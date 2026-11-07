@@ -5,6 +5,7 @@ import React, {
   useLayoutEffect,
   useMemo,
   useRef,
+  useState,
   useSyncExternalStore,
 } from 'react';
 import { FlatList, View, type FlatListProps } from 'react-native';
@@ -183,6 +184,8 @@ export const RoomSendList = forwardRef<FlatList<ChatDisplayMessage>, Props>(func
   const previewInEmptyRoom = useSyncExternalStore(preview.subscribe, emptySnapshot, emptySnapshot);
   const paintingSnapshot = useCallback(() => preview.snapshot()?.painted === false, [preview]);
   const painting = useSyncExternalStore(preview.subscribe, paintingSnapshot, paintingSnapshot);
+  const [atAutoFollowTail, setAtAutoFollowTail] = useState(true);
+  const autoFollowThreshold = props.maintainVisibleContentPosition?.autoscrollToTopThreshold;
   const callbacks = useRef({ onContentSizeChange, onScroll, onViewableItemsChanged });
   callbacks.current = { onContentSizeChange, onScroll, onViewableItemsChanged };
   const deferred = useRef(new Map<string, () => void>());
@@ -219,9 +222,12 @@ export const RoomSendList = forwardRef<FlatList<ChatDisplayMessage>, Props>(func
   const scroll = useCallback<NonNullable<Props['onScroll']>>(
     (event) => {
       event.persist?.();
+      if (autoFollowThreshold != null) {
+        setAtAutoFollowTail(event.nativeEvent.contentOffset.y <= autoFollowThreshold);
+      }
       notify('scroll', () => callbacks.current.onScroll?.(event));
     },
-    [notify],
+    [autoFollowThreshold, notify],
   );
   const content = useCallback(
     (width: number, height: number) => {
@@ -243,9 +249,15 @@ export const RoomSendList = forwardRef<FlatList<ChatDisplayMessage>, Props>(func
       ref={ref}
       data={data}
       inverted={data.length > 0 || previewInEmptyRoom}
-      // An own send owns the tail. Android otherwise preserves the old row's position,
-      // then smooth-scrolls back to zero, delaying visibility despite an immediate commit.
-      maintainVisibleContentPosition={painting ? undefined : props.maintainVisibleContentPosition}
+      // The scroll controller owns live-tail follow. Native anchoring at zero
+      // can produce no scroll event after a prepend, leaving VirtualizedList's
+      // pending-scroll counter stuck and its rendered window unable to fill.
+      // Keep native anchoring for readers in history and detached jump windows.
+      maintainVisibleContentPosition={
+        painting || (autoFollowThreshold != null && atAutoFollowTail)
+          ? undefined
+          : props.maintainVisibleContentPosition
+      }
       renderItem={render}
       ListHeaderComponent={
         <SendHeader preview={preview} renderItem={renderItem} header={ListHeaderComponent} />

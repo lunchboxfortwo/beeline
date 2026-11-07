@@ -1,10 +1,48 @@
 import { afterEach, expect, it, vi } from 'vitest';
+import React from 'react';
+// @ts-expect-error react-test-renderer has no declarations in this workspace.
+import { act, create } from 'react-test-renderer';
 import type { ChatDisplayMessage } from './room-view-presentation';
-vi.mock('react-native', () => ({ FlatList: () => null, View: () => null }));
-import { RoomSendPreview } from './room-send-list';
+vi.mock('react-native', () => ({
+  FlatList: (props: Record<string, unknown>) => React.createElement('flat-list', props),
+  View: (props: Record<string, unknown>) => React.createElement('view', props),
+}));
+import { RoomSendList, RoomSendPreview } from './room-send-list';
 
 const message = (id: string): ChatDisplayMessage => ({ id, text: 'Complete first frame', timestamp: 1, isUser: true });
 afterEach(() => vi.unstubAllGlobals());
+
+it('keeps live-tail arrivals out of native pending-scroll anchoring, preserving history anchors', () => {
+  const preview = new RoomSendPreview();
+  const anchor = { minIndexForVisible: 1, autoscrollToTopThreshold: 50 };
+  const props = { preview, initialNumToRender: 2, renderItem: null, maintainVisibleContentPosition: anchor };
+  const first = message('first');
+  let renderer!: ReturnType<typeof create>;
+  act(() => { renderer = create(<RoomSendList {...props} data={[first]} />); });
+  const list = () => renderer.root.findByType('flat-list');
+  const instance = list();
+  // At offset zero native may emit no scroll event for a prepend. Asking it
+  // to preserve an anchor leaves VirtualizedList waiting and freezes its mask.
+  expect(list().props.maintainVisibleContentPosition).toBeUndefined();
+  act(() => { renderer.update(<RoomSendList {...props} data={[message('draft'), first]} />); });
+  act(() => { renderer.update(<RoomSendList {...props} data={[message('settled'), first]} />); });
+  expect(list()).toBe(instance);
+  expect(list().props.maintainVisibleContentPosition).toBeUndefined();
+  const scroll = (y: number) => act(() => list().props.onScroll({
+    nativeEvent: { contentOffset: { y } },
+  }));
+  scroll(200);
+  expect(list().props.maintainVisibleContentPosition).toBe(anchor);
+  act(() => { renderer.update(<RoomSendList {...props} data={[message('next'), message('settled'), first]} />); });
+  expect(list().props.maintainVisibleContentPosition).toBe(anchor);
+  scroll(0);
+  expect(list().props.maintainVisibleContentPosition).toBeUndefined();
+  // Offset zero in a detached source window belongs to the jump target.
+  const detachedAnchor = { minIndexForVisible: 1 };
+  act(() => { renderer.update(<RoomSendList {...props} maintainVisibleContentPosition={detachedAnchor} data={[first]} />); });
+  expect(list().props.maintainVisibleContentPosition).toBe(detachedAnchor);
+  act(() => renderer.unmount());
+});
 
 it('releases preparation after layout and a painted host frame, without a timer', async () => {
   const frames: FrameRequestCallback[] = [];
