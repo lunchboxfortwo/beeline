@@ -42,12 +42,23 @@ One bridge process per machine user (`bridge.ts`) negotiates `memberStreamV1` on
 The detached bridge has its own loaded-bundle identity; a live PID does not prove
 that it speaks the current protocol. Installed helper startup adopts existing
 joins into its current recovery bundle, and join/SessionStart also check bridge
-identity. A stale bridge finishes any state write or credential refresh before
-replacement. The successor preserves the member cursor and inbox, so its first
-stream connection catches up undelivered mentions. Claude's in-session MCP
+identity. `bridge-launch.ts` stages the replacement outside the serving bridge's
+watched tree. The candidate binds its private tool socket and opens every joined
+member's stream before reporting ready over IPC. It buffers delivery until the
+old bridge drains its in-flight work and exits; only then does the launcher
+publish the stable bundle and activate the successor. The member cursor and
+durable delivery identities join overlapping stream replay without duplicate
+wakes. A startup failure preserves the serving bridge and stable bundle; if the
+old process was already dead, the launcher starts the retained bundle once using
+its existing owner-file readiness contract, including pre-IPC releases. Failure
+still reaches the helper's upgrade warning and `bridge.log`. No timer, polling,
+or retry loop owns this handoff. Claude's in-session MCP
 receiver wakes on the durable state commit as well as legacy inbox writes;
 its own failure requeue does not create another delivery attempt. Regressions:
-`apps/body/src/session-join/bridge-upgrade.test.ts`.
+`apps/body/src/session-join/bridge-upgrade.test.ts` and
+`apps/body/src/session-join/bridge-resilience.test.ts`. The resilience suite builds
+real recovery bundles and proves good/broken refresh with both serving and dead
+bridges against a local member-stream server and Claude receiver socket.
 
 | App | Channel | Idle session |
 | --- | --- | --- |

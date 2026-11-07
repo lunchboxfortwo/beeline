@@ -1,12 +1,9 @@
 // The machine's one session bridge: for every joined session it waits on Beeline for tags and wakes, and hands each
 // to the session's app by the fastest way the app has. It needs no public address: it only calls out to Beeline.
 import { sessionAgentBehavior } from '../agent-command.js';
-import { execFileSync, spawn } from 'node:child_process';
 import { chmodSync, closeSync, existsSync, mkdirSync, openSync, readFileSync, readdirSync, renameSync, rmSync, writeFileSync, watch } from 'node:fs';
 import { createConnection, createServer } from 'node:net';
-import { basename, join, resolve } from 'node:path';
-import { withKernelLock } from '../kernel-lock.js';
-import { waitForProcessExit } from '../process-exit.js';
+import { join } from 'node:path';
 import { externalAgentRules } from '@beeline/api-contract/phone';
 import { accessToken, callTool, memberStream } from './beeline-api.js';
 import { memberStreamFrame } from './stream-frame.js';
@@ -15,13 +12,19 @@ import { codexQueue, turnRunning } from './codex.js';
 import { postToClaude } from './claude.js';
 import { hasClaudeMcp } from './claude-mcp.js';
 import { findSession, liveSessions, machineSources, type LiveSession, type Sources } from './sessions.js';
-import { pidAlive, queueInbox, queueInboxOnce, readState, takeInbox, updateState, withLock, type JoinedSession } from './store.js';
+import { bundleDigest } from './bridge-launch.js';
+import { pidAlive, queueInbox, queueInboxOnce, readState, takeInbox, updateState, type JoinedSession } from './store.js';
 
 export interface Mention { memberId?: string; replyRule?: string; id: string; room_id: string; room_name?: string; author_handle?: string | null; author_name?: string | null; text: string }
 export interface Wake { id: string; address: string; reason: string; kind?: string; text?: string; createdAt: string; next?: string }
 
 /** How the session runs Beeline commands: the stable bundle copy and this member's id. */
-export interface Runner { node: string; bundle: string }
+export interface Runner {
+  node: string;
+  bundle: string;
+  /** A new npx entry to validate before replacing the stable command path. */
+  candidate?: string;
+}
 
 function command(runner: Runner, joined: JoinedSession, args: string): string {
   const q = (v: string) => /^[A-Za-z0-9_./:@=-]+$/.test(v) ? v : `"${v.replace(/(["\\$`])/g, '\\$1')}"`;
@@ -156,8 +159,7 @@ export async function flush(dir: string, sources: Sources, deps: DeliverDeps = r
  * Tool calls for joined sessions, over a private socket. A sandboxed app (Codex's default) blocks the network but
  * not this socket, so its replies go out without asking the person to approve network access each time.
  */
-function serveTools(dir: string): void {
-  const path = join(dir, 'bridge.sock');
+async function serveTools(dir: string, path = join(dir, 'bridge.sock')) {
   rmSync(path, { force: true });
   const server = createServer(connection => {
     let buffer = '', taken = false;
@@ -177,8 +179,12 @@ function serveTools(dir: string): void {
       connection.end(JSON.stringify(answer) + '\n');
     });
   });
-  server.listen(path, () => chmodSync(path, 0o600));
+  await new Promise<void>((done, fail) => {
+    server.once('error', fail);
+    server.listen(path, () => { chmodSync(path, 0o600); done(); });
+  });
   server.unref();
+  return server;
 }
 
 /**
@@ -258,50 +264,87 @@ export function toolViaBridge(dir: string, key: string, name: string, args: Reco
 
 /** Runs until no session is joined. One per machine user: a second exits at once. */
 export async function runBridge(dir: string, runner: Runner): Promise<void> {
-  const pidFile = join(dir, 'bridge.pid');
-  try {
-    const fd = openSync(pidFile, 'wx', 0o600);
-    writeFileSync(fd, String(process.pid));
-    closeSync(fd);
-  } catch {
-    const holder = Number(readFileSync(pidFile, 'utf8'));
-    if (holder && holder !== process.pid && pidAlive(holder)) return;
-    writeFileSync(pidFile, String(process.pid), { mode: 0o600 });
+  const staged = process.env.BEELINE_SESSION_BRIDGE_STAGING === '1' && Boolean(process.send);
+  let activated = !staged, stopping = false;
+  let activate!: () => void, begin!: () => void;
+  const handoff = staged ? new Promise<void>(done => { begin = done; }) : Promise.resolve();
+  const activation = staged ? new Promise<void>(done => { activate = done; }) : Promise.resolve();
+  if (staged) {
+    process.once('message', message => { if (message === 'activate') begin(); });
+    process.once('disconnect', () => { if (!activated) process.exit(1); });
   }
+  const digest = bundleDigest({ ...runner, bundle: runner.candidate ?? runner.bundle });
+  const pidFile = join(dir, 'bridge.pid');
+  const claim = (): boolean => {
+    try {
+      const fd = openSync(pidFile, 'wx', 0o600);
+      writeFileSync(fd, String(process.pid));
+      closeSync(fd);
+    } catch {
+      const holder = Number(readFileSync(pidFile, 'utf8'));
+      if (holder && holder !== process.pid && pidAlive(holder)) return false;
+      writeFileSync(pidFile, String(process.pid), { mode: 0o600 });
+    }
+    return true;
+  };
+  if (!staged && !claim()) return;
+  const socket = join(dir, staged ? `bridge-${process.pid}.sock` : 'bridge.sock');
+  const tools = await serveTools(dir, socket);
   const sources = machineSources(dir);
   type Stream={fingerprint:string;controller:AbortController;recovered:boolean};
   const streams=new Map<string,Stream>();
   const outboxWatches=new Map<string,ReturnType<typeof watch>>();
   let localDirty=true,wake:(()=>void)|undefined;
   const changed=()=>{localDirty=true;wake?.();};
-  serveTools(dir);
-  writeFileSync(join(dir, 'bridge-owner.json'), JSON.stringify({ pid: process.pid, digest: bundleDigest(runner) }), { mode: 0o600 });
   const localWatch=watch(dir,{recursive:true},(_event,name)=>{
     const path=String(name??'');
     if(path==='state.json'||path.startsWith('hooks/')||path.startsWith('inbox/')||path.startsWith('deliveries/'))changed();
   });
   const stop = () => {
-    for(const stream of streams.values()){stream.controller.abort();}
-    localWatch.close();for(const watcher of outboxWatches.values())watcher.close();
-    rmSync(pidFile,{force:true});rmSync(join(dir,'bridge.sock'),{force:true});process.exit(0);
+    if (!activated) process.exit(0);
+    stopping = true;
+    for (const stream of streams.values()) stream.controller.abort();
+    changed();
   };
   process.once('SIGTERM',stop);process.once('SIGINT',stop);
-  log(dir,`bridge ${process.pid} started`);
+  const jobs = new Set<Promise<void>>();
+  const expected = new Set(readState(dir).sessions.map(session => session.key));
+  const openedKeys = new Set<string>();
+  const failedStartup = (error: unknown) => {
+    if (staged && !activated) { log(dir, `candidate startup failed: ${String(error)}`); process.exit(1); }
+  };
   const fingerprint=(session:JoinedSession)=>createHash('sha256').update(JSON.stringify([
     session.server,session.clientId,session.refreshToken,session.accessToken,session.accessExpiresAt,session.joinedAt])).digest('hex');
   const start=(joined:JoinedSession,recovered=false)=>{
     const controller=new AbortController(),entry:Stream={fingerprint:fingerprint(joined),controller,recovered};
     streams.set(joined.key,entry);
-    void(async()=>{
+    const job = (async()=>{
       let expiredToken:string|undefined;
       while(!controller.signal.aborted){
         let opened=false,terminal=false;
         try{
           const token=await accessToken(dir,joined.key,expiredToken);
           const current=readState(dir).sessions.find(session=>session.key===joined.key);
-          if(!current||fingerprint(current)!==entry.fingerprint){changed();return;}
-          for await(const raw of memberStream(current,token,controller.signal,()=>{opened=true;})){
+          if (!current) { failedStartup('session disappeared'); changed(); return; }
+          if (staged && !activated) entry.fingerprint = fingerprint(current);
+          if (fingerprint(current) !== entry.fingerprint) { changed(); return; }
+          for await(const raw of memberStream(current,token,controller.signal,()=>{
+            opened=true;
+            if (staged && !activated) {
+              openedKeys.add(joined.key);
+              if ([...expected].every(key => openedKeys.has(key))) process.send?.('ready');
+            }
+          })){
+            // A candidate has a live stream before it can commit or deliver.
+            // The old owner drains first; replay then joins durable identities.
             const frame=memberStreamFrame(raw);
+            if (frame.type === 'ended' && !activated) failedStartup(`member stream ended: ${frame.reason}`);
+            await activation;
+            if (controller.signal.aborted) return;
+            if (staged && frame.type === 'checkpoint') {
+              const committed = readState(dir).sessions.find(session => session.key === joined.key)?.streamCursor;
+              if (committed?.epoch === frame.cursor.epoch && committed.through > frame.cursor.through) continue;
+            }
             if(frame.type==='ended'){
               terminal=frame.reason!=='expired';
               if(!terminal)expiredToken=token;
@@ -309,16 +352,33 @@ export async function runBridge(dir: string, runner: Runner): Promise<void> {
             }
             if(await acceptMemberDelivery(dir,joined.key,runner,frame)){entry.recovered=false;await flush(dir,sources);}
           }
-        }catch(error){if(!controller.signal.aborted)log(dir,`${joined.key}: ${error instanceof Error?error.message:String(error)}`);}
+        }catch(error){
+          failedStartup(error);
+          if(!controller.signal.aborted)log(dir,`${joined.key}: ${error instanceof Error?error.message:String(error)}`);
+        }
+        if (!activated) failedStartup('member stream ended before activation');
         if(controller.signal.aborted||terminal||!opened||entry.recovered)return;
         // One replacement after an established stream drops or expires. A failed initial
         // or replacement connection parks until credentials/join state changes.
         entry.recovered=true;
       }
     })();
+    jobs.add(job); void job.finally(() => jobs.delete(job));
   };
   try{
-    for(;;){
+    if (staged) {
+      if (!expected.size) throw new Error('No joined sessions to activate');
+      for (const joined of readState(dir).sessions) start(joined);
+      await handoff;
+      // Commands embedded in delivered messages always use the retained path.
+      runner = { ...runner, bundle: join(dir, 'usebeeline.mjs') };
+      renameSync(socket, join(dir, 'bridge.sock'));
+    }
+    if (staged && !claim()) throw new Error('Beeline bridge owner changed during handoff');
+    writeFileSync(join(dir, 'bridge-owner.json'), JSON.stringify({ pid: process.pid, digest }), { mode: 0o600 });
+    if (staged) { activated = true; activate(); process.send?.('active'); }
+    log(dir,`bridge ${process.pid} started`);
+    for(; !stopping;){
       localDirty=false;
       const sessions=readState(dir).sessions;
       if(!sessions.length)break;
@@ -344,89 +404,20 @@ export async function runBridge(dir: string, runner: Runner): Promise<void> {
       if(!localDirty)await new Promise<void>(resolve=>{wake=resolve;});
       wake=undefined;
     }
+  }catch(error){
+    failedStartup(error);
+    throw error;
   }finally{
     localWatch.close();for(const watcher of outboxWatches.values())watcher.close();
     for(const stream of streams.values()){stream.controller.abort();}
+    if (staged && !activated) activate();
+    await Promise.allSettled(jobs);
+    await new Promise<void>(done => tools.close(() => done()));
   }
-  log(dir, `bridge ${process.pid} stopped: no joined sessions`);
+  log(dir, `bridge ${process.pid} stopped: ${stopping ? 'handoff or shutdown' : 'no joined sessions'}`);
   rmSync(pidFile, { force: true });
   rmSync(join(dir, 'bridge.sock'), { force: true });
   process.exit(0);
 }
 
-export function bridgeRunning(dir: string): boolean {
-  try {
-    const holder = Number(readFileSync(join(dir, 'bridge.pid'), 'utf8'));
-    return Boolean(holder) && pidAlive(holder);
-  } catch { return false; }
-}
-
-function bundleDigest(runner: Runner): string {
-  return createHash('sha256').update(readFileSync(runner.bundle)).digest('hex');
-}
-
-function bridgeOwner(dir: string): { pid: number; digest: string } | undefined {
-  try { return JSON.parse(readFileSync(join(dir, 'bridge-owner.json'), 'utf8')); } catch { return undefined; }
-}
-
-/** A stale private pid file must never authorize signalling an unrelated process. */
-function isBridgeProcess(pid: number): boolean {
-  try {
-    if (process.platform === 'linux') {
-      const args = readFileSync(`/proc/${pid}/cmdline`, 'utf8').split('\0').filter(Boolean);
-      return args.length === 4 && /^node(?:\.exe)?$/.test(basename(args[0]!)) &&
-        /^(?:beeline|usebeeline\.mjs|recovery-cli\.mjs)$/.test(basename(args[1]!)) && args[2] === 'session' && args[3] === 'bridge';
-    }
-    const args = execFileSync('ps', ['-ww', '-p', String(pid), '-o', 'args='], { encoding: 'utf8' }).trim();
-    return /(?:^|\/)node\s+.*\/(?:beeline|usebeeline\.mjs|recovery-cli\.mjs) session bridge$/.test(args);
-  } catch { return false; }
-}
-
-/** Upgrade the detached bridge too: a live PID alone says nothing about its loaded protocol.
- * Serialize handoffs, wait on process exit/readiness events, and preserve the durable member cursor. */
-export async function ensureBridge(dir: string, runner: Runner, env: NodeJS.ProcessEnv = process.env): Promise<void> {
-  await withKernelLock(`beeline-session-bridge:${resolve(dir)}`, async () => {
-    const digest = bundleDigest(runner);
-    const pidFile = join(dir, 'bridge.pid');
-    if (bridgeRunning(dir)) {
-      const pid = Number(readFileSync(pidFile, 'utf8'));
-      if (!isBridgeProcess(pid)) throw new Error('Beeline bridge PID belongs to an unrecognized process; refusing takeover');
-      const owner = bridgeOwner(dir);
-      if (owner?.pid === pid && owner.digest === digest) return;
-      log(dir, `replacing stale bridge ${pid}`);
-      // Let a credential refresh/cursor commit finish before ending its owner.
-      await withLock(dir, async () => {
-        try { process.kill(pid, 'SIGTERM'); } catch (error) { if ((error as NodeJS.ErrnoException).code !== 'ESRCH') throw error; }
-        await waitForProcessExit(pid);
-      });
-      // Installed legacy bridges may not have a signal cleanup handler.
-      if (existsSync(pidFile) && Number(readFileSync(pidFile, 'utf8')) === pid) rmSync(pidFile);
-    }
-    const out = openSync(join(dir, 'bridge.log'), 'a', 0o600);
-    const child = spawn(runner.node, [runner.bundle, 'session', 'bridge'], { detached: true, stdio: ['ignore', out, out], env });
-    closeSync(out);
-    child.unref();
-    await new Promise<void>((done, fail) => {
-      const finish = (error?: Error) => {
-        watcher.close(); child.removeListener('error', failed); child.removeListener('exit', exited);
-        if (error) fail(error); else done();
-      };
-      const inspect = () => { const owner = bridgeOwner(dir); if (owner && owner.pid === child.pid && owner.digest === digest) finish(); };
-      const failed = (error: Error) => finish(error);
-      const exited = () => finish(new Error('Beeline bridge exited before readiness; see bridge.log'));
-      const watcher = watch(dir, (_event, name) => { if (String(name) === 'bridge-owner.json') inspect(); });
-      child.once('error', failed); child.once('exit', exited); inspect();
-    });
-  });
-}
-
-/** Helper startup is the installed-release event for sessions joined through an older npx bundle. */
-export async function refreshJoinedSessionBridge(bundle: string, env: NodeJS.ProcessEnv = process.env): Promise<void> {
-  const { stateDir } = await import('./store.js');
-  const dir = stateDir(env);
-  if (!readState(dir).sessions.length) return;
-  const stable = join(dir, 'usebeeline.mjs');
-  writeFileSync(stable + '.tmp', readFileSync(bundle), { mode: 0o600 });
-  renameSync(stable + '.tmp', stable);
-  await ensureBridge(dir, { node: process.execPath, bundle: stable }, env);
-}
+export { bridgeRunning, ensureBridge, refreshJoinedSessionBridge } from './bridge-launch.js';

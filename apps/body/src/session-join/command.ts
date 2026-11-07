@@ -2,7 +2,7 @@
 // Rooms as its own member, from one pasted line and one sign-in on any device.
 import { sessionAgentBehavior } from '../agent-command.js';
 import { spawn, spawnSync } from 'node:child_process';
-import { closeSync, copyFileSync, existsSync, fsyncSync, mkdirSync, openSync, readFileSync, readdirSync, renameSync, rmSync, writeFileSync } from 'node:fs';
+import { closeSync, constants, copyFileSync, existsSync, fsyncSync, mkdirSync, openSync, readFileSync, readdirSync, renameSync, rmSync, writeFileSync } from 'node:fs';
 import { delimiter, dirname, join, resolve } from 'node:path';
 import { createHash, randomUUID } from 'node:crypto';
 import { agentLabel, defaultName, detectAgent, isAgentId, pickName, type AgentId } from './agents.js';
@@ -80,8 +80,13 @@ function runner(dir: string, env: NodeJS.ProcessEnv): Runner {
   const bundle = join(dir, 'usebeeline.mjs');
   const running = resolve(process.argv[1] ?? '');
   if (running !== bundle && running.endsWith('.mjs')) {
+    // The first sign-in finisher needs a durable entry before a bridge exists.
+    // Seeding must never replace a retained bundle, even across concurrent joins.
     mkdirSync(dir, { recursive: true, mode: 0o700 });
-    copyFileSync(running, bundle);
+    try { copyFileSync(running, bundle, constants.COPYFILE_EXCL); }
+    catch (error) { if ((error as NodeJS.ErrnoException).code !== 'EEXIST') throw error; }
+    // ensureBridge publishes this source only after its staged startup works.
+    return { node: process.execPath, bundle, candidate: running };
   }
   return { node: process.execPath, bundle: existsSync(bundle) ? bundle : running };
 }

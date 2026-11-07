@@ -20,6 +20,7 @@ import { spawnSync } from 'node:child_process';
 import { validateBundleDirectory } from './pages-site.mjs';
 import { macHelperInputs } from './mac-helper-inputs.mjs';
 import { writeBeelineArchive } from './beeline-archive.mjs';
+import { recoveryCliBundleArgs } from './recovery-cli-bundle.mjs';
 import { NATIVE_CARGO_BUILD_FLAGS } from './native-agent-cache.mjs';
 
 const UPSTREAM_REF = process.env.BEELINE_BUZZ_REF ?? '07a3c768d619db31fee3f0590f9433cdd1213e8f';
@@ -215,10 +216,10 @@ async function main() {
     await mkdir(resolve(staging, 'bin'), { recursive: true });
     await mkdir(resolve(staging, 'lib', 'beeline'), { recursive: true });
 
-    run('npx', [ '--no-install', 'esbuild', resolve(repoRoot, 'apps/body/dist/recovery-cli.js'),
-      '--bundle', '--platform=node', '--format=esm', '--target=node20',
-      `--outfile=${resolve(staging, 'lib/beeline/recovery-cli.mjs')}`,
-    ]);
+    run('npx', recoveryCliBundleArgs(
+      resolve(repoRoot, 'apps/body/dist/recovery-cli.js'),
+      resolve(staging, 'lib/beeline/recovery-cli.mjs'),
+    ));
     run('npx', [
       '--no-install',
       'esbuild',

@@ -4,6 +4,7 @@ import { chmod, copyFile, mkdir, rm } from 'node:fs/promises';
 import { dirname, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { spawnSync } from 'node:child_process';
+import { recoveryCliBundleArgs } from './recovery-cli-bundle.mjs';
 
 const root = resolve(dirname(fileURLToPath(import.meta.url)), '..');
 const output = resolve(root, 'packages/usebeeline/dist/usebeeline.mjs');
@@ -13,16 +14,8 @@ await mkdir(dirname(output), { recursive: true });
 const result = spawnSync(
   'npx',
   [
-    '--no-install',
-    'esbuild',
-    resolve(root, 'apps/body/dist/recovery-cli.js'),
-    '--bundle',
-    '--platform=node',
-    '--format=esm',
-    '--target=node20',
-    '--banner:js=import { createRequire as __cr } from "module"; const require = __cr(import.meta.url);',
+    ...recoveryCliBundleArgs(resolve(root, 'apps/body/dist/recovery-cli.js'), output),
     '--define:import.meta.url="usebeeline:npm"',
-    `--outfile=${output}`,
   ],
   { cwd: root, stdio: 'inherit' },
 );
