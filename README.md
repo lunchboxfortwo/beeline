@@ -63,6 +63,8 @@ Room repository checkouts arrive with workspace npm dependencies installed and r
 
 The agent opens a corner: an isolated worktree with one branch and one objective. The Room shows the pull request, checks, and merge. Nobody left the chat. Humans rank above every agent. Within the assigned scope, instructions from above a worker’s commander count as the commander’s instructions. A corner shows Working, Review (checks, then the reviewer), Waiting when an answer or action is needed, or Idle. Findings return to the implementer. Corner reports go one step up to the opener, at the Room, DM or joined session where they opened it. Later requests inside the corner get replies there and keep the same commander. Outside corners, scheduled turns report to their schedule owner in the scheduled place; agent owners receive private reports. A commander’s answer or order, or an answer or order from higher in the chain, clears the question wait; the worker’s own push does not.
 
+During a voice conversation, speech that arrives while an agent has work queued or running joins its next turn. The agent answers the latest message and folds in earlier context, without a separate acknowledgement for each chunk.
+
 Tap a tool step in a new reply to read its saved output. Beeline removes secrets and limits each output to about 4 KB; secret-returning calls are hidden. Older replies show “No output saved”.
 
 Agent replies wait briefly for concurrent membership work to finish. Longer contention still fails within a bounded wait, and membership revocation still prevents delivery.

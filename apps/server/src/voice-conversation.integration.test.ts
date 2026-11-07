@@ -1,4 +1,7 @@
 import { EventEmitter } from 'node:events';
+import { mkdtemp, rm } from 'node:fs/promises';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
 import type { AddressInfo } from 'node:net';
 import { expect, it, vi } from 'vitest';
 import { phoneFetch } from '../../../tests/helpers/phone-operation.js';
@@ -7,7 +10,10 @@ import { migrate } from './database.js';
 import { LiveHub } from './live.js';
 import { PhoneService } from './phone-service.js';
 import { createBeelineServer } from './server.js';
-import { PgliteDatabase } from './test-support.js';
+import { PgliteDatabase, migratedDatabase } from './test-support.js';
+import { CommandExecutionContext, runServerCommandIntake } from '../../body/src/server-command-intake.js';
+import type { DaemonApiClient } from '../../body/src/daemon-api-client.js';
+import type { AgentCommand } from '@beeline/api-contract/daemon';
 import { HelperDaemonService } from './test-fixtures/helper-daemon.js';
 import { readAgentCommands } from './agent-command.js';
 import { VoiceService } from './voice-service.js';
@@ -100,5 +106,81 @@ it('starts over the phone socket, speaks a reply, and speaks a real helper comma
     await voice.close();
     await new Promise<void>(resolve => server.close(() => resolve()));
     await db.close();
+  }
+}, 30_000);
+
+it.each(['queued', 'running'] as const)('batches five voice chunks behind a %s DM turn without per-chunk acknowledgements', async state => {
+  const db = await migratedDatabase(), live = new LiveHub();
+  const human = 'c'.repeat(64), agent = 'd'.repeat(64);
+  const workspaceId = '33333333-3333-4333-8333-333333333333';
+  const phone = new PhoneService(db, 'http://proof'), daemon = new HelperDaemonService(db, live);
+  const answer = vi.fn(async () => ({ text: "Checking. I’ll tell you when I have it.", order: true }));
+  const synthesize = vi.fn(async function* (_text: string) { yield new Uint8Array([200, 1, 200, 1]); });
+  const voice = new VoiceService(db, live, { url: 'ws://rtc', apiKey: 'devkey', apiSecret: 'secret',
+    speech: { synthesize }, stt: vi.fn(), brain: { answer } });
+  const scratch = await mkdtemp(join(tmpdir(), 'beeline-voice-batch-'));
+  const context = new CommandExecutionContext(scratch), abort = new AbortController();
+  const invocations: AgentCommand[][] = [], prompts: AgentCommand[] = [], errors: unknown[] = [];
+  let finishFirst!: () => void;
+  const first = new Promise<void>(resolve => { finishFirst = resolve; });
+  let push: ((commands: readonly AgentCommand[]) => void) | undefined;
+  const api = {
+    execute: (name: string, input: Record<string, unknown>) => daemon.execute(name as never, input as never, agent),
+    liveSubscribe: (_room: unknown, _cursor: unknown, _items: unknown, _state: unknown, _presence: unknown, onCommands: typeof push) => {
+      push = onCommands; return () => {};
+    },
+  } as unknown as DaemonApiClient;
+  const intake = () => runServerCommandIntake({ api, roomId, agentId: agent, context, signal: abort.signal,
+    stop: () => {}, onError: error => errors.push(error), run: async command => {
+      invocations.push([...context.commands]); prompts.push(command);
+      if (state === 'running' && invocations.length === 1) await first;
+      else {
+        await daemon.execute('postRoomMessage', { roomId, requestId: command.turnRequestId,
+          generationId: context.generationId, text: 'Answer to the latest question, with earlier context.' }, agent);
+        abort.abort();
+      }
+    } });
+  let roomId = '', callId: string | undefined, running: Promise<void> | undefined;
+  try {
+    await db.query(`INSERT INTO identities(id,kind,name,handle) VALUES($1,'human','Caller','caller'),($2,'agent','Ruby','ruby')`, [human, agent]);
+    await db.query('INSERT INTO agents(agent_id,owner_id) VALUES($1,$2)', [agent, human]);
+    await db.query("INSERT INTO workspaces(id,name) VALUES($1,'Voice batch proof')", [workspaceId]);
+    for (const id of [human, agent]) await db.query(`INSERT INTO memberships(workspace_id,identity_id,role) VALUES($1,$2,'owner')`, [workspaceId, id]);
+    roomId = (await phone.execute('resolveDirectMessage', { workspaceId, participantId: agent }, human)).id;
+    await phone.execute('sendRoomMessage', { roomId, text: '@ruby Initial task' }, human);
+    const joined = await voice.join(roomId, human); callId = joined.call.id;
+    const runtime = await (voice as unknown as { runtimes: Map<string, Promise<VoiceRoomRuntime>> }).runtimes.get(callId)!;
+    rtc.room.remoteParticipants.set(human, { identity: human });
+    if (state === 'running') {
+      running = intake();
+      await vi.waitFor(() => expect(invocations).toHaveLength(1));
+    }
+    const chunks = ['a little background noise', 'hold on', 'Why did you get', 'let me finish', 'What caused the build failure?'];
+    for (const [index, chunk] of chunks.entries()) {
+      await runtime.prepareEager(human, { event: 'EagerEndOfTurn', turn_index: index, sequence_id: index, transcript: chunk });
+      await runtime.utterance(human, chunk);
+      push?.((await daemon.execute('getAgentCommands', { roomId }, agent)).commands);
+    }
+    if (state === 'queued') running = intake();
+    finishFirst();
+    await running;
+    expect(invocations).toHaveLength(state === 'running' ? 2 : 1);
+    const batch = invocations.at(-1)!;
+    expect(batch).toHaveLength(state === 'running' ? 5 : 6);
+    for (const chunk of chunks) expect(batch.some(command => command.source.body.includes(chunk))).toBe(true);
+    expect(prompts.at(-1)?.source.body).toContain(chunks.at(-1));
+    expect((await daemon.execute('getAgentCommands', { roomId }, agent)).commands).toEqual([]);
+    expect(errors).toEqual([]);
+    expect(answer).not.toHaveBeenCalled();
+    expect(prompts.at(-1)?.source.body).not.toContain('Answer this request in this turn');
+    expect((await db.query(`SELECT text FROM messages WHERE room_id=$1 AND author_id=$2 AND text LIKE 'Checking.%'`, [roomId, agent])).rows).toEqual([]);
+    // Only the single current answer is spoken, never five intake acknowledgements.
+    await runtime.refresh();
+    await vi.waitFor(() => expect(synthesize).toHaveBeenCalledOnce());
+    expect(synthesize.mock.calls[0]?.[0]).toBe('Answer to the latest question, with earlier context.');
+  } finally {
+    abort.abort(); finishFirst(); await running;
+    if (callId) await voice.leave(callId, human);
+    await voice.close(); await db.close(); await rm(scratch, { recursive: true, force: true });
   }
 }, 30_000);

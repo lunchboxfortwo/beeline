@@ -1,3 +1,4 @@
+import { commandOwnerLiveSql } from './turn-ownership.js';
 import { namedVoiceTarget, openingVoiceName } from "./voice-target.js";
 import type { FluxEvent, VoiceBrain } from "./voice-providers.js";
 import { VoiceEagerReply } from "./voice-eager-reply.js";
@@ -11,7 +12,15 @@ import { cleanVoiceReply } from "./voice-reply.js";
 import { VoiceRoomRuntime, DeliveredVoicePlaybackError, spokenReport } from './voice-room-runtime.js';
 
 
-
+// Speech arrives through the same durable command queue as text. Inspect it
+// only on speech events; the existing helper claim owns the pending batch.
+async function voiceAgentBusy(ctx: VoiceRoomRuntime, agentId: string): Promise<boolean> {
+  const result = await ctx.observe(() => ctx.service.db.query<{ busy: boolean }>(`SELECT EXISTS(
+    SELECT 1 FROM agent_commands command WHERE command.room_id=$1 AND command.agent_id=$2
+      AND command.action IN ('input','resume')
+      AND (command.state='pending' OR ${commandOwnerLiveSql('command')})) busy`, [ctx.roomId, agentId]));
+  return result.rows[0]?.busy === true;
+}
 
   export function voiceRoomRuntimeClearAudioQueue(ctx: VoiceRoomRuntime) {
     // Provider cancellation can unwind after close has disposed the native handle.
@@ -108,6 +117,7 @@ import { VoiceRoomRuntime, DeliveredVoicePlaybackError, spokenReport } from './v
       : ctx.targets.get(human);
     const agent = pinned ?? named ?? tapped ?? (humans === 1 ? namedVoiceTarget(event.transcript, agents, selected, humans) : undefined);
     if (!agent || voiceNameOnly(event.transcript, agents) || voiceContactNameOnly(event.transcript, ctx.externalContacts.get(human))) { if (ctx.eager.get(human) === draft) ctx.cancelEager(human); return; }
+    if (await voiceAgentBusy(ctx, agent.id)) { if (ctx.eager.get(human) === draft) ctx.cancelEager(human); return; }
     const history = await ctx.observe(() => readVoiceContext(ctx.service.db, ctx.roomId, '', agent.id));
     const pending = [...ctx.pendingWork.values()].filter(work => work.agent_id === agent.id && work.human_id === human);
     if (pending.length) history.push({ role: 'user', content:
@@ -234,6 +244,20 @@ import { VoiceRoomRuntime, DeliveredVoicePlaybackError, spokenReport } from './v
       committedSourceId = sourceId;
       timing('human_committed');
       if (generation.signal.aborted || ctx.closed || !sourceId) return;
+      // While work is queued/running, later speech is input to its next
+      // current-state turn. Do not spend a voice-brain turn acknowledging each
+      // fragment, or let a local answer hide it from the working agent.
+      if (!retry && await voiceAgentBusy(ctx, agent.id)) {
+        if (generation.signal.aborted || ctx.closed) return;
+        ctx.assembler.finish(human, request);
+        request.state = 'delivering';
+        try { await ctx.observe(() => ctx.service.dispatch(ctx.callId, sourceId, agent.id)); }
+        catch (error) { ctx.assembler.retainFailure(human, request); throw error; }
+        ctx.pendingWork.set(sourceId, { text: request.text, agent_id: agent.id, human_id: human });
+        delivered = true;
+        timing('delivery_committed');
+        return;
+      }
       const history = await context;
       if (generation.signal.aborted || ctx.closed) return;
       const pending = [...ctx.pendingWork.values()].filter(work => work.agent_id === agent.id && work.human_id === human);

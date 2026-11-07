@@ -576,7 +576,7 @@ it('call history search excludes Rooms another caller cannot read and privately 
     await service.dispatch(call.call.id, source, A);
     const { readAgentCommands } = await import('./agent-command.js');
     const commands = await readAgentCommands(db, room, A);
-    expect(commands.commands[0]?.source.body).toContain('This is a separate request from a live voice call.');
+    expect(commands.commands[0]?.source.body).toContain('This input came from a live voice call.');
     expect(commands.commands[0]?.source.body).toContain('Results dated today are current');
     expect(commands.commands[0]?.source.body).toContain('Never start your reply with your name');
     expect(commands.commands[0]?.source.body).toContain(String(new Date().getUTCFullYear()));
@@ -587,7 +587,7 @@ it('call history search excludes Rooms another caller cannot read and privately 
 });
 
 
-it('VOICE-ROUTER-1: hand-offs arriving mid-turn remain separate requests after overdue recovery', async () => {
+it('VOICE-ROUTER-1: hand-offs arriving mid-turn remain pending for the next current-state batch', async () => {
   const room = '67676767-6767-4767-8767-676767676767';
   await db.query(`INSERT INTO rooms(id,workspace_id,name) VALUES($1,$2,'Busy voice proof')`, [room,W]);
   for (const who of [H,A]) await db.query(`INSERT INTO memberships(workspace_id,room_id,identity_id,role) VALUES($1,$2,$3,'member')`, [W,room,who]);
@@ -612,7 +612,7 @@ it('VOICE-ROUTER-1: hand-offs arriving mid-turn remain separate requests after o
     const queued = await commands();
     expect(queued.map(command=>command.source.id)).toEqual(expect.arrayContaining([second,third]));
     expect(queued.every(command=>!command.recoveryContext)).toBe(true);
-    expect(queued.every(command=>command.source.body.includes('Answer this request in this turn'))).toBe(true);
+    expect(queued.every(command=>command.source.body.includes('Answer the latest message'))).toBe(true);
     expect((await db.query(`SELECT state FROM agent_commands WHERE source_message_id=$1`,[first])).rows[0]).toEqual({state:'complete'});
   } finally { await service.leave(joined.call.id,H); await db.query('DELETE FROM rooms WHERE id=$1',[room]); }
 });
