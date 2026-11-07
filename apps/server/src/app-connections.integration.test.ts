@@ -164,7 +164,7 @@ const scope2 = fixtureScope2();
       expect(result).toMatchObject({ status: 'ready', app: 'Beeline Rooms' });
       expect(result.next).toContain('https://join.usebeeline.app');
       expect(result.next).toContain('Members sheet > +');
-      expect(result.next).toContain('Muse directory listing is still pending');
+      expect(result.next).toContain('Muse can connect now through a custom connector at https://join.usebeeline.app; only its directory listing is pending.');
     }
     expect((await scope2.database.query('SELECT id FROM workspace_apps')).rowCount).toBe(0);
     expect((await scope2.database.query("SELECT id FROM messages WHERE card_type IS NOT NULL")).rowCount).toBe(0);
