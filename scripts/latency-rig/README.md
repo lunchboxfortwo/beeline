@@ -697,3 +697,39 @@ capture. `LATENCY_RIG_SMOKE=1` permits one sample (the ordinary minimum stays
 20); it never relaxes nightly analysis coverage and cannot establish a passing
 nightly verdict. With no entry filter smoke mode captures the arrival cases too;
 use the explicit entry filter for these bounded proofs.
+
+## Local web busy-Room capture
+
+`capture-web-room.mjs` captures two batches of twenty warm switches from
+`Rig room 002` to `Rig room 001` using Chrome's loopback CDP endpoint. Start a
+production web export against the disposable local server, sign in using its
+local review link, and select **Latency Rig 200** before running:
+
+```sh
+LATENCY_RIG_CDP=http://127.0.0.1:18083 \
+  node scripts/latency-rig/capture-web-room.mjs web-room.json
+```
+
+The endpoint defaults to the address above. `LATENCY_RIG_CPU_RATE` defaults to
+one (no throttling); keep the same rate, browser viewport, fixture and build
+configuration for comparisons. Reload with browser caching disabled after changing
+exports and verify the `browser.scripts` bundle names in each report.
+
+The driver starts before the row click. Completion requires the entire seeded
+answer text, a visible hit-tested answer and composer, no visible loading/error
+surface, and nonempty laid-out visible message bodies; it rechecks on the next
+animation frame. The large newest answer fills this fixture's visible transcript.
+Hidden, occluded, offscreen or incomplete Rooms cannot complete the sample.
+This is a browser frame proxy, not physical scanout. The alternate Room receives
+a fixed setup wait outside the timed interval.
+
+The original evidence ZIP and its capture conditions are unavailable. The
+unchanged seed and committed driver reconstruct the baseline at `594e3bca`;
+this is not a claim to reproduce the original approximately 370 ms result.
+The old layout-only predicate measured p95 186.8 / 160.3 ms and was superseded
+by the visible-frame predicate. Paired results and conditions are in the PR's
+Reproduction BUSY-ROOM-WEB-1 evidence.
+
+Predicate checks: `node --test scripts/latency-rig/web-room-frame.test.mjs`.
+The SidebarView route-hop test guards stable row props so navigation cannot
+silently force every unrelated memoized conversation row to render again.

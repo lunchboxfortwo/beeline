@@ -397,6 +397,14 @@ export const SidebarView = React.memo(function SidebarView() {
   );
   // The sidebar reads through RoomViewClient only, so the one write it makes
   // builds the monolith transport on demand, as the Room composer does.
+  const [ageNow, setAgeNow] = React.useState(() => Date.now());
+  React.useEffect(() => {
+    const timer = setInterval(() => setAgeNow(Date.now()), 60_000);
+    return () => clearInterval(timer);
+  }, []);
+  const openCorners = React.useCallback((roomId: string) => {
+    router.push(roomCornersHref(roomId));
+  }, [router]);
   const openingCornerRef = React.useRef(false);
   const openNewCorner = React.useCallback(
     async (roomId: string, attempt?: CornerOpenAttempt) => {
@@ -613,16 +621,16 @@ export const SidebarView = React.memo(function SidebarView() {
                         <ConversationRow
                           item={item}
                           viewer={identityPubkey ?? undefined}
-                          now={Date.now()}
+                          now={ageNow}
                           selected={isDesktop && active}
                           desktop
-                          onOpenCorners={() => router.push(roomCornersHref(item.room.id))}
+                          onOpenCorners={openCorners}
                           pinned={pinned.includes(item.room.id)}
-                          onPin={() => void togglePin(item.room.id)}
+                          onPin={togglePin}
                           onLongPressCorners={
-                            viewerIsAgent ? undefined : () => void openNewCorner(item.room.id)
+                            viewerIsAgent ? undefined : openNewCorner
                           }
-                          onPress={() => openRoom(item.room.id)}
+                          onPress={openRoom}
                           testID={`desktop-room-${item.room.id}`}
                         />
                       </View>
@@ -633,7 +641,7 @@ export const SidebarView = React.memo(function SidebarView() {
             )}
             <MessageSearchResults
               search={messageSearch}
-              now={Date.now()}
+              now={ageNow}
               onOpen={(result) => {
                 if (workspaceId) {
                   setQuery('');

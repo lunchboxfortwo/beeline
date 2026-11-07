@@ -17,6 +17,7 @@ const workspaceChange: MonolithSurfaceEvent = {
 const routerReplace = vi.hoisted(() => vi.fn());
 const routerPush = vi.hoisted(() => vi.fn());
 const routerNavigate = vi.hoisted(() => vi.fn());
+const stableRouter = vi.hoisted(() => ({ push: routerPush, navigate: routerNavigate, replace: routerReplace }));
 const saveActiveCommunityId = vi.hoisted(() => vi.fn(async () => undefined));
 const loadLastViewedChannel = vi.hoisted(() => vi.fn(async () => null));
 const route = vi.hoisted(() => ({
@@ -204,7 +205,7 @@ vi.mock('expo-router', async () => {
     pathnameListeners.add(listener);
     return () => { pathnameListeners.delete(listener); };
   }, () => route.pathname),
-  useRouter: () => ({ push: routerPush, navigate: routerNavigate, replace: routerReplace }),
+  useRouter: () => stableRouter,
   });
 });
 vi.mock('@/utils/responsive', () => ({ useHeaderHeight: () => 56, useIsDesktop: () => true }));
@@ -324,6 +325,7 @@ vi.mock('@/components/buzz/HullActionSheet', () => ({
 }));
 
 import { SidebarView } from './SidebarView';
+import { ConversationRow } from './buzz/ConversationRow';
 import { liveChatList, refreshChatList, resetChatListStoresForTest } from '@/buzz/chat-list-store';
 import { TrayGlyph } from '@/components/buzz/TrayGlyph';
 import { RoomListToolbar } from '@/components/buzz/RoomListToolbar';
@@ -512,6 +514,8 @@ describe('desktop Workspace navigation', () => {
     expect(chats).toHaveBeenCalledTimes(initialChatReads);
     expect(chats.mock.calls.every(([id]) => id === 'workspace-a')).toBe(true);
     expect(tree.root.findByType('CommunitySwitcherTrigger').props.community.name).toBe('Alpha Workspace');
+    const unchangedRow = () => tree.root.findAllByType(ConversationRow).find((row: any) => row.props.item.room.id === 'dm-a')!;
+    const unchangedProps = { ...unchangedRow().props };
     const hopStarted = performance.now();
     for (let hop = 0; hop < 10; hop += 1) {
       route.pathname = hop % 2 ? '/beeline/chat/room-a' : '/beeline/tray';
@@ -520,6 +524,9 @@ describe('desktop Workspace navigation', () => {
         tree.update(<SidebarView />);
       });
       expect(control('desktop-room-room-a')).toBeDefined();
+      for (const key of Object.keys(unchangedProps)) {
+        expect(unchangedRow().props[key], key).toBe(unchangedProps[key]);
+      }
     }
     expect(workspaces).toHaveBeenCalledTimes(initialReads);
     expect(chats).toHaveBeenCalledTimes(initialChatReads);
