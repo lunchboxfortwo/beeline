@@ -42,6 +42,7 @@ it('allows only the bounded closed owned-model credential on a claim result and 
   const modelCredential = { v: 1, token: `bfmc_v1.${'a'.repeat(32)}.${'b'.repeat(64)}`, expiresAt: 1_800_000_001 };
   expect(codec.parse(write)).toEqual(write);
   expect(codec.parse({ ...write, modelCredential })).toEqual({ ...write, modelCredential });
+  expect(codec.parse({...write,modelCredential:{...modelCredential,expiresAt:null}})).toMatchObject({modelCredential:{expiresAt:null}});
   for (const credential of [{ ...modelCredential, token: 'bfm_legacy' }, { ...modelCredential, token: modelCredential.token + '.extra' },
     { ...modelCredential, v: 2 }, { ...modelCredential, providerKey: 'synthetic-secret' },
     ...[0, -1, 1.5, Number.MAX_SAFE_INTEGER, Infinity].map(expiresAt => ({ ...modelCredential, expiresAt }))])

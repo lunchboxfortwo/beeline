@@ -30,6 +30,7 @@ import { phoneProjectPendingAgentCommands } from './message-enrichment.js';
       `SELECT ARRAY(
          SELECT DISTINCT command.agent_id
          FROM agent_commands command
+      LEFT JOIN free_agents free ON free.agent_id=command.agent_id
          JOIN agent_turns turn ON turn.room_id=command.room_id
            AND turn.agent_id=command.agent_id AND turn.status='working'
            AND COALESCE(turn.generation_id,'') NOT LIKE 'pending:%'
@@ -68,10 +69,11 @@ import { phoneProjectPendingAgentCommands } from './message-enrichment.js';
     const commands = await database.query<{
       agent_id: string;
       turn_request_id: string;
-      created_at: Date;
+      created_at: Date; runtime_phase?: NonNullable<RoomView['pendingAgentCommands']>[number]['runtimePhase'];
     }>(
-      `SELECT command.agent_id,command.turn_request_id,command.created_at
+      `SELECT command.agent_id,command.turn_request_id,command.created_at,free.runtime_phase
        FROM agent_commands command
+      LEFT JOIN free_agents free ON free.agent_id=command.agent_id
        WHERE command.room_id=$1 AND command.source_message_id=$2
          AND command.state='pending' AND command.action='input'
          AND command.reason IN ('human_tag','direct_message')

@@ -58,7 +58,7 @@ describe('actual selected model credential claim socket', () => {
   };
   async function register(installed = true) {
     const from = frames.length;
-    send({ type: 'register', token: TOKEN, turnOwnershipV1: true, ownedModelV1: installed, daemonOperationsV1:true });
+    send({ type: 'register', token: TOKEN, turnOwnershipV1: true, ownedModelV1: installed, ownedModelUnboundedV1:installed, daemonOperationsV1:true });
     return next(frame => frame.type === 'registered' && frames.indexOf(frame) >= from);
   }
   async function claim(requestId = 'model-claim') {

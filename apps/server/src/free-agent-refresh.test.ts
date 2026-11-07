@@ -36,10 +36,10 @@ describe('release refresh and committed free-agent sleep events', () => {
       if (!path && init?.method === 'POST') {
         const update = JSON.parse(String(init.body));
         expect(update.current_version).toBe(machine.instance_id);
-        expect(update.skip_launch).toBe(true);
+        expect(update.skip_launch).toBe(false);
         machine.config = update.config;
         machine.instance_id += '-updated';
-        machine.state = 'replacing';
+        machine.state = 'started';
         return Response.json({ instance_id: machine.instance_id });
       }
       if (path === '/stop') machine.state = 'stopped';
@@ -98,7 +98,7 @@ describe('release refresh and committed free-agent sleep events', () => {
     for (let n = 1; n <= 32; n++) expect(fleet.get(`m${n}`)).toMatchObject({ state: 'started',
       config: { image: IMAGE, env: { keep: agentId(n) }, rootfs: { persist: 'always' } } });
     expect(calls.some(call => /m(4\d|5\d)/.test(call))).toBe(false);
-    expect((await db.query(`SELECT 1 FROM free_agent_events WHERE kind='refresh_started'`)).rowCount).toBe(32);
+    expect((await db.query(`SELECT 1 FROM free_agent_events WHERE kind='machine_started'`)).rowCount).toBe(32);
     expect((await db.query(`SELECT 1 FROM agent_commands`)).rowCount).toBe(0);
     for (let n = 1; n <= 32; n++) {
       await db.query(`UPDATE free_agents SET state='running' WHERE agent_id=$1`, [agentId(n)]);
@@ -106,12 +106,11 @@ describe('release refresh and committed free-agent sleep events', () => {
     }
     await vi.waitFor(async () => expect((await db.query(`SELECT 1 FROM free_agent_events WHERE kind='slept'`)).rowCount).toBe(32));
     for (let n = 1; n <= 32; n++) expect(fleet.get(`m${n}`)?.state).toBe('suspended');
-    expect(logs).toContain('release refresh started 32; unchanged 0; failed 0');
     // The next real command resumes the prepared snapshot, with no stop/update.
     calls.length = 0;
     await command(1, 'pending');
     expect(await service.wake(agentId(1))).toBe(true);
-    expect(calls).toEqual(['GET m1', 'POST m1/start']);
+    expect(calls).toEqual(['GET m1','GET m1','POST m1/start']);
   });
 
   it.each(['pending', 'claimed'] as const)('never suspends %s work; completion admits one suspend without a clock', async state => {
@@ -131,14 +130,14 @@ describe('release refresh and committed free-agent sleep events', () => {
     expect(calls.filter(call => call === 'POST m1/suspend')).toHaveLength(1);
   });
 
-  it('attempts every selected Machine and exposes partial failures to the release command', async () => {
-    await seed(1); await seed(2); failStart = 'm1';
-    await expect(service.refreshSleepingMachines()).rejects.toThrow('Free-agent image refresh failed');
-    expect(calls).toContain('POST m1/start');
-    expect(calls).toContain('POST m2/start');
-    expect((await db.query(`SELECT agent_id FROM free_agent_events WHERE kind='refresh_started'`)).rows)
-      .toEqual([{ agent_id: agentId(2) }]);
-    expect(logs).toContain('release refresh started 1; unchanged 0; failed 1');
+  it('exposes a failed acquisition while allowing other selected releases to prepare', async () => {
+    await seed(1, 'sleeping', 'stopped'); await seed(2);
+    fleet.get('m1')!.config.image = IMAGE;
+    failStart = 'm1';
+    await expect(service.refreshSleepingMachines()).rejects.toThrow('image preparation unavailable');
+    expect(fleet.get('m2')?.state).toBe('started');
+    expect((await db.query(`SELECT runtime_phase->>'phase' phase FROM free_agents WHERE agent_id=$1`, [agentId(1)])).rows)
+      .toEqual([{ phase: 'unavailable' }]);
   });
 
   it('protects connector installation until its committed completion event', async () => {
@@ -181,7 +180,23 @@ describe('release refresh and committed free-agent sleep events', () => {
     // The still-serving helper can claim the command before Fly finishes freezing.
     await db.query(`UPDATE agent_commands SET state='claimed' WHERE id='command-1'`);
     finishSuspend();
-    await vi.waitFor(() => expect(calls.filter(call => call === 'POST m1/start')).toHaveLength(2));
+    await vi.waitFor(() => expect(calls.filter(call => call === 'POST m1/start')).toHaveLength(1));
     expect(fleet.get('m1')?.state).toBe('started');
   });
+  it('reads connector work committed during suspension at the slept completion', async () => {
+    await seed(1, 'running', 'started'); fleet.get('m1')!.config.image = IMAGE;
+    await db.query(`INSERT INTO squire_machines(owner_id,machine_id,helper_agent_id,squire_work)
+      VALUES($1,'connector-host',$2,'{}')`, [OWNER, agentId(1)]);
+    let finishSuspend!: () => void;
+    beforeSuspend = () => new Promise<void>(resolve => { finishSuspend = resolve; });
+    expect(await service.requestSleep(agentId(1))).toEqual({ sleep: true });
+    await vi.waitFor(() => expect(finishSuspend).toBeTypeOf('function'));
+    // No command or synthetic wake is delivered: completion reads desired work.
+    await db.query(`UPDATE squire_machines SET squire_work='{"install":true}' WHERE owner_id=$1`, [OWNER]);
+    finishSuspend();
+    await vi.waitFor(() => expect(calls.filter(call => call === 'POST m1/start')).toHaveLength(1));
+    expect(fleet.get('m1')?.state).toBe('started');
+    expect(await service.requestSleep(agentId(1))).toEqual({ sleep: false });
+  });
+
 });

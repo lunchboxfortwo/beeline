@@ -1,3 +1,4 @@
+import { SquireOperationError } from './squire-outcome.js';
 import type { ConnectorStep, ConnectorSignIn, VaultConnectionMeta, ConnectionGrant } from "@beeline/api-contract/daemon";
 import { squireHostPaths, squireBrokerSocketReady } from "./squire-host.js";
 import { homedir } from "node:os";
@@ -229,6 +230,8 @@ export async function pairSquire(
 
 /** Decode MCP error envelopes for recovery, and publish only a plain cause. */
 export function pairingFailure(error: unknown): { ok: false; reason: string; reconnectRequired?: true } {
+  if(error instanceof SquireOperationError && error.outcome.cause==='needs-sign-in')
+    return {ok:false,reason:'Trusty Squire needs account sign-in',reconnectRequired:true};
   let payload: unknown = error;
   if (isRecord(payload) && Array.isArray(payload.content)) {
     payload = payload.content.find((entry: unknown) => isRecord(entry) && entry.type === 'text')?.text;

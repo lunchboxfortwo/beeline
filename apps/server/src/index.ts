@@ -1,3 +1,4 @@
+import { OwnedModelCredentials } from './owned-model-credential.js';
 import { requiredServerSetting as required } from './server-configuration.js';
 import { sentryEligibilityKey } from './sentry-wake-source.js';
 import { AGENT_SCHEDULE_DUE_KEY } from './agent-schedule-source.js';
@@ -14,7 +15,7 @@ process.on('unhandledRejection', error => {
   console.error('[unhandled-rejection]', error instanceof Error ? error.name : 'Unknown rejection');
 });
 import { sentryTelegramFromEnv } from './sentry-telegram.js';
-import { randomUUID } from 'node:crypto';
+import { createHash, randomUUID } from 'node:crypto';
 import { assertSchemaCurrent, markSchemaCurrent, migrate, migrateData, PostgresDatabase } from './database.js';
 import { runMigrationStep } from './migration-steps.js';
 import { databaseConnectionBudget } from './database-budget.js';
@@ -357,6 +358,7 @@ async function main() {
           process.env.FLY_FREE_AGENT_API_ORIGIN || undefined,
         ),
         (agentId, transaction) => auth.createDaemonExchange(agentId, transaction),
+        undefined, connectionPresence.instanceId,
       )
     : undefined;
   if (freeAgents) phone.setFreeAgents(freeAgents);
@@ -370,6 +372,14 @@ async function main() {
           : {}),
       }
     : undefined;
+  if (freeAgentModel && freeAgentConfig) {
+    const version='free-agent-v1';
+    const key=createHash('sha256').update('beeline:owned-model:root:v1\0').update(freeAgentConfig.sealSecret).digest();
+    const ownedModel={ credentials:new OwnedModelCredentials({currentVersion:version,key:v=>v===version ? key : undefined},
+      ()=>freeAgentConfig.model),ready:()=>true };
+    Object.assign(freeAgentModel,{ownedModel});
+    daemon.setOwnedModel(ownedModel);
+  }
   const starterOnboarding = new StarterOnboardingService(database, freeAgentModel);
   phone.setStarterOnboarding(starterOnboarding);
   daemon.setStarterOnboarding(starterOnboarding);
@@ -452,12 +462,13 @@ async function main() {
   liveListener.setOwedWake(source => { if (source === 'sentry') sentryJob.wake(); });
   liveListener.setMcpWebhookWake(() => mcpJob.wake());
   // A committed wake for a sleeping free agent starts its Machine at once;
-  const stopFreeAgentWake = freeAgents?.subscribeToWakes(live);
+  let stopFreeAgentWake: (()=>void) | undefined;
   const port = Number(process.env.PORT ?? '8080');
   const host = process.env.HOST ?? '127.0.0.1';
   await listenAfterBestEffortRecovery(server, async () => {
     await connectionPresence.start();
   }, port, host);
+  stopFreeAgentWake=freeAgents?.subscribeToWakes(live);
   schedulesJob.wake();
   const stopOperationOutcomes = startOperationOutcomeFlush(jobsDatabase, operationOutcomes, backgroundJobs);
   console.log(`[server] listening on ${host}:${port}; store=postgres; background=events`);
@@ -494,7 +505,9 @@ async function runFreeAgentOperation(refresh: boolean, workspaceId: string | und
   const config = freeAgentConfigFromEnv(process.env, required('PUBLIC_ORIGIN'));
   if (!config) throw new Error('free agents are not configured on this server');
   const database = new PostgresDatabase(required('DATABASE_URL'), 1, { mode: 'long-running' });
+  const presence = new ConnectionPresence(database,new LiveHub());
   try {
+    await presence.start();
     const service = new FreeAgentService(
       database,
       config,
@@ -507,6 +520,7 @@ async function runFreeAgentOperation(refresh: boolean, workspaceId: string | und
       async () => {
         throw new Error('bootstrap is served by the running server');
       },
+      undefined,presence.instanceId,
     );
     if (refresh) {
       await service.refreshSleepingMachines();
@@ -517,6 +531,7 @@ async function runFreeAgentOperation(refresh: boolean, workspaceId: string | und
       ? `[free-agents] added free agent ${agentId} to Workspace ${workspaceId}`
       : `[free-agents] Workspace ${workspaceId} already has a free agent, or its owner is at the limit`);
   } finally {
+    await presence.stop();
     await database.close();
   }
 }

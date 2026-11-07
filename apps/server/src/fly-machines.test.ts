@@ -4,6 +4,30 @@ import { FlyApiError, FlyMachines } from './fly-machines.js';
 afterEach(() => vi.useRealTimers());
 
 describe('Fly start during suspend', () => {
+  it('Klor: 34.293 seconds preparing an image still launches without a timed wait', async () => {
+    vi.useFakeTimers();
+    let state = 'stopped';
+    const requests: string[] = [];
+    const request = vi.fn<typeof fetch>(async (url, init) => {
+      const path = String(url).split('/machines/m1')[1]!;
+      requests.push(`${init?.method} ${path}`);
+      if (!path && init?.method === 'GET') return Response.json({ state, instance_id: 'old', config: { image: 'old', rootfs: { persist: 'always' } } });
+      if (!path && init?.method === 'POST') {
+        const update = JSON.parse(String(init.body));
+        state = 'replacing';
+        setTimeout(() => { state = update.skip_launch ? 'stopped' : 'started'; }, 34_293);
+        return Response.json({ instance_id: 'new' });
+      }
+      if (path.startsWith('/wait')) return new Response('{}', { status: 408 });
+      if (path === '/start') state = 'started';
+      return Response.json({});
+    });
+    await new FlyMachines('synthetic', 'proof', request).start('m1', 'new');
+    await vi.advanceTimersByTimeAsync(34_293);
+    expect(state).toBe('started');
+    expect(requests).toEqual(['GET ', 'POST ']);
+  });
+
   it('boots the new image during refresh, suspends the ready helper, and resumes on the next wake', async () => {
     let state = 'suspended';
     let version = 'old-version';
@@ -15,10 +39,10 @@ describe('Fly start during suspend', () => {
       if (!path && init?.method === 'POST') {
         const update = JSON.parse(String(init.body));
         expect(update.current_version).toBe(version);
-        expect(update.skip_launch).toBe(true);
+        expect(update.skip_launch).toBe(false);
         config = update.config;
         version = 'new-version';
-        state = 'replacing';
+        state = 'started';
         return Response.json({ instance_id: version });
       }
       if (path === '/wait?state=stopped&timeout=30&instance_id=new-version') state = 'stopped';
@@ -37,16 +61,13 @@ describe('Fly start during suspend', () => {
     await machines.waitFor('m1', 'suspended', 60);
     expect(state).toBe('suspended');
     await machines.start('m1', 'new');
-    expect(starts).toEqual(['stopped', 'suspended']);
+    expect(starts).toEqual(['suspended']);
   });
 
-  it('reboots an outdated helper even when the base image has not changed', async () => {
-    const request = vi.fn<typeof fetch>()
-      .mockImplementation(async () => Response.json({ state: 'started', config: { image: 'same' } }));
-    expect(await new FlyMachines('test', 'proof', request).refresh('m1', 'same', true)).toBe(true);
-    expect(request.mock.calls.map(([url]) => String(url).split('/machines')[1])).toEqual([
-      '/m1', '/m1/stop', '/m1/wait?state=stopped&timeout=30', '/m1', '/m1/start',
-    ]);
+  it('keeps the baked helper when its pinned image is already serving', async () => {
+    const request=vi.fn<typeof fetch>().mockResolvedValue(Response.json({state:'started',config:{image:'same'}}));
+    expect(await new FlyMachines('test','proof',request).refresh('m1','same',true)).toBe(false);
+    expect(request).toHaveBeenCalledOnce();
   });
 
   it('updates a stale image before wake, preserving the complete Machine configuration', async () => {
@@ -58,11 +79,10 @@ describe('Fly start during suspend', () => {
       String(url).endsWith('/m1') && init?.method === 'POST' ? { instance_id: 'replacement-version' } : {}));
     await new FlyMachines('test', 'proof', request).start('m1', 'new');
     expect(request.mock.calls.map(([url]) => String(url).split('/machines')[1])).toEqual([
-      '/m1', '/m1/stop', '/m1/wait?state=stopped&timeout=30', '/m1',
-      '/m1/wait?state=stopped&timeout=30&instance_id=replacement-version', '/m1/start',
+      '/m1', '/m1',
     ]);
-    expect(JSON.parse(String(request.mock.calls[3]![1]!.body))).toEqual({
-      current_version: 'current-version', skip_launch: true, config: { ...config, image: 'new' },
+    expect(JSON.parse(String(request.mock.calls[1]![1]!.body))).toEqual({
+      current_version: 'current-version', skip_launch: false, config: { ...config, image: 'new' },
     });
   });
 
@@ -82,16 +102,11 @@ describe('Fly start during suspend', () => {
     expect(request).toHaveBeenCalledTimes(2);
   });
 
-  it('never starts while the image replacement has not reached its stopped state', async () => {
-    const request = vi.fn<typeof fetch>()
-      .mockResolvedValueOnce(Response.json({ state: 'stopped', instance_id: 'old', config: { image: 'old' } }))
-      .mockResolvedValueOnce(Response.json({ instance_id: 'replacement' }))
-      .mockResolvedValueOnce(new Response('{}', { status: 408 }));
-    await expect(new FlyMachines('test', 'proof', request).start('m1', 'new'))
-      .rejects.toMatchObject({ status: 408, operation: 'wait' });
-    expect(request.mock.calls.map(([url]) => String(url).split('/machines')[1])).toEqual([
-      '/m1', '/m1', '/m1/wait?state=stopped&timeout=30&instance_id=replacement',
-    ]);
+  it('lets the provider launch an accepted replacement without waiting for stopped', async () => {
+    const request=vi.fn<typeof fetch>().mockResolvedValueOnce(Response.json({state:'stopped',instance_id:'old',config:{image:'old'}}))
+      .mockResolvedValueOnce(Response.json({instance_id:'replacement',state:'replacing'}));
+    await new FlyMachines('test','proof',request).start('m1','new');
+    expect(request.mock.calls.map(([url])=>String(url).split('/machines')[1])).toEqual(['/m1','/m1']);
   });
   it('returns a snapshot transition refusal without a timed reattempt', async () => {
     vi.useFakeTimers();

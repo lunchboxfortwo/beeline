@@ -43,7 +43,7 @@ export async function seedOwnedModelFixture<T extends SqlDatabase>(db: T,
   [MODEL_CLAIM.commandId, MODEL_ROOM, MODEL_AGENT, MODEL_CLAIM.generationId, MODEL_SOURCE.connectionId, MODEL_SOURCE.epoch]);
   await db.query(`CREATE TABLE owned_model_test_accounting(id text PRIMARY KEY,amount integer NOT NULL)`);
   const credentials = new OwnedModelCredentials({ currentVersion: 'test-v1', key: version => version === 'test-v1' ? MODEL_KEY : undefined },
-    () => MODEL, () => 15 * 60_000);
+    () => MODEL);
   const issued = await db.transaction(tx => credentials.issueInTransaction(tx, MODEL_CLAIM));
   const actor = await credentials.authenticate(db, issued.token);
   return { db, credentials, issued, actor };

@@ -68,7 +68,8 @@
 
 ## Turn recovery storage retirement
 
-The existing post-drain retired-column cleanup covers `agent_commands.startup_wake_after`,
+The existing post-drain retired-column cleanup covers `free_agents.wake_requested_at`, `free_agents.provision_started_at`, `free_agents.provision_attempts`,
+`free_agents.provision_error`, `agent_commands.startup_wake_after`,
 `agent_turns.startup_outcome`, `free_agents.allowance_paused_until`, `agents.wake_batch_minutes`,
 `agent_commands.wake_after`, `agent_commands.coalesced_context`, `agent_commands.coalesced_attachments`,
 `agent_commands.created_offline`, `agent_commands.hiccup_attempts`. The background simplification also leaves

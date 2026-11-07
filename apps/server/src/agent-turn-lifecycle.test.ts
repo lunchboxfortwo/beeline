@@ -5,7 +5,6 @@ import { DaemonService } from './daemon-service.js';
 import { PhoneService } from './phone-service.js';
 import { LiveHub } from './live.js';
 import { cancelCornerAgentCommands } from './corner-close.js';
-import { refuseExpiredFreeAgentTurn } from './free-agent-turn-budget.js';
 import { claimAgentConnection, releaseAgentConnection } from './connection-presence.js';
 import type { HelperTurnOwnershipSource } from '@beeline/api-contract/helper-turn-ownership';
 
@@ -83,12 +82,12 @@ it('corner cancellation ends queued and claimed work without a silence notice',a
   expect((await notices()).rowCount).toBe(0);
   expect((await db.query('SELECT status FROM agent_turns WHERE request_id=$1',[c.turnRequestId])).rows).toEqual([{status:'cancelled'}]);
 });
-it('model request admission ends an over-budget turn once through the terminal owner',async()=>{
+it('a long claimed invocation ends on its actual answer through the terminal owner',async()=>{
   const c=await ask();
   await db.query("UPDATE agent_turns SET started_at=now()-interval '20 minutes' WHERE request_id=$1",[c.turnRequestId]);
-  expect(await refuseExpiredFreeAgentTurn(db,c.id,'generation',15*60_000)).toBe(true);
-  expect(await refuseExpiredFreeAgentTurn(db,c.id,'generation',15*60_000)).toBe(false);
-  expect((await notices()).rowCount).toBe(1);
+  await daemon.execute('postRoomMessage',{roomId:R,requestId:c.turnRequestId,generationId:'generation',text:'The long work finished.'},A);
+  await receipt(c.turnRequestId,'complete');
+  expect((await notices()).rowCount).toBe(0);
   expect((await readAgentCommands(db,R,A)).commands).toEqual([]);
 });
 
@@ -102,7 +101,6 @@ it('disconnect returns the same command once; reconnect answers it without a fai
   const next={connectionId:'second-connection',epoch:await claimAgentConnection(db,live,A,{},
     {connectionId:'second-connection',instanceId:'test-server'})};
   await claimAgentCommand(db,R,A,c.id,'next-generation',next);
-  expect(await refuseExpiredFreeAgentTurn(db,c.id,'next-generation',15*60_000)).toBe(false);
   expect(await releaseAgentConnection(db,live,A,owner.connectionId)).toBe(false);
   await daemon.execute('postRoomMessage',{roomId:R,requestId:c.turnRequestId,generationId:'next-generation',text:'Recovered answer.'},A);
   expect((await readAgentCommands(db,R,A)).commands).toEqual([]);

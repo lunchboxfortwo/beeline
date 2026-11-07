@@ -157,16 +157,18 @@ export function useChatTurnPresentation([
    * channel-local reply that is visibly streaming now.
    *
    * `pendingAck` bridges only the send round trip. After acceptance, the
-   * unclaimed commands stay silent until the helper claims them.
-   * Only a genuine server-indexed WORKING receipt says the agent is thinking.
+   * unclaimed free-agent commands display their committed runtime phase.
+   * A claimed WORKING receipt supplies the execution counter.
    */
   const composerAck = useMemo((): ComposerAckPresentation | null => {
     return selectComposerAckPresentation({
       isCorner,
       viewerCanSend: roomSurface?.viewer.permissions.send,
+      pendingAgentCommands: roomSurface?.pendingAgentCommands,
       ...(activeAgentTurn?.agentPubkey ? { activeTurnPubkey: activeAgentTurn.agentPubkey } : {}),
       ...(activeAgentTurn
         ? {
+            activeTurnGenerationId: activeAgentTurn.generationId,
             activeTurnStartedAt: activeAgentTurn.startedAt ?? activeAgentTurn.createdAt,
             activeTurnRequestId: activeAgentTurn.requestId,
             activeTurnAgentPubkey: activeAgentTurn.agentPubkey,
@@ -185,6 +187,7 @@ export function useChatTurnPresentation([
   }, [
     activeAgentTurn,
     roomSurface?.viewer.permissions.send,
+    roomSurface?.pendingAgentCommands,
     agentByPubkey,
     conversationIdentities,
     isCorner,

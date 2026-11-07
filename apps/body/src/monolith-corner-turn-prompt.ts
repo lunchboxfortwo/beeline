@@ -53,7 +53,6 @@ import { MonolithCornerTurnLoop, isCornerReviewTurn, DaemonActivity, toolCallKey
       : undefined;
     ctx.currentTurn = { requestId, ...(requester ? { requester } : {}) };
     const trace = ctx.beginTurnTrace(requestId);
-    let timeLimited = false;
     const freeAgent = Boolean(ctx.options.config.agentEnv?.BEELINE_FREE_AGENT_ID ||
       ctx.options.config.agentEnv?.BEELINE_FREE_AGENT_MODEL_TOKEN);
     const traceGenerationId = ctx.commandContext.generationId;
@@ -631,15 +630,6 @@ import { MonolithCornerTurnLoop, isCornerReviewTurn, DaemonActivity, toolCallKey
                 }
               };
               const completeTerminal = async (result: PromptResult): Promise<boolean> => {
-                if (result.stopReason === 'free-agent-time-limit') {
-                  stream.close();
-                  timeLimited = true;
-                  let reply: string;
-                  try { reply = await ctx.freeContinuation.stopped(result); }
-                  finally { await ctx.discardSession(); }
-                  await stream.settle(reply, requestedById ? { triggerMessageId: requestId } : {});
-                  return true;
-                }
                 if (!['no-reply', 'repeated-tool-call'].includes(result.stopReason)) return false;
                 stream.close();
                 await flushToolCalls(result.toolCalls, '', true);
@@ -675,7 +665,7 @@ import { MonolithCornerTurnLoop, isCornerReviewTurn, DaemonActivity, toolCallKey
               if (
                 explained &&
                 !ctx.stoppedTurns.has(requestId) &&
-                ((!restates && shouldRetryEmptyTurn(explained)) ||
+                !freeAgent && ((!restates && shouldRetryEmptyTurn(explained)) ||
                   shouldFailOverProviderError(explained))
               ) {
                 await flushToolCalls(result.toolCalls, '');
@@ -876,19 +866,18 @@ import { MonolithCornerTurnLoop, isCornerReviewTurn, DaemonActivity, toolCallKey
         agentId: ctx.agent.publicKey,
         roomId: cornerId,
         requestId,
-        status: timeLimited ? 'failed' : 'complete',
-        ...(!timeLimited ? {diagnosticsOnly:true} : {}),
-        ...(timeLimited ? { reason: 'free-agent-time-limit' } : {}),
+        status: 'complete',
+        diagnosticsOnly:true,
         generationId: ctx.commandContext.generationId,
         toolCalls: trace.toolCallsTotal,
         trace: trace.replay(),
         ...ctx.turnMetrics,
       });
-      if (freeAgent && !timeLimited) await ctx.freeContinuation.clear();
+      if (freeAgent) await ctx.freeContinuation.clear();
       ctx.warmTranscript.complete(ctx.sessionId, [requestId]);
       // After the receipt: an operator artifact never delays the answer, and
       // never becomes one — the trace has no way to post a Room row.
-      void finishTrace(timeLimited ? 'failed' : 'complete', timeLimited ? 'free-agent-time-limit' : undefined).catch(() => undefined);
+      void finishTrace('complete').catch(() => undefined);
     } catch (error) {
       // A stopped turn already has its ending: the server wrote `cancelled` and
       // named who stopped it when it accepted the request. Nothing to post, and

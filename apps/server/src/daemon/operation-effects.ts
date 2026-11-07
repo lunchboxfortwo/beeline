@@ -347,18 +347,12 @@ export async function postBackgroundToolCompletionOperation<Name extends keyof D
                   AND completion_kind='no-reply'`,
               [completion.roomId, authenticatedAgentId, completion.requestId, completion.generationId])).rowCount)
             return daemonWriteResult(ctx);
-          const commandId = createHash('sha256').update(JSON.stringify([
-            'background-tool', origin.id, completion.generationId, completion.toolCallId,
-          ])).digest('hex');
-          await advanceCorner(db, completion.roomId, { kind: 'command', command: {
-            id: commandId, roomId: completion.roomId, agentId: authenticatedAgentId,
-            sourceMessageId: null, parent: origin, retainDepth: true,
-            reason: 'corner_background_tool',
-            privatePayload: {
-              kind: 'lifecycle', authorId: SYSTEM_IDENTITY_ID, fromRoomId: completion.roomId,
-              text: `Your background tool ${completion.title.slice(0, 500)} (${completion.toolCallId}) ${completion.status}. Continue the work from its result.`,
-            },
-          } });
+          // Legacy helpers may acknowledge a detached tool. Its invocation owns
+          // the result; a completion receipt never authorizes another model turn.
+          await db.query(`INSERT INTO free_agent_events(agent_id,kind,detail)
+            SELECT agent_id,'background_tool_result',$2::jsonb FROM free_agents WHERE agent_id=$1`,
+            [authenticatedAgentId,JSON.stringify({commandId:origin.id,generationId:completion.generationId,
+              toolCallId:completion.toolCallId,status:completion.status})]);
           return daemonWriteResult(ctx);
         }) as Output<Name>;
 

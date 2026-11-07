@@ -201,9 +201,10 @@ import { phoneOptionalEnrichment } from './optional-enrichment.js';
            ORDER BY turn.agent_id
          ), pending_command_rows AS (
            SELECT DISTINCT ON(command.agent_id)
-             command.agent_id,command.turn_request_id,command.created_at
+             command.agent_id,command.turn_request_id,command.created_at,free.runtime_phase
            FROM authorized_room room
            JOIN agent_commands command ON command.room_id=room.id
+           LEFT JOIN free_agents free ON free.agent_id=command.agent_id
            JOIN messages source ON source.id=command.source_message_id AND source.room_id=room.id
            JOIN identities author ON author.id=source.author_id AND author.kind='human'
            WHERE command.state='pending' AND command.action='input'

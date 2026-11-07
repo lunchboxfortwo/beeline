@@ -18,8 +18,8 @@ const claimResult: typeof claim.result = Object.freeze({ parse(value: unknown) {
         Object.keys(credential).sort().join() !== 'expiresAt,token,v') throw new Error('Turn model credential shape invalid');
     const model = credential as { v?: unknown; token?: unknown; expiresAt?: unknown };
     if (model.v !== 1 || typeof model.token !== 'string' || !/^bfmc_v1\.[a-f0-9]{32}\.[a-f0-9]{64}$/.test(model.token) ||
-        typeof model.expiresAt !== 'number' || !Number.isSafeInteger(model.expiresAt) || model.expiresAt <= 0 ||
-        model.expiresAt > Math.floor(Number.MAX_SAFE_INTEGER / 1000)) throw new Error('Turn model credential invalid');
+        (model.expiresAt !== null && (typeof model.expiresAt !== 'number' || !Number.isSafeInteger(model.expiresAt) || model.expiresAt <= 0 ||
+        model.expiresAt > Math.floor(Number.MAX_SAFE_INTEGER / 1000)))) throw new Error('Turn model credential invalid');
   }
   return parsed;
 } });

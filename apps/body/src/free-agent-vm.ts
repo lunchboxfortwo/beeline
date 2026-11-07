@@ -40,7 +40,6 @@ export interface FreeAgentGrant {
   modelToken: string;
   modelBaseUrl: string;
   upstreamModel: string;
-  maxTurnSeconds?: number;
   idleSeconds: number;
 }
 
@@ -83,13 +82,11 @@ async function freeAgentInput(model: string): Promise<Array<'text' | 'image'>> {
 }
 
 /** Values are single lines; parseEnvFile does not unescape quoted values. */
-export function freeAgentModelEnv(grant: Pick<FreeAgentGrant, 'modelToken' | 'maxTurnSeconds'>): string {
+export function freeAgentModelEnv(grant: Pick<FreeAgentGrant, 'modelToken'>): string {
   const lines = {
     BEELINE_FREE_AGENT_MODEL_TOKEN: grant.modelToken,
-    BEELINE_FREE_AGENT_MAX_TURN_SECONDS: String(grant.maxTurnSeconds ?? 900),
     BEELINE_BODY_AGENT_ENV_PASSTHROUGH: [
       'BEELINE_FREE_AGENT_MODEL_TOKEN',
-      'BEELINE_FREE_AGENT_MAX_TURN_SECONDS',
     ].join(','),
   };
   return `${Object.entries(lines)
@@ -188,9 +185,7 @@ async function upgradeFreeAgentHarness(configPath: string, env: NodeJS.ProcessEn
       .filter(Boolean).join(',').split(',').map(name => canonicalName(name.trim())).filter(Boolean),
   );
   passthrough.add('BEELINE_FREE_AGENT_MODEL_TOKEN');
-  passthrough.add('BEELINE_FREE_AGENT_MAX_TURN_SECONDS');
   normalized.BEELINE_BODY_AGENT_ENV_PASSTHROUGH = [...passthrough].join(',');
-  normalized.BEELINE_FREE_AGENT_MAX_TURN_SECONDS ??= '900';
   if (!normalized.BEELINE_FREE_AGENT_MODEL_TOKEN)
     throw new Error('free agent proxy configuration is missing');
   if (agentBehavior(runtime.agentKind).hostedModelConfig === 'inline-provider') {

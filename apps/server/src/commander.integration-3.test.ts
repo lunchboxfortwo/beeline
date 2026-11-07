@@ -328,12 +328,10 @@ it('Reproduction SELF-1: cross-place self-tags never start a ping-pong chain', a
 });
 
 
-it('Reproduction SELF-2: own brief revisions stay quiet while external shell completions can finish silently', async () => {
+it('Reproduction SELF-2: own brief revisions and external shell completion bookkeeping stay quiet', async () => {
   const opened = await open(), turn = await worker(opened.cornerId);
   await daemon.execute('postBackgroundToolCompletion', { ...authority(turn), toolCallId: 'shell', title: 'Run tests', status: 'completed' }, WORKER);
-  const shell = (await commands(opened.cornerId, WORKER)).find(c => c.reason === 'corner_background_tool')!;
-  await claim(shell);
-  await daemon.execute('markAgentTurnSilent', authority(shell), WORKER);
+  expect((await commands(opened.cornerId, WORKER)).filter(c => c.reason === 'corner_background_tool')).toEqual([]);
   const own = await daemon.execute('createCorner', { ...authority(order), targetRoomId: ROOM,
     idempotencyKey: 'own-revision', name: 'own-revision', objective: 'Continue own work', implementer: 'ruby',
     brief: { spec: 'Continue own work', repositoryWork: false } }, RUBY);

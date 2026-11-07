@@ -1,3 +1,4 @@
+import {installOwnedModelProvider} from './owned-model-install.js';
 import { prepareRoomGitDirectory } from './room-checkout-tools.js';
 import { postChangedAgentUsage } from './helper-usage-binding.js';
 import { agentBehavior } from './agent-command.js';
@@ -15,7 +16,6 @@ import { openRouterRoutingInput } from './openrouter-routing.js';
 import { agentOpenRouterKey } from './openrouter-key-usage.js';
 import { agentCommandCatalogPublisher } from './agent-command-catalog.js';
 import { installPiMcpBridge } from './pi-mcp-bridge.js';
-import { installPiTurnBudget } from './pi-turn-budget.js';
 import { beelineAgentMcpServer, writeSessionResourceAuth, recordSessionModelFallback, tracedAgentProcessLifecycle, readOnlyMcpServer } from './room-session.js';
 import { modelContextWindowTokens } from './model-context-window.js';
 import { codegraphFingerprintServers, codegraphIndexDirectory, codegraphMcpServer, prepareCodegraphIndex } from './codegraph.js';
@@ -330,7 +330,7 @@ import { MonolithRoomTurnLoop, execFileAsync, roomPermissionDecision, HumanMessa
     const sessionServers = sessionNewMcpServers<McpServerWire>(harnessLabel, servers, grantedRouteServers);
     // Pi ACP ignores session/new MCP servers. The installer selects native
     // mcp.json or the generated bridge for this executable and isolated home.
-    await installPiTurnBudget(agentEnv.PI_CODING_AGENT_DIR);
+    if(agentEnv.BEELINE_FREE_AGENT_ID || agentEnv.BEELINE_FREE_AGENT_MODEL_TOKEN)await installOwnedModelProvider(agentEnv.PI_CODING_AGENT_DIR);
     await installPiMcpBridge({
       agentCommand: harnessLabel,
       piHome: agentEnv.PI_CODING_AGENT_DIR,

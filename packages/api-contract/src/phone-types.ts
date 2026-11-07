@@ -702,4 +702,10 @@ export type RoomViewPendingAgentCommand = {
   readonly requestId: string;
   readonly agentPubkey: string;
   readonly createdAt: number;
+  readonly runtimePhase?: {
+    readonly phase: 'starting' | 'updating' | 'preparing' | 'reconnecting' | 'unavailable' | 'needs-sign-in';
+    readonly operationId: string;
+    readonly machineVersion?: string;
+    readonly cause?: string;
+  };
 };

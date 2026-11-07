@@ -458,9 +458,6 @@ async function serveMachineHelper(
     established: (agentId) => {
       const slot = [...slots.values()].find((candidate) => candidate.agentId === agentId);
       if (!slot) return;
-        if (options.freeAgentIdle && env.BEELINE_FREE_AGENT_READY_FILE)
-        void writeFile(env.BEELINE_FREE_AGENT_READY_FILE, 'ready\n', { mode: 0o600 })
-          .catch(error => console.warn('[helper] could not record startup readiness:', error));
       slot.established = true;
       if (slot.state === 'starting' || slot.state === 'restarting') setState(slot, 'serving');
     },

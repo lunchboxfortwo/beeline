@@ -119,11 +119,6 @@ export class AcpClient extends EventEmitter {
 
    activePromptSessions = new Set<string>();
 
-   detachedTools = new Map<string, {
-    call: ToolCallEntry;
-    complete: (call: ToolCallEntry) => void;
-  }>();
-
   /** Tool metadata arrives in session/update just before a sparse permission request. */
    toolCallMetadata = new Map<string, AcpPermissionRequest['toolCall']>();
 
@@ -464,7 +459,6 @@ async handleChildExit(code: number | null, signal: NodeJS.Signals | null): Promi
     this.alive = false;
     this.activeRunIds.clear();
     this.activePromptSessions.clear();
-    this.detachedTools.clear();
     this.toolCallMetadata.clear();
   }
 
@@ -510,7 +504,7 @@ async sessionLoad(opts: {
 
   /** Tool progress and process exit arrive through the ACP stream. */
   get hasBackgroundTools(): boolean {
-    return this.detachedTools.size > 0;
+    return this.activePromptSessions.size > 0;
   }
 
 

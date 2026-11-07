@@ -1,3 +1,4 @@
+import {handleModelExecutionFixture as handleFreeAgentModelRequest} from './test-fixtures/free-agent-model-execution.js';
 import { claimAgentConnection } from './connection-presence.js';
 import { DaemonService } from './daemon-service.js';
 import { LiveHub } from './live.js';
@@ -9,7 +10,6 @@ import {
   allowanceMessage,
   chargedTokens,
   freeAgentAllowance,
-  handleFreeAgentModelRequest,
   StreamUsageReader,
   reserveAllowance,
   promptTokenBound,
@@ -34,7 +34,7 @@ const TOKEN = `bfm_${'x'.repeat(43)}`;
 const ENABLED_ENV = { BEELINE_FREE_AGENT_SEAL_KEY: 'seal', FLY_FREE_AGENT_IMAGE: 'image' };
 const CONFIG = { model: 'deepseek/deepseek-v4-flash', dailyTokenCap: 1_000, firstDayTokenCap: 1_000, lifetimeTokenCap: 5_000 };
 
-describe('free agent model proxy', () => {
+describe('server-owned model execution and accounting', () => {
   let db: PgliteDatabase;
   let server: Server;
   let origin: string;
@@ -353,13 +353,13 @@ describe('free agent model proxy', () => {
     expect(upstream).toEqual([]);
   });
 
-  it('atomically limits parallel owner calls per minute and allows the next minute', async () => {
+  it('admits parallel owner calls without the former minute limit', async () => {
     const limits = { ...DEFAULT_FREE_AGENT_LIMITS, callsPerMinute: 2 };
     const now = new Date('2026-10-16T12:00:00Z');
     const config = { ...CONFIG, dailyTokenCap: 100_000 };
     const calls = await Promise.all(Array.from({ length: 8 }, () => reserveAllowance(db, OWNER, now, config, 10, 256, limits)));
-    expect(calls.filter(call => 'reserved' in call)).toHaveLength(2);
-    expect(calls.filter(call => 'limit' in call && call.limit === 'rate')).toHaveLength(6);
+    expect(calls.filter(call => 'reserved' in call)).toHaveLength(8);
+    expect(calls.every(call=>'reserved' in call)).toBe(true);
     expect(await reserveAllowance(db, OWNER, new Date(now.getTime() + 60_000), config, 10, 256, limits)).toHaveProperty('reserved');
   });
 
@@ -390,33 +390,28 @@ describe('free agent model proxy', () => {
     expect(Number((await db.query(`SELECT usd FROM free_agent_budget`)).rows[0]!.usd)).toBeCloseTo(0.000273, 8);
   });
 
-  it('ignores obsolete lease clocks and ends an overlong turn at model-request admission',async()=>{
+  it('ignores obsolete execution clocks while the invocation remains current',async()=>{
     await db.query("UPDATE agent_commands SET lease_expires_at=now()-interval '1 second'");
     const live=await call({messages:[]});expect(live.status).toBe(200);await live.text();
     await db.query("UPDATE agent_commands SET claimed_at=now()-interval '16 minutes'");
-    expect((await call({messages:[]})).status).toBe(403);
-    expect((await db.query("SELECT state FROM agent_commands WHERE id='turn'")).rows).toEqual([{state:'complete'}]);
-    expect(upstream).toHaveLength(1);
+    expect((await call({messages:[]})).status).toBe(200);
+    expect((await db.query("SELECT state FROM agent_commands WHERE id='turn'")).rows).toEqual([{state:'claimed'}]);
+    expect(upstream).toHaveLength(2);
   });
 
-  it('refuses owner calls above the minute limit without calling upstream', async () => {
-    const minute = Math.floor(Date.now() / 60_000);
-    await db.query(`INSERT INTO free_agent_call_rate(owner_id,minute,calls) VALUES($1,$2,30)`, [OWNER, minute]);
-    expect((await call({ messages: [] })).status).toBe(429);
-    expect(upstream).toEqual([]);
-    await db.query(`UPDATE free_agent_call_rate SET minute=minute-1`);
-    expect((await call({ messages: [] })).status).toBe(200);
-    expect(upstream).toHaveLength(1);
+  it('ignores the retired owner-minute counter',async()=>{
+    await db.query(`INSERT INTO free_agent_call_rate(owner_id,minute,calls) VALUES($1,$2,30)`,[OWNER,Math.floor(Date.now()/60_000)]);
+    const response=await call({messages:[]});expect(response.status).toBe(200);await response.text();expect(upstream).toHaveLength(1);
   });
 
   it('uses configurable limits and rounds weighted cached tokens upward', () => {
     expect(freeAgentLimitsFromEnv({})).toEqual(DEFAULT_FREE_AGENT_LIMITS);
     expect(freeAgentLimitsFromEnv({ BEELINE_FREE_AGENT_CACHED_TOKEN_WEIGHT: '0.1', BEELINE_FREE_AGENT_CALLS_PER_MINUTE: '5',
       BEELINE_FREE_AGENT_DAILY_BUDGET_USD: '12', BEELINE_FREE_AGENT_MAX_TURN_SECONDS: '60' })).toMatchObject({
-      cachedTokenWeight: 0.1, callsPerMinute: 5, dailyBudgetUsd: 12, maxTurnMs: 60_000,
+      cachedTokenWeight: 0.1, dailyBudgetUsd: 12,
     });
     expect(freeAgentLimitsFromEnv({ BEELINE_FREE_AGENT_MAX_OUTPUT_TOKENS: '16000', BEELINE_FREE_AGENT_MAX_CONCURRENT_CALLS: '3' }))
-      .toMatchObject({ maxOutputTokens: 16_000, maxConcurrentCalls: 3 });
+      .toMatchObject({ maxOutputTokens: 16_000 });
     expect(chargedTokens({ prompt_tokens: 100, completion_tokens: 5, prompt_tokens_details: { cached_tokens: 91 } }, 0.1)).toBe(24);
   });
 
@@ -718,18 +713,18 @@ describe('free agent model proxy', () => {
     expect(upstream).toHaveLength(1);
   });
 
-  it('refuses the first expired upstream chunk without a clock or another request', async () => {
+  it('delivers a late upstream chunk without an execution window', async () => {
     const now = Date.now(), clock = vi.spyOn(Date, 'now').mockReturnValue(now);
     reply = () => new Response(new ReadableStream<Uint8Array>({
       pull(controller) {
-        clock.mockReturnValue(now + DEFAULT_FREE_AGENT_LIMITS.maxTurnMs + 1);
+        clock.mockReturnValue(now + 2*60*60_000);
         controller.enqueue(new TextEncoder().encode('expired-authorized-content'));
         controller.close();
       },
     }), { headers: { 'content-type': 'text/event-stream' } });
     try {
       const response = await call({ stream: true, messages: [] });
-      expect(await response.text()).not.toContain('expired-authorized-content');
+      expect(await response.text()).toContain('expired-authorized-content');
       expect(upstream).toHaveLength(1);
     } finally { clock.mockRestore(); }
   });
@@ -784,11 +779,11 @@ describe('free agent model proxy', () => {
     reader.push(',"completion_tokens":4}}\n\ndata: [DONE]\n');
     expect(reader.usage).toEqual({ prompt_tokens: 3, completion_tokens: 4 });
   });
-  it('defaults the reply cap to at least 32,768 tokens and 8 concurrent calls', () => {
+  it('retains the reply-token bound without a concurrency setting', () => {
     // "8k max tokens is too small."
     expect(DEFAULT_FREE_AGENT_LIMITS.maxOutputTokens).toBeGreaterThanOrEqual(32_768);
     expect(freeAgentLimitsFromEnv({}).maxOutputTokens).toBe(32_768);
-    expect(freeAgentLimitsFromEnv({}).maxConcurrentCalls).toBe(8);
+    expect(freeAgentLimitsFromEnv({})).not.toHaveProperty('maxConcurrentCalls');
   });
 
   it('FREE-CAP-1: sends a 65,536-token request upstream with max_tokens 32,768', async () => {
@@ -799,7 +794,7 @@ describe('free agent model proxy', () => {
     console.log('Demonstrated FREE-CAP-1: requested 65536 reply tokens; upstream max_tokens 32768.');
   });
 
-  it('FREE-INFLIGHT-1: 20 parallel calls return the first in-flight refusal with at most 8 upstream calls running', async () => {
+  it('FREE-INFLIGHT-1: 20 parallel calls return the first in-flight refusal without a process call queue', async () => {
     config = { ...CONFIG, dailyTokenCap: 1_000_000, lifetimeTokenCap: 0 };
     const refused = new Set<string>();
     let running = 0;
@@ -814,8 +809,7 @@ describe('free agent model proxy', () => {
       try {
         // Hold the initial requests until the test observes all eight slots.
         // A fixed sleep can finish before the last request arrives on busy CI.
-        if (attempts <= 8) await firstWave;
-        else await new Promise((resolve) => setTimeout(resolve, 20));
+        await firstWave;
         const id = String(JSON.parse(String(init?.body)).messages[0].content);
         if (!refused.has(id)) {
           refused.add(id);
@@ -839,7 +833,7 @@ describe('free agent model proxy', () => {
       return { status: response.status, content: (await response.json()).choices?.[0]?.message?.content };
     }));
     try {
-      await vi.waitFor(() => expect(running).toBe(8), { timeout: 5000 });
+      await vi.waitFor(() => expect(running).toBe(20), { timeout: 5000 });
     } finally {
       releaseFirstWave();
       await pendingResponses;
@@ -847,8 +841,7 @@ describe('free agent model proxy', () => {
     const responses = await pendingResponses;
     expect(responses).toEqual(Array(20).fill({ status: 402, content: undefined }));
     expect(attempts).toBe(20);
-    expect(peak).toBeLessThanOrEqual(8);
-    expect(peak).toBe(8);
+    expect(peak).toBe(20);
     expect(await freeAgentAllowance(db, OWNER, new Date())).toEqual({ today: 0, lifetime: 0 });
   }, 15_000);
 

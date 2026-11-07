@@ -33,7 +33,7 @@ async function executeOwned<N extends keyof DaemonOperationMap>(name:N,input:Dae
 beforeAll(async () => {
   db = await migratedDatabase();
   daemon = new DaemonService(db, new LiveHub());
-  daemon.setOwnedModel({ready:()=>true,credentials:new OwnedModelCredentials({currentVersion:'test',key:()=>Buffer.alloc(32,7)},()=> 'synthetic/model',()=>15*60_000)});
+  daemon.setOwnedModel({ready:()=>true,credentials:new OwnedModelCredentials({currentVersion:'test',key:()=>Buffer.alloc(32,7)},()=> 'synthetic/model')});
   phone = new PhoneService(db, 'http://test');
   await db.query(`INSERT INTO identities(id,kind,name,handle) VALUES($1,'human','Captain','captain'),($2,'agent','Bee','bee')`, [HUMAN, AGENT]);
   await db.query(`INSERT INTO agents(agent_id,owner_id) VALUES($1,$2)`, [AGENT,HUMAN]);

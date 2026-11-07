@@ -42,39 +42,29 @@ soul. Existing free agents keep their names.
   queued work provisions the Machine through `FreeAgentService.kick` from its committed work event.
   A creator owns at most
   `BEELINE_FREE_AGENT_MAX_PER_OWNER` (default 3) free agents.
-- **First boot.** The image builds the thin Beeline helper and its MCP entrypoint
-  from its own release SHA, alongside pinned Pi. `entrypoint.sh` runs
-  `BEELINE_LAB=1 install.sh` before launching any helper,
-  reconciling the published bundle even on a persistent rootfs. A helper refused
-  by the server's minimum-version gate exits; the entrypoint refreshes and retries.
-  A failed refresh retains the installed helper. The Machine trades its
-  one-time `BEELINE_FREE_AGENT_BOOTSTRAP` at `POST /v1/free-agents/bootstrap`. It gets
-  its keys, a fresh daemon exchange token and a revocable model token. The root
-  filesystem persists (`rootfs.persist=always`), so later boots skip this step.
-  Runtime owner records include the Linux boot id as well as process start ticks;
-  legacy tick-only records require command-line ownership. A free-agent helper
-  that has not established its runtime within five minutes reports once and
-  exits with status 78; the entrypoint stops that boot instead of retrying.
-  The boot budget spans refreshes and failed launches. A shell watchdog also
-  stops an old fallback helper after five minutes plus ten seconds; installer
-  attempts are bounded to two minutes. Establishing the runtime cancels both
-  startup watchdogs.
+- **First boot.** The pinned image contains its compatible helper and Pi. The
+  entrypoint launches that baked helper once; it performs no installer download,
+  refresh loop or startup watchdog. Bootstrap exchanges the Machine's saved
+  bootstrap identity for keys, daemon access and a model token. Files and account
+  binding persist on the root filesystem. A lost create reply is reconciled by
+  stable agent identity and adopts the existing Machine without replacing files
+  or rotating its bootstrap identity.
 - **Sleep.** Authenticated helper connections, committed command updates and
   connector reports admit a sleep check through `FreeAgentService.subscribeToWakes`.
   The server refuses while any command is pending or claimed, or a connector
   install/sign-in is active. Completion, failure or disconnect releases that
-  protection on its own committed event. Otherwise the server records
+  protection on its own committed event. Suspension completion reads pending commands and connector work together so work committed during the snapshot resumes immediately. Otherwise the server records
   `sleeping` and asks Fly to suspend the Machine. Suspend failures are reported
   without falling back to a cold stop. A helper behind the announced release
   asks for `refresh`: the server boots it on the configured image immediately,
-  so installation happens before the next message. The refreshed helper connects
+  so the pinned image/helper is ready before the next message. The refreshed helper connects
   and its connection event admits suspension once no work remains. Image promotion runs
   `--refresh-free-agents` to warm existing stopped or outdated sleeping Machines;
   active helpers reconcile the image when their work finishes. There is no idle
   countdown, polling, periodic sweep or timed retry. The legacy helper sleep
   endpoint remains available. Confirmed Fly suspension checks for work that
   arrived during the snapshot and admits one resume, including a command already
-  claimed by the still-serving helper. Removal, stop and budget fences remain.
+  claimed by the still-serving helper. Removal and command cancellation remain authoritative.
   The helper never updates in place.
 - **Wake.** The Fly adapter submits one start request per admitted action. HTTP 412 and lost replies return to the owner without a timer or resubmission (`fly-machines.test.ts`). Before starting an existing Machine, the server compares its image
   with the configured published digest and updates it while keeping its complete
@@ -82,8 +72,7 @@ soul. Existing free agents keep their names.
   directory anchor after an image replacement, preserving its account binding.
   Every committed `agent_commands` INSERT for a free agent calls
   `FreeAgentService.wake`. A committed connector-assignment notification also
-  wakes a free agent with active connector installation or sign-in work, through
-  the existing allowance checks. There is no leader sweep, retry deadline,
+  wakes a free agent with active connector installation or sign-in work, independently of model-spend admission. There is no leader sweep, retry deadline,
   idle reaper or retention deletion. A failed provider call waits for another
   actual request. Wakes are never
   suppressed for an offline Machine (`agentMachineOfflineSql` exempts free agents). A
@@ -150,7 +139,7 @@ and a 65,536-token output ceiling.
 ## Model access and allowances
 
 The Machine never holds a provider key. Pi's `beeline` provider points at
-`POST /v1/free-agents/model/chat/completions` with the agent's model token. The
+`POST /v1/free-agents/model/chat/completions` with the current claimed invocation’s private credential. The release-owned Pi extension supplies invocation and request-ID headers to the existing native provider transport and commits its signed response receipt; legacy agent-wide model tokens cannot call this endpoint. The
 proxy pins each new agent's stored model. Beebee uses `BEELINE_FREE_AGENT_MODEL` (default `deepseek/deepseek-v4.1-flash-1017`); Luna uses `BEELINE_FREE_AGENT_LUNA_MODEL` (default `openai/gpt-6-luna`). Existing rows without a stored model keep the configured legacy model. Both teammates reserve and settle against the same owner's allowance and shared dollar budget. It
 forwards to `BEELINE_FREE_AGENT_MODEL_UPSTREAM` (default OpenRouter) with
 `BEELINE_FREE_AGENT_MODEL_KEY`, which may be a Squire egress grant. Before each call it
@@ -159,8 +148,7 @@ owner's daily allowance with atomic counter updates. Concurrent reservations
 fit the cap, and each reply is bounded to the estimated room left. Actual
 usage can exceed the prompt estimate; settlement corrects the balance. On completion it settles to the reported usage.
 A refused call is
-refunded. An interrupted reply without usage releases its token reservation;
-reported usage is still charged. The default allowance is 3M tokens a day, and an owner's first 24 hours (from their first settled model call) get a larger 10M-token allowance so day one does not run out. There is no lifetime cap unless
+refunded. An uncertain helper request retains its reservation until an authoritative result can settle it; reported usage is charged. The default allowance is 3M tokens a day, and an owner's first 24 hours (from their first settled model call) get a larger 10M-token allowance so day one does not run out. There is no lifetime cap unless
 `BEELINE_FREE_AGENT_LIFETIME_TOKENS` is
 set. The first-24h allowance is `BEELINE_FREE_AGENT_FIRST_DAY_TOKENS` (default 10M,
 never below the daily cap). A charge
@@ -175,42 +163,34 @@ The proxy caps every reply at `BEELINE_FREE_AGENT_MAX_OUTPUT_TOKENS` (default
 reserves 8,192. Pi still asks for 65,536, so the cap changes with a server
 restart and needs no image rebuild.
 
-OpenRouter holds each running call's prompt plus `max_tokens` cost against an
-account in-flight budget. A call that does not fit gets HTTP 402 with
-`error.metadata.reason` `in_flight_budget_exhausted` and a `Retry-After`. The
-proxy returns that first refusal and its `Retry-After` metadata immediately,
-refunds the reservation once, and releases its call slot. It never waits and
-resubmits. A separately admitted model call can obtain a fresh result. Other
-402 reasons and other errors retain their existing refusal/refund behavior.
-
-Each server process runs at most `BEELINE_FREE_AGENT_MAX_CONCURRENT_CALLS`
-(default 8) upstream calls at once, across all free agents. Further calls wait
-in arrival order. A queued call gives up when its caller disconnects. At provider admission it
-checks the turn budget again; an overlong turn is refused and ends through
-`agent-turn-end.ts`, without a timeout sweep or a machine-stop request.
-The limit is per process: production runs two machines, so the real ceiling
-is twice the setting.
+Each authorized model call goes directly upstream. A provider refusal is recorded
+for that exact invocation and returned plainly. The server leaf reads its recorded
+receipt after provider transport loss; a lost helper response remains UNKNOWN,
+without a helper-side receipt request or another paid request. No process-wide call queue or per-owner
+minute throttle delays a call. Allowance and dollar reservations still happen
+atomically before provider entry.
 
 Helper model calls require a claimed `input`/`resume` command and its current
-connection owner. Every request checks elapsed turn time and the shared cost
+connection owner. Every request checks current invocation authority and the shared cost
 budget; a refusal ends that turn through the single terminal owner. The Machine
 then sleeps at its normal idle boundary. Pending and completed commands do not
 permit calls, including copied model tokens used from outside Beeline. The
-helper retains the command claim through model retries and tool follow-ups;
-there is no post-completion grace that would authorize idle calls. Server-owned starter banter is a separate internal entry: a recent generating onboarding run must bind the agent and owner to the current Room team. It shares the same allowance, dollar budget, queue and settlement code; the HTTP endpoint retains its live-turn requirement.
+helper retains the command claim through model responses and tool follow-ups;
+there is no post-completion grace that would authorize idle calls. Server-owned starter banter is a separate internal entry: a recent generating onboarding run must bind the agent and owner to the current Room team. It shares the same allowance, dollar budget, settlement code; the HTTP endpoint retains its live-turn requirement.
 
-A per-owner UTC minute counter defaults to 30 admitted calls, including failed
-upstream attempts. Reservations update the owner, daily tokens and shared dollars
-in that order within one short database transaction, refunding any excess owner
-allocation when the shared budget grants less output. No network runs in that
-transaction. See `free-agent-accounting.ts`. The shared UTC daily dollar budget defaults to **$25**. Each call reserves
+Reservations update owner lifetime accounting, daily tokens and shared dollars
+in that order within one short database transaction, refunding excess owner
+allocation when the shared budget grants less output. The legacy counter table
+retains lifetime totals only; its minute and call-count fields no longer admit or
+throttle requests. No network runs in that transaction. See `free-agent-accounting.ts`.
+The shared UTC daily dollar budget defaults to **$25**. Each call reserves
 its full uncached prompt and bounded output at configured fallback prices before
 contacting the model. Successful calls settle to OpenRouter `usage.cost`, or to
-configured input/output prices when cost is absent. Failed upstream calls refund
-the reservation; interrupted replies without usage keep it. Each settlement
+configured input/output prices when cost is absent. Definite provider refusals refund
+the reservation; unknown or interrupted outcomes without usage keep it. Each settlement
 records `model_usage` (day, charged tokens, USD). A `budget_reached` event records
-refused model calls and wakes. At the budget, model calls refuse with the allowance reason and end the
-current turn once; provisioning/waking cannot start Machines. A fresh request
+refused model calls. At the budget, model calls refuse with the allowance reason and end the
+current turn once; provisioning and waking remain independent of model spend. A fresh request
 gets a fresh cost check without parking or rearming old commands. Operators must keep fallback prices at or above their pinned
 model's worst-case prices; changing models requires checking these prices.
 
@@ -242,23 +222,31 @@ claim to know a missing provider usage record. A crashed request can leave its
 reservation/credit held conservatively, as with the existing token reservation.
 The shared dollar budget retains its original full wire-byte reservation;
 binary/metadata accounting never creates a dollar-budget bypass. The 8 MiB
-request ceiling, owner rate limit and turn deadline also remain in force.
+request ceiling and spend accounting remain in force.
 See [SUB0ZERO admission and instruction replay proof](free-agent-token-admission-proof.md).
 
-Free-agent ACP turns have a hard wall clock cap of **15 minutes**, measured from
-local command intake across prompt retries. Activity does not extend it. The
-helper cancels the prompt, publishes a short note inviting another message, and
-discards the session. The server evaluates authorization/turn expiry on requests and streamed chunks; no server clock cancels a turn or reaps its Machine.
+Free-agent turns end on their result, explicit Stop, removal, or actual process loss.
+There is no elapsed execution window, generated shell-time budget, model-call
+queue or per-owner calls-per-minute limit. Model calls retain current command,
+generation, connection and Room membership checks, the daily token allowance,
+and the shared daily dollar budget. Lost model responses retain their original
+invocation receipt; they do not authorize another paid request.
 
-Pi shell commands leave a delivery window before that cap. The generated
-`pi-turn-budget.ts` extension reads the current command intake time for each
-`bash` call and clamps its timeout to the remaining budget minus one minute
-(one tenth of the budget for shorter configured test turns). Shorter requested
-timeouts remain intact. During the delivery window, new shell commands are
-refused; a budget-stopped command tells the agent to deliver finished files or
-explain what remains. The hard cap and its existing plain continuation notice
-are unchanged. Regression: `pi-turn-budget.test.ts`; isolated real-Pi proof:
-build the body, then run `node scripts/prove-turn-command-budget.mjs`.
+Runtime preparation is outside execution. The pending-command Room DTO carries
+server-owned starting, release-download, preparation, reconnect and saved-message
+failure phases in the existing thinking line, without an elapsed counter. Claims
+start execution from the server claim timestamp. A pinned image runs its baked
+helper without a boot-time installer or refresh loop. Image replacement launches
+in one update; a lost result gets one fresh connection and authoritative Machine
+read. Listener bootstrap/reconnect and release changes read pending desired work,
+including stale waking rows. Automatic idle suspension and shared CPU remain.
+
+Squire keeps one host broker. Its broker-owned operation receipt and helper relay
+return the original result after a lost reply without replaying browser starts
+or mutations. Account sign-in remains an explicit connector requirement. An
+unknown result remains unknown. Background tool completion stays in its original
+invocation; bookkeeping never creates a model turn. Saved checkpoints remain
+readable after a real interruption.
 
 At 80% of whichever allowance applies (2.4M of the default 3M daily cap, or 8M of the 10M first-day cap), settlement posts one plain allowance notice per owner per UTC day into the room where the person is working, with the midnight UTC reset and a Members ->
 Add agent link. The owner must be a room member; otherwise nothing is posted. Delivery does not call a model. The warning records
@@ -283,17 +271,13 @@ Free agents run when all of these are set:
 `BEELINE_FREE_AGENT_DELETE_AFTER_DAYS`, `BEELINE_FREE_AGENT_DAILY_TOKENS`,
 `BEELINE_FREE_AGENT_LIFETIME_TOKENS`,
 `BEELINE_FREE_AGENT_CACHED_TOKEN_WEIGHT` (0.25),
-`BEELINE_FREE_AGENT_CALLS_PER_MINUTE` (30),
 `BEELINE_FREE_AGENT_DAILY_BUDGET_USD` (25),
 `BEELINE_FREE_AGENT_INPUT_USD_PER_MILLION` (1),
 `BEELINE_FREE_AGENT_OUTPUT_USD_PER_MILLION` (5),
-`BEELINE_FREE_AGENT_MAX_TURN_SECONDS` (900),
 `BEELINE_FREE_AGENT_MAX_OUTPUT_TOKENS` (32768),
-`BEELINE_FREE_AGENT_MAX_CONCURRENT_CALLS` (8, per server process),
-`BEELINE_FREE_AGENT_INSTALL_BASE_URL` and
 `FLY_FREE_AGENT_API_ORIGIN` (proofs only). Fly offers no egress firewall for
 Machines, so outbound traffic is not restricted. The abuse limits are Machine
-size, sleep, the reaper, live turns, owner token/rate limits and the shared dollar budget.
+size, automatic sleep, current invocation authority, owner token allowances and the shared dollar budget.
 
 ## Image and proofs
 
@@ -305,8 +289,7 @@ existing suspend detector reruns `hosted-services.sh` before its immediate
 socket reconnect, restoring a missing user manager or broker through systemd.
 This script fixes HOME and XDG paths to the machine's root account, including
 when called from a process with an agent home. Failed recovery exits the helper
-so the existing entrypoint retries boot recovery. Hosted installation waits for both
-broker sockets before opening sign-in. The phone receives Squire's streamed
+as a concrete process failure. The acquisition owner reconciles on the next real connection event. The hosted manager reports READY or actual exit, and the existing broker unit owns browser readiness before sign-in. The phone receives Squire's streamed
 virtual browser page. Owners' personal-computer setup keeps its existing path.
 The isolated entry is `infra/free-agent/hosted-install-proof.mjs`; evidence and
 remaining full-account checks are in [the onboarding connection proof](onboarding-connect-proof.md).

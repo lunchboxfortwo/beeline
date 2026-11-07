@@ -1,6 +1,6 @@
 import { afterEach, beforeEach, expect, it, vi } from 'vitest';
 import { endAgentTurn } from './agent-turn-end.js';
-import { refuseExpiredFreeAgentTurn } from './free-agent-turn-budget.js';
+import { endFreeAgentModelTurn } from './free-agent-turn-budget.js';
 import { OwnedModelAttempts } from './owned-model-attempt.js';
 import { MODEL_AGENT, MODEL_CLAIM, MODEL_OWNER, MODEL_ROOM, MODEL_SOURCE, MODEL_WORKSPACE, ownedModelFixture } from './test-fixtures/owned-model.js';
 
@@ -61,8 +61,9 @@ it('the invocation cost limit ends only unanswered commands after its first resu
     SELECT room_id,turn_request_id,agent_id,'working',generation_id FROM agent_commands`);
   await end(MODEL_CLAIM.commandId);
   await fixture.db.query("UPDATE agent_turns SET started_at=clock_timestamp()-interval '16 minutes' WHERE request_id='synthetic-request'");
-  expect(await refuseExpiredFreeAgentTurn(fixture.db,MODEL_CLAIM.commandId,MODEL_CLAIM.generationId,15*60_000)).toBe(true);
-  expect(await refuseExpiredFreeAgentTurn(fixture.db,MODEL_CLAIM.commandId,MODEL_CLAIM.generationId,15*60_000)).toBe(false);
+  await fixture.credentials.authenticate(fixture.db,fixture.issued.token);
+  await endFreeAgentModelTurn(fixture.db,MODEL_CLAIM.commandId,MODEL_CLAIM.generationId,'Daily token allowance used');
+  await endFreeAgentModelTurn(fixture.db,MODEL_CLAIM.commandId,MODEL_CLAIM.generationId,'Daily token allowance used');
   expect((await fixture.db.query('SELECT request_id,status FROM agent_turns ORDER BY request_id')).rows)
     .toEqual([{request_id:'sibling-request',status:'failed'},{request_id:'synthetic-request',status:'complete'}]);
 });

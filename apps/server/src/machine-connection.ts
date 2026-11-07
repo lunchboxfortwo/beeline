@@ -240,6 +240,7 @@ export function serveMachineSocket(
           ...(item.activationContextV1===true?{activationContextV1:true}:{}),
           ...(item.turnOwnershipV1===true?{turnOwnershipV1:true}:{}),
           ...(item.ownedModelV1===true?{ownedModelV1:true}:{}),
+          ...(item.ownedModelUnboundedV1===true?{ownedModelUnboundedV1:true}:{}),
           ...(item.daemonOperationsV1===true?{daemonOperationsV1:true}:{}),
         },
       );

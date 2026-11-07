@@ -68,7 +68,7 @@ export function TurnProgressLine(props: React.ComponentProps<typeof TurnProgress
     stopRef.current = props.onStop;
   });
   const stop = React.useCallback(() => stopRef.current?.(), []);
-  return props.live === false ? (
+  return props.live === false && !props.onStop ? (
     <TurnSettledLine line={props.label} inset={props.inset} leading testID={props.testID} />
   ) : (
     <TurnProgressLineBody {...props} onStop={props.onStop ? stop : undefined} />
@@ -77,6 +77,7 @@ export function TurnProgressLine(props: React.ComponentProps<typeof TurnProgress
 
 const TurnProgressLineBody = React.memo(function TurnProgressLineBody({
   label,
+  live = true,
   startedAt,
   received = false,
   onStop,
@@ -85,6 +86,7 @@ const TurnProgressLineBody = React.memo(function TurnProgressLineBody({
   inset = true,
 }: {
   label: string;
+  live?: boolean;
   /** Desktop callers already supply the transcript inset around this row. */
   inset?: boolean;
   /** Server receipt time, unix seconds, the elapsed counter ticks from. */
@@ -123,16 +125,16 @@ const TurnProgressLineBody = React.memo(function TurnProgressLineBody({
     <View
       accessibilityLabel={stateLabel ? `${label} (${stateLabel})` : label}
       accessibilityLiveRegion="polite"
-      accessibilityRole="progressbar"
+      accessibilityRole={live ? "progressbar" : "text"}
       style={inset ? styles.bar : [styles.bar, styles.insetBar]}
       testID={testID}
     >
-      <HullLivePulse style={styles.row}>
+      <HullLivePulse active={live} style={styles.row}>
         <View
           style={[styles.glyphCell, styles.leadingGlyph]}
           testID={testID ? `${testID}-glyph` : undefined}
         >
-          <BeelineMarkSpinner live />
+          <BeelineMarkSpinner live={live} />
         </View>
         <Text numberOfLines={1} ellipsizeMode="tail" style={styles.label}>
           {label}

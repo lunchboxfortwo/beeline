@@ -15,9 +15,11 @@ RUN curl -fsSL https://dl.google.com/linux/direct/google-chrome-stable_current_a
   && rm -f /tmp/chrome.deb && rm -rf /var/lib/apt/lists/* \
   && curl -fsSL "https://github.com/cloudflare/cloudflared/releases/download/${CLOUDFLARED_VERSION}/cloudflared-linux-amd64" -o /usr/local/bin/cloudflared \
   && chmod 755 /usr/local/bin/cloudflared
-COPY infra/free-agent/hosted-services.sh infra/free-agent/reconcile-broker-marker.mjs /opt/beeline/
+COPY infra/free-agent/hosted-services.sh infra/free-agent/reconcile-broker-marker.mjs infra/free-agent/start-hosted-manager.py /opt/beeline/
+COPY infra/free-agent/squire-operation-receipts.mjs infra/free-agent/patch-squire-receipts.mjs /opt/beeline/
 ARG SQUIRE_VERSION=1.1.39
 RUN npm install --prefix /opt/beeline/squire --omit=dev --no-audit --no-fund "@trusty-squire/mcp@${SQUIRE_VERSION}" \
+  && node /opt/beeline/patch-squire-receipts.mjs /opt/beeline/squire/node_modules/@trusty-squire/mcp/dist/server.js \
   && npm cache clean --force
 COPY infra/free-agent/hosted-squire-broker.service /etc/systemd/user/trusty-squire-broker.service
 RUN systemctl --global enable trusty-squire-broker.service
@@ -39,7 +41,7 @@ RUN test "$PI_VERSION" != latest && test "$PI_ACP_VERSION" != latest \
   && npm cache clean --force
 COPY infra/free-agent/prepare-image.mjs /opt/beeline/
 RUN node /opt/beeline/prepare-image.mjs
-COPY web/install.sh infra/free-agent/entrypoint.sh /opt/beeline/
+COPY infra/free-agent/entrypoint.sh /opt/beeline/
 COPY --from=helper-build /root/.local/ /root/.local/
 ARG BEELINE_RELEASE_VERSION
 ARG BEELINE_RELEASE_SHA

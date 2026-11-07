@@ -462,7 +462,7 @@ export async function resolveBundleEntrypoint(bundleDir: string): Promise<string
 
 /** Files whose presence makes an extracted bundle installable. */
 export function requiredBundlePaths(): string[] {
-  return [BUNDLE_ENTRYPOINT, PI_MCP_ADAPTER_ENTRYPOINT, CODEGRAPH_ENTRYPOINT];
+  return [BUNDLE_ENTRYPOINT, PI_MCP_ADAPTER_ENTRYPOINT, 'lib/beeline/owned-model-provider.mjs', CODEGRAPH_ENTRYPOINT];
 }
 
 

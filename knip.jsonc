@@ -398,6 +398,8 @@
       // JavaScript module graph Knip can follow.
       "entry": [
         "src/{index,cli,recovery-cli,squire-facade}.ts",
+        // Loaded by the pinned Pi extension and bundled as a release asset.
+        "src/owned-model-provider.ts",
         "scripts/measure-turn-phases.ts",
         "vitest.live.config.ts",
       ],

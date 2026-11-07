@@ -35,7 +35,6 @@ import { MonolithRoomTurnLoop, ActiveTurn, inboxItemPromptBody, transcriptMessag
     ctx.turnUsage = new TurnUsageAccumulator();
     ctx.harnessTokens = undefined;
     const trace = ctx.beginTurnTrace(item.id);
-    let timeLimited = false;
     const freeAgent = Boolean(ctx.options.config.agentEnv?.BEELINE_FREE_AGENT_ID ||
       ctx.options.config.agentEnv?.BEELINE_FREE_AGENT_MODEL_TOKEN);
     const traceGenerationId = ctx.commandContext.generationId;
@@ -359,19 +358,6 @@ import { MonolithRoomTurnLoop, ActiveTurn, inboxItemPromptBody, transcriptMessag
                 const tool = result.toolCalls.at(-1)?.title;
                 throw new Error(`unreported_order: ${result.stopReason}${tool ? ` (${tool})` : ''}; requested work is unconfirmed`);
               }
-              if (result.stopReason === 'free-agent-time-limit') {
-                stream.close();
-                timeLimited = true;
-                let reply: string;
-                try { reply = await ctx.freeContinuation.stopped(result); }
-                finally { await ctx.discardSession(); }
-                if (['order', 'corner_objective'].includes(ctx.commandContext.current?.reason ?? '')) {
-                  await stream.retract();
-                  throw new Error('unreported_order: free-agent-time-limit; requested work is unfinished');
-                }
-                await stream.settle(reply, { triggerMessageId: item.id });
-                return;
-              }
               if (['no-reply', 'repeated-tool-call'].includes(result.stopReason)) {
                 stream.close();
                 await stream.retract();
@@ -401,7 +387,7 @@ import { MonolithRoomTurnLoop, ActiveTurn, inboxItemPromptBody, transcriptMessag
                 !cornerOpened &&
                 !active.cancelled &&
                 explained &&
-                (shouldRetryEmptyTurn(explained) || shouldFailOverProviderError(explained))
+                !freeAgent && (shouldRetryEmptyTurn(explained) || shouldFailOverProviderError(explained))
               ) {
                 const silent = ctx.servingProviders();
                 const next = await ctx.repinNextProvider(trace, explained.reason);
@@ -555,19 +541,18 @@ import { MonolithRoomTurnLoop, ActiveTurn, inboxItemPromptBody, transcriptMessag
         agentId: ctx.agent.publicKey,
         roomId: ctx.options.roomId,
         requestId: item.id,
-        status: timeLimited ? 'failed' : 'complete',
-        ...(!timeLimited ? {diagnosticsOnly:true} : {}),
-        ...(timeLimited ? { reason: 'free-agent-time-limit' } : {}),
+        status: 'complete',
+        diagnosticsOnly:true,
         generationId: ctx.commandContext.generationId,
         toolCalls: trace.toolCallsTotal,
         trace: trace.replay(),
         ...ctx.turnMetrics,
       });
-      if (freeAgent && !timeLimited) await ctx.freeContinuation.clear();
+      if (freeAgent) await ctx.freeContinuation.clear();
       ctx.warmTranscript.complete(ctx.sessionId, [item.id, ...active.steers.map((steer) => steer.id)]);
       // After the receipt: an operator artifact must never delay the answer,
       // and it never becomes one — the trace has no way to post a Room row.
-      void finishTrace(timeLimited ? 'failed' : 'complete', timeLimited ? 'free-agent-time-limit' : undefined).catch(() => undefined);
+      void finishTrace('complete').catch(() => undefined);
     } catch (error) {
       // A stopped turn already has its ending — the server wrote `cancelled`
       // and named who stopped it the moment it accepted the request. There is
@@ -616,7 +601,7 @@ import { MonolithRoomTurnLoop, ActiveTurn, inboxItemPromptBody, transcriptMessag
           retractError,
         );
       });
-      const reason = timeLimited ? { text: 'free-agent-time-limit' } : distillTurnFailureReason(error);
+      const reason = distillTurnFailureReason(error);
       startTraceStats();
       await api.execute('postAgentTurnReceipt', {
         agentId: ctx.agent.publicKey,

@@ -185,7 +185,7 @@ beforeAll(async () => {
   phone = new PhoneService(db, 'http://test');
   live = new LiveHub();
   daemon = new DaemonService(db, live);
-  daemon.setOwnedModel({ready:()=>true,credentials:new OwnedModelCredentials({currentVersion:'test',key:()=>Buffer.alloc(32,7)},()=> 'synthetic/model',()=>15*60_000)});
+  daemon.setOwnedModel({ready:()=>true,credentials:new OwnedModelCredentials({currentVersion:'test',key:()=>Buffer.alloc(32,7)},()=> 'synthetic/model')});
   Object.assign(daemon, { github: { assertCornerReviewerNotAuthor: async () => {} } });
 }, 30_000);
 

@@ -1,3 +1,4 @@
+import { SquireOperationError, squireOutcome } from './squire-outcome.js';
 /**
  * The helper owns Squire's MCP process for an agent's Room/DM/corner. ACP children
  * (including Pi's generated bridge) speak to this loopback relay instead of
@@ -23,7 +24,7 @@ import {
 } from './squire-session-registry.js';
 
 type TurnKey = { roomId: string; requestId: string; taskId: string; generationId: string };
-type RelayRequest = TurnKey & { method: string; params?: Record<string, unknown> };
+type RelayRequest = TurnKey & { operationId?:string; method: string; params?: Record<string, unknown> };
 export type SquireTaskCall = TurnKey & { tool: string; args: Record<string, unknown> };
 
 function sessionIds(value: unknown, depth = 0): string[] {
@@ -92,6 +93,7 @@ type TaskConnection = {
   pendingApprovals: Map<string, PendingApproval>;
   decidedApprovals: Set<string>;
   dead: boolean;
+  uncertainStart?:SquireOperationError;
 };
 
 /** Squire's own decision on a pending approval, matched back to the turn that asked. */
@@ -115,6 +117,7 @@ export class SquireTaskRelay {
   private approvalRequestId?: string;
   private closed = false;
   private callTail: Promise<void> = Promise.resolve();
+  private readonly operations = new Map<string,{input:RelayRequest;result:Promise<unknown>}>();
   private readonly shareRenewals: SquireShareRenewals;
   private readonly toolSubscribers = new Set<ServerResponse>();
   private toolsChanged = false;
@@ -203,7 +206,7 @@ export class SquireTaskRelay {
           response.writeHead(200, { 'content-type': 'application/json' }).end(JSON.stringify({ result }));
         } catch (error) {
           response.writeHead(400, { 'content-type': 'application/json' }).end(
-            JSON.stringify({ error: error instanceof Error ? error.message : 'Squire relay failed' }),
+            JSON.stringify({ error: error instanceof Error ? error.message : 'Squire relay failed',outcome:squireOutcome(error) }),
           );
         }
       });
@@ -261,6 +264,7 @@ export class SquireTaskRelay {
     this.shareRenewals.close();
     for (const response of this.toolSubscribers) response.end();
     this.toolSubscribers.clear();
+    this.operations.clear();
     this.active = undefined;
     this.approvalRequestId = undefined;
     this.retire('helper-exit');
@@ -314,10 +318,6 @@ export class SquireTaskRelay {
         task.dead = true;
         this.log('relay-exit', task, { pid, exitCode: code,
           sessionId: redactedSessionId(task.sessions.values().next().value) });
-        forgetSquireSessions(task.sessions);
-        this.ended(task.sessions);
-        task.sessions.clear();
-        task.pendingApprovals.clear();
         this.toolsChanged = true;
         this.flushToolChanges();
       },
@@ -381,7 +381,19 @@ export class SquireTaskRelay {
   }
 
   private handle(input: RelayRequest): Promise<unknown> {
+    if (input.method === 'beeline/read_operation') {
+      const receipt = input.operationId && this.operations.get(input.operationId);
+      if (!receipt || ['roomId','requestId','taskId','generationId'].some(key =>
+          input[key as keyof TurnKey] !== receipt.input[key as keyof TurnKey]))
+        return Promise.reject(new SquireOperationError('Browser result is unknown. Do not repeat it.',
+          {cause:'result-unknown',operationId:input.operationId,accepted:null,completed:false}));
+      return receipt.result;
+    }
+    if (input.operationId && this.operations.has(input.operationId))
+      return Promise.reject(new SquireOperationError('Read the original browser operation; do not repeat it.',
+        {cause:'request-refused',operationId:input.operationId,accepted:true,completed:false}));
     const next = this.callTail.then(() => this.handleSerial(input));
+    if (input.operationId) this.operations.set(input.operationId,{input,result:next});
     this.callTail = next.then(() => undefined, () => undefined);
     return next;
   }
@@ -411,6 +423,7 @@ export class SquireTaskRelay {
     const toolName = input.method === 'tools/call' ? input.params?.name : undefined;
     const safeToolName = typeof toolName === 'string' && /^[a-z][a-z0-9_]{0,80}$/i.test(toolName)
       ? toolName : undefined;
+    if(safeToolName==='operate_start' && task.uncertainStart)throw task.uncertainStart;
     const requestedIds = sessionIds(input.params?.arguments);
     this.log('call-start', task, { method: input.method, tool: safeToolName ?? null,
       sessionId: redactedSessionId(requestedIds[0] ?? task.sessions.values().next().value) });
@@ -431,7 +444,7 @@ export class SquireTaskRelay {
     if (input.method === 'tools/call' && usingOwnConnection && task.dead &&
         toolName !== 'operate_start') {
       this.log('call-refused', task, { reason: 'connection-died' });
-      throw new Error('Squire MCP connection died and its browser session is gone; call operate_start');
+      throw new Error('Squire connection was lost; read the original result before another browser action');
     }
     // A scheduled turn must also pass schedule provenance for every session,
     // including ones this relay owns, so a second schedule in the same
@@ -453,15 +466,9 @@ export class SquireTaskRelay {
       this.log('call-refused', task, { reason: 'resource-denied' });
       throw new Error('Squire call is not authorized for this task');
     }
-    if (usingOwnConnection && task.dead) {
-      if (toolName !== 'operate_start' || requestedIds.length) {
-        this.log('call-refused', task, { reason: 'restart-required' });
-        throw new Error('Squire MCP connection died; call operate_start for a fresh browser session');
-      }
-      this.retire('restart-required');
-      task = this.connection(active!.taskId);
-      callClient = task.client;
-    }
+    if (usingOwnConnection && task.dead)
+      throw new SquireOperationError('Browser connection was lost; the previous result must be read before another browser action.',
+        {cause:'process-exit',accepted:null,completed:false});
     try {
       let params = input.params ?? {};
       const args = params.arguments as Record<string, unknown> | undefined;
@@ -488,6 +495,7 @@ export class SquireTaskRelay {
           throw new Error('Squire task ended while resolving the credential');
       }
       const result = await callClient.requestMcp(input.method, params);
+      task.dead=false;
       if (this.closed || this.task !== task || (active && (this.active?.taskId !== active.taskId ||
           this.active?.requestId !== active.requestId)))
         throw new Error('Squire task ended while the call was running');
@@ -574,17 +582,12 @@ export class SquireTaskRelay {
         await this.onVaultActivity();
       return result;
     } catch (error) {
-      if (error instanceof Error && /timed out/.test(error.message)) {
-        task.dead = true;
-        this.ended(task.sessions);
-        task.sessions.clear();
-        task.pendingApprovals.clear();
-        task.client.close();
-      }
-      this.log('call-error', task, { method: input.method, tool: safeToolName ?? null,
-        sessionId: redactedSessionId(requestedIds[0] ?? task.sessions.values().next().value) });
-      if (task.dead && !(error instanceof Error && /timed out/.test(error.message)))
-        throw new Error('Squire MCP connection died and its browser session is gone; call operate_start');
+      const outcome = squireOutcome(error);
+      if(safeToolName==='operate_start' && !outcome.completed && outcome.accepted!==false)
+        task.uncertainStart=error instanceof SquireOperationError ? error : new SquireOperationError('The previous browser start is unknown; do not start another browser.',outcome);
+      this.log('call-error',task,{ method:input.method,tool:safeToolName ?? null,
+        cause:outcome.cause,accepted:outcome.accepted,completed:outcome.completed,
+        operationId:outcome.operationId ?? input.operationId });
       throw error;
     }
   }
@@ -681,14 +684,17 @@ export function runSquireTaskProxy(env: NodeJS.ProcessEnv = process.env): void {
         // claimed. Inventory is safe; calls still require the current turn file.
         const inventory = input.method === 'initialize' || input.method === 'tools/list';
         const context = inventory ? undefined : JSON.parse(await readFile(contextFile, 'utf8')) as TurnKey;
-        const response = await fetch(new URL('/mcp', url), {
-          method: 'POST',
-          headers: { authorization: `Bearer ${token}`, 'content-type': 'application/json' },
-          body: JSON.stringify({ ...context, method: input.method, params: input.params ?? {} }),
-          signal: undefined,
+        const operationId = randomUUID();
+        const send = (read:boolean) => fetch(new URL('/mcp',url),{
+          method:'POST',headers:{authorization:`Bearer ${token}`,'content-type':'application/json'},
+          body:JSON.stringify({...context,operationId,method:read ? 'beeline/read_operation' : input.method,params:input.params ?? {}}),
         });
-        const body = await response.json() as { result?: unknown; error?: string };
-        if (!response.ok) throw new Error(body.error ?? 'Squire task relay refused the call');
+        let response:Response;
+        try { response=await send(false); }
+        catch { response=await send(true); }
+        const body=await response.json() as {result?:unknown;error?:string;outcome?:ReturnType<typeof squireOutcome>};
+        if (!response.ok) throw new SquireOperationError(body.error ?? 'Squire task relay refused the call',
+          body.outcome ?? {cause:'result-unknown',operationId,accepted:null,completed:false});
         process.stdout.write(`${JSON.stringify({ jsonrpc: '2.0', id: input.id, result: body.result })}\n`);
         if (input.method === 'initialize' && !subscribed) {
           subscribed = true;
@@ -696,7 +702,7 @@ export function runSquireTaskProxy(env: NodeJS.ProcessEnv = process.env): void {
         }
       } catch (error) {
         process.stdout.write(`${JSON.stringify({ jsonrpc: '2.0', id: input.id,
-          error: { code: -32000, message: error instanceof Error ? error.message : 'Squire relay failed' } })}\n`);
+          error: { code: -32000, message: error instanceof Error ? error.message : 'Squire relay failed',data:squireOutcome(error) } })}\n`);
       }
     })();
   });

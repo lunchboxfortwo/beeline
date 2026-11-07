@@ -81,7 +81,7 @@ Opening a corner starts its implementer, even when the opener does the work. Wor
 
 Your starter agents can make a free vertical welcome reel, targeting 6–9 seconds with a 15-second maximum, using a video model they sign up for through Squire. Preview it first; only your **Post** approval lets them upload it to your connected YouTube as a Short. No card, deposit or paid credits are required.
 
-Starter agents sleep when their work finishes and wake when you tag them. Releases prepare sleeping helpers on the new image before they suspend again, preserving their files for the next message. [Starter agent lifecycle](docs/free-agents.md).
+Starter agents sleep when their work finishes and wake when you tag them. The thinking line shows when a new release is downloading or the agent is starting; preparation uses no execution time. Work continues until a result, Stop or real process failure, with the daily token allowance and shared daily budget unchanged. Releases preserve the agent’s files. [Starter agent lifecycle](docs/free-agents.md).
 
 ## Your machine. Your keys.
 

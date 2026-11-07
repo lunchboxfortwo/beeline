@@ -130,13 +130,19 @@ it('retains a credential-fetch refusal when masking its MCP error payload', () =
   expect(toolCallFailureLine(call)).toBe('tool refused: [REDACTED]');
 });
 
-it('masks a sparse background completion before handing it to its recorder', () => {
+it('masks a sparse completion at its original invocation before handing it to its recorder', async () => {
   const client = new AcpClient({ agentCommand: 'fixture', agentEnv: {} });
   const complete = vi.fn();
-  client.detachedTools.set('session\0fetch', { call: { id: 'fetch', name: 'fetch_credential' }, complete });
-  client.handleMessage({ method: 'session/update', params: { sessionId: 'session', update: {
-    sessionUpdate: 'tool_result', toolCallId: 'fetch', rawOutput: result,
-  } } });
-  expect(complete).toHaveBeenCalledWith(expect.objectContaining({ rawOutput: '[REDACTED]' }));
-  expect(JSON.stringify(complete.mock.calls)).not.toContain(result);
+  vi.spyOn(client,'request').mockImplementation(async () => {
+    client.handleMessage({method:'session/update',params:{sessionId:'session',update:{
+      sessionUpdate:'tool_call',toolCallId:'fetch',name:'fetch_credential',status:'in_progress',
+    }}});
+    client.handleMessage({ method: 'session/update', params: { sessionId: 'session', update: {
+      sessionUpdate: 'tool_result', toolCallId: 'fetch', rawOutput: result,
+    } } });
+    return {stopReason:'end_turn'};
+  });
+  const output=await client.sessionPrompt('session','work',undefined,undefined,complete);
+  expect(output.toolCalls).toContainEqual(expect.objectContaining({rawOutput:'[REDACTED]'}));
+  expect(JSON.stringify([output,complete.mock.calls])).not.toContain(result);
 });

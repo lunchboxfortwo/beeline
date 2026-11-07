@@ -43,6 +43,56 @@ afterEach(() => {
 });
 
 describe('StdioSquireMcpClient', () => {
+  it('returns an explicit malformed-request refusal without reconnecting or starting another process', async () => {
+    const {child}=fakeChild({initialize:{}});
+    const write=child.stdin.write;
+    child.stdin.write=chunk=>{
+      const frame=JSON.parse(chunk);
+      if(frame.method!=='tools/call')return write(chunk);
+      child.stdout.emit('data',JSON.stringify({id:frame.id,error:{code:-32602,message:'Invalid parameters'}})+'\n');
+      return true;
+    };
+    const spawn=vi.fn(()=>child);
+    const client=new StdioSquireMcpClient({scope:{agentId:'agent',roomId:'room'},spawn});
+    try {
+      await expect(client.requestMcp('tools/call',{name:'operate_start'})).rejects.toMatchObject({
+        outcome:{cause:'request-refused',accepted:false,completed:true},
+      });
+      expect(spawn).toHaveBeenCalledOnce();
+    } finally {client.close();}
+  });
+
+  it('reads a lost browser-start result once without starting another browser', async () => {
+    const original=fakeChild({initialize:{}}), replacement=fakeChild({initialize:{}});
+    let operationId:string|undefined;
+    const started={content:[{type:'text',text:JSON.stringify({session_id:'browser-original'})}]};
+    const starts:string[]=[],reads:string[]=[];
+    const oldWrite=original.child.stdin.write;
+    original.child.stdin.write=chunk=>{
+      const frame=JSON.parse(chunk);
+      if(frame.method!=='tools/call') return oldWrite(chunk);
+      starts.push(frame.params.name);operationId=frame.params._meta?.beelineOperationId;
+      original.child.stdout.emit('data',JSON.stringify({id:frame.id,error:{message:'lost result',data:{outcome:'unknown'}}})+'\n');
+      return true;
+    };
+    const freshWrite=replacement.child.stdin.write;
+    replacement.child.stdin.write=chunk=>{
+      const frame=JSON.parse(chunk);
+      if(frame.method!=='tools/call') return freshWrite(chunk);
+      reads.push(frame.params.name);
+      expect(frame.params.arguments.operationId).toBe(operationId);
+      replacement.child.stdout.emit('data',JSON.stringify({id:frame.id,result:{content:[{type:'text',text:JSON.stringify({
+        outcome:'completed',accepted:true,completed:true,result:started,
+      })}]}})+'\n');return true;
+    };
+    const spawn=vi.fn().mockReturnValueOnce(original.child).mockReturnValueOnce(replacement.child);
+    const client=new StdioSquireMcpClient({scope:{agentId:'agent',roomId:'room'},spawn});
+    try {
+      expect(await client.requestMcp('tools/call',{name:'operate_start',arguments:{service_url:'https://synthetic.test'}})).toEqual(started);
+      expect(starts).toEqual(['operate_start']);expect(reads).toEqual(['beeline_read_operation']);expect(spawn).toHaveBeenCalledTimes(2);
+    } finally { client.close(); }
+  });
+
   it('reconnects on an explicit account change and ignores the retired facade exiting later', async () => {
     const old = fakeChild({ initialize: {}, 'tools/call': {
       isError: true, content: [{ type: 'text', text: '{"error":{"code":"reconnect_required"}}' }],
@@ -52,7 +102,7 @@ describe('StdioSquireMcpClient', () => {
     } });
     const spawn = vi.fn().mockReturnValueOnce(old.child).mockReturnValueOnce(fresh.child);
     const client = new StdioSquireMcpClient({ scope: { agentId: 'agent', roomId: 'connector' }, spawn });
-    await expect(client.call('list_credentials')).rejects.toThrow('reconnect_required');
+    await expect(client.call('list_credentials')).rejects.toMatchObject({outcome:{cause:'needs-sign-in',accepted:true,completed:true}});
     expect(spawn).toHaveBeenCalledTimes(1);
     client.reconnect();
     expect(old.child.killed).toBe(true);
@@ -150,7 +200,7 @@ describe('StdioSquireMcpClient', () => {
     const notifications: Record<string, unknown>[] = [];
     const client = new StdioSquireMcpClient({
       scope: { agentId: 'agent-a', roomId: 'room-a' },
-      spawn: () => child as never,
+      spawn: vi.fn().mockReturnValueOnce(child).mockImplementation(()=>{throw new Error('synthetic replacement unavailable');}),
       onNotification: (message) => notifications.push(message),
     });
     const pending = client.call('ping'); // starts the session; this ping itself stays pending
@@ -171,7 +221,7 @@ describe('StdioSquireMcpClient', () => {
     const { child } = fakeChild({ initialize: {} });
     const client = new StdioSquireMcpClient({
       scope: { agentId: 'agent-a', roomId: 'room-a' },
-      spawn: () => child as never,
+      spawn: vi.fn().mockReturnValueOnce(child).mockImplementation(()=>{throw new Error('synthetic replacement unavailable');}),
     });
     const pending = client.call('ping');
     for (let index = 0; index < 10; index += 1) await Promise.resolve();
@@ -190,12 +240,12 @@ describe('StdioSquireMcpClient', () => {
     const { child } = fakeChild({ initialize: {} });
     const client = new StdioSquireMcpClient({
       scope: { agentId: 'agent-a', roomId: 'room-a' },
-      spawn: () => child as never,
+      spawn: vi.fn().mockReturnValueOnce(child).mockImplementation(()=>{throw new Error('synthetic replacement unavailable');}),
     });
     const pending = client.call('list_credentials');
     for (let index = 0; index < 10; index += 1) await Promise.resolve();
     child.emit('exit', 1);
-    await expect(pending).rejects.toThrow('Squire MCP server exited');
+    await expect(pending).rejects.toMatchObject({outcome:{cause:'connection-lost',accepted:null,completed:false}});
     client.close();
   });
 

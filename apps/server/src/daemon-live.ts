@@ -146,6 +146,7 @@ export class DaemonAgentSession {
       activationContextV1?:boolean;
       turnOwnershipV1?:boolean;
       ownedModelV1?:boolean;
+      ownedModelUnboundedV1?:boolean;
       daemonOperationsV1?:boolean;
     } = {},
   ) {
@@ -264,7 +265,7 @@ export class DaemonAgentSession {
       this.epoch = epoch;
       this.turnSource = {connectionId:this.connectionId,epoch};
       const model = await this.deps.daemon.negotiateOwnedModel(this.agentId,
-        this.turnSource, this.presence.ownedModelV1 === true);
+        this.turnSource, this.presence.ownedModelV1 === true && this.presence.ownedModelUnboundedV1 === true);
       this.#ownedModelCapability = model?.capability;
       this.deps.registry.settled(this);
       if(this.presence.usageAccountV1&&helperUsageEnabled())this.usageOwnerId=(await this.deps.database.query<{owner_id:string|null}>(

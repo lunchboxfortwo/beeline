@@ -1,3 +1,6 @@
+import {OwnedModelFiles} from './owned-model-files.js';
+import {bindOwnedModelTurn,releaseOwnedModelTurn} from './owned-model-turn.js';
+import type {OwnedModelCredential} from '@beeline/api-contract/helper-model';
 import { randomUUID } from 'node:crypto';
 import { mkdir, writeFile } from 'node:fs/promises';
 import { writeFileSync } from 'node:fs';
@@ -17,6 +20,13 @@ export class CommandExecutionContext {
   current?: AgentCommand;
   commands: readonly AgentCommand[] = [];
   private startedAt?: number;
+  private ownedModelDirectory?:string;
+  bindModel(command:AgentCommand,credential:OwnedModelCredential,source:import('@beeline/api-contract/helper-turn-ownership').HelperTurnOwnershipSource,baseUrl:string):void{
+    const owner=OwnedModelFiles.create({root:join(dirname(this.path),'state','owned-model-'+this.generationId),credential,binding:{agentId:command.agentId,commandId:command.id,
+      generationId:this.generationId,connectionId:source.connectionId,connectionEpoch:source.epoch,provider:'beeline',model:'server-selected',
+      baseUrl:new URL('/v1/free-agents/model',baseUrl).href}});
+    this.ownedModelDirectory=owner.paths().directory;bindOwnedModelTurn(this,owner);
+  }
   constructor(private readonly root?: string) {
     this.contextPath = join(root ?? tmpdir(), `beeline-command-${this.generationId}.json`);
   }
@@ -45,6 +55,7 @@ export class CommandExecutionContext {
         commandReason: command.reason,
         commands: this.commands.map(item => ({requestId:item.turnRequestId,commandReason:item.reason,taskId:item.rootCommandId})),
         startedAt: this.startedAt,
+        ...(this.ownedModelDirectory ? {ownedModelDirectory:this.ownedModelDirectory} : {}),
       }),
       { mode: 0o600 },
     );
@@ -67,6 +78,7 @@ export class CommandExecutionContext {
         commandReason: command.reason,
         commands: this.commands.map(item => ({requestId:item.turnRequestId,commandReason:item.reason,taskId:item.rootCommandId})),
         startedAt: this.startedAt,
+        ...(this.ownedModelDirectory ? {ownedModelDirectory:this.ownedModelDirectory} : {}),
         promptSectionIds: [...new Set(ids)],
       }),
       { mode: 0o600 },
@@ -77,6 +89,7 @@ export class CommandExecutionContext {
     this.commands = [];
     await writeFile(this.path, '{}', { mode: 0o600 });
     this.ownership = undefined;
+    this.ownedModelDirectory=undefined;releaseOwnedModelTurn(this);
   }
   bind(api: DaemonApiClient): DaemonApiClient {
     return new Proxy(api, {
@@ -239,6 +252,7 @@ export async function runServerCommandIntake(options: {
                 commandId: command.id,
                 generationId: context.generationId,
               });
+              if(startingTurn && claim.modelCredential && claimOwner)context.bindModel(command,claim.modelCredential,claimOwner,api.baseUrl);
               if (startingTurn) {
                 turnCommands = (claim as import('@beeline/api-contract/daemon').DaemonOperationMap['claimAgentTurn']['output']).commands;
                 if (!turnCommands.length) throw new Error('empty turn claim');

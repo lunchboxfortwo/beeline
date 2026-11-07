@@ -649,8 +649,8 @@
       "apps/server/src",
       "apps/auth/src"
     ],
-    "bootstrapTotal": 1664,
-    "unusedTotal": 174,
+    "bootstrapTotal": 1660,
+    "unusedTotal": 173,
     "tables": {
       "agent_avatars": {
         "module": "Agent types",
@@ -1344,10 +1344,22 @@
           "sealed_keys": "existing before the registry; weekly audit reviews",
           "bootstrap_hash": "existing before the registry; weekly audit reviews",
           "model_token_hash": "existing before the registry; weekly audit reviews",
-          "wake_requested_at": "existing before the registry; weekly audit reviews",
-          "provision_started_at": "existing before the registry; weekly audit reviews",
-          "provision_attempts": "existing before the registry; weekly audit reviews",
-          "provision_error": "existing before the registry; weekly audit reviews",
+          "wake_requested_at": {
+            "reason": "Retained inertly for the prior server during the runtime-acquisition cutover.",
+            "drop": "Post-drain reliability cleanup: docs/agent-server-surfaces.md#turn-recovery-storage-retirement"
+          },
+          "provision_started_at": {
+            "reason": "Retained inertly for the prior server during the runtime-acquisition cutover.",
+            "drop": "Post-drain reliability cleanup: docs/agent-server-surfaces.md#turn-recovery-storage-retirement"
+          },
+          "provision_attempts": {
+            "reason": "Retained inertly for the prior server during the runtime-acquisition cutover.",
+            "drop": "Post-drain reliability cleanup: docs/agent-server-surfaces.md#turn-recovery-storage-retirement"
+          },
+          "provision_error": {
+            "reason": "Retained inertly for the prior server during the runtime-acquisition cutover.",
+            "drop": "Post-drain reliability cleanup: docs/agent-server-surfaces.md#turn-recovery-storage-retirement"
+          },
           "created_at": "existing before the registry; weekly audit reviews",
           "updated_at": "existing before the registry; weekly audit reviews",
           "model": "existing before the registry; weekly audit reviews",
@@ -1355,7 +1367,10 @@
           "allowance_paused_until": {
             "reason": "Retained without runtime use until the previous server drains during this rolling release.",
             "drop": "Next release after turn-lifecycle cleanup: docs/agent-server-surfaces.md#turn-recovery-storage-retirement"
-          }
+          },
+          "runtime_operation_id": "Fences provider results against a newer acquisition or authenticated helper connection.",
+          "runtime_owner": "Binds the in-flight provider action to its existing server-source owner across instances.",
+          "runtime_phase": "Stores the committed pre-execution phase and provider version for canonical Room reads after reconnect."
         }
       },
       "github_auth_flows": {
@@ -3699,6 +3714,12 @@
         "credit": "Admission uncertainty credit granted by the daily counter update.",
         "reservedUsd": "Exact dollars granted by the shared budget update.",
         "limit": "Refusal reason from the atomic allocation; a refusal rolls the transaction back."
+      },
+      "runtime_phase": {
+        "phase": "Committed plain runtime lifecycle phase before a command is claimed.",
+        "operationId": "Identity that prevents an old completion replacing a new phase.",
+        "machineVersion": "Provider instance version observed by the acquisition owner.",
+        "cause": "Content-free user-facing cause of a definitively unavailable runtime."
       },
       "descriptor": {
         "platform": "Allowlisted client compatibility descriptor, never a raw fingerprint.",

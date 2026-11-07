@@ -1,14 +1,16 @@
 import type { SqlDatabase } from './database.js';
 import type { FreeAgentConfig } from './free-agents.js';
 import { CommandRefusalError } from './command-refusal.js';
-import { DEFAULT_FREE_AGENT_LIMITS, type FreeAgentLimits } from './free-agent-limits.js';
+import { DEFAULT_FREE_AGENT_LIMITS, FREE_AGENT_BUDGET_MESSAGE, type FreeAgentLimits } from './free-agent-limits.js';
 
 export const DEFAULT_OUTPUT_RESERVATION = 8_192;
-type Limit = 'daily' | 'lifetime' | 'budget' | 'rate';
+type Limit = 'daily' | 'lifetime' | 'budget';
 type Allocation = { reserved: number; maxOutput: number; credit: number; limit?: Limit | null };
 type Reservation = Omit<Allocation, 'limit'> & { reservedUsd: number };
 export class AllowanceRefusal extends CommandRefusalError {
-  constructor(readonly limit: Limit) { super('Owned model allowance is unavailable', limit === 'rate' ? 429 : 403); }
+  constructor(readonly limit: Limit) { super(limit === 'budget' ? FREE_AGENT_BUDGET_MESSAGE : limit === 'daily'
+    ? 'Your daily free-agent token allowance is used. It resets at midnight UTC.'
+    : 'Your free-agent token allowance is used. Connect your own agent to continue.',403); }
 }
 
 // PostgreSQL 16 RETURNING exposes the new row. Retain the exact last grant
@@ -50,22 +52,18 @@ export async function reserveAllowanceInTransaction(db: SqlDatabase, ownerId: st
   config: Pick<FreeAgentConfig, 'dailyTokenCap' | 'lifetimeTokenCap'>, promptTokens: number,
   requestedOutput: number | undefined, limits: FreeAgentLimits = DEFAULT_FREE_AGENT_LIMITS,
   budgetPromptTokens = promptTokens, promptUpperBound = promptTokens): Promise<Reservation> {
-  const day = now.toISOString().slice(0, 10), minute = Math.floor(now.getTime()/60_000);
+  const day = now.toISOString().slice(0, 10);
   const output = Math.floor(Math.min(requestedOutput ?? DEFAULT_OUTPUT_RESERVATION,limits.maxOutputTokens));
   const want = promptUpperBound+Math.max(256,output);
   const prior = `(SELECT COALESCE(SUM(tokens),0) FROM free_agent_usage WHERE owner_id=$1)`;
   const total = `COALESCE(free_agent_call_rate.lifetime_tokens,${prior})`;
-  const grant = (used: string) => `GREATEST(0,LEAST($3::bigint,CASE WHEN $4::bigint>0 THEN $4::bigint-${used} ELSE $3::bigint END))`;
+  const grant = (used: string) => `GREATEST(0,LEAST($2::bigint,CASE WHEN $3::bigint>0 THEN $3::bigint-${used} ELSE $2::bigint END))`;
   const owner = (await db.query<{ last_grant: string }>(`
     INSERT INTO free_agent_call_rate(owner_id,minute,calls,lifetime_tokens,last_grant)
-    VALUES($1,$2,1,${prior}+${grant(prior)},${grant(prior)})
-    ON CONFLICT(owner_id) DO UPDATE SET minute=$2,
-      calls=CASE WHEN free_agent_call_rate.minute=$2 THEN free_agent_call_rate.calls+1 ELSE 1 END,
-      lifetime_tokens=${total}+${grant(total)},last_grant=${grant(total)}
-    WHERE free_agent_call_rate.minute<>$2 OR free_agent_call_rate.calls<$5
-    RETURNING last_grant`, [ownerId,minute,want,config.lifetimeTokenCap,limits.callsPerMinute])).rows[0];
-  if (!owner) throw new AllowanceRefusal('rate');
-  const ownerGrant = Number(owner.last_grant);
+    VALUES($1,0,0,${prior}+${grant(prior)},${grant(prior)})
+    ON CONFLICT(owner_id) DO UPDATE SET lifetime_tokens=${total}+${grant(total)},last_grant=${grant(total)}
+    RETURNING last_grant`, [ownerId,want,config.lifetimeTokenCap])).rows[0];
+  const ownerGrant = Number(owner!.last_grant);
   const daily = (await db.query<{ allocation: Allocation }>(`
     INSERT INTO free_agent_usage(owner_id,day,tokens,reservation_credit,allocation)
     SELECT $1,$2::date,proposal.* FROM (${dailyAllocation('0::bigint','0::bigint')}) proposal

@@ -1,18 +1,19 @@
+import {notifyFreeAgentRuntimePhaseSql} from './postgres-live.js';
 import {FREE_AGENT_CREATION_SCHEMA,reserveStarterAgents,refundStarterAgent} from './free-agent-creation.js';
 import { FREE_AGENT_ACCOUNTING_SCHEMA } from './free-agent-accounting.js';
 import { setRoomEventSubscriptions } from './agent-subscriptions.js';
 import { SYSTEM_IDENTITY_ID } from '@beeline/api-contract/system-identity';
 import { systemMessage } from '@beeline/api-contract/system-message-catalog';
-import { createCipheriv, createDecipheriv, createECDH, createHash, randomBytes } from 'node:crypto';
+import { createCipheriv, createDecipheriv, createECDH, createHash, randomBytes, randomUUID } from 'node:crypto';
 import { assignSeededAgentIdentity, resolveFace, agentHandleFromName } from '@beeline/api-contract/phone';
 import { createAgentCommand } from './agent-command.js';
 import type { SqlDatabase } from './database.js';
 import type { FreeAgentMachines } from './fly-machines.js';
-import { FlyApiError } from './fly-machines.js';
+import { FlyApiError, sameMachineImage } from './fly-machines.js';
+import { writeRuntimePhase } from './free-agent-runtime-phase.js';
 import type { LiveHub } from './live.js';
-import { DEFAULT_FREE_AGENT_LIMITS, freeAgentDailyTokenCapFromEnv, freeAgentFirstDayTokenCapFromEnv, freeAgentBudgetReached, freeAgentLimitsFromEnv, type FreeAgentLimits } from './free-agent-limits.js';
+import { freeAgentDailyTokenCapFromEnv, freeAgentFirstDayTokenCapFromEnv, freeAgentLimitsFromEnv, type FreeAgentLimits } from './free-agent-limits.js';
 import { createInvitedWorkspaceMembership, joinRooms } from './membership-join.js';
-import { captureServerError } from './sentry.js';
 import { ensureSystemIdentity, systemLine } from './system-line.js';
 import { createStarterOnboardingRun } from './starter-onboarding-run.js';
 
@@ -46,6 +47,9 @@ CREATE TABLE IF NOT EXISTS free_agents (
 );
 ALTER TABLE free_agents ADD COLUMN IF NOT EXISTS removed_at timestamptz;
 ALTER TABLE free_agents ADD COLUMN IF NOT EXISTS removal_cleaned_at timestamptz;
+ALTER TABLE free_agents ADD COLUMN IF NOT EXISTS runtime_operation_id text;
+ALTER TABLE free_agents ADD COLUMN IF NOT EXISTS runtime_owner text;
+ALTER TABLE free_agents ADD COLUMN IF NOT EXISTS runtime_phase jsonb;
 ALTER TABLE free_agents ADD COLUMN IF NOT EXISTS model text;
 ALTER TABLE free_agents ADD COLUMN IF NOT EXISTS starter_role text;
 DROP TRIGGER IF EXISTS defer_allowance_wake ON agent_commands;
@@ -82,6 +86,19 @@ CREATE TABLE IF NOT EXISTS free_agent_events (
   detail jsonb
 );
 CREATE INDEX IF NOT EXISTS free_agent_events_agent ON free_agent_events(agent_id, at);
+-- A committed phase change invalidates the same pending-command read over the existing live socket.
+CREATE OR REPLACE FUNCTION notify_free_agent_runtime_phase() RETURNS trigger AS $$
+DECLARE target record;
+BEGIN
+  IF NEW.runtime_phase IS NOT DISTINCT FROM OLD.runtime_phase THEN RETURN NEW; END IF;
+  FOR target IN SELECT DISTINCT room_id FROM agent_commands WHERE agent_id=NEW.agent_id AND state='pending' LOOP
+    PERFORM ${notifyFreeAgentRuntimePhaseSql()};
+  END LOOP;
+  RETURN NEW;
+END; $$ LANGUAGE plpgsql;
+DROP TRIGGER IF EXISTS free_agent_runtime_phase_live ON free_agents;
+CREATE TRIGGER free_agent_runtime_phase_live AFTER UPDATE OF runtime_phase ON free_agents
+  FOR EACH ROW EXECUTE FUNCTION notify_free_agent_runtime_phase();
 ${FREE_AGENT_ACCOUNTING_SCHEMA}
 ${FREE_AGENT_CREATION_SCHEMA}
 `;
@@ -110,8 +127,6 @@ export interface FreeAgentConfig {
   region: string;
   cpus: number;
   memoryMb: number;
-  /** Installer origin for the helper bundle; absent uses the published one. */
-  installBaseUrl?: string;
   /** A running Machine with no work this long is put to sleep by the reaper. */
   reapIdleMs: number;
   /** A Machine with no activity this long is deleted; a later wake recreates it. */
@@ -144,9 +159,6 @@ export function freeAgentConfigFromEnv(
     region: env.FLY_FREE_AGENT_REGION || 'iad',
     cpus: number('FLY_FREE_AGENT_CPUS', 1),
     memoryMb: number('FLY_FREE_AGENT_MEMORY_MB', 2048),
-    ...(env.BEELINE_FREE_AGENT_INSTALL_BASE_URL
-      ? { installBaseUrl: env.BEELINE_FREE_AGENT_INSTALL_BASE_URL }
-      : {}),
     reapIdleMs: number('BEELINE_FREE_AGENT_REAP_IDLE_SECONDS', 300) * 1000,
     deleteAfterMs: number('BEELINE_FREE_AGENT_DELETE_AFTER_DAYS', 30) * 86_400_000,
   };
@@ -233,7 +245,7 @@ export const FREE_AGENT_EXIT_NOTE =
 /** Membership events every free agent hears in #general from creation. */
 export const FREE_AGENT_EVENT_SUBSCRIPTIONS = ['joined', 'left'] as const;
 
-export const FREE_AGENT_CONNECT_GUIDE = `Offer help bringing their own agent only on real triggers: someone requests their own files, apps, logins or local repository that you cannot access, a job longer than your turn limit, or the server's 80% allowance warning has fired. Explain the limitation and offer to guide them. At most one unsolicited nudge per UTC day; the 80% warning counts as that day's nudge. Check the conversation before nudging; if unsure whether you already nudged today, do not nudge. Normal conversation is not a trigger. When explicitly asked, help without this daily restriction.
+export const FREE_AGENT_CONNECT_GUIDE = `Offer help bringing their own agent only on real triggers: someone requests their own files, apps, logins or local repository that you cannot access, or the server's 80% allowance warning has fired. Explain the limitation and offer to guide them. At most one unsolicited nudge per UTC day; the 80% warning counts as that day's nudge. Check the conversation before nudging; if unsure whether you already nudged today, do not nudge. Normal conversation is not a trigger. When explicitly asked, help without this daily restriction.
 
 When they accept, guide them one step at a time, waiting for the result of each step. Help them choose their own computer or an always-on machine they control. Install Node.js and an agent CLI (Claude Code, Codex or OpenCode), and help them sign in to that CLI. Send them to Members -> Add agent in their Workspace to copy the command. The command format is npx usebeeline connect <code>; they must run the actual command copied from Add agent on their chosen machine. Never create, retrieve, request, repeat or post a pairing code in a Room. Troubleshoot using redacted errors, never secrets. Keep helping until Members shows their new agent online, then have them tag it with a small task. Do not claim it is online without confirmation.`;
 
@@ -461,16 +473,8 @@ export interface FreeAgentBootstrapGrant {
   modelToken: string;
   modelBaseUrl: string;
   upstreamModel: string;
-  maxTurnSeconds: number;
   idleSeconds: number;
 }
-
-/**
- * Starts without a connection that stop the restarts: a Machine that boots but
- * never connects would otherwise be started every 20 seconds forever.
- */
-export const FREE_AGENT_START_LIMIT = 5;
-export const FREE_AGENT_START_WINDOW_MINUTES = 10;
 
 /** Durable install/sign-in work ends on completion, failure, or disconnect. */
 const connectorWorkSql = (agent: string): string => `(
@@ -481,50 +485,8 @@ const connectorWorkSql = (agent: string): string => `(
     WHERE connector.helper_agent_id=${agent} AND connector.status='installing')
 )`;
 
-/**
- * Whether a wake is due for the row `f`: pending work, a Machine, and the
- * agent not serving. A waking or running agent waits 20 seconds between starts.
- * $2 is a Machine whose completed suspension proves it needs a resume, even
- * if work was already claimed or a concurrent start just marked it waking.
- */
-const WAKE_DUE_SQL = `f.removed_at IS NULL AND f.fly_machine_id IS NOT NULL
-  AND ($2::text IS NULL OR (f.fly_machine_id=$2 AND f.state<>'stopped'))
-  AND (f.state IN ('sleeping','stopped')
-    OR ($2::text=f.fly_machine_id AND f.state IN ('waking','running'))
-    OR (f.state IN ('waking','running')
-      AND (f.wake_requested_at IS NULL OR f.wake_requested_at<clock_timestamp()-interval '20 seconds')
-      AND NOT EXISTS (SELECT 1 FROM agent_connections connection
-        JOIN live_server_instances server ON server.instance_id=connection.instance_id
-        WHERE connection.agent_id=f.agent_id AND connection.released_at IS NULL
-          AND server.renewed_at>clock_timestamp()-interval '90 seconds')))
-  AND (${connectorWorkSql('f.agent_id')} OR EXISTS (SELECT 1 FROM agent_commands command
-    WHERE command.agent_id=f.agent_id AND (command.state='pending'
-      OR ($2::text=f.fly_machine_id AND command.state='claimed'))))`;
-
-/**
- * The start limit for one agent. A `connected` event ends an episode. A
- * `start_limit_reached` event stops starts until a person sends a new message
- * that queues a command; that message opens a fresh episode. Join, leave and
- * other System lines carry a human author but never clear the stop.
- */
-const START_LIMIT_SQL = `WITH last_connect AS (
-    SELECT max(at) at FROM free_agent_events WHERE agent_id=$1 AND kind='connected'),
-  last_stop AS (
-    SELECT max(at) at FROM free_agent_events WHERE agent_id=$1 AND kind='start_limit_reached')
-  SELECT
-    (last_stop.at IS NOT NULL AND (last_connect.at IS NULL OR last_stop.at>last_connect.at)
-      AND NOT EXISTS (SELECT 1 FROM agent_commands command
-        JOIN messages source ON source.id=command.source_message_id
-          AND source.presentation='message' AND source.system_event IS NULL
-        JOIN identities author ON author.id=source.author_id AND author.kind='human'
-        WHERE command.agent_id=$1 AND command.state='pending' AND command.created_at>last_stop.at)) stopped,
-    (SELECT count(*)::int FROM free_agent_events started
-      WHERE started.agent_id=$1 AND started.kind='wake_requested'
-        AND started.at>GREATEST(clock_timestamp()-make_interval(mins => $2), last_connect.at, last_stop.at)) starts
-  FROM last_connect, last_stop`;
-
 /** Wake reasons recorded for the latency measurement. */
-type WakeCause = 'command' | 'connector' | 'provisioned';
+type WakeCause = 'command' | 'connector' | 'provisioned' | 'release';
 
 /**
  * Runtime half of free agents: provisioning, waking, sleeping, bootstrap and
@@ -532,7 +494,7 @@ type WakeCause = 'command' | 'connector' | 'provisioned';
  * conditional row update decides which server instance makes it.
  */
 export class FreeAgentService {
-  readonly #inFlight = new Set<string>();
+  readonly #inFlight = new Map<string,Promise<void>>();
 
   constructor(
     private readonly database: SqlDatabase,
@@ -543,6 +505,7 @@ export class FreeAgentService {
       database: SqlDatabase,
     ) => Promise<{ exchangeToken: string }>,
     private readonly log: (line: string) => void = (line) => console.log(`[free-agents] ${line}`),
+    private readonly instanceId: string = randomUUID(),
   ) {}
 
   async createInWorkspace(
@@ -578,210 +541,155 @@ export class FreeAgentService {
 
   /** Fire-and-forget entry for a committed create or a pending wake. */
   kick(agentId: string, cause: WakeCause = 'command'): void {
-    if (this.#inFlight.has(agentId)) return;
-    this.#inFlight.add(agentId);
-    void this.#advance(agentId, cause)
-      .catch((error) =>
-        this.log(`agent ${agentId.slice(0, 12)} ${error instanceof Error ? error.message : String(error)}`),
-      )
-      .finally(() => this.#inFlight.delete(agentId));
+    void this.#run(agentId,cause);
   }
 
-  /** Bring one agent toward serving: provision when it has no Machine, otherwise wake it. */
+  #run(agentId: string, cause: WakeCause): Promise<void> {
+    // Each committed signal gets its read after the current acquisition drains.
+    // Returning the current promise dropped work committed after its last read.
+    const previous = this.#inFlight.get(agentId) ?? Promise.resolve();
+    const work = previous.then(() => this.#advance(agentId,cause))
+      .catch(error => this.log(`agent ${agentId.slice(0,12)} ${error instanceof Error ? error.name : 'runtime failure'}`))
+      .finally(() => { if (this.#inFlight.get(agentId) === work) this.#inFlight.delete(agentId); });
+    this.#inFlight.set(agentId,work);
+    return work;
+  }
+
+  /** All command, release and reconnect entry points share this acquisition owner. */
   async #advance(agentId: string, cause: WakeCause): Promise<void> {
     if (await this.cleanupRemoved(agentId)) return;
-    if (await this.provision(agentId)) return;
-    await this.wake(agentId, cause);
+    await this.#acquire(agentId, cause, true);
   }
 
-  /**
-   * Create the Machine for an agent that has none. A provision is claimed for
-   * two minutes so concurrent instances never create two Machines; a crash
-   * mid-create is adopted by lookup on retry.
-   */
   async provision(agentId: string): Promise<boolean> {
-    if (await this.#budgetPaused(agentId)) return false;
-    const claimed = (
-      await this.database.query<{ agent_id: string }>(
-        `UPDATE free_agents SET provision_started_at=clock_timestamp(),
-           provision_attempts=provision_attempts+1,updated_at=now(),
-           state=CASE WHEN state='destroyed' THEN 'provisioning' ELSE state END
-         WHERE agent_id=$1 AND removed_at IS NULL AND fly_machine_id IS NULL AND state IN ('provisioning','destroyed')
-           AND provision_attempts<5
-           AND (provision_started_at IS NULL OR provision_started_at<clock_timestamp()-interval '2 minutes')
-         RETURNING agent_id`,
-        [agentId],
-      )
-    ).rows[0];
-    if (!claimed) return false;
-    try {
-      const bootstrap = opaque('bfb');
-      const active = await this.database.query(
-        `UPDATE free_agents SET bootstrap_hash=$2,updated_at=now() WHERE agent_id=$1 AND removed_at IS NULL RETURNING agent_id`,
-        [agentId, tokenHash(bootstrap)],
-      );
-      if (!active.rowCount) return false;
-      const existing = await this.machines.find(agentId);
-      if (existing) await this.machines.destroy(existing.id);
-      const machine = await this.machines.create({
-        agentId,
-        image: this.config.image,
-        region: this.config.region,
-        cpus: this.config.cpus,
-        memoryMb: this.config.memoryMb,
-        env: {
-          BEELINE_FREE_AGENT_ID: agentId,
-          BEELINE_FREE_AGENT_MAX_TURN_SECONDS: String((this.config.limits ?? DEFAULT_FREE_AGENT_LIMITS).maxTurnMs / 1000),
-          BEELINE_FREE_AGENT_BOOTSTRAP: bootstrap,
-          BEELINE_SERVER_URL: this.config.publicOrigin,
-          ...(this.config.installBaseUrl
-            ? { BEELINE_INSTALL_BASE_URL: this.config.installBaseUrl }
-            : {}),
-        },
-      });
-      await this.database.query(
-        `UPDATE free_agents SET fly_machine_id=$2,
-           state=CASE WHEN removed_at IS NULL THEN 'waking' ELSE state END,
-           wake_requested_at=CASE WHEN removed_at IS NULL THEN clock_timestamp() ELSE NULL END,
-           provision_started_at=NULL,removal_cleaned_at=NULL,provision_error=NULL,updated_at=now()
-         WHERE agent_id=$1`,
-        [agentId, machine.id],
-      );
-      if (await this.cleanupRemoved(agentId)) return false;
-      await recordFreeAgentEvent(this.database, agentId, 'provisioned', { machineId: machine.id });
-      this.log(`agent ${agentId.slice(0, 12)} provisioned machine ${machine.id}`);
-      return true;
-    } catch (error) {
-      const message = error instanceof Error ? error.message : String(error);
-      await this.database.query(
-        `UPDATE free_agents SET provision_error=$2,provision_started_at=NULL,updated_at=now(),
-           state=CASE WHEN provision_attempts>=5 THEN 'failed' ELSE state END
-         WHERE agent_id=$1 AND removed_at IS NULL`,
-        [agentId, message.slice(0, 1000)],
-      );
-      throw error;
-    }
-  }
-
-  /**
-   * Start the agent's Machine when a wake is pending and the agent is not
-   * serving. The row update is the fence: one instance per 20 seconds.
-   */
-  async #budgetPaused(agentId: string): Promise<boolean> {
-    if (!await freeAgentBudgetReached(this.database, (this.config.limits ?? DEFAULT_FREE_AGENT_LIMITS).dailyBudgetUsd)) return false;
-    await recordFreeAgentEvent(this.database, agentId, 'budget_reached');
-    return true;
+    return this.#acquire(agentId, 'provisioned', true, true);
   }
 
   async wake(agentId: string, cause: WakeCause = 'command'): Promise<boolean> {
-    return this.#wake(agentId, cause);
+    return this.#acquire(agentId, cause, false);
   }
 
-  /** A completed Fly suspension proves even a recent/connected helper is frozen. */
   async #wake(agentId: string, cause: WakeCause, suspendedMachineId?: string): Promise<boolean> {
-    if (await this.#budgetPaused(agentId)) return false;
-    const decision = await this.database.transaction(async (db) => {
-      // The row lock is the fence: one instance decides each start or stop.
-      await db.query(`SELECT 1 FROM free_agents WHERE agent_id=$1 FOR UPDATE`, [agentId]);
-      const due = (
-        await db.query<{ fly_machine_id: string; previous: string }>(
-          `SELECT f.fly_machine_id,f.state previous FROM free_agents f WHERE f.agent_id=$1 AND ${WAKE_DUE_SQL}`,
-          [agentId, suspendedMachineId ?? null],
-        )
-      ).rows[0];
-      if (!due) return undefined;
-      const limit = (
-        await db.query<{ stopped: boolean; starts: number }>(START_LIMIT_SQL, [
-          agentId,
-          FREE_AGENT_START_WINDOW_MINUTES,
-        ])
-      ).rows[0]!;
-      if (limit.stopped) return undefined;
-      if (limit.starts >= FREE_AGENT_START_LIMIT) {
-        await this.#stopStarts(db, agentId, due.fly_machine_id, limit.starts);
-        return { kind: 'stopped' as const, machineId: due.fly_machine_id, starts: limit.starts };
-      }
-      await db.query(
-        `UPDATE free_agents SET state='waking',wake_requested_at=clock_timestamp(),
-           updated_at=now() WHERE agent_id=$1`,
-        [agentId],
-      );
-      await recordFreeAgentEvent(db, agentId, 'wake_requested', { cause, previous: due.previous });
-      return { kind: 'claimed' as const, claimed: due };
-    });
-    if (!decision) return false;
-    if (decision.kind === 'stopped') {
-      this.log(`agent ${agentId.slice(0, 12)} never connected after ${decision.starts} starts; stopped starting`);
-      captureServerError(
-        new Error(`Free agent Machine never connected after ${decision.starts} starts in ${FREE_AGENT_START_WINDOW_MINUTES} minutes`),
-        { area: 'free-agent-start-limit', agentId, machineId: decision.machineId, starts: String(decision.starts) },
-      );
-      await this.machines.stop(decision.machineId).catch((error) =>
-        this.log(`stop ${agentId.slice(0, 12)}: ${String(error)}`),
-      );
-      return false;
-    }
-    const claimed = decision.claimed;
-    try {
-      await this.machines.start(claimed.fly_machine_id, this.config.image);
-      await recordFreeAgentEvent(this.database, agentId, 'machine_started', {
-        machineId: claimed.fly_machine_id,
-      });
-    } catch (error) {
-      const state = await this.machines.state(claimed.fly_machine_id).catch(() => 'unknown');
-      if (state === undefined) {
-        // The Machine is gone (deleted by hand or by Fly). Recreate it.
-        await this.database.query(
-          `UPDATE free_agents SET fly_machine_id=NULL,state='destroyed',provision_attempts=0,
-             provision_started_at=NULL,updated_at=now() WHERE agent_id=$1 AND removed_at IS NULL`,
-          [agentId],
-        );
-        return this.provision(agentId);
-      }
-      // `started` already, or mid-transition: the next lifecycle event can observe it.
-      if (state !== 'started' || (error instanceof FlyApiError && error.operation !== 'start')) throw error;
-    }
-    return true;
+    return this.#acquire(agentId, cause, false, false, suspendedMachineId);
   }
 
-  /**
-   * Record the stop and tell the person whose message is waiting, in the Room
-   * of the newest pending command. The notice id follows the stop event, so a
-   * retry writes nothing twice.
-   */
-  async #stopStarts(db: SqlDatabase, agentId: string, machineId: string, starts: number): Promise<void> {
-    await db.query(`UPDATE free_agents SET state='stopped',updated_at=now() WHERE agent_id=$1`, [agentId]);
-    const event = (
-      await db.query<{ id: string }>(
-        `INSERT INTO free_agent_events(agent_id,kind,detail) VALUES($1,'start_limit_reached',$2::jsonb) RETURNING id`,
-        [agentId, JSON.stringify({ machineId, starts })],
-      )
-    ).rows[0]!;
-    const target = (
-      await db.query<{ room_id: string; agent_name: string; person_id: string | null; person_handle: string | null }>(
-        `SELECT command.room_id,agent.name agent_name,person.id person_id,person.handle person_handle
-         FROM agent_commands command
-         JOIN identities agent ON agent.id=command.agent_id
-         JOIN free_agents f ON f.agent_id=command.agent_id
-         LEFT JOIN messages source ON source.id=command.source_message_id
-         LEFT JOIN identities author ON author.id=source.author_id AND author.kind='human'
-         LEFT JOIN identities person ON person.id=COALESCE(author.id,f.owner_id)
-         WHERE command.agent_id=$1 AND command.state='pending'
-         ORDER BY command.created_at DESC,command.id DESC LIMIT 1`,
-        [agentId],
-      )
-    ).rows[0];
-    if (!target) return;
-    await systemLine(db, {
-      roomId: target.room_id,
-      id: createHash('sha256').update(`free-agent-start-limit:${event.id}`).digest('hex'),
-      subject: { kind: 'agent', id: agentId, name: target.agent_name },
-      verb: systemMessage("free-agents.could-not-start"),
-      ...(target.person_id && target.person_handle
-        ? { object: { text: systemMessage("free-agents.for", target.person_handle), id: target.person_id } }
-        : {}),
-      consequence: systemMessage("free-agents.the-beeline-team-has-been-told-send-a-new-message-to-try-again"),
+  async #acquire(agentId: string, cause: WakeCause, allowCreate: boolean, provisionOnly = false,
+    suspendedMachineId?: string): Promise<boolean> {
+    const operationId = randomUUID();
+    const row = await this.database.transaction(async db => {
+      const row = (await db.query<{ fly_machine_id: string | null; state: string; serving:boolean }>(
+        `SELECT fly_machine_id,state,EXISTS(SELECT 1 FROM agent_connections connection
+           JOIN live_server_instances server ON server.instance_id=connection.instance_id
+           WHERE connection.agent_id=f.agent_id AND connection.released_at IS NULL
+             AND server.renewed_at>clock_timestamp()-interval '90 seconds') serving FROM free_agents f WHERE agent_id=$1 AND removed_at IS NULL
+         AND runtime_owner IS NULL
+         AND ($4::text=f.fly_machine_id OR NOT EXISTS(SELECT 1 FROM agent_commands active_command
+           JOIN agent_connections connection ON connection.agent_id=active_command.agent_id AND connection.released_at IS NULL
+           JOIN live_server_instances server ON server.instance_id=connection.instance_id AND server.renewed_at>clock_timestamp()-interval '90 seconds'
+           WHERE active_command.agent_id=f.agent_id AND active_command.state='claimed'))
+         AND ($2 OR fly_machine_id IS NOT NULL) AND (NOT $3 OR fly_machine_id IS NULL)
+         AND ($3 OR $5::boolean OR ${connectorWorkSql('f.agent_id')} OR EXISTS(SELECT 1 FROM agent_commands command
+           WHERE command.agent_id=f.agent_id AND (command.state='pending' OR ($4::text=f.fly_machine_id AND command.state='claimed'))))
+         FOR UPDATE`, [agentId,allowCreate,provisionOnly,suspendedMachineId ?? null,cause==='release'])).rows[0];
+      if (!row) return undefined;
+      await db.query(`UPDATE free_agents SET runtime_owner=$2,runtime_operation_id=$3,
+        state='waking',wake_requested_at=clock_timestamp(),updated_at=now() WHERE agent_id=$1`, [agentId,this.instanceId,operationId]);
+      await recordFreeAgentEvent(db,agentId,'wake_requested',{cause,previous:row.state,operationId});
+      await writeRuntimePhase(db,agentId,operationId,row.serving?'preparing':'starting');
+      return row;
     });
+    if (!row) return false;
+    let machineId = row.fly_machine_id;
+    let phase: 'starting' | 'updating' | 'preparing' = row.serving?'preparing':'starting';
+    let createAttempted = false;
+    let provider = this.machines;
+    const adopt = async (id: string) => {
+      machineId = id;
+      await this.database.query(`UPDATE free_agents SET fly_machine_id=$3,provision_started_at=NULL,
+        removal_cleaned_at=NULL,provision_error=NULL,updated_at=now()
+        WHERE agent_id=$1 AND runtime_operation_id=$2`, [agentId,operationId,id]);
+    };
+    try {
+      if (!machineId) {
+        // The stable agent identity, not a fresh bootstrap, owns ambiguous creates.
+        const existing = await provider.find(agentId);
+        if (existing) await adopt(existing.id);
+        else {
+          const bootstrap = opaque('bfb');
+          const active = await this.database.query(`UPDATE free_agents SET bootstrap_hash=$3,
+            provision_started_at=clock_timestamp(),updated_at=now()
+            WHERE agent_id=$1 AND runtime_operation_id=$2 AND removed_at IS NULL RETURNING agent_id`,
+            [agentId,operationId,tokenHash(bootstrap)]);
+          if (!active.rowCount) return false;
+          createAttempted = true;
+          const machine = await provider.create({ agentId,image:this.config.image,region:this.config.region,
+            cpus:this.config.cpus,memoryMb:this.config.memoryMb,
+            env:{ BEELINE_FREE_AGENT_ID:agentId,BEELINE_FREE_AGENT_BOOTSTRAP:bootstrap,BEELINE_SERVER_URL:this.config.publicOrigin } });
+          await adopt(machine.id);
+          await recordFreeAgentEvent(this.database,agentId,'provisioned',{machineId,operationId});
+          return true;
+        }
+      }
+      const machine = await provider.read(machineId!);
+      if (!machine) throw new Error('runtime-absent');
+      if(cause==='release' && sameMachineImage(machine.config.image,this.config.image) && machine.state!=='stopped'){
+        await this.database.query(`UPDATE free_agents SET state=$3 WHERE agent_id=$1 AND runtime_operation_id=$2`,[agentId,operationId,row.state]);
+        return false;
+      }
+      if (!sameMachineImage(machine.config.image,this.config.image)) phase='updating';
+      await writeRuntimePhase(this.database,agentId,operationId,phase,machine.instance_id);
+      const result = await provider.start(machineId!,this.config.image);
+      await writeRuntimePhase(this.database,agentId,operationId,phase,result?.instance_id ?? machine.instance_id);
+      await recordFreeAgentEvent(this.database,agentId,'machine_started',{
+        machineId,operationId,machineVersion:result?.instance_id ?? machine.instance_id,accepted:true,
+      });
+      return true;
+    } catch (error) {
+      await recordFreeAgentEvent(this.database,agentId,'runtime_result_lost',{
+        operationId,machineId,accepted:null,completed:false,
+        ...(error instanceof FlyApiError ? {cause:'provider-refused',status:error.status,operation:error.operation} : {cause:'connection-lost'}),
+      });
+      // Exactly one fresh connection/read after an uncertain result. Never replay an update/create.
+      provider = provider.reconnect();
+      try {
+        let observed = machineId ? await provider.read(machineId) : await provider.find(agentId);
+        if (!observed && machineId) observed=await provider.find(agentId);
+        if (!observed && !createAttempted) {
+          // The stable identity is authoritatively absent; one fresh create is allowed.
+          const bootstrap=opaque('bfb');
+          const active=await this.database.query(`UPDATE free_agents SET bootstrap_hash=$3,fly_machine_id=NULL
+            WHERE agent_id=$1 AND runtime_operation_id=$2 AND removed_at IS NULL RETURNING agent_id`,
+            [agentId,operationId,tokenHash(bootstrap)]);
+          if(!active.rowCount)return false;
+          const created=await provider.create({agentId,image:this.config.image,region:this.config.region,cpus:this.config.cpus,
+            memoryMb:this.config.memoryMb,env:{BEELINE_FREE_AGENT_ID:agentId,BEELINE_FREE_AGENT_BOOTSTRAP:bootstrap,BEELINE_SERVER_URL:this.config.publicOrigin}});
+          await adopt(created.id);return true;
+        }
+        if (!observed) throw new Error('runtime-absent');
+        await adopt(observed.id ?? machineId!);
+        if (!sameMachineImage(observed.config.image,this.config.image)) throw new Error('release-unavailable');
+        await writeRuntimePhase(this.database,agentId,operationId,phase,observed.instance_id);
+        if (observed.state === 'stopped' || observed.state === 'suspended')
+          await provider.start(machineId!); // Newly observed stopped state owns one ordinary start.
+        await recordFreeAgentEvent(this.database,agentId,'runtime_reconciled',{
+          operationId,machineId,machineVersion:observed.instance_id,state:observed.state,accepted:true,completed:observed.state==='started',
+        });
+        return true;
+      } catch (error) {
+        await recordFreeAgentEvent(this.database,agentId,'runtime_unavailable',{
+          operationId,machineId,accepted:null,completed:false,
+          ...(error instanceof FlyApiError ? {cause:'provider-refused',status:error.status,operation:error.operation} : {cause:'runtime-unavailable'}),
+        });
+        await writeRuntimePhase(this.database,agentId,operationId,'unavailable',undefined,'The cloud computer is unavailable.');
+        await this.database.query(`UPDATE free_agents SET state='stopped',provision_started_at=NULL,
+          provision_error='runtime-unavailable',updated_at=now() WHERE agent_id=$1 AND runtime_operation_id=$2 AND removed_at IS NULL`,
+          [agentId,operationId]);
+        return false;
+      }
+    } finally {
+      await this.database.query(`UPDATE free_agents SET runtime_owner=NULL WHERE agent_id=$1 AND runtime_operation_id=$2`, [agentId,operationId]);
+      await this.cleanupRemoved(agentId);
+    }
   }
 
   /**
@@ -792,7 +700,7 @@ export class FreeAgentService {
     const slept = (
       await this.database.query<{ fly_machine_id: string }>(
         `UPDATE free_agents f SET state='sleeping',updated_at=now()
-         WHERE f.agent_id=$1 AND f.removed_at IS NULL AND f.fly_machine_id IS NOT NULL AND f.state IN ('running','waking')
+         WHERE f.agent_id=$1 AND f.removed_at IS NULL AND f.runtime_owner IS NULL AND f.fly_machine_id IS NOT NULL AND f.state IN ('running','waking')
            AND NOT ${connectorWorkSql('f.agent_id')}
            AND NOT EXISTS (SELECT 1 FROM agent_commands command
              WHERE command.agent_id=f.agent_id AND command.state IN ('pending','claimed'))
@@ -807,32 +715,37 @@ export class FreeAgentService {
     return { sleep: true };
   }
 
-  /** Image promotion warms existing sleepers without queuing an agent turn. */
+  /** Release and listener catch-up read durable desired work, including stale waking rows. */
   async refreshSleepingMachines(): Promise<void> {
+    await this.resumePendingWork();
     const sleepers = await this.database.query<{ agent_id: string; fly_machine_id: string }>(
-      `SELECT agent_id,fly_machine_id FROM free_agents
-       WHERE removed_at IS NULL AND fly_machine_id IS NOT NULL AND state='sleeping'`,
-    );
-    this.log(`release refresh selected ${sleepers.rows.length} sleeping Machines`);
-    let refreshed = 0;
-    const results = await Promise.allSettled(sleepers.rows.map(async row => {
-      if (await this.machines.refresh(row.fly_machine_id, this.config.image)) {
-        await recordFreeAgentEvent(this.database, row.agent_id, 'refresh_started', {
-          machineId: row.fly_machine_id, image: this.config.image,
-        });
-        refreshed++;
-      }
-    }));
-    const failures = results.filter(result => result.status === 'rejected');
-    this.log(`release refresh started ${refreshed}; unchanged ${results.length - failures.length - refreshed}; failed ${failures.length}`);
-    if (failures.length) throw new AggregateError(failures.map(result => result.reason),
-      `Free-agent image refresh failed: ${failures.map(result => String(result.reason)).join('; ')}`);
+      `SELECT agent_id,fly_machine_id FROM free_agents WHERE removed_at IS NULL
+       AND fly_machine_id IS NOT NULL AND state='sleeping' AND runtime_owner IS NULL`);
+    const failed: string[] = [];
+    for (const row of sleepers.rows) {
+      if (await this.#acquire(row.agent_id,'release',false)) continue;
+      const outcome = await this.database.query(`SELECT 1 FROM free_agents WHERE agent_id=$1
+        AND removed_at IS NULL AND runtime_phase->>'phase'='unavailable'`, [row.agent_id]);
+      if (outcome.rowCount) failed.push(row.agent_id);
+    }
+    if (failed.length) throw new Error(`Free-agent image preparation unavailable for ${failed.length} Machines`);
+  }
+
+  async resumePendingWork(): Promise<void> {
+    // Existing server-source leases decide abandoned ownership; there is no wake-age fence.
+    await this.database.query(`UPDATE free_agents f SET runtime_owner=NULL WHERE runtime_owner IS NOT NULL
+      AND NOT EXISTS(SELECT 1 FROM live_server_instances server WHERE server.instance_id=f.runtime_owner
+        AND server.renewed_at>clock_timestamp()-interval '90 seconds')`);
+    const rows = await this.database.query<{ agent_id: string }>(`SELECT agent_id FROM free_agents f
+      WHERE removed_at IS NULL AND (${connectorWorkSql('f.agent_id')} OR EXISTS(SELECT 1 FROM agent_commands command
+        WHERE command.agent_id=f.agent_id AND command.state='pending'))`);
+    for (const row of rows.rows) await this.#run(row.agent_id,'command');
   }
 
   async #sleepMachine(agentId: string, machineId: string, mode: 'suspend' | 'refresh'): Promise<void> {
     // Let the helper's response leave the Machine before it freezes.
     try {
-      if (await this.machines.refresh(machineId, this.config.image, mode === 'refresh')) {
+      if (await this.#acquire(agentId,'release',false)) {
         // The new boot connects and uses this same idle-sleep path once the
         // installer and helper are ready. Never snapshot a half-booted helper.
         await recordFreeAgentEvent(this.database, agentId, 'refresh_started', { machineId, image: this.config.image });
@@ -903,7 +816,6 @@ export class FreeAgentService {
         modelToken,
         modelBaseUrl: `${new URL(this.config.publicOrigin).origin}/v1/free-agents/model`,
         upstreamModel: row.model ?? this.config.model,
-        maxTurnSeconds: (this.config.limits ?? DEFAULT_FREE_AGENT_LIMITS).maxTurnMs / 1000,
         idleSeconds: this.config.idleSeconds,
       };
     });
@@ -930,7 +842,7 @@ export class FreeAgentService {
     // through its provision lease; its completion stores the new id and retries cleanup.
     await this.database.query(
       `UPDATE free_agents SET fly_machine_id=NULL,removal_cleaned_at=CASE
-         WHEN provision_started_at IS NULL OR provision_started_at<clock_timestamp()-interval '2 minutes'
+         WHEN runtime_owner IS NULL
          THEN clock_timestamp() ELSE NULL END,updated_at=now()
        WHERE agent_id=$1 AND removed_at IS NOT NULL AND fly_machine_id IS NOT DISTINCT FROM $2`,
       [agentId, row.fly_machine_id],
@@ -944,10 +856,14 @@ export class FreeAgentService {
       void this.requestSleep(agentId).catch(error =>
         this.log(`idle sleep ${agentId.slice(0, 12)}: ${String(error)}`));
     };
-    return live.subscribeAll((event) => {
+    const catchUp = () => { void this.resumePendingWork().catch(error => this.log(`runtime catch-up: ${String(error)}`)); };
+    const stopResync = live.subscribeResync(catchUp);
+    const stopRecovery = this.database.onRecovery?.(catchUp);
+    catchUp();
+    const stopEvents = live.subscribeAll((event) => {
       // A refreshed helper's authenticated connection is the readiness event.
       // The conditional sleep update arbitrates peers and concurrent new work.
-      if (event.type === 'agent-connection') { sleep(event.agentId); return; }
+      if (event.type === 'agent-connection') { this.kickIfFree(event.agentId); sleep(event.agentId); return; }
       if (event.type !== 'invalidate' || !event.targetAgentId) return;
       if (event.reason === 'connector-assignment') {
         this.kickIfFree(event.targetAgentId, 'connector');
@@ -955,15 +871,17 @@ export class FreeAgentService {
       }
       else if (event.reason === 'postgres:agent_commands' && event.operation === 'INSERT')
         this.kickIfFree(event.targetAgentId);
-      else if (event.reason === 'postgres:agent_commands' && event.operation === 'UPDATE')
-        sleep(event.targetAgentId);
+      else if (event.reason === 'postgres:agent_commands' && event.operation === 'UPDATE') {
+        this.kickIfFree(event.targetAgentId);sleep(event.targetAgentId);
+      }
     });
+    return () => { stopEvents(); stopResync(); stopRecovery?.(); };
   }
 
   /** Start the Machine if committed work targets a free agent. */
   kickIfFree(agentId: string, cause: WakeCause = 'command'): void {
     void this.database
-      .query(`SELECT 1 FROM free_agents f WHERE agent_id=$1 AND state<>'failed' AND removed_at IS NULL
+      .query(`SELECT 1 FROM free_agents f WHERE agent_id=$1 AND removed_at IS NULL
         ${cause === 'connector' ? `AND ${connectorWorkSql('f.agent_id')}` : ''}`, [agentId])
       .then((found) => {
         if (found.rowCount) this.kick(agentId, cause);

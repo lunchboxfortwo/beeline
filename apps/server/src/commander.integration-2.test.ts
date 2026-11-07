@@ -208,19 +208,15 @@ it('keeps Room opening facts historical while current worker and commander goals
 });
 
 
-it('pushes one background completion continuation with original order provenance after the turn ends', async () => {
+it('records background completion in its original invocation without a bookkeeping turn', async () => {
   const opened = await open(), turn = await worker(opened.cornerId);
   await rootFixture.db.query(`UPDATE agent_commands SET state='complete',completed_at=now() WHERE id=$1`, [turn.id]);
   const completion = { ...authority(turn), toolCallId: 'build-1', title: 'npm test', status: 'completed' as const };
   await rootFixture.daemon.execute('postBackgroundToolCompletion', completion, WORKER);
   await rootFixture.daemon.execute('postBackgroundToolCompletion', completion, WORKER);
   const wakes = (await commands(opened.cornerId, WORKER)).filter(c => c.reason === 'corner_background_tool');
-  expect(wakes).toHaveLength(1);
-  expect(wakes[0]).toMatchObject({ parentCommandId: turn.id,
-    source: { body: expect.stringContaining('npm test (build-1) completed') } });
-  await claim(wakes[0]!);
-  await rootFixture.daemon.execute('report', { ...authority(wakes[0]!), status: 'blocked', text: 'blocked: test failed' }, WORKER);
-  expect((await commands(DM, RUBY)).some(c => c.reason === 'report')).toBe(true);
+  expect(wakes).toEqual([]);
+  expect((await rootFixture.db.query('SELECT state FROM agent_commands WHERE id=$1',[turn.id])).rows[0]?.state).toBe('complete');
   await expect(rootFixture.daemon.execute('postBackgroundToolCompletion', { ...completion, generationId: 'stale' }, WORKER))
     .rejects.toThrow('authority rejected');
   await expect(rootFixture.daemon.execute('postBackgroundToolCompletion', completion, RUBY)).rejects.toThrow();

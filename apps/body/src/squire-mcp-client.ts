@@ -1,3 +1,5 @@
+import { randomUUID } from 'node:crypto';
+import { SquireOperationError } from './squire-outcome.js';
 /**
  * The REAL Squire MCP client — one stdio JSON-RPC session with the Squire MCP
  * server process on this helper. Everything the connector lifecycle does
@@ -66,14 +68,16 @@ export class StdioSquireMcpClient {
 
   /** One Squire MCP tool call; resolves with the tool's parsed result. */
   async call(tool: string, args: Record<string, unknown> = {}): Promise<unknown> {
-    await this.ensureSession();
-    const response = (await this.request('tools/call', { name: tool, arguments: args }, tool)) as {
+    const response = (await this.requestMcp('tools/call', { name: tool, arguments: args })) as {
       isError?: boolean;
       content?: readonly { type?: string; text?: string }[];
     };
     if (response.isError) {
       const text = response.content?.find((entry) => entry.type === 'text')?.text ?? 'tool error';
-      throw new Error(`${tool} failed: ${text}`);
+      let code: string | undefined;
+      try { code = JSON.parse(text).error?.code; } catch { /* Prose tool error. */ }
+      throw new SquireOperationError(code === 'reconnect_required' ? 'Trusty Squire needs sign-in' : `${tool} failed: ${text}`,
+        { cause:code === 'reconnect_required' ? 'needs-sign-in' : 'request-refused',accepted:true,completed:true });
     }
     const text = response.content?.find((entry) => entry.type === 'text')?.text;
     if (typeof text !== 'string') return response;
@@ -86,8 +90,28 @@ export class StdioSquireMcpClient {
 
   /** Raw MCP request for the helper-owned task relay. The child remains the owner. */
   async requestMcp(method: 'tools/list' | 'tools/call', params: Record<string, unknown>): Promise<unknown> {
-    await this.ensureSession();
-    return this.request(method, params, typeof params.name === 'string' ? params.name : undefined);
+    const operationId = randomUUID();
+    try {
+      await this.ensureSession();
+      return await this.request(method, { ...params, _meta: { ...(params._meta as Record<string,unknown>),beelineOperationId:operationId } });
+    } catch (error) {
+      if (!(error instanceof SquireOperationError) || error.outcome.completed || error.outcome.cause === 'needs-sign-in') throw error;
+      if(error.outcome.reconnect==='failed')throw error;
+      if(error.outcome.reconnect!=='in-progress')this.reconnect();
+      try {
+        await this.ensureSession();
+        if(method==='tools/list')return await this.request(method,params);
+        const reply = await this.request('tools/call',{ name:'beeline_read_operation',arguments:{operationId} }) as {content?:{text?:string}[]};
+        const receipt = JSON.parse(reply.content?.[0]?.text ?? '{}');
+        if (receipt.completed && receipt.outcome === 'completed') return receipt.result;
+        throw new SquireOperationError('Browser result is unknown. Do not repeat the browser action.',
+          { cause:'result-unknown',operationId,accepted:receipt.accepted ?? null,completed:false },{cause:error});
+      } catch (readError) {
+        if (readError instanceof SquireOperationError && readError.outcome.operationId) throw readError;
+        throw new SquireOperationError('Browser connection is unavailable; the previous action may have completed. Do not repeat it.',
+          { cause:'connection-lost',operationId,accepted:null,completed:false },{cause:error});
+      }
+    }
   }
 
   get pid(): number | undefined { return this.child?.pid; }
@@ -161,7 +185,7 @@ export class StdioSquireMcpClient {
       this.initialized = undefined;
       this.child = undefined;
       for (const entry of this.pending.values()) {
-        entry.reject(error ?? new Error('Squire MCP server exited'));
+        entry.reject(new SquireOperationError('Squire process exited', {cause:'process-exit',accepted:null,completed:false}, {cause:error}));
       }
       this.pending.clear();
     };
@@ -188,7 +212,7 @@ export class StdioSquireMcpClient {
   ): Promise<unknown> {
     const id = this.nextId++;
     const child = this.child;
-    if (!child) return Promise.reject(new Error('Squire MCP session is not running'));
+    if (!child) return Promise.reject(new SquireOperationError('Squire connection is not running',{cause:'connection-lost',accepted:false,completed:false}));
     return new Promise((resolve, reject) => {
       this.pending.set(id, { resolve, reject });
       child.stdin.write(`${JSON.stringify({ jsonrpc: '2.0', id, method, params })}\n`);
@@ -218,8 +242,13 @@ export class StdioSquireMcpClient {
       if (!entry) continue;
       this.pending.delete(id);
       if (message.error) {
-        const error = message.error as { message?: string };
-        entry.reject(new Error(error.message ?? 'Squire MCP error'));
+        const error = message.error as { code?: number; message?: string; data?: { outcome?:string; cause?:string; reconnect?:'in-progress'|'failed' } };
+        const refused=[-32600,-32601,-32602].includes(error.code ?? 0);
+        entry.reject(new SquireOperationError(error.message ?? 'Squire MCP error', {
+          cause:error.data?.cause === 'needs-sign-in' ? 'needs-sign-in' : refused ? 'request-refused' : error.data?.outcome ? 'connection-lost' : 'result-unknown',
+          accepted:refused || error.data?.outcome === 'not-sent' ? false : null,completed:refused,
+          ...(error.data?.reconnect ? {reconnect:error.data.reconnect} : {}),
+        }));
       } else {
         entry.resolve(message.result);
       }

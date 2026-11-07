@@ -113,7 +113,7 @@ describe.skipIf(!url)('real PostgreSQL owned model primitive contention', () => 
       const owner = new OwnedModelAttempts(observe(f.left,async sql=>{
         if(sql.includes('INSERT INTO owned_model_attempts')){entered.resolve();await release.promise;}
       }), f.credentials);
-      const otherKeys = new OwnedModelCredentials({ currentVersion: 'test-v1', key: () => MODEL_KEY }, () => MODEL, () => 900_000);
+      const otherKeys = new OwnedModelCredentials({ currentVersion: 'test-v1', key: () => MODEL_KEY }, () => MODEL);
       const otherActor = await otherKeys.authenticate(f.right, f.issued.token);
       const other = new OwnedModelAttempts(f.right, otherKeys);
       // The committed unique request key decides the winner. A duplicate's

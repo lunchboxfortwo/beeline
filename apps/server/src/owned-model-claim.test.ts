@@ -27,7 +27,7 @@ describe('actual owned-model claim transaction and secret boundary', () => {
     vi.stubEnv('BEELINE_NETWORK_ROUTER_V1', '1');
     const events: unknown[] = []; const publish = vi.spyOn(live, 'publish').mockImplementation(event => { events.push(event); });
     const selected = await capability(), result = await daemon.execute('claimAgentCommand', input(), MODEL_AGENT, MODEL_SOURCE, selected);
-    expect(result.modelCredential).toMatchObject({ v: 1 }); expect(Number.isSafeInteger(result.modelCredential?.expiresAt)).toBe(true);
+    expect(result.modelCredential).toMatchObject({ v: 1 }); expect(result.modelCredential?.expiresAt).toBeNull();
     const bearer = result.modelCredential!.token, actor = await f.credentials.authenticate(f.db, bearer);
     expect(actor.binding).toMatchObject({ commandId, generationId, agentId: MODEL_AGENT, connectionId: MODEL_SOURCE.connectionId, connectionEpoch: MODEL_SOURCE.epoch });
     expect((await f.db.query('SELECT command_id FROM owned_model_credentials WHERE command_id=$1', [commandId])).rows).toEqual([{ command_id: commandId }]);

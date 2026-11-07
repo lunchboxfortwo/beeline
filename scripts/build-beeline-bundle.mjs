@@ -264,6 +264,9 @@ async function main() {
       '--external:typebox/*',
       `--outfile=${resolve(staging, 'lib', 'beeline', 'pi-mcp-adapter.mjs')}`,
     ]);
+    run('npx',['--no-install','esbuild',resolve(repoRoot,'apps/body/dist/owned-model-provider.js'),
+      '--bundle','--platform=node','--format=esm','--target=node20','--external:@earendil-works/pi-*',
+      `--outfile=${resolve(staging,'lib','beeline','owned-model-provider.mjs')}`]);
     // Plan quota for Codex, Cursor, Grok and OpenCode Go agents. The helper
     // runs this pinned copy beside beeline-cli.mjs (see harness-quota.ts).
     run('npx', [

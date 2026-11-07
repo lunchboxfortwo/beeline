@@ -188,7 +188,7 @@ export interface RoomReadRow {
   };
   members: MemberRow[];
   turns: AgentTurnRow[];
-  pending_commands: Array<{ agent_id: string; turn_request_id: string; created_at: Date }>;
+  pending_commands: Array<{ agent_id: string; turn_request_id: string; created_at: Date; runtime_phase?: NonNullable<RoomView['pendingAgentCommands']>[number]['runtimePhase'] }>;
   transcript: MessageRow[];
   activity: MessageRow[];
   allow_auto_merge?: boolean;

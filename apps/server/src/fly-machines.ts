@@ -13,13 +13,26 @@ export interface FreeAgentMachineSpec {
   memoryMb: number;
 }
 
+export interface FreeAgentMachine {
+  id: string;
+  state: string;
+  instance_id?: string;
+  config: Record<string, unknown> & { image: string };
+}
+
+export function sameMachineImage(actual: string, desired: string): boolean {
+  return actual === desired || (desired.includes('@sha256:') && actual.split('@')[1] === desired.split('@')[1]);
+}
+
 export interface FreeAgentMachines {
   /** Create and boot one Machine; returns its Fly id. */
   create(spec: FreeAgentMachineSpec): Promise<{ id: string }>;
   /** The Machine already created for this agent, if any. */
-  find(agentId: string): Promise<{ id: string; state: string } | undefined>;
+  find(agentId: string): Promise<FreeAgentMachine | undefined>;
   /** Start a stopped Machine or resume a suspended one. */
-  start(id: string, image?: string): Promise<void>;
+  start(id: string, image?: string): Promise<FreeAgentMachine | void>;
+  read(id: string): Promise<FreeAgentMachine | undefined>;
+  reconnect(): FreeAgentMachines;
   /** Boot a stopped or outdated Machine now; its helper will suspend when ready. */
   refresh(id: string, image: string, force?: boolean): Promise<boolean>;
   suspend(id: string): Promise<void>;
@@ -50,6 +63,7 @@ export class FlyMachines implements FreeAgentMachines {
     readonly app: string,
     private readonly fetchImpl: typeof fetch = fetch,
     apiOrigin = 'https://api.machines.dev',
+    private readonly freshConnection = false,
   ) {
     this.#base = `${apiOrigin.replace(/\/$/, '')}/v1/apps/${encodeURIComponent(app)}/machines`;
   }
@@ -74,8 +88,8 @@ export class FlyMachines implements FreeAgentMachines {
     return { id: machine.id };
   }
 
-  async find(agentId: string): Promise<{ id: string; state: string } | undefined> {
-    const machines = await this.#request<Array<{ id: string; state: string }>>(
+  async find(agentId: string): Promise<FreeAgentMachine | undefined> {
+    const machines = await this.#request<FreeAgentMachine[]>(
       'list',
       `?metadata.beeline_agent=${encodeURIComponent(agentId)}`,
       'GET',
@@ -83,50 +97,46 @@ export class FlyMachines implements FreeAgentMachines {
     return machines.find((machine) => machine.state !== 'destroyed');
   }
 
-  async start(id: string, image?: string): Promise<void> {
-    if (image) {
-      const machine = await this.#request<{ state: string; instance_id: string; config: Record<string, unknown> & { image: string } }>(
-        'get', `/${id}`, 'GET');
-      const sameImage = machine.config.image === image ||
-        (image.includes('@sha256:') && machine.config.image.split('@')[1] === image.split('@')[1]);
-      if (!sameImage) {
-        if (machine.state === 'started' || machine.state === 'suspended') {
-          await this.stop(id);
-          await this.waitFor(id, 'stopped', 30);
-        }
-        const updated = await this.#request<{ instance_id: string }>('update image', `/${id}`, 'POST', {
-          current_version: machine.instance_id,
-          skip_launch: true,
-          config: { ...machine.config, image },
-        });
-        // An accepted update can still be replacing the Machine. Wait for
-        // that exact replacement before submitting the one admitted start.
-        await this.waitFor(id, 'stopped', 30, updated.instance_id);
-      }
+  /** One fresh config read and one launch-enabled mutation. Fly owns preparation and launch. */
+  async start(id: string, image?: string): Promise<FreeAgentMachine | void> {
+    if (!image) { await this.#request('start', `/${id}/start`, 'POST', {}); return; }
+    return (await this.#acquire(id, image)).machine;
+  }
+
+  async #acquire(id: string, image: string): Promise<{ changed: boolean; machine: FreeAgentMachine }> {
+    const machine = await this.read(id);
+    if (!machine) throw new FlyApiError(404, '', 'get');
+    if (!sameMachineImage(machine.config.image, image)) {
+      const updated = await this.#request<FreeAgentMachine>('update image', `/${id}`, 'POST', {
+        current_version: machine.instance_id,
+        skip_launch: false,
+        config: { ...machine.config, image },
+      });
+      return { changed: true, machine: { ...machine, ...updated, config: { ...machine.config, image } } };
     }
-    // A transition refusal ends this admitted action. Its owner may act again
-    // only on a new command or actual machine/reachability evidence.
-    await this.#request('start', `/${id}/start`, 'POST', {});
+    if (machine.state === 'stopped' || machine.state === 'suspended') {
+      await this.#request('start', `/${id}/start`, 'POST', {});
+      return { changed: true, machine };
+    }
+    return { changed: false, machine };
   }
 
   async suspend(id: string): Promise<void> {
     await this.#request('suspend', `/${id}/suspend`, 'POST', {});
   }
 
-  async refresh(id: string, image: string, force = false): Promise<boolean> {
-    const machine = await this.#request<{ state: string; config: { image: string } }>(
-      'get', `/${id}`, 'GET');
-    const sameImage = machine.config.image === image ||
-      (image.includes('@sha256:') && machine.config.image.split('@')[1] === image.split('@')[1]);
-    if (!force && sameImage && machine.state !== 'stopped') return false;
-    // Even with an unchanged base image, a helper release needs a cold boot
-    // to run the installer. Pay for that boot during refresh, before user work.
-    if (force && sameImage && (machine.state === 'started' || machine.state === 'suspended')) {
-      await this.stop(id);
-      await this.waitFor(id, 'stopped', 30);
-    }
-    await this.start(id, image);
-    return true;
+  async refresh(id: string, image: string): Promise<boolean> {
+    return (await this.#acquire(id, image)).changed;
+  }
+
+  reconnect(): FlyMachines {
+    // A new transport exchange, with no mutation replay or cached state.
+    return new FlyMachines(this.token, this.app, this.fetchImpl, this.#base.split('/v1/apps/')[0], true);
+  }
+
+  async read(id: string): Promise<FreeAgentMachine | undefined> {
+    try { return await this.#request<FreeAgentMachine>('get', `/${id}`, 'GET'); }
+    catch (error) { if (error instanceof FlyApiError && error.status === 404) return undefined; throw error; }
   }
 
   async stop(id: string): Promise<void> {
@@ -148,12 +158,7 @@ export class FlyMachines implements FreeAgentMachines {
   }
 
   async state(id: string): Promise<string | undefined> {
-    try {
-      return (await this.#request<{ state: string }>('get', `/${id}`, 'GET')).state;
-    } catch (error) {
-      if (error instanceof FlyApiError && error.status === 404) return undefined;
-      throw error;
-    }
+    return (await this.read(id))?.state;
   }
 
   async #request<T = unknown>(
@@ -166,6 +171,7 @@ export class FlyMachines implements FreeAgentMachines {
       method,
       headers: {
         authorization: `Bearer ${this.token}`,
+        ...(this.freshConnection ? { connection: 'close' } : {}),
         ...(body === undefined ? {} : { 'content-type': 'application/json' }),
       },
       ...(body === undefined ? {} : { body: JSON.stringify(body) }),

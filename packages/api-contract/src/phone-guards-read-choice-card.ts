@@ -514,10 +514,19 @@ export function readPendingAgentCommand(value: unknown): RoomViewPendingAgentCom
   const item = record(value);
   if (!item || !nonempty(item.requestId) || !hex64(item.agentPubkey) || !integer(item.createdAt))
     return null;
+  const phase = record(item.runtimePhase);
+  if (item.runtimePhase !== undefined && (!phase ||
+      !['starting','updating','preparing','reconnecting','unavailable','needs-sign-in'].includes(String(phase.phase)) ||
+      !nonempty(phase.operationId) || (phase.machineVersion !== undefined && !nonempty(phase.machineVersion)) ||
+      (phase.cause !== undefined && !nonempty(phase.cause)))) return null;
   return {
     requestId: item.requestId,
     agentPubkey: item.agentPubkey,
     createdAt: item.createdAt,
+    ...(phase ? { runtimePhase: { phase: phase.phase as NonNullable<RoomViewPendingAgentCommand['runtimePhase']>['phase'],
+      operationId: phase.operationId as string,
+      ...(phase.machineVersion ? { machineVersion: phase.machineVersion as string } : {}),
+      ...(phase.cause ? { cause: phase.cause as string } : {}) } } : {}),
   };
 }
 

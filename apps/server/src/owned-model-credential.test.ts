@@ -43,7 +43,7 @@ describe('opaque immutable owned-model credential primitive', () => {
     const row = (await db.query('SELECT * FROM owned_model_credentials')).rows[0]!;
     const data = JSON.stringify([row.id, row.key_version, row.agent_id, row.owner_id, row.workspace_id, row.room_id, row.command_id,
       row.generation_id, row.request_id, row.connection_id, Number(row.connection_epoch), row.instance_id, row.model,
-      row.agent_model, row.model_token_hash, Number(row.expires_ms)]);
+      row.agent_model, row.model_token_hash, row.expires_ms === null ? null : Number(row.expires_ms)]);
     const key = createHmac('sha256', MODEL_KEY).update('beeline:owned-model:credential-key:v1\0').digest();
     const mac = createHmac('sha256', key).update('beeline:owned-model:credential:v1\0').update(data).digest('hex');
     expect(issued.token).toBe(`bfmc_v1.${row.id}.${mac}`);
@@ -51,7 +51,7 @@ describe('opaque immutable owned-model credential primitive', () => {
       createHmac('sha256', key).update('beeline:legacy-model:v1\0').update(data).digest('hex')])
       await expect(credentials.authenticate(db, `bfmc_v1.${row.id}.${wrong}`)).rejects.toThrow('authority');
     await expect(new OwnedModelCredentials({ currentVersion: 'test-v1', key: () => Buffer.alloc(32, 8) },
-      () => 'synthetic/model', () => 900_000).authenticate(db, issued.token)).rejects.toThrow('authority');
+      () => 'synthetic/model').authenticate(db, issued.token)).rejects.toThrow('authority');
   });
 
   it('rejects malformed legacy-prefix, substituted ID and signature credentials without fallback', async () => {
@@ -63,7 +63,7 @@ describe('opaque immutable owned-model credential primitive', () => {
 
   it('rejects normal SQL identity/expiry mutation and cannot authenticate an out-of-band tampered binding', async () => {
     const { db, credentials, issued } = fixture;
-    await expect(db.query(`UPDATE owned_model_credentials SET expires_ms=expires_ms+1000`)).rejects.toThrow('immutable');
+    await expect(db.query(`UPDATE owned_model_credentials SET expires_ms=1000`)).rejects.toThrow('immutable');
     await expect(db.query('DELETE FROM owned_model_credentials')).rejects.toThrow('retained');
     // Synthetic DB-owner corruption bypasses the ordinary immutable trigger;
     // the original bearer still cannot authenticate the changed signed row.
@@ -72,7 +72,7 @@ describe('opaque immutable owned-model credential primitive', () => {
     await expect(credentials.authenticate(db, issued.token)).rejects.toThrow('authority');
   });
 
-  it.each(['lease', 'membership', 'workspace', 'archive', 'rotation', 'retired', 'model', 'source', 'command', 'hard-cap', 'stop'])(
+  it.each(['lease', 'membership', 'workspace', 'archive', 'rotation', 'retired', 'model', 'source', 'command', 'stop'])(
     'refuses a previously authenticated actor after actual %s authority changes', async change => {
       const { db, credentials, actor, issued } = fixture;
       if (change === 'lease') await db.query(`UPDATE live_server_instances SET renewed_at=clock_timestamp()-interval '91 seconds'`);
@@ -84,7 +84,6 @@ describe('opaque immutable owned-model credential primitive', () => {
       if (change === 'model') await db.query(`UPDATE free_agents SET model='synthetic/other' WHERE agent_id=$1`, [MODEL_AGENT]);
       if (change === 'source') await db.query(`UPDATE agent_connections SET connection_id='replacement',epoch=2 WHERE agent_id=$1`, [MODEL_AGENT]);
       if (change === 'command') await db.query(`UPDATE agent_commands SET state='pending',generation_id=NULL,turn_owner_connection_id=NULL,turn_owner_epoch=NULL WHERE id=$1`, [MODEL_CLAIM.commandId]);
-      if (change === 'hard-cap') await db.query(`UPDATE agent_commands SET claimed_at=clock_timestamp()-interval '16 minutes' WHERE id=$1`, [MODEL_CLAIM.commandId]);
       if (change === 'stop') await db.query(`UPDATE agent_commands SET action='stop' WHERE id=$1`, [MODEL_CLAIM.commandId]);
       await expect(credentials.assertCurrent(db, actor)).rejects.toThrow('authority');
       await expect(credentials.authenticate(db, issued.token)).rejects.toThrow('authority');

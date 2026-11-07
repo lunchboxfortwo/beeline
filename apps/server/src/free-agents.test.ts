@@ -6,6 +6,8 @@ import { postRepositoryOnboarding } from './repository-onboarding.js';
 import { TokenAuth } from './auth.js';
 import { DaemonService } from './daemon-service.js';
 import { createECDH } from 'node:crypto';
+import { EventEmitter } from 'node:events';
+import { PostgresLiveListener, type LivePgClient } from './postgres-live.js';
 import { getPublicKey } from '@beeline/nostr';
 
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
@@ -90,17 +92,24 @@ class FakeMachines implements FreeAgentMachines {
     const index = this.specs.findIndex((spec) => spec.agentId === agentId);
     const id = index >= 0 ? `m${index + 1}` : undefined;
     const state = id ? this.states.get(id) : undefined;
-    return id && state && state !== 'destroyed' ? { id, state } : undefined;
+    return id && state && state !== 'destroyed' ? { id, state,config:{image:this.specs[index]!.image} } : undefined;
   }
-  async start(id: string) {
+  async start(id: string, image?: string) {
+    const spec = this.specs[Number(id.slice(1)) - 1]!;
+    const state = this.states.get(id);
+    if (image && spec.image === image && state !== 'stopped' && state !== 'suspended') return;
+    if (image) spec.image = image;
     this.calls.push(`start ${id}`);
     this.states.set(id, 'started');
   }
-  async refresh(id: string, _image: string, force = false) {
-    if (!force && this.states.get(id) !== 'stopped') return false;
-    await this.stop(id);
-    await this.start(id);
-    return true;
+  reconnect(){return this;}
+  async read(id:string){
+    const state=this.states.get(id);return state && state!=='destroyed' ? {id,state,instance_id:id,config:{image:this.specs[Number(id.slice(1))-1]!.image}} : undefined;
+  }
+  async refresh(id:string,image:string){
+    const machine=await this.read(id);if(!machine)return false;
+    if(machine.config.image===image && machine.state!=='stopped')return false;
+    await this.start(id);return true;
   }
   async suspend(id: string) {
     this.calls.push(`suspend ${id}`);
@@ -639,12 +648,29 @@ describe('free starter agents', () => {
     expect(await freeAgents.requestSleep(agent.agent_id)).toEqual({ sleep: true });
     await vi.waitFor(() => expect(machines.states.get(agent.fly_machine_id!)).toBe('suspended'));
     machines.calls.length = 0;
+    // Listen to real committed PGlite notifications through the production
+    // projector. Phone pairing only writes pg_notify, never publishes to LiveHub.
+    const emitter = new EventEmitter();
+    const unlisten: Array<() => Promise<void>> = [];
+    const client = Object.assign(emitter, {
+      async connect() {},
+      async query(sql: string) {
+        const channel = sql.slice('LISTEN '.length);
+        unlisten.push(await db.client.listen(channel, payload => emitter.emit('notification', { channel, payload })));
+      },
+      async end() { for (const off of unlisten.splice(0)) await off(); },
+    }) as LivePgClient;
+    const listener = new PostgresLiveListener(db, live, () => client);
+    void listener.run();
+    await vi.waitFor(() => expect(listener.projectionHealth().connected).toBe(true));
     const stop = freeAgents.subscribeToWakes(live);
-    const pairing = await phone.execute('pairConnector', {
-      helperAgentId: agent.agent_id, connectorType: 'trusty-squire',
-    }, OWNER);
-    expect(pairing.status.status).toBe('installing');
-    await settle(); stop();
+    try {
+      const pairing = await phone.execute('pairConnector', {
+        helperAgentId: agent.agent_id, connectorType: 'trusty-squire',
+      }, OWNER);
+      expect(pairing.status.status).toBe('installing');
+      await vi.waitFor(() => expect(machines.states.get(agent.fly_machine_id!)).toBe('started'));
+    } finally { stop(); await listener.stop(); }
     expect(machines.states.get(agent.fly_machine_id!)).toBe('started');
     expect(machines.calls).toEqual([`start ${agent.fly_machine_id}`]);
   });
@@ -681,24 +707,6 @@ describe('free starter agents', () => {
     machines.states.set(agent.fly_machine_id!, 'started');
     expect(await freeAgents.requestSleep(agent.agent_id)).toEqual({ sleep: true });
     await vi.waitFor(() => expect(machines.calls).toContain(`suspend ${agent.fly_machine_id}`));
-  });
-
-  it.each(['budget', 'start-limit'] as const)('R-SQUIRE-SLEEP: connector wakes respect the %s fence', async (fence) => {
-    const { id } = await createWorkspace();
-    await settle();
-    const agent = await freeAgentOf(id);
-    await db.query(`DELETE FROM agent_commands WHERE agent_id=$1`, [agent.agent_id]);
-    await db.query(`UPDATE free_agents SET state='sleeping' WHERE agent_id=$1`, [agent.agent_id]);
-    if (fence === 'budget') await db.query(`INSERT INTO free_agent_budget(day,usd) VALUES(current_date,25)`);
-    else await db.query(`INSERT INTO free_agent_events(agent_id,kind) VALUES($1,'start_limit_reached')`, [agent.agent_id]);
-    await phone.execute('pairConnector', { helperAgentId: agent.agent_id, connectorType: 'trusty-squire' }, OWNER);
-    machines.calls.length = 0;
-    const off = freeAgents.subscribeToWakes(live);
-    try {
-      live.publish({ type: 'invalidate', roomId: '', reason: 'connector-assignment', targetAgentId: agent.agent_id });
-      await settle();
-      expect(machines.calls).toEqual([]);
-    } finally { off(); }
   });
 
   it.each(['trusty-squire', 'tailscale'] as const)('R-SQUIRE-SLEEP: %s assignment wakes immediately and holds idle sleep', async (connectorType) => {
@@ -756,22 +764,14 @@ describe('free starter agents', () => {
     expect(roomId).toBeTruthy();
   });
 
-  it('refreshes before idle suspension, then wakes the warmed helper', async () => {
-    const { id, roomId } = await createWorkspace();
-    await settle();
-    const agent = await freeAgentOf(id);
-    await db.query(`UPDATE agent_commands SET state='complete',completed_at=now() WHERE agent_id=$1`, [agent.agent_id]);
-    await db.query(`UPDATE free_agents SET state='running' WHERE agent_id=$1`, [agent.agent_id]);
-    machines.calls.length = 0;
-    expect(await freeAgents.requestSleep(agent.agent_id, { refresh: true })).toEqual({ sleep: true });
-    await vi.waitFor(() => expect(machines.calls).toEqual(['stop m1', 'start m1']));
-    // The refreshed helper establishes its connection before asking to sleep.
-    await db.query(`UPDATE free_agents SET state='running' WHERE agent_id=$1`, [agent.agent_id]);
-    expect(await freeAgents.requestSleep(agent.agent_id)).toEqual({ sleep: true });
-    await vi.waitFor(() => expect(machines.states.get('m1')).toBe('suspended'));
-    await createAgentCommand(db, { roomId, agentId: agent.agent_id, sourceMessageId: null, reason: 'human_tag' });
-    await freeAgents.wake(agent.agent_id);
-    expect(machines.calls).toEqual(['stop m1', 'start m1', 'suspend m1', 'start m1']);
+  it('suspends the baked helper without an installer refresh cycle',async()=>{
+    const {id,roomId}=await createWorkspace();await settle();const agent=await freeAgentOf(id);
+    await db.query(`UPDATE agent_commands SET state='complete',completed_at=now() WHERE agent_id=$1`,[agent.agent_id]);
+    await db.query(`UPDATE free_agents SET state='running' WHERE agent_id=$1`,[agent.agent_id]);
+    machines.calls.length=0;expect(await freeAgents.requestSleep(agent.agent_id,{refresh:true})).toEqual({sleep:true});
+    await vi.waitFor(()=>expect(machines.states.get('m1')).toBe('suspended'));
+    await createAgentCommand(db,{roomId,agentId:agent.agent_id,sourceMessageId:null,reason:'human_tag'});
+    expect(await freeAgents.wake(agent.agent_id)).toBe(true);expect(machines.calls).toEqual(['suspend m1','start m1']);
   });
 
   it('image promotion warms existing stopped agents without provisioning new Machines or model work', async () => {
@@ -783,7 +783,7 @@ describe('free starter agents', () => {
     machines.states.set('m1', 'stopped');
     machines.calls.length = 0;
     await freeAgents.refreshSleepingMachines();
-    expect(machines.calls).toEqual(['stop m1', 'start m1']);
+    expect(machines.calls).toEqual(['start m1']);
     expect((await db.query(`SELECT 1 FROM agent_commands WHERE agent_id=$1 AND state='pending'`, [agent.agent_id])).rowCount).toBe(0);
     machines.calls.length = 0;
     await freeAgents.refreshSleepingMachines();
@@ -796,53 +796,19 @@ describe('free starter agents', () => {
     expect(machines.calls).toEqual([]);
   });
 
-  describe('start limit', () => {
-    const passFence = (agentId: string) =>
-      db.query(`UPDATE free_agents SET wake_requested_at=now()-interval '21 seconds' WHERE agent_id=$1`, [agentId]);
-    const startOnce = async (agentId: string) => {
-      await passFence(agentId);
-      return freeAgents.wake(agentId);
-    };
-    const startNotices = async (roomId: string) =>
-      (
-        await db.query<{ author_id: string; text: string }>(
-          `SELECT author_id,text FROM messages WHERE room_id=$1 AND text LIKE '%could not start%' ORDER BY created_at`,
-          [roomId],
-        )
-      ).rows;
-
-    it('resets the count when the helper connects', async () => {
-      const { id } = await createWorkspace();
-      await settle();
-      const agent = await freeAgentOf(id);
-      for (let start = 0; start < 4; start++) expect(await startOnce(agent.agent_id)).toBe(true);
-      await db.query(
-        `INSERT INTO live_server_instances(instance_id,renewed_at) VALUES('server-1',now()) ON CONFLICT DO NOTHING`,
-      );
-      await claimAgentConnection(db, live, agent.agent_id, { lifecycleId: 'life-1' }, {
-        connectionId: 'conn-1',
-        instanceId: 'server-1',
-      });
-      await releaseAgentConnection(db, live, agent.agent_id, 'conn-1');
-      for (let start = 0; start < 5; start++) expect(await startOnce(agent.agent_id)).toBe(true);
-      expect(await startOnce(agent.agent_id)).toBe(false);
-      expect(sentryCaptures).toHaveLength(1);
-    });
-
-  });
-
-  it('does not start or provision Machines after the shared budget is reached', async () => {
+  it('acquires the runtime independently of shared model-budget spend', async () => {
     const { id } = await createWorkspace();
     await settle();
     const agent = await freeAgentOf(id);
     await db.query(`UPDATE free_agents SET state='sleeping' WHERE agent_id=$1`, [agent.agent_id]);
     await db.query(`INSERT INTO free_agent_budget(day,usd) VALUES(current_date,25)`);
+    machines.states.set(agent.fly_machine_id!, 'suspended');
     machines.calls.length = 0;
-    expect(await freeAgents.wake(agent.agent_id)).toBe(false);
+    expect(await freeAgents.wake(agent.agent_id)).toBe(true);
     await db.query(`UPDATE free_agents SET state='destroyed',fly_machine_id=NULL WHERE agent_id=$1`, [agent.agent_id]);
-    expect(await freeAgents.provision(agent.agent_id)).toBe(false);
-    expect(machines.calls).toEqual([]);
-    expect((await db.query(`SELECT kind FROM free_agent_events WHERE kind='budget_reached'`)).rows).toHaveLength(2);
+    expect(await freeAgents.provision(agent.agent_id)).toBe(true);
+    expect(machines.calls).toEqual([`start ${agent.fly_machine_id}`]);
+    expect((await db.query(`SELECT kind FROM free_agent_events WHERE kind='budget_reached'`)).rows).toHaveLength(0);
   });
 
   it('adds one free agent to an existing Workspace in its #general, owned by its owner', async () => {

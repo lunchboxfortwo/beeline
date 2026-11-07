@@ -1,5 +1,4 @@
-import { maskCredentialResult } from './mask-credential-result.js';
-import { AcpClient, flattenHarnessCause, AcpRuntimeExitedError, SessionUpdate, toolCallEntries, asyncTaskCall, SteerResult, AcpRequestError, parseAcpUsage, parseAvailableCommands, AcpPermissionRequest, AcpPermissionDecision } from './acp.js';
+import { AcpClient, flattenHarnessCause, AcpRuntimeExitedError, SessionUpdate, SteerResult, AcpRequestError, parseAcpUsage, parseAvailableCommands, AcpPermissionRequest, AcpPermissionDecision } from './acp.js';
 
 
 
@@ -215,17 +214,6 @@ import { AcpClient, flattenHarnessCause, AcpRuntimeExitedError, SessionUpdate, t
         };
         const activeRunId = ctx.activeRunIdFromUpdate(params.update);
         if (activeRunId) ctx.activeRunIds.set(params.sessionId, activeRunId);
-        const task = asyncTaskCall(params.update);
-        const key = `${params.sessionId}\0${task?.id ?? String(params.update.toolCallId ?? '')}`;
-        const detached = ctx.detachedTools.get(key);
-        if (detached) {
-          detached.call = maskCredentialResult({ ...detached.call, ...(task ?? toolCallEntries([u])[0]) });
-          if (detached.call.status === 'completed' || detached.call.status === 'failed' ||
-              detached.call.resultReceived) {
-            ctx.detachedTools.delete(key);
-            detached.complete(detached.call);
-          }
-        }
         ctx.emit('session/update', u);
       }
       return;

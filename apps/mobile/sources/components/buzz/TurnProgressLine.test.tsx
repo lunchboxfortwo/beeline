@@ -2,7 +2,7 @@ import React from 'react';
 // @ts-expect-error react-test-renderer has no declarations in this workspace.
 import { act, create } from 'react-test-renderer';
 import { expect, it, vi } from 'vitest';
-import { TurnSettledLine } from './TurnProgressLine';
+import { TurnProgressLine,TurnSettledLine } from './TurnProgressLine';
 vi.mock('react-native', () => ({ View: 'View', Text: 'Text' }));
 vi.mock('./BeelineMarkSpinner', () => ({ MARK_CELL: 18, BeelineMarkSpinner: () => React.createElement('Mark') }));
 vi.mock('./Button', () => ({ Button: (props: any) => React.createElement('Button', props) }));
@@ -30,4 +30,16 @@ it('keeps the existing settled-turn mark when no failure-line options are suppli
   expect(renderer.root.findAllByType('Mark')).toHaveLength(1);
   expect(renderer.root.findAllByType('Button')).toHaveLength(0);
   act(() => renderer.unmount());
+});
+
+
+it('renders release preparation in the thinking line without scheduling an execution counter',()=>{
+  vi.useFakeTimers();let renderer:any;
+  try{
+    act(()=>{renderer=create(<TurnProgressLine label="Beebee · updating — downloading the new release…" testID="release"/>);});
+    const labels=renderer.root.findAllByType('Text').map((node:any)=>node.props.children);
+    expect(labels).toContain('Beebee · updating — downloading the new release…');
+    expect(renderer.root.findAll((node:any)=>node.props.testID==='release-elapsed')).toHaveLength(0);
+    expect(vi.getTimerCount()).toBe(0);
+  }finally{act(()=>renderer?.unmount());vi.useRealTimers();}
 });

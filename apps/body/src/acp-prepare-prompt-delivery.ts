@@ -59,7 +59,6 @@ import { AcpClient, isPiAcpHarness, flattenHarnessCause, AcpRuntimeExitedError, 
     ctx.pending.clear();
     ctx.activeRunIds.clear();
     ctx.activePromptSessions.clear();
-    ctx.detachedTools.clear();
     ctx.toolCallMetadata.clear();
     ctx.sessionCommands.clear();
     if (scope) {
@@ -263,7 +262,7 @@ import { AcpClient, isPiAcpHarness, flattenHarnessCause, AcpRuntimeExitedError, 
     onChunk?: AcpTextChunkHandler,
     onActivity?: AcpStreamHandler,
     onToolCalls?: (calls: readonly ToolCallEntry[]) => void,
-    onBackgroundToolCompletion?: (call: ToolCallEntry) => void,
+    _onBackgroundToolCompletion?: (call: ToolCallEntry) => void,
   ): Promise<PromptResult> {
     if (typeof text === 'string') text = await ctx.piSessionInstructions.prepare(sessionId, text, ctx.agentEnv);
     else {
@@ -302,10 +301,9 @@ import { AcpClient, isPiAcpHarness, flattenHarnessCause, AcpRuntimeExitedError, 
       endTurn({ stopReason: reason });
       ctx.sessionCancel(sessionId);
     };
-    const isSilentCall = (call: ToolCallEntry) =>
-      /^(?:(?:mcp__)?beeline[-_]agent__|mcp\.beeline-agent\.)?no_reply_needed$/.test(call.title ?? '');
-    const silentCallPending = () => toolCallEntries(updates).some(call =>
-      isSilentCall(call) && !call.resultReceived && !['completed', 'failed'].includes(call.status ?? ''));
+    const asyncTasks = new Map<string,ToolCallEntry>();
+    const invocationToolsPending = () => [...toolCallEntries(updates),...asyncTasks.values()].some(call =>
+      !call.resultReceived && !['completed','failed'].includes(call.status ?? ''));
     let toolsSettled: (() => void) | undefined;
     const checkTerminalContext = () => {
       if (!contextPath || terminalReason) return;
@@ -314,7 +312,7 @@ import { AcpClient, isPiAcpHarness, flattenHarnessCause, AcpRuntimeExitedError, 
         // Keep the originating authority until the MCP result has reached the
         // harness. Cancelling earlier turns a successful silence into a failed
         // background call, whose completion would otherwise wake another turn.
-        if (context.terminalReason === 'no-reply' && silentCallPending()) return;
+        if (context.terminalReason === 'no-reply' && invocationToolsPending()) return;
         if (context.terminalReason) stop(context.terminalReason);
       } catch { /* A context rewrite can briefly be empty. */ }
     };
@@ -327,29 +325,24 @@ import { AcpClient, isPiAcpHarness, flattenHarnessCause, AcpRuntimeExitedError, 
       );
       return value;
     };
-    const asyncTasks = new Map<string, ToolCallEntry>();
-    const asyncToolCallIds = new Set<string>();
     const onUpdate = (u: SessionUpdate) => {
       if (u.sessionId !== sessionId || terminalReason) return;
       if (['tool_call', 'tool_call_update', 'tool_result'].includes(String(u.update.sessionUpdate))) {
-        const calls = toolCallEntries(updates);
+        const calls = [...toolCallEntries(updates),...asyncTasks.values()];
         const previous = u.update.toolCallId
           ? calls.find(call => call.id === u.update.toolCallId)
           : u.update.sessionUpdate === 'tool_call' ? undefined : calls.at(-1);
         u = { ...u, update: maskCredentialResult(u.update, { ...previous, ...u.update }) };
       }
       updates.push(u);
-      if (!silentCallPending()) toolsSettled?.();
+      const asyncTask = asyncTaskCall(u.update);
+      if (asyncTask?.id) asyncTasks.set(asyncTask.id,{...asyncTasks.get(asyncTask.id),...asyncTask});
+      if (!invocationToolsPending()) toolsSettled?.();
       checkTerminalContext();
       if (terminalReason) return;
-      const task = asyncTaskCall(u.update);
-      if (task?.id) {
-        asyncTasks.set(task.id, { ...asyncTasks.get(task.id), ...task });
-        if (typeof u.update.toolCallId === 'string') asyncToolCallIds.add(u.update.toolCallId);
-      }
       promptRunId ??= ctx.activeRunIdFromUpdate(u.update);
       onActivity?.(agentStreamSnapshot(updates, ctx.agentLabel));
-      const calls = toolCallEntries(updates);
+      const calls = [...toolCallEntries(updates),...asyncTasks.values()];
       onToolCalls?.(calls);
       let previous: string | undefined;
       let repeats = 0;
@@ -390,12 +383,12 @@ import { AcpClient, isPiAcpHarness, flattenHarnessCause, AcpRuntimeExitedError, 
 
       // Some harnesses return end_turn before background MCP calls finish.
       // Silence is part of this turn, never a detached job or a new trigger.
-      if (!terminalReason && silentCallPending()) {
+      if (!terminalReason && invocationToolsPending()) {
         let runtimeExited: (() => void) | undefined;
         try {
           await Promise.race([terminal, new Promise<void>((resolve, reject) => {
             toolsSettled = resolve;
-            runtimeExited = () => reject(new AcpRuntimeExitedError('runtime exited awaiting no_reply_needed result'));
+            runtimeExited = () => reject(new AcpRuntimeExitedError('runtime exited awaiting invocation tool result'));
             ctx.once('exit', runtimeExited);
             if (!ctx.alive) runtimeExited();
           })]);
@@ -405,11 +398,9 @@ import { AcpClient, isPiAcpHarness, flattenHarnessCause, AcpRuntimeExitedError, 
         }
       }
       checkTerminalContext();
-      const agentText = terminalReason === 'free-agent-time-limit'
-        ? agentMessageRuns(updates, ctx.agentLabel).join('\n\n')
-        : terminalReason ? '' : finalAgentMessageText(updates, ctx.agentLabel);
+      const agentText = terminalReason ? '' : finalAgentMessageText(updates, ctx.agentLabel);
 
-      const toolCalls = toolCallEntries(updates);
+      const toolCalls = [...toolCallEntries(updates),...asyncTasks.values()];
       completed = !terminalReason;
       const tokenUsage = harnessTurnTokens(result, updates);
 
@@ -436,17 +427,6 @@ import { AcpClient, isPiAcpHarness, flattenHarnessCause, AcpRuntimeExitedError, 
         ctx.activeRunIds.delete(sessionId);
       }
       ctx.off('session/update', onUpdate);
-      if (onBackgroundToolCompletion) {
-        for (const call of [...toolCallEntries(updates), ...asyncTasks.values()]) {
-          if (!isSilentCall(call) && call.id && !asyncToolCallIds.has(call.id) && !call.id.startsWith('anonymous-') &&
-              !['completed', 'failed'].includes(call.status ?? '') && !call.resultReceived) {
-            const key = `${sessionId}\0${call.id}`;
-            // Progress during another turn must retain the job's original order.
-            if (!ctx.detachedTools.has(key)) ctx.detachedTools.set(key, {
-              call, complete: onBackgroundToolCompletion,
-            });
-          }
-        }
-      }
+
     }
   }

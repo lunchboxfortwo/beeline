@@ -47,7 +47,7 @@ describe('owned model durable UNKNOWN and exact one-use handoff primitive', () =
 
   it('replays the same request after process-owner replacement with zero new reservation or dispatch permit', async () => {
     const reserve = hook(), first = await attempts.reserve(fixture.actor, ONE, semantic, reserve);
-    const credentials = new OwnedModelCredentials({ currentVersion: 'test-v1', key: () => MODEL_KEY }, () => MODEL, () => 900_000);
+    const credentials = new OwnedModelCredentials({ currentVersion: 'test-v1', key: () => MODEL_KEY }, () => MODEL);
     const actor = await credentials.authenticate(fixture.db, fixture.issued.token);
     const restarted = new OwnedModelAttempts(fixture.db, credentials);
     const replay = await restarted.reserve(actor, ONE, { messages: semantic.messages, model: MODEL }, reserve);

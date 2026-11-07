@@ -625,7 +625,7 @@ it.each(['no_reply_needed', 'mcp__beeline-agent__no_reply_needed', 'mcp__beeline
   await rootFixture.daemon.execute('postBackgroundToolCompletion', {
     ...turn, toolCallId: 'build', title: 'Run build', status: 'completed',
   }, A);
-  expect((await commands(A, C)).filter(c => c.reason === 'corner_background_tool')).toHaveLength(1);
+  expect((await commands(A, C)).filter(c => c.reason === 'corner_background_tool')).toHaveLength(0);
   const next = await createAgentCommand(rootFixture.db, { roomId: C, agentId: A, sourceMessageId: null, reason: 'system' });
   expect((await commands(A, C)).some(c => c.id === next!.id)).toBe(true);
 });

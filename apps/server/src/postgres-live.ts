@@ -112,6 +112,12 @@ export function notifyCornerStateSql(room: 'NEW.room_id' | 'corner'): string {
 }
 
 
+/** A runtime phase invalidates the existing pending-command Room projection. */
+export function notifyFreeAgentRuntimePhaseSql():string {
+  return `pg_notify('${POSTGRES_LIVE_CHANNEL}',jsonb_build_object('table','agent_commands','operation','RUNTIME',
+    'roomId',target.room_id,'agentId',NEW.agent_id)::text)`;
+}
+
 export function notifyMcpWakesSql(channel: string): string {
   return `count(pg_notify(${channel}, jsonb_build_object(
         'table','${MCP_WEBHOOK_TABLE}','operation','INSERT','roomId',room_id::text)::text))`;

@@ -17,6 +17,7 @@ afterEach(() => { vi.unstubAllEnvs(); vi.unstubAllGlobals(); vi.restoreAllMocks(
 const harness = String.raw`
 const input = require('node:readline').createInterface({input: process.stdin});
 let pending;
+let first = true;
 const send = value => process.stdout.write(JSON.stringify(value) + '\n');
 input.on('line', line => {
   const r = JSON.parse(line);
@@ -24,7 +25,10 @@ input.on('line', line => {
   if (r.method === 'session/new') send({jsonrpc:'2.0', id:r.id, result:{sessionId:'claude'}});
   if (r.method === 'session/prompt') {
     pending = r;
-    send({jsonrpc:'2.0', method:'session/update', params:{sessionId:'claude', update:{sessionUpdate:'tool_call', toolCallId:'wake', title:'mcp__beeline-agent__wake', status:'in_progress', rawInput:{action:'create',trigger:'schedule'}}}});
+    if(first) {
+      first = false;
+      send({jsonrpc:'2.0', method:'session/update', params:{sessionId:'claude', update:{sessionUpdate:'tool_call', toolCallId:'wake', title:'mcp__beeline-agent__wake', status:'in_progress', rawInput:{action:'create',trigger:'schedule'}}}});
+    }
     process.stderr.write('prompt-ready');
   }
   if (r.method === 'fixture/tool-completed') send({jsonrpc:'2.0', method:'session/update', params:{sessionId:'claude', update:{sessionUpdate:'tool_call_update', toolCallId:'wake', status:'completed', content:[{type:'content',content:{type:'text',text:r.params.text}}]}}});
@@ -85,6 +89,8 @@ it('finishes after wake(create schedule), then starts the queued wake while the 
         const result = await client.sessionPrompt(sessionId, item.source.body);
         expect(result.stopReason).toBe('end_turn');
         expect(result.agentText).toBe('Finished.');
+        expect(result.toolCalls).toEqual(item.id === 'original'
+          ? [expect.objectContaining({id:'wake',status:'completed'})] : []);
         completed.push(item.id);
         if (completed.length === 2) controller.abort();
       } });

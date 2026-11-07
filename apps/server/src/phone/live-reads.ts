@@ -490,10 +490,11 @@ import { phoneListRoomWorkflowRuns } from './schedules.js';
   export async function phoneLiveRoomCommands(ctx: PhoneContext, roomId: string, viewerId: string) {
     if (!(await phoneCanReadRooms(ctx, [roomId], viewerId)).has(roomId)) return null;
     const rows = await ctx.database.query<{
-      agent_id: string; turn_request_id: string; created_at: Date;
+      agent_id: string; turn_request_id: string; created_at: Date; runtime_phase?: NonNullable<RoomView['pendingAgentCommands']>[number]['runtimePhase'];
     }>(`SELECT DISTINCT ON(command.agent_id)
-        command.agent_id,command.turn_request_id,command.created_at
+        command.agent_id,command.turn_request_id,command.created_at,free.runtime_phase
       FROM agent_commands command
+      LEFT JOIN free_agents free ON free.agent_id=command.agent_id
       JOIN messages source ON source.id=command.source_message_id AND source.room_id=command.room_id
       JOIN identities author ON author.id=source.author_id AND author.kind='human'
       WHERE command.room_id=$1 AND command.state='pending' AND command.action='input'

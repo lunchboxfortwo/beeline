@@ -149,13 +149,14 @@ import { projectedMessage, messageOrder } from './read-projection.js';
   }
 
   export function phoneProjectPendingAgentCommands(ctx: PhoneContext,
-    commands: readonly { agent_id: string; turn_request_id: string; created_at: Date | string }[],
+    commands: readonly { agent_id: string; turn_request_id: string; created_at: Date | string; runtime_phase?: NonNullable<RoomView['pendingAgentCommands']>[number]['runtimePhase'] }[],
   ): NonNullable<RoomView['pendingAgentCommands']> {
     return commands
       .map((command) => ({
         requestId: command.turn_request_id,
         agentPubkey: command.agent_id,
         createdAt: unix(new Date(command.created_at)),
+        ...(command.runtime_phase ? { runtimePhase: command.runtime_phase } : {}),
       }))
       .sort((left, right) => left.createdAt - right.createdAt ||
         left.agentPubkey.localeCompare(right.agentPubkey));
