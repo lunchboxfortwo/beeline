@@ -221,10 +221,12 @@ test('warn CLI returns exit zero with a GitHub warning for a registry timeout', 
     const npm = join(directory, 'npm');
     writeFileSync(npm, `#!${process.execPath}\nconsole.error('npm error code E404'); process.exit(1);\n`);
     chmodSync(npm, 0o755);
+    // 9s is the spawn timeout (min of the 20s command cap and time left) and stays under the 10s retry, so a slow CI node start cannot ETIMEDOUT before the single visibility deadline.
+    const visibilityTimeoutMs = '9000';
     const result = spawnSync(process.execPath, ['scripts/npm-package-visibility.mjs', PACKAGE, VERSION, '--warn'], {
-      encoding: 'utf8', env: { ...process.env, PATH: directory, NPM_VISIBILITY_TIMEOUT_MS: '1000' },
+      encoding: 'utf8', env: { ...process.env, PATH: directory, NPM_VISIBILITY_TIMEOUT_MS: visibilityTimeoutMs },
     });
     assert.equal(result.status, 0, result.stderr);
-    assert.match(result.stdout, /::warning::.*not visible after 1000ms/);
+    assert.match(result.stdout, /::warning::.*not visible after 9000ms/);
   } finally { rmSync(directory, { recursive: true, force: true }); }
 });
