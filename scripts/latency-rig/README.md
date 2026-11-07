@@ -698,6 +698,62 @@ capture. `LATENCY_RIG_SMOKE=1` permits one sample (the ordinary minimum stays
 nightly verdict. With no entry filter smoke mode captures the arrival cases too;
 use the explicit entry filter for these bounded proofs.
 
+## Paired web interaction inventory
+
+`web-run.sh OUTPUT_DIRECTORY` builds the production Expo web export, starts a
+loopback server on a separate disposable `beeline_latency_rig_inventory` database, seeds the
+explicit `web-fixtures.mjs` scenarios, and runs `web-capture.mjs`. It requires
+prepared root/mobile dependencies, PostgreSQL, and `npx playwright install
+chromium`. It never starts an emulator or connects to a production Workspace.
+The default ports are 18090 (server), 18091 (local proxy), and 18089 (web); it
+checks that they are free before starting. `LATENCY_RIG_WEB_DATABASE_URL`,
+`LATENCY_RIG_WEB_SERVER_PORT`, `LATENCY_RIG_WEB_PROXY_PORT`, and
+`LATENCY_RIG_WEB_PORT` override this isolated lane. Database writes require a
+loopback host and a database name containing `latency_rig`.
+
+The inventory remains `interactions.json`; fixture starting routes must exist
+in `routes.json`. Every item has an explicit seeded scenario and driver step
+or a documented unsupported boundary. Each capture starts with the same inventory. Before each sample, setup resets
+that scenario and its browser response/outbox caches while retaining fixture sign-in. Chromium blocks all requests outside the two configured
+loopback origins, including external WebSockets, analytics, OAuth and media.
+The driver adds CORS headers only to its local fixture API responses.
+
+Each supported interaction runs twice with twenty samples per capture.
+`captures.json` retains the individual durations and exact setup/action errors.
+`summary.json` contains pooled and per-capture p50/p95, browser/commit/source
+hashes, coverage, `fullInventoryScore`, and `unmeasured[]`. Setup, sign-in and
+fixture reset are outside timing. Timing includes the browser driver's action
+dispatch and observing the visible result followed by two animation frames;
+it is an upper bound on rendered feedback, not physical scanout. Mutations
+also check their committed database effect after timing, so cancelling a sheet
+cannot count as forwarding a message. A failed or incomplete pair contributes
+no successful percentile row. Failure screenshots and visible text are retained.
+
+`fullInventoryScore` is the percentage of the **complete** inventory with
+pooled p50 below the existing 150 ms tap target. It is `null` when any item
+cannot be measured; gaps never count as zero-duration samples or disappear
+from the denominator. Native file selection, external provider consent, live
+GitHub merge gates, internal agent workflow commands, and retired standalone
+read/unread controls are explicitly unmeasured, with their reasons. This lane
+does not reinstate retired product controls or treat opening their neighboring
+screen as completing an interaction.
+
+`nightly-run.sh` runs the web lane before the independent native lane and keeps
+its output under `web/`. Both native comparison attempts carry `--web-summary`,
+so the final nightly JSON and card text include the web score, each measured
+p50/p95, and every gap. Native calibration, history and regression baselines
+retain their existing meaning. The existing Insights projection adds separate
+`case:web/<interaction>/paired` charts for valid current-head pairs, labels them
+as headless feedback upper bounds, and carries every gap into the dated log.
+Web setup failures retain their build/server
+logs and a nonzero exit status; a missing summary produces explicit missing
+web rows in the final nightly card.
+
+`node --test scripts/latency-rig/nightly-web-capture.test.mjs` fails if an
+inventory entry loses its fixture or driver decision, checks pair/sample
+validity, and checks propagation into the nightly card. It runs in the existing
+nightly test glob in CI and before the standalone web lane.
+
 ## Local web busy-Room capture
 
 `capture-web-room.mjs` captures two batches of twenty warm switches from

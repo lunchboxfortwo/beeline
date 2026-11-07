@@ -17,12 +17,20 @@ export function latencyLoops(current, verdict, updatedAt = new Date().toISOStrin
     report?.commit === verdict.head && contended === false && report.rows.every((row) =>
       Number.isFinite(row.p50Ms) && row.p50Ms >= 0 && row.p95Ms >= row.p50Ms);
   const rows = measured ? report.rows : [];
-  for (const row of rows) {
+  const web = verdict.webInventory;
+  const currentWeb = !!web && typeof web.commit === 'string' && web.commit === verdict.head;
+  const webRows = (currentWeb ? web.rows ?? [] : []).filter((row) =>
+    row.samples === 40 && Number.isFinite(row.p50Ms) && row.p50Ms > 0 &&
+    Number.isFinite(row.p95Ms) && row.p95Ms >= row.p50Ms &&
+    row.captures?.length === 2 && new Set(row.captures.map(pair => pair.capture)).size === 2 &&
+    row.captures.every(pair => [1, 2].includes(pair.capture) && pair.samples === 20))
+    .map(row => ({ ...row, kind: 'web', variant: 'paired', budgetMs: 150 }));
+  for (const row of [...rows, ...webRows]) {
     const key = caseKey(row);
     const seriesKey = (percentile) => `case:${key}:${percentile}`;
     let chart = loop.charts.find((chart) => chart.series.some((series) => series.key === seriesKey('p50')));
     if (!chart) {
-      chart = { label: `${key}: nightly p50 (solid) and p95 (dotted), ms`, series: [
+      chart = { label: `${key}: nightly p50 (solid) and p95 (dotted), ms${row.kind === 'web' ? ' (headless rendered-feedback upper bounds)' : ''}`, series: [
         { key: seriesKey('p50'), label: 'p50', style: 'solid', points: [] },
         { key: seriesKey('p95'), label: 'p95', style: 'dotted', points: [] },
       ] };
@@ -38,9 +46,15 @@ export function latencyLoops(current, verdict, updatedAt = new Date().toISOStrin
   }
   const note = rows.length ? `Measured ${rows.length} local emulator cases on ${verdict.night}; ${verdict.pass ? 'PASS' : 'FAIL'}. Per-case p50/p95 are measured native-frame timings, not production phone timings.` :
     `${contended === true ? 'Contended capture' : 'No usable capture'} on ${verdict.night}; no latency point added. Next measurement: the next scheduled 03:00 Eastern run.`;
-  loop.note = note;
+  const webScore = currentWeb && webRows.length === web.coverage?.total && !web.unmeasured?.length
+    ? web.fullInventoryScore : null;
+  const webNote = verdict.webInventory !== undefined
+    ? ` Web inventory: ${webRows.length}/${web?.coverage?.total ?? verdict.unmeasured?.length ?? 'unknown'}; full-inventory score ${webScore ?? 'unavailable'}. Web timings are headless rendered-feedback upper bounds.` : '';
+  loop.note = note + webNote;
   loop.log ??= [];
-  loop.log = [{ date: verdict.night, text: `${note} Run ${verdict.runId}. ${verdict.failures.join('; ')}` },
+  const webDetails = [...webRows.map(row => `${row.name}: p50=${row.p50Ms} ms p95=${row.p95Ms} ms`),
+    ...(verdict.unmeasured ?? []).map(gap => `${gap.name}: unmeasured — ${gap.reason}`)];
+  loop.log = [{ date: verdict.night, text: `${note}${webNote} Run ${verdict.runId}. ${verdict.failures.join('; ')}${webDetails.length ? ` ${webDetails.join('; ')}` : ''}` },
     ...loop.log.filter((entry) => entry.date !== verdict.night)];
   result.updatedAt = updatedAt;
   return result;
