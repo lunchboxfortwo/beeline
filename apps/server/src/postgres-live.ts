@@ -68,6 +68,13 @@ export async function notifyLive(
 
 
 
+/** A committed delivery fact invalidates the member's visible Room reads only. */
+export async function notifyMcpDeliveryChange(database:Pick<SqlDatabase,'query'>,memberId:string):Promise<void> {
+  await database.query(`SELECT pg_notify($1,jsonb_build_object('table','rooms','operation','UPDATE','roomId',a.room_id)::text)
+    FROM room_access a JOIN rooms r ON r.id=a.room_id
+    WHERE a.identity_id=$2 AND a.removed_at IS NULL AND r.archived_at IS NULL`,[POSTGRES_LIVE_CHANNEL,memberId]);
+}
+
 export function notifyMcpWebhook(database: Pick<SqlDatabase, 'query'>, roomId: string) {
   return notifyLive(database, { table: MCP_WEBHOOK_TABLE, operation: 'INSERT', roomId });
 }

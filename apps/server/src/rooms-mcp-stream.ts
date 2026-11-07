@@ -1,8 +1,10 @@
+import { recoverMemberDelivery } from './rooms-mcp-delivery.js';
+import { notifyCommittedCommand, notifyMcpDeliveryChange } from './postgres-live.js';
 import { ROUTER_AUTHORITY_LOCK } from './router-authority-lock.js';
 import { MEMBERSHIP_AUTHORITY_SCHEMA } from './membership-authority-schema.js';
 import { committedCommandNotificationSchema } from './postgres-live.js';
 import type { ServerResponse } from 'node:http';
-import { createHash } from 'node:crypto';
+import { createHash, randomUUID } from 'node:crypto';
 import type { SqlDatabase } from './database.js';
 import type { McpPrincipal } from './rooms-mcp-oauth.js';
 import { subscribeCommandCompletion } from './command-completion.js';
@@ -142,10 +144,23 @@ export async function serveMcpMemberStream(database: SqlDatabase, principal: Mcp
   input: { cursor?: McpStreamCursor; mentionCursor: string },
   page: (db: SqlDatabase, after: string) => Promise<McpStreamPage>): Promise<void> {
   if (!principal.member_id || !principal.scope.split(' ').includes('rooms:read')) throw new Error('member stream unavailable');
+  await recoverMemberDelivery(database,principal);
   const member = principal.member_id, stream = `mcp:${member}`;
+  // A staged bridge may overlap its serving predecessor. Both belong to the
+  // same selected route; the local handoff owns activation and inbox dedupe.
+  const streamId=randomUUID();
+  await database.transaction(async db=>{
+    await db.query("UPDATE rooms_mcp_delivery SET stream_id=$2,credential_hash=$3 WHERE member_id=$1 AND mechanism='local'",[member,streamId,principal.hash]);
+    await notifyCommittedCommand(db,{principal:'mcp',operation:'stream',commandId:member});
+    await notifyMcpDeliveryChange(db,member);
+  });
   let stopped = false, running = false, dirty = true, initial = true, position = input.cursor, mentionCursor = input.mentionCursor;
   const close = (reason?: 'expired' | 'unavailable') => {
     if (stopped) return; stopped=true; release();
+    void database.transaction(async db=>{
+      await db.query('UPDATE rooms_mcp_delivery SET stream_id=NULL WHERE member_id=$1 AND stream_id=$2',[member,streamId]);
+      await notifyMcpDeliveryChange(db,member);
+    }).catch(()=>undefined);
     if (reason && !response.destroyed && !response.writableEnded) response.write(JSON.stringify({v:1,type:'ended',reason})+'\n');
     if (!response.writableEnded) response.end();
   };
@@ -161,6 +176,7 @@ export async function serveMcpMemberStream(database: SqlDatabase, principal: Mcp
         const prepared = await database.transaction(async db => {
           await db.query('SET TRANSACTION ISOLATION LEVEL REPEATABLE READ READ ONLY');
           const expiresAt = await currentCredential(db,principal);
+          if(!(await db.query("SELECT 1 WHERE beeline_mcp_delivery_owner($1,'local')",[member])).rowCount)throw new Error('Delivery owner changed');
           if (!expiresAt) throw new Error('member stream credential ended');
           const head = (await db.query<{epoch:string; sequence:string}>('SELECT epoch,sequence::text FROM live_streams WHERE id=$1',[stream])).rows[0];
           if (!head) throw new Error('member stream source missing');
@@ -187,7 +203,9 @@ export async function serveMcpMemberStream(database: SqlDatabase, principal: Mcp
             }
             for (const wake of current.wakes) {
               if (wakeIds.has(wake.id)) continue;
-              wakeIds.add(wake.id); roomIds.add(wake.address);
+              wakeIds.add(wake.id);
+              // A join receipt contains no Room content or work authority. Its address is the host conversation.
+              if(wake.kind!=='join_probe')roomIds.add(wake.address);
               frames.push({v:1,type:'delivery',deliveryId:`wake:${wake.id}`,mentions:[],wakes:[wake],mentionCursor:current.nextCursor});
             }
             after=current.nextCursor;
@@ -203,7 +221,7 @@ export async function serveMcpMemberStream(database: SqlDatabase, principal: Mcp
         if (!prepared || stopped) continue;
         await database.transaction(async db=>{
           await db.query('SET TRANSACTION ISOLATION LEVEL READ COMMITTED');
-          if (!await lockRoomAccess(db,prepared.rooms,[member]) || !await currentCredential(db,principal,true) ||
+          if (!(await db.query("SELECT 1 WHERE beeline_mcp_delivery_owner($1,'local')",[member])).rowCount || !await lockRoomAccess(db,prepared.rooms,[member]) || !await currentCredential(db,principal,true) ||
               digest(await scopes(db,member,prepared.rooms))!==prepared.authority)
             throw new Error('member stream authority changed');
           if (!stopped) for (const frame of prepared.encoded) {

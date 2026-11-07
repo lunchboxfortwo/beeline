@@ -1,3 +1,4 @@
+import type { MemberDelivery } from './mcp-delivery.js';
 import type { SigninFunnelEvent } from './signin-funnel.js';
 import type { DiagnosticBatch, DiagnosticAck } from './diagnostics.js';
 import type { MediaMetadata, MediaLink } from './media-metadata.js';
@@ -412,6 +413,8 @@ export type MessageWriteResult = { readonly messageId: string };
 export type AgentMessageWriteResult = MessageWriteResult & {
   /** External recipients recorded with this message; storage is not proof of pickup. */
   readonly externalAgentHandles?: readonly string[];
+  /** Server projection only; copy is owned by the shared UI after design approval. */
+  readonly externalAgentDelivery?: readonly (MemberDelivery & {readonly memberId:string;readonly handle:string})[];
   /** Optional so a newer phone remains compatible during a rolling server deploy. */
   readonly activeSteerAgentIds?: readonly string[];
   /** Canonical row for local settlement when the write commits before its live delta. */

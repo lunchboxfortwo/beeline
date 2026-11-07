@@ -136,7 +136,7 @@ const scope1 = fixtureScope1();
     expect(Date.parse(refresh.result.refreshBefore) - Date.now()).toBeLessThanOrEqual(60_000);
     expect(posts).toHaveLength(1);
     const noExpiry = await scope1.eventCall(token, 'events/subscribe', { ...params, ttlMs: null });
-    expect(noExpiry.result.refreshBefore).toEqual(expect.any(String));
+    expect(noExpiry.result.refreshBefore).toBeNull();
     expect((await scope1.db.query('SELECT id FROM rooms_mcp_event_subscriptions WHERE member_id=$1', [member])).rowCount).toBe(1);
     const { secret: _secret, ...delivery } = params.delivery;
     expect((await scope1.eventCall(token, 'events/unsubscribe', { name: 'mention', arguments: {}, delivery })).result).toEqual({});
@@ -203,6 +203,7 @@ const scope1 = fixtureScope1();
       expect((await scope1.eventCall(other.token, 'events/unsubscribe', { name: 'mention', arguments: {}, delivery: { mode: 'webhook', url } })).result).toEqual({});
       expect((await scope1.db.query('SELECT id FROM rooms_mcp_event_subscriptions WHERE id=$1', [subscription.id])).rowCount).toBe(1);
       await client.callTool({ name: 'set_webhook', arguments: { url: 'https://hooks.example/bearer', secret: 'legacy-bearer' } });
+      await client.callTool({name:'setup_delivery',arguments:{mechanism:'events',host:'ChatGPT',surface:'Work',conversation:'event-test'}});
       const handle = (await scope1.db.query<{ handle: string }>('SELECT handle FROM identities WHERE id=$1', [member])).rows[0]!.handle;
       const sent = await scope1.phone.execute('sendRoomMessage', { roomId: ROOM, text: '@' + handle + ' reply here' }, USER);
       await routeHumanMessage(scope1.db, sent.messageId);
@@ -217,9 +218,9 @@ const scope1 = fixtureScope1();
         return phoneFetch(`http://127.0.0.1:${(receiver.address() as AddressInfo).port}`, { method: 'POST', ...init });
       };
       expect(await deliverMcpMemberWebhooks(scope1.db, deliveryTransport)).toBe(2);
-      expect(bearerCalls).toBe(1);
-      expect(received).toHaveLength(2);
-      expect(received[1]).toMatchObject({ name: 'mention', cursor: null,
+      expect(bearerCalls).toBe(0);
+      expect(received).toHaveLength(3);
+      expect(received.find(event=>event.data?.messageId===sent.messageId)).toMatchObject({ name: 'mention', cursor: null,
         data: { roomId: ROOM, messageId: sent.messageId, memberId: member, replyRule: `answer in this Room with replyTo ${sent.messageId}`, idempotencyKey: `mention:${member}:${sent.messageId}`, author: { id: USER }, text: '@' + handle + ' reply here' } });
       expect(await deliverMcpMemberWebhooks(scope1.db, deliveryTransport)).toBe(0);
       const reply = await client.callTool({ name: 'send_message', arguments: { room: ROOM, text: 'Event received.', replyTo: sent.messageId } });
@@ -413,7 +414,7 @@ const scope1 = fixtureScope1();
       ...params, name: 'wake', delivery: { ...params.delivery, url: wakeTooUrl, secret },
     })).result;
     expect((await queued((await place('wake subscription replaces the mention webhook', handle)).id))
-      .map(row => row.subscription_id)).toEqual([both.id]);
+      .map(row => row.subscription_id)).toEqual([mention.id]);
     await scope1.eventCall(token, 'events/unsubscribe', { name: 'wake', arguments: {}, delivery: { mode: 'webhook', url: wakeTooUrl } });
     await scope1.eventCall(token, 'events/unsubscribe', { name: 'mention', arguments: {}, delivery: { mode: 'webhook', url } });
     expect(await queued((await place('order after unsubscribe', handle)).id)).toEqual([]);
@@ -616,7 +617,7 @@ const scope1 = fixtureScope1();
     await phoneFetch(`${scope1.origin}/mcp/oauth/login?flow=${flow}&provider=google`, { headers: { cookie }, redirect: 'manual' });
     await phoneFetch(`${scope1.origin}/mcp/oauth/callback/google?state=${flow}&ticket=local-demo-ticket`, { headers: { cookie }, redirect: 'manual' });
     const page = await (await phoneFetch(`${scope1.origin}/mcp/oauth/consent?flow=${flow}`, { headers: { cookie } })).text();
-    expect(page).toContain('Add an unsupported app to your team');
+    expect(page).toContain('Join Beeline with an unsupported app');
     expect(page).toContain('This is not a supported agent');
     expect(page).toContain('>evil.example</p>');
     expect(page).toContain('I set this app up myself and trust <b>evil.example</b>');
@@ -657,7 +658,7 @@ const scope1 = fixtureScope1();
   ])('brands supported callback %s from the list, not the submitted name', async (redirect, display, host) => {
     const registered = await (await scope1.post('/mcp/oauth/register', { client_name: 'Untrusted supplied name', redirect_uris: [redirect] })).json() as { client_id: string };
     const grant = await scope1.prepareAuthorization(undefined, registered.client_id, redirect);
-    expect(grant.consentHtml).toContain(`Add ${display} to your team`);
+    expect(grant.consentHtml).toContain(`Join Beeline with ${display}`);
     expect(grant.consentHtml).toContain(`Supported agent · sends its code to <b>${host}</b>`);
     expect(grant.consentHtml).toMatch(/<img class="mark client" src="data:image/);
     expect(grant.consentHtml).not.toContain('Untrusted supplied name');

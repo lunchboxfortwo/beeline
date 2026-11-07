@@ -1,3 +1,4 @@
+import { readMemberDelivery } from './mcp-delivery.js';
 import { readAgentUsage } from './agent-usage.js';
 import { isAgentSignInHarness, isAgentSignInKeyProvider } from './agent-sign-in.js';
 import { type AgentGrantView, type ChoiceCardView, type GrantRequestCardView, type RoomViewActivity, type RoomViewHeader, type RoomViewIdentity, type RoomViewMember, type RoomViewMessage, type RoomViewer, type SurfaceWatchFilter, type WorkspaceAgentView, type WorkspaceMemberGrantView } from './phone-types.js';
@@ -195,6 +196,7 @@ export function readMember(value: unknown): RoomViewMember | null {
     role: role as RoomViewMember['role'],
     ...field('model', identity.kind === 'agent' && typeof item.model === 'string' ? item.model : undefined),
     ...field('presence', readPresence(item.presence)),
+    ...field('delivery', readMemberDelivery(item.delivery)),
   };
 }
 

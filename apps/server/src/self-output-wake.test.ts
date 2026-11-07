@@ -300,7 +300,7 @@ it('SELF-OUTPUT: connected apps receive no webhook or MCP event for their own ou
   expect(
     (await db.query(`SELECT 1 FROM rooms_mcp_event_deliveries WHERE command_id=$1`, [incoming!.id]))
       .rowCount,
-  ).toBe(1);
+  ).toBe(0); // The configured callback is the selected route; no parallel Events delivery.
   expect(
     (await db.query(`SELECT 1 FROM rooms_mcp_webhook_outbox WHERE member_id=$1`, [AGENT])).rowCount,
   ).toBe(1);

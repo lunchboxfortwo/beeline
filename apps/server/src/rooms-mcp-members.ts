@@ -4,7 +4,7 @@ import {
   restoreMcpWorkspaceMemberships,
   removeIdentityMemberships,
 } from './membership-join.js';
-import { notifyMcpWebhook } from './postgres-live.js';
+import { notifyMcpWebhook, notifyMcpDeliveryChange } from './postgres-live.js';
 import { mentionRouting } from './owed-mentions.js';
 import { queueMcpMentionEvents, deliverMcpEvents, mcpWakeNext } from './rooms-mcp-events.js';
 import { createHash, randomUUID } from 'node:crypto';
@@ -263,6 +263,7 @@ export async function recordMcpMemberWebhook(
   messageId: string,
   text: string,
 ): Promise<McpMemberWebhook | undefined> {
+  if (!(await db.query("SELECT 1 WHERE beeline_mcp_delivery_owner($1,'webhook')",[memberId])).rowCount) return undefined;
   const id = randomUUID();
   const inserted = await db.query(
     `INSERT INTO subscription_webhook_calls(id,member_id,wake_message_id,outcome,byte_size,reason)
@@ -320,7 +321,7 @@ export async function deliverMcpMemberWebhooks(
       call_id: string; member_id: string; room_id: string; message_id: string;
       body: string; owner_id: string | null; callback_url: string | null; callback_secret: string | null; deliverable: boolean; answered: boolean;
       author_id: string | null; author_handle: string | null; author_name: string | null; author_kind: string | null; cursor: string | null;
-      command_id: string | null; command_reason: string | null; command_kind: string | null; command_text: string | null;
+      command_id: string | null; command_reason: string | null; command_kind: string | null; command_text: string | null; probe: object | null; delivery_generation:string|null;
     }>(
       `WITH claimed AS (
          UPDATE rooms_mcp_webhook_outbox outbox SET claimed_at=now(),attempted_at=now()
@@ -334,9 +335,11 @@ export async function deliverMcpMemberWebhooks(
          COALESCE(member.callback_url,client.callback_url) callback_url,
          CASE WHEN member.callback_url IS NOT NULL THEN member.callback_secret END callback_secret,
          message.author_id,author.handle author_handle,author.name author_name,author.kind author_kind,mention.seq::text cursor,mention.cleared_at IS NOT NULL answered,
-         command.id command_id,command.reason command_reason,command.private_payload->>'kind' command_kind,
+         delivery.generation delivery_generation,probe.probe,command.id command_id,command.reason command_reason,command.private_payload->>'kind' command_kind,
          left(COALESCE(command.private_payload->>'text',source.text),16000) command_text,(
            room.id IS NOT NULL AND room.archived_at IS NULL AND mention.cleared_at IS NULL
+           AND beeline_mcp_delivery_owner(claimed.member_id,'webhook')
+           AND (probe.member_id IS NOT NULL OR message.id IS NOT NULL OR command.state='pending')
            AND EXISTS (SELECT 1 FROM room_access room_member
              WHERE room_member.room_id=claimed.room_id AND room_member.identity_id=claimed.member_id
                AND room_member.removed_at IS NULL)
@@ -352,7 +355,10 @@ export async function deliverMcpMemberWebhooks(
        LEFT JOIN identities author ON author.id=message.author_id
        LEFT JOIN rooms_mcp_mentions mention ON mention.member_id=claimed.member_id AND mention.message_id=claimed.message_id
        LEFT JOIN agent_commands command ON message.id IS NULL AND command.id=claimed.message_id AND command.agent_id=claimed.member_id
-       LEFT JOIN messages source ON source.id=command.source_message_id`,
+       LEFT JOIN messages source ON source.id=command.source_message_id
+       LEFT JOIN rooms_mcp_delivery delivery ON delivery.member_id=claimed.member_id
+       LEFT JOIN rooms_mcp_delivery probe ON probe.member_id=claimed.member_id AND probe.generation=claimed.message_id
+         AND probe.mechanism='webhook' AND probe.receipt_at IS NULL AND probe.failure IS NULL`,
     );
     const row = claimed.rows[0];
     if (!row || signal?.aborted) break;
@@ -372,11 +378,11 @@ export async function deliverMcpMemberWebhooks(
       const response = await transport(row.callback_url, {
         headers: { 'content-type': 'application/json',
           ...(row.callback_secret ? { authorization: `Bearer ${openSecrets<string>(webhookKey(), row.callback_secret)}` } : {}) },
-        body: JSON.stringify(row.command_id ? wakeBody(row) : { ...mentionRouting(row.member_id, row.room_id, row.message_id),
+        body: JSON.stringify(row.probe ?? (row.command_id ? wakeBody(row) : { ...mentionRouting(row.member_id, row.room_id, row.message_id),
           author: row.author_id ? { id: row.author_id, handle: row.author_handle, name: row.author_name } : null,
           text: row.body, cursor: row.cursor, instruction: row.author_kind === 'agent' && row.author_handle
             ? `${routingInstruction(row)} ${MCP_TAG_INSTRUCTION} Start your reply with @${row.author_handle} to wake the asking agent.`
-            : `${routingInstruction(row)} ${MCP_TAG_INSTRUCTION}` }),
+            : `${routingInstruction(row)} ${MCP_TAG_INSTRUCTION}` })),
       });
       accepted = response.ok;
       httpStatus=response.status;
@@ -387,6 +393,8 @@ export async function deliverMcpMemberWebhooks(
     await recordDiagnostic(db,{name:'mcp_delivery',deliveryState:accepted?'delivered':'failed',outcome:accepted?'success':'failed',
       code:accepted?'host_execution_unknown':httpStatus?'http_error':'network_error',...(row.command_id?{commandId:row.command_id}:{}),
       ...(httpStatus?{httpStatus}:{}),durationMs:Date.now()-deliveryStarted},row.owner_id??undefined).catch(()=>undefined);
+    if (!accepted) await db.query("UPDATE rooms_mcp_delivery SET failure='webhook_delivery_failed' WHERE member_id=$1 AND generation=$2 AND mechanism='webhook'",[row.member_id,row.delivery_generation]);
+    if (!accepted)await notifyMcpDeliveryChange(db,row.member_id);
     if (!accepted)
       await db.query(`UPDATE subscription_webhook_calls SET outcome='refused',reason='delivery failed' WHERE id=$1`, [row.call_id]);
     else delivered++;
@@ -475,6 +483,7 @@ export async function retireMcpMember(
     await tx.query(`UPDATE identities SET hidden_from_roster=true,updated_at=now() WHERE id=$1`, [
       member,
     ]);
+    await tx.query("UPDATE rooms_mcp_delivery SET failure='connection_ended',receipt_at=NULL,stream_id=NULL WHERE member_id IN (SELECT member_id FROM rooms_mcp_members WHERE client_id=$1 AND owner_id=$2)",[clientId,ownerId]);
     await tx.query('DELETE FROM rooms_mcp_members WHERE client_id=$1 AND owner_id=$2', [
       clientId,
       ownerId,
@@ -548,6 +557,7 @@ export async function setMcpMemberWebhook(
   if (secret !== undefined && !raw) throw new McpToolError('A webhook secret needs a webhook url');
   const sealed = secret === undefined ? null : sealSecrets(webhookKey(), secret);
   await db.transaction(async tx => {
+    await tx.query("UPDATE rooms_mcp_delivery SET failure='webhook_changed',receipt_at=NULL WHERE member_id=$1 AND mechanism='webhook'",[memberId]);
     // Keep the empty string: COALESCE must not restore the registration callback.
     await tx.query(
       'UPDATE rooms_mcp_members SET callback_url=$2,callback_secret=$3 WHERE member_id=$1',

@@ -58,7 +58,7 @@ export async function routeAgentResult(
             AND connection.identity_id=member.owner_id AND connection.revoked_at IS NULL
           WHERE member.member_id=$1 AND (EXISTS(SELECT 1 FROM rooms_mcp_event_subscriptions subscription
               JOIN rooms_mcp_event_deliveries delivery ON delivery.subscription_id=subscription.id AND delivery.message_id=$2
-              WHERE subscription.member_id=member.member_id AND subscription.expires_at>now()))`,
+              WHERE subscription.member_id=member.member_id AND (subscription.expires_at IS NULL OR subscription.expires_at>now())))`,
         [mention.id, sourceId])).rowCount;
         if (live) woken.push(mention.handle);
         else notWoken.push({ handle: mention.handle, reason: 'no live wake route; sees it on next list_mentions' });

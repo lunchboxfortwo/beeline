@@ -154,7 +154,7 @@ export function fixtureScope1() {
     expect(page.headers.get('content-security-policy')).not.toContain('form-action');
     expect(page.headers.get('content-security-policy')).toContain("frame-ancestors 'none'");
     const consentHtml = await page.text();
-    expect(consentHtml).toContain(clientId ? 'to your team</h1>' : 'Local MCP reviewer');
+    expect(consentHtml).toContain(clientId ? 'Join Beeline with ' : 'Local MCP reviewer');
     return { consentHtml, consent, clientId: client.client_id, verifier, cookie, flow };
   }
 

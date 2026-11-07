@@ -1,3 +1,5 @@
+import { tryWithKernelLock } from '../kernel-lock.js';
+import { recordDeliveryFailure } from './bridge.js';
 import { watch } from 'node:fs/promises';
 // Apps that collect Beeline messages themselves: ZCode through a small MCP server of ours, Antigravity's App through
 // a sidecar that hands them to `agentapi`. Ported from Reason Network (src/setup/zcode.rs, src/antigravity.rs),
@@ -48,28 +50,36 @@ const agentapi: SendMessage = (sessionId, text) => new Promise((resolve, reject)
   execFile('agentapi', ['send-message', sessionId, text], { timeout: 30_000 }, error => error ? reject(error) : resolve()));
 
 /** Hands what waits for each joined Antigravity conversation to the App; a failed handoff stays waiting. */
+const failedHandoffs=new Map<string,string>();
 export async function antigravityOnce(dir: string, live: HookSession[], send: SendMessage = agentapi): Promise<number> {
   let handed = 0;
   for (const joined of readState(dir).sessions.filter(s => s.agent === 'antigravity')) {
-    const session = live.find(h => h.agent === 'antigravity' && (h.sessionId === joined.sessionId || h.cwd === joined.cwd));
+    const session = live.find(h => h.agent === 'antigravity' && h.sessionId === joined.sessionId);
     if (!session) continue;
+    const generation=joined.deliveryGeneration??session.sessionId;
+    if(failedHandoffs.get(joined.key)===generation)continue;
     const text = takeInbox(dir, joined.key);
     if (!text) continue;
     try {
       await send(session.sessionId, text);
       handed++;
     } catch {
+      failedHandoffs.set(joined.key,generation);
       queueInbox(dir, joined.key, text);
+      await recordDeliveryFailure(dir,joined,'antigravity_agentapi_failed');
     }
   }
   return handed;
 }
 
 /** The App launches this sidecar with `agentapi` on PATH. */
-export async function runAntigravitySidecar(dir: string): Promise<never> {
+export async function runAntigravitySidecar(dir: string): Promise<void> {
+  await tryWithKernelLock('beeline-antigravity-sidecar:'+dir,()=>watchAntigravity(dir));
+}
+async function watchAntigravity(dir:string):Promise<never> {
   await antigravityOnce(dir,hookSessions(dir)).catch(()=>0);
   for await(const event of watch(dir,{recursive:true})){
-    if(event.filename?.startsWith('inbox/'))await antigravityOnce(dir,hookSessions(dir)).catch(()=>0);
+    if(event.filename?.startsWith('inbox/') || event.filename?.startsWith('deliveries/'))await antigravityOnce(dir,hookSessions(dir)).catch(()=>0);
   }
   throw new Error('session inbox watcher closed');
 }

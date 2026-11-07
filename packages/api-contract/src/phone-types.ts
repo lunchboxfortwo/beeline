@@ -1,3 +1,4 @@
+import type { MemberDelivery } from './mcp-delivery.js';
 import type { SquireApprovalDetails } from './approval-copy.js';
 import type { RepositoryOnboardingCard } from './repository-onboarding.js';
 import type { AgentUsage } from './agent-usage.js';
@@ -157,6 +158,7 @@ export type RoomViewIdentity = {
 
 
 export type RoomViewMember = {
+  readonly delivery?: MemberDelivery;
   readonly identity: RoomViewIdentity;
   readonly role: 'owner' | 'admin' | 'member' | 'spectator';
   /** Selected model label for agent bylines, available on the Room read itself. */

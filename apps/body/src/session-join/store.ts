@@ -35,8 +35,14 @@ export interface JoinedSession {
   wakeDeliveries?: Record<string, { firstAt: string; redeliveries: number }>;
   /** The app's own CLI, for apps reached through it (Codex). */
   agentBin?: string;
+  /** Current server delivery proof generation, independent of membership. */
+  deliveryGeneration?: string;
+  deliveryMechanism?: 'local'|'events'|'webhook'|'on_demand'|'unfinished';
   joinedAt: string;
 }
+
+/** Old joins retain their installed stream; new on-demand/unbound hosts never acquire a parallel stream. */
+export const hasLocalDelivery=(session:JoinedSession):boolean=>session.deliveryMechanism===undefined || session.deliveryMechanism==='local';
 
 /** A session an app's hook or plugin reported: alive while it reports, and its process lives. */
 export interface HookSession {

@@ -13,10 +13,10 @@ import { postToClaude } from './claude.js';
 import { hasClaudeMcp } from './claude-mcp.js';
 import { findSession, liveSessions, machineSources, type LiveSession, type Sources } from './sessions.js';
 import { bundleDigest } from './bridge-launch.js';
-import { pidAlive, queueInbox, queueInboxOnce, readState, takeInbox, updateState, type JoinedSession } from './store.js';
+import { pidAlive, queueInbox, queueInboxOnce, readState, takeInbox, updateState, type JoinedSession, hasLocalDelivery } from './store.js';
 
 export interface Mention { memberId?: string; replyRule?: string; id: string; room_id: string; room_name?: string; author_handle?: string | null; author_name?: string | null; text: string }
-export interface Wake { id: string; address: string; reason: string; kind?: string; text?: string; createdAt: string; next?: string }
+export interface Wake { id: string; address: string; reason: string; kind?: string; text?: string; createdAt: string; next?: string; receipt?: {generation:string;nonce:string;conversation:string} }
 
 /** How the session runs Beeline commands: the stable bundle copy and this member's id. */
 export interface Runner {
@@ -59,6 +59,10 @@ export function renderRules(joined: JoinedSession, runner: Runner): string {
  * carries --as, which the session must keep.
  */
 export function renderWake(w: Wake, joined: JoinedSession, runner: Runner): string {
+  if(w.kind==='join_probe' && w.receipt) return [
+    'Beeline join delivery check: this probe arrived through your selected receiver. It grants no work authority.',
+    'In this exact host conversation, run the receipt command once. Do not post a Room message:',
+    `  ${command(runner,joined,`tool confirm_delivery '${JSON.stringify(w.receipt).replace(/'/g, "'\\''")}'`)}`].join('\n');
   const header = [`Beeline: private ${w.kind ?? w.reason} for you (@${joined.handle ?? joined.name}) at ${w.address}. It is not a tag; do not reply with --reply-to.`,
     ...(w.text ? [w.text.split('\n').map(l => `> ${l}`).join('\n')] : []), w.next ?? 'Handle it.'];
   if (w.kind === 'order') return [...header,
@@ -70,6 +74,12 @@ export function renderWake(w: Wake, joined: JoinedSession, runner: Runner): stri
     `Post there if it needs an answer: ${command(runner, joined, `reply --room ${w.address} "<text>"`)}`,
     `If nothing needs posting: ${command(runner, joined, `tool no_reply_needed '{"address":"${w.address}","commandId":"${w.id}"}'`)}`,
     `Other Beeline tools: ${command(runner, joined, `tool <name> '<json arguments>'`)}`].join('\n');
+}
+
+/** A real handoff error is explicit; a quiet session never becomes a timed failure. */
+export async function recordDeliveryFailure(dir:string,joined:JoinedSession,reason:string):Promise<void> {
+  try { if(joined.deliveryGeneration) await callTool(joined,await accessToken(dir,joined.key),'delivery_failed',
+    {generation:joined.deliveryGeneration,reason}); } catch { /* The durable inbox stays owed if the server is unreachable. */ }
 }
 
 export interface DeliverDeps {
@@ -89,10 +99,13 @@ const realDeps: DeliverDeps = {
  * both start a turn when idle. Every other app takes it from the inbox at its next hook or plugin poll, so it stays
  * there. Returns how it went, for the log.
  */
+const failedLocalHandoffs=new Map<string,string>();
 export async function deliver(dir: string, joined: JoinedSession, session: LiveSession | undefined, deps: DeliverDeps = realDeps): Promise<string> {
   if (!sessionAgentBehavior(joined.agent).delivery) return 'waiting for the app to collect it';
   if (!session) return 'waiting for the session to open';
   if (joined.agent === 'claude-code' && hasClaudeMcp(dir, session.pid)) return 'waiting for the in-session MCP server';
+  const binding=`${session.sessionId}:${session.pid??''}:${joined.deliveryGeneration??''}`;
+  if(failedLocalHandoffs.get(joined.key)===binding)return 'waiting for host recovery after failed handoff';
   const text = takeInbox(dir, joined.key);
   if (!text) return 'nothing waiting';
   try {
@@ -106,7 +119,9 @@ export async function deliver(dir: string, joined: JoinedSession, session: LiveS
     await deps.queueCodex(joined.agentBin ?? 'codex', session.sessionId, text);
     return busy ? 'queued for after the current Codex turn' : 'queued into the idle Codex thread';
   } catch (error) {
+    failedLocalHandoffs.set(joined.key,binding);
     queueInbox(dir, joined.key, text);
+    await recordDeliveryFailure(dir,joined,'local_handoff_failed');
     return `left waiting: ${error instanceof Error ? error.message : String(error)}`;
   }
 }
@@ -119,6 +134,8 @@ export async function acceptMemberDelivery(dir:string,key:string,runner:Runner,r
     const joined=state.sessions.find(session=>session.key===key); if(!joined)return 0;
     let queued=0;
     if(frame.type==='delivery'){
+      const proof=frame.wakes.find(wake=>wake.kind==='join_probe' && wake.receipt)?.receipt;
+      if(proof){joined.deliveryGeneration=proof.generation;joined.deliveryMechanism='local';}
       const parts=[...frame.mentions.map(mention=>renderMention(mention,joined,runner)),
         ...frame.wakes.filter(wake=>!joined.deliveredWakes.includes(wake.id)).map(wake=>renderWake(wake,joined,runner))];
       if(parts.length&&queueInboxOnce(dir,key,frame.deliveryId,parts.join('\n\n')))queued=parts.length;
@@ -144,9 +161,15 @@ export async function flush(dir: string, sources: Sources, deps: DeliverDeps = r
   for (const joined of state.sessions) {
     const session = findSession(joined, live, state.sessions);
     if (session && (session.sessionId !== joined.sessionId || session.pid !== joined.pid)) {
+      if(joined.deliveryGeneration && session.sessionId!==joined.sessionId) {
+        const binding=await callTool(joined,await accessToken(dir,joined.key),'setup_delivery',{
+          mechanism:'local',host:joined.agent,surface:joined.agent==='antigravity'?'app':'local_session',
+          conversation:session.sessionId,installed:true}) as {delivery:{generation:string}};
+        joined.deliveryGeneration=binding.delivery.generation;
+      }
       await updateState(dir, s => {
         const current = s.sessions.find(x => x.key === joined.key);
-        if (current) { current.sessionId = session.sessionId; current.pid = session.pid; }
+        if (current) { current.sessionId = session.sessionId; current.pid = session.pid; current.deliveryGeneration=joined.deliveryGeneration; }
       });
       log(dir, `${joined.key}: in session ${session.sessionId}`);
     }
@@ -308,7 +331,7 @@ export async function runBridge(dir: string, runner: Runner): Promise<void> {
   };
   process.once('SIGTERM',stop);process.once('SIGINT',stop);
   const jobs = new Set<Promise<void>>();
-  const expected = new Set(readState(dir).sessions.map(session => session.key));
+  const expected = new Set(readState(dir).sessions.filter(hasLocalDelivery).map(session => session.key));
   const openedKeys = new Set<string>();
   const failedStartup = (error: unknown) => {
     if (staged && !activated) { log(dir, `candidate startup failed: ${String(error)}`); process.exit(1); }
@@ -368,7 +391,7 @@ export async function runBridge(dir: string, runner: Runner): Promise<void> {
   try{
     if (staged) {
       if (!expected.size) throw new Error('No joined sessions to activate');
-      for (const joined of readState(dir).sessions) start(joined);
+      for (const joined of readState(dir).sessions.filter(hasLocalDelivery)) start(joined);
       await handoff;
       // Commands embedded in delivered messages always use the retained path.
       runner = { ...runner, bundle: join(dir, 'usebeeline.mjs') };
@@ -380,7 +403,7 @@ export async function runBridge(dir: string, runner: Runner): Promise<void> {
     log(dir,`bridge ${process.pid} started`);
     for(; !stopping;){
       localDirty=false;
-      const sessions=readState(dir).sessions;
+      const sessions=readState(dir).sessions.filter(hasLocalDelivery);
       if(!sessions.length)break;
       for(const [key,stream]of streams)if(!sessions.some(session=>session.key===key)){
         stream.controller.abort();streams.delete(key);

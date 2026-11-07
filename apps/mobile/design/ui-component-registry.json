@@ -722,6 +722,9 @@
     ],
     "components/UpdateReadyPrompt.tsx": [
       "UpdateReadyPrompt"
+    ],
+    "components/buzz/AgentDeliveryStatus.tsx": [
+      "AgentDeliveryStatus"
     ]
   },
   "legacyControls": {

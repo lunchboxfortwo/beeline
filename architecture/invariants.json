@@ -650,7 +650,7 @@
       "apps/auth/src"
     ],
     "bootstrapTotal": 1660,
-    "unusedTotal": 173,
+    "unusedTotal": 172,
     "tables": {
       "agent_avatars": {
         "module": "Agent types",
@@ -2355,7 +2355,8 @@
           "failure_category": "Finite failure category distinct from unknown host execution.",
           "duration_ms": "Measured callback transport duration.",
           "delivery_state": "Truthful receipt, failure, skipped or legacy unknown state.",
-          "execution_state": "Host execution remains unknown without explicit evidence."
+          "execution_state": "Host execution remains unknown without explicit evidence.",
+          "probe_generation": "The selected-path join probe has no Room message or work command."
         }
       },
       "rooms_mcp_event_subscriptions": {
@@ -3448,6 +3449,38 @@
           "command_id": "Work authority reference, without the private command body.",
           "detail": "Allowlisted semantic step, result and metadata without content."
         }
+      },
+      "rooms_mcp_delivery": {
+        "module": "Tools and connectors",
+        "reason": "Selected host binding and authenticated join probe cannot be derived from OAuth membership.",
+        "columns": {
+          "member_id": "Selected host binding and authenticated join probe cannot be derived from OAuth membership.",
+          "generation": "Selected host binding and authenticated join probe cannot be derived from OAuth membership.",
+          "mechanism": "Selected host binding and authenticated join probe cannot be derived from OAuth membership.",
+          "host": "Selected host binding and authenticated join probe cannot be derived from OAuth membership.",
+          "surface": "Selected host binding and authenticated join probe cannot be derived from OAuth membership.",
+          "conversation": "Selected host binding and authenticated join probe cannot be derived from OAuth membership.",
+          "nonce_hash": "Selected host binding and authenticated join probe cannot be derived from OAuth membership.",
+          "probe": "Selected host binding and authenticated join probe cannot be derived from OAuth membership.",
+          "subscription_id": "Selected host binding and authenticated join probe cannot be derived from OAuth membership.",
+          "credential_hash": "Selected host binding and authenticated join probe cannot be derived from OAuth membership.",
+          "receipt_at": "Selected host binding and authenticated join probe cannot be derived from OAuth membership.",
+          "failure": "Selected host binding and authenticated join probe cannot be derived from OAuth membership.",
+          "stream_id": "Selected host binding and authenticated join probe cannot be derived from OAuth membership.",
+          "created_at": "Selected host binding and authenticated join probe cannot be derived from OAuth membership."
+        }
+      },
+      "rooms_mcp_delivery_attachments": {
+        "module": "Tools and connectors",
+        "reason": "Single-use local companion adoption of an existing consent; prevents duplicate members and extra approval.",
+        "columns": {
+          "hash": "Single-use local companion adoption of an existing consent; prevents duplicate members and extra approval.",
+          "client_id": "Single-use local companion adoption of an existing consent; prevents duplicate members and extra approval.",
+          "owner_id": "Single-use local companion adoption of an existing consent; prevents duplicate members and extra approval.",
+          "member_id": "Single-use local companion adoption of an existing consent; prevents duplicate members and extra approval.",
+          "expires_at": "Single-use local companion adoption of an existing consent; prevents duplicate members and extra approval.",
+          "consumed_at": "Single-use local companion adoption of an existing consent; prevents duplicate members and extra approval."
+        }
       }
     },
     "jsonb": {
@@ -3733,6 +3766,16 @@
         "updateId": "Allowlisted client compatibility descriptor, never a raw fingerprint.",
         "releaseSha": "Allowlisted client compatibility descriptor, never a raw fingerprint.",
         "buildNumber": "Allowlisted client compatibility descriptor, never a raw fingerprint."
+      },
+      "probe": {
+        "id": "Server-created join probe sent only over the selected transport; never parsed from Room text.",
+        "address": "Server-created join probe sent only over the selected transport; never parsed from Room text.",
+        "reason": "Server-created join probe sent only over the selected transport; never parsed from Room text.",
+        "kind": "Server-created join probe sent only over the selected transport; never parsed from Room text.",
+        "createdAt": "Server-created join probe sent only over the selected transport; never parsed from Room text.",
+        "text": "Server-created join probe sent only over the selected transport; never parsed from Room text.",
+        "next": "Server-created join probe sent only over the selected transport; never parsed from Room text.",
+        "receipt": "Server-created join probe sent only over the selected transport; never parsed from Room text."
       }
     }
   }

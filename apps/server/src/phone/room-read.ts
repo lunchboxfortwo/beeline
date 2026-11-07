@@ -1,3 +1,4 @@
+import { readMemberDeliveries } from '../rooms-mcp-delivery.js';
 import { phoneIdentity as identity } from '../phone-identity.js';
 import { projectCornerBrief } from '../corner-brief.js';
 import { ROOM_VIEW_MEMBER_LIMIT } from '@beeline/api-contract/phone';
@@ -80,7 +81,11 @@ import { unix, roomFilters, SLOW_ROOM_READ_MS, messageId } from './values.js';
         message.feedback_reported = reported.has(message.id);
       }
     }
-    const allMembers = phoneProjectMembers(ctx, rows.members, roomId);
+    const delivery=await readMemberDeliveries(ctx.database,rows.members.filter(member=>member.mcp_client).map(member=>member.id));
+    const allMembers = phoneProjectMembers(ctx, rows.members, roomId).map(member=>{
+      const state=delivery.get(member.identity.pubkey);
+      return state?{...member,delivery:state}:member;
+    });
     const messageResult = enrichment
       ? phoneProjectRoomMessages(ctx,
           rows.transcript,

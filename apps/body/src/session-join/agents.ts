@@ -5,10 +5,11 @@ import { readFileSync } from 'node:fs';
 import { basename } from 'node:path';
 
 /** The coding-agent apps a running session can join from. */
-export const AGENTS = ['claude-code', 'codex', 'opencode', 'pi', 'antigravity', 'gemini', 'hermes', 'zcode'] as const;
+export const AGENTS = ['claude-code', 'codex', 'opencode', 'pi', 'antigravity', 'gemini', 'hermes', 'zcode', 'grok'] as const;
 export type AgentId = (typeof AGENTS)[number];
 
 const LABELS: Record<AgentId, string> = {
+  grok:'Grok',
   'claude-code': 'Claude Code', codex: 'Codex', opencode: 'OpenCode', pi: 'Pi',
   antigravity: 'Antigravity', gemini: 'Gemini CLI', hermes: 'Hermes', zcode: 'ZCode',
 };
@@ -29,6 +30,7 @@ export function detectEnv(env: NodeJS.ProcessEnv = process.env): AgentId | undef
   const has = (key: string) => Boolean(env[key]);
   if (has('CLAUDECODE') || has('CLAUDE_CODE_SESSION_ID')) return 'claude-code';
   if (has('CODEX_THREAD_ID') || has('CODEX_SESSION_ID')) return 'codex';
+  if (has('GROK_SESSION_ID') || has('GROK_CLI')) return 'grok';
   if (has('ANTIGRAVITY_SESSION_ID') || has('ANTIGRAVITY_AGENT')) return 'antigravity';
   if (has('GEMINI_CLI')) return 'gemini';
   if (has('OPENCODE')) return 'opencode';

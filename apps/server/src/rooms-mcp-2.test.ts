@@ -317,9 +317,9 @@ const scope1 = fixtureScope1();
     await phoneFetch(`${scope1.origin}/mcp/oauth/login?flow=${flow}&provider=google`, { headers: { cookie }, redirect: 'manual' });
     await phoneFetch(`${scope1.origin}/mcp/oauth/callback/google?state=${flow}&ticket=local-demo-ticket`, { headers: { cookie }, redirect: 'manual' });
     const page = await (await phoneFetch(`${scope1.origin}/mcp/oauth/consent?flow=${flow}`, { headers: { cookie } })).text();
-    expect(page).toContain('Webhook URL (optional)'); expect(page).toContain('Auth token (optional)');
+    expect(page).toContain('Live replies · host webhook URL'); expect(page).toContain('Host receiver auth token');
     expect(page).not.toMatch(/Wake (link|key)/);
-    expect(page).toContain('Joins as'); expect(page).toContain('Add Grok Bot to your team');
+    expect(page).toContain('Joins as'); expect(page).toContain('Join Beeline with Grok Bot');
     expect(page).toContain('Starter instructions');
     expect(page).toContain('id="copy-routine" type="button">Copy</button>');
     for (const line of MCP_STARTER_ROUTINE.split('\n').filter(line => line.trim()))
@@ -431,7 +431,7 @@ const scope1 = fixtureScope1();
 
   it('connects a real SDK client, reads, searches, posts as the member and wakes an agent', async () => {
     const { client, token, grant, member } = await scope1.connected();
-    const tools = await client.listTools(); expect(tools.tools).toHaveLength(9 + MCP_AGENT_TOOLS.length);
+    const tools = await client.listTools(); expect(tools.tools).toHaveLength(12 + MCP_AGENT_TOOLS.length);
     const rooms = await client.callTool({ name: 'list_rooms', arguments: {} });
     expect(JSON.stringify(rooms)).toContain(ROOM); expect(JSON.stringify(rooms)).not.toContain(PRIVATE);
     const posted = await client.callTool({ name: 'send_message', arguments: { room: ROOM, text: '@demo-agent report the nebula test' } });

@@ -1,3 +1,4 @@
+import { readMemberDeliveries } from '../rooms-mcp-delivery.js';
 import { systemMessage } from '@beeline/api-contract/system-message-catalog';
 import type { RoomView } from '@beeline/api-contract/phone';
 import { accessNoticeBucket, parseAgentAccessPolicy, senderMayAddressAgent } from '@beeline/api-contract/agent-access';
@@ -53,7 +54,13 @@ import { phoneProjectPendingAgentCommands } from './message-enrichment.js';
        ) external_agent_handles`,
       [roomId, messageIdValue, mayRoute],
     )).rows[0];
+    const externalMembers=routing?.external_agent_handles?.length
+      ? (await database.query<{member_id:string;handle:string}>(`SELECT m.member_id,i.handle FROM rooms_mcp_members m
+          JOIN identities i ON i.id=m.member_id WHERE i.handle=ANY($1::text[]) ORDER BY i.handle`,[routing.external_agent_handles])).rows : [];
+    const delivery=await readMemberDeliveries(database,externalMembers.map(member=>member.member_id));
+    const externalAgentDelivery=externalMembers.map(member=>({memberId:member.member_id,handle:member.handle,...delivery.get(member.member_id)!}));
     return {
+      externalAgentDelivery,
       ...(delta?.type === 'message-delta' ? { message: delta.message } : {}),
       activeSteerAgentIds: routing?.active_steer_agent_ids ?? [],
       externalAgentHandles: routing?.external_agent_handles ?? [],
@@ -148,8 +155,7 @@ import { phoneProjectPendingAgentCommands } from './message-enrichment.js';
          FROM identities identity
          LEFT JOIN agents a ON a.agent_id=identity.id
          LEFT JOIN identities owner ON owner.id=a.owner_id
-         WHERE identity.id=ANY($1::text[]) AND identity.kind='agent'
-           AND NOT EXISTS(SELECT 1 FROM rooms_mcp_members WHERE member_id=identity.id)`,
+         WHERE identity.id=ANY($1::text[]) AND identity.kind='agent'`,
         [[...agentIds], roomId, systemMessage("system-line.agent-name")],
       );
       const bucket = accessNoticeBucket(Date.now());

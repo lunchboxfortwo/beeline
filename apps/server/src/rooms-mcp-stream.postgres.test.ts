@@ -1,3 +1,4 @@
+import {MCP_DELIVERY_OWNER_SCHEMA} from './rooms-mcp-delivery-schema.js';
 import { randomUUID } from 'node:crypto';
 import { EventEmitter } from 'node:events';
 import type { ServerResponse } from 'node:http';
@@ -30,16 +31,19 @@ describe.skipIf(!url)('MCP real PostgreSQL final authority contention',()=>{
         CREATE TABLE memberships(workspace_id uuid,room_id uuid,identity_id text,role text,removed_at timestamptz);
         CREATE TABLE rooms_mcp_mentions(seq bigserial PRIMARY KEY,member_id text,room_id uuid,message_id text,cleared_at timestamptz);
         CREATE TABLE agent_commands(id text,agent_id text,reason text,state text,hiccup_attempts integer,private_payload jsonb,source_message_id text);
-        CREATE TABLE rooms_mcp_members(client_id text,owner_id text,member_id text);
+        CREATE TABLE rooms_mcp_members(client_id text,owner_id text,member_id text,callback_url text);
+        CREATE TABLE rooms_mcp_clients(id text,callback_url text);
+        CREATE TABLE rooms_mcp_delivery(member_id text,mechanism text,subscription_id text,stream_id text,credential_hash text,host text,surface text,conversation text,failure text);
+        CREATE TABLE rooms_mcp_event_subscriptions(id text,member_id text,url text,event_name text,expires_at timestamptz,verified_at timestamptz);
         CREATE TABLE rooms_mcp_tokens(hash text,client_id text,identity_id text,family_id text,scope text,expires_at timestamptz,revoked_at timestamptz);
         CREATE TABLE rooms_mcp_connections(client_id text,identity_id text,scope text,revoked_at timestamptz);
         CREATE TABLE rooms_mcp_families(id text,client_id text,identity_id text,revoked_at timestamptz);`);
-      await first.query(COMMITTED_JOURNAL_SCHEMA);await first.query(MCP_MEMBER_STREAM_SCHEMA);
+      await first.query(MCP_DELIVERY_OWNER_SCHEMA);await first.query(COMMITTED_JOURNAL_SCHEMA);await first.query(MCP_MEMBER_STREAM_SCHEMA);
       await first.query(`INSERT INTO rooms VALUES($1,$2,NULL,NULL)`,[room,workspace]);
       await first.query(`INSERT INTO room_access VALUES($1,'member',NULL)`,[room]);
       await first.query(`INSERT INTO memberships VALUES($1,NULL,'member','member',NULL)`,[workspace]);
       await first.query(`INSERT INTO memberships VALUES($1,$2,'member','member',NULL)`,[workspace,room]);
-      await first.query(`INSERT INTO rooms_mcp_members VALUES('client','owner','member');
+      await first.query(`INSERT INTO rooms_mcp_clients VALUES('client',NULL); INSERT INTO rooms_mcp_members VALUES('client','owner','member',NULL);
         INSERT INTO rooms_mcp_connections VALUES('client','owner','rooms:read',NULL);
         INSERT INTO rooms_mcp_tokens VALUES('synthetic-token','client','owner',NULL,'rooms:read',now()+interval '1 hour',NULL);`);
       const observed:SqlDatabase={query:(sql,values)=>first.query(sql,values),transaction:work=>first.transaction(tx=>work({

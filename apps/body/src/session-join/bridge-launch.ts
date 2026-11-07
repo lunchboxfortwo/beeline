@@ -4,7 +4,7 @@ import { basename, dirname, join, resolve } from 'node:path';
 import { createHash } from 'node:crypto';
 import { withKernelLock } from '../kernel-lock.js';
 import { waitForProcessExit } from '../process-exit.js';
-import { pidAlive, readState, stateDir } from './store.js';
+import { pidAlive, readState, hasLocalDelivery, stateDir } from './store.js';
 import type { Runner } from './bridge.js';
 
 export function bridgeRunning(dir: string): boolean {
@@ -142,7 +142,7 @@ async function recoverRetainedBridge(dir: string, stable: string, env: NodeJS.Pr
  * through the helper's existing upgrade warning as well as bridge.log. */
 export async function refreshJoinedSessionBridge(bundle: string, env: NodeJS.ProcessEnv = process.env): Promise<void> {
   const dir = stateDir(env);
-  if (!readState(dir).sessions.length) return;
+  if (!readState(dir).sessions.some(hasLocalDelivery)) return;
   try { await ensureBridge(dir, { node: process.execPath, bundle }, env); }
   catch (error) {
     writeFileSync(join(dir, 'bridge.log'), `bridge upgrade failed: ${String(error)}\n`, { flag: 'a', mode: 0o600 });

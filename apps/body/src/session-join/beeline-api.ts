@@ -56,6 +56,15 @@ async function postJson(url: string, body: unknown, headers: Record<string, stri
   return { status: response.status, value };
 }
 
+/** Adopt an already-consented member through the existing OAuth transport owner. */
+export async function attachLocalDelivery(server:string,secret:string):Promise<Tokens & {clientId:string}> {
+  const {status,value}=await postJson(`${server}/mcp/oauth/delivery-attach`,{secret});
+  if(status!==200 || typeof value.clientId!=='string' || typeof value.access_token!=='string' ||
+    typeof value.refresh_token!=='string' || typeof value.expires_in!=='number')
+    throw new Error('The local delivery handoff ended or was already used. Ask this same connected member for setup_delivery again.');
+  return value as unknown as Tokens & {clientId:string};
+}
+
 export function handoffUri(server: string): string {
   return `${server}/mcp/oauth/handoff`;
 }

@@ -1,3 +1,4 @@
+import { MCP_DELIVERY_SCHEMA } from './rooms-mcp-delivery-schema.js';
 import { committedCommandNotificationSchema } from './postgres-live.js';
 /** OAuth credentials are independent of phone and helper credentials. */
 export const ROOMS_MCP_SCHEMA = `
@@ -185,6 +186,7 @@ CREATE TABLE IF NOT EXISTS rooms_mcp_event_subscriptions (
   FOREIGN KEY(client_id,owner_id) REFERENCES rooms_mcp_members(client_id,owner_id) ON DELETE CASCADE,
   FOREIGN KEY(client_id,owner_id) REFERENCES rooms_mcp_connections(client_id,identity_id) ON DELETE CASCADE
 );
+ALTER TABLE rooms_mcp_event_subscriptions ALTER COLUMN expires_at DROP NOT NULL;
 CREATE INDEX IF NOT EXISTS rooms_mcp_event_subscriptions_expiry ON rooms_mcp_event_subscriptions(expires_at);
 CREATE INDEX IF NOT EXISTS rooms_mcp_event_subscriptions_member ON rooms_mcp_event_subscriptions(member_id);
 CREATE INDEX IF NOT EXISTS rooms_mcp_event_subscriptions_connection ON rooms_mcp_event_subscriptions(client_id,owner_id);
@@ -247,4 +249,5 @@ DO $$ BEGIN
   END IF;
 END $$;
 ALTER TABLE rooms_mcp_event_deliveries VALIDATE CONSTRAINT rooms_mcp_event_deliveries_subject;
+${MCP_DELIVERY_SCHEMA}
 `;

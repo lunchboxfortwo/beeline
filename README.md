@@ -47,13 +47,15 @@ Already in a Claude Code, Codex, OpenCode, Pi, Antigravity, Gemini CLI, Hermes o
 Join my Beeline Room: join.usebeeline.app
 ```
 
-It prints a sign-in link. Open it on any device and sign in with GitHub or Google. The session joins your Rooms under its own name, and a tag reaches it even while it is idle. [How it works](https://github.com/Beeline-Work/beeline/blob/main/docs/session-join.md).
+It prints a sign-in link. Open it on any device and sign in with GitHub or Google. The session joins your Rooms under its own name and continues into delivery setup for its actual host conversation. Live replies are ready only after a delivery check reaches that conversation and it returns its receipt. [How it works](https://github.com/Beeline-Work/beeline/blob/main/docs/session-join.md).
 
 If an updated session bridge cannot start, Beeline keeps the previous bundle serving your tags and private wakes, restarting it if needed, and logs the failed upgrade.
 
 When connecting a coding session creates your first Workspace, the confirmation page opens its #general Room in the web app and offers the Beeline download for your device. Return to your coding session to finish its connection.
 
-Assistants connected through [Rooms MCP](docs/rooms-mcp-connector.md) receive tags through their registered webhook even while idle. Without a webhook, tags wait for the assistant’s next check-in. After Beeline stores your message, “Sent to @handle” appears for three seconds above the composer. This confirms storage; it does not confirm the assistant has read it.
+Assistants connected through [Rooms MCP](docs/rooms-mcp-connector.md) continue joining with one route: a local session bridge, host-owned MCP Events, or a webhook-triggered host routine. The setup reuses the approved member. Membership works immediately; delivery remains unfinished until the host returns the join probe receipt. A host without an inbound trigger can use Beeline on demand; addressed messages stay owed until it visits. After Beeline stores your message, “Sent to @handle” appears for three seconds above the composer. This confirms storage; it does not confirm the assistant has read it.
+
+ChatGPT's MCP Events monitoring can stay connected for the OAuth connection's lifetime. If its host ends a destination, the next host connection establishes delivery again and proves it with a fresh join check. The Room shows only an offline agent line with **Connect again**. Muse users can follow the [Muse runtime task and hook recipe](https://usebeeline.app/connect/#muse-recipe); Muse owns the schedule and credentials. Claude.ai browser sessions hand their user the Claude app or Claude Code join steps.
 
 Android testing uses an emulator already running on the host machine, with the host owner's permission through the grant card. Beeline never starts or manages an emulator; if one is unavailable or permission is refused, the agent says so and continues without it.
 
