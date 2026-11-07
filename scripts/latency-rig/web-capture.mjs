@@ -9,6 +9,7 @@ import { execFileSync } from 'node:child_process';
 import { fixture, scenarios, resetWebFixture, verifyWebEffect } from './web-fixtures.mjs';
 import { steps, exclusions } from './web-steps.mjs';
 import { measureLongPress } from './web-long-press.mjs';
+import { armForwardTiming, readForwardTiming } from './web-forward-timing.mjs';
 async function bounded(work, milliseconds, label) {
   let timer;
   try {
@@ -65,11 +66,50 @@ export function summarize(inventory, captures) {
       [...values].sort((a, b) => a - b)[Math.ceil(values.length * p) - 1];
     const values = paired.flatMap((c) => c.samples);
     const longPress = paired.flatMap((c) => c.longPressTimings ?? []);
+    const forward = paired.flatMap((c) => c.forwardTimings ?? []);
     rows.push({
       name,
       samples: 40,
       p50Ms: percentile(values, 0.5),
       p95Ms: percentile(values, 0.95),
+      ...(forward.length === 40
+        ? {
+            timingContract: 'action start to in-page picker removal plus two animation frames',
+            driverObserved: {
+              p50Ms: percentile(
+                forward.map((t) => t.driverObservedMs),
+                0.5,
+              ),
+              p95Ms: percentile(
+                forward.map((t) => t.driverObservedMs),
+                0.95,
+              ),
+            },
+            profile: Object.fromEntries(
+              Object.keys(forward[0])
+                .filter((k) => k !== 'driverObservedMs')
+                .map((key) => [
+                  key,
+                  forward.some((t) => !Number.isFinite(t[key]))
+                    ? {
+                        p50Ms: null,
+                        p95Ms: null,
+                        observedSamples: forward.filter((t) => Number.isFinite(t[key])).length,
+                      }
+                    : {
+                        p50Ms: percentile(
+                          forward.map((t) => t[key]),
+                          0.5,
+                        ),
+                        p95Ms: percentile(
+                          forward.map((t) => t[key]),
+                          0.95,
+                        ),
+                      },
+                ]),
+            ),
+          }
+        : {}),
       ...(longPress.length === 40
         ? {
             timingContract: 'long-press recognition to observed rendered result',
@@ -154,6 +194,7 @@ async function main() {
         'web-fixtures.mjs',
         'web-steps.mjs',
         'web-capture.mjs',
+        'web-forward-timing.mjs',
         'web-long-press.mjs',
         'interactions.json',
         'routes.json',
@@ -255,6 +296,8 @@ async function main() {
               record.reason = prepared.unmeasured;
               break;
             }
+            if (name === 'forward-message')
+              await page.evaluate(armForwardTiming, { messageText: f.text });
             await bounded(
               () =>
                 page.evaluate(() => {
@@ -297,6 +340,15 @@ async function main() {
                 'Result frame',
               );
             }
+            if (name === 'forward-message') {
+              const timing = await page.evaluate(readForwardTiming);
+              (record.forwardTimings ??= []).push({
+                ...timing,
+                driverObservedMs: duration,
+                driverObservationLagMs: duration - timing.durationMs,
+              });
+              duration = timing.durationMs;
+            }
             await bounded(
               () => verifyWebEffect(db, f, `rig-${name}-${capture}-${sample}`),
               3000,
@@ -338,7 +390,7 @@ async function main() {
       browser: browser.version(),
       sourceHashes,
       method:
-        'User action to observed destination/result DOM plus two animation frames, including driver overhead; upper bound, not physical scanout. Setup, reset and sign-in excluded. Local server only; no injected network delay.',
+        'User action to observed destination/result DOM plus two animation frames, including driver overhead; upper bound, not physical scanout. Setup, reset and sign-in excluded. Forward completion uses in-page removal plus two frames; driver-observed durations are retained separately. Local server only; no injected network delay.',
       ...summarize(inventory, captures),
       blockedRequests,
     };

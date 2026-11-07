@@ -1,0 +1,41 @@
+{
+  "reproduction": "FORWARD-WEB-1",
+  "beforeAppCommit": "43e3022a22dbb685b11f4ea56e1a7917e7a04959",
+  "afterAppCommit": "0a9126247bbab2dc1e79e8c9a354402a15f2de15",
+  "runs": {
+    "before": {
+      "browser": "158.0.8127.18",
+      "sourceHashes": {
+        "web-fixtures.mjs": "5417ecb2a23e17ed7cabf3dbf0009e6f70185e02f9eeff19ac8421d78bff58ca",
+        "web-steps.mjs": "cef5ad0a40bebce9d4487c5c7fe2ab2b2f04bbdbda6aed7c9aca368aee646f2e",
+        "web-capture.mjs": "88aad227693b61067ff74259dcd358686caf8ff008cd07cef07184628b6cabf4",
+        "web-forward-timing.mjs": "e132c5e68e7325948f45367158fe20198f2acfea526956fb2f6c381e1cf66ebc",
+        "interactions.json": "d5371537b295314b3cef53cb5b8e372b66ae883526980ef4a2f32cff50003472",
+        "routes.json": "d39bb3faa0876480d31fa0cda4a4e4ffb81ca9bce63a145f5e90db6ca73290f4"
+      },
+      "hashesMatch": true,
+      "entryScripts": [
+        "/_expo/static/js/web/__expo-metro-runtime-1f8f5d3ca6b7f58204d51e14506d73fb.js",
+        "/_expo/static/js/web/__common-284bcdc4bea527ba7f5214212805856e.js",
+        "/_expo/static/js/web/index-19bcc2c1b5951bf38b3c73fec418a53a.js"
+      ]
+    },
+    "after": {
+      "browser": "158.0.8127.18",
+      "sourceHashes": {
+        "web-fixtures.mjs": "5417ecb2a23e17ed7cabf3dbf0009e6f70185e02f9eeff19ac8421d78bff58ca",
+        "web-steps.mjs": "cef5ad0a40bebce9d4487c5c7fe2ab2b2f04bbdbda6aed7c9aca368aee646f2e",
+        "web-capture.mjs": "88aad227693b61067ff74259dcd358686caf8ff008cd07cef07184628b6cabf4",
+        "web-forward-timing.mjs": "e132c5e68e7325948f45367158fe20198f2acfea526956fb2f6c381e1cf66ebc",
+        "interactions.json": "d5371537b295314b3cef53cb5b8e372b66ae883526980ef4a2f32cff50003472",
+        "routes.json": "d39bb3faa0876480d31fa0cda4a4e4ffb81ca9bce63a145f5e90db6ca73290f4"
+      },
+      "hashesMatch": true,
+      "entryScripts": [
+        "/_expo/static/js/web/__expo-metro-runtime-1f8f5d3ca6b7f58204d51e14506d73fb.js",
+        "/_expo/static/js/web/__common-284bcdc4bea527ba7f5214212805856e.js",
+        "/_expo/static/js/web/index-779ffc92520c57dcbe2582dadd695d4f.js"
+      ]
+    }
+  }
+}

@@ -106,13 +106,13 @@ export type ForwardTarget =
     };
 
 /** Resolve a member-backed destination only when the viewer selects it. */
-export async function resolveForwardTargetRoom(
+export function resolveForwardTargetRoom(
   target: ForwardTarget,
   workspaceId: string,
   resolveDirectMessage: (workspaceId: string, memberId: string) => Promise<{ channelId: string }>,
-): Promise<string> {
+): string | Promise<string> {
   if (target.kind === 'room') return target.id;
-  return (await resolveDirectMessage(workspaceId, target.memberId)).channelId;
+  return resolveDirectMessage(workspaceId, target.memberId).then(room => room.channelId);
 }
 
 /**

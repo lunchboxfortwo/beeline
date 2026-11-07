@@ -233,3 +233,36 @@ test('Insights publishes valid paired web cases and gaps independently of native
   });
   assert.equal(partial.loops[0].charts.length, 0);
 });
+
+test('paired summary retains corrected completion and the original driver timing separately', () => {
+  const captures = [1, 2].map((capture) => ({
+    name: 'forward-message',
+    capture,
+    samples: Array(20).fill(350),
+    forwardTimings: Array.from({ length: 20 }, () => ({
+      durationMs: 350,
+      driverObservedMs: 850,
+      animationMs: 250,
+    })),
+  }));
+  const row = summarize(['forward-message'], captures).rows[0];
+  assert.equal(row.p50Ms, 350);
+  assert.equal(row.p95Ms, 350);
+  assert.deepEqual(row.driverObserved, { p50Ms: 850, p95Ms: 850 });
+  assert.deepEqual(row.profile.animationMs, { p50Ms: 250, p95Ms: 250 });
+});
+
+test('unobserved source visibility stays unavailable instead of becoming zero milliseconds', () => {
+  const captures = [1, 2].map((capture) => ({
+    name: 'forward-message',
+    capture,
+    samples: Array(20).fill(350),
+    forwardTimings: Array.from({ length: 20 }, () => ({
+      durationMs: 350,
+      driverObservedMs: 850,
+      sourceMessageVisibleMs: null,
+    })),
+  }));
+  const field = summarize(['forward-message'], captures).rows[0].profile.sourceMessageVisibleMs;
+  assert.deepEqual(field, { p50Ms: null, p95Ms: null, observedSamples: 0 });
+});

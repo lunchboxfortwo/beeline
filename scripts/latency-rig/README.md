@@ -790,6 +790,34 @@ Predicate checks: `node --test scripts/latency-rig/web-room-frame.test.mjs`.
 The SidebarView route-hop test guards stable row props so navigation cannot
 silently force every unrelated memoized conversation row to render again.
 
+## Forward-message completion timing
+
+The forward-message row preserves its original start, fixture, click, accepted
+server write, hidden-picker completion, and two result frames. Before the start,
+`web-forward-timing.mjs` installs a passive DOM-removal observer. It records the
+picker removal and the following two frames in the page, so Playwright's selector
+polling cannot move the stop timestamp. `forwardTimings` retains each corrected
+sample, the original `driverObservedMs`, and the dispatch, click-to-send,
+send-to-reply, reply-to-animation, animation, removal, and frame segments. The
+summary keeps original driver percentiles under `driverObserved` and segment
+percentiles under `profile`. These timestamps observe the real app; they neither
+close the picker nor change its exit animation. Missing profile events fail the
+sample. Socket instrumentation retains timing only, without message contents.
+
+This is a measurement-contract correction, not an app speedup against earlier
+web-inventory numbers. The existing web modal's exit animation remains a design
+floor. To select this interaction without changing its two batches of twenty
+samples, use `LATENCY_RIG_WEB_INTERACTION=forward-message` with `web-run.sh`;
+uncaptured inventory entries remain explicitly unmeasured and the full score
+remains unavailable. This selection matches the create-corner capture lane.
+
+The existing nightly regression checks retain corrected and driver percentiles
+separately. `node --test scripts/latency-rig/web-forward-timing.test.mjs` additionally
+uses local headless Chromium to prove that delaying the driver's read cannot move
+the recorded stop, that unrelated replies cannot settle the profile, and that
+instrumentation restores itself. Chromium is required for that local check; it
+is not added as a prerequisite to the existing browser-free nightly CI suite.
+
 ### Long-press recognition timing
 
 Create-corner reports time from pointerdown plus the `delayLongPress` threshold
@@ -808,3 +836,12 @@ of twenty static rendered-result samples to establish the driver floor. This
 self-check is not an app/server performance measurement. For a targeted paired
 capture set `LATENCY_RIG_WEB_INTERACTION=create-corner`; the summary still lists
 unmeasured inventory rows and leaves the full score unavailable.
+
+Forward close auditing also separates `configuredAnimationMs` (the CSS animation
+elapsed-time value) from `animationMs` (the observed start/end event interval).
+`closeStartMs`, `animationEndMs`, `removalMs`, `tapToGoneMs`, and
+`sourceMessageVisibleMs` expose the actual marks. The last observes the existing
+source message after removal, not a forwarded message in a destination Room that
+this route never opens. Missing visibility stays null. The primary two-frame
+completion metric is unchanged; the direct tap-to-gone value excludes those
+frames and the pre-click driver dispatch.

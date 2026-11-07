@@ -367,11 +367,14 @@ export function useChatMessageActions([
       setForwardError(null);
       try {
         if (!transport || !activeCommunityId) throw new Error('Beeline is still connecting.');
-        const roomId = await resolveForwardTargetRoom(
+        const destination = resolveForwardTargetRoom(
           target,
           activeCommunityId,
           (workspaceId, memberId) => transport.resolveDirectMessage(workspaceId, memberId),
         );
+        // An existing Room needs no asynchronous resolution. Send before
+        // yielding to the picker's busy-state render; member DMs still wait.
+        const roomId = typeof destination === 'string' ? destination : await destination;
         await forwardMessageToRoom(
           (input) => monolithPhoneOperation('sendRoomMessage', input),
           roomId,
