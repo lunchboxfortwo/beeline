@@ -2383,6 +2383,19 @@
           "claude_inbound_fallback": "existing before the registry; weekly audit reviews"
         }
       },
+      "rooms_mcp_workspace_landings": {
+        "module": "apps/server/src/rooms-mcp-oauth.ts",
+        "reason": "Browser-bound receipt of first-Workspace creation survives consumption of the OAuth flow and one-shot grant code.",
+        "columns": {
+          "code_hash": "Correlates the browser landing to the one-shot consent code without retaining another raw OAuth credential.",
+          "browser_hash": "Binds the first-Workspace receipt to the browser that approved consent after its flow is deleted.",
+          "workspace_id": "Records the Workspace created by this consent transaction; membership alone cannot prove first-run creation.",
+          "room_id": "Records the exact general Room created by this consent transaction for the human next step.",
+          "workspace_name": "Preserves the consent-time Workspace name after the onboarding flow and grant code are consumed.",
+          "client_name": "Preserves the normalized client display name used in the deleted consent flow for session-return instructions.",
+          "expires_at": "Limits how long the consumed-flow receipt can present the first-Workspace landing."
+        }
+      },
       "rooms_mcp_handoffs": {
         "module": "Tools and connectors",
         "reason": "existing before the registry; weekly audit reviews",

@@ -1,3 +1,4 @@
+import { MCP_LANDING_STYLE, renderMcpWorkspaceLanding, type McpWorkspaceLanding } from './rooms-mcp-landing.js';
 import { createWorkspace, defaultWorkspaceName } from './workspace-creation.js';
 import { renderMcpWorkspaceSelection, MCP_WORKSPACE_SCRIPT, MCP_WORKSPACE_STYLE } from './rooms-mcp-consent-ui.js';
 import { readFileSync } from 'node:fs';
@@ -176,7 +177,7 @@ export class RoomsMcpOAuth {
   private cookie(request: IncomingMessage): string {
     return (request.headers.cookie ?? '').split(';').map(part => part.trim()).find(part => part.startsWith('beeline_mcp='))?.slice(12) ?? '';
   }
-  private page(response: ServerResponse, title: string, content: string, status = 200): void {
+  private page(response: ServerResponse, title: string, content: string, status = 200, workspaceLanding = false): void {
     // No form-action: Chrome applies it to every redirect after a form POST, so
     // a client callback that redirects again (www.cursor.com to cursor.com) stalls.
     const nonce = randomBytes(18).toString('base64');
@@ -188,7 +189,7 @@ export class RoomsMcpOAuth {
       'content-security-policy': `default-src 'none'; ${copyScript ? `script-src 'nonce-${nonce}'; ` : ''}style-src 'unsafe-inline'; font-src 'self'; img-src data:; base-uri 'none'; frame-ancestors 'none'`,
       'x-content-type-options': 'nosniff',
     });
-    response.end(`<!doctype html><html lang="en"><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><meta name="color-scheme" content="light dark"><title>${escape(title)} · Beeline</title><style>${PAGE_STYLE}</style><main>${content}<p class="foot"><a href="https://usebeeline.app/privacy/">Privacy</a><a href="https://usebeeline.app/terms/">Terms</a><a href="mailto:hello@usebeeline.app">Support</a></p></main>${copyScript}</html>`);
+    response.end(`<!doctype html><html lang="en"><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><meta name="color-scheme" content="light dark"><title>${escape(title)} · Beeline</title><style>${PAGE_STYLE}${workspaceLanding ? MCP_LANDING_STYLE : ''}</style><main${workspaceLanding ? ' class="workspace-ready"' : ''}>${content}<p class="foot"><a href="https://usebeeline.app/privacy/">Privacy</a><a href="https://usebeeline.app/terms/">Terms</a><a href="mailto:hello@usebeeline.app">Support</a></p></main>${copyScript}</html>`);
   }
   /** The client's own mark joined to the real Beeline icon by a dashed line. */
   private brand(flow: Pick<Flow, 'name' | 'logo'>): string {
@@ -459,6 +460,7 @@ export class RoomsMcpOAuth {
           target.searchParams.set('state', flow.state); target.searchParams.set('iss', this.origin);
           if (input.decision === 'allow') {
             if (!flow.supported && input.trust_app !== '1') throw new Refusal('invalid_request', 'app_trust_unconfirmed');
+            let createdWorkspace: { id: string; roomId: string } | undefined;
             let workspaceIds = typeof input.workspace_ids === 'string' ? [input.workspace_ids] : input.workspace_ids;
             if (input.workspace_selection === '1' && (workspaceIds === undefined || (Array.isArray(workspaceIds) && !workspaceIds.length))) {
               // Serialize simultaneous first connections for this person. Only an account
@@ -469,6 +471,7 @@ export class RoomsMcpOAuth {
               if (!memberships.rowCount) {
                 const workspace = await createWorkspace(db, { name: defaultWorkspaceName(flow.identity_name) }, flow.identity_id);
                 workspaceIds = [workspace.id];
+                createdWorkspace = workspace;
               }
             }
             if (input.workspace_selection !== '1' || !Array.isArray(workspaceIds) || !workspaceIds.length
@@ -503,6 +506,12 @@ export class RoomsMcpOAuth {
             const code = opaque();
             await db.query(`INSERT INTO rooms_mcp_codes(hash,client_id,identity_id,redirect_uri,challenge,scope,expires_at)
               VALUES($1,$2,$3,$4,$5,$6,now()+interval '10 minutes')`, [tokenHash(code), flow.client_id, flow.identity_id, flow.redirect_uri, flow.challenge, flow.scope]);
+            if (createdWorkspace && flow.redirect_uri === `${this.origin}/mcp/oauth/handoff`) {
+              await db.query(`INSERT INTO rooms_mcp_workspace_landings
+                (code_hash,browser_hash,workspace_id,room_id,workspace_name,client_name,expires_at)
+                VALUES($1,$2,$3,$4,$5,$6,now()+interval '10 minutes')`,
+                [tokenHash(code), flow.browser_hash, createdWorkspace.id, createdWorkspace.roomId, defaultWorkspaceName(flow.identity_name), flow.name]);
+            }
             target.searchParams.set('code', code);
           } else target.searchParams.set('error', 'access_denied');
           await db.query('DELETE FROM rooms_mcp_flows WHERE id=$1', [flow.id]);
@@ -518,9 +527,14 @@ export class RoomsMcpOAuth {
         if (!code && !denied) throw new Refusal('invalid_request', 'handoff_invalid');
         await this.database.query(`INSERT INTO rooms_mcp_handoffs(state_hash,code,error,expires_at) VALUES($1,$2,$3,now()+interval '10 minutes')
           ON CONFLICT(state_hash) DO NOTHING`, [tokenHash(state), code && code.length <= 100 ? code : null, code ? null : 'access_denied']);
-        this.page(response, code ? 'Connected' : 'Not connected', `<div class="brand"><img class="mark" src="${BEELINE_ICON}" alt="Beeline"></div>${code
-          ? '<h1>Connected</h1><p class="lede">Go back to your session. It finishes joining by itself.</p>'
-          : '<h1>Not connected</h1><p class="lede">You chose Cancel. Your session did not join Beeline.</p>'}`);
+        // Browser-bound first-run context survives the session consuming its OAuth code.
+        // URL parameters never select a Workspace or supply display text.
+        const landing = code && code.length <= 100 ? (await this.database.query<McpWorkspaceLanding>(
+          `SELECT workspace_id,room_id,workspace_name,client_name FROM rooms_mcp_workspace_landings
+           WHERE code_hash=$1 AND browser_hash=$2 AND expires_at>now()`, [tokenHash(code), tokenHash(this.cookie(request))])).rows[0] : undefined;
+        this.page(response, landing ? 'Your team is ready' : code ? 'Connected' : 'Not connected', `<div class="brand"><img class="mark" src="${BEELINE_ICON}" alt="Beeline"></div>${code
+          ? landing ? renderMcpWorkspaceLanding(landing, request.headers['user-agent'] ?? '') : '<h1>Connected</h1><p class="lede">Go back to your session. It finishes joining by itself.</p>'
+          : '<h1>Not connected</h1><p class="lede">You chose Cancel. Your session did not join Beeline.</p>'}`, 200, !!landing);
         return true;
       }
       if (request.method === 'POST' && path === '/mcp/oauth/handoff') {

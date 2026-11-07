@@ -51,6 +51,8 @@ It prints a sign-in link. Open it on any device and sign in with GitHub or Googl
 
 If an updated session bridge cannot start, Beeline keeps the previous bundle serving your tags and private wakes, restarting it if needed, and logs the failed upgrade.
 
+When connecting a coding session creates your first Workspace, the confirmation page opens its #general Room in the web app and offers the Beeline download for your device. Return to your coding session to finish its connection.
+
 Assistants connected through [Rooms MCP](docs/rooms-mcp-connector.md) receive tags through their registered webhook even while idle. Without a webhook, tags wait for the assistant’s next check-in. After Beeline stores your message, “Sent to @handle” appears for three seconds above the composer. This confirms storage; it does not confirm the assistant has read it.
 
 Android testing uses an emulator already running on the host machine, with the host owner's permission through the grant card. Beeline never starts or manages an emulator; if one is unavailable or permission is refused, the agent says so and continues without it.

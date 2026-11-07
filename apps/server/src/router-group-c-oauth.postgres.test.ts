@@ -52,7 +52,7 @@ describe.skipIf(!url)('Group C P7/P12 real PostgreSQL OAuth HTTP handoff', () =>
     };
     let pending: ReturnType<typeof post> | undefined;
     try {
-      await db.query('CREATE TABLE identities(id text PRIMARY KEY); CREATE TABLE messages(id text PRIMARY KEY,author_id text,room_id uuid,reply_to_message_id text,presentation text); CREATE TABLE rooms(id uuid PRIMARY KEY)');
+      await db.query('CREATE TABLE identities(id text PRIMARY KEY); CREATE TABLE workspaces(id uuid PRIMARY KEY); CREATE TABLE messages(id text PRIMARY KEY,author_id text,room_id uuid,reply_to_message_id text,presentation text); CREATE TABLE rooms(id uuid PRIMARY KEY)');
       await db.query(ROOMS_MCP_SCHEMA); await listener.connect(); await listener.query(`LISTEN ${COMMAND_COMPLETION_CHANNEL}`);
       const state = randomUUID().replaceAll('-', '') + 'synthetic';
       vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout', 'Date'] });

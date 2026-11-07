@@ -133,6 +133,17 @@ CREATE TABLE IF NOT EXISTS rooms_mcp_handoffs (
   expires_at timestamptz NOT NULL
 );
 CREATE INDEX IF NOT EXISTS rooms_mcp_handoffs_expiry ON rooms_mcp_handoffs(expires_at);
+-- Presentation context only: never a grant. Bound to the consenting browser and
+-- independent of the one-shot code, so the app can collect its token first.
+CREATE TABLE IF NOT EXISTS rooms_mcp_workspace_landings (
+  code_hash text PRIMARY KEY, browser_hash text NOT NULL,
+  workspace_id uuid NOT NULL REFERENCES workspaces(id) ON DELETE CASCADE,
+  room_id uuid NOT NULL REFERENCES rooms(id) ON DELETE CASCADE,
+  workspace_name text NOT NULL, client_name text NOT NULL, expires_at timestamptz NOT NULL
+);
+CREATE INDEX IF NOT EXISTS rooms_mcp_workspace_landings_workspace ON rooms_mcp_workspace_landings(workspace_id);
+CREATE INDEX IF NOT EXISTS rooms_mcp_workspace_landings_room ON rooms_mcp_workspace_landings(room_id);
+
 CREATE OR REPLACE FUNCTION beeline_mcp_handoff_completion() RETURNS trigger AS $$
 BEGIN
  IF TG_OP='UPDATE' AND ROW(NEW.code,NEW.error,NEW.expires_at) IS NOT DISTINCT FROM ROW(OLD.code,OLD.error,OLD.expires_at) THEN RETURN NULL;END IF;

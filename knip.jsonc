@@ -48,6 +48,9 @@
         "web/marketing/boot.mjs",
         "web/marketing/demo-source.mjs",
         "scripts/marketing/build.mjs",
+        // The connector artwork runbook invokes esbuild; its Room fixture is loaded by path.
+        "scripts/connector-preview/build.mjs",
+        "scripts/connector-preview/room.tsx",
         // TYPECHECK invokes the architecture guard by path.
         "scripts/check-architecture.mjs",
         // Accepted audit decisions: explicit one-time operator entrypoints.
