@@ -2,6 +2,10 @@ import { setImmediate as nextTurn } from 'node:timers/promises';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { ObjectStorage } from './object-storage.js';
 
+const nativeTimers = {
+  setTimeout, clearTimeout, setInterval, clearInterval, setImmediate, clearImmediate,
+};
+
 const NOW = Date.parse('2026-11-02T12:00:00.000Z');
 const DAY_MS = 24 * 60 * 60 * 1000;
 const KEY = 'artifact/synthetic-owner/synthetic-digest';
@@ -26,17 +30,37 @@ function operation(storage: ObjectStorage, method: Method): Promise<unknown> {
 }
 
 describe('object storage admits one actual SDK transport attempt', () => {
+  let pendingOperation: Promise<unknown> | undefined;
   beforeEach(() => {
-    // Keep the next-turn barrier real while advancing every retry/loop timer.
-    vi.useFakeTimers({ toFake: ['Date', 'setTimeout', 'clearTimeout', 'setInterval', 'clearInterval'] });
+    pendingOperation = undefined;
+    // Signing needs a fixed date. Native I/O from this reused worker must
+    // always see native timers, including while we await the SDK below.
+    vi.useFakeTimers({ toFake: ['Date'] });
     vi.setSystemTime(NOW);
-    // If status retries return, their backoff must advance deterministically.
+    // Keep any reintroduced retry backoff nonzero for the settled checks below.
     vi.spyOn(Math, 'random').mockReturnValue(1);
   });
-  afterEach(() => {
-    vi.unstubAllGlobals();
+  afterEach(async () => {
+    try {
+      // Drain even if an assertion fails before the test awaits its result.
+      await pendingOperation;
+    } finally {
+      vi.unstubAllGlobals();
+      vi.restoreAllMocks();
+      vi.useRealTimers();
+    }
+    // Repeat Vitest's file-end restoration: it must not reinstall a fake
+    // timer (or delete setTimeout) in the worker running the next file.
     vi.restoreAllMocks();
-    vi.useRealTimers();
+    for (const [name, timer] of Object.entries(nativeTimers)) {
+      expect(Reflect.get(globalThis, name), name).toBe(timer);
+    }
+  });
+
+  it('keeps Node timer functions native while the signing clock is mocked', () => {
+    for (const [name, timer] of Object.entries(nativeTimers)) {
+      expect(Reflect.get(globalThis, name), name).toBe(timer);
+    }
   });
 
   it.each(METHODS.flatMap(method => [429, 503].map(status => ({ method, status }))))(
@@ -56,7 +80,7 @@ describe('object storage admits one actual SDK transport attempt', () => {
       vi.stubGlobal('fetch', transport);
       const storage = new ObjectStorage(CONFIG);
       let settled = false;
-      const outcome = operation(storage, method).then(
+      const outcome = pendingOperation = operation(storage, method).then(
         () => { settled = true; return undefined; },
         error => { settled = true; return error; },
       );
@@ -64,7 +88,7 @@ describe('object storage admits one actual SDK transport attempt', () => {
       // A returned failure ends this attempt without waiting for any backoff.
       await nextTurn();
       expect(settled).toBe(true);
-      await vi.advanceTimersByTimeAsync(DAY_MS);
+      vi.advanceTimersByTime(DAY_MS);
       const error: unknown = await outcome;
       expect(error).toBeInstanceOf(Error);
       expect((error as Error).message).toContain(`HTTP ${status}`);
@@ -94,9 +118,15 @@ describe('object storage admits one actual SDK transport attempt', () => {
     });
     vi.stubGlobal('fetch', transport);
     const storage = new ObjectStorage(CONFIG);
-    const outcome = operation(storage, method).then(() => undefined, error => error);
+    let settled = false;
+    const outcome = pendingOperation = operation(storage, method).then(
+      () => { settled = true; return undefined; },
+      error => { settled = true; return error; },
+    );
     await firstRequest;
-    await vi.advanceTimersByTimeAsync(DAY_MS);
+    await nextTurn();
+    expect(settled).toBe(true);
+    vi.advanceTimersByTime(DAY_MS);
     expect(await outcome).toBe(failure);
     expect(transport).toHaveBeenCalledTimes(1);
   });
