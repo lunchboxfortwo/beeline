@@ -236,8 +236,10 @@ Runtime preparation is outside execution. The pending-command Room DTO carries
 server-owned starting, release-download, preparation, reconnect and saved-message
 failure phases in the existing thinking line, without an elapsed counter. Claims
 start execution from the server claim timestamp. A pinned image runs its baked
-helper without a boot-time installer or refresh loop. Image replacement launches
-in one update; a lost result gets one fresh connection and authoritative Machine
+helper without a boot-time installer or refresh loop. After updating a stopped
+or suspended Machine, the acquisition owner waits for the returned version to
+reach `stopped`, then sends one ordinary start. Running Machines own their update
+restart. A lost result gets one fresh connection and authoritative Machine
 read. Listener bootstrap/reconnect and release changes read pending desired work,
 including stale waking rows. Automatic idle suspension and shared CPU remain.
 Acquisition keeps a helper with a current live connection `running`; preparation

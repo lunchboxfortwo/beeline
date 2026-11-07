@@ -97,7 +97,7 @@ export class FlyMachines implements FreeAgentMachines {
     return machines.find((machine) => machine.state !== 'destroyed');
   }
 
-  /** One fresh config read and one launch-enabled mutation. Fly owns preparation and launch. */
+  /** One acquisition owns the image update and any required ordinary start. */
   async start(id: string, image?: string): Promise<FreeAgentMachine | void> {
     if (!image) { await this.#request('start', `/${id}/start`, 'POST', {}); return; }
     return (await this.#acquire(id, image)).machine;
@@ -112,6 +112,14 @@ export class FlyMachines implements FreeAgentMachines {
         skip_launch: false,
         config: { ...machine.config, image },
       });
+      // Fly preserves a non-started Machine's state after an image update.
+      // Its acknowledgement precedes preparation; fence readiness to the new
+      // version before issuing the ordinary start, without polling or replay.
+      if ((machine.state === 'stopped' || machine.state === 'suspended') && updated.state !== 'started') {
+        if (!updated.instance_id) throw new Error('Fly image update did not return a replacement instance ID');
+        await this.waitFor(id, 'stopped', 60, updated.instance_id);
+        await this.#request('start', `/${id}/start`, 'POST', {});
+      }
       return { changed: true, machine: { ...machine, ...updated, config: { ...machine.config, image } } };
     }
     if (machine.state === 'stopped' || machine.state === 'suspended') {

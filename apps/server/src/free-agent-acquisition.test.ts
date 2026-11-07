@@ -232,22 +232,36 @@ it('Klor: a lost update reply after 34.293s still answers both original queued m
   ).toBe(true);
 });
 
-it('listener bootstrap reads Klor’s stale waking row and starts the observed stopped release', async () => {
-  await send('original saved message');
+it('a new human message wakes a stale waking row whose stopped Machine needs an image update', async () => {
   await fixture.db.query(
-    `UPDATE free_agents SET state='waking',wake_requested_at=clock_timestamp()`,
+    `UPDATE free_agents SET state='waking',wake_requested_at=clock_timestamp()-interval '2 hours'`,
   );
+  const message = await send('new human message after an incomplete release wake');
+  let state = 'stopped', currentImage = 'old';
   const requests: string[] = [];
   const provider = new FlyMachines('synthetic', 'proof', async (url, init) => {
-    requests.push(`${init?.method} ${new URL(String(url)).pathname.split('/machines/m1')[1]}`);
-    return Response.json({ id: 'm1', state: 'stopped', instance_id: 'desired', config: { image } });
+    const path = new URL(String(url)).pathname.split('/machines/m1')[1]!;
+    requests.push(`${init?.method} ${path}`);
+    if (!path && init?.method === 'GET')
+      return Response.json({ id: 'm1', state, instance_id: 'old', config: { image: currentImage } });
+    if (!path && init?.method === 'POST') {
+      currentImage = JSON.parse(String(init.body)).config.image;
+      state = 'replacing';
+      return Response.json({ instance_id: 'replacement', state });
+    }
+    if (path === '/wait') { state = 'stopped'; return Response.json({ state }); }
+    if (path === '/start') { state = 'started'; return Response.json({}); }
+    throw new Error(`Unexpected Fly call ${path}`);
   });
   const service = new FreeAgentService(fixture.db, config(), provider, async () => ({
     exchangeToken: 'synthetic',
   }));
   await service.resumePendingWork();
-  await vi.waitFor(() => expect(requests).toContain('POST /start'));
-  expect(requests.filter((request) => request.startsWith('POST'))).toEqual(['POST /start']);
+  expect(state).toBe('started');
+  expect(currentImage).toBe(image);
+  expect(requests.filter((request) => request.startsWith('POST'))).toEqual(['POST ', 'POST /start']);
+  expect((await fixture.db.query('SELECT state FROM agent_commands WHERE source_message_id=$1', [message.messageId])).rows)
+    .toEqual([{ state: 'pending' }]);
 });
 
 it('a definite provider failure retains work with a truthful saved-message phase and clears its owner', async () => {

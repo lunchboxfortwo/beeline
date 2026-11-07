@@ -39,7 +39,7 @@ describe('release refresh and committed free-agent sleep events', () => {
         expect(update.skip_launch).toBe(false);
         machine.config = update.config;
         machine.instance_id += '-updated';
-        machine.state = 'started';
+        machine.state = machine.state === 'started' ? 'started' : 'stopped';
         return Response.json({ instance_id: machine.instance_id });
       }
       if (path === '/stop') machine.state = 'stopped';
