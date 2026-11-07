@@ -1,3 +1,4 @@
+import { sidebarAgeTests } from './SidebarView.age.test-support';
 vi.mock('react-native-keyboard-controller', async () => { const R = await import('react'); return { KeyboardAvoidingView: (props: any) => R.createElement('View', props, props.children) }; });
 import * as React from 'react';
 // @ts-expect-error react-test-renderer has no declarations in this workspace.
@@ -437,6 +438,11 @@ describe('desktop Workspace navigation', () => {
     expect(chats).toHaveBeenCalledTimes(chatReads + 1);
   });
 
+  sidebarAgeTests({
+    get tree() { return tree; },
+    set tree(value) { tree = value; },
+    settle, control, surfaceRows, surfaceListeners, route, pathnameListeners,
+  });
 
   it.each(['committed workspace update', 'shared covering read'])('restores Room rows after outage recovery through %s', async recovery => {
     workspaces.mockRejectedValueOnce(new Error('isolated outage'));

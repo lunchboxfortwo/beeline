@@ -397,11 +397,9 @@ export const SidebarView = React.memo(function SidebarView() {
   );
   // The sidebar reads through RoomViewClient only, so the one write it makes
   // builds the monolith transport on demand, as the Room composer does.
-  const [ageNow, setAgeNow] = React.useState(() => Date.now());
-  React.useEffect(() => {
-    const timer = setInterval(() => setAgeNow(Date.now()), 60_000);
-    return () => clearInterval(timer);
-  }, []);
+  // Quiet lists keep their ages until real list activity. Route changes retain
+  // the same timestamp so unrelated conversation rows can stay memoized.
+  const ageNow = React.useMemo(() => Date.now(), [surface?.chats]);
   const openCorners = React.useCallback((roomId: string) => {
     router.push(roomCornersHref(roomId));
   }, [router]);
