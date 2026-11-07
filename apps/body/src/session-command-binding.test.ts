@@ -14,7 +14,7 @@ afterEach(async () => {
   await Promise.all(roots.splice(0).map(root => rm(root, { recursive: true, force: true })));
 });
 
-it.each(['room', 'corner'] as const)('%s cancellation tears down the harness and its MCP tools even if session/cancel is ignored', async kind => {
+it.each(['room', 'corner', 'room-batch'] as const)('%s cancellation tears down the harness and its MCP tools even if session/cancel is ignored', async kind => {
   const root = await mkdtemp(join(process.cwd(), '.command-binding-'));
   roots.push(root);
   const identity = identityFromKey('11'.repeat(32), 'Bee');
@@ -24,7 +24,7 @@ it.each(['room', 'corner'] as const)('%s cancellation tears down the harness and
     config: { workspaceRoot: root, agentHomeRoot: root }, scheduler,
     api: { execute: vi.fn() }, cwd: root, roomId: 'room', cornerId: 'room',
   };
-  const loop = (kind === 'room' ? new MonolithRoomTurnLoop(options as never)
+  const loop = (kind !== 'corner' ? new MonolithRoomTurnLoop(options as never)
     : new MonolithCornerTurnLoop(options as never)) as any;
   let finish!: () => void;
   const work = new Promise<void>(resolve => { finish = resolve; });
@@ -35,6 +35,10 @@ it.each(['room', 'corner'] as const)('%s cancellation tears down the harness and
   loop.sessionId = 'stale-session';
   loop.activeTurn = { item: { id: 'cancelled-command' } };
   loop.currentTurn = { requestId: 'cancelled-command' };
+  if (kind === 'room-batch') {
+    loop.commandContext.commands = [{ turnRequestId: 'cancelled-command' }, { turnRequestId: 'primary' }];
+    loop.activeTurn.item.id = 'primary';
+  }
   const running = scheduler.run('room', {
     start: async () => 'stale-session',
     stop: (force) => loop.discardSession(true, force),

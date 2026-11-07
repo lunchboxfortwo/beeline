@@ -589,7 +589,7 @@ import { MonolithRoomTurnLoop, execFileAsync, roomPermissionDecision, HumanMessa
   /**
    * Obey a stop the requester already made a fact.
    *
-   * A stop names ONE request id and touches only the turn that answers it. The
+   * A stop names a request in the running invocation's batch. The
    * turn in flight is cancelled at the harness and marked so its own run
    * publishes nothing; a turn still queued is simply dropped, since starting
    * work the person has already withdrawn is worse than never starting it.
@@ -605,7 +605,8 @@ import { MonolithRoomTurnLoop, execFileAsync, roomPermissionDecision, HumanMessa
     for (let index = ctx.queuedTurns.length - 1; index >= 0; index -= 1)
       if (ctx.queuedTurns[index]!.id === requestId) ctx.queuedTurns.splice(index, 1);
     const active = ctx.activeTurn;
-    if (!active || active.item.id !== requestId) return;
+    if (!active || (active.item.id !== requestId &&
+      !ctx.commandContext.commands.some(command => command.turnRequestId === requestId))) return;
     active.cancelled = true;
     // Cancellation ends the process tree, including MCP keepalives. A harness
     // notification alone leaves tools running under the revoked generation.
