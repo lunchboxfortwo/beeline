@@ -28,6 +28,8 @@ Personal GitHub connections on managed OAuth support read-only GraphQL (includin
 
 App tools return pending sign-in guidance and provider tool failures as ordinary results. Sentry digests keep findings for the morning card. Nightly Checks accepts delayed starts on its Eastern date; a failed GitHub issue report is reported once without replaying the request.
 
+Production raw logs on squire are captured by the [live collectors](scripts/log-walk/README.md); the daily report walk is retired.
+
 ## Install
 
 ```sh
