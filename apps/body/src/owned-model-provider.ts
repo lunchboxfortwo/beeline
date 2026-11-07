@@ -16,6 +16,7 @@ export default function install(pi: {
   registerProvider(
     name: string,
     configuration: {
+      api: 'openai-completions';
       streamSimple: (
         model: Provider,
         context: Context,
@@ -24,7 +25,7 @@ export default function install(pi: {
     },
   ): void;
 }): void {
-  pi.registerProvider('beeline', { streamSimple: ownedModelStream });
+  pi.registerProvider('beeline', { api: 'openai-completions', streamSimple: ownedModelStream });
 }
 export function ownedModelStream(
   model: Provider,

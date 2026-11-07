@@ -133,7 +133,7 @@ it.each([true,false])('uses the native provider’s error receipt only when auth
 
 it('loads the immutable provider artifact through the pinned Pi extension host', async () => {
   const { build } = await import('esbuild');
-  const { discoverAndLoadExtensions } = await import('@earendil-works/pi-coding-agent');
+  const { discoverAndLoadExtensions, ModelRuntime } = await import('@earendil-works/pi-coding-agent');
   const root = mkdtempSync(join(tmpdir(),'owned-extension-')); roots.push(root);
   const artifact = join(root,'owned-model-provider.mjs');
   await build({entryPoints:[new URL('./owned-model-provider.ts',import.meta.url).pathname],outfile:artifact,
@@ -142,6 +142,13 @@ it('loads the immutable provider artifact through the pinned Pi extension host',
   expect(loaded.errors).toEqual([]);
   expect(loaded.extensions).toHaveLength(1);
   expect(loaded.runtime.pendingProviderRegistrations).toContainEqual(expect.objectContaining({name:'beeline'}));
+  const runtime = await ModelRuntime.create({ authPath: join(root, 'auth.json'),
+    modelsPath: join(root, 'models.json'), modelsStorePath: join(root, 'catalog.json'), refreshOnCreate: false });
+  // Discovery only queues registrations. Pi applies them on startup, where an
+  // invalid transport declaration exits the process beneath pi-acp.
+  for (const registration of loaded.runtime.pendingProviderRegistrations)
+    runtime.registerProvider(registration.name, registration.config);
+  expect(runtime.getRegisteredProviderIds()).toContain('beeline');
 });
 
 it('removes the former generated execution budget from a persisted Pi home', async () => {
