@@ -1,5 +1,5 @@
 import type { MessageSendState } from '@/buzz/message-outbox';
-import { appErrorCopy } from '@/buzz/app-error-copy';
+import { appReadErrorCopy } from '@/buzz/app-error-copy';
 import { useEffect, type MutableRefObject } from 'react';
 import { AppState } from 'react-native';
 import { router } from 'expo-router';
@@ -19,7 +19,6 @@ import { currentSurfaceStamp } from '@/buzz/surface-clock';
 import { BuzzRigTransport } from '@/sync/transport';
 import type { MonolithSurfaceEvent } from '@/sync/transport/monolith-rig-transport';
 import { mergeAgentPresenceBatch, type RoomAgentPresence } from '@/buzz/agent-presence';
-import { ROOM_LABEL } from '@/buzz/vocabulary';
 import { takePrefetchedPushRoom } from '@/push/push-room-prefetch';
 import { LIVE_CACHE_WRITE_DELAY_MS, ROOM_READ_UNCHANGED_REASONS, ReceivedLiveTrace, logLiveTrace, queueNewestFrameMark, yieldToPaint, logLivePaintAck, eventTag, eventMarkers, reopenIfDismissed, RoomSurfaceSessionBindings } from './useRoomSurfaceSession';
 
@@ -782,7 +781,7 @@ export function useRoomSurfaceSubscription([
               unsubscribe = undefined;
               void mobileSurfaceCache.remove(address);
             }
-            const copy = appErrorCopy(error, 'Could not load this Room.');
+            const copy = appReadErrorCopy(error);
             setHydrationFailed(Boolean(copy));
             setHydrationError(copy || null);
           }
@@ -795,7 +794,7 @@ export function useRoomSurfaceSubscription([
         markRoomOpen('watch-ready');
       } catch (error) {
         if (cancelled) return;
-        const copy = appErrorCopy(error, `Could not open this ${ROOM_LABEL}.`);
+        const copy = appReadErrorCopy(error);
         setHydrationFailed(Boolean(copy));
         setHydrationError(copy || null);
       }

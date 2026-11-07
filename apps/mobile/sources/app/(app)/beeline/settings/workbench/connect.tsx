@@ -214,12 +214,8 @@ function ConnectToolFlow() {
     void pair(online[0]!.id);
   }, [helpers, offerCeremony, pair, pairedConnectorId, requestedHelperId]);
 
-  const retry = useCallback(() => {
+  const retryPairing = useCallback(() => {
     setError(null);
-    if (observed.error && !observed.installMissing) {
-      void observed.retry();
-      return;
-    }
     stopObserving();
     setInstall(null);
     if (offerId) {
@@ -367,13 +363,12 @@ function ConnectToolFlow() {
           </View>
         ) : null}
         {errorUnplaced ? <ErrorBanner inline title={error ?? ''} titleTestID="connect-error" /> : null}
-        {helperLoadError && !helpers ? <ErrorBanner inline title={"Helpers are unavailable right now"} titleTestID="connect-error" /> : null}
       </ScrollView>
       {showSteps ? (
         <View style={[styles.foot, { paddingBottom: theme.buzz.space.lg + insets.bottom }]}>
           {failed ? (
             <>
-              <Button appearance={{ control: styles.primaryButton, label: styles.primaryLabel }} label="Try again" fullWidth onPress={retry} testID="connect-retry" />
+              <Button appearance={{ control: styles.primaryButton, label: styles.primaryLabel }} label="Try again" fullWidth onPress={retryPairing} testID="connect-retry" />
               <Text style={styles.footNote}>
                 {failedIndex <= 0 ? `Sign in unlocks once ${machineName} answers.` : 'Sign in unlocks when pairing finishes.'}
               </Text>

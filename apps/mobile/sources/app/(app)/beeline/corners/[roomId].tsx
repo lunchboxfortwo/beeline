@@ -173,7 +173,7 @@ export default function BuzzCorners() {
   if (!surface) {
     return (
       <View style={[styles.container, styles.center, { paddingTop: insets.top }]}>
-        <SettingsRow title={error!}  action="Retry" onPress={() => void corners.refresh()} />
+        <SettingsRow title={error!} />
       </View>
     );
   }
@@ -207,8 +207,7 @@ export default function BuzzCorners() {
           onAdd={() => void createCorner()}
         />
         {!!error && (
-          <SettingsRow title={error!}  action="Retry"
-            onPress={() => void corners.refresh()} />
+          <SettingsRow title={error!} />
         )}
         <CornerOpenRow roomId={decodedId} />
         <RoomCornersList

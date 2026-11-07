@@ -16,3 +16,14 @@ export function appErrorCopy(reason: unknown, fallback = 'Could not complete req
   if (!clientFailure && /\b(?:TLS|WebRTC)\b|Cannot read propert|(?:request|read) failed/i.test(human)) return fallback;
   return human;
 }
+
+/** Read failures have one recovery owner. Only a server's human refusal is local UI. */
+export function appReadErrorCopy(reason: unknown): string {
+  const status = reason && typeof reason === 'object' && 'status' in reason ? Number(reason.status) : 0;
+  if (status >= 400 && status < 500 && status !== 408) return appErrorCopy(reason, 'This request was refused.');
+  // A few provider adapters reject locally before a request and carry their
+  // ownership refusal as an Error rather than an HTTP status.
+  const message = reason instanceof Error ? reason.message : '';
+  return /another member|only (?:the )?owner|not (?:allowed|permitted)|permission denied|access denied/i.test(message)
+    ? appErrorCopy(reason, '') : '';
+}

@@ -616,7 +616,7 @@ describe('useRoomSurfaceSession', () => {
   });
 
 
-  it('keeps the cached page with an action error and clears private data on access loss', async () => {
+  it('keeps the cached page without network copy and clears private data on access loss', async () => {
     controls.cached = roomView('room-a');
     let current!: UseRoomSurfaceSessionResult;
     let renderer!: ReactTestRenderer;
@@ -632,13 +632,13 @@ describe('useRoomSurfaceSession', () => {
 
     await act(async () => controls.responses[0]!.error(new TypeError('Network request failed')));
     expect(current.roomSurface?.room.id).toBe('room-a');
-    expect(current.hydrationFailed).toBe(true);
-    expect(current.hydrationError).toBe('Could not load this Room.');
+    expect(current.hydrationFailed).toBe(false);
+    expect(current.hydrationError).toBeNull();
 
     await act(async () => controls.responses[0]!.error(new RoomViewHttpError(403, 'forbidden')));
     expect(current.roomSurface).toBeNull();
     expect(current.hydrationFailed).toBe(true);
-    expect(current.hydrationError).toBe('Could not load this Room.');
+    expect(current.hydrationError).toBe('This request was refused.');
     await act(async () => renderer.unmount());
   });
 });

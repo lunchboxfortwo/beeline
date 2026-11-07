@@ -189,7 +189,7 @@ describe('Persisted Workspace bootstrap', () => {
 describe('New sign-in workspace landing (SIGNUP-LANDING-1)', () => {
 const scope3 = fixtureScope3();
 
-  it('shows the shared Retry after a failed discovery and reads on Retry', async () => {
+  it('keeps failed discovery silent until the shared owner invalidates it', async () => {
     deck.selectedWorkspace=null;deck.workspacesResponse={workspaces:[],viewer,truncated:false,watchFilters:[]};
     deck.workspaceFailures=[Object.assign(new Error('Socket request failed'), { socketRequest: true })];
     let renderer!:ReactTestRenderer;
@@ -262,26 +262,21 @@ const scope3 = fixtureScope3();
     } finally {if(renderer)await act(async()=>renderer.unmount());}
   });
 
-  it('keeps startup failure recovery visible while the socket is connected', async () => {
+  it('has no per-screen recovery UI after a failed initial read', async () => {
     deck.selectedWorkspace = null;
     deck.connectionState = 'connected';
     deck.workspaceFailures = [new RoomViewHttpError(503, 'unavailable')];
     let renderer!: ReactTestRenderer;
-    await act(async () => {
-      renderer = create(React.createElement(BuzzChannels));
-    });
+    await act(async () => { renderer = create(React.createElement(BuzzChannels)); });
     await quiet();
-    expect(renderer.root.findAllByType('Text').length).toBeGreaterThan(0);
-    const retry = renderer.root.findByProps({ testID: 'room-deck-error-retry' });
-    await act(async () => {
-      retry.props.onPress();
-    });
+    expect(renderer.root.findAllByProps({ action: 'Retry' })).toHaveLength(0);
+    expect(renderer.root.findAllByProps({ testID: 'room-deck-error-retry' })).toHaveLength(0);
+    expect(deck.workspaceReads).toBe(1);
+    expect(deck.reconnects).toBe(0);
+    await act(async () => deck.subscriptions.find(entry => entry.filters.some((filter: any) => filter.kinds?.includes(9000)))!.emit({ monolithLive: { type: 'invalidate', roomId: '', reason: 'reconnect' } }));
     await quiet();
     expect(deck.workspaceReads).toBe(2);
-    expect(deck.reconnects).toBe(1);
-    expect(renderer.root.findAllByProps({ testID: 'connection-status-disconnected' })).toHaveLength(
-      0,
-    );
+    expect(renderer.root.findAllByProps({ action: 'Retry' })).toHaveLength(0);
     await act(async () => renderer.unmount());
   });
 

@@ -279,14 +279,6 @@ export default function BuzzMembers({
         detail={selectedAgent}
         loading={!selectedAgent && !displayedError}
         error={displayedError}
-        onRetry={() => {
-
-          setError(null);
-          if (workspaceError) void readWorkspaceRef.current?.();
-          setWorkspaceError(null);
-          if (!identity || !relayUrl) setRetryGeneration((value) => value + 1);
-          else setProfileRetryGeneration((value) => value + 1);
-        }}
         onClose={() => void closeAgentProfile()}
         onMessage={() => void messageSelectedAgent()}
         canManage={Boolean(selectedAgent && canRemoveSelectedAgent)}
@@ -302,7 +294,7 @@ export default function BuzzMembers({
         }}
         loadMoreWork={async (cursor) => {
           if (!identity || !relayUrl || !workspaceId)
-            throw new Error('Workspace connection unavailable');
+            throw new Error('Workspace identity is unavailable');
           return new RoomViewClient({ baseUrl: relayUrl, identity }).agent(
             workspaceId,
             profileAgentId,
@@ -562,7 +554,7 @@ export default function BuzzMembers({
   if (!surface) {
     return (
       <View style={[styles.container, styles.center, { paddingTop: insets.top }]}>
-        <SettingsRow title={displayedError!}  action="Retry" onPress={() => {setRetryGeneration((value) => value + 1);}} />
+        <SettingsRow title={displayedError!} />
       </View>
     );
   }
@@ -630,7 +622,7 @@ export default function BuzzMembers({
           titleTestID="members-title"
         />
         {!!displayedError && (
-          <SettingsRow title={displayedError!}  action="Retry" onPress={() => { setError(null); void readWorkspaceRef.current?.(); }} />
+          <SettingsRow title={displayedError!} />
         )}
         <KeyboardAwareScrollView
           bottomOffset={16}

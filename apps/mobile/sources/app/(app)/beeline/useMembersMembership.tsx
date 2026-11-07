@@ -122,7 +122,7 @@ export function useMembersMembership([
         if (!cancelled) applyMemberPage(page, undefined, false);
       })
       .catch((reason) => {
-        if (!cancelled) setError(appErrorCopy(reason, `Could not search members.`));
+        if (!cancelled) setError(appErrorCopy(reason, ''));
       })
       .finally(() => {
         if (!cancelled) setRosterLoading(false);
@@ -149,7 +149,7 @@ export function useMembersMembership([
       });
       applyMemberPage(next, kind, true);
     } catch (reason) {
-      setError(appErrorCopy(reason, `Could not load more members.`));
+      setError(appErrorCopy(reason, ''));
     } finally {
       setRosterLoading(false);
     }

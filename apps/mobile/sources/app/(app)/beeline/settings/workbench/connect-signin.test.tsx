@@ -195,7 +195,7 @@ describe('ConnectorSignInScreen', () => {
     } finally { await act(async () => renderer.unmount()); }
   });
 
-  it('Reproduction squire-spinner: OAuth waits for its request owner, then offers Retry on the source refusal', async () => {
+  it('OAuth keeps a failed install read silent and resumes on the shared reconnect', async () => {
     vi.useFakeTimers();
     searchParams.connectorName = 'Trusty Squire';
     searchParams.url = '';
@@ -210,10 +210,11 @@ describe('ConnectorSignInScreen', () => {
       expect(renderer.root.findAllByProps({ testID: 'signin-retry' })).toHaveLength(0);
       expect(readInstallState).toHaveBeenCalledOnce();
       await act(async () => refuse(new Error('Request deadline exceeded')));
-      expect(renderer.root.findAllByProps({ testID: 'signin-retry' }).length).toBeGreaterThan(0);
+      expect(renderer.root.findAllByProps({ testID: 'signin-retry' })).toHaveLength(0);
       expect(renderer.root.findByType('PageHeader').props.title).toBe('Sign in to Google');
-      expect(JSON.stringify(renderer.toJSON())).toContain('Lost contact while installing');
-      await act(async () => { void renderer.root.findByProps({ testID: 'signin-retry' }).props.onPress(); });
+      await act(async () => {
+        for (const listener of liveListeners) listener({ monolithLive: { type: 'invalidate', roomId: '', reason: 'reconnect' } });
+      });
       expect(readInstallState).toHaveBeenCalledTimes(2);
     } finally { await act(async () => { renderer.unmount(); releases.forEach(resolve => resolve(null)); }); vi.useRealTimers(); }
   });
@@ -291,22 +292,27 @@ describe('ConnectorSignInScreen', () => {
     } finally { await act(async () => { renderer.unmount(); release(null); }); vi.useRealTimers(); }
   });
 
-  it.each(['missing', 'rejected'])('Reproduction R9b: %s reads end visibly and retry', async (kind) => {
+  it.each(['missing', 'rejected'])('Reproduction R9b: %s install state uses its own semantic recovery authority', async (kind) => {
     vi.useFakeTimers();
     if (kind === 'rejected') readInstallState.mockRejectedValue(new Error('offline'));
     let renderer!: ReactTestRenderer;
     try {
       await act(async () => { renderer = create(<ConnectorSignInScreen />); });
       await act(async () => { await vi.advanceTimersByTimeAsync(15000); });
-      const retry = renderer.root.findByProps({ testID: 'signin-retry' });
       const calls = readInstallState.mock.calls.length;
       await act(async () => { await vi.advanceTimersByTimeAsync(15000); });
       expect(readInstallState).toHaveBeenCalledTimes(calls);
-      await act(async () => retry.props.onPress());
       if (kind === 'missing') {
+        await act(async () => renderer.root.findByProps({ testID: 'signin-retry' }).props.onPress());
         expect(router.back).toHaveBeenCalledTimes(1); // R12h
         expect(readInstallState).toHaveBeenCalledTimes(calls);
-      } else expect(readInstallState.mock.calls.length).toBeGreaterThan(calls);
+      } else {
+        expect(renderer.root.findAllByProps({ testID: 'signin-retry' })).toHaveLength(0);
+        await act(async () => {
+          for (const listener of liveListeners) listener({ monolithLive: { type: 'invalidate', roomId: '', reason: 'reconnect' } });
+        });
+        expect(readInstallState.mock.calls.length).toBeGreaterThan(calls);
+      }
     } finally { await act(async () => renderer.unmount()); vi.useRealTimers(); }
   });
 

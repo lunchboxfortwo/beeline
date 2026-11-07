@@ -250,7 +250,7 @@ export function DesktopRoomInspector({
       ) : (
         <>
           {observed.error ? (
-            <SettingsRow title={observed.error}  action="Retry" onPress={observed.retry} testID="desktop-corner-retry" />
+            <SettingsRow title={observed.error} testID="desktop-corner-retry" />
           ) : null}
           <CornerCockpit
             client={client}
@@ -628,7 +628,7 @@ function CornerCockpit({
             <SurfaceGlyphLoader />
           </View>
         ) : (
-          <ErrorBanner inline title={"Corner details unavailable"} />
+          null
         )
       ) : (
         <FlatList

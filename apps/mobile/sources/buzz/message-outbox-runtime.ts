@@ -24,7 +24,7 @@ export function startMessageOutbox(): Promise<void> {
       send: async (event, cause) => {
         const socketGeneration = connection.diagnostics().generation;
         try {
-          const result = await transport.publishPreparedMessage(event);
+          const result = await transport.publishPreparedMessage(event, { reconnectOwnedByOutbox: true });
           markDictatedMessageAccepted(event.id);
           return result;
         }

@@ -1,3 +1,4 @@
+import { checkConnectionUiTree } from './connection-ui-policy.mjs';
 import { readFileSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
 import path from 'node:path';
@@ -8,11 +9,15 @@ const baseFlag = args.indexOf('--base');
 const base = baseFlag === -1 ? undefined : args[baseFlag + 1];
 if (baseFlag !== -1 && (!base || base.startsWith('-')))
   throw new Error('--base requires a git ref');
-const root = path.resolve(fileURLToPath(new URL('..', import.meta.url)));
+const rootFlag = args.indexOf('--root');
+const rootArg = rootFlag === -1 ? undefined : args[rootFlag + 1];
+if (rootFlag !== -1 && (!rootArg || rootArg.startsWith('-')))
+  throw new Error('--root requires a directory');
+const root = path.resolve(rootArg ?? fileURLToPath(new URL('..', import.meta.url)));
 try {
   const scans = scanUiTree(root);
   const registry = JSON.parse(readFileSync(path.join(root, REGISTRY_PATH), 'utf8'));
-  const errors = judgeUiRegistry(scans, registry, base ? registryAtRef(root, base) : undefined);
+  const errors = [...judgeUiRegistry(scans, registry, base ? registryAtRef(root, base) : undefined), ...checkConnectionUiTree(root)];
   for (const error of errors)
     console.error(
       `apps/mobile/sources/${error.file}:${error.line} [${error.rule}] ${error.message}`,

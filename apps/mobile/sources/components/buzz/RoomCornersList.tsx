@@ -1,5 +1,4 @@
 import { ContentTarget, InlineActionRow } from './IndexRow';
-import { ErrorBanner } from './ErrorBanner';
 import React, { useMemo, useRef, useState } from 'react';
 import { FlatList, Pressable, Text, View } from 'react-native';
 import { StyleSheet } from 'react-native-unistyles';
@@ -398,11 +397,7 @@ export function RoomCornersList({
           ))}
           {showMoreArchived && archived.status === 'ready' && archived.next ? (
             more?.status === 'error' ? (
-              <InlineActionRow><ErrorBanner inline
-                title={more.reason}
-                retryLabel="Retry"
-                onRetry={onMoreArchived}
-                retryTestID="room-corners-archived-more" /></InlineActionRow>
+              null
             ) : (
               <InlineActionRow><Button
                 size="inline"

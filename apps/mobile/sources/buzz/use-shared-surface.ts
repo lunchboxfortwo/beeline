@@ -1,4 +1,4 @@
-import { appErrorCopy } from '@/buzz/app-error-copy';
+import { appErrorCopy, appReadErrorCopy } from '@/buzz/app-error-copy';
 import { useCallback, useEffect, useState, useSyncExternalStore } from 'react';
 import { useFocusEffect } from 'expo-router';
 import { sharedLiveConnection } from '@/sync/transport/live-connection';
@@ -54,7 +54,7 @@ export function useSharedSurface<T>(
       setError(null);
       return next;
     } catch (cause) {
-      setError(appErrorCopy(cause));
+      setError(appReadErrorCopy(cause));
       return null;
     } finally {
       setLoading(false);

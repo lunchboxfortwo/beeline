@@ -436,17 +436,16 @@ describe('desktop Workspace navigation', () => {
   });
 
 
-  it.each(['Retry', 'committed workspace update', 'shared covering read'])('restores Room rows after outage recovery through %s', async recovery => {
+  it.each(['committed workspace update', 'shared covering read'])('restores Room rows after outage recovery through %s', async recovery => {
     workspaces.mockRejectedValueOnce(new Error('isolated outage'));
     await act(async () => { for (const listener of [...workspaceLive.listeners]) listener(workspaceChange); });
     await settle();
     const failed = tree.root.findAll((node: any) => node.props.action === 'Retry' && node.props.title === 'Could not load workspaces.');
-    expect(failed.length).toBeGreaterThan(0);
-    expect(tree.root.findAllByProps({ testID: 'desktop-room-room-a' })).toHaveLength(0);
+    expect(failed).toHaveLength(0);
+    expect(tree.root.findAllByProps({ testID: 'desktop-room-room-a' }).length).toBeGreaterThan(0);
     const reads = workspaces.mock.calls.length;
     await act(async () => {
-      if (recovery === 'Retry') failed[0]!.props.onPress();
-      else if (recovery === 'shared covering read') {
+      if (recovery === 'shared covering read') {
         for (const listener of surfaceListeners.get('/workspaces:') ?? []) listener();
       }
       else for (const listener of [...workspaceLive.listeners]) listener(workspaceChange);

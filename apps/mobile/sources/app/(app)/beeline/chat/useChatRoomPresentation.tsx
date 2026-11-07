@@ -1,3 +1,4 @@
+import { appReadErrorCopy } from '@/buzz/app-error-copy';
 import { appErrorCopy } from '@/buzz/app-error-copy';
 import { showVoiceJoinError } from '@/buzz/voice-update';
 import { useUntaggedMessageHints } from '@/buzz/use-untagged-message-hints';
@@ -304,13 +305,7 @@ export function useChatRoomPresentation([
       if (target.kind === 'corner' && target.channelId === decodedId) return;
       if (openingChannelReferenceRef.current) return;
       const referenceLabel = text ?? 'this destination';
-      if (!roomClient) {
-        Modal.alert(
-          'Destination unavailable',
-          `Beeline is still connecting. Try ${referenceLabel} again in a moment.`,
-        );
-        return;
-      }
+      if (!roomClient) return;
       const lock =
         target.kind === 'corner'
           ? (target.channelId ?? `pending:${target.parentChannelId}:${target.name ?? text ?? ''}`)
@@ -347,10 +342,8 @@ export function useChatRoomPresentation([
             `${referenceLabel} is unavailable or you no longer have access.`,
           );
         } else {
-          Modal.alert(
-            'Could not open destination',
-            `Beeline could not verify access to ${referenceLabel}. Try again.`,
-          );
+          const copy = appReadErrorCopy(error);
+          if (copy) Modal.alert('Could not open destination', copy);
         }
       } finally {
         openingChannelReferenceRef.current = null;

@@ -55,6 +55,8 @@ Android testing uses an emulator already running on the host machine, with the h
 
 If joining Conversation mode fails, tap Retry in the error dialog to make another attempt.
 
+The phone keeps saved Rooms visible during a network interruption. It reconnects once after a socket request fails; only a failed replacement shows the app’s connection banner.
+
 ## One message
 
 ```text

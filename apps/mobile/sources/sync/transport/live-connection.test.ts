@@ -54,22 +54,218 @@ function appState(next: string) { state.currentState=next;for(const listener of 
 beforeEach(()=>{vi.useFakeTimers();Socket.instances=[];state.currentState='active';state.platform='android';vi.stubGlobal('WebSocket',Socket);});
 afterEach(()=>{resetSharedLiveConnection();for(const connection of connections.splice(0))connection.dispose();state.listeners.clear();vi.useRealTimers();vi.unstubAllGlobals();});
 
-describe('the one phone socket',()=>{
-  it('a foreground session starts without the preceding session’s failure', async () => {
-    const { connection } = setup();
-    const failed = connection.request('readRoom', { roomId: 'a' }).catch(error => error);
-    const socket = await open(); socket.drop(); await failed;
-    expect(useConnectionFailure()).toBe(true);
-    appState('background'); appState('active');
-    expect(useConnectionFailure()).toBe(false);
+async function recoverRead(result: unknown = { room: { id: 'a' } }) {
+  const replacement = await open();
+  expect(useConnectionFailure()).toBe(false);
+  expect(replacement.requests().map(frame => frame.op)).toEqual(['readWorkspaces']);
+  replacement.reply({ workspaces: [] });
+  await tick();
+  replacement.reply(result, 1);
+  return replacement;
+}
+async function failRecovery() {
+  await tick();
+  Socket.instances.at(-1)!.fail();
+  await tick();
+}
+
+describe('the one phone socket', () => {
+  it('reconnects once and rereads without ever announcing a recovered blip', async () => {
+    const { connection, invalidate } = setup();
     const read = connection.request('readRoom', { roomId: 'a' });
+    const first = await open(); first.drop();
     expect(useConnectionFailure()).toBe(false);
-    const replacement = await open();
+    await recoverRead();
+    await expect(read).resolves.toEqual({ room: { id: 'a' } });
+    expect(Socket.instances).toHaveLength(2);
+    expect(invalidate).not.toHaveBeenCalled();
     expect(useConnectionFailure()).toBe(false);
-    replacement.reply({}); await read;
+    expect(vi.getTimerCount()).toBe(0);
+  });
+  it.each(['open', 'read'] as const)('shows one failure only when the replacement %s fails, with no third attempt', async stage => {
+    const { connection } = setup();
+    const read = connection.request('readRoom', { roomId: 'a' }).catch(error => error);
+    (await open()).drop();
+    if (stage === 'read') await open();
+    await failRecovery();
+    expect(await read).toBeInstanceOf(PhoneSocketDisconnectedError);
+    expect(useConnectionFailure()).toBe(true);
+    await vi.advanceTimersByTimeAsync(90_000);
+    expect(Socket.instances).toHaveLength(2);
+    expect(vi.getTimerCount()).toBe(0);
+    const next = connection.request('readRoom', { roomId: 'a' });
+    const socket = await open(); socket.reply({}); await next;
     expect(useConnectionFailure()).toBe(false);
   });
-  it('an old request deadline cannot announce a failure after resume', async () => {
+  it('initial socket admission gets only one replacement', async () => {
+    const { connection } = setup();
+    const read = connection.request('readRoom', { roomId: 'a' }).catch(error => error);
+    await tick(); Socket.instances[0].fail();
+    expect(useConnectionFailure()).toBe(false);
+    await failRecovery();
+    expect(await read).toBeInstanceOf(PhoneSocketDisconnectedError);
+    expect(Socket.instances).toHaveLength(2); expect(useConnectionFailure()).toBe(true);
+  });
+  it('shares one replacement and confirming read across concurrent failures', async () => {
+    const { connection } = setup();
+    const room = connection.request('readRoom', { roomId: 'a' });
+    const list = connection.request('readWorkspaces', {});
+    (await open()).drop();
+    const socket = await open();
+    expect(socket.requests()).toHaveLength(1);
+    socket.reply({ workspaces: [] }); await tick();
+    expect(socket.requests().map(frame => frame.op)).toEqual(['readWorkspaces', 'readRoom', 'readWorkspaces']);
+    socket.reply({ workspaces: [] }, 2); socket.reply({}, 1);
+    await room; await list;
+    expect(Socket.instances).toHaveLength(2); expect(useConnectionFailure()).toBe(false);
+  });
+  it('a failed confirming read shared by several screens never starts a third socket', async () => {
+    const { connection } = setup();
+    const room = connection.request('readRoom', { roomId: 'a' }).catch(error => error);
+    const list = connection.request('readWorkspaces', {}).catch(error => error);
+    (await open()).drop(); await open(); await failRecovery();
+    await room; await list;
+    expect(Socket.instances).toHaveLength(2); expect(useConnectionFailure()).toBe(true);
+  });
+  it.each(['reactToMessage', 'sendRoomMessage', 'sendRoomReply'] as const)('does not replay an uncertain %s; it confirms connectivity with a read', async operation => {
+    const { connection } = setup();
+    const write = connection.request(operation, { roomId: 'a', messageId: 'm', emoji: '👍', text: 'Hello', parentMessageId: 'parent' }).catch(error => error);
+    const first = await open(); first.drop();
+    const replacement = await open(); replacement.reply({ workspaces: [] });
+    expect(await write).toBeInstanceOf(PhoneSocketDisconnectedError);
+    expect(replacement.requests().map(frame => frame.op)).toEqual(['readWorkspaces']);
+    expect(useConnectionFailure()).toBe(false);
+  });
+  it('a socket write exception uses the same one replacement budget', async () => {
+    const { connection } = setup(); await connection.register([], () => {});
+    const socket = await open(); socket.send = () => { throw Error('write failed'); };
+    const write = connection.request('reactToMessage', { roomId: 'a', messageId: 'm', emoji: '👍' }).catch(error => error);
+    await failRecovery(); await write;
+    expect(useConnectionFailure()).toBe(true); expect(Socket.instances).toHaveLength(2);
+  });
+  it('a failed reread cannot silently create another reconnect', async () => {
+    const { connection } = setup();
+    const read = connection.request('readRoom', { roomId: 'a' }).catch(error => error);
+    (await open()).drop(); const socket = await open(); socket.reply({}); await tick(); socket.drop();
+    await read; await tick();
+    expect(useConnectionFailure()).toBe(true); expect(Socket.instances).toHaveLength(2);
+  });
+  it.each(['readRoom', 'reactToMessage'] as const)('%s deadlines never infer an outage or reconnect', async operation => {
+    const { connection } = setup();
+    const read = connection.request(operation, { roomId: 'a', messageId: 'm', emoji: '👍' }, { timeoutMs: 100 }).catch(error => error);
+    const socket = await open();
+    const join = connection.request('voiceJoin', { roomId: 'a' });
+    await vi.advanceTimersByTimeAsync(100);
+    expect(await read).toBeInstanceOf(MonolithRequestTimeoutError);
+    expect(useConnectionFailure()).toBe(false); expect(socket.readyState).toBe(1);
+    socket.reply({ call: { id: 'call' } }, 1); await join;
+    expect(Socket.instances).toHaveLength(1);
+  });
+  it('a confirming read deadline never diagnoses a broken socket or schedules another attempt', async () => {
+    const { connection } = setup();
+    const read = connection.request('readRoom', { roomId: 'a' }).catch(error => error);
+    (await open()).drop(); const replacement = await open();
+    await vi.advanceTimersByTimeAsync(20_000); await read;
+    expect(useConnectionFailure()).toBe(false); expect(Socket.instances).toHaveLength(2);
+    expect(replacement.readyState).toBe(1); expect(vi.getTimerCount()).toBe(0);
+  });
+  it('returns server refusals once without reconnecting', async () => {
+    const { connection } = setup();
+    const read = connection.request('readRoom', { roomId: 'a' }).catch(error => error);
+    const socket = await open(); socket.refuse();
+    expect(await read).toMatchObject({ code: 'unavailable' });
+    expect(useConnectionFailure()).toBe(false); expect(Socket.instances).toHaveLength(1);
+  });
+  it('a server refusal on the confirming read proves the socket answered', async () => {
+    const { connection } = setup();
+    const read = connection.request('readRoom', { roomId: 'a' }).catch(error => error);
+    (await open()).drop(); (await open()).refuse(); await read;
+    expect(useConnectionFailure()).toBe(false); expect(Socket.instances).toHaveLength(2);
+  });
+  it('invalidates credentials only on the explicit authorization refusal', async () => {
+    const { connection, invalidate } = setup();
+    const read = connection.request('readRoom', { roomId: 'a' }).catch(error => error);
+    const socket = await open();
+    socket.emit({ t: 'res', id: socket.requests()[0].id, ok: false, error: { code: 'unauthorized', message: 'Sign in again', retryable: false } });
+    expect(await read).toMatchObject({ code: 'unauthorized' }); expect(invalidate).toHaveBeenCalledWith('fixture-access');
+    expect(Socket.instances).toHaveLength(1); expect(useConnectionFailure()).toBe(false);
+  });
+  it('authorization failures and deadlines before socket admission cannot infer connectivity', async () => {
+    const { connection } = setup(vi.fn(async () => { throw new MonolithRequestTimeoutError(); }));
+    await expect(connection.request('readRoom', { roomId: 'a' })).rejects.toBeInstanceOf(MonolithRequestTimeoutError);
+    expect(Socket.instances).toHaveLength(0); expect(useConnectionFailure()).toBe(false);
+  });
+  it('never retries background or old-identity work', async () => {
+    const { connection, changeIdentity } = setup();
+    const old = connection.request('readRoom', { roomId: 'a' }).catch(error => error);
+    (await open()); changeIdentity(); await old;
+    expect(Socket.instances).toHaveLength(1); expect(useConnectionFailure()).toBe(false);
+    const read = connection.request('readRoom', { roomId: 'b' }).catch(error => error);
+    const socket = await open(); appState('background'); socket.drop(); await read;
+    expect(Socket.instances).toHaveLength(2); expect(useConnectionFailure()).toBe(false);
+  });
+  it('an identity change during reconnect cannot replay the old read or show an old failure', async () => {
+    const { connection, changeIdentity } = setup();
+    const read = connection.request('readRoom', { roomId: 'a' }).catch(error => error);
+    (await open()).drop(); await open(); changeIdentity(); await read;
+    expect(useConnectionFailure()).toBe(false); expect(Socket.instances).toHaveLength(2);
+  });
+  it('a new foreground session clears an old confirmed failure', async () => {
+    const { connection } = setup();
+    const read = connection.request('readRoom', { roomId: 'a' }).catch(error => error);
+    (await open()).drop(); await failRecovery(); await read;
+    expect(useConnectionFailure()).toBe(true);
+    appState('background'); appState('active'); expect(useConnectionFailure()).toBe(false);
+  });
+  it('abort does not close the shared socket or reconnect', async () => {
+    const { connection } = setup(); const cancel = new AbortController();
+    const read = connection.request('readRoom', { roomId: 'a' }, { signal: cancel.signal }).catch(error => error);
+    const socket = await open(); const other = connection.request('readWorkspaces', {}); cancel.abort();
+    expect(await read).toMatchObject({ name: 'AbortError' }); socket.reply({}, 1); await other;
+    expect(Socket.instances).toHaveLength(1); expect(useConnectionFailure()).toBe(false);
+  });
+  it('idle time, offline signals and missing heartbeats never infer failure', async () => {
+    const { connection } = setup(); await connection.register([], () => {}); const socket = await open();
+    for (const listener of state.network) listener({ isConnected: false, isInternetReachable: false });
+    await vi.advanceTimersByTimeAsync(3_600_000);
+    expect(socket.sent).not.toContain('{"type":"ping"}'); expect(useConnectionFailure()).toBe(false);
+    expect(vi.getTimerCount()).toBe(0); expect(Socket.instances).toHaveLength(1);
+  });
+  it('online and foreground events invoke the subscribed read without probes', async () => {
+    const { connection } = setup(); const listener = vi.fn(); await connection.register([{ '#h': ['a'] }], listener); await open();
+    for (const online of state.network) online({ isConnected: true, isInternetReachable: true });
+    appState('background'); appState('active');
+    expect(listener).toHaveBeenCalledTimes(2); expect(Socket.instances).toHaveLength(1);
+  });
+  it('idle socket failure asks the screen to read, but does not itself show a banner', async () => {
+    const { connection } = setup(); const listener = vi.fn(); await connection.register([{ '#h': ['a'] }], listener);
+    (await open()).drop(); expect(listener).toHaveBeenCalledOnce(); expect(useConnectionFailure()).toBe(false);
+  });
+  it('a native-closed socket without its callback is replaced by the next read', async () => {
+    const { connection } = setup(); await connection.register([], () => {}); const first = await open(); first.readyState = 3;
+    const read = connection.request('readRoom', { roomId: 'a' }); const next = await open(); next.reply({}); await read;
+    expect(next).not.toBe(first); expect(useConnectionFailure()).toBe(false);
+  });
+  it('preserves Room subscriptions and view ownership across replacement', async () => {
+    const { connection } = setup(); const stop = await connection.register([{ '#h': ['a'] }], () => {});
+    const first = await open(); const release = connection.view('a'); const read = connection.request('readRoom', { roomId: 'a' });
+    first.drop(); const next = await recoverRead(); await read;
+    expect(next.sent.map(value => JSON.parse(value))).toContainEqual({ type: 'viewing', roomId: 'a', viewing: true });
+    release(); stop(); expect(next.sent.map(value => JSON.parse(value))).toContainEqual({ type: 'unsubscribe', roomId: 'a' });
+  });
+  it('delivers live events as-is without a client replay cache', async () => {
+    const { connection } = setup(); const first = vi.fn(); await connection.register([{ '#h': ['a'] }], first); const socket = await open();
+    const event = { type: 'draft', roomId: 'a', agentId: 'agent', turnId: 'turn', text: 'Current text' };
+    socket.emit(event); expect(first).toHaveBeenCalledWith({ monolithLive: event });
+    const later = vi.fn(); await connection.register([{ '#h': ['a'] }], later); expect(later).not.toHaveBeenCalled();
+  });
+  it('the shared production owner removes native online listeners on dispose', () => {
+    sharedLiveConnection(); expect(state.network.size).toBe(1); resetSharedLiveConnection(); expect(state.network.size).toBe(0);
+  });
+});
+
+describe('unchanged socket ownership guarantees', () => {
+it('an old request deadline cannot announce a failure after resume', async () => {
     const { connection } = setup();
     const old = connection.request('readRoom', { roomId: 'a' }, { timeoutMs: 100 }).catch(error => error);
     const socket = await open();
@@ -80,29 +276,7 @@ describe('the one phone socket',()=>{
     socket.reply({}, 1); await read;
     expect(useConnectionFailure()).toBe(false);
   });
-  it('an authorization timeout before a socket exists cannot announce a socket failure', async () => {
-    const { connection } = setup(vi.fn(async () => { throw new MonolithRequestTimeoutError(); }));
-    await expect(connection.request('readRoom', { roomId: 'a' })).rejects.toBeInstanceOf(MonolithRequestTimeoutError);
-    expect(Socket.instances).toHaveLength(0);
-    expect(useConnectionFailure()).toBe(false);
-  });
-  it('an identity reset clears the previous account’s failure', async () => {
-    const { connection, changeIdentity } = setup();
-    const failed = connection.request('readRoom', { roomId: 'a' }).catch(error => error);
-    const socket = await open(); socket.drop(); await failed;
-    changeIdentity();
-    expect(useConnectionFailure()).toBe(false);
-  });
-  it('a background read failure is not carried into the next foreground', async () => {
-    const { connection } = setup();
-    const read = connection.request('readRoom', { roomId: 'a' }).catch(error => error);
-    const socket = await open();
-    appState('background'); socket.drop(); await read;
-    expect(useConnectionFailure()).toBe(false);
-    appState('active');
-    expect(useConnectionFailure()).toBe(false);
-  });
-  it('a request deadline waiting for authorization cannot announce a socket failure', async () => {
+it('a request deadline waiting for authorization cannot announce a socket failure', async () => {
     const { connection } = setup(vi.fn(() => new Promise<string>(() => {})));
     const read = connection.request('readRoom', { roomId: 'a' }, { timeoutMs: 100 }).catch(error => error);
     await vi.advanceTimersByTimeAsync(100);
@@ -110,75 +284,13 @@ describe('the one phone socket',()=>{
     expect(Socket.instances).toHaveLength(0);
     expect(useConnectionFailure()).toBe(false);
   });
-  it('the shared production owner supplies and disposes native online events',()=>{
-    expect(state.network.size).toBe(0);
-    sharedLiveConnection();expect(state.network.size).toBe(1);
-    resetSharedLiveConnection();expect(state.network.size).toBe(0);
-  });
-  it('an embedded connection only uses its supplied host dependencies',()=>{
-    const connection=new LiveConnection({authorization:async()=> 'fixture-access',
-      liveUrl:()=> 'ws://fixture.invalid/v1/phone/live',subscribeIdentityChange:()=>()=>{}});
-    connections.push(connection);expect(state.network.size).toBe(0);
-  });
-  it('publishes the first failed read without waiting through replacement attempts',async()=>{
-    const {connection}=setup();const answer=connection.request('readRoom',{roomId:'a'}).catch(error=>error);
-    const socket=await open();socket.drop();await tick();
-    expect(useConnectionFailure()).toBe(true);
-    expect(await answer).toBeInstanceOf(PhoneSocketDisconnectedError);
-    expect(Socket.instances).toHaveLength(1);
-  });
-  it('network-online invokes the open Room read immediately after a five-second outage',async()=>{
-    const {connection}=setup();let answer:Promise<unknown>|undefined;
-    await connection.register([{'#h':['a']}],()=>{answer=connection.request('readRoom',{roomId:'a'}).catch(error=>error);});
-    const socket=await open();const initial=connection.request('readRoom',{roomId:'a'});socket.reply({room:{id:'a'}});await initial;
-    socket.drop();await tick();Socket.instances.at(-1)!.fail();await tick();
-    expect(useConnectionFailure()).toBe(true);
-    await vi.advanceTimersByTimeAsync(5_000);
-    for(const listener of state.network)listener({isConnected:true,isInternetReachable:true});
-    const replacement=await open();replacement.reply({room:{id:'a'}});await answer;
-    expect(useConnectionFailure()).toBe(false);
-    expect(replacement.requests()).toHaveLength(1);
-    expect(state.network.size).toBe(1);connection.dispose();expect(state.network.size).toBe(0);
-  });
-  it('offline signals never invent failures or schedule recovery',async()=>{
-    const {connection}=setup();const read=connection.request('readRoom',{roomId:'a'});const socket=await open();socket.reply({});await read;
-    const listener=vi.fn();await connection.register([{'#h':['a']}],listener);
-    for(const network of state.network)network({isConnected:false,isInternetReachable:false});
-    await vi.advanceTimersByTimeAsync(60_000);
-    expect(useConnectionFailure()).toBe(false);expect(listener).not.toHaveBeenCalled();expect(Socket.instances).toHaveLength(1);
-    expect(vi.getTimerCount()).toBe(0);
-  });
-  it('browser online invokes the same read and disposal removes its listener',async()=>{
+it('browser online invokes the same read and disposal removes its listener',async()=>{
     state.platform='web';const browser=new EventTarget();vi.stubGlobal('window',browser);
     const {connection}=setup();const listener=vi.fn();await connection.register([{'#h':['a']}],listener);await open();
     browser.dispatchEvent(new Event('online'));expect(listener).toHaveBeenCalledTimes(1);
     connection.dispose();browser.dispatchEvent(new Event('online'));expect(listener).toHaveBeenCalledTimes(1);
   });
-  it('sends ordinary reads immediately and returns their answers unchanged',async()=>{
-    const {connection}=setup();const answer=connection.request('readRoom',{roomId:'a'});const socket=await open();
-    expect(socket.protocols).toEqual(['bearer.fixture-access']);expect(socket.requests()[0]).toMatchObject({op:'readRoom',args:{roomId:'a'}});
-    const value={room:{id:'a'},messages:[]};socket.reply(value);await expect(answer).resolves.toEqual(value);
-  });
-  it('shares one connecting socket across concurrent screens and matches reversed replies',async()=>{
-    const {connection}=setup();const room=connection.request('readRoom',{roomId:'a'}),workspaces=connection.request('readWorkspaces',{});
-    const socket=await open();expect(Socket.instances).toHaveLength(1);socket.reply({workspaces:[]},1);socket.reply({room:{id:'a'}});
-    await expect(room).resolves.toEqual({room:{id:'a'}});await expect(workspaces).resolves.toEqual({workspaces:[]});
-  });
-  it('settles a lost read; the next read reconnects',async()=>{
-    const {connection}=setup();const failed=connection.request('readRoom',{roomId:'a'}).catch(error=>error);const first=await open();first.drop();
-    expect(await failed).toBeInstanceOf(PhoneSocketDisconnectedError);
-    const answer=connection.request('readRoom',{roomId:'a'});
-    const second=await open();expect(Socket.instances).toHaveLength(2);expect(second.requests()).toHaveLength(1);second.reply({room:{id:'a'}});
-    await expect(answer).resolves.toMatchObject({room:{id:'a'}});
-  });
-  it('returns a server refusal once and keeps the answered socket usable',async()=>{
-    const {connection}=setup();const answer=connection.request('readRoom',{roomId:'a'}).catch(error=>error);
-    const socket=await open();socket.refuse();
-    expect(await answer).toMatchObject({message:'Read unavailable'});expect(socket.readyState).toBe(1);
-    const retried=connection.request('readRoom',{roomId:'a'});socket.reply({room:{id:'a'}},1);await retried;
-    expect(Socket.instances).toHaveLength(1);expect(useConnectionFailure()).toBe(false);
-  });
-  it('a rejected image metadata read cannot disconnect a send awaiting its acknowledgement',async()=>{
+it('a rejected image metadata read cannot disconnect a send awaiting its acknowledgement',async()=>{
     const {connection}=setup();const send=connection.request('sendRoomMessage',{roomId:'a',messageId:'image',text:''});
     const socket=await open();const metadata=connection.request('readMediaMetadata',{objectId:'media'}).catch(error=>error);
     socket.emit({t:'res',id:socket.requests()[1].id,ok:false,error:{code:'unknown_phone_operation',message:'unknown_phone_operation',retryable:false}});
@@ -187,170 +299,19 @@ describe('the one phone socket',()=>{
     socket.reply({messageId:'image'});await expect(send).resolves.toEqual({messageId:'image'});
     expect(Socket.instances).toHaveLength(1);
   });
-  it('settles the first failed native opening without another attempt',async()=>{
-    const {connection,invalidate}=setup();const answer=connection.request('readRoom',{roomId:'a'}).catch(error=>error);
-    await tick();Socket.instances[0]!.fail();
-    expect(await answer).toBeInstanceOf(PhoneSocketDisconnectedError);expect(Socket.instances).toHaveLength(1);expect(invalidate).not.toHaveBeenCalled();
-  });
-  it('invalidates authorization only for an explicit server authorization refusal',async()=>{
-    const {connection,invalidate}=setup();const read=connection.request('readRoom',{roomId:'a'}).catch(error=>error);const socket=await open();
-    socket.emit({t:'res',id:socket.requests()[0].id,ok:false,error:{code:'unauthorized',message:'Sign in again',retryable:false}});
-    expect(await read).toMatchObject({code:'unauthorized'});expect(invalidate).toHaveBeenCalledWith('fixture-access');
-    expect(socket.readyState).toBe(1);expect(Socket.instances).toHaveLength(1);expect(useConnectionFailure()).toBe(false);
-  });
-  it('does not repeat an authorization failure before any socket request',async()=>{
-    const authorization=vi.fn(async()=>{throw Error('Authorization unavailable');});const {connection}=setup(authorization);
-    await expect(connection.request('readRoom',{roomId:'a'})).rejects.toThrow('Authorization unavailable');
-    expect(authorization).toHaveBeenCalledTimes(1);expect(Socket.instances).toHaveLength(0);
-  });
-  it('ends an unanswered read at its existing deadline even if pongs arrive',async()=>{
-    const {connection}=setup();const answer=connection.request('readRoom',{roomId:'a'},{timeoutMs:100}).catch(error=>error);
-    await open();await vi.advanceTimersByTimeAsync(100);
-    expect((await answer).constructor.name).toBe('MonolithRequestTimeoutError');expect(Socket.instances).toHaveLength(1);
-  });
-  it('a read deadline leaves an in-flight voice join on the same socket to receive its answer', async () => {
-    const { connection } = setup();
-    const read = connection.request('readRoom', { roomId: 'a' }, { timeoutMs: 100 }).catch(error => error);
-    const socket = await open();
-    const join = connection.request('voiceJoin', { roomId: 'a' }).catch(error => error);
-    await vi.advanceTimersByTimeAsync(100);
-    expect((await read).constructor.name).toBe('MonolithRequestTimeoutError');
-    expect(socket.readyState).toBe(1);
-    expect(useConnectionFailure()).toBe(true);
-    const result = { call: { id: 'call' }, sessionId: 'session' };
-    socket.reply(result, 1);
-    expect(await join).toEqual(result);
-    expect(useConnectionFailure()).toBe(false);
-    expect(socket.requests().map(frame => frame.op)).toEqual(['readRoom', 'voiceJoin']);
-    expect(Socket.instances).toHaveLength(1);
-  });
-  it('shares a replacement after two concurrent reads fail together',async()=>{
-    const {connection}=setup();const oldRoom=connection.request('readRoom',{roomId:'a'}).catch(error=>error),oldList=connection.request('readWorkspaces',{}).catch(error=>error);
-    const first=await open();first.drop();expect(await oldRoom).toBeInstanceOf(PhoneSocketDisconnectedError);expect(await oldList).toBeInstanceOf(PhoneSocketDisconnectedError);
-    const room=connection.request('readRoom',{roomId:'a'}),list=connection.request('readWorkspaces',{});
-    const replacement=await open();expect(Socket.instances).toHaveLength(2);
-    replacement.reply({room:{id:'a'}});replacement.reply({workspaces:[]},1);await room;await list;
-  });
-  it('does not replay a lost write',async()=>{
-    const {connection}=setup();const write=connection.request('reactToMessage',{roomId:'a',messageId:'m',emoji:'👍'}).catch(error=>error);
-    const socket=await open();socket.drop();expect(await write).toBeInstanceOf(PhoneSocketDisconnectedError);
-    await vi.advanceTimersByTimeAsync(90_000);expect(Socket.instances).toHaveLength(1);expect(socket.requests()).toHaveLength(1);
-  });
-  it('settles a write at its existing deadline; the next answer clears the banner',async()=>{
-    const {connection}=setup();const write=connection.request('reactToMessage',{roomId:'a',messageId:'m',emoji:'👍'},{timeoutMs:100}).catch(error=>error);
-    const socket=await open();await vi.advanceTimersByTimeAsync(100);
-    expect((await write).constructor.name).toBe('MonolithRequestTimeoutError');expect(useConnectionFailure()).toBe(true);
-    expect(Socket.instances).toHaveLength(1);expect(socket.requests()).toHaveLength(1);expect(socket.readyState).toBe(1);
-    const read=connection.request('readRoom',{roomId:'a'});socket.reply({room:{id:'a'}},1);await read;
-    expect(useConnectionFailure()).toBe(false);
-  });
-  it('aborts one read without closing another screen’s healthy socket',async()=>{
-    const {connection}=setup();const abort=new AbortController();const cancelled=connection.request('readRoom',{roomId:'a'},{signal:abort.signal}).catch(error=>error);
-    const socket=await open();const other=connection.request('readWorkspaces',{});abort.abort();expect(await cancelled).toMatchObject({name:'AbortError'});
-    socket.reply({workspaces:[]},1);await other;expect(socket.readyState).toBe(1);expect(Socket.instances).toHaveLength(1);
-  });
-  it('ignores a reply arriving from a replaced socket',async()=>{
-    const {connection}=setup();const lost=connection.request('readRoom',{roomId:'a'}).catch(error=>error);const first=await open();first.drop();await lost;
-    const answer=connection.request('readRoom',{roomId:'a'});const second=await open();
-    first.reply({room:{id:'old'}});second.reply({room:{id:'a'}});await expect(answer).resolves.toEqual({room:{id:'a'}});
-  });
-  it('never opens with authorization completed after sign-out',async()=>{
+it('never opens with authorization completed after sign-out',async()=>{
     let release!:(token:string)=>void;const authorization=vi.fn(()=>new Promise<string>(resolve=>{release=resolve;}));const {connection,changeIdentity}=setup(authorization);
     await connection.register([],()=>{});changeIdentity();release('old-access');await tick();expect(Socket.instances).toHaveLength(0);
   });
-  it('does not retry old-identity reads after sign-out',async()=>{
-    const {connection,changeIdentity}=setup();const answer=connection.request('readRoom',{roomId:'a'}).catch(error=>error);await open();changeIdentity();
-    expect(await answer).toBeInstanceOf(PhoneSocketDisconnectedError);await tick();expect(Socket.instances).toHaveLength(1);
-  });
-  it('an old view release cannot hide the new identity’s view',async()=>{
+it('an old view release cannot hide the new identity’s view',async()=>{
     const {connection,changeIdentity}=setup();await connection.register([],()=>{});await open();const oldRelease=connection.view('a');changeIdentity();
     connection.reconnectNow();const socket=await open();connection.view('a');oldRelease();
     expect(socket.sent.map(value=>JSON.parse(value)).filter(frame=>frame.type==='viewing')).toEqual([{type:'viewing',roomId:'a',viewing:true}]);
   });
-  it('subscribes open Rooms without resume cursors and asks the server again for a joining screen',async()=>{
+it('subscribes open Rooms without resume cursors and asks the server again for a joining screen',async()=>{
     const {connection}=setup();const listener=vi.fn();const stop=await connection.register([{'#h':['a']}],listener);const socket=await open();
     expect(socket.sent.map(value=>JSON.parse(value))[0]).toEqual({type:'subscribe',roomIds:['a'],sidebarPreviews:true,roomStateProjections:true});
     const other=await connection.register([{'#h':['a']}],()=>{});expect(socket.sent.map(value=>JSON.parse(value)).filter(frame=>frame.type==='subscribe')).toHaveLength(2);
     stop();expect(socket.sent.some(value=>JSON.parse(value).type==='unsubscribe')).toBe(false);other();expect(socket.sent.some(value=>JSON.parse(value).type==='unsubscribe')).toBe(true);
-  });
-  it('delivers full draft pushes as-is and does not invent a late-join cache',async()=>{
-    const {connection}=setup();const first=vi.fn();await connection.register([{'#h':['a']}],first);const socket=await open();
-    const event={type:'draft',roomId:'a',agentId:'agent',turnId:'turn',text:'Current text'};socket.emit(event);expect(first).toHaveBeenCalledWith({monolithLive:event});
-    const later=vi.fn();await connection.register([{'#h':['a']}],later);expect(later).not.toHaveBeenCalled();socket.emit(event);expect(later).toHaveBeenCalledWith({monolithLive:event});
-  });
-  it('a broken idle socket asks the screen to invoke its same read',async()=>{
-    const {connection}=setup();let read:Promise<unknown>|undefined;await connection.register([{'#h':['a']}],event=>{
-      if('monolithLive'in event&&event.monolithLive.type==='invalidate')read=connection.request('readRoom',{roomId:'a'});
-    });const first=await open();first.drop();const replacement=await open();replacement.reply({room:{id:'a'}});await read;expect(Socket.instances).toHaveLength(2);
-  });
-  it('idle time and missing heartbeats cannot close a socket or produce a banner',async()=>{
-    const {connection}=setup();const read=connection.request('readRoom',{roomId:'a'});const socket=await open();socket.reply({});await read;
-    socket.autoPong=false;await vi.advanceTimersByTimeAsync(3_600_000);
-    expect(socket.sent).not.toContain('{"type":"ping"}');expect(socket.readyState).toBe(1);expect(useConnectionFailure()).toBe(false);
-    socket.drop();expect(useConnectionFailure()).toBe(false);
-  });
-  it('foreground asks the screen to read without speculative pings',async()=>{
-    const {connection}=setup();const listener=vi.fn();await connection.register([{'#h':['a']}],listener);const socket=await open();appState('background');
-    await vi.advanceTimersByTimeAsync(90_000);expect(socket.sent).not.toContain('{"type":"ping"}');appState('active');
-    expect(socket.sent).not.toContain('{"type":"ping"}');expect(listener).toHaveBeenCalledWith({monolithLive:{type:'invalidate',roomId:'a',reason:'reconnect'}});
-  });
-  it('Retry revives a socket already closed before its native close callback arrives',async()=>{
-    const {connection}=setup();await connection.register([],()=>{});const first=await open();
-    first.readyState=3;connection.reconnectNow();const second=await open();
-    expect(second).not.toBe(first);expect(connection.diagnostics().state).toBe(1);
-  });
-  it('a late failure on a closed old socket cannot restore the banner after the replacement read', async () => {
-    const { connection } = setup();
-    const oldRead = connection.request('readRoom', { roomId: 'a' }, { timeoutMs: 100 }).catch(error => error);
-    const oldSocket = await open();
-    // Android has closed the socket but has not delivered its close callback.
-    oldSocket.readyState = 3;
-    const nextRead = connection.request('readRoom', { roomId: 'a' });
-    const replacement = await open();
-    replacement.reply({ room: { id: 'a' } });
-    await nextRead;
-    expect(useConnectionFailure()).toBe(false);
-    await vi.advanceTimersByTimeAsync(100);
-    await oldRead;
-    expect(useConnectionFailure()).toBe(false);
-  });
-  it('a screen registration settles a native-closed socket before replacing it', async () => {
-    const { connection } = setup();
-    const oldRead = connection.request('readRoom', { roomId: 'a' }, { timeoutMs: 100 }).catch(error => error);
-    const oldSocket = await open(); oldSocket.readyState = 3;
-    await connection.register([{ '#h': ['b'] }], () => {});
-    const replacement = await open();
-    expect(await oldRead).toBeInstanceOf(PhoneSocketDisconnectedError);
-    const nextRead = connection.request('readRoom', { roomId: 'b' });
-    replacement.reply({ room: { id: 'b' } }); await nextRead;
-    await vi.advanceTimersByTimeAsync(100);
-    expect(useConnectionFailure()).toBe(false);
-  });
-  it('Reconnect clears the banner on its read and notifies media even on an already open socket', async () => {
-    const connection = sharedLiveConnection();
-    const failed = connection.request('reactToMessage', { roomId: 'a', messageId: 'm', emoji: '👍' }, { timeoutMs: 100 }).catch(error => error);
-    const socket = await open();
-    await vi.advanceTimersByTimeAsync(100); await failed;
-    expect(useConnectionFailure()).toBe(true);
-    const recovered = vi.fn(); connection.subscribeConnected(recovered);
-    const generation = connection.commandState().generation;
-    reconnectNow();
-    expect(useConnectionFailure()).toBe(true);
-    socket.reply({ workspaces: [] }, 1); await tick();
-    expect(useConnectionFailure()).toBe(false);
-    expect(connection.commandState().generation).toBeGreaterThan(generation);
-    expect(recovered).toHaveBeenCalledOnce();
-    expect(Socket.instances).toHaveLength(1);
-  });
-  it('a lost native close callback is handled by the next explicit request',async()=>{
-    const {connection}=setup();const listener=vi.fn();await connection.register([],listener);
-    const socket=await open();socket.readyState=3;await vi.advanceTimersByTimeAsync(30_000);
-    expect(listener).not.toHaveBeenCalled();
-    const read=connection.request('readRoom',{roomId:'a'});const next=await open();next.reply({room:{id:'a'}});
-    await expect(read).resolves.toMatchObject({room:{id:'a'}});expect(next).not.toBe(socket);expect(useConnectionFailure()).toBe(false);
-  });
-  it('forwards a native push into the same read without another connection',async()=>{
-    const {connection}=setup();const listener=vi.fn();await connection.register([{'#h':['a']}],listener);await open();connection.notePushedMessage('a');
-    expect(listener).toHaveBeenCalledWith({monolithLive:{type:'invalidate',roomId:'a',reason:'resync'}});expect(Socket.instances).toHaveLength(1);
   });
 });

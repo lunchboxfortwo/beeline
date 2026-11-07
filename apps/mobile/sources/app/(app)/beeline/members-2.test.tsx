@@ -169,7 +169,7 @@ const scope1 = fixtureScope1();
   });
 
 
-  it('loads older work, preserves the current page on failure, and retries', async () => {
+  it('loads older work and preserves the page and normal More control after failure', async () => {
     state.agent = {
       ...baseAgent(),
       recentWork: [{ title: 'First', url: 'https://github.com/acme/repo/pull/2' }],
@@ -180,8 +180,9 @@ const scope1 = fixtureScope1();
     roomView.agent.mockRejectedValueOnce(new Error('offline'));
     await press(renderer, 'load-more-agent-work');
     expect(renderer.root.findByProps({ testID: 'load-more-agent-work' }).props.label).toBe(
-      'Retry',
+      'More',
     );
+    expect(renderer.root.findAllByProps({ action: 'Retry' })).toHaveLength(0);
     roomView.agent.mockResolvedValueOnce({
       ...baseAgent(),
       recentWork: [{ title: 'Older', url: 'https://github.com/acme/repo/pull/1' }],
@@ -242,11 +243,11 @@ const scope1 = fixtureScope1();
   });
 
 
-  it('keeps a profile read failure and Retry after a successful workspace refresh', async () => {
+  it('keeps profile read failures silent after a workspace refresh and recovers on reconnect', async () => {
     roomView.agent.mockRejectedValueOnce(new Error('Connection lost'));
     const renderer = await render();
     await openAgentProfile(renderer);
-    expect(renderer.root.findAllByProps({ action: 'Retry' })).not.toHaveLength(0);
+    expect(renderer.root.findAllByProps({ action: 'Retry' })).toHaveLength(0);
     const subscriptions = client.surfaceSubscribe.mock.calls as unknown as Array<
       [unknown, (event?: unknown) => void]
     >;
@@ -254,9 +255,10 @@ const scope1 = fixtureScope1();
     const readsBeforeRefresh = roomView.workspace.mock.calls.length;
     await act(async () => refresh({ monolithLive: { type: 'invalidate', roomId: '', reason: 'postgres:memberships' } }));
     expect(roomView.workspace.mock.calls.length).toBeGreaterThan(readsBeforeRefresh);
-    const retry = renderer.root.findAllByProps({ action: 'Retry' })[0];
-    expect(retry).toBeDefined();
-    await act(async () => retry.props.onPress());
+    expect(renderer.root.findAllByProps({ action: 'Retry' })).toHaveLength(0);
+    await act(async () => {
+      for (const listener of liveListeners) listener({ monolithLive: { type: 'invalidate', roomId: '', reason: 'reconnect' } });
+    });
     expect(roomView.agent).toHaveBeenCalledTimes(2);
     expect(renderer.root.findByProps({ testID: 'agent-profile-soul' })).toBeDefined();
   });
@@ -278,12 +280,16 @@ const scope1 = fixtureScope1();
   });
 
 
-  it('retries a failed profile read without collapsing the profile', async () => {
+  it('reconnects a failed profile read without collapsing the profile', async () => {
     roomView.agent.mockRejectedValueOnce(new Error('Connection lost'));
     const renderer = await render();
     await openAgentProfile(renderer);
-    const retry = renderer.root.findAllByProps({ action: 'Retry' })[0];
-    await act(async () => retry.props.onPress());
+    const profile = renderer.root.findByProps({ testID: 'agent-profile' });
+    expect(renderer.root.findAllByProps({ action: 'Retry' })).toHaveLength(0);
+    await act(async () => {
+      for (const listener of liveListeners) listener({ monolithLive: { type: 'invalidate', roomId: '', reason: 'reconnect' } });
+    });
+    expect(renderer.root.findByProps({ testID: 'agent-profile' })).toBe(profile);
     expect(roomView.agent).toHaveBeenCalledTimes(2);
     expect(renderer.root.findByProps({ testID: 'agent-profile-soul' })).toBeDefined();
   });

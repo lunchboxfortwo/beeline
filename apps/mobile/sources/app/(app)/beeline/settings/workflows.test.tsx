@@ -36,22 +36,22 @@ beforeEach(() => {
 });
 
 it.each([
-  ['network',new RoomViewHttpError(504,'surface_request_timed_out'),'Could not load workflows.',undefined],
+  ['network',new RoomViewHttpError(504,'surface_request_timed_out'),'',undefined],
   ['server refusal',Object.assign(new Error('Workspace admins only'),{status:403}),'Workspace admins only',undefined],
-  ['unknown',new Error('opaque_diagnostic'),'Could not load workflows.',undefined],
-])('R2: displays the %s failure and Retry reloads Workflow settings', async (_kind,reason,title,description) => {
+  ['unknown',new Error('opaque_diagnostic'),'',undefined],
+])('R2: %s failed reads never add a local Retry; server refusals keep their reason', async (_kind,reason,title,description) => {
   controls.room.mockRejectedValueOnce(reason);
   let tree:any;
   try {
     await act(async()=>{tree=create(<RoomWorkflows />);});
-    const row=tree.root.findByType('SettingsRow');
-    expect(row.props.title).toBe(title);
-    expect(row.props.title).not.toContain('{error}');
-    expect(row.props.description).toBe(description);
-    expect(row.props.action).toBe('Retry');
-    await act(async()=>row.props.onPress());
-    expect(controls.room).toHaveBeenCalledTimes(2);
-    expect(controls.operation).toHaveBeenCalledWith('listRoomWorkflows',{roomId:'room-1'});
-    expect(tree.root.findAllByType('SettingsRow')).toHaveLength(0);
+    const rows=tree.root.findAllByType('SettingsRow');
+    if (title) {
+      expect(rows).toHaveLength(1);
+      expect(rows[0].props.title).toBe(title);
+      expect(rows[0].props.description).toBe(description);
+      expect(rows[0].props.action).toBeUndefined();
+      expect(rows[0].props.onPress).toBeUndefined();
+    } else expect(rows).toHaveLength(0);
+    expect(controls.room).toHaveBeenCalledTimes(1);
   } finally { if(tree) await act(async()=>tree.unmount()); }
 });

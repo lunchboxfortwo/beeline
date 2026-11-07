@@ -49,7 +49,6 @@ import { DirectMessagePickerSheet } from '@/components/buzz/DirectMessagePickerS
 import { ExitGlyph } from '@/components/buzz/ExitGlyph';
 import { MemberPickerSheet } from '@/components/buzz/MemberPickerSheet';
 import { Button } from '@/components/buzz/Button';
-import { reconnectNow } from '@/sync/transport/live-connection';
 import { clientResetGeneration } from '@/sync/client-reset';
 import { InlineRow } from '@/components/buzz/IndexRow';
 import { NewRoomDialog } from '@/components/buzz/NewRoomDialog';
@@ -342,8 +341,7 @@ function BuzzChannels({ session }: { session: DeckSession }) {
           {!isDesktop && <CommunitySwitcherTrigger community={activeCommunity} expanded={false} />}
         </InlineRow>
         <View style={styles.failureInset}>
-          <IndexRow inset="flush" title={error || 'Could not load Rooms'}  testID="room-deck-error-retry" action="Retry"
-            onPress={() => { reconnectNow(); setError(null); setRetryGeneration(value => value + 1); }} />
+          <IndexRow inset="flush" title={error ?? ''}  testID="room-deck-error-retry" />
         </View>
       </View>
     );
@@ -475,9 +473,6 @@ function BuzzChannels({ session }: { session: DeckSession }) {
             <IndexRow
               inset="flush"
               title={error}
-
-              action="Retry"
-              onPress={refreshNow}
             />
           </View>
         )}

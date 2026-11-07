@@ -140,7 +140,7 @@ function ConnectorSignInOverlay() {
     return () => subscription.remove();
   }, [fallback, observed.retry]);
 
-  const failure = observed.error ?? pageError;
+  const failure = observed.error || pageError;
   const errorLine = failure === PAGE_LOAD_ERROR
     ? `${machineName}’s browser didn’t answer within 15 seconds. Try again, or finish sign-in in your phone’s browser.`
     : failure;

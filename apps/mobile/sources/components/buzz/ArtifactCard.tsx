@@ -1,3 +1,4 @@
+import { appReadErrorCopy } from '@/buzz/app-error-copy';
 import { useArtifactRecoveryGeneration } from '@/buzz/use-artifact-recovery';
 import { ContentTarget, IndexRow, InlineRow } from './IndexRow';
 import { Button } from '@/components/buzz/Button';
@@ -315,13 +316,13 @@ export function ArtifactSandboxPreview({
     }).catch(error => {
       if (!live || controller.signal.aborted) return;
       if (error instanceof ArtifactPreviewUnavailable) setRenderDocument(true);
-      else setFailed(true);
+      else setFailed(Boolean(appReadErrorCopy(error)));
     });
     return () => { live = false; controller.abort(); stopPurge(); releaseArtifactImageSource(loaded); };
   }, [attachment, recovery]);
   if (failed) return (
     <View style={styles.failureInset} testID="artifact-preview-failed">
-      <IndexRow inset="flush" title="Preview unavailable" description="The page could not be loaded. Try again." />
+      <IndexRow inset="flush" title="Preview unavailable" />
     </View>
   );
   if (renderDocument) return <ArtifactDocumentPreview attachment={attachment} format={format} />;
@@ -343,14 +344,14 @@ export function ArtifactMarkdownPreview({ attachment }: { attachment: Attachment
       .then((text) => {
         if (live && !controller.signal.aborted) setMarkdown(text);
       })
-      .catch(() => { if (live && !controller.signal.aborted) setFailed(true); });
+      .catch((cause) => { if (live && !controller.signal.aborted) setFailed(Boolean(appReadErrorCopy(cause))); });
     return () => {
       live = false; controller.abort(); stopPurge();
     };
   }, [attachment, recovery]);
   if (failed) return (
     <View style={styles.failureInset} testID="artifact-preview-failed">
-      <IndexRow inset="flush" title="Preview unavailable" description="The page could not be loaded. Try again." />
+      <IndexRow inset="flush" title="Preview unavailable" />
     </View>
   );
   if (markdown == null) {

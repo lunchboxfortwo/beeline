@@ -347,7 +347,7 @@ export function useChatMessageActions([
         // The live Room list is current; only a list not yet loaded reads one.
         const held = workspaceChatListRef.current;
         const [chats, workspace] = await Promise.all([
-          held ? held.chats : chatListKey ? readChatList(chatListKey).then(list => list.chats) : Promise.reject(new Error('Room list unavailable.')),
+          held ? held.chats : chatListKey ? readChatList(chatListKey).then(list => list.chats) : Promise.reject(new Error('No Room list is held yet.')),
           roomClient.workspace(activeCommunityId),
         ]);
         setForwardRooms(forwardTargets(chats, workspace, decodedId));

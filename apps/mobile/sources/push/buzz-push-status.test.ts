@@ -48,7 +48,7 @@ describe('push status presentation', () => {
         true,
         state({ phase: 'network-failed', message: 'offline' }),
       ),
-    ).toBe('connection unavailable — will retry');
+    ).toBe('OS permission: blocked in device settings');
   });
 
   it('explicitly names successful registration and keeps unknown registration distinct', () => {

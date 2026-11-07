@@ -441,7 +441,7 @@ export function BuzzChatSurface({
             </View>
           </View>
           <View style={styles.hydrationFailureInset}>
-            {transcriptHydrationError && <IndexRow inset="flush" title={transcriptHydrationError} action="Retry" onPress={retryHydration} testID="room-read-error" />}
+            {transcriptHydrationError && <IndexRow inset="flush" title={transcriptHydrationError} testID="room-read-error" />}
           </View>
         </View>
       );

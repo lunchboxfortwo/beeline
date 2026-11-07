@@ -484,7 +484,7 @@ describe('Bookmarks mobile open', () => {
   });
 
 
-  it('keeps the items and offers Retry when a refresh fails for another reason', async () => {
+  it('keeps the items without local failure copy or Retry when a refresh fails', async () => {
     {
       const tree = await renderTray();
       phoneOperation.mockImplementation(async () => {
@@ -495,7 +495,8 @@ describe('Bookmarks mobile open', () => {
       await returnToForeground();
       expect(tree.root.findByProps({ testID: 'bookmark-msg-1' })).toBeTruthy();
       expect(tree.root.findAllByProps({ testID: 'tray-no-workspace' })).toHaveLength(0);
-      expect(textOf(tree)).toContain('Retry');
+      expect(textOf(tree)).not.toContain('Retry');
+      expect(textOf(tree)).not.toContain('Could not complete request');
     }
   });
 });

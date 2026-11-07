@@ -103,7 +103,10 @@ describe.each(['web', 'android'])('%s connection banner lifecycle', platform => 
     const connection = sharedLiveConnection();
     const failed = connection.request('readWorkspaces', {}).catch(error => error);
     const socket = await open();
-    await act(async () => { socket.drop(); await failed; });
+    await act(async () => { socket.drop(); });
+    const failedReplacement = await open();
+    expect(banners()).toHaveLength(0);
+    await act(async () => { failedReplacement.drop(); await failed; });
     expect(banners()).toHaveLength(1);
     const stale = connection.request('readWorkspaces', {}, { timeoutMs: 100 }).catch(error => error);
     await open();
@@ -119,7 +122,10 @@ describe.each(['web', 'android'])('%s connection banner lifecycle', platform => 
     const read = connection.request('readWorkspaces', {}).catch(error => error);
     const socket = await open();
     expect(banners()).toHaveLength(0);
-    await act(async () => { socket.drop(); await read; });
+    await act(async () => { socket.drop(); });
+    expect(banners()).toHaveLength(0);
+    const failedReplacement = await open();
+    await act(async () => { failedReplacement.drop(); await read; });
     expect(banners()).toHaveLength(1);
     const recovered = connection.request('readWorkspaces', {});
     const replacement = await open();
@@ -137,12 +143,34 @@ describe.each(['web', 'android'])('%s connection banner lifecycle', platform => 
     const replacement = connection.reconnectAfterFailedSend(connection.diagnostics().generation);
     await act(async () => { await cancelled; });
     expect(banners()).toHaveLength(0);
-    const next = await open(); await replacement;
+    const next = await open();
+    await act(async () => { next.reply(); await replacement; });
     next.send.mockImplementationOnce(() => { throw new Error('socket write failed'); });
+    let failedWrite: Promise<unknown>;
     await act(async () => {
-      await connection.request('reactToMessage', { roomId: 'a', messageId: 'm', emoji: '👍' }).catch(() => undefined);
+      failedWrite = connection.request('reactToMessage', { roomId: 'a', messageId: 'm', emoji: '👍' }).catch(() => undefined);
     });
+    expect(banners()).toHaveLength(0);
+    const failedOpening = await open();
+    await act(async () => { failedOpening.drop(); await failedWrite; });
     expect(banners()).toHaveLength(1);
+  });
+
+  it('a recovered blip never mounts the banner, and deadlines cannot infer failure', async () => {
+    const connection = sharedLiveConnection();
+    const read = connection.request('readWorkspaces', {});
+    const socket = await open();
+    await act(async () => { socket.drop(); });
+    expect(banners()).toHaveLength(0);
+    const replacement = await open();
+    expect(banners()).toHaveLength(0);
+    await act(async () => { replacement.reply(); });
+    await act(async () => { replacement.reply(1); await read; });
+    expect(banners()).toHaveLength(0);
+    const slow = connection.request('readWorkspaces', {}, { timeoutMs: 100 }).catch(error => error);
+    await act(async () => { await vi.advanceTimersByTimeAsync(100); await slow; });
+    expect(banners()).toHaveLength(0);
+    expect(Socket.instances).toHaveLength(2);
   });
 
   it('never renders for authorization failures before any socket exists', async () => {

@@ -166,7 +166,7 @@ export class ImmutableByteCache {
       this.remember(flight.key, bytes);
       this.finish(flight, bytes);
     } catch (reason) {
-      this.finish(flight, undefined, reason instanceof Error ? reason : new Error('The file could not be loaded.'));
+      this.finish(flight, undefined, reason instanceof Error ? reason : new Error('artifact_read_failed'));
     }
   }
   private remember(key: string, bytes: Uint8Array): void {

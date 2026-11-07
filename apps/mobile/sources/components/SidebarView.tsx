@@ -1,3 +1,4 @@
+import { appErrorCopy, appReadErrorCopy } from '@/buzz/app-error-copy';
 import { EmptyState } from '@/components/buzz/EmptyState';
 import { SettingsRow } from '@/components/buzz/SettingsRow';
 import { useDesktopLayout } from '@/buzz/desktop-layout-state';
@@ -27,7 +28,7 @@ import { workspaceRailItem } from '@/buzz/room-view-presentation';
 import { mobileSurfaceCache, surfaceAddress } from '@/buzz/surface-storage';
 import { chatListSnapshot, refreshChatList, useChatList } from '@/buzz/chat-list-store';
 import { useActiveCommunityId } from '@/buzz/use-active-community';
-import { ROOMS_LABEL, WORKSPACE_LABEL, WORKSPACES_LABEL } from '@/buzz/vocabulary';
+import { ROOMS_LABEL, WORKSPACES_LABEL } from '@/buzz/vocabulary';
 import { isWorkspaceManagerRole } from '@/buzz/workspace-role';
 import { CommunitySwitcherTrigger } from '@/components/buzz/CommunityRail';
 import { ConversationRow } from '@/components/buzz/ConversationRow';
@@ -241,8 +242,8 @@ export const SidebarView = React.memo(function SidebarView() {
         if (cancelled) stop();
         else stopWorkspaces = stop;
       });
-    })().catch(() => {
-      if (!cancelled) setNavigationError(`Could not load ${WORKSPACE_LABEL.toLowerCase()}s.`);
+    })().catch((reason) => {
+      if (!cancelled) setNavigationError(appErrorCopy(reason, 'Saved Workspaces are unavailable on this device.'));
     });
     return () => {
       cancelled = true;
@@ -278,8 +279,8 @@ export const SidebarView = React.memo(function SidebarView() {
           ? { pathname: '/beeline/channels', params: { communityId: nextId } }
           : '/beeline/community');
       }
-    }).catch(() => {
-      if (!cancelled) setNavigationError(`Could not load ${WORKSPACE_LABEL.toLowerCase()}s.`);
+    }).catch((reason) => {
+      if (!cancelled) setNavigationError(appReadErrorCopy(reason));
       });
     return () => {
       cancelled = true;
@@ -297,7 +298,7 @@ export const SidebarView = React.memo(function SidebarView() {
     [identityPubkey, relayUrl, workspaceId],
   );
   const surface = useChatList(chatListKey, {
-    onError: () => setNavigationError(`Could not load ${ROOMS_LABEL.toLowerCase()}.`),
+    onError: (reason) => setNavigationError(appReadErrorCopy(reason)),
   });
   // An identity-wide change (a Room joined or left) reads the list again; the
   // mounted deck already reads for its own Workspace watch.
@@ -552,7 +553,7 @@ export const SidebarView = React.memo(function SidebarView() {
           )}
           <ScrollView style={styles.list} contentContainerStyle={styles.listContent}>
             {navigationError ? (
-              <SettingsRow title={navigationError}  action="Retry" onPress={() => setRefreshNonce((value) => value + 1)} />
+              <SettingsRow title={navigationError} />
             ) : !filteredChats.length && (!surface || query.trim() || filter !== 'all') ? (
               surface ? (
                 filter === 'pinned' && !query.trim() ? (

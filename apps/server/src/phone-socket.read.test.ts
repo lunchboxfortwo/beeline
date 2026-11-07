@@ -76,18 +76,18 @@ it('plain reads load the list and a busy Room with 1,900 active Rooms', async ()
   expect(sockets.filter(socket => socket.readyState === WebSocket.OPEN)).toHaveLength(1);
 }, 120_000);
 
-it('a socket killed mid-read fails once; the next read reconnects', async () => {
+it('a socket killed mid-read reconnects once and returns the interrupted read', async () => {
   const { phone } = await setup();
   const original = phone.readRoom.bind(phone);
   const read = vi.spyOn(phone, 'readRoom').mockImplementationOnce(async () => {
     sockets[0]!.terminate();
     return original(ROOM, VIEWER);
   });
-  await expect(connection.request('readRoom', { roomId: ROOM })).rejects.toMatchObject({ name: 'PhoneSocketDisconnectedError' });
-  expect(read).toHaveBeenCalledTimes(1);expect(sockets).toHaveLength(1);
+  await expect(connection.request('readRoom', { roomId: ROOM })).resolves.toMatchObject({ room: { id: ROOM }, messages: [] });
+  expect(read).toHaveBeenCalledTimes(2); expect(sockets).toHaveLength(2);
   const value = await connection.request('readRoom', { roomId: ROOM });
   expect(value).toMatchObject({ room: { id: ROOM }, messages: [] });
-  expect(read).toHaveBeenCalledTimes(2); expect(sockets).toHaveLength(2);
+  expect(read).toHaveBeenCalledTimes(3); expect(sockets).toHaveLength(2);
 });
 
 it('a server error settles once without closing the socket; a later Retry reads successfully', async () => {

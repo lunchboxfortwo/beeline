@@ -1,5 +1,5 @@
 import { SettingsRow } from '@/components/buzz/SettingsRow';
-import { appErrorCopy } from '@/buzz/app-error-copy';
+import { appErrorCopy, appReadErrorCopy } from '@/buzz/app-error-copy';
 import { desktopColumnWidths } from '@/buzz/desktop-layout-tokens';
 import { useIsDesktop as useDesktopPageLayout } from '@/utils/responsive';
 import { useLatencyRouteFrame } from '@/buzz/latency-route-hook';
@@ -63,7 +63,7 @@ export default function RoomWorkflows() {
       setList(workflows);
       setError(null);
     } catch (caught) {
-      setError(appErrorCopy(caught, `Could not load workflows.`));
+      setError(appReadErrorCopy(caught));
     } finally {
       setLoading(false);
     }
@@ -159,9 +159,6 @@ export default function RoomWorkflows() {
           {error && (
             <SettingsRow
               title={error}
-
-              action="Retry"
-              onPress={() => void reload()}
               testID="workflows-error"
             />
           )}

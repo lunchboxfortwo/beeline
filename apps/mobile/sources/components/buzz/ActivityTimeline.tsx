@@ -1,3 +1,4 @@
+import { appReadErrorCopy } from '@/buzz/app-error-copy';
 import { displayRoomMessage } from '@/buzz/room-view-presentation';
 import { readRoomViewMessage, type PhoneOperationMap } from '@beeline/api-contract/phone';
 import { monolithPhoneOperation } from '@/sync/transport/monolith-operation';
@@ -117,9 +118,9 @@ function ToolLedgerLineRow({
 }
 
 function toolPageLines(page:PhoneOperationMap['readRoomTools']['output']):ToolLedgerLine[]{
-  if(!Array.isArray(page.messages)||page.messages.length>50)throw new Error('Tool output is unavailable.');
+  if(!Array.isArray(page.messages)||page.messages.length>50)throw new Error('Tool output did not match the expected format.');
   const messages=page.messages.map(readRoomViewMessage);
-  if(messages.some(message=>!message))throw new Error('Tool output is unavailable.');
+  if(messages.some(message=>!message))throw new Error('Tool output did not match the expected format.');
   return toolLedgerLines(buildTurnActivity(messages.flatMap(message=>displayRoomMessage(message!,'').activity??[])).steps);
 }
 function useToolOutput() {
@@ -138,11 +139,11 @@ function useToolOutput() {
       const full = toolPageLines(page).find(item => item.id === next.id);
       setLine({ ...next, detail: full?.detail, requester: full?.requester,
         reason: full?.reason, outputHidden: full?.outputHidden });
-    }).catch(() => {
+    }).catch((cause) => {
       if (generation !== current.current) return;
-      const message = 'Output unavailable. Open again to retry.';
-      setLine({ ...next, detail: message });
-      setError(message);
+      const message = appReadErrorCopy(cause);
+      setLine({ ...next, detail: message || undefined });
+      setError(message || null);
     });
   };
   return { line, error, open, close: () => { current.current++; setLine(null); } };

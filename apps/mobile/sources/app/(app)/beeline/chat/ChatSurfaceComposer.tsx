@@ -241,7 +241,7 @@ export function ChatSurfaceComposer({
                 typing in. The Room's corners door in the header is the one way
                 in; the corner's own state is read there, in the corners list,
                 and on the Room-list row. */}
-                  {transcriptHydrationFailed && !!transcriptHydrationError && <IndexRow title={transcriptHydrationError} action="Retry" onPress={retryHydration} testID="room-read-error" />}
+                  {transcriptHydrationFailed && !!transcriptHydrationError && <IndexRow title={transcriptHydrationError} testID="room-read-error" />}
                 {isReadOnlyDirectMessage ? (
                   <View style={[styles.archivedInputBar, readOnlyFooterInset]}>
                     <Text style={styles.archivedInputText}>

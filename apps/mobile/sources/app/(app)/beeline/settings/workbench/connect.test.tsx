@@ -583,16 +583,22 @@ describe('Connect Trusty Squire flow — ONE connect path', () => {
       throw new Error('connect-error never appeared');
     }
 
-    it('stops helper discovery when its read reports failure', async () => {
+    it('keeps failed helper discovery silent and reads again on shared reconnect', async () => {
       let refuse!: (error: Error) => void;
-      setWorkbenchSource(Object.assign(new MockWorkbenchSource(), {
-        readWorkbench: () => new Promise((_resolve, reject) => { refuse = reject; }),
-      }));
+      const source = new MockWorkbenchSource();
+      const read = source.readWorkbench.bind(source);
+      const readWorkbench = vi.fn(read).mockImplementationOnce(() => new Promise((_resolve, reject) => { refuse = reject; }));
+      setWorkbenchSource(Object.assign(source, { readWorkbench }));
       const renderer = await render();
       expect(renderer.root.findAllByProps({ testID: 'connect-loader' }).length).toBeGreaterThan(0);
       await act(async () => { refuse(new Error('Helpers are unavailable right now')); });
+      expect(renderer.root.findAllByProps({ testID: 'connect-error' })).toHaveLength(0);
+      expect(readWorkbench).toHaveBeenCalledOnce();
+      await act(async () => {
+        for (const listener of liveListeners) listener({ monolithLive: { type: 'invalidate', roomId: '', reason: 'reconnect' } });
+      });
+      expect(readWorkbench.mock.calls.length).toBeGreaterThan(1);
       expect(renderer.root.findAllByProps({ testID: 'connect-loader' })).toHaveLength(0);
-      expect(renderer.root.findByProps({ testID: 'connect-error' }).props.children).toBe('Helpers are unavailable right now');
     });
 
     it('keeps a pair pending until its source settles, then follows the install commit', async () => {
@@ -640,20 +646,22 @@ describe('Connect Trusty Squire flow — ONE connect path', () => {
       );
     });
 
-    it('surfaces an install poll that keeps failing instead of swallowing errors', async () => {
-      setWorkbenchSource(
-        Object.assign(new MockWorkbenchSource(), {
-          readInstallState: async () => {
-            throw new Error('transport gone');
-          },
-        }),
-      );
+    it('keeps failed install reads silent until a shared reconnect reads again', async () => {
+      const source = new MockWorkbenchSource();
+      const read = source.readInstallState.bind(source);
+      const readInstallState = vi.fn(read).mockRejectedValueOnce(new Error('transport gone'));
+      setWorkbenchSource(Object.assign(source, { readInstallState }));
       const renderer = await render();
       await pair(renderer);
-      await untilError(renderer);
-      expect(renderer.root.findByProps({ testID: 'connect-error' }).props.children).toContain(
-        'Lost contact',
-      );
+      expect(renderer.root.findAllByProps({ testID: 'connect-error' })).toHaveLength(0);
+      const calls = readInstallState.mock.calls.length;
+      await act(async () => { await Promise.resolve(); await Promise.resolve(); });
+      expect(readInstallState).toHaveBeenCalledTimes(calls);
+      await act(async () => {
+        for (const listener of liveListeners) listener({ monolithLive: { type: 'invalidate', roomId: '', reason: 'reconnect' } });
+      });
+      expect(readInstallState.mock.calls.length).toBeGreaterThan(calls);
+      expect(renderer.root.findAllByProps({ testID: 'connect-error' })).toHaveLength(0);
     });
   });
 });

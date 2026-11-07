@@ -85,10 +85,10 @@ it('SEND-RECONNECT reopens once and flushes a send that timed out while the app 
   expect(first.readyState).toBe(3);
   expect(room.get(event.id)).toBeDefined();
   const replacement = Socket.instances[1]!; replacement.open(); await tick();
-  expect(reads).toHaveLength(1);
+  expect(reads).toHaveLength(0);
   const replay = replacement.requests().find(request => request.op === 'sendRoomMessage');
   expect(replay.args.messageId).toBe(event.id);
-  const read = replacement.requests().find(request => request.op === 'readRoom');
+  const read = replacement.requests().find(request => request.op === 'readWorkspaces');
   replacement.reply(read, { room: { id: 'room-a' }, messages: [] });
   replacement.reply(replay, { messageId: event.id }); await tick();
   expect(room.list()).toHaveLength(0);
@@ -102,10 +102,13 @@ it('a failed reconnect send becomes a failure without another reconnect or repla
   const event = await enqueue(); const sending = room.send(event.id); await tick();
   // A concurrent read must not suppress the send owner's recovery.
   const interruptedRead = connection.request('readRoom', { roomId: 'room-a' }).catch(error => error);
-  first.drop(); await sending; await interruptedRead; await tick();
+  first.drop(); await sending; await tick();
   expect(Socket.instances).toHaveLength(2);
   const replacement = Socket.instances[1]!; replacement.open(); await tick();
+  for (const request of replacement.requests().filter(request => request.op === 'readWorkspaces')) replacement.reply(request, {});
+  await tick();
   for (const request of replacement.requests().filter(request => request.op === 'readRoom')) replacement.reply(request, {});
+  await interruptedRead;
   await vi.advanceTimersByTimeAsync(15_000);
   expect(room.state(event.id)?.text).toBe('Not sent');
   await vi.advanceTimersByTimeAsync(3 * 60 * 60 * 1000);

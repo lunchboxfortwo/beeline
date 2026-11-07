@@ -1,4 +1,3 @@
-import { ErrorBanner } from './ErrorBanner';
 import { LedgerDisclosure, LedgerLogGroup } from './LedgerDisclosure';
 import { webhookCallerMessage } from '@/buzz/system-lines';
 import React, { useEffect, useLayoutEffect, useRef, useState } from 'react';
@@ -137,16 +136,10 @@ export function LedgerRoomUpdate({
 
 
 /** Paging state belongs inside the transcript as one quiet line, never a card. */
-export function LedgerHistoryLine({ text, onPress }: { text: string; onPress?: () => void }) {
-  const line = <Text style={styles.historyLineText}>{text}</Text>;
-  return onPress ? (
-    <View style={styles.historyFailure}>
-      <ErrorBanner inline title={text.replace(' · tap to retry', '')} onRetry={onPress}
-        retryTestID="transcript-history-retry" />
-    </View>
-  ) : (
+export function LedgerHistoryLine({ text }: { text: string }) {
+  return (
     <View style={styles.historyLine} testID="transcript-history-status">
-      {line}
+      <Text style={styles.historyLineText}>{text}</Text>
     </View>
   );
 }

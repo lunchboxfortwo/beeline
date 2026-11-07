@@ -26,7 +26,7 @@ export function buzzPushPhaseDetail(phase: BuzzPushRegistrationPhase): string | 
     case 'gateway-rejected':
       return 'server refused registration';
     case 'network-failed':
-      return 'connection unavailable';
+      return null;
     case 'registered':
     case 'disabled':
     case 'unsupported-platform':

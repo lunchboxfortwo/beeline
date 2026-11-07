@@ -57,22 +57,23 @@ afterEach(async () => {
   resetSharedLiveConnection(); vi.useRealTimers(); vi.unstubAllGlobals();
 });
 
-it('a failed image reads again when reconnect and its covering read succeed on the same socket', async () => {
+it('a failed image adds no local error and rereads after confirmed recovery on an already open socket', async () => {
   const connection = sharedLiveConnection();
-  const failed = connection.request('reactToMessage', { roomId: 'a', messageId: 'm', emoji: '👍' }, { timeoutMs: 100 }).catch(error => error);
-  await flush(); const socket = Socket.instances[0]; socket.open();
-  await vi.advanceTimersByTimeAsync(100); await failed;
+  const failed = connection.request('reactToMessage', { roomId: 'a', messageId: 'm', emoji: '👍' }).catch(error => error);
+  await flush(); const first = Socket.instances[0]; first.open(); first.drop(); await failed;
+  await flush(); Socket.instances[1].drop(); await flush();
+  connection.reconnectNow(); await flush(); const socket = Socket.instances[2]; socket.open();
   media.source.mockRejectedValueOnce(new Error('image read failed')).mockResolvedValue({ uri: 'file:///image.png' });
   await render();
   expect(tree.root.findByType('Banner').props.failed).toBe(true);
-  expect(tree.root.findAllByProps({ testID: 'artifact-image-failed' })).toHaveLength(1);
+  expect(tree.root.findAllByProps({ testID: 'artifact-image-failed' })).toHaveLength(0);
   await act(async () => reconnectNow());
   expect(media.source).toHaveBeenCalledTimes(1);
-  await act(async () => socket.reply(1, { workspaces: [] }));
+  await act(async () => socket.reply(0, { workspaces: [] }));
   expect(tree.root.findByType('Banner').props.failed).toBe(false);
   expect(media.source).toHaveBeenCalledTimes(2);
   expect(tree.root.findByType('Image').props.source).toEqual({ uri: 'file:///image.png' });
-  expect(Socket.instances).toHaveLength(1);
+  expect(Socket.instances).toHaveLength(3);
 });
 
 it('a failed socket image read reads again on the replacement connection', async () => {
@@ -84,9 +85,9 @@ it('a failed socket image read reads again on the replacement connection', async
   await render(); await flush();
   const first = Socket.instances[0]; await act(async () => first.open());
   await act(async () => first.drop());
-  expect(tree.root.findByType('Banner').props.failed).toBe(true);
-  expect(tree.root.findAllByProps({ testID: 'artifact-image-failed' })).toHaveLength(1);
-  await act(async () => reconnectNow()); await flush();
+  expect(tree.root.findByType('Banner').props.failed).toBe(false);
+  expect(tree.root.findAllByProps({ testID: 'artifact-image-failed' })).toHaveLength(0);
+  await flush();
   const next = Socket.instances[1]; await act(async () => next.open());
   expect(next.requests[0].op).toBe('readWorkspaces');
   await act(async () => next.reply(0, { workspaces: [] }));

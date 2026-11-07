@@ -1,3 +1,4 @@
+import { appReadErrorCopy } from '@/buzz/app-error-copy';
 import { IndexRow } from '@/components/buzz/IndexRow';
 import { ErrorBanner } from '@/components/buzz/ErrorBanner';
 import { desktopColumnWidths } from '@/buzz/desktop-layout-tokens';
@@ -85,9 +86,8 @@ export default function WalletScreen() {
       .then((id) => {
         if (!cancelled) setWorkspaceId(id);
       })
-      .catch(() => {
-        if (!cancelled)
-          setWorkspaceError('Could not verify your Workspace. Try opening Wallet again.');
+      .catch((cause) => {
+        if (!cancelled) setWorkspaceError(appReadErrorCopy(cause) || null);
       });
     return () => {
       cancelled = true;
@@ -168,13 +168,9 @@ export default function WalletScreen() {
     );
   }
 
+
   if (error && wallet === null) {
-    return (
-      <View style={screenStyle}>
-        {header}
-        <View style={styles.failureInset}><IndexRow inset="flush" title="Network is not available right now." action="Retry" onPress={() => void load()} testID="wallet-network-unavailable" /></View>
-      </View>
-    );
+    return <View style={screenStyle}>{header}<View style={styles.failureInset}><IndexRow inset="flush" title={error} /></View></View>;
   }
 
   if (wallet === null) {
@@ -329,7 +325,7 @@ export default function WalletScreen() {
 
               <RoomListSectionHeader title="Activity" inset="content" testID="wallet-activity-head" />
               {historyUnavailable ? (
-              <ErrorBanner inline title={"Activity is unavailable right now."} titleTestID="wallet-activity-unavailable" />
+              <ErrorBanner inline title={historyError ?? ''} titleTestID="wallet-activity-unavailable" />
             ) : history === null ? (
               <View style={styles.activityLoading} testID="wallet-activity-loading">
                 <SurfaceGlyphLoader compact testID="wallet-activity-loader" />

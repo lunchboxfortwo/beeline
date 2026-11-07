@@ -1,3 +1,4 @@
+import { appReadErrorCopy } from '@/buzz/app-error-copy';
 import { useLatencyRouteFrame } from '@/buzz/latency-route-hook';
 import React from 'react';
 import { router, useLocalSearchParams } from 'expo-router';
@@ -38,10 +39,10 @@ export default function ArtifactViewerRoute() {
         oldest ? { createdAt: oldest.createdAt, id: oldest.id } : undefined,
         (rows) => codeDocumentFromMessages(rows, messageId, index),
       );
-      if (!next) throw new Error();
+      if (!next) { if (live) setFailed(true); return; }
       if (live) setDocument(next);
-    })().catch(() => {
-      if (live) setFailed(true);
+    })().catch((cause) => {
+      if (live) setFailed(Boolean(appReadErrorCopy(cause)));
     });
     return () => {
       live = false;
@@ -54,7 +55,7 @@ export default function ArtifactViewerRoute() {
     <ArtifactViewerScreen
       notice={{
         title: 'Code',
-        message: failed ? 'The code block could not be loaded. Go back and try again.' : 'Loading…',
+        message: failed ? 'This code block is no longer available.' : 'Loading…',
       }}
       onClose={() => router.back()}
     />

@@ -1,4 +1,4 @@
-import { appErrorCopy } from '@/buzz/app-error-copy';
+import { appReadErrorCopy } from '@/buzz/app-error-copy';
 import { invalidatesWorkspaceList } from '@/buzz/workspace-list-invalidation';
 import { takePendingBrowserShare } from '@/buzz/pending-browser-share';
 import { RoomViewHttpError } from '@beeline/buzz-client';
@@ -137,7 +137,7 @@ export function useChannelsSubscriptions([
           }
         } catch (reason) {
           if (!cancelled) {
-            setError(appErrorCopy(reason));
+            setError(appReadErrorCopy(reason));
           }
         }
       };
@@ -163,7 +163,7 @@ export function useChannelsSubscriptions([
               onError: (reason) => {
                 if (selectedWorkspaceRemoved) return;
                 setRefreshing(false);
-                setError(appErrorCopy(reason));
+                setError(appReadErrorCopy(reason));
                 // A deleted Workspace's old route may be restored from storage
                 // before the authoritative workspace read has reconciled it.
                 if (
@@ -217,7 +217,7 @@ export function useChannelsSubscriptions([
       await workspaceListenReady;
       await readWorkspace();
     })().catch((reason) => {
-      if (!cancelled) setError(appErrorCopy(reason));
+      if (!cancelled) setError(appReadErrorCopy(reason));
     });
     return () => {
       cancelled = true;
@@ -261,7 +261,7 @@ export function useChannelsSubscriptions([
           ),
       )
       .catch((reason) => {
-        if (!cancelled) setError(appErrorCopy(reason));
+        if (!cancelled) setError(appReadErrorCopy(reason));
       });
     return () => {
       cancelled = true;

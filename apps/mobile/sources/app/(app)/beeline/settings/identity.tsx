@@ -323,7 +323,7 @@ export default function BuzzIdentitySettings() {
         setPushPermission(permission);
         await saveStoredPushLevel(identity.publicKey, settings.identity.pushLevel);
       } catch (caught) {
-        if (!cancelled) setError(appErrorCopy(caught, `Could not load your profile.`));
+        if (!cancelled) setError(appErrorCopy(caught, ''));
       }
     })();
     return () => {

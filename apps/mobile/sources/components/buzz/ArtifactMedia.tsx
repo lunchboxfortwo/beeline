@@ -1,3 +1,4 @@
+import { appReadErrorCopy } from '@/buzz/app-error-copy';
 import { IndexRow } from '@/components/buzz/IndexRow';
 import { useArtifactRecoveryGeneration } from '@/buzz/use-artifact-recovery';
 import React, { useEffect, useState } from 'react';
@@ -53,8 +54,8 @@ export function ArtifactImage({
         if (live && !controller.signal.aborted) setSource(next);
         else releaseArtifactImageSource(next);
       })
-      .catch(() => {
-        if (live) setFailed(true);
+      .catch((cause) => {
+        if (live && !controller.signal.aborted) setFailed(Boolean(appReadErrorCopy(cause)));
       });
     return () => {
       live = false; controller.abort(); stopPurge();
@@ -64,7 +65,7 @@ export function ArtifactImage({
   if (failed) {
     return (
       <View style={[styles.failureInset, style]} testID="artifact-image-failed">
-        <IndexRow inset="flush" title="Image unavailable" description={"The image could not be loaded. Try again."} />
+        <IndexRow inset="flush" title="Image unavailable" />
       </View>
     );
   }
@@ -123,8 +124,8 @@ export function ArtifactText({
       .then((next) => {
         if (live && !controller.signal.aborted) setText(next);
       })
-      .catch(() => {
-        if (live) setFailed(true);
+      .catch((cause) => {
+        if (live && !controller.signal.aborted) setFailed(Boolean(appReadErrorCopy(cause)));
       });
     return () => {
       live = false; controller.abort(); stopPurge();
@@ -133,7 +134,7 @@ export function ArtifactText({
   if (failed) {
     return (
       <View style={styles.failureInset} testID="artifact-text-failed">
-        <IndexRow inset="flush" title="File unavailable" description={"The file could not be loaded. Try again."} />
+        <IndexRow inset="flush" title="File unavailable" />
       </View>
     );
   }

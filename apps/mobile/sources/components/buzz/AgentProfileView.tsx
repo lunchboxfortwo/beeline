@@ -29,7 +29,6 @@ export function AgentProfileView({
   detail,
   loading,
   error,
-  onRetry,
   onClose,
   onMessage,
   canManage,
@@ -57,7 +56,7 @@ export function AgentProfileView({
   detail: AgentDetailView | null;
   loading: boolean;
   error: string | null;
-  onRetry: () => void;
+  onRetry?: () => void;
   onClose: () => void;
   onMessage: () => void;
   canManage: boolean;
@@ -109,7 +108,6 @@ export function AgentProfileView({
   const [olderWork, setOlderWork] = useState<NonNullable<AgentDetailView['recentWork']>>([]);
   const [nextCursor, setNextCursor] = useState<string | null | undefined>();
   const [workLoading, setWorkLoading] = useState(false);
-  const [workError, setWorkError] = useState(false);
   const workRequest = useRef(0);
   const workBusy = useRef(false);
   const identity = detail?.agent.identity;
@@ -121,7 +119,6 @@ export function AgentProfileView({
     workBusy.current = false;
     setOlderWork([]);
     setNextCursor(undefined);
-    setWorkError(false);
     setWorkLoading(false);
     return () => {
       workRequest.current += 1;
@@ -138,14 +135,14 @@ export function AgentProfileView({
     const request = workRequest.current;
     workBusy.current = true;
     setWorkLoading(true);
-    setWorkError(false);
     try {
       const page = await loadMoreWork(cursor);
       if (request !== workRequest.current) return;
       setOlderWork((current) => [...current, ...(page.recentWork ?? [])]);
       setNextCursor(page.recentWorkCursor ?? null);
     } catch {
-      if (request === workRequest.current) setWorkError(true);
+      // The shared connection owns failed reads. Keep the current page and
+      // its ordinary paging control without introducing error-only actions.
     } finally {
       if (request === workRequest.current) {
         workBusy.current = false;
@@ -182,7 +179,7 @@ export function AgentProfileView({
       >
         {loading && <SurfaceGlyphLoader testID="agent-profile-loader" />}
         {error && (
-          <IndexRow inset="flush" title={error} action="Retry" onPress={onRetry} />
+          <IndexRow inset="flush" title={error} />
         )}
         {identity && (
           <>
@@ -384,7 +381,7 @@ export function AgentProfileView({
                   No merged work to show yet.
                 </Text>
               )}
-              {cursor && loadMoreWork && !workError && (
+              {cursor && loadMoreWork && (
                 <InlineActionRow><Button
                   size="inline"
 
@@ -395,9 +392,6 @@ export function AgentProfileView({
                   variant="secondary"
                   testID="load-more-agent-work"
                 /></InlineActionRow>
-              )}
-              {workError && (
-                <ErrorBanner inline title="Could not load older work. Your current list is still available." onRetry={() => void moreWork()} retrying={workLoading} retryTestID="load-more-agent-work" />
               )}
               {linkError && (
                 <ErrorBanner inline title={"Could not open this pull request. Select it to retry."}  />

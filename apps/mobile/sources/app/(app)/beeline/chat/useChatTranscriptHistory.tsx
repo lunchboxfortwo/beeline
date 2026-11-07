@@ -6,7 +6,6 @@ import { cornerObjectiveItems } from '@/buzz/corner-context';
 import { ROOM_LABEL } from '@/buzz/vocabulary';
 import { useRoomSendFrame } from '@/buzz/room-send-frame';
 import { liveDraftMessages } from '@/buzz/live-turn-stream';
-import { requestMessageJump } from '@/buzz/transcript-scroll-controller';
 import { createTranscriptRowFolder, foldTranscriptRows } from '@/buzz/room-message-store';
 import { useRoomMessageRecords } from '@/buzz/room-message-records';
 import { type RoomSurfaceSessionBindings } from './useRoomSurfaceSession';
@@ -294,30 +293,11 @@ export function useChatTranscriptHistory([
     loadOlderTranscriptMessages();
   }, [loadOlderTranscriptMessages]);
 
-  const retryOlderTranscriptMessages = useCallback(() => {
-    retryOlderHistory(visibleTranscriptWindow(foldedMessages, Number.MAX_SAFE_INTEGER).length);
-  }, [foldedMessages, retryOlderHistory]);
-
-  const retryTranscriptJump = useCallback(() => {
-    if (!transcriptJump) return;
-    requestMessageJump(scrollController, transcriptJump.messageId, jumpToTranscriptMessage);
-  }, [jumpToTranscriptMessage, scrollController, transcriptJump]);
-
   // Lines at the newest end of the transcript, beside the composer, where the
   // reader of a notification is looking. A jump never covers the room.
   const transcriptForwardLine =
-    transcriptJump?.status === 'error' ? (
-      <LedgerHistoryLine
-        text="Couldn't locate message · tap to retry"
-        onPress={retryTranscriptJump}
-      />
-    ) : transcriptJump?.status === 'missing' ? (
+    transcriptJump?.status === 'missing' ? (
       <LedgerHistoryLine text="That message is no longer available" />
-    ) : transcriptNewerStatus === 'error' ? (
-      <LedgerHistoryLine
-        text="Couldn't load later messages · tap to retry"
-        onPress={retryNewerTranscriptMessages}
-      />
     ) : transcriptNewerStatus === 'loading' ? (
       <LedgerHistoryLine text="Loading later messages…" />
     ) : null;
@@ -325,11 +305,6 @@ export function useChatTranscriptHistory([
   const transcriptHistoryLine =
     transcriptHistoryStatus === 'loading' ? (
       <LedgerHistoryLine text="Loading earlier messages…" />
-    ) : transcriptHistoryStatus === 'error' ? (
-      <LedgerHistoryLine
-        text="Couldn't load earlier messages · tap to retry"
-        onPress={retryOlderTranscriptMessages}
-      />
     ) : transcriptHistoryStatus === 'complete' ? (
       <LedgerHistoryLine text={isCorner ? 'Beginning of corner' : `Beginning of ${ROOM_LABEL}`} />
     ) : null;

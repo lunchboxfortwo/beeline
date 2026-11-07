@@ -38,7 +38,7 @@ export default function WorkbenchScreen() {
   const header = <PageHeader prominent backAccessibilityLabel="Back to Settings" eyebrow="Settings" title="Connectors" testID="workbench-header" onBack={() => router.back()} />;
   return <View style={[styles.container, { paddingTop: desktop ? 0 : insets.top }]}>
     {header}
-    {(!index && error) || (view && !index) ? <View style={styles.failureInset}><IndexRow inset="flush" title="Network is not available right now." action="Retry" onPress={() => void refresh()} testID="workbench-network-unavailable" /></View> : !index ?
+    {!index && error ? <View style={styles.failureInset}><IndexRow inset="flush" title={error} /></View> : !index ?
       <View style={styles.centered}><SurfaceGlyphLoader testID="workbench-loader" /></View> :
       <ScrollView style={styles.content} contentContainerStyle={[styles.contentInner, desktop && styles.desktopColumn, { paddingBottom: insets.bottom + theme.buzz.space.xxl }]} testID="workbench-scroll">
         <HullDialogInput accessibilityLabel="Search apps, keys, and websites" placeholder="Search apps, keys, and websites"
@@ -68,7 +68,7 @@ export default function WorkbenchScreen() {
             })}
           </View> : null;
         })}
-        {error ? <SettingsRow title="Could not refresh connections. Try again." /> : null}
+
         {actions.error ? <SettingsRow title={actions.error} /> : null}
       </ScrollView>}
     <ConnectorsSearchSheet visible={searchOpen} onClose={() => setSearchOpen(false)} scope={scope} view={view} />

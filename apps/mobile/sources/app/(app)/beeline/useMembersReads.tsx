@@ -1,4 +1,4 @@
-import { appErrorCopy } from '@/buzz/app-error-copy';
+import { appReadErrorCopy } from '@/buzz/app-error-copy';
 import React, { useEffect } from 'react';
 import { router } from 'expo-router';
 import { isAgentDetailView, isWorkspaceView, type AgentDetailView, type Identity } from '@beeline/buzz-client';
@@ -52,7 +52,7 @@ export function useMembersReads([
 
 
   const writeClient = async () => {
-    if (!identity || !relayUrl) throw new Error('Workspace connection unavailable');
+    if (!identity || !relayUrl) throw new Error('Workspace identity is unavailable');
     const client = await new BuzzRigTransport(identity).ensureClient();
     return client as typeof client & {
       refreshAgentModelCatalog(workspaceId: string, agentId: string): Promise<unknown>;
@@ -79,7 +79,7 @@ export function useMembersReads([
     kind?: 'human' | 'agent';
     offset?: number;
   }) => {
-    if (!identity || !relayUrl || !workspaceId) throw new Error('Workspace connection unavailable');
+    if (!identity || !relayUrl || !workspaceId) throw new Error('Workspace identity is unavailable');
     // A removal or receipt recorded while this page is in flight is newer than it.
     const stamp = currentSurfaceStamp();
     const page = await new RoomViewClient({ baseUrl: relayUrl, identity }).workspaceMembers(
@@ -152,7 +152,7 @@ export function useMembersReads([
           if (!value) return;
           setWorkspaceError(null);
         } catch (reason) {
-          if (!cancelled) setWorkspaceError(appErrorCopy(reason));
+          if (!cancelled) setWorkspaceError(appReadErrorCopy(reason));
         }
       };
       readWorkspaceRef.current = readWorkspace;
@@ -161,14 +161,14 @@ export function useMembersReads([
         nextRelayUrl,
         workspaceId,
         () => void readWorkspace?.(),
-        (reason) => setWorkspaceError(appErrorCopy(reason)),
+        (reason) => setWorkspaceError(appReadErrorCopy(reason)),
       );
       stopWatch = watch.release;
       await watch.ready;
       if (cancelled) return;
       if ((!profileAgentId)) await readWorkspace();
     })().catch((reason) => {
-      if (!cancelled) setWorkspaceError(appErrorCopy(reason));
+      if (!cancelled) setWorkspaceError(appReadErrorCopy(reason));
     });
     return () => {
       cancelled = true;
@@ -214,7 +214,7 @@ export function useMembersReads([
     } catch (reason) {
       // Keep a readable cached profile rather than replacing it with an error.
       if (generation === agentRequestGenerationRef.current && (!cached || profileRetryGeneration > 0))
-        setError(appErrorCopy(reason));
+        setError(appReadErrorCopy(reason));
     }
   };
 

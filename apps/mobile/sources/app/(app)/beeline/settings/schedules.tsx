@@ -126,7 +126,7 @@ export default function ScheduledWork() {
         testID="scheduled-work-header"
         title="Schedules and subscriptions"
       />
-      {error && <SettingsRow title={error} action="Retry" onPress={retry}
+      {error && <SettingsRow title={error}
           />}
       {loading ? (
         <View style={styles.loading}>

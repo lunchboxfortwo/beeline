@@ -146,7 +146,7 @@ export default function ConnectorServiceScreen() {
   const agent = aiClient?.agent;
   return <View style={[styles.screen, desktopPageLayout && { width: '100%', maxWidth: desktopColumnWidths.detail, alignSelf: 'center' }, { paddingTop: insets.top }]} testID="connector-service-screen">
     <PageHeader eyebrow="Connectors" prominent title={row?.name ?? 'Connectors'} backAccessibilityLabel="Back to Connectors" onBack={() => router.back()} />
-    {loadError && !row ? <View style={styles.failureInset}><IndexRow inset="flush" title="Network is not available right now." action="Retry" onPress={() => void refresh()}  /></View> : !view ? <SurfaceGlyphLoader /> : !row ?
+    {loadError && !row ? <View style={styles.failureInset}><IndexRow inset="flush" title={loadError} /></View> : !view ? <SurfaceGlyphLoader /> : !row ?
       <Text style={styles.note}>This company is no longer connected.</Text> :
       <ScrollView contentContainerStyle={[styles.content, { paddingBottom: insets.bottom + theme.buzz.space.xl }]}>
         {row.roomsClientId ? <>
@@ -219,7 +219,7 @@ export default function ConnectorServiceScreen() {
             leading={<ServiceMark company={app.providerName} domain={app.domain} mark={app.logo} />} chevron="right"
             disabled={Boolean(actions.busy)} onPress={() => void actions.connect(app)} testID={`company-available-${app.appKey}`} />)}
         </View> : null}
-        {loadError ? <SettingsRow title="Could not refresh connections. Try again." /> : null}
+
         {notice ? <Text accessibilityLiveRegion="polite" style={styles.note} testID="connector-info-notice">{notice}</Text> : null}
         {error || actions.error ? <SettingsRow title={(error ?? actions.error)!} /> : null}
         </>}

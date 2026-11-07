@@ -1,5 +1,5 @@
 import { useSurfaceFocus } from '@/buzz/use-surface-focus';
-import { appErrorCopy } from '@/buzz/app-error-copy';
+import { appReadErrorCopy } from '@/buzz/app-error-copy';
 import { useIsDesktop } from '@/utils/responsive';
 import { useLatencyRouteFrame } from '@/buzz/latency-route-hook';
 import { useTextDraft } from '@/buzz/use-text-draft';
@@ -213,7 +213,7 @@ export function useMembersRouteState([
 
   const readAgent = async (agentPubkey: string): Promise<AgentDetailView> => {
     const generation = agentRequestGenerationRef.current;
-    if (!focusedRef.current || AppState.currentState === 'background' || AppState.currentState === 'inactive' || !identity || !relayUrl || !workspaceId) throw new Error('Workspace connection unavailable');
+    if (!focusedRef.current || AppState.currentState === 'background' || AppState.currentState === 'inactive' || !identity || !relayUrl || !workspaceId) throw new Error('Workspace identity is unavailable');
     const value = await new RoomViewClient({ baseUrl: relayUrl, identity }).agent(
       workspaceId,
       agentPubkey,
@@ -247,10 +247,9 @@ export function useMembersRouteState([
   };
 
   useEffect(() => {
-    if ((!focused) || !selectedAgent || !identity || !relayUrl) return;
+    if ((!focused) || !agentId || !identity || !relayUrl) return;
     let cancelled = false;
     let stop: (() => void) | undefined;
-    const agentId = selectedAgent.agent.identity.pubkey;
     void sharedLiveConnection()
       .register([], (event) => {
         if (cancelled || AppState.currentState === 'background' || AppState.currentState === 'inactive' || !('monolithLive' in event)) return;
@@ -287,7 +286,7 @@ export function useMembersRouteState([
             }
           })
           .catch((reason) => {
-            if (!cancelled) setError(appErrorCopy(reason));
+            if (!cancelled) setError(appReadErrorCopy(reason));
           });
       })
       .then((release) => {
@@ -298,7 +297,7 @@ export function useMembersRouteState([
       cancelled = true;
       stop?.();
     };
-  }, [focused, identity, relayUrl, selectedAgent?.agent.identity.pubkey]);
+  }, [focused, identity, relayUrl, agentId]);
 return [
     identity, relayUrl, recordScope, setRosterQuery, workspaceId, focused, setIdentity, setRelayUrl,
     focusedRef, setWorkspaceError, readWorkspaceRef, agentRequestGenerationRef, retryGeneration,

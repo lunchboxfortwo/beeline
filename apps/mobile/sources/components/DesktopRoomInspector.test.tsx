@@ -418,7 +418,8 @@ describe('DesktopRoomInspector work pane', () => {
       await act(async () => { tree = create(<DesktopRoomInspector {...props({ client, selectedCornerId: 'working' })} />); });
       await act(async () => { tree.update(<DesktopRoomInspector {...props({ client, selectedCornerId: 'broken' })} />); });
       expect(tree.root.findAllByProps({ testID: 'desktop-work-corner-transcript' })).toHaveLength(0);
-      expect(tree.root.findByProps({ testID: 'desktop-corner-retry' })).toBeTruthy();
+      expect(tree.root.findAllByProps({ testID: 'desktop-corner-retry' })).toHaveLength(0);
+      expect(tree.root.findAllByProps({ action: 'Retry' })).toHaveLength(0);
     } finally { await act(async () => tree.unmount()); }
   });
 

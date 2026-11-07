@@ -23,11 +23,18 @@ type SurfaceFilters = readonly {
 }[];
 type SurfaceListener = (event: NostrEvent | MonolithSurfaceEvent) => void;
 type Registration = { roomIds: ReadonlySet<string>; listener: SurfaceListener; closed: boolean };
-type RequestOptions = { timeoutMs?: number; signal?: AbortSignal };
+type RequestOptions = {
+  timeoutMs?: number;
+  signal?: AbortSignal;
+  /** Internal confirming read: the one replacement must never retry itself. */
+  reconnectAttempt?: true;
+  /** Durable sends have their own one-replay budget on this same connection. */
+  reconnectOwnedByOutbox?: true;
+};
 type PendingRequest = {
   frame: string;
-  read: boolean;
   socket?: WebSocket;
+  generation?: number;
   resolve(value: unknown): void;
   reject(reason: unknown, transportFailed?: boolean): void;
 };
@@ -107,6 +114,8 @@ export class LiveConnection {
   private readonly connected = new Set<() => void>();
   private readonly disconnected = new Set<() => void>();
   private readonly paintOwners = new Map<string, Registration>();
+  private recovery?: { generation: number; promise: Promise<void> };
+  private recovering = false;
   private requestId = 0;
   private socketEpoch = 0;
   private socketGeneration = 0;
@@ -134,6 +143,8 @@ export class LiveConnection {
     this.stopNetwork = deps.subscribeNetworkOnline?.(() => this.refreshRoom()) ?? (() => {});
     this.stopIdentity = deps.subscribeIdentityChange(() => {
       this.identity++;
+      this.recovery = undefined;
+      this.recovering = false;
       resetConnectionFailure();
       this.viewEpoch++;
       this.viewing.clear();
@@ -179,19 +190,59 @@ export class LiveConnection {
     const identity = this.identity;
     const session = failureSession;
     let failed: boolean | undefined;
+    let reconnected = options.reconnectAttempt === true || this.recovering;
+    let generation = this.socketGeneration;
+    const outcome = (value: boolean, socketGeneration: number) => {
+      failed = value;
+      generation = socketGeneration;
+    };
+    const current = () => !this.disposed && this.foreground && identity === this.identity && session === failureSession;
     try {
-      return await this.sendRequest(operation, args, options, (outcome) => {
-        failed = outcome;
-      }) as PhoneOperationMap[Name]['output'];
+      try {
+        return await this.sendRequest(operation, args, options, outcome) as PhoneOperationMap[Name]['output'];
+      } catch (error) {
+        if (reconnected || !failed || !current() || options.signal?.aborted) throw error;
+        // The durable outbox owns the one same-id send replay and calls this
+        // connection's shared recovery itself; replay failures must not get a
+        // second replacement from the generic request path.
+        if (options.reconnectOwnedByOutbox) throw error;
+        // All failed requests on this socket share exactly one replacement and
+        // confirming read. Never replay a write whose acceptance is unknown.
+        failed = undefined;
+        const recovery = this.reconnectAfterFailure(generation);
+        if (!(PHONE_READ_OPERATIONS as readonly string[]).includes(operation)) {
+          void recovery.catch(() => undefined);
+          throw error;
+        }
+        await recovery;
+        reconnected = true;
+        if (!current() || options.signal?.aborted) throw error;
+        return await this.sendRequest(operation, args, options, outcome) as PhoneOperationMap[Name]['output'];
+      }
     } finally {
-      // Only this foreground session's explicit socket outcomes own the banner.
-      // Authorization, cancellation and old/background work cannot infer an outage.
-      if (failed !== undefined && !this.disposed && this.foreground && identity === this.identity && session === failureSession) {
+      // Deadlines, cancellation, server refusals and background/old-account work
+      // never infer an outage. Only a failed replacement can show the banner.
+      if (current() && (failed === false || (reconnected && failed === true))) {
         const recovered = connectionFailure() && !failed;
         setConnectionFailure(failed);
         if (recovered && isOpen(this.socket)) this.publishConnected();
       }
     }
+  }
+
+  private reconnectAfterFailure(generation: number): Promise<void> {
+    if (this.recovery && (generation <= this.recovery.generation || this.recovering)) return this.recovery.promise;
+    const recovery = { generation, promise: Promise.resolve() };
+    this.recovery = recovery;
+    this.recovering = true;
+    // Even failed admission belongs to a real request. Lifecycle callbacks
+    // cannot publish an outage; only request's explicit outcomes own the UI.
+    recovery.promise = this.request('readWorkspaces', {}, { reconnectAttempt: true })
+      .then(() => undefined)
+      .finally(() => {
+        if (this.recovery === recovery) this.recovering = false;
+      });
+    return recovery.promise;
   }
 
   // Existing update/artifact observers use this confirmed availability generation.
@@ -204,14 +255,13 @@ export class LiveConnection {
     operation: string,
     args: unknown,
     options: RequestOptions,
-    outcome: (failed: boolean) => void,
+    outcome: (failed: boolean, generation: number) => void,
   ): Promise<unknown> {
     if (options.signal?.aborted) return Promise.reject(this.abortError());
     // Native close callbacks can arrive late. Settle the old socket's requests
     // before admitting a replacement, so their deadlines cannot undo recovery.
     if (this.socket && this.socket.readyState > 1) this.dropConnection(true);
     const id = String(++this.requestId);
-    const read = (PHONE_READ_OPERATIONS as readonly string[]).includes(operation);
     return new Promise((resolve, reject) => {
       let settled = false;
       const finish = () => {
@@ -229,16 +279,15 @@ export class LiveConnection {
           op: operation,
           args,
         }),
-        read,
         resolve: (value) => {
           if (!finish()) return;
-          outcome(false);
+          outcome(false, request.generation ?? this.socketGeneration);
           resolve(value);
         },
         reject: (error, transportFailed = false) => {
           if (!finish()) return;
-          if (error instanceof PhoneSocketError) outcome(false);
-          else if (transportFailed) outcome(true);
+          if (error instanceof PhoneSocketError) outcome(false, request.generation ?? this.socketGeneration);
+          else if (transportFailed) outcome(true, request.generation ?? this.socketGeneration);
           // A request deadline is not evidence that the shared socket closed.
           // Other requests (including a voice join) still own their answers.
           reject(error);
@@ -248,7 +297,6 @@ export class LiveConnection {
       const deadline = setTimeout(() => {
         request.reject(
           Object.assign(new MonolithRequestTimeoutError(), { socketRequest: true }),
-          Boolean(request.socket || this.socket),
         );
       }, options.timeoutMs ?? 20_000);
       this.requests.set(id, request);
@@ -266,6 +314,7 @@ export class LiveConnection {
     for (const request of this.requests.values()) {
       if (request.socket) continue;
       request.socket = socket;
+      request.generation = this.socketGeneration;
       try {
         socket.send(request.frame);
       } catch {
@@ -348,11 +397,11 @@ export class LiveConnection {
 
   private socketFailed(socket: WebSocket): void {
     if (this.socket !== socket) return;
-    const waitingRead = [...this.requests.values()].some((request) => request.read);
+    const waitingRequest = this.requests.size > 0;
     this.dropConnection(true);
     // An in-flight read receives the failure. An idle broken socket asks the
     // open screens to read, making the failed request and recovery visible.
-    if (!waitingRead && AppState.currentState === 'active') this.refreshRoom();
+    if (!waitingRequest && !this.recovering && AppState.currentState === 'active') this.refreshRoom();
   }
   private dropConnection(transportFailed = false): void {
     const socket = this.socket;
@@ -379,9 +428,7 @@ export class LiveConnection {
     if (this.connecting) return this.connecting.promise;
     if (generation !== this.socketGeneration) return Promise.resolve();
     this.dropConnection();
-    const opening = this.ensureSocket();
-    this.refreshRoom();
-    return opening;
+    return this.reconnectAfterFailure(generation);
   }
 
   view(roomId: string): () => void {

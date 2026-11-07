@@ -46,13 +46,13 @@ it('a slow resource keeps waiting for its live socket request instead of adding 
   expect(current.data).toBe('answer'); expect(current.loading).toBe(false);
 });
 
-it('a failed read stays visible, stops automatic reads, and retry recovers', async () => {
+it('a failed read adds no local copy or scheduled reads, and a fresh read recovers', async () => {
   vi.useFakeTimers();
   const load = vi.fn().mockRejectedValueOnce(new Error('offline')).mockResolvedValue('recovered');
   let current: any;
   function Reader() { current = useObservedResource<string>('error', { load }); return <span>{current.error ?? current.data}</span>; }
   await act(async () => { mount(<Reader />); });
-  expect(current.error).toBe('Could not complete request');
+  expect(current.error).toBe('');
   await act(async () => { await vi.advanceTimersByTimeAsync(10000); });
   expect(load).toHaveBeenCalledTimes(1);
   await act(async () => current.retry());
@@ -68,7 +68,7 @@ it('R9-OBS-01: the reconnect invalidation calls the same failed read again', asy
   await act(async () => wire.listener({ monolithLive: { type: 'subscribed', roomId: 'room' } }));
   expect(load).toHaveBeenCalledTimes(1);
   await act(async () => wire.listener({ monolithLive: { type: 'invalidate', roomId: 'room', reason: 'message' } }));
-  expect(current.error).toBe('Could not complete request');
+  expect(current.error).toBe('');
   await act(async () => wire.listener({ monolithLive: { type: 'invalidate', roomId: 'room', reason: 'reconnect' } }));
   expect(load).toHaveBeenCalledTimes(3);
   expect(current.error).toBeNull();
@@ -80,7 +80,7 @@ it('R9-OBS-02: a room invalidation recovers after an error', async () => {
   let current: any;
   function Reader() { current = useObservedResource<string>('live-error', { load, subscribe: observeRoomResource('room') }); return <span>{current.error ?? current.data}</span>; }
   await act(async () => { mount(<Reader />); });
-  expect(current.error).toBe('Could not complete request');
+  expect(current.error).toBe('');
   await act(async () => wire.listener({ monolithLive: { type: 'invalidate', roomId: 'room', reason: 'message' } }));
   expect(load).toHaveBeenCalledTimes(2);
   expect(current.error).toBeNull();

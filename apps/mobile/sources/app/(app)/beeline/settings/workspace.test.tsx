@@ -9,8 +9,6 @@ import { afterAll, beforeAll, beforeEach, describe, expect, it, vi } from 'vites
 // These fixtures exercise the negotiated legacy compatibility path. The actual
 // router owner/negotiation path has independent integration coverage.
 
-
-
 const platform = vi.hoisted(() => ({ OS: 'android' }));
 const navigation = vi.hoisted(() => ({ back: vi.fn(), push: vi.fn(), replace: vi.fn() }));
 const auth = vi.hoisted(() => ({
@@ -30,6 +28,7 @@ const hotSurfaces = vi.hoisted(() => ({
   values: new Map<string, unknown>(),
   listeners: new Map<string, Set<() => void>>(),
 }));
+const reconnectListeners = vi.hoisted(() => new Set<(event: any) => void>());
 const roomViews = vi.hoisted(() => ({ workspace: vi.fn(), chats: vi.fn(), room: vi.fn() }));
 const client = vi.hoisted(() => ({
   surfaceSubscribe: vi.fn(async () => vi.fn()),
@@ -115,7 +114,9 @@ vi.mock('@/buzz/surface-storage', () => ({
 // The Room list store settings reads watches through the shared live connection.
 vi.mock('@/sync/transport/live-connection', () => ({
   sharedLiveConnection: () => ({
-    register: async () => () => undefined,
+    register: async (_filters: unknown, listener: (event: any) => void) => {
+      reconnectListeners.add(listener); return () => reconnectListeners.delete(listener);
+    },
     whenSubscribed: async () => undefined,
     isViewing: () => false,
     reconnect: () => undefined,
@@ -233,6 +234,7 @@ beforeAll(() => {
 
 afterAll(() => vi.restoreAllMocks());
 beforeEach(() => {
+  reconnectListeners.clear();
   vi.clearAllMocks();
   resetChatListStoresForTest();
   hotSurfaces.values.clear();
@@ -374,20 +376,20 @@ describe('Workspace Settings authority', () => {
     const renderer = await render();
 
     expect(renderer.root.findAllByProps({ testID: 'workspace-settings-denied' })).toHaveLength(0);
-    expect(renderer.root.findByProps({ testID: 'workspace-settings-retry' }).props.title).toBe('Could not complete request');
-    expect(renderer.root.findByProps({ testID: 'workspace-settings-retry' })).toBeDefined();
+    expect(renderer.root.findAllByProps({ testID: 'workspace-settings-retry' })).toHaveLength(0);
+    expect(renderer.root.findAllByProps({ action: 'Retry' })).toHaveLength(0);
     expect(renderer.root.findAllByType('Text').map((node: any) => node.children.join(''))).not.toContain(
       'Admin access required',
     );
   });
 
-  it('retries the workspace read from the load-failed screen', async () => {
+  it('recovers the workspace read through the shared reconnect without a local Retry', async () => {
     roomViews.workspace.mockRejectedValueOnce({ status: 502, code: 'request_failed' });
     const renderer = await render();
     roomViews.workspace.mockResolvedValue(workspaceView());
 
     await act(async () => {
-      renderer.root.findByProps({ testID: 'workspace-settings-retry' }).props.onPress();
+      for (const listener of reconnectListeners) listener({ monolithLive: { type: 'invalidate', roomId: '', reason: 'reconnect' } });
       await Promise.resolve();
       await Promise.resolve();
     });

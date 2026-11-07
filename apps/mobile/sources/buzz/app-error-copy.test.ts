@@ -48,3 +48,13 @@ it('keeps HTTP-only upload timeouts as action errors without diagnosing connecti
   const error=Object.assign(new Error('Request timed out'), {name:'MonolithRequestTimeoutError'});
   expect(appErrorCopy(error,'Could not upload this photo.')).toBe('Could not upload this photo.');
 });
+
+it('leaves all failed reads to the shared owner while preserving human server refusals', async () => {
+  const { appReadErrorCopy } = await import('./app-error-copy');
+  for (const reason of [new PhoneSocketDisconnectedError(), new TypeError('Network request failed'),
+    { status: 503, message: 'Unavailable' }, new Error('Something failed'), { status: 408 }])
+    expect(appReadErrorCopy(reason)).toBe('');
+  expect(appReadErrorCopy(new Error('This connection belongs to another member.'))).toBe('This connection belongs to another member.');
+  expect(appReadErrorCopy({ status: 403, message: 'Only Workspace members can open this Room.' }))
+    .toBe('Only Workspace members can open this Room.');
+});
