@@ -46,7 +46,8 @@ try {
       `http://127.0.0.1:${server.address().port}/manifest.json`,
     ],
     {
-      env: { ...process.env, HOME: '/root', BEELINE_LAB: '1' },
+      env: { ...process.env, HOME: '/root', BEELINE_LAB: '1',
+        BEELINE_INSTALL_DIR: '/opt/beeline/helper/bin' },
       stdio: 'inherit',
     },
   );

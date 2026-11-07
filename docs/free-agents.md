@@ -240,6 +240,9 @@ helper without a boot-time installer or refresh loop. Image replacement launches
 in one update; a lost result gets one fresh connection and authoritative Machine
 read. Listener bootstrap/reconnect and release changes read pending desired work,
 including stale waking rows. Automatic idle suspension and shared CPU remain.
+Acquisition keeps a helper with a current live connection `running`; preparation
+must not demote it to `waking` and revoke its claimed model access. The registration
+and catch-up regression is in `free-agent-acquisition.test.ts`.
 
 Squire keeps one host broker. Its broker-owned operation receipt and helper relay
 return the original result after a lost reply without replaying browser starts
@@ -329,9 +332,11 @@ The image's helper build takes `BEELINE_RELEASE_SHA` and
 `BEELINE_RELEASE_VERSION`; the hand-build script supplies the checkout SHA.
 `scripts/stage-free-agent-helper.sh` builds the canonical helper bundle from
 that checkout. Image construction verifies its SHA, version and digest, then
-installs it through the existing recovery installer in an isolated build stage.
-`node --test infra/free-agent/entrypoint.test.mjs` exercises cold-boot refresh,
-fallback and startup deadlines. The [persistent boot recovery proof](free-agent-persistent-boot-proof.md)
+installs it through the existing recovery installer in an isolated build stage
+under `/opt/beeline/helper`. The entrypoint launches that image-owned helper
+directly, so an older release pointer in persistent HOME cannot select the runtime.
+`node --test infra/free-agent/entrypoint.test.mjs` covers stale-HOME boot selection,
+helper exit propagation and hosted-service startup failure. The [persistent boot recovery proof](free-agent-persistent-boot-proof.md)
 records a disposable Fly Machine cold stop/start and the stale-owner regression.
 After building the server and image, `node infra/free-agent/cold-start-proof.mjs`
 creates a disposable local database and fresh test Workspace, then drives the

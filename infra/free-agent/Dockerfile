@@ -42,7 +42,8 @@ RUN test "$PI_VERSION" != latest && test "$PI_ACP_VERSION" != latest \
 COPY infra/free-agent/prepare-image.mjs /opt/beeline/
 RUN node /opt/beeline/prepare-image.mjs
 COPY infra/free-agent/entrypoint.sh /opt/beeline/
-COPY --from=helper-build /root/.local/ /root/.local/
+# Keep the verified helper outside the Machine's persistent HOME.
+COPY --from=helper-build /opt/beeline/helper/ /opt/beeline/helper/
 ARG BEELINE_RELEASE_VERSION
 ARG BEELINE_RELEASE_SHA
 LABEL app.usebeeline.release.version=$BEELINE_RELEASE_VERSION \

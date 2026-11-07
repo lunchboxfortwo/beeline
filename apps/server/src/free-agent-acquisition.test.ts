@@ -4,6 +4,8 @@ import { FreeAgentService, freeAgentConfigFromEnv } from './free-agents.js';
 import { LiveHub } from './live.js';
 import { PhoneService } from './phone-service.js';
 import { HelperDaemonService } from './test-fixtures/helper-daemon.js';
+import { DaemonService } from './daemon-service.js';
+import { claimAgentConnection } from './connection-presence.js';
 import {
   MODEL_AGENT,
   MODEL_OWNER,
@@ -48,6 +50,43 @@ const config = () =>
   )!;
 const send = (text: string) =>
   phone.execute('sendRoomMessage', { roomId: MODEL_ROOM, text: `@beebee ${text}` }, MODEL_OWNER);
+
+it.each(['before', 'after'] as const)('connected helper retains owned-model authority when negotiation is %s runtime catch-up', async timing => {
+  const first = await send('original first message'), second = await send('original second message');
+  const daemon = new DaemonService(fixture.db, live);
+  daemon.setOwnedModel({ credentials: fixture.credentials, ready: () => true });
+  const source = { connectionId: 'current-image-helper', epoch: await claimAgentConnection(
+    fixture.db, live, MODEL_AGENT, {}, { connectionId: 'current-image-helper', instanceId: 'synthetic-server' }) };
+  const provider = new FlyMachines('synthetic', 'proof', async () => Response.json({
+    id: 'm1', state: 'started', instance_id: 'current', config: { image },
+  }));
+  const service = new FreeAgentService(fixture.db, config(), provider, async () => ({ exchangeToken: 'synthetic' }));
+  const negotiate = () => daemon.negotiateOwnedModel(MODEL_AGENT, source, true);
+  const selectedBefore = timing === 'before' ? await negotiate() : undefined;
+  // Registration and listener catch-up both admit this acquisition while the
+  // original messages are still pending. A serving helper must remain ready.
+  await service.resumePendingWork();
+  const selected = selectedBefore ?? await negotiate();
+  const pending = await daemon.execute('getAgentCommands', { roomId: MODEL_ROOM }, MODEL_AGENT);
+  const generationId = 'original-messages';
+  const claimed = await daemon.execute('claimAgentTurn', {
+    roomId: MODEL_ROOM, commandId: pending.commands[0]!.id, generationId,
+  }, MODEL_AGENT, source, selected.capability);
+  expect(claimed.commands.map(command => command.source.id)).toEqual([first.messageId, second.messageId]);
+  expect(claimed.modelCredential).toMatchObject({ v: 1 });
+  const actor = await fixture.credentials.authenticate(fixture.db, claimed.modelCredential!.token);
+  expect(actor.binding).toMatchObject({ connectionId: source.connectionId, connectionEpoch: source.epoch, generationId });
+  await daemon.execute('postRoomMessage', {
+    roomId: MODEL_ROOM, requestId: claimed.commands[0]!.turnRequestId!, generationId,
+    text: 'Both original messages answered.',
+  }, MODEL_AGENT);
+  await daemon.execute('releaseAgentTurn', { roomId: MODEL_ROOM, generationId }, MODEL_AGENT, source);
+  expect((await fixture.db.query('SELECT state FROM free_agents WHERE agent_id=$1', [MODEL_AGENT])).rows)
+    .toEqual([{ state: 'running' }]);
+  expect((await fixture.db.query('SELECT state FROM agent_commands WHERE source_message_id=ANY($1::text[])',
+    [[first.messageId, second.messageId]])).rows).toEqual([{ state: 'complete' }, { state: 'complete' }]);
+  expect((await phone.readRoom(MODEL_ROOM, MODEL_OWNER))?.messages.some(message => message.text === 'Both original messages answered.')).toBe(true);
+});
 
 it('Klor: a lost update reply after 34.293s still answers both original queued messages, outside execution', async () => {
   let state = 'stopped',

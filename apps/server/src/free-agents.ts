@@ -592,8 +592,11 @@ export class FreeAgentService {
            WHERE command.agent_id=f.agent_id AND (command.state='pending' OR ($4::text=f.fly_machine_id AND command.state='claimed'))))
          FOR UPDATE`, [agentId,allowCreate,provisionOnly,suspendedMachineId ?? null,cause==='release'])).rows[0];
       if (!row) return undefined;
+      // Acquisition owns preparation, not connection readiness. Demoting an
+      // authenticated helper would revoke its negotiated model authority.
       await db.query(`UPDATE free_agents SET runtime_owner=$2,runtime_operation_id=$3,
-        state='waking',wake_requested_at=clock_timestamp(),updated_at=now() WHERE agent_id=$1`, [agentId,this.instanceId,operationId]);
+        state=CASE WHEN $4::boolean THEN 'running' ELSE 'waking' END,
+        wake_requested_at=clock_timestamp(),updated_at=now() WHERE agent_id=$1`, [agentId,this.instanceId,operationId,row.serving]);
       await recordFreeAgentEvent(db,agentId,'wake_requested',{cause,previous:row.state,operationId});
       await writeRuntimePhase(db,agentId,operationId,row.serving?'preparing':'starting');
       return row;
