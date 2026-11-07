@@ -1,3 +1,5 @@
+import type { SigninFunnelEvent } from './signin-funnel.js';
+import type { DiagnosticBatch, DiagnosticAck } from './diagnostics.js';
 import type { MediaMetadata, MediaLink } from './media-metadata.js';
 import type { RepositoryOnboardingAction } from './repository-onboarding.js';
 import { PHONE_ROUTE_READ_OPERATIONS, type PhoneRouteOperationMap } from './phone-route-operations.js';
@@ -161,6 +163,8 @@ export type PhoneOperationMap = PhoneRouteOperationMap & {
   createRoomPoll: { input: CreateRoomPollInput; output: CreateRoomPollResult };
   answerChoice: { input: AnswerChoiceInput; output: ChoiceDecisionResult };
   skipChoice: { input: SkipChoiceInput; output: ChoiceDecisionResult };
+  reportSigninFunnel: { input: { event: SigninFunnelEvent }; output: null };
+  reportDiagnostics: { input: DiagnosticBatch; output: DiagnosticAck };
   createWorkspace: { input: NamedWorkspaceInput; output: CreateWorkspaceResult };
   updateWorkspace: { input: UpdateWorkspaceInput; output: void };
   leaveWorkspace: { input: WorkspaceInput; output: void };
@@ -393,7 +397,7 @@ export type WorkspaceMemberInput = WorkspaceInput & {
 };
 /** A manager removes a person from the Workspace and every live Room in it; agents use removeAgent. */
 export type RemoveWorkspaceMemberInput = WorkspaceInput & { readonly memberId: string };
-export type NamedWorkspaceInput = { readonly name: string; readonly workspaceId?: string; readonly timeZone?: string };
+export type NamedWorkspaceInput = { readonly name: string; readonly workspaceId?: string; readonly timeZone?: string; readonly creationSource?: 'manual_ui' | 'onboarding' | 'recovery' };
 export type IdResult = { readonly id: string };
 /** A new Workspace and the public `#general` Room created with it. */
 export type CreateWorkspaceResult = IdResult & { readonly roomId?: string };
@@ -834,6 +838,8 @@ export type PushDeviceInput = {
 export type PushRegistrationResult = { readonly accepted: boolean };
 export type RunningUpdateInput = {
   readonly deviceId: string;
+  /** Presented together by the same installation during canonical-id migration. */
+  readonly previousDeviceId?: string;
   readonly platform?: 'ios' | 'android' | 'macos' | 'windows' | 'linux';
   readonly updateId?: string;
   readonly channel?: string;

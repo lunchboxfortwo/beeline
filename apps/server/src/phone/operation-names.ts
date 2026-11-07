@@ -69,6 +69,8 @@ export const PHONE_OPERATION_NAMES = new Set<keyof PhoneOperationMap>([
   'createRoomPoll',
   'answerChoice',
   'skipChoice',
+  'reportSigninFunnel',
+  'reportDiagnostics',
   'createWorkspace',
   'updateWorkspace',
   'leaveWorkspace',

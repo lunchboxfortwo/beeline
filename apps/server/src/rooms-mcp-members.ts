@@ -1,3 +1,4 @@
+import { recordDiagnostic } from './diagnostics.js';
 import {
   joinMcpPublicRooms,
   restoreMcpWorkspaceMemberships,
@@ -317,19 +318,19 @@ export async function deliverMcpMemberWebhooks(
     if (signal?.aborted) break;
     const claimed = await db.query<{
       call_id: string; member_id: string; room_id: string; message_id: string;
-      body: string; callback_url: string | null; callback_secret: string | null; deliverable: boolean; answered: boolean;
+      body: string; owner_id: string | null; callback_url: string | null; callback_secret: string | null; deliverable: boolean; answered: boolean;
       author_id: string | null; author_handle: string | null; author_name: string | null; author_kind: string | null; cursor: string | null;
       command_id: string | null; command_reason: string | null; command_kind: string | null; command_text: string | null;
     }>(
       `WITH claimed AS (
-         UPDATE rooms_mcp_webhook_outbox outbox SET claimed_at=now()
+         UPDATE rooms_mcp_webhook_outbox outbox SET claimed_at=now(),attempted_at=now()
          WHERE outbox.call_id IN (
            SELECT candidate.call_id FROM rooms_mcp_webhook_outbox candidate
            WHERE candidate.delivered_at IS NULL AND candidate.claimed_at IS NULL
            ORDER BY candidate.created_at,candidate.call_id LIMIT 1
            FOR UPDATE SKIP LOCKED)
          RETURNING outbox.call_id,outbox.member_id,outbox.room_id,outbox.message_id,outbox.body)
-       SELECT claimed.call_id,claimed.member_id,claimed.room_id,claimed.message_id,claimed.body,
+       SELECT claimed.call_id,claimed.member_id,claimed.room_id,claimed.message_id,claimed.body,member.owner_id,
          COALESCE(member.callback_url,client.callback_url) callback_url,
          CASE WHEN member.callback_url IS NOT NULL THEN member.callback_secret END callback_secret,
          message.author_id,author.handle author_handle,author.name author_name,author.kind author_kind,mention.seq::text cursor,mention.cleared_at IS NOT NULL answered,
@@ -356,7 +357,7 @@ export async function deliverMcpMemberWebhooks(
     const row = claimed.rows[0];
     if (!row || signal?.aborted) break;
     if (!row.deliverable || !row.callback_url) {
-      await db.query('UPDATE rooms_mcp_webhook_outbox SET delivered_at=now() WHERE call_id=$1', [row.call_id]);
+      await db.query("UPDATE rooms_mcp_webhook_outbox SET delivered_at=now(),completed_at=now(),delivery_state='skipped',failure_category='access_ended' WHERE call_id=$1", [row.call_id]);
       await db.query(
         `UPDATE subscription_webhook_calls SET outcome='skipped',reason=$2 WHERE id=$1`,
         [row.call_id, row.answered ? 'already answered' : row.deliverable ? 'webhook disabled' : 'membership ended'],
@@ -364,6 +365,8 @@ export async function deliverMcpMemberWebhooks(
       continue;
     }
     let accepted = false;
+    let httpStatus: number | null = null;
+    const deliveryStarted=Date.now();
     try {
       if (!row.callback_url) throw new Error('no callback url');
       const response = await transport(row.callback_url, {
@@ -376,8 +379,14 @@ export async function deliverMcpMemberWebhooks(
             : `${routingInstruction(row)} ${MCP_TAG_INSTRUCTION}` }),
       });
       accepted = response.ok;
+      httpStatus=response.status;
     } catch { accepted = false; }
-    await db.query(`UPDATE rooms_mcp_webhook_outbox SET delivered_at=now() WHERE call_id=$1`, [row.call_id]);
+    await db.query(`UPDATE rooms_mcp_webhook_outbox SET delivered_at=now(),completed_at=now(),
+      delivery_state=$2,http_status=$3,failure_category=$4,duration_ms=$5 WHERE call_id=$1`,
+      [row.call_id,accepted?'delivered':'failed',httpStatus,accepted?null:httpStatus?'http_error':'network_error',Date.now()-deliveryStarted]);
+    await recordDiagnostic(db,{name:'mcp_delivery',deliveryState:accepted?'delivered':'failed',outcome:accepted?'success':'failed',
+      code:accepted?'host_execution_unknown':httpStatus?'http_error':'network_error',...(row.command_id?{commandId:row.command_id}:{}),
+      ...(httpStatus?{httpStatus}:{}),durationMs:Date.now()-deliveryStarted},row.owner_id??undefined).catch(()=>undefined);
     if (!accepted)
       await db.query(`UPDATE subscription_webhook_calls SET outcome='refused',reason='delivery failed' WHERE id=$1`, [row.call_id]);
     else delivered++;

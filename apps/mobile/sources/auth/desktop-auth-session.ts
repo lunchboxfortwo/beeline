@@ -1,3 +1,4 @@
+import { authPhase, observeAuth } from './auth-diagnostics';
 import { beginFunnelAttempt, funnelCallback } from './signin-funnel';
 import * as Linking from 'expo-linking';
 import * as WebBrowser from 'expo-web-browser';
@@ -33,7 +34,8 @@ export async function openAccountAuthSession(
   }
   try {
     if (!isDesktopShell()) {
-      const result=await WebBrowser.openAuthSessionAsync(url.toString(), redirectUri, options);
+      const result=await authPhase('browser_open_requested', () => WebBrowser.openAuthSessionAsync(url.toString(), redirectUri, options));
+      observeAuth({ name: 'browser_returned', outcome: result.type === 'success' ? 'success' : result.type === 'cancel' ? 'cancelled' : 'unknown' });
       if(google && result.type==='success') {
         const error=new URL(result.url).searchParams.get('error');
         void funnelCallback(error ? 'error' : 'success',error ? 'provider_error' : undefined);
@@ -42,7 +44,7 @@ export async function openAccountAuthSession(
       return result;
     }
     const { openUrl } = await import('@tauri-apps/plugin-opener');
-    await openUrl(url.toString());
+    await authPhase('browser_open_requested', () => openUrl(url.toString()), 'browser_opened');
     return { type: 'opened' };
   }catch(error){if(google)void funnelCallback('error','unknown');throw error;}
 }
@@ -50,11 +52,15 @@ export async function openAccountAuthSession(
 export function subscribeToAuthUrls(
   listener: (url: string) => void,
 ): AuthUrlSubscription | Promise<AuthUrlSubscription> {
+  const received = (url: string) => { observeAuth({ name: 'callback_received' }); listener(url); };
   if (!isDesktopShell()) {
-    return Linking.addEventListener('url', ({ url }) => listener(url));
+    const subscription=Linking.addEventListener('url', ({ url }) => received(url));
+    observeAuth({ name: 'listener_ready' });
+    return subscription;
   }
   return import('@tauri-apps/plugin-deep-link').then(async ({ onOpenUrl }) => {
-    const unlisten = await onOpenUrl((urls) => urls.forEach(listener));
+    const unlisten = await onOpenUrl((urls) => urls.forEach(received));
+    observeAuth({ name: 'listener_ready' });
     return { remove: unlisten };
   });
 }

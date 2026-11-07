@@ -42,6 +42,8 @@ Paths and commands below are relative to the repository root. Read these invaria
 
 - Sentry capture, authenticated Telegram forwarder, configuration and post-release proof: [error monitoring](error-monitoring.md). Keep Telegram outbound-only and exclude forwarder failures from recursive capture. Caller validation failures use `ExpectedRefusalError` (or `CommandRefusalError` with an HTTP status); `captureServerError` excludes that shared type, never matching refusal message text. Unexpected exceptions and provider outages remain reportable. Handler proof: `BEELINE-SENTRY-REFUSALS` in `sentry.test.ts`.
 
+- Private device/session timeline, retention, provenance and local acceptance proofs: [device diagnostics](device-session-diagnostics.md).
+
 - Private operator dashboard cohorts, fixture exclusions and metric provenance: [dashboard API](operator-dashboard-api.md); aggregate queries and regressions live in `operator-dashboard.ts` and `operator-dashboard.test.ts`.
 
 - Wallet settlement and push authority: [wallet tools](wallet-tools.md), `wallet-notices.ts`, `wallet-webhooks.ts`. Indexed incoming receipts stay in `wallet_transactions` without a System DM. Outgoing transactions, failures, refusals, pending notices and webhook receipts without a history row retain their notices.

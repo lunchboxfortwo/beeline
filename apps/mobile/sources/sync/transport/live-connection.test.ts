@@ -17,6 +17,8 @@ vi.mock('react', () => ({ useSyncExternalStore: (_subscribe: unknown, snapshot: 
 import { LiveConnection, useConnectionFailure, subscribeNetworkOnline, sharedLiveConnection, resetSharedLiveConnection, reconnectNow } from './live-connection';
 import { PhoneSocketDisconnectedError } from './phone-socket-error';
 import { MonolithRequestTimeoutError } from '@/auth/monolith-session';
+import { createDiagnosticClient } from '@beeline/api-contract/diagnostics-client';
+import { randomUUID } from 'node:crypto';
 
 class Socket {
   static readonly OPEN = 1;
@@ -49,6 +51,59 @@ function setup(authorization = vi.fn(async () => 'fixture-access')) {
   return {connection,authorization,invalidate,changeIdentity:()=>changed()};
 }
 const tick = () => vi.advanceTimersByTimeAsync(0);
+
+it('does not attribute an old account request outcome to the next account',async()=>{
+  let changed=()=>{};
+  const record=vi.fn();
+  const connection=new LiveConnection({authorization:async()=> 'fixture-access',liveUrl:()=> 'ws://fixture.invalid/v1/phone/live',
+    subscribeIdentityChange:listener=>{changed=listener;return()=>{};},
+    telemetry:{origin:()=>undefined,record,flush:()=>{}}});
+  connections.push(connection);
+  const old=connection.request('readRoom',{roomId:'old-account-room'}).catch(error=>error);
+  await open();changed();await old;
+  expect(record.mock.calls.some(([step])=>step.name==='operation_failed')).toBe(false);
+  const current=connection.request('readWorkspaces',{});
+  const socket=await open();socket.reply([]);await current;
+  expect(record.mock.calls.filter(([step])=>step.name==='operation_completed').map(([step])=>step.operation)).toEqual(['readWorkspaces']);
+});
+
+it('acceptance 8: batches share the established socket, never recurse, poll or wait on ingestion before completing an action',async()=>{
+  const values=new Map<string,string>();
+  let connection!: LiveConnection;
+  const telemetry=createDiagnosticClient({storage:{getItem:async k=>values.get(k)??null,setItem:async(k,v)=>{values.set(k,v);},getAllKeys:async()=>[...values.keys()],removeItem:async k=>{values.delete(k);}},
+    uuid:randomUUID,descriptor:{platform:'android',client:'expo_native',version:'0.2.22',environment:'lab'},
+    send:async batch=>{
+      if(!connection.commandState().ready)throw new Error('offline');
+      return connection.request('reportDiagnostics',batch);
+    }});
+  await telemetry.identify('fixture-viewer');
+  const origin=await telemetry.context();
+  connection=new LiveConnection({authorization:async()=> 'fixture-access',liveUrl:()=> 'ws://fixture.invalid/v1/phone/live',subscribeIdentityChange:()=>()=>{},
+    telemetry:{origin:()=>({...origin,requestId:randomUUID()}),record:step=>{void telemetry.record(step);},flush:()=>{void telemetry.flush();}}});
+  connections.push(connection);
+  const action=connection.request('readWorkspaces',{});
+  const socket=await open();await tick();
+  const domain=socket.requests().find(r=>r.op==='readWorkspaces');
+  expect(domain.diagnostic).toEqual(expect.objectContaining({sessionId:expect.any(String),actionId:expect.any(String)}));
+  socket.emit({t:'res',id:domain.id,ok:true,result:[]});
+  await expect(action).resolves.toEqual([]); // Telemetry acknowledgement is still withheld.
+  await tick();
+  expect(Socket.instances).toHaveLength(1);
+  const batches=socket.requests().filter(r=>r.op==='reportDiagnostics');
+  expect(batches).toHaveLength(1);
+  expect(batches[0].args.events.length).toBeLessThanOrEqual(32);
+  for(let i=0;i<4;i++) {
+    const unanswered=socket.requests().filter(r=>r.op==='reportDiagnostics' && !r.acknowledged);
+    for(const r of unanswered) { r.acknowledged=true;socket.emit({t:'res',id:r.id,ok:true,result:{accepted:r.args.events.map((e:{eventId:string})=>e.eventId)}}); }
+    await tick();
+  }
+  const before=socket.sent.length;
+  await vi.advanceTimersByTimeAsync(10_000);
+  expect(socket.sent).toHaveLength(before);
+  expect(Socket.instances).toHaveLength(1);
+  const events=socket.requests().filter(r=>r.op==='reportDiagnostics').flatMap(r=>r.args.events);
+  expect(events.some(e=>e.operation==='reportDiagnostics')).toBe(false);
+});
 async function open() { await tick(); const socket=Socket.instances.at(-1)!;socket.open();return socket; }
 function appState(next: string) { state.currentState=next;for(const listener of state.listeners)listener(next); }
 beforeEach(()=>{vi.useFakeTimers();Socket.instances=[];state.currentState='active';state.platform='android';vi.stubGlobal('WebSocket',Socket);});

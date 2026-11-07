@@ -1,3 +1,5 @@
+import { readPersonDiagnostics, renderPersonDiagnostics } from './operator-diagnostics.js';
+import { ingestDiagnostics } from './diagnostics.js';
 import type { IncomingMessage, ServerResponse } from "node:http";
 import { InvitePreviewAccess } from "./invite-preview.js";
 import { HelperVersionGate } from "./helper-version-gate.js";
@@ -420,6 +422,23 @@ a:focus-visible { outline: 3px solid #c8a8e8; outline-offset: 4px; }
     json(response, 200, await ingestScreenReport(options.database, report));
     return;
   }
+  if (method === 'GET' && url.pathname === '/v1/admin/diagnostics') {
+    if (!options.dashboardSecret || !bearerSecretMatches(options.dashboardSecret, request)) {
+      json(response,403,{error:'access_denied'});return;
+    }
+    const person=url.searchParams.get('person');
+    if (!person || person.length>128 || [...url.searchParams.keys()].some(k=>!['person','format'].includes(k))) {
+      json(response,400,{error:'invalid_person'});return;
+    }
+    const data=await readPersonDiagnostics(options.databasePools?.diagnostics ?? options.database,person);
+    if (!data) { json(response,404,{error:'not_found'});return; }
+    response.setHeader('cache-control','no-store');
+    if (url.searchParams.get('format')==='html') {
+      response.setHeader('content-security-policy',"default-src 'none'; style-src 'unsafe-inline'; frame-ancestors 'self'");
+      response.writeHead(200,{'content-type':'text/html; charset=utf-8'});response.end(renderPersonDiagnostics(data));
+    } else json(response,200,data);
+    return;
+  }
   if (method === 'GET' && url.pathname === '/v1/admin/dashboard') {
     // Authentication happens before parsing the filter or reading any ledger.
     // The browser never receives this key; the same-origin edge proxy supplies it.
@@ -557,8 +576,13 @@ a:focus-visible { outline: 3px solid #c8a8e8; outline-offset: 4px; }
   if (method === 'POST' && url.pathname === '/v1/funnel/events') {
     if (!funnelRateLimit.allow(clientKey(request))) { json(response,429,{error:'too_many_requests'}); return; }
     let input: unknown;
-    try { input = JSON.parse((await bytes(request, 1024)).toString('utf8')); }
+    try { input = JSON.parse((await bytes(request, 32768)).toString('utf8')); }
     catch { json(response,400,{error:'invalid_funnel_event'}); return; }
+    if (input && typeof input === 'object' && 'schemaVersion' in input) {
+      try { json(response,200,await ingestDiagnostics(options.databasePools?.diagnostics ?? options.database,input)); }
+      catch { json(response,400,{error:'invalid_diagnostic_batch'}); }
+      return;
+    }
     const event = parseSigninFunnelEvent(input);
     if (!event) { json(response,400,{error:'invalid_funnel_event'}); return; }
     const requiresIdentity = ['signed_in', 'workspace_created', 'first_message_sent', 'screen_shown'].includes(event.event);

@@ -1,3 +1,4 @@
+import { authPhase, observeAuth, authFailureCode } from '@/auth/auth-diagnostics';
 import { appErrorCopy } from '@/buzz/app-error-copy';
 import { desktopColumnWidths } from '@/buzz/desktop-layout-tokens';
 import { useIsDesktop as useDesktopPageLayout } from '@/utils/responsive';
@@ -151,7 +152,7 @@ export default function BuzzOnboarding() {
   const enterAfterMonolithSignIn = async (_identityId: string | undefined) => {
     // Repository discovery belongs to the in-app picker. An unavailable
     // GitHub service must never hold a successfully signed-in user here.
-    router.replace('/beeline/channels');
+    await authPhase('navigation_started', async () => { router.replace('/beeline/channels'); });
   };
 
   const restorePendingBind = async (): Promise<boolean> => {
@@ -373,7 +374,7 @@ export default function BuzzOnboarding() {
       }
     })()
       .catch((error: unknown) => {
-        void funnelCallback('error','unknown');
+        observeAuth({ name: 'auth_failed', phase: 'recovery_started', code: authFailureCode(error,'recovery_started'), outcome: 'failed' });
         if (!alive) return;
         const next = noticeForAuthError(error);
         setNotice(next);
@@ -421,7 +422,8 @@ export default function BuzzOnboarding() {
     } catch (error) {
       if (attempt.signal.aborted) return;
       const cancelled = error instanceof OidcBindError && ['browser_canceled', 'oidc_denied'].includes(error.code);
-      void funnelCallback(cancelled ? 'cancelled' : 'error', cancelled ? undefined : 'unknown');
+      void funnelCallback(cancelled ? 'cancelled' : 'error', cancelled ? undefined : 'exchange_failed');
+      observeAuth({ name: 'notice_shown', code: authFailureCode(error,'callback_validated'), outcome: 'failed' });
       const next = noticeForAuthError(
         error instanceof OidcBindError
           ? error
@@ -491,6 +493,7 @@ export default function BuzzOnboarding() {
       }
       await cancelPendingGitHubSignIn(undefined, undefined, startedState).catch(() => undefined);
       const next = noticeForAuthError(error);
+      observeAuth({name:'notice_shown',code:authFailureCode(error,'callback_validated'),outcome:'failed'});
       setStatus(next.status);
       setNotice(next);
       publishOnboardingNotice(next);
@@ -523,6 +526,7 @@ export default function BuzzOnboarding() {
       await finishPendingBind(pending);
     } catch (error) {
       const next = noticeForAuthError(error);
+      observeAuth({name:'notice_shown',code:authFailureCode(error,'callback_validated'),outcome:'failed'});
       setStatus(next.status);
       setNotice(next);
       publishOnboardingNotice(next);

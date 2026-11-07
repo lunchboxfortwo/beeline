@@ -1,3 +1,6 @@
+import { parseSigninFunnelEvent } from '@beeline/api-contract/signin-funnel';
+import { recordSigninFunnelEvent } from './signin-funnel.js';
+import { ingestDiagnostics, recordDiagnostic } from './diagnostics.js';
 import { readRoomTools } from './room-tool-projection.js';
 import { dispatchTrayDecisionCommand, isTrayDecisionCommand } from './tray-decision-command.js';
 
@@ -24,7 +27,7 @@ export class PhoneOperationError extends ExpectedRefusalError {
 
 const quiet = new Set<string>([
   ...PHONE_READ_OPERATIONS, 'reopenChat', 'updateRoomPushState',
-  'markRead', 'markUnread', 'reportClientError', 'reportPageLoad',
+  'reportSigninFunnel', 'reportDiagnostics', 'markRead', 'markUnread', 'reportClientError', 'reportPageLoad',
   // These services publish their own precise changes.
   'voiceJoin', 'voiceLeave', 'voiceIdle', 'voiceResume',
   'saveAgentVoice', 'previewAgentVoice',
@@ -78,10 +81,18 @@ export function createPhoneOperationDispatcher(
   errorStatus: (error: unknown) => number = error => error instanceof PhoneOperationError ? error.status : 500,
 ) {
   const ledger = new RouterCommandLedger(options.database);
+  const diagnosticsDb = options.databasePools?.diagnostics ?? options.database;
   const execute = async (name: string, input: Record<string, unknown>, viewerId: string,
     familyId?: string): Promise<unknown> => {
     const phone = options.phone;
     switch (name) {
+      case 'reportSigninFunnel': {
+        const event = parseSigninFunnelEvent(input.event);
+        if (!event) refuse(400,'invalid_funnel_event');
+        await recordSigninFunnelEvent(options.database,event,'client',viewerId);
+        return null;
+      }
+      case 'reportDiagnostics': return ingestDiagnostics(diagnosticsDb,input,viewerId,familyId);
       case 'readMediaMetadata': return readMediaMetadata(options.database,uuid(input,'objectId'),viewerId);
       case 'readMediaLink':
       case 'readMediaPlayback': {
@@ -308,14 +319,20 @@ export function createPhoneOperationDispatcher(
     return command ? receipt : result;
   };
   return async (...args: Parameters<typeof dispatch>): Promise<unknown> => {
+    const started = Date.now();
+    // Unknown RPCs retain their database-free refusal boundary, including retired
+    // secret-bearing operations. Only admitted names may enter diagnostics.
+    const operation=PHONE_OPERATION_NAMES.has(args[0] as never) ? args[0] : undefined;
     try {
       const result = await dispatch(...args);
+      if (operation && operation !== 'reportDiagnostics') void recordDiagnostic(diagnosticsDb, { name: 'operation_completed', operation, outcome: 'success', durationMs: Date.now()-started },args[2]).catch(()=>undefined);
       options.operationOutcomes?.record(args[0], 200, '');
       return result;
     } catch (error) {
       const explicit = error instanceof PhoneOperationError ? error.payload.code ?? error.payload.error : undefined;
       const code = typeof explicit === 'string' && /^[A-Za-z][A-Za-z0-9_-]{0,63}$/.test(explicit)
         ? explicit : error instanceof Error ? error.name || 'Error' : 'Error';
+      if (operation && operation !== 'reportDiagnostics') void recordDiagnostic(diagnosticsDb, { name: 'operation_failed', operation, outcome: errorStatus(error)<500 ? 'refused' : 'failed', code: errorStatus(error)<500 ? 'refused' : 'unexpected_error', durationMs: Date.now()-started },args[2]).catch(()=>undefined);
       options.operationOutcomes?.record(args[0], errorStatus(error), code);
       throw error;
     }

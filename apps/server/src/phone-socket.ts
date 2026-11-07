@@ -1,3 +1,4 @@
+import { parseDiagnosticOrigin, withDiagnosticContext } from './diagnostics.js';
 import { parseRouterCommandIdentity } from '@beeline/api-contract/router-command';
 import type { WebSocket } from 'ws';
 import {
@@ -50,7 +51,7 @@ export function phoneSocketRequests(
     catch { fail(id, 'invalid_command_identity', 'Invalid durable command identity'); return true; }
     const controller = new AbortController();
     active.set(id, controller);
-    void dispatch(request.op, request.args as Record<string, unknown>, viewerId, controller.signal, familyId, command)
+    void withDiagnosticContext(viewerId,parseDiagnosticOrigin(request.diagnostic), () => dispatch(request.op!, request.args as Record<string, unknown>, viewerId, controller.signal, familyId, command))
       .then(async result => {
         const enqueue = (safeResult: unknown = result) => {
           if (!controller.signal.aborted) reply({ t: 'res', id, ok: true, result: safeResult ?? null });

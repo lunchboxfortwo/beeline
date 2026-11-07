@@ -125,6 +125,8 @@ const phoneOperations = {
   removeWorkspaceMember: true,
   reopenChat: true,
   reportClientError: true,
+  reportDiagnostics: true,
+  reportSigninFunnel: true,
   reportMessageIssue: true,
   reportPageLoad: true,
   reportRunningUpdate: true,

@@ -128,6 +128,21 @@
       "types": "./dist/helper-model-receipt.d.ts",
       "import": "./dist/helper-model-receipt.js",
       "default": "./dist/helper-model-receipt.js"
+    },
+    "./diagnostics": {
+      "types": "./dist/diagnostics.d.ts",
+      "import": "./dist/diagnostics.js",
+      "default": "./dist/diagnostics.js"
+    },
+    "./diagnostics-client": {
+      "types": "./dist/diagnostics-client.d.ts",
+      "import": "./dist/diagnostics-client.js",
+      "default": "./dist/diagnostics-client.js"
+    },
+    "./installation-identity": {
+      "types": "./dist/installation-identity.d.ts",
+      "import": "./dist/installation-identity.js",
+      "default": "./dist/installation-identity.js"
     }
   },
   "scripts": {

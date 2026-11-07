@@ -1,3 +1,4 @@
+import { observeAuth } from './auth-diagnostics';
 import type { SigninFunnelEvent } from '@beeline/api-contract/signin-funnel';
 import { githubConnectionErrorMessage } from './github-connection-error';
 import * as Linking from 'expo-linking';
@@ -6,7 +7,7 @@ import { sha256 } from '@noble/hashes/sha2.js';
 import { bytesToHex, utf8ToBytes } from '@noble/hashes/utils.js';
 import {
   OidcBindError,
-  parseOidcBindCallback,
+  parseOidcBindCallback as parseCallback,
   startGitHubBind,
   type OidcBindChallenge,
   type OidcBindStart,
@@ -353,6 +354,7 @@ async function inspectGitHubRecoveryChallenge(
   fetchImpl: typeof fetch,
   waitMs = 0, signal?: AbortSignal,
 ): Promise<OidcBindChallenge | null> {
+  observeAuth({ name: 'recovery_started' });
   const controller = new AbortController();
   const timeout = setTimeout(() => controller.abort(), waitMs + 3_000);
   const abort = () => controller.abort();
@@ -371,7 +373,7 @@ async function inspectGitHubRecoveryChallenge(
   } finally {
     clearTimeout(timeout); signal?.removeEventListener('abort', abort);
   }
-  if (response.status === 202) return null;
+  if (response.status === 202) { observeAuth({ name:'recovery_completed',outcome:'unknown',code:'callback_missing' }); return null; }
   if (response.status === 410) {
     throw new OidcBindError('ticket_expired', 'The GitHub completion expired', 410);
   }
@@ -395,7 +397,9 @@ async function inspectGitHubRecoveryChallenge(
   } catch {
     throw new OidcBindError('invalid_response', 'GitHub completion response was invalid');
   }
-  return parseOidcBindCallback(challengeCallbackUrl(challenge, state), state);
+  const result=parseOidcBindCallback(challengeCallbackUrl(challenge, state), state);
+  observeAuth({name:'recovery_completed',outcome:'success'});
+  return result;
 }
 
 async function cancelGitHubRecovery(
@@ -794,4 +798,10 @@ export async function resumeInitialGitHubInstallation(
   }
   await clearPendingGitHubInstallation();
   return true;
+}
+
+function parseOidcBindCallback(...args: Parameters<typeof parseCallback>) {
+  observeAuth({ name: 'callback_received' });
+  try { const result=parseCallback(...args); observeAuth({ name: 'callback_validated', outcome: 'success' }); return result; }
+  catch (error) { observeAuth({ name: 'auth_failed', phase: 'callback_validated', code: 'invalid_callback', outcome: 'failed' }); throw error; }
 }

@@ -29,6 +29,8 @@ import { token } from './values.js';
   export async function phoneReportUpdate(ctx: PhoneContext, input: Input<'reportRunningUpdate'>, viewerId: string, familyId?: string) {
     if (input.platform && !['ios', 'android', 'macos', 'windows', 'linux'].includes(input.platform))
       throw new Error('invalid platform');
+    if (input.previousDeviceId !== undefined && (typeof input.previousDeviceId !== 'string' || !/^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(input.previousDeviceId)))
+      throw new Error('invalid previous device');
     if (typeof input.deviceId !== 'string') throw new Error('invalid device');
     const deviceId = input.deviceId.trim();
     if (!deviceId || deviceId.length > 128) throw new Error('invalid device');

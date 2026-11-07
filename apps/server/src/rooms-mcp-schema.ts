@@ -205,6 +205,15 @@ CREATE TABLE IF NOT EXISTS rooms_mcp_event_deliveries (
   delivered_at timestamptz,
   PRIMARY KEY(subscription_id,message_id)
 );
+-- delivered_at remains the historical processed marker for rollback readers.
+-- Explicit result columns alone establish receipt; legacy rows stay unknown.
+ALTER TABLE rooms_mcp_event_deliveries ADD COLUMN IF NOT EXISTS attempted_at timestamptz;
+ALTER TABLE rooms_mcp_event_deliveries ADD COLUMN IF NOT EXISTS completed_at timestamptz;
+ALTER TABLE rooms_mcp_event_deliveries ADD COLUMN IF NOT EXISTS http_status integer;
+ALTER TABLE rooms_mcp_event_deliveries ADD COLUMN IF NOT EXISTS failure_category text;
+ALTER TABLE rooms_mcp_event_deliveries ADD COLUMN IF NOT EXISTS duration_ms integer;
+ALTER TABLE rooms_mcp_event_deliveries ADD COLUMN IF NOT EXISTS delivery_state text NOT NULL DEFAULT 'unknown';
+ALTER TABLE rooms_mcp_event_deliveries ADD COLUMN IF NOT EXISTS execution_state text NOT NULL DEFAULT 'unknown';
 CREATE INDEX IF NOT EXISTS rooms_mcp_event_deliveries_done ON rooms_mcp_event_deliveries(delivered_at) WHERE delivered_at IS NOT NULL;
 CREATE INDEX IF NOT EXISTS rooms_mcp_event_deliveries_room ON rooms_mcp_event_deliveries(room_id);
 -- A private wake has no message. command_id is its idempotency key; exactly one of the two is set.

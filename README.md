@@ -97,3 +97,7 @@ Server updates no longer revoke your existing Always and Once approvals solely b
 - [Development](https://github.com/Beeline-Work/beeline/blob/main/docs/development.md)
 
 Beeline is in beta (`0.0.x`). [Current limits](https://github.com/Beeline-Work/beeline/blob/main/docs/getting-started.md#beta). Licensed under [MIT](https://github.com/Beeline-Work/beeline/blob/main/LICENSE).
+
+## Device diagnostics
+
+Beeline keeps a private, content-free timeline of device sessions and action outcomes for support. It records sign-in steps, Workspace creation sources and assistant delivery results without message contents, keystrokes or session replay. See [device and session diagnostics](docs/device-session-diagnostics.md).

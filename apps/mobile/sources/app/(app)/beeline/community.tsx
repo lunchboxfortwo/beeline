@@ -72,7 +72,7 @@ export default function WorkspaceChoice() {
     setError(null);
     try {
       const name = workspaceName.trim();
-      const created = await monolithPhoneOperation('createWorkspace', { workspaceId, name });
+      const created = await monolithPhoneOperation('createWorkspace', { workspaceId, name, creationSource: 'onboarding' });
       await monolithPhoneOperation('updateWorkspace', { workspaceId, name });
       await saveActiveCommunityId(identity.publicKey, created.id);
       enterWorkspaceRoom(created.id, created.roomId ?? null);

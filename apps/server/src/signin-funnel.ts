@@ -1,3 +1,4 @@
+import { compactDiagnostics } from './diagnostics.js';
 import {
   FUNNEL_FIRST_SESSION_MS,
   FUNNEL_SCREEN_SEND_CAP,
@@ -308,6 +309,7 @@ export async function observeFunnelAuth(database: SqlDatabase, input: FunnelAuth
 /** Sign-in detail compacts after 90 days; onboarding milestones retain the all-time cohort. */
 export async function compactSigninFunnel(database: SqlDatabase) {
   await compactSigninAttempts(database);
+  await compactDiagnostics(database);
   await database.transaction(async (tx) => {
     await tx.query(`WITH expired AS (
       DELETE FROM signin_funnel_events e WHERE occurred_at < (now() AT TIME ZONE 'UTC')::date-89

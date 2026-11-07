@@ -1,3 +1,5 @@
+import { setAnonymousDiagnosticSender } from './anonymous-diagnostics';
+import type { DiagnosticBatch, DiagnosticAck } from '@beeline/api-contract/diagnostics';
 import { subscribePhoneLiveEvents } from '@/sync/transport/phone-live-events';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import Constants from 'expo-constants';
@@ -44,22 +46,15 @@ function getClient() {
       version,
       environment,
       send: async (event, authorization) => {
-        const fetcher = isDesktopShell() ? (await import('@tauri-apps/plugin-http')).fetch : fetch;
-        const controller = new AbortController(),
-          timeout = setTimeout(() => controller.abort(), 3000);
-        try {
-          await fetcher(`${base}/v1/funnel/events`, {
-            method: 'POST',
-            headers: {
-              'content-type': 'application/json',
-              ...(authorization ? { authorization: `Bearer ${authorization}` } : {}),
-            },
-            body: JSON.stringify(event),
-            signal: controller.signal,
-          });
-        } finally {
-          clearTimeout(timeout);
+        if (authorization) {
+          const { sharedLiveConnection } = await import('@/sync/transport/live-connection');
+          // Legacy cohort milestones retain their existing projection via the socket.
+          const connection=sharedLiveConnection();
+          if (!connection.commandState().ready) throw new Error('offline');
+          await connection.request('reportSigninFunnel', { event },{reconnectOwnedByOutbox:true});
+          return;
         }
+        await sendAnonymous(event);
       },
     });
   })().catch(() => null));
@@ -78,7 +73,9 @@ export async function funnelScreenShown(screen: FunnelScreen) {
   });
 }
 export async function beginFunnelAttempt(provider: 'github' | 'google') {
-  return (await getClient())?.begin(provider);
+  const attempt = await (await getClient())?.begin(provider);
+  if (attempt) await import('@/track/diagnostics').then(t=>t.diagnosticAttempt(attempt.attemptId)).catch(()=>undefined);
+  return attempt;
 }
 export async function pendingFunnelAttempt() {
   return (await getClient())?.pending();
@@ -122,3 +119,25 @@ subscribePhoneLiveEvents(event => {
   if (event.type === 'operation-completed')
     void funnelSuccessfulOperation(event.operation).catch(() => console.warn('[sign-in] Operation observation unavailable'));
 });
+
+async function sendAnonymous(event: SigninFunnelEvent | DiagnosticBatch): Promise<DiagnosticAck> {
+  const base = getBuzzRuntimeConfig().monolithUrl;
+  const fetcher = isDesktopShell() ? (await import('@tauri-apps/plugin-http')).fetch : fetch;
+  const controller = new AbortController(),
+    timeout = setTimeout(() => controller.abort(), 3000);
+  try {
+    const response = await fetcher(`${base}/v1/funnel/events`, {
+      method: 'POST',
+      headers: {
+        'content-type': 'application/json',
+      },
+      body: JSON.stringify(event),
+      signal: controller.signal,
+    });
+    if (!response.ok) throw new Error('diagnostic_ingress_failed');
+    return response.status === 204 ? { accepted: [] } : response.json();
+  } finally {
+    clearTimeout(timeout);
+  }
+}
+setAnonymousDiagnosticSender(sendAnonymous);

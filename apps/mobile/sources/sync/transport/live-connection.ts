@@ -1,3 +1,4 @@
+import type { DiagnosticStep } from '@beeline/api-contract/diagnostics';
 import {
   PHONE_READ_OPERATIONS,
   readSidebarPreview,
@@ -39,6 +40,11 @@ type PendingRequest = {
   reject(reason: unknown, transportFailed?: boolean): void;
 };
 type Dependencies = {
+  telemetry?: {
+    origin(): { deviceId: string; sessionId: string; viewId: string; actionId: string; requestId: string } | undefined;
+    record(step: DiagnosticStep): void;
+    flush(): void;
+  };
   authorization(): Promise<string>;
   invalidateAuthorization?(token: string): void;
   liveUrl(): string;
@@ -137,6 +143,7 @@ export class LiveConnection {
         this.foreground = foreground;
         resetConnectionFailure();
       }
+      this.deps.telemetry?.flush();
       if (foreground) this.refreshRoom();
     });
     this.stopAppState = () => subscription.remove();
@@ -197,9 +204,21 @@ export class LiveConnection {
       generation = socketGeneration;
     };
     const current = () => !this.disposed && this.foreground && identity === this.identity && session === failureSession;
+    const observed = !['reportDiagnostics','reportSigninFunnel'].includes(operation);
+    const startedAt=Date.now();
+    let diagnostic=observed ? this.deps.telemetry?.origin() : undefined;
+    if (diagnostic && operation==='createWorkspace') {
+      const workspaceId=(args as {workspaceId?:string}).workspaceId;
+      if (workspaceId) diagnostic.actionId=workspaceId;
+    }
+    const send=() => {
+      if (observed) this.deps.telemetry?.record({name:'operation_started',operation,actionId:diagnostic?.actionId,requestId:diagnostic?.requestId});
+      return this.sendRequest(operation,args,options,outcome,diagnostic) as Promise<PhoneOperationMap[Name]['output']>;
+    };
     try {
+      let result: PhoneOperationMap[Name]['output'];
       try {
-        return await this.sendRequest(operation, args, options, outcome) as PhoneOperationMap[Name]['output'];
+        result=await send();
       } catch (error) {
         if (reconnected || !failed || !current() || options.signal?.aborted) throw error;
         // The durable outbox owns the one same-id send replay and calls this
@@ -217,8 +236,16 @@ export class LiveConnection {
         await recovery;
         reconnected = true;
         if (!current() || options.signal?.aborted) throw error;
-        return await this.sendRequest(operation, args, options, outcome) as PhoneOperationMap[Name]['output'];
+        if (diagnostic) diagnostic={...(this.deps.telemetry?.origin() ?? diagnostic),actionId:diagnostic.actionId};
+        result=await send();
       }
+      if (observed && identity===this.identity) this.deps.telemetry?.record({name:'operation_completed',operation,outcome:'success',actionId:diagnostic?.actionId,requestId:diagnostic?.requestId,durationMs:Date.now()-startedAt});
+      return result;
+    } catch (error) {
+      if (observed && identity===this.identity) this.deps.telemetry?.record({name:'operation_failed',operation,actionId:diagnostic?.actionId,requestId:diagnostic?.requestId,
+        outcome:error instanceof PhoneSocketError?'refused':'unknown',code:error instanceof PhoneSocketError?'refused':'transport_failed',durationMs:Date.now()-startedAt});
+      throw error;
+
     } finally {
       // Deadlines, cancellation, server refusals and background/old-account work
       // never infer an outage. Only a failed replacement can show the banner.
@@ -256,6 +283,7 @@ export class LiveConnection {
     args: unknown,
     options: RequestOptions,
     outcome: (failed: boolean, generation: number) => void,
+    diagnostic?: ReturnType<NonNullable<Dependencies['telemetry']>['origin']>,
   ): Promise<unknown> {
     if (options.signal?.aborted) return Promise.reject(this.abortError());
     // Native close callbacks can arrive late. Settle the old socket's requests
@@ -278,6 +306,7 @@ export class LiveConnection {
           id,
           op: operation,
           args,
+          ...(diagnostic ? { diagnostic } : {}),
         }),
         resolve: (value) => {
           if (!finish()) return;
@@ -467,6 +496,7 @@ export class LiveConnection {
   private publishConnected(): void {
     this.socketEpoch++;
     for (const listener of this.connected) listener();
+    this.deps.telemetry?.flush();
   }
   subscribeConnected(listener: () => void): () => void {
     this.connected.add(listener);
@@ -554,6 +584,7 @@ export class LiveConnection {
   }
 }
 let shared: LiveConnection | undefined;
+let telemetryOrigin: NonNullable<Dependencies['telemetry']>['origin'] | undefined;
 export function sharedLiveConnection(): LiveConnection {
   shared ??= new LiveConnection({
     authorization: () => monolithSession.authorization(),
@@ -561,7 +592,19 @@ export function sharedLiveConnection(): LiveConnection {
     liveUrl: () => `${getBuzzRuntimeConfig().monolithUrl.replace(/^http/, 'ws')}/v1/phone/live`,
     subscribeIdentityChange: subscribeClientReset,
     subscribeNetworkOnline,
+    telemetry: {
+      origin: () => telemetryOrigin?.(),
+      record: step => { void import('@/track/diagnostics').then(t=>t.diagnostic(step)).catch(()=>undefined); },
+      flush: () => { void import('@/track/diagnostics').then(t=>t.flushDiagnostics()).catch(()=>undefined); },
+    },
   });
+  const connection = shared;
+  void import('@/track/diagnostics').then(async t=>{
+    telemetryOrigin=t.diagnosticOrigin;
+    t.attachDiagnosticSocket({ready:()=>connection.commandState().ready,send:batch=>connection.request('reportDiagnostics',batch,{reconnectOwnedByOutbox:true})});
+    await t.identifyDiagnostics(await monolithSession.identityId());
+    t.flushDiagnostics();
+  }).catch(()=>undefined);
   return shared;
 }
 export function reconnectNow(): void {

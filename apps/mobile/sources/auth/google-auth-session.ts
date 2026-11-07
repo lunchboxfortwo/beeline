@@ -1,3 +1,4 @@
+import { authPhase, observeAuth } from './auth-diagnostics';
 import type { SigninFunnelEvent } from '@beeline/api-contract/signin-funnel';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import * as Linking from 'expo-linking';
@@ -67,6 +68,7 @@ let completionFlight: { key: string; promise: Promise<string | null> } | undefin
 /** Warm Linking, browser and cold-start callbacks join the same correlated
  * inspection. A failed/pending result never schedules another observation. */
 function completion(pending: PendingGoogle, waitMs = 0, signal?: AbortSignal): Promise<string | null> {
+  observeAuth({ name: 'recovery_started' });
   const base = getBuzzRuntimeConfig().monolithUrl;
   const key = JSON.stringify([base, pending.state, pending.recoveryToken]);
   if (completionFlight?.key === key) return completionFlight.promise;
@@ -83,11 +85,12 @@ async function inspectCompletion(pending: PendingGoogle, base: string, waitMs: n
   const current = await pendingGoogle();
   if (signal?.aborted || current?.state !== pending.state || current.recoveryToken !== pending.recoveryToken)
     throw new OidcBindError('browser_canceled', 'This sign-in was replaced');
-  if (response.status === 202) return null;
+  if (response.status === 202) { observeAuth({name:'recovery_completed',outcome:'unknown',code:'callback_missing'}); return null; }
   if (response.status >= 500 || response.status === 429) {
     throw new Error('Google sign-in service temporarily unavailable');
   }
   if (!response.ok) throw new OidcBindError('token_expired', 'Google sign-in expired. Try again.');
+  observeAuth({ name: 'recovery_completed', outcome: 'success' });
   return pending.recoveryToken;
 }
 
@@ -97,6 +100,7 @@ export async function resumeGoogleSignIn(callbackUrl: string | null): Promise<st
   if (!pending) return null;
   const redirect = googleSignInRedirectUri();
   if (callbackUrl && (callbackUrl === redirect || callbackUrl.startsWith(`${redirect}?`))) {
+    observeAuth({ name: 'callback_received' });
     const callback = new URL(callbackUrl);
     if (callback.searchParams.getAll('state').length !== 1 || callback.searchParams.get('state') !== pending.state) {
       throw new OidcBindError('state_mismatch', 'Google callback state mismatch');
@@ -104,6 +108,7 @@ export async function resumeGoogleSignIn(callbackUrl: string | null): Promise<st
     if (callback.searchParams.get('completed') !== '1') {
       const challenge = parseOidcBindCallback(callbackUrl, pending.state);
       if (challenge.provider !== 'https://accounts.google.com') throw new OidcBindError('wrong_provider', 'Invalid Google sign-in proof');
+      observeAuth({ name: 'callback_validated', outcome: 'success' });
       return challenge.ticket;
     }
   }
@@ -170,7 +175,8 @@ export async function runGoogleSignIn(input: {
           typeof config.serverClientId !== 'string' || !config.serverClientId.endsWith('.apps.googleusercontent.com'))
         throw new OidcBindError('invalid_response', 'Invalid Google sign-in configuration');
       await assertCurrent(nativeToken);
-      const idToken = await googleAccountPicker.signIn(config.serverClientId, config.nonce);
+      const picker=googleAccountPicker;
+      const idToken = await authPhase('provider_picker_started',()=>picker.signIn(config.serverClientId, config.nonce),'provider_picker_completed');
       await assertCurrent(nativeToken);
       completionAttempted = true;
       const complete = await googleAuthFetch(`${base}/auth/oidc/native/complete`, {

@@ -193,7 +193,7 @@ describe('the create-or-join choice', () => {
     expect(find(renderer, 'choice-workspace-name')[0]!.props.value).toBe("Ada's team");
     expect(controls.operation.mock.calls.every(call => call[0] === 'getAuthCapabilities')).toBe(true);
     await act(async () => find(renderer, 'choice-create')[0]!.props.onPress());
-    expect(controls.operation).toHaveBeenCalledWith('createWorkspace', { workspaceId: '11111111-2222-4333-8444-555555555555', name: "Ada's team" });
+    expect(controls.operation).toHaveBeenCalledWith('createWorkspace', { workspaceId: '11111111-2222-4333-8444-555555555555', name: "Ada's team", creationSource:'onboarding' });
     expect(controls.enter).toHaveBeenCalledWith('11111111-2222-4333-8444-555555555555', 'general');
   });
 

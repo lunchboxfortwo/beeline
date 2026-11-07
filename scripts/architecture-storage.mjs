@@ -70,12 +70,15 @@ function splitDdl(text) {
 function columnEvidence(root, storage) {
   const tables = storage.tables ?? {};
   const evidence = new Map();
+  const partitions = new Map();
   const at = (table, column) => {
     const key = `${table}.${column}`;
     if (!evidence.has(key)) evidence.set(key, { writes: 0, defaults: 0, mentions: 0 });
     return evidence.get(key);
   };
   for (const { text } of sources(root, storage.scope)) {
+    for (const match of text.matchAll(/CREATE\s+TABLE\s+(?:IF\s+NOT\s+EXISTS\s+)?(\w+)\s+PARTITION\s+OF\s+(\w+)/gi))
+      partitions.set(match[1],match[2]);
     const { definitions, rest } = splitDdl(text);
     for (const { table, body } of definitions) {
       if (!tables[table]) continue;
@@ -105,6 +108,12 @@ function columnEvidence(root, storage) {
         if (mentions) at(name, column).mentions += mentions;
       }
   }
+  // Inserts and reads through a partitioned parent operate on its leaf columns.
+  for (const [child,parent] of partitions)
+    for (const column of Object.keys(tables[child]?.columns ?? {})) {
+      const inherited=evidence.get(`${parent}.${column}`);
+      if (inherited) { const leaf=at(child,column); leaf.writes+=inherited.writes;leaf.defaults+=inherited.defaults;leaf.mentions+=inherited.mentions; }
+    }
   return evidence;
 }
 

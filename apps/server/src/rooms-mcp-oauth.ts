@@ -469,7 +469,7 @@ export class RoomsMcpOAuth {
               const memberships = await db.query(`SELECT 1 FROM memberships WHERE identity_id=$1
                 AND room_id IS NULL AND removed_at IS NULL LIMIT 1`, [flow.identity_id]);
               if (!memberships.rowCount) {
-                const workspace = await createWorkspace(db, { name: defaultWorkspaceName(flow.identity_name) }, flow.identity_id);
+                const workspace = await createWorkspace(db, { name: defaultWorkspaceName(flow.identity_name) }, flow.identity_id, undefined, 'mcp_consent');
                 workspaceIds = [workspace.id];
                 createdWorkspace = workspace;
               }

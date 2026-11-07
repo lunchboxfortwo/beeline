@@ -1,3 +1,4 @@
+import { diagnosticContext } from './diagnostics.js';
 import { dropQueuedOrdersForStop } from './agent-command-queue.js';
 import { lockAgentCommandQueue } from './agent-command-queue.js';
 import { AGENT_COMMAND_DELEGATION_SCHEMA } from './agent-command-queue.js';
@@ -733,6 +734,7 @@ export async function insertAgentCommand(db: SqlDatabase, input: AgentCommandInp
   // agents have no subscription, so the delivery insert matches nothing and
   // adds no round trip. list_mentions remains the catch-up read.
   const wake = mcpCommandWakeSql(14);
+  const diagnostic = diagnosticContext();
   const result = await db.query<CommandRow>(
     `WITH created AS (
        INSERT INTO agent_commands
@@ -740,8 +742,19 @@ export async function insertAgentCommand(db: SqlDatabase, input: AgentCommandInp
         VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13::jsonb,'pending')
         ON CONFLICT DO NOTHING
         RETURNING *
+     ), diagnostic_origin AS (
+       INSERT INTO diagnostic_command_origins(command_id,session_id,user_id,action_id)
+       SELECT c.id,COALESCE(s.id,parent.session_id),COALESCE(s.user_id,parent.user_id),COALESCE($21::uuid,parent.action_id)
+       FROM created c LEFT JOIN diagnostic_sessions s ON s.id=$19::uuid AND s.user_id=$20
+       LEFT JOIN diagnostic_command_origins parent ON parent.command_id=c.parent_command_id
+       WHERE s.id IS NOT NULL OR parent.command_id IS NOT NULL ON CONFLICT DO NOTHING RETURNING *
+     ), diagnostic_queued AS (
+       INSERT INTO diagnostic_actions(event_id,session_id,user_id,source,occurred_at,action_id,command_id,detail)
+       SELECT gen_random_uuid(),origin.session_id,COALESCE(origin.user_id,agent.owner_id),'server',now(),origin.action_id,c.id,
+         jsonb_build_object('name','agent_command','outcome','started','commandState','pending')
+       FROM created c JOIN agents agent ON agent.agent_id=c.agent_id LEFT JOIN diagnostic_origin origin ON origin.command_id=c.id
      ), inserted AS (
-       SELECT * FROM created WHERE NOT $18::boolean
+       SELECT created.* FROM created WHERE NOT $18::boolean
      ), owed AS (
        INSERT INTO rooms_mcp_mentions(member_id,room_id,message_id)
        SELECT agent_id,room_id,source_message_id FROM inserted
@@ -768,6 +781,7 @@ export async function insertAgentCommand(db: SqlDatabase, input: AgentCommandInp
       privatePayload ? JSON.stringify(privatePayload) : null,
       ...wake.params,
       selfAuthored,
+      diagnostic?.origin?.sessionId ?? null,diagnostic?.userId ?? null,diagnostic?.origin?.actionId ?? null,
     ],
   );
   const command = result.rows[0] ?? (await db.query<CommandRow>(

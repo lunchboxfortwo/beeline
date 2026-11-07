@@ -41,6 +41,12 @@ CREATE TABLE IF NOT EXISTS rooms_mcp_webhook_outbox (
  delivered_at timestamptz
 );
 ALTER TABLE rooms_mcp_webhook_outbox ADD COLUMN IF NOT EXISTS claimed_at timestamptz;
+ALTER TABLE rooms_mcp_webhook_outbox ADD COLUMN IF NOT EXISTS attempted_at timestamptz;
+ALTER TABLE rooms_mcp_webhook_outbox ADD COLUMN IF NOT EXISTS completed_at timestamptz;
+ALTER TABLE rooms_mcp_webhook_outbox ADD COLUMN IF NOT EXISTS http_status integer;
+ALTER TABLE rooms_mcp_webhook_outbox ADD COLUMN IF NOT EXISTS failure_category text;
+ALTER TABLE rooms_mcp_webhook_outbox ADD COLUMN IF NOT EXISTS duration_ms integer;
+ALTER TABLE rooms_mcp_webhook_outbox ADD COLUMN IF NOT EXISTS delivery_state text NOT NULL DEFAULT 'unknown';
 DROP INDEX IF EXISTS rooms_mcp_webhook_outbox_due;
 DROP INDEX IF EXISTS rooms_mcp_webhook_outbox_pending;
 CREATE INDEX rooms_mcp_webhook_outbox_pending

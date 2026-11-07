@@ -1,3 +1,4 @@
+import { DIAGNOSTICS_SCHEMA } from './diagnostics-schema.js';
 import { recordPostgresStatementError } from './postgres-error.js';
 export { messageSearchDocumentSql, MESSAGE_SEARCH_DOCUMENT_MAX_BYTES } from './message-search-document-sql.js';
 import { DATABASE_SCHEMA_WORKFLOW_BACKFILLS } from './database-schema-workflow-backfills.js';
@@ -17,7 +18,7 @@ import { backfillSquireApprovalExpiry, keywordsFromBody, retireStandingPreferenc
 
 
 
-export const SCHEMA = DATABASE_SCHEMA_WORKFLOW_BACKFILLS + DATABASE_SCHEMA_INSTITUTIONAL_MEMORY_ITEMS + DATABASE_SCHEMA_CORNER_FACTS + DATABASE_SCHEMA_AGENT_GRANTS + DATABASE_SCHEMA_TABLES;
+export const SCHEMA = DATABASE_SCHEMA_WORKFLOW_BACKFILLS + DATABASE_SCHEMA_INSTITUTIONAL_MEMORY_ITEMS + DATABASE_SCHEMA_CORNER_FACTS + DATABASE_SCHEMA_AGENT_GRANTS + DATABASE_SCHEMA_TABLES + DIAGNOSTICS_SCHEMA;
 
 
 export const JOB_STATEMENT_TIMEOUT_MS = 2_000;
@@ -206,7 +207,7 @@ export const MESSAGE_CURSOR_MS_SQL =
 
 // Bump only after every server and auth migration required by that image has
 // completed. Machine boot reads this marker; it never mutates the schema.
-export const REQUIRED_SCHEMA_VERSION = 48;
+export const REQUIRED_SCHEMA_VERSION = 49;
 
 
 export async function markSchemaCurrent(database: SqlDatabase): Promise<void> {

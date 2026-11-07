@@ -1,3 +1,4 @@
+import { DIAGNOSTIC_COMMAND_SCHEMA } from './diagnostics-schema.js';
 import { SQUIRE_MACHINE_SCHEMA } from './squire-machine.js';
 import { backfillSquireMachines } from './squire-machine.js';
 import { IDENTITY_HANDLE_SCHEMA } from './identity-handles.js';
@@ -126,6 +127,7 @@ export async function migrate(
     `ALTER TABLE wallet_bindings ADD COLUMN IF NOT EXISTS delegation_standing boolean NOT NULL DEFAULT false`,
   );
   await ddlScript('agent command schema', AGENT_COMMAND_SCHEMA);
+  await ddlScript('diagnostic command observations', DIAGNOSTIC_COMMAND_SCHEMA);
   await runMigrationStep('one active helper restart', () => createIndexConcurrently(
     database,'agent_commands_one_restart',
     `CREATE UNIQUE INDEX CONCURRENTLY agent_commands_one_restart ON agent_commands(agent_id)

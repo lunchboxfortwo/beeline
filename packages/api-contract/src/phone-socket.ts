@@ -8,6 +8,7 @@ export type PhoneRequestFrame<Name extends keyof PhoneOperationMap = keyof Phone
   readonly op: Op;
   readonly args: PhoneOperationMap[Op]['input'];
   readonly command?: RouterCommandIdentity;
+  readonly diagnostic?: { deviceId: string; sessionId: string; viewId: string; actionId: string; requestId: string };
 } }[Name];
 
 export type PhoneResponseFrame<Result = unknown> =

@@ -3,6 +3,7 @@ const observed = vi.hoisted(() => ({ activation: vi.fn(), called: undefined as (
 vi.mock('expo-constants', () => ({ default: { expoConfig: { version: '1.2.3' } } }));
 vi.mock('expo-crypto', () => ({ randomUUID: () => 'fixture-id' }));
 vi.mock('react-native', () => ({ Platform: { OS: 'web' } }));
+vi.mock('@/track/diagnostics', () => ({ diagnosticAttempt: vi.fn() }));
 vi.mock('@react-native-async-storage/async-storage', () => ({ default: {} }));
 vi.mock('@beeline/api-contract/signin-funnel-client', () => ({
   createSigninFunnelClient: () => ({ activation: observed.activation }),

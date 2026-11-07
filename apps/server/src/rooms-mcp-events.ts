@@ -1,3 +1,4 @@
+import { recordDiagnostic } from './diagnostics.js';
 import { createHash, createHmac, randomBytes, randomUUID, timingSafeEqual } from 'node:crypto';
 import type { SqlDatabase } from './database.js';
 import type { McpPrincipal } from './rooms-mcp-oauth.js';
@@ -213,15 +214,15 @@ export async function deliverMcpEvents(db: SqlDatabase, transport: Transport, si
   let delivered = 0;
   for (;;) {
     if (signal?.aborted) break;
-    const row = (await db.query<Subscription & { event_id: string; body: string; deliverable: boolean }>(`
+    const row = (await db.query<Subscription & { event_id: string; body: string; command_id: string | null; deliverable: boolean }>(`
       WITH claimed AS (
-        UPDATE rooms_mcp_event_deliveries d SET claimed_at=now()
+        UPDATE rooms_mcp_event_deliveries d SET claimed_at=now(),attempted_at=now()
         WHERE d.event_id IN (
           SELECT event_id FROM rooms_mcp_event_deliveries
           WHERE delivered_at IS NULL AND claimed_at IS NULL
           ORDER BY event_id LIMIT 1 FOR UPDATE SKIP LOCKED)
         RETURNING d.*)
-      SELECT s.*,d.event_id,d.body,
+      SELECT s.*,d.event_id,d.body,d.command_id,
         (s.expires_at>now() AND c.revoked_at IS NULL AND c.client_id IS NOT NULL
          AND r.archived_at IS NULL AND r.id IS NOT NULL
          AND ((d.command_id IS NULL AND m.deleted_at IS NULL AND m.id IS NOT NULL
@@ -237,17 +238,28 @@ export async function deliverMcpEvents(db: SqlDatabase, transport: Transport, si
       LEFT JOIN rooms r ON r.id=d.room_id LEFT JOIN messages m ON m.id=d.message_id
       LEFT JOIN agent_commands command ON command.id=d.command_id`)).rows[0];
     if (!row || signal?.aborted) break;
+    const startedAt = Date.now();
+    let state: 'delivered'|'failed'|'skipped' = row.deliverable ? 'failed' : 'skipped';
+    let status: number | null = null;
+    let category: 'network_error'|'http_error'|'access_ended'|null = row.deliverable ? 'network_error' : 'access_ended';
     if (row.deliverable) {
       try {
         const response = await transport(row.url, { body: row.body,
           headers: headers(row.event_id, row.id, row.body, openSecrets<string>(key(), row.secret),
             row.previous_secret && row.rotation_until && row.rotation_until.getTime() > Date.now()
               ? openSecrets<string>(key(), row.previous_secret) : undefined) });
+        status = response.status;
+        state = response.ok ? 'delivered' : 'failed';
+        category = response.ok ? null : 'http_error';
         if (response.ok) delivered++;
 
       } catch { /* Best effort; a failure creates no future delivery. */ }
     }
-    await db.query(`UPDATE rooms_mcp_event_deliveries SET delivered_at=now() WHERE event_id=$1`, [row.event_id]);
+    await db.query(`UPDATE rooms_mcp_event_deliveries SET delivered_at=now(),completed_at=now(),
+      http_status=$2,failure_category=$3,duration_ms=$4,delivery_state=$5 WHERE event_id=$1`,
+    [row.event_id,status,category,Date.now()-startedAt,state]);
+    await recordDiagnostic(db,{ name: 'mcp_delivery',...(row.command_id ? { commandId:row.command_id } : {}),deliveryState: state,outcome: state==='delivered' ? 'success' : state==='failed' ? 'failed' : 'unknown',
+      ...(status ? { httpStatus: status } : {}),code: category ?? 'host_execution_unknown',durationMs: Date.now()-startedAt },row.owner_id).catch(()=>undefined);
   }
   return delivered;
 }

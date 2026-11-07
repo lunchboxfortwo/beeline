@@ -1,3 +1,4 @@
+import { authPhase, observeAuth } from './auth-diagnostics';
 import { readWebXAttribution, loadXPixel, trackXSignup } from '@beeline/api-contract/x-attribution';
 import type { SigninFunnelEvent } from '@beeline/api-contract/signin-funnel';
 import { getBuzzRuntimeConfig } from '@/buzz/runtime-config';
@@ -124,7 +125,8 @@ export class MonolithSession {
   ): Promise<string> {
     const revision = this.credentialRevision;
     const xAttribution = readWebXAttribution();
-    const response = await this.fetchImpl(`${this.baseUrl}/v1/auth/${provider}/exchange`, {
+    const response = await authPhase('exchange_started', async () => {
+      const response = await this.fetchImpl(`${this.baseUrl}/v1/auth/${provider}/exchange`, {
       method: 'POST',
       headers: { 'content-type': 'application/json' },
       body: JSON.stringify({
@@ -133,9 +135,12 @@ export class MonolithSession {
         ...(xAttribution ? { xAttribution } : {}),
       }),
     });
-    if (!response.ok) throw new MonolithSessionRequiredError();
+      if (!response.ok) throw new MonolithSessionRequiredError();
+      return response;
+    }, 'exchange_completed');
     const tokens = (await response.json()) as MonolithTokens;
-    await this.accept(tokens, true, revision);
+    await authPhase('session_saved', () => this.accept(tokens, true, revision));
+    observeAuth({ name: 'session_saved', outcome: 'success' });
     trackXSignup(tokens.xSignup);
     return tokens.identityId;
   }
@@ -264,6 +269,7 @@ export class MonolithSession {
   }
 
   async clear(): Promise<void> {
+    void import('@/track/diagnostics').then(t=>t.diagnosticIdentity(null)).catch(()=>undefined);
     this.credentialRevision += 1;
     this.sessionRevision += 1;
     this.access = undefined;
@@ -577,6 +583,7 @@ export class MonolithSession {
       // A new sign-in may repair an expired session for the same identity.
       // Token refresh alone must not start another registration/refresh loop.
       if (signedIn || previousId !== tokens.identityId) this.identityChanged();
+      void import('@/track/diagnostics').then(t=>t.diagnosticIdentity(tokens.identityId)).catch(()=>undefined);
       if (signedIn)
         void import('./signin-funnel')
           .then((module) => module.funnelSignedIn(tokens.accessToken))
