@@ -1,5 +1,6 @@
 /** Every timer starts at the final user action, after fixture/navigation setup. */
 import { workspace, alternateWorkspace, agent, fixture } from './web-fixtures.mjs';
+import { cornerLongPressThreshold } from './web-long-press.mjs';
 const id = (p, value) => p.getByTestId(value).filter({ visible: true });
 const button = (p, value) => p.getByRole('button', { name: value, exact: true });
 const visible = (locator) => locator.waitFor({ state: 'visible' });
@@ -95,12 +96,23 @@ export const steps = {
   'create-corner': async (p, f) => {
     await room(p, f);
     return {
+      longPressThresholdMs: await cornerLongPressThreshold(),
       act: () => hold(p, id(p, 'room-corners-menu')),
       done: async () => {
-        await p.waitForURL(
-          (url) => url.pathname.includes('/beeline/chat/') && !url.pathname.includes(f.roomId),
+        await p.waitForFunction(
+          (roomId) => {
+            if (!location.pathname.includes('/beeline/chat/') || location.pathname.includes(roomId))
+              return false;
+            return [...document.querySelectorAll('[data-testid="chat-input"]')].some((input) => {
+              const box = input.getBoundingClientRect();
+              return (
+                box.width > 0 && box.height > 0 && getComputedStyle(input).visibility !== 'hidden'
+              );
+            });
+          },
+          f.roomId,
+          { polling: 'raf' },
         );
-        await visible(id(p, 'chat-input'));
       },
     };
   },

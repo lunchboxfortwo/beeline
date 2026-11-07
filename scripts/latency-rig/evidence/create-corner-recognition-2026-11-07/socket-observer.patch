@@ -1,0 +1,65 @@
+--- a/scripts/latency-rig/web-capture.mjs
++++ b/scripts/latency-rig/web-capture.mjs
+@@ -9,6 +9,25 @@
+ import { fixture, scenarios, resetWebFixture, verifyWebEffect } from './web-fixtures.mjs';
+ import { steps, exclusions } from './web-steps.mjs';
+ import { measureLongPress } from './web-long-press.mjs';
++const wire = [];
++async function newProfilePage(context) {
++  const page = await context.newPage();
++  page.on('websocket', socket => {
++    const pending = new Map();
++    socket.on('framesent', ({payload}) => {
++      let f; try { f = JSON.parse(String(payload)); } catch { return; }
++      if (f.t !== 'req') return;
++      const span = { operation: f.op, sentEpochMs: Date.now() };
++      pending.set(f.id, span); wire.push(span);
++    });
++    socket.on('framereceived', ({payload}) => {
++      let f; try { f = JSON.parse(String(payload)); } catch { return; }
++      const span = f.t === 'res' && pending.get(f.id);
++      if (span) { span.replyEpochMs = Date.now(); span.ok = f.ok; pending.delete(f.id); }
++    });
++  });
++  return page;
++}
+ async function bounded(work, milliseconds, label) {
+   let timer;
+   try {
+@@ -209,7 +228,7 @@
+           socket.close();
+         }
+       });
+-      let page = await context.newPage();
++      let page = await newProfilePage(context);
+       page.setDefaultTimeout(4000);
+       page.setDefaultNavigationTimeout(6000);
+       await page.goto(`/review/${secret}`);
+@@ -263,6 +282,7 @@
+               2000,
+               'Action start',
+             );
++            const wireStart = wire.length;
+             let duration;
+             if (prepared.longPressThresholdMs !== undefined) {
+               const timing = await bounded(
+@@ -303,6 +323,10 @@
+               'Committed effect',
+             );
+             record.samples.push(duration);
++            (record.profiles ??= []).push({
++              timeOrigin: await page.evaluate(() => performance.timeOrigin),
++              operations: wire.slice(wireStart).map(span => ({...span})),
++            });
+           } catch (error) {
+             record.reason = `Sample ${sample + 1}: ${stripVTControlCharacters(error.message)}`;
+             await page
+@@ -316,7 +340,7 @@
+                 .catch(() => ''),
+             );
+             await page.close();
+-            page = await context.newPage();
++            page = await newProfilePage(context);
+             page.setDefaultTimeout(4000);
+             page.setDefaultNavigationTimeout(6000);
+             break;

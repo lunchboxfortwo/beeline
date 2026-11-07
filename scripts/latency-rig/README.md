@@ -789,3 +789,22 @@ Reproduction BUSY-ROOM-WEB-1 evidence.
 Predicate checks: `node --test scripts/latency-rig/web-room-frame.test.mjs`.
 The SidebarView route-hop test guards stable row props so navigation cannot
 silently force every unrelated memoized conversation row to render again.
+
+### Long-press recognition timing
+
+Create-corner reports time from pointerdown plus the `delayLongPress` threshold
+read from `ChatSurfaceHeader.tsx`. Its existing destination URL and visible
+composer are observed during the unchanged hold; two result frames freeze the
+completion timestamp before gesture cleanup is awaited. Other interactions keep
+their existing timing. Captures retain recognition, hold and completion stamps
+and a separate `gestureInclusiveMs`; summary rows label the recognition contract
+and carry separate gesture-inclusive percentiles. Do not compare recognition
+latency with historical gesture-inclusive numbers, including the old 852 ms
+create-corner inventory value. Subtracting a static floor is a separately labelled
+analysis field, not a replacement for either raw timing contract.
+
+`node scripts/latency-rig/web-long-press-floor.mjs OUTPUT.json` runs two batches
+of twenty static rendered-result samples to establish the driver floor. This
+self-check is not an app/server performance measurement. For a targeted paired
+capture set `LATENCY_RIG_WEB_INTERACTION=create-corner`; the summary still lists
+unmeasured inventory rows and leaves the full score unavailable.

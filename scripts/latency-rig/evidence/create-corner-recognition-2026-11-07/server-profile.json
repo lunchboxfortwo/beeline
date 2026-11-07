@@ -1,0 +1,575 @@
+{
+  "kind": "built local service socket stand-in; excludes browser/gesture/render",
+  "captures": [
+    {
+      "capture": 1,
+      "samples": [
+        {
+          "create": {
+            "op": "createHumanCorner",
+            "startEpochMs": 1794078939734,
+            "endEpochMs": 1794078939864,
+            "durationMs": 129.822565
+          },
+          "coveringRead": {
+            "op": "readRoom",
+            "startEpochMs": 1794078939864,
+            "endEpochMs": 1794078939908,
+            "durationMs": 44.08085399999999
+          }
+        },
+        {
+          "create": {
+            "op": "createHumanCorner",
+            "startEpochMs": 1794078939939,
+            "endEpochMs": 1794078940051,
+            "durationMs": 112.19691700000004
+          },
+          "coveringRead": {
+            "op": "readRoom",
+            "startEpochMs": 1794078940051,
+            "endEpochMs": 1794078940069,
+            "durationMs": 17.68345099999999
+          }
+        },
+        {
+          "create": {
+            "op": "createHumanCorner",
+            "startEpochMs": 1794078940112,
+            "endEpochMs": 1794078940196,
+            "durationMs": 84.36468100000002
+          },
+          "coveringRead": {
+            "op": "readRoom",
+            "startEpochMs": 1794078940196,
+            "endEpochMs": 1794078940216,
+            "durationMs": 19.62923599999999
+          }
+        },
+        {
+          "create": {
+            "op": "createHumanCorner",
+            "startEpochMs": 1794078940250,
+            "endEpochMs": 1794078940328,
+            "durationMs": 77.5877190000001
+          },
+          "coveringRead": {
+            "op": "readRoom",
+            "startEpochMs": 1794078940328,
+            "endEpochMs": 1794078940347,
+            "durationMs": 19.676918
+          }
+        },
+        {
+          "create": {
+            "op": "createHumanCorner",
+            "startEpochMs": 1794078940385,
+            "endEpochMs": 1794078940483,
+            "durationMs": 97.72405500000002
+          },
+          "coveringRead": {
+            "op": "readRoom",
+            "startEpochMs": 1794078940483,
+            "endEpochMs": 1794078940505,
+            "durationMs": 22.280420999999933
+          }
+        },
+        {
+          "create": {
+            "op": "createHumanCorner",
+            "startEpochMs": 1794078940553,
+            "endEpochMs": 1794078940618,
+            "durationMs": 64.53325499999994
+          },
+          "coveringRead": {
+            "op": "readRoom",
+            "startEpochMs": 1794078940618,
+            "endEpochMs": 1794078940632,
+            "durationMs": 14.695898999999827
+          }
+        },
+        {
+          "create": {
+            "op": "createHumanCorner",
+            "startEpochMs": 1794078940668,
+            "endEpochMs": 1794078940731,
+            "durationMs": 63.12141200000019
+          },
+          "coveringRead": {
+            "op": "readRoom",
+            "startEpochMs": 1794078940731,
+            "endEpochMs": 1794078940749,
+            "durationMs": 17.723537999999962
+          }
+        },
+        {
+          "create": {
+            "op": "createHumanCorner",
+            "startEpochMs": 1794078940781,
+            "endEpochMs": 1794078940865,
+            "durationMs": 84.63573900000006
+          },
+          "coveringRead": {
+            "op": "readRoom",
+            "startEpochMs": 1794078940865,
+            "endEpochMs": 1794078940881,
+            "durationMs": 16.128061000000116
+          }
+        },
+        {
+          "create": {
+            "op": "createHumanCorner",
+            "startEpochMs": 1794078940920,
+            "endEpochMs": 1794078940991,
+            "durationMs": 71.69076199999995
+          },
+          "coveringRead": {
+            "op": "readRoom",
+            "startEpochMs": 1794078940991,
+            "endEpochMs": 1794078941005,
+            "durationMs": 13.860081000000037
+          }
+        },
+        {
+          "create": {
+            "op": "createHumanCorner",
+            "startEpochMs": 1794078941040,
+            "endEpochMs": 1794078941119,
+            "durationMs": 78.94674400000008
+          },
+          "coveringRead": {
+            "op": "readRoom",
+            "startEpochMs": 1794078941119,
+            "endEpochMs": 1794078941136,
+            "durationMs": 16.148349000000053
+          }
+        },
+        {
+          "create": {
+            "op": "createHumanCorner",
+            "startEpochMs": 1794078941170,
+            "endEpochMs": 1794078941240,
+            "durationMs": 70.06673300000011
+          },
+          "coveringRead": {
+            "op": "readRoom",
+            "startEpochMs": 1794078941240,
+            "endEpochMs": 1794078941257,
+            "durationMs": 16.138969999999972
+          }
+        },
+        {
+          "create": {
+            "op": "createHumanCorner",
+            "startEpochMs": 1794078941295,
+            "endEpochMs": 1794078941348,
+            "durationMs": 53.65893699999992
+          },
+          "coveringRead": {
+            "op": "readRoom",
+            "startEpochMs": 1794078941348,
+            "endEpochMs": 1794078941362,
+            "durationMs": 13.461403999999902
+          }
+        },
+        {
+          "create": {
+            "op": "createHumanCorner",
+            "startEpochMs": 1794078941396,
+            "endEpochMs": 1794078941458,
+            "durationMs": 61.84829600000012
+          },
+          "coveringRead": {
+            "op": "readRoom",
+            "startEpochMs": 1794078941458,
+            "endEpochMs": 1794078941472,
+            "durationMs": 13.949455999999827
+          }
+        },
+        {
+          "create": {
+            "op": "createHumanCorner",
+            "startEpochMs": 1794078941522,
+            "endEpochMs": 1794078941594,
+            "durationMs": 71.29600899999991
+          },
+          "coveringRead": {
+            "op": "readRoom",
+            "startEpochMs": 1794078941594,
+            "endEpochMs": 1794078941602,
+            "durationMs": 7.8263140000001385
+          }
+        },
+        {
+          "create": {
+            "op": "createHumanCorner",
+            "startEpochMs": 1794078941646,
+            "endEpochMs": 1794078941699,
+            "durationMs": 53.25017900000012
+          },
+          "coveringRead": {
+            "op": "readRoom",
+            "startEpochMs": 1794078941699,
+            "endEpochMs": 1794078941721,
+            "durationMs": 21.978786000000127
+          }
+        },
+        {
+          "create": {
+            "op": "createHumanCorner",
+            "startEpochMs": 1794078941745,
+            "endEpochMs": 1794078941823,
+            "durationMs": 77.82065899999998
+          },
+          "coveringRead": {
+            "op": "readRoom",
+            "startEpochMs": 1794078941823,
+            "endEpochMs": 1794078941841,
+            "durationMs": 18.300896000000193
+          }
+        },
+        {
+          "create": {
+            "op": "createHumanCorner",
+            "startEpochMs": 1794078941874,
+            "endEpochMs": 1794078941929,
+            "durationMs": 55.16317700000036
+          },
+          "coveringRead": {
+            "op": "readRoom",
+            "startEpochMs": 1794078941929,
+            "endEpochMs": 1794078941947,
+            "durationMs": 17.69148499999983
+          }
+        },
+        {
+          "create": {
+            "op": "createHumanCorner",
+            "startEpochMs": 1794078941974,
+            "endEpochMs": 1794078942046,
+            "durationMs": 72.16285300000027
+          },
+          "coveringRead": {
+            "op": "readRoom",
+            "startEpochMs": 1794078942046,
+            "endEpochMs": 1794078942060,
+            "durationMs": 14.013520999999855
+          }
+        },
+        {
+          "create": {
+            "op": "createHumanCorner",
+            "startEpochMs": 1794078942098,
+            "endEpochMs": 1794078942154,
+            "durationMs": 55.705255999999736
+          },
+          "coveringRead": {
+            "op": "readRoom",
+            "startEpochMs": 1794078942154,
+            "endEpochMs": 1794078942162,
+            "durationMs": 7.747060000000147
+          }
+        },
+        {
+          "create": {
+            "op": "createHumanCorner",
+            "startEpochMs": 1794078942203,
+            "endEpochMs": 1794078942259,
+            "durationMs": 55.98358600000029
+          },
+          "coveringRead": {
+            "op": "readRoom",
+            "startEpochMs": 1794078942259,
+            "endEpochMs": 1794078942280,
+            "durationMs": 20.859774000000016
+          }
+        }
+      ]
+    },
+    {
+      "capture": 2,
+      "samples": [
+        {
+          "create": {
+            "op": "createHumanCorner",
+            "startEpochMs": 1794078942303,
+            "endEpochMs": 1794078942370,
+            "durationMs": 66.63104900000008
+          },
+          "coveringRead": {
+            "op": "readRoom",
+            "startEpochMs": 1794078942370,
+            "endEpochMs": 1794078942389,
+            "durationMs": 19.432165000000168
+          }
+        },
+        {
+          "create": {
+            "op": "createHumanCorner",
+            "startEpochMs": 1794078942417,
+            "endEpochMs": 1794078942473,
+            "durationMs": 56.010475999999926
+          },
+          "coveringRead": {
+            "op": "readRoom",
+            "startEpochMs": 1794078942473,
+            "endEpochMs": 1794078942489,
+            "durationMs": 15.693573999999899
+          }
+        },
+        {
+          "create": {
+            "op": "createHumanCorner",
+            "startEpochMs": 1794078942529,
+            "endEpochMs": 1794078942578,
+            "durationMs": 48.7209499999999
+          },
+          "coveringRead": {
+            "op": "readRoom",
+            "startEpochMs": 1794078942578,
+            "endEpochMs": 1794078942585,
+            "durationMs": 7.025955999999951
+          }
+        },
+        {
+          "create": {
+            "op": "createHumanCorner",
+            "startEpochMs": 1794078942627,
+            "endEpochMs": 1794078942690,
+            "durationMs": 63.22395099999994
+          },
+          "coveringRead": {
+            "op": "readRoom",
+            "startEpochMs": 1794078942690,
+            "endEpochMs": 1794078942704,
+            "durationMs": 14.535107000000153
+          }
+        },
+        {
+          "create": {
+            "op": "createHumanCorner",
+            "startEpochMs": 1794078942737,
+            "endEpochMs": 1794078942795,
+            "durationMs": 58.308594000000085
+          },
+          "coveringRead": {
+            "op": "readRoom",
+            "startEpochMs": 1794078942795,
+            "endEpochMs": 1794078942802,
+            "durationMs": 6.950048000000152
+          }
+        },
+        {
+          "create": {
+            "op": "createHumanCorner",
+            "startEpochMs": 1794078942844,
+            "endEpochMs": 1794078942900,
+            "durationMs": 55.97927600000003
+          },
+          "coveringRead": {
+            "op": "readRoom",
+            "startEpochMs": 1794078942900,
+            "endEpochMs": 1794078942909,
+            "durationMs": 9.199921999999788
+          }
+        },
+        {
+          "create": {
+            "op": "createHumanCorner",
+            "startEpochMs": 1794078942945,
+            "endEpochMs": 1794078943011,
+            "durationMs": 66.49628799999982
+          },
+          "coveringRead": {
+            "op": "readRoom",
+            "startEpochMs": 1794078943011,
+            "endEpochMs": 1794078943018,
+            "durationMs": 7.17458600000009
+          }
+        },
+        {
+          "create": {
+            "op": "createHumanCorner",
+            "startEpochMs": 1794078943074,
+            "endEpochMs": 1794078943126,
+            "durationMs": 51.968804999999975
+          },
+          "coveringRead": {
+            "op": "readRoom",
+            "startEpochMs": 1794078943126,
+            "endEpochMs": 1794078943133,
+            "durationMs": 6.600007000000005
+          }
+        },
+        {
+          "create": {
+            "op": "createHumanCorner",
+            "startEpochMs": 1794078943170,
+            "endEpochMs": 1794078943221,
+            "durationMs": 51.51320799999985
+          },
+          "coveringRead": {
+            "op": "readRoom",
+            "startEpochMs": 1794078943222,
+            "endEpochMs": 1794078943236,
+            "durationMs": 14.781576999999743
+          }
+        },
+        {
+          "create": {
+            "op": "createHumanCorner",
+            "startEpochMs": 1794078943287,
+            "endEpochMs": 1794078943346,
+            "durationMs": 59.025698999999804
+          },
+          "coveringRead": {
+            "op": "readRoom",
+            "startEpochMs": 1794078943346,
+            "endEpochMs": 1794078943352,
+            "durationMs": 5.976972999999816
+          }
+        },
+        {
+          "create": {
+            "op": "createHumanCorner",
+            "startEpochMs": 1794078943413,
+            "endEpochMs": 1794078943470,
+            "durationMs": 56.886797000000115
+          },
+          "coveringRead": {
+            "op": "readRoom",
+            "startEpochMs": 1794078943470,
+            "endEpochMs": 1794078943476,
+            "durationMs": 6.541757999999845
+          }
+        },
+        {
+          "create": {
+            "op": "createHumanCorner",
+            "startEpochMs": 1794078943523,
+            "endEpochMs": 1794078943578,
+            "durationMs": 54.59534900000017
+          },
+          "coveringRead": {
+            "op": "readRoom",
+            "startEpochMs": 1794078943578,
+            "endEpochMs": 1794078943585,
+            "durationMs": 7.231361000000106
+          }
+        },
+        {
+          "create": {
+            "op": "createHumanCorner",
+            "startEpochMs": 1794078943642,
+            "endEpochMs": 1794078943698,
+            "durationMs": 56.0128209999998
+          },
+          "coveringRead": {
+            "op": "readRoom",
+            "startEpochMs": 1794078943698,
+            "endEpochMs": 1794078943705,
+            "durationMs": 6.612055999999939
+          }
+        },
+        {
+          "create": {
+            "op": "createHumanCorner",
+            "startEpochMs": 1794078943744,
+            "endEpochMs": 1794078943795,
+            "durationMs": 50.77049299999999
+          },
+          "coveringRead": {
+            "op": "readRoom",
+            "startEpochMs": 1794078943795,
+            "endEpochMs": 1794078943802,
+            "durationMs": 6.72313000000031
+          }
+        },
+        {
+          "create": {
+            "op": "createHumanCorner",
+            "startEpochMs": 1794078943837,
+            "endEpochMs": 1794078943885,
+            "durationMs": 47.723376999999346
+          },
+          "coveringRead": {
+            "op": "readRoom",
+            "startEpochMs": 1794078943885,
+            "endEpochMs": 1794078943890,
+            "durationMs": 5.249369000000115
+          }
+        },
+        {
+          "create": {
+            "op": "createHumanCorner",
+            "startEpochMs": 1794078943928,
+            "endEpochMs": 1794078943978,
+            "durationMs": 49.933686999999736
+          },
+          "coveringRead": {
+            "op": "readRoom",
+            "startEpochMs": 1794078943978,
+            "endEpochMs": 1794078943985,
+            "durationMs": 6.951635000000351
+          }
+        },
+        {
+          "create": {
+            "op": "createHumanCorner",
+            "startEpochMs": 1794078944042,
+            "endEpochMs": 1794078944095,
+            "durationMs": 53.213732000000164
+          },
+          "coveringRead": {
+            "op": "readRoom",
+            "startEpochMs": 1794078944095,
+            "endEpochMs": 1794078944111,
+            "durationMs": 15.654701999999816
+          }
+        },
+        {
+          "create": {
+            "op": "createHumanCorner",
+            "startEpochMs": 1794078944139,
+            "endEpochMs": 1794078944196,
+            "durationMs": 56.33724399999937
+          },
+          "coveringRead": {
+            "op": "readRoom",
+            "startEpochMs": 1794078944196,
+            "endEpochMs": 1794078944202,
+            "durationMs": 6.098323999999593
+          }
+        },
+        {
+          "create": {
+            "op": "createHumanCorner",
+            "startEpochMs": 1794078944254,
+            "endEpochMs": 1794078944330,
+            "durationMs": 75.07301900000039
+          },
+          "coveringRead": {
+            "op": "readRoom",
+            "startEpochMs": 1794078944330,
+            "endEpochMs": 1794078944337,
+            "durationMs": 7.876103999999941
+          }
+        },
+        {
+          "create": {
+            "op": "createHumanCorner",
+            "startEpochMs": 1794078944375,
+            "endEpochMs": 1794078944447,
+            "durationMs": 71.95540299999993
+          },
+          "coveringRead": {
+            "op": "readRoom",
+            "startEpochMs": 1794078944447,
+            "endEpochMs": 1794078944454,
+            "durationMs": 7.665278000000399
+          }
+        }
+      ]
+    }
+  ]
+}

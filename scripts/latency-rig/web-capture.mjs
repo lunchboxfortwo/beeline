@@ -8,6 +8,7 @@ import { pathToFileURL } from 'node:url';
 import { execFileSync } from 'node:child_process';
 import { fixture, scenarios, resetWebFixture, verifyWebEffect } from './web-fixtures.mjs';
 import { steps, exclusions } from './web-steps.mjs';
+import { measureLongPress } from './web-long-press.mjs';
 async function bounded(work, milliseconds, label) {
   let timer;
   try {
@@ -63,11 +64,27 @@ export function summarize(inventory, captures) {
     const percentile = (values, p) =>
       [...values].sort((a, b) => a - b)[Math.ceil(values.length * p) - 1];
     const values = paired.flatMap((c) => c.samples);
+    const longPress = paired.flatMap((c) => c.longPressTimings ?? []);
     rows.push({
       name,
       samples: 40,
       p50Ms: percentile(values, 0.5),
       p95Ms: percentile(values, 0.95),
+      ...(longPress.length === 40
+        ? {
+            timingContract: 'long-press recognition to observed rendered result',
+            gestureInclusive: {
+              p50Ms: percentile(
+                longPress.map((t) => t.gestureInclusiveMs),
+                0.5,
+              ),
+              p95Ms: percentile(
+                longPress.map((t) => t.gestureInclusiveMs),
+                0.95,
+              ),
+            },
+          }
+        : {}),
       captures: paired.map((c) => ({
         capture: c.capture,
         samples: 20,
@@ -117,6 +134,10 @@ async function main() {
     await readFile(new URL('./interactions.json', import.meta.url), 'utf8'),
   );
   validateInventory(inventory);
+  const selected = process.env.LATENCY_RIG_WEB_INTERACTION;
+  if (selected && !inventory.includes(selected))
+    throw new Error(`Unknown interaction: ${selected}`);
+  const captureInventory = selected ? [selected] : inventory;
   const routes = JSON.parse(await readFile(new URL('./routes.json', import.meta.url), 'utf8'));
   for (const name of inventory)
     if (!routes.some((route) => route.path === fixture(name).route))
@@ -133,6 +154,7 @@ async function main() {
         'web-fixtures.mjs',
         'web-steps.mjs',
         'web-capture.mjs',
+        'web-long-press.mjs',
         'interactions.json',
         'routes.json',
       ].map(async (name) => [
@@ -192,7 +214,7 @@ async function main() {
       page.setDefaultNavigationTimeout(6000);
       await page.goto(`/review/${secret}`);
       await page.waitForURL('**/beeline/channels**', { timeout: 15000 });
-      for (const name of inventory) {
+      for (const name of captureInventory) {
         const record = { name, capture, samples: [] };
         captures.push(record);
         const f = fixture(name);
@@ -241,29 +263,40 @@ async function main() {
               2000,
               'Action start',
             );
-            await bounded(
-              async () => {
-                await prepared.act();
-                await prepared.done();
-              },
-              10000,
-              'Action and visible result',
-            );
-            const duration = await bounded(
-              () =>
-                page.evaluate(
-                  () =>
-                    new Promise((resolve) =>
-                      requestAnimationFrame(() =>
+            let duration;
+            if (prepared.longPressThresholdMs !== undefined) {
+              const timing = await bounded(
+                () => measureLongPress(page, prepared),
+                10000,
+                'Long press and visible result',
+              );
+              (record.longPressTimings ??= []).push(timing);
+              duration = timing.postRecognitionMs;
+            } else {
+              await bounded(
+                async () => {
+                  await prepared.act();
+                  await prepared.done();
+                },
+                10000,
+                'Action and visible result',
+              );
+              duration = await bounded(
+                () =>
+                  page.evaluate(
+                    () =>
+                      new Promise((resolve) =>
                         requestAnimationFrame(() =>
-                          resolve(performance.now() - window.__latencyStart),
+                          requestAnimationFrame(() =>
+                            resolve(performance.now() - window.__latencyStart),
+                          ),
                         ),
                       ),
-                    ),
-                ),
-              2000,
-              'Result frame',
-            );
+                  ),
+                2000,
+                'Result frame',
+              );
+            }
             await bounded(
               () => verifyWebEffect(db, f, `rig-${name}-${capture}-${sample}`),
               3000,
@@ -298,6 +331,8 @@ async function main() {
     }
     const summary = {
       schemaVersion: 1,
+      longPressContract:
+        'pointerdown + threshold from source to existing result plus two frames; observed during hold; gesture-inclusive timings retained separately',
       platform: 'headless-chromium-web',
       commit: execFileSync('git', ['rev-parse', 'HEAD'], { encoding: 'utf8' }).trim(),
       browser: browser.version(),

@@ -1,0 +1,298 @@
+{
+  "kind": "static rendered result, not app capture",
+  "thresholdFromSourceMs": 450,
+  "p50Ms": 63.90000009536743,
+  "p95Ms": 65.2999997138977,
+  "captures": [
+    {
+      "capture": 1,
+      "samples": [
+        {
+          "holdStartMs": 150.59999990463257,
+          "recognitionStartMs": 600.5999999046326,
+          "completionMs": 665.1999998092651,
+          "postRecognitionMs": 64.59999990463257,
+          "gestureInclusiveMs": 613.9000000953674
+        },
+        {
+          "holdStartMs": 866.6999998092651,
+          "recognitionStartMs": 1316.6999998092651,
+          "completionMs": 1381.1999998092651,
+          "postRecognitionMs": 64.5,
+          "gestureInclusiveMs": 574.1999998092651
+        },
+        {
+          "holdStartMs": 1567.4000000953674,
+          "recognitionStartMs": 2017.4000000953674,
+          "completionMs": 2081.199999809265,
+          "postRecognitionMs": 63.799999713897705,
+          "gestureInclusiveMs": 560.6999998092651
+        },
+        {
+          "holdStartMs": 2270.2999997138977,
+          "recognitionStartMs": 2720.2999997138977,
+          "completionMs": 2781.199999809265,
+          "postRecognitionMs": 60.90000009536743,
+          "gestureInclusiveMs": 558.1999998092651
+        },
+        {
+          "holdStartMs": 2967,
+          "recognitionStartMs": 3417,
+          "completionMs": 3481.4000000953674,
+          "postRecognitionMs": 64.40000009536743,
+          "gestureInclusiveMs": 556.3000001907349
+        },
+        {
+          "holdStartMs": 3672,
+          "recognitionStartMs": 4122,
+          "completionMs": 4181.099999904633,
+          "postRecognitionMs": 59.09999990463257,
+          "gestureInclusiveMs": 560.8000001907349
+        },
+        {
+          "holdStartMs": 4383,
+          "recognitionStartMs": 4833,
+          "completionMs": 4897.799999713898,
+          "postRecognitionMs": 64.7999997138977,
+          "gestureInclusiveMs": 570.0999999046326
+        },
+        {
+          "holdStartMs": 5084.299999713898,
+          "recognitionStartMs": 5534.299999713898,
+          "completionMs": 5597.699999809265,
+          "postRecognitionMs": 63.40000009536743,
+          "gestureInclusiveMs": 561.7999997138977
+        },
+        {
+          "holdStartMs": 5784.099999904633,
+          "recognitionStartMs": 6234.099999904633,
+          "completionMs": 6298.099999904633,
+          "postRecognitionMs": 64,
+          "gestureInclusiveMs": 561.5
+        },
+        {
+          "holdStartMs": 6485.299999713898,
+          "recognitionStartMs": 6935.299999713898,
+          "completionMs": 6997.799999713898,
+          "postRecognitionMs": 62.5,
+          "gestureInclusiveMs": 561.0999999046326
+        },
+        {
+          "holdStartMs": 7184.199999809265,
+          "recognitionStartMs": 7634.199999809265,
+          "completionMs": 7697.699999809265,
+          "postRecognitionMs": 63.5,
+          "gestureInclusiveMs": 560.2999997138977
+        },
+        {
+          "holdStartMs": 7883.599999904633,
+          "recognitionStartMs": 8333.599999904633,
+          "completionMs": 8397.699999809265,
+          "postRecognitionMs": 64.09999990463257,
+          "gestureInclusiveMs": 560.5
+        },
+        {
+          "holdStartMs": 8582.699999809265,
+          "recognitionStartMs": 9032.699999809265,
+          "completionMs": 9097.799999713898,
+          "postRecognitionMs": 65.09999990463257,
+          "gestureInclusiveMs": 561.5999999046326
+        },
+        {
+          "holdStartMs": 9282.799999713898,
+          "recognitionStartMs": 9732.799999713898,
+          "completionMs": 9797.599999904633,
+          "postRecognitionMs": 64.80000019073486,
+          "gestureInclusiveMs": 562.3000001907349
+        },
+        {
+          "holdStartMs": 9983.299999713898,
+          "recognitionStartMs": 10433.299999713898,
+          "completionMs": 10498.299999713898,
+          "postRecognitionMs": 65,
+          "gestureInclusiveMs": 563.5
+        },
+        {
+          "holdStartMs": 10684.799999713898,
+          "recognitionStartMs": 11134.799999713898,
+          "completionMs": 11197.5,
+          "postRecognitionMs": 62.700000286102295,
+          "gestureInclusiveMs": 561.4000000953674
+        },
+        {
+          "holdStartMs": 11385.699999809265,
+          "recognitionStartMs": 11835.699999809265,
+          "completionMs": 11897.599999904633,
+          "postRecognitionMs": 61.90000009536743,
+          "gestureInclusiveMs": 559.8000001907349
+        },
+        {
+          "holdStartMs": 12086.900000095367,
+          "recognitionStartMs": 12536.900000095367,
+          "completionMs": 12600.900000095367,
+          "postRecognitionMs": 64,
+          "gestureInclusiveMs": 562
+        },
+        {
+          "holdStartMs": 12785,
+          "recognitionStartMs": 13235,
+          "completionMs": 13297.5,
+          "postRecognitionMs": 62.5,
+          "gestureInclusiveMs": 558.3000001907349
+        },
+        {
+          "holdStartMs": 13482.599999904633,
+          "recognitionStartMs": 13932.599999904633,
+          "completionMs": 13997.5,
+          "postRecognitionMs": 64.90000009536743,
+          "gestureInclusiveMs": 557.5999999046326
+        }
+      ]
+    },
+    {
+      "capture": 2,
+      "samples": [
+        {
+          "holdStartMs": 14184.5,
+          "recognitionStartMs": 14634.5,
+          "completionMs": 14698,
+          "postRecognitionMs": 63.5,
+          "gestureInclusiveMs": 563
+        },
+        {
+          "holdStartMs": 14884.099999904633,
+          "recognitionStartMs": 15334.099999904633,
+          "completionMs": 15397.5,
+          "postRecognitionMs": 63.40000009536743,
+          "gestureInclusiveMs": 559.9000000953674
+        },
+        {
+          "holdStartMs": 15583.400000095367,
+          "recognitionStartMs": 16033.400000095367,
+          "completionMs": 16097.400000095367,
+          "postRecognitionMs": 64,
+          "gestureInclusiveMs": 560.5
+        },
+        {
+          "holdStartMs": 16283.400000095367,
+          "recognitionStartMs": 16733.400000095367,
+          "completionMs": 16797.299999713898,
+          "postRecognitionMs": 63.89999961853027,
+          "gestureInclusiveMs": 560.1999998092651
+        },
+        {
+          "holdStartMs": 16982.799999713898,
+          "recognitionStartMs": 17432.799999713898,
+          "completionMs": 17497.400000095367,
+          "postRecognitionMs": 64.60000038146973,
+          "gestureInclusiveMs": 561.6000003814697
+        },
+        {
+          "holdStartMs": 17682,
+          "recognitionStartMs": 18132,
+          "completionMs": 18197.299999713898,
+          "postRecognitionMs": 65.2999997138977,
+          "gestureInclusiveMs": 561.5
+        },
+        {
+          "holdStartMs": 18382,
+          "recognitionStartMs": 18832,
+          "completionMs": 18898.900000095367,
+          "postRecognitionMs": 66.90000009536743,
+          "gestureInclusiveMs": 563.2000002861023
+        },
+        {
+          "holdStartMs": 19083.299999713898,
+          "recognitionStartMs": 19533.299999713898,
+          "completionMs": 19597.099999904633,
+          "postRecognitionMs": 63.80000019073486,
+          "gestureInclusiveMs": 563.6999998092651
+        },
+        {
+          "holdStartMs": 19787,
+          "recognitionStartMs": 20237,
+          "completionMs": 20297.199999809265,
+          "postRecognitionMs": 60.19999980926514,
+          "gestureInclusiveMs": 561.5999999046326
+        },
+        {
+          "holdStartMs": 20483.699999809265,
+          "recognitionStartMs": 20933.699999809265,
+          "completionMs": 20997.099999904633,
+          "postRecognitionMs": 63.40000009536743,
+          "gestureInclusiveMs": 557.1999998092651
+        },
+        {
+          "holdStartMs": 21185.299999713898,
+          "recognitionStartMs": 21635.299999713898,
+          "completionMs": 21697.199999809265,
+          "postRecognitionMs": 61.90000009536743,
+          "gestureInclusiveMs": 560.9000000953674
+        },
+        {
+          "holdStartMs": 21882.5,
+          "recognitionStartMs": 22332.5,
+          "completionMs": 22402.099999904633,
+          "postRecognitionMs": 69.59999990463257,
+          "gestureInclusiveMs": 564.4000000953674
+        },
+        {
+          "holdStartMs": 22588.5,
+          "recognitionStartMs": 23038.5,
+          "completionMs": 23097.099999904633,
+          "postRecognitionMs": 58.59999990463257,
+          "gestureInclusiveMs": 559.5
+        },
+        {
+          "holdStartMs": 23283.699999809265,
+          "recognitionStartMs": 23733.699999809265,
+          "completionMs": 23797.099999904633,
+          "postRecognitionMs": 63.40000009536743,
+          "gestureInclusiveMs": 555.3000001907349
+        },
+        {
+          "holdStartMs": 23983.5,
+          "recognitionStartMs": 24433.5,
+          "completionMs": 24497.900000095367,
+          "postRecognitionMs": 64.40000009536743,
+          "gestureInclusiveMs": 561.1000003814697
+        },
+        {
+          "holdStartMs": 24683.099999904633,
+          "recognitionStartMs": 25133.099999904633,
+          "completionMs": 25197,
+          "postRecognitionMs": 63.90000009536743,
+          "gestureInclusiveMs": 560.5999999046326
+        },
+        {
+          "holdStartMs": 25382.099999904633,
+          "recognitionStartMs": 25832.099999904633,
+          "completionMs": 25897,
+          "postRecognitionMs": 64.90000009536743,
+          "gestureInclusiveMs": 560.8000001907349
+        },
+        {
+          "holdStartMs": 26082.299999713898,
+          "recognitionStartMs": 26532.299999713898,
+          "completionMs": 26596.900000095367,
+          "postRecognitionMs": 64.60000038146973,
+          "gestureInclusiveMs": 562.9000000953674
+        },
+        {
+          "holdStartMs": 26783.900000095367,
+          "recognitionStartMs": 27233.900000095367,
+          "completionMs": 27296.900000095367,
+          "postRecognitionMs": 63,
+          "gestureInclusiveMs": 562.4000000953674
+        },
+        {
+          "holdStartMs": 27481.699999809265,
+          "recognitionStartMs": 27931.699999809265,
+          "completionMs": 27996.900000095367,
+          "postRecognitionMs": 65.2000002861023,
+          "gestureInclusiveMs": 560.3000001907349
+        }
+      ]
+    }
+  ]
+}

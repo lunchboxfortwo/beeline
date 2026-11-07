@@ -5,9 +5,92 @@ import { validateInventory, summarize } from './web-capture.mjs';
 import { attachWebInventory } from './nightly-local.mjs';
 import { scenarios, fixture } from './web-fixtures.mjs';
 import { steps } from './web-steps.mjs';
+import { cornerLongPressThreshold, measureLongPress } from './web-long-press.mjs';
 const inventory = JSON.parse(
   await readFile(new URL('./interactions.json', import.meta.url), 'utf8'),
 );
+test('corner clock follows the source threshold and observes completion before release', async () => {
+  const source = await readFile(
+    new URL(
+      '../../apps/mobile/sources/app/(app)/beeline/chat/ChatSurfaceHeader.tsx',
+      import.meta.url,
+    ),
+    'utf8',
+  );
+  const threshold = await cornerLongPressThreshold();
+  const control = source
+    .split('<TouchableOpacity')
+    .find((part) => part.includes('testID="room-corners-menu"'));
+  assert.equal(threshold, Number(control.match(/delayLongPress=\{(\d+)\}/)[1]));
+  let release;
+  let observed = false;
+  let released = false;
+  const held = new Promise((resolve) => {
+    release = resolve;
+  });
+  const page = {
+    evaluate: async (fn, value) => {
+      if (value === undefined) return;
+      // Execute the actual browser clock/frame callback with a deterministic clock.
+      const previous = {
+        window: globalThis.window,
+        requestAnimationFrame: globalThis.requestAnimationFrame,
+        performance: globalThis.performance,
+      };
+      globalThis.window = { __latencyHoldStart: 100, __latencyStart: 80 };
+      globalThis.requestAnimationFrame = (callback) => callback();
+      globalThis.performance = { now: () => 100 + threshold + 25 };
+      try {
+        const timing = await fn(value);
+        assert.equal(released, false);
+        observed = true;
+        release();
+        return timing;
+      } finally {
+        Object.assign(globalThis, previous);
+      }
+    },
+  };
+  const timing = await measureLongPress(page, {
+    longPressThresholdMs: threshold,
+    act: async () => {
+      await Promise.race([
+        held,
+        new Promise((_, reject) =>
+          setImmediate(() => reject(new Error('Observation gated on release'))),
+        ),
+      ]);
+      released = true;
+    },
+    done: async () => {},
+  });
+  assert.equal(observed, true);
+  assert.equal(released, true);
+  assert.equal(timing.recognitionStartMs, timing.holdStartMs + threshold);
+  assert.equal(timing.postRecognitionMs, 25);
+  assert.equal(timing.gestureInclusiveMs, threshold + 45);
+});
+
+test('a failed gesture cannot become a successful long-press sample', async () => {
+  const page = {
+    evaluate: async (fn, value) =>
+      value === undefined
+        ? undefined
+        : {
+            postRecognitionMs: 10,
+          },
+  };
+  await assert.rejects(
+    measureLongPress(page, {
+      longPressThresholdMs: 123,
+      act: async () => {
+        throw new Error('release failed');
+      },
+      done: async () => {},
+    }),
+    /release failed/,
+  );
+});
 test('every inventory entry has a seeded scenario and an executable driver decision', () => {
   validateInventory(inventory);
   for (const name of inventory) {
@@ -47,6 +130,16 @@ test('only two complete captures contribute percentiles and a full score', () =>
   assert.deepEqual(result.unmeasured, []);
   assert.equal(result.rows[0].p50Ms, 109);
   assert.equal(result.rows[0].p95Ms, 118);
+});
+test('recognition summaries retain separately labelled gesture-inclusive percentiles', () => {
+  const captures = pair('create-corner').map((capture) => ({
+    ...capture,
+    longPressTimings: capture.samples.map((value) => ({ gestureInclusiveMs: value + 500 })),
+  }));
+  const row = summarize(['create-corner'], captures).rows[0];
+  assert.equal(row.p50Ms, 109);
+  assert.match(row.timingContract, /recognition/);
+  assert.deepEqual(row.gestureInclusive, { p50Ms: 609, p95Ms: 618 });
 });
 test('missing, partial, failed and nonfinite captures keep score unavailable and retain the exact reason', () => {
   for (const bad of [
