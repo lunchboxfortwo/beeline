@@ -1,5 +1,6 @@
 import type { AttachmentReference } from '@beeline/buzz-client';
 import { artifactByteDigest } from './artifact-byte-digest';
+import { ArtifactByteError } from './artifact-byte-error';
 import { loadBuzzIdentity } from '@/auth/buzz-identity-storage';
 import { clientResetGeneration } from '@/sync/client-reset';
 import { getBuzzRuntimeConfig } from './runtime-config';
@@ -45,7 +46,7 @@ subscribeMediaCacheBoundary(event => {
 export async function readArtifactObject(attachment: AttachmentReference,
   read: (objectId: string, signal: AbortSignal, maxBytes: number) => Promise<Uint8Array>,
   options: ArtifactByteOptions = {}): Promise<{ bytes: Uint8Array; key: string; address: ImmutableByteAddress; mimeType: string; isCurrent(): boolean }> {
-  if (attachment.expired) throw new Error('This file has expired.');
+  if (attachment.expired) throw new ArtifactByteError(new Error('This file has expired.'));
   const objectId = mediaIdFromUrl(attachment.url);
   if (!objectId) throw new Error('attachment is not a monolith media URL');
   const reset = clientResetGeneration(); const localEpoch = epoch;
@@ -81,13 +82,14 @@ export async function readArtifactObject(attachment: AttachmentReference,
     const bytes = await read(id, signal, options.preview && !raster ? 16 * 1024 : 25 * 1024 * 1024);
     return bytes;
   }, { signal: options.signal, restoreAuthorized: !!metadata, reuseAuthorized: !!metadata, isCurrent: current,
-    maxBytes: options.preview && !raster ? 16 * 1024 : 25 * 1024 * 1024 });
+    maxBytes: options.preview && !raster ? 16 * 1024 : 25 * 1024 * 1024 })
+    .catch(cause => { throw new ArtifactByteError(cause); });
   if (!current() || options.signal?.aborted) throw new Error('The file is no longer visible.');
   return { bytes, key, address, mimeType, isCurrent: current };
 }
 export async function artifactObjectLocalUri(key: string): Promise<string> {
-  const uri = await store.localUri(key);
-  if (!uri) throw new Error('The file could not be saved to the local cache.');
+  const uri = await store.localUri(key).catch(cause => { throw new ArtifactByteError(cause); });
+  if (!uri) throw new ArtifactByteError(new Error('The file could not be saved to the local cache.'));
   return uri;
 }
 export function subscribeArtifactBytesPurge(attachment: AttachmentReference, listener: () => void): () => void {

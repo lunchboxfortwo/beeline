@@ -299,7 +299,10 @@ describe('the one phone socket', () => {
     const { connection } = setup(); const listener = vi.fn(); await connection.register([{ '#h': ['a'] }], listener);
     (await open()).drop(); expect(listener).toHaveBeenCalledOnce(); expect(useConnectionFailure()).toBe(false);
   });
-  it.each(['foreground', 'online'] as const)('recovers a silently lost native socket before the next send on %s', async trigger => {
+  it.each([
+    ['foreground', 'sendRoomMessage'], ['foreground', 'sendRoomReply'],
+    ['online', 'sendRoomMessage'], ['online', 'sendRoomReply'],
+  ] as const)('recovers a silently lost native socket on %s before %s', async (trigger, operation) => {
     const { connection } = setup();
     const reads: Promise<unknown>[] = [];
     await connection.register([{ '#h': ['a'] }], () => {
@@ -323,7 +326,10 @@ describe('the one phone socket', () => {
     expect(replacement.sent.map(frame => JSON.parse(frame))).toContainEqual({ type: 'viewing', roomId: 'a', viewing: true });
     replacement.reply({ room: { id: 'a' } });
     await Promise.all(reads);
-    const sending = connection.request('sendRoomMessage', { roomId: 'a', messageId: 'next-send', text: 'After returning' });
+    const input = { roomId: 'a', messageId: 'next-send', text: 'After returning' };
+    const sending = operation === 'sendRoomReply'
+      ? connection.request(operation, { ...input, parentMessageId: 'parent' })
+      : connection.request(operation, input);
     replacement.reply({ messageId: 'next-send' }, 1);
     await expect(sending).resolves.toEqual({ messageId: 'next-send' });
     expect(lost.requests()).toHaveLength(0);
