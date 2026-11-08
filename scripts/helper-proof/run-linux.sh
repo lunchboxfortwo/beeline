@@ -4,6 +4,7 @@ proof_root=$(git rev-parse --show-toplevel)
 proof_node=$(command -v node)
 proof_node=$(readlink -f "$proof_node")
 proof_name="beeline-helper-proof-$$-$(date +%s)"
+proof_entry=${1:-scripts/helper-proof/prove-linux.mjs}
 docker build -t beeline-helper-proof:local "$proof_root/scripts/helper-proof"
 docker run -d --rm --privileged --cgroupns=private --tmpfs /run --tmpfs /run/lock \
   -v "$proof_root:/workspace:ro" -v "$proof_node:/usr/local/bin/node:ro" \
@@ -23,4 +24,4 @@ docker exec --user proof --workdir /workspace \
   -e XDG_STATE_HOME=/home/proof/.local/state -e XDG_RUNTIME_DIR=/run/user/1001 \
   -e DBUS_SESSION_BUS_ADDRESS=unix:path=/run/user/1001/bus -e BEELINE_NATIVE_PROOF=1 \
   -e BEELINE_PROOF_PHASES="${BEELINE_PROOF_PHASES:-}" \
-  "$proof_name" node --import tsx scripts/helper-proof/prove-linux.mjs
+  "$proof_name" node --import tsx "$proof_entry"

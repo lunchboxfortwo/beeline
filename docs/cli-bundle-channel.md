@@ -141,10 +141,12 @@ is sandboxed or nothing (C94 fail-closed). Corner grants are unaffected — they
 run on the host by design — so `run_granted_command` works in corners and
 refuses in Rooms on every Mac.
 
-Linux uses `Type=notify` and `WatchdogSec=180s`. macOS has no `sd_notify`
-protocol; the helper uses the same local work-loop barrier with a bounded
-three-minute watchdog that exits the process when progress stops. `KeepAlive`
-restarts it. Native readiness and individual agent readiness remain separate.
+Linux uses `Type=notify` and `Restart=always`; macOS uses launchd `KeepAlive`.
+Neither uses a helper watchdog. After preparation and the intake drain, the
+helper closes the machine link and exits in the same turn. The native manager
+cleans up remaining processes and restarts the helper; local broker clients or
+asynchronous runtime teardown cannot hold up that exit. Native readiness and
+individual agent readiness remain separate.
 The macOS helper log is `~/Library/Logs/Beeline/helper.log`; launchd does not
 provide Linux's bounded journal rotation.
 
@@ -224,6 +226,12 @@ PID 1, user manager, local HTTP/WebSocket server and deterministic ACP harness.
 The container is removed at completion. See the acceptance evidence in
 [helper simplification](./helper-simplification.md).
 
+Run `bash scripts/helper-proof/run-linux.sh scripts/helper-proof/prove-update-handoff.mjs`
+for the update handoff regression. It retains a real local broker client while
+an idle helper stages a verified release, proves the successor answers through
+both agent connections with `WatchdogSec=0`, and proves a successor startup
+smoke-test failure preserves the serving process and connections.
+
 ## Daemon update invariants
 
 Paths and commands below are relative to the repository root. Read these invariants before editing this area; named code and tests hold implementation detail.
@@ -231,7 +239,7 @@ Paths and commands below are relative to the repository root. Read these invaria
 ### Daemon self-update and CLI bundle
 
 - **`<prefix>/lib/beeline` is the active bundle anchor**, a symlink into `lib/beeline-releases/<id>` swung by rename(2) (`self-update.ts`). Never suggest `npx beeline` (an unrelated package); recovery is `npx usebeeline update`.
-- **Update restarts are silent.** `runMachineHelper` closes the machine link before agent teardown with `HELPER_UPDATE_CLOSE_CODE`/`HELPER_UPDATE_CLOSE_REASON`; `DaemonAgentSession` releases presence without an offline notice only for that signal. Unexpected loss still notices the owner (`machine-offline.test.ts`, `daemon-live.test.ts`, `machine-helper.test.ts`). Release delivery pushes helpers only (`release-notify.ts`).
+- **Update restarts are silent and exit directly.** `runMachineHelper` closes the machine link with `HELPER_UPDATE_CLOSE_CODE`/`HELPER_UPDATE_CLOSE_REASON`, then exits synchronously without awaiting agent teardown; `DaemonAgentSession` releases presence without an offline notice only for that signal. Unexpected loss still notices the owner (`machine-offline.test.ts`, `daemon-live.test.ts`, `machine-update-handoff.test.ts`). Release delivery pushes helpers only (`release-notify.ts`).
 - **Linux handovers use a fixed one-second native restart delay.** `native-helper.ts` renders no escalating restart steps. The running helper refreshes the installed unit with `daemon-reload`, without restarting the service. `recovery.startup.test.ts` proves verified staged/active boot makes no publication request; `systemd.test.ts` covers unit convergence.
 - **Routine release notices preserve active turns.** `ReleaseNotifier` (`apps/server/src/release-notify.ts`) pushes published helper releases; `MachineLink` (`apps/body/src/machine-link.ts`) reconciles the manifest once after first registration, with no periodic update check. `ReleaseTransaction` (`managed-update.ts`) and `quiesceHostedAgents` (`machine-helper.ts`) keep intake open until idle or the five-minute admission deadline. At the deadline new turns pause while active turns finish; only an idle helper hands over. Pending wakes reach the successor. `machine-helper.test.ts` proves push, reconnect, child survival during drain and queued delivery over isolated HTTP/WebSocket (WAKE-UPDATE-1). Installation remains checksum verification plus atomic activation. Server minimums (426 / `force-update`) still interrupt immediately, using `force-update-journal.ts` to replay interrupted commands.
 - `unified-release.yml` builds Linux and Mac bundles in parallel; `.github/actions/daemon-leg/` collects and promotes their verified outputs; `launchd.ts` supervises macOS (no bwrap). `https://usebeeline.app/dl/manifest.json` stays pinned; runbook `docs/cli-bundle-channel.md`.

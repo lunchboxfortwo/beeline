@@ -14,6 +14,7 @@ import { LiveHub } from '../../apps/server/src/live.ts';
 import { ReleaseNotifier } from '../../apps/server/src/release-notify.ts';
 import { createBeelineServer } from '../../apps/server/src/server.ts';
 import { HelperVersionGate } from '../../apps/server/src/helper-version-gate.ts';
+import { ConnectionPresence } from '../../apps/server/src/connection-presence.ts';
 
 const exec = promisify(execFile);
 const home = process.env.HOME;
@@ -47,6 +48,8 @@ export const auth = new TokenAuth(database, async () => {
 export const live = new LiveHub();
 export const phone = new PhoneService(database, 'http://fixture', undefined, undefined, live);
 const daemon = new DaemonService(database, live);
+const connectionPresence = new ConnectionPresence(database, live);
+await connectionPresence.start();
 export const releases = new ReleaseNotifier(database, { secret: 'fixture-release', live });
 export const helperVersionGate = new HelperVersionGate();
 const backendOptions = {
@@ -54,6 +57,7 @@ const backendOptions = {
   auth,
   phone,
   daemon,
+  connectionPresence,
   live,
   helperVersionGate,
   mediaMaximumBytes: 1024,
@@ -384,6 +388,7 @@ export async function closeFixture() {
   server.closeAllConnections();
   await new Promise((done) => server.close(() => done()));
   backend.close();
+  await connectionPresence.stop();
   await database.close();
 }
 export function evidence() {

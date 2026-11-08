@@ -310,6 +310,11 @@ async function serveMachineHelper(
     // Close the machine socket before agent teardown can unregister the last agent.
     if (reason === 'update') for (const link of links.values()) link.stop(true);
     lifecycle.stop(reason);
+    // Intake is already quiesced and interrupted turns are journaled. Once
+    // the machine link closes, exit in this same turn: local broker clients,
+    // harness cleanup, or pending discovery must never gate the native restart.
+    // The service manager owns the exiting process and its remaining children.
+    if (reason === 'update') lifecycle.exit(reason);
   };
 
   if (layout && !options.freeAgent)
