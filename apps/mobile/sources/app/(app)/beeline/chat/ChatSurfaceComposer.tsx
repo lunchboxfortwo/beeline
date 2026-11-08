@@ -1,4 +1,3 @@
-import { AgentDeliveryStatus } from '@/components/buzz/AgentDeliveryStatus';
 import { IndexRow } from '@/components/buzz/IndexRow';
 import { ErrorBanner } from '@/components/buzz/ErrorBanner';
 import React from 'react';
@@ -243,7 +242,6 @@ export function ChatSurfaceComposer({
                 in; the corner's own state is read there, in the corners list,
                 and on the Room-list row. */}
                   {transcriptHydrationFailed && !!transcriptHydrationError && <IndexRow title={transcriptHydrationError} testID="room-read-error" />}
-                <AgentDeliveryStatus members={roomSurface.members} />
                 {isReadOnlyDirectMessage ? (
                   <View style={[styles.archivedInputBar, readOnlyFooterInset]}>
                     <Text style={styles.archivedInputText}>
