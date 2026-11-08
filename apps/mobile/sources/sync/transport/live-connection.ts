@@ -139,15 +139,19 @@ export class LiveConnection {
     resetConnectionFailure();
     const subscription = AppState.addEventListener('change', (state) => {
       const foreground = state === 'active';
+      const returning = foreground && !this.foreground;
       if (foreground !== this.foreground) {
         this.foreground = foreground;
         resetConnectionFailure();
       }
+      if (returning) this.refreshConnection();
+      else if (foreground) this.refreshRoom();
       this.deps.telemetry?.flush();
-      if (foreground) this.refreshRoom();
     });
     this.stopAppState = () => subscription.remove();
-    this.stopNetwork = deps.subscribeNetworkOnline?.(() => this.refreshRoom()) ?? (() => {});
+    this.stopNetwork = deps.subscribeNetworkOnline?.(() => {
+      if (this.foreground) this.refreshConnection();
+    }) ?? (() => {});
     this.stopIdentity = deps.subscribeIdentityChange(() => {
       this.identity++;
       this.recovery = undefined;
@@ -448,6 +452,15 @@ export class LiveConnection {
   reconnectNow(): void {
     if (this.socket && this.socket.readyState > 1) this.dropConnection(true);
     if (!this.socket) void this.ensureSocket().catch(() => undefined);
+  }
+
+  private refreshConnection(): void {
+    // A suspended app or changed network can lose TCP without receiving close.
+    // OPEN is then only local state. Retire it before reads or sends can use it;
+    // lifecycle events do not diagnose an outage or replay an unknown write.
+    if (isOpen(this.socket)) this.dropConnection();
+    this.reconnectNow();
+    this.refreshRoom();
   }
 
   /** One failed explicit send may replace its socket, then refresh open screens. */

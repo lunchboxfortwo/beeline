@@ -286,15 +286,53 @@ describe('the one phone socket', () => {
     expect(socket.sent).not.toContain('{"type":"ping"}'); expect(useConnectionFailure()).toBe(false);
     expect(vi.getTimerCount()).toBe(0); expect(Socket.instances).toHaveLength(1);
   });
-  it('online and foreground events invoke the subscribed read without probes', async () => {
+  it('concurrent online and foreground events share a replacement and invoke the subscribed read without probes', async () => {
     const { connection } = setup(); const listener = vi.fn(); await connection.register([{ '#h': ['a'] }], listener); await open();
     for (const online of state.network) online({ isConnected: true, isInternetReachable: true });
     appState('background'); appState('active');
-    expect(listener).toHaveBeenCalledTimes(2); expect(Socket.instances).toHaveLength(1);
+    expect(listener).toHaveBeenCalledTimes(2);
+    await tick();
+    expect(Socket.instances).toHaveLength(2);
+    expect((await open()).requests()).toHaveLength(0);
   });
   it('idle socket failure asks the screen to read, but does not itself show a banner', async () => {
     const { connection } = setup(); const listener = vi.fn(); await connection.register([{ '#h': ['a'] }], listener);
     (await open()).drop(); expect(listener).toHaveBeenCalledOnce(); expect(useConnectionFailure()).toBe(false);
+  });
+  it.each(['foreground', 'online'] as const)('recovers a silently lost native socket before the next send on %s', async trigger => {
+    const { connection } = setup();
+    const reads: Promise<unknown>[] = [];
+    await connection.register([{ '#h': ['a'] }], () => {
+      reads.push(connection.request('readRoom', { roomId: 'a' }).catch(error => error));
+    });
+    const lost = await open();
+    const release = connection.view('a');
+    // The OS lost this TCP path while JavaScript retained OPEN and received
+    // neither error nor close. It can still accept frames without delivering them.
+    if (trigger === 'foreground') {
+      appState('background');
+      await vi.advanceTimersByTimeAsync(125_000);
+      appState('active');
+    } else {
+      for (const online of state.network) online({ isConnected: true, isInternetReachable: true });
+    }
+    await tick();
+    expect(Socket.instances).toHaveLength(2);
+    const replacement = await open();
+    expect(replacement).not.toBe(lost);
+    expect(replacement.sent.map(frame => JSON.parse(frame))).toContainEqual({ type: 'viewing', roomId: 'a', viewing: true });
+    replacement.reply({ room: { id: 'a' } });
+    await Promise.all(reads);
+    const sending = connection.request('sendRoomMessage', { roomId: 'a', messageId: 'next-send', text: 'After returning' });
+    replacement.reply({ messageId: 'next-send' }, 1);
+    await expect(sending).resolves.toEqual({ messageId: 'next-send' });
+    expect(lost.requests()).toHaveLength(0);
+    expect(useConnectionFailure()).toBe(false);
+    await vi.advanceTimersByTimeAsync(600_000);
+    expect(Socket.instances).toHaveLength(2);
+    expect(replacement.requests()).toHaveLength(2);
+    expect(vi.getTimerCount()).toBe(0);
+    release();
   });
   it('a native-closed socket without its callback is replaced by the next read', async () => {
     const { connection } = setup(); await connection.register([], () => {}); const first = await open(); first.readyState = 3;
@@ -328,8 +366,25 @@ it('an old request deadline cannot announce a failure after resume', async () =>
     await vi.advanceTimersByTimeAsync(100); await old;
     expect(useConnectionFailure()).toBe(false);
     const read = connection.request('readRoom', { roomId: 'a' });
-    socket.reply({}, 1); await read;
+    const replacement = await open(); replacement.reply({}); await read;
+    socket.fail(); socket.drop();
+    expect(Socket.instances).toHaveLength(2);
+    expect(replacement.readyState).toBe(1);
     expect(useConnectionFailure()).toBe(false);
+  });
+it('foreground replacement never replays a write whose acceptance is unknown', async () => {
+    const { connection } = setup();
+    const writing = connection.request('sendRoomMessage', { roomId: 'a', messageId: 'uncertain', text: 'Before backgrounding' }).catch(error => error);
+    const first = await open();
+    appState('background'); appState('active');
+    expect(await writing).toBeInstanceOf(PhoneSocketDisconnectedError);
+    const replacement = await open();
+    expect(first.requests()).toHaveLength(1);
+    expect(replacement.requests()).toHaveLength(0);
+    expect(useConnectionFailure()).toBe(false);
+    await vi.advanceTimersByTimeAsync(600_000);
+    expect(replacement.requests()).toHaveLength(0);
+    expect(Socket.instances).toHaveLength(2);
   });
 it('a request deadline waiting for authorization cannot announce a socket failure', async () => {
     const { connection } = setup(vi.fn(() => new Promise<string>(() => {})));
