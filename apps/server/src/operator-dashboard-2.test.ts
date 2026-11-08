@@ -623,3 +623,38 @@ const scope3 = fixtureScope3();
     expect(measuredZero.change.ownAgentTokens.weekOverWeek).toBe(-1);
   }, 60_000);
 });
+
+it('reconciles signup counts and return eligibility from one production cohort and timestamp', async () => {
+  const { dashboardPeriods } = await import('./operator-dashboard-periods.js');
+  const measuredAt = '2026-11-08T15:11:00Z';
+  await rootFixture.db.query(`UPDATE workspaces SET allow_fix_sweep=false WHERE id=$1`, [workspace]);
+  for (const [index, created] of [
+    '2026-11-07T15:44:25Z', '2026-11-08T02:10:24Z',
+    '2026-10-30T15:00:00Z', '2026-10-29T15:00:00Z',
+  ].entries()) {
+    const human = `a${index.toString(16).padStart(63, '0')}`, agent = `b${index.toString(16).padStart(63, '0')}`;
+    await rootFixture.db.query(`INSERT INTO identities(id,kind,name,created_at)
+      VALUES($1,'human','Customer',$3),($2,'agent','Helper',$3)`, [human, agent, created]);
+    await rootFixture.db.query(`INSERT INTO agents(agent_id,owner_id) VALUES($1,$2)`, [agent, human]);
+    await rootFixture.db.query(`INSERT INTO memberships(workspace_id,identity_id,role,joined_at)
+      VALUES($1,$2,'owner',$3)`, [workspace, human, created]);
+    await rootFixture.db.query(`INSERT INTO messages(id,room_id,author_id,text,created_at)
+      VALUES($1,$3,$4,'hello',$6::timestamptz+interval '1 minute'),
+        ($2,$3,$5,'reply',$6::timestamptz+interval '2 minutes')`,
+    [`reconcile-first-${index}`, `reconcile-reply-${index}`, room, human, agent, created]);
+    if (index === 2) {
+      for (const days of [1, 7]) await rootFixture.db.query(`INSERT INTO messages(id,room_id,author_id,text,created_at)
+        VALUES($1,$2,$3,'back',$4::timestamptz+$5::int*interval '24 hours')`,
+      [`reconcile-return-${days}`, room, human, created, days]);
+    }
+  }
+  const periods = await dashboardPeriods(rootFixture.db, measuredAt);
+  for (const period of Object.values(periods)) {
+    expect(period.growth.newPeople).toBe(period.funnel.steps[0]!.count);
+    expect((period.growth.series as {value: number}[]).reduce((sum, p) => sum + p.value, 0))
+      .toBe(period.growth.newPeople);
+  }
+  expect(periods['24h']!.funnel.steps.slice(0, 4).map(s => s.count)).toEqual([2, 2, 2, 2]);
+  expect(periods['24h']!.funnel.returns.map(s => [s.eligible, s.count])).toEqual([[0, null], [0, null]]);
+  expect(periods['28d']!.funnel.returns.map(s => [s.eligible, s.count])).toEqual([[2, 1], [1, 1]]);
+});

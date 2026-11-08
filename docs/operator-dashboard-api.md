@@ -528,6 +528,27 @@ with recent activity in the trailing 168 hours. Hidden or retired owned agents c
 still establish the person's reply milestone. Biggest drop uses the destination
 step key, prefers the later step on equal losses, and is null without any loss.
 
+The page's signup funnel reads `periods[key].funnel` from this same response;
+there is no separate page-side SQL cohort or measurement clock. `signed_up`
+is the Growth `newPeople` count. Workspace growth counts Workspace rows;
+`joined_workspace` counts new people with a current production membership.
+Opting out of the fix sweep does not opt out of aggregate usage metrics.
+
+`funnel.returns` adds `return_1d` and `return_7d`, each with `eligible` and
+nullable `count`. Both use retained ordinary human messages in production Rooms,
+the same activity definition as the period headline. Next-day return is on the
+next Eastern calendar date, measured only after that date has fully ended, among
+people who reached the agent-reply step. Day-seven return requires a message at
+least 168 hours after signup, among next-day returners old enough for that step.
+No eligible people yields `count: null`; eligible people with no returns yields
+zero. Milestones stop at the response's exclusive `measuredAt` boundary.
+
+The page keeps store installs outside the period funnel, with each platform's
+latest complete report date in UTC and its measured daily count. They supply no
+signup conversion denominator. Hourly signup captions sum bars by Eastern date;
+activity captions describe the busiest hour rather than summing distinct people.
+Weekly chart captions describe weeks, not days.
+
 `platformBreakdown {basis: "last_device", counts}` assigns every eligible human
 once to the latest push registration update or device update receipt. Unknown or
 missing platforms become `unknown`; exact observation-time ties use a stable

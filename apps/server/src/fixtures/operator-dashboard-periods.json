@@ -242,7 +242,21 @@
             "count": 1
           }
         ],
-        "biggestDrop": null
+        "biggestDrop": null,
+        "returns": [
+          {
+            "key": "return_1d",
+            "label": "Came back the next day",
+            "eligible": 0,
+            "count": null
+          },
+          {
+            "key": "return_7d",
+            "label": "Still active after day 7",
+            "eligible": 0,
+            "count": null
+          }
+        ]
       },
       "onboardingFunnel": {
         "cohort": "welcome_shown_in_window",
@@ -641,7 +655,21 @@
         "biggestDrop": {
           "key": "active_7d",
           "lost": 1
-        }
+        },
+        "returns": [
+          {
+            "key": "return_1d",
+            "label": "Came back the next day",
+            "eligible": 2,
+            "count": 0
+          },
+          {
+            "key": "return_7d",
+            "label": "Still active after day 7",
+            "eligible": 0,
+            "count": null
+          }
+        ]
       },
       "onboardingFunnel": {
         "cohort": "welcome_shown_in_window",
@@ -869,7 +897,21 @@
             "count": 2
           }
         ],
-        "biggestDrop": null
+        "biggestDrop": null,
+        "returns": [
+          {
+            "key": "return_1d",
+            "label": "Came back the next day",
+            "eligible": 1,
+            "count": 0
+          },
+          {
+            "key": "return_7d",
+            "label": "Still active after day 7",
+            "eligible": 0,
+            "count": null
+          }
+        ]
       },
       "onboardingFunnel": {
         "cohort": "welcome_shown_in_window",
@@ -1092,7 +1134,21 @@
         "biggestDrop": {
           "key": "active_7d",
           "lost": 2
-        }
+        },
+        "returns": [
+          {
+            "key": "return_1d",
+            "label": "Came back the next day",
+            "eligible": 3,
+            "count": 0
+          },
+          {
+            "key": "return_7d",
+            "label": "Still active after day 7",
+            "eligible": 0,
+            "count": null
+          }
+        ]
       },
       "onboardingFunnel": {
         "cohort": "welcome_shown_in_window",
