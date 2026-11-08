@@ -1,4 +1,5 @@
 import { phoneFetch, describe, expect, it, vi, createServer, Webhook, MCP_ORDER_WAKE_HINT, MCP_REVIEW_WAKE_HINT, MCP_WAKE_HINT, backfillMcpMemberRoomsAndAvatars, ensureMcpMember, postMcpWebhook, randomBytes, createHash, randomUUID, Client, StreamableHTTPClientTransport, tokenHash, recordSigninAttempt, pendingMcpWakes, createAgentCommand, routeHumanMessage, openSecrets, deliverMcpMemberWebhooks, runMcpWebhookDelivery, USER, OTHER, AGENT, WORKSPACE, ROOM, opaque, fixtureScope1, type AddressInfo } from './test-support-rooms-mcp.test-support.js';
+import { MCP_WEBHOOK_TABLE, POSTGRES_LIVE_CHANNEL } from './postgres-live-notifications.js';
 
 describe('Rooms connector HTTP OAuth and MCP', () => {
 const scope1 = fixtureScope1();
@@ -318,6 +319,69 @@ const scope1 = fixtureScope1();
     expect(await deliverMcpMemberWebhooks(scope1.db, transport)).toBe(0);
     expect(attempts).toHaveLength(1);
     expect((await scope1.db.query('SELECT 1 FROM rooms_mcp_event_deliveries WHERE delivered_at IS NULL')).rowCount).toBe(0);
+  });
+
+  it.each(['mention', 'wake', 'webhook'])('MCP-ORDER-NOTIFY: %s orders notify the delivery loop and can be claimed', async route => {
+    const { client, member, token, params, grant } = await scope1.eventFixture();
+    if (route === 'webhook') {
+      await scope1.db.query('UPDATE rooms_mcp_clients SET callback_url=$2 WHERE id=$1', [grant.clientId, params.delivery.url]);
+    } else {
+      expect((await scope1.eventCall(token, 'events/subscribe', { ...params, name: route })).error).toBeUndefined();
+    }
+    const handle = (await scope1.db.query<{ handle: string }>('SELECT handle FROM identities WHERE id=$1', [member])).rows[0]!.handle;
+    const source = await scope1.phone.execute('sendRoomMessage', { roomId: ROOM, text: 'Delegate the delivery check.' }, USER);
+    const commander = (await createAgentCommand(scope1.db, {
+      roomId: ROOM, agentId: AGENT, sourceMessageId: source.messageId, reason: 'human_message',
+    }))!;
+    await scope1.daemon.execute('claimAgentCommand', { roomId: ROOM, commandId: commander.id, generationId: 'notify-proof' }, AGENT);
+    const notices: object[] = [];
+    const unlisten = await scope1.db.client.listen(POSTGRES_LIVE_CHANNEL, payload => {
+      const notice = JSON.parse(payload);
+      if (notice.table === MCP_WEBHOOK_TABLE) notices.push(notice);
+    });
+    try {
+      const args = { roomId: ROOM, requestId: commander.turn_request_id, generationId: 'notify-proof',
+        address: ROOM, agent: handle, text: 'Check delivery without a later tag.' };
+      const sent = await scope1.daemon.execute('order', args, AGENT) as { id: string };
+      // A queued row alone is insufficient: the event-driven worker needs this committed notification.
+      expect(notices).toEqual([{ table: MCP_WEBHOOK_TABLE, operation: 'INSERT', roomId: ROOM }]);
+      const received: Record<string, unknown>[] = [];
+      expect(await deliverMcpMemberWebhooks(scope1.db, async (_url, init) => {
+        received.push(JSON.parse(init.body));
+        return new Response(null, { status: 204 });
+      })).toBe(1);
+      expect(route === 'webhook' ? received[0] : received[0]!.data).toMatchObject({
+        commandId: sent.id, address: ROOM, kind: 'order', text: args.text, next: MCP_ORDER_WAKE_HINT,
+      });
+      expect(scope1.data(await client.callTool({ name: 'list_mentions', arguments: {} })).wakes)
+        .toContainEqual(expect.objectContaining({ id: sent.id, kind: 'order' }));
+      notices.length = 0;
+      expect(await scope1.daemon.execute('order', args, AGENT)).toMatchObject({ id: sent.id });
+      expect(notices).toEqual([]);
+      expect(await deliverMcpMemberWebhooks(scope1.db, async () => { throw new Error('duplicate delivery'); })).toBe(0);
+      const rolledBackId = randomBytes(32).toString('hex');
+      await expect(scope1.db.transaction(async tx => {
+        await createAgentCommand(tx, { id: rolledBackId, roomId: ROOM, agentId: member,
+          sourceMessageId: null, reason: 'order', privatePayload: {
+            kind: 'order', authorId: AGENT, fromRoomId: ROOM, text: 'Rolled back order',
+          } });
+        throw new Error('rollback delivery');
+      })).rejects.toThrow('rollback delivery');
+      expect(notices).toEqual([]);
+      expect((await scope1.db.query('SELECT 1 FROM agent_commands WHERE id=$1', [rolledBackId])).rowCount).toBe(0);
+      const pickup = await client.callTool({ name: 'read', arguments: {
+        address: ROOM, commandId: sent.id, facet: 'members',
+      } });
+      expect(pickup.isError, JSON.stringify(pickup)).not.toBe(true);
+      expect((await scope1.db.query('SELECT state,generation_id FROM agent_commands WHERE id=$1', [sent.id])).rows[0])
+        .toMatchObject({ state: 'claimed', generation_id: expect.stringMatching(/^mcp:/) });
+      const report = await client.callTool({ name: 'report', arguments: {
+        address: ROOM, commandId: sent.id, status: 'done', text: 'Delivery checked.',
+      } });
+      expect(report.isError).not.toBe(true);
+      expect((await scope1.db.query('SELECT state FROM agent_commands WHERE id=$1', [sent.id])).rows)
+        .toEqual([{ state: 'complete' }]);
+    } finally { await unlisten(); }
   });
 
   it('MCP-WAKE-1: a subscribed member gets one signed wake for an order, a report, and a corner assignment', async () => {

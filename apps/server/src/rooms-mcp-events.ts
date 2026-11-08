@@ -214,10 +214,14 @@ export function mcpCommandWakeSql(first: number): { cte: string; join: string; p
       ON CONFLICT(subscription_id,command_id) WHERE command_id IS NOT NULL DO NOTHING
       RETURNING room_id
     )`,
-    join: `LEFT JOIN LATERAL (
+    // The aggregate always returns one row, even without deliveries. A LEFT
+    // JOIN whose output is unused can be removed by PostgreSQL, skipping
+    // pg_notify while still committing the queued delivery. CROSS JOIN keeps
+    // the notification in the execution plan without filtering the command.
+    join: `CROSS JOIN LATERAL (
       SELECT ${notifyMcpWakesSql(channel)} notified
       FROM (SELECT DISTINCT room_id FROM queued_mcp_wakes) notices
-    ) mcp_wake_notice ON true`,
+    ) mcp_wake_notice`,
   };
 }
 
