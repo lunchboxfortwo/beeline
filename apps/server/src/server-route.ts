@@ -87,18 +87,7 @@ export async function route(
     }
     return;
   }
-  if (method === 'POST' && url.pathname === '/v1/free-agents/sleep') {
-    const agentId = await daemonIdentity(request, options);
-    if (!agentId) {
-      await refuseDaemon(request, response, options);
-      return;
-    }
-    const input = await body(request);
-    json(response, 200, options.freeAgents
-      ? await options.freeAgents.requestSleep(agentId, { refresh: input.refresh === true })
-      : { sleep: false });
-    return;
-  }
+
   const computer = /^\/s\/([A-Za-z0-9_-]{43})\/?$/.exec(url.pathname);
   if (method === 'GET' && computer) {
     await serveComputerSession(request, response, options.database, options.live, computer[1]!);

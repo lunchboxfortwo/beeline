@@ -1368,9 +1368,9 @@
             "reason": "Retained without runtime use until the previous server drains during this rolling release.",
             "drop": "Next release after turn-lifecycle cleanup: docs/agent-server-surfaces.md#turn-recovery-storage-retirement"
           },
-          "runtime_operation_id": "Fences provider results against a newer acquisition or authenticated helper connection.",
+          "runtime_operation_id": "Fences provider results against a newer lifecycle operation; only FreeAgentService writes it.",
           "runtime_owner": "Binds the in-flight provider action to its existing server-source owner across instances.",
-          "runtime_phase": "Stores the committed pre-execution phase and provider version for canonical Room reads after reconnect."
+          "runtime_phase": {"reason":"Retained inertly through serving and rollback overlap; pending UI is projected from commands.","drop":"Post-drain contract: docs/agent-server-surfaces.md#turn-recovery-storage-retirement"}
         }
       },
       "github_auth_flows": {

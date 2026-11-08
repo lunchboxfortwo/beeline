@@ -1,6 +1,6 @@
 import { parseOpenRouterEndpoints, piInputModalities } from './openrouter-routing.js';
-import { chmod, mkdir, readFile, rm, writeFile } from 'node:fs/promises';
-import { dirname, resolve } from 'node:path';
+import { readFile, rm } from 'node:fs/promises';
+import { resolve } from 'node:path';
 import { writePrivateFileAtomically } from './atomic-private-file.js';
 import { LEGACY_ACCESS_POLICY } from './access-policy.js';
 import { agentBehavior, resolveAgentCommand } from './agent-command.js';
@@ -21,7 +21,7 @@ import {
  * `beeline free-agent`: the entry point on a free starter agent's Fly Machine.
  * The first boot trades the Machine's one-time bootstrap token for its agent
  * identity, a daemon exchange token and a model token; every boot then hosts
- * that one agent with the idle sleep of `free-agent-idle.ts`. The Machine's
+ * that one agent. The server owns Machine suspension. The Machine's
  * root filesystem persists, so later boots skip the bootstrap.
  */
 export interface FreeAgentGrant {
@@ -40,11 +40,6 @@ export interface FreeAgentGrant {
   modelToken: string;
   modelBaseUrl: string;
   upstreamModel: string;
-  idleSeconds: number;
-}
-
-interface FreeAgentSettings {
-  idleSeconds: number;
 }
 
 /** Pi's private provider uses only the scoped proxy token, resolved from env. */
@@ -112,12 +107,6 @@ export async function fetchFreeAgentGrant(
   return await response.json() as FreeAgentGrant;
 }
 
-async function writePrivate(path: string, contents: string): Promise<void> {
-  await mkdir(dirname(path), { recursive: true, mode: 0o700 });
-  await writeFile(path, contents, { mode: 0o600 });
-  await chmod(path, 0o600);
-}
-
 async function hasDaemonToken(configPath: string): Promise<boolean> {
   try {
     const transport = (await readRuntimeRecord(configPath)).transport;
@@ -135,12 +124,8 @@ export async function stageFreeAgent(
   const supervisorRoot = defaultSupervisorRoot(env);
   const directory = resolve(supervisorRoot, 'beeline', 'free-agent');
   const llmEnvFile = resolve(directory, 'model.env');
-  await writePrivate(llmEnvFile, freeAgentModelEnv(grant));
-  await writePrivate(
-    resolve(directory, 'settings.json'),
-    `${JSON.stringify({ idleSeconds: grant.idleSeconds } satisfies FreeAgentSettings)}\n`,
-  );
-  await writePrivate(resolve(env.HOME ?? '/root', '.pi/agent/models.json'), freeAgentPiConfig(grant, await freeAgentInput(grant.upstreamModel)));
+  await writePrivateFileAtomically(llmEnvFile, freeAgentModelEnv(grant));
+  await writePrivateFileAtomically(resolve(env.HOME ?? '/root', '.pi/agent/models.json'), freeAgentPiConfig(grant, await freeAgentInput(grant.upstreamModel)));
   const agent = await freeAgentPiCommand(env);
   const localConfig = loadBodyConfig({ workspaceRoot: process.cwd(), llmEnvFile, agent, env });
   const staged = await stageMonolithAgentRuntime({
@@ -204,7 +189,7 @@ async function upgradeFreeAgentHarness(configPath: string, env: NodeJS.ProcessEn
     const model = runtime.modelSelection?.model;
     if (!model?.startsWith('beeline/')) throw new Error('free agent proxy model is missing');
     const agent = await freeAgentPiCommand(env);
-    await writePrivate(resolve(env.HOME ?? '/root', '.pi/agent/models.json'), freeAgentPiConfig({
+    await writePrivateFileAtomically(resolve(env.HOME ?? '/root', '.pi/agent/models.json'), freeAgentPiConfig({
       modelBaseUrl: provider.options.baseURL,
       upstreamModel: model.slice('beeline/'.length),
     }, await freeAgentInput(model.slice('beeline/'.length))));
@@ -221,35 +206,12 @@ async function upgradeFreeAgentHarness(configPath: string, env: NodeJS.ProcessEn
     const model = runtime.modelSelection?.model;
     if (provider?.baseUrl && model?.startsWith('beeline/')) {
       const upstreamModel = model.slice('beeline/'.length);
-      await writePrivate(path, freeAgentPiConfig({ modelBaseUrl: provider.baseUrl, upstreamModel },
+      await writePrivateFileAtomically(path, freeAgentPiConfig({ modelBaseUrl: provider.baseUrl, upstreamModel },
         await freeAgentInput(upstreamModel)));
     }
   }
   const reconciled = `${Object.entries(normalized).map(([name, value]) => `${name}=${value}`).join('\n')}\n`;
   if (reconciled !== original) await writePrivateFileAtomically(runtime.llmEnvFile, reconciled);
-}
-
-/**
- * POST the idle report; the server answers whether it will sleep this Machine.
- * `refresh` asks the server to reboot before suspension, so that boot installs
- * the newer helper release the server announced.
- */
-export async function requestFreeAgentSleep(
-  configPath: string,
-  options: { refresh?: boolean } = {},
-  fetchImpl: typeof fetch = fetch,
-): Promise<boolean> {
-  const transport = (await readRuntimeRecord(configPath)).transport;
-  if (!transport || !('daemonToken' in transport) || !transport.daemonToken)
-    throw new Error('free agent has no daemon token');
-  const response = await fetchImpl(new URL('/v1/free-agents/sleep', transport.baseUrl), {
-    method: 'POST',
-    headers: { authorization: `Bearer ${transport.daemonToken}`, 'content-type': 'application/json' },
-    body: JSON.stringify({ refresh: options.refresh === true }),
-    signal: undefined,
-  });
-  if (!response.ok) throw new Error(`sleep request failed: HTTP ${response.status}`);
-  return ((await response.json()) as { sleep?: unknown }).sleep === true;
 }
 
 export async function runFreeAgentCommand(env: NodeJS.ProcessEnv = process.env) {
@@ -276,16 +238,10 @@ export async function runFreeAgentCommand(env: NodeJS.ProcessEnv = process.env) 
   startupStep('staged');
   await upgradeFreeAgentHarness(configPath, env);
   startupStep('harness');
-  const settings = JSON.parse(
-    await readFile(resolve(supervisorRoot, 'beeline', 'free-agent', 'settings.json'), 'utf8'),
-  ) as FreeAgentSettings;
   startupStep('helper-start');
   return runMachineHelper({
     configPaths: [configPath],
     env,
-    freeAgentIdle: {
-      idleMs: Math.max(10, settings.idleSeconds) * 1_000,
-      requestSleep: (sleep) => requestFreeAgentSleep(configPath, sleep),
-    },
+    freeAgent: true,
   });
 }

@@ -137,20 +137,9 @@ export async function claimAgentConnection(
       WHERE agent_id=$1 AND state='claimed' AND turn_owner_connection_id IS NULL
         AND reason<>'mcp_call' AND COALESCE(generation_id,'') NOT LIKE 'mcp:%'`,[agentId]);
     const announcement = await writeAgentAnnouncement(db, undefined, agentId, metadata, connection);
-    // A free agent's Machine is serving again; the wake latency ends here.
-    const freeAgent = await db.query<{ previous: string }>(
-      `WITH old AS (SELECT agent_id,state FROM free_agents WHERE agent_id=$1 FOR UPDATE)
-       UPDATE free_agents f SET state='running',runtime_owner=NULL,runtime_operation_id=$2,
-         runtime_phase=jsonb_build_object('operationId',$2::text,'phase','preparing'),updated_at=now()
-       FROM old WHERE f.agent_id=old.agent_id AND f.removed_at IS NULL AND f.state NOT IN ('failed','destroyed')
-       RETURNING old.state previous`,
-      [agentId,connection.connectionId],
-    );
-    if (freeAgent.rows[0])
-      await db.query(
-        `INSERT INTO free_agent_events(agent_id,kind,detail) VALUES($1,'connected',$2::jsonb)`,
-        [agentId, JSON.stringify({ previous: freeAgent.rows[0].previous,operationId:connection.connectionId,phase:'preparing' })],
-      );
+    await db.query(`INSERT INTO free_agent_events(agent_id,kind,detail)
+      SELECT agent_id,'connected',jsonb_build_object('connectionId',$2::text) FROM free_agents
+      WHERE agent_id=$1 AND removed_at IS NULL`,[agentId,connection.connectionId]);
     return { epoch: Number(claimed.rows[0]?.epoch ?? 0), announcement };
   });
   const { epoch, announcement } = claimedConnection;
@@ -176,12 +165,6 @@ export async function releaseAgentConnection(
       [agentId, connectionId],
     );
     if (!current.rowCount) return undefined;
-    await db.query(`UPDATE free_agents SET runtime_owner=NULL,runtime_operation_id=$2,
-      runtime_phase=jsonb_build_object('operationId',$2::text,'phase','reconnecting'),updated_at=now()
-      WHERE agent_id=$1 AND removed_at IS NULL`, [agentId,randomUUID()]);
-    await db.query(`INSERT INTO free_agent_events(agent_id,kind,detail)
-      SELECT agent_id,'runtime_phase',runtime_phase FROM free_agents WHERE agent_id=$1`,[agentId]);
-
     await db.query(`UPDATE agent_commands command SET state='pending',generation_id=NULL,
       lease_expires_at=NULL,claimed_at=NULL,turn_owner_connection_id=NULL,turn_owner_epoch=NULL
       FROM agent_connections connection WHERE connection.agent_id=$1 AND connection.connection_id=$2

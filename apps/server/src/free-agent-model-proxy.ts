@@ -577,7 +577,7 @@ export async function completeStarterBanter(options: FreeAgentModelProxyOptions,
     `SELECT f.agent_id,f.owner_id,f.model,r.room_id FROM starter_onboarding_runs r
      JOIN free_agents f ON f.owner_id=r.user_id AND f.agent_id=ANY(ARRAY[r.beebee_id,r.luna_id])
      JOIN memberships m ON m.identity_id=f.agent_id AND m.room_id=r.room_id AND m.removed_at IS NULL
-     WHERE r.id=$1 AND f.agent_id=$2 AND f.removed_at IS NULL AND f.state NOT IN ('failed','destroyed') AND r.status='generating'
+     WHERE r.id=$1 AND f.agent_id=$2 AND f.removed_at IS NULL AND r.status='generating'
        AND r.created_at>clock_timestamp()-interval '2 minutes'`, [runId, agentId])).rows[0];
   if (!agent) throw new Error('Onboarding generation is no longer active');
   let status = 200;

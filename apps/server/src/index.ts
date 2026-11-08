@@ -1,3 +1,4 @@
+import { notifyLive } from './postgres-live.js';
 import { OwnedModelCredentials } from './owned-model-credential.js';
 import { requiredServerSetting as required } from './server-configuration.js';
 import { sentryEligibilityKey } from './sentry-wake-source.js';
@@ -505,33 +506,20 @@ async function runFreeAgentOperation(refresh: boolean, workspaceId: string | und
   const config = freeAgentConfigFromEnv(process.env, required('PUBLIC_ORIGIN'));
   if (!config) throw new Error('free agents are not configured on this server');
   const database = new PostgresDatabase(required('DATABASE_URL'), 1, { mode: 'long-running' });
-  const presence = new ConnectionPresence(database,new LiveHub());
   try {
-    await presence.start();
-    const service = new FreeAgentService(
-      database,
-      config,
-      new FlyMachines(
-        required('FLY_FREE_AGENT_API_TOKEN'),
-        process.env.FLY_FREE_AGENT_APP || 'beeline-free-agents',
-        fetch,
-        process.env.FLY_FREE_AGENT_API_ORIGIN || undefined,
-      ),
-      async () => {
-        throw new Error('bootstrap is served by the running server');
-      },
-      undefined,presence.instanceId,
-    );
     if (refresh) {
-      await service.refreshSleepingMachines();
+      await notifyLive(database,{table:'free_agents',operation:'RELEASE',roomId:''});
+      console.log('[free-agents] release inventory requested from running server owners; readiness awaits helper connections');
       return;
     }
+    const service = new FreeAgentService(database,config,new FlyMachines(
+      required('FLY_FREE_AGENT_API_TOKEN'),process.env.FLY_FREE_AGENT_APP || 'beeline-free-agents',fetch,
+      process.env.FLY_FREE_AGENT_API_ORIGIN || undefined),async () => { throw new Error('bootstrap is served by the running server'); });
     const agentId = await addFreeAgentToWorkspace(database, service, workspaceId!);
     console.log(agentId
       ? `[free-agents] added free agent ${agentId} to Workspace ${workspaceId}`
       : `[free-agents] Workspace ${workspaceId} already has a free agent, or its owner is at the limit`);
   } finally {
-    await presence.stop();
     await database.close();
   }
 }

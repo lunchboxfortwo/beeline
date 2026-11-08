@@ -157,7 +157,7 @@
       "id": "apps/body/src/free-agent-vm.ts::fetch",
       "file": "apps/body/src/free-agent-vm.ts",
       "kind": "fetch",
-      "count": 3,
+      "count": 2,
       "compatibility": "legacy-only",
       "phase": "M5"
     },
@@ -165,7 +165,7 @@
       "id": "apps/body/src/free-agent-vm.ts::fetch-impl",
       "file": "apps/body/src/free-agent-vm.ts",
       "kind": "fetch-impl",
-      "count": 2,
+      "count": 1,
       "compatibility": "legacy-only",
       "phase": "M5"
     },

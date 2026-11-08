@@ -20,7 +20,7 @@ import { DaemonService } from '../daemon-service.js';
 
 
   export async function daemonNegotiateOwnedModel(ctx: DaemonContext, agentId: string, source: HelperTurnOwnershipSource, installed: boolean): Promise<OwnedModelNegotiation> {
-    const free = (await ctx.database.query<{ eligible: boolean }>(`SELECT removed_at IS NULL AND state='running'
+    const free = (await ctx.database.query<{ eligible: boolean }>(`SELECT removed_at IS NULL
       AND model_token_hash IS NOT NULL eligible FROM free_agents WHERE agent_id=$1`, [agentId])).rows[0];
     if (!free) return { freeAgent: false };
     const configuration = ctx.ownedModel;

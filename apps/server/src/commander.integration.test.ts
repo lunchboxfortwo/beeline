@@ -361,12 +361,11 @@ it('Reproduction R1: elapsed time keeps work queued behind a claimed turn', asyn
     privatePayload: { kind: 'lifecycle', text: 'Background tool completed', authorId: SYSTEM_IDENTITY_ID, fromRoomId: opened.cornerId } });
 
   expect((await rootFixture.db.query(`SELECT generation_id FROM agent_turns WHERE request_id=$1`, [queued!.turn_request_id])).rows)
-    .toEqual([{ generation_id: 'pending:' + queued!.id }]);
+    .toEqual([]);
   await claim(running);
-  await rootFixture.db.query(`UPDATE agent_turns SET created_at=now()-interval '2 minutes'
-    WHERE room_id=$1 AND request_id=$2`, [opened.cornerId, queued!.turn_request_id]);
+  await rootFixture.db.query(`UPDATE agent_commands SET created_at=now()-interval '2 minutes' WHERE id=$1`,[queued!.id]);
   expect((await rootFixture.db.query(`SELECT status FROM agent_turns WHERE room_id=$1 AND request_id=$2`,
-    [opened.cornerId, queued!.turn_request_id])).rows).toEqual([{status:'working'}]);
+    [opened.cornerId, queued!.turn_request_id])).rows).toEqual([]);
   expect((await rootFixture.db.query(`SELECT text FROM messages WHERE room_id=$1 AND text LIKE '%did not claim%'`,
     [opened.cornerId])).rows).toEqual([]);
   expect((await rootFixture.db.query(`SELECT state FROM agent_commands WHERE id=$1`, [queued!.id])).rows)

@@ -36,7 +36,7 @@ soul. Existing free agents keep their names.
   The legacy hello teaches Room replies, corners and connectors, then asks what the person is working on. It contains no repository card; the agent offers one only for coding or GitHub-connection intent.
   The hello tags the owner through the normal mention/push path and uses the
   agent's actual handle. It creates no model turn or Machine. The first real
-  queued work provisions the Machine through `FreeAgentService.kick` from its committed work event.
+  queued work provisions the Machine through `FreeAgentService.reconcile` from its committed work event.
   A creator owns at most
   `BEELINE_FREE_AGENT_MAX_PER_OWNER` (default 3) free agents.
 - **First boot.** The pinned image contains its compatible helper and Pi. The
@@ -46,48 +46,42 @@ soul. Existing free agents keep their names.
   binding persist on the root filesystem. A lost create reply is reconciled by
   stable agent identity and adopts the existing Machine without replacing files
   or rotating its bootstrap identity.
-- **Sleep.** Authenticated helper connections, committed command updates and
-  connector reports admit a sleep check through `FreeAgentService.subscribeToWakes`.
-  The server refuses while any command is pending or claimed, or a connector
-  install/sign-in is active. Completion, failure or disconnect releases that
-  protection on its own committed event. Suspension completion reads pending commands and connector work together so work committed during the snapshot resumes immediately. Otherwise the server records
-  `sleeping` and asks Fly to suspend the Machine. Suspend failures are reported
-  without falling back to a cold stop. A helper behind the announced release
-  asks for `refresh`: the server boots it on the configured image immediately,
-  so the pinned image/helper is ready before the next message. The refreshed helper connects
-  and its connection event admits suspension once no work remains. Image promotion runs
-  `--refresh-free-agents` to warm existing stopped or outdated sleeping Machines;
-  active helpers reconcile the image when their work finishes. There is no idle
-  countdown, polling, periodic sweep or timed retry. The legacy helper sleep
-  endpoint remains available. Confirmed Fly suspension checks for work that
-  arrived during the snapshot and admits one resume, including a command already
-  claimed by the still-serving helper. Removal and command cancellation remain authoritative.
-  The helper never updates in place.
-- **Wake.** The Fly adapter submits one start request per admitted action. HTTP 412 and lost replies return to the owner without a timer or resubmission (`fly-machines.test.ts`). Before starting an existing Machine, the server compares its image
-  with the configured published digest and updates it while keeping its complete
-  configuration and persistent rootfs.
-  Every committed `agent_commands` INSERT for a free agent calls
-  `FreeAgentService.wake`. A committed connector-assignment notification also
-  wakes a free agent with active connector installation or sign-in work, independently of model-spend admission. There is no leader sweep, retry deadline,
-  idle reaper or retention deletion. A failed provider call waits for another
-  actual request. Wakes are never
-  suppressed for an offline Machine (`agentMachineOfflineSql` exempts free agents). A
-  released connection keeps presence `online`, `held`, `asleep`, so mentions never get
-  "its helper is offline". `LiveLink` owns the machine socket; an actual socket
-  close admits reconnection.
-  For every agent, dispatch also writes a working turn before helper pickup.
-  A helper claim replaces the reserved `pending:<command id>` generation in
-  that same row. Claimed work belongs to its connection until it reports a result.
-  A disconnect returns unfinished commands to pending without a failure notice.
-  The next connection claims them again; no pickup or silence timer ends a turn.
-  Delayed wakes paint when released; passive computer observations stay silent.
+- **Work and sleep.** Every committed command, connector report, authenticated
+  connection, removal, listener recovery and release signal enters
+  `FreeAgentService.reconcile`. That owner serializes create, image update, start,
+  suspend and destroy across servers. It reads pending/claimed commands, connector
+  work, Fly's observed machine/version and current authenticated connection.
+  Claimed invocations and connector installs finish before image replacement.
+  A connected helper with no remaining work is suspended; the provider's completed
+  snapshot hands any work committed during suspension back to the same owner.
+  There is no countdown, periodic sweep or timed retry.
+- **Image replacement and wake.** The owner preserves the full machine config and
+  persistent filesystem. A successful image POST does not establish readiness:
+  the owner observes completion for the returned Fly version before deciding
+  whether an ordinary start is required. Stopped, suspended and created machines
+  with work start once from that observation. A started machine awaits its real
+  authenticated helper connection. A lost provider reply gets one authoritative
+  observation, never a replay of the unknown mutation; saved commands remain
+  pending. Recovery after an unobservable provider completion requires another
+  actual signal. No external-completion/eventual-recovery guarantee is implied.
+  Connection registration manages connection facts only and cannot clear the
+  lifecycle owner's token. Model admission uses current connection and claimed
+  invocation authority, independently of retired lifecycle fields.
+- **Message display.** An accepted pending human command projects starting in the
+  existing thinking line. Only a real claim writes a working turn and starts its
+  elapsed counter. Terminal work clears the line. Full reads, send receipts and
+  socket command projections share the same server projection; the optional
+  `runtimePhase` wire field remains for older phones, derived from the command.
+  There is no stored preparation phase or synthetic `pending:*` working turn.
+  A released helper returns unfinished commands to pending without inventing a
+  failure. Explicit Stop, membership and retirement remain authoritative.
 - **Removal.** The existing Members remove action admits the agent owner or a
   Workspace owner/admin. Removal from any Workspace retires the free-agent runtime,
   matching the existing global daemon retirement. Its transaction keeps a permanent `removed_at` tombstone,
   revokes model/bootstrap and daemon access, and records `removed`. After commit,
   cleanup deletes the Fly Machine without delaying the removal. A later committed source or real recovery can revisit
   failed deletion, including a Machine created by provisioning already in flight.
-  Removed agents cannot bootstrap, wake, reap back into service, or be replaced by
+  Removed agents cannot bootstrap, wake, or be replaced by
   `--add-free-agent` in that Workspace. Beebee's server-posted first hello ends by explaining how
   to remove it from Members.
 - **Existing Workspaces.** An operator gives one its free agent with
@@ -107,10 +101,13 @@ soul. Existing free agents keep their names.
   owner's allowance like any turn. Several events while the Machine sleeps are
   coalesced on return into one turn.
 
-Every transition writes `free_agent_events`. These rows are the source of the
-rewake latency numbers from `scripts/prove-free-agent.mjs`: created, provisioned,
-bootstrapped, connected, sleep_requested, slept, wake_requested, machine_started,
-reaped_idle, deleted_idle and allowance_reached.
+`free_agent_events` records factual provisioning, connection, start requests,
+suspension, retirement and spend observations. Historical state/phase events remain
+available for audit. The physical `state`, `runtime_phase` and retired preparation
+columns remain through serving and rollback overlap; current lifecycle and model
+admission never read or write their values. Physical removal requires the existing
+post-drain contract migration. The operation token is exclusive effect ownership,
+not readiness. Only `FreeAgentService` writes and releases it.
 
 Existing free agents switch to Pi on their next cold boot. The helper upgrades
 the persisted runtime and writes a private Pi provider configuration before
@@ -220,19 +217,15 @@ generation, connection and Room membership checks, the daily token allowance,
 and the shared daily dollar budget. Lost model responses retain their original
 invocation receipt; they do not authorize another paid request.
 
-Runtime preparation is outside execution. The pending-command Room DTO carries
-server-owned starting, release-download, preparation, reconnect and saved-message
-failure phases in the existing thinking line, without an elapsed counter. Claims
-start execution from the server claim timestamp. A pinned image runs its baked
-helper without a boot-time installer or refresh loop. After updating a stopped
-or suspended Machine, the acquisition owner waits for the returned version to
-reach `stopped`, then sends one ordinary start. Running Machines own their update
-restart. A lost result gets one fresh connection and authoritative Machine
-read. Listener bootstrap/reconnect and release changes read pending desired work,
-including stale waking rows. Automatic idle suspension and shared CPU remain.
-Acquisition keeps a helper with a current live connection `running`; preparation
-must not demote it to `waking` and revoke its claimed model access. The registration
-and catch-up regression is in `free-agent-acquisition.test.ts`.
+Runtime preparation is outside execution. Pending commands are saved work;
+claims begin execution at the server claim timestamp. The image always runs its
+baked helper and pinned Pi/ACP. Free agents have no helper self-update, local
+refresh flag, sleep HTTP endpoint or settings/idle-window file. Generic helpers
+retain their own release transaction. `free-agent-acquisition.test.ts` covers
+connection/model authority, pending presentation and provider observations;
+`free-agent-ownership.postgres.test.ts` proves two independent PostgreSQL owners
+and the final-read handoff race. Run each Vitest suite separately with
+`--maxWorkers=2 --minWorkers=1`.
 
 At 80% of whichever allowance applies (2.4M of the default 3M daily cap, or 8M of the 10M first-day cap), settlement posts one plain allowance notice per owner per UTC day into the room where the person is working, with the midnight UTC reset and a Members ->
 Add agent link. The owner must be a room member; otherwise nothing is posted. Delivery does not call a model. The warning records
@@ -253,8 +246,7 @@ Free agents run when all of these are set:
 (scoped to the app), and for the model `BEELINE_FREE_AGENT_MODEL_KEY`. Optional:
 `FLY_FREE_AGENT_APP`, `FLY_FREE_AGENT_REGION`, `FLY_FREE_AGENT_CPUS`,
 `FLY_FREE_AGENT_MEMORY_MB` (1 shared CPU, 2048 MB: with 1024 MB a Machine with no swap stalled after its first turn),
-`BEELINE_FREE_AGENT_IDLE_SECONDS`, `BEELINE_FREE_AGENT_REAP_IDLE_SECONDS`,
-`BEELINE_FREE_AGENT_DELETE_AFTER_DAYS`, `BEELINE_FREE_AGENT_DAILY_TOKENS`,
+`BEELINE_FREE_AGENT_DAILY_TOKENS`,
 `BEELINE_FREE_AGENT_LIFETIME_TOKENS`,
 `BEELINE_FREE_AGENT_CACHED_TOKEN_WEIGHT` (0.25),
 `BEELINE_FREE_AGENT_DAILY_BUDGET_USD` (25),
@@ -291,15 +283,18 @@ The server release leg (`.github/actions/server-leg/action.yml`) builds
 digest, and stages that digest as `FLY_FREE_AGENT_IMAGE` before the release's
 existing server rollout. Each server receives it during that rollout; no
 post-release job restarts server Machines. Publication failure stops the leg
-before deployment. After rollout, the leg verifies the setting on each server
-and refreshes every eligible sleeping Machine. Fly exec uses the absolute
-`/app/apps/server/dist/index.js` entrypoint and checks the JSON remote exit code;
-flyctl's local exit status does not reflect remote command failure. The refresh
-logs selected, started, unchanged and failed counts. A fully shipped rerun skips
-image publication and server updates but still verifies and refreshes helpers,
-so a partial refresh failure cannot be hidden by an already-shipped server.
-`free-agent-refresh.test.ts` covers 32 sleepers, exclusion fences, partial
-failure, connection-driven suspension and subsequent warm wake.
+before deployment. After rollout, the leg verifies the image setting on each server and
+`--refresh-free-agents` publishes a release signal to the running owners. It does
+not create a second service or claim that a notification is helper readiness.
+Startup/recovery/release inventory visits every mapped machine regardless of the
+retired state, adopts known metadata mappings, leaves idle identities unprovisioned,
+and reports unmapped provider machines as preserved ownership discrepancies.
+A failed observation does not skip the rest of that finite inventory.
+After release, firstmate verifies that a stopped free agent in a firstmate-owned
+test Room answers a fresh message and checks actual image/connection/work facts;
+a successful signal or update POST alone is insufficient.
+`free-agent-refresh.test.ts` covers all retired state values, deferred claimed
+work, partial failures and preserved unmapped machines.
 `scripts/build-free-agent-image.sh` builds the
 same image by hand.
 `npm run prove:free-agent:docker-machines` stands in for the Machines API with
@@ -323,8 +318,11 @@ records a disposable Fly Machine cold stop/start and the stale-owner regression.
 After building the server and image, `node infra/free-agent/cold-start-proof.mjs`
 creates a disposable local database and fresh test Workspace, then drives the
 real server, image and Pi through a mention and reply. Docker substitutes for
-Fly and an immediate local model response substitutes for the provider; the
-timed artifact identifies both stand-ins. Set `PROOF_IMAGE` to choose an image.
+Fly (including HOME persistence), and a deterministic
+local model response substitutes for the provider; the artifact identifies both
+stand-ins. The proof uses two server processes and answers fresh messages after
+a cold stop, an image replacement while stopped and concurrent command/release
+signals, retaining files and checking one paid-attempt receipt per command. Set `PROOF_IMAGE` to choose an image.
 
 Reproduction `cold-beebee-first-reply`, Tubing Crew on 2026-10-16: mention
 17:52:42Z; Machine booted 17:52:58Z; helper download 17:53:00–17:53:17Z;

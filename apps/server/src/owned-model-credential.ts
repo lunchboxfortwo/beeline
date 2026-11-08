@@ -117,7 +117,7 @@ const CURRENT = `SELECT command.agent_id,starter.owner_id,room.workspace_id,room
    AND immutable.connection_id=command.turn_owner_connection_id AND immutable.connection_epoch=command.turn_owner_epoch
  WHERE command.id=$1 AND command.agent_id=$2 AND command.generation_id=$3 AND command.action IN ('input','resume')
    AND command.turn_owner_connection_id=COALESCE(connection.turn_connection_id,connection.connection_id) AND command.turn_owner_epoch=COALESCE(connection.turn_connection_epoch,connection.epoch)
-   AND connection.released_at IS NULL AND starter.removed_at IS NULL AND starter.state='running'
+   AND connection.released_at IS NULL AND starter.removed_at IS NULL
    AND starter.model_token_hash IS NOT NULL AND command.claimed_at IS NOT NULL
    AND room.archived_at IS NULL AND parent.archived_at IS NULL
    AND EXISTS(SELECT 1 FROM memberships workspace WHERE workspace.workspace_id=room.workspace_id AND workspace.room_id IS NULL

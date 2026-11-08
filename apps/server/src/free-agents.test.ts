@@ -53,7 +53,6 @@ const ORDINARY = 'c'.repeat(64);
 
 const TEST_FREE_AGENT_CONFIG: FreeAgentConfig = {
   model: 'deepseek/deepseek-v4-flash',
-  idleSeconds: 60,
   maxPerOwner: 3,
   dailyTokenCap: 1_000_000,
   firstDayTokenCap: 1_000_000,
@@ -64,8 +63,6 @@ const TEST_FREE_AGENT_CONFIG: FreeAgentConfig = {
   region: 'iad',
   cpus: 1,
   memoryMb: 1024,
-  reapIdleMs: 300_000,
-  deleteAfterMs: 30 * 86_400_000,
 };
 
 /** Fly Machines stand-in: records every call and keeps each Machine's state. */
@@ -86,6 +83,13 @@ class FakeMachines implements FreeAgentMachines {
     this.specs.push(spec);
     this.states.set(id, 'started');
     return { id };
+  }
+  async list() {
+    return Promise.all([...this.states.keys()].map(id => this.read(id))).then(rows=>rows.filter(row=>row!==undefined));
+  }
+  async update(machine: import('./fly-machines.js').FreeAgentMachine,image:string) {
+    this.specs[Number(machine.id.slice(1))-1]!.image=image;
+    return (await this.read(machine.id))!;
   }
   async find(agentId: string) {
     const index = this.specs.findIndex((spec) => spec.agentId === agentId);
@@ -376,7 +380,7 @@ describe('free starter agents', () => {
     const agent = (await db.query<{ agent_id: string }>(`SELECT f.agent_id FROM free_agents f JOIN identities i ON i.id=f.agent_id WHERE workspace_id=$1 ORDER BY i.name`, [result.id])).rows[0];
     if (agent) {
       await createAgentCommand(db, { roomId: result.roomId, agentId: agent.agent_id, sourceMessageId: null, reason: 'human_tag' });
-      await freeAgents.provision(agent.agent_id);
+      await freeAgents.reconcile(agent.agent_id);
     }
     return result;
   };
@@ -523,7 +527,7 @@ describe('free starter agents', () => {
     expect((await db.query(`SELECT 1 FROM starter_onboarding_runs WHERE user_id=$1`, [OWNER])).rowCount).toBe(1);
     // Beebee has done work: a running Machine and a stored turn trace.
     await createAgentCommand(db, { roomId, agentId: team[0]!, sourceMessageId: null, reason: 'human_tag' });
-    await freeAgents.provision(team[0]!);
+    await freeAgents.reconcile(team[0]!);
     await settle();
     expect((await freeAgentOf(id)).fly_machine_id).toBe('m1');
     for (const agentId of team)
@@ -600,8 +604,7 @@ describe('free starter agents', () => {
       pairedBy: OWNER,
       monolithBaseUrl: 'https://server.test',
       modelBaseUrl: 'https://server.test/v1/free-agents/model',
-      idleSeconds: 60,
-    });
+        });
     expect(grant.modelToken).toMatch(/^bfm_/);
     expect(exchanges).toEqual([agent.agent_id]);
     // A retried first boot gets a fresh exchange and model token; the old model token dies.
@@ -635,7 +638,7 @@ describe('free starter agents', () => {
     try {
       live.publish({ type: 'invalidate', roomId: '', reason: 'connector-assignment', targetAgentId: agent.agent_id });
       await vi.waitFor(() => expect(machines.calls).toEqual([`start ${agent.fly_machine_id}`]));
-      expect(await freeAgents.requestSleep(agent.agent_id)).toEqual({ sleep: false });
+      await freeAgents.reconcile(agent.agent_id);
     } finally { off(); }
   });
 
@@ -648,80 +651,6 @@ describe('free starter agents', () => {
       await settle();
       expect(machines.calls).toEqual([]);
     } finally { off(); }
-  });
-
-  it('sleeps only when no wake is pending and leaves suspend failures visible without stopping', async () => {
-    const { id, roomId } = await createWorkspace();
-    await settle();
-    const agent = await freeAgentOf(id);
-    // The owner request is still pending: no sleep.
-    expect(await freeAgents.requestSleep(agent.agent_id)).toEqual({ sleep: false });
-    await db.query(`UPDATE agent_commands SET state='complete',completed_at=now() WHERE agent_id=$1`, [
-      agent.agent_id,
-    ]);
-    await db.query(`UPDATE free_agents SET state='running' WHERE agent_id=$1`, [agent.agent_id]);
-    machines.calls.length = 0;
-    expect(await freeAgents.requestSleep(agent.agent_id)).toEqual({ sleep: true });
-    await new Promise((resolve) => setTimeout(resolve, 400));
-    expect(machines.calls).toEqual(['suspend m1']);
-    expect(await freeAgentOf(id)).toMatchObject({ state: 'sleeping' });
-    // Asleep is not a second sleep.
-    expect(await freeAgents.requestSleep(agent.agent_id)).toEqual({ sleep: false });
-
-    await db.query(`UPDATE free_agents SET state='running' WHERE agent_id=$1`, [agent.agent_id]);
-    machines.failSuspend = true;
-    machines.calls.length = 0;
-    expect(await freeAgents.requestSleep(agent.agent_id)).toEqual({ sleep: true });
-    await new Promise((resolve) => setTimeout(resolve, 400));
-    expect(machines.calls).toEqual(['suspend m1']);
-    expect(roomId).toBeTruthy();
-  });
-
-  it('suspends the baked helper without an installer refresh cycle',async()=>{
-    const {id,roomId}=await createWorkspace();await settle();const agent=await freeAgentOf(id);
-    await db.query(`UPDATE agent_commands SET state='complete',completed_at=now() WHERE agent_id=$1`,[agent.agent_id]);
-    await db.query(`UPDATE free_agents SET state='running' WHERE agent_id=$1`,[agent.agent_id]);
-    machines.calls.length=0;expect(await freeAgents.requestSleep(agent.agent_id,{refresh:true})).toEqual({sleep:true});
-    await vi.waitFor(()=>expect(machines.states.get('m1')).toBe('suspended'));
-    await createAgentCommand(db,{roomId,agentId:agent.agent_id,sourceMessageId:null,reason:'human_tag'});
-    expect(await freeAgents.wake(agent.agent_id)).toBe(true);expect(machines.calls).toEqual(['suspend m1','start m1']);
-  });
-
-  it('image promotion warms existing stopped agents without provisioning new Machines or model work', async () => {
-    const { id } = await createWorkspace();
-    await settle();
-    const agent = await freeAgentOf(id);
-    await db.query(`UPDATE agent_commands SET state='complete',completed_at=now() WHERE agent_id=$1`, [agent.agent_id]);
-    await db.query(`UPDATE free_agents SET state='sleeping' WHERE agent_id=$1`, [agent.agent_id]);
-    machines.states.set('m1', 'stopped');
-    machines.calls.length = 0;
-    await freeAgents.refreshSleepingMachines();
-    expect(machines.calls).toEqual(['start m1']);
-    expect((await db.query(`SELECT 1 FROM agent_commands WHERE agent_id=$1 AND state='pending'`, [agent.agent_id])).rowCount).toBe(0);
-    machines.calls.length = 0;
-    await freeAgents.refreshSleepingMachines();
-    expect(machines.calls).toEqual([]);
-    // A service stop is an existing authority fence, distinct from a sleeping
-    // agent whose Fly Machine was stopped by the old refresh path.
-    await db.query(`UPDATE free_agents SET state='stopped' WHERE agent_id=$1`, [agent.agent_id]);
-    machines.states.set('m1', 'stopped');
-    await freeAgents.refreshSleepingMachines();
-    expect(machines.calls).toEqual([]);
-  });
-
-  it('acquires the runtime independently of shared model-budget spend', async () => {
-    const { id } = await createWorkspace();
-    await settle();
-    const agent = await freeAgentOf(id);
-    await db.query(`UPDATE free_agents SET state='sleeping' WHERE agent_id=$1`, [agent.agent_id]);
-    await db.query(`INSERT INTO free_agent_budget(day,usd) VALUES(current_date,25)`);
-    machines.states.set(agent.fly_machine_id!, 'suspended');
-    machines.calls.length = 0;
-    expect(await freeAgents.wake(agent.agent_id)).toBe(true);
-    await db.query(`UPDATE free_agents SET state='destroyed',fly_machine_id=NULL WHERE agent_id=$1`, [agent.agent_id]);
-    expect(await freeAgents.provision(agent.agent_id)).toBe(true);
-    expect(machines.calls).toEqual([`start ${agent.fly_machine_id}`]);
-    expect((await db.query(`SELECT kind FROM free_agent_events WHERE kind='budget_reached'`)).rows).toHaveLength(0);
   });
 
   it('adds one free agent to an existing Workspace in its #general, owned by its owner', async () => {
@@ -846,7 +775,7 @@ describe('free starter agents', () => {
     await phone.execute('removeAgent', { workspaceId: other, agentId: agent.agent_id }, FRIEND);
     await settle();
     expect(machines.states.get('m1')).toBe('destroyed');
-    expect(await freeAgents.wake(agent.agent_id)).toBe(false);
+    await freeAgents.reconcile(agent.agent_id);expect(machines.states.get('m1')).toBe('destroyed');
     expect(await addFreeAgentToWorkspace(db, freeAgents, id)).toBeUndefined();
   });
 

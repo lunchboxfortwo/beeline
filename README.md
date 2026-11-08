@@ -83,7 +83,7 @@ Opening a corner starts its implementer, even when the opener does the work. Wor
 
 Your free starter agents can browse public pages using Lightpanda. If a site requires sign-in, signup or a bot check, open it yourself or connect your own agent. Tell Beebee what you want to work on; you can also ask the team to play tic-tac-toe.
 
-Starter agents sleep when their work finishes and wake when you tag them. The thinking line shows when a new release is downloading or the agent is starting; preparation uses no execution time. Work continues until a result, Stop or real process failure, with the daily token allowance and shared daily budget unchanged. Releases preserve the agent’s files. [Starter agent lifecycle](docs/free-agents.md).
+Starter agents sleep when their work finishes and wake when you tag them. The thinking line shows accepted messages as starting, then shows execution time once the helper claims the work. Work continues until a result, Stop or real process failure, with the daily token allowance and shared daily budget unchanged. Releases preserve the agent’s files. [Starter agent lifecycle](docs/free-agents.md).
 
 ## Your machine. Your keys.
 

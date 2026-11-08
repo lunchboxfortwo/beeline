@@ -365,6 +365,8 @@ function CornerCockpit({
     now,
     viewerPubkey: detail?.viewer.identity.pubkey,
     viewerCanSend: detail?.viewer.permissions.send,
+    pendingAgentCommands: detail?.pendingAgentCommands,
+    activeTurnGenerationId: turn?.generationId,
     activeTurnPubkey: turn?.agentPubkey,
     activeTurnAgentPubkey: turn?.agentPubkey,
     activeTurnRequestId: turn?.requestId,

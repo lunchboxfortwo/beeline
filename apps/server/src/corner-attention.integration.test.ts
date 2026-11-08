@@ -536,8 +536,11 @@ it.each(['agent', 'human'] as const)('REPORT-WAITING-DERIVED: %s report quiets w
         sourceMessageId: null, reason: 'corner_lifecycle',
         privatePayload: { kind: 'lifecycle', authorId: SYSTEM_IDENTITY_ID, fromRoomId: C, text: 'Continue automatically' } });
       expect(automatic).toBeDefined();
+      expect((await db.query(`SELECT state FROM agent_commands WHERE id=$1`, [automatic!.id])).rows)
+        .toEqual([{ state: 'pending' }]);
       expect((await db.query(`SELECT status FROM agent_turns WHERE room_id=$1 AND request_id=$2`, [C,automatic!.turn_request_id])).rows)
-        .toEqual([{ status: 'working' }]);
+        .toEqual([]);
+      expect(await state()).toBe('working');
       changes.length = 0;
       const report = await reportToCommander(db, C, WORKER, 'blocked: choose the next direction', undefined, `report-${input}`);
       expect(await cornerReportWaiting(db, C)).toBe(true);

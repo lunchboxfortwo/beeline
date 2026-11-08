@@ -1,4 +1,3 @@
-import { writeRuntimePhase } from './free-agent-runtime-phase.js';
 import { SQUIRE_MCP_TARGET } from '@beeline/api-contract/phone';
 import { failConnectingOffers } from './connector-offer-completion.js';
 import type { ConnectorAssignment, ConnectorStatus, PostConnectorStatusInput } from '@beeline/api-contract/daemon';
@@ -227,11 +226,7 @@ export async function reportSquireWork(database: SqlDatabase, agentId: string,
   [agentId,input.pairingGeneration??1,input.connectorId,JSON.stringify(patch),remove]);
   if(!changed.rowCount) throw new Error('Squire work not found for this helper');
   if(input.errorMessage) await failConnectingOffers(database,{agentId});
-  if(input.signIn || complete){
-    const runtime=(await database.query<{runtime_operation_id:string}>(`SELECT runtime_operation_id FROM free_agents
-      WHERE agent_id=$1 AND runtime_operation_id IS NOT NULL AND removed_at IS NULL`,[agentId])).rows[0];
-    if(runtime)await writeRuntimePhase(database,agentId,runtime.runtime_operation_id,complete?'preparing':'needs-sign-in');
-  }
+
 }
 
 /** Whether this agent's Squire session was last seen signed in to the app. */

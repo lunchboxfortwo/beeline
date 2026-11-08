@@ -210,22 +210,12 @@ export function selectComposerAckState(input: ComposerAckInput): ComposerAckStat
 export function selectComposerAckPresentation(
   input: ComposerAckPresentationInput,
 ): ComposerAckPresentation | null {
-  // A runtime receipt describes preparation, never a fabricated working generation.
-  const pending = input.pendingAgentCommands?.find(command => command.runtimePhase &&
-    (!input.activeTurnPubkey || (command.agentPubkey === input.activeTurnPubkey &&
-      input.activeTurnGenerationId?.startsWith('pending:'))));
-  if (pending?.runtimePhase) {
-    const runtime = pending.runtimePhase;
+  const pending = !input.activeTurnPubkey ? input.pendingAgentCommands?.[0] : undefined;
+  if (pending) {
     const agent = agentFromConversationIdentity(input.conversationIdentities?.get(pending.agentPubkey)) ??
       input.agentsByPubkey?.get(pending.agentPubkey);
     const subject = resolveAgentDisplayIdentity(pending.agentPubkey,agent).name;
-    const labels = { starting: 'starting…', updating: 'updating — downloading the new release…',
-      preparing: 'preparing your message…', reconnecting: 'reconnecting…', 'needs-sign-in': 'needs sign-in' };
-    return {
-      label: runtime.phase === 'unavailable'
-        ? `${subject} couldn't start. Your message is saved.${runtime.cause ? ` ${runtime.cause}` : ''}`
-        : `${subject} · ${labels[runtime.phase]}`,
-      ...(runtime.phase === 'unavailable' || runtime.phase === 'needs-sign-in' ? { live: false as const } : {}),
+    return { label: `${subject} · starting…`,
       ...(viewerMayStopTurn(input.viewerPubkey,input.viewerCanSend)
         ? { stop: { agentPubkey:pending.agentPubkey,requestId:pending.requestId } } : {}),
     };

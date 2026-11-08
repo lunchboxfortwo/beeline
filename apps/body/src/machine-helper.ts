@@ -99,15 +99,8 @@ async function serveMachineHelper(
     runUpdateWorker?: () => Promise<void>;
     signals?: EventEmitter;
     exitProcess?: (code: number) => void;
-    /**
-     * A free agent's Machine: sleep after this idle window (`free-agent-idle.ts`).
-     * Its helper never updates in place; `refresh` asks the server to stop
-     * rather than suspend, so the next boot installs the newer release.
-     */
-    freeAgentIdle?: {
-      idleMs: number;
-      requestSleep: (options: { refresh: boolean }) => Promise<boolean>;
-    };
+    /** Image-owned helpers have no self-update transaction. */
+    freeAgent?: boolean;
   } = {},
 ): Promise<{ reason: HelperExitReason; lifecycle: HelperLifecycle }> {
   const runAgent = options.runAgent ?? runAgentRuntime;
@@ -128,7 +121,7 @@ async function serveMachineHelper(
   });
   const signals = options.signals ?? process;
   const disposeSignals = lifecycle.installSignals(signals);
-  const usage = !options.freeAgentIdle && managedBy !== 'lab' && process.platform === 'linux'
+  const usage = !options.freeAgent && managedBy !== 'lab' && process.platform === 'linux'
     ? monitorHelperUsage(supervisorRoot) : undefined;
   const notifier = new SystemdNotifier();
   const slots = new Map<string, AgentSlot>();
@@ -319,8 +312,7 @@ async function serveMachineHelper(
     lifecycle.stop(reason);
   };
 
-  let freeAgentRefresh = false;
-  if (layout && !options.freeAgentIdle)
+  if (layout && !options.freeAgent)
     update = new ReleaseTransaction({
       layout,
       loadedRelease,
@@ -359,10 +351,6 @@ async function serveMachineHelper(
     });
   const tickUpdate = async () => {
     await update?.idleChanged();
-    if(freeAgentRefresh&&options.freeAgentIdle&&![...hosted.values()].some(agent=>agent.core.activeTurnCount()>0)){
-      freeAgentRefresh=false;
-      await options.freeAgentIdle.requestSleep({refresh:true});
-    }
     void sweepHostDisk();
   };
   const requestForceUpdate = (minimum: string) => {
@@ -404,7 +392,7 @@ async function serveMachineHelper(
     layout,
     loadedRelease,
     loadedReleaseIdentity,
-    freeAgent: Boolean(options.freeAgentIdle),
+    freeAgent: Boolean(options.freeAgent),
     attach: (agent) => {
       hosted.set(agent.agentId, agent);
       return () => {
@@ -459,10 +447,6 @@ async function serveMachineHelper(
     },
     tickUpdate,
     notifyReleaseAvailable: (releaseKey) => {
-      if (options.freeAgentIdle) {
-        if (releaseKey.split(':')[1] !== loadedReleaseIdentity?.commit) freeAgentRefresh = true;
-        return;
-      }
       update?.notify(releaseKey);
     },
     requestForceUpdate,

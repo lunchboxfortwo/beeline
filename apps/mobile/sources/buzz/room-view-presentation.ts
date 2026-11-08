@@ -178,7 +178,7 @@ export function reconcileRoomTurnDelta(
     messages,
     latestAgentTurns,
     pendingAgentCommands: view.pendingAgentCommands?.filter(
-      (command) => command.requestId !== turn.requestId,
+      (command) => turn.status === 'working' || command.requestId !== turn.requestId,
     ),
   });
 }

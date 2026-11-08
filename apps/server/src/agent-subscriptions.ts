@@ -642,7 +642,7 @@ async function recoverRecentLeaveFacts(db: SqlDatabase): Promise<void> {
     SELECT line.id,subscription.room_id,subscription.agent_id
     FROM room_event_subscriptions subscription
     JOIN room_access member ON member.room_id=subscription.room_id AND member.identity_id=subscription.agent_id AND member.removed_at IS NULL
-    JOIN free_agents agent ON agent.agent_id=subscription.agent_id AND agent.state<>'failed' AND agent.removed_at IS NULL
+    JOIN free_agents agent ON agent.agent_id=subscription.agent_id AND agent.removed_at IS NULL
     CROSS JOIN LATERAL (
       SELECT message.id,message.card FROM messages message WHERE message.room_id=subscription.room_id
         AND floor(extract(epoch FROM (message.created_at AT TIME ZONE 'UTC'))*1000)::bigint

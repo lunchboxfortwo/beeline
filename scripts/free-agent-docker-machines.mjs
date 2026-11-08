@@ -11,7 +11,8 @@ import { createServer } from 'node:http';
 const port = Number(process.argv[2] ?? 4280);
 const prefix = process.argv[3] ?? 'free-agent-proof';
 let next = 0;
-const machineConfigs = new Map();
+const configs = new Map();
+const versions = new Map();
 
 function docker(...args) {
   return execFileSync('docker', args, { encoding: 'utf8', stdio: ['ignore', 'pipe', 'pipe'] }).trim();
@@ -24,15 +25,6 @@ function state(id) {
   } catch {
     return undefined;
   }
-}
-
-// Acquisition reads the full Fly machine shape before deciding whether to
-// start or update it. Omitting config.image makes a serving lab helper look lost.
-function machineView(id) {
-  const current = state(id);
-  if (!current) return undefined;
-  return { id, state: current, instance_id: id,
-    config: machineConfigs.get(id) ?? { image: docker('inspect', '-f', '{{.Config.Image}}', id) } };
 }
 
 function log(line) {
@@ -55,6 +47,7 @@ createServer(async (request, response) => {
     if (!id && request.method === 'POST') {
       const machine = `${prefix}-${Date.now().toString(36)}-${++next}`;
       const config = body.config;
+      configs.set(machine, config);versions.set(machine,1);
       const env = Object.entries(config.env ?? {}).flatMap(([key, value]) => ['-e', `${key}=${value}`]);
       docker(
         'run', '-d', '--name', machine, '--network', 'host',
@@ -62,26 +55,40 @@ createServer(async (request, response) => {
         '--label', `beeline_agent=${config.metadata.beeline_agent}`,
         // bwrap needs user namespaces inside the container, as on a Fly VM.
         '--security-opt', 'seccomp=unconfined', '--security-opt', 'apparmor=unconfined',
-        '--cap-add', 'SYS_ADMIN',
+        '--cap-add', 'SYS_ADMIN', '-v', `${machine}-home:/root`,
         ...env, config.image,
       );
-      machineConfigs.set(machine, config);
       log(`create ${machine}`);
-      return send(200, { id: machine, state: 'created' });
+      return send(200, { id: machine, state: 'created',instance_id:'1',config });
     }
     if (!id && request.method === 'GET') {
       const agent = url.searchParams.get('metadata.beeline_agent');
-      const names = docker('ps', '-a', '--filter', `label=beeline_agent=${agent}`, '--format', '{{.Names}}')
-        .split('\n').filter(Boolean);
-      return send(200, names.map(machineView).filter(Boolean));
+      return send(200,[...configs].filter(([,config])=>!agent||config.metadata.beeline_agent===agent).map(([id,config])=>({
+        id,state:state(id),instance_id:String(versions.get(id)),config,
+      })));
+    }
+    if (id && !configs.has(id)) return send(404,{error:'not a fixture machine'});
+    if (id && !action && request.method === 'POST') {
+      if (String(body.current_version)!==String(versions.get(id))) return send(412,{error:'version changed'});
+      const running=state(id)==='started',config=body.config;
+      if (state(id)==='suspended') docker('unpause',id);
+      docker('rm','-f',id);
+      const env=Object.entries(config.env??{}).flatMap(([key,value])=>['-e',`${key}=${value}`]);
+      docker('create','--name',id,'--network','host','--memory',`${config.guest.memory_mb}m`,'--cpus',String(config.guest.cpus),
+        '--label',`beeline_agent=${config.metadata.beeline_agent}`,'--security-opt','seccomp=unconfined','--security-opt','apparmor=unconfined',
+        '--cap-add','SYS_ADMIN','-v',`${id}-home:/root`,...env,config.image);
+      if(running)docker('start',id);
+      configs.set(id,config);versions.set(id,versions.get(id)+1);
+      log(`update ${id}: ${state(id)}`);
+      return send(200,{id,state:state(id),instance_id:String(versions.get(id)),config});
     }
     if (id && !action && request.method === 'GET') {
-      const current = machineView(id);
-      return current ? send(200, current) : send(404, { error: 'not found' });
+      const current = state(id);
+      return current ? send(200, { id, state: current,instance_id:String(versions.get(id)),config:configs.get(id) }) : send(404, { error: 'not found' });
     }
     if (id && !action && request.method === 'DELETE') {
       docker('rm', '-f', id);
-      machineConfigs.delete(id);
+      docker('volume','rm',`${id}-home`);configs.delete(id);versions.delete(id);
       log(`destroy ${id}`);
       return send(200, { ok: true });
     }
@@ -92,7 +99,7 @@ createServer(async (request, response) => {
       log(`start ${id} (was ${current})`);
       return send(200, { previous_state: current });
     }
-    if (action === 'wait') return send(200, { ok: true, state: state(id) });
+    if (action === 'wait') return send(state(id)===url.searchParams.get('state')?200:409, { state: state(id) });
     if (action === 'suspend') {
       docker('pause', id);
       log(`suspend ${id}`);

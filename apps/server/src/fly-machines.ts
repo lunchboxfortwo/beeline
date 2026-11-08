@@ -27,21 +27,18 @@ export function sameMachineImage(actual: string, desired: string): boolean {
 export interface FreeAgentMachines {
   /** Create and boot one Machine; returns its Fly id. */
   create(spec: FreeAgentMachineSpec): Promise<{ id: string }>;
+  list(): Promise<FreeAgentMachine[]>;
   /** The Machine already created for this agent, if any. */
   find(agentId: string): Promise<FreeAgentMachine | undefined>;
   /** Start a stopped Machine or resume a suspended one. */
-  start(id: string, image?: string): Promise<FreeAgentMachine | void>;
+  start(id: string): Promise<void>;
+  update(machine: FreeAgentMachine, image: string): Promise<FreeAgentMachine>;
   read(id: string): Promise<FreeAgentMachine | undefined>;
   reconnect(): FreeAgentMachines;
-  /** Boot a stopped or outdated Machine now; its helper will suspend when ready. */
-  refresh(id: string, image: string, force?: boolean): Promise<boolean>;
   suspend(id: string): Promise<void>;
-  stop(id: string): Promise<void>;
   destroy(id: string): Promise<void>;
-  /** Current Fly state (`started`, `suspended`, `stopped`, ...), or undefined when gone. */
-  state(id: string): Promise<string | undefined>;
   /** Resolve once the Machine reaches `state` (Fly's own wait), or reject after the timeout. */
-  waitFor(id: string, state: 'suspended' | 'stopped', timeoutSeconds: number, instanceId?: string): Promise<void>;
+  waitFor(id: string, state: 'suspended' | 'stopped' | 'started', timeoutSeconds: number, instanceId?: string): Promise<void>;
 }
 
 export class FlyApiError extends Error {
@@ -88,6 +85,10 @@ export class FlyMachines implements FreeAgentMachines {
     return { id: machine.id };
   }
 
+  async list(): Promise<FreeAgentMachine[]> {
+    return this.#request<FreeAgentMachine[]>('list','','GET');
+  }
+
   async find(agentId: string): Promise<FreeAgentMachine | undefined> {
     const machines = await this.#request<FreeAgentMachine[]>(
       'list',
@@ -97,44 +98,18 @@ export class FlyMachines implements FreeAgentMachines {
     return machines.find((machine) => machine.state !== 'destroyed');
   }
 
-  /** One acquisition owns the image update and any required ordinary start. */
-  async start(id: string, image?: string): Promise<FreeAgentMachine | void> {
-    if (!image) { await this.#request('start', `/${id}/start`, 'POST', {}); return; }
-    return (await this.#acquire(id, image)).machine;
+  async start(id: string): Promise<void> {
+    await this.#request('start', `/${id}/start`, 'POST', {});
   }
 
-  async #acquire(id: string, image: string): Promise<{ changed: boolean; machine: FreeAgentMachine }> {
-    const machine = await this.read(id);
-    if (!machine) throw new FlyApiError(404, '', 'get');
-    if (!sameMachineImage(machine.config.image, image)) {
-      const updated = await this.#request<FreeAgentMachine>('update image', `/${id}`, 'POST', {
-        current_version: machine.instance_id,
-        skip_launch: false,
-        config: { ...machine.config, image },
-      });
-      // Fly preserves a non-started Machine's state after an image update.
-      // Its acknowledgement precedes preparation; fence readiness to the new
-      // version before issuing the ordinary start, without polling or replay.
-      if ((machine.state === 'stopped' || machine.state === 'suspended') && updated.state !== 'started') {
-        if (!updated.instance_id) throw new Error('Fly image update did not return a replacement instance ID');
-        await this.waitFor(id, 'stopped', 60, updated.instance_id);
-        await this.#request('start', `/${id}/start`, 'POST', {});
-      }
-      return { changed: true, machine: { ...machine, ...updated, config: { ...machine.config, image } } };
-    }
-    if (machine.state === 'stopped' || machine.state === 'suspended') {
-      await this.#request('start', `/${id}/start`, 'POST', {});
-      return { changed: true, machine };
-    }
-    return { changed: false, machine };
+  async update(machine: FreeAgentMachine, image: string): Promise<FreeAgentMachine> {
+    return this.#request<FreeAgentMachine>('update image', `/${machine.id}`, 'POST', {
+      current_version: machine.instance_id, skip_launch: false, config: { ...machine.config, image },
+    });
   }
 
   async suspend(id: string): Promise<void> {
     await this.#request('suspend', `/${id}/suspend`, 'POST', {});
-  }
-
-  async refresh(id: string, image: string): Promise<boolean> {
-    return (await this.#acquire(id, image)).changed;
   }
 
   reconnect(): FlyMachines {
@@ -147,10 +122,6 @@ export class FlyMachines implements FreeAgentMachines {
     catch (error) { if (error instanceof FlyApiError && error.status === 404) return undefined; throw error; }
   }
 
-  async stop(id: string): Promise<void> {
-    await this.#request('stop', `/${id}/stop`, 'POST', {});
-  }
-
   async destroy(id: string): Promise<void> {
     try {
       await this.#request('destroy', `/${id}?force=true`, 'DELETE');
@@ -160,13 +131,9 @@ export class FlyMachines implements FreeAgentMachines {
     }
   }
 
-  async waitFor(id: string, state: 'suspended' | 'stopped', timeoutSeconds: number, instanceId?: string): Promise<void> {
+  async waitFor(id: string, state: 'suspended' | 'stopped' | 'started', timeoutSeconds: number, instanceId?: string): Promise<void> {
     const instance = instanceId ? `&instance_id=${encodeURIComponent(instanceId)}` : '';
     await this.#request('wait', `/${id}/wait?state=${state}&timeout=${timeoutSeconds}${instance}`, 'GET');
-  }
-
-  async state(id: string): Promise<string | undefined> {
-    return (await this.read(id))?.state;
   }
 
   async #request<T = unknown>(

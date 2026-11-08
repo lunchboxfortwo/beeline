@@ -119,12 +119,6 @@ export function notifyCornerStateSql(room: 'NEW.room_id' | 'corner'): string {
 }
 
 
-/** A runtime phase invalidates the existing pending-command Room projection. */
-export function notifyFreeAgentRuntimePhaseSql():string {
-  return `pg_notify('${POSTGRES_LIVE_CHANNEL}',jsonb_build_object('table','agent_commands','operation','RUNTIME',
-    'roomId',target.room_id,'agentId',NEW.agent_id)::text)`;
-}
-
 export function notifyMcpWakesSql(channel: string): string {
   return `count(pg_notify(${channel}, jsonb_build_object(
         'table','${MCP_WEBHOOK_TABLE}','operation','INSERT','roomId',room_id::text)::text))`;
@@ -370,7 +364,7 @@ export class PostgresLiveListener {
     }
     // These notifications only ask a helper to refresh the latest state or
     // drain durable pending operations; the newest one supersedes earlier ones.
-    const key = (payload.table === 'agent_config' || payload.table === 'connector_assignment') &&
+    const key = (payload.table === 'agent_config' || payload.table === 'connector_assignment' || payload.table === 'free_agents') &&
         payload.agentId
       ? `${payload.table}:${payload.agentId}`
       : payload.table==='usage_accounts'&&payload.ownerId&&payload.accountId
@@ -725,7 +719,7 @@ export class PostgresLiveListener {
         payload.turnStatus === 'failed' || payload.turnStatus === 'cancelled'
         ? { turnStatus: payload.turnStatus } : {}),
       ...(payload.needsYouCandidate ? { needsYouCandidate: true } : {}),
-      ...(payload.table === 'agent_commands' ? { targetAgentId: payload.agentId } : {}),
+      ...(['agent_commands','free_agents'].includes(payload.table) ? { targetAgentId: payload.agentId } : {}),
       ...(payload.table === 'agent_commands' && payload.released ? { commandReleased: true } : {}),
       ...(payload.table === 'memberships' && payload.identityId
         ? { targetAgentId: payload.identityId }
