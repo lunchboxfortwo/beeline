@@ -289,7 +289,7 @@ const scope1 = fixtureScope1();
       expect(posts[0]).toMatchObject({ url: 'https://hooks.example/muse', authorization: 'Bearer tag-secret',
         body: { memberId: member, roomId: ROOM, messageId: sent.messageId, text: `@${handle} please answer` } });
       expect(String(posts[0]!.body.instruction)).toContain('send_message');
-      expect(String(posts[0]!.body.instruction)).toContain('Start your reply with @demo-agent to wake the asking agent.');
+      expect(String(posts[0]!.body.instruction)).toContain('and start with @demo-agent');
       expect(String(posts[0]!.body.instruction)).toContain('A reply without the tag does not wake them');
       // Removing the webhook stops the push.
       await client.callTool({ name: 'set_webhook', arguments: { url: '' } });

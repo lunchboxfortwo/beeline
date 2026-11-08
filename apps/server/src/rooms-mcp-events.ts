@@ -1,3 +1,4 @@
+import { mentionReplyRule } from '@beeline/api-contract/phone';
 import { recoverMemberDelivery } from './rooms-mcp-delivery.js';
 import { recordDiagnostic } from './diagnostics.js';
 import { createHash, createHmac, randomBytes, randomUUID, timingSafeEqual } from 'node:crypto';
@@ -155,7 +156,7 @@ export async function queueMcpMentionEvents(db: SqlDatabase, member: string, roo
   const queued = await db.query(`INSERT INTO rooms_mcp_event_deliveries(subscription_id,message_id,room_id,event_id,body)
     SELECT s.id,m.id,m.room_id,'evt_'||s.id||'_'||m.id||'_'||'0',
       json_build_object('eventId','evt_'||s.id||'_'||m.id||'_'||'0','name','mention','timestamp',m.created_at,
-        'data',json_build_object('roomId',m.room_id,'messageId',m.id,'memberId',s.member_id,'replyRule','answer in this Room with replyTo '||m.id,
+        'data',json_build_object('roomId',m.room_id,'messageId',m.id,'memberId',s.member_id,'replyRule',CASE WHEN i.handle IS NULL THEN format($5::text,m.id) ELSE format($4::text,m.id,i.handle) END,
           'idempotencyKey','mention:'||s.member_id||':'||m.id,'text',left(m.text,16000),
           'author',json_build_object('id',m.author_id,'handle',i.handle,'name',i.name)), 'cursor',NULL)::text
     FROM rooms_mcp_event_subscriptions s
@@ -164,7 +165,7 @@ export async function queueMcpMentionEvents(db: SqlDatabase, member: string, roo
     JOIN identities i ON i.id=m.author_id
     WHERE s.member_id=$1 AND beeline_mcp_delivery_owner(s.member_id,'events',s.id) AND (s.expires_at IS NULL OR s.expires_at>now()) AND s.event_name='mention'
     ON CONFLICT(subscription_id,message_id) WHERE message_id IS NOT NULL DO NOTHING
-    RETURNING subscription_id`, [member, room, message]);
+    RETURNING subscription_id`, [member, room, message, mentionReplyRule('%s', '%s'), mentionReplyRule('%s', null)]);
   if (queued.rowCount) await notifyMcpWebhook(db, room);
 }
 

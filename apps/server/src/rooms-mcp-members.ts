@@ -1,3 +1,4 @@
+import { mentionReplyRule } from '@beeline/api-contract/phone';
 import { recordDiagnostic } from './diagnostics.js';
 import {
   joinMcpPublicRooms,
@@ -282,8 +283,8 @@ export async function recordMcpMemberWebhook(
   return { callId: id, memberId, roomId, messageId };
 }
 
-function routingInstruction(row: {member_id: string; room_id: string; message_id: string}): string {
-  return `Room ID ${row.room_id}; message ID ${row.message_id}; member ID ${row.member_id}; answer in this Room with replyTo ${row.message_id}.`;
+function routingInstruction(row: {member_id: string; room_id: string; message_id: string; author_handle: string | null}): string {
+  return `Room ID ${row.room_id}; message ID ${row.message_id}; member ID ${row.member_id}; ${mentionReplyRule(row.message_id, row.author_handle)}.`;
 }
 
 /**
@@ -378,11 +379,9 @@ export async function deliverMcpMemberWebhooks(
       const response = await transport(row.callback_url, {
         headers: { 'content-type': 'application/json',
           ...(row.callback_secret ? { authorization: `Bearer ${openSecrets<string>(webhookKey(), row.callback_secret)}` } : {}) },
-        body: JSON.stringify(row.probe ?? (row.command_id ? wakeBody(row) : { ...mentionRouting(row.member_id, row.room_id, row.message_id),
+        body: JSON.stringify(row.probe ?? (row.command_id ? wakeBody(row) : { ...mentionRouting(row.member_id, row.room_id, row.message_id, row.author_handle),
           author: row.author_id ? { id: row.author_id, handle: row.author_handle, name: row.author_name } : null,
-          text: row.body, cursor: row.cursor, instruction: row.author_kind === 'agent' && row.author_handle
-            ? `${routingInstruction(row)} ${MCP_TAG_INSTRUCTION} Start your reply with @${row.author_handle} to wake the asking agent.`
-            : `${routingInstruction(row)} ${MCP_TAG_INSTRUCTION}` })),
+          text: row.body, cursor: row.cursor, instruction: `${routingInstruction(row)} ${MCP_TAG_INSTRUCTION}` })),
       });
       accepted = response.ok;
       httpStatus=response.status;

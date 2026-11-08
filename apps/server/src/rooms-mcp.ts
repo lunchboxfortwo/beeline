@@ -282,7 +282,7 @@ export class RoomsMcp {
        ORDER BY mention.seq LIMIT $3`, [member, cursor, limit + 1])).rows;
     const page = rows.slice(0, limit);
     return {
-      mentions: page.map(({ seq, ...row }) => ({ ...mentionRouting(member, row.room_id, row.id), ...row, deliveryCursor: seq })),
+      mentions: page.map(({ seq, ...row }) => ({ ...mentionRouting(member, row.room_id, row.id, row.author_handle), ...row, deliveryCursor: seq })),
       nextCursor: page.at(-1)?.seq ?? cursor,
       more: rows.length > limit,
       wakes: [...await pendingMcpWakes(db, member), ...(stream ? await localDeliveryProbe(db,member) : [])],

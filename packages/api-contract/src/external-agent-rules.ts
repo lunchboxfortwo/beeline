@@ -93,3 +93,8 @@ export type ExternalAgentSurface = 'mcp' | 'session';
 export function externalAgentRules(surface: ExternalAgentSurface, tool = "the session tool command each Beeline message names"): string {
   return EXTERNAL_AGENT_RULES.map(rule => `- ${surface === 'mcp' ? rule.mcp : rule.session.replace('{tool}', tool)}`).join('\n');
 }
+
+/** Per-message routing stays explicit even when the surrounding instructions are truncated. */
+export function mentionReplyRule(messageId: string, askerHandle: string | null | undefined): string {
+  return `answer in this Room with replyTo ${messageId} and start with ${askerHandle ? `@${askerHandle}` : "the asker's exact @handle"}`;
+}

@@ -58,11 +58,13 @@ describe('owed Room tags', () => {
     const payloads: any[] = [];
     await deliverMcpMemberWebhooks(db, async (_url, init) => { payloads.push(JSON.parse(init.body)); return new Response('', { status: 200 }); });
     const payload = payloads.find(p => p.messageId === message);
-    const expected = { roomId: room, messageId: message, memberId: member, replyRule: `answer in this Room with replyTo ${message}` };
+    const expected = { roomId: room, messageId: message, memberId: member, replyRule: `answer in this Room with replyTo ${message} and start with @owner` };
     expect(payload).toMatchObject(expected);
     const cut = { ...payload, instruction: payload.instruction.slice(0, 200) };
     expect(cut).toMatchObject(expected);
     expect(cut.instruction).toContain(message);
+    expect(payload.instruction).toContain(expected.replyRule);
+    expect(await owedMentions(db, member)).toContainEqual(expect.objectContaining(expected));
     const page = await call('list_mentions');
     expect(page.mentions.find((m: any) => m.id === message)).toMatchObject(expected);
   });

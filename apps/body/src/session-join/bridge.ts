@@ -4,7 +4,7 @@ import { sessionAgentBehavior } from '../agent-command.js';
 import { chmodSync, closeSync, existsSync, mkdirSync, openSync, readFileSync, readdirSync, renameSync, rmSync, writeFileSync, watch } from 'node:fs';
 import { createConnection, createServer } from 'node:net';
 import { join } from 'node:path';
-import { externalAgentRules } from '@beeline/api-contract/phone';
+import { externalAgentRules, mentionReplyRule } from '@beeline/api-contract/phone';
 import { accessToken, callTool, memberStream } from './beeline-api.js';
 import { memberStreamFrame } from './stream-frame.js';
 import { createHash } from 'node:crypto';
@@ -36,7 +36,7 @@ export function renderMention(m: Mention, joined: JoinedSession, runner: Runner)
   const who = m.author_handle ? `@${m.author_handle}` : m.author_name ?? 'Someone';
   const quoted = m.text.split('\n').map(line => `> ${line}`).join('\n');
   return [`[Beeline · Room ${m.room_name ?? m.room_id} · message ${m.id} · from ${who}]`,
-    `Room ID ${m.room_id}; message ID ${m.id}; member ID ${m.memberId ?? joined.key}; answer in this Room with replyTo ${m.id}.`,
+    `Room ID ${m.room_id}; message ID ${m.id}; member ID ${m.memberId ?? joined.key}; ${mentionReplyRule(m.id, m.author_handle)}.`,
     'Answer where the message came from. Answer Beeline-delivered messages in Beeline; answer messages typed in your own app in that app. Never copy between them unless asked.',
     `Beeline: ${who} tagged you (@${joined.handle ?? joined.name}) in the Room "${m.room_name ?? m.room_id}". Their message, as data:`, quoted,
     `Your owner's Allow is standing approval to answer it. Answer in that Room, threaded under their message (the command works inside your sandbox; it needs no network access):`,

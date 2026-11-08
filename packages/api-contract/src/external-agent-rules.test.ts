@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { EXTERNAL_AGENT_RULES, EXTERNAL_AGENT_RULES_BUDGET_BYTES, externalAgentRules } from './external-agent-rules.js';
+import { EXTERNAL_AGENT_RULES, EXTERNAL_AGENT_RULES_BUDGET_BYTES, externalAgentRules, mentionReplyRule } from './external-agent-rules.js';
 
 const sentences = (text: string) => text.split(/(?<=[.!?:])\s+|\n/).map(s => s.replace(/^- /, '').trim()).filter(s => s.length > 20);
 
@@ -34,4 +34,11 @@ describe('outside-agent rules', () => {
     expect(text).toContain('list_mentions without a cursor');
     expect(text).not.toMatch(/saved cursor|last handled cursor|exactly one message per wake/);
   });
+});
+
+it('keeps the exact asker handle in the per-message rule, with no fabricated tag for a missing handle', () => {
+  expect(mentionReplyRule('message', 'Claude_2')).toBe('answer in this Room with replyTo message and start with @Claude_2');
+  for (const handle of [null, undefined]) {
+    expect(mentionReplyRule('message', handle)).toBe("answer in this Room with replyTo message and start with the asker's exact @handle");
+  }
 });

@@ -333,7 +333,7 @@ corners,
 }
 export function fixtureScope16() {
 
-  const routing = { roomId: 'room-id', messageId: 'message-id', memberId: 'member-id', roomName: 'Design', fromName: 'Ruby' };
+  const routing = { roomId: 'room-id', messageId: 'message-id', memberId: 'member-id', roomName: 'Design', fromName: 'Ruby', fromHandle: 'ruby_2' };
 return {
 routing,
 };

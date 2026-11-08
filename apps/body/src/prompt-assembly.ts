@@ -1,3 +1,4 @@
+import { mentionReplyRule } from '@beeline/api-contract/phone';
 import type { CodexPromptDelivery } from './codex-prompt-delivery.js';
 import { renderFreeAgentCheckpoint, type FreeAgentCheckpoint } from './free-agent-continuation.js';
 import { boundReplyExcerpt, subscriptionActionPrompt, WORKSPACE_CORE_SKILL_SLUG, type RoomInboxResult, type SystemEvent } from '@beeline/api-contract/daemon';
@@ -604,7 +605,7 @@ export function roomMentionDirectory(roster: WorkspaceRoster, selfId: string): s
 }
 
 export interface TurnPromptContext {
-  readonly routing?: { readonly roomId: string; readonly messageId: string; readonly memberId: string; readonly roomName?: string; readonly fromName?: string };
+  readonly routing?: { readonly roomId: string; readonly messageId: string; readonly memberId: string; readonly roomName?: string; readonly fromName?: string; readonly fromHandle?: string | null };
   /** Present only for a confirmed Codex session with compaction notifications. */
   readonly delivery?: CodexPromptDelivery;
   /** Current server eligibility for onboarding, refreshed each turn. */
@@ -684,7 +685,7 @@ export const TURN_SECTIONS: readonly PromptSection<TurnPromptContext>[] = [
     budgetBytes: 1400, layer: 'turn', surfaces: EVERYWHERE,
     render: ({ routing }) => routing ? [
       `[Beeline · Room ${routing.roomName ?? routing.roomId} · message ${routing.messageId} · from ${routing.fromName ?? 'member'}]`,
-      `Room ID ${routing.roomId}; message ID ${routing.messageId}; member ID ${routing.memberId}; answer in this Room with replyTo ${routing.messageId}.`,
+      `Room ID ${routing.roomId}; message ID ${routing.messageId}; member ID ${routing.memberId}; ${mentionReplyRule(routing.messageId, routing.fromHandle)}.`,
       'Answer where the message came from. Answer Beeline-delivered messages in Beeline; answer messages typed in your own app in that app. Never copy between them unless asked.',
     ].join('\n') : '',
   },

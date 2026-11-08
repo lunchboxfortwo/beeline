@@ -1,8 +1,9 @@
+import { mentionReplyRule } from '@beeline/api-contract/phone';
 import { createHash } from 'node:crypto';
 import type { SqlDatabase } from './database.js';
 
-export function mentionRouting(memberId: string, roomId: string, messageId: string) {
-  return { roomId, messageId, memberId, replyRule: `answer in this Room with replyTo ${messageId}`,
+export function mentionRouting(memberId: string, roomId: string, messageId: string, askerHandle: string | null) {
+  return { roomId, messageId, memberId, replyRule: mentionReplyRule(messageId, askerHandle),
     idempotencyKey: `mention:${memberId}:${messageId}` };
 }
 
@@ -33,14 +34,15 @@ export function isMentionReplyInput(input: object): boolean {
 
 /** Private, current membership-scoped reminder accompanying tool results. */
 export async function owedMentions(db: SqlDatabase, member: string) {
-  const rows = (await db.query<{room_id: string; message_id: string}>(`SELECT mention.room_id,mention.message_id
+  const rows = (await db.query<{room_id: string; message_id: string; author_handle: string | null}>(`SELECT mention.room_id,mention.message_id,author.handle author_handle
     FROM rooms_mcp_mentions mention JOIN messages m ON m.id=mention.message_id AND m.deleted_at IS NULL
+    JOIN identities author ON author.id=m.author_id
     JOIN rooms r ON r.id=mention.room_id AND r.archived_at IS NULL
     WHERE mention.member_id=$1 AND mention.cleared_at IS NULL
       AND EXISTS(SELECT 1 FROM effective_memberships rm WHERE rm.room_id=r.id AND rm.identity_id=$1 AND rm.removed_at IS NULL)
       AND EXISTS(SELECT 1 FROM memberships wm WHERE wm.workspace_id=r.workspace_id AND wm.room_id IS NULL AND wm.identity_id=$1 AND wm.removed_at IS NULL)
     ORDER BY mention.seq LIMIT 100`, [member])).rows;
-  return rows.map(row => mentionRouting(member, row.room_id, row.message_id));
+  return rows.map(row => mentionRouting(member, row.room_id, row.message_id, row.author_handle));
 }
 export async function clearOwedMention(db: SqlDatabase, member: string, room: string, message: string): Promise<number> {
   return (await db.query(`UPDATE rooms_mcp_mentions SET cleared_at=now()

@@ -216,7 +216,8 @@ import { MonolithRoomTurnLoop, ActiveTurn, inboxItemPromptBody, transcriptMessag
                   onboarding,
                   ...(['human_tag', 'direct_message', 'agent_tag'].includes(ctx.commandContext.current?.reason ?? '') ? {
                     routing: { roomId: ctx.options.roomId, messageId: ctx.commandContext.current!.sourceMessageId,
-                      memberId: ctx.agent.publicKey, fromName: inboxItemAuthorName(item, names) },
+                      memberId: ctx.agent.publicKey, fromName: inboxItemAuthorName(item, names),
+                      fromHandle: roster.members.find(member => member.identityId === item.authorId)?.handle },
                   } : {}),
                   task: {
                     fromName: inboxItemAuthorName(item, names),

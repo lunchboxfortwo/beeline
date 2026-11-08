@@ -221,7 +221,7 @@ const scope1 = fixtureScope1();
       expect(bearerCalls).toBe(0);
       expect(received).toHaveLength(3);
       expect(received.find(event=>event.data?.messageId===sent.messageId)).toMatchObject({ name: 'mention', cursor: null,
-        data: { roomId: ROOM, messageId: sent.messageId, memberId: member, replyRule: `answer in this Room with replyTo ${sent.messageId}`, idempotencyKey: `mention:${member}:${sent.messageId}`, author: { id: USER }, text: '@' + handle + ' reply here' } });
+        data: { roomId: ROOM, messageId: sent.messageId, memberId: member, replyRule: `answer in this Room with replyTo ${sent.messageId} and start with @demo`, idempotencyKey: `mention:${member}:${sent.messageId}`, author: { id: USER }, text: '@' + handle + ' reply here' } });
       expect(await deliverMcpMemberWebhooks(scope1.db, deliveryTransport)).toBe(0);
       const reply = await client.callTool({ name: 'send_message', arguments: { room: ROOM, text: 'Event received.', replyTo: sent.messageId } });
       expect(reply.isError).not.toBe(true);
