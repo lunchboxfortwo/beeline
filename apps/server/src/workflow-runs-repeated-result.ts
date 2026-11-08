@@ -73,7 +73,7 @@ export async function handoff(
         : alreadyAdvanced(scope);
     }
     const state = scope.state;
-    if (scope.ended || !state) throw new Error('this workflow run has already ended');
+    if (scope.ended || !state) throw new ExpectedRefusalError('this workflow run has already ended');
     if (state.kind === 'gate') {
       const role = state.role;
       const boundAgentId = run.roleBindings[role];

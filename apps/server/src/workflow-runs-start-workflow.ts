@@ -52,7 +52,7 @@ export async function startWorkflow(
         [room.workspace_id, input.name],
       )
     ).rows[0];
-    if (!skill) throw new Error('workflow is unavailable');
+    if (!skill) throw new ExpectedRefusalError('workflow is unavailable');
     const contract = JSON.parse(skill.markdown) as WorkflowReadContract;
     const trigger = command.source_message_id
       ? await scheduleTriggerPeriod(db, command.source_message_id)
@@ -235,7 +235,7 @@ export async function assignWorkflowRole(
       ? input.targetAgentId
       : await memberIdForHandle(db, command.room_id, input.targetAgentId);
     const { run, state } = scope;
-    if (scope.ended || !state) throw new Error('this workflow run has already ended');
+    if (scope.ended || !state) throw new ExpectedRefusalError('this workflow run has already ended');
     const currentRole = (state as WorkflowHandoffState | WorkflowGateState).role;
     if (!scope.contract.roles.includes(input.role)) {
       throw new ExpectedRefusalError(`unknown workflow role: ${input.role}`);

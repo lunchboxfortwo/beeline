@@ -2,7 +2,7 @@ import { phoneIdentity as identity } from '../phone-identity.js';
 import { prepareMentionReplyInput } from '../owed-mentions.js';
 import { setMcpMemberWebhook, McpToolError } from '../rooms-mcp-members.js';
 import { disconnectMcp } from '../rooms-mcp-connections.js';
-import { CommandRefusalError } from '../command-refusal.js';
+import { CommandRefusalError, ExpectedRefusalError } from '../command-refusal.js';
 import { requestUsageRefresh } from '../agent-usage.js';
 import { FIRST_PARTY_INTEGRATIONS } from '../first-party-integrations.js';
 import { squireWorkStatus } from '../squire-machine.js';
@@ -230,7 +230,7 @@ import { phoneReadConnectionDetail, phoneRevokeConnectionGrants } from './connec
             [request.roomId, request.name],
           )
         ).rows[0];
-        if (!row) throw new Error('workflow is unavailable');
+        if (!row) throw new ExpectedRefusalError('workflow is unavailable');
         return {
           contract: JSON.parse(row.markdown),
           runs: (

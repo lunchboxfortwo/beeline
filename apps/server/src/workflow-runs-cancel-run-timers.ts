@@ -1,5 +1,5 @@
 import { claimRun } from './workflow-runs.js';
-import { CommandRefusalError } from './command-refusal.js';
+import { CommandRefusalError, ExpectedRefusalError } from './command-refusal.js';
 import { firstHealthyAgent } from './agent-health.js';
 import { systemMessage } from '@beeline/api-contract/system-message-catalog';
 import { reserveServiceReviewWorkspaces } from './service-review.js';
@@ -473,7 +473,7 @@ export async function cancelWorkflowRun(
     input = { ...input, runId: scope.runId };
     const { run } = scope;
     const actorId = await authorizeRunControl(db, command, run, 'cancel this run', true);
-    if (scope.ended) throw new Error('this workflow run has already ended');
+    if (scope.ended) throw new ExpectedRefusalError('this workflow run has already ended');
     const reason = input.reason.trim();
     const closed = await closeRun(db, scope, {
       status: 'abandoned',
