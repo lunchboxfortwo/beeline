@@ -1,9 +1,11 @@
-import { transitions, deck, viewer, chatList, room, listOf, paintedRows, roomWatch, quiet, mountDeck, fixtureScope1, fixtureScope3, fixtureScope5 } from './test-support-channels.test-support';
+import { transitions, deck, hotSurfaces, viewer, chatList, room, listOf, paintedRows, roomWatch, quiet, mountDeck, fixtureScope1, fixtureScope3, fixtureScope5 } from './test-support-channels.test-support';
 import * as React from 'react';
+import * as Native from 'react-native';
+import AsyncStorage from '@react-native-async-storage/async-storage';
 // @ts-expect-error react-test-renderer has no declarations in this workspace.
 import { act, create, type ReactTestRenderer } from 'react-test-renderer';
 import { describe, expect, it, vi } from 'vitest';
-import { RoomViewHttpError, type ChatListView } from '@beeline/buzz-client';
+import { RoomViewHttpError, type ChatListView, type ChatListItem } from '@beeline/buzz-client';
 import BuzzChannels from './channels';
 import { router } from 'expo-router';
 import { loadBuzzIdentity } from '@/auth/buzz-identity-storage';
@@ -15,6 +17,74 @@ import { mobileSurfaceCache } from '@/buzz/surface-storage';
 import { ConversationRow } from '@/components/buzz/ConversationRow';
 import { dispatchRoomOpenTap } from '@/buzz/room-open-prefetch';
 import { applyChatListCorners } from '@/buzz/room-corner-store';
+
+it.each(['cold load', 'return to the list'])('never renders unpinned cached rows on %s', async (scenario) => {
+  deck.holdLayouts = true;
+  const scope = fixtureScope1();
+  scope.saveDeck();
+  const pinKey = `@beeline/room-pins/${scope.savedViewer}/${scope.savedWorkspace}`;
+  const pinnedId = '22222222-2222-4222-8222-222222222222';
+  const originalGet = AsyncStorage.getItem;
+  let releasePins!: (raw: string | null) => void;
+  const pins = new Promise<string | null>(resolve => { releasePins = resolve; });
+  const storage = vi.spyOn(AsyncStorage, 'getItem').mockImplementation(key =>
+    key === pinKey ? pins : originalGet(key));
+  const renders: string[][] = [];
+  const nativeLists = Native as unknown as {
+    SectionList: (props: Native.SectionListProps<ChatListItem>) => React.ReactElement;
+  };
+  const renderList = nativeLists.SectionList;
+  const list = vi.spyOn(nativeLists, 'SectionList').mockImplementation((props) => {
+    renders.push(props.sections.flatMap(section => section.data.map(item => item.room.id)));
+    return React.createElement(renderList, props);
+  });
+  let renderer!: ReactTestRenderer;
+  try {
+    // The synchronous deck cache contains a pinned Room plus an unpinned Room.
+    for (const [key, value] of hotSurfaces.saved) {
+      if (!key.includes('/workspace/:id/chats')) continue;
+      const saved = value as ChatListView;
+      hotSurfaces.saved.set(key, { ...saved, chats: [
+        ...saved.chats,
+        { ...saved.chats[0], room: { ...saved.chats[0].room, id: '33333333-3333-4333-8333-333333333333' } },
+      ] });
+    }
+    if (scenario === 'return to the list') {
+      await act(async () => { renderer = create(<BuzzChannels />); });
+      await act(async () => releasePins(JSON.stringify([pinnedId])));
+      await act(async () => renderer.unmount());
+      renders.length = 0;
+    }
+    await act(async () => { renderer = create(<BuzzChannels />); });
+    expect(renders.flat()).not.toContain('33333333-3333-4333-8333-333333333333');
+    await act(async () => releasePins(JSON.stringify([pinnedId])));
+    expect(renders.length).toBeGreaterThan(0);
+    expect(renders.every(ids => ids.length === 1 && ids[0] === pinnedId)).toBe(true);
+    expect(paintedRows(renderer).map(item => item.room.id)).toEqual([pinnedId]);
+  } finally {
+    if (renderer) await act(async () => renderer.unmount());
+    storage.mockRestore();
+    list.mockRestore();
+  }
+});
+
+it('finishes the existing Room load gate and shows the pin error when local pin storage fails', async () => {
+  deck.holdLayouts = true;
+  fixtureScope1().saveDeck();
+  const originalGet = AsyncStorage.getItem;
+  const storage = vi.spyOn(AsyncStorage, 'getItem').mockImplementation(key =>
+    key.startsWith('@beeline/room-pins/') ? Promise.reject(new Error('storage unavailable')) : originalGet(key));
+  let renderer!: ReactTestRenderer;
+  try {
+    await act(async () => { renderer = create(<BuzzChannels />); });
+    expect(paintedRows(renderer)).toHaveLength(1);
+    expect(renderer.root.findAllByProps({ testID: 'rooms-loader-gate' })).toHaveLength(0);
+    expect(renderer.root.findAllByProps({ title: 'Could not load pinned conversations.' }).length).toBeGreaterThan(0);
+  } finally {
+    if (renderer) await act(async () => renderer.unmount());
+    storage.mockRestore();
+  }
+});
 
 describe('Saved deck cold launch', () => {
 const scope1 = fixtureScope1();

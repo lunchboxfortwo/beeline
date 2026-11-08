@@ -282,7 +282,7 @@ function BuzzChannels({ session }: { session: DeckSession }) {
   const [
     viewerIsAgent, canManageWorkspace, activeCommunityId, togglePin, roomName, roomNameDraft,
     activeCommunity, communities, filter, setFilter, searchOpen, setSearchOpen, query, setQuery,
-    counts, pinError, setRoomName, chatSections, messageSearch, pinned, workspaceDetail,
+    counts, pinError, setRoomName, chatSections, messageSearch, pinned, workspaceDetail, pinsLoaded,
   ] = useChannelsPresentation([
     workspaceList, requestedWorkspaceId, chatList, identity, relayUrl,
   ]);
@@ -346,9 +346,9 @@ function BuzzChannels({ session }: { session: DeckSession }) {
       </View>
     );
   }
-  if (landing.kind !== 'deck' || !chatList) {
-    // Choice: the create-or-join screen is the landing and the effect above
-    // is replacing this one; loader: nothing has answered yet.
+  if (landing.kind !== 'deck' || !chatList || !pinsLoaded) {
+    // Keep the existing load gate until Room data and local pins can
+    // choose the first list together. Other landings navigate above.
     return <RoomDeckLoadingView style={{ paddingTop: insets.top }} onLayout={onLayout} />;
   }
 

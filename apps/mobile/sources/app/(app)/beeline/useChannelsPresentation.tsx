@@ -41,6 +41,7 @@ export function useChannelsPresentation([
   messageSearch: import("@/buzz/use-message-search").MessageSearchState,
   pinned: readonly string[],
   workspaceDetail: WorkspaceView | null,
+  pinsLoaded: boolean,
 ] {
 
 
@@ -114,6 +115,6 @@ export function useChannelsPresentation([
 return [
     viewerIsAgent, canManageWorkspace, activeCommunityId, togglePin, roomName, roomNameDraft,
     activeCommunity, communities, filter, setFilter, searchOpen, setSearchOpen, query, setQuery,
-    counts, pinError, setRoomName, chatSections, messageSearch, pinned, workspaceDetail,
+    counts, pinError, setRoomName, chatSections, messageSearch, pinned, workspaceDetail, pinsLoaded,
   ];
 }

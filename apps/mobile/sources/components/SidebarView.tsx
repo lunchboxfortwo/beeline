@@ -560,7 +560,7 @@ export const SidebarView = React.memo(function SidebarView() {
           <ScrollView style={styles.list} contentContainerStyle={styles.listContent}>
             {navigationError ? (
               <SettingsRow title={navigationError} />
-            ) : !filteredChats.length && (!surface || query.trim() || filter !== 'all') ? (
+            ) : surface && !pinsLoaded ? null : !filteredChats.length && (!surface || query.trim() || filter !== 'all') ? (
               surface ? (
                 filter === 'pinned' && !query.trim() ? (
                   <EmptyState title="No pinned conversations yet" description="Long press a Room to pin it here." testID="desktop-pinned-empty" action={{label:'Show all conversations',onPress:() => setFilter('all'),testID:'desktop-show-all-conversations'}} />

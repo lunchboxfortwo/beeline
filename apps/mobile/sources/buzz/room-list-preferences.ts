@@ -14,7 +14,11 @@ export function useRoomListFilter(
     filter: RoomListFilter;
     chosen: boolean;
   }>({ workspace, filter: 'all', chosen: false });
-  const filter = selection.workspace === workspace ? selection.filter : 'all';
+  // Choose the default on the same render that receives pins and Rooms.
+  // The effect only remembers that choice so later updates cannot replace it.
+  const filter = selection.workspace === workspace && selection.chosen
+    ? selection.filter
+    : ready && hasPinnedRoom ? 'pinned' : 'all';
   useEffect(() => {
     if (!workspace) return;
     setSelection((current) => {
@@ -106,7 +110,10 @@ export function useRoomPins(
         setState({ key, ids: decodePins(raw), loaded: true });
       })
       .catch(() => {
-        if (!changed) setError('Could not load pinned conversations.');
+        if (!changed) {
+          setState({ key, ids: [], loaded: true });
+          setError('Could not load pinned conversations.');
+        }
       });
     return () => {
       changed = true;
