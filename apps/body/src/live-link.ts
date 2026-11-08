@@ -64,13 +64,13 @@ export class LiveLink {
     });
     socket.on?.('unexpected-response', (_request: unknown, response: IncomingMessage) => {
       const status = response.statusCode ?? 0;
-      // A login/version refusal ends this connection. Ordinary request
-      // refusals never touch it. Consume the response before ending upgrade.
-      if (status === 401 || status === 403 || status === 426) this.#wanted = false;
+      // A failed upgrade ends this attempt, never the demand for a link.
+      // `close` also covers truncated responses: `end` alone can strand a
+      // CONNECTING WebSocket after its underlying TCP socket is already gone.
       let body = '';
       response.on('data', (chunk: Buffer) => { if (body.length < 1024) body += chunk.toString('utf8').slice(0, 1024 - body.length); });
-      response.on('end', () => {
-        if (status === 426) {
+      response.on('close', () => {
+        if (status === 426 && response.complete) {
           try {
             const value = JSON.parse(body) as { error?: string; minVersion?: string };
             if (value.error === 'update_required' && typeof value.minVersion === 'string') this.requireUpdate(value.minVersion);
