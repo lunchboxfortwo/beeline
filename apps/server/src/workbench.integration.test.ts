@@ -156,7 +156,7 @@ const scope1 = fixtureScope1();
   });
 
 
-  it('projects companies from persisted metadata, isolates owners and includes hosted helpers', async () => {
+  it('projects companies from persisted metadata, isolates owners and includes hosted helpers without Squire', async () => {
     const freeAgent = 'e'.repeat(64);
     await scope1.database.query("INSERT INTO identities(id,kind,name) VALUES($1,'agent','Free server')", [freeAgent]);
     await scope1.database.query('INSERT INTO agents(agent_id,owner_id) VALUES($1,$2)', [freeAgent, HUMAN]);
@@ -167,10 +167,11 @@ const scope1 = fixtureScope1();
       fieldNames: ['session'], createdAt: 1, state: 'active', stale: false }] });
     const view = await scope1.phoneOperation('readWorkbench', { workspaceId: WORKSPACE }) as import('@beeline/api-contract/workbench').WorkbenchView;
     expect(view.helpers.map(h => h.id)).toEqual(expect.arrayContaining([HELPER, freeAgent]));
-    expect(view.helpers[0]?.squireEligible).toBe(true);
+    expect(view.helpers.find(h => h.id === HELPER)?.squireEligible).toBe(true);
+    expect(view.helpers.find(h => h.id === freeAgent)?.squireEligible).toBe(false);
     expect(view.connections[0]).toMatchObject({ loginHosts: ['login.example.co.uk'], keyName: 'EXAMPLE_LOGIN', credentialKind: 'login', expiresAt: 1 });
     expect(view.companies?.rows.find(r => r.id === 'example.co.uk')).toMatchObject({ section: 'attention', items: [{ kind: 'login', title: 'Production login', status: 'Expired' }] });
-    expect(view.companies?.rows.find(r => r.kind === 'sign-in-service')).toMatchObject({ items: [], machines: expect.arrayContaining([expect.objectContaining({ id: HELPER }), expect.objectContaining({ id: freeAgent })]) });
+    expect(view.companies?.rows.find(r => r.kind === 'sign-in-service')).toMatchObject({ items: [], machines: [expect.objectContaining({ id: HELPER })] });
     const other = await scope1.phoneOperation('readWorkbench', { workspaceId: WORKSPACE }, scope1.recipientToken) as typeof view;
     expect(other.companies?.rows.some(r => r.id === 'example.co.uk')).toBe(false);
     const response = await phoneFetch(`${scope1.origin}/v1/company-logos/sentry`);

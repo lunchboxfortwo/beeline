@@ -238,7 +238,6 @@ export class DaemonService {
   async listAppTools(input: Input<'listAppTools'>, agentId: string) { return daemonListAppTools(this, input, agentId); }
 
 
-   deferredAppTool?: (database: SqlDatabase) => Promise<Output<'executeAppTool'>>;
   async executeAppTool(input: Input<'executeAppTool'>, agentId: string) { return daemonExecuteAppTool(this, input, agentId); }
   async authorizeResource(input: Input<'authorizeResourceCall'>, agentId: string) { return daemonAuthorizeResource(this, input, agentId); }
   async connectMcpServer(input: Input<'connectMcpServer'>, agentId: string): Promise<Output<'connectMcpServer'>> { return daemonConnectMcpServer(this, input, agentId); }

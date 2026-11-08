@@ -156,6 +156,7 @@ import { seconds } from './values.js';
         id: string;
         name: string;
         online: boolean;
+        free_agent: boolean;
         broker_report: import('@beeline/api-contract/workbench').SquireMachineReport | null;
         reconnecting: boolean;
         google_session_expired: boolean;
@@ -172,6 +173,7 @@ import { seconds } from './values.js';
         // same 90-second window readers use). Name is the machine_name if set,
         // falling back to the first agent's identity name.
         `SELECT COALESCE(a.machine_id,a.agent_id) id,
+                bool_or(EXISTS(SELECT 1 FROM free_agents f WHERE f.agent_id=a.agent_id)) free_agent,
                 COALESCE(MAX(a.machine_name),MIN(i.name)) name,
                 bool_or(p.online) online,
                 bool_or(COALESCE(source.squire_work->>'install','false')='true' AND NOT source.squire_work ? 'errorMessage') reconnecting,
@@ -276,7 +278,7 @@ import { seconds } from './values.js';
         id: row.id,
         name: row.name,
         online: row.online,
-        squireEligible: true,
+        squireEligible: !row.free_agent,
         ...(row.broker_report || row.reconnecting || row.google_session_expired || row.squire_error ? {
           squire: { ...(row.broker_report ?? { status: 'not-added' as const, reportedAt: 0 }),
             ...(row.squire_error ? { status: 'error' as const, errorMessage: row.squire_error } : {}),

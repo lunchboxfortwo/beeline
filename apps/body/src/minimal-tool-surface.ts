@@ -7,7 +7,7 @@ export type ToolDefinition = { name: string; description: string; inputSchema: R
 
 export const CAPABILITY_ROUTES: Record<string, Record<string, string>> = {
   vault: { request: 'post_vault_save_card' },
-  "onboarding": {"welcome": "post_starter_welcome", "video_preview": "post_starter_video_preview", "invite": "post_room_invite", "repository": "post_repository_card", "starters": "post_starters_card"},
+  "onboarding": {"welcome": "post_starter_welcome", "game": "post_starter_game", "invite": "post_room_invite", "repository": "post_repository_card", "starters": "post_starters_card"},
   "workflow": {
     "save": "save_workflow",
     "describe": "load_workspace_skill",
@@ -58,8 +58,8 @@ export const CAPABILITY_TOOLS: Record<string, Record<string, ToolDefinition>> = 
         properties: { name: { type: 'string', pattern: '^[a-z][a-z0-9_]*$' }, label: { type: 'string' }, secret: { type: 'boolean' } } } } }
   } } },
   onboarding: {
-    video_preview: { name: 'video_preview', description: 'Show a Room clip frame, title, description and visibility above Post/Cancel. Upload the extracted frame as a Room image first. Nothing uploads to YouTube until Post is tapped.', inputSchema: { type: 'object', required: ['videoObjectId','frameObjectId','title','description','visibility'], properties: { videoObjectId: { type: 'string' }, frameObjectId: { type: 'string' }, title: { type: 'string', maxLength: 100 }, description: { type: 'string', maxLength: 5000 }, visibility: { enum: ['public','unlisted','private'] } }, additionalProperties: false } },
-    welcome: { name: 'welcome', description: 'Post the signup welcome choices in this chat to rerun onboarding. Manual runs are excluded from signup funnel counts.', inputSchema: { type: 'object', properties: {}, additionalProperties: false } },
+    game: { name: 'game', description: 'Start tic-tac-toe with the starter team when the person asks to play.', inputSchema: { type: 'object', properties: {}, additionalProperties: false } },
+    welcome: { name: 'welcome', description: 'Post the signup welcome question in this chat to rerun onboarding. Manual runs are excluded from signup funnel counts.', inputSchema: { type: 'object', properties: {}, additionalProperties: false } },
     invite: { name: 'invite', description: 'Create an invite for the requester\'s own Room and print the invite link in this chat. Workspace manager membership is required.', inputSchema: { type: 'object', properties: {}, additionalProperties: false } },
     repository: { name: 'repository', description: 'Post the Room repository card: create a private repo, link an installation repo, switch repos or add an organization. Returns install_missing, no_repo_linked or repo_linked. Use this instead of settings or CLI instructions.', inputSchema: { type: 'object', properties: {}, additionalProperties: false } },
     starters: { name: 'starters', description: 'Read recent commits, CI and open issues in the linked repository and post 3–4 one-tap tasks. Empty repositories get useful starting tasks. A selection starts work through the normal corner flow.', inputSchema: { type: 'object', properties: {}, additionalProperties: false } },
@@ -351,7 +351,7 @@ export const CAPABILITY_TOOLS: Record<string, Record<string, ToolDefinition>> = 
     },
     "link_wait": {
       "name": "link_wait",
-      "description": "Wait for the owner to approve a Link spend request. Polls briefly; call again while pending. After approval the result contains a one-time merchant-and-amount scoped card number, expiry, CVC and billing fields, or a shared payment token. Fill ordinary checkout fields with Squire operate_type/operate_drive using those approved details. Never reuse the card for another purchase.",
+      "description": "Wait for the owner to approve a Link spend request. Polls briefly; call again while pending. After approval the result contains a one-time merchant-and-amount scoped card number, expiry, CVC and billing fields, or a shared payment token. Fill ordinary checkout fields through the available browser using those approved details. Never reuse the card for another purchase.",
       "inputSchema": {
         "type": "object",
         "required": ["id"],

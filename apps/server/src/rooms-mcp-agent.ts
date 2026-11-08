@@ -56,9 +56,8 @@ const APP_ROUTES: Record<string, Record<string, Route | string>> = {
       description: 'Ask your owner to type secrets into a Save to vault card. Send names and purpose only; values never reach you.' },
   },
   onboarding: {
-    welcome: { op: 'post_starter_welcome', required: [], description: 'Post the signup welcome choices here.' },
-    video_preview: { op: 'post_starter_video_preview', required: ['videoObjectId', 'frameObjectId', 'title', 'description', 'visibility'],
-      description: 'Show a clip preview above Post/Cancel; nothing uploads until a person taps Post.' },
+    welcome: { op: 'post_starter_welcome', required: [], description: 'Post the signup welcome question here.' },
+    game: { op: 'post_starter_game', required: [], description: 'Play tic-tac-toe when the person asks.' },
     invite: { op: 'post_room_invite', required: [], description: 'Post an invite link for this Room. Workspace manager membership is required.' },
     repository: { op: 'post_repository_card', required: [], description: 'Post the Room repository card.' },
     starters: { op: 'post_starters_card', required: [], description: 'Post 3 to 4 one-tap starter tasks for the linked repository.' },
@@ -608,8 +607,7 @@ export class RoomsMcpAgentTools {
       switch (route.op) {
         case 'post_vault_save_card': return exec('postVaultSaveCard', { ...input, ...context });
         case 'post_starter_welcome': return exec('postStarterWelcome', context);
-        case 'post_starter_video_preview': return exec('postStarterVideoPreview', { ...context, videoObjectId: input.videoObjectId,
-          frameObjectId: input.frameObjectId, title: input.title, description: input.description, visibility: input.visibility });
+        case 'post_starter_game': return exec('postStarterGame', context);
         case 'post_room_invite': return exec('postRoomInvite', context);
         case 'post_repository_card': return exec('postRepositoryOnboarding', { ...context, kind: 'repository' });
         case 'post_starters_card': return exec('postRepositoryOnboarding', { ...context, kind: 'starters' });

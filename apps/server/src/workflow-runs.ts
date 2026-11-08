@@ -1,7 +1,6 @@
 import { claimWorkflowTransition } from './workflow-transition.js';
 import { sendSystemNotices } from './system-line.js';
 import { systemMessage } from '@beeline/api-contract/system-message-catalog';
-import { WELCOME_VIDEO_SLUG } from './welcome-video-workflow.js';
 import { CommandRefusalError, ExpectedRefusalError } from './command-refusal.js';
 import { CornerAccessDatabase } from './corner-access-database.js';
 import { createHash } from 'node:crypto';
@@ -13,7 +12,7 @@ import type { SqlDatabase } from './database.js';
 import { firstHealthyAgent, roomAgentHealth, type AgentHealthReason } from './agent-health.js';
 import { ensureSystemDirectMessageRoom, ensureSystemIdentity, systemIdentityMention, systemLine } from './system-line.js';
 import { SYSTEM_IDENTITY_ID } from '@beeline/api-contract/system-identity';
-import { welcomeVideoRoleHolders, workflowGatePrompt, cancelWorkflowRun } from './workflow-runs-cancel-run-timers.js';
+import { workflowGatePrompt, cancelWorkflowRun } from './workflow-runs-cancel-run-timers.js';
 import { handoff, settleWorkflowGate, abandonCornerWorkflowRuns, liveWorkflowRun, saveWorkflow, activeRunIdsForSchedule } from './workflow-runs-repeated-result.js';
 import { startWorkflow, assignWorkflowRole, archiveWorkflow, describedLegacyWorkflowContract, backfillWorkflowSkillDescriptions, closeStaleWorkflowGateChoices } from './workflow-runs-start-workflow.js';
 
@@ -169,18 +168,6 @@ export async function loadRunRoleAgents(
 }
 
 
-export async function pickWorkflowAgent(db: SqlDatabase, roomId: string, list: string[], exclude: string[], slug?: string): Promise<string | null> {
-  if (slug !== WELCOME_VIDEO_SLUG) return firstHealthyAgent(db, roomId, list, exclude);
-  const health = await roomAgentHealth(db, roomId, list);
-  const free = (await db.query<{ agent_id: string }>(
-    `SELECT agent_id FROM free_agents WHERE agent_id=ANY($1::text[]) AND removed_at IS NULL`, [list])).rows;
-  const hosted = new Set(free.map(row => row.agent_id));
-  // A hosted starter can be asleep before its first job; dispatch wakes its machine.
-  return list.find(id => !exclude.includes(id) && (health.get(id)?.healthy ||
-    (health.get(id)?.reason === 'offline' && hosted.has(id)))) ?? null;
-}
-
-
 /**
  * Resolve `role`'s binding to a concrete agent id, picking the first healthy
  * agent on its list only the FIRST time a list-bound role is dispatched —
@@ -199,13 +186,9 @@ export async function resolveRoleBinding(
     runId?: string;
   },
 ): Promise<{ agentId: string } | { exhausted: true }> {
-  const otherRole = input.role === 'checker' ? 'maker' : input.role === 'maker' ? 'checker' : undefined;
-  const excluded = input.workflowSlug === WELCOME_VIDEO_SLUG && otherRole
-    ? await welcomeVideoRoleHolders(db, input.roomId, input.runId, otherRole, input.roleBindings[otherRole]) : [];
   const current = input.roleBindings[input.role];
-  if (current && excluded.includes(current)) delete input.roleBindings[input.role];
-  if (current && !excluded.includes(current)) return { agentId: current };
-  const picked = await pickWorkflowAgent(db, input.roomId, input.roleAgents[input.role] ?? [], excluded, input.workflowSlug);
+  if (current) return { agentId: current };
+  const picked = await firstHealthyAgent(db, input.roomId, input.roleAgents[input.role] ?? []);
   if (!picked) return { exhausted: true };
   input.roleBindings[input.role] = picked;
   return { agentId: picked };

@@ -304,6 +304,8 @@ import { phoneSendMessage } from './messages.js';
       if (!adapter.authorize('connect', role).allowed) throw new Error(CONNECTOR_ADAPTER_DENIED);
     }
     if (input.connectorType === 'trusty-squire') {
+      if ((await database.query('SELECT 1 FROM free_agents WHERE agent_id=$1', [input.helperAgentId])).rowCount)
+        throw new Error('Free agents use Lightpanda. Open the site yourself or connect your own agent for sign-in or signup.');
       await queueSquireWork(database, input.helperAgentId, { install: true, forceReloginProvider: input.forceReloginProvider });
       await grantSquireToOwnerMachineAgents(database, { workspaceId: input.workspaceId,
         ownerIdentityId: input.ownerIdentityId, machineId: input.machineId });

@@ -1,6 +1,4 @@
 import { systemMessage } from '@beeline/api-contract/system-message-catalog';
-import { YouTubeUploadRefusal } from '../composio-apps.js';
-import { consumeStarterVideoPost, restoreStarterVideoPost } from '../starter-onboarding.js';
 import { ExpectedRefusalError } from '../command-refusal.js';
 import { CommandRefusalError } from '../commander.js';
 import { firstPartyIntegration } from '../first-party-integrations.js';
@@ -76,6 +74,8 @@ import { daemonRequestAgentGrant, daemonGrantRequester, daemonConsumeAgentGrant 
       const name = connectorDisplayName(kind);
       let connectorId: string;
       if (kind === 'trusty-squire') {
+        if ((await ctx.database.query('SELECT 1 FROM free_agents WHERE agent_id=$1', [agentId])).rowCount)
+          return { status: 'unavailable', app: name, next: 'This free agent can browse public pages with Lightpanda. For sign-in or signup, open the site yourself or connect your own agent.' };
         connectorId = squireMachineAddress(context.machine.machineId);
         const status = await squireWorkStatus(ctx.database, agentId);
         if (status.status === 'connected' && !input.reconnect && !input.switchGoogleAccount)
@@ -86,7 +86,7 @@ import { daemonRequestAgentGrant, daemonGrantRequester, daemonConsumeAgentGrant 
           if (commandId && !offer.joined) await ctx.database.query(
             'UPDATE connector_offers SET command_id=$2 WHERE id=$1', [offer.offerId, commandId]);
           return { status: 'needs_approval', app: name, connectorId,
-            next: 'The Trusty Squire connector card is ready. Tap it to install Squire on your agent’s machine, including its hosted machine; complete any sign-in on your phone, then this request resumes.' };
+            next: 'The Trusty Squire connector card is ready. Tap it to install Squire on your agent’s machine, complete any sign-in on your phone, then this request resumes.' };
         }
         await ctx.database.transaction(database => queueSquireWork(database, agentId,
           { install: true, ...(input.switchGoogleAccount ? { forceReloginProvider: 'google' } : {}) }));
@@ -192,6 +192,9 @@ import { daemonRequestAgentGrant, daemonGrantRequester, daemonConsumeAgentGrant 
         Object.assign(result, { status: 'needs_sign_in', next: 'The sign-in card is ready. Wait for the owner.' });
       });
     }
+    if ((outcome.transport === 'squire-api' || outcome.transport === 'squire-browser') &&
+        (await ctx.database.query('SELECT 1 FROM free_agents WHERE agent_id=$1', [agentId])).rowCount)
+      return { status: 'unavailable', app: service, next: 'Open this site yourself or connect your own agent to use its signed-in account.' };
     if (outcome.transport !== 'squire-api' && outcome.transport !== 'squire-browser') return result;
     if ((await machineSquireReport(ctx.database, context.owner.pubkey, context.machine.machineId))?.status !== 'connected')
       return machine('trusty-squire');
@@ -476,26 +479,14 @@ import { daemonRequestAgentGrant, daemonGrantRequester, daemonConsumeAgentGrant 
     if (!args || typeof args !== 'object' || Array.isArray(args) ||
       JSON.stringify(args).length > 65_536)
       throw new Error('App tool arguments are invalid');
-    const claim = input.tool === 'YOUTUBE_MULTIPART_UPLOAD_VIDEO'
-      ? await ctx.database.transaction(db => consumeStarterVideoPost(db, input.roomId, agentId, args)) : undefined;
     const execute = async (database: SqlDatabase) => {
-      let data: unknown;
-      try {
-        data = await ctx.composio!.execute({ accountId: row.composio_account_id!,
+      const data = await ctx.composio!.execute({ accountId: row.composio_account_id!,
           userId: row.owner_identity_id, toolkit: composioToolkitForApp(row.app_key),
           tool: input.tool, arguments: args, files });
-      } catch (error) {
-        if (claim && error instanceof YouTubeUploadRefusal) await restoreStarterVideoPost(database, claim);
-        throw error;
-      }
       await recordAppUsage(database, { appId: row.id, agentId,
         roomId: input.roomId, requesterId: requester.id, transport: 'composio',
         operation: input.tool, ...(grantId ? { grantId } : {}) });
       return { status: 'executed' as const, data };
     };
-    if (claim && ctx.commandTransaction) {
-      ctx.deferredAppTool = execute;
-      return { status: 'executed' as const, data: undefined };
-    }
     return execute(ctx.database);
   }

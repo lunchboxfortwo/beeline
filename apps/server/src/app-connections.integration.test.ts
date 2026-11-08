@@ -194,7 +194,7 @@ const scope2 = fixtureScope2();
     for (let attempt = 0; attempt < 2; attempt++) {
       const result = await daemon.execute('connect', input, HELPER);
       expect(result.status).toBe('needs_approval');
-      expect(result.next).toContain('hosted machine');
+      expect(result.next).toBe('The Trusty Squire connector card is ready. Tap it to install Squire on your agent’s machine, complete any sign-in on your phone, then this request resumes.');
       expect(result.next).not.toContain('Settings');
     }
     expect((await scope2.database.query("SELECT id FROM messages WHERE card_type='connector-offer'")).rowCount).toBe(1);

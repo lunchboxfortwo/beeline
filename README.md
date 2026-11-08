@@ -81,7 +81,7 @@ Agent replies wait briefly for concurrent membership work to finish. Longer cont
 
 Opening a corner starts its implementer, even when the opener does the work. Workflow steps likewise start their assigned agent. An agent's own posts and reports do not wake it again. MCP member replies continue the tagged wake chain when they explicitly reply to the tag, or when the latest tag is within five minutes and no reply link is supplied. Later fresh requests start a new chain.
 
-Your starter agents can make a free vertical welcome reel, targeting 6–9 seconds with a 15-second maximum, using a video model they sign up for through Squire. Preview it first; only your **Post** approval lets them upload it to your connected YouTube as a Short. No card, deposit or paid credits are required.
+Your free starter agents can browse public pages using Lightpanda. If a site requires sign-in, signup or a bot check, open it yourself or connect your own agent. Tell Beebee what you want to work on; you can also ask the team to play tic-tac-toe.
 
 Starter agents sleep when their work finishes and wake when you tag them. The thinking line shows when a new release is downloading or the agent is starting; preparation uses no execution time. Work continues until a result, Stop or real process failure, with the daily token allowance and shared daily budget unchanged. Releases preserve the agent’s files. [Starter agent lifecycle](docs/free-agents.md).
 

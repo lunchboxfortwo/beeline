@@ -2,7 +2,7 @@ import { setAgentWakePaused } from '../agent-wake-pause.js';
 import type { HelperTurnOwnershipSource } from '@beeline/api-contract/helper-turn-ownership';
 import { attachUsageAccount, helperUsageEnabled, publishUsageAccount } from '../helper-usage.js';
 import { owedMentions } from '../owed-mentions.js';
-import { postStarterVideoPreview } from '../starter-onboarding.js';
+import { postStarterGame } from '../starter-onboarding.js';
 import { readUsageRefreshOutcome } from '@beeline/api-contract/daemon';
 import { postStarterInviteOffer } from '../starter-invite.js';
 import { sendOperatorSystemDm, readOperatorSystemDm } from '../operator-system-dm.js';
@@ -656,10 +656,13 @@ export async function daemonExecuteOperation<Name extends keyof DaemonOperationM
           input as Input<'requestAgentGrant'>,
           authenticatedAgentId,
         )) as Output<Name>;
-      case 'postStarterVideoPreview': {
-        const request = input as Input<'postStarterVideoPreview'>;
+      case 'postStarterGame': {
+        const request = input as Input<'postStarterGame'>;
         await daemonAccess(ctx, request.roomId, authenticatedAgentId);
-        const result = await postStarterVideoPreview(ctx.database, ctx.objects, { ...request, agentId: authenticatedAgentId });
+        const personId = await daemonRepositoryOnboardingRequester(ctx, authenticatedAgentId, request.roomId, candidate);
+        if (!personId) throw new Error('The starter team owner must request the game');
+        await postStarterGame(ctx.database, ctx.objects, request.roomId, personId);
+        const result = { status: 'posted' as const };
         ctx.live.publish({ type: 'invalidate', roomId: request.roomId, reason: 'message' });
         return result as Output<Name>;
       }

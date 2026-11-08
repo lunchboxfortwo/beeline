@@ -27,15 +27,12 @@ soul. Existing free agents keep their names.
   Beebee/Luna/Beebee banter through the shared model proxy using each agent's
   stored model and instructions. The phone supplies its timezone at creation.
   Room entry starts playback: each accepted line follows a brief working state,
-  then Beebee posts the fixed first-name hello and the repository, YouTube and
-  Something else choices. Invalid lines end the exchange; a failed exchange or the
-  Room-entry deadline (20 seconds) falls back to the hello and choices.
-  Repository choices reuse the repository/starters cards; YouTube uses the
-  existing multipart connector and requires a preview Post tap before upload;
-  Something else focuses the composer. Manual reruns queue the same flow after
-  the command commits and remain outside signup funnel counts. The game and
-  explanation welcome paths are retired. The single-agent operator path retains
-  the legacy hello.
+  then Beebee posts the fixed first-name hello and asks “What should we work on?”
+  Nothing follows that open question. Invalid or late banter falls back
+  to this same hello. No option card or video workflow is created. Tic-tac-toe is
+  available through the onboarding game tool when requested. Manual reruns queue
+  the same flow after commit and remain outside signup funnel counts. The
+  single-agent operator path retains the legacy hello.
   The legacy hello teaches Room replies, corners and connectors, then asks what the person is working on. It contains no repository card; the agent offers one only for coding or GitHub-connection intent.
   The hello tags the owner through the normal mention/push path and uses the
   agent's actual handle. It creates no model turn or Machine. The first real
@@ -68,8 +65,7 @@ soul. Existing free agents keep their names.
   The helper never updates in place.
 - **Wake.** The Fly adapter submits one start request per admitted action. HTTP 412 and lost replies return to the owner without a timer or resubmission (`fly-machines.test.ts`). Before starting an existing Machine, the server compares its image
   with the configured published digest and updates it while keeping its complete
-  configuration and persistent rootfs. Cold boot reconciles the broker marker
-  directory anchor after an image replacement, preserving its account binding.
+  configuration and persistent rootfs.
   Every committed `agent_commands` INSERT for a free agent calls
   `FreeAgentService.wake`. A committed connector-assignment notification also
   wakes a free agent with active connector installation or sign-in work, independently of model-spend admission. There is no leader sweep, retry deadline,
@@ -115,14 +111,6 @@ Every transition writes `free_agent_events`. These rows are the source of the
 rewake latency numbers from `scripts/prove-free-agent.mjs`: created, provisioned,
 bootstrapped, connected, sleep_requested, slept, wake_requested, machine_started,
 reaped_idle, deleted_idle and allowance_reached.
-
-`R-SQUIRE-SLEEP` in `free-agents.test.ts` covers pairing while suspended, sign-in
-sleep protection, terminal release and wake fences. After building the server,
-`node --import tsx scripts/prove-squire-free-agent-wake.mjs` exercises the built
-phone HTTP pair → committed notification → wake → helper assignment → phone
-sign-in surface → completion path. PGlite, a stateful Machines API stand-in and
-simulated helper reports isolate it from production; it does not measure live
-Fly resume or helper reconnect latency.
 
 Existing free agents switch to Pi on their next cold boot. The helper upgrades
 the persisted runtime and writes a private Pi provider configuration before
@@ -246,13 +234,6 @@ Acquisition keeps a helper with a current live connection `running`; preparation
 must not demote it to `waking` and revoke its claimed model access. The registration
 and catch-up regression is in `free-agent-acquisition.test.ts`.
 
-Squire keeps one host broker. Its broker-owned operation receipt and helper relay
-return the original result after a lost reply without replaying browser starts
-or mutations. Account sign-in remains an explicit connector requirement. An
-unknown result remains unknown. Background tool completion stays in its original
-invocation; bookkeeping never creates a model turn. Saved checkpoints remain
-readable after a real interruption.
-
 At 80% of whichever allowance applies (2.4M of the default 3M daily cap, or 8M of the 10M first-day cap), settlement posts one plain allowance notice per owner per UTC day into the room where the person is working, with the midnight UTC reset and a Members ->
 Add agent link. The owner must be a room member; otherwise nothing is posted. Delivery does not call a model. The warning records
 `allowance_warning` and `nudge_shown`; pairing a non-free agent in the same
@@ -286,25 +267,24 @@ size, automatic sleep, current invocation authority, owner token allowances and 
 
 ## Image and proofs
 
-Hosted VMs include Chrome, the remote sign-in display tools and a real systemd
-user manager started by `infra/free-agent/hosted-services.sh`. Each VM keeps its
-own profile and broker sockets on its private rootfs. The image-owned Squire
-broker unit is enabled under `default.target` and starts on boot. The helper's
-existing suspend detector reruns `hosted-services.sh` before its immediate
-socket reconnect, restoring a missing user manager or broker through systemd.
-This script fixes HOME and XDG paths to the machine's root account, including
-when called from a process with an agent home. Failed recovery exits the helper
-as a concrete process failure. The acquisition owner reconciles on the next real connection event. The hosted manager reports READY or actual exit, and the existing broker unit owns browser readiness before sign-in. The phone receives Squire's streamed
-virtual browser page. Owners' personal-computer setup keeps its existing path.
-The isolated entry is `infra/free-agent/hosted-install-proof.mjs`; evidence and
-remaining full-account checks are in [the onboarding connection proof](onboarding-connect-proof.md).
-Real Fly restart, suspend/resume and missing-manager recovery evidence:
-[broker restart proof](free-agent-broker-restart-proof.json). The disposable
-Machine uses the production helper with an empty agent inventory; it proves
-real systemd/Squire recovery and sign-in, without server registration or model
-turns. `infra/free-agent/resume-proof-helper.mjs` supplies that entry and
-`infra/free-agent/hosted-service-state.mjs` records redacted state/sign-in results.
+Hosted VMs contain agent-browser 0.41.2 (Apache-2.0) and Lightpanda 1.0.3
+(AGPL-3.0), resolved from the latest stable upstream releases and pinned by SHA-256
+in `infra/free-agent/Dockerfile`. Update the version and checksum together when
+adopting a newer release; builds never resolve a mutable latest tag. The native
+agent-browser CLI launches Lightpanda on demand. `free-agent-vm.ts` reconciles its
+engine and executable environment into new and persisted isolated agent homes.
+The browser socket directory is `/tmp/beeline-browser` inside each Room sandbox’s
+private `/tmp`, keeping Unix socket paths below the limit despite long harness homes.
+There is no Chrome, virtual display, Squire package, broker or startup service.
+A bot check, sign-in or signup ends browsing with a plain explanation and the
+suggestion to open the site personally or connect an owned agent. Do not retry
+or claim a blocked action succeeded. Server connector routes refuse Squire
+cards and assignments on free agents. Personal agents retain their own tools.
 
+Every free agent receives exactly this team guide, including existing agents on
+configuration reads: “Try to include another agent, if available, to request
+feedback on your work as much as possible.” `FREE_AGENT_TEAM_GUIDE` contains no
+question-count decay or additional directions. Personal agents do not receive it.
 
 The server release leg (`.github/actions/server-leg/action.yml`) builds
 `infra/free-agent/Dockerfile` from the release checkout, publishes its immutable
@@ -338,7 +318,7 @@ installs it through the existing recovery installer in an isolated build stage
 under `/opt/beeline/helper`. The entrypoint launches that image-owned helper
 directly, so an older release pointer in persistent HOME cannot select the runtime.
 `node --test infra/free-agent/entrypoint.test.mjs` covers stale-HOME boot selection,
-helper exit propagation and hosted-service startup failure. The [persistent boot recovery proof](free-agent-persistent-boot-proof.md)
+and helper exit propagation. The [persistent boot recovery proof](free-agent-persistent-boot-proof.md)
 records a disposable Fly Machine cold stop/start and the stale-owner regression.
 After building the server and image, `node infra/free-agent/cold-start-proof.mjs`
 creates a disposable local database and fresh test Workspace, then drives the
@@ -361,21 +341,23 @@ matching image needs no reserve allocation on its first turn.
 
 ## Starter onboarding (revision 4)
 
-Beebee asks the opening question in its greeting; the welcome card contains only A–D options. Option A wakes Beebee alone. Its prompt asks for a single second opinion on the first three substantive questions when another agent is present, then only when in doubt. No server-specific review wake or review-depth rule is added. Option C and the post-game invite action print an invite link in chat; the agent invite tool does the same. The funnel invite_shared milestone means that committed chat post, not a native share action.
+The Beebee/Luna/Beebee banter precedes the greeting, which ends with “What should
+we work on?” and has no suggestions or choice card. Luna’s second line may hope
+for code in the person’s repo or one specific everyday task. The onboarding
+`invite` tool prints an invite link in chat when requested. The funnel
+`invite_shared` milestone means that committed chat post, not a native share action.
 
 
 ## Manual onboarding and Luna backfill
 
 Agents can load the `beeline-onboarding` skill, discover
 `app_tool(app:"beeline:onboarding")`, and call its `welcome` action. This reuses
-signup's welcome choices in the calling chat. An earlier onboarding question
-from the same agent is skipped without a wake; unrelated questions retain their
-normal open-choice rule. Signup still posts its welcome directly on the server.
+signup's banter and open welcome question in the calling chat. Unrelated
+questions retain their normal open-choice rule. Signup still posts its welcome directly on the server.
 
-Manual welcome cards carry `onboardingManual` and a separate run ID. Their server events
+Manual welcome messages carry `onboardingManual` and a separate run ID. Their server events
 use that run ID as an internal funnel install/attempt with version `manual`, so
-signup cohorts exclude them. Explanation cards retain the marker. Game viewer
-and invite milestones also follow the manual run. Older clients' welcome events
+signup cohorts exclude them. Game viewer and invite milestones also follow the manual run. Older clients' welcome events
 are routed to the manual run on the server.
 
 After building the server, `npm run backfill:luna` prints the production target
@@ -403,34 +385,3 @@ Normal subscribed membership notifications still apply to other agents.
 ## Next-morning check-in
 
 There is no automatic next-day check-in.
-
-## Hosted Squire install recovery
-
-Reproduction `fb_32e642993b10b09e8a03bb7f`: helper-reported install failure settles
-the connector offer as `failed`, resumes its waiting request and frees the open
-card slot. The person can Retry the same card, or the agent can offer again.
-There is no maintenance timeout or scheduled install retry. A newer open card takes precedence over an old Retry.
-
-Run `node --import tsx scripts/prove-hosted-squire-failure.mjs` after building the
-server to demonstrate connect → accept → helper failure → phone failed card →
-resume → Retry → new assignment through built HTTP handlers. PGlite and a
-simulated helper failure stand in for production; this does not prove a live
-signup, Squire account sign-in or native Android rendering.
-
-Live diagnosis on Mahesh's Beebee (2 November, UTC): the replacement sq1139 image
-booted successfully; the user service manager responded; starting the existing
-broker unit returned active, with both broker and MCP sockets and no restarts.
-Connect then failed because the persisted marker's parent inode was 218 while
-the directory's inode was 81. Reanchoring that metadata, preserving the account
-binding, advanced connect to `needs-sign-in` with a sign-in page. Account sign-in
-and the post-release fresh-signup proof remain outstanding.
-
-The hosted broker unit also reconciles its marker in `ExecStartPre`, so a service
-restart repairs the anchor without another VM boot. `broker-image-proof.mjs`
-connects a real pinned Squire broker, replaces its persisted parent directory,
-demonstrates rejection of the stale marker, and reconnects after starting the
-same unit. It preserves a fixture account binding and profile data. This Docker
-directory-replacement proof does not claim a real signed-in account survived a
-Fly image update; that production acceptance check remains separate. Mahesh's
-never-signed-in account correctly reaches `needs-sign-in` and needs no operator
-sign-in or outward message.

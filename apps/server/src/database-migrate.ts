@@ -17,7 +17,6 @@ import { X_SIGNUP_DELIVERY_SCHEMA } from './x-ads.js';
 import { SERVER_LEASE_DEADLINE_SCHEMA } from './server-lease-deadlines.js';
 import { commandCompletionSchema } from './command-completion.js';
 import { ROUTER_COMMAND_SCHEMA } from './router-command-ledger.js';
-import { backfillWelcomeVideoWorkflow } from './welcome-video-workflow.js';
 import { AGENT_TURN_END_SCHEMA } from './agent-turn-end.js';
 import { clearConnectedAppPlaceholders } from './migrations/connected-app-turns.js';
 import { AGENT_CORNER_HOLDS_SCHEMA } from './migrations/agent-corner-holds.js';
@@ -624,8 +623,6 @@ export async function migrateData(database: SqlDatabase): Promise<void> {
     workflowBackfillOnce(database, 'feedback-triage-prompt-cases-v1', backfillFeedbackTriageWorkflow));
   await dataStep('feedback triage latest counts', () =>
     workflowBackfillOnce(database, 'feedback-triage-latest-count-v1', backfillFeedbackTriageWorkflow));
-  await dataStep('welcome video workflow', () =>
-    workflowBackfillOnce(database, 'welcome-video-v2', backfillWelcomeVideoWorkflow));
   await dataStep('feedback signal walk', () =>
     workflowBackfillOnce(database, 'feedback-signal-walk-v1', backfillFeedbackSignalWalk));
   await dataStep('workspace walk history', () =>

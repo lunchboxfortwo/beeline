@@ -193,7 +193,11 @@ Finish required work and report real blockers first: no_reply_needed ends the tu
   );
 }
 
-export function beelineConnectSkillMarkdown(releaseId: string): string {
+export function beelineConnectSkillMarkdown(releaseId: string, freeAgent = false): string {
+  if (freeAgent) return skillMarkdown(BEELINE_CONNECT_SKILL_NAME,
+    'Browse public websites with Lightpanda or connect supported apps.', releaseId, `Use agent-browser with Lightpanda for browser tasks. Run agent-browser skills get core before first use. A bot check, sign-in or signup means stop, explain the block plainly, and suggest the person opens it themselves or connects their own agent. Never retry or claim success without reading the result.
+
+Use connect for supported app connections and app_tool for their actual tools. Follow the returned readiness. When an app needs an unavailable browser or account, explain the limitation. For repository work, use the Room repository card and normal corner workflow.`);
   return skillMarkdown(
     BEELINE_CONNECT_SKILL_NAME,
     'Reach an app, API, website, GitHub, Tailscale, wallet or host command: connect, app_tool, Squire, grants and keys.',
@@ -257,14 +261,14 @@ You keep memory yourself. No background reviewer exists: what you do not keep cu
 
 | Store | Holds | Write with |
 | --- | --- | --- |
-| \`workspace-core\` procedure | Capabilities per machine; the Squire credential checklist | remember(kind:procedure, action:save), whole text |
+| \`workspace-core\` procedure | Capabilities and account access per machine | remember(kind:procedure, action:save), whole text |
 | Profile facts | Facts about the person who asked | remember(kind:fact, action:save) |
 | Workspace facts | Facts about anyone or anything else | remember(kind:fact, action:save) |
 | Procedures | Steps for a task that repeats | remember(kind:procedure, action:save) |
 | Workflows | Roles and steps for a run across agents | app_tool(app:beeline:workflow, tool:save); run with app_tool(app:beeline:workflow, tool:start) |
 | History | Every message in the Workspace | Nothing; read with search(scope:history) |
 
-- **Look up.** Before you say \"can't\", \"impossible\" or \"not saved\", run search(scope:memory, query) and connect(mode:status); inspect vault metadata only when Squire is mounted and relevant.
+- **Look up.** Before you say \"can't\", \"impossible\" or \"not saved\", run search(scope:memory, query) and connect(mode:status); inspect vault metadata only when its tools are mounted and relevant.
 - **Correct.** When a human corrects your claim, save the corrected fact with remember(kind:fact, action:save) in that same turn. Private harness notes do not count; other agents read only Beeline memory.
 - **Use.** Call remember(kind:fact, action:used) for what your answer used. When a saved item fails, fix it in the same turn.
 - **Save.** Put each fact in one store only. Never save "X is impossible". Save the specific failure and the machine: "On Niglet's host, the highroll Fly token returns 403."
@@ -283,7 +287,7 @@ export function beelineManagedSkills(
     { name: BEELINE_FILES_SKILL_NAME, content: beelineFilesSkillMarkdown(releaseId) },
     { name: BEELINE_CORNERS_SKILL_NAME, content: beelineCornersSkillMarkdown(releaseId) },
     { name: BEELINE_WAKES_SKILL_NAME, content: beelineWakesSkillMarkdown(releaseId) },
-    { name: BEELINE_CONNECT_SKILL_NAME, content: beelineConnectSkillMarkdown(releaseId) },
+    { name: BEELINE_CONNECT_SKILL_NAME, content: beelineConnectSkillMarkdown(releaseId, Boolean(process.env.BEELINE_FREE_AGENT_ID)) },
     { name: BEELINE_MEMORY_SKILL_NAME, content: beelineMemorySkillMarkdown(releaseId) },
     { name: BEELINE_TRIAGE_SKILL_NAME, content: beelineTriageSkillMarkdown(releaseId) },
     { name: BEELINE_SPEC_SKILL_NAME, content: beelineSpecSkillMarkdown(releaseId) },
@@ -521,7 +525,7 @@ function beelineOnboardingSkillMarkdown(releaseId: string): string {
     `# Run onboarding
 
 Discover the existing onboarding app with app_tool(app:"beeline:onboarding"). Call its welcome action with app_tool(app:"beeline:onboarding", tool:"welcome", args:{}).
-The action queues the same Beebee/Luna banter, fixed greeting and three job choices as signup in your current chat. When it returns started, end the turn with no reply: call no_reply_needed and write no text. The server plays the welcome without another agent turn. Let the person choose Write code in your repo, Post a video to your YouTube, or Something else. Manual runs stay out of signup funnel counts.
-Do not recreate the greeting or choices in prose. If the app refuses, follow its returned reason and report the concrete next step.
+The action queues the same Beebee/Luna banter, fixed greeting and open question as signup in your current chat. When it returns started, end the turn with no reply: call no_reply_needed and write no text. The server plays the welcome without another agent turn. Ask “What should we work on?” and let the person answer in their own words. Manual runs stay out of signup funnel counts.
+Do not recreate the greeting in prose. If the app refuses, follow its returned reason and report the concrete next step.
 `);
 }

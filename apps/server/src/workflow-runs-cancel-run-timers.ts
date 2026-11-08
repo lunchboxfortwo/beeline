@@ -1,7 +1,7 @@
 import { claimRun } from './workflow-runs.js';
 import { CommandRefusalError } from './command-refusal.js';
+import { firstHealthyAgent } from './agent-health.js';
 import { systemMessage } from '@beeline/api-contract/system-message-catalog';
-import { WELCOME_VIDEO_SLUG } from './welcome-video-workflow.js';
 import { reserveServiceReviewWorkspaces } from './service-review.js';
 import { humanRoomAdmin, humanRoomMember, WorkflowAuthorizationError } from './workflow-admin.js';
 import { randomBytes } from 'node:crypto';
@@ -13,7 +13,7 @@ import type { SqlDatabase } from './database.js';
 import { closeRunChoices, postRoomChoice } from './room-choice.js';
 import { ensureSystemIdentity, identitySubject, systemLine } from './system-line.js';
 import { SYSTEM_IDENTITY_ID } from '@beeline/api-contract/system-identity';
-import { loadRunStart, noteWorkflowRoleExhausted, RunScope, WORKFLOW_HANDOFF_CARD_TYPE, cancelRunWakes, loadRunRoleAgents, resolveRoleBinding, saveRunStatus, TriedAgent, mentionsFor, pickWorkflowAgent, roleReasons, workflowRequester, WorkflowRunCard, openRun, loadIdentityRow } from './workflow-runs.js';
+import { loadRunStart, noteWorkflowRoleExhausted, RunScope, WORKFLOW_HANDOFF_CARD_TYPE, cancelRunWakes, loadRunRoleAgents, resolveRoleBinding, saveRunStatus, TriedAgent, mentionsFor, roleReasons, workflowRequester, WorkflowRunCard, openRun, loadIdentityRow } from './workflow-runs.js';
 
 
 
@@ -248,10 +248,6 @@ export async function moveRole(
 ): Promise<{ state: string; attempt: number }> {
   const { run, roomId, runId, stateName } = scope;
   const state = scope.state as WorkflowHandoffState | WorkflowGateState;
-  const otherRole = input.role === 'checker' ? 'maker' : input.role === 'maker' ? 'checker' : undefined;
-  if (run.workflowSlug === WELCOME_VIDEO_SLUG && otherRole &&
-    (await welcomeVideoRoleHolders(db, roomId, runId, otherRole, run.roleBindings[otherRole])).includes(input.picked))
-    throw new Error('The welcome video maker and checker must not be the same agent in a run.');
   const roleBindings = { ...run.roleBindings, [input.role]: input.picked };
   const from = run.roleBindings[input.role];
   const names = await mentionsFor(db, [input.picked, ...(from ? [from] : [])]);
@@ -348,27 +344,10 @@ export async function closeRun(
 }
 
 
-/** Every agent that has held this role in the run, including earlier failovers. */
-export async function welcomeVideoRoleHolders(db: SqlDatabase, roomId: string, runId: string | undefined, role: 'maker' | 'checker', current?: string): Promise<string[]> {
-  const rows = runId ? (await db.query<{ holder: string | null }>(
-    `SELECT DISTINCT card->'roleBindings'->>$4 holder FROM messages
-     WHERE room_id=$1 AND card_type=$2 AND card->>'runId'=$3`,
-    [roomId, WORKFLOW_HANDOFF_CARD_TYPE, runId, role])).rows : [];
-  return [...new Set([...rows.map(row => row.holder), current].filter((id): id is string => Boolean(id)))];
-}
-
-
 /** The agents a step's role may walk: its ordered list, or its one bound agent. */
 export async function roleList(db: SqlDatabase, scope: RunScope, role: string): Promise<string[]> {
   const agents = (await loadRunRoleAgents(db, scope.roomId, scope.runId))[role];
-  if (agents?.length) {
-    const otherRole = role === 'checker' ? 'maker' : role === 'maker' ? 'checker' : undefined;
-    if (scope.run.workflowSlug === WELCOME_VIDEO_SLUG && otherRole) {
-      const excluded = await welcomeVideoRoleHolders(db, scope.roomId, scope.runId, otherRole, scope.run.roleBindings[otherRole]);
-      return agents.filter(agent => !excluded.includes(agent));
-    }
-    return agents;
-  }
+  if (agents?.length) return agents;
   const bound = scope.run.roleBindings[role];
   return bound ? [bound] : [];
 }
@@ -396,8 +375,8 @@ export async function failOver(
   const list = await roleList(db, scope, role);
   const cursor = input.leaving ?? scope.run.roleBindings[role];
   const start = cursor && list.includes(cursor) ? list.indexOf(cursor) + 1 : 0;
-  const picked = await pickWorkflowAgent(
-    db, scope.roomId, list.slice(start), tried.map((entry) => entry.agentId), scope.run.workflowSlug,
+  const picked = await firstHealthyAgent(
+    db, scope.roomId, list.slice(start), tried.map((entry) => entry.agentId),
   );
   if (picked) return moveRole(db, scope, { role, picked, tried, why: input.why });
   const reasons = list.length ? await roleReasons(db, { roomId: scope.roomId, list, tried, cursor }) : '';

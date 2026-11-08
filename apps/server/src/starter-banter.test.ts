@@ -2,7 +2,7 @@ import { describe, it, expect, vi, afterEach } from 'vitest';
 import { generateStarterBanter, validBanterLine, starterBanterBeforeDeadline } from './starter-banter.js';
 const beebee = { id: 'b', name: 'Beebee', handle: 'beebee42', instructions: 'real beebee instructions' };
 const luna = { id: 'l', name: 'Luna', handle: 'luna42', instructions: 'real luna instructions' };
-const good = ['@luna42, Alex arrived. I hope my coffee can keep up.', '@beebee42, I hope Alex brings a YouTube video to polish.', 'Alex is reading now. I should look busy.'];
+const good = ['@luna42, Alex arrived. I hope my coffee can keep up.', '@beebee42, I hope Alex brings code from a repo to sharpen.', 'Alex is reading now. I should look busy.'];
 afterEach(() => vi.useRealTimers());
 describe('starter banter', () => {
   it('uses each real instruction and carries the accepted conversation forward', async () => {

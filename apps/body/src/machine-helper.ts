@@ -1,7 +1,6 @@
 import { waitForProcessExit } from './process-exit.js';
 import { captureHelperError } from './sentry.js';
 import { createHash, randomUUID } from 'node:crypto';
-import { execFile } from 'node:child_process';
 import { MachineControl, machineControlPath } from './machine-control.js';
 import { withKernelLock } from './kernel-lock.js';
 import { DaemonApiError, isAgentRemovedError } from './daemon-api-client.js';
@@ -392,9 +391,6 @@ async function serveMachineHelper(
           log: message => console.warn(`[helper] ${message}`),
           onRegistered: () => {
             update?.notify();
-            if(env.BEELINE_HOSTED_SERVICES==='1')execFile('/bin/sh',['/opt/beeline/hosted-services.sh'],{env},error=>{
-              if(error){console.error('[helper] hosted services recovery failed:',error.message);restartHelper('failed');}
-            });
           },
         });
         link.setHelperIdentity({
@@ -500,9 +496,6 @@ async function serveMachineHelper(
           if (!migrationReleaseChecked) {
             migrationReleaseChecked = true;
             update?.notify();
-            if(env.BEELINE_HOSTED_SERVICES==='1')execFile('/bin/sh',['/opt/beeline/hosted-services.sh'],{env},error=>{
-              if(error){console.error('[helper] hosted services recovery failed:',error.message);restartHelper('failed');}
-            });
           }
           const signalOwner = async (signal: NodeJS.Signals) => {
             // Re-read identity immediately before each signal; records and PIDs can change.

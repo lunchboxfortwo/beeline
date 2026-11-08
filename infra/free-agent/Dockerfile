@@ -1,29 +1,24 @@
 # Base image for free starter agents (one Fly Machine per agent, app
 # beeline-free-agents). It holds the tools an agent works with and the
 # Pi harness and the helper built from this image's exact release checkout.
-FROM node:22-bookworm-slim AS hosted-services
+FROM node:22-bookworm-slim AS browser-tools
 ENV DEBIAN_FRONTEND=noninteractive
 RUN apt-get update && apt-get install -y --no-install-recommends \
-      bubblewrap ca-certificates curl dbus-user-session git less novnc procps python3 python3-venv \
-      ripgrep systemd websockify x11vnc xauth xvfb unzip xz-utils \
+      bubblewrap ca-certificates curl git less procps python3 ripgrep unzip xz-utils \
   && rm -rf /var/lib/apt/lists/*
-# The Squire broker uses headed Chrome and exposes its sign-in through noVNC.
-# Install these at image build time, never during a person's connection request.
-ARG CLOUDFLARED_VERSION=2026.10.5
-RUN curl -fsSL https://dl.google.com/linux/direct/google-chrome-stable_current_amd64.deb -o /tmp/chrome.deb \
-  && apt-get update && apt-get install -y --no-install-recommends /tmp/chrome.deb \
-  && rm -f /tmp/chrome.deb && rm -rf /var/lib/apt/lists/* \
-  && curl -fsSL "https://github.com/cloudflare/cloudflared/releases/download/${CLOUDFLARED_VERSION}/cloudflared-linux-amd64" -o /usr/local/bin/cloudflared \
-  && chmod 755 /usr/local/bin/cloudflared
-COPY infra/free-agent/hosted-services.sh infra/free-agent/reconcile-broker-marker.mjs infra/free-agent/start-hosted-manager.py /opt/beeline/
-COPY infra/free-agent/squire-operation-receipts.mjs infra/free-agent/patch-squire-receipts.mjs /opt/beeline/
-ARG SQUIRE_VERSION=1.1.39
-RUN npm install --prefix /opt/beeline/squire --omit=dev --no-audit --no-fund "@trusty-squire/mcp@${SQUIRE_VERSION}" \
-  && node /opt/beeline/patch-squire-receipts.mjs /opt/beeline/squire/node_modules/@trusty-squire/mcp/dist/server.js \
-  && npm cache clean --force
-COPY infra/free-agent/hosted-squire-broker.service /etc/systemd/user/trusty-squire-broker.service
-RUN systemctl --global enable trusty-squire-broker.service
-ENV XDG_RUNTIME_DIR=/run/user/0 DBUS_SESSION_BUS_ADDRESS=unix:path=/run/user/0/bus
+# Latest stable releases, resolved together and checksum pinned for repeatable builds.
+# agent-browser is Apache-2.0; Lightpanda is AGPL-3.0.
+ARG AGENT_BROWSER_VERSION=0.41.2
+ARG AGENT_BROWSER_SHA256=c4351f3802ffa5254d8c69f20a52e2fcf56925c6016fcf4203db25a07d811379
+ARG LIGHTPANDA_VERSION=1.0.3
+ARG LIGHTPANDA_SHA256=53eb34da09159dcf8f04865dbfe3e63e9a652062684495aa7ced5ddd7c82e8b0
+RUN curl -fsSL "https://github.com/vercel-labs/agent-browser/releases/download/v${AGENT_BROWSER_VERSION}/agent-browser-linux-x64" -o /usr/local/bin/agent-browser \
+  && echo "${AGENT_BROWSER_SHA256}  /usr/local/bin/agent-browser" | sha256sum -c - \
+  && curl -fsSL "https://github.com/lightpanda-io/browser/releases/download/${LIGHTPANDA_VERSION}/lightpanda-x86_64-linux" -o /usr/local/bin/lightpanda \
+  && echo "${LIGHTPANDA_SHA256}  /usr/local/bin/lightpanda" | sha256sum -c - \
+  && chmod 755 /usr/local/bin/agent-browser /usr/local/bin/lightpanda
+ENV AGENT_BROWSER_ENGINE=lightpanda AGENT_BROWSER_EXECUTABLE_PATH=/usr/local/bin/lightpanda \
+    AGENT_BROWSER_SOCKET_DIR=/tmp/beeline-browser
 
 FROM node:22-bookworm-slim AS helper-build
 WORKDIR /build
@@ -31,9 +26,10 @@ COPY infra/free-agent/helper-bundle/ /bundle/
 COPY infra/free-agent/bake-helper.mjs /build/
 ARG BEELINE_RELEASE_VERSION
 ARG BEELINE_RELEASE_SHA
-RUN node bake-helper.mjs "$BEELINE_RELEASE_VERSION" "$BEELINE_RELEASE_SHA"
+RUN node bake-helper.mjs "$BEELINE_RELEASE_VERSION" "$BEELINE_RELEASE_SHA" \
+  && find /opt/beeline/helper -type f -iname '*squire*' -delete
 
-FROM hosted-services AS runtime
+FROM browser-tools AS runtime
 ARG PI_VERSION=0.84.3
 ARG PI_ACP_VERSION=0.0.34
 RUN test "$PI_VERSION" != latest && test "$PI_ACP_VERSION" != latest \
@@ -49,7 +45,6 @@ ARG BEELINE_RELEASE_SHA
 LABEL app.usebeeline.release.version=$BEELINE_RELEASE_VERSION \
   app.usebeeline.release.sha=$BEELINE_RELEASE_SHA
 ENV HOME=/root
-ENV BEELINE_HOSTED_SERVICES=1
 WORKDIR /root
 STOPSIGNAL SIGTERM
 CMD ["/bin/sh", "/opt/beeline/entrypoint.sh"]

@@ -11,6 +11,7 @@ import { createServer } from 'node:http';
 const port = Number(process.argv[2] ?? 4280);
 const prefix = process.argv[3] ?? 'free-agent-proof';
 let next = 0;
+const machineConfigs = new Map();
 
 function docker(...args) {
   return execFileSync('docker', args, { encoding: 'utf8', stdio: ['ignore', 'pipe', 'pipe'] }).trim();
@@ -23,6 +24,15 @@ function state(id) {
   } catch {
     return undefined;
   }
+}
+
+// Acquisition reads the full Fly machine shape before deciding whether to
+// start or update it. Omitting config.image makes a serving lab helper look lost.
+function machineView(id) {
+  const current = state(id);
+  if (!current) return undefined;
+  return { id, state: current, instance_id: id,
+    config: machineConfigs.get(id) ?? { image: docker('inspect', '-f', '{{.Config.Image}}', id) } };
 }
 
 function log(line) {
@@ -55,6 +65,7 @@ createServer(async (request, response) => {
         '--cap-add', 'SYS_ADMIN',
         ...env, config.image,
       );
+      machineConfigs.set(machine, config);
       log(`create ${machine}`);
       return send(200, { id: machine, state: 'created' });
     }
@@ -62,14 +73,15 @@ createServer(async (request, response) => {
       const agent = url.searchParams.get('metadata.beeline_agent');
       const names = docker('ps', '-a', '--filter', `label=beeline_agent=${agent}`, '--format', '{{.Names}}')
         .split('\n').filter(Boolean);
-      return send(200, names.map((name) => ({ id: name, state: state(name) })));
+      return send(200, names.map(machineView).filter(Boolean));
     }
     if (id && !action && request.method === 'GET') {
-      const current = state(id);
-      return current ? send(200, { id, state: current }) : send(404, { error: 'not found' });
+      const current = machineView(id);
+      return current ? send(200, current) : send(404, { error: 'not found' });
     }
     if (id && !action && request.method === 'DELETE') {
       docker('rm', '-f', id);
+      machineConfigs.delete(id);
       log(`destroy ${id}`);
       return send(200, { ok: true });
     }

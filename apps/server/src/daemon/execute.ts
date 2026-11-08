@@ -89,7 +89,7 @@ import { daemonExecuteOperation } from './operations.js';
       'postRepositoryOnboarding',
       'postRoomInvite',
       'postStarterWelcome',
-      'postStarterVideoPreview',
+      'postStarterGame',
       'askRoomChoice',
       'openRoomPoll',
       'renameCorner',
@@ -271,7 +271,6 @@ import { daemonExecuteOperation } from './operations.js';
               })
             : undefined;
       const committedTasks: Parameters<AfterCommit>[0][] = [];
-      let appToolExecution: DaemonService['deferredAppTool'];
       const output = await queueDatabaseWork(ctx.database, `turn:${scopedRoom}:${authenticatedAgentId}`, () => ctx.database.transaction(async (db) => {
         const needsLifecycle = name === 'createCorner' || name === 'reviseCornerBrief' ||
           (isCorner && name === 'postAgentTurnReceipt' && candidate.status === 'failed');
@@ -412,7 +411,6 @@ import { daemonExecuteOperation } from './operations.js';
           committedTasks.push(task);
         };
         let result: Output<Name> = await scoped.execute(name, input, authenticatedAgentId, turnOwner);
-        appToolExecution = scoped.deferredAppTool;
         if (name === 'requestAgentGrant') {
           await db.query(
             `UPDATE agent_grants SET command_id=$2 WHERE id=$1 AND command_id IS NULL`,
@@ -494,8 +492,6 @@ import { daemonExecuteOperation } from './operations.js';
           authenticatedAgentId,
         );
       }
-      // Upload reservation and turn authority commit before bytes leave for YouTube.
-      if (appToolExecution) return await appToolExecution(ctx.database) as Output<Name>;
       return output;
     }
     if (walletCall && ctx.commandTransaction) {

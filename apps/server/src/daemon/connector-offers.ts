@@ -178,6 +178,9 @@ import { daemonOfferContext } from './workbench.js';
       throw new Error(
         `connector offer is invalid: only ${connectorDisplayName(CONNECTOR_OFFER_SWITCH_KIND)}'s account can be switched`,
       );
+    if (connectorType === 'trusty-squire' &&
+        (await ctx.database.query('SELECT 1 FROM free_agents WHERE agent_id=$1', [agentId])).rowCount)
+      throw new Error('Free agents use Lightpanda. Open the site yourself or connect your own agent for sign-in or signup.');
     const intent = switching ? 'switch' : 'add';
     const provider = switching ? 'google' : undefined;
     const offeredContext = await ctx.offerContext(input.roomId, agentId);

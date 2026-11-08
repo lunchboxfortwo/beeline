@@ -57,7 +57,6 @@ interface PromptSource {
   readonly tools: typeof ToolSurface;
   readonly skills: typeof Skills;
   readonly freeAgentRepositoryGuide: string;
-  readonly freeAgentYouTubeGuide: string;
 }
 
 export async function loadSource(root: string): Promise<PromptSource> {
@@ -71,12 +70,7 @@ export async function loadSource(root: string): Promise<PromptSource> {
   const guide = declaration?.initializer;
   if (!guide || !(ts.isNoSubstitutionTemplateLiteral(guide) || ts.isStringLiteral(guide)))
     throw new Error('FREE_AGENT_REPOSITORY_GUIDE must be a literal for prompt replay');
-  const youtube = parsed.statements.flatMap(statement => ts.isVariableStatement(statement)
-    ? [...statement.declarationList.declarations] : [])
-    .find(node => ts.isIdentifier(node.name) && node.name.text === 'FREE_AGENT_YOUTUBE_GUIDE')?.initializer;
-  if (!youtube || !(ts.isNoSubstitutionTemplateLiteral(youtube) || ts.isStringLiteral(youtube)))
-    throw new Error('FREE_AGENT_YOUTUBE_GUIDE must be a literal for prompt replay');
-  return { freeAgentYouTubeGuide: youtube.text, assembly: await load('prompt-assembly.ts'), tools: await load('minimal-tool-surface.ts'), skills: await load('beeline-skill.ts'), freeAgentRepositoryGuide: guide.text };
+  return { assembly: await load('prompt-assembly.ts'), tools: await load('minimal-tool-surface.ts'), skills: await load('beeline-skill.ts'), freeAgentRepositoryGuide: guide.text };
 }
 
 const NATIVE_TOOLS: Record<(typeof NATIVE_TOOL_NAMES)[number], ToolDefinition> = {
@@ -144,7 +138,7 @@ function assemble(source: PromptSource, testCase: PromptCase, withMemory = true)
     ...testCase.session,
     ...(testCase.session?.freeAgent === true ? {
       agentName: 'Beebee',
-      soul: { name: 'Beebee', instructions: testCase.session?.freeAgentJob === 'youtube' ? source.freeAgentYouTubeGuide : source.freeAgentRepositoryGuide },
+      soul: { name: 'Beebee', instructions: source.freeAgentRepositoryGuide },
     } : {}),
     brief,
     surface: testCase.place,

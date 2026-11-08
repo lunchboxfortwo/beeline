@@ -1,7 +1,6 @@
 import { setAgentWakePaused } from '../agent-wake-pause.js';
 import { OwnedModelCredentials } from '../owned-model-credential.js';
 import { systemMessage } from '@beeline/api-contract/system-message-catalog';
-import { postStarterVideoPreview } from '../starter-onboarding.js';
 import { sendOperatorSystemDm, readOperatorSystemDm } from '../operator-system-dm.js';
 import { postRepositoryOnboarding } from '../repository-onboarding.js';
 import { createAgentSubscription, listAgentSubscriptions, deleteAgentSubscription, listServiceSubscriptionEvents } from '../agent-subscriptions.js';
@@ -404,7 +403,7 @@ export const DAEMON_OPERATION_ROUTES: Record<keyof DaemonOperationMap, true> = {
   postRepositoryOnboarding: true,
   postRoomInvite: true,
   postStarterWelcome: true,
-  postStarterVideoPreview: true,
+  postStarterGame: true,
   askRoomChoice: true,
   openRoomPoll: true,
   listAgentGrants: true,

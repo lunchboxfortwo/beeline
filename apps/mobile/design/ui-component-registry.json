@@ -105,9 +105,6 @@
       "TranscriptCardChoicePlate",
       "inner"
     ],
-    "components/buzz/ChoiceVideoPreview.tsx": [
-      "ChoiceVideoPreview"
-    ],
     "components/buzz/CloseGlyph.tsx": [
       "CloseButton",
       "CloseGlyph"

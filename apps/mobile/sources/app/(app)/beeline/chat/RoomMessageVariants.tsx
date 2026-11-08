@@ -1,5 +1,3 @@
-import { ChoiceVideoPreview } from '@/components/buzz/ChoiceVideoPreview';
-import { funnelOnboarding } from '@/auth/signin-funnel';
 import { ErrorBanner } from '@/components/buzz/ErrorBanner';
 import React, { useEffect, useState } from 'react';
 import { Text, View } from 'react-native';
@@ -377,9 +375,6 @@ export const ChoiceCard = React.memo(function ChoiceCard({
   onSkip,
 }: ChoiceCardProps) {
   const card = message.choice!;
-  React.useEffect(() => {
-    if (card.starterOnboarding === 'welcome' && !card.onboardingManual) void funnelOnboarding('welcome_shown');
-  }, [card.choiceId, card.starterOnboarding, card.onboardingManual]);
   const display =
     card.agent.kind === 'agent' ? resolveAgentDisplayIdentity(card.agent.pubkey, agent) : null;
   const agentName = display && agent ? display.name : card.agent.name;
@@ -460,7 +455,6 @@ export const ChoiceCard = React.memo(function ChoiceCard({
       subline={subline}
       sublineTestID={`choice-${card.choiceId}-subline`}
       stamp={ledgerStamp(message.timestamp)}
-      body={card.videoPreview ? <ChoiceVideoPreview {...card.videoPreview} /> : undefined}
       choices={choices}
       noteInput={
         takesNote

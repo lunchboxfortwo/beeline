@@ -1,9 +1,7 @@
 import { SquireOperationError } from './squire-outcome.js';
 import type { ConnectorStep, ConnectorSignIn, VaultConnectionMeta, ConnectionGrant } from "@beeline/api-contract/daemon";
-import { squireHostPaths, squireBrokerSocketReady } from "./squire-host.js";
-import { homedir } from "node:os";
 import { squireReachCause } from "./squire-status.js";
-import { InstallSquireOptions, InstallSquireResult, squireChromeProfileDir, defaultShellRunner, defaultStreamedRunner, step, prepareHostedSquire, releaseSquireConnectSession, SquireConnectResolution, resolveSquireConnectSpec, squireConnectProcessEnv, isOutstandingSignIn, connectBlockedLine, connectBrowserLocation, awaitPublicPage, SquireMcpClient, isRecord } from './connector-squire.js';
+import { InstallSquireOptions, InstallSquireResult, squireChromeProfileDir, defaultShellRunner, defaultStreamedRunner, step, releaseSquireConnectSession, SquireConnectResolution, resolveSquireConnectSpec, squireConnectProcessEnv, isOutstandingSignIn, connectBlockedLine, connectBrowserLocation, awaitPublicPage, SquireMcpClient, isRecord } from './connector-squire.js';
 
 
 
@@ -30,15 +28,6 @@ export async function installSquireAttempt(
   };
   emit();
 
-  const hostedEntry = process.env.BEELINE_HOSTED_SERVICES === '1'
-    ? '/opt/beeline/squire/node_modules/@trusty-squire/mcp/dist/bin.js' : undefined;
-  if (hostedEntry &&
-    !await prepareHostedSquire(run, squireHostPaths(homedir()))) {
-    const reason = 'The hosted browser service could not start. Retry the Trusty Squire connection.';
-    push(step('trusty-squire installed', 'failed', reason));
-    return fail(reason);
-  }
-
   // Stop only the connect ceremony this agent spawned. Squire alone decides
   // whether its profile is busy or connected in the next typed report.
   releaseSquireConnectSession(log, options.workspaceId);
@@ -46,40 +35,22 @@ export async function installSquireAttempt(
 
   // Verify the copy npx resolves BEFORE connect runs, re-resolving a stale
   // one against the release this reader is written for.
-  const resolution: SquireConnectResolution = hostedEntry
-    ? { npxArgs: [], reResolved: false,
-        resolvedVersion: (await run(process.execPath, [hostedEntry, '--version'])).stdout.trim() }
-    : await resolveSquireConnectSpec(run);
+  const resolution: SquireConnectResolution = await resolveSquireConnectSpec(run);
   if (resolution.reResolved) {
     log(
       `trusty-squire stale copy ${resolution.resolvedVersion ?? 'unknown'} re-resolved against current release ${resolution.currentRelease}`,
     );
   }
 
-  // A paired hosted broker can serve API apps before any browser provider is
-  // signed in. Explicit provider re-login still needs its sign-in ceremony.
-  if (hostedEntry && !options.forceReloginProvider &&
-      (await pairSquire(options.mcp, options.workspaceId)).ok) {
-    push(step(`trusty-squire${resolution.resolvedVersion ? ` ${resolution.resolvedVersion}` : ''} installed`, 'done'));
-    push(step('waiting for sign-in', 'done'));
-    push(step('paired to workspace', 'done'));
-    push(step('Browser provider sign-in is available when a task needs it', 'done'));
-    return { status: 'connected', steps,
-      ...(resolution.resolvedVersion ? { squireVersion: resolution.resolvedVersion } : {}) };
-  }
 
-  // Ordinary hosted pairing can use the API plane without provider cookies.
-  // Explicit provider re-login must open broker Chrome, so never skip its
-  // browser ceremony. Personal-computer pairing also uses broker Chrome.
   // --json supplies the typed report consumed by the phone handoff.
   const install = await streamRun(
-    hostedEntry ? process.execPath : 'npx',
+    'npx',
     [
-      ...(hostedEntry ? [hostedEntry] : resolution.npxArgs),
+      ...resolution.npxArgs,
       'connect',
       '--target=codex',
       '--json',
-      ...(hostedEntry && !options.forceReloginProvider ? ['--skip-browser'] : []),
       ...(options.forceReloginProvider
         ? [`--force-relogin=${options.forceReloginProvider}`]
         : []),
@@ -104,9 +75,7 @@ export async function installSquireAttempt(
     push(step('trusty-squire installed', 'failed', reason));
     return fail(reason);
   }
-  const hostedAccountReady = !!hostedEntry && !options.forceReloginProvider && report.terminal &&
-    report.reason === 'provider_session_missing' && !!report.account?.id;
-  if (report.state !== 'connected' && !hostedAccountReady && !isOutstandingSignIn(report)) {
+  if (report.state !== 'connected' && !isOutstandingSignIn(report)) {
     const reason = connectBlockedLine(report) ?? 'Trusty Squire could not connect';
     push(step('trusty-squire installed', 'failed', reason));
     return fail(reason);
@@ -143,13 +112,6 @@ export async function installSquireAttempt(
   // nobody to wait for.
   push(step('waiting for sign-in', signIn ? 'pending' : 'done'));
 
-  if (hostedEntry) {
-    const sockets = squireHostPaths(homedir());
-    if (!await squireBrokerSocketReady(sockets.brokerSocket) ||
-        !await squireBrokerSocketReady(sockets.mcpSocket)) {
-      return fail('The hosted browser service disconnected. Retry the Trusty Squire connection.');
-    }
-  }
   const pair = await pairSquire(options.mcp, options.workspaceId);
   if (!pair.ok) {
     // Connect may need the person to claim the account before the vault can
@@ -176,9 +138,6 @@ export async function installSquireAttempt(
     };
   }
   push(step('paired to workspace', 'done'));
-  if (hostedAccountReady) {
-    push(step('Browser provider sign-in is available when a task needs it', 'done'));
-  }
   // An OUTSTANDING ceremony is not a connected helper. The vault answering
   // `list_credentials` proves the credential plane, never that the shared
   // Chrome carries a provider session — and `installConnector` completes the

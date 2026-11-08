@@ -6,7 +6,6 @@ import type { SqlDatabase } from './database.js';
 import type { FreeAgentService } from './free-agents.js';
 import { createWorkspaceOwnerMembership } from './membership-join.js';
 import { ensureFirstRoom } from './first-room.js';
-import { seedWelcomeVideoWorkflow } from './welcome-video-workflow.js';
 
 /** Shared first-run creation. The caller owns the transaction, including any consent grant. */
 export async function createWorkspace(
@@ -45,7 +44,6 @@ export async function createWorkspace(
       FROM fact`,[id,viewerId,source,origin?.actionId ?? null,origin?.sessionId ?? null,diagnosticId()]);
   }
   const generalId = await ensureFirstRoom(db, id, viewerId);
-  await seedWelcomeVideoWorkflow(db, id, generalId);
   // Only a newly created Workspace gets a free starter agent, in the same
   // transaction as its #general, so the creator lands next to it.
   if (inserted.rowCount && freeAgents)

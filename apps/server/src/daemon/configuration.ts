@@ -1,6 +1,6 @@
 import { cornerOwnerSql } from '../corner-worker.js';
 import { cornerReviewerSql } from '../corner-reviewer.js';
-import { FREE_AGENT_APP_CONNECT_GUIDE, FREE_AGENT_REPOSITORY_GUIDE, FREE_AGENT_TURN_GUIDE } from '../free-agents.js';
+import { currentFreeAgentInstructions, FREE_AGENT_REPOSITORY_GUIDE, FREE_AGENT_TURN_GUIDE } from '../free-agents.js';
 import { isAgentReachable } from '@beeline/api-contract/agent-access';
 import { isCornerReviewer } from '../agent-health.js';
 import type { DaemonContext } from './context.js';
@@ -90,8 +90,8 @@ import { daemonRepositoryOnboardingRequester } from './grants.js';
       const owner = freeAgent ? await daemonRepositoryOnboardingRequester(ctx, agentId, roomId, context) : undefined;
       if (freeAgent && !row.soul.instructions.includes(FREE_AGENT_TURN_GUIDE))
         row.soul = { ...row.soul, instructions: `${row.soul.instructions}\n\n${FREE_AGENT_TURN_GUIDE}` };
-      if (freeAgent && !row.soul.instructions.includes(FREE_AGENT_APP_CONNECT_GUIDE))
-        row.soul = { ...row.soul, instructions: `${row.soul.instructions}\n\n${FREE_AGENT_APP_CONNECT_GUIDE}` };
+      if (freeAgent)
+        row.soul = { ...row.soul, instructions: currentFreeAgentInstructions(row.soul.instructions) };
       if (owner)
         row.soul = { ...row.soul, instructions: `${row.soul.instructions}\n\n${FREE_AGENT_REPOSITORY_GUIDE}` };
     }

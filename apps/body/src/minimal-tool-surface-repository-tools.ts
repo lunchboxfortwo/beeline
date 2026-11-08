@@ -142,6 +142,7 @@ export function agentToolsFor(
   commandRunnerAvailable = true,
   institutionalMemoryEnabled = true,
   nativeIoProven = false,
+  freeAgent = false,
 ): ToolDefinition[] {
   if (!agentSurface) return repositoryTools();
   const tools = minimalTools(cornerTurn).filter(tool =>
@@ -152,5 +153,11 @@ export function agentToolsFor(
   // itself refuses human wakes.
   tools.push(invocationTool(SILENT_TOOL));
   if (!nativeIoProven) tools.push(...scratchTools(cornerTurn && !repositoryCorner));
-  return tools;
+  return freeAgent ? tools.map(tool => {
+    if (tool.name !== 'connect') return tool;
+    const inputSchema = structuredClone(tool.inputSchema);
+    const properties = inputSchema.properties as Record<string, unknown>;
+    for (const name of ['switchGoogleAccount', 'noApi', 'signedInUrl']) delete properties[name];
+    return { ...tool, inputSchema };
+  }) : tools;
 }

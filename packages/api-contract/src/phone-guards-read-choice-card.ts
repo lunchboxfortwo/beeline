@@ -1,10 +1,10 @@
+import { record, readIdentity, readList, readChoiceOption, uuid, hex64, integer, choiceLetter, field, oneOf, readIdentityOnly, nonempty, readHumanApprovalIdentity, githubUrl, readAttachment, readActivity, readGrantRequest, readSquireApproval, readComputerSession, readConnectorOfferCardView, readAppSignInCard, readAgentSignInCard, readHeader, httpUrl } from './phone-guards.js';
 import { readRepositoryOnboardingCard } from './repository-onboarding.js';
 import { readVaultSaveCard } from './vault-save.js';
 import { isSystemEvent } from './system-events.js';
 import { readVoiceCall } from './voice.js';
 import { MESSAGE_REACTION_EMOJIS, type ChatListCorner, type RoomCornerSummary, type ChatListItem, type ChatListWorkspace, type ChoiceCardView, type CornerLifecycleView, type MessageReactionView, type RoomViewAgentTurn, type RoomViewPendingAgentCommand, type RoomViewMessage } from './phone-types.js';
 import { isChoiceMode, isChoiceStatus } from './room-choices.js';
-import { record, readIdentity, readList, readChoiceOption, uuid, hex64, integer, choiceLetter, field, readChoiceVideoPreview, oneOf, readIdentityOnly, nonempty, readHumanApprovalIdentity, githubUrl, readAttachment, readActivity, readGrantRequest, readSquireApproval, readComputerSession, readConnectorOfferCardView, readAppSignInCard, readAgentSignInCard, readHeader, httpUrl } from './phone-guards.js';
 
 
 
@@ -36,9 +36,6 @@ function readChoiceCard(value: unknown): ChoiceCardView | null {
     return { identityId: response.identityId, optionId: response.optionId };
   });
   return {
-    ...field('videoPreview', readChoiceVideoPreview(item.videoPreview)),
-    ...field('onboardingManual', typeof item.onboardingManual === 'boolean' ? item.onboardingManual : undefined),
-    ...field('starterOnboarding', oneOf(item.starterOnboarding, ['welcome', 'next'] as const)),
     choiceId: item.choiceId,
     mode: item.mode,
     status: item.status,

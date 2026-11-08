@@ -689,13 +689,3 @@ export function readChoiceOption(value: unknown): ChoiceCardView['options'][numb
     ...field('leader', item.leader === true ? true : undefined),
   };
 }
-
-
-export function readChoiceVideoPreview(value: unknown): ChoiceCardView['videoPreview'] | undefined {
-  const item = record(value);
-  if (!item || !uuid(item.videoObjectId) || typeof item.frameUrl !== 'string' || !/^https?:\/\//.test(item.frameUrl) ||
-    typeof item.title !== 'string' || item.title.length > 100 || typeof item.description !== 'string' || item.description.length > 5000 ||
-    !oneOf(item.visibility, ['public', 'unlisted', 'private'])) return undefined;
-  return { videoObjectId: item.videoObjectId, frameUrl: item.frameUrl, title: item.title, description: item.description,
-    visibility: item.visibility as 'public' | 'unlisted' | 'private' };
-}

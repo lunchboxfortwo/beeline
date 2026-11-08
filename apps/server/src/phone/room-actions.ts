@@ -1,11 +1,7 @@
 import { phoneIdentity as identity } from '../phone-identity.js';
-import { WELCOME_VIDEO_SLUG } from '../welcome-video-workflow.js';
-import { postStarterGame } from '../starter-onboarding.js';
-import { postStarterInviteOffer } from '../starter-invite.js';
-import { recordOnboardingEvent } from '../signin-funnel.js';
 import { postRepositoryOnboarding } from '../repository-onboarding.js';
 import { readRepositoryOnboardingCard } from '@beeline/api-contract/phone';
-import { settleWorkflowGate, startWorkflow } from '../workflow-runs.js';
+import { settleWorkflowGate } from '../workflow-runs.js';
 import { answerRoomChoice, postRoomChoice, skipRoomChoice } from '../room-choice.js';
 import type { PhoneContext } from './context.js';
 import { Input, Output } from './types.js';
@@ -127,41 +123,6 @@ import { PhoneService } from '../phone-service.js';
 
   export async function phoneAnswerChoice(ctx: PhoneContext, input: Input<'answerChoice'>, viewerId: string) {
     return ctx.database.transaction(async database => {
-      const starter = (await database.query<{ room_id: string; agent_id: string; stage: string; first_label: string }>(
-        `SELECT c.room_id,c.agent_id,c.options->0->>'label' first_label,m.card->>'starterOnboarding' stage
-         FROM room_choices c JOIN messages m ON m.id=c.message_id
-         WHERE c.id=$1 AND m.card->>'starterOnboarding' IN ('welcome','next')`, [input.choiceId],
-      )).rows[0];
-      if (starter) {
-        if (starter.stage === 'welcome' && starter.first_label !== 'Make a welcome video and post it to my YouTube')
-          throw new Error('This welcome has changed. Ask Beebee to run onboarding again for the current job choices.');
-        const result = await answerRoomChoice(database, {
-          choiceId: input.choiceId, optionId: input.optionId, viewerId, note: input.note,
-        }, { wake: (starter.stage === 'next' && input.optionId === 'B') || (starter.stage === 'welcome' && input.optionId === 'C') });
-        if (starter.stage === 'next') {
-          if (input.optionId === 'A') await postStarterInviteOffer(database, starter.room_id, starter.agent_id, viewerId, ctx.publicOrigin);
-          return result;
-        }
-        await recordOnboardingEvent(database, viewerId, 'option_picked', { option: input.optionId as 'A' | 'B' | 'C', roomId: starter.room_id });
-        if (input.optionId === 'A') {
-          await recordOnboardingEvent(database, viewerId, 'youtube_job_chosen', { roomId: starter.room_id });
-          const team = (await database.query<{ agent_id: string; starter_role: string }>(
-            `SELECT f.agent_id,f.starter_role FROM free_agents f JOIN memberships m ON m.identity_id=f.agent_id
-             WHERE m.room_id=$1 AND m.removed_at IS NULL AND f.owner_id=$2 AND f.removed_at IS NULL`,
-            [starter.room_id, viewerId])).rows;
-          const beebee = team.find(agent => agent.starter_role === 'beebee')?.agent_id;
-          const luna = team.find(agent => agent.starter_role === 'luna')?.agent_id;
-          if (!beebee || !luna) throw new Error('Your starter team is no longer in this Room');
-          await startWorkflow(database, { room_id: starter.room_id, agent_id: viewerId }, {
-            name: WELCOME_VIDEO_SLUG, roleBindings: { writer: [beebee, luna], maker: [beebee, luna], checker: [luna, beebee], owner: [beebee, luna] },
-          });
-        } else if (input.optionId === 'B') {
-          await postStarterGame(database, ctx.objects, starter.room_id, viewerId);
-        } else {
-          await recordOnboardingEvent(database, viewerId, 'other_job_chosen', { roomId: starter.room_id });
-        }
-        return result;
-      }
       return (await settleWorkflowGate(database, {
         choiceId: input.choiceId, optionId: input.optionId, viewerId, note: input.note,
       })) ?? answerRoomChoice(database, { choiceId: input.choiceId, optionId: input.optionId, viewerId, note: input.note });
@@ -171,14 +132,9 @@ import { PhoneService } from '../phone-service.js';
   export async function phoneSkipChoice(ctx: PhoneContext, input: Input<'skipChoice'>, viewerId: string) {
     return ctx.database.transaction(
       async (database) => {
-        const starter = (await database.query<{ stage: string; room_id: string }>(
-          `SELECT c.room_id,m.card->>'starterOnboarding' stage FROM room_choices c JOIN messages m ON m.id=c.message_id
-           WHERE c.id=$1 AND m.card->>'starterOnboarding' IN ('welcome','next')`, [input.choiceId],
-        )).rows[0];
         const result = await (
-        (await settleWorkflowGate(database, { choiceId: input.choiceId, viewerId, skip: true })) ??
-        skipRoomChoice(database, { choiceId: input.choiceId, viewerId }, { wake: !starter }));
-        if (starter?.stage === 'welcome') await recordOnboardingEvent(database, viewerId, 'welcome_skipped', { roomId: starter.room_id });
+          (await settleWorkflowGate(database, { choiceId: input.choiceId, viewerId, skip: true })) ??
+          skipRoomChoice(database, { choiceId: input.choiceId, viewerId }));
         return result;
       },
     );

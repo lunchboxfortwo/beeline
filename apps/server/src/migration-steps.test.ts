@@ -202,9 +202,6 @@ describe('release-owned migration steps', () => {
         { name: 'corner hold messages', table: 'corner_merge_holds',
           matches: (sql: string, _values: unknown[]) => sql.includes('SELECT hold.corner_id,hold.id,COALESCE'),
           run: () => migrateData(database) },
-        { name: 'welcome video workflow', table: 'workflow_backfills',
-          matches: (sql: string, values: unknown[]) => sql.startsWith('SELECT name FROM workflow_backfills') && values[0] === 'welcome-video-v2',
-          run: () => migrateData(database) },
       ];
       for (const step of steps) {
         let calls = 0;

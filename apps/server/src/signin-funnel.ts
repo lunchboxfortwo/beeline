@@ -43,8 +43,8 @@ export async function recordOnboardingEvent(database: SqlDatabase, identityId: s
     `SELECT e.install_id,e.attempt_id,e.platform,e.version FROM signin_funnel_installs i
      JOIN signin_funnel_events e ON e.install_id=i.install_id
      WHERE i.account_hash=$1 AND NOT i.internal AND e.event='signed_in'
-       AND ($2 <> 'user_answered' OR EXISTS(SELECT 1 FROM signin_funnel_events pick
-         WHERE pick.install_id=e.install_id AND pick.attempt_id=e.attempt_id AND pick.event='option_picked'))
+       AND ($2 <> 'user_answered' OR EXISTS(SELECT 1 FROM signin_funnel_events welcome
+         WHERE welcome.install_id=e.install_id AND welcome.attempt_id=e.attempt_id AND welcome.event='welcome_shown'))
        AND EXISTS(SELECT 1 FROM signin_funnel_events signup WHERE signup.install_id=e.install_id
          AND signup.attempt_id=e.attempt_id AND signup.event='signup')
      ORDER BY EXISTS(SELECT 1 FROM signin_funnel_events welcome WHERE welcome.install_id=e.install_id
@@ -571,9 +571,9 @@ export async function dashboardOnboarding(database: SqlDatabase, from: string | 
     const welcome = events.find(event => event.event === 'welcome_shown');
     return welcome && (from === null || at(welcome) >= Date.parse(from));
   });
-  const main = ['welcome_shown', 'option_picked', 'answered_after_pick', 'return_1d', 'return_7d'] as const;
+  const main = ['welcome_shown', 'user_answered', 'return_1d', 'return_7d'] as const;
   const source: Record<string, OnboardingEvent> = {
-    welcome_shown: 'welcome_shown', option_picked: 'option_picked', answered_after_pick: 'user_answered',
+    welcome_shown: 'welcome_shown', user_answered: 'user_answered',
     return_1d: 'returned_day_1', return_7d: 'returned_day_7',
     task_first_answer: 'task_first_answer', task_second_opinion: 'task_review_requested', task_final_answer: 'task_final_answer',
     game_posted: 'game_posted', game_viewer_opened: 'game_viewer_opened', game_closed: 'game_viewer_closed',
@@ -581,10 +581,8 @@ export async function dashboardOnboarding(database: SqlDatabase, from: string | 
     invite_friend_signed_up: 'invite_friend_signed_up', invite_friend_messaged: 'invite_friend_messaged',
   };
   const milestone = (events: typeof rows, key: string) => {
-    const pick = events.find(event => event.event === 'option_picked');
     const welcome = events.find(event => event.event === 'welcome_shown')!;
     return events.find(event => event.event === source[key] && at(event) >= at(welcome) &&
-      (key !== 'answered_after_pick' || (pick && at(event) >= at(pick))) &&
       (key !== 'return_1d' || at(event) - at(welcome) >= 86_400_000) &&
       (key !== 'return_7d' || at(event) - at(welcome) >= 7 * 86_400_000));
   };
@@ -624,13 +622,10 @@ export async function dashboardOnboarding(database: SqlDatabase, from: string | 
     cohort: 'welcome_shown_in_window' as const,
     steps,
     paths: {
-      task: list(cohort, ['task_first_answer', 'task_second_opinion', 'task_final_answer'], 'option_picked'),
+      task: list(cohort, ['task_first_answer', 'task_second_opinion', 'task_final_answer'], 'user_answered'),
       game: list(cohort, ['game_posted', 'game_viewer_opened', 'game_closed']),
       invite: list(cohort, ['invite_link_created', 'invite_shared', 'invite_opened', 'invite_friend_signed_up', 'invite_friend_messaged']),
     },
-    byOption: Object.fromEntries(([['task', 'A'], ['game', 'B'], ['invite', 'C'], ['special', 'D']] as const)
-      .map(([name, option]) => [name, { steps: list(cohort.filter(events =>
-        events.find(event => event.event === 'option_picked')?.onboarding_option === option), main) }])),
     biggestDrop,
   };
 }

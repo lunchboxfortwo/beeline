@@ -25,6 +25,7 @@ import { Output, id, Input, registrySubject } from './values.js';
    * until the helper confirms the provider drop.
    */
   export async function daemonConnectorAssignments(ctx: DaemonContext, agentId: string): Promise<Output<'getConnectorAssignments'>> {
+    const freeAgent = (await ctx.database.query('SELECT 1 FROM free_agents WHERE agent_id=$1', [agentId])).rowCount > 0;
     const connectors = (
       await ctx.database.query<{
         id: string;
@@ -45,7 +46,7 @@ import { Output, id, Input, registrySubject } from './values.js';
         [agentId],
       )
     ).rows;
-    const assignments: ConnectorAssignment[] = await ctx.database.transaction(
+    const assignments: ConnectorAssignment[] = freeAgent ? [] : await ctx.database.transaction(
       (db) => squireAssignments(db, agentId));
     for (const row of connectors) {
       const adapter = connectorAdapter(row.connector_type);

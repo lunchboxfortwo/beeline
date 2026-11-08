@@ -458,7 +458,7 @@ it('ATTACH-CAP-1: attachment cap is a client error and unexpected failures still
   } finally { await new Promise<void>(r => collector.close(() => r())); }
 }, 60_000);
 
-it('WORKFLOW-ROLE-REFUSAL / BEELINE-SENTRY-REFUSALS / APP-REFUSAL-5 / VIDEO-PREVIEW-1P: real agent handlers keep refusals out of Sentry', async () => {
+it('WORKFLOW-ROLE-REFUSAL / BEELINE-SENTRY-REFUSALS / APP-REFUSAL-5: real agent handlers keep refusals out of Sentry', async () => {
   const envelopes: string[] = [];
   const collector = createServer(async (request, response) => {
     const chunks: Buffer[] = [];
@@ -591,40 +591,6 @@ it('WORKFLOW-ROLE-REFUSAL / BEELINE-SENTRY-REFUSALS / APP-REFUSAL-5 / VIDEO-PREV
           if (failure === 'permission') assert.equal(result.body.error,'App tool execution failed: '+JSON.stringify({error:{code:403,message:'Request had insufficient authentication scopes.',status:'PERMISSION_DENIED'}}));
           if (failure === 'flagged404') assert.ok(result.body.error.includes('Not Found'));
         }
-        // VIDEO-PREVIEW-1P: exercise the real app-tool guard before provider execution.
-        await db.query("INSERT INTO messages(id,room_id,author_id,text,card,created_at) VALUES('video-welcome',$1,$2,'Welcome',$3::jsonb,now()-interval '1 minute')",
-          [room,agent,JSON.stringify({starterOnboarding:'welcome',selectedOptionId:'B'})]);
-        await db.query("INSERT INTO workspace_apps(id,workspace_id,owner_identity_id,app_key,display_name,transport,route,composio_account_id) VALUES('55555555-5555-4555-8555-555555555555',$1,$2,'youtube','YouTube','composio','composio','fixture-youtube')",[workspace,human]);
-        const upload = {...input,appId:'app:youtube',tool:'YOUTUBE_MULTIPART_UPLOAD_VIDEO',arguments:{title:'Changed'}};
-        const tapMessage = 'Show the video preview with Post and Cancel, and wait for the person to tap Post before uploading.';
-        const matchMessage = 'Upload arguments must match the approved video preview exactly: title mismatched. Use videoFile: {beelineObjectId: "<videoObjectId from the preview>"}. Show a new preview for any changes.';
-        const missingApproval = await call(upload,'executeAppTool');
-        console.log('VIDEO-PREVIEW-1P missing approval HTTP response',JSON.stringify(missingApproval));
-        assert.deepEqual(missingApproval,{status:403,body:{error:tapMessage}});
-        const preview = await postRoomChoice(db,{roomId:room,agentId:agent,mode:'question',prompt:'Preview',
-          options:[{label:'Post',consequence:'Post'},{label:'Cancel',consequence:'Cancel'}]});
-        await db.query("UPDATE messages SET card=card || $2::jsonb WHERE id=$1",[preview.messageId,JSON.stringify({
-          status:'answered',selectedOptionId:'A',videoPreview:{videoObjectId:media,title:'Approved',description:'Description',visibility:'private'}
-        })]);
-        const changedUpload = await call(upload,'executeAppTool');
-        console.log('VIDEO-PREVIEW-1P changed upload HTTP response',JSON.stringify(changedUpload));
-        assert.deepEqual(changedUpload,{status:403,body:{error:matchMessage}});
-        assert.equal((await db.query('SELECT card FROM messages WHERE id=$1',[preview.messageId])).rows[0].card.youtubeUploadUsed,undefined);
-        await flushServerErrors();
-        // A database failure in this same guard must still alert, even with refusal wording.
-        const transaction = db.transaction.bind(db);
-        const failGuard = executor => ({
-          query: async (sql,params) => {
-            if (sql.includes("m.card->>'selectedOptionId' selected")) throw new Error(tapMessage);
-            return executor.query(sql,params);
-          },
-          transaction: work => executor.transaction(tx => work(failGuard(tx))),
-        });
-        db.transaction = work => transaction(tx => work(failGuard(tx)));
-        try {
-          assert.deepEqual(await call(upload,'executeAppTool'),{status:503,body:{error:tapMessage}});
-        } finally { db.transaction = transaction; }
-        await flushServerErrors();
         providerFault = 'unexpected';
         const unexpected = await call({...input,appId:'app:slack',tool:'SLACK_FETCH',arguments:{}},'executeAppTool');
         assert.deepEqual(unexpected,{status:200,body:{status:'executed',data:{successful:false,
@@ -654,11 +620,10 @@ it('WORKFLOW-ROLE-REFUSAL / BEELINE-SENTRY-REFUSALS / APP-REFUSAL-5 / VIDEO-PREV
     expect(result, result.error).toMatchObject({ code: 0 });
     const events = envelopes.flatMap(envelope => envelope.split('\n').filter(line => line.startsWith('{')).map(line => JSON.parse(line)))
       .filter(item => item.exception);
-    expect(events).toHaveLength(3);
+    expect(events).toHaveLength(2);
     expect(events.map(event => event.exception.values[0].value).sort()).toEqual([
       'App provider request failed (500): upstream broken',
       'queued attachments exceed the size cap',
-      'Show the video preview with Post and Cancel, and wait for the person to tap Post before uploading.',
     ].sort());
   } finally { await new Promise<void>(r => collector.close(() => r())); }
 }, 60_000);

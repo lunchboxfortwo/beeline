@@ -41,10 +41,9 @@ m26_it('keeps ordinary GitHub repository reads on the connector route', async ()
 
 
 
-m26_it('binds the visual clip preview and visibility to the active Room turn', async () => {
-  const args={videoObjectId:'11111111-1111-4111-8111-111111111111',frameObjectId:'22222222-2222-4222-8222-222222222222',title:'Clip preview',description:'A short clip',visibility:'unlisted'};
-  await m26_callAgentTool('app_tool',{app:'beeline:onboarding',tool:'video_preview',args});
-  m26_expect(scope24.calls.find(call=>call.name==='postStarterVideoPreview')!.input).toMatchObject({...args,roomId:'room-1',requestId:'request-1',taskId:'command-1',generationId:scope24.context.generationId});
+m26_it('binds an explicitly requested game to the active Room turn', async () => {
+  await m26_callAgentTool('app_tool',{app:'beeline:onboarding',tool:'game',args:{}});
+  m26_expect(scope24.calls.find(call=>call.name==='postStarterGame')!.input).toMatchObject({roomId:'room-1',requestId:'request-1',taskId:'command-1',generationId:scope24.context.generationId});
 });
 });
 mergedDescribe27("read-only-mcp.order.test.ts", () => {

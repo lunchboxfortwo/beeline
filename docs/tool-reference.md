@@ -64,7 +64,7 @@ writable. Corners keep the watcher so edits are reflected as work proceeds.
 | `send_operator_system_dm`, `read_operator_system_dm` | Queue and read operator System DMs on the operator owner's command |
 
 First-party `app_tool` apps and their actions: `beeline:vault` (request), `beeline:onboarding` (welcome,
-video_preview, invite, repository, starters), `beeline:workflow` (save, describe, start, read, advance, cancel,
+game, invite, repository, starters), `beeline:workflow` (save, describe, start, read, advance, cancel,
 archive, rebind), `beeline:wallet` (address, balance, chains, history, quote, pay, swap, contract_call,
 sign_typed_data, link_request, link_wait), `beeline:browser_share` (start, end) and `beeline:avatar` (read, set).
 

@@ -619,9 +619,6 @@ export type SquireApprovalCardView = SquireApprovalDetails & {
 
 /** One lettered question or Room poll. Options are plates, never ledger rows. */
 export type ChoiceCardView = {
-  readonly videoPreview?: { readonly videoObjectId: string; readonly frameUrl: string; readonly title: string; readonly description: string; readonly visibility: 'public' | 'unlisted' | 'private' };
-  readonly starterOnboarding?: 'welcome' | 'next';
-  readonly onboardingManual?: boolean;
   readonly ask?: string;
   readonly choiceId: string;
   readonly mode: ChoiceMode;

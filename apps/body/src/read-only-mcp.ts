@@ -104,6 +104,7 @@ export const TOOLS = agentToolsFor(
   Boolean(process.env.BEELINE_GRANT_RUNNER_URL),
   true,
   process.env.BEELINE_NATIVE_IO_PROVEN === '1',
+  Boolean(process.env.BEELINE_FREE_AGENT_ID || process.env.BEELINE_FREE_AGENT_MODEL_TOKEN),
 );
 
 

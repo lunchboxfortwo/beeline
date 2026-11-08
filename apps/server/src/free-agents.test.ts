@@ -1,13 +1,10 @@
 import { migrateMembershipSubscriptions } from './agent-subscriptions.js';
 import { STARTER_BANTER_TYPING_MS, StarterOnboardingService } from './starter-onboarding-run.js';
-import { starterHello, consumeStarterVideoPost, postStarterVideoPreview } from './starter-onboarding.js';
-import { postRoomChoice } from './room-choice.js';
+import { starterHello, postStarterGame } from './starter-onboarding.js';
 import { postRepositoryOnboarding } from './repository-onboarding.js';
 import { TokenAuth } from './auth.js';
 import { DaemonService } from './daemon-service.js';
 import { createECDH } from 'node:crypto';
-import { EventEmitter } from 'node:events';
-import { PostgresLiveListener, type LivePgClient } from './postgres-live.js';
 import { getPublicKey } from '@beeline/nostr';
 
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
@@ -17,6 +14,9 @@ import { migrate } from './database.js';
 import type { FreeAgentMachines, FreeAgentMachineSpec } from './fly-machines.js';
 import {
   addFreeAgentToWorkspace,
+  currentFreeAgentInstructions,
+  FREE_AGENT_TEAM_GUIDE,
+  FREE_AGENT_BROWSER_GUIDE,
   FREE_AGENT_EXIT_NOTE,
   FREE_AGENT_TURN_GUIDE,
   FREE_AGENT_HELLO,
@@ -38,7 +38,6 @@ import { ObjectService } from './object-service.js';
 import { PgliteDatabase, MemoryObjectStorage, migratedDatabase } from './test-support.js';
 import { recordSigninFunnelEvent, recordOnboardingEvent } from './signin-funnel.js';
 import { dashboardPeriods } from './operator-dashboard-periods.js';
-import { reportSquireWork } from './squire-machine.js';
 
 const sentryCaptures = vi.hoisted(() => [] as { error: unknown; tags: Record<string, string> | undefined }[]);
 vi.mock('./sentry.js', async (importOriginal) => ({
@@ -137,6 +136,21 @@ async function settle(): Promise<void> {
   for (let index = 0; index < 20; index++) await new Promise((resolve) => setTimeout(resolve, 5));
 }
 
+describe('current starter instructions', () => {
+  it('replaces retired hosted policy on an existing soul and keeps its persona', () => {
+    const prior = 'Be curious.\n\nFor Grok/xAI old hosted sign-in guide.\n\nWhen the person picks "Make a welcome video and post it to my YouTube", use old tools.\n\nYou are on a team with another free starter agent. Old rule.';
+    const current = currentFreeAgentInstructions(prior);
+    expect(current).toContain('Be curious.');
+    expect(current).toContain(FREE_AGENT_BROWSER_GUIDE);
+    expect(current).toContain(FREE_AGENT_TEAM_GUIDE);
+    expect(current).not.toMatch(/Trusty Squire|video_preview|welcome-video|old hosted|Old rule/);
+    expect(currentFreeAgentInstructions(current)).toBe(current);
+  });
+  it('uses exactly the requested feedback instruction with no decay or extra directions', () => {
+    expect(FREE_AGENT_TEAM_GUIDE).toBe('Try to include another agent, if available, to request feedback on your work as much as possible.');
+  });
+});
+
 describe('free starter agents', () => {
   let db: PgliteDatabase;
   let live: LiveHub;
@@ -219,25 +233,17 @@ describe('free starter agents', () => {
     const first = await replay();
     const welcome = await replay();
     expect((await db.query<{ time_zone: string }>(`SELECT time_zone FROM starter_onboarding_runs WHERE room_id=$1 ORDER BY created_at DESC LIMIT 1`, [other.id])).rows[0]?.time_zone).toBe('America/New_York');
-    expect((await phone.readRoom(other.id, FRIEND))!.messages.find(message => message.id === first.messageId)!.choice!.status).toBe('skipped');
     const view = (await phone.readRoom(other.id, FRIEND))!;
-    const card = view.messages.find(message => message.id === welcome.messageId)!.choice!;
+    expect(view.messages.find(message => message.id === first.messageId)?.text).toBe(starterHello('Friend'));
+    expect(view.messages.find(message => message.id === welcome.messageId)?.choice).toBeUndefined();
+    const card = (await db.query<{card:{onboardingManual:boolean}}>('SELECT card FROM messages WHERE id=$1',[welcome.messageId])).rows[0]!.card;
     expect(card.onboardingManual).toBe(true);
-    // Reproduction welcome-order-1: the greeting sits directly above the card and nothing from Beebee follows it.
-    const ordered = (await db.query<{ id: string; author_id: string; text: string; created_at: Date }>(
-      `SELECT id,author_id,text,created_at FROM messages WHERE room_id=$1 AND author_id=$2 ORDER BY created_at,id`, [other.id, beebee])).rows;
-    const cardIndex = ordered.findIndex(row => row.id === welcome.messageId);
-    expect(ordered[cardIndex - 1]!.text).toBe(starterHello('Friend'));
-    expect(ordered[cardIndex - 1]!.created_at.getTime()).toBeLessThanOrEqual(ordered[cardIndex]!.created_at.getTime());
-    expect(ordered.slice(cardIndex + 1)).toEqual([]);
-    expect(card.options.map(option => option.optionId)).toEqual(['A', 'B', 'C']);
     expect((await phone.readRoom(roomId, FRIEND))!.messages.some(message => message.id === welcome.messageId)).toBe(false);
-    await phone.execute('answerChoice', { choiceId: card.choiceId, optionId: 'C' }, FRIEND);
     await phone.execute('sendRoomMessage', { roomId: other.id, text: 'Try the task' }, FRIEND);
     const signup = (await db.query(`SELECT event FROM signin_funnel_events WHERE install_id=$1 ORDER BY event`, [installId])).rows;
     expect(signup).toEqual([{ event: 'signed_in' }, { event: 'signup' }]);
     const manual = (await db.query<{ event: string }>(`SELECT e.event FROM signin_funnel_events e JOIN signin_funnel_installs i USING(install_id) WHERE i.internal AND e.version='manual'`)).rows.map(row => row.event);
-    expect(manual).toEqual(expect.arrayContaining(['welcome_shown', 'option_picked', 'other_job_chosen', 'user_answered']));
+    expect(manual).toEqual(expect.arrayContaining(['welcome_shown', 'user_answered']));
     const periods = await dashboardPeriods(db, new Date().toISOString());
     const funnel = periods['24h'].onboardingFunnel!;
     expect('steps' in funnel && funnel.steps[0]!.count).toBe(0);
@@ -262,85 +268,29 @@ describe('free starter agents', () => {
     expect(open).not.toHaveBeenCalled();
   });
 
-  it('offers the three jobs and lets Something else await the composer', async () => {
+  it('welcomes with one open question, no card, and waits for the person', async () => {
     const workspace = await phone.execute('createWorkspace', { name: 'Welcome' }, OWNER);
     await finishWelcome(workspace.roomId!, OWNER);
     await finishWelcome(workspace.roomId!, OWNER);
     const room = (await phone.readRoom(workspace.roomId!, OWNER))!;
-    const welcome = room.messages.find(message => message.choice)!.choice!;
-    expect(welcome.prompt).toBe('Pick a first job');
-    expect(welcome.options.map(option => option.label)).toEqual(['Make a welcome video and post it to my YouTube', 'Play tic-tac-toe with me', 'Something else']);
-    expect(welcome.options.map(option => option.consequence)).toEqual(['Beebee makes it, Luna checks it, you approve the post', 'You and Beebee against Luna', 'Tell us the job in your own words']);
-    expect(room.messages.some(message => message.attachments?.length)).toBe(false);
-    expect(room.messages.some(message => message.text.startsWith('Most AI apps'))).toBe(false);
-    await phone.execute('answerChoice', { choiceId: welcome.choiceId, optionId: 'C' }, OWNER);
-    expect((await db.query(`SELECT 1 FROM messages WHERE card->>'workflowSlug'='welcome-video'`)).rowCount).toBe(0);
-    expect((await db.query(`SELECT 1 FROM agent_commands`)).rowCount).toBe(1);
-    await db.query('DELETE FROM agent_commands');
+    expect(room.messages.filter(message => message.text === starterHello('Charles'))).toHaveLength(1);
+    expect(starterHello('Charles')).toMatch(/What should we work on\?$/);
+    expect(starterHello('Charles')).not.toContain('Pitch us an idea');
+    expect(room.messages.some(message => message.choice || message.attachments?.length)).toBe(false);
+    expect((await db.query('SELECT 1 FROM agent_commands')).rowCount).toBe(0);
+    expect((await db.query("SELECT 1 FROM workspace_skills WHERE slug='welcome-video'")).rowCount).toBe(0);
     await phone.execute('sendRoomMessage', { roomId: workspace.roomId!, text: 'Plan a picnic' }, OWNER);
-    expect((await db.query(`SELECT agent_id FROM agent_commands`)).rowCount).toBe(1);
+    expect((await db.query('SELECT 1 FROM agent_commands')).rowCount).toBe(1);
   });
 
-  it('starts the YouTube job with Beebee and requires a Post tap before upload', async () => {
-    const workspace = await phone.execute('createWorkspace', { name: 'YouTube' }, OWNER);
-    await finishWelcome(workspace.roomId!, OWNER);
-    await finishWelcome(workspace.roomId!, OWNER);
-    const welcome = (await phone.readRoom(workspace.roomId!, OWNER))!.messages.find(message => message.choice)!.choice!;
-    await phone.execute('answerChoice', { choiceId: welcome.choiceId, optionId: 'A' }, OWNER);
-    await expect(phone.execute('answerChoice', { choiceId: welcome.choiceId, optionId: 'A' }, OWNER)).rejects.toThrow('already decided');
-    expect((await db.query(`SELECT 1 FROM messages WHERE room_id=$1 AND card->>'workflowSlug'='welcome-video' AND card->>'seq'='0'`, [workspace.roomId])).rowCount).toBe(1);
-    const commands = (await db.query<{ agent_id: string }>(`SELECT agent_id FROM agent_commands`)).rows;
-    expect(commands).toHaveLength(1);
-    const agent = commands[0]!.agent_id;
-    await expect(db.transaction(tx => consumeStarterVideoPost(tx, workspace.roomId!, agent, {}))).rejects.toThrow('tap Post');
-    const objects = new ObjectService(db, new MemoryObjectStorage().asStorage(), 'https://server.test');
-    const clip = await objects.uploadArtifact(OWNER, Buffer.from('clip bytes'), 'video/mp4', 'clip.mp4');
-    const frame = await objects.uploadArtifact(OWNER, Buffer.from('frame bytes'), 'image/jpeg', 'frame.jpg');
-    await db.query(`INSERT INTO messages(id,room_id,author_id,text,attachments) VALUES($1,$2,$3,'clip and frame',$4::jsonb)`,
-      ['f'.repeat(64), workspace.roomId, OWNER, JSON.stringify([clip,frame].map(file => ({url:file.url,name:file.title,mimeType:file.mimeType,size:file.size})))]);
-    await expect(db.transaction(tx => postStarterVideoPreview(tx, objects, { roomId: workspace.roomId!, agentId: agent,
-      videoObjectId: clip.objectId, frameObjectId: clip.objectId, title: 'Picnic', description: 'A picnic.', visibility: 'unlisted' }))).rejects.toThrow('video clip and an image frame');
-    const unrelated = await postRoomChoice(db, { roomId: workspace.roomId!, agentId: agent, mode: 'question',
-      prompt: 'Post a draft message to this Room?', options: [{ label: 'Post', consequence: 'Post' }, { label: 'Cancel', consequence: 'Cancel' }] });
-    await phone.execute('answerChoice', { choiceId: unrelated.choiceId, optionId: 'A' }, OWNER);
-    await expect(db.transaction(tx => consumeStarterVideoPost(tx, workspace.roomId!, agent, {}))).rejects.toThrow('tap Post');
-    const args = { title: 'Picnic', description: 'A picnic.', privacyStatus: 'unlisted', videoFile: { beelineObjectId: clip.objectId } };
-    const preview = await db.transaction(tx => postStarterVideoPreview(tx, objects, { roomId: workspace.roomId!, agentId: agent,
-      videoObjectId: clip.objectId, frameObjectId: frame.objectId, title: 'Picnic', description: 'A picnic.', visibility: 'unlisted' }));
-    const previewCard = (await phone.readRoom(workspace.roomId!, OWNER))!.messages.find(message => message.id === preview.messageId)!.choice!;
-    expect(previewCard.videoPreview).toMatchObject({frameUrl:frame.url,title:'Picnic',visibility:'unlisted',videoObjectId:clip.objectId});
-    await expect(db.transaction(tx => consumeStarterVideoPost(tx, workspace.roomId!, agent, args))).rejects.toThrow('tap Post');
-    await phone.execute('answerChoice', { choiceId: preview.choiceId, optionId: 'A' }, OWNER);
-    expect((await phone.readRoom(workspace.roomId!, OWNER))!.messages.find(message => message.id === preview.messageId)!.choice!.videoPreview?.frameUrl).toBe(frame.url);
-    for (const changed of [{ title: 'Changed' }, { description: 'Changed' }, { privacyStatus: 'public' },
-      { videoFile: { beelineObjectId: frame.objectId } }, { videoFile: 'https://other.test/clip.mp4' }, { unexpected: true }]) {
-      await expect(db.transaction(tx => consumeStarterVideoPost(tx, workspace.roomId!, agent, { ...args, ...changed }))).rejects.toThrow('match the approved video preview');
-    }
-    await expect(db.transaction(tx => consumeStarterVideoPost(tx, workspace.roomId!, agent, { ...args, videoFile: { name: 'clip.mp4', mimetype: 'video/mp4', s3key: 'private-placeholder' } }))).rejects.toThrow('videoFile shape');
-    await db.transaction(tx => consumeStarterVideoPost(tx, workspace.roomId!, agent, args));
-    await expect(db.transaction(tx => consumeStarterVideoPost(tx, workspace.roomId!, agent, args))).rejects.toThrow('tap Post');
-  });
-
-  it('routes an untagged first task to Beebee with the starter pair present', async () => {
-    const workspace = await phone.execute('createWorkspace', { name: 'Task' }, OWNER);
-    await finishWelcome(workspace.roomId!, OWNER);
-    await phone.execute('sendRoomMessage', { roomId: workspace.roomId!, text: 'Help me plan a picnic' }, OWNER);
-    const commands = (await db.query(`SELECT i.name FROM agent_commands c JOIN identities i ON i.id=c.agent_id WHERE c.room_id=$1`, [workspace.roomId])).rows;
-    expect(commands).toEqual([{ name: 'Beebee' }]);
-  });
-
-  it('posts Luna’s stored game with inline faces when B is chosen', async () => {
-    const objects = new ObjectService(db, new MemoryObjectStorage().asStorage(), 'https://server.test');
-    phone = new PhoneService(db, 'https://server.test', undefined, undefined, live, false, db, objects);
-    phone.setFreeAgents(freeAgents);
+  it('keeps tic-tac-toe available on request without a followup menu', async () => {
     const workspace = await phone.execute('createWorkspace', { name: 'Game' }, OWNER);
     await finishWelcome(workspace.roomId!, OWNER);
-    const welcome = (await phone.readRoom(workspace.roomId!, OWNER))!.messages.find(message => message.choice)!.choice!;
-    await phone.execute('answerChoice', { choiceId: welcome.choiceId, optionId: 'B' }, OWNER);
+    const objects = new ObjectService(db, new MemoryObjectStorage().asStorage(), 'https://server.test');
+    await db.transaction(tx => postStarterGame(tx, objects, workspace.roomId!, OWNER));
     const room = (await phone.readRoom(workspace.roomId!, OWNER))!;
     expect(room.messages.some(message => message.attachments?.some(file => file.mimeType === 'application/vnd.beeline.game+html'))).toBe(true);
-    expect((await db.query(`SELECT 1 FROM messages WHERE card->>'workflowSlug'='welcome-video'`)).rowCount).toBe(0);
-    expect(room.messages.some(message => message.text.startsWith('Game on.'))).toBe(true);
+    expect(room.messages.some(message => message.choice)).toBe(false);
   });
 
   it('keeps starter agent mentions on the ordinary handoff path without a forced review limit', async () => {
@@ -359,28 +309,25 @@ describe('free starter agents', () => {
     }
   });
 
-  it('counts the first answer after a pick even when the person messaged before choosing', async () => {
+  it('counts the first answer to the open welcome exactly once', async () => {
     const installId = '11111111-1111-4111-8111-111111111111';
     const attemptId = '22222222-2222-4222-8222-222222222222';
     await recordSigninFunnelEvent(db, { event: 'signed_in', installId, attemptId, provider: 'google',
       platform: 'android', version: '0.2.22', environment: 'production', timestamp: new Date().toISOString() }, 'server', FRIEND);
     await db.query(`INSERT INTO signin_funnel_events(install_id,attempt_id,event,platform,version,source,occurred_at)
       VALUES($1,$2,'signup','android','0.2.22','server',now())`, [installId, attemptId]);
-    const workspace = await phone.execute('createWorkspace', { name: 'Answer after choosing' }, FRIEND);
+    const workspace = await phone.execute('createWorkspace', { name: 'Answer after welcome' }, FRIEND);
+    await phone.execute('sendRoomMessage', { roomId: workspace.roomId!, text: 'Hello before the welcome' }, FRIEND);
+    expect((await db.query("SELECT 1 FROM signin_funnel_events WHERE event='user_answered'")).rowCount).toBe(0);
     await finishWelcome(workspace.roomId!, FRIEND);
     await recordOnboardingEvent(db, FRIEND, 'welcome_shown');
-    await phone.execute('sendRoomMessage', { roomId: workspace.roomId!, text: 'Before I choose' }, FRIEND);
-    expect((await db.query(`SELECT 1 FROM signin_funnel_events WHERE event='user_answered'`)).rowCount).toBe(0);
-    const room = await phone.readRoom(workspace.roomId!, FRIEND);
-    const welcome = room!.messages.find(message => message.choice?.status === 'open')!.choice!;
-    await phone.execute('answerChoice', { choiceId: welcome.choiceId, optionId: 'C' }, FRIEND);
     await phone.execute('sendRoomMessage', { roomId: workspace.roomId!, text: 'Here is my answer' }, FRIEND);
     const firstAnswer = (await db.query(`SELECT occurred_at FROM signin_funnel_events WHERE event='user_answered'`)).rows;
     await phone.execute('sendRoomMessage', { roomId: workspace.roomId!, text: 'And another answer' }, FRIEND);
     expect((await db.query(`SELECT occurred_at FROM signin_funnel_events WHERE event='user_answered'`)).rows).toEqual(firstAnswer);
     const periods = await dashboardPeriods(db, new Date().toISOString());
     const funnel = periods['24h'].onboardingFunnel!;
-    expect('steps' in funnel && funnel.steps.find(step => step.key === 'answered_after_pick')?.count).toBe(1);
+    expect('steps' in funnel && funnel.steps.find(step => step.key === 'user_answered')?.count).toBe(1);
   });
 
   it('records return milestones after the welcome, using the existing signup funnel', async () => {
@@ -411,9 +358,6 @@ describe('free starter agents', () => {
     const workspace = await phone.execute('createWorkspace', { name: 'Tracked phone milestones' }, FRIEND);
     await finishWelcome(workspace.roomId!, FRIEND);
     await recordOnboardingEvent(db, FRIEND, 'welcome_shown');
-    const room = await phone.readRoom(workspace.roomId!, FRIEND);
-    const welcome = room!.messages.find(message => message.choice?.status === 'open')!.choice!;
-    await phone.execute('answerChoice', { choiceId: welcome.choiceId, optionId: 'C' }, FRIEND);
     await db.query(`UPDATE signin_funnel_events SET occurred_at=now()-interval '8 days' WHERE event='welcome_shown'`);
 
     await phone.execute('sendRoomMessage', { roomId: workspace.roomId!, text: 'A committed transport send' }, FRIEND,
@@ -457,6 +401,33 @@ describe('free starter agents', () => {
     expect(configuration.soul?.instructions).toContain(FREE_AGENT_TURN_GUIDE);
     const stored=(await db.query<{soul:{instructions:string}}>(`SELECT soul FROM agents WHERE agent_id=$1`,[agent.agent_id])).rows[0]!;
     expect(stored.soul.instructions).not.toContain('beeline:onboarding');
+  });
+
+  it('replaces old team guidance for both existing free agents, including legacy roles, without changing personal agents', async () => {
+    const workspace = await phone.execute('createWorkspace', { name: 'Feedback guide' }, OWNER);
+    const members = (await db.query<{agent_id:string;soul:{instructions:string}}>(`SELECT f.agent_id,a.soul
+      FROM free_agents f JOIN agents a ON a.agent_id=f.agent_id WHERE f.workspace_id=$1`, [workspace.id])).rows;
+    expect(members).toHaveLength(2);
+    const daemon = new DaemonService(db, live);
+    const old = 'Original persona.\n\nYou are on a team with another free starter agent. Ask on the first three substantive questions, then only when in doubt. One review round per answer.';
+    for (const member of members) {
+      expect(member.soul.instructions.split(FREE_AGENT_TEAM_GUIDE)).toHaveLength(2);
+      await db.query(`UPDATE agents SET soul=jsonb_set(soul,'{instructions}',$2::jsonb) WHERE agent_id=$1`, [member.agent_id,JSON.stringify(old)]);
+      const config = await daemon.execute('getAgentConfiguration', { roomId: workspace.roomId! }, member.agent_id);
+      expect(config.soul?.instructions).toContain('Original persona.');
+      expect(config.soul?.instructions.split(FREE_AGENT_TEAM_GUIDE)).toHaveLength(2);
+      expect(config.soul?.instructions).not.toMatch(/first three substantive questions|only when in doubt|One review round/);
+    }
+    await db.query('UPDATE free_agents SET starter_role=NULL WHERE agent_id=$1',[members[0]!.agent_id]);
+    const legacy = await daemon.execute('getAgentConfiguration', { roomId: workspace.roomId! }, members[0]!.agent_id);
+    expect(legacy.soul?.instructions).toContain(FREE_AGENT_TEAM_GUIDE);
+    await db.query(`INSERT INTO identities(id,kind,name) VALUES($1,'agent','Personal agent')`,[ORDINARY]);
+    await db.query(`INSERT INTO agents(agent_id,owner_id,soul,harness) VALUES($1,$2,$3::jsonb,'pi')`,
+      [ORDINARY,OWNER,JSON.stringify({name:'Personal agent',instructions:'Personal instructions.'})]);
+    await db.query(`INSERT INTO memberships(workspace_id,room_id,identity_id,role) VALUES($1,NULL,$3,'member'),($1,$2,$3,'member')`,
+      [workspace.id,workspace.roomId,ORDINARY]);
+    const personal = await daemon.execute('getAgentConfiguration', { roomId: workspace.roomId! }, ORDINARY);
+    expect(personal.soul?.instructions).toBe('Personal instructions.');
   });
 
   it('onboarding-invite-1: an unlinked Room join does not presume coding intent', async () => {
@@ -639,77 +610,19 @@ describe('free starter agents', () => {
     expect(exchanges).toHaveLength(2);
   });
 
-  it('R-SQUIRE-SLEEP: phone pairing wakes a suspended Machine without an agent command', async () => {
-    const { id } = await createWorkspace();
+  it('refuses Squire pairing and cards on a free agent without starting browser work', async () => {
+    const { id, roomId } = await createWorkspace();
     await settle();
     const agent = await freeAgentOf(id);
-    await db.query(`UPDATE agent_commands SET state='complete',completed_at=now() WHERE agent_id=$1`, [agent.agent_id]);
-    await db.query(`UPDATE free_agents SET state='running' WHERE agent_id=$1`, [agent.agent_id]);
-    expect(await freeAgents.requestSleep(agent.agent_id)).toEqual({ sleep: true });
-    await vi.waitFor(() => expect(machines.states.get(agent.fly_machine_id!)).toBe('suspended'));
-    machines.calls.length = 0;
-    // Listen to real committed PGlite notifications through the production
-    // projector. Phone pairing only writes pg_notify, never publishes to LiveHub.
-    const emitter = new EventEmitter();
-    const unlisten: Array<() => Promise<void>> = [];
-    const client = Object.assign(emitter, {
-      async connect() {},
-      async query(sql: string) {
-        const channel = sql.slice('LISTEN '.length);
-        unlisten.push(await db.client.listen(channel, payload => emitter.emit('notification', { channel, payload })));
-      },
-      async end() { for (const off of unlisten.splice(0)) await off(); },
-    }) as LivePgClient;
-    const listener = new PostgresLiveListener(db, live, () => client);
-    void listener.run();
-    await vi.waitFor(() => expect(listener.projectionHealth().connected).toBe(true));
-    const stop = freeAgents.subscribeToWakes(live);
-    try {
-      const pairing = await phone.execute('pairConnector', {
-        helperAgentId: agent.agent_id, connectorType: 'trusty-squire',
-      }, OWNER);
-      expect(pairing.status.status).toBe('installing');
-      await vi.waitFor(() => expect(machines.states.get(agent.fly_machine_id!)).toBe('started'));
-    } finally { stop(); await listener.stop(); }
-    expect(machines.states.get(agent.fly_machine_id!)).toBe('started');
-    expect(machines.calls).toEqual([`start ${agent.fly_machine_id}`]);
+    await expect(phone.execute('pairConnector', { helperAgentId: agent.agent_id, connectorType: 'trusty-squire' }, OWNER))
+      .rejects.toThrow('Free agents use Lightpanda');
+    const daemon = new DaemonService(db, live);
+    await expect(daemon.execute('offerConnector', { roomId, connectorType: 'trusty-squire', reason: 'Sign in' }, agent.agent_id))
+      .rejects.toThrow();
+    expect((await db.query('SELECT 1 FROM connector_offers')).rowCount).toBe(0);
   });
 
-  it.each(['complete', 'error', 'disconnect'] as const)('R-SQUIRE-SLEEP: protects sign-in from explicit helper sleep until %s', async (ending) => {
-    const { id } = await createWorkspace();
-    await settle();
-    const agent = await freeAgentOf(id);
-    await db.query(`DELETE FROM agent_commands WHERE agent_id=$1`, [agent.agent_id]);
-    const pairing = await phone.execute('pairConnector', {
-      helperAgentId: agent.agent_id, connectorType: 'trusty-squire',
-    }, OWNER);
-    await db.transaction(db => reportSquireWork(db, agent.agent_id, {
-      connectorId: pairing.connectorId, pairingGeneration: 1,
-      steps: [{ label: 'Install on helper', status: 'complete' }],
-      signIn: { method: 'streamed-page', url: 'https://signin.example.test' },
-    }));
-    await db.query(`UPDATE free_agents SET state='running',wake_requested_at=now()-interval '10 minutes' WHERE agent_id=$1`, [agent.agent_id]);
-    await db.query(`INSERT INTO live_server_instances(instance_id,renewed_at) VALUES('pairing',now())`);
-    await claimAgentConnection(db, live, agent.agent_id, { lifecycleId: 'pairing' }, {
-      connectionId: 'pairing', instanceId: 'pairing',
-    });
-    machines.calls.length = 0;
-    expect(await freeAgents.requestSleep(agent.agent_id)).toEqual({ sleep: false });
-    expect(machines.calls).toEqual([]);
-    if (ending === 'disconnect') await phone.execute('unpairConnector', { connectorId: pairing.connectorId }, OWNER);
-    else await db.transaction(db => reportSquireWork(db, agent.agent_id, {
-      connectorId: pairing.connectorId, pairingGeneration: 1, steps: [],
-      ...(ending === 'error' ? { errorMessage: 'Sign-in cancelled' } : { signedInAs: 'owner' }),
-    }, ending === 'complete'));
-    expect(machines.calls).toEqual([]);
-    // An explicit helper sleep request is allowed after the terminal report.
-    await db.query(`UPDATE free_agents SET state='running' WHERE agent_id=$1`, [agent.agent_id]);
-    machines.states.set(agent.fly_machine_id!, 'started');
-    expect(await freeAgents.requestSleep(agent.agent_id)).toEqual({ sleep: true });
-    await vi.waitFor(() => expect(machines.calls).toContain(`suspend ${agent.fly_machine_id}`));
-  });
-
-  it.each(['trusty-squire', 'tailscale'] as const)('R-SQUIRE-SLEEP: %s assignment wakes immediately and holds idle sleep', async (connectorType) => {
+  it.each(['tailscale'] as const)('R-SQUIRE-SLEEP: %s assignment wakes immediately and holds idle sleep', async (connectorType) => {
     const { id } = await createWorkspace();
     await settle();
     const agent = await freeAgentOf(id);

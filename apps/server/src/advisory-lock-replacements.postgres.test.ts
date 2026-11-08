@@ -5,7 +5,6 @@ import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import { migrate, markSchemaCurrent, PostgresDatabase, REQUIRED_SCHEMA_VERSION, type SqlDatabase } from './database.js';
 import { runInstitutionalCuratorCycle } from './institutional-curator.js';
 import { retireWelcomeWorkspace } from './welcome-retirement.js';
-import { seedWelcomeVideoWorkflow, WELCOME_VIDEO_SLUG } from './welcome-video-workflow.js';
 import { deleteSkill } from './institutional-skills.js';
 import { createAgentCommand,type CommandRow } from './agent-command.js';
 import { saveInstitutionalMemory } from './institutional-memory-shadow.js';
@@ -452,28 +451,6 @@ describe.skipIf(!url)('atomic claims replace advisory serialization', () => {
       .toEqual([{status:'settled'}]);
   });
 
-  it('two workflow seeds leave one complete skill version', async () => {
-    await overlap(db => db.transaction(tx => seedWelcomeVideoWorkflow(tx, workspace, room)),
-      'WITH saved AS');
-    const rows = (await first.query<{ current_version: number; version: number; markdown: string }>(
-      `SELECT skill.current_version,version.version,version.markdown FROM workspace_skills skill
-       JOIN workspace_skill_versions version ON version.skill_id=skill.id
-       WHERE skill.workspace_id=$1 AND skill.slug=$2`, [workspace, WELCOME_VIDEO_SLUG])).rows;
-    expect(rows).toHaveLength(1);
-    expect(rows[0]).toMatchObject({ current_version: 1, version: 1 });
-    expect(JSON.parse(rows[0]!.markdown).description).toBeTruthy();
-  });
-
-  it('two seed refreshes append one current version and preserve the pinned seed',async()=>{
-    await first.query(`UPDATE workspace_skill_versions version SET content_hash=repeat('0',64)
-      FROM workspace_skills skill WHERE skill.id=version.skill_id AND skill.workspace_id=$1 AND skill.slug=$2`,[workspace,WELCOME_VIDEO_SLUG]);
-    await overlap(db=>db.transaction(tx=>seedWelcomeVideoWorkflow(tx,workspace,room)),'WITH saved AS');
-    expect((await first.query(`SELECT skill.current_version,version.version FROM workspace_skills skill
-      JOIN workspace_skill_versions version ON version.skill_id=skill.id
-      WHERE skill.workspace_id=$1 AND skill.slug=$2 ORDER BY version.version`,[workspace,WELCOME_VIDEO_SLUG])).rows)
-      .toEqual([{current_version:2,version:1},{current_version:2,version:2}]);
-  });
-
   it('two curator writers complete one weekly cycle', async () => {
     await overlap(db => runInstitutionalCuratorCycle(db, { enabled: true, live: false },
       new Date('2026-11-05T12:00:00Z')), 'INSERT INTO institutional_curator_cycles');
@@ -490,17 +467,18 @@ describe.skipIf(!url)('atomic claims replace advisory serialization', () => {
   it('two skill deletions archive the cited version once and refuse the second deletion', async () => {
     const agent = 'a'.repeat(64), source = 'atomic-skill-deletion';
     await first.query(`INSERT INTO identities(id,kind,name) VALUES($1,'agent','Writer')`, [agent]);
-    await first.query(`INSERT INTO messages(id,room_id,author_id,text) VALUES($1,$2,$3,'Delete the welcome workflow')`,
+    await first.query(`INSERT INTO messages(id,room_id,author_id,text) VALUES($1,$2,$3,'Delete the atomic procedure')`,
       [source, room, agent]);
-    await seedWelcomeVideoWorkflow(first, workspace, room);
+    await first.query(`INSERT INTO workspace_skills(id,workspace_id,slug,kind,description,current_version,revision,source_room_id,repository,target_commit)
+      VALUES($1,$2,'atomic-test','procedure','Atomic test',2,2,$3,'','')`, [randomUUID(),workspace,room]);
     const command = { room_id: room, agent_id: agent, root_source_message_id: source } as CommandRow;
     const results = await overlap(db => deleteSkill(db, command,
-      { slug: WELCOME_VIDEO_SLUG, version: 2, sourceMessageIds: [source] })
+      { slug: 'atomic-test', version: 2, sourceMessageIds: [source] })
       .then(() => 'deleted')
       .catch((error: Error) => error.message), 'UPDATE workspace_skills SET');
-    expect(results).toEqual(['deleted', `no procedure or workflow is named ${WELCOME_VIDEO_SLUG}`]);
+    expect(results).toEqual(['deleted', 'no procedure or workflow is named atomic-test']);
     expect((await first.query(`SELECT state,current_version,revision FROM workspace_skills
-      WHERE workspace_id=$1 AND slug=$2`, [workspace, WELCOME_VIDEO_SLUG])).rows)
+      WHERE workspace_id=$1 AND slug=$2`, [workspace, 'atomic-test'])).rows)
       .toEqual([{ state: 'archived', current_version: 2, revision: '3' }]);
   });
 

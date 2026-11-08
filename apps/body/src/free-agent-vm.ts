@@ -85,8 +85,12 @@ async function freeAgentInput(model: string): Promise<Array<'text' | 'image'>> {
 export function freeAgentModelEnv(grant: Pick<FreeAgentGrant, 'modelToken'>): string {
   const lines = {
     BEELINE_FREE_AGENT_MODEL_TOKEN: grant.modelToken,
+    AGENT_BROWSER_ENGINE: 'lightpanda',
+    AGENT_BROWSER_EXECUTABLE_PATH: '/usr/local/bin/lightpanda',
+    // Each Room sandbox has its own /tmp; long harness homes exceed AF_UNIX limits.
+    AGENT_BROWSER_SOCKET_DIR: '/tmp/beeline-browser',
     BEELINE_BODY_AGENT_ENV_PASSTHROUGH: [
-      'BEELINE_FREE_AGENT_MODEL_TOKEN',
+      'BEELINE_FREE_AGENT_MODEL_TOKEN', 'AGENT_BROWSER_ENGINE', 'AGENT_BROWSER_EXECUTABLE_PATH', 'AGENT_BROWSER_SOCKET_DIR',
     ].join(','),
   };
   return `${Object.entries(lines)
@@ -185,6 +189,12 @@ async function upgradeFreeAgentHarness(configPath: string, env: NodeJS.ProcessEn
       .filter(Boolean).join(',').split(',').map(name => canonicalName(name.trim())).filter(Boolean),
   );
   passthrough.add('BEELINE_FREE_AGENT_MODEL_TOKEN');
+  passthrough.add('AGENT_BROWSER_ENGINE');
+  passthrough.add('AGENT_BROWSER_EXECUTABLE_PATH');
+  passthrough.add('AGENT_BROWSER_SOCKET_DIR');
+  normalized.AGENT_BROWSER_ENGINE = 'lightpanda';
+  normalized.AGENT_BROWSER_EXECUTABLE_PATH = '/usr/local/bin/lightpanda';
+  normalized.AGENT_BROWSER_SOCKET_DIR = '/tmp/beeline-browser';
   normalized.BEELINE_BODY_AGENT_ENV_PASSTHROUGH = [...passthrough].join(',');
   if (!normalized.BEELINE_FREE_AGENT_MODEL_TOKEN)
     throw new Error('free agent proxy configuration is missing');

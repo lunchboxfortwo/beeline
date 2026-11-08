@@ -404,7 +404,9 @@ export async function availableCapabilities(checkOnboarding = true): Promise<str
     }
   } catch { /* Missing server eligibility always leaves the feature dark. */ }
 
-  return placeBeelineApps(Boolean(process.env.BEELINE_DAEMON_CORNER_ID), onboarding);
+  const apps = placeBeelineApps(Boolean(process.env.BEELINE_DAEMON_CORNER_ID), onboarding);
+  return process.env.BEELINE_FREE_AGENT_ID || process.env.BEELINE_FREE_AGENT_MODEL_TOKEN
+    ? apps.filter(app => app !== 'beeline:browser_share') : apps;
 }
 
 

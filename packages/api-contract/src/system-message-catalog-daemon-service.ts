@@ -619,70 +619,18 @@ export const SYSTEM_MESSAGE_DAEMON_SERVICE = {
     variables: [],
   },
 
-  'starter-onboarding.make-a-welcome-video-and-post-it-to-my-youtube': {
-    parts: ['Make a welcome video and post it to my YouTube'],
-    variables: [],
-  },
 
-  'starter-onboarding.beebee-makes-it-luna-checks-it-you-approve-the-post': {
-    parts: ['Beebee makes it, Luna checks it, you approve the post'],
-    variables: [],
-  },
 
-  'starter-onboarding.play-tic-tac-toe-with-me': {
-    parts: ['Play tic-tac-toe with me'],
-    variables: [],
-  },
 
-  'starter-onboarding.you-and-beebee-against-luna': {
-    parts: ['You and Beebee against Luna'],
-    variables: [],
-  },
 
-  'starter-onboarding.something-else': {
-    parts: ['Something else'],
-    variables: [],
-  },
 
-  'starter-onboarding.tell-us-the-job-in-your-own-words': {
-    parts: ['Tell us the job in your own words'],
-    variables: [],
-  },
 
-  'starter-onboarding.pick-a-first-job': {
-    parts: ['Pick a first job'],
-    variables: [],
-  },
 
-  'starter-onboarding.visibility': {
-    parts: ['Visibility: ', ''],
-    variables: ['input_visibility'],
-  },
 
-  'starter-onboarding.post': {
-    parts: ['Post'],
-    variables: [],
-  },
 
-  'starter-onboarding.cancel': {
-    parts: ['Cancel'],
-    variables: [],
-  },
 
-  'starter-onboarding.after-your-game-what-next': {
-    parts: ['After your game, what next?'],
-    variables: [],
-  },
 
-  'starter-onboarding.invite-a-friend-to-play': {
-    parts: ['Invite a friend to play'],
-    variables: [],
-  },
 
-  'starter-onboarding.give-us-a-real-task': {
-    parts: ['Give us a real task'],
-    variables: [],
-  },
 
   'startup-wake-backoff.keeps-failing-to-start-automatic-wakes-are-paused-for-5-minutes': {
     parts: ['', ' keeps failing to start. Automatic wakes are paused for 5 minutes.'],

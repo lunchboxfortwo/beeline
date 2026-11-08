@@ -310,7 +310,7 @@ const daemonOperations = {
   postSquireApproval: true,
   postSquireApprovalDecision: true,
   postSquireLoginWall: true,
-  postStarterVideoPreview: true,
+  postStarterGame: true,
   postStarterWelcome: true,
   postTargetBranchProposal: true,
   postVaultSaveCard: true,

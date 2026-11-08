@@ -1,4 +1,4 @@
-import { squireHostPaths, squireHostRewriteEnv, squireBrokerSocketReady } from "./squire-host.js";
+import { squireHostPaths, squireHostRewriteEnv } from "./squire-host.js";
 import { homedir } from "node:os";
 import { execFile, spawn } from "node:child_process";
 import type { ConnectorStep, ConnectorBrowserLocation, ConnectorSignIn } from "@beeline/api-contract/daemon";
@@ -678,20 +678,6 @@ export async function resolveSquireConnectSpec(run: ShellRunner): Promise<Squire
     currentRelease,
     reResolved: true,
   };
-}
-
-
-
-/** The hosted broker can cold-start slower than Squire connect's own deadline. */
-export async function prepareHostedSquire(
-  run: ShellRunner,
-  sockets: { brokerSocket: string; mcpSocket: string },
-  _timeoutMs = 60_000,
-): Promise<boolean> {
-  const started = await run('systemctl', ['--user', 'start', 'trusty-squire-broker.service']);
-  if (started.code !== 0) return false;
-  return await squireBrokerSocketReady(sockets.brokerSocket) && await squireBrokerSocketReady(sockets.mcpSocket);
-
 }
 
 
