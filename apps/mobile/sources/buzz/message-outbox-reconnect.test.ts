@@ -163,6 +163,22 @@ it('an idle-screen replacement failure settles the send even when a read opened 
   expect(Socket.instances).toHaveLength(2);
 });
 
+it('a replacement opened by the Room read shares the send budget through its confirming answer', async () => {
+  const { room, first, enqueue } = await setup();
+  const event = await enqueue(); const sending = room.send(event.id); await tick();
+  first.drop(); await sending; await tick();
+  const replacement = Socket.instances[1]!; replacement.open(); await tick();
+  expect(replacement.requests().filter(request => request.op === 'readWorkspaces')).toHaveLength(1);
+  expect(replacement.requests().filter(request => request.op === 'sendRoomMessage')).toHaveLength(1);
+  // Opening alone does not confirm recovery. A loss before the confirming
+  // answer must settle both owners without creating a third socket.
+  replacement.drop(); await tick();
+  expect(room.state(event.id)?.text).toBe('Not sent');
+  await vi.advanceTimersByTimeAsync(3 * 60 * 60 * 1000);
+  expect(Socket.instances).toHaveLength(2);
+  expect(room.state(event.id)?.text).toBe('Not sent');
+});
+
 it('an explicit Retry reconnects a failed offline message and preserves its id', async () => {
   const { room, enqueue } = await setup();
   const event = await enqueue(); const sending = room.send(event.id); await tick();

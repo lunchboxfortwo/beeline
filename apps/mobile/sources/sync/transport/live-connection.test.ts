@@ -299,6 +299,27 @@ describe('the one phone socket', () => {
     const { connection } = setup(); const listener = vi.fn(); await connection.register([{ '#h': ['a'] }], listener);
     (await open()).drop(); expect(listener).toHaveBeenCalledOnce(); expect(useConnectionFailure()).toBe(false);
   });
+  it('a diagnostic upload cannot hide a socket close from the Room covering read', async () => {
+    const { connection } = setup();
+    let room = { working:true, replies:[] as string[] };
+    const reads:Promise<unknown>[]=[];
+    await connection.register([{ '#h':['a'] }], () => {
+      reads.push(connection.request('readRoom',{roomId:'a'}).then(view=>{ room=view as unknown as typeof room; }));
+    });
+    const first=await open();
+    const upload=connection.request('reportDiagnostics',{} as never,{reconnectOwnedByOutbox:true}).catch(error=>error);
+    first.drop();
+    await upload;await tick();
+    expect(Socket.instances).toHaveLength(2);
+    const next=await open();
+    next.reply({working:false,replies:['Yes. 14:00 UTC is 9:00 AM EST.']});
+    await Promise.all(reads);
+    expect(room).toEqual({working:false,replies:['Yes. 14:00 UTC is 9:00 AM EST.']});
+    await vi.advanceTimersByTimeAsync(600_000);
+    expect(Socket.instances).toHaveLength(2);
+    expect(next.requests()).toHaveLength(1);
+    expect(useConnectionFailure()).toBe(false);
+  });
   it.each([
     ['foreground', 'sendRoomMessage'], ['foreground', 'sendRoomReply'],
     ['online', 'sendRoomMessage'], ['online', 'sendRoomReply'],

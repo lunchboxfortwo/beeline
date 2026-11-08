@@ -160,7 +160,7 @@ it('acceptance 4: callback receipt, HTTP refusal, network failure, access skip a
   expect(hostResults.find(d=>d.event_id==='evt_2')!.host_result).toBe('unknown'); // Host lost before any terminal evidence.
 });
 
-it('acceptance 5: offline persistence survives process death, drains in batches without a cap and acknowledges duplicates',async()=>{
+it('acceptance 5: bounded offline persistence survives process death and acknowledges duplicates',async()=>{
   const store=storage();let online=false;
   const send=vi.fn(async(b:DiagnosticBatch,authenticated:boolean)=>{
     if(!online)throw new Error('offline');
@@ -170,14 +170,29 @@ it('acceptance 5: offline persistence survives process death, drains in batches 
   await first.identify(user);
   for(let i=0;i<1100;i++)await first.record({name:'screen_viewed',route:'beeline/channels'});
   await first.flush();
-  expect([...store.values.keys()].filter(k=>k.startsWith('beeline.diagnostics.event.v1:')).length).toBeGreaterThan(1000);
+  const retained=[...store.values.entries()].filter(([key])=>key.startsWith('beeline.diagnostics.event.v1:'));
+  expect(retained.length).toBeGreaterThan(32);
+  expect(retained.length).toBeLessThanOrEqual(256);
+  expect(retained.reduce((sum,[,value])=>sum+value.length*3,0)).toBeLessThanOrEqual(256*1024);
   const restored=createDiagnosticClient({storage:store,uuid:randomUUID,descriptor,send});
-  await restored.identify(user);online=true;await restored.flush();
-  expect((await db.query(`SELECT 1 FROM diagnostic_actions WHERE detail->>'name'='screen_viewed'`)).rowCount).toBe(1100);
+  await restored.identify(user);
+  const screenCount=[...store.values.entries()].filter(([key,value])=>
+    key.startsWith('beeline.diagnostics.event.v1:') && JSON.parse(value).event.name==='screen_viewed').length;
+  send.mockClear();online=true;await restored.flush();
+  expect((await db.query(`SELECT 1 FROM diagnostic_actions WHERE detail->>'name'='screen_viewed'`)).rowCount).toBe(screenCount);
   expect(send.mock.calls.every(([b])=>b.events.length<=32)).toBe(true);
   const sent=send.mock.calls.find(([b])=>b.events.length===32)![0];
   await ingestDiagnostics(db,sent,user);await ingestDiagnostics(db,sent,user);
-  expect((await db.query(`SELECT 1 FROM diagnostic_actions WHERE detail->>'name'='screen_viewed'`)).rowCount).toBe(1100);
+  expect((await db.query(`SELECT 1 FROM diagnostic_actions WHERE detail->>'name'='screen_viewed'`)).rowCount).toBe(screenCount);
+});
+
+it('records native Expo UUIDv7 updates while retaining UUIDv4 session authority',async()=>{
+  const b=batch({descriptor:{...descriptor,platform:'android',client:'expo_native',
+    updateId:'019a0000-0000-7000-8000-000000000001'}});
+  expect(await ingestDiagnostics(db,b,user)).toEqual({accepted:[b.events[0]!.eventId]});
+  expect((await readPersonDiagnostics(db,user))!.devices[0]!.sessions[0]!.descriptor.updateId)
+    .toBe(b.descriptor.updateId);
+  expect(parseDiagnosticBatch({...b,sessionId:b.descriptor.updateId},PHONE_OPERATION_NAMES)).toBeNull();
 });
 
 it('acceptance 5: account switches and copied or denied storage never mix identities, idle sessions rotate without timers',async()=>{

@@ -430,11 +430,12 @@ export class LiveConnection {
 
   private socketFailed(socket: WebSocket): void {
     if (this.socket !== socket) return;
-    const waitingRequest = this.requests.size > 0;
     this.dropConnection(true);
-    // An in-flight read receives the failure. An idle broken socket asks the
-    // open screens to read, making the failed request and recovery visible.
-    if (!waitingRequest && !this.recovering && AppState.currentState === 'active') this.refreshRoom();
+    // Every open surface lost coverage, even when an unrelated request was
+    // pending. Telemetry intentionally cannot reconnect itself; a diagnostic
+    // upload must not swallow the only signal that makes the Room read again.
+    // The confirming replacement retains its existing one-attempt budget.
+    if (!this.recovering && AppState.currentState === 'active') this.refreshRoom();
   }
   private dropConnection(transportFailed = false): void {
     const socket = this.socket;
@@ -467,7 +468,10 @@ export class LiveConnection {
   reconnectAfterFailedSend(generation: number): Promise<void> {
     // Concurrent failures share recovery; an old outcome cannot drop a new socket.
     if (this.disposed) return Promise.resolve();
-    if (this.connecting) return this.connecting.promise;
+    // A covering Room read may have opened the replacement before the send's
+    // rejection settled. Join its socket through the shared recovery budget,
+    // so a failed replacement cannot grant that read another reconnect.
+    if (this.connecting) return this.reconnectAfterFailure(generation);
     if (generation !== this.socketGeneration) return Promise.resolve();
     this.dropConnection();
     return this.reconnectAfterFailure(generation);

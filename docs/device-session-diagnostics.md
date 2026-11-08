@@ -19,10 +19,17 @@ users as well as new accounts.
 Unknown and retired socket operations retain their database-free refusal path;
 only allowlisted operation names enter the diagnostic journal.
 
-`diagnostics-client.ts` persists an uncapped queue before sending, using a separate storage key for each
-occurrence so simultaneous browser views cannot overwrite each other. Each batch has
-at most 32 events. Only acknowledged IDs are removed. Delivery is at least once;
-the server's global ID ledger deduplicates retries across receive dates. Offline
+`diagnostics-client.ts` retains at most 256 events and a conservative 256 KiB UTF-8
+budget per runtime, using a separate storage key for each occurrence so simultaneous
+browser views cannot overwrite each other. Startup prunes an older diagnostic backlog
+before saving an installation ID. Oldest observations may be discarded; sequence gaps
+and `storage_unavailable` preserve the limits of coverage. Credentials and unsent
+messages are never pruned. A failed save parks persistence for that runtime while
+bounded in-memory observations can still be sent. Expo update descriptors accept
+UUIDv7 build IDs; session and event authority IDs retain UUIDv4 validation.
+
+Each batch has at most 32 events. Acknowledged IDs leave the queue; the server's
+global ID ledger deduplicates repeated delivery across receive dates. Offline
 failure waits for a real action, foreground/background event, or existing socket
 connection event. There is no flush interval, polling, telemetry reconnect or
 second authenticated connection. Telemetry never delays an operation for an

@@ -87,7 +87,9 @@ export function parseDiagnosticBatch(raw: unknown, operations: ReadonlySet<strin
     (d.buildNumber !== undefined && !version(d.buildNumber)) ||
     (d.browserVersion !== undefined && !version(d.browserVersion)) ||
     (d.osVersion !== undefined && !version(d.osVersion)) || (d.runtimeVersion !== undefined && !version(d.runtimeVersion)) ||
-    (d.updateId !== undefined && !uuid(d.updateId)) ||
+    // Expo update IDs are UUIDv7. They describe a build and carry no session authority.
+    (d.updateId !== undefined && (typeof d.updateId !== 'string' ||
+      !/^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(d.updateId))) ||
     (d.browser !== undefined && !member(d.browser,['chrome','safari','firefox','edge','unknown']))) return null;
   const ids=new Set<string>();
   for (const e of raw.events) {
