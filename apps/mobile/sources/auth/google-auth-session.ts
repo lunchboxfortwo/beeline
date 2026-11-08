@@ -221,7 +221,9 @@ export async function runGoogleSignIn(input: {
   });
   try { await assertCurrent(); } catch (error) { subscription.remove(); throw error; }
   // One outstanding recovery connection also covers a lost OS/browser callback.
-  const waitMs = input.platform === 'android' ? 5 * 60_000 : 120_000;
+  // Match the server's browser-flow lifetime. The two-minute held read may
+  // finish pending while Google is still waiting for approval on another device.
+  const waitMs = 5 * 60_000;
   let rejectReplacement!: (error: OidcBindError) => void;
   const replaced = new Promise<never>((_resolve, reject) => { rejectReplacement = reject; });
   const abort = () => {

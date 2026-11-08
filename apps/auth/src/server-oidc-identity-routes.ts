@@ -641,15 +641,24 @@ export function registerServerOidcIdentityRoutes(context: AuthRouteContext): voi
   app.get('/auth/oidc/callback', async (request, reply) => {
     const tenant = tenantFor(request);
     const query = request.query as Record<string, unknown>;
-    const state = requiredQueryString(query.state, 'state');
-    const browserSession = flowCookie(request, flowCookieName);
+    // A provider may return after this browser's cookie expired, the app
+    // canceled, or the callback moved to another browser. Never recover a
+    // session from state alone; restart at the configured sign-in surface.
+    const restartSignIn = () => {
+      noStore(reply);
+      return reply.redirect(new URL('/beeline/onboarding', options.webAppOrigins?.[0] ?? tenant.origin).toString(), 302);
+    };
+    let state: string;
+    let browserSession: string;
+    try {
+      state = requiredQueryString(query.state, 'state');
+      browserSession = flowCookie(request, flowCookieName);
+    } catch (error) {
+      if (error instanceof ProtocolError) return restartSignIn();
+      throw error;
+    }
     const flow = await options.store.consumeFlow(sha256(state), sha256(browserSession), now());
-    if (!flow)
-      throw new ProtocolError(
-        400,
-        'invalid_oidc_flow',
-        'OIDC flow is missing, expired, or already used',
-      );
+    if (!flow) return restartSignIn();
     reply.header(
       'set-cookie',
       `${flowCookieName}=; Path=/; Max-Age=0;${cookieSecurity} HttpOnly; SameSite=Lax`,
@@ -660,7 +669,7 @@ export function registerServerOidcIdentityRoutes(context: AuthRouteContext): voi
       flow.audience !== options.oidc.config.clientId ||
       flow.redirectUri !== `${tenant.origin}/auth/oidc/callback`
     ) {
-      throw new ProtocolError(400, 'invalid_oidc_flow', 'OIDC flow tenant or provider mismatch');
+      return restartSignIn();
     }
     await observeSigninAttempt({ stage: 'provider_returned', flowHash: sha256(state), at: now(),
       ...(typeof query.error === 'string' ? { errorCode: query.error } : {}) });
@@ -671,10 +680,13 @@ export function registerServerOidcIdentityRoutes(context: AuthRouteContext): voi
         message: 'Google authorization was canceled or denied',
       });
       if (completion) return deliverNativeCompletion(reply, completion);
-      throw new ProtocolError(401, 'oidc_denied', 'OIDC provider denied the authorization request');
+      return restartSignIn();
     }
-    if(typeof query.code !== 'string') await callbackObservation(state,'google','error','missing_provider_code');
-    const code = requiredQueryString(query.code, 'code');
+    if (typeof query.code !== 'string' || !query.code || query.code.length > 4_096) {
+      await callbackObservation(state,'google','error','missing_provider_code');
+      return restartSignIn();
+    }
+    const code = query.code;
 
     let identity;
     try {
@@ -687,11 +699,7 @@ export function registerServerOidcIdentityRoutes(context: AuthRouteContext): voi
         message: 'Google authorization expired or could not be verified',
       });
       if (completion) return deliverNativeCompletion(reply, completion);
-      throw new ProtocolError(
-        401,
-        'invalid_oidc_proof',
-        'OIDC code exchange or ID token validation failed',
-      );
+      return restartSignIn();
     }
 
     await callbackObservation(state,'google','success');

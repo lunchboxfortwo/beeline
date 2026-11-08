@@ -168,7 +168,8 @@ m5_it('observes OIDC cancellation and keeps auth working if telemetry is unavail
     headers: { host: m5_alphaTenant.host, cookie: m5_startCookie(start.headers['set-cookie']) },
     url: `/auth/oidc/callback?state=${state}&error=access_denied`,
   });
-  m5_expect(callback.statusCode).toBe(401);
+  m5_expect(callback.statusCode).toBe(302);
+  m5_expect(callback.headers.location).toBe('https://web.alpha.example/beeline/onboarding');
   m5_expect(observe.mock.calls.at(-1)?.[0]).toMatchObject({
     provider: 'google',
     outcome: 'cancelled',

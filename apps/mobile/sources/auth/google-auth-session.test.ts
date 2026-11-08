@@ -375,3 +375,52 @@ it('F11: cancellation while recovering a lost native completion cannot return th
     expect(browser).not.toHaveBeenCalled(); expect(storage.size).toBe(0);
   } finally { picker.enabled = false; vi.unstubAllGlobals(); }
 });
+
+
+it.each(['web', 'ios'])('R-oidc-delayed-approval: %s approval after two minutes still completes', async platform => {
+  storage.clear(); picker.enabled = false; vi.useFakeTimers();
+  let returned = false;
+  let callback!: (url: string) => void;
+  const removed = vi.fn();
+  const fetcher = vi.fn(async (url: string) => new Response('{}', {
+    status: url.endsWith('/cancel') || returned ? 200 : 202,
+  }));
+  vi.stubGlobal('fetch', fetcher);
+  try {
+    const result = runGoogleSignIn({ state, recoveryToken, platform,
+      openAuthSession: async () => ({ type: 'opened' }),
+      subscribeToUrls: listener => { callback = listener; return { remove: removed }; },
+    });
+    const outcome = result.then(value => ({ value }), error => ({ error }));
+    await vi.advanceTimersByTimeAsync(3 * 60_000);
+    expect(fetcher.mock.calls.some(([url]) => url.endsWith('/cancel'))).toBe(false);
+    expect(removed).not.toHaveBeenCalled();
+    returned = true;
+    callback(`beeline://beeline/google-callback?state=${state}&completed=1`);
+    await vi.advanceTimersByTimeAsync(1);
+    expect(await outcome).toEqual({ value: recoveryToken });
+    expect(fetcher).toHaveBeenCalledTimes(2);
+    expect(removed).toHaveBeenCalledOnce();
+  } finally { vi.useRealTimers(); vi.unstubAllGlobals(); }
+});
+
+
+it('R-oidc-delayed-approval: an unfinished browser flow is canceled at the five-minute server limit', async () => {
+  storage.clear(); picker.enabled = false; vi.useFakeTimers();
+  const removed = vi.fn();
+  const fetcher = vi.fn(async (url: string) => new Response('{}', { status: url.endsWith('/cancel') ? 200 : 202 }));
+  vi.stubGlobal('fetch', fetcher);
+  try {
+    const result = runGoogleSignIn({ state, recoveryToken, platform: 'web',
+      openAuthSession: async () => ({ type: 'opened' }), subscribeToUrls: () => ({ remove: removed }),
+    });
+    const assertion = expect(result).rejects.toMatchObject({ code: 'token_expired' });
+    await vi.advanceTimersByTimeAsync(5 * 60_000 - 1);
+    expect(fetcher).toHaveBeenCalledTimes(1);
+    await vi.advanceTimersByTimeAsync(1);
+    await assertion;
+    expect(fetcher.mock.calls.filter(([url]) => url.endsWith('/cancel'))).toHaveLength(1);
+    expect(storage.size).toBe(0);
+    expect(removed).toHaveBeenCalledOnce();
+  } finally { vi.useRealTimers(); vi.unstubAllGlobals(); }
+});
