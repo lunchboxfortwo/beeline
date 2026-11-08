@@ -1,8 +1,10 @@
+import { randomUUID } from 'node:crypto';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { FlyMachines } from './fly-machines.js';
 import { FreeAgentService, freeAgentConfigFromEnv } from './free-agents.js';
 import { LiveHub } from './live.js';
 import { claimAgentConnection } from './connection-presence.js';
+import { DaemonService } from './daemon-service.js';
 import { migratedDatabase, type PgliteDatabase } from './test-support.js';
 
 const OWNER = 'a'.repeat(64);
@@ -88,8 +90,8 @@ describe('release refresh and committed free-agent sleep events', () => {
   }
 
   async function connector(n: number) {
-    await db.query(`INSERT INTO squire_machines(owner_id,machine_id,helper_agent_id,squire_work)
-      VALUES($1,$2,$3,'{"install":true}')`, [OWNER, `helper-${n}`, agentId(n)]);
+    await db.query(`INSERT INTO workspace_connectors(id,workspace_id,owner_identity_id,helper_agent_id,connector_type)
+      VALUES($1,$2,$3,$4,'tailscale')`, [randomUUID(), WORKSPACE, OWNER, agentId(n)]);
   }
 
   async function connect(n: number) {
@@ -127,7 +129,11 @@ describe('release refresh and committed free-agent sleep events', () => {
     await connect(1);
     await connect(2);
     if (work === 'claimed') await command(2, work);
-    else await connector(2);
+    else {
+      await connector(2);
+      expect(await new DaemonService(db, live).execute('getConnectorAssignments', { agentId: agentId(2) }, agentId(2)))
+        .toMatchObject({ assignments: [{ kind: 'install', connectorType: 'tailscale' }] });
+    }
 
     await service.reconcileAll();
 
@@ -135,6 +141,52 @@ describe('release refresh and committed free-agent sleep events', () => {
     expect(fleet.get('m2')).toMatchObject({ state: 'started', instance_id: 'v2' });
     expect(fleet.get('m2')!.config.image).not.toBe(IMAGE);
     expect(calls.filter(call => call.startsWith('POST'))).toEqual(['POST m1', 'POST m1/suspend']);
+  });
+
+  it.each(['startup', 'release', 'connection'].flatMap(signal =>
+    ['old', 'current'].map(binding => ({ signal, binding }))))('$signal replaces and suspends an idle helper with a saved $binding-machine Squire install', async ({ signal, binding }) => {
+    const startup = vi.spyOn(service, 'reconcileAll');
+    const signals = vi.spyOn(service, 'reconcile');
+    if (signal === 'connection') {
+      off = service.subscribeToWakes(live);
+      await startup.mock.results[0]!.value;
+    }
+    await seed(1, 'running', 'started');
+    const currentMachine = '33333333-3333-4333-8333-333333333333';
+    // Production retained an install under free-agent:<id> after registration
+    // changed machine identity. Even a matching binding is undeliverable:
+    // free agents never receive Squire installation work.
+    await db.query(`INSERT INTO squire_machines(owner_id,machine_id,helper_agent_id,squire_work)
+      VALUES($1,$2,$3,'{"install":true,"steps":[{"label":"Install on helper","status":"pending"},{"label":"Connect provider account","status":"pending"}]}')`,
+      [OWNER, binding === 'old' ? `free-agent:${agentId(1)}` : currentMachine, agentId(1)]);
+    await db.query(`UPDATE agents SET machine_id=$2 WHERE agent_id=$1`,
+      [agentId(1), currentMachine]);
+    expect(await new DaemonService(db, live).execute('getConnectorAssignments', { agentId: agentId(1) }, agentId(1)))
+      .toEqual({ assignments: [] });
+
+    if (signal !== 'connection') {
+      await connect(1);
+      off = service.subscribeToWakes(live);
+      await startup.mock.results[0]!.value;
+    }
+    if (signal === 'release') {
+      // Recreate image drift after startup, without reopening the connection.
+      fleet.get('m1')!.config.image = 'old-release';
+      fleet.get('m1')!.state = 'started';
+      calls.length = 0;
+      live.publish({ type: 'invalidate', roomId: '', reason: 'postgres:free_agents' });
+      await startup.mock.results[1]!.value;
+    } else if (signal === 'connection') {
+      calls.length = 0;
+      await connect(1);
+      await Promise.all(signals.mock.results.map(result => result.value));
+    }
+
+    expect((await db.query('SELECT 1 FROM agent_commands')).rowCount).toBe(0);
+    expect(fleet.get('m1')).toMatchObject({ state: 'suspended', config: { image: IMAGE } });
+    expect(calls.filter(call => call.startsWith('POST'))).toEqual(['POST m1', 'POST m1/suspend']);
+    expect((await db.query(`SELECT squire_work->>'install' install FROM squire_machines`)).rows)
+      .toEqual([{ install: 'true' }]);
   });
 
   it.each(['pending', 'claimed', 'connector'] as const)('keeps %s work committed during image replacement running', async work => {

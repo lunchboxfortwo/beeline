@@ -465,12 +465,9 @@ export interface FreeAgentBootstrapGrant {
   upstreamModel: string;
 }
 
-/** Durable install/sign-in work ends on completion, failure, or disconnect. */
+/** Free helpers receive workspace connector work, never Squire installs. */
 const connectorWorkSql = (agent: string): string => `(
-  EXISTS (SELECT 1 FROM squire_machines helper WHERE helper.helper_agent_id=${agent}
-    AND helper.squire_work->>'install'='true'
-    AND COALESCE(helper.squire_work->>'errorMessage','')='')
-  OR EXISTS (SELECT 1 FROM workspace_connectors connector
+  EXISTS (SELECT 1 FROM workspace_connectors connector
     WHERE connector.helper_agent_id=${agent} AND connector.status='installing')
 )`;
 

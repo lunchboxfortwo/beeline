@@ -51,6 +51,9 @@ soul. Existing free agents keep their names.
   `FreeAgentService.reconcile`. That owner serializes create, image update, start,
   suspend and destroy across servers. It reads pending/claimed commands, connector
   work, Fly's observed machine/version and current authenticated connection.
+  Free helpers never receive Squire install assignments. Saved Squire installation
+  rows cannot keep them running or block image replacement; supported Workspace
+  connector installs still count as work, matching `daemonConnectorAssignments`.
   Claimed invocations and connector installs finish before image replacement.
   A connected helper with no remaining work is suspended; the provider's completed
   snapshot hands any work committed during suspension back to the same owner.
