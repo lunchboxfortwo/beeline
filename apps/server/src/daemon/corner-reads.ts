@@ -165,7 +165,7 @@ import { daemonIdentity, daemonAccess } from './access.js';
     input: Input<'listCornerBriefRevisions'>,
     agentId: string,
   ) {
-    await daemonReach(ctx, input.cornerId, agentId);
+    await daemonAccess(ctx, input.cornerId, agentId);
     if (
       input.beforeRevision !== undefined &&
       (!Number.isInteger(input.beforeRevision) || input.beforeRevision < 1)

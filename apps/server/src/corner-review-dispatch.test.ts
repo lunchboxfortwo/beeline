@@ -562,7 +562,7 @@ describe('corner message attribution', () => {
   });
 
 
-  it('Reproduction REVIEW-HEAD-1: a worker tag does not repeat a finished review on the unchanged head', async () => {
+  it('RUBY-18: a worker can explicitly request re-review after an evidence-only repair', async () => {
     const head = 'b'.repeat(40);
     await rootFixture.phone.execute('updateRoom', { roomId: R, reviewerAgentId: B }, H);
     await greenHead(27, head);
@@ -577,9 +577,12 @@ describe('corner message attribution', () => {
     await claim(repair!);
     const reply = '@goosy Added both demonstrations to the PR description; the code and head are unchanged.';
     await result(repair!, reply);
-    // A new commit is needed before this head can be reviewed again.
-    expect(await commands(B, C)).toEqual([]);
+    const [rereview] = await commands(B, C);
+    expect(rereview?.source.body).toContain(reply);
+    await claim(rereview!);
     await reconcileConfiguredCornerReviewers(rootFixture.db, R);
+    expect((await rootFixture.db.query(`SELECT state FROM agent_commands WHERE id=$1`, [rereview!.id])).rows)
+      .toEqual([{ state: 'claimed' }]);
     expect(await commands(B, C)).toEqual([]);
     expect((await rootFixture.db.query<{ workflow_state: string }>(
       `SELECT ${cornerRunStateSql('corner_id')} workflow_state FROM corner_facts WHERE corner_id=$1`, [C],

@@ -1,5 +1,41 @@
 import { releaseAgentConnection, advanceCorner, randomUUID, randomBytes, expect, it, vi, MemoryObjectStorage, ObjectService, DaemonService, LiveHub, PushDeliveryLoop, createAgentCommand, GITHUB_SUBJECT, systemLine, HUMAN, RUBY, WORKER, WS, ROOM, DM, db, daemon, phone, order, claim, authority, commands, open, worker, rootFixture, type AgentCommand } from './test-support-commander-recovery.integration.test-support.js';
 
+it('RUBY-16: a reviewer reads reported files from the existing corner report card', async () => {
+  const opened = await open();
+  const turn = await worker(opened.cornerId);
+  const objects = new ObjectService(rootFixture.db, new MemoryObjectStorage(), 'http://test');
+  const bytes = Buffer.from('native review evidence');
+  const uploaded = await objects.uploadArtifact(WORKER, bytes, 'text/plain', 'proof.txt');
+  const attachment = { url: uploaded.url, name: 'proof.txt', mimeType: 'text/plain', size: bytes.length };
+  await rootFixture.daemon.execute('postAgentAttachment', { ...authority(turn), attachment }, WORKER);
+  await rootFixture.daemon.execute('report', { ...authority(turn), status: 'done', text: 'done: proof attached' }, WORKER);
+  const reviewer = '16'.repeat(32);
+  await rootFixture.db.query(`INSERT INTO identities(id,kind,name) VALUES($1,'agent','Reviewer')`, [reviewer]);
+  await rootFixture.db.query(`INSERT INTO agents(agent_id,owner_id) VALUES($1,$2)`, [reviewer, HUMAN]);
+  await rootFixture.db.query(`INSERT INTO memberships(workspace_id,room_id,identity_id,role)
+    VALUES($1,NULL,$3,'member'),($1,$2,$3,'member')`, [WS, ROOM, reviewer]);
+  const card = (await rootFixture.db.query<{ id: string }>(`SELECT id FROM messages
+    WHERE room_id=$1 AND card_type='agent-command' AND card->>'kind'='report'`, [opened.cornerId])).rows[0]!;
+  const read = await rootFixture.daemon.execute('getRoomMessage', { roomId: opened.cornerId, messageId: card.id }, reviewer);
+  expect(read.attachments).toEqual([expect.objectContaining(attachment)]);
+  const byObject = await rootFixture.daemon.execute('getRoomMessage', {
+    roomId: opened.cornerId, attachmentId: uploaded.url.split('/').at(-1)!,
+  }, reviewer);
+  expect(byObject.attachments).toEqual(read.attachments);
+  const privateReport = (await commands(DM, RUBY)).find(command => command.reason === 'report')!;
+  await expect(rootFixture.daemon.execute('getRoomMessage', {
+    roomId: opened.cornerId, messageId: privateReport.id,
+  }, reviewer)).rejects.toThrow('message access denied');
+});
+
+it('RUBY-19: a member reading a Room without a brief gets an empty revision list', async () => {
+  await expect(rootFixture.daemon.execute('listCornerBriefRevisions', { cornerId: ROOM }, RUBY))
+    .resolves.toEqual({ revisions: [] });
+  await rootFixture.db.query(`UPDATE memberships SET removed_at=now() WHERE room_id=$1 AND identity_id=$2`, [ROOM, RUBY]);
+  await expect(rootFixture.daemon.execute('listCornerBriefRevisions', { cornerId: ROOM }, RUBY))
+    .rejects.toThrow('daemon room access denied');
+});
+
 
 
 it.each(['report', 'postRoomMessage'] as const)('Reproduction FILE-HANDOFF: independent reports retain every file through %s', async (delivery) => {
@@ -236,7 +272,7 @@ it('opens a sibling when given a corner target', async () => {
 });
 
 
-it('delivers artifacts privately and forwards them in human reports', async () => {
+it('keeps artifacts on corner report cards and forwards them in human reports', async () => {
   const opened = await open(),
     turn = await worker(opened.cornerId),
     media = randomUUID();
@@ -271,15 +307,14 @@ it('delivers artifacts privately and forwards them in human reports', async () =
     ).rowCount,
   ).toBe(0);
   expect(
-    (await rootFixture.db.query(`SELECT 1 FROM messages WHERE attachments::text LIKE $1`, ['%' + media + '%']))
-      .rowCount,
-  ).toBe(0);
+    (await rootFixture.db.query(`SELECT room_id,card_type FROM messages WHERE attachments::text LIKE $1`, ['%' + media + '%'])).rows,
+  ).toEqual([{ room_id: opened.cornerId, card_type: 'agent-command' }]);
   const report = (await commands(DM, RUBY)).find((c) => c.reason === 'report')!;
   expect(report.source.attachments).toEqual([expect.objectContaining({ name: 'report.txt' })]);
   await claim(report);
   await rootFixture.daemon.execute('report', { status: 'done', ...authority(report), text: 'done: report is attached' }, RUBY);
   expect(
-    (await rootFixture.db.query(`SELECT 1 FROM messages WHERE attachments::text LIKE $1`, ['%' + media + '%']))
+    (await rootFixture.db.query(`SELECT 1 FROM messages WHERE room_id=$2 AND attachments::text LIKE $1`, ['%' + media + '%', DM]))
       .rowCount,
   ).toBe(1);
 });

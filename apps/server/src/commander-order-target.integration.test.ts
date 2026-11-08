@@ -126,6 +126,36 @@ async function cornerTurn() {
   return command;
 }
 
+it('RUBY-18: an explicit re-review reaches the configured reviewer at the chain depth bound', async () => {
+  const incoming = await cornerTurn();
+  await db.query(`UPDATE rooms SET reviewer_agent_id=$2 WHERE id=$1`, [ROOM, BABY]);
+  await db.query(`UPDATE agent_commands SET agent_depth=3 WHERE id=$1`, [incoming.id]);
+  await db.query(`UPDATE corner_github_cache SET lifecycle=$2::jsonb WHERE corner_id=$1`,
+    [incoming.roomId, JSON.stringify({ pr: { number: 42, headSha: 'a'.repeat(40) } })]);
+  // The commander may be handling the reviewer's earlier verdict report.
+  await db.query(`UPDATE agent_commands SET review_context=$2::jsonb WHERE id=$1`, [incoming.id,
+    JSON.stringify({ cornerId: incoming.roomId, headSha: 'a'.repeat(40), pullRequest: 42, briefRevision: 1, purpose: 'verdict' })]);
+  const result = await daemon.execute('order', { roomId: incoming.roomId, requestId: incoming.turnRequestId,
+    generationId: 'guard', address: incoming.roomId, agent: 'baby', text: 'Re-review the restored PR body on the same head' }, CANDY);
+  const review = (await daemon.execute('getAgentCommands', { roomId: incoming.roomId }, BABY)).commands.find(command => command.id === result.id)!;
+  expect(review.source.body).toContain('Re-review the restored PR body');
+  expect((await db.query<{ agent_depth: number }>(`SELECT agent_depth FROM agent_commands WHERE id=$1`, [review.id])).rows[0]!.agent_depth).toBe(3);
+  await db.query(`UPDATE agent_commands SET state='complete',completed_at=now() WHERE id=$1`, [review.id]);
+  const tagged = await daemon.execute('postCornerMessage', { roomId: incoming.roomId, requestId: incoming.turnRequestId,
+    generationId: 'guard', cornerId: incoming.roomId, text: '@baby Re-review the restored evidence' }, CANDY);
+  expect(tagged.woken).toContain('baby');
+  await db.query(`UPDATE agent_commands SET state='complete',completed_at=now() WHERE room_id=$1 AND agent_id=$2`, [incoming.roomId, BABY]);
+  await db.query(`UPDATE agent_commands SET review_context=jsonb_set(review_context,'{purpose}','"repair"') WHERE id=$1`, [incoming.id]);
+  const rereview = await daemon.execute('order', { roomId: incoming.roomId, requestId: incoming.turnRequestId,
+    generationId: 'guard', address: incoming.roomId, agent: 'baby', text: 'Re-review after the evidence-only repair' }, CANDY);
+  const delivered = (await daemon.execute('getAgentCommands', { roomId: incoming.roomId }, BABY)).commands.find(command => command.id === rereview.id)!;
+  expect(delivered).toBeDefined();
+  await daemon.execute('claimAgentCommand', { roomId: incoming.roomId, commandId: delivered.id, generationId: 're-review' }, BABY);
+  await expect(daemon.execute('order', { roomId: incoming.roomId, requestId: incoming.turnRequestId,
+    generationId: 'guard', address: incoming.roomId, agent: 'earth', text: 'Recruit a peer' }, CANDY))
+    .rejects.toThrow('agent order chain depth limit reached');
+});
+
 it.each(['done', 'blocked', 'failed', 'needs_decision'])('Reproduction report-commander-refused: repair %s reaches its opening commander after a new head', async status => {
   const incoming = await cornerTurn();
   const context = { cornerId: incoming.roomId, headSha: 'old-head', pullRequest: 42, briefRevision: 1 };

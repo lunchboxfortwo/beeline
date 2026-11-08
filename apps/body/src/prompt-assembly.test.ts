@@ -372,19 +372,20 @@ describe('prompt assembly guards', () => {
 
 
   it.each(['code-corner-reviewed', 'code-corner-rest'])(
-    '%s skips rebase only for a missing remote branch, rebases later pushes, and stops on lookup failure',
+    'RUBY-17: %s preserves the tested merge history when synchronizing a published branch',
     (name) => {
       const prompt = assembleSessionPrompt(SESSION_VARIANTS[name]!).systemPrompt;
       expect(prompt).toContain(
-        'Before pushing, run `git ls-remote --exit-code origin feature/corner-abc`. Exit code 0: rebase on origin/feature/corner-abc;',
+        'Before pushing, run `git ls-remote --exit-code origin feature/corner-abc`. Exit code 0: fetch origin feature/corner-abc;',
       );
-      expect(prompt).toContain('Exit code 2: absent branch; skip first rebase.');
+      expect(prompt).toContain('if origin/feature/corner-abc is an ancestor of HEAD, keep HEAD; else merge origin/feature/corner-abc;');
+      expect(prompt).toContain('Exit code 2: absent branch; push.');
       expect(prompt).toContain(
-        'Other exit: stop; retry lookup.',
+        'Other exit: stop.',
       );
-      expect(prompt).not.toContain('Before pushing, rebase on origin/feature/corner-abc;');
+      expect(prompt).not.toContain('rebase on origin/feature/corner-abc');
       expect(prompt).toContain(
-        'resolve conflicts against that branch; redo work and rerun affected tests.',
+        'resolve conflicts and rerun affected tests.',
       );
     },
   );

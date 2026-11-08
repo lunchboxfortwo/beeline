@@ -163,8 +163,6 @@ export async function sendOrder(
   // Peer recruitment consumes the existing depth budget; handoffs to another
   // implementer retain it.
   const peerOrder = Boolean(source?.parent_id && (!target.parent_id || worker !== target.worker));
-  if (peerOrder && nextAgentDepth(command.agent_depth) === undefined)
-    throw new CommandRefusalError('agent order chain depth limit reached', 400);
   const queued = await createAgentCommand(db, {
     id: createHash('sha256')
       .update(`order:${command.id}:${address}:${worker}:${text}`)
@@ -177,7 +175,11 @@ export async function sendOrder(
     parent: command,
     retainDepth: !peerOrder,
   });
-  if (!queued) throw new CommandRefusalError('order recipient is no longer a member', 403);
+  if (!queued) {
+    if (peerOrder && nextAgentDepth(command.agent_depth) === undefined)
+      throw new CommandRefusalError('agent order chain depth limit reached', 400);
+    throw new CommandRefusalError('order recipient is no longer a member', 403);
+  }
   if (target.parent_id)
     await recordAgentCommandCard(db, { id: queued.id, cornerId: address, kind: 'order', authorId: agentId, recipientId: worker, text });
   return { id: queued.id, createdAt: Math.floor(Date.now() / 1000),
@@ -268,11 +270,11 @@ export async function stopCommandedTurn(
  */
 async function recordAgentCommandCard(db: SqlDatabase, input: {
   id: string; cornerId: string; kind: 'order' | 'report'; authorId: string; recipientId: string;
-  text: string; status?: string;
+  text: string; status?: string; attachments?: PrivateCommandPayload['attachments'];
 }) {
   const recipient = (await db.query<{ name: string; handle: string | null }>(
     'SELECT name,handle FROM identities WHERE id=$1', [input.recipientId])).rows[0];
-  await systemLine(db, {
+  const card = await systemLine(db, {
     id: createHash('sha256').update(`agent-command-card:${input.id}`).digest('hex'),
     roomId: input.cornerId,
     authorId: input.authorId,
@@ -289,6 +291,8 @@ async function recordAgentCommandCard(db: SqlDatabase, input: {
       text: input.text,
     },
   });
+  if (input.attachments?.length) await db.query(
+    'UPDATE messages SET attachments=$2::jsonb WHERE id=$1', [card.id, JSON.stringify(input.attachments)]);
 }
 
 export const AGENT_COMMAND_CARD_TYPE = 'agent-command';
@@ -480,7 +484,7 @@ export async function reportToCommander(
   if (!options.automatic && (returnRoom !== roomId || member.kind === 'agent') &&
     (await db.query('SELECT 1 FROM rooms WHERE id=$1 AND parent_id IS NOT NULL', [roomId])).rowCount) {
     await recordAgentCommandCard(db, { id: reportId, cornerId: roomId, kind: 'report', authorId: agentId,
-      recipientId: recipient, text, status: /^(done|blocked|needs-decision|failed):/.exec(text)?.[1] });
+      recipientId: recipient, text, attachments, status: /^(done|blocked|needs-decision|failed):/.exec(text)?.[1] });
   }
   if (supersededHumanReports.length) await db.query(
     `UPDATE messages SET card=jsonb_set(card,'{waitingAnswered}','true')

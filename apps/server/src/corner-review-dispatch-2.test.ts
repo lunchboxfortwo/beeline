@@ -367,8 +367,7 @@ describe('corner message attribution', () => {
       });
       if (created && !verdicted.has(created.id)) delivered.push(`${reason}:${created.id}`);
     }
-    // A tag or order sent back from the worker's repair turn asks for another
-    // look at the same head. It is a review path too.
+    // Explicit re-review requests remain deliverable after an evidence-only repair.
     const repairTurn = await createAgentCommand(rootFixture.db, { roomId: C, agentId: A, sourceMessageId: null, reason: 'agent_tag', parent });
     expect(repairTurn?.review_context).toMatchObject({ purpose: 'repair', headSha: head });
     const repairRow = (await rootFixture.db.query(`SELECT * FROM agent_commands WHERE id=$1`, [repairTurn!.id])).rows[0];
@@ -379,9 +378,10 @@ describe('corner message attribution', () => {
           privatePayload: { kind: reason, authorId: A, fromRoomId: C, text: 'Please review the same head again' },
         } : {}),
       });
-      if (created && !verdicted.has(created.id)) delivered.push(`repair ${reason}:${created.id}`);
+      expect(created?.reason).toBe(reason);
+      verdicted.add(created!.id);
     }
-    expect(reviewerDispatchCarriesHead('agent_tag', undefined, { headSha: head }, 'repair')).toBe(true);
+    expect(reviewerDispatchCarriesHead('agent_tag', undefined, { headSha: head })).toBe(false);
     for (const reason of ['agent_tag', 'order'] as const) {
       const created = await createAgentCommand(rootFixture.db, {
         roomId: C, agentId: B, sourceMessageId: null, reason,

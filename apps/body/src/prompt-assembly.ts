@@ -486,7 +486,7 @@ export const SESSION_SECTIONS: readonly PromptSection<SessionPromptContext>[] = 
     why: {
       'corner.implementer': 'Any member agent may write and push code here; only the agent knows whether it wrote code, so the author rules apply when it does. The reviewer rules still keep a reviewer off the author branch (PR #2224).',
       'corner.prepare': 'Only a checkout that defines the command can run it; another repository fails on its first step.',
-      'corner.push': 'The author must push only its own branch and rebase before each push, or it overwrites or loses work.',
+      'corner.push': 'The author must push only its own branch and preserve tested merge history when incorporating remote work.',
       'corner.contract': 'The reviewer enforces this contract; an author that never saw it fails review.',
       'corner.checks': 'Server check notes were restated as replies, and agents scheduled polls of a gate that wakes them itself.',
       'corner.merge': 'Exactly one rule may say who merges and when; two rules here once said both "merge" and "never merge".',
@@ -497,7 +497,7 @@ export const SESSION_SECTIONS: readonly PromptSection<SessionPromptContext>[] = 
     surfaces: ['code-corner'],
     render: ({ brief, reviewer, reviewerHandle, worktree, githubCli, cornerPrepareScript }) => {
       const repositoryWork = cornerHasRepositoryWork(brief);
-      const push = `Only when the brief calls for repository changes: commit and push only ${worktree?.featureBranch}; never force-push or write to ${worktree?.targetBranch}. Before pushing, run \`git ls-remote --exit-code origin ${worktree?.featureBranch}\`. Exit code 0: rebase on origin/${worktree?.featureBranch}; resolve conflicts against that branch; redo work and rerun affected tests. Exit code 2: absent branch; skip first rebase. Other exit: stop; retry lookup.`;
+      const push = `Only when the brief calls for repository changes: commit and push only ${worktree?.featureBranch}; never force-push or write to ${worktree?.targetBranch}. Before pushing, run \`git ls-remote --exit-code origin ${worktree?.featureBranch}\`. Exit code 0: fetch origin ${worktree?.featureBranch}; if origin/${worktree?.featureBranch} is an ancestor of HEAD, keep HEAD; else merge origin/${worktree?.featureBranch}; resolve conflicts and rerun affected tests. Exit code 2: absent branch; push. Other exit: stop.`;
       return paragraphs(
         `Implementer rules: any agent in this corner may commit, push and open a pull request. The rules below${reviewer ? ', up to the reviewer rules,' : ''} apply whenever you write code in this corner.`,
         repositoryWork && cornerPrepareScript === true && 'Run npm run corner:prepare first.',

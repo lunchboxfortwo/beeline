@@ -351,24 +351,19 @@ export const REVIEWER_DISPATCH_REASONS = [
 
 
 /**
- * A repair handback (`purpose: repair`) and an ordinary tag or order are not
- * another review. They carry the current pull request only as a handoff note.
- * Two wakes are the repeat: a verdict walking back (`purpose: verdict`), and a
- * tag or order sent from a repair turn (`sourcePurpose: repair`), which asks
- * the reviewer to look again. The refusal still lets a new head through.
+ * Automatic dispatch and returning verdicts must not repeat a reviewed head.
+ * An explicit tag or order may request another review after a repair that
+ * changes evidence or the PR description without creating a new commit.
  */
 export function reviewerDispatchCarriesHead(
   reason: string,
   sourceKind: string | undefined,
   reviewContext: Record<string, unknown> | undefined,
-  sourcePurpose?: unknown,
 ): boolean {
   if (reason === 'corner_review_dispatch') return true;
   if (reason === 'subscribed_event' && sourceKind === 'check-passed') return true;
   if (!reviewContext) return false;
-  if ((reason === 'agent_tag' || reason === 'order') && sourcePurpose === 'repair') return true;
-  if (reviewContext.purpose !== 'verdict') return false;
-  return reason === 'agent_tag' || reason === 'order' || reason === 'report';
+  return reason === 'report' && reviewContext.purpose === 'verdict';
 }
 
 
@@ -665,8 +660,8 @@ export async function insertAgentCommand(db: SqlDatabase, input: AgentCommandInp
   }
   if (reviewContext && input.reason === 'corner_review_needed') reviewContext.purpose = 'repair';
   const sourceEvent = member.rows[0]!.source_event as { kind?: string; object?: { headSha?: string } } | null;
-  // Every review dispatch is inserted here. A verdicted or in-flight head is not delivered again.
-  if (reviewerDispatchCarriesHead(input.reason, sourceEvent?.kind, reviewContext, reviewSource?.review_context?.purpose)) {
+  // Automatic dispatch and returning verdicts do not repeat a verdicted or in-flight head.
+  if (reviewerDispatchCarriesHead(input.reason, sourceEvent?.kind, reviewContext)) {
     const recordedHead = typeof reviewContext?.headSha === 'string' ? reviewContext.headSha : undefined;
     const recordedPull = typeof reviewContext?.pullRequest === 'number' ? reviewContext.pullRequest
       : typeof reviewContext?.pullRequest === 'string' && /^\d+$/.test(reviewContext.pullRequest)
@@ -696,7 +691,11 @@ export async function insertAgentCommand(db: SqlDatabase, input: AgentCommandInp
     : input.wakeNote
       ? { text: `${sourceText ?? ''}${note}`.trim(), authorId: SYSTEM_IDENTITY_ID, fromRoomId: input.roomId, kind: 'lifecycle' as const }
       : undefined);
-  const depth = parent ? input.retainDepth || lifecycle || input.action === 'resume'
+  // A current reviewer handoff continues the corner assignment, including an
+  // explicit same-head re-review. Recruiting ordinary peers still adds a hop.
+  const reviewHandoff = reviewContext && (input.reason === 'order' || input.reason === 'agent_tag') &&
+    await isCornerReviewer(db, input.roomId, input.agentId);
+  const depth = parent ? input.retainDepth || lifecycle || input.action === 'resume' || reviewHandoff
     ? parent.agent_depth : nextAgentDepth(parent.agent_depth) : 0;
   if (depth === undefined) return undefined;
   const id = input.id ?? randomBytes(32).toString('hex');
