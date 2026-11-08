@@ -447,7 +447,7 @@ it('an old view release cannot hide the new identity’s view',async()=>{
   });
 it('subscribes open Rooms without resume cursors and asks the server again for a joining screen',async()=>{
     const {connection}=setup();const listener=vi.fn();const stop=await connection.register([{'#h':['a']}],listener);const socket=await open();
-    expect(socket.sent.map(value=>JSON.parse(value))[0]).toEqual({type:'subscribe',roomIds:['a'],sidebarPreviews:true,roomStateProjections:true});
+    expect(socket.sent.map(value=>JSON.parse(value))[0]).toEqual({type:'subscribe',roomIds:['a'],sidebarPreviews:false,roomStateProjections:true});
     const other=await connection.register([{'#h':['a']}],()=>{});expect(socket.sent.map(value=>JSON.parse(value)).filter(frame=>frame.type==='subscribe')).toHaveLength(2);
     stop();expect(socket.sent.some(value=>JSON.parse(value).type==='unsubscribe')).toBe(false);other();expect(socket.sent.some(value=>JSON.parse(value).type==='unsubscribe')).toBe(true);
   });

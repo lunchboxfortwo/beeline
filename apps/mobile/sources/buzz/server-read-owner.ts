@@ -7,7 +7,7 @@ import {
   type SurfaceCacheAddress,
 } from '@beeline/buzz-client';
 import { type MessageBookmarkListResult, type MessageBookmarkView, type NeedsYouItemView, type NeedsYouListResult } from '@beeline/api-contract/phone';
-import { getEffectiveRelayUrl, loadBuzzIdentity } from '@/auth/buzz-identity-storage';
+import { getEffectiveRelayUrl, loadBuzzIdentity, peekBuzzViewerContext } from '@/auth/buzz-identity-storage';
 import { clientResetGeneration, subscribeClientReset } from '@/sync/client-reset';
 import { monolithPhoneOperation } from '@/sync/transport/monolith-operation';
 import { sharedLiveConnection } from '@/sync/transport/live-connection';
@@ -24,9 +24,10 @@ import {
   keepUnavailableChatFacts,
 } from './chat-list-delta';
 import { applyChatListCorners, cornerStoreClock, getRoomCornerSummary } from './room-corner-store';
-import { cacheRoomMessageDelta } from './cache-room-message-delta';
 import { currentSurfaceStamp } from './surface-clock';
-import { markRoomOpen } from './room-open-trace';
+import { observeRoomLiveState } from './room-live-state';
+
+observeRoomLiveState(mobileSurfaceCache, () => peekBuzzViewerContext());
 
 export type ChatListKey = {
   readonly relayUrl: string;
@@ -232,25 +233,6 @@ namespace ChatReads {
       const live =
         'monolithLive' in event ? (event as MonolithSurfaceEvent).monolithLive : undefined;
       if (live?.type === 'room-commands') return;
-      if (live?.type === 'sidebar-preview') {
-        // A projection cannot establish a complete transcript, including edits
-        // and deletions whose missing body is not detectable from the newest id.
-        const address = surfaceAddress(
-          this.key.relayUrl,
-          this.key.viewerPubkey,
-          `/room/${live.roomId}`,
-        );
-        void mobileSurfaceCache.remove(address).catch(() => undefined);
-      }
-      if (live?.type === 'message-delta') {
-        markRoomOpen('list-message-delta', live.message.id);
-        const address = surfaceAddress(
-          this.key.relayUrl,
-          this.key.viewerPubkey,
-          `/room/${live.roomId}`,
-        );
-        cacheRoomMessageDelta(mobileSurfaceCache, address, live);
-      }
       if (
         live?.type === 'read-state' ||
         live?.type === 'sidebar-preview' ||

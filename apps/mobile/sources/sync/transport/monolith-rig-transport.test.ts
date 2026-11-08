@@ -216,7 +216,7 @@ describe('monolith Room send path', () => {
     expect(received).toHaveLength(1);
     expect(received[0]!.acknowledgePaint).toEqual(expect.any(Function));
     expect(sockets[0]!.sent.map(value => JSON.parse(value))).toEqual([
-      { type: 'subscribe', sidebarPreviews: true, roomStateProjections: true, roomIds: [ROOM] },
+      { type: 'subscribe', sidebarPreviews: false, roomStateProjections: true, roomIds: [ROOM] },
     ]);
     received[0]!.acknowledgePaint?.();
     expect(sockets[0]!.sent.at(-1)).toBe(JSON.stringify({ type: 'trace-paint', id: trace.id }));

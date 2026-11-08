@@ -2,6 +2,8 @@ import * as React from 'react';
 vi.mock('@/modal', () => ({ Modal: { alert: vi.fn() } }));
 
 import { SurfaceRegistry } from '@/buzz/surface-registry';
+import { observeRoomLiveState } from '@/buzz/room-live-state';
+import { publishPhoneLiveEvent } from '@/sync/transport/phone-live-events';
 
 import { roomTransitionWork } from '@/buzz/room-transition-work';
 
@@ -277,11 +279,15 @@ vi.mock('@/buzz/community-storage', () => ({
 vi.mock('@/buzz/surface-storage', () => ({
   restoreStoredSurface: (path: string) => path.startsWith('/room/') ? controls.cached : null,
   mobileSurfaceCache: {
-    peek: vi.fn((path: string) => (path.startsWith('/room/') ? controls.cached : null)),
+    peek: vi.fn((path: string | { endpoint: string }) => ((typeof path === 'string' ? path : path.endpoint).startsWith('/room/') ? controls.cached : null)),
     read: vi.fn(async () => controls.cached),
-    write: vi.fn(async () => undefined),
+    write: vi.fn(async (_address: unknown, view: RoomView) => {
+      controls.cached = view;
+      controls.cacheListeners.forEach(listener => listener());
+    }),
     publish: vi.fn((_address: unknown, view: RoomView) => {
       controls.cached = view;
+      controls.cacheListeners.forEach(listener => listener());
       return view;
     }),
     subscribe: vi.fn((_address: unknown, listener: () => void) => {
@@ -332,7 +338,11 @@ vi.mock('@/sync/transport', () => ({
       return {
         surfaceSubscribe: async (filters: unknown, emit: (event: TestSurfaceEvent) => void) => {
           const stop = vi.fn();
-          controls.subscriptions.push({ filters, stop, emit });
+          const deliver = (event: TestSurfaceEvent) => {
+            if ('monolithLive' in event) publishPhoneLiveEvent(event.monolithLive);
+            emit(event);
+          };
+          controls.subscriptions.push({ filters, stop, emit: deliver });
           for (const event of controls.replayEvents) emit(event);
           return stop;
         },
@@ -523,7 +533,9 @@ beforeAll(() => {
 });
 
 
-afterAll(() => vi.restoreAllMocks());
+const stopRoomLiveState = observeRoomLiveState(mobileSurfaceCache, () =>
+  ({ relayUrl: 'https://relay.test', viewerPubkey: controls.viewerPubkey ?? 'viewer' }));
+afterAll(() => { stopRoomLiveState(); vi.restoreAllMocks(); });
 
 
 beforeEach(() => {

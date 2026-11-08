@@ -505,7 +505,7 @@ export class LiveConnection {
         JSON.stringify({
           type: 'subscribe',
           roomIds,
-          sidebarPreviews: true,
+          sidebarPreviews: false,
           roomStateProjections: true,
         }),
       );

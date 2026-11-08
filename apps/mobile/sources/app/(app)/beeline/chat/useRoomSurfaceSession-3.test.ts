@@ -736,7 +736,7 @@ const scope3 = fixtureScope3();
     await act(async () => {
       await vi.advanceTimersByTimeAsync(1_000);
     });
-    const written = vi.mocked(mobileSurfaceCache.write).mock.calls.at(-1)?.[1] as RoomView;
+    const written = vi.mocked(mobileSurfaceCache.persist).mock.calls.at(-1)?.[1] as RoomView;
     expect(written.messages.at(-1)?.id).toBe('fresh-row');
     await act(async () => renderer.unmount());
   });
@@ -753,7 +753,7 @@ const scope3 = fixtureScope3();
     await act(async () => {
       await vi.advanceTimersByTimeAsync(1_000);
     });
-    const written = vi.mocked(mobileSurfaceCache.write).mock.calls.at(-1)?.[1] as RoomView;
+    const written = vi.mocked(mobileSurfaceCache.persist).mock.calls.at(-1)?.[1] as RoomView;
     expect(written.messages.at(-1)?.text).toBe('edited');
     await act(async () => renderer.unmount());
   });

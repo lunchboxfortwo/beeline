@@ -7,8 +7,8 @@ import { KIND_AGENT_DRAFT, LiveOverlayDecoder, isRoomView, type LiveOverlay, typ
 import { RoomViewClient, RoomViewHttpError } from '@/sync/transport/room-view-client';
 import { loadBuzzIdentity, loadBuzzViewerPubkey, peekBuzzViewerContext, getEffectiveRelayUrl } from '@/auth/buzz-identity-storage';
 import { markRoomOpen, markRoomOpenWeight } from '@/buzz/room-open-trace';
-import { displayRoomMessages, reconcileRoomView, reconcileRoomMessageDelta, reconcileRoomTurnDelta } from '@/buzz/room-view-presentation';
-import { offerRoomTurns, roomTurns, writeRoomMessage, writeRoomTurn } from '@/buzz/room-message-records';
+import { displayRoomMessages, reconcileRoomView, reconcileRoomMessageDelta } from '@/buzz/room-view-presentation';
+import { offerRoomTurns, roomTurns } from '@/buzz/room-message-records';
 import { saveActiveCommunityId, saveLastViewedChannel } from '@/buzz/community-storage';
 import { ReadCursorAdvancer } from '@/buzz/read-cursor-advance';
 import { liveDraftRowId } from '@/buzz/draft-settle';
@@ -185,6 +185,12 @@ export function useRoomSurfaceSubscription([
           liveDraftDrainStore.finalize(liveDraftDrainKey(turn.agentPubkey, turn.requestId));
         }
       }
+      const authoritativeIds = new Set(stableView.messages.map(message => message.id));
+      void outboxRef.current?.reconcile(authoritativeIds);
+      setFailedIds(current => {
+        const next = new Set([...current].filter(id => !authoritativeIds.has(id)));
+        return next.size === current.size ? current : next;
+      });
       reconciledViewRef.current = stableView;
       hasPainted = true;
       bindingsRef.current.observeRoomSurface();
@@ -268,15 +274,9 @@ export function useRoomSurfaceSubscription([
         const overlay = decoder.decode(event);
         if (overlay) applyDecodedOverlay(overlay);
       }
-      const authoritativeIds = new Set(stableView.messages.map((message) => message.id));
-      void outboxRef.current?.reconcile(authoritativeIds);
-      setFailedIds((current) => {
-        const next = new Set([...current].filter((id) => !authoritativeIds.has(id)));
-        return next.size === current.size ? current : next;
-      });
       cacheAddress = surfaceAddress(relayUrl, identityPubkey, `/room/${channelId}`);
       if ((fresh)) {
-        void mobileSurfaceCache.write(cacheAddress, stableView, isRoomView);
+        void mobileSurfaceCache.write(cacheAddress, stableView, isRoomView, readStamp);
       }
     };
 
@@ -288,10 +288,13 @@ export function useRoomSurfaceSubscription([
       cacheWriteTimer = undefined;
       const view = reconciledViewRef.current;
       if (cancelled || !view || !cacheAddress) return;
-      void mobileSurfaceCache.write(cacheAddress, view, isRoomView);
+      void mobileSurfaceCache.persist(cacheAddress, view, isRoomView);
     };
     const scheduleCacheWrite = () => {
-      if (cacheWriteTimer || !cacheAddress) return;
+      if (!cacheAddress) return;
+      const view = reconciledViewRef.current;
+      if (view) mobileSurfaceCache.publish(cacheAddress, view, isRoomView);
+      if (cacheWriteTimer) return;
       cacheWriteTimer = setTimeout(flushCacheWrite, LIVE_CACHE_WRITE_DELAY_MS);
     };
     // A retained Room can still have a debounce pending while a corner opens.
@@ -354,87 +357,29 @@ export function useRoomSurfaceSubscription([
                 if (live.type === 'read-state') cursorDuringRead = live.readCursor;
                 else commandsDuringRead = live.commands;
               }
-              const current = reconciledViewRef.current;
               if (live.type === 'read-state' && live.readCursor.messageId)
                 readCursorRef.current?.acknowledge(live.readCursor.messageId);
-              if (!current) return;
-              const next = live.type === 'read-state'
-                ? { ...current, viewer: { ...current.viewer, readCursor: live.readCursor } }
-                : { ...current, pendingAgentCommands: live.commands };
-              reconciledViewRef.current = next;
-              setRoomSurface(next);
-              scheduleCacheWrite();
               return;
             }
             if (live.type === 'message-delta' || live.type === 'turn-delta') {
               if (live.roomId !== channelId) return;
-              const deltaMessage = live.type === 'message-delta'
-                ? live.version === undefined ? live.message : { ...live.message, version: live.version }
-                : null;
-              if (live.type === 'message-delta' && live.message.requestId) {
-                liveDraftDrainStore.finalize(
-                  liveDraftDrainKey(live.message.author.pubkey, live.message.requestId),
-                );
-              } else if (live.type === 'turn-delta' && live.turn.status === 'complete') {
-                liveDraftDrainStore.finalize(
-                  liveDraftDrainKey(live.turn.agentPubkey, live.turn.requestId),
-                );
-              }
-              const received = live.trace
-                ? {
-                    ...live.trace,
-                    reason: live.type,
-                    receivedAt: Date.now(),
-                    ...(surfaceEvent.acknowledgePaint
-                      ? { acknowledgePaint: surfaceEvent.acknowledgePaint }
-                      : {}),
-                  }
-                : undefined;
-              if (received) logLiveTrace('socket-receipt', [received], received.receivedAt);
-              if (live.type === 'turn-delta')
-                writeRoomTurn(messageRecordScopeRef.current, channelId, live.turn);
-              else {
-                messageDeltasDuringRead?.push(deltaMessage!);
-                // A row older than the tail lives only in loaded history.
-                writeRoomMessage(messageRecordScopeRef.current, channelId, deltaMessage!);
-              }
-              const current = reconciledViewRef.current;
-              if (!current) {
-                // The opening read is already in flight. Its snapshot will be
-                // replayed with this row, so a second GET adds no information.
-                return;
-              }
-              if (live.type === 'message-delta' && live.message.author.pubkey === readCursorViewerRef.current)
-                readCursorRef.current?.acknowledge(live.message.id);
-              const next =
-                live.type === 'message-delta'
-                  ? reconcileRoomMessageDelta(current, deltaMessage!)
-                  : reconcileRoomTurnDelta(current, live.turn, roomTurns(messageRecordScopeRef.current, channelId));
-              if (next === current) {
-                received?.acknowledgePaint?.();
-                return;
-              }
-              reconciledViewRef.current = next;
-              hasPainted = true;
-              bindingsRef.current.observeRoomSurface();
-              if (received)
-                pendingPaintTracesRef.current = [
-                  ...pendingPaintTracesRef.current.slice(-15),
-                  received,
-                ];
-              setRoomSurface(next);
-              scheduleCacheWrite();
+              // The shared committed-frame owner has already published this
+              // response. This listener owns only visit effects and read replay.
               if (live.type === 'message-delta') {
-                void outboxRef.current?.reconcile(
-                  new Set(next.messages.map((message) => message.id)),
-                );
-                setFailedIds((failed) => {
-                  if (!failed.has(live.message.id)) return failed;
-                  const reconciled = new Set(failed);
-                  reconciled.delete(live.message.id);
-                  return reconciled;
-                });
+                messageDeltasDuringRead?.push(live.version === undefined
+                  ? live.message : { ...live.message, version: live.version });
+                if (live.message.author.pubkey === readCursorViewerRef.current)
+                  readCursorRef.current?.acknowledge(live.message.id);
               }
+              if (live.trace) {
+                const received = { ...live.trace, reason: live.type, receivedAt: Date.now(),
+                  ...(surfaceEvent.acknowledgePaint ? { acknowledgePaint: surfaceEvent.acknowledgePaint } : {}) };
+                logLiveTrace('socket-receipt', [received], received.receivedAt);
+                if (responseChanged)
+                  pendingPaintTracesRef.current = [...pendingPaintTracesRef.current, received];
+                else received.acknowledgePaint?.();
+              }
+              responseChanged = false;
               return;
             }
             if (live.type === 'invalidate') {
@@ -586,24 +531,27 @@ export function useRoomSurfaceSubscription([
       unsubscribe = stop;
     };
 
-    let stopOpeningResponse = () => {};
-    if (openingFrame && openingViewer) {
-      const address = surfaceAddress(openingViewer.relayUrl, openingViewer.viewerPubkey, `/room/${channelId}`);
-      const paintOpeningResponse = () => {
+    let stopResponse = () => {};
+    let responseChanged = false;
+    const observeResponse = (relayUrl: string, viewerPubkey: string) => {
+      stopResponse();
+      const address = surfaceAddress(relayUrl, viewerPubkey, `/room/${channelId}`);
+      const paintResponse = () => {
         const viewer = peekBuzzViewerContext();
-        if (cancelled || viewer?.viewerPubkey !== openingViewer.viewerPubkey ||
-            viewer.relayUrl !== openingViewer.relayUrl) return;
+        if (cancelled || (viewer && (viewer.viewerPubkey !== viewerPubkey || viewer.relayUrl !== relayUrl))) return;
         const view = mobileSurfaceCache.peek(address, isRoomView);
         if (view && view !== reconciledViewRef.current) {
+          const previous = reconciledViewRef.current;
           paintView(view, false);
+          responseChanged = reconciledViewRef.current !== previous;
           queueNewestFrameMark(view.messages.at(-1)?.id, channelId);
         }
       };
-      // A missing-row reply may arrive while the cached frame is committing.
-      // Observe the authorized response now instead of holding it behind setup.
-      stopOpeningResponse = mobileSurfaceCache.subscribe(address, paintOpeningResponse);
-      paintOpeningResponse();
-    }
+      stopResponse = mobileSurfaceCache.subscribe(address, paintResponse);
+      paintResponse();
+      responseChanged = false;
+    };
+    if (openingViewer) observeResponse(openingViewer.relayUrl, openingViewer.viewerPubkey);
 
     let transportForEffect: BuzzRigTransport | undefined;
     void (async () => {
@@ -627,6 +575,7 @@ export function useRoomSurfaceSubscription([
         const relayUrl = await getEffectiveRelayUrl();
         markRoomOpen('relay-ready');
         if (cancelled) return;
+        observeResponse(relayUrl, viewerPubkey);
         const scope = identityScope(relayUrl, viewerPubkey);
         messageRecordScopeRef.current = scope;
         setIdentityRecordScope(scope);
@@ -740,10 +689,6 @@ export function useRoomSurfaceSubscription([
               relayUrl,
               true,
             );
-            // Disk completion does not mean the tap-time response has arrived.
-            // Keep painting cache publishes through identity/outbox setup until
-            // the opening read is actually applied (cleanup also unsubscribes).
-            stopOpeningResponse();
             if (!view.parent && !reopenedChat) {
               reopenedChat = true;
               // Only a Room the reader dismissed from the list needs reopening;
@@ -801,7 +746,7 @@ export function useRoomSurfaceSubscription([
     })();
 
     return () => {
-      stopOpeningResponse();
+      stopResponse();
       cacheAppStateSubscription.remove();
       flushCacheWrite();
       cancelled = true;

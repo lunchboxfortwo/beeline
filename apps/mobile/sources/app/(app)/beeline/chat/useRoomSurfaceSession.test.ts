@@ -60,7 +60,7 @@ describe('useRoomSurfaceSession', () => {
     await act(async () => renderer.unmount());
   });
 
-  it('releases Room conversion and saves only after the actual route transition ends', async () => {
+  it('publishes the Room immediately and saves after the actual route transition ends', async () => {
     controls.cached = roomView('room-a');
     let renderer!: ReactTestRenderer;
     await act(async () => {
@@ -92,8 +92,8 @@ describe('useRoomSurfaceSession', () => {
       guard,
     );
     controls.interactionTasks.forEach((work) => work());
-    expect(normalize).not.toHaveBeenCalled();
-    expect(guard).not.toHaveBeenCalled();
+    expect(normalize).toHaveBeenCalledOnce();
+    expect(guard).toHaveBeenCalledOnce();
     expect(set).not.toHaveBeenCalled();
     emit('transitionEnd');
     expect(set).not.toHaveBeenCalled();
@@ -161,56 +161,27 @@ describe('useRoomSurfaceSession', () => {
 
 
   it.each(['background', 'inactive'])(
-    'flushes a pending delta save on %s during a corner transition without advancing timers',
-    async (state) => {
-      vi.useFakeTimers();
+    'persists committed deltas independently of the Room visit on %s',
+    async state => {
       controls.cached = roomView('room-a');
       let renderer!: ReactTestRenderer;
-      await act(async () => {
-        renderer = create(React.createElement(BuzzChat));
-      });
+      await act(async () => { renderer = create(React.createElement(BuzzChat)); });
       await flushEffects();
-      vi.mocked(mobileSurfaceCache.write).mockClear();
-      await act(async () =>
-        controls.subscriptions.at(-1)!.emit({
-          monolithLive: {
-            type: 'message-delta',
-            roomId: 'room-a',
-            message: {
-              id: 'before-background',
-              roomId: 'room-a',
-              text: 'latest committed arrival',
-              createdAt: 100,
-              author: { pubkey: 'viewer', kind: 'human', name: 'Captain' },
-              tags: [],
-              attachments: [],
-              reactions: [],
-            },
-          },
-        } as MonolithSurfaceEvent),
-      );
-      await act(async () => {
-        controls.navigationListeners.get('transitionStart')?.forEach((listener) => listener());
-        controls.focused = false;
-        controls.focusListeners.forEach((listener) => listener());
-      });
-      expect(mobileSurfaceCache.write).not.toHaveBeenCalled();
+      vi.mocked(mobileSurfaceCache.persist).mockClear();
       await act(async () => {
         controls.appState = state;
-        controls.appStateListeners.forEach((listener) => listener(state));
+        controls.subscriptions.at(-1)!.emit({ monolithLive: {
+          type: 'message-delta', roomId: 'room-a', message: { id: 'before-background',
+            text: 'latest committed arrival', createdAt: 100, presentation: 'message',
+            author: { pubkey: 'viewer', kind: 'human', name: 'Captain' } },
+        } });
       });
-      expect(mobileSurfaceCache.write).toHaveBeenCalledTimes(1);
-      const saved = vi.mocked(mobileSurfaceCache.write).mock.calls[0]![1] as RoomView;
+      expect(mobileSurfaceCache.persist).toHaveBeenCalledOnce();
+      const saved = vi.mocked(mobileSurfaceCache.persist).mock.calls[0]![1] as RoomView;
       expect(saved.messages.at(-1)?.id).toBe('before-background');
-      await act(async () => {
-        await vi.advanceTimersByTimeAsync(1_000);
-      });
-      expect(mobileSurfaceCache.write).toHaveBeenCalledTimes(1);
       await act(async () => renderer.unmount());
-      expect(controls.appStateListeners.size).toBe(0);
     },
   );
-
 
   it('does not save the Room during a corner push or pop', async () => {
     controls.cached = roomView('room-a');
