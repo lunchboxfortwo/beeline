@@ -1,7 +1,8 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { FlyMachines } from './fly-machines.js';
 import { FreeAgentService, freeAgentConfigFromEnv } from './free-agents.js';
-import { LiveHub, type LiveEvent } from './live.js';
+import { LiveHub } from './live.js';
+import { claimAgentConnection } from './connection-presence.js';
 import { migratedDatabase, type PgliteDatabase } from './test-support.js';
 
 const OWNER = 'a'.repeat(64);
@@ -15,7 +16,7 @@ describe('release refresh and committed free-agent sleep events', () => {
   let service: FreeAgentService;
   let off: () => void;
   let failStart: string | undefined;
-  let beforeSuspend: (() => Promise<void>) | undefined;
+  let beforeUpdate: (() => Promise<void>) | undefined;
   const fleet = new Map<string, { state: string; instance_id: string; config: {
     image: string; env: { keep: string }; rootfs: { persist: string };
   } }>();
@@ -26,7 +27,7 @@ describe('release refresh and committed free-agent sleep events', () => {
   beforeEach(async () => {
     db = await migratedDatabase();
     live = new LiveHub();
-    fleet.clear(); calls.length = 0; logs.length = 0; failStart = undefined; beforeSuspend = undefined;
+    fleet.clear(); calls.length = 0; logs.length = 0; failStart = undefined; beforeUpdate = undefined;
     const request = vi.fn<typeof fetch>(async (url, init) => {
       if (new URL(String(url)).pathname.endsWith('/machines')) return Response.json([...fleet].map(([id,machine])=>({id,...machine})));
       const match = new URL(String(url)).pathname.match(/\/machines\/(m\d+)(.*)/)!;
@@ -35,6 +36,7 @@ describe('release refresh and committed free-agent sleep events', () => {
       calls.push(`${init?.method} ${id}${path}`);
       if (!path && init?.method === 'GET') return Response.json({id,...machine});
       if (!path && init?.method === 'POST') {
+        await beforeUpdate?.();
         const update = JSON.parse(String(init.body));
         expect(update.current_version).toBe(machine.instance_id);
         expect(update.skip_launch).toBe(false);
@@ -45,7 +47,7 @@ describe('release refresh and committed free-agent sleep events', () => {
       }
       if (path === '/stop') machine.state = 'stopped';
       else if (path === '/wait') machine.state = new URL(String(url)).searchParams.get('state')!;
-      else if (path === '/suspend') { await beforeSuspend?.(); machine.state = 'suspended'; }
+      else if (path === '/suspend') machine.state = 'suspended';
       else if (path === '/start') {
         if (id === failStart) return new Response('start refused', { status: 500 });
         machine.state = 'started';
@@ -57,7 +59,7 @@ describe('release refresh and committed free-agent sleep events', () => {
     }, 'https://server.test')!, new FlyMachines('test', 'proof', request), async () => {
       throw new Error('refresh must not provision or bootstrap');
     }, line => logs.push(line));
-    off = service.subscribeToWakes(live);
+    off = () => {};
     await db.query(`INSERT INTO identities(id,kind,name) VALUES($1,'human','Owner')`, [OWNER]);
     await db.query(`INSERT INTO workspaces(id,name) VALUES($1,'Refresh')`, [WORKSPACE]);
     await db.query(`INSERT INTO rooms(id,workspace_id,created_by,name,visibility)
@@ -85,8 +87,66 @@ describe('release refresh and committed free-agent sleep events', () => {
       VALUES($1,$2,$3,$1,'input','human_tag',$1,$1,0,$4)`, [`command-${n}`, ROOM, agentId(n), state]);
   }
 
-  const commandEvent = (n: number): LiveEvent => ({ type: 'invalidate', roomId: ROOM,
-    reason: 'postgres:agent_commands', targetAgentId: agentId(n), operation: 'UPDATE' });
+  async function connector(n: number) {
+    await db.query(`INSERT INTO squire_machines(owner_id,machine_id,helper_agent_id,squire_work)
+      VALUES($1,$2,$3,'{"install":true}')`, [OWNER, `helper-${n}`, agentId(n)]);
+  }
+
+  async function connect(n: number) {
+    await db.query(`INSERT INTO live_server_instances(instance_id,renewed_at)
+      VALUES('legacy-helper-server',clock_timestamp()) ON CONFLICT(instance_id)
+      DO UPDATE SET renewed_at=EXCLUDED.renewed_at`);
+    // A pre-rebuild helper has no new lifecycle/sleep protocol to report.
+    await claimAgentConnection(db, live, agentId(n), { releaseVersion: '0.1.186-rc.4' }, {
+      connectionId: `legacy-helper-${n}`, instanceId: 'legacy-helper-server',
+    });
+  }
+
+  it.each(['current', 'old'])('suspends an idle %s-image helper from its authenticated connection alone', async release => {
+    const startup = vi.spyOn(service, 'reconcileAll');
+    const signals = vi.spyOn(service, 'reconcile');
+    off = service.subscribeToWakes(live);
+    await startup.mock.results[0]!.value;
+    await seed(1, 'running', 'started');
+    if (release === 'current') fleet.get('m1')!.config.image = IMAGE;
+
+    await connect(1);
+    expect(signals).toHaveBeenCalledWith(agentId(1));
+    await Promise.all(signals.mock.results.map(result => result.value));
+
+    expect((await db.query('SELECT 1 FROM agent_commands')).rowCount).toBe(0);
+    expect(fleet.get('m1')).toMatchObject({ state: 'suspended', config: { image: IMAGE } });
+    expect(calls.filter(call => call.startsWith('POST'))).toEqual([
+      ...(release === 'old' ? ['POST m1'] : []), 'POST m1/suspend',
+    ]);
+  });
+
+  it.each(['claimed', 'connector'] as const)('release visits replace and suspend a connected idle helper while %s work retains its image', async work => {
+    await seed(1, 'running', 'started');
+    await seed(2, 'running', 'started');
+    await connect(1);
+    await connect(2);
+    if (work === 'claimed') await command(2, work);
+    else await connector(2);
+
+    await service.reconcileAll();
+
+    expect(fleet.get('m1')).toMatchObject({ state: 'suspended', config: { image: IMAGE } });
+    expect(fleet.get('m2')).toMatchObject({ state: 'started', instance_id: 'v2' });
+    expect(fleet.get('m2')!.config.image).not.toBe(IMAGE);
+    expect(calls.filter(call => call.startsWith('POST'))).toEqual(['POST m1', 'POST m1/suspend']);
+  });
+
+  it.each(['pending', 'claimed', 'connector'] as const)('keeps %s work committed during image replacement running', async work => {
+    await seed(1, 'running', 'started');
+    await connect(1);
+    beforeUpdate = () => work === 'connector' ? connector(1) : command(1, work);
+
+    await service.reconcileAll();
+
+    expect(fleet.get('m1')).toMatchObject({ state: 'started', config: { image: IMAGE } });
+    expect(calls.filter(call => call.startsWith('POST'))).toEqual(['POST m1']);
+  });
 
   it('visits all stored lifecycle values, preserves idle identities and defers image replacement for claimed work',async()=>{
     const states=['sleeping','waking','stopped','running','failed','destroyed','provisioning'];

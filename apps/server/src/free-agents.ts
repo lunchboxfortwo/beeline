@@ -626,12 +626,17 @@ export class FreeAgentService {
           completedEffect = true;
           await recordFreeAgentEvent(this.database,agentId,'start_requested',{machineId:machine.id,operationId,machineVersion:machine.instance_id});
         }
-      } else if (!completedEffect && machine.state === 'started' && initial.connection_id && !work && await owns()) {
-        // Work committed while the snapshot is being taken is read at handoff.
-        await this.machines.suspend(machine.id);
-        await this.machines.waitFor(machine.id,'suspended',60,machine.instance_id);
-        completedEffect = true;
-        await recordFreeAgentEvent(this.database,agentId,'slept',{machineId:machine.id,operationId});
+      } else if (machine.state === 'started') {
+        // Image replacement does not make an idle connection busy. Re-read work
+        // committed during provider observation/replacement before taking its snapshot.
+        const current = (await this.database.query<RuntimeFacts>(runtimeFactsSql,[agentId])).rows[0];
+        if (current?.connection_id && !current.pending && !current.claimed && !current.connector && await owns()) {
+          // Work committed while the snapshot is being taken is read at handoff.
+          await this.machines.suspend(machine.id);
+          await this.machines.waitFor(machine.id,'suspended',60,machine.instance_id);
+          completedEffect = true;
+          await recordFreeAgentEvent(this.database,agentId,'slept',{machineId:machine.id,operationId});
+        }
       }
     } catch (error) {
       completedEffect = false;
