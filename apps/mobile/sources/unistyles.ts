@@ -9,6 +9,8 @@ import {
     obsidianTheme,
 } from './theme';
 import * as SystemUI from 'expo-system-ui';
+import { applySystemBackground } from './buzz/system-background';
+import { captureMobileError } from './buzz/sentry';
 import { setAndroidNavigationBarStyle } from './buzz/android-navigation-bar';
 import { LAYOUT_BREAKPOINTS } from './utils/layoutClass';
 import type { LocalSettings } from './sync/localSettings';
@@ -77,7 +79,8 @@ export function navigationBarStyleForTheme(themeName: AppThemeName): 'light' | '
 function applyRootBackground(themeName: AppThemeName): void {
     const rootColor = appThemes[themeName].colors.groupped.background;
     UnistylesRuntime.setRootViewBackgroundColor(rootColor);
-    void SystemUI.setBackgroundColorAsync(rootColor);
+    void applySystemBackground(() => SystemUI.setBackgroundColorAsync(rootColor),
+        error => captureMobileError('system-background', error));
     if (Platform.OS === 'android') {
         void setAndroidNavigationBarStyle(navigationBarStyleForTheme(themeName));
     }

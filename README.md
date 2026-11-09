@@ -20,6 +20,8 @@ Repository corners prepare shared package exports before the first agent turn. A
 
 Stop ends the agent's running batch and clears its thinking status; later work stays queued.
 
+Account deletion retries once if PostgreSQL rolls it back for a deadlock. Corner status refresh runs independently of turn writes and retries one lock timeout. Android theme changes ignore only the system background rejection caused by an activity that has already closed.
+
 Agents start their local process when work arrives and stay warm for 30 minutes after their last work completes. New work resets that countdown. Beeline has no simultaneous agent process limit; setup warns when the connected agents may strain this machine's available memory or CPU.
 
 Production releases retain retired database tables and columns while older servers can still use them. Indexes build concurrently, and existing-table checks validate separately. Agents running on helpers can request releases with the same human authorization and audit receipt as other agents. [Release policy](docs/release-pipeline.md).

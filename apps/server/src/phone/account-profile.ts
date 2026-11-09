@@ -86,7 +86,7 @@ import { phoneManagedIdentity } from './repositories.js';
       [freeAgentIds, Boolean(ctx.freeAgents)],
     );
     if (machinesLeft.rowCount) throw new Error('Agent machines are still stopping; try again shortly');
-    await ctx.database.transaction(async (database) => {
+    const erase = () => ctx.database.transaction(async (database) => {
       const owned = await database.query<{ agent_id: string }>(
         `SELECT agent_id FROM agents WHERE owner_id=$1
          UNION SELECT agent_id FROM free_agents WHERE owner_id=$1`,
@@ -114,7 +114,15 @@ import { phoneManagedIdentity } from './repositories.js';
       const plannedIds = new Set(plannedCorners.rows.map(row => row.id));
       if (closingCorners.rows.some(row => !plannedIds.has(row.id)))
         throw new Error('Account changed while deletion was being prepared; try again');
-      await database.query(`SELECT 1 FROM identities WHERE id=$1 FOR UPDATE`, [viewerId]);
+      // Lock shared Room and identity rows in key order before erasure. In
+      // particular, do not update every DM in the database for one deletion.
+      await database.query(`SELECT id FROM rooms
+        WHERE created_by=ANY($1) OR direct_participants ?| $1::text[]
+        ORDER BY id FOR UPDATE`, [gone]);
+      const directRooms = (await database.query<{ id: string }>(
+        `SELECT id FROM rooms WHERE direct_participants ?| $1::text[]`, [gone],
+      )).rows.map(row => row.id);
+      await database.query(`SELECT id FROM identities WHERE id=ANY($1) ORDER BY id FOR UPDATE`, [gone]);
       if (!(await database.query(`SELECT 1 FROM identities WHERE id=$1`, [viewerId])).rowCount) return;
 
       // The agents are removed, not re-owned: tokens, schedules and grants die
@@ -208,15 +216,15 @@ import { phoneManagedIdentity } from './repositories.js';
            SELECT coalesce(jsonb_agg(p),'[]'::jsonb)
            FROM jsonb_array_elements(direct_participants) p
            WHERE p#>>'{}' <> ALL($1))
-         WHERE direct_participants IS NOT NULL`,
-        [gone],
+         WHERE id=ANY($2::uuid[])`,
+        [gone, directRooms],
       );
       await database.query(
-        `DELETE FROM rooms WHERE direct_participants IS NOT NULL AND NOT EXISTS (
+        `DELETE FROM rooms WHERE id=ANY($2::uuid[]) AND NOT EXISTS (
            SELECT 1 FROM memberships m JOIN identities i ON i.id=m.identity_id
            WHERE m.room_id=rooms.id AND m.removed_at IS NULL
              AND i.kind='human' AND i.id <> ALL($1))`,
-        [gone],
+        [gone, directRooms],
       );
 
       // Receipts, output streams and authority rows that point at the gone ids.
@@ -304,6 +312,14 @@ import { phoneManagedIdentity } from './repositories.js';
       await database.query(`DELETE FROM identities WHERE id=ANY($1) AND kind='agent'`, [gone]);
       await database.query(`DELETE FROM identities WHERE id=$1`, [viewerId]);
     });
+    try {
+      await erase();
+    } catch (error) {
+      // PostgreSQL aborts the complete transaction on deadlock. Only that
+      // known rollback is safe to retry; provider cleanup stays outside it.
+      if (!error || typeof error !== 'object' || !('code' in error) || error.code !== '40P01') throw error;
+      await erase();
+    }
   }
 
   export async function phoneUpdateProfile(ctx: PhoneContext, input: Input<'updatePersonProfile'>, viewerId: string) {

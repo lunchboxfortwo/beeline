@@ -118,7 +118,14 @@ CREATE TRIGGER corner_configuration_membership AFTER INSERT OR UPDATE OF removed
 
 /** A committed fact enters the one corner runtime. */
 export async function refreshCornerAttention(db: SqlDatabase, cornerId: string): Promise<{ parentId: string } | undefined> {
-  await advanceCorner(db, cornerId, { kind: 'reconcile' });
+  // Source events enter here after commit, independently of the turn writer.
+  // Retry only a rolled-back lock timeout; never replay uncertain outcomes.
+  try {
+    await advanceCorner(db, cornerId, { kind: 'reconcile' });
+  } catch (error) {
+    if (!error || typeof error !== 'object' || !('code' in error) || error.code !== '55P03') throw error;
+    await advanceCorner(db, cornerId, { kind: 'reconcile' });
+  }
   const row = (await db.query<{ parent_id: string }>('SELECT parent_id FROM rooms WHERE id=$1 AND parent_id IS NOT NULL', [cornerId])).rows[0];
   return row ? { parentId: row.parent_id } : undefined;
 }

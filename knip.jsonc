@@ -92,6 +92,9 @@
         "scripts/prove-webhook-burst.mjs",
         // Reproduction CHECK-DEADLOCK-1 invokes the isolated PostgreSQL HTTP proof by path.
         "scripts/prove-check-rollup-deadlock.mjs",
+        // Sentry contention and destroyed-activity proofs run directly by path.
+        "scripts/prove-sentry-contention.mjs",
+        "scripts/prove-system-background.mjs",
         "scripts/cleanup-legacy-daemon-chat.ts",
         "scripts/prove-harness-node-path.mjs",
         "scripts/prove-corner-startup.mjs",

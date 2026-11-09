@@ -599,6 +599,55 @@ describe('deleteAccount', () => {
     await expectRowCount(`SELECT 1 FROM corner_merge_holds WHERE corner_id=$1 AND released_at IS NULL`, [CORNER], 1);
   });
 
+  it('Reproduction SENTRY-4P: retries one rolled-back deadlock and completes account erasure', async () => {
+    const transaction = database.transaction.bind(database);
+    let attempts = 0;
+    const observe = vi.spyOn(database, 'transaction').mockImplementation(work => transaction(async tx => {
+      attempts++;
+      return work({ transaction: nested => tx.transaction(nested), query: async (sql, args) => {
+        const result = await tx.query(sql, args);
+        if (attempts === 1 && sql.startsWith('UPDATE messages SET author_id='))
+          throw Object.assign(new Error('deadlock detected'), { code: '40P01' });
+        return result;
+      } });
+    }));
+    try {
+      await phone.execute('deleteAccount', {}, OWNER);
+      expect(attempts).toBe(2);
+      await expectRowCount('SELECT 1 FROM identities WHERE id=ANY($1)', [[OWNER, AGENT]], 0);
+      await expectRowCount('SELECT 1 FROM messages WHERE author_id=ANY($1)', [[OWNER, AGENT]], 0);
+    } finally { observe.mockRestore(); }
+  });
+
+  it.each(['40P01', '55P03', '08006'])('bounds deletion retries for %s', async code => {
+    const failure = Object.assign(new Error('database failure'), { code });
+    const observe = vi.spyOn(database, 'transaction').mockRejectedValue(failure);
+    try {
+      await expect(phone.execute('deleteAccount', {}, OWNER)).rejects.toBe(failure);
+      expect(observe).toHaveBeenCalledTimes(code === '40P01' ? 2 : 1);
+      await expectRowCount('SELECT 1 FROM identities WHERE id=$1', [OWNER], 1);
+    } finally { observe.mockRestore(); }
+  });
+
+  it('Reproduction SENTRY-4P: locks affected rooms and erased identities in key order before writes', async () => {
+    const transaction = database.transaction.bind(database), statements: string[] = [];
+    const observe = vi.spyOn(database, 'transaction').mockImplementation(work => transaction(tx => work({
+      transaction: nested => tx.transaction(nested), query: async (sql, args) => {
+        statements.push(sql);
+        return tx.query(sql, args);
+      },
+    })));
+    try {
+      await phone.execute('deleteAccount', {}, OWNER);
+      const rooms = statements.findIndex(sql => /SELECT id FROM rooms/.test(sql) && /ORDER BY id FOR UPDATE/.test(sql));
+      const identities = statements.findIndex(sql => /SELECT id FROM identities/.test(sql) && /ORDER BY id FOR UPDATE/.test(sql));
+      const write = statements.findIndex(sql => sql.startsWith('UPDATE daemon_tokens'));
+      expect(rooms).toBeGreaterThan(-1);
+      expect(identities).toBeGreaterThan(rooms);
+      expect(write).toBeGreaterThan(identities);
+    } finally { observe.mockRestore(); }
+  });
+
   it('is idempotent: a second call resolves without effect', async () => {
     await phone.execute('deleteAccount', {}, OWNER);
     await expect(phone.execute('deleteAccount', {}, OWNER)).resolves.toBeUndefined();

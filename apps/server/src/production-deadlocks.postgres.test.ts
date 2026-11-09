@@ -1,3 +1,4 @@
+import { seedCornerOpening } from './test-fixtures/corner-commands.js';
 import { subscribeConfiguredReviewers } from './agent-subscriptions.js';
 import { seedSquireMachine } from './test-fixtures/squire-machines.js';
 import { randomUUID } from 'node:crypto';
@@ -185,6 +186,43 @@ describe.skipIf(!url)('production transaction lock ordering', () => {
     expect(results).toEqual([expect.anything(),expect.objectContaining({status:'connecting'})]);
     expect((await first.query<{ status: string }>(`SELECT squire_report->>'status' status FROM squire_machines WHERE (owner_id,machine_id)=(SELECT owner_id,COALESCE(machine_id,agent_id) FROM agents WHERE agent_id=$1)`, [agent])).rows[0]?.status).toBe(mode === 'reconnect' ? 'error' : 'connected');
     expect((await first.query<{ install: string }>(`SELECT squire_work->>'install' install FROM squire_machines WHERE (owner_id,machine_id)=(SELECT owner_id,COALESCE(machine_id,agent_id) FROM agents WHERE agent_id=$1)`, [agent])).rows[0]?.install).toBe('true');
+  });
+
+  it('Reproduction SENTRY-4B: retries a real lifecycle timeout while the turn row stays locked', async () => {
+    const id = randomUUID();
+    await first.query(`INSERT INTO rooms(id,workspace_id,parent_id,created_by,name) VALUES($1,$2,$3,$4,'Busy corner')`, [id, workspace, room, agent]);
+    await first.query('INSERT INTO corner_facts(corner_id) VALUES($1)', [id]);
+    await seedCornerOpening(first, { cornerId: id, agentId: agent, commissionedBy: owner });
+    await first.query(`INSERT INTO agent_turns(room_id,request_id,agent_id,status,generation_id)
+      VALUES($1,'held-turn',$2,'working','held-generation')`, [id, agent]);
+    let release!: () => void, entered!: () => void;
+    const gate = new Promise<void>(resolve => { release = resolve; });
+    const held = new Promise<void>(resolve => { entered = resolve; });
+    const turn = first.transaction(async db => {
+      await db.query('SELECT 1 FROM agent_turns WHERE room_id=$1 FOR UPDATE', [id]);
+      entered(); await gate;
+    });
+    await held;
+    await observer.query('BEGIN');
+    await observer.query('SELECT corner_id FROM corner_facts WHERE corner_id=$1 FOR UPDATE', [id]);
+    await second.query("SET lock_timeout='100ms'");
+    const transaction = second.transaction.bind(second);
+    let attempts = 0;
+    const observe = vi.spyOn(second, 'transaction').mockImplementation(async work => {
+      attempts++;
+      try { return await transaction(work); }
+      catch (error) { await observer.query('ROLLBACK'); throw error; }
+    });
+    try {
+      expect(await refreshCornerAttention(second, id)).toEqual({ parentId: room });
+      expect(attempts).toBe(2);
+      // Read the projected user surface before releasing the turn writer.
+      const result = await new PhoneService(second, 'https://beeline.invalid').readCorners(room, owner);
+      expect(result!.corners.some(corner => corner.corner.id === id)).toBe(true);
+    } finally {
+      observe.mockRestore(); await observer.query('ROLLBACK');
+      release(); await turn; await second.query('RESET lock_timeout');
+    }
   });
 
   it.each(['refresh', 'open'] as const)('SERVER-49/4A/45: %s does not update the shared System identity', async path => {

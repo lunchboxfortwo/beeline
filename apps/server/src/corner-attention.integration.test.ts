@@ -693,3 +693,29 @@ it.each(['human-order', 'human-member-order', 'human-member-reply', 'worker-push
   if (input === 'worker-push') expect(await state()).toBe('waiting');
   else expect(await state()).not.toBe('waiting');
 });
+
+it.each(['55P03', '08006'])('Reproduction SENTRY-4B: refresh retries only a lock timeout (%s)', async code => {
+  const failure = Object.assign(new Error('refresh failed'), { code });
+  const observe = vi.spyOn(db, 'transaction').mockRejectedValueOnce(failure);
+  const live = new LiveHub(), publish = vi.spyOn(live, 'publish');
+  const runtime = new CornerMachineEvents(db, live, () => {});
+  try {
+    if (code === '55P03') {
+      await runtime.refresh(C);
+      expect(observe).toHaveBeenCalledTimes(2);
+      expect(publish).toHaveBeenCalledWith({ type: 'invalidate', roomId: ROOM, reason: 'corner-status' });
+    } else {
+      await expect(runtime.refresh(C)).rejects.toBe(failure);
+      expect(observe).toHaveBeenCalledTimes(1);
+    }
+  } finally { observe.mockRestore(); await runtime.stop(); }
+});
+
+it('Reproduction SENTRY-4B: persistent lock timeout stops after its one retry', async () => {
+  const failure = Object.assign(new Error('lock timeout'), { code: '55P03' });
+  const observe = vi.spyOn(db, 'transaction').mockRejectedValue(failure);
+  try {
+    await expect(refreshCornerAttention(db, C)).rejects.toBe(failure);
+    expect(observe).toHaveBeenCalledTimes(2);
+  } finally { observe.mockRestore(); }
+});
