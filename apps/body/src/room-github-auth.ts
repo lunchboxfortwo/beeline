@@ -136,7 +136,8 @@ async function issueCommentRoute(personal, auth, context) {
   }
   return async (request, body) => {
     if (managed && request.method === 'GET' && request.headers.host === 'api.github.com')
-      return await execute('BEELINE_GITHUB_REST_READ', { path: request.url });
+      return await execute('BEELINE_GITHUB_REST_READ', { path: request.url,
+        ...(request.headers.accept === 'application/octet-stream' ? { accept: request.headers.accept } : {}) });
     if (managed && request.method === 'PUT' && request.headers.host === 'api.github.com' &&
         /^\/repos\/[^/]+\/[^/]+\/contents\/.+/.test(request.url))
       return await execute('BEELINE_GITHUB_CONTENTS_PUT', { path: request.url, body: JSON.parse(body) });
@@ -171,7 +172,7 @@ async function issueCommentRoute(personal, auth, context) {
         return json({ data: { addComment: { commentEdge: { node: { url: data.html_url } } } } });
       }
       if (managed && typeof input.query === 'string' &&
-          /^(?:\s|,|#[^\r\n]*(?:\r?\n|$))*(?:query\b|\{)/.test(input.query) &&
+          /^(?:\s|,|#[^\r\n]*(?:\r?\n|$))*(?:query\b|fragment\b|\{)/.test(input.query) &&
           !/\b(?:mutation|subscription)\b/.test(input.query))
         return await execute('BEELINE_GITHUB_GRAPHQL_READ', input);
       throw Object.assign(new Error('Unsupported GitHub GraphQL request: only read queries are supported'), { status: 400 });

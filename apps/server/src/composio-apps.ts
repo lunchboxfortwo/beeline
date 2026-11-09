@@ -160,7 +160,8 @@ const githubRestReadTool = {
   slug: 'BEELINE_GITHUB_REST_READ', name: 'GitHub repository REST read',
   description: 'Read repository data through the connected GitHub account, including contents and pull requests.',
   inputParameters: { type: 'object', additionalProperties: false, required: ['path'],
-    properties: { path: { type: 'string', description: 'Repository API path, including query parameters.' } } },
+    properties: { path: { type: 'string', description: 'Repository API path or HTTPS api.github.com pagination URL, including query parameters.' },
+      accept: { type: 'string', enum: ['application/octet-stream'], description: 'Download release asset contents.' } } },
 };
 
 const githubGraphqlReadTool = {
@@ -777,14 +778,15 @@ export class ComposioApps {
       const write = input.tool === githubContentsPutTool.slug;
       const path = graphql ? '/graphql' : input.arguments.path;
       const url = typeof path === 'string' ? new URL(path, 'https://api.github.com') : undefined;
-      if (!graphql && (!url || !path || typeof path !== 'string' || !path.startsWith('/repos/') ||
+      if (!graphql && (!url || !path || typeof path !== 'string' || !(path.startsWith('/repos/') || (!write && path.startsWith('https://api.github.com/'))) ||
         url.origin !== 'https://api.github.com' || !/^\/repos\/[^/]+\/[^/]+(?:\/|$)/.test(url.pathname) ||
-        url.hash || Object.keys(input.arguments).some(key => !['path', ...(write ? ['body'] : [])].includes(key))))
+        url.hash || url.username || url.password || Object.keys(input.arguments).some(key => !['path', ...(write ? ['body'] : ['accept'])].includes(key)) ||
+        (!write && input.arguments.accept !== undefined && input.arguments.accept !== 'application/octet-stream')))
         throw new CommandRefusalError('GitHub read requires a repository API path', 400);
       // Fail closed across every operation in a document, including an unselected
       // mutation. Keyword checks are conservative even inside strings/comments.
       if (graphql && (typeof input.arguments.query !== 'string' ||
-        !/^(?:\s|,|#[^\r\n]*(?:\r?\n|$))*(?:query\b|\{)/.test(input.arguments.query) ||
+        !/^(?:\s|,|#[^\r\n]*(?:\r?\n|$))*(?:query\b|fragment\b|\{)/.test(input.arguments.query) ||
         /\b(?:mutation|subscription)\b/.test(input.arguments.query) ||
         Object.keys(input.arguments).some(key => !['query', 'variables', 'operationName'].includes(key))))
         throw new CommandRefusalError('GitHub GraphQL accepts read queries only', 400);
@@ -799,15 +801,16 @@ export class ComposioApps {
       const result = await this.request('/tools/execute/proxy', 'POST', {
         connected_account_id: input.accountId, endpoint: url!.origin + url!.pathname, method: graphql ? 'POST' : write ? 'PUT' : 'GET',
         ...(graphql ? { body: input.arguments } : write ? { body: input.arguments.body } : {}),
-        parameters: [...url!.searchParams].map(([name, value]) => ({ name, value, type: 'query' })),
+        parameters: [...[...url!.searchParams].map(([name, value]) => ({ name, value, type: 'query' })),
+          ...(!graphql && !write && input.arguments.accept ? [{ name: 'Accept', value: input.arguments.accept, type: 'header' }] : [])],
       }, 'v3.1');
       if (!Number.isInteger(result.status) || Number(result.status) < 100 || Number(result.status) > 599)
         throw new Error('GitHub returned an invalid response status');
       const headers = object(result.headers);
-      return stripSecrets({ status: result.status,
-        headers: { 'content-type': 'application/json',
+      return { status: result.status,
+        headers: { 'content-type': typeof headers['content-type'] === 'string' ? headers['content-type'] : 'application/json',
           ...(typeof headers.link === 'string' ? { link: headers.link } : {}) },
-        body: JSON.stringify(stripSecrets(result.data)) });
+        body: typeof result.data === 'string' ? result.data : JSON.stringify(stripSecrets(result.data)) };
     }
     if (input.tool === YOUTUBE_ANALYTICS_TOOL && input.toolkit === 'youtube') {
       if (files.size) throw new CommandRefusalError('A Room file was passed for a parameter that does not take a file', 400);

@@ -18,7 +18,13 @@ async function fixture() {
     else if (req.url?.endsWith('listAppTools')) data = { tools: ['GITHUB_CREATE_AN_ISSUE_COMMENT', 'BEELINE_GITHUB_REST_READ', 'BEELINE_GITHUB_GRAPHQL_READ', 'BEELINE_GITHUB_CONTENTS_PUT'].map(slug => ({ slug })) };
     else {
       calls.push(input);
-      const result = input.arguments?.query?.includes('PullRequestByNumber') ? { data: { repository: { pullRequest: { title: 'Fixture PR' } } } } : input.arguments?.query?.includes('__type') ? { data: { Release: { fields: [{ name: 'isLatest' }] } } } : input.tool === 'BEELINE_GITHUB_GRAPHQL_READ'
+      const result = input.arguments?.query?.includes('SearchType_enumValues')
+        ? { data: { SearchType: { enumValues: [{ name: 'ISSUE' }] } } }
+        : input.arguments?.query?.includes('PullRequestSearch')
+        ? { data: { search: { issueCount: 1, nodes: [{ number: 1, title: 'Fixture PR',
+          url: 'https://github.com/a/b/pull/1', state: 'OPEN', isDraft: false, headRefName: 'branch' }],
+          pageInfo: { hasNextPage: false, endCursor: '' } } } }
+        : input.arguments?.query?.includes('PullRequestByNumber') ? { data: { repository: { pullRequest: { title: 'Fixture PR' } } } } : input.arguments?.query?.includes('__type') ? { data: { Release: { fields: [{ name: 'isLatest' }] } } } : input.tool === 'BEELINE_GITHUB_GRAPHQL_READ'
         ? { data: { repository: { releases: { nodes: [{ name: 'Fixture release', tagName: 'v1', isDraft: false, isPrerelease: false, publishedAt: '2026-11-07T00:00:00Z' }], pageInfo: { hasNextPage: false, endCursor: '' } } } } }
         : { content: { path: 'proof.txt' } };
       data = { status: 'executed', data: { status: 200, headers: {}, body: JSON.stringify(result) } };
@@ -70,5 +76,12 @@ it('reads pull request details with native gh', async () => {
   const { run } = await fixture();
   const result = await run(['pr', 'view', '1', '-R', 'a/b', '--json', 'title']);
   expect(result.code, result.output).toBe(0);
+  expect(result.output).toContain('Fixture PR');
+});
+
+it('Reproduction ROOM-GITHUB-READS: native gh pr list search is allowed', async () => {
+  const { run, calls } = await fixture();
+  const result = await run(['pr', 'list', '--repo', 'Beeline-Work/beeline', '--state', 'all', '--search', 'token cache']);
+  expect(result.code, result.output + JSON.stringify(calls)).toBe(0);
   expect(result.output).toContain('Fixture PR');
 });
