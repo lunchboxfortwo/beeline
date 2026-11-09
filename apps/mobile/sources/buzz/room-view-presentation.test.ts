@@ -173,7 +173,7 @@ describe('Room view presentation', () => {
     ]);
   });
 
-  it('keeps an indexed system row visible as a system notice', () => {
+  it.each(['system', 'card'] as const)('keeps an indexed workflow %s row in the compact system renderer', presentation => {
     const message: RoomViewMessage = {
       id: 'system-notice',
       text: 'A scheduled run is paused.',
@@ -183,7 +183,8 @@ describe('Room view presentation', () => {
         kind: 'agent',
         name: 'Pi agent',
       },
-      presentation: 'system',
+      presentation,
+      systemEvent: { kind: 'workflow-handoff', subject: { kind: 'system', name: 'Workflow' }, verb: 'advanced' },
     };
 
     expect(displayRoomMessage(message, 'a'.repeat(64))).toMatchObject({

@@ -620,6 +620,6 @@ export { closeStaleWorkflowGateChoices } from './workflow-runs-start-workflow.js
 
 export async function claimRun(db: SqlDatabase, scope: RunScope): Promise<boolean> {
   if (scope.claimed) return true;
-  scope.claimed = await claimWorkflowTransition(db, { ...scope.head, state: scope.stateName });
+  scope.claimed = await claimWorkflowTransition(db, { ...scope.head, state: scope.head.card.toState });
   return scope.claimed;
 }

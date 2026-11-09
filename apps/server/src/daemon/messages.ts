@@ -172,7 +172,7 @@ import { daemonWriteResult } from './corner-messages.js';
                ${taggedIdentityIdsSql('inserted')} tagged_ids
              FROM inserted JOIN identities author ON author.id=inserted.author_id
              CROSS JOIN (SELECT count(*) FROM completed) completion`,
-            [...values, command!.id, command!.generation_id, command!.private_payload?.kind !== 'order'],
+            [...values, command!.id, command!.generation_id, true],
           )
         ).rows[0]!;
       }

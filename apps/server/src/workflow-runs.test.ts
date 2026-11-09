@@ -246,7 +246,7 @@ describe('save_workflow error reasons', () => {
 });
 
 describe('start_workflow', () => {
-  it('Reproduction workflow-notice-1: reads workflow system lines through the phone service, retaining text and wakes (workflow-line-1)', async () => {
+  it('Reproduction workflow-notice-1: reads compact workflow cards through the phone service, retaining text and wakes (workflow-line-1)', async () => {
     await database.query(`UPDATE identities SET handle='impy' WHERE id=$1`, [IMPLEMENTER]);
     await database.query(`INSERT INTO memberships(workspace_id,identity_id,role) VALUES($1,$2,'owner')`, [WORKSPACE, OWNER]);
     const command = await commandFor(IMPLEMENTER);
@@ -280,8 +280,8 @@ describe('start_workflow', () => {
     expect(cards.every(row => row.card.runId === runId)).toBe(true);
     expect((await getWorkflowRun(database, ROOM, runId)).status).toBe('abandoned');
     console.log(`Reproduction workflow-notice-1: start workflow → reassign → hand off → cancel → read Room; stored=${cards.map(row => row.presentation).join(',')}; phone=${[start, moved, handoffLine, cancel].map(message => message.presentation).join(',')}`);
-    expect(cards.map(row => row.presentation)).toEqual(['system', 'system', 'system', 'system']);
-    expect([start, moved, handoffLine, cancel].map(message => message.presentation)).toEqual(['system', 'system', 'system', 'system']);
+    expect(cards.map(row => row.presentation).sort()).toEqual(['card', 'card', 'card', 'system']);
+    expect([start, moved, handoffLine, cancel].map(message => message.presentation)).toEqual(['card', 'card', 'card', 'system']);
     expect(messages.find(message => message.choice)?.presentation).toBe('card');
   });
 

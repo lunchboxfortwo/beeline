@@ -71,7 +71,7 @@ const APP_ROUTES: Record<string, Record<string, Route | string>> = {
     advance: { op: 'handoff', required: ['runId', 'outcome', 'contents'], description: 'Advance a run you hold, with an outcome its state declares.' },
     cancel: { op: 'cancel_workflow_run', required: ['runId', 'reason'], description: 'End an active run with a recorded reason.' },
     archive: { op: 'archive_workflow', required: ['name'], description: 'Retire a saved workflow by name.' },
-    rebind: { op: 'assign_workflow_role', required: ['runId', 'role', 'agent'], description: 'Bind one agent to a list-bound role of a run.' },
+    rebind: { op: 'assign_workflow_role', required: ['runId', 'role', 'agent'], description: 'Bind an agent to a role; resumes a failed run at its failed step.' },
   },
   wallet: {
     address: { op: 'wallet_address', required: [], description: 'Read the wallet address.' },

@@ -414,8 +414,10 @@ describe('a result ends its turn without implicitly moving a workflow', () => {
   });
 });
 
-it('workflow silence creates no schedules and cannot move a step or gate', async () => {
+it('workflow silence without timeout metadata creates no schedules and cannot move a step or gate', async () => {
   const runId = await startedGatedRun({ room_id: ROOM, agent_id: OWNER });
+  await withoutTimeouts('gated', 'work');
+  await withoutTimeouts('gated', 'sign_off');
   expect((await database.query('SELECT id FROM agent_schedules')).rows).toEqual([]);
   expect(await new AgentScheduleLoop(database).runOnce(new Date(Date.now() + 30 * 86400_000))).toBe(0);
   expect((await getWorkflowRun(database, ROOM, runId)).state).toBe('work');
@@ -687,5 +689,72 @@ describe('workflow timeout recovery reproductions', () => {
     await expect(handoff(database, await commandFor(WORKER_B), {
       runId, outcome: 'ready', contents: { vault_reference: 'vault://provider/key' },
     })).resolves.toMatchObject({ status: 'done' });
+  });
+});
+
+describe('Reproduction 8: recoverable workflow visits', () => {
+  it.each(['closure', 'terminal'])('resumes a %s failure through rebind, retaining its successful prefix and pinned history', async ending => {
+    const { runId } = await startedListRun(WORKER_A, WORKER_A);
+    const worker = await commandFor(WORKER_A);
+    await handoff(database, worker, { runId, outcome: 'done', contents: { note: 'Side effect completed once' } });
+    // Close the current visit as a failed turn would, without changing its state.
+    const { openRun } = await import('./workflow-runs.js');
+    const { closeRun } = await import('./workflow-runs-cancel-run-timers.js');
+    if (ending === 'terminal') {
+      await handoff(database, await commandFor(WORKER_A), { runId, outcome: 'timeout', contents: { reason: 'Dependency unavailable' } });
+    } else await database.transaction(async db => {
+      const scope = await openRun(db, ROOM, runId);
+      await closeRun(db, scope, { status: 'failed', outcome: 'failed', reason: 'Dependency unavailable',
+        line: { authorId: SYSTEM_IDENTITY_ID, subject: { kind: 'system', name: 'Workflow' }, verb: 'failed' } });
+    });
+    const before = await getWorkflowRun(database, ROOM, runId);
+    await assignWorkflowRole(database, await commandFor(WORKER_A, await rootMessage(OWNER)),
+      { runId, role: 'closer', targetAgentId: WORKER_B });
+    const after = await getWorkflowRun(database, ROOM, runId);
+    expect(after).toMatchObject({ state: 'close', status: 'live', boundAgentId: WORKER_B });
+    expect(after.history.slice(0, before.history.length)).toEqual(before.history);
+    expect(after.history.filter(h => h.toState === 'work')).toHaveLength(1);
+    expect(after.attempt).toBe(before.attempt+1);
+  });
+
+  it.each(['parent', 'corner'])('settles the exact gate from a parent Room answer in a %s turn and refuses agent answers', async address => {
+    const corner = '20000000-0000-4000-8000-000000000008';
+    await database.query(`INSERT INTO rooms(id,workspace_id,created_by,name,parent_id) VALUES($1,$2,$3,'Run corner',$4)`,
+      [corner, WORKSPACE, OWNER, ROOM]);
+    const runId = await startedGatedRun({ room_id: ROOM, agent_id: OWNER });
+    await reachGate(runId);
+    await database.query(`UPDATE messages SET room_id=$2 WHERE card->>'runId'=$1`, [runId, corner]);
+    await database.query(`UPDATE room_choices SET room_id=$2 WHERE workflow_run_id=$1`, [runId, corner]);
+    const gateCommand = async (source?: string) => address === 'parent'
+      ? commandFor(APPROVER, source)
+      : (await createAgentCommand(database, { roomId: corner, agentId: APPROVER,
+          sourceMessageId: source ?? await rootMessage(WORKER_A), reason: 'test' }))!;
+    await expect(handoff(database, await gateCommand(),
+      { runId, outcome: 'publish', contents: {} })).rejects.toThrow('a person answers');
+    await expect(handoff(database, await gateCommand(await rootMessage(OUTSIDER)),
+      { runId, outcome: 'publish', contents: {} })).rejects.toThrow('room access denied');
+    const answer = await rootMessage(OWNER, 'publish for this exact run');
+    await handoff(database, await gateCommand(answer), { runId, outcome: 'publish', contents: {} });
+    const read = await getWorkflowRun(database, corner, runId);
+    expect(read.status).toBe('done');
+    expect(read.history.at(-1)?.receipt?.exit).toMatchObject({ actorId: OWNER, sourceMessageId: answer });
+  });
+
+  it('expires a legacy gate at its pinned timeout, removes active status, and permits recovery', async () => {
+    const runId = await startedGatedRun({ room_id: ROOM, agent_id: OWNER });
+    await reachGate(runId);
+    const { nextWorkflowExpiryDelay } = await import('./workflow-run-expiry.js');
+    expect(await nextWorkflowExpiryDelay(database)).toBeGreaterThan(0);
+    await database.query(`UPDATE messages SET created_at=now()-interval '9 hours'
+      WHERE card->>'runId'=$1`, [runId]);
+    const changed: string[] = [];
+    await new AgentScheduleLoop(database, room => changed.push(room)).runOnce();
+    expect(await getWorkflowRun(database, ROOM, runId)).toMatchObject({ state: 'sign_off', status: 'failed' });
+    expect(await liveWorkflowRun(database, ROOM, 'gated')).toBeUndefined();
+    expect((await database.query(`SELECT 1 FROM room_choices WHERE workflow_run_id=$1 AND status='open'`, [runId])).rowCount).toBe(0);
+    expect(changed).toEqual([ROOM]);
+    await assignWorkflowRole(database, await commandFor(WORKER_A, await rootMessage(OWNER)),
+      { runId, role: 'approver', targetAgentId: APPROVER });
+    expect(await getWorkflowRun(database, ROOM, runId)).toMatchObject({ status: 'live', state: 'sign_off' });
   });
 });

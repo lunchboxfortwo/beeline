@@ -1,3 +1,4 @@
+import { expireWorkflowRuns, nextWorkflowExpiryDelay } from './workflow-run-expiry.js';
 import { systemMessage } from '@beeline/api-contract/system-message-catalog';
 import { CornerAccessDatabase } from './corner-access-database.js';
 import { createAgentCommand } from './agent-command.js';
@@ -121,9 +122,10 @@ export class AgentScheduleLoop {
          ORDER BY schedule.next_run_at,schedule.id LIMIT 1`,
       )
     ).rows[0];
-    if (!row) return;
+    const expiry = await nextWorkflowExpiryDelay(this.database);
+    if (!row) return expiry;
     if (!Number.isFinite(row.delay_ms)) throw new Error('Schedule deadline unavailable');
-    return row.delay_ms;
+    return Math.min(row.delay_ms, expiry ?? Infinity);
   }
 
   async runOnce(now?: Date): Promise<number> {
@@ -131,6 +133,7 @@ export class AgentScheduleLoop {
     // clock that may be ahead of the persisted calendar. Explicit times are
     // reserved for deterministic fixture runs.
     now ??= (await this.database.query<{ now_at: Date }>('SELECT clock_timestamp() now_at')).rows[0]!.now_at;
+    for (const roomId of await expireWorkflowRuns(this.database, now)) this.onPosted?.(roomId);
     const due = await this.database.query<DueSchedule>(
       `SELECT schedule.id,schedule.room_id,schedule.agent_id,schedule.creator_id,schedule.owner_id,schedule.workflow_slug,schedule.human_command_message_id,
         schedule.cadence,schedule.message,schedule.max_runs,schedule.run_count,schedule.next_run_at,

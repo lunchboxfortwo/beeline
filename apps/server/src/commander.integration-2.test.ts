@@ -509,10 +509,10 @@ it('failure visibility: post acknowledges stored visible text and cannot dischar
   expect((await commands(DM, RUBY)).filter(c => c.reason === 'report')).toHaveLength(0);
 });
 
-it('failure visibility: public corner prose cannot consume private assignment authority before its report', async () => {
+it('Reproduction 13: a public final reply closes its private assignment without inventing a commander report', async () => {
   const opened = await open(), turn = await worker(opened.cornerId);
   await rootFixture.daemon.execute('postRoomMessage', { ...authority(turn), text: 'I checked the login page.' }, WORKER);
-  expect((await rootFixture.db.query('SELECT state FROM agent_commands WHERE id=$1', [turn.id])).rows[0]?.state).toBe('claimed');
+  expect((await rootFixture.db.query('SELECT state FROM agent_commands WHERE id=$1', [turn.id])).rows[0]?.state).toBe('complete');
   await rootFixture.daemon.execute('postAgentTurnReceipt', { ...authority(turn), agentId: WORKER, status: 'complete' }, WORKER);
   expect((await commands(DM, RUBY)).filter(c => c.reason === 'report')).toEqual([]);
 });

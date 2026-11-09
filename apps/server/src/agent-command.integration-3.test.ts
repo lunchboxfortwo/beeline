@@ -697,3 +697,17 @@ it('command-only requester: workflow gate requester override stays authoritative
   const root = (await createAgentCommand(rootFixture.db, { roomId: R, agentId: A, sourceMessageId: handoffId, reason: 'workflow_handoff' }))!;
   expect(await rootFixture.daemon['grantRequester'](root)).toMatchObject({ id: P });
 });
+
+it('Reproduction 13: a corner order closes when its final reply commits without waiting for a receipt', async () => {
+  const queued = await createAgentCommand(rootFixture.db, { roomId: C, agentId: A, sourceMessageId: null,
+    reason: 'order', privatePayload: { kind: 'order', authorId: H, fromRoomId: R, text: 'Work in this corner' } });
+  const command = (await commands(A, C)).find(c => c.id === queued!.id)!;
+  await claim(command);
+  await result(command, 'Finished the requested work');
+  expect((await rootFixture.db.query(`SELECT state FROM agent_commands WHERE id=$1`, [queued!.id])).rows[0]?.state).toBe('complete');
+  expect((await rootFixture.db.query(`SELECT status FROM agent_turns WHERE room_id=$1 AND agent_id=$2 AND request_id=$3`,
+    [C, A, command.turnRequestId])).rows[0]?.status).toBe('complete');
+  const room = await rootFixture.phone.readRoom(C, H);
+  expect(room?.messages.some(message => message.text === 'Finished the requested work')).toBe(true);
+  expect(room?.latestAgentTurns?.some(turn => turn.agentPubkey === A && turn.status === 'working')).toBe(false);
+});

@@ -59,6 +59,8 @@
         "scripts/audit-decisions-schedules.mjs",
         // Rollout replay and the post-drain release action invoke these CLIs by path.
         "scripts/prove-rollout-overlap.mjs",
+        // Reproductions 8 and 13 invoke this isolated built-service proof by path.
+        "scripts/prove-workflow-recovery.mjs",
         "scripts/run-contract-migrations.mjs",
         // The CI baseline runbook invokes this read-only GitHub measurement CLI by path.
         "scripts/ci-baseline.mjs",

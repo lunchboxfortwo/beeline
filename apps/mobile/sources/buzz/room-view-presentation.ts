@@ -413,7 +413,9 @@ export function displayRoomMessage(
     ...(!githubEvent && !daemonFact && message.author.kind === 'agent'
       ? { isAgentAuthor: true }
       : {}),
-    ...(message.presentation === 'system' ? { isSystemNotice: true } : {}),
+    ...((message.presentation === 'system' ||
+      (message.presentation === 'card' && message.systemEvent?.kind === 'workflow-handoff'))
+      ? { isSystemNotice: true } : {}),
     ...(message.deleted ? { deleted: true } : {}),
     ...(message.awayWarning ? { awayWarning: true } : {}),
     ...(message.systemEvent ? { systemEvent: message.systemEvent } : {}),
