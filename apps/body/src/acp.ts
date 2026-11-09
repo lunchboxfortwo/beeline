@@ -391,7 +391,7 @@ export class AcpClient extends EventEmitter {
       )) as Record<string, unknown>;
     } catch (error) {
       if (/EPIPE/.test(String(error)) && this.stderrTail.trim()) {
-        throw new AcpRuntimeExitedError(`ACP agent ${this.agentLabel}: ${String(error)}: ${flattenHarnessCause(this.stderrTail)}`);
+        throw await explainAgentProgramFailure(new AcpRuntimeExitedError(`ACP agent ${this.agentLabel}: ${String(error)}: ${flattenHarnessCause(this.stderrTail)}`), this.agentEnv);
       }
       throw await explainAgentProgramFailure(error, this.agentEnv);
     }

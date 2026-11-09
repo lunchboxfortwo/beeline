@@ -101,3 +101,14 @@ it.each(['tool', 'async'] as const)('keeps a background %s completion in the ori
     expect(bookkeeping).toBe(0);
   } finally { await stopAgentProcess(client); }
 });
+
+it('surfaces a missing Codex platform package from the actual adapter startup', async () => {
+  const client = new AcpClient({
+    agentCommand: process.execPath,
+    agentArgs: ['-e', `process.stdin.once('data', () => { process.stderr.write('Missing optional dependency @openai/codex-linux-x64\\n'); process.exit(1); });`],
+    agentEnv: {}, resourceScope: 'none',
+  });
+  try {
+    await expect(startAgentProcess(client)).rejects.toThrow('missing platform package @openai/codex-linux-x64');
+  } finally { await stopAgentProcess(client); }
+});

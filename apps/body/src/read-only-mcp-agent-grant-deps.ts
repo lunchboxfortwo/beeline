@@ -213,6 +213,8 @@ export async function requestGrant(
   const grantId = typeof result.grantId === 'string' ? result.grantId : 'unknown';
   const ask = `${AGENT_GRANT_VERBS[kind]} ${target}`;
   if (result.auto === true) {
+    if (kind === 'host' && target === HOST_EMULATOR_TARGET)
+      return 'Host emulator permission approved. Call request_grant again now to read live authority and the existing emulator address; no new session is needed.';
     if (kind === 'command')
       return `approved: ${ask} [grant ${grantId}]. Run it now with run_granted_command and the argv.`;
     if (kind === 'device') {

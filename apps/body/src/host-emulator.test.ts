@@ -94,6 +94,17 @@ describe('host emulator permission through request_grant', () => {
     expect(await requestGrant(ask, deps([grant], [], probe))).toContain('Host emulator unavailable');
     expect(probe).toHaveBeenCalledTimes(1);
   });
+  it('uses an automatic host approval on the next call without a new session', async () => {
+    const live: unknown[] = [];
+    const dependencies = deps(live, [], vi.fn(async () => ['emulator-5554']));
+    dependencies.execute.mockImplementation(async (name: string) => {
+      if (name === 'requestAgentGrant') { live.push(grant); return { grantId: 'g1', auto: true }; }
+      return { grants: live };
+    });
+    expect(await requestGrant(ask, dependencies)).toContain('no new session is needed');
+    expect(dependencies.hostEmulators).not.toHaveBeenCalled();
+    expect(await requestGrant(ask, dependencies)).toContain('adb -H 127.0.0.1 -P 5037 -s emulator-5554');
+  });
   it('spends a once permission before delivering the address', async () => {
     const dependencies = deps([{ ...grant, status: 'once' }], [], vi.fn(async () => ['emulator-5554']));
     expect(await requestGrant(ask, dependencies)).toContain('Host emulator allowed');

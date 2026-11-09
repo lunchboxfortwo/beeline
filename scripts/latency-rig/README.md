@@ -525,7 +525,10 @@ the standing corner rather than creating a duplicate. Its execution contract is:
 
 > Run the nightly squire emulator latency rig under scripts/latency-rig/README.md
 > Nightly setup and execution. Fetch origin/main into the private detached
-> latency-rig-speedy checkout; read the current scripts, install dependencies
+> checkout inside this corner's writable worktree or its private scratch directory.
+> If the supplied latency-rig-speedy checkout is read-only, make a detached copy
+> with git clone --shared --no-hardlinks <source> "$TMPDIR/latency-rig" and run there.
+> Verify write access with mktemp in that copy before installing dependencies; read the current scripts, install dependencies
 > if needed, and use an owned Beeline-leased se_api35 emulator (2560 MiB, 4 cores).
 > Bind-test an unused local port pair. Run nightly-run.sh and monitor it in the
 > same turn until exit, retaining its log and exit status. It compares reports,

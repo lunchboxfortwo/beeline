@@ -108,7 +108,7 @@ jobs:
         with:
           mobile: "true"
       - name: Prove corner preparation and iOS capture runner setup
-        run: node --test scripts/prepare-corner.test.mjs scripts/review-exact-head.test.mjs scripts/ios-signin/capture.test.mjs
+        run: node --test scripts/prepare-corner.test.mjs scripts/review-exact-head.test.mjs scripts/ios-signin/capture.test.mjs scripts/corner-job.test.mjs scripts/android-build-failure.test.mjs
       - name: Test feedback grouping and ranking
         run: npm run test:feedback-signals
       - name: Test nightly dispatch and main-failure reporting

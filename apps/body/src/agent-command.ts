@@ -320,6 +320,11 @@ const execFileAsync = promisify(execFile);
 
 /** Older user CLIs can reject flags required by the latest adapter. */
 export async function explainAgentProgramFailure(error: unknown, env: NodeJS.ProcessEnv): Promise<unknown> {
+  const missingCodexPackage = /(?:Cannot find module|Missing optional dependency)[^\n]*?(@(?:openai|zed-industries)\/codex[^\s'"`]*)/i.exec(String(error));
+  if (missingCodexPackage) return new Error(
+    `Codex could not start: missing platform package ${missingCodexPackage[1]}. Reinstall the package that owns this executable with npm optional dependencies enabled (--include=optional), then retry. ${String(error)}`,
+    { cause: error },
+  );
   if (!env.CLAUDE_CODE_EXECUTABLE || !/unknown option|unrecognized (?:option|argument)|unsupported.*version|requires.*version/i.test(String(error))) return error;
   const version = await execFileAsync(env.CLAUDE_CODE_EXECUTABLE, ['--version'], { env, timeout: 3000, maxBuffer: 4096 })
     .then(result => result.stdout.trim().replace(/\s+/g, ' ').slice(0, 80)).catch(() => 'version unavailable');
