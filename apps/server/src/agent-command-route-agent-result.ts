@@ -53,15 +53,19 @@ export async function routeAgentResult(
         await recordMcpMemberWebhook(db, mention.id, mention.mcpCallbackUrl, roomId, sourceId, source.text);
         woken.push(mention.handle);
       } else {
-        const live = (await db.query(`SELECT 1 FROM rooms_mcp_members member
+        const delivery = (await db.query<{ live: boolean; recent_poll: boolean }>(`SELECT
+          connection.last_used_at>now()-interval '2 minutes' AS recent_poll,
+          EXISTS(SELECT 1 FROM rooms_mcp_event_subscriptions subscription
+            JOIN rooms_mcp_event_deliveries delivery ON delivery.subscription_id=subscription.id AND delivery.message_id=$2
+            WHERE subscription.member_id=member.member_id AND (subscription.expires_at IS NULL OR subscription.expires_at>now())) AS live
+          FROM rooms_mcp_members member
           JOIN rooms_mcp_connections connection ON connection.client_id=member.client_id
             AND connection.identity_id=member.owner_id AND connection.revoked_at IS NULL
-          WHERE member.member_id=$1 AND (EXISTS(SELECT 1 FROM rooms_mcp_event_subscriptions subscription
-              JOIN rooms_mcp_event_deliveries delivery ON delivery.subscription_id=subscription.id AND delivery.message_id=$2
-              WHERE subscription.member_id=member.member_id AND (subscription.expires_at IS NULL OR subscription.expires_at>now())))`,
-        [mention.id, sourceId])).rowCount;
-        if (live) woken.push(mention.handle);
-        else notWoken.push({ handle: mention.handle, reason: 'no live wake route; sees it on next list_mentions' });
+          WHERE member.member_id=$1`,
+        [mention.id, sourceId])).rows;
+        if (delivery.some(connection => connection.live)) woken.push(mention.handle);
+        else notWoken.push({ handle: mention.handle, reason: delivery.some(connection => connection.recent_poll)
+          ? 'delivered; its poller picks it up' : 'no live wake route; sees it on next list_mentions' });
       }
       continue;
     }

@@ -95,7 +95,7 @@ const scope1 = fixtureScope1();
     expect(JSON.stringify(await scope1.phone.readRoom(ROOM, USER))).toContain(text);
   }, 60_000);
 
-  it.each(['webhook', 'events', 'none', 'expired events'])(
+  it.each(['webhook', 'events', 'none', 'expired events', 'recent poll', 'stale poll', 'never polled'])(
     'R2: tag receipt accounts for connected member route %s', async route => {
       const fixture = await scope1.eventFixture();
       const { member, token, params, grant, client } = fixture;
@@ -106,11 +106,15 @@ const scope1 = fixtureScope1();
         if (route === 'expired events') await scope1.db.query("UPDATE rooms_mcp_event_subscriptions SET expires_at=now()-interval '1 second' WHERE member_id=$1", [member]);
       }
       const sender = await scope1.connected();
+      const age = route === 'recent poll' ? '30 seconds' : '10 minutes';
+      await scope1.db.query(`UPDATE rooms_mcp_connections SET last_used_at=
+        CASE WHEN $3::boolean THEN NULL ELSE now()-$4::interval END
+        WHERE client_id=$1 AND identity_id=$2`, [grant.clientId, USER, route === 'never polled', age]);
       const response = await sender.client.callTool({ name: 'send_message', arguments: { room: ROOM, text: `@${handle} check this tag` } }) as { content: { text: string }[] };
       const receipt = JSON.parse(response.content[0]!.text).data;
       const live = ['webhook', 'events'].includes(route);
       expect(receipt.woken).toEqual(live ? [handle] : []);
-      expect(receipt.notWoken).toEqual(live ? [] : [{ handle, reason: 'no live wake route; sees it on next list_mentions' }]);
+      expect(receipt.notWoken).toEqual(live ? [] : [{ handle, reason: route === 'recent poll' ? 'delivered; its poller picks it up' : 'no live wake route; sees it on next list_mentions' }]);
       expect((await scope1.db.query('SELECT 1 FROM rooms_mcp_mentions WHERE member_id=$1 AND message_id=$2', [member, receipt.messageId])).rowCount).toBe(1);
     }, 60_000);
 
