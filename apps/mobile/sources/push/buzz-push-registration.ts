@@ -30,6 +30,11 @@ export interface BuzzPushRegistrationResult {
   message?: string;
 }
 
+export interface BuzzPushRegistrationOptions {
+  automatic?: boolean;
+  nativeToken?: Notifications.DevicePushToken;
+}
+
 /**
  * Durable record of the last registration attempt, so the settings UI can tell
  * the truth about whether a device token is actually bound to the gateway
@@ -139,7 +144,7 @@ async function grantedNotificationPermission(requestWhenPossible: boolean): Prom
  */
 export async function registerBuzzPushNotifications(
   identity: Identity,
-  options: { automatic?: boolean } = {},
+  options: BuzzPushRegistrationOptions = {},
 ): Promise<BuzzPushRegistrationResult> {
   if (!currentPushPlatform() && Platform.OS !== 'web') {
     return { registered: false, retryable: false, phase: 'unsupported-platform' };
@@ -153,7 +158,7 @@ export async function registerBuzzPushNotifications(
   const attempt =
     Platform.OS === 'web'
       ? await registerWebPush(identity, !options.automatic)
-      : await attemptRegistration(identity, !options.automatic);
+      : await attemptRegistration(identity, !options.automatic, options.nativeToken);
   const state: BuzzPushRegistrationState = { ...attempt, updatedAt: Date.now() };
   await saveRegistrationState(identity.publicKey, state).catch((error: unknown) => {
     console.warn(
@@ -167,6 +172,7 @@ export async function registerBuzzPushNotifications(
 async function attemptRegistration(
   identity: Identity,
   requestPermission: boolean,
+  suppliedToken?: Notifications.DevicePushToken,
 ): Promise<BuzzPushRegistrationResult> {
   const platform = currentPushPlatform();
   if (!platform) {
@@ -180,7 +186,9 @@ async function attemptRegistration(
 
     let nativeToken: Awaited<ReturnType<typeof Notifications.getDevicePushTokenAsync>>;
     try {
-      nativeToken = await Notifications.getDevicePushTokenAsync();
+      // Android emits a token event for every acquisition. Consume its token
+      // directly: acquiring again from that event creates an infinite loop.
+      nativeToken = suppliedToken ?? await Notifications.getDevicePushTokenAsync();
     } catch (error) {
       if (isIosPushCapabilityUnavailable(error)) {
         return { registered: false, retryable: false, phase: 'unsupported-platform' };
@@ -209,18 +217,24 @@ async function attemptRegistration(
         message,
       };
     }
+    // An acquisition also announces the same token. That is the same attempt,
+    // including when its binding failed; recovery owns subsequent attempts.
+    if (suppliedToken && await AsyncStorage.getItem(tokenKey(identity.publicKey)) === nativeToken.data) {
+      const state = await getBuzzPushRegistrationState(identity.publicKey);
+      if (state) return state;
+    }
     console.log(
       `[beeline-push] ${service} token acquired fingerprint=${tokenFingerprint(nativeToken.data)} length=${nativeToken.data.length}`,
     );
 
     try {
+      await AsyncStorage.setItem(tokenKey(identity.publicKey), nativeToken.data);
       await monolithPhoneOperation('registerPushDevice', {
         token: nativeToken.data,
         platform,
         environment: Device.isDevice ? 'physical' : 'emulator',
       });
       console.log('[beeline-push] registerPushDevice accepted');
-      await AsyncStorage.setItem(tokenKey(identity.publicKey), nativeToken.data);
       return { registered: true, retryable: false, phase: 'registered' };
     } catch (error) {
       const failure = classifyRegistrationFailure(error);

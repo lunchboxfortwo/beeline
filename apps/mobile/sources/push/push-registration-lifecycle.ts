@@ -1,13 +1,14 @@
 import type { Identity } from '@beeline/buzz-client';
-import type { BuzzPushRegistrationResult } from './buzz-push-registration';
+import type { DevicePushToken } from 'expo-notifications';
+import type { BuzzPushRegistrationOptions, BuzzPushRegistrationResult } from './buzz-push-registration';
 
 interface PushLifecycle {
   loadIdentity(): Promise<Identity | null>;
   subscribeIdentityChange(listener: () => void): () => void;
   subscribeForeground(listener: () => void): () => void;
-  subscribeTokenChange(listener: () => void): () => void;
+  subscribeTokenChange(listener: (token: DevicePushToken) => void): () => void;
   subscribeRecovery(listener: () => void): () => void;
-  register(identity: Identity): Promise<BuzzPushRegistrationResult>;
+  register(identity: Identity, options?: BuzzPushRegistrationOptions): Promise<BuzzPushRegistrationResult>;
   retry(identity: Identity): Promise<BuzzPushRegistrationResult | null>;
   reportUpdate(identity: Identity): Promise<unknown>;
   reportFailure(error: unknown): void;
@@ -21,7 +22,7 @@ interface PushLifecycle {
 export function startPushRegistrationLifecycle(deps: PushLifecycle): () => void {
   let disposed = false;
   let running = false;
-  let pending: 'register' | 'retry' | null = null;
+  let pending: { mode: 'register' | 'retry'; nativeToken?: DevicePushToken } | null = null;
   let registeredIdentity: string | null = null;
 
   async function drain() {
@@ -29,7 +30,7 @@ export function startPushRegistrationLifecycle(deps: PushLifecycle): () => void 
     running = true;
     try {
       while (pending && !disposed) {
-        const mode = pending;
+        const { mode, nativeToken } = pending;
         pending = null;
         try {
           const identity = await deps.loadIdentity();
@@ -42,7 +43,9 @@ export function startPushRegistrationLifecycle(deps: PushLifecycle): () => void 
           void deps.reportUpdate(identity).catch(deps.reportFailure);
           const result =
             mode === 'register' || identity.publicKey !== registeredIdentity
-              ? await deps.register(identity)
+              ? nativeToken
+                ? await deps.register(identity, { automatic: true, nativeToken })
+                : await deps.register(identity)
               : await deps.retry(identity);
           registeredIdentity = identity.publicKey;
           if (result && !result.registered) {
@@ -56,14 +59,14 @@ export function startPushRegistrationLifecycle(deps: PushLifecycle): () => void 
       running = false;
     }
   }
-  function request(mode: 'register' | 'retry') {
+  function request(mode: 'register' | 'retry', nativeToken?: DevicePushToken) {
     // Identity availability takes priority over a simultaneous foreground retry.
-    if (pending !== 'register') pending = mode;
+    if (pending?.mode !== 'register' || mode === 'register') pending = { mode, nativeToken };
     void drain();
   }
   const stopIdentity = deps.subscribeIdentityChange(() => request('register'));
   const stopForeground = deps.subscribeForeground(() => request('retry'));
-  const stopToken = deps.subscribeTokenChange(() => request('register'));
+  const stopToken = deps.subscribeTokenChange(token => request('register', token));
   const stopRecovery = deps.subscribeRecovery(() => request('retry'));
   request('register');
   return () => {

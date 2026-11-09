@@ -6,6 +6,7 @@ const storage = vi.hoisted(() => ({
   setItem: vi.fn(),
 }));
 const notifications = vi.hoisted(() => ({
+  addPushTokenListener: vi.fn(),
   getPermissionsAsync: vi.fn(),
   requestPermissionsAsync: vi.fn(),
   getDevicePushTokenAsync: vi.fn(),
@@ -20,7 +21,10 @@ vi.mock('react-native', () => ({ Platform: platformState }));
 vi.mock('@/buzz/runtime-config', () => ({
   getBuzzRuntimeConfig: () => ({ pushGatewayUrl: 'https://push.example' }),
 }));
-vi.mock('@/sync/transport/monolith-operation', () => ({ monolithPhoneOperation: operation }));
+vi.mock('@/sync/transport/monolith-operation', () => ({
+  monolithPhoneOperation: operation,
+  MonolithPhoneOperationError: class extends Error {},
+}));
 
 import {
   getBuzzPushRegistrationState,
@@ -29,6 +33,8 @@ import {
   sendBuzzPushTestNotification,
   setBuzzPushEnabled,
 } from './buzz-push-registration';
+import { startPushRegistrationLifecycle } from './push-registration-lifecycle';
+import { subscribePushTokenChanges } from './push-token-events';
 
 const identity = {
   publicKey: 'a'.repeat(64),
@@ -114,6 +120,66 @@ describe('Buzz push preference', () => {
     expect(logged).toContain(`length=${FCM_TOKEN.length}`);
     expect(logged).toContain('registerPushDevice accepted');
     expect(logged).not.toContain(FCM_TOKEN);
+  });
+
+  it.each(['success', 'failure'])('registers once per Android trigger after %s without feeding token events back into acquisition', async (outcome) => {
+    operation.mockImplementation(async (name) => {
+      if (outcome === 'failure' && name === 'registerPushDevice') throw new Error('Disconnected');
+      return {};
+    });
+    let listener: ((token: { type: 'android'; data: string }) => void) | undefined;
+    notifications.addPushTokenListener.mockImplementation((next) => {
+      listener = next;
+      return { remove: () => { listener = undefined; } };
+    });
+    const saved = new Map<string, string>();
+    storage.getItem.mockImplementation(async (key: string) => saved.get(key) ?? null);
+    storage.setItem.mockImplementation(async (key: string, value: string) => { saved.set(key, value); });
+    // Expo's Android PushTokenModule resolves the acquisition AND emits this
+    // event on every getDevicePushTokenAsync call, even for an unchanged token.
+    let currentToken = FCM_TOKEN;
+    notifications.getDevicePushTokenAsync.mockImplementation(async () => {
+      const token = { type: 'android' as const, data: currentToken };
+      listener?.(token);
+      return token;
+    });
+    const flush = async () => { for (let i = 0; i < 200; i++) await Promise.resolve(); };
+    const stop = startPushRegistrationLifecycle({
+      loadIdentity: async () => identity,
+      subscribeIdentityChange: () => () => {},
+      subscribeForeground: () => () => {},
+      subscribeRecovery: () => () => {},
+      subscribeTokenChange: subscribePushTokenChanges,
+      register: registerBuzzPushNotifications,
+      retry: retryBuzzPushRegistration,
+      reportUpdate: async () => {},
+      reportFailure: vi.fn(),
+    });
+    try {
+      await flush();
+      expect(notifications.getDevicePushTokenAsync).toHaveBeenCalledOnce();
+      expect(operation).toHaveBeenCalledTimes(1);
+
+      currentToken = 'rotated-fcm-token';
+      listener?.({ type: 'android', data: currentToken });
+      await flush();
+      expect(notifications.getDevicePushTokenAsync).toHaveBeenCalledOnce();
+      expect(operation).toHaveBeenCalledTimes(2);
+      expect(operation).toHaveBeenLastCalledWith('registerPushDevice', expect.objectContaining({ token: currentToken }));
+
+      listener?.({ type: 'android', data: currentToken });
+      await flush();
+      expect(operation).toHaveBeenCalledTimes(2);
+
+      await setBuzzPushEnabled(identity, false);
+      await setBuzzPushEnabled(identity, true);
+      await flush();
+      expect(notifications.getDevicePushTokenAsync).toHaveBeenCalledTimes(2);
+      expect(operation.mock.calls.filter(([name]) => name === 'registerPushDevice')).toHaveLength(3);
+    } finally {
+      stop();
+      await flush();
+    }
   });
 
   it('sends a test notification through the server', async () => {
