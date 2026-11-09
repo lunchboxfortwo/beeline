@@ -20,7 +20,7 @@ import { daemonAccess, daemonReviewSourceAccess } from './access.js';
 import { daemonReach, daemonWriteResult } from './corner-messages.js';
 import { daemonPostRoomMessage, daemonPersistTurnTrace } from './messages.js';
 import { daemonReconcileZeroCheckWorkerCompletion } from './corner-completion.js';
-import { DaemonService } from '../daemon-service.js';
+import { createDaemonCommandService } from '../daemon-service.js';
 import { daemonLockOwnedTurnAccess } from './owned-model.js';
 import { daemonReport } from './corner-reports.js';
 import { daemonAuthorizeScopedGrant } from './grants.js';
@@ -384,32 +384,11 @@ import { daemonExecuteOperation } from './operations.js';
           if (name !== 'postAgentTurnReceipt')
             return daemonWriteResult(ctx) as Output<Name>;
         }
-        const scoped = new DaemonService(
-          db,
-          buffered,
-          ctx.roomGitHubToken,
-          ctx.mediaMaximumBytes,
-          true,
-          command,
-          ctx.livePaintDiagnostics,
-          ctx.liveDiagnosticServerInstance,
-          ctx.prChecksStatus,
-          undefined,
-          ctx.institutionalMemoryShadow,
-          ctx.mcpRegistry,
-          ctx.registryMcpOAuth,
-          ctx.composio,
-          ctx.feedback,
-          ctx.objects,
-          ctx.linkWallet,
-          ctx.refreshMergeability,
-          ctx.landCorner, ctx.closePullRequest, ctx.readPullRequest, ctx.subscriptionReceiverUrl, ctx.github,
-        );
-        scoped.starterOnboarding = ctx.starterOnboarding;
-        scoped.memoryEmbed = memoryEmbed;
-        scoped.afterCommit = (task) => {
-          committedTasks.push(task);
-        };
+        const scoped = createDaemonCommandService(ctx.dependencies, {
+          database: db, live: buffered, authorizedCommand: command,
+          starterOnboarding: ctx.starterOnboarding, memoryEmbed,
+          afterCommit: (task) => { committedTasks.push(task); },
+        });
         let result: Output<Name> = await scoped.execute(name, input, authenticatedAgentId, turnOwner);
         if (name === 'requestAgentGrant') {
           await db.query(
