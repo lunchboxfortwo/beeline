@@ -1,5 +1,8 @@
 app = "beeline-server"
 primary_region = "iad"
+kill_signal = "SIGTERM"
+# Allow the bounded request drain and cleanup to finish before Fly intervenes.
+kill_timeout = "20s"
 
 [build]
   dockerfile = "apps/server/Dockerfile"

@@ -290,17 +290,18 @@
     {
       "id": "timers.server-timeout",
       "module": "Background work and timers",
-      "invariant": "Only owner-schedule-clock.ts may create a server timer, solely for owner-created schedules.",
+      "invariant": "Server timers belong only to owner-created schedules and bounded process shutdown.",
       "pattern": "\\bsetTimeout\\b|\\bAbortSignal\\s*\\.\\s*timeout\\s*\\(",
       "scope": [
         "apps/server/src"
       ],
       "owners": [
-        "apps/server/src/owner-schedule-clock.ts"
+        "apps/server/src/owner-schedule-clock.ts",
+        "apps/server/src/shutdown.ts"
       ],
       "total": 0,
       "strict": true,
-      "fix": "Delete the timer and drive the effect from its source event. Owner-created schedules use apps/server/src/owner-schedule-clock.ts."
+      "fix": "Drive work from its source event. Only owner-schedule-clock.ts and shutdown.ts own schedule and shutdown deadlines."
     },
     {
       "id": "access.membership-writes",
@@ -642,6 +643,23 @@
         "packages/net/src/generated-wire-shapes.ts"
       ],
       "fix": "Split the file by domain without changing behavior."
+    },
+    {
+      "id": "timers.shutdown-sites",
+      "module": "Server shutdown",
+      "invariant": "Shutdown owns exactly the request drain, process deadline and live-close deadline.",
+      "pattern": "\\bsetTimeout\\b|\\bAbortSignal\\s*\\.\\s*timeout\\s*\\(",
+      "scope": [
+        "apps/server/src"
+      ],
+      "owners": [
+        "apps/server/src/shutdown.ts"
+      ],
+      "ownerSites": 3,
+      "total": 0,
+      "strict": true,
+      "fix": "Keep the three bounded shutdown deadlines in shutdown.ts; do not add retry or background clocks.",
+      "filePattern": "^apps/server/src/shutdown\\.ts$"
     }
   ],
   "storage": {

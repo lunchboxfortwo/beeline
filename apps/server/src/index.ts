@@ -1,3 +1,4 @@
+import { installShutdown } from './shutdown.js';
 import { notifyLive } from './postgres-live.js';
 import { OwnedModelCredentials } from './owned-model-credential.js';
 import { requiredServerSetting as required } from './server-configuration.js';
@@ -473,7 +474,7 @@ async function main() {
   schedulesJob.wake();
   const stopOperationOutcomes = startOperationOutcomeFlush(jobsDatabase, operationOutcomes, backgroundJobs);
   console.log(`[server] listening on ${host}:${port}; store=postgres; background=events`);
-  const stop = async () => {
+  installShutdown(server, async () => {
     mcpStop.abort();
     liveListener.setMcpWebhookWake(() => {});
     for (const stop of stops) stop();
@@ -485,7 +486,6 @@ async function main() {
     await voice?.close();
     await connectionPresence.stop();
     await liveListener.stop();
-    await new Promise<void>((resolve) => server.close(() => resolve()));
     await stopOperationOutcomes();
     await mountedAuth.close();
     await Promise.all([github?.stopCheckRefreshes(), githubJobs?.stopCheckRefreshes()]);
@@ -495,9 +495,7 @@ async function main() {
       healthDatabase.close(),
       jobsDatabase.close(),
     ]);
-  };
-  process.once('SIGINT', () => void stop());
-  process.once('SIGTERM', () => void stop());
+  });
 }
 
 /** Operator creation or release-time warming, using the normal free-agent service. */

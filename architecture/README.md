@@ -27,8 +27,11 @@ membership SQL and its conflict policies; callers pass their current transaction
 and retain access checks. `postgres-live.ts` owns named notifiers and SQL
 expressions for atomic CTE/trigger notifications. `background-work.ts` drains work authorized by committed events. The strict
 `timers.server-timeout` rule has zero exceptions outside the named
-`apps/server/src/owner-schedule-clock.ts` module, whose only job is firing
-owner-created schedules. There are no connection timer chains, retry clocks,
+`apps/server/src/owner-schedule-clock.ts` and `apps/server/src/shutdown.ts` modules.
+They own owner-created schedules and bounded deploy shutdown, respectively.
+`timers.shutdown-sites` pins shutdown to three deadlines: request drain, live close,
+and process exit. The strict migration allows only this named shutdown owner;
+additional timer owners still fail. There are no connection timer chains, retry clocks,
 retention sweeps or expiry wake loops. `scripts/server-timers.test.mjs` plants
 forbidden calls and verifies the real architecture check rejects them.
 
