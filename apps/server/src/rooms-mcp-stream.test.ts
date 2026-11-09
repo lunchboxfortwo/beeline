@@ -110,11 +110,11 @@ describe.each(['pglite',...(postgresUrl?['postgres']:[])])('P12 MCP committed me
       expect(readState(dir).sessions[0]?.streamCursor).toEqual(output.frames[2]!.cursor);
     }finally{rmSync(dir,{recursive:true,force:true});}
   });
-  it('resumes an unchanged committed cursor without requerying the application inbox',async()=>{
+  it('checks the durable inbox once when resuming an unchanged committed cursor',async()=>{
     const head=(await db.query<{epoch:string;through:number}>(`SELECT epoch,sequence::integer through FROM live_streams WHERE id='mcp:member'`)).rows[0]!;
     const output=reply(),read=page();
     await serveMcpMemberStream(db,principal,output as unknown as ServerResponse,{cursor:head,mentionCursor:'1'},read as never);
-    expect(read).not.toHaveBeenCalled();expect(output.frames).toEqual([{v:1,type:'checkpoint',cursor:head,mentionCursor:'1'}]);
+    expect(read).toHaveBeenCalledTimes(1);expect(output.frames).toEqual([{v:1,type:'checkpoint',cursor:head,mentionCursor:'1'}]);
   });
   it('does not publish a rolled-back source or unrelated token-use metrics',async()=>{
     const output=reply(),read=page();

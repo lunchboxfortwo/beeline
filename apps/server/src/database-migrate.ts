@@ -76,7 +76,7 @@ export async function migrate(
   database: SqlDatabase,
   options: { deferData?: boolean } = {},
 ): Promise<void> {
-  const ddl = async (name: string, sql: string) => runMigrationStep(name, async () => {
+  const ddl = async (name: string, sql: string, db: SqlDatabase = database) => runMigrationStep(name, async () => {
     const statement = sql.replace(/^(?:\s*--[^\n]*\n)*/, '').trim();
     const index = /^CREATE\s+(UNIQUE\s+)?INDEX\s+(?:IF\s+NOT\s+EXISTS\s+)?(\w+)\s+ON\b/i.exec(statement);
     if (index) {
@@ -87,21 +87,32 @@ export async function migrate(
     // ALTER lock. Validation uses PostgreSQL's weaker online lock separately.
     const constraint = /^ALTER\s+TABLE\s+(\w+)\s+ADD\s+CONSTRAINT\s+(\w+)\s+(?:CHECK|FOREIGN\s+KEY)\b/i.exec(statement);
     if (constraint && !/\bNOT\s+VALID\b/i.test(statement)) {
-      await database.query(statement.replace(/;?\s*$/, ' NOT VALID;'));
-      await database.query(`ALTER TABLE ${constraint[1]} VALIDATE CONSTRAINT ${constraint[2]}`);
+      await db.query(statement.replace(/;?\s*$/, ' NOT VALID;'));
+      await db.query(`ALTER TABLE ${constraint[1]} VALIDATE CONSTRAINT ${constraint[2]}`);
       return;
     }
-    await database.query(sql);
+    await db.query(sql);
   });
-  const ddlScript = async (name: string, sql: string) => {
+  const ddlScript = async (name: string, sql: string, atomic = false) => {
     const statements = splitMigrationStatements(sql);
-    for (let index = 0; index < statements.length; index++) {
-      const statement = statements[index]!;
-      if (await alreadySatisfied(database, statement) || await alreadyNoOp(database, statement)) continue;
-      const next = statements[index + 1];
-      if (next && await triggerAlreadyCurrent(database, statement, next)) { index++; continue; }
-      await ddl(`${name} ${index + 1}/${statements.length}`, statement);
+    const isIndex = (statement: string) => /^CREATE\s+(?:UNIQUE\s+)?INDEX\b/i.test(statement.replace(/^(?:\s*--[^\n]*\n)*/, '').trim());
+    // Concurrent indexes must finish outside the function/trigger transaction.
+    // A failed replacement must leave every serving source installed.
+    if (atomic) for (const statement of statements.filter(isIndex)) {
+      if (!await alreadySatisfied(database, statement)) await ddl(`${name} index`, statement);
     }
+    const install = async (db: SqlDatabase) => {
+      for (let index = 0; index < statements.length; index++) {
+        const statement = statements[index]!;
+        if (atomic && isIndex(statement)) continue;
+        if (await alreadySatisfied(db, statement) || await alreadyNoOp(db, statement)) continue;
+        const next = statements[index + 1];
+        if (next && await triggerAlreadyCurrent(db, statement, next)) { index++; continue; }
+        await ddl(`${name} ${index + 1}/${statements.length}`, statement, db);
+      }
+    };
+    if (atomic) await database.transaction(install);
+    else await install(database);
   };
   await ddlScript('server schema', SCHEMA);
   await ddlScript('Rooms MCP OAuth', ROOMS_MCP_SCHEMA);
@@ -544,7 +555,7 @@ export async function migrate(
   await ddlScript('X signup delivery deadlines', X_SIGNUP_DELIVERY_SCHEMA);
   await ddlScript('command completion notifications', commandCompletionSchema());
   await runMigrationStep('normalize machine Squire state', () => backfillSquireMachines(database));
-  await ddlScript('MCP member stream', MCP_MEMBER_STREAM_SCHEMA);
+  await ddlScript('MCP member stream', MCP_MEMBER_STREAM_SCHEMA, true);
   await ddlScript('Helper overlay demand', HELPER_OVERLAY_SCHEMA);
   await ddlScript('Helper usage ownership', HELPER_USAGE_SCHEMA);
   await ddlScript('Helper command activation', HELPER_ACTIVATION_SCHEMA);

@@ -184,10 +184,9 @@ export async function serveMcpMemberStream(database: SqlDatabase, principal: Mcp
           if (!Number.isSafeInteger(to.through)) throw new Error('member stream cursor overflow');
           if (position?.epoch === to.epoch && position.through === to.through) {
             if (!initial) return undefined;
-            // Credential renewal resumes the existing delivery cursor; it does
-            // not reread an unchanged application inbox.
-            return {to,after:mentionCursor,encoded:[JSON.stringify({v:1,type:'checkpoint',cursor:to,mentionCursor})+'\n'],
-              rooms:[],authority:digest(await scopes(db,member,[])),expiresAt};
+            // A preceding interrupted migration may have left committed inbox
+            // rows without journal entries. Every new connection catches up
+            // from its durable mention cursor, even when the head is unchanged.
           }
           if (position && position.epoch === to.epoch && position.through<to.through) {
             const count = await db.query<{total:string}>('SELECT count(*)::text total FROM live_journal WHERE stream_id=$1 AND sequence>$2 AND sequence<=$3',[stream,position.through,to.through]);

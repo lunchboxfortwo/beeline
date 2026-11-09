@@ -67,7 +67,8 @@ DO $$ BEGIN
         AND reply.presentation='message');
   END IF;
 END $$;
-DROP FUNCTION IF EXISTS beeline_mcp_stream_source() CASCADE;
+-- The serving member stream owns this source function and its triggers.
+-- Preserve them until its atomic installer commits their replacement.
 -- Retire the index used only by the deleted timed mention re-delivery.
 DROP INDEX IF EXISTS rooms_mcp_mentions_owed;
 -- A reply settles its own author's tag only after the message write succeeds,
