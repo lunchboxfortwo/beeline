@@ -537,6 +537,14 @@ export class GitHubAppClient {
   async appJwt(): Promise<string> { return gitHubAppClientAppJwt({ service: this, config: this.#config }); }
 
 
+  /** Drop every grant for this installation; detached mints cannot refill the cache. */
+  invalidateInstallationTokens(installationId: number): void {
+    const prefix = `[${installationId},`;
+    for (const key of this.#tokens.keys()) if (key.startsWith(prefix)) this.#tokens.delete(key);
+    for (const key of this.#mints.keys()) if (key.startsWith(prefix)) this.#mints.delete(key);
+  }
+
+
   async installationToken(
     installationId: number,
     options: {
@@ -560,12 +568,13 @@ export class GitHubAppClient {
     const mint = this.mintInstallationToken(installationId, options).then(value => {
       this.#tokenScopes.set(createHash('sha256').update(value.token).digest('hex'),
         { installationId, expiresAt: Date.parse(value.expiresAt) });
-      if (Date.parse(value.expiresAt) > Date.now() + 5 * 60_000) this.#tokens.set(key, value);
+      if (this.#mints.get(key) === mint && Date.parse(value.expiresAt) > Date.now() + 5 * 60_000)
+        this.#tokens.set(key, value);
       return value;
     });
     this.#mints.set(key, mint);
     try { return { ...await mint }; }
-    finally { this.#mints.delete(key); }
+    finally { if (this.#mints.get(key) === mint) this.#mints.delete(key); }
   }
   async mintInstallationToken(installationId: number, options: { repositoryIds?: readonly number[]; permissions?: Readonly<Record<string, string>>; }): Promise<GitHubInstallationToken> { return gitHubAppClientMintInstallationToken({ service: this, config: this.#config }, installationId, options); }
   /** List only workflows a person can dispatch, with the latest run on any branch. */ async listDispatchableWorkflows(accessToken: string, fullName: string, defaultBranch: string): Promise<GitHubDispatchableWorkflow[]> { return gitHubAppClientListDispatchableWorkflows({ service: this, config: this.#config }, accessToken, fullName, defaultBranch); }

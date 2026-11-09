@@ -548,7 +548,7 @@ const scope1 = fixtureScope1();
   it.each([
     ['installation', { action: 'new_permissions_accepted', installation: { id: 77 } }],
     ['installation_repositories', { action: 'added', installation: { id: 77 } }],
-  ] as const)('TOKEN-PERM-1: a %s webhook mints the next room token and leaves another installation cached', async (event, payload) => {
+  ] as const)('MILO-GH-PERM-1 / TOKEN-PERM-1: a %s webhook mints the next room token and leaves another installation cached', async (event, payload) => {
     const { room } = await scope1.checksFixture();
     const otherRoom = '44444444-4444-4444-8444-444444444444';
     await scope1.database.query(`INSERT INTO github_installations(installation_id,owner_id,account_id,account_login,account_type,repository_selection,status)
@@ -564,8 +564,9 @@ const scope1 = fixtureScope1();
       token: `token-${installationId}-${scope.repositoryIds[0]}-${++n}`,
       expiresAt: '2030-01-01T00:00:00Z',
     }));
-    const operations = new GitHubOperations(scope1.database, {} as GitHubOAuthClient, {
-      installationToken: mint,
+    const operations = new GitHubOperations(scope1.database, {} as GitHubOAuthClient, Object.assign(
+      new GitHubAppClient({ appId: '1', slug: 'fixture', privateKey: 'unused' }), {
+      mintInstallationToken: mint,
       installationAccount: async () => ({
         id: '42', login: 'owner', type: 'User' as const, repositorySelection: 'selected' as const,
       }),
@@ -573,13 +574,16 @@ const scope1 = fixtureScope1();
         id: 101, installationId: 77, fullName: 'owner/widgets', defaultBranch: 'main',
         private: false, allowAutoMerge: false,
       }],
-    } as unknown as GitHubAppClient, 'secret');
+    }), 'secret');
 
     const first = await operations.roomToken(room);
     expect(await operations.roomToken(room)).toEqual(first);
+    expect(await operations.roomWorkflowTarget(room)).toMatchObject({ token: first.token });
     const other = await operations.roomToken(otherRoom);
     expect(mint).toHaveBeenCalledTimes(2);
     await operations.processWebhook(event, payload);
+    // Merge/check reads call the client directly, bypassing the Room cache.
+    await expect(operations.roomWorkflowTarget(room)).resolves.toMatchObject({ token: 'token-77-101-3' });
     await expect(operations.roomToken(room)).resolves.toMatchObject({ token: 'token-77-101-3' });
     expect(await operations.roomToken(otherRoom)).toEqual(other);
     expect(mint).toHaveBeenCalledTimes(3);
@@ -597,8 +601,9 @@ const scope1 = fixtureScope1();
       .mockImplementationOnce(() => new Promise(resolve => { releaseFirst = resolve; }))
       .mockImplementationOnce(() => new Promise(resolve => { releaseSecond = resolve; }))
       .mockResolvedValue({ token: 'unexpected', expiresAt: '2030-01-01T00:00:00Z' });
-    const operations = new GitHubOperations(scope1.database, {} as GitHubOAuthClient, {
-      installationToken: mint,
+    const operations = new GitHubOperations(scope1.database, {} as GitHubOAuthClient, Object.assign(
+      new GitHubAppClient({ appId: '1', slug: 'fixture', privateKey: 'unused' }), {
+      mintInstallationToken: mint,
       installationAccount: async () => ({
         id: '42', login: 'owner', type: 'User' as const, repositorySelection: 'selected' as const,
       }),
@@ -606,7 +611,7 @@ const scope1 = fixtureScope1();
         id: 101, installationId: 77, fullName: 'owner/widgets', defaultBranch: 'main',
         private: false, allowAutoMerge: false,
       }],
-    } as unknown as GitHubAppClient, 'secret');
+    }), 'secret');
 
     const first = operations.roomToken(room);
     await vi.waitFor(() => expect(mint).toHaveBeenCalledTimes(1));
@@ -632,8 +637,9 @@ const scope1 = fixtureScope1();
       .mockImplementationOnce(() => new Promise(resolve => { releaseFirst = resolve; }))
       .mockImplementationOnce(() => new Promise(resolve => { releaseSecond = resolve; }))
       .mockResolvedValue({ token: 'unexpected', expiresAt: '2030-01-01T00:00:00Z' });
-    const operations = new GitHubOperations(scope1.database, {} as GitHubOAuthClient, {
-      installationToken: mint,
+    const operations = new GitHubOperations(scope1.database, {} as GitHubOAuthClient, Object.assign(
+      new GitHubAppClient({ appId: '1', slug: 'fixture', privateKey: 'unused' }), {
+      mintInstallationToken: mint,
       installationAccount: async () => ({
         id: '42', login: 'owner', type: 'User' as const, repositorySelection: 'selected' as const,
       }),
@@ -641,7 +647,7 @@ const scope1 = fixtureScope1();
         id: 101, installationId: 77, fullName: 'owner/widgets', defaultBranch: 'main',
         private: false, allowAutoMerge: false,
       }],
-    } as unknown as GitHubAppClient, 'secret');
+    }), 'secret');
 
     const first = operations.roomToken(room);
     await vi.waitFor(() => expect(mint).toHaveBeenCalledTimes(1));

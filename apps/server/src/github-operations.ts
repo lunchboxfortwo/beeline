@@ -130,6 +130,7 @@ async createRepository(viewerId: string, input: Input<'createGitHubRepository'>,
    */
    invalidateInstallationRoomTokens(installationId: number): void {
     bumpInstallationTokenEpoch(installationId);
+    this.app.invalidateInstallationTokens?.(installationId);
     const prefix = `${installationId}:`;
     for (const key of [...this.#roomTokens.keys()]) {
       if (key.startsWith(prefix)) this.#roomTokens.delete(key);
