@@ -361,7 +361,7 @@ vi.mock('@/buzz/surface-storage', () => {
   };
 });
 
-vi.mock('@/buzz/room-open-prefetch', () => ({ dispatchRoomOpenTap: vi.fn() }));
+vi.mock('@/buzz/room-open-prefetch', () => ({ dispatchRoomOpenTap: vi.fn(), warmRoomRouteCode: vi.fn() }));
 
 vi.mock('@/utils/responsive', () => ({ useIsDesktop: () => false }));
 

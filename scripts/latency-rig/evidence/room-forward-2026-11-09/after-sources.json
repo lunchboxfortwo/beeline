@@ -1,0 +1,14 @@
+{
+  "apps/mobile/sources/app/(app)/beeline/chat/[channelId].tsx": "8b1449538cb05851b368274f68f31d6b33ea575a8222295486b9f50cb320784d",
+  "apps/mobile/sources/app/(app)/beeline/chat/_chat-surface.tsx": "9b4fbe83c71a1b6f61bd0ca8e622ca5dc532abfa7c9372558482d417929a446a",
+  "apps/mobile/sources/app/(app)/beeline/chat/useRoomSurfaceSession.ts": "9f931b14b3119d7af1a95161f713028f44c7082b1f0f3e97226db0023900f58d",
+  "apps/mobile/sources/buzz/room-open-prefetch.ts": "e7ca2a5bf726223e5ac3df7782cade1523d8016da488611368bdd79273991600",
+  "apps/mobile/sources/components/SidebarView.tsx": "92bf5d87156b23320fde0e3b40b88961bf592d2c9430d44c97c188ff3431c3e6",
+  "apps/mobile/sources/app/(app)/beeline/useChannelsNavigation.tsx": "486c4bfac06483a9d84354bf631dd8a5c7c1d13008af0e2db34eef4e7783a674",
+  "apps/mobile/sources/app/(app)/beeline/chat/useRoomSurfaceSubscription.tsx": "285c9a20b0cc440304a2e12af82f35c6cb5dc9d05b18852da663241ab4ebeae0",
+  "apps/mobile/sources/push/push-room-prefetch.ts": "85c675d4e23e2824f000c1d3a71af836e7f62797891753d8b67778c4153ab024",
+  "apps/mobile/sources/app/(app)/beeline/chat/ChatSurfaceOverlays.tsx": "191b3b4a737b56bc00cfc60009473bc2402e1796bbcdf8fdb24d090a5bc1c75d",
+  "apps/mobile/sources/app/(app)/beeline/chat/useChatMessageActions.tsx": "60c7aba848917a4af757eb33f3c981ca1da1e361caa82f648d3ad547440670b5",
+  "apps/mobile/sources/components/buzz/ForwardMessagePickerSheet.tsx": "20d029ef7c91e97d85746339c18fc96f950c019119460d470ffef7957d524158",
+  "apps/mobile/patches/react-native-unistyles+3.1.1.patch": "95357c8f10d88cb62912e17ce7cfddcc1fe372adde62aa882812c5aa2083a404"
+}

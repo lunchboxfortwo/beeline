@@ -5,12 +5,13 @@ import { cornerHref, navigateToRoom } from '@/buzz/corner-navigation';
 import { openRoomListCorner } from '@/buzz/room-list-new-corner';
 import { cornerOpenTappedAgain } from '@/buzz/corner-open-status';
 import type { CornerOpenAttempt } from '@/buzz/open-random-corner';
-import { dispatchRoomOpenTap } from '@/buzz/room-open-prefetch';
+import { dispatchRoomOpenTap, warmRoomRouteCode } from '@/buzz/room-open-prefetch';
 import { type WorkspaceMemberDisplayItem } from '@/buzz/room-view-presentation';
 import { BuzzRigTransport } from '@/sync/transport';
 import { type Identity } from '@beeline/buzz-client';
 import { router } from 'expo-router';
-import { useCallback, useRef } from 'react';
+import { useCallback, useEffect, useRef } from 'react';
+import { Platform } from 'react-native';
 import { Swipeable } from 'react-native-gesture-handler';
 
 type Props = [
@@ -35,6 +36,10 @@ export function useChannelsNavigation([
   handleStartDirectMessage: (member: WorkspaceMemberDisplayItem) => Promise<void>,
 ] {
 
+
+  useEffect(() => {
+    if (Platform.OS === 'web') warmRoomRouteCode();
+  }, []);
 
   const openRoom = useCallback(
     (roomId: string) => {

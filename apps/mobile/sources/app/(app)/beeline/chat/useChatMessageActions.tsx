@@ -74,7 +74,7 @@ export function useChatMessageActions([
   messageIsBookmarked: (message: ChatDisplayMessage) => boolean,
   canDeleteMessage: (message: ChatDisplayMessage) => boolean,
   handleDeleteMessage: (message: ChatDisplayMessage) => Promise<void>,
-  forwardToRoom: (target: ForwardTarget) => Promise<void>,
+  forwardToRoom: (target: ForwardTarget) => Promise<boolean>,
 ] {
 
 
@@ -362,7 +362,7 @@ export function useChatMessageActions([
 
   const forwardToRoom = useCallback(
     async (target: ForwardTarget) => {
-      if (!forwardTarget || forwardBusyRoomId) return;
+      if (!forwardTarget || forwardBusyRoomId) return false;
       setForwardBusyRoomId(target.id);
       setForwardError(null);
       try {
@@ -394,11 +394,12 @@ export function useChatMessageActions([
           },
           displayRoomName,
         );
-        setForwardTarget(null);
-        setForwardRooms(null);
+        // Retain the destination rows while the sheet exits so its result paints.
         void Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
+        return true;
       } catch (error) {
         setForwardError(appErrorCopy(error));
+        return false;
       } finally {
         setForwardBusyRoomId(null);
       }

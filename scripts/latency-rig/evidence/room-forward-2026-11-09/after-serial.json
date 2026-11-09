@@ -1,0 +1,1207 @@
+{
+  "browser": "158.0.8127.18",
+  "results": [
+    {
+      "device": "phone-web",
+      "theme": "Bone",
+      "name": "open-room",
+      "samples": [
+        {
+          "durationMs": 251.09999990463257,
+          "driverMs": 251.09999990463257
+        }
+      ],
+      "p50": 251.09999990463257,
+      "p95": 251.09999990463257
+    },
+    {
+      "device": "phone-web",
+      "theme": "Bone",
+      "name": "open-dm",
+      "samples": [
+        {
+          "durationMs": 159.59999990463257,
+          "driverMs": 159.59999990463257
+        }
+      ],
+      "p50": 159.59999990463257,
+      "p95": 159.59999990463257
+    },
+    {
+      "device": "phone-web",
+      "theme": "Bone",
+      "name": "forward-message",
+      "samples": [
+        {
+          "durationMs": 118.5,
+          "acceptedResultMs": 118.5,
+          "dismissalResultMs": 435,
+          "removalMs": 403.59999990463257,
+          "dispatchMs": 39.80000019073486,
+          "clickToSendMs": 0.2999997138977051,
+          "sendToReplyMs": 43.40000009536743,
+          "replyToAnimationMs": 85,
+          "animationMs": 233.30000019073486,
+          "configuredAnimationMs": 250,
+          "closeStartMs": 168.5,
+          "animationEndMs": 401.80000019073486,
+          "tapToGoneMs": 363.7999997138977,
+          "closeToGoneMs": 235.09999990463257,
+          "sourceMessageVisibleMs": 418.59999990463257,
+          "animationEndToRemovalMs": 1.799999713897705,
+          "removalToFrameMs": 31.40000009536743,
+          "driverMs": 868.3000001907349
+        }
+      ],
+      "p50": 118.5,
+      "p95": 118.5
+    },
+    {
+      "device": "phone-web",
+      "theme": "Obsidian",
+      "name": "open-room",
+      "samples": [
+        {
+          "durationMs": 216.39999961853027,
+          "driverMs": 216.39999961853027
+        },
+        {
+          "durationMs": 154.69999980926514,
+          "driverMs": 154.69999980926514
+        },
+        {
+          "durationMs": 153.80000019073486,
+          "driverMs": 153.80000019073486
+        },
+        {
+          "durationMs": 168,
+          "driverMs": 168
+        },
+        {
+          "durationMs": 156.5,
+          "driverMs": 156.5
+        },
+        {
+          "durationMs": 141.7999997138977,
+          "driverMs": 141.7999997138977
+        },
+        {
+          "durationMs": 144.40000009536743,
+          "driverMs": 144.40000009536743
+        },
+        {
+          "durationMs": 154.59999990463257,
+          "driverMs": 154.59999990463257
+        },
+        {
+          "durationMs": 141.7000002861023,
+          "driverMs": 141.7000002861023
+        },
+        {
+          "durationMs": 128.09999990463257,
+          "driverMs": 128.09999990463257
+        },
+        {
+          "durationMs": 151.5,
+          "driverMs": 151.5
+        },
+        {
+          "durationMs": 157.19999980926514,
+          "driverMs": 157.19999980926514
+        },
+        {
+          "durationMs": 128.7999997138977,
+          "driverMs": 128.7999997138977
+        },
+        {
+          "durationMs": 128.80000019073486,
+          "driverMs": 128.80000019073486
+        },
+        {
+          "durationMs": 158.60000038146973,
+          "driverMs": 158.60000038146973
+        },
+        {
+          "durationMs": 160.59999990463257,
+          "driverMs": 160.59999990463257
+        },
+        {
+          "durationMs": 149.19999980926514,
+          "driverMs": 149.19999980926514
+        },
+        {
+          "durationMs": 150.40000009536743,
+          "driverMs": 150.40000009536743
+        },
+        {
+          "durationMs": 156.90000009536743,
+          "driverMs": 156.90000009536743
+        },
+        {
+          "durationMs": 145.89999961853027,
+          "driverMs": 145.89999961853027
+        },
+        {
+          "durationMs": 184.5,
+          "driverMs": 184.5
+        },
+        {
+          "durationMs": 143.30000019073486,
+          "driverMs": 143.30000019073486
+        },
+        {
+          "durationMs": 201.40000009536743,
+          "driverMs": 201.40000009536743
+        },
+        {
+          "durationMs": 152.09999990463257,
+          "driverMs": 152.09999990463257
+        },
+        {
+          "durationMs": 154.2999997138977,
+          "driverMs": 154.2999997138977
+        },
+        {
+          "durationMs": 132.5,
+          "driverMs": 132.5
+        },
+        {
+          "durationMs": 132.40000009536743,
+          "driverMs": 132.40000009536743
+        },
+        {
+          "durationMs": 147.19999980926514,
+          "driverMs": 147.19999980926514
+        },
+        {
+          "durationMs": 130.7999997138977,
+          "driverMs": 130.7999997138977
+        },
+        {
+          "durationMs": 199.69999980926514,
+          "driverMs": 199.69999980926514
+        },
+        {
+          "durationMs": 123.90000009536743,
+          "driverMs": 123.90000009536743
+        },
+        {
+          "durationMs": 147.40000009536743,
+          "driverMs": 147.40000009536743
+        },
+        {
+          "durationMs": 130.30000019073486,
+          "driverMs": 130.30000019073486
+        },
+        {
+          "durationMs": 147.40000009536743,
+          "driverMs": 147.40000009536743
+        },
+        {
+          "durationMs": 143.10000038146973,
+          "driverMs": 143.10000038146973
+        },
+        {
+          "durationMs": 138.09999990463257,
+          "driverMs": 138.09999990463257
+        },
+        {
+          "durationMs": 144.09999990463257,
+          "driverMs": 144.09999990463257
+        },
+        {
+          "durationMs": 155,
+          "driverMs": 155
+        },
+        {
+          "durationMs": 204.5,
+          "driverMs": 204.5
+        },
+        {
+          "durationMs": 162.90000009536743,
+          "driverMs": 162.90000009536743
+        }
+      ],
+      "p50": 149.19999980926514,
+      "p95": 201.40000009536743
+    },
+    {
+      "device": "phone-web",
+      "theme": "Obsidian",
+      "name": "open-dm",
+      "samples": [
+        {
+          "durationMs": 149.10000038146973,
+          "driverMs": 149.10000038146973
+        },
+        {
+          "durationMs": 139,
+          "driverMs": 139
+        },
+        {
+          "durationMs": 143.90000009536743,
+          "driverMs": 143.90000009536743
+        },
+        {
+          "durationMs": 141.2999997138977,
+          "driverMs": 141.2999997138977
+        },
+        {
+          "durationMs": 148.10000038146973,
+          "driverMs": 148.10000038146973
+        },
+        {
+          "durationMs": 144.5,
+          "driverMs": 144.5
+        },
+        {
+          "durationMs": 139,
+          "driverMs": 139
+        },
+        {
+          "durationMs": 148.19999980926514,
+          "driverMs": 148.19999980926514
+        },
+        {
+          "durationMs": 136.69999980926514,
+          "driverMs": 136.69999980926514
+        },
+        {
+          "durationMs": 151.09999990463257,
+          "driverMs": 151.09999990463257
+        },
+        {
+          "durationMs": 147.09999990463257,
+          "driverMs": 147.09999990463257
+        },
+        {
+          "durationMs": 127.7999997138977,
+          "driverMs": 127.7999997138977
+        },
+        {
+          "durationMs": 154.10000038146973,
+          "driverMs": 154.10000038146973
+        },
+        {
+          "durationMs": 143.10000038146973,
+          "driverMs": 143.10000038146973
+        },
+        {
+          "durationMs": 147.59999990463257,
+          "driverMs": 147.59999990463257
+        },
+        {
+          "durationMs": 146.59999990463257,
+          "driverMs": 146.59999990463257
+        },
+        {
+          "durationMs": 168.5,
+          "driverMs": 168.5
+        },
+        {
+          "durationMs": 144.80000019073486,
+          "driverMs": 144.80000019073486
+        },
+        {
+          "durationMs": 140.80000019073486,
+          "driverMs": 140.80000019073486
+        },
+        {
+          "durationMs": 159.7000002861023,
+          "driverMs": 159.7000002861023
+        },
+        {
+          "durationMs": 167.7999997138977,
+          "driverMs": 167.7999997138977
+        },
+        {
+          "durationMs": 160,
+          "driverMs": 160
+        },
+        {
+          "durationMs": 173.59999990463257,
+          "driverMs": 173.59999990463257
+        },
+        {
+          "durationMs": 150,
+          "driverMs": 150
+        },
+        {
+          "durationMs": 138.90000009536743,
+          "driverMs": 138.90000009536743
+        },
+        {
+          "durationMs": 149.40000009536743,
+          "driverMs": 149.40000009536743
+        },
+        {
+          "durationMs": 140.09999990463257,
+          "driverMs": 140.09999990463257
+        },
+        {
+          "durationMs": 138.09999990463257,
+          "driverMs": 138.09999990463257
+        },
+        {
+          "durationMs": 146.59999990463257,
+          "driverMs": 146.59999990463257
+        },
+        {
+          "durationMs": 150.80000019073486,
+          "driverMs": 150.80000019073486
+        },
+        {
+          "durationMs": 156.80000019073486,
+          "driverMs": 156.80000019073486
+        },
+        {
+          "durationMs": 145,
+          "driverMs": 145
+        },
+        {
+          "durationMs": 130.30000019073486,
+          "driverMs": 130.30000019073486
+        },
+        {
+          "durationMs": 149.90000009536743,
+          "driverMs": 149.90000009536743
+        },
+        {
+          "durationMs": 161,
+          "driverMs": 161
+        },
+        {
+          "durationMs": 148.2000002861023,
+          "driverMs": 148.2000002861023
+        },
+        {
+          "durationMs": 149.30000019073486,
+          "driverMs": 149.30000019073486
+        },
+        {
+          "durationMs": 143.10000038146973,
+          "driverMs": 143.10000038146973
+        },
+        {
+          "durationMs": 141.09999990463257,
+          "driverMs": 141.09999990463257
+        },
+        {
+          "durationMs": 143,
+          "driverMs": 143
+        }
+      ],
+      "p50": 146.59999990463257,
+      "p95": 167.7999997138977
+    },
+    {
+      "device": "phone-web",
+      "theme": "Obsidian",
+      "name": "forward-message",
+      "samples": [
+        {
+          "durationMs": 118,
+          "acceptedResultMs": 118,
+          "dismissalResultMs": 434.30000019073486,
+          "removalMs": 402.90000009536743,
+          "dispatchMs": 39.80000019073486,
+          "clickToSendMs": 0.5999999046325684,
+          "sendToReplyMs": 45.09999990463257,
+          "replyToAnimationMs": 82.40000009536743,
+          "animationMs": 233.09999990463257,
+          "configuredAnimationMs": 250,
+          "closeStartMs": 167.90000009536743,
+          "animationEndMs": 401,
+          "tapToGoneMs": 363.09999990463257,
+          "closeToGoneMs": 235,
+          "sourceMessageVisibleMs": 417.90000009536743,
+          "animationEndToRemovalMs": 1.9000000953674316,
+          "removalToFrameMs": 31.40000009536743,
+          "driverMs": 850.9000000953674
+        },
+        {
+          "durationMs": 102.7000002861023,
+          "acceptedResultMs": 102.7000002861023,
+          "dismissalResultMs": 419.30000019073486,
+          "removalMs": 387.90000009536743,
+          "dispatchMs": 23.40000009536743,
+          "clickToSendMs": 0.3000001907348633,
+          "sendToReplyMs": 37.69999980926514,
+          "replyToAnimationMs": 91.40000009536743,
+          "animationMs": 233.2999997138977,
+          "configuredAnimationMs": 250,
+          "closeStartMs": 152.80000019073486,
+          "animationEndMs": 386.09999990463257,
+          "tapToGoneMs": 364.5,
+          "closeToGoneMs": 235.09999990463257,
+          "sourceMessageVisibleMs": 403,
+          "animationEndToRemovalMs": 1.8000001907348633,
+          "removalToFrameMs": 31.40000009536743,
+          "driverMs": 852.7000002861023
+        },
+        {
+          "durationMs": 104.59999990463257,
+          "acceptedResultMs": 104.59999990463257,
+          "dismissalResultMs": 421.2999997138977,
+          "removalMs": 389.59999990463257,
+          "dispatchMs": 25.09999990463257,
+          "clickToSendMs": 0.19999980926513672,
+          "sendToReplyMs": 35.30000019073486,
+          "replyToAnimationMs": 94,
+          "animationMs": 233.30000019073486,
+          "configuredAnimationMs": 250,
+          "closeStartMs": 154.59999990463257,
+          "animationEndMs": 387.90000009536743,
+          "tapToGoneMs": 364.5,
+          "closeToGoneMs": 235,
+          "sourceMessageVisibleMs": 404.69999980926514,
+          "animationEndToRemovalMs": 1.6999998092651367,
+          "removalToFrameMs": 31.699999809265137,
+          "driverMs": 854.4000000953674
+        },
+        {
+          "durationMs": 116,
+          "acceptedResultMs": 116,
+          "dismissalResultMs": 432.5,
+          "removalMs": 401.2999997138977,
+          "dispatchMs": 36.90000009536743,
+          "clickToSendMs": 0.09999990463256836,
+          "sendToReplyMs": 40.09999990463257,
+          "replyToAnimationMs": 88.80000019073486,
+          "animationMs": 233.59999990463257,
+          "configuredAnimationMs": 250,
+          "closeStartMs": 165.90000009536743,
+          "animationEndMs": 399.5,
+          "tapToGoneMs": 364.3999996185303,
+          "closeToGoneMs": 235.39999961853027,
+          "sourceMessageVisibleMs": 416.09999990463257,
+          "animationEndToRemovalMs": 1.799999713897705,
+          "removalToFrameMs": 31.200000286102295,
+          "driverMs": 865.7999997138977
+        },
+        {
+          "durationMs": 104,
+          "acceptedResultMs": 104,
+          "dismissalResultMs": 420.5,
+          "removalMs": 389.19999980926514,
+          "dispatchMs": 25.09999990463257,
+          "clickToSendMs": 0.2999997138977051,
+          "sendToReplyMs": 37.90000009536743,
+          "replyToAnimationMs": 90.7000002861023,
+          "animationMs": 233.2999997138977,
+          "configuredAnimationMs": 250,
+          "closeStartMs": 154,
+          "animationEndMs": 387.2999997138977,
+          "tapToGoneMs": 364.09999990463257,
+          "closeToGoneMs": 235.19999980926514,
+          "sourceMessageVisibleMs": 404.2999997138977,
+          "animationEndToRemovalMs": 1.9000000953674316,
+          "removalToFrameMs": 31.300000190734863,
+          "driverMs": 853.8999996185303
+        },
+        {
+          "durationMs": 114.30000019073486,
+          "acceptedResultMs": 114.30000019073486,
+          "dismissalResultMs": 430.90000009536743,
+          "removalMs": 399.59999990463257,
+          "dispatchMs": 35,
+          "clickToSendMs": 0.09999990463256836,
+          "sendToReplyMs": 37.200000286102295,
+          "replyToAnimationMs": 92,
+          "animationMs": 233.40000009536743,
+          "configuredAnimationMs": 250,
+          "closeStartMs": 164.30000019073486,
+          "animationEndMs": 397.7000002861023,
+          "tapToGoneMs": 364.59999990463257,
+          "closeToGoneMs": 235.2999997138977,
+          "sourceMessageVisibleMs": 414.40000009536743,
+          "animationEndToRemovalMs": 1.8999996185302734,
+          "removalToFrameMs": 31.300000190734863,
+          "driverMs": 864.3000001907349
+        },
+        {
+          "durationMs": 115.19999980926514,
+          "acceptedResultMs": 115.19999980926514,
+          "dismissalResultMs": 431.90000009536743,
+          "removalMs": 400.40000009536743,
+          "dispatchMs": 36.19999980926514,
+          "clickToSendMs": 0.20000028610229492,
+          "sendToReplyMs": 39.299999713897705,
+          "replyToAnimationMs": 90.30000019073486,
+          "animationMs": 232.5,
+          "configuredAnimationMs": 250,
+          "closeStartMs": 166,
+          "animationEndMs": 398.5,
+          "tapToGoneMs": 364.2000002861023,
+          "closeToGoneMs": 234.40000009536743,
+          "sourceMessageVisibleMs": 415.40000009536743,
+          "animationEndToRemovalMs": 1.9000000953674316,
+          "removalToFrameMs": 31.5,
+          "driverMs": 865.0999999046326
+        },
+        {
+          "durationMs": 102.7999997138977,
+          "acceptedResultMs": 102.7999997138977,
+          "dismissalResultMs": 419.2999997138977,
+          "removalMs": 387.7999997138977,
+          "dispatchMs": 23.699999809265137,
+          "clickToSendMs": 0.09999990463256836,
+          "sendToReplyMs": 38.09999990463257,
+          "replyToAnimationMs": 90.80000019073486,
+          "animationMs": 233.30000019073486,
+          "configuredAnimationMs": 250,
+          "closeStartMs": 152.69999980926514,
+          "animationEndMs": 386,
+          "tapToGoneMs": 364.09999990463257,
+          "closeToGoneMs": 235.09999990463257,
+          "sourceMessageVisibleMs": 402.8999996185303,
+          "animationEndToRemovalMs": 1.799999713897705,
+          "removalToFrameMs": 31.5,
+          "driverMs": 852.5999999046326
+        },
+        {
+          "durationMs": 102.39999961853027,
+          "acceptedResultMs": 102.39999961853027,
+          "dismissalResultMs": 418.8999996185303,
+          "removalMs": 387.7999997138977,
+          "dispatchMs": 23.09999990463257,
+          "clickToSendMs": 0.19999980926513672,
+          "sendToReplyMs": 42.200000286102295,
+          "replyToAnimationMs": 86.7999997138977,
+          "animationMs": 233.30000019073486,
+          "configuredAnimationMs": 250,
+          "closeStartMs": 152.2999997138977,
+          "animationEndMs": 385.59999990463257,
+          "tapToGoneMs": 364.69999980926514,
+          "closeToGoneMs": 235.5,
+          "sourceMessageVisibleMs": 402.5,
+          "animationEndToRemovalMs": 2.1999998092651367,
+          "removalToFrameMs": 31.09999990463257,
+          "driverMs": 852.0999999046326
+        },
+        {
+          "durationMs": 117,
+          "acceptedResultMs": 117,
+          "dismissalResultMs": 433.69999980926514,
+          "removalMs": 402.40000009536743,
+          "dispatchMs": 37.90000009536743,
+          "clickToSendMs": 0.09999990463256836,
+          "sendToReplyMs": 35.19999980926514,
+          "replyToAnimationMs": 93.80000019073486,
+          "animationMs": 233.2999997138977,
+          "configuredAnimationMs": 250,
+          "closeStartMs": 167,
+          "animationEndMs": 400.2999997138977,
+          "tapToGoneMs": 364.5,
+          "closeToGoneMs": 235.40000009536743,
+          "sourceMessageVisibleMs": 417.09999990463257,
+          "animationEndToRemovalMs": 2.1000003814697266,
+          "removalToFrameMs": 31.299999713897705,
+          "driverMs": 850.0999999046326
+        },
+        {
+          "durationMs": 102.60000038146973,
+          "acceptedResultMs": 102.60000038146973,
+          "dismissalResultMs": 419.1000003814697,
+          "removalMs": 387.7000002861023,
+          "dispatchMs": 23.40000009536743,
+          "clickToSendMs": 0.20000028610229492,
+          "sendToReplyMs": 37.39999961853027,
+          "replyToAnimationMs": 91.60000038146973,
+          "animationMs": 233.2999997138977,
+          "configuredAnimationMs": 250,
+          "closeStartMs": 152.60000038146973,
+          "animationEndMs": 385.90000009536743,
+          "tapToGoneMs": 364.30000019073486,
+          "closeToGoneMs": 235.09999990463257,
+          "sourceMessageVisibleMs": 402.7000002861023,
+          "animationEndToRemovalMs": 1.8000001907348633,
+          "removalToFrameMs": 31.40000009536743,
+          "driverMs": 852.4000000953674
+        },
+        {
+          "durationMs": 117.19999980926514,
+          "acceptedResultMs": 117.19999980926514,
+          "dismissalResultMs": 433.69999980926514,
+          "removalMs": 402.30000019073486,
+          "dispatchMs": 37.90000009536743,
+          "clickToSendMs": 0.09999990463256836,
+          "sendToReplyMs": 37.09999990463257,
+          "replyToAnimationMs": 92.09999990463257,
+          "animationMs": 233.40000009536743,
+          "configuredAnimationMs": 250,
+          "closeStartMs": 167.19999980926514,
+          "animationEndMs": 400.59999990463257,
+          "tapToGoneMs": 364.40000009536743,
+          "closeToGoneMs": 235.10000038146973,
+          "sourceMessageVisibleMs": 417.30000019073486,
+          "animationEndToRemovalMs": 1.700000286102295,
+          "removalToFrameMs": 31.399999618530273,
+          "driverMs": 867
+        },
+        {
+          "durationMs": 117.80000019073486,
+          "acceptedResultMs": 117.80000019073486,
+          "dismissalResultMs": 434.5,
+          "removalMs": 403,
+          "dispatchMs": 39.200000286102295,
+          "clickToSendMs": 0.2999997138977051,
+          "sendToReplyMs": 38.59999990463257,
+          "replyToAnimationMs": 89.7000002861023,
+          "animationMs": 233.40000009536743,
+          "configuredAnimationMs": 250,
+          "closeStartMs": 167.80000019073486,
+          "animationEndMs": 401.2000002861023,
+          "tapToGoneMs": 363.7999997138977,
+          "closeToGoneMs": 235.19999980926514,
+          "sourceMessageVisibleMs": 418,
+          "animationEndToRemovalMs": 1.799999713897705,
+          "removalToFrameMs": 31.5,
+          "driverMs": 867.7000002861023
+        },
+        {
+          "durationMs": 104.69999980926514,
+          "acceptedResultMs": 104.69999980926514,
+          "dismissalResultMs": 421.30000019073486,
+          "removalMs": 389.90000009536743,
+          "dispatchMs": 25.5,
+          "clickToSendMs": 0.19999980926513672,
+          "sendToReplyMs": 35.60000038146973,
+          "replyToAnimationMs": 100.39999961853027,
+          "animationMs": 226.30000019073486,
+          "configuredAnimationMs": 250,
+          "closeStartMs": 161.69999980926514,
+          "animationEndMs": 388,
+          "tapToGoneMs": 364.40000009536743,
+          "closeToGoneMs": 228.2000002861023,
+          "sourceMessageVisibleMs": 404.80000019073486,
+          "animationEndToRemovalMs": 1.9000000953674316,
+          "removalToFrameMs": 31.40000009536743,
+          "driverMs": 854.5999999046326
+        },
+        {
+          "durationMs": 103.2000002861023,
+          "acceptedResultMs": 103.2000002861023,
+          "dismissalResultMs": 419.80000019073486,
+          "removalMs": 388.40000009536743,
+          "dispatchMs": 23.90000009536743,
+          "clickToSendMs": 0.09999990463256836,
+          "sendToReplyMs": 36.40000009536743,
+          "replyToAnimationMs": 92.80000019073486,
+          "animationMs": 233.2999997138977,
+          "configuredAnimationMs": 250,
+          "closeStartMs": 153.2000002861023,
+          "animationEndMs": 386.5,
+          "tapToGoneMs": 364.5,
+          "closeToGoneMs": 235.19999980926514,
+          "sourceMessageVisibleMs": 403.30000019073486,
+          "animationEndToRemovalMs": 1.9000000953674316,
+          "removalToFrameMs": 31.40000009536743,
+          "driverMs": 836.4000000953674
+        },
+        {
+          "durationMs": 104.7999997138977,
+          "acceptedResultMs": 104.7999997138977,
+          "dismissalResultMs": 421.40000009536743,
+          "removalMs": 389.7999997138977,
+          "dispatchMs": 25.5,
+          "clickToSendMs": 0.19999980926513672,
+          "sendToReplyMs": 35.09999990463257,
+          "replyToAnimationMs": 94,
+          "animationMs": 233.2000002861023,
+          "configuredAnimationMs": 250,
+          "closeStartMs": 154.7999997138977,
+          "animationEndMs": 388,
+          "tapToGoneMs": 364.2999997138977,
+          "closeToGoneMs": 235,
+          "sourceMessageVisibleMs": 404.90000009536743,
+          "animationEndToRemovalMs": 1.799999713897705,
+          "removalToFrameMs": 31.600000381469727,
+          "driverMs": 854.6999998092651
+        },
+        {
+          "durationMs": 114.09999990463257,
+          "acceptedResultMs": 114.09999990463257,
+          "dismissalResultMs": 430.69999980926514,
+          "removalMs": 399.2999997138977,
+          "dispatchMs": 35,
+          "clickToSendMs": 0.09999990463256836,
+          "sendToReplyMs": 37.09999990463257,
+          "replyToAnimationMs": 91.90000009536743,
+          "animationMs": 233.40000009536743,
+          "configuredAnimationMs": 250,
+          "closeStartMs": 164.09999990463257,
+          "animationEndMs": 397.5,
+          "tapToGoneMs": 364.2999997138977,
+          "closeToGoneMs": 235.19999980926514,
+          "sourceMessageVisibleMs": 414.2999997138977,
+          "animationEndToRemovalMs": 1.799999713897705,
+          "removalToFrameMs": 31.40000009536743,
+          "driverMs": 847.0999999046326
+        },
+        {
+          "durationMs": 117.7000002861023,
+          "acceptedResultMs": 117.7000002861023,
+          "dismissalResultMs": 434.30000019073486,
+          "removalMs": 404,
+          "dispatchMs": 38.59999990463257,
+          "clickToSendMs": 0.20000028610229492,
+          "sendToReplyMs": 37.90000009536743,
+          "replyToAnimationMs": 90.89999961853027,
+          "animationMs": 233.40000009536743,
+          "configuredAnimationMs": 250,
+          "closeStartMs": 167.59999990463257,
+          "animationEndMs": 401,
+          "tapToGoneMs": 365.40000009536743,
+          "closeToGoneMs": 236.40000009536743,
+          "sourceMessageVisibleMs": 417.80000019073486,
+          "animationEndToRemovalMs": 3,
+          "removalToFrameMs": 30.300000190734863,
+          "driverMs": 867.5
+        },
+        {
+          "durationMs": 116.90000009536743,
+          "acceptedResultMs": 116.90000009536743,
+          "dismissalResultMs": 433.69999980926514,
+          "removalMs": 402,
+          "dispatchMs": 37.90000009536743,
+          "clickToSendMs": 0.2999997138977051,
+          "sendToReplyMs": 36.40000009536743,
+          "replyToAnimationMs": 92.30000019073486,
+          "animationMs": 233.40000009536743,
+          "configuredAnimationMs": 250,
+          "closeStartMs": 166.90000009536743,
+          "animationEndMs": 400.30000019073486,
+          "tapToGoneMs": 364.09999990463257,
+          "closeToGoneMs": 235.09999990463257,
+          "sourceMessageVisibleMs": 417.09999990463257,
+          "animationEndToRemovalMs": 1.6999998092651367,
+          "removalToFrameMs": 31.699999809265137,
+          "driverMs": 850
+        },
+        {
+          "durationMs": 114.5,
+          "acceptedResultMs": 114.5,
+          "dismissalResultMs": 431.09999990463257,
+          "removalMs": 399.59999990463257,
+          "dispatchMs": 35.700000286102295,
+          "clickToSendMs": 0.19999980926513672,
+          "sendToReplyMs": 36.19999980926514,
+          "replyToAnimationMs": 92.30000019073486,
+          "animationMs": 233.40000009536743,
+          "configuredAnimationMs": 250,
+          "closeStartMs": 164.40000009536743,
+          "animationEndMs": 397.80000019073486,
+          "tapToGoneMs": 363.8999996185303,
+          "closeToGoneMs": 235.19999980926514,
+          "sourceMessageVisibleMs": 414.59999990463257,
+          "animationEndToRemovalMs": 1.799999713897705,
+          "removalToFrameMs": 31.5,
+          "driverMs": 864.3000001907349
+        },
+        {
+          "durationMs": 117.40000009536743,
+          "acceptedResultMs": 117.40000009536743,
+          "dismissalResultMs": 433.90000009536743,
+          "removalMs": 402.40000009536743,
+          "dispatchMs": 38.19999980926514,
+          "clickToSendMs": 0.10000038146972656,
+          "sendToReplyMs": 36.5,
+          "replyToAnimationMs": 92.5,
+          "animationMs": 233.2999997138977,
+          "configuredAnimationMs": 250,
+          "closeStartMs": 167.30000019073486,
+          "animationEndMs": 400.59999990463257,
+          "tapToGoneMs": 364.2000002861023,
+          "closeToGoneMs": 235.09999990463257,
+          "sourceMessageVisibleMs": 417.5,
+          "animationEndToRemovalMs": 1.8000001907348633,
+          "removalToFrameMs": 31.5,
+          "driverMs": 867.1999998092651
+        },
+        {
+          "durationMs": 114.39999961853027,
+          "acceptedResultMs": 114.39999961853027,
+          "dismissalResultMs": 431,
+          "removalMs": 399.59999990463257,
+          "dispatchMs": 35.299999713897705,
+          "clickToSendMs": 0.20000028610229492,
+          "sendToReplyMs": 36.59999990463257,
+          "replyToAnimationMs": 92.2999997138977,
+          "animationMs": 233.40000009536743,
+          "configuredAnimationMs": 250,
+          "closeStartMs": 164.39999961853027,
+          "animationEndMs": 397.7999997138977,
+          "tapToGoneMs": 364.30000019073486,
+          "closeToGoneMs": 235.2000002861023,
+          "sourceMessageVisibleMs": 414.59999990463257,
+          "animationEndToRemovalMs": 1.8000001907348633,
+          "removalToFrameMs": 31.40000009536743,
+          "driverMs": 864.2999997138977
+        },
+        {
+          "durationMs": 112.2999997138977,
+          "acceptedResultMs": 112.2999997138977,
+          "dismissalResultMs": 428.7999997138977,
+          "removalMs": 397.69999980926514,
+          "dispatchMs": 33,
+          "clickToSendMs": 0.2999997138977051,
+          "sendToReplyMs": 36.40000009536743,
+          "replyToAnimationMs": 92.5,
+          "animationMs": 233.40000009536743,
+          "configuredAnimationMs": 250,
+          "closeStartMs": 162.19999980926514,
+          "animationEndMs": 395.59999990463257,
+          "tapToGoneMs": 364.69999980926514,
+          "closeToGoneMs": 235.5,
+          "sourceMessageVisibleMs": 412.5,
+          "animationEndToRemovalMs": 2.0999999046325684,
+          "removalToFrameMs": 31.09999990463257,
+          "driverMs": 862
+        },
+        {
+          "durationMs": 116,
+          "acceptedResultMs": 116,
+          "dismissalResultMs": 432.69999980926514,
+          "removalMs": 401.09999990463257,
+          "dispatchMs": 37.09999990463257,
+          "clickToSendMs": 0.19999980926513672,
+          "sendToReplyMs": 36,
+          "replyToAnimationMs": 92.7000002861023,
+          "animationMs": 233.19999980926514,
+          "configuredAnimationMs": 250,
+          "closeStartMs": 166,
+          "animationEndMs": 399.19999980926514,
+          "tapToGoneMs": 364,
+          "closeToGoneMs": 235.09999990463257,
+          "sourceMessageVisibleMs": 416,
+          "animationEndToRemovalMs": 1.9000000953674316,
+          "removalToFrameMs": 31.59999990463257,
+          "driverMs": 865.9000000953674
+        },
+        {
+          "durationMs": 120.30000019073486,
+          "acceptedResultMs": 120.30000019073486,
+          "dismissalResultMs": 437,
+          "removalMs": 405.30000019073486,
+          "dispatchMs": 41.19999980926514,
+          "clickToSendMs": 0.10000038146972656,
+          "sendToReplyMs": 35.19999980926514,
+          "replyToAnimationMs": 93.80000019073486,
+          "animationMs": 233.2999997138977,
+          "configuredAnimationMs": 250,
+          "closeStartMs": 170.30000019073486,
+          "animationEndMs": 403.59999990463257,
+          "tapToGoneMs": 364.1000003814697,
+          "closeToGoneMs": 235,
+          "sourceMessageVisibleMs": 420.40000009536743,
+          "animationEndToRemovalMs": 1.700000286102295,
+          "removalToFrameMs": 31.699999809265137,
+          "driverMs": 853.4000000953674
+        },
+        {
+          "durationMs": 112.19999980926514,
+          "acceptedResultMs": 112.19999980926514,
+          "dismissalResultMs": 428.8999996185303,
+          "removalMs": 397.69999980926514,
+          "dispatchMs": 33,
+          "clickToSendMs": 0.19999980926513672,
+          "sendToReplyMs": 37.80000019073486,
+          "replyToAnimationMs": 91.2999997138977,
+          "animationMs": 233.30000019073486,
+          "configuredAnimationMs": 250,
+          "closeStartMs": 162.2999997138977,
+          "animationEndMs": 395.59999990463257,
+          "tapToGoneMs": 364.69999980926514,
+          "closeToGoneMs": 235.40000009536743,
+          "sourceMessageVisibleMs": 412.3999996185303,
+          "animationEndToRemovalMs": 2.0999999046325684,
+          "removalToFrameMs": 31.199999809265137,
+          "driverMs": 862.1999998092651
+        },
+        {
+          "durationMs": 117.09999990463257,
+          "acceptedResultMs": 117.09999990463257,
+          "dismissalResultMs": 433.7999997138977,
+          "removalMs": 402.69999980926514,
+          "dispatchMs": 38,
+          "clickToSendMs": 0.19999980926513672,
+          "sendToReplyMs": 36.80000019073486,
+          "replyToAnimationMs": 92.19999980926514,
+          "animationMs": 233.30000019073486,
+          "configuredAnimationMs": 250,
+          "closeStartMs": 167.19999980926514,
+          "animationEndMs": 400.5,
+          "tapToGoneMs": 364.69999980926514,
+          "closeToGoneMs": 235.5,
+          "sourceMessageVisibleMs": 417.2999997138977,
+          "animationEndToRemovalMs": 2.1999998092651367,
+          "removalToFrameMs": 31.09999990463257,
+          "driverMs": 867
+        },
+        {
+          "durationMs": 113,
+          "acceptedResultMs": 113,
+          "dismissalResultMs": 429.7000002861023,
+          "removalMs": 398.40000009536743,
+          "dispatchMs": 34,
+          "clickToSendMs": 0.3000001907348633,
+          "sendToReplyMs": 36.69999980926514,
+          "replyToAnimationMs": 92.10000038146973,
+          "animationMs": 233.39999961853027,
+          "configuredAnimationMs": 250,
+          "closeStartMs": 163.10000038146973,
+          "animationEndMs": 396.5,
+          "tapToGoneMs": 364.40000009536743,
+          "closeToGoneMs": 235.2999997138977,
+          "sourceMessageVisibleMs": 413.2000002861023,
+          "animationEndToRemovalMs": 1.9000000953674316,
+          "removalToFrameMs": 31.300000190734863,
+          "driverMs": 862.9000000953674
+        },
+        {
+          "durationMs": 114.39999961853027,
+          "acceptedResultMs": 114.39999961853027,
+          "dismissalResultMs": 431.2999997138977,
+          "removalMs": 399.69999980926514,
+          "dispatchMs": 35.299999713897705,
+          "clickToSendMs": 0.20000028610229492,
+          "sendToReplyMs": 38.299999713897705,
+          "replyToAnimationMs": 90.80000019073486,
+          "animationMs": 233.2999997138977,
+          "configuredAnimationMs": 250,
+          "closeStartMs": 164.59999990463257,
+          "animationEndMs": 397.8999996185303,
+          "tapToGoneMs": 364.40000009536743,
+          "closeToGoneMs": 235.09999990463257,
+          "sourceMessageVisibleMs": 414.69999980926514,
+          "animationEndToRemovalMs": 1.8000001907348633,
+          "removalToFrameMs": 31.59999990463257,
+          "driverMs": 864.2999997138977
+        },
+        {
+          "durationMs": 120.69999980926514,
+          "acceptedResultMs": 120.69999980926514,
+          "dismissalResultMs": 437.2999997138977,
+          "removalMs": 406,
+          "dispatchMs": 41.69999980926514,
+          "clickToSendMs": 0.20000028610229492,
+          "sendToReplyMs": 36.19999980926514,
+          "replyToAnimationMs": 92.5,
+          "animationMs": 233.40000009536743,
+          "configuredAnimationMs": 250,
+          "closeStartMs": 170.59999990463257,
+          "animationEndMs": 404,
+          "tapToGoneMs": 364.30000019073486,
+          "closeToGoneMs": 235.40000009536743,
+          "sourceMessageVisibleMs": 420.7999997138977,
+          "animationEndToRemovalMs": 2,
+          "removalToFrameMs": 31.299999713897705,
+          "driverMs": 870.5
+        },
+        {
+          "durationMs": 119.19999980926514,
+          "acceptedResultMs": 119.19999980926514,
+          "dismissalResultMs": 435.8999996185303,
+          "removalMs": 404.19999980926514,
+          "dispatchMs": 41.59999990463257,
+          "clickToSendMs": 0.09999990463256836,
+          "sendToReplyMs": 35.69999980926514,
+          "replyToAnimationMs": 91.7000002861023,
+          "animationMs": 233.40000009536743,
+          "configuredAnimationMs": 250,
+          "closeStartMs": 169.09999990463257,
+          "animationEndMs": 402.5,
+          "tapToGoneMs": 362.59999990463257,
+          "closeToGoneMs": 235.09999990463257,
+          "sourceMessageVisibleMs": 419.2999997138977,
+          "animationEndToRemovalMs": 1.6999998092651367,
+          "removalToFrameMs": 31.699999809265137,
+          "driverMs": 869
+        },
+        {
+          "durationMs": 114.30000019073486,
+          "acceptedResultMs": 114.30000019073486,
+          "dismissalResultMs": 430.90000009536743,
+          "removalMs": 399.40000009536743,
+          "dispatchMs": 35.09999990463257,
+          "clickToSendMs": 0.3000001907348633,
+          "sendToReplyMs": 36.19999980926514,
+          "replyToAnimationMs": 92.80000019073486,
+          "animationMs": 233.19999980926514,
+          "configuredAnimationMs": 250,
+          "closeStartMs": 164.40000009536743,
+          "animationEndMs": 397.59999990463257,
+          "tapToGoneMs": 364.30000019073486,
+          "closeToGoneMs": 235,
+          "sourceMessageVisibleMs": 414.40000009536743,
+          "animationEndToRemovalMs": 1.8000001907348633,
+          "removalToFrameMs": 31.5,
+          "driverMs": 847.5
+        },
+        {
+          "durationMs": 115,
+          "acceptedResultMs": 115,
+          "dismissalResultMs": 431.5,
+          "removalMs": 400.30000019073486,
+          "dispatchMs": 35.700000286102295,
+          "clickToSendMs": 0.19999980926513672,
+          "sendToReplyMs": 36.09999990463257,
+          "replyToAnimationMs": 92.90000009536743,
+          "animationMs": 233.30000019073486,
+          "configuredAnimationMs": 250,
+          "closeStartMs": 164.90000009536743,
+          "animationEndMs": 398.2000002861023,
+          "tapToGoneMs": 364.59999990463257,
+          "closeToGoneMs": 235.40000009536743,
+          "sourceMessageVisibleMs": 415.09999990463257,
+          "animationEndToRemovalMs": 2.0999999046325684,
+          "removalToFrameMs": 31.199999809265137,
+          "driverMs": 864.9000000953674
+        },
+        {
+          "durationMs": 114.19999980926514,
+          "acceptedResultMs": 114.19999980926514,
+          "dismissalResultMs": 430.69999980926514,
+          "removalMs": 399.19999980926514,
+          "dispatchMs": 35.299999713897705,
+          "clickToSendMs": 0.20000028610229492,
+          "sendToReplyMs": 36.59999990463257,
+          "replyToAnimationMs": 92.09999990463257,
+          "animationMs": 233.19999980926514,
+          "configuredAnimationMs": 250,
+          "closeStartMs": 164.19999980926514,
+          "animationEndMs": 397.3999996185303,
+          "tapToGoneMs": 363.90000009536743,
+          "closeToGoneMs": 235,
+          "sourceMessageVisibleMs": 414.3999996185303,
+          "animationEndToRemovalMs": 1.8000001907348633,
+          "removalToFrameMs": 31.5,
+          "driverMs": 863.8999996185303
+        },
+        {
+          "durationMs": 119.59999990463257,
+          "acceptedResultMs": 119.59999990463257,
+          "dismissalResultMs": 436.19999980926514,
+          "removalMs": 404.69999980926514,
+          "dispatchMs": 40.59999990463257,
+          "clickToSendMs": 0.19999980926513672,
+          "sendToReplyMs": 38.200000286102295,
+          "replyToAnimationMs": 90.59999990463257,
+          "animationMs": 233.30000019073486,
+          "configuredAnimationMs": 250,
+          "closeStartMs": 169.59999990463257,
+          "animationEndMs": 402.90000009536743,
+          "tapToGoneMs": 364.09999990463257,
+          "closeToGoneMs": 235.09999990463257,
+          "sourceMessageVisibleMs": 419.7999997138977,
+          "animationEndToRemovalMs": 1.799999713897705,
+          "removalToFrameMs": 31.5,
+          "driverMs": 869.4000000953674
+        },
+        {
+          "durationMs": 110.5,
+          "acceptedResultMs": 110.5,
+          "dismissalResultMs": 427.09999990463257,
+          "removalMs": 395.90000009536743,
+          "dispatchMs": 31.700000286102295,
+          "clickToSendMs": 0.09999990463256836,
+          "sendToReplyMs": 38.19999980926514,
+          "replyToAnimationMs": 90.5,
+          "animationMs": 233.30000019073486,
+          "configuredAnimationMs": 250,
+          "closeStartMs": 160.5,
+          "animationEndMs": 393.80000019073486,
+          "tapToGoneMs": 364.19999980926514,
+          "closeToGoneMs": 235.40000009536743,
+          "sourceMessageVisibleMs": 410.7000002861023,
+          "animationEndToRemovalMs": 2.0999999046325684,
+          "removalToFrameMs": 31.199999809265137,
+          "driverMs": 860.3000001907349
+        },
+        {
+          "durationMs": 114.30000019073486,
+          "acceptedResultMs": 114.30000019073486,
+          "dismissalResultMs": 430.90000009536743,
+          "removalMs": 399.6000003814697,
+          "dispatchMs": 35.10000038146973,
+          "clickToSendMs": 0.19999980926513672,
+          "sendToReplyMs": 35.40000009536743,
+          "replyToAnimationMs": 93.59999990463257,
+          "animationMs": 233.30000019073486,
+          "configuredAnimationMs": 250,
+          "closeStartMs": 164.30000019073486,
+          "animationEndMs": 397.6000003814697,
+          "tapToGoneMs": 364.5,
+          "closeToGoneMs": 235.30000019073486,
+          "sourceMessageVisibleMs": 414.40000009536743,
+          "animationEndToRemovalMs": 2,
+          "removalToFrameMs": 31.299999713897705,
+          "driverMs": 864.1000003814697
+        },
+        {
+          "durationMs": 104.2999997138977,
+          "acceptedResultMs": 104.2999997138977,
+          "dismissalResultMs": 420.7999997138977,
+          "removalMs": 389.3999996185303,
+          "dispatchMs": 24.899999618530273,
+          "clickToSendMs": 0.20000028610229492,
+          "sendToReplyMs": 35.299999713897705,
+          "replyToAnimationMs": 93.90000009536743,
+          "animationMs": 233.5,
+          "configuredAnimationMs": 250,
+          "closeStartMs": 154.2999997138977,
+          "animationEndMs": 387.7999997138977,
+          "tapToGoneMs": 364.5,
+          "closeToGoneMs": 235.09999990463257,
+          "sourceMessageVisibleMs": 404.5,
+          "animationEndToRemovalMs": 1.5999999046325684,
+          "removalToFrameMs": 31.40000009536743,
+          "driverMs": 854.0999999046326
+        },
+        {
+          "durationMs": 117.30000019073486,
+          "acceptedResultMs": 117.30000019073486,
+          "dismissalResultMs": 434,
+          "removalMs": 402.40000009536743,
+          "dispatchMs": 38.40000009536743,
+          "clickToSendMs": 0.09999990463256836,
+          "sendToReplyMs": 36,
+          "replyToAnimationMs": 92.80000019073486,
+          "animationMs": 233.30000019073486,
+          "configuredAnimationMs": 250,
+          "closeStartMs": 167.30000019073486,
+          "animationEndMs": 400.6000003814697,
+          "tapToGoneMs": 364,
+          "closeToGoneMs": 235.09999990463257,
+          "sourceMessageVisibleMs": 417.40000009536743,
+          "animationEndToRemovalMs": 1.799999713897705,
+          "removalToFrameMs": 31.59999990463257,
+          "driverMs": 850.6000003814697
+        },
+        {
+          "durationMs": 103.7000002861023,
+          "acceptedResultMs": 103.7000002861023,
+          "dismissalResultMs": 420.30000019073486,
+          "removalMs": 388.80000019073486,
+          "dispatchMs": 24.600000381469727,
+          "clickToSendMs": 0.09999990463256836,
+          "sendToReplyMs": 37,
+          "replyToAnimationMs": 92,
+          "animationMs": 233.2999997138977,
+          "configuredAnimationMs": 250,
+          "closeStartMs": 153.7000002861023,
+          "animationEndMs": 387,
+          "tapToGoneMs": 364.19999980926514,
+          "closeToGoneMs": 235.09999990463257,
+          "sourceMessageVisibleMs": 403.90000009536743,
+          "animationEndToRemovalMs": 1.8000001907348633,
+          "removalToFrameMs": 31.5,
+          "driverMs": 853.5
+        }
+      ],
+      "p50": 114.30000019073486,
+      "p95": 119.59999990463257
+    }
+  ]
+}

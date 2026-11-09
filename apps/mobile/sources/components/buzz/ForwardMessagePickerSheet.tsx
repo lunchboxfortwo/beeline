@@ -1,7 +1,7 @@
 import { RoomListSectionHeader } from '@/components/buzz/RoomListSectionHeader';
 import { HullDialogInput } from '@/components/buzz/HullDialog';
 import { useTextDraft } from '@/buzz/use-text-draft';
-import React, { useMemo } from 'react';
+import React, { useEffect, useMemo, useState } from 'react';
 import { ScrollView, Text, View } from 'react-native';
 import { StyleSheet, useUnistyles } from 'react-native-unistyles';
 import type { ForwardTarget, ForwardTargetGroup } from '@/buzz/message-forward';
@@ -17,7 +17,8 @@ type ForwardMessagePickerSheetProps = {
   busyRoomId: string | null;
   error: string | null;
   onClose: () => void;
-  onForward: (target: ForwardTarget) => void;
+  onDismiss?: () => void;
+  onForward: (target: ForwardTarget) => Promise<boolean>;
   targets: readonly ForwardTarget[] | null;
   visible: boolean;
   draftContext?: string;
@@ -33,12 +34,26 @@ export function ForwardMessagePickerSheet({
   busyRoomId,
   error,
   onClose,
+  onDismiss,
   onForward,
   targets,
   visible,
   draftContext = 'global',
 }: ForwardMessagePickerSheetProps) {
   const { theme } = useUnistyles();
+  const [completedTarget, setCompletedTarget] = useState<string | null>(null);
+  const [resultLaidOut, setResultLaidOut] = useState(false);
+  useEffect(() => {
+    if (visible) setCompletedTarget(null);
+  }, [visible]);
+  useEffect(() => {
+    if (!completedTarget || !resultLaidOut || !visible) return;
+    // Wait for the native result layout, then let it paint before dismissal.
+    let frame = requestAnimationFrame(() => {
+      frame = requestAnimationFrame(onClose);
+    });
+    return () => cancelAnimationFrame(frame);
+  }, [completedTarget, resultLaidOut, visible, onClose]);
   const [query, setQuery] = useTextDraft(`forward-search:${draftContext}`, '');
 
   const filteredTargets = useMemo(() => {
@@ -53,6 +68,7 @@ export function ForwardMessagePickerSheet({
     <HullActionSheetModal
       accessibilityLabel="Close forward picker"
       onClose={onClose}
+      onDismiss={onDismiss}
       subtitle="Choose a Room or member in this Workspace"
       testID="forward-room-picker"
       title="Forward message"
@@ -96,15 +112,24 @@ export function ForwardMessagePickerSheet({
               <React.Fragment key={section.group}>
                 <RoomListSectionHeader title={section.label} surface="sheet" />
                 {sectionTargets.map((target) => (
-                  <HullActionSheetRow
-                    chevron="right"
-                    disabled={Boolean(busyRoomId)}
-                    key={`${target.kind}:${target.id}`}
-                    label={target.label}
-                    metadata={busyRoomId === target.id ? 'SENDING' : undefined}
-                    onPress={() => onForward(target)}
-                    testID={`forward-${target.kind}-${target.id}`}
-                  />
+                  <View
+                    key={`${target.kind}:${target.id}:${completedTarget === target.id ? 'accepted' : 'pending'}`}
+                    testID={completedTarget === target.id ? 'forward-accepted-result' : undefined}
+                    onLayout={completedTarget === target.id ? () => setResultLaidOut(true) : undefined}
+                  >
+                    <HullActionSheetRow
+                      chevron="right"
+                      disabled={Boolean(busyRoomId || (completedTarget && completedTarget !== target.id))}
+                      label={target.label}
+                      metadata={completedTarget === target.id ? 'FORWARDED' : busyRoomId === target.id ? 'SENDING' : undefined}
+                      onPress={completedTarget ? undefined : async () => {
+                        setCompletedTarget(null);
+                        setResultLaidOut(false);
+                        if (await onForward(target)) setCompletedTarget(target.id);
+                      }}
+                      testID={`forward-${target.kind}-${target.id}`}
+                    />
+                  </View>
                 ))}
               </React.Fragment>
             );

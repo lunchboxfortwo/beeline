@@ -60,7 +60,7 @@ type Props = {
   setForwardTarget: React.Dispatch<React.SetStateAction<ChatDisplayMessage | null>>;
   setForwardRooms: React.Dispatch<React.SetStateAction<readonly ForwardTarget[] | null>>;
   setForwardError: React.Dispatch<React.SetStateAction<string | null>>;
-  forwardToRoom: (target: ForwardTarget) => Promise<void>;
+  forwardToRoom: (target: ForwardTarget) => Promise<boolean>;
   forwardRooms: readonly ForwardTarget[] | null;
   forwardTarget: ChatDisplayMessage | null;
   insets: import("react-native-safe-area-context/lib/typescript/src/SafeArea.types").EdgeInsets;
@@ -398,10 +398,12 @@ export function ChatSurfaceOverlays({
         onClose={() => {
           if (forwardBusyRoomId) return;
           setForwardTarget(null);
+        }}
+        onDismiss={() => {
           setForwardRooms(null);
           setForwardError(null);
         }}
-        onForward={(target) => void forwardToRoom(target)}
+        onForward={forwardToRoom}
         targets={forwardRooms}
         visible={Boolean(forwardTarget)}
       />

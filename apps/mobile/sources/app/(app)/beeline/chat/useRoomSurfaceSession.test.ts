@@ -6,6 +6,7 @@ import { roomTransitionWork } from '@/buzz/room-transition-work';
 import { act, create, type ReactTestRenderer } from 'react-test-renderer';
 import { describe, expect, it, vi } from 'vitest';
 import { SurfaceResponseCache } from '@beeline/buzz-client';
+import * as runtimeConfig from '@/buzz/runtime-config';
 import { prefetchPushRoom } from '@/push/push-room-prefetch';
 import { mobileSurfaceCache } from '@/buzz/surface-storage';
 import { READ_CURSOR_DEBOUNCE_MS } from '@/buzz/read-cursor-advance';
@@ -43,6 +44,18 @@ const scope1 = fixtureScope1();
   });
 });
 describe('useRoomSurfaceSession', () => {
+  it('starts a known-viewer cache miss on the tap stack before route mounting', () => {
+    controls.hotViewer = true;
+    controls.cached = null;
+    const config = vi.spyOn(runtimeConfig, 'getBuzzRuntimeConfig').mockReturnValue({
+      monolithUrl: 'https://relay.test', relayUrl: 'https://usebeeline.app',
+    });
+    try {
+      prefetchPushRoom('cold-tap-immediate', 'room-missing');
+      expect(controls.roomReads).toBe(1);
+    } finally { config.mockRestore(); }
+  });
+
   it('paints a tap-owned cached Room and completes setup without a visible-row handshake', async () => {
     controls.hotViewer = true;
     controls.cached = { ...roomView('room-a'), messages: [{ id: 'target', text: 'Already received', createdAt: 10,
@@ -750,9 +763,9 @@ describe('useRoomSurfaceSession', () => {
   });
 
 
-  it('yields a paint turn after cache apply before installing the live watch', async () => {
+  for (const hasCache of [true, false]) it(`yields only for cached content before the live watch (cache=${hasCache})`, async () => {
     const { queued, receivers } = stubFrameScheduler();
-    controls.cached = roomView('room-a');
+    controls.cached = hasCache ? roomView('room-a') : null;
     controls.roomResponse = null;
     let current!: UseRoomSurfaceSessionResult;
     let renderer!: ReactTestRenderer;
@@ -765,6 +778,12 @@ describe('useRoomSurfaceSession', () => {
       );
     });
     await flushMicrotasks();
+    if (!hasCache) {
+      expect(controls.transportCount).toBe(1);
+      expect(controls.subscriptions).toHaveLength(1);
+      await act(async () => renderer.unmount());
+      return;
+    }
     expect(current.roomSurface?.room.id).toBe('room-a');
     expect(controls.subscriptions).toHaveLength(0);
     expect(controls.transportCount).toBe(0);

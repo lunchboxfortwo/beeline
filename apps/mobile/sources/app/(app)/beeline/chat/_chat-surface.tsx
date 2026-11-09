@@ -1,3 +1,4 @@
+import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { IndexRow } from '@/components/buzz/IndexRow';
 import { type MutableRefObject } from 'react';
 import { View, Text, TouchableOpacity, Platform } from 'react-native';
@@ -51,6 +52,19 @@ import { ChatSurfaceWorkPane } from './ChatSurfaceWorkPane';
 import { ChatSurfaceOverlays } from './ChatSurfaceOverlays';
 
 
+
+/** The existing loading surface, without mounting an empty transcript. */
+export function ChatOpeningSurface({ isCorner }: { isCorner: boolean }) {
+  const insets = useSafeAreaInsets();
+  return (
+    <View style={[styles.container, styles.center, { paddingTop: insets.top }]}>
+      <SurfaceGlyphLoader testID="room-surface-loader" />
+      <Text style={styles.loadingText}>
+        LOADING {(isCorner ? CORNER_LABEL : ROOM_LABEL).toUpperCase()}
+      </Text>
+    </View>
+  );
+}
 
 export function BuzzChatSurface({
   session,
@@ -446,14 +460,7 @@ export function BuzzChatSurface({
         </View>
       );
     }
-    return (
-      <View style={[styles.container, styles.center, { paddingTop: insets.top }]}>
-        <SurfaceGlyphLoader testID="room-surface-loader" />
-        <Text style={styles.loadingText}>
-          LOADING {(isCorner ? CORNER_LABEL : ROOM_LABEL).toUpperCase()}
-        </Text>
-      </View>
-    );
+    return <ChatOpeningSurface isCorner={isCorner} />;
   }
 
   return (

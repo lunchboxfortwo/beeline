@@ -795,6 +795,8 @@ silently force every unrelated memoized conversation row to render again.
 
 ## Forward-message completion timing
 
+The picker now renders FORWARDED after the matching send reply. The passive observer records that visible result across two frames separately from dismissal. Completion uses this accepted-result frame when present; clients without feedback retain the removal-frame fallback. `acceptedResultMs` and `dismissalResultMs` preserve both boundaries, and the original animation and removal segments remain available. Compare the new accepted-result metric with the old dismissal metric explicitly; neither is a physical scanout measurement.
+
 The forward-message row preserves its original start, fixture, click, accepted
 server write, hidden-picker completion, and two result frames. Before the start,
 `web-forward-timing.mjs` installs a passive DOM-removal observer. It records the
@@ -807,9 +809,9 @@ percentiles under `profile`. These timestamps observe the real app; they neither
 close the picker nor change its exit animation. Missing profile events fail the
 sample. Socket instrumentation retains timing only, without message contents.
 
-This is a measurement-contract correction, not an app speedup against earlier
-web-inventory numbers. The existing web modal's exit animation remains a design
-floor. To select this interaction without changing its two batches of twenty
+The removal audit corrects driver observation delay; it does not make dismissal
+faster. The existing animation remains a floor on dismissal, while accepted
+feedback can appear sooner. To select this interaction without changing its two batches of twenty
 samples, use `LATENCY_RIG_WEB_INTERACTION=forward-message` with `web-run.sh`;
 uncaptured inventory entries remain explicitly unmeasured and the full score
 remains unavailable. This selection matches the create-corner capture lane.
@@ -845,6 +847,6 @@ elapsed-time value) from `animationMs` (the observed start/end event interval).
 `closeStartMs`, `animationEndMs`, `removalMs`, `tapToGoneMs`, and
 `sourceMessageVisibleMs` expose the actual marks. The last observes the existing
 source message after removal, not a forwarded message in a destination Room that
-this route never opens. Missing visibility stays null. The primary two-frame
-completion metric is unchanged; the direct tap-to-gone value excludes those
+this route never opens. Missing visibility stays null. The dismissal audit retains its two-frame
+completion boundary alongside accepted-result timing; the direct tap-to-gone value excludes those
 frames and the pre-click driver dispatch.

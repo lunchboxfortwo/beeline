@@ -1,0 +1,49 @@
+
+> @beeline/mobile@0.2.22 test
+> vitest --run sources/buzz/unistyles-batching.test.ts --maxWorkers=1
+
+
+ RUN  v3.2.7 /home/lunchbox/.local/state/beeline/corners/3b155900f9007458ed563c679b1178522acdafb9eba3ee16d05ad311d9f0d0a8/apps/mobile
+
+ ❯ sources/buzz/unistyles-batching.test.ts (2 tests | 2 failed) 11ms
+   × style additions and removals batch before the next browser paint (frames=true) 8ms
+     → adding styles must not rebuild the sheet per style
+
+30 !== 0
+
+   × style additions and removals batch before the next browser paint (frames=false) 2ms
+     → adding styles must not rebuild the sheet per style
+
+30 !== 0
+
+
+⎯⎯⎯⎯⎯⎯⎯ Failed Tests 2 ⎯⎯⎯⎯⎯⎯⎯
+
+ FAIL  sources/buzz/unistyles-batching.test.ts > style additions and removals batch before the next browser paint (frames=true)
+ FAIL  sources/buzz/unistyles-batching.test.ts > style additions and removals batch before the next browser paint (frames=false)
+AssertionError: adding styles must not rebuild the sheet per style
+
+30 !== 0
+
+
+- Expected
++ Received
+
+- 0
++ 30
+
+ ❯ sources/buzz/unistyles-batching.test.ts:46:10
+     44|   const css = new exports.CSSState({ runtime: {} });
+     45|   for (let i = 0; i < 30; i++) css.add(`row${i}`, { color: 'red' });
+     46|   assert.equal(writes.length, 0, 'adding styles must not rebuild the s…
+       |          ^
+     47|   await Promise.resolve();
+     48|   if (browserFrames) {
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[1/2]⎯
+
+
+ Test Files  1 failed (1)
+      Tests  2 failed (2)
+   Start at  12:16:12
+   Duration  571ms (transform 59ms, setup 67ms, collect 338ms, tests 11ms, environment 0ms, prepare 49ms)

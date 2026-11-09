@@ -245,6 +245,7 @@ vi.mock('./_chat-surface', async () => {
     );
   }
   return {
+    ChatOpeningSurface: () => React.createElement('room-opening'),
     BuzzChatSurface: (props: any) => {
       controls.surfaceRenders++;
       return controls.scopeProbe

@@ -1,0 +1,61 @@
+
+> @beeline/mobile@0.2.22 test
+> vitest --run sources/app/(app)/beeline/chat/useRoomSurfaceSession-2.test.ts --maxWorkers=1
+
+
+ RUN  v3.2.7 /home/lunchbox/.local/state/beeline/corners/3b155900f9007458ed563c679b1178522acdafb9eba3ee16d05ad311d9f0d0a8/apps/mobile
+
+ ❯ sources/app/(app)/beeline/chat/useRoomSurfaceSession-2.test.ts (25 tests | 1 failed) 94ms
+   ✓ useRoomSurfaceSession > keeps the known viewer on a cold visit before asynchronous identity setup 10ms
+   ✓ useRoomSurfaceSession > renders the hot target before the asynchronous session has even read its identity 4ms
+   ✓ useRoomSurfaceSession > paints an opening reply while cached-frame callbacks and identity setup are still pending 2ms
+   ✓ useRoomSurfaceSession > paints a missing-row publish after disk read while identity and then outbox remain pending 10ms
+   ✓ useRoomSurfaceSession > paints 1 received messages on the first frame before any network read 2ms
+   ✓ useRoomSurfaceSession > paints 5 received messages on the first frame before any network read 1ms
+   ✓ useRoomSurfaceSession > paints cached newest row before authorization occupies the session 3ms
+   ✓ useRoomSurfaceSession > acknowledges every burst delta after its committed render without a follow-up read 5ms
+   ✓ useRoomSurfaceSession > acknowledges an idempotent delta immediately because its row is already painted 3ms
+   ✓ useRoomSurfaceSession > records the same-server pre-write-to-paint upper bound returned by the server 4ms
+   ✓ useRoomSurfaceSession > opens a cached corner and applies its fresh response without a draw handshake 5ms
+   × useRoomSurfaceSession > keeps the loading surface until a cold Room response is available 9ms
+     → expected 2 to be +0 // Object.is equality
+   ✓ useRoomSurfaceSession > Send: pending state reaches the Room once, unchanged bookkeeping stays quiet, and failures remain visible 5ms
+   ✓ useRoomSurfaceSession > Send: pushed queued commands paint without a follow-up Room read 3ms
+   ✓ useRoomSurfaceSession > signals a targetless phone-write so an open Room can paint without remounting 2ms
+   ✓ useRoomSurfaceSession > still waits for the committed-row delta when a phone-write names its message 2ms
+   ✓ useRoomSurfaceSession > reads nothing for the SYNC-01 hint whose delta follows 2ms
+   ✓ useRoomSurfaceSession > reads nothing for the STOP-01 hint whose delta follows 2ms
+   ✓ useRoomSurfaceSession > STOP-01 clears the working turn from its turn delta, with no Room read 3ms
+   ✓ useRoomSurfaceSession > paints a paired delta and reads no Room for it 3ms
+   ✓ useRoomSurfaceSession > reconciles immediately when a committed delta cannot be delivered 2ms
+   ✓ useRoomSurfaceSession > reads the Room once for the fallback of a delivery the server could not read 2ms
+   ✓ useRoomSurfaceSession > starts the single opening Room read after its subscribe 2ms
+   ✓ useRoomSurfaceSession > reads once on its first handshake and never starts reads from resubscribe 2ms
+   ✓ useRoomSurfaceSession > uses the push read already started before route mount without a subscription reread 4ms
+
+⎯⎯⎯⎯⎯⎯⎯ Failed Tests 1 ⎯⎯⎯⎯⎯⎯⎯
+
+ FAIL  sources/app/(app)/beeline/chat/useRoomSurfaceSession-2.test.ts > useRoomSurfaceSession > keeps the loading surface until a cold Room response is available
+AssertionError: expected 2 to be +0 // Object.is equality
+
+- Expected
++ Received
+
+- 0
++ 2
+
+ ❯ sources/app/(app)/beeline/chat/useRoomSurfaceSession-2.test.ts:412:37
+    410|     await act(async () => { renderer = create(React.createElement(Buzz…
+    411|     await flushEffects();
+    412|     expect(controls.surfaceRenders).toBe(0);
+       |                                     ^
+    413|     expect(renderer.root.findAllByType('room-opening')).toHaveLength(1…
+    414|     await act(async () => controls.responses[0]!.apply(roomView('room-…
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[1/1]⎯
+
+
+ Test Files  1 failed (1)
+      Tests  1 failed | 24 passed (25)
+   Start at  12:19:24
+   Duration  787ms (transform 349ms, setup 61ms, collect 481ms, tests 94ms, environment 0ms, prepare 44ms)

@@ -67,6 +67,8 @@ If joining Conversation mode fails, tap Retry in the error dialog to make anothe
 
 The phone keeps saved Rooms visible during a network interruption. It reconnects once after a socket request fails; only a failed replacement shows the app’s connection banner.
 
+Forwarding marks the selected destination FORWARDED as soon as the send is accepted, before the picker finishes closing.
+
 During server deploys, Beeline stops accepting new requests, lets admitted requests finish for up to five seconds, and sends live connections a restart close so they can reconnect. Shutdown is bounded to ten seconds; Fly allows twenty seconds before forcing a stop.
 
 ## One message

@@ -50,8 +50,10 @@ async function messageMenu(p, f) {
 export const steps = {
   'open-room': async (p, f) => {
     await list(p);
+    const target = id(p, `room-${f.roomId}`);
+    await visible(target);
     return {
-      act: () => click(id(p, `room-${f.roomId}`)),
+      act: () => click(target),
       done: () => visible(p.getByText(f.text, { exact: true }).first()),
     };
   },

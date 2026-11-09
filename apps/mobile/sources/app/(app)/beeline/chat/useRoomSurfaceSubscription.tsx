@@ -116,15 +116,16 @@ export function useRoomSurfaceSubscription([
     let cacheAddress: ReturnType<typeof surfaceAddress> | undefined;
     let cacheWriteTimer: ReturnType<typeof setTimeout> | undefined;
 
+    const firstSession = !sessionStartedRef.current;
     const openingViewer = peekBuzzViewerContext();
     const openingFrame = !sessionStartedRef.current && openingCache &&
       openingCache.view.room.id === channelId &&
       openingCache.viewerPubkey === openingViewer?.viewerPubkey &&
       openingCache.relayUrl === openingViewer?.relayUrl;
     sessionStartedRef.current = true;
-    // Initial state already describes this cached response. Resetting it here
-    // commits another Room render before its first frame can be submitted.
-    if (!openingFrame) {
+    // Initial state already describes this visit, including a cold empty one.
+    // Reset only when an existing session changes, not before its first frame.
+    if (!firstSession) {
       agentPresencesRef.current = {};
       reconnectGraceRef.current = {};
       setAgentPresences({});
@@ -138,7 +139,7 @@ export function useRoomSurfaceSubscription([
     }
     setHydrationFailed(false);
     setHydrationError(null);
-    if (!openingFrame) bindingsRef.current.resetTranscript();
+    if (!firstSession) bindingsRef.current.resetTranscript();
 
     // Seconds, but not WHOLE seconds. A draft's first snapshot is the anchor
     // its row keeps for the rest of the turn (C107), and two turns starting a
@@ -592,7 +593,7 @@ export function useRoomSurfaceSubscription([
           queueNewestFrameMark(cachedNewest, channelId);
         }
         markRoomOpen('occupancy-yield-start');
-        if (!openingFrame || cached !== openingCache.view) await yieldToPaint();
+        if (cached && (!openingFrame || cached !== openingCache.view)) await yieldToPaint();
         markRoomOpen('occupancy-yield-end');
         if (cancelled) return;
 

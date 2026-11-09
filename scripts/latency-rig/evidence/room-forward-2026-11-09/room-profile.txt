@@ -1,0 +1,68 @@
+Exploratory pre-fix diagnostic only; final percentile evidence is in before-serial.json and after-serial.json.
+
+{
+  start: 667.3000001907349,
+  events: [
+    {
+      event: 'send',
+      op: 'reportDiagnostics',
+      id: '14',
+      ms: 689.2000002861023
+    },
+    { event: 'reply', op: 'reportDiagnostics', ms: 694.9000000953674 },
+    {
+      event: 'send',
+      op: undefined,
+      id: undefined,
+      ms: 800.0999999046326
+    },
+    { event: 'send', op: 'readRoom', id: '15', ms: 807.3000001907349 },
+    {
+      event: 'send',
+      op: 'reportDiagnostics',
+      id: '16',
+      ms: 810.2000002861023
+    },
+    {
+      event: 'send',
+      op: undefined,
+      id: undefined,
+      ms: 820.5999999046326
+    },
+    { event: 'reply', op: 'reportDiagnostics', ms: 842.0999999046326 },
+    { event: 'reply', op: undefined, ms: 844 },
+    { event: 'reply', op: undefined, ms: 844 },
+    { event: 'reply', op: 'readRoom', ms: 847.0999999046326 },
+    {
+      event: 'send',
+      op: 'reportDiagnostics',
+      id: '17',
+      ms: 851.0999999046326
+    },
+    {
+      event: 'send',
+      op: undefined,
+      id: undefined,
+      ms: 917.2000002861023
+    },
+    { event: 'send', op: 'readHistory', id: '18', ms: 957 },
+    { event: 'reply', op: undefined, ms: 976.4000000953674 },
+    { event: 'reply', op: undefined, ms: 976.4000000953674 },
+    { event: 'reply', op: undefined, ms: 976.4000000953674 },
+    {
+      event: 'send',
+      op: 'readStarPrompt',
+      id: '19',
+      ms: 987.3000001907349
+    },
+    { event: 'reply', op: 'reportDiagnostics', ms: 988.3000001907349 },
+    {
+      event: 'send',
+      op: 'reportDiagnostics',
+      id: '20',
+      ms: 988.4000000953674
+    },
+    { event: 'reply', op: 'readHistory', ms: 997.8000001907349 }
+  ]
+}
+{"device":"phone-web","theme":"Obsidian","name":"open-room","samples":1,"p50":330.90000009536743,"p95":330.90000009536743}

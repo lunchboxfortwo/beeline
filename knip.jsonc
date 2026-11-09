@@ -142,6 +142,8 @@
         "scripts/prove-helper-migration-update.mjs",
         // CI and the local Android runner invoke these tools by path.
         "scripts/latency-rig/*.{mjs,cjs}",
+        // Reproductions 25 and 26 replay this capture CLI by path (evidence README).
+        "scripts/latency-rig/evidence/room-forward-2026-11-09/capture.mjs",
         // store-shipped.test.mjs runs the release scripts with this fake App Store Connect preloaded.
         "scripts/fixtures/fake-app-store-connect.mjs",
         // The transcript benchmark README invokes these measurement CLIs by path.

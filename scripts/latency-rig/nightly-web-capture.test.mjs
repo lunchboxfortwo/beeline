@@ -266,3 +266,19 @@ test('unobserved source visibility stays unavailable instead of becoming zero mi
   const field = summarize(['forward-message'], captures).rows[0].profile.sourceMessageVisibleMs;
   assert.deepEqual(field, { p50Ms: null, p95Ms: null, observedSamples: 0 });
 });
+
+
+test('Room-open setup waits for the actual destination row before the action clock', async () => {
+  let release;
+  const rowReady = new Promise(resolve => { release = resolve; });
+  let prepared;
+  const row = { filter() { return this; }, waitFor: () => rowReady, click: async () => {} };
+  const header = { filter() { return this; }, waitFor: async () => {} };
+  const page = { goto: async () => {}, getByTestId: id => id.startsWith('room-') ? row : header };
+  const setup = steps['open-room'](page, fixture('open-room')).then(value => { prepared = value; });
+  await new Promise(resolve => setImmediate(resolve));
+  assert.equal(prepared, undefined, 'an absent row is fixture setup, not tap latency');
+  release();
+  await setup;
+  assert.equal(typeof prepared.act, 'function');
+});

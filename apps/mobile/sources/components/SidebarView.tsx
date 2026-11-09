@@ -23,7 +23,7 @@ import { openRoomListCorner } from '@/buzz/room-list-new-corner';
 import { cornerOpenTappedAgain } from '@/buzz/corner-open-status';
 import type { CornerOpenAttempt } from '@/buzz/open-random-corner';
 import { roomListSections } from '@/buzz/room-list-row';
-import { dispatchRoomOpenTap } from '@/buzz/room-open-prefetch';
+import { dispatchRoomOpenTap, warmRoomRouteCode } from '@/buzz/room-open-prefetch';
 import { workspaceRailItem } from '@/buzz/room-view-presentation';
 import { mobileSurfaceCache, surfaceAddress } from '@/buzz/surface-storage';
 import { chatListSnapshot, refreshChatList, useChatList } from '@/buzz/chat-list-store';
@@ -163,6 +163,9 @@ const stylesheet = StyleSheet.create((theme) => ({
 
 /** One server-backed desktop pane for Workspace and Room movement. */
 export const SidebarView = React.memo(function SidebarView() {
+  React.useEffect(() => {
+    if (Platform.OS === 'web') warmRoomRouteCode();
+  }, []);
   const { showRoomList } = useDesktopLayout();
   const styles = stylesheet;
   const safeArea = useSafeAreaInsets();

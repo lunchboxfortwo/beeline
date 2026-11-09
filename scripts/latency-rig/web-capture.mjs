@@ -74,7 +74,7 @@ export function summarize(inventory, captures) {
       p95Ms: percentile(values, 0.95),
       ...(forward.length === 40
         ? {
-            timingContract: 'action start to in-page picker removal plus two animation frames',
+            timingContract: 'action start to accepted visible feedback plus two frames, or picker removal plus two frames on clients without feedback',
             driverObserved: {
               p50Ms: percentile(
                 forward.map((t) => t.driverObservedMs),
@@ -390,7 +390,7 @@ async function main() {
       browser: browser.version(),
       sourceHashes,
       method:
-        'User action to observed destination/result DOM plus two animation frames, including driver overhead; upper bound, not physical scanout. Setup, reset and sign-in excluded. Forward completion uses in-page removal plus two frames; driver-observed durations are retained separately. Local server only; no injected network delay.',
+        'User action to observed destination/result DOM plus two animation frames, including driver overhead; upper bound, not physical scanout. Setup, reset and sign-in excluded. Forward completion uses accepted visible feedback plus two frames when present, otherwise in-page removal plus two frames; driver-observed durations are retained separately. Local server only; no injected network delay.',
       ...summarize(inventory, captures),
       blockedRequests,
     };

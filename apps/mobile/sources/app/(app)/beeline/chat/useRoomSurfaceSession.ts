@@ -276,9 +276,10 @@ export function useRoomSurfaceSession({
 }: UseRoomSurfaceSessionOptions): UseRoomSurfaceSessionResult {
   const liveDraftDrainStore = useMemo(() => createLiveDraftDrainStore(), [channelId]);
 
+  const [openingViewer] = useState(peekBuzzViewerContext);
+  const openingScope = openingViewer ? identityScope(openingViewer.relayUrl, openingViewer.viewerPubkey) : null;
   const [openingCache] = useState(() => {
-
-    const viewer = peekBuzzViewerContext();
+    const viewer = openingViewer;
     if (!viewer) return null;
     const view = mobileSurfaceCache.peek(surfaceAddress(viewer.relayUrl, viewer.viewerPubkey, `/room/${channelId}`), isRoomView);
     return view ? { ...viewer, view, scope: identityScope(viewer.relayUrl, viewer.viewerPubkey) } : null;
@@ -290,8 +291,8 @@ export function useRoomSurfaceSession({
   const [roomClient, setRoomClient] = useState<RoomViewClient | null>(null);
   const [roomSurface, setRoomSurface] = useState<RoomView | null>(openingCache?.view ?? null);
   const scheduleCacheWriteRef = useRef<(() => void) | undefined>(undefined);
-  const [identityRecordScope, setIdentityRecordScope] = useState<string | null>(openingCache?.scope ?? null);
-  const messageRecordScopeRef = useRef<string | null>(openingCache?.scope ?? null);
+  const [identityRecordScope, setIdentityRecordScope] = useState<string | null>(openingCache?.scope ?? openingScope);
+  const messageRecordScopeRef = useRef<string | null>(openingCache?.scope ?? openingScope);
   const roomReadStampRef = useRef(0);
   const identityVersion = useIdentityRecords();
   const turnRecords = useRoomTurnRecords(identityRecordScope, channelId);
@@ -381,7 +382,7 @@ export function useRoomSurfaceSession({
   }, []);
   const [firstUnreadMessageId, setFirstUnreadMessageId] = useState<string | null>(null);
   const [liveOverlays, setLiveOverlays] = useState<readonly LiveOverlay[]>([]);
-  const [userPubkey, setUserPubkey] = useState(openingCache?.viewerPubkey ?? '');
+  const [userPubkey, setUserPubkey] = useState(openingCache?.viewerPubkey ?? openingViewer?.viewerPubkey ?? '');
   const [heartbeatPresences, setAgentPresences] = useState<Record<string, RoomAgentPresence>>({});
   const [presenceResolved, setPresenceResolved] = useState(false);
   const [presenceReconnectGrace, setPresenceReconnectGrace] = useState<Record<string, number>>({});

@@ -25,7 +25,6 @@ it('isolates transcript windows, outbox and late send completion when a route ch
     renderer = create(React.createElement(BuzzChat));
   });
   await flushEffects();
-  const source = current;
   const view = roomView('room-a');
   const row = {
     id: 'source-message',
@@ -41,6 +40,9 @@ it('isolates transcript windows, outbox and late send completion when a route ch
   const visible = () =>
     renderer.root.findAllByType('probe-row').map((node: any) => node.props.children);
   expect(visible()).toEqual(['source only', 'pending source']);
+  // The transcript mounts with the first canonical response, so capture its
+  // callbacks after that mount to exercise late work from the source Room.
+  const source = current;
   const sourceOutbox = current.session.outbox.current();
   controls.routeChannelId = 'room-b';
   controls.cached = null;
