@@ -1,4 +1,5 @@
 import { subscriptionRooms } from './agent-subscriptions.js';
+import { clearCornerReviewersForMembershipsSql } from './corner-lifecycle.js';
 import type { QueryResultRow } from 'pg';
 import { systemMessage } from '@beeline/api-contract/system-message-catalog';
 import { randomUUID } from 'node:crypto';
@@ -275,11 +276,23 @@ export async function joinRooms(
 
 // Membership write primitives. Callers retain their transaction and access checks.
 // Keep each conflict policy explicit: initial joins and restorations differ.
+/** One statement makes departure and reviewer cleanup atomic, including retirement. */
+function removeMembershipsSql(predicate: string): string {
+  return `WITH departing AS MATERIALIZED (
+      SELECT room_id,identity_id FROM memberships WHERE ${predicate}
+    ), cleared_room_reviewers AS (
+      UPDATE rooms room SET reviewer_agent_id=NULL FROM departing member
+      WHERE room.id=member.room_id AND room.reviewer_agent_id=member.identity_id
+    ), cleared_corner_reviewers AS (
+      ${clearCornerReviewersForMembershipsSql('departing')}
+    ) UPDATE memberships SET removed_at=now() WHERE ${predicate}`;
+}
+
 export function removeWorkspaceMemberships<Row extends QueryResultRow = QueryResultRow>(
   database: Pick<SqlDatabase, 'query'>, values: [workspaceId: string, identityId: string],
 ) {
   return database.query<Row>(
-    `UPDATE memberships SET removed_at=now() WHERE workspace_id=$1 AND identity_id=$2`, values,
+    removeMembershipsSql('workspace_id=$1 AND identity_id=$2'), values,
   );
 }
 
@@ -388,7 +401,7 @@ export function removeRoomMembership<Row extends QueryResultRow = QueryResultRow
   database: Pick<SqlDatabase, 'query'>, values: [roomId: string, identityId: string],
 ) {
   return database.query<Row>(
-    `UPDATE memberships SET removed_at=now() WHERE room_id=$1 AND identity_id=$2`, values,
+    removeMembershipsSql('room_id=$1 AND identity_id=$2'), values,
   );
 }
 
@@ -433,8 +446,7 @@ export function removeIdentityMemberships<Row extends QueryResultRow = QueryResu
   database: Pick<SqlDatabase, 'query'>, values: [identityId: string],
 ) {
   return database.query<Row>(
-    `UPDATE memberships SET removed_at=now()
-       WHERE identity_id=$1 AND removed_at IS NULL`, values,
+    removeMembershipsSql('identity_id=$1 AND removed_at IS NULL'), values,
   );
 }
 

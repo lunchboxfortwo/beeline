@@ -53,6 +53,7 @@ import { backfillFeedbackTriageWorkflow, backfillFeedbackSignalWalk, backfillWor
 import { backfillWorkflowSkillDescriptions, closeStaleWorkflowGateChoices } from './workflow-runs.js';
 import { withdrawSupersededGrantAsks } from './grant-policy-upgrade.js';
 import { restoreOwnerApprovedGrants } from './migrations/owner-approved-grants.js';
+import { clearDepartedReviewers } from './migrations/departed-reviewers.js';
 import { backfillRegistryApps } from './app-connections.js';
 import { syncTopLevelSharedRoomRoles } from './membership-join.js';
 import { postgresLiveSchema } from './postgres-live.js';
@@ -565,6 +566,8 @@ export async function migrateData(database: SqlDatabase): Promise<void> {
     });
     return result;
   };
+  await dataStep('departed reviewers', () => workflowBackfillOnce(
+    database, 'departed-reviewers-v1', clearDepartedReviewers));
   await dataStep('archived corner holds', () => releaseArchivedCornerHolds(database));
   await dataStep('corner hold messages', () => backfillCornerHoldMessages(database));
   await dataStep('push outbox cutover', () => workflowBackfillOnce(

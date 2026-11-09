@@ -106,6 +106,15 @@ export async function clearCornerReviewers(db: SqlDatabase, agentIds: string[]):
 }
 
 
+/** Internal relation of room_id/identity_id pairs whose reviewer assignment ends. */
+export function clearCornerReviewersForMembershipsSql(members: string): string {
+  return `UPDATE corner_facts fact SET reviewer_agent_id=NULL
+    FROM rooms corner,${members} member
+    WHERE corner.id=fact.corner_id AND corner.parent_id=member.room_id
+      AND fact.reviewer_agent_id=member.identity_id`;
+}
+
+
 /** The corner's own reviewer; returns whether it changed. Callers check authority first. */
 export async function setCornerReviewerFact(
   db: SqlDatabase,
