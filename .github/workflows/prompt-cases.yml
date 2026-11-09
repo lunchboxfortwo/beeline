@@ -46,7 +46,7 @@ jobs:
         run: npx turbo run build --filter=@beeline/body --filter=@beeline/server
         if: steps.changes.outputs.run == 'true'
       - name: Check the case library
-        run: node --import tsx scripts/prompt-cases.ts
+        run: npm run test:prompt-cases
         if: steps.changes.outputs.run == 'true'
       - name: Check capability discovery controls and real local service paths
         run: npm run test:prompt-discovery

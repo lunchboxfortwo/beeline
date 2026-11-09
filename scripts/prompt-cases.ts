@@ -26,7 +26,7 @@ import {
   caseOutcome,
   skillPath,
   validateRuleSkills,
-  evaluateRule,
+  evaluateCase,
   parsePromptCase,
   type PromptCase,
   type ToolCall,
@@ -287,7 +287,7 @@ function grade(dir: string, cases: readonly PromptCase[]): CaseResult[] {
         const calls: ToolCall[] = Array.isArray(answer.calls)
           ? answer.calls.map((call) => ({ name: String(call?.name ?? ''), args: (call?.args ?? {}) as Record<string, unknown> }))
           : [];
-        return evaluateRule(testCase.pass, { calls, text: typeof answer.text === 'string' ? answer.text : '' });
+        return evaluateCase(testCase, { calls, text: typeof answer.text === 'string' ? answer.text : '' });
       } catch (error) {
         return { pass: false, reason: `${file}: ${(error as Error).message}` };
       }

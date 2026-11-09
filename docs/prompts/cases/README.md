@@ -48,7 +48,7 @@ Rooms, Workspaces or emails behind it.
 | `tools` | Tools beyond the ordinary agent surface: `no_reply_needed`, `Bash`, `operate_drive`, `operate_click`, `operate_navigate`. |
 | `toolResults` | Legacy tool-name stub results. New fixtures should use argument-matched `scenario.results`. |
 | `scenario` | Typed factual brief, history, checks, connection status, usage, files and argument-matched tool results; no grader expectations. Missing results mark replay incomplete. |
-| `truthfulness` | Optional independent truthfulness rule, separate from task completion. |
+| `truthfulness` | Optional truthfulness rule; failure blocks the overall pass even when task completion passes. |
 | `pass` | The pass rule. |
 
 Set `session.freeAgent` to `true` to replay Beebee with the current server-owned repository-intent guide, rather than a copied fixture.
