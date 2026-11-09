@@ -302,7 +302,19 @@ export class SquireTaskRelay {
         if (message.method === 'notifications/tools/list_changed') {
           this.toolsChanged = true;
           this.flushToolChanges();
-        } else this.handleApprovalNotification(task, message);
+        } else {
+          const approvalId = (message.params as Record<string, unknown> | undefined)?.approval_id;
+          if (typeof approvalId === 'string' &&
+              task.pendingApprovals.has(createHash('sha256').update(approvalId).digest('hex'))) {
+            this.handleApprovalNotification(task, message);
+            return;
+          }
+          // The result and decision can share one stdio read. Wait for the
+          // current call to register its pending approval before matching it.
+          void this.callTail.then(() => {
+            if (this.task === task) this.handleApprovalNotification(task, message);
+          });
+        }
       },
       onDiagnostic: (message) => {
         if (message.startsWith('squire mcp exited')) return;

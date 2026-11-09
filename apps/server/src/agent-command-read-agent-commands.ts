@@ -216,10 +216,9 @@ export async function routeSystemCommand(
   // A Squire decision answers a turn that never paused: the agent posted the
   // approval link and either kept working or ended its turn. A live turn must
   // keep running (completing its command revokes its output authority and
-  // drops it), so the resume waits behind it. Once that turn has ended, only
-  // an approval starts the follow-up turn; a denial or expiry wakes nobody,
-  // because the person who decided already knows and the agent has nothing
-  // it can do with the answer.
+  // drops it), so the resume waits behind it. After the asking turn ends,
+  // an approved or denied push starts one new turn with that answer and its
+  // provenance. Expiry keeps its existing routing.
   const squireDecision = input.kind === 'squire-approval-decided';
   const squireStatus = squireDecision
     ? (await db.query<{ status: string | null }>(
@@ -227,7 +226,7 @@ export async function routeSystemCommand(
       )).rows[0]?.status
     : undefined;
   for (const agentId of new Set(input.targets)) {
-    const action =
+    let action: 'input' | 'resume' | 'stop' =
       input.kind === 'turn-cancelled' ? 'stop' : isResumeKind(input.kind) ? 'resume' : 'input';
     let parent: CommandRow | undefined;
     if (action !== 'input') {
@@ -239,10 +238,10 @@ export async function routeSystemCommand(
         )
       ).rows[0];
       if (!parent) continue;
-      if (squireDecision && squireStatus !== 'approved' &&
-          (parent.state === 'complete' || parent.state === 'cancelled'))
-        continue;
-      await db.query(
+      if (squireDecision && (parent.state === 'complete' || parent.state === 'cancelled')) {
+        if (squireStatus !== 'approved' && squireStatus !== 'denied') continue;
+        action = 'input';
+      } else await db.query(
         `SELECT (terminal.ended).* FROM (SELECT beeline_end_agent_turn(agent_commands.id,agent_commands.generation_id,$4,NULL,NULL) ended FROM agent_commands WHERE room_id=$1 AND agent_id=$2 AND turn_request_id=$3
            AND (state='pending' OR (state='claimed' AND NOT $5::boolean))) terminal`,
         [
@@ -277,7 +276,7 @@ export async function routeSystemCommand(
       ...(parent
         ? {
             parent,
-            retainDepth: action !== 'input',
+            retainDepth: action !== 'input' || squireDecision,
             turnRequestId: action !== 'input' ? parent.turn_request_id : undefined,
           }
         : {}),
