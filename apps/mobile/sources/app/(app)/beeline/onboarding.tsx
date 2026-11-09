@@ -392,7 +392,7 @@ export default function BuzzOnboarding() {
   }, [canSignIn]);
 
   const handleGoogleSignIn = async () => {
-    if (!canSignIn || loading) return;
+    if (!canSignIn) return;
     setLoadingAction('google');
     setStatus('opening_browser');
     clearOnboardingNotice();
@@ -426,6 +426,10 @@ export default function BuzzOnboarding() {
       if (attempt.signal.aborted) return;
       const cancelled = error instanceof OidcBindError && ['browser_canceled', 'oidc_denied'].includes(error.code);
       void funnelCallback(cancelled ? 'cancelled' : 'error', cancelled ? undefined : 'exchange_failed');
+      if (cancelled) {
+        setStatus('idle');
+        return;
+      }
       observeAuth({ name: 'notice_shown', code: authFailureCode(error,'callback_validated'), outcome: 'failed' });
       const next = noticeForAuthError(
         error instanceof OidcBindError
@@ -703,7 +707,7 @@ export default function BuzzOnboarding() {
                 testID="onboarding-github-sign-in"
                 loading={loadingAction === 'github' || loadingAction === 'bind' || status === 'checking_device'}
                 onPress={() => void handleSignIn()}
-                disabled={loading || status === 'checking_device' || status === 'binding'}
+                disabled={status === 'checking_device' || status === 'binding'}
               />
               {!notice && <Text style={styles.recommended}>Recommended</Text>}
             </View>
@@ -712,7 +716,7 @@ export default function BuzzOnboarding() {
               variant="provider"
               testID="onboarding-google-sign-in"
               loading={loadingAction === 'google'}
-              disabled={loading || status === 'checking_device' || status === 'binding'}
+              disabled={status === 'checking_device' || status === 'binding'}
               onPress={() => void handleGoogleSignIn()}
             />
           </>

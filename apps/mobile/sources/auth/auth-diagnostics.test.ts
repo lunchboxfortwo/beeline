@@ -2,8 +2,8 @@ import { beforeEach, expect, it, vi } from 'vitest';
 import type { DiagnosticStep } from '@beeline/api-contract/diagnostics';
 const controls=vi.hoisted(()=>({steps:[] as DiagnosticStep[],open:vi.fn(),desktop:false}));
 vi.mock('@/track/diagnostics',()=>({authDiagnostic:(step:DiagnosticStep)=>{controls.steps.push(step);},diagnosticIdentity:vi.fn()}));
-vi.mock('@/auth/signin-funnel',()=>({funnelSignedIn:vi.fn(),beginFunnelAttempt:vi.fn(),funnelCallback:vi.fn()}));
-vi.mock('./signin-funnel',()=>({funnelSignedIn:vi.fn(),beginFunnelAttempt:vi.fn(),funnelCallback:vi.fn()}));
+vi.mock('@/auth/signin-funnel',()=>({funnelSignedIn:vi.fn(),beginFunnelAttempt:vi.fn(async()=>undefined),funnelCallback:vi.fn()}));
+vi.mock('./signin-funnel',()=>({funnelSignedIn:vi.fn(),beginFunnelAttempt:vi.fn(async()=>undefined),funnelCallback:vi.fn()}));
 vi.mock('expo-linking',()=>({addEventListener:vi.fn(()=>({remove:vi.fn()})),getInitialURL:async()=>null}));
 vi.mock('expo-web-browser',()=>({openAuthSessionAsync:controls.open}));
 vi.mock('@tauri-apps/api/core',()=>({invoke:controls.open}));
@@ -50,6 +50,18 @@ it('acceptance 2: cancelled, denied, invalid callback and navigation failure sta
   expect(authFailureCode({code:'callback_missing'},'recovery_started')).toBe('callback_missing');
   await expect(authPhase('navigation_started',async()=>{throw new Error('route private value');})).rejects.toThrow();
   await vi.waitFor(()=>expect(controls.steps).toContainEqual(expect.objectContaining({phase:'navigation_started',code:'navigation_failed'})));
+});
+
+it('web sign-in opens the provider without waiting for its window to close', async () => {
+  controls.desktop = false;
+  controls.open.mockReturnValue(new Promise(() => undefined));
+  const url = 'https://fixture.invalid/auth/oidc/start?state=fixture';
+  const result = await Promise.race([
+    openAccountAuthSession(url, 'beeline://callback', {}),
+    new Promise((_, reject) => setTimeout(() => reject(new Error('still waiting on the provider window')), 50)),
+  ]);
+  expect(result).toEqual({ type: 'opened' });
+  expect(controls.open).toHaveBeenCalledWith(url, 'beeline://callback', {});
 });
 
 it.each(['github', 'oidc'])('desktop %s sign-in passes the unchanged authorization URL to the native browser boundary', async provider => {

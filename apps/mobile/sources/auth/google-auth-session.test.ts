@@ -431,22 +431,27 @@ it.each(['web', 'ios'])('R-oidc-delayed-approval: %s approval after two minutes 
 });
 
 
-it('R-oidc-delayed-approval: an unfinished browser flow is canceled at the five-minute server limit', async () => {
+it('an opened Google page does not expire on its own, and replacing it does not report expiry', async () => {
   storage.clear(); picker.enabled = false; vi.useFakeTimers();
   const removed = vi.fn();
+  const closed = vi.fn();
+  const controller = new AbortController();
   const fetcher = vi.fn(async (url: string) => new Response('{}', { status: url.endsWith('/cancel') ? 200 : 202 }));
   vi.stubGlobal('fetch', fetcher);
   try {
-    const result = runGoogleSignIn({ state, recoveryToken, platform: 'web',
+    const result = runGoogleSignIn({ state, recoveryToken, platform: 'web', signal: controller.signal, onBrowserClosed: closed,
       openAuthSession: async () => ({ type: 'opened' }), subscribeToUrls: () => ({ remove: removed }),
     });
-    const assertion = expect(result).rejects.toMatchObject({ code: 'token_expired' });
-    await vi.advanceTimersByTimeAsync(5 * 60_000 - 1);
-    expect(fetcher).toHaveBeenCalledTimes(1);
+    const outcome = result.then(value => ({ value }), error => ({ error }));
+    await vi.advanceTimersByTimeAsync(5 * 60_000);
+    expect(closed).toHaveBeenCalledOnce();
+    expect(fetcher.mock.calls.filter(([url]) => String(url).endsWith('/cancel'))).toHaveLength(0);
+    let settled = false;
+    void outcome.then(() => { settled = true; });
     await vi.advanceTimersByTimeAsync(1);
-    await assertion;
-    expect(fetcher.mock.calls.filter(([url]) => url.endsWith('/cancel'))).toHaveLength(1);
-    expect(storage.size).toBe(0);
+    expect(settled).toBe(false);
+    controller.abort();
+    expect(await outcome).toMatchObject({ error: { code: 'browser_canceled' } });
     expect(removed).toHaveBeenCalledOnce();
   } finally { vi.useRealTimers(); vi.unstubAllGlobals(); }
 });

@@ -541,7 +541,6 @@ export async function runResilientGitHubSignInSession({
   assertCurrent();
   await persistGitHubSignInState(state, purpose, recoveryToken);
   const controller = new AbortController();
-  let completionFailure: unknown;
   const never = () => new Promise<never>(() => {});
   const recovery = fetchGitHubRecoveryChallenge(recoveryToken, state, runtime, fetchImpl,
     Math.min(120_000, Math.max(0, recoveryWaitMs)), controller.signal);
@@ -551,14 +550,8 @@ export async function runResilientGitHubSignInSession({
     await persistPendingCallback(challengeCallbackUrl(challenge, state), state);
     return challenge;
   }, error => {
-    completionFailure = error;
     if (error instanceof OidcBindError && !error.retryable) throw error;
     return never();
-  });
-  let timeout: ReturnType<typeof setTimeout> | undefined;
-  const deadline = new Promise<never>((_resolve, reject) => {
-    timeout = setTimeout(() => reject(completionFailure ??
-      new OidcBindError('ticket_expired', 'The GitHub completion expired', 410)), recoveryWaitMs);
   });
   let rejectReplacement!: (error: OidcBindError) => void;
   const replaced = new Promise<never>((_resolve, reject) => { rejectReplacement = reject; });
@@ -572,9 +565,9 @@ export async function runResilientGitHubSignInSession({
     openAuthSession: async () => {
       assertCurrent();
       const result = await openAuthSession(start.authorizationUrl, start.redirectUri);
-      if (platform === 'android' && (result.type === 'cancel' || result.type === 'dismiss')) {
+      if (result.type === 'opened' || (platform === 'android' && (result.type === 'cancel' || result.type === 'dismiss'))) {
         onBrowserClosed?.();
-        return { type: 'opened' };
+        return result.type === 'opened' ? result : { type: 'opened' };
       }
       return result;
     }, subscribeToUrls, openedCallbackWaitMs: recoveryWaitMs,
@@ -602,13 +595,13 @@ export async function runResilientGitHubSignInSession({
     void cancelGitHubRecovery(recoveryToken, runtime, fetchImpl).catch(() => undefined);
     leftGitHubSignIns.add(error); throw error;
   });
-  try { return await Promise.race([recovered, callback, deadline, replaced]); }
+  try { return await Promise.race([recovered, callback, replaced]); }
   catch (error) {
     if (error instanceof OidcBindError && !error.retryable && !leftGitHubSignIns.has(error))
       await cancelGitHubRecovery(recoveryToken, runtime, fetchImpl).catch(() => undefined);
     if (signal?.aborted) await clearPendingGitHubSignInState(state);
     throw error;
-  } finally { if (timeout) clearTimeout(timeout); signal?.removeEventListener('abort', abort); controller.abort(); }
+  } finally { signal?.removeEventListener('abort', abort); controller.abort(); }
 
 }
 
