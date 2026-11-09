@@ -31,7 +31,7 @@ import { runtimeDirectory } from './runtime.js';
 import { assembleSessionPrompt } from './prompt-assembly.js';
 import { durableReplyText } from './turn-stream.js';
 import { TurnTrace } from './turn-trace.js';
-import { isPrivateWorkToolCall } from './tool-call-failure.js';
+import { isAnswerDeliveryToolCall } from './tool-call-failure.js';
 import { turnErrorDetail } from './turn-failure-reason.js';
 import { startAgentProcess, stopAgentProcess, type AgentProcessLifecycle } from './agent-process.js';
 import { MonolithRoomTurnLoop, execFileAsync, roomPermissionDecision, HumanMessage, ActiveTurn } from './monolith-room-turn.js';
@@ -511,6 +511,7 @@ import { MonolithRoomTurnLoop, execFileAsync, roomPermissionDecision, HumanMessa
   export async function monolithRoomTurnLoopExplainEmpty(ctx: MonolithRoomTurnLoop, result: PromptResult): Promise<EmptyTurnExplanation | undefined> {
     if (['no-reply', 'repeated-tool-call'].includes(result.stopReason)) return undefined;
     if (durableReplyText(result.agentText)) return undefined;
+    if (result.toolCalls.some(isAnswerDeliveryToolCall)) return undefined;
     // Passive browser updates owe no answer and must not start provider
     // retries. Their receipt acknowledges delivery, even for a textless turn.
     if (ctx.commandContext.current?.source.systemEvent?.kind === 'computer-session-activity') return undefined;
@@ -527,10 +528,6 @@ import { MonolithRoomTurnLoop, execFileAsync, roomPermissionDecision, HumanMessa
     if (explanation.record?.kind === 'error' && explanation.record.status === 402)
       ctx.publishOpenRouterSpend(true);
     if (isSilentCompletion(result, explanation)) return undefined;
-    // Private delivery answers the command without a chat reply. Only an
-    // affirmative completed status counts; failed or unfinished calls still
-    // owe an answer. Keep any durable text recovered from pi's turn record.
-    if (result.toolCalls.some(isPrivateWorkToolCall) && !durableReplyText(explanation.recoveredText ?? '')) return undefined;
     return explanation;
   }
 

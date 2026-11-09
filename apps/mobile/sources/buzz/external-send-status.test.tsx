@@ -5,6 +5,8 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { beelineThemes } from './groknight';
 import { selectComposerAckPresentation, type PendingComposerAck } from './room-indicators';
 import { useComposerAckExpiry } from './use-composer-ack-expiry';
+import { isAgentTurnActive } from './agent-presence';
+import type { RoomViewAgentTurn } from '@beeline/buzz-client';
 
 vi.mock('react-native', () => ({ Text: 'Text', View: 'View' }));
 vi.mock('@/components/buzz/MonoHull', () => ({ HullLivePulse: 'HullLivePulse' }));
@@ -98,6 +100,25 @@ it('keeps a native working receipt, its counter and Stop ahead of an external ac
   expect(tree.root.findByType('BeelineMarkSpinner').props.live).toBe(true);
   expect(tree.root.findAllByType('Button')).toHaveLength(1);
   expect(native?.stop).toEqual({ agentPubkey: 'native', requestId: 'turn' });
+});
+
+it('shows Monarch working from claim at 0s with no transcript, thoughts, tools or drafts', () => {
+  const turn: RoomViewAgentTurn = { agentPubkey: 'monarch', requestId: 'turn', generationId: 'generation',
+    status: 'working', startedAt: Date.now() / 1_000, createdAt: Date.now() / 1_000 };
+  const room = { messages: [], latestAgentTurns: [turn] };
+  const active = room.latestAgentTurns.filter(isAgentTurnActive)[0]!;
+  const presentation = selectComposerAckPresentation({ isCorner: false, now: Date.now(),
+    activeTurnPubkey: active.agentPubkey, activeTurnRequestId: active.requestId,
+    activeTurnStartedAt: active.startedAt ?? active.createdAt,
+    conversationIdentities: new Map([['monarch', { pubkey: 'monarch', kind: 'agent', name: 'Monarch' }]]),
+  });
+  expect(room.messages).toEqual([]);
+  expect(presentation?.label).toBe(`Monarch ${presentation!.verb!.gerund}…`);
+  act(() => { tree = create(<TurnProgressLine {...presentation!} testID="claim-progress" />); });
+  expect(tree.root.findAllByType('Text').map((node: { props: { children: unknown } }) => node.props.children)).toEqual([presentation!.label, '0s']);
+  expect(tree.root.findByType('BeelineMarkSpinner').props.live).toBe(true);
+  act(() => vi.advanceTimersByTime(3_000));
+  expect(tree.root.findAllByType('Text').map((node: { props: { children: unknown } }) => node.props.children)).toEqual([presentation!.label, '3s']);
 });
 
 it('a newer accepted send receives its own full three seconds and releases its deadline on unmount', () => {

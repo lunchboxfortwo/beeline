@@ -98,6 +98,12 @@ export function isPrivateWorkToolCall(call: ToolCallEntry): boolean {
   return kind === undefined || kind === 'commander';
 }
 
+/** A delivered answer completes the turn even when another tool failed. */
+export function isAnswerDeliveryToolCall(call: ToolCallEntry): boolean {
+  return isPrivateWorkToolCall(call) ||
+    (isCompletedToolCall(call) && /(?:^|[._:/-])post$/i.test(call.title ?? ''));
+}
+
 /**
  * The line to log for a failed tool call, or `undefined` when the call did
  * not fail. Credential-fetch results are masked and the detail is capped.

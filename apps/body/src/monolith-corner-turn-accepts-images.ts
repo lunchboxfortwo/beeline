@@ -1,5 +1,6 @@
 import { type PromptResult } from './acp.js';
 import { durableReplyText } from './turn-stream.js';
+import { isAnswerDeliveryToolCall } from './tool-call-failure.js';
 import { harnessIdentityLabel } from './cursor-acp-bridge.js';
 import { explainEmptyAgentTurn, isSilentCompletion, nextPinnedProvider, type EmptyTurnExplanation } from './empty-turn.js';
 import { cornerHasRepositoryWork } from './prompt-assembly.js';
@@ -26,6 +27,7 @@ import { MonolithCornerTurnLoop } from './monolith-corner-turn.js';
   export async function monolithCornerTurnLoopExplainEmpty(ctx: MonolithCornerTurnLoop, result: PromptResult): Promise<EmptyTurnExplanation | undefined> {
     if (['no-reply', 'repeated-tool-call'].includes(result.stopReason)) return undefined;
     if (durableReplyText(result.agentText)) return undefined;
+    if (result.toolCalls.some(isAnswerDeliveryToolCall)) return undefined;
     // Passive browser updates owe no answer and must not start provider
     // retries. Their receipt acknowledges delivery, even for a textless turn.
     if (ctx.commandContext.current?.source.systemEvent?.kind === 'computer-session-activity') return undefined;

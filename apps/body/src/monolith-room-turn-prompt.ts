@@ -88,19 +88,6 @@ import { MonolithRoomTurnLoop, ActiveTurn, inboxItemPromptBody, transcriptMessag
           generationId: ctx.commandContext.generationId,
         },
         async () => {
-          await api.execute('postAgentActivity', {
-            agentId: ctx.agent.publicKey,
-            roomId: ctx.options.roomId,
-            requestId: item.id,
-            activity: [
-              {
-                kind: 'thinking',
-                title: 'Working',
-                status: 'in_progress',
-                requestedBy: ctx.requesterOf(item.authorId),
-              },
-            ],
-          });
           trace.noteScheduler('queue', ctx.options.scheduler.snapshot());
           trace.start('queue-wait');
           ctx.turnCheckout = undefined;

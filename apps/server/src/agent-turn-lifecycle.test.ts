@@ -31,6 +31,15 @@ async function ask(){
 const receipt=(requestId:string,status:'complete'|'failed')=>daemon.execute('postAgentTurnReceipt',
   {roomId:R,requestId,generationId:'generation',status,...(status==='failed'?{reason:'provider unavailable',reasonKind:'hiccup'}:{})},A,owner);
 const notices=()=>db.query("SELECT id FROM messages WHERE room_id=$1 AND card_type='turn-failed'",[R]);
+it('projects a working turn at claim before any agent activity or model output exists',async()=>{
+  const command=await ask();
+  const room=await phone.readRoom(R,H);
+  expect(room?.latestAgentTurns).toEqual([expect.objectContaining({
+    agentPubkey:A,requestId:command.turnRequestId,status:'working',generationId:'generation',
+    startedAt:expect.any(Number),
+  })]);
+  expect((await db.query('SELECT id FROM messages WHERE room_id=$1 AND author_id=$2',[R,A])).rows).toEqual([]);
+});
 it('an answered tag stays complete through elapsed time, duplicate receipts and queue reads',async()=>{
   const c=await ask();
   await daemon.execute('postRoomMessage',{roomId:R,requestId:c.turnRequestId,generationId:'generation',text:'Here is the answer.'},A);
