@@ -182,7 +182,7 @@ export async function flush(dir: string, sources: Sources, deps: DeliverDeps = r
  * Tool calls for joined sessions, over a private socket. A sandboxed app (Codex's default) blocks the network but
  * not this socket, so its replies go out without asking the person to approve network access each time.
  */
-async function serveTools(dir: string, path = join(dir, 'bridge.sock')) {
+async function serveTools(dir: string, path: string, sessionsChanged: () => void) {
   rmSync(path, { force: true });
   const server = createServer(connection => {
     let buffer = '', taken = false;
@@ -194,10 +194,17 @@ async function serveTools(dir: string, path = join(dir, 'bridge.sock')) {
       taken = true;
       let answer: object;
       try {
-        const request = JSON.parse(buffer.slice(0, end)) as { key: string; name: string; args: Record<string, unknown> };
-        const joined = readState(dir).sessions.find(s => s.key === request.key);
-        if (!joined) throw new Error('This session has not joined Beeline');
-        answer = { ok: true, data: await callTool(joined, await accessToken(dir, joined.key), request.name, request.args ?? {}) };
+        const request = JSON.parse(buffer.slice(0, end)) as { type?: string; key: string; name: string; args: Record<string, unknown> };
+        if (request.type === 'sessions-changed') {
+          sessionsChanged();
+          answer = { ok: true };
+        } else {
+          const joined = readState(dir).sessions.find(s => s.key === request.key);
+          if (!joined) throw new Error('This session has not joined Beeline');
+          const token = await accessToken(dir, joined.key);
+          if (token !== joined.accessToken) sessionsChanged();
+          answer = { ok: true, data: await callTool(joined, token, request.name, request.args ?? {}) };
+        }
       } catch (error) { answer = { ok: false, error: error instanceof Error ? error.message : String(error) }; }
       connection.end(JSON.stringify(answer) + '\n');
     });
@@ -270,6 +277,16 @@ export async function toolViaOutbox(cwd: string, name: string, args: Record<stri
 
 /** Calls a tool through the bridge; undefined when no bridge answers, so the caller goes direct. */
 export function toolViaBridge(dir: string, key: string, name: string, args: Record<string, unknown>): Promise<{ ok: boolean; data?: unknown; error?: string } | undefined> {
+  return bridgeRequest(dir, { key, name, args });
+}
+
+/** State is durable storage; its writer tells the serving bridge to read it. */
+export async function notifyBridgeSessions(dir: string): Promise<void> {
+  const answer = await bridgeRequest(dir, { type: 'sessions-changed' });
+  if (!answer?.ok) throw new Error(answer?.error ?? 'Beeline tool result is awaiting confirmation');
+}
+
+function bridgeRequest(dir: string, request: object): Promise<{ ok: boolean; data?: unknown; error?: string } | undefined> {
   return new Promise(resolve => {
     const connection = createConnection(join(dir, 'bridge.sock'));
     let text = '', sent = false, settled = false;
@@ -278,7 +295,7 @@ export function toolViaBridge(dir: string, key: string, name: string, args: Reco
       if (settled) return; settled=true; resolve(answer); connection.destroy();
     };
     connection.setEncoding('utf8');
-    connection.once('connect', () => { sent=true; connection.write(JSON.stringify({ key, name, args }) + '\n'); });
+    connection.once('connect', () => { sent=true; connection.write(JSON.stringify(request) + '\n'); });
     connection.once('error', () => finish(sent ? unknown : undefined));
     connection.on('data', chunk => { text += chunk; });
     connection.on('end', () => { try { finish(JSON.parse(text) as { ok: boolean }); } catch { finish(sent ? unknown : undefined); } });
@@ -312,16 +329,16 @@ export async function runBridge(dir: string, runner: Runner): Promise<void> {
   };
   if (!staged && !claim()) return;
   const socket = join(dir, staged ? `bridge-${process.pid}.sock` : 'bridge.sock');
-  const tools = await serveTools(dir, socket);
+  let localDirty=true,wake:(()=>void)|undefined;
+  const changed=()=>{localDirty=true;wake?.();};
+  const tools = await serveTools(dir, socket, changed);
   const sources = machineSources(dir);
   type Stream={fingerprint:string;controller:AbortController;recovered:boolean};
   const streams=new Map<string,Stream>();
   const outboxWatches=new Map<string,ReturnType<typeof watch>>();
-  let localDirty=true,wake:(()=>void)|undefined;
-  const changed=()=>{localDirty=true;wake?.();};
   const localWatch=watch(dir,{recursive:true},(_event,name)=>{
     const path=String(name??'');
-    if(path==='state.json'||path.startsWith('hooks/')||path.startsWith('inbox/')||path.startsWith('deliveries/'))changed();
+    if(path.startsWith('hooks/')||path.startsWith('inbox/')||path.startsWith('deliveries/'))changed();
   });
   const stop = () => {
     if (!activated) process.exit(0);

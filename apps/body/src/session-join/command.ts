@@ -7,7 +7,7 @@ import { delimiter, dirname, join, resolve } from 'node:path';
 import { createHash, randomUUID } from 'node:crypto';
 import { agentLabel, defaultName, detectAgent, isAgentId, pickName, type AgentId } from './agents.js';
 import { accessToken, attachLocalDelivery, callTool, DEFAULT_SERVER, finishSignIn, NOT_JOINED, registerClient, signInLink, SignInEndedError, type SignIn } from './beeline-api.js';
-import { ensureBridge, renderMention, renderRules, renderWake, runBridge, toolViaBridge, toolViaOutbox, type Mention, type Runner, type Wake } from './bridge.js';
+import { bridgeRunning, ensureBridge, notifyBridgeSessions, renderMention, renderRules, renderWake, runBridge, toolViaBridge, toolViaOutbox, type Mention, type Runner, type Wake } from './bridge.js';
 import { chosenName, claudeTranscript, heldBy, inboundSetting, permissionMode, postToClaude, scanClaude } from './claude.js';
 import { acceptClaudeInbound, assertClaudePolicy, restoreClaudeInbound } from './claude-inbound.js';
 import { hasClaudeMcp, runClaudeMcp } from './claude-mcp.js';
@@ -398,6 +398,7 @@ async function session(args: string[], env: NodeJS.ProcessEnv): Promise<void> {
       state.sessions = state.sessions.filter(s => s.key !== joined.key);
       return state.sessions;
     });
+    if (bridgeRunning(dir)) await notifyBridgeSessions(dir);
     const r = runner(dir, env);
     await restoreClaudeInbound(env);
     const changes = left.some(s => s.agent === joined.agent) ? [] : setupAgent(joined.agent, { env, node: r.node, bundle: r.bundle, remove: true });
