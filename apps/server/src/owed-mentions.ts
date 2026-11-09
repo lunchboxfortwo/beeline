@@ -16,15 +16,19 @@ export async function mentionReplyKey(db: SqlDatabase, member: string, room: str
 export function mentionReplyId(key: string): string {
   return createHash('sha256').update(`rooms-mcp-message:${key}`).digest('hex');
 }
+/** One answer per tag and text: an identical retry dedupes, a different reply posts. */
+export function mentionAnswerKey(key: string, text: string): string {
+  return `${key}:${createHash('sha256').update(text).digest('hex')}`;
+}
 
 const serverMentionInputs = new WeakSet<object>();
 
 /** Normalize transport metadata before the ordinary phone reply writer runs. */
 export async function prepareMentionReplyInput(db: SqlDatabase, member: string,
-  input: { roomId: string; parentMessageId: string; messageId?: string }): Promise<void> {
+  input: { roomId: string; parentMessageId: string; text: string; messageId?: string }): Promise<void> {
   const key = await mentionReplyKey(db, member, input.roomId, input.parentMessageId);
   if (!key) return;
-  input.messageId = mentionReplyId(key);
+  input.messageId = mentionReplyId(mentionAnswerKey(key, input.text));
   serverMentionInputs.add(input);
 }
 

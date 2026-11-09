@@ -2,7 +2,7 @@ import { readMemberDelivery, setupMemberDelivery, confirmMemberDelivery, prepare
 import { memberStreamEnabled, serveMcpMemberStream, type McpStreamCursor } from './rooms-mcp-stream.js';
 import type { SqlDatabase } from './database.js';
 import { waitForConnection } from './connection-wait.js';
-import { mentionRouting, mentionReplyKey, mentionReplyId, owedMentions } from './owed-mentions.js';
+import { mentionRouting, mentionReplyKey, mentionReplyId, mentionAnswerKey, owedMentions } from './owed-mentions.js';
 import { RoomsMcpEvents, McpEventError } from './rooms-mcp-events.js';
 import type { IncomingMessage, ServerResponse } from 'node:http';
 import { createHash } from 'node:crypto';
@@ -353,7 +353,8 @@ export class RoomsMcp {
       const text = textArg(args.text, 16000);
       const replyTo = args.replyTo === undefined ? undefined : textArg(args.replyTo, 64);
       if (replyTo !== undefined && !/^[0-9a-f]{64}$/.test(replyTo)) throw new Error('Invalid replyTo');
-      const mentionKey = await mentionReplyKey(db, member, roomId, replyTo);
+      const mentionTag = await mentionReplyKey(db, member, roomId, replyTo);
+      const mentionKey = mentionTag && mentionAnswerKey(mentionTag, text);
       const key = mentionKey ?? (args.idempotencyKey === undefined ? null : textArg(args.idempotencyKey, 100));
       const messageId = key ? (mentionKey ? mentionReplyId(mentionKey) : createHash('sha256').update(`rooms-mcp-message:${member}:${key}`).digest('hex')) : undefined;
       if (key) {

@@ -158,11 +158,24 @@ describe('owed Room tags', () => {
     const message = await tag(); await recordMcpMention(db, other, room, message);
     for (const who of [member, other]) {
       const first = await call('send_message', { room, text: 'first', replyTo: message, idempotencyKey: 'custom-key' }, who);
-      const retry = await call('send_message', { room, text: 'retry', replyTo: message, idempotencyKey: 'different-key' }, who);
-      expect(retry.messageId).toBe(first.messageId);
-      expect((await db.query('SELECT 1 FROM rooms_mcp_idempotency WHERE member_id=$1 AND idempotency_key=$2', [who, `mention:${who}:${message}`])).rowCount).toBe(1);
+      const retry = await call('send_message', { room, text: 'first', replyTo: message, idempotencyKey: 'different-key' }, who);
+      expect(retry).toEqual(first);
+      expect((await db.query(`SELECT 1 FROM rooms_mcp_idempotency WHERE member_id=$1 AND idempotency_key LIKE $2`, [who, `mention:${who}:${message}:%`])).rowCount).toBe(1);
     }
     expect((await db.query('SELECT 1 FROM messages WHERE reply_to_message_id=$1', [message])).rowCount).toBe(2);
+  });
+  it('R1 a second, different reply to the same tag is stored, readable, searchable and wakes its own tags', async () => {
+    const message = await tag(member, 'desktop audit request');
+    const first = await call('send_message', { room, text: '@owner blocked for now', replyTo: message });
+    const second = await call('send_message', { room, text: '@owner @pidoong unblocked zebracorn', replyTo: message });
+    expect(second.messageId).not.toBe(first.messageId);
+    const replies = (await db.query<{ id: string; text: string }>('SELECT id,text FROM messages WHERE reply_to_message_id=$1 ORDER BY created_at,id', [message])).rows;
+    expect(replies.map(r => r.id).sort()).toEqual([first.messageId, second.messageId].sort());
+    expect((await call('read_messages', { room })).messages.map((m: any) => m.id)).toEqual(expect.arrayContaining([first.messageId, second.messageId]));
+    expect((await call('search_messages', { query: 'zebracorn' })).messages.map((m: any) => m.id)).toEqual([second.messageId]);
+    const reached = [...second.woken.map((w: any) => w.handle ?? w), ...second.notWoken.map((w: any) => w.handle)];
+    expect(reached).toContain('pidoong');
+    expect(first.notWoken.map((w: any) => w.handle)).not.toContain('pidoong');
   });
   it('C5 helper silence requires an explicit tag message ID and clears only that tag', async () => {
     await db.query("UPDATE agent_commands SET state='complete' WHERE agent_id=$1 AND state='pending'", [helper]);
