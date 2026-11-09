@@ -450,8 +450,10 @@ export async function notifyFeedbackFixed(
   agentId: string,
   input: NotifyFeedbackFixedInput,
 ): Promise<NotifyFeedbackFixedResult> {
+  if (command?.agent_id !== agentId) throw new Error('feedback resolution requires the agent’s own turn');
+  const notify = input.notify === true;
   const owner =
-    command?.agent_id === agentId
+    notify
       ? (
           await database.query<{ owner_id: string }>(
             `SELECT owner_id FROM agents WHERE agent_id=$1`,
@@ -459,11 +461,10 @@ export async function notifyFeedbackFixed(
           )
         ).rows[0]?.owner_id
       : undefined;
-  if (!owner || !config.systemSenders.includes(owner))
+  if (notify && (!owner || !config.systemSenders.includes(owner)))
     throw new Error(
       'System DM access denied: only agents whose owner is a configured System sender can send Fixed DMs, in their own turn',
     );
-  const notify = input.notify === true;
   if (notify) {
     const root = (await database.query<{ author_id: string }>(
       `SELECT message.author_id FROM messages message

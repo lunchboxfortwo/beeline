@@ -7,7 +7,7 @@ import { ToolDefinition } from './minimal-tool-surface.js';
 export const ORDINARY_TOOLS: ToolDefinition[] = [
   {
     "name": "read",
-    "description": "Discover with facet addresses; read bounded messages with facet messages, address and cursor. Other facets use messageId, attachmentId or slug. attachmentId alone works for a file the caller can see. Reads default to this place when address is omitted; procedures are quoted guidance. Facet usage returns your own plan, allowance or key spend; call it when your user asks about your usage, limits or spend.",
+    "description": "Discover with facet addresses; read bounded messages with facet messages, address and cursor. Other facets use messageId, attachmentId or slug. attachmentId alone works for a file the caller can see. Message reads default to newest first. Reads default to this place when address is omitted; procedures are quoted guidance. Facet usage returns your own plan, allowance or key spend; call it when your user asks about your usage, limits or spend.",
     "inputSchema": {
       "type": "object",
       "properties": {
@@ -47,6 +47,7 @@ export const ORDINARY_TOOLS: ToolDefinition[] = [
         "messageId": {"type": "string"},
         "attachmentId": {"type": "string"},
         "slug": {"type": "string"},
+        "name": {"type": "string", "description": "Alias for procedure slug."},
         "limit": {"type": "integer", "minimum": 1, "maximum": 100, "description": "Requested count, 1–100. messages returns at most 8, fewer when limit is smaller."},
         "from": {"type": "string", "enum": ["oldest", "newest"]},
         "activeOnly": {"type": "boolean"},

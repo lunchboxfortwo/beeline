@@ -426,12 +426,6 @@ import { daemonWriteResult } from './corner-messages.js';
       )) ?? existing.workflow_slug;
     const nextRunAt =
       input.cadence === undefined ? null : nextScheduleOccurrence(input.cadence, new Date());
-    // Keep the stored name in step with the prompt it now runs.
-    const resolvedTitle =
-      title ??
-      (input.prompt === undefined
-        ? undefined
-        : scheduleDisplayTitle({ workflow: workflowName, prompt: input.prompt }));
     const updated = await db.query<{ next_run_at: Date }>(
       `UPDATE agent_schedules SET message=COALESCE($3,message),
          cadence=COALESCE($4::jsonb,cadence),max_runs=COALESCE($5,max_runs),
@@ -449,7 +443,7 @@ import { daemonWriteResult } from './corner-messages.js';
         workflowName ?? null,
         agentId,
         input.selfOnly === true,
-        resolvedTitle ?? null,
+        title ?? null,
       ],
     );
     const row = updated.rows[0];

@@ -87,7 +87,7 @@ const scope4 = fixtureScope4();
 describe('corner wake reporting (Reproduction schedule-silence-4)', () => {
 const scope5 = fixtureScope5();
 
-  it.each(['report', 'order', 'watched_corner', 'corner_check', 'schedule', 'subscribed_event', 'system', 'corner_background_tool', 'corner_brief_revision'])('makes a %s wake quiet without a progress nudge', (commandReason) => {
+  it.each(['report', 'order', 'resume', 'watched_corner', 'corner_check', 'schedule', 'subscribed_event', 'system', 'corner_background_tool', 'corner_brief_revision'])('makes a %s wake quiet without a progress nudge', (commandReason) => {
     const text = assembleTurnPrompt({ surface: 'room', task: { body: 'Handle this wake', commandReason } }).text;
     expect(text).toContain('Do not post an update merely because time has passed');
     expect(text).toContain('call the no_reply_needed tool');

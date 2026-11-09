@@ -45,6 +45,9 @@ export async function owedMentions(db: SqlDatabase, member: string) {
     WHERE mention.member_id=$1 AND mention.cleared_at IS NULL
       AND EXISTS(SELECT 1 FROM effective_memberships rm WHERE rm.room_id=r.id AND rm.identity_id=$1 AND rm.removed_at IS NULL)
       AND EXISTS(SELECT 1 FROM memberships wm WHERE wm.workspace_id=r.workspace_id AND wm.room_id IS NULL AND wm.identity_id=$1 AND wm.removed_at IS NULL)
+      AND NOT EXISTS(SELECT 1 FROM messages reply WHERE reply.room_id=mention.room_id
+        AND reply.author_id=$1 AND reply.reply_to_message_id=mention.message_id AND reply.deleted_at IS NULL
+        AND reply.presentation='message')
     ORDER BY mention.seq LIMIT 100`, [member])).rows;
   return rows.map(row => mentionRouting(member, row.room_id, row.message_id, row.author_handle));
 }

@@ -290,7 +290,7 @@ export async function markAgentTurnSilentOperation<Name extends keyof DaemonOper
           if (!command) throw new CommandRefusalError('silence requires an active turn', 409);
           if (declinedMessage && !await mentionReplyKey(ctx.database, authenticatedAgentId, command.room_id, declinedMessage))
             throw new CommandRefusalError('messageId must be a tagged message in this Room', 400);
-          if (!declinedMessage && !['report', 'order', 'watched_corner', 'corner_check', 'corner_review_needed',
+          if (!declinedMessage && !['report', 'order', 'resume', 'watched_corner', 'corner_check', 'corner_review_needed',
             'corner_review_dispatch', 'corner_merge_conflict', 'computer_activity',
             'schedule', 'subscribed_event', 'system', 'agent_tag', 'corner_objective',
             'corner_land', 'corner_merge_refused', 'corner_merge_unconfirmed',

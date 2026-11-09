@@ -88,14 +88,27 @@ const scope27 = fixtureScope27();
 
 
   for (const skill of m28_beelineManagedSkills('source', { isReviewer: true })) {
-    m28_it(`returns shipped text for ${skill.name}`, async () => {
-      const result = JSON.parse(await m28_callAgentTool('read', { facet: 'procedure', slug: skill.name }));
+    m28_it.each(['slug', 'name'])(`returns shipped text for ${skill.name} by %s`, async field => {
+      const result = JSON.parse(await m28_callAgentTool('read', { facet: 'procedure', [field]: skill.name }));
       m28_expect(result).toEqual({ slug: skill.name, markdown: skill.content, source: 'built-in' });
       m28_expect(fetch).toHaveBeenCalledWith(new URL('http://daemon.test/v1/daemon/operations/loadWorkspaceSkill'),
         m28_expect.objectContaining({ body: JSON.stringify({ agentId: 'agent', roomId: 'room', slug: skill.name }) }));
     });
   }
 
+
+  m28_it.each([undefined, 'oldest'])("reads messages with direction %s", async from => {
+    const fetcher = m28_vi.fn(async (_url, init) => {
+      const input = JSON.parse(init.body);
+      const ids = input.window === 'recent' ? ['newer', 'newest'] : ['oldest', 'older'];
+      return Response.json({ items: ids.map((id, i) => ({ id, cursor: id, body: id,
+        authorId: 'agent', createdAt: i, type: 'chat', attachments: [] })) });
+    });
+    m28_vi.stubGlobal('fetch', fetcher);
+    const result = JSON.parse(await m28_callAgentTool('read', { facet: 'messages', ...(from ? { from } : {}) }));
+    m28_expect(result.items.map(item => item.id)).toEqual(from ? ['oldest', 'older'] : ['newest', 'newer']);
+    m28_expect(JSON.parse(fetcher.mock.calls[0][1].body).window).toBe(from ? 'earliest' : 'recent');
+  });
 
   m28_it('keeps a workspace procedure ahead of a built-in with the same slug', async () => {
     const procedure = { slug: 'beeline-memory', markdown: 'Workspace guidance', version: 2 };

@@ -88,6 +88,7 @@ const fixture = monolithFixture();
     const during = await turnIn(corner);
     const refused = await daemonCall('notifyFeedbackFixed', {
       ...during,
+      notify: true,
       itemIds: ['fb_000000000000000000000000'],
       title: 'Grant card resolves',
       prUrl: 'https://github.com/Beeline-Work/beeline/pull/1',

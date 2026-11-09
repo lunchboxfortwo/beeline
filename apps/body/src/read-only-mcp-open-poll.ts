@@ -217,6 +217,7 @@ export async function executeAgentTool(name: string, args: JsonObject, toolCallI
   switch (name) {
     case 'read': {
       const facet = args.facet;
+      if (facet === 'procedure' && args.slug === undefined) args.slug = args.name;
       const requiredField = facet === 'message' ? 'messageId' : facet === 'attachment' ? 'attachmentId' : facet === 'procedure' ? 'slug' : undefined;
       if (requiredField && !args[requiredField]) throw new Error(`read: ${requiredField} is required for facet ${facet}`);
       const address = args.address ?? (process.env.BEELINE_DAEMON_CORNER_ID?.trim() || process.env.BEELINE_DAEMON_ROOM_ID);
@@ -227,7 +228,7 @@ export async function executeAgentTool(name: string, args: JsonObject, toolCallI
         case 'members': return execute('list_room_members', input);
         case 'messages':
           // Every message read uses the same bounded cursor contract.
-          return execute('inspect_corner', { ...input, from: args.from ?? (asObject(args.cursor).before ? 'newest' : undefined), mode: 'transcript' });
+          return execute('inspect_corner', { ...input, from: args.from ?? (asObject(args.cursor).after || asObject(args.cursor).offset !== undefined ? 'oldest' : 'newest'), mode: 'transcript' });
         case 'message': return execute('get_room_message', { ...input, messageId: args.messageId });
         case 'attachment': return execute('download_attachment', input);
         case 'brief': return execute('read_corner_brief', input);

@@ -459,7 +459,7 @@ export async function executeAgentOperation(
       };
       if (args.mode === 'transcript' && args.from === 'newest') {
         const page = await readMessagePage(true);
-        // Walk back from the newest message; return the kept rows in transcript order.
+        // Assemble the bounded page in transcript order, then return newest first.
         const items: Record<string, unknown>[] = [];
         for (const item of page.items.slice(-itemLimit).reverse()) {
           let body = item.body.slice(0, 1000);
@@ -481,6 +481,7 @@ export async function executeAgentOperation(
           });
         }
         const oldest = items[0]?.cursor as string | undefined;
+        items.reverse();
         return JSON.stringify({
           cornerId: args.cornerId,
           items,

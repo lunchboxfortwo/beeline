@@ -90,6 +90,21 @@ describe('owed Room tags', () => {
     await call('no_reply_needed', { address: room, messageId: keep });
     expect((await owedMentions(db, member)).some(m => m.messageId === keep)).toBe(false);
   });
+  it('Reproduction 7: a committed reply and lost Room access disappear from the next tool result', async () => {
+    const answered = await tag(helper), pending = await tag(helper);
+    await db.query(`INSERT INTO messages(id,room_id,author_id,text,reply_to_message_id)
+      VALUES($1,$2,$3,'ordinary reply',$4)`, [id(), room, helper, answered]);
+    // Recreate an old/late ledger entry after the reply trigger already ran.
+    await db.query('DELETE FROM rooms_mcp_mentions WHERE member_id=$1 AND message_id=$2', [helper, answered]);
+    await recordMcpMention(db, helper, room, answered);
+    const read = () => daemon.execute('getOwedMentions', {}, helper);
+    expect((await read()).owedMentions.map(m => m.messageId)).not.toContain(answered);
+    expect((await read()).owedMentions.map(m => m.messageId)).toContain(pending);
+    await db.query('UPDATE memberships SET removed_at=now() WHERE room_id=$1 AND identity_id=$2', [room, helper]);
+    try { expect((await read()).owedMentions).toEqual([]); }
+    finally { await db.query('UPDATE memberships SET removed_at=NULL WHERE room_id=$1 AND identity_id=$2', [room, helper]); }
+  });
+
   it('C6 owed-only list and legacy cursor paging', async () => {
     const a = await tag(), b = await tag();
     const seq = (await db.query<{seq: string}>('SELECT seq::text seq FROM rooms_mcp_mentions WHERE member_id=$1 AND message_id=$2', [member, a])).rows[0]!.seq;
