@@ -514,14 +514,6 @@
       "phase": "M4"
     },
     {
-      "id": "apps/mobile/sources/auth/google-auth-session.ts::fetch",
-      "file": "apps/mobile/sources/auth/google-auth-session.ts",
-      "kind": "fetch",
-      "count": 1,
-      "compatibility": "legacy-only",
-      "phase": "M4"
-    },
-    {
       "id": "apps/mobile/sources/auth/monolith-session.ts::fetch",
       "file": "apps/mobile/sources/auth/monolith-session.ts",
       "kind": "fetch",

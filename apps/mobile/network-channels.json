@@ -60,7 +60,7 @@
       "kind": "fetch",
       "count": 1,
       "fate": "exception",
-      "why": "GitHub sign-in; runs before an authenticated socket exists."
+      "why": "Shared Google and GitHub sign-in HTTP transport; runs before an authenticated socket exists."
     },
     {
       "file": "apps/mobile/sources/auth/github-auth-session.ts",
@@ -74,14 +74,7 @@
       "kind": "import:@tauri-apps/plugin-http",
       "count": 1,
       "fate": "exception",
-      "why": "Desktop-shell HTTP for GitHub sign-in."
-    },
-    {
-      "file": "apps/mobile/sources/auth/google-auth-session.ts",
-      "kind": "fetch",
-      "count": 1,
-      "fate": "exception",
-      "why": "Google sign-in; runs before an authenticated socket exists."
+      "why": "Desktop-shell HTTP shared by Google and GitHub sign-in."
     },
     {
       "file": "apps/mobile/sources/auth/monolith-session.ts",

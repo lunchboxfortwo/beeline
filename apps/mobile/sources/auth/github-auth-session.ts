@@ -114,7 +114,7 @@ async function persistPendingCallback(callbackUrl: string, expectedState: string
   });
 }
 
-async function githubAuthFetch(input: RequestInfo | URL, init?: RequestInit): Promise<Response> {
+export async function accountAuthFetch(input: RequestInfo | URL, init?: RequestInit): Promise<Response> {
   if (!isDesktopShell()) return fetch(input, init);
   const { fetch: desktopFetch } = await import('@tauri-apps/plugin-http');
   return desktopFetch(input, init);
@@ -432,7 +432,7 @@ async function cancelGitHubRecovery(
 /** Revoke a pending/recovered ticket before forgetting the only token that can burn it. */
 export async function cancelPendingGitHubSignIn(
   runtime: BuzzRuntimeConfig = getBuzzRuntimeConfig(),
-  fetchImpl: typeof fetch = githubAuthFetch,
+  fetchImpl: typeof fetch = accountAuthFetch,
   expectedState?: string,
 ): Promise<void> {
   const session = await readPendingSession();
@@ -448,7 +448,7 @@ export async function cancelPendingGitHubSignIn(
 
 export async function recoverPendingGitHubBindChallenge(
   runtime: BuzzRuntimeConfig = getBuzzRuntimeConfig(),
-  fetchImpl: typeof fetch = githubAuthFetch,
+  fetchImpl: typeof fetch = accountAuthFetch,
   expectedState?: string,
 ): Promise<OidcBindChallenge | null> {
   const session = await readPendingSession();
@@ -472,7 +472,7 @@ async function awaitCompletedGitHubBindChallenge(expectedState: string): Promise
   if (session?.state !== expectedState || !session.recoveryToken)
     throw new OidcBindError('state_mismatch', 'This GitHub callback has no pending recovery.');
   const challenge = await fetchGitHubRecoveryChallenge(session.recoveryToken, expectedState,
-    getBuzzRuntimeConfig(), githubAuthFetch, GITHUB_RECOVERY_WAIT_MS);
+    getBuzzRuntimeConfig(), accountAuthFetch, GITHUB_RECOVERY_WAIT_MS);
   if ((await readPendingSession())?.state !== expectedState)
     throw new OidcBindError('state_mismatch', 'This GitHub callback does not match the current sign-in.');
   if (!challenge) throw new OidcBindError('ticket_expired', 'The GitHub completion expired', 410);
@@ -510,7 +510,7 @@ export async function runResilientGitHubSignInSession({
   runtime = getBuzzRuntimeConfig(),
   openAuthSession,
   subscribeToUrls,
-  fetchImpl = githubAuthFetch,
+  fetchImpl = accountAuthFetch,
   recoveryWaitMs = platform === 'android' ? 5 * 60_000 : GITHUB_RECOVERY_WAIT_MS,
   callbackGraceMs,
 }: ResilientGitHubSessionInput): Promise<OidcBindChallenge> {

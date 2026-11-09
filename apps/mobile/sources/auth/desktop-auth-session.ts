@@ -43,8 +43,8 @@ export async function openAccountAuthSession(
       // The sign-in flow checks server completion before recording a close outcome.
       return result;
     }
-    const { openUrl } = await import('@tauri-apps/plugin-opener');
-    await authPhase('browser_open_requested', () => openUrl(url.toString()), 'browser_opened');
+    const { invoke } = await import('@tauri-apps/api/core');
+    await authPhase('browser_open_requested', () => invoke('desktop_open_auth_url', { url: url.toString() }), 'browser_opened');
     return { type: 'opened' };
   }catch(error){if(google)void funnelCallback('error','unknown');throw error;}
 }

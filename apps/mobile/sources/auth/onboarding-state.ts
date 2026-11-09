@@ -200,14 +200,15 @@ export const OFFLINE_NOTICE: OnboardingNotice = {
   retryable: true,
 };
 
-export function noticeForAuthError(error: unknown): OnboardingNotice {
+export function noticeForAuthError(error: unknown, provider: 'google' | 'github' = 'github'): OnboardingNotice {
+  const providerName = provider === 'google' ? 'Google' : 'GitHub';
   if (isNetworkFailure(error)) return OFFLINE_NOTICE;
   const code = error instanceof OidcBindError ? error.code : 'unknown';
   if (code === 'ticket_expired' || code === 'unknown_ticket' || code === 'invalid_oidc_flow') {
     return {
       status: 'token_expired',
       title: 'Sign-in expired',
-      message: 'Continue with GitHub again to start a new sign-in.',
+      message: `Continue with ${providerName} again to start a new sign-in.`,
       retryable: false,
     };
   }
@@ -216,7 +217,7 @@ export function noticeForAuthError(error: unknown): OnboardingNotice {
       status: 'link_conflict',
       title: 'Device key already linked',
       message:
-        'This GitHub account is linked to another device key. Replace it to continue with a new identity, or import your backed-up key to keep the existing identity.',
+        `This ${providerName} account is linked to another device key. Replace it to continue with a new identity, or import your backed-up key to keep the existing identity.`,
       retryable: false,
     };
   }
@@ -225,7 +226,7 @@ export function noticeForAuthError(error: unknown): OnboardingNotice {
       status: 'bind_retry',
       title: 'Sign-in did not finish.',
       message:
-        'Continue with GitHub again to finish signing in.',
+        `Continue with ${providerName} again to finish signing in.`,
       retryable: false,
     };
   }
@@ -241,7 +242,7 @@ export function noticeForAuthError(error: unknown): OnboardingNotice {
     return {
       status: 'bind_retry',
       title: 'Sign-in needs an update',
-      message: 'Update Beeline, then continue with GitHub again.',
+      message: `Update Beeline, then continue with ${providerName} again.`,
       retryable: false,
     };
   }
@@ -260,7 +261,7 @@ export function noticeForAuthError(error: unknown): OnboardingNotice {
   return {
     status: 'bind_retry',
     title: 'Sign-in did not finish.',
-    message: 'Continue with GitHub again to finish signing in.',
+    message: `Continue with ${providerName} again to finish signing in.`,
     retryable: false,
   };
 }

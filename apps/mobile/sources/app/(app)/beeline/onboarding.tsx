@@ -183,12 +183,13 @@ export default function BuzzOnboarding() {
                   'The replacement proof is no longer available. Sign in again.',
                   410,
                 ),
+                'github',
               );
               setStatus(expired.status);
               setNotice(expired);
             })
             .catch((error: unknown) => {
-              const failed = noticeForAuthError(error);
+              const failed = noticeForAuthError(error, 'github');
               setStatus(failed.status);
               setNotice(failed);
             });
@@ -302,7 +303,7 @@ export default function BuzzOnboarding() {
               appErrorCopy(error),
               500,
             );
-      const next = noticeForAuthError(normalized);
+      const next = noticeForAuthError(normalized, 'github');
       if (!next.retryable && normalized.code !== 'identity_conflict') pendingBind.current = null;
       setStatus(next.status);
       setNotice(next);
@@ -318,6 +319,7 @@ export default function BuzzOnboarding() {
       return;
     }
     let alive = true;
+    let recoveryProvider: 'google' | 'github' = 'google';
     void (async () => {
       const initialUrl = await initialAuthUrl().catch(() => null);
       // A press already running in this process owns its own callback. This
@@ -340,6 +342,7 @@ export default function BuzzOnboarding() {
         if (alive) await enterAfterMonolithSignIn(identityId);
         return;
       }
+      recoveryProvider = 'github';
       const challenge =
         (await resumeInitialGitHubSignIn(() => Promise.resolve(initialUrl), undefined, {
           signedIn: savedIdentityId !== null,
@@ -376,7 +379,7 @@ export default function BuzzOnboarding() {
       .catch((error: unknown) => {
         observeAuth({ name: 'auth_failed', phase: 'recovery_started', code: authFailureCode(error,'recovery_started'), outcome: 'failed' });
         if (!alive) return;
-        const next = noticeForAuthError(error);
+        const next = noticeForAuthError(error, recoveryProvider);
         setNotice(next);
         setStatus(next.status);
       })
@@ -428,6 +431,7 @@ export default function BuzzOnboarding() {
         error instanceof OidcBindError
           ? error
           : new OidcBindError('exchange_failed', 'Google sign-in could not finish. Try again.'),
+        'google',
       );
       setStatus(next.status);
       setNotice(next);
@@ -492,7 +496,7 @@ export default function BuzzOnboarding() {
         return;
       }
       await cancelPendingGitHubSignIn(undefined, undefined, startedState).catch(() => undefined);
-      const next = noticeForAuthError(error);
+      const next = noticeForAuthError(error, 'github');
       observeAuth({name:'notice_shown',code:authFailureCode(error,'callback_validated'),outcome:'failed'});
       setStatus(next.status);
       setNotice(next);
@@ -525,7 +529,7 @@ export default function BuzzOnboarding() {
       pending.bound = true;
       await finishPendingBind(pending);
     } catch (error) {
-      const next = noticeForAuthError(error);
+      const next = noticeForAuthError(error, 'github');
       observeAuth({name:'notice_shown',code:authFailureCode(error,'callback_validated'),outcome:'failed'});
       setStatus(next.status);
       setNotice(next);
