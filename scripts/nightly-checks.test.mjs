@@ -11,6 +11,7 @@ test('R-NOISE-19: delayed nightly dispatch uses the Eastern date, including DST 
     const calls = [], saved = [];
     const api = async (method, path, body) => {
       calls.push({ method, path, body });
+      if (path.includes('nightly-checks.yml/runs')) return { workflow_runs: [], total_count: 0 };
       if (path.includes('unified-release')) return { workflow_runs: [] };
       if (path === 'commits/main') return { sha: 'head' };
       return null;
@@ -22,5 +23,25 @@ test('R-NOISE-19: delayed nightly dispatch uses the Eastern date, including DST 
     assert.equal(calls.length, count);
     assert.equal(saved.length, 1);
     assert.equal(calls.filter(c => c.method === 'POST').length, 1);
+  }
+});
+
+test('Reproduction 23: cron is a fallback after a dispatch in the same Eastern night', async () => {
+  for (const [created_at, skipped] of [
+    ['2026-11-09T08:07:02Z', true],
+    ['2026-11-09T04:07:02Z', false],
+  ]) {
+    const calls = [];
+    const result = await runNightly({
+      api: async (method, path) => {
+        calls.push(method);
+        if (path.includes('nightly-checks.yml/runs')) return { workflow_runs: [{ created_at }], total_count: 1 };
+        if (path.includes('unified-release')) return { workflow_runs: [] };
+        return { sha: 'head' };
+      },
+      save() {}, now: () => new Date('2026-11-09T14:59:32Z'), schedule: '7 8 * * *', requestId: '123',
+    });
+    assert.equal(Boolean(result.skipped), skipped);
+    assert.equal(calls.includes('POST'), !skipped);
   }
 });

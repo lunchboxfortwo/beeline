@@ -11,10 +11,33 @@ import { initializeRelease, planOutputs, restoreReleasePlan, applyJobFacts, appl
 import { latestPublished, assignReleaseVersion, compareVersions, versionedReleases, staleDrafts } from './release-record.mjs';
 import { pagesChannelTag, publishPagesChannel, downloadPagesChannel } from './pages-channel.mjs';
 import { buildPagesSite } from './pages-site.mjs';
+import { deployPages } from './deploy-pages.mjs';
 import { knownBuilds, readStores } from './read-store-runtimes.mjs';
 import { androidReleaseProfile } from './android-release-channel.mjs';
 import { computeTargets } from '../apps/mobile/scripts/ota-release.mjs';
 import { playLiveBuilds } from '../apps/mobile/scripts/store-runtime-targets.mjs';
+
+test('Reproduction 24: empty Pages status retries once immediately, then fails and cancels', async () => {
+  for (const recovered of [false, true]) {
+    const calls = [];
+    let reads = 0;
+    const proof = deployPages({
+      github: { request: async (route, args) => {
+        calls.push(route);
+        assert.equal(args.request.timeout, 30000);
+        if (route.endsWith('/cancel')) return {};
+        if (route.startsWith('POST')) return { data: { id: '123' } };
+        reads++;
+        return { data: recovered && reads === 2 ? { status: 'succeed' } : {} };
+      } }, repo: { owner: 'test', repo: 'test' }, artifactId: 1, sha: 'head', idToken: 'test',
+      wait: async () => assert.fail('Empty status must retry without waiting'),
+    });
+    if (recovered) await proof;
+    else await assert.rejects(proof, /empty status after one retry/);
+    assert.equal(reads, 2);
+    assert.equal(calls.filter(route => route.endsWith('/cancel')).length, recovered ? 0 : 1);
+  }
+});
 
 const sha = execFileSync('git', ['rev-parse', 'HEAD'], { encoding: 'utf8' }).trim();
 // Unit fixture identities must work in CI's single-commit checkout.

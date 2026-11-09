@@ -107,6 +107,8 @@ Server updates no longer revoke your existing Always and Once approvals solely b
 
 The nightly latency report includes paired web interaction timings and an explicit reason for each unmeasured interaction. Its full-inventory score stays unavailable until every interaction has two complete captures. [Rig and measurement limits](scripts/latency-rig/README.md#paired-web-interaction-inventory).
 
+Nightly Checks accepts a Beeline dispatch at 03:07 New York time. The GitHub timers remain as fallbacks and skip a night already dispatched. Pages deployment retries an empty status once immediately, then fails instead of waiting for the deployment timeout.
+
 ## Links
 
 - [Getting started, Rooms and corners](https://github.com/Beeline-Work/beeline/blob/main/docs/getting-started.md)
