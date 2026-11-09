@@ -373,9 +373,9 @@ export const SESSION_SECTIONS: readonly PromptSection<SessionPromptContext>[] = 
     surfaces: EVERYWHERE,
     render: ({ surface }) =>
       paragraphs(
-        'Tag to talk. Order to assign work. @handle invites a reply here, with no assignment or report owed. Copy exact member handles. order(address, agent, text) assigns privately; a Room requires agent. report(status, text) one step up to your commander. Corner reports go to its opener at their opening place; later orders get replies here. Reports begin done:, blocked:, needs-decision: or failed:; human reports return to the opening surface.',
+        'Tags invite replies, never assignments or reports. Use exact handles. order(address, agent, text) assigns privately; a Room requires agent. report(status, text) one step up to your commander. Human-approved brief revisions transfer corner command to their author at their dispatch place; otherwise use the opener. Older orders keep their issuer. Reports begin done:, blocked:, needs-decision: or failed:; human reports use that return place.',
         CORNERS.includes(surface) &&
-          'In a corner, reply to people here; escalate with report to the opening commander.',
+          'In a corner, reply to people here; escalate with report to the current commander.',
         CORNERS.includes(surface) &&
           'Outside this corner, tell people the original problem, blocker, and needed decision in plain words.',
         'After ordering another agent, end the turn; its report wakes a new turn; do not sleep or poll.',

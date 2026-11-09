@@ -1,3 +1,4 @@
+import { cornerCommanderIdSql } from '../corner-commander.js';
 import { ensureRoomMembership } from '../membership-join.js';
 import { systemMessage } from '@beeline/api-contract/system-message-catalog';
 import { cornerObjectiveSql, readCornerObjective } from '../corner-objective.js';
@@ -354,7 +355,7 @@ import { daemonReach, daemonWriteResult } from './corner-messages.js';
           created_by: string;
         }>(
           `SELECT room.parent_id,${cornerOwnerSql('room.id')} owner_agent_id,${cornerImplementerSql('fact', 'room')} implementer_agent_id,
-             ${cornerKindSql('room.id')} kind,room.created_by,EXISTS(SELECT 1 FROM rooms parent WHERE parent.id=room.parent_id
+             ${cornerKindSql('room.id')} kind,${cornerCommanderIdSql('room')} created_by,EXISTS(SELECT 1 FROM rooms parent WHERE parent.id=room.parent_id
                AND (parent.repository_resolution='repository' OR parent.repository_key IS NOT NULL)) repository_backed FROM rooms room
          JOIN corner_facts fact ON fact.corner_id=room.id
          WHERE room.id=$1 AND room.archived_at IS NULL FOR UPDATE OF room`,
@@ -440,7 +441,7 @@ import { daemonReach, daemonWriteResult } from './corner-messages.js';
           input.cornerId,
           revision,
           draft.spec.trim(),
-          JSON.stringify(authority.approvalBasis),
+          JSON.stringify({ ...authority.approvalBasis, commanderReturnRoomId: commandRoomId, commanderCommandId: command.id }),
           authority.revisionHash,
           draft.change?.trim() ?? null,
           agentId,

@@ -367,7 +367,7 @@ export const ORDINARY_TOOLS: ToolDefinition[] = [
   },
   {
     "name": "report",
-    "description": "Report the assigned outcome one step up. In a corner, the opening order fixes the commander and return place. Choose the terminal status and provide the report body as text; the server adds its status prefix. No address. Feedback is separate from assignment completion. Local proof paths are refused. First upload each proof with post_artifact, then cite its attachment filename instead of a local path.",
+    "description": "Report the assigned outcome one step up. In a corner, a human-approved revised brief transfers command to its author at its dispatch place; otherwise the opening route applies. Earlier explicit orders retain their issuer. Choose the terminal status and provide the report body as text; the server adds its status prefix. No address. Feedback is separate from assignment completion. Local proof paths are refused. First upload each proof with post_artifact, then cite its attachment filename instead of a local path.",
     "inputSchema": {
       "type": "object",
       "required": ["status", "text"],

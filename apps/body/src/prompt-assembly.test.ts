@@ -512,11 +512,11 @@ describe('prompt assembly guards', () => {
   it('keeps decisions on the chain of command', () => {
     for (const [name, context] of Object.entries(SESSION_VARIANTS)) {
       const text = assembleSessionPrompt(context).systemPrompt;
-      expect(text, name).toContain('Corner reports go to its opener at their opening place; later orders get replies here.');
+      expect(text, name).toContain('Human-approved brief revisions transfer corner command to their author at their dispatch place; otherwise use the opener. Older orders keep their issuer.');
       expect(text, name).not.toContain('If human, tag them');
       expect(text, name).toContain('report(status, text) one step up to your commander.');
       const corner = ['code-corner', 'repo-less-corner'].includes(context.surface);
-      expect(text.includes('In a corner, reply to people here; escalate with report to the opening commander.'), name).toBe(corner);
+      expect(text.includes('In a corner, reply to people here; escalate with report to the current commander.'), name).toBe(corner);
     }
   });
 

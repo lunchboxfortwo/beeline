@@ -61,6 +61,10 @@ import { Input, id, seconds, AccessDeniedError, Output } from './values.js';
       )
     ).rows[0];
     if (!saved) throw new CommandRefusalError('post refused: address is archived', 409);
+    if (command.private_payload) await ctx.database.query(
+      `UPDATE agent_commands SET private_payload=private_payload ||
+        jsonb_build_object('publicPostId',$2::text,'publicPostGenerationId',$3::text) WHERE id=$1`,
+      [command.id, saved.id, command.generation_id]);
     const delivery = await routeAgentResult(ctx.database, command, saved.id, { roomId: input.cornerId, agentId });
     ctx.live.publish({ type: 'invalidate', roomId: input.cornerId, reason: 'message', agentId });
     return { id: saved.id, createdAt: seconds(saved.created_at), effect: 'conversation',

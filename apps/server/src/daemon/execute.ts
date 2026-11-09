@@ -354,8 +354,22 @@ import { daemonExecuteOperation } from './operations.js';
             const text = String(candidate.text ?? '').trim();
             if (text) {
               const report = await daemonReport(ctx, text, authenticatedAgentId, command, db, true);
-              if ('delivered' in report && report.delivered === false)
-                throw new CommandRefusalError('Report was not delivered; restore commander membership at the recorded return address, then report again.', 409);
+              if ('delivered' in report && report.delivered === false) {
+                // An explicit public post may already have committed before
+                // this final-text private copy. Its success must survive a
+                // missing commander; a private-only report still refuses.
+                const posted = (await db.query<{ id: string; created_at: Date }>(
+                  `SELECT posted.id,posted.created_at FROM agent_commands current
+                   JOIN messages posted ON posted.id=current.private_payload->>'publicPostId'
+                   WHERE current.id=$1 AND current.private_payload->>'publicPostGenerationId'=$3
+                     AND posted.author_id=$2 AND posted.presentation='message' AND posted.deleted_at IS NULL`,
+                  [command.id, authenticatedAgentId, command.generation_id],
+                )).rows[0];
+                if (!posted) throw new CommandRefusalError('Report was not delivered; restore commander membership at the recorded return address, then report again.', 409);
+                const warning = 'Warning: Your public reply was posted, but its private report copy was not delivered. Restore commander membership at the recorded return address before reporting again.';
+                await endAgentTurn(db, command, 'complete', null, posted.id);
+                return { id: posted.id, createdAt: seconds(posted.created_at), receipt: warning } as Output<Name>;
+              }
             } else throw new CommandRefusalError('An assignment outcome requires nonempty report text.', 400);
             await endAgentTurn(db, command, 'complete');
           }

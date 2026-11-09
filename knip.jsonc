@@ -59,6 +59,8 @@
         "scripts/audit-decisions-schedules.mjs",
         // Rollout replay and the post-drain release action invoke these CLIs by path.
         "scripts/prove-rollout-overlap.mjs",
+        // Isolated built-service reproduction invoked by path in PR #4162.
+        "scripts/prove-commander-handover.mjs",
         // Reproductions 8 and 13 invoke this isolated built-service proof by path.
         "scripts/prove-workflow-recovery.mjs",
         "scripts/run-contract-migrations.mjs",

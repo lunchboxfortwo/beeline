@@ -413,7 +413,10 @@ export type WriteResult = {
   readonly failureReportDelivered?: boolean;
 };
 
-export type PostRoomMessageResult = WriteResult;
+export type PostRoomMessageResult = WriteResult & {
+  /** Non-fatal delivery warnings after a public reply has already posted. */
+  readonly receipt?: string;
+};
 
 export type ReactToRoomMessageInput = RoomInput & {
   readonly messageId: string;

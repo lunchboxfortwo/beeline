@@ -3514,7 +3514,9 @@
         "attachments": "existing before the registry; weekly audit reviews",
         "reportedOutcome": "existing before the registry; weekly audit reviews",
         "objective": "existing before the registry; weekly audit reviews",
-        "idleSince": "the idle episode a stall alert reports; delivery and claim recompute it and drop a stale alert"
+        "idleSince": "the idle episode a stall alert reports; delivery and claim recompute it and drop a stale alert",
+        "publicPostId": "The exact committed public reply lets final private-copy failure preserve its successful result, including cross-address posts.",
+        "publicPostGenerationId": "Only a public post from this generation may make an undelivered final report copy non-fatal."
       },
       "review_context": {
         "reportIds": "existing before the registry; weekly audit reviews",
@@ -3582,7 +3584,11 @@
       "criteria": {},
       "non_goals": {},
       "brief_references": {},
-      "approval_basis": {},
+      "approval_basis": {
+        "approvedBy": "The human approval identity is retained as durable revision authority after handover.",
+        "commanderCommandId": "The exact dispatching command retains commander ancestry and the revision author's own escalation route.",
+        "commanderReturnRoomId": "The author's dispatch address may differ from the approving human message address."
+      },
       "machine": {
         "state": "The single corner state rendered by server rows.",
         "phase": "The checks or reviewer phase within Review.",

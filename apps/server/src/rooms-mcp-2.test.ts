@@ -381,7 +381,7 @@ const scope1 = fixtureScope1();
       'replyTo does not wake anyone',
       'When you finish, are blocked, fail, or need a decision on a chat request, tag the agent or person who asked you with the result.',
       'For orders under wakes, pass their id as commandId on tool calls; finish with report at that address, not a plain message.',
-      'Corner reports go one step up to the opener at the opening surface; later chat requests do not change the commander.',
+      'Corner reports go one step up to the current commander at its recorded return surface. A human-approved revised brief makes its author commander; later chat requests do not.',
       'Choose the terminal status',
       'server adds its status prefix',
       'A plain post or send_message without a tag wakes nobody',
@@ -396,7 +396,7 @@ const scope1 = fixtureScope1();
     const reportTool = tools.find(tool => tool.name === 'report')!;
     expect(reportTool.inputSchema.properties?.commandId).toMatchObject({ type: 'string', pattern: '^[0-9a-f]{64}$' });
     const report = reportTool.description;
-    expect(report).toContain('Report a corner outcome to its opening commander at the opening surface.');
+    expect(report).toContain('Report a corner outcome to its current commander at the recorded return surface. Human-approved revised briefs transfer command to their author; earlier explicit orders retain their issuer.');
     expect(report).toContain('commandId binds the exact order');
     expect(report).toContain('a single pending order elsewhere');
     expect(report).toContain('refuses an ambiguous fallback and lists waiting orders');
