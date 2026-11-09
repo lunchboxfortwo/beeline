@@ -1,0 +1,10 @@
+let resolve: (value: any) => void;
+let reject: (value: any) => void;
+export const pending = new Promise((yes, no) => { resolve = yes; reject = no; });
+export const artifactImageSource = () => pending;
+export const releaseArtifactImageSource = () => {};
+export const subscribeArtifactBytesPurge = () => () => {};
+export const fetchArtifactText = async () => '';
+export const useArtifactRecoveryGeneration = () => 0;
+(window as any).finish = () => resolve({ uri: 'data:image/svg+xml,' + encodeURIComponent('<svg xmlns="http://www.w3.org/2000/svg" width="80" height="80"><rect width="80" height="80" fill="tan"/><circle cx="40" cy="40" r="24" fill="purple"/></svg>') });
+(window as any).fail = () => reject(Object.assign(new Error('Access denied'), { status: 403 }));

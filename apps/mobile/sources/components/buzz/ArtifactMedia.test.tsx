@@ -32,13 +32,21 @@ afterEach(async () => { await act(async () => tree?.unmount()); tree = undefined
 // They must not cancel a download that is slower than transcript updates.
 describe.each(['image', 'text'] as const)('%s byte demand', kind => {
   const render = (file = attachment) => kind === 'image'
-    ? <ArtifactImage attachment={file} fit="cover" testID="loaded" />
+    ? <ArtifactImage attachment={file} fit="cover" style={{ width: 46, height: 46 }} testID="loaded" />
     : <ArtifactText attachment={file} crop testID="loaded" />;
   const read = () => kind === 'image' ? host.image : host.text;
   it('finishes the original read across equivalent DTOs and socket recovery without refetching', async () => {
     let complete!: (value: any) => void;
     read().mockImplementation(() => new Promise(resolve => { complete = resolve; }));
     await act(async () => { tree = create(render()); });
+    if (kind === 'image') {
+      const placeholder = tree!.root.findByProps({ testID: 'artifact-image-loading' });
+      const style = Object.assign({}, ...placeholder.props.style);
+      // A growing/padded View consumes the filename column in a compact row.
+      expect(style).toMatchObject({ width: 46, height: 46 });
+      expect(style.flex).toBeUndefined();
+      expect(style.padding).toBeUndefined();
+    }
     const signal = read().mock.calls[0][1].signal as AbortSignal;
     for (let n = 0; n < 6; n++) {
       host.recovery++;

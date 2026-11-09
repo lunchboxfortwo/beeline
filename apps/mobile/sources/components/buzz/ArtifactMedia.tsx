@@ -95,8 +95,8 @@ export function ArtifactImage({
   }
   if (!source) {
     return (
-      <View style={[styles.placeholder, style]} testID="artifact-image-loading">
-        <Text style={styles.placeholderText}>Loading…</Text>
+      <View style={[styles.imagePlaceholder, style]} testID="artifact-image-loading">
+        <Text numberOfLines={1} style={[styles.placeholderText, styles.imagePlaceholderText]}>Loading…</Text>
       </View>
     );
   }
@@ -197,6 +197,13 @@ export function ArtifactText({
 
 const styles = StyleSheet.create((theme) => ({
   failureInset: { paddingHorizontal: theme.buzz.roomList.edge },
+  // Image callers own the frame, including compact transcript thumbnails.
+  imagePlaceholder: {
+    alignItems: 'center',
+    justifyContent: 'center',
+    overflow: 'hidden',
+  },
+  imagePlaceholderText: { maxWidth: '100%' },
   placeholder: {
     flex: 1,
     alignItems: 'center',
