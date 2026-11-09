@@ -167,12 +167,11 @@ export function useChatTranscriptLanding([
   // once, or from a read around the id. The room stays usable throughout, and
   // the target is highlighted when its row is drawn.
   useEffect(() => {
-    if (!notificationResponseId) return;
-    const anchorKey = `${notificationResponseId}:${notificationMessageId ?? notificationTarget ?? ''}`;
-    if (handledNotificationAnchorRef.current === anchorKey) return;
-
     const messageId = notificationMessageId?.trim();
     if (!messageId) return;
+    // Canonical message links carry the message id without a native receipt.
+    const anchorKey = `${notificationResponseId ?? messageId}:${messageId}`;
+    if (handledNotificationAnchorRef.current === anchorKey) return;
     const hostIndex = hostRowIndex(transcriptMessages, transcriptHostIdsRef.current, messageId);
     const needsRead =
       transcriptJump?.messageId !== messageId &&

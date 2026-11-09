@@ -17,7 +17,6 @@ import {
   markInitialLandingResolved,
   resetInitialLandingForTests,
   suppressInitialLandingNavigation,
-  whenInitialLandingResolved,
 } from '@/navigation/initial-landing';
 import {
   createConsumedNotificationResponseStore,
@@ -82,7 +81,7 @@ for (const [wrapper, wrap] of Object.entries(wrappers)) {
       };
       const route = (response: TappedNotificationResponse) => routeBuzzNotificationResponse(response, {
         navigator, handled, defaultActionIdentifier: defaultAction,
-        waitForRootReady: async () => {}, waitForInitialLanding: whenInitialLandingResolved,
+        waitForRootReady: async () => {},
         suppressPendingInitialLanding: suppressInitialLandingNavigation,
         clearLastResponse, consumedResponses: consumed,
         resolveTarget: async (target) => target, log: () => {},
@@ -146,7 +145,6 @@ it('does not let an inline action consume a later body tap for the same message'
   const clearLastResponse = vi.fn(async () => {});
   const routing = {
     navigator, handled, defaultActionIdentifier: defaultAction,
-    waitForInitialLanding: async () => 'committed' as const,
     suppressPendingInitialLanding: vi.fn(), clearLastResponse,
     resolveTarget: async (target: import('@/utils/notificationRouting').BuzzNotificationTarget) => target,
     log: () => {},

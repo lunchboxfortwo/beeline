@@ -354,7 +354,6 @@ export default function RootLayout() {
         handled: handledNotificationIds.current,
         defaultActionIdentifier: Notifications.DEFAULT_ACTION_IDENTIFIER,
         waitForRootReady: () => rootReady.current!.promise,
-        waitForInitialLanding: whenInitialLandingResolved,
         suppressPendingInitialLanding: suppressInitialLandingNavigation,
         clearLastResponse: Notifications.clearLastNotificationResponseAsync,
         resolveTarget: resolveBuzzNotificationDestination,

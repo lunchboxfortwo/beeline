@@ -131,9 +131,9 @@ export function getBuzzNotificationTargetFromData(data: unknown): BuzzNotificati
 
 /**
  * The one notification destination resolver. Workspace selection is committed
- * before navigation. Corners read server truth so an unavailable/finished
- * corner degrades only to its parent Room. A transient read failure keeps the
- * named destination; it never converts a routable push into the chat list.
+ * after navigation. Complete payloads need no destination read; the opened
+ * screen reads its own server view, including archived corners. Legacy
+ * payloads can discover their Workspace from server truth.
  */
 export async function resolveBuzzNotificationTarget(
   target: BuzzNotificationTarget,
@@ -142,17 +142,9 @@ export async function resolveBuzzNotificationTarget(
   if (target.workspaceId) await resolver.activateWorkspace(target.workspaceId);
   if (target.target === 'workspace') return target;
 
-  // A current top-level Room push already names both the Room and Workspace.
-  // The Room screen reads its own server view after navigation; reading that
-  // same view here only holds the notification tap behind an extra request.
-  // Corners still need server truth to fall back when they have finished.
-  if (
-    target.target === 'message' &&
-    target.workspaceId &&
-    target.roomId === target.channelId &&
-    !target.cornerId
-  )
-    return target;
+  // The named Room/corner owns its read. Finishing a corner does not change
+  // the source of the message the person tapped.
+  if (target.workspaceId) return target;
 
   try {
     const truth = await resolver.readRoom(target.channelId);
@@ -246,7 +238,7 @@ export function notificationStackRoutes(
       ...(isCorner
         ? { parent: target.roomId, returnTo: 'corners' }
         : { returnTo: 'room-list' }),
-      ...(target.target === 'message' && target.messageId
+      ...(target.messageId
         ? { notificationMessageId: target.messageId }
         : {}),
       notificationTarget: target.target,
