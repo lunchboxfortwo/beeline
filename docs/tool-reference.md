@@ -56,6 +56,7 @@ writable. Corners keep the watcher so edits are reflected as work proceeds.
 | `connect`                 | Discover, check or connect an integration                                                      |
 | `app_tool`                | Run a connected app's tool, or a first-party `beeline:*` app action                            |
 | `request_grant`           | Ask a workspace admin or the resource owner for access                                         |
+| `store_secret`            | Save one local operator secret for a command grant’s `--with NAME`, without echoing its value   |
 | `run_granted_command`     | Run a command an approved grant covers, outside the sandbox                                    |
 | `scratch_io`              | Fallback session-file writes and bounded image downloads                                       |
 | `report_feedback`         | Report one rough patch in Beeline itself to the Beeline team                                   |

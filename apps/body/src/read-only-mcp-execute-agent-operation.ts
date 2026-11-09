@@ -11,7 +11,7 @@ import { squireSessionSignedIn } from "./squire-sign-in.js";
 import { JsonObject, readTurnContextFile, daemonExecute, requiredEnv, downloadAttachment, memorySources, activeCommandContext, commandRequest, fetchImage, asObject, stringArg, connectorOfferDepsFromEnv } from './read-only-mcp.js';
 import { agentScheduleRoomId, reactToMessage, postArtifact, bindBriefFiles, agentScheduleDepsFromEnv } from './read-only-mcp-download-attachment.js';
 import { reportFeedback, openCorner, reviseCornerBrief, readCornerBrief, closeCorner, prChecksStatus, approveMerge, targetCornerId, writeScratchFile } from './read-only-mcp-open-corner.js';
-import { shareBrowser, requestGrant, listGrants, workbenchStatus } from './read-only-mcp-agent-grant-deps.js';
+import { shareBrowser, requestGrant, listGrants, workbenchStatus, storeSecret } from './read-only-mcp-agent-grant-deps.js';
 import { runGrantedCommand } from './read-only-mcp-open-poll.js';
 
 
@@ -826,6 +826,8 @@ export async function executeAgentOperation(
       return JSON.stringify(await daemonExecute('postRepositoryOnboarding', {
         ...await activeCommandContext(), kind: name === 'post_repository_card' ? 'repository' : 'starters',
       }));
+    case 'store_secret':
+      return storeSecret(args);
     case 'run_granted_command':
       return runGrantedCommand(args);
     default:

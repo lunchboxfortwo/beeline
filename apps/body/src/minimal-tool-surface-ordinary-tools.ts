@@ -1,3 +1,4 @@
+import { COMMAND_SECRET_NAME } from '@beeline/api-contract/agent-grants';
 import { HOST_EMULATOR_RULE } from './host-emulator.js';
 import { ARTIFACT_MIME_TYPES, INSTITUTIONAL_HISTORY_QUERY_SCHEMA, INSTITUTIONAL_SEARCH_QUERY_MAX_CHARACTERS, INSTITUTIONAL_HISTORY_RESULT_MIN, INSTITUTIONAL_HISTORY_RESULT_MAX } from '@beeline/api-contract/daemon';
 import { ToolDefinition } from './minimal-tool-surface.js';
@@ -560,6 +561,19 @@ export const ORDINARY_TOOLS: ToolDefinition[] = [
       },
       "additionalProperties": false
     }
+  },
+  {
+    name: 'store_secret',
+    description: "Save a credential in the local operator key store for command grants. After fetch_credential returns a value a granted command needs, call store_secret right away, then run it under a command grant with --with NAME in its target (pass only executable argv to run_granted_command). The value is never echoed, sent to the server, or shown on a ledger row.",
+    inputSchema: {
+      type: 'object',
+      properties: {
+        name: { type: 'string', pattern: COMMAND_SECRET_NAME.source, description: 'The UPPER_CASE name used by --with NAME.' },
+        value: { type: 'string', minLength: 1, maxLength: 8192 },
+      },
+      required: ['name', 'value'],
+      additionalProperties: false,
+    },
   },
   {
     "name": "request_grant",

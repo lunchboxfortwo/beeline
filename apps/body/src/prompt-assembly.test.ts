@@ -541,9 +541,8 @@ describe('prompt assembly guards', () => {
   it('documents Connectors discovery and connection in every agent turn', () => {
     for (const [name, context] of Object.entries(SESSION_VARIANTS)) {
       const text = assembleSessionPrompt(context).systemPrompt;
-      expect(text, name).toContain('use connect(mode:discover) if unclear, then connect(mode:ensure, service, reason, continuation).');
-      if (context.surface.includes('corner'))
-        expect(text, name).toContain('use connect(mode:discover) if unclear, then connect(mode:ensure, service, reason, continuation).');
+      expect(text, name).toContain('connect(mode:discover)');
+      expect(text, name).toContain('connect(mode:ensure, service, reason, continuation)');
     }
   });
 

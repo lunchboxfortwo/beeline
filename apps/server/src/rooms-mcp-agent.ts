@@ -29,6 +29,7 @@ export const MCP_AGENT_EXCLUSIONS: Readonly<Record<string, string>> = {
   wait_link_spend_request: WALLET_SPENDING,
   request_grant: HOST_GRANTS,
   run_granted_command: HOST_GRANTS,
+  store_secret: HOST_GRANTS,
   repository_io: MACHINE,
   list_files: MACHINE,
   read_file: MACHINE,

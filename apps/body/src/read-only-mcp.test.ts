@@ -625,12 +625,13 @@ m9_describe('beeline-agent request_grant', () => {
   });
 
 
-  m9_it('keeps grant listing under request_grant and local secret initialization out of ordinary turns', () => {
+  m9_it('keeps grant listing under request_grant and exposes local secret storage beside request_grant', () => {
     for (const directMessage of [false, true]) {
       const names = m9_agentToolsFor(true, directMessage).map((tool) => tool.name);
       m9_expect(names).not.toContain('list_grants');
-      m9_expect(names).not.toContain('store_secret');
+      m9_expect(names).toContain('store_secret');
       m9_expect(names).toContain('request_grant');
+      m9_expect(m9_agentToolsFor(true, directMessage, false, false, false).map(tool => tool.name)).toContain('store_secret');
     }
     m9_expect(m9_agentToolsFor(false, false).map((tool) => tool.name)).not.toContain('store_secret');
     m9_expect(m9_agentToolsFor(false, false).map((tool) => tool.name)).not.toContain('list_grants');

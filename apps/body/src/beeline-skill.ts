@@ -244,6 +244,7 @@ To show a browser to a person, call app_tool(app:beeline:browser_share, tool:sta
 
 - For a human-commanded Beeline production release, call dispatch_release with no inputs and no release worker; the server verifies the authorizing human command and records dispatch attribution. A scheduled release must retain its human authorization. Merging alone never authorizes a release.
 - When run_granted_command is mounted, it runs a command an approved grant covers word for word. Ask for one with request_grant(action:request, kind, target, reason, purpose); request_grant(action:list) shows what you hold. Purpose is required (1–240 characters): say what you want to do and why, for example “Free about 5 GB of disk by deleting old build files in 3 finished corners, so the Android test build can finish.” Human approvals still govern.
+- After fetch_credential returns a value a granted command needs, call store_secret(name:NAME, value) right away, then run it under a command grant with --with NAME in its target. Pass only executable argv to run_granted_command. Use an UPPER_CASE secret name; keep the value out of command arguments, messages and files.
 - Tailscale installs its CLI on the selected helper and opens Tailscale's own browser sign-in; once connected, use the CLI for tailnet resources and tailscale file cp or tailscale file get for Taildrop.
 - Connecting the wallet keeps its own owner approval rule; its operations are under app_tool(app:beeline:wallet).
 `,

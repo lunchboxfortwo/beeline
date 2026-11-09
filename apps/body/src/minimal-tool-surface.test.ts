@@ -27,7 +27,7 @@ describe('Beeline tool surface across harnesses', () => {
       // accepts the same schema: this was Ruby's exact 28 -> 22 discrepancy.
       const accepted = tools.filter(tool => rootCombinators.every(key => !(key in tool.inputSchema)));
       expect(accepted.map(tool => tool.name)).toEqual(tools.map(tool => tool.name));
-      expect(accepted).toHaveLength(28);
+      expect(accepted).toHaveLength(29);
       expect(accepted.map(tool => tool.name)).toEqual(expect.arrayContaining(missingOnClaude));
       const prompt = assembleSessionPrompt({ surface, agentName: 'Bee', agentCommand }).systemPrompt;
       const inventory = prompt.match(/^Beeline tools: (.+)\.$/m)?.[1]?.replaceAll('`', '').split(', ');
@@ -91,7 +91,7 @@ describe('Beeline tool surface across harnesses', () => {
       }>;
       const tools = responses.find(response => response.id === 1)!.result.tools;
       expect(tools).toEqual(agentToolsFor(true, false, false, false, true, true, true));
-      expect(tools.filter(tool => rootCombinators.every(key => !(key in tool.inputSchema)))).toHaveLength(28);
+      expect(tools.filter(tool => rootCombinators.every(key => !(key in tool.inputSchema)))).toHaveLength(29);
       for (let index = 0; index < invalidInputs.length; index++) {
         const response = responses.find(response => response.id === index + 2)!;
         expect(response.result.isError).toBe(true);

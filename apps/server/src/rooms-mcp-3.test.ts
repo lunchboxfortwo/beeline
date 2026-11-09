@@ -666,10 +666,10 @@ const scope3 = fixtureScope3(scope1);
     it('R-MCP-EXCLUDED: refuses wallet spending and host grants with a plain reason', async () => {
       const { client } = await scope1.connected();
       for (const name of ['wallet_pay', 'wallet_swap', 'wallet_contract_call', 'wallet_sign_typed_data',
-        'create_link_spend_request', 'wait_link_spend_request', 'request_grant', 'run_granted_command']) {
+        'create_link_spend_request', 'wait_link_spend_request', 'request_grant', 'run_granted_command', 'store_secret']) {
         const refused = await scope3.call(client, name, {});
         expect(refused.error, name).toBe(true);
-        expect(refused.text).toMatch(name.includes('grant') ? /host grants are kept out of connected apps/ : /wallet spending is kept out of connected apps/);
+        expect(refused.text).toMatch((name.includes('grant') || name === 'store_secret') ? /host grants are kept out of connected apps/ : /wallet spending is kept out of connected apps/);
       }
       for (const tool of ['pay', 'swap', 'contract_call', 'sign_typed_data', 'link_request', 'link_wait']) {
         const refused = await scope3.call(client, 'app_tool', { address: ROOM, app: 'beeline:wallet', tool, args: { amount: '1', to: '0x0' } });

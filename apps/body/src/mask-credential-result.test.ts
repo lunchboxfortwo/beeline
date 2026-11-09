@@ -146,3 +146,36 @@ it('masks a sparse completion at its original invocation before handing it to it
   expect(output.toolCalls).toContainEqual(expect.objectContaining({rawOutput:'[REDACTED]'}));
   expect(JSON.stringify([output,complete.mock.calls])).not.toContain(result);
 });
+
+
+it.each(['store_secret', 'mcp__beeline_agent__store_secret', 'mcp.beeline-agent.store_secret'])(
+  'masks secret inputs in recorded %s calls, sparse updates, ledger rows and traces', async name => {
+    const call = { id: 'store', name, title: name, rawInput: { name: 'FLY_TOKEN', value: result }, content: 'stored', status: 'completed' };
+    const updates = [
+      { sessionId: 'session', update: { sessionUpdate: 'tool_call', toolCallId: 'store', name, rawInput: call.rawInput } },
+      { sessionId: 'session', update: { sessionUpdate: 'tool_result', toolCallId: 'store', content: result } },
+    ];
+    const client = new AcpClient({ agentCommand: 'fixture', agentEnv: {} });
+    vi.spyOn(client, 'request').mockImplementation(async () => {
+      for (const update of updates) client.emit('session/update', update);
+      return { stopReason: 'end_turn' };
+    });
+    const streamed: unknown[] = [];
+    const completed = await client.sessionPrompt('session', 'work', undefined, undefined, calls => streamed.push(calls));
+    const trace = new TurnTrace({ surface: 'room', agentId: 'agent', roomId: 'room', requestId: 'request' });
+    trace.toolCalls([call]);
+    const continuation = new FreeAgentContinuation();
+    await continuation.begin('work');
+    await continuation.stopped({ stopReason: 'free-agent-time-limit', agentText: '', updates, toolCalls: [call] });
+    const records = [maskCredentialResult(call), toolCallEntries(updates), completed, streamed,
+      roomReplySteps([{ kind: 'tool', call }]), await cornerToolActivity(call, '/unused'),
+      trace.snapshot('done'), trace.replay(), continuation.context];
+    expect(JSON.stringify(records)).not.toContain(result);
+    expect(call.rawInput.value).toBe(result);
+  },
+);
+
+it('recognizes store_secret in a harness dispatcher envelope before masking the input', () => {
+  const call = { title: 'tools/call', rawInput: { name: 'store_secret', arguments: { name: 'FLY_TOKEN', value: result } } };
+  expect(maskCredentialResult(call)).toMatchObject({ name: 'store_secret', rawInput: '[REDACTED]' });
+});

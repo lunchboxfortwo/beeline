@@ -133,7 +133,7 @@ An app has no checkout, so `open_corner` refuses the app itself as implementer o
 | Not exposed | Reason |
 | --- | --- |
 | `wallet_pay`, `wallet_swap`, `wallet_contract_call`, `wallet_sign_typed_data`, `create_link_spend_request`, `wait_link_spend_request` | Wallet spending is kept out of connected apps |
-| `request_grant`, `run_granted_command` | Host grants are kept out of connected apps |
+| `request_grant`, `run_granted_command`, `store_secret` | Host grants are kept out of connected apps |
 | `repository_io`, `list_files`, `read_file`, `read_agent_file`, `search_text`, `git_log`, `git_show`, `git_diff`, `git_status` | Needs a Beeline machine |
 | `scratch_io`, `write_scratch_file`, `fetch_image`, `scratch_status`, `read` facet `attachment` | Needs a Beeline machine |
 | `share_browser`, `end_browser_share` | Needs a Beeline machine |

@@ -1,3 +1,4 @@
+import { maskCredentialResult } from './mask-credential-result.js';
 import type { DaemonOperationMap } from '@beeline/api-contract/daemon';
 import { toolCallText } from './tool-call-failure.js';
 import type { AgentTurnStep } from './acp.js';
@@ -70,12 +71,13 @@ export function roomReplySteps(
       }
       return;
     }
-    const operation = oneLine(step.call.kind ?? '') || 'tool';
-    const title = oneLine(redactToolDetail(step.call.title ?? '')) || `${operation} tool`;
-    const identity = `${step.call.name ?? ''} ${step.call.title ?? ''} ${JSON.stringify(step.call.rawInput ?? {})}`;
+    const call = maskCredentialResult(step.call);
+    const operation = oneLine(call.kind ?? '') || 'tool';
+    const title = oneLine(redactToolDetail(call.title ?? '')) || `${operation} tool`;
+    const identity = `${call.name ?? ''} ${call.title ?? ''} ${JSON.stringify(call.rawInput ?? {})}`;
     // Credential paths suppress output regardless of the command used to access them.
     const secret = /fetch_credential|read_credential|raw_credential|[._]netrc\b|\.pgpass\b|\.git-credentials\b|\.npmrc\b|\.pypirc\b|\.docker[\\/]+config\.json\b|\.aws[\\/]+credentials\b|\.env|credentials|\bid_[a-z0-9_]+\b|\.(?:pem|key)\b|private.?key/i.test(identity);
-    const raw = secret ? '' : redactToolDetail(toolCallText(step.call.content) || toolCallText(step.call.rawOutput));
+    const raw = secret ? '' : redactToolDetail(toolCallText(call.content) || toolCallText(call.rawOutput));
     const bytes = Buffer.from(raw);
     const marker = '\n[cut off]';
     const output = secret ? 'Output hidden: contains a secret.' : bytes.length > 4096
@@ -85,7 +87,7 @@ export function roomReplySteps(
       kind: 'tool',
       title: title.slice(0, 240),
       operation: operation.slice(0, 80),
-      status: step.call.status ?? 'completed',
+      status: call.status ?? 'completed',
       ...(output ? { output } : {}),
       ...(requestedBy ? { requestedBy } : {}),
     });

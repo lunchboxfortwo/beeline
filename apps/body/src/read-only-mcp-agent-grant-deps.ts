@@ -172,7 +172,7 @@ export async function requestGrant(
     if (missing.length) {
       throw new Error(
         `secret ${missing.join(', ')} is not in the operator key store or the daemon environment, so this command grant could never run. ` +
-          'Have the operator initialize the named secret securely, or drop the --with suffix.',
+          'Store it first with store_secret (the value is written into the daemon key store and never echoed), or drop the --with suffix.',
       );
     }
   }
@@ -324,7 +324,7 @@ export async function listGrants(
             )
           ).filter((name): name is string => name !== null);
           secretsNote = missing.length
-            ? ` · secrets ${missing.join(', ')} NOT resolvable (operator secret setup is required before asking again)`
+            ? ` · secrets ${missing.join(', ')} NOT resolvable (store them with store_secret, then ask again)`
             : ` · secrets present`;
         }
       } catch {
