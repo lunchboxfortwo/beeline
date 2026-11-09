@@ -1,0 +1,27 @@
+{
+  "reproduction": "swipe-reply-1",
+  "baselineCommit": "f461c5f32c69f60471a702b5854af182f75d52cc",
+  "replyHandlerSha256": {
+    "before": "414ec6b7d6752f83d6144794c91486952477b2e72722354ad687d94488ef40e1",
+    "after": "0834ccd8437e403720f2407ccf2bb0bc784cc68582d94f4c9b9a81efba0ac496"
+  },
+  "nativeHarnessSha256": "77e2b61315e1a9156d1c7d5d913ed74233e347df5900fd0a0af023b0f7ab9372",
+  "apkSha256": "7ebd622bec00fcbda5eb2fb7d974e46b03767af324a8e1aebcf79c36b3fafe36",
+  "nativeReplay": {
+    "device": "emulator-5626",
+    "androidApi": 35,
+    "widthPx": 1080,
+    "heightPx": 2340,
+    "densityDpi": 420,
+    "appId": "app.usebeeline.swipeproof",
+    "reactNative": "0.83.1",
+    "runtime": "47",
+    "devBundle": true
+  },
+  "installedBefore": {
+    "appId": "app.usebeeline",
+    "versionName": "0.2.24",
+    "versionCode": 144,
+    "bundledSourceUnknown": true
+  }
+}

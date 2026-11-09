@@ -141,19 +141,15 @@ export function useChatMessageActions([
         }
         setDismissedMentionKey(null);
         void Haptics.selectionAsync();
-        // A reply started from a message the reader scrolled up to read keeps
-        // that same scroll offset by default while the keyboard/reply banner
-        // shrink the viewport, which reads as the transcript jumping to
-        // center the replied-to message. The reply reference in the composer
-        // is enough context, so land back on the end of the log instead.
-        scrollController.request({ kind: 'newest' });
+        // Keep the reader's position and tail-follow state while the reply
+        // banner and keyboard open. Beginning a reply is not a transcript jump.
         scheduleAnimationFrame(() => composerRef.current?.focus());
       };
       install();
     },
     // Read through the ref: a transcript dependency here would hand every
     // row a new renderer on each live message.
-    [applyComposerPrefill, decodedId, replyTargetForMessage, scrollController],
+    [applyComposerPrefill, decodedId, replyTargetForMessage],
   );
 
 

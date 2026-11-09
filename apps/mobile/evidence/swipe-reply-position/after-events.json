@@ -1,0 +1,88 @@
+[
+  {
+    "phase": "offset",
+    "offset": 1200,
+    "offsetPx": 3150
+  },
+  {
+    "phase": "reset",
+    "offset": 1200,
+    "offsetPx": 3150,
+    "startOffset": 0,
+    "bodyY": -508.57098388671875,
+    "composerY": 745.90478515625,
+    "anchorFromComposerPx": -118.99898529052734
+  },
+  {
+    "phase": "before-reply",
+    "offset": 1200,
+    "offsetPx": 3150,
+    "startOffset": 1200,
+    "bodyY": -508.57098388671875,
+    "composerY": 745.90478515625,
+    "anchorFromComposerPx": -118.99898529052734
+  },
+  {
+    "phase": "keyboard-open",
+    "offset": 1200,
+    "offsetPx": 3150,
+    "startOffset": 1200,
+    "bodyY": -848.3804321289062,
+    "composerY": 406.0952453613281,
+    "anchorFromComposerPx": -118.99874496459961
+  },
+  {
+    "phase": "reset",
+    "offset": 1200,
+    "offsetPx": 3150,
+    "startOffset": 1200,
+    "bodyY": -508.57098388671875,
+    "composerY": 745.90478515625,
+    "anchorFromComposerPx": -118.99898529052734
+  },
+  {
+    "phase": "before-reply",
+    "offset": 1200,
+    "offsetPx": 3150,
+    "startOffset": 1200,
+    "bodyY": -508.57098388671875,
+    "composerY": 745.90478515625,
+    "anchorFromComposerPx": -118.99898529052734
+  },
+  {
+    "phase": "keyboard-open",
+    "offset": 1200,
+    "offsetPx": 3150,
+    "startOffset": 1200,
+    "bodyY": -848.3804321289062,
+    "composerY": 406.0952453613281,
+    "anchorFromComposerPx": -118.99874496459961
+  },
+  {
+    "phase": "reset",
+    "offset": 1200,
+    "offsetPx": 3150,
+    "startOffset": 1200,
+    "bodyY": -508.57098388671875,
+    "composerY": 745.90478515625,
+    "anchorFromComposerPx": -118.99898529052734
+  },
+  {
+    "phase": "before-corner",
+    "offset": 1200,
+    "offsetPx": 3150,
+    "startOffset": 1200,
+    "bodyY": -508.57098388671875,
+    "composerY": 745.90478515625,
+    "anchorFromComposerPx": -118.99898529052734
+  },
+  {
+    "phase": "after-corner",
+    "offset": 1200,
+    "offsetPx": 3150,
+    "startOffset": 1200,
+    "bodyY": -508.57098388671875,
+    "composerY": 745.90478515625,
+    "anchorFromComposerPx": -118.99898529052734
+  }
+]
