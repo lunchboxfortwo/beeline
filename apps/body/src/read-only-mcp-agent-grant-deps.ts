@@ -1,6 +1,7 @@
 import { type SecretResolver, operatorSecretResolver, storeOperatorSecret } from "./grant-runner.js";
+import { pathGrantAllowsWrite } from '@beeline/api-contract/agent-grants';
 import { type CommandGrantRule, type CommandGrantScript, interpreterScriptArgument, GRANT_SCRIPT_MAX_BYTES, GRANT_SCRIPT_MAX_LINES, grantScriptTooLongMessage, isRequestableAgentGrantKind, REQUESTABLE_AGENT_GRANT_KINDS, AGENT_GRANT_TARGET_MAX_LENGTH, parseCommandGrantTarget, AGENT_GRANT_REASON_MAX_LENGTH, HOST_EMULATOR_TARGET, AGENT_GRANT_VERBS, type AgentGrantEscalation, formatGrantEscalationReason, isSharedAssetCategory, SHARED_ASSET_CATEGORIES, COMMAND_SECRET_NAME } from "@beeline/api-contract/agent-grants";
-import { resolveGrantCommand, resolveGrantScriptExecutable, isNativeGrantExecutable } from "./grant-script.js";
+import { resolveGrantCommand, resolveGrantScriptExecutable, isNativeGrantExecutable, installedGrantExecutable } from "./grant-script.js";
 import { readFileSync } from "node:fs";
 import { createHash } from "node:crypto";
 import { hostEmulatorSerials } from "./machine-control.js";
@@ -78,6 +79,7 @@ export function readGrantScript(
   const context = resolveGrantCommand(rule.argv, roots[0]!, deps.scriptEnv ?? process.env);
   const argument = interpreterScriptArgument(context.argv, true);
   if (!argument) return undefined;
+  if (installedGrantExecutable(argument, context.cwd, context.env)) return undefined;
   const candidatePath = resolveGrantScriptExecutable(argument, context.cwd, context.env);
   const executable = argument.direct ? candidatePath : undefined;
   if (argument.direct && !executable) return undefined;
@@ -152,6 +154,10 @@ export async function requestGrant(
   if (target.length > AGENT_GRANT_TARGET_MAX_LENGTH) throw new Error('target is too long');
   const rule = kind === 'command' ? parseCommandGrantTarget(target) : undefined;
   const script = rule ? readGrantScript(rule, deps) : undefined;
+  const commandContext = rule ? resolveGrantCommand(rule.argv, deps.scriptRoots?.[0] ?? '.', deps.scriptEnv ?? process.env) : undefined;
+  const commandArgument = commandContext ? interpreterScriptArgument(commandContext.argv, true) : undefined;
+  const installedPath = commandArgument && commandContext
+    ? installedGrantExecutable(commandArgument, commandContext.cwd, commandContext.env) : undefined;
   const reason = stringArg(args, 'reason')?.trim();
   if (!reason) throw new Error('reason must be a non-empty string');
   if (reason.length > AGENT_GRANT_REASON_MAX_LENGTH) throw new Error('reason is too long');
@@ -205,13 +211,14 @@ export async function requestGrant(
     target,
     reason,
     purpose,
-    ...(args.touches !== undefined ? { touches: stringArg(args, 'touches') } : {}),
+    ...(args.touches !== undefined ? { touches: stringArg(args, 'touches') }
+      : installedPath ? { touches: installedPath } : {}),
     ...(args.capabilities !== undefined ? { capabilities: stringArg(args, 'capabilities') } : {}),
     ...(ttl !== undefined ? { ttlSeconds: ttl } : {}),
     ...(script ? { script } : {}),
   });
   const grantId = typeof result.grantId === 'string' ? result.grantId : 'unknown';
-  const ask = `${AGENT_GRANT_VERBS[kind]} ${target}`;
+  const ask = `${kind === 'path' && pathGrantAllowsWrite(stringArg(args, 'capabilities')) ? 'read and write' : AGENT_GRANT_VERBS[kind]} ${target}`;
   if (result.auto === true) {
     if (kind === 'host' && target === HOST_EMULATOR_TARGET)
       return 'Host emulator permission approved. Call request_grant again now to read live authority and the existing emulator address; no new session is needed.';

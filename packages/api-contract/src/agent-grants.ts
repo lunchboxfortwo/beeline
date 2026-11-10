@@ -545,6 +545,25 @@ export function interpreterScriptArgument(
 /** Existing Android emulator access on the host adb server requires human consent. */
 export const HOST_EMULATOR_TARGET = '127.0.0.1:5037';
 
+/** Shared by grant requests and owner-machine session startup. */
+export function agentGrantAutoApproves(input: {
+  kind: AgentGrantKind; target: string; escalations?: readonly AgentGrantEscalation[];
+  requireOwnerApproval?: boolean; ownApp?: boolean; yolo?: boolean; requesterIsOwner?: boolean;
+}): boolean {
+  return !input.requireOwnerApproval && input.kind !== 'shared_asset' &&
+    !(input.kind === 'host' && input.target === HOST_EMULATOR_TARGET) &&
+    !input.escalations?.length &&
+    (input.kind === 'mcp' && (input.target.startsWith('app:') || input.target.startsWith('connection-install:'))
+      ? input.ownApp === true
+      : input.kind === 'mcp' && input.target === 'wallet'
+        ? input.yolo === true && input.requesterIsOwner === true : true);
+}
+
+/** Path requests retain their explicit write capability through activation. */
+export function pathGrantAllowsWrite(capabilities?: string): boolean {
+  return /\b(write|writable|modify|edit)\b/i.test(capabilities ?? '');
+}
+
 /** The mcp grant target that mounts Trusty Squire. */
 export const SQUIRE_MCP_TARGET = 'squire';
 
@@ -558,7 +577,7 @@ export function grantPresentation(grant: {
   if (grant.kind === 'command') {
     try {
       const rule = parseCommandGrantTarget(grant.target);
-      runs = rule.argv.map((value) => value.split(/[\\/]/).pop() || value).join(' ');
+      runs = rule.argv.join(' ');
       uses = rule.secrets.join(', ') || undefined;
     } catch { /* Legacy command targets may predate the command grammar. */ }
   }

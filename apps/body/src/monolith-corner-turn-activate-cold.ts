@@ -4,7 +4,7 @@ import { agentBehavior } from './agent-command.js';
 import type { SandboxSessionSpec } from './bwrap-sandbox.js';
 import { extraDependencyRoots, dependencyFingerprint, prepareDependencyGeneration, installDependencyNpmGuard, dependencyRequest } from './dependency-generation.js';
 import { CODE_OWNED_HOST_MCP_NAMES } from './mcp-route-class.js';
-import { roomPermissionDecision } from './monolith-room-turn.js';
+import { createRoomPermissionHandler } from './monolith-room-turn.js';
 import { modelContextWindowTokens } from './model-context-window.js';
 import { existsSync } from 'node:fs';
 import { mkdir } from 'node:fs/promises';
@@ -25,7 +25,7 @@ import { registryMcpHostBindPaths, registryMcpHostDeclarations } from './registr
 import { installPiMcpBridge } from './pi-mcp-bridge.js';
 import { beelineAgentMcpServer, readOnlyMcpServer, writeSessionResourceAuth, recordSessionModelFallback, tracedAgentProcessLifecycle } from './room-session.js';
 import { codegraphFingerprintServers, codegraphMcpServer, prepareCodegraphIndex } from './codegraph.js';
-import { credentialMaskPaths, harnessHomeStateDirs, siblingAgentMaskPaths, wrapAgentCommand } from './bwrap-sandbox.js';
+import { sandboxMountPlan, credentialMaskPaths, harnessHomeStateDirs, siblingAgentMaskPaths, wrapAgentCommand } from './bwrap-sandbox.js';
 import { harnessIdentityLabel, sessionNewMcpServers } from './cursor-acp-bridge.js';
 import { bodyAgentCommand } from './config.js';
 import { agentArgsWithModelSelection, applyAgentModelSelection, filterAllowedModelConfigOptions, parseAdvertisedConfigOptions } from './model-config.js';
@@ -256,6 +256,9 @@ import { MonolithCornerTurnLoop, execFileAsync } from './monolith-corner-turn.js
     if (attachScratchRoot) await mkdir(attachScratchRoot, { recursive: true });
     const dependencyPaths: string[] = [];
     const sandboxSpec: SandboxSessionSpec = {
+        operatorHome,
+        userRuntimeDir: `/run/user/${process.getuid?.() ?? 0}`,
+        grantedPaths: grants.paths,
         mode: ctx.options.repository?.readOnly ? 'readonly' : 'edit',
         cwd: ctx.options.worktreePath,
         worktreePath: ctx.options.worktreePath,
@@ -366,9 +369,9 @@ import { MonolithCornerTurnLoop, execFileAsync } from './monolith-corner-turn.js
       backgroundTasks: true,
       autoApprovePermissions: !repository?.readOnly,
       ...(repository?.readOnly ? { osSandbox: Boolean(ctx.options.config.bwrapPath) } : {}),
-      permissionHandler: async request => repository?.readOnly
-        ? roomPermissionDecision(request, { mountedServers, hostServers, shellSandboxed: Boolean(ctx.options.config.bwrapPath), sandboxHome: homeOverlay.HOME })
-        : 'allow',
+      permissionHandler: repository?.readOnly
+        ? createRoomPermissionHandler({ mountedServers, hostServers, shellSandboxed: Boolean(ctx.options.config.bwrapPath), sandboxPlan: sandboxMountPlan(sandboxSpec), sandboxHome: homeOverlay.HOME })
+        : async () => 'allow',
       onUsage: (usage) => {
         void postChangedAgentUsage(ctx.options.api,ctx.agent.publicKey,usage)
           .catch(error => console.error('[agent-usage] publish failed', error));

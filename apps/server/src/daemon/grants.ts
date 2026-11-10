@@ -1,4 +1,4 @@
-import { HOST_EMULATOR_TARGET } from '@beeline/api-contract/agent-grants';
+import { agentGrantAutoApproves, HOST_EMULATOR_TARGET } from '@beeline/api-contract/agent-grants';
 import { resourceRequester } from '../resource-requester.js';
 import { cornerReviewerSql } from '../corner-reviewer.js';
 import { normalizeAgentAsk } from '../tray-approval-ask.js';
@@ -26,8 +26,9 @@ import { daemonWriteResult } from './corner-messages.js';
     if (typeof input.purpose !== 'string' || !input.purpose.trim() || input.purpose.trim().length > 240)
       throw new Error('grant purpose is required: explain what you want to do and why in 1–240 characters');
     for (const field of ['touches', 'capabilities'] as const) {
-      if (input[field] !== undefined && (typeof input[field] !== 'string' || !input[field]!.trim() || input[field]!.trim().length > 240))
-        throw new Error(`grant ${field} must be 1–240 characters`);
+      const maximum = field === 'touches' && input.kind === 'command' ? 4096 : 240;
+      if (input[field] !== undefined && (typeof input[field] !== 'string' || !input[field]!.trim() || input[field]!.trim().length > maximum))
+        throw new Error(`grant ${field} must be 1–${maximum} characters`);
     }
     if (!isRequestableAgentGrantKind(input.kind)) throw new Error('grant kind is invalid');
     if (typeof input.target !== 'string' || !input.target.trim())
@@ -149,16 +150,9 @@ import { daemonWriteResult } from './corner-messages.js';
     // These grants describe resources on the executing agent's owner machine.
     // The person who started the turn is provenance, not the resource owner.
     // Wallet consent and the two command hard stops keep their existing gates.
-    const auto =
-      !requireOwnerApproval &&
-      kind !== 'shared_asset' &&
-      !(kind === 'host' && target === HOST_EMULATOR_TARGET) &&
-      escalations.length === 0 &&
-      (kind === 'mcp' && (target.startsWith('app:') || connectionInstall)
-        ? context.owner_id === resourceOwnerId
-        : kind === 'mcp' && target === 'wallet'
-        ? context.yolo_mode && requesterRow.id === context.owner_id
-        : true);
+    const auto = agentGrantAutoApproves({ kind, target, escalations, requireOwnerApproval,
+      ownApp: context.owner_id === resourceOwnerId, yolo: context.yolo_mode,
+      requesterIsOwner: requesterRow.id === context.owner_id });
     const status = auto ? 'approved' : 'pending';
     const result = await ctx.database.transaction(async (database) => {
       // A retry replaces only an undecided ask for this exact command and
@@ -399,9 +393,10 @@ import { daemonWriteResult } from './corner-messages.js';
       requester_name: string | null;
       expires_at: Date | null;
       script: CommandGrantScript | null;
+      capabilities: string | null;
     }>(
       `SELECT g.id,g.workspace_id,g.room_id,g.kind,g.target,g.status,g.requested_by,
-              requester.name requester_name,g.expires_at,g.script
+              requester.name requester_name,g.expires_at,g.script,g.capabilities
        FROM agent_grants g LEFT JOIN identities requester ON requester.id=g.requested_by
        WHERE g.agent_id=$1 AND g.status IN ('approved','once')
          AND (g.expires_at IS NULL OR g.expires_at>now())
@@ -428,6 +423,7 @@ import { daemonWriteResult } from './corner-messages.js';
         roomId: row.room_id,
         kind: row.kind,
         target: row.target,
+        ...(row.capabilities ? { capabilities: row.capabilities } : {}),
         status: row.status,
         requestedBy: row.requested_by,
         ...(row.requester_name ? { requestedByName: row.requester_name } : {}),

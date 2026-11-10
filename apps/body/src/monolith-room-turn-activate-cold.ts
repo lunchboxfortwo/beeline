@@ -21,7 +21,7 @@ import { modelContextWindowTokens } from './model-context-window.js';
 import { codegraphFingerprintServers, codegraphIndexDirectory, codegraphMcpServer, prepareCodegraphIndex } from './codegraph.js';
 import { sessionConfigFingerprint } from './session-config-fingerprint.js';
 import { registryMcpHostBindPaths, registryMcpHostDeclarations } from './registry-mcp.js';
-import { credentialMaskPaths, harnessHomeStateDirs, siblingAgentMaskPaths, wrapAgentCommand, type SandboxSessionSpec } from './bwrap-sandbox.js';
+import { sandboxMountPlan, credentialMaskPaths, harnessHomeStateDirs, siblingAgentMaskPaths, wrapAgentCommand, type SandboxSessionSpec } from './bwrap-sandbox.js';
 import { harnessIdentityLabel, sessionNewMcpServers } from './cursor-acp-bridge.js';
 import { bodyAgentCommand } from './config.js';
 import { explainEmptyAgentTurn, isSilentCompletion, nextPinnedProvider, type EmptyTurnExplanation } from './empty-turn.js';
@@ -34,7 +34,7 @@ import { TurnTrace } from './turn-trace.js';
 import { isAnswerDeliveryToolCall } from './tool-call-failure.js';
 import { turnErrorDetail } from './turn-failure-reason.js';
 import { startAgentProcess, stopAgentProcess, type AgentProcessLifecycle } from './agent-process.js';
-import { MonolithRoomTurnLoop, execFileAsync, roomPermissionDecision, HumanMessage, ActiveTurn } from './monolith-room-turn.js';
+import { MonolithRoomTurnLoop, execFileAsync, createRoomPermissionHandler, HumanMessage, ActiveTurn } from './monolith-room-turn.js';
 
 
 
@@ -226,6 +226,9 @@ import { MonolithRoomTurnLoop, execFileAsync, roomPermissionDecision, HumanMessa
       ),
     });
     const sandboxSpec: SandboxSessionSpec = {
+      operatorHome,
+      userRuntimeDir: `/run/user/${process.getuid?.() ?? 0}`,
+      grantedPaths: grants.paths,
       mode: 'readonly',
       cwd: ctx.options.cwd,
       harnessStateDirs: stateDirs,
@@ -367,14 +370,14 @@ import { MonolithRoomTurnLoop, execFileAsync, roomPermissionDecision, HumanMessa
       // (`config.ts`), which is exactly when `wrapAgentCommand` above wraps.
       osSandbox: Boolean(ctx.options.config.bwrapPath),
       autoApprovePermissions: false,
-      permissionHandler: async (request) =>
-        roomPermissionDecision(request, {
-          mountedServers,
-          hostServers,
-          shellSandboxed: Boolean(ctx.options.config.bwrapPath),
-          attachmentsDir: attachScratchRoot ? join(attachScratchRoot, 'attachments') : undefined,
-          sandboxHome: homeOverlay.HOME,
-        }),
+      permissionHandler: createRoomPermissionHandler({
+        mountedServers,
+        hostServers,
+        shellSandboxed: Boolean(ctx.options.config.bwrapPath),
+        attachmentsDir: attachScratchRoot ? join(attachScratchRoot, 'attachments') : undefined,
+        sandboxPlan: sandboxMountPlan(sandboxSpec),
+        sandboxHome: homeOverlay.HOME,
+      }),
       onUsage: (usage) => {
         void postChangedAgentUsage(ctx.options.api,ctx.agent.publicKey,usage)
           .catch(error => console.error('[agent-usage] publish failed', error));

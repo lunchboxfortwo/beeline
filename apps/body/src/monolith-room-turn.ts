@@ -1,3 +1,4 @@
+import { sandboxAllowsWrite, type SandboxMountPlan } from './bwrap-sandbox.js';
 import { CommandActivationContext } from './helper-activation-context.js';
 import { FreeAgentContinuation } from './free-agent-continuation.js';
 import { subscriptionActionPrompt } from '@beeline/api-contract/daemon';
@@ -527,9 +528,9 @@ export function isSandboxHomeEdit(request: AcpPermissionRequest, sandboxHome?: s
  * The Room ACP client applies this host-owned decision fail-closed: a mounted
  * MCP tool call is approved; shell commands and native read/search requests
  * are approved while the OS sandbox wraps this session, as are native
- * writes/edits whose every path resolves inside the sandbox home (`$HOME`, the
- * `agent-home/user` directory the sandbox already binds writable for the
- * shell). Without the sandbox, only native reads confined to downloaded
+ * writes/edits whose every path resolves to a writable mount in the effective
+ * sandbox plan, including operator HOME and explicit grants. Credential and
+ * sibling masks and protected read-only mounts still reject edits. Without the sandbox, only native reads confined to downloaded
  * attachments are approved. Other native writes/edits, deletes, moves and
  * unstructured requests remain refused.
  *
@@ -555,6 +556,7 @@ export function roomPermissionDecision(
     attachmentsDir?: string;
     /** The wrapped session's `$HOME` (`agent-home/user`), writable in the sandbox. */
     sandboxHome?: string;
+    sandboxPlan?: SandboxMountPlan;
   } = {},
 ): AcpPermissionDecision {
   const hostServers = options.hostServers ?? CODE_OWNED_HOST_MCP_NAMES;
@@ -563,11 +565,24 @@ export function roomPermissionDecision(
   if (!isMcpShapedPermissionRequest(request, hostServers)) {
     if (options.shellSandboxed) {
       if (request.toolCall?.kind === 'read' || request.toolCall?.kind === 'search') return 'allow';
-      if (isSandboxHomeEdit(request, options.sandboxHome)) return 'allow';
+      if (options.sandboxPlan && request.toolCall?.kind === 'edit') {
+        const paths = nativeRequestPaths(request.toolCall);
+        try {
+          if (paths?.length && paths.every(path => isAbsolute(path) && path === resolve(path) &&
+            sandboxAllowsWrite(options.sandboxPlan!, path) &&
+            sandboxAllowsWrite(options.sandboxPlan!, realWriteTarget(path)))) return 'allow';
+        } catch { return 'reject'; }
+      } else if (isSandboxHomeEdit(request, options.sandboxHome)) return 'allow';
     } else if (isAttachmentRead(request, options.attachmentsDir)) return 'allow';
   }
   if (!options.shellSandboxed) return 'reject';
   return isRoomShellPermissionRequest(request, hostServers) ? 'allow' : 'reject';
+}
+
+
+/** The callback installed for native tools in a non-edit session. */
+export function createRoomPermissionHandler(options: Parameters<typeof roomPermissionDecision>[1]) {
+  return async (request: AcpPermissionRequest): Promise<AcpPermissionDecision> => roomPermissionDecision(request, options);
 }
 
 

@@ -93,6 +93,8 @@ Removing a reviewer from a Room clears that Room's reviewer setting and their re
 
 During a voice conversation, speech that arrives while an agent has work queued or running joins its next turn. The agent answers the latest message and folds in earlier context, without a separate acknowledgement for each chunk.
 
+Agents start with the ordinary owner-machine access that Beeline would automatically grant: writable operator home and the user session bus. Credential stores and other agents' private state stay masked; Docker sockets require an explicit grant. Approved command runs preserve granted path access and the user bus. Installed tools on PATH show their executable path and full command instead of requiring their source on an approval card; explicit script files retain script approval.
+
 Agents can save a fetched credential in the helper’s operator key store with `store_secret`, then use it through a command grant’s `--with NAME`. The value stays out of tool results and grant ledger rows.
 
 Tap a tool step in a new reply to read its saved output. Beeline removes secrets and limits each output to about 4 KB; secret-returning calls are hidden. Older replies show “No output saved”.

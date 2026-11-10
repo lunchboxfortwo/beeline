@@ -175,7 +175,7 @@ export const helperShapes: readonly WireShape[] = [
   shape({"kind":"object","properties":{"name":{"node":2,"optional":false},"instructions":{"node":2,"optional":false},"avatarSeed":{"node":2,"optional":false},"avatar":{"node":24,"optional":true},"authoredBy":{"node":2,"optional":false},"updatedAt":{"node":5,"optional":false}}}),
   shape({"kind":"object","properties":{"grants":{"node":172,"optional":false}}}),
   shape({"kind":"array","item":173}),
-  shape({"kind":"object","properties":{"grantId":{"node":2,"optional":false},"workspaceId":{"node":2,"optional":false},"roomId":{"node":2,"optional":false},"kind":{"node":174,"optional":false},"target":{"node":2,"optional":false},"status":{"node":184,"optional":false},"requestedBy":{"node":2,"optional":false},"requestedByName":{"node":24,"optional":true},"expiresAt":{"node":73,"optional":true},"script":{"node":190,"optional":true}}}),
+  shape({"kind":"object","properties":{"grantId":{"node":2,"optional":false},"workspaceId":{"node":2,"optional":false},"roomId":{"node":2,"optional":false},"kind":{"node":174,"optional":false},"target":{"node":2,"optional":false},"capabilities":{"node":24,"optional":true},"status":{"node":184,"optional":false},"requestedBy":{"node":2,"optional":false},"requestedByName":{"node":24,"optional":true},"expiresAt":{"node":73,"optional":true},"script":{"node":190,"optional":true}}}),
   shape({"kind":"union","choices":[175,176,177,178,179,180,181,182,183]}),
   shape({"kind":"literal","value":"host"}),
   shape({"kind":"literal","value":"repository"}),

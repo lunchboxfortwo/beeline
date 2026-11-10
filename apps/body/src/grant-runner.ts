@@ -1,5 +1,6 @@
 import { waitForPathRemoval } from './filesystem-change.js';
 import { resolveGrantCommand, isNativeGrantExecutable, resolveGrantScriptExecutable } from './grant-script.js';
+import { pathGrantAllowsWrite } from '@beeline/api-contract/agent-grants';
 /**
  * The command-kind grant runner (Agent Grants, slice 2).
  *
@@ -89,6 +90,7 @@ export type GrantRunRequester = { pubkey: string; name?: string };
  * spawned plainly or into the Room's read-only mount table.
  */
 export interface GrantWritePolicy {
+  operatorHome?: string;
   surface: AgentSurface;
   /** The self-tested bwrap; absent on a Room means its promise cannot be kept. */
   bwrapPath?: string;
@@ -136,8 +138,7 @@ export const ROOM_SANDBOX_UNAVAILABLE =
   'open_corner and run it there, where writes belong.';
 
 export const ROOM_WRITE_REFUSED_NOTE =
-  '[beeline] the Room filesystem is read-only outside your scratch directory, so this write ' +
-  'was refused by the kernel. Open a corner with open_corner to change files.';
+  '[beeline] a remaining read-only mount refused this write; request the specific path capability before retrying.';
 
 export type SecretResolver = (name: string) => Promise<string | undefined>;
 
@@ -442,7 +443,7 @@ export class GrantCommandRunner {
     const match = matchCommandGrant(live.grants, room.workspaceId, argv);
     if (!match) {
       throw new Error(
-        `no approved command grant matches: ${argv.join(' ')}. Ask with request_grant kind=command first.`,
+        `no approved command grant matches: ${argv.join(' ')}. Call request_grant(${JSON.stringify({ action: 'request', kind: 'command', target: argv.join(' '), reason: 'Run the blocked command', purpose: 'Complete the blocked host operation' })}).`,
       );
     }
     const { grant, rule } = match;
@@ -474,6 +475,8 @@ export class GrantCommandRunner {
     const env: Record<string, string> = {
       ...(source.PATH ? { PATH: source.PATH } : {}),
       ...(source.HOME ? { HOME: source.HOME } : {}),
+      XDG_RUNTIME_DIR: source.XDG_RUNTIME_DIR ?? `/run/user/${process.getuid?.() ?? 0}`,
+      DBUS_SESSION_BUS_ADDRESS: source.DBUS_SESSION_BUS_ADDRESS ?? `unix:path=/run/user/${process.getuid?.() ?? 0}/bus`,
       ...(policy.toolEnv ?? {}),
       ...Object.fromEntries(secrets),
     };
@@ -488,7 +491,9 @@ export class GrantCommandRunner {
       : `[beeline-sandbox-started:${randomBytes(16).toString('hex')}]`;
     const spawn = runsOnHost
       ? { command: argv[0]!, args: argv.slice(1) }
-      : roomSandboxCommand(policy, room.cwd, argv, sandboxMarker!);
+      : roomSandboxCommand(policy, room.cwd, argv, sandboxMarker!, env.XDG_RUNTIME_DIR!,
+          live.grants.filter(entry => entry.kind === 'path' && entry.status === 'approved' && entry.target.startsWith('/'))
+            .map(entry => ({ path: entry.target, writable: pathGrantAllowsWrite(entry.capabilities) })));
     // Re-check after secret resolution and Once consumption, immediately before exec.
     await this.checkScriptBinding(grant, scriptCandidates(room.cwd, argv, env), argv);
     const outcome = await new Promise<{
@@ -532,6 +537,18 @@ export class GrantCommandRunner {
     if (sandboxMarker && sandboxStarted) {
       outcome.output = outcome.output.replace(`${sandboxMarker}\n`, '').replace(sandboxMarker, '');
     }
+    const deniedPath = outcome.output.match(/['‘“`]([^'’”`\n]+)['’”`][^\n]*(?:Read-only file system|EROFS)/)?.[1]
+      ?? outcome.output.match(/(?:Read-only file system|EROFS)[^\n]*[, :]\s*['‘“`]([^'’”`\n]+)['’”`]/)?.[1];
+    let deniedTarget = deniedPath ? resolve(room.cwd, deniedPath) : undefined;
+    if (deniedTarget) {
+      // New files cannot be bind-mounted. Grant the existing parent needed to
+      // create them, so the suggested call is sufficient on its own.
+      while (!await stat(deniedTarget).catch(() => undefined)) {
+        const parent = dirname(deniedTarget);
+        if (parent === deniedTarget) break;
+        deniedTarget = parent;
+      }
+    }
     const writeRefused = !runsOnHost && WRITE_REFUSED.test(outcome.output);
     // The marker is emitted only after bubblewrap has built the namespace and
     // started its child. Command output is evidence about the command, never
@@ -539,7 +556,7 @@ export class GrantCommandRunner {
     const sandboxFailure = !runsOnHost && !sandboxStarted;
     const output = capOutput(
       scrubSecrets(
-        writeRefused ? `${outcome.output.trimEnd()}\n${ROOM_WRITE_REFUSED_NOTE}` : outcome.output,
+        writeRefused ? `${outcome.output.trimEnd()}\n${ROOM_WRITE_REFUSED_NOTE} Call request_grant(${JSON.stringify({ action: 'request', kind: 'path', target: deniedTarget ?? room.cwd, capabilities: 'write', reason: deniedTarget ? 'Write the denied path' : 'Write the command working directory', purpose: 'Complete the blocked host operation' })}).` : outcome.output,
         secrets,
       ),
       cap,
@@ -601,6 +618,7 @@ export class GrantCommandRunner {
     argv = resolveGrantCommand(argv, '.', {}).argv;
     const argument = interpreterScriptArgument(argv, true);
     if (!argument) return;
+    if (argument.direct && !argument.path.includes('/') && candidates.length && !grant.script) return;
     let bytes: Buffer | undefined;
     for (const candidate of candidates) {
       bytes = await readFile(candidate).catch(() => undefined);
@@ -648,12 +666,17 @@ function roomSandboxCommand(
   cwd: string,
   argv: readonly string[],
   sandboxMarker: string,
+  runtimeDir: string,
+  grantedPaths: NonNullable<SandboxSessionSpec['grantedPaths']>,
 ): { command: string; args: string[] } {
   if (!policy.bwrapPath) throw new Error(ROOM_SANDBOX_UNAVAILABLE);
   return wrapAgentCommand({
     bwrapPath: policy.bwrapPath,
     spec: {
       mode: 'readonly',
+      operatorHome: policy.operatorHome,
+      userRuntimeDir: runtimeDir,
+      grantedPaths,
       cwd,
       // The Room keeps every writable surface its session already had: the
       // scratch and the agent-home overlay. Only the repository copy and the

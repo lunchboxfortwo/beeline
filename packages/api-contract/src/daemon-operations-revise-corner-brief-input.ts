@@ -98,6 +98,7 @@ export type AgentGrantListResult = {
     readonly roomId: string;
     readonly kind: AgentGrantKind;
     readonly target: string;
+    readonly capabilities?: string;
     readonly status: AgentGrantStatus;
     readonly requestedBy: string;
     readonly requestedByName?: string;

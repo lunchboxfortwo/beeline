@@ -58,6 +58,7 @@ import { MonolithRoomTurnLoop, WorkspaceRoster, HumanMessage, RoomRepositoryStat
     const privateAssetRoot = join(runtimeDir, 'private-assets');
     return {
       surface: 'room',
+      operatorHome: ctx.options.config.operatorHome ?? homedir(),
       ...(ctx.options.config.bwrapPath ? { bwrapPath: ctx.options.config.bwrapPath } : {}),
       ...(ctx.sessionScratchDir ? { scratch: ctx.sessionScratchDir } : {}),
       ...(ctx.sessionStateDirs.length ? { harnessStateDirs: ctx.sessionStateDirs } : {}),

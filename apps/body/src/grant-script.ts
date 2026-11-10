@@ -100,6 +100,12 @@ function resolveGrantExecutable(path: string, cwd: string, env: NodeJS.ProcessEn
   return undefined;
 }
 
+/** Bare PATH tools are installed commands; explicit script files keep byte binding. */
+export function installedGrantExecutable(argument: { path: string; direct?: true }, cwd: string, env: NodeJS.ProcessEnv): string | undefined {
+  return argument.direct && !argument.path.includes('/')
+    ? resolveGrantExecutable(argument.path, cwd, env) : undefined;
+}
+
 /** Native executable headers; other direct files may use the ENOEXEC shell fallback. */
 export function isNativeGrantExecutable(bytes: Buffer): boolean {
   if (bytes.length < 4) return false;

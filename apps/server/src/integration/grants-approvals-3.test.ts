@@ -339,10 +339,17 @@ const fixture = monolithFixture();
             kind,
             target,
             reason: 'owner resource',
+            ...(kind === 'path' ? { capabilities: 'read and write' } : {}),
           })
         ).json()) as { grantId: string; status: string; auto: boolean; messageId?: string };
         expect(grant).toMatchObject({ status: 'approved', auto: true });
         expect(grant.messageId).toBeUndefined();
+        if (kind === 'path') {
+          const live = await (await fixture.daemonOperation('listAgentGrants', { roomId: ROOM })).json();
+          expect(live.grants).toEqual(expect.arrayContaining([
+            expect.objectContaining({ grantId: grant.grantId, capabilities: 'read and write' }),
+          ]));
+        }
         expect(
           (
             await fixture.database.query(`SELECT requested_by FROM agent_grants WHERE id=$1`, [

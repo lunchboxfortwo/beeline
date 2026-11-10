@@ -113,6 +113,9 @@
         // Documented host command-grant build runner and isolated corner-host proof.
         "scripts/corner-job.mjs",
         "scripts/prove-corner-host.mjs",
+        // Reproductions R1–R3 invoke these built sandbox and grant-runner proofs by path.
+        "scripts/prove-owner-machine-access.mjs",
+        "scripts/prove-owner-machine-grants.mjs",
         // Reproduction CONNECTORS-1 invokes the built local PhoneService proof by path.
         "scripts/prove-connectors-cleanup.mjs",
         // Reproduction R-SQUIRE-SLEEP invokes the built HTTP pairing proof by path.
