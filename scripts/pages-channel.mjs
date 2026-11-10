@@ -1,6 +1,5 @@
-// Durable input for website-only deploys. All callers hold usebeeline-pages
-// concurrency through download/publish/deploy; helpers consume Pages, not these
-// mutable backup assets. A partial upload fails closed at byte validation.
+// Public helper channels served through the Cloudflare /dl/* route. The helper
+// job serializes publication. A partial upload fails closed at byte validation.
 import { mkdir, readFile, writeFile } from 'node:fs/promises';
 import { join } from 'node:path';
 import { validateBundleDirectory } from './pages-site.mjs';
@@ -14,7 +13,7 @@ export function pagesChannelTag(channel = 'latest') {
 // carry an unchanged Mac bundle forward instead of rebuilding it.
 export const MAC_INPUT_FILES = ['mac-helper-inputs-darwin-arm64.json', 'mac-helper-inputs-darwin-x64.json'];
 
-/** @public Pages and helper release actions import these from github-script. */
+/** @public Helper release actions import these from github-script. */
 export async function downloadPagesChannel({ github, repo, directory, channel = 'latest', allowMissing = false }) {
   let release;
   try {
@@ -58,7 +57,7 @@ export async function downloadPagesChannel({ github, repo, directory, channel = 
   return (await validateBundleDirectory(directory)).manifest;
 }
 
-/** @public Pages and helper release actions import these from github-script. */
+/** @public Helper release actions import these from github-script. */
 export async function publishPagesChannel({
   github,
   repo,
@@ -83,7 +82,7 @@ export async function publishPagesChannel({
       name: `Current helper ${channel} update channel`,
       prerelease: true,
       make_latest: 'false',
-      body: 'Rolling input for usebeeline.app/dl Pages deployments. Managed by the daemon release leg; do not edit assets by hand.',
+      body: 'Public assets for the usebeeline.app/dl download route. Managed by the daemon release leg; do not edit assets by hand.',
     }));
   }
   // A retry replaces a partial backup too. Never update the manifest before

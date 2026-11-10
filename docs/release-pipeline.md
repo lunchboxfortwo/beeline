@@ -136,8 +136,8 @@ npm test -w @beeline/server -- src/production-release-dispatch.test.ts --maxWork
 ```
 
 The plan tests print next and latest component plans and exercise restoration
-of the workflow's scalar outputs. Pages tests verify both channel manifests,
-checksums and separately stamped rc/final bytes while preserving the stable website.
+of the workflow's scalar outputs. Download-route tests verify both channel manifests,
+checksums and separately stamped rc/final bytes while keeping helper bytes out of the static website.
 The same suite tests rc ordering/allocation, default-tag final npm publication,
 and final OTA rebuilding against local npm/eas-cli stubs.
 
@@ -241,7 +241,7 @@ installable when processing finishes, with no release rerun required.
 Installed helpers use the verified bundles published earlier by the daemon
 promotion step to `https://usebeeline.app/dl/manifest.json` (latest) or
 `https://usebeeline.app/dl/next/manifest.json` (next), independently of npm. The
-final release notification verifies that the live Pages manifest matches the
+final release notification verifies that the live download manifest matches the
 release version and source commit, then wakes connected helpers even if another
 component or release bookkeeping failed. A no-op release sends no notice.
 Notification failure never changes the authoritative release outcome; their first socket
@@ -418,7 +418,7 @@ node --test scripts/unified-release.test.mjs
 A failed attempt stores nothing. The release never redispatches itself. A
 rerun (same commit, routine or with `release_version`/`release_sha`) plans the
 same legs and each leg asks its own system what already shipped: the server
-asks Fly which image each Machine runs, the helper asks Pages which version
+asks Fly which image each Machine runs, the helper asks the download route which version
 its manifest serves and npm whether the package exists, the phone OTA asks EAS
 which runtimes the release branch already holds and where each channel points,
 and `release_result` reuses the draft release. Nothing is published twice.
@@ -444,15 +444,16 @@ desktop signing and notarization](./macos-desktop-signing.md).
 
 The user-visible critical path is `initialize` → server / phone OTA / website
 in parallel → `delivery_result`. The checkpoint needs no helper, macOS,
-desktop or store build. The website always deploys its Pages content with the
-previous verified helper channel, even when a helper build is selected; the
-helper publishes its new channel later under the same Pages deployment lock.
+desktop or store build. The website deploys only static Pages content, associations and installers,
+even when a helper build is selected. Helper archives and manifests are served
+from public GitHub Release assets through the Cloudflare download route; helper
+publication does not upload or deploy a Pages artifact.
 `helper_linux` starts directly after `initialize` on the existing standard
 `ubuntu-22.04` runner type, alongside both Mac builds. It builds and
 install-verifies Linux and compiles the CLI once, then hands only those build
 outputs to the final `helper` job through a same-run artifact. The final job
 requires Linux and both Mac jobs to succeed, verifies and merges the three
-platforms, runs the Pages update proof, packs and smoke-tests the exact compiled
+platforms, runs the download-route update proof, packs and smoke-tests the exact compiled
 CLI tarball, and publishes once. It never recompiles a native bundle.
 
 The helper publication and Android store build still wait for the live

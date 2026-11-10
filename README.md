@@ -115,7 +115,7 @@ Server updates no longer revoke your existing Always and Once approvals solely b
 
 The nightly latency report includes paired web interaction timings and an explicit reason for each unmeasured interaction. It also records cold and warm web route loads, labelling redirects and local integration fixtures; attachment timing includes the real web picker, local upload and delivered message. Its full-inventory score stays unavailable until every interaction has two complete captures. [Rig and measurement limits](scripts/latency-rig/README.md#paired-web-interaction-inventory).
 
-Nightly Checks accepts a Beeline dispatch at 03:07 New York time. The GitHub timers remain as fallbacks and skip a night already dispatched. Pages deployment retries an empty status once immediately, then fails instead of waiting for the deployment timeout. A deployment stuck in progress for eight minutes is cancelled and retried once with the same artifact; a second stall fails with the deployment identity and last status.
+Nightly Checks accepts a Beeline dispatch at 03:07 New York time. The GitHub timers remain as fallbacks and skip a night already dispatched. Helper updates keep their existing download URLs and use public GitHub Release assets through Cloudflare. Helper releases no longer upload archives to GitHub Pages or wait for a Pages deployment. [Download routing and rollout](infra/helper-downloads/README.md).
 
 ## Links
 

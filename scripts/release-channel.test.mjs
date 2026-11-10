@@ -314,9 +314,9 @@ test('workflow rebuilds both channels and preserves native beta selection', () =
 
 test('next helper checks and publication verify the public manifest without a Pages redirect', () => {
   const manifests = Object.values(workflow.jobs).flatMap(job => job.steps ?? [])
-    .map(step => step.env?.MANIFEST_URL ?? step.with?.pages_manifest_url ?? step.with?.manifest_url)
+    .map(step => step.env?.MANIFEST_URL ?? step.with?.manifest_url)
     .filter(value => value?.includes("channel == 'next'"));
-  assert.equal(manifests.length, 5); // Linux/Mac reuse, helper/website publication, release notification.
+  assert.equal(manifests.length, 4); // Linux/Mac reuse, helper publication, release notification.
   for (const manifest of manifests) {
     assert.match(manifest, /channel == 'next' && 'https:\/\/usebeeline\.app\/dl\/next\/manifest\.json'/);
     assert.doesNotMatch(manifest, /github\.io\/beeline\/dl\/next/);

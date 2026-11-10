@@ -15,11 +15,9 @@ export const UPDATER_ENTRY = new URL('../apps/body/src/self-update.ts', import.m
 /**
  * Every `@beeline/*` workspace package the updater's own import graph reaches.
  *
- * The Pages leg used to bundle this entry after only `npm ci`, while a workspace
- * package's `exports` point at its built `dist/`. Each name reported here is
- * a package `.github/actions/pages-leg` must compile before the proof runs.
- * `verify-pages-update.test.mjs` holds that leg to exactly this set, so a new
- * import cannot silently assume a dist that was never built.
+ * The helper job must build these workspaces before bundling this entry:
+ * their package exports resolve to built dist/. Keep the production import
+ * graph here so the release proof exercises the actual updater.
  */
 export async function updaterWorkspacePackages() {
   const packages = new Set();
@@ -62,8 +60,8 @@ async function updaterModule() {
 
 export async function verifyPagesUpdate({ manifestUrl, expectedManifest, workDir }) {
   const strictFetch = async (url, options) => {
-    // Before DNS cutover github.io must not redirect this proof to the old
-    // origin. After cutover pass the final custom-domain URL explicitly.
+    // The download route must serve bytes directly; GitHub asset redirects
+    // are followed inside the Worker, never by the installed helper.
     const response = await fetch(url, { ...options, redirect: 'error', cache: 'no-store' });
     if (!response.ok) throw new Error(`${url}: HTTP ${response.status}`);
     return response;

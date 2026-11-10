@@ -141,14 +141,15 @@ export async function buildPagesSite({
   sourceRoot = DEFAULT_SOURCE_ROOT,
   bundleRoot,
   nextBundleRoot,
+  includeDownloads = true,
   outputRoot,
   expectedSha,
   expectedVersion,
 }) {
-  if (!bundleRoot) fail('bundleRoot is required');
+  if (includeDownloads && !bundleRoot) fail('bundleRoot is required');
   if (!outputRoot) fail('outputRoot is required');
   sourceRoot = resolve(sourceRoot);
-  bundleRoot = resolve(bundleRoot);
+  if (bundleRoot) bundleRoot = resolve(bundleRoot);
   outputRoot = resolve(outputRoot);
   if (outputRoot === sourceRoot || outputRoot.startsWith(`${sourceRoot}/`)) {
     fail('Pages output must be outside web');
@@ -161,21 +162,23 @@ export async function buildPagesSite({
   const associationErrors = validateRequiredAssociations(await readAssociations(sourceRoot));
   if (associationErrors.length > 0) fail(associationErrors.join('\n'));
 
-  const bundle = await validateBundleDirectory(bundleRoot, { expectedSha, expectedVersion });
+  const bundle = includeDownloads ? await validateBundleDirectory(bundleRoot, { expectedSha, expectedVersion }) : null;
   await rm(outputRoot, { recursive: true, force: true });
   await copyStaticTree(sourceRoot, outputRoot);
   await copyFile(join(sourceRoot, 'install.sh'), join(outputRoot, 'install'));
-  const outputDl = join(outputRoot, 'dl');
-  await mkdir(outputDl, { recursive: true });
-  for (const file of bundle.files) await copyFile(join(bundleRoot, file), join(outputDl, file));
-  await writeFile(join(outputDl, 'manifest.json'), bundle.manifestBytes);
+  if (includeDownloads) {
+    const outputDl = join(outputRoot, 'dl');
+    await mkdir(outputDl, { recursive: true });
+    for (const file of bundle.files) await copyFile(join(bundleRoot, file), join(outputDl, file));
+    await writeFile(join(outputDl, 'manifest.json'), bundle.manifestBytes);
 
-  if (nextBundleRoot) {
-    const next = await validateBundleDirectory(nextBundleRoot);
-    const nextDl = join(outputDl, 'next');
-    await mkdir(nextDl, { recursive: true });
-    for (const file of next.files) await copyFile(join(nextBundleRoot, file), join(nextDl, file));
-    await writeFile(join(nextDl, 'manifest.json'), next.manifestBytes);
+    if (nextBundleRoot) {
+      const next = await validateBundleDirectory(nextBundleRoot);
+      const nextDl = join(outputDl, 'next');
+      await mkdir(nextDl, { recursive: true });
+      for (const file of next.files) await copyFile(join(nextBundleRoot, file), join(nextDl, file));
+      await writeFile(join(nextDl, 'manifest.json'), next.manifestBytes);
+    }
   }
 
   for (const file of ['apple-app-site-association', 'assetlinks.json']) {
@@ -183,7 +186,7 @@ export async function buildPagesSite({
     const output = await readFile(join(outputRoot, '.well-known', file));
     if (!source.equals(output)) fail(`Pages build changed .well-known/${file}`);
   }
-  return bundle.manifest;
+  return bundle?.manifest;
 }
 
 async function main() {
@@ -194,12 +197,13 @@ async function main() {
     sourceRoot: option('--source-dir', DEFAULT_SOURCE_ROOT),
     bundleRoot: option('--bundle-dir'),
     nextBundleRoot: option('--next-bundle-dir'),
+    includeDownloads: !process.argv.includes('--static-only'),
     outputRoot: option('--output-dir'),
     expectedSha: option('--sha'),
     expectedVersion: option('--version'),
   });
   console.log(
-    `pages-site: built usebeeline.app for ${manifest.version} (${manifest.sourceCommit})`,
+    manifest ? `pages-site: built usebeeline.app for ${manifest.version} (${manifest.sourceCommit})` : 'pages-site: built static usebeeline.app without helper downloads',
   );
 }
 

@@ -1,15 +1,16 @@
 # Beeline helper update channel
 
-> **Current topology (2026-09-09):** the cutover below is complete.
-> `usebeeline.app` is backed by GitHub Pages and `server.usebeeline.app` is the
-> Fly monolith. The unified release has no legacy host mirror. The runbook is
-> retained only as cutover history; do not execute its mirror-enable steps.
+> **Download routing:** `infra/helper-downloads/` owns the Cloudflare `/dl/*`
+> route. It streams public GitHub Release assets at the existing URLs. Activate
+> that route using its [rollout instructions](../infra/helper-downloads/README.md)
+> before the first release using this workflow. The marketing site stays on
+> GitHub Pages; helper publication does not deploy Pages.
 
-Helpers boot a verified staged release or the verified active release from local disk, then check for the newest release on a pushed release notice and once after socket registration from `https://usebeeline.app/dl/manifest.json`. That URL and
-its relative platform archive and `.sha256` paths remain unchanged.
+Helpers boot a verified staged release or the verified active release from local disk, then check for the newest release on a pushed release notice and once after socket registration from `https://usebeeline.app/dl/manifest.json`.
+The manifest, relative platform archives and `.sha256` paths remain unchanged,
+including `/dl/next/manifest.json`. The installer at `/install` and `/install.sh`
+still fetches `/dl/beeline-bootstrap.mjs` and its checksum through the same route.
 The recovery bootstrap migrates old installations forward to one native supervised helper.
-Cloudflare remains the public TLS endpoint; GitHub Pages becomes the origin
-for the entire website, including `/dl` and `.well-known`.
 
 ## Following next
 
@@ -33,9 +34,9 @@ settings returns to latest on the next ordinary update reconciliation.
 
 The rolling prereleases `helper-update-channel` (latest) and
 `helper-update-channel-next` retain independently validated helper bytes.
-Every Pages deployment includes both directories. A `next` helper deployment
-uses the last latest website component's source commit for the static website;
-it cannot publish website changes from `next`. Next bundles carry an rc version,
+The route selects the channel from the path, independently of the static
+website deployment. A next release never republishes the stable website.
+Next bundles carry an rc version,
 for example `v0.1.184-rc.3`. Latest promotion
 rebuilds/stamps bundles from that rc commit with `v0.1.184` and publishes them
 to `/dl/manifest.json`; the next manifest keeps serving the rc. Ordinary helper
@@ -59,38 +60,34 @@ version and source SHA. Linux builds on the standard hosted `ubuntu-22.04` runne
 Apple-silicon and Intel builds on the existing `macos-15` and `macos-15-intel`
 runner types. The Linux job also compiles the CLI. The final helper job waits
 for all three, combines their verified outputs and publishes once; it performs
-no native compilation. A retry whose exact identity already serves on Pages
+no native compilation. A retry whose exact identity already serves at the download URL
 skips bundle rebuilding and promotion (see [the release pipeline](./release-pipeline.md)).
 Input-keyed native binaries may be restored from Actions cache; a miss builds
 them from the pinned upstream. Full-bundle install proof still runs. Native
 cache entries are never published on the public Releases page.
 Channel policy selects helper rebuilding even when helper source inputs are
 unchanged, so every new identity gets its own version stamp.
-Its promote phase passes `daemon-artifact-<version>-<sha>` to
-`.github/actions/pages-leg/action.yml`. The Pages leg:
+Its promote phase validates and publishes the exact bundle directory through
+`scripts/pages-channel.mjs`, then runs `scripts/verify-pages-update.mjs` against
+the public download URL. The legacy script names are retained. The helper job
+has no Pages permission, environment, artifact upload or deployment wait.
 
-1. Verifies the artifact identity, every archive's digest and size, and sidecars.
-2. Assembles the static website with those exact bytes, ignoring checkout `dl/`.
-3. Saves the same files as GitHub Release assets on `helper-update-channel`.
-4. Deploys the complete Pages artifact, including hidden association files.
-5. Runs `scripts/verify-pages-update.mjs` against the deployed host.
+The rolling `helper-update-channel` and `helper-update-channel-next` releases
+are public prereleases, excluded from GitHub's latest stable selection. They
+hold the archives, checksums, manifest, recovery bootstrap and Mac build inputs.
+The Worker streams their assets without credentials or exposing GitHub's
+redirects to installed clients. It bypasses caches for these mutable channel
+URLs. Helpers retain their existing checksum verification and leave the
+installed version untouched if publication is interrupted; rerunning the
+helper leg repairs a partial upload. The manifest is uploaded last.
 
-The rolling `helper-update-channel` release is a prerelease, excluded from
-GitHub's latest stable release selection. It supplies durable inputs for
-website-only deployments after Actions artifacts expire. It is not the URL
-helpers read on startup and release/reconnect events. `scripts/pages-channel.mjs` owns its upload/download contract.
-Every caller holds the same `usebeeline-pages` concurrency group through
-publication and deployment. An interrupted backup upload fails validation;
-the next release retry replaces and repairs it. The previous Pages deployment
-continues serving until a complete replacement is deployed.
+The helper job serializes channel publication. The website job separately
+holds `usebeeline-pages` while deploying only static marketing files,
+associations and installers. It ignores checkout `web/dl/` and never downloads
+or republishes helper archives. Website deployment runs when selected even
+when the helper is also selected, since the helper no longer deploys the site.
 
-Website changes are selected and deployed only by `unified-release.yml`; a
-merge to main does not deploy Pages. Website-only releases reuse the durable
-helper channel and never build or assign a second helper version. A missing or
-corrupt channel fails closed, preserving the existing Pages site; it never
-falls back to checkout helper bytes or the dev machine.
-
-No new binaries are committed to Git (#647). The served Pages site and Release
+No new binaries are committed to Git (#647). The static website and Release
 assets are independent of the dev machine and Actions artifact retention.
 Build runners still run the existing release jobs; moving those runners is a
 separate task from retiring the retired development services.
@@ -161,11 +158,10 @@ is no non-launchd fallback. The `gui/` domain is deliberate, not incidental:
 Trusty Squire drives a real Chrome in that session, and Linux's
 `systemctl --user` carries the analogous `loginctl enable-linger` requirement.
 
-Redirects are refused in the hosting proof: a github.io redirect back to the
-old dev origin must not count as a successful Pages verification. Use the
-direct github.io URL before custom-domain setup and the public Cloudflare URL
-after cutover. Pages propagation is retried for up to 20 attempts, 15 seconds
-apart; stale manifests and checksum mismatches never count as success.
+Redirects are refused in the update proof: the canonical download URL must
+serve the bytes directly. The Worker follows GitHub's asset redirect internally.
+The helper proof verifies the exact manifest, sidecars and production updater
+without a Pages propagation loop.
 
 ## Recovery and the first update from an old release
 
@@ -211,7 +207,7 @@ it never disables the native restart owner. There is no rollback coordinator
 or detached production fallback.
 
 The manifest's `recovery` entry pins the small bootstrap's file, checksum and
-size. Bundle merging, Pages assembly and the durable helper channel preserve
+size. Bundle merging and the public helper channel preserve
 and validate those exact bytes alongside the platform archives.
 
 ## Isolated acceptance

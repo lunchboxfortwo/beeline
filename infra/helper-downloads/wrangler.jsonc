@@ -1,0 +1,17 @@
+{
+  "name": "beeline-helper-downloads",
+  "main": "worker.mjs",
+  "compatibility_date": "2026-11-10",
+  "account_id": "6e97e79c389234e4c8aa7837ee3e2a94",
+  "workers_dev": false,
+  "routes": [
+    { "pattern": "usebeeline.app/dl/*", "zone_name": "usebeeline.app" }
+  ],
+  "env": {
+    "preview": {
+      "name": "beeline-helper-downloads-preview",
+      "workers_dev": true,
+      "routes": []
+    }
+  }
+}
