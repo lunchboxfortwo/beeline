@@ -337,29 +337,46 @@ export async function authorizeCommandOutput(
   const row =
     typeof requestId === 'string' && typeof generation === 'string'
       ? (
-          await db.query<CommandRow & { turn_cancelled: boolean }>(
+          await db.query<CommandRow & { turn_cancelled: boolean; rejection_reason: string | null }>(
             `WITH ${commandOwnerFenceCteSql('owned_command.room_id=$1 AND owned_command.agent_id=$2 AND owned_command.turn_request_id=$3 AND owned_command.generation_id=$4')}
              SELECT command.*,
+               CASE
+                 WHEN command.generation_id IS DISTINCT FROM $4 THEN 'generation ended'
+                 WHEN command.state<>'claimed' AND NOT ($5::boolean AND command.state='complete') THEN 'state not claimed: ' || command.state
+                 WHEN command.turn_owner_connection_id IS NULL THEN NULL
+                 WHEN NOT beeline_command_generation_open(command.id,command.generation_id) THEN 'generation ended'
+                 WHEN connection.agent_id IS NULL OR connection.released_at IS NOT NULL
+                   OR COALESCE(connection.turn_connection_id,connection.connection_id) IS DISTINCT FROM command.turn_owner_connection_id
+                   OR COALESCE(connection.turn_connection_epoch,connection.epoch) IS DISTINCT FROM command.turn_owner_epoch
+                   THEN 'connection/epoch mismatch'
+                 WHEN server.renewed_at IS NULL THEN 'server instance lease stale: missing'
+                 WHEN NOT (${commandOwnerFenceMatchesSql('command')}) THEN
+                   'server instance lease stale: age=' || EXTRACT(EPOCH FROM (clock_timestamp()-server.renewed_at))::text || 's'
+                 ELSE NULL
+               END rejection_reason,
                EXISTS(SELECT 1 FROM agent_turns turn
                  WHERE turn.room_id=command.room_id AND turn.agent_id=command.agent_id
                    AND turn.request_id=command.turn_request_id AND turn.status='cancelled') turn_cancelled
              FROM agent_commands command
+             LEFT JOIN agent_connections connection ON connection.agent_id=command.agent_id
+             LEFT JOIN live_server_instances server ON server.instance_id=connection.instance_id
              WHERE command.room_id=$1 AND command.agent_id=$2 AND command.turn_request_id=$3
-               AND command.action IN ('input','resume') AND command.generation_id=$4
-               AND ${commandOwnerFenceMatchesSql('command')}
-             ORDER BY command.created_at DESC,command.id DESC LIMIT 1 FOR UPDATE OF command`,
-            [roomId, agentId, requestId, generation],
+               AND command.action IN ('input','resume')
+             ORDER BY (command.generation_id IS NOT DISTINCT FROM $4) DESC,command.created_at DESC,command.id DESC LIMIT 1 FOR UPDATE OF command`,
+            [roomId, agentId, requestId, generation, allowCompleted],
           )
         ).rows[0]
       : undefined;
-  if (!row || (row.state !== 'claimed' && !(allowCompleted && row.state === 'complete'))) {
+  if (!row || row.rejection_reason || (row.state !== 'claimed' && !(allowCompleted && row.state === 'complete'))) {
+    const reason = row?.rejection_reason ?? (row ? `state not claimed: ${row.state}` : 'no command row');
     console.error('command output rejected', {
+      reason,
       command: row?.id,
       agent: agentId,
       room: roomId,
       generation: typeof generation === 'string' ? generation : undefined,
     });
-    throw new Error('command output authority rejected');
+    throw new Error(`command output authority rejected: ${reason}`);
   }
   if (row.turn_cancelled) throw new Error('command turn cancelled');
   if (row.turn_owner_connection_id) {

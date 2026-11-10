@@ -1,7 +1,9 @@
+import {DaemonService} from './daemon-service.js';
+import {PhoneService} from './phone-service.js';
 import {afterEach,beforeEach,expect,it,vi} from 'vitest';
 import {migratedDatabase,type PgliteDatabase} from './test-support.js';
 import {ConnectionPresence,recordAgentEvidence} from './connection-presence.js';
-import {createAgentCommand,claimAgentCommand,createClaimedMcpAgentCommand} from './agent-command.js';
+import {authorizeCommandOutput,createAgentCommand,claimAgentCommand,createClaimedMcpAgentCommand} from './agent-command.js';
 import {randomUUID} from 'node:crypto';
 import {LiveHub} from './live.js';
 
@@ -107,4 +109,33 @@ it('registration recovers only its agent’s ownerless helper claims once and pr
   await database.transaction(db=>claimAgentCommand(db,ROOM,AGENT,legacy.id,'upgraded-generation',source));
   await presence.releaseConnection(AGENT,source.connectionId);
   expect(await untouched()).toEqual(before);
+});
+
+// Reproduction turn-write-reject: unchanged claimed owner refuses while its server lease is stale.
+it('names a stale server lease and recovers the same claimed turn after renewal',async()=>{
+  const {command}=await claimed();
+  const daemon=new DaemonService(database,live);
+  const post=()=>daemon.execute('postCornerMessage',{roomId:ROOM,cornerId:ROOM,requestId:command.turn_request_id,generationId:'generation',text:'Recovered live turn write'},AGENT);
+  await database.query(`UPDATE live_server_instances SET renewed_at=clock_timestamp()-interval '161 seconds' WHERE instance_id=$1`,[presence.instanceId]);
+  const log=vi.spyOn(console,'error').mockImplementation(()=>{});
+  await expect(post())
+    .rejects.toThrow(/command output authority rejected: server instance lease stale: age=16[1-9]/);
+  expect(log).toHaveBeenCalledWith('command output rejected',expect.objectContaining({reason:expect.stringContaining('server instance lease stale: age=')}));
+  expect((await database.query('SELECT state FROM agent_commands WHERE id=$1',[command.id])).rows).toEqual([{state:'claimed'}]);
+  await presence.renewLease();
+  await post();
+  await database.query(`INSERT INTO memberships(workspace_id,room_id,identity_id,role) VALUES($1,NULL,$2,'owner')`,[WORKSPACE,HUMAN]);
+  const room=await new PhoneService(database,'http://test').readRoom(ROOM,HUMAN);
+  expect(room?.messages.filter(message=>message.text==='Recovered live turn write')).toHaveLength(1);
+});
+it.each([
+  ["DELETE FROM agent_commands",'no command row'],
+  ["UPDATE agent_commands SET state='complete'",'state not claimed: complete'],
+  ["UPDATE agent_connections SET epoch=epoch+1",'connection/epoch mismatch'],
+  ["UPDATE agent_commands SET generation_id=NULL",'generation ended'],
+])('explains output refusal after %s',async(sql,reason)=>{
+  const {command}=await claimed();vi.spyOn(console,'error').mockImplementation(()=>{});
+  await database.query(sql);
+  await expect(database.transaction(db=>authorizeCommandOutput(db,ROOM,AGENT,command.turn_request_id,'generation')))
+    .rejects.toThrow('command output authority rejected: '+reason);
 });
