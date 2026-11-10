@@ -354,7 +354,7 @@ const scope1 = fixtureScope1();
   }, 120_000);
 
 
-  it.skipIf(!existsSync(scope1.chromeBinary))('pinches, pans and maps a tap in the Squire bridge viewer without forwarding the gesture', async () => {
+  it.skipIf(!existsSync(scope1.chromeBinary))('pinches and pans locally, then dispatches a phone tap through the Squire mouse path', async () => {
     const squire = createServer((_request, response) => {
       response.writeHead(200, { 'content-type': 'text/html' });
       response.end(`<!doctype html><head><meta name="viewport" content="width=device-width,initial-scale=1"><style>
@@ -383,6 +383,13 @@ const scope1 = fixtureScope1();
         onPhase: (name) => { inputCounts[name] = forwarded.filter(scope1.isForwardedInput).length; },
       });
       scope1.expectViewerGesture(gesture, forwarded, inputCounts);
+      // Squire's touch path offsets input twice inside a cross-origin iframe.
+      // A deliberate tap must use the same trusted mouse path as a desktop click.
+      const input = forwarded.filter(scope1.isForwardedInput).map((raw) => JSON.parse(raw));
+      expect(input).toEqual([
+        { type: 'pointer', phase: 'down', button: 'left', x: expect.any(Number), y: expect.any(Number) },
+        { type: 'pointer', phase: 'up', button: 'left', x: input[0]?.x, y: input[0]?.y },
+      ]);
     } finally {
       for (const client of streams.clients) client.close();
       await new Promise<void>((resolve) => streams.close(() => resolve()));

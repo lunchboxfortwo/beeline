@@ -300,7 +300,7 @@ export function fixtureScope1() {
   function isForwardedInput(raw: string): boolean {
     try {
       const message = JSON.parse(raw) as { type?: string; method?: string };
-      if (message.type === 'touch' || message.type === 'wheel') return true;
+      if (message.type === 'touch' || message.type === 'pointer' || message.type === 'wheel') return true;
       return typeof message.method === 'string' && message.method.startsWith('Input.');
     } catch { return false; }
   }
@@ -311,7 +311,7 @@ export function fixtureScope1() {
     try {
       const message = JSON.parse(raw) as { type?: string; phase?: string; x?: number; y?: number;
         method?: string; params?: { type?: string; x?: number; y?: number } };
-      if (message.type === 'touch' && message.phase === 'start'
+      if (((message.type === 'touch' && message.phase === 'start') || (message.type === 'pointer' && message.phase === 'down'))
         && typeof message.x === 'number' && typeof message.y === 'number') return { x: message.x, y: message.y };
       if (message.method === 'Input.dispatchMouseEvent' && message.params?.type === 'mousePressed'
         && typeof message.params.x === 'number' && typeof message.params.y === 'number')

@@ -516,7 +516,8 @@ export async function serveComputerSession(
         beelineCanvas.addEventListener('pointerup',event=>{if(event.pointerType!=='touch')return;
           event.preventDefault();event.stopImmediatePropagation();const wasPinch=Boolean(pinch);pointers.delete(event.pointerId);
           if(pointers.size<2)pinch=undefined;
-          if(drag?.id===event.pointerId&&!drag.moved&&!wasPinch){const p=point(event);send({type:'touch',phase:'start',...p});send({type:'touch',phase:'end',...p});}
+          // Use the desktop mouse path for taps: Squire touch input is offset twice in cross-origin frames.
+          if(drag?.id===event.pointerId&&!drag.moved&&!wasPinch){const p=point(event);send({type:'pointer',phase:'down',button:'left',...p});send({type:'pointer',phase:'up',button:'left',...p});}
           drag=undefined;if(pointers.size===1){const [id,p]=[...pointers.entries()][0];drag={id,x:p.x,y:p.y,moved:true};}},true);
         beelineCanvas.addEventListener('pointercancel',event=>{if(event.pointerType==='touch'){pointers.delete(event.pointerId);drag=undefined;pinch=undefined;}},true);
       }
