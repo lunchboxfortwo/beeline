@@ -156,8 +156,6 @@ import { projectedMessage, messageOrder } from './read-projection.js';
         requestId: command.turn_request_id,
         agentPubkey: command.agent_id,
         createdAt: unix(new Date(command.created_at)),
-        // Older phones consume this optional field; it is a command projection.
-        runtimePhase: { operationId: command.turn_request_id, phase: 'starting' as const },
       }))
       .sort((left, right) => left.createdAt - right.createdAt ||
         left.agentPubkey.localeCompare(right.agentPubkey));

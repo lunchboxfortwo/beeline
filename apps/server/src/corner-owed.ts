@@ -654,14 +654,29 @@ CREATE TRIGGER corner_owed_facts_insert AFTER INSERT ON corner_facts
 DROP TRIGGER IF EXISTS corner_owed_facts_update ON corner_facts;
 
 -- Opening provenance and the owner (the opening order, or a person's first
--- tag in a person-opened corner) become available only when the command is inserted.
+-- non-reviewer tag) become available when that assignment is inserted.
+-- Later tags cannot change either fact and must not rebuild message history
+-- for every human member before their command can commit and reach the helper.
 CREATE OR REPLACE FUNCTION corner_owed_opening_inserted() RETURNS trigger
 LANGUAGE plpgsql AS $corner_owed$
 BEGIN
   PERFORM corner_owed_refresh(NEW.room_id, member.identity_id)
   FROM room_access member
   JOIN identities person ON person.id=member.identity_id AND person.kind='human'
-  WHERE member.room_id=NEW.room_id AND member.removed_at IS NULL;
+  WHERE member.room_id=NEW.room_id AND member.removed_at IS NULL
+    AND (NEW.reason='corner_objective' OR EXISTS (
+      SELECT 1 FROM rooms corner
+      LEFT JOIN corner_facts fact ON fact.corner_id=corner.id
+      LEFT JOIN rooms parent ON parent.id=corner.parent_id
+      WHERE corner.id=NEW.room_id AND corner.parent_id IS NOT NULL
+        AND NEW.agent_id IS DISTINCT FROM COALESCE(fact.reviewer_agent_id,parent.reviewer_agent_id)
+        AND NOT EXISTS (SELECT 1 FROM agent_commands opening
+          WHERE opening.room_id=corner.id AND opening.reason='corner_objective')
+        AND NOT EXISTS (SELECT 1 FROM agent_commands earlier
+          WHERE earlier.room_id=corner.id AND earlier.reason='human_tag'
+            AND earlier.inbox_sequence<NEW.inbox_sequence
+            AND earlier.agent_id IS DISTINCT FROM COALESCE(fact.reviewer_agent_id,parent.reviewer_agent_id))
+    ));
   RETURN NULL;
 END
 $corner_owed$;

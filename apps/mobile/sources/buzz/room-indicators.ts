@@ -210,7 +210,9 @@ export function selectComposerAckState(input: ComposerAckInput): ComposerAckStat
 export function selectComposerAckPresentation(
   input: ComposerAckPresentationInput,
 ): ComposerAckPresentation | null {
-  const pending = !input.activeTurnPubkey ? input.pendingAgentCommands?.[0] : undefined;
+  const pending = !input.activeTurnPubkey
+    ? input.pendingAgentCommands?.find(command => command.runtimePhase?.phase === 'starting')
+    : undefined;
   if (pending) {
     const agent = agentFromConversationIdentity(input.conversationIdentities?.get(pending.agentPubkey)) ??
       input.agentsByPubkey?.get(pending.agentPubkey);
