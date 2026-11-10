@@ -202,7 +202,7 @@ export async function agentWalletTool(
           walletNotice: true, status: 'pending', operation: 'swap', execution: true,
           amountText: `${amount} ${fromAsset.toUpperCase()}→${toAsset.toUpperCase()}`,
           counterparty: venue, chain: swapChain, agentId,
-          agentName: await agentName(database, agentId),
+          agentName: await agentName(database, agentId,ctx.workspaceId),
           txUrl: walletExplorerTxUrl(swapChain, swapped.txId),
         });
         return {
@@ -219,7 +219,7 @@ export async function agentWalletTool(
       const txUrl = walletExplorerTxUrl(swapChain, swapped.txId);
       await postLedgerLine(database, ctx.workspaceId, ctx.ownerIdentityId, {
         direction: 'out',
-        agentName: await agentName(database, agentId),
+        agentName: await agentName(database, agentId,ctx.workspaceId),
         amountText: `${fromAmountText} ${toAmountText}`,
         counterparty: venue,
         chain: swapChain,
@@ -301,7 +301,7 @@ async function agentSend(
         needed: input.amount,
         available,
         asset: symbol,
-        agentName: await agentName(database, agentId),
+        agentName: await agentName(database, agentId,ctx.workspaceId),
       },
     );
     return { outcome: 'insufficient', asset: symbol, needed: input.amount, available };
@@ -319,7 +319,7 @@ async function agentSend(
   const txUrl = walletExplorerTxUrl(input.chain, sent.txId);
   await postLedgerLine(database, ctx.workspaceId, ctx.ownerIdentityId, {
     direction: 'out',
-    agentName: await agentName(database, agentId),
+    agentName: await agentName(database, agentId,ctx.workspaceId),
     amountText: `−${input.amount} ${symbol.toUpperCase()}`,
     counterparty: input.to,
     chain: input.chain,
@@ -462,7 +462,7 @@ export async function agentContractCall(
           needed: String(amount),
           available,
           asset: symbol,
-          agentName: await agentName(database, agentId),
+          agentName: await agentName(database, agentId,ctx.workspaceId),
         },
       );
       return { outcome: 'insufficient', asset: symbol, needed: String(amount), available };
@@ -491,7 +491,7 @@ export async function agentContractCall(
   const txUrl = walletExplorerTxUrl(call.chain, sent.txId);
   await postLedgerLine(database, ctx.workspaceId, ctx.ownerIdentityId, {
     direction: 'out',
-    agentName: await agentName(database, agentId),
+    agentName: await agentName(database, agentId,ctx.workspaceId),
     amountText,
     counterparty: call.contract,
     chain: call.chain,
@@ -537,7 +537,7 @@ export async function handleSendFailure(
       counterparty: error.approval?.spender ?? counterparty,
       chain, reason: error.message,
       ...(txUrl ? { txUrl } : {}),
-      ...(agentId ? { agentId, agentName: await agentName(database, agentId) } : {}),
+      ...(agentId ? { agentId, agentName: await agentName(database, agentId,ctx.workspaceId) } : {}),
     });
     return { outcome: 'pending', reason: error.message, ...(txUrl ? { txUrl } : {}) };
   }
@@ -548,7 +548,7 @@ export async function handleSendFailure(
     walletNotice: true, status: 'failed', operation, execution: true,
     amountText: `${amount} ${asset.toUpperCase()}`, counterparty, chain, reason,
     ...(hash ? { txUrl: walletExplorerTxUrl(chain, hash) } : {}),
-    ...(agentId ? { agentId, agentName: await agentName(database, agentId) } : {}),
+    ...(agentId ? { agentId, agentName: await agentName(database, agentId,ctx.workspaceId) } : {}),
   });
   return { outcome: 'failed', reason };
 }
@@ -625,7 +625,7 @@ export async function agentSignTypedData(
     subject: { kind: 'system', name: systemMessage("wallet.wallet") },
     verb: systemMessage("wallet.signed"),
     object: { text: systemMessage("wallet.eip-712-typed-data") },
-    consequence: (await agentName(database, agentId)) ?? systemMessage("wallet.an-agent"),
+    consequence: (await agentName(database, agentId,ctx.workspaceId)) ?? systemMessage("wallet.an-agent"),
     presentation: 'card',
     cardType: 'wallet-signature',
     card: {

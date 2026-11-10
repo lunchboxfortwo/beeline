@@ -250,7 +250,7 @@ export async function moveRole(
   const state = scope.state as WorkflowHandoffState | WorkflowGateState;
   const roleBindings = { ...run.roleBindings, [input.role]: input.picked };
   const from = run.roleBindings[input.role];
-  const names = await mentionsFor(db, [input.picked, ...(from ? [from] : [])]);
+  const names = await mentionsFor(db, [input.picked, ...(from ? [from] : [])],roomId);
   if (!await claimRun(db, scope)) return { state: scope.stateName, attempt: scope.run.seq };
   await cancelRunWakes(db, roomId, runId);
   if (state.kind === 'gate') await closeRunChoices(db, roomId, runId);

@@ -392,7 +392,10 @@ it('deletes draft and thought rows when a successful turn settles without a repl
 });
 
 
-it('stores an ambiguous agent tag as prose without dispatching either candidate', async () => {
+it('stores an ambiguous legacy agent tag as prose without dispatching either candidate', async () => {
+  // An overlapping old writer can leave an agent without a workspace reservation.
+  // Its global fallback must still be rejected if it collides with a reserved tag.
+  await rootFixture.db.query(`DELETE FROM workspace_handles WHERE workspace_id=$1 AND identity_id=$2`, [W, B]);
   await rootFixture.db.query(`UPDATE identities SET handle='hoots' WHERE id=$1`, [B]);
   try {
     const source = await send('@hoots who is this?');

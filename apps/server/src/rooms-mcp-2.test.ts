@@ -459,7 +459,7 @@ const scope1 = fixtureScope1();
   it.each([['send_message', 'recent'], ['post', 'recent'], ['send_message', 'old-reply'], ['post', 'old-reply'], ['send_message', 'old-fresh'], ['post', 'old-fresh']])('R1: MCP chain via %s (%s) wakes fresh requests and limits replies', async (replyTool, mode) => {
     const { client, grant, member } = await scope1.connected();
     await scope1.db.query(`UPDATE rooms_mcp_clients SET callback_url='https://hooks.example/loop' WHERE id=$1`, [grant.clientId]);
-    const handle = (await scope1.db.query<{ handle: string }>('SELECT handle FROM identities WHERE id=$1', [member])).rows[0]!.handle;
+    const handle = (await scope1.db.query<{ handle: string }>('SELECT beeline_room_handle(id,$2) handle FROM identities WHERE id=$1', [member,ROOM])).rows[0]!.handle;
     const latestMemberCommand = async () => (await scope1.db.query<{ agent_depth: number }>(
       'SELECT agent_depth FROM agent_commands WHERE room_id=$1 AND agent_id=$2 ORDER BY created_at DESC,id DESC LIMIT 1',
       [ROOM, member])).rows[0];
@@ -573,7 +573,7 @@ const scope1 = fixtureScope1();
     if (callback === 'client')
       await scope1.db.query('UPDATE rooms_mcp_clients SET callback_url=$2 WHERE id=$1', [grant.clientId, url]);
     expect((await scope1.db.query('SELECT 1 FROM rooms_mcp_event_subscriptions WHERE member_id=$1', [member])).rowCount).toBe(0);
-    const handle = (await scope1.db.query<{ handle: string }>('SELECT handle FROM identities WHERE id=$1', [member])).rows[0]!.handle;
+    const handle = (await scope1.db.query<{ handle: string }>('SELECT beeline_room_handle(id,$2) handle FROM identities WHERE id=$1', [member,ROOM])).rows[0]!.handle;
     const source = await scope1.phone.execute('sendRoomMessage', { roomId: ROOM, text: '@demo-agent report back' }, USER);
     const command = (await scope1.db.query<{ id: string; turn_request_id: string }>(
       "UPDATE agent_commands SET agent_depth=3,reason='report' WHERE source_message_id=$1 AND agent_id=$2 RETURNING id,turn_request_id",
@@ -600,7 +600,7 @@ const scope1 = fixtureScope1();
     const sender = await scope1.connected();
     const target = await scope1.connected();
     await scope1.db.query(`UPDATE rooms_mcp_clients SET callback_url='https://hooks.example/member' WHERE id=$1`, [target.grant.clientId]);
-    const handle = (await scope1.db.query<{ handle: string }>('SELECT handle FROM identities WHERE id=$1', [target.member])).rows[0]!.handle;
+    const handle = (await scope1.db.query<{ handle: string }>('SELECT beeline_room_handle(id,$2) handle FROM identities WHERE id=$1', [target.member,ROOM])).rows[0]!.handle;
     const result = await sender.client.callTool({ name: 'send_message', arguments: { room: ROOM, text: `@${handle} hello`, idempotencyKey: 'webhook-wake' } });
     const data = JSON.parse((result.content as { text: string }[])[0]!.text).data;
     expect(data.woken).toEqual([handle]);
@@ -614,7 +614,7 @@ const scope1 = fixtureScope1();
     await deliverMcpMemberWebhooks(scope1.db, async () => new Response('', { status: 200 }));
     const { client, grant, member } = await scope1.connected();
     await scope1.db.query(`UPDATE rooms_mcp_clients SET callback_url='https://hooks.example/firstmate' WHERE id=$1`, [grant.clientId]);
-    const handle = (await scope1.db.query<{ handle: string }>('SELECT handle FROM identities WHERE id=$1', [member])).rows[0]!.handle;
+    const handle = (await scope1.db.query<{ handle: string }>('SELECT beeline_room_handle(id,$2) handle FROM identities WHERE id=$1', [member,ROOM])).rows[0]!.handle;
     const sent = await scope1.phone.execute('sendRoomMessage', { roomId: ROOM, text: `@${handle} ship the webhook` }, USER);
     const calls = async () => (await scope1.db.query('SELECT id FROM subscription_webhook_calls WHERE member_id=$1 AND wake_message_id=$2', [member, sent.messageId])).rowCount;
     expect(await calls()).toBe(1);
@@ -638,7 +638,7 @@ const scope1 = fixtureScope1();
     await scope1.db.query(`UPDATE rooms_mcp_clients SET callback_url='https://hooks.example/removed' WHERE id=$1`, [grant.clientId]);
     // Drain earlier tests' backlog so only this delivery is pending.
     await deliverMcpMemberWebhooks(scope1.db, async () => new Response('', { status: 200 }));
-    const handle = (await scope1.db.query<{ handle: string }>('SELECT handle FROM identities WHERE id=$1', [member])).rows[0]!.handle;
+    const handle = (await scope1.db.query<{ handle: string }>('SELECT beeline_room_handle(id,$2) handle FROM identities WHERE id=$1', [member,ROOM])).rows[0]!.handle;
     const sent = await scope1.phone.execute('sendRoomMessage', { roomId: ROOM, text: `@${handle} queued before removal` }, USER);
     // The wake is already queued, then the owner removes the member from the Room.
     await scope1.phone.execute('removeRoomMember', { roomId: ROOM, memberId: member }, USER);
@@ -656,7 +656,7 @@ const scope1 = fixtureScope1();
     await scope1.db.query(`UPDATE rooms_mcp_clients SET callback_url='https://hooks.example/concurrent' WHERE id=$1`, [grant.clientId]);
     // Drain earlier tests' backlog so only this delivery is pending.
     await deliverMcpMemberWebhooks(scope1.db, async () => new Response('', { status: 200 }));
-    const handle = (await scope1.db.query<{ handle: string }>('SELECT handle FROM identities WHERE id=$1', [member])).rows[0]!.handle;
+    const handle = (await scope1.db.query<{ handle: string }>('SELECT beeline_room_handle(id,$2) handle FROM identities WHERE id=$1', [member,ROOM])).rows[0]!.handle;
     const sent = await scope1.phone.execute('sendRoomMessage', { roomId: ROOM, text: `@${handle} deliver once` }, USER);
     let calls = 0;
     let started!: () => void;
@@ -689,7 +689,7 @@ const scope1 = fixtureScope1();
     await scope1.db.query(`UPDATE rooms_mcp_clients SET callback_url='https://hooks.example/slow-batch' WHERE id=$1`, [grant.clientId]);
     // Drain earlier tests' backlog so only this batch is pending.
     await deliverMcpMemberWebhooks(scope1.db, async () => new Response('', { status: 200 }));
-    const handle = (await scope1.db.query<{ handle: string }>('SELECT handle FROM identities WHERE id=$1', [member])).rows[0]!.handle;
+    const handle = (await scope1.db.query<{ handle: string }>('SELECT beeline_room_handle(id,$2) handle FROM identities WHERE id=$1', [member,ROOM])).rows[0]!.handle;
     const texts = ['batch one', 'batch two', 'batch three'];
     for (const text of texts) await scope1.phone.execute('sendRoomMessage', { roomId: ROOM, text: `@${handle} ${text}` }, USER);
     const received: string[] = [];

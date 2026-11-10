@@ -173,7 +173,7 @@ export async function joinRooms(
         inviter_name: string | null;
         inviter_handle: string | null;
       }>(
-        `SELECT identity.name identity_name,identity.handle identity_handle,identity.kind,
+        `SELECT identity.name identity_name,beeline_workspace_handle(identity.id,workspace.id) identity_handle,identity.kind,
                 workspace.name workspace_name,
                 (SELECT name FROM rooms WHERE id=$3) room_name,
                 inviter.id inviter_id,inviter.kind inviter_kind,inviter.name inviter_name,

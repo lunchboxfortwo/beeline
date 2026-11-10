@@ -458,7 +458,7 @@ export async function sendFromWallet(
       needed: input.amount,
       available: holding?.amount ?? '0',
       asset: symbol,
-      agentName: agentId ? await agentName(database, agentId) : null,
+      agentName: agentId ? await agentName(database, agentId,workspaceId) : null,
     });
     return {
       outcome: 'insufficient',
@@ -502,7 +502,7 @@ export async function sendFromWallet(
   });
   await postLedgerLine(database, workspaceId, identityId, {
     direction: 'out',
-    agentName: agentId ? await agentName(database, agentId) : null,
+    agentName: agentId ? await agentName(database, agentId,workspaceId) : null,
     amountText,
     counterparty: input.to,
     chain: input.chain,
@@ -514,11 +514,11 @@ export async function sendFromWallet(
 }
 
 
-export async function agentName(database: SqlDatabase, agentId: string): Promise<string | null> {
+export async function agentName(database: SqlDatabase, agentId: string, workspaceId?: string): Promise<string | null> {
   const row = (
     await database.query<{ name: string; handle: string | null }>(
-      `SELECT name,handle FROM identities WHERE id=$1`,
-      [agentId],
+      `SELECT name,beeline_workspace_handle(id,$2) handle FROM identities WHERE id=$1`,
+      [agentId,workspaceId ?? null],
     )
   ).rows[0];
   return row?.handle ? systemMessage("wallet.agent-mention", row.handle) : (row?.name ?? null);
@@ -660,7 +660,7 @@ export async function walletHistory(
     }>(
       `SELECT t.direction,t.asset,t.amount,t.counterparty,t.chain,t.balance_after_usd,
               t.agent_id,t.tx_url,t.created_at,
-              i.handle AS agent_handle,i.name AS agent_name
+              beeline_workspace_handle(i.id,NULL) AS agent_handle,i.name AS agent_name
        FROM wallet_transactions t
        LEFT JOIN identities i ON i.id=t.agent_id
        WHERE t.identity_id=$1

@@ -15,7 +15,7 @@ export async function agentMemberMetadata<T extends {
     agent_id: string; owner_id: string; owner_handle: string | null;
     owner_name: string; machine_name: string | null; online: boolean | null;
   }>(
-    `SELECT a.agent_id,owner.id owner_id,owner.handle owner_handle,owner.name owner_name,
+    `SELECT a.agent_id,owner.id owner_id,beeline_room_handle(owner.id,$3) owner_handle,owner.name owner_name,
        a.machine_name,
        (SELECT lo.body->>'status'='online' AND
           (lo.body->>'held'='true' OR lo.updated_at >= now()-make_interval(secs => $2::double precision / 1000))
@@ -23,7 +23,7 @@ export async function agentMemberMetadata<T extends {
         ORDER BY lo.updated_at DESC LIMIT 1) online
      FROM agents a JOIN identities owner ON owner.id=a.owner_id
      WHERE a.agent_id=ANY($1::text[])`,
-    [ids, AGENT_REACHABLE_HORIZON_MS],
+    [ids, AGENT_REACHABLE_HORIZON_MS,roomId ?? null],
   );
   const agents = new Map(result.rows.map(row => [row.agent_id, row]));
   // Only the membership-authorized Room read exposes billing and allowance.

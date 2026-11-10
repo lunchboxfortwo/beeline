@@ -512,7 +512,7 @@ export class RoomsMcpAgentTools {
   private async openCorner(member: string, args: Args, exec: (op: string, input: Args) => Promise<unknown>) {
     const room = addressArg(args.room, 'room');
     const implementer = String(args.implementer ?? '').trim().replace(/^@/, '').toLowerCase();
-    const self = (await this.db.query<{ handle: string | null }>('SELECT handle FROM identities WHERE id=$1', [member])).rows[0];
+    const self = (await this.db.query<{ handle: string | null }>('SELECT beeline_room_handle(id,$2) handle FROM identities WHERE id=$1', [member,room])).rows[0];
     const repository = await exec('getRoomRepositoryState', { roomId: await this.place(member, room) }) as {
       resolution?: string; key?: string; remote?: string; targetBranch?: string };
     // An app runs no Beeline machine, so it has no checkout to change files in.

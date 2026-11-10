@@ -39,7 +39,7 @@ import { phoneProjectPendingAgentCommands } from './message-enrichment.js';
          ORDER BY command.agent_id
        ) active_steer_agent_ids,
        ARRAY(
-         SELECT DISTINCT identity.handle
+         SELECT DISTINCT beeline_room_handle(identity.id,$1) handle
          FROM memberships membership
          JOIN rooms_mcp_members external ON external.member_id=membership.identity_id
          JOIN identities identity ON identity.id=external.member_id
@@ -49,13 +49,15 @@ import { phoneProjectPendingAgentCommands } from './message-enrichment.js';
            AND EXISTS(SELECT 1 FROM rooms_mcp_mentions mention
              WHERE mention.member_id=external.member_id AND mention.message_id=$2
                AND mention.room_id=$1)
-         ORDER BY identity.handle
+         ORDER BY handle
        ) external_agent_handles`,
       [roomId, messageIdValue, mayRoute],
     )).rows[0];
     const externalMembers=routing?.external_agent_handles?.length
-      ? (await database.query<{member_id:string;handle:string}>(`SELECT m.member_id,i.handle FROM rooms_mcp_members m
-          JOIN identities i ON i.id=m.member_id WHERE i.handle=ANY($1::text[]) ORDER BY i.handle`,[routing.external_agent_handles])).rows : [];
+      ? (await database.query<{member_id:string;handle:string}>(`SELECT m.member_id,beeline_room_handle(i.id,$2) handle FROM rooms_mcp_members m
+          JOIN identities i ON i.id=m.member_id
+          JOIN room_access member ON member.identity_id=i.id AND member.room_id=$2 AND member.removed_at IS NULL
+          WHERE beeline_room_handle(i.id,$2)=ANY($1::text[]) ORDER BY handle`,[routing.external_agent_handles,roomId])).rows : [];
     const delivery=await readMemberDeliveries(database,externalMembers.map(member=>member.member_id));
     const externalAgentDelivery=externalMembers.map(member=>({memberId:member.member_id,handle:member.handle,...delivery.get(member.member_id)!}));
     return {
@@ -126,8 +128,8 @@ import { phoneProjectPendingAgentCommands } from './message-enrichment.js';
     try {
       const sender = (
         await ctx.database.query<{ kind: 'human' | 'agent'; handle: string | null }>(
-          `SELECT kind,handle FROM identities WHERE id=$1`,
-          [senderId],
+          `SELECT kind,beeline_room_handle(id,$2) handle FROM identities WHERE id=$1`,
+          [senderId,roomId],
         )
       ).rows[0];
       if (!sender) return;
@@ -142,7 +144,7 @@ import { phoneProjectPendingAgentCommands } from './message-enrichment.js';
         corner: boolean;
       }>(
         `SELECT identity.id agent_id,COALESCE(NULLIF(identity.name,''),$3::text) agent_name,
-                identity.handle agent_handle,
+                beeline_room_handle(identity.id,$2) agent_handle,
                 a.access_policy,a.owner_id,owner.handle owner_handle,
                 EXISTS(SELECT 1 FROM rooms room WHERE room.id=$2 AND room.parent_id IS NOT NULL) corner,
                 EXISTS(
@@ -316,7 +318,7 @@ import { phoneProjectPendingAgentCommands } from './message-enrichment.js';
     }
     const absentCornerAgents = !typedHandles.size || source?.corner === false
       ? { rows: [] } : await ctx.database.query<{ id: string; handle: string }>(
-      `SELECT identity.id,identity.handle
+      `SELECT identity.id,beeline_workspace_handle(identity.id,room.workspace_id) handle
        FROM rooms room
        JOIN memberships workspace_membership ON workspace_membership.workspace_id=room.workspace_id
          AND workspace_membership.room_id IS NULL AND workspace_membership.removed_at IS NULL

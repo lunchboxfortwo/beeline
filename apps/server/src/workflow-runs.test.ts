@@ -308,7 +308,7 @@ describe('start_workflow', () => {
     const wrap = (inner: SqlDatabase): SqlDatabase => ({
       async query<Row extends QueryResultRow = QueryResultRow>(sql: string, values?: unknown[]) {
         const result = await inner.query<Row>(sql, values);
-        if (!removed && sql.includes('SELECT member.identity_id,identity.handle,identity.kind')) {
+        if (!removed && sql.includes('SELECT member.identity_id,') && sql.includes('FROM effective_memberships member')) {
           // Model a committed removal between READ COMMITTED statements. PGlite
           // serializes transactions, so remove through the same connection.
           removed = true;

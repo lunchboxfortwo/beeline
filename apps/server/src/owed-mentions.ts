@@ -38,7 +38,7 @@ export function isMentionReplyInput(input: object): boolean {
 
 /** Private, current membership-scoped reminder accompanying tool results. */
 export async function owedMentions(db: SqlDatabase, member: string) {
-  const rows = (await db.query<{room_id: string; message_id: string; author_handle: string | null}>(`SELECT mention.room_id,mention.message_id,author.handle author_handle
+  const rows = (await db.query<{room_id: string; message_id: string; author_handle: string | null}>(`SELECT mention.room_id,mention.message_id,beeline_room_handle(author.id,mention.room_id) author_handle
     FROM rooms_mcp_mentions mention JOIN messages m ON m.id=mention.message_id AND m.deleted_at IS NULL
     JOIN identities author ON author.id=m.author_id
     JOIN rooms r ON r.id=mention.room_id AND r.archived_at IS NULL

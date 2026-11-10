@@ -198,7 +198,7 @@ const ROW_COLUMNS = `
     WHEN room.parent_id IS NOT NULL THEN 'corner' ELSE 'room' END room_kind,
   (SELECT parent.name FROM rooms parent WHERE parent.id=room.parent_id) parent_room_name,
   author.id author_id,author.kind author_kind,author.name author_name,
-  author.handle author_handle,author.avatar author_avatar,author.face_id author_face`;
+  beeline_workspace_handle(author.id,room.workspace_id) author_handle,author.avatar author_avatar,author.face_id author_face`;
 
 /** The viewer is a current member of the Workspace. */
 export function viewerMemberSql(workspaceId: string, viewerId: string): string {

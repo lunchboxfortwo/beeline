@@ -157,7 +157,7 @@ import { phoneSendMessage } from './messages.js';
     ) {
       const agent = (
         await ctx.database.query<{ handle: string | null }>(
-          `SELECT handle FROM identities WHERE id=$1`,
+          `SELECT beeline_workspace_handle(id,NULL) handle FROM identities WHERE id=$1`,
           [matched.agent_id],
         )
       ).rows[0];

@@ -188,7 +188,7 @@ import { daemonWriteResult } from './corner-messages.js';
       throw new Error(`an event may wake at most ${MAX_MENTIONS_PER_EVENT} agents`);
     if (wakes.length) {
       const members = await ctx.database.query<{ identity_id: string; handle: string | null }>(
-        `SELECT member.identity_id, identity.handle FROM memberships member
+        `SELECT member.identity_id, beeline_workspace_handle(identity.id,member.workspace_id) handle FROM memberships member
          JOIN identities identity ON identity.id=member.identity_id AND identity.kind='agent'
          WHERE member.room_id=$1 AND member.removed_at IS NULL`,
         [input.roomId],
@@ -270,7 +270,7 @@ import { daemonWriteResult } from './corner-messages.js';
       next_run_at: Date;
       paused_at: Date | null;
     }>(
-      `SELECT schedule.title,schedule.workflow_slug,schedule.id,schedule.agent_id,agent.handle agent_handle,schedule.cadence,
+      `SELECT schedule.title,schedule.workflow_slug,schedule.id,schedule.agent_id,beeline_room_handle(agent.id,schedule.room_id) agent_handle,schedule.cadence,
          schedule.room_id,room.name room_name,
          schedule.message,schedule.max_runs,schedule.run_count,schedule.next_run_at,schedule.paused_at
        FROM agent_schedules schedule JOIN identities agent ON agent.id=schedule.agent_id

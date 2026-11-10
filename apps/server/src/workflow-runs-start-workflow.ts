@@ -98,7 +98,7 @@ export async function startWorkflow(
         throw new CommandRefusalError(`${notAgent} is not a current agent member of this Room`, 400);
       }
     }
-    const starter = await loadIdentityRow(db, command.agent_id);
+    const starter = await loadIdentityRow(db, command.agent_id,command.room_id);
     const runId = randomBytes(32).toString('hex');
     const startState = contract.handoffs[contract.start]!;
     const isGate = startState.kind === 'gate';
@@ -190,7 +190,7 @@ export async function roomMemberIdForHandle(
   const row = (
     await db.query<{ identity_id: string }>(
       `SELECT m.identity_id FROM memberships m JOIN identities i ON i.id=m.identity_id
-       WHERE m.room_id=$1 AND m.removed_at IS NULL AND lower(i.handle)=lower($2)`,
+       WHERE m.room_id=$1 AND m.removed_at IS NULL AND lower(beeline_workspace_handle(i.id,m.workspace_id))=lower($2)`,
       [roomId, handle],
     )
   ).rows[0];
@@ -265,7 +265,7 @@ export async function assignWorkflowRole(
     }
     if (resuming && !await claimRun(db, scope))
       throw new CommandRefusalError('workflow already advanced; no resume was applied', 409);
-    const caller = await mentionsFor(db, [command.agent_id]);
+    const caller = await mentionsFor(db, [command.agent_id],command.room_id);
     await moveRole(db, scope, {
       role: input.role,
       picked: targetAgentId,

@@ -106,7 +106,7 @@ import { AGENT_OWNER_AUTHORITY_MESSAGE, WORKSPACE_ADMIN_AUTHORITY_MESSAGE } from
   export async function phoneRequireIdentity(ctx: PhoneContext, id: string, database: SqlDatabase = ctx.database) {
     const row = (
       await database.query<IdentityRow>(
-        `SELECT id,kind,name,handle,avatar,face_id FROM identities WHERE id=$1`,
+        `SELECT id,kind,name,beeline_workspace_handle(id,NULL) handle,avatar,face_id FROM identities WHERE id=$1`,
         [id],
       )
     ).rows[0];

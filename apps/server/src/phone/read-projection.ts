@@ -386,7 +386,7 @@ export function reactionIdentitiesSql(messageAlias: string): string {
       'id',reactor.id,
       'kind',reactor.kind,
       'name',reactor.name,
-      'handle',reactor.handle,
+      'handle',beeline_room_handle(reactor.id,${messageAlias}.room_id),
       'avatar',reactor.avatar,
       'face_id',reactor.face_id
     ) ORDER BY reactor.id)

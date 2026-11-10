@@ -618,7 +618,7 @@ const fixture = monolithFixture();
   });
 
 
-  it('projects every agent message with the current author name, handle, and face', async () => {
+  it('projects every agent message with the current name and face and its stable workspace handle', async () => {
     await fixture.database.query(
       `UPDATE identities SET name='Lumen',handle='lumen',face_id='owl' WHERE id=$1`,
       [AGENT],
@@ -635,7 +635,7 @@ const fixture = monolithFixture();
       pubkey: AGENT,
       kind: 'agent',
       name: 'Lumen',
-      handle: 'lumen',
+      handle: 'bee',
       face: 'owl',
     });
   });

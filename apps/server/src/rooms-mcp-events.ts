@@ -156,9 +156,9 @@ export async function queueMcpMentionEvents(db: SqlDatabase, member: string, roo
   const queued = await db.query(`INSERT INTO rooms_mcp_event_deliveries(subscription_id,message_id,room_id,event_id,body)
     SELECT s.id,m.id,m.room_id,'evt_'||s.id||'_'||m.id||'_'||'0',
       json_build_object('eventId','evt_'||s.id||'_'||m.id||'_'||'0','name','mention','timestamp',m.created_at,
-        'data',json_build_object('roomId',m.room_id,'messageId',m.id,'memberId',s.member_id,'replyRule',CASE WHEN i.handle IS NULL THEN format($5::text,m.id) ELSE format($4::text,m.id,i.handle) END,
+        'data',json_build_object('roomId',m.room_id,'messageId',m.id,'memberId',s.member_id,'replyRule',CASE WHEN beeline_room_handle(i.id,m.room_id) IS NULL THEN format($5::text,m.id) ELSE format($4::text,m.id,beeline_room_handle(i.id,m.room_id)) END,
           'idempotencyKey','mention:'||s.member_id||':'||m.id,'text',left(m.text,16000),
-          'author',json_build_object('id',m.author_id,'handle',i.handle,'name',i.name)), 'cursor',NULL)::text
+          'author',json_build_object('id',m.author_id,'handle',beeline_room_handle(i.id,m.room_id),'name',i.name)), 'cursor',NULL)::text
     FROM rooms_mcp_event_subscriptions s
     JOIN rooms_mcp_connections c ON c.client_id=s.client_id AND c.identity_id=s.owner_id AND c.revoked_at IS NULL
     JOIN messages m ON m.id=$3 AND m.room_id=$2 AND m.deleted_at IS NULL

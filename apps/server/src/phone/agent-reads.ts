@@ -54,7 +54,7 @@ import { reviveDates } from './read-projection.js';
       mcp_client: McpClientIdentity | null;
     } & AgentUsageRow>(`SELECT agent_identity.id member_id,
         ${mcpClientIdentitySql('a.agent_id')} mcp_client,agent_identity.name member_name,
-        agent_identity.handle member_handle,agent_identity.avatar member_avatar,
+        beeline_workspace_handle(agent_identity.id,$2) member_handle,agent_identity.avatar member_avatar,
         agent_identity.face_id member_face,agent_membership.role member_role,
         a.harness,a.soul,a.model_catalog,a.commands,a.selected_model,a.selected_effort,
         a.fast_mode,a.model_unavailable,
@@ -65,7 +65,7 @@ import { reviveDates } from './read-projection.js';
         CASE WHEN workspace.visibility='public' THEN false ELSE COALESCE(a.yolo_mode,false) END yolo_mode,
         workspace.visibility='public' yolo_forced_off,a.yolo_set_at,
         setter.name yolo_set_by_name,a.access_policy,a.owner_id,
-        owner.name owner_name,owner.handle owner_handle,
+        owner.name owner_name,beeline_workspace_handle(owner.id,$2) owner_handle,
         a.owner_id=$3 can_change_yolo,
         ${agentUsageColumns('a', '$3')},
         (a.owner_id=$3 OR viewer_membership.role IN ('owner','admin')) can_manage_grants,

@@ -1,3 +1,4 @@
+import { WORKSPACE_HANDLE_SCHEMA } from './workspace-handles.js';
 import { cornerWaitingReportSql } from './corner-waiting-report.js';
 import { createHash } from 'node:crypto';
 import { PGlite } from '@electric-sql/pglite';
@@ -18,6 +19,14 @@ beforeAll(async () => {
     INSERT INTO rooms VALUES('33333333-3333-4333-8333-333333333333','22222222-2222-4222-8222-222222222222','worker');
     INSERT INTO corner_facts VALUES('33333333-3333-4333-8333-333333333333','worker','worker');
     INSERT INTO memberships VALUES('22222222-2222-4222-8222-222222222222','person',NULL);`);
+  // This focused fixture runs production mention SQL, including its address
+  // readers; install the real reservation schema rather than stubbing it.
+  await db.exec(`CREATE TABLE workspaces(id uuid PRIMARY KEY);
+    INSERT INTO workspaces VALUES('11111111-1111-4111-8111-111111111111');
+    ALTER TABLE identities ADD PRIMARY KEY(id);
+    ALTER TABLE rooms ADD COLUMN workspace_id uuid DEFAULT '11111111-1111-4111-8111-111111111111';
+    ALTER TABLE memberships ADD COLUMN workspace_id uuid DEFAULT '11111111-1111-4111-8111-111111111111';`);
+  await db.exec(WORKSPACE_HANDLE_SCHEMA);
 });
 afterAll(() => db.close());
 
@@ -94,7 +103,7 @@ it('R1: an agent-commander report retains selection when a human blocker is also
 
 it('R1: holds and messageless reports resolve selection IDs to real source message targets', async () => {
   await db.exec(`DELETE FROM corner_owed; DELETE FROM messages;
-    INSERT INTO identities(id,kind,name) VALUES('person','human','Lunchbox');
+    INSERT INTO identities(id,kind,name) VALUES('person','human','Lunchbox') ON CONFLICT(id) DO NOTHING;
     INSERT INTO room_access VALUES('33333333-3333-4333-8333-333333333333','person',NULL);
     INSERT INTO corner_merge_holds VALUES('33333333-3333-4333-8333-333333333333','hold','person','2026-01-01',NULL);
     DELETE FROM agent_commands;
@@ -181,7 +190,7 @@ it('REPORT-WAITING-DERIVED: derives only the worker wait and its commander/tagge
     INSERT INTO identities(id,kind,name,handle) VALUES('commander','agent','Commander','commander'),
       ('tagged','human','Tagged','tagged'),('other','human','Other','other'),('worker','agent','Worker','worker');
     INSERT INTO room_access VALUES('33333333-3333-4333-8333-333333333333','tagged',NULL),('33333333-3333-4333-8333-333333333333','other',NULL);
-    INSERT INTO memberships VALUES('22222222-2222-4222-8222-222222222222','tagged',NULL),('22222222-2222-4222-8222-222222222222','other',NULL);
+    INSERT INTO memberships(room_id,identity_id,removed_at) VALUES('22222222-2222-4222-8222-222222222222','tagged',NULL),('22222222-2222-4222-8222-222222222222','other',NULL);
     INSERT INTO agent_commands VALUES('worker-wait','44444444-4444-4444-8444-444444444444','commander',
       '{"kind":"report","fromRoomId":"33333333-3333-4333-8333-333333333333","authorId":"worker","text":"blocked: @tagged choose"}','2026-01-01'),
       ('other-wait','44444444-4444-4444-8444-444444444444','other','{"kind":"report","fromRoomId":"33333333-3333-4333-8333-333333333333","authorId":"other","text":"blocked: unrelated"}','2026-01-02'),

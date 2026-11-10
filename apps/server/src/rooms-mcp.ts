@@ -271,7 +271,7 @@ export class RoomsMcp {
   private async mentionsPage(member: string, cursor: string, limit: number, db: SqlDatabase = this.oauth.database, stream = false) {
     const rows = (await db.query<{ seq: string; id: string; room_id: string; room_name: string; author_id: string; author_handle: string | null; author_name: string | null; created_at: Date; text: string; truncated: boolean }>(
       `WITH readable AS (${READABLE})
-       SELECT mention.seq::text seq,m.id,m.room_id,r.name room_name,m.author_id,i.handle author_handle,i.name author_name,
+       SELECT mention.seq::text seq,m.id,m.room_id,r.name room_name,m.author_id,beeline_room_handle(i.id,m.room_id) author_handle,i.name author_name,
          m.created_at,left(m.text,16000) text,length(m.text)>16000 truncated
        FROM rooms_mcp_mentions mention
        JOIN readable r ON r.id=mention.room_id
@@ -311,7 +311,7 @@ export class RoomsMcp {
       const rooms = (await db.query(`WITH readable AS (${READABLE}) SELECT id,name,workspace_id FROM readable WHERE parent_id IS NULL ORDER BY id LIMIT 100`, [viewer])).rows;
       const setup = await this.setupNote(member);
       // Who this member is, so a client can address it by the name and handle its owner allowed.
-      const you = (await db.query<{ id: string; name: string; handle: string | null }>('SELECT id,name,handle FROM identities WHERE id=$1', [member])).rows[0];
+      const you = (await db.query<{ id: string; name: string; handle: string | null }>('SELECT id,name,beeline_workspace_handle(id,NULL) handle FROM identities WHERE id=$1', [member])).rows[0];
       return rooms.length ? { rooms, you, ...setup } : { rooms, you, ...setup, note: 'You are in no Rooms yet. You join public Rooms in the Workspaces selected on Allow; for any other Room, your owner adds you under Members in the Beeline app.' };
     }
     if (name === 'list_mentions') {
@@ -337,7 +337,7 @@ export class RoomsMcp {
         await tx.query("SET LOCAL statement_timeout='2s'");
         return (await tx.query(`WITH readable AS (${READABLE}), cursor AS (
             SELECT m.created_at,m.id FROM messages m JOIN readable r ON r.id=m.room_id WHERE m.id=$3 AND m.room_id=$2
-          ) SELECT m.id,m.room_id,m.author_id,i.handle author_handle,m.created_at,left(m.text,16000) text,
+          ) SELECT m.id,m.room_id,m.author_id,beeline_room_handle(i.id,m.room_id) author_handle,m.created_at,left(m.text,16000) text,
             length(m.text)>16000 truncated
           FROM messages m JOIN readable r ON r.id=m.room_id LEFT JOIN identities i ON i.id=m.author_id
           WHERE ($2::uuid IS NULL OR m.room_id=$2) AND ${visibleChatMessageSql('m')}

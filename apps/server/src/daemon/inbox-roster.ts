@@ -81,7 +81,7 @@ import { daemonExpiredMediaIds } from './message-reads.js';
       agent_updated_at: Date | null;
     }>(
       `SELECT m.identity_id,
-         i.kind,i.name,i.handle,
+         i.kind,i.name,beeline_workspace_handle(i.id,m.workspace_id) handle,
          m.role,a.owner_id,a.soul,a.updated_at agent_updated_at
        FROM memberships m
        JOIN identities i ON i.id=m.identity_id

@@ -133,6 +133,12 @@ export function handleLiveConnection(ctx: LiveConnectionContext, client: WebSock
           const read = ctx.readPersonChange(event, event.personId);
           identityDelivery = identityDelivery.then(() => read.then((change) => {
             if (!change?.viewers.has(principal.identityId)) return;
+            // An agent has a different address in each Workspace. A global
+            // identity delta would overwrite those addresses on every surface.
+            if (change.person.kind === 'agent') {
+              sendLive(JSON.stringify({ type: 'invalidate', roomId: '', reason: event.reason }));
+              return;
+            }
             // The push level is the owner's own setting; no other viewer hears it.
             sendLive(JSON.stringify({ type: 'person-changed', roomId: '', person: change.person,
               ...(change.person.pubkey === principal.identityId && change.pushLevel

@@ -70,7 +70,7 @@ import { phoneDecorateMessageCards } from './message-decoration.js';
            )
            SELECT matches.id,matches.room_id,matches.created_at,
              COALESCE(jsonb_typeof(room.direct_participants)='array',false) direct_message,
-             COALESCE(peer.handle,peer.name,room.name) room_name,author.name author_name,
+             COALESCE(beeline_workspace_handle(peer.id,room.workspace_id),peer.name,room.name) room_name,author.name author_name,
              ts_headline('simple',translate(matches.text,E'\\x01\\x02',''),search_query.query,$5) headline
            FROM matches
            CROSS JOIN search_query
@@ -134,7 +134,7 @@ import { phoneDecorateMessageCards } from './message-decoration.js';
             AND ${visibleMessageSql('m')}
           ORDER BY m.created_at DESC,m.id DESC LIMIT 15)
        ), page AS (
-       SELECT ${messageColumns('m')},i.kind author_kind,i.name author_name,i.handle author_handle,
+       SELECT ${messageColumns('m')},i.kind author_kind,i.name author_name,beeline_room_handle(i.id,m.room_id) author_handle,
          i.avatar author_avatar,i.face_id author_face,
          ${reactionIdentitiesSql('m')} reaction_identities,
          '{}'::text[] tagged_ids
@@ -168,7 +168,7 @@ import { phoneDecorateMessageCards } from './message-decoration.js';
               AND workspace_member.removed_at IS NULL))
       ), page AS (
       SELECT ${messageColumns('m')},
-         i.kind author_kind,i.name author_name,i.handle author_handle,
+         i.kind author_kind,i.name author_name,beeline_room_handle(i.id,m.room_id) author_handle,
          i.avatar author_avatar,i.face_id author_face,
          ${reactionIdentitiesSql('m')} reaction_identities,
          '{}'::text[] tagged_ids
@@ -211,7 +211,7 @@ import { phoneDecorateMessageCards } from './message-decoration.js';
       ), cursor AS (
         SELECT created_at,id FROM messages WHERE room_id=$1 AND id=$3
       ), page AS (
-        SELECT ${messageColumns('m')},i.kind author_kind,i.name author_name,i.handle author_handle,
+        SELECT ${messageColumns('m')},i.kind author_kind,i.name author_name,beeline_room_handle(i.id,m.room_id) author_handle,
           i.avatar author_avatar,i.face_id author_face,
           ${reactionIdentitiesSql('m')} reaction_identities,
           '{}'::text[] tagged_ids
@@ -294,7 +294,7 @@ import { phoneDecorateMessageCards } from './message-decoration.js';
       }>(
         `SELECT DISTINCT ON (local.day) local.day::text AS local_day,
            count(*) OVER (PARTITION BY local.day)::text AS message_count,
-           m.id,m.created_at,i.name author_name,i.handle author_handle,
+           m.id,m.created_at,i.name author_name,beeline_room_handle(i.id,m.room_id) author_handle,
            first_value(m.id) OVER (ORDER BY m.created_at DESC,m.id DESC) newest_id,
            first_value(m.created_at) OVER (ORDER BY m.created_at DESC,m.id DESC) newest_created_at
          FROM messages m JOIN identities i ON i.id=m.author_id

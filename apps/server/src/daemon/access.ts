@@ -90,7 +90,7 @@ import { AccessDeniedError, id } from './values.js';
       handle: string | null;
       role: string;
     }>(
-      `SELECT identity.id,identity.kind,identity.name,identity.handle,
+      `SELECT identity.id,identity.kind,identity.name,beeline_workspace_handle(identity.id,member.workspace_id) handle,
          COALESCE(workspace_member.role,member.role) role
        FROM memberships member JOIN identities identity ON identity.id=member.identity_id
        LEFT JOIN memberships workspace_member ON workspace_member.workspace_id=member.workspace_id

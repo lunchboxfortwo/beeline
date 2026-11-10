@@ -40,7 +40,7 @@ import { projectedMessage, messageOrder } from './read-projection.js';
         author: string;
       }>(
         `SELECT o.id::text id,COALESCE(o.title, '') title,o.mime mime,o.size::text size,
-                COALESCE(i.handle, i.name) author
+                COALESCE(beeline_workspace_handle(i.id,NULL), i.name) author
          FROM objects o JOIN identities i ON i.id=o.owner_id
          WHERE o.state='ready' AND o.id=ANY($1::uuid[])`,
         [[...ids]], 'phone-room-media-1',
@@ -92,7 +92,7 @@ import { projectedMessage, messageOrder } from './read-projection.js';
             WHERE expired.id=ANY($3::uuid[])),'[]'::jsonb) expired,
           COALESCE((SELECT jsonb_agg(jsonb_build_object('id',object.id::text,
             'title',COALESCE(object.title,''),'mime',object.mime,
-            'size',object.size::text,'author',COALESCE(author.handle,author.name)))
+            'size',object.size::text,'author',COALESCE(beeline_workspace_handle(author.id,NULL),author.name)))
             FROM objects object JOIN identities author ON author.id=object.owner_id
             WHERE object.state='ready' AND object.id=ANY($3::uuid[])),'[]'::jsonb) artifacts`,
         [rows.map((row) => row.id),viewerId,[...mediaIds]],

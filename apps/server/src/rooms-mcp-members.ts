@@ -137,7 +137,7 @@ export async function ensureMcpMember(
     const addedWorkspaces = input.workspaceIds === undefined ? [] : workspaces.filter(
       id => !previousMemberships.rows.some(row => row.workspace_id === id));
     const created = await tx.query(
-      `INSERT INTO identities(id,kind,name,handle,hidden_from_roster) VALUES($1,'agent',$2,beeline_identity_handle($1,$3),false)
+      `INSERT INTO identities(id,kind,name,handle,hidden_from_roster,workspace_handle_base) VALUES($1,'agent',$2,beeline_identity_handle($1,$3),false,$3)
        ON CONFLICT(id) DO UPDATE SET hidden_from_roster=false,updated_at=now()
        RETURNING id`,
       [memberId, input.initialName??modelLabel, agentHandleFromName(input.initialName??modelLabel)],
@@ -335,7 +335,7 @@ export async function deliverMcpMemberWebhooks(
        SELECT claimed.call_id,claimed.member_id,claimed.room_id,claimed.message_id,claimed.body,member.owner_id,
          COALESCE(member.callback_url,client.callback_url) callback_url,
          CASE WHEN member.callback_url IS NOT NULL THEN member.callback_secret END callback_secret,
-         message.author_id,author.handle author_handle,author.name author_name,author.kind author_kind,mention.seq::text cursor,mention.cleared_at IS NOT NULL answered,
+         message.author_id,beeline_room_handle(author.id,message.room_id) author_handle,author.name author_name,author.kind author_kind,mention.seq::text cursor,mention.cleared_at IS NOT NULL answered,
          delivery.generation delivery_generation,probe.probe,command.id command_id,command.reason command_reason,command.private_payload->>'kind' command_kind,
          left(COALESCE(command.private_payload->>'text',source.text),16000) command_text,(
            room.id IS NOT NULL AND room.archived_at IS NULL AND mention.cleared_at IS NULL

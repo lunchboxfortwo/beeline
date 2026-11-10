@@ -277,7 +277,7 @@ const scope1 = fixtureScope1();
       expect(JSON.stringify(set)).not.toContain('tag-secret');
       const stored = (await scope1.db.query<{ callback_url: string; callback_secret: string }>('SELECT callback_url,callback_secret FROM rooms_mcp_members WHERE member_id=$1', [member])).rows[0]!;
       expect(stored.callback_url).toBe('https://hooks.example/muse'); expect(stored.callback_secret).not.toContain('tag-secret');
-      const handle = (await scope1.db.query<{ handle: string }>('SELECT handle FROM identities WHERE id=$1', [member])).rows[0]!.handle;
+      const handle = (await scope1.db.query<{ handle: string }>('SELECT beeline_room_handle(id,$2) handle FROM identities WHERE id=$1', [member,ROOM])).rows[0]!.handle;
       const sent = await scope1.phone.execute('sendRoomMessage', { roomId: ROOM, text: `@${handle} please answer` }, AGENT);
       await routeAgentResult(scope1.db, undefined, sent.messageId, { roomId: ROOM, agentId: AGENT });
       const posts: { url: string; authorization: string | null; body: Record<string, unknown> }[] = [];
@@ -321,7 +321,7 @@ const scope1 = fixtureScope1();
 
   it('WEBHOOK-CLEAR-1: clearing a member webhook disables fallback and cancels queued tags', async () => {
     const { client, member, grant } = await scope1.connected();
-    const handle = (await scope1.db.query<{ handle: string }>('SELECT handle FROM identities WHERE id=$1', [member])).rows[0]!.handle;
+    const handle = (await scope1.db.query<{ handle: string }>('SELECT beeline_room_handle(id,$2) handle FROM identities WHERE id=$1', [member,ROOM])).rows[0]!.handle;
     await scope1.db.query("UPDATE rooms_mcp_clients SET callback_url='https://hooks.example/registration' WHERE id=$1", [grant.clientId]);
     const posts: string[] = [];
     const deliver = () => deliverMcpMemberWebhooks(scope1.db, async url => { posts.push(url); return new Response('', { status: 200 }); });
@@ -400,7 +400,7 @@ const scope1 = fixtureScope1();
 
   it('lists the tags owed a reply across Rooms, oldest first, after a cursor', async () => {
     const { client, member } = await scope1.connected();
-    const handle = (await scope1.db.query<{ handle: string }>('SELECT handle FROM identities WHERE id=$1', [member])).rows[0]!.handle;
+    const handle = (await scope1.db.query<{ handle: string }>('SELECT beeline_room_handle(id,$2) handle FROM identities WHERE id=$1', [member,ROOM])).rows[0]!.handle;
     const second = (await scope1.phone.execute('createRoom', { workspaceId: WORKSPACE, name: `mentions-${member.slice(0, 6)}` }, USER)).id;
     const first = await scope1.phone.execute('sendRoomMessage', { roomId: ROOM, text: `@${handle} first question` }, USER);
     const next = await scope1.phone.execute('sendRoomMessage', { roomId: second, text: `@${handle} second question` }, USER);
@@ -629,7 +629,7 @@ const scope3 = fixtureScope3(scope1);
     // Reproduction (R-MCP-LIMITS): search advertised limit 20 while the server refuses anything above 10.
     it('R-MCP-LIMITS: every advertised search limit is accepted', async () => {
       const { client, member } = await scope1.connected();
-      const handle = (await scope1.db.query<{ handle: string }>('SELECT handle FROM identities WHERE id=$1', [member])).rows[0]!.handle;
+      const handle = (await scope1.db.query<{ handle: string }>('SELECT beeline_room_handle(id,$2) handle FROM identities WHERE id=$1', [member,ROOM])).rows[0]!.handle;
       // A person's tag gives the app's turn a requester, as it does for an agent.
       await scope1.phone.execute('sendRoomMessage', { roomId: ROOM, text: `@${handle} what did the release migration change?` }, USER);
       const search = (await client.listTools()).tools.find(tool => tool.name === 'search')!;
@@ -702,7 +702,7 @@ const scope3 = fixtureScope3(scope1);
     it('R-MCP-REPORT: reports an order back to the agent that sent it', async () => {
       const { client, member, grant } = await scope1.connected();
       await scope1.db.query(`UPDATE rooms_mcp_clients SET callback_url='https://hooks.example/orders' WHERE id=$1`, [grant.clientId]);
-      const handle = (await scope1.db.query<{ handle: string }>('SELECT handle FROM identities WHERE id=$1', [member])).rows[0]!.handle;
+      const handle = (await scope1.db.query<{ handle: string }>('SELECT beeline_room_handle(id,$2) handle FROM identities WHERE id=$1', [member,ROOM])).rows[0]!.handle;
       expect((await scope3.call(client, 'report', { address: ROOM, status: 'done', text: 'done: nothing was ordered' })).text)
         .toContain('no order is waiting for your report');
       const turn = await scope3.agentTurn('@demo-agent hand the audit to the app');

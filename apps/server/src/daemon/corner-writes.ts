@@ -115,7 +115,7 @@ import { daemonReach, daemonWriteResult } from './corner-messages.js';
         }>(
           `SELECT child.id::text corner_id,child.name,${cornerObjectiveSql('child')} objective,${cornerOwnerSql('child.id')} owner_agent_id,child.created_by,
                   ${cornerRequestSql('child.id')} request_id,child.repository_key,child.repository_target_branch,
-                  (SELECT handle FROM identities WHERE id=fact.reviewer_agent_id) reviewer_handle,
+                  beeline_room_handle(fact.reviewer_agent_id,child.id) reviewer_handle,
                   initial.revision brief_revision,
                   initial.revision_hash brief_revision_hash,initial.change brief_change,
                   initial.attachments brief_attachments
@@ -134,8 +134,12 @@ import { daemonReach, daemonWriteResult } from './corner-messages.js';
       ).rows[0];
       let implementerAgentId = agentId;
       if (existing && input.implementer !== undefined) {
+        // A retry validates the original assignee, even after departure; it never
+        // searches other identities that happen to share the requested handle.
         const named = (await db.query<{ id: string }>(
-          `SELECT id FROM identities WHERE handle=$1 AND kind='agent'`, [input.implementer],
+          `SELECT id FROM identities
+           WHERE id=$3 AND kind='agent' AND beeline_room_handle(id,$1)=$2`,
+          [roomId,input.implementer,existing.owner_agent_id],
         )).rows[0];
         implementerAgentId = named?.id ?? '';
       }
@@ -189,7 +193,7 @@ import { daemonReach, daemonWriteResult } from './corner-messages.js';
           await db.query<{ id: string; kind: string }>(
             `SELECT identity.id,identity.kind FROM memberships member
              JOIN identities identity ON identity.id=member.identity_id
-             WHERE member.room_id=$1 AND member.removed_at IS NULL AND identity.handle=$2
+             WHERE member.room_id=$1 AND member.removed_at IS NULL AND beeline_workspace_handle(identity.id,member.workspace_id)=$2
              FOR SHARE OF member,identity`,
             [roomId, input.implementer],
           )

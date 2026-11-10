@@ -99,11 +99,11 @@ export async function loadHumanElectorate(
   return rows.rows.map((row) => row.id);
 }
 
-async function loadIdentity(database: SqlDatabase, id: string): Promise<IdentityRow> {
+async function loadIdentity(database: SqlDatabase, id: string, roomId?: string): Promise<IdentityRow> {
   const row = (
     await database.query<IdentityRow>(
-      `SELECT id,kind,name,handle,avatar,face_id FROM identities WHERE id=$1`,
-      [id],
+      `SELECT id,kind,name,beeline_room_handle(id,$2) handle,avatar,face_id FROM identities WHERE id=$1`,
+      [id,roomId ?? null],
     )
   ).rows[0];
   if (!row) throw new Error('identity not found');
@@ -347,11 +347,11 @@ export async function postRoomChoice(
     )
   ).rows[0];
   if (open && !input.workflowRunId) throw new Error('choice conflict: you already have an open choice in this Room');
-  const agent = await loadIdentity(database, input.agentId);
+  const agent = await loadIdentity(database, input.agentId,input.roomId);
   const requesterRow = input.workflowRunId && input.workflowOwnerId
-    ? await loadIdentity(database, input.workflowOwnerId)
+    ? await loadIdentity(database, input.workflowOwnerId,input.roomId)
     : agent.kind === 'agent' ? (await database.query<IdentityRow>(
-      `SELECT identity.id,identity.kind,identity.name,identity.handle,identity.avatar,identity.face_id
+      `SELECT identity.id,identity.kind,identity.name,beeline_room_handle(identity.id,command.room_id) handle,identity.avatar,identity.face_id
        FROM agent_commands command
        JOIN messages message ON message.id=command.source_message_id
        JOIN identities identity ON identity.id=message.author_id

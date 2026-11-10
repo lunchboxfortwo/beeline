@@ -547,6 +547,19 @@ describe('free starter agents', () => {
     expect(machines.states.get('m1')).toBe('destroyed');
   });
 
+  it('handle-1: gives each new workspace plain starter handles and routes their tags locally', async () => {
+    for (const [name,owner] of [['One',OWNER], ['Two',FRIEND]] as const) {
+      const workspace = await phone.execute('createWorkspace', { name }, owner);
+      const roster = (await phone.readWorkspaceMembers(workspace.id, owner))!;
+      const agents = roster.agents.map(member => member.identity);
+      expect(agents.map(agent => agent.handle).sort()).toEqual(['beebee', 'luna']);
+      for (const agent of agents) {
+        const targets = await resolveCurrentMemberMentions(db, workspace.roomId!, `@${agent.handle} hello`, owner);
+        expect(targets.map(target => target.id)).toEqual([agent.pubkey]);
+      }
+    }
+  });
+
   it('keeps the Beebee name and de-duplicates its handle against existing members', async () => {
     await phone.execute('updatePersonProfile',{handle:'beebee'},OWNER);
     const { id } = await createWorkspace();

@@ -171,7 +171,7 @@ import { phoneOptionalEnrichment } from './optional-enrichment.js';
              AND workspace_member.removed_at IS NULL
            WHERE room.id=$1 ${('')}
          ), member_rows AS (
-           SELECT i.id,i.kind,i.name,i.handle,i.avatar,i.face_id,
+           SELECT i.id,i.kind,i.name,beeline_room_handle(i.id,$1) handle,i.avatar,i.face_id,
              agent.selected_model,agent.model_catalog,
              ${mcpClientIdentitySql('i.id')} mcp_client,
              COALESCE(roster_workspace.role,roster_member.role) role,NULL::jsonb presence_body,
@@ -217,7 +217,7 @@ import { phoneOptionalEnrichment } from './optional-enrichment.js';
          ), active_turn_rows AS (
            SELECT agent_id,created_at FROM projected_turn_rows WHERE status='working'
          ), transcript_rows AS (
-           SELECT ${messageColumns('m')},i.kind author_kind,i.name author_name,i.handle author_handle,
+           SELECT ${messageColumns('m')},i.kind author_kind,i.name author_name,beeline_room_handle(i.id,m.room_id) author_handle,
              i.avatar author_avatar,i.face_id author_face,
              ${reactionIdentitiesSql('m')} reaction_identities,
              (room.parent_id IS NULL AND EXISTS(SELECT 1 FROM message_bookmarks bookmark
@@ -234,7 +234,7 @@ import { phoneOptionalEnrichment } from './optional-enrichment.js';
            ) m ON true
            JOIN identities i ON i.id=m.author_id
          ), activity_rows AS (
-           SELECT ${messageColumns('m')},i.kind author_kind,i.name author_name,i.handle author_handle,
+           SELECT ${messageColumns('m')},i.kind author_kind,i.name author_name,beeline_room_handle(i.id,m.room_id) author_handle,
              i.avatar author_avatar,i.face_id author_face,
              ${reactionIdentitiesSql('m')} reaction_identities,
              (room.parent_id IS NULL AND EXISTS(SELECT 1 FROM message_bookmarks bookmark
@@ -252,7 +252,7 @@ import { phoneOptionalEnrichment } from './optional-enrichment.js';
            ) m ON true
            JOIN identities i ON i.id=m.author_id
          ), corner_tool_rows AS (
-           SELECT ${messageColumns('m')},i.kind author_kind,i.name author_name,i.handle author_handle,
+           SELECT ${messageColumns('m')},i.kind author_kind,i.name author_name,beeline_room_handle(i.id,m.room_id) author_handle,
              i.avatar author_avatar,i.face_id author_face,
              ${reactionIdentitiesSql('m')} reaction_identities,
              false bookmarked,false feedback_reported,'{}'::text[] tagged_ids
@@ -267,7 +267,7 @@ import { phoneOptionalEnrichment } from './optional-enrichment.js';
            ) m ON true
            JOIN identities i ON i.id=m.author_id
          ), corner_briefing_rows AS (
-           SELECT ${messageColumns('m')},i.kind author_kind,i.name author_name,i.handle author_handle,
+           SELECT ${messageColumns('m')},i.kind author_kind,i.name author_name,beeline_room_handle(i.id,m.room_id) author_handle,
              i.avatar author_avatar,i.face_id author_face,
              ${reactionIdentitiesSql('m')} reaction_identities,
              false bookmarked,false feedback_reported,'{}'::text[] tagged_ids
@@ -305,7 +305,7 @@ import { phoneOptionalEnrichment } from './optional-enrichment.js';
              'facts',(SELECT (to_jsonb(f)-'objective') || jsonb_build_object('lifecycle',${cornerLifecycleSql('f.corner_id')},'objective',${cornerObjectiveSql('authorized_room')},'owner_agent_id',${cornerOwnerSql('f.corner_id')}) FROM corner_facts f WHERE f.corner_id=authorized_room.id),
              'owed',(SELECT owed.owed FROM rooms c
                ${cornerOwedLookupSql('c', '$2')} WHERE c.id=authorized_room.id),
-             'brief',(SELECT to_jsonb(brief) || jsonb_build_object('approver_name',approver.name,'author_handle',brief_author.handle)
+             'brief',(SELECT to_jsonb(brief) || jsonb_build_object('approver_name',approver.name,'author_handle',beeline_room_handle(brief_author.id,$1))
                FROM corner_brief_revisions brief
                LEFT JOIN identities approver ON approver.id=brief.approval_basis->>'approvedBy'
                LEFT JOIN identities brief_author ON brief_author.id=brief.author_id
@@ -493,7 +493,7 @@ import { phoneOptionalEnrichment } from './optional-enrichment.js';
              FROM object_expirations WHERE id=ANY($6::uuid[])),'[]'::jsonb) expired,
            COALESCE((SELECT jsonb_agg(jsonb_build_object('id',o.id::text,
              'title',COALESCE(o.title,''),'mime',o.mime,'size',o.size::text,
-             'author',COALESCE(i.handle,i.name)))
+             'author',COALESCE(beeline_room_handle(i.id,$1),i.name)))
              FROM objects o JOIN identities i ON i.id=o.owner_id
              WHERE o.state='ready' AND o.id=ANY($6::uuid[])),'[]'::jsonb) objects,
            (SELECT allow_auto_merge FROM github_repositories WHERE repository_id=$7) allow_auto_merge`,
@@ -561,7 +561,7 @@ import { phoneOptionalEnrichment } from './optional-enrichment.js';
     return `
       SELECT ${cornerRoomColumnsSql},${facts.columns},${cornerObjectiveSql('c')} objective,lm.id latest_id,lm.text latest_text,lm.author_id latest_author_id,
         initiator.id initiator_id,initiator.name initiator_name,
-        initiator.handle initiator_handle,initiator.avatar initiator_avatar,
+        beeline_workspace_handle(initiator.id,c.workspace_id) initiator_handle,initiator.avatar initiator_avatar,
         initiator.face_id initiator_face,
         li.kind latest_author_kind,li.name latest_author_name,agent.identity_id agent_id,
         agent.name agent_name,agent.handle agent_handle,agent.avatar agent_avatar,
@@ -574,7 +574,7 @@ import { phoneOptionalEnrichment } from './optional-enrichment.js';
       LEFT JOIN identities li ON li.id=lm.author_id
       LEFT JOIN LATERAL (
         SELECT i.id identity_id,
-          i.name,i.handle,i.avatar
+          i.name,beeline_room_handle(i.id,$1) handle,i.avatar
         FROM identities i
         LEFT JOIN memberships member ON member.room_id=c.id AND member.identity_id=i.id
           AND member.removed_at IS NULL

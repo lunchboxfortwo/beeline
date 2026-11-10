@@ -42,7 +42,7 @@ import { GitHubOperations, reviewerWakeFromFacts, Input, LandCornerOutcome, Corn
                 reviewer_identity.id reviewer_identity_id,
                 parent_member.identity_id parent_reviewer_id,
                 corner_member.identity_id corner_reviewer_id,
-                reviewer_identity.handle reviewer_handle
+                beeline_room_handle(reviewer_identity.id,$1) reviewer_handle
          FROM rooms r
          JOIN corner_github_cache f ON f.corner_id=r.id
          JOIN rooms parent ON parent.id=r.parent_id

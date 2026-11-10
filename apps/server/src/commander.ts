@@ -70,7 +70,7 @@ export async function assertCornerCommandTarget(
     `SELECT 1 FROM rooms source WHERE source.id=$1 AND source.parent_id IS NOT NULL
        AND (EXISTS (SELECT 1 FROM rooms target WHERE target.id::text=lower($2) AND target.direct_participants IS NOT NULL)
          OR EXISTS (SELECT 1 FROM identities agent WHERE agent.kind='agent'
-           AND (agent.id=$2 OR lower(agent.handle)=lower(ltrim($2,'@'))))) LIMIT 1`,
+           AND (agent.id=$2 OR lower(beeline_workspace_handle(agent.id,source.workspace_id))=lower(ltrim($2,'@'))))) LIMIT 1`,
     [sourceRoomId, targetRoomId],
   );
   if (dm.rowCount)
@@ -126,7 +126,7 @@ export async function sendOrder(
         `SELECT identity.id FROM room_access member JOIN identities identity
            ON identity.id=member.identity_id AND identity.kind='agent'
          WHERE member.room_id=$1 AND member.removed_at IS NULL
-           AND (identity.id=$2 OR lower(identity.handle)=$3)`, [address, named, named.toLowerCase()],
+           AND (identity.id=$2 OR lower(beeline_workspace_handle(identity.id,member.workspace_id))=$3)`, [address, named, named.toLowerCase()],
       )).rows[0];
       if (!member || !await repairReviewerCornerMembership(db, address, member.id))
         throw new CommandRefusalError('order agent must be an agent member of this corner or its parent Room', 403);
@@ -138,7 +138,7 @@ export async function sendOrder(
     ).rows[0]?.direct;
     const agents = (
       await db.query<{ id: string; handle: string | null }>(
-        `SELECT identity.id,lower(identity.handle) handle FROM room_access member JOIN identities identity
+        `SELECT identity.id,lower(beeline_workspace_handle(identity.id,member.workspace_id)) handle FROM room_access member JOIN identities identity
          ON identity.id=member.identity_id AND identity.kind='agent'
        WHERE member.room_id=$1 AND member.removed_at IS NULL AND (identity.id<>$2 OR $3::boolean)`,
         [address, agentId, Boolean(named)],
@@ -207,7 +207,7 @@ export async function stopCommandedTurn(
   if (agent !== undefined && !named) throw new CommandRefusalError('stop agent must name one agent', 400);
   const target = await commandAddress(db, address, agentId);
   const candidates = (await db.query<{ id: string; handle: string | null; name: string }>(
-    `SELECT identity.id,identity.handle,identity.name FROM room_access member JOIN identities identity
+    `SELECT identity.id,beeline_workspace_handle(identity.id,member.workspace_id) handle,identity.name FROM room_access member JOIN identities identity
        ON identity.id=member.identity_id AND identity.kind='agent'
      WHERE member.room_id=$1 AND member.removed_at IS NULL AND identity.id<>$2`,
     [address, agentId])).rows;
@@ -274,7 +274,7 @@ async function recordAgentCommandCard(db: SqlDatabase, input: {
   text: string; status?: string; attachments?: PrivateCommandPayload['attachments'];
 }) {
   const recipient = (await db.query<{ name: string; handle: string | null }>(
-    'SELECT name,handle FROM identities WHERE id=$1', [input.recipientId])).rows[0];
+    'SELECT name,beeline_room_handle(id,$2) handle FROM identities WHERE id=$1', [input.recipientId,input.cornerId])).rows[0];
   const card = await systemLine(db, {
     id: createHash('sha256').update(`agent-command-card:${input.id}`).digest('hex'),
     roomId: input.cornerId,
@@ -526,7 +526,7 @@ export async function refuseTagPastCommander(
   const skipped = people.filter(person => person.id !== reply && !(person.id === recipient && returnRoom === roomId));
   if (!skipped.length) return;
   const commander = recipient && returnRoom ? (await db.query<{ handle: string | null; name: string; place: string }>(
-    `SELECT identity.handle,identity.name,room.name place FROM identities identity, rooms room
+    `SELECT beeline_workspace_handle(identity.id,room.workspace_id) handle,identity.name,room.name place FROM identities identity, rooms room
      WHERE identity.id=$1 AND room.id=$2`, [recipient, returnRoom])).rows[0] : undefined;
   const who = commander ? `@${(commander.handle ?? commander.name).replace(/^@/, '')} in ${commander.place}` : 'whoever opened this corner';
   throw new CommandRefusalError(

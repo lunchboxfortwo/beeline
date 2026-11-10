@@ -168,7 +168,7 @@ import { daemonWriteResult } from './corner-messages.js';
                WHERE room_id=$2 AND agent_id=$3 AND turn_id=$6 AND kind IN ('draft','thought') AND NOT $15::boolean
              )
              SELECT inserted.*,author.kind author_kind,author.name author_name,
-               author.handle author_handle,author.avatar author_avatar,author.face_id author_face,
+               beeline_room_handle(author.id,inserted.room_id) author_handle,author.avatar author_avatar,author.face_id author_face,
                ${taggedIdentityIdsSql('inserted')} tagged_ids
              FROM inserted JOIN identities author ON author.id=inserted.author_id
              CROSS JOIN (SELECT count(*) FROM completed) completion`,
@@ -192,7 +192,7 @@ import { daemonWriteResult } from './corner-messages.js';
                AND NOT EXISTS(SELECT 1 FROM new_messages)
            )
            SELECT inserted.*,author.kind author_kind,author.name author_name,
-             author.handle author_handle,author.avatar author_avatar,author.face_id author_face,
+             beeline_room_handle(author.id,inserted.room_id) author_handle,author.avatar author_avatar,author.face_id author_face,
              ${taggedIdentityIdsSql('inserted')} tagged_ids
            FROM inserted JOIN identities author ON author.id=inserted.author_id`,
           values,
@@ -271,13 +271,13 @@ import { daemonWriteResult } from './corner-messages.js';
              )}
            ), inserted_public AS (
              SELECT inserted.*,author.kind author_kind,author.name author_name,
-               author.handle author_handle,author.avatar author_avatar,author.face_id author_face,
+               beeline_room_handle(author.id,inserted.room_id) author_handle,author.avatar author_avatar,author.face_id author_face,
                ${taggedIdentityIdsSql('inserted')} tagged_ids
              FROM inserted JOIN identities author ON author.id=inserted.author_id
              CROSS JOIN completed
            ), existing_public AS (
              SELECT ${messageColumns('message')},author.kind author_kind,author.name author_name,
-               author.handle author_handle,author.avatar author_avatar,author.face_id author_face,
+               beeline_room_handle(author.id,message.room_id) author_handle,author.avatar author_avatar,author.face_id author_face,
                ${taggedIdentityIdsSql('message')} tagged_ids
              FROM candidate JOIN messages message ON message.id=candidate.result_message_id
              JOIN identities author ON author.id=message.author_id

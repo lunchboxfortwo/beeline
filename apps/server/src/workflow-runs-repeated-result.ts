@@ -169,7 +169,7 @@ export async function handoff(
       await completeServiceReview(db,command.agent_id,input.runId,(input.contents as Record<string, unknown>).receipts);
     }
     await bindWorkflowStepOutput(db, command, input.runId);
-    const actor = await loadIdentityRow(db, command.agent_id);
+    const actor = await loadIdentityRow(db, command.agent_id,command.room_id);
     const result = await enterState(db, scope, {
       outcome: input.outcome,
       contents: input.contents,
@@ -282,7 +282,7 @@ export async function settleWorkflowGate(
         { choiceId: input.choiceId, optionId: input.optionId!, viewerId: input.viewerId, note: input.note },
         { wake: false },
       );
-  const viewer = await loadIdentityRow(db, input.viewerId);
+  const viewer = await loadIdentityRow(db, input.viewerId,scope.roomId);
   const note = typeof input.note === 'string' && input.note.trim() ? input.note.replace(/\s+/g, ' ').trim() : undefined;
   const attempt = scope.run.seq;
   await enterState(db, scope, {
@@ -495,7 +495,7 @@ export async function validateWorkflowBindings(
   input: { roleBindings: Readonly<Record<string, WorkflowRoleBinding>> },
 ): Promise<void> {
   const members = (await db.query<{ identity_id: string; handle: string | null; kind: string }>(
-    `SELECT member.identity_id,identity.handle,identity.kind FROM effective_memberships member
+    `SELECT member.identity_id,beeline_workspace_handle(identity.id,member.workspace_id) handle,identity.kind FROM effective_memberships member
      JOIN identities identity ON identity.id=member.identity_id
      WHERE member.room_id=$1 AND member.removed_at IS NULL`, [roomId],
   )).rows;

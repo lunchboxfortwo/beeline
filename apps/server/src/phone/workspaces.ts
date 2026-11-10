@@ -148,17 +148,17 @@ import { phoneProjectMemberGrantRows } from './agent-reads.js';
         SELECT role FROM memberships WHERE workspace_id=$1 AND room_id IS NULL
           AND identity_id=$2 AND removed_at IS NULL
       ), member_row AS (
-        SELECT i.id,i.kind,i.name,i.handle,i.avatar,i.face_id,m.role,
+        SELECT i.id,i.kind,i.name,beeline_workspace_handle(i.id,m.workspace_id) handle,i.avatar,i.face_id,m.role,
           NULL::jsonb presence_body,NULL::timestamptz presence_updated_at
         FROM memberships m JOIN identities i ON i.id=m.identity_id
         WHERE m.workspace_id=$1 AND m.room_id IS NULL AND m.identity_id=$3
           AND m.removed_at IS NULL AND i.kind='human' AND i.hidden_from_roster=false
       ), owned AS (
-        SELECT i.id,i.kind,i.name,i.handle,i.avatar,i.face_id,m.role,
+        SELECT i.id,i.kind,i.name,beeline_workspace_handle(i.id,m.workspace_id) handle,i.avatar,i.face_id,m.role,
           NULL::jsonb presence_body,NULL::timestamptz presence_updated_at,
           agent.selected_model,agent.model_catalog,
           ${mcpClientIdentitySql('agent.agent_id')} mcp_client,
-          owner.id owner_id,owner.name owner_name,owner.handle owner_handle
+          owner.id owner_id,owner.name owner_name,beeline_workspace_handle(owner.id,m.workspace_id) owner_handle
         FROM agents agent JOIN identities i ON i.id=agent.agent_id
         JOIN memberships m ON m.identity_id=i.id
         JOIN identities owner ON owner.id=agent.owner_id

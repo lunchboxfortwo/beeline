@@ -227,8 +227,8 @@ async function postUsageReceiptCard(
 
   const agent = (
     await database.query<{ name: string; handle: string | null }>(
-      `SELECT name,handle FROM identities WHERE id=$1`,
-      [agentId],
+      `SELECT name,beeline_workspace_handle(id,$2) handle FROM identities WHERE id=$1`,
+      [agentId,connector.workspace_id],
     )
   ).rows[0];
   const connectionName = connection.label ?? connection.service ?? connection.reference;

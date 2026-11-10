@@ -83,9 +83,9 @@ export type WorkflowRunCard = {
 export type IdentityRow = { id: string; kind: 'human' | 'agent'; name: string; handle?: string | null };
 
 
-export async function loadIdentityRow(db: SqlDatabase, id: string): Promise<IdentityRow> {
+export async function loadIdentityRow(db: SqlDatabase, id: string, roomId?: string): Promise<IdentityRow> {
   const row = (
-    await db.query<IdentityRow>(`SELECT id,kind,name,handle FROM identities WHERE id=$1`, [id])
+    await db.query<IdentityRow>(`SELECT id,kind,name,beeline_room_handle(id,$2) handle FROM identities WHERE id=$1`, [id,roomId ?? null])
   ).rows[0];
   if (!row) throw new Error('identity not found');
   return row;
@@ -93,12 +93,12 @@ export async function loadIdentityRow(db: SqlDatabase, id: string): Promise<Iden
 
 
 /** How a system line names each id: `@handle`, falling back to the raw id for an unknown one. */
-export async function mentionsFor(db: SqlDatabase, ids: readonly string[]): Promise<Map<string, string>> {
+export async function mentionsFor(db: SqlDatabase, ids: readonly string[], roomId?: string): Promise<Map<string, string>> {
   const rows = ids.length
     ? (
         await db.query<IdentityRow & { handle: string | null }>(
-          `SELECT id,kind,name,handle FROM identities WHERE id=ANY($1::text[])`,
-          [[...new Set(ids)]],
+          `SELECT id,kind,name,beeline_room_handle(id,$2) handle FROM identities WHERE id=ANY($1::text[])`,
+          [[...new Set(ids)],roomId ?? null],
         )
       ).rows
     : [];
@@ -115,7 +115,7 @@ export async function mentionsFor(db: SqlDatabase, ids: readonly string[]): Prom
  */
 export async function loadRunStarter(db: SqlDatabase, roomId: string, runId: string): Promise<IdentityRow> {
   const start = await loadRunStart(db, roomId, runId);
-  return loadIdentityRow(db, start.card.requesterId ?? start.authorId);
+  return loadIdentityRow(db, start.card.requesterId ?? start.authorId,roomId);
 }
 
 
@@ -206,7 +206,7 @@ export async function roleReasons(
   input: { roomId: string; list: readonly string[]; tried: readonly TriedAgent[]; cursor?: string },
 ): Promise<string> {
   const health = await roomAgentHealth(db, input.roomId, input.list);
-  const names = await mentionsFor(db, input.list);
+  const names = await mentionsFor(db, input.list,input.roomId);
   const cursorIndex = input.cursor ? input.list.indexOf(input.cursor) : -1;
   return input.list
     .map((id, index) => {

@@ -73,11 +73,11 @@ import { effortCatalogAxis } from './read-projection.js';
           actor_handle: string | null;
         }>(
           `SELECT config.selected_model,config.selected_effort,config.fast_mode,config.model_catalog,
-                  agent.id agent_id,agent.kind agent_kind,agent.name agent_name,agent.handle agent_handle,
-                  actor.id actor_id,actor.kind actor_kind,actor.name actor_name,actor.handle actor_handle
+                  agent.id agent_id,agent.kind agent_kind,agent.name agent_name,beeline_workspace_handle(agent.id,$3) agent_handle,
+                  actor.id actor_id,actor.kind actor_kind,actor.name actor_name,beeline_workspace_handle(actor.id,$3) actor_handle
            FROM agents config JOIN identities agent ON agent.id=config.agent_id
            JOIN identities actor ON actor.id=$2 WHERE config.agent_id=$1 FOR UPDATE`,
-          [input.agentId, viewerId],
+          [input.agentId, viewerId,input.workspaceId],
         )
       ).rows[0];
       if (!context) throw new Error('agent not found');

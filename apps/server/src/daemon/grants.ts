@@ -90,8 +90,8 @@ import { daemonWriteResult } from './corner-messages.js';
       }>(
         `SELECT room.workspace_id,room.parent_id,a.owner_id,a.machine_name,
                 CASE WHEN workspace.visibility='public' THEN false ELSE a.yolo_mode END yolo_mode,
-                agent.name agent_name,agent.handle agent_handle,agent.avatar agent_avatar,
-                owner.name owner_name,owner.handle owner_handle,owner.avatar owner_avatar
+                agent.name agent_name,beeline_workspace_handle(agent.id,room.workspace_id) agent_handle,agent.avatar agent_avatar,
+                owner.name owner_name,beeline_workspace_handle(owner.id,room.workspace_id) owner_handle,owner.avatar owner_avatar
          FROM rooms room
          JOIN workspaces workspace ON workspace.id=room.workspace_id
          JOIN agents a ON a.agent_id=$2
@@ -560,8 +560,8 @@ import { daemonWriteResult } from './corner-messages.js';
           handle: string | null;
           avatar: string | null;
         }>(
-          `SELECT id,kind,name,handle,avatar FROM identities WHERE id=$1`,
-          [workflow.id],
+          `SELECT id,kind,name,beeline_room_handle(id,$2) handle,avatar FROM identities WHERE id=$1`,
+          [workflow.id,command.room_id],
         )
       ).rows[0];
       if (resolved) return resolved;

@@ -267,7 +267,7 @@ async function finishAgentAnnouncement(database: SqlDatabase, agentId: string,
       handle: string | null;
       name: string;
     }>(
-      `SELECT command.id,command.generation_id,command.room_id,command.source_message_id,identity.handle,identity.name
+      `SELECT command.id,command.generation_id,command.room_id,command.source_message_id,beeline_room_handle(identity.id,command.room_id) handle,identity.name
        FROM agent_commands command JOIN identities identity ON command.agent_id=identity.id
        WHERE command.agent_id=$1
          AND command.action='restart' AND (command.state='claimed' OR (command.state='pending'

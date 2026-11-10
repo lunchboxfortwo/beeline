@@ -260,6 +260,9 @@ async function canonicalPhrase(
   database: SqlDatabase,
   phrase: SystemPhrase,
   plainSubjectId?: string,
+  roomId?: string,
+  messageId?: string,
+  workspaceId?: string,
 ): Promise<SystemPhrase> {
   const ids = [
     phrase.subject.id,
@@ -268,8 +271,8 @@ async function canonicalPhrase(
   ].filter((id): id is string => Boolean(id));
   const rows = ids.length
     ? await database.query<IdentityLabelRow>(
-        `SELECT id,kind,name,handle FROM identities WHERE id=ANY($1::text[])`,
-        [[...new Set(ids)]],
+        `SELECT id,kind,name,beeline_workspace_handle(id,COALESCE($4::uuid,(SELECT workspace_id FROM rooms WHERE id=COALESCE($2::uuid,(SELECT room_id FROM messages WHERE id=$3))))) handle FROM identities WHERE id=ANY($1::text[])`,
+        [[...new Set(ids)],roomId ?? null,messageId ?? null,workspaceId ?? null],
       )
     : { rows: [] };
   const identities = new Map(rows.rows.map((row) => [row.id, row]));
@@ -388,6 +391,7 @@ export async function systemLine(
       database,
       input,
       input.cardType === 'workflow-handoff' ? authorId : undefined,
+      input.roomId,
     ),
   );
   const id = input.id ?? randomBytes(32).toString('hex');
@@ -529,10 +533,12 @@ export async function connectorOfferDecisionLines(database: SqlDatabase,
   const ids = [...new Set(inputs.flatMap(input => [input.subject.id,
     typeof input.object === 'string' ? undefined : input.object?.id, input.attribution?.actor.id])
     .filter((id): id is string => Boolean(id)))];
-  const labels = (await database.query<IdentityLabelRow>(
-    'SELECT id,kind,name,handle FROM identities WHERE id=ANY($1::text[])', [ids])).rows;
-  const identities = new Map(labels.map(row => [row.id,row]));
+  const labels = (await database.query<IdentityLabelRow & {room_id:string}>(
+    `SELECT identity.id,kind,name,beeline_room_handle(identity.id,place.room_id) handle,place.room_id
+     FROM identities identity CROSS JOIN unnest($2::uuid[]) place(room_id) WHERE identity.id=ANY($1::text[])`,
+    [ids,[...new Set(inputs.map(input => input.roomId))]])).rows;
   const lines = inputs.map(input => {
+    const identities = new Map(labels.filter(row => row.room_id===input.roomId).map(row => [row.id,row]));
     const id = input.id ?? randomBytes(32).toString('hex');
     const composed = composeSystemLine(labeledPhrase(input,identities));
     return { id,roomId:input.roomId,authorId:input.authorId ?? input.subject.id,
@@ -607,7 +613,7 @@ export async function restateSystemLine(
   phrase: SystemPhrase,
   card?: Record<string, unknown>,
 ): Promise<{ text: string; event: SystemEvent; updated: boolean }> {
-  const { text, event } = composeSystemLine(await canonicalPhrase(database, phrase));
+  const { text, event } = composeSystemLine(await canonicalPhrase(database, phrase,undefined,undefined,messageId));
   const result = await database.query(
     `UPDATE messages SET text=$2,system_event=$3::jsonb,card=COALESCE($4::jsonb,card) WHERE id=$1`,
     [messageId, text, JSON.stringify(event), card ? JSON.stringify(card) : null],
@@ -624,9 +630,12 @@ export async function restateSystemLines(database: SqlDatabase, lines: readonly 
   const ids = [...new Set(lines.flatMap(({phrase}) => [phrase.subject.id,
     typeof phrase.object === 'string' ? undefined : phrase.object?.id, phrase.attribution?.actor.id]
     .filter((id): id is string => Boolean(id))))];
-  const identities = new Map((ids.length ? (await database.query<IdentityLabelRow>(
-    'SELECT id,kind,name,handle FROM identities WHERE id=ANY($1::text[])', [ids])).rows : []).map(row => [row.id,row]));
-  const rows = lines.map(line => ({id:line.id,...composeSystemLine(labeledPhrase(line.phrase,identities)),
+  const labels = ids.length ? (await database.query<IdentityLabelRow & {message_id:string}>(
+    `SELECT identity.id,kind,name,beeline_room_handle(identity.id,message.room_id) handle,message.id message_id
+     FROM messages message CROSS JOIN identities identity
+     WHERE identity.id=ANY($1::text[]) AND message.id=ANY($2::text[])`,[ids,lines.map(line => line.id)])).rows : [];
+  const rows = lines.map(line => ({id:line.id,...composeSystemLine(labeledPhrase(line.phrase,
+    new Map(labels.filter(row => row.message_id===line.id).map(row => [row.id,row])))),
     card:line.card,presentation:line.presentation,created_at:line.createdAt}));
   await database.query(`UPDATE messages message SET text=line.text,system_event=line.event,
     card=COALESCE(line.card,message.card),presentation=COALESCE(line.presentation,message.presentation),
@@ -659,10 +668,11 @@ export async function deletedMessageEvent(
   database: SqlDatabase,
   deleterId: string,
   authorId: string,
+  roomId?: string,
 ): Promise<SystemEvent> {
   const rows = await database.query<IdentityLabelRow>(
-    `SELECT id,kind,name,handle FROM identities WHERE id=ANY($1::text[])`,
-    [[...new Set([deleterId, authorId])]],
+    `SELECT id,kind,name,beeline_room_handle(id,$2) handle FROM identities WHERE id=ANY($1::text[])`,
+    [[...new Set([deleterId, authorId])],roomId ?? null],
   );
   const identities = new Map(rows.rows.map((row) => [row.id, row]));
   const deleter = identities.get(deleterId);
@@ -676,7 +686,7 @@ export async function deletedMessageEvent(
       ...(authorId === deleterId
         ? {}
         : { attribution: { verb: 'sent by', actor: identitySubject(author) } }),
-    }),
+    },undefined,roomId),
   ).event;
 }
 
@@ -727,7 +737,7 @@ export async function sendSystemNotices(database: SqlDatabase, workspaceId: stri
   phrase: Pick<SystemPhrase,'subject'|'verb'|'object'|'consequence'|'attribution'>): Promise<void> {
   if (!recipients.length) return;
   await ensureSystemIdentity(database);
-  const { text, event } = composeSystemLine(await canonicalPhrase(database,phrase));
+  const { text, event } = composeSystemLine(await canonicalPhrase(database,phrase,undefined,undefined,undefined,workspaceId));
   const notices = recipients.map(recipient=>{
     const participants=[SYSTEM_IDENTITY_ID,recipient.identityId].sort() as [string,string];
     return {id:recipient.messageId,room:directMessageRoomId(workspaceId,participants),participants};

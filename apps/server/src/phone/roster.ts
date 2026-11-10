@@ -52,19 +52,19 @@ import { reviveDates, selectedModelLabel, projectAgentPresence } from './read-pr
       ), viewer_row AS (
         SELECT id,kind,name,handle,avatar,face_id FROM identities WHERE id=$7
       ), people AS (
-        SELECT i.id,i.kind,i.name,i.handle,i.avatar,i.face_id,m.role,
+        SELECT i.id,i.kind,i.name,beeline_workspace_handle(i.id,m.workspace_id) handle,i.avatar,i.face_id,m.role,
           NULL::jsonb presence_body,NULL::timestamptz presence_updated_at
         FROM memberships m JOIN identities i ON i.id=m.identity_id
         WHERE m.workspace_id=$1 AND m.room_id IS NULL AND m.removed_at IS NULL
           AND i.hidden_from_roster=false AND i.kind='human'
           AND ($2::text IS NULL OR position($2 in lower(i.name))>0
-            OR position($2 in lower(COALESCE(i.handle,'')))>0)
+            OR position($2 in lower(COALESCE(beeline_workspace_handle(i.id,m.workspace_id),'')))>0)
       ), agent_rows AS (
-        SELECT i.id,i.kind,i.name,i.handle,i.avatar,i.face_id,m.role,
+        SELECT i.id,i.kind,i.name,beeline_workspace_handle(i.id,m.workspace_id) handle,i.avatar,i.face_id,m.role,
           NULL::jsonb presence_body,NULL::timestamptz presence_updated_at,
           agent.selected_model,agent.model_catalog,
           ${mcpClientIdentitySql('agent.agent_id')} mcp_client,
-          owner.id owner_id,owner.name owner_name,owner.handle owner_handle,
+          owner.id owner_id,owner.name owner_name,beeline_workspace_handle(owner.id,m.workspace_id) owner_handle,
           ${(agentUsageColumns('agent', '$7'))}
         FROM memberships m JOIN identities i ON i.id=m.identity_id
         LEFT JOIN agents agent ON agent.agent_id=i.id
@@ -72,7 +72,7 @@ import { reviveDates, selectedModelLabel, projectAgentPresence } from './read-pr
         WHERE m.workspace_id=$1 AND m.room_id IS NULL AND m.removed_at IS NULL
           AND i.hidden_from_roster=false AND i.kind='agent'
           AND ($2::text IS NULL OR position($2 in lower(i.name))>0
-            OR position($2 in lower(COALESCE(i.handle,'')))>0)
+            OR position($2 in lower(COALESCE(beeline_workspace_handle(i.id,m.workspace_id),'')))>0)
           AND ($5::text IS NULL OR $4::text='human' OR agent.owner_id=$5)
       )
       SELECT to_jsonb(visible_workspace) workspace_row,
@@ -177,7 +177,7 @@ import { reviveDates, selectedModelLabel, projectAgentPresence } from './read-pr
   ): Promise<RoomViewMember[]> {
     const rows = await ctx.database.query<MemberRow>(
       `SELECT i.id,
-         i.kind,i.name,i.handle,i.avatar,
+         i.kind,i.name,beeline_workspace_handle(i.id,m.workspace_id) handle,i.avatar,
          i.face_id,agent.selected_model,agent.model_catalog,
          ${mcpClientIdentitySql('i.id')} mcp_client,
          COALESCE(workspace_member.role,m.role) role,NULL::jsonb presence_body,

@@ -2,6 +2,7 @@ import { DIAGNOSTIC_COMMAND_SCHEMA } from './diagnostics-schema.js';
 import { SQUIRE_MACHINE_SCHEMA } from './squire-machine.js';
 import { backfillSquireMachines } from './squire-machine.js';
 import { IDENTITY_HANDLE_SCHEMA } from './identity-handles.js';
+import { WORKSPACE_HANDLE_SCHEMA } from './workspace-handles.js';
 import { OWNED_MODEL_CREDENTIAL_SCHEMA } from './owned-model-credential.js';
 import { OWNED_MODEL_ATTEMPT_SCHEMA } from './owned-model-attempt.js';
 import { SENTRY_WAKE_SOURCE_SCHEMA } from './sentry-wake-source.js';
@@ -156,6 +157,7 @@ export async function migrate(
   `);
   await ddlScript('free agents schema', FREE_AGENTS_SCHEMA);
   await ddlScript('machine Squire source', SQUIRE_MACHINE_SCHEMA);
+  await ddlScript('workspace handles', WORKSPACE_HANDLE_SCHEMA);
   await ddlScript('stable identity handles', IDENTITY_HANDLE_SCHEMA);
   await runMigrationStep('one pending app sign-in card',()=>createIndexConcurrently(database,
     'messages_pending_app_sign_in_unique',`CREATE UNIQUE INDEX CONCURRENTLY messages_pending_app_sign_in_unique

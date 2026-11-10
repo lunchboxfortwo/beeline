@@ -45,7 +45,7 @@ export class StarterOnboardingService {
        RETURNING id,time_zone,(SELECT name FROM identities WHERE id=user_id) name`, [roomId])).rows[0];
     if (!run) return;
     const agents = (await this.database.query<BanterAgent & { starter_role: string }>(
-      `SELECT i.id,i.name,i.handle,a.soul->>'instructions' instructions,f.starter_role
+      `SELECT i.id,i.name,beeline_workspace_handle(i.id,f.workspace_id) handle,a.soul->>'instructions' instructions,f.starter_role
        FROM starter_onboarding_runs r JOIN free_agents f ON f.agent_id=ANY(ARRAY[r.beebee_id,r.luna_id])
        JOIN identities i ON i.id=f.agent_id JOIN agents a ON a.agent_id=i.id
        WHERE r.id=$1 AND f.removed_at IS NULL`, [run.id])).rows;

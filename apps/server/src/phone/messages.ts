@@ -400,7 +400,7 @@ import { phoneReadLiveDelta, phoneLiveStarPrompt } from './live-reads.js';
         `UPDATE messages message SET system_event=$2::jsonb WHERE message.id=$1`,
         [
           input.messageId,
-          JSON.stringify(await deletedMessageEvent(database, row.deleted_by, row.author_id)),
+          JSON.stringify(await deletedMessageEvent(database, row.deleted_by, row.author_id,input.roomId)),
         ],
       );
       await tombstoneInstitutionalMemoryForMessage(database, input.messageId);

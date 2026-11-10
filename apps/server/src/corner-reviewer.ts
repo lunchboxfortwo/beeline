@@ -33,7 +33,7 @@ export async function setCornerReviewer(
     `SELECT identity.id,identity.name FROM rooms corner
      JOIN room_access member ON member.room_id=corner.parent_id AND member.removed_at IS NULL
      JOIN identities identity ON identity.id=member.identity_id AND identity.kind='agent'
-     WHERE corner.id=$1 AND identity.handle=$2`, [cornerId, handle],
+     WHERE corner.id=$1 AND beeline_workspace_handle(identity.id,corner.workspace_id)=$2`, [cornerId, handle],
   )).rows[0];
   if (!reviewer) throw new CommandRefusalError('reviewer must be an agent member of the parent Room', 409);
   await assertIndependentCornerReviewer(db, cornerId, reviewer.id, checkAuthors);

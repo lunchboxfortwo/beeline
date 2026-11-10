@@ -42,7 +42,7 @@ import { daemonWriteResult } from './corner-messages.js';
       throw new Error('Link returned an invalid approval URL');
     const context = (await ctx.database.query<{ workspace_id: string; agent_name: string;
       agent_handle: string | null; agent_avatar: string | null }>(
-      `SELECT room.workspace_id,identity.name agent_name,identity.handle agent_handle,
+      `SELECT room.workspace_id,identity.name agent_name,beeline_workspace_handle(identity.id,room.workspace_id) agent_handle,
         identity.avatar agent_avatar FROM rooms room JOIN identities identity ON identity.id=$2
        WHERE room.id=$1`, [input.roomId, agentId])).rows[0];
     if (!context) throw new Error('Link request Room not found');
@@ -119,7 +119,7 @@ import { daemonWriteResult } from './corner-messages.js';
         agent_avatar: string | null;
       }>(
         `SELECT room.workspace_id,agent.owner_id,identity.name agent_name,
-                identity.handle agent_handle,identity.avatar agent_avatar
+                beeline_workspace_handle(identity.id,room.workspace_id) agent_handle,identity.avatar agent_avatar
          FROM rooms room
          JOIN agents agent ON agent.agent_id=$2
          JOIN identities identity ON identity.id=agent.agent_id
@@ -441,8 +441,8 @@ import { daemonWriteResult } from './corner-messages.js';
         name: string;
         handle: string | null;
         avatar: string | null;
-      }>(`SELECT id,kind,name,handle,avatar FROM identities WHERE id=ANY($1::text[])`, [
-        [input.principalId, agentId],
+      }>(`SELECT id,kind,name,beeline_room_handle(id,$2) handle,avatar FROM identities WHERE id=ANY($1::text[])`, [
+        [input.principalId, agentId],input.roomId,
       ]);
       const requesterRow = identities.rows.find((row) => row.id === input.principalId);
       const agentRow = identities.rows.find((row) => row.id === agentId);

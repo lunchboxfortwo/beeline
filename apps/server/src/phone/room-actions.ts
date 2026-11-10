@@ -84,7 +84,7 @@ import { PhoneService } from '../phone-service.js';
         const current = (await database.query<{ repository_name: string }>(
           `SELECT repository_name FROM rooms WHERE id=$1`, [input.roomId])).rows[0];
         if (current?.repository_name !== card.repository) throw new Error('Repository changed. Ask for fresh starters.');
-        const agent = (await database.query<{ handle: string }>(`SELECT handle FROM identities WHERE id=$1`, [card.agentId])).rows[0];
+        const agent = (await database.query<{ handle: string }>(`SELECT beeline_room_handle(id,$2) handle FROM identities WHERE id=$1`, [card.agentId,input.roomId])).rows[0];
         if (!agent?.handle) throw new Error('The offering agent is no longer available');
         await service.sendMessage({ roomId: input.roomId,
           text: `@${agent.handle} ${starter.title}\n${starter.task}\nStart this task now in a repository corner with a complete brief. Use this selection as approval. Keep the normal checks, independent review and merge gate.`,

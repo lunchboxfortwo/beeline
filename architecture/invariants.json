@@ -1499,7 +1499,8 @@
           "updated_at": "existing before the registry; weekly audit reviews",
           "face_id": "existing before the registry; weekly audit reviews",
           "welcome_cards_due": "existing before the registry; weekly audit reviews",
-          "speaking_speed": "existing before the registry; weekly audit reviews"
+          "speaking_speed": "existing before the registry; weekly audit reviews",
+          "workspace_handle_base": "Preferred first workspace address for newly created agents; null preserves legacy handles."
         }
       },
       "identity_external_links": {
@@ -3498,6 +3499,15 @@
           "member_id": "Single-use local companion adoption of an existing consent; prevents duplicate members and extra approval.",
           "expires_at": "Single-use local companion adoption of an existing consent; prevents duplicate members and extra approval.",
           "consumed_at": "Single-use local companion adoption of an existing consent; prevents duplicate members and extra approval."
+        }
+      },
+      "workspace_handles": {
+        "module": "apps/server/src/workspace-handles.ts",
+        "reason": "Permanent per-workspace agent addresses, including collision reservations after departure.",
+        "columns": {
+          "workspace_id": "Workspace whose address namespace owns the reservation.",
+          "identity_id": "Agent that owns this permanent address.",
+          "handle": "Assigned address; never recomputed from names or roster."
         }
       }
     },

@@ -151,7 +151,7 @@ import { phoneListRoomWorkflowRuns } from './schedules.js';
            WHERE room.id=$1
          )
          SELECT ${messageColumns('message')},author.kind author_kind,author.name author_name,
-           author.handle author_handle,author.avatar author_avatar,author.face_id author_face,
+           beeline_room_handle(author.id,message.room_id) author_handle,author.avatar author_avatar,author.face_id author_face,
            ${reactionIdentitiesSql('message')} reaction_identities,
            ${taggedIdentityIdsSql('message')} tagged_ids,
            ARRAY(SELECT identity_id FROM authorized) authorized_viewers,
@@ -161,7 +161,7 @@ import { phoneListRoomWorkflowRuns } from './schedules.js';
            preview_author.id deck_latest_author_id,
            preview_author.kind deck_latest_author_kind,
            preview_author.name deck_latest_author_name,
-           preview_author.handle deck_latest_author_handle,
+           beeline_room_handle(preview_author.id,latest.room_id) deck_latest_author_handle,
            preview_author.avatar deck_latest_author_avatar,
            preview_author.face_id deck_latest_author_face,
            CASE WHEN message.deleted_at IS NOT NULL
@@ -265,7 +265,7 @@ import { phoneListRoomWorkflowRuns } from './schedules.js';
          CASE WHEN room_member.identity_id IS NOT NULL AND message.deleted_at IS NULL THEN author.id END author_id,
          CASE WHEN room_member.identity_id IS NOT NULL AND message.deleted_at IS NULL THEN author.kind END author_kind,
          CASE WHEN room_member.identity_id IS NOT NULL AND message.deleted_at IS NULL THEN author.name END author_name,
-         CASE WHEN room_member.identity_id IS NOT NULL AND message.deleted_at IS NULL THEN author.handle END author_handle,
+         CASE WHEN room_member.identity_id IS NOT NULL AND message.deleted_at IS NULL THEN beeline_room_handle(author.id,message.room_id) END author_handle,
          CASE WHEN room_member.identity_id IS NOT NULL AND message.deleted_at IS NULL THEN author.avatar END author_avatar,
          CASE WHEN room_member.identity_id IS NOT NULL AND message.deleted_at IS NULL THEN author.face_id END author_face
        FROM message_bookmarks bookmark

@@ -92,7 +92,7 @@ export async function routeTaggedLifecycleCommand(
     return false;
   const target = (
     await db.query<LifecycleTarget>(
-      `SELECT agent.agent_id,agent.owner_id,agent.harness,identity.handle,identity.name,
+      `SELECT agent.agent_id,agent.owner_id,agent.harness,beeline_workspace_handle(identity.id,target_member.workspace_id) handle,identity.name,
          presence.body->>'lifecycleId' lifecycle_id,
          presence.body->>'releaseVersion' release_version,
          presence.body->>'sourceSha' source_sha,

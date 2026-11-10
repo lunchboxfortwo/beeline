@@ -371,7 +371,8 @@ describe('PR-scoped check gate', () => {
       checks: 'passed',
       approved: false,
       mergeAllowed: false,
-      reviewer: '@reviewer',
+      // The assigned workspace address survives a later global handle edit.
+      reviewer: '@author',
       reviewerExists: true,
       reviewerWake: { status: 'waiting' },
     });

@@ -308,10 +308,10 @@ async function createReservedFreeAgent(database:SqlDatabase,config:FreeAgentConf
     takenFaces: roster.rows.map((row) => resolveFace(row.face_id, row.id)),
     takenNames: roster.rows.map((row) => row.name),
   });
-  const handle=(await database.query<{handle:string}>(
-    `INSERT INTO identities(id,kind,name,handle,face_id) VALUES($1,'agent',$2,beeline_identity_handle($1,$3),$4) RETURNING handle`,
+  await database.query<{handle:string}>(
+    `INSERT INTO identities(id,kind,name,handle,face_id,workspace_handle_base) VALUES($1,'agent',$2,beeline_identity_handle($1,$3),$4,$3) RETURNING handle`,
     [agent.publicKey, name, agentHandleFromName(name), seeded.face],
-  )).rows[0]!.handle;
+  );
   await database.query(
     `INSERT INTO agents(agent_id,owner_id,soul,selected_model,machine_id,machine_name,harness)
      VALUES($1,$2,$3::jsonb,$4,$5,'Beeline cloud',$6)`,
@@ -377,6 +377,9 @@ async function createReservedFreeAgent(database:SqlDatabase,config:FreeAgentConf
   const owner = (await database.query<{ handle: string }>(
     `SELECT COALESCE(handle,id) handle FROM identities WHERE id=$1`, [input.creatorId],
   )).rows[0]!;
+  const handle = (await database.query<{handle:string}>(
+    `SELECT beeline_workspace_handle($1,$2) handle`, [agent.publicKey,input.workspaceId],
+  )).rows[0]!.handle;
   const hello = FREE_AGENT_HELLO.replace('<owner>', owner.handle).replace('<handle>', handle);
   const helloId = createHash('sha256').update(`free-agent-hello:${agent.publicKey}`).digest('hex');
   // An ordinary agent-authored message: the existing mention/push path notifies the owner.

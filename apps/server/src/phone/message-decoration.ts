@@ -44,7 +44,7 @@ import { phoneReadAppCatalog } from './workbench-catalog.js';
 
   /** Project historical Room openings without private objectives or lifecycle outcomes. */
   export async function phoneDecorateCornerOpenCards(ctx: PhoneContext, roomId: string, messages: RoomViewMessage[]): Promise<RoomViewMessage[]> {
-    messages = await phoneDecorateApprovalIdentities(ctx, messages);
+    messages = await phoneDecorateApprovalIdentities(ctx, messages,roomId);
     messages = await phoneDecorateApprovalSources(ctx, messages);
     messages = await phoneDecorateVoiceCallReasons(ctx, roomId, messages);
     const cornerIds = [...new Set(messages.flatMap((message) => {
@@ -83,7 +83,7 @@ import { phoneReadAppCatalog } from './workbench-catalog.js';
 
 
   /** Approval snapshots can outlive an avatar. Resolve all their identities in one read. */
-  export async function phoneDecorateApprovalIdentities(ctx: PhoneContext, messages: RoomViewMessage[]): Promise<RoomViewMessage[]> {
+  export async function phoneDecorateApprovalIdentities(ctx: PhoneContext, messages: RoomViewMessage[], roomId?: string): Promise<RoomViewMessage[]> {
     const ids = new Set<string>();
     for (const message of messages) {
       const card = message.grantRequest ?? message.squireApproval;
@@ -95,8 +95,8 @@ import { phoneReadAppCatalog } from './workbench-catalog.js';
     }
     if (!ids.size) return messages;
     const rows = await ctx.database.query<IdentityRow>(
-      `SELECT id,kind,name,handle,avatar,face_id FROM identities WHERE id=ANY($1::text[])`,
-      [[...ids]], 'phone-room-card-identities-0',
+      `SELECT id,kind,name,beeline_room_handle(id,$2) handle,avatar,face_id FROM identities WHERE id=ANY($1::text[])`,
+      [[...ids],roomId ?? null], 'phone-room-card-identities-0',
     );
     const current = new Map(rows.rows.map(row => [row.id, identity(row, ctx.publicOrigin)]));
     const resolve = (person: RoomViewIdentity): RoomViewIdentity =>
