@@ -18,7 +18,7 @@ export function validBanterLine(text: string, name: string, speaker: BanterAgent
 
 /** Every call uses the speaking agent's stored instructions and the accepted exchange so far. */
 export async function generateStarterBanter(input: {
-  name: string; time: string; beebee: BanterAgent; luna: BanterAgent;
+  language?: string; name: string; time: string; beebee: BanterAgent; luna: BanterAgent;
   complete: BanterCompletion; signal: AbortSignal; brief?: string;
 }): Promise<BanterLine[] | null> {
   const brief = (input.brief ?? await readFile(new URL('../assets/banter-brief.md', import.meta.url), 'utf8'))
@@ -32,7 +32,7 @@ export async function generateStarterBanter(input: {
     const exchange = lines.map(line => `${line.agentId === input.beebee.id ? input.beebee.name : input.luna.name}: ${line.text}`).join('\n');
     const text = (await input.complete(agent, [
       { role: 'system', content: agent.instructions },
-      { role: 'user', content: `${brief}\n\nExchange so far:\n${exchange || '(none)'}\nWrite line ${index + 1}.` },
+      { role: 'user', content: `${brief}\nWrite only in language ${input.language ?? 'en'}.\n\nExchange so far:\n${exchange || '(none)'}\nWrite line ${index + 1}.` },
     ], input.signal)).trim();
     if (!validBanterLine(text, input.name, agent, tagged)) return null;
     lines.push({ agentId: agent.id, text });

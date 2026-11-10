@@ -510,7 +510,7 @@ export class FreeAgentService {
 
   async createInWorkspace(
     database: SqlDatabase,
-    input: { workspaceId: string; creatorId: string; roomId: string; team?: boolean; timeZone?: string },
+    input: { workspaceId: string; creatorId: string; roomId: string; team?: boolean; timeZone?: string; locale?: string },
   ): Promise<string | undefined> {
     if (!input.team) return createFreeAgentInWorkspace(database,this.config,input);
     if (!await reserveStarterAgents(database,input.creatorId,2,this.config.maxPerOwner)) {
@@ -535,7 +535,7 @@ export class FreeAgentService {
     }, { ...input, name: 'Luna', silent: true, team: true });
     if (!beebee || !luna) throw new Error('starter team provisioning failed');
     for (const agent of [beebee, luna]) await setRoomEventSubscriptions(database, input.roomId, agent, FREE_AGENT_EVENT_SUBSCRIPTIONS);
-    await createStarterOnboardingRun(database, { roomId: input.roomId, userId: input.creatorId, beebeeId: beebee, lunaId: luna, timeZone: input.timeZone });
+    await createStarterOnboardingRun(database, { roomId: input.roomId, userId: input.creatorId, beebeeId: beebee, lunaId: luna, timeZone: input.timeZone, locale: input.locale });
     return beebee;
   }
 

@@ -1,0 +1,49 @@
+{
+  "reproduction": "WELCOME-LANGUAGE-1",
+  "target": "built PhoneService createWorkspace → starter playback → readRoom",
+  "standIn": "Isolated PGlite and local agent provisioning; no production signups or Fly machines.",
+  "results": [
+    {
+      "locale": "en-US",
+      "firstMessage": "",
+      "text": "Hi Charles, I'm Beebee and that's Luna. We're your free agents. We run on different AI models, so one of us does the work and the other checks it.\n\nWhat should we work on?",
+      "passed": true
+    },
+    {
+      "locale": "es-MX",
+      "firstMessage": "",
+      "text": "Hola Charles, soy Beebee y esta es Luna. Somos tus agentes gratuitos. Usamos distintos modelos de IA: una hace el trabajo y la otra lo revisa.\n\n¿En qué trabajamos?",
+      "passed": true
+    },
+    {
+      "locale": "en-US",
+      "firstMessage": "안녕하세요, 한국어로 이야기해 주세요",
+      "text": "안녕하세요 Charles, 저는 Beebee이고 이쪽은 Luna예요. 저희는 무료 에이전트예요. 서로 다른 AI 모델을 사용해서 한 명이 작업하면 다른 한 명이 검토해요.\n\n어떤 일을 함께 할까요?",
+      "passed": true
+    },
+    {
+      "locale": "invalid_locale",
+      "firstMessage": "OK",
+      "text": "Hi Charles, I'm Beebee and that's Luna. We're your free agents. We run on different AI models, so one of us does the work and the other checks it.\n\nWhat should we work on?",
+      "passed": true
+    },
+    {
+      "locale": "en-US",
+      "firstMessage": "Can you translate hola for me?",
+      "text": "Hi Charles, I'm Beebee and that's Luna. We're your free agents. We run on different AI models, so one of us does the work and the other checks it.\n\nWhat should we work on?",
+      "passed": true
+    },
+    {
+      "locale": "en-US",
+      "firstMessage": "Olá!",
+      "text": "Olá Charles, sou a Beebee e esta é a Luna. Somos suas agentes gratuitas. Usamos modelos de IA diferentes: uma faz o trabalho e a outra confere.\n\nEm que vamos trabalhar?",
+      "passed": true
+    },
+    {
+      "locale": "en-US",
+      "firstMessage": "¿Podemos hablar en español?",
+      "text": "Hola Charles, soy Beebee y esta es Luna. Somos tus agentes gratuitos. Usamos distintos modelos de IA: una hace el trabajo y la otra lo revisa.\n\n¿En qué trabajamos?",
+      "passed": true
+    }
+  ]
+}

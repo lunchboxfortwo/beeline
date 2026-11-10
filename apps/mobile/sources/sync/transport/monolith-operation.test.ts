@@ -33,7 +33,7 @@ describe('phone operations over the shared socket', () => {
   });
   it('adds the local time zone when creating a Workspace', async () => {
     await monolithPhoneOperation('createWorkspace', { name: 'Example' });
-    expect(request.mock.calls[0]?.[1]).toMatchObject({ name: 'Example', timeZone: Intl.DateTimeFormat().resolvedOptions().timeZone });
+    expect(request.mock.calls[0]?.[1]).toMatchObject({ name: 'Example', locale: Intl.DateTimeFormat().resolvedOptions().locale, timeZone: Intl.DateTimeFormat().resolvedOptions().timeZone });
   });
   it('preserves the special deadlines for external transactions', () => {
     expect(phoneOperationRequestOptions('actOnRepositoryCard', {})).toMatchObject({ timeoutMs: 60_000 });

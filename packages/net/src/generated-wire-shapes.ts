@@ -173,7 +173,7 @@ export const wireShapes: readonly WireShape[] = [
   shape({"kind":"object","properties":{"usedUsd":{"node":1,"optional":false},"limitUsd":{"node":1,"optional":false}}}),
   shape({"kind":"object","properties":{"active":{"node":32,"optional":false},"expiresAt":{"node":170,"optional":false}}}),
   shape({"kind":"union","choices":[152,18]}),
-  shape({"kind":"object","properties":{"name":{"node":1,"optional":false},"workspaceId":{"node":5,"optional":true},"timeZone":{"node":5,"optional":true},"creationSource":{"node":172,"optional":true}}}),
+  shape({"kind":"object","properties":{"name":{"node":1,"optional":false},"workspaceId":{"node":5,"optional":true},"timeZone":{"node":5,"optional":true},"locale":{"node":5,"optional":true},"creationSource":{"node":172,"optional":true}}}),
   shape({"kind":"union","choices":[6,173,174,175]}),
   shape({"kind":"literal","value":"manual_ui"}),
   shape({"kind":"literal","value":"onboarding"}),

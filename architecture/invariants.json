@@ -2687,7 +2687,8 @@
           "opened_at": "existing before the registry; weekly audit reviews",
           "playback_claimed_at": "existing before the registry; weekly audit reviews",
           "time_zone": "existing before the registry; weekly audit reviews",
-          "manual": "existing before the registry; weekly audit reviews"
+          "manual": "existing before the registry; weekly audit reviews",
+          "locale": "Device language captured by starter-onboarding.ts for deferred welcome playback; the initiating device is no longer available at playback."
         }
       },
       "store_download_days": {

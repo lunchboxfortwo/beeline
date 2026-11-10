@@ -287,6 +287,27 @@ describe('free starter agents', () => {
     expect((await db.query('SELECT 1 FROM agent_commands')).rowCount).toBe(1);
   });
 
+  it.each([
+    ['es-MX', undefined, 'Hola Charles'],
+    ['ko-KR', undefined, '안녕하세요 Charles'],
+    ['en-US', '안녕하세요, 한국어로 이야기해 주세요', '안녕하세요 Charles'],
+    ['en-US', 'Hola, ¿podemos hablar en español?', 'Hola Charles'],
+    ['en-US', 'Can you translate hola for me?', 'Hi Charles'],
+    ['en-US', 'Olá!', 'Olá Charles'],
+    ['en-US', '¿Podemos hablar en español?', 'Hola Charles'],
+    ['unknown', 'OK', 'Hi Charles'],
+    ['not_a_locale', undefined, 'Hi Charles'],
+    ['es-MX', 'hello bonjour', 'Hi Charles'],
+    ['en-US', undefined, 'Hi Charles'],
+  ])('welcomes in the person’s language (%s, %s)', async (locale, firstMessage, greeting) => {
+    const workspace = await phone.execute('createWorkspace', { name: 'Language welcome', locale }, OWNER);
+    if (firstMessage) await phone.execute('sendRoomMessage', { roomId: workspace.roomId!, text: firstMessage }, OWNER);
+    await finishWelcome(workspace.roomId!, OWNER);
+    const room = (await phone.readRoom(workspace.roomId!, OWNER))!;
+    const welcome = room.messages.find(message => message.text.startsWith(greeting));
+    expect(welcome).toBeDefined();
+  });
+
   it('keeps tic-tac-toe available on request without a followup menu', async () => {
     const workspace = await phone.execute('createWorkspace', { name: 'Game' }, OWNER);
     await finishWelcome(workspace.roomId!, OWNER);

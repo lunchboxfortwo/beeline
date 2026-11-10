@@ -1,3 +1,4 @@
+import { readStarterLanguage } from './starter-language.js';
 import { randomUUID, randomBytes } from 'node:crypto';
 import type { SqlDatabase } from './database.js';
 import type { FreeAgentModelProxyOptions } from './free-agent-model-proxy.js';
@@ -20,14 +21,15 @@ export const STARTER_ONBOARDING_SCHEMA = `CREATE TABLE IF NOT EXISTS starter_onb
   time_zone text NOT NULL DEFAULT 'UTC',
   manual boolean NOT NULL DEFAULT false
 );
+ALTER TABLE starter_onboarding_runs ADD COLUMN IF NOT EXISTS locale text;
 CREATE INDEX IF NOT EXISTS starter_onboarding_room_pending ON starter_onboarding_runs(room_id) WHERE status<>'complete';`;
 
 export async function createStarterOnboardingRun(database: SqlDatabase, input: {
-  roomId: string; userId: string; beebeeId: string; lunaId: string; manual?: boolean; timeZone?: string;
+  roomId: string; userId: string; beebeeId: string; lunaId: string; manual?: boolean; timeZone?: string; locale?: string;
 }) {
   const id = randomUUID();
-  await database.query(`INSERT INTO starter_onboarding_runs(id,room_id,user_id,beebee_id,luna_id,manual,time_zone)
-    VALUES($1,$2,$3,$4,$5,$6,$7)`, [id, input.roomId, input.userId, input.beebeeId, input.lunaId, input.manual ?? false, input.timeZone ?? 'UTC']);
+  await database.query(`INSERT INTO starter_onboarding_runs(id,room_id,user_id,beebee_id,luna_id,manual,time_zone,locale)
+    VALUES($1,$2,$3,$4,$5,$6,$7,$8)`, [id, input.roomId, input.userId, input.beebeeId, input.lunaId, input.manual ?? false, input.timeZone ?? 'UTC', input.locale ?? null]);
   return id;
 }
 
@@ -40,9 +42,9 @@ export class StarterOnboardingService {
   constructor(private database: SqlDatabase, private model?: FreeAgentModelProxyOptions) {}
 
   async prepare(roomId: string): Promise<void> {
-    const run = (await this.database.query<{ id: string; name: string; time_zone: string }>(
+    const run = (await this.database.query<{ id: string; name: string; time_zone: string; user_id: string }>(
       `UPDATE starter_onboarding_runs SET status='generating' WHERE room_id=$1 AND status='pending'
-       RETURNING id,time_zone,(SELECT name FROM identities WHERE id=user_id) name`, [roomId])).rows[0];
+       RETURNING id,time_zone,user_id,(SELECT name FROM identities WHERE id=user_id) name`, [roomId])).rows[0];
     if (!run) return;
     const agents = (await this.database.query<BanterAgent & { starter_role: string }>(
       `SELECT i.id,i.name,beeline_workspace_handle(i.id,f.workspace_id) handle,a.soul->>'instructions' instructions,f.starter_role
@@ -56,7 +58,7 @@ export class StarterOnboardingService {
     const promise = beebee && luna && model ? generateStarterBanter({
       name: run.name.trim().split(/\s+/u)[0] || 'there',
       time: new Intl.DateTimeFormat('en', { weekday: 'long', hour: 'numeric', minute: 'numeric', timeZone: run.time_zone, timeZoneName: 'short' }).format(new Date()),
-      beebee, luna, signal: abort.signal,
+      beebee, luna, signal: abort.signal, language: await readStarterLanguage(this.database, roomId, run.user_id),
       complete: (agent, messages, signal) => completeStarterBanter(model, run.id, agent.id, messages, signal),
     }).catch(() => null) : Promise.resolve(null);
     this.generations.set(run.id, { promise, abort });
@@ -78,16 +80,16 @@ export class StarterOnboardingService {
   }
 
   async queueRerun(database: SqlDatabase, roomId: string, userId: string, agentId: string) {
-    const team = (await database.query<{ beebee_id: string; luna_id: string; time_zone: string }>(
+    const team = (await database.query<{ beebee_id: string; luna_id: string; time_zone: string; locale: string | null }>(
       `SELECT b.agent_id beebee_id,l.agent_id luna_id,COALESCE((SELECT time_zone FROM starter_onboarding_runs
-         WHERE user_id=$3 ORDER BY created_at DESC LIMIT 1),'UTC') time_zone FROM free_agents b JOIN free_agents l
+         WHERE user_id=$3 ORDER BY created_at DESC LIMIT 1),'UTC') time_zone,(SELECT locale FROM starter_onboarding_runs WHERE user_id=$3 ORDER BY created_at DESC LIMIT 1) locale FROM free_agents b JOIN free_agents l
        ON l.owner_id=b.owner_id AND l.workspace_id=b.workspace_id AND l.starter_role='luna'
        JOIN memberships bm ON bm.identity_id=b.agent_id AND bm.room_id=$1 AND bm.removed_at IS NULL
        JOIN memberships lm ON lm.identity_id=l.agent_id AND lm.room_id=$1 AND lm.removed_at IS NULL
        WHERE b.agent_id=$2 AND b.starter_role='beebee' AND b.removed_at IS NULL AND l.removed_at IS NULL`, [roomId, agentId, userId])).rows[0];
     if (!team) throw new Error('Onboarding requires Beebee and Luna in this Room');
     await database.query(`UPDATE starter_onboarding_runs SET status='complete' WHERE room_id=$1 AND status<>'complete'`, [roomId]);
-    return createStarterOnboardingRun(database, { roomId, userId, beebeeId: team.beebee_id, lunaId: team.luna_id, timeZone: team.time_zone, manual: true });
+    return createStarterOnboardingRun(database, { roomId, userId, beebeeId: team.beebee_id, lunaId: team.luna_id, timeZone: team.time_zone, locale: team.locale ?? undefined, manual: true });
   }
 
   async enter(roomId: string, userId: string) {

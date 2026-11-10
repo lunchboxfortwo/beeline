@@ -5,9 +5,10 @@ const luna = { id: 'l', name: 'Luna', handle: 'luna42', instructions: 'real luna
 const good = ['@luna42, Alex arrived. I hope my coffee can keep up.', '@beebee42, I hope Alex brings code from a repo to sharpen.', 'Alex is reading now. I should look busy.'];
 afterEach(() => vi.useRealTimers());
 describe('starter banter', () => {
-  it('uses each real instruction and carries the accepted conversation forward', async () => {
+  it.each(['en', 'es', 'ko'])('uses each real instruction and the person’s language (%s)', async language => {
     const complete = vi.fn().mockResolvedValueOnce(good[0]).mockResolvedValueOnce(good[1]).mockResolvedValueOnce(good[2]);
-    const lines = await generateStarterBanter({ name: 'Alex', time: 'Monday 9 AM', beebee, luna, complete, signal: new AbortController().signal, brief: '{name} {time} @luna @beebee' });
+    const lines = await generateStarterBanter({ language, name: 'Alex', time: 'Monday 9 AM', beebee, luna, complete, signal: new AbortController().signal, brief: '{name} {time} @luna @beebee' });
+    expect(complete.mock.calls[0]![1][1].content).toContain(`Write only in language ${language}.`);
     expect(lines?.map(line => line.text)).toEqual(good);
     expect(complete.mock.calls.map(call => call[0].id)).toEqual(['b', 'l', 'b']);
     expect(complete.mock.calls[1]![1][0].content).toBe(luna.instructions);
