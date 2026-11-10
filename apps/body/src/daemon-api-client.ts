@@ -305,6 +305,11 @@ export class DaemonApiClient {
     return this.#channel.onOpen(listener);
   }
 
+  /** End an open connection so intake resumes through authenticated live open. */
+  reconnectLive(): void {
+    this.#channel.reconnect();
+  }
+
   /** Add one Room to this agent's shared live socket. */
   liveSubscribe(
     roomId: string,
@@ -615,6 +620,10 @@ export class DaemonApiClient {
         connectionPresence: capabilities?.connectionPresence === true,
       };
       this.completeLiveSubscription(event.roomId);
+      return;
+    }
+    if (event.type === 'commands' && typeof event.error === 'string') {
+      if (this.currentLiveSubscription(event)) this.reconnectLive();
       return;
     }
     if (

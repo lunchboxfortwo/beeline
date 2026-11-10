@@ -19,6 +19,7 @@ export function retryAfterMs(value: string | null | undefined): number | undefin
  * successor; TCP keepalive detects dead links without application timers. */
 export class LiveLink {
   #socket?: WebSocket;
+  #endAttempt?: () => void;
   #wanted = false;
   #updateAnnounced = false;
   #reconnects = 0;
@@ -39,10 +40,15 @@ export class LiveLink {
     this.#wanted = true;
     this.#connect();
   }
+  /** Actual close still owns recovery; concurrent failures share that close. */
+  reconnect(): void {
+    if (this.#socket?.readyState === WebSocket.OPEN) this.#endAttempt?.();
+  }
   stop(forUpdate = false): void {
     this.#wanted = false;
     const socket = this.#socket;
     this.#socket = undefined;
+    this.#endAttempt = undefined;
     this.#state = 'disconnected';
     socket?.close(forUpdate ? HELPER_UPDATE_CLOSE_CODE : undefined, forUpdate ? HELPER_UPDATE_CLOSE_REASON : undefined);
   }
@@ -61,6 +67,7 @@ export class LiveLink {
     const socket=(this.options.factory??((url,protocols,options)=>new WebSocket(url,protocols,options)))(this.options.url(),this.options.protocols(),{});
     this.#socket = socket;
     const endAttempt = () => socket.terminate();
+    this.#endAttempt = endAttempt;
     const disposeResume = this.options.subscribeResume?.(endAttempt);
     socket.on?.('upgrade', (response: IncomingMessage) => {
       response.socket?.setKeepAlive?.(true, this.options.timing?.keepAliveDelayMs ?? LIVE_LINK_TIMING.keepAliveDelayMs);
@@ -94,6 +101,7 @@ export class LiveLink {
       disposeResume?.();
       if (this.#socket !== socket) return;
       this.#socket = undefined;
+      this.#endAttempt = undefined;
       this.#state = 'disconnected';
       this.options.onClose();
       if (this.#wanted) {

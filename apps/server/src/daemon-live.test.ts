@@ -367,9 +367,10 @@ describe('held presence for a live connection', () => {
       failNextPush = true;
       change(AGENT_A);
       await vi.waitFor(() => expect(error).toHaveBeenCalledWith('[live] daemon command push failed', 'transient read failure'));
+      await client.next(frame => frame.type === 'commands' && frame.error === 'transient read failure');
       const reads = () => calls.mock.calls.filter(([name, , agent]) => name === 'getAgentCommands' && agent === AGENT_A).length;
       const failedReads = reads();
-      const delivered = (frame: Frame, id: string) => frame.type === 'commands' &&
+      const delivered = (frame: Frame, id: string) => frame.type === 'commands' && Array.isArray(frame.commands) &&
         (frame.commands as { id: string }[]).some(command => command.id === id);
       change(AGENT_B);
       await client.next(frame => delivered(frame, sibling.id));
@@ -693,6 +694,62 @@ it('completes a large Claude final reply before claiming the wake queued during 
     abort.abort();api.closeLive();await running;await rm(root,{recursive:true,force:true});
   }
 });
+
+it.each(['after turn completion', 'on reconnect'])(
+  'recovers an idle pending tag when the command snapshot fails %s without another Room event', async boundary => {
+    const {mkdtemp,rm} = await import('node:fs/promises');
+    const {tmpdir} = await import('node:os');
+    const {join} = await import('node:path');
+    const {DaemonApiClient} = await import('../../body/src/daemon-api-client.js');
+    const {CommandExecutionContext,runServerCommandIntake} = await import('../../body/src/server-command-intake.js');
+    const command = (id:string) => ({id,roomId:'room',agentId:AGENT_A,turnRequestId:id,
+      sourceMessageId:id,action:'input' as const,reason:'human_tag' as const,rootCommandId:id,
+      rootSourceMessageId:id,agentDepth:0,source:{id,authorId:'human',body:id,createdAt:1,attachments:[]}});
+    const queue = [command('original')], completed:string[] = [];
+    const live = new LiveHub(), daemon = daemonStub();
+    let failNextPush = false, releases = 0, subscribed = false;
+    vi.mocked(daemon.execute).mockImplementation(async (name:string) => {
+      if (name === 'getAgentCommands') {
+        if (failNextPush) { failNextPush = false; throw new Error('canceling statement due to lock timeout'); }
+        return {commandProtocol:1,commands:[...queue]};
+      }
+      if (name === 'claimAgentTurn') return {commands:[queue.shift()!]};
+      if (name === 'releaseAgentTurn') { releases++; return {commands:[...queue]}; }
+      throw new Error(`Unexpected operation ${name}`);
+    });
+    const error = vi.spyOn(console,'error').mockImplementation(() => undefined);
+    const {port} = await start({daemon,live});
+    const http = vi.fn<typeof fetch>();
+    const api = new DaemonApiClient(`http://127.0.0.1:${port}`,'bdt_a',AGENT_A,http);
+    const root = await mkdtemp(join(tmpdir(),'beeline-idle-push-'));
+    const context = new CommandExecutionContext(root), abort = new AbortController();
+    const running = runServerCommandIntake({api,roomId:'room',agentId:AGENT_A,context,
+      signal:abort.signal,stop:()=>{},onSubscriptionState:connected=>{subscribed=connected;},
+      run:async item=>{completed.push(item.id);}});
+    try {
+      await vi.waitFor(() => {
+        expect(completed).toEqual(['original']);
+        expect(releases).toBe(1);
+        expect(context.current).toBeUndefined();
+        expect(subscribed).toBe(true);
+      });
+      queue.push(command('idle-tag'));
+      failNextPush = true;
+      if (boundary === 'on reconnect') api.reconnectLive();
+      else live.publish({type:'invalidate',roomId:'room',reason:'postgres:agent_commands',targetAgentId:AGENT_A});
+      await vi.waitFor(() => expect(error).toHaveBeenCalledWith(
+        '[live] daemon command push failed','canceling statement due to lock timeout'));
+      // The tag has committed. No second tag, Room invalidation or timer recovers it.
+      await vi.waitFor(() => expect(completed).toEqual(['original','idle-tag']),{timeout:3000});
+      expect(api.metrics().reconnects).toBe(boundary === 'on reconnect' ? 2 : 1);
+      expect(vi.mocked(daemon.execute).mock.calls.filter(([name]) => name === 'claimAgentTurn')).toHaveLength(2);
+      expect(http).not.toHaveBeenCalled();
+    } finally {
+      abort.abort();api.closeLive();await running;
+      await rm(root,{recursive:true,force:true});error.mockRestore();
+    }
+  },
+);
 
 it('answers a request admission failure instead of leaving the helper waiting', async () => {
   const database = new PgliteDatabase();

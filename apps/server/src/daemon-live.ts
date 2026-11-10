@@ -606,7 +606,11 @@ export class DaemonAgentSession {
           '[live] daemon command push failed',
           error instanceof Error ? error.message : String(error),
         );
-
+        if (transport.isOpen()) transport.send({
+          type: 'commands', roomId, ...correlation,
+          error: error instanceof Error ? error.message : 'daemon_operation_refused',
+          status: this.deps.operationErrorStatus?.(error) ?? 503,
+        });
       } finally {
         commandsPushing = false;
       }

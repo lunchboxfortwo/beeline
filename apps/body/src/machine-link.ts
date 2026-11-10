@@ -86,6 +86,7 @@ export class AgentChannel {
     if (!this.send(pending.frame)) pending.sent = false;
   }
   onOpen(listener: () => void): () => void { this.#openListeners.add(listener); return () => this.#openListeners.delete(listener); }
+  reconnect(): void { this.machine.link.reconnect(); }
   start(): void {
     if (this.#wanted) return;
     this.#wanted = true;
