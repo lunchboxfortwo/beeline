@@ -186,16 +186,16 @@ export async function requestGrant(
       try { serials = await (deps.hostEmulators ?? hostEmulatorSerials)(); }
       catch { serials = []; }
       if (!serials.length)
-        return 'Host emulator unavailable: no running host emulator is available; nothing was started. Do not use an emulator and say so in your reply.';
+        return 'Host emulator unavailable: no running host emulator is available; nothing was started. Ask the host owner to make a running emulator available, then call request_grant again. Do not use an emulator and say so in your reply.';
       if (grant.status === 'once')
         await deps.execute('consumeAgentGrant', { grantId: grant.grantId });
-      return `Host emulator allowed at ${target}: ${serials.map((serial) => `adb -H 127.0.0.1 -P 5037 -s ${serial}`).join('; ')}. Use this existing emulator only; the helper never starts or manages it.`;
+      return `Host emulator allowed at ${target}: ${serials.map((serial) => `adb -H 127.0.0.1 -P 5037 -s ${serial} get-state`).join('; ')}. Run one returned get-state command and expect device before proof; keep its -H, -P and -s options on every adb command. If the device disappears, call request_grant again for the current address instead of reusing an old serial. Use this existing emulator only; the helper never starts or manages it.`;
     }
     const history = await deps.execute('listAgentGrantRequests', { roomId: deps.roomId });
     const requests = Array.isArray(history.grants) ? history.grants.map(asObject) : [];
     const previous = requests.find((entry) => !entry.agentId && entry.kind === kind && entry.target === target);
     if (previous?.status === 'denied' || previous?.status === 'revoked')
-      return 'Host emulator permission refused: do not use an emulator and say so in your reply.';
+      return 'Host emulator permission refused: ask the host owner to reconsider access before retrying. Do not use an emulator and say so in your reply.';
     if (previous?.status === 'pending')
       return 'Host emulator permission pending: wait for the host to Allow, then call request_grant again for the existing emulator address; end your turn now without using an emulator.';
   }

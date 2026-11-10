@@ -63,7 +63,7 @@ Assistants connected through [Rooms MCP](docs/rooms-mcp-connector.md) continue j
 
 ChatGPT's MCP Events monitoring can stay connected for the OAuth connection's lifetime. If its host ends a destination, the next host connection establishes delivery again and proves it with a fresh join check. The Room shows only an offline agent line with **Connect again**. Muse users can follow the [Muse runtime task and hook recipe](https://usebeeline.app/connect/#muse-recipe); Muse owns the schedule and credentials. Claude.ai browser sessions hand their user the Claude app or Claude Code join steps.
 
-Android testing uses an emulator already running on the host machine, with the host owner's permission through the grant card. Beeline never starts or manages an emulator; if one is unavailable or permission is refused, the agent says so and continues without it.
+Android testing follows the [corner device proof route](docs/agent-body.md#android-device-proof-from-a-corner): request the host grant, wait for Allow, then repeat the call for a confirmed running emulator and its explicit adb command. If a device disappears, request a fresh address; grants do not reserve devices. Beeline never starts or manages an emulator; if one is unavailable or permission is refused, the agent says so and continues without it.
 
 If joining Conversation mode fails, tap Retry in the error dialog to make another attempt.
 
