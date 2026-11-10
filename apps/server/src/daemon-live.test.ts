@@ -1,4 +1,5 @@
 import { ROUTER_COMMAND_SCHEMA } from './router-command-ledger.js';
+import { createAgentCommand } from './agent-command.js';
 import type { AddressInfo } from 'node:net';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import WebSocket from 'ws';
@@ -322,6 +323,73 @@ describe('held presence for a live connection', () => {
       )
     ).rows[0]?.body;
   }
+
+  it.each(['room event', 'resync'])('delivers a committed tag after one failed push on the next %s', async recovery => {
+    const database = await seeded();
+    requestDatabases.push(database);
+    await database.query(`INSERT INTO identities(id,kind,name) VALUES($1,'agent','Sibling')`, [AGENT_B]);
+    await database.query(`INSERT INTO agents(agent_id,owner_id) VALUES($1,$2)`, [AGENT_B, HUMAN]);
+    await database.query(`INSERT INTO memberships(workspace_id,room_id,identity_id,role)
+      VALUES($1,$2,$3,'member'),($1,NULL,$3,'member')`, [WORKSPACE, ROOM, AGENT_B]);
+    const live = new LiveHub(), daemon = new DaemonService(database, live);
+    const presence = new ConnectionPresence(database, live);
+    const execute = daemon.execute.bind(daemon);
+    let failNextPush = false;
+    const calls = vi.spyOn(daemon, 'execute').mockImplementation(async (...args) => {
+      if (args[0] === 'getAgentCommands' && args[2] === AGENT_A && failNextPush) {
+        failNextPush = false;
+        throw new Error('transient read failure');
+      }
+      return execute(...args);
+    });
+    const error = vi.spyOn(console, 'error').mockImplementation(() => undefined);
+    try {
+      const { port } = await start({ database, live, daemon, connectionPresence: presence });
+      const client = await machine(port);
+      for (const [agentId, token] of [[AGENT_A, 'bdt_a'], [AGENT_B, 'bdt_b']]) {
+        await register(client, agentId, token);
+        client.send({ type: 'subscribe', agentId, roomId: ROOM, inbox: false });
+        await client.next(frame => frame.type === 'subscribed' && frame.agentId === agentId);
+      }
+      const command = (agentId: string) => createAgentCommand(database, {
+        roomId: ROOM, agentId, sourceMessageId: null, reason: 'human_tag',
+      });
+      const claimed = (await command(AGENT_A))!;
+      const owner = (await database.query<{ connectionId: string; epoch: number }>(
+        `SELECT connection_id "connectionId",epoch::integer epoch FROM agent_connections WHERE agent_id=$1`, [AGENT_A],
+      )).rows[0]!;
+      await daemon.execute('claimAgentCommand', { roomId: ROOM, commandId: claimed.id, generationId: 'first' }, AGENT_A, owner);
+      const missed = (await command(AGENT_A))!, sibling = (await command(AGENT_B))!;
+      // Both inserts have committed. No more commands are inserted to recover delivery.
+      const change = (agentId: string) => live.publish({
+        type: 'invalidate', roomId: ROOM, reason: 'postgres:agent_commands', targetAgentId: agentId,
+      });
+      failNextPush = true;
+      change(AGENT_A);
+      await vi.waitFor(() => expect(error).toHaveBeenCalledWith('[live] daemon command push failed', 'transient read failure'));
+      const reads = () => calls.mock.calls.filter(([name, , agent]) => name === 'getAgentCommands' && agent === AGENT_A).length;
+      const failedReads = reads();
+      const delivered = (frame: Frame, id: string) => frame.type === 'commands' &&
+        (frame.commands as { id: string }[]).some(command => command.id === id);
+      change(AGENT_B);
+      await client.next(frame => delivered(frame, sibling.id));
+      expect(reads()).toBe(failedReads);
+      expect(client.frames.some(frame => delivered(frame, missed.id))).toBe(false);
+      if (recovery === 'resync') live.resync();
+      else live.publish({ type: 'invalidate', roomId: ROOM, reason: 'postgres:messages', messageId: 'source' });
+      const recovered = await client.next(frame => delivered(frame, missed.id));
+      expect(recovered.commands).toEqual([expect.objectContaining({ id: missed.id })]);
+      expect(client.frames.some(frame => delivered(frame, claimed.id))).toBe(false);
+      expect(client.frames.filter(frame => delivered(frame, sibling.id))).toHaveLength(1);
+      expect(client.frames.some(frame => frame.type === 'unregistered')).toBe(false);
+      expect(client.socket.readyState).toBe(WebSocket.OPEN);
+      expect((await database.query('SELECT state FROM agent_commands WHERE id=$1', [missed.id])).rows)
+        .toEqual([{ state: 'pending' }]);
+    } finally {
+      error.mockRestore();
+      await presence.stop();
+    }
+  });
 
   it.each(['update', 'crash', 'ordinary-close'] as const)('releases a %s socket silently and retains offline presence', async (kind) => {
     const database = await seeded();

@@ -600,6 +600,8 @@ export class DaemonAgentSession {
         }
       } catch (error) {
         if (!active || this.#closed) return;
+        // This subscription still owes a command snapshot at its next live boundary.
+        commandsRequested = true;
         console.error(
           '[live] daemon command push failed',
           error instanceof Error ? error.message : String(error),
@@ -641,6 +643,9 @@ export class DaemonAgentSession {
             void this.#projection(() => pushCommands(trigger));
           return;
         }
+        if (commandsRequested && !commandsPushing &&
+            (!event.targetAgentId || event.targetAgentId === agentId))
+          void this.#projection(() => pushCommands(trigger));
         if (event.reason === 'postgres:rooms' && event.repositoryChanged) {
           if (transport.isOpen())
             transport.send({ type: 'rooms-changed', roomId, repositoryChanged: true });
