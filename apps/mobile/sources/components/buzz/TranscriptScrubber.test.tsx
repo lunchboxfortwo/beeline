@@ -14,6 +14,8 @@ vi.mock('react-native', async () => {
   return {
     // The handlers are the config, so a test can drive the gesture directly.
     PanResponder: { create: (config: any) => ({ panHandlers: config }) },
+    Platform: { OS: 'android' },
+    FlatList: host('FlatList'),
     Text: host('Text'),
     View: host('View'),
   };
@@ -31,15 +33,26 @@ vi.mock('expo-haptics', () => ({
   impactAsync: haptics.impact,
   ImpactFeedbackStyle: { Light: 'light' },
 }));
+vi.mock('@/app/(app)/beeline/chat/chat-surface-styles', () => ({ styles: {} }));
+vi.mock('@/buzz/activity-timeline', () => ({ buildTurnActivity: vi.fn() }));
+vi.mock('@/components/buzz/ConversationComposer', () => ({ COMPOSER_MAX_INPUT_HEIGHT: 100, COMPOSER_SINGLE_LINE_INPUT_HEIGHT: 40 }));
+vi.mock('@/buzz/room-send-list', () => ({ RoomSendList: 'RoomSendList' }));
+vi.mock('@/components/buzz/StarPromptCard', () => ({ StarPromptCard: () => null }));
+vi.mock('@/components/buzz/RoomUnreadControls', () => ({ RoomUnreadControls: () => null }));
 
 import type { RoomHistoryView, RoomViewMessage } from '@beeline/buzz-client';
 import { useRoomMessageStore } from '@/buzz/room-message-store';
 import {
   createTranscriptScrollController,
+  phoneTranscriptList,
   type TranscriptScrollList,
 } from '@/buzz/transcript-scroll-controller';
 import { createTranscriptScrubberStore, SCRUBBER_LINGER_MS } from '@/buzz/use-transcript-scrubber';
 import { TranscriptScrubber } from './TranscriptScrubber';
+import { ChatSurfaceTranscript } from '@/app/(app)/beeline/chat/ChatSurfaceTranscript';
+import { useChatTranscriptLanding } from '@/app/(app)/beeline/chat/useChatTranscriptLanding';
+import { createLiveDraftDrainStore } from '@/buzz/live-draft-drain';
+import type { ChatDisplayMessage } from '@/buzz/room-view-presentation';
 
 const originalTz = process.env.TZ;
 beforeAll(() => {
@@ -108,6 +121,24 @@ describe('TranscriptScrubber', () => {
     expect(grab().props.style[1].top).toBe(-14);
     act(() => vi.advanceTimersByTime(SCRUBBER_LINGER_MS));
     expect(renderer.root.findAllByProps({ testID: 'transcript-scrubber-grab' })).toHaveLength(0);
+  });
+
+  it('scrubber-idle-1: holds the rendered thumb still through idle row measurements', () => {
+    const { renderer, store, grab } = render(5_600, 2_500);
+    const top = grab().props.style[1].top;
+    for (const height of [8_600, 5_600, 9_600, 5_600]) {
+      act(() => {
+        store.observeContentSize(height);
+        store.observeScroll(scroll(2_500.25, height));
+      });
+      expect(grab().props.style[1].top).toBe(top);
+      act(() => vi.advanceTimersByTime(SCRUBBER_LINGER_MS / 4));
+    }
+    expect(renderer.root.findAllByProps({ testID: 'transcript-scrubber-grab' })).toHaveLength(0);
+    act(() => store.observeScroll(scroll(2_500, 8_600)));
+    expect(renderer.root.findAllByProps({ testID: 'transcript-scrubber-grab' })).toHaveLength(0);
+    act(() => renderer.unmount());
+    store.dispose();
   });
 
   it('passes touches off the bar to the list', () => {
@@ -182,9 +213,12 @@ describe('TranscriptScrubber', () => {
         contentOffset: { y: 2_500 },
         contentSize: { height: 6_000 },
         layoutMeasurement: { height: 300 },
-      }),
+      }, false),
     );
     expect(listToOffset).toHaveBeenCalledTimes(1);
+    const heldTop = grab().props.style[1].top;
+    act(() => grab().props.onPanResponderRelease());
+    expect(grab().props.style[1].top).toBe(heldTop);
   });
 
   it('lands where the finger lifts after a fling, once momentum ends', () => {
@@ -232,6 +266,108 @@ describe('TranscriptScrubber', () => {
  */
 describe('TranscriptScrubber on the Room transcript', () => {
   const PAGE = 3_000;
+
+  it('keeps the thumb still above tail and follows the tail while one draft slowly grows', () => {
+    // One stable draft, twelve small appends over three seconds, no new posts.
+    // Drive the real draft-commit subscription and Room list callbacks; only
+    // native measurement/anchor reports and the platform list are stand-ins.
+    for (const initialOffset of [2_500, 0]) {
+      const positions = createTranscriptScrubberStore();
+      const drafts = createLiveDraftDrainStore({ clock: {
+        requestFrame: (callback) => Number(setTimeout(callback, 16)),
+        cancelFrame: (id) => clearTimeout(id),
+      } });
+      const draft: ChatDisplayMessage = { id: 'live-turn:agent:turn', text: 'Starting', timestamp: 1, isUser: false };
+      const rows = [draft, ...Array.from({ length: 20 }, (_, n) => ({
+        id: `history-${n}`, text: `Post ${n}`, timestamp: 1, isUser: true,
+      }))];
+      const rowIds = rows.map((row) => row.id);
+      const native = { offset: initialOffset, height: 5_600 };
+      let renderer!: ReactTestRenderer;
+      const list = () => renderer.root.findByType('RoomSendList');
+      const reportScroll = () => list().props.onScroll({ nativeEvent: scroll(native.offset, native.height) });
+      const scrollToOffset = vi.fn(({ offset }: { offset: number }) => {
+        native.offset = offset;
+        reportScroll();
+      });
+      const adapter = phoneTranscriptList(() => ({ scrollToOffset, scrollToIndex: vi.fn() }), () => true);
+      const controller = createTranscriptScrollController({
+        list: () => adapter, rows: () => rows, rowIndex: () => -1,
+        schedule: (callback) => { setTimeout(callback, 16); },
+      });
+      const paint = ({ text }: { text: string }) => { draft.text = text; };
+      const detach = drafts.attach(draft.id, { paint, replace: paint });
+      const noop = () => {};
+      function Room() {
+        const [, observePhoneTailOffset] = useChatTranscriptLanding([
+          controller, noop, false, noop, rows, null, true, null, '', 'room',
+          noop, drafts, { call: null }, [...rows].reverse(), undefined, undefined, undefined,
+          { current: null }, { current: new Map() }, () => true, null, '', null,
+          noop, false, 'idle', { current: null }, noop,
+        ] as unknown as Parameters<typeof useChatTranscriptLanding>[0]);
+        const props = {
+          desktopTranscript: false, transcriptMessages: rows, scrollController: controller,
+          phoneScrollList: adapter, starPrompt: { prompt: null }, transcriptPositions: positions,
+          phoneScrollOffsetRef: { current: native.offset }, observePhoneTailOffset,
+          allowOlderHistoryRef: { current: false }, detachedFillMeasuredRef: { current: false },
+          phoneUnderfill: { observeContentHeight: noop }, holdPhoneLanding: noop,
+          loadOlderTranscriptMessages: noop,
+          renderItem: ({ item }: { item: ChatDisplayMessage }) => <React.Fragment>{item.text}</React.Fragment>,
+        } as unknown as React.ComponentProps<typeof ChatSurfaceTranscript>;
+        return <ChatSurfaceTranscript {...props} />;
+      }
+      try {
+        act(() => { renderer = create(<Room />); });
+        act(() => renderer.root.findByProps({ testID: 'transcript-scrubber' })
+          .props.onLayout({ nativeEvent: { layout: { height: RAIL } } }));
+        // Establish the starting thumb with a real, completed reader gesture.
+        act(() => {
+          list().props.onScrollBeginDrag();
+          reportScroll();
+          list().props.onScrollEndDrag({ nativeEvent: { contentOffset: { y: native.offset }, velocity: { y: 0 } } });
+        });
+        const thumbTop = renderer.root.findByProps({ testID: 'transcript-scrubber-grab' }).props.style[1].top;
+        const atTail = initialOffset === 0;
+        for (let step = 1; step <= 12; step++) {
+          act(() => vi.advanceTimersByTime(234));
+          act(() => {
+            drafts.publish(draft.id, `Starting${' more'.repeat(step)}`);
+            vi.advanceTimersByTime(16);
+          });
+          act(() => renderer.update(<Room />));
+          expect(list().props.data.map((row: ChatDisplayMessage) => row.id)).toEqual(rowIds);
+          expect(draft.text).toBe(`Starting${' more'.repeat(step)}`);
+          act(() => {
+            // Inverted native anchoring moves the old reading row as the
+            // newest draft gains 12pt. Layout must restore a pinned tail.
+            native.height += 12;
+            native.offset += 12;
+            reportScroll();
+            list().props.onContentSizeChange(400, native.height);
+          });
+          expect.soft(native.offset, `step ${step}, tail=${atTail}`).toBe(atTail ? 0 : initialOffset + step * 12);
+          expect(controller.isPinnedToTail()).toBe(atTail);
+          const thumbs = renderer.root.findAllByProps({ testID: 'transcript-scrubber-grab' })
+            .filter((node: { type: unknown }) => typeof node.type === 'string');
+          if (step * 250 < SCRUBBER_LINGER_MS) {
+            expect(thumbs).toHaveLength(1);
+            expect.soft(thumbs[0].props.style[1].top, `step ${step}, tail=${atTail}`).toBe(thumbTop);
+          } else {
+            expect.soft(thumbs, `idle thumb after ${step * 250}ms, tail=${atTail}`).toHaveLength(0);
+          }
+        }
+        expect(drafts.getMetrics(draft.id)).toMatchObject({ arrivals: 12, paints: 12 });
+        expect(scrollToOffset.mock.calls).toHaveLength(atTail ? 24 : 0);
+        expect(positions.getSnapshot().metrics?.contentHeight).toBe(5_744);
+      } finally {
+        act(() => renderer?.unmount());
+        detach();
+        drafts.reset();
+        positions.dispose();
+        vi.clearAllTimers();
+      }
+    }
+  });
 
   function mountRoom() {
     const store = createTranscriptScrubberStore();
@@ -311,7 +447,8 @@ describe('TranscriptScrubber on the Room transcript', () => {
       'utf8',
     );
     expect(readFileSync(resolve(__dirname, '../../app/(app)/beeline/chat/useChatRoomPresentation.tsx'), 'utf8')).toContain('positions: transcriptPositions,');
-    expect(surface).toContain('transcriptPositions.observeScroll(event.nativeEvent);');
+    expect(surface).toContain('transcriptPositions.observeScroll(');
+    expect(surface).toContain('scrollController.isUserDragging() || scrollController.isLanding()');
     expect(surface).toContain('transcriptPositions.observeContentSize(height);');
     expect(surface).toContain('positions={transcriptPositions}');
     expect(surface).toContain('loadOlder={loadOlderTranscriptMessages}');

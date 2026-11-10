@@ -33,7 +33,7 @@ type Props = {
   anchoredSegmentActive: boolean;
   phoneScrollOffsetRef: React.RefObject<number>;
   observePhoneTailOffset: (offsetY: number) => void;
-  transcriptPositions: { getSnapshot: () => import("@/buzz/use-transcript-scrubber").TranscriptScrubberSnapshot; subscribe(listener: () => void): () => void; reveal: () => void; observeScroll(event: { contentOffset: { y: number; }; contentSize: { height: number; }; layoutMeasurement: { height: number; }; }): void; observeContentSize(contentHeight: number): void; observeVisibleRows(rows: readonly ChatDisplayMessage[]): void; reset(): void; dispose(): void; };
+  transcriptPositions: { getSnapshot: () => import("@/buzz/use-transcript-scrubber").TranscriptScrubberSnapshot; subscribe(listener: () => void): () => void; reveal: (position?: number) => void; observeScroll(event: { contentOffset: { y: number; }; contentSize: { height: number; }; layoutMeasurement: { height: number; }; }, readerScrolling?: boolean): void; observeContentSize(contentHeight: number): void; observeVisibleRows(rows: readonly ChatDisplayMessage[]): void; reset(): void; dispose(): void; };
   loadNewerTranscriptMessages: () => void;
   observeVisibleTranscriptMessages: ({ viewableItems }: { viewableItems: ViewToken<ChatDisplayMessage>[]; }) => void;
   allowOlderHistoryRef: React.RefObject<boolean>;
@@ -186,7 +186,10 @@ export function ChatSurfaceTranscript({
                   onScroll={(event) => {
                     phoneScrollOffsetRef.current = event.nativeEvent.contentOffset.y;
                     observePhoneTailOffset(event.nativeEvent.contentOffset.y);
-                    transcriptPositions.observeScroll(event.nativeEvent);
+                    transcriptPositions.observeScroll(
+                      event.nativeEvent,
+                      Platform.OS === 'web' || scrollController.isUserDragging() || scrollController.isLanding(),
+                    );
                     if (
                       anchoredSegmentActive &&
                       event.nativeEvent.contentOffset.y <= TAIL_PIN_THRESHOLD &&

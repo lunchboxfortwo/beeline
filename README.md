@@ -34,6 +34,8 @@ App tools return pending sign-in guidance and provider tool failures as ordinary
 
 Production raw logs on squire are captured by the [live collectors](scripts/log-walk/README.md); the daily report walk is retired.
 
+The transcript scroll thumb stays still while idle rows remeasure or native anchoring adjusts the offset to hold the reading row. Those callbacks do not bring it back after it hides. Dragging it continues to use the latest loaded history size and holds the finger's destination on release.
+
 ## Install
 
 ```sh

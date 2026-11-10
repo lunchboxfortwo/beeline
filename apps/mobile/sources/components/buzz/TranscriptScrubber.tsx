@@ -14,7 +14,6 @@ import type {
   TranscriptScrollRow,
 } from '@/buzz/transcript-scroll-controller';
 import {
-  scrollBarPosition,
   scrubOffset,
   scrubReachesOldest,
   type TranscriptScrollMetrics,
@@ -49,14 +48,14 @@ export function TranscriptScrubber({
   loadOlder: () => void;
   scrollController: Pick<TranscriptScrollController<TranscriptScrollRow>, 'request'>;
 }) {
-  const { metrics, date, visible } = useSyncExternalStore(
+  const { metrics, position: listPosition, date, visible } = useSyncExternalStore(
     positions.subscribe,
     positions.getSnapshot,
   );
   const [railHeight, setRailHeight] = useState(0);
   // The thumb follows the finger while dragging, not the list's echo.
   const [dragPosition, setDragPosition] = useState<number | null>(null);
-  const position = dragPosition ?? (metrics ? scrollBarPosition(metrics) : null);
+  const position = dragPosition ?? listPosition;
   const live = useRef({ position, dragPosition, railHeight, scrollController, loadOlder });
   live.current = { position, dragPosition, railHeight, scrollController, loadOlder };
   const grabbedAt = useRef(0);
@@ -82,8 +81,11 @@ export function TranscriptScrubber({
 
   const pan = useMemo(() => {
     const finish = () => {
+      const held = live.current.dragPosition;
       setDragPosition(null);
-      positions.reveal();
+      // Native echoes can arrive after release. Keep the finger's destination
+      // while idle anchor corrections continue updating the scroll metrics.
+      positions.reveal(held ?? undefined);
     };
     return PanResponder.create({
       onStartShouldSetPanResponder: () => true,
