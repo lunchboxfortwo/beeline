@@ -342,7 +342,7 @@ export async function reportToCommander(
   text: string,
   command?: CommandRow,
   reportId = randomBytes(32).toString('hex'),
-  options: { automatic?: boolean; agentOnly?: boolean; ask?: string; attachments?: PrivateCommandPayload['attachments']; wakeInCorner?: boolean; idleSince?: string } = {},
+  options: { orderIssuer?: boolean; automatic?: boolean; agentOnly?: boolean; ask?: string; attachments?: PrivateCommandPayload['attachments']; wakeInCorner?: boolean; idleSince?: string } = {},
 ): Promise<{ id: string; createdAt: number; delivered?: boolean; receipt?: string; skipped?: boolean }> {
   if ((!options.automatic && !/^(done|blocked|needs-decision|failed):\s*\S/.test(text)) || !text.trim() || text.length > 16_000)
     throw new CommandRefusalError(
@@ -351,7 +351,7 @@ export async function reportToCommander(
     );
   const ask = options.ask === undefined ? undefined : normalizeAgentAsk(options.ask);
   const strict = Boolean(command) && !options.automatic;
-  const { recipient, returnRoom, parent, origin, incoming } = await commanderReportAddress(db, roomId, command);
+  const { recipient, returnRoom, parent, origin, incoming } = await commanderReportAddress(db, roomId, command, options.orderIssuer);
   // Closed work has no outstanding request. Do not move its stale reports to
   // an ancestor Room merely because that Room still exists.
   if (origin && (await db.query(`SELECT 1 FROM rooms corner
@@ -557,7 +557,7 @@ async function cornerReportOpening(db: SqlDatabase, roomId: string) {
 }
 
 /** The recorded return route shared by lifecycle reports and commander approvals. */
-export async function commanderReportAddress(db: SqlDatabase, roomId: string, command?: CommandRow) {
+export async function commanderReportAddress(db: SqlDatabase, roomId: string, command?: CommandRow, orderIssuer = false) {
   const reporter = command?.agent_id;
   const corner = await cornerReportOpening(db, roomId);
   const incoming = command ?? corner?.opening ?? undefined;
@@ -576,7 +576,7 @@ export async function commanderReportAddress(db: SqlDatabase, roomId: string, co
   ).rows[0]?.id;
   let humanOpening = corner && !corner.opening ? corner : undefined;
   let openingRoot: string | undefined;
-  if (corner) {
+  if (corner && !(orderIssuer && command?.private_payload?.kind === 'order')) {
     // Orders accepted before the handover keep their original issuer and return address. New
     // lifecycle reports and assignments use the approved commander instead.
     const beforeHandover = corner.handover && command?.private_payload?.kind === 'order' &&

@@ -6,9 +6,10 @@ import { mkdir, writeFile } from 'node:fs/promises';
 import { writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { dirname, join } from 'node:path';
-import { redactReplayError, isAgentCommand, type AgentCommand } from '@beeline/api-contract/daemon';
+import { isAgentCommand, type AgentCommand } from '@beeline/api-contract/daemon';
 import { DaemonApiError, type DaemonApiClient } from './daemon-api-client.js';
 import { isNetworkFailure } from './live-link.js';
+import { distillTurnFailureReason, redactToolDetail } from './turn-failure-reason.js';
 
 /** Session-local output context. No transcript or sender policy enters this boundary. */
 export class CommandExecutionContext {
@@ -20,6 +21,8 @@ export class CommandExecutionContext {
   current?: AgentCommand;
   commands: readonly AgentCommand[] = [];
   private startedAt?: number;
+  private terminalReceipts = new Set<string>();
+  hasTerminalReceipt(requestId: string): boolean { return this.terminalReceipts.has(requestId); }
   private ownedModelDirectory?:string;
   bindModel(command:AgentCommand,credential:OwnedModelCredential,source:import('@beeline/api-contract/helper-turn-ownership').HelperTurnOwnershipSource,baseUrl:string):void{
     const owner=OwnedModelFiles.create({root:join(dirname(this.path),'state','owned-model-'+this.generationId),credential,binding:{agentId:command.agentId,commandId:command.id,
@@ -41,6 +44,7 @@ export class CommandExecutionContext {
     this.contextPath = join(this.root ?? tmpdir(), `beeline-command-${this.generationId}.json`);
   }
   async enter(command: AgentCommand, commands: readonly AgentCommand[] = []): Promise<void> {
+    this.terminalReceipts.clear();
     this.commands = commands;
     this.current = command;
     this.startedAt = Date.now();
@@ -100,6 +104,7 @@ export class CommandExecutionContext {
             input: Record<string, unknown>,
           ) => {
             const turn = this.current;
+            const generation = this.generationId;
             return target.execute(name, {
               ...input,
               ...(turn && (input.roomId === turn.roomId || input.cornerId === turn.roomId)
@@ -108,7 +113,15 @@ export class CommandExecutionContext {
                     requestId: input.requestId ?? input.turnId ?? turn.turnRequestId,
                   }
                 : {}),
-            } as never);
+            } as never).then(result => {
+              // Prompt owners may already have reported a process exit. The
+              // intake fallback only fills missing outcomes, never repeats it.
+              if (turn && this.current === turn && this.generationId === generation && name === 'postAgentTurnReceipt' && !input.diagnosticsOnly &&
+                  input.status !== 'working' && input.roomId === turn.roomId &&
+                  (input.generationId ?? this.generationId) === this.generationId)
+                this.terminalReceipts.add(String(input.requestId ?? turn.turnRequestId));
+              return result;
+            });
           };
         const value = Reflect.get(target, key);
         return typeof value === 'function' ? value.bind(target) : value;
@@ -333,6 +346,22 @@ export async function runServerCommandIntake(options: {
             generationId: context.generationId,
           });
         } else {
+          const fail = async (error: unknown) => {
+            const reason = distillTurnFailureReason(error);
+            // Every admitted wake belongs to this invocation. Fail each one
+            // before release can consume the remaining claims as successful.
+            for (const item of [...turnCommands].reverse()) {
+              if (context.hasTerminalReceipt(item.turnRequestId)) continue;
+              try {
+                await api.execute('postAgentTurnReceipt', {
+                  agentId, roomId, requestId: item.turnRequestId,
+                  generationId: claimedGeneration, status: 'failed',
+                  reason: redactToolDetail(reason.text),
+                  ...(reason.kind ? { reasonKind: reason.kind } : {}),
+                });
+              } catch (receiptError) { options.onError?.(receiptError); }
+            }
+          };
           const release = async () => {
             let waiting: readonly AgentCommand[] = [];
             try {
@@ -358,12 +387,7 @@ export async function runServerCommandIntake(options: {
               } catch (leaveError) {
                 options.onError?.(leaveError);
               }
-              await api.execute('postAgentTurnReceipt', {
-                agentId, roomId, requestId: command.turnRequestId,
-                generationId: context.generationId, status: 'failed',
-                reason: 'Could not enter command execution context',
-                trace: { totalMs: 0, attempts: [], reason: redactReplayError('Could not enter command execution context') },
-              });
+              await fail(error);
             } finally {
               await release();
             }
@@ -376,8 +400,9 @@ export async function runServerCommandIntake(options: {
                 throw new Error('Turn owner changed before activation');
               return options.run(command);
             })
-            .catch((error) => {
+            .catch(async (error) => {
               options.onError?.(error);
+              await fail(error);
             })
             .finally(async () => {
               try {

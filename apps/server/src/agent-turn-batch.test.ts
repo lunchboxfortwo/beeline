@@ -153,3 +153,85 @@ it.each([0,2,4])('R1 Stop on batch member %s clears all five requests before hel
   await db.query(`SELECT beeline_end_agent_turn(id,generation_id,'cancelled','test cleanup')
     FROM agent_commands WHERE id=ANY($1::text[])`,[preserved]);
 });
+
+async function runRunnerTurn(reason?: string, orders:readonly {authorId:string;fromRoomId:string}[]=[{authorId:H,fromRoomId:R}]) {
+  const {createAgentCommand}=await import('./agent-command.js');
+  const scratch=await mkdtemp(join(tmpdir(),'beeline-failed-wake-'));
+  const abort=new AbortController(), context=new CommandExecutionContext(scratch);
+  const commands=[];
+  for(const route of orders) commands.push((await createAgentCommand(db,{roomId:R,agentId:A,sourceMessageId:null,reason:'order',
+    privatePayload:{kind:'order',...route,text:'Run the review'}}))!);
+  const command=commands[0]!;
+  const api={turnOwnershipScope:()=>owner,execute:async(name:string,input:Record<string,unknown>)=>{
+    const result=await daemon.execute(name as never,input as never,A,
+      ['claimAgentTurn','releaseAgentTurn','postAgentTurnReceipt'].includes(name)?owner:undefined);
+    if(name==='releaseAgentTurn')abort.abort();
+    return result;
+  }} as unknown as DaemonApiClient;
+  try {
+    await runServerCommandIntake({api,roomId:R,agentId:A,context,signal:abort.signal,
+      stop:()=>{},run:async()=>{if(reason)throw new Error(reason);}});
+    return {room:(await phone.readRoom(R,H))!,command};
+  } finally {abort.abort();await rm(scratch,{recursive:true,force:true});}
+}
+
+it.each(['review checkout has uncommitted work', 'agent process exited before output'])(
+  'Reproduction F1: runner failure reaches the sender and stays failed after release (%s)', async reason => {
+    await runRunnerTurn();
+    const {room,command}=await runRunnerTurn(reason);
+    expect(room.latestAgentTurns).toContainEqual(expect.objectContaining({
+      requestId:command.turn_request_id,status:'failed',
+    }));
+    expect(room.messages.some(message=>message.text.startsWith('failed:') && message.text.includes(reason)
+      && message.text.includes('@worker') && message.text.includes(R))).toBe(true);
+    expect(room.messages.some(message=>message.systemEvent?.verb==='could not finish this request' && message.text.includes(reason))).toBe(true);
+  });
+
+it('Reproduction F1: repeated failures send one update until a successful quiet turn clears the streak',async()=>{
+  const reports=(room:Awaited<ReturnType<typeof runRunnerTurn>>['room'])=>
+    room.messages.filter(message=>message.text.startsWith('failed:')).length;
+  const baseline=reports((await runRunnerTurn()).room);
+  for(let attempt=1;attempt<=4;attempt++){
+    const {room}=await runRunnerTurn('checkout preparation failed');
+    expect(reports(room)).toBe(baseline+Math.min(attempt,2));
+  }
+  const success=await runRunnerTurn();
+  expect(success.room.latestAgentTurns).toContainEqual(expect.objectContaining({
+    requestId:success.command.turn_request_id,status:'complete',
+  }));
+  expect(reports((await runRunnerTurn('another early crash')).room)).toBe(baseline+3);
+});
+
+it.each(['distinct issuers and places','same issuer','same place'])(
+  'Reproduction F1: batched failures preserve each return route and bound repeated reports (%s)',async kind=>{
+    await runRunnerTurn();
+    const other='c'.repeat(64), firstPlace=randomUUID(), secondPlace=kind==='same place'?firstPlace:randomUUID();
+    await db.query("INSERT INTO identities(id,kind,name,handle) VALUES($1,'human','Other owner','otherowner') ON CONFLICT DO NOTHING",[other]);
+    for(const place of new Set([firstPlace,secondPlace])) {
+      await db.query("INSERT INTO rooms(id,workspace_id,name) VALUES($1,$2,'Return place')",[place,W]);
+      for(const member of [H,other,A]) await db.query(`INSERT INTO memberships(workspace_id,room_id,identity_id,role)
+        VALUES($1,NULL,$2,'member'),($1,$3,$2,'member') ON CONFLICT DO NOTHING`,[W,member,place]);
+    }
+    const orders=[{authorId:H,fromRoomId:firstPlace},
+      {authorId:kind==='same issuer'?H:other,fromRoomId:secondPlace}];
+    orders.push({...orders[0]!});
+    const routeCount=2;
+    const reportCount=async()=>{
+      let count=0;
+      for(const place of new Set([firstPlace,secondPlace])) {
+        const room=(await phone.readRoom(place,H))!;
+        const reports=room.messages.filter(message=>message.text.startsWith('failed:'));
+        expect(reports.every(message=>message.text.includes('@worker') && message.text.includes(R)
+          && message.text.includes('checkout preparation failed'))).toBe(true);
+        count+=reports.length;
+      }
+      return count;
+    };
+    for(let attempt=1;attempt<=4;attempt++) {
+      await runRunnerTurn('checkout preparation failed',orders);
+      expect(await reportCount()).toBe(routeCount*Math.min(attempt,2));
+    }
+    await runRunnerTurn();
+    await runRunnerTurn('checkout preparation failed',orders);
+    expect(await reportCount()).toBe(routeCount*3);
+  });

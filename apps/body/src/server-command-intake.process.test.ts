@@ -60,11 +60,13 @@ it.each([false, true])(
       return {};
     });
     const api = { execute } as unknown as DaemonApiClient;
+    const context = new CommandExecutionContext(root);
+    const boundApi = context.bind(api);
     const running = runServerCommandIntake({
       api,
       roomId: 'room',
       agentId: 'agent',
-      context: new CommandExecutionContext(root),
+      context,
       signal: controller.signal,
       onWake: (wake) => {
         if (wake) notify = wake;
@@ -89,6 +91,10 @@ it.each([false, true])(
               serverQueue.push(command('new-work'));
               notify([command('new-work')]);
             }
+            await boundApi.execute('postAgentTurnReceipt', {
+              agentId:'agent',roomId:'room',requestId:item.turnRequestId,
+              status:'failed',reason:'fixture died mid-turn',reasonKind:'process-exited',
+            });
             throw new AcpRuntimeExitedError('fixture died mid-turn');
           }
         }),
@@ -111,6 +117,7 @@ it.each([false, true])(
       await vi.waitFor(() =>
         expect(bodies).toEqual([expect.stringContaining('old local body'), expect.stringContaining('new-work')]),
       );
+      expect(execute.mock.calls.filter(([name]) => name === 'postAgentTurnReceipt')).toHaveLength(1);
       expect(lifecycle.start).toHaveBeenCalledTimes(2);
       expect(
         execute.mock.calls.filter(([name]) => name === 'getAgentCommands').length,

@@ -793,3 +793,31 @@ it('dedupe keeps a lightly reworded summary in collapsed activity', async () => 
   expect((await rootFixture.db.query(`SELECT presentation,activity FROM messages WHERE id=$1`, [result.id])).rows[0])
     .toMatchObject({ presentation: 'activity', activity: [{ kind: 'note', title: 'Turn summary', text: final }] });
 });
+
+it.each(['agent_tag','corner_review_dispatch'])('Reproduction F1: a failed %s wake reports to the corner commander',async reason=>{
+  const opened=await open(), initial=await worker(opened.cornerId);
+  await rootFixture.daemon.execute('postAgentTurnReceipt',{...authority(initial),status:'complete'},WORKER);
+  const queued=(await createAgentCommand(rootFixture.db,{roomId:opened.cornerId,agentId:WORKER,
+    sourceMessageId:null,reason}))!;
+  const turn=(await commands(opened.cornerId,WORKER)).find(command=>command.id===queued.id)!;
+  await claim(turn);
+  await rootFixture.daemon.execute('postAgentTurnReceipt',{...authority(turn),status:'failed',reason:'checkout preparation failed'},WORKER);
+  const reports=(await commands(DM,RUBY)).filter(command=>command.reason==='report');
+  expect(reports).toHaveLength(1);
+  expect(reports[0]!.source.body).toContain('checkout preparation failed');
+  expect(reports[0]!.source.body).toContain('@worker');
+  expect(reports[0]!.source.body).toContain(opened.cornerId);
+});
+
+it('Reproduction F1: a failed explicit corner order reports to its issuer rather than its opener',async()=>{
+  const opened=await open(), initial=await worker(opened.cornerId);
+  await rootFixture.daemon.execute('postAgentTurnReceipt',{...authority(initial),status:'complete'},WORKER);
+  const queued=(await createAgentCommand(rootFixture.db,{roomId:opened.cornerId,agentId:WORKER,
+    sourceMessageId:null,reason:'order',privatePayload:{kind:'order',authorId:HUMAN,fromRoomId:ROOM,text:'Review this'}}))!;
+  const turn=(await commands(opened.cornerId,WORKER)).find(command=>command.id===queued.id)!;
+  await claim(turn);
+  await rootFixture.daemon.execute('postAgentTurnReceipt',{...authority(turn),status:'failed',reason:'spawn failed'},WORKER);
+  expect((await commands(DM,RUBY)).filter(command=>command.reason==='report')).toHaveLength(0);
+  expect((await rootFixture.phone.readRoom(ROOM,HUMAN))!.messages.some(message=>
+    message.text.startsWith('failed:') && message.text.includes('spawn failed') && message.text.includes(opened.cornerId))).toBe(true);
+});
