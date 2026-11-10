@@ -142,10 +142,12 @@ import { phoneProjectPendingAgentCommands } from './message-enrichment.js';
         owner_handle: string | null;
         member: boolean;
         corner: boolean;
+        no_live_route: boolean;
       }>(
         `SELECT identity.id agent_id,COALESCE(NULLIF(identity.name,''),$3::text) agent_name,
                 beeline_room_handle(identity.id,$2) agent_handle,
                 a.access_policy,a.owner_id,owner.handle owner_handle,
+                (a.machine_id IS NULL AND external.member_id IS NOT NULL) no_live_route,
                 EXISTS(SELECT 1 FROM rooms room WHERE room.id=$2 AND room.parent_id IS NOT NULL) corner,
                 EXISTS(
                   SELECT 1 FROM memberships membership
@@ -154,12 +156,21 @@ import { phoneProjectPendingAgentCommands } from './message-enrichment.js';
                 ) member
          FROM identities identity
          LEFT JOIN agents a ON a.agent_id=identity.id
+         LEFT JOIN rooms_mcp_members external ON external.member_id=identity.id
          LEFT JOIN identities owner ON owner.id=a.owner_id
          WHERE identity.id=ANY($1::text[]) AND identity.kind='agent'`,
         [[...agentIds], roomId, systemMessage("system-line.agent-name")],
       );
+      const deliveries = await readMemberDeliveries(ctx.database,
+        agents.rows.filter(agent => agent.no_live_route).map(agent => agent.agent_id));
       const bucket = accessNoticeBucket(Date.now());
       for (const agent of agents.rows) {
+        if (agent.no_live_route) {
+          const delivery = deliveries.get(agent.agent_id)!;
+          agent.no_live_route = delivery.mechanism
+            ? delivery.state !== 'proved_ready'
+            : Boolean(delivery.offline);
+        }
         const phrase = phoneUnansweredMentionPhrase(ctx, agent, sender, senderId);
         if (!phrase) continue;
         await phoneWriteMentionNotice(ctx, ctx.database, {
@@ -215,6 +226,7 @@ import { phoneProjectPendingAgentCommands } from './message-enrichment.js';
       owner_handle: string | null;
       member: boolean;
       corner: boolean;
+      no_live_route?: boolean;
     },
     sender: { kind: 'human' | 'agent'; handle: string | null },
     senderId: string,
@@ -259,6 +271,13 @@ import { phoneProjectPendingAgentCommands } from './message-enrichment.js';
         verb: systemMessage("phone-service.did-not-answer"),
         ...(object ? { object } : {}),
         consequence: systemMessage("phone-service.only-may-address-ask-the-user-for-permission-to-access-the-agent", personMention(agent.owner_handle) ?? systemMessage("phone-service.the-owner"), agentMention),
+      };
+    }
+    if (agent.no_live_route) {
+      return {
+        reason: 'no-live-route',
+        verb: systemMessage('phone-service.saved-for-host'),
+        consequence: systemMessage('phone-service.open-host-for-delivery'),
       };
     }
     return undefined;

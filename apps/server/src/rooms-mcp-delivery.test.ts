@@ -15,8 +15,8 @@ import {
 describe('JOIN-DELIVERY: OAuth is membership, host receipts prove delivery', () => {
   const scope = fixtureScope1();
   const value = (result: any) => JSON.parse(result.content[0].text).data;
-  it('1: Jane-shaped Codex and Antigravity empty-webhook joins remain honestly unfinished after naming', async () => {
-    for (const host of ['Codex', 'Antigravity']) {
+  it('muse-wake-1: tags and DMs explain how to reach a member with no inbound route', async () => {
+    for (const host of ['Codex', 'Antigravity', 'Unattached local', 'Failed local']) {
       const { client, member } = await scope.connected();
       await scope.db.query('UPDATE rooms_mcp_members SET model_label=$2 WHERE member_id=$1', [
         member,
@@ -27,6 +27,24 @@ describe('JOIN-DELIVERY: OAuth is membership, host receipts prove delivery', () 
       expect(rooms.you.id).toBe(member);
       expect(rooms.delivery.state).toBe('setup_unfinished');
       expect(rooms.setup).toContain('setup_delivery');
+      if (host.endsWith('local')) {
+        await client.callTool({ name: 'setup_delivery', arguments: {
+          mechanism: 'local', host, surface: 'CLI', conversation: 'unattached-thread', installed: true,
+        } });
+      }
+      if (host === 'Failed local') {
+        await scope.db.query("UPDATE rooms_mcp_delivery SET failure='stream_ended' WHERE member_id=$1", [member]);
+      }
+      const tagged = await scope.phone.execute(
+        'sendRoomMessage',
+        { roomId: ROOM, text: `@${rooms.you.handle} are you there?` },
+        USER,
+      );
+      expect(JSON.stringify(await scope.phone.readRoom(ROOM, USER))).toContain(
+        'open its host conversation to read and reply, or finish delivery setup there for automatic wakes',
+      );
+      expect((await scope.db.query('SELECT machine_id FROM agents WHERE agent_id=$1', [member])).rows[0]!.machine_id).toBeNull();
+      expect((await scope.db.query('SELECT 1 FROM rooms_mcp_mentions WHERE member_id=$1 AND message_id=$2', [member, tagged.messageId])).rowCount).toBe(1);
       const dm = await scope.phone.execute(
         'resolveDirectMessage',
         { workspaceId: WORKSPACE, participantId: member },
@@ -38,8 +56,11 @@ describe('JOIN-DELIVERY: OAuth is membership, host receipts prove delivery', () 
         USER,
       );
       expect(sent.externalAgentDelivery).toEqual([
-        expect.objectContaining({ memberId: member, state: 'setup_unfinished' }),
+        expect.objectContaining({ memberId: member, state: host === 'Failed local' ? 'failed' : 'setup_unfinished' }),
       ]);
+      expect(JSON.stringify(await scope.phone.readRoom(dm.id, USER))).toContain(
+        'open its host conversation to read and reply, or finish delivery setup there for automatic wakes',
+      );
       expect(
         (
           await scope.db.query(

@@ -320,6 +320,16 @@ export const SYSTEM_MESSAGE_DAEMON_SERVICE = {
     variables: [],
   },
 
+  'phone-service.saved-for-host': {
+    parts: ['had your message saved for its next visit'],
+    variables: [],
+  },
+
+  'phone-service.open-host-for-delivery': {
+    parts: ['open its host conversation to read and reply, or finish delivery setup there for automatic wakes'],
+    variables: [],
+  },
+
   'phone-service.not-a-member-of-this-corner': {
     parts: ['not a member of this corner'],
     variables: [],
