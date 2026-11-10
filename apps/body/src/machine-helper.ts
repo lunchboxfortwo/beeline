@@ -6,7 +6,8 @@ import { withKernelLock } from './kernel-lock.js';
 import { DaemonApiError, isAgentRemovedError } from './daemon-api-client.js';
 import { retireRemovedAgent } from './agent-retirement.js';
 import { existsSync, watch, type FSWatcher } from 'node:fs';
-import type { EventEmitter } from 'node:events';
+import { EventEmitter } from 'node:events';
+import { watchFreeAgentResume } from './free-agent-resume.js';
 import { mkdir, readFile, rename, stat, writeFile } from 'node:fs/promises';
 import { homedir } from 'node:os';
 import { dirname, resolve } from 'node:path';
@@ -127,6 +128,8 @@ async function serveMachineHelper(
   const slots = new Map<string, AgentSlot>();
   const hosted = new Map<string, HostedAgent>();
   const links = new Map<string, MachineLink>();
+  const resumes = options.freeAgent && env.FLY_MACHINE_ID && process.platform === 'linux' ? new EventEmitter() : undefined;
+  let disposeResume: (() => void) | undefined;
   const archiveStoragePending = new Map<string, import('./helper-storage.js').StorageRoomState>();
   let archiveStorageRunning = false;
   const stopStorageFacts = watchStorageFacts(supervisorRoot, states => {
@@ -375,6 +378,10 @@ async function serveMachineHelper(
         const home = env.HOME?.trim() || homedir();
         link = new MachineLink({
           baseUrl,
+          ...(resumes ? { subscribeResume: (listener: () => void) => {
+            resumes.on('resume', listener);
+            return () => { resumes.off('resume', listener); };
+          } } : {}),
           readVault: async agentId => {
             if (!existsSync(squireBrokerInstallEntry(home)) && !existsSync(squireHostPaths(home).mcpSocket))
               return { connections: [], notAdded: true };
@@ -674,6 +681,7 @@ async function serveMachineHelper(
   signals.on('SIGHUP', onHangup);
 
   try {
+    if (resumes) disposeResume = watchFreeAgentResume(() => { resumes.emit('resume'); });
     console.log(`[helper] hosting ${initial.length} agent(s) on one machine socket per server`);
     for (const configPath of initial) await startSlot(configPath);
     lifecycle.beginServing();
@@ -696,6 +704,7 @@ async function serveMachineHelper(
     }
     await Promise.all([...slots.values()].map((slot) => slot.running));
   } finally {
+    disposeResume?.();
     signals.off('SIGHUP', onHangup);
     update?.dispose();
     await control.stop();

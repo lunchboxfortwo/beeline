@@ -58,6 +58,13 @@ soul. Existing free agents keep their names.
   A connected helper with no remaining work is suspended; the provider's completed
   snapshot hands any work committed during suspension back to the same owner.
   There is no countdown, periodic sweep or timed retry.
+  Fly's default `acpi=off` hides the x86 VMGenID device. New Machines and image
+  replacements use `acpi=force`, preserving other init settings and kernel args.
+  The image-owned helper blocks on new kernel log records through `dmesg`;
+  VMGenID's entropy-reseed event ends its restored socket attempt, and the
+  ordinary close handler opens its successor. `free-agent-resume.ts` owns that
+  event source and stops it with the helper. Suspension and persistent files
+  remain intact; no application clock, network probe or resend admits recovery.
 - **Image replacement and wake.** The owner preserves the full machine config and
   persistent filesystem. A successful image POST does not establish readiness:
   the owner observes completion for the returned Fly version before deciding

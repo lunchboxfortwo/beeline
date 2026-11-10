@@ -7,6 +7,7 @@ import { waitForProcessExit } from '../process-exit.js';
 import { pidAlive, readState, hasLocalDelivery, stateDir } from './store.js';
 import type { Runner } from './bridge.js';
 import { notifyBridgeSessions } from './bridge.js';
+import { bridgeSocketPath } from './bridge-socket.js';
 
 export function bridgeRunning(dir: string): boolean {
   try { const pid = Number(readFileSync(join(dir, 'bridge.pid'), 'utf8')); return pid > 0 && pidAlive(pid); } catch { return false; }
@@ -105,7 +106,7 @@ export async function ensureBridge(dir: string, runner: Runner, env: NodeJS.Proc
       }
       throw error;
     } finally {
-      if (child.pid) rmSync(join(dir, `bridge-${child.pid}.sock`), { force: true });
+      if (child.pid) rmSync(bridgeSocketPath(dir, child.pid), { force: true });
       rmSync(staging, { recursive: true, force: true });
     }
   });

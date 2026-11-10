@@ -3,7 +3,9 @@
 import { sessionAgentBehavior } from '../agent-command.js';
 import { chmodSync, closeSync, existsSync, mkdirSync, openSync, readFileSync, readdirSync, renameSync, rmSync, writeFileSync, watch } from 'node:fs';
 import { createConnection, createServer } from 'node:net';
-import { join } from 'node:path';
+import { dirname, join } from 'node:path';
+import { preparePrivateSocketDirectory } from '../local-socket.js';
+import { bridgeSocketPath } from './bridge-socket.js';
 import { externalAgentRules, mentionReplyRule } from '@beeline/api-contract/phone';
 import { accessToken, callTool, memberStream } from './beeline-api.js';
 import { memberStreamFrame } from './stream-frame.js';
@@ -183,6 +185,7 @@ export async function flush(dir: string, sources: Sources, deps: DeliverDeps = r
  * not this socket, so its replies go out without asking the person to approve network access each time.
  */
 async function serveTools(dir: string, path: string, sessionsChanged: () => void) {
+  if (dirname(path) !== dir) await preparePrivateSocketDirectory(path);
   rmSync(path, { force: true });
   const server = createServer(connection => {
     let buffer = '', taken = false;
@@ -288,7 +291,7 @@ export async function notifyBridgeSessions(dir: string): Promise<void> {
 
 function bridgeRequest(dir: string, request: object): Promise<{ ok: boolean; data?: unknown; error?: string } | undefined> {
   return new Promise(resolve => {
-    const connection = createConnection(join(dir, 'bridge.sock'));
+    const connection = createConnection(bridgeSocketPath(dir));
     let text = '', sent = false, settled = false;
     const unknown = { ok: false, error: 'Beeline tool result is awaiting confirmation' };
     const finish = (answer: {ok:boolean;data?:unknown;error?:string}|undefined) => {
@@ -328,10 +331,15 @@ export async function runBridge(dir: string, runner: Runner): Promise<void> {
     return true;
   };
   if (!staged && !claim()) return;
-  const socket = join(dir, staged ? `bridge-${process.pid}.sock` : 'bridge.sock');
+  const socket = bridgeSocketPath(dir, staged ? process.pid : undefined);
   let localDirty=true,wake:(()=>void)|undefined;
   const changed=()=>{localDirty=true;wake?.();};
-  const tools = await serveTools(dir, socket, changed);
+  const tools = await serveTools(dir, socket, changed).catch(error => {
+    // A refused bind happens before the startup cleanup block. Release the
+    // launcher channel so its readiness wait observes this candidate's exit.
+    if (staged && process.connected) process.disconnect();
+    throw error;
+  });
   const sources = machineSources(dir);
   type Stream={fingerprint:string;controller:AbortController;recovered:boolean};
   const streams=new Map<string,Stream>();
@@ -412,7 +420,7 @@ export async function runBridge(dir: string, runner: Runner): Promise<void> {
       await handoff;
       // Commands embedded in delivered messages always use the retained path.
       runner = { ...runner, bundle: join(dir, 'usebeeline.mjs') };
-      renameSync(socket, join(dir, 'bridge.sock'));
+      renameSync(socket, bridgeSocketPath(dir));
     }
     if (staged && !claim()) throw new Error('Beeline bridge owner changed during handoff');
     writeFileSync(join(dir, 'bridge-owner.json'), JSON.stringify({ pid: process.pid, digest }), { mode: 0o600 });
@@ -456,7 +464,7 @@ export async function runBridge(dir: string, runner: Runner): Promise<void> {
   }
   log(dir, `bridge ${process.pid} stopped: ${stopping ? 'handoff or shutdown' : 'no joined sessions'}`);
   rmSync(pidFile, { force: true });
-  rmSync(join(dir, 'bridge.sock'), { force: true });
+  rmSync(bridgeSocketPath(dir), { force: true });
   process.exit(0);
 }
 

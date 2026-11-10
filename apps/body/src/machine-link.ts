@@ -189,6 +189,7 @@ export class MachineLink {
       timing?: Partial<LiveLinkTiming>;
       random?: () => number;
       onRegistered?: () => void;
+      subscribeResume?: (listener: () => void) => () => void;
       readVault?: (agentId: string) => Promise<Omit<PostConnectorVaultInput, 'agentId'>>;
       log?: (message: string) => void;
     },
@@ -198,6 +199,7 @@ export class MachineLink {
       url: () => this.#url(),
       protocols: () => [MACHINE_SOCKET_PROTOCOL],
       ...(options.factory ? {factory:options.factory} : {}),
+      ...(options.subscribeResume ? { subscribeResume: options.subscribeResume } : {}),
       onOpen: () => {
         this.#reconciledOnSocket = false;
         this.#pendingRelease = undefined;

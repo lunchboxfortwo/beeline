@@ -1,12 +1,13 @@
 import { afterEach, expect, it } from 'vitest';
 import { spawn, type ChildProcess } from 'node:child_process';
 import { once } from 'node:events';
-import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, watch, writeFileSync } from 'node:fs';
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, statSync, watch, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
-import { join, resolve } from 'node:path';
+import { dirname, join, resolve } from 'node:path';
 import { createRequire } from 'node:module';
 import { recordHookSession, updateState, type JoinedSession } from './store.js';
 import { ensureBridge, notifyBridgeSessions } from './bridge.js';
+import { bridgeSocketPath } from './bridge-socket.js';
 
 const children: ChildProcess[] = [];
 const folders: string[] = [];
@@ -33,10 +34,12 @@ function received(path: string, text: string): Promise<void> {
   });
 }
 
-it('opens successive joins through the bridge socket and delivers their tags', async () => {
+it.each(['short', 'long', 'unicode'])('opens successive joins through a %s state path and delivers their tags', async length => {
   const home = mkdtempSync(join(tmpdir(), 'bridge-session-control-'));
   folders.push(home);
-  const dir = join(home, 'state'); mkdirSync(dir);
+  const dir = join(home, length === 'long' ? 'state-'.repeat(30) : length === 'unicode' ? '巢'.repeat(26) : 'state'); mkdirSync(dir);
+  const socket = bridgeSocketPath(dir);
+  if (dirname(socket) !== dir) folders.push(dirname(socket));
   const output = join(home, 'received');
   const cli = join(home, 'codex');
   writeFileSync(cli, `#!${process.execPath}
@@ -78,9 +81,15 @@ it('opens successive joins through the bridge socket and delivers their tags', a
   writeFileSync(bundle, script);
   const env = { ...process.env, HOME: home, XDG_CONFIG_HOME: home, XDG_STATE_HOME: home,
     CODEX_HOME: join(home, '.codex'), CLAUDE_CONFIG_DIR: join(home, '.claude') };
-  const child = spawn(process.execPath, [bundle, 'session', 'bridge'], { env, stdio: 'ignore' });
+  const child = spawn(process.execPath, [bundle, 'session', 'bridge'], { env, stdio: ['ignore', 'ignore', 'pipe'] });
+  let errors = '';
+  child.stderr!.on('data', chunk => { errors += chunk; });
   children.push(child);
-  await received(output, 'tag-first');
+  await Promise.race([received(output, 'tag-first'), once(child, 'exit').then(() => {
+    throw new Error(`bridge exited before delivering the first tag: ${errors}`);
+  })]);
+  expect(statSync(socket).mode & 0o777).toBe(0o600);
+  if (dirname(socket) !== dir) expect(statSync(dirname(socket)).mode & 0o777).toBe(0o700);
   await updateState(dir, state => { state.sessions.push(session('second')); });
   await ensureBridge(dir, { node: process.execPath, bundle }, env);
   await received(output, 'tag-second');
@@ -97,4 +106,28 @@ it('opens successive joins through the bridge socket and delivers their tags', a
   await updateState(dir, state => { state.sessions = []; });
   await notifyBridgeSessions(dir);
   expect((await ended)[0]).toBe(0);
+});
+
+it('returns a staged socket startup failure to its launcher instead of hanging on IPC', async () => {
+  const dir = mkdtempSync(join(tmpdir(), 'bridge-bind-failure-')); folders.push(dir);
+  const source = resolve('src/session-join/bridge.ts');
+  const bundle = join(dir, 'usebeeline.mjs');
+  writeFileSync(bundle, `import { tsImport } from ${JSON.stringify(createRequire(import.meta.url).resolve('tsx/esm/api'))};
+    import { mkdirSync } from 'node:fs';
+    const { runBridge } = await tsImport(${JSON.stringify(source)}, import.meta.url);
+    mkdirSync(${JSON.stringify(dir)} + '/bridge-' + process.pid + '.sock');
+    try { await runBridge(${JSON.stringify(dir)}, { node: process.execPath, bundle: ${JSON.stringify(bundle)} }); }
+    catch { process.exitCode = 1; }`);
+  const child = spawn(process.execPath, [bundle, 'session', 'bridge'], {
+    env: { ...process.env, BEELINE_SESSION_BRIDGE_STAGING: '1' },
+    stdio: ['ignore', 'ignore', 'ignore', 'ipc'],
+  });
+  children.push(child);
+  let deadline: ReturnType<typeof setTimeout> | undefined;
+  try {
+    const ended = await Promise.race([once(child, 'exit'), new Promise<never>((_done, fail) => {
+      deadline = setTimeout(() => fail(new Error('failed candidate retained its launcher IPC')), 1500);
+    })]);
+    expect(ended[0]).toBe(1);
+  } finally { clearTimeout(deadline); }
 });

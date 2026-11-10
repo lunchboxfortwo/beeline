@@ -60,6 +60,8 @@ uses the existing opening-commander route. Corner activity rules are unchanged.
 
 One bridge process per machine user (`bridge.ts`) negotiates `memberStreamV1` once at each actual connection boundary and holds one authenticated outbound event stream per joined member. It stores stable delivery identities in the private inbox before advancing a durable checkpoint, then hands each new tag or wake to the session:
 
+Bridge control endpoints use `bridge-socket.ts`: short state directories retain their existing socket paths; longer paths use the helper’s bounded, per-user private socket directory, including staged handoffs. A staged socket startup failure releases its launcher IPC so readiness rejects immediately. Regression coverage includes long and Unicode state paths, socket permissions, successive joins and legacy bridge upgrades.
+
 Join saves the joined session record, then notifies an already-running bridge through its private `bridge.sock` socket. SessionStart uses the same notification path. The bridge reads the saved state on that notification and opens the new member stream. Leaving a session uses the same notification to close its stream. `state.json` is durable storage only; its atomic replacement is not a delivery signal. Regression: `apps/body/src/session-join/bridge-session-control.test.ts` adds successive joins to a serving bridge, delivers their tags, and removes sessions through the socket.
 
 The detached bridge has its own loaded-bundle identity; a live PID does not prove

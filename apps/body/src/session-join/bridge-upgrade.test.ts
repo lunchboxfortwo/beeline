@@ -4,10 +4,11 @@ import { once } from 'node:events';
 import { createServer } from 'node:net';
 import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, watch, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
-import { join, resolve } from 'node:path';
+import { dirname, join, resolve } from 'node:path';
 import { createRequire } from 'node:module';
 import { acceptMemberDelivery, deliver, ensureBridge, refreshJoinedSessionBridge } from './bridge.js';
 import { readState, updateState, type JoinedSession } from './store.js';
+import { bridgeSocketPath } from './bridge-socket.js';
 
 const children: ChildProcess[] = [];
 const folders: string[] = [];
@@ -59,10 +60,12 @@ it('parks after an expired replacement without resetting the recovery allowance 
   expect(readFileSync(requests, 'utf8')).toBe('stream\nrefresh\nstream\n');
 });
 
-it('replaces a living legacy bridge and catches up the saved cursor before delivering live Claude tags', async () => {
+it.each(['short', 'long'])('replaces a living legacy bridge at a %s state path and catches up before delivering live Claude tags', async length => {
   const dir = mkdtempSync(join(tmpdir(), 'bridge-upgrade-')); folders.push(dir);
-  const env = { ...process.env, HOME: dir, XDG_STATE_HOME: dir, CLAUDE_CONFIG_DIR: join(dir, '.claude') };
-  const stateDir = join(dir, 'beeline-sessions'); mkdirSync(stateDir);
+  const stateRoot = length === 'long' ? join(dir, 'state-'.repeat(30)) : dir;
+  const env = { ...process.env, HOME: dir, XDG_STATE_HOME: stateRoot, CLAUDE_CONFIG_DIR: join(dir, '.claude') };
+  const stateDir = join(stateRoot, 'beeline-sessions'); mkdirSync(stateDir, { recursive: true });
+  if (dirname(bridgeSocketPath(stateDir)) !== stateDir) folders.push(dirname(bridgeSocketPath(stateDir)));
   const joined: JoinedSession = { key: `claude-code:${dir}`, agent: 'claude-code', cwd: dir,
     name: 'Claude', server: 'https://synthetic.invalid', clientId: 'client', refreshToken: 'synthetic',
     accessToken: 'synthetic', accessExpiresAt: Date.now() + 3_600_000, cursor: '437', deliveredWakes: [],
