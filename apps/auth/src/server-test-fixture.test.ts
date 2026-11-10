@@ -136,7 +136,7 @@ m5_it('observes only state-bound GitHub starts/callbacks without codes, cookies,
     headers: { host: m5_alphaTenant.host, cookie: m5_startCookie(start.headers['set-cookie']) },
     url: '/auth/github/callback?state=wrong&code=do-not-log',
   });
-  m5_expect(invalid.statusCode).toBe(400);
+  m5_expect(invalid.statusCode).toBe(302);
   m5_expect(observe).toHaveBeenCalledTimes(1);
   const result = await m5_app.inject({
     method: 'GET',

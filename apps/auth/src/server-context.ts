@@ -10,7 +10,7 @@ export { type AuthRouteContext } from './server-context-auth-route-context.js';
 
 
 
-export const DEFAULT_FLOW_TTL_MS = 5 * 60_000;
+export const DEFAULT_FLOW_TTL_MS = 15 * 60_000;
 
 export const DEFAULT_TICKET_TTL_MS = 2 * 60_000;
 
