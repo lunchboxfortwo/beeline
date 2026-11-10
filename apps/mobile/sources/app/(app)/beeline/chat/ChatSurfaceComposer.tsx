@@ -209,6 +209,14 @@ export function ChatSurfaceComposer({
   channelMenuKey,
   setInputSelection,
 }: Props) {
+  // RN-web measures content when its input ref attaches. Keep this callback
+  // stable so a height update cannot reattach the ref and measure in a loop.
+  const handleContentSizeChange = React.useCallback<
+    React.ComponentProps<typeof ConversationComposer>['onContentSizeChange']
+  >((event) => {
+    const contentHeight = Math.ceil(event.nativeEvent.contentSize.height);
+    setComposerHeight(Math.min(COMPOSER_MAX_HEIGHT, Math.max(COMPOSER_MIN_HEIGHT, contentHeight)));
+  }, [setComposerHeight]);
   return (<View style={[styles.bottomChromeStack, desktopExperience && styles.desktopReadingColumn]} testID="room-bottom-chrome">
                 {/* Phone turn chrome overlays the fixed transcript tail.
                 Its canvas fits below the whole newest row, including reactions;
@@ -456,15 +464,7 @@ export function ChatSurfaceComposer({
                         inputTextRef.current = value;
                         setInputText(value);
                       }}
-                      onContentSizeChange={(event) => {
-                        const contentHeight = Math.ceil(event.nativeEvent.contentSize.height);
-                        setComposerHeight(
-                          Math.min(
-                            COMPOSER_MAX_HEIGHT,
-                            Math.max(COMPOSER_MIN_HEIGHT, contentHeight),
-                          ),
-                        );
-                      }}
+                      onContentSizeChange={handleContentSizeChange}
                       onFocus={() => setComposerFocused(true)}
                       onBlur={() => setComposerFocused(false)}
                       onKeyPress={(event) => {
