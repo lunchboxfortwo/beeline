@@ -39,6 +39,76 @@ test('Reproduction 24: empty Pages status retries once immediately, then fails a
   }
 });
 
+test('Reproduction publish-wait-1 diagnostic stand-in: timeout records deployment and last status before cancel', async () => {
+  // Preserve the timeout diagnostic independently of the stalled-host replay below.
+  const events = [];
+  let elapsed = 0;
+  let reads = 0;
+  await assert.rejects(deployPages({
+    github: { request: async (route) => {
+      if (route.endsWith('/cancel')) { events.push('cancel'); return {}; }
+      if (route.startsWith('POST')) return { data: { id: 'publish-wait-fixture' } };
+      reads++;
+      if (reads === 1) return { data: { status: 'deploying' } };
+      throw new Error('temporary upstream error');
+    } },
+    repo: { owner: 'test', repo: 'test' }, artifactId: 1, sha: 'head', idToken: 'test',
+    now: () => elapsed,
+    wait: async () => { elapsed += 300000; },
+    log: message => events.push(message),
+  }), /Pages deployment timed out.*publish-wait-fixture.*deploying/);
+  assert.match(events[0], /publish-wait-fixture/);
+  assert.match(events.at(-2), /publish-wait-fixture.*deploying/);
+  assert.equal(events.at(-1), 'cancel');
+});
+
+// GitHub deployment history uses in_progress/success; Pages reports deploying/succeed.
+// Replay the preserved timing with both vocabularies at the actual wait boundary.
+for (const activeStatus of ['in_progress', 'deploying']) {
+  for (const outcome of ['healthy', 'retry succeeds', 'retry stalls']) {
+    test(`Reproduction publish-wait-1: ${activeStatus}, ${outcome}`, async () => {
+      let elapsed = 0;
+      let createdAt = 0;
+      let deployments = 0;
+      const cancelled = [];
+      const cancelTimes = [];
+      const logs = [];
+      const payloads = [];
+      const ids = outcome === 'healthy' ? ['7671253449'] : ['7670937024', '7671253449'];
+      const proof = deployPages({
+        github: { request: async (route, args) => {
+          if (route.endsWith('/cancel')) { cancelled.push(route); cancelTimes.push(elapsed - createdAt); return {}; }
+          if (route.startsWith('POST')) {
+            payloads.push([args.artifact_id, args.pages_build_version, args.oidc_token]);
+            createdAt = elapsed;
+            return { data: { id: ids[deployments++] } };
+          }
+          assert.ok(route.endsWith(`/${ids[deployments - 1]}`));
+          const age = elapsed - createdAt;
+          const healthy = outcome === 'healthy' || (deployments === 2 && outcome === 'retry succeeds');
+          const status = age === 0 ? 'waiting' : age === 5000 ? 'queued'
+            : healthy && age >= 215000 ? 'succeed' : activeStatus;
+          return { data: { status } };
+        } },
+        repo: { owner: 'test', repo: 'test' }, artifactId: 42, sha: 'same-head', idToken: 'test',
+        now: () => elapsed, wait: async ms => { elapsed += ms; }, log: line => logs.push(line),
+      });
+      if (outcome === 'retry stalls') {
+        await assert.rejects(proof, /stalled.*7671253449.*last status=/);
+        assert.ok(logs.some(line => line.includes('7671253449') && line.includes(`last status="${activeStatus}"`)));
+      } else {
+        assert.equal((await proof).id, ids[outcome === 'healthy' ? 0 : 1]);
+      }
+      assert.ok(cancelTimes.every(ms => ms === 490000));
+      assert.equal(deployments, outcome === 'healthy' ? 1 : 2);
+      assert.deepEqual(payloads, Array(deployments).fill([42, 'same-head', 'test']));
+      assert.deepEqual(cancelled, ids.slice(0, outcome === 'healthy' ? 0 : outcome === 'retry succeeds' ? 1 : 2)
+        .map(id => `POST /repos/{owner}/{repo}/pages/deployments/${id}/cancel`));
+      if (outcome !== 'healthy') assert.match(logs.join('\n'), /7670937024.*last status=/);
+    });
+  }
+}
+
 const sha = execFileSync('git', ['rev-parse', 'HEAD'], { encoding: 'utf8' }).trim();
 // Unit fixture identities must work in CI's single-commit checkout.
 const previousSha = 'a'.repeat(40);
