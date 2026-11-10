@@ -1,3 +1,4 @@
+import { DatabaseLockDiagnostics } from './database-lock-diagnostics.js';
 import { githubProviderKey } from './providers/index.js';
 import { installShutdown } from './shutdown.js';
 import { notifyLive } from './postgres-live.js';
@@ -121,9 +122,11 @@ async function main() {
     await healthDatabase.close();
     throw error;
   }
+  const lockDiagnostics = new DatabaseLockDiagnostics(healthDatabase);
   const database = new PostgresDatabase(
     connectionString,
     budget.app,
+    { lockDiagnostics },
   );
   try {
     await assertSchemaCurrent(database);
@@ -132,8 +135,8 @@ async function main() {
     await healthDatabase.close();
     throw error;
   }
-  const enrichmentDatabase = new PostgresDatabase(connectionString, budget.enrichment, { mode: 'enrichment' });
-  const jobsDatabase = new PostgresDatabase(connectionString, budget.jobs, { mode: 'long-running' });
+  const enrichmentDatabase = new PostgresDatabase(connectionString, budget.enrichment, { mode: 'enrichment', lockDiagnostics });
+  const jobsDatabase = new PostgresDatabase(connectionString, budget.jobs, { mode: 'long-running', lockDiagnostics });
   warnIfEmbeddingKeyMissing();
   console.log(`[database] connection budget ${JSON.stringify(budget)}`);
   const publicOrigin =

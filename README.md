@@ -34,7 +34,7 @@ Personal GitHub connections on managed OAuth support read-only GraphQL (includin
 
 App tools return pending sign-in guidance and provider tool failures as ordinary results. Asking to switch Google accounts for a service other than Trusty Squire returns a caller refusal without reporting a server error. Provider-specific webhook validation, subscription lookups and custom tools live in server provider adapters. Run `node scripts/provider-special-cases.mjs` to check for provider keys outside that boundary; the server test suite enforces it. Sentry digests keep findings for the morning card. Nightly Checks accepts delayed starts on its Eastern date; a failed GitHub issue report is reported once without replaying the request. Prompt replay graders require both task completion and any configured truthfulness rule to pass.
 
-Production raw logs on squire are captured by the [live collectors](scripts/log-walk/README.md); the daily report walk is retired.
+Production raw logs on squire are captured by the [live collectors](scripts/log-walk/README.md); the daily report walk is retired. [Database lock-timeout diagnostics](docs/database-contention-diagnostics.md) capture the observed blocking query with literal values removed; connection-wait timeouts log pool occupancy and waiting requests. Missing blocker observations are explicit.
 
 The transcript scroll thumb stays still while idle rows remeasure or native anchoring adjusts the offset to hold the reading row. Those callbacks do not bring it back after it hides. Dragging it continues to use the latest loaded history size and holds the finger's destination on release.
 

@@ -1,3 +1,5 @@
+import { DatabaseLockDiagnostics } from './database-lock-diagnostics.js';
+import { loadCorner } from './corner-lifecycle-read-state.js';
 import { seedCornerOpening } from './test-fixtures/corner-commands.js';
 import { subscribeConfiguredReviewers } from './agent-subscriptions.js';
 import { seedSquireMachine } from './test-fixtures/squire-machines.js';
@@ -77,6 +79,57 @@ describe.skipIf(!url)('production transaction lock ordering', () => {
     observer?.release(); await observerPool.end();
     await admin.query(`DROP DATABASE IF EXISTS ${databaseName}`);
     await admin.end();
+  });
+
+  it('db-lock-1: a corner lookup timeout logs the observed blocking query without values', async () => {
+    const id = randomUUID();
+    await first.query(`INSERT INTO rooms(id,workspace_id,parent_id,created_by,name) VALUES($1,$2,$3,$4,'Diagnostic corner')`, [id, workspace, room, agent]);
+    await first.query('INSERT INTO corner_facts(corner_id) VALUES($1)', [id]);
+    const diagnosticsPool = new PostgresDatabase('', 1, { pool: new Pool(config) });
+    const monitoredPool = new Pool({ ...config, max: 2 });
+    // Production Neon returns a cancellation PID different from pg_backend_pid().
+    monitoredPool.on('connect', client => {
+      (client as unknown as { processID: number }).processID = -99;
+    });
+    const monitored = new PostgresDatabase('', 1, {
+      pool: monitoredPool, lockDiagnostics: new DatabaseLockDiagnostics(diagnosticsPool),
+    });
+    const warn = vi.spyOn(console, 'warn').mockImplementation(() => {});
+    try {
+      const waiterPid = (await monitored.query<{ pid: number }>('SELECT pg_backend_pid() pid')).rows[0]!.pid;
+      await observer.query('BEGIN');
+      const holderSql = "SELECT corner_id FROM corner_facts WHERE corner_id=$1 AND 'private-message-secret' <> '' FOR UPDATE";
+      await observer.query(holderSql, [id]);
+      const lookup = monitored.transaction(async db => {
+        await db.query("SET LOCAL lock_timeout='500ms'");
+        await loadCorner(db, id);
+      });
+      const failed = expect(lookup).rejects.toMatchObject({ code: '55P03' });
+      await waiting(observer, waiterPid, observerPid);
+      // A concurrent request admits the passive observation while the wait is live.
+      await observer.query('SELECT pg_sleep(0.12)');
+      // The blocker exposes its latest statement; restore the planted locking query.
+      await observer.query(holderSql, [id]);
+      await monitored.query('SELECT 1');
+      await failed;
+      const diagnostic = warn.mock.calls.find(call => call[0] === '[database] lock timeout')?.[1];
+      expect(diagnostic).toMatchObject({
+        code: '55P03', observation: 'captured',
+        statement: expect.stringContaining('SELECT fact.machine,corner.parent_id'),
+        blockers: [expect.objectContaining({
+          blocking_pid: observerPid, blocking_state: 'idle in transaction',
+          query: 'SELECT corner_id FROM corner_facts WHERE corner_id=? AND ? <> ? FOR UPDATE',
+          transaction_age_ms: expect.any(Number),
+        })],
+      });
+      expect(JSON.stringify(diagnostic)).not.toContain('private-message-secret');
+      await observer.query('ROLLBACK');
+      expect(await loadCorner(monitored, id)).toMatchObject({ parent_id: room });
+    } finally {
+      await observer.query('ROLLBACK');
+      warn.mockRestore();
+      await monitored.close(); await diagnosticsPool.close();
+    }
   });
 
   it('concurrent connections keep monotonic epochs and stale releases cannot erase the latest presence',async()=>{
