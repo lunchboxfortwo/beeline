@@ -185,6 +185,9 @@ export function useChatDesktopScroll([
       const visibleRows = viewableItems
         .filter((token) => token.isViewable)
         .map((token) => token.item);
+      const sourceId = messageAnchorIdRef.current;
+      if (sourceId && visibleRows.some((row) => messageBoundaryIds(row).includes(sourceId)))
+        console.info(`[TRANSCRIPT TARGET VISIBLE] ${sourceId}`);
       observeArtifactRows(decodedId, visibleRows.flatMap(messageBoundaryIds));
       transcriptPositions.observeVisibleRows(visibleRows);
       // The list recomputes viewability on scroll AND on every committed

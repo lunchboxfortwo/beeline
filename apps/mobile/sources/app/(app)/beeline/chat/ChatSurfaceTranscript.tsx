@@ -193,7 +193,10 @@ export const ChatSurfaceTranscript = React.memo(function ChatSurfaceTranscript({
                     if (
                       anchoredSegmentActive &&
                       event.nativeEvent.contentOffset.y <= TAIL_PIN_THRESHOLD &&
-                      !scrollController.isLanding()
+                      !scrollController.isLanding() &&
+                      // Native can deliver a queued tail offset after landing.
+                      // Keep the target until a reader gesture releases it.
+                      !scrollController.isHoldingLanding()
                     )
                       loadNewerTranscriptMessages();
                   }}

@@ -314,7 +314,7 @@ export function useRoomMessageStore({
       }
       void client
         .historyAround(requestedRoomId, messageId)
-        .then((page) => {
+        .then(async (page) => {
           if (request !== windowRequestRef.current || requestedRoomId !== previousRoomIdRef.current)
             return;
           const index = page.messages.findIndex((row) => row.id === messageId);
@@ -323,21 +323,36 @@ export function useRoomMessageStore({
             setJump({ messageId, status: 'missing' });
             return;
           }
+          let messages = page.messages;
+          // Around reads return only fourteen newer rows. Finish the bounded
+          // jump window before exposing it: otherwise a short native layout
+          // can land, then page forward underneath that completed landing.
+          if (
+            messages.length - index - 1 < JUMP_NEWER_ROWS &&
+            !(tailRef.current ?? []).some((row) => row.id === messages.at(-1)!.id) &&
+            client.historyAfter
+          ) {
+            const next = await client.historyAfter(requestedRoomId, messages.at(-1)!.id);
+            if (request !== windowRequestRef.current || requestedRoomId !== previousRoomIdRef.current)
+              return;
+            const seen = new Set(messages.map((row) => row.id));
+            messages = [...messages, ...next.messages.filter((row) => !seen.has(row.id))];
+          }
           const tailNow = tailRef.current ?? [];
           const tailIds = new Set(tailNow.map((row) => row.id));
           // The page joins the tail only when it ends inside it. A tail that
           // ends inside the page is older than the page's newest rows, and
           // putting it after the page would move those rows above the tail.
-          const reachesTail = tailIds.has(page.messages.at(-1)!.id);
+          const reachesTail = tailIds.has(messages.at(-1)!.id);
           const all = reachesTail
-            ? [...page.messages.filter((row) => !tailIds.has(row.id)), ...tailNow]
-            : page.messages;
+            ? [...messages.filter((row) => !tailIds.has(row.id)), ...tailNow]
+            : messages;
           const at = all.findIndex((row) => row.id === messageId);
           openWindowAt(
             all,
             at,
-            reachesTail ? null : (page.messages.at(-1)?.id ?? null),
-            cursorOf(page.messages[0]),
+            reachesTail ? null : (messages.at(-1)?.id ?? null),
+            cursorOf(messages[0]),
             'idle',
           );
           setJump({ messageId, status: 'ready' });

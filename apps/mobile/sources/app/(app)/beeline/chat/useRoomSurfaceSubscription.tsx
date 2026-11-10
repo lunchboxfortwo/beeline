@@ -311,11 +311,6 @@ export function useRoomSurfaceSubscription([
       fresh: boolean,
       readStamp = 0,
     ) => {
-      const parent = view.parent?.id ?? view.room.parentId;
-      if (notificationResponseId && parent && (view.room.archived || view.cornerLifecycle?.lifecycle === 'done')) {
-        router.replace({ pathname: '/beeline/chat/[channelId]', params: { channelId: parent } });
-        return;
-      }
       const stableView = paintView(view, fresh, readStamp);
       if (stableView) enrichView(stableView, identityPubkey, relayUrl, fresh, readStamp);
     };

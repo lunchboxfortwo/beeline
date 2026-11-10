@@ -12,6 +12,7 @@
     "test": "vitest",
     "apk:release": "node scripts/check-release-version.cjs && bash scripts/android-build.sh",
     "e2e:build": "node scripts/check-release-version.cjs && BEELINE_ANDROID_KEEP_DEVICE=1 bash scripts/android-build.sh",
+    "prove:android-push-tap": "node scripts/prove-android-push-tap.mjs",
     "version:check": "node scripts/check-release-version.cjs",
     "fingerprint:check": "node scripts/native-fingerprint.mjs",
     "fingerprint:write": "node scripts/native-fingerprint.mjs --write",
