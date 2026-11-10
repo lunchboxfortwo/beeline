@@ -716,6 +716,7 @@ export const ORDINARY_TOOLS: ToolDefinition[] = [
           },
           "additionalProperties": false
         },
+        "maxRuns": {"type": "integer", "minimum": 1, "description": "Run this many times, then the schedule deletes itself. Use 1 for a one-time check."},
         "scheduleId": {"type": "string", "description": "The scheduleId from wake(action:list)."},
         "source": {"type": "string", "enum": ["room", "repository", "service", "webhook"]},
         "event": {"type": "string"},

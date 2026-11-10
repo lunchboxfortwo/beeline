@@ -275,18 +275,34 @@ m31_it('calls watchCorner in the current corner and returns readable state and k
 
 
 
-m31_it('rejects schedule run limits on create and update before calling the daemon', async () => {
+m31_it('passes a one-time schedule run limit through the wake schema to the daemon', async () => {
+  await m31_callAgentTool('wake', {
+    action: 'create', trigger: 'schedule', title: 'One-time scan',
+    prompt: 'Scan.', cadence: { kind: 'interval', everyMinutes: 60 }, maxRuns: 1,
+  }, 'limited-create');
   for (const dm of [false, true]) {
     const tool = m31_agentToolsFor(true, dm).find(t => t.name === 'wake')!;
-    m31_expect(tool.inputSchema.properties).not.toHaveProperty('maxRuns');
+    m31_expect(tool.inputSchema.properties).toHaveProperty('maxRuns', {
+      type: 'integer', minimum: 1,
+      description: 'Run this many times, then the schedule deletes itself. Use 1 for a one-time check.',
+    });
   }
-  for (const action of ['create', 'update']) {
-    await m31_expect(m31_callAgentTool('wake', {
-      action, trigger: 'schedule', title: 'Daily scan', scheduleId: 'sched-1',
-      prompt: 'Scan.', cadence: { kind: 'interval', everyMinutes: 60 }, maxRuns: 14,
-    }, `limited-${action}`)).rejects.toThrow(/invalid arguments/);
-  }
-  m31_expect(scope34.calls).toEqual([]);
+  m31_expect(scope34.calls).toEqual([{
+    name: 'createAgentSchedule', input: {
+      roomId: 'watcher', title: 'One-time scan', prompt: 'Scan.',
+      cadence: { kind: 'interval', everyMinutes: 60 }, maxRuns: 1,
+    },
+  }]);
+});
+
+m31_it('passes a run-limit-only schedule update through wake to the daemon', async () => {
+  await m31_callAgentTool('wake', {
+    action: 'update', trigger: 'schedule', scheduleId: 'sched-1', maxRuns: 1,
+  }, 'limited-update');
+  m31_expect(scope34.calls).toEqual([{
+    name: 'updateAgentSchedule',
+    input: { roomId: 'watcher', scheduleId: 'sched-1', selfOnly: true, maxRuns: 1 },
+  }]);
 });
 
 
