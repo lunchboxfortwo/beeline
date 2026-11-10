@@ -142,7 +142,7 @@ import { daemonRequestAgentGrant, daemonGrantRequester, daemonConsumeAgentGrant 
       if (commandId) await ctx.database.query('UPDATE connector_offers SET command_id=$2 WHERE id=$1', [offer.offerId, commandId]);
       return { status: 'needs_approval', app: 'Wallet', next: 'Wait for the owner to approve connecting their wallet.' };
     }
-    if (input.switchGoogleAccount) throw new Error('switchGoogleAccount applies only to Trusty Squire');
+    if (input.switchGoogleAccount) throw new CommandRefusalError('switchGoogleAccount applies only to Trusty Squire', 400);
     let outcome: Output<'connectApp'>;
     if (!firstPartyIntegration(service)) {
       const key = appIdentity(service)?.key;

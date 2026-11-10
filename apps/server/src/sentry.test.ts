@@ -540,6 +540,12 @@ it('WORKFLOW-ROLE-REFUSAL / BEELINE-SENTRY-REFUSALS / APP-REFUSAL-5: real agent 
       };
       const queue = async () => (await db.query('SELECT * FROM agent_pending_attachments ORDER BY id')).rows;
       try {
+        // browser-refusal-1: Sentry event 42ab67c6e9704070a05b315fb3140e6e.
+        // Replay the rejected option through the built daemon HTTP boundary.
+        const browserRefusal = await call({...input,service:'Google',reason:'Switch browser account',
+          continuation:'Continue with the selected account.',switchGoogleAccount:true},'connect');
+        console.log('Reproduction browser-refusal-1',JSON.stringify(browserRefusal));
+        assert.deepEqual(browserRefusal,{status:400,body:{error:'switchGoogleAccount applies only to Trusty Squire'}});
         assert.equal((await call()).status,200); // One byte below the total cap.
         assert.equal((await call({...input,attachment:{...input.attachment,size:1}})).status,200); // Exactly at cap.
         const before = await queue();

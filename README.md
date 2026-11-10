@@ -30,7 +30,7 @@ Production releases retain retired database tables and columns while older serve
 
 Personal GitHub connections on managed OAuth support read-only GraphQL (including release and pull request reads with leading fragments) and repository contents writes. Repository reads follow GitHub pagination links, preserve artifact-list JSON, and forward the release download header to return file contents. Unsupported requests return a specific client error; linked-repository code writes still use the Beeline GitHub App.
 
-App tools return pending sign-in guidance and provider tool failures as ordinary results. Sentry digests keep findings for the morning card. Nightly Checks accepts delayed starts on its Eastern date; a failed GitHub issue report is reported once without replaying the request. Prompt replay graders require both task completion and any configured truthfulness rule to pass.
+App tools return pending sign-in guidance and provider tool failures as ordinary results. Asking to switch Google accounts for a service other than Trusty Squire returns a caller refusal without reporting a server error. Sentry digests keep findings for the morning card. Nightly Checks accepts delayed starts on its Eastern date; a failed GitHub issue report is reported once without replaying the request. Prompt replay graders require both task completion and any configured truthfulness rule to pass.
 
 Production raw logs on squire are captured by the [live collectors](scripts/log-walk/README.md); the daily report walk is retired.
 
