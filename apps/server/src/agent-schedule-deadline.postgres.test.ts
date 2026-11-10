@@ -1,9 +1,8 @@
 import { randomUUID } from 'node:crypto';
-import { readFileSync } from 'node:fs';
 import { Pool } from 'pg';
 import { describe, expect, it, vi } from 'vitest';
 import { AgentScheduleLoop } from './agent-schedules.js';
-import type { SqlDatabase } from './database.js';
+import { SCHEMA, type SqlDatabase } from './database.js';
 
 const url = process.env.BEELINE_COMMAND_TEST_POSTGRES_URL;
 if (url && !['127.0.0.1', 'localhost', '[::1]'].includes(new URL(url).hostname)) {
@@ -19,30 +18,35 @@ describe.skipIf(!url)('Persisted schedule clock admission', () => {
       await pool.query(`SET search_path TO ${schema}`);
       // Minimal physical-plan fixture; full migrated schema behavior is covered
       // by agent-schedules/postgres-live tests, not claimed by this fixture.
-      await pool.query(`CREATE TABLE rooms(id uuid PRIMARY KEY,archived_at timestamptz);
-        CREATE TABLE identities(id text PRIMARY KEY,kind text);
+      await pool.query(`CREATE TABLE rooms(id uuid PRIMARY KEY,workspace_id uuid,archived_at timestamptz);
+        CREATE TABLE messages(id text PRIMARY KEY,room_id uuid,card_type text,card jsonb,created_at timestamptz);
+        CREATE TABLE workspace_skills(id uuid,workspace_id uuid,slug text,kind text);
+        CREATE TABLE workspace_skill_versions(skill_id uuid,version int,markdown text);
+        CREATE TABLE identities(id text PRIMARY KEY,kind text,hidden_from_roster boolean DEFAULT false,
+          created_at timestamptz DEFAULT now());
+        CREATE TABLE agents(agent_id text PRIMARY KEY,owner_id text);
         CREATE TABLE memberships(room_id uuid,identity_id text,removed_at timestamptz);
         CREATE VIEW room_access AS SELECT * FROM memberships;
         CREATE TABLE agent_schedules(id uuid PRIMARY KEY,room_id uuid,agent_id text,creator_id text,
           owner_id text,workflow_slug text,human_command_message_id text,cadence jsonb,message text,
           max_runs int,run_count int DEFAULT 0,next_run_at timestamptz,updated_at timestamptz DEFAULT now(),
-          workflow_run jsonb,failed_due_at timestamptz,failed_revision timestamptz);`);
-      const source = readFileSync(new URL('./database.ts', import.meta.url), 'utf8');
-      const index = source.match(/CREATE INDEX IF NOT EXISTS agent_schedules_admitted_due_idx[^;]+;/)?.[0];
+          paused_at timestamptz,failed_due_at timestamptz,failed_revision timestamptz);`);
+      // Use the assembled production schema regardless of how its SQL is split across files.
+      const index = SCHEMA.match(/CREATE INDEX IF NOT EXISTS agent_schedules_admitted_due_idx[^;]+;/)?.[0];
       expect(index).toBeTruthy(); await pool.query(index!);
       await pool.query('INSERT INTO rooms(id) VALUES($1)', [room]);
-      await pool.query("INSERT INTO identities VALUES('agent','agent'),('human','human')");
+      await pool.query("INSERT INTO identities(id,kind) VALUES('agent','agent'),('human','human')");
       await pool.query("INSERT INTO memberships VALUES($1,'agent',NULL),($1,'human',NULL)", [room]);
       await pool.query(`INSERT INTO agent_schedules(id,room_id,agent_id,creator_id,cadence,message,next_run_at,failed_due_at,failed_revision)
         SELECT gen_random_uuid(),$1,'agent','human','{"kind":"interval","everyMinutes":5}',
           'Synthetic',now()-interval '1 day',now()-interval '1 day',now() FROM generate_series(1,10000)`, [room]);
       await pool.query(`INSERT INTO agent_schedules(id,room_id,agent_id,creator_id,cadence,message,next_run_at)
         VALUES(gen_random_uuid(),$1,'agent','human','{"kind":"interval","everyMinutes":5}','Future',now()+interval '1 hour')`, [room]);
-      await pool.query('ANALYZE agent_schedules');
+      await pool.query('ANALYZE agent_schedules; ANALYZE rooms; ANALYZE identities; ANALYZE memberships');
       let deadlineSql = '';
       const transaction = vi.fn(async () => { throw new Error('future work was dispatched'); });
       const database = { query: async (sql: string, values?: unknown[]) => {
-        if (sql.includes('delay_ms')) deadlineSql = sql;
+        if (sql.includes('ORDER BY schedule.next_run_at')) deadlineSql = sql;
         return pool.query(sql, values);
       }, transaction } as unknown as SqlDatabase;
       vi.useFakeTimers({ toFake: ['Date'] }); vi.setSystemTime(new Date('2099-01-01'));

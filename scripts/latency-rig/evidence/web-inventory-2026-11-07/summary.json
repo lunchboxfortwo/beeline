@@ -1,0 +1,503 @@
+{
+  "schemaVersion": 1,
+  "platform": "headless-chromium-web",
+  "commit": "39b3ae651f54c63ba393a8f96f3a4ffcecb93b07",
+  "browser": "158.0.8127.18",
+  "sourceHashes": {
+    "web-fixtures.mjs": "5417ecb2a23e17ed7cabf3dbf0009e6f70185e02f9eeff19ac8421d78bff58ca",
+    "web-steps.mjs": "cef5ad0a40bebce9d4487c5c7fe2ab2b2f04bbdbda6aed7c9aca368aee646f2e",
+    "web-capture.mjs": "ba51453a5b75795153eea6734d9a216909ce58658bae847e40d12a3440103412",
+    "interactions.json": "d5371537b295314b3cef53cb5b8e372b66ae883526980ef4a2f32cff50003472",
+    "routes.json": "d39bb3faa0876480d31fa0cda4a4e4ffb81ca9bce63a145f5e90db6ca73290f4"
+  },
+  "method": "User action to observed destination/result DOM plus two animation frames, including driver overhead; upper bound, not physical scanout. Setup, reset and sign-in excluded. Local server only; no injected network delay.",
+  "fullInventoryScore": null,
+  "scoreDefinition": "Percentage of the complete interaction inventory with paired pooled p50 below 150 ms; null if any item is unmeasured",
+  "coverage": {
+    "measured": 19,
+    "total": 26
+  },
+  "rows": [
+    {
+      "name": "open-room",
+      "samples": 40,
+      "p50Ms": 316.59999990463257,
+      "p95Ms": 456,
+      "captures": [
+        {
+          "capture": 1,
+          "samples": 20,
+          "p50Ms": 264.3999996185303,
+          "p95Ms": 360.3999996185303
+        },
+        {
+          "capture": 2,
+          "samples": 20,
+          "p50Ms": 337.5,
+          "p95Ms": 500.7000002861023
+        }
+      ]
+    },
+    {
+      "name": "open-corner",
+      "samples": 40,
+      "p50Ms": 175.5,
+      "p95Ms": 298.30000019073486,
+      "captures": [
+        {
+          "capture": 1,
+          "samples": 20,
+          "p50Ms": 177.09999990463257,
+          "p95Ms": 286
+        },
+        {
+          "capture": 2,
+          "samples": 20,
+          "p50Ms": 174.09999990463257,
+          "p95Ms": 298.30000019073486
+        }
+      ]
+    },
+    {
+      "name": "switch-workspace",
+      "samples": 40,
+      "p50Ms": 411.90000009536743,
+      "p95Ms": 578.5,
+      "captures": [
+        {
+          "capture": 1,
+          "samples": 20,
+          "p50Ms": 406.7999997138977,
+          "p95Ms": 508.59999990463257
+        },
+        {
+          "capture": 2,
+          "samples": 20,
+          "p50Ms": 414.5,
+          "p95Ms": 578.5
+        }
+      ]
+    },
+    {
+      "name": "create-room",
+      "samples": 40,
+      "p50Ms": 338.90000009536743,
+      "p95Ms": 444.90000009536743,
+      "captures": [
+        {
+          "capture": 1,
+          "samples": 20,
+          "p50Ms": 346.80000019073486,
+          "p95Ms": 608
+        },
+        {
+          "capture": 2,
+          "samples": 20,
+          "p50Ms": 331.2000002861023,
+          "p95Ms": 385.19999980926514
+        }
+      ]
+    },
+    {
+      "name": "create-dm",
+      "samples": 40,
+      "p50Ms": 301.69999980926514,
+      "p95Ms": 420.30000019073486,
+      "captures": [
+        {
+          "capture": 1,
+          "samples": 20,
+          "p50Ms": 307,
+          "p95Ms": 431
+        },
+        {
+          "capture": 2,
+          "samples": 20,
+          "p50Ms": 301.2000002861023,
+          "p95Ms": 353.80000019073486
+        }
+      ]
+    },
+    {
+      "name": "create-corner",
+      "samples": 40,
+      "p50Ms": 852.3999996185303,
+      "p95Ms": 1037.5999999046326,
+      "captures": [
+        {
+          "capture": 1,
+          "samples": 20,
+          "p50Ms": 794.4000000953674,
+          "p95Ms": 857.6999998092651
+        },
+        {
+          "capture": 2,
+          "samples": 20,
+          "p50Ms": 926.8000001907349,
+          "p95Ms": 1072.1999998092651
+        }
+      ]
+    },
+    {
+      "name": "send-text",
+      "samples": 40,
+      "p50Ms": 50.700000286102295,
+      "p95Ms": 79.30000019073486,
+      "captures": [
+        {
+          "capture": 1,
+          "samples": 20,
+          "p50Ms": 47.09999990463257,
+          "p95Ms": 72.40000009536743
+        },
+        {
+          "capture": 2,
+          "samples": 20,
+          "p50Ms": 64.7999997138977,
+          "p95Ms": 79.89999961853027
+        }
+      ]
+    },
+    {
+      "name": "forward-message",
+      "samples": 40,
+      "p50Ms": 850.5999999046326,
+      "p95Ms": 880.2999997138977,
+      "captures": [
+        {
+          "capture": 1,
+          "samples": 20,
+          "p50Ms": 846.4000000953674,
+          "p95Ms": 862.7000002861023
+        },
+        {
+          "capture": 2,
+          "samples": 20,
+          "p50Ms": 868.5999999046326,
+          "p95Ms": 881.4000000953674
+        }
+      ]
+    },
+    {
+      "name": "react-message",
+      "samples": 40,
+      "p50Ms": 79.19999980926514,
+      "p95Ms": 95.7999997138977,
+      "captures": [
+        {
+          "capture": 1,
+          "samples": 20,
+          "p50Ms": 77.5,
+          "p95Ms": 90.30000019073486
+        },
+        {
+          "capture": 2,
+          "samples": 20,
+          "p50Ms": 79.5,
+          "p95Ms": 95.89999961853027
+        }
+      ]
+    },
+    {
+      "name": "bookmark-message",
+      "samples": 40,
+      "p50Ms": 106.5,
+      "p95Ms": 123.90000009536743,
+      "captures": [
+        {
+          "capture": 1,
+          "samples": 20,
+          "p50Ms": 105.40000009536743,
+          "p95Ms": 138.59999990463257
+        },
+        {
+          "capture": 2,
+          "samples": 20,
+          "p50Ms": 106.90000009536743,
+          "p95Ms": 122
+        }
+      ]
+    },
+    {
+      "name": "report-message",
+      "samples": 40,
+      "p50Ms": 113.09999990463257,
+      "p95Ms": 123.90000009536743,
+      "captures": [
+        {
+          "capture": 1,
+          "samples": 20,
+          "p50Ms": 111.40000009536743,
+          "p95Ms": 125.2000002861023
+        },
+        {
+          "capture": 2,
+          "samples": 20,
+          "p50Ms": 114.5,
+          "p95Ms": 120.7000002861023
+        }
+      ]
+    },
+    {
+      "name": "delete-message",
+      "samples": 40,
+      "p50Ms": 78,
+      "p95Ms": 103.7999997138977,
+      "captures": [
+        {
+          "capture": 1,
+          "samples": 20,
+          "p50Ms": 76.7000002861023,
+          "p95Ms": 95
+        },
+        {
+          "capture": 2,
+          "samples": 20,
+          "p50Ms": 80.10000038146973,
+          "p95Ms": 103.7999997138977
+        }
+      ]
+    },
+    {
+      "name": "rename-room",
+      "samples": 40,
+      "p50Ms": 82.5,
+      "p95Ms": 108.30000019073486,
+      "captures": [
+        {
+          "capture": 1,
+          "samples": 20,
+          "p50Ms": 82.5,
+          "p95Ms": 108.30000019073486
+        },
+        {
+          "capture": 2,
+          "samples": 20,
+          "p50Ms": 82.40000009536743,
+          "p95Ms": 103.80000019073486
+        }
+      ]
+    },
+    {
+      "name": "leave-room",
+      "samples": 40,
+      "p50Ms": 209.90000009536743,
+      "p95Ms": 253.30000019073486,
+      "captures": [
+        {
+          "capture": 1,
+          "samples": 20,
+          "p50Ms": 209.7999997138977,
+          "p95Ms": 240.2000002861023
+        },
+        {
+          "capture": 2,
+          "samples": 20,
+          "p50Ms": 210.30000019073486,
+          "p95Ms": 253.30000019073486
+        }
+      ]
+    },
+    {
+      "name": "close-corner",
+      "samples": 40,
+      "p50Ms": 211.90000009536743,
+      "p95Ms": 278.59999990463257,
+      "captures": [
+        {
+          "capture": 1,
+          "samples": 20,
+          "p50Ms": 213.40000009536743,
+          "p95Ms": 278.59999990463257
+        },
+        {
+          "capture": 2,
+          "samples": 20,
+          "p50Ms": 211.59999990463257,
+          "p95Ms": 238.80000019073486
+        }
+      ]
+    },
+    {
+      "name": "answer-approval",
+      "samples": 40,
+      "p50Ms": 103.60000038146973,
+      "p95Ms": 149.89999961853027,
+      "captures": [
+        {
+          "capture": 1,
+          "samples": 20,
+          "p50Ms": 103.60000038146973,
+          "p95Ms": 146.69999980926514
+        },
+        {
+          "capture": 2,
+          "samples": 20,
+          "p50Ms": 101.69999980926514,
+          "p95Ms": 152
+        }
+      ]
+    },
+    {
+      "name": "choose-model",
+      "samples": 40,
+      "p50Ms": 81.09999990463257,
+      "p95Ms": 101.59999990463257,
+      "captures": [
+        {
+          "capture": 1,
+          "samples": 20,
+          "p50Ms": 81.09999990463257,
+          "p95Ms": 101.59999990463257
+        },
+        {
+          "capture": 2,
+          "samples": 20,
+          "p50Ms": 80.19999980926514,
+          "p95Ms": 98
+        }
+      ]
+    },
+    {
+      "name": "change-yolo",
+      "samples": 40,
+      "p50Ms": 69.7999997138977,
+      "p95Ms": 101.2000002861023,
+      "captures": [
+        {
+          "capture": 1,
+          "samples": 20,
+          "p50Ms": 67.40000009536743,
+          "p95Ms": 78.90000009536743
+        },
+        {
+          "capture": 2,
+          "samples": 20,
+          "p50Ms": 81.59999990463257,
+          "p95Ms": 112.40000009536743
+        }
+      ]
+    },
+    {
+      "name": "stop-turn",
+      "samples": 40,
+      "p50Ms": 94.80000019073486,
+      "p95Ms": 136,
+      "captures": [
+        {
+          "capture": 1,
+          "samples": 20,
+          "p50Ms": 76.7999997138977,
+          "p95Ms": 107.90000009536743
+        },
+        {
+          "capture": 2,
+          "samples": 20,
+          "p50Ms": 110,
+          "p95Ms": 136.40000009536743
+        }
+      ]
+    }
+  ],
+  "unmeasured": [
+    {
+      "name": "send-attachment",
+      "reason": "Capture 1: OS file-picker completion is outside headless page rendering; this web capture does not claim native picker or upload timing.; Capture 2: OS file-picker completion is outside headless page rendering; this web capture does not claim native picker or upload timing.",
+      "captures": [
+        {
+          "capture": 1,
+          "samples": 0
+        },
+        {
+          "capture": 2,
+          "samples": 0
+        }
+      ]
+    },
+    {
+      "name": "mark-read",
+      "reason": "Capture 1: The current phone UI advances read marks automatically from the visible message viewport; it has no standalone Mark as read control. Room opening is measured separately.; Capture 2: The current phone UI advances read marks automatically from the visible message viewport; it has no standalone Mark as read control. Room opening is measured separately.",
+      "captures": [
+        {
+          "capture": 1,
+          "samples": 0
+        },
+        {
+          "capture": 2,
+          "samples": 0
+        }
+      ]
+    },
+    {
+      "name": "mark-unread",
+      "reason": "Capture 1: The current phone UI has no Mark as unread control; only the internal room session method remains. The rig does not invoke an internal method as a user interaction.; Capture 2: The current phone UI has no Mark as unread control; only the internal room session method remains. The rig does not invoke an internal method as a user interaction.",
+      "captures": [
+        {
+          "capture": 1,
+          "samples": 0
+        },
+        {
+          "capture": 2,
+          "samples": 0
+        }
+      ]
+    },
+    {
+      "name": "approve-merge",
+      "reason": "Capture 1: A valid merge gate needs live GitHub checks and exact-head approval; the deterministic offline fixture has no repository or GitHub connection. No merge request is sent.; Capture 2: A valid merge gate needs live GitHub checks and exact-head approval; the deterministic offline fixture has no repository or GitHub connection. No merge request is sent.",
+      "captures": [
+        {
+          "capture": 1,
+          "samples": 0
+        },
+        {
+          "capture": 2,
+          "samples": 0
+        }
+      ]
+    },
+    {
+      "name": "start-workflow",
+      "reason": "Capture 1: The saved internal workflow detail page exposes its definition, not a human start control; starting it requires an agent workflow command and helper execution, absent from this headless phone fixture.; Capture 2: The saved internal workflow detail page exposes its definition, not a human start control; starting it requires an agent workflow command and helper execution, absent from this headless phone fixture.",
+      "captures": [
+        {
+          "capture": 1,
+          "samples": 0
+        },
+        {
+          "capture": 2,
+          "samples": 0
+        }
+      ]
+    },
+    {
+      "name": "handoff-workflow",
+      "reason": "Capture 1: Workflow handoff is an agent command tied to an active owned step, not a phone control. This fixture has no executing helper; no handoff timing is inferred from opening a workflow page.; Capture 2: Workflow handoff is an agent command tied to an active owned step, not a phone control. This fixture has no executing helper; no handoff timing is inferred from opening a workflow page.",
+      "captures": [
+        {
+          "capture": 1,
+          "samples": 0
+        },
+        {
+          "capture": 2,
+          "samples": 0
+        }
+      ]
+    },
+    {
+      "name": "connect-app",
+      "reason": "Capture 1: Connection completion requires an external provider sign-in/consent ceremony. External requests are blocked in this deterministic fixture; opening the connection sheet is not a completed connection.; Capture 2: Connection completion requires an external provider sign-in/consent ceremony. External requests are blocked in this deterministic fixture; opening the connection sheet is not a completed connection.",
+      "captures": [
+        {
+          "capture": 1,
+          "samples": 0
+        },
+        {
+          "capture": 2,
+          "samples": 0
+        }
+      ]
+    }
+  ],
+  "blockedRequests": []
+}

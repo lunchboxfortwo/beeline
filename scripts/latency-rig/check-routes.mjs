@@ -12,8 +12,11 @@ const interactionsPath = new URL('./interactions.json', import.meta.url);
 
 async function files(directory) {
   const entries = await readdir(directory, { withFileTypes: true });
-  const nested = await Promise.all(entries.map((entry) =>
-    entry.isDirectory() ? files(join(directory, entry.name)) : [join(directory, entry.name)]));
+  const nested = await Promise.all(
+    entries.map((entry) =>
+      entry.isDirectory() ? files(join(directory, entry.name)) : [join(directory, entry.name)],
+    ),
+  );
   return nested.flat();
 }
 
@@ -21,10 +24,22 @@ export function routeForFile(file) {
   if (!file.endsWith('.tsx') || file.endsWith('.test.tsx')) return null;
   const parts = file.split('/');
   const last = parts.at(-1);
-  if (last.startsWith('_') || last.startsWith('+')) return null;
+  if (
+    last.startsWith('_') ||
+    last.startsWith('+') ||
+    /^use[A-Z]/.test(last) ||
+    last.startsWith('test-support-') ||
+    last.endsWith('.test-support.tsx') ||
+    last === 'chat-surface-values.tsx'
+  )
+    return null;
   if (/^[A-Z]/.test(parts.at(-1))) return null;
-  const path = parts.filter((part) => !/^\(.*\)$/.test(part))
-    .join('/').replace(/\.tsx$/, '').replace(/(^|\/)index$/, '') || '/';
+  const path =
+    parts
+      .filter((part) => !/^\(.*\)$/.test(part))
+      .join('/')
+      .replace(/\.tsx$/, '')
+      .replace(/(^|\/)index$/, '') || '/';
   return path.startsWith('/') ? path : `/${path}`;
 }
 
@@ -35,11 +50,16 @@ export async function checkRoutes(actualFiles, routes) {
   if (duplicate) throw new Error(`duplicate route budget: ${duplicate}`);
   const missing = expected.filter((path) => !observed.includes(path));
   const extra = observed.filter((path) => !expected.includes(path));
-  if (missing.length || extra.length) throw new Error(`route budget drift: missing=${missing.join(',')} extra=${extra.join(',')}`);
+  if (missing.length || extra.length)
+    throw new Error(`route budget drift: missing=${missing.join(',')} extra=${extra.join(',')}`);
   for (const route of routes) {
-    if (!Number.isInteger(route.coldHttpMax) || !Number.isInteger(route.coldDepthMax) ||
-        route.coldHttpMax < 0 || route.coldDepthMax < 0 ||
-        route.coldDepthMax > route.coldHttpMax)
+    if (
+      !Number.isInteger(route.coldHttpMax) ||
+      !Number.isInteger(route.coldDepthMax) ||
+      route.coldHttpMax < 0 ||
+      route.coldDepthMax < 0 ||
+      route.coldDepthMax > route.coldHttpMax
+    )
       throw new Error(`invalid cold request budget for ${route.path}`);
   }
   return expected;
@@ -49,11 +69,18 @@ if (process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href) 
   const paths = (await files(root)).map((file) => relative(root, file).split(sep).join('/'));
   const routes = JSON.parse(await readFile(budgetPath, 'utf8'));
   const interactions = JSON.parse(await readFile(interactionsPath, 'utf8'));
-  validateArrivalCases(JSON.parse(await readFile(new URL('./room-arrival-cases.json', import.meta.url), 'utf8')));
+  validateArrivalCases(
+    JSON.parse(await readFile(new URL('./room-arrival-cases.json', import.meta.url), 'utf8')),
+  );
   const checked = await checkRoutes(paths, routes);
-  if (!Array.isArray(interactions) || interactions.length === 0 ||
-      interactions.some((name) => typeof name !== 'string' || !name) ||
-      new Set(interactions).size !== interactions.length)
+  if (
+    !Array.isArray(interactions) ||
+    interactions.length === 0 ||
+    interactions.some((name) => typeof name !== 'string' || !name) ||
+    new Set(interactions).size !== interactions.length
+  )
     throw new Error('interaction matrix must contain distinct names');
-  console.log(`Latency budgets cover ${checked.length} Expo routes and ${interactions.length} interactions.`);
+  console.log(
+    `Latency budgets cover ${checked.length} Expo routes and ${interactions.length} interactions.`,
+  );
 }

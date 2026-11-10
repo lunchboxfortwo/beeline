@@ -1,17 +1,20 @@
 import { afterAll, beforeAll, describe, expect, it, vi } from 'vitest';
 import { createHash, randomBytes } from 'node:crypto';
+import { BACKGROUND_DUE_SOURCE_SCHEMA } from './background-due-source.js';
 import { ROOMS_MCP_SCHEMA } from './rooms-mcp-schema.js';
 import { migrate } from './database.js';
 import { PgliteDatabase } from './test-support.js';
 import { PhoneService } from './phone-service.js';
-import { DaemonService } from './daemon-service.js';
+import { HelperDaemonService as DaemonService } from './test-fixtures/helper-daemon.js';
 import { LiveHub } from './live.js';
 import { TokenAuth } from './auth.js';
 import { RoomsMcp } from './rooms-mcp.js';
 import { RoomsMcpOAuth, type McpPrincipal } from './rooms-mcp-oauth.js';
 import { recordMcpMention, recordMcpMemberWebhook, deliverMcpMemberWebhooks } from './rooms-mcp-members.js';
 import { routeHumanMessage } from './agent-command.js';
-import { retryOwedMentions, owedMentions, clearOwedMention } from './owed-mentions.js';
+import { owedMentions, clearOwedMention } from './owed-mentions.js';
+
+
 import { MCP_STARTER_ROUTINE } from '@beeline/api-contract/phone';
 
 const owner = '1'.repeat(64), member = '2'.repeat(64), other = '3'.repeat(64), helper = '4'.repeat(64);
@@ -55,11 +58,13 @@ describe('owed Room tags', () => {
     const payloads: any[] = [];
     await deliverMcpMemberWebhooks(db, async (_url, init) => { payloads.push(JSON.parse(init.body)); return new Response('', { status: 200 }); });
     const payload = payloads.find(p => p.messageId === message);
-    const expected = { roomId: room, messageId: message, memberId: member, replyRule: `answer in this Room with replyTo ${message}` };
+    const expected = { roomId: room, messageId: message, memberId: member, replyRule: `answer in this Room with replyTo ${message} and start with @owner` };
     expect(payload).toMatchObject(expected);
     const cut = { ...payload, instruction: payload.instruction.slice(0, 200) };
     expect(cut).toMatchObject(expected);
     expect(cut.instruction).toContain(message);
+    expect(payload.instruction).toContain(expected.replyRule);
+    expect(await owedMentions(db, member)).toContainEqual(expect.objectContaining(expected));
     const page = await call('list_mentions');
     expect(page.mentions.find((m: any) => m.id === message)).toMatchObject(expected);
   });
@@ -85,6 +90,21 @@ describe('owed Room tags', () => {
     await call('no_reply_needed', { address: room, messageId: keep });
     expect((await owedMentions(db, member)).some(m => m.messageId === keep)).toBe(false);
   });
+  it('Reproduction 7: a committed reply and lost Room access disappear from the next tool result', async () => {
+    const answered = await tag(helper), pending = await tag(helper);
+    await db.query(`INSERT INTO messages(id,room_id,author_id,text,reply_to_message_id)
+      VALUES($1,$2,$3,'ordinary reply',$4)`, [id(), room, helper, answered]);
+    // Recreate an old/late ledger entry after the reply trigger already ran.
+    await db.query('DELETE FROM rooms_mcp_mentions WHERE member_id=$1 AND message_id=$2', [helper, answered]);
+    await recordMcpMention(db, helper, room, answered);
+    const read = () => daemon.execute('getOwedMentions', {}, helper);
+    expect((await read()).owedMentions.map(m => m.messageId)).not.toContain(answered);
+    expect((await read()).owedMentions.map(m => m.messageId)).toContain(pending);
+    await db.query('UPDATE memberships SET removed_at=now() WHERE room_id=$1 AND identity_id=$2', [room, helper]);
+    try { expect((await read()).owedMentions).toEqual([]); }
+    finally { await db.query('UPDATE memberships SET removed_at=NULL WHERE room_id=$1 AND identity_id=$2', [room, helper]); }
+  });
+
   it('C6 owed-only list and legacy cursor paging', async () => {
     const a = await tag(), b = await tag();
     const seq = (await db.query<{seq: string}>('SELECT seq::text seq FROM rooms_mcp_mentions WHERE member_id=$1 AND message_id=$2', [member, a])).rows[0]!.seq;
@@ -153,11 +173,24 @@ describe('owed Room tags', () => {
     const message = await tag(); await recordMcpMention(db, other, room, message);
     for (const who of [member, other]) {
       const first = await call('send_message', { room, text: 'first', replyTo: message, idempotencyKey: 'custom-key' }, who);
-      const retry = await call('send_message', { room, text: 'retry', replyTo: message, idempotencyKey: 'different-key' }, who);
-      expect(retry.messageId).toBe(first.messageId);
-      expect((await db.query('SELECT 1 FROM rooms_mcp_idempotency WHERE member_id=$1 AND idempotency_key=$2', [who, `mention:${who}:${message}`])).rowCount).toBe(1);
+      const retry = await call('send_message', { room, text: 'first', replyTo: message, idempotencyKey: 'different-key' }, who);
+      expect(retry).toEqual(first);
+      expect((await db.query(`SELECT 1 FROM rooms_mcp_idempotency WHERE member_id=$1 AND idempotency_key LIKE $2`, [who, `mention:${who}:${message}:%`])).rowCount).toBe(1);
     }
     expect((await db.query('SELECT 1 FROM messages WHERE reply_to_message_id=$1', [message])).rowCount).toBe(2);
+  });
+  it('R1 a second, different reply to the same tag is stored, readable, searchable and wakes its own tags', async () => {
+    const message = await tag(member, 'desktop audit request');
+    const first = await call('send_message', { room, text: '@owner blocked for now', replyTo: message });
+    const second = await call('send_message', { room, text: '@owner @pidoong unblocked zebracorn', replyTo: message });
+    expect(second.messageId).not.toBe(first.messageId);
+    const replies = (await db.query<{ id: string; text: string }>('SELECT id,text FROM messages WHERE reply_to_message_id=$1 ORDER BY created_at,id', [message])).rows;
+    expect(replies.map(r => r.id).sort()).toEqual([first.messageId, second.messageId].sort());
+    expect((await call('read_messages', { room })).messages.map((m: any) => m.id)).toEqual(expect.arrayContaining([first.messageId, second.messageId]));
+    expect((await call('search_messages', { query: 'zebracorn' })).messages.map((m: any) => m.id)).toEqual([second.messageId]);
+    const reached = [...second.woken.map((w: any) => w.handle ?? w), ...second.notWoken.map((w: any) => w.handle)];
+    expect(reached).toContain('pidoong');
+    expect(first.notWoken.map((w: any) => w.handle)).not.toContain('pidoong');
   });
   it('C5 helper silence requires an explicit tag message ID and clears only that tag', async () => {
     await db.query("UPDATE agent_commands SET state='complete' WHERE agent_id=$1 AND state='pending'", [helper]);
@@ -190,39 +223,44 @@ describe('owed Room tags', () => {
     expect((await db.query('SELECT id FROM messages WHERE author_id=$1 AND reply_to_message_id=$2', [helper, source])).rows).toEqual([{ id: first.id }]);
     expect((await owedMentions(db, helper)).some(m => m.messageId === source)).toBe(false);
   });
-  it('C9 fake-clock re-wakes at 5/15/45 minutes then stops silently, skipping an in-flight turn', async () => {
-    await db.query('UPDATE rooms_mcp_mentions SET cleared_at=now()');
-    await db.query(`INSERT INTO rooms_mcp_connections(client_id,identity_id,scope) VALUES('test',$1,'rooms:read rooms:write') ON CONFLICT DO NOTHING`, [owner]);
-    await db.query(`INSERT INTO rooms_mcp_event_subscriptions(id,client_id,owner_id,member_id,url,secret,verified_at,expires_at)
-      VALUES('local-rewake','test',$1,$2,'https://example.com/events','local-fixture',now(),now()+interval '1 day')`, [owner, member]);
-    const message = await tag();
-    const start = new Date('2030-01-01T00:00:00Z');
-    await db.query('UPDATE rooms_mcp_mentions SET created_at=$1 WHERE message_id=$2', [start, message]);
-    const count = (await db.query('SELECT 1 FROM messages')).rowCount;
-    let legacyCursor = (await call('list_mentions')).nextCursor;
-    for (const minute of [4, 5, 14, 15, 44, 45, 60]) {
-      const wakes = await retryOwedMentions(db, new Date(start.getTime() + minute * 60_000));
-      expect(wakes).toBe([5,15,45].includes(minute) ? 1 : 0);
-      if (wakes) {
-        const page = await call('list_mentions', { cursor: legacyCursor });
-        expect(page.mentions.map((m: any) => m.id)).toContain(message);
-        legacyCursor = page.nextCursor;
-        const event = (await db.query<{ body: string }>('SELECT body FROM rooms_mcp_event_deliveries WHERE message_id=$1', [message])).rows[0]!;
-        expect(event.body.indexOf('replyRule')).toBeLessThan(event.body.indexOf('text'));
-        expect(JSON.parse(event.body).data).toMatchObject({ roomId: room, messageId: message, memberId: member, replyRule: `answer in this Room with replyTo ${message}` });
-        expect((await db.query('SELECT 1 FROM rooms_mcp_webhook_outbox WHERE message_id=$1 AND delivered_at IS NULL', [message])).rowCount).toBe(1);
-      }
-    }
-    expect((await db.query('SELECT 1 FROM messages')).rowCount).toBe(count);
-    const source = id();
-    await db.query(`INSERT INTO messages(id,room_id,author_id,text) VALUES($1,$2,$3,'@helper slow job')`, [source, room, owner]);
-    await routeHumanMessage(db, source);
-    await db.query(`UPDATE agent_commands SET state='claimed',lease_expires_at=now()+interval '1 hour' WHERE source_message_id=$1`, [source]);
-    await db.query('UPDATE rooms_mcp_mentions SET created_at=$1 WHERE message_id=$2', [start, source]);
-    expect(await retryOwedMentions(db, new Date(start.getTime()+5*60_000))).toBe(0);
-    await db.query(`UPDATE agent_commands SET state='complete',lease_expires_at=NULL WHERE source_message_id=$1`, [source]);
-    expect(await retryOwedMentions(db, new Date(start.getTime()+15*60_000))).toBe(1);
-    expect((await db.query('SELECT state FROM agent_commands WHERE source_message_id=$1', [source])).rows).toEqual([{ state: 'pending' }]);
+
+  it('a reply committed before delivery suppresses the queued tag wake', async () => {
+    const source = await tag(member, 'answer before webhook delivery');
+    await recordMcpMemberWebhook(db, member, 'https://example.com/wake', room, source, 'answer before webhook delivery');
+    await call('send_message', { room, text: 'already answered', replyTo: source });
+    const transport = vi.fn(async () => new Response(null, { status: 204 }));
+    await deliverMcpMemberWebhooks(db, transport);
+    expect(transport.mock.calls.some(([, input]) => JSON.parse(input.body).messageId === source)).toBe(false);
+    expect((await db.query(`SELECT outcome,reason FROM subscription_webhook_calls WHERE member_id=$1 AND wake_message_id=$2`, [member, source])).rows)
+      .toEqual([{ outcome: 'skipped', reason: 'already answered' }]);
+  });
+
+  it('an answered tag stays settled across idle time and later event drains', async () => {
+    const source = await tag(member, 'one answered question');
+    const queued = await recordMcpMemberWebhook(db, member, 'https://example.com/wake', room, source, 'one answered question');
+    expect(queued).toBeDefined();
+    const transport = vi.fn(async () => new Response(null, { status: 204 }));
+    await deliverMcpMemberWebhooks(db, transport);
+    await call('send_message', { room, text: 'answered', replyTo: source });
+    const calls = transport.mock.calls.length;
+    vi.useFakeTimers({ toFake: ['Date', 'setTimeout', 'clearTimeout', 'setInterval', 'clearInterval'] });
+    try {
+      await vi.advanceTimersByTimeAsync(3 * 86400_000);
+      expect(vi.getTimerCount()).toBe(0);
+      await deliverMcpMemberWebhooks(db, transport);
+      expect(transport).toHaveBeenCalledTimes(calls);
+      expect((await owedMentions(db, member)).some(item => item.messageId === source)).toBe(false);
+    } finally { vi.useRealTimers(); }
+  });
+
+  it('COMPLETED-TAG: migration removes retired background source triggers on upgraded databases', async () => {
+    await db.query(`CREATE TRIGGER beeline_background_source_999 AFTER INSERT OR UPDATE OR DELETE ON rooms_mcp_mentions
+      FOR EACH ROW EXECUTE FUNCTION beeline_background_source('owed-mentions','created_at,cleared_at')`);
+    await db.query(BACKGROUND_DUE_SOURCE_SCHEMA);
+    await db.query(BACKGROUND_DUE_SOURCE_SCHEMA);
+    expect((await db.query(`SELECT 1 FROM pg_trigger WHERE tgname='beeline_background_source_999'`)).rowCount).toBe(0);
+    expect((await db.query(`SELECT 1 FROM pg_trigger WHERE tgfoid='beeline_background_source()'::regprocedure
+      AND encode(tgargs,'escape') LIKE 'owed-mentions%'`)).rowCount).toBe(0);
   });
   it('C5 migration preserves successful historical replies and remains idempotent', async () => {
     const answered = await tag(), unanswered = await tag();

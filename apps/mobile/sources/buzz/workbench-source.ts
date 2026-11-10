@@ -39,6 +39,8 @@ export interface WorkbenchSource {
   beginLinkSignIn(): Promise<{ authorizationUrl: string }>;
   cancelLinkSignIn(state?: string): Promise<void>;
   disconnectLinkSignIn(): Promise<void>;
+  /** Ends an AI app's Rooms access; its agent and messages stay. */
+  disconnectAiClient(input: { clientId: string }): Promise<void>;
   readWorkbench(input: {
     workspaceId: string;
     viewerId: string;
@@ -118,14 +120,14 @@ function toSteps(
 }
 
 /**
- * The real source: one signed `readWorkbench` projection per poll, resolved
+ * The real source: one signed `readWorkbench` projection per read, resolved
  * through the session's own viewer on the server.
  */
 export class MonolithWorkbenchSource implements WorkbenchSource {
   async readConnectApp(input: { workspaceId: string; viewerId: string }) {
     const result = await monolithPhoneOperation('readConnectApp', { workspaceId: input.workspaceId });
     return {
-      ...(result.workbench ? { view: await this.readWorkbench(input, result.workbench) } : {}),
+      ...(result.workbench ? { view: projectWorkbenchDisplay(result.workbench, input.viewerId) } : {}),
       ...(result.suggestions ? { suggestions: result.suggestions } : {}),
       ...(result.workbenchError ? { workbenchError: result.workbenchError } : {}),
       ...(result.suggestionsError ? { suggestionsError: result.suggestionsError } : {}),
@@ -146,12 +148,16 @@ export class MonolithWorkbenchSource implements WorkbenchSource {
     await monolithPhoneOperation('disconnectLinkSignIn', {});
   }
 
+  async disconnectAiClient(input: { clientId: string }): Promise<void> {
+    await monolithPhoneOperation('disconnectAiClient', input);
+  }
+
   async readWorkbench(input: {
     workspaceId: string;
     viewerId: string;
     refreshVault?: boolean;
-  }, supplied?: WorkbenchDto): Promise<WorkbenchView> {
-    const dto = supplied ?? await monolithPhoneOperation('readWorkbench', {
+  }): Promise<WorkbenchView> {
+    const dto = await monolithPhoneOperation('readWorkbench', {
       workspaceId: input.workspaceId,
       ...(input.refreshVault ? { refreshVault: true } : {}),
     });

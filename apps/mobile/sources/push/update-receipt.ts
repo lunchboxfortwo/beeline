@@ -1,3 +1,4 @@
+import { installationIdentity } from '@beeline/api-contract/installation-identity';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import type { Identity } from '@beeline/buzz-client';
 import * as Crypto from 'expo-crypto';
@@ -8,6 +9,8 @@ import { monolithPhoneOperation } from '@/sync/transport/monolith-operation';
 import { isTauri } from '@/utils/isTauri';
 
 const DEVICE_ID_KEY = '@beeline/mobile-update-receipt/device-id';
+const LEGACY_DEVICE_KEY = 'beeline.diagnostics.legacy-update-id.v1';
+let previousDeviceId: string | undefined;
 let deviceIdPromise: Promise<string> | null = null;
 
 function object(value: unknown): Record<string, unknown> | null {
@@ -46,8 +49,14 @@ async function installationDeviceId(): Promise<string> {
   deviceIdPromise ??= (async () => {
     try {
       const existing = await AsyncStorage.getItem(DEVICE_ID_KEY);
-      if (existing) return existing;
-      const created = Crypto.randomUUID();
+      const canonical=await installationIdentity(AsyncStorage,Crypto.randomUUID);
+      const legacy=existing!==canonical ? existing : await AsyncStorage.getItem(LEGACY_DEVICE_KEY);
+      if (legacy && /^[a-f0-9]{8}-[a-f0-9]{4}-4[a-f0-9]{3}-[89ab][a-f0-9]{3}-[a-f0-9]{12}$/i.test(legacy)) {
+        previousDeviceId=legacy;
+        await AsyncStorage.setItem(LEGACY_DEVICE_KEY,legacy);
+      }
+      if (existing===canonical) return existing;
+      const created = canonical;
       await AsyncStorage.setItem(DEVICE_ID_KEY, created);
       return created;
     } catch (error) {
@@ -80,6 +89,7 @@ export async function reportRunningUpdateReceipt(identity: Identity): Promise<vo
   const release = loadAppConfig();
   await monolithPhoneOperation('reportRunningUpdate', {
     deviceId: await installationDeviceId(),
+    ...(previousDeviceId ? { previousDeviceId } : {}),
     platform,
     ...(Updates.updateId ? { updateId: Updates.updateId } : {}),
     ...(Updates.channel ? { channel: Updates.channel } : {}),

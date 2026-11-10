@@ -69,6 +69,23 @@ export function assessNight({ current, baseline, commits = [], head, rerun, reru
     firstAttempt: first, text, measuredReport: chosen, passingReport: verdict.pass ? chosen : undefined };
 }
 
+export function attachWebInventory(verdict, summary, inventory, failure) {
+  verdict.fullInventoryScore = summary?.fullInventoryScore ?? null;
+  verdict.webInventory = summary ?? null;
+  verdict.unmeasured = summary?.unmeasured ?? inventory.map(name => ({ name, reason: failure ?? 'Web capture did not produce a summary' }));
+  const measured = summary?.coverage?.measured ?? 0;
+  verdict.text += `\nWeb inventory: ${measured}/${inventory.length}; full-inventory score: ${verdict.fullInventoryScore ?? 'unavailable'}`;
+  for (const row of summary?.rows ?? []) verdict.text += `\nWeb ${row.name}: n=${row.samples} p50=${row.p50Ms} ms p95=${row.p95Ms} ms`;
+  for (const gap of verdict.unmeasured) verdict.text += `\nWeb ${gap.name}: ${gap.availability ?? 'unmeasured'} — ${gap.reason}`;
+  if (summary?.routeInventory) {
+    const routes = summary.routeInventory;
+    verdict.text += `\nWeb routes: ${routes.coverage.measured}/${routes.coverage.total}`;
+    for (const row of routes.rows) verdict.text += `\nWeb route ${row.name}: n=${row.samples} p50=${row.p50Ms} ms p95=${row.p95Ms} ms`;
+    for (const gap of routes.unmeasured) verdict.text += `\nWeb route ${gap.name}: unmeasured — ${gap.reason}`;
+  }
+  return verdict;
+}
+
 async function writeFixOrder(output, verdict) {
   const path = `${dirname(output)}/fix-order.json`;
   if (verdict.fixOrder) await writeFile(path, JSON.stringify(verdict.fixOrder, null, 2) + '\n');
@@ -136,6 +153,13 @@ async function main() {
       throw new Error('Require an Eastern YYYY-MM-DD night');
     const result = assessNight({ current, baseline, rerun, commits, hostLoad, firstHostLoad, head,
       history, runId, firstBaseline, night, rerunAttempted: args.includes('--rerun') });
+    if (option('--web-summary')) {
+      const inventory = JSON.parse(await readFile(new URL('./interactions.json', import.meta.url), 'utf8'));
+      let webSummary, webFailure;
+      try { webSummary = JSON.parse(await readFile(option('--web-summary'), 'utf8')); }
+      catch (error) { webFailure = `Web summary unavailable: ${error.message}`; }
+      attachWebInventory(result, webSummary, inventory, webFailure);
+    }
     if (errors.length) {
       result.pass = false;
       result.failures.push(...errors);

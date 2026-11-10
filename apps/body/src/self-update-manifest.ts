@@ -38,7 +38,10 @@ export const DEFAULT_UPDATE_MANIFEST_URL = 'https://usebeeline.app/dl/manifest.j
 
 export function resolveManifestUrl(env: NodeJS.ProcessEnv = process.env): string {
   const override = env.BEELINE_UPDATE_MANIFEST_URL?.trim();
-  return override && override.length > 0 ? override : DEFAULT_UPDATE_MANIFEST_URL;
+  if (override) return override;
+  const channel = env.BEELINE_RELEASE_CHANNEL?.trim() || 'latest';
+  if (!['latest', 'next'].includes(channel)) throw new Error(`invalid helper release channel: ${channel}`);
+  return channel === 'next' ? 'https://usebeeline.app/dl/next/manifest.json' : DEFAULT_UPDATE_MANIFEST_URL;
 }
 
 /**

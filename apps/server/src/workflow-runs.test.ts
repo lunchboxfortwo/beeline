@@ -246,7 +246,7 @@ describe('save_workflow error reasons', () => {
 });
 
 describe('start_workflow', () => {
-  it('Reproduction workflow-notice-1: reads workflow system lines through the phone service, retaining text and wakes (workflow-line-1)', async () => {
+  it('Reproduction workflow-notice-1: reads compact workflow cards through the phone service, retaining text and wakes (workflow-line-1)', async () => {
     await database.query(`UPDATE identities SET handle='impy' WHERE id=$1`, [IMPLEMENTER]);
     await database.query(`INSERT INTO memberships(workspace_id,identity_id,role) VALUES($1,$2,'owner')`, [WORKSPACE, OWNER]);
     const command = await commandFor(IMPLEMENTER);
@@ -280,8 +280,8 @@ describe('start_workflow', () => {
     expect(cards.every(row => row.card.runId === runId)).toBe(true);
     expect((await getWorkflowRun(database, ROOM, runId)).status).toBe('abandoned');
     console.log(`Reproduction workflow-notice-1: start workflow → reassign → hand off → cancel → read Room; stored=${cards.map(row => row.presentation).join(',')}; phone=${[start, moved, handoffLine, cancel].map(message => message.presentation).join(',')}`);
-    expect(cards.map(row => row.presentation)).toEqual(['system', 'system', 'system', 'system']);
-    expect([start, moved, handoffLine, cancel].map(message => message.presentation)).toEqual(['system', 'system', 'system', 'system']);
+    expect(cards.map(row => row.presentation).sort()).toEqual(['card', 'card', 'card', 'system']);
+    expect([start, moved, handoffLine, cancel].map(message => message.presentation)).toEqual(['card', 'card', 'card', 'system']);
     expect(messages.find(message => message.choice)?.presentation).toBe('card');
   });
 
@@ -308,7 +308,7 @@ describe('start_workflow', () => {
     const wrap = (inner: SqlDatabase): SqlDatabase => ({
       async query<Row extends QueryResultRow = QueryResultRow>(sql: string, values?: unknown[]) {
         const result = await inner.query<Row>(sql, values);
-        if (!removed && sql.includes('SELECT member.identity_id,identity.handle,identity.kind')) {
+        if (!removed && sql.includes('SELECT member.identity_id,') && sql.includes('FROM effective_memberships member')) {
           // Model a committed removal between READ COMMITTED statements. PGlite
           // serializes transactions, so remove through the same connection.
           removed = true;
@@ -370,15 +370,15 @@ describe('start_workflow', () => {
     expect(card.rows[0]?.card.roleBindings.reviewer).toBe(REVIEWER);
   });
 
-  it('posts a run, wakes the start role agent, and names the run in the wake and card', async () => {
+  it.each([IMPLEMENTER, REVIEWER])('retains run guidance and wakes the start-role assignee once (%s)', async target => {
     const command = await commandFor(IMPLEMENTER);
     await saveWorkflow(database, command, { contract: describedWorkflow(CONTRACT)});
     const started = await startWorkflow(database, command, {
       name: 'corner',
-      roleBindings: { implementer: IMPLEMENTER, reviewer: REVIEWER, approver: APPROVER },
+      roleBindings: { implementer: target, reviewer: REVIEWER, approver: APPROVER },
     });
     expect(started.state).toBe('implement');
-    expect(await pendingCommandsFor(IMPLEMENTER)).toBeGreaterThan(0);
+    expect(await pendingCommandsFor(target)).toBe(1);
     const card = await database.query<{ card_type: string; text: string; card: { runId: string } }>(
       `SELECT card_type,text,card FROM messages WHERE id=$1`,
       [started.runId],
@@ -387,8 +387,10 @@ describe('start_workflow', () => {
     // The phone renders this text column for workflow-handoff cards.
     expect(card.rows[0]?.text).toBe(`Impy started workflow corner · run ${started.runId.slice(0, 8)}`);
     expect(card.rows[0]?.card.runId).toBe(started.runId);
-    const inbox = await readAgentCommands(database, ROOM, IMPLEMENTER);
+    const inbox = await readAgentCommands(database, ROOM, target);
     const woken = inbox.commands.find((c) => c.sourceMessageId === started.runId);
+    expect((await database.query(`SELECT state FROM agent_commands WHERE source_message_id=$1 AND agent_id=$2`,
+      [started.runId,target])).rows).toEqual([{state:'pending'}]);
     expect(woken?.source.body).toContain(
       `You are in run ${started.runId} of corner. Continue this run; do not start a new one.`,
     );

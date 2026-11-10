@@ -1,5 +1,4 @@
-import { InlineActionRow } from './IndexRow';
-import { ErrorBanner } from './ErrorBanner';
+import { ContentTarget, InlineActionRow } from './IndexRow';
 import React, { useMemo, useRef, useState } from 'react';
 import { FlatList, Pressable, Text, View } from 'react-native';
 import { StyleSheet } from 'react-native-unistyles';
@@ -249,7 +248,7 @@ export function RoomCornersList({
     const closed = cornerClosedStamp(item.closedAt, stampedAt);
     const line = [opener, display.detail, closed].filter(Boolean).join(' · ') || 'No activity yet';
     return (
-      <Pressable
+      <ContentTarget
         accessibilityLabel={`${label}. ${display.word}. ${line}`}
         accessibilityRole="button"
         onPress={() => openCorner(item)}
@@ -275,7 +274,7 @@ export function RoomCornersList({
           circle carries its motion for the glance. */}
         {stateWord(display)}
         <StateCircle state={display.visual} tone={display.tone} />
-      </Pressable>
+      </ContentTarget>
     );
   };
 
@@ -398,11 +397,7 @@ export function RoomCornersList({
           ))}
           {showMoreArchived && archived.status === 'ready' && archived.next ? (
             more?.status === 'error' ? (
-              <InlineActionRow><ErrorBanner inline
-                title={more.reason}
-                retryLabel="Retry"
-                onRetry={onMoreArchived}
-                retryTestID="room-corners-archived-more" /></InlineActionRow>
+              null
             ) : (
               <InlineActionRow><Button
                 size="inline"

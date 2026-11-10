@@ -1,0 +1,15 @@
+
+ RUN  v3.2.7 /home/lunchbox/.local/state/beeline/corners/bd047d3916abc4ee2bb1e4938bbb48d0a45210bd0a9208b8105b41c647cc9768/apps/mobile
+
+stderr | sources/app/(app)/beeline/chat/useChatMessageActions.test.tsx > swipe-reply-1: replying preserves the reading offset (tail=false)
+react-test-renderer is deprecated. See https://react.dev/warnings/react-test-renderer
+
+stderr | sources/app/(app)/beeline/chat/useChatMessageActions.test.tsx > swipe-reply-1: replying preserves the reading offset (tail=true)
+react-test-renderer is deprecated. See https://react.dev/warnings/react-test-renderer
+
+ ✓ sources/app/(app)/beeline/chat/useChatMessageActions.test.tsx (2 tests) 22ms
+
+ Test Files  1 passed (1)
+      Tests  2 passed (2)
+   Start at  21:36:12
+   Duration  1.15s (transform 552ms, setup 94ms, collect 801ms, tests 22ms, environment 0ms, prepare 85ms)

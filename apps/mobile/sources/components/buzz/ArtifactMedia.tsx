@@ -1,6 +1,8 @@
 import { IndexRow } from '@/components/buzz/IndexRow';
+import React, { useEffect, useRef, useState } from 'react';
 import { useArtifactRecoveryGeneration } from '@/buzz/use-artifact-recovery';
-import React, { useEffect, useState } from 'react';
+import { appReadErrorCopy } from '@/buzz/app-error-copy';
+import { ArtifactByteError } from '@/buzz/artifact-byte-error';
 import { Image, ScrollView, Text, View } from 'react-native';
 import { StyleSheet } from 'react-native-unistyles';
 import type { AttachmentReference } from '@beeline/buzz-client';
@@ -14,6 +16,19 @@ import {
 } from '@/buzz/artifact-link';
 
 type ImageSource = Awaited<ReturnType<typeof artifactImageSource>>;
+
+/** A failed read can hand one reread to confirmed connection recovery.
+ * Recovery never interrupts an in-progress read or reloads a displayed file. */
+function useArtifactRecoveryRead() {
+  const recovery = useArtifactRecoveryGeneration();
+  const reread = useRef<(() => void) | undefined>(undefined);
+  useEffect(() => {
+    const read = reread.current;
+    reread.current = undefined;
+    read?.();
+  }, [recovery]);
+  return reread;
+}
 
 /**
  * A raster artifact — PNG, JPEG, GIF, WebP — painted wherever the artifact
@@ -35,43 +50,53 @@ export function ArtifactImage({
   style?: object;
   testID: string;
 }) {
-  const recovery = useArtifactRecoveryGeneration();
+  const reread = useArtifactRecoveryRead();
   const [source, setSource] = useState<ImageSource | null>(null);
   const [failed, setFailed] = useState(false);
+  // A fresh Room DTO is not new byte demand. Only fields used by the byte
+  // owner can replace this read; recovery only consumes a failed read's handoff.
   useEffect(() => {
     let live = true;
     let loaded: ImageSource | null = null;
     const controller = new AbortController();
+    reread.current = undefined;
     const stopPurge = subscribeArtifactBytesPurge(attachment, () => {
+      reread.current = undefined;
       controller.abort(); releaseArtifactImageSource(loaded); setSource(null); setFailed(true);
     });
-    setFailed(false);
-    setSource(null);
-    void artifactImageSource(attachment, { signal: controller.signal, preview: fit === 'cover' })
-      .then((next) => {
-        loaded = next;
-        if (live && !controller.signal.aborted) setSource(next);
-        else releaseArtifactImageSource(next);
-      })
-      .catch(() => {
-        if (live) setFailed(true);
-      });
+    const read = (afterRecovery = false) => {
+      setFailed(false);
+      setSource(null);
+      void artifactImageSource(attachment, { signal: controller.signal, preview: fit === 'cover' })
+        .then((next) => {
+          loaded = next;
+          if (live && !controller.signal.aborted) setSource(next);
+          else releaseArtifactImageSource(next);
+        })
+        .catch((cause) => {
+          if (!live || controller.signal.aborted) return;
+          setFailed(cause instanceof ArtifactByteError || Boolean(appReadErrorCopy(cause)));
+          if (!afterRecovery) reread.current = () => read(true);
+        });
+    };
+    read();
     return () => {
+      reread.current = undefined;
       live = false; controller.abort(); stopPurge();
       releaseArtifactImageSource(loaded);
     };
-  }, [attachment, fit, recovery]);
+  }, [attachment.url, attachment.mimeType, attachment.size, attachment.sha256, attachment.expired, fit]);
   if (failed) {
     return (
       <View style={[styles.failureInset, style]} testID="artifact-image-failed">
-        <IndexRow inset="flush" title="Image unavailable" description={"The image could not be loaded. Try again."} />
+        <IndexRow inset="flush" title="Image unavailable" />
       </View>
     );
   }
   if (!source) {
     return (
-      <View style={[styles.placeholder, style]} testID="artifact-image-loading">
-        <Text style={styles.placeholderText}>Loading…</Text>
+      <View style={[styles.imagePlaceholder, style]} testID="artifact-image-loading">
+        <Text numberOfLines={1} style={[styles.placeholderText, styles.imagePlaceholderText]}>Loading…</Text>
       </View>
     );
   }
@@ -111,29 +136,39 @@ export function ArtifactText({
   crop: boolean;
   testID: string;
 }) {
-  const recovery = useArtifactRecoveryGeneration();
+  const reread = useArtifactRecoveryRead();
   const [text, setText] = useState<string | null>(null);
   const [failed, setFailed] = useState(false);
   useEffect(() => {
     let live = true;
     const controller = new AbortController();
-    const stopPurge = subscribeArtifactBytesPurge(attachment, () => { controller.abort(); setText(null); setFailed(true); });
-    setText(null); setFailed(false);
-    void fetchArtifactText(attachment, { signal: controller.signal, preview: crop })
-      .then((next) => {
-        if (live && !controller.signal.aborted) setText(next);
-      })
-      .catch(() => {
-        if (live) setFailed(true);
-      });
+    reread.current = undefined;
+    const stopPurge = subscribeArtifactBytesPurge(attachment, () => {
+      reread.current = undefined;
+      controller.abort(); setText(null); setFailed(true);
+    });
+    const read = (afterRecovery = false) => {
+      setText(null); setFailed(false);
+      void fetchArtifactText(attachment, { signal: controller.signal, preview: crop })
+        .then((next) => {
+          if (live && !controller.signal.aborted) setText(next);
+        })
+        .catch((cause) => {
+          if (!live || controller.signal.aborted) return;
+          setFailed(cause instanceof ArtifactByteError || Boolean(appReadErrorCopy(cause)));
+          if (!afterRecovery) reread.current = () => read(true);
+        });
+    };
+    read();
     return () => {
+      reread.current = undefined;
       live = false; controller.abort(); stopPurge();
     };
-  }, [attachment, crop, recovery]);
+  }, [attachment.url, attachment.mimeType, attachment.size, attachment.sha256, attachment.expired, crop]);
   if (failed) {
     return (
       <View style={styles.failureInset} testID="artifact-text-failed">
-        <IndexRow inset="flush" title="File unavailable" description={"The file could not be loaded. Try again."} />
+        <IndexRow inset="flush" title="File unavailable" />
       </View>
     );
   }
@@ -162,6 +197,13 @@ export function ArtifactText({
 
 const styles = StyleSheet.create((theme) => ({
   failureInset: { paddingHorizontal: theme.buzz.roomList.edge },
+  // Image callers own the frame, including compact transcript thumbnails.
+  imagePlaceholder: {
+    alignItems: 'center',
+    justifyContent: 'center',
+    overflow: 'hidden',
+  },
+  imagePlaceholderText: { maxWidth: '100%' },
   placeholder: {
     flex: 1,
     alignItems: 'center',

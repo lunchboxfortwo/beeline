@@ -6,7 +6,6 @@ import type { DaemonBootstrapResult, CornerListResult } from '@beeline/api-contr
 import { capturePrivateProcessUse, hasNonSquirePayload, reclaimWholeStorageObject, reclaimHelperStorage, type StorageReclaimEntry, type StorageRoomState } from './helper-storage.js';
 import { isDeletedRuntimeName, pruneDeletedRuntimes, pruneRepositoryCaches, pruneMachineStorage } from './host-disk-retention.js';
 import { pruneEndedOwnerStorage, pruneUnusedCheckoutStorage, pruneOpenCheckoutObjects, discoverLegacyStorageOwners, readStorageOwners, reclaimOwnedCheckout } from './storage-owners.js';
-import { workspaceAssetRoot } from './workspace-assets.js';
 import { defaultSupervisorRoot, type AgentRuntimeRecord } from './runtime.js';
 import { inspectCheckoutPreservation } from './storage-owners.js';
 
@@ -32,7 +31,7 @@ export async function helperStorageReport(supervisorRoot = defaultSupervisorRoot
       const operation = async <T>(name: 'getDaemonBootstrap' | 'listRoomCorners', operationInput: unknown): Promise<T> => {
         const response = await fetch(new URL(`/v1/daemon/operations/${name}`, runtime.transport!.baseUrl), {
           method: 'POST', headers: { authorization: `Bearer ${runtime.transport!.daemonToken}`, 'content-type': 'application/json' },
-          body: JSON.stringify(operationInput), signal: AbortSignal.timeout(30_000),
+          body: JSON.stringify(operationInput), signal: undefined,
         });
         if (!response.ok) {
           const payload = await response.json().catch(() => ({})) as { error?: string; code?: string };
@@ -73,7 +72,6 @@ export async function helperStorageReport(supervisorRoot = defaultSupervisorRoot
       if (!input.orphanOnly) await reclaimHelperStorage({ runtimeDir, readStates: async () => agentStates,
         relatedRoots: roomId => [resolve(root, 'corners', roomId), ...legacyOwners.filter(owner => owner.roomId === roomId).map(owner => resolve(root, owner.kind, owner.itemId))],
         ...options('room-private'), withIdleRoom: async (_id, task) => { await task(); return true; },
-        emulatorLeaseRoot: resolve(workspaceAssetRoot(supervisorRoot, runtime.communityId), 'cache/android-leases'),
         log: entry => entries.push({ ...entry, rule: entry.kind === 'archived' ? 'archived-room-private' : 'unused-open-room-object' }),
         onError: (roomId, error) => unknown.push({ path: resolve(runtimeDir, 'rooms', roomId), reason: error instanceof Error ? error.message : 'inventory unavailable' }),
       });

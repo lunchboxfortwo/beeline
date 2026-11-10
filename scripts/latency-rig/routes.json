@@ -20,6 +20,11 @@
     "coldDepthMax": 1
   },
   {
+    "path": "/beeline/browser-share",
+    "coldHttpMax": 1,
+    "coldDepthMax": 1
+  },
+  {
     "path": "/beeline/channels",
     "coldHttpMax": 1,
     "coldDepthMax": 1
@@ -51,6 +56,11 @@
   },
   {
     "path": "/beeline/github-installation",
+    "coldHttpMax": 1,
+    "coldDepthMax": 1
+  },
+  {
+    "path": "/beeline/google-callback",
     "coldHttpMax": 1,
     "coldDepthMax": 1
   },

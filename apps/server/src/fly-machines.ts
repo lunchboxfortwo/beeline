@@ -13,20 +13,32 @@ export interface FreeAgentMachineSpec {
   memoryMb: number;
 }
 
+export interface FreeAgentMachine {
+  id: string;
+  state: string;
+  instance_id?: string;
+  config: Record<string, unknown> & { image: string };
+}
+
+export function sameMachineImage(actual: string, desired: string): boolean {
+  return actual === desired || (desired.includes('@sha256:') && actual.split('@')[1] === desired.split('@')[1]);
+}
+
 export interface FreeAgentMachines {
   /** Create and boot one Machine; returns its Fly id. */
   create(spec: FreeAgentMachineSpec): Promise<{ id: string }>;
+  list(): Promise<FreeAgentMachine[]>;
   /** The Machine already created for this agent, if any. */
-  find(agentId: string): Promise<{ id: string; state: string } | undefined>;
+  find(agentId: string): Promise<FreeAgentMachine | undefined>;
   /** Start a stopped Machine or resume a suspended one. */
-  start(id: string, image?: string): Promise<void>;
+  start(id: string): Promise<void>;
+  update(machine: FreeAgentMachine, image: string): Promise<FreeAgentMachine>;
+  read(id: string): Promise<FreeAgentMachine | undefined>;
+  reconnect(): FreeAgentMachines;
   suspend(id: string): Promise<void>;
-  stop(id: string): Promise<void>;
   destroy(id: string): Promise<void>;
-  /** Current Fly state (`started`, `suspended`, `stopped`, ...), or undefined when gone. */
-  state(id: string): Promise<string | undefined>;
   /** Resolve once the Machine reaches `state` (Fly's own wait), or reject after the timeout. */
-  waitFor(id: string, state: 'suspended' | 'stopped', timeoutSeconds: number): Promise<void>;
+  waitFor(id: string, state: 'suspended' | 'stopped' | 'started', timeoutSeconds: number, instanceId?: string): Promise<void>;
 }
 
 export class FlyApiError extends Error {
@@ -48,6 +60,7 @@ export class FlyMachines implements FreeAgentMachines {
     readonly app: string,
     private readonly fetchImpl: typeof fetch = fetch,
     apiOrigin = 'https://api.machines.dev',
+    private readonly freshConnection = false,
   ) {
     this.#base = `${apiOrigin.replace(/\/$/, '')}/v1/apps/${encodeURIComponent(app)}/machines`;
   }
@@ -72,8 +85,12 @@ export class FlyMachines implements FreeAgentMachines {
     return { id: machine.id };
   }
 
-  async find(agentId: string): Promise<{ id: string; state: string } | undefined> {
-    const machines = await this.#request<Array<{ id: string; state: string }>>(
+  async list(): Promise<FreeAgentMachine[]> {
+    return this.#request<FreeAgentMachine[]>('list','','GET');
+  }
+
+  async find(agentId: string): Promise<FreeAgentMachine | undefined> {
+    const machines = await this.#request<FreeAgentMachine[]>(
       'list',
       `?metadata.beeline_agent=${encodeURIComponent(agentId)}`,
       'GET',
@@ -81,35 +98,28 @@ export class FlyMachines implements FreeAgentMachines {
     return machines.find((machine) => machine.state !== 'destroyed');
   }
 
-  async start(id: string, image?: string): Promise<void> {
-    if (image) {
-      const machine = await this.#request<{ state: string; version: string; config: Record<string, unknown> & { image: string } }>(
-        'get', `/${id}`, 'GET');
-      const sameImage = machine.config.image === image ||
-        (image.includes('@sha256:') && machine.config.image.split('@')[1] === image.split('@')[1]);
-      if (!sameImage) {
-        if (machine.state === 'started' || machine.state === 'suspended') {
-          await this.stop(id);
-          await this.waitFor(id, 'stopped', 30);
-        }
-        await this.#request('update image', `/${id}`, 'POST', {
-          current_version: machine.version,
-          skip_launch: true,
-          config: { ...machine.config, image },
-        });
-      }
-    }
-    // A transition refusal ends this admitted action. Its owner may act again
-    // only on a new command or actual machine/reachability evidence.
+  async start(id: string): Promise<void> {
     await this.#request('start', `/${id}/start`, 'POST', {});
+  }
+
+  async update(machine: FreeAgentMachine, image: string): Promise<FreeAgentMachine> {
+    return this.#request<FreeAgentMachine>('update image', `/${machine.id}`, 'POST', {
+      current_version: machine.instance_id, skip_launch: false, config: { ...machine.config, image },
+    });
   }
 
   async suspend(id: string): Promise<void> {
     await this.#request('suspend', `/${id}/suspend`, 'POST', {});
   }
 
-  async stop(id: string): Promise<void> {
-    await this.#request('stop', `/${id}/stop`, 'POST', {});
+  reconnect(): FlyMachines {
+    // A new transport exchange, with no mutation replay or cached state.
+    return new FlyMachines(this.token, this.app, this.fetchImpl, this.#base.split('/v1/apps/')[0], true);
+  }
+
+  async read(id: string): Promise<FreeAgentMachine | undefined> {
+    try { return await this.#request<FreeAgentMachine>('get', `/${id}`, 'GET'); }
+    catch (error) { if (error instanceof FlyApiError && error.status === 404) return undefined; throw error; }
   }
 
   async destroy(id: string): Promise<void> {
@@ -121,17 +131,9 @@ export class FlyMachines implements FreeAgentMachines {
     }
   }
 
-  async waitFor(id: string, state: 'suspended' | 'stopped', timeoutSeconds: number): Promise<void> {
-    await this.#request('wait', `/${id}/wait?state=${state}&timeout=${timeoutSeconds}`, 'GET');
-  }
-
-  async state(id: string): Promise<string | undefined> {
-    try {
-      return (await this.#request<{ state: string }>('get', `/${id}`, 'GET')).state;
-    } catch (error) {
-      if (error instanceof FlyApiError && error.status === 404) return undefined;
-      throw error;
-    }
+  async waitFor(id: string, state: 'suspended' | 'stopped' | 'started', timeoutSeconds: number, instanceId?: string): Promise<void> {
+    const instance = instanceId ? `&instance_id=${encodeURIComponent(instanceId)}` : '';
+    await this.#request('wait', `/${id}/wait?state=${state}&timeout=${timeoutSeconds}${instance}`, 'GET');
   }
 
   async #request<T = unknown>(
@@ -144,10 +146,11 @@ export class FlyMachines implements FreeAgentMachines {
       method,
       headers: {
         authorization: `Bearer ${this.token}`,
+        ...(this.freshConnection ? { connection: 'close' } : {}),
         ...(body === undefined ? {} : { 'content-type': 'application/json' }),
       },
       ...(body === undefined ? {} : { body: JSON.stringify(body) }),
-      signal: AbortSignal.timeout(30_000),
+
     });
     const text = await response.text();
     if (!response.ok) throw new FlyApiError(response.status, text, operation);

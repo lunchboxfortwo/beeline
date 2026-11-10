@@ -127,7 +127,7 @@ export async function resolveCurrentMemberMentions(
     mcp_callback_url: string | null;
     mcp_member: boolean;
   }>(
-    `SELECT identity.id,identity.kind,identity.handle,COALESCE(member.callback_url,client.callback_url) mcp_callback_url,
+    `SELECT identity.id,identity.kind,beeline_workspace_handle(identity.id,membership.workspace_id) handle,COALESCE(member.callback_url,client.callback_url) mcp_callback_url,
        member.member_id IS NOT NULL mcp_member
      FROM memberships membership
      JOIN identities identity ON identity.id=membership.identity_id
@@ -278,7 +278,7 @@ export function taggedIdentityIdsSql(message: string): string {
     WITH mention_text AS MATERIALIZED (
       SELECT ${withoutForwardCaptionSql(`${message}.text`)} text
     ), mention_members AS MATERIALIZED (
-      SELECT tagged_roster_member.identity_id,tagged.handle
+      SELECT tagged_roster_member.identity_id,beeline_workspace_handle(tagged.id,tagged_roster_member.workspace_id) handle
       FROM memberships tagged_roster_member JOIN identities tagged ON tagged.id=tagged_roster_member.identity_id
       WHERE tagged_roster_member.room_id=(SELECT COALESCE(parent_id,id) FROM rooms WHERE id=${message}.room_id)
         AND tagged_roster_member.removed_at IS NULL
@@ -318,6 +318,10 @@ export function tagsKnownIdentitySql(
   identityHandleExpr: string,
   identityKindExpr: string,
 ): string {
+  // Human handles remain global. Keep their existing expression so common
+  // human-only Tray reads do not resolve the same workspace address per row.
+  identityHandleExpr = `(CASE WHEN ${identityKindExpr}='agent'
+    THEN beeline_room_handle(${identityIdExpr},${message}.room_id) ELSE ${identityHandleExpr} END)`;
   return `(
     ${message}.presentation NOT IN ('system','card')
     AND (
@@ -327,9 +331,11 @@ export function tagsKnownIdentitySql(
         AND NOT EXISTS (
           SELECT 1 FROM memberships rival_member
           JOIN identities rival ON rival.id=rival_member.identity_id
+          LEFT JOIN workspace_handles rival_address
+            ON rival_address.workspace_id=rival_member.workspace_id AND rival_address.identity_id=rival.id
           WHERE rival_member.room_id=(SELECT COALESCE(parent_id,id) FROM rooms WHERE id=${message}.room_id) AND rival_member.removed_at IS NULL
             AND rival_member.identity_id<>${identityIdExpr}
-            AND btrim(ltrim(rival.handle,'@'))=btrim(ltrim(${identityHandleExpr},'@'))
+            AND btrim(ltrim(CASE WHEN rival.kind='agent' THEN COALESCE(rival_address.handle,rival.handle) ELSE rival.handle END,'@'))=btrim(ltrim(${identityHandleExpr},'@'))
         )
       )
       OR (

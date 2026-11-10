@@ -1,0 +1,11 @@
+{
+  "filesAccountedFor": 927,
+  "parsedFiles": 834,
+  "discoveryRows": 21823,
+  "score": 3701,
+  "excludedRows": 18122,
+  "modeParameters": 285,
+  "parameterAdjudications": 300,
+  "missingModeGuard": "PASS",
+  "status": "PASS"
+}

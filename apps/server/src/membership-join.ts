@@ -1,4 +1,5 @@
 import { subscriptionRooms } from './agent-subscriptions.js';
+import { clearCornerReviewersForMembershipsSql } from './corner-lifecycle.js';
 import type { QueryResultRow } from 'pg';
 import { systemMessage } from '@beeline/api-contract/system-message-catalog';
 import { randomUUID } from 'node:crypto';
@@ -172,7 +173,7 @@ export async function joinRooms(
         inviter_name: string | null;
         inviter_handle: string | null;
       }>(
-        `SELECT identity.name identity_name,identity.handle identity_handle,identity.kind,
+        `SELECT identity.name identity_name,beeline_workspace_handle(identity.id,workspace.id) identity_handle,identity.kind,
                 workspace.name workspace_name,
                 (SELECT name FROM rooms WHERE id=$3) room_name,
                 inviter.id inviter_id,inviter.kind inviter_kind,inviter.name inviter_name,
@@ -275,11 +276,23 @@ export async function joinRooms(
 
 // Membership write primitives. Callers retain their transaction and access checks.
 // Keep each conflict policy explicit: initial joins and restorations differ.
+/** One statement makes departure and reviewer cleanup atomic, including retirement. */
+function removeMembershipsSql(predicate: string): string {
+  return `WITH departing AS MATERIALIZED (
+      SELECT room_id,identity_id FROM memberships WHERE ${predicate}
+    ), cleared_room_reviewers AS (
+      UPDATE rooms room SET reviewer_agent_id=NULL FROM departing member
+      WHERE room.id=member.room_id AND room.reviewer_agent_id=member.identity_id
+    ), cleared_corner_reviewers AS (
+      ${clearCornerReviewersForMembershipsSql('departing')}
+    ) UPDATE memberships SET removed_at=now() WHERE ${predicate}`;
+}
+
 export function removeWorkspaceMemberships<Row extends QueryResultRow = QueryResultRow>(
   database: Pick<SqlDatabase, 'query'>, values: [workspaceId: string, identityId: string],
 ) {
   return database.query<Row>(
-    `UPDATE memberships SET removed_at=now() WHERE workspace_id=$1 AND identity_id=$2`, values,
+    removeMembershipsSql('workspace_id=$1 AND identity_id=$2'), values,
   );
 }
 
@@ -290,6 +303,20 @@ export function restoreRoomMembership<Row extends QueryResultRow = QueryResultRo
     `INSERT INTO memberships(workspace_id,room_id,identity_id,role) VALUES($1,$2,$3,'member')
          ON CONFLICT(room_id,identity_id) WHERE room_id IS NOT NULL DO UPDATE SET removed_at=NULL`, values,
   );
+}
+
+/** Compose an internal relation of workspace_id, room_id and identity_id into
+ * a batch restore. The relation is server SQL, never caller input. */
+export function restoreRoomMembershipsSql(relation: string): string {
+  return `INSERT INTO memberships(workspace_id,room_id,identity_id,role)
+    SELECT workspace_id,room_id,identity_id,'member' FROM ${relation}
+    ON CONFLICT(room_id,identity_id) WHERE room_id IS NOT NULL DO UPDATE SET removed_at=NULL RETURNING room_id`;
+}
+
+export function restoreRoomMemberships(database: Pick<SqlDatabase,'query'>,
+  workspaceId: string, roomId: string, identityIds: readonly string[]) {
+  return database.query(restoreRoomMembershipsSql('(SELECT $1::uuid workspace_id,$2::uuid room_id,unnest($3::text[]) identity_id) members'),
+    [workspaceId,roomId,identityIds]);
 }
 
 export function ensureRoomMembership<Row extends QueryResultRow = QueryResultRow>(
@@ -374,7 +401,7 @@ export function removeRoomMembership<Row extends QueryResultRow = QueryResultRow
   database: Pick<SqlDatabase, 'query'>, values: [roomId: string, identityId: string],
 ) {
   return database.query<Row>(
-    `UPDATE memberships SET removed_at=now() WHERE room_id=$1 AND identity_id=$2`, values,
+    removeMembershipsSql('room_id=$1 AND identity_id=$2'), values,
   );
 }
 
@@ -419,8 +446,7 @@ export function removeIdentityMemberships<Row extends QueryResultRow = QueryResu
   database: Pick<SqlDatabase, 'query'>, values: [identityId: string],
 ) {
   return database.query<Row>(
-    `UPDATE memberships SET removed_at=now()
-       WHERE identity_id=$1 AND removed_at IS NULL`, values,
+    removeMembershipsSql('identity_id=$1 AND removed_at IS NULL'), values,
   );
 }
 
@@ -552,20 +578,6 @@ export function restoreMcpWorkspaceMemberships<Row extends QueryResultRow = Quer
          ON CONFLICT(workspace_id,identity_id) WHERE room_id IS NULL
          DO UPDATE SET removed_at=NULL`, values,
   );
-}
-
-/** Retire historical bans before their table is dropped. */
-export function retireWorkspaceBansSql(): string {
-  return `DO $$
-BEGIN
-  IF to_regclass('workspace_bans') IS NOT NULL THEN
-    UPDATE memberships m SET removed_at=now()
-    FROM workspace_bans b
-    WHERE m.workspace_id=b.workspace_id AND m.identity_id=b.identity_id AND m.removed_at IS NULL;
-  END IF;
-END;
-$$;
-`;
 }
 
 /** Upgrade-only: old membership JSON cannot remain an actionable subscription store. */

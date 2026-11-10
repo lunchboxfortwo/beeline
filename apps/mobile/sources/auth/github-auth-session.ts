@@ -1,3 +1,4 @@
+import { observeAuth } from './auth-diagnostics';
 import type { SigninFunnelEvent } from '@beeline/api-contract/signin-funnel';
 import { githubConnectionErrorMessage } from './github-connection-error';
 import * as Linking from 'expo-linking';
@@ -6,7 +7,7 @@ import { sha256 } from '@noble/hashes/sha2.js';
 import { bytesToHex, utf8ToBytes } from '@noble/hashes/utils.js';
 import {
   OidcBindError,
-  parseOidcBindCallback,
+  parseOidcBindCallback as parseCallback,
   startGitHubBind,
   type OidcBindChallenge,
   type OidcBindStart,
@@ -113,7 +114,7 @@ async function persistPendingCallback(callbackUrl: string, expectedState: string
   });
 }
 
-async function githubAuthFetch(input: RequestInfo | URL, init?: RequestInit): Promise<Response> {
+export async function accountAuthFetch(input: RequestInfo | URL, init?: RequestInit): Promise<Response> {
   if (!isDesktopShell()) return fetch(input, init);
   const { fetch: desktopFetch } = await import('@tauri-apps/plugin-http');
   return desktopFetch(input, init);
@@ -353,6 +354,7 @@ async function inspectGitHubRecoveryChallenge(
   fetchImpl: typeof fetch,
   waitMs = 0, signal?: AbortSignal,
 ): Promise<OidcBindChallenge | null> {
+  observeAuth({ name: 'recovery_started' });
   const controller = new AbortController();
   const timeout = setTimeout(() => controller.abort(), waitMs + 3_000);
   const abort = () => controller.abort();
@@ -371,7 +373,7 @@ async function inspectGitHubRecoveryChallenge(
   } finally {
     clearTimeout(timeout); signal?.removeEventListener('abort', abort);
   }
-  if (response.status === 202) return null;
+  if (response.status === 202) { observeAuth({ name:'recovery_completed',outcome:'unknown',code:'callback_missing' }); return null; }
   if (response.status === 410) {
     throw new OidcBindError('ticket_expired', 'The GitHub completion expired', 410);
   }
@@ -395,7 +397,9 @@ async function inspectGitHubRecoveryChallenge(
   } catch {
     throw new OidcBindError('invalid_response', 'GitHub completion response was invalid');
   }
-  return parseOidcBindCallback(challengeCallbackUrl(challenge, state), state);
+  const result=parseOidcBindCallback(challengeCallbackUrl(challenge, state), state);
+  observeAuth({name:'recovery_completed',outcome:'success'});
+  return result;
 }
 
 async function cancelGitHubRecovery(
@@ -428,7 +432,7 @@ async function cancelGitHubRecovery(
 /** Revoke a pending/recovered ticket before forgetting the only token that can burn it. */
 export async function cancelPendingGitHubSignIn(
   runtime: BuzzRuntimeConfig = getBuzzRuntimeConfig(),
-  fetchImpl: typeof fetch = githubAuthFetch,
+  fetchImpl: typeof fetch = accountAuthFetch,
   expectedState?: string,
 ): Promise<void> {
   const session = await readPendingSession();
@@ -444,7 +448,7 @@ export async function cancelPendingGitHubSignIn(
 
 export async function recoverPendingGitHubBindChallenge(
   runtime: BuzzRuntimeConfig = getBuzzRuntimeConfig(),
-  fetchImpl: typeof fetch = githubAuthFetch,
+  fetchImpl: typeof fetch = accountAuthFetch,
   expectedState?: string,
 ): Promise<OidcBindChallenge | null> {
   const session = await readPendingSession();
@@ -468,7 +472,7 @@ async function awaitCompletedGitHubBindChallenge(expectedState: string): Promise
   if (session?.state !== expectedState || !session.recoveryToken)
     throw new OidcBindError('state_mismatch', 'This GitHub callback has no pending recovery.');
   const challenge = await fetchGitHubRecoveryChallenge(session.recoveryToken, expectedState,
-    getBuzzRuntimeConfig(), githubAuthFetch, GITHUB_RECOVERY_WAIT_MS);
+    getBuzzRuntimeConfig(), accountAuthFetch, GITHUB_RECOVERY_WAIT_MS);
   if ((await readPendingSession())?.state !== expectedState)
     throw new OidcBindError('state_mismatch', 'This GitHub callback does not match the current sign-in.');
   if (!challenge) throw new OidcBindError('ticket_expired', 'The GitHub completion expired', 410);
@@ -506,7 +510,7 @@ export async function runResilientGitHubSignInSession({
   runtime = getBuzzRuntimeConfig(),
   openAuthSession,
   subscribeToUrls,
-  fetchImpl = githubAuthFetch,
+  fetchImpl = accountAuthFetch,
   recoveryWaitMs = platform === 'android' ? 5 * 60_000 : GITHUB_RECOVERY_WAIT_MS,
   callbackGraceMs,
 }: ResilientGitHubSessionInput): Promise<OidcBindChallenge> {
@@ -537,7 +541,6 @@ export async function runResilientGitHubSignInSession({
   assertCurrent();
   await persistGitHubSignInState(state, purpose, recoveryToken);
   const controller = new AbortController();
-  let completionFailure: unknown;
   const never = () => new Promise<never>(() => {});
   const recovery = fetchGitHubRecoveryChallenge(recoveryToken, state, runtime, fetchImpl,
     Math.min(120_000, Math.max(0, recoveryWaitMs)), controller.signal);
@@ -547,14 +550,8 @@ export async function runResilientGitHubSignInSession({
     await persistPendingCallback(challengeCallbackUrl(challenge, state), state);
     return challenge;
   }, error => {
-    completionFailure = error;
     if (error instanceof OidcBindError && !error.retryable) throw error;
     return never();
-  });
-  let timeout: ReturnType<typeof setTimeout> | undefined;
-  const deadline = new Promise<never>((_resolve, reject) => {
-    timeout = setTimeout(() => reject(completionFailure ??
-      new OidcBindError('ticket_expired', 'The GitHub completion expired', 410)), recoveryWaitMs);
   });
   let rejectReplacement!: (error: OidcBindError) => void;
   const replaced = new Promise<never>((_resolve, reject) => { rejectReplacement = reject; });
@@ -568,9 +565,9 @@ export async function runResilientGitHubSignInSession({
     openAuthSession: async () => {
       assertCurrent();
       const result = await openAuthSession(start.authorizationUrl, start.redirectUri);
-      if (platform === 'android' && (result.type === 'cancel' || result.type === 'dismiss')) {
+      if (result.type === 'opened' || (platform === 'android' && (result.type === 'cancel' || result.type === 'dismiss'))) {
         onBrowserClosed?.();
-        return { type: 'opened' };
+        return result.type === 'opened' ? result : { type: 'opened' };
       }
       return result;
     }, subscribeToUrls, openedCallbackWaitMs: recoveryWaitMs,
@@ -598,13 +595,13 @@ export async function runResilientGitHubSignInSession({
     void cancelGitHubRecovery(recoveryToken, runtime, fetchImpl).catch(() => undefined);
     leftGitHubSignIns.add(error); throw error;
   });
-  try { return await Promise.race([recovered, callback, deadline, replaced]); }
+  try { return await Promise.race([recovered, callback, replaced]); }
   catch (error) {
     if (error instanceof OidcBindError && !error.retryable && !leftGitHubSignIns.has(error))
       await cancelGitHubRecovery(recoveryToken, runtime, fetchImpl).catch(() => undefined);
     if (signal?.aborted) await clearPendingGitHubSignInState(state);
     throw error;
-  } finally { if (timeout) clearTimeout(timeout); signal?.removeEventListener('abort', abort); controller.abort(); }
+  } finally { signal?.removeEventListener('abort', abort); controller.abort(); }
 
 }
 
@@ -794,4 +791,10 @@ export async function resumeInitialGitHubInstallation(
   }
   await clearPendingGitHubInstallation();
   return true;
+}
+
+function parseOidcBindCallback(...args: Parameters<typeof parseCallback>) {
+  observeAuth({ name: 'callback_received' });
+  try { const result=parseCallback(...args); observeAuth({ name: 'callback_validated', outcome: 'success' }); return result; }
+  catch (error) { observeAuth({ name: 'auth_failed', phase: 'callback_validated', code: 'invalid_callback', outcome: 'failed' }); throw error; }
 }

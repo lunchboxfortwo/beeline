@@ -1,0 +1,5 @@
+
+> @beeline/mobile@0.2.22 fingerprint:check
+> node scripts/native-fingerprint.mjs
+
+runtime {"android":"47","ios":"38"} still describes this tree: android c23a000e6fee714e7226113af7ea07c36ef62ad7, ios b0f4f3ebc8ade69ab27525645b624ff9ae4482c3

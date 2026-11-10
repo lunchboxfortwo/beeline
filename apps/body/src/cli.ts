@@ -37,7 +37,7 @@ import {
   type HelperLifecycle,
   type HelperExitReason,
 } from './helper-lifecycle.js';
-import { activateDaemonTransport } from './daemon-api-client.js';
+import { DaemonApiClient } from './daemon-api-client.js';
 import { defaultSupervisorRoot, findAgentRuntimeConfigPaths, readRuntimeRecord, setAgentStopped } from './runtime.js';
 import { runCleanupSharedHomeCommand } from './startup-cleanup.js';
 import { runStartCommand } from './start-command.js';
@@ -57,8 +57,6 @@ import {
 import { runManagedUpdateWorker } from './managed-update.js';
 import { ensureMachineHelper, reloadMachineHelper } from './helper-service.js';
 import { runMachineHelper } from './machine-helper.js';
-import { emulatorArgsAreInfoOnly, runLeasedEmulator } from './android-emulator-lease.js';
-import { requestKeptCornerEmulator } from './corner-emulator.js';
 
 function usage(exitCode = 1): void {
   console.error(`
@@ -136,22 +134,6 @@ async function main(): Promise<void> {
   if (args.length === 0) usage();
 
   const command = args[0];
-  if (command === 'emulator') {
-    const emulatorArgs = args.slice(1);
-    const socketPath = process.env.BEELINE_CORNER_EMULATOR_SOCKET;
-    const cornerId = process.env.BEELINE_CORNER_ID;
-    // Info flags stay in this process. A boot goes to the helper so the
-    // emulator outlives the turn that asked for it.
-    try {
-      process.exitCode = socketPath && cornerId && !emulatorArgsAreInfoOnly(emulatorArgs)
-        ? await requestKeptCornerEmulator(socketPath, cornerId, emulatorArgs, process.env)
-        : await runLeasedEmulator(emulatorArgs);
-    } catch (error) {
-      console.error(error instanceof Error ? error.message : String(error));
-      process.exitCode = 1;
-    }
-    return;
-  }
   if (command === CURSOR_ACP_BRIDGE_FLAG) {
     await runCursorAcpStdioServer();
     return;
@@ -207,9 +189,7 @@ async function main(): Promise<void> {
     const configPath = configFlag >= 0 ? args[configFlag + 1] : undefined;
     const roomId = roomFlag >= 0 ? args[roomFlag + 1] : undefined;
     if (!configPath || !roomId) throw new Error('corner-read-token requires --config and --room');
-    const activated = await activateDaemonTransport(resolve(configPath));
-    if (!activated) throw new Error('corner-read-token requires monolith transport');
-    const credential = await activated.client.execute('getRoomGitHubToken', { roomId });
+    const credential = await DaemonApiClient.readRepositoryCredential(resolve(configPath), roomId);
     // A caller may close its reader before this short-lived command writes.
     process.stdout.once('error', (error: NodeJS.ErrnoException) => {
       if (error.code !== 'EPIPE') throw error;
@@ -295,6 +275,11 @@ async function main(): Promise<void> {
     // `--machine` hosts every paired agent; `--config` hosts exactly one, for
     // a development checkout or a test that runs one helper by hand.
     if (configPath && process.env.BEELINE_LAB !== '1') throw new Error('daemon --config requires explicit BEELINE_LAB=1 and an isolated state root');
+    if (startupLayout && !configPath) {
+      const { refreshJoinedSessionBridge } = await import('./session-join/bridge.js');
+      await refreshJoinedSessionBridge(resolve(startupLayout.libDir, 'lib/beeline/recovery-cli.mjs'))
+        .catch(error => console.warn('[helper] joined-session bridge upgrade failed:', error));
+    }
     const { reason, lifecycle } = await runMachineHelper(
       configPath ? { configPaths: [resolve(configPath)] } : {},
     );

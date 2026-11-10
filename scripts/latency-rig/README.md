@@ -468,9 +468,9 @@ Stop only the emulator and fixture processes owned by this wake.
 The host runner is built but **not installed**. Switch only if any of the next
 three scheduled nights (November 2–4, 2026) fails for a non-app reason. It fetches
 and detaches exact main in `<state-dir>/checkout`, installs root/mobile dependencies
-only when their lockfile hashes change, leases one emulator, bind-tests unused
+only when their lockfile hashes change, uses an operator-selected running host emulator, bind-tests unused
 ports, and runs the same `nightly-run.sh`. It reports a held capture, verdict or
-emulator lane as blocked (exit 2), leaving the holder alone. Stale `host.lock` or
+unavailable emulator as blocked (exit 2). Stale `host.lock` or
 `nightly.lock` directories require verifying that no writer remains before removal.
 
 Before enabling it, replace agent capture schedule `390f36c4-454d-475a-a789-0d3561bcdc92`
@@ -491,16 +491,13 @@ PATH=/absolute/node/bin:/absolute/beeline/bin:/absolute/android-sdk/platform-too
 LATENCY_RIG_STATE=/absolute/private/latency-rig-speedy
 LATENCY_RIG_RUNNER=/absolute/repository/scripts/latency-rig/nightly-host.sh
 ANDROID_HOME=/absolute/android-sdk
-BEELINE_ANDROID_EMULATOR_BINARY=/absolute/android-sdk/emulator/emulator
-BEELINE_ANDROID_BASE_AVD_HOME=/absolute/avd-metadata-containing-se_api35
-BEELINE_ANDROID_LEASE_ROOT=/absolute/private/latency-rig-speedy/emulator-leases
-BEELINE_ANDROID_INSTANCE_ROOT=/absolute/private/latency-rig-speedy/emulator-instances
+LATENCY_RIG_DEVICE=emulator-5554
 ```
 
 Include the host JDK/toolchain environment and optional prepared
 `GRADLE_RO_DEP_CACHE` described above. Use the existing persistent rig state to
 retain baseline history. Requires the local-run prerequisites plus `git`, `npm`,
-`beeline`, `adb`, `ss`, `flock`, `setsid` and `pkill`. Install only after the
+`adb`, `ss`, `flock`, `setsid` and `pkill`. Install only after the
 schedule switch:
 
 ```sh
@@ -528,7 +525,10 @@ the standing corner rather than creating a duplicate. Its execution contract is:
 
 > Run the nightly squire emulator latency rig under scripts/latency-rig/README.md
 > Nightly setup and execution. Fetch origin/main into the private detached
-> latency-rig-speedy checkout; read the current scripts, install dependencies
+> checkout inside this corner's writable worktree or its private scratch directory.
+> If the supplied latency-rig-speedy checkout is read-only, make a detached copy
+> with git clone --shared --no-hardlinks <source> "$TMPDIR/latency-rig" and run there.
+> Verify write access with mktemp in that copy before installing dependencies; read the current scripts, install dependencies
 > if needed, and use an owned Beeline-leased se_api35 emulator (2560 MiB, 4 cores).
 > Bind-test an unused local port pair. Run nightly-run.sh and monitor it in the
 > same turn until exit, retaining its log and exit status. It compares reports,
@@ -615,8 +615,7 @@ in the connection, never in the rig, repository or capture environment:
    through the approved first-party connection. Its `sha` is mandatory. On HTTP
    409, read the latest contents, regenerate the body, and retry (at most three
    writes); never resend a stale body or replace unrelated concurrent edits.
-   `publishInsights(transport, verdict)` implements this protocol for a sealed
-   transport; the CLI only prepares the request and has no network credentials.
+   The CLI only prepares the request and has no network credentials.
 4. Save the successful publication receipt with the run; a publication failure
    must be reported and retried from fresh contents, including on a passing night.
    This does not change the measurement verdict or baseline. Publish only final
@@ -701,3 +700,184 @@ capture. `LATENCY_RIG_SMOKE=1` permits one sample (the ordinary minimum stays
 20); it never relaxes nightly analysis coverage and cannot establish a passing
 nightly verdict. With no entry filter smoke mode captures the arrival cases too;
 use the explicit entry filter for these bounded proofs.
+
+## Paired web interaction inventory
+
+`web-run.sh OUTPUT_DIRECTORY` builds the production Expo web export, starts a
+loopback server on a separate disposable `beeline_latency_rig_inventory` database, seeds the
+explicit `web-fixtures.mjs` scenarios, and runs `web-capture.mjs`. It requires
+prepared root/mobile dependencies, PostgreSQL, and `npx playwright install
+chromium`. It never starts an emulator or connects to a production Workspace.
+The default ports are 18090 (server), 18091 (local proxy), and 18089 (web); it
+checks that they are free before starting. `LATENCY_RIG_WEB_DATABASE_URL`,
+`LATENCY_RIG_WEB_SERVER_PORT`, `LATENCY_RIG_WEB_PROXY_PORT`, and
+`LATENCY_RIG_WEB_PORT` override this isolated lane. Database writes require a
+loopback host and a database name containing `latency_rig`.
+
+The inventory remains `interactions.json`; fixture starting routes must exist
+in `routes.json`. Every item has an explicit seeded scenario and driver step
+or a documented unsupported boundary. Each capture starts with the same inventory. Before each sample, setup resets
+that scenario and its browser response/outbox caches while retaining fixture sign-in. Chromium blocks all requests outside the two configured
+loopback origins, including external WebSockets, analytics, OAuth and media.
+The driver adds CORS headers only to its local fixture API responses.
+
+Each supported interaction runs twice with twenty samples per capture.
+`captures.json` retains the individual durations and exact setup/action errors.
+`summary.json` contains pooled and per-capture p50/p95, browser/commit/source
+hashes, coverage, `fullInventoryScore`, and `unmeasured[]`. Setup, sign-in and
+fixture reset are outside timing. Timing includes the browser driver's action
+dispatch and observing the visible result followed by two animation frames;
+it is an upper bound on rendered feedback, not physical scanout. Mutations
+also check their committed database effect after timing, so cancelling a sheet
+cannot count as forwarding a message. A failed or incomplete pair contributes
+no successful percentile row. Failure screenshots and visible text are retained.
+
+`fullInventoryScore` is the percentage of the **complete** inventory with
+pooled p50 below the existing 150 ms tap target. It is `null` when any item
+cannot be measured; gaps never count as zero-duration samples or disappear
+from the denominator. Native file selection, external provider consent, live
+GitHub merge gates, internal agent workflow commands, and retired standalone
+read/unread controls are explicitly unmeasured, with their reasons. This lane
+does not reinstate retired product controls or treat opening their neighboring
+screen as completing an interaction.
+
+`nightly-run.sh` runs the web lane before the independent native lane and keeps
+its output under `web/`. Both native comparison attempts carry `--web-summary`,
+so the final nightly JSON and card text include the web score, each measured
+p50/p95, and every gap. Native calibration, history and regression baselines
+retain their existing meaning. The existing Insights projection adds separate
+`case:web/<interaction>/paired` charts for valid current-head pairs, labels them
+as headless feedback upper bounds, and carries every gap into the dated log.
+Web setup failures retain their build/server
+logs and a nonzero exit status; a missing summary produces explicit missing
+web rows in the final nightly card.
+
+`node --test scripts/latency-rig/nightly-web-capture.test.mjs` fails if an
+inventory entry loses its fixture or driver decision, checks pair/sample
+validity, and checks propagation into the nightly card. It runs in the existing
+nightly test glob in CI and before the standalone web lane.
+
+## Local web busy-Room capture
+
+`capture-web-room.mjs` captures two batches of twenty warm switches from
+`Rig room 002` to `Rig room 001` using Chrome's loopback CDP endpoint. Start a
+production web export against the disposable local server, sign in using its
+local review link, and select **Latency Rig 200** before running:
+
+```sh
+LATENCY_RIG_CDP=http://127.0.0.1:18083 \
+  node scripts/latency-rig/capture-web-room.mjs web-room.json
+```
+
+The endpoint defaults to the address above. `LATENCY_RIG_CPU_RATE` defaults to
+one (no throttling); keep the same rate, browser viewport, fixture and build
+configuration for comparisons. Reload with browser caching disabled after changing
+exports and verify the `browser.scripts` bundle names in each report.
+
+The driver starts before the row click. Completion requires the entire seeded
+answer text, a visible hit-tested answer and composer, no visible loading/error
+surface, and nonempty laid-out visible message bodies; it rechecks on the next
+animation frame. The large newest answer fills this fixture's visible transcript.
+Hidden, occluded, offscreen or incomplete Rooms cannot complete the sample.
+This is a browser frame proxy, not physical scanout. The alternate Room receives
+a fixed setup wait outside the timed interval.
+
+The original evidence ZIP and its capture conditions are unavailable. The
+unchanged seed and committed driver reconstruct the baseline at `594e3bca`;
+this is not a claim to reproduce the original approximately 370 ms result.
+The old layout-only predicate measured p95 186.8 / 160.3 ms and was superseded
+by the visible-frame predicate. Paired results and conditions are in the PR's
+Reproduction BUSY-ROOM-WEB-1 evidence.
+
+Predicate checks: `node --test scripts/latency-rig/web-room-frame.test.mjs`.
+The SidebarView route-hop test guards stable row props so navigation cannot
+silently force every unrelated memoized conversation row to render again.
+
+## Forward-message completion timing
+
+The picker now renders FORWARDED after the matching send reply. The passive observer records that visible result across two frames separately from dismissal. Completion uses this accepted-result frame when present; clients without feedback retain the removal-frame fallback. `acceptedResultMs` and `dismissalResultMs` preserve both boundaries, and the original animation and removal segments remain available. Compare the new accepted-result metric with the old dismissal metric explicitly; neither is a physical scanout measurement.
+
+The forward-message row preserves its original start, fixture, click, accepted
+server write, hidden-picker completion, and two result frames. Before the start,
+`web-forward-timing.mjs` installs a passive DOM-removal observer. It records the
+picker removal and the following two frames in the page, so Playwright's selector
+polling cannot move the stop timestamp. `forwardTimings` retains each corrected
+sample, the original `driverObservedMs`, and the dispatch, click-to-send,
+send-to-reply, reply-to-animation, animation, removal, and frame segments. The
+summary keeps original driver percentiles under `driverObserved` and segment
+percentiles under `profile`. These timestamps observe the real app; they neither
+close the picker nor change its exit animation. Missing profile events fail the
+sample. Socket instrumentation retains timing only, without message contents.
+
+The removal audit corrects driver observation delay; it does not make dismissal
+faster. The existing animation remains a floor on dismissal, while accepted
+feedback can appear sooner. To select this interaction without changing its two batches of twenty
+samples, use `LATENCY_RIG_WEB_INTERACTION=forward-message` with `web-run.sh`;
+uncaptured inventory entries remain explicitly unmeasured and the full score
+remains unavailable. This selection matches the create-corner capture lane.
+
+The existing nightly regression checks retain corrected and driver percentiles
+separately. `node --test scripts/latency-rig/web-forward-timing.test.mjs` additionally
+uses local headless Chromium to prove that delaying the driver's read cannot move
+the recorded stop, that unrelated replies cannot settle the profile, and that
+instrumentation restores itself. Chromium is required for that local check; it
+is not added as a prerequisite to the existing browser-free nightly CI suite.
+
+### Long-press recognition timing
+
+Create-corner reports time from pointerdown plus the `delayLongPress` threshold
+read from `ChatSurfaceHeader.tsx`. Its existing destination URL and visible
+composer are observed during the unchanged hold; two result frames freeze the
+completion timestamp before gesture cleanup is awaited. Other interactions keep
+their existing timing. Captures retain recognition, hold and completion stamps
+and a separate `gestureInclusiveMs`; summary rows label the recognition contract
+and carry separate gesture-inclusive percentiles. Do not compare recognition
+latency with historical gesture-inclusive numbers, including the old 852 ms
+create-corner inventory value. Subtracting a static floor is a separately labelled
+analysis field, not a replacement for either raw timing contract.
+
+`node scripts/latency-rig/web-long-press-floor.mjs OUTPUT.json` runs two batches
+of twenty static rendered-result samples to establish the driver floor. This
+self-check is not an app/server performance measurement. For a targeted paired
+capture set `LATENCY_RIG_WEB_INTERACTION=create-corner`; the summary still lists
+unmeasured inventory rows and leaves the full score unavailable.
+
+Forward close auditing also separates `configuredAnimationMs` (the CSS animation
+elapsed-time value) from `animationMs` (the observed start/end event interval).
+`closeStartMs`, `animationEndMs`, `removalMs`, `tapToGoneMs`, and
+`sourceMessageVisibleMs` expose the actual marks. The last observes the existing
+source message after removal, not a forwarded message in a destination Room that
+this route never opens. Missing visibility stays null. The dismissal audit retains its two-frame
+completion boundary alongside accepted-result timing; the direct tap-to-gone value excludes those
+frames and the pre-click driver dispatch.
+
+### Web route coverage
+
+Route discovery excludes extracted hook/support modules and includes browser-share
+and Google callback screens. The current inventory contains 44 routes (88 cold/warm
+variants), rather than the historical 38 missing page loads. Each has an explicit
+content predicate in `web-route-fixtures.mjs`; redirects and terminal unavailable
+states are labelled in `route-summary.json`. Headers and spinners alone do not
+settle a page load. The wallet read uses a deterministic zero-balance DTO over the
+local socket, with no provider or wallet writes. App/key pages read metadata-only
+rows in the disposable local database. These are rendering fixtures, not proof of
+provider sign-in, usable credentials, wallet balances or spending.
+
+`web-run.sh` captures routes by default in the same browser after interactions.
+Each route variant has two captures of three document loads; route percentiles
+are coverage observations at a 450 ms budget, not the forty-sample performance
+proof required for the slow-path fixes. Cold document loads clear HTTP and app
+surface caches while preserving authentication; warm loads retain those caches.
+Set `LATENCY_RIG_WEB_ROUTES_ONLY=1` for the independent route lane. For setup
+smoke checks, `LATENCY_RIG_ROUTE_SMOKE_SAMPLES=1` runs one incomplete capture;
+its gaps stay explicit and Insights rejects it as a timing series.
+
+Attachment timing starts at file selection through the real web document picker,
+then includes upload, Send, the rendered message and a committed attachment check.
+It excludes human time in OS picker chrome. `web-run.sh` starts a disposable,
+loopback-only object store with synthetic keys (at most 1 MiB per fixture object),
+then shuts it down with the local server. No production object storage is used.
+Mark-read/unread have no current user controls; agent workflow start/handoff have
+no web tap controls; exact-head merge approval and provider consent remain explicit
+unavailable/external rows. Opening a workflow or connection page is never counted
+as completing those actions.

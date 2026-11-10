@@ -1,3 +1,4 @@
+import { appReadErrorCopy } from '@/buzz/app-error-copy';
 import { displayRoomMessage } from '@/buzz/room-view-presentation';
 import { readRoomViewMessage, type PhoneOperationMap } from '@beeline/api-contract/phone';
 import { monolithPhoneOperation } from '@/sync/transport/monolith-operation';
@@ -117,9 +118,9 @@ function ToolLedgerLineRow({
 }
 
 function toolPageLines(page:PhoneOperationMap['readRoomTools']['output']):ToolLedgerLine[]{
-  if(!Array.isArray(page.messages)||page.messages.length>50)throw new Error('Tool output is unavailable.');
+  if(!Array.isArray(page.messages)||page.messages.length>50)throw new Error('Tool output did not match the expected format.');
   const messages=page.messages.map(readRoomViewMessage);
-  if(messages.some(message=>!message))throw new Error('Tool output is unavailable.');
+  if(messages.some(message=>!message))throw new Error('Tool output did not match the expected format.');
   return toolLedgerLines(buildTurnActivity(messages.flatMap(message=>displayRoomMessage(message!,'').activity??[])).steps);
 }
 function useToolOutput() {
@@ -136,13 +137,13 @@ function useToolOutput() {
     void request.then(page => {
       if (generation !== current.current) return;
       const full = toolPageLines(page).find(item => item.id === next.id);
-      setLine({ ...next, detail: full?.detail ?? 'Output unavailable.' });
-      if (full?.detail == null) setError('Output unavailable.');
-    }).catch(() => {
+      setLine({ ...next, detail: full?.detail, requester: full?.requester,
+        reason: full?.reason, outputHidden: full?.outputHidden });
+    }).catch((cause) => {
       if (generation !== current.current) return;
-      const message = 'Output unavailable. Open again to retry.';
-      setLine({ ...next, detail: message });
-      setError(message);
+      const message = appReadErrorCopy(cause);
+      setLine({ ...next, detail: message || undefined });
+      setError(message || null);
     });
   };
   return { line, error, open, close: () => { current.current++; setLine(null); } };
@@ -197,7 +198,7 @@ function ToolRunGroupRow({
               key={line.id}
               line={line}
               divider={index > 0}
-              onPress={line.detail||line.toolOutput ? () => onPressLine?.(line) : undefined}
+              onPress={line.kind === 'tool' || line.detail||line.toolOutput ? () => onPressLine?.(line) : undefined}
               testID={`tool-ledger-line-${line.id}`}
             />
           ))
@@ -237,11 +238,12 @@ export const TurnStepsLine = React.memo(function TurnStepsLine({
       ))}
       <ToolOutputSheet
         detail={sheetLine?.detail}
+        outputHidden={sheetLine?.outputHidden}
         error={sheetError}
         onClose={closeLine}
-        subtitle={sheetLine?.outcome === 'failure' ? sheetLine?.reason : undefined}
+        subtitle={sheetLine?.outcome === 'failure' ? sheetLine.reason : sheetLine?.requester}
         title={sheetLine?.label ?? 'Output'}
-        visible={Boolean(sheetLine?.detail)}
+        visible={Boolean(sheetLine)}
       />
     </View>
   );
@@ -309,11 +311,12 @@ export const ActivityTimeline = React.memo(function ActivityTimeline({
       ) : null}
       <ToolOutputSheet
         detail={sheetLine?.detail}
+        outputHidden={sheetLine?.outputHidden}
         error={sheetError}
         onClose={closeLine}
-        subtitle={sheetLine?.outcome === 'failure' ? sheetLine?.reason : undefined}
+        subtitle={sheetLine?.outcome === 'failure' ? sheetLine.reason : sheetLine?.requester}
         title={sheetLine?.label ?? 'Output'}
-        visible={Boolean(sheetLine?.detail)}
+        visible={Boolean(sheetLine)}
       />
     </View>
   );

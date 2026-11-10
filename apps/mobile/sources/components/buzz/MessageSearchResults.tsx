@@ -1,7 +1,8 @@
+import { ContentTarget } from '@/components/buzz/IndexRow';
 import { ErrorBanner } from './ErrorBanner';
 import { Button } from '@/components/buzz/Button';
 import React from 'react';
-import { Pressable, Text, View } from 'react-native';
+import { Text, View } from 'react-native';
 import { StyleSheet } from 'react-native-unistyles';
 import { MESSAGE_SEARCH_MIN_CHARS, type MessageSearchResult } from '@beeline/api-contract/phone';
 import { compactRelativeTime } from '@/buzz/relative-time';
@@ -36,13 +37,12 @@ export function MessageSearchResults({
         <Text style={styles.note} testID="message-search-too-broad">
           Too many messages match “{search.query}”. Add another word.
         </Text>
-      ) : search.status === 'rate_limited' || search.status === 'error' ? (
+      ) : search.status === 'rate_limited' ? (
         <ErrorBanner inline
           title={FAILURE_LABELS[search.status]}
-          onRetry={search.retry}
           retryTestID={search.status === 'rate_limited' ? 'message-search-too-fast' : 'message-search-retry'}
         />
-      ) : search.results.length === 0 ? (
+      ) : search.status === 'error' ? null : search.results.length === 0 ? (
         <Text style={styles.note} testID="message-search-empty">
           No messages match
         </Text>
@@ -51,10 +51,9 @@ export function MessageSearchResults({
           {search.results.map((result) => (
             <MessageSearchRow key={result.messageId} result={result} now={now} onOpen={onOpen} />
           ))}
-          {search.moreFailed ? (
+          {search.moreFailed && search.moreFailed !== 'error' ? (
             <ErrorBanner inline
-              title={search.moreFailed === 'error' ? "Couldn't load more." : FAILURE_LABELS[search.moreFailed]}
-              onRetry={search.loadMore}
+              title={FAILURE_LABELS[search.moreFailed]}
               retryTestID="message-search-more-retry"
             />
           ) : search.hasMore ? (
@@ -80,7 +79,7 @@ export function MessageSearchResults({
 const FAILURE_LABELS: Record<MessageSearchFailure, string> = {
   too_broad: 'Too many messages match. Add another word.',
   rate_limited: 'Searching too fast. Wait a moment.',
-  error: "Couldn't search messages.",
+  error: '',
 };
 
 function MessageSearchRow({
@@ -96,7 +95,7 @@ function MessageSearchRow({
   const room = result.roomName.replace(/^[#@]+/, '');
   const text = result.snippet.map((part) => part.text).join('');
   return (
-    <Pressable
+    <ContentTarget
       accessibilityRole="button"
       accessibilityLabel={`${result.authorName} in ${sigil}${room}: ${text}`}
       onPress={() => onOpen(result)}
@@ -122,7 +121,7 @@ function MessageSearchRow({
           ),
         )}
       </Text>
-    </Pressable>
+    </ContentTarget>
   );
 }
 

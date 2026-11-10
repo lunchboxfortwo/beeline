@@ -1,0 +1,244 @@
+{
+  "schemaVersion": 1,
+  "longPressContract": "pointerdown + threshold from source to existing result plus two frames; observed during hold; gesture-inclusive timings retained separately",
+  "platform": "headless-chromium-web",
+  "commit": "b3548612f8051d9136916f6b45ab6854e87e7f1f",
+  "browser": "158.0.8127.18",
+  "sourceHashes": {
+    "web-fixtures.mjs": "5417ecb2a23e17ed7cabf3dbf0009e6f70185e02f9eeff19ac8421d78bff58ca",
+    "web-steps.mjs": "42c51c1ae15ed4983ac8e6118f91aa8edd1968f80b61bbf392147ea3a6672afd",
+    "web-capture.mjs": "a50b5dc19f80f58f6e9095611bdcbfc6ad591b5e0919547be96dc60bea9d7c97",
+    "web-forward-timing.mjs": "da2ef4e702485054f59a2a58dfc4b1575a5bde9e6d5bda9cc872ec7eab04fe19",
+    "web-long-press.mjs": "23153380ade570cf9769583374743e66eb9231b3f81524f3474d980c629263a9",
+    "interactions.json": "d5371537b295314b3cef53cb5b8e372b66ae883526980ef4a2f32cff50003472",
+    "routes.json": "d39bb3faa0876480d31fa0cda4a4e4ffb81ca9bce63a145f5e90db6ca73290f4"
+  },
+  "method": "User action to observed destination/result DOM plus two animation frames, including driver overhead; upper bound, not physical scanout. Setup, reset and sign-in excluded. Forward completion uses in-page removal plus two frames; driver-observed durations are retained separately. Local server only; no injected network delay.",
+  "fullInventoryScore": null,
+  "scoreDefinition": "Percentage of the complete interaction inventory with paired pooled p50 below 150 ms; null if any item is unmeasured",
+  "coverage": {
+    "measured": 1,
+    "total": 26
+  },
+  "rows": [
+    {
+      "name": "forward-message",
+      "samples": 40,
+      "p50Ms": 380.90000009536743,
+      "p95Ms": 396.2999997138977,
+      "timingContract": "action start to in-page picker removal plus two animation frames",
+      "driverObserved": {
+        "p50Ms": 844.6999998092651,
+        "p95Ms": 861.9000000953674
+      },
+      "profile": {
+        "durationMs": {
+          "p50Ms": 380.90000009536743,
+          "p95Ms": 396.2999997138977
+        },
+        "removalMs": {
+          "p50Ms": 349.2999997138977,
+          "p95Ms": 364.5
+        },
+        "dispatchMs": {
+          "p50Ms": 34.19999980926514,
+          "p95Ms": 37.5
+        },
+        "clickToSendMs": {
+          "p50Ms": 0.19999980926513672,
+          "p95Ms": 0.3000001907348633
+        },
+        "sendToReplyMs": {
+          "p50Ms": 39,
+          "p95Ms": 52.09999990463257
+        },
+        "replyToAnimationMs": {
+          "p50Ms": 28.300000190734863,
+          "p95Ms": 39.40000009536743
+        },
+        "animationMs": {
+          "p50Ms": 249.89999961853027,
+          "p95Ms": 250.09999990463257
+        },
+        "configuredAnimationMs": {
+          "p50Ms": 250,
+          "p95Ms": 250
+        },
+        "closeStartMs": {
+          "p50Ms": 104.5,
+          "p95Ms": 117.2999997138977
+        },
+        "animationEndMs": {
+          "p50Ms": 347.80000019073486,
+          "p95Ms": 363.09999990463257
+        },
+        "tapToGoneMs": {
+          "p50Ms": 313.69999980926514,
+          "p95Ms": 330.30000019073486
+        },
+        "closeToGoneMs": {
+          "p50Ms": 251.09999990463257,
+          "p95Ms": 251.5
+        },
+        "sourceMessageVisibleMs": {
+          "p50Ms": 364.40000009536743,
+          "p95Ms": 379.90000009536743
+        },
+        "animationEndToRemovalMs": {
+          "p50Ms": 1.299999713897705,
+          "p95Ms": 1.5999999046325684
+        },
+        "removalToFrameMs": {
+          "p50Ms": 31.90000009536743,
+          "p95Ms": 32.09999990463257
+        },
+        "driverObservationLagMs": {
+          "p50Ms": 450,
+          "p95Ms": 466.69999980926514
+        }
+      },
+      "captures": [
+        {
+          "capture": 1,
+          "samples": 20,
+          "p50Ms": 380.90000009536743,
+          "p95Ms": 398.19999980926514
+        },
+        {
+          "capture": 2,
+          "samples": 20,
+          "p50Ms": 380.59999990463257,
+          "p95Ms": 395.30000019073486
+        }
+      ]
+    }
+  ],
+  "unmeasured": [
+    {
+      "name": "open-room",
+      "reason": "Requires two complete captures of twenty positive finite samples",
+      "captures": []
+    },
+    {
+      "name": "open-corner",
+      "reason": "Requires two complete captures of twenty positive finite samples",
+      "captures": []
+    },
+    {
+      "name": "switch-workspace",
+      "reason": "Requires two complete captures of twenty positive finite samples",
+      "captures": []
+    },
+    {
+      "name": "create-room",
+      "reason": "Requires two complete captures of twenty positive finite samples",
+      "captures": []
+    },
+    {
+      "name": "create-dm",
+      "reason": "Requires two complete captures of twenty positive finite samples",
+      "captures": []
+    },
+    {
+      "name": "create-corner",
+      "reason": "Requires two complete captures of twenty positive finite samples",
+      "captures": []
+    },
+    {
+      "name": "send-text",
+      "reason": "Requires two complete captures of twenty positive finite samples",
+      "captures": []
+    },
+    {
+      "name": "send-attachment",
+      "reason": "Requires two complete captures of twenty positive finite samples",
+      "captures": []
+    },
+    {
+      "name": "react-message",
+      "reason": "Requires two complete captures of twenty positive finite samples",
+      "captures": []
+    },
+    {
+      "name": "bookmark-message",
+      "reason": "Requires two complete captures of twenty positive finite samples",
+      "captures": []
+    },
+    {
+      "name": "report-message",
+      "reason": "Requires two complete captures of twenty positive finite samples",
+      "captures": []
+    },
+    {
+      "name": "delete-message",
+      "reason": "Requires two complete captures of twenty positive finite samples",
+      "captures": []
+    },
+    {
+      "name": "mark-read",
+      "reason": "Requires two complete captures of twenty positive finite samples",
+      "captures": []
+    },
+    {
+      "name": "mark-unread",
+      "reason": "Requires two complete captures of twenty positive finite samples",
+      "captures": []
+    },
+    {
+      "name": "rename-room",
+      "reason": "Requires two complete captures of twenty positive finite samples",
+      "captures": []
+    },
+    {
+      "name": "leave-room",
+      "reason": "Requires two complete captures of twenty positive finite samples",
+      "captures": []
+    },
+    {
+      "name": "close-corner",
+      "reason": "Requires two complete captures of twenty positive finite samples",
+      "captures": []
+    },
+    {
+      "name": "approve-merge",
+      "reason": "Requires two complete captures of twenty positive finite samples",
+      "captures": []
+    },
+    {
+      "name": "answer-approval",
+      "reason": "Requires two complete captures of twenty positive finite samples",
+      "captures": []
+    },
+    {
+      "name": "start-workflow",
+      "reason": "Requires two complete captures of twenty positive finite samples",
+      "captures": []
+    },
+    {
+      "name": "handoff-workflow",
+      "reason": "Requires two complete captures of twenty positive finite samples",
+      "captures": []
+    },
+    {
+      "name": "connect-app",
+      "reason": "Requires two complete captures of twenty positive finite samples",
+      "captures": []
+    },
+    {
+      "name": "choose-model",
+      "reason": "Requires two complete captures of twenty positive finite samples",
+      "captures": []
+    },
+    {
+      "name": "change-yolo",
+      "reason": "Requires two complete captures of twenty positive finite samples",
+      "captures": []
+    },
+    {
+      "name": "stop-turn",
+      "reason": "Requires two complete captures of twenty positive finite samples",
+      "captures": []
+    }
+  ],
+  "blockedRequests": []
+}

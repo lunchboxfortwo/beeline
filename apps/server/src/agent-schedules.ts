@@ -1,3 +1,4 @@
+import { expireWorkflowRuns, nextWorkflowExpiryDelay } from './workflow-run-expiry.js';
 import { systemMessage } from '@beeline/api-contract/system-message-catalog';
 import { CornerAccessDatabase } from './corner-access-database.js';
 import { createAgentCommand } from './agent-command.js';
@@ -12,7 +13,7 @@ import {
 } from '@beeline/api-contract/scheduled-prompts';
 import type { SqlDatabase } from './database.js';
 import { ensureSystemIdentity, systemLine } from './system-line.js';
-import { fireWorkflowTimer, liveWorkflowRun } from './workflow-runs.js';
+import { liveWorkflowRun } from './workflow-runs.js';
 import { SYSTEM_IDENTITY_ID } from '@beeline/api-contract/system-identity';
 
 const MINUTE_MS = 60_000;
@@ -109,21 +110,22 @@ export class AgentScheduleLoop {
         `SELECT greatest(0,ceil(extract(epoch FROM (schedule.next_run_at-clock_timestamp()))*1000))::float8 delay_ms
          FROM agent_schedules schedule
          JOIN rooms room ON room.id=schedule.room_id AND room.archived_at IS NULL
-         WHERE (schedule.max_runs IS NULL OR schedule.run_count<schedule.max_runs)
-           AND ${unfailedSchedule} AND (schedule.workflow_run IS NOT NULL OR (
+         WHERE schedule.paused_at IS NULL AND (schedule.max_runs IS NULL OR schedule.run_count<schedule.max_runs)
+           AND ${unfailedSchedule} AND (
            EXISTS(SELECT 1 FROM identities creator WHERE creator.id=schedule.creator_id
              AND (creator.kind='human' OR creator.id=schedule.agent_id))
            AND EXISTS(SELECT 1 FROM identities agent WHERE agent.id=schedule.agent_id AND agent.kind='agent')
            AND EXISTS(SELECT 1 FROM memberships creator_membership WHERE creator_membership.room_id=schedule.room_id
              AND creator_membership.identity_id=schedule.creator_id AND creator_membership.removed_at IS NULL)
            AND EXISTS(SELECT 1 FROM memberships agent_membership WHERE agent_membership.room_id=schedule.room_id
-             AND agent_membership.identity_id=schedule.agent_id AND agent_membership.removed_at IS NULL)))
+             AND agent_membership.identity_id=schedule.agent_id AND agent_membership.removed_at IS NULL))
          ORDER BY schedule.next_run_at,schedule.id LIMIT 1`,
       )
     ).rows[0];
-    if (!row) return;
+    const expiry = await nextWorkflowExpiryDelay(this.database);
+    if (!row) return expiry;
     if (!Number.isFinite(row.delay_ms)) throw new Error('Schedule deadline unavailable');
-    return row.delay_ms;
+    return Math.min(row.delay_ms, expiry ?? Infinity);
   }
 
   async runOnce(now?: Date): Promise<number> {
@@ -131,6 +133,7 @@ export class AgentScheduleLoop {
     // clock that may be ahead of the persisted calendar. Explicit times are
     // reserved for deterministic fixture runs.
     now ??= (await this.database.query<{ now_at: Date }>('SELECT clock_timestamp() now_at')).rows[0]!.now_at;
+    for (const roomId of await expireWorkflowRuns(this.database, now)) this.onPosted?.(roomId);
     const due = await this.database.query<DueSchedule>(
       `SELECT schedule.id,schedule.room_id,schedule.agent_id,schedule.creator_id,schedule.owner_id,schedule.workflow_slug,schedule.human_command_message_id,
         schedule.cadence,schedule.message,schedule.max_runs,schedule.run_count,schedule.next_run_at,
@@ -144,12 +147,12 @@ export class AgentScheduleLoop {
          AND creator_membership.identity_id=schedule.creator_id AND creator_membership.removed_at IS NULL
        JOIN memberships agent_membership ON agent_membership.room_id=schedule.room_id
          AND agent_membership.identity_id=schedule.agent_id AND agent_membership.removed_at IS NULL
-       WHERE schedule.next_run_at <= $1 AND schedule.workflow_run IS NULL AND ${unfailedSchedule}
+       WHERE schedule.paused_at IS NULL AND schedule.next_run_at <= $1 AND ${unfailedSchedule}
          AND (schedule.max_runs IS NULL OR schedule.run_count<schedule.max_runs)
-       ORDER BY schedule.next_run_at,schedule.id LIMIT 100`,
+       ORDER BY schedule.next_run_at,schedule.id`,
       [now],
     );
-    let posted = await this.fireWorkflowTimers(now);
+    let posted = 0;
     let parkFailure: unknown;
     for (const candidate of due.rows) {
       let roomId: string | undefined;
@@ -172,7 +175,7 @@ export class AgentScheduleLoop {
                JOIN memberships agent_membership ON agent_membership.room_id=schedule.room_id
                  AND agent_membership.identity_id=schedule.agent_id
                  AND agent_membership.removed_at IS NULL
-               WHERE schedule.id=$1 AND schedule.next_run_at <= $2 AND schedule.workflow_run IS NULL AND ${unfailedSchedule}
+               WHERE schedule.paused_at IS NULL AND schedule.id=$1 AND schedule.next_run_at <= $2 AND ${unfailedSchedule}
                  AND (schedule.max_runs IS NULL OR schedule.run_count<schedule.max_runs)
                FOR UPDATE OF schedule`,
               [candidate.id, now],
@@ -324,36 +327,4 @@ export class AgentScheduleLoop {
     );
   }
 
-  /**
-   * Workflow engine timers (`workflow_run` set): a step's timeout, a gate's
-   * default or a run's deadline. They belong to the run, not to an agent or
-   * the schedule's creator, so no membership is required to fire them.
-   */
-  private async fireWorkflowTimers(now: Date): Promise<number> {
-    const due = await this.database.query<ScheduleAttempt & {
-      id: string;
-      room_id: string;
-      workflow_run: Parameters<typeof fireWorkflowTimer>[1]['workflow_run'];
-    }>(
-      `SELECT schedule.id,schedule.room_id,schedule.workflow_run,schedule.next_run_at,schedule.updated_at::text updated_at,schedule.next_run_at::text due_revision
-       FROM agent_schedules schedule
-       JOIN rooms room ON room.id=schedule.room_id AND room.archived_at IS NULL
-       WHERE schedule.next_run_at <= $1 AND schedule.workflow_run IS NOT NULL AND ${unfailedSchedule}
-       ORDER BY schedule.next_run_at,schedule.id LIMIT 100`,
-      [now],
-    );
-    let fired = 0;
-    for (const row of due.rows) {
-      try {
-        if (!(await fireWorkflowTimer(this.database, row))) continue;
-      } catch (error) {
-        console.error(`workflow timer ${row.id} failed; occurrence parked`, error);
-        await this.park(row);
-        continue;
-      }
-      fired += 1;
-      this.onPosted?.(row.room_id);
-    }
-    return fired;
-  }
 }

@@ -1,0 +1,40 @@
+
+ RUN  v3.2.7 /home/lunchbox/.local/state/beeline/corners/bd047d3916abc4ee2bb1e4938bbb48d0a45210bd0a9208b8105b41c647cc9768/apps/mobile
+
+stderr | sources/app/(app)/beeline/chat/useChatMessageActions.test.tsx > swipe-reply-1: replying preserves the reading offset (tail=false)
+react-test-renderer is deprecated. See https://react.dev/warnings/react-test-renderer
+
+stderr | sources/app/(app)/beeline/chat/useChatMessageActions.test.tsx > swipe-reply-1: replying preserves the reading offset (tail=true)
+react-test-renderer is deprecated. See https://react.dev/warnings/react-test-renderer
+
+ ❯ sources/app/(app)/beeline/chat/useChatMessageActions.test.tsx (2 tests | 1 failed) 18ms
+   × swipe-reply-1: replying preserves the reading offset (tail=false) 16ms
+     → expected +0 to be 1200 // Object.is equality
+   ✓ swipe-reply-1: replying preserves the reading offset (tail=true) 2ms
+
+⎯⎯⎯⎯⎯⎯⎯ Failed Tests 1 ⎯⎯⎯⎯⎯⎯⎯
+
+ FAIL  sources/app/(app)/beeline/chat/useChatMessageActions.test.tsx > swipe-reply-1: replying preserves the reading offset (tail=false)
+AssertionError: expected +0 to be 1200 // Object.is equality
+
+- Expected
++ Received
+
+- 1200
++ 0
+
+ ❯ sources/app/(app)/beeline/chat/useChatMessageActions.test.tsx:57:20
+     55|     expect(setReplyTarget).toHaveBeenCalledWith(expect.objectContainin…
+     56|     expect(focus).toHaveBeenCalledOnce();
+     57|     expect(offset).toBe(initialOffset);
+       |                    ^
+     58|     expect(controller.isPinnedToTail()).toBe(atTail);
+     59|     // The real keyboard/composer layout owner must retain history and…
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[1/1]⎯
+
+
+ Test Files  1 failed (1)
+      Tests  1 failed | 1 passed (2)
+   Start at  21:35:34
+   Duration  654ms (transform 286ms, setup 67ms, collect 405ms, tests 18ms, environment 0ms, prepare 46ms)

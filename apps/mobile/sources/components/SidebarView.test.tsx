@@ -1,18 +1,24 @@
+import { sidebarAgeTests } from './SidebarView.age.test-support';
 vi.mock('react-native-keyboard-controller', async () => { const R = await import('react'); return { KeyboardAvoidingView: (props: any) => R.createElement('View', props, props.children) }; });
 import * as React from 'react';
 // @ts-expect-error react-test-renderer has no declarations in this workspace.
 import { act, create, type ReactTestRenderer } from 'react-test-renderer';
 import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest';
+import type { MonolithSurfaceEvent } from '@/sync/transport/monolith-rig-transport';
 
 // These fixtures exercise the negotiated legacy compatibility path. The actual
 // router owner/negotiation path has independent integration coverage.
 
 
 
-const workspaceLive = vi.hoisted(() => ({ listeners: new Set<() => void>(), deleted: false, empty: false }));
+const workspaceLive = vi.hoisted(() => ({ listeners: new Set<(event: MonolithSurfaceEvent) => void>(), deleted: false, empty: false }));
+const workspaceChange: MonolithSurfaceEvent = {
+  monolithLive: { type: 'invalidate', roomId: '', reason: 'postgres:memberships' },
+};
 const routerReplace = vi.hoisted(() => vi.fn());
 const routerPush = vi.hoisted(() => vi.fn());
 const routerNavigate = vi.hoisted(() => vi.fn());
+const stableRouter = vi.hoisted(() => ({ push: routerPush, navigate: routerNavigate, replace: routerReplace }));
 const saveActiveCommunityId = vi.hoisted(() => vi.fn(async () => undefined));
 const loadLastViewedChannel = vi.hoisted(() => vi.fn(async () => null));
 const route = vi.hoisted(() => ({
@@ -187,9 +193,9 @@ vi.mock('react-native-unistyles', async () => {
   },
   useUnistyles: () => ({ theme: fullTheme }),
 }); });
-vi.mock('@expo/vector-icons', async () => {
+vi.mock('@expo/vector-icons/Ionicons', async () => {
   const ReactModule = await import('react');
-  return { Ionicons: (props: any) => ReactModule.createElement('Ionicons', props) };
+  return { default: (props: any) => ReactModule.createElement('Ionicons', props) };
 });
 vi.mock('react-native-safe-area-context', () => ({ useSafeAreaInsets: () => ({ top: 0 }) }));
 vi.mock('expo-router', async () => {
@@ -200,7 +206,7 @@ vi.mock('expo-router', async () => {
     pathnameListeners.add(listener);
     return () => { pathnameListeners.delete(listener); };
   }, () => route.pathname),
-  useRouter: () => ({ push: routerPush, navigate: routerNavigate, replace: routerReplace }),
+  useRouter: () => stableRouter,
   });
 });
 vi.mock('@/utils/responsive', () => ({ useHeaderHeight: () => 56, useIsDesktop: () => true }));
@@ -231,7 +237,7 @@ vi.mock('@/sync/transport/room-view-client', () => ({
 vi.mock('@/sync/transport', () => ({
   BuzzRigTransport: class {
     createHumanCorner = createHumanCorner;
-    async surfaceSubscribe(_filters: unknown, listener: () => void) {
+    async surfaceSubscribe(_filters: unknown, listener: (event: MonolithSurfaceEvent) => void) {
       workspaceLive.listeners.add(listener);
       return () => workspaceLive.listeners.delete(listener);
     }
@@ -306,11 +312,6 @@ vi.mock('@/components/buzz/CornerGlyph', async () => {
 vi.mock('@/components/buzz/IdentityMark', () => ({
   IdentityMark: (props: any) => React.createElement('IdentityMark', props),
 }));
-vi.mock('@/components/buzz/MembersGlyph', () => ({
-  MEMBERS_GLYPH_STROKE_WIDTH: 1.25,
-  chromeStrokeWidth: () => 1.25,
-  MembersGlyph: (props: any) => React.createElement('MembersGlyph', props),
-}));
 vi.mock('@/components/buzz/SurfaceGlyphLoader', async () => {
   const ReactModule = await import('react');
   return {
@@ -325,6 +326,7 @@ vi.mock('@/components/buzz/HullActionSheet', () => ({
 }));
 
 import { SidebarView } from './SidebarView';
+import { ConversationRow } from './buzz/ConversationRow';
 import { liveChatList, refreshChatList, resetChatListStoresForTest } from '@/buzz/chat-list-store';
 import { TrayGlyph } from '@/components/buzz/TrayGlyph';
 import { RoomListToolbar } from '@/components/buzz/RoomListToolbar';
@@ -414,21 +416,47 @@ describe('desktop Workspace navigation', () => {
     await settle();
   });
 
+  it('keeps send-related Tray and bookmark deltas from rereading both navigation lists', async () => {
+    const workspaceReads = workspaces.mock.calls.length;
+    const chatReads = chats.mock.calls.length;
+    await act(async () => {
+      for (const listener of workspaceLive.listeners) {
+        listener({ monolithLive: { type: 'needs-you-delta', roomId: '',
+          workspaceId: 'workspace-a', sourceRoomId: 'room-a', count: 0, items: [] } });
+        listener({ monolithLive: { type: 'bookmark-delta', roomId: '',
+          workspaceId: 'workspace-a', messageId: 'message-a', bookmark: null } });
+      }
+    });
+    await settle();
+    expect(workspaces).toHaveBeenCalledTimes(workspaceReads);
+    expect(chats).toHaveBeenCalledTimes(chatReads);
+    await act(async () => {
+      for (const listener of workspaceLive.listeners) listener(workspaceChange);
+    });
+    await settle();
+    expect(workspaces).toHaveBeenCalledTimes(workspaceReads + 1);
+    expect(chats).toHaveBeenCalledTimes(chatReads + 1);
+  });
 
-  it.each(['Retry', 'committed workspace update', 'shared covering read'])('restores Room rows after outage recovery through %s', async recovery => {
+  sidebarAgeTests({
+    get tree() { return tree; },
+    set tree(value) { tree = value; },
+    settle, control, surfaceRows, surfaceListeners, route, pathnameListeners,
+  });
+
+  it.each(['committed workspace update', 'shared covering read'])('restores Room rows after outage recovery through %s', async recovery => {
     workspaces.mockRejectedValueOnce(new Error('isolated outage'));
-    await act(async () => { for (const listener of [...workspaceLive.listeners]) listener(); });
+    await act(async () => { for (const listener of [...workspaceLive.listeners]) listener(workspaceChange); });
     await settle();
     const failed = tree.root.findAll((node: any) => node.props.action === 'Retry' && node.props.title === 'Could not load workspaces.');
-    expect(failed.length).toBeGreaterThan(0);
-    expect(tree.root.findAllByProps({ testID: 'desktop-room-room-a' })).toHaveLength(0);
+    expect(failed).toHaveLength(0);
+    expect(tree.root.findAllByProps({ testID: 'desktop-room-room-a' }).length).toBeGreaterThan(0);
     const reads = workspaces.mock.calls.length;
     await act(async () => {
-      if (recovery === 'Retry') failed[0]!.props.onPress();
-      else if (recovery === 'shared covering read') {
+      if (recovery === 'shared covering read') {
         for (const listener of surfaceListeners.get('/workspaces:') ?? []) listener();
       }
-      else for (const listener of [...workspaceLive.listeners]) listener();
+      else for (const listener of [...workspaceLive.listeners]) listener(workspaceChange);
     });
     await settle();
     expect(workspaces).toHaveBeenCalledTimes(reads + (recovery === 'shared covering read' ? 0 : 1));
@@ -439,7 +467,7 @@ describe('desktop Workspace navigation', () => {
   it('removes the deleted workspace from the permanent rail while a Room is open', async () => {
     route.pathname = '/beeline/chat/room-a';
     workspaceLive.deleted = true;
-    await act(async () => { for (const listener of [...workspaceLive.listeners]) listener(); });
+    await act(async () => { for (const listener of [...workspaceLive.listeners]) listener(workspaceChange); });
     await settle();
     expect(tree.root.findByType('DesktopWorkspaceRail').props.workspaces.map((workspace: { id: string }) => workspace.id)).toEqual(['workspace-empty']);
     expect(saveActiveCommunityId).toHaveBeenCalledWith('viewer', 'workspace-empty');
@@ -450,7 +478,7 @@ describe('desktop Workspace navigation', () => {
 
   it('clears the permanent rail when its final workspace is deleted', async () => {
     workspaceLive.empty = true;
-    await act(async () => { for (const listener of [...workspaceLive.listeners]) listener(); });
+    await act(async () => { for (const listener of [...workspaceLive.listeners]) listener(workspaceChange); });
     await settle();
     expect(tree.root.findByType('DesktopWorkspaceRail').props.workspaces).toEqual([]);
     expect(saveActiveCommunityId).toHaveBeenCalledWith('viewer', null);
@@ -492,6 +520,8 @@ describe('desktop Workspace navigation', () => {
     expect(chats).toHaveBeenCalledTimes(initialChatReads);
     expect(chats.mock.calls.every(([id]) => id === 'workspace-a')).toBe(true);
     expect(tree.root.findByType('CommunitySwitcherTrigger').props.community.name).toBe('Alpha Workspace');
+    const unchangedRow = () => tree.root.findAllByType(ConversationRow).find((row: any) => row.props.item.room.id === 'dm-a')!;
+    const unchangedProps = { ...unchangedRow().props };
     const hopStarted = performance.now();
     for (let hop = 0; hop < 10; hop += 1) {
       route.pathname = hop % 2 ? '/beeline/chat/room-a' : '/beeline/tray';
@@ -500,6 +530,9 @@ describe('desktop Workspace navigation', () => {
         tree.update(<SidebarView />);
       });
       expect(control('desktop-room-room-a')).toBeDefined();
+      for (const key of Object.keys(unchangedProps)) {
+        expect(unchangedRow().props[key], key).toBe(unchangedProps[key]);
+      }
     }
     expect(workspaces).toHaveBeenCalledTimes(initialReads);
     expect(chats).toHaveBeenCalledTimes(initialChatReads);

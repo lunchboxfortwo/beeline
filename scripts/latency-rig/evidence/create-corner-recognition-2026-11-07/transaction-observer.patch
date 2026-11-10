@@ -1,0 +1,20 @@
+--- a/scripts/latency-rig/pg-probe.cjs
++++ b/scripts/latency-rig/pg-probe.cjs
+@@ -94,6 +94,8 @@
+ const query = pg.Client.prototype.query;
+ pg.Client.prototype.query = function (...args) {
+   const startMs = Date.now();
++  const text = typeof args[0] === 'string' ? args[0] : args[0]?.text;
++  const boundary = typeof text === 'string' ? /^(BEGIN|START TRANSACTION|COMMIT|ROLLBACK)\b/i.exec(text.trim())?.[1]?.toUpperCase() : undefined;
+   const scope = context.getStore();
+   const poolWaitMs = waits.get(this) ?? 0;
+   waits.delete(this);
+@@ -102,7 +104,7 @@
+     if (finished) return;
+     finished = true;
+     emit({ type: 'sql', traceId: scope?.traceId ?? null,
+-      operation: scope?.operation ?? 'background', startMs, endMs: Date.now(),
++      operation: scope?.operation ?? 'background', boundary, startMs, endMs: Date.now(),
+       poolWaitMs, rows: result?.rowCount ?? null, failed: Boolean(error) });
+   };
+   const callback = args.at(-1);

@@ -36,18 +36,21 @@ CREATE TABLE IF NOT EXISTS rooms_mcp_webhook_outbox (
  room_id uuid NOT NULL REFERENCES rooms(id) ON DELETE CASCADE,
  message_id text NOT NULL,
  body text NOT NULL,
- attempts integer NOT NULL DEFAULT 0,
  claimed_at timestamptz,
  created_at timestamptz NOT NULL DEFAULT now(),
  delivered_at timestamptz
 );
 ALTER TABLE rooms_mcp_webhook_outbox ADD COLUMN IF NOT EXISTS claimed_at timestamptz;
-CREATE INDEX IF NOT EXISTS rooms_mcp_webhook_outbox_pending
- ON rooms_mcp_webhook_outbox(created_at) WHERE delivered_at IS NULL;
--- UTC keeps the claim-duration expression immutable and independent of session timezone.
-CREATE INDEX IF NOT EXISTS rooms_mcp_webhook_outbox_due ON rooms_mcp_webhook_outbox
- ((GREATEST(created_at AT TIME ZONE 'UTC',(claimed_at AT TIME ZONE 'UTC')+interval '1 minute')))
- WHERE delivered_at IS NULL AND attempts<3;
+ALTER TABLE rooms_mcp_webhook_outbox ADD COLUMN IF NOT EXISTS attempted_at timestamptz;
+ALTER TABLE rooms_mcp_webhook_outbox ADD COLUMN IF NOT EXISTS completed_at timestamptz;
+ALTER TABLE rooms_mcp_webhook_outbox ADD COLUMN IF NOT EXISTS http_status integer;
+ALTER TABLE rooms_mcp_webhook_outbox ADD COLUMN IF NOT EXISTS failure_category text;
+ALTER TABLE rooms_mcp_webhook_outbox ADD COLUMN IF NOT EXISTS duration_ms integer;
+ALTER TABLE rooms_mcp_webhook_outbox ADD COLUMN IF NOT EXISTS delivery_state text NOT NULL DEFAULT 'unknown';
+DROP INDEX IF EXISTS rooms_mcp_webhook_outbox_due;
+DROP INDEX IF EXISTS rooms_mcp_webhook_outbox_pending;
+CREATE INDEX rooms_mcp_webhook_outbox_pending
+ ON rooms_mcp_webhook_outbox(created_at) WHERE delivered_at IS NULL AND claimed_at IS NULL;
 CREATE INDEX IF NOT EXISTS rooms_mcp_webhook_outbox_room ON rooms_mcp_webhook_outbox(room_id);
 CREATE INDEX IF NOT EXISTS rooms_mcp_webhook_outbox_member ON rooms_mcp_webhook_outbox(member_id);
 CREATE TABLE IF NOT EXISTS subscription_webhook_deliveries (
@@ -81,7 +84,7 @@ export async function requireScheduledWorkReader(db: SqlDatabase, roomId: string
 }
 
 /** Humans manage their own DMs; Rooms retain Workspace admin authority. */
-export async function requireScheduledWorkManager(db: SqlDatabase, roomId: string, viewerId: string, allowCorner = false, denialMessage = 'workspace admins only'): Promise<void> {
+export async function requireScheduledWorkManager(db: SqlDatabase, roomId: string, viewerId: string, allowCorner = false, denialMessage = 'workspace admins only', holdAuthority = false): Promise<void> {
   const room = (await db.query<{ parent_id: string | null; archived_at: Date | null }>(
     'SELECT parent_id,archived_at FROM rooms WHERE id=$1', [roomId])).rows[0];
   if (!room) throw new Error('room not found');
@@ -93,12 +96,23 @@ export async function requireScheduledWorkManager(db: SqlDatabase, roomId: strin
      WHERE room.id=$1 AND (room.parent_id IS NULL OR $3) AND room.archived_at IS NULL AND (
        (room.direct_participants IS NOT NULL AND room.direct_participants ? $2
          AND EXISTS (SELECT 1 FROM memberships member WHERE member.room_id=room.id
-           AND member.identity_id=$2 AND member.removed_at IS NULL))
+           AND member.identity_id=$2 AND member.removed_at IS NULL ${holdAuthority?'FOR SHARE OF member':''}))
        OR (room.direct_participants IS NULL AND EXISTS (
          SELECT 1 FROM memberships member WHERE member.workspace_id=room.workspace_id
            AND member.room_id IS NULL AND member.identity_id=$2 AND member.removed_at IS NULL
-           AND member.role IN ('owner','admin'))))`, [roomId, viewerId, allowCorner]);
+           AND member.role IN ('owner','admin') ${holdAuthority?'FOR SHARE OF member':''})))
+       ${holdAuthority?'FOR SHARE OF room,person':''}`, [roomId, viewerId, allowCorner]);
   if (!allowed.rowCount) throw new Error(denialMessage);
+}
+
+/** A DM participant's Workspace role still controls its read-only policy. */
+export async function requireScheduledStopManager(db:SqlDatabase,roomId:string,viewerId:string):Promise<void>{
+  await requireScheduledWorkManager(db,roomId,viewerId,false,'workspace admins only',true);
+  const roles=await db.query<{role:string}>(`SELECT member.role FROM memberships member
+    WHERE member.identity_id=$1 AND member.room_id IS NULL AND member.removed_at IS NULL
+      AND member.workspace_id=(SELECT workspace_id FROM rooms WHERE id=$2)
+    FOR SHARE OF member NOWAIT`,[viewerId,roomId]);
+  if(roles.rows.some(member=>member.role==='spectator'))throw new Error('spectator access is read-only (access denied)');
 }
 
 /** One authority check for both the commanding human and phone operations. */
@@ -185,8 +199,8 @@ export async function ingestSubscriptionWebhook(db: SqlDatabase, id: string, raw
   await ensureSystemIdentity(db);
   return db.transaction(async (tx) => {
     const row = (await tx.query<{ room_id: string; agent_id: string; prompt: string;
-      workflow_slug: string | null; webhook_token: string; webhook_owner_id: string }>(
-      `SELECT room_id,agent_id,prompt,workflow_slug,webhook_token,webhook_owner_id
+      workflow_slug: string | null; webhook_token: string; webhook_owner_id: string; paused_at: Date | null }>(
+      `SELECT room_id,agent_id,prompt,workflow_slug,webhook_token,webhook_owner_id,paused_at
        FROM agent_subscriptions WHERE id=$1 AND source='webhook' FOR UPDATE`, [id])).rows[0];
     if (!row) return { status: 404, outcome: 'not_found' };
     const record = async (outcome: WebhookCallView['outcome'], status: number, reason?: string,
@@ -207,6 +221,7 @@ export async function ingestSubscriptionWebhook(db: SqlDatabase, id: string, raw
     if (recent.rowCount >= CALLS_PER_MINUTE) return record('refused', 429, 'Too many calls');
     if (!webhookAuthenticated(openSecrets<string>(secret(), row.webhook_token), raw, headers))
       return record('refused', 401, 'Invalid token or signature');
+    if (row.paused_at) return record('refused', 409, 'Paused while you were away');
     const current = await tx.query(
       `SELECT 1 FROM rooms room
        JOIN room_access member ON member.room_id=room.id AND member.identity_id=$2 AND member.removed_at IS NULL

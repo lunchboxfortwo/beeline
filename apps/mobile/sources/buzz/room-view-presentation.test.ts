@@ -38,6 +38,13 @@ describe('Room view presentation', () => {
     watchFilters: [{ '#h': ['room'] }],
   });
 
+  it('preserves the server warning card through transcript projection', () => {
+    expect(displayRoomMessage({
+      id: 'away', text: 'Return within 1 day', createdAt: 1, presentation: 'card', awayWarning: true,
+      author: { pubkey: 'system', kind: 'human', name: 'Beeline' },
+    }, 'viewer')).toMatchObject({ awayWarning: true, text: 'Return within 1 day' });
+  });
+
   it('applies committed message deltas idempotently and in authoritative order', () => {
     const message = (id: string, createdAt: number): RoomViewMessage => ({
       id,
@@ -54,11 +61,12 @@ describe('Room view presentation', () => {
     expect(duplicate).toBe(ordered);
   });
 
-  it('replaces a pending command when its working receipt arrives', () => {
+  it('retains pending commands through out-of-order working deltas until the command projection changes', () => {
     const pending = { requestId: 'request', agentPubkey: 'agent', createdAt: 1 };
     const view = { ...emptyRoom(), pendingAgentCommands: [pending] };
     const working = { requestId: 'request', agentPubkey: 'agent', status: 'working' as const, createdAt: 2 };
-    expect(reconcileRoomTurnDelta(view, working, [working]).pendingAgentCommands).toEqual([]);
+    expect(reconcileRoomTurnDelta(view, working, [working]).pendingAgentCommands).toEqual([pending]);
+    expect(reconcileRoomTurnDelta(view,{...working,status:'complete'},[]).pendingAgentCommands).toEqual([]);
   });
 
   it('projects the same computer card from a live delta and a later Room read', () => {
@@ -165,7 +173,7 @@ describe('Room view presentation', () => {
     ]);
   });
 
-  it('keeps an indexed system row visible as a system notice', () => {
+  it.each(['system', 'card'] as const)('keeps an indexed workflow %s row in the compact system renderer', presentation => {
     const message: RoomViewMessage = {
       id: 'system-notice',
       text: 'A scheduled run is paused.',
@@ -175,7 +183,8 @@ describe('Room view presentation', () => {
         kind: 'agent',
         name: 'Pi agent',
       },
-      presentation: 'system',
+      presentation,
+      systemEvent: { kind: 'workflow-handoff', subject: { kind: 'system', name: 'Workflow' }, verb: 'advanced' },
     };
 
     expect(displayRoomMessage(message, 'a'.repeat(64))).toMatchObject({

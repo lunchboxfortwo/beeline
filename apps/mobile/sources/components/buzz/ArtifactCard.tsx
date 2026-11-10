@@ -1,3 +1,4 @@
+import { appReadErrorCopy } from '@/buzz/app-error-copy';
 import { useArtifactRecoveryGeneration } from '@/buzz/use-artifact-recovery';
 import { ContentTarget, IndexRow, InlineRow } from './IndexRow';
 import { Button } from '@/components/buzz/Button';
@@ -13,12 +14,14 @@ import {
   mediaIdFromUrl,
 } from '@/buzz/artifact';
 import {
+  ArtifactPreviewUnavailable,
   artifactImageSource,
   releaseArtifactImageSource,
   subscribeArtifactBytesPurge,
   fetchArtifactText,
   openArtifactInBrowserOrExplain,
 } from '@/buzz/artifact-link';
+import { ArtifactDocumentPreview } from './ArtifactDocumentPreview';
 import { formatAttachmentSize } from '@/buzz/chat-attachment';
 import { withAlpha } from '@/buzz/groknight';
 import { openArtifactInDesktopWorkPane } from '@/buzz/desktop-artifact-pane';
@@ -67,9 +70,8 @@ export function openArtifactViewer(attachment: AttachmentReference, isDesktop = 
 }
 
 /**
- * Visible cards use a bounded excerpt or a server-produced thumbnail. Full
- * document rendering belongs to the existing Open action. Hidden transcript
- * rows retain the same frame without starting a byte request.
+ * Visible cards use an excerpt, thumbnail, or bounded sandbox render. Hidden
+ * transcript rows retain the same frame without starting a byte request.
  */
 export const ArtifactCard = React.memo(function ArtifactCard({
   attachment,
@@ -289,11 +291,12 @@ function ArtifactCardShell({
 type SandboxPreviewFormat = 'html' | 'svg' | 'pdf';
 
 /**
- * The existing preview frame paints a bounded server-produced thumbnail.
- * Full markup/PDF rendering starts only through the existing Open action.
+ * Prefer an existing thumbnail; agent-posted documents without one render in
+ * the same sandbox as Open, cropped to the card. Both share the byte cache.
  */
 export function ArtifactSandboxPreview({
   attachment,
+  format,
 }: {
   attachment: AttachmentReference;
   format: SandboxPreviewFormat;
@@ -301,23 +304,28 @@ export function ArtifactSandboxPreview({
   const recovery = useArtifactRecoveryGeneration();
   const [source, setSource] = useState<Awaited<ReturnType<typeof artifactImageSource>> | null>(null);
   const [failed, setFailed] = useState(false);
+  const [renderDocument, setRenderDocument] = useState(false);
   useEffect(() => {
-    setFailed(false); setSource(null);
+    setFailed(false); setSource(null); setRenderDocument(false);
     let live = true; let loaded: Awaited<ReturnType<typeof artifactImageSource>> | null = null;
     const controller = new AbortController();
     const stopPurge = subscribeArtifactBytesPurge(attachment, () => { controller.abort(); releaseArtifactImageSource(loaded); setSource(null); setFailed(true); });
-    // A server-produced bounded thumbnail is the only binary preview. Whole
-    // HTML/SVG/PDF bytes belong to the existing explicit Open action.
+    // Missing thumbnails are expected for agent posts, not load failures.
     void artifactImageSource(attachment, { signal: controller.signal, preview: true, thumbnail: true }).then(value => {
       loaded = value; if (live && !controller.signal.aborted) setSource(value); else releaseArtifactImageSource(value);
-    }).catch(() => { if (live && !controller.signal.aborted) setFailed(true); });
+    }).catch(error => {
+      if (!live || controller.signal.aborted) return;
+      if (error instanceof ArtifactPreviewUnavailable) setRenderDocument(true);
+      else setFailed(Boolean(appReadErrorCopy(error)));
+    });
     return () => { live = false; controller.abort(); stopPurge(); releaseArtifactImageSource(loaded); };
   }, [attachment, recovery]);
   if (failed) return (
     <View style={styles.failureInset} testID="artifact-preview-failed">
-      <IndexRow inset="flush" title="Preview unavailable" description="The page could not be loaded. Try again." />
+      <IndexRow inset="flush" title="Preview unavailable" />
     </View>
   );
+  if (renderDocument) return <ArtifactDocumentPreview attachment={attachment} format={format} />;
   if (source) return <View style={styles.preview} testID="artifact-preview-snapshot"><Image source={source} resizeMode="cover" onError={() => setFailed(true)} style={styles.previewImage} /></View>;
   return <View style={styles.previewPlaceholder} testID="artifact-preview-loading"><Text style={styles.docGlyph}>▧</Text></View>;
 }
@@ -336,14 +344,14 @@ export function ArtifactMarkdownPreview({ attachment }: { attachment: Attachment
       .then((text) => {
         if (live && !controller.signal.aborted) setMarkdown(text);
       })
-      .catch(() => { if (live && !controller.signal.aborted) setFailed(true); });
+      .catch((cause) => { if (live && !controller.signal.aborted) setFailed(Boolean(appReadErrorCopy(cause))); });
     return () => {
       live = false; controller.abort(); stopPurge();
     };
   }, [attachment, recovery]);
   if (failed) return (
     <View style={styles.failureInset} testID="artifact-preview-failed">
-      <IndexRow inset="flush" title="Preview unavailable" description="The page could not be loaded. Try again." />
+      <IndexRow inset="flush" title="Preview unavailable" />
     </View>
   );
   if (markdown == null) {

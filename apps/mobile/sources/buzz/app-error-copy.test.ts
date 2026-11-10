@@ -1,7 +1,8 @@
 import { expect, it } from 'vitest';
-import { appErrorCopy, connectionErrorTitle } from './app-error-copy';
+import { appErrorCopy } from './app-error-copy';
+import { PhoneSocketDisconnectedError } from '@/sync/transport/phone-socket-error';
 it('explains network, timeout and server failures without diagnostics', () => {
-  for (const reason of [new TypeError('Network request failed'), new Error('Request timed out'), { status: 504, code: 'surface_request_timed_out', message: 'Room view request failed (504 surface_request_timed_out)' }]) expect(appErrorCopy(reason, 'Could not load rooms.')).toBe(connectionErrorTitle);
+  for (const reason of [new TypeError('Network request failed'), new Error('Request timed out'), { status: 504, code: 'surface_request_timed_out', message: 'Room view request failed (504 surface_request_timed_out)' }]) expect(appErrorCopy(reason, 'Could not load rooms.')).toBe('Could not load rooms.');
 });
 it('preserves human client messages and uses the screen fallback for unknown failures', () => {
   expect(appErrorCopy({ status: 403, message: 'Forbidden' })).toBe('Forbidden');
@@ -24,7 +25,7 @@ it('keeps human refusal messages from Error objects while hiding unknown diagnos
   for (const message of ['Claude did not accept that code.', 'This connection belongs to another member.', 'Sign-in was denied', 'invalid face id'])
     expect(appErrorCopy(new Error(message))).toBe(message);
   for (const message of ['offline', 'Network unavailable', 'Connections did not answer. Try again.'])
-    expect(appErrorCopy(new Error(message))).toBe(connectionErrorTitle);
+    expect(appErrorCopy(new Error(message))).toBe('Could not complete request');
 });
 
 it('uses the screen fallback for runtime and RTC diagnostics', () => {
@@ -33,5 +34,27 @@ it('uses the screen fallback for runtime and RTC diagnostics', () => {
 });
 
 it('shows connection recovery after a live socket closes before its read answers', () => {
-  expect(appErrorCopy(new Error('The connection closed before the server answered. The result is unknown.'))).toBe(connectionErrorTitle);
+  expect(appErrorCopy(new Error('The connection closed before the server answered. The result is unknown.'))).toBe('Could not complete request');
+});
+
+it('leaves socket transport recovery to the global banner', () => {
+  for (const name of ['PhoneSocketDisconnectedError', 'MonolithRequestTimeoutError'])
+    expect(appErrorCopy(Object.assign(new Error('transport diagnostic'), { name, socketRequest: true }), 'Could not load rooms.')).toBe('');
+  expect(appErrorCopy(new PhoneSocketDisconnectedError(), 'Could not load rooms.')).toBe('');
+  expect(appErrorCopy({ name: 'PhoneSocketDisconnectedError', message: 'transport diagnostic' })).toBe('transport diagnostic');
+});
+
+it('keeps HTTP-only upload timeouts as action errors without diagnosing connectivity', () => {
+  const error=Object.assign(new Error('Request timed out'), {name:'MonolithRequestTimeoutError'});
+  expect(appErrorCopy(error,'Could not upload this photo.')).toBe('Could not upload this photo.');
+});
+
+it('leaves all failed reads to the shared owner while preserving human server refusals', async () => {
+  const { appReadErrorCopy } = await import('./app-error-copy');
+  for (const reason of [new PhoneSocketDisconnectedError(), new TypeError('Network request failed'),
+    { status: 503, message: 'Unavailable' }, new Error('Something failed'), { status: 408 }])
+    expect(appReadErrorCopy(reason)).toBe('');
+  expect(appReadErrorCopy(new Error('This connection belongs to another member.'))).toBe('This connection belongs to another member.');
+  expect(appReadErrorCopy({ status: 403, message: 'Only Workspace members can open this Room.' }))
+    .toBe('Only Workspace members can open this Room.');
 });

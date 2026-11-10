@@ -3,8 +3,8 @@
 export type OwnedModelCredential = Readonly<{
   v: 1;
   token: string;
-  /** Absolute DB-derived hard turn deadline, Unix seconds. Replay never renews. */
-  expiresAt: number;
+  /** Legacy wire field. New credentials end with invocation authority, without an execution deadline. */
+  expiresAt: number | null;
 }>;
 
 /** Durable outcome only. No model transcript, provider key or replayed answer. */

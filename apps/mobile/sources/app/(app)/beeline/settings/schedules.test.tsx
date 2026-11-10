@@ -25,7 +25,7 @@ vi.mock('react-native', async () => {
 });
 vi.mock('react-native-unistyles', () => ({ StyleSheet: { create: (fn: any) => fn({ buzz: { type: { sectionHead: {}, sectionLabel: { fontSize: 13, lineHeight: 19, letterSpacing: 2 }, sectionCount: { fontSize: 15, lineHeight: 22 } }, space: {}, roomList: { edge: 20 } } }), hairlineWidth: 1 } }));
 vi.mock('react-native-safe-area-context', () => ({ useSafeAreaInsets: () => ({ top: 0, bottom: 0 }) }));
-vi.mock('@expo/vector-icons', () => ({ Ionicons: () => null }));
+vi.mock('@expo/vector-icons/Ionicons', () => ({ default: () => null }));
 vi.mock('@/components/buzz/PageHeader', () => ({ PageHeader: () => null }));
 vi.mock('@/components/buzz/SettingsRow', async () => {
   const { createElement } = await import('react');
@@ -294,4 +294,9 @@ it('uses the server DM flag for location and fallback trigger wording, not a mis
   expect(scheduleWhere({}, 'Room', false)).toBe('this Room');
   expect(subscriptionWhen({ source: 'room', event: 'joined' } as any, true)).toBe('On someone joining this DM');
   expect(subscriptionWhen({ source: 'room', event: 'other' } as any, true)).toBe('On an event in this DM');
+});
+
+it('shows paused schedules and subscriptions without claiming a next run', () => {
+  expect(scheduleTrigger({ paused: true } as any)).toBe('Paused while you were away');
+  expect(subscriptionWhen({ paused: true, registrationStatus: 'registering' } as any)).toBe('Paused while you were away');
 });

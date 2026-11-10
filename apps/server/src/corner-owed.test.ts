@@ -170,6 +170,33 @@ describe('corner_owed', () => {
     await step(owedToViewer);
   });
 
+  it.each(['opening order', 'first human tag'])('does not rebuild owed history after the %s establishes the owner', async source => {
+    if (source === 'first human tag') {
+      await database.query(`DELETE FROM agent_commands WHERE room_id=$1 AND reason='corner_objective'`, [CORNER]);
+      await phone.execute('sendRoomMessage', { roomId: CORNER, text: '@bee first assignment' }, OTHER);
+    }
+    await post('existing-tag', AGENT, '@owner matte or gloss?');
+    await database.query(`CREATE FUNCTION reject_owed_history_rebuild() RETURNS trigger
+      LANGUAGE plpgsql AS $$ BEGIN RAISE EXCEPTION 'tag rebuilt existing owed history'; END $$;
+      CREATE TRIGGER reject_owed_history_rebuild BEFORE DELETE ON corner_owed
+      FOR EACH ROW WHEN (OLD.message_id='existing-tag') EXECUTE FUNCTION reject_owed_history_rebuild()`);
+    await phone.execute('sendRoomMessage', { roomId: CORNER, text: '@bee continue' }, OTHER);
+    expect((await database.query(`SELECT message_id FROM corner_owed WHERE person_id=$1`, [OWNER])).rows)
+      .toContainEqual({ message_id: 'existing-tag' });
+  });
+
+  it('refreshes existing deliverables when the first human tag establishes the owner', async () => {
+    await database.query(`DELETE FROM agent_commands WHERE room_id=$1 AND reason='corner_objective'`, [CORNER]);
+    await database.query(`UPDATE rooms SET created_by=$2 WHERE id=$1`, [CORNER, OWNER]);
+    await post('deliverable', AGENT, 'Here it is.', {
+      attachments: [{ name: 'finish.png', url: '/files/finish.png', mimeType: 'image/png' }],
+    });
+    await step(idle);
+    await phone.execute('sendRoomMessage', { roomId: CORNER, text: '@bee continue' }, OTHER);
+    expect((await facts()).header).toBe(true);
+    await expectTableMatchesMessages();
+  });
+
   it('keeps push commissioner probes on the opening-order index', async () => {
     await database.transaction(async db => {
       await db.query(`SET LOCAL enable_seqscan=off`);
@@ -467,14 +494,14 @@ describe('corner_owed', () => {
     // indexed call-site cards. These scans do not recover owed facts.
     const callsiteScans = messageScans.filter((scan) => scan.alias.startsWith('callsite'));
     expect(callsiteScans).toHaveLength(2);
-    // The run state is the newest handoff card (indexed by corner and seq),
-    // and a derived worker wait reads its report card by primary key and the
-    // worker's newest human report through separate origin, local-legacy and
-    // command-forwarded legacy indexes. None recovers owed facts.
-    expect(messageScans.filter((scan) => scan.alias.startsWith('run_card'))).toHaveLength(2);
+    // The machine state is indexed on corner_facts; no lifecycle cards are scanned.
+    expect(messageScans.filter((scan) => scan.alias.startsWith('run_card'))).toHaveLength(0);
+    // Pending and held commands validate their exact head through source-id lookups.
+    const isTargetSource = (alias: string) => /^target_source(?:_\d+)?$/.test(alias);
+    expect(messageScans.filter((scan) => isTargetSource(scan.alias))).toHaveLength(2);
     expect(messageScans.filter((scan) => scan.alias === 'visible')).toHaveLength(1);
     expect(messageScans.filter((scan) => scan.alias !== 'item' && scan.alias !== 'visible' &&
-      !isDispatchSource(scan.alias) && !scan.alias.startsWith('callsite') &&
+      !isDispatchSource(scan.alias) && !isTargetSource(scan.alias) && !scan.alias.startsWith('callsite') &&
       !scan.alias.startsWith('run_card'))).toHaveLength(6);
   });
 });

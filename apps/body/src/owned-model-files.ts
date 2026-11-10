@@ -1,7 +1,7 @@
 import { createHash, randomBytes, randomUUID } from 'node:crypto';
 import { constants, closeSync, existsSync, fchmodSync, fsyncSync, fstatSync, lstatSync, mkdirSync, openSync,
   readSync, renameSync, unlinkSync, writeFileSync } from 'node:fs';
-import { isAbsolute, join, resolve } from 'node:path';
+import { dirname, isAbsolute, join, resolve } from 'node:path';
 import { readOwnedModelReceipt } from '@beeline/api-contract/helper-model-receipt';
 
 /** Private generation files only. No transport, provider registration, local
@@ -17,9 +17,9 @@ export interface OwnedModelFileBinding {
   readonly model: string;
   readonly baseUrl: string;
 }
-export interface OwnedModelFileCredential { readonly v: 1; readonly token: string; readonly expiresAt: number }
+export interface OwnedModelFileCredential { readonly v: 1; readonly token: string; readonly expiresAt: number | null }
 interface CredentialFile { v: 1; binding: OwnedModelFileBinding; credential: OwnedModelFileCredential }
-interface Journal { v: 1; bindingHash: string; requests: { id: string; state: 'unknown' | 'succeeded' }[]; active: string | null }
+interface Journal { v: 1; bindingHash: string; requests: { id: string; state: 'unknown' | 'succeeded' | 'refused' }[]; active: string | null }
 interface Owner { directory: string; authPath: string; journalPath: string; binding: OwnedModelFileBinding; digest: string; bindingHash: string }
 export class OwnedModelFileRefusal extends Error {
   constructor() { super('Owned model local intent is unavailable or UNKNOWN; do not resubmit.'); }
@@ -50,8 +50,8 @@ function binding(value: OwnedModelFileBinding): OwnedModelFileBinding {
 }
 function credential(value: OwnedModelFileCredential): OwnedModelFileCredential {
   if (!closed(value, 'expiresAt,token,v') || value.v !== 1 || typeof value.token !== 'string' ||
-      !/^bfmc_v1\.[a-f0-9]{32}\.[a-f0-9]{64}$/.test(value.token) || !Number.isSafeInteger(value.expiresAt) ||
-      value.expiresAt <= 0 || value.expiresAt > Math.floor(Number.MAX_SAFE_INTEGER / 1000)) throw new OwnedModelFileRefusal();
+      !/^bfmc_v1\.[a-f0-9]{32}\.[a-f0-9]{64}$/.test(value.token) || (value.expiresAt !== null && (!Number.isSafeInteger(value.expiresAt) ||
+      value.expiresAt <= 0 || value.expiresAt > Math.floor(Number.MAX_SAFE_INTEGER / 1000)))) throw new OwnedModelFileRefusal();
   return Object.freeze({ v: 1, token: value.token, expiresAt: value.expiresAt });
 }
 function privateDirectory(path: string): void {
@@ -88,7 +88,7 @@ function readPrivate(path: string): string {
     return bytes.subarray(0, length).toString('utf8');
   } finally { closeSync(descriptor); }
 }
-function readCredential(owner: Owner, now: number): CredentialFile {
+function readCredential(owner: Owner, _now: number): CredentialFile {
   privateDirectory(owner.directory);
   if (existsSync(join(owner.directory, 'revoked'))) throw new OwnedModelFileRefusal();
   const bytes = readPrivate(owner.authPath);
@@ -97,7 +97,6 @@ function readCredential(owner: Owner, now: number): CredentialFile {
   if (!closed(parsed, 'binding,credential,v') || parsed.v !== 1 ||
       JSON.stringify(binding(parsed.binding as OwnedModelFileBinding)) !== JSON.stringify(owner.binding)) throw new OwnedModelFileRefusal();
   const authenticated = credential(parsed.credential as OwnedModelFileCredential);
-  if (authenticated.expiresAt * 1000 <= now) throw new OwnedModelFileRefusal();
   return { v: 1, binding: owner.binding, credential: authenticated };
 }
 function readJournal(owner: Owner): Journal {
@@ -109,7 +108,7 @@ function readJournal(owner: Owner): Journal {
   for (const entry of value.requests) {
     if (!closed(entry, 'id,state') || typeof entry.id !== 'string' ||
         !/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/.test(entry.id) ||
-        !['unknown', 'succeeded'].includes(String(entry.state)) || ids.has(entry.id))
+        !['unknown', 'succeeded','refused'].includes(String(entry.state)) || ids.has(entry.id))
       throw new OwnedModelFileRefusal();
     if (entry.state === 'unknown' && entry !== value.requests.at(-1)) throw new OwnedModelFileRefusal();
     ids.add(entry.id);
@@ -127,6 +126,15 @@ function saveJournal(owner: Owner, journal: Journal): void {
  * serialization of this owner exposes neither bearer nor private state. */
 export class OwnedModelFiles {
   private constructor() {}
+  static open(directory:string):OwnedModelFiles {
+    if(!isAbsolute(directory))throw new OwnedModelFileRefusal();
+    privateDirectory(directory);
+    const stored=JSON.parse(readPrivate(join(directory,'credential.json'))) as CredentialFile;
+    const owner=OwnedModelFiles.create({root:dirname(directory),binding:stored.binding,credential:stored.credential});
+    if(owner.paths().directory!==directory)throw new OwnedModelFileRefusal();
+    return owner;
+  }
+
   static create(input: { root: string; binding: OwnedModelFileBinding; credential: OwnedModelFileCredential }): OwnedModelFiles {
     try {
       if (!isAbsolute(input.root)) throw new OwnedModelFileRefusal();
@@ -192,12 +200,12 @@ export class OwnedModelFiles {
       const current = readCredential(owner, Date.now()), journal = readJournal(owner), latest = journal.requests.at(-1);
       if (!latest) return false;
       const receipt = readOwnedModelReceipt(value, current.credential.token, latest.id);
-      if (receipt?.state !== 'succeeded' || receipt.evidence?.kind !== 'usage') return false;
-      if (latest.state === 'succeeded') return true;
+      if(!receipt || receipt.state==='unknown' || !receipt.evidence)return false;
+      if(latest.state===receipt.state)return true;
       const lock = join(owner.directory, 'requests.lock'); writeNew(lock, 'owned model terminal receipt'); directorySync(owner.directory);
       const locked = readJournal(owner), active = locked.requests.at(-1);
       if (!active || active.id !== latest.id || active.state !== 'unknown' || locked.active !== active.id) return false;
-      active.state = 'succeeded'; locked.active = null; saveJournal(owner, locked);
+      active.state = receipt.state; locked.active = null; saveJournal(owner, locked);
       unlinkSync(lock); directorySync(owner.directory); return true;
     } catch { return false; }
   }

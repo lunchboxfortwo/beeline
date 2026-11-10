@@ -1,7 +1,7 @@
+import { maskCredentialResult } from './mask-credential-result.js';
 import { readFile, rm } from 'node:fs/promises';
 import { writePrivateFileAtomically } from './atomic-private-file.js';
 import type { PromptResult } from './acp.js';
-import { redactToolDetail } from './turn-failure-reason.js';
 
 const normalizeRequest = (request: string): string =>
   request.trim().replace(/^@\S+\s+/, '').toLowerCase().replace(/[.!?]+$/, '');
@@ -13,7 +13,7 @@ export interface FreeAgentCheckpoint {
   limits: number;
 }
 
-/** Private per-conversation memory, independent of the process killed at the cap. */
+/** Private per-conversation memory, retained across real process loss or an explicit Stop. */
 export class FreeAgentContinuation {
   private checkpoint?: FreeAgentCheckpoint;
   private request = '';
@@ -47,15 +47,12 @@ export class FreeAgentContinuation {
     this.checkpoint = {
       request: previous?.request ?? this.request,
       partial: [previous?.partial, result.agentText].filter(Boolean).join('\n\n').slice(-8_000),
-      tools: [...(previous?.tools ?? []), ...result.toolCalls.map(call =>
-        `${redactToolDetail(call.title ?? call.kind ?? 'tool').slice(0, 120)}: ${['completed', 'failed'].includes(call.status ?? '') ? call.status : 'unfinished'}\n${redactToolDetail(JSON.stringify({ input: call.rawInput, output: call.rawOutput ?? call.content }, (key, value) =>
-          /token|secret|password|authorization|credential|cookie|api[_-]?key/i.test(key) ? '[REDACTED]' : value) ?? '').slice(0, 500)}`)].slice(-12),
+      tools: [...(previous?.tools ?? []), ...result.toolCalls.map(call => maskCredentialResult(call)).map(call =>
+        `${(call.title ?? call.kind ?? 'tool').slice(0, 120)}: ${['completed', 'failed'].includes(call.status ?? '') ? call.status : 'unfinished'}\n${(JSON.stringify({ input: call.rawInput, output: call.rawOutput ?? call.content }) ?? '').slice(0, 500)}`)].slice(-12),
       limits: (previous?.limits ?? 0) + 1,
     };
     if (this.path) await writePrivateFileAtomically(this.path, JSON.stringify({ version: 1, ...this.checkpoint }));
-    const note = this.checkpoint.limits < 2
-      ? "I've hit the time limit for this turn. I've saved the work so far; send continue to resume it."
-      : `I've hit the time limit again. Finishing “${this.checkpoint.request.replace(/\s+/g, ' ').slice(0, 180)}” is too large for one turn. First, I can check ${this.checkpoint.tools.length ? `the output from “${this.checkpoint.tools.at(-1)!.split('\n')[0]!.slice(0, 120)}”` : 'what was finished'} and report one remaining step.`;
+    const note = "The work stopped. I've saved the confirmed results and unfinished steps.";
     return [result.agentText, note].filter(Boolean).join('\n\n');
   }
 
@@ -67,9 +64,8 @@ export class FreeAgentContinuation {
 
 export function renderFreeAgentCheckpoint(checkpoint: FreeAgentCheckpoint): string {
   return [
-    'Saved work from a turn stopped at the free-agent time limit. The previous process and tools were stopped.',
+    'Saved work from a stopped invocation. Read the actual tool and file results before continuing.',
     'Resume from this checkpoint. Verify unfinished tool results before repeating any action.',
-    ...(checkpoint.limits >= 2 ? ['This request hit the limit twice. Explain which remaining part is too large and offer one smaller first step.'] : []),
     `Original request: ${checkpoint.request}`,
     `Work written so far:\n${checkpoint.partial || '(No partial reply was written.)'}`,
     `Observed tool steps (unfinished means no confirmed result):\n${checkpoint.tools.join('\n') || '(No tool steps were observed.)'}`,

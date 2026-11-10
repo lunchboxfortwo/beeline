@@ -1,3 +1,6 @@
+import type { MemberDelivery } from './mcp-delivery.js';
+import type { SigninFunnelEvent } from './signin-funnel.js';
+import type { DiagnosticBatch, DiagnosticAck } from './diagnostics.js';
 import type { MediaMetadata, MediaLink } from './media-metadata.js';
 import type { RepositoryOnboardingAction } from './repository-onboarding.js';
 import { PHONE_ROUTE_READ_OPERATIONS, type PhoneRouteOperationMap } from './phone-route-operations.js';
@@ -161,6 +164,8 @@ export type PhoneOperationMap = PhoneRouteOperationMap & {
   createRoomPoll: { input: CreateRoomPollInput; output: CreateRoomPollResult };
   answerChoice: { input: AnswerChoiceInput; output: ChoiceDecisionResult };
   skipChoice: { input: SkipChoiceInput; output: ChoiceDecisionResult };
+  reportSigninFunnel: { input: { event: SigninFunnelEvent }; output: null };
+  reportDiagnostics: { input: DiagnosticBatch; output: DiagnosticAck };
   createWorkspace: { input: NamedWorkspaceInput; output: CreateWorkspaceResult };
   updateWorkspace: { input: UpdateWorkspaceInput; output: void };
   leaveWorkspace: { input: WorkspaceInput; output: void };
@@ -393,7 +398,7 @@ export type WorkspaceMemberInput = WorkspaceInput & {
 };
 /** A manager removes a person from the Workspace and every live Room in it; agents use removeAgent. */
 export type RemoveWorkspaceMemberInput = WorkspaceInput & { readonly memberId: string };
-export type NamedWorkspaceInput = { readonly name: string; readonly workspaceId?: string; readonly timeZone?: string };
+export type NamedWorkspaceInput = { readonly name: string; readonly workspaceId?: string; readonly timeZone?: string; readonly creationSource?: 'manual_ui' | 'onboarding' | 'recovery' };
 export type IdResult = { readonly id: string };
 /** A new Workspace and the public `#general` Room created with it. */
 export type CreateWorkspaceResult = IdResult & { readonly roomId?: string };
@@ -406,6 +411,10 @@ export type InviteMembershipResult = MembershipResult & {
 export type MessageWriteResult = { readonly messageId: string };
 /** Active turns that received a server-created command with this human message. */
 export type AgentMessageWriteResult = MessageWriteResult & {
+  /** External recipients recorded with this message; storage is not proof of pickup. */
+  readonly externalAgentHandles?: readonly string[];
+  /** Server projection only; copy is owned by the shared UI after design approval. */
+  readonly externalAgentDelivery?: readonly (MemberDelivery & {readonly memberId:string;readonly handle:string})[];
   /** Optional so a newer phone remains compatible during a rolling server deploy. */
   readonly activeSteerAgentIds?: readonly string[];
   /** Canonical row for local settlement when the write commits before its live delta. */
@@ -417,6 +426,7 @@ export type RoomScheduleCadence =
   | { readonly kind: 'cron'; readonly expression: string; readonly timeZone?: string }
   | { readonly kind: 'interval'; readonly everyMinutes: number; readonly startsAt?: number };
 export type RoomScheduleView = {
+  readonly paused?: boolean;
   readonly title?: string;
   readonly maxRuns?: number;
   readonly id: string;
@@ -831,6 +841,8 @@ export type PushDeviceInput = {
 export type PushRegistrationResult = { readonly accepted: boolean };
 export type RunningUpdateInput = {
   readonly deviceId: string;
+  /** Presented together by the same installation during canonical-id migration. */
+  readonly previousDeviceId?: string;
   readonly platform?: 'ios' | 'android' | 'macos' | 'windows' | 'linux';
   readonly updateId?: string;
   readonly channel?: string;

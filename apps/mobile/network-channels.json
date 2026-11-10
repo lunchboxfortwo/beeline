@@ -60,7 +60,7 @@
       "kind": "fetch",
       "count": 1,
       "fate": "exception",
-      "why": "GitHub sign-in; runs before an authenticated socket exists."
+      "why": "Shared Google and GitHub sign-in HTTP transport; runs before an authenticated socket exists."
     },
     {
       "file": "apps/mobile/sources/auth/github-auth-session.ts",
@@ -74,14 +74,7 @@
       "kind": "import:@tauri-apps/plugin-http",
       "count": 1,
       "fate": "exception",
-      "why": "Desktop-shell HTTP for GitHub sign-in."
-    },
-    {
-      "file": "apps/mobile/sources/auth/google-auth-session.ts",
-      "kind": "fetch",
-      "count": 1,
-      "fate": "exception",
-      "why": "Google sign-in; runs before an authenticated socket exists."
+      "why": "Desktop-shell HTTP shared by Google and GitHub sign-in."
     },
     {
       "file": "apps/mobile/sources/auth/monolith-session.ts",
@@ -114,7 +107,7 @@
     {
       "file": "apps/mobile/sources/buzz/runtime-config.ts",
       "kind": "origin:server.usebeeline.app",
-      "count": 2,
+      "count": 1,
       "fate": "exception",
       "why": "The Beeline server origin: host of the main live socket and of the remaining HTTP exceptions."
     },
@@ -301,13 +294,6 @@
       "why": "Base URL that gives the sandboxed PDF page a non-opaque origin; nothing is fetched from it."
     },
     {
-      "file": "apps/mobile/sources/buzz/beeline-glyph.ts",
-      "kind": "origin:www.w3.org",
-      "count": 1,
-      "fate": "link",
-      "why": "SVG namespace string."
-    },
-    {
       "file": "apps/mobile/sources/buzz/pr-lifecycle.ts",
       "kind": "origin:github.com",
       "count": 1,
@@ -385,7 +371,7 @@
       "why": "Repository link shown in the app."
     },
     {
-      "file": "packages/api-contract/src/phone-guards.ts",
+      "file": "packages/api-contract/src/phone-guards-read-choice-card.ts",
       "kind": "origin:github.com",
       "count": 1,
       "fate": "link",
@@ -504,7 +490,7 @@
       "why": "RoomViewClient HTTP reads bundled through the @beeline/buzz-client index; phone Room reads move to the main live socket."
     },
     {
-      "file": "packages/api-contract/src/system-message-catalog.ts",
+      "file": "packages/api-contract/src/system-message-catalog-daemon-service.ts",
       "kind": "origin:github.com",
       "count": 1,
       "fate": "link",

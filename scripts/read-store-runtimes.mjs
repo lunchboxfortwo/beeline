@@ -53,19 +53,58 @@ function publishedWindow(platform, numbers, historicalNumbers, builds) {
   return records;
 }
 
+// Use the same Android package as app.config.js and the Play upload workflow.
+// https://developers.google.com/android-publisher/api-ref/rest/v3/edits.tracks/get
+async function readPlayTrack(track, token, fetchImpl) {
+  const base = 'https://androidpublisher.googleapis.com/androidpublisher/v3/applications/app.usebeeline';
+  const call = async (method, path) => {
+    const url = `${base}${path}`;
+    const response = await fetchImpl(url, {
+      method,
+      headers: { Authorization: `Bearer ${token}`, Accept: 'application/json',
+        ...(method === 'POST' ? { 'Content-Type': 'application/json' } : {}) },
+      ...(method === 'POST' ? { body: '{}' } : {}),
+      signal: AbortSignal.timeout(30_000),
+    });
+    const context = `Play ${track} ${method} ${url} HTTP ${response.status}`;
+    let body;
+    try { body = await response.text(); }
+    catch { throw new Error(`${context}: response body read failed`); }
+    if (!response.ok) throw new Error(context);
+    // edits.delete may return an empty success body. Reads must contain JSON.
+    if (method === 'DELETE' && !body.trim()) return;
+    if (!body.trim()) throw new Error(`${context}: empty response body`);
+    try { return JSON.parse(body); }
+    catch {
+      throw new Error(`${context}: invalid JSON (${response.headers.get('content-type') ?? 'unknown content type'}, ${body.length} characters)`);
+    }
+  };
+  const edit = await call('POST', '/edits');
+  if (typeof edit?.id !== 'string' || !edit.id) throw new Error(`Play ${track} edits.insert returned no edit id`);
+  const path = `/edits/${encodeURIComponent(edit.id)}`;
+  let readError;
+  try {
+    return playLiveBuilds(await call('GET', `${path}/tracks/${track}`), track);
+  } catch (error) {
+    readError = error;
+    throw error;
+  } finally {
+    // Never commit the observation edit, including after a malformed read.
+    try { await call('DELETE', path); }
+    catch (error) { if (!readError) throw error; }
+  }
+}
+
 export async function readStores({ builds, env = process.env, fetchImpl = fetch, appleApi } = {}) {
   const stores = {};
   await Promise.all(['android', 'ios'].map(async platform => {
     let numbers = [];
+    let playToken;
     const historicalNumbers = [];
     try {
       if (platform === 'android') {
-        const token = await mintAccessToken(env.GOOGLE_PLAY_SERVICE_ACCOUNT_JSON, { fetchImpl });
-        const response = await fetchImpl('https://androidpublisher.googleapis.com/androidpublisher/v3/applications/app.usebeeline/tracks/production/releases', {
-          headers: { Authorization: `Bearer ${token}` }, signal: AbortSignal.timeout(30_000),
-        });
-        if (!response.ok) throw new Error(`Play production HTTP ${response.status}`);
-        numbers = playLiveBuilds(await response.json());
+        playToken = await mintAccessToken(env.GOOGLE_PLAY_SERVICE_ACCOUNT_JSON, { fetchImpl });
+        numbers = [...new Set(await readPlayTrack('production', playToken, fetchImpl))];
       } else {
         const appleEnv = env.EXPO_ASC_API_KEY_P8?.includes('-----BEGIN')
           ? { ...env, EXPO_ASC_API_KEY_P8: Buffer.from(env.EXPO_ASC_API_KEY_P8).toString('base64') } : env;
@@ -94,8 +133,21 @@ export async function readStores({ builds, env = process.env, fetchImpl = fetch,
       const newest = [...live].sort((a, b) => newestBuildFirst(a.buildNumber, b.buildNumber))[0];
       stores[platform] = { status: 'readable', live, historical, latestRuntimeVersion: newest?.runtimeVersion, buildNumbers: numbers };
     } catch (error) {
-      stores[platform] = { status: 'unavailable', reason: error.message,
+      stores[platform] = { status: 'unavailable',
+        reason: platform === 'android' ? `Play production runtime lookup failed: ${error.message}` : error.message,
         buildNumbers: numbers, historicalBuildNumbers: historicalNumbers };
+    }
+    // Beta is an additional audience, not the production retention anchor.
+    // Read it even if production failed; neither track can discard the other
+    // track's verified runtimes. A failed observation retains recorded targets.
+    if (platform === 'android' && env.BEELINE_RELEASE_CHANNEL === 'next' && playToken) {
+      try {
+        const betaNumbers = await readPlayTrack('beta', playToken, fetchImpl);
+        stores.android.betaLive = resolveStoreBuilds('android', betaNumbers, builds)
+          .map(target => ({ ...target, observedLiveAt: new Date().toISOString() }));
+      } catch (error) {
+        stores.android.warnings = [`Play beta runtime lookup failed: ${error.message}`];
+      }
     }
   }));
   return stores;

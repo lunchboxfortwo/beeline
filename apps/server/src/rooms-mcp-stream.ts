@@ -1,17 +1,19 @@
+import { recoverMemberDelivery } from './rooms-mcp-delivery.js';
+import { notifyCommittedCommand, notifyMcpDeliveryChange } from './postgres-live.js';
+import { ROUTER_AUTHORITY_LOCK } from './router-authority-lock.js';
 import { MEMBERSHIP_AUTHORITY_SCHEMA } from './membership-authority-schema.js';
 import { committedCommandNotificationSchema } from './postgres-live.js';
 import type { ServerResponse } from 'node:http';
-import { createHash } from 'node:crypto';
+import { createHash, randomUUID } from 'node:crypto';
 import type { SqlDatabase } from './database.js';
 import type { McpPrincipal } from './rooms-mcp-oauth.js';
 import { subscribeCommandCompletion } from './command-completion.js';
-import { ROUTER_AUTHORITY_LOCK } from './router-authority-lock.js';
-import type { WorkTimers } from './background-work.js';
+import { lockRoomAccess } from './room-access-lock.js';
 
 /** Separate rollout floor; enable only after real-PG source/authority proofs. */
 export { networkRouterEnabled as memberStreamEnabled } from './network-router-rollout.js';
 
-/** The retained authority rows/lock below belong to this separate MCP credential
+/** The authority rows below belong to this separate MCP credential
  * stream. Ordinary phone reads neither create nor consume certificates. */
 
 /** Compact causes share the existing commit-ordered journal and listener. No
@@ -30,12 +32,12 @@ DECLARE item jsonb; member text;
 BEGIN
  item:=CASE WHEN TG_OP='DELETE' THEN to_jsonb(OLD) ELSE to_jsonb(NEW) END;
  IF TG_TABLE_NAME='rooms_mcp_mentions' THEN
-   IF TG_OP='UPDATE' AND ROW(NEW.cleared_at,NEW.rewakes) IS NOT DISTINCT FROM ROW(OLD.cleared_at,OLD.rewakes) THEN RETURN NULL; END IF;
+   IF TG_OP='UPDATE' AND NEW.cleared_at IS NOT DISTINCT FROM OLD.cleared_at THEN RETURN NULL; END IF;
    PERFORM beeline_mcp_stream(item->>'member_id',jsonb_build_object('kind','mention','id',item->>'message_id'));
  ELSIF TG_TABLE_NAME='agent_commands' THEN
    IF item->>'reason'='mcp_call' THEN RETURN NULL; END IF;
-   IF TG_OP='UPDATE' AND ROW(NEW.state,NEW.hiccup_attempts,NEW.private_payload,NEW.source_message_id)
-     IS NOT DISTINCT FROM ROW(OLD.state,OLD.hiccup_attempts,OLD.private_payload,OLD.source_message_id) THEN RETURN NULL; END IF;
+   IF TG_OP='UPDATE' AND ROW(NEW.state,NEW.private_payload,NEW.source_message_id)
+     IS NOT DISTINCT FROM ROW(OLD.state,OLD.private_payload,OLD.source_message_id) THEN RETURN NULL; END IF;
    IF EXISTS(SELECT 1 FROM rooms_mcp_members WHERE member_id=item->>'agent_id') THEN
      PERFORM beeline_mcp_stream(item->>'agent_id',jsonb_build_object('kind','wake','id',item->>'id'));
    END IF;
@@ -54,17 +56,16 @@ BEGIN
  RETURN NULL;
 END; $$ LANGUAGE plpgsql;
 CREATE OR REPLACE FUNCTION beeline_mcp_authority_lock() RETURNS trigger AS $$
-DECLARE item jsonb; member text;
+DECLARE item jsonb;
 BEGIN
+ -- Preceding serving readers need this writer fence until this release drains.
  PERFORM pg_advisory_xact_lock(hashtextextended('${ROUTER_AUTHORITY_LOCK}',0));
  item:=CASE WHEN TG_OP='DELETE' THEN to_jsonb(OLD) ELSE to_jsonb(NEW) END;
- FOR member IN SELECT m.member_id FROM rooms_mcp_members m WHERE
-   (TG_TABLE_NAME='rooms_mcp_members' AND m.member_id=item->>'member_id') OR
-   (m.client_id=item->>'client_id' AND m.owner_id=item->>'identity_id')
- LOOP
-   INSERT INTO router_authority(scope) VALUES('mcp:'||member)
-     ON CONFLICT(scope) DO UPDATE SET epoch=router_authority.epoch+1;
- END LOOP;
+ INSERT INTO router_authority(scope)
+   SELECT DISTINCT 'mcp:'||m.member_id FROM rooms_mcp_members m WHERE
+     (TG_TABLE_NAME='rooms_mcp_members' AND m.member_id=item->>'member_id') OR
+     (m.client_id=item->>'client_id' AND m.owner_id=item->>'identity_id')
+   ORDER BY 1 ON CONFLICT(scope) DO UPDATE SET epoch=router_authority.epoch+1;
  IF TG_OP='DELETE' THEN RETURN OLD; END IF; RETURN NEW;
 END; $$ LANGUAGE plpgsql;
 DROP TRIGGER IF EXISTS beeline_mcp_stream_source ON rooms_mcp_mentions;
@@ -106,15 +107,23 @@ interface McpStreamPage {
   nextCursor: string; more: boolean;
 }
 const digest = (value: unknown) => createHash('sha256').update(JSON.stringify(value)).digest('hex');
-async function currentCredential(db: SqlDatabase, principal: McpPrincipal): Promise<Date | undefined> {
-  return (await db.query<{expires_at: Date}>(`SELECT t.expires_at FROM rooms_mcp_tokens t
-    LEFT JOIN rooms_mcp_families f ON f.id=t.family_id
+class McpStreamExpired extends Error {}
+// Refuse a busy credential writer before enqueue rather than forming an
+// inverse wait with that writer's later membership or Room changes.
+async function currentCredential(db: SqlDatabase, principal: McpPrincipal, lock = false): Promise<Date | undefined> {
+  const credential = (await db.query<{expires_at: Date; current: boolean}>(`SELECT t.expires_at,t.expires_at>now() AS current FROM rooms_mcp_tokens t
+    LEFT JOIN LATERAL (SELECT f.* FROM rooms_mcp_families f WHERE f.id=t.family_id ${lock ? 'FOR SHARE OF f NOWAIT' : ''}) f ON true
     JOIN rooms_mcp_connections c ON c.client_id=t.client_id AND c.identity_id=t.identity_id AND c.revoked_at IS NULL
     JOIN rooms_mcp_members m ON m.client_id=c.client_id AND m.owner_id=c.identity_id AND m.member_id=$4
-    WHERE t.hash=$1 AND t.client_id=$2 AND t.identity_id=$3 AND t.revoked_at IS NULL AND t.expires_at>now()
+    WHERE t.hash=$1 AND t.client_id=$2 AND t.identity_id=$3 AND t.revoked_at IS NULL
       AND t.scope ~ '(^| )rooms:read( |$)' AND c.scope ~ '(^| )rooms:read( |$)'
-      AND (t.family_id IS NULL OR (f.id IS NOT NULL AND f.revoked_at IS NULL AND f.client_id=t.client_id AND f.identity_id=t.identity_id))`,
-    [principal.hash,principal.client_id,principal.identity_id,principal.member_id])).rows[0]?.expires_at;
+      AND (t.family_id IS NULL OR (f.id IS NOT NULL AND f.revoked_at IS NULL AND f.client_id=t.client_id AND f.identity_id=t.identity_id))
+      ${lock ? 'FOR SHARE OF t,c,m NOWAIT' : ''}`,
+    [principal.hash,principal.client_id,principal.identity_id,principal.member_id])).rows[0];
+  // Only expiry of an otherwise current grant can be renewed. Revoked tokens,
+  // consent, families and member mappings remain terminal, even after expiry.
+  if (credential && !credential.current) throw new McpStreamExpired();
+  return credential?.expires_at;
 }
 async function scopes(db: SqlDatabase, member: string, rooms: readonly string[]) {
   const expected = await db.query<{scope: string; epoch: string}>(`SELECT scope,epoch::text FROM router_authority WHERE scope='mcp:'||$1 OR scope IN (
@@ -133,13 +142,25 @@ async function scopes(db: SqlDatabase, member: string, rooms: readonly string[])
  * an idle stream makes no reads, writes, empty responses or heartbeat frames. */
 export async function serveMcpMemberStream(database: SqlDatabase, principal: McpPrincipal, response: ServerResponse,
   input: { cursor?: McpStreamCursor; mentionCursor: string },
-  page: (db: SqlDatabase, after: string) => Promise<McpStreamPage>, timers: WorkTimers = { setTimeout, clearTimeout }): Promise<void> {
+  page: (db: SqlDatabase, after: string) => Promise<McpStreamPage>): Promise<void> {
   if (!principal.member_id || !principal.scope.split(' ').includes('rooms:read')) throw new Error('member stream unavailable');
+  await recoverMemberDelivery(database,principal);
   const member = principal.member_id, stream = `mcp:${member}`;
+  // A staged bridge may overlap its serving predecessor. Both belong to the
+  // same selected route; the local handoff owns activation and inbox dedupe.
+  const streamId=randomUUID();
+  await database.transaction(async db=>{
+    await db.query("UPDATE rooms_mcp_delivery SET stream_id=$2,credential_hash=$3 WHERE member_id=$1 AND mechanism='local'",[member,streamId,principal.hash]);
+    await notifyCommittedCommand(db,{principal:'mcp',operation:'stream',commandId:member});
+    await notifyMcpDeliveryChange(db,member);
+  });
   let stopped = false, running = false, dirty = true, initial = true, position = input.cursor, mentionCursor = input.mentionCursor;
-  let expiry: ReturnType<typeof setTimeout> | undefined;
   const close = (reason?: 'expired' | 'unavailable') => {
-    if (stopped) return; stopped=true; release(); if (expiry) timers.clearTimeout(expiry);
+    if (stopped) return; stopped=true; release();
+    void database.transaction(async db=>{
+      await db.query('UPDATE rooms_mcp_delivery SET stream_id=NULL WHERE member_id=$1 AND stream_id=$2',[member,streamId]);
+      await notifyMcpDeliveryChange(db,member);
+    }).catch(()=>undefined);
     if (reason && !response.destroyed && !response.writableEnded) response.write(JSON.stringify({v:1,type:'ended',reason})+'\n');
     if (!response.writableEnded) response.end();
   };
@@ -155,6 +176,7 @@ export async function serveMcpMemberStream(database: SqlDatabase, principal: Mcp
         const prepared = await database.transaction(async db => {
           await db.query('SET TRANSACTION ISOLATION LEVEL REPEATABLE READ READ ONLY');
           const expiresAt = await currentCredential(db,principal);
+          if(!(await db.query("SELECT 1 WHERE beeline_mcp_delivery_owner($1,'local')",[member])).rowCount)throw new Error('Delivery owner changed');
           if (!expiresAt) throw new Error('member stream credential ended');
           const head = (await db.query<{epoch:string; sequence:string}>('SELECT epoch,sequence::text FROM live_streams WHERE id=$1',[stream])).rows[0];
           if (!head) throw new Error('member stream source missing');
@@ -162,10 +184,9 @@ export async function serveMcpMemberStream(database: SqlDatabase, principal: Mcp
           if (!Number.isSafeInteger(to.through)) throw new Error('member stream cursor overflow');
           if (position?.epoch === to.epoch && position.through === to.through) {
             if (!initial) return undefined;
-            // Credential renewal resumes the existing delivery cursor; it does
-            // not reread an unchanged application inbox.
-            return {to,after:mentionCursor,encoded:[JSON.stringify({v:1,type:'checkpoint',cursor:to,mentionCursor})+'\n'],
-              rooms:[],authority:digest(await scopes(db,member,[])),expiresAt};
+            // A preceding interrupted migration may have left committed inbox
+            // rows without journal entries. Every new connection catches up
+            // from its durable mention cursor, even when the head is unchanged.
           }
           if (position && position.epoch === to.epoch && position.through<to.through) {
             const count = await db.query<{total:string}>('SELECT count(*)::text total FROM live_journal WHERE stream_id=$1 AND sequence>$2 AND sequence<=$3',[stream,position.through,to.through]);
@@ -177,12 +198,14 @@ export async function serveMcpMemberStream(database: SqlDatabase, principal: Mcp
             const current = await page(db,after);
             for (const mention of current.mentions) {
               roomIds.add(mention.room_id);
-              frames.push({v:1,type:'delivery',deliveryId:`mention:${mention.id}:${mention.rewakes ?? 0}`,mentions:[mention],wakes:[],mentionCursor:String(mention.deliveryCursor ?? after)});
+              frames.push({v:1,type:'delivery',deliveryId:`mention:${mention.id}:0`,mentions:[mention],wakes:[],mentionCursor:String(mention.deliveryCursor ?? after)});
             }
             for (const wake of current.wakes) {
               if (wakeIds.has(wake.id)) continue;
-              wakeIds.add(wake.id); roomIds.add(wake.address);
-              frames.push({v:1,type:'delivery',deliveryId:`wake:${wake.id}:${wake.deliveryVersion ?? 0}`,mentions:[],wakes:[wake],mentionCursor:current.nextCursor});
+              wakeIds.add(wake.id);
+              // A join receipt contains no Room content or work authority. Its address is the host conversation.
+              if(wake.kind!=='join_probe')roomIds.add(wake.address);
+              frames.push({v:1,type:'delivery',deliveryId:`wake:${wake.id}`,mentions:[],wakes:[wake],mentionCursor:current.nextCursor});
             }
             after=current.nextCursor;
             if (!current.more) break;
@@ -197,8 +220,8 @@ export async function serveMcpMemberStream(database: SqlDatabase, principal: Mcp
         if (!prepared || stopped) continue;
         await database.transaction(async db=>{
           await db.query('SET TRANSACTION ISOLATION LEVEL READ COMMITTED');
-          await db.query('SELECT pg_advisory_xact_lock_shared(hashtextextended($1,0))',[ROUTER_AUTHORITY_LOCK]);
-          if (!await currentCredential(db,principal) || digest(await scopes(db,member,prepared.rooms))!==prepared.authority)
+          if (!(await db.query("SELECT 1 WHERE beeline_mcp_delivery_owner($1,'local')",[member])).rowCount || !await lockRoomAccess(db,prepared.rooms,[member]) || !await currentCredential(db,principal,true) ||
+              digest(await scopes(db,member,prepared.rooms))!==prepared.authority)
             throw new Error('member stream authority changed');
           if (!stopped) for (const frame of prepared.encoded) {
             if (response.writableLength+Buffer.byteLength(frame)>1024*1024) throw new Error('member stream backpressure capacity');
@@ -206,10 +229,8 @@ export async function serveMcpMemberStream(database: SqlDatabase, principal: Mcp
           }
         });
         position=prepared.to; mentionCursor=prepared.after; initial=false;
-        if (expiry) timers.clearTimeout(expiry);
-        expiry=timers.setTimeout(()=>close('expired'),Math.max(0,prepared.expiresAt.getTime()-Date.now())); expiry.unref?.();
       }
-    } catch { close('unavailable'); } finally { running=false; }
+    } catch (error) { close(error instanceof McpStreamExpired ? 'expired' : 'unavailable'); } finally { running=false; }
   };
   await drain();
 }

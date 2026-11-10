@@ -72,7 +72,7 @@ export default function PromptSchedule() {
           testID="schedule-stop-error"
         />
       ) : error ? (
-        <SettingsRow title={error} action="Retry" onPress={retry}
+        <SettingsRow title={error}
           />
       ) : null}
       {loading && !work ? (

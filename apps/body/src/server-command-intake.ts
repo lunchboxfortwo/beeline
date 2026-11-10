@@ -1,3 +1,6 @@
+import {OwnedModelFiles} from './owned-model-files.js';
+import {bindOwnedModelTurn,releaseOwnedModelTurn} from './owned-model-turn.js';
+import type {OwnedModelCredential} from '@beeline/api-contract/helper-model';
 import { randomUUID } from 'node:crypto';
 import { mkdir, writeFile } from 'node:fs/promises';
 import { writeFileSync } from 'node:fs';
@@ -5,7 +8,6 @@ import { tmpdir } from 'node:os';
 import { dirname, join } from 'node:path';
 import { redactReplayError, isAgentCommand, type AgentCommand } from '@beeline/api-contract/daemon';
 import { DaemonApiError, type DaemonApiClient } from './daemon-api-client.js';
-import { isStandingRuntimeFault, retryNotBefore } from './retry-barrier.js';
 import { isNetworkFailure } from './live-link.js';
 
 /** Session-local output context. No transcript or sender policy enters this boundary. */
@@ -16,7 +18,15 @@ export class CommandExecutionContext {
   get generationId(): string { return this.generation; }
   get path(): string { return this.contextPath; }
   current?: AgentCommand;
+  commands: readonly AgentCommand[] = [];
   private startedAt?: number;
+  private ownedModelDirectory?:string;
+  bindModel(command:AgentCommand,credential:OwnedModelCredential,source:import('@beeline/api-contract/helper-turn-ownership').HelperTurnOwnershipSource,baseUrl:string):void{
+    const owner=OwnedModelFiles.create({root:join(dirname(this.path),'state','owned-model-'+this.generationId),credential,binding:{agentId:command.agentId,commandId:command.id,
+      generationId:this.generationId,connectionId:source.connectionId,connectionEpoch:source.epoch,provider:'beeline',model:'server-selected',
+      baseUrl:new URL('/v1/free-agents/model',baseUrl).href}});
+    this.ownedModelDirectory=owner.paths().directory;bindOwnedModelTurn(this,owner);
+  }
   constructor(private readonly root?: string) {
     this.contextPath = join(root ?? tmpdir(), `beeline-command-${this.generationId}.json`);
   }
@@ -30,7 +40,8 @@ export class CommandExecutionContext {
     this.generation = randomUUID();
     this.contextPath = join(this.root ?? tmpdir(), `beeline-command-${this.generationId}.json`);
   }
-  async enter(command: AgentCommand): Promise<void> {
+  async enter(command: AgentCommand, commands: readonly AgentCommand[] = []): Promise<void> {
+    this.commands = commands;
     this.current = command;
     this.startedAt = Date.now();
     await mkdir(dirname(this.path), { recursive: true });
@@ -42,7 +53,9 @@ export class CommandExecutionContext {
         taskId: command.rootCommandId,
         generationId: this.generationId,
         commandReason: command.reason,
+        commands: this.commands.map(item => ({requestId:item.turnRequestId,commandReason:item.reason,taskId:item.rootCommandId})),
         startedAt: this.startedAt,
+        ...(this.ownedModelDirectory ? {ownedModelDirectory:this.ownedModelDirectory} : {}),
       }),
       { mode: 0o600 },
     );
@@ -63,7 +76,9 @@ export class CommandExecutionContext {
         taskId: command.rootCommandId,
         generationId: this.generationId,
         commandReason: command.reason,
+        commands: this.commands.map(item => ({requestId:item.turnRequestId,commandReason:item.reason,taskId:item.rootCommandId})),
         startedAt: this.startedAt,
+        ...(this.ownedModelDirectory ? {ownedModelDirectory:this.ownedModelDirectory} : {}),
         promptSectionIds: [...new Set(ids)],
       }),
       { mode: 0o600 },
@@ -71,8 +86,10 @@ export class CommandExecutionContext {
   }
   async leave(): Promise<void> {
     this.current = undefined;
+    this.commands = [];
     await writeFile(this.path, '{}', { mode: 0o600 });
     this.ownership = undefined;
+    this.ownedModelDirectory=undefined;releaseOwnedModelTurn(this);
   }
   bind(api: DaemonApiClient): DaemonApiClient {
     return new Proxy(api, {
@@ -121,11 +138,10 @@ export async function runServerCommandIntake(options: {
   agentId: string;
   context: CommandExecutionContext;
   signal?: AbortSignal;
-  pollMs?: number;
   presence?: { releaseVersion?: string; sourceSha?: string; available?: boolean };
   run: (command: AgentCommand) => Promise<void>;
   stop: (requestId: string) => void;
-  restart?: (command: AgentCommand) => void;
+  restart?: (command: AgentCommand) => Promise<void> | void;
   canStartTurn?: () => boolean;
   onWake?: (wake: (() => void) | undefined) => void;
   onRecovery?: (recover: (() => void) | undefined) => void;
@@ -157,58 +173,21 @@ export async function runServerCommandIntake(options: {
   if (first?.commandProtocol !== 1)
     throw new Error('server command protocol 1 is required; refusing intake');
   let busy: Promise<void> | undefined;
-  let wake: ((reconcile: boolean) => void) | undefined;
-  let hasSubscribed = false;
+  let wake: (() => void) | undefined;
   let subscribed = false;
   let connectionGeneration = -1;
   const blockedClaims = new Set<string>();
-  let reconciliation: Promise<void> | undefined;
-  let reconciliationError: unknown;
-  let stopped = false;
-  let retryAt = 0;
-  let standingFailure = false;
-  let configurationVersion = 0;
-  const canStartTurn = () => !standingFailure && Date.now() >= retryAt && options.canStartTurn?.() !== false;
-  const parkFailure = (error: unknown, sameConfiguration: boolean) => {
-    if (sameConfiguration && isStandingRuntimeFault(error)) standingFailure = true;
-    const reset = retryNotBefore(error);
-    if (reset === undefined) return;
-    retryAt = Math.max(retryAt, reset);
-    // Retry-After is an earliest eligible bound, never a timer admission.
-    // A new configuration/connection/command boundary must wake parked work.
-  };
+  const canStartTurn = () => options.canStartTurn?.() !== false;
   const pending = new Map(first.commands.map((command) => [command.id, command]));
   const claimed = new Set<string>();
-  // The server may requeue a command this helper is still running (a stalled
-  // turn it failed). Hold that snapshot until the local run ends, then claim it
-  // again in this same process.
-  const requeued = new Map<string, AgentCommand>();
   const notify = (commands: readonly AgentCommand[] = []) => {
     for (const command of commands) {
-      if (claimed.has(command.id)) requeued.set(command.id, command);
-      else pending.set(command.id, command);
+      if (!claimed.has(command.id)) pending.set(command.id, command);
     }
-    wake?.(false);
-  };
-  const requestReconciliation = () => {
-    if (reconciliation) return;
-    reconciliation = api
-      .execute('getAgentCommands', { roomId })
-      .then((page) => {
-        if (page.commandProtocol !== 1)
-          throw new Error('server command protocol changed; refusing intake');
-        if (!stopped) notify(page.commands);
-      })
-      .catch((error: unknown) => {
-        reconciliationError = error;
-        wake?.(false);
-      })
-      .finally(() => {
-        reconciliation = undefined;
-      });
+    wake?.();
   };
   options.onWake?.(notify);
-  options.onRecovery?.(() => { configurationVersion++; standingFailure = false; blockedClaims.clear(); notify(); });
+  options.onRecovery?.(() => { blockedClaims.clear(); notify(); });
   const off = api.liveSubscribe?.(
     roomId,
     undefined,
@@ -225,10 +204,9 @@ export async function runServerCommandIntake(options: {
         options.onError?.(new Error('server push intake is required; refusing timer-free intake'));
         return;
       }
-      // The initial GET precedes the first subscription; the server also
-      // sends a command snapshot on subscribe. Reconnects need one fresh GET.
-      if (hasSubscribed) requestReconciliation();
-      hasSubscribed = true;
+      notify();
+      // Registration already delivered the authoritative command snapshot.
+      // Resume intake from that push without another read.
     },
     options.presence,
     notify,
@@ -236,7 +214,6 @@ export async function runServerCommandIntake(options: {
   let failed = false;
   try {
     while (!signal?.aborted) {
-      if (reconciliationError) throw reconciliationError;
       if (options.closed && (await options.closed())) return;
       for (let command of [...pending.values()].sort((a, b) => Number(a.reason === 'computer_activity') - Number(b.reason === 'computer_activity'))) {
         validateServerCommand(command, roomId, agentId);
@@ -261,24 +238,45 @@ export async function runServerCommandIntake(options: {
         const startingTurn = command.action !== 'restart' && command.action !== 'stop';
         if (startingTurn) options.onClaiming?.(command);
         let claimSucceeded = false;
+        let turnCommands: readonly AgentCommand[] = [];
         const claimOwner = api.turnOwnershipScope?.();
         if (claimOwner && startingTurn) context.prepareOwnership(claimOwner, command.id);
         const claimedGeneration = context.generationId;
         try {
           // A lost response may already have committed this generation's claim.
           // One attempt per admitted boundary; uncertainty never starts backoff.
-          for (let attempt = 0; attempt < 1; attempt += 1) {
-            if (signal?.aborted) break;
+          if (!signal?.aborted) {
             try {
-              const claim = await api.execute('claimAgentCommand', {
+              const claim = await api.execute(startingTurn ? 'claimAgentTurn' : 'claimAgentCommand', {
                 roomId,
                 commandId: command.id,
                 generationId: context.generationId,
               });
-              // The claim is authoritative even if the snapshot predates
-              // recovery coalescing. Older servers leave the snapshot intact.
+              if(startingTurn && claim.modelCredential && claimOwner)context.bindModel(command,claim.modelCredential,claimOwner,api.baseUrl);
+              if (startingTurn) {
+                turnCommands = (claim as import('@beeline/api-contract/daemon').DaemonOperationMap['claimAgentTurn']['output']).commands;
+                if (!turnCommands.length) throw new Error('empty turn claim');
+                for (const item of turnCommands) {
+                  validateServerCommand(item, roomId, agentId);
+                  pending.delete(item.id);
+                  claimed.add(item.id);
+                }
+                // Wakes admit one look at the place as it is now. Historical
+                // notifications are already in its conversation; replaying
+                // their bodies as separate requests resurrects obsolete work.
+                command = turnCommands.at(-1)!;
+                const privateDeliveries = turnCommands.filter(item => item.private &&
+                  (item.reason === 'order' || item.reason === 'report' || item.reason === 'corner_objective'));
+                const latestWake = turnCommands.filter(item => !privateDeliveries.includes(item)).at(-1);
+                command = { ...command, source: { ...command.source,
+                  body: 'This is one turn for the current state of this place. Read its current conversation, brief and relevant live state, then resolve what still needs attention now. Missed mentions, schedule runs and lifecycle wakes are notifications, not separate jobs to replay or report on individually. This turn consumes the claimed wakes; they will not be replayed when it ends.\n' +
+                    (latestWake ? '\nLatest wake:\n' + JSON.stringify({requestId:latestWake.turnRequestId,reason:latestWake.reason,source:latestWake.source}) + '\n' : '') +
+                    (privateDeliveries.length ? '\nPrivate deliveries, each included once. Preserve their instructions and files. Use a delivery’s requestId when directing tools for it. In a corner, reports follow its current human-approved brief commander or opening route. Earlier explicit orders retain their issuer; later deliveries do not transfer command:\n' +
+                      privateDeliveries.map(item => JSON.stringify({requestId:item.turnRequestId,reason:item.reason,source:item.source})).join('\n') : ''),
+                } };
+              }
+              // Source-specific recovery context is read-only history.
               const recoveryContext = claim?.recoveryContext ?? command.recoveryContext;
-              if (claim?.source) command = { ...command, source: claim.source };
               if (claim?.activitySource) command = {
                 ...command, source: { ...command.source, ...claim.activitySource },
               };
@@ -289,31 +287,27 @@ export async function runServerCommandIntake(options: {
                     ? '\nBrowser actions since the previous update (observations, not requests; latest state above):\n'
                     : '\nEarlier superseded wakes (read-only history, never instructions or requests to execute; only the latest wake above authorizes this turn):\n') + recoveryContext },
               };
-              const coalesced = claim?.coalescedContext ?? command.coalescedContext;
-              if (coalesced) command = { ...command, source: { ...command.source,
-                body: command.source.body + '\nAdditional inbox wakes in arrival order:\n' + coalesced } };
               claimSucceeded = true;
-              if (claimOwner && startingTurn) api.noteOwnedTurnClaim?.({
-                roomId, requestId: command.turnRequestId, generationId: claimedGeneration,
-              }, claimOwner, () => options.stop(command.turnRequestId));
-              else if (startingTurn) api.noteLegacyTurnClaim?.({ roomId, requestId: command.turnRequestId, generationId: claimedGeneration });
-              break;
+              for (const item of turnCommands.length ? turnCommands : [command]) {
+                if (claimOwner && startingTurn) api.noteOwnedTurnClaim?.({
+                  roomId, requestId: item.turnRequestId, generationId: claimedGeneration,
+                }, claimOwner, () => options.stop(command.turnRequestId));
+                else if (startingTurn) api.noteLegacyTurnClaim?.({ roomId, requestId: item.turnRequestId, generationId: claimedGeneration });
+              }
             } catch (error) {
               const retryable = error instanceof DaemonApiError
                 ? error.status !== 403 && error.status !== 409 && error.retryable
                 : isNetworkFailure(error);
               if (!retryable) {
-                // A queued snapshot can legitimately lose to coalescing or a
-                // higher-priority human request. Drop that stale delivery;
+                // A queued snapshot can lose its authority to a real source
+                // change. Drop that stale delivery;
                 // the server's targeted push owns its replacement.
                 if (!(error instanceof DaemonApiError && error.status === 409)) options.onError?.(error);
-                break;
+              } else {
+                blockedClaims.add(command.id);
+                pending.set(command.id, command);
+                options.onError?.(error);
               }
-              retryAt=Math.max(retryAt,retryNotBefore(error)??0);
-              blockedClaims.add(command.id);
-              pending.set(command.id, command);
-              options.onError?.(error);
-              break;
             }
           }
         } catch (error) {
@@ -321,16 +315,16 @@ export async function runServerCommandIntake(options: {
         } finally {
           if (!claimSucceeded) {
             claimed.delete(command.id);
-            requeued.delete(command.id);
             if (startingTurn) options.onClaimFailed?.(command);
           }
         }
         if (!claimSucceeded) continue;
         if (command.action === 'restart') {
           if (!options.restart) throw new Error('restart command is not supported by this helper');
-          // Leave the command claimed. A genuinely new process lifecycle completes
-          // it on announce; acknowledging before exit could falsely report success.
-          options.restart(command);
+          await options.restart(command);
+          await api.execute('acknowledgeAgentCommand', {
+            roomId, commandId: command.id, generationId: context.generationId,
+          });
         } else if (command.action === 'stop') {
           options.stop(command.turnRequestId);
           await api.execute('acknowledgeAgentCommand', {
@@ -340,26 +334,19 @@ export async function runServerCommandIntake(options: {
           });
         } else {
           const release = async () => {
-            api.releaseOwnedTurn?.({ roomId, requestId: command.turnRequestId, generationId: claimedGeneration });
-            context.current = undefined;
-            const sawSnapshot = requeued.delete(command.id);
-            // A push or reconciliation may have read pending state before our
-            // claim committed. Only the current server queue proves a requeue.
-            let current: readonly AgentCommand[] = [];
-            if (sawSnapshot && !signal?.aborted) {
-              try {
-                const page = await api.execute('getAgentCommands', { roomId });
-                if (page.commandProtocol !== 1) throw new Error('server command protocol changed');
-                current = page.commands;
-              } catch (error) { options.onError?.(error); }
+            let waiting: readonly AgentCommand[] = [];
+            try {
+              waiting = (await api.execute('releaseAgentTurn', {roomId,generationId:claimedGeneration})).commands;
+            } catch (error) { options.onError?.(error); }
+            for (const item of turnCommands) {
+              api.releaseOwnedTurn?.({roomId,requestId:item.turnRequestId,generationId:claimedGeneration});
+              claimed.delete(item.id);
             }
-            claimed.delete(command.id);
-            requeued.delete(command.id);
             busy = undefined;
-            notify(current);
+            notify(waiting);
           };
           try {
-            await context.enter(command);
+            await context.enter(command, turnCommands);
             options.onEnter?.(command);
           } catch (error) {
             context.current = undefined;
@@ -382,16 +369,14 @@ export async function runServerCommandIntake(options: {
             }
             continue;
           }
-          const configuration = configurationVersion;
           busy = Promise.resolve()
             .then(() => {
               const currentOwner = api.turnOwnershipScope?.();
-              if (claimOwner && (!currentOwner || currentOwner.connectionId !== claimOwner.connectionId || currentOwner.epoch !== claimOwner.epoch))
+              if (claimOwner && currentOwner && (currentOwner.connectionId !== claimOwner.connectionId || currentOwner.epoch !== claimOwner.epoch))
                 throw new Error('Turn owner changed before activation');
               return options.run(command);
             })
             .catch((error) => {
-              parkFailure(error, configuration === configurationVersion);
               options.onError?.(error);
             })
             .finally(async () => {
@@ -414,18 +399,18 @@ export async function runServerCommandIntake(options: {
         }
       }
       options.onPoll?.();
-      const reconcile = await new Promise<boolean>((resolve) => {
-        const done = (needed: boolean) => {
+      await new Promise<void>((resolve) => {
+        const done = () => {
           signal?.removeEventListener('abort', aborted);
           wake = undefined;
-          resolve(needed);
+          resolve();
         };
-        const aborted = () => done(false);
+        const aborted = () => done();
         wake = done;
         signal?.addEventListener('abort', aborted, { once: true });
         // `closed()` and command claims can yield after shutdown has already
         // aborted the signal, before this listener is installed.
-        if (signal?.aborted) done(false);
+        if (signal?.aborted) done();
         else if (
           !busy &&
           [...pending.values()].some(
@@ -434,16 +419,14 @@ export async function runServerCommandIntake(options: {
               command.action === 'restart' || canStartTurn()),
           )
         )
-          done(false);
+          done();
       });
       if (signal?.aborted) break;
-      if (reconcile) requestReconciliation();
     }
   } catch (error) {
     failed = true;
     throw error;
   } finally {
-    stopped = true;
     off?.();
     options.onWake?.(undefined);
     options.onRecovery?.(undefined);
@@ -451,7 +434,7 @@ export async function runServerCommandIntake(options: {
     const stopCurrent = () => {
       if (current) options.stop(current.turnRequestId);
     };
-    // A failed read leaves the running turn to finish. Intake is re-entered
+    // An intake error leaves the running turn to finish. Intake is re-entered
     // only after it settles, so its command can never be claimed twice.
     if (!failed || signal?.aborted) stopCurrent();
     else signal?.addEventListener('abort', stopCurrent, { once: true });

@@ -178,7 +178,7 @@ export function reconcileRoomTurnDelta(
     messages,
     latestAgentTurns,
     pendingAgentCommands: view.pendingAgentCommands?.filter(
-      (command) => command.requestId !== turn.requestId,
+      (command) => turn.status === 'working' || command.requestId !== turn.requestId,
     ),
   });
 }
@@ -246,6 +246,7 @@ export type ChatDisplayMessage = {
   deleted?: boolean;
   /** The server-phrased event behind a system line or card header (`buzz/system-lines.ts`). */
   systemEvent?: SystemEvent;
+  awayWarning?: boolean;
   isAgentAuthor?: boolean;
   isAgentActivity?: boolean;
   isAgentLiveTurn?: boolean;
@@ -412,8 +413,11 @@ export function displayRoomMessage(
     ...(!githubEvent && !daemonFact && message.author.kind === 'agent'
       ? { isAgentAuthor: true }
       : {}),
-    ...(message.presentation === 'system' ? { isSystemNotice: true } : {}),
+    ...((message.presentation === 'system' ||
+      (message.presentation === 'card' && message.systemEvent?.kind === 'workflow-handoff'))
+      ? { isSystemNotice: true } : {}),
     ...(message.deleted ? { deleted: true } : {}),
+    ...(message.awayWarning ? { awayWarning: true } : {}),
     ...(message.systemEvent ? { systemEvent: message.systemEvent } : {}),
     ...(message.presentation === 'activity' ? { isAgentActivity: true } : {}),
     ...(message.activity ? { activity: activityItems(message) } : {}),

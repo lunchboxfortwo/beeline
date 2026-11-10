@@ -55,7 +55,8 @@ export function CornerActionsSheet({
     } finally {
       if (attempt === generation.current) {
         pending.current = false;
-        setClosing(false);
+        // Accepted navigation takes priority over resetting its departing sheet.
+        React.startTransition(() => setClosing(false));
       }
     }
   };

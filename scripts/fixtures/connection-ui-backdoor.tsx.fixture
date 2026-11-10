@@ -1,0 +1,5 @@
+// A tempting backdoor: a shared row is still a second read-recovery surface.
+export function SneakyRoom({ readError, readRoom }) {
+  const copy = "Couldn't load this Room.";
+  return readError ? <IndexRow title={copy} action="Retry" onPress={readRoom} /> : null;
+}

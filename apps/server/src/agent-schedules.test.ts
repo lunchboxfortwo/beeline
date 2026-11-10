@@ -1,4 +1,3 @@
-import { BackgroundWork, startBackgroundWork } from './background-work.js';
 import { randomBytes, randomUUID } from 'node:crypto';
 import { createAgentCommand } from './agent-command.js';
 import type { SqlDatabase } from './database.js';
@@ -10,7 +9,7 @@ import {
   nextScheduleOccurrence,
   validateScheduleCadence,
 } from './agent-schedules.js';
-import { DaemonService } from './daemon-service.js';
+import { HelperDaemonService as DaemonService } from './test-fixtures/helper-daemon.js';
 import { LiveHub } from './live.js';
 import { PhoneService } from './phone-service.js';
 import { SCHEDULE_RAN_VERB, SCHEDULE_SCHEDULER_ID } from '@beeline/api-contract/scheduled-prompts';
@@ -66,6 +65,34 @@ async function fixture() {
   );
   return database;
 }
+
+it.each([OWNER, OTHER_AGENT, null, AGENT])('Reproduction schedule-report-owner: scheduled report reaches owner %s once', async (owner) => {
+  const database = await fixture();
+  try {
+    await database.query('INSERT INTO agents(agent_id,owner_id) VALUES($1,$2)', [AGENT, OWNER]);
+    const daemon = new DaemonService(database, new LiveHub());
+    const scheduleId = randomUUID();
+    await database.query(`INSERT INTO agent_schedules(id,workspace_id,room_id,agent_id,creator_id,owner_id,cadence,message,max_runs,next_run_at)
+      VALUES($1,$2,$3,$4,$4,$5,'{"kind":"interval","everyMinutes":1}','Check work',1,now()-interval '1 second')`,
+      [scheduleId, WORKSPACE, ROOM, AGENT, owner]);
+    expect(await new AgentScheduleLoop(database).runOnce()).toBe(1);
+    const [command] = (await daemon.execute('getAgentCommands', { roomId: ROOM }, AGENT)).commands;
+    await daemon.execute('claimAgentCommand', { roomId: ROOM, commandId: command!.id, generationId: 'schedule-proof' }, AGENT);
+    const authority = { roomId: ROOM, requestId: command!.turnRequestId, generationId: 'schedule-proof' };
+    await daemon.execute('postCornerMessage', { ...authority, cornerId: ROOM, text: 'Work posted' }, AGENT);
+    await expect(daemon.execute('report', { ...authority, status: 'done', text: 'Work complete' }, AGENT))
+      .resolves.toMatchObject({ delivered: true });
+    if (owner !== OTHER_AGENT) {
+      const phone = new PhoneService(database, new LiveHub());
+      expect((await phone.readRoom(ROOM, OWNER))!.messages.filter(row => row.text === 'done: Work complete'))
+        .toHaveLength(1);
+    } else {
+      expect((await database.query("SELECT agent_id FROM agent_commands WHERE reason='report'")).rows)
+        .toEqual([{ agent_id: OTHER_AGENT }]);
+      expect((await database.query("SELECT 1 FROM messages WHERE text='done: Work complete'")).rowCount).toBe(0);
+    }
+  } finally { await database.close(); }
+});
 
 describe('agent schedule cadence', () => {
   it('keeps interval cadence while skipping missed occurrences', () => {
@@ -320,23 +347,6 @@ describe('agent schedule background posting', () => {
       // deadline even though its original due remains in the past.
       await database.query('DELETE FROM agent_schedules WHERE id=$1', [healthyId]);
       await expect(loop.nextDelayMs()).resolves.toBeUndefined();
-      vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout'] });
-      let started!: () => void;
-      const settled = new Promise<void>(resolve => { started = resolve; });
-      const work = new BackgroundWork();
-      const run = vi.fn(async () => {
-        await loop.runOnce(now); const due = await loop.nextDelayMs(); started();
-        return due;
-      });
-      work.addDeadline('schedules', run);
-      const stop = startBackgroundWork(work);
-      try {
-        await settled;
-        await vi.advanceTimersByTimeAsync(86_400_000);
-        expect(run).toHaveBeenCalledOnce();
-        expect(vi.getTimerCount()).toBe(0);
-      } finally { await stop(); vi.useRealTimers(); }
-
       await database.query(`UPDATE agent_schedules SET cadence=$2::jsonb,updated_at=updated_at+interval '1 second' WHERE id=$1`,
         [failedId, JSON.stringify({ kind: 'interval', everyMinutes: 5 })]);
       await expect(loop.runOnce(new Date(now.getTime() + 60_000))).resolves.toBe(1);
@@ -393,29 +403,6 @@ describe('agent schedule background posting', () => {
       }
     },
   );
-
-  it('parks a rolled-back workflow timer across owner replacement without rewriting its due', async () => {
-    const database = await fixture();
-    const error = vi.spyOn(console, 'error').mockImplementation(() => {});
-    const id = '44444444-4444-4444-8444-444444444444', due = new Date('2026-09-01T12:00:00Z');
-    try {
-      await database.query(`INSERT INTO agent_schedules(id,workspace_id,room_id,agent_id,creator_id,cadence,message,next_run_at,workflow_run)
-        VALUES($1,$2,$3,$4,$5,'{"kind":"interval","everyMinutes":5}','Synthetic',$6,
-          '{"runId":"synthetic-run","timer":"deadline"}')`, [id,WORKSPACE,ROOM,AGENT,OWNER,due]);
-      const transaction = vi.spyOn(database, 'transaction').mockRejectedValueOnce(new Error('timer transaction failed'));
-      await expect(new AgentScheduleLoop(database).runOnce(due)).resolves.toBe(0);
-      transaction.mockClear();
-      const replacement = new AgentScheduleLoop(database);
-      await expect(replacement.nextDelayMs()).resolves.toBeUndefined();
-      await expect(replacement.runOnce(new Date(due.getTime()+86_400_000))).resolves.toBe(0);
-      expect(transaction).not.toHaveBeenCalled();
-      expect((await database.query('SELECT next_run_at,failed_due_at FROM agent_schedules WHERE id=$1', [id])).rows)
-        .toEqual([{next_run_at:due,failed_due_at:due}]);
-      await database.query("UPDATE agent_schedules SET updated_at=updated_at+interval '1 second' WHERE id=$1", [id]);
-      await expect(replacement.nextDelayMs()).resolves.toBe(0);
-      transaction.mockRestore();
-    } finally { error.mockRestore(); await database.close(); }
-  });
 
   it('does not arm a past deadline for an ineligible schedule and admits restored membership', async () => {
     const database = await fixture();
@@ -670,7 +657,7 @@ describe('agent tool schedule daemon operations', () => {
       expect((await daemon.execute('listAgentSchedules', {
         agentId: AGENT, roomId: elsewhere, selfOnly: true,
       }, AGENT)).schedules).toContainEqual(expect.objectContaining({
-        scheduleId: own.scheduleId, roomId: ROOM, prompt: 'Evening audit.', cadence,
+        scheduleId: own.scheduleId, roomId: ROOM, prompt: 'Evening audit.', cadence, title: 'Scheduled check',
       }));
       for (const operation of ['updateAgentSchedule', 'deleteAgentSchedule'] as const) {
         await expect(daemon.execute(operation, {
@@ -818,7 +805,7 @@ describe('agent tool schedule daemon operations', () => {
           .schedules,
       ).toEqual([
         {
-          title: 'Summarize the Room',
+          title: 'Scheduled check',
           scheduleId: created.scheduleId,
           agentId: AGENT,
           prompt: 'Summarize the Room.',

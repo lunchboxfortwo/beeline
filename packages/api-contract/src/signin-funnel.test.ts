@@ -22,7 +22,7 @@ it('accepts only the fixed event schema and enums', () => {
     expect(parseSigninFunnelEvent({ ...valid, ...patch })).toBeNull();
 });
 it('bounds onboarding options and viewer durations without accepting free text', () => {
-  expect(parseSigninFunnelEvent({ ...valid, event: 'option_picked', option: 'D' })).not.toBeNull();
+  expect(parseSigninFunnelEvent({ ...valid, event: 'option_picked', option: 'D' })).toBeNull();
   expect(parseSigninFunnelEvent({ ...valid, event: 'game_viewer_closed', durationMs: 1234 })).not.toBeNull();
   expect(parseSigninFunnelEvent({ ...valid, event: 'game_viewer_opened', artifactId: valid.installId })).not.toBeNull();
   for (const patch of [
@@ -77,7 +77,7 @@ it('maps route segments to a pattern without groups or index', () => {
   expect(funnelScreenFromSegments(['(app)', 'beeline', 'chat', '[channelId]'])).toBe('beeline/chat/[channelId]');
   expect(funnelScreenFromSegments(['(app)', 'beeline', 'chat', 'abc123'])).toBeNull();
 });
-it.each(['banter_shown', 'repo_job_chosen', 'youtube_job_chosen', 'other_job_chosen'])('records the starter milestone %s without personal fields', event => {
+it.each(['banter_shown', 'welcome_shown', 'user_answered'])('records the starter milestone %s without personal fields', event => {
   expect(parseSigninFunnelEvent({ ...valid, event })).not.toBeNull();
   expect(parseSigninFunnelEvent({ ...valid, event, name: 'private' })).toBeNull();
 });

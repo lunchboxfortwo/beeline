@@ -4,29 +4,51 @@ import { OWNED_MODEL_OWNER_END_SCHEMA } from './owned-model-parking.js';
 
 /** Independent rollout gate. Legacy rows and helpers retain their receipt adapter. */
 export { networkRouterEnabled as turnOwnershipEnabled } from './network-router-rollout.js';
-const ownedTurnAdapters = new Set([
-  'claimAgentCommand', 'acknowledgeAgentCommand', 'getAgentCommands',
-  'postRoomMessage', 'postCornerMessage', 'postAgentTurnReceipt', 'markAgentTurnSilent',
-  'postAgentActivity', 'postRoomEvent', 'postAgentDraft', 'postAgentThought', 'retractAgentLiveOutput',
-  'postBackgroundToolCompletion', 'getRoomConversation', 'getRoomMessage', 'getRoomAuthority',
-  // Prompt preparation uses these existing command-authorized database adapters.
-  'getInstitutionalContext', 'getInstitutionalMemoryTurnStats', 'listRoomCorners',
-]);
-/** Completed ownership adapters select their dedicated behavior. Every other
- * operation retains its existing handler, permissions and provider leaf; lack
- * of a new adapter is never a reason to refuse an otherwise allowed operation. */
-export const usesOwnedTurnAdapter = (name: string): boolean => ownedTurnAdapters.has(name);
+
+/** Actual access rows are retained only at the final commit check or
+ * synchronous transport enqueue. Earlier authorization is a read. */
+export function ownedRoomAccessSql(room:string,agent:string,control:string,retain=false):string {
+  if(retain)return `SELECT 1 FROM beeline_retain_owned_access(${room},${agent},${control})`;
+  return `SELECT 1 FROM rooms room JOIN rooms parent ON parent.id=COALESCE(room.parent_id,room.id)
+    JOIN memberships member ON member.room_id=parent.id AND member.identity_id=${agent} AND member.removed_at IS NULL
+    JOIN memberships workspace_member ON workspace_member.workspace_id=room.workspace_id
+      AND workspace_member.room_id IS NULL AND workspace_member.identity_id=member.identity_id
+      AND workspace_member.removed_at IS NULL
+    WHERE room.id=${room} AND (room.archived_at IS NULL OR (room.parent_id IS NOT NULL AND EXISTS(SELECT 1 FROM agent_commands control
+      WHERE control.id=${control} AND control.room_id=room.id AND control.agent_id=${agent}
+        AND control.action IN ('stop','restart'))))
+    `;
+}
 
 export const TURN_OWNERSHIP_SCHEMA = `
+-- Execution ownership survives transport loss; a new helper runtime replaces it.
+ALTER TABLE agent_connections ADD COLUMN IF NOT EXISTS turn_connection_id text;
+ALTER TABLE agent_connections ADD COLUMN IF NOT EXISTS turn_connection_epoch bigint;
+ALTER TABLE agent_connections ADD COLUMN IF NOT EXISTS turn_transport_id text;
+-- A pre-continuation server updates only the physical connection. Clear the
+-- optional runtime binding when that writer takes over during rollout/rollback.
+CREATE OR REPLACE FUNCTION beeline_replace_turn_transport() RETURNS trigger AS $$
+BEGIN
+  IF NEW.turn_transport_id IS DISTINCT FROM NEW.connection_id THEN
+    NEW.turn_connection_id=NULL;
+    NEW.turn_connection_epoch=NULL;
+    NEW.turn_transport_id=NULL;
+  END IF;
+  RETURN NEW;
+END; $$ LANGUAGE plpgsql;
+DROP TRIGGER IF EXISTS beeline_replace_turn_transport ON agent_connections;
+CREATE TRIGGER beeline_replace_turn_transport BEFORE UPDATE OF connection_id ON agent_connections
+  FOR EACH ROW EXECUTE FUNCTION beeline_replace_turn_transport();
 ALTER TABLE agent_commands ADD COLUMN IF NOT EXISTS turn_owner_connection_id text;
 ALTER TABLE agent_commands ADD COLUMN IF NOT EXISTS turn_owner_epoch bigint;
 DO $$ BEGIN
   IF NOT EXISTS(SELECT 1 FROM pg_constraint WHERE conname='agent_commands_turn_owner_pair'
     AND conrelid='agent_commands'::regclass) THEN
     ALTER TABLE agent_commands ADD CONSTRAINT agent_commands_turn_owner_pair CHECK
-      ((turn_owner_connection_id IS NULL)=(turn_owner_epoch IS NULL));
+      ((turn_owner_connection_id IS NULL)=(turn_owner_epoch IS NULL)) NOT VALID;
   END IF;
 END $$;
+ALTER TABLE agent_commands VALIDATE CONSTRAINT agent_commands_turn_owner_pair;
 CREATE INDEX IF NOT EXISTS agent_commands_turn_owner_claimed
   ON agent_commands(agent_id,turn_owner_connection_id,turn_owner_epoch)
   WHERE state='claimed' AND turn_owner_connection_id IS NOT NULL;
@@ -107,8 +129,8 @@ BEGIN
     JOIN agent_commands command ON command.id=NEW.command_id AND command.agent_id=NEW.agent_id
     JOIN agent_command_generation_owners binding ON binding.command_id=command.id AND binding.generation_id=NEW.generation_id
       AND binding.connection_id=NEW.connection_id AND binding.connection_epoch=NEW.connection_epoch
-    WHERE connection.agent_id=NEW.agent_id AND connection.connection_id=NEW.connection_id
-      AND connection.epoch=NEW.connection_epoch AND connection.released_at IS NULL
+    WHERE connection.agent_id=NEW.agent_id AND COALESCE(connection.turn_connection_id,connection.connection_id)=NEW.connection_id
+      AND COALESCE(connection.turn_connection_epoch,connection.epoch)=NEW.connection_epoch AND connection.released_at IS NULL
       AND server.renewed_at>clock_timestamp()-interval '90 seconds'
       AND (beeline_command_generation_open(command.id,NEW.generation_id) OR EXISTS(
         SELECT 1 FROM agent_command_owner_ends ended WHERE ended.command_id=command.id
@@ -131,15 +153,45 @@ CREATE CONSTRAINT TRIGGER beeline_commit_owned_effect AFTER INSERT ON turn_owned
 CREATE OR REPLACE FUNCTION beeline_command_owner_live(
   owned_agent text,owned_connection text,owned_epoch bigint,legacy_until timestamptz,observed_at timestamptz
 ) RETURNS boolean AS $$
-  SELECT CASE WHEN owned_connection IS NULL THEN legacy_until>observed_at
+  SELECT CASE WHEN owned_connection IS NULL THEN true
   ELSE EXISTS(
-    SELECT 1 FROM agent_connections connection JOIN live_server_instances server
+    SELECT 1 FROM agent_connections connection LEFT JOIN live_server_instances server
       ON server.instance_id=connection.instance_id
-    WHERE connection.agent_id=owned_agent AND connection.connection_id=owned_connection
-      AND connection.epoch=owned_epoch AND connection.released_at IS NULL
-      AND server.renewed_at>clock_timestamp()-interval '90 seconds'
+    WHERE connection.agent_id=owned_agent AND COALESCE(connection.turn_connection_id,connection.connection_id)=owned_connection
+      AND COALESCE(connection.turn_connection_epoch,connection.epoch)=owned_epoch
+      AND (connection.turn_connection_id IS NOT NULL OR (connection.released_at IS NULL
+        AND server.renewed_at>clock_timestamp()-interval '90 seconds'))
   ) END;
 $$ LANGUAGE sql VOLATILE;
+-- Queue writers take membership before command rows, while final effects can
+-- already hold command/source rows. Bound the reverse-order wait below the
+-- deadlock detector instead of NOWAIT, allowing brief queue contention to clear.
+-- Function-local configuration restores the caller's timeout even on failure.
+CREATE OR REPLACE FUNCTION beeline_retain_owned_access(access_room uuid,access_agent text,access_control text)
+RETURNS SETOF integer LANGUAGE plpgsql SET lock_timeout='500ms' AS $$
+BEGIN
+  RETURN QUERY ${ownedRoomAccessSql('access_room','access_agent','access_control')}
+    FOR SHARE OF room,parent,member,workspace_member;
+END; $$;
+-- This additive checkpoint survives a preceding installer replacing the
+-- owner-binding callback while new readers still serve during rollback.
+CREATE OR REPLACE FUNCTION beeline_commit_owned_access() RETURNS trigger LANGUAGE plpgsql AS $$
+BEGIN
+  IF NOT EXISTS(SELECT 1 FROM agent_commands command
+    WHERE command.id=NEW.command_id AND command.agent_id=NEW.agent_id
+      AND EXISTS(${ownedRoomAccessSql('command.room_id','command.agent_id','command.id',true)})) THEN
+    RAISE EXCEPTION 'owned effect authority expired before commit' USING ERRCODE='23514';
+  END IF;
+  RETURN NULL;
+END; $$;
+DO $$ BEGIN
+  IF NOT EXISTS(SELECT 1 FROM pg_trigger WHERE tgrelid='turn_owned_effect_fences'::regclass
+    AND tgname='beeline_commit_owned_access') THEN
+    CREATE CONSTRAINT TRIGGER beeline_commit_owned_access AFTER INSERT ON turn_owned_effect_fences
+      DEFERRABLE INITIALLY DEFERRED FOR EACH ROW EXECUTE FUNCTION beeline_commit_owned_access();
+  END IF;
+END $$;
+
 `;
 
 function prefix(alias?: string): string {
@@ -150,37 +202,31 @@ function prefix(alias?: string): string {
 /** One definition for claims, recovery, effective busy state and tool authority. */
 export function commandOwnerLiveSql(alias?: string, observedAt = 'now()'): string {
   const p = prefix(alias);
-  // Keep the legacy branch local to the row; no connection lookup or SQL
-  // function call is needed for a row that has never selected this protocol.
-  return `(CASE WHEN ${p}turn_owner_connection_id IS NULL THEN ${p}lease_expires_at>${observedAt}
-    ELSE beeline_command_generation_open(${p}id,${p}generation_id) AND
-      beeline_command_owner_live(${p}agent_id,${p}turn_owner_connection_id,${p}turn_owner_epoch,${p}lease_expires_at,${observedAt}) END)`;
+  return `(${p}state='claimed' AND (${p}turn_owner_connection_id IS NULL OR (
+    beeline_command_generation_open(${p}id,${p}generation_id) AND
+    beeline_command_owner_live(${p}agent_id,${p}turn_owner_connection_id,${p}turn_owner_epoch,NULL,${observedAt}))))`;
+}
+/** Model work belongs to the invocation, while results remain command-specific. */
+export function invocationCommandSql(anchor: string, member: string): string {
+  const a=prefix(anchor),m=prefix(member);
+  return `${m}room_id=${a}room_id AND ${m}agent_id=${a}agent_id
+    AND ${m}generation_id IS NOT DISTINCT FROM ${a}generation_id
+    AND ${m}turn_owner_connection_id IS NOT DISTINCT FROM ${a}turn_owner_connection_id
+    AND ${m}turn_owner_epoch IS NOT DISTINCT FROM ${a}turn_owner_epoch
+    AND ${m}action IN ('input','resume') AND ${commandOwnerLiveSql(member, 'clock_timestamp()')}`;
 }
 export function commandOwnerExpiredSql(alias?: string, observedAt = 'now()'): string {
   const p = prefix(alias);
   return `((${p}turn_owner_connection_id IS NULL OR beeline_command_generation_open(${p}id,${p}generation_id)) AND NOT (${commandOwnerLiveSql(alias, observedAt)}))`;
 }
-/** Legacy grace periods are retained. A lost registered owner needs no fake turn freshness. */
-export function commandOwnerExpiredBeforeSql(alias: string | undefined, before: string): string {
-  const p = prefix(alias);
-  return `(CASE WHEN ${p}turn_owner_connection_id IS NULL THEN ${p}lease_expires_at<${before}
-    ELSE ${commandOwnerExpiredSql(alias)} END)`;
-}
-
-/** Visible working state follows real execution ownership for the new cohort.
- * Immutable bindings prevent an old owned turn borrowing legacy freshness
- * after its command was requeued or moved to a newer generation. */
+/** A turn is working only while its exact generation still has its claim owner. */
 export function workingTurnFreshSql(alias: string): string {
-  const p = prefix(alias);
-  const scope = `working_command.room_id=${p}room_id AND working_command.agent_id=${p}agent_id
-    AND working_command.turn_request_id=${p}request_id`;
-  return `(CASE WHEN EXISTS(SELECT 1 FROM agent_commands working_command
-    JOIN agent_command_generation_owners working_binding ON working_binding.command_id=working_command.id
-      AND working_binding.generation_id=${p}generation_id AND working_binding.connection_id IS NOT NULL
-    WHERE ${scope}) THEN EXISTS(SELECT 1 FROM agent_commands working_command
-      WHERE ${scope} AND working_command.generation_id=${p}generation_id
-        AND working_command.state='claimed' AND ${commandOwnerLiveSql('working_command')})
-    ELSE ${p}created_at>now()-interval '90 seconds' END)`;
+  const p=prefix(alias);
+  return `EXISTS(SELECT 1 FROM agent_commands working_command
+    WHERE working_command.room_id=${p}room_id AND working_command.agent_id=${p}agent_id
+      AND working_command.turn_request_id=${p}request_id
+      AND working_command.generation_id IS NOT DISTINCT FROM ${p}generation_id
+      AND ${commandOwnerLiveSql('working_command')})`;
 }
 
 /** Materialize the indexed source lock before command-row locks. Registration
@@ -189,8 +235,8 @@ export function commandOwnerFenceCteSql(scope: string): string {
   return `turn_owner_fence AS MATERIALIZED (
     SELECT owned_command.id command_id FROM agent_commands owned_command
     JOIN agent_connections connection ON connection.agent_id=owned_command.agent_id
-      AND connection.connection_id=owned_command.turn_owner_connection_id
-      AND connection.epoch=owned_command.turn_owner_epoch AND connection.released_at IS NULL
+      AND COALESCE(connection.turn_connection_id,connection.connection_id)=owned_command.turn_owner_connection_id
+      AND COALESCE(connection.turn_connection_epoch,connection.epoch)=owned_command.turn_owner_epoch AND connection.released_at IS NULL
     JOIN live_server_instances server ON server.instance_id=connection.instance_id
       AND server.renewed_at>clock_timestamp()-interval '90 seconds'
     WHERE ${scope} AND beeline_command_generation_open(owned_command.id,owned_command.generation_id) FOR SHARE OF connection
@@ -210,7 +256,7 @@ export async function assertCurrentTurnOwner(
     throw new Error('Turn ownership source invalid');
   const current = await database.query(`SELECT connection.agent_id FROM agent_connections connection
     JOIN live_server_instances server ON server.instance_id=connection.instance_id
-    WHERE connection.agent_id=$1 AND connection.connection_id=$2 AND connection.epoch=$3
+    WHERE connection.agent_id=$1 AND COALESCE(connection.turn_connection_id,connection.connection_id)=$2 AND COALESCE(connection.turn_connection_epoch,connection.epoch)=$3
       AND connection.released_at IS NULL AND server.renewed_at>clock_timestamp()-interval '90 seconds'
     FOR SHARE OF connection`, [agentId, source.connectionId, source.epoch]);
   if (!current.rowCount) throw new Error('Turn ownership source changed');
@@ -232,4 +278,12 @@ export async function registerOwnedEffectFence(database: SqlDatabase, command: {
   await database.query('SELECT beeline_register_owned_effect($1,$2,$3,$4,$5)', [
     command.id, command.agent_id, command.generation_id, command.turn_owner_connection_id, command.turn_owner_epoch,
   ]);
+}
+
+/** Archived corners retain only their exact queued cleanup controls. */
+export async function lockOwnedTurnRoomAccess(
+  database: SqlDatabase, roomId: string, agentId: string, controlId?: string,
+): Promise<boolean> {
+  const access = await database.query(ownedRoomAccessSql('$1','$2','$3'), [roomId,agentId,controlId??null]);
+  return Boolean(access.rowCount);
 }

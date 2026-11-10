@@ -1,3 +1,4 @@
+import { phoneIdentity as identity, type PhoneIdentityRow as IdentityRow } from './phone-identity.js';
 import { systemMessage } from '@beeline/api-contract/system-message-catalog';
 import type { ObjectService } from './object-service.js';
 import { mediaIdFromUrl } from './media-ttl.js';
@@ -7,12 +8,12 @@ import { VoiceBudgetStore } from './voice-budget.js';
 import { AgentVoiceService } from './agent-voice.js';
 import { createHash, createHmac, timingSafeEqual, randomBytes, randomUUID } from 'node:crypto';
 import { AccessToken, RoomServiceClient } from 'livekit-server-sdk';
-import { type VoiceIdleState, type VoiceCall, type VoiceJoin, type RoomViewIdentity, voiceDuration } from '@beeline/api-contract/phone';
+import { type VoiceIdleState, type VoiceCall, type VoiceJoin, voiceDuration } from '@beeline/api-contract/phone';
 import { SYSTEM_IDENTITY_ID } from '@beeline/api-contract/system-identity';
 import { parseAgentAccessPolicy, senderMayAddressAgent } from '@beeline/api-contract/agent-access';
 import type { SqlDatabase } from './database.js';
 import type { LiveHub } from './live.js';
-import { systemLine, restateSystemLine, ensureSystemIdentity } from './system-line.js';
+import { systemLine, restateSystemLine, restateSystemLines, ensureSystemIdentity } from './system-line.js';
 import { searchInstitutionalHistory } from './institutional-history.js';
 import { routeAgentResult, routeHumanMessage, type CommandRow } from './agent-command.js';
 import { assignVoiceAgents, type VoiceAgent, type VoiceBrain, type VoiceSearch, type VoiceSpeech, type VoiceSttFactory,
@@ -21,11 +22,8 @@ import { VoiceRoomRuntime } from './voice-room-runtime.js';
 import type { SpeechMember } from './markdown-to-speech.js';
 
 export type VoiceConfig = { url: string; apiKey: string; apiSecret: string; brain: VoiceBrain;
-  speech: VoiceSpeech; stt: VoiceSttFactory; searchWeb?: (query: string, signal: AbortSignal, currentTime?: number) => Promise<string>; budgetLimitMs?: number; objects?: ObjectService };
+  speech: VoiceSpeech; stt: VoiceSttFactory; searchWeb?: (query: string, signal: AbortSignal, currentTime?: number) => Promise<string>; budgetLimitMs?: number; objects?: ObjectService; publicOrigin?: string };
 type CallRow = { id: string; room_id: string; message_id: string; started_at: Date; ended_at: Date | null; end_reason?: string | null };
-type IdentityRow = { id: string; kind: 'human' | 'agent'; name: string; handle: string | null; face_id: string | null };
-const identity = (row: IdentityRow): RoomViewIdentity => ({ pubkey: row.id, kind: row.kind,
-  name: row.name, ...(row.handle ? { handle: row.handle } : {}), ...(row.face_id ? { face: row.face_id } : {}) });
 
 /** The DB owns membership/session facts. LiveKit transports audio, never authority. */
 export class VoiceService {
@@ -94,17 +92,17 @@ export class VoiceService {
 
   async endWorkspaceCalls(workspaceId: string) {
     const calls = await this.db.transaction(async db => {
-      // Serialize workspace endings, and recheck the day after acquiring it.
-      await db.query('SELECT pg_advisory_xact_lock(hashtext($1))', [`voice-budget:${workspaceId}`]);
       if ((await this.budget.read(workspaceId, db)).remainingMs > 0) return [];
-      const calls = await db.query<CallRow>(`SELECT c.* FROM voice_calls c
-        JOIN rooms r ON r.id=c.room_id WHERE r.workspace_id=$1 AND c.ended_at IS NULL FOR UPDATE OF c`, [workspaceId]);
-      for (const call of calls.rows) {
-        const ended = (await db.query<CallRow>(`UPDATE voice_calls SET ended_at=now(),end_reason=$2
-          WHERE id=$1 RETURNING *`, [call.id, systemMessage("voice-service.today-s-60-minutes-are-used")])).rows[0]!;
-        await db.query('UPDATE voice_participants SET left_at=now() WHERE call_id=$1 AND left_at IS NULL', [call.id]);
-        await this.updateCard(ended, db);
-      }
+      const calls = await db.query<CallRow>(`UPDATE voice_calls call SET ended_at=now(),end_reason=$2
+        FROM rooms room WHERE room.id=call.room_id AND room.workspace_id=$1 AND call.ended_at IS NULL
+        RETURNING call.*`, [workspaceId,systemMessage("voice-service.today-s-60-minutes-are-used")]);
+      await db.query('UPDATE voice_participants SET left_at=now() WHERE call_id=ANY($1::uuid[]) AND left_at IS NULL',
+        [calls.rows.map(call => call.id)]);
+      await restateSystemLines(db,calls.rows.map(call => ({id:call.message_id,
+        phrase:{subject:{kind:'system',name:systemMessage("voice-service.call")},verb:systemMessage("voice-service.ended"),
+          consequence:voiceDuration((call.ended_at!.getTime()-call.started_at.getTime())/1000)+systemMessage("voice-service.separator",call.end_reason!)},
+        card:{id:call.id,roomId:call.room_id,startedAt:Math.floor(call.started_at.getTime()/1000),startedAtMs:call.started_at.getTime(),
+          endedAt:Math.floor(call.ended_at!.getTime()/1000),participants:[]},presentation:'system',createdAt:call.ended_at!})));
       return calls.rows;
     });
     // Use the same RTC/runtime cleanup as an ordinary call ending. Commit the
@@ -122,7 +120,7 @@ export class VoiceService {
         chosen_voices: Record<string, string>;
       }
     >(
-      `SELECT i.id,i.kind,i.name,i.handle,i.face_id,a.soul,a.owner_id,a.access_policy,a.chosen_voices FROM memberships m
+      `SELECT i.id,i.kind,i.name,beeline_workspace_handle(i.id,m.workspace_id) handle,i.avatar,i.face_id,a.soul,a.owner_id,a.access_policy,a.chosen_voices FROM memberships m
        JOIN identities i ON i.id=m.identity_id AND i.kind='agent' JOIN agents a ON a.agent_id=i.id
        JOIN rooms r ON r.id=m.room_id JOIN workspaces w ON w.id=r.workspace_id
        WHERE m.room_id=$1 AND m.removed_at IS NULL ORDER BY i.id`,
@@ -145,6 +143,7 @@ export class VoiceService {
         soul: a.soul?.instructions ?? '',
         chosenVoice: savedAuraVoice(a.chosen_voices),
         ...(a.face_id ? { face: a.face_id } : {}),
+        ...(a.avatar ? { avatar: a.avatar } : {}),
       })),
       speech.voices,
     ).filter((a) => allowed.has(a.id));
@@ -153,7 +152,7 @@ export class VoiceService {
   /** Handle-to-display-name pairs for every current Room member, for spoken names. */
   async memberNames(roomId: string): Promise<SpeechMember[]> {
     const rows = await this.db.query<IdentityRow>(
-      `SELECT i.id,i.kind,i.name,i.handle,i.face_id FROM memberships m
+      `SELECT i.id,i.kind,i.name,beeline_workspace_handle(i.id,m.workspace_id) handle,i.avatar,i.face_id FROM memberships m
        JOIN identities i ON i.id=m.identity_id WHERE m.room_id=$1 AND m.removed_at IS NULL`,
       [roomId],
     );
@@ -190,7 +189,7 @@ export class VoiceService {
     return { id: row.id, roomId: row.room_id, startedAt: Math.floor(row.started_at.getTime() / 1000),
       startedAtMs: row.started_at.getTime(),
       ...(row.ended_at ? { endedAt: Math.floor(row.ended_at.getTime() / 1000) } : {}),
-      participants: members.rows.map(identity) };
+      participants: members.rows.map(row => identity(row, this.config.publicOrigin ?? '')) };
   }
 
   async current(roomId: string, humanId: string): Promise<VoiceCall | null> {
@@ -208,19 +207,23 @@ export class VoiceService {
     const row = await this.db.transaction(async db => {
       await this.access(roomId, humanId, db);
       const workspaceId = await this.workspaceId(roomId, db);
-      await db.query('SELECT pg_advisory_xact_lock(hashtext($1))', [`voice-budget:${workspaceId}`]);
       await this.budget.require(workspaceId, db);
-      await db.query(`SELECT pg_advisory_xact_lock(hashtext($1))`, [`voice:${roomId}`]);
-      let call = (await db.query<CallRow>(`SELECT * FROM voice_calls WHERE room_id=$1 AND ended_at IS NULL FOR UPDATE`, [roomId])).rows[0];
-      if (expectedCallId && call?.id !== expectedCallId) throw new Error('voice session ended');
-      if (!call) {
+      let call: CallRow;
+      if (expectedCallId) {
+        const current = await db.query<CallRow>(`UPDATE voice_calls SET room_id=room_id
+          WHERE id=$1 AND room_id=$2 AND ended_at IS NULL RETURNING *`, [expectedCallId,roomId]);
+        if (!current.rows[0]) throw new Error('voice session ended');
+        call=current.rows[0];
+      } else {
         await ensureSystemIdentity(db);
         const id = randomUUID(); const messageId = randomBytes(32).toString('hex');
         await systemLine(db, { id: messageId, roomId, authorId: SYSTEM_IDENTITY_ID,
           subject: { kind: 'system', name: systemMessage("voice-service.voice-call") }, verb: systemMessage("voice-service.started"), presentation: 'card',
           cardType: 'voice-call', card: { id, roomId, startedAt: Math.floor(Date.now() / 1000), participants: [] } });
-        call = (await db.query<CallRow>(`INSERT INTO voice_calls(id,room_id,message_id) VALUES($1,$2,$3) RETURNING *`,
+        call = (await db.query<CallRow>(`INSERT INTO voice_calls(id,room_id,message_id) VALUES($1,$2,$3)
+          ON CONFLICT(room_id) WHERE ended_at IS NULL DO UPDATE SET room_id=EXCLUDED.room_id RETURNING *`,
           [id, roomId, messageId])).rows[0]!;
+        if (call.message_id !== messageId) await db.query('DELETE FROM messages WHERE id=$1', [messageId]);
       }
       await db.query(`INSERT INTO voice_participants(call_id,identity_id,session_id) VALUES($1,$2,$3)
         ON CONFLICT(call_id,identity_id) DO UPDATE SET left_at=NULL,parked_at=NULL,joined_at=now(),session_id=excluded.session_id`, [call.id, humanId, sessionId]);
@@ -237,8 +240,8 @@ export class VoiceService {
     token.addGrant({ roomJoin: true, room: `beeline-voice-${row.id}`, canPublish: true,
       canSubscribe: true, canPublishData: true, canUpdateOwnMetadata: false });
     return { sessionId, stopToken: this.stopToken(row.id, humanId, sessionId), call: await this.view(row), url: this.config.url, token: await token.toJwt(),
-      agents: agents.map(a => ({ pubkey: a.id, kind: 'agent', name: a.name, handle: a.handle,
-        ...(a.face ? { face: a.face } : {}) })) };
+      agents: agents.map(a => identity({ id: a.id, kind: 'agent', name: a.name, handle: a.handle,
+        face_id: a.face ?? null, avatar: a.avatar ?? null }, this.config.publicOrigin ?? '')) };
   }
 
   /** Compatibility for older phones: idle never parks or removes a human. */
@@ -336,7 +339,6 @@ export class VoiceService {
         const left = await db.query(`UPDATE voice_participants SET left_at=now() WHERE call_id=$1 AND identity_id=$2
           AND ($3::text IS NULL OR session_id=$3) RETURNING identity_id`, [callId, humanId, sessionId ?? null]);
         if (!left.rowCount) return null;
-        await this.rooms.removeParticipant(`beeline-voice-${callId}`, humanId).catch(() => {});
       }
       if (!(await db.query(`SELECT 1 FROM voice_participants WHERE call_id=$1 AND left_at IS NULL`, [callId])).rowCount) {
         call.end_reason = inactivity ? systemMessage("voice-service.silence") : null;
@@ -347,6 +349,7 @@ export class VoiceService {
       return call;
     }).catch(error => { if (error === resumed) return null; throw error; });
     if (!row) return;
+    if (!inactivity) await this.rooms.removeParticipant(`beeline-voice-${callId}`, humanId).catch(() => {});
     (await this.runtimes.get(callId))?.participantLeft?.(humanId);
     if (row.ended_at && inactivity) { inactivity.ended = true; await (await this.runtimes.get(callId))?.stopCall(); }
     await (await this.runtimes.get(callId))?.countHumans().catch(() => {});
@@ -455,7 +458,7 @@ export class VoiceService {
       const reference = request.query.trim();
       const messageId = /^#beeline\/[^\s/()<>]+\/([0-9a-f]{64})$/.exec(reference)?.[1] ?? reference;
       const row = (await this.db.query<VoiceContextRow>(
-        `SELECT m.id,left(m.text,6000) text,m.author_id,i.name,i.handle,m.attachments,m.card_type,m.card
+        `SELECT m.id,left(m.text,6000) text,m.author_id,i.name,beeline_room_handle(i.id,m.room_id) handle,m.attachments,m.card_type,m.card
          FROM messages m JOIN identities i ON i.id=m.author_id
          WHERE m.room_id=$1 AND m.deleted_at IS NULL AND m.presentation IN ('message','card')
            AND (m.id=$2 OR EXISTS (SELECT 1 FROM jsonb_array_elements(m.attachments) a WHERE a->>'url'=$3))
@@ -490,7 +493,7 @@ export class VoiceService {
         WHERE m.id=$1 FOR UPDATE OF m FOR SHARE OF c,p`, [sourceId, callId])).rows[0];
       if (!row) throw new Error('Voice request is no longer available');
       await this.access(row.room_id, row.author_id, db);
-      const target = (await db.query<{ handle: string }>(`SELECT handle FROM identities WHERE id=$1 FOR SHARE`, [agentId])).rows[0];
+      const target = (await db.query<{ handle: string }>(`SELECT beeline_room_handle(id,$2) handle FROM identities WHERE id=$1 FOR SHARE`, [agentId,row.room_id])).rows[0];
       if (!target?.handle || !row.text.startsWith(`@${target.handle} `))
         throw new Error('The agent handle changed; please repeat the order');
       const inserted = await db.query(`INSERT INTO voice_orders(source_message_id,call_id,agent_id) VALUES($1,$2,$3) ON CONFLICT DO NOTHING`,

@@ -12,21 +12,30 @@
       "owners": [
         "apps/mobile/sources/sync/transport/live-connection.ts",
         "apps/server/src/phone-operations.ts",
-        "apps/server/src/server.ts",
-        "apps/server/src/rooms-mcp.ts"
+        "apps/server/src/rooms-mcp.ts",
+        "apps/server/src/server-authenticated-routes.ts",
+        "apps/server/src/server-route.ts",
+        "apps/server/src/server.ts"
       ],
       "ownerFunctions": {
         "apps/mobile/sources/sync/transport/live-connection.ts": [
           "sendRequest"
         ],
         "apps/server/src/phone-operations.ts": [
-          "execute", "effect"
-        ],
-        "apps/server/src/server.ts": [
-          "httpPhoneOperation", "route"
+          "execute",
+          "effect"
         ],
         "apps/server/src/rooms-mcp.ts": [
           "call"
+        ],
+        "apps/server/src/server-authenticated-routes.ts": [
+          "routeAuthenticated"
+        ],
+        "apps/server/src/server-route.ts": [
+          "route"
+        ],
+        "apps/server/src/server.ts": [
+          "httpPhoneOperation"
         ]
       },
       "ownerSites": 16,
@@ -51,8 +60,8 @@
       "strict": true,
       "ownerFunctions": {
         "apps/server/src/agent-command.ts": [
-          "createAgentCommand",
-          "createClaimedMcpAgentCommand"
+          "createClaimedMcpAgentCommand",
+          "insertAgentCommand"
         ]
       },
       "ownerSites": 2
@@ -67,10 +76,10 @@
         "apps/server/src"
       ],
       "owners": [
-        "apps/server/src/agent-command.ts"
+        "apps/server/src/agent-command-route-agent-result.ts"
       ],
       "ownerFunctions": {
-        "apps/server/src/agent-command.ts": [
+        "apps/server/src/agent-command-route-agent-result.ts": [
           "claimAgentCommand"
         ]
       },
@@ -89,15 +98,14 @@
         "apps/server/src"
       ],
       "owners": [
-        "apps/server/src/agent-command.ts"
+        "apps/server/src/agent-command-route-agent-result.ts"
       ],
       "ownerFunctions": {
-        "apps/server/src/agent-command.ts": [
-          "claimAgentCommand",
-          "renewAgentCommandLease"
+        "apps/server/src/agent-command-route-agent-result.ts": [
+          "claimAgentCommand"
         ]
       },
-      "ownerSites": 2,
+      "ownerSites": 1,
       "strict": true,
       "total": 0,
       "fix": "Call claimAgentCommand; connected apps select orders with claimMcpOrder."
@@ -156,11 +164,11 @@
         "apps/server/src"
       ],
       "owners": [
-        "apps/server/src/corner-lifecycle.ts",
-        "apps/server/src/corner-close.ts"
+        "apps/server/src/corner-lifecycle.ts"
       ],
       "total": 0,
-      "fix": "Change corner state through the corner module: advanceCorner/lockCornerLifecycle in apps/server/src/corner-lifecycle.ts, or closeCornerState in apps/server/src/corner-close.ts. If the module lacks the write you need, add a named function there and call it."
+      "fix": "Emit an event through advanceCorner in apps/server/src/corner-lifecycle.ts.",
+      "strict": true
     },
     {
       "id": "corner.github-cache-writes",
@@ -172,10 +180,13 @@
         "apps/server/src"
       ],
       "owners": [
-        "apps/server/src/github-operations.ts",
+        "apps/server/src/corner-close.ts",
         "apps/server/src/corner-github-cache.ts",
         "apps/server/src/corner-lifecycle.ts",
-        "apps/server/src/corner-close.ts"
+        "apps/server/src/github-operations-begin-identity.ts",
+        "apps/server/src/github-operations-read-pr-checks-status.ts",
+        "apps/server/src/github-operations-reconcile-queued-corners.ts",
+        "apps/server/src/github-operations-refresh-check-rollup.ts"
       ],
       "total": 0,
       "fix": "Write the cache through apps/server/src/corner-github-cache.ts (writeCornerGithubCache, recordHelperRemoteState) or GitHubOperations in apps/server/src/github-operations.ts; read it with cornerLifecycleSql."
@@ -220,13 +231,13 @@
         "apps/server/src"
       ],
       "owners": [
-        "apps/server/src/corner-close.ts"
+        "apps/server/src/corner-lifecycle.ts"
       ],
       "total": 0,
-      "fix": "Call archiveCornerState in corner-close.ts; retain outcome-specific lifecycle writes in the caller.",
+      "fix": "Emit closed or merged through advanceCorner in corner-lifecycle.ts; its archiveCorner effect owns command, workflow and hold cleanup.",
       "ownerFunctions": {
-        "apps/server/src/corner-close.ts": [
-          "archiveCornerState"
+        "apps/server/src/corner-lifecycle.ts": [
+          "archiveCorner"
         ]
       },
       "ownerSites": 1,
@@ -242,7 +253,7 @@
         "apps/body/src"
       ],
       "owners": [
-        "apps/server/src/github-operations.ts"
+        "apps/server/src/github-operations-read-pr-checks-status.ts"
       ],
       "total": 0,
       "fix": "Merge through GitHubOperations.landCorner, the only merge path (AGENTS.md merge authority); it checks the exact-head yes, green checks and holds."
@@ -257,6 +268,7 @@
         "apps/server/src"
       ],
       "owners": [
+        "apps/server/src/postgres-live-schema.ts",
         "apps/server/src/postgres-live.ts"
       ],
       "total": 0,
@@ -265,14 +277,31 @@
     {
       "id": "timers.server-interval",
       "module": "Background work and timers",
-      "invariant": "Server background work runs on owned work queues or connection timeout chains, not on free-running intervals.",
-      "pattern": "\\bsetInterval\\s*\\(",
+      "invariant": "Server work runs only on events or owner-created schedules.",
+      "pattern": "\\bsetInterval\\b",
       "scope": [
         "apps/server/src"
       ],
       "owners": [],
       "total": 0,
-      "fix": "Use leader work.add for shared jobs; startBackgroundWork in apps/server/src/background-work.ts for instance-local memory flushes/channel cleanup; startConnectionWork there for a connection-owned timeout chain cancelled on close; or a due-time wake (agent_schedules/work_schedules). Do not add a setInterval."
+      "fix": "Delete the interval. Use the committed event that authorizes the work.",
+      "strict": true
+    },
+    {
+      "id": "timers.server-timeout",
+      "module": "Background work and timers",
+      "invariant": "Server timers belong only to owner-created schedules and bounded process shutdown.",
+      "pattern": "\\bsetTimeout\\b|\\bAbortSignal\\s*\\.\\s*timeout\\s*\\(",
+      "scope": [
+        "apps/server/src"
+      ],
+      "owners": [
+        "apps/server/src/owner-schedule-clock.ts",
+        "apps/server/src/shutdown.ts"
+      ],
+      "total": 0,
+      "strict": true,
+      "fix": "Drive work from its source event. Only owner-schedule-clock.ts and shutdown.ts own schedule and shutdown deadlines."
     },
     {
       "id": "access.membership-writes",
@@ -415,6 +444,222 @@
       "owners": [],
       "total": 4,
       "fix": "Change the main path instead of adding a legacy/fallback/compat variant beside it, or remove an old variant in the same PR."
+    },
+    {
+      "id": "phone.connection-error-trigger",
+      "module": "Phone connection failures",
+      "invariant": "Only an explicit socket request outcome may publish the app connection error.",
+      "pattern": "\\bsetConnectionFailure\\s*\\(|\\bconnectionFailed\\s*=(?!=)(?!=)|\\bsetConnectionState\\s*\\(\\s*[\\x27\\x22]disconnected[\\x27\\x22]",
+      "scope": [
+        "apps/mobile/sources"
+      ],
+      "owners": [
+        "apps/mobile/sources/sync/transport/live-connection.ts"
+      ],
+      "ownerFunctions": {
+        "apps/mobile/sources/sync/transport/live-connection.ts": [
+          "connectionFailed",
+          "setConnectionFailure",
+          "request"
+        ]
+      },
+      "ownerSites": 4,
+      "total": 0,
+      "strict": true,
+      "fix": "Publish the outcome in LiveConnection.request. Socket lifecycle, HTTP, heartbeat and screen timers cannot set a connection error."
+    },
+    {
+      "id": "phone.connection-error-surface",
+      "module": "Phone connection failures",
+      "invariant": "Connection failure copy and the connection failure hook belong only to the app-wide banner.",
+      "pattern": "Beeline (?:isn[\\x27\u2019]t|is not) connected|Could(?:n[\\x27\u2019]t| not) reach Beeline|[Cc]heck your connection|Showing saved messages|connectionError(?:Title|Description)|\\buseConnectionFailure\\s*\\(|No connection to the server|Not connected yet|No connection(?!s)|You[\u2019']re offline",
+      "scope": [
+        "apps/mobile/sources"
+      ],
+      "owners": [
+        "apps/mobile/sources/components/buzz/ConnectionStatus.tsx",
+        "apps/mobile/sources/sync/transport/live-connection.ts"
+      ],
+      "ownerFunctions": {
+        "apps/mobile/sources/components/buzz/ConnectionStatus.tsx": [
+          "ConnectionStatus"
+        ],
+        "apps/mobile/sources/sync/transport/live-connection.ts": [
+          "useConnectionFailure"
+        ]
+      },
+      "ownerSites": 3,
+      "total": 0,
+      "strict": true,
+      "fix": "Use the one ConnectionStatus in the app layout. Keep screen errors specific to server refusals or failed actions; do not duplicate connection errors."
+    },
+    {
+      "id": "phone.connection-error-mount",
+      "module": "Phone connection failures",
+      "invariant": "The app layout mounts exactly one connection banner.",
+      "pattern": "<ConnectionStatus\\b|\\b(?:React\\.)?createElement\\s*\\(\\s*ConnectionStatus\\b",
+      "scope": [
+        "apps/mobile/sources"
+      ],
+      "owners": [
+        "apps/mobile/sources/app/(app)/_layout.tsx"
+      ],
+      "ownerFunctions": {
+        "apps/mobile/sources/app/(app)/_layout.tsx": [
+          "RootLayout"
+        ]
+      },
+      "ownerSites": 1,
+      "total": 0,
+      "strict": true,
+      "fix": "Remove the additional connection banner. The app layout owns the only mount."
+    },
+    {
+      "id": "work.command-terminal",
+      "module": "Turn lifecycle",
+      "invariant": "Only beeline_end_agent_turn changes a command or turn to a terminal state.",
+      "pattern": "(?:UPDATE\\s+(?:\"?\\w+\"?\\s*\\.\\s*)?\"?agent_commands\"?\\s+(?:(?:AS\\s+)?\"?\\w+\"?\\s+)?|INSERT\\s+INTO\\s+(?:\"?\\w+\"?\\s*\\.\\s*)?\"?agent_commands\"?\\s*\\((?:(?!;|`).)*?\\bON\\s+CONFLICT(?:(?!;|`).)*?\\bDO\\s+UPDATE\\s+)SET\\s+(?:(?!\\bWHERE\\b|;|`).)*?\\b\"?state\"?\\s*=(?!\\s*'(?:pending|claimed)')",
+      "flags": "is",
+      "scope": [
+        "apps/server/src"
+      ],
+      "owners": [
+        "apps/server/src/agent-turn-end.ts"
+      ],
+      "ownerFunctions": {
+        "apps/server/src/agent-turn-end.ts": [
+          "AGENT_TURN_END_SCHEMA"
+        ]
+      },
+      "ownerSites": 1,
+      "strict": true,
+      "total": 0,
+      "fix": "Call endAgentTurn or beeline_end_agent_turn in the caller authority transaction; connection loss returns work to pending."
+    },
+    {
+      "id": "work.turn-terminal",
+      "module": "Turn lifecycle",
+      "invariant": "Only beeline_end_agent_turn changes a command or turn to a terminal state.",
+      "pattern": "(?:UPDATE\\s+(?:\"?\\w+\"?\\s*\\.\\s*)?\"?agent_turns\"?\\s+(?:(?:AS\\s+)?\"?\\w+\"?\\s+)?|INSERT\\s+INTO\\s+(?:\"?\\w+\"?\\s*\\.\\s*)?\"?agent_turns\"?\\s*\\((?:(?!;|`).)*?\\bON\\s+CONFLICT(?:(?!;|`).)*?\\bDO\\s+UPDATE\\s+)SET\\s+(?:(?!\\bWHERE\\b|;|`).)*?\\b\"?status\"?\\s*=(?!\\s*'working')",
+      "flags": "is",
+      "scope": [
+        "apps/server/src"
+      ],
+      "owners": [
+        "apps/server/src/agent-turn-end.ts"
+      ],
+      "ownerFunctions": {
+        "apps/server/src/agent-turn-end.ts": [
+          "AGENT_TURN_END_SCHEMA"
+        ]
+      },
+      "ownerSites": 1,
+      "strict": true,
+      "total": 0,
+      "fix": "Call endAgentTurn or beeline_end_agent_turn in the caller authority transaction; connection loss returns work to pending."
+    },
+    {
+      "id": "work.terminal-turn-insert",
+      "module": "Turn lifecycle",
+      "invariant": "Turns are started as working; terminal turns are written only by beeline_end_agent_turn.",
+      "pattern": "INSERT\\s+INTO\\s+(?:\"?\\w+\"?\\s*\\.\\s*)?\"?agent_turns\"?(?=\\s|\\(|$)(?:\\s*\\([^)]*\\)\\s*(?:VALUES\\s*\\(|SELECT\\s+))?",
+      "flags": "is",
+      "scope": [
+        "apps/server/src"
+      ],
+      "owners": [],
+      "strict": true,
+      "total": 0,
+      "fix": "Insert working turns only; finish them through endAgentTurn.",
+      "insertColumnValue": {
+        "column": "status",
+        "value": "'working'"
+      }
+    },
+    {
+      "id": "work.terminal-command-insert",
+      "module": "Turn lifecycle",
+      "invariant": "Commands are created pending; only beeline_end_agent_turn writes terminal commands.",
+      "pattern": "INSERT\\s+INTO\\s+(?:\"?\\w+\"?\\s*\\.\\s*)?\"?agent_commands\"?(?=\\s|\\(|$)(?:\\s*\\([^)]*\\)\\s*(?:VALUES\\s*\\(|SELECT\\s+))?",
+      "flags": "is",
+      "scope": [
+        "apps/server/src"
+      ],
+      "owners": [],
+      "strict": true,
+      "total": 0,
+      "fix": "Insert pending commands, then claim them through claimAgentCommand; end them through endAgentTurn.",
+      "insertColumnValue": {
+        "column": "state",
+        "value": "'pending'"
+      }
+    },
+    {
+      "id": "helper.agent-process",
+      "module": "Helper agent processes",
+      "invariant": "Only agent-process.ts calls ACP process lifecycle primitives; acp.ts defines them. Work starts processes and one warm countdown retires them.",
+      "pattern": "\\b(?:startProcess|stopProcess)\\b",
+      "scope": [
+        "apps/body/src"
+      ],
+      "owners": [
+        "apps/body/src/acp.ts",
+        "apps/body/src/agent-process.ts"
+      ],
+      "ownerFunctions": {
+        "apps/body/src/acp.ts": [
+          "startProcess",
+          "stopProcess"
+        ],
+        "apps/body/src/agent-process.ts": [
+          "startAgentProcess",
+          "stopAgentProcess"
+        ]
+      },
+      "ownerSites": 5,
+      "strict": true,
+      "total": 0,
+      "fix": "Use startAgentProcess/stopAgentProcess in apps/body/src/agent-process.ts. Do not add another ACP process lifecycle caller."
+    },
+    {
+      "id": "code.file-lines",
+      "kind": "file-lines",
+      "module": "Code complexity",
+      "invariant": "Tracked code files have at most 1000 lines.",
+      "scope": [
+        "apps",
+        "packages",
+        "scripts",
+        "tools"
+      ],
+      "limit": 1000,
+      "generated": [
+        "apps/mobile/sources/vendor/pdfjs/pdfjs.gen.ts",
+        "apps/server/src/email-art/animals.ts",
+        "apps/server/src/email-art/logo.ts",
+        "apps/server/src/email-art/palette.ts",
+        "apps/server/src/face-palette.generated.ts",
+        "packages/net/src/generated-helper-shapes.ts",
+        "packages/net/src/generated-wire-shapes.ts"
+      ],
+      "fix": "Split the file by domain without changing behavior."
+    },
+    {
+      "id": "timers.shutdown-sites",
+      "module": "Server shutdown",
+      "invariant": "Shutdown owns exactly the request drain, process deadline and live-close deadline.",
+      "pattern": "\\bsetTimeout\\b|\\bAbortSignal\\s*\\.\\s*timeout\\s*\\(",
+      "scope": [
+        "apps/server/src"
+      ],
+      "owners": [
+        "apps/server/src/shutdown.ts"
+      ],
+      "ownerSites": 3,
+      "total": 0,
+      "strict": true,
+      "fix": "Keep the three bounded shutdown deadlines in shutdown.ts; do not add retry or background clocks.",
+      "filePattern": "^apps/server/src/shutdown\\.ts$"
     }
   ],
   "storage": {
@@ -422,8 +667,8 @@
       "apps/server/src",
       "apps/auth/src"
     ],
-    "bootstrapTotal": 1741,
-    "unusedTotal": 181,
+    "bootstrapTotal": 1660,
+    "unusedTotal": 172,
     "tables": {
       "agent_avatars": {
         "module": "Agent types",
@@ -461,8 +706,10 @@
           "result_message_id": "existing before the registry; weekly audit reviews",
           "private_payload": "existing before the registry; weekly audit reviews",
           "avatar_job": "existing before the registry; weekly audit reviews",
-          "hiccup_attempts": "existing before the registry; weekly audit reviews",
-          "renudged_at": "existing before the registry; weekly audit reviews",
+          "hiccup_attempts": {
+            "reason": "Retained without runtime use until the previous server drains during this rolling release.",
+            "drop": "Next release after turn-lifecycle cleanup: docs/agent-server-surfaces.md#turn-recovery-storage-retirement"
+          },
           "lifecycle_before": "existing before the registry; weekly audit reviews",
           "review_context": "existing before the registry; weekly audit reviews",
           "wake_context": "existing before the registry; weekly audit reviews",
@@ -470,14 +717,29 @@
           "restart_confirmed_at": "existing before the registry; weekly audit reviews",
           "cancellation_reason": "existing before the registry; weekly audit reviews",
           "recovery_context": "existing before the registry; weekly audit reviews",
-          "wake_after": "existing before the registry; weekly audit reviews",
-          "startup_wake_after": "existing before the registry; weekly audit reviews",
-          "coalesced_context": "existing before the registry; weekly audit reviews",
-          "coalesced_attachments": "existing before the registry; weekly audit reviews",
+          "wake_after": {
+            "reason": "Retained without runtime use until the previous server drains during this rolling release.",
+            "drop": "Next release after turn-lifecycle cleanup: docs/agent-server-surfaces.md#turn-recovery-storage-retirement"
+          },
+          "coalesced_context": {
+            "reason": "Retained without runtime use until the previous server drains during this rolling release.",
+            "drop": "Next release after turn-lifecycle cleanup: docs/agent-server-surfaces.md#turn-recovery-storage-retirement"
+          },
+          "coalesced_attachments": {
+            "reason": "Retained without runtime use until the previous server drains during this rolling release.",
+            "drop": "Next release after turn-lifecycle cleanup: docs/agent-server-surfaces.md#turn-recovery-storage-retirement"
+          },
           "inbox_sequence": "existing before the registry; weekly audit reviews",
-          "created_offline": "existing before the registry; weekly audit reviews",
+          "created_offline": {
+            "reason": "Retained without runtime use until the previous server drains during this rolling release.",
+            "drop": "Next release after turn-lifecycle cleanup: docs/agent-server-surfaces.md#turn-recovery-storage-retirement"
+          },
           "turn_owner_connection_id": "Pins an owned command generation to its actual helper registration; NULL retains the installed-helper adapter.",
-          "turn_owner_epoch": "Fences an owned command against takeover of that helper registration even if other identifiers remain the same."
+          "turn_owner_epoch": "Fences an owned command against takeover of that helper registration even if other identifiers remain the same.",
+          "startup_wake_after": {
+            "reason": "Retained without runtime use until the previous server drains during this rolling release.",
+            "drop": "Next release after turn-lifecycle cleanup: docs/agent-server-surfaces.md#turn-recovery-storage-retirement"
+          }
         }
       },
       "agent_connections": {
@@ -489,12 +751,16 @@
           "connection_id": "existing before the registry; weekly audit reviews",
           "instance_id": "existing before the registry; weekly audit reviews",
           "connected_at": "existing before the registry; weekly audit reviews",
-          "released_at": "existing before the registry; weekly audit reviews"
+          "released_at": "existing before the registry; weekly audit reviews",
+          "turn_connection_id": "the machine connection that owns the agent's running turn, so a turn survives socket loss",
+          "turn_connection_epoch": "epoch of that turn-owning connection, so a stale socket cannot claim the turn",
+          "turn_transport_id": "transport that owns the running turn, so a reconnect resumes the same turn"
         }
       },
       "agent_grant_policy_revocations": {
         "module": "Tools and connectors",
         "reason": "existing before the registry; weekly audit reviews",
+        "drop": "docs/approval-matrix.md (retired policy-upgrade ledger; retain until separately authorized grant recovery and retention review)",
         "columns": {
           "grant_id": "existing before the registry; weekly audit reviews",
           "agent_id": "existing before the registry; weekly audit reviews",
@@ -593,6 +859,7 @@
         "module": "Background work and timers",
         "reason": "existing before the registry; weekly audit reviews",
         "columns": {
+          "paused_at": "Preserves explicit suspension managed by agent-wake-pause.ts so schedule admission stops without deleting its cadence or prompt.",
           "id": "existing before the registry; weekly audit reviews",
           "workspace_id": "existing before the registry; weekly audit reviews",
           "room_id": "existing before the registry; weekly audit reviews",
@@ -610,26 +877,16 @@
           "title": "existing before the registry; weekly audit reviews",
           "last_reported_blocking_run_id": "existing before the registry; weekly audit reviews",
           "updated_by": "existing before the registry; weekly audit reviews",
-          "workflow_run": "existing before the registry; weekly audit reviews",
           "owner_id": "existing before the registry; weekly audit reviews",
           "failed_due_at": "Records the exact failed scheduled occurrence so the same due work cannot retry on a timer.",
           "failed_revision": "Records the exact failed schedule revision; a committed edit or advance permits new work without altering the authorized due time."
-        }
-      },
-      "agent_startup_backoff": {
-        "module": "Background work and timers",
-        "reason": "existing before the registry; weekly audit reviews",
-        "columns": {
-          "agent_id": "existing before the registry; weekly audit reviews",
-          "failures": "existing before the registry; weekly audit reviews",
-          "window_started_at": "existing before the registry; weekly audit reviews",
-          "paused_until": "existing before the registry; weekly audit reviews"
         }
       },
       "agent_subscriptions": {
         "module": "Background work and timers",
         "reason": "existing before the registry; weekly audit reviews",
         "columns": {
+          "paused_at": "Preserves explicit suspension managed by agent-wake-pause.ts so every event ingress stops wakes without deleting the subscription.",
           "id": "existing before the registry; weekly audit reviews",
           "workspace_id": "existing before the registry; weekly audit reviews",
           "room_id": "existing before the registry; weekly audit reviews",
@@ -686,8 +943,11 @@
           "tool_calls": "existing before the registry; weekly audit reviews",
           "input_tokens": "existing before the registry; weekly audit reviews",
           "output_tokens": "existing before the registry; weekly audit reviews",
-          "startup_outcome": "existing before the registry; weekly audit reviews",
-          "ended_at": "when a turn ended; set by the turn's own status change, so idle timing never reads a mutable corner span"
+          "ended_at": "when a turn ended; set by the turn's own status change, so idle timing never reads a mutable corner span",
+          "startup_outcome": {
+            "reason": "Retained without runtime use until the previous server drains during this rolling release.",
+            "drop": "Next release after turn-lifecycle cleanup: docs/agent-server-surfaces.md#turn-recovery-storage-retirement"
+          }
         }
       },
       "agents": {
@@ -710,10 +970,16 @@
           "updated_at": "existing before the registry; weekly audit reviews",
           "usage_snapshot": "existing before the registry; weekly audit reviews",
           "usage_account_id": "existing before the registry; weekly audit reviews",
-          "wake_batch_minutes": "existing before the registry; weekly audit reviews",
+          "wake_batch_minutes": {
+            "reason": "Retained without runtime use until the previous server drains during this rolling release.",
+            "drop": "Next release after turn-lifecycle cleanup: docs/agent-server-surfaces.md#turn-recovery-storage-retirement"
+          },
           "machine_id": "existing before the registry; weekly audit reviews",
           "machine_name": "existing before the registry; weekly audit reviews",
-          "squire_report": "existing before the registry; weekly audit reviews",
+          "squire_report": {
+            "reason": "Retired broker-copy storage retained for preceding serving and rollback images; canonical reports live in squire_machines.",
+            "drop": "docs/release-pipeline.md#release-memory \u2014 beeline-drop-retired-turn-schema contract release"
+          },
           "squire_work": "existing before the registry; weekly audit reviews",
           "harness": "existing before the registry; weekly audit reviews",
           "custom_tags": {
@@ -881,7 +1147,8 @@
           "owner_agent_id": {
             "reason": "Compatibility for rollout-0707: preceding serving and rollback images read the retired owner column",
             "drop": "Remove only through a reviewed contract migration after serving and rollback images stop reading it."
-          }
+          },
+          "machine": "The single corner state and once-only transition effect receipts; the owner rebuilds it from committed facts on startup."
         }
       },
       "corner_github_cache": {
@@ -1044,7 +1311,8 @@
         "reason": "existing before the registry; weekly audit reviews",
         "columns": {
           "day": "existing before the registry; weekly audit reviews",
-          "usd": "existing before the registry; weekly audit reviews"
+          "usd": "existing before the registry; weekly audit reviews",
+          "allocation": "Exact grant produced by the latest atomic counter update, needed to return partial allocations without subtracting a stale pre-update snapshot."
         }
       },
       "free_agent_call_rate": {
@@ -1053,7 +1321,9 @@
         "columns": {
           "owner_id": "existing before the registry; weekly audit reviews",
           "minute": "existing before the registry; weekly audit reviews",
-          "calls": "existing before the registry; weekly audit reviews"
+          "calls": "existing before the registry; weekly audit reviews",
+          "lifetime_tokens": "Owner lifetime reservation counter, updated atomically with admission and settlement so cross-day concurrent writers cannot spend the same allowance.",
+          "last_grant": "Exact owner grant produced by the latest atomic UPDATE; PostgreSQL 16 cannot return the old row after waiting on another writer."
         }
       },
       "free_agent_events": {
@@ -1074,7 +1344,8 @@
           "owner_id": "existing before the registry; weekly audit reviews",
           "day": "existing before the registry; weekly audit reviews",
           "tokens": "existing before the registry; weekly audit reviews",
-          "reservation_credit": "existing before the registry; weekly audit reviews"
+          "reservation_credit": "existing before the registry; weekly audit reviews",
+          "allocation": "Exact grant produced by the latest atomic counter update, needed to return partial allocations without subtracting a stale pre-update snapshot."
         }
       },
       "free_agents": {
@@ -1091,16 +1362,33 @@
           "sealed_keys": "existing before the registry; weekly audit reviews",
           "bootstrap_hash": "existing before the registry; weekly audit reviews",
           "model_token_hash": "existing before the registry; weekly audit reviews",
-          "last_activity_at": "existing before the registry; weekly audit reviews",
-          "wake_requested_at": "existing before the registry; weekly audit reviews",
-          "provision_started_at": "existing before the registry; weekly audit reviews",
-          "provision_attempts": "existing before the registry; weekly audit reviews",
-          "provision_error": "existing before the registry; weekly audit reviews",
+          "wake_requested_at": {
+            "reason": "Retained inertly for the prior server during the runtime-acquisition cutover.",
+            "drop": "Post-drain reliability cleanup: docs/agent-server-surfaces.md#turn-recovery-storage-retirement"
+          },
+          "provision_started_at": {
+            "reason": "Retained inertly for the prior server during the runtime-acquisition cutover.",
+            "drop": "Post-drain reliability cleanup: docs/agent-server-surfaces.md#turn-recovery-storage-retirement"
+          },
+          "provision_attempts": {
+            "reason": "Retained inertly for the prior server during the runtime-acquisition cutover.",
+            "drop": "Post-drain reliability cleanup: docs/agent-server-surfaces.md#turn-recovery-storage-retirement"
+          },
+          "provision_error": {
+            "reason": "Retained inertly for the prior server during the runtime-acquisition cutover.",
+            "drop": "Post-drain reliability cleanup: docs/agent-server-surfaces.md#turn-recovery-storage-retirement"
+          },
           "created_at": "existing before the registry; weekly audit reviews",
           "updated_at": "existing before the registry; weekly audit reviews",
           "model": "existing before the registry; weekly audit reviews",
           "starter_role": "existing before the registry; weekly audit reviews",
-          "allowance_paused_until": "existing before the registry; weekly audit reviews"
+          "allowance_paused_until": {
+            "reason": "Retained without runtime use until the previous server drains during this rolling release.",
+            "drop": "Next release after turn-lifecycle cleanup: docs/agent-server-surfaces.md#turn-recovery-storage-retirement"
+          },
+          "runtime_operation_id": "Fences provider results against a newer lifecycle operation; only FreeAgentService writes it.",
+          "runtime_owner": "Binds the in-flight provider action to its existing server-source owner across instances.",
+          "runtime_phase": {"reason":"Retained inertly through serving and rollback overlap; pending UI is projected from commands.","drop":"Post-drain contract: docs/agent-server-surfaces.md#turn-recovery-storage-retirement"}
         }
       },
       "github_auth_flows": {
@@ -1211,7 +1499,8 @@
           "updated_at": "existing before the registry; weekly audit reviews",
           "face_id": "existing before the registry; weekly audit reviews",
           "welcome_cards_due": "existing before the registry; weekly audit reviews",
-          "speaking_speed": "existing before the registry; weekly audit reviews"
+          "speaking_speed": "existing before the registry; weekly audit reviews",
+          "workspace_handle_base": "Preferred first workspace address for newly created agents; null preserves legacy handles."
         }
       },
       "identity_external_links": {
@@ -1648,7 +1937,10 @@
           "event_cause_id": "existing before the registry; weekly audit reviews",
           "event_root_cause_id": "existing before the registry; weekly audit reviews",
           "event_depth": "existing before the registry; weekly audit reviews",
-          "event_woken": "existing before the registry; weekly audit reviews",
+          "event_woken": {
+            "reason": "Retired cascade counter retained for preceding serving and rollback images; current event traces have no budget counter.",
+            "drop": "docs/release-pipeline.md#release-memory \u2014 beeline-drop-retired-turn-schema contract release"
+          },
           "agent_model": "existing before the registry; weekly audit reviews",
           "source_client": "existing before the registry; weekly audit reviews"
         }
@@ -1673,34 +1965,6 @@
           "first_seen_at": "existing before the registry; weekly audit reviews",
           "cleared_at": "existing before the registry; weekly audit reviews",
           "reminder_dismissed_at": "existing before the registry; weekly audit reviews"
-        }
-      },
-      "next_day_checkin_candidates": {
-        "module": "Rooms and messages",
-        "reason": "existing before the registry; weekly audit reviews",
-        "columns": {
-          "identity_id": "existing before the registry; weekly audit reviews",
-          "first_at": "existing before the registry; weekly audit reviews",
-          "due_at": "existing before the registry; weekly audit reviews",
-          "processed": "existing before the registry; weekly audit reviews"
-        }
-      },
-      "next_day_checkins": {
-        "module": "Rooms and messages",
-        "reason": "existing before the registry; weekly audit reviews",
-        "columns": {
-          "identity_id": "existing before the registry; weekly audit reviews",
-          "due_at": "existing before the registry; weekly audit reviews",
-          "room_id": "existing before the registry; weekly audit reviews",
-          "agent_id": "existing before the registry; weekly audit reviews",
-          "command_id": "existing before the registry; weekly audit reviews",
-          "message_id": "existing before the registry; weekly audit reviews",
-          "sent_at": "existing before the registry; weekly audit reviews",
-          "skip_reason": "existing before the registry; weekly audit reviews",
-          "email_status": "existing before the registry; weekly audit reviews",
-          "email_attempted_at": "existing before the registry; weekly audit reviews",
-          "push_outcomes": "existing before the registry; weekly audit reviews",
-          "measured_at": "existing before the registry; weekly audit reviews"
         }
       },
       "object_expirations": {
@@ -1786,20 +2050,6 @@
           "created_at": "existing before the registry; weekly audit reviews"
         }
       },
-      "pending_mention_notices": {
-        "module": "Work authority",
-        "reason": "existing before the registry; weekly audit reviews",
-        "columns": {
-          "room_id": "existing before the registry; weekly audit reviews",
-          "agent_id": "existing before the registry; weekly audit reviews",
-          "sender_id": "existing before the registry; weekly audit reviews",
-          "source_message_id": "existing before the registry; weekly audit reviews",
-          "reason": "existing before the registry; weekly audit reviews",
-          "due_at": "existing before the registry; weekly audit reviews",
-          "notice_id": "existing before the registry; weekly audit reviews",
-          "notified_at": "existing before the registry; weekly audit reviews"
-        }
-      },
       "permission_authority": {
         "module": "Work authority",
         "reason": "existing before the registry; weekly audit reviews",
@@ -1880,7 +2130,6 @@
           "completed_at": "existing before the registry; weekly audit reviews",
           "error": "existing before the registry; weekly audit reviews",
           "attempts": "existing before the registry; weekly audit reviews",
-          "next_retry_at": "existing before the registry; weekly audit reviews",
           "read_cleared_at": "existing before the registry; weekly audit reviews"
         }
       },
@@ -1913,6 +2162,17 @@
           "user_count": "existing before the registry; weekly audit reviews"
         }
       },
+      "push_turn_context": {
+        "module": "Live fanout and push",
+        "reason": "One native aggregate per turn merges concurrent messages and keeps delivery on message primary keys.",
+        "columns": {
+          "room_id": "Room component of the native turn key.",
+          "author_id": "Agent component of the native turn key.",
+          "request_id": "Request component of the native turn key.",
+          "turn_ids": "Committed sibling message IDs for point reads without chat history scans.",
+          "expires_at": "Latest sibling expiry retires the aggregate with its delivery window."
+        }
+      },
       "push_message_context": {
         "module": "Live fanout and push",
         "reason": "existing before the registry; weekly audit reviews",
@@ -1932,26 +2192,7 @@
         "columns": {
           "message_id": "existing before the registry; weekly audit reviews",
           "device_token": "existing before the registry; weekly audit reviews",
-          "not_before": "existing before the registry; weekly audit reviews",
           "expires_at": "existing before the registry; weekly audit reviews"
-        }
-      },
-      "push_outbox_retirements": {
-        "module": "Live fanout and push",
-        "reason": "existing before the registry; weekly audit reviews",
-        "columns": {
-          "message_id": "existing before the registry; weekly audit reviews",
-          "device_token": "existing before the registry; weekly audit reviews",
-          "reason": "existing before the registry; weekly audit reviews",
-          "retired_at": "existing before the registry; weekly audit reviews"
-        }
-      },
-      "push_read_clears": {
-        "module": "Live fanout and push",
-        "reason": "existing before the registry; weekly audit reviews",
-        "columns": {
-          "device_token": "existing before the registry; weekly audit reviews",
-          "sent_at": "existing before the registry; weekly audit reviews"
         }
       },
       "registry_mcp_oauth_attempts": {
@@ -2124,11 +2365,17 @@
           "room_id": "existing before the registry; weekly audit reviews",
           "event_id": "existing before the registry; weekly audit reviews",
           "body": "existing before the registry; weekly audit reviews",
-          "attempts": "existing before the registry; weekly audit reviews",
           "claimed_at": "existing before the registry; weekly audit reviews",
-          "next_attempt_at": "existing before the registry; weekly audit reviews",
           "delivered_at": "existing before the registry; weekly audit reviews",
-          "command_id": "existing before the registry; weekly audit reviews"
+          "command_id": "existing before the registry; weekly audit reviews",
+          "attempted_at": "Actual delivery claim time; silence does not prove failure.",
+          "completed_at": "Actual callback attempt completion time.",
+          "http_status": "Endpoint receipt result without retaining provider body.",
+          "failure_category": "Finite failure category distinct from unknown host execution.",
+          "duration_ms": "Measured callback transport duration.",
+          "delivery_state": "Truthful receipt, failure, skipped or legacy unknown state.",
+          "execution_state": "Host execution remains unknown without explicit evidence.",
+          "probe_generation": "The selected-path join probe has no Room message or work command."
         }
       },
       "rooms_mcp_event_subscriptions": {
@@ -2178,6 +2425,19 @@
           "claude_inbound_fallback": "existing before the registry; weekly audit reviews"
         }
       },
+      "rooms_mcp_workspace_landings": {
+        "module": "apps/server/src/rooms-mcp-oauth.ts",
+        "reason": "Browser-bound receipt of first-Workspace creation survives consumption of the OAuth flow and one-shot grant code.",
+        "columns": {
+          "code_hash": "Correlates the browser landing to the one-shot consent code without retaining another raw OAuth credential.",
+          "browser_hash": "Binds the first-Workspace receipt to the browser that approved consent after its flow is deleted.",
+          "workspace_id": "Records the Workspace created by this consent transaction; membership alone cannot prove first-run creation.",
+          "room_id": "Records the exact general Room created by this consent transaction for the human next step.",
+          "workspace_name": "Preserves the consent-time Workspace name after the onboarding flow and grant code are consumed.",
+          "client_name": "Preserves the normalized client display name used in the deleted consent flow for session-return instructions.",
+          "expires_at": "Limits how long the consumed-flow receipt can present the first-Workspace landing."
+        }
+      },
       "rooms_mcp_handoffs": {
         "module": "Tools and connectors",
         "reason": "existing before the registry; weekly audit reviews",
@@ -2211,8 +2471,7 @@
           "workspace_ids": "existing before the registry; weekly audit reviews",
           "callback_url": "existing before the registry; weekly audit reviews",
           "callback_secret": "existing before the registry; weekly audit reviews",
-          "profile_set": "existing before the registry; weekly audit reviews",
-          "last_bridge_poll_at": "existing before the registry; weekly audit reviews"
+          "profile_set": "existing before the registry; weekly audit reviews"
         }
       },
       "rooms_mcp_mentions": {
@@ -2224,20 +2483,7 @@
           "room_id": "existing before the registry; weekly audit reviews",
           "message_id": "existing before the registry; weekly audit reviews",
           "created_at": "existing before the registry; weekly audit reviews",
-          "cleared_at": "existing before the registry; weekly audit reviews",
-          "rewakes": "existing before the registry; weekly audit reviews"
-        }
-      },
-      "rooms_mcp_pending_routes": {
-        "module": "Tools and connectors",
-        "reason": "existing before the registry; weekly audit reviews",
-        "columns": {
-          "message_id": "existing before the registry; weekly audit reviews",
-          "room_id": "existing before the registry; weekly audit reviews",
-          "member_id": "existing before the registry; weekly audit reviews",
-          "attempts": "existing before the registry; weekly audit reviews",
-          "last_error": "existing before the registry; weekly audit reviews",
-          "created_at": "existing before the registry; weekly audit reviews"
+          "cleared_at": "existing before the registry; weekly audit reviews"
         }
       },
       "rooms_mcp_refresh": {
@@ -2273,10 +2519,15 @@
           "room_id": "existing before the registry; weekly audit reviews",
           "message_id": "existing before the registry; weekly audit reviews",
           "body": "existing before the registry; weekly audit reviews",
-          "attempts": "existing before the registry; weekly audit reviews",
           "claimed_at": "existing before the registry; weekly audit reviews",
           "created_at": "existing before the registry; weekly audit reviews",
-          "delivered_at": "existing before the registry; weekly audit reviews"
+          "delivered_at": "existing before the registry; weekly audit reviews",
+          "attempted_at": "Actual delivery claim time; silence does not prove failure.",
+          "completed_at": "Actual callback attempt completion time.",
+          "http_status": "Endpoint receipt result without retaining provider body.",
+          "failure_category": "Finite failure category distinct from unknown host execution.",
+          "duration_ms": "Measured callback transport duration.",
+          "delivery_state": "Truthful receipt, failure, skipped or legacy unknown state."
         }
       },
       "schedule_receipts": {
@@ -2306,19 +2557,14 @@
           "last_seen": "existing before the registry; weekly audit reviews",
           "event_count": "existing before the registry; weekly audit reviews",
           "delivery_hash": "existing before the registry; weekly audit reviews",
-          "pending": "existing before the registry; weekly audit reviews",
-          "last_digested_at": "existing before the registry; weekly audit reviews",
-          "last_digested_level": "existing before the registry; weekly audit reviews",
-          "urgent": "existing before the registry; weekly audit reviews"
+          "pending": "existing before the registry; weekly audit reviews"
         }
       },
       "sentry_wake_state": {
         "module": "Background work and timers",
         "reason": "existing before the registry; weekly audit reviews",
         "columns": {
-          "singleton": "existing before the registry; weekly audit reviews",
-          "last_wake_at": "existing before the registry; weekly audit reviews",
-          "last_daily_wake_at": "existing before the registry; weekly audit reviews"
+          "singleton": "existing before the registry; weekly audit reviews"
         }
       },
       "service_review_visits": {
@@ -2897,7 +3143,6 @@
           "event_id": "existing before the registry; weekly audit reviews",
           "sent_at": "existing before the registry; weekly audit reviews",
           "attempts": "existing before the registry; weekly audit reviews",
-          "next_attempt_at": "existing before the registry; weekly audit reviews",
           "delivery_failed": "existing before the registry; weekly audit reviews"
         }
       },
@@ -3097,6 +3342,173 @@
           "settled_at": "Records when the first durable settlement committed so later evidence cannot renew it.",
           "created_at": "Records durable provider admission time independently of eventual settlement."
         }
+      },
+      "squire_machines": {
+        "reason": "Canonical owner and machine installation: generation, explicit unpair intent and the last applied broker report survive helper replacement.",
+        "columns": {
+          "owner_id": "Person whose physical-machine installation and explicit pairing intent this source records.",
+          "machine_id": "Stable physical-machine routing key; multiple helper agents share this source.",
+          "generation": "Current installation ceremony identity used to reject stale helper acknowledgements.",
+          "revision": "Compare-and-set revision for whole-machine report replacement and unpair intent.",
+          "helper_agent_id": "Helper assigned to the current installation ceremony; siblings must not perform it twice.",
+          "squire_work": "Current installation progress and owner unpair intent, independent of any helper inbox.",
+          "squire_report": "Last applied broker observation for this machine; failure preserves cached vault keys."
+        },
+        "module": "apps/server/src/squire-machine.ts"
+      },
+      "identity_handle_counters": {
+        "module": "Identity and sign-in",
+        "reason": "Assign stable automatic handle numbers with one native counter upsert.",
+        "columns": {
+          "name": "Canonical base name sharing one monotonically increasing sequence.",
+          "n": "Highest reserved number; existing addresses seed it and numbers are never reused."
+        }
+      },
+      "free_agent_creation_budget": {
+        "module": "Agent types",
+        "reason": "Atomically reserves the configured owner-funded starter Machine allowance before identities and memberships are created.",
+        "columns": {
+          "owner_id": "Selects the owner-funded Machine allowance shared by all of their Workspaces.",
+          "agents": "Counts reserved starter Machines so concurrent Workspace creation cannot overspend the existing owner allowance; losing Luna claims refund it."
+        }
+      },
+      "diagnostic_devices": {
+        "module": "Device session diagnostics",
+        "reason": "Durable content-free diagnosis cannot be recovered from volatile application logs.",
+        "columns": {
+          "id": "Random installation identity independent of account and hardware.",
+          "first_seen": "First observed receipt, unavailable from retained detail after compaction.",
+          "last_seen": "Actual traffic timestamp used for device retirement."
+        }
+      },
+      "diagnostic_sessions": {
+        "module": "Device session diagnostics",
+        "reason": "Durable content-free diagnosis cannot be recovered from volatile application logs.",
+        "columns": {
+          "id": "Activity session identity independent of authentication family.",
+          "device_id": "Installation observed for this activity session.",
+          "view_id": "Runtime or tab identity that owns the client sequence.",
+          "binding_hash": "Hashed continuity proof fencing anonymous session claims.",
+          "user_id": "Authenticated identity binding, immutable after claim.",
+          "auth_family_id": "Server-only sign-in family linkage independent of session.",
+          "descriptor": "Build and coarse platform snapshot at session creation.",
+          "first_seen": "Server observation time independent of client clock.",
+          "last_seen": "Last actual session traffic used for retention."
+        }
+      },
+      "diagnostic_event_keys": {
+        "module": "Device session diagnostics",
+        "reason": "Durable content-free diagnosis cannot be recovered from volatile application logs.",
+        "columns": {
+          "event_id": "Global idempotence across receive-date journal partitions.",
+          "session_id": "Original session ownership prevents another session stealing an event id."
+        }
+      },
+      "diagnostic_actions": {
+        "module": "Device session diagnostics",
+        "reason": "Durable content-free diagnosis cannot be recovered from volatile application logs.",
+        "columns": {
+          "event_id": "Unique occurrence identifier retained through duplicate delivery.",
+          "session_id": "Verified activity origin, nullable for legacy/server-only work.",
+          "user_id": "Authenticated actor for server facts or claimed client observations.",
+          "source": "Distinguishes client observation, server fact and agent evidence.",
+          "received_at": "Server receipt clock and retention partition key.",
+          "occurred_at": "Observed source clock retained to diagnose skew.",
+          "sequence": "Per-view occurrence order exposes gaps and repeated screen visits.",
+          "action_id": "Logical action identity survives retries and durable work.",
+          "command_id": "Work authority reference, without the private command body.",
+          "detail": "Allowlisted semantic step, result and metadata without content."
+        }
+      },
+      "workspace_creation_facts": {
+        "module": "Device session diagnostics",
+        "reason": "Durable content-free diagnosis cannot be recovered from volatile application logs.",
+        "columns": {
+          "workspace_id": "One immutable creation provenance record per domain workspace.",
+          "user_id": "Authenticated creator at creation time, rather than current owner.",
+          "source": "Actual creation boundary: app, onboarding, consent or recovery.",
+          "action_id": "Original logical creation request retained across response loss.",
+          "session_id": "Verified initiating session if supported.",
+          "device_id": "Verified installation origin at workspace creation.",
+          "created_at": "Committed creation time, rather than observation time."
+        }
+      },
+      "diagnostic_reads": {
+        "module": "Device session diagnostics",
+        "reason": "Durable content-free diagnosis cannot be recovered from volatile application logs.",
+        "columns": {
+          "id": "Private support read audit occurrence.",
+          "user_id": "Person whose diagnostic history was inspected.",
+          "authority": "Explicit private operator authorization boundary.",
+          "read_at": "Audit receipt time for retention and access investigation."
+        }
+      },
+      "diagnostic_command_origins": {
+        "module": "Device session diagnostics",
+        "reason": "Durable content-free diagnosis cannot be recovered from volatile application logs.",
+        "columns": {
+          "command_id": "Durable command identifier preserves origin across asynchronous execution.",
+          "session_id": "Origin activity session, distinct from the helper host.",
+          "user_id": "Authenticated initiating person independent of agent ownership.",
+          "action_id": "Origin action propagates across child commands."
+        }
+      },
+      "diagnostic_actions_default": {
+        "module": "Device session diagnostics",
+        "reason": "Durable content-free diagnosis cannot be recovered from volatile application logs.",
+        "columns": {
+          "event_id": "Unique occurrence identifier retained through duplicate delivery.",
+          "session_id": "Verified activity origin, nullable for legacy/server-only work.",
+          "user_id": "Authenticated actor for server facts or claimed client observations.",
+          "source": "Distinguishes client observation, server fact and agent evidence.",
+          "received_at": "Server receipt clock and retention partition key.",
+          "occurred_at": "Observed source clock retained to diagnose skew.",
+          "sequence": "Per-view occurrence order exposes gaps and repeated screen visits.",
+          "action_id": "Logical action identity survives retries and durable work.",
+          "command_id": "Work authority reference, without the private command body.",
+          "detail": "Allowlisted semantic step, result and metadata without content."
+        }
+      },
+      "rooms_mcp_delivery": {
+        "module": "Tools and connectors",
+        "reason": "Selected host binding and authenticated join probe cannot be derived from OAuth membership.",
+        "columns": {
+          "member_id": "Selected host binding and authenticated join probe cannot be derived from OAuth membership.",
+          "generation": "Selected host binding and authenticated join probe cannot be derived from OAuth membership.",
+          "mechanism": "Selected host binding and authenticated join probe cannot be derived from OAuth membership.",
+          "host": "Selected host binding and authenticated join probe cannot be derived from OAuth membership.",
+          "surface": "Selected host binding and authenticated join probe cannot be derived from OAuth membership.",
+          "conversation": "Selected host binding and authenticated join probe cannot be derived from OAuth membership.",
+          "nonce_hash": "Selected host binding and authenticated join probe cannot be derived from OAuth membership.",
+          "probe": "Selected host binding and authenticated join probe cannot be derived from OAuth membership.",
+          "subscription_id": "Selected host binding and authenticated join probe cannot be derived from OAuth membership.",
+          "credential_hash": "Selected host binding and authenticated join probe cannot be derived from OAuth membership.",
+          "receipt_at": "Selected host binding and authenticated join probe cannot be derived from OAuth membership.",
+          "failure": "Selected host binding and authenticated join probe cannot be derived from OAuth membership.",
+          "stream_id": "Selected host binding and authenticated join probe cannot be derived from OAuth membership.",
+          "created_at": "Selected host binding and authenticated join probe cannot be derived from OAuth membership."
+        }
+      },
+      "rooms_mcp_delivery_attachments": {
+        "module": "Tools and connectors",
+        "reason": "Single-use local companion adoption of an existing consent; prevents duplicate members and extra approval.",
+        "columns": {
+          "hash": "Single-use local companion adoption of an existing consent; prevents duplicate members and extra approval.",
+          "client_id": "Single-use local companion adoption of an existing consent; prevents duplicate members and extra approval.",
+          "owner_id": "Single-use local companion adoption of an existing consent; prevents duplicate members and extra approval.",
+          "member_id": "Single-use local companion adoption of an existing consent; prevents duplicate members and extra approval.",
+          "expires_at": "Single-use local companion adoption of an existing consent; prevents duplicate members and extra approval.",
+          "consumed_at": "Single-use local companion adoption of an existing consent; prevents duplicate members and extra approval."
+        }
+      },
+      "workspace_handles": {
+        "module": "apps/server/src/workspace-handles.ts",
+        "reason": "Permanent per-workspace agent addresses, including collision reservations after departure.",
+        "columns": {
+          "workspace_id": "Workspace whose address namespace owns the reservation.",
+          "identity_id": "Agent that owns this permanent address.",
+          "handle": "Assigned address; never recomputed from names or roster."
+        }
       }
     },
     "jsonb": {
@@ -3112,25 +3524,23 @@
         "attachments": "existing before the registry; weekly audit reviews",
         "reportedOutcome": "existing before the registry; weekly audit reviews",
         "objective": "existing before the registry; weekly audit reviews",
-        "idleSince": "the idle episode a stall alert reports; delivery and claim recompute it and drop a stale alert"
+        "idleSince": "the idle episode a stall alert reports; delivery and claim recompute it and drop a stale alert",
+        "publicPostId": "The exact committed public reply lets final private-copy failure preserve its successful result, including cross-address posts.",
+        "publicPostGenerationId": "Only a public post from this generation may make an undelivered final report copy non-fatal."
       },
       "review_context": {
         "reportIds": "existing before the registry; weekly audit reviews",
         "headSha": "existing before the registry; weekly audit reviews",
         "purpose": "existing before the registry; weekly audit reviews",
         "pullRequest": "existing before the registry; weekly audit reviews",
-        "reviewerConfiguration": "existing before the registry; weekly audit reviews",
-        "cornerId": "existing before the registry; weekly audit reviews"
+        "cornerId": "existing before the registry; weekly audit reviews",
+        "briefRevision": "The brief revision captured at review dispatch; it must remain comparable with the current revision."
       },
       "wake_context": {},
       "coalesced_attachments": {},
       "script": {},
       "mandate": {},
       "cadence": {},
-      "workflow_run": {
-        "timer": "existing before the registry; weekly audit reviews",
-        "attempt": "existing before the registry; weekly audit reviews"
-      },
       "reply_message_ids": {},
       "trace": {},
       "access_policy": {},
@@ -3142,6 +3552,7 @@
         "reportedAt": "existing before the registry; weekly audit reviews"
       },
       "squire_work": {
+        "signedInAs": "Account label reported by the selected machine installer; broker connectivity does not identify the signed-in account.",
         "disconnected": "existing before the registry; weekly audit reviews",
         "ops": "existing before the registry; weekly audit reviews",
         "install": "existing before the registry; weekly audit reviews",
@@ -3155,7 +3566,27 @@
         "aura-2": "existing before the registry; weekly audit reviews"
       },
       "detail": {
-        "usd": "existing before the registry; weekly audit reviews"
+        "usd": "existing before the registry; weekly audit reviews",
+        "warningId": "Warning event whose Add agent guide start this event records; the episode key prevents duplicate conversion events.",
+        "name": "Content-free diagnostic step correlation and outcome.",
+        "outcome": "Content-free diagnostic step correlation and outcome.",
+        "phase": "Content-free diagnostic step correlation and outcome.",
+        "code": "Content-free diagnostic step correlation and outcome.",
+        "route": "Content-free diagnostic step correlation and outcome.",
+        "operation": "Content-free diagnostic step correlation and outcome.",
+        "attemptId": "Content-free diagnostic step correlation and outcome.",
+        "actionId": "Content-free diagnostic step correlation and outcome.",
+        "requestId": "Content-free diagnostic step correlation and outcome.",
+        "workspaceId": "Content-free diagnostic step correlation and outcome.",
+        "commandId": "Content-free diagnostic step correlation and outcome.",
+        "durationMs": "Content-free diagnostic step correlation and outcome.",
+        "httpStatus": "Content-free diagnostic step correlation and outcome.",
+        "creationSource": "Content-free diagnostic step correlation and outcome.",
+        "deliveryState": "Content-free diagnostic step correlation and outcome.",
+        "commandState": "Content-free diagnostic step correlation and outcome.",
+        "terminalReason": "Content-free diagnostic step correlation and outcome.",
+        "generationId": "Content-free diagnostic step correlation and outcome.",
+        "hostResult": "Explicit reply, no-reply, failure or unknown execution evidence."
       },
       "manifests": {},
       "attachments": {},
@@ -3163,7 +3594,20 @@
       "criteria": {},
       "non_goals": {},
       "brief_references": {},
-      "approval_basis": {},
+      "approval_basis": {
+        "approvedBy": "The human approval identity is retained as durable revision authority after handover.",
+        "commanderCommandId": "The exact dispatching command retains commander ancestry and the revision author's own escalation route.",
+        "commanderReturnRoomId": "The author's dispatch address may differ from the approving human message address."
+      },
+      "machine": {
+        "state": "The single corner state rendered by server rows.",
+        "phase": "The checks or reviewer phase within Review.",
+        "reason": "Blocked, user action or question within Waiting.",
+        "headSha": "Head that scopes the transition effect receipts.",
+        "pullRequest": "PR target paired with that head.",
+        "effects": "Applied transition effect keys for replay deduplication.",
+        "outcome": "Confirmed landed or closed terminal outcome."
+      },
       "lifecycle": {
         "pr": "existing before the registry; weekly audit reviews",
         "checks": "existing before the registry; weekly audit reviews",
@@ -3181,7 +3625,8 @@
       "receipt": {
         "platform": "existing before the registry; weekly audit reviews",
         "releaseVersion": "existing before the registry; weekly audit reviews",
-        "runtimeVersion": "existing before the registry; weekly audit reviews"
+        "runtimeVersion": "existing before the registry; weekly audit reviews",
+        "previousDeviceId": "Legacy update id presented with the canonical id by the same installation."
       },
       "occurrences": {},
       "provider_identity": {},
@@ -3207,6 +3652,13 @@
         "confirmed": "existing before the registry; weekly audit reviews"
       },
       "card": {
+        "runStatus": "Workflow run start cards persist the committed live or terminal status so assignment admission cannot wake a finished run.",
+        "reason": "The terminal wallet verdict retains its original explanation when later provider observations arrive.",
+        "execution": "Server execution attribution distinguishes an initiated operation from provider-only transaction observations.",
+        "operation": "The initiating financial operation cannot be reconstructed from a provider transfer event alone.",
+        "amountText": "Execution-owned amount and asset labels must survive provider updates that lack the original intent.",
+        "counterparty": "Execution-owned destination or venue label must survive provider status-only updates.",
+        "transfers": "Per-log transfer amounts merge multiple observations of the same transaction without losing earlier logs.",
         "roleClasses": "existing before the registry; weekly audit reviews",
         "roleBindings": "existing before the registry; weekly audit reviews",
         "runId": "existing before the registry; weekly audit reviews",
@@ -3219,6 +3671,7 @@
         "sourceMessageId": "existing before the registry; weekly audit reviews",
         "appId": "existing before the registry; weekly audit reviews",
         "offerId": "existing before the registry; weekly audit reviews",
+        "replacementMessageId": "The committed replacement card keeps expired connector offers navigable across transcript reads and live deltas.",
         "toState": "existing before the registry; weekly audit reviews",
         "outcome": "existing before the registry; weekly audit reviews",
         "contents": "existing before the registry; weekly audit reviews",
@@ -3276,10 +3729,10 @@
         "object": "existing before the registry; weekly audit reviews",
         "verb": "existing before the registry; weekly audit reviews",
         "kind": "existing before the registry; weekly audit reviews",
-        "subject": "existing before the registry; weekly audit reviews"
+        "subject": "existing before the registry; weekly audit reviews",
+        "payload": "Committed provider event evidence (failed jobs and bounded follow-up provenance), preserved for recovery without a provider re-read."
       },
       "source_client": {},
-      "push_outcomes": {},
       "recipients": {},
       "scope": {},
       "web_keys": {},
@@ -3321,6 +3774,42 @@
         "usd": "Retains the observed model charge used for settled accounting.",
         "reason": "Records the exact proven nonentry cause without inferring it from elapsed time.",
         "status": "Preserves the provider refusal status that authorized settlement."
+      },
+      "allocation": {
+        "reserved": "Exact tokens granted by the latest atomic owner/day allocation.",
+        "maxOutput": "Exact output tokens granted by the latest atomic allocation.",
+        "credit": "Admission uncertainty credit granted by the daily counter update.",
+        "reservedUsd": "Exact dollars granted by the shared budget update.",
+        "limit": "Refusal reason from the atomic allocation; a refusal rolls the transaction back."
+      },
+      "runtime_phase": {
+        "phase": "Committed plain runtime lifecycle phase before a command is claimed.",
+        "operationId": "Identity that prevents an old completion replacing a new phase.",
+        "machineVersion": "Provider instance version observed by the acquisition owner.",
+        "cause": "Content-free user-facing cause of a definitively unavailable runtime."
+      },
+      "descriptor": {
+        "platform": "Allowlisted client compatibility descriptor, never a raw fingerprint.",
+        "client": "Allowlisted client compatibility descriptor, never a raw fingerprint.",
+        "version": "Allowlisted client compatibility descriptor, never a raw fingerprint.",
+        "environment": "Allowlisted client compatibility descriptor, never a raw fingerprint.",
+        "osVersion": "Allowlisted client compatibility descriptor, never a raw fingerprint.",
+        "browser": "Allowlisted client compatibility descriptor, never a raw fingerprint.",
+        "browserVersion": "Allowlisted client compatibility descriptor, never a raw fingerprint.",
+        "runtimeVersion": "Allowlisted client compatibility descriptor, never a raw fingerprint.",
+        "updateId": "Allowlisted client compatibility descriptor, never a raw fingerprint.",
+        "releaseSha": "Allowlisted client compatibility descriptor, never a raw fingerprint.",
+        "buildNumber": "Allowlisted client compatibility descriptor, never a raw fingerprint."
+      },
+      "probe": {
+        "id": "Server-created join probe sent only over the selected transport; never parsed from Room text.",
+        "address": "Server-created join probe sent only over the selected transport; never parsed from Room text.",
+        "reason": "Server-created join probe sent only over the selected transport; never parsed from Room text.",
+        "kind": "Server-created join probe sent only over the selected transport; never parsed from Room text.",
+        "createdAt": "Server-created join probe sent only over the selected transport; never parsed from Room text.",
+        "text": "Server-created join probe sent only over the selected transport; never parsed from Room text.",
+        "next": "Server-created join probe sent only over the selected transport; never parsed from Room text.",
+        "receipt": "Server-created join probe sent only over the selected transport; never parsed from Room text."
       }
     }
   }

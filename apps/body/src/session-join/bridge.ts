@@ -1,11 +1,10 @@
 // The machine's one session bridge: for every joined session it waits on Beeline for tags and wakes, and hands each
 // to the session's app by the fastest way the app has. It needs no public address: it only calls out to Beeline.
 import { sessionAgentBehavior } from '../agent-command.js';
-import { spawn } from 'node:child_process';
 import { chmodSync, closeSync, existsSync, mkdirSync, openSync, readFileSync, readdirSync, renameSync, rmSync, writeFileSync, watch } from 'node:fs';
 import { createConnection, createServer } from 'node:net';
 import { join } from 'node:path';
-import { externalAgentRules } from '@beeline/api-contract/phone';
+import { externalAgentRules, mentionReplyRule } from '@beeline/api-contract/phone';
 import { accessToken, callTool, memberStream } from './beeline-api.js';
 import { memberStreamFrame } from './stream-frame.js';
 import { createHash } from 'node:crypto';
@@ -13,13 +12,19 @@ import { codexQueue, turnRunning } from './codex.js';
 import { postToClaude } from './claude.js';
 import { hasClaudeMcp } from './claude-mcp.js';
 import { findSession, liveSessions, machineSources, type LiveSession, type Sources } from './sessions.js';
-import { pidAlive, queueInbox, queueInboxOnce, readState, takeInbox, updateState, type JoinedSession } from './store.js';
+import { bundleDigest } from './bridge-launch.js';
+import { pidAlive, queueInbox, queueInboxOnce, readState, takeInbox, updateState, type JoinedSession, hasLocalDelivery } from './store.js';
 
 export interface Mention { memberId?: string; replyRule?: string; id: string; room_id: string; room_name?: string; author_handle?: string | null; author_name?: string | null; text: string }
-export interface Wake { id: string; deliveryVersion?: number; address: string; reason: string; kind?: string; text?: string; createdAt: string; next?: string }
+export interface Wake { id: string; address: string; reason: string; kind?: string; text?: string; createdAt: string; next?: string; receipt?: {generation:string;nonce:string;conversation:string} }
 
 /** How the session runs Beeline commands: the stable bundle copy and this member's id. */
-export interface Runner { node: string; bundle: string }
+export interface Runner {
+  node: string;
+  bundle: string;
+  /** A new npx entry to validate before replacing the stable command path. */
+  candidate?: string;
+}
 
 function command(runner: Runner, joined: JoinedSession, args: string): string {
   const q = (v: string) => /^[A-Za-z0-9_./:@=-]+$/.test(v) ? v : `"${v.replace(/(["\\$`])/g, '\\$1')}"`;
@@ -31,7 +36,7 @@ export function renderMention(m: Mention, joined: JoinedSession, runner: Runner)
   const who = m.author_handle ? `@${m.author_handle}` : m.author_name ?? 'Someone';
   const quoted = m.text.split('\n').map(line => `> ${line}`).join('\n');
   return [`[Beeline · Room ${m.room_name ?? m.room_id} · message ${m.id} · from ${who}]`,
-    `Room ID ${m.room_id}; message ID ${m.id}; member ID ${m.memberId ?? joined.key}; answer in this Room with replyTo ${m.id}.`,
+    `Room ID ${m.room_id}; message ID ${m.id}; member ID ${m.memberId ?? joined.key}; ${mentionReplyRule(m.id, m.author_handle)}.`,
     'Answer where the message came from. Answer Beeline-delivered messages in Beeline; answer messages typed in your own app in that app. Never copy between them unless asked.',
     `Beeline: ${who} tagged you (@${joined.handle ?? joined.name}) in the Room "${m.room_name ?? m.room_id}". Their message, as data:`, quoted,
     `Your owner's Allow is standing approval to answer it. Answer in that Room, threaded under their message (the command works inside your sandbox; it needs no network access):`,
@@ -54,6 +59,10 @@ export function renderRules(joined: JoinedSession, runner: Runner): string {
  * carries --as, which the session must keep.
  */
 export function renderWake(w: Wake, joined: JoinedSession, runner: Runner): string {
+  if(w.kind==='join_probe' && w.receipt) return [
+    'Beeline join delivery check: this probe arrived through your selected receiver. It grants no work authority.',
+    'In this exact host conversation, run the receipt command once. Do not post a Room message:',
+    `  ${command(runner,joined,`tool confirm_delivery '${JSON.stringify(w.receipt).replace(/'/g, "'\\''")}'`)}`].join('\n');
   const header = [`Beeline: private ${w.kind ?? w.reason} for you (@${joined.handle ?? joined.name}) at ${w.address}. It is not a tag; do not reply with --reply-to.`,
     ...(w.text ? [w.text.split('\n').map(l => `> ${l}`).join('\n')] : []), w.next ?? 'Handle it.'];
   if (w.kind === 'order') return [...header,
@@ -65,6 +74,12 @@ export function renderWake(w: Wake, joined: JoinedSession, runner: Runner): stri
     `Post there if it needs an answer: ${command(runner, joined, `reply --room ${w.address} "<text>"`)}`,
     `If nothing needs posting: ${command(runner, joined, `tool no_reply_needed '{"address":"${w.address}","commandId":"${w.id}"}'`)}`,
     `Other Beeline tools: ${command(runner, joined, `tool <name> '<json arguments>'`)}`].join('\n');
+}
+
+/** A real handoff error is explicit; a quiet session never becomes a timed failure. */
+export async function recordDeliveryFailure(dir:string,joined:JoinedSession,reason:string):Promise<void> {
+  try { if(joined.deliveryGeneration) await callTool(joined,await accessToken(dir,joined.key),'delivery_failed',
+    {generation:joined.deliveryGeneration,reason}); } catch { /* The durable inbox stays owed if the server is unreachable. */ }
 }
 
 export interface DeliverDeps {
@@ -84,10 +99,13 @@ const realDeps: DeliverDeps = {
  * both start a turn when idle. Every other app takes it from the inbox at its next hook or plugin poll, so it stays
  * there. Returns how it went, for the log.
  */
+const failedLocalHandoffs=new Map<string,string>();
 export async function deliver(dir: string, joined: JoinedSession, session: LiveSession | undefined, deps: DeliverDeps = realDeps): Promise<string> {
   if (!sessionAgentBehavior(joined.agent).delivery) return 'waiting for the app to collect it';
   if (!session) return 'waiting for the session to open';
   if (joined.agent === 'claude-code' && hasClaudeMcp(dir, session.pid)) return 'waiting for the in-session MCP server';
+  const binding=`${session.sessionId}:${session.pid??''}:${joined.deliveryGeneration??''}`;
+  if(failedLocalHandoffs.get(joined.key)===binding)return 'waiting for host recovery after failed handoff';
   const text = takeInbox(dir, joined.key);
   if (!text) return 'nothing waiting';
   try {
@@ -101,7 +119,9 @@ export async function deliver(dir: string, joined: JoinedSession, session: LiveS
     await deps.queueCodex(joined.agentBin ?? 'codex', session.sessionId, text);
     return busy ? 'queued for after the current Codex turn' : 'queued into the idle Codex thread';
   } catch (error) {
+    failedLocalHandoffs.set(joined.key,binding);
     queueInbox(dir, joined.key, text);
+    await recordDeliveryFailure(dir,joined,'local_handoff_failed');
     return `left waiting: ${error instanceof Error ? error.message : String(error)}`;
   }
 }
@@ -114,12 +134,12 @@ export async function acceptMemberDelivery(dir:string,key:string,runner:Runner,r
     const joined=state.sessions.find(session=>session.key===key); if(!joined)return 0;
     let queued=0;
     if(frame.type==='delivery'){
-      const wakeKey=(wake:Wake)=>wake.deliveryVersion===undefined?wake.id:`${wake.id}:${wake.deliveryVersion}`;
+      const proof=frame.wakes.find(wake=>wake.kind==='join_probe' && wake.receipt)?.receipt;
+      if(proof){joined.deliveryGeneration=proof.generation;joined.deliveryMechanism='local';}
       const parts=[...frame.mentions.map(mention=>renderMention(mention,joined,runner)),
-        ...frame.wakes.filter(wake=>!joined.deliveredWakes.includes(wakeKey(wake))&&
-          !(wake.deliveryVersion===0&&joined.deliveredWakes.includes(wake.id))).map(wake=>renderWake(wake,joined,runner))];
+        ...frame.wakes.filter(wake=>!joined.deliveredWakes.includes(wake.id)).map(wake=>renderWake(wake,joined,runner))];
       if(parts.length&&queueInboxOnce(dir,key,frame.deliveryId,parts.join('\n\n')))queued=parts.length;
-      joined.deliveredWakes=[...new Set([...joined.deliveredWakes,...frame.wakes.map(wakeKey)])];
+      joined.deliveredWakes=[...new Set([...joined.deliveredWakes,...frame.wakes.map(wake=>wake.id)])];
     }else{
       const old=joined.streamCursor;
       if(old?.epoch===frame.cursor.epoch&&old.through>frame.cursor.through)throw new Error('Beeline stream cursor moved backwards');
@@ -141,9 +161,15 @@ export async function flush(dir: string, sources: Sources, deps: DeliverDeps = r
   for (const joined of state.sessions) {
     const session = findSession(joined, live, state.sessions);
     if (session && (session.sessionId !== joined.sessionId || session.pid !== joined.pid)) {
+      if(joined.deliveryGeneration && session.sessionId!==joined.sessionId) {
+        const binding=await callTool(joined,await accessToken(dir,joined.key),'setup_delivery',{
+          mechanism:'local',host:joined.agent,surface:joined.agent==='antigravity'?'app':'local_session',
+          conversation:session.sessionId,installed:true}) as {delivery:{generation:string}};
+        joined.deliveryGeneration=binding.delivery.generation;
+      }
       await updateState(dir, s => {
         const current = s.sessions.find(x => x.key === joined.key);
-        if (current) { current.sessionId = session.sessionId; current.pid = session.pid; }
+        if (current) { current.sessionId = session.sessionId; current.pid = session.pid; current.deliveryGeneration=joined.deliveryGeneration; }
       });
       log(dir, `${joined.key}: in session ${session.sessionId}`);
     }
@@ -156,8 +182,7 @@ export async function flush(dir: string, sources: Sources, deps: DeliverDeps = r
  * Tool calls for joined sessions, over a private socket. A sandboxed app (Codex's default) blocks the network but
  * not this socket, so its replies go out without asking the person to approve network access each time.
  */
-function serveTools(dir: string): void {
-  const path = join(dir, 'bridge.sock');
+async function serveTools(dir: string, path: string, sessionsChanged: () => void) {
   rmSync(path, { force: true });
   const server = createServer(connection => {
     let buffer = '', taken = false;
@@ -169,16 +194,27 @@ function serveTools(dir: string): void {
       taken = true;
       let answer: object;
       try {
-        const request = JSON.parse(buffer.slice(0, end)) as { key: string; name: string; args: Record<string, unknown> };
-        const joined = readState(dir).sessions.find(s => s.key === request.key);
-        if (!joined) throw new Error('This session has not joined Beeline');
-        answer = { ok: true, data: await callTool(joined, await accessToken(dir, joined.key), request.name, request.args ?? {}) };
+        const request = JSON.parse(buffer.slice(0, end)) as { type?: string; key: string; name: string; args: Record<string, unknown> };
+        if (request.type === 'sessions-changed') {
+          sessionsChanged();
+          answer = { ok: true };
+        } else {
+          const joined = readState(dir).sessions.find(s => s.key === request.key);
+          if (!joined) throw new Error('This session has not joined Beeline');
+          const token = await accessToken(dir, joined.key);
+          if (token !== joined.accessToken) sessionsChanged();
+          answer = { ok: true, data: await callTool(joined, token, request.name, request.args ?? {}) };
+        }
       } catch (error) { answer = { ok: false, error: error instanceof Error ? error.message : String(error) }; }
       connection.end(JSON.stringify(answer) + '\n');
     });
   });
-  server.listen(path, () => chmodSync(path, 0o600));
+  await new Promise<void>((done, fail) => {
+    server.once('error', fail);
+    server.listen(path, () => { chmodSync(path, 0o600); done(); });
+  });
   server.unref();
+  return server;
 }
 
 /**
@@ -214,7 +250,7 @@ export async function serveOutboxes(dir: string): Promise<number> {
 }
 
 /** Leaves a tool call in the working folder's outbox and waits for the bridge's answer. */
-export async function toolViaOutbox(cwd: string, name: string, args: Record<string, unknown>, timeoutMs = 90_000): Promise<{ ok: boolean; data?: unknown; error?: string } | undefined> {
+export async function toolViaOutbox(cwd: string, name: string, args: Record<string, unknown>): Promise<{ ok: boolean; data?: unknown; error?: string } | undefined> {
   const dirPath = outboxDir(cwd);
   mkdirSync(dirPath, { recursive: true });
   // Keep the outbox out of the person's repository.
@@ -226,7 +262,7 @@ export async function toolViaOutbox(cwd: string, name: string, args: Record<stri
   return new Promise(resolve=>{
     let settled=false;
     const finish=(answer:{ok:boolean;data?:unknown;error?:string}|undefined)=>{
-      if(settled)return;settled=true;clearTimeout(deadline);watcher.close();resolve(answer);
+      if(settled)return;settled=true;watcher.close();resolve(answer);
     };
     const inspect=()=>{
       try{
@@ -235,20 +271,22 @@ export async function toolViaOutbox(cwd: string, name: string, args: Record<stri
       }catch{/* Only a completed atomic result rename admits another inspection. */}
     };
     const watcher=watch(dirPath,(_event,file)=>{if(String(file??'')===`${id}.result.json`)inspect();});
-    const deadline=setTimeout(()=>{
-      inspect();if(settled)return;
-      // Atomically take back an unclaimed request before permitting direct
-      // fallback. A bridge-claimed write has an UNKNOWN outcome, never a retry.
-      const abandoned=request+'.abandoned';
-      try{renameSync(request,abandoned);rmSync(abandoned,{force:true});finish(undefined);}
-      catch{finish({ok:false,error:'Beeline tool result is awaiting confirmation'});}
-    },timeoutMs);
     inspect();
   });
 }
 
 /** Calls a tool through the bridge; undefined when no bridge answers, so the caller goes direct. */
 export function toolViaBridge(dir: string, key: string, name: string, args: Record<string, unknown>): Promise<{ ok: boolean; data?: unknown; error?: string } | undefined> {
+  return bridgeRequest(dir, { key, name, args });
+}
+
+/** State is durable storage; its writer tells the serving bridge to read it. */
+export async function notifyBridgeSessions(dir: string): Promise<void> {
+  const answer = await bridgeRequest(dir, { type: 'sessions-changed' });
+  if (!answer?.ok) throw new Error(answer?.error ?? 'Beeline tool result is awaiting confirmation');
+}
+
+function bridgeRequest(dir: string, request: object): Promise<{ ok: boolean; data?: unknown; error?: string } | undefined> {
   return new Promise(resolve => {
     const connection = createConnection(join(dir, 'bridge.sock'));
     let text = '', sent = false, settled = false;
@@ -257,90 +295,142 @@ export function toolViaBridge(dir: string, key: string, name: string, args: Reco
       if (settled) return; settled=true; resolve(answer); connection.destroy();
     };
     connection.setEncoding('utf8');
-    connection.once('connect', () => { sent=true; connection.write(JSON.stringify({ key, name, args }) + '\n'); });
+    connection.once('connect', () => { sent=true; connection.write(JSON.stringify(request) + '\n'); });
     connection.once('error', () => finish(sent ? unknown : undefined));
     connection.on('data', chunk => { text += chunk; });
     connection.on('end', () => { try { finish(JSON.parse(text) as { ok: boolean }); } catch { finish(sent ? unknown : undefined); } });
-    connection.setTimeout(90_000, () => finish(sent ? unknown : undefined));
   });
 }
 
 /** Runs until no session is joined. One per machine user: a second exits at once. */
 export async function runBridge(dir: string, runner: Runner): Promise<void> {
-  const pidFile = join(dir, 'bridge.pid');
-  try {
-    const fd = openSync(pidFile, 'wx', 0o600);
-    writeFileSync(fd, String(process.pid));
-    closeSync(fd);
-  } catch {
-    const holder = Number(readFileSync(pidFile, 'utf8'));
-    if (holder && holder !== process.pid && pidAlive(holder)) return;
-    writeFileSync(pidFile, String(process.pid), { mode: 0o600 });
+  const staged = process.env.BEELINE_SESSION_BRIDGE_STAGING === '1' && Boolean(process.send);
+  let activated = !staged, stopping = false;
+  let activate!: () => void, begin!: () => void;
+  const handoff = staged ? new Promise<void>(done => { begin = done; }) : Promise.resolve();
+  const activation = staged ? new Promise<void>(done => { activate = done; }) : Promise.resolve();
+  if (staged) {
+    process.once('message', message => { if (message === 'activate') begin(); });
+    process.once('disconnect', () => { if (!activated) process.exit(1); });
   }
-  const sources = machineSources(dir);
-  type Stream={fingerprint:string;controller:AbortController;expiry?:ReturnType<typeof setTimeout>};
-  const streams=new Map<string,Stream>();
-  const outboxWatches=new Map<string,ReturnType<typeof watch>>();
+  const digest = bundleDigest({ ...runner, bundle: runner.candidate ?? runner.bundle });
+  const pidFile = join(dir, 'bridge.pid');
+  const claim = (): boolean => {
+    try {
+      const fd = openSync(pidFile, 'wx', 0o600);
+      writeFileSync(fd, String(process.pid));
+      closeSync(fd);
+    } catch {
+      const holder = Number(readFileSync(pidFile, 'utf8'));
+      if (holder && holder !== process.pid && pidAlive(holder)) return false;
+      writeFileSync(pidFile, String(process.pid), { mode: 0o600 });
+    }
+    return true;
+  };
+  if (!staged && !claim()) return;
+  const socket = join(dir, staged ? `bridge-${process.pid}.sock` : 'bridge.sock');
   let localDirty=true,wake:(()=>void)|undefined;
   const changed=()=>{localDirty=true;wake?.();};
-  serveTools(dir);
+  const tools = await serveTools(dir, socket, changed);
+  const sources = machineSources(dir);
+  type Stream={fingerprint:string;controller:AbortController;recovered:boolean};
+  const streams=new Map<string,Stream>();
+  const outboxWatches=new Map<string,ReturnType<typeof watch>>();
   const localWatch=watch(dir,{recursive:true},(_event,name)=>{
     const path=String(name??'');
-    if(path==='state.json'||path.startsWith('hooks/')||path.startsWith('inbox/')||path.startsWith('deliveries/'))changed();
+    if(path.startsWith('hooks/')||path.startsWith('inbox/')||path.startsWith('deliveries/'))changed();
   });
   const stop = () => {
-    for(const stream of streams.values()){stream.controller.abort();if(stream.expiry)clearTimeout(stream.expiry);}
-    localWatch.close();for(const watcher of outboxWatches.values())watcher.close();
-    rmSync(pidFile,{force:true});rmSync(join(dir,'bridge.sock'),{force:true});process.exit(0);
+    if (!activated) process.exit(0);
+    stopping = true;
+    for (const stream of streams.values()) stream.controller.abort();
+    changed();
   };
   process.once('SIGTERM',stop);process.once('SIGINT',stop);
-  log(dir,`bridge ${process.pid} started`);
+  const jobs = new Set<Promise<void>>();
+  const expected = new Set(readState(dir).sessions.filter(hasLocalDelivery).map(session => session.key));
+  const openedKeys = new Set<string>();
+  const failedStartup = (error: unknown) => {
+    if (staged && !activated) { log(dir, `candidate startup failed: ${String(error)}`); process.exit(1); }
+  };
   const fingerprint=(session:JoinedSession)=>createHash('sha256').update(JSON.stringify([
     session.server,session.clientId,session.refreshToken,session.accessToken,session.accessExpiresAt,session.joinedAt])).digest('hex');
-  const start=(joined:JoinedSession)=>{
-    const controller=new AbortController(),entry:Stream={fingerprint:fingerprint(joined),controller};
+  const start=(joined:JoinedSession,recovered=false)=>{
+    const controller=new AbortController(),entry:Stream={fingerprint:fingerprint(joined),controller,recovered};
     streams.set(joined.key,entry);
-    const remaining=(joined.accessExpiresAt??0)-Date.now();
-    if(remaining>0){
-      // One real persisted credential expiry, never a failed-observation retry.
-      entry.expiry=setTimeout(()=>{
-        controller.abort();
-        void accessToken(dir,joined.key).then(changed,error=>log(dir,`${joined.key}: credential renewal ended: ${String(error)}`));
-      },remaining);entry.expiry.unref?.();
-    }
-    void(async()=>{
-      let recovered=false;
+    const job = (async()=>{
+      let expiredToken:string|undefined;
       while(!controller.signal.aborted){
         let opened=false,terminal=false;
         try{
-          const token=await accessToken(dir,joined.key);
+          const token=await accessToken(dir,joined.key,expiredToken);
           const current=readState(dir).sessions.find(session=>session.key===joined.key);
-          if(!current||fingerprint(current)!==entry.fingerprint){changed();return;}
-          for await(const raw of memberStream(current,token,controller.signal,()=>{opened=true;})){
+          if (!current) { failedStartup('session disappeared'); changed(); return; }
+          if (staged && !activated) entry.fingerprint = fingerprint(current);
+          if (fingerprint(current) !== entry.fingerprint) { changed(); return; }
+          for await(const raw of memberStream(current,token,controller.signal,()=>{
+            opened=true;
+            if (staged && !activated) {
+              openedKeys.add(joined.key);
+              if ([...expected].every(key => openedKeys.has(key))) process.send?.('ready');
+            }
+          })){
+            // A candidate has a live stream before it can commit or deliver.
+            // The old owner drains first; replay then joins durable identities.
             const frame=memberStreamFrame(raw);
-            if(frame.type==='ended'){terminal=true;break;}
-            if(await acceptMemberDelivery(dir,joined.key,runner,frame)){recovered=false;await flush(dir,sources);}
+            if (frame.type === 'ended' && !activated) failedStartup(`member stream ended: ${frame.reason}`);
+            await activation;
+            if (controller.signal.aborted) return;
+            if (staged && frame.type === 'checkpoint') {
+              const committed = readState(dir).sessions.find(session => session.key === joined.key)?.streamCursor;
+              if (committed?.epoch === frame.cursor.epoch && committed.through > frame.cursor.through) continue;
+            }
+            if(frame.type==='ended'){
+              terminal=frame.reason!=='expired';
+              if(!terminal)expiredToken=token;
+              break;
+            }
+            if(await acceptMemberDelivery(dir,joined.key,runner,frame)){entry.recovered=false;await flush(dir,sources);}
           }
-        }catch(error){if(!controller.signal.aborted)log(dir,`${joined.key}: ${error instanceof Error?error.message:String(error)}`);}
-        if(controller.signal.aborted||terminal||!opened||recovered)return;
-        // One replacement after an established stream drops. A failed initial
+        }catch(error){
+          failedStartup(error);
+          if(!controller.signal.aborted)log(dir,`${joined.key}: ${error instanceof Error?error.message:String(error)}`);
+        }
+        if (!activated) failedStartup('member stream ended before activation');
+        if(controller.signal.aborted||terminal||!opened||entry.recovered)return;
+        // One replacement after an established stream drops or expires. A failed initial
         // or replacement connection parks until credentials/join state changes.
-        recovered=true;
+        entry.recovered=true;
       }
     })();
+    jobs.add(job); void job.finally(() => jobs.delete(job));
   };
   try{
-    for(;;){
+    if (staged) {
+      if (!expected.size) throw new Error('No joined sessions to activate');
+      for (const joined of readState(dir).sessions.filter(hasLocalDelivery)) start(joined);
+      await handoff;
+      // Commands embedded in delivered messages always use the retained path.
+      runner = { ...runner, bundle: join(dir, 'usebeeline.mjs') };
+      renameSync(socket, join(dir, 'bridge.sock'));
+    }
+    if (staged && !claim()) throw new Error('Beeline bridge owner changed during handoff');
+    writeFileSync(join(dir, 'bridge-owner.json'), JSON.stringify({ pid: process.pid, digest }), { mode: 0o600 });
+    if (staged) { activated = true; activate(); process.send?.('active'); }
+    log(dir,`bridge ${process.pid} started`);
+    for(; !stopping;){
       localDirty=false;
-      const sessions=readState(dir).sessions;
+      const sessions=readState(dir).sessions.filter(hasLocalDelivery);
       if(!sessions.length)break;
       for(const [key,stream]of streams)if(!sessions.some(session=>session.key===key)){
-        stream.controller.abort();if(stream.expiry)clearTimeout(stream.expiry);streams.delete(key);
+        stream.controller.abort();streams.delete(key);
       }
       for(const joined of sessions){
         const old=streams.get(joined.key);
         if(!old||old.fingerprint!==fingerprint(joined)){
-          old?.controller.abort();if(old?.expiry)clearTimeout(old.expiry);start(joined);
+          // Token rotation replaces this owner too; retain its one recovery
+          // allowance until a real delivery proves the replacement works.
+          old?.controller.abort();start(joined,old?.recovered);
         }
         const path=outboxDir(joined.cwd);
         if(!outboxWatches.has(path)){
@@ -354,28 +444,20 @@ export async function runBridge(dir: string, runner: Runner): Promise<void> {
       if(!localDirty)await new Promise<void>(resolve=>{wake=resolve;});
       wake=undefined;
     }
+  }catch(error){
+    failedStartup(error);
+    throw error;
   }finally{
     localWatch.close();for(const watcher of outboxWatches.values())watcher.close();
-    for(const stream of streams.values()){stream.controller.abort();if(stream.expiry)clearTimeout(stream.expiry);}
+    for(const stream of streams.values()){stream.controller.abort();}
+    if (staged && !activated) activate();
+    await Promise.allSettled(jobs);
+    await new Promise<void>(done => tools.close(() => done()));
   }
-  log(dir, `bridge ${process.pid} stopped: no joined sessions`);
+  log(dir, `bridge ${process.pid} stopped: ${stopping ? 'handoff or shutdown' : 'no joined sessions'}`);
   rmSync(pidFile, { force: true });
   rmSync(join(dir, 'bridge.sock'), { force: true });
   process.exit(0);
 }
 
-export function bridgeRunning(dir: string): boolean {
-  try {
-    const holder = Number(readFileSync(join(dir, 'bridge.pid'), 'utf8'));
-    return Boolean(holder) && pidAlive(holder);
-  } catch { return false; }
-}
-
-/** Starts the bridge in the background unless one runs. It outlives the command that started it. */
-export function ensureBridge(dir: string, runner: Runner, env: NodeJS.ProcessEnv = process.env): void {
-  if (bridgeRunning(dir)) return;
-  const out = openSync(join(dir, 'bridge.log'), 'a', 0o600);
-  const child = spawn(runner.node, [runner.bundle, 'session', 'bridge'], { detached: true, stdio: ['ignore', out, out], env });
-  child.unref();
-  closeSync(out);
-}
+export { bridgeRunning, ensureBridge, refreshJoinedSessionBridge } from './bridge-launch.js';

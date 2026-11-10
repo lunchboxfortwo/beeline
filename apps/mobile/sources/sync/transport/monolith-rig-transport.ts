@@ -272,7 +272,7 @@ export class MonolithRigTransport {
   async operation(
     name: keyof PhoneOperationMap,
     input: unknown,
-    options?: { timeoutMs?: number },
+    options?: { timeoutMs?: number; reconnectOwnedByOutbox?: true },
   ): Promise<unknown> {
     return monolithPhoneOperation(
       name,
@@ -332,10 +332,10 @@ export class MonolithRigTransport {
     );
   }
 
-  async publishPreparedMessage(event: NostrEvent): Promise<AgentMessageWriteResult> {
+  async publishPreparedMessage(event: NostrEvent, options?: { reconnectOwnedByOutbox?: true }): Promise<AgentMessageWriteResult> {
     const { operation, input } = preparedMessageOperation(event);
     // Legacy no-envelope clients preserve prepared message replay semantics.
-    return (await this.operation(operation, input, { timeoutMs: MONOLITH_REQUEST_TIMEOUT_MS })) as AgentMessageWriteResult;
+    return (await this.operation(operation, input, { timeoutMs: MONOLITH_REQUEST_TIMEOUT_MS, ...options })) as AgentMessageWriteResult;
   }
 
   async uploadMedia(bytes: Uint8Array, mimeType: string): Promise<any> {

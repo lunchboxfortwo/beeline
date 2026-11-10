@@ -5,7 +5,7 @@ import {getEffectiveRelayUrl} from '@/auth/buzz-identity-storage';
 import {mobileSurfaceCache,surfaceAddress} from './surface-storage';
 import {useWorkspaceRecords,workspaceRecordScope,workspaceRows} from './workspace-records';
 import {shouldReadWorkspaceRoster} from './room-participants';
-import {appErrorCopy} from './app-error-copy';
+import {appReadErrorCopy} from './app-error-copy';
 import {clientResetGeneration,subscribeClientReset} from '@/sync/client-reset';
 
 /** The Room's existing picker owner. Closed sheets can observe a held roster
@@ -39,7 +39,7 @@ export function useRoomRoster(workspaceId:string|null|undefined,viewer:string|nu
       if(cancel.signal.aborted)return;
       await mobileSurfaceCache.fetch(address,isWorkspaceView,()=>read(workspaceId));
       if(!cancel.signal.aborted)cached.current=workspaceId;
-    }).catch(reason=>{if(!cancel.signal.aborted&&visible)error.current(appErrorCopy(reason,'Could not read the Workspace roster.'));});
+    }).catch(reason=>{if(!cancel.signal.aborted&&visible)error.current(appReadErrorCopy(reason));});
     return()=>cancel.abort();
   },[workspaceId,visible,read,address]);
   // The records version re-selects canonical rows after another surface writes.

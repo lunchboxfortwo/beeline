@@ -264,7 +264,7 @@ export default function BuzzIdentitySettings() {
       // Keep the friendly copy, but record the real cause for diagnosis.
       console.warn('[ACCOUNT] Delete account failed:', error);
       void reportClientError('app', error);
-      setError('Could not delete the account. Check your connection and try again.');
+      setError('Could not delete the account. Try again.');
       setDeleteBusy(false);
     }
   }, [deleteBusy, profileIdentity]);
@@ -323,7 +323,7 @@ export default function BuzzIdentitySettings() {
         setPushPermission(permission);
         await saveStoredPushLevel(identity.publicKey, settings.identity.pushLevel);
       } catch (caught) {
-        if (!cancelled) setError(appErrorCopy(caught, `Could not load your profile.`));
+        if (!cancelled) setError(appErrorCopy(caught, ''));
       }
     })();
     return () => {
@@ -339,13 +339,9 @@ export default function BuzzIdentitySettings() {
     async (
       identity: Identity,
       result: BuzzPushRegistrationResult,
-      previous: BuzzPushRegistrationState | null,
     ) => {
       setPushRegistration({
         ...result,
-        failedAttempts: result.registered
-          ? 0
-          : (previous?.failedAttempts ?? 0) + (result.retryable ? 1 : 0),
         updatedAt: Date.now(),
       });
       setPushEnabledState(await getBuzzPushEnabled(identity.publicKey));
@@ -360,7 +356,7 @@ export default function BuzzIdentitySettings() {
     setError(null);
     try {
       const result = await registerBuzzPushNotifications(profileIdentity);
-      await applyPushResult(profileIdentity, result, pushRegistration);
+      await applyPushResult(profileIdentity, result);
     } catch (caught) {
       setError(appErrorCopy(caught, `Could not retry push registration.`));
     } finally {
@@ -385,7 +381,7 @@ export default function BuzzIdentitySettings() {
           await reconcilePresentedNotificationBadge(notifications, Platform.OS, 'off');
         } else if (!pushOn) {
           const result = await setBuzzPushEnabled(profileIdentity, true);
-          await applyPushResult(profileIdentity, result, pushRegistration);
+          await applyPushResult(profileIdentity, result);
         }
       } catch (caught) {
         setError(appErrorCopy(caught, `Could not update notifications.`));

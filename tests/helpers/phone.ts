@@ -54,6 +54,8 @@ vi.mock('@expo/vector-icons', () => ({
   FontAwesome: 'FontAwesome',
   Ionicons: 'Ionicons',
 }));
+// Screens import the Ionicons subpath so web does not load every icon font.
+vi.mock('@expo/vector-icons/Ionicons', () => ({ default: 'Ionicons' }));
 
 // Glyph primitives (chevrons, the corner sigil, the members mark) are drawn
 // shapes now, so any component tree can contain one. Node tests never load

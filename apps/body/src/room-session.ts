@@ -1,8 +1,8 @@
 import type { TurnTrace } from './turn-trace.js';
-import type { SessionLifecycle } from './session-scheduler.js';
+import type { AgentProcessLifecycle } from './agent-process.js';
 import { mkdir, writeFile } from 'node:fs/promises';
 import type { AgentModelConfigOption } from './model-types.js';
-import { claimGrantedHostRoutes } from './host-mcp-route.js';
+import { grantedSquireHostRoute, claimGrantedHostRoutes } from './host-mcp-route.js';
 import { grantedSandboxDevices } from './bwrap-sandbox.js';
 import { isolatedSharedAssetCategories } from './workspace-assets.js';
 import { dirname, resolve } from 'node:path';
@@ -61,6 +61,8 @@ export function beelineAgentMcpServer(
     args: [...(config.readonlyMcpArgs ?? [])],
     env: [
       { name: 'BEELINE_MCP_SURFACE', value: 'agent' },
+      ...(config.agentEnv?.BEELINE_FREE_AGENT_ID || config.agentEnv?.BEELINE_FREE_AGENT_MODEL_TOKEN
+        ? [{ name: 'BEELINE_FREE_AGENT_ID', value: config.agentEnv.BEELINE_FREE_AGENT_ID ?? connection.agentId }] : []),
       { name: 'BEELINE_NATIVE_IO_PROVEN', value: context.nativeIoProven ? '1' : '0' },
       ...(context.turnContextPath
         ? [{ name: 'BEELINE_TURN_CONTEXT_FILE', value: context.turnContextPath }]
@@ -153,20 +155,17 @@ export async function sessionGrantedResources(
   try {
     const grants = await read();
     const approved = await claimGrantedHostRoutes(grants);
+    const freeAgent = Boolean(config.agentEnv?.BEELINE_FREE_AGENT_ID || config.agentEnv?.BEELINE_FREE_AGENT_MODEL_TOKEN);
+    const declarations = hostImportedMcpDeclarations({ operatorHome: config.operatorHome, agentKind: config.agentKind });
     // Discovery is safe to mount; the transport gate authorizes every use.
     // This also lets an owner use a yolo resource without an activation prompt.
     return {
       hostRoutes: [
         ...new Set([
           ...approved,
-          ...Object.keys(
-            hostImportedMcpDeclarations({
-              operatorHome: config.operatorHome,
-              agentKind: config.agentKind,
-            }),
-          ),
+          ...Object.keys(declarations),
         ]),
-      ],
+      ].filter(route => !freeAgent || !grantedSquireHostRoute([route], declarations)),
       devices: grantedSandboxDevices(grants),
       isolatedCategories: isolatedSharedAssetCategories(grants),
     };
@@ -195,12 +194,12 @@ export function recordSessionModelFallback(
   }).catch(error => console.error(`[thin-core] failed to persist automatic model fallback for ${surface}:`, error));
 }
 
-/** Close capacity-wait timing at the actual activation/current-session check. */
-export function tracedSessionLifecycle(
+/** Close queue timing at the actual activation/current-session check. */
+export function tracedAgentProcessLifecycle(
   activate: () => Promise<string>, isCurrent: () => Promise<boolean>, trace?: TurnTrace,
-): Pick<SessionLifecycle, 'activate' | 'isCurrent' | 'onStateChange'> {
+): Pick<AgentProcessLifecycle, 'start' | 'isCurrent'> {
   return {
-    activate: async () => {
+    start: async () => {
       trace?.end('queue-wait');
       return trace ? trace.measure('activation', activate) : activate();
     },
@@ -208,6 +207,5 @@ export function tracedSessionLifecycle(
       trace?.end('queue-wait');
       return trace ? trace.measure('activation', isCurrent) : isCurrent();
     },
-    onStateChange: state => { if (state === 'waiting-for-slot') trace?.noteCapacityWait(); },
   };
 }

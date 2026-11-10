@@ -6,14 +6,23 @@ import type { ParamListBase } from '@react-navigation/native';
 import { roomTransitionWork } from '@/buzz/room-transition-work';
 import { useLocalSearchParams } from 'expo-router';
 import { markRoomOpen } from '@/buzz/room-open-trace';
+import { RoomPresentationContext } from '@/buzz/room-presentation-context';
 import { RoomOpenTraceOverlay } from '@/components/buzz/RoomOpenTraceOverlay';
-import { BuzzChatSurface } from './_chat-surface';
+import { BuzzChatSurface, ChatOpeningSurface } from './_chat-surface';
 import {
   useRoomSurfaceSession,
   type RoomSurfaceSessionBindings,
 } from './useRoomSurfaceSession';
 
-const RoomSurface = memo(BuzzChatSurface, (previous, next) =>
+const RoomSurface = memo(function RoomSurface(props: React.ComponentProps<typeof BuzzChatSurface>) {
+  const { parent } = useLocalSearchParams<{ parent?: string }>();
+  const mounted = useRef(false);
+  if (props.session.roomSurface || props.session.hydrationFailed) mounted.current = true;
+  // Mount the transcript once, with its opening response. After that, preserve
+  // its state through refreshes and failures just as an existing visit does.
+  if (!mounted.current) return <ChatOpeningSurface isCorner={Boolean(parent)} />;
+  return <BuzzChatSurface {...props} />;
+}, (previous, next) =>
   previous.bindingsRef === next.bindingsRef &&
   (Object.keys(previous.session) as Array<keyof typeof previous.session>).every(
     (key) => Object.is(previous.session[key], next.session[key]),
@@ -80,9 +89,9 @@ function RoomVisit({
   });
 
   return (
-    <>
+    <RoomPresentationContext.Provider value={session.liveDraftStore}>
       <RoomSurface session={session} bindingsRef={bindingsRef} />
       <RoomOpenTraceOverlay />
-    </>
+    </RoomPresentationContext.Provider>
   );
 }

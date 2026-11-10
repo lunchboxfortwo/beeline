@@ -39,33 +39,35 @@ export class VoiceBudgetStore {
   }
 
   async record(call: string, owner: string, workspace: string, intervals: readonly AudioInterval[]): Promise<VoiceBudget | null> {
-    const budget = await this.db.transaction(async db => {
-      await db.query('SELECT pg_advisory_xact_lock(hashtext($1))', [`voice-budget:${workspace}`]);
-      // A stale runtime may neither spend nor remove a successor's participant.
-      const lease = await db.query(`SELECT 1 FROM voice_calls c JOIN rooms r ON r.id=c.room_id
-        WHERE c.id=$1 AND c.runtime_owner=$2 AND c.runtime_until>clock_timestamp() AND c.ended_at IS NULL
-        AND r.workspace_id=$3 FOR SHARE OF c`, [call, owner, workspace]);
-      if (!lease.rowCount) return null;
-      const now = this.now();
-      const days = new Map<number, AudioInterval[]>();
-      for (const [from, to] of intervals) {
-        if (!Number.isSafeInteger(from) || !Number.isSafeInteger(to) || from >= to || to > now + 1000)
-          throw new Error('Invalid voice audio interval');
-        for (let at = from; at < to;) {
-          const { start, resetAt } = voiceBudgetDay(at);
-          const end = Math.min(resetAt, to);
-          const slices = days.get(start) ?? [];
-          slices.push([at, end]); days.set(start, slices); at = end;
-        }
+    const now = this.now();
+    const days = new Map<number, AudioInterval[]>();
+    for (const [from, to] of intervals) {
+      if (!Number.isSafeInteger(from) || !Number.isSafeInteger(to) || from >= to || to > now + 1000)
+        throw new Error('Invalid voice audio interval');
+      for (let at = from; at < to;) {
+        const { start, resetAt } = voiceBudgetDay(at);
+        const end = Math.min(resetAt, to);
+        const slices = days.get(start) ?? [];
+        slices.push([at, end]); days.set(start, slices); at = end;
       }
-      for (const [day, slices] of [...days].sort(([a], [b]) => a - b)) {
-        const ranges = `{${slices.map(([a, b]) => `[${a},${b})`).join(',')}}`;
-        await db.query(`INSERT INTO voice_workspace_usage(workspace_id,call_id,day_start,audio) VALUES($1,$2,$3,$4::int8multirange)
-          ON CONFLICT(workspace_id,call_id,day_start) DO UPDATE SET audio=voice_workspace_usage.audio + excluded.audio`, [workspace, call, day, ranges]);
-      }
-      return this.read(workspace, db);
-    });
-    return budget;
+    }
+    const slices = [...days].sort(([a], [b]) => a - b).map(([day, ranges]) => ({
+      day, audio: `{${ranges.map(([a,b]) => `[${a},${b})`).join(',')}}`,
+    }));
+    const admitted = await this.db.query(`WITH lease AS MATERIALIZED (
+      SELECT c.id FROM voice_calls c JOIN rooms r ON r.id=c.room_id
+      WHERE c.id=$1 AND c.runtime_owner=$2 AND c.runtime_until>clock_timestamp()
+        AND c.ended_at IS NULL AND r.workspace_id=$3 FOR SHARE OF c
+    ), charged AS (
+      INSERT INTO voice_workspace_usage(workspace_id,call_id,day_start,audio)
+      SELECT $3,lease.id,slice.day,slice.audio::int8multirange FROM lease
+        CROSS JOIN jsonb_to_recordset($4::jsonb) slice(day bigint,audio text) ORDER BY slice.day
+      ON CONFLICT(workspace_id,call_id,day_start) DO UPDATE
+        SET audio=voice_workspace_usage.audio + EXCLUDED.audio RETURNING call_id
+    ) SELECT id FROM lease`, [call,owner,workspace,JSON.stringify(slices)]);
+    // Read after the charge commits: each contending writer sees all earlier
+    // committed charges, including a different call in the same Workspace.
+    return admitted.rowCount ? this.read(workspace) : null;
   }
 
   /** Usage is durable before entering this second transaction. Retain the
@@ -102,22 +104,11 @@ export class VoiceAudioMeter {
   private readonly reservations = new Set<() => void>();
   private readonly reservationDetails = new WeakMap<() => void, { milliseconds: number; bytes: number; transferred: boolean }>();
   private recovery = 0;
-  private timer?: ReturnType<typeof setTimeout>;
   constructor(private readonly store: VoiceBudgetStore, private readonly call: string,
     private readonly owner: string, private readonly workspace: string, initial: VoiceBudget,
     private readonly receipt: (budget: VoiceBudget | null) => void,
     private readonly log: (message: string) => void, private readonly now = Date.now) {
     this.budget = initial;
-  }
-
-  private armCheckpoint(): void {
-    if (this.closed || this.parked || this.fenced || this.timer || this.flushing ||
-      (!this.pending.length && !this.pendingFrames.length)) return;
-    this.timer = setTimeout(() => {
-      this.timer = undefined;
-      void this.flush().catch(() => {});
-    }, 250);
-    this.timer.unref();
   }
 
   /** Shared across authorization buffering, pending and in-flight delivery.
@@ -165,7 +156,7 @@ export class VoiceAudioMeter {
     let live = true;
     this.pendingFrames.push({ run: () => { if (live && copy && !this.closed && !this.fenced) deliver(copy); },
       release: () => { live = false; copy = undefined; release(); } });
-    this.armCheckpoint();
+    queueMicrotask(() => { void this.flush().catch(() => {}); });
   }
 
   audio(milliseconds: number, capturedAt = this.now()): number {
@@ -195,7 +186,7 @@ export class VoiceAudioMeter {
     if (tail && tail[1] === start) this.pending[this.pending.length - 1] = [tail[0], acceptedEnd];
     else this.pending.push([start, acceptedEnd]);
     this.lastEnd = acceptedEnd;
-    this.armCheckpoint();
+    queueMicrotask(() => { void this.flush().catch(() => {}); });
     return duration === elapsed ? milliseconds : Math.min(duration, milliseconds);
   }
 
@@ -213,7 +204,6 @@ export class VoiceAudioMeter {
   flush(): Promise<void> { return this.commit(false); }
   private commit(terminal: boolean): Promise<void> {
     if (this.flushing) return this.flushing;
-    clearTimeout(this.timer); this.timer = undefined;
     if (this.fenced || (!terminal && (this.closed || this.parked)) ||
       (!this.pending.length && !this.pendingFrames.length)) return Promise.resolve();
     const admittedRecovery = this.recovery;
@@ -263,7 +253,7 @@ export class VoiceAudioMeter {
       this.flushing = undefined;
       if (this.parked && !this.closed && !this.fenced && this.recovery > admittedRecovery) {
         this.parked = false; void this.flush().catch(() => {});
-      } else this.armCheckpoint();
+      } else if (this.pending.length || this.pendingFrames.length) void this.flush().catch(() => {});
     });
     return this.flushing;
   }
@@ -277,7 +267,7 @@ export class VoiceAudioMeter {
   close(): Promise<void> {
     if (this.closing) return this.closing;
     // Revoke delivery synchronously, before any database await can complete.
-    this.closed = true; clearTimeout(this.timer); this.timer = undefined;
+    this.closed = true;
     for (const frame of [...this.pendingFrames, ...this.inFlightFrames]) frame.release();
     for (const release of this.reservations) release();
     this.closing = (async () => {

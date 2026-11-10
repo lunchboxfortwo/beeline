@@ -3,7 +3,7 @@ import type { AddressInfo } from 'node:net';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import { createAgentCommand } from './agent-command.js';
 import { TokenAuth } from './auth.js';
-import { DaemonService } from './daemon-service.js';
+import { HelperDaemonService as DaemonService } from './test-fixtures/helper-daemon.js';
 import { LiveHub } from './live.js';
 import { PhoneService } from './phone-service.js';
 import { createBeelineServer } from './server.js';
@@ -31,6 +31,8 @@ beforeAll(async () => {
   await db.query(`INSERT INTO workspaces(id,name) VALUES($1,'Permissions proof')`, [WORKSPACE]);
   await db.query(`INSERT INTO rooms(id,workspace_id,name) VALUES($1,$3,'Team'),($2,$3,'Other team')`, [ROOM, OTHER_ROOM, WORKSPACE]);
   for (const who of [REQUESTER, ROLE_OWNER, ROOM_ADMIN, WORKSPACE_ADMIN, OUTSIDER, SAVER, WORKER, DELEGATE]) {
+    if (who !== WORKSPACE_ADMIN) await db.query(
+      `INSERT INTO memberships(workspace_id,room_id,identity_id,role) VALUES($1,NULL,$2,'member')`, [WORKSPACE, who]);
     for (const room of [ROOM, OTHER_ROOM]) await db.query(
       `INSERT INTO memberships(workspace_id,room_id,identity_id,role) VALUES($1,$2,$3,$4)`,
       [WORKSPACE, room, who, who === ROOM_ADMIN ? 'admin' : 'member']);
@@ -132,7 +134,7 @@ describe('workflow control through authenticated daemon HTTP operations', () => 
   // Archiving deletes a saved workflow for the Workspace: who saved it grants nothing.
   it.each([['saved requester', REQUESTER], ['saving agent', SAVER], ['saving agent owner', ROLE_OWNER]])(
     'refuses %s, who is not a Workspace admin, to archive', async (_label, actor) => {
-      const { name } = await savedWorkflow(actor === ROLE_OWNER || actor === SAVER ? SAVER : REQUESTER);
+      const { name } = await savedWorkflow();
       const archived = await call(DELEGATE, 'archiveWorkflow', { ...await turn(actor, DELEGATE), name });
       expect(archived.status).toBe(403);
       expect(JSON.stringify(archived.body)).toContain('workspace admins only');
@@ -289,9 +291,11 @@ describe('Reproduction run-id-prefix: authenticated run lookup and control', () 
     const foreignWorkspace = randomUUID(), foreignRoom = randomUUID();
     await db.query(`INSERT INTO workspaces(id,name) VALUES($1,'Hidden')`, [foreignWorkspace]);
     await db.query(`INSERT INTO rooms(id,workspace_id,name) VALUES($1,$2,'Hidden')`, [foreignRoom, foreignWorkspace]);
+    // Ended runs still participate in prefix lookup; only one run may be live.
     for (const [id, room] of [[second, ROOM], [hidden, foreignRoom]]) await db.query(
       `INSERT INTO messages(id,room_id,author_id,card_type,card,text)
-       SELECT $1,$2,author_id,card_type,jsonb_set(card,'{runId}',to_jsonb($1::text)),text FROM messages WHERE id=$3`,
+       SELECT $1,$2,author_id,card_type,card || jsonb_build_object('runId',$1::text,'runStatus','done','toState','done','status','done'),text
+       FROM messages WHERE id=$3`,
       [id, room, runId]);
     const context = await turn(REQUESTER);
     for (const operation of ['getWorkflowRun', 'handoff', 'cancelWorkflowRun', 'assignWorkflowRole']) {

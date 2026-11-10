@@ -2,10 +2,10 @@ import { markRoomOpen } from '@/buzz/room-open-trace';
 import {
   getBuzzNotificationTargetFromData,
   navigateToBuzzTargetFromNotification,
+  notificationStackRoutes,
   type BuzzNotificationTarget,
   type NotificationNavigator,
 } from '@/utils/notificationRouting';
-import type { InitialLandingResult } from '@/navigation/initial-landing';
 
 /**
  * Routing a tapped push, independent of React so the whole rule is testable.
@@ -15,10 +15,9 @@ import type { InitialLandingResult } from '@/navigation/initial-landing';
  * turn on lives here: the once-per-process guard, the durable leftover-id skip
  * (Expo Android synthesizes a DEFAULT response from `google.message_id` extras
  * on Activity onCreate, including a launcher reopen), the default-action check,
- * the wait for the app root's landing decision (see
- * `navigation/initial-landing.ts` — a push routed before that decision lands
- * is overwritten by it), the suppression of a landing replace still pending
- * after that wait times out, and the navigation itself.
+ * the suppression of a pending landing replace, and navigation after the
+ * root navigator is ready. A message tap never waits for the Room deck or a
+ * destination read to finish.
  */
 
 export type TappedNotificationResponse = {
@@ -65,11 +64,13 @@ function parseConsumedResponseIds(raw: string | null): string[] {
   }
 }
 
-function readIdentifier(response: TappedNotificationResponse): string | undefined {
-  const data = response.notification?.request?.content?.data as
-    { messageId?: unknown; collapseId?: unknown } | undefined;
-  if (typeof data?.collapseId === 'string' && typeof data.messageId === 'string' && data.messageId)
-    return data.messageId;
+/**
+ * Use the same decoded payload for deduplication, prefetch and navigation.
+ * Expo's request identifier may be a reused Android notification slot.
+ */
+export function getNotificationResponseId(response: TappedNotificationResponse): string | undefined {
+  const target = getBuzzNotificationTargetFromData(response.notification?.request?.content?.data);
+  if (target?.messageId) return target.messageId;
   const identifier = response.notification?.request?.identifier;
   return typeof identifier === 'string' && identifier ? identifier : undefined;
 }
@@ -109,7 +110,7 @@ async function dispatchNotificationResponse(
   active: () => boolean,
 ): Promise<void> {
   markRoomOpen('push-entry-dispatch');
-  const id = readIdentifier(response);
+  const id = getNotificationResponseId(response);
   if (id && entries.consumedResponses && (await entries.consumedResponses.has(id))) {
     entries.log?.(`[PUSH ROUTING] Skipping leftover ${entry} notification response: ${id}`);
     return;
@@ -122,8 +123,10 @@ async function dispatchNotificationResponse(
 /** Wire every Expo response entry path to the same payload resolver. */
 export function startNotificationResponseEntries(entries: NotificationResponseEntries): () => void {
   let active = true;
+  let receivedLiveResponse = false;
   const stillActive = () => active;
   const subscription = entries.addResponseListener((response) => {
+    receivedLiveResponse = true;
     markRoomOpen('push-entry-event');
     const entry = entries.getAppState() === 'active' ? 'foreground' : 'background';
     void dispatchNotificationResponse(entries, response, entry, stillActive).catch((error) =>
@@ -133,12 +136,14 @@ export function startNotificationResponseEntries(entries: NotificationResponseEn
   void entries
     .getLastResponse()
     .then((response) => {
-      if (!active) return;
+      // The native getter may have captured an older response before a live
+      // tap arrived. That replay must never overwrite the newer destination.
+      if (!active || receivedLiveResponse) return;
       if (!response) {
         entries.log?.('[PUSH ROUTING] cold getLastResponse is null');
         return;
       }
-      return dispatchNotificationResponse(entries, response, 'cold', stillActive);
+      return dispatchNotificationResponse(entries, response, 'cold', () => active && !receivedLiveResponse);
     })
     .catch((error) => entries.log?.('Failed to read last notification response:', error));
   return () => {
@@ -156,8 +161,6 @@ export type NotificationResponseRouting = {
   defaultActionIdentifier: string;
   /** Route only after the root navigator has rendered; prefetch may run sooner. */
   waitForRootReady?: () => Promise<void>;
-  /** Resolves once the landing route has committed, or reports a timeout. */
-  waitForInitialLanding: () => Promise<InitialLandingResult>;
   /** Claims the destination for this push: the app root's pending landing replace must not run. */
   suppressPendingInitialLanding: () => void;
   /** Clears the retained native "last response" once it has been routed. */
@@ -169,14 +172,6 @@ export type NotificationResponseRouting = {
   consumedResponses?: ConsumedNotificationResponseStore;
   log?: (message: string) => void;
 };
-
-async function waitForCommittedLanding(routing: NotificationResponseRouting, log: (message: string) => void): Promise<void> {
-  while ((await routing.waitForInitialLanding()) === 'timeout') {
-    // Keep the response pending while Home shows its retry surface. Suppressing
-    // Home here would strand a cold tap on the empty index route.
-    log('[PUSH ROUTING] Initial landing still pending; retaining pushed destination');
-  }
-}
 
 function stringifyNotificationPayload(value: unknown): string {
   try {
@@ -204,7 +199,14 @@ export async function routeBuzzNotificationResponse(
 
   log('[PUSH ROUTING] Full notification response:\n' + stringifyNotificationPayload(response));
 
-  const responseId = readIdentifier(response);
+  // Inline actions belong to the action runtime. They must neither claim the
+  // body's message id nor clear the native response it may still be reading.
+  if (response.actionIdentifier !== routing.defaultActionIdentifier) {
+    log(`[PUSH ROUTING] Ignoring non-default action: ${response.actionIdentifier}`);
+    return null;
+  }
+
+  const responseId = getNotificationResponseId(response);
   if (responseId) {
     if (routing.handled.has(responseId)) {
       log(`[PUSH ROUTING] Duplicate notification response ignored: ${responseId}`);
@@ -223,11 +225,6 @@ export async function routeBuzzNotificationResponse(
   }
 
   try {
-    if (response.actionIdentifier !== routing.defaultActionIdentifier) {
-      log(`[PUSH ROUTING] Ignoring non-default action: ${response.actionIdentifier}`);
-      return null;
-    }
-
     log(
       '[PUSH ROUTING] notification.request.content.data:\n' +
         stringifyNotificationPayload(response.notification?.request?.content?.data),
@@ -236,57 +233,30 @@ export async function routeBuzzNotificationResponse(
     const buzzTarget = getBuzzNotificationTargetFromData(
       response.notification?.request?.content?.data,
     );
-    const directRoom =
-      buzzTarget?.target === 'message' &&
-      Boolean(buzzTarget.workspaceId) &&
-      buzzTarget.roomId === buzzTarget.channelId &&
-      !buzzTarget.cornerId;
-    if (responseId && directRoom && buzzTarget?.channelId) {
-      try {
-        const messageId = buzzTarget.messageId ?? buzzTarget.eventId;
-        if (messageId) routing.prefetchRoom?.(responseId, buzzTarget.channelId, messageId);
-        else routing.prefetchRoom?.(responseId, buzzTarget.channelId);
-      } catch (error) {
-        log(`Could not prefetch pushed Room: ${String(error)}`);
-      }
-    }
-    await routing.waitForRootReady?.();
-
-    // The Room read may finish during startup, but navigation must wait until
-    // the landing route has committed. Root navigator readiness alone can
-    // precede that first usable destination on a killed-app push.
-    if (directRoom && buzzTarget) {
-      await waitForCommittedLanding(routing, log);
-      // This payload already has the exact top-level Room and Workspace. Its
-      // route carries the Workspace id, and the Room's own read persists
-      // server truth. A cold AsyncStorage selection write need not keep the
-      // Room behind the landing screen.
+    if (buzzTarget) {
+      // Claim the destination before any startup wait. The deck's local
+      // restoration must not send an onboarding/invite replace over this tap.
       routing.suppressPendingInitialLanding();
+      if (responseId && buzzTarget.target === 'message' && buzzTarget.workspaceId &&
+          buzzTarget.roomId === buzzTarget.channelId && !buzzTarget.cornerId) {
+        try {
+          const messageId = buzzTarget.messageId ?? buzzTarget.eventId;
+          if (messageId) routing.prefetchRoom?.(responseId, buzzTarget.channelId, messageId);
+          else routing.prefetchRoom?.(responseId, buzzTarget.channelId);
+        } catch (error) {
+          log(`Could not prefetch pushed Room: ${String(error)}`);
+        }
+      }
+      await routing.waitForRootReady?.();
       navigateToBuzzTargetFromNotification(routing.navigator, buzzTarget, responseId!);
+      // The payload names the destination. Workspace persistence and legacy
+      // Workspace discovery must not keep the reader on the Room list.
       void routing.resolveTarget(buzzTarget).catch((error) =>
         log(`Could not persist pushed Workspace selection: ${String(error)}`),
       );
       if (responseId) await routing.consumedResponses?.add(responseId);
-      log(`[PUSH ROUTING] Navigating to Beeline ${buzzTarget.target}: ${buzzTarget.channelId}`);
+      log(`[PUSH ROUTING] Navigating to Beeline ${buzzTarget.target}: ${buzzTarget.channelId ?? buzzTarget.workspaceId}`);
       return buzzTarget;
-    }
-
-    if (!directRoom) {
-      await waitForCommittedLanding(routing, log);
-    }
-
-    if (buzzTarget) {
-      // This push now owns the destination. Suppress a later Home replace
-      // before resolving (which persists the Workspace selection and can take
-      // its own time), or that replace would land the deck over the Room.
-      routing.suppressPendingInitialLanding();
-      const resolvedTarget = await routing.resolveTarget(buzzTarget);
-      navigateToBuzzTargetFromNotification(routing.navigator, resolvedTarget, responseId!);
-      if (responseId) await routing.consumedResponses?.add(responseId);
-      log(
-        `[PUSH ROUTING] Navigating to Beeline ${resolvedTarget.target}: ${resolvedTarget.channelId ?? resolvedTarget.workspaceId}`,
-      );
-      return resolvedTarget;
     }
     log('[PUSH ROUTING] No supported route found in notification.request.content.data');
     return null;
@@ -296,5 +266,44 @@ export async function routeBuzzNotificationResponse(
     } catch (error) {
       log(`Failed to clear last notification response: ${String(error)}`);
     }
+  }
+}
+
+/**
+ * Seed Expo Router before its first screen mounts. Waiting for the root layout
+ * to replay a cold notification lets the saved Room deck paint in between.
+ * Explicit links keep their own destination, and consumed native leftovers
+ * still open the ordinary deck.
+ */
+export async function initialNotificationPath(
+  path: string,
+  entries: Pick<NotificationResponseEntries, 'getLastResponse' | 'consumedResponses'> & {
+    defaultActionIdentifier: string;
+  },
+): Promise<string> {
+  if (path !== '' && path !== '/') {
+    try {
+      const url = new URL(path);
+      if (url.protocol !== 'beeline:' || url.host || (url.pathname && url.pathname !== '/') || url.search || url.hash)
+        return path;
+    } catch {
+      return path;
+    }
+  }
+  try {
+    const response = await entries.getLastResponse();
+    if (!response || response.actionIdentifier !== entries.defaultActionIdentifier) return path;
+    const target = getBuzzNotificationTargetFromData(response.notification?.request?.content?.data);
+    const id = getNotificationResponseId(response);
+    if (!target || !id || await entries.consumedResponses?.has(id)) return path;
+    const route = notificationStackRoutes(target, id).at(-1)!;
+    const { channelId, ...params } = route.params;
+    const destination = route.name === 'beeline/channels'
+      ? '/beeline/channels'
+      : `/beeline/chat/${encodeURIComponent(channelId!)}`;
+    return `${destination}?${new URLSearchParams(params)}`;
+  } catch {
+    // A runtime without the native getter still has the root response listener.
+    return path;
   }
 }

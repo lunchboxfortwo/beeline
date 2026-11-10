@@ -2,7 +2,7 @@ vi.mock('@/buzz/use-surface-focus',()=>({useSurfaceFocus:()=>true}));
 
 vi.mock('@/utils/responsive', () => ({ useIsDesktop: () => false }));
 vi.mock('@/sync/transport/live-connection', () => ({ sharedLiveConnection: () => ({ register: async () => () => undefined }) }));
-vi.mock('@expo/vector-icons', async () => { const R = await import('react'); return { Ionicons: (props: any) => R.createElement('Ionicons', props) }; });
+vi.mock('@expo/vector-icons/Ionicons', async () => { const R = await import('react'); return { default: (props: any) => R.createElement('Ionicons', props) }; });
 vi.mock('expo-haptics', () => ({ ImpactFeedbackStyle: { Light: 'Light' }, impactAsync: async () => undefined }));
 vi.mock('react-native-keyboard-controller', async () => { const R = await import('react'); return { KeyboardAvoidingView: (props: any) => R.createElement('View', props, props.children) }; });
 import * as React from 'react';
@@ -263,7 +263,7 @@ describe('Wallet screens (mock §Screens, pass 4)', () => {
     const renderer = await render(WalletScreen);
     await act(async () => { await renderer.root.findByProps({ testID: 'wallet-disconnect-row' }).props.onPress(); });
     const row = renderer.root.findByProps({ testID: 'wallet-disconnect-row' });
-    expect(row.props.description).toBe('Couldn’t reach Beeline');
+    expect(row.props.description).toBe('Could not complete request');
     expect(row.props.disabled).toBe(false);
     expect((await source.readWallet()).delegation.active).toBe(true);
   });
@@ -425,7 +425,7 @@ describe('Wallet screens (mock §Screens, pass 4)', () => {
       await Promise.resolve();
     });
     const banner = renderer.root.findByProps({ testID: 'wallet-connect-row' });
-    expect(banner.props.description).toBe('Couldn’t reach Beeline');
+    expect(banner.props.description).toBe('Could not complete request');
     expect(banner.props.descriptionTone).toBe('danger');
     expect(banner.props.action).toBe('reconnect');
     expect(renderer.root.findAllByProps({ testID: 'wallet-network-unavailable' })).toHaveLength(0);

@@ -56,6 +56,9 @@ vi.mock('@/sync/transport/live-connection', () => ({ sharedLiveConnection: () =>
 }) }));
 vi.mock('@/sync/transport/monolith-operation', () => ({ monolithPhoneOperation: phoneOperation }));
 
+const openBrowser = vi.hoisted(() => vi.fn(async () => ({ type: 'dismiss' })));
+vi.mock('expo-web-browser', () => ({ openBrowserAsync: openBrowser }));
+
 const navigation = vi.hoisted(() => ({ back: vi.fn(), push: vi.fn(), replace: vi.fn() }));
 const searchParams = vi.hoisted(() => ({
   params: {
@@ -326,7 +329,7 @@ describe('Connect Trusty Squire flow — ONE connect path', () => {
     setWorkbenchSource(source);
     const renderer = await render();
     expect(pairing).not.toHaveBeenCalled();
-    expect(renderer.root.findByProps({ testID: 'connect-step-0-detail' }).props.children).toContain('Reconnecting');
+    expect(renderer.root.findByProps({ testID: 'connect-step-0-detail' }).props.children).toBe('Waiting for the helper');
     expect(renderer.root.findAllByProps({ testID: 'connect-machine-machine-b' })).toHaveLength(0);
     online = true;
     await act(async () => {
@@ -393,7 +396,7 @@ describe('Connect Trusty Squire flow — ONE connect path', () => {
     expect(navigation.push.mock.calls.at(-1)?.[0].params.connectorName).toBe('Tailscale');
   });
 
-  it('sign-in is a full-screen route, never a browser call inside the step list', async () => {
+  it('streamed sign-in opens the machine browser in a full-screen route', async () => {
     const renderer = await render();
     await pair(renderer);
     await untilSignin(renderer);
@@ -411,6 +414,42 @@ describe('Connect Trusty Squire flow — ONE connect path', () => {
     expect(route.params.url).toContain('https://');
     expect(route.params.connectorName).toBe('Trusty Squire');
     expect(route.params.machineName).toBe('squire-box');
+  });
+
+  it('opens external Squire sign-in on the first tap and clears the mounted sheet on completion', async () => {
+    searchParams.params = { workspaceId: 'workspace-1', viewerId: 'human-dani',
+      connectorId: 'trusty-squire', pairedConnectorId: 'squire:machine',
+      offerId: 'offer-1', roomId: 'room-1' };
+    let connected = false;
+    const readInstallState = vi.fn(async () => ({
+      connectorId: 'squire:machine', helperName: 'cloud-machine',
+      steps: connected ? [] : [{ label: 'waiting for sign-in', status: 'active' as const }],
+      signIn: connected ? null : { method: 'oauth' as const, url: 'https://squire.test/install?token=test' },
+      connected,
+    }));
+    setWorkbenchSource(Object.assign(new MockWorkbenchSource(), { readInstallState }));
+    const renderer = await render();
+    await act(async () => {
+      renderer.root.findByProps({ testID: 'connect-sign-in' }).props.onPress();
+    });
+    expect(openBrowser).toHaveBeenCalledExactlyOnceWith('https://squire.test/install?token=test');
+    expect(navigation.push).not.toHaveBeenCalled();
+    expect(navigation.replace).not.toHaveBeenCalled();
+    expect(JSON.stringify(renderer.toJSON())).toContain('Opens sign-in in your browser.');
+
+    // The browser has already returned; only the later server commit wakes this read.
+    readInstallState.mockClear();
+    connected = true;
+    await act(async () => {
+      for (const listener of liveListeners) listener({ monolithLive: {
+        type: 'resource-change', roomId: '', resource: 'install', resourceId: 'squire:machine',
+      } });
+    });
+    expect(readInstallState).toHaveBeenCalledOnce();
+    expect(navigation.replace).toHaveBeenCalledExactlyOnceWith({
+      pathname: '/beeline/chat/[channelId]', params: { channelId: 'room-1' },
+    });
+    expect(navigation.push).not.toHaveBeenCalled();
   });
 
   it('shows where the sign-in page opened, from the helper report', async () => {
@@ -544,18 +583,25 @@ describe('Connect Trusty Squire flow — ONE connect path', () => {
       throw new Error('connect-error never appeared');
     }
 
-    it('stops helper discovery when its bounded read fails', async () => {
-      setWorkbenchSource(Object.assign(new MockWorkbenchSource(), {
-        readWorkbench: () => new Promise(() => {}),
-      }));
+    it('keeps failed helper discovery silent and reads again on shared reconnect', async () => {
+      let refuse!: (error: Error) => void;
+      const source = new MockWorkbenchSource();
+      const read = source.readWorkbench.bind(source);
+      const readWorkbench = vi.fn(read).mockImplementationOnce(() => new Promise((_resolve, reject) => { refuse = reject; }));
+      setWorkbenchSource(Object.assign(source, { readWorkbench }));
       const renderer = await render();
       expect(renderer.root.findAllByProps({ testID: 'connect-loader' }).length).toBeGreaterThan(0);
-      await act(async () => { await vi.advanceTimersByTimeAsync(15_001); });
+      await act(async () => { refuse(new Error('Helpers are unavailable right now')); });
+      expect(renderer.root.findAllByProps({ testID: 'connect-error' })).toHaveLength(0);
+      expect(readWorkbench).toHaveBeenCalledOnce();
+      await act(async () => {
+        for (const listener of liveListeners) listener({ monolithLive: { type: 'invalidate', roomId: '', reason: 'reconnect' } });
+      });
+      expect(readWorkbench.mock.calls.length).toBeGreaterThan(1);
       expect(renderer.root.findAllByProps({ testID: 'connect-loader' })).toHaveLength(0);
-      expect(renderer.root.findByProps({ testID: 'connect-error' }).props.children).toBe('Helpers are unavailable right now');
     });
 
-    it('surfaces a pair POST that never settles, and still follows a late resolve', async () => {
+    it('keeps a pair pending until its source settles, then follows the install commit', async () => {
       let resolvePair: () => void = () => {};
       const base = new MockWorkbenchSource();
       const realPair = base.pairConnector.bind(base);
@@ -576,16 +622,8 @@ describe('Connect Trusty Squire flow — ONE connect path', () => {
         await Promise.resolve();
       });
       expect(renderer.root.findAllByProps({ testID: 'connect-error' })).toHaveLength(0);
-      // The transport sets no timeout of its own: the hung await must reach
-      // the user through the one error channel, not sit on the picker.
-      await act(async () => {
-        vi.advanceTimersByTime(60_000);
-        await Promise.resolve();
-        await Promise.resolve();
-      });
-      expect(renderer.root.findByProps({ testID: 'connect-step-0-detail' }).props.children).toContain('didn’t answer for 1 minute');
-      expect(renderer.root.findByProps({ testID: 'connect-step-bar' }).props.parts[0]).toBe('failed');
-      // A late resolve still starts the poll and clears the stale notice.
+      expect(renderer.root.findByProps({ testID: 'connect-step-0-detail' }).props.children).toBe('Waiting for the helper');
+      expect(renderer.root.findByProps({ testID: 'connect-step-bar' }).props.parts[0]).toBe('active');
       await act(async () => {
         resolvePair();
         await Promise.resolve();
@@ -608,20 +646,22 @@ describe('Connect Trusty Squire flow — ONE connect path', () => {
       );
     });
 
-    it('surfaces an install poll that keeps failing instead of swallowing errors', async () => {
-      setWorkbenchSource(
-        Object.assign(new MockWorkbenchSource(), {
-          readInstallState: async () => {
-            throw new Error('transport gone');
-          },
-        }),
-      );
+    it('keeps failed install reads silent until a shared reconnect reads again', async () => {
+      const source = new MockWorkbenchSource();
+      const read = source.readInstallState.bind(source);
+      const readInstallState = vi.fn(read).mockRejectedValueOnce(new Error('transport gone'));
+      setWorkbenchSource(Object.assign(source, { readInstallState }));
       const renderer = await render();
       await pair(renderer);
-      await untilError(renderer);
-      expect(renderer.root.findByProps({ testID: 'connect-error' }).props.children).toContain(
-        'Lost contact',
-      );
+      expect(renderer.root.findAllByProps({ testID: 'connect-error' })).toHaveLength(0);
+      const calls = readInstallState.mock.calls.length;
+      await act(async () => { await Promise.resolve(); await Promise.resolve(); });
+      expect(readInstallState).toHaveBeenCalledTimes(calls);
+      await act(async () => {
+        for (const listener of liveListeners) listener({ monolithLive: { type: 'invalidate', roomId: '', reason: 'reconnect' } });
+      });
+      expect(readInstallState.mock.calls.length).toBeGreaterThan(calls);
+      expect(renderer.root.findAllByProps({ testID: 'connect-error' })).toHaveLength(0);
     });
   });
 });

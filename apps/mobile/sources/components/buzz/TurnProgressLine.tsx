@@ -5,6 +5,7 @@ import { BeelineMarkSpinner, MARK_CELL } from './BeelineMarkSpinner';
 import { ribbon } from '@/buzz/beeline-glyph';
 import { HullLivePulse } from './MonoHull';
 import { Button } from './Button';
+import { InlineRow } from './IndexRow';
 import { SPINNER_STEP_MS, elapsedSeconds, formatWorkingCounter } from '@/buzz/turn-clock';
 import {
   TURN_LINE_BAR_MARGIN_BOTTOM,
@@ -56,7 +57,10 @@ export const STOP_HIT_SLOP = (44 - TURN_LINE_ROW_MIN_HEIGHT) / 2;
  * the control dims and the counter says `stopping` — before the cancelled
  * receipt lands; a failed stop enables it again.
  */
-export function TurnProgressLine(props: React.ComponentProps<typeof TurnProgressLineBody>) {
+export function TurnProgressLine(props: React.ComponentProps<typeof TurnProgressLineBody> & {
+  /** Accepted external sends use the same line without live motion. */
+  live?: boolean;
+}) {
   // A stream replaces its parent's Stop closure on every tick. Keep the paint
   // boundary stable while the action reads the latest committed turn.
   const stopRef = React.useRef(props.onStop);
@@ -64,11 +68,16 @@ export function TurnProgressLine(props: React.ComponentProps<typeof TurnProgress
     stopRef.current = props.onStop;
   });
   const stop = React.useCallback(() => stopRef.current?.(), []);
-  return <TurnProgressLineBody {...props} onStop={props.onStop ? stop : undefined} />;
+  return props.live === false && !props.onStop ? (
+    <TurnSettledLine line={props.label} inset={props.inset} leading testID={props.testID} />
+  ) : (
+    <TurnProgressLineBody {...props} onStop={props.onStop ? stop : undefined} />
+  );
 }
 
 const TurnProgressLineBody = React.memo(function TurnProgressLineBody({
   label,
+  live = true,
   startedAt,
   received = false,
   onStop,
@@ -77,6 +86,7 @@ const TurnProgressLineBody = React.memo(function TurnProgressLineBody({
   inset = true,
 }: {
   label: string;
+  live?: boolean;
   /** Desktop callers already supply the transcript inset around this row. */
   inset?: boolean;
   /** Server receipt time, unix seconds, the elapsed counter ticks from. */
@@ -115,18 +125,18 @@ const TurnProgressLineBody = React.memo(function TurnProgressLineBody({
     <View
       accessibilityLabel={stateLabel ? `${label} (${stateLabel})` : label}
       accessibilityLiveRegion="polite"
-      accessibilityRole="progressbar"
+      accessibilityRole={live ? "progressbar" : "text"}
       style={inset ? styles.bar : [styles.bar, styles.insetBar]}
       testID={testID}
     >
-      <HullLivePulse style={styles.row}>
+      <HullLivePulse active={live} style={styles.row}>
         <View
           style={[styles.glyphCell, styles.leadingGlyph]}
           testID={testID ? `${testID}-glyph` : undefined}
         >
-          <BeelineMarkSpinner live />
+          <BeelineMarkSpinner live={live} />
         </View>
-        <Text numberOfLines={1} style={styles.label}>
+        <Text numberOfLines={1} ellipsizeMode="tail" style={styles.label}>
           {label}
         </Text>
         {counter != null && (
@@ -170,38 +180,40 @@ const TurnProgressLineBody = React.memo(function TurnProgressLineBody({
  * wall-clock "done" stamp. Static — no breath, no counter, the completed mark
  * — because the turn is over; the screen clears it after a few seconds.
  */
-export function TurnSettledLine({ line, testID }: { line: string; testID?: string }) {
+export function TurnSettledLine({ line, testID, inset = true, leading = false, leadingGlyph = true, action }: {
+  line: string;
+  testID?: string;
+  inset?: boolean;
+  /** The external-send variant shares the thinking mark's optical alignment. */
+  leading?: boolean;
+  leadingGlyph?: boolean;
+  action?: { label: string; onPress(): void };
+}) {
   return (
-    <View accessibilityLabel={line} style={styles.bar} testID={testID}>
-      <View style={styles.row}>
-        <View style={styles.glyphCell} testID={testID ? `${testID}-glyph` : undefined}>
+    <View accessibilityLabel={line} accessibilityLiveRegion={leading ? 'polite' : undefined} style={inset ? styles.bar : [styles.bar, styles.insetBar]} testID={testID}>
+      <InlineRow style={[styles.row, action && !leadingGlyph && styles.actionRow]}>
+        {leadingGlyph ? <View style={leading ? [styles.glyphCell, styles.leadingGlyph] : styles.glyphCell} testID={testID ? `${testID}-glyph` : undefined}>
           <BeelineMarkSpinner />
-        </View>
-        <Text numberOfLines={1} style={styles.label}>
+        </View> : null}
+        <Text numberOfLines={1} ellipsizeMode="tail" style={styles.label}>
           {line}
         </Text>
-      </View>
+        {action ? <>
+          <Text style={styles.counter}> · </Text>
+          <Button size="inline" variant="quiet" label={action.label}
+            appearance={{ control: styles.statusAction, label: styles.counter }}
+            onTouchEnd={event => event.stopPropagation()}
+            onPress={event => { event.stopPropagation(); action.onPress(); }}
+            testID={testID ? `${testID}-retry` : undefined} />
+        </> : null}
+      </InlineRow>
     </View>
   );
 }
 
-/**
- * Where the turn line lives: in the margin the transcript already leaves below
- * its newest message, painted over it rather than added beneath it.
- *
- * Earlier rounds gave the line its own strip, which forced a choice with no
- * good side. An in-flow band takes its height out of the list, so the
- * transcript shifted every time an agent started or stopped working. Holding a
- * strip open permanently stopped the shift but left an empty band above the
- * composer in every Room, whether or not anybody was working, and needed a
- * hidden duplicate of the line mounted purely to measure it.
- *
- * Neither was necessary: the room between the newest message and the composer
- * is already the ordinary speaker-change margin plus the fixed composer-top
- * gap, and the line's box is exactly that space. Painting into reserved space
- * costs no conditional height, so there is nothing to measure and nothing for
- * the transcript to move by.
- */
+/** The phone line overlays the fixed transcript tail. Its canvas and label
+ * are lowered toward the field so the newest row (including reactions) stays
+ * above the paint and the visible air to the field border is balanced. */
 export function TurnBandSlot({
   children,
   onTopInset,
@@ -251,6 +263,8 @@ const styles = StyleSheet.create((theme) => {
       paddingHorizontal: groknight.space.md,
     },
     insetBar: { paddingHorizontal: 0 },
+    actionRow: { gap: 0 },
+    statusAction: { minHeight: TURN_LINE_ROW_MIN_HEIGHT, justifyContent: 'center' },
     row: {
       minHeight: TURN_LINE_ROW_MIN_HEIGHT,
       minWidth: 0,

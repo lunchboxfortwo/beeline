@@ -4,7 +4,7 @@ import { cornerOwnerSql } from './corner-worker.js';
 import { afterAll, beforeAll, expect, it } from 'vitest';
 import { PgliteDatabase, migratedDatabase } from './test-support.js';
 import { PhoneService } from './phone-service.js';
-import { DaemonService } from './daemon-service.js';
+import { HelperDaemonService as DaemonService } from './test-fixtures/helper-daemon.js';
 import { LiveHub } from './live.js';
 
 const HUMAN = 'a'.repeat(64),
@@ -128,8 +128,8 @@ it('Reproduction O1-1: naming Beta assigns the work to Beta and keeps Alpha as a
     )
   ).rows[0];
   expect(card?.system_event.subject.id).toBe(A);
-  const workflow = (await db.query(`SELECT card FROM messages WHERE id=$1`, [cornerId])).rows[0];
-  expect(workflow?.card.roleBindings.implementer).toBe(B);
+  expect((await db.query(`SELECT agent_id FROM agent_commands WHERE room_id=$1 AND reason='corner_objective'`, [cornerId])).rows)
+    .toEqual([{ agent_id: B }]);
   const beforeReplay = await openingCounts();
   expect(await daemon.execute('createCorner', request, A)).toEqual({
     cornerId,
@@ -182,6 +182,25 @@ async function openingCounts() {
     counts[table] = (await db.query(`SELECT count(*) FROM ${table}`)).rows[0];
   return counts;
 }
+
+it('handle-1: retries select the current Room member when an outsider has the same global handle', async () => {
+  await db.query(`UPDATE identities SET handle='beta_global' WHERE id=$1`, [B]);
+  await db.query(`UPDATE identities SET handle='beta' WHERE id=$1`, [OUTSIDER]);
+  // Keep the outsider first in an unscoped heap scan, reproducing the retry failure.
+  await db.query(`UPDATE identities SET name='Local Beta' WHERE id=$1`, [B]);
+  try {
+    const request = { ...(await input()), implementer: 'beta' };
+    const opened = await daemon.execute('createCorner', request, A);
+    const before = await openingCounts();
+    expect(await daemon.execute('createCorner', request, A)).toEqual(opened);
+    expect(await openingCounts()).toEqual(before);
+    expect((await db.query(`SELECT agent_id FROM agent_commands WHERE room_id=$1 AND reason='corner_objective'`, [opened.cornerId])).rows)
+      .toEqual([{ agent_id: B }]);
+  } finally {
+    await db.query(`UPDATE identities SET handle='outsider' WHERE id=$1`, [OUTSIDER]);
+    await db.query(`UPDATE identities SET handle='beta',name='Beta' WHERE id=$1`, [B]);
+  }
+}, 30_000);
 
 it.each([
   ['outsider', 'current member'],

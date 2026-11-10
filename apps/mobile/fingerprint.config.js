@@ -24,9 +24,16 @@ const easChunks = new WeakMap();
 /** @type {import('@expo/fingerprint').Config} */
 /** @public Expo fingerprint loads this configuration by filename. */
 module.exports = {
-  // This patch catches a web-only font promise in JavaScript. It changes no
-  // native input; keep native patches (including expo-notifications) counted.
-  ignorePaths: ['patches/@expo+vector-icons+15.1.1.patch'],
+  // These patches only change web JavaScript. Keep native patches counted.
+  ignorePaths: [
+    'patches/@expo+vector-icons+15.1.1.patch',
+    'patches/react-native-unistyles+3.1.1.patch',
+    // Autolinking hashes the installed package too. These are the exact web-only
+    // files covered by unistyles-batching.test.ts; native inputs remain counted.
+    'node_modules/react-native-unistyles/src/web/css/state.ts',
+    'node_modules/react-native-unistyles/lib/module/web/css/state.js',
+    'node_modules/react-native-unistyles/lib/commonjs/web/css/state.js',
+  ],
   sourceSkips: [
     // The whole `scripts` section is JS/CI tooling. The library hashes it by
     // default only because `expo prebuild` rewrites the android/ios entries,

@@ -88,7 +88,7 @@ export async function requestMachine(
   stateRoot: string,
   request: MachineRequest,
   accept: (status: HelperStatusFile) => boolean,
-  timeoutMs = 600_000,
+  _timeoutMs = 600_000,
 ): Promise<HelperStatusFile> {
   const path = machineControlPath(stateRoot);
   await preparePrivateSocketDirectory(path);
@@ -97,33 +97,16 @@ export async function requestMachine(
     let connecting = false;
     let reconnectNeeded = false;
     let settled = false;
-    let lastStatus: HelperStatusFile | undefined;
     const watcher = watch(dirname(path), (_event, filename) => {
       if (filename === basename(path)) {
         reconnectNeeded = true;
         if (!socket && !connecting) connect();
       }
     });
-    const timer = setTimeout(
-      () =>
-        finish(
-          new Error(
-            `helper convergence timed out${
-              lastStatus
-                ? `: ${Object.entries(lastStatus.agents)
-                    .filter(([, agent]) => agent.state !== 'serving' && agent.state !== 'stopped')
-                    .map(([id, agent]) => `${id}: ${agent.state} (${agent.status})`)
-                    .join('; ')}`
-                : '; no live helper acknowledgment'
-            }`,
-          ),
-        ),
-      timeoutMs,
-    );
+
     function finish(error?: Error, status?: HelperStatusFile) {
       if (settled) return;
       settled = true;
-      clearTimeout(timer);
       watcher.close();
       socket?.destroy();
       if (error) reject(error);
@@ -162,8 +145,7 @@ export async function requestMachine(
               Array.isArray(status.agents)
             )
               throw new Error('invalid helper acknowledgment');
-            lastStatus = status;
-            if (accept(status)) finish(undefined, status);
+                  if (accept(status)) finish(undefined, status);
           } catch (error) {
             finish(error instanceof Error ? error : new Error(String(error)));
           }
@@ -179,5 +161,37 @@ export async function requestMachine(
       });
     }
     connect();
+  });
+}
+
+/** Read the existing host adb server directly: invoking adb could start a server. */
+export function hostEmulatorSerials(connect = () => createConnection({ host: '127.0.0.1', port: 5037 })): Promise<string[]> {
+  return new Promise((resolve, reject) => {
+    const socket = connect();
+    let bytes = Buffer.alloc(0);
+    socket.once('connect', () => {
+      const query = 'host:devices';
+      socket.write(query.length.toString(16).padStart(4, '0') + query);
+    });
+    socket.on('data', (chunk: Buffer) => {
+      bytes = Buffer.concat([bytes, chunk]);
+      if (bytes.length < 8) return;
+      const status = bytes.subarray(0, 4).toString();
+      const header = bytes.subarray(4, 8).toString();
+      if (status !== 'OKAY' || !/^[0-9a-f]{4}$/i.test(header)) {
+        socket.destroy(new Error('host adb device list unavailable'));
+        return;
+      }
+      const length = Number.parseInt(header, 16);
+      if (bytes.length < 8 + length) return;
+      const devices = bytes.subarray(8, 8 + length).toString().split('\n');
+      socket.destroy();
+      resolve(devices.flatMap((line) => {
+        const [serial, state] = line.trim().split(/\s+/);
+        return serial && /^emulator-\d+$/.test(serial) && state === 'device' ? [serial] : [];
+      }));
+    });
+    socket.once('error', reject);
+    socket.once('close', () => reject(new Error('host adb server closed')));
   });
 }

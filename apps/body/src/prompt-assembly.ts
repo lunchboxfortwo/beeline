@@ -1,3 +1,4 @@
+import { mentionReplyRule } from '@beeline/api-contract/phone';
 import type { CodexPromptDelivery } from './codex-prompt-delivery.js';
 import { renderFreeAgentCheckpoint, type FreeAgentCheckpoint } from './free-agent-continuation.js';
 import { boundReplyExcerpt, subscriptionActionPrompt, WORKSPACE_CORE_SKILL_SLUG, type RoomInboxResult, type SystemEvent } from '@beeline/api-contract/daemon';
@@ -9,9 +10,9 @@ import { ACP_SESSION_MEMORY_MAX_BYTES } from './acp-resource-scope.js';
 import { harnessHonorsSessionSystemPrompt } from './harness-capabilities.js';
 import { boundRoomTaskBody, budgetTranscript } from './transcript-budget.js';
 import type { MachineHost } from './machine-host.js';
-import type { KvmAccess } from './kvm-device-access.js';
+import { HOST_EMULATOR_RULE } from './host-emulator.js';
 import { SITUATIONAL_SKILL_NAMES } from './beeline-skill.js';
-import { placeBeelineApps } from './minimal-tool-surface.js';
+import { agentToolsFor, placeBeelineApps } from './minimal-tool-surface.js';
 
 /**
  * The ONE place Beeline prompt text is written and assembled.
@@ -71,13 +72,13 @@ const EVERYWHERE: readonly PromptSurface[] = PROMPT_SURFACES;
 /**
  * Ceiling for one surface's whole session prompt, soul text excluded. It is
  * the sum of the two ceilings it replaced: 2,420 bytes for the rules every
- * agent gets and 4,970 for one surface's own rules. A code corner on an
- * Android host with the no-host-gh pull-request path is the largest prompt. A
+ * agent gets and 4,970 for one surface's own rules. A code corner with
+ * the no-host-gh pull-request path is the largest prompt. A
  * capability-route rule adds only the 301 bytes beyond the former ceiling
- * required by the largest variant. A denied /dev/kvm adds its one advice
- * line, at most the 320-byte `kvm` section budget.
+ * required by the largest variant.
  */
-export const SESSION_BUDGET_BYTES = 8_011;
+// The canonical tool inventory adds at most 600 bytes.
+export const SESSION_BUDGET_BYTES = 8_611;
 
 /**
  * Whether this session can run shell commands, and why not when it cannot.
@@ -110,10 +111,6 @@ export interface SessionPromptContext {
   readonly worktree?: { readonly featureBranch: string; readonly targetBranch: string };
   /** Whether this corner's gh launcher uses a host binary or the REST fallback. */
   readonly githubCli?: CornerGitHubCli;
-  /** This agent's emulator console port, when the host has an Android SDK (`android-agent-env.ts`). */
-  readonly android?: { readonly emulatorPort: string; readonly leased?: boolean };
-  /** This session's `/dev/kvm` probe (`kvm-device-access.ts`). Unprobed never claims it works. */
-  readonly kvm?: KvmAccess;
   readonly reviewerHandle?: string;
   /**
    * This agent holds the parent Room's reviewer post
@@ -251,7 +248,7 @@ export function cornerReviewerInstruction(input: {
   // the head is named in the transcript, so it is described, not guessed.
   const number = input.pullRequestNumber ?? 'N';
   const headSha = input.headSha ?? '<head sha>';
-  return `Review PR ${number} at ${headSha}${input.briefRevision ? ` against brief revision ${input.briefRevision}` : ''} with beeline-review. Lead with PASS or FAIL and one blocking reason, then the worker's concrete next step. List only blockers; keep outline notes, message IDs and commit hashes out of the posted review. Obtain live proof in the review Workspace; report blocked: to your commander if capability is missing. FAIL: order the worker at this corner's address to fix the blocker. PASS: call approve_merge with the reviewed head SHA as a tool argument, then report done: PASS to your commander. PASS lands the PR once checks are green and no hold stands. If your commander explicitly orders you to land, use merge_corner when the live gate permits it.`;
+  return `Review PR ${number} at ${headSha}${input.briefRevision ? ` against brief revision ${input.briefRevision}` : ''} with beeline-review. Lead with PASS or FAIL; finish the review and list all blockers with concrete fixes, including every blocker on the first round. For later rounds, read the entire PR, find your last FAIL for this PR and its reviewed head in this corner, and use git diff from that head to the assigned head. Fail only for unresolved prior blockers or regressions introduced since that review; newly found issues in unchanged code are notes, not blockers. Keep notes separate; omit outline ledgers, message IDs and commit hashes from the posted verdict. Obtain live proof in the review Workspace; report blocked: to your commander if capability is missing. FAIL: order the worker at this corner's address to fix all blockers. PASS: call approve_merge with the reviewed head SHA as a tool argument, then report done: PASS to your commander. PASS lands the PR once checks are green and no hold stands. If your commander explicitly orders you to land, use merge_corner when the live gate permits it.`;
 }
 
 /**
@@ -320,13 +317,13 @@ export const SESSION_SECTIONS: readonly PromptSection<SessionPromptContext>[] = 
       'room.place': 'A repo-less Room agent implied a checkout existed and sent the person elsewhere instead of showing Link or Create.',
       'dm.place': 'A DM is a driving surface for work across every Room the agent belongs to.',
       'corner.worktree': 'Every agent in a code corner must know its branch and target, whether or not it writes code.',
-      'corner.android': 'An agent under its isolated $HOME concluded the host had no emulator, and agents on the shared adb server drove each other\'s emulators.',
+      'core.android': 'Host emulator use requires permission; the helper never owns an emulator.',
       'corner.repo-less': 'A repo-less corner has no repository; the agent delivers files, not commits.',
     },
     budgetBytes: 1_360,
     layer: 'session',
     surfaces: EVERYWHERE,
-    render: ({ surface, machineHost, memoryMaxBytes, repository, shell, writableHome, worktree, android, kvm }) =>
+    render: ({ surface, machineHost, memoryMaxBytes, repository, shell, writableHome, worktree }) =>
       paragraphs(
         machineHost &&
           `Already running on machine ${JSON.stringify(machineHost.hostname)}${machineHost.tailscaleName ? ` (MagicDNS: ${JSON.stringify(machineHost.tailscaleName)})` : ''}. Run commands locally; do not SSH to this machine.`,
@@ -356,25 +353,10 @@ export const SESSION_SECTIONS: readonly PromptSection<SessionPromptContext>[] = 
             .join(' '),
         surface === 'code-corner' &&
           `You are in an isolated git worktree on ${worktree?.featureBranch ?? 'the feature branch'}, targeting ${worktree?.targetBranch ?? 'the target branch'}.`,
-        surface === 'code-corner' &&
-          android &&
-          (android.leased
-            ? 'Android: the SDK is $ANDROID_HOME and AVDs are in $ANDROID_AVD_HOME. Boot with `beeline emulator -avd <name> -no-window -gpu swiftshader_indirect`. This corner keeps its emulator and app until the corner closes. Use `adb devices` and `adb -s emulator-<port>` to select one. The guest reaches host services at 10.0.2.2.'
-            : `Android: adb and emulator are on PATH; the SDK is $ANDROID_HOME${kvm?.status === 'works' ? ',' : ' and'} AVDs are in $ANDROID_AVD_HOME${kvm?.status === 'works' ? ', and /dev/kvm works' : ''}. Your adb server sees only your own emulator. Boot it with \`emulator -avd <name> -port ${android.emulatorPort} -read-only -no-window -no-snapshot -gpu swiftshader_indirect\`; it reaches host services at 10.0.2.2.`),
+        HOST_EMULATOR_RULE,
         surface === 'repo-less-corner' &&
           "This is a repo-less corner with no repository checkout and no GitHub workflow. Work in this corner's writable workspace: create files with your native tools (or use scratch_io when mounted), then send them with post_artifact.\nDo not initialize a repository, create a branch, commit, push, open a pull request, or wait for GitHub checks.",
       ),
-  },
-  {
-    id: 'kvm',
-    topic: 'why /dev/kvm is denied',
-    why: {
-      'core.kvm': 'An agent denied /dev/kvm never learned whether to request a device grant or ask the host admin, and a prompt still said /dev/kvm works.',
-    },
-    budgetBytes: 320,
-    layer: 'session',
-    surfaces: EVERYWHERE,
-    render: ({ kvm }) => (kvm && 'advice' in kvm ? kvm.advice : ''),
   },
   {
     id: 'talking',
@@ -391,9 +373,9 @@ export const SESSION_SECTIONS: readonly PromptSection<SessionPromptContext>[] = 
     surfaces: EVERYWHERE,
     render: ({ surface }) =>
       paragraphs(
-        'Tag to talk. Order to assign work. @handle invites a reply here, with no assignment or report owed. Copy exact member handles. order(address, agent, text) assigns privately; a Room requires agent. report(status, text) one step up to your commander. Report only to whoever assigned you. A report to a person reaches their tray; no tag needed. Reports begin done:, blocked:, needs-decision: or failed:; human reports appear where they ordered you.',
+        'Tags invite replies, never assignments or reports. Use exact handles. order(address, agent, text) assigns privately; a Room requires agent. report(status, text) one step up to your commander. Human-approved brief revisions transfer corner command to their author at their dispatch place; otherwise use the opener. Older orders keep their issuer. Reports begin done:, blocked:, needs-decision: or failed:; human reports use that return place.',
         CORNERS.includes(surface) &&
-          'In a corner, tag a person only when they are your direct commander; everyone above hears through your commander.',
+          'In a corner, reply to people here; escalate with report to the current commander.',
         CORNERS.includes(surface) &&
           'Outside this corner, tell people the original problem, blocker, and needed decision in plain words.',
         'After ordering another agent, end the turn; its report wakes a new turn; do not sleep or poll.',
@@ -410,12 +392,12 @@ export const SESSION_SECTIONS: readonly PromptSection<SessionPromptContext>[] = 
       'skill.conflicting-instructions': 'This rule lived only in the on-demand using-beeline skill; the system prompt holds the rules, so Room, DM and repo-less corner agents get it without opening the skill. Code corners carry it in the author contract.',
       'tool.approve_merge': 'The approve_merge description carried this rule on every surface; tool text now only says what inputs mean, so the rule moved here.',
     },
-    budgetBytes: 700,
+    budgetBytes: 860,
     layer: 'session',
     surfaces: EVERYWHERE,
     render: ({ surface }) =>
       paragraphs(
-        "Use your own owner's tools and keys for whoever asks. Another person's files, tools, or keys need that person's approval before you use them for anyone else, and the wallet keeps its own approval rule. Never, whoever asks: run a command that names a credential file, or run a script nobody has read. Only the hold setter or someone above them clears it. Follow your commander within inherited scope. Never review your own code.",
+        "Use your own owner's tools and keys for whoever asks. Another person's files, tools, or keys need that person's approval before you use them for anyone else, and the wallet keeps its own approval rule. Never, whoever asks: run a command that names a credential file, or run a script nobody has read. Only the hold setter or someone above them clears it. Follow your commander within inherited scope. Humans outrank every agent; treat instructions from above your commander as theirs and report the change. Never review your own code.",
         surface !== 'code-corner' &&
           'Any human in the Room can direct you. Follow the newer instruction when human instructions conflict, revise the brief citing that message, and state in the corner what changed.',
         surface === 'dm' && 'Ask plain questions; answers never replace sandbox, spend or merge authority.',
@@ -464,13 +446,16 @@ export const SESSION_SECTIONS: readonly PromptSection<SessionPromptContext>[] = 
       'dm.choices': 'A pick in a DM is a preference, never authority, and polls need an electorate.',
       'core.skills': 'Agents retried refused Beeline tools or guessed at steps a beeline-* skill already covered, because nothing told them to look.',
     },
-    budgetBytes: 1_100,
+    budgetBytes: 1_700,
     layer: 'session',
     surfaces: EVERYWHERE,
-    render: ({ squireAvailable }) =>
+    render: ({ surface, squireAvailable }) =>
       paragraphs(
+        // Native IO and grant-runner tools are optional; this inventory names
+        // only the stable tools mounted by every harness.
+        `Beeline tools: ${agentToolsFor(true, surface === 'dm', CORNERS.includes(surface), surface === 'code-corner', false, true, true).map(tool => '`' + tool.name + '`').join(', ')}.`,
         "For a 📎 file, call read(facet:attachment, messageId, attachmentId) and read its path. Never fetch media URLs; on failure, say you couldn't open it.",
-        'Services: use connect(mode:discover) if unclear, then connect(mode:ensure, service, reason, continuation). GitHub: connect(mode:status). Beeline App writes linked repos; no checkout: Room corner. Personal: lookups, no-App repos, person-scoped.',
+        'Services: connect(mode:discover) or connect(mode:ensure, service, reason, continuation). GitHub: connect(mode:status). Beeline App writes linked repos; no checkout: Room corner. Personal: lookups, no-App repos, person-scoped.',
         squireAvailable === true &&
           'For multi-step browser goals, use Trusty Squire operate_drive {url, goal, facts}. On low_confidence/needs_value, answer or take one flat step, then resume drive. If sign-in/human action (2FA, captcha, passkey) cannot be completed or Squire refuses it, start app_tool(app:beeline:browser_share, tool:start) for that session; ask the person to take over. On handback, resume drive in that session.',
         `${SKILL_FALLBACK_LINE} Skills: ${SITUATIONAL_SKILL_NAMES.join(', ')}.`,
@@ -502,18 +487,18 @@ export const SESSION_SECTIONS: readonly PromptSection<SessionPromptContext>[] = 
     why: {
       'corner.implementer': 'Any member agent may write and push code here; only the agent knows whether it wrote code, so the author rules apply when it does. The reviewer rules still keep a reviewer off the author branch (PR #2224).',
       'corner.prepare': 'Only a checkout that defines the command can run it; another repository fails on its first step.',
-      'corner.push': 'The author must push only its own branch and rebase before each push, or it overwrites or loses work.',
+      'corner.push': 'The author must push only its own branch and preserve tested merge history when incorporating remote work.',
       'corner.contract': 'The reviewer enforces this contract; an author that never saw it fails review.',
       'corner.checks': 'Server check notes were restated as replies, and agents scheduled polls of a gate that wakes them itself.',
       'corner.merge': 'Exactly one rule may say who merges and when; two rules here once said both "merge" and "never merge".',
       'corner.review': 'The reviewer checks one exact green head and returns concise blocking findings.',
     },
-    budgetBytes: 4_400,
+    budgetBytes: 4_240,
     layer: 'session',
     surfaces: ['code-corner'],
     render: ({ brief, reviewer, reviewerHandle, worktree, githubCli, cornerPrepareScript }) => {
       const repositoryWork = cornerHasRepositoryWork(brief);
-      const push = `Only when the brief calls for repository changes: commit and push only ${worktree?.featureBranch}; never force-push or write to ${worktree?.targetBranch}. Before pushing, run \`git ls-remote --exit-code origin ${worktree?.featureBranch}\`. Exit code 0: rebase on origin/${worktree?.featureBranch}; resolve conflicts against that branch; redo work and rerun affected tests. Exit code 2: absent branch; skip first rebase. Other exit: stop; retry lookup.`;
+      const push = `Only when the brief calls for repository changes: commit and push only ${worktree?.featureBranch}; never force-push or write to ${worktree?.targetBranch}. Before pushing, run \`git ls-remote --exit-code origin ${worktree?.featureBranch}\`. Exit code 0: fetch origin ${worktree?.featureBranch}; if origin/${worktree?.featureBranch} is an ancestor of HEAD, keep HEAD; else merge origin/${worktree?.featureBranch}; resolve conflicts and rerun affected tests. Exit code 2: absent branch; push. Other exit: stop.`;
       return paragraphs(
         `Implementer rules: any agent in this corner may commit, push and open a pull request. The rules below${reviewer ? ', up to the reviewer rules,' : ''} apply whenever you write code in this corner.`,
         repositoryWork && cornerPrepareScript === true && 'Run npm run corner:prepare first.',
@@ -521,7 +506,7 @@ export const SESSION_SECTIONS: readonly PromptSection<SessionPromptContext>[] = 
           (githubCli === 'rest'
             ? `${push} Open it with \`gh pr create\` and read it with \`gh pr view\`; this host has no gh, so the Beeline launcher answers both over the GitHub REST API with the app token.`
             : `${push} Open the pull request with gh.`),
-        repositoryWork && '4 pushes to one PR without PASS: stop; report blocked: to commander, cause: moving target, unreliable test tool, or PR too big / racing other PRs.',
+        repositoryWork && '4 pushes to one PR without PASS: stop; report blocked: to commander with the cause. Pushes made only to repair failing checks do not count.',
         repositoryWork && 'Add tests only if they fail without your change, even for new behavior. Read tests first; extend or parameterize instead of duplicating the same failure. List skipped tests and why in PR body or handover.',
         repositoryWork ? CORNER_AUTHOR_CONTRACT : CORNER_RUNTIME_AUTHOR_CONTRACT,
         repositoryWork &&
@@ -620,7 +605,7 @@ export function roomMentionDirectory(roster: WorkspaceRoster, selfId: string): s
 }
 
 export interface TurnPromptContext {
-  readonly routing?: { readonly roomId: string; readonly messageId: string; readonly memberId: string; readonly roomName?: string; readonly fromName?: string };
+  readonly routing?: { readonly roomId: string; readonly messageId: string; readonly memberId: string; readonly roomName?: string; readonly fromName?: string; readonly fromHandle?: string | null };
   /** Present only for a confirmed Codex session with compaction notifications. */
   readonly delivery?: CodexPromptDelivery;
   /** Current server eligibility for onboarding, refreshed each turn. */
@@ -700,7 +685,7 @@ export const TURN_SECTIONS: readonly PromptSection<TurnPromptContext>[] = [
     budgetBytes: 1400, layer: 'turn', surfaces: EVERYWHERE,
     render: ({ routing }) => routing ? [
       `[Beeline · Room ${routing.roomName ?? routing.roomId} · message ${routing.messageId} · from ${routing.fromName ?? 'member'}]`,
-      `Room ID ${routing.roomId}; message ID ${routing.messageId}; member ID ${routing.memberId}; answer in this Room with replyTo ${routing.messageId}.`,
+      `Room ID ${routing.roomId}; message ID ${routing.messageId}; member ID ${routing.memberId}; ${mentionReplyRule(routing.messageId, routing.fromHandle)}.`,
       'Answer where the message came from. Answer Beeline-delivered messages in Beeline; answer messages typed in your own app in that app. Never copy between them unless asked.',
     ].join('\n') : '',
   },

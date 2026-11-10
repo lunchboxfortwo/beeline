@@ -18,7 +18,7 @@ export function voiceContextText(row: VoiceContextRow): string {
 
 export async function readVoiceContext(db: SqlDatabase, roomId: string, sourceId: string, agentId: string) {
   const rows = await db.query<VoiceContextRow>(
-    `SELECT m.id,left(m.text,800) text,m.author_id,i.name,i.handle,m.attachments,m.card_type,
+    `SELECT m.id,left(m.text,800) text,m.author_id,i.name,beeline_room_handle(i.id,m.room_id) handle,m.attachments,m.card_type,
        jsonb_build_object('title',m.card->>'title','name',m.card->>'name','url',m.card->>'url') card
      FROM messages m JOIN identities i ON i.id=m.author_id
      WHERE m.room_id=$1 AND m.id<>$2 AND m.presentation IN ('message','card') AND m.deleted_at IS NULL

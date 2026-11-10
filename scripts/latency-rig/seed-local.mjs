@@ -2,6 +2,7 @@
 /** Deterministic, disposable fixture for the local monolith only. */
 import { createHash } from 'node:crypto';
 import pg from 'pg';
+import { seedWebFixtures } from './web-fixtures.mjs';
 
 const connectionString = process.env.LATENCY_RIG_DATABASE_URL;
 if (!connectionString) throw new Error('LATENCY_RIG_DATABASE_URL is required');
@@ -104,6 +105,7 @@ try {
     VALUES($1,$2,$3,repeat('streamed answer ',640),clock_timestamp())
     ON CONFLICT(id) DO UPDATE SET created_at=EXCLUDED.created_at`,
     [messageId('10kb-answer'), busy.roomId, reviewId]);
+  await seedWebFixtures(database);
   await database.query('COMMIT');
   console.log(JSON.stringify({ fixtures, busyCornerId: cornerIds[0],
     cornerCount: cornerIds.length, oldActivityRows: 10000, windowRows: 30,

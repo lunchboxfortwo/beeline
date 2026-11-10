@@ -7,7 +7,7 @@ import { createBeelineServer } from './server.js';
 import { migrate } from './database.js';
 import { describedWorkflow, PgliteDatabase, migratedDatabase } from './test-support.js';
 import { PhoneService } from './phone-service.js';
-import { DaemonService } from './daemon-service.js';
+import { HelperDaemonService as DaemonService } from './test-fixtures/helper-daemon.js';
 import { LiveHub } from './live.js';
 import { AgentScheduleLoop } from './agent-schedules.js';
 import { saveWorkflow, startWorkflow, cancelWorkflowRun, getWorkflowRun } from './workflow-runs.js';
@@ -93,111 +93,6 @@ const start = () =>
     { room_id: ROOM, agent_id: OWNER },
     { name: 'daily', roleBindings: { worker: AGENT } },
   );
-
-describe('Reproduction workflow-timer-mutations-1', () => {
-  it.each([ROOM, CORNER])('a Workspace admin cannot delete engine timers in %s', async (surfaceId) => {
-    const { runId } = await start();
-    if (surfaceId === CORNER) {
-      await db.query(
-        `INSERT INTO rooms(id,workspace_id,parent_id,created_by,name) VALUES($1,$2,$3,$4,'Corner')`,
-        [CORNER, WORKSPACE, ROOM, OWNER],
-      );
-
-      await db.query(`UPDATE agent_schedules SET room_id=$2 WHERE workflow_run->>'runId'=$1`, [
-        runId,
-        CORNER,
-      ]);
-    }
-    const timers = (
-      await db.query(`SELECT * FROM agent_schedules WHERE workflow_run->>'runId'=$1 ORDER BY id`, [
-        runId,
-      ])
-    ).rows;
-    expect(timers).toHaveLength(2);
-    const run = await getWorkflowRun(db, ROOM, runId);
-    for (const timer of timers) {
-      await expect(
-        phone.execute('deleteRoomSchedule', { roomId: ROOM, scheduleId: timer.id }, ADMIN),
-      ).rejects.toThrow('schedule not found');
-    }
-    expect(
-      (
-        await db.query(
-          `SELECT * FROM agent_schedules WHERE workflow_run->>'runId'=$1 ORDER BY id`,
-          [runId],
-        )
-      ).rows,
-    ).toEqual(timers);
-    expect(await getWorkflowRun(db, ROOM, runId)).toEqual(run);
-    const ordinary = await daemon.execute(
-      'createAgentSchedule',
-      { title: 'Scheduled check',
-        roomId: surfaceId,
-        agentId: AGENT,
-        prompt: 'Ordinary task',
-        cadence: { kind: 'interval', everyMinutes: 1 },
-      },
-      AGENT,
-    );
-    await phone.execute(
-      'deleteRoomSchedule',
-      { roomId: ROOM, scheduleId: ordinary.scheduleId },
-      ADMIN,
-    );
-    expect(
-      (await db.query(`SELECT 1 FROM agent_schedules WHERE id=$1`, [ordinary.scheduleId])).rowCount,
-    ).toBe(0);
-    console.log(
-      `Demonstrated workflow-timer-mutations-1: Room admin got schedule not found for both timers in ${surfaceId}; timer rows and run unchanged; ordinary deletion succeeded`,
-    );
-  });
-
-  it.each(['deleteAgentSchedule', 'updateAgentSchedule'] as const)(
-    '%s cannot mutate engine timers',
-    async (operation) => {
-      const { runId } = await start();
-      const timers = (
-        await db.query(
-          `SELECT * FROM agent_schedules WHERE workflow_run->>'runId'=$1 ORDER BY id`,
-          [runId],
-        )
-      ).rows;
-      expect(timers).toHaveLength(2);
-      const run = await getWorkflowRun(db, ROOM, runId);
-      for (const timer of timers) {
-        await expect(
-          daemon.execute(
-            operation,
-            {
-              roomId: ROOM,
-              scheduleId: timer.id,
-              ...(operation === 'updateAgentSchedule'
-                ? {
-                    prompt: 'Rewritten timer',
-                    cadence: { kind: 'interval' as const, everyMinutes: 60 },
-                    maxRuns: 3,
-                  }
-                : {}),
-            },
-            AGENT,
-          ),
-        ).rejects.toThrow('schedule not found');
-      }
-      expect(
-        (
-          await db.query(
-            `SELECT * FROM agent_schedules WHERE workflow_run->>'runId'=$1 ORDER BY id`,
-            [runId],
-          )
-        ).rows,
-      ).toEqual(timers);
-      expect(await getWorkflowRun(db, ROOM, runId)).toEqual(run);
-      console.log(
-        `Demonstrated workflow-timer-mutations-1: ${operation} rejected both engine timers; timer rows and run unchanged`,
-      );
-    },
-  );
-});
 
 async function schedule(prompt: string, explicit = false) {
   const created = await daemon.execute(

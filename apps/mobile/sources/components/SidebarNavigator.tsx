@@ -12,7 +12,7 @@ import { useLocalSetting, useLocalSettingMutable } from '@/sync/storage';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { usePathname, useRouter } from 'expo-router';
 import { Image } from 'expo-image';
-import { Ionicons } from '@expo/vector-icons';
+import Ionicons from '@expo/vector-icons/Ionicons';
 import { useUnistyles } from 'react-native-unistyles';
 import { isTauri } from '@/utils/isTauri';
 import { APP_UI_SIZE_SCALE } from '@/ui-size';
@@ -60,7 +60,7 @@ export const SidebarNavigator = React.memo(() => {
   // Choosing, creating or joining a Workspace is a focused setup step, like
   // onboarding: no Room sidebar (a person there may have no Workspace yet).
   const isAppSurface =
-    pathname.startsWith('/beeline/') &&
+    (pathname === '/' || pathname.startsWith('/beeline/')) &&
     !pathname.includes('/onboarding') &&
     !SETUP_SURFACES.includes(pathname);
   const showSessionChrome =

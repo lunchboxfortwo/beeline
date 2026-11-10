@@ -3,13 +3,13 @@ vi.mock('expo-crypto', () => ({ randomUUID: () => '11111111-2222-4333-8444-55555
 vi.mock('@/sync/transport/monolith-operation', () => ({ monolithPhoneOperation: controls.operation }));
 vi.mock('@/buzz/community-storage', () => ({ saveActiveCommunityId: vi.fn(async () => undefined) }));
 vi.mock('@/buzz/enter-workspace', () => ({ enterWorkspaceRoom: controls.enter }));
-vi.mock('@expo/vector-icons', async () => { const R = await import('react'); return { Ionicons: (props: any) => R.createElement('Ionicons', props) }; });
+vi.mock('@expo/vector-icons/Ionicons', async () => { const R = await import('react'); return { default: (props: any) => R.createElement('Ionicons', props) }; });
 vi.mock('expo-haptics', () => ({ ImpactFeedbackStyle: { Light: 'Light' }, impactAsync: async () => undefined }));
 vi.mock('react-native-keyboard-controller', async () => { const R = await import('react'); return { KeyboardAvoidingView: (props: any) => R.createElement('View', props, props.children) }; });
 import * as React from 'react';
 // @ts-expect-error react-test-renderer has no declarations in this workspace.
 import { act, create, type ReactTestRenderer } from 'react-test-renderer';
-import { afterAll, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest';
+import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest';
 
 const TOKEN = `inv_${'b'.repeat(64)}`;
 const controls = vi.hoisted(() => ({
@@ -115,12 +115,16 @@ beforeAll(() => {
 });
 afterAll(() => vi.restoreAllMocks());
 
+const mounted: ReactTestRenderer[] = [];
+afterEach(async () => { await act(async () => { for (const tree of mounted.splice(0)) tree.unmount(); }); });
+
 async function render(): Promise<ReactTestRenderer> {
   let renderer!: ReactTestRenderer;
   await act(async () => {
     renderer = create(React.createElement(WorkspaceChoice));
   });
   await act(async () => undefined);
+  mounted.push(renderer);
   return renderer;
 }
 const find = (renderer: ReactTestRenderer, testID: string) =>
@@ -189,7 +193,7 @@ describe('the create-or-join choice', () => {
     expect(find(renderer, 'choice-workspace-name')[0]!.props.value).toBe("Ada's team");
     expect(controls.operation.mock.calls.every(call => call[0] === 'getAuthCapabilities')).toBe(true);
     await act(async () => find(renderer, 'choice-create')[0]!.props.onPress());
-    expect(controls.operation).toHaveBeenCalledWith('createWorkspace', { workspaceId: '11111111-2222-4333-8444-555555555555', name: "Ada's team" });
+    expect(controls.operation).toHaveBeenCalledWith('createWorkspace', { workspaceId: '11111111-2222-4333-8444-555555555555', name: "Ada's team", creationSource:'onboarding' });
     expect(controls.enter).toHaveBeenCalledWith('11111111-2222-4333-8444-555555555555', 'general');
   });
 

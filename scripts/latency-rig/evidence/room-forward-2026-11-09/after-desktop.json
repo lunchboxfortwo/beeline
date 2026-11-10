@@ -1,0 +1,115 @@
+{
+  "browser": "158.0.8127.18",
+  "results": [
+    {
+      "device": "web",
+      "theme": "Bone",
+      "name": "open-room",
+      "samples": [
+        {
+          "durationMs": null,
+          "driverMs": null
+        }
+      ],
+      "p50": null,
+      "p95": null
+    },
+    {
+      "device": "web",
+      "theme": "Bone",
+      "name": "open-dm",
+      "samples": [
+        {
+          "durationMs": null,
+          "driverMs": null
+        }
+      ],
+      "p50": null,
+      "p95": null
+    },
+    {
+      "device": "web",
+      "theme": "Bone",
+      "name": "forward-message",
+      "samples": [
+        {
+          "durationMs": 102.09999990463257,
+          "acceptedResultMs": 102.09999990463257,
+          "dismissalResultMs": 435.59999990463257,
+          "removalMs": 404.30000019073486,
+          "dispatchMs": 29.800000190734863,
+          "clickToSendMs": 0.2999997138977051,
+          "sendToReplyMs": 51.40000009536743,
+          "replyToAnimationMs": 87.30000019073486,
+          "animationMs": 233.2999997138977,
+          "configuredAnimationMs": 250,
+          "closeStartMs": 168.80000019073486,
+          "animationEndMs": 402.09999990463257,
+          "tapToGoneMs": 374.5,
+          "closeToGoneMs": 235.5,
+          "sourceMessageVisibleMs": 419.30000019073486,
+          "animationEndToRemovalMs": 2.200000286102295,
+          "removalToFrameMs": 31.299999713897705,
+          "driverMs": 852.0999999046326
+        }
+      ],
+      "p50": 102.09999990463257,
+      "p95": 102.09999990463257
+    },
+    {
+      "device": "web",
+      "theme": "Obsidian",
+      "name": "open-room",
+      "samples": [
+        {
+          "durationMs": null,
+          "driverMs": null
+        }
+      ],
+      "p50": null,
+      "p95": null
+    },
+    {
+      "device": "web",
+      "theme": "Obsidian",
+      "name": "open-dm",
+      "samples": [
+        {
+          "durationMs": null,
+          "driverMs": null
+        }
+      ],
+      "p50": null,
+      "p95": null
+    },
+    {
+      "device": "web",
+      "theme": "Obsidian",
+      "name": "forward-message",
+      "samples": [
+        {
+          "durationMs": 96.5,
+          "acceptedResultMs": 96.5,
+          "dismissalResultMs": 427.40000009536743,
+          "removalMs": 396.59999990463257,
+          "dispatchMs": 28.199999809265137,
+          "clickToSendMs": 0.40000009536743164,
+          "sendToReplyMs": 48,
+          "replyToAnimationMs": 84,
+          "animationMs": 233.40000009536743,
+          "configuredAnimationMs": 250,
+          "closeStartMs": 160.59999990463257,
+          "animationEndMs": 394,
+          "tapToGoneMs": 368.40000009536743,
+          "closeToGoneMs": 236,
+          "sourceMessageVisibleMs": 411.19999980926514,
+          "animationEndToRemovalMs": 2.5999999046325684,
+          "removalToFrameMs": 30.800000190734863,
+          "driverMs": 860.4000000953674
+        }
+      ],
+      "p50": 96.5,
+      "p95": 96.5
+    }
+  ]
+}

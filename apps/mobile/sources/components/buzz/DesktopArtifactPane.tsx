@@ -1,3 +1,4 @@
+import { appReadErrorCopy } from '@/buzz/app-error-copy';
 import { IndexRow } from '@/components/buzz/IndexRow';
 import { useArtifactRecoveryGeneration } from '@/buzz/use-artifact-recovery';
 import { Button } from '@/components/buzz/Button';
@@ -158,8 +159,8 @@ export function DesktopArtifactFrame({
       .then((bytes) => {
         if (live && !controller.signal.aborted) setHtml(wrapArtifactMarkup(new TextDecoder().decode(bytes), format));
       })
-      .catch(() => {
-        if (live) setFailed(true);
+      .catch((cause) => {
+        if (live && !controller.signal.aborted) setFailed(Boolean(appReadErrorCopy(cause)));
       });
     return () => {
       live = false; controller.abort(); stopPurge();
@@ -168,7 +169,7 @@ export function DesktopArtifactFrame({
   if (failed) {
     return (
       <View style={styles.failureInset} testID="desktop-artifact-failed">
-        <IndexRow inset="flush" title="Page unavailable" description={"The page could not be loaded. Try again."} />
+        <IndexRow inset="flush" title="Page unavailable" />
       </View>
     );
   }
@@ -208,8 +209,8 @@ function DesktopArtifactMarkdown({ attachment }: { attachment: AttachmentReferen
       .then((text) => {
         if (live && !controller.signal.aborted) setMarkdown(text);
       })
-      .catch(() => {
-        if (live) setFailed(true);
+      .catch((cause) => {
+        if (live && !controller.signal.aborted) setFailed(Boolean(appReadErrorCopy(cause)));
       });
     return () => {
       live = false; controller.abort(); stopPurge();
@@ -218,7 +219,7 @@ function DesktopArtifactMarkdown({ attachment }: { attachment: AttachmentReferen
   if (failed) {
     return (
       <View style={styles.failureInset} testID="desktop-artifact-failed">
-        <IndexRow inset="flush" title="Page unavailable" description={"The page could not be loaded. Try again."} />
+        <IndexRow inset="flush" title="Page unavailable" />
       </View>
     );
   }

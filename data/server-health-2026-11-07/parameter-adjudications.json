@@ -1,0 +1,2102 @@
+{
+  "src/agent-command-route-agent-result.ts:330:3": {
+    "owner": "authorizeCommandOutput",
+    "parameter": "allowCompleted = false",
+    "modeKind": "boolean",
+    "disposition": "retained-caller-policy",
+    "reason": "A completed turn may still report its final receipt without regaining write authority."
+  },
+  "src/agent-command.ts:226:72": {
+    "owner": "commandValidityCtes",
+    "parameter": "claimFence = false",
+    "modeKind": "boolean",
+    "disposition": "retained-caller-policy",
+    "reason": "Claim and output authorization require different row-fence treatment."
+  },
+  "src/agent-command.ts:226:92": {
+    "owner": "commandValidityCtes",
+    "parameter": "idleFence = true",
+    "modeKind": "boolean",
+    "disposition": "retained-caller-policy",
+    "reason": "Idle and active ownership checks have distinct fencing needs."
+  },
+  "src/agent-subscriptions.ts:380:3": {
+    "owner": "listServiceSubscriptionEvents",
+    "parameter": "includeSlack = true",
+    "modeKind": "boolean",
+    "disposition": "retained-caller-policy",
+    "reason": "Slack routing adds provider-specific subscription behavior."
+  },
+  "src/agent-usage.ts:27:66": {
+    "owner": "agentUsageColumns",
+    "parameter": "bindSnapshotOwner=false",
+    "modeKind": "boolean",
+    "disposition": "retained-caller-policy",
+    "reason": "Snapshot attribution binds usage to its owner rather than the refreshing caller."
+  },
+  "src/cdp-client.ts:562:5": {
+    "owner": "sendEvmTransaction",
+    "parameter": "completionV1 = false",
+    "modeKind": "boolean",
+    "disposition": "retained-caller-policy",
+    "reason": "The provider completion endpoint uses a distinct supported wire format."
+  },
+  "src/daemon-service.ts:65:25": {
+    "owner": "fenceOwnedTurnReply",
+    "parameter": "requireClaimed = false",
+    "modeKind": "boolean",
+    "disposition": "retained-caller-policy",
+    "reason": "A terminal receipt and an active claimed turn have distinct generation fences."
+  },
+  "src/daemon-service.ts:76:6": {
+    "owner": "DaemonService.constructor",
+    "parameter": "readonly commandTransaction = false",
+    "modeKind": "boolean",
+    "disposition": "retained-caller-policy",
+    "reason": "Re-entry into a command-owned transaction must not reopen or reauthorize it."
+  },
+  "src/daemon-service.ts:77:6": {
+    "owner": "DaemonService.constructor",
+    "parameter": "readonly authorizedCommand?: CommandRow",
+    "modeKind": "explicit-caller-policy",
+    "disposition": "retained-caller-policy",
+    "reason": "Execution must retain the exact generation-fenced command."
+  },
+  "src/daemon-service.ts:82:7": {
+    "owner": "DaemonService.constructor",
+    "parameter": "confirmZeroChecks?: boolean",
+    "modeKind": "boolean",
+    "disposition": "retained-caller-policy",
+    "reason": "A second GitHub observation distinguishes genuinely zero checks from an incomplete rollup."
+  },
+  "src/daemon-service.ts:84:5": {
+    "owner": "DaemonService.constructor",
+    "parameter": "_legacyProviderSlot?: unknown",
+    "modeKind": "explicit-caller-policy",
+    "disposition": "avoidable-compatibility",
+    "reason": "Unused positional provider placeholder; no implementation reads its value. Removing it requires coordinated constructor call-site edits, outside the rejected refactor."
+  },
+  "src/daemon-service.ts:171:75": {
+    "owner": "postRoomMessage",
+    "parameter": "atomicCommandWrite = false",
+    "modeKind": "boolean",
+    "disposition": "retained-caller-policy",
+    "reason": "The durable write adapter owns atomic message effects."
+  },
+  "src/daemon-service.ts:213:79": {
+    "owner": "requestAgentGrant",
+    "parameter": "requireOwnerApproval = false",
+    "modeKind": "boolean",
+    "disposition": "retained-caller-policy",
+    "reason": "An owner approval is required by the resource-request workflow."
+  },
+  "src/daemon-service.ts:237:77": {
+    "owner": "connectedAppForTool",
+    "parameter": "discovery = false",
+    "modeKind": "boolean",
+    "disposition": "retained-caller-policy",
+    "reason": "Resource discovery may inspect a route without consuming its grant or executing a provider call."
+  },
+  "src/daemon-service.ts:245:73": {
+    "owner": "offerConnector",
+    "parameter": "unified = false",
+    "modeKind": "boolean",
+    "disposition": "retained-caller-policy",
+    "reason": "Unified app connection and the retained connector-offer adapter return distinct protocol results."
+  },
+  "src/daemon/apps.ts:348:119": {
+    "owner": "daemonConnectedAppForTool",
+    "parameter": "discovery = false",
+    "modeKind": "boolean",
+    "disposition": "retained-caller-policy",
+    "reason": "Resource discovery may inspect a route without consuming its grant or executing a provider call."
+  },
+  "src/daemon/connector-offers.ts:162:115": {
+    "owner": "daemonOfferConnector",
+    "parameter": "unified = false",
+    "modeKind": "boolean",
+    "disposition": "retained-caller-policy",
+    "reason": "Unified app connection and the retained connector-offer adapter return distinct protocol results."
+  },
+  "src/daemon/grants.ts:25:121": {
+    "owner": "daemonRequestAgentGrant",
+    "parameter": "requireOwnerApproval = false",
+    "modeKind": "boolean",
+    "disposition": "retained-caller-policy",
+    "reason": "An owner approval is required by the resource-request workflow."
+  },
+  "src/daemon/messages.ts:37:117": {
+    "owner": "daemonPostRoomMessage",
+    "parameter": "atomicCommandWrite = false",
+    "modeKind": "boolean",
+    "disposition": "retained-caller-policy",
+    "reason": "The durable write adapter owns atomic message effects."
+  },
+  "src/daemon/operation-effects.ts:40:346": {
+    "owner": "getInstitutionalContextOperation",
+    "parameter": "ownedIntent: boolean",
+    "modeKind": "boolean",
+    "disposition": "retained-caller-policy",
+    "reason": "Durable owned-model operations and legacy operations have different effect ownership."
+  },
+  "src/daemon/operation-effects.ts:60:346": {
+    "owner": "saveInstitutionalMemoryOperation",
+    "parameter": "ownedIntent: boolean",
+    "modeKind": "boolean",
+    "disposition": "retained-caller-policy",
+    "reason": "Durable owned-model operations and legacy operations have different effect ownership."
+  },
+  "src/daemon/operation-effects.ts:100:348": {
+    "owner": "searchInstitutionalMemoryOperation",
+    "parameter": "ownedIntent: boolean",
+    "modeKind": "boolean",
+    "disposition": "retained-caller-policy",
+    "reason": "Durable owned-model operations and legacy operations have different effect ownership."
+  },
+  "src/daemon/operation-effects.ts:115:349": {
+    "owner": "searchInstitutionalHistoryOperation",
+    "parameter": "ownedIntent: boolean",
+    "modeKind": "boolean",
+    "disposition": "retained-caller-policy",
+    "reason": "Durable owned-model operations and legacy operations have different effect ownership."
+  },
+  "src/daemon/operation-effects.ts:129:341": {
+    "owner": "loadWorkspaceSkillOperation",
+    "parameter": "ownedIntent: boolean",
+    "modeKind": "boolean",
+    "disposition": "retained-caller-policy",
+    "reason": "Durable owned-model operations and legacy operations have different effect ownership."
+  },
+  "src/daemon/operation-effects.ts:143:340": {
+    "owner": "claimAgentCommandOperation",
+    "parameter": "ownedIntent: boolean",
+    "modeKind": "boolean",
+    "disposition": "retained-caller-policy",
+    "reason": "Durable owned-model operations and legacy operations have different effect ownership."
+  },
+  "src/daemon/operation-effects.ts:186:339": {
+    "owner": "releaseAgentTurnOperation",
+    "parameter": "ownedIntent: boolean",
+    "modeKind": "boolean",
+    "disposition": "retained-caller-policy",
+    "reason": "Durable owned-model operations and legacy operations have different effect ownership."
+  },
+  "src/daemon/operation-effects.ts:209:346": {
+    "owner": "acknowledgeAgentCommandOperation",
+    "parameter": "ownedIntent: boolean",
+    "modeKind": "boolean",
+    "disposition": "retained-caller-policy",
+    "reason": "Durable owned-model operations and legacy operations have different effect ownership."
+  },
+  "src/daemon/operation-effects.ts:237:346": {
+    "owner": "noteEmptyRoomRepositoryOperation",
+    "parameter": "ownedIntent: boolean",
+    "modeKind": "boolean",
+    "disposition": "retained-caller-policy",
+    "reason": "Durable owned-model operations and legacy operations have different effect ownership."
+  },
+  "src/daemon/operation-effects.ts:255:341": {
+    "owner": "getRoomGitHubTokenOperation",
+    "parameter": "ownedIntent: boolean",
+    "modeKind": "boolean",
+    "disposition": "retained-caller-policy",
+    "reason": "Durable owned-model operations and legacy operations have different effect ownership."
+  },
+  "src/daemon/operation-effects.ts:285:342": {
+    "owner": "markAgentTurnSilentOperation",
+    "parameter": "ownedIntent: boolean",
+    "modeKind": "boolean",
+    "disposition": "retained-caller-policy",
+    "reason": "Durable owned-model operations and legacy operations have different effect ownership."
+  },
+  "src/daemon/operation-effects.ts:330:351": {
+    "owner": "postBackgroundToolCompletionOperation",
+    "parameter": "ownedIntent: boolean",
+    "modeKind": "boolean",
+    "disposition": "retained-caller-policy",
+    "reason": "Durable owned-model operations and legacy operations have different effect ownership."
+  },
+  "src/daemon/operation-effects.ts:367:341": {
+    "owner": "endComputerSessionOperation",
+    "parameter": "ownedIntent: boolean",
+    "modeKind": "boolean",
+    "disposition": "retained-caller-policy",
+    "reason": "Durable owned-model operations and legacy operations have different effect ownership."
+  },
+  "src/daemon/operation-effects.ts:382:345": {
+    "owner": "createLinkSpendRequestOperation",
+    "parameter": "ownedIntent: boolean",
+    "modeKind": "boolean",
+    "disposition": "retained-caller-policy",
+    "reason": "Durable owned-model operations and legacy operations have different effect ownership."
+  },
+  "src/daemon/operation-effects.ts:398:347": {
+    "owner": "retrieveLinkSpendRequestOperation",
+    "parameter": "ownedIntent: boolean",
+    "modeKind": "boolean",
+    "disposition": "retained-caller-policy",
+    "reason": "Durable owned-model operations and legacy operations have different effect ownership."
+  },
+  "src/daemon/operation-effects.ts:427:341": {
+    "owner": "postStarterWelcomeOperation",
+    "parameter": "ownedIntent: boolean",
+    "modeKind": "boolean",
+    "disposition": "retained-caller-policy",
+    "reason": "Durable owned-model operations and legacy operations have different effect ownership."
+  },
+  "src/daemon/operation-effects.ts:448:347": {
+    "owner": "postRepositoryOnboardingOperation",
+    "parameter": "ownedIntent: boolean",
+    "modeKind": "boolean",
+    "disposition": "retained-caller-policy",
+    "reason": "Durable owned-model operations and legacy operations have different effect ownership."
+  },
+  "src/daemon/operation-effects.ts:466:337": {
+    "owner": "findConnectorsOperation",
+    "parameter": "ownedIntent: boolean",
+    "modeKind": "boolean",
+    "disposition": "retained-caller-policy",
+    "reason": "Durable owned-model operations and legacy operations have different effect ownership."
+  },
+  "src/daemon/operation-effects.ts:498:340": {
+    "owner": "postVaultSaveCardOperation",
+    "parameter": "ownedIntent: boolean",
+    "modeKind": "boolean",
+    "disposition": "retained-caller-policy",
+    "reason": "Durable owned-model operations and legacy operations have different effect ownership."
+  },
+  "src/daemon/operation-effects.ts:514:336": {
+    "owner": "setCornerHoldOperation",
+    "parameter": "ownedIntent: boolean",
+    "modeKind": "boolean",
+    "disposition": "retained-caller-policy",
+    "reason": "Durable owned-model operations and legacy operations have different effect ownership."
+  },
+  "src/daemon/operation-effects.ts:539:339": {
+    "owner": "orderCornerMergeOperation",
+    "parameter": "ownedIntent: boolean",
+    "modeKind": "boolean",
+    "disposition": "retained-caller-policy",
+    "reason": "Durable owned-model operations and legacy operations have different effect ownership."
+  },
+  "src/daemon/operations.ts:50:336": {
+    "owner": "daemonExecuteOperation",
+    "parameter": "ownedIntent: boolean",
+    "modeKind": "boolean",
+    "disposition": "retained-caller-policy",
+    "reason": "Durable owned-model operations and legacy operations have different effect ownership."
+  },
+  "src/daemon/owned-model.ts:54:234": {
+    "owner": "daemonFenceOwnedTurnReply",
+    "parameter": "requireClaimed = false",
+    "modeKind": "boolean",
+    "disposition": "retained-caller-policy",
+    "reason": "A terminal receipt and an active claimed turn have distinct generation fences."
+  },
+  "src/free-agent-model-proxy.ts:136:88": {
+    "owner": "modelPayload",
+    "parameter": "openRouter: boolean",
+    "modeKind": "boolean",
+    "disposition": "retained-caller-policy",
+    "reason": "The OpenRouter provider has a distinct model proxy wire format."
+  },
+  "src/github-operations-begin-identity.ts:621:133": {
+    "owner": "gitHubOperationsPrChecksStatus",
+    "parameter": "confirmZeroChecks = false",
+    "modeKind": "boolean",
+    "disposition": "retained-caller-policy",
+    "reason": "A second GitHub observation distinguishes genuinely zero checks from an incomplete rollup."
+  },
+  "src/github-operations-read-pr-checks-status.ts:21:143": {
+    "owner": "gitHubOperationsReadPrChecksStatus",
+    "parameter": "confirmZeroChecks: boolean",
+    "modeKind": "boolean",
+    "disposition": "retained-caller-policy",
+    "reason": "A second GitHub observation distinguishes genuinely zero checks from an incomplete rollup."
+  },
+  "src/github-operations.ts:181:4": {
+    "owner": "prChecksStatus",
+    "parameter": "confirmZeroChecks = false",
+    "modeKind": "boolean",
+    "disposition": "retained-caller-policy",
+    "reason": "A second GitHub observation distinguishes genuinely zero checks from an incomplete rollup."
+  },
+  "src/github-operations.ts:185:4": {
+    "owner": "readPrChecksStatus",
+    "parameter": "confirmZeroChecks: boolean",
+    "modeKind": "boolean",
+    "disposition": "retained-caller-policy",
+    "reason": "A second GitHub observation distinguishes genuinely zero checks from an incomplete rollup."
+  },
+  "src/index.ts:310:22": {
+    "owner": "main",
+    "parameter": "confirmZeroChecks",
+    "modeKind": "explicit-caller-policy",
+    "disposition": "retained-caller-policy",
+    "reason": "A second GitHub observation distinguishes genuinely zero checks from an incomplete rollup."
+  },
+  "src/institutional-memory-embeddings.ts:173:3": {
+    "owner": "runAfterCommit",
+    "parameter": "afterCommit: AfterCommit | undefined",
+    "modeKind": "explicit-caller-policy",
+    "disposition": "retained-caller-policy",
+    "reason": "The command transaction owns the deferred provider-effect queue."
+  },
+  "src/institutional-memory-shadow-save-institutional-memory.ts:14:3": {
+    "owner": "saveInstitutionalMemory",
+    "parameter": "afterCommit?: AfterCommit",
+    "modeKind": "explicit-caller-policy",
+    "disposition": "retained-caller-policy",
+    "reason": "The command transaction owns the deferred provider-effect queue."
+  },
+  "src/institutional-memory-shadow-save-institutional-memory.ts:39:3": {
+    "owner": "updateInstitutionalMemory",
+    "parameter": "afterCommit?: AfterCommit",
+    "modeKind": "explicit-caller-policy",
+    "disposition": "retained-caller-policy",
+    "reason": "The command transaction owns the deferred provider-effect queue."
+  },
+  "src/institutional-skills.ts:119:3": {
+    "owner": "applySkillRevision",
+    "parameter": "afterCommit?: AfterCommit",
+    "modeKind": "explicit-caller-policy",
+    "disposition": "retained-caller-policy",
+    "reason": "The command transaction owns the deferred provider-effect queue."
+  },
+  "src/institutional-skills.ts:171:3": {
+    "owner": "saveSkill",
+    "parameter": "afterCommit?: AfterCommit",
+    "modeKind": "explicit-caller-policy",
+    "disposition": "retained-caller-policy",
+    "reason": "The command transaction owns the deferred provider-effect queue."
+  },
+  "src/owned-turn-reply.ts:9:20": {
+    "owner": "fenceOwnedTurnReply",
+    "parameter": "requireClaimed=false",
+    "modeKind": "boolean",
+    "disposition": "retained-caller-policy",
+    "reason": "A terminal receipt and an active claimed turn have distinct generation fences."
+  },
+  "src/phone-service.ts:96:6": {
+    "owner": "PhoneService.constructor",
+    "parameter": "readonly routingTransaction = false",
+    "modeKind": "boolean",
+    "disposition": "retained-caller-policy",
+    "reason": "The phone routing adapter owns the transaction rather than a nested service call."
+  },
+  "src/phone-service.ts:97:6": {
+    "owner": "PhoneService.constructor",
+    "parameter": "readonly enrichmentDatabase: SqlDatabase = database",
+    "modeKind": "explicit-caller-policy",
+    "disposition": "retained-caller-policy",
+    "reason": "Phone enrichment uses a separate read budget/pool from the durable command transaction."
+  },
+  "src/phone-service.ts:99:5": {
+    "owner": "PhoneService.constructor",
+    "parameter": "_legacyProviderSlot?: unknown",
+    "modeKind": "explicit-caller-policy",
+    "disposition": "avoidable-compatibility",
+    "reason": "Unused positional provider placeholder; no implementation reads its value. Removing it requires coordinated constructor call-site edits, outside the rejected refactor."
+  },
+  "src/phone-service.ts:115:144": {
+    "owner": "applyTrayDecisionCommand",
+    "parameter": "defer: (notification: () => void) => void",
+    "modeKind": "explicit-caller-policy",
+    "disposition": "retained-caller-policy",
+    "reason": "The command adapter owns post-commit publication/effect timing."
+  },
+  "src/phone-service.ts:341:23": {
+    "owner": "execute",
+    "parameter": "deferPostCommitObservation = false",
+    "modeKind": "boolean",
+    "disposition": "retained-caller-policy",
+    "reason": "The durable phone adapter must observe only after commit."
+  },
+  "src/phone-service.ts:345:23": {
+    "owner": "executeOperation",
+    "parameter": "deferPostCommitObservation = false",
+    "modeKind": "boolean",
+    "disposition": "retained-caller-policy",
+    "reason": "The durable phone adapter must observe only after commit."
+  },
+  "src/phone-service.ts:351:62": {
+    "owner": "observeSentMessage",
+    "parameter": "defer: boolean",
+    "modeKind": "boolean",
+    "disposition": "retained-caller-policy",
+    "reason": "The command adapter owns post-commit publication/effect timing."
+  },
+  "src/phone-service.ts:455:78": {
+    "owner": "decideAgentGrant",
+    "parameter": "defer?: (notification: () => void) => void",
+    "modeKind": "explicit-caller-policy",
+    "disposition": "retained-caller-policy",
+    "reason": "The command adapter owns post-commit publication/effect timing."
+  },
+  "src/phone/agent-configuration.ts:218:5": {
+    "owner": "phoneDecideAgentGrant",
+    "parameter": "defer?: (notification: () => void) => void",
+    "modeKind": "explicit-caller-policy",
+    "disposition": "retained-caller-policy",
+    "reason": "The command adapter owns post-commit publication/effect timing."
+  },
+  "src/phone/command-context.ts:42:5": {
+    "owner": "phoneApplyTrayDecisionCommand",
+    "parameter": "defer: (notification: () => void) => void",
+    "modeKind": "explicit-caller-policy",
+    "disposition": "retained-caller-policy",
+    "reason": "The command adapter owns post-commit publication/effect timing."
+  },
+  "src/phone/execute.ts:11:5": {
+    "owner": "phoneExecute",
+    "parameter": "deferPostCommitObservation = false",
+    "modeKind": "boolean",
+    "disposition": "retained-caller-policy",
+    "reason": "The durable phone adapter must observe only after commit."
+  },
+  "src/phone/messages.ts:137:102": {
+    "owner": "phoneObserveSentMessage",
+    "parameter": "defer: boolean",
+    "modeKind": "boolean",
+    "disposition": "retained-caller-policy",
+    "reason": "The command adapter owns post-commit publication/effect timing."
+  },
+  "src/phone/operations.ts:64:5": {
+    "owner": "phoneExecuteOperation",
+    "parameter": "deferPostCommitObservation = false",
+    "modeKind": "boolean",
+    "disposition": "retained-caller-policy",
+    "reason": "The durable phone adapter must observe only after commit."
+  },
+  "src/rooms-mcp-oauth.ts:154:58": {
+    "owner": "sessionMessageConsent",
+    "parameter": "codex = false",
+    "modeKind": "boolean",
+    "disposition": "retained-caller-policy",
+    "reason": "The Codex consent handoff has a distinct session explanation."
+  },
+  "src/server.ts:300:54": {
+    "owner": "body",
+    "parameter": "allowEmptyVoiceBody = false",
+    "modeKind": "boolean",
+    "disposition": "retained-caller-policy",
+    "reason": "The voice transcript endpoint accepts a body shape that ordinary messages refuse."
+  },
+  "src/workflow-runs-repeated-result.ts:366:3": {
+    "owner": "saveWorkflow",
+    "parameter": "afterCommit?: AfterCommit",
+    "modeKind": "explicit-caller-policy",
+    "disposition": "retained-caller-policy",
+    "reason": "The command transaction owns the deferred provider-effect queue."
+  },
+  "src/agent-command-route-agent-result.ts:150:3": {
+    "owner": "claimAgentCommand",
+    "parameter": "allPending = false",
+    "modeKind": "boolean",
+    "disposition": "retained-caller-policy",
+    "reason": "Claims all pending input/resume commands rather than only the named command, for the queue-draining caller."
+  },
+  "src/agent-command-route-agent-result.ts:331:3": {
+    "owner": "authorizeCommandOutput",
+    "parameter": "registerEffect = true",
+    "modeKind": "boolean",
+    "disposition": "retained-caller-policy",
+    "reason": "Allows authorization callers to omit owned-effect registration; the default registers the ownership fence."
+  },
+  "src/agent-schedules.ts:311:5": {
+    "owner": "advance",
+    "parameter": "started: boolean",
+    "modeKind": "boolean",
+    "disposition": "ordinary-control-flow",
+    "reason": "Occurrence outcome data: started determines the run-count increment; it is not an authority exemption."
+  },
+  "src/agent-sign-in.ts:173:3": {
+    "owner": "settleCard",
+    "parameter": "clearError: boolean",
+    "modeKind": "boolean",
+    "disposition": "retained-caller-policy",
+    "reason": "Sign-in settlement can clear a prior error while ordinary patches retain it."
+  },
+  "src/agent-subscriptions.ts:594:95": {
+    "owner": "roomEventSubscriptions",
+    "parameter": "lock = false",
+    "modeKind": "boolean",
+    "disposition": "retained-caller-policy",
+    "reason": "The subscription writer requests row locking; read-only subscription listing omits that lock."
+  },
+  "src/cdp-client.ts:338:5": {
+    "owner": "walletRequest",
+    "parameter": "broadcast = false",
+    "modeKind": "boolean",
+    "disposition": "retained-caller-policy",
+    "reason": "Broadcast requests preserve uncertain-send outcomes instead of treating them like read-only wallet requests."
+  },
+  "src/chat-corner-counts.ts:156:31": {
+    "owner": "cornerWorkSql",
+    "parameter": "ignoreCommander = false",
+    "modeKind": "boolean",
+    "disposition": "retained-caller-policy",
+    "reason": "Idle/work projection may exclude the opening commander while retaining worker and reviewer activity."
+  },
+  "src/chat-corner-counts.ts:209:60": {
+    "owner": "cornerBlockerSql",
+    "parameter": "newestFirst = false",
+    "modeKind": "boolean",
+    "disposition": "ordinary-control-flow",
+    "reason": "Generic sort direction: ASC versus DESC changes ordering, not eligibility, authority or workflow semantics."
+  },
+  "src/commander.ts:45:3": {
+    "owner": "commandAddress",
+    "parameter": "allowArchived = false",
+    "modeKind": "boolean",
+    "disposition": "retained-caller-policy",
+    "reason": "Archived-target inspection explicitly bypasses the archived-room filter while still requiring current membership."
+  },
+  "src/commander.ts:66:64": {
+    "owner": "assertCornerCommandTarget",
+    "parameter": "allowParentOrder = false",
+    "modeKind": "boolean",
+    "disposition": "retained-caller-policy",
+    "reason": "Only the order path admits the direct-parent ancestor; other corner targets retain the ancestor restriction."
+  },
+  "src/company-mcp-discovery.ts:69:33": {
+    "owner": "discover",
+    "parameter": "fresh = false",
+    "modeKind": "boolean",
+    "disposition": "retained-caller-policy",
+    "reason": "A fresh discovery bypasses the cached manifest observation for an explicit new probe."
+  },
+  "src/composio-apps.ts:188:30": {
+    "owner": "text",
+    "parameter": "required: boolean",
+    "modeKind": "boolean",
+    "disposition": "ordinary-control-flow",
+    "reason": "Generic text validation option: optional and required fields share the same type/length validator."
+  },
+  "src/computer-session.ts:280:3": {
+    "owner": "endComputerSession",
+    "parameter": "expiredOnly = false",
+    "modeKind": "boolean",
+    "disposition": "retained-caller-policy",
+    "reason": "Expiry cleanup checks both due time and expiry version; explicit close is not restricted to expired sessions."
+  },
+  "src/connection-presence.ts:63:66": {
+    "owner": "releaseConnection",
+    "parameter": "forUpdate = false",
+    "modeKind": "boolean",
+    "disposition": "avoidable-compatibility",
+    "reason": "Unused update-mode argument is forwarded to releaseAgentConnection, where it has no effect."
+  },
+  "src/connection-presence.ts:169:3": {
+    "owner": "releaseAgentConnection",
+    "parameter": "forUpdate = false",
+    "modeKind": "boolean",
+    "disposition": "avoidable-compatibility",
+    "reason": "Unused update-mode argument is never read by the connection-release implementation."
+  },
+  "src/corner-branch-cleanup.ts:18:3": {
+    "owner": "deleteArchivedCornerBranch",
+    "parameter": "requireContainment = false",
+    "modeKind": "boolean",
+    "disposition": "retained-caller-policy",
+    "reason": "Maintenance requires branch containment; an archival caller can accept its recorded squash-merge proof."
+  },
+  "src/corner-brief.ts:21:62": {
+    "owner": "validateCornerBrief",
+    "parameter": "repositoryBacked = false",
+    "modeKind": "boolean",
+    "disposition": "retained-caller-policy",
+    "reason": "Only repository-backed bugfix briefs require the reproduction/stand-in validation branch."
+  },
+  "src/corner-idle.ts:22:49": {
+    "owner": "cornerIdleSql",
+    "parameter": "includeCommander = false",
+    "modeKind": "boolean",
+    "disposition": "retained-caller-policy",
+    "reason": "The idle observer may include commander work that the normal worker projection excludes."
+  },
+  "src/corner-lifecycle-read-state.ts:79:69": {
+    "owner": "loadCorner",
+    "parameter": "retain = true",
+    "modeKind": "boolean",
+    "disposition": "retained-caller-policy",
+    "reason": "Lifecycle writers retain the corner-fact row lock; read-only observation can omit it."
+  },
+  "src/corner-lifecycle.ts:95:3": {
+    "owner": "setCornerLockedFact",
+    "parameter": "locked: boolean",
+    "modeKind": "boolean",
+    "disposition": "ordinary-control-flow",
+    "reason": "Desired lock-state data is written verbatim; this setter does not choose between close and lock workflows."
+  },
+  "src/corner-lifecycle.ts:680:3": {
+    "owner": "noteReviewBlocked",
+    "parameter": "reportCommander = true",
+    "modeKind": "boolean",
+    "disposition": "retained-caller-policy",
+    "reason": "Some lifecycle callers already own reporting; this option suppresses duplicate commander notification."
+  },
+  "src/corner-lifecycle.ts:724:3": {
+    "owner": "noteMissingReviewVerdict",
+    "parameter": "reported = false",
+    "modeKind": "boolean",
+    "disposition": "retained-caller-policy",
+    "reason": "An already-reported missing-verdict episode skips a second commander report."
+  },
+  "src/corner-objective.ts:21:63": {
+    "owner": "writeCornerObjective",
+    "parameter": "onlyMissing = false",
+    "modeKind": "boolean",
+    "disposition": "retained-caller-policy",
+    "reason": "Backfill callers fill only missing objectives; an explicit objective edit may replace a value."
+  },
+  "src/corner-owed.ts:53:3": {
+    "owner": "addressedToPersonSql",
+    "parameter": "includeCommissioned = true",
+    "modeKind": "boolean",
+    "disposition": "retained-caller-policy",
+    "reason": "Commissioned completion facts count as addressing only for projections that request that policy."
+  },
+  "src/corner-owed.ts:131:43": {
+    "owner": "cornerOwedRowsSql",
+    "parameter": "bulk: boolean",
+    "modeKind": "boolean",
+    "disposition": "retained-caller-policy",
+    "reason": "Bulk owed-item projection uses its own expiry and answered-item rules, rather than individual-item rules."
+  },
+  "src/corner-owed.ts:131:92": {
+    "owner": "cornerOwedRowsSql",
+    "parameter": "historical = false",
+    "modeKind": "boolean",
+    "disposition": "retained-caller-policy",
+    "reason": "Historical owed-item reads preserve answerable report history instead of applying only current open-item rules."
+  },
+  "src/corner-owed.ts:131:112": {
+    "owner": "cornerOwedRowsSql",
+    "parameter": "externalOnly = false",
+    "modeKind": "boolean",
+    "disposition": "retained-caller-policy",
+    "reason": "External-only owed projection omits local candidates and retains cross-surface items."
+  },
+  "src/corner-owed.ts:229:58": {
+    "owner": "cornerOwedAnswerTimesSql",
+    "parameter": "externalOnly = false",
+    "modeKind": "boolean",
+    "disposition": "retained-caller-policy",
+    "reason": "The answer-time projection forwards external-only selection to historical owed rows."
+  },
+  "src/corner-owed.ts:247:58": {
+    "owner": "reportAnswerSql",
+    "parameter": "order = false",
+    "modeKind": "boolean",
+    "disposition": "retained-caller-policy",
+    "reason": "An order reply uses recorded order provenance instead of the ordinary message-answer predicate."
+  },
+  "src/corner-owed.ts:330:71": {
+    "owner": "cornerMessageCandidatesSql",
+    "parameter": "externalOnly = false",
+    "modeKind": "boolean",
+    "disposition": "retained-caller-policy",
+    "reason": "Candidate generation may omit local Room items for the external-only reporting view."
+  },
+  "src/corner-waiting-report.ts:52:56": {
+    "owner": "cornerWaitingReportSql",
+    "parameter": "includeAnswered = false",
+    "modeKind": "boolean",
+    "disposition": "retained-caller-policy",
+    "reason": "Historical report reads can include answered requests; current waiting reads exclude them."
+  },
+  "src/corner-worker.ts:29:37": {
+    "owner": "earliest",
+    "parameter": "skipReviewer: boolean",
+    "modeKind": "boolean",
+    "disposition": "retained-caller-policy",
+    "reason": "Worker derivation skips the reviewer when locating an implementation opening."
+  },
+  "src/daemon-live.ts:336:9": {
+    "owner": "close",
+    "parameter": "forUpdate = false",
+    "modeKind": "boolean",
+    "disposition": "avoidable-compatibility",
+    "reason": "The socket remembers and forwards this update flag, but the terminal release implementation ignores it."
+  },
+  "src/daemon-service.ts:54:81": {
+    "owner": "negotiateOwnedModel",
+    "parameter": "installed: boolean",
+    "modeKind": "boolean",
+    "disposition": "ordinary-control-flow",
+    "reason": "Observed helper-installation capability, not a caller exemption: owner eligibility and readiness are still checked."
+  },
+  "src/daemon-service.ts:78:6": {
+    "owner": "DaemonService.constructor",
+    "parameter": "readonly livePaintDiagnostics = false",
+    "modeKind": "boolean",
+    "disposition": "ordinary-control-flow",
+    "reason": "General observability configuration enables live-paint diagnostics, without relaxing an authority or execution rule."
+  },
+  "src/daemon-service.ts:157:50": {
+    "owner": "corners",
+    "parameter": "activeOnly = false",
+    "modeKind": "boolean",
+    "disposition": "ordinary-control-flow",
+    "reason": "Ordinary list filter selects active corners; it does not exempt membership or change command authority."
+  },
+  "src/daemon-service.ts:157:70": {
+    "owner": "corners",
+    "parameter": "reachable = false",
+    "modeKind": "boolean",
+    "disposition": "retained-caller-policy",
+    "reason": "Reachable-corner discovery widens direct corner membership to the permitted parent/reachability view."
+  },
+  "src/daemon-service.ts:206:108": {
+    "owner": "report",
+    "parameter": "automatic = false",
+    "modeKind": "boolean",
+    "disposition": "retained-caller-policy",
+    "reason": "Automatic reports retain their existing prefix and generation dedupe; tool reports validate an explicit status."
+  },
+  "src/daemon/apps.ts:75:65": {
+    "owner": "machine",
+    "parameter": "dependent = false",
+    "modeKind": "boolean",
+    "disposition": "retained-caller-policy",
+    "reason": "A dependent connection suppresses resume-on-connect so the owning workflow keeps continuation ownership."
+  },
+  "src/daemon/corner-reads.ts:49:92": {
+    "owner": "daemonCorners",
+    "parameter": "activeOnly = false",
+    "modeKind": "boolean",
+    "disposition": "ordinary-control-flow",
+    "reason": "Ordinary active-corner list filter; all rows still use the same reachability/membership predicate."
+  },
+  "src/daemon/corner-reads.ts:49:112": {
+    "owner": "daemonCorners",
+    "parameter": "reachable = false",
+    "modeKind": "boolean",
+    "disposition": "retained-caller-policy",
+    "reason": "Reachable discovery admits the defined parent/reachable scope instead of requiring direct corner membership."
+  },
+  "src/daemon/corner-reports.ts:27:148": {
+    "owner": "daemonReport",
+    "parameter": "automatic = false",
+    "modeKind": "boolean",
+    "disposition": "retained-caller-policy",
+    "reason": "Automatic report routing keeps system-report prefix and generation behavior distinct from explicit tool reports."
+  },
+  "src/daemon/owned-model.ts:22:123": {
+    "owner": "daemonNegotiateOwnedModel",
+    "parameter": "installed: boolean",
+    "modeKind": "boolean",
+    "disposition": "retained-caller-policy",
+    "reason": "Installation is an observed capability; negotiation still independently checks free-agent eligibility and owner authority."
+  },
+  "src/database-backfill-squire-approval-expiry.ts:122:3": {
+    "owner": "backfillMessageSearchDocuments",
+    "parameter": "bounded = false",
+    "modeKind": "boolean",
+    "disposition": "retained-caller-policy",
+    "reason": "Bounded migration batches install local statement/lock deadlines in their own transaction."
+  },
+  "src/database.ts:526:24": {
+    "owner": "connectDedicated",
+    "parameter": "destroy?: boolean | Error",
+    "modeKind": "boolean",
+    "disposition": "ordinary-control-flow",
+    "reason": "Generic pg release argument requests client destruction or carries an error; it is not a caller-specific exception."
+  },
+  "src/feedback.ts:181:3": {
+    "owner": "humanReportVersions",
+    "parameter": "externalClient: boolean",
+    "modeKind": "boolean",
+    "disposition": "retained-caller-policy",
+    "reason": "External-client feedback must not infer the Beeline phone version from a device sign-in family."
+  },
+  "src/fly-machines.ts:24:38": {
+    "owner": "refresh",
+    "parameter": "force?: boolean",
+    "modeKind": "boolean",
+    "disposition": "retained-caller-policy",
+    "reason": "Helper refresh may force a cold boot even when the configured image is unchanged."
+  },
+  "src/fly-machines.ts:116:44": {
+    "owner": "refresh",
+    "parameter": "force = false",
+    "modeKind": "boolean",
+    "disposition": "retained-caller-policy",
+    "reason": "Release refresh forces a cold boot for unchanged images; ordinary refresh skips an already-current running image."
+  },
+  "src/free-agent-image-input.ts:29:59": {
+    "owner": "imageInput",
+    "parameter": "acceptsImages: boolean",
+    "modeKind": "boolean",
+    "disposition": "retained-caller-policy",
+    "reason": "A model capability controls whether image input is accepted rather than rejecting all non-text parts."
+  },
+  "src/free-agent-model-proxy.ts:200:21": {
+    "owner": "done",
+    "parameter": "granted: boolean",
+    "modeKind": "boolean",
+    "disposition": "ordinary-control-flow",
+    "reason": "Queue admission result data: granted resolves the permit or absence; it does not bypass admission."
+  },
+  "src/github-operations-begin-identity.ts:35:5": {
+    "owner": "gitHubOperationsCompleteIdentity",
+    "parameter": "recover: boolean",
+    "modeKind": "boolean",
+    "disposition": "retained-caller-policy",
+    "reason": "Identity recovery may reclaim an existing GitHub link that ordinary linking refuses."
+  },
+  "src/github-operations-refresh-check-rollup.ts:321:5": {
+    "owner": "gitHubOperationsSystemNote",
+    "parameter": "deferNotification = false",
+    "modeKind": "boolean",
+    "disposition": "retained-caller-policy",
+    "reason": "An enclosing transaction owner can defer Room notification instead of publishing immediately."
+  },
+  "src/github-operations.ts:71:86": {
+    "owner": "completeIdentity",
+    "parameter": "recover: boolean",
+    "modeKind": "boolean",
+    "disposition": "retained-caller-policy",
+    "reason": "Facade forwards the explicit identity-recovery policy to the GitHub account-linking implementation."
+  },
+  "src/github-operations.ts:388:129": {
+    "owner": "systemNote",
+    "parameter": "deferNotification = false",
+    "modeKind": "boolean",
+    "disposition": "retained-caller-policy",
+    "reason": "Facade forwards post-commit notification ownership rather than independently publishing a system note."
+  },
+  "src/helper-activation.ts:11:65": {
+    "owner": "(module)",
+    "parameter": "isCorner:boolean",
+    "modeKind": "boolean",
+    "disposition": "ordinary-control-flow",
+    "reason": "Observed Room-kind data in the activation reader contract; scope and membership are checked independently."
+  },
+  "src/helper-activation.ts:27:73": {
+    "owner": "currentActor",
+    "parameter": "lock:boolean",
+    "modeKind": "boolean",
+    "disposition": "retained-caller-policy",
+    "reason": "The final activation enqueue holds actor/connection/command locks; the capture snapshot remains read-only."
+  },
+  "src/helper-activation.ts:54:64": {
+    "owner": "authorityHead",
+    "parameter": "lock:boolean",
+    "modeKind": "boolean",
+    "disposition": "retained-caller-policy",
+    "reason": "The final activation fence locks the authority head; initial snapshot observation does not."
+  },
+  "src/index.ts:492:38": {
+    "owner": "runFreeAgentOperation",
+    "parameter": "refresh: boolean",
+    "modeKind": "boolean",
+    "disposition": "retained-caller-policy",
+    "reason": "The CLI selects refresh-existing-machines versus add-a-free-agent, with different required inputs."
+  },
+  "src/message-mentions.ts:208:64": {
+    "owner": "handleWrittenIn",
+    "parameter": "sanitized = false",
+    "modeKind": "boolean",
+    "disposition": "retained-caller-policy",
+    "reason": "Already-sanitized mention text skips stripping forwarded-caption syntax a second time."
+  },
+  "src/message-mentions.ts:231:53": {
+    "owner": "channelMentionWrittenSql",
+    "parameter": "sanitized = false",
+    "modeKind": "boolean",
+    "disposition": "retained-caller-policy",
+    "reason": "The channel-mention adapter can accept already-sanitized text instead of reapplying caption removal."
+  },
+  "src/needs-you.ts:211:42": {
+    "owner": "viewerRoomsSql",
+    "parameter": "scoped=false",
+    "modeKind": "boolean",
+    "disposition": "ordinary-control-flow",
+    "reason": "Ordinary optional Room-id query filter narrows the same membership-authorized candidate set."
+  },
+  "src/needs-you.ts:422:58": {
+    "owner": "needsYouCandidates",
+    "parameter": "scoped=false",
+    "modeKind": "boolean",
+    "disposition": "ordinary-control-flow",
+    "reason": "Ordinary scoped query filter is forwarded to the shared membership-authorized Room selection."
+  },
+  "src/needs-you.ts:504:3": {
+    "owner": "needsYouItems",
+    "parameter": "markSeen = true",
+    "modeKind": "boolean",
+    "disposition": "retained-caller-policy",
+    "reason": "Read-only tray projection suppresses first-seen writes that a legacy seen-read would perform."
+  },
+  "src/needs-you.ts:626:5": {
+    "owner": "view",
+    "parameter": "literal: boolean",
+    "modeKind": "boolean",
+    "disposition": "ordinary-control-flow",
+    "reason": "Projected literal-label data is copied into the view; it is not an authorization or execution mode."
+  },
+  "src/operator-dashboard.ts:42:3": {
+    "owner": "recordOperatorFunctionEvent",
+    "parameter": "failed: boolean",
+    "modeKind": "boolean",
+    "disposition": "ordinary-control-flow",
+    "reason": "Observed request-failure metric is inserted as data, without altering the measured request's result."
+  },
+  "src/operator-finances.ts:48:79": {
+    "owner": "money",
+    "parameter": "partial = false",
+    "modeKind": "boolean",
+    "disposition": "ordinary-control-flow",
+    "reason": "Observed completeness flag selects the partial/measured output tag; it grants no extra read or write behavior."
+  },
+  "src/phone-service.ts:204:55": {
+    "owner": "readCorners",
+    "parameter": "roomViewFamilyOrder = false",
+    "modeKind": "boolean",
+    "disposition": "retained-caller-policy",
+    "reason": "The Room-family projection owns combined ordering rather than the standalone corner-list ordering."
+  },
+  "src/phone-service.ts:204:84": {
+    "owner": "readCorners",
+    "parameter": "archived = false",
+    "modeKind": "boolean",
+    "disposition": "ordinary-control-flow",
+    "reason": "Ordinary archive-list filter and pagination choice; the same viewer authorization remains in force."
+  },
+  "src/phone-service.ts:238:17": {
+    "owner": "cornerRowsSql",
+    "parameter": "roomViewFamilyOrder = false",
+    "modeKind": "boolean",
+    "disposition": "retained-caller-policy",
+    "reason": "Facade forwards family-view ordering ownership to the SQL projection builder."
+  },
+  "src/phone-service.ts:238:46": {
+    "owner": "cornerRowsSql",
+    "parameter": "archived = false",
+    "modeKind": "boolean",
+    "disposition": "ordinary-control-flow",
+    "reason": "Ordinary archive-list filter/pagination data forwarded to the SQL builder; it does not bypass access checks."
+  },
+  "src/phone-service.ts:423:62": {
+    "owner": "requestCornerClose",
+    "parameter": "locked?: boolean",
+    "modeKind": "boolean",
+    "disposition": "retained-caller-policy",
+    "reason": "The close API uses a supplied lock value for lock/unlock instead of the archival workflow."
+  },
+  "src/phone-service.ts:577:188": {
+    "owner": "projectRoomMessages",
+    "parameter": "isCorner: boolean",
+    "modeKind": "boolean",
+    "disposition": "retained-caller-policy",
+    "reason": "Corner message projection adds tool/activity rows; ordinary Room projection returns the bounded message lane."
+  },
+  "src/phone-socket.ts:33:60": {
+    "owner": "fail",
+    "parameter": "retryable = false",
+    "modeKind": "boolean",
+    "disposition": "ordinary-control-flow",
+    "reason": "Wire error metadata reports whether the failure is retryable; it does not itself schedule or perform a retry."
+  },
+  "src/phone-viewing.ts:17:63": {
+    "owner": "view",
+    "parameter": "viewing: boolean",
+    "modeKind": "boolean",
+    "disposition": "ordinary-control-flow",
+    "reason": "Observed viewing-state command data, forwarded to symmetric set/remove tracking rather than an exemption."
+  },
+  "src/phone-viewing.ts:21:80": {
+    "owner": "setView",
+    "parameter": "viewing: boolean",
+    "modeKind": "boolean",
+    "disposition": "ordinary-control-flow",
+    "reason": "Viewing-state data controls adding/removing that session's view; ownership is not bypassed."
+  },
+  "src/phone/approvals.ts:98:102": {
+    "owner": "phoneRequestCornerClose",
+    "parameter": "locked?: boolean",
+    "modeKind": "boolean",
+    "disposition": "retained-caller-policy",
+    "reason": "A supplied lock value updates lock state; absence selects the separate close/archive authorization and effect path."
+  },
+  "src/phone/corner-reads.ts:36:5": {
+    "owner": "phoneReadCorners",
+    "parameter": "roomViewFamilyOrder = false",
+    "modeKind": "boolean",
+    "disposition": "retained-caller-policy",
+    "reason": "The parent Room-family response owns ordering instead of standalone corner-list SQL ordering."
+  },
+  "src/phone/corner-reads.ts:37:5": {
+    "owner": "phoneReadCorners",
+    "parameter": "archived = false",
+    "modeKind": "boolean",
+    "disposition": "ordinary-control-flow",
+    "reason": "Ordinary archive-list selection determines the page cursor and ordering, with unchanged authorization."
+  },
+  "src/phone/corner-reads.ts:541:5": {
+    "owner": "phoneCornerRowsSql",
+    "parameter": "roomViewFamilyOrder = false",
+    "modeKind": "boolean",
+    "disposition": "retained-caller-policy",
+    "reason": "Family-row ordering is left to its owner rather than duplicated in the standalone SQL query."
+  },
+  "src/phone/corner-reads.ts:542:5": {
+    "owner": "phoneCornerRowsSql",
+    "parameter": "archived = false",
+    "modeKind": "boolean",
+    "disposition": "ordinary-control-flow",
+    "reason": "Ordinary archive-list order/cursor selection; it does not widen viewer or command authority."
+  },
+  "src/phone/mention-notices.ts:19:145": {
+    "owner": "phoneReceiptMessage",
+    "parameter": "mayRoute = true",
+    "modeKind": "boolean",
+    "disposition": "retained-caller-policy",
+    "reason": "The no-routing send path suppresses steer facts in the receipt query instead of inferring local routing."
+  },
+  "src/phone/message-enrichment.ts:192:5": {
+    "owner": "phoneProjectRoomMessages",
+    "parameter": "isCorner: boolean",
+    "modeKind": "boolean",
+    "disposition": "retained-caller-policy",
+    "reason": "Corner-specific projection merges settled tool/activity output; ordinary Room projection has no tool-row lane."
+  },
+  "src/release-notify.ts:97:20": {
+    "owner": "readOnce",
+    "parameter": "force: boolean",
+    "modeKind": "boolean",
+    "disposition": "retained-caller-policy",
+    "reason": "Source/recovery events can request reconciliation after the initial release observation has already run."
+  },
+  "src/room-choice.ts:532:3": {
+    "owner": "skipOpenChoice",
+    "parameter": "wake = true",
+    "modeKind": "boolean",
+    "disposition": "retained-caller-policy",
+    "reason": "An enclosing decision adapter can suppress waking immediately after writing its choice card."
+  },
+  "src/rooms-mcp-agent.ts:96:106": {
+    "owner": "tool",
+    "parameter": "write = true",
+    "modeKind": "boolean",
+    "disposition": "ordinary-control-flow",
+    "reason": "Tool descriptor data sets read-only/idempotent hints; this flag does not authorize or dispatch the tool."
+  },
+  "src/rooms-mcp-agent.ts:283:55": {
+    "owner": "begin",
+    "parameter": "order: boolean",
+    "modeKind": "boolean",
+    "disposition": "retained-caller-policy",
+    "reason": "Order execution claims exact order provenance; conversational execution may establish message provenance instead."
+  },
+  "src/rooms-mcp-agent.ts:324:52": {
+    "owner": "end",
+    "parameter": "reported: boolean",
+    "modeKind": "boolean",
+    "disposition": "retained-caller-policy",
+    "reason": "Unreported order completion releases that generation for another consumer rather than treating it as reported."
+  },
+  "src/rooms-mcp-agent.ts:333:110": {
+    "owner": "inTurn",
+    "parameter": "order = false",
+    "modeKind": "boolean",
+    "disposition": "retained-caller-policy",
+    "reason": "The wrapper selects the order-bound lifecycle and report tracking rather than a conversational turn."
+  },
+  "src/rooms-mcp-members.ts:484:3": {
+    "owner": "setMcpMemberProfile",
+    "parameter": "byMember = true",
+    "modeKind": "boolean",
+    "disposition": "retained-caller-policy",
+    "reason": "Owner profile updates avoid marking a member's own profile as explicitly set by that member."
+  },
+  "src/rooms-mcp-oauth.ts:154:39": {
+    "owner": "sessionMessageConsent",
+    "parameter": "fallback: boolean",
+    "modeKind": "boolean",
+    "disposition": "retained-caller-policy",
+    "reason": "Claude inbound consent adds the user-level crossSessionInbound acceptance explanation; ordinary sessions omit it."
+  },
+  "src/rooms-mcp-stream.ts:111:76": {
+    "owner": "currentCredential",
+    "parameter": "lock = false",
+    "modeKind": "boolean",
+    "disposition": "retained-caller-policy",
+    "reason": "Final MCP delivery holds NOWAIT credential/connection/membership locks; initial stream observation does not."
+  },
+  "src/rooms-mcp.ts:48:106": {
+    "owner": "tool",
+    "parameter": "write = false",
+    "modeKind": "boolean",
+    "disposition": "ordinary-control-flow",
+    "reason": "Tool descriptor metadata sets read-only/idempotent hints; it does not bypass runtime tool authorization."
+  },
+  "src/signin-funnel.ts:99:108": {
+    "owner": "observeOnboardingInvite",
+    "parameter": "joined = false",
+    "modeKind": "boolean",
+    "disposition": "ordinary-control-flow",
+    "reason": "Observed completed-join event data records the friend/accepted milestone, unlike merely opening an invite."
+  },
+  "src/squire-machine.ts:216:130": {
+    "owner": "reportSquireWork",
+    "parameter": "complete=false",
+    "modeKind": "boolean",
+    "disposition": "retained-caller-policy",
+    "reason": "A completed Squire operation clears pending sign-in/install/error state; an intermediate report retains it."
+  },
+  "src/subscription-webhooks.ts:81:102": {
+    "owner": "requireScheduledWorkManager",
+    "parameter": "allowCorner = false",
+    "modeKind": "boolean",
+    "disposition": "retained-caller-policy",
+    "reason": "Scheduled stop's corner adapter may target a corner that ordinary lifecycle management refuses."
+  },
+  "src/subscription-webhooks.ts:81:164": {
+    "owner": "requireScheduledWorkManager",
+    "parameter": "holdAuthority = false",
+    "modeKind": "boolean",
+    "disposition": "retained-caller-policy",
+    "reason": "The scheduled-command adapter retains membership and Room authority locks through the final write."
+  },
+  "src/subscription-webhooks.ts:160:3": {
+    "owner": "webhookToken",
+    "parameter": "rotate = false",
+    "modeKind": "boolean",
+    "disposition": "retained-caller-policy",
+    "reason": "Rotation requests replace webhook credentials, while ordinary token reads preserve the existing secret."
+  },
+  "src/turn-ownership.ts:10:76": {
+    "owner": "ownedRoomAccessSql",
+    "parameter": "retain=false",
+    "modeKind": "boolean",
+    "disposition": "retained-caller-policy",
+    "reason": "Owned final-enqueue access retains its authority fence; ordinary access observation does not retain it."
+  },
+  "src/unfinished-app-sign-ins.ts:13:74": {
+    "owner": "cleanupUnfinishedAppSignIns",
+    "parameter": "apply = false",
+    "modeKind": "boolean",
+    "disposition": "retained-caller-policy",
+    "reason": "The cleanup CLI uses dry-run counting by default and only mutates when apply is explicitly selected."
+  },
+  "src/voice-budget.ts:205:18": {
+    "owner": "commit",
+    "parameter": "terminal: boolean",
+    "modeKind": "boolean",
+    "disposition": "retained-caller-policy",
+    "reason": "Terminal metering flush may settle retained intervals after closure/parking; normal live frames cannot."
+  },
+  "src/voice-providers.ts:236:79": {
+    "owner": "complete",
+    "parameter": "searched = false",
+    "modeKind": "boolean",
+    "disposition": "retained-caller-policy",
+    "reason": "After a search, completion omits the first-pass order/search tools rather than offering another search cycle."
+  },
+  "src/voice-providers.ts:408:84": {
+    "owner": "synthesizeChunk",
+    "parameter": "buffered: boolean",
+    "modeKind": "boolean",
+    "disposition": "retained-caller-policy",
+    "reason": "Buffered speech synthesis retains PCM for later playback instead of immediately emitting streamed frames."
+  },
+  "src/voice-room-runtime-check-inactivity.ts:60:70": {
+    "owner": "voiceRoomRuntimeCountHumans",
+    "parameter": "announce = false",
+    "modeKind": "boolean",
+    "disposition": "retained-caller-policy",
+    "reason": "Explicit count announcements bypass change-only announcement suppression without changing the authoritative count."
+  },
+  "src/voice-room-runtime-check-inactivity.ts:123:138": {
+    "owner": "voiceRoomRuntimeUtterance",
+    "parameter": "interrupts = true",
+    "modeKind": "boolean",
+    "disposition": "retained-caller-policy",
+    "reason": "Partial/non-interrupting speech cannot cancel playback as freely as a confirmed interrupting utterance."
+  },
+  "src/voice-room-runtime-check-inactivity.ts:123:157": {
+    "owner": "voiceRoomRuntimeUtterance",
+    "parameter": "confirmedSpeech = true",
+    "modeKind": "boolean",
+    "disposition": "retained-caller-policy",
+    "reason": "Confirmed speech can interrupt the single-human reply even when earlier speculative fragments could not."
+  },
+  "src/voice-room-runtime-check-inactivity.ts:176:58": {
+    "owner": "recordSpoken",
+    "parameter": "final = false",
+    "modeKind": "boolean",
+    "disposition": "retained-caller-policy",
+    "reason": "Only final spoken text carries the reply/source identity and routes committed mentions."
+  },
+  "src/voice-room-runtime-refresh-speaking-speed.ts:177:79": {
+    "owner": "voiceRoomRuntimeRequestLeaseRecovery",
+    "parameter": "background: boolean",
+    "modeKind": "boolean",
+    "disposition": "retained-caller-policy",
+    "reason": "Background lease recovery records its separate resumption origin instead of treating it as foreground input."
+  },
+  "src/voice-room-runtime-refresh-speaking-speed.ts:182:22": {
+    "owner": "resolve",
+    "parameter": "value: boolean",
+    "modeKind": "boolean",
+    "disposition": "ordinary-control-flow",
+    "reason": "Promise resolution payload: the boolean is the observed lease-validity result, not a mode that bypasses checks."
+  },
+  "src/voice-room-runtime-refresh-speaking-speed.ts:192:78": {
+    "owner": "voiceRoomRuntimeSettleLeaseRecovery",
+    "parameter": "renewed: boolean",
+    "modeKind": "boolean",
+    "disposition": "ordinary-control-flow",
+    "reason": "Observed renewal outcome resolves the parked lease waiter; it is not a request to ignore lease authority."
+  },
+  "src/voice-room-runtime.ts:213:61": {
+    "owner": "resolve",
+    "parameter": "value: boolean",
+    "modeKind": "boolean",
+    "disposition": "ordinary-control-flow",
+    "reason": "Promise resolution signature carries the observed boolean result; no mode behavior is implemented here."
+  },
+  "src/voice-room-runtime.ts:257:22": {
+    "owner": "requestLeaseRecovery",
+    "parameter": "background: boolean",
+    "modeKind": "boolean",
+    "disposition": "retained-caller-policy",
+    "reason": "Facade forwards the background recovery origin to the lease-recovery owner."
+  },
+  "src/voice-room-runtime.ts:258:21": {
+    "owner": "settleLeaseRecovery",
+    "parameter": "renewed: boolean",
+    "modeKind": "boolean",
+    "disposition": "ordinary-control-flow",
+    "reason": "Facade forwards the observed renewal outcome, not a request to bypass the renewal check."
+  },
+  "src/voice-room-runtime.ts:280:13": {
+    "owner": "countHumans",
+    "parameter": "announce = false",
+    "modeKind": "boolean",
+    "disposition": "retained-caller-policy",
+    "reason": "Facade forwards explicit count-announcement behavior to the voice count owner."
+  },
+  "src/voice-room-runtime.ts:283:81": {
+    "owner": "utterance",
+    "parameter": "interrupts = true",
+    "modeKind": "boolean",
+    "disposition": "retained-caller-policy",
+    "reason": "Facade forwards interrupt behavior for speculative versus interrupting speech."
+  },
+  "src/voice-room-runtime.ts:283:100": {
+    "owner": "utterance",
+    "parameter": "confirmedSpeech = true",
+    "modeKind": "boolean",
+    "disposition": "retained-caller-policy",
+    "reason": "Facade forwards confirmed-speech status used by the voice interruption policy."
+  },
+  "src/voice-service.ts:326:48": {
+    "owner": "leave",
+    "parameter": "disconnected = false",
+    "modeKind": "boolean",
+    "disposition": "retained-caller-policy",
+    "reason": "Disconnect/inactivity cleanup can leave without reusing the ordinary human access check; its owner fence remains."
+  },
+  "src/voice-tempo.ts:19:23": {
+    "owner": "available",
+    "parameter": "final: boolean",
+    "modeKind": "boolean",
+    "disposition": "ordinary-control-flow",
+    "reason": "End-of-input state drives generic PCM flush/tail handling; it is not a workflow-specific caller exemption."
+  },
+  "src/workbench-companies.ts:16:85": {
+    "owner": "hasAccountRoute",
+    "parameter": "oauth = false",
+    "modeKind": "boolean",
+    "disposition": "retained-caller-policy",
+    "reason": "OAuth-only account lookup excludes API-key routes accepted by the broader account view."
+  },
+  "src/workbench-companies.ts:177:98": {
+    "owner": "builtin",
+    "parameter": "failed?: boolean",
+    "modeKind": "boolean",
+    "disposition": "ordinary-control-flow",
+    "reason": "Observed failure/authorization state is projected into connection status; this flag is output evidence, not a bypass."
+  },
+  "src/workflow-runs-cancel-run-timers.ts:471:3": {
+    "owner": "authorizeRunControl",
+    "parameter": "roomMembers = false",
+    "modeKind": "boolean",
+    "disposition": "retained-caller-policy",
+    "reason": "Run cancellation may allow Room humans as well as the requester/role owners; other control actions are narrower."
+  },
+  "src/agent-command.ts:502:36": {
+    "owner": "turnRootMessageSql",
+    "parameter": "turn: 'turn' | 'written'",
+    "modeKind": "literal-selector",
+    "disposition": "ordinary-control-flow",
+    "reason": "Closed SQL alias vocabulary used only to interpolate a root-message expression; no behavioral exemption."
+  },
+  "src/agent-turn-end.ts:46:3": {
+    "owner": "endAgentTurn",
+    "parameter": "outcome: 'complete' | 'failed' | 'cancelled'",
+    "modeKind": "literal-selector",
+    "disposition": "ordinary-control-flow",
+    "reason": "Terminal outcome data is passed to the atomic end-turn function; it is not an authority bypass."
+  },
+  "src/app-connections-connect-app.ts:371:3": {
+    "owner": "recordOwnerGitHubSelection",
+    "parameter": "transport: 'composio' | 'registry-mcp'",
+    "modeKind": "literal-selector",
+    "disposition": "ordinary-control-flow",
+    "reason": "Transport identity data records the owner's selected active GitHub route; it does not opt out of route validation."
+  },
+  "src/approval-card-source.ts:8:3": {
+    "owner": "approvalCardSource",
+    "parameter": "cardKind: 'grant-request' | 'squire-approval'",
+    "modeKind": "literal-selector",
+    "disposition": "ordinary-control-flow",
+    "reason": "Card-kind diagnostic data labels source validation; the Room/source check is unchanged for both kinds."
+  },
+  "src/command-refusal.ts:7:5": {
+    "owner": "CommandRefusalError.constructor",
+    "parameter": "readonly status: 400 | 403 | 404 | 409 | 410 | 429",
+    "modeKind": "literal-selector",
+    "disposition": "ordinary-control-flow",
+    "reason": "HTTP status data stored by the refusal error; the constructor does not authorize a special caller."
+  },
+  "src/company-mcp-discovery.ts:12:80": {
+    "owner": "(module)",
+    "parameter": "method?: 'GET' | 'POST'",
+    "modeKind": "literal-selector",
+    "disposition": "ordinary-control-flow",
+    "reason": "Standard HTTP method in the transport signature, not an exception to trust or deadline checks."
+  },
+  "src/company-mcp-discovery.ts:87:34": {
+    "owner": "get",
+    "parameter": "method: 'GET' | 'POST' = 'GET'",
+    "modeKind": "literal-selector",
+    "disposition": "ordinary-control-flow",
+    "reason": "Standard HTTP method forwarded by the generic discovery request; both methods retain the same URL/deadline policy."
+  },
+  "src/composio-apps.ts:432:39": {
+    "owner": "request",
+    "parameter": "method: 'GET' | 'POST' | 'DELETE'",
+    "modeKind": "literal-selector",
+    "disposition": "ordinary-control-flow",
+    "reason": "Standard REST method selects request/response encoding; every method uses the same authenticated transport."
+  },
+  "src/composio-apps.ts:433:5": {
+    "owner": "request",
+    "parameter": "version: 'v3' | 'v3.1' = 'v3'",
+    "modeKind": "literal-selector",
+    "disposition": "retained-caller-policy",
+    "reason": "The v3.1 provider endpoints require a version override from the default Composio v3 request adapter."
+  },
+  "src/connector-offer-completion.ts:103:3": {
+    "owner": "settleConnectingOffers",
+    "parameter": "status: 'accepted' | 'failed'",
+    "modeKind": "literal-selector",
+    "disposition": "ordinary-control-flow",
+    "reason": "Settlement outcome data is persisted uniformly in the offer/card; it does not bypass eligibility."
+  },
+  "src/daemon-service.ts:173:20": {
+    "owner": "liveOutput",
+    "parameter": "kind: 'draft' | 'thought'",
+    "modeKind": "literal-selector",
+    "disposition": "ordinary-control-flow",
+    "reason": "Live-output kind is ordinary draft/thought event data; both use the same authorization and insertion flow."
+  },
+  "src/daemon-service.ts:178:24": {
+    "owner": "approvalSource",
+    "parameter": "cardKind: 'grant-request' | 'squire-approval'",
+    "modeKind": "literal-selector",
+    "disposition": "ordinary-control-flow",
+    "reason": "Card-kind source data is forwarded to the same source validation helper."
+  },
+  "src/daemon/approvals.ts:21:66": {
+    "owner": "daemonApprovalSource",
+    "parameter": "cardKind: 'grant-request' | 'squire-approval'",
+    "modeKind": "literal-selector",
+    "disposition": "ordinary-control-flow",
+    "reason": "Card-kind diagnostic data reaches approvalCardSource; it does not relax source matching."
+  },
+  "src/daemon/apps.ts:75:28": {
+    "owner": "machine",
+    "parameter": "kind: 'trusty-squire' | 'tailscale'",
+    "modeKind": "literal-selector",
+    "disposition": "retained-caller-policy",
+    "reason": "The shared machine-connect helper branches between Squire installation and Tailscale sign-in protocols."
+  },
+  "src/daemon/messages.ts:472:5": {
+    "owner": "daemonLiveOutput",
+    "parameter": "kind: 'draft' | 'thought'",
+    "modeKind": "literal-selector",
+    "disposition": "ordinary-control-flow",
+    "reason": "Ordinary live-output kind is persisted/published through the same guarded output mechanism."
+  },
+  "src/database.ts:57:3": {
+    "owner": "postgresPoolConfig",
+    "parameter": "mode: 'app' | 'enrichment' | 'long-running' | 'diagnostics' | 'migration' = 'app'",
+    "modeKind": "literal-selector",
+    "disposition": "retained-caller-policy",
+    "reason": "Pool mode changes timeout/pool/application-name policy for migration, enrichment, diagnostics and serving callers."
+  },
+  "src/fly-machines.ts:31:23": {
+    "owner": "waitFor",
+    "parameter": "state: 'suspended' | 'stopped'",
+    "modeKind": "literal-selector",
+    "disposition": "ordinary-control-flow",
+    "reason": "Desired Fly terminal state is standard wait-endpoint data; it does not bypass the wait protocol."
+  },
+  "src/fly-machines.ts:145:29": {
+    "owner": "waitFor",
+    "parameter": "state: 'suspended' | 'stopped'",
+    "modeKind": "literal-selector",
+    "disposition": "ordinary-control-flow",
+    "reason": "Desired Fly terminal state is encoded into the standard wait URL, without an extra recovery exemption."
+  },
+  "src/free-agent-creation.ts:13:78": {
+    "owner": "reserveStarterAgents",
+    "parameter": "count:1|2",
+    "modeKind": "literal-selector",
+    "disposition": "ordinary-control-flow",
+    "reason": "Reservation quantity is bounded domain input to the same owner budget check and atomic reservation."
+  },
+  "src/free-agent-model-proxy.ts:92:3": {
+    "owner": "allowanceMessage",
+    "parameter": "kind: 'daily' | 'lifetime'",
+    "modeKind": "literal-selector",
+    "disposition": "ordinary-control-flow",
+    "reason": "Daily/lifetime allowance is the ordinary budget-domain discriminator; its individual value policies are counted at their branches."
+  },
+  "src/free-agent-model-proxy.ts:426:32": {
+    "owner": "knownNonentry",
+    "parameter": "reason: 'authority' | 'queue' | 'cancelled' | 'deadline'",
+    "modeKind": "literal-selector",
+    "disposition": "ordinary-control-flow",
+    "reason": "Refusal reason is recorded by the owned-attempt state machine, not a switch that skips its fences."
+  },
+  "src/free-agents.ts:832:59": {
+    "owner": "#sleepMachine",
+    "parameter": "mode: 'suspend' | 'refresh'",
+    "modeKind": "literal-selector",
+    "disposition": "retained-caller-policy",
+    "reason": "Release refresh invokes cold-boot refresh while ordinary idle sleep suspends the Machine."
+  },
+  "src/github-operations-refresh-check-rollup.ts:521:5": {
+    "owner": "gitHubOperationsUserCanAdministerInstallation",
+    "parameter": "accountType: 'User' | 'Organization'",
+    "modeKind": "literal-selector",
+    "disposition": "retained-caller-policy",
+    "reason": "Organization installation-listing failures may defer verification; personal-account failures propagate."
+  },
+  "src/github-operations.ts:425:76": {
+    "owner": "userCanAdministerInstallation",
+    "parameter": "accountType: 'User' | 'Organization'",
+    "modeKind": "literal-selector",
+    "disposition": "retained-caller-policy",
+    "reason": "Facade preserves the organization-versus-personal GitHub installation verification exception."
+  },
+  "src/membership-join.ts:62:3": {
+    "owner": "joinWorkspaceMembersToPublicRoom",
+    "parameter": "scope: 'all' | 'roster-humans' = 'all'",
+    "modeKind": "literal-selector",
+    "disposition": "retained-caller-policy",
+    "reason": "Roster-human joining excludes hidden humans/agents and does not restore removed members like the ordinary all-members join."
+  },
+  "src/message-search-document-sql.ts:16:3": {
+    "owner": "messageSearchDocumentSql",
+    "parameter": "configuration: 'simple' | 'english' = 'simple'",
+    "modeKind": "literal-selector",
+    "disposition": "ordinary-control-flow",
+    "reason": "Search-document configuration chooses stemmed versus exact indexes in their shared SQL builder."
+  },
+  "src/object-service.ts:104:19": {
+    "owner": "#retentionHours",
+    "parameter": "kind: 'media' | 'artifact'",
+    "modeKind": "literal-selector",
+    "disposition": "ordinary-control-flow",
+    "reason": "Stored-object kind is ordinary TTL domain data; the value-specific TTL branch is separately counted."
+  },
+  "src/object-service.ts:233:5": {
+    "owner": "#putReadyObject",
+    "parameter": "kind: 'media' | 'artifact'",
+    "modeKind": "literal-selector",
+    "disposition": "ordinary-control-flow",
+    "reason": "Object kind is persisted with its configured retention class, under the same ready-object write protocol."
+  },
+  "src/operator-dashboard-core-metrics.ts:60:47": {
+    "owner": "windowCount",
+    "parameter": "field: 'last7' | 'prior7'",
+    "modeKind": "literal-selector",
+    "disposition": "ordinary-control-flow",
+    "reason": "Generic metric-field selector reads the chosen week column; no caller-specific workflow branch."
+  },
+  "src/operator-dashboard.ts:40:3": {
+    "owner": "recordOperatorFunctionEvent",
+    "parameter": "name: 'page_load' | 'message_delivery' | 'corner_open' | 'attachment_upload'",
+    "modeKind": "literal-selector",
+    "disposition": "ordinary-control-flow",
+    "reason": "Recorded function name is metric data; insertion and duration bounds are shared."
+  },
+  "src/operator-dashboard.ts:261:19": {
+    "owner": "stages",
+    "parameter": "kind: 'people' | 'agents'",
+    "modeKind": "literal-selector",
+    "disposition": "retained-caller-policy",
+    "reason": "People and agents have distinct dashboard stage projections rather than one shared legacy stage list."
+  },
+  "src/operator-finances-wire.ts:18:18": {
+    "owner": "total",
+    "parameter": "field: 'monthToDate' | 'projectedMonth' | 'lastMonth'",
+    "modeKind": "literal-selector",
+    "disposition": "ordinary-control-flow",
+    "reason": "Generic financial summary field selector; it applies the same missing-value and aggregation rules."
+  },
+  "src/operator-finances-wire.ts:48:25": {
+    "owner": "category",
+    "parameter": "key: 'models' | 'voice' | 'hosting' | 'other'",
+    "modeKind": "literal-selector",
+    "disposition": "ordinary-control-flow",
+    "reason": "Generic cost-category selector; every category retains the same missing-data/source aggregation rules."
+  },
+  "src/owned-model-attempt.ts:265:99": {
+    "owner": "settleUsage",
+    "parameter": "outcome: 'unknown' | 'succeeded'",
+    "modeKind": "literal-selector",
+    "disposition": "ordinary-control-flow",
+    "reason": "Observed settlement outcome is passed through the owned-attempt completion protocol, not a bypass flag."
+  },
+  "src/phone-service.ts:116:34": {
+    "owner": "stopScheduledWorkCommand",
+    "parameter": "operation: 'deleteRoomSchedule' | 'deleteRoomSubscription'",
+    "modeKind": "literal-selector",
+    "disposition": "retained-caller-policy",
+    "reason": "The stop adapter selects durable schedule deletion versus the legacy subscription/provider cleanup path."
+  },
+  "src/phone/command-context.ts:57:74": {
+    "owner": "phoneStopScheduledWorkCommand",
+    "parameter": "operation:'deleteRoomSchedule'|'deleteRoomSubscription'",
+    "modeKind": "literal-selector",
+    "disposition": "retained-caller-policy",
+    "reason": "Schedule stops require the installed command transaction; subscription stops use their own DB/provider cleanup path."
+  },
+  "src/postgres-live.ts:110:38": {
+    "owner": "notifyCornerStateSql",
+    "parameter": "room: 'NEW.room_id' | 'corner'",
+    "modeKind": "literal-selector",
+    "disposition": "ordinary-control-flow",
+    "reason": "Closed SQL alias vocabulary selects the notification's Room expression without an authority exception."
+  },
+  "src/postgres-live.ts:254:23": {
+    "owner": "(module)",
+    "parameter": "source: 'sentry' | 'owed'",
+    "modeKind": "literal-selector",
+    "disposition": "ordinary-control-flow",
+    "reason": "Callback payload identifies the committed wake source; it does not bypass wake authority."
+  },
+  "src/postgres-live.ts:255:22": {
+    "owner": "setOwedWake",
+    "parameter": "source: 'sentry' | 'owed'",
+    "modeKind": "literal-selector",
+    "disposition": "ordinary-control-flow",
+    "reason": "Callback signature carries the committed Sentry/owed source datum; the setter merely stores the callback."
+  },
+  "src/room-choice.ts:531:3": {
+    "owner": "skipOpenChoice",
+    "parameter": "reason: 'skip' | 'expired'",
+    "modeKind": "literal-selector",
+    "disposition": "retained-caller-policy",
+    "reason": "Expired choices use expiry messaging instead of a human skip message, under the same choice settlement guard."
+  },
+  "src/rooms-mcp-stream.ts:147:18": {
+    "owner": "close",
+    "parameter": "reason?: 'expired' | 'unavailable'",
+    "modeKind": "literal-selector",
+    "disposition": "ordinary-control-flow",
+    "reason": "Stream termination reason is failure payload sent before closing, not an authorization or reconnect mode."
+  },
+  "src/server-live-connection.ts:226:65": {
+    "owner": "rememberPaintTrace",
+    "parameter": "kind: 'message' | 'turn'",
+    "modeKind": "literal-selector",
+    "disposition": "ordinary-control-flow",
+    "reason": "Paint trace kind is observational metric data, not a request to change message/turn authority."
+  },
+  "src/service-review.ts:50:109": {
+    "owner": "reserveServiceReviewWorkspaces",
+    "parameter": "windowDays: 1 | 14 = 1",
+    "modeKind": "literal-selector",
+    "disposition": "ordinary-control-flow",
+    "reason": "A bounded query window is normal service-review selection data; it does not exempt reservation or membership checks."
+  },
+  "src/signin-funnel.ts:133:3": {
+    "owner": "recordSigninFunnelEvent",
+    "parameter": "source: 'client' | 'server' = 'client'",
+    "modeKind": "literal-selector",
+    "disposition": "retained-caller-policy",
+    "reason": "Client-origin sign-in events cannot mint server-only milestones; server-origin observations can record them."
+  },
+  "src/store-download-reports.ts:90:59": {
+    "owner": "jwt",
+    "parameter": "algorithm: 'RSA-SHA256' | 'SHA256'",
+    "modeKind": "literal-selector",
+    "disposition": "ordinary-control-flow",
+    "reason": "Signing algorithm is ordinary cryptographic adapter configuration; it does not exempt provider verification or signing checks."
+  },
+  "src/wallet-post-ledger-line.ts:100:3": {
+    "owner": "agentWalletTool",
+    "parameter": "op:\n    | 'state'\n    | 'balance'\n    | 'chains'\n    | 'history'\n    | 'quote'\n    | 'pay'\n    | 'swap'",
+    "modeKind": "literal-selector",
+    "disposition": "ordinary-control-flow",
+    "reason": "Wallet operation is the ordinary public dispatch discriminator; each operation case is counted separately as value policy."
+  },
+  "src/workflow-admin.ts:8:5": {
+    "owner": "WorkflowAuthorizationError.constructor",
+    "parameter": "readonly status: 403 | 409",
+    "modeKind": "literal-selector",
+    "disposition": "ordinary-control-flow",
+    "reason": "HTTP refusal status is error payload data; constructor behavior is the same for both supported statuses."
+  },
+  "src/workflow-runs-cancel-run-timers.ts:352:107": {
+    "owner": "welcomeVideoRoleHolders",
+    "parameter": "role: 'maker' | 'checker'",
+    "modeKind": "literal-selector",
+    "disposition": "ordinary-control-flow",
+    "reason": "Maker/checker is an ordinary role-data selector for the same historical holder query; it does not grant role authority."
+  },
+  "scripts/shared-browser-repro.ts:102:16": {
+    "owner": "open",
+    "parameter": "metrics: { width: number; height: number; mobile: boolean }",
+    "modeKind": "nested-controls",
+    "disposition": "ordinary-control-flow",
+    "reason": "Device metrics are ordinary browser-emulation data; mobile does not exempt a proof from its browser checks."
+  },
+  "src/agent-command-read-agent-commands.ts:154:3": {
+    "owner": "routeSystemCommand",
+    "parameter": "input: {\n    roomId: string;\n    sourceMessageId: string;\n    kind?: string;\n    targets: readonly string[];\n    assignmentTargets?: readonly string[];\n    requestId?: string;\n    causeId?: string;\n    commandId?: string;\n    followup?: boolean;\n  }",
+    "modeKind": "nested-controls",
+    "disposition": "retained-caller-policy",
+    "reason": "A follow-up system wake carries its distinct followup routing marker into command creation."
+  },
+  "src/agent-wake-pause.ts:6:76": {
+    "owner": "setAgentWakePaused",
+    "parameter": "input: {\n  roomId: string; scheduleId?: string; subscriptionId?: string; paused: boolean;\n}",
+    "modeKind": "nested-controls",
+    "disposition": "ordinary-control-flow",
+    "reason": "Paused is the requested schedule/subscription state, not a caller-specific permission exemption."
+  },
+  "src/app-connections.ts:79:3": {
+    "owner": "resolveAppRoute",
+    "parameter": "input: { readonly existing?: ExistingApp; readonly reconnect: boolean; readonly noApi: boolean;\n    readonly preferredRoute?: 'composio' | 'squire-api'; readonly appKey?: string }",
+    "modeKind": "nested-controls",
+    "disposition": "retained-caller-policy",
+    "reason": "Reconnect/noApi/preferredRoute explicitly alter the managed-route selection and permitted browser fallback."
+  },
+  "src/app-connections.ts:435:3": {
+    "owner": "readOwnerApps",
+    "parameter": "options?:{readonly pure?:boolean}",
+    "modeKind": "nested-controls",
+    "disposition": "retained-caller-policy",
+    "reason": "Pure owner-app reads skip enrichment work reserved for the broader Workbench read path."
+  },
+  "src/chat-corner-counts.ts:317:3": {
+    "owner": "chatCornerCounts",
+    "parameter": "rows: readonly (CornerStateRow & {\n    id: string;\n    name: string;\n    parent_id: string;\n    latest_created_at?: Date | null;\n    attention?: boolean | null;\n  })[]",
+    "modeKind": "nested-controls",
+    "disposition": "ordinary-control-flow",
+    "reason": "Attention is observed corner-row state supplied to a pure projection, not a bypass option."
+  },
+  "src/commander.ts:336:3": {
+    "owner": "reportToCommander",
+    "parameter": "options: { automatic?: boolean; agentOnly?: boolean; ask?: string; attachments?: PrivateCommandPayload['attachments']; wakeInCorner?: boolean; idleSince?: string } = {}",
+    "modeKind": "nested-controls",
+    "disposition": "retained-caller-policy",
+    "reason": "Automatic/agent-only/corner-wake report options select different validation, recipient and continuation rules."
+  },
+  "src/computer-session.ts:204:3": {
+    "owner": "createComputerSession",
+    "parameter": "allowUpstream: (upstream: URL) => boolean = trustedComputerShareUpstream",
+    "modeKind": "nested-controls",
+    "disposition": "retained-caller-policy",
+    "reason": "The session host supplies its upstream trust predicate; the general share boundary delegates host policy to that caller."
+  },
+  "src/daemon-live.ts:139:5": {
+    "owner": "DaemonAgentSession.constructor",
+    "parameter": "private readonly presence: {\n      lifecycleId?: string;\n      turnRuntimeId?: string;\n      releaseVersion?: string;\n      sourceSha?: string;\n      overlayV1?: boolean;\n      usageAccountV1?:boolean;\n      activationContextV1?:boolean;\n      turnOwnershipV1?:boolean;\n      ownedModelV1?:boolean;\n      daemonOperationsV1?:boolean;\n    } = {}",
+    "modeKind": "nested-controls",
+    "disposition": "retained-caller-policy",
+    "reason": "Helper feature-capability flags select compatible overlay, activation, usage and owned-model protocols."
+  },
+  "src/daemon-service.ts:80:6": {
+    "owner": "DaemonService.constructor",
+    "parameter": "readonly prChecksStatus?: (\n      input: Input<'getPrChecksStatus'>,\n      confirmZeroChecks?: boolean,\n    ) => Promise<Output<'getPrChecksStatus'> & { zeroChecksConfirmed?: boolean }>",
+    "modeKind": "nested-controls",
+    "disposition": "retained-caller-policy",
+    "reason": "The installed GitHub check-status callback carries the special zero-check confirmation mode."
+  },
+  "src/daemon-service.ts:224:30": {
+    "owner": "authorizeScopedGrant",
+    "parameter": "input: Input<'authorizeSquireCall'> & {\n    readonly consume?: boolean;\n}",
+    "modeKind": "nested-controls",
+    "disposition": "retained-caller-policy",
+    "reason": "Consume=false permits discovery/inspection without spending a one-shot grant."
+  },
+  "src/daemon-service.ts:263:15": {
+    "owner": "writeResult",
+    "parameter": "extra?: {\n    failureReportDelivered?: boolean;\n}",
+    "modeKind": "nested-controls",
+    "disposition": "ordinary-control-flow",
+    "reason": "failureReportDelivered is output metadata appended to the result, not a request to bypass a check."
+  },
+  "src/daemon/apps.ts:55:52": {
+    "owner": "postCard",
+    "parameter": "card: {\n      appId: string; appKey: string; name: string; connectorId?: string;\n      connectKind?: string; resumeOnConnect?: boolean;\n    }",
+    "modeKind": "nested-controls",
+    "disposition": "retained-caller-policy",
+    "reason": "Dependent connection cards suppress resume-on-connect so their owning workflow keeps continuation ownership."
+  },
+  "src/daemon/corner-messages.ts:151:57": {
+    "owner": "daemonWriteResult",
+    "parameter": "extra?: {\n    failureReportDelivered?: boolean;\n  }",
+    "modeKind": "nested-controls",
+    "disposition": "ordinary-control-flow",
+    "reason": "failureReportDelivered is result data; this helper merges it into the same live delta result."
+  },
+  "src/daemon/grants.ts:580:5": {
+    "owner": "daemonAuthorizeScopedGrant",
+    "parameter": "input: Input<'authorizeSquireCall'> & { readonly consume?: boolean }",
+    "modeKind": "nested-controls",
+    "disposition": "retained-caller-policy",
+    "reason": "The scoped-grant adapter can inspect a one-shot grant without consuming it on discovery."
+  },
+  "src/database-migrate.ts:76:3": {
+    "owner": "migrate",
+    "parameter": "options: { deferData?: boolean } = {}",
+    "modeKind": "nested-controls",
+    "disposition": "retained-caller-policy",
+    "reason": "Release migration can defer data backfills to its separately authorized data stage."
+  },
+  "src/feedback.ts:295:3": {
+    "owner": "insertHumanReport",
+    "parameter": "input: {\n    roomId: string;\n    messageId: string;\n    reporterId: string;\n    summary: string;\n    note?: string;\n    /** Set when a client other than the Beeline app filed this report. */\n    externalClient?: boolean;\n    /** Sign-in family of the device session filing this report. Absent when unknown. */\n    familyId?: string;\n  }",
+    "modeKind": "nested-controls",
+    "disposition": "retained-caller-policy",
+    "reason": "External-client feedback omits phone-only version attribution based on sign-in family metadata."
+  },
+  "src/firebase-push.ts:145:3": {
+    "owner": "readClearBatch",
+    "parameter": "fits: (batch: readonly ReadClear[]) => boolean",
+    "modeKind": "nested-controls",
+    "disposition": "ordinary-control-flow",
+    "reason": "Generic batch-capacity predicate reports whether an encoded APNs batch fits its size limit, not a mode exemption."
+  },
+  "src/free-agents.ts:550:5": {
+    "owner": "createInWorkspace",
+    "parameter": "input: { workspaceId: string; creatorId: string; roomId: string; team?: boolean; timeZone?: string }",
+    "modeKind": "nested-controls",
+    "disposition": "retained-caller-policy",
+    "reason": "Team creation uses two starter roles and team-specific onboarding instead of the ordinary single starter."
+  },
+  "src/free-agents.ts:791:39": {
+    "owner": "requestSleep",
+    "parameter": "options: { refresh?: boolean } = {}",
+    "modeKind": "nested-controls",
+    "disposition": "retained-caller-policy",
+    "reason": "Refresh sleep selects the cold-boot release path rather than ordinary idle suspension."
+  },
+  "src/github-operations-refresh-check-rollup.ts:16:5": {
+    "owner": "gitHubOperationsRefreshCheckRollup",
+    "parameter": "target: CornerWebhookTarget & { has_pr?: boolean; pr_number?: string | null }",
+    "modeKind": "nested-controls",
+    "disposition": "ordinary-control-flow",
+    "reason": "The target's has_pr value is an observed repository/cache fact, not a request to bypass PR validation."
+  },
+  "src/github-operations-refresh-check-rollup.ts:18:5": {
+    "owner": "gitHubOperationsRefreshCheckRollup",
+    "parameter": "options?: { quiet?: boolean; snapshot?: {\n      rollup: Awaited<ReturnType<GitHubAppClient['readCommitCheckRollup']>>;\n      pr: Awaited<ReturnType<GitHubAppClient['readPullRequest']>>;\n      fetchStartedAt: number;\n      token: string;\n    } }",
+    "modeKind": "nested-controls",
+    "disposition": "retained-caller-policy",
+    "reason": "Quiet repeated check reads suppress duplicate failure notices; a supplied snapshot reuses the caller's observed GitHub facts."
+  },
+  "src/github-operations-user-credential.ts:107:5": {
+    "owner": "gitHubOperationsStoreRepository",
+    "parameter": "repository: {\n      id: number;\n      installationId: number;\n      fullName: string;\n      defaultBranch: string;\n      private: boolean;\n      allowAutoMerge: boolean;\n    }",
+    "modeKind": "nested-controls",
+    "disposition": "ordinary-control-flow",
+    "reason": "Repository private/auto-merge flags are provider metadata stored under the same installation checks."
+  },
+  "src/github-operations.ts:374:26": {
+    "owner": "refreshCheckRollup",
+    "parameter": "target: CornerWebhookTarget & {\n    has_pr?: boolean;\n    pr_number?: string | null;\n}",
+    "modeKind": "nested-controls",
+    "disposition": "ordinary-control-flow",
+    "reason": "The target's has_pr value is observed repository/cache data forwarded to the shared rollup reader."
+  },
+  "src/github-operations.ts:377:97": {
+    "owner": "refreshCheckRollup",
+    "parameter": "options?: {\n    quiet?: boolean;\n    snapshot?: {\n        rollup: Awaited<ReturnType<GitHubAppClient['readCommitCheckRollup']>>;\n        pr: Awaited<ReturnType<GitHubAppClient['readPullRequest']>>;\n        fetchStartedAt: number;\n        token: string;\n    };\n}",
+    "modeKind": "nested-controls",
+    "disposition": "retained-caller-policy",
+    "reason": "Facade forwards quiet-notification and caller-snapshot modes to the GitHub rollup owner."
+  },
+  "src/github-operations.ts:437:23": {
+    "owner": "storeRepository",
+    "parameter": "repository: {\n    id: number;\n    installationId: number;\n    fullName: string;\n    defaultBranch: string;\n    private: boolean;\n    allowAutoMerge: boolean;\n}",
+    "modeKind": "nested-controls",
+    "disposition": "ordinary-control-flow",
+    "reason": "Repository private/auto-merge values are provider data forwarded to the same guarded repository store."
+  },
+  "src/github-operations.ts:654:39": {
+    "owner": "reviewerWakeFromFacts",
+    "parameter": "input: {\n  configuredReviewerId: string | null;\n  reviewerHandle: string | null;\n  parentMember: boolean;\n  cornerMember: boolean;\n  /** The live GitHub verdict reported beside this status, never the stored lifecycle. */\n  checks: string | undefined;\n  /** The run sits in `review` after a green head woke the reviewer. */\n  reviewWoken: boolean;\n}",
+    "modeKind": "nested-controls",
+    "disposition": "ordinary-control-flow",
+    "reason": "Membership/check/reviewer-woken values are observed facts used by a pure status projection, not exemption requests."
+  },
+  "src/institutional-memory-shadow.ts:444:3": {
+    "owner": "memoryWriteAuthority",
+    "parameter": "input: { sourceMessageIds: readonly string[]; personAsked: boolean }",
+    "modeKind": "nested-controls",
+    "disposition": "retained-caller-policy",
+    "reason": "PersonAsked distinguishes explicitly requested personal-memory writes, whose source authority must be validated."
+  },
+  "src/institutional-memory-shadow.ts:560:3": {
+    "owner": "insertMemoryItem",
+    "parameter": "options: { version: number; explicitSave: boolean; predecessorId?: string }",
+    "modeKind": "nested-controls",
+    "disposition": "retained-caller-policy",
+    "reason": "Explicit-save provenance is preserved separately from automatic memory insertion and replacement."
+  },
+  "src/link-agent-wallet.ts:181:66": {
+    "owner": "create",
+    "parameter": "input: {\n    merchant: string; merchantUrl?: string; amount: number; description: string;\n    test?: boolean; idempotencyKey: string;\n    credentialType?: 'card' | 'shared_payment_token'; networkId?: string;\n  }",
+    "modeKind": "nested-controls",
+    "disposition": "retained-caller-policy",
+    "reason": "The Link provider's explicit test mode selects a sandbox spend request; live approval remains required otherwise."
+  },
+  "src/luna-backfill.ts:54:3": {
+    "owner": "backfillLuna",
+    "parameter": "options: { apply?: boolean; approvedTargets?: ReadonlyArray<{ workspace_id: string; room_id: string }> }",
+    "modeKind": "nested-controls",
+    "disposition": "retained-caller-policy",
+    "reason": "The backfill defaults to inspection and mutates only the explicitly approved apply/target set."
+  },
+  "src/membership-join.ts:492:41": {
+    "owner": "writeSurfacePushState",
+    "parameter": "values: [roomId: string, identityId: string, muted: boolean | null]",
+    "modeKind": "nested-controls",
+    "disposition": "ordinary-control-flow",
+    "reason": "Muted is desired per-surface push state written as data, not a request to bypass membership."
+  },
+  "src/membership-join.ts:548:41": {
+    "owner": "joinMcpPublicRooms",
+    "parameter": "values: [identityId: string, workspaceIds: string[], restoreRemoved: boolean]",
+    "modeKind": "nested-controls",
+    "disposition": "retained-caller-policy",
+    "reason": "Only explicit restoration can rejoin removed MCP memberships; ordinary public-Room discovery cannot."
+  },
+  "src/phone-service.ts:205:55": {
+    "owner": "loadCorners",
+    "parameter": "{ roomViewFamilyOrder = false, archived = false, before, deck = false, }: {\n    roomViewFamilyOrder?: boolean;\n    archived?: boolean;\n    before?: ArchivedCornerCursor;\n    deck?: boolean;\n} = {}",
+    "modeKind": "nested-controls",
+    "disposition": "retained-caller-policy",
+    "reason": "Family ordering/deck modes compose the parent Room's coherent snapshot instead of standalone list ordering."
+  },
+  "src/phone-service.ts:250:34": {
+    "owner": "claimAgentConnectPairing",
+    "parameter": "input: {\n    code: string;\n    agentPubkey: string;\n    model: string;\n    effort?: string;\n    avatarSeed?: string;\n    eventSubscriptions?: readonly string[];\n    deferJoin?: boolean;\n}",
+    "modeKind": "nested-controls",
+    "disposition": "retained-caller-policy",
+    "reason": "Pairing's deferJoin reserves final Room joining for the completion phase instead of immediate claim."
+  },
+  "src/phone-service.ts:270:34": {
+    "owner": "claimAgentConnectPairing",
+    "parameter": "input: {\n    code: string;\n    agentPubkey: string;\n    model: string;\n    effort?: string;\n    avatarSeed?: string;\n    eventSubscriptions?: readonly string[];\n    deferJoin?: boolean;\n    machineId?: string;\n    machineName?: string;\n}",
+    "modeKind": "nested-controls",
+    "disposition": "retained-caller-policy",
+    "reason": "The overload preserves deferred joining for machine-aware pairing, rather than implicitly joining at claim."
+  },
+  "src/phone-service.ts:295:34": {
+    "owner": "claimAgentConnectPairing",
+    "parameter": "input: {\n    code: string;\n    agentPubkey: string;\n    model: string;\n    effort?: string;\n    avatarSeed?: string;\n    eventSubscriptions?: readonly string[];\n    deferJoin?: boolean;\n    machineId?: string;\n    machineName?: string;\n}",
+    "modeKind": "nested-controls",
+    "disposition": "retained-caller-policy",
+    "reason": "The overload preserves deferred joining for machine-aware pairing, rather than implicitly joining at claim."
+  },
+  "src/phone-service.ts:329:35": {
+    "owner": "finishAgentConnectPairing",
+    "parameter": "input: {\n    code: string;\n    workspaceJoined: boolean;\n    eventSubscriptions?: readonly string[];\n}",
+    "modeKind": "nested-controls",
+    "disposition": "retained-caller-policy",
+    "reason": "Pairing completion supplies the Workspace-joined phase marker to the authoritative Room-join/event projector."
+  },
+  "src/phone-service.ts:396:27": {
+    "owner": "unansweredMentionPhrase",
+    "parameter": "agent: {\n    agent_id: string;\n    agent_name: string;\n    agent_handle: string | null;\n    access_policy: unknown;\n    owner_id: string | null;\n    owner_handle: string | null;\n    member: boolean;\n    corner: boolean;\n}",
+    "modeKind": "nested-controls",
+    "disposition": "ordinary-control-flow",
+    "reason": "Agent member/corner fields are observed query facts used to phrase a mention notice, not bypass requests."
+  },
+  "src/phone-service.ts:417:80": {
+    "owner": "unansweredMentionTargets",
+    "parameter": "source?: {\n    authorKind: 'human' | 'agent';\n    direct: boolean;\n    corner: boolean;\n}",
+    "modeKind": "nested-controls",
+    "disposition": "ordinary-control-flow",
+    "reason": "Source author/direct/corner fields are observed message context for mention selection, not a caller exemption."
+  },
+  "src/phone/corner-reads.ts:62:5": {
+    "owner": "phoneLoadCorners",
+    "parameter": "{\n      roomViewFamilyOrder = false,\n      archived = false,\n      before,\n      deck = false,\n    }: {\n      roomViewFamilyOrder?: boolean;\n      archived?: boolean;\n      /** The keyset cursor of the page before, open or archived. */\n      before?: ArchivedCornerCursor;\n      deck?: boolean;\n    } = {}",
+    "modeKind": "nested-controls",
+    "disposition": "retained-caller-policy",
+    "reason": "Family ordering and deck compose a parent Room snapshot; standalone corner reads keep their own ordering."
+  },
+  "src/phone/mention-notices.ts:201:5": {
+    "owner": "phoneUnansweredMentionPhrase",
+    "parameter": "agent: {\n      agent_id: string;\n      agent_name: string;\n      agent_handle: string | null;\n      access_policy: unknown;\n      owner_id: string | null;\n      owner_handle: string | null;\n      member: boolean;\n      corner: boolean;\n    }",
+    "modeKind": "nested-controls",
+    "disposition": "ordinary-control-flow",
+    "reason": "Agent membership/corner values are source facts for notice projection, not an option to waive membership."
+  },
+  "src/phone/mention-notices.ts:271:5": {
+    "owner": "phoneUnansweredMentionTargets",
+    "parameter": "source?: { authorKind: 'human' | 'agent'; direct: boolean; corner: boolean }",
+    "modeKind": "nested-controls",
+    "disposition": "ordinary-control-flow",
+    "reason": "Direct/corner/author-kind describe the message source; the selector does not grant the caller a bypass."
+  },
+  "src/phone/pairing.ts:168:74": {
+    "owner": "phoneClaimAgentConnectPairing",
+    "parameter": "input: {\n      code: string;\n      agentPubkey: string;\n      model: string;\n      effort?: string;\n      avatarSeed?: string;\n      eventSubscriptions?: readonly string[];\n      deferJoin?: boolean;\n      machineId?: string;\n      machineName?: string;\n    }",
+    "modeKind": "nested-controls",
+    "disposition": "retained-caller-policy",
+    "reason": "The claim phase may defer Room joins until machine pairing and completion own the final join."
+  },
+  "src/phone/pairing.ts:374:75": {
+    "owner": "phoneFinishAgentConnectPairing",
+    "parameter": "input: {\n    code: string;\n    workspaceJoined: boolean;\n    eventSubscriptions?: readonly string[];\n  }",
+    "modeKind": "nested-controls",
+    "disposition": "retained-caller-policy",
+    "reason": "The completion phase supplies the Workspace-joined marker to join/event projection, distinct from initial claim."
+  },
+  "src/provider-webhooks.ts:137:3": {
+    "owner": "completeProviderWebhookAssignment",
+    "parameter": "input: { id: string; operation: 'register' | 'remove'; providerId?: string;\n    signingSecret?: string; accountContext?: string; livemode?: boolean; error?: string }",
+    "modeKind": "nested-controls",
+    "disposition": "ordinary-control-flow",
+    "reason": "Webhook livemode/error/registration fields are signed provider outcome data stored by assignment completion."
+  },
+  "src/resource-requester.ts:24:47": {
+    "owner": "resourceRequester",
+    "parameter": "options: { includeDeletedMessage?: boolean } = {}",
+    "modeKind": "nested-controls",
+    "disposition": "retained-caller-policy",
+    "reason": "A provenance lookup may include its deleted root message; ordinary resource requests require an undeleted source."
+  },
+  "src/room-choice.ts:582:3": {
+    "owner": "answerRoomChoice",
+    "parameter": "{ wake = true }: { wake?: boolean } = {}",
+    "modeKind": "nested-controls",
+    "disposition": "retained-caller-policy",
+    "reason": "The durable choice adapter can defer waking until its enclosing transaction has committed."
+  },
+  "src/room-choice.ts:700:3": {
+    "owner": "skipRoomChoice",
+    "parameter": "{ wake = true }: { wake?: boolean } = {}",
+    "modeKind": "nested-controls",
+    "disposition": "retained-caller-policy",
+    "reason": "The durable skip adapter can defer waking until its enclosing transaction has committed."
+  },
+  "src/rooms-mcp-members.ts:214:54": {
+    "owner": "postMcpWebhook",
+    "parameter": "init: { headers: Record<string, string>; body: string; readResponse?: boolean }",
+    "modeKind": "nested-controls",
+    "disposition": "retained-caller-policy",
+    "reason": "The verification probe retains response bytes; fire-and-forget webhook delivery normally cancels the body."
+  },
+  "src/rooms-mcp-oauth.ts:171:48": {
+    "owner": "RoomsMcpOAuth.constructor",
+    "parameter": "private readonly completionReady: () => boolean = () => false",
+    "modeKind": "nested-controls",
+    "disposition": "ordinary-control-flow",
+    "reason": "Runtime readiness predicate reflects whether the completion bridge is mounted; its boolean is observed capability data."
+  },
+  "src/rooms-mcp.ts:93:5": {
+    "owner": "RoomsMcp.constructor",
+    "parameter": "private readonly memberStreamReady:()=>boolean=()=>false",
+    "modeKind": "nested-controls",
+    "disposition": "ordinary-control-flow",
+    "reason": "Runtime readiness predicate reflects member-stream availability; it is not a caller-controlled consent bypass."
+  },
+  "src/squire-machine.ts:107:3": {
+    "owner": "queueSquireWork",
+    "parameter": "input: { install?: boolean; forceReloginProvider?: string; op?: string }",
+    "modeKind": "nested-controls",
+    "disposition": "retained-caller-policy",
+    "reason": "Installation requests clear different Squire operation state than ordinary queued sync/sign-in work."
+  },
+  "src/starter-onboarding-run.ts:25:73": {
+    "owner": "createStarterOnboardingRun",
+    "parameter": "input: {\n  roomId: string; userId: string; beebeeId: string; lunaId: string; manual?: boolean; timeZone?: string;\n}",
+    "modeKind": "nested-controls",
+    "disposition": "retained-caller-policy",
+    "reason": "Manual onboarding records the requesting user so an explicit rerun differs from automatic starter greeting."
+  },
+  "src/vault-save-relay.ts:20:27": {
+    "owner": "attach",
+    "parameter": "send: (frame: Record<string, unknown>) => boolean",
+    "modeKind": "nested-controls",
+    "disposition": "ordinary-control-flow",
+    "reason": "The send callback's boolean reports transport acceptance; it does not opt out of vault or Room authority."
+  },
+  "src/voice-service.ts:274:52": {
+    "owner": "endInactive",
+    "parameter": "stillInactive: () => boolean",
+    "modeKind": "nested-controls",
+    "disposition": "ordinary-control-flow",
+    "reason": "The inactivity callback rechecks actual quiet state before ending a call; it is a safety predicate, not an exemption flag."
+  },
+  "src/voice-service.ts:326:90": {
+    "owner": "leave",
+    "parameter": "inactivity?: { owner: string; stillInactive(): boolean; ended: boolean }",
+    "modeKind": "nested-controls",
+    "disposition": "retained-caller-policy",
+    "reason": "The inactivity owner record permits fenced cleanup of an ended/quiet call rather than the ordinary human leave path."
+  },
+  "src/voice-service.ts:516:5": {
+    "owner": "recordAnswer",
+    "parameter": "options?: { replyId?: string; sourceId?: string; routeMentions?: boolean }",
+    "modeKind": "nested-controls",
+    "disposition": "retained-caller-policy",
+    "reason": "Intermediate speech can suppress mention routing; only final committed speech carries reply/source identities."
+  },
+  "src/workbench-companies.ts:81:41": {
+    "owner": "classifyConnectionState",
+    "parameter": "input: {\n  readonly status?: string | null;\n  readonly errorMessage?: string | null;\n  readonly neverAuthorised?: boolean;\n  readonly computerOffline?: boolean;\n}",
+    "modeKind": "nested-controls",
+    "disposition": "ordinary-control-flow",
+    "reason": "Never-authorized/offline are observed connection facts used to project state, not route bypass requests."
+  },
+  "src/workflow-runs-cancel-run-timers.ts:80:3": {
+    "owner": "dispatchState",
+    "parameter": "input: {\n    workspaceId: string;\n    roomId: string;\n    runId: string;\n    contract: WorkflowReadContract;\n    roleBindings: Record<string, string>;\n    roleAgents: Record<string, string[]>;\n    stateName: string;\n    attempt: number;\n    cardId: string;\n    exhausted: boolean;\n  }",
+    "modeKind": "nested-controls",
+    "disposition": "retained-caller-policy",
+    "reason": "The exhausted-attempt flag tells workflow dispatch to handle a completed failover set rather than select another role holder."
+  },
+  "src/workflow-runs-cancel-run-timers.ts:438:3": {
+    "owner": "authorizeWorkflowControl",
+    "parameter": "input: {\n    requesterId: string | null;\n    agentIds: string[];\n    authority: string;\n    action: string;\n    /** Any human in the Room may take this action (cancelling a run). */\n    roomMembers?: boolean;\n  }",
+    "modeKind": "nested-controls",
+    "disposition": "retained-caller-policy",
+    "reason": "RoomMembers expands cancel authorization to Room humans; other control actions remain requester/role-owner only."
+  },
+  "src/workflow-runs-repeated-result.ts:236:3": {
+    "owner": "settleWorkflowGate",
+    "parameter": "input: { choiceId: string; viewerId: string; optionId?: string; note?: unknown; skip?: boolean; sourceMessageId?: string; outputCommand?: CommandRow }",
+    "modeKind": "nested-controls",
+    "disposition": "retained-caller-policy",
+    "reason": "A skip resolves a gate's declared default instead of requiring an explicit option answer."
+  }
+}

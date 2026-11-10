@@ -318,7 +318,7 @@ export default function ConnectionDetailScreen() {
             testID="connection-error-state"
             retryLabel="Retry"
             retryTestID="connection-retry"
-            onRetry={() => void (detail && error ? revoke() : retry())} />
+            onRetry={detail && error ? () => void revoke() : undefined} />
         ) : null}
       </ScrollView>
     </View>

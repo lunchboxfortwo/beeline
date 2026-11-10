@@ -1,3 +1,4 @@
+import { subscribePhoneLiveEvents } from './phone-live-events';
 
 import { type RoomViewMessage } from '@beeline/buzz-client';
 import { verifyEvent, type NostrEvent } from '@beeline/nostr';
@@ -6,14 +7,12 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 const controls = vi.hoisted(() => ({
   fetch: vi.fn(),
   request: vi.fn(),
-  activation: vi.fn(),
   authorization: vi.fn(),
   invalidateAuthorization: vi.fn(),
   identityListeners: new Set<() => void>(),
 }));
 const mmkv = vi.hoisted(() => ({ stores: new Map<string, Map<string, string>>() }));
 
-vi.mock('@/auth/signin-funnel', () => ({ funnelSuccessfulOperation: controls.activation }));
 
 vi.mock('react-native', () => ({
   AppState: { currentState: 'active', addEventListener: () => ({ remove: () => undefined }) },
@@ -217,7 +216,7 @@ describe('monolith Room send path', () => {
     expect(received).toHaveLength(1);
     expect(received[0]!.acknowledgePaint).toEqual(expect.any(Function));
     expect(sockets[0]!.sent.map(value => JSON.parse(value))).toEqual([
-      { type: 'subscribe', sidebarPreviews: true, roomStateProjections: true, roomIds: [ROOM] },
+      { type: 'subscribe', sidebarPreviews: false, roomStateProjections: true, roomIds: [ROOM] },
     ]);
     received[0]!.acknowledgePaint?.();
     expect(sockets[0]!.sent.at(-1)).toBe(JSON.stringify({ type: 'trace-paint', id: trace.id }));
@@ -300,10 +299,10 @@ describe('monolith Room send path', () => {
     );
   });
 
-  it('returns the server-backed active-steer acknowledgement', async () => {
+  it('returns server-backed active-steer and external-recipient acknowledgements', async () => {
     controls.fetch.mockResolvedValueOnce(
       new Response(
-        JSON.stringify({ messageId: '07'.repeat(32), activeSteerAgentIds: ['agent-1'] }),
+        JSON.stringify({ messageId: '07'.repeat(32), activeSteerAgentIds: ['agent-1'], externalAgentHandles: ['atlas', 'nova'] }),
         { status: 200 },
       ),
     );
@@ -313,6 +312,7 @@ describe('monolith Room send path', () => {
     await expect(transport.publishPreparedMessage(event)).resolves.toEqual({
       messageId: event.id,
       activeSteerAgentIds: ['agent-1'],
+      externalAgentHandles: ['atlas', 'nova'],
     });
   });
 
@@ -721,17 +721,19 @@ describe('monolith Room send path', () => {
   });
 });
 
-it('measures accepted Workspace and message writes through either transport, excluding refused writes', async () => {
-  controls.activation.mockClear();
-  controls.fetch.mockResolvedValue(new Response('{}', { status: 200 }));
-  await monolithPhoneOperation('createWorkspace', { name: 'First workspace' });
-  await vi.waitFor(() => expect(controls.activation).toHaveBeenCalledWith('createWorkspace'));
-  controls.fetch.mockResolvedValue(new Response('{}', { status: 200 }));
-  await new MonolithRigTransport(identity).operation('sendRoomMessage', { roomId: ROOM, text: 'Hello' });
-  await vi.waitFor(() => expect(controls.activation).toHaveBeenCalledWith('sendRoomMessage'));
-  controls.activation.mockClear();
-  controls.fetch.mockResolvedValue(new Response('{"error":"refused"}', { status: 403 }));
-  await expect(monolithPhoneOperation('createWorkspace', { name: 'Refused' })).rejects.toThrow();
-  await expect(new MonolithRigTransport(identity).operation('sendRoomMessage', { roomId: ROOM, text: 'Refused' })).rejects.toThrow();
-  expect(controls.activation).not.toHaveBeenCalled();
+it('publishes only committed operation outcomes through either transport', async () => {
+  const observed: string[] = [];
+  const stop = subscribePhoneLiveEvents(event => {
+    if (event.type === 'operation-completed') observed.push(event.operation);
+  });
+  try {
+    controls.fetch.mockImplementation(async () => new Response('{}', { status: 200 }));
+    await monolithPhoneOperation('createWorkspace', { name: 'First workspace' });
+    await new MonolithRigTransport(identity).operation('sendRoomMessage', { roomId: ROOM, text: 'Hello' });
+    expect(observed).toEqual(['createWorkspace', 'sendRoomMessage']);
+    controls.fetch.mockImplementation(async () => new Response('{"error":"refused"}', { status: 403 }));
+    await expect(monolithPhoneOperation('createWorkspace', { name: 'Refused' })).rejects.toThrow();
+    await expect(new MonolithRigTransport(identity).operation('sendRoomMessage', { roomId: ROOM, text: 'Refused' })).rejects.toThrow();
+    expect(observed).toEqual(['createWorkspace', 'sendRoomMessage']);
+  } finally { stop(); }
 });

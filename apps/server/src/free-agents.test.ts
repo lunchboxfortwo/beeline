@@ -1,24 +1,22 @@
 import { migrateMembershipSubscriptions } from './agent-subscriptions.js';
 import { STARTER_BANTER_TYPING_MS, StarterOnboardingService } from './starter-onboarding-run.js';
-import { starterHello, consumeStarterVideoPost, postStarterVideoPreview } from './starter-onboarding.js';
-import { postRoomChoice } from './room-choice.js';
+import { starterHello, postStarterGame } from './starter-onboarding.js';
 import { postRepositoryOnboarding } from './repository-onboarding.js';
 import { TokenAuth } from './auth.js';
 import { DaemonService } from './daemon-service.js';
 import { createECDH } from 'node:crypto';
 import { getPublicKey } from '@beeline/nostr';
-import { AGENT_MENTION_NOTICE_GRACE_MS } from '@beeline/api-contract/agent-access';
+
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { claimAgentCommand, createAgentCommand, type CommandRow } from './agent-command.js';
-import {
-  claimAgentConnection,
-  releaseAgentConnection,
-  releaseStaleServerConnections,
-} from './connection-presence.js';
+import { claimAgentConnection, releaseAgentConnection } from './connection-presence.js';
 import { migrate } from './database.js';
 import type { FreeAgentMachines, FreeAgentMachineSpec } from './fly-machines.js';
 import {
   addFreeAgentToWorkspace,
+  currentFreeAgentInstructions,
+  FREE_AGENT_TEAM_GUIDE,
+  FREE_AGENT_BROWSER_GUIDE,
   FREE_AGENT_EXIT_NOTE,
   FREE_AGENT_TURN_GUIDE,
   FREE_AGENT_HELLO,
@@ -40,7 +38,6 @@ import { ObjectService } from './object-service.js';
 import { PgliteDatabase, MemoryObjectStorage, migratedDatabase } from './test-support.js';
 import { recordSigninFunnelEvent, recordOnboardingEvent } from './signin-funnel.js';
 import { dashboardPeriods } from './operator-dashboard-periods.js';
-import { reportSquireWork } from './squire-machine.js';
 
 const sentryCaptures = vi.hoisted(() => [] as { error: unknown; tags: Record<string, string> | undefined }[]);
 vi.mock('./sentry.js', async (importOriginal) => ({
@@ -56,7 +53,6 @@ const ORDINARY = 'c'.repeat(64);
 
 const TEST_FREE_AGENT_CONFIG: FreeAgentConfig = {
   model: 'deepseek/deepseek-v4-flash',
-  idleSeconds: 60,
   maxPerOwner: 3,
   dailyTokenCap: 1_000_000,
   firstDayTokenCap: 1_000_000,
@@ -67,8 +63,6 @@ const TEST_FREE_AGENT_CONFIG: FreeAgentConfig = {
   region: 'iad',
   cpus: 1,
   memoryMb: 1024,
-  reapIdleMs: 300_000,
-  deleteAfterMs: 30 * 86_400_000,
 };
 
 /** Fly Machines stand-in: records every call and keeps each Machine's state. */
@@ -90,15 +84,35 @@ class FakeMachines implements FreeAgentMachines {
     this.states.set(id, 'started');
     return { id };
   }
+  async list() {
+    return Promise.all([...this.states.keys()].map(id => this.read(id))).then(rows=>rows.filter(row=>row!==undefined));
+  }
+  async update(machine: import('./fly-machines.js').FreeAgentMachine,image:string) {
+    this.specs[Number(machine.id.slice(1))-1]!.image=image;
+    return (await this.read(machine.id))!;
+  }
   async find(agentId: string) {
     const index = this.specs.findIndex((spec) => spec.agentId === agentId);
     const id = index >= 0 ? `m${index + 1}` : undefined;
     const state = id ? this.states.get(id) : undefined;
-    return id && state && state !== 'destroyed' ? { id, state } : undefined;
+    return id && state && state !== 'destroyed' ? { id, state,config:{image:this.specs[index]!.image} } : undefined;
   }
-  async start(id: string) {
+  async start(id: string, image?: string) {
+    const spec = this.specs[Number(id.slice(1)) - 1]!;
+    const state = this.states.get(id);
+    if (image && spec.image === image && state !== 'stopped' && state !== 'suspended') return;
+    if (image) spec.image = image;
     this.calls.push(`start ${id}`);
     this.states.set(id, 'started');
+  }
+  reconnect(){return this;}
+  async read(id:string){
+    const state=this.states.get(id);return state && state!=='destroyed' ? {id,state,instance_id:id,config:{image:this.specs[Number(id.slice(1))-1]!.image}} : undefined;
+  }
+  async refresh(id:string,image:string){
+    const machine=await this.read(id);if(!machine)return false;
+    if(machine.config.image===image && machine.state!=='stopped')return false;
+    await this.start(id);return true;
   }
   async suspend(id: string) {
     this.calls.push(`suspend ${id}`);
@@ -125,6 +139,21 @@ class FakeMachines implements FreeAgentMachines {
 async function settle(): Promise<void> {
   for (let index = 0; index < 20; index++) await new Promise((resolve) => setTimeout(resolve, 5));
 }
+
+describe('current starter instructions', () => {
+  it('replaces retired hosted policy on an existing soul and keeps its persona', () => {
+    const prior = 'Be curious.\n\nFor Grok/xAI old hosted sign-in guide.\n\nWhen the person picks "Make a welcome video and post it to my YouTube", use old tools.\n\nYou are on a team with another free starter agent. Old rule.';
+    const current = currentFreeAgentInstructions(prior);
+    expect(current).toContain('Be curious.');
+    expect(current).toContain(FREE_AGENT_BROWSER_GUIDE);
+    expect(current).toContain(FREE_AGENT_TEAM_GUIDE);
+    expect(current).not.toMatch(/Trusty Squire|video_preview|welcome-video|old hosted|Old rule/);
+    expect(currentFreeAgentInstructions(current)).toBe(current);
+  });
+  it('uses exactly the requested feedback instruction with no decay or extra directions', () => {
+    expect(FREE_AGENT_TEAM_GUIDE).toBe('Try to include another agent, if available, to request feedback on your work as much as possible.');
+  });
+});
 
 describe('free starter agents', () => {
   let db: PgliteDatabase;
@@ -208,25 +237,17 @@ describe('free starter agents', () => {
     const first = await replay();
     const welcome = await replay();
     expect((await db.query<{ time_zone: string }>(`SELECT time_zone FROM starter_onboarding_runs WHERE room_id=$1 ORDER BY created_at DESC LIMIT 1`, [other.id])).rows[0]?.time_zone).toBe('America/New_York');
-    expect((await phone.readRoom(other.id, FRIEND))!.messages.find(message => message.id === first.messageId)!.choice!.status).toBe('skipped');
     const view = (await phone.readRoom(other.id, FRIEND))!;
-    const card = view.messages.find(message => message.id === welcome.messageId)!.choice!;
+    expect(view.messages.find(message => message.id === first.messageId)?.text).toBe(starterHello('Friend'));
+    expect(view.messages.find(message => message.id === welcome.messageId)?.choice).toBeUndefined();
+    const card = (await db.query<{card:{onboardingManual:boolean}}>('SELECT card FROM messages WHERE id=$1',[welcome.messageId])).rows[0]!.card;
     expect(card.onboardingManual).toBe(true);
-    // Reproduction welcome-order-1: the greeting sits directly above the card and nothing from Beebee follows it.
-    const ordered = (await db.query<{ id: string; author_id: string; text: string; created_at: Date }>(
-      `SELECT id,author_id,text,created_at FROM messages WHERE room_id=$1 AND author_id=$2 ORDER BY created_at,id`, [other.id, beebee])).rows;
-    const cardIndex = ordered.findIndex(row => row.id === welcome.messageId);
-    expect(ordered[cardIndex - 1]!.text).toBe(starterHello('Friend'));
-    expect(ordered[cardIndex - 1]!.created_at.getTime()).toBeLessThanOrEqual(ordered[cardIndex]!.created_at.getTime());
-    expect(ordered.slice(cardIndex + 1)).toEqual([]);
-    expect(card.options.map(option => option.optionId)).toEqual(['A', 'B', 'C']);
     expect((await phone.readRoom(roomId, FRIEND))!.messages.some(message => message.id === welcome.messageId)).toBe(false);
-    await phone.execute('answerChoice', { choiceId: card.choiceId, optionId: 'C' }, FRIEND);
     await phone.execute('sendRoomMessage', { roomId: other.id, text: 'Try the task' }, FRIEND);
     const signup = (await db.query(`SELECT event FROM signin_funnel_events WHERE install_id=$1 ORDER BY event`, [installId])).rows;
     expect(signup).toEqual([{ event: 'signed_in' }, { event: 'signup' }]);
     const manual = (await db.query<{ event: string }>(`SELECT e.event FROM signin_funnel_events e JOIN signin_funnel_installs i USING(install_id) WHERE i.internal AND e.version='manual'`)).rows.map(row => row.event);
-    expect(manual).toEqual(expect.arrayContaining(['welcome_shown', 'option_picked', 'other_job_chosen', 'user_answered']));
+    expect(manual).toEqual(expect.arrayContaining(['welcome_shown', 'user_answered']));
     const periods = await dashboardPeriods(db, new Date().toISOString());
     const funnel = periods['24h'].onboardingFunnel!;
     expect('steps' in funnel && funnel.steps[0]!.count).toBe(0);
@@ -251,85 +272,29 @@ describe('free starter agents', () => {
     expect(open).not.toHaveBeenCalled();
   });
 
-  it('offers the three jobs and lets Something else await the composer', async () => {
+  it('welcomes with one open question, no card, and waits for the person', async () => {
     const workspace = await phone.execute('createWorkspace', { name: 'Welcome' }, OWNER);
     await finishWelcome(workspace.roomId!, OWNER);
     await finishWelcome(workspace.roomId!, OWNER);
     const room = (await phone.readRoom(workspace.roomId!, OWNER))!;
-    const welcome = room.messages.find(message => message.choice)!.choice!;
-    expect(welcome.prompt).toBe('Pick a first job');
-    expect(welcome.options.map(option => option.label)).toEqual(['Make a welcome video and post it to my YouTube', 'Play tic-tac-toe with me', 'Something else']);
-    expect(welcome.options.map(option => option.consequence)).toEqual(['Beebee makes it, Luna checks it, you approve the post', 'You and Beebee against Luna', 'Tell us the job in your own words']);
-    expect(room.messages.some(message => message.attachments?.length)).toBe(false);
-    expect(room.messages.some(message => message.text.startsWith('Most AI apps'))).toBe(false);
-    await phone.execute('answerChoice', { choiceId: welcome.choiceId, optionId: 'C' }, OWNER);
-    expect((await db.query(`SELECT 1 FROM messages WHERE card->>'workflowSlug'='welcome-video'`)).rowCount).toBe(0);
-    expect((await db.query(`SELECT 1 FROM agent_commands`)).rowCount).toBe(1);
-    await db.query('DELETE FROM agent_commands');
+    expect(room.messages.filter(message => message.text === starterHello('Charles'))).toHaveLength(1);
+    expect(starterHello('Charles')).toMatch(/What should we work on\?$/);
+    expect(starterHello('Charles')).not.toContain('Pitch us an idea');
+    expect(room.messages.some(message => message.choice || message.attachments?.length)).toBe(false);
+    expect((await db.query('SELECT 1 FROM agent_commands')).rowCount).toBe(0);
+    expect((await db.query("SELECT 1 FROM workspace_skills WHERE slug='welcome-video'")).rowCount).toBe(0);
     await phone.execute('sendRoomMessage', { roomId: workspace.roomId!, text: 'Plan a picnic' }, OWNER);
-    expect((await db.query(`SELECT agent_id FROM agent_commands`)).rowCount).toBe(1);
+    expect((await db.query('SELECT 1 FROM agent_commands')).rowCount).toBe(1);
   });
 
-  it('starts the YouTube job with Beebee and requires a Post tap before upload', async () => {
-    const workspace = await phone.execute('createWorkspace', { name: 'YouTube' }, OWNER);
-    await finishWelcome(workspace.roomId!, OWNER);
-    await finishWelcome(workspace.roomId!, OWNER);
-    const welcome = (await phone.readRoom(workspace.roomId!, OWNER))!.messages.find(message => message.choice)!.choice!;
-    await phone.execute('answerChoice', { choiceId: welcome.choiceId, optionId: 'A' }, OWNER);
-    await expect(phone.execute('answerChoice', { choiceId: welcome.choiceId, optionId: 'A' }, OWNER)).rejects.toThrow('already decided');
-    expect((await db.query(`SELECT 1 FROM messages WHERE room_id=$1 AND card->>'workflowSlug'='welcome-video' AND card->>'seq'='0'`, [workspace.roomId])).rowCount).toBe(1);
-    const commands = (await db.query<{ agent_id: string }>(`SELECT agent_id FROM agent_commands`)).rows;
-    expect(commands).toHaveLength(1);
-    const agent = commands[0]!.agent_id;
-    await expect(db.transaction(tx => consumeStarterVideoPost(tx, workspace.roomId!, agent, {}))).rejects.toThrow('tap Post');
-    const objects = new ObjectService(db, new MemoryObjectStorage().asStorage(), 'https://server.test');
-    const clip = await objects.uploadArtifact(OWNER, Buffer.from('clip bytes'), 'video/mp4', 'clip.mp4');
-    const frame = await objects.uploadArtifact(OWNER, Buffer.from('frame bytes'), 'image/jpeg', 'frame.jpg');
-    await db.query(`INSERT INTO messages(id,room_id,author_id,text,attachments) VALUES($1,$2,$3,'clip and frame',$4::jsonb)`,
-      ['f'.repeat(64), workspace.roomId, OWNER, JSON.stringify([clip,frame].map(file => ({url:file.url,name:file.title,mimeType:file.mimeType,size:file.size})))]);
-    await expect(db.transaction(tx => postStarterVideoPreview(tx, objects, { roomId: workspace.roomId!, agentId: agent,
-      videoObjectId: clip.objectId, frameObjectId: clip.objectId, title: 'Picnic', description: 'A picnic.', visibility: 'unlisted' }))).rejects.toThrow('video clip and an image frame');
-    const unrelated = await postRoomChoice(db, { roomId: workspace.roomId!, agentId: agent, mode: 'question',
-      prompt: 'Post a draft message to this Room?', options: [{ label: 'Post', consequence: 'Post' }, { label: 'Cancel', consequence: 'Cancel' }] });
-    await phone.execute('answerChoice', { choiceId: unrelated.choiceId, optionId: 'A' }, OWNER);
-    await expect(db.transaction(tx => consumeStarterVideoPost(tx, workspace.roomId!, agent, {}))).rejects.toThrow('tap Post');
-    const args = { title: 'Picnic', description: 'A picnic.', privacyStatus: 'unlisted', videoFile: { beelineObjectId: clip.objectId } };
-    const preview = await db.transaction(tx => postStarterVideoPreview(tx, objects, { roomId: workspace.roomId!, agentId: agent,
-      videoObjectId: clip.objectId, frameObjectId: frame.objectId, title: 'Picnic', description: 'A picnic.', visibility: 'unlisted' }));
-    const previewCard = (await phone.readRoom(workspace.roomId!, OWNER))!.messages.find(message => message.id === preview.messageId)!.choice!;
-    expect(previewCard.videoPreview).toMatchObject({frameUrl:frame.url,title:'Picnic',visibility:'unlisted',videoObjectId:clip.objectId});
-    await expect(db.transaction(tx => consumeStarterVideoPost(tx, workspace.roomId!, agent, args))).rejects.toThrow('tap Post');
-    await phone.execute('answerChoice', { choiceId: preview.choiceId, optionId: 'A' }, OWNER);
-    expect((await phone.readRoom(workspace.roomId!, OWNER))!.messages.find(message => message.id === preview.messageId)!.choice!.videoPreview?.frameUrl).toBe(frame.url);
-    for (const changed of [{ title: 'Changed' }, { description: 'Changed' }, { privacyStatus: 'public' },
-      { videoFile: { beelineObjectId: frame.objectId } }, { videoFile: 'https://other.test/clip.mp4' }, { unexpected: true }]) {
-      await expect(db.transaction(tx => consumeStarterVideoPost(tx, workspace.roomId!, agent, { ...args, ...changed }))).rejects.toThrow('match the approved video preview');
-    }
-    await expect(db.transaction(tx => consumeStarterVideoPost(tx, workspace.roomId!, agent, { ...args, videoFile: { name: 'clip.mp4', mimetype: 'video/mp4', s3key: 'private-placeholder' } }))).rejects.toThrow('videoFile shape');
-    await db.transaction(tx => consumeStarterVideoPost(tx, workspace.roomId!, agent, args));
-    await expect(db.transaction(tx => consumeStarterVideoPost(tx, workspace.roomId!, agent, args))).rejects.toThrow('tap Post');
-  });
-
-  it('routes an untagged first task to Beebee with the starter pair present', async () => {
-    const workspace = await phone.execute('createWorkspace', { name: 'Task' }, OWNER);
-    await finishWelcome(workspace.roomId!, OWNER);
-    await phone.execute('sendRoomMessage', { roomId: workspace.roomId!, text: 'Help me plan a picnic' }, OWNER);
-    const commands = (await db.query(`SELECT i.name FROM agent_commands c JOIN identities i ON i.id=c.agent_id WHERE c.room_id=$1`, [workspace.roomId])).rows;
-    expect(commands).toEqual([{ name: 'Beebee' }]);
-  });
-
-  it('posts Luna’s stored game with inline faces when B is chosen', async () => {
-    const objects = new ObjectService(db, new MemoryObjectStorage().asStorage(), 'https://server.test');
-    phone = new PhoneService(db, 'https://server.test', undefined, undefined, live, false, db, objects);
-    phone.setFreeAgents(freeAgents);
+  it('keeps tic-tac-toe available on request without a followup menu', async () => {
     const workspace = await phone.execute('createWorkspace', { name: 'Game' }, OWNER);
     await finishWelcome(workspace.roomId!, OWNER);
-    const welcome = (await phone.readRoom(workspace.roomId!, OWNER))!.messages.find(message => message.choice)!.choice!;
-    await phone.execute('answerChoice', { choiceId: welcome.choiceId, optionId: 'B' }, OWNER);
+    const objects = new ObjectService(db, new MemoryObjectStorage().asStorage(), 'https://server.test');
+    await db.transaction(tx => postStarterGame(tx, objects, workspace.roomId!, OWNER));
     const room = (await phone.readRoom(workspace.roomId!, OWNER))!;
     expect(room.messages.some(message => message.attachments?.some(file => file.mimeType === 'application/vnd.beeline.game+html'))).toBe(true);
-    expect((await db.query(`SELECT 1 FROM messages WHERE card->>'workflowSlug'='welcome-video'`)).rowCount).toBe(0);
-    expect(room.messages.some(message => message.text.startsWith('Game on.'))).toBe(true);
+    expect(room.messages.some(message => message.choice)).toBe(false);
   });
 
   it('keeps starter agent mentions on the ordinary handoff path without a forced review limit', async () => {
@@ -348,28 +313,25 @@ describe('free starter agents', () => {
     }
   });
 
-  it('counts the first answer after a pick even when the person messaged before choosing', async () => {
+  it('counts the first answer to the open welcome exactly once', async () => {
     const installId = '11111111-1111-4111-8111-111111111111';
     const attemptId = '22222222-2222-4222-8222-222222222222';
     await recordSigninFunnelEvent(db, { event: 'signed_in', installId, attemptId, provider: 'google',
       platform: 'android', version: '0.2.22', environment: 'production', timestamp: new Date().toISOString() }, 'server', FRIEND);
     await db.query(`INSERT INTO signin_funnel_events(install_id,attempt_id,event,platform,version,source,occurred_at)
       VALUES($1,$2,'signup','android','0.2.22','server',now())`, [installId, attemptId]);
-    const workspace = await phone.execute('createWorkspace', { name: 'Answer after choosing' }, FRIEND);
+    const workspace = await phone.execute('createWorkspace', { name: 'Answer after welcome' }, FRIEND);
+    await phone.execute('sendRoomMessage', { roomId: workspace.roomId!, text: 'Hello before the welcome' }, FRIEND);
+    expect((await db.query("SELECT 1 FROM signin_funnel_events WHERE event='user_answered'")).rowCount).toBe(0);
     await finishWelcome(workspace.roomId!, FRIEND);
     await recordOnboardingEvent(db, FRIEND, 'welcome_shown');
-    await phone.execute('sendRoomMessage', { roomId: workspace.roomId!, text: 'Before I choose' }, FRIEND);
-    expect((await db.query(`SELECT 1 FROM signin_funnel_events WHERE event='user_answered'`)).rowCount).toBe(0);
-    const room = await phone.readRoom(workspace.roomId!, FRIEND);
-    const welcome = room!.messages.find(message => message.choice?.status === 'open')!.choice!;
-    await phone.execute('answerChoice', { choiceId: welcome.choiceId, optionId: 'C' }, FRIEND);
     await phone.execute('sendRoomMessage', { roomId: workspace.roomId!, text: 'Here is my answer' }, FRIEND);
     const firstAnswer = (await db.query(`SELECT occurred_at FROM signin_funnel_events WHERE event='user_answered'`)).rows;
     await phone.execute('sendRoomMessage', { roomId: workspace.roomId!, text: 'And another answer' }, FRIEND);
     expect((await db.query(`SELECT occurred_at FROM signin_funnel_events WHERE event='user_answered'`)).rows).toEqual(firstAnswer);
     const periods = await dashboardPeriods(db, new Date().toISOString());
     const funnel = periods['24h'].onboardingFunnel!;
-    expect('steps' in funnel && funnel.steps.find(step => step.key === 'answered_after_pick')?.count).toBe(1);
+    expect('steps' in funnel && funnel.steps.find(step => step.key === 'user_answered')?.count).toBe(1);
   });
 
   it('records return milestones after the welcome, using the existing signup funnel', async () => {
@@ -400,9 +362,6 @@ describe('free starter agents', () => {
     const workspace = await phone.execute('createWorkspace', { name: 'Tracked phone milestones' }, FRIEND);
     await finishWelcome(workspace.roomId!, FRIEND);
     await recordOnboardingEvent(db, FRIEND, 'welcome_shown');
-    const room = await phone.readRoom(workspace.roomId!, FRIEND);
-    const welcome = room!.messages.find(message => message.choice?.status === 'open')!.choice!;
-    await phone.execute('answerChoice', { choiceId: welcome.choiceId, optionId: 'C' }, FRIEND);
     await db.query(`UPDATE signin_funnel_events SET occurred_at=now()-interval '8 days' WHERE event='welcome_shown'`);
 
     await phone.execute('sendRoomMessage', { roomId: workspace.roomId!, text: 'A committed transport send' }, FRIEND,
@@ -421,7 +380,7 @@ describe('free starter agents', () => {
     const agent = (await db.query<{ agent_id: string }>(`SELECT f.agent_id FROM free_agents f JOIN identities i ON i.id=f.agent_id WHERE workspace_id=$1 ORDER BY i.name`, [result.id])).rows[0];
     if (agent) {
       await createAgentCommand(db, { roomId: result.roomId, agentId: agent.agent_id, sourceMessageId: null, reason: 'human_tag' });
-      await freeAgents.provision(agent.agent_id);
+      await freeAgents.reconcile(agent.agent_id);
     }
     return result;
   };
@@ -446,6 +405,33 @@ describe('free starter agents', () => {
     expect(configuration.soul?.instructions).toContain(FREE_AGENT_TURN_GUIDE);
     const stored=(await db.query<{soul:{instructions:string}}>(`SELECT soul FROM agents WHERE agent_id=$1`,[agent.agent_id])).rows[0]!;
     expect(stored.soul.instructions).not.toContain('beeline:onboarding');
+  });
+
+  it('replaces old team guidance for both existing free agents, including legacy roles, without changing personal agents', async () => {
+    const workspace = await phone.execute('createWorkspace', { name: 'Feedback guide' }, OWNER);
+    const members = (await db.query<{agent_id:string;soul:{instructions:string}}>(`SELECT f.agent_id,a.soul
+      FROM free_agents f JOIN agents a ON a.agent_id=f.agent_id WHERE f.workspace_id=$1`, [workspace.id])).rows;
+    expect(members).toHaveLength(2);
+    const daemon = new DaemonService(db, live);
+    const old = 'Original persona.\n\nYou are on a team with another free starter agent. Ask on the first three substantive questions, then only when in doubt. One review round per answer.';
+    for (const member of members) {
+      expect(member.soul.instructions.split(FREE_AGENT_TEAM_GUIDE)).toHaveLength(2);
+      await db.query(`UPDATE agents SET soul=jsonb_set(soul,'{instructions}',$2::jsonb) WHERE agent_id=$1`, [member.agent_id,JSON.stringify(old)]);
+      const config = await daemon.execute('getAgentConfiguration', { roomId: workspace.roomId! }, member.agent_id);
+      expect(config.soul?.instructions).toContain('Original persona.');
+      expect(config.soul?.instructions.split(FREE_AGENT_TEAM_GUIDE)).toHaveLength(2);
+      expect(config.soul?.instructions).not.toMatch(/first three substantive questions|only when in doubt|One review round/);
+    }
+    await db.query('UPDATE free_agents SET starter_role=NULL WHERE agent_id=$1',[members[0]!.agent_id]);
+    const legacy = await daemon.execute('getAgentConfiguration', { roomId: workspace.roomId! }, members[0]!.agent_id);
+    expect(legacy.soul?.instructions).toContain(FREE_AGENT_TEAM_GUIDE);
+    await db.query(`INSERT INTO identities(id,kind,name) VALUES($1,'agent','Personal agent')`,[ORDINARY]);
+    await db.query(`INSERT INTO agents(agent_id,owner_id,soul,harness) VALUES($1,$2,$3::jsonb,'pi')`,
+      [ORDINARY,OWNER,JSON.stringify({name:'Personal agent',instructions:'Personal instructions.'})]);
+    await db.query(`INSERT INTO memberships(workspace_id,room_id,identity_id,role) VALUES($1,NULL,$3,'member'),($1,$2,$3,'member')`,
+      [workspace.id,workspace.roomId,ORDINARY]);
+    const personal = await daemon.execute('getAgentConfiguration', { roomId: workspace.roomId! }, ORDINARY);
+    expect(personal.soul?.instructions).toBe('Personal instructions.');
   });
 
   it('onboarding-invite-1: an unlinked Room join does not presume coding intent', async () => {
@@ -530,94 +516,6 @@ describe('free starter agents', () => {
     expect((await db.query('SELECT github_subject FROM identities WHERE id=$1', [google.identityId])).rows[0]?.github_subject).toBeNull();
   });
 
-  it('posts the exact hello and notifies the owner without a model turn or Machine boot', async () => {
-    // The owner registers their device before creating the Workspace.
-    await db.query(`INSERT INTO push_devices(token,identity_id,platform,environment,registered_at)
-      VALUES('hello-owner-device-1234567890',$1,'android','physical',now()-interval '1 minute')`, [OWNER]);
-    await db.query(`INSERT INTO push_delivery_floors(id,started_at) VALUES('message-delivery',now()-interval '1 minute')`);
-    const { id, roomId } = await phone.execute('createWorkspace', { name: 'Fresh' }, OWNER) as { id: string; roomId: string };
-    await finishWelcome(roomId!, OWNER);
-    const agent = await freeAgentOf(id);
-    expect(agent.state).toMatch(/provisioning|waking/);
-
-    const identity = (
-      await db.query<{ kind: string; name: string; handle: string | null; owner_id: string; selected_model: string; soul: { name: string; instructions: string } }>(
-        `SELECT i.kind,i.name,i.handle,a.owner_id,a.selected_model,a.harness,a.soul FROM identities i
-         JOIN agents a ON a.agent_id=i.id WHERE i.id=$1`,
-        [agent.agent_id],
-      )
-    ).rows[0]!;
-    expect(identity).toMatchObject({
-      kind: 'agent',
-      name: 'Beebee',
-      handle: 'beebee',
-      owner_id: OWNER,
-      selected_model: 'beeline/deepseek/deepseek-v4-flash',
-      harness: 'pi',
-    });
-    expect(identity.soul.name).toBe('Beebee');
-    expect(identity.soul.instructions).toContain('You are Beebee');
-    // A member of the Workspace and of #general, created in the same transaction.
-    expect(
-      (
-        await db.query(
-          `SELECT room_id FROM memberships WHERE identity_id=$1 AND removed_at IS NULL ORDER BY room_id NULLS FIRST`,
-          [agent.agent_id],
-        )
-      ).rows,
-    ).toEqual([{ room_id: null }, { room_id: roomId }]);
-    const hello = (await db.query<{ id: string; text: string }>(
-      `SELECT id,text FROM messages WHERE room_id=$1 AND author_id=$2 AND card_type IS NULL`, [roomId, agent.agent_id],
-    )).rows;
-    const expected = starterHello('Charles');
-    expect(hello).toHaveLength(1);
-    expect(hello[0]!.text).toBe(expected);
-    const team = (await db.query<{ name: string; model: string; owner_id: string; instructions: string }>(
-      `SELECT i.name,f.model,f.owner_id,a.soul->>'instructions' instructions FROM free_agents f
-       JOIN identities i ON i.id=f.agent_id JOIN agents a ON a.agent_id=f.agent_id
-       WHERE f.workspace_id=$1 ORDER BY i.name`, [id],
-    )).rows;
-    expect(team.map(({ name, model, owner_id }) => ({ name, model, owner_id }))).toEqual([
-      { name: 'Beebee', model: TEST_FREE_AGENT_CONFIG.model, owner_id: OWNER },
-      { name: 'Luna', model: 'openai/gpt-6-luna', owner_id: OWNER },
-    ]);
-    expect(team.every(member => member.instructions.includes('never ask back'))).toBe(true);
-    expect(team.every(member => member.instructions.includes('tagging the requesting agent once to deliver your opinion'))).toBe(true);
-    await freeAgents.sweep();
-    await settle();
-    expect(machines.calls).toEqual([]);
-    expect(exchanges).toEqual([]);
-    expect((await db.query(`SELECT 1 FROM agent_commands WHERE agent_id=$1`, [agent.agent_id])).rowCount).toBe(0);
-    expect((await db.query(`SELECT 1 FROM free_agent_events WHERE agent_id=$1 AND kind='model_usage'`, [agent.agent_id])).rowCount).toBe(0);
-    // Reachable before its Machine ever booted.
-    const presence = (
-      await db.query<{ body: Record<string, unknown> }>(
-        `SELECT body FROM live_outputs WHERE agent_id=$1 AND kind='presence'`,
-        [agent.agent_id],
-      )
-    ).rows[0]!.body;
-    expect(presence).toMatchObject({ status: 'online', held: true, asleep: true });
-
-    // Only actual work provisions its Machine.
-    await createAgentCommand(db, { roomId, agentId: agent.agent_id, sourceMessageId: null, reason: 'human_tag' });
-    await freeAgents.provision(agent.agent_id);
-    await settle();
-    expect(machines.calls).toEqual([`create ${agent.agent_id.slice(0, 4)}`]);
-    const spec = machines.specs[0]!;
-    expect(spec.env.BEELINE_FREE_AGENT_ID).toBe(agent.agent_id);
-    expect(spec.env.BEELINE_FREE_AGENT_BOOTSTRAP).toMatch(/^bfb_/);
-    expect(spec.env.BEELINE_SERVER_URL).toBe('https://server.test');
-    expect(spec).toMatchObject({ cpus: 1, memoryMb: 1024, region: 'iad' });
-    expect(await freeAgentOf(id)).toMatchObject({ state: 'waking', fly_machine_id: 'm1' });
-    expect(
-      (
-        await db.query(`SELECT kind FROM free_agent_events WHERE agent_id=$1 ORDER BY id`, [
-          agent.agent_id,
-        ])
-      ).rows.map((row) => row.kind),
-    ).toEqual(['created', 'provisioned']);
-  });
-
   it('R-DELETE-NEW-USER: deletes a new account with its starter pair, onboarding run and turn traces, and deletes their Machines', async () => {
     await new AuthStore(db as unknown as TransactionalDatabase).migrate();
     const { id, roomId } = await phone.execute('createWorkspace', { name: 'Fresh' }, OWNER) as { id: string; roomId: string };
@@ -629,7 +527,7 @@ describe('free starter agents', () => {
     expect((await db.query(`SELECT 1 FROM starter_onboarding_runs WHERE user_id=$1`, [OWNER])).rowCount).toBe(1);
     // Beebee has done work: a running Machine and a stored turn trace.
     await createAgentCommand(db, { roomId, agentId: team[0]!, sourceMessageId: null, reason: 'human_tag' });
-    await freeAgents.provision(team[0]!);
+    await freeAgents.reconcile(team[0]!);
     await settle();
     expect((await freeAgentOf(id)).fly_machine_id).toBe('m1');
     for (const agentId of team)
@@ -649,8 +547,21 @@ describe('free starter agents', () => {
     expect(machines.states.get('m1')).toBe('destroyed');
   });
 
+  it('handle-1: gives each new workspace plain starter handles and routes their tags locally', async () => {
+    for (const [name,owner] of [['One',OWNER], ['Two',FRIEND]] as const) {
+      const workspace = await phone.execute('createWorkspace', { name }, owner);
+      const roster = (await phone.readWorkspaceMembers(workspace.id, owner))!;
+      const agents = roster.agents.map(member => member.identity);
+      expect(agents.map(agent => agent.handle).sort()).toEqual(['beebee', 'luna']);
+      for (const agent of agents) {
+        const targets = await resolveCurrentMemberMentions(db, workspace.roomId!, `@${agent.handle} hello`, owner);
+        expect(targets.map(target => target.id)).toEqual([agent.pubkey]);
+      }
+    }
+  });
+
   it('keeps the Beebee name and de-duplicates its handle against existing members', async () => {
-    await db.query(`UPDATE identities SET handle='beebee' WHERE id=$1`, [OWNER]);
+    await phone.execute('updatePersonProfile',{handle:'beebee'},OWNER);
     const { id } = await createWorkspace();
     const agent = await freeAgentOf(id);
     const identity = (await db.query<{ name: string; handle: string }>(
@@ -706,8 +617,7 @@ describe('free starter agents', () => {
       pairedBy: OWNER,
       monolithBaseUrl: 'https://server.test',
       modelBaseUrl: 'https://server.test/v1/free-agents/model',
-      idleSeconds: 60,
-    });
+        });
     expect(grant.modelToken).toMatch(/^bfm_/);
     expect(exchanges).toEqual([agent.agent_id]);
     // A retried first boot gets a fresh exchange and model token; the old model token dies.
@@ -716,208 +626,19 @@ describe('free starter agents', () => {
     expect(exchanges).toHaveLength(2);
   });
 
-  it('keeps a free agent reachable and its wake alive while its Machine is offline, and starts the Machine', async () => {
+  it('refuses Squire pairing and cards on a free agent without starting browser work', async () => {
     const { id, roomId } = await createWorkspace();
     await settle();
     const agent = await freeAgentOf(id);
-    // An ordinary agent on a machine with no live helper, in the same Room.
-    await db.query(`INSERT INTO identities(id,kind,name,handle) VALUES($1,'agent','Ordinary','ordinary')`, [
-      ORDINARY,
-    ]);
-    await db.query(
-      `INSERT INTO agents(agent_id,owner_id,machine_id,machine_name) VALUES($1,$2,'laptop','Laptop')`,
-      [ORDINARY, OWNER],
-    );
-    await db.query(
-      `INSERT INTO memberships(workspace_id,room_id,identity_id,role) VALUES($1,NULL,$2,'member'),($1,$3,$2,'member')`,
-      [id, ORDINARY, roomId],
-    );
-    // Both helpers connected once and went away; the free agent's Machine is asleep.
-    await db.query(
-      `INSERT INTO live_server_instances(instance_id,renewed_at) VALUES('server-1',now())
-       ON CONFLICT DO NOTHING`,
-    );
-    for (const agentId of [agent.agent_id, ORDINARY]) {
-      await claimAgentConnection(db, live, agentId, { lifecycleId: `life-${agentId}` }, {
-        connectionId: `conn-${agentId}`,
-        instanceId: 'server-1',
-      });
-      await releaseAgentConnection(db, live, agentId, `conn-${agentId}`);
-    }
-    await db.query(`UPDATE free_agents SET state='sleeping' WHERE agent_id=$1`, [agent.agent_id]);
-    await db.query(`UPDATE agent_commands SET state='complete',completed_at=now() WHERE agent_id=$1`, [
-      agent.agent_id,
-    ]);
-
-    const offline = async (agentId: string) =>
-      (
-        await db.query<{ offline: boolean }>(`SELECT ${agentMachineOfflineSql('$1')} offline`, [agentId])
-      ).rows[0]!.offline;
-    expect(await offline(agent.agent_id)).toBe(false);
-    expect(await offline(ORDINARY)).toBe(true);
-
-    const presence = async (agentId: string) =>
-      (
-        await db.query<{ body: Record<string, unknown> }>(
-          `SELECT body FROM live_outputs WHERE agent_id=$1 AND kind='presence'`,
-          [agentId],
-        )
-      ).rows[0]!.body;
-    expect(await presence(agent.agent_id)).toMatchObject({ status: 'online', held: true, asleep: true });
-    expect(await presence(ORDINARY)).toMatchObject({ status: 'offline', held: false });
-
-    // The owner tags both agents. The free agent's wake is kept and starts its
-    // Machine; the ordinary agent is told offline after the grace window.
-    const handle = (
-      await db.query<{ handle: string }>(`SELECT handle FROM identities WHERE id=$1`, [agent.agent_id])
-    ).rows[0]!.handle;
-    machines.calls.length = 0;
-    await phone.execute(
-      'sendRoomMessage',
-      {
-        roomId,
-        messageId: '9'.repeat(64),
-        text: `@${handle} @ordinary make a file`,
-        mentions: [agent.agent_id, ORDINARY],
-      },
-      OWNER,
-    );
-    const pending = (
-      await db.query<{ agent_id: string; state: string }>(
-        `SELECT agent_id,state FROM agent_commands WHERE source_message_id=$1 ORDER BY agent_id`,
-        ['9'.repeat(64)],
-      )
-    ).rows;
-    expect(pending).toEqual(
-      expect.arrayContaining([{ agent_id: agent.agent_id, state: 'pending' }]),
-    );
-    freeAgents.kickIfFree(ORDINARY);
-    freeAgents.kickIfFree(agent.agent_id);
-    await settle();
-    expect(machines.calls).toEqual(['start m1']);
-    expect(await freeAgentOf(id)).toMatchObject({ state: 'waking' });
-    await phone.flushPendingMentionNotices(Date.now() + AGENT_MENTION_NOTICE_GRACE_MS + 1_000);
-    const notices = (
-      await db.query<{ author_id: string; text: string }>(
-        `SELECT author_id,text FROM messages WHERE room_id=$1 AND text LIKE '%did not answer%'`,
-        [roomId],
-      )
-    ).rows;
-    expect(notices).toEqual([{ author_id: ORDINARY, text: '@ordinary did not answer @lunchboxfortwo · its helper is offline' }]);
-
-    // The Machine's helper registers: the free agent is running again.
-    await claimAgentConnection(db, live, agent.agent_id, { lifecycleId: 'life-2' }, {
-      connectionId: 'conn-2',
-      instanceId: 'server-1',
-    });
-    expect(await freeAgentOf(id)).toMatchObject({ state: 'running' });
-    expect(
-      (
-        await db.query(`SELECT kind,detail FROM free_agent_events WHERE agent_id=$1 AND kind IN ('wake_requested','machine_started','connected') ORDER BY id`, [
-          agent.agent_id,
-        ])
-      ).rows.map((row) => row.kind),
-    ).toEqual(['connected', 'wake_requested', 'machine_started', 'connected']);
+    await expect(phone.execute('pairConnector', { helperAgentId: agent.agent_id, connectorType: 'trusty-squire' }, OWNER))
+      .rejects.toThrow('Free agents use Lightpanda');
+    const daemon = new DaemonService(db, live);
+    await expect(daemon.execute('offerConnector', { roomId, connectorType: 'trusty-squire', reason: 'Sign in' }, agent.agent_id))
+      .rejects.toThrow();
+    expect((await db.query('SELECT 1 FROM connector_offers')).rowCount).toBe(0);
   });
 
-  it('keeps a free agent reachable when its server instance dies, unlike an ordinary agent', async () => {
-    const { id } = await createWorkspace();
-    await settle();
-    const agent = await freeAgentOf(id);
-    await db.query(
-      `INSERT INTO live_server_instances(instance_id,renewed_at) VALUES('dead',now()-interval '1 hour')`,
-    );
-    await claimAgentConnection(db, live, agent.agent_id, { lifecycleId: 'life' }, {
-      connectionId: 'conn',
-      instanceId: 'dead',
-    });
-    expect(await releaseStaleServerConnections(db, 90_000)).toEqual([agent.agent_id]);
-    expect(
-      (
-        await db.query<{ body: Record<string, unknown> }>(
-          `SELECT body FROM live_outputs WHERE agent_id=$1 AND kind='presence'`,
-          [agent.agent_id],
-        )
-      ).rows[0]!.body,
-    ).toMatchObject({ status: 'online', held: true, asleep: true });
-  });
-
-  it('R-SQUIRE-SLEEP: phone pairing wakes a suspended Machine without an agent command', async () => {
-    const { id } = await createWorkspace();
-    await settle();
-    const agent = await freeAgentOf(id);
-    await db.query(`UPDATE agent_commands SET state='complete',completed_at=now() WHERE agent_id=$1`, [agent.agent_id]);
-    await db.query(`UPDATE free_agents SET state='running' WHERE agent_id=$1`, [agent.agent_id]);
-    expect(await freeAgents.requestSleep(agent.agent_id)).toEqual({ sleep: true });
-    await vi.waitFor(() => expect(machines.states.get(agent.fly_machine_id!)).toBe('suspended'));
-    machines.calls.length = 0;
-    const pairing = await phone.execute('pairConnector', {
-      helperAgentId: agent.agent_id, connectorType: 'trusty-squire',
-    }, OWNER);
-    expect(pairing.status.status).toBe('installing');
-    await freeAgents.sweep();
-    expect(machines.states.get(agent.fly_machine_id!)).toBe('started');
-    expect(machines.calls).toEqual([`start ${agent.fly_machine_id}`]);
-  });
-
-  it.each(['complete', 'error', 'disconnect'] as const)('R-SQUIRE-SLEEP: protects sign-in from helper sleep and reaping until %s', async (ending) => {
-    const { id } = await createWorkspace();
-    await settle();
-    const agent = await freeAgentOf(id);
-    await db.query(`DELETE FROM agent_commands WHERE agent_id=$1`, [agent.agent_id]);
-    const pairing = await phone.execute('pairConnector', {
-      helperAgentId: agent.agent_id, connectorType: 'trusty-squire',
-    }, OWNER);
-    await db.transaction(db => reportSquireWork(db, agent.agent_id, {
-      connectorId: pairing.connectorId, pairingGeneration: 1,
-      steps: [{ label: 'Install on helper', status: 'complete' }],
-      signIn: { method: 'streamed-page', url: 'https://signin.example.test' },
-    }));
-    await db.query(`UPDATE free_agents SET state='running',last_activity_at=now()-interval '10 minutes',
-      wake_requested_at=now()-interval '10 minutes' WHERE agent_id=$1`, [agent.agent_id]);
-    await db.query(`INSERT INTO live_server_instances(instance_id,renewed_at) VALUES('pairing',now())`);
-    await claimAgentConnection(db, live, agent.agent_id, { lifecycleId: 'pairing' }, {
-      connectionId: 'pairing', instanceId: 'pairing',
-    });
-    await db.query(`UPDATE free_agents SET last_activity_at=now()-interval '10 minutes',
-      wake_requested_at=now()-interval '10 minutes' WHERE agent_id=$1`, [agent.agent_id]);
-    machines.calls.length = 0;
-    expect(await freeAgents.requestSleep(agent.agent_id)).toEqual({ sleep: false });
-    await freeAgents.sweep();
-    expect(machines.calls).toEqual([]);
-    if (ending === 'disconnect') await phone.execute('unpairConnector', { connectorId: pairing.connectorId }, OWNER);
-    else await db.transaction(db => reportSquireWork(db, agent.agent_id, {
-      connectorId: pairing.connectorId, pairingGeneration: 1, steps: [],
-      ...(ending === 'error' ? { errorMessage: 'Sign-in cancelled' } : { signedInAs: 'owner' }),
-    }, ending === 'complete'));
-    await freeAgents.sweep();
-    expect(machines.calls).toEqual([`stop ${agent.fly_machine_id}`]);
-    // The normal helper sleep path also releases after the terminal report.
-    await db.query(`UPDATE free_agents SET state='running' WHERE agent_id=$1`, [agent.agent_id]);
-    expect(await freeAgents.requestSleep(agent.agent_id)).toEqual({ sleep: true });
-    await vi.waitFor(() => expect(machines.calls).toContain(`suspend ${agent.fly_machine_id}`));
-  });
-
-  it.each(['budget', 'start-limit'] as const)('R-SQUIRE-SLEEP: connector wakes respect the %s fence', async (fence) => {
-    const { id } = await createWorkspace();
-    await settle();
-    const agent = await freeAgentOf(id);
-    await db.query(`DELETE FROM agent_commands WHERE agent_id=$1`, [agent.agent_id]);
-    await db.query(`UPDATE free_agents SET state='sleeping' WHERE agent_id=$1`, [agent.agent_id]);
-    if (fence === 'budget') await db.query(`INSERT INTO free_agent_budget(day,usd) VALUES(current_date,25)`);
-    else await db.query(`INSERT INTO free_agent_events(agent_id,kind) VALUES($1,'start_limit_reached')`, [agent.agent_id]);
-    await phone.execute('pairConnector', { helperAgentId: agent.agent_id, connectorType: 'trusty-squire' }, OWNER);
-    machines.calls.length = 0;
-    const off = freeAgents.subscribeToWakes(live);
-    try {
-      live.publish({ type: 'invalidate', roomId: '', reason: 'connector-assignment', targetAgentId: agent.agent_id });
-      await settle();
-      await freeAgents.sweep();
-      expect(machines.calls).toEqual([]);
-    } finally { off(); }
-  });
-
-  it.each(['trusty-squire', 'tailscale'] as const)('R-SQUIRE-SLEEP: %s assignment wakes immediately and holds idle sleep', async (connectorType) => {
+  it.each(['tailscale'] as const)('R-SQUIRE-SLEEP: %s assignment wakes immediately and holds idle sleep', async (connectorType) => {
     const { id } = await createWorkspace();
     await settle();
     const agent = await freeAgentOf(id);
@@ -930,7 +651,7 @@ describe('free starter agents', () => {
     try {
       live.publish({ type: 'invalidate', roomId: '', reason: 'connector-assignment', targetAgentId: agent.agent_id });
       await vi.waitFor(() => expect(machines.calls).toEqual([`start ${agent.fly_machine_id}`]));
-      expect(await freeAgents.requestSleep(agent.agent_id)).toEqual({ sleep: false });
+      await freeAgents.reconcile(agent.agent_id);
     } finally { off(); }
   });
 
@@ -943,247 +664,6 @@ describe('free starter agents', () => {
       await settle();
       expect(machines.calls).toEqual([]);
     } finally { off(); }
-  });
-
-  it('sleeps only when no wake is pending, suspending and falling back to stop', async () => {
-    const { id, roomId } = await createWorkspace();
-    await settle();
-    const agent = await freeAgentOf(id);
-    // The owner request is still pending: no sleep.
-    expect(await freeAgents.requestSleep(agent.agent_id)).toEqual({ sleep: false });
-    await db.query(`UPDATE agent_commands SET state='complete',completed_at=now() WHERE agent_id=$1`, [
-      agent.agent_id,
-    ]);
-    await db.query(`UPDATE free_agents SET state='running' WHERE agent_id=$1`, [agent.agent_id]);
-    machines.calls.length = 0;
-    expect(await freeAgents.requestSleep(agent.agent_id)).toEqual({ sleep: true });
-    await new Promise((resolve) => setTimeout(resolve, 400));
-    expect(machines.calls).toEqual(['suspend m1']);
-    expect(await freeAgentOf(id)).toMatchObject({ state: 'sleeping' });
-    // Asleep is not a second sleep.
-    expect(await freeAgents.requestSleep(agent.agent_id)).toEqual({ sleep: false });
-
-    await db.query(`UPDATE free_agents SET state='running' WHERE agent_id=$1`, [agent.agent_id]);
-    machines.failSuspend = true;
-    machines.calls.length = 0;
-    expect(await freeAgents.requestSleep(agent.agent_id)).toEqual({ sleep: true });
-    await new Promise((resolve) => setTimeout(resolve, 400));
-    expect(machines.calls).toEqual(['suspend m1', 'stop m1']);
-    expect(roomId).toBeTruthy();
-  });
-
-  it('sweeps: retries provisioning, wakes an overdue wake, reaps an idle Machine, deletes after 30 days and recreates on wake', async () => {
-    const { id, roomId } = await createWorkspace();
-    await settle();
-    const agent = await freeAgentOf(id);
-    await db.query(`UPDATE agent_commands SET state='complete',completed_at=now()-interval '1 hour' WHERE agent_id=$1`, [
-      agent.agent_id,
-    ]);
-    // A running Machine with no work for longer than the reap window.
-    await db.query(
-      `UPDATE free_agents SET state='running',last_activity_at=now()-interval '10 minutes',
-         wake_requested_at=now()-interval '10 minutes' WHERE agent_id=$1`,
-      [agent.agent_id],
-    );
-    machines.calls.length = 0;
-    await freeAgents.sweep();
-    expect(machines.calls).toEqual(['stop m1']);
-    expect(await freeAgentOf(id)).toMatchObject({ state: 'sleeping' });
-
-    // Thirty days with no activity: the Machine is deleted.
-    await db.query(`UPDATE free_agents SET last_activity_at=now()-interval '31 days' WHERE agent_id=$1`, [
-      agent.agent_id,
-    ]);
-    await db.query(`UPDATE agent_commands SET created_at=now()-interval '31 days' WHERE agent_id=$1`, [
-      agent.agent_id,
-    ]);
-    machines.calls.length = 0;
-    await freeAgents.sweep();
-    expect(machines.calls).toEqual(['destroy m1']);
-    expect(await freeAgentOf(id)).toMatchObject({ state: 'destroyed', fly_machine_id: null });
-
-    // A later wake recreates the Machine (the agent and its identity are kept).
-    const source = 'f'.repeat(64);
-    await db.query(`INSERT INTO messages(id,room_id,author_id,text) VALUES($1,$2,$3,'are you there?')`, [
-      source,
-      roomId,
-      OWNER,
-    ]);
-    await createAgentCommand(db, {
-      roomId,
-      agentId: agent.agent_id,
-      sourceMessageId: source,
-      reason: 'human_tag',
-      id: 'e'.repeat(64),
-    });
-    await db.query(`UPDATE agent_commands SET created_at=now()-interval '1 minute' WHERE id=$1`, [
-      'e'.repeat(64),
-    ]);
-    machines.calls.length = 0;
-    await freeAgents.sweep();
-    expect(machines.calls).toEqual([`create ${agent.agent_id.slice(0, 4)}`]);
-    expect(await freeAgentOf(id)).toMatchObject({ state: 'waking', fly_machine_id: 'm2' });
-  });
-
-  describe('start limit', () => {
-    const passFence = (agentId: string) =>
-      db.query(`UPDATE free_agents SET wake_requested_at=now()-interval '21 seconds' WHERE agent_id=$1`, [agentId]);
-    const startOnce = async (agentId: string) => {
-      await passFence(agentId);
-      return freeAgents.wake(agentId);
-    };
-    const startNotices = async (roomId: string) =>
-      (
-        await db.query<{ author_id: string; text: string }>(
-          `SELECT author_id,text FROM messages WHERE room_id=$1 AND text LIKE '%could not start%' ORDER BY created_at`,
-          [roomId],
-        )
-      ).rows;
-
-    it('FA-START-LIMIT-1: stops a Machine that never connects after 5 starts, tells the person once and alerts Sentry once', async () => {
-      const { id, roomId } = await createWorkspace();
-      await settle();
-      const agent = await freeAgentOf(id);
-      const handle = (await db.query<{ handle: string }>(`SELECT handle FROM identities WHERE id=$1`, [agent.agent_id]))
-        .rows[0]!.handle;
-      await db.query(`UPDATE agent_commands SET created_at=now()-interval '1 minute' WHERE agent_id=$1`, [agent.agent_id]);
-      machines.calls.length = 0;
-      // Start always succeeds and the helper never connects; the sweep runs past every 20-second fence.
-      for (let sweep = 0; sweep < 10; sweep++) {
-        await passFence(agent.agent_id);
-        await freeAgents.sweep();
-      }
-      expect(machines.calls).toEqual([...Array(5).fill('start m1'), 'stop m1']);
-      expect(await freeAgentOf(id)).toMatchObject({ state: 'stopped' });
-      expect(await startNotices(roomId)).toEqual([
-        {
-          author_id: agent.agent_id,
-          text: `@${handle} could not start for @lunchboxfortwo · the Beeline team has been told. Send a new message to try again`,
-        },
-      ]);
-      expect(sentryCaptures).toHaveLength(1);
-      expect(sentryCaptures[0]!.tags).toEqual({
-        area: 'free-agent-start-limit',
-        agentId: agent.agent_id,
-        machineId: 'm1',
-        starts: '5',
-      });
-      expect(String(sentryCaptures[0]!.error)).toContain('never connected after 5 starts in 10 minutes');
-      expect(
-        (await db.query(`SELECT 1 FROM free_agent_events WHERE agent_id=$1 AND kind='start_limit_reached'`, [agent.agent_id]))
-          .rowCount,
-      ).toBe(1);
-    });
-
-    it('resets the count when the helper connects', async () => {
-      const { id } = await createWorkspace();
-      await settle();
-      const agent = await freeAgentOf(id);
-      for (let start = 0; start < 4; start++) expect(await startOnce(agent.agent_id)).toBe(true);
-      await db.query(
-        `INSERT INTO live_server_instances(instance_id,renewed_at) VALUES('server-1',now()) ON CONFLICT DO NOTHING`,
-      );
-      await claimAgentConnection(db, live, agent.agent_id, { lifecycleId: 'life-1' }, {
-        connectionId: 'conn-1',
-        instanceId: 'server-1',
-      });
-      await releaseAgentConnection(db, live, agent.agent_id, 'conn-1');
-      for (let start = 0; start < 5; start++) expect(await startOnce(agent.agent_id)).toBe(true);
-      expect(await startOnce(agent.agent_id)).toBe(false);
-      expect(sentryCaptures).toHaveLength(1);
-    });
-
-    it('keeps the stop when a person joins or leaves the Workspace', async () => {
-      const { id } = await createWorkspace();
-      const workspaceId = id;
-      await settle();
-      const agent = await freeAgentOf(id);
-      for (let start = 0; start < 5; start++) expect(await startOnce(agent.agent_id)).toBe(true);
-      expect(await startOnce(agent.agent_id)).toBe(false);
-      machines.calls.length = 0;
-      // Join and leave post System lines with a human author; neither is a retry.
-      await phone.execute('addWorkspaceMember', { workspaceId, memberId: FRIEND, role: 'member' }, OWNER);
-      await settle();
-      expect(await startOnce(agent.agent_id)).toBe(false);
-      await phone.execute('removeWorkspaceMember', { workspaceId, memberId: FRIEND }, OWNER);
-      await settle();
-      expect(await startOnce(agent.agent_id)).toBe(false);
-      await passFence(agent.agent_id);
-      await freeAgents.sweep();
-      // The other teammate may handle the leave; this helper must stay stopped.
-      const teammate = (await db.query<{ agent_id: string }>(
-        `SELECT agent_id FROM free_agents WHERE workspace_id=$1 AND agent_id<>$2`, [id, agent.agent_id])).rows[0]!;
-      expect(machines.calls.filter(call => call !== `create ${teammate.agent_id.slice(0, 4)}`)).toEqual([]);
-      expect(machines.specs.filter(spec => spec.agentId === agent.agent_id)).toHaveLength(1);
-      expect((await freeAgentOf(id)).state).toBe('stopped');
-      expect(sentryCaptures).toHaveLength(1);
-    });
-
-    it('lets a new human message open one fresh episode after the stop', async () => {
-      const { id, roomId } = await createWorkspace();
-      await settle();
-      const agent = await freeAgentOf(id);
-      for (let start = 0; start < 5; start++) expect(await startOnce(agent.agent_id)).toBe(true);
-      expect(await startOnce(agent.agent_id)).toBe(false);
-      // Repeated sweeps and wakes during the stop start nothing and post nothing.
-      machines.calls.length = 0;
-      for (let retry = 0; retry < 3; retry++) {
-        expect(await startOnce(agent.agent_id)).toBe(false);
-        await freeAgents.sweep();
-      }
-      expect(machines.calls).toEqual([]);
-      expect(await startNotices(roomId)).toHaveLength(1);
-      expect(sentryCaptures).toHaveLength(1);
-
-      const handle = (await db.query<{ handle: string }>(`SELECT handle FROM identities WHERE id=$1`, [agent.agent_id]))
-        .rows[0]!.handle;
-      await phone.execute(
-        'sendRoomMessage',
-        { roomId, messageId: '7'.repeat(64), text: `@${handle} try again`, mentions: [agent.agent_id] },
-        OWNER,
-      );
-      await settle();
-      const kicked = machines.calls.filter((call) => call === 'start m1').length;
-      for (let start = kicked; start < 5; start++) expect(await startOnce(agent.agent_id)).toBe(true);
-      expect(machines.calls.filter((call) => call === 'start m1')).toHaveLength(5);
-      expect(await startOnce(agent.agent_id)).toBe(false);
-      expect(await startNotices(roomId)).toHaveLength(2);
-      expect(sentryCaptures).toHaveLength(2);
-    });
-  });
-
-  it('does not start or provision Machines after the shared budget is reached', async () => {
-    const { id } = await createWorkspace();
-    await settle();
-    const agent = await freeAgentOf(id);
-    await db.query(`UPDATE free_agents SET state='sleeping' WHERE agent_id=$1`, [agent.agent_id]);
-    await db.query(`INSERT INTO free_agent_budget(day,usd) VALUES(current_date,25)`);
-    machines.calls.length = 0;
-    expect(await freeAgents.wake(agent.agent_id)).toBe(false);
-    await db.query(`UPDATE free_agents SET state='destroyed',fly_machine_id=NULL WHERE agent_id=$1`, [agent.agent_id]);
-    expect(await freeAgents.provision(agent.agent_id)).toBe(false);
-    expect(machines.calls).toEqual([]);
-    expect((await db.query(`SELECT kind FROM free_agent_events WHERE kind='budget_reached'`)).rows).toHaveLength(2);
-  });
-
-  it('FREE-ABUSE-1: reaps a Machine when its command passes the hard cap plus grace', async () => {
-    const { id } = await createWorkspace();
-    await settle();
-    const agent = await freeAgentOf(id);
-    await db.query(`UPDATE free_agents SET state='running',last_activity_at=now(),
-      wake_requested_at=now() WHERE agent_id=$1`, [agent.agent_id]);
-    await db.query(`UPDATE agent_commands SET state='claimed',claimed_at=now()-interval '17 minutes',
-      lease_expires_at=now()+interval '90 seconds' WHERE agent_id=$1`, [agent.agent_id]);
-    machines.calls.length = 0;
-    await freeAgents.sweep();
-    expect(machines.calls).toContain('stop m1');
-    const closed = await db.query(`SELECT text FROM messages WHERE card->>'freeAgentClosed'='true'`);
-    expect(closed.rows).toHaveLength(1);
-    expect(closed.rows[0].text).toContain('15-minute limit');
-    await freeAgents.sweep();
-    expect((await db.query(`SELECT id FROM messages WHERE card->>'freeAgentClosed'='true'`)).rowCount).toBe(1);
-    expect((await db.query(`SELECT state,cancellation_reason FROM agent_commands WHERE agent_id=$1`, [agent.agent_id])).rows)
-      .toEqual([{ state: 'cancelled', cancellation_reason: 'free-agent-time-limit' }]);
   });
 
   it('adds one free agent to an existing Workspace in its #general, owned by its owner', async () => {
@@ -1210,7 +690,6 @@ describe('free starter agents', () => {
     expect(machines.calls).toEqual([]);
     const hello = (await db.query<{ text: string }>(`SELECT text FROM messages WHERE author_id=$1 AND card_type IS NULL`, [agentId])).rows;
     expect(hello).toEqual([{ text: FREE_AGENT_HELLO.replace('<owner>', 'lunchboxfortwo').replace('<handle>', 'beebee') }]);
-    await freeAgents.sweep();
     expect(machines.calls).toEqual([]);
     expect(
       (await db.query(`SELECT owner_id FROM free_agents WHERE agent_id=$1`, [agentId])).rows,
@@ -1252,15 +731,12 @@ describe('free starter agents', () => {
     // Leave producers use the same event dispatch as joins, before any sweep.
     await phone.execute('leaveRoom', { roomId }, FRIEND);
     expect((await wakes()).at(-1)).toBe('@friend left');
-    await freeAgents.sweep();
     // Each leave is one wake, never repeated.
-    await freeAgents.sweep();
     expect(await wakes()).toHaveLength(2);
     // A removal by an admin is a leave too.
     await phone.execute('addRoomMember', { roomId, memberIds: [FRIEND] }, OWNER);
     await phone.execute('removeRoomMember', { roomId, memberId: FRIEND }, OWNER);
     expect((await wakes()).at(-1)).toBe('@lunchboxfortwo removed @friend');
-    await freeAgents.sweep();
     expect(await wakes()).toHaveLength(4);
     // A recent unkinded fact from the preceding image retains its owed wake at upgrade.
     await db.query(`INSERT INTO messages(id,room_id,author_id,text,presentation,card_type,card,system_event)
@@ -1290,35 +766,6 @@ describe('free starter agents', () => {
     expect(soul).toContain('Never greet an agent.');
   });
 
-  it('removes Beebee through Members, revokes bootstrap and never recreates it on a mention or wake', async () => {
-    const { id, roomId } = await createWorkspace();
-    await settle();
-    const agent = await freeAgentOf(id);
-    const bootstrap = machines.specs[0]!.env.BEELINE_FREE_AGENT_BOOTSTRAP!;
-    const grant = await freeAgents.bootstrap(bootstrap);
-    expect(grant?.modelToken).toBeTruthy();
-    await phone.execute('removeAgent', { workspaceId: id, agentId: agent.agent_id }, OWNER);
-    await settle();
-    expect(machines.calls).toContain('destroy m1');
-    const removed = (await db.query(`SELECT removed_at,bootstrap_hash,model_token_hash FROM free_agents WHERE agent_id=$1`, [agent.agent_id])).rows[0]!;
-    expect(removed.removed_at).toBeTruthy();
-    expect(removed.bootstrap_hash).toBeNull();
-    expect(removed.model_token_hash).toBeNull();
-    expect(await freeAgents.bootstrap(bootstrap)).toBeUndefined();
-    machines.calls.length = 0;
-    await phone.execute('sendRoomMessage', { roomId, messageId: '8'.repeat(64), text: '@beebee are you there?', mentions: [agent.agent_id] }, OWNER);
-    freeAgents.kickIfFree(agent.agent_id);
-    freeAgents.kick(agent.agent_id);
-    expect(await freeAgents.wake(agent.agent_id)).toBe(false);
-    expect(await freeAgents.provision(agent.agent_id)).toBe(false);
-    expect(await freeAgents.requestSleep(agent.agent_id)).toEqual({ sleep: false });
-    expect(await addFreeAgentToWorkspace(db, freeAgents, id)).toBeUndefined();
-    await freeAgents.sweep();
-    await settle();
-    expect(machines.calls).toEqual([]);
-    expect((await db.query(`SELECT kind FROM free_agent_events WHERE agent_id=$1 AND kind='removed'`, [agent.agent_id])).rows).toHaveLength(1);
-  });
-
   it.each(['owner', 'admin'])('allows a Workspace %s to remove another person\'s Beebee', async role => {
     const { id } = await createWorkspace();
     await settle();
@@ -1341,65 +788,8 @@ describe('free starter agents', () => {
     await phone.execute('removeAgent', { workspaceId: other, agentId: agent.agent_id }, FRIEND);
     await settle();
     expect(machines.states.get('m1')).toBe('destroyed');
-    expect(await freeAgents.wake(agent.agent_id)).toBe(false);
+    await freeAgents.reconcile(agent.agent_id);expect(machines.states.get('m1')).toBe('destroyed');
     expect(await addFreeAgentToWorkspace(db, freeAgents, id)).toBeUndefined();
-  });
-
-  it('commits removal despite Fly deletion failure and retries it in the leader sweep', async () => {
-    const { id } = await createWorkspace();
-    await settle();
-    const agent = await freeAgentOf(id);
-    machines.failDestroy = true;
-    let deletionStarted!: () => void;
-    let releaseDelete!: () => void;
-    const started = new Promise<void>(resolve => { deletionStarted = resolve; });
-    const blocked = new Promise<void>(resolve => { releaseDelete = resolve; });
-    machines.beforeDestroy = async () => { deletionStarted(); await blocked; };
-    const removal = phone.execute('removeAgent', { workspaceId: id, agentId: agent.agent_id }, OWNER);
-    await started;
-    try {
-      expect(await Promise.race([removal.then(() => true), new Promise(resolve => setTimeout(() => resolve(false), 100))])).toBe(true);
-    } finally {
-      releaseDelete();
-      await removal;
-    }
-    await settle();
-    machines.beforeDestroy = undefined;
-    expect((await db.query(`SELECT removed_at,removal_cleaned_at,fly_machine_id FROM free_agents WHERE agent_id=$1`, [agent.agent_id])).rows[0])
-      .toMatchObject({ removed_at: expect.any(Date), removal_cleaned_at: null, fly_machine_id: 'm1' });
-    machines.failDestroy = false;
-    machines.calls.length = 0;
-    await freeAgents.sweep();
-    expect(machines.calls).toEqual(['destroy m1']);
-    expect((await db.query(`SELECT removal_cleaned_at,fly_machine_id FROM free_agents WHERE agent_id=$1`, [agent.agent_id])).rows[0])
-      .toMatchObject({ removal_cleaned_at: expect.any(Date), fly_machine_id: null });
-    machines.calls.length = 0;
-    await freeAgents.sweep();
-    expect(machines.calls).toEqual([]);
-  });
-
-  it('cleans up a Machine whose provisioning finishes after removal without restoring its bootstrap', async () => {
-    let release!: () => void;
-    let entered!: () => void;
-    const creating = new Promise<void>(resolve => { entered = resolve; });
-    const finish = new Promise<void>(resolve => { release = resolve; });
-    machines.beforeCreate = async () => { entered(); await finish; };
-    const { id, roomId } = await phone.execute('createWorkspace', { name: 'Race' }, OWNER) as { id: string; roomId: string };
-    await finishWelcome(roomId!, OWNER);
-    const pending = await freeAgentOf(id);
-    await createAgentCommand(db, { roomId, agentId: pending.agent_id, sourceMessageId: null, reason: 'human_tag' });
-    freeAgents.kick(pending.agent_id);
-    await creating;
-    const agent = await freeAgentOf(id);
-    await phone.execute('removeAgent', { workspaceId: id, agentId: agent.agent_id }, OWNER);
-    release();
-    await settle();
-    expect(machines.calls.filter(call => call.startsWith('create '))).toEqual([`create ${agent.agent_id.slice(0, 4)}`]);
-    expect(machines.states.get('m1')).toBe('destroyed');
-    expect((await db.query(`SELECT removed_at,bootstrap_hash,fly_machine_id FROM free_agents WHERE agent_id=$1`, [agent.agent_id])).rows[0])
-      .toMatchObject({ removed_at: expect.any(Date), bootstrap_hash: null, fly_machine_id: null });
-    await freeAgents.sweep();
-    expect(machines.specs).toHaveLength(1);
   });
 
   it('generates keys in the helper identity format', () => {

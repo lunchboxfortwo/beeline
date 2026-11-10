@@ -1,3 +1,4 @@
+import { appReadErrorCopy } from '@/buzz/app-error-copy';
 import { IndexRow } from '@/components/buzz/IndexRow';
 import { useArtifactRecoveryGeneration } from '@/buzz/use-artifact-recovery';
 import { Button } from '@/components/buzz/Button';
@@ -236,7 +237,7 @@ export function ArtifactViewerSandbox({
   useEffect(() => {
     let live = true;
     const controller = new AbortController();
-    const stopPurge = subscribeArtifactBytesPurge(attachment, () => { controller.abort(); setSource(null); setFailed('The page could not be loaded. Try again.'); });
+    const stopPurge = subscribeArtifactBytesPurge(attachment, () => { controller.abort(); setSource(null); setFailed('This file is no longer available.'); });
     setSource(null); setFailed(null);
     void (async () => {
       try {
@@ -254,8 +255,8 @@ export function ArtifactViewerSandbox({
           return;
         }
         if (live) setFailed('This file type has no inline preview — open it in a browser instead.');
-      } catch {
-        if (live) setFailed('The page could not be loaded. Try again.');
+      } catch (cause) {
+        if (live && !controller.signal.aborted) setFailed(appReadErrorCopy(cause) || null);
       }
     })();
     return () => {
@@ -307,8 +308,8 @@ function ArtifactViewerMarkdown({ attachment }: { attachment: AttachmentReferenc
       .then((text) => {
         if (live && !controller.signal.aborted) setMarkdown(text);
       })
-      .catch(() => {
-        if (live) setFailed(true);
+      .catch((cause) => {
+        if (live && !controller.signal.aborted) setFailed(Boolean(appReadErrorCopy(cause)));
       });
     return () => {
       live = false; controller.abort(); stopPurge();
@@ -317,7 +318,7 @@ function ArtifactViewerMarkdown({ attachment }: { attachment: AttachmentReferenc
   if (failed) {
     return (
       <View style={styles.failureInset} testID="artifact-viewer-failed">
-        <IndexRow inset="flush" title="Page unavailable" description={"The page could not be loaded. Try again."} />
+        <IndexRow inset="flush" title="Page unavailable" />
       </View>
     );
   }

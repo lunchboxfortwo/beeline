@@ -1,8 +1,8 @@
+import { installationIdentity } from './installation-identity.js';
 import {
   parseSigninFunnelEvent,
   FUNNEL_FIRST_SESSION_MS,
   FUNNEL_SCREEN_SEND_CAP,
-  FUNNEL_UUID,
 } from './signin-funnel.js';
 import type { FunnelScreen, SigninFunnelEvent } from './signin-funnel.js';
 
@@ -38,11 +38,7 @@ export function createSigninFunnelClient(input: {
   };
   const context = async () => {
     if (session) return session;
-    let installId = await input.storage.getItem(INSTALL_KEY);
-    if (!installId || !FUNNEL_UUID.test(installId)) {
-      installId = input.uuid();
-      await input.storage.setItem(INSTALL_KEY, installId);
-    }
+    const installId = await installationIdentity(input.storage,input.uuid);
     session = {
       installId,
       attemptId: input.uuid(),

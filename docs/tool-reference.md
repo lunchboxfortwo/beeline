@@ -56,6 +56,7 @@ writable. Corners keep the watcher so edits are reflected as work proceeds.
 | `connect`                 | Discover, check or connect an integration                                                      |
 | `app_tool`                | Run a connected app's tool, or a first-party `beeline:*` app action                            |
 | `request_grant`           | Ask a workspace admin or the resource owner for access                                         |
+| `store_secret`            | Save one local operator secret for a command grant’s `--with NAME`, without echoing its value   |
 | `run_granted_command`     | Run a command an approved grant covers, outside the sandbox                                    |
 | `scratch_io`              | Fallback session-file writes and bounded image downloads                                       |
 | `report_feedback`         | Report one rough patch in Beeline itself to the Beeline team                                   |
@@ -64,7 +65,7 @@ writable. Corners keep the watcher so edits are reflected as work proceeds.
 | `send_operator_system_dm`, `read_operator_system_dm` | Queue and read operator System DMs on the operator owner's command |
 
 First-party `app_tool` apps and their actions: `beeline:vault` (request), `beeline:onboarding` (welcome,
-video_preview, invite, repository, starters), `beeline:workflow` (save, describe, start, read, advance, cancel,
+game, invite, repository, starters), `beeline:workflow` (save, describe, start, read, advance, cancel,
 archive, rebind), `beeline:wallet` (address, balance, chains, history, quote, pay, swap, contract_call,
 sign_typed_data, link_request, link_wait), `beeline:browser_share` (start, end) and `beeline:avatar` (read, set).
 

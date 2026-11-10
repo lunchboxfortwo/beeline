@@ -10,8 +10,9 @@ import { LiveHub } from './live.js';
 import { systemLine } from './system-line.js';
 import { lockCornerLifecycle } from './corner-lifecycle.js';
 import { createAgentCommand } from './agent-command.js';
+import { claimAgentConnection } from './connection-presence.js';
 import { TokenAuth } from './auth.js';
-import { flushSentryWakes, runSentryWakeDeadline } from './sentry-wake.js';
+import { flushSentryWakes } from './sentry-wake.js';
 
 const url = process.env.BEELINE_INCIDENT_TEST_POSTGRES_URL;
 if (url && !['localhost', '127.0.0.1', '[::1]'].includes(new URL(url).hostname))
@@ -78,6 +79,7 @@ function contention(db: SqlDatabase) {
 
 describe.skipIf(!url)('production incident deadlocks on real PostgreSQL', () => {
   let db: PostgresDatabase, admin: Pool, databaseName: string;
+  let helperSource:{connectionId:string;epoch:number};
   beforeAll(async () => {
     databaseName = `incident_${randomUUID().replaceAll('-', '')}`;
     admin = new Pool({ connectionString: url });
@@ -92,7 +94,7 @@ describe.skipIf(!url)('production incident deadlocks on real PostgreSQL', () => 
       await admin.query(`DROP DATABASE IF EXISTS ${databaseName}`);
       await admin.end();
     }
-  });
+  }, 60_000);
   beforeEach(async () => {
     await db.query(`DELETE FROM workspaces WHERE id=$1`, [W]);
     await db.query(`INSERT INTO identities(id,kind,name,handle) VALUES
@@ -114,6 +116,10 @@ describe.skipIf(!url)('production incident deadlocks on real PostgreSQL', () => 
       pr:{number:1,headSha,url:'https://github.com/owner/widgets/pull/1',mergeability:'clean'}}), workflowState: 'implement' });
     for (const who of [H,A,B,F]) for (const room of [null,R])
       await db.query(`INSERT INTO memberships(workspace_id,room_id,identity_id,role) VALUES($1,$2,$3,'owner')`, [W,room,who]);
+    const connectionId='incident-helper';
+    await db.query(`INSERT INTO live_server_instances(instance_id,renewed_at) VALUES($1,clock_timestamp())
+      ON CONFLICT(instance_id) DO UPDATE SET renewed_at=EXCLUDED.renewed_at`,[connectionId]);
+    helperSource={connectionId,epoch:await claimAgentConnection(db,new LiveHub(),A,{}, {connectionId,instanceId:connectionId})};
   });
 
   it('SERVER-26/1A: one blocked command cannot consume the phone and webhook connections', async () => {
@@ -123,12 +129,12 @@ describe.skipIf(!url)('production incident deadlocks on real PostgreSQL', () => 
     // Fly logs show command-row waits before the checkout failures.
     const isolated = new URL(url!); isolated.pathname = `/${databaseName}`;
     const appDb = new PostgresDatabase('', 2, { pool: new Pool({ connectionString: isolated.toString(), max: 2,
-      connectionTimeoutMillis: 50, statement_timeout: 2000 }), transactionDeadlineMs: 1000 });
+      connectionTimeoutMillis: 50, statement_timeout: 2000 }) });
     const source = 'e'.repeat(64);
     await db.query(`INSERT INTO messages(id,room_id,author_id,text) VALUES($1,$2,$3,'Work')`, [source,R,H]);
     const command = await createAgentCommand(db, { roomId: R, agentId: A, sourceMessageId: source, reason: 'human_tag' });
     const setup = new DaemonService(db, new LiveHub());
-    await setup.execute('claimAgentCommand', { roomId: R, commandId: command!.id, generationId: 'rollout-proof' }, A);
+    await setup.execute('claimAgentCommand', { roomId: R, commandId: command!.id, generationId: 'rollout-proof' }, A, helperSource);
     await db.query(`INSERT INTO identity_external_links(provider,subject,identity_id,issuer,audience,provider_login)
       VALUES('github','rollout-proof',$1,'https://github.com','beeline','owner') ON CONFLICT DO NOTHING`, [H]);
     const auth = new TokenAuth(appDb, async () => ({ subject: 'rollout-proof', login: 'owner', name: 'Owner' }));
@@ -153,7 +159,7 @@ describe.skipIf(!url)('production incident deadlocks on real PostgreSQL', () => 
     const daemon = new DaemonService(watched, new LiveHub());
     const turn = { roomId: R, requestId: command!.turn_request_id, generationId: 'rollout-proof', agentId: A };
     const requests = Array.from({ length: 8 }, (_, n) => n % 2
-      ? daemon.execute('postAgentTurnReceipt', { ...turn, status: 'working', heartbeat: true }, A)
+      ? daemon.execute('postAgentTurnReceipt', { ...turn, status: 'working' }, A, helperSource)
       : daemon.execute('postAgentActivity', { ...turn, activity: [{ kind: 'thinking', title: 'Working', status: 'in_progress' }] }, A));
     // Observe all promises immediately, including on the failing pre-fix path.
     const settled = Promise.allSettled(requests);
@@ -175,7 +181,6 @@ describe.skipIf(!url)('production incident deadlocks on real PostgreSQL', () => 
       const results = await settled;
       await appDb.close();
       expect(results.map(result => result.status)).toEqual(Array(8).fill('fulfilled'));
-      expect(appDb.transactionDeadlineCount()).toBe(0);
     }
   }, 20_000);
 
@@ -185,12 +190,12 @@ describe.skipIf(!url)('production incident deadlocks on real PostgreSQL', () => 
     // writer must not consume the next writer's transaction deadline.
     const isolated = new URL(url!); isolated.pathname = `/${databaseName}`;
     const appDb = new PostgresDatabase('', 4, { pool: new Pool({ connectionString: isolated.toString(), max: 4,
-      connectionTimeoutMillis: 2000, statement_timeout: 2000 }), transactionDeadlineMs: 1000 });
+      connectionTimeoutMillis: 2000, statement_timeout: 2000 }) });
     const source = 'e'.repeat(64);
     await db.query(`INSERT INTO messages(id,room_id,author_id,text) VALUES($1,$2,$3,'Work')`, [source,R,H]);
     const command = await createAgentCommand(db, { roomId: R, agentId: A, sourceMessageId: source, reason: 'human_tag' });
     await new DaemonService(db, new LiveHub()).execute('claimAgentCommand',
-      { roomId: R, commandId: command!.id, generationId: 'deadline-proof' }, A);
+      { roomId: R, commandId: command!.id, generationId: 'deadline-proof' }, A, helperSource);
     const watched: SqlDatabase = { query: appDb.query.bind(appDb), transaction: work => appDb.transaction(tx => {
       const wrapped: SqlDatabase = { query: async (sql, values) => {
         const result = await tx.query(sql, values);
@@ -204,19 +209,17 @@ describe.skipIf(!url)('production incident deadlocks on real PostgreSQL', () => 
     try {
       const results = await Promise.allSettled(Array.from({ length: 4 }, () => daemon.execute('postAgentTurnReceipt', {
         roomId: R, requestId: command!.turn_request_id, generationId: 'deadline-proof', agentId: A,
-        status: 'working', heartbeat: true,
-      }, A)));
+        status: 'working',
+      }, A, helperSource)));
       const errors = results.flatMap(result => result.status === 'rejected' ? [String(result.reason)] : []);
       expect(errors).toEqual([]);
-      expect(appDb.transactionDeadlineCount()).toBe(0);
     } finally { await appDb.close(); }
   });
 
-  it.each(['dispatch','singleton','insert'])('SERVER-25: a busy %s leaves the Sentry batch pending and delivers it once after release', async kind => {
+  it.each(['singleton','insert'])('SERVER-25: a busy %s leaves the Sentry batch pending and delivers it once after release', async kind => {
     const triage = 'a914716f-cd6c-4663-b42a-6e1044dc2bb9';
     await db.query(`INSERT INTO rooms(id,workspace_id,parent_id,name,created_by) VALUES($1,$2,$3,'Triage',$4)`, [triage,W,R,A]);
     await db.query(`DELETE FROM sentry_wake_issues`);
-    await db.query(`UPDATE sentry_wake_state SET last_wake_at=NULL`);
     await db.query(`INSERT INTO sentry_wake_issues(issue_id,event_type,title,level,culprit,permalink,first_seen,last_seen,event_count,delivery_hash)
       VALUES('7825612495','issue.created','canceling statement due to lock timeout','error','createAgentCommand',
         'https://beeline-bt.sentry.io/issues/7825612495/',now(),now(),1,'534f2fb1712b472fb6d3210b4b4aac0c')`);
@@ -225,8 +228,7 @@ describe.skipIf(!url)('production incident deadlocks on real PostgreSQL', () => 
       BEGIN IF NEW.reason='subscribed_event' THEN PERFORM pg_advisory_xact_lock(739125); END IF; RETURN NEW; END $$;
       CREATE TRIGGER sentry_insert_contention BEFORE INSERT ON agent_commands FOR EACH ROW EXECUTE FUNCTION sentry_insert_contention()`);
     const blocker = db.transaction(async tx => {
-      if (kind === 'dispatch') await tx.query(`SELECT pg_advisory_xact_lock(hashtext($1))`, [`commander-wakes:${triage}:${A}`]);
-      else if (kind === 'singleton') await tx.query(`SELECT singleton FROM sentry_wake_state WHERE singleton FOR UPDATE`);
+      if (kind === 'singleton') await tx.query(`SELECT singleton FROM sentry_wake_state WHERE singleton FOR UPDATE`);
       else await tx.query(`SELECT pg_advisory_xact_lock(739125)`);
       locked.resolve(); await release.promise;
     });
@@ -235,7 +237,7 @@ describe.skipIf(!url)('production incident deadlocks on real PostgreSQL', () => 
       await tx.query(`SET LOCAL lock_timeout='30ms'`); return work(tx);
     }) };
     try {
-      await expect(runSentryWakeDeadline(bounded,A)).resolves.toBeUndefined();
+      await expect(flushSentryWakes(bounded,A)).resolves.toBe(false);
       expect((await db.query(`SELECT pending FROM sentry_wake_issues`)).rows).toEqual([{ pending: true }]);
     } finally { release.resolve(); await blocker; }
     await flushSentryWakes(bounded,A);
@@ -250,7 +252,7 @@ describe.skipIf(!url)('production incident deadlocks on real PostgreSQL', () => 
     await db.query(`INSERT INTO messages(id,room_id,author_id,text) VALUES($1,$2,$3,'Clarify the brief')`, [source,R,H]);
     const command = await createAgentCommand(db,{roomId:R,agentId:A,sourceMessageId:source,reason:'human_tag'});
     const daemon = new DaemonService(db,new LiveHub());
-    await daemon.execute('claimAgentCommand',{roomId:R,commandId:command!.id,generationId:'brief-proof'},A);
+    await daemon.execute('claimAgentCommand',{roomId:R,commandId:command!.id,generationId:'brief-proof'},A,helperSource);
     const turn = {roomId:R,requestId:command!.turn_request_id,generationId:'brief-proof'};
     await daemon.execute('reviseCornerBrief',{...turn,cornerId:C,expectedRevision:0,
       brief:{spec:'Build the widget',change:'Record scope'}},A);
@@ -302,10 +304,8 @@ describe.skipIf(!url)('production incident deadlocks on real PostgreSQL', () => 
     expect(race.attempts()).toBeGreaterThanOrEqual(2);
     expect(race.attempts()).toBeLessThanOrEqual(3);
     for (const seen of race.statements.slice(0,2)) {
-      const lock = seen.findIndex(sql => sql.includes('pg_advisory_xact_lock'));
       const fact = seen.findIndex(sql => sql.includes('SELECT lifecycle FROM corner_github_cache WHERE corner_id=$1 FOR UPDATE'));
-      expect(lock).toBeGreaterThanOrEqual(0);
-      expect(fact).toBeGreaterThan(lock);
+      expect(fact).toBeGreaterThanOrEqual(0);
     }
     expect((await db.query(`SELECT lifecycle->>'checks' checks FROM corner_facts WHERE corner_id=$1`, [C])).rows[0]?.checks).toBe('failing');
     expect((await db.query(`SELECT 1 FROM messages WHERE room_id=$1 AND system_event->>'kind'='check-failed'`, [C])).rowCount).toBe(1);

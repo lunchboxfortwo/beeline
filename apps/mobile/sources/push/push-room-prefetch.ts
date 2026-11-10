@@ -77,9 +77,9 @@ export function prefetchPushRoom(responseId: string, roomId: string, messageId?:
   const hotAddress = hotViewer ? surfaceAddress(config.monolithUrl, hotViewer, `/room/${roomId}`) : null;
   const hotCache = hotAddress ? restoreStoredSurface(hotAddress, isRoomView) : null;
   // A known viewer can restore an authorized stored response on the tap's
-  // stack, before navigation renders. A cache miss or unresolved viewer
-  // retains the asynchronous path.
-  const view = hotViewer && hotCache
+  // stack, before navigation renders. A synchronous miss is also final for
+  // this tap: start the read before mounting the route can occupy the thread.
+  const view = hotViewer
     ? openCached(hotViewer, hotCache)
     : viewer.then(async (pubkey) => {
       const address = pubkey ? surfaceAddress(config.monolithUrl, pubkey, `/room/${roomId}`) : null;

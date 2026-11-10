@@ -1,5 +1,8 @@
 import { beforeEach, afterEach, describe, expect, it, vi } from 'vitest';
 const storage = vi.hoisted(() => new Map<string, string>());
+const desktop = vi.hoisted(() => ({ enabled: false, fetch: vi.fn() }));
+vi.mock('@/utils/isDesktopShell', () => ({ isDesktopShell: () => desktop.enabled }));
+vi.mock('@tauri-apps/plugin-http', () => ({ fetch: desktop.fetch }));
 const picker = vi.hoisted(() => ({ enabled: false, signIn: vi.fn() }));
 vi.mock('./google-account-picker', () => ({ get googleAccountPicker() { return picker.enabled ? picker : null; } }));
 vi.mock('expo-linking', () => ({ createURL: (path: string) => `beeline://beeline/${path.split('/').pop()}` }));
@@ -99,7 +102,7 @@ describe('Google sign-in continuation', () => {
       subscribeToUrls: () => ({ remove() {} }),
     })).resolves.toBe(recoveryToken);
   });
-  beforeEach(() => { storage.clear(); picker.enabled = false; picker.signIn.mockReset(); });
+  beforeEach(() => { storage.clear(); picker.enabled = false; picker.signIn.mockReset(); desktop.enabled = false; desktop.fetch.mockReset(); });
   afterEach(() => { vi.unstubAllGlobals(); });
   it('R-signin-native: uses the native picker and preserves the recovery token and account-link target', async () => {
     picker.enabled = true;
@@ -133,7 +136,7 @@ describe('Google sign-in continuation', () => {
     'native user cancel', 'unexpected native failure', 'missing native start route',
     'missing Android client configuration', 'missing native complete route',
     'rejected native proof', 'malformed native configuration', 'malformed native completion', 'failed native cleanup',
-  ])('R-signin-fallback: completes browser sign-in after %s', async (failure) => {
+  ])('settles the native attempt after %s without starting a browser', async (failure) => {
     picker.enabled = true;
     picker.signIn.mockResolvedValue('signed-google-id-token');
     const pickerFailures: Record<string, unknown> = {
@@ -145,11 +148,9 @@ describe('Google sign-in continuation', () => {
       'failed native cleanup': new Error('native error'),
     };
     if (failure in pickerFailures) picker.signIn.mockRejectedValue(pickerFailures[failure]);
-    let nativeChallenge = '';
     const fetcher = vi.fn(async (url: string, options?: RequestInit) => {
       const body = JSON.parse(options!.body as string);
       if (url.endsWith('/native/start')) {
-        nativeChallenge = body.recoveryChallenge;
         if (failure === 'missing native start route') return new Response('{}', { status: 404 });
         if (failure === 'missing Android client configuration') return new Response('{}', { status: 503 });
         return new Response(JSON.stringify(failure === 'malformed native configuration' ? {} : {
@@ -166,23 +167,12 @@ describe('Google sign-in continuation', () => {
       return new Response('{}', { status: body.recoveryToken === recoveryToken ? 200 : 202 });
     });
     vi.stubGlobal('fetch', fetcher);
-    const open = vi.fn(async (url: string) => {
-      const browser = new URL(url);
-      expect(browser.pathname).toBe('/auth/oidc/start');
-      // The native flow row keeps its unique recovery hash after cancellation.
-      // Reusing it would reject this browser start even when cleanup succeeds.
-      expect(browser.searchParams.get('app_recovery_challenge')).not.toBe(nativeChallenge);
-      expect(browser.searchParams.get('app_state')).toBe(state);
-      expect(JSON.parse(storage.get('beeline.google-sign-in.v1')!)).toMatchObject({
-        recoveryToken, linkIdentity: 'existing-account',
-      });
-      return { type: 'opened' };
-    });
-    expect(await runGoogleSignIn({ state, recoveryToken, linkIdentity: 'existing-account', openAuthSession: open,
+    const open = vi.fn();
+    await expect(runGoogleSignIn({ state, recoveryToken, linkIdentity: 'existing-account', openAuthSession: open,
       subscribeToUrls: () => ({ remove() {} }),
-    })).toBe(recoveryToken);
-    expect(open).toHaveBeenCalledOnce();
-    expect(await pendingGoogleLinkIdentity()).toBe('existing-account');
+    })).rejects.toBeDefined();
+    expect(open).not.toHaveBeenCalled();
+    expect(await pendingGoogleLinkIdentity()).toBeNull();
   });
   it('recovers a lost callback with the persisted secret, then clears it after exchange', async () => {
     pending();
@@ -249,22 +239,45 @@ describe('Google sign-in continuation', () => {
     expect(open).toHaveBeenCalledOnce();
     expect(remove).toHaveBeenCalledOnce();
   });
-  it.each(['opened', 'dismiss'])('R-onb-1: an actual callback/close recovers the same proof after a failed held request (%s)', async type => {
+  it('desktop Google completion uses native HTTP instead of browser fetch', async () => {
+    desktop.enabled = true;
+    desktop.fetch.mockResolvedValue(new Response('{}'));
+    const browserFetch = vi.fn();
+    vi.stubGlobal('fetch', browserFetch);
+    const open = vi.fn(async () => ({ type: 'opened' }));
+    const remove = vi.fn();
+    await expect(runGoogleSignIn({ state, recoveryToken, openAuthSession: open,
+      subscribeToUrls: () => ({ remove }),
+    })).resolves.toBe(recoveryToken);
+    expect(desktop.fetch).toHaveBeenCalledWith('https://server.example/auth/oidc/completion',
+      expect.objectContaining({ method: 'POST', body: JSON.stringify({ recoveryToken, waitMs: 120_000 }), signal: expect.any(AbortSignal) }));
+    expect(browserFetch).not.toHaveBeenCalled();
+    expect(open).toHaveBeenCalledOnce();
+    expect(remove).toHaveBeenCalledOnce();
+  });
+  it('a rejected held completion ends immediately and a cold callback can still recover', async () => {
     vi.useFakeTimers();
-    const fetcher=vi.fn().mockRejectedValueOnce(new TypeError('Network request failed'))
-      .mockResolvedValueOnce(new Response('{}',{status:200}));
-    vi.stubGlobal('fetch',fetcher);
-    let callback!: (url:string)=>void;
-    try{
-      const result=runGoogleSignIn({state,recoveryToken,openAuthSession:async()=>({type}),
-        subscribeToUrls:listener=>{callback=listener;return{remove(){}};}});
-      const assertion=expect(result).resolves.toBe(recoveryToken);
+    const failure = new TypeError('Network request failed');
+    const fetcher = vi.fn().mockRejectedValueOnce(failure)
+      .mockResolvedValueOnce(new Response('{}'));
+    vi.stubGlobal('fetch', fetcher);
+    const remove = vi.fn();
+    let settled = false;
+    try {
+      const result = runGoogleSignIn({ state, recoveryToken,
+        openAuthSession: () => new Promise(() => {}),
+        subscribeToUrls: () => ({ remove }),
+      });
+      const outcome = result.catch(error => { settled = true; return error; });
       await vi.advanceTimersByTimeAsync(0);
-      if(type==='opened')callback(`beeline://beeline/google-callback?state=${state}&completed=1`);
-      await assertion;
-      await vi.advanceTimersByTimeAsync(600_000);
-      expect(fetcher).toHaveBeenCalledTimes(2); // Hold + actual provider/browser boundary.
-    }finally{vi.useRealTimers();}
+      expect(settled).toBe(true);
+      expect(await outcome).toBe(failure);
+      expect(remove).toHaveBeenCalledOnce();
+      expect(vi.getTimerCount()).toBe(0);
+      expect(fetcher).toHaveBeenCalledTimes(1);
+      expect(await resumeGoogleSignIn(`beeline://beeline/google-callback?state=${state}&completed=1`)).toBe(recoveryToken);
+      expect(fetcher).toHaveBeenCalledTimes(2);
+    } finally { vi.useRealTimers(); }
   });
   it('R-onb-21: recovers and cancels on Hermes without AbortSignal.timeout', async () => {
     vi.stubGlobal('AbortSignal', {});
@@ -387,4 +400,58 @@ it('F11: cancellation while recovering a lost native completion cannot return th
     expect(fetcher.mock.calls.filter(([url]) => url.endsWith('/completion/cancel'))).toHaveLength(1);
     expect(browser).not.toHaveBeenCalled(); expect(storage.size).toBe(0);
   } finally { picker.enabled = false; vi.unstubAllGlobals(); }
+});
+
+
+it.each(['web', 'ios'])('R-oidc-delayed-approval: %s approval after two minutes still completes', async platform => {
+  storage.clear(); picker.enabled = false; vi.useFakeTimers();
+  let returned = false;
+  let callback!: (url: string) => void;
+  const removed = vi.fn();
+  const fetcher = vi.fn(async (url: string) => new Response('{}', {
+    status: url.endsWith('/cancel') || returned ? 200 : 202,
+  }));
+  vi.stubGlobal('fetch', fetcher);
+  try {
+    const result = runGoogleSignIn({ state, recoveryToken, platform,
+      openAuthSession: async () => ({ type: 'opened' }),
+      subscribeToUrls: listener => { callback = listener; return { remove: removed }; },
+    });
+    const outcome = result.then(value => ({ value }), error => ({ error }));
+    await vi.advanceTimersByTimeAsync(3 * 60_000);
+    expect(fetcher.mock.calls.some(([url]) => url.endsWith('/cancel'))).toBe(false);
+    expect(removed).not.toHaveBeenCalled();
+    returned = true;
+    callback(`beeline://beeline/google-callback?state=${state}&completed=1`);
+    await vi.advanceTimersByTimeAsync(1);
+    expect(await outcome).toEqual({ value: recoveryToken });
+    expect(fetcher).toHaveBeenCalledTimes(2);
+    expect(removed).toHaveBeenCalledOnce();
+  } finally { vi.useRealTimers(); vi.unstubAllGlobals(); }
+});
+
+
+it('an opened Google page does not expire on its own, and replacing it does not report expiry', async () => {
+  storage.clear(); picker.enabled = false; vi.useFakeTimers();
+  const removed = vi.fn();
+  const closed = vi.fn();
+  const controller = new AbortController();
+  const fetcher = vi.fn(async (url: string) => new Response('{}', { status: url.endsWith('/cancel') ? 200 : 202 }));
+  vi.stubGlobal('fetch', fetcher);
+  try {
+    const result = runGoogleSignIn({ state, recoveryToken, platform: 'web', signal: controller.signal, onBrowserClosed: closed,
+      openAuthSession: async () => ({ type: 'opened' }), subscribeToUrls: () => ({ remove: removed }),
+    });
+    const outcome = result.then(value => ({ value }), error => ({ error }));
+    await vi.advanceTimersByTimeAsync(5 * 60_000);
+    expect(closed).toHaveBeenCalledOnce();
+    expect(fetcher.mock.calls.filter(([url]) => String(url).endsWith('/cancel'))).toHaveLength(0);
+    let settled = false;
+    void outcome.then(() => { settled = true; });
+    await vi.advanceTimersByTimeAsync(1);
+    expect(settled).toBe(false);
+    controller.abort();
+    expect(await outcome).toMatchObject({ error: { code: 'browser_canceled' } });
+    expect(removed).toHaveBeenCalledOnce();
+  } finally { vi.useRealTimers(); vi.unstubAllGlobals(); }
 });

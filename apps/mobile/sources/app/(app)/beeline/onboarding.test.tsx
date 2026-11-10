@@ -1,5 +1,5 @@
 vi.mock('@/utils/responsive', () => ({ useIsDesktop: () => false }));
-vi.mock('@expo/vector-icons', async () => { const R = await import('react'); return { Ionicons: (props: any) => R.createElement('Ionicons', props) }; });
+vi.mock('@expo/vector-icons/Ionicons', async () => { const R = await import('react'); return { default: (props: any) => R.createElement('Ionicons', props) }; });
 vi.mock('expo-haptics', () => ({ ImpactFeedbackStyle: { Light: 'Light' }, impactAsync: async () => undefined }));
 vi.mock('react-native-keyboard-controller', async () => { const R = await import('react'); return { KeyboardAvoidingView: (props: any) => R.createElement('View', props, props.children) }; });
 import * as React from 'react';
@@ -22,11 +22,17 @@ const SOURCE_PATH = resolve(__dirname, 'onboarding.tsx');
 const source = () => readFileSync(SOURCE_PATH, 'utf8');
 
 const navigation = vi.hoisted(() => ({ back: vi.fn(), push: vi.fn(), replace: vi.fn() }));
+const googleSignIn = vi.hoisted(() => vi.fn(() => new Promise(() => undefined)));
 
 vi.mock('expo-router', () => ({ router: navigation }));
 vi.mock('expo-linking', () => ({
   createURL: (p: string) => `beeline://${p}`,
   addEventListener: vi.fn(() => ({ remove: vi.fn() })),
+}));
+vi.mock('@/auth/google-auth-session', () => ({
+  clearPendingGoogleSignIn: vi.fn(async () => undefined),
+  resumeGoogleSignIn: vi.fn(async () => null),
+  runGoogleSignIn: googleSignIn,
 }));
 vi.mock('expo-web-browser', () => ({
   maybeCompleteAuthSession: vi.fn(),
@@ -192,6 +198,35 @@ describe('onboarding — canonical brand treatment', () => {
         expect(button.props.labelStyle).toBeUndefined();
       }
     }
+  });
+});
+
+describe('onboarding — a pending sign-in leaves the buttons usable', () => {
+  it('starts a fresh Google attempt when the first one is still open', async () => {
+    googleSignIn.mockClear();
+    googleSignIn.mockImplementation(() => new Promise(() => undefined));
+    let tree!: ReactTestRenderer;
+    await act(async () => {
+      tree = create(React.createElement(BuzzOnboarding));
+    });
+    const button = () => tree.root.findAll(
+      (node: any) => node.props?.testID === 'onboarding-google-sign-in' && node.type === 'Button',
+    )[0];
+    const github = () => tree.root.findAll(
+      (node: any) => node.props?.testID === 'onboarding-github-sign-in' && node.type === 'Button',
+    )[0];
+    // The device check awaits several stores before it enables the buttons.
+    // Wait for it to finish instead of a fixed number of microtask turns.
+    await vi.waitFor(async () => {
+      await act(async () => { await new Promise((done) => setTimeout(done, 0)); });
+      expect(button().props.disabled).toBe(false);
+    });
+    await act(async () => { button().props.onPress(); });
+    expect(googleSignIn).toHaveBeenCalledTimes(1);
+    expect(button().props.disabled).toBe(false);
+    expect(github().props.disabled).toBe(false);
+    await act(async () => { button().props.onPress(); });
+    expect(googleSignIn).toHaveBeenCalledTimes(2);
   });
 });
 

@@ -147,14 +147,10 @@ export class SurfaceRegistry {
   }
 
   write<T>(address: SurfaceCacheAddress, value: T, guard: Guard<T>, stamp?: number): Promise<void> {
-    const epoch = this.epoch;
-    const key = surfaceCacheKey(address);
-    const revision = this.revisions.get(key) ?? 0;
-    return this.deferWrite(key, async () => {
-      if (epoch !== this.epoch || revision !== (this.revisions.get(key) ?? 0)) return;
-      const normalized = this.publish(address, value, guard, stamp);
-      await this.durable.write(address, normalized, guard);
-    });
+    // Publication owns the response now. Only serialization waits for native
+    // interactions; a suspended transition must never retain an older Room.
+    const normalized = this.publish(address, value, guard, stamp);
+    return this.persist(address, normalized, guard);
   }
 
   persist<T>(address: SurfaceCacheAddress, value: T, guard: Guard<T>): Promise<void> {

@@ -25,8 +25,6 @@ CREATE TABLE IF NOT EXISTS operator_system_dm_deliveries (
  PRIMARY KEY(send_id,recipient_id)
 );
 -- Retired copies: the hash was never compared and the count is the send's delivery rows.
-ALTER TABLE operator_system_dm_sends DROP COLUMN IF EXISTS text_hash;
-ALTER TABLE operator_system_dm_sends DROP COLUMN IF EXISTS recipient_count;
 CREATE INDEX IF NOT EXISTS operator_system_dm_pending ON operator_system_dm_deliveries(send_id,recipient_id)
  WHERE state='pending';
 CREATE OR REPLACE FUNCTION beeline_operator_system_dm_pending() RETURNS trigger AS $$
@@ -113,11 +111,10 @@ export async function sendOperatorSystemDm(database: SqlDatabase, config: Feedba
   });
 }
 
-/** Durable, bounded work on the background leader; each message and receipt commit together. */
+/** Each committed send drains its recipients; each message and receipt commit together. */
 export async function flushOperatorSystemDms(database: SqlDatabase,options:{waitForLockedDelivery?:true}={}) {
   let processed = 0;
-  const started = Date.now();
-  while (processed < 10 && Date.now() - started < 500) {
+  for (;;) {
     const item = await database.transaction(async db => {
       const row = (await db.query<{ send_id: string; recipient_id: string; workspace_id: string | null; text: string }>(
         `SELECT d.send_id,d.recipient_id,d.workspace_id,s.text FROM operator_system_dm_deliveries d
@@ -147,14 +144,7 @@ export async function flushOperatorSystemDms(database: SqlDatabase,options:{wait
   return processed;
 }
 
-/** One existing leader-owned bounded batch. Only an actual remaining durable
- * recipient permits the next immediate batch; elapsed time never does. */
-export async function deliverOperatorSystemDmBatch(database:SqlDatabase):Promise<number|undefined>{
-  // A lock held by the former leader is not an empty queue. Wait through its
-  // real commit/rollback; the database's existing statement deadline may park
-  // this attempt, but no timeout invents another admission.
-  const processed=await flushOperatorSystemDms(database,{waitForLockedDelivery:true});
-  if(!processed)return;
-  const remaining=await database.query(`SELECT 1 FROM operator_system_dm_deliveries WHERE state='pending' ORDER BY send_id,recipient_id LIMIT 1`);
-  if(remaining.rowCount)return 0;
+/** One committed send drains its recipients; there is no continuation clock. */
+export async function deliverOperatorSystemDmBatch(database: SqlDatabase): Promise<void> {
+  await flushOperatorSystemDms(database, { waitForLockedDelivery: true });
 }

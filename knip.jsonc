@@ -48,6 +48,9 @@
         "web/marketing/boot.mjs",
         "web/marketing/demo-source.mjs",
         "scripts/marketing/build.mjs",
+        // The connector artwork runbook invokes esbuild; its Room fixture is loaded by path.
+        "scripts/connector-preview/build.mjs",
+        "scripts/connector-preview/room.tsx",
         // TYPECHECK invokes the architecture guard by path.
         "scripts/check-architecture.mjs",
         // Accepted audit decisions: explicit one-time operator entrypoints.
@@ -56,6 +59,12 @@
         "scripts/audit-decisions-schedules.mjs",
         // Rollout replay and the post-drain release action invoke these CLIs by path.
         "scripts/prove-rollout-overlap.mjs",
+        // Isolated built-service reproduction invoked by path in PR #4162.
+        "scripts/prove-commander-handover.mjs",
+        // Reproduction handle-1 invokes this isolated built-service proof by path.
+        "scripts/prove-workspace-handles.mjs",
+        // Reproductions 8 and 13 invoke this isolated built-service proof by path.
+        "scripts/prove-workflow-recovery.mjs",
         "scripts/run-contract-migrations.mjs",
         // The CI baseline runbook invokes this read-only GitHub measurement CLI by path.
         "scripts/ci-baseline.mjs",
@@ -68,6 +77,10 @@
         "scripts/prove-agent-merge-holds.mjs",
         // The report/post delivery runbook invokes this built HTTP proof by path.
         "scripts/prove-report-post-delivery.mjs",
+        // The workflow guide invokes this isolated scheduler/report proof by path.
+        "scripts/prove-schedule-report-owner.mjs",
+        // The Body guide invokes this isolated agent-tool regression proof by path.
+        "scripts/prove-agent-tool-traps.mjs",
         // BRIEF-CITATION invokes the isolated built Body/HTTP proof by path.
         "scripts/prove-brief-citation.mjs",
         // The corner membership migration guide invokes the owner-shaped HTTP/socket proof by path.
@@ -87,11 +100,15 @@
         "scripts/prove-webhook-burst.mjs",
         // Reproduction CHECK-DEADLOCK-1 invokes the isolated PostgreSQL HTTP proof by path.
         "scripts/prove-check-rollup-deadlock.mjs",
-        // The prompt replay runbook invokes this isolated webhook/agent-turn proof by path.
-        "scripts/prove-prompt-pr-replay.mjs",
+        // Sentry contention and destroyed-activity proofs run directly by path.
+        "scripts/prove-sentry-contention.mjs",
+        "scripts/prove-system-background.mjs",
         "scripts/cleanup-legacy-daemon-chat.ts",
         "scripts/prove-harness-node-path.mjs",
         "scripts/prove-corner-startup.mjs",
+        // Documented host command-grant build runner and isolated corner-host proof.
+        "scripts/corner-job.mjs",
+        "scripts/prove-corner-host.mjs",
         // Reproduction CONNECTORS-1 invokes the built local PhoneService proof by path.
         "scripts/prove-connectors-cleanup.mjs",
         // Reproduction R-SQUIRE-SLEEP invokes the built HTTP pairing proof by path.
@@ -123,9 +140,12 @@
         "scripts/serve-voice-ui-proof.ts",
         "scripts/serve-voice-room-review.ts",
         "scripts/helper-proof/prove-linux.mjs",
+        "scripts/helper-proof/prove-update-handoff.mjs",
         "scripts/prove-helper-migration-update.mjs",
         // CI and the local Android runner invoke these tools by path.
         "scripts/latency-rig/*.{mjs,cjs}",
+        // Reproductions 25 and 26 replay this capture CLI by path (evidence README).
+        "scripts/latency-rig/evidence/room-forward-2026-11-09/capture.mjs",
         // store-shipped.test.mjs runs the release scripts with this fake App Store Connect preloaded.
         "scripts/fixtures/fake-app-store-connect.mjs",
         // The transcript benchmark README invokes these measurement CLIs by path.
@@ -214,7 +234,6 @@
         "scripts/room-deck-unavailable-proof.tsx",
         // label-sweep-proof.browser.test.ts bundles this browser entry by path through esbuild.
         "scripts/label-sweep-components-proof.tsx",
-        "scripts/ui-repair-audit/prepare.mjs",
         "scripts/render-waveform-proof.mjs",
         // Documented browser proof bundles the real webhook subscription screen.
         "scripts/render-subscription-webhook-proof.mjs",
@@ -224,8 +243,6 @@
         "scripts/viewer-dock-keyboard-native.tsx",
         // Gradle bundles the viewer composer screenshot fixture via entryFile.
         "scripts/viewer-composer-polish-native.tsx",
-        // The native status fixture is bundled through Gradle's entryFile override.
-        "scripts/status-band-native-entry.js",
         "scripts/unread-controls-native-proof.tsx",
         "scripts/operation-deadline-native-proof.tsx",
         "scripts/unread-dot-clear-proof.tsx",
@@ -272,18 +289,10 @@
         "scripts/pr-accordion-proof.tsx",
         // Gradle bundles this native screenshot fixture through its entryFile override.
         "scripts/corner-pr-cards-native-proof.tsx",
-        // Screenshot capture bundles these entries by path through esbuild and Gradle.
-        "scripts/capture-corner-line-web.mjs",
-        "scripts/corner-line-{native,web}-proof.tsx",
-        // The lifecycle glyph runbook invokes capture by path; esbuild and Gradle select these entries.
-        "scripts/capture-lifecycle-glyph-web.mjs",
-        "scripts/lifecycle-glyph-{native,web}-proof.tsx",
         "scripts/transcript-events-native-proof.tsx",
         // Browser bundling and the temporary Metro main select these proof entries by path.
         "scripts/disclosure-rows-{browser,native}-proof.tsx",
         "scripts/transcript-dividers-{browser,native}-proof.tsx",
-        // The Android swipe regression runbook loads this temporary native app entry.
-        "scripts/message-swipe-native-proof.tsx",
         "scripts/lifecycle-rows-a-native-proof.tsx",
         "scripts/ci-accordion-proof.tsx",
         "scripts/tray-empty-proof.tsx",
@@ -406,6 +415,8 @@
       // JavaScript module graph Knip can follow.
       "entry": [
         "src/{index,cli,recovery-cli,squire-facade}.ts",
+        // Loaded by the pinned Pi extension and bundled as a release asset.
+        "src/owned-model-provider.ts",
         "scripts/measure-turn-phases.ts",
         "vitest.live.config.ts",
       ],

@@ -2,7 +2,7 @@ import { phoneFetch } from '../../../tests/helpers/phone-operation.js';
 import type { AddressInfo } from 'node:net';
 import WebSocket from 'ws';
 import { TokenAuth } from './auth.js';
-import { DaemonService } from './daemon-service.js';
+import { HelperDaemonService as DaemonService } from './test-fixtures/helper-daemon.js';
 import { createBeelineServer } from './server.js';
 import { afterAll, beforeAll, expect, it, vi } from 'vitest';
 import { migrate } from './database.js';
@@ -24,13 +24,15 @@ vi.mock('livekit-server-sdk', async original => {
 const H = 'a'.repeat(64), SECOND = 'd'.repeat(64), A = 'b'.repeat(64), B = 'c'.repeat(64);
 const W = '11111111-1111-4111-8111-111111111111', R = '22222222-2222-4222-8222-222222222222';
 const db = new PgliteDatabase(); const live = new LiveHub();
-const service = new VoiceService(db, live, { url: 'ws://localhost:7880', apiKey: 'devkey', apiSecret: 'secret',
+const service = new VoiceService(db, live, { url: 'ws://localhost:7880', apiKey: 'devkey', apiSecret: 'secret', publicOrigin: 'http://proof',
   brain: { answer: vi.fn() }, speech: { synthesize: vi.fn() }, stt: vi.fn() });
 beforeAll(async () => {
   await migrate(db);
   await db.query(`INSERT INTO identities(id,kind,name,handle) VALUES($1,'human','System','system') ON CONFLICT DO NOTHING`, [SYSTEM_IDENTITY_ID]);
   await db.query(`INSERT INTO identities(id,kind,name,handle) VALUES($1,'human','Human','human'),($2,'agent','Ruby','ruby'),
     ($3,'agent','Sol','sol'),($4,'human','Second','second')`, [H, A, B, SECOND]);
+  await db.query(`INSERT INTO identity_external_links(provider,subject,identity_id,issuer,audience,provider_login)
+    VALUES('github','voice-proof-owner',$1,'https://github.com','beeline','voice-proof-owner')`, [H]);
   await db.query(`INSERT INTO agents(agent_id,owner_id,soul) VALUES($1,$3,'{"instructions":"Warm."}'),($2,$3,'{"instructions":"Concise."}')`, [A, B, H]);
   await db.query(`INSERT INTO workspaces(id,name) VALUES($1,'Voice proof')`, [W]);
   await db.query(`INSERT INTO rooms(id,workspace_id,name) VALUES($1,$2,'Room')`, [R, W]);
@@ -62,9 +64,7 @@ it('refuses the retired HTTP call join for Android and JSON bodies', async () =>
   for (const id of [H, A]) await db.query(`INSERT INTO memberships(workspace_id,room_id,identity_id,role)
     VALUES($1,$2,$3,'member')`, [W, roomId, id]);
   const auth = new TokenAuth(db, async token => ({ subject: token, login: token, name: token }));
-  await db.query(`INSERT INTO identity_external_links(provider,subject,identity_id,issuer,audience,provider_login)
-    VALUES('github','android-join-proof',$1,'https://github.com','beeline','android-join-proof')`, [H]);
-  const { accessToken } = await auth.exchangeGitHubOidc('android-join-proof');
+  const { accessToken } = await auth.exchangeGitHubOidc('voice-proof-owner');
   const server = createBeelineServer({ database: db, auth, phone: new PhoneService(db, 'http://proof'),
     daemon: new DaemonService(db, live), live, voice: service, mediaMaximumBytes: 1024 });
   await new Promise<void>(resolve => server.listen(0, '127.0.0.1', resolve));
@@ -91,9 +91,7 @@ it('SOCKET-OPS-1: joins, reads, resumes and leaves a real voice session over the
   for (const id of [H, A]) await db.query(`INSERT INTO memberships(workspace_id,room_id,identity_id,role)
     VALUES($1,$2,$3,'member')`, [W, roomId, id]);
   const auth = new TokenAuth(db, async token => ({ subject: token, login: token, name: token }));
-  await db.query(`INSERT INTO identity_external_links(provider,subject,identity_id,issuer,audience,provider_login)
-    VALUES('github','socket-voice-proof',$1,'https://github.com','beeline','socket-voice-proof')`, [H]);
-  const { accessToken } = await auth.exchangeGitHubOidc('socket-voice-proof');
+  const { accessToken } = await auth.exchangeGitHubOidc('voice-proof-owner');
   const server = createBeelineServer({ database: db, auth, phone: new PhoneService(db, 'http://proof'),
     daemon: new DaemonService(db, live), live, voice: service, mediaMaximumBytes: 1024 });
   await new Promise<void>(resolve => server.listen(0, '127.0.0.1', resolve));
@@ -248,9 +246,7 @@ it('ignores an old client provider field while keeping Aura and manager authoriz
 
 it('demonstrates authenticated Aura saves and WAV previews while ignoring old provider fields', async () => {
   const auth = new TokenAuth(db, async token => ({ subject: token, login: token, name: token }));
-  await db.query(`INSERT INTO identity_external_links(provider,subject,identity_id,issuer,audience,provider_login)
-    VALUES('github','aura-proof-owner',$1,'https://github.com','beeline','aura-proof-owner')`, [H]);
-  const { accessToken } = await auth.exchangeGitHubOidc('aura-proof-owner');
+  const { accessToken } = await auth.exchangeGitHubOidc('voice-proof-owner');
   const aura = new VoiceService(db, live, { ...service.config, speech: {
     voices: ['luna', 'apollo'], async *synthesize() { yield new Uint8Array([1, 2, 3, 4]); },
   } });
@@ -490,9 +486,7 @@ it('demonstrates workspace exhaustion ending the whole call and refusing HTTP jo
     releaseClose?.(); await ending; deleteRoom.mockRestore();
   }
   const auth = new TokenAuth(db, async token => ({ subject: token, login: token, name: token }));
-  await db.query(`INSERT INTO identity_external_links(provider,subject,identity_id,issuer,audience,provider_login)
-    VALUES('github','budget-proof-human',$1,'https://github.com','beeline','budget-proof-human')`, [H]);
-  const { accessToken } = await auth.exchangeGitHubOidc('budget-proof-human');
+  const { accessToken } = await auth.exchangeGitHubOidc('voice-proof-owner');
   const server = createBeelineServer({ database: db, auth, phone: new PhoneService(db, 'http://proof'),
     daemon: new DaemonService(db, live), live, voice: service, mediaMaximumBytes: 1024 });
   await new Promise<void>(resolve => server.listen(0, '127.0.0.1', resolve));
@@ -582,7 +576,7 @@ it('call history search excludes Rooms another caller cannot read and privately 
     await service.dispatch(call.call.id, source, A);
     const { readAgentCommands } = await import('./agent-command.js');
     const commands = await readAgentCommands(db, room, A);
-    expect(commands.commands[0]?.source.body).toContain('This is a separate request from a live voice call.');
+    expect(commands.commands[0]?.source.body).toContain('This input came from a live voice call.');
     expect(commands.commands[0]?.source.body).toContain('Results dated today are current');
     expect(commands.commands[0]?.source.body).toContain('Never start your reply with your name');
     expect(commands.commands[0]?.source.body).toContain(String(new Date().getUTCFullYear()));
@@ -593,7 +587,7 @@ it('call history search excludes Rooms another caller cannot read and privately 
 });
 
 
-it('VOICE-ROUTER-1: hand-offs arriving mid-turn remain separate requests after overdue recovery', async () => {
+it('VOICE-ROUTER-1: hand-offs arriving mid-turn remain pending for the next current-state batch', async () => {
   const room = '67676767-6767-4767-8767-676767676767';
   await db.query(`INSERT INTO rooms(id,workspace_id,name) VALUES($1,$2,'Busy voice proof')`, [room,W]);
   for (const who of [H,A]) await db.query(`INSERT INTO memberships(workspace_id,room_id,identity_id,role) VALUES($1,$2,$3,'member')`, [W,room,who]);
@@ -618,7 +612,7 @@ it('VOICE-ROUTER-1: hand-offs arriving mid-turn remain separate requests after o
     const queued = await commands();
     expect(queued.map(command=>command.source.id)).toEqual(expect.arrayContaining([second,third]));
     expect(queued.every(command=>!command.recoveryContext)).toBe(true);
-    expect(queued.every(command=>command.source.body.includes('Answer this request in this turn'))).toBe(true);
+    expect(queued.every(command=>command.source.body.includes('Answer the latest message'))).toBe(true);
     expect((await db.query(`SELECT state FROM agent_commands WHERE source_message_id=$1`,[first])).rows[0]).toEqual({state:'complete'});
   } finally { await service.leave(joined.call.id,H); await db.query('DELETE FROM rooms WHERE id=$1',[room]); }
 });
@@ -652,28 +646,26 @@ it('Reproduction VOICE-TAG-1: final call reply wakes another agent once and sees
   const room = '31313131-3131-4131-8131-313131313131';
   await db.query(`INSERT INTO rooms(id,workspace_id,name) VALUES($1,$2,'Voice tag proof')`, [room,W]);
   for (const id of [H,A,B]) await db.query(`INSERT INTO memberships(workspace_id,room_id,identity_id,role) VALUES($1,$2,$3,'member')`, [W,room,id]);
-  await db.query(`UPDATE identities SET name='Baby',handle='baby' WHERE id=$1`,[B]);
   try {
-    await service.recordAnswer(room,A,'@baby let me look.', {routeMentions:false});
+    await service.recordAnswer(room,A,'@sol let me look.', {routeMentions:false});
     await service.recordAnswer(room,A,'@ruby @missing hello.', {replyId:'self-and-missing'});
     expect((await db.query(`SELECT * FROM agent_commands WHERE room_id=$1`,[room])).rows).toHaveLength(0);
-    await service.recordAnswer(room,A,'@baby what are you up to?',{replyId:'final-answer'});
-    await service.recordAnswer(room,A,'@baby what are you up to?',{replyId:'final-answer'});
+    await service.recordAnswer(room,A,'@sol what are you up to?',{replyId:'final-answer'});
+    await service.recordAnswer(room,A,'@sol what are you up to?',{replyId:'final-answer'});
     const commands = (await db.query<CommandRow>(`SELECT * FROM agent_commands WHERE room_id=$1`,[room])).rows;
     expect(commands).toHaveLength(1);
     expect(commands[0]).toMatchObject({agent_id:B,reason:'agent_tag',agent_depth:0,private_payload:null});
     expect((await db.query(`SELECT text,author_id FROM messages WHERE id=$1`,[commands[0]!.source_message_id])).rows[0])
-      .toEqual({text:'@baby what are you up to?',author_id:A});
+      .toEqual({text:'@sol what are you up to?',author_id:A});
     await db.transaction(tx=>routeAgentResult(tx,undefined,commands[0]!.source_message_id!,{roomId:room,agentId:A}));
     expect((await db.query(`SELECT * FROM agent_commands WHERE room_id=$1`,[room])).rows).toHaveLength(1);
     await service.recordAnswer(room,B,'I am checking the call history.');
     expect(JSON.stringify(await readVoiceContext(db,room,'next-turn',A))).toContain('I am checking the call history.');
     await db.query(`UPDATE memberships SET removed_at=now() WHERE room_id=$1 AND identity_id=$2`,[room,B]);
-    await service.recordAnswer(room,A,'@baby are you still here?',{replyId:'removed-member'});
+    await service.recordAnswer(room,A,'@sol are you still here?',{replyId:'removed-member'});
     expect((await db.query(`SELECT * FROM agent_commands WHERE room_id=$1`,[room])).rows).toHaveLength(1);
     console.log('VOICE-TAG-1: final post -> one agent_tag -> reply in next voice history; replay, acknowledgements, self and nonmembers bounded. Pglite service stand-in; RTC and model not live.');
   } finally {
-    await db.query(`UPDATE identities SET name='Sol',handle='sol' WHERE id=$1`,[B]);
     await db.query(`DELETE FROM rooms WHERE id=$1`,[room]);
   }
 });
@@ -747,4 +739,20 @@ it('F17: a committed exact call-card source reaches the held runtime participant
     expect(runtime.refresh).toHaveBeenCalledTimes(3);
     expect(runtime.countHumans).toHaveBeenCalledOnce();
   }finally{await service.leave(joined.call.id,H);await db.query('DELETE FROM rooms WHERE id=$1',[room]);}
+});
+
+
+it('projects the same assigned face and generated portrait in voice and Room identities', async () => {
+  const portrait = '/v1/agent-avatars/33333333-3333-4333-8333-333333333333';
+  await db.query('UPDATE identities SET face_id=$2,avatar=$3 WHERE id=$1', [A, 'bat', portrait]);
+  try {
+    const joined = await service.join(R, H);
+    const room = await new PhoneService(db, 'http://proof').readRoom(R, H);
+    const agent = room!.members.find(member => member.identity.pubkey === A)!.identity;
+    expect(agent).toMatchObject({ face: 'bat', avatar: `http://proof${portrait}` });
+    expect(joined.agents.find(candidate => candidate.pubkey === A)).toEqual(agent);
+    await service.leave(joined.call.id, H);
+  } finally {
+    await db.query('UPDATE identities SET face_id=NULL,avatar=NULL WHERE id=$1', [A]);
+  }
 });

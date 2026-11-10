@@ -1,7 +1,36 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
+import { execFileSync, spawnSync } from 'node:child_process';
+import { mkdtempSync, rmSync } from 'node:fs';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
+import { fileURLToPath } from 'node:url';
 
 import { run } from './verify-beeline-install.mjs';
+import { recoveryCliBundleArgs } from './recovery-cli-bundle.mjs';
+
+test('helper recovery bundle loads session commands after being copied outside the install', () => {
+  const directory = mkdtempSync(join(tmpdir(), 'beeline-recovery-bundle-'));
+  try {
+    const root = fileURLToPath(new URL('..', import.meta.url));
+    const output = join(directory, 'usebeeline.mjs');
+    // Use the helper's build recipe and real compiled entry, without npm's
+    // import.meta.url define. No helper lifecycle or network calls are needed.
+    execFileSync('npx', recoveryCliBundleArgs(join(root, 'apps/body/dist/recovery-cli.js'), output), {
+      cwd: root, stdio: 'pipe', timeout: 30_000,
+    });
+    const result = spawnSync(process.execPath, [output, 'session', 'status'], {
+      cwd: directory, encoding: 'utf8', timeout: 10_000,
+      env: { PATH: process.env.PATH, HOME: directory,
+        XDG_CONFIG_HOME: join(directory, 'config'), XDG_STATE_HOME: join(directory, 'state') },
+    });
+    assert.ifError(result.error);
+    assert.equal(result.status, 0, result.stderr);
+    assert.equal(result.stdout, '');
+  } finally {
+    rmSync(directory, { recursive: true, force: true });
+  }
+});
 
 test('run keeps stdin open until the requested JSON-RPC reply is complete', async () => {
   const server = String.raw`

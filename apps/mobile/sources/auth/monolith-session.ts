@@ -1,3 +1,4 @@
+import { authPhase, observeAuth } from './auth-diagnostics';
 import { readWebXAttribution, loadXPixel, trackXSignup } from '@beeline/api-contract/x-attribution';
 import type { SigninFunnelEvent } from '@beeline/api-contract/signin-funnel';
 import { getBuzzRuntimeConfig } from '@/buzz/runtime-config';
@@ -8,9 +9,6 @@ import { webRuntimeStorage } from '@/utils/web-storage';
 import { resetClientState } from '@/sync/client-reset';
 import { sha256 } from '@noble/hashes/sha2.js';
 import { bytesToHex, utf8ToBytes } from '@noble/hashes/utils.js';
-import { markRoomOpen } from '@/buzz/room-open-trace';
-import { beginNetworkResponseTiming } from './network-response-timing';
-import { reportRequestDeadlineMissed } from '@/sync/transport/request-deadline';
 
 // Capture before OAuth leaves the landing URL; the shared first-party cookie survives it.
 loadXPixel(readWebXAttribution());
@@ -112,14 +110,6 @@ export class MonolithSession {
     _origins: readonly string[] = monolithOrigins(baseUrl),
   ) {}
 
-  /**
-   * A request past its deadline makes the shared socket suspect. HTTP keeps
-   * its configured primary origin; recovery rides the one live socket.
-   */
-  noteStalled(_input: string): void {
-    reportRequestDeadlineMissed();
-  }
-
   async exchangeGitHubTicket(ticket: string, funnel?: SigninFunnelEvent): Promise<string> {
     return this.exchangeProviderTicket('github', ticket, funnel);
   }
@@ -135,7 +125,8 @@ export class MonolithSession {
   ): Promise<string> {
     const revision = this.credentialRevision;
     const xAttribution = readWebXAttribution();
-    const response = await this.fetchImpl(`${this.baseUrl}/v1/auth/${provider}/exchange`, {
+    const response = await authPhase('exchange_started', async () => {
+      const response = await this.fetchImpl(`${this.baseUrl}/v1/auth/${provider}/exchange`, {
       method: 'POST',
       headers: { 'content-type': 'application/json' },
       body: JSON.stringify({
@@ -144,9 +135,12 @@ export class MonolithSession {
         ...(xAttribution ? { xAttribution } : {}),
       }),
     });
-    if (!response.ok) throw new MonolithSessionRequiredError();
+      if (!response.ok) throw new MonolithSessionRequiredError();
+      return response;
+    }, 'exchange_completed');
     const tokens = (await response.json()) as MonolithTokens;
-    await this.accept(tokens, true, revision);
+    await authPhase('session_saved', () => this.accept(tokens, true, revision));
+    observeAuth({ name: 'session_saved', outcome: 'success' });
     trackXSignup(tokens.xSignup);
     return tokens.identityId;
   }
@@ -275,6 +269,7 @@ export class MonolithSession {
   }
 
   async clear(): Promise<void> {
+    void import('@/track/diagnostics').then(t=>t.diagnosticIdentity(null)).catch(()=>undefined);
     this.credentialRevision += 1;
     this.sessionRevision += 1;
     this.access = undefined;
@@ -414,15 +409,11 @@ export class MonolithSession {
     init: RequestInit = {},
     options: {
       timeoutMs?: number;
-      idempotent?: boolean;
       fetchImpl?: typeof fetch;
     } = {},
   ): Promise<Response> {
     const sessionRevision = this.sessionRevision;
-    const dispatch = () =>
-      options.fetchImpl
-        ? this.perform(input, init, options.timeoutMs, options.fetchImpl)
-        : this.dispatch(input, init, options);
+    const dispatch = () => this.perform(input, init, options.timeoutMs, options.fetchImpl);
     let response = await dispatch();
     if (response.status !== 401) return response;
     if (sessionRevision !== this.sessionRevision) throw new MonolithSessionChangedError();
@@ -430,19 +421,6 @@ export class MonolithSession {
     this.accessRestoreAttempted = true;
     response = await dispatch();
     return response;
-  }
-
-  private async dispatch(
-    input: string,
-    init: RequestInit,
-    options: { timeoutMs?: number; idempotent?: boolean },
-  ): Promise<Response> {
-    try {
-      return await this.perform(input, init, options.timeoutMs);
-    } catch (error) {
-      if (error instanceof MonolithRequestTimeoutError) reportRequestDeadlineMissed();
-      throw error;
-    }
   }
 
   private async perform(
@@ -465,8 +443,6 @@ export class MonolithSession {
     if (init.signal?.aborted) controller.abort();
     try {
       // Token restore or refresh can stall too; the deadline covers it.
-      const tracingRoom = /\/v1\/phone\/rooms\/[^/?]+$/.test(input);
-      if (tracingRoom) markRoomOpen('wire-authorizing');
       // A warm Room tap must dispatch before navigation starts rendering.
       // Awaiting an already available token lets that render hold the GET.
       const available = this.validAccessToken();
@@ -474,26 +450,14 @@ export class MonolithSession {
         available && !controller.signal.aborted
           ? available
           : await untilAborted(this.authorization(fetchImpl), controller.signal);
-      const finishTiming = tracingRoom ? beginNetworkResponseTiming(input) : undefined;
-      if (tracingRoom) markRoomOpen('wire-dispatch');
-      let response: Response;
-      try {
-        response = await fetchImpl(input, {
-          ...init,
-          signal: controller.signal,
-          headers: {
-            ...Object.fromEntries(new Headers(init.headers).entries()),
-            authorization: `Bearer ${authorized}`,
-          },
-        });
-      } catch (error) {
-        finishTiming?.();
-        throw error;
-      }
-      finishTiming?.();
-      if (tracingRoom) markRoomOpen('wire-headers');
-
-      return response;
+      return await fetchImpl(input, {
+        ...init,
+        signal: controller.signal,
+        headers: {
+          ...Object.fromEntries(new Headers(init.headers).entries()),
+          authorization: `Bearer ${authorized}`,
+        },
+      });
     } catch (error) {
       if (timedOut) throw new MonolithRequestTimeoutError();
       throw error;
@@ -557,7 +521,6 @@ export class MonolithSession {
       return tokens.accessToken;
     } catch (error) {
       if (timedOut) {
-        reportRequestDeadlineMissed();
         throw new MonolithRequestTimeoutError();
       }
       throw error;
@@ -620,6 +583,7 @@ export class MonolithSession {
       // A new sign-in may repair an expired session for the same identity.
       // Token refresh alone must not start another registration/refresh loop.
       if (signedIn || previousId !== tokens.identityId) this.identityChanged();
+      void import('@/track/diagnostics').then(t=>t.diagnosticIdentity(tokens.identityId)).catch(()=>undefined);
       if (signedIn)
         void import('./signin-funnel')
           .then((module) => module.funnelSignedIn(tokens.accessToken))

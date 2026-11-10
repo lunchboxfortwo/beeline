@@ -1,4 +1,6 @@
+import { maskCredentialResult } from './mask-credential-result.js';
 import type { DaemonOperationMap } from '@beeline/api-contract/daemon';
+import { toolCallText } from './tool-call-failure.js';
 import type { AgentTurnStep } from './acp.js';
 import { redactToolDetail } from './turn-failure-reason.js';
 
@@ -29,7 +31,7 @@ function notePieces(text: string): string[] {
 
 /**
  * A Room turn's steps as the activity its reply carries: each earlier text
- * run as a note and each tool call as a redacted one-line ledger row, in the
+ * run as a note and each tool call as a one-line ledger row, in the
  * turn's own order.
  *
  * Notes are the agent's words and are never cut or dropped. A run longer
@@ -69,13 +71,24 @@ export function roomReplySteps(
       }
       return;
     }
-    const operation = oneLine(step.call.kind ?? '') || 'tool';
-    const title = oneLine(redactToolDetail(step.call.title ?? '')) || `${operation} tool`;
+    const call = maskCredentialResult(step.call);
+    const operation = oneLine(call.kind ?? '') || 'tool';
+    const title = oneLine(redactToolDetail(call.title ?? '')) || `${operation} tool`;
+    const identity = `${call.name ?? ''} ${call.title ?? ''} ${JSON.stringify(call.rawInput ?? {})}`;
+    // Credential paths suppress output regardless of the command used to access them.
+    const secret = /fetch_credential|read_credential|raw_credential|[._]netrc\b|\.pgpass\b|\.git-credentials\b|\.npmrc\b|\.pypirc\b|\.docker[\\/]+config\.json\b|\.aws[\\/]+credentials\b|\.env|credentials|\bid_[a-z0-9_]+\b|\.(?:pem|key)\b|private.?key/i.test(identity);
+    const raw = secret ? '' : redactToolDetail(toolCallText(call.content) || toolCallText(call.rawOutput));
+    const bytes = Buffer.from(raw);
+    const marker = '\n[cut off]';
+    const output = secret ? 'Output hidden: contains a secret.' : bytes.length > 4096
+      ? bytes.subarray(0, 4096 - Buffer.byteLength(marker)).toString('utf8').replace(/\ufffd$/, '') + marker
+      : raw;
     rows.push({
       kind: 'tool',
       title: title.slice(0, 240),
       operation: operation.slice(0, 80),
-      status: step.call.status ?? 'completed',
+      status: call.status ?? 'completed',
+      ...(output ? { output } : {}),
       ...(requestedBy ? { requestedBy } : {}),
     });
   });

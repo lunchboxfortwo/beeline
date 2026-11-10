@@ -1,3 +1,4 @@
+import { authPhase, observeAuth, authFailureCode } from '@/auth/auth-diagnostics';
 import { appErrorCopy } from '@/buzz/app-error-copy';
 import { desktopColumnWidths } from '@/buzz/desktop-layout-tokens';
 import { useIsDesktop as useDesktopPageLayout } from '@/utils/responsive';
@@ -151,7 +152,7 @@ export default function BuzzOnboarding() {
   const enterAfterMonolithSignIn = async (_identityId: string | undefined) => {
     // Repository discovery belongs to the in-app picker. An unavailable
     // GitHub service must never hold a successfully signed-in user here.
-    router.replace('/beeline/channels');
+    await authPhase('navigation_started', async () => { router.replace('/beeline/channels'); });
   };
 
   const restorePendingBind = async (): Promise<boolean> => {
@@ -182,12 +183,13 @@ export default function BuzzOnboarding() {
                   'The replacement proof is no longer available. Sign in again.',
                   410,
                 ),
+                'github',
               );
               setStatus(expired.status);
               setNotice(expired);
             })
             .catch((error: unknown) => {
-              const failed = noticeForAuthError(error);
+              const failed = noticeForAuthError(error, 'github');
               setStatus(failed.status);
               setNotice(failed);
             });
@@ -301,7 +303,7 @@ export default function BuzzOnboarding() {
               appErrorCopy(error),
               500,
             );
-      const next = noticeForAuthError(normalized);
+      const next = noticeForAuthError(normalized, 'github');
       if (!next.retryable && normalized.code !== 'identity_conflict') pendingBind.current = null;
       setStatus(next.status);
       setNotice(next);
@@ -317,6 +319,7 @@ export default function BuzzOnboarding() {
       return;
     }
     let alive = true;
+    let recoveryProvider: 'google' | 'github' = 'google';
     void (async () => {
       const initialUrl = await initialAuthUrl().catch(() => null);
       // A press already running in this process owns its own callback. This
@@ -339,6 +342,7 @@ export default function BuzzOnboarding() {
         if (alive) await enterAfterMonolithSignIn(identityId);
         return;
       }
+      recoveryProvider = 'github';
       const challenge =
         (await resumeInitialGitHubSignIn(() => Promise.resolve(initialUrl), undefined, {
           signedIn: savedIdentityId !== null,
@@ -373,9 +377,9 @@ export default function BuzzOnboarding() {
       }
     })()
       .catch((error: unknown) => {
-        void funnelCallback('error','unknown');
+        observeAuth({ name: 'auth_failed', phase: 'recovery_started', code: authFailureCode(error,'recovery_started'), outcome: 'failed' });
         if (!alive) return;
-        const next = noticeForAuthError(error);
+        const next = noticeForAuthError(error, recoveryProvider);
         setNotice(next);
         setStatus(next.status);
       })
@@ -388,7 +392,7 @@ export default function BuzzOnboarding() {
   }, [canSignIn]);
 
   const handleGoogleSignIn = async () => {
-    if (!canSignIn || loading) return;
+    if (!canSignIn) return;
     setLoadingAction('google');
     setStatus('opening_browser');
     clearOnboardingNotice();
@@ -421,11 +425,17 @@ export default function BuzzOnboarding() {
     } catch (error) {
       if (attempt.signal.aborted) return;
       const cancelled = error instanceof OidcBindError && ['browser_canceled', 'oidc_denied'].includes(error.code);
-      void funnelCallback(cancelled ? 'cancelled' : 'error', cancelled ? undefined : 'unknown');
+      void funnelCallback(cancelled ? 'cancelled' : 'error', cancelled ? undefined : 'exchange_failed');
+      if (cancelled) {
+        setStatus('idle');
+        return;
+      }
+      observeAuth({ name: 'notice_shown', code: authFailureCode(error,'callback_validated'), outcome: 'failed' });
       const next = noticeForAuthError(
         error instanceof OidcBindError
           ? error
           : new OidcBindError('exchange_failed', 'Google sign-in could not finish. Try again.'),
+        'google',
       );
       setStatus(next.status);
       setNotice(next);
@@ -490,7 +500,8 @@ export default function BuzzOnboarding() {
         return;
       }
       await cancelPendingGitHubSignIn(undefined, undefined, startedState).catch(() => undefined);
-      const next = noticeForAuthError(error);
+      const next = noticeForAuthError(error, 'github');
+      observeAuth({name:'notice_shown',code:authFailureCode(error,'callback_validated'),outcome:'failed'});
       setStatus(next.status);
       setNotice(next);
       publishOnboardingNotice(next);
@@ -522,7 +533,8 @@ export default function BuzzOnboarding() {
       pending.bound = true;
       await finishPendingBind(pending);
     } catch (error) {
-      const next = noticeForAuthError(error);
+      const next = noticeForAuthError(error, 'github');
+      observeAuth({name:'notice_shown',code:authFailureCode(error,'callback_validated'),outcome:'failed'});
       setStatus(next.status);
       setNotice(next);
       publishOnboardingNotice(next);
@@ -695,7 +707,7 @@ export default function BuzzOnboarding() {
                 testID="onboarding-github-sign-in"
                 loading={loadingAction === 'github' || loadingAction === 'bind' || status === 'checking_device'}
                 onPress={() => void handleSignIn()}
-                disabled={loading || status === 'checking_device' || status === 'binding'}
+                disabled={status === 'checking_device' || status === 'binding'}
               />
               {!notice && <Text style={styles.recommended}>Recommended</Text>}
             </View>
@@ -704,7 +716,7 @@ export default function BuzzOnboarding() {
               variant="provider"
               testID="onboarding-google-sign-in"
               loading={loadingAction === 'google'}
-              disabled={loading || status === 'checking_device' || status === 'binding'}
+              disabled={status === 'checking_device' || status === 'binding'}
               onPress={() => void handleGoogleSignIn()}
             />
           </>

@@ -1,13 +1,14 @@
+import { appErrorCopy, appReadErrorCopy } from '@/buzz/app-error-copy';
 import { EmptyState } from '@/components/buzz/EmptyState';
-import { connectionErrorDescription } from '@/buzz/app-error-copy';
 import { SettingsRow } from '@/components/buzz/SettingsRow';
 import { useDesktopLayout } from '@/buzz/desktop-layout-state';
 import { TrayGlyph } from '@/components/buzz/TrayGlyph';
 import { Button } from '@/components/buzz/Button';
 import { HullDialogInput } from '@/components/buzz/HullDialog';
-import { InlineRow } from '@/components/buzz/IndexRow';
+import { InlineRow, ContentTarget } from '@/components/buzz/IndexRow';
 import { removeRoomSearchDrafts } from '@/buzz/room-search-drafts';
 import { useNeedsYouCount } from '@/buzz/needs-you-store';
+import { invalidatesWorkspaceList } from '@/buzz/workspace-list-invalidation';
 import { getEffectiveRelayUrl, loadBuzzIdentity } from '@/auth/buzz-identity-storage';
 import { saveActiveCommunityId, subscribeActiveCommunityId } from '@/buzz/community-storage';
 import { cornerHref, navigateToRoom, roomCornersHref } from '@/buzz/corner-navigation';
@@ -22,12 +23,12 @@ import { openRoomListCorner } from '@/buzz/room-list-new-corner';
 import { cornerOpenTappedAgain } from '@/buzz/corner-open-status';
 import type { CornerOpenAttempt } from '@/buzz/open-random-corner';
 import { roomListSections } from '@/buzz/room-list-row';
-import { dispatchRoomOpenTap } from '@/buzz/room-open-prefetch';
+import { dispatchRoomOpenTap, warmRoomRouteCode } from '@/buzz/room-open-prefetch';
 import { workspaceRailItem } from '@/buzz/room-view-presentation';
 import { mobileSurfaceCache, surfaceAddress } from '@/buzz/surface-storage';
 import { chatListSnapshot, refreshChatList, useChatList } from '@/buzz/chat-list-store';
 import { useActiveCommunityId } from '@/buzz/use-active-community';
-import { ROOMS_LABEL, WORKSPACE_LABEL, WORKSPACES_LABEL } from '@/buzz/vocabulary';
+import { ROOMS_LABEL, WORKSPACES_LABEL } from '@/buzz/vocabulary';
 import { isWorkspaceManagerRole } from '@/buzz/workspace-role';
 import { CommunitySwitcherTrigger } from '@/components/buzz/CommunityRail';
 import { ConversationRow } from '@/components/buzz/ConversationRow';
@@ -48,12 +49,11 @@ import {
   type WorkspaceListView,
   isWorkspaceListView,
 } from '@beeline/buzz-client';
-import { Ionicons } from '@expo/vector-icons';
+import Ionicons from '@expo/vector-icons/Ionicons';
 import { useGlobalSearchParams, usePathname, useRouter, type Href } from 'expo-router';
 import * as React from 'react';
 import {
   Platform,
-  Pressable,
   ScrollView,
   Text,
   TextInput,
@@ -163,6 +163,9 @@ const stylesheet = StyleSheet.create((theme) => ({
 
 /** One server-backed desktop pane for Workspace and Room movement. */
 export const SidebarView = React.memo(function SidebarView() {
+  React.useEffect(() => {
+    if (Platform.OS === 'web') warmRoomRouteCode();
+  }, []);
   const { showRoomList } = useDesktopLayout();
   const styles = stylesheet;
   const safeArea = useSafeAreaInsets();
@@ -236,14 +239,14 @@ export const SidebarView = React.memo(function SidebarView() {
       setWorkspaceId(selected);
       if (routeWorkspaceId && selected === routeWorkspaceId && selected !== stored)
         void saveActiveCommunityId(identity.publicKey, selected);
-      void new BuzzRigTransport(identity).surfaceSubscribe([], () => {
-        if (!cancelled) setRefreshNonce((nonce) => nonce + 1);
+      void new BuzzRigTransport(identity).surfaceSubscribe([], (event) => {
+        if (!cancelled && invalidatesWorkspaceList(event)) setRefreshNonce((nonce) => nonce + 1);
       }).then((stop) => {
         if (cancelled) stop();
         else stopWorkspaces = stop;
       });
-    })().catch(() => {
-      if (!cancelled) setNavigationError(`Could not load ${WORKSPACE_LABEL.toLowerCase()}s.`);
+    })().catch((reason) => {
+      if (!cancelled) setNavigationError(appErrorCopy(reason, 'Saved Workspaces are unavailable on this device.'));
     });
     return () => {
       cancelled = true;
@@ -279,8 +282,8 @@ export const SidebarView = React.memo(function SidebarView() {
           ? { pathname: '/beeline/channels', params: { communityId: nextId } }
           : '/beeline/community');
       }
-    }).catch(() => {
-      if (!cancelled) setNavigationError(`Could not load ${WORKSPACE_LABEL.toLowerCase()}s.`);
+    }).catch((reason) => {
+      if (!cancelled) setNavigationError(appReadErrorCopy(reason));
       });
     return () => {
       cancelled = true;
@@ -298,7 +301,7 @@ export const SidebarView = React.memo(function SidebarView() {
     [identityPubkey, relayUrl, workspaceId],
   );
   const surface = useChatList(chatListKey, {
-    onError: () => setNavigationError(`Could not load ${ROOMS_LABEL.toLowerCase()}.`),
+    onError: (reason) => setNavigationError(appReadErrorCopy(reason)),
   });
   // An identity-wide change (a Room joined or left) reads the list again; the
   // mounted deck already reads for its own Workspace watch.
@@ -397,6 +400,12 @@ export const SidebarView = React.memo(function SidebarView() {
   );
   // The sidebar reads through RoomViewClient only, so the one write it makes
   // builds the monolith transport on demand, as the Room composer does.
+  // Quiet lists keep their ages until real list activity. Route changes retain
+  // the same timestamp so unrelated conversation rows can stay memoized.
+  const ageNow = React.useMemo(() => Date.now(), [surface?.chats]);
+  const openCorners = React.useCallback((roomId: string) => {
+    router.push(roomCornersHref(roomId));
+  }, [router]);
   const openingCornerRef = React.useRef(false);
   const openNewCorner = React.useCallback(
     async (roomId: string, attempt?: CornerOpenAttempt) => {
@@ -515,7 +524,7 @@ export const SidebarView = React.memo(function SidebarView() {
               {workspaces.map((workspace) => {
                 const selected = workspace.id === workspaceId;
                 return (
-                  <Pressable
+                  <ContentTarget
                     key={workspace.id}
                     accessibilityRole="button"
                     accessibilityState={{ selected }}
@@ -529,7 +538,7 @@ export const SidebarView = React.memo(function SidebarView() {
                     >
                       {workspace.name}
                     </Text>
-                  </Pressable>
+                  </ContentTarget>
                 );
               })}
             </ScrollView>
@@ -553,8 +562,8 @@ export const SidebarView = React.memo(function SidebarView() {
           )}
           <ScrollView style={styles.list} contentContainerStyle={styles.listContent}>
             {navigationError ? (
-              <SettingsRow title={navigationError} description={connectionErrorDescription} action="Retry" onPress={() => setRefreshNonce((value) => value + 1)} />
-            ) : !filteredChats.length && (!surface || query.trim() || filter !== 'all') ? (
+              <SettingsRow title={navigationError} />
+            ) : surface && !pinsLoaded ? null : !filteredChats.length && (!surface || query.trim() || filter !== 'all') ? (
               surface ? (
                 filter === 'pinned' && !query.trim() ? (
                   <EmptyState title="No pinned conversations yet" description="Long press a Room to pin it here." testID="desktop-pinned-empty" action={{label:'Show all conversations',onPress:() => setFilter('all'),testID:'desktop-show-all-conversations'}} />
@@ -613,16 +622,16 @@ export const SidebarView = React.memo(function SidebarView() {
                         <ConversationRow
                           item={item}
                           viewer={identityPubkey ?? undefined}
-                          now={Date.now()}
+                          now={ageNow}
                           selected={isDesktop && active}
                           desktop
-                          onOpenCorners={() => router.push(roomCornersHref(item.room.id))}
+                          onOpenCorners={openCorners}
                           pinned={pinned.includes(item.room.id)}
-                          onPin={() => void togglePin(item.room.id)}
+                          onPin={togglePin}
                           onLongPressCorners={
-                            viewerIsAgent ? undefined : () => void openNewCorner(item.room.id)
+                            viewerIsAgent ? undefined : openNewCorner
                           }
-                          onPress={() => openRoom(item.room.id)}
+                          onPress={openRoom}
                           testID={`desktop-room-${item.room.id}`}
                         />
                       </View>
@@ -633,7 +642,7 @@ export const SidebarView = React.memo(function SidebarView() {
             )}
             <MessageSearchResults
               search={messageSearch}
-              now={Date.now()}
+              now={ageNow}
               onOpen={(result) => {
                 if (workspaceId) {
                   setQuery('');
@@ -643,7 +652,7 @@ export const SidebarView = React.memo(function SidebarView() {
               }}
             />
           </ScrollView>
-            <Pressable
+            <ContentTarget
               accessibilityLabel={
                 viewerIdentity?.name ? `${viewerIdentity.name} — Settings` : 'Settings'
               }
@@ -691,7 +700,7 @@ export const SidebarView = React.memo(function SidebarView() {
                   <Text style={styles.settingsText}>SETTINGS</Text>
                 </>
               )}
-            </Pressable>
+            </ContentTarget>
         </>
         {isDesktop && (
           <DesktopWorkspaceRail

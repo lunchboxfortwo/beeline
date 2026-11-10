@@ -5,11 +5,12 @@ import React, {
   useLayoutEffect,
   useMemo,
   useRef,
+  useState,
   useSyncExternalStore,
 } from 'react';
 import { FlatList, View, type FlatListProps } from 'react-native';
 import type { ChatDisplayMessage } from './room-view-presentation';
-import { scheduleAnimationFrame } from './host-scheduler';
+import { yieldToNextPaint } from './host-scheduler';
 
 type PendingSend = { message: ChatDisplayMessage; key: string; painted: boolean };
 
@@ -57,16 +58,14 @@ export class RoomSendPreview {
     const current = this.value;
     if (!current || current.message.id !== id || current.painted || this.layoutScheduled) return;
     this.layoutScheduled = true;
-    const finish = () =>
-      setTimeout(() => {
-        if (this.value?.key !== current.key) return;
-        this.value = { ...this.value, painted: true };
-        this.publish();
-        const resolve = this.finish;
-        this.finish = undefined;
-        resolve?.();
-      }, 0);
-    if (scheduleAnimationFrame(finish) === false) finish();
+    void yieldToNextPaint().then(() => {
+      if (this.value?.key !== current.key) return;
+      this.value = { ...this.value, painted: true };
+      this.publish();
+      const resolve = this.finish;
+      this.finish = undefined;
+      resolve?.();
+    });
   }
 
   reconcile(from: string, to: string): void {
@@ -185,6 +184,8 @@ export const RoomSendList = forwardRef<FlatList<ChatDisplayMessage>, Props>(func
   const previewInEmptyRoom = useSyncExternalStore(preview.subscribe, emptySnapshot, emptySnapshot);
   const paintingSnapshot = useCallback(() => preview.snapshot()?.painted === false, [preview]);
   const painting = useSyncExternalStore(preview.subscribe, paintingSnapshot, paintingSnapshot);
+  const [atAutoFollowTail, setAtAutoFollowTail] = useState(true);
+  const autoFollowThreshold = props.maintainVisibleContentPosition?.autoscrollToTopThreshold;
   const callbacks = useRef({ onContentSizeChange, onScroll, onViewableItemsChanged });
   callbacks.current = { onContentSizeChange, onScroll, onViewableItemsChanged };
   const deferred = useRef(new Map<string, () => void>());
@@ -221,9 +222,12 @@ export const RoomSendList = forwardRef<FlatList<ChatDisplayMessage>, Props>(func
   const scroll = useCallback<NonNullable<Props['onScroll']>>(
     (event) => {
       event.persist?.();
+      if (autoFollowThreshold != null) {
+        setAtAutoFollowTail(event.nativeEvent.contentOffset.y <= autoFollowThreshold);
+      }
       notify('scroll', () => callbacks.current.onScroll?.(event));
     },
-    [notify],
+    [autoFollowThreshold, notify],
   );
   const content = useCallback(
     (width: number, height: number) => {
@@ -245,9 +249,15 @@ export const RoomSendList = forwardRef<FlatList<ChatDisplayMessage>, Props>(func
       ref={ref}
       data={data}
       inverted={data.length > 0 || previewInEmptyRoom}
-      // An own send owns the tail. Android otherwise preserves the old row's position,
-      // then smooth-scrolls back to zero, delaying visibility despite an immediate commit.
-      maintainVisibleContentPosition={painting ? undefined : props.maintainVisibleContentPosition}
+      // The scroll controller owns live-tail follow. Native anchoring at zero
+      // can produce no scroll event after a prepend, leaving VirtualizedList's
+      // pending-scroll counter stuck and its rendered window unable to fill.
+      // Keep native anchoring for readers in history and detached jump windows.
+      maintainVisibleContentPosition={
+        painting || (autoFollowThreshold != null && atAutoFollowTail)
+          ? undefined
+          : props.maintainVisibleContentPosition
+      }
       renderItem={render}
       ListHeaderComponent={
         <SendHeader preview={preview} renderItem={renderItem} header={ListHeaderComponent} />

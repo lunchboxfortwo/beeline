@@ -1,6 +1,8 @@
 # Persistent free-agent boot recovery
 
-Reproduction `free-agent-persistent-boot`, October 22, 2026.
+Historical reproduction `free-agent-persistent-boot`, October 22, 2026.
+The installer/watchdog paths described in that observation are retired. Current
+images run the image-owned helper directly; use the current regressions below.
 
 ## Before the fix
 
@@ -49,16 +51,20 @@ The second boot returned `staleOwnerRejected: true` and
 `refreshedBeforeLaunch: true`. Destroyed the disposable Machine after reading
 the result; the API confirmed deletion.
 
-## Repeatable regressions
+## Current regressions
 
-- `node --test infra/free-agent/entrypoint.test.mjs`: installed-helper refresh,
-  failed-download fallback, terminal watchdog exit, hung installer, old helper
-  without a watchdog, repeated startup failures and readiness cancellation.
-- Body `start-command.test.ts`: matching legacy start ticks and matching start
-  ticks from another boot cannot authorize an unrelated owner.
-- Body `machine-helper.test.ts`: the same stale-owner collisions reach serving
-  without signaling the unrelated live process; an unestablished free agent
-  reports once and exits with status 78, while readiness cancels the deadline.
+- `node --test infra/free-agent/entrypoint.test.mjs` checks image-owned selection
+  despite a stale HOME launcher, exit propagation and hosted-service startup.
+- `infra/free-agent/cold-start-proof.mjs` runs the built image and Pi against an
+  isolated database and two server processes, through cold stop/start, image
+  replacement while stopped and concurrent command/release signals. Docker is
+  the default Machines stand-in; `PROOF_FLY_APP` selects a separate disposable
+  app and reads its scoped token from stdin. A deterministic model is explicitly
+  a stand-in for the external provider.
+- `free-agent-acquisition.test.ts` and `free-agent-ownership.postgres.test.ts`
+  cover credentials, removal and ownership handoff. Free-agent staging uses the
+  shared atomic private-file writer, including fsync, so its model environment
+  is durable before the first suspension.
 
 ## Legacy Pi environment upgrade
 

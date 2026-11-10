@@ -1,3 +1,33 @@
+#[cfg(target_os = "linux")]
+mod appimage_environment;
+
+/// The same HTTP(S) URL boundary as opener:default, with a clean child
+/// environment for the system browser when running from a Linux AppImage.
+#[tauri::command]
+async fn desktop_open_auth_url(url: String) -> Result<(), String> {
+    if !url.starts_with("https://") && !url.starts_with("http://") {
+        return Err("unsupported authorization URL".into());
+    }
+    #[cfg(target_os = "linux")]
+    if let Some(appdir) = std::env::var_os("APPDIR").filter(|value| !value.is_empty()) {
+        use webkit2gtk::gio;
+        use webkit2gtk::gio::prelude::*;
+        let context = gio::AppLaunchContext::new();
+        for (key, value) in appimage_environment::browser_environment(
+            std::env::vars_os(),
+            std::path::Path::new(&appdir),
+        ) {
+            match value {
+                Some(value) => context.setenv(key, value),
+                None => context.unsetenv(key),
+            }
+        }
+        return gio::AppInfo::launch_default_for_uri(&url, Some(&context))
+            .map_err(|error| error.to_string());
+    }
+    tauri_plugin_opener::open_url(url, None::<&str>).map_err(|error| error.to_string())
+}
+
 const SESSION_KEYS: [&str; 3] = [
     "buzzy.monolith.refresh.v1",
     "buzzy.monolith.identity.v1",
@@ -178,7 +208,8 @@ pub fn run() {
         .invoke_handler(tauri::generate_handler![
             desktop_secure_get,
             desktop_secure_set,
-            desktop_secure_remove
+            desktop_secure_remove,
+            desktop_open_auth_url
         ])
         .run(tauri::generate_context!())
         .expect("error while running Beeline desktop");

@@ -1,3 +1,5 @@
+import { OwnedModelAttempts } from './owned-model-attempt.js';
+import { settleAllowance } from './free-agent-accounting.js';
 import { groupBPostgresDatabase } from './test-fixtures/test-support-router-group-b-postgres.js';
 import { seedOwnedModelFixture, type OwnedModelFixture } from './test-fixtures/owned-model.js';
 import { readOwnedModelReceipt } from '@beeline/api-contract/helper-model-receipt';
@@ -52,6 +54,75 @@ describe('actual owned model endpoint and actual quota adapter', () => {
     rate: (await f.db.query('SELECT calls FROM free_agent_call_rate')).rows,
   });
 
+  it('keeps the original claimed invocation usable after the former execution window', async () => {
+    await f.db.query("UPDATE agent_commands SET claimed_at=clock_timestamp()-interval '2 hours'");
+    const response = await call();
+    expect(response.status).toBe(200);
+    expect(await response.text()).toContain('SYNTHETIC_PRIVATE_ANSWER');
+    expect(calls).toHaveLength(1);
+    expect((await f.db.query('SELECT state FROM agent_commands')).rows).toEqual([{ state: 'claimed' }]);
+  });
+
+  it('sends N concurrent owner calls directly upstream while retaining the spend refusal', async () => {
+    const release=deferred<void>();
+    options.config.dailyTokenCap=1_000_000;options.config.firstDayTokenCap=1_000_000;
+    const count=40;
+    reply=async()=>{ await release.promise;return success(); };
+    const pending=Array.from({length:count},(_,index)=>call({messages:[{role:'user',content:`Distinct authorized call ${index}`}],max_tokens:256},
+      `11111111-1111-4111-8111-${String(index).padStart(12,'0')}`).catch(()=>new Response('{}',{status:599})));
+    try {
+      await vi.waitFor(()=>expect(calls).toHaveLength(count),{timeout:5000});
+      expect(calls).toHaveLength(count);
+    } finally { release.resolve();await Promise.allSettled(pending); }
+    const results=await Promise.all(pending);
+    for(const response of results){expect(response.status).toBe(200);await response.text();}
+    options.config.dailyTokenCap=100;options.config.firstDayTokenCap=100;
+    const refused=await call({messages:[{role:'user',content:'Fresh call after spend exhaustion'}]},TWO);
+    expect(refused.status).toBe(403);expect(calls).toHaveLength(count);
+  });
+
+  it('reads the recorded result on the existing POST leaf without another paid provider request',async()=>{
+    const response=await call();expect(response.status).toBe(200);await response.text();
+    const recorded=await call();expect(recorded.status).toBe(409);
+    const body=await recorded.json();expect(body.receipt.state).toBe('succeeded');
+    expect(readOwnedModelReceipt(body.error.signedReceipt,f.issued.token,ONE)).toMatchObject({state:'succeeded'});
+    expect(calls).toHaveLength(1);
+    const removedRead=await fetch(origin+'/v1/free-agents/model/requests/'+ONE,{headers:{authorization:'Bearer '+f.issued.token}});
+    expect(removedRead.status).toBe(404);await removedRead.text();
+  });
+
+  it('reads the invocation header supplied by the existing native Pi transport',async()=>{
+    const response=await fetch(origin+'/v1/free-agents/model/chat/completions',{
+      method:'POST',headers:{authorization:'Bearer bfm_native_provider_config',
+        'x-beeline-model-invocation':f.issued.token,'x-beeline-model-request':ONE,'content-type':'application/json'},
+      body:JSON.stringify(input),
+    });
+    expect(response.status).toBe(200);await response.text();
+    expect(calls).toHaveLength(1);
+    expect(calls[0]!.headers.has('x-beeline-model-invocation')).toBe(false);
+    expect(calls[0]!.headers.get('authorization')).toBe('Bearer SYNTHETIC_SERVER_PROVIDER_KEY');
+  });
+
+  it('reconciles a lost provider reply inside the existing leaf from its recorded receipt',async()=>{
+    reply=async()=>{
+      const binding=f.credentials.actor(f.actor);
+      await new OwnedModelAttempts(f.db,f.credentials).settleUsage(f.actor,ONE,{tokens:13,usd:0.00002},'succeeded',async(tx,reservation)=>{
+        await settleAllowance(tx,binding.ownerId,binding.agentId,reservation.day,
+          13-reservation.reserved,-reservation.credit,0.00002-reservation.reservedUsd,{modelRequestId:ONE});
+      });
+      throw new TypeError('synthetic lost provider reply after recorded completion');
+    };
+    const response=await call();expect(response.status).toBe(409);
+    const body=await response.json();expect(body.receipt.state).toBe('succeeded');
+    expect(readOwnedModelReceipt(body.error.signedReceipt,f.issued.token,ONE)).toMatchObject({state:'succeeded'});
+    expect(calls).toHaveLength(1);
+    expect(Number((await counters()).usage[0]?.tokens)).toBe(13);
+  });
+  it('rejects the retired agent-wide model token without selecting a different Room’s command',async()=>{
+    const response=await call(input,ONE,'bfm_retired');expect(response.status).toBe(401);
+    expect(await response.json()).toMatchObject({error:{code:'owned_model_required'}});expect(calls).toHaveLength(0);
+  });
+
   it('pins actual command model, strips private identity headers, settles real quota once and replays outcome only', async () => {
     const first = await call({ ...input, model: 'attacker/model', models: ['attacker/fallback'], n: 5, provider: { order: ['attacker'] } });
     expect(first.status).toBe(200); expect(await first.text()).toContain('SYNTHETIC_PRIVATE_ANSWER'); expect(calls).toHaveLength(1);
@@ -67,6 +138,40 @@ describe('actual owned model endpoint and actual quota adapter', () => {
     expect(calls).toHaveLength(1); expect(await counters()).toEqual(before);
     const stored = JSON.stringify((await f.db.query('SELECT * FROM owned_model_attempts')).rows);
     for (const secret of ['SYNTHETIC_PRIVATE_HISTORY', 'SYNTHETIC_PRIVATE_ANSWER', 'SYNTHETIC_SERVER_PROVIDER_KEY', f.issued.token]) expect(stored).not.toContain(secret);
+  });
+
+  it('delivers an owned stream beyond the former window without spending preparation time', async () => {
+    const originalNow = Date.now;
+    let wall = originalNow();
+    vi.spyOn(Date, 'now').mockImplementation(() => wall);
+    options.config.limits = { ...DEFAULT_FREE_AGENT_LIMITS };
+    let part = 0;
+    const frames=[
+      'data: '+JSON.stringify({choices:[{delta:{content:'AUTHORIZED_CHUNK'}}]})+'\n\n',
+      'data: '+JSON.stringify({choices:[{delta:{content:'LATE_CHUNK'}}]})+'\n\n',
+      'data: '+JSON.stringify({choices:[{delta:{},finish_reason:'stop'}],usage:{prompt_tokens:10,completion_tokens:3,cost:0.00002}})+'\n\ndata: [DONE]\n\n',
+    ];
+    reply=()=>new Response(new ReadableStream({async pull(controller){
+      if(part===1){
+        wall+=2*60*60_000;
+        // Advancing PGlite's clock must include the real source-renewal event.
+        // Ownership remains live throughout execution; only elapsed execution limits are gone.
+        await f.db.query('UPDATE live_server_instances SET renewed_at=clock_timestamp()');
+      }
+      if(part<frames.length) controller.enqueue(new TextEncoder().encode(frames[part++]));else controller.close();
+    }},{highWaterMark:0}),{headers:{'content-type':'text/event-stream'}});
+    let received = '';
+    try {
+      const response = await call({ ...input, stream: true });
+      const reader = response.body!.getReader(), decoder = new TextDecoder();
+      try { for (;;) { const next = await reader.read(); if (next.done) break; received += decoder.decode(next.value); } }
+      catch { /* Expiry closes the stream before the provider's next frame. */ }
+    } catch { /* The transport may observe the close before its first packet. */ }
+    finally { vi.mocked(Date.now).mockRestore(); }
+    expect(received).toContain('LATE_CHUNK');
+    expect(calls).toHaveLength(1);
+    expect((await f.db.query(`SELECT state FROM owned_model_attempts`)).rows).toEqual([{ state: 'succeeded' }]);
+    expect(Number((await counters()).usage[0]?.tokens)).toBeGreaterThan(0);
   });
 
   it('retains actual allowance on lost transport and refuses same-ID and new-UUID retries without duplicate accounting', async () => {
@@ -203,23 +308,19 @@ describe('actual owned model endpoint and actual quota adapter', () => {
     expect((await f.db.query('SELECT * FROM owned_model_attempts')).rowCount).toBe(0);
   });
 
-  it('refunds only the queued known nonentry after real membership revocation, with no second provider call', async () => {
-    const firstEntered = deferred<void>(), provider = deferred<Response>(), secondCommitted = deferred<void>();
-    options.config = { ...options.config, limits: { ...DEFAULT_FREE_AGENT_LIMITS, maxConcurrentCalls: 1 } };
-    options.database = { query: (sql, values) => f.db.query(sql, values), transaction: work => f.db.transaction(async tx => {
-      let second = false;
-      const result = await work({ transaction: nested => tx.transaction(nested), query: (sql, values) => {
-        if (sql.includes('INSERT INTO owned_model_attempts(') && values?.[1] === TWO) second = true; return tx.query(sql, values);
-      } }); return { result, second };
-    }).then(({ result, second }) => { if (second) secondCommitted.resolve(); return result; }) };
-    reply = () => { firstEntered.resolve(); return provider.promise; };
-    const first = call().then(async response => { await response.text(); }); await firstEntered.promise;
-    const second = call({ ...input, messages: [{ role: 'user', content: 'another synthetic tool result' }] }, TWO);
-    await secondCommitted.promise;
-    await f.db.query('UPDATE memberships SET removed_at=clock_timestamp() WHERE room_id=$1', [MODEL_ROOM]);
-    provider.resolve(success()); await first;
-    const refused = await second; expect(await refused.json()).toMatchObject({ receipt: { requestId: TWO, state: 'refused', evidence: { kind: 'not-dispatched' } } });
-    expect(calls).toHaveLength(1); expect(Number((await counters()).usage[0]?.tokens)).toBe(13);
+  it('stops on the first chunk after authorization is revoked, without a timer', async () => {
+    reply = () => new Response(new ReadableStream<Uint8Array>({
+      async pull(controller) {
+        await f.db.query('UPDATE owned_model_credentials SET revoked_at=clock_timestamp()');
+        controller.enqueue(new TextEncoder().encode('data: {"choices":[{"delta":{"content":"EXPIRED_PRIVATE_CHUNK"}}]}\n\n'));
+        controller.close();
+      },
+    }), { headers: { 'content-type': 'text/event-stream' } });
+    let received = '';
+    try { const response = await call({ ...input, stream: true }); received = await response.text(); } catch {}
+    expect(received).not.toContain('EXPIRED_PRIVATE_CHUNK');
+    expect(calls).toHaveLength(1);
+    expect((await f.db.query('SELECT state FROM owned_model_attempts WHERE model_request_id=$1', [ONE])).rows[0]).toEqual({ state: 'unknown' });
   });
 
   it('refuses default-off and every malformed owned namespace before legacy lookup or model metadata work', async () => {

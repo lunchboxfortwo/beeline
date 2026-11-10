@@ -2,12 +2,12 @@
 // Rooms as its own member, from one pasted line and one sign-in on any device.
 import { sessionAgentBehavior } from '../agent-command.js';
 import { spawn, spawnSync } from 'node:child_process';
-import { closeSync, copyFileSync, existsSync, fsyncSync, mkdirSync, openSync, readFileSync, readdirSync, renameSync, rmSync, writeFileSync } from 'node:fs';
+import { closeSync, constants, copyFileSync, existsSync, fsyncSync, mkdirSync, openSync, readFileSync, readdirSync, renameSync, rmSync, writeFileSync } from 'node:fs';
 import { delimiter, dirname, join, resolve } from 'node:path';
 import { createHash, randomUUID } from 'node:crypto';
 import { agentLabel, defaultName, detectAgent, isAgentId, pickName, type AgentId } from './agents.js';
-import { accessToken, callTool, DEFAULT_SERVER, finishSignIn, NOT_JOINED, registerClient, signInLink, SignInEndedError, type SignIn } from './beeline-api.js';
-import { ensureBridge, renderMention, renderRules, renderWake, runBridge, toolViaBridge, toolViaOutbox, type Mention, type Runner, type Wake } from './bridge.js';
+import { accessToken, attachLocalDelivery, callTool, DEFAULT_SERVER, finishSignIn, NOT_JOINED, registerClient, signInLink, SignInEndedError, type SignIn } from './beeline-api.js';
+import { bridgeRunning, ensureBridge, notifyBridgeSessions, renderMention, renderRules, renderWake, runBridge, toolViaBridge, toolViaOutbox, type Mention, type Runner, type Wake } from './bridge.js';
 import { chosenName, claudeTranscript, heldBy, inboundSetting, permissionMode, postToClaude, scanClaude } from './claude.js';
 import { acceptClaudeInbound, assertClaudePolicy, restoreClaudeInbound } from './claude-inbound.js';
 import { hasClaudeMcp, runClaudeMcp } from './claude-mcp.js';
@@ -15,8 +15,8 @@ import { codexQueue, scanCodex } from './codex.js';
 import { trustCodexHook } from './codex-trust.js';
 import { runHook } from './hook.js';
 import { runAntigravitySidecar, runZcodeMcp } from './pull-apps.js';
-import { setupAgent } from './setup.js';
-import { hookSessions, queueInbox, readState, sessionKey, stateDir, updateState, type JoinedSession } from './store.js';
+import { setupAgent, antigravitySidecarEnabled } from './setup.js';
+import { hookSessions, queueInbox, readState, sessionKey, stateDir, updateState, type JoinedSession, recordHookSession } from './store.js';
 import { tryWithKernelLock } from '../kernel-lock.js';
 
 interface Pending {
@@ -80,8 +80,13 @@ function runner(dir: string, env: NodeJS.ProcessEnv): Runner {
   const bundle = join(dir, 'usebeeline.mjs');
   const running = resolve(process.argv[1] ?? '');
   if (running !== bundle && running.endsWith('.mjs')) {
+    // The first sign-in finisher needs a durable entry before a bridge exists.
+    // Seeding must never replace a retained bundle, even across concurrent joins.
     mkdirSync(dir, { recursive: true, mode: 0o700 });
-    copyFileSync(running, bundle);
+    try { copyFileSync(running, bundle, constants.COPYFILE_EXCL); }
+    catch (error) { if ((error as NodeJS.ErrnoException).code !== 'EEXIST') throw error; }
+    // ensureBridge publishes this source only after its staged startup works.
+    return { node: process.execPath, bundle, candidate: running };
   }
   return { node: process.execPath, bundle: existsSync(bundle) ? bundle : running };
 }
@@ -108,14 +113,15 @@ export function findOwnSession(env: NodeJS.ProcessEnv, dir: string): Found {
       claudeInboundFallback: held && !hasClaudeMcp(dir, own?.pid ?? detected.pid) };
   }
   if (sessionAgentBehavior(detected.agent).delivery === 'queue') {
-    const thread = env.CODEX_THREAD_ID ?? env.CODEX_SESSION_ID;
+    const reported=hookSessions(dir).filter(h=>h.agent===detected.agent && h.cwd===cwd).sort((a,b)=>b.seenAt-a.seenAt)[0];
+    const thread = env.CODEX_THREAD_ID ?? env.CODEX_SESSION_ID ?? reported?.sessionId;
     const live = scanCodex();
     const own = thread ? live.find(s => s.threadId === thread) : live.find(s => detected.pid !== undefined && s.pid === detected.pid);
     return { agent: 'codex', cwd: own?.cwd ?? cwd, sessionId: thread ?? own?.threadId, pid: own?.pid ?? detected.pid };
   }
   // Other apps report their conversations through the hooks or plugins this command installs.
   const reported = hookSessions(dir).filter(h => h.agent === detected.agent && h.cwd === cwd).sort((a, b) => b.seenAt - a.seenAt)[0];
-  return { agent: detected.agent, cwd, sessionId: reported?.sessionId, pid: reported?.pid ?? detected.pid };
+  return { agent: detected.agent, cwd, sessionId: env.ANTIGRAVITY_CONVERSATION_ID ?? env.ANTIGRAVITY_SESSION_ID ?? env.GROK_SESSION_ID ?? env.CONVERSATION_ID ?? reported?.sessionId, pid: reported?.pid ?? detected.pid };
 }
 
 function serverUrl(args: string[], env: NodeJS.ProcessEnv): string {
@@ -123,24 +129,47 @@ function serverUrl(args: string[], env: NodeJS.ProcessEnv): string {
 }
 
 async function joinCommand(args: string[], env: NodeJS.ProcessEnv): Promise<void> {
+  const host=flag(args,'--host');
+  if(host){if(!isAgentId(host))throw new Error('Unknown join host');env={...env,BEELINE_SESSION_AGENT:host};}
   const dir = stateDir(env);
   const own = findOwnSession(env, dir);
+  own.sessionId=flag(args,'--conversation')??own.sessionId;
   if (own.agent === 'claude-code') assertClaudePolicy(env);
   const run = runner(dir, env);
   const key = sessionKey(own.agent, own.cwd);
   const server = serverUrl(args, env);
+  const attachment=flag(args,'--attach');
+  if(attachment) {
+    const tokens=await attachLocalDelivery(server,attachment);
+    const pending:Pending={server,clientId:tokens.clientId,signIn:{url:'',verifier:'',state:randomUUID(),tokens,tokensAt:Date.now()},
+      agent:own.agent,cwd:own.cwd,name:own.chosen??agentLabel(own.agent),sessionId:flag(args,'--conversation')??own.sessionId,pid:own.pid,
+      agentBin:sessionAgentBehavior(own.agent).delivery==='queue'?which('codex',env):undefined,startedAt:Date.now()};
+    mkdirSync(join(dir,'pending'),{recursive:true,mode:0o700});
+    const file=join(dir,'pending',`${createHash('sha256').update(pending.signIn.state).digest('hex').slice(0,24)}.json`);
+    writePending(file,pending);
+    await finishJoin(file,env);
+    console.log('Joined as the existing consented member. Live replies stay connecting until this host returns the delivery receipt.');
+    return;
+  }
   const existing = readState(dir).sessions.find(s => s.key === key && s.server === server);
   if (existing) {
+    let connected = false;
     try {
       await accessToken(dir, key);
       await updateState(dir, state => {
         const s = state.sessions.find(x => x.key === key);
         if (s) { s.sessionId = own.sessionId ?? s.sessionId; s.pid = own.pid ?? s.pid; }
       });
-      ensureBridge(dir, run, env);
-      console.log(`This ${agentLabel(own.agent)} session is on Beeline as @${existing.handle ?? existing.name}. Tags in its Rooms arrive here.`);
-      return;
+      connected = true;
     } catch { /* Disconnected: sign in again below. */ }
+    if (connected) {
+      const current=readState(dir).sessions.find(s=>s.key===key)!;
+      await bindLocalDelivery(dir,current,await accessToken(dir,key),env);
+      if(current.deliveryMechanism==='local'){setupAgent(current.agent,{env,node:run.node,bundle:run.bundle});
+      await ensureBridge(dir, run, env);}
+      console.log(`This ${agentLabel(own.agent)} session is on Beeline as @${existing.handle ?? existing.name}. Live replies are connecting until this host returns the delivery receipt. Run session status to read the current server proof.`);
+      return;
+    }
   }
   const taken = new Set(readState(dir).sessions.filter(s => s.key !== key).map(s => s.name));
   const name = pickName(flag(args, '--name') ?? own.chosen, defaultName(own.agent, own.cwd, gitRoot(own.cwd)), n => taken.has(n));
@@ -170,9 +199,20 @@ async function joinCommand(args: string[], env: NodeJS.ProcessEnv): Promise<void
     `  ${signIn.url}`,
     '',
     `This ${agentLabel(own.agent)} session joins their Beeline Rooms as "${name}" (they can rename it on the Allow page).`,
-    `Nothing else to run: once they tap Allow, a confirmation arrives in this conversation. The link expires in 10 minutes.`,
+    ...(sessionAgentBehavior(own.agent).joinDelivery==='on_demand' ? ['After Allow, run usebeeline session status to confirm your member identity. This CLI uses on-demand Room tools until its host provides a proved inbound trigger.'] : [`After Allow, Beeline sets up this session’s receiver and sends one delivery check here. Return its receipt from this conversation. Until then, membership is joined and live replies are connecting. The sign-in link expires in 10 minutes.`]),
     ...(env.BEELINE_SESSION_DEBUG ? [`(log: ${out})`] : []),
   ].join('\n'));
+}
+
+async function bindLocalDelivery(dir:string,joined:JoinedSession,token:string,env:NodeJS.ProcessEnv):Promise<string|undefined> {
+  const local=sessionAgentBehavior(joined.agent).joinDelivery==='local';
+  if(local && (!joined.sessionId || joined.agent==='antigravity' && !which('agentapi',env)))return;
+  const result=await callTool(joined,token,'setup_delivery',{mechanism:local?'local':'on_demand',host:joined.agent,
+    surface:joined.agent==='antigravity'?'app':'local_session',conversation:joined.sessionId??joined.key,installed:true}) as {delivery:{generation?:string;mechanism?:JoinedSession['deliveryMechanism']}};
+  joined.deliveryGeneration=result.delivery.generation;
+  joined.deliveryMechanism=result.delivery.mechanism;
+  await updateState(dir,state=>{const current=state.sessions.find(s=>s.key===joined.key);if(current){current.deliveryGeneration=joined.deliveryGeneration;current.deliveryMechanism=joined.deliveryMechanism;}});
+  return joined.deliveryGeneration;
 }
 
 async function finishJoin(file: string, env: NodeJS.ProcessEnv): Promise<void> {
@@ -195,7 +235,7 @@ async function finishJoinOwned(file: string, env: NodeJS.ProcessEnv): Promise<vo
     }
     const key = sessionKey(pending.agent, pending.cwd);
     const joined: JoinedSession = { key, agent: pending.agent, cwd: pending.cwd, name: pending.name, server: pending.server, clientId: pending.clientId,
-      refreshToken: tokens.refresh_token, accessToken: tokens.access_token, accessExpiresAt: Date.now() + tokens.expires_in * 1000,
+      deliveryMechanism:'unfinished', refreshToken: tokens.refresh_token, accessToken: tokens.access_token, accessExpiresAt: Date.now() + tokens.expires_in * 1000,
       sessionId: pending.sessionId, pid: pending.pid, cursor: '0', deliveredWakes: [], agentBin: pending.agentBin, joinedAt: new Date().toISOString() };
     // A tag sent immediately after Allow is already owed, even before the background finisher gets its token.
     const first = await callTool(joined, tokens.access_token, 'list_mentions', {}) as { mentions: Mention[]; nextCursor: string; wakes: Wake[] };
@@ -205,14 +245,12 @@ async function finishJoinOwned(file: string, env: NodeJS.ProcessEnv): Promise<vo
     const me = await callTool(joined, tokens.access_token, 'list_rooms', {}) as { rooms: { name: string }[]; you?: { name: string; handle: string | null } };
     joined.name = me.you?.name ?? joined.name;
     joined.handle = me.you?.handle ?? undefined;
-    // The person named it on the Allow page; saying that name back ends Beeline's first-call setup reminder.
-    await callTool(joined, tokens.access_token, 'set_profile', { name: joined.name }).catch(() => undefined);
+    // The approved identity is reused; only a host receipt finishes live-delivery setup.
     if (pending.agent === 'claude-code' && pending.claudeInboundFallback && !hasClaudeMcp(dir, pending.pid)) {
       const transcript = pending.sessionId ? claudeTranscript(pending.sessionId, env) : undefined;
       if (transcript && permissionMode(transcript) === 'bypassPermissions') {
         await acceptClaudeInbound(env);
         // Claude watches settings with a debounce. Let it see consent before posting the first message.
-        await new Promise(resolve => setTimeout(resolve, 1000));
       }
     }
     await updateState(dir, state => {
@@ -221,15 +259,24 @@ async function finishJoinOwned(file: string, env: NodeJS.ProcessEnv): Promise<vo
       const waiting = [...first.mentions.map(m => renderMention(m, joined, run)), ...first.wakes.map(w => renderWake(w, joined, run))];
       if (waiting.length) queueInbox(dir, key, waiting.join('\n\n'));
     });
-    const changes = setupAgent(pending.agent, { env, node: run.node, bundle: run.bundle });
+    if(joined.sessionId) recordHookSession(dir,{agent:joined.agent,sessionId:joined.sessionId,cwd:joined.cwd,pid:joined.pid,seenAt:Date.now()});
+    const generation=await bindLocalDelivery(dir,joined,tokens.access_token,env);
+    try {
+    const changes = joined.deliveryMechanism==='local'?setupAgent(pending.agent, { env, node: run.node, bundle: run.bundle }):[];
     if (sessionAgentBehavior(pending.agent).delivery === 'queue' && await trustCodexHook({ env, node: run.node, bundle: run.bundle }, pending.agentBin ?? 'codex', pending.cwd)) {
       const prompt = changes.findIndex(line => line.startsWith('Codex asks once'));
       if (prompt >= 0) changes.splice(prompt, 1);
       changes.push('Trusted only Beeline’s SessionStart hook, pinned to its current Codex hash.');
     }
-    ensureBridge(dir, run, env);
+    if(joined.deliveryMechanism==='local')await ensureBridge(dir, run, env);
+    if(joined.agent==='antigravity' && which('agentapi',env) && joined.sessionId) {
+      if(!antigravitySidecarEnabled(env))throw new Error('Beeline’s Antigravity sidecar is disabled in the host configuration.');
+      const child=spawn(run.node,[run.bundle,'session','antigravity-sidecar'],{detached:true,stdio:'ignore',env});child.unref();
+    }
     const rooms = me.rooms.map(r => r.name).slice(0, 5).join(', ');
-    await announce(joined, `Beeline: you joined as @${joined.handle ?? joined.name}${rooms ? ` in ${rooms}` : ''}. When someone tags you there, the message arrives here with the command that answers it.${changes.length ? `\n(${changes.join('; ')})` : ''}\n\n${renderRules(joined, run)}`, dir);
+    if(joined.deliveryMechanism==='on_demand'){console.log(`Joined on demand as @${joined.handle??joined.name}. Run session status to read the approved member and owner.`);return;}
+    await announce(joined, `Beeline: joined · connecting live replies as @${joined.handle ?? joined.name}${rooms ? ` in ${rooms}` : ''}. A separate delivery check must reach this conversation and return its receipt before live replies are proved ready. Incoming Room messages include the command that answers them.${changes.length ? `\n(${changes.join('; ')})` : ''}\n\n${renderRules(joined, run)}`, dir);
+    } catch(error) { if(generation) await callTool(joined,tokens.access_token,'delivery_failed',{generation,reason:'local_receiver_setup_failed'}).catch(()=>undefined);throw error; }
   }catch(error){retain=!(error instanceof SignInEndedError);throw error;}
   finally{if(!retain)rmSync(file,{force:true});}
 }
@@ -243,9 +290,9 @@ async function announce(joined: JoinedSession, text: string, dir: string): Promi
       return;
     }
     const session = scanClaude().find(s => s.sessionId === joined.sessionId || s.pid === joined.pid);
-    if (session?.messagingSocketPath) { await postToClaude({ path: session.messagingSocketPath }, text).catch(() => undefined); return; }
+    if (session?.messagingSocketPath) { await postToClaude({ path: session.messagingSocketPath }, text); return; }
   }
-  if (sessionAgentBehavior(joined.agent).delivery === 'queue' && joined.sessionId) { await codexQueue(joined.sessionId, text, joined.agentBin ?? 'codex').catch(() => undefined); return; }
+  if (sessionAgentBehavior(joined.agent).delivery === 'queue' && joined.sessionId) { await codexQueue(joined.sessionId, text, joined.agentBin ?? 'codex'); return; }
   const { queueInbox } = await import('./store.js');
   queueInbox(dir, joined.key, text);
 }
@@ -296,7 +343,7 @@ async function session(args: string[], env: NodeJS.ProcessEnv): Promise<void> {
         rules: joined => renderRules(joined, runner(dir, env)),
         pid: process.ppid, env });
       if (out) process.stdout.write(out + '\n');
-      if (event === 'session-start' && readState(dir).sessions.length) ensureBridge(dir, runner(dir, env), env);
+      if (event === 'session-start' && readState(dir).sessions.length) await ensureBridge(dir, runner(dir, env), env);
     } catch { /* silent */ }
     return;
   }
@@ -326,22 +373,32 @@ async function session(args: string[], env: NodeJS.ProcessEnv): Promise<void> {
     const joined = own(rest, env);
     const [name, json] = words(rest, VALUED);
     if (!name) throw new Error('Usage: usebeeline session tool <name> \'<json arguments>\'');
-    const result = await ownTool(dir, joined, name, json ? JSON.parse(json) as Record<string, unknown> : {});
+    const input=json ? JSON.parse(json) as Record<string,unknown> : {};
+    if(name==='confirm_delivery' && findOwnSession(env,dir).sessionId!==input.conversation)
+      throw new Error('The receipt must run in its bound host conversation');
+    const result = await ownTool(dir, joined, name, input);
     console.log(JSON.stringify(result, null, 2));
     return;
   }
   if (sub === 'status') {
-    for (const s of readState(dir).sessions) console.log(`${s.key}  @${s.handle ?? s.name}  ${s.server}  session ${s.sessionId ?? 'unknown'}`);
+    for (const s of readState(dir).sessions) {
+      console.log(`${s.key}  @${s.handle ?? s.name}  ${s.server}  session ${s.sessionId ?? 'unknown'}`);
+      try {
+        const result=await ownTool(dir,s,'list_rooms',{});
+        console.log(JSON.stringify({you:result.you,owner:result.owner,delivery:result.delivery??{state:'setup_unfinished'}},null,2));
+      } catch { console.log('Delivery state unavailable; no host receipt verified by this read.'); }
+    }
     return;
   }
   if (sub === 'leave') {
     const joined = own(rest, env);
     await fetch(`${joined.server}/mcp/oauth/revoke`, { method: 'POST', headers: { 'content-type': 'application/json' },
-      body: JSON.stringify({ client_id: joined.clientId, token: joined.refreshToken }), signal: AbortSignal.timeout(15_000) }).catch(() => undefined);
+      body: JSON.stringify({ client_id: joined.clientId, token: joined.refreshToken }), signal: undefined }).catch(() => undefined);
     const left = await updateState(dir, state => {
       state.sessions = state.sessions.filter(s => s.key !== joined.key);
       return state.sessions;
     });
+    if (bridgeRunning(dir)) await notifyBridgeSessions(dir);
     const r = runner(dir, env);
     await restoreClaudeInbound(env);
     const changes = left.some(s => s.agent === joined.agent) ? [] : setupAgent(joined.agent, { env, node: r.node, bundle: r.bundle, remove: true });
@@ -351,13 +408,12 @@ async function session(args: string[], env: NodeJS.ProcessEnv): Promise<void> {
   throw new Error('Usage: usebeeline join | usebeeline session reply|read|tool|status|leave');
 }
 
-function readStdin(limitMs: number): Promise<string> {
+function readStdin(_limitMs: number): Promise<string> {
   return new Promise(resolve => {
     let text = '';
-    const timer = setTimeout(() => resolve(text), limitMs);
     process.stdin.setEncoding('utf8');
     process.stdin.on('data', chunk => { text += chunk; });
-    process.stdin.on('end', () => { clearTimeout(timer); resolve(text); });
+    process.stdin.on('end', () => { resolve(text); });
   });
 }
 

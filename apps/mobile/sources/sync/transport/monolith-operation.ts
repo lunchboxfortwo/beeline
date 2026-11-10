@@ -1,3 +1,4 @@
+import { publishPhoneLiveEvent } from './phone-live-events';
 import { appErrorCopy } from '@/buzz/app-error-copy';
 import type { PhoneOperationMap } from '@beeline/api-contract/phone';
 import { MONOLITH_REQUEST_TIMEOUT_MS, MonolithRequestTimeoutError } from '@/auth/monolith-session';
@@ -101,15 +102,17 @@ export function phoneOperationFailureReason(error: unknown): string {
   return appErrorCopy(error);
 }
 
-async function executePhoneOperation<Name extends keyof PhoneOperationMap>(
+export async function monolithPhoneOperation<Name extends keyof PhoneOperationMap>(
   name: Name,
   input: PhoneOperationMap[Name]['input'],
-  options?: { timeoutMs?: number },
+  options?: { timeoutMs?: number; reconnectOwnedByOutbox?: true },
 ): Promise<PhoneOperationMap[Name]['output']> {
   try {
     const args =
       name === 'createWorkspace' ? { ...input, timeZone: Intl.DateTimeFormat().resolvedOptions().timeZone } : input,
-      requestOptions = phoneOperationRequestOptions(name, input, options);
+      requestOptions = { ...phoneOperationRequestOptions(name, input, options),
+        ...(options?.reconnectOwnedByOutbox ? { reconnectOwnedByOutbox: true as const } : {}),
+      };
     let result: PhoneOperationMap[Name]['output'];
     const ambiguous = (error: unknown) => error instanceof MonolithRequestTimeoutError || error instanceof PhoneSocketDisconnectedError;
     try {
@@ -120,18 +123,11 @@ async function executePhoneOperation<Name extends keyof PhoneOperationMap>(
       // uncertainty until a separate explicit Join action checks the same token.
       throw new Error('Your join is not confirmed yet. Try Join again to check its result.');
     }
-    if (['createWorkspace', 'sendRoomMessage', 'sendRoomReply'].includes(name))
-      void import('@/auth/signin-funnel').then(module => module.funnelSuccessfulOperation(name)).catch(() => undefined);
+    publishPhoneLiveEvent({ type: 'operation-completed', operation: name });
     return result;
   } catch (error) {
     if (error instanceof PhoneSocketError)
       throw new MonolithPhoneOperationError(name, error.status, error.message);
     throw error;
   }
-}
-
-export function monolithPhoneOperation<Name extends keyof PhoneOperationMap>(
-  name: Name, input: PhoneOperationMap[Name]['input'], options?: { timeoutMs?: number },
-): Promise<PhoneOperationMap[Name]['output']> {
-  return executePhoneOperation(name, input, options);
 }

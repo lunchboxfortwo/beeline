@@ -4,7 +4,7 @@ import { HullDialogInput } from '@/components/buzz/HullDialog';
 import React, { useEffect, useRef, useState } from 'react';
 import { Pressable, ScrollView, Text, TextInput, View } from 'react-native';
 import { StyleSheet } from 'react-native-unistyles';
-import { Ionicons } from '@expo/vector-icons';
+import Ionicons from '@expo/vector-icons/Ionicons';
 import type { RoomListFilter } from '@/buzz/room-list-preferences';
 
 export function RoomListToolbar({

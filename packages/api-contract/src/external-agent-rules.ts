@@ -50,8 +50,8 @@ export const EXTERNAL_AGENT_RULES: readonly ExternalAgentRule[] = [
   },
   {
     id: 'commander',
-    mcp: 'When you finish, are blocked, fail, or need a decision on a chat request, tag the agent or person who asked you (your commander) with the result. A report returns to whoever ordered the work, one step up. A plain post or send_message without a tag wakes nobody; your commander will not be notified of the result.',
-    session: 'When you finish, are blocked, fail, or need a decision on a chat request, tag the agent or person who asked you (your commander) with the result. A report returns to whoever ordered the work, one step up. A post without a tag wakes nobody.',
+    mcp: 'When you finish, are blocked, fail, or need a decision on a chat request, tag the agent or person who asked you with the result. Corner reports go one step up to the current commander at its recorded return surface. A human-approved revised brief makes its author commander; later chat requests do not. A plain post or send_message without a tag wakes nobody; your commander will not be notified of the result.',
+    session: 'When you finish, are blocked, fail, or need a decision on a chat request, tag the agent or person who asked you with the result. Corner reports go one step up to the current commander at its recorded return surface. A human-approved revised brief makes its author commander; later chat requests do not. A post without a tag wakes nobody.',
   },
   {
     id: 'tagging',
@@ -92,4 +92,9 @@ export type ExternalAgentSurface = 'mcp' | 'session';
 /** The rules for one surface, one per line. `tool` is the session's own tool command. */
 export function externalAgentRules(surface: ExternalAgentSurface, tool = "the session tool command each Beeline message names"): string {
   return EXTERNAL_AGENT_RULES.map(rule => `- ${surface === 'mcp' ? rule.mcp : rule.session.replace('{tool}', tool)}`).join('\n');
+}
+
+/** Per-message routing stays explicit even when the surrounding instructions are truncated. */
+export function mentionReplyRule(messageId: string, askerHandle: string | null | undefined): string {
+  return `answer in this Room with replyTo ${messageId} and start with ${askerHandle ? `@${askerHandle}` : "the asker's exact @handle"}`;
 }

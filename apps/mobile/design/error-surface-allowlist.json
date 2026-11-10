@@ -595,17 +595,6 @@
     "reason": "Approved unified error-surface mock: shared inline feedback uses the existing caller content inset; no new control or retry action is introduced."
   },
   {
-    "layoutHash": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
-    "file": "components/buzz/ChoiceVideoPreview.tsx",
-    "line": 19,
-    "tag": "ErrorBanner",
-    "source": "<ErrorBanner inline title={\"Frame unavailable\"}  />",
-    "ancestors": [
-      "<View>"
-    ],
-    "reason": "Approved unified error-surface mock: shared inline feedback uses the existing caller content inset; no new control or retry action is introduced."
-  },
-  {
     "layoutHash": "4b5ec1b45209f5bd7e5a9fcc6932685913d43446680b8e1ca956f9f839d1593e",
     "file": "components/buzz/Ledger.tsx",
     "line": 826,

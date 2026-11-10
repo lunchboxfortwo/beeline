@@ -4,7 +4,7 @@ import { Button } from '@/components/buzz/Button';
 import { useLatencyRouteFrame } from '@/buzz/latency-route-hook';
 import React from 'react';
 import { Pressable, ScrollView, Text, View } from 'react-native';
-import { Ionicons } from '@expo/vector-icons';
+import Ionicons from '@expo/vector-icons/Ionicons';
 import { router, useLocalSearchParams } from 'expo-router';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { StyleSheet } from 'react-native-unistyles';
@@ -73,9 +73,7 @@ export default function ScheduledWork() {
   }>();
   const roomId = first(params.roomId);
   const workspaceId = first(params.workspaceId);
-  const { work, loading, error, retry } = useScheduledWork(
-    roomId,Boolean(workspaceId),
-  );
+  const { work, loading, error, retry } = useScheduledWork(roomId);
   useLatencyRouteFrame('/beeline/settings/schedules', !loading, true);
   const schedules = work?.schedules ?? [];
   const subscriptions = work?.subscriptions ?? [];
@@ -128,7 +126,7 @@ export default function ScheduledWork() {
         testID="scheduled-work-header"
         title="Schedules and subscriptions"
       />
-      {error && <SettingsRow title={error} action="Retry" onPress={retry}
+      {error && <SettingsRow title={error}
           />}
       {loading ? (
         <View style={styles.loading}>

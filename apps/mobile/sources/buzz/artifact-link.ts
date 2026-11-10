@@ -10,6 +10,7 @@ import { mediaIdFromUrl } from '@/buzz/artifact';
 import { openExternalUrl } from '@/utils/open-external-url';
 import type { AttachmentReference } from '@beeline/buzz-client';
 export { subscribeArtifactBytesPurge };
+export { ArtifactPreviewUnavailable } from './artifact-byte-owner';
 export type { ArtifactByteOptions };
 
 /**
@@ -133,10 +134,7 @@ export async function openArtifactInBrowser(attachment: AttachmentReference): Pr
   await openExternalUrl(url);
 }
 
-/** Lands the PDF bytes in a cache file so an iOS preview can render page one locally. */
-export async function artifactPdfLocalUri(attachment: AttachmentReference, options: ArtifactByteOptions = {}): Promise<string> {
-  return artifactLocalUri(attachment, options);
-}
+export { artifactLocalUri as artifactPdfLocalUri };
 
 /** Opens the signed link and folds every failure into one spoken outcome. */
 export async function openArtifactInBrowserOrExplain(attachment: AttachmentReference): Promise<void> {

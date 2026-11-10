@@ -1,8 +1,9 @@
+import { OwnedModelUnknownGeneration } from './owned-model-errors.js';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import type { SqlDatabase } from './database.js';
 import { OwnedModelAttempts, OwnedModelIdentityConflict, OwnedModelUnknownPayload, canonicalOwnedModelPayload,
   type OwnedModelDispatchPermit, type OwnedModelReservation } from './owned-model-attempt.js';
-import { OwnedModelCredentials, OwnedModelUnknownGeneration } from './owned-model-credential.js';
+import { OwnedModelCredentials } from './owned-model-credential.js';
 import { MODEL, MODEL_CLAIM, MODEL_KEY, MODEL_ROOM, MODEL_SOURCE, ownedModelFixture } from './test-fixtures/owned-model.js';
 
 const ONE = '11111111-1111-4111-8111-111111111111', TWO = '22222222-2222-4222-8222-222222222222';
@@ -46,7 +47,7 @@ describe('owned model durable UNKNOWN and exact one-use handoff primitive', () =
 
   it('replays the same request after process-owner replacement with zero new reservation or dispatch permit', async () => {
     const reserve = hook(), first = await attempts.reserve(fixture.actor, ONE, semantic, reserve);
-    const credentials = new OwnedModelCredentials({ currentVersion: 'test-v1', key: () => MODEL_KEY }, () => MODEL, () => 900_000);
+    const credentials = new OwnedModelCredentials({ currentVersion: 'test-v1', key: () => MODEL_KEY }, () => MODEL);
     const actor = await credentials.authenticate(fixture.db, fixture.issued.token);
     const restarted = new OwnedModelAttempts(fixture.db, credentials);
     const replay = await restarted.reserve(actor, ONE, { messages: semantic.messages, model: MODEL }, reserve);

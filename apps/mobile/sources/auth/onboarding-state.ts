@@ -181,10 +181,6 @@ export async function waitForAuthCallbackResult({
   }
 }
 
-async function waitForAuthCallback(input: WaitForAuthCallbackInput): Promise<string> {
-  return (await waitForAuthCallbackResult(input)).url;
-}
-
 /** React Native rejects an unanswerable fetch with a bare TypeError, not a typed error. */
 function isNetworkFailure(error: unknown): boolean {
   return (
@@ -199,19 +195,20 @@ function isNetworkFailure(error: unknown): boolean {
  */
 export const OFFLINE_NOTICE: OnboardingNotice = {
   status: 'offline',
-  title: 'No connection',
-  message: "You're offline. Connect to Wi-Fi or mobile data, then try again.",
+  title: 'Could not finish sign-in',
+  message: "Try signing in again.",
   retryable: true,
 };
 
-export function noticeForAuthError(error: unknown): OnboardingNotice {
+export function noticeForAuthError(error: unknown, provider: 'google' | 'github' = 'github'): OnboardingNotice {
+  const providerName = provider === 'google' ? 'Google' : 'GitHub';
   if (isNetworkFailure(error)) return OFFLINE_NOTICE;
   const code = error instanceof OidcBindError ? error.code : 'unknown';
   if (code === 'ticket_expired' || code === 'unknown_ticket' || code === 'invalid_oidc_flow') {
     return {
       status: 'token_expired',
       title: 'Sign-in expired',
-      message: 'Continue with GitHub again to start a new sign-in.',
+      message: `Continue with ${providerName} again to start a new sign-in.`,
       retryable: false,
     };
   }
@@ -220,7 +217,7 @@ export function noticeForAuthError(error: unknown): OnboardingNotice {
       status: 'link_conflict',
       title: 'Device key already linked',
       message:
-        'This GitHub account is linked to another device key. Replace it to continue with a new identity, or import your backed-up key to keep the existing identity.',
+        `This ${providerName} account is linked to another device key. Replace it to continue with a new identity, or import your backed-up key to keep the existing identity.`,
       retryable: false,
     };
   }
@@ -229,7 +226,7 @@ export function noticeForAuthError(error: unknown): OnboardingNotice {
       status: 'bind_retry',
       title: 'Sign-in did not finish.',
       message:
-        'Continue with GitHub again to finish signing in.',
+        `Continue with ${providerName} again to finish signing in.`,
       retryable: false,
     };
   }
@@ -245,7 +242,7 @@ export function noticeForAuthError(error: unknown): OnboardingNotice {
     return {
       status: 'bind_retry',
       title: 'Sign-in needs an update',
-      message: 'Update Beeline, then continue with GitHub again.',
+      message: `Update Beeline, then continue with ${providerName} again.`,
       retryable: false,
     };
   }
@@ -257,14 +254,14 @@ export function noticeForAuthError(error: unknown): OnboardingNotice {
       status: 'bind_retry',
       title: 'Sign-in interrupted',
       message:
-        'The device key is ready but could not be bound. Check the connection and retry before the proof expires.',
+        'The device key is ready but could not be bound. Try binding it again before the proof expires.',
       retryable: true,
     };
   }
   return {
     status: 'bind_retry',
     title: 'Sign-in did not finish.',
-    message: 'Continue with GitHub again to finish signing in.',
+    message: `Continue with ${providerName} again to finish signing in.`,
     retryable: false,
   };
 }

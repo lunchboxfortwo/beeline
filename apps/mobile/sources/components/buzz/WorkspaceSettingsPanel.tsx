@@ -1,5 +1,5 @@
-import { appErrorCopy } from '@/buzz/app-error-copy';
-import { connectionErrorDescription } from '@/buzz/app-error-copy';
+import { sharedLiveConnection } from '@/sync/transport/live-connection';
+import { appErrorCopy, appReadErrorCopy } from '@/buzz/app-error-copy';
 import { HullDialogActions } from '@/components/buzz/HullDialog';
 import { HullDialogInput } from '@/components/buzz/HullDialog';
 import { useTextDraft } from '@/buzz/use-text-draft';
@@ -161,7 +161,7 @@ function WorkspaceSettings({ workspaceId }, ref) {
   const [retryGeneration, setRetryGeneration] = useState(0);
   const readWorkspaceRef = useRef<(() => Promise<void>) | null>(null);
   // The Room names come from the app-level Room list, which owns its watch and reads.
-  const chatList = useChatList(chatListKey, { onError: (reason) => setError(appErrorCopy(reason)) });
+  const chatList = useChatList(chatListKey, { onError: (reason) => setError(appReadErrorCopy(reason)) });
 
   const workspace = workspaceView?.workspace;
   useEffect(() => {
@@ -183,7 +183,7 @@ function WorkspaceSettings({ workspaceId }, ref) {
       setJoinLinkCopied(false);
     } catch (caught) {
       if (generation === joinLinkGeneration.current)
-        setError(appErrorCopy(caught, `Could not load public join link.`));
+        setError(appErrorCopy(caught, ''));
     } finally {
       if (generation === joinLinkGeneration.current) setJoinLinkBusy(false);
     }
@@ -236,6 +236,7 @@ function WorkspaceSettings({ workspaceId }, ref) {
     useCallback(() => {
       let cancelled = false;
       let readWorkspace: (() => Promise<void>) | undefined;
+      let stopReconnect: (() => void) | undefined;
       if (paintedWorkspaceId.current !== communityId) {
         setLoading(true);
         setWorkspaceAddress(null);
@@ -288,20 +289,27 @@ function WorkspaceSettings({ workspaceId }, ref) {
             } catch (reason) {
               if (!cancelled) {
                 setLoading(false);
-                setError(appErrorCopy(reason));
+                setError(appReadErrorCopy(reason));
               }
             }
           };
           readWorkspaceRef.current = readWorkspace;
+          const release = await sharedLiveConnection().register([], (event) => {
+            if (!cancelled && 'monolithLive' in event && event.monolithLive.type === 'invalidate' &&
+                event.monolithLive.roomId === '' && event.monolithLive.reason === 'reconnect') void readWorkspace?.();
+          });
+          if (cancelled) { release(); return; }
+          stopReconnect = release;
           await readWorkspace();
         } catch (caught) {
-          if (!cancelled) setError(appErrorCopy(caught, `Could not load ${WORKSPACE_LABEL} settings.`));
+          if (!cancelled) setError(appErrorCopy(caught, ''));
         } finally {
           if (!cancelled && !readWorkspace) setLoading(false);
         }
       })();
       return () => {
         cancelled = true;
+        stopReconnect?.();
         readWorkspaceRef.current = null;
       };
     }, [communityId, retryGeneration]),
@@ -478,10 +486,10 @@ function WorkspaceSettings({ workspaceId }, ref) {
   return (
     <View style={styles.container}>
       {!workspaceView ? (
-        <SettingsRow title={error ?? `Could not load ${WORKSPACE_LABEL} settings`} description={connectionErrorDescription} action="Retry" onPress={() => setRetryGeneration((value) => value + 1)} testID="workspace-settings-retry" />
+        !error ? null : <SettingsRow title={error} testID="workspace-settings-retry" />
       ) : (
         <View testID={canManageWorkspace ? 'workspace-settings-manage' : 'workspace-settings-read-only'}>
-          {error && !errorRow ? <SettingsRow title={error} description={connectionErrorDescription} action="Retry" onPress={() => setRetryGeneration((value) => value + 1)} /> : null}
+          {error && !errorRow ? <SettingsRow title={error} /> : null}
           <View testID="workspace-overview-settings">
             <RoomListSectionHeader title="General" inset="content" />
             {canManageWorkspace ? (

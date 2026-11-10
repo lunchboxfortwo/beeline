@@ -101,11 +101,11 @@ export async function runSquireBrokerLink(options: SquireBrokerLinkOptions): Pro
     resolveDone = resolve;
   });
 
-  const failResponse = (id: string | number, outcome: 'unknown' | 'not-sent') =>
+  const failResponse = (id: string | number, outcome: 'unknown' | 'not-sent', reconnect: 'in-progress' | 'failed' = 'failed') =>
     `${JSON.stringify({
       jsonrpc: '2.0',
       id,
-      error: { code: -32000, message: 'Trusty Squire broker connection lost', data: { outcome } },
+      error: { code: -32000, message: 'Trusty Squire broker connection lost', data: { outcome,reconnect } },
     })}\n`;
 
   const flush = () => {
@@ -189,14 +189,11 @@ export async function runSquireBrokerLink(options: SquireBrokerLinkOptions): Pro
       socket = undefined;
       ready = false;
       replayId = undefined;
-      for (const id of pending.values()) output.write(failResponse(id, 'unknown'));
+      const replace=connectedOnce && !replacementUsed;
+      if(replace)replacementUsed=true;
+      for(const id of pending.values())output.write(failResponse(id,'unknown',replace?'in-progress':'failed'));
       pending.clear();
-      if (connectedOnce && !replacementUsed) {
-        replacementUsed = true;
-        doConnect();
-      } else {
-        giveUp();
-      }
+      if(replace)doConnect();else giveUp();
     });
   };
 

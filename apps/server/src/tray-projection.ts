@@ -45,7 +45,7 @@ export async function readMessageBookmarks(database: SqlDatabase, input: Input<'
          CASE WHEN room_member.identity_id IS NOT NULL AND message.deleted_at IS NULL THEN author.id END author_id,
          CASE WHEN room_member.identity_id IS NOT NULL AND message.deleted_at IS NULL THEN author.kind END author_kind,
          CASE WHEN room_member.identity_id IS NOT NULL AND message.deleted_at IS NULL THEN author.name END author_name,
-         CASE WHEN room_member.identity_id IS NOT NULL AND message.deleted_at IS NULL THEN author.handle END author_handle,
+         CASE WHEN room_member.identity_id IS NOT NULL AND message.deleted_at IS NULL THEN beeline_room_handle(author.id,message.room_id) END author_handle,
          CASE WHEN room_member.identity_id IS NOT NULL AND message.deleted_at IS NULL THEN author.avatar END author_avatar,
          CASE WHEN room_member.identity_id IS NOT NULL AND message.deleted_at IS NULL THEN author.face_id END author_face
        FROM message_bookmarks bookmark

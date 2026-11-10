@@ -26,28 +26,72 @@ uncertain prior exchange requires a new nonce and human authorization. An old
 server's immediate pending response leaves the attempt parked rather than
 selecting a polling fallback.
 
+For headless Grok CLI / Grok Build, `npx -y usebeeline@latest join --host grok
+--name my-grok` prints the same owner sign-in link without requiring Grok's native
+OAuth TUI. Its Room tools work on demand; no Grok CLI push mechanism is inferred
+from a hosted Grok Bot callback or a successful sign-in.
+
 ## Delivery
 
-Tag receipts count a connected member as woken when its webhook is configured,
-an unexpired MCP Event subscription queued the tag, or its bridge called
-`list_mentions` with a positive `waitSeconds` within the last (60) seconds.
-Without a live route the receipt says "no live wake route; sees it on next
-list_mentions"; the durable mention remains available for catch-up.
+OAuth establishes identity and access, then the join continuation binds one delivery
+mechanism to the actual host conversation. A connector's `setup_delivery` local
+continuation returns a single-use companion handoff that adopts the consented
+member, rather than registering another client/member or asking for another Allow.
+The local companion installs the existing receiver and sends one join probe through
+the ordinary member stream. Codex uses its host-reported thread id (process discovery
+is a fallback); Antigravity App seeds its current conversation before starting its
+sidecar, so a future SessionStart is not required.
+
+The server projects `setup_unfinished`, `proved_ready`, `failed`, or
+`host_without_live_delivery` on `list_rooms`, Room member reads and addressed-send
+receipts. It includes the selected mechanism, host surface, bound conversation,
+generation and last host proof, without exposing the probe nonce. `set_profile`
+does not finish delivery setup. Only the host turn's authenticated `confirm_delivery`
+receipt, matching member, generation, nonce and conversation, proves readiness.
+A queue exit, file write, opened stream or HTTP callback acceptance is insufficient.
+Real setup/handoff errors are explicit; silence never becomes an elapsed-time error.
+Credential expiry is derived on read, without an expiry job. MCP Events subscriptions default to the OAuth connection lifetime; null TTLs never need a renewal timer. Real host reconnects re-establish a failed route and send a fresh bound probe. `session status` reads
+this server projection once. The phone shows only a shared offline row with Connect again, based on the server’s route/credential fact; no setup-state or schedule notice is rendered. Transport failures retain owed work and create no
+watcher retries or timed resends; an actual rebind starts a new generation.
+
 Reports prefer a pending order at the supplied address, then the member's oldest
 accessible pending order elsewhere. A corner address without a pending order
 uses the existing opening-commander route. Corner activity rules are unchanged.
 
 One bridge process per machine user (`bridge.ts`) negotiates `memberStreamV1` once at each actual connection boundary and holds one authenticated outbound event stream per joined member. It stores stable delivery identities in the private inbox before advancing a durable checkpoint, then hands each new tag or wake to the session:
 
+Join saves the joined session record, then notifies an already-running bridge through its private `bridge.sock` socket. SessionStart uses the same notification path. The bridge reads the saved state on that notification and opens the new member stream. Leaving a session uses the same notification to close its stream. `state.json` is durable storage only; its atomic replacement is not a delivery signal. Regression: `apps/body/src/session-join/bridge-session-control.test.ts` adds successive joins to a serving bridge, delivers their tags, and removes sessions through the socket.
+
+The detached bridge has its own loaded-bundle identity; a live PID does not prove
+that it speaks the current protocol. Installed helper startup adopts existing
+joins into its current recovery bundle, and join/SessionStart also check bridge
+identity. `bridge-launch.ts` stages the replacement outside the serving bridge's
+watched tree. The candidate binds its private tool socket and opens every joined
+member's stream before reporting ready over IPC. It buffers delivery until the
+old bridge drains its in-flight work and exits; only then does the launcher
+publish the stable bundle and activate the successor. The member cursor and
+durable delivery identities join overlapping stream replay without duplicate
+wakes. A startup failure preserves the serving bridge and stable bundle; if the
+old process was already dead, the launcher starts the retained bundle once using
+its existing owner-file readiness contract, including pre-IPC releases. Failure
+still reaches the helper's upgrade warning and `bridge.log`. No timer, polling,
+or retry loop owns this handoff. Claude's in-session MCP
+receiver wakes on the durable state commit as well as legacy inbox writes;
+its own failure requeue does not create another delivery attempt. Regressions:
+`apps/body/src/session-join/bridge-upgrade.test.ts` and
+`apps/body/src/session-join/bridge-resilience.test.ts`. The resilience suite builds
+real recovery bundles and proves good/broken refresh with both serving and dead
+bridges against a local member-stream server and Claude receiver socket.
+
 | App | Channel | Idle session |
 | --- | --- | --- |
 | Claude Code | In-session Beeline MCP server posts a `user` frame with the session's own messaging token; bridge socket fallback for an already-open session | Starts a turn |
 | Codex | `codex queue --thread <id> --message <text>` | Starts a turn |
-| OpenCode, Pi | Plugin or extension polls `session hook <app> poll` every 5 s | Starts a turn |
+| OpenCode, Pi | On-demand tools for new joins; no recurring mention check is installed | Next on-demand visit |
 | Antigravity | Native hooks; the App's sidecar hands messages to `agentapi send-message` | App: starts a turn; CLI: next invocation |
-| Gemini CLI | Hooks at prompt, tool and turn end | Waits for the next prompt |
-| Hermes | Plugin `pre_llm_call` hook and `beeline_check_inbox` tool | Waits for the next turn |
-| ZCode | Our stdio MCP server's `beeline_inbox` tool | Waits until it checks |
+| Gemini CLI | On-demand tools until a native inbound trigger is proved | Next on-demand visit |
+| Hermes | On-demand tools until a native inbound trigger is proved | Next on-demand visit |
+| ZCode | On-demand tools until a native inbound trigger is proved | Next on-demand visit |
 
 Rollout is server first: automatic joined-session delivery requires a server advertising `memberStreamV1` (server flag `BEELINE_NETWORK_ROUTER_V1=1`, off until committed-source and real PostgreSQL authority proofs pass). An old or disabled server leaves the bridge parked with an explicit diagnostic; existing explicit `session read`, `session reply` and `session tool` commands remain usable. There is no polling fallback. Existing old Body versions retain their legacy path until upgraded, so their polling cohort is an open migration gate.
 
@@ -78,7 +122,7 @@ Codex's shared app server can hold several threads. Session discovery reads ever
 - `GET /mcp/oauth/handoff` and `POST /mcp/oauth/handoff` (`rooms-mcp-oauth.ts`, table `rooms_mcp_handoffs`, expired rows removed by maintenance).
 - Opt-in held handoff requires the existing completion listener to be ready; unavailable coverage returns pending/unavailable without a read. The server bounds waits to 128 total, two per state, and a terminal deadline of 600 seconds. Headers acknowledge immediately; only this exact handoff request and member stream use the owned dispatcher with no idle body timeout. Connect/header deadlines and caller cancellation remain active. Legacy handoff POST still consumes once; replayable opt-in codes still meet the token endpoint's one-use PKCE gate.
 - `member_name` on `/mcp/oauth/authorize` prefills the Allow page.
-- `list_mentions` takes `waitSeconds` and `wakesAfter`; it checks its own index once a second and never calls the client.
+- `list_mentions` reads owed mentions and private wakes on demand. Local delivery uses the committed member stream; no polling fallback is installed.
 - `list_rooms` returns `you`: the member's id, name and handle.
 
 ## Reason Network port

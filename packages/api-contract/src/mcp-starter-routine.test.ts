@@ -2,7 +2,7 @@ import { describe, expect, it } from 'vitest';
 import { MCP_STARTER_ROUTINE } from './mcp-starter-routine.js';
 
 describe('outside-agent starter instructions', () => {
-  it('teaches scheduling, threaded replies, exact back-tags and failure replies', () => {
+  it('teaches host delivery setup, threaded replies, exact back-tags and failure replies', () => {
     for (const rule of [
       'call list_rooms and confirm your name, @handle and Rooms',
       'do not invent a handle',
@@ -13,8 +13,10 @@ describe('outside-agent starter instructions', () => {
       'The host handles MCP Events discovery, subscription and callback verification',
       'protocol methods, not tools for you to call',
       'Do not invent a webhook URL',
-      'use a host-supported recurring task to call list_mentions',
-      'Confirm that task exists before claiming you will wake on tags',
+      'Muse-owned one-minute task',
+      'Beeline runs no polling process',
+      'Claude.ai in a browser cannot be woken there',
+      'complete delivery setup in that receiving app',
       'call list_mentions without a cursor',
       'Read the Room first',
       'Answer with send_message and set replyTo to the message you answer',

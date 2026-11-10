@@ -1,4 +1,5 @@
 #!/usr/bin/env node
+import { releaseChannel, channelComponents, promotionSource, channelBaseline } from './release-channel.mjs';
 import { encodeReleaseOutput, decodeReleaseOutput } from './release-job-output.mjs';
 import { execFileSync } from 'node:child_process';
 import { appendFileSync, existsSync, readFileSync, writeFileSync } from 'node:fs';
@@ -49,7 +50,7 @@ export const COMPONENT_PATH_RULES = [
   { exact: 'apps/mobile/scripts/store-runtime-targets.mjs', components: ['mobile-ota'] },
   { exact: 'apps/mobile/store/native-runtime-builds.json', components: ['mobile-ota'] },
   { exact: 'scripts/read-store-runtimes.mjs', components: ['mobile-ota'] },
-  { exact: 'apps/mobile/scripts/ota-canary.sh', components: ['mobile-ota'] },
+  { exact: 'scripts/android-release-channel.mjs', components: ['mobile-native'] },
   { exact: 'apps/mobile/app.config.js', components: ['mobile-ota', 'mobile-native', 'desktop', 'website'] },
   { exact: 'apps/mobile/package.json', components: ['mobile-ota', 'mobile-native', 'desktop', 'website'] },
   { exact: 'apps/mobile/package-lock.json', components: ['mobile-ota', 'mobile-native', 'desktop', 'website'] },
@@ -86,10 +87,11 @@ export const COMPONENT_PATH_RULES = [
   { exact: 'scripts/unified-release.mjs', components: ['server', 'mobile-ota', 'website'] },
   { exact: 'scripts/release-delivery.mjs', components: ['server', 'mobile-ota', 'website'] },
   { exact: 'scripts/release-job-output.mjs', components: ['server', 'mobile-ota', 'website'] },
+  { exact: 'scripts/release-channel.mjs', components: ['server', 'mobile-ota', 'website'] },
   { exact: 'scripts/release-record.mjs', components: ['server', 'mobile-ota', 'website'] },
 ];
 
-const VERSION = /^v(\d+)\.(\d+)\.(\d+)$/;
+const VERSION = /^v(\d+)\.(\d+)\.(\d+)(?:-rc\.[1-9]\d*)?$/;
 const SHA = /^[0-9a-f]{7,64}$/;
 const FINAL_STATES = new Set(['checked', 'carried']);
 const RUNTIME_PIN_PATH = 'apps/mobile/native-fingerprint.json';
@@ -335,7 +337,7 @@ export function artifactReference(component, { version, sourceSha }) {
 
 // What a carried component still serves: the server image, the phone OTA
 // branch and its targets. Rollbacks read these from the newest release.
-const CARRIED_FACTS = ['imageRef', 'previousImageRef', 'otaBranch', 'previousOtaBranch', 'otaTargets'];
+const CARRIED_FACTS = ['imageRef', 'previousImageRef', 'otaBranch', 'previousOtaBranch', 'otaTargets', 'storeTrack'];
 
 function previousComponent(previous, component) {
   const legacyName = component === 'helper' ? 'daemon' : component === 'mobile-ota' ? 'app' : component;
@@ -373,11 +375,39 @@ function desktopVersionForRelease(previous) {
 // A rerun of an identity plans exactly what a first attempt would: there is
 // no attempt file. Each leg asks its own system whether its output already
 // shipped and skips what did.
-export function initializeRelease({ version, sourceSha, previous, selectedComponents = RELEASE_COMPONENTS, runtimePin, startedAt = now() }) {
+export function initializeRelease({ version, sourceSha, previous, selectedComponents = RELEASE_COMPONENTS, runtimePin, startedAt = now(), channel, next, freshIdentity = false }) {
+  if (channel) {
+    releaseChannel(channel);
+    if (channel === 'latest' && promotionSource(next, sourceSha).version !== version) fail('latest must use the final version of the current next rc');
+    if (channel === 'next' && !/-rc\.[1-9]\d*$/.test(version)) fail('next requires an rc release version');
+    const baseline = channelBaseline(previous, next);
+    const state = initializeRelease({ version, sourceSha, previous: baseline, selectedComponents, runtimePin, startedAt, freshIdentity: previous?.version !== version });
+    if (baseline?.storeRuntime) state.storeRuntime = structuredClone(baseline.storeRuntime);
+    state.channel = channel;
+    if (next) state.promotedFrom = next.version;
+    const track = channel === 'next' ? 'beta' : 'production';
+    const native = state.components['mobile-native'];
+    // A production binary and a beta binary of the same source have different
+    // OTA subscriptions. One cannot satisfy an explicit request for the other.
+    if (selectedComponents.includes('mobile-native') && FINAL_STATES.has(native.state) && native.storeTrack !== track) {
+      state.components['mobile-native'] = { state: 'pending', selected: true, version, sourceSha,
+        artifactRef: artifactReference('mobile-native', { version, sourceSha }) };
+      state.state = 'planned';
+      state.startedAt = startedAt;
+      state.delivery = { state: 'pending' };
+      state.plan.selected = RELEASE_COMPONENTS.filter(c => pendingComponents(state)[c]);
+      state.plan.carried = RELEASE_COMPONENTS.filter(c => !state.plan.selected.includes(c));
+      state.plan.nativePlatforms = runtimePin?.changed ? runtimePin.changedPlatforms : ['android', 'ios'];
+    }
+    if (channel === 'next') state.plan.nativePlatforms = ['android'];
+    if (state.state !== 'delivered') for (const component of state.plan.carried)
+      state.components[component] = previousComponent(state, component);
+    return state;
+  }
   validateReleaseIdentity(version, sourceSha);
   const selected = new Set(selectedComponents);
   selected.forEach(assertComponent);
-  if (previous?.sourceSha === sourceSha) {
+  if (previous?.sourceSha === sourceSha && !freshIdentity) {
     if (previous.version !== version) fail(`sha ${sourceSha} is already assigned to ${previous.version}, not ${version}`);
     const supplemental = previous.state === 'delivered' ? RELEASE_COMPONENTS.filter((component) => {
       const entry = previous.components?.[component];
@@ -506,6 +536,7 @@ export function releasePlanSummary(state) {
   currentRelease(state);
   return {
     identity: `${state.version}@${state.sourceSha}`,
+    ...(state.channel ? { channel: state.channel, helper: 'build and stamp release version' } : {}),
     selected: state.plan.selected,
     carried: Object.fromEntries(state.plan.carried.map((component) => {
       const entry = componentEntry(state, component);
@@ -567,6 +598,7 @@ function parseJsonOutput(value, label) {
  */
 export function applyJobFacts(state, needs, { previous, runtimePins = {} } = {}) {
   currentRelease(state);
+  if (state.state === 'delivered') return state;
   const server = state.components.server;
   const serverOutputs = needs?.server?.outputs ?? {};
   if (server.selected && server.state === 'checked') {
@@ -593,8 +625,10 @@ export function applyJobFacts(state, needs, { previous, runtimePins = {} } = {})
     const storeRuntime = parseJsonOutput(outputs.store_runtime, 'store_runtime');
     if (storeRuntime) state.storeRuntime = { ...state.storeRuntime, previouslyLive: storeRuntime.previouslyLive ?? [] };
   }
+  if (state.channel && state.components['mobile-native'].selected && state.components['mobile-native'].state === 'checked')
+    state.components['mobile-native'].storeTrack = state.channel === 'next' ? 'beta' : 'production';
   // Store builds this release uploaded become known OTA runtimes once live.
-  const builds = [...(previous?.storeRuntime?.builds ?? [])];
+  const builds = [...(state.storeRuntime?.builds ?? previous?.storeRuntime?.builds ?? [])];
   for (const [platform, job, key] of [['android', 'mobile_native_android', 'version_code'], ['ios', 'mobile_native_ios', 'build_number']]) {
     const buildNumber = needs?.[job]?.result === 'success' ? needs[job].outputs?.[key] : '';
     if (!buildNumber || !/^\d+$/.test(runtimePins[platform] ?? '')) continue;
@@ -624,6 +658,7 @@ export function compactState(state) {
 export function planOutputs(state, previous) {
   const plan = state.plan;
   const lines = [
+    ...(state.channel ? [`channel=${state.channel}`] : []),
     `has_previous=${Boolean(previous)}`,
     `previous_version=${previous?.version ?? ''}`,
     `previous_sha=${previous?.sourceSha ?? ''}`,
@@ -649,7 +684,7 @@ export function planOutputs(state, previous) {
 /** Rebuild finalization state from scalar intent and the published baseline.
  * No encoded state blob crosses the runner's secret-filtered output boundary.
  */
-export function restoreReleasePlan({ version, sourceSha, plan, previous, startedAt }) {
+export function restoreReleasePlan({ version, sourceSha, plan, previous, next, startedAt }) {
   const flag = (key) => {
     if (!['true', 'false'].includes(plan?.[key])) fail(`invalid or missing plan flag: ${key}`);
     return plan[key] === 'true';
@@ -681,7 +716,7 @@ export function restoreReleasePlan({ version, sourceSha, plan, previous, started
   if (typeof plan.plan_selection !== 'string' || !plan.plan_selection) fail('missing plan selection');
   selectReleaseComponents([], { selection: plan.plan_selection }); // Validate the original audit selection.
   const noOp = flag('no_op');
-  const state = initializeRelease({ version, sourceSha, previous, selectedComponents, startedAt });
+  const state = initializeRelease({ version, sourceSha, previous, selectedComponents, startedAt, channel: plan.channel, next });
   if ((state.state === 'delivered') !== noOp) fail('plan no-op identity mismatch');
   if (state.components.desktop.desktopVersion !== plan.desktop_version) fail('plan desktop version mismatch');
   if (!noOp) {
@@ -782,11 +817,14 @@ async function main(argv) {
     const componentPaths = args['component-paths'] ? readJson(args['component-paths']) : undefined;
     const selection = args.selection ?? 'auto';
     const runtimePin = previous ? runtimePinChangeFromPublishedInputs(previous, args.sha) : undefined;
+    const channel = releaseChannel(args.channel);
+    const next = args.next ? readJson(args.next) : undefined;
     const selectOptions = { selection, storeTrack: args['store-track'] ?? 'none' };
-    const selectedComponents = componentPaths
+    const selected = componentPaths
       ? selectReleaseComponentsFromPublishedInputs(componentPaths, selectOptions)
       : selectReleaseComponents(paths, selectOptions);
-    const state = initializeRelease({ ...identityFromOptions(args), previous, selectedComponents, runtimePin });
+    const selectedComponents = channelComponents(selected, { channel, storeTrack: selectOptions.storeTrack });
+    const state = initializeRelease({ ...identityFromOptions(args), previous, selectedComponents, runtimePin, channel, next });
     state.plan.paths = paths;
     if (componentPaths) state.plan.componentPaths = componentPaths;
     state.plan.selection = selection;
@@ -810,7 +848,7 @@ async function main(argv) {
       if (!Number.isSafeInteger(epoch) || epoch <= 0) fail('invalid dispatch clock');
       const state = restoreReleasePlan({
         version: process.env.RELEASE_VERSION, sourceSha: process.env.RELEASE_SHA,
-        plan: needs.initialize?.outputs, previous, startedAt: new Date(epoch * 1000).toISOString(),
+        plan: needs.initialize?.outputs, previous, next: args.next ? readJson(args.next) : undefined, startedAt: new Date(epoch * 1000).toISOString(),
       });
       writeJson(args.state, state);
     } catch (error) {

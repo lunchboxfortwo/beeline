@@ -1,6 +1,6 @@
 import { usageHarness, usageProvider, usageTime } from '@/buzz/agent-usage';
 import React from 'react';
-import { Ionicons } from '@expo/vector-icons';
+import Ionicons from '@expo/vector-icons/Ionicons';
 import { Button } from './Button';
 import { InlineRow } from './IndexRow';
 import { AccessibilityInfo, ActivityIndicator, Text, View } from 'react-native';

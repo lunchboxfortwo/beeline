@@ -2,6 +2,8 @@ import type { PostTurnReceiptInput } from '@beeline/api-contract/daemon';
 import { OwnedModelFiles } from './owned-model-files.js';
 
 const owners = new WeakMap<object, OwnedModelFiles>();
+export function bindOwnedModelTurn(context:object,owner:OwnedModelFiles):void{owners.set(context,owner);}
+export function releaseOwnedModelTurn(context:object):void{const owner=owners.get(context);owners.delete(context);owner?.revoke();}
 export class OwnedModelOutcomeUnknown extends Error {
   constructor(readonly modelRequestId?: string) { super('Owned model outcome UNKNOWN; dependent work ended without resubmission.'); }
 }

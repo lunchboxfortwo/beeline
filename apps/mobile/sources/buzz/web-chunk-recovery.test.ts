@@ -62,7 +62,11 @@ it('handles script load rejection, concurrent failures, unrelated errors and blo
 it('installs capture listeners that recover caught chunk parse errors without hiding app errors', async () => {
   window.sessionStorage.clear();
   const recovery = await import('./web-chunk-recovery.web');
+  const listen = vi.spyOn(window, 'addEventListener');
   recovery.installWebChunkRecovery();
+  recovery.installWebChunkRecovery();
+  expect(listen).toHaveBeenCalledTimes(2);
+  listen.mockRestore();
   const ordinary = new ErrorEvent('error', { filename: chunk, message: 'render failed', error: new TypeError('render failed'), cancelable: true });
   window.dispatchEvent(ordinary);
   expect(ordinary.defaultPrevented).toBe(false);
@@ -82,6 +86,7 @@ it('installs capture listeners that recover caught chunk parse errors without hi
 it('filters stale chunks at the Sentry boundary but preserves application errors', async () => {
   const init = vi.fn();
   vi.doMock('@sentry/react-native', () => ({ init }));
+  vi.doMock('expo-device', () => ({ isDevice: true }));
   vi.doMock('./web-chunk-recovery', () => import('./web-chunk-recovery.web'));
   vi.stubGlobal('__DEV__', false);
   vi.stubEnv('EXPO_PUBLIC_SENTRY_DSN', 'https://public@fixture.ingest.sentry.io/1');

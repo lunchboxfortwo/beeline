@@ -1,0 +1,21 @@
+{
+  "baselineCommit": "1391cab1720d74642debc22abce11a8bf9f5ced8",
+  "baselineExport": ".beeline-proof/baseline-fixed/build",
+  "afterExport": ".beeline-proof/v10/build",
+  "afterInputs": "after-sources.json",
+  "dependencyInputs": "patched-dependency.json",
+  "nativeInputs": "after-native-sources.json",
+  "medianSamplesPerPath": 40,
+  "browser": "158.0.8127.18",
+  "phoneWebViewport": {
+    "width": 390,
+    "height": 844
+  },
+  "desktopViewport": {
+    "width": 1365,
+    "height": 900
+  },
+  "nativePackage": "app.usebeeline.swipeproof",
+  "nativeRuntime": 47,
+  "setup": "Both timed arms wait for the target row before starting the action timer."
+}

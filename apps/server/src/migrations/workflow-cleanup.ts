@@ -1,6 +1,5 @@
 import { systemMessage } from '@beeline/api-contract/system-message-catalog';
 import { workflowRunStatus, type WorkflowReadContract } from '@beeline/api-contract/phone';
-import { workflowTimerId } from '../workflow-timer-id.js';
 import { workflowRunStatusUnsavedSql } from '../workflow-run-saved-status.js';
 import type { SqlDatabase } from '../database.js';
 
@@ -21,9 +20,6 @@ export async function workflowBackfillOnce(
 /** Fill legacy storage without dispatching, closing, or restarting any run. */
 export async function normalizeLegacyWorkflowRuns(database: SqlDatabase): Promise<void> {
   await database.transaction(async (db) => {
-    // Serialize against handoffs, gate answers and timers from the serving release.
-    await db.query(`SELECT pg_advisory_xact_lock(hashtext('workflow-run:' || id))
-      FROM (SELECT id FROM messages WHERE card_type='workflow-handoff' AND id=card->>'runId' ORDER BY id) runs`);
     // Number the old prefix ending at zero, or just before the first existing
     // attempt. Existing numbered attempts and their in-flight wakes stay valid.
     await db.query(`WITH missing AS (
@@ -41,26 +37,7 @@ export async function normalizeLegacyWorkflowRuns(database: SqlDatabase): Promis
         ORDER BY (head.card->>'seq')::int DESC,head.created_at DESC,head.id DESC LIMIT 1))
       FROM room_choices choice WHERE choice.message_id=gate.id AND gate.card->>'runId' IS NOT NULL
         AND NOT gate.card ? 'attempt'`);
-    const timers = await db.query<{ id: string; room_id: string; workflow_run: { runId: string; timer?: string; attempt?: number } }>(
-      `SELECT id,room_id,workflow_run FROM agent_schedules WHERE workflow_run IS NOT NULL
-        AND (NOT workflow_run ? 'timer' OR (workflow_run->>'timer'='step' AND NOT workflow_run ? 'attempt'))`,
-    );
-    for (const timer of timers.rows) {
-      const current = (await db.query<{ seq: number }>(
-        `SELECT (card->>'seq')::int seq FROM messages WHERE room_id=$1 AND card_type='workflow-handoff'
-          AND card->>'runId'=$2 ORDER BY (card->>'seq')::int DESC,created_at DESC,id DESC LIMIT 1`,
-        [timer.room_id, timer.workflow_run.runId],
-      )).rows[0];
-      if (!current) continue;
-      const id = workflowTimerId(timer.workflow_run.runId, 'step');
-      // If a newer timer already exists it owns the lease; remove only the old duplicate.
-      if (timer.id !== id && (await db.query(`SELECT 1 FROM agent_schedules WHERE id=$1`, [id])).rowCount) {
-        await db.query(`DELETE FROM agent_schedules WHERE id=$1`, [timer.id]);
-        continue;
-      }
-      await db.query(`UPDATE agent_schedules SET id=$2,workflow_run=workflow_run ||
-        jsonb_build_object('timer','step','attempt',$3::int) WHERE id=$1`, [timer.id, id, current.seq]);
-    }
+
   });
 }
 
@@ -72,43 +49,36 @@ export async function normalizeLegacyWorkflowRuns(database: SqlDatabase): Promis
  * predicate keeps a converged pass to an empty index read.
  */
 export async function saveUnsavedWorkflowRunStatus(database: SqlDatabase): Promise<number> {
-  const starts = await database.query<{ id: string; room_id: string }>(
-    `SELECT id,room_id FROM messages
-     WHERE card_type='workflow-handoff' AND ${workflowRunStatusUnsavedSql('card', 'id')}`,
-  );
-  for (const start of starts.rows) {
-    await database.transaction(async (db) => {
-      await db.query(`SELECT pg_advisory_xact_lock(hashtext('workflow-run:' || $1::text))`, [start.id]);
-      const head = (await db.query<{ card: { toState: string; status?: 'done' | 'failed' | 'abandoned'; cancellation?: unknown }; markdown: string | null }>(
-        `SELECT head.card,version.markdown FROM messages head
-         JOIN rooms room ON room.id=head.room_id
-         LEFT JOIN workspace_skills skill ON skill.workspace_id=room.workspace_id AND skill.kind='workflow'
-           AND skill.slug=head.card->>'workflowSlug'
-         LEFT JOIN workspace_skill_versions version ON version.skill_id=skill.id
-           AND version.version=COALESCE((head.card->>'workflowVersion')::int,1)
-         WHERE head.room_id=$2 AND head.card_type='workflow-handoff' AND head.card->>'runId'=$1
-           AND head.card->>'toState' IS NOT NULL
-         ORDER BY (head.card->>'seq')::int DESC NULLS LAST,head.created_at DESC,head.id DESC LIMIT 1`,
-        [start.id, start.room_id],
-      )).rows[0];
-      if (!head) return;
-      let contract: WorkflowReadContract = { handoffs: {} } as WorkflowReadContract;
-      try {
-        const parsed = head.markdown ? JSON.parse(head.markdown) : undefined;
-        if (parsed?.handoffs && typeof parsed.handoffs === 'object') contract = parsed as WorkflowReadContract;
-        else console.warn(`saveUnsavedWorkflowRunStatus: run ${start.id} has no readable pinned contract`);
-      } catch {
-        console.warn(`saveUnsavedWorkflowRunStatus: run ${start.id} has an unreadable pinned contract`);
-      }
-      const status = workflowRunStatus(contract, head.card.toState, head.card.cancellation ? systemMessage("workflow-cleanup.abandoned") : head.card.status);
-      await db.query(
-        `UPDATE messages SET card=(card - 'active') || jsonb_build_object('runStatus',$2::text) WHERE id=$1`,
-        [start.id, status],
-      );
-    });
-  }
-  if (starts.rows.length) console.log(`saveUnsavedWorkflowRunStatus: saved ${starts.rows.length} run status(es)`);
-  return starts.rows.length;
+  const starts = (await database.query<{
+    id:string;version:number;card:{toState:string;status?:'done'|'failed'|'abandoned';cancellation?:unknown};markdown:string|null;
+  }>(`SELECT start.id,start.version,head.card,version.markdown FROM messages start
+    JOIN rooms room ON room.id=start.room_id JOIN LATERAL (
+      SELECT candidate.card FROM messages candidate WHERE candidate.room_id=start.room_id
+        AND candidate.card_type='workflow-handoff' AND candidate.card->>'runId'=start.id
+        AND candidate.card->>'toState' IS NOT NULL
+      ORDER BY (candidate.card->>'seq')::int DESC NULLS LAST,candidate.created_at DESC,candidate.id DESC LIMIT 1
+    ) head ON true
+    LEFT JOIN workspace_skills skill ON skill.workspace_id=room.workspace_id AND skill.kind='workflow'
+      AND skill.slug=head.card->>'workflowSlug'
+    LEFT JOIN workspace_skill_versions version ON version.skill_id=skill.id
+      AND version.version=COALESCE((head.card->>'workflowVersion')::int,1)
+    WHERE start.card_type='workflow-handoff' AND ${workflowRunStatusUnsavedSql('start.card','start.id')}`)).rows;
+  const changes=starts.map(start=>{
+    let contract:WorkflowReadContract={handoffs:{}} as WorkflowReadContract;
+    try {
+      const parsed=start.markdown?JSON.parse(start.markdown):undefined;
+      if(parsed?.handoffs && typeof parsed.handoffs==='object') contract=parsed as WorkflowReadContract;
+      else console.warn(`saveUnsavedWorkflowRunStatus: run ${start.id} has no readable pinned contract`);
+    } catch { console.warn(`saveUnsavedWorkflowRunStatus: run ${start.id} has an unreadable pinned contract`); }
+    return {id:start.id,version:start.version,status:workflowRunStatus(contract,start.card.toState,
+      start.card.cancellation?systemMessage("workflow-cleanup.abandoned"):start.card.status)};
+  });
+  const saved=await database.query(`UPDATE messages start SET card=(start.card-'active') || jsonb_build_object('runStatus',change.status)
+    FROM jsonb_to_recordset($1::jsonb) change(id text,version int,status text)
+    WHERE start.id=change.id AND start.version=change.version AND ${workflowRunStatusUnsavedSql('start.card','start.id')}`,
+    [JSON.stringify(changes)]);
+  if(saved.rowCount) console.log(`saveUnsavedWorkflowRunStatus: saved ${saved.rowCount} run status(es)`);
+  return saved.rowCount;
 }
 
 /** Name saved workflows whose current version still ends as abandoned; their next save must pick done or failed. */

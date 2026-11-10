@@ -1,3 +1,4 @@
+import { compactDiagnostics } from './diagnostics.js';
 import {
   FUNNEL_FIRST_SESSION_MS,
   FUNNEL_SCREEN_SEND_CAP,
@@ -42,8 +43,8 @@ export async function recordOnboardingEvent(database: SqlDatabase, identityId: s
     `SELECT e.install_id,e.attempt_id,e.platform,e.version FROM signin_funnel_installs i
      JOIN signin_funnel_events e ON e.install_id=i.install_id
      WHERE i.account_hash=$1 AND NOT i.internal AND e.event='signed_in'
-       AND ($2 <> 'user_answered' OR EXISTS(SELECT 1 FROM signin_funnel_events pick
-         WHERE pick.install_id=e.install_id AND pick.attempt_id=e.attempt_id AND pick.event='option_picked'))
+       AND ($2 <> 'user_answered' OR EXISTS(SELECT 1 FROM signin_funnel_events welcome
+         WHERE welcome.install_id=e.install_id AND welcome.attempt_id=e.attempt_id AND welcome.event='welcome_shown'))
        AND EXISTS(SELECT 1 FROM signin_funnel_events signup WHERE signup.install_id=e.install_id
          AND signup.attempt_id=e.attempt_id AND signup.event='signup')
      ORDER BY EXISTS(SELECT 1 FROM signin_funnel_events welcome WHERE welcome.install_id=e.install_id
@@ -59,7 +60,7 @@ export async function recordOnboardingEvent(database: SqlDatabase, identityId: s
 
 export async function observeOnboardingMessage(database: SqlDatabase, roomId: string, identityId: string, depth?: number, text = '') {
   const team = (await database.query<{ owner_id: string; agent_id: string; handle: string | null }>(
-    `SELECT f.owner_id,f.agent_id,i.handle FROM free_agents f JOIN identities i ON i.id=f.agent_id
+    `SELECT f.owner_id,f.agent_id,beeline_workspace_handle(i.id,m.workspace_id) handle FROM free_agents f JOIN identities i ON i.id=f.agent_id
      JOIN memberships m ON m.identity_id=f.agent_id AND m.room_id=$1 AND m.removed_at IS NULL
      WHERE f.starter_role IS NOT NULL AND f.removed_at IS NULL
        AND (f.owner_id=$2 OR EXISTS(SELECT 1 FROM free_agents self WHERE self.agent_id=$2 AND self.owner_id=f.owner_id))`,
@@ -81,7 +82,7 @@ export async function observeOnboardingMessage(database: SqlDatabase, roomId: st
     const mentionsPeer = peerHandles.length > 0 && (await database.query(
       `SELECT 1 FROM identities i JOIN memberships m ON m.identity_id=i.id AND m.room_id=$1
        AND m.removed_at IS NULL WHERE i.kind='agent' AND i.id<>$2 AND i.handle IS NOT NULL
-       AND lower(btrim(i.handle,'@'))=ANY($3::text[]) LIMIT 1`, [roomId, identityId, peerHandles],
+       AND lower(btrim(beeline_workspace_handle(i.id,m.workspace_id),'@'))=ANY($3::text[]) LIMIT 1`, [roomId, identityId, peerHandles],
     )).rowCount > 0;
     if (depth === 0) {
       await recordOnboardingEvent(database, owner, 'task_first_answer', { roomId });
@@ -308,6 +309,7 @@ export async function observeFunnelAuth(database: SqlDatabase, input: FunnelAuth
 /** Sign-in detail compacts after 90 days; onboarding milestones retain the all-time cohort. */
 export async function compactSigninFunnel(database: SqlDatabase) {
   await compactSigninAttempts(database);
+  await compactDiagnostics(database);
   await database.transaction(async (tx) => {
     await tx.query(`WITH expired AS (
       DELETE FROM signin_funnel_events e WHERE occurred_at < (now() AT TIME ZONE 'UTC')::date-89
@@ -569,9 +571,9 @@ export async function dashboardOnboarding(database: SqlDatabase, from: string | 
     const welcome = events.find(event => event.event === 'welcome_shown');
     return welcome && (from === null || at(welcome) >= Date.parse(from));
   });
-  const main = ['welcome_shown', 'option_picked', 'answered_after_pick', 'return_1d', 'return_7d'] as const;
+  const main = ['welcome_shown', 'user_answered', 'return_1d', 'return_7d'] as const;
   const source: Record<string, OnboardingEvent> = {
-    welcome_shown: 'welcome_shown', option_picked: 'option_picked', answered_after_pick: 'user_answered',
+    welcome_shown: 'welcome_shown', user_answered: 'user_answered',
     return_1d: 'returned_day_1', return_7d: 'returned_day_7',
     task_first_answer: 'task_first_answer', task_second_opinion: 'task_review_requested', task_final_answer: 'task_final_answer',
     game_posted: 'game_posted', game_viewer_opened: 'game_viewer_opened', game_closed: 'game_viewer_closed',
@@ -579,10 +581,8 @@ export async function dashboardOnboarding(database: SqlDatabase, from: string | 
     invite_friend_signed_up: 'invite_friend_signed_up', invite_friend_messaged: 'invite_friend_messaged',
   };
   const milestone = (events: typeof rows, key: string) => {
-    const pick = events.find(event => event.event === 'option_picked');
     const welcome = events.find(event => event.event === 'welcome_shown')!;
     return events.find(event => event.event === source[key] && at(event) >= at(welcome) &&
-      (key !== 'answered_after_pick' || (pick && at(event) >= at(pick))) &&
       (key !== 'return_1d' || at(event) - at(welcome) >= 86_400_000) &&
       (key !== 'return_7d' || at(event) - at(welcome) >= 7 * 86_400_000));
   };
@@ -622,13 +622,10 @@ export async function dashboardOnboarding(database: SqlDatabase, from: string | 
     cohort: 'welcome_shown_in_window' as const,
     steps,
     paths: {
-      task: list(cohort, ['task_first_answer', 'task_second_opinion', 'task_final_answer'], 'option_picked'),
+      task: list(cohort, ['task_first_answer', 'task_second_opinion', 'task_final_answer'], 'user_answered'),
       game: list(cohort, ['game_posted', 'game_viewer_opened', 'game_closed']),
       invite: list(cohort, ['invite_link_created', 'invite_shared', 'invite_opened', 'invite_friend_signed_up', 'invite_friend_messaged']),
     },
-    byOption: Object.fromEntries(([['task', 'A'], ['game', 'B'], ['invite', 'C'], ['special', 'D']] as const)
-      .map(([name, option]) => [name, { steps: list(cohort.filter(events =>
-        events.find(event => event.event === 'option_picked')?.onboarding_option === option), main) }])),
     biggestDrop,
   };
 }

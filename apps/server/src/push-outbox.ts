@@ -6,23 +6,11 @@ export const PUSH_OUTBOX_SCHEMA = `
 CREATE TABLE IF NOT EXISTS push_outbox (
   message_id text NOT NULL,
   device_token text NOT NULL REFERENCES push_devices(token) ON DELETE CASCADE,
-  not_before timestamptz NOT NULL DEFAULT now(),
   expires_at timestamptz NOT NULL,
   PRIMARY KEY(message_id,device_token)
 );
 CREATE INDEX IF NOT EXISTS push_outbox_device_idx ON push_outbox(device_token);
-CREATE INDEX IF NOT EXISTS push_outbox_due_idx ON push_outbox(not_before,message_id,device_token);
 CREATE INDEX IF NOT EXISTS push_outbox_expiry_idx ON push_outbox(expires_at);
--- Retirement evidence is separate from claims: editing a message may enqueue it again.
-CREATE TABLE IF NOT EXISTS push_outbox_retirements (
-  message_id text NOT NULL,
-  device_token text NOT NULL REFERENCES push_devices(token) ON DELETE CASCADE,
-  reason text NOT NULL,
-  retired_at timestamptz NOT NULL DEFAULT now(),
-  PRIMARY KEY(message_id,device_token)
-);
-CREATE INDEX IF NOT EXISTS push_outbox_retirements_device_idx ON push_outbox_retirements(device_token);
-CREATE INDEX IF NOT EXISTS push_outbox_retirements_time_idx ON push_outbox_retirements(retired_at);
 CREATE TABLE IF NOT EXISTS push_message_context (
   message_id text PRIMARY KEY REFERENCES messages(id) ON DELETE CASCADE,
   room_id uuid NOT NULL REFERENCES rooms(id) ON DELETE CASCADE,
@@ -35,40 +23,53 @@ CREATE TABLE IF NOT EXISTS push_message_context (
 CREATE INDEX IF NOT EXISTS push_message_context_expiry_idx ON push_message_context(expires_at);
 CREATE INDEX IF NOT EXISTS push_message_context_room_turn_idx
   ON push_message_context(room_id,author_id,request_id);
+CREATE TABLE IF NOT EXISTS push_turn_context (
+  room_id uuid NOT NULL REFERENCES rooms(id) ON DELETE CASCADE,
+  author_id text NOT NULL,
+  request_id text NOT NULL,
+  turn_ids text[] NOT NULL,
+  expires_at timestamptz NOT NULL,
+  PRIMARY KEY(room_id,author_id,request_id)
+);
+CREATE INDEX IF NOT EXISTS push_turn_context_expiry_idx ON push_turn_context(expires_at);
+-- Carry queued turns across the schema change using their existing point indexes.
+INSERT INTO push_turn_context(room_id,author_id,request_id,turn_ids,expires_at)
+  SELECT context.room_id,context.author_id,context.request_id,array_agg(DISTINCT part.id),max(context.expires_at)
+  FROM push_message_context context CROSS JOIN LATERAL unnest(context.turn_ids) part(id)
+  WHERE context.request_id IS NOT NULL AND context.expires_at>now()
+  GROUP BY context.room_id,context.author_id,context.request_id
+  ON CONFLICT(room_id,author_id,request_id) DO NOTHING;
 CREATE OR REPLACE FUNCTION enqueue_message_push(m messages) RETURNS void LANGUAGE plpgsql AS $$
-DECLARE collected_turn_ids text[]; collected_burst_ids text[];
-  interruption_time messages.created_at%TYPE; interruption_id text;
+DECLARE collected_turn_ids text[];
 BEGIN
   IF m.created_at<now()-interval '1 hour' OR m.presentation='activity'
     OR m.deleted_at IS NOT NULL OR btrim(m.text)=''
     OR m.card_type IN ('agent-yolo','grant-auto','turn-failed','workspace-member-joined','agent-command')
     OR (m.card_type='relay' AND m.card->>'direction'='up')
     OR NOT EXISTS (SELECT 1 FROM push_devices LIMIT 1) THEN RETURN; END IF;
-  -- Serialize turn context with other committed writes in this Room.
-  PERFORM pg_advisory_xact_lock(hashtextextended('push-context:' || m.room_id::text,0));
-  -- These history reads happen once on the write path, never in the worker.
-  SELECT COALESCE(array_agg(part.id),ARRAY[]::text[]) INTO collected_turn_ids FROM messages part
-    WHERE part.room_id=m.room_id AND part.author_id=m.author_id
-      AND part.request_id=m.request_id AND m.request_id IS NOT NULL;
-  SELECT interruption.created_at,interruption.id INTO interruption_time,interruption_id
-    FROM messages interruption WHERE interruption.room_id=m.room_id
-      AND interruption.author_id<>m.author_id AND interruption.presentation='message'
-      AND interruption.created_at>=m.created_at-interval '20 seconds'
-      AND (interruption.created_at,interruption.id)<(m.created_at,m.id)
-    ORDER BY interruption.created_at DESC,interruption.id DESC LIMIT 1;
-  SELECT COALESCE(array_agg(burst.id),ARRAY[]::text[]) INTO collected_burst_ids FROM messages burst
-    WHERE burst.room_id=m.room_id AND burst.author_id=m.author_id
-      AND burst.presentation='message' AND burst.deleted_at IS NULL
-      AND burst.created_at>=m.created_at-interval '20 seconds'
-      AND (burst.created_at,burst.id)<=(m.created_at,m.id)
-      AND (interruption_time IS NULL OR (burst.created_at,burst.id)>(interruption_time,interruption_id));
-  INSERT INTO push_message_context(message_id,room_id,author_id,request_id,turn_ids,burst_ids,expires_at)
-    VALUES(m.id,m.room_id,m.author_id,m.request_id,collected_turn_ids,collected_burst_ids,m.created_at+interval '1 hour')
-    ON CONFLICT(message_id) DO UPDATE SET room_id=EXCLUDED.room_id,author_id=EXCLUDED.author_id,
-      request_id=EXCLUDED.request_id,turn_ids=EXCLUDED.turn_ids,burst_ids=EXCLUDED.burst_ids;
-  UPDATE push_message_context context SET turn_ids=collected_turn_ids
-    WHERE context.room_id=m.room_id AND context.author_id=m.author_id
-      AND context.request_id=m.request_id AND context.message_id<>m.id;
+  -- The native turn key merges concurrent message inserts without a history scan.
+  WITH turn AS (
+    INSERT INTO push_turn_context(room_id,author_id,request_id,turn_ids,expires_at)
+      SELECT m.room_id,m.author_id,m.request_id,ARRAY[m.id],m.created_at+interval '1 hour'
+      WHERE m.request_id IS NOT NULL
+      ON CONFLICT(room_id,author_id,request_id) DO UPDATE SET
+        turn_ids=ARRAY(SELECT DISTINCT id FROM unnest(push_turn_context.turn_ids||EXCLUDED.turn_ids) ids(id)),
+        expires_at=GREATEST(push_turn_context.expires_at,EXCLUDED.expires_at)
+      RETURNING turn_ids
+  ), context AS (
+    -- Keep the existing message projection readable by serving replicas.
+    INSERT INTO push_message_context(message_id,room_id,author_id,request_id,turn_ids,burst_ids,expires_at)
+      VALUES(m.id,m.room_id,m.author_id,m.request_id,COALESCE((SELECT turn_ids FROM turn),ARRAY[m.id]),
+        ARRAY[m.id],m.created_at+interval '1 hour')
+      ON CONFLICT(message_id) DO UPDATE SET room_id=EXCLUDED.room_id,author_id=EXCLUDED.author_id,
+        request_id=EXCLUDED.request_id,turn_ids=EXCLUDED.turn_ids,burst_ids=EXCLUDED.burst_ids
+      RETURNING turn_ids
+  ), siblings AS (
+    UPDATE push_message_context stored SET turn_ids=context.turn_ids FROM context
+      WHERE stored.room_id=m.room_id AND stored.author_id=m.author_id
+        AND stored.request_id=m.request_id AND stored.message_id<>m.id
+      RETURNING stored.message_id
+  ) SELECT turn_ids INTO collected_turn_ids FROM context;
   INSERT INTO push_outbox(message_id,device_token,expires_at)
     SELECT m.id,device.token,m.created_at+interval '1 hour'
     FROM room_access member
@@ -83,12 +84,7 @@ BEGIN
       -- Other kinds need direct attention under every possible push level.
       AND ((m.presentation='message' AND m.card_type IS NULL)
         OR ${pushDirectAttentionSql('collected_turn_ids')})
-    ON CONFLICT(message_id,device_token) DO UPDATE SET not_before=now()
-      -- Only wake preference-parked work; claims retain provider retry authority.
-      WHERE push_outbox.not_before=push_outbox.expires_at
-        AND NOT EXISTS (SELECT 1 FROM push_delivery_claims claim
-          WHERE claim.message_id=push_outbox.message_id
-            AND claim.device_token=push_outbox.device_token);
+    ON CONFLICT(message_id,device_token) DO NOTHING;
 END $$;
 CREATE OR REPLACE FUNCTION message_push_outbox_trigger() RETURNS trigger LANGUAGE plpgsql AS $$
 BEGIN
@@ -110,22 +106,14 @@ END $$;
 DROP TRIGGER IF EXISTS join_push_outbox ON workspace_join_notification_devices;
 CREATE TRIGGER join_push_outbox AFTER INSERT ON workspace_join_notification_devices
   FOR EACH ROW EXECUTE FUNCTION join_push_outbox_trigger();
--- Changing a deadline changes the durable queue deadline in the same transaction.
-CREATE OR REPLACE FUNCTION retry_push_outbox_trigger() RETURNS trigger LANGUAGE plpgsql AS $$
-BEGIN
-  IF NEW.status='retryable' THEN
-    UPDATE push_outbox SET not_before=NEW.next_retry_at
-      WHERE message_id=NEW.message_id AND device_token=NEW.device_token;
-  END IF;
-  RETURN NEW;
-END $$;
 DROP TRIGGER IF EXISTS retry_push_outbox ON push_delivery_claims;
-CREATE TRIGGER retry_push_outbox AFTER INSERT OR UPDATE OF next_retry_at ON push_delivery_claims
-  FOR EACH ROW EXECUTE FUNCTION retry_push_outbox_trigger();
+DROP FUNCTION IF EXISTS retry_push_outbox_trigger();
 CREATE OR REPLACE FUNCTION person_push_outbox_trigger() RETURNS trigger LANGUAGE plpgsql AS $$
 BEGIN
-  UPDATE push_outbox queue SET not_before=now() FROM push_devices device
-    WHERE device.identity_id=NEW.id AND queue.device_token=device.token;
+  PERFORM enqueue_message_push(message) FROM push_message_context context
+    JOIN messages message ON message.id=context.message_id
+    JOIN room_access member ON member.room_id=context.room_id AND member.identity_id=NEW.id AND member.removed_at IS NULL
+    WHERE context.expires_at>now();
   RETURN NEW;
 END $$;
 DROP TRIGGER IF EXISTS person_push_outbox ON identities;
@@ -134,9 +122,9 @@ CREATE TRIGGER person_push_outbox AFTER UPDATE OF push_level ON identities
   EXECUTE FUNCTION person_push_outbox_trigger();
 CREATE OR REPLACE FUNCTION turn_push_outbox_trigger() RETURNS trigger LANGUAGE plpgsql AS $$
 BEGIN
-  UPDATE push_outbox queue SET not_before=now() FROM push_message_context context
-    WHERE context.room_id=NEW.room_id AND context.author_id=NEW.agent_id
-      AND context.request_id=NEW.request_id AND queue.message_id=context.message_id;
+  PERFORM enqueue_message_push(message) FROM push_message_context context
+    JOIN messages message ON message.id=context.message_id
+    WHERE context.room_id=NEW.room_id AND context.author_id=NEW.agent_id AND context.request_id=NEW.request_id;
   RETURN NEW;
 END $$;
 DROP TRIGGER IF EXISTS turn_push_outbox ON agent_turns;

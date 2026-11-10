@@ -1,5 +1,5 @@
 import React from 'react';
-import { Ionicons } from '@expo/vector-icons';
+import Ionicons from '@expo/vector-icons/Ionicons';
 import { useUnistyles } from 'react-native-unistyles';
 import { useDesktopLayout, toggleDesktopRoomList } from '@/buzz/desktop-layout-state';
 import { useIsTablet } from '@/utils/responsive';

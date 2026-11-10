@@ -1,3 +1,5 @@
+import { ROUTER_COMMAND_SCHEMA } from './router-command-ledger.js';
+import { createAgentCommand } from './agent-command.js';
 import type { AddressInfo } from 'node:net';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import WebSocket from 'ws';
@@ -11,7 +13,7 @@ import { LiveHub } from './live.js';
 import { ReleaseNotifier } from './release-notify.js';
 import type { PhoneService } from './phone-service.js';
 import { createBeelineServer, type ServerOptions } from './server.js';
-import { migratedDatabase } from './test-support.js';
+import { migratedDatabase, PgliteDatabase } from './test-support.js';
 
 const AGENT_A = 'a'.repeat(64);
 const AGENT_B = 'b'.repeat(64);
@@ -24,11 +26,13 @@ type Server = ReturnType<typeof createBeelineServer>;
 
 const servers: Server[] = [];
 const sockets: WebSocket[] = [];
+const requestDatabases:PgliteDatabase[]=[];
 afterEach(async () => {
   for (const socket of sockets.splice(0)) socket.terminate();
   await Promise.all(
     servers.splice(0).map((server) => new Promise<void>((resolve) => server.close(() => resolve()))),
   );
+  for(const database of requestDatabases.splice(0))await database.close();
 });
 
 function auth(): TokenAuth {
@@ -41,6 +45,7 @@ function auth(): TokenAuth {
 
 function daemonStub(): DaemonService {
   return {
+    negotiateOwnedModel:vi.fn(async()=>({freeAgent:false})),
     execute: vi.fn(async (name: string, input: { roomId: string }, agentId: string) =>
       name === 'getAgentCommands'
         ? { commandProtocol: 1, commands: [] }
@@ -49,8 +54,10 @@ function daemonStub(): DaemonService {
 }
 
 async function start(overrides: Partial<ServerOptions> = {}): Promise<{ server: Server; port: number }> {
+  const database=overrides.database??new PgliteDatabase();
+  if(!overrides.database){requestDatabases.push(database as PgliteDatabase);await database.query(ROUTER_COMMAND_SCHEMA);}
   const server = createBeelineServer({
-    database: { query: vi.fn(), transaction: vi.fn() } as unknown as SqlDatabase,
+    database,
     auth: auth(),
     phone: { canReadRooms: vi.fn(async (ids: readonly string[]) => new Set(ids)) } as unknown as PhoneService,
     daemon: daemonStub(),
@@ -123,9 +130,9 @@ describe('one machine socket for every agent on a helper machine', () => {
     try{
       const owner='e'.repeat(64),execute=vi.fn(async()=>({id:'synthetic-receipt',createdAt:1}));
       const database={query:vi.fn(async()=>({rows:[{owner_id:owner}],rowCount:1})),transaction:vi.fn()} as unknown as SqlDatabase;
-      const presence={instanceId:'synthetic-registration',holdServerConnection:()=>()=>undefined,
+      const presence={instanceId:'synthetic-registration',holdServerConnection:()=>()=>undefined,renewLease:async()=>undefined,
         claimConnection:vi.fn(async()=>7),releaseConnection:vi.fn(async()=>undefined)} as unknown as ConnectionPresence;
-      const {port}=await start({database,connectionPresence:presence,daemon:{execute} as unknown as DaemonService});
+      const {port}=await start({database,connectionPresence:presence,daemon:{execute,negotiateOwnedModel:async()=>({freeAgent:false})} as unknown as DaemonService});
       const client=await machine(port);
       client.send({type:'register',agentId:AGENT_A,token:'bdt_a',overlayV1:true,usageAccountV1:true});
       const registered=await client.next(frame=>frame.type==='registered'&&frame.agentId===AGENT_A);
@@ -164,7 +171,6 @@ describe('one machine socket for every agent on a helper machine', () => {
     const client = await machine(port);
     expect(await client.next((frame) => frame.type === 'hello')).toMatchObject({
       protocol: 'machine',
-      heartbeatMs: 30_000,
     });
 
     expect(await register(client, AGENT_RETIRED, 'bdt_retired')).toMatchObject({
@@ -210,7 +216,7 @@ describe('one machine socket for every agent on a helper machine', () => {
     });
   });
 
-  it('drops only the agent that floods the socket; its sibling keeps its slot and its work', async () => {
+  it('refuses excess intake without dropping either machine agent', async () => {
     const stalled: Array<() => void> = [];
     const canReadRooms = vi.fn((ids: readonly string[], agentId: string) =>
       agentId === AGENT_A
@@ -228,8 +234,8 @@ describe('one machine socket for every agent on a helper machine', () => {
     const padding = 'x'.repeat(60 * 1024);
     for (let index = 0; index < 40; index++)
       client.send({ type: 'subscribe', agentId: AGENT_A, roomId: `room-a-${index}`, padding });
-    expect(await client.next((frame) => frame.type === 'unregistered' && frame.agentId === AGENT_A))
-      .toMatchObject({ code: 1013, reason: 'live admission overloaded' });
+    expect(await client.next((frame) => frame.type === 'live-refused' && frame.agentId === AGENT_A))
+      .toMatchObject({ reason: 'live admission overloaded' });
 
     // Agent B is neither delayed behind A's queue nor disconnected with it.
     const subscribedAt = Date.now();
@@ -266,70 +272,25 @@ describe('one machine socket for every agent on a helper machine', () => {
   });
 });
 
-describe('protocol heartbeat on helper sockets', () => {
-  it.each(['getAgentCommands', 'getRoomInbox'])(
-    'drops a session after %s rejects so its helper can reconcile missed work', async operation => {
-      const live = new LiveHub();
-      const daemon = daemonStub();
-      const { port } = await start({ live, daemon });
-      const client = await machine(port);
-      await register(client, AGENT_A, 'bdt_a');
-      client.send({ type: 'subscribe', agentId: AGENT_A, roomId: 'room-a' });
-      await client.next(frame => frame.type === 'commands');
-      const error = vi.spyOn(console, 'error').mockImplementation(() => undefined);
-      try {
-        vi.mocked(daemon.execute).mockRejectedValueOnce(new Error('transient read failure'));
-        live.publish({ type: 'invalidate', roomId: 'room-a',
-          reason: operation === 'getAgentCommands' ? 'postgres:agent_commands' : 'postgres:messages',
-          ...(operation === 'getRoomInbox' ? { messageId: 'changed-message' } : {}),
-          targetAgentId: AGENT_A });
-        expect(await client.next(frame => frame.type === 'unregistered')).toMatchObject({ agentId: AGENT_A });
-        // The machine and other agents can stay connected. A new registration
-        // gets a new subscription and the authoritative command snapshot.
-        expect(await register(client, AGENT_A, 'bdt_a')).toMatchObject({ type: 'registered' });
-        const before = client.frames.length;
-        client.send({ type: 'subscribe', agentId: AGENT_A, roomId: 'room-a' });
-        await client.next(frame => client.frames.indexOf(frame) >= before && frame.type === 'commands');
-        expect(client.socket.readyState).toBe(WebSocket.OPEN);
-      } finally { error.mockRestore(); }
-    },
-  );
-
-  it('terminates a machine socket that stops answering pings while idle, and keeps one that answers', async () => {
-    const { port } = await start({ liveHeartbeatMs: 100 });
-    const silent = await machine(port, { autoPong: false });
-    const answering = await machine(port);
-    let pings = 0;
-    answering.socket.on('ping', () => pings++);
-    const closedAt = new Promise<number>((resolve) => silent.socket.once('close', () => resolve(Date.now())));
-    const openedAt = Date.now();
-    // Neither socket sends a frame: both are idle the whole time.
-    expect((await closedAt) - openedAt).toBeLessThan(1_000);
-    await new Promise((resolve) => setTimeout(resolve, 600));
-    expect(answering.socket.readyState).toBe(WebSocket.OPEN);
-    expect(pings).toBeGreaterThanOrEqual(4);
-    const health = await (await fetch(`http://127.0.0.1:${port}/health`)).json();
-    expect(health.live.heartbeatTerminations).toBeGreaterThanOrEqual(1);
+describe('machine connection closes only for login or version changes',()=>{
+  it.each(['getAgentCommands','getRoomInbox'])('keeps the connection and subscriptions when %s fails',async operation=>{
+    const live=new LiveHub(),daemon=daemonStub();const {port}=await start({live,daemon});const client=await machine(port);
+    await register(client,AGENT_A,'bdt_a');client.send({type:'subscribe',agentId:AGENT_A,roomId:'room-a'});
+    await client.next(frame=>frame.type==='commands');const error=vi.spyOn(console,'error').mockImplementation(()=>undefined);
+    const change=()=>live.publish({type:'invalidate',roomId:'room-a',reason:operation==='getAgentCommands'?'postgres:agent_commands':'postgres:messages',targetAgentId:AGENT_A,...(operation==='getRoomInbox'?{messageId:'changed-message'}:{})});
+    try{
+      vi.mocked(daemon.execute).mockRejectedValueOnce(new Error('transient read failure'));change();
+      await vi.waitFor(()=>expect(error).toHaveBeenCalled());
+      expect(client.socket.readyState).toBe(WebSocket.OPEN);expect(client.frames.some(frame=>frame.type==='unregistered')).toBe(false);
+      const before=client.frames.length;change();
+      await client.next(frame=>client.frames.indexOf(frame)>=before&&frame.type===(operation==='getAgentCommands'?'commands':'inbox'));
+    }finally{error.mockRestore();}
   });
-
-  it('pings old per-agent sockets too and drops one whose peer went silent', async () => {
-    const { port } = await start({ liveHeartbeatMs: 100 });
-    const silent = await connect(port, 'bearer.bdt_a', { autoPong: false });
-    const closed = new Promise<void>((resolve) => silent.socket.once('close', () => resolve()));
-    await closed;
-  });
-
-  it('pings without touching the database', async () => {
-    const query = vi.fn();
-    const { port } = await start({
-      liveHeartbeatMs: 50,
-      database: { query, transaction: vi.fn() } as unknown as SqlDatabase,
-    });
-    const client = await machine(port);
-    let pings = 0;
-    client.socket.on('ping', () => pings++);
-    await vi.waitFor(() => expect(pings).toBeGreaterThanOrEqual(5), { timeout: 2_000 });
-    expect(query).not.toHaveBeenCalled();
+  it('keeps idle helpers connected without application pings or database reads',async()=>{
+    const query=vi.fn();const {port}=await start({liveHeartbeatMs:10,database:{query,transaction:vi.fn()} as unknown as SqlDatabase});
+    const client=await machine(port,{autoPong:false});const ping=vi.fn();client.socket.on('ping',ping);
+    await new Promise(resolve=>setTimeout(resolve,100));expect(client.socket.readyState).toBe(WebSocket.OPEN);
+    expect(ping).not.toHaveBeenCalled();expect(query).not.toHaveBeenCalled();
   });
 });
 
@@ -362,6 +323,73 @@ describe('held presence for a live connection', () => {
       )
     ).rows[0]?.body;
   }
+
+  it.each(['room event', 'resync'])('delivers a committed tag after one failed push on the next %s', async recovery => {
+    const database = await seeded();
+    requestDatabases.push(database);
+    await database.query(`INSERT INTO identities(id,kind,name) VALUES($1,'agent','Sibling')`, [AGENT_B]);
+    await database.query(`INSERT INTO agents(agent_id,owner_id) VALUES($1,$2)`, [AGENT_B, HUMAN]);
+    await database.query(`INSERT INTO memberships(workspace_id,room_id,identity_id,role)
+      VALUES($1,$2,$3,'member'),($1,NULL,$3,'member')`, [WORKSPACE, ROOM, AGENT_B]);
+    const live = new LiveHub(), daemon = new DaemonService(database, live);
+    const presence = new ConnectionPresence(database, live);
+    const execute = daemon.execute.bind(daemon);
+    let failNextPush = false;
+    const calls = vi.spyOn(daemon, 'execute').mockImplementation(async (...args) => {
+      if (args[0] === 'getAgentCommands' && args[2] === AGENT_A && failNextPush) {
+        failNextPush = false;
+        throw new Error('transient read failure');
+      }
+      return execute(...args);
+    });
+    const error = vi.spyOn(console, 'error').mockImplementation(() => undefined);
+    try {
+      const { port } = await start({ database, live, daemon, connectionPresence: presence });
+      const client = await machine(port);
+      for (const [agentId, token] of [[AGENT_A, 'bdt_a'], [AGENT_B, 'bdt_b']]) {
+        await register(client, agentId, token);
+        client.send({ type: 'subscribe', agentId, roomId: ROOM, inbox: false });
+        await client.next(frame => frame.type === 'subscribed' && frame.agentId === agentId);
+      }
+      const command = (agentId: string) => createAgentCommand(database, {
+        roomId: ROOM, agentId, sourceMessageId: null, reason: 'human_tag',
+      });
+      const claimed = (await command(AGENT_A))!;
+      const owner = (await database.query<{ connectionId: string; epoch: number }>(
+        `SELECT connection_id "connectionId",epoch::integer epoch FROM agent_connections WHERE agent_id=$1`, [AGENT_A],
+      )).rows[0]!;
+      await daemon.execute('claimAgentCommand', { roomId: ROOM, commandId: claimed.id, generationId: 'first' }, AGENT_A, owner);
+      const missed = (await command(AGENT_A))!, sibling = (await command(AGENT_B))!;
+      // Both inserts have committed. No more commands are inserted to recover delivery.
+      const change = (agentId: string) => live.publish({
+        type: 'invalidate', roomId: ROOM, reason: 'postgres:agent_commands', targetAgentId: agentId,
+      });
+      failNextPush = true;
+      change(AGENT_A);
+      await vi.waitFor(() => expect(error).toHaveBeenCalledWith('[live] daemon command push failed', 'transient read failure'));
+      const reads = () => calls.mock.calls.filter(([name, , agent]) => name === 'getAgentCommands' && agent === AGENT_A).length;
+      const failedReads = reads();
+      const delivered = (frame: Frame, id: string) => frame.type === 'commands' &&
+        (frame.commands as { id: string }[]).some(command => command.id === id);
+      change(AGENT_B);
+      await client.next(frame => delivered(frame, sibling.id));
+      expect(reads()).toBe(failedReads);
+      expect(client.frames.some(frame => delivered(frame, missed.id))).toBe(false);
+      if (recovery === 'resync') live.resync();
+      else live.publish({ type: 'invalidate', roomId: ROOM, reason: 'postgres:messages', messageId: 'source' });
+      const recovered = await client.next(frame => delivered(frame, missed.id));
+      expect(recovered.commands).toEqual([expect.objectContaining({ id: missed.id })]);
+      expect(client.frames.some(frame => delivered(frame, claimed.id))).toBe(false);
+      expect(client.frames.filter(frame => delivered(frame, sibling.id))).toHaveLength(1);
+      expect(client.frames.some(frame => frame.type === 'unregistered')).toBe(false);
+      expect(client.socket.readyState).toBe(WebSocket.OPEN);
+      expect((await database.query('SELECT state FROM agent_commands WHERE id=$1', [missed.id])).rows)
+        .toEqual([{ state: 'pending' }]);
+    } finally {
+      error.mockRestore();
+      await presence.stop();
+    }
+  });
 
   it.each(['update', 'crash', 'ordinary-close'] as const)('releases a %s socket silently and retains offline presence', async (kind) => {
     const database = await seeded();
@@ -427,8 +455,8 @@ describe('held presence for a live connection', () => {
     const database = await seeded();
     // One hub stands in for the PostgreSQL listener both instances share.
     const live = new LiveHub();
-    const first = new ConnectionPresence(database, live, undefined, undefined, { instanceId: 'server-1' });
-    const second = new ConnectionPresence(database, live, undefined, undefined, { instanceId: 'server-2' });
+    const first = new ConnectionPresence(database, live, { instanceId: 'server-1' });
+    const second = new ConnectionPresence(database, live, { instanceId: 'server-2' });
     try {
       const one = await start({ database, live, connectionPresence: first });
       const two = await start({ database, live, connectionPresence: second });
@@ -462,8 +490,8 @@ describe('held presence for a live connection', () => {
   it('survives a server restart: the connection stays held until the helper reconnects', async () => {
     const database = await seeded();
     const live = new LiveHub();
-    const restarting = new ConnectionPresence(database, live, undefined, undefined, { instanceId: 'server-old' });
-    const successor = new ConnectionPresence(database, live, undefined, undefined, { instanceId: 'server-new' });
+    const restarting = new ConnectionPresence(database, live, { instanceId: 'server-old' });
+    const successor = new ConnectionPresence(database, live, { instanceId: 'server-new' });
     try {
       const old = await start({ database, live, connectionPresence: restarting });
       const client = await machine(old.port);
@@ -485,37 +513,6 @@ describe('held presence for a live connection', () => {
     } finally {
       await restarting.stop();
       await successor.stop();
-      await database.close();
-    }
-  });
-
-  it('releases the connections of a server that stopped renewing its lease', async () => {
-    const database = await seeded();
-    const live = new LiveHub();
-    const crashed = new ConnectionPresence(database, live, undefined, undefined, {
-      instanceId: 'server-gone', expiryMs: 200,
-    });
-    const survivor = new ConnectionPresence(database, live, undefined, undefined, {
-      instanceId: 'server-up', expiryMs: 200,
-    });
-    try {
-      await crashed.renewLease();
-      const gone = await start({ database, live, connectionPresence: crashed });
-      const client = await machine(gone.port);
-      await register(client, AGENT_A, 'bdt_a');
-      await new Promise<void>((resolve) => gone.server.close(() => resolve()));
-      servers.splice(servers.indexOf(gone.server), 1);
-      await crashed.stop();
-
-      // Inside the lease the agent is still held online.
-      await survivor.renewLease();
-      await survivor.recoverServerLeases();
-      expect(await presenceBody(database)).toMatchObject({ status: 'online', held: true });
-      await new Promise((resolve) => setTimeout(resolve, 300));
-      expect(await presenceBody(database)).toMatchObject({ status: 'offline', held: false });
-    } finally {
-      await crashed.stop();
-      await survivor.stop();
       await database.close();
     }
   });
@@ -589,17 +586,137 @@ it('serves controls and subscriptions while 65 ordinary operations await externa
   expect(await client.next(frame => frame.requestId === 'held-64')).toMatchObject({result: {id: 'wake'}});
 });
 
-it('rejects unknown operations and dedicated activation on ordinary machine dispatch before effects', async () => {
+it('rejects unknown operations before effects', async () => {
   const daemon = daemonStub();
   const {port} = await start({daemon});
   const client = await machine(port);
   client.send({type: 'register', agentId: AGENT_A, token: 'bdt_a', daemonOperationsV1: true});
   await client.next(frame => frame.type === 'registered');
-  for (const [operation, status] of [['notAnOperation', 400], ['readCommandActivation', 409]] as const) {
+  for (const [operation, status] of [['notAnOperation', 400]] as const) {
     client.send({type: 'daemon-operation', agentId: AGENT_A, requestId: operation, operation, input: {}});
     expect(await client.next(frame => frame.requestId === operation)).toMatchObject({status});
   }
   expect(daemon.execute).not.toHaveBeenCalled();
+});
+
+it('publishes a final reply over 64 KB without dropping its tool steps', async () => {
+  const daemon = daemonStub();
+  vi.mocked(daemon.execute).mockResolvedValue({id:'final-reply',createdAt:1});
+  const {port} = await start({daemon});
+  const client = await machine(port);
+  client.send({type:'register',agentId:AGENT_A,token:'bdt_a',daemonOperationsV1:true});
+  await client.next(frame => frame.type === 'registered');
+  const input = {roomId:'room',requestId:'turn',text:'Finished.',steps:Array.from({length:70},(_,index) => ({
+    kind:'tool',title:`Read ${index}`,operation:'read',status:'completed',output:'a'.repeat(3000),
+  }))};
+  expect(Buffer.byteLength(JSON.stringify(input))).toBeGreaterThan(64 * 1024);
+  client.send({type:'daemon-operation',agentId:AGENT_A,requestId:'publish',operation:'postRoomMessage',input});
+  expect(await client.next(frame => frame.requestId === 'publish')).toMatchObject({
+    type:'daemon-operation-result',result:{id:'final-reply'},
+  });
+  expect(daemon.execute).toHaveBeenCalledWith('postRoomMessage',input,AGENT_A,undefined,undefined);
+  client.send({type:'daemon-operation',agentId:AGENT_A,requestId:'publish',operation:'postRoomMessage',
+    input:{...input,text:'changed intent'}});
+  expect(await client.next(frame => frame.requestId === 'publish' && frame.status === 409))
+    .toMatchObject({error:'request_identity_conflict'});
+  expect(daemon.execute).toHaveBeenCalledTimes(1);
+});
+
+it('completes a large Claude final reply before claiming the wake queued during that turn', async () => {
+  const {mkdtemp,rm} = await import('node:fs/promises');
+  const {tmpdir} = await import('node:os');
+  const {join} = await import('node:path');
+  const {DaemonApiClient} = await import('../../body/src/daemon-api-client.js');
+  const {CommandExecutionContext,runServerCommandIntake} = await import('../../body/src/server-command-intake.js');
+  const {AcpClient,agentTurnSteps} = await import('../../body/src/acp.js');
+  const {AgentTurnStream} = await import('../../body/src/turn-stream.js');
+  const {roomReplySteps} = await import('../../body/src/room-turn-steps.js');
+  const command = (id:string) => ({id,roomId:'room',agentId:AGENT_A,turnRequestId:id,
+    sourceMessageId:id,action:'input' as const,reason:'agent_tag' as const,rootCommandId:id,
+    rootSourceMessageId:id,agentDepth:0,source:{id,authorId:AGENT_B,body:id,createdAt:1,attachments:[]}});
+  const queue = [command('original')];
+  const transitions: string[] = [];
+  let notify!: (commands:ReturnType<typeof command>[]) => void;
+  const daemon = daemonStub();
+  vi.mocked(daemon.execute).mockImplementation(async (name:string,input:Record<string,unknown>) => {
+    if(name === 'getAgentCommands') return {commandProtocol:1,commands:[...queue]};
+    if(name === 'claimAgentTurn') { transitions.push(`claim:${input.commandId}`); return {commands:[queue.shift()!]}; }
+    if(name === 'releaseAgentTurn') return {commands:[...queue]};
+    if(name === 'postRoomMessage') transitions.push(`reply:${input.requestId}`);
+    if(name === 'postAgentTurnReceipt') transitions.push(`complete:${input.requestId}`);
+    return {id:'written',createdAt:1};
+  });
+  const {port} = await start({daemon});
+  const api = new DaemonApiClient(`http://127.0.0.1:${port}`,'bdt_a',AGENT_A);
+  const root = await mkdtemp(join(tmpdir(),'beeline-large-completion-'));
+  const context = new CommandExecutionContext(root), abort = new AbortController();
+  const client = new AcpClient({agentCommand:'claude-agent-acp',agentEnv:{}});
+  const errors: unknown[] = [];
+  let completed = 0;
+  vi.spyOn(client,'request').mockImplementation(async (_method,params) => {
+    const {sessionId} = params as {sessionId:string};
+    if(!completed) { queue.push(command('new-wake')); notify([...queue]); }
+    for(let index=0;index<70;index++) client.emit('session/update',{sessionId,update:{
+      sessionUpdate:'tool_call',toolCallId:String(index),title:'read',kind:'read',
+      rawInput:{path:`file-${index}`},
+      status:'completed',content:[{type:'content',content:{type:'text',text:'a'.repeat(3000)}}],
+    }});
+    client.emit('session/update',{sessionId,update:{sessionUpdate:'agent_message_chunk',
+      content:{type:'text',text:'Finished.'}}});
+    return {stopReason:'end_turn'};
+  });
+  // The intake uses the real machine request owner; only the harness/provider
+  // and daemon's durable effects are fixtures. No helper process is launched.
+  const running = runServerCommandIntake({api:{execute:api.execute.bind(api)} as never,
+    roomId:'room',agentId:AGENT_A,context,signal:abort.signal,stop:()=>{},
+    onWake:wake => {if(wake) notify=wake;},onError:error => {errors.push(error);abort.abort();},
+    run:async item => {
+      const result = await client.sessionPrompt('claude',item.source.body);
+      expect(result.agentText).toBe('Finished.');
+      expect(result.toolCalls).toHaveLength(70);
+      const stream = new AgentTurnStream({api,roomId:'room',agentId:AGENT_A,requestId:item.id,label:'large reply proof'});
+      await stream.settle(result.agentText,{steps:roomReplySteps(agentTurnSteps(result.updates))});
+      await api.execute('postAgentTurnReceipt',{agentId:AGENT_A,roomId:'room',requestId:item.id,status:'complete'});
+      if(++completed === 2) abort.abort();
+    }});
+  try {
+    await vi.waitFor(() => {expect(errors).toEqual([]);expect(completed).toBe(2);},{timeout:5000});
+    await running;
+    expect(errors).toEqual([]);
+    expect(transitions).toEqual(['claim:original','reply:original','complete:original',
+      'claim:new-wake','reply:new-wake','complete:new-wake']);
+    const replies = vi.mocked(daemon.execute).mock.calls.filter(([name]) => name === 'postRoomMessage');
+    expect(replies).toHaveLength(2);
+    expect(Buffer.byteLength(JSON.stringify(replies[0]![1]))).toBeGreaterThan(64 * 1024);
+    expect((replies[0]![1] as {steps:unknown[]}).steps).toHaveLength(70);
+  } finally {
+    abort.abort();api.closeLive();await running;await rm(root,{recursive:true,force:true});
+  }
+});
+
+it('answers a request admission failure instead of leaving the helper waiting', async () => {
+  const database = new PgliteDatabase();
+  requestDatabases.push(database);
+  const query = database.query.bind(database);
+  vi.spyOn(database,'query').mockImplementation((sql,values) => {
+    if(sql.includes('INSERT INTO router_commands')) return Promise.reject(new Error('fixture admission failure'));
+    return query(sql,values);
+  });
+  const error = vi.spyOn(console,'error').mockImplementation(() => undefined);
+  try {
+    const daemon = daemonStub();
+    const {port} = await start({database,daemon});
+    const client = await machine(port);
+    client.send({type:'register',agentId:AGENT_A,token:'bdt_a',daemonOperationsV1:true});
+    await client.next(frame => frame.type === 'registered');
+    client.send({type:'daemon-operation',agentId:AGENT_A,requestId:'publish',operation:'postRoomMessage',
+      input:{roomId:'room',requestId:'turn',text:'Finished.'}});
+    expect(await client.next(frame => frame.requestId === 'publish')).toMatchObject({
+      type:'daemon-operation-result',error:'machine_request_failed',status:503,
+    });
+    expect(daemon.execute).not.toHaveBeenCalled();
+    expect(error).toHaveBeenCalledWith('[live] machine request failed',expect.any(Error));
+  } finally { error.mockRestore(); }
 });
 
 it('rechecks token revocation before an ordinary operation on an already registered socket', async () => {
@@ -610,26 +727,24 @@ it('rechecks token revocation before an ordinary operation on an already registe
   await client.next(frame => frame.type === 'registered');
   vi.mocked(tokenAuth.authenticateDaemon).mockResolvedValue(null);
   vi.mocked(tokenAuth.retiredDaemonAgent).mockResolvedValue(AGENT_A);
+  const ended=new Promise<number>(resolve=>client.socket.once('close',resolve));
   client.send({type: 'daemon-operation', agentId: AGENT_A, requestId: 'revoked', operation: 'listRooms', input: {agentId: AGENT_A}});
-  expect(await client.next(frame => frame.requestId === 'revoked')).toMatchObject({error: 'agent_removed', status: 403});
+  expect(await ended).toBe(4003);
   expect(daemon.execute).not.toHaveBeenCalled();
 });
 
-it('rejects selected turn and usage controls on the ordinary channel before dispatch', async () => {
-  vi.stubEnv('BEELINE_NETWORK_ROUTER_V1', '1');
-  try {
-    const daemon = {execute: vi.fn(), negotiateOwnedModel: vi.fn(async () => ({freeAgent: false}))} as unknown as DaemonService;
-    const database = {query: vi.fn(async () => ({rows: [{owner_id: 'e'.repeat(64)}], rowCount: 1})), transaction: vi.fn()} as unknown as SqlDatabase;
-    const presence = {instanceId: 'operation-gate', holdServerConnection: () => () => undefined,
-      claimConnection: vi.fn(async () => 7), releaseConnection: vi.fn(async () => undefined)} as unknown as ConnectionPresence;
-    const {port} = await start({daemon, database, connectionPresence: presence});
-    const client = await machine(port);
-    client.send({type: 'register', agentId: AGENT_A, token: 'bdt_a', daemonOperationsV1: true, turnOwnershipV1: true, usageAccountV1: true});
-    expect(await client.next(frame => frame.type === 'registered')).toMatchObject({capabilities: {turnOwnershipV1: true, usageAccountV1: true}});
-    for (const operation of ['claimAgentCommand', 'acknowledgeAgentCommand', 'publishAgentUsageAccount', 'attachAgentUsageAccount', 'postAgentUsage']) {
-      client.send({type: 'daemon-operation', agentId: AGENT_A, requestId: operation, operation, input: {}});
-      expect(await client.next(frame => frame.requestId === operation)).toMatchObject({error: 'dedicated_machine_channel_required', status: 409});
-    }
-    expect(daemon.execute).not.toHaveBeenCalled();
-  } finally { vi.unstubAllEnvs(); }
+it('dispatches turn controls with the registered machine owner through the ordinary request path',async()=>{
+  const database=new PgliteDatabase();await database.query(ROUTER_COMMAND_SCHEMA);
+  const daemon={execute:vi.fn(async()=>({id:'ok',createdAt:1})),negotiateOwnedModel:async()=>({freeAgent:false})} as unknown as DaemonService;
+  const presence={instanceId:'operation-owner',renewLease:async()=>undefined,claimConnection:async()=>7,releaseConnection:async()=>{}} as unknown as ConnectionPresence;
+  try{
+    const {port}=await start({daemon,database,connectionPresence:presence});const client=await machine(port);
+    client.send({type:'register',agentId:AGENT_A,token:'bdt_a',daemonOperationsV1:true,turnOwnershipV1:true});
+    const registered=await client.next(frame=>frame.type==='registered');
+    client.send({type:'daemon-operation',agentId:AGENT_A,requestId:'claim',operation:'claimAgentCommand',input:{commandId:'command'}});
+    await client.next(frame=>frame.requestId==='claim');
+    const capabilities=registered.capabilities as {turnConnectionId:string;turnConnectionEpoch:number};
+    expect(daemon.execute).toHaveBeenCalledWith('claimAgentCommand',{commandId:'command'},AGENT_A,
+      {connectionId:capabilities.turnConnectionId,epoch:capabilities.turnConnectionEpoch},undefined);
+  }finally{await database.close();}
 });

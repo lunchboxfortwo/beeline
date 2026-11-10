@@ -1,199 +1,137 @@
-import { describe, expect, it, vi } from 'vitest';
-import { BackgroundWork, startBackgroundWork, startConnectionWork } from './background-work.js';
+import { afterEach, describe, expect, it, vi } from 'vitest';
+import { startBackgroundWork } from './background-work.js';
+import { OwnerScheduleClock } from './owner-schedule-clock.js';
+import { setImmediate, clearImmediate } from 'node:timers';
 
-describe('R-BACKGROUND-WASTE', () => {
-  it('keeps repairs on their deadline during a minute of mixed notifications', async () => {
-    let now = 0;
-    const log = vi.fn();
-    const work = new BackgroundWork(() => now, log);
-    const jobs = Object.fromEntries(['push', 'sentry', 'deadlines', 'schedules', 'repair'].map(name => [name, vi.fn(async () => {})]));
-    for (const [name, job] of Object.entries(jobs)) work.add(name, 60_000, job);
-    await work.run(true);
-    for (now = 1000; now < 60_000; now += 1000) {
-      const name = ['push', 'sentry', 'deadlines'][now / 1000 % 3]!;
-      work.wake(name);
-      expect(await work.run(false)).toBeGreaterThan(0);
+afterEach(() => vi.useRealTimers());
+describe('event-only background work', () => {
+  it('startup and elapsed time cannot wake an answered message again', async () => {
+    vi.useFakeTimers();
+    const answered = vi.fn(async () => {}), job = startBackgroundWork(answered);
+    vi.advanceTimersByTime(86400_000);
+    expect(answered).not.toHaveBeenCalled();
+    job.wake();
+    await job.stop();
+    vi.advanceTimersByTime(7 * 86400_000);
+    expect(answered).toHaveBeenCalledOnce();
+    expect(vi.getTimerCount()).toBe(0);
+  });
+  it('preserves a source event committed in flight and drains it on shutdown', async () => {
+    let finish!: () => void;
+    const waiting = new Promise<void>(resolve => { finish = resolve; });
+    const run = vi.fn(async () => { if (run.mock.calls.length === 1) await waiting; });
+    const job = startBackgroundWork(run);
+    job.wake(); job.wake();
+    const stopped = job.stop();
+    finish(); await stopped;
+    expect(run).toHaveBeenCalledTimes(2);
+    job.wake(); expect(run).toHaveBeenCalledTimes(2);
+  });
+  it('preserves a source event arriving as the previous drain settles', async () => {
+    const run = vi.fn<() => Promise<void>>();
+    const job = startBackgroundWork(run);
+    run.mockImplementationOnce(() => {
+      const done = Promise.resolve();
+      void done.then(() => queueMicrotask(() => job.wake()));
+      return done;
+    }).mockResolvedValue(undefined);
+    job.wake();
+    for (let index = 0; index < 10; index++) await Promise.resolve();
+    await job.stop();
+    expect(run).toHaveBeenCalledTimes(2);
+  });
+  it('a stalled delivery cannot block an independent owner schedule', async () => {
+    let finish!: () => void;
+    const delivery = startBackgroundWork(() => new Promise<void>(resolve => { finish = resolve; }));
+    const runSchedule = vi.fn(async () => {}), schedule = startBackgroundWork(runSchedule);
+    delivery.wake(); schedule.wake();
+    await schedule.stop();
+    expect(runSchedule).toHaveBeenCalledOnce();
+    finish(); await delivery.stop();
+  });
+  it('a failure does not admit another attempt', async () => {
+    vi.useFakeTimers();
+    const report = vi.spyOn(console, 'error').mockImplementation(() => {});
+    const run = vi.fn(async () => { throw new Error('unavailable'); }), job = startBackgroundWork(run);
+    try {
+      job.wake(); await job.stop();
+      vi.advanceTimersByTime(86400_000);
+      expect(run).toHaveBeenCalledOnce(); expect(report).toHaveBeenCalledOnce();
+      expect(vi.getTimerCount()).toBe(0);
+    } finally { report.mockRestore(); }
+  });
+});
+describe('owner-created schedule clock', () => {
+  it('shutdown clears its own handle and preserves another owner timer', () => {
+    const nativeSetTimeout = globalThis.setTimeout, nativeClearTimeout = globalThis.clearTimeout;
+    vi.useFakeTimers();
+    const fakeSetTimeout = globalThis.setTimeout, fakeClearTimeout = globalThis.clearTimeout;
+    const set = vi.fn(fakeSetTimeout), clear = vi.fn(fakeClearTimeout);
+    // Global spies retain the fake timer descriptor and Vitest restores them
+    // again after this file. Install local recording wrappers instead.
+    globalThis.setTimeout = set;
+    globalThis.clearTimeout = clear;
+    const outside = vi.fn(), fire = vi.fn(), clock = new OwnerScheduleClock(fire);
+    const unrelated = setTimeout(outside, 60_000);
+    try {
+      clock.arm(10_000);
+      const owned = set.mock.results.at(-1)!.value;
+      clock.stop();
+      expect(clear).toHaveBeenCalledWith(owned);
+      expect(clear).not.toHaveBeenCalledWith(unrelated);
+      vi.advanceTimersByTime(60_000);
+      expect(outside).toHaveBeenCalledOnce();
+      expect(fire).not.toHaveBeenCalled();
+    } finally {
+      clock.stop(); clearTimeout(unrelated);
+      globalThis.setTimeout = fakeSetTimeout;
+      globalThis.clearTimeout = fakeClearTimeout;
+      vi.useRealTimers();
     }
-    expect(jobs.repair).toHaveBeenCalledOnce();
-    expect(jobs.schedules).toHaveBeenCalledOnce();
-    expect(jobs.push).toHaveBeenCalledTimes(20);
-    expect(jobs.sentry).toHaveBeenCalledTimes(21);
-    expect(jobs.deadlines).toHaveBeenCalledTimes(21);
-    await work.run(false);
-    expect(jobs.repair).toHaveBeenCalledTimes(2);
-    expect(log).toHaveBeenCalledWith(expect.stringContaining('"repair":2'));
-    expect(log).toHaveBeenCalledWith(expect.stringContaining('"wakes":{"sentry":20,"deadlines":20,"push":19}'));
-  });
-
-  it('retains exact due times across unrelated wakes and resets recovery on takeover', async () => {
-    let now = 0;
-    const work = new BackgroundWork(() => now, () => {});
-    const schedule = vi.fn(async () => 25_000);
-    const deadline = vi.fn(async () => 10_000);
-    const repair = vi.fn(async () => {});
-    work.add('schedules', 60_000, schedule);
-    work.add('deadlines', 60_000, deadline);
-    work.add('repair', 60_000, repair);
-    expect(await work.run(true)).toBe(10_000);
-    now = 2000;
-    work.wake('schedules');
-    expect(await work.run(false)).toBe(8000);
-    expect(deadline).toHaveBeenCalledOnce();
-    now = 10_000;
-    expect(await work.run(false)).toBe(10_000);
-    expect(deadline).toHaveBeenCalledTimes(2);
-    expect(repair).toHaveBeenCalledOnce();
-    await work.run(true);
-    expect(repair).toHaveBeenLastCalledWith(true);
-    expect(repair).toHaveBeenCalledTimes(2);
-  });
-
-  it('retains a wake received while a job is running', async () => {
-    const work = new BackgroundWork(() => 0, () => {});
-    let calls = 0;
-    work.add('push', 60_000, async () => { if (++calls === 1) work.wake('push'); });
-    expect(await work.run(true)).toBe(0);
-    expect(await work.run(false)).toBe(60_000);
-    expect(calls).toBe(2);
-  });
-});
-
-
-describe('semantic deadline jobs',()=>{
-  it('runs one acquisition pass and then sleeps forever when no real obligation exists',async()=>{
-    let now=0;const run=vi.fn(async()=>{}),work=new BackgroundWork(()=>now,()=>{});
-    work.addDeadline('delivery',run);
-    expect(await work.run(true)).toBe(Infinity);expect(run).toHaveBeenCalledOnce();
-    now=24*60*60_000;expect(await work.run(false)).toBe(Infinity);expect(run).toHaveBeenCalledOnce();
-    work.wake('delivery','committed-row');expect(await work.run(false)).toBe(Infinity);expect(run).toHaveBeenCalledTimes(2);
-  });
-  it('arms only an actual returned due time and parks after a completed obligation',async()=>{
-    let now=0;const work=new BackgroundWork(()=>now,()=>{});
-    const run=vi.fn<()=>Promise<number|void>>().mockResolvedValueOnce(15_000).mockResolvedValue(undefined);
-    work.addDeadline('delivery',run);
-    expect(await work.run(true)).toBe(15_000);now=14_999;expect(await work.run(false)).toBe(1);expect(run).toHaveBeenCalledOnce();
-    now=15_000;expect(await work.run(false)).toBe(Infinity);expect(run).toHaveBeenCalledTimes(2);
-  });
-});
-
-describe('owned timer chains', () => {
-  it('keeps connection cadence and cancels the next tick when its owner closes', async () => {
-    vi.useFakeTimers();
+    // Vitest restores registered spies again when the file ends. That must
+    // not reinstall the fake clock into the worker running the next file.
     try {
-      // Other worker activity may own timers while this connection closes.
-      const unrelated = setTimeout(() => {}, 60_000);
-      const unrelatedCount = vi.getTimerCount();
-      const run = vi.fn();
-      const stop = startConnectionWork(() => {
-        run();
-        if (run.mock.calls.length === 2) {
-          stop();
-        }
-      }, 1000);
-      await vi.advanceTimersByTimeAsync(999);
-      expect(run).not.toHaveBeenCalled();
-      await vi.advanceTimersByTimeAsync(2001);
-      expect(run).toHaveBeenCalledTimes(2);
-      expect(vi.getTimerCount()).toBe(unrelatedCount);
-      await vi.advanceTimersByTimeAsync(10_000);
-      expect(run).toHaveBeenCalledTimes(2);
-      clearTimeout(unrelated);
-    } finally { vi.useRealTimers(); }
+      vi.restoreAllMocks();
+      expect(globalThis.setTimeout).toBe(nativeSetTimeout);
+      expect(globalThis.clearTimeout).toBe(nativeClearTimeout);
+    } finally {
+      globalThis.setTimeout = nativeSetTimeout;
+      globalThis.clearTimeout = nativeClearTimeout;
+    }
   });
 
-  it('runs startup work immediately and uses the next queue deadline', async () => {
+  it('fires only at the supplied time, once, and parks without another schedule', () => {
     vi.useFakeTimers();
+    const fire = vi.fn(), clock = new OwnerScheduleClock(fire);
+    clock.arm(60_000);
+    vi.advanceTimersByTime(59_999); expect(fire).not.toHaveBeenCalled();
+    vi.advanceTimersByTime(1); expect(fire).toHaveBeenCalledOnce();
+    vi.advanceTimersByTime(86400_000); expect(fire).toHaveBeenCalledOnce();
+    expect(vi.getTimerCount()).toBe(0);
+  });
+  it('preserves an owner time beyond the native timer range without firing early', () => {
+    vi.useFakeTimers();
+    const fire = vi.fn(), clock = new OwnerScheduleClock(fire);
+    const delay = 2_147_483_647 + 60_000;
+    clock.arm(delay);
+    vi.advanceTimersByTime(2_147_483_647);
+    expect(fire).not.toHaveBeenCalled();
+    expect(vi.getTimerCount()).toBe(1);
+    // Model an outstanding socket cleanup from an earlier file in this worker.
+    // Advancing this synchronous clock must not admit another owner's I/O.
+    const io = setImmediate(() => setTimeout(() => {}, 120_000));
     try {
-      const work = new BackgroundWork();
-      const fast = vi.fn(async () => {}), slow = vi.fn(async () => {});
-      work.add('fast', 1000, fast);
-      work.add('slow', 5000, slow);
-      const stop = startBackgroundWork(work);
-      expect(fast).toHaveBeenCalledOnce();
-      await vi.advanceTimersByTimeAsync(5000);
-      expect(fast).toHaveBeenCalledTimes(6);
-      expect(slow).toHaveBeenCalledTimes(2);
-      await stop();
-      await vi.advanceTimersByTimeAsync(5000);
-      expect(fast).toHaveBeenCalledTimes(6);
+      vi.advanceTimersByTime(60_000);
+      expect(fire).toHaveBeenCalledOnce();
       expect(vi.getTimerCount()).toBe(0);
-    } finally { vi.useRealTimers(); }
+    } finally { clearImmediate(io); }
   });
-
-  it('parks an empty instance owner with no timer and resumes once on an actual wake', async () => {
+  it('a schedule edit replaces the time and shutdown cancels it', () => {
     vi.useFakeTimers();
-    let stop!: () => Promise<void>;
-    try {
-      const work = new BackgroundWork();
-      const run = vi.fn(async () => {});
-      const release = vi.fn();
-      let wake!: () => void;
-      work.addDeadline('delivery', run);
-      stop = startBackgroundWork(work, tick => {
-        wake = () => { work.wake('delivery'); tick(); }; return release;
-      });
-      await vi.advanceTimersByTimeAsync(24 * 60 * 60_000);
-      expect(run).toHaveBeenCalledOnce(); expect(vi.getTimerCount()).toBe(0);
-      wake(); await vi.advanceTimersByTimeAsync(0);
-      expect(run).toHaveBeenCalledTimes(2); expect(vi.getTimerCount()).toBe(0);
-      await stop(); expect(release).toHaveBeenCalledOnce();
-      wake(); await vi.advanceTimersByTimeAsync(24 * 60 * 60_000);
-      expect(run).toHaveBeenCalledTimes(2);
-    } finally { await stop?.(); vi.useRealTimers(); }
-  });
-
-  it('coalesces committed wakes during a slow instance drain without overlap', async () => {
-    vi.useFakeTimers();
-    let finish!: () => void, wake!: () => void;
-    const work = new BackgroundWork();
-    const run = vi.fn().mockImplementationOnce(() => new Promise<void>(resolve => { finish = resolve; }))
-      .mockResolvedValue(undefined);
-    work.addDeadline('delivery', run);
-    const stop = startBackgroundWork(work, tick => {
-      wake = () => { work.wake('delivery'); tick(); }; return () => {};
-    });
-    try {
-      wake(); wake();
-      await vi.advanceTimersByTimeAsync(60_000);
-      expect(run).toHaveBeenCalledOnce();
-      finish(); await vi.advanceTimersByTimeAsync(0);
-      expect(run).toHaveBeenCalledTimes(2); expect(vi.getTimerCount()).toBe(0);
-    } finally { finish(); await stop(); vi.useRealTimers(); }
-  });
-
-  it('does not schedule a failed instance job and accepts a distinct recovery wake', async () => {
-    vi.useFakeTimers();
-    const work = new BackgroundWork(); let wake!: () => void;
-    const run = vi.fn().mockRejectedValueOnce(new Error('unavailable')).mockResolvedValue(undefined);
-    work.addDeadline('delivery', run);
-    const stop = startBackgroundWork(work, tick => {
-      wake = () => { work.wake('delivery'); tick(); }; return () => {};
-    });
-    try {
-      await vi.advanceTimersByTimeAsync(24 * 60 * 60_000);
-      expect(run).toHaveBeenCalledOnce(); expect(vi.getTimerCount()).toBe(0);
-      wake(); await vi.advanceTimersByTimeAsync(0);
-      expect(run).toHaveBeenCalledTimes(2);
-    } finally { await stop(); vi.useRealTimers(); }
-  });
-
-  it('drains an active job on close without scheduling another tick', async () => {
-    vi.useFakeTimers();
-    try {
-      let finish!: () => void;
-      const work = new BackgroundWork();
-      const run = vi.fn(() => new Promise<void>(resolve => { finish = resolve; }));
-      work.add('slow', 1000, run);
-      const stop = startBackgroundWork(work);
-      await vi.advanceTimersByTimeAsync(5000);
-      expect(run).toHaveBeenCalledOnce();
-      let stopped = false;
-      const closing = stop().then(() => { stopped = true; });
-      await Promise.resolve();
-      expect(stopped).toBe(false);
-      finish();
-      await closing;
-      expect(vi.getTimerCount()).toBe(0);
-    } finally { vi.useRealTimers(); }
+    const fire = vi.fn(), clock = new OwnerScheduleClock(fire);
+    clock.arm(10_000); clock.arm(20_000);
+    vi.advanceTimersByTime(10_000); expect(fire).not.toHaveBeenCalled();
+    clock.stop(); vi.advanceTimersByTime(86400_000);
+    expect(fire).not.toHaveBeenCalled(); expect(vi.getTimerCount()).toBe(0);
   });
 });

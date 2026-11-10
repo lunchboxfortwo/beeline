@@ -18,7 +18,11 @@ const PERIOD_SQL = `WITH ${COHORT_SQL}, eligible AS MATERIALIZED (
   JOIN production_workspaces w ON w.id=r.workspace_id
   WHERE m.presentation='message' AND m.deleted_at IS NULL AND m.created_at<$1::timestamptz
 ), first_messages AS (
-  SELECT author_id,min(created_at) first_at,max(created_at) last_at FROM human_messages GROUP BY 1
+  SELECT m.author_id,min(m.created_at) first_at,max(m.created_at) last_at,
+    bool_or((m.created_at AT TIME ZONE 'America/New_York')::date=
+      (e.created_at AT TIME ZONE 'America/New_York')::date+1) return_1d,
+    bool_or(m.created_at>=e.created_at+interval '168 hours') return_7d
+  FROM human_messages m JOIN eligible e ON e.id=m.author_id GROUP BY 1
 ), replies AS MATERIALIZED (
   SELECT DISTINCT a.owner_id FROM messages m JOIN agents a ON a.agent_id=m.author_id
   JOIN first_messages f ON f.author_id=a.owner_id AND m.created_at>f.first_at
@@ -29,7 +33,12 @@ const PERIOD_SQL = `WITH ${COHORT_SQL}, eligible AS MATERIALIZED (
   WHERE m.room_id IS NULL AND m.removed_at IS NULL
 ), signup_facts AS MATERIALIZED (
   SELECT e.*,j.identity_id IS NOT NULL joined,f.first_at IS NOT NULL messaged,
-    r.owner_id IS NOT NULL replied,f.last_at >= $1::timestamptz-interval '168 hours' recent
+    r.owner_id IS NOT NULL replied,
+    (e.created_at AT TIME ZONE 'America/New_York')::date+2 <=
+      ($1::timestamptz AT TIME ZONE 'America/New_York')::date eligible_1d,
+    e.created_at+interval '168 hours'<$1::timestamptz eligible_7d,
+    coalesce(f.return_1d,false) return_1d,coalesce(f.return_7d,false) return_7d,
+    f.last_at >= $1::timestamptz-interval '168 hours' recent
   FROM eligible e LEFT JOIN joined j ON j.identity_id=e.id
   LEFT JOIN first_messages f ON f.author_id=e.id LEFT JOIN replies r ON r.owner_id=e.id
 ), workspace_facts AS MATERIALIZED (
@@ -51,7 +60,12 @@ const PERIOD_SQL = `WITH ${COHORT_SQL}, eligible AS MATERIALIZED (
   SELECT key,count(*) new_people,count(*) FILTER(WHERE joined) joined,
     count(*) FILTER(WHERE joined AND messaged) messaged,
     count(*) FILTER(WHERE joined AND messaged AND replied) replied,
-    count(*) FILTER(WHERE joined AND messaged AND replied AND recent) recent FROM signups GROUP BY 1
+    count(*) FILTER(WHERE joined AND messaged AND replied AND recent) recent,
+    count(*) FILTER(WHERE joined AND messaged AND replied AND eligible_1d) eligible_1d,
+    count(*) FILTER(WHERE joined AND messaged AND replied AND eligible_1d AND return_1d) return_1d,
+    count(*) FILTER(WHERE joined AND messaged AND replied AND eligible_1d AND return_1d AND eligible_7d) eligible_7d,
+    count(*) FILTER(WHERE joined AND messaged AND replied AND eligible_1d AND return_1d AND eligible_7d AND return_7d) return_7d
+    FROM signups GROUP BY 1
 ), workspace_totals AS (
   SELECT w.key,count(f.id) workspaces FROM windows w LEFT JOIN workspace_facts f ON f.created_at>=w.since GROUP BY 1
 ), active_buckets AS (
@@ -74,6 +88,8 @@ const PERIOD_SQL = `WITH ${COHORT_SQL}, eligible AS MATERIALIZED (
 SELECT w.key,w.unit,coalesce(a.people,0) people,coalesce(a.messages,0) messages,
   coalesce(s.new_people,0) new_people,coalesce(s.joined,0) joined,coalesce(s.messaged,0) messaged,
   coalesce(s.replied,0) replied,coalesce(s.recent,0) recent,t.workspaces,
+  coalesce(s.eligible_1d,0) eligible_1d,coalesce(s.return_1d,0) return_1d,
+  coalesce(s.eligible_7d,0) eligible_7d,coalesce(s.return_7d,0) return_7d,
   coalesce(b.active_series,'[]'::jsonb) active_series,coalesce(b.growth_series,'[]'::jsonb) growth_series
 FROM windows w LEFT JOIN active_totals a USING(key) LEFT JOIN signup_totals s USING(key)
 JOIN workspace_totals t USING(key) LEFT JOIN series b USING(key)`;
@@ -131,7 +147,12 @@ export async function dashboardPeriods(database: SqlDatabase, measuredAt: string
             workspaces: Number(row.workspaces),
             series: row.growth_series,
           },
-          funnel: { steps, biggestDrop },
+          funnel: { steps, biggestDrop, returns: [
+            { key: 'return_1d', label: 'Came back the next day', eligible: Number(row.eligible_1d),
+              count: Number(row.eligible_1d) ? Number(row.return_1d) : null },
+            { key: 'return_7d', label: 'Still active after day 7', eligible: Number(row.eligible_7d),
+              count: Number(row.eligible_7d) ? Number(row.return_7d) : null },
+          ] },
           onboardingFunnel,
         },
       ];

@@ -8,7 +8,7 @@ import { getEffectiveRelayUrl, loadBuzzIdentity } from '@/auth/buzz-identity-sto
 import { mobileSurfaceCache, surfaceAddress } from '@/buzz/surface-storage';
 import { sharedLiveConnection } from '@/sync/transport/live-connection';
 import { RoomViewClient } from '@/sync/transport/room-view-client';
-import { phoneOperationFailureReason } from '@/sync/transport/monolith-operation';
+import { appReadErrorCopy } from './app-error-copy';
 import { subscribeClientReset } from '@/sync/client-reset';
 import { cornerHeaderItem, type CornerDisplayItem } from '@/buzz/corner-display-state';
 import {
@@ -125,7 +125,7 @@ export function useRoomCorners(
       await readFirstPage(roomId, await reader(), force);
       setError(null);
     } catch (reason) {
-      setError(phoneOperationFailureReason(reason));
+      setError(appReadErrorCopy(reason));
     }
   }, [reader, roomId]);
   const refresh = useCallback(() => read(true), [read]);
@@ -157,7 +157,7 @@ export function useRoomCorners(
         const now = getRoomCorners(roomId);
         if (rereadOnMount || !now.current || !now.headerRead || now.wantsRead) await read(false);
       } catch (reason) {
-        if (!cancelled) setError(phoneOperationFailureReason(reason));
+        if (!cancelled) setError(appReadErrorCopy(reason));
       }
     })();
     return () => {
@@ -174,14 +174,14 @@ export function useRoomCorners(
       refreshingOpen.current = true;
       void reader()
         .then((value) => rereadPages(roomId, value, false))
-        .catch((reason) => setError(phoneOperationFailureReason(reason)))
+        .catch((reason) => setError(appReadErrorCopy(reason)))
         .finally(() => { refreshingOpen.current = false; });
     }
     if (record.archivedStale && record.archived && !refreshingArchived.current) {
       refreshingArchived.current = true;
       void reader()
         .then((value) => rereadPages(roomId, value, true))
-        .catch((reason) => setError(phoneOperationFailureReason(reason)))
+        .catch((reason) => setError(appReadErrorCopy(reason)))
         .finally(() => { refreshingArchived.current = false; });
     }
   }, [read, reader, record, roomId]);
@@ -200,7 +200,7 @@ export function useRoomCorners(
       if (getRoomCorners(roomId).nextOpen !== cursor) return;
       applyOpenCornerPage(roomId, page.corners, page.nextOpen, mark);
     } catch (reason) {
-      setError(phoneOperationFailureReason(reason));
+      setError(appReadErrorCopy(reason));
     } finally {
       loadingOpen.current = false;
     }

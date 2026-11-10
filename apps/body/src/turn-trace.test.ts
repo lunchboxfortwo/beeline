@@ -73,16 +73,13 @@ describe('turn phase trace', () => {
     const { now, advance } = clock();
     const turn = trace(now);
     turn.noteScheduler('queue', {
-      live: 4,
-      pending: 0,
+      running: 4,
+      warm: 0,
       busy: 4,
       queuedChannels: 2,
-      maxLive: 4,
-      perRoom: 10,
     });
     turn.start('queue-wait');
     advance(2_500);
-    turn.noteCapacityWait();
     turn.end('queue-wait');
     turn.noteActivation('cold');
     turn.start('activation');
@@ -104,7 +101,6 @@ describe('turn phase trace', () => {
     expect(record.attempts).toHaveLength(1);
     const [attempt] = record.attempts;
     expect(attempt!.activation).toBe('cold');
-    expect(attempt!.capacityWait).toBe(true);
     expect(attempt!.phases).toEqual({
       'queue-wait': 2_500,
       activation: 3_100,
@@ -114,7 +110,7 @@ describe('turn phase trace', () => {
       publish: 180,
     });
     expect(record.totalMs).toBe(10_800);
-    expect(record.scheduler.atQueue?.maxLive).toBe(4);
+    expect(record.scheduler.atQueue?.running).toBe(4);
   });
 
   it('records how the institutional-memory snapshot fetch resolved, absent when it never ran', async () => {
@@ -388,7 +384,7 @@ import { describe as mergedDescribe42 } from 'vitest';
 mergedDescribe42("turn-replay.test.ts", () => {
 
 
-m42_it('records ordered calls, terminal durations and unfinished calls without arguments or personal details', () => {
+m42_it('records ordered calls, terminal durations and unfinished calls without arguments or successful output', () => {
   let clock = 0;
   const trace = new m42_TurnTrace({ surface: 'room', agentId: 'agent', roomId: 'room', requestId: 'request', now: () => clock });
   const privateText = 'person@example.com sk-secret1234567890 https://example.com/path?secret=yes';
@@ -402,11 +398,12 @@ m42_it('records ordered calls, terminal durations and unfinished calls without a
   const replay = trace.replay()!;
   m42_expect(replay.attempts[0]?.tools).toEqual([
     { name: 'read', outcome: 'ok', durationMs: 12, outputBytes: Buffer.byteLength(privateText) },
-    { name: 'post', outcome: 'refused', durationMs: 13, outputBytes: Buffer.byteLength(`permission denied ${privateText}`), error: 'permission denied [EMAIL] [TOKEN] [URL]' },
+    { name: 'post', outcome: 'refused', durationMs: 13, outputBytes: Buffer.byteLength(`permission denied ${privateText}`), error: `permission denied ${privateText}` },
     { name: 'unknown', outcome: 'unfinished', durationMs: 0 },
   ]);
   const stored = JSON.stringify(trace.snapshot('failed', privateText));
-  for (const secret of ['person@example.com', 'sk-secret1234567890', 'secret=yes', 'rawInput']) m42_expect(stored).not.toContain(secret);
+  m42_expect(stored).not.toContain('rawInput');
+  m42_expect(stored).toContain(privateText);
   m42_expect(m42_sanitizeTurnReplay({ ...replay, arguments: privateText })).toEqual(replay);
 });
 
@@ -419,15 +416,16 @@ m42_it('whitelists malicious wire payloads and caps excerpts at the server bound
   m42_expect(trace?.attempts[0]?.tools).toEqual([]);
   m42_expect(trace?.attempts[1]?.tools[0]).toMatchObject({ name: 'unknown', outcome: 'unfinished', durationMs: 0 });
   m42_expect(trace?.attempts[1]?.tools[0]?.error?.length).toBeLessThanOrEqual(160);
-  m42_expect(JSON.stringify(trace)).not.toMatch(/private|example.com|secret=|arguments/);
+  m42_expect(JSON.stringify(trace)).not.toMatch(/arguments/);
+  m42_expect(trace?.attempts[1]?.tools[0]?.error).toContain('token=abcdef');
 });
 
 
-m42_it('bounds and redacts optional pre-session failure metadata without changing normal traces', () => {
+m42_it('bounds optional pre-session failure metadata without changing normal traces', () => {
   const base = {totalMs:0, attempts:[]};
   m42_expect(m42_sanitizeTurnReplay(base)).toEqual(base);
   m42_expect(m42_sanitizeTurnReplay({...base, reason:'token=private https://private.example', reasonKind:'workspace-failure'}))
-    .toEqual({...base,reason:'[SECRET] [URL]',reasonKind:'workspace-failure'});
+    .toEqual({...base,reason:'token=private https://private.example',reasonKind:'workspace-failure'});
   for (const reasonKind of ['BAD', 'a'.repeat(41), 'contains secret', 12, null]) {
     m42_expect(m42_sanitizeTurnReplay({...base,reason:12,reasonKind})).toEqual(base);
   }

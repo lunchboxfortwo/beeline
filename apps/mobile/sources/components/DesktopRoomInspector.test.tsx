@@ -1,6 +1,6 @@
 const computerFocus = vi.hoisted(() => ({ active: true }));
 vi.mock('@/buzz/use-surface-focus', () => ({ useSurfaceFocus: () => computerFocus.active }));
-vi.mock('@expo/vector-icons', async () => { const R = await import('react'); return { Ionicons: (props: any) => R.createElement('Ionicons', props) }; });
+vi.mock('@expo/vector-icons/Ionicons', async () => { const R = await import('react'); return { default: (props: any) => R.createElement('Ionicons', props) }; });
 vi.mock('expo-haptics', () => ({ ImpactFeedbackStyle: { Light: 'Light' }, impactAsync: async () => undefined }));
 vi.mock('react-native-keyboard-controller', async () => { const R = await import('react'); return { KeyboardAvoidingView: (props: any) => R.createElement('View', props, props.children) }; });
 import * as React from 'react';
@@ -418,7 +418,8 @@ describe('DesktopRoomInspector work pane', () => {
       await act(async () => { tree = create(<DesktopRoomInspector {...props({ client, selectedCornerId: 'working' })} />); });
       await act(async () => { tree.update(<DesktopRoomInspector {...props({ client, selectedCornerId: 'broken' })} />); });
       expect(tree.root.findAllByProps({ testID: 'desktop-work-corner-transcript' })).toHaveLength(0);
-      expect(tree.root.findByProps({ testID: 'desktop-corner-retry' })).toBeTruthy();
+      expect(tree.root.findAllByProps({ testID: 'desktop-corner-retry' })).toHaveLength(0);
+      expect(tree.root.findAllByProps({ action: 'Retry' })).toHaveLength(0);
     } finally { await act(async () => tree.unmount()); }
   });
 

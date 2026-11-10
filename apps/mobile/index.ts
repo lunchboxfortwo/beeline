@@ -3,7 +3,7 @@
 // @noble/hashes, @noble/curves, and nostr-tools require at import time).
 import 'react-native-get-random-values';
 import './sources/polyfills/arrayFindLast';
-import './sources/buzz/sentry';
+import './sources/buzz/sentry-entry';
 
 import './sources/polyfills/screenOrientation';
 import './sources/polyfills/webViewport';

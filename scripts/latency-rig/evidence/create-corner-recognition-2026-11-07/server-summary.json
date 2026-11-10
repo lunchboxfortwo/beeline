@@ -1,0 +1,16 @@
+{
+  "create": {
+    "samples": 40,
+    "p50Ms": 59.025698999999804,
+    "p95Ms": 97.72405500000002,
+    "sqlCountP50": 26,
+    "sqlTimeP50Ms": 59
+  },
+  "coveringRead": {
+    "samples": 40,
+    "p50Ms": 13.949455999999827,
+    "p95Ms": 21.978786000000127,
+    "sqlCountP50": 4,
+    "sqlTimeP50Ms": 13
+  }
+}

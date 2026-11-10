@@ -9,7 +9,9 @@ import {
     obsidianTheme,
 } from './theme';
 import * as SystemUI from 'expo-system-ui';
-import * as NavigationBar from 'expo-navigation-bar';
+import { applySystemBackground } from './buzz/system-background';
+import { captureMobileError } from './buzz/sentry-entry';
+import { setAndroidNavigationBarStyle } from './buzz/android-navigation-bar';
 import { LAYOUT_BREAKPOINTS } from './utils/layoutClass';
 import type { LocalSettings } from './sync/localSettings';
 import { loadLocalSettings } from './sync/persistence';
@@ -77,9 +79,10 @@ export function navigationBarStyleForTheme(themeName: AppThemeName): 'light' | '
 function applyRootBackground(themeName: AppThemeName): void {
     const rootColor = appThemes[themeName].colors.groupped.background;
     UnistylesRuntime.setRootViewBackgroundColor(rootColor);
-    void SystemUI.setBackgroundColorAsync(rootColor);
+    void applySystemBackground(() => SystemUI.setBackgroundColorAsync(rootColor),
+        error => captureMobileError('system-background', error));
     if (Platform.OS === 'android') {
-        NavigationBar.setStyle(navigationBarStyleForTheme(themeName));
+        void setAndroidNavigationBarStyle(navigationBarStyleForTheme(themeName));
     }
 }
 
@@ -96,13 +99,6 @@ export function setAppDisplay(
     const themeName = themeNameForDisplay(appearance, uiSize);
     UnistylesRuntime.setTheme(themeName);
     applyRootBackground(themeName);
-}
-
-function setAppAppearance(
-    appearance: LocalSettings['appearance'],
-    uiSize: LocalSettings['uiSize'] = loadLocalSettings().uiSize,
-): void {
-    setAppDisplay(appearance, uiSize);
 }
 
 /** Settings → Appearance only. Text-size changes keep using setAppDisplay so

@@ -1,8 +1,9 @@
+import * as daemonWorkbench from './daemon/workbench.js';
 import { afterAll, beforeAll, expect, it, vi } from 'vitest';
 import type { AddressInfo } from 'node:net';
 import { migrate } from './database.js';
 import { PgliteDatabase, describedWorkflow, insertCornerFacts } from './test-support.js';
-import { DaemonService } from './daemon-service.js';
+import { HelperDaemonService as DaemonService } from './test-fixtures/helper-daemon.js';
 import { LiveHub } from './live.js';
 import { TokenAuth, tokenHash } from './auth.js';
 import { PhoneService } from './phone-service.js';
@@ -21,7 +22,7 @@ const corner = '33333333-3333-4333-8333-333333333333';
 const head = 'c'.repeat(40);
 const live = new LiveHub();
 const daemon = new DaemonService(db, live);
-vi.spyOn(daemon, 'warmConnectorIndex').mockResolvedValue();
+vi.spyOn(daemonWorkbench, 'daemonWarmConnectorIndex').mockResolvedValue();
 let server: ReturnType<typeof createBeelineServer>;
 let origin: string;
 
@@ -32,7 +33,7 @@ beforeAll(async () => {
   await db.query(`INSERT INTO workspaces(id,name) VALUES($1,'Refusal proof')`, [workspace]);
   await db.query(`INSERT INTO rooms(id,workspace_id,name) VALUES($1,$2,'Parent')`, [parent, workspace]);
   await db.query(`INSERT INTO rooms(id,workspace_id,parent_id,name) VALUES($1,$2,$3,'Corner')`, [corner, workspace, parent]);
-  await db.query(`INSERT INTO memberships(workspace_id,room_id,identity_id,role) VALUES($1,$2,$3,'member')`, [workspace, parent, agent]);
+  await db.query(`INSERT INTO memberships(workspace_id,room_id,identity_id,role) VALUES($1,NULL,$3,'member'),($1,$2,$3,'member')`, [workspace, parent, agent]);
   await insertCornerFacts(db, { cornerId: corner, ownerAgentId: agent });
   await db.query(`INSERT INTO daemon_tokens(token_hash,agent_id) VALUES($1,$2)`, [tokenHash('bdt_refusal_fixture_123456789'), agent]);
   server = createBeelineServer({ database: db, daemon, live, auth: new TokenAuth(db, async () => { throw new Error('unused'); }), phone: new PhoneService(db, 'http://test'), mediaMaximumBytes: 1 });

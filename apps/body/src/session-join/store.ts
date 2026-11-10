@@ -1,3 +1,4 @@
+import { waitForPathRemoval } from '../filesystem-change.js';
 // Local state for sessions that joined Beeline: one private file per machine user, a lock, and per-session inboxes
 // for apps that take messages through their own hooks or plugins instead of a push channel.
 import { createHash, randomUUID } from 'node:crypto';
@@ -34,8 +35,14 @@ export interface JoinedSession {
   wakeDeliveries?: Record<string, { firstAt: string; redeliveries: number }>;
   /** The app's own CLI, for apps reached through it (Codex). */
   agentBin?: string;
+  /** Current server delivery proof generation, independent of membership. */
+  deliveryGeneration?: string;
+  deliveryMechanism?: 'local'|'events'|'webhook'|'on_demand'|'unfinished';
   joinedAt: string;
 }
+
+/** Old joins retain their installed stream; new on-demand/unbound hosts never acquire a parallel stream. */
+export const hasLocalDelivery=(session:JoinedSession):boolean=>session.deliveryMechanism===undefined || session.deliveryMechanism==='local';
 
 /** A session an app's hook or plugin reported: alive while it reports, and its process lives. */
 export interface HookSession {
@@ -102,7 +109,7 @@ export async function withLock<T>(dir: string, run: () => Promise<T> | T): Promi
       // A holder that died leaves its lock; nothing holds it for 30 seconds.
       try { if (Date.now() - statSync(lock).mtimeMs > 30_000) rmSync(lock, { recursive: true, force: true }); } catch { /* gone */ }
       if (attempt > 400) throw new Error('Beeline session state is locked');
-      await new Promise(resolve => setTimeout(resolve, 25));
+      await waitForPathRemoval(lock);
     }
   }
   try { return await run(); } finally { rmSync(lock, { recursive: true, force: true }); }

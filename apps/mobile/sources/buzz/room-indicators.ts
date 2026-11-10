@@ -1,6 +1,6 @@
 import { resolveAgentDisplayIdentity } from './agent-display';
 import { pickTurnVerb, type TurnVerb } from './turn-clock';
-import type { CornerState } from '@beeline/api-contract/phone';
+import type { RoomViewPendingAgentCommand, CornerState } from '@beeline/api-contract/phone';
 import type { Agent, RoomViewAgentTurn, RoomViewIdentity } from '@beeline/buzz-client';
 
 /**
@@ -26,6 +26,7 @@ export type TurnProgressInput = {
   /** Corners trust their own channel-local turn proof even if Room presence is stale. */
   isCorner: boolean;
   activeTurnPubkey?: string;
+  activeTurnGenerationId?: string;
   /** Server receipt time (unix seconds) the elapsed counter ticks from. */
   activeTurnStartedAt?: number;
   /** Stable per-turn identity; seeds the one-verb-per-turn pick. */
@@ -83,16 +84,28 @@ export function selectWorkingAgents(input: WorkingAgentsInput): Readonly<Record<
 /** How long a locally-armed "buzzing" ack waits for the real WORKING receipt
  * before it must stop implying the daemon is still on its way. */
 export const COMPOSER_ACK_BOUND_MS = 15_000;
+/** Brief confirmation of storage, without implying an external agent picked it up. */
+export const EXTERNAL_SENT_VISIBLE_MS = 3_000;
+export type PendingComposerAck = {
+  sentAt: number;
+  requestId?: string;
+  externalHandles?: readonly string[];
+};
 /** How long a committed mid-turn steer acknowledgement remains visible. */
 export const STEER_RECEIVED_VISIBLE_MS = 6_000;
 
-export type ComposerAckState = { kind: 'thinking'; agentPubkey: string } | { kind: 'buzzing' };
+export type ComposerAckState =
+  | { kind: 'thinking'; agentPubkey: string }
+  | { kind: 'sent'; handles: readonly string[] }
+  | { kind: 'buzzing' };
 
 export type ComposerAckInput = TurnProgressInput & {
   /** Set the instant a message addressed to an agent is sent; cleared once
    * the server accepts the write, the real receipt lands, a fresher send
    * re-arms it, or nothing addressed an agent this turn. */
   pendingAckSentAt?: number;
+  /** Present only after the server accepts a send addressed to external members. */
+  externalHandles?: readonly string[];
   now: number;
 };
 
@@ -109,10 +122,13 @@ export type ComposerAckPresentationInput = ComposerAckInput & {
   agentsByPubkey?: ReadonlyMap<string, AgentDisplaySource>;
   /** A human steer the server routed while this exact turn was working. */
   receivedSteer?: { agentPubkey: string; turnRequestId: string };
+  pendingAgentCommands?: readonly RoomViewPendingAgentCommand[];
 };
 
 export type ComposerAckPresentation = {
   label: string;
+  /** Storage acknowledgement uses the same line without live motion. */
+  live?: false;
   /** Present only when a real server receipt drives the line. */
   startedAt?: number;
   turnKey?: string;
@@ -177,6 +193,11 @@ export function selectComposerAckState(input: ComposerAckInput): ComposerAckStat
   if (input.pendingAckSentAt == null) return null;
   const elapsed = input.now - input.pendingAckSentAt;
   if (elapsed < 0) return null;
+  if (input.externalHandles?.length) {
+    return elapsed < EXTERNAL_SENT_VISIBLE_MS
+      ? { kind: 'sent', handles: input.externalHandles }
+      : null;
+  }
   return elapsed < COMPOSER_ACK_BOUND_MS ? { kind: 'buzzing' } : null;
 }
 
@@ -189,8 +210,23 @@ export function selectComposerAckState(input: ComposerAckInput): ComposerAckStat
 export function selectComposerAckPresentation(
   input: ComposerAckPresentationInput,
 ): ComposerAckPresentation | null {
+  const pending = !input.activeTurnPubkey
+    ? input.pendingAgentCommands?.find(command => command.runtimePhase?.phase === 'starting')
+    : undefined;
+  if (pending) {
+    const agent = agentFromConversationIdentity(input.conversationIdentities?.get(pending.agentPubkey)) ??
+      input.agentsByPubkey?.get(pending.agentPubkey);
+    const subject = resolveAgentDisplayIdentity(pending.agentPubkey,agent).name;
+    return { label: `${subject} · starting…`,
+      ...(viewerMayStopTurn(input.viewerPubkey,input.viewerCanSend)
+        ? { stop: { agentPubkey:pending.agentPubkey,requestId:pending.requestId } } : {}),
+    };
+  }
   const state = selectComposerAckState(input);
   if (!state) return null;
+  if (state.kind === 'sent') {
+    return { label: `Sent to ${state.handles.map((handle) => `@${handle}`).join(', ')}`, live: false };
+  }
   if (state.kind === 'thinking') {
     const agent =
       agentFromConversationIdentity(input.conversationIdentities?.get(state.agentPubkey)) ??
@@ -229,24 +265,4 @@ export function selectComposerAckPresentation(
     return { label: `${subject} thinking…` };
   }
   return { label: 'sending…' };
-}
-
-/**
- * Motion means one thing product-wide: an agent is working in that corner.
- * Waiting and review show no breath.
- */
-function isPinnedCornerLive(status: CornerState): boolean {
-  return status === 'working';
-}
-
-/** A corner has an approvable change waiting. */
-function isPinnedCornerReadyForReview(status: CornerState): boolean {
-  return status === 'review';
-}
-
-/** Human-facing branch label for a full Git target ref. */
-function humanBranchName(ref: string | undefined): string | undefined {
-  const value = ref?.trim();
-  if (!value) return undefined;
-  return value.replace(/^refs\/heads\//, '');
 }

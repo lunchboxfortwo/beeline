@@ -1,4 +1,3 @@
-import { commandOwnerExpiredSql } from './turn-ownership.js';
 import { AsyncLocalStorage } from 'node:async_hooks';
 import { clearOwedMention } from './owed-mentions.js';
 import { createHash, randomUUID } from 'node:crypto';
@@ -30,6 +29,7 @@ export const MCP_AGENT_EXCLUSIONS: Readonly<Record<string, string>> = {
   wait_link_spend_request: WALLET_SPENDING,
   request_grant: HOST_GRANTS,
   run_granted_command: HOST_GRANTS,
+  store_secret: HOST_GRANTS,
   repository_io: MACHINE,
   list_files: MACHINE,
   read_file: MACHINE,
@@ -57,9 +57,8 @@ const APP_ROUTES: Record<string, Record<string, Route | string>> = {
       description: 'Ask your owner to type secrets into a Save to vault card. Send names and purpose only; values never reach you.' },
   },
   onboarding: {
-    welcome: { op: 'post_starter_welcome', required: [], description: 'Post the signup welcome choices here.' },
-    video_preview: { op: 'post_starter_video_preview', required: ['videoObjectId', 'frameObjectId', 'title', 'description', 'visibility'],
-      description: 'Show a clip preview above Post/Cancel; nothing uploads until a person taps Post.' },
+    welcome: { op: 'post_starter_welcome', required: [], description: 'Post the signup welcome question here.' },
+    game: { op: 'post_starter_game', required: [], description: 'Play tic-tac-toe when the person asks.' },
     invite: { op: 'post_room_invite', required: [], description: 'Post an invite link for this Room. Workspace manager membership is required.' },
     repository: { op: 'post_repository_card', required: [], description: 'Post the Room repository card.' },
     starters: { op: 'post_starters_card', required: [], description: 'Post 3 to 4 one-tap starter tasks for the linked repository.' },
@@ -72,7 +71,7 @@ const APP_ROUTES: Record<string, Record<string, Route | string>> = {
     advance: { op: 'handoff', required: ['runId', 'outcome', 'contents'], description: 'Advance a run you hold, with an outcome its state declares.' },
     cancel: { op: 'cancel_workflow_run', required: ['runId', 'reason'], description: 'End an active run with a recorded reason.' },
     archive: { op: 'archive_workflow', required: ['name'], description: 'Retire a saved workflow by name.' },
-    rebind: { op: 'assign_workflow_role', required: ['runId', 'role', 'agent'], description: 'Bind one agent to a list-bound role of a run.' },
+    rebind: { op: 'assign_workflow_role', required: ['runId', 'role', 'agent'], description: 'Bind an agent to a role; resumes a failed run at its failed step.' },
   },
   wallet: {
     address: { op: 'wallet_address', required: [], description: 'Read the wallet address.' },
@@ -143,13 +142,13 @@ export const MCP_AGENT_TOOLS: Tool[] = [
     address: address('Corner id.'), action: { type: 'string', enum: ['metadata', 'brief', 'install_brief'] }, reviewer: { type: 'string' },
     name: { type: 'string' }, objective: { type: 'string' }, brief, expectedRevision: { type: 'integer', minimum: 0 }, change: { type: 'string', maxLength: 1000 },
   }, ['address', 'action']),
-  tool('order', 'Privately assign one agent besides yourself. A Room address needs agent; a corner defaults to its implementer. The report returns to you: read it with list_mentions.', {
+  tool('order', 'Privately assign one agent besides yourself. A Room address needs agent; a corner defaults to its implementer. Corner reports return to the current commander; human-approved revised briefs transfer command to their author; read yours with list_mentions.', {
     address: address(), agent: { type: 'string', maxLength: 120 }, text: { type: 'string', minLength: 1, maxLength: 16000 },
   }, ['address', 'text']),
   tool('stop', 'Stop the running turn of an agent you ordered, or one working in a corner you opened.', {
     address: address(), agent: { type: 'string', maxLength: 120 },
   }, ['address']),
-  tool('report', 'Answer an order with its outcome to whoever ordered you. Answer chat requests with a tagged message instead. commandId binds the exact order. Without it, prefers an order at address, then a single pending order elsewhere; refuses an ambiguous fallback and lists waiting orders. Without an order, a corner address reports to its commander. Status and text prefix agree: done:, blocked:, failed:, needs-decision:.', {
+  tool('report', 'Report a corner outcome to its current commander at the recorded return surface. Human-approved revised briefs transfer command to their author; earlier explicit orders retain their issuer. Later chat requests get ordinary replies here. Room and DM order outcomes return to their sender. commandId binds the exact order. Without it, prefers an order at address, then a single pending order elsewhere; refuses an ambiguous fallback and lists waiting orders. Without an order, a corner address reports to its commander. Status and text prefix agree: done:, blocked:, failed:, needs-decision:.', {
     address: address(), status: { type: 'string', enum: ['done', 'blocked', 'failed', 'needs_decision'] },
     text: { type: 'string', minLength: 1, maxLength: 16000 }, ask: { type: 'string', maxLength: 140 },
   }, ['address', 'status', 'text']),
@@ -198,8 +197,8 @@ export const MCP_AGENT_TOOLS: Tool[] = [
   tool('app_tool', `Discover an app's operations with app and no tool; run one with tool and args. app is a connected app id from connect status, or one of ${['vault', 'onboarding', 'workflow', 'wallet', 'avatar'].map(app => `beeline:${app}`).join(', ')}. The wallet is read-only here.`, {
     address: address(), app: { type: 'string' }, tool: { type: 'string' }, args: { type: 'object', additionalProperties: true }, query: { type: 'string' },
   }, ['address', 'app']),
-  tool('wake', 'Manage your own wake sources in a place: schedules, events and corner lifecycle watches. lifecycle watches the corner named by corner. A wake reaches you through list_mentions and your webhook. Schedules support create, list, update and delete (update and delete take scheduleId); events support create (source, event) and delete (subscriptionId); lifecycle watches support create and delete (corner).', {
-    address: address(), action: { type: 'string', enum: ['create', 'list', 'update', 'delete', 'events', 'replace_events'] },
+  tool('wake', 'Manage your own wake sources in a place: schedules, events and corner lifecycle watches. lifecycle watches the corner named by corner. A wake reaches you through list_mentions and your webhook. Schedules support create, list, update and delete (update and delete take scheduleId); events support create (source, event) and delete (subscriptionId); pause and resume take one scheduleId or subscriptionId and skip missed schedule runs; lifecycle watches support create and delete (corner).', {
+    address: address(), action: { type: 'string', enum: ['create', 'list', 'update', 'delete', 'pause', 'resume', 'events', 'replace_events'] },
     trigger: { type: 'string', enum: ['schedule', 'event', 'lifecycle'] }, corner: address('Corner to watch, for lifecycle.'),
     title: { type: 'string', maxLength: 80 }, when: { type: 'string' }, workflowName: { type: 'string' }, prompt: { type: 'string', maxLength: 2000 },
     cadence: { type: 'object', required: ['kind'], additionalProperties: false, properties: { kind: { type: 'string', enum: ['interval', 'cron'] },
@@ -287,7 +286,9 @@ export class RoomsMcpAgentTools {
     // tags in this turn count toward the same depth limit.
     let incoming: Awaited<ReturnType<typeof mcpProvenance>> | null = null;
     if (!order) try {
-      incoming = await mcpProvenance(this.db, member, roomId);
+      const replyTo = this.postReplyRouting.getStore();
+      incoming = await mcpProvenance(this.db, member, roomId, undefined,
+        typeof replyTo === 'string' ? replyTo : undefined);
     } catch (error) {
       console.error('[rooms-mcp] provenance lookup failed; starting the turn without a parent', error);
     }
@@ -511,7 +512,7 @@ export class RoomsMcpAgentTools {
   private async openCorner(member: string, args: Args, exec: (op: string, input: Args) => Promise<unknown>) {
     const room = addressArg(args.room, 'room');
     const implementer = String(args.implementer ?? '').trim().replace(/^@/, '').toLowerCase();
-    const self = (await this.db.query<{ handle: string | null }>('SELECT handle FROM identities WHERE id=$1', [member])).rows[0];
+    const self = (await this.db.query<{ handle: string | null }>('SELECT beeline_room_handle(id,$2) handle FROM identities WHERE id=$1', [member,room])).rows[0];
     const repository = await exec('getRoomRepositoryState', { roomId: await this.place(member, room) }) as {
       resolution?: string; key?: string; remote?: string; targetBranch?: string };
     // An app runs no Beeline machine, so it has no checkout to change files in.
@@ -567,15 +568,21 @@ export class RoomsMcpAgentTools {
     if (!bytes?.length) throw new McpToolError('the file is empty');
     const mime = text(args.mime) ?? (args.html !== undefined ? 'text/html' : 'application/octet-stream');
     const title = text(args.title)!;
-    if (await this.place(member, at) !== at) throw new McpToolError('post_artifact needs an address you are a direct member of');
+    await this.place(member, at);
     const uploaded = await this.objects.uploadArtifact(member, bytes, mime, title).catch((error: unknown) => {
       throw new McpToolError(`artifact refused: ${error instanceof Error ? error.message : 'invalid artifact'}`);
     });
-    return this.inTurn(member, at, async (_, context) => {
+    // Queue and publish in the addressed place, even when access comes from
+    // its parent Room. Reuse an explicitly bound order's authority.
+    const bound = this.boundTurn.getStore();
+    const turn = bound ?? await this.begin(member, at, false);
+    const context = { roomId: turn.roomId, requestId: turn.requestId, generationId: turn.generationId };
+    try {
       await exec('postAgentAttachment', { ...context, attachment: { url: uploaded.url, name: title, mimeType: uploaded.mimeType, size: bytes.length } });
-      // The file posts with this call's own reply, the way a turn's final reply carries it.
-      return exec('postRoomMessage', { ...context, text: text(args.text) ?? '' });
-    });
+      return await exec('postCornerMessage', { ...context, cornerId: at, text: text(args.text) ?? title });
+    } finally {
+      if (!bound) await this.end(member, turn, false);
+    }
   }
 
   private async appTool(member: string, args: Args, exec: (op: string, input: Args) => Promise<unknown>,
@@ -601,8 +608,7 @@ export class RoomsMcpAgentTools {
       switch (route.op) {
         case 'post_vault_save_card': return exec('postVaultSaveCard', { ...input, ...context });
         case 'post_starter_welcome': return exec('postStarterWelcome', context);
-        case 'post_starter_video_preview': return exec('postStarterVideoPreview', { ...context, videoObjectId: input.videoObjectId,
-          frameObjectId: input.frameObjectId, title: input.title, description: input.description, visibility: input.visibility });
+        case 'post_starter_game': return exec('postStarterGame', context);
         case 'post_room_invite': return exec('postRoomInvite', context);
         case 'post_repository_card': return exec('postRepositoryOnboarding', { ...context, kind: 'repository' });
         case 'post_starters_card': return exec('postRepositoryOnboarding', { ...context, kind: 'starters' });
@@ -631,6 +637,8 @@ export class RoomsMcpAgentTools {
     const at = addressArg(args.address);
     return this.inTurn(member, at, async (_, context) => {
       const roomId = context.roomId;
+      if (args.action === 'pause' || args.action === 'resume')
+        return exec('setAgentWakePaused', { ...context, scheduleId: args.scheduleId, subscriptionId: args.subscriptionId, paused: args.action === 'pause' });
       if (args.action === 'list') {
         const [schedules, subscriptions, watches, events] = await Promise.all([
           exec('listAgentSchedules', { roomId, selfOnly: true }), exec('listAgentSubscriptions', { roomId }),
@@ -677,16 +685,16 @@ function briefDraft(value: unknown): Args | undefined {
  * scheduled wakes addressed to this member that it has not handled yet.
  */
 export async function pendingMcpWakes(db: SqlDatabase, member: string) {
-  return (await db.query<{ id: string; room_id: string; reason: string; kind: string | null; text: string | null; created_at: Date; hiccup_attempts: number }>(
+  return (await db.query<{ id: string; room_id: string; reason: string; kind: string | null; text: string | null; created_at: Date }>(
     `SELECT command.id,command.room_id,command.reason,command.private_payload->>'kind' kind,
-       left(COALESCE(command.private_payload->>'text',source.text),16000) text,command.created_at,command.hiccup_attempts
+       left(COALESCE(command.private_payload->>'text',source.text),16000) text,command.created_at
      FROM agent_commands command LEFT JOIN messages source ON source.id=command.source_message_id
      WHERE command.agent_id=$1 AND command.action IN ('input','resume') AND command.reason<>'mcp_call'
        AND EXISTS(SELECT 1 FROM rooms active WHERE active.id=command.room_id AND active.archived_at IS NULL)
-       AND (command.state='pending' OR (command.state='claimed' AND ${commandOwnerExpiredSql('command')}))
+       AND command.state='pending'
        AND EXISTS(SELECT 1 FROM room_access member WHERE member.room_id=command.room_id
          AND member.identity_id=$1 AND member.removed_at IS NULL)
-     ORDER BY command.created_at,command.id LIMIT 30`, [member])).rows
-    .map(row => ({ id: row.id, deliveryVersion: row.hiccup_attempts, address: row.room_id, reason: row.reason, ...(row.kind ? { kind: row.kind } : {}),
+     ORDER BY command.created_at,command.id`, [member])).rows
+    .map(row => ({ id: row.id, address: row.room_id, reason: row.reason, ...(row.kind ? { kind: row.kind } : {}),
       ...(row.text ? { text: row.text } : {}), createdAt: row.created_at, next: mcpWakeNext(row.kind, row.reason) }));
 }

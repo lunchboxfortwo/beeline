@@ -1,7 +1,7 @@
 // Store publication, not an OTA or upload receipt, admits a retention slot.
 export const runtimeKey = ({ platform, runtimeVersion }) => `${platform}@${runtimeVersion}`;
 
-export function storeRuntimeTargets({ pins, stores, previouslyLive = [], previousTargets = [] }) {
+export function storeRuntimeTargets({ pins, stores, previouslyLive = [], previousTargets = [], channel = 'production' }) {
   const result = [];
   for (const platform of ['android', 'ios']) {
     const pin = pins[platform];
@@ -18,6 +18,13 @@ export function storeRuntimeTargets({ pins, stores, previouslyLive = [], previou
     const selected = store?.status === 'readable'
       ? (anchor ? [{ platform, runtimeVersion: anchor }, ...older.map(runtimeVersion => ({ platform, runtimeVersion }))] : [])
       : retained;
+    if (channel === 'next') {
+      // Keep every previously served runtime if this additional audience could
+      // not be read, plus any beta runtimes independently proved live now.
+      if (store?.warnings?.length) selected.push(...previousTargets.filter(t => t.platform === platform));
+      selected.push(...live);
+      selected.push(...(store?.betaLive ?? []));
+    }
     for (const target of selected) {
       if (target.platform !== platform || !/^\d+$/.test(target.runtimeVersion)) {
         throw new Error(`Invalid store runtime: ${runtimeKey(target)}`);
@@ -30,13 +37,22 @@ export function storeRuntimeTargets({ pins, stores, previouslyLive = [], previou
   return result;
 }
 
-export function playLiveBuilds(payload) {
-  if (!Array.isArray(payload?.releases)) throw new Error('Unreadable Play production releases');
-  return payload.releases.filter(r => r.releaseLifecycleState === 'RELEASE_LIFECYCLE_STATE_PUBLISHED')
-    .flatMap(r => {
-      if (r.track !== 'production' || !Array.isArray(r.activeArtifacts)) throw new Error('Invalid Play production release');
-      return r.activeArtifacts.map(a => String(a.versionCode));
-    });
+export function playLiveBuilds(payload, track = 'production') {
+  if (payload?.track !== track) throw new Error(`Invalid Play ${track} track`);
+  if (payload.releases !== undefined && !Array.isArray(payload.releases)) throw new Error(`Unreadable Play ${track} releases`);
+  // Staged and halted rollouts have installed users who still need OTAs.
+  // A draft has never been served. Missing releases is an empty track.
+  return (payload.releases ?? []).flatMap(release => {
+    if (!['completed', 'inProgress', 'halted', 'draft'].includes(release.status)) {
+      throw new Error(`Invalid Play ${track} release status`);
+    }
+    if (release.status === 'draft') return [];
+    if (!Array.isArray(release.versionCodes) || !release.versionCodes.length
+      || !release.versionCodes.every(code => typeof code === 'string' && /^\d+$/.test(code))) {
+      throw new Error(`Invalid Play ${track} version codes`);
+    }
+    return release.versionCodes;
+  });
 }
 
 export function resolveStoreBuilds(platform, buildNumbers, builds) {

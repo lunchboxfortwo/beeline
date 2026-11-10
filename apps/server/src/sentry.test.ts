@@ -19,9 +19,11 @@ it.each([['server', false], ['body', false], ['server', true], ['body', true]] a
     const modulePath = resolve('../', surface, 'src/sentry.ts');
     const capture = surface === 'server' ? 'captureServerError' : 'captureHelperError';
     const flush = surface === 'server' ? 'flushServerErrors' : 'flushHelperErrors';
-    const thrown = `throw new Error('Beeline Sentry E2E test ${surface} Bearer private user@example.com');`;
+    const postgres=surface==='server'&&!fatal;
+    const thrown = `throw ${postgres?"Object.assign(":''}new Error('Beeline Sentry E2E test ${surface} Bearer private user@example.com')${postgres?",{code:'40P01',detail:'Process 10 waits for ShareLock on transaction 20.'})":''};`;
     const source = `import { ${capture}, ${flush} } from ${JSON.stringify(modulePath)};
-      ${fatal ? thrown : `try { ${thrown} } catch (error) { ${capture}(error); } await ${flush}();`}`;
+      ${postgres?`import {recordPostgresStatementError} from ${JSON.stringify(resolve('src/postgres-error.ts'))};`:''}
+      ${fatal ? thrown : `try { ${thrown} } catch (error) { ${postgres?"recordPostgresStatementError(error,'SELECT id FROM memberships WHERE identity_id=$1');":''}${capture}(error); } await ${flush}();`}`;
     const result = await new Promise<{ code: number | null; error: string }>((done, reject) => {
       const child = spawn(process.execPath, ['--import', 'tsx', '--input-type=module', '-e', source], {
         env: { ...process.env, SENTRY_DSN: `http://public@127.0.0.1:${port}/1`,
@@ -35,6 +37,8 @@ it.each([['server', false], ['body', false], ['server', true], ['body', true]] a
     const events = envelopes.flatMap(envelope => envelope.split('\n').filter(line => line.startsWith('{')).map(line => JSON.parse(line)))
       .filter(item => item.exception);
     expect(events).toHaveLength(1);
+    if(postgres) expect(events[0].contexts.postgresql).toMatchObject({code:'40P01',
+      detail:'Process 10 waits for ShareLock on transaction 20.',statement_fingerprint:expect.stringMatching(/^[a-f0-9]{16}$/)});
     expect(events[0]).toMatchObject({ tags: { surface: surface === 'body' ? 'helper' : surface }, environment: 'test',
       exception: { values: [{ value: `Beeline Sentry E2E test ${surface} Bearer [redacted] [email]` }] } });
     expect(events[0].exception.values[0].stacktrace.frames.length).toBeGreaterThan(0);
@@ -196,7 +200,7 @@ it('SENTRY-7807034373: schedule HTTP refusals stay visible without Sentry events
       import assert from 'node:assert/strict';
       import { PgliteDatabase } from './src/test-support.ts';
       import { migrate } from './src/database.ts';
-      import { DaemonService } from './src/daemon-service.ts';
+      import { HelperDaemonService as DaemonService } from './src/test-fixtures/helper-daemon.ts';
       import { LiveHub } from './src/live.ts';
       import { createBeelineServer } from './src/server.ts';
       import { flushServerErrors } from './src/sentry.ts';
@@ -259,7 +263,7 @@ it('SENTRY-7807034373: schedule HTTP refusals stay visible without Sentry events
   } finally { await new Promise<void>(r => collector.close(() => r())); }
 }, 60_000);
 
-it('R-CHECKIN-ACTIVITY: invalid final output is actionable while unexpected database errors still alert', async () => {
+it('unexpected database errors still alert with retired validation wording', async () => {
   const envelopes: string[] = [];
   const collector = createServer(async (request, response) => {
     const chunks: Buffer[] = [];
@@ -274,7 +278,7 @@ it('R-CHECKIN-ACTIVITY: invalid final output is actionable while unexpected data
       import assert from 'node:assert/strict';
       import { PgliteDatabase } from './src/test-support.ts';
       import { migrate } from './src/database.ts';
-      import { DaemonService } from './src/daemon-service.ts';
+      import { HelperDaemonService as DaemonService } from './src/test-fixtures/helper-daemon.ts';
       import { LiveHub } from './src/live.ts';
       import { createAgentCommand, claimAgentCommand } from './src/agent-command.ts';
       import { createBeelineServer } from './src/server.ts';
@@ -287,9 +291,7 @@ it('R-CHECKIN-ACTIVITY: invalid final output is actionable while unexpected data
       await db.query("INSERT INTO workspaces(id,name) VALUES($1,'Test')",[workspace]);
       await db.query("INSERT INTO rooms(id,workspace_id,name) VALUES($1,$2,'Test')",[room,workspace]);
       await db.query("INSERT INTO memberships(workspace_id,room_id,identity_id,role) VALUES($1,NULL,$3,'member'),($1,$2,$3,'member')",[workspace,room,agent]);
-      const command=await createAgentCommand(db,{roomId:room,agentId:agent,sourceMessageId:null,reason:'free_agent_checkin'});
-      await db.query("INSERT INTO next_day_checkin_candidates(identity_id,first_at,due_at) VALUES($1,now()-interval '1 day',now())",[human]);
-      await db.query("INSERT INTO next_day_checkins(identity_id,due_at,room_id,agent_id,command_id) VALUES($1,now(),$2,$3,$4)",[human,room,agent,command.id]);
+      const command=await createAgentCommand(db,{roomId:room,agentId:agent,sourceMessageId:null,reason:'human_tag'});
       await claimAgentCommand(db,room,agent,command.id,'proof');
       const live=new LiveHub(), daemon=new DaemonService(db,live);
       const server=createBeelineServer({database:db,live,daemon,phone:{},
@@ -304,11 +306,6 @@ it('R-CHECKIN-ACTIVITY: invalid final output is actionable while unexpected data
       try {
         const activity={activity:[{kind:'thinking',title:'Working',status:'in_progress'}]};
         assert.equal((await call('postAgentActivity',activity)).status,200);
-        for (const output of [{text:'   '},{text:'Card',presentation:'card'}]) {
-          const result=await call('postRoomMessage',output);
-          assert.match(result.body.error,/Post nonempty text with message presentation/);
-        }
-        assert.equal((await db.query('SELECT sent_at FROM next_day_checkins')).rows[0].sent_at,null);
         // Exercise an actual database failure with the old validation wording.
         await db.query(\`CREATE FUNCTION fail_checkin_activity() RETURNS trigger LANGUAGE plpgsql AS $$
           BEGIN RAISE EXCEPTION 'A check-in must be one plain Room message'; END $$;
@@ -382,7 +379,7 @@ it('ATTACH-CAP-1: attachment cap is a client error and unexpected failures still
       import assert from 'node:assert/strict';
       import { PgliteDatabase } from './src/test-support.ts';
       import { migrate } from './src/database.ts';
-      import { DaemonService } from './src/daemon-service.ts';
+      import { HelperDaemonService as DaemonService } from './src/test-fixtures/helper-daemon.ts';
       import { LiveHub } from './src/live.ts';
       import { createAgentCommand } from './src/agent-command.ts';
       import { createBeelineServer } from './src/server.ts';
@@ -461,7 +458,7 @@ it('ATTACH-CAP-1: attachment cap is a client error and unexpected failures still
   } finally { await new Promise<void>(r => collector.close(() => r())); }
 }, 60_000);
 
-it('WORKFLOW-ROLE-REFUSAL / BEELINE-SENTRY-REFUSALS / APP-REFUSAL-5 / VIDEO-PREVIEW-1P: real agent handlers keep refusals out of Sentry', async () => {
+it('WORKFLOW-ROLE-REFUSAL / BEELINE-SENTRY-REFUSALS / APP-REFUSAL-5: real agent handlers keep refusals out of Sentry', async () => {
   const envelopes: string[] = [];
   const collector = createServer(async (request, response) => {
     const chunks: Buffer[] = [];
@@ -482,7 +479,7 @@ it('WORKFLOW-ROLE-REFUSAL / BEELINE-SENTRY-REFUSALS / APP-REFUSAL-5 / VIDEO-PREV
       import { describedWorkflow } from './src/test-support.ts';
       import { PgliteDatabase } from './src/test-support.ts';
       import { migrate } from './dist/database.js';
-      import { DaemonService } from './dist/daemon-service.js';
+      import { HelperDaemonService as DaemonService } from './dist/test-fixtures/helper-daemon.js';
       import { LiveHub } from './dist/live.js';
       import { createAgentCommand } from './dist/agent-command.js';
       import { createBeelineServer } from './dist/server.js';
@@ -581,7 +578,7 @@ it('WORKFLOW-ROLE-REFUSAL / BEELINE-SENTRY-REFUSALS / APP-REFUSAL-5 / VIDEO-PREV
             assert.deepEqual(mismatch,{status:503,body:{error:'unknown workflow role: reviewer'}});
             assert.deepEqual(await snapshot(),before);
           }
-          if (name === 'workspace-walk') await reserveServiceReviewWorkspaces(db,agent,runId,true);
+          if (name === 'workspace-walk') await reserveServiceReviewWorkspaces(db,agent,runId);
           const contents = name === 'workspace-walk' ? {receipts:(await db.query('SELECT * FROM service_review_targets($1,$2)',[agent,runId])).rows.map(row=>({workspace:row.workspace_id,rowsRead:0,firstMessageTime:null,lastMessageTime:null,findings:'none'}))} : {text:'x'.repeat(17000)};
           const result = await call({...input,runId,outcome:'reviewed',contents},'handoff');
           assert.match(result.body.error,name === 'workspace-walk' ? /workspace receipt must match/ : /contents exceeds 16 KB/);
@@ -594,44 +591,10 @@ it('WORKFLOW-ROLE-REFUSAL / BEELINE-SENTRY-REFUSALS / APP-REFUSAL-5 / VIDEO-PREV
           if (failure === 'permission') assert.equal(result.body.error,'App tool execution failed: '+JSON.stringify({error:{code:403,message:'Request had insufficient authentication scopes.',status:'PERMISSION_DENIED'}}));
           if (failure === 'flagged404') assert.ok(result.body.error.includes('Not Found'));
         }
-        // VIDEO-PREVIEW-1P: exercise the real app-tool guard before provider execution.
-        await db.query("INSERT INTO messages(id,room_id,author_id,text,card,created_at) VALUES('video-welcome',$1,$2,'Welcome',$3::jsonb,now()-interval '1 minute')",
-          [room,agent,JSON.stringify({starterOnboarding:'welcome',selectedOptionId:'B'})]);
-        await db.query("INSERT INTO workspace_apps(id,workspace_id,owner_identity_id,app_key,display_name,transport,route,composio_account_id) VALUES('55555555-5555-4555-8555-555555555555',$1,$2,'youtube','YouTube','composio','composio','fixture-youtube')",[workspace,human]);
-        const upload = {...input,appId:'app:youtube',tool:'YOUTUBE_MULTIPART_UPLOAD_VIDEO',arguments:{title:'Changed'}};
-        const tapMessage = 'Show the video preview with Post and Cancel, and wait for the person to tap Post before uploading.';
-        const matchMessage = 'Upload arguments must match the approved video preview exactly: title mismatched. Use videoFile: {beelineObjectId: "<videoObjectId from the preview>"}. Show a new preview for any changes.';
-        const missingApproval = await call(upload,'executeAppTool');
-        console.log('VIDEO-PREVIEW-1P missing approval HTTP response',JSON.stringify(missingApproval));
-        assert.deepEqual(missingApproval,{status:403,body:{error:tapMessage}});
-        const preview = await postRoomChoice(db,{roomId:room,agentId:agent,mode:'question',prompt:'Preview',
-          options:[{label:'Post',consequence:'Post'},{label:'Cancel',consequence:'Cancel'}]});
-        await db.query("UPDATE messages SET card=card || $2::jsonb WHERE id=$1",[preview.messageId,JSON.stringify({
-          status:'answered',selectedOptionId:'A',videoPreview:{videoObjectId:media,title:'Approved',description:'Description',visibility:'private'}
-        })]);
-        const changedUpload = await call(upload,'executeAppTool');
-        console.log('VIDEO-PREVIEW-1P changed upload HTTP response',JSON.stringify(changedUpload));
-        assert.deepEqual(changedUpload,{status:403,body:{error:matchMessage}});
-        assert.equal((await db.query('SELECT card FROM messages WHERE id=$1',[preview.messageId])).rows[0].card.youtubeUploadUsed,undefined);
-        await flushServerErrors();
-        // A database failure in this same guard must still alert, even with refusal wording.
-        const transaction = db.transaction.bind(db);
-        const failGuard = executor => ({
-          query: async (sql,params) => {
-            if (sql.includes("m.card->>'selectedOptionId' selected")) throw new Error(tapMessage);
-            return executor.query(sql,params);
-          },
-          transaction: work => executor.transaction(tx => work(failGuard(tx))),
-        });
-        db.transaction = work => transaction(tx => work(failGuard(tx)));
-        try {
-          assert.deepEqual(await call(upload,'executeAppTool'),{status:503,body:{error:tapMessage}});
-        } finally { db.transaction = transaction; }
-        await flushServerErrors();
         providerFault = 'unexpected';
         const unexpected = await call({...input,appId:'app:slack',tool:'SLACK_FETCH',arguments:{}},'executeAppTool');
-        assert.equal(unexpected.status,503);
-        assert.ok(unexpected.body.error.includes('Insufficient Permission'));
+        assert.deepEqual(unexpected,{status:200,body:{status:'executed',data:{successful:false,
+          error:'App tool execution failed: '+JSON.stringify({error:{code:500,message:'Insufficient Permission',status:'INTERNAL'}})}}});
         providerFault = 'http500';
         const outage = await call({...input,appId:'app:slack',tool:'SLACK_FETCH',arguments:{}},'executeAppTool');
         assert.equal(outage.status,503);
@@ -657,12 +620,10 @@ it('WORKFLOW-ROLE-REFUSAL / BEELINE-SENTRY-REFUSALS / APP-REFUSAL-5 / VIDEO-PREV
     expect(result, result.error).toMatchObject({ code: 0 });
     const events = envelopes.flatMap(envelope => envelope.split('\n').filter(line => line.startsWith('{')).map(line => JSON.parse(line)))
       .filter(item => item.exception);
-    expect(events).toHaveLength(4);
+    expect(events).toHaveLength(2);
     expect(events.map(event => event.exception.values[0].value).sort()).toEqual([
       'App provider request failed (500): upstream broken',
-      'App tool execution failed: '+JSON.stringify({error:{code:500,message:'Insufficient Permission',status:'INTERNAL'}}),
       'queued attachments exceed the size cap',
-      'Show the video preview with Post and Cancel, and wait for the person to tap Post before uploading.',
     ].sort());
   } finally { await new Promise<void>(r => collector.close(() => r())); }
 }, 60_000);

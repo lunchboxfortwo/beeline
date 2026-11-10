@@ -2,6 +2,7 @@ import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { sha256 } from '@noble/hashes/sha2.js';
 import { bytesToHex } from '@noble/hashes/utils.js';
 import { resetClientState } from '@/sync/client-reset';
+import { ArtifactByteError } from './artifact-byte-error';
 const mocks = vi.hoisted(() => ({ disk: new Map<string, Uint8Array>(), origin: 'https://media.test', principal: 'ada' }));
 vi.mock('@/auth/buzz-identity-storage', () => ({ loadBuzzIdentity: async () => ({ publicKey: mocks.principal }) }));
 vi.mock('./runtime-config', () => ({ getBuzzRuntimeConfig: () => ({ monolithUrl: mocks.origin }) }));
@@ -24,6 +25,22 @@ function install(size = 3, mimeType = 'image/png', content = bytes) {
 
 beforeEach(async () => { resetClientState(); await drain(); mocks.disk.clear(); mocks.origin = 'https://media.test'; mocks.principal = 'ada'; });
 describe('the shared artifact byte owner', () => {
+  it.each(['transfer', 'integrity'])('identifies a %s failure after metadata as a file failure', async kind => {
+    install();
+    const cause = new Error('artifact fetch failed: 404');
+    const read = kind === 'transfer' ? async () => { throw cause; } : async () => new Uint8Array([3, 2, 1]);
+    const failure = await readArtifactObject(attachment, read).catch(error => error);
+    expect(failure).toBeInstanceOf(ArtifactByteError);
+    if (kind === 'transfer') expect(failure.cause).toBe(cause);
+    else expect(failure.message).toContain('immutable integrity check');
+  });
+  it('retains the socket metadata failure for its existing recovery owner', async () => {
+    const cause = Object.assign(new Error('The connection closed before the server answered.'), { socketRequest: true });
+    vi.mocked(monolithPhoneOperation).mockRejectedValueOnce(cause);
+    const read = vi.fn(async () => bytes);
+    await expect(readArtifactObject(attachment, read)).rejects.toBe(cause);
+    expect(read).not.toHaveBeenCalled();
+  });
   it('preview, native view and save use one current immutable object flight and completion', async () => {
     install(); let resolve!: (value: Uint8Array) => void;
     const read = vi.fn(() => new Promise<Uint8Array>(done => { resolve = done; }));

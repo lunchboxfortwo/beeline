@@ -1,9 +1,10 @@
+import { OwnedModelUnknownGeneration } from './owned-model-errors.js';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { createAgentCommand } from './agent-command.js';
 import { DaemonService, type OwnedModelClaimCapability } from './daemon-service.js';
 import { LiveHub } from './live.js';
 import { OwnedModelAttempts } from './owned-model-attempt.js';
-import { OwnedModelUnknownGeneration } from './owned-model-credential.js';
+
 import { MODEL_AGENT, MODEL_CLAIM, MODEL_OWNER, MODEL_ROOM, MODEL_SOURCE, MODEL_WORKSPACE, ownedModelFixture } from './test-fixtures/owned-model.js';
 
 describe('actual owned-model claim transaction and secret boundary', () => {
@@ -26,7 +27,7 @@ describe('actual owned-model claim transaction and secret boundary', () => {
     vi.stubEnv('BEELINE_NETWORK_ROUTER_V1', '1');
     const events: unknown[] = []; const publish = vi.spyOn(live, 'publish').mockImplementation(event => { events.push(event); });
     const selected = await capability(), result = await daemon.execute('claimAgentCommand', input(), MODEL_AGENT, MODEL_SOURCE, selected);
-    expect(result.modelCredential).toMatchObject({ v: 1 }); expect(Number.isSafeInteger(result.modelCredential?.expiresAt)).toBe(true);
+    expect(result.modelCredential).toMatchObject({ v: 1 }); expect(result.modelCredential?.expiresAt).toBeNull();
     const bearer = result.modelCredential!.token, actor = await f.credentials.authenticate(f.db, bearer);
     expect(actor.binding).toMatchObject({ commandId, generationId, agentId: MODEL_AGENT, connectionId: MODEL_SOURCE.connectionId, connectionEpoch: MODEL_SOURCE.epoch });
     expect((await f.db.query('SELECT command_id FROM owned_model_credentials WHERE command_id=$1', [commandId])).rows).toEqual([{ command_id: commandId }]);
@@ -40,11 +41,12 @@ describe('actual owned-model claim transaction and secret boundary', () => {
     publish.mockRestore();
   });
 
-  it('keeps an unselected legacy caller compatible even with a configured signer and client-supplied model metadata', async () => {
-    const result = await daemon.execute('claimAgentCommand', { ...input(), ownedModelV1: true, modelCredential: { token: 'forged' } } as never, MODEL_AGENT);
-    expect(result).not.toHaveProperty('modelCredential');
+  it('refuses ownerless helper claims even with client-supplied model metadata', async () => {
+    await expect(daemon.execute('claimAgentCommand', { ...input(), ownedModelV1: true,
+      modelCredential: { token: 'forged' } } as never, MODEL_AGENT)).rejects.toThrow('helper claim requires its machine connection owner');
     expect((await f.db.query('SELECT * FROM owned_model_credentials WHERE command_id=$1', [commandId])).rowCount).toBe(0);
-    expect((await f.db.query('SELECT turn_owner_connection_id FROM agent_commands WHERE id=$1', [commandId])).rows).toEqual([{ turn_owner_connection_id: null }]);
+    expect((await f.db.query('SELECT state,turn_owner_connection_id FROM agent_commands WHERE id=$1', [commandId])).rows)
+      .toEqual([{ state:'pending',turn_owner_connection_id:null }]);
   });
 
   it('refuses source-only or forged capability claims and rolls the real claim/working-turn creation back without events', async () => {
@@ -57,12 +59,12 @@ describe('actual owned-model claim transaction and secret boundary', () => {
     expect(events).not.toHaveBeenCalled(); events.mockRestore();
   });
 
-  it('does not reuse a capability after signer configuration loss or under another service owner', async () => {
+  it('keeps machine ownership after signer loss and refuses another service owner’s model capability', async () => {
     const selected = await capability(); daemon.setOwnedModel(undefined);
-    await expect(daemon.execute('claimAgentCommand', input(), MODEL_AGENT, MODEL_SOURCE, selected)).rejects.toThrow('authority');
+    expect(await daemon.execute('claimAgentCommand', input(), MODEL_AGENT, MODEL_SOURCE, selected)).not.toHaveProperty('modelCredential');
     const other = new DaemonService(f.db, live); other.setOwnedModel({ credentials: f.credentials, ready: () => true });
     await expect(other.execute('claimAgentCommand', input(), MODEL_AGENT, MODEL_SOURCE, selected)).rejects.toThrow('authority');
-    expect((await f.db.query('SELECT state FROM agent_commands WHERE id=$1', [commandId])).rows).toEqual([{ state: 'pending' }]);
+    expect((await f.db.query('SELECT state FROM agent_commands WHERE id=$1', [commandId])).rows).toEqual([{ state: 'claimed' }]);
   });
 
   it('preserves an actual source-owned Stop and its bearer-free acknowledgement after model capability loss', async () => {

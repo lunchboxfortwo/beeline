@@ -27,7 +27,7 @@ if mode=='disk':
    name=os.path.basename(path)
    if name=='node_modules': kind='dependencies'
    elif name=='.codegraph': kind='codegraph'
-   elif name in ['tmp','attachments','logs','android-instances']: kind=name
+   elif name in ['tmp','attachments','logs']: kind=name
    bucket=category+':'+kind
    item=totals.setdefault(bucket,{'allocatedBytes':0,'entries':0})
    item['allocatedBytes']+=s.st_blocks*512; item['entries']+=1
@@ -64,7 +64,7 @@ else:
   owned=descendant(pid) or cwd.startswith(root+'/') or any(a.startswith(root+'/') for a in args)
   if not owned: continue
   text=' '.join(args)
-  category=('helper' if pid==owner else 'emulator' if 'qemu-system' in exe else
+  category=('helper' if pid==owner else
    'codegraph' if '/codegraph/' in exe else 'browser' if any(x in os.path.basename(exe) for x in ['chrome','chromium']) else
    'harness' if any(x in os.path.basename(exe) for x in ['codex','claude']) else 'other')
   item=totals.setdefault(category,{'rssBytes':0,'count':0}); item['rssBytes']+=rss; item['count']+=1
@@ -128,16 +128,14 @@ export function monitorHelperUsage(supervisorRoot: string): {
       if (!controller.signal.aborted) console.warn('[helper] usage process sample unavailable');
     } finally { sampling = false; }
   };
-  const timer = setInterval(() => { void tick(); }, 5 * 60_000);
-  timer.unref();
   void tick();
   return {
-    cleanup: entry => { cleanupActions++; freedBytes += entry.freedBytes; },
+    cleanup: entry => { cleanupActions++; freedBytes += entry.freedBytes; void tick(); },
     observe: states => {
       for (const state of states) {
         if (lifecycle.get(state.roomId) !== true) lifecycle.set(state.roomId, state.archived);
       }
     },
-    stop: () => { clearInterval(timer); controller.abort(); },
+    stop: () => { controller.abort(); },
   };
 }

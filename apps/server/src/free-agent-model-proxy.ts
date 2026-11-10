@@ -1,23 +1,22 @@
+import { OwnedModelUnknownGeneration } from './owned-model-errors.js';
+import { endFreeAgentModelTurn } from './free-agent-turn-budget.js';
 import { encodeOwnedModelReceipt } from '@beeline/api-contract/helper-model-receipt';
 import { OwnedModelStream } from './owned-model-stream.js';
-import { commandOwnerLiveSql } from './turn-ownership.js';
-import { freeAgentModelTakesImages, imageInput, withoutImageData } from './free-agent-image-input.js';
+import { imageInput, withoutImageData } from './free-agent-image-input.js';
 import { Writable } from 'node:stream';
-import { randomBytes } from 'node:crypto';
 import type { IncomingMessage, ServerResponse } from 'node:http';
 import { DEFAULT_FREE_AGENT_LIMITS, FREE_AGENT_BUDGET_MESSAGE, freeAgentTokenCapAt, type FreeAgentLimits } from './free-agent-limits.js';
 import type { SqlDatabase } from './database.js';
 import { warnFreeAgentOwner } from './free-agent-warning.js';
-import { recordFreeAgentEvent, tokenHash, type FreeAgentConfig } from './free-agents.js';
+import { recordFreeAgentEvent, type FreeAgentConfig } from './free-agents.js';
 import { FreeAgentPromptCache, promptTextBytes } from './free-agent-prompt-budget.js';
 import { OwnedModelAttempts, OwnedModelUnknownPayload, type OwnedModelAttemptReceipt, type OwnedModelEvidence, type OwnedModelReservation } from './owned-model-attempt.js';
-import { OwnedModelCredentials, OwnedModelUnknownGeneration, type AuthenticatedOwnedModel } from './owned-model-credential.js';
+import { OwnedModelCredentials, type AuthenticatedOwnedModel } from './owned-model-credential.js';
 import { CommandRefusalError } from './command-refusal.js';
+import { AllowanceRefusal as OwnedModelAllowanceRefusal, DEFAULT_OUTPUT_RESERVATION, reserveAllowance, reserveAllowanceInTransaction, settleAllowance } from './free-agent-accounting.js';
+export { reserveAllowance } from './free-agent-accounting.js';
 
 const promptCache = new FreeAgentPromptCache();
-// Shared across all in-flight calls for one owner/day, including other servers.
-// Even a complete cache miss cannot add more than this much admission risk.
-const MAX_RESERVATION_CREDIT = 32_768;
 
 /**
  * The only model access a free agent's Machine has: an OpenAI-compatible
@@ -147,44 +146,6 @@ function modelPayload(body: Record<string, unknown>, model: string, maxOutput: n
   };
 }
 
-/** A complete assistant reply, in the shape the caller asked for. */
-function sendAssistantText(
-  response: ServerResponse,
-  stream: boolean,
-  model: string,
-  text: string,
-): void {
-  const id = `chatcmpl-beeline-${randomBytes(8).toString('hex')}`;
-  const created = Math.floor(Date.now() / 1000);
-  if (!stream) {
-    sendJson(response, 200, {
-      id,
-      object: 'chat.completion',
-      created,
-      model,
-      choices: [{ index: 0, message: { role: 'assistant', content: text }, finish_reason: 'stop' }],
-      usage: { prompt_tokens: 0, completion_tokens: 0, total_tokens: 0 },
-    });
-    return;
-  }
-  response.writeHead(200, {
-    'content-type': 'text/event-stream',
-    'cache-control': 'no-store',
-    connection: 'keep-alive',
-  });
-  const chunk = (delta: Record<string, unknown>, finish: string | null) =>
-    `data: ${JSON.stringify({
-      id,
-      object: 'chat.completion.chunk',
-      created,
-      model,
-      choices: [{ index: 0, delta, finish_reason: finish }],
-    })}\n\n`;
-  response.write(chunk({ role: 'assistant', content: text }, null));
-  response.write(chunk({}, 'stop'));
-  response.end('data: [DONE]\n\n');
-}
-
 export async function freeAgentAllowance(
   database: Pick<SqlDatabase, 'query'>,
   ownerId: string,
@@ -201,29 +162,6 @@ export async function freeAgentAllowance(
   return { today: Number(row?.today ?? 0), lifetime: Number(row?.lifetime ?? 0) };
 }
 
-/** Adjust today's usage by a signed amount (a reservation, or its reconciliation). */
-async function adjustUsage(
-  database: Pick<SqlDatabase, 'query'>,
-  ownerId: string,
-  day: string,
-  tokens: number,
-  credit = 0,
-): Promise<void> {
-  if (tokens === 0 && credit === 0) return;
-  await database.query(
-    `INSERT INTO free_agent_usage(owner_id,day,tokens,reservation_credit)
-     VALUES($1,$2::date,GREATEST($3::bigint,0),GREATEST($4::bigint,0))
-     ON CONFLICT(owner_id,day) DO UPDATE SET tokens=GREATEST(free_agent_usage.tokens+$3::bigint,0),
-       reservation_credit=GREATEST(free_agent_usage.reservation_credit+$4::bigint,0)`,
-    [ownerId, day, tokens, credit],
-  );
-}
-
-/** Output a reply may use when the request names no smaller bound. */
-const DEFAULT_OUTPUT_RESERVATION = 8_192;
-/** Below this many tokens of room, a call is refused as over the allowance. */
-const MINIMUM_CALL_TOKENS = 256;
-
 /**
  * Estimate model-facing text plus framing overhead. Count schemas and tool
  * selectors, but not repeated reasoning-fragment transport envelopes.
@@ -235,116 +173,6 @@ export function promptTokenBound(body: Record<string, unknown>): number {
   return Math.ceil(promptTextBytes(withoutImageData(forwardedFields(body))) / 3) + 256 + imageInput(body, true);
 }
 
-/**
- * Reserve estimated prompt tokens plus bounded output before a call runs.
- * Serialized per owner across server instances, so concurrent reservations fit
- * the daily cap (or a configured lifetime cap); the reply's output is
- * bounded by what remains. Returns the reservation, or the cap reached.
- */
-export async function reserveAllowance(
-  database: SqlDatabase,
-  ownerId: string,
-  now: Date,
-  config: Pick<FreeAgentConfig, 'dailyTokenCap' | 'lifetimeTokenCap'>,
-  promptTokens: number,
-  requestedOutput: number | undefined,
-  limits: FreeAgentLimits = DEFAULT_FREE_AGENT_LIMITS,
-  budgetPromptTokens = promptTokens,
-  promptUpperBound = promptTokens,
-): Promise<{ reserved: number; maxOutput: number; reservedUsd: number; credit: number } | { limit: 'daily' | 'lifetime' | 'budget' | 'rate' }> {
-  return database.transaction(async (db) => {
-    // Every reservation takes locks in the same order across server instances.
-    await db.query(`SELECT pg_advisory_xact_lock(hashtext('free-agent-global-budget'))`);
-    await db.query(`SELECT pg_advisory_xact_lock(hashtext($1))`, [`free-agent-usage:${ownerId}`]);
-    const day = now.toISOString().slice(0, 10);
-    const budget = Number((await db.query<{ usd: string }>(
-      `SELECT usd FROM free_agent_budget WHERE day=$1::date`, [day],
-    )).rows[0]?.usd ?? 0);
-    if (budget >= limits.dailyBudgetUsd) return { limit: 'budget' };
-    const minute = Math.floor(now.getTime() / 60_000);
-    const rate = (await db.query<{ minute: string; calls: number }>(
-      `SELECT minute,calls FROM free_agent_call_rate WHERE owner_id=$1`, [ownerId],
-    )).rows[0];
-    if (rate && Number(rate.minute) === minute && rate.calls >= limits.callsPerMinute) return { limit: 'rate' };
-    const used = await freeAgentAllowance(db, ownerId, now);
-    const outstanding = Number((await db.query<{ reservation_credit: string }>(
-      `SELECT reservation_credit FROM free_agent_usage WHERE owner_id=$1 AND day=$2::date`, [ownerId, day],
-    )).rows[0]?.reservation_credit ?? 0);
-    // The estimate (including any trusted warm-cache discount) is bounded by
-    // a cold byte ceiling minus a small, owner-wide pool of admission credit.
-    const reservedPrompt = Math.max(promptTokens, promptUpperBound - Math.max(0, MAX_RESERVATION_CREDIT - outstanding));
-    const credit = Math.max(0, promptUpperBound - reservedPrompt);
-    const daily = config.dailyTokenCap - used.today;
-    const lifetime =
-      config.lifetimeTokenCap > 0 ? config.lifetimeTokenCap - used.lifetime : Number.POSITIVE_INFINITY;
-    const room = Math.min(daily, lifetime) - reservedPrompt;
-    if (room < MINIMUM_CALL_TOKENS) return { limit: lifetime <= daily ? 'lifetime' : 'daily' };
-    const dollarRoom = limits.dailyBudgetUsd - budget - budgetPromptTokens * limits.inputUsdPerMillion / 1_000_000;
-    const affordableOutput = Math.floor(dollarRoom * 1_000_000 / limits.outputUsdPerMillion);
-    if (affordableOutput < MINIMUM_CALL_TOKENS) return { limit: 'budget' };
-    const maxOutput = Math.floor(Math.min(
-      room, affordableOutput, requestedOutput ?? DEFAULT_OUTPUT_RESERVATION, limits.maxOutputTokens,
-    ));
-    const reserved = reservedPrompt + maxOutput;
-    await adjustUsage(db, ownerId, now.toISOString().slice(0, 10), reserved, credit);
-    const reservedUsd = (budgetPromptTokens * limits.inputUsdPerMillion + maxOutput * limits.outputUsdPerMillion) / 1_000_000;
-    await db.query(`INSERT INTO free_agent_budget(day,usd) VALUES($1::date,$2)
-      ON CONFLICT(day) DO UPDATE SET usd=free_agent_budget.usd+$2`, [day, reservedUsd]);
-    await db.query(`INSERT INTO free_agent_call_rate(owner_id,minute,calls) VALUES($1,$2,1)
-      ON CONFLICT(owner_id) DO UPDATE SET minute=$2,calls=CASE WHEN free_agent_call_rate.minute=$2
-        THEN free_agent_call_rate.calls+1 ELSE 1 END`, [ownerId, minute]);
-    return { reserved, maxOutput, reservedUsd, credit };
-  });
-}
-
-/** Process-wide cap on upstream model calls in flight. Extra calls wait in arrival order. */
-export class FreeAgentCallGate {
-  #running = 0;
-  #waiting: Array<() => void> = [];
-
-  constructor(readonly limit: number) {}
-
-  /** Resolves with the slot's release, or undefined if the signal aborts or the deadline passes first. */
-  acquire(signal: AbortSignal, deadline: number): Promise<(() => void) | undefined> {
-    let released = false;
-    const release = () => {
-      if (released) return;
-      released = true;
-      const next = this.#waiting.shift();
-      if (next) next();
-      else this.#running -= 1;
-    };
-    if (signal.aborted) return Promise.resolve(undefined);
-    if (this.#running < this.limit && !this.#waiting.length) {
-      this.#running += 1;
-      return Promise.resolve(release);
-    }
-    return new Promise((resolve) => {
-      const done = (granted: boolean) => {
-        clearTimeout(timer);
-        signal.removeEventListener('abort', cancel);
-        resolve(granted ? release : undefined);
-      };
-      const grant = () => done(true);
-      const cancel = () => {
-        const index = this.#waiting.indexOf(grant);
-        if (index >= 0) this.#waiting.splice(index, 1);
-        done(false);
-      };
-      const timer = setTimeout(cancel, Math.max(0, deadline - Date.now()));
-      signal.addEventListener('abort', cancel, { once: true });
-      this.#waiting.push(grant);
-    });
-  }
-}
-
-const callGates = new Map<number, FreeAgentCallGate>();
-
-function callGate(limit: number): FreeAgentCallGate {
-  let gate = callGates.get(limit);
-  if (!gate) callGates.set(limit, (gate = new FreeAgentCallGate(limit)));
-  return gate;
-}
 
 /** Find the last `usage` object in an OpenAI-style SSE stream. */
 export class StreamUsageReader {
@@ -391,76 +219,27 @@ export async function handleFreeAgentModelRequest(
     return true;
   }
   const header = request.headers.authorization;
-  const token = typeof header === 'string' && header.startsWith('Bearer ') ? header.slice(7) : '';
+  const invocation = request.headers['x-beeline-model-invocation'];
+  const token = typeof invocation === 'string' ? invocation :
+    typeof header === 'string' && header.startsWith('Bearer ') ? header.slice(7) : '';
   if (token.startsWith('bfmc_')) return handleOwnedFreeAgentModel(request, response, token, options);
-  const agent = token.startsWith('bfm_')
-    ? (
-        await options.database.query<{ agent_id: string; owner_id: string; model: string | null }>(
-          `SELECT agent_id,owner_id,model FROM free_agents
-           WHERE model_token_hash=$1 AND removed_at IS NULL AND state NOT IN ('failed','destroyed')`,
-          [tokenHash(token)],
-        )
-      ).rows[0]
-    : undefined;
-  if (!agent) {
-    sendJson(response, 401, { error: { message: 'invalid free agent model token' } });
-    return true;
-  }
-  // Only the server-stored choice can select a model; request bodies cannot.
-  options = { ...options, config: { ...options.config, model: agent.model ?? options.config.model } };
-  let body: Record<string, unknown>;
-  try {
-    body = JSON.parse((await readBody(request)).toString('utf8')) as Record<string, unknown>;
-    if (!body || typeof body !== 'object' || !Array.isArray(body.messages)) throw new Error('messages required');
-    const hasImages = body.messages.some(message => Array.isArray(message?.content) &&
-      message.content.some((part: { type?: string }) => part?.type === 'image_url'));
-    imageInput(body, hasImages && await freeAgentModelTakesImages(options.config.model));
-  } catch (error) {
-    sendJson(response, 400, { error: { message: error instanceof Error ? error.message : 'invalid request' } });
-    return true;
-  }
-  const now = options.now?.() ?? new Date();
-  const limits = options.config.limits ?? DEFAULT_FREE_AGENT_LIMITS;
-  // A first-day owner gets the larger allowance so a few hours of real work fits.
-  const config = {
-    ...options.config,
-    dailyTokenCap: await freeAgentTokenCapAt(options.database, agent.owner_id, now, options.config),
-  };
-  const turn = (await options.database.query<{ started: Date | string; room_id: string; turn_request_id: string }>(
-    `SELECT command.room_id,command.turn_request_id,COALESCE(turn.started_at,command.claimed_at) started FROM agent_commands command LEFT JOIN agent_turns turn
-       ON turn.agent_id=command.agent_id AND turn.room_id=command.room_id
-         AND turn.request_id=command.turn_request_id
-       WHERE command.agent_id=$1 AND command.state='claimed'
-         AND command.action IN ('input','resume') AND ${commandOwnerLiveSql('command', '$2')}
-         -- A per-agent model token does not identify a new connection's execution.
-         -- The owned cohort stays closed until this transport binds that actor.
-         AND command.turn_owner_connection_id IS NULL
-         AND COALESCE(turn.started_at,command.claimed_at)>$2::timestamptz-make_interval(secs => $3::double precision / 1000)
-       ORDER BY started DESC LIMIT 1`,
-    [agent.agent_id, now, limits.maxTurnMs],
-  )).rows[0];
-  if (!turn) {
-    sendJson(response, 403, { error: { message: 'free agent model access requires a live turn' } });
-    return true;
-  }
-  return executeFreeAgentModel(response, body, agent, turn, options);
+  sendJson(response,401,{error:{code:'owned_model_required',message:'Model access requires this invocation’s current claimed credential.'}});
+  return true;
 }
 
 interface ModelAgent { agent_id: string; owner_id: string; model: string | null }
-interface ModelTurn { started: Date | string; room_id: string; turn_request_id: string }
+interface ModelTurn { id: string; generation_id: string | null; started: Date | string; room_id: string; turn_request_id: string }
 
-class OwnedModelAllowanceRefusal extends CommandRefusalError {
-  constructor(readonly limit: 'daily' | 'lifetime' | 'budget' | 'rate') {
-    super('Owned model allowance is unavailable', limit === 'rate' ? 429 : 403);
-  }
-}
-function ownedOutcome(response: ServerResponse, receipt: OwnedModelAttemptReceipt): void {
+function ownedOutcome(response: ServerResponse, receipt: OwnedModelAttemptReceipt,token:string): void {
   if (response.destroyed || response.writableEnded) return;
   if (response.headersSent) { response.destroy(); return; }
   sendJson(response, 409, { error: {
     code: receipt.state === 'unknown' ? 'owned_model_unknown' : 'owned_model_recorded',
-    message: receipt.state === 'unknown' ? 'Model request outcome is UNKNOWN; do not resubmit.' : 'Model request already has a recorded outcome; do not resubmit.',
-  }, receipt });
+    message: receipt.state === 'unknown' ? 'Model request outcome is UNKNOWN; do not resubmit.' :
+      receipt.evidence?.kind==='provider-refused' ? `The model provider refused this invocation (HTTP ${receipt.evidence.status}).` :
+      'Model request already has a recorded outcome; do not resubmit.',
+    signedReceipt:encodeOwnedModelReceipt(token,receipt),
+  }, receipt,signedReceipt:encodeOwnedModelReceipt(token,receipt) });
 }
 function waitOwned<T>(pending: Promise<T>, signal: AbortSignal): Promise<T> {
   return new Promise((resolve, reject) => {
@@ -485,6 +264,7 @@ function ownedUsage(value: Usage | undefined, limits: FreeAgentLimits): { tokens
  * Schema/signer/claim/installed-helper negotiation must all precede ready(). */
 async function handleOwnedFreeAgentModel(request: IncomingMessage, response: ServerResponse, token: string,
   options: FreeAgentModelProxyOptions): Promise<boolean> {
+  const respondOutcome=(receipt:OwnedModelAttemptReceipt)=>ownedOutcome(response,receipt,token);
   const selected = options.ownedModel;
   if (!selected?.ready()) {
     sendJson(response, 401, { error: { code: 'owned_model_unavailable', message: 'Owned model access is unavailable' } }); return true;
@@ -505,7 +285,8 @@ async function handleOwnedFreeAgentModel(request: IncomingMessage, response: Ser
     if (!body || typeof body !== 'object' || Array.isArray(body) || !Array.isArray(body.messages)) throw new Error('messages required');
     imageInput(body, selected.acceptsImages?.(binding.model) !== false);
   } catch {
-    sendJson(response, 400, { error: { message: 'Invalid owned model request' } }); return true;
+    sendJson(response,400,{error:{message:'Invalid owned model request',signedReceipt:encodeOwnedModelReceipt(token,
+      {requestId:id,state:'refused',evidence:{kind:'not-dispatched',reason:'authority'}})}});return true;
   }
   const stream = body.stream === true, now = options.now?.() ?? new Date(), day = now.toISOString().slice(0, 10);
   const requested = [body.max_tokens, body.max_completion_tokens].map(Number).filter(value => Number.isFinite(value) && value > 0);
@@ -521,76 +302,90 @@ async function handleOwnedFreeAgentModel(request: IncomingMessage, response: Ser
   try {
     admitted = await attempts.reserve(actor, id, semantic, async tx => {
       const config = { ...options.config, dailyTokenCap: await freeAgentTokenCapAt(tx, binding.ownerId, now, options.config) };
-      const reserved = await reserveAllowance(tx, binding.ownerId, now, config,
+      const reserved = await reserveAllowanceInTransaction(tx, binding.ownerId, now, config,
         estimated - cached + Math.ceil(cached * limits.cachedTokenWeight), requestedOutput, limits,
         Buffer.byteLength(JSON.stringify(withoutImageData(forwardedFields(body))), 'utf8') + 256 + imageInput(body, true),
         promptTextBytes(withoutImageData(forwardedFields(body))) + 256 + imageInput(body, true));
-      if ('limit' in reserved) throw new OwnedModelAllowanceRefusal(reserved.limit);
       return { reservation: { ...reserved, day }, payload: modelPayload(body, binding.model, reserved.maxOutput, openRouter) };
     });
   } catch (error) {
+    if (error instanceof OwnedModelAllowanceRefusal)
+      await endFreeAgentModelTurn(options.database,binding.commandId,binding.generationId,error.message);
     if (error instanceof CommandRefusalError) sendJson(response, error.status, { error: {
       code: error instanceof OwnedModelAllowanceRefusal ? 'owned_model_allowance' :
         error instanceof OwnedModelUnknownPayload || error instanceof OwnedModelUnknownGeneration ? 'owned_model_unknown' : 'owned_model_refused', message: error.message,
-    } });
+      ...(error instanceof OwnedModelAllowanceRefusal ? {signedReceipt:encodeOwnedModelReceipt(token,{requestId:id,state:'refused',evidence:{kind:'not-dispatched',reason:'authority'}})} : {}),
+    }, ...(error instanceof OwnedModelAllowanceRefusal ? {signedReceipt:encodeOwnedModelReceipt(token,{requestId:id,state:'refused',evidence:{kind:'not-dispatched',reason:'authority'}})} : {}) });
     else sendJson(response, 503, { error: { code: 'owned_model_unknown', message: 'Model request admission is uncertain; do not resubmit.' } });
     return true;
   }
-  if (!admitted.permit) { ownedOutcome(response, admitted.receipt); return true; }
+  if (!admitted.permit) { respondOutcome(admitted.receipt); return true; }
   const permit = admitted.permit;
+  const reconcile = async () => {
+    // The existing model leaf owns lost-result reads. This never creates a
+    // reservation, another provider request, or a helper-side HTTP boundary.
+    try {
+      await selected.credentials.assertCurrent(options.database,actor);
+      const row=(await options.database.query<{state:OwnedModelAttemptReceipt['state'];evidence:OwnedModelAttemptReceipt['evidence']|null}>(
+        `SELECT state,evidence FROM owned_model_attempts WHERE credential_id=$1 AND model_request_id=$2`,[binding.id,id])).rows[0];
+      respondOutcome(row ? {requestId:id,state:row.state,...(row.evidence ? {evidence:row.evidence} : {})} : admitted.receipt);
+    } catch { respondOutcome(admitted.receipt); }
+  };
   const settle = async (tx: SqlDatabase, reservation: OwnedModelReservation, evidence: OwnedModelEvidence): Promise<void> => {
     const tokens = evidence.kind === 'usage' ? evidence.tokens : 0, usd = evidence.kind === 'usage' ? evidence.usd : 0;
-    await adjustUsage(tx, binding.ownerId, reservation.day, tokens - reservation.reserved, -reservation.credit);
-    await tx.query(`UPDATE free_agent_budget SET usd=GREATEST(0,usd+$2) WHERE day=$1::date`, [reservation.day, usd - reservation.reservedUsd]);
-    await recordFreeAgentEvent(tx, binding.agentId, 'model_usage', { day: reservation.day, tokens, usd, modelRequestId: id });
+    await settleAllowance(tx,binding.ownerId,binding.agentId,reservation.day,
+      tokens-reservation.reserved,-reservation.credit,usd-reservation.reservedUsd,
+      { day:reservation.day,tokens,usd,modelRequestId:id });
   };
   const abort = new AbortController(), close = () => abort.abort();
   response.once('close', close);
-  const deadline = Math.min(binding.expiresMs, Date.now() + limits.maxTurnMs);
-  const timer = setTimeout(close, Math.max(0, deadline - Date.now()));
-  let release: (() => void) | undefined;
   const knownNonentry = async (reason: 'authority' | 'queue' | 'cancelled' | 'deadline') => {
-    try { ownedOutcome(response, await attempts.refuseBeforeHandoff(permit, reason, settle)); }
-    catch { ownedOutcome(response, admitted.receipt); }
+    try { respondOutcome(await attempts.refuseBeforeHandoff(permit, reason, settle)); }
+    catch { respondOutcome(admitted.receipt); }
   };
   try {
-    release = await callGate(limits.maxConcurrentCalls).acquire(abort.signal, deadline);
-    if (!release || abort.signal.aborted || Date.now() >= deadline) {
-      await knownNonentry(abort.signal.aborted ? 'cancelled' : 'deadline'); return true;
+    if (abort.signal.aborted) {
+      await knownNonentry('cancelled');
+      return true;
     }
     let started: { state: 'started'; completion: Promise<Response> } | { state: 'unknown'; completion?: Promise<Response> };
     try { started = await attempts.handoff(permit, bytes => {
-      if (abort.signal.aborted || Date.now() >= deadline) throw new Error('Owned model deadline ended before handoff');
+      if (abort.signal.aborted) throw new Error('Owned model invocation cancelled');
       return requestModelUpstream(options, bytes, abort.signal);
     }); }
-    catch { await knownNonentry('authority'); return true; }
+    catch {
+      await knownNonentry('authority');
+      return true;
+    }
     if (started.state === 'unknown') {
       abort.abort();
       void started.completion?.then(upstream => upstream.body?.cancel()).catch(() => {});
-      ownedOutcome(response, admitted.receipt); return true;
+      await reconcile(); return true;
     }
     let upstream: Response;
     void started.completion.then(result => {
       if (abort.signal.aborted) void result.body?.cancel().catch(() => {});
     }).catch(() => {});
     try { upstream = await waitOwned(started.completion, abort.signal); }
-    catch { ownedOutcome(response, admitted.receipt); return true; }
+    catch { await reconcile(); return true; }
     if (!upstream.ok) {
       void upstream.body?.cancel().catch(() => {});
       if ([400, 401, 402, 403, 404, 413, 422, 429].includes(upstream.status)) {
-        try { ownedOutcome(response, await attempts.refuseFromProvider(actor, id, upstream.status, settle)); }
-        catch { ownedOutcome(response, admitted.receipt); }
-      } else ownedOutcome(response, admitted.receipt);
+        try { respondOutcome(await attempts.refuseFromProvider(actor, id, upstream.status, settle)); }
+        catch { respondOutcome(admitted.receipt); }
+      } else respondOutcome(admitted.receipt);
       return true;
     }
-    if (!upstream.body) { ownedOutcome(response, admitted.receipt); return true; }
+    if (!upstream.body) { respondOutcome(admitted.receipt); return true; }
     const reader = upstream.body.getReader(), decoder = new TextDecoder(), usage = new StreamUsageReader(), filtered = new OwnedModelStream();
     let whole = '', complete = false, reported: Usage | undefined, answer: Record<string, unknown> | undefined;
     let receipt: OwnedModelAttemptReceipt | undefined;
     response.writeHead(upstream.status, { 'content-type': upstream.headers.get('content-type') ?? 'application/json', 'cache-control': 'no-store' });
     try {
       for (;;) {
-        const next = await waitOwned(reader.read(), abort.signal); if (next.done) { complete = true; break; }
+        const next = await waitOwned(reader.read(), abort.signal);
+        await selected.credentials.assertCurrent(options.database, actor);
+        if (next.done) { complete = true; break; }
         const text = decoder.decode(next.value, { stream: true });
         if (stream) {
           usage.push(text);
@@ -628,11 +423,11 @@ async function handleOwnedFreeAgentModel(request: IncomingMessage, response: Ser
     }
     return true;
   } finally {
-    clearTimeout(timer); response.removeListener('close', close); release?.();
+    response.removeListener('close', close);
   }
 }
 
-async function executeFreeAgentModel(response: ServerResponse, body: Record<string, unknown>,
+export async function executeFreeAgentModel(response: ServerResponse, body: Record<string, unknown>,
   agent: ModelAgent, turn: ModelTurn, options: FreeAgentModelProxyOptions, signal?: AbortSignal): Promise<boolean> {
   const now = options.now?.() ?? new Date();
   const limits = options.config.limits ?? DEFAULT_FREE_AGENT_LIMITS;
@@ -662,28 +457,19 @@ async function executeFreeAgentModel(response: ServerResponse, body: Record<stri
     promptTextBytes(withoutImageData(forwarded)) + 256 + imageInput(body, true),
   );
   if ('limit' in reservation) {
-    if (reservation.limit === 'rate') {
-      sendJson(response, 429, { error: { message: 'Free agent call limit reached. Try again next minute.' } });
-      return true;
-    }
     if (reservation.limit === 'budget') {
       await recordFreeAgentEvent(options.database, agent.agent_id, 'budget_reached');
-      sendAssistantText(response, stream, options.config.model, FREE_AGENT_BUDGET_MESSAGE);
+      await endFreeAgentModelTurn(options.database,turn.id,turn.generation_id,FREE_AGENT_BUDGET_MESSAGE);
+      sendJson(response,403,{error:{message:FREE_AGENT_BUDGET_MESSAGE}});
       return true;
     }
     await recordFreeAgentEvent(options.database, agent.agent_id, 'allowance_reached', {
       limit: reservation.limit, roomId: turn.room_id, requestId: turn.turn_request_id,
     });
     const used = await freeAgentAllowance(options.database, agent.owner_id, now);
-    const reset = reservation.limit === 'daily'
-      ? new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), now.getUTCDate() + 1)) : null;
-    await options.database.transaction(async db => {
-      await db.query(`UPDATE free_agents SET allowance_paused_until=COALESCE($2::timestamptz,'infinity'::timestamptz) WHERE owner_id=$1`, [agent.owner_id, reset]);
-      await db.query(`UPDATE agent_commands command SET startup_wake_after=GREATEST(command.startup_wake_after,starter.allowance_paused_until)
-        FROM free_agents starter WHERE starter.owner_id=$1 AND starter.agent_id=command.agent_id
-        AND command.state='pending' AND command.action IN ('input','resume')`, [agent.owner_id]);
-    });
-    sendAssistantText(response, stream, options.config.model, allowanceMessage(reservation.limit, config, reservation.limit === 'daily' ? used.today : used.lifetime));
+    await endFreeAgentModelTurn(options.database,turn.id,turn.generation_id,
+      allowanceMessage(reservation.limit,config,reservation.limit === 'daily' ? used.today : used.lifetime));
+    sendJson(response,403,{error:{message:allowanceMessage(reservation.limit,config,reservation.limit === 'daily' ? used.today : used.lifetime)}});
     return true;
   }
   const day = now.toISOString().slice(0, 10);
@@ -691,11 +477,8 @@ async function executeFreeAgentModel(response: ServerResponse, body: Record<stri
   // failed or interrupted call. Never keep a worst-case dollar reservation for an aborted reply.
   const settle = (spent: number, usd: number) =>
     options.database.transaction(async db => {
-      await db.query(`SELECT pg_advisory_xact_lock(hashtext('free-agent-global-budget'))`);
-      await adjustUsage(db, agent.owner_id, day, spent - reservation.reserved, -reservation.credit);
-      await db.query(`UPDATE free_agent_budget SET usd=GREATEST(0,usd+$2) WHERE day=$1::date`,
-        [day, usd - reservation.reservedUsd]);
-      await recordFreeAgentEvent(db, agent.agent_id, 'model_usage', { day, tokens: spent, usd });
+      await settleAllowance(db,agent.owner_id,agent.agent_id,day,spent-reservation.reserved,
+        -reservation.credit,usd-reservation.reservedUsd,{ day,tokens:spent,usd });
     }).then(async () => {
       if (spent > 0) await warnFreeAgentOwner(options.database, agent.agent_id, agent.owner_id, day, config.dailyTokenCap, turn.room_id);
     }).catch(error => console.error('[free-agents] usage charge or warning failed', error));
@@ -706,8 +489,6 @@ async function executeFreeAgentModel(response: ServerResponse, body: Record<stri
   response.on('close', () => abort.abort());
   signal?.addEventListener('abort', () => abort.abort(), { once: true });
   if (signal?.aborted) abort.abort();
-  // Queued calls keep their reservation, so they give up when the turn cap ends or the caller leaves.
-  const turnDeadline = new Date(turn.started).getTime() + limits.maxTurnMs;
   const forwardUpstream = async (): Promise<void> => {
     let upstream: Response;
     try {
@@ -754,6 +535,9 @@ async function executeFreeAgentModel(response: ServerResponse, body: Record<stri
     } catch {
       // Refund token reservations when an interrupted reply has no reported usage.
       interrupted = true;
+    } finally {
+      if (interrupted) void reader.cancel().catch(() => {});
+      reader.releaseLock();
     }
     let reported: Usage | undefined = usage.usage;
     if (!stream && upstream.ok) {
@@ -780,18 +564,7 @@ async function executeFreeAgentModel(response: ServerResponse, body: Record<stri
     );
     response.end();
   };
-  const release = await callGate(limits.maxConcurrentCalls).acquire(abort.signal, turnDeadline);
-  if (!release) {
-    await settle(0, 0);
-    if (!response.headersSent)
-      sendJson(response, 503, { error: { message: 'free agent model busy; try again' } });
-    return true;
-  }
-  try {
-    await forwardUpstream();
-  } finally {
-    release();
-  }
+  await forwardUpstream();
   return true;
 }
 
@@ -804,7 +577,7 @@ export async function completeStarterBanter(options: FreeAgentModelProxyOptions,
     `SELECT f.agent_id,f.owner_id,f.model,r.room_id FROM starter_onboarding_runs r
      JOIN free_agents f ON f.owner_id=r.user_id AND f.agent_id=ANY(ARRAY[r.beebee_id,r.luna_id])
      JOIN memberships m ON m.identity_id=f.agent_id AND m.room_id=r.room_id AND m.removed_at IS NULL
-     WHERE r.id=$1 AND f.agent_id=$2 AND f.removed_at IS NULL AND f.state NOT IN ('failed','destroyed') AND r.status='generating'
+     WHERE r.id=$1 AND f.agent_id=$2 AND f.removed_at IS NULL AND r.status='generating'
        AND r.created_at>clock_timestamp()-interval '2 minutes'`, [runId, agentId])).rows[0];
   if (!agent) throw new Error('Onboarding generation is no longer active');
   let status = 200;
@@ -820,7 +593,7 @@ export async function completeStarterBanter(options: FreeAgentModelProxyOptions,
   try {
     await executeFreeAgentModel(response as unknown as ServerResponse,
       { messages, stream: false, max_tokens: 4096, reasoning: { exclude: true, ...(agent.model?.startsWith('openai/') ? { effort: 'low' } : {}) } }, agent,
-      { room_id: agent.room_id, turn_request_id: runId, started: new Date() }, options, signal);
+      { id: runId, generation_id: null, room_id: agent.room_id, turn_request_id: runId, started: new Date() }, options, signal);
     if (status !== 200) throw new Error(`Onboarding model returned ${status}`);
     const result = JSON.parse(reply) as { choices?: { message?: { content?: unknown } }[] };
     const text = result.choices?.[0]?.message?.content;

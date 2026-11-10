@@ -1,0 +1,5419 @@
+{
+  "sourceSha": "00b345c83b2ad74cb0eacd496c02a3e2d66a4984",
+  "scoringVersion": "server-retained-special-cases-v2",
+  "ruleInputs": {
+    "inventory.mjs": "a21caa6efba9c08070b387af9708b6fb229753b8b1ce29112a4098e562eab398",
+    "adjudicate.mjs": "c282aa4bd92dc3a17c963d96d951381d98d345e9f44d5ee9b9b6d235ae940545",
+    "adjudication-overrides.json": "07b5b7b833c1e363c3c89789fb2d33c7c02fe19f5c3b0d86430d5aa83a866ef0",
+    "parameter-adjudications.json": "05a025ecc914be1e4e7f80665712ddc2cb82e69ebe4c57ba9863c7e8a465e323"
+  },
+  "parameterAudit": {
+    "reviewed": 300,
+    "modeParameters": 285
+  },
+  "score": 3701,
+  "candidates": 21823,
+  "excluded": 18122,
+  "byDisposition": {
+    "ordinary-control-flow": 18122,
+    "retained-value-policy": 2551,
+    "retained-presentation-wait": 2,
+    "retained-input-policy": 60,
+    "retained-recovery": 325,
+    "retained-proof-wait": 18,
+    "retained-test-environment": 47,
+    "retained-sql-policy": 488,
+    "retained-caller-policy": 205,
+    "avoidable-compatibility": 5
+  },
+  "byCategory": {
+    "value-specific-branch": 2523,
+    "retry-sleep-or-scheduling-candidate": 20,
+    "exception-handler": 385,
+    "value-specific-set": 28,
+    "disabled-or-conditional-test": 47,
+    "sql-case-policy": 488,
+    "parameter": 210
+  },
+  "meaning": "Retained value/caller/recovery/compatibility/test/proof special cases; not confirmed defects or a minimum achievable count.",
+  "nonCodeFiles": [
+    {
+      "file": "apps/server/Dockerfile",
+      "reason": "Build recipe; its certificate assertion and build steps are ordinary prerequisites."
+    },
+    {
+      "file": "apps/server/README.md",
+      "reason": "Static asset, declarative data, documentation, snapshot or package/build metadata."
+    },
+    {
+      "file": "apps/server/assets/banter-brief.md",
+      "reason": "Static asset, declarative data, documentation, snapshot or package/build metadata."
+    },
+    {
+      "file": "apps/server/assets/companies/README.md",
+      "reason": "Static asset, declarative data, documentation, snapshot or package/build metadata."
+    },
+    {
+      "file": "apps/server/assets/companies/airtable.svg",
+      "reason": "Static asset, declarative data, documentation, snapshot or package/build metadata."
+    },
+    {
+      "file": "apps/server/assets/companies/apple.svg",
+      "reason": "Static asset, declarative data, documentation, snapshot or package/build metadata."
+    },
+    {
+      "file": "apps/server/assets/companies/asana.svg",
+      "reason": "Static asset, declarative data, documentation, snapshot or package/build metadata."
+    },
+    {
+      "file": "apps/server/assets/companies/atlassian.svg",
+      "reason": "Static asset, declarative data, documentation, snapshot or package/build metadata."
+    },
+    {
+      "file": "apps/server/assets/companies/beeline.svg",
+      "reason": "Static asset, declarative data, documentation, snapshot or package/build metadata."
+    },
+    {
+      "file": "apps/server/assets/companies/cloudflare.svg",
+      "reason": "Static asset, declarative data, documentation, snapshot or package/build metadata."
+    },
+    {
+      "file": "apps/server/assets/companies/coinbase.svg",
+      "reason": "Static asset, declarative data, documentation, snapshot or package/build metadata."
+    },
+    {
+      "file": "apps/server/assets/companies/convex.svg",
+      "reason": "Static asset, declarative data, documentation, snapshot or package/build metadata."
+    },
+    {
+      "file": "apps/server/assets/companies/elevenlabs.svg",
+      "reason": "Static asset, declarative data, documentation, snapshot or package/build metadata."
+    },
+    {
+      "file": "apps/server/assets/companies/expo.svg",
+      "reason": "Static asset, declarative data, documentation, snapshot or package/build metadata."
+    },
+    {
+      "file": "apps/server/assets/companies/fish.svg",
+      "reason": "Static asset, declarative data, documentation, snapshot or package/build metadata."
+    },
+    {
+      "file": "apps/server/assets/companies/fly.svg",
+      "reason": "Static asset, declarative data, documentation, snapshot or package/build metadata."
+    },
+    {
+      "file": "apps/server/assets/companies/github.svg",
+      "reason": "Static asset, declarative data, documentation, snapshot or package/build metadata."
+    },
+    {
+      "file": "apps/server/assets/companies/google.svg",
+      "reason": "Static asset, declarative data, documentation, snapshot or package/build metadata."
+    },
+    {
+      "file": "apps/server/assets/companies/hetzner.svg",
+      "reason": "Static asset, declarative data, documentation, snapshot or package/build metadata."
+    },
+    {
+      "file": "apps/server/assets/companies/hubspot.svg",
+      "reason": "Static asset, declarative data, documentation, snapshot or package/build metadata."
+    },
+    {
+      "file": "apps/server/assets/companies/linear.svg",
+      "reason": "Static asset, declarative data, documentation, snapshot or package/build metadata."
+    },
+    {
+      "file": "apps/server/assets/companies/meta.svg",
+      "reason": "Static asset, declarative data, documentation, snapshot or package/build metadata."
+    },
+    {
+      "file": "apps/server/assets/companies/neon.svg",
+      "reason": "Static asset, declarative data, documentation, snapshot or package/build metadata."
+    },
+    {
+      "file": "apps/server/assets/companies/notion.svg",
+      "reason": "Static asset, declarative data, documentation, snapshot or package/build metadata."
+    },
+    {
+      "file": "apps/server/assets/companies/openrouter.svg",
+      "reason": "Static asset, declarative data, documentation, snapshot or package/build metadata."
+    },
+    {
+      "file": "apps/server/assets/companies/railway.svg",
+      "reason": "Static asset, declarative data, documentation, snapshot or package/build metadata."
+    },
+    {
+      "file": "apps/server/assets/companies/resend.svg",
+      "reason": "Static asset, declarative data, documentation, snapshot or package/build metadata."
+    },
+    {
+      "file": "apps/server/assets/companies/sentry.svg",
+      "reason": "Static asset, declarative data, documentation, snapshot or package/build metadata."
+    },
+    {
+      "file": "apps/server/assets/companies/shopify.svg",
+      "reason": "Static asset, declarative data, documentation, snapshot or package/build metadata."
+    },
+    {
+      "file": "apps/server/assets/companies/squire.svg",
+      "reason": "Static asset, declarative data, documentation, snapshot or package/build metadata."
+    },
+    {
+      "file": "apps/server/assets/companies/stripe.svg",
+      "reason": "Static asset, declarative data, documentation, snapshot or package/build metadata."
+    },
+    {
+      "file": "apps/server/assets/companies/supabase.svg",
+      "reason": "Static asset, declarative data, documentation, snapshot or package/build metadata."
+    },
+    {
+      "file": "apps/server/assets/companies/tailscale.svg",
+      "reason": "Static asset, declarative data, documentation, snapshot or package/build metadata."
+    },
+    {
+      "file": "apps/server/assets/companies/tiktok.svg",
+      "reason": "Static asset, declarative data, documentation, snapshot or package/build metadata."
+    },
+    {
+      "file": "apps/server/assets/companies/x.svg",
+      "reason": "Static asset, declarative data, documentation, snapshot or package/build metadata."
+    },
+    {
+      "file": "apps/server/assets/connectors/composio.svg",
+      "reason": "Static asset, declarative data, documentation, snapshot or package/build metadata."
+    },
+    {
+      "file": "apps/server/assets/connectors/google-calendar.svg",
+      "reason": "Static asset, declarative data, documentation, snapshot or package/build metadata."
+    },
+    {
+      "file": "apps/server/assets/connectors/google-drive.svg",
+      "reason": "Static asset, declarative data, documentation, snapshot or package/build metadata."
+    },
+    {
+      "file": "apps/server/assets/connectors/google-gmail.svg",
+      "reason": "Static asset, declarative data, documentation, snapshot or package/build metadata."
+    },
+    {
+      "file": "apps/server/assets/connectors/google-youtube.svg",
+      "reason": "Static asset, declarative data, documentation, snapshot or package/build metadata."
+    },
+    {
+      "file": "apps/server/assets/connectors/google.svg",
+      "reason": "Static asset, declarative data, documentation, snapshot or package/build metadata."
+    },
+    {
+      "file": "apps/server/assets/connectors/system.svg",
+      "reason": "Static asset, declarative data, documentation, snapshot or package/build metadata."
+    },
+    {
+      "file": "apps/server/assets/connectors/tailscale.svg",
+      "reason": "Static asset, declarative data, documentation, snapshot or package/build metadata."
+    },
+    {
+      "file": "apps/server/assets/connectors/trusty-squire.svg",
+      "reason": "Static asset, declarative data, documentation, snapshot or package/build metadata."
+    },
+    {
+      "file": "apps/server/assets/connectors/wallet.svg",
+      "reason": "Static asset, declarative data, documentation, snapshot or package/build metadata."
+    },
+    {
+      "file": "apps/server/assets/mcp/README.md",
+      "reason": "Static asset, declarative data, documentation, snapshot or package/build metadata."
+    },
+    {
+      "file": "apps/server/assets/mcp/SpaceGrotesk-Medium.ttf",
+      "reason": "Static asset, declarative data, documentation, snapshot or package/build metadata."
+    },
+    {
+      "file": "apps/server/assets/mcp/SpaceGrotesk-OFL.txt",
+      "reason": "Static asset, declarative data, documentation, snapshot or package/build metadata."
+    },
+    {
+      "file": "apps/server/assets/mcp/SpaceGrotesk-Regular.ttf",
+      "reason": "Static asset, declarative data, documentation, snapshot or package/build metadata."
+    },
+    {
+      "file": "apps/server/assets/mcp/SpaceGrotesk-SemiBold.ttf",
+      "reason": "Static asset, declarative data, documentation, snapshot or package/build metadata."
+    },
+    {
+      "file": "apps/server/assets/mcp/beeline.svg",
+      "reason": "Static asset, declarative data, documentation, snapshot or package/build metadata."
+    },
+    {
+      "file": "apps/server/assets/mcp/claude.png",
+      "reason": "Static asset, declarative data, documentation, snapshot or package/build metadata."
+    },
+    {
+      "file": "apps/server/assets/mcp/codex.png",
+      "reason": "Static asset, declarative data, documentation, snapshot or package/build metadata."
+    },
+    {
+      "file": "apps/server/assets/mcp/gemini.png",
+      "reason": "Static asset, declarative data, documentation, snapshot or package/build metadata."
+    },
+    {
+      "file": "apps/server/assets/mcp/goose.png",
+      "reason": "Static asset, declarative data, documentation, snapshot or package/build metadata."
+    },
+    {
+      "file": "apps/server/assets/mcp/grok-bot.svg",
+      "reason": "Static asset, declarative data, documentation, snapshot or package/build metadata."
+    },
+    {
+      "file": "apps/server/assets/mcp/grok.svg",
+      "reason": "Static asset, declarative data, documentation, snapshot or package/build metadata."
+    },
+    {
+      "file": "apps/server/assets/mcp/hermes.svg",
+      "reason": "Static asset, declarative data, documentation, snapshot or package/build metadata."
+    },
+    {
+      "file": "apps/server/assets/mcp/muse.svg",
+      "reason": "Static asset, declarative data, documentation, snapshot or package/build metadata."
+    },
+    {
+      "file": "apps/server/assets/mcp/muse.webp",
+      "reason": "Static asset, declarative data, documentation, snapshot or package/build metadata."
+    },
+    {
+      "file": "apps/server/assets/mcp/openai.svg",
+      "reason": "Static asset, declarative data, documentation, snapshot or package/build metadata."
+    },
+    {
+      "file": "apps/server/assets/mcp/opencode.svg",
+      "reason": "Static asset, declarative data, documentation, snapshot or package/build metadata."
+    },
+    {
+      "file": "apps/server/assets/mcp/pi.svg",
+      "reason": "Static asset, declarative data, documentation, snapshot or package/build metadata."
+    },
+    {
+      "file": "apps/server/assets/mcp/zcode.png",
+      "reason": "Static asset, declarative data, documentation, snapshot or package/build metadata."
+    },
+    {
+      "file": "apps/server/contracts/README.md",
+      "reason": "Static asset, declarative data, documentation, snapshot or package/build metadata."
+    },
+    {
+      "file": "apps/server/docs/app-sign-in-contract.md",
+      "reason": "Static asset, declarative data, documentation, snapshot or package/build metadata."
+    },
+    {
+      "file": "apps/server/docs/credential-ceremony.md",
+      "reason": "Static asset, declarative data, documentation, snapshot or package/build metadata."
+    },
+    {
+      "file": "apps/server/docs/cutover-monolith-rehearsal-2026-08-31.md",
+      "reason": "Static asset, declarative data, documentation, snapshot or package/build metadata."
+    },
+    {
+      "file": "apps/server/docs/cutover-monolith.md",
+      "reason": "Static asset, declarative data, documentation, snapshot or package/build metadata."
+    },
+    {
+      "file": "apps/server/docs/fly-managed-postgres.md",
+      "reason": "Static asset, declarative data, documentation, snapshot or package/build metadata."
+    },
+    {
+      "file": "apps/server/docs/neon-fit.md",
+      "reason": "Static asset, declarative data, documentation, snapshot or package/build metadata."
+    },
+    {
+      "file": "apps/server/docs/production-import-rehearsal-2026-08-31.md",
+      "reason": "Static asset, declarative data, documentation, snapshot or package/build metadata."
+    },
+    {
+      "file": "apps/server/evidence/voice-phantom-transcripts.md",
+      "reason": "Static asset, declarative data, documentation, snapshot or package/build metadata."
+    },
+    {
+      "file": "apps/server/package.json",
+      "reason": "Static asset, declarative data, documentation, snapshot or package/build metadata."
+    },
+    {
+      "file": "apps/server/proofs/slow-query-fixture.sql",
+      "reason": "Proof/test SQL fixture; serving SQL is embedded in the scanned TS sources."
+    },
+    {
+      "file": "apps/server/scripts/ci-test-timings.json",
+      "reason": "Static asset, declarative data, documentation, snapshot or package/build metadata."
+    },
+    {
+      "file": "apps/server/scripts/test-selection-replay.json",
+      "reason": "Static asset, declarative data, documentation, snapshot or package/build metadata."
+    },
+    {
+      "file": "apps/server/src/__snapshots__/system-dm-sites.test.ts.snap",
+      "reason": "Static asset, declarative data, documentation, snapshot or package/build metadata."
+    },
+    {
+      "file": "apps/server/src/face-templates.generated.json",
+      "reason": "Static asset, declarative data, documentation, snapshot or package/build metadata."
+    },
+    {
+      "file": "apps/server/src/fixtures/operator-dashboard-periods.json",
+      "reason": "Static asset, declarative data, documentation, snapshot or package/build metadata."
+    },
+    {
+      "file": "apps/server/src/fixtures/queued-tags-repeat.json",
+      "reason": "Static asset, declarative data, documentation, snapshot or package/build metadata."
+    },
+    {
+      "file": "apps/server/src/fixtures/schema46-readiness.source.txt",
+      "reason": "Static asset, declarative data, documentation, snapshot or package/build metadata."
+    },
+    {
+      "file": "apps/server/src/fixtures/sentry-22-app-schema.sql",
+      "reason": "Proof/test SQL fixture; serving SQL is embedded in the scanned TS sources."
+    },
+    {
+      "file": "apps/server/src/fixtures/wake-storm-83.json",
+      "reason": "Static asset, declarative data, documentation, snapshot or package/build metadata."
+    },
+    {
+      "file": "apps/server/src/operator-finances-contract.fixture.json",
+      "reason": "Static asset, declarative data, documentation, snapshot or package/build metadata."
+    },
+    {
+      "file": "apps/server/src/system-message-legacy.fixture.json",
+      "reason": "Static asset, declarative data, documentation, snapshot or package/build metadata."
+    },
+    {
+      "file": "apps/server/src/test-fixtures/push-selection-before-backlog.sql",
+      "reason": "Proof/test SQL fixture; serving SQL is embedded in the scanned TS sources."
+    },
+    {
+      "file": "apps/server/src/test-fixtures/quoted-tag-posts.json",
+      "reason": "Static asset, declarative data, documentation, snapshot or package/build metadata."
+    },
+    {
+      "file": "apps/server/src/test-fixtures/scheduled-work-legacy-source.sql",
+      "reason": "Proof/test SQL fixture; serving SQL is embedded in the scanned TS sources."
+    },
+    {
+      "file": "apps/server/src/x-site-visits.recorded.json",
+      "reason": "Static asset, declarative data, documentation, snapshot or package/build metadata."
+    },
+    {
+      "file": "apps/server/system-message-wording.lock.json",
+      "reason": "Static asset, declarative data, documentation, snapshot or package/build metadata."
+    },
+    {
+      "file": "apps/server/test-fixtures/system-wording-refactors.json",
+      "reason": "Static asset, declarative data, documentation, snapshot or package/build metadata."
+    },
+    {
+      "file": "apps/server/tsconfig.json",
+      "reason": "Static asset, declarative data, documentation, snapshot or package/build metadata."
+    }
+  ],
+  "files": [
+    {
+      "file": "apps/server/assets/game.template.html",
+      "sha256": "ddc6879f1e096ba5fcb9538d78f5f1f5c3787cf81f70f3f0acdff751bd8d6f87",
+      "candidates": 69,
+      "retained": 9
+    },
+    {
+      "file": "apps/server/assets/mcp/join.html",
+      "sha256": "8cad77425ba8da0414e2c1e595cc22f42f1a4500a3a953f646926b8514622cd9",
+      "candidates": 0,
+      "retained": 0
+    },
+    {
+      "file": "apps/server/scripts/ci-shards.mjs",
+      "sha256": "d1f0a0b4a670f4c0640011bdb2b8a61be145319e05cef04dd165e7b185736dd9",
+      "candidates": 17,
+      "retained": 0
+    },
+    {
+      "file": "apps/server/scripts/coverage-map-artifact.mjs",
+      "sha256": "e63889cdecaa69c483e611030446426bc2d20d2ecc9c337f21f8a86137b50660",
+      "candidates": 25,
+      "retained": 6
+    },
+    {
+      "file": "apps/server/scripts/coverage-map-setup.mjs",
+      "sha256": "45b25dd29efb7aa7e6a7c4e1231c2a88bb828d7d068de57ea894c3d7d0e695cf",
+      "candidates": 22,
+      "retained": 2
+    },
+    {
+      "file": "apps/server/scripts/generate-email-art.mjs",
+      "sha256": "72e873acd3467f0adc5d50600008a478d887807ab0e44e26f3815785be43dc5e",
+      "candidates": 32,
+      "retained": 2
+    },
+    {
+      "file": "apps/server/scripts/run-ci-shard.mjs",
+      "sha256": "4ca2b0ba88227bffd99ce9eed3956f981a388ac08340903d00e39838150089a0",
+      "candidates": 24,
+      "retained": 4
+    },
+    {
+      "file": "apps/server/scripts/run-integration-shard.mjs",
+      "sha256": "e43eac845becbd80cae94bdc50b11f40bfa38a3d4252d3ade9f08ea83a7edaa0",
+      "candidates": 6,
+      "retained": 1
+    },
+    {
+      "file": "apps/server/scripts/selected-tests.mjs",
+      "sha256": "509314ced3e3ea48af753e80e496f1ce85b4d4fe0ef91fb06b3c9b4e804753f3",
+      "candidates": 4,
+      "retained": 0
+    },
+    {
+      "file": "apps/server/scripts/shared-browser-repro.ts",
+      "sha256": "e3f0e5af15cdf60789630c0d9a081205e1b4285d065eeb8e14b365830da0d322",
+      "candidates": 79,
+      "retained": 23
+    },
+    {
+      "file": "apps/server/scripts/test-database-setup.ts",
+      "sha256": "8f21e08f532206d4f2d3af13cbee5755bcbeb57534ac0d20d9d0790360b79849",
+      "candidates": 2,
+      "retained": 1
+    },
+    {
+      "file": "apps/server/scripts/test-event-loop.ts",
+      "sha256": "63c5e8e42de73b6ec14721af226fab3caa24c3f71489b5f91aed1e35ffc4be62",
+      "candidates": 0,
+      "retained": 0
+    },
+    {
+      "file": "apps/server/scripts/test-selection-replay.mjs",
+      "sha256": "b4639124b7c38eff72026d8cded4e0399ca44b2eb214637b4f33b835a7233f5f",
+      "candidates": 39,
+      "retained": 2
+    },
+    {
+      "file": "apps/server/scripts/test-selection.mjs",
+      "sha256": "c8fdc8d05acb6b27a5646106729d1a2fa6cc3cc8627b44ca9461d465c78a2788",
+      "candidates": 277,
+      "retained": 19
+    },
+    {
+      "file": "apps/server/scripts/verify-fly-cutover.mjs",
+      "sha256": "5a591c666c19655dfcb5aa207cf0c17b3f7cd6af69a1d9b68b8cb5f6e5eca8b0",
+      "candidates": 19,
+      "retained": 1
+    },
+    {
+      "file": "apps/server/src/account-deletion.test.ts",
+      "sha256": "27b1094636418bfe7959ca439a4d22d741af28ee2537628b0380337d45d8f8b7",
+      "candidates": 0,
+      "retained": 0
+    },
+    {
+      "file": "apps/server/src/advisory-lock-replacements.postgres.test.ts",
+      "sha256": "86d4b5b631cacc65436e4f1d43ee28114142d9aeffec4aa2a670171c52ff1db0",
+      "candidates": 1,
+      "retained": 1
+    },
+    {
+      "file": "apps/server/src/agent-access.test.ts",
+      "sha256": "12d81f87c130f30d79f5eeb8ca922a708a250062b76ce9dbb8396dfe8e355006",
+      "candidates": 0,
+      "retained": 0
+    },
+    {
+      "file": "apps/server/src/agent-avatar.test.ts",
+      "sha256": "47ed0429a5345dbd8c066ff6363e854ab3b638ae606133209b55d9df6edb6e11",
+      "candidates": 0,
+      "retained": 0
+    },
+    {
+      "file": "apps/server/src/agent-avatar.ts",
+      "sha256": "950a38508ff3d290093acc2d1040a546efe03dbfac861a64138a5a133a7045ab",
+      "candidates": 17,
+      "retained": 6
+    },
+    {
+      "file": "apps/server/src/agent-command-create-agent-command.ts",
+      "sha256": "97c1c49aeb68bbcb56e9673b1f3e212e329bdee504ff766a14a7e67353d945b2",
+      "candidates": 59,
+      "retained": 8
+    },
+    {
+      "file": "apps/server/src/agent-command-queue.ts",
+      "sha256": "208acef078be5cdf1cff17eca89dec7a6d63bb8960f13626c996b456d864c404",
+      "candidates": 17,
+      "retained": 3
+    },
+    {
+      "file": "apps/server/src/agent-command-read-agent-commands.ts",
+      "sha256": "45730c453cf55a0c528dab4d07cae5ce229fa5060431ebd9289c35ed82c0ffec",
+      "candidates": 68,
+      "retained": 26
+    },
+    {
+      "file": "apps/server/src/agent-command-reconcile-configured-corner-reviewers.ts",
+      "sha256": "9d82bd7f28014ba3c899bb5ccd5e51a729071e5925bbc41d4109247f148384e4",
+      "candidates": 3,
+      "retained": 0
+    },
+    {
+      "file": "apps/server/src/agent-command-route-agent-result.ts",
+      "sha256": "61193c5633b59b83e6e186399d49e5cfc165c5c10ca26b6e94dbddb1de9852bc",
+      "candidates": 106,
+      "retained": 14
+    },
+    {
+      "file": "apps/server/src/agent-command.integration-2.test.ts",
+      "sha256": "cab9139c2b2549d3b9f768ff0d457e141684ccf114e2e98ea5380c0be2f1070f",
+      "candidates": 0,
+      "retained": 0
+    },
+    {
+      "file": "apps/server/src/agent-command.integration-3.test.ts",
+      "sha256": "a420de9e9d01a094b436bf967e71bc32f536ecc1bbd845e5a71e86c4bd9864df",
+      "candidates": 1,
+      "retained": 1
+    },
+    {
+      "file": "apps/server/src/agent-command.integration.test.ts",
+      "sha256": "d23cab32600af2298c9e89802836234b53be285886417171392d6229794dc97c",
+      "candidates": 1,
+      "retained": 1
+    },
+    {
+      "file": "apps/server/src/agent-command.ts",
+      "sha256": "6f0d29143c6e402b7a4aed6d37e66ff39609a84b3bcd77500c518b95b20ffbb6",
+      "candidates": 139,
+      "retained": 28
+    },
+    {
+      "file": "apps/server/src/agent-grant-inspect.test.ts",
+      "sha256": "aa644ae70b9a9526e75cba63daab462353b5b7c6b9308e890a2aa4779ebd8182",
+      "candidates": 0,
+      "retained": 0
+    },
+    {
+      "file": "apps/server/src/agent-health.test.ts",
+      "sha256": "792e91fb3e01b097cfccfe31c58b9504e1d0337a3f165a9146cfc3a750ffaef5",
+      "candidates": 0,
+      "retained": 0
+    },
+    {
+      "file": "apps/server/src/agent-health.ts",
+      "sha256": "eb1ccd0f0a5f560de6c692a5660075b2240ae2fda5993a28bba5d3a39c2dd365",
+      "candidates": 18,
+      "retained": 0
+    },
+    {
+      "file": "apps/server/src/agent-lifecycle-command.test.ts",
+      "sha256": "4ae862e24b4342fc76964fefd5deafee3775496603efb2c77342d2704f143631",
+      "candidates": 0,
+      "retained": 0
+    },
+    {
+      "file": "apps/server/src/agent-member-metadata.test.ts",
+      "sha256": "04a005e7771242f739be1dfd56acc64bd70a4fe45ec30c00479a445681512428",
+      "candidates": 0,
+      "retained": 0
+    },
+    {
+      "file": "apps/server/src/agent-member-metadata.ts",
+      "sha256": "ad2f049b14c56453706f1f264ac7691ab80aa833b6cff7b994791d08ae8c4312",
+      "candidates": 27,
+      "retained": 1
+    },
+    {
+      "file": "apps/server/src/agent-order-resources.integration.test.ts",
+      "sha256": "127dc2888dddab4df8a7694cf628262b31181f224e06bd5fb2e01f41d3cd449d",
+      "candidates": 0,
+      "retained": 0
+    },
+    {
+      "file": "apps/server/src/agent-post-text.test.ts",
+      "sha256": "6381e58633272d7d12025d334fcab7f04ca8d2de5e9282b32996e22db700dd11",
+      "candidates": 0,
+      "retained": 0
+    },
+    {
+      "file": "apps/server/src/agent-post-text.ts",
+      "sha256": "fc9dc5442af34c8364f4883d328881f7c293cc359aac1328dde30e6fa69fc683",
+      "candidates": 3,
+      "retained": 0
+    },
+    {
+      "file": "apps/server/src/agent-removal.test.ts",
+      "sha256": "8d3aafc8608cf70555754d1f61316c766e5c0e6956bf2ccf7b6f61eb83eb2cc9",
+      "candidates": 0,
+      "retained": 0
+    },
+    {
+      "file": "apps/server/src/agent-retirement.ts",
+      "sha256": "b0c1c70f3f95dec968877513904a5f67e43aec08bdeaed825fd99d4085f3859b",
+      "candidates": 8,
+      "retained": 1
+    },
+    {
+      "file": "apps/server/src/agent-return-queue.postgres.test.ts",
+      "sha256": "8474d2a434dd73b7f104bb61357455fab62c1a682e6e7cbf44cb78a76fded107",
+      "candidates": 1,
+      "retained": 1
+    },
+    {
+      "file": "apps/server/src/agent-schedule-deadline.postgres.test.ts",
+      "sha256": "c558b789189286680cc367826ed3013c68f53e83c4ea8de6ac5bc252a40f7f5d",
+      "candidates": 1,
+      "retained": 1
+    },
+    {
+      "file": "apps/server/src/agent-schedule-source.ts",
+      "sha256": "bd70caca3cfdbd8c4890310c0184ae9fd8a1cf53dac2d5f7a9c47ae6e41358ef",
+      "candidates": 13,
+      "retained": 9
+    },
+    {
+      "file": "apps/server/src/agent-schedules.test.ts",
+      "sha256": "d59d99037d6f65fdf6d6f4ed5c60ea77584629b5bc4eeb0a9863cf00ff6ab538",
+      "candidates": 0,
+      "retained": 0
+    },
+    {
+      "file": "apps/server/src/agent-schedules.ts",
+      "sha256": "2493090bb8cbfb2025fbc06badd42acb30b6b177cd3b2be9cbc33574ff0bdc8a",
+      "candidates": 45,
+      "retained": 7
+    },
+    {
+      "file": "apps/server/src/agent-sign-in.test.ts",
+      "sha256": "b1411fef5fdfef501d80eb78c034ea256d046fdd468a5925e8d9567e9d863d29",
+      "candidates": 0,
+      "retained": 0
+    },
+    {
+      "file": "apps/server/src/agent-sign-in.ts",
+      "sha256": "4b78c91d90b449ccb40a2d527934ab34f5abbec309ea1889f26e2448a4cbde48",
+      "candidates": 68,
+      "retained": 11
+    },
+    {
+      "file": "apps/server/src/agent-subscriptions.test.ts",
+      "sha256": "fbb80c312c0b29199359e57cabff5ed4f99c0e32480db64c0bd76866c7bd1051",
+      "candidates": 0,
+      "retained": 0
+    },
+    {
+      "file": "apps/server/src/agent-subscriptions.ts",
+      "sha256": "7ed2896009a47ba6f41fa81259dc613aeb11aeb22ce7ef4c89d570cc1ae0e7e8",
+      "candidates": 225,
+      "retained": 36
+    },
+    {
+      "file": "apps/server/src/agent-turn-batch.test.ts",
+      "sha256": "d7ba0c6e1e33a01e88e9648053ce371d5643324159f5723bbc077d48659a10a2",
+      "candidates": 0,
+      "retained": 0
+    },
+    {
+      "file": "apps/server/src/agent-turn-end.test.ts",
+      "sha256": "9df6d3463549dce7dd386067d32b5700b0d75135313a4adb28d76a5603bf91e7",
+      "candidates": 0,
+      "retained": 0
+    },
+    {
+      "file": "apps/server/src/agent-turn-end.ts",
+      "sha256": "daa63aa9128f31daed35e9a8f5659a21f6db71886ea89771147fd8a5cf24aaef",
+      "candidates": 9,
+      "retained": 4
+    },
+    {
+      "file": "apps/server/src/agent-turn-failure.ts",
+      "sha256": "26d2211e65ad8025ce9e040c2a43b1044fde946c316fceece09420a7fdd0cd76",
+      "candidates": 6,
+      "retained": 1
+    },
+    {
+      "file": "apps/server/src/agent-turn-lifecycle.test.ts",
+      "sha256": "ef9717cb591223d598c87ed7676e59b3cbdfbeb63f6bf75241cdd4548a1b8eb3",
+      "candidates": 0,
+      "retained": 0
+    },
+    {
+      "file": "apps/server/src/agent-turn-native.postgres.test.ts",
+      "sha256": "185c65070aa2c774f4a7b2a94590851d75936cc206c640c4dd1696a476419379",
+      "candidates": 1,
+      "retained": 1
+    },
+    {
+      "file": "apps/server/src/agent-usage-accounts.integration.test.ts",
+      "sha256": "60955eb2948d2bf81d6fa44d360bc645f09456165a61e65ec222a4c52e580b00",
+      "candidates": 0,
+      "retained": 0
+    },
+    {
+      "file": "apps/server/src/agent-usage.integration.test.ts",
+      "sha256": "f6869adade0b7b5bb454cfc7478ff5102d8216f548aeb1557a868a4e921a4b38",
+      "candidates": 0,
+      "retained": 0
+    },
+    {
+      "file": "apps/server/src/agent-usage.ts",
+      "sha256": "b1e5a97bad250d12fb739528d644f1a2ca7756eb04e796f1ae1d3f485285b145",
+      "candidates": 90,
+      "retained": 13
+    },
+    {
+      "file": "apps/server/src/agent-voice.test.ts",
+      "sha256": "3cca027bcd3ba7b0a240ecbc4bb6870bf41a9593714bbe3c46932b8b54545277",
+      "candidates": 0,
+      "retained": 0
+    },
+    {
+      "file": "apps/server/src/agent-voice.ts",
+      "sha256": "99d7bbaa75940279c2ca6dbcb6ec6ea447a4309239fa07c82308ce421509c88e",
+      "candidates": 36,
+      "retained": 1
+    },
+    {
+      "file": "apps/server/src/agent-wake-pause.ts",
+      "sha256": "28d1ba2cebd9a42e5d5a71361b59d5590bd9a3f647207936d8f70b4b2810a874",
+      "candidates": 12,
+      "retained": 0
+    },
+    {
+      "file": "apps/server/src/apns-push.test.ts",
+      "sha256": "8ff7ed8fda2f0dd4f26e3fd3a05b2d2e750455cd798d961726b781878d8dbb14",
+      "candidates": 0,
+      "retained": 0
+    },
+    {
+      "file": "apps/server/src/apns-push.ts",
+      "sha256": "c94f0ef82acae03183c6f3d48c630cc6f7ced9ce1da56215ffc43bd2c8bdb99f",
+      "candidates": 66,
+      "retained": 8
+    },
+    {
+      "file": "apps/server/src/app-api-credential.ts",
+      "sha256": "1f318fac9f01ecc504b7fb64fe1563555be0fc893a453665969e39cebfad9d20",
+      "candidates": 7,
+      "retained": 2
+    },
+    {
+      "file": "apps/server/src/app-connections-connect-app.ts",
+      "sha256": "e0487591f2a534bbfd5920800854cee1da9255c73c401bf4698a4902094bfe2b",
+      "candidates": 135,
+      "retained": 35
+    },
+    {
+      "file": "apps/server/src/app-connections.integration-2.test.ts",
+      "sha256": "807859dac6009174c20c1008fb4f514331425941b169373e6076a31eac717f83",
+      "candidates": 0,
+      "retained": 0
+    },
+    {
+      "file": "apps/server/src/app-connections.integration-3.test.ts",
+      "sha256": "c30b1cc7daa406e855e0445f6c60006c91e1ef2fb30576599d40425bc105dd99",
+      "candidates": 1,
+      "retained": 1
+    },
+    {
+      "file": "apps/server/src/app-connections.integration-4.test.ts",
+      "sha256": "bd0b3bbdbd82c8cc0ad867fc08c7d0022137b5f15c65f6f7300f23321eda54e0",
+      "candidates": 0,
+      "retained": 0
+    },
+    {
+      "file": "apps/server/src/app-connections.integration.test.ts",
+      "sha256": "bc37679a24e9e06d24ed1bfaff03a89725cab810df7cc0fc3ceb8c14f1eec1bc",
+      "candidates": 0,
+      "retained": 0
+    },
+    {
+      "file": "apps/server/src/app-connections.ts",
+      "sha256": "32f92dfa6b818bc7b103cfceea4aa81658bc446e85619be495b6d9715ff0d815",
+      "candidates": 133,
+      "retained": 60
+    },
+    {
+      "file": "apps/server/src/approval-card-identity.test.ts",
+      "sha256": "b0c1c266e5c3f071dc46ea148e3f0218f8f5406f1bbfb957f57e1a12415dd476",
+      "candidates": 0,
+      "retained": 0
+    },
+    {
+      "file": "apps/server/src/approval-card-source.test.ts",
+      "sha256": "87dcd5c1d9ad1b8df7bc0eea8d1fc3dd2111839fe7b3bd2fb2aabd208e679239",
+      "candidates": 0,
+      "retained": 0
+    },
+    {
+      "file": "apps/server/src/approval-card-source.ts",
+      "sha256": "3229c4081c5931ad1ccbce67816ffceeb6509d4a5ba5727cf69f2bc4ad3b7dbc",
+      "candidates": 6,
+      "retained": 0
+    },
+    {
+      "file": "apps/server/src/archived-corner-memberships.test.ts",
+      "sha256": "f393f35bf3c1b0a95048f6e58088b86e797e9b20f86e65678864af191d584f62",
+      "candidates": 0,
+      "retained": 0
+    },
+    {
+      "file": "apps/server/src/auth.test.ts",
+      "sha256": "8003f78fcdcc3cbb74bffb4fd3a743ecd5e0a1c879330c69e661afc2522ddeff",
+      "candidates": 0,
+      "retained": 0
+    },
+    {
+      "file": "apps/server/src/auth.ts",
+      "sha256": "2d9c1762a14b023f8e92ad7d1b3245f53724cb4c68d75edaae4dd2f47a48f783",
+      "candidates": 118,
+      "retained": 4
+    },
+    {
+      "file": "apps/server/src/authorization-lifetime.test.ts",
+      "sha256": "f238287717394cfb1775cc74fbe2997ab8754cee940d358c946747c4a858e6e9",
+      "candidates": 1,
+      "retained": 1
+    },
+    {
+      "file": "apps/server/src/background-2.test.ts",
+      "sha256": "257655c63b0a7152aef2b95e88b4d6e94a8e8c2f5ac0d498d010371168bc1a11",
+      "candidates": 0,
+      "retained": 0
+    },
+    {
+      "file": "apps/server/src/background-3.test.ts",
+      "sha256": "6848c5cc5cd9601a543648a64dcbac0a731123685a4a1fd6cb09ce510100b448",
+      "candidates": 0,
+      "retained": 0
+    },
+    {
+      "file": "apps/server/src/background-database-recovery.test.ts",
+      "sha256": "3de0339aec982d1de53a2e13c61309047e0ff94480f4a26cbd9313b93aa06432",
+      "candidates": 0,
+      "retained": 0
+    },
+    {
+      "file": "apps/server/src/background-due-source.ts",
+      "sha256": "f8a930480cde7c601a5fdec74ca94f349d9d193931ab852b46eb14c93f167589",
+      "candidates": 3,
+      "retained": 2
+    },
+    {
+      "file": "apps/server/src/background-retirement.test.ts",
+      "sha256": "c481a89b2e6d5bb297504ff115a1e26a067c14c07655e3667f3f7c2a7b78cd54",
+      "candidates": 0,
+      "retained": 0
+    },
+    {
+      "file": "apps/server/src/background-work.test.ts",
+      "sha256": "b87708effd0752e7fbb43aa85777706620228d40458c2320423b970ff63c4df8",
+      "candidates": 0,
+      "retained": 0
+    },
+    {
+      "file": "apps/server/src/background-work.ts",
+      "sha256": "ee87dfd46c7d5a86da6537019c91fec36f0e47350740e253e19baf905a55972f",
+      "candidates": 6,
+      "retained": 1
+    },
+    {
+      "file": "apps/server/src/background.test.ts",
+      "sha256": "b53369d8532d9ac06a906502224b0d33da9d33c99e5e1973a79fda5a00f1e5c4",
+      "candidates": 0,
+      "retained": 0
+    },
+    {
+      "file": "apps/server/src/background.ts",
+      "sha256": "b530968d5abcba608544193e3b0daff267cb3c4e213e6da714648860b5cf118e",
+      "candidates": 87,
+      "retained": 20
+    },
+    {
+      "file": "apps/server/src/can-read-rooms.test.ts",
+      "sha256": "5ee4799c8ec79c98f89eb17b484b26db0cd8b46f254738476bb5f3bcf2369630",
+      "candidates": 0,
+      "retained": 0
+    },
+    {
+      "file": "apps/server/src/cdp-client.ts",
+      "sha256": "fa20718ac577649f8320534f984411f3b5bf55ea62b253a2898acd5c1ba09d6a",
+      "candidates": 143,
+      "retained": 11
+    },
+    {
+      "file": "apps/server/src/cdp-fake.ts",
+      "sha256": "89e50cf24c20211059b17ec4091129b9c452c67e726cf15dcc78472e0d2f1deb",
+      "candidates": 44,
+      "retained": 5
+    },
+    {
+      "file": "apps/server/src/channel-mention.test.ts",
+      "sha256": "3f0d38b54e1f86b1fb000d33d0fc479dfd3f9575e86e5bff305e798260702993",
+      "candidates": 0,
+      "retained": 0
+    },
+    {
+      "file": "apps/server/src/chat-corner-counts.test.ts",
+      "sha256": "dcee8ef24f83929a1ecac2a13de968315f03954128acf6cbf4a9b30593d8121f",
+      "candidates": 0,
+      "retained": 0
+    },
+    {
+      "file": "apps/server/src/chat-corner-counts.ts",
+      "sha256": "b4030a8c099c813fd6abe68bdb35c2cd35a50f50c9fea7be051b324a5726150e",
+      "candidates": 42,
+      "retained": 10
+    },
+    {
+      "file": "apps/server/src/choice-expiry-schema.ts",
+      "sha256": "0e362797121c8004461de4e09ba2b77a50d05a2168cf3932b7a372ceda404de3",
+      "candidates": 0,
+      "retained": 0
+    },
+    {
+      "file": "apps/server/src/client-error-observation.test.ts",
+      "sha256": "c216afab4e68c1f9eb34f7147d89958c33c2355c98f1d2ac775b6074de1b1354",
+      "candidates": 0,
+      "retained": 0
+    },
+    {
+      "file": "apps/server/src/command-completion.integration.test.ts",
+      "sha256": "e8a8707851d500504dd9541d08fd5b218591e7c78fb70190734df1b17e9e4488",
+      "candidates": 0,
+      "retained": 0
+    },
+    {
+      "file": "apps/server/src/command-completion.ts",
+      "sha256": "3bc24a9131dd55fa23b15a6dd9ea685087d6eb2a281f7e651449e3e7001da24f",
+      "candidates": 42,
+      "retained": 11
+    },
+    {
+      "file": "apps/server/src/command-refusal.ts",
+      "sha256": "ad07687b7bf95cfc8480478494a9082e468cf869a962323ffeaa643e33e5a383",
+      "candidates": 2,
+      "retained": 0
+    },
+    {
+      "file": "apps/server/src/command-scoped-database.ts",
+      "sha256": "4f9ebc3bf26c71434c52e3bc99899ba75a31af61154ffd4b5c00a93dc1a356f1",
+      "candidates": 8,
+      "retained": 0
+    },
+    {
+      "file": "apps/server/src/commander-opening.integration.test.ts",
+      "sha256": "d013913ada0e7f51db335a3fe5c13f2759058f43c872a5a530acecf650a6add3",
+      "candidates": 0,
+      "retained": 0
+    },
+    {
+      "file": "apps/server/src/commander-order-target.integration.test.ts",
+      "sha256": "d3eb48c143bcc9a53a8f7db0c9a9bd5d6053d7ac49c09da6f80cbddbbd78983e",
+      "candidates": 0,
+      "retained": 0
+    },
+    {
+      "file": "apps/server/src/commander-recovery.integration-2.test.ts",
+      "sha256": "89324ae55415af9dae1b7e547bdbb9bbf8fc91a048f67d734cd3c12ade1236d9",
+      "candidates": 0,
+      "retained": 0
+    },
+    {
+      "file": "apps/server/src/commander-recovery.integration-3.test.ts",
+      "sha256": "f90c6e3cf1a882a95b4cff5dbad95abc16cb06be608d6ab200acea7a031a56b2",
+      "candidates": 0,
+      "retained": 0
+    },
+    {
+      "file": "apps/server/src/commander-recovery.integration.test.ts",
+      "sha256": "81198cfbed1b247ea22c17fe43b052cba6b40cd6339da356764f125e61ae086b",
+      "candidates": 0,
+      "retained": 0
+    },
+    {
+      "file": "apps/server/src/commander-wakes.integration.test.ts",
+      "sha256": "0a1333bfe56b1d7aa96760c8c7df42009945935249eb752559b0dc4dce7b2653",
+      "candidates": 0,
+      "retained": 0
+    },
+    {
+      "file": "apps/server/src/commander.integration-2.test.ts",
+      "sha256": "9aee731a5e202292c1a135ffe149ca00b5a2f1b933eae9b51c7fac2701f91fa3",
+      "candidates": 0,
+      "retained": 0
+    },
+    {
+      "file": "apps/server/src/commander.integration-3.test.ts",
+      "sha256": "06b6ab5e17a7ba60af9e5fade05e87d8d8501e1ac8d54b72f7e0df3b6a876818",
+      "candidates": 0,
+      "retained": 0
+    },
+    {
+      "file": "apps/server/src/commander.integration.test.ts",
+      "sha256": "4850fc75c4d83baa2a654af7e1c63e7feecf6a31b696578ed0467bbd02cc2b60",
+      "candidates": 0,
+      "retained": 0
+    },
+    {
+      "file": "apps/server/src/commander.ts",
+      "sha256": "75942c6c61d4752b0ca68b2ae92296b2771bb218c3910f8559365cd21ad957a3",
+      "candidates": 149,
+      "retained": 15
+    },
+    {
+      "file": "apps/server/src/committed-journal-schema.ts",
+      "sha256": "e7a699891f252d4534e8b1bd57d0cd1d62b853bad272a370abf1a000d03a191a",
+      "candidates": 5,
+      "retained": 1
+    },
+    {
+      "file": "apps/server/src/compact-room-view.test.ts",
+      "sha256": "9eee85dd68aeeb4ecb25df60438ce704740464703c4fe3b9eafd1c99c59e9419",
+      "candidates": 0,
+      "retained": 0
+    },
+    {
+      "file": "apps/server/src/compact-room-view.ts",
+      "sha256": "e1ed3b55840b0c3bb5815592022540be02669f4dd5e940ad229c61ec28ab2188",
+      "candidates": 11,
+      "retained": 0
+    },
+    {
+      "file": "apps/server/src/company-logos.test.ts",
+      "sha256": "15816196a8385c4573fbffb7ef1305d6a004ab034006354ab8c43f03bf67d710",
+      "candidates": 0,
+      "retained": 0
+    },
+    {
+      "file": "apps/server/src/company-logos.ts",
+      "sha256": "614e33ae78b9d8c763075752081b6115f6c89c789f5159fa76ad434af2448556",
+      "candidates": 44,
+      "retained": 8
+    },
+    {
+      "file": "apps/server/src/company-mcp-discovery.test.ts",
+      "sha256": "76c37424fe8c6acae1851d70c76245bb0401ae9d281af5567334a3ef3db60169",
+      "candidates": 0,
+      "retained": 0
+    },
+    {
+      "file": "apps/server/src/company-mcp-discovery.ts",
+      "sha256": "3886b17217ee102b4fb79128e6da2623f454ef3e16df868a9f3f0b7bbe55cc32",
+      "candidates": 55,
+      "retained": 11
+    },
+    {
+      "file": "apps/server/src/company-registry.ts",
+      "sha256": "d8e76cf566767d5a44d289e6c63b11094402f3b66da3fdad63f145408434d6e9",
+      "candidates": 26,
+      "retained": 3
+    },
+    {
+      "file": "apps/server/src/composio-apps.test.ts",
+      "sha256": "9ef4d3a84d6de3e302b2ee2c2ff202fa2fb226f8f45fd0564012282bb867d082",
+      "candidates": 0,
+      "retained": 0
+    },
+    {
+      "file": "apps/server/src/composio-apps.ts",
+      "sha256": "ed245bf8b0fdba9ea4b4cc3c2a812094257d76d58690fb077d07c92b3c508641",
+      "candidates": 305,
+      "retained": 38
+    },
+    {
+      "file": "apps/server/src/composio-delivery.ts",
+      "sha256": "b99fbe3688d98dc49811fc5b1be186fc1197c4ad225dfbf7867b56e42789cbbe",
+      "candidates": 15,
+      "retained": 1
+    },
+    {
+      "file": "apps/server/src/computer-expiry-schema.ts",
+      "sha256": "17dea3addd4749c9dbbc74eb071ab3abb5af243ea83b3fa2aad166b8e1079e2d",
+      "candidates": 2,
+      "retained": 1
+    },
+    {
+      "file": "apps/server/src/computer-session-2.test.ts",
+      "sha256": "d53050c8d4bec3b2dc3223c74e04dfb3fec493fb646ec4e68bdd4a6295d515b9",
+      "candidates": 4,
+      "retained": 4
+    },
+    {
+      "file": "apps/server/src/computer-session-computer-viewer-html.ts",
+      "sha256": "015584415d93b054279814f09a99c0eb0f259e74d0b4e8ec3d812343c269f04f",
+      "candidates": 132,
+      "retained": 39
+    },
+    {
+      "file": "apps/server/src/computer-session.test.ts",
+      "sha256": "73426aac1eb3dd37fc7b13e441a74ecc2da7c794f498d20dedda52d1ec76f534",
+      "candidates": 0,
+      "retained": 0
+    },
+    {
+      "file": "apps/server/src/computer-session.ts",
+      "sha256": "d1f1ec2ca5b754ff64a0a94abc50f0fdf4bc5d5a16c0eaff52e89c5500853b25",
+      "candidates": 309,
+      "retained": 87
+    },
+    {
+      "file": "apps/server/src/connected-app-activity.integration.test.ts",
+      "sha256": "1f47b6b2d7e75f6c5180ab3b5494de57cd2ccc6f9815cbc2fef7b0b26b67b8c4",
+      "candidates": 0,
+      "retained": 0
+    },
+    {
+      "file": "apps/server/src/connection-presence.postgres.test.ts",
+      "sha256": "d909be3663fbe2335495c899d40c8ec53ecfd1668e80dc8de586d3971c28d44c",
+      "candidates": 1,
+      "retained": 1
+    },
+    {
+      "file": "apps/server/src/connection-presence.test.ts",
+      "sha256": "ea6d72d1a33f69bfa7adf59ea374cc3e95cc82d86c1a77437b30bd1813a177ff",
+      "candidates": 0,
+      "retained": 0
+    },
+    {
+      "file": "apps/server/src/connection-presence.ts",
+      "sha256": "3521ae01172763d3aa4a5b5bdd48670316b6d30c30c0a1cd8cbadf97e89bf30a",
+      "candidates": 88,
+      "retained": 7
+    },
+    {
+      "file": "apps/server/src/connection-wait.ts",
+      "sha256": "93b6954d4ef26c6cc43fdc7e9889571314f831ecba0bdb575aeffd8544f236a2",
+      "candidates": 5,
+      "retained": 0
+    },
+    {
+      "file": "apps/server/src/connector-claims.postgres.test.ts",
+      "sha256": "79958b544cec607b1fd556c64c96f376d468c6bbaf347ec9dc62ceaee880108b",
+      "candidates": 1,
+      "retained": 1
+    },
+    {
+      "file": "apps/server/src/connector-discovery-cache.ts",
+      "sha256": "d9d5bf0128e3b5e693c15f15071423a112329f0fb45a15c89b95f56ee6561eea",
+      "candidates": 25,
+      "retained": 2
+    },
+    {
+      "file": "apps/server/src/connector-intent-index.test.ts",
+      "sha256": "c301bf4e4ec383a0f522db7ea6ae298c593e671e95649d22b2fa74f56f087a33",
+      "candidates": 0,
+      "retained": 0
+    },
+    {
+      "file": "apps/server/src/connector-intent-index.ts",
+      "sha256": "500398b04b2e9862973bb0436ade17fd4519eaea67313b96cff4eec99601289b",
+      "candidates": 35,
+      "retained": 4
+    },
+    {
+      "file": "apps/server/src/connector-offer-completion.ts",
+      "sha256": "d07cacd0d4571fbbc458417e4a3b3281bd143118b56f213c4f8f877a2eae7f29",
+      "candidates": 36,
+      "retained": 2
+    },
+    {
+      "file": "apps/server/src/connector-offer-expiry.ts",
+      "sha256": "ef36b2e9eff0c6371f0351edce00e394f233b472f5db1ae625e14e4f83148391",
+      "candidates": 0,
+      "retained": 0
+    },
+    {
+      "file": "apps/server/src/corner-access-database.test.ts",
+      "sha256": "66b795d0163502b8740ec3e0f099b71edfe709174379cd1ad64e840a41e5010e",
+      "candidates": 0,
+      "retained": 0
+    },
+    {
+      "file": "apps/server/src/corner-access-database.ts",
+      "sha256": "3e5b794466ac782925e0905a0b783d5346f1799eb5d051c76084f56a2c26116b",
+      "candidates": 29,
+      "retained": 0
+    },
+    {
+      "file": "apps/server/src/corner-attention.integration.test.ts",
+      "sha256": "d03c1eb97cc100960fa9887d44bfb4db3f86fd386789605f199868fcd21a0fee",
+      "candidates": 0,
+      "retained": 0
+    },
+    {
+      "file": "apps/server/src/corner-attention.ts",
+      "sha256": "2e9f1324c93ac3001b43ddcc7a6458fbbbf73ad16ea7a1ea7b37257fd8e191b5",
+      "candidates": 59,
+      "retained": 13
+    },
+    {
+      "file": "apps/server/src/corner-branch-cleanup.ts",
+      "sha256": "6981e58bfe4b4488d6c88f9a91867db761da7b91df6e4a6d44ad4e4676f5a72f",
+      "candidates": 23,
+      "retained": 5
+    },
+    {
+      "file": "apps/server/src/corner-branch.ts",
+      "sha256": "ecdf64b2120a27a9a81c76a1a5111a3a46fb1bd37a941d473f19668064640437",
+      "candidates": 2,
+      "retained": 0
+    },
+    {
+      "file": "apps/server/src/corner-brief-refusals.test.ts",
+      "sha256": "336392de1af9ab30e4ea01b3f2b527e00cfb986a1aabd675b66dd3d00ae3e2b5",
+      "candidates": 0,
+      "retained": 0
+    },
+    {
+      "file": "apps/server/src/corner-brief-reproduction.test.ts",
+      "sha256": "9225fd74e290e83d8679b172908ecd64343c6bb9b41d6b8944cdb99a3783fb59",
+      "candidates": 0,
+      "retained": 0
+    },
+    {
+      "file": "apps/server/src/corner-brief-sentry.test.ts",
+      "sha256": "2989700f1a16ad8e56386c08762ffe9866ed1521e18b322df14cebd03a32b12a",
+      "candidates": 0,
+      "retained": 0
+    },
+    {
+      "file": "apps/server/src/corner-brief.ts",
+      "sha256": "d2252dbcfa987047826116fc504ee780566d2a2418a346d7e990e1bc4e9b3dd1",
+      "candidates": 113,
+      "retained": 14
+    },
+    {
+      "file": "apps/server/src/corner-callsite.integration.test.ts",
+      "sha256": "5654d82d090b7c7589b0ec5c32b29e81964f26e7c8561bcaafb1097a86dc0675",
+      "candidates": 0,
+      "retained": 0
+    },
+    {
+      "file": "apps/server/src/corner-cleanup-backfill.ts",
+      "sha256": "d0c7a2d6cf13e06c41dea3723140d3170687248fe639a13b87f368948039c14c",
+      "candidates": 4,
+      "retained": 0
+    },
+    {
+      "file": "apps/server/src/corner-cleanup-cli.ts",
+      "sha256": "dfd876fe0fba19f94c6310227a00ef12b0a71c5ff3dc512bca3637ef9c99caf3",
+      "candidates": 5,
+      "retained": 1
+    },
+    {
+      "file": "apps/server/src/corner-close.ts",
+      "sha256": "3f1e1335a79acc674acd6e5bb3bb743db6efb30b723e0674f7784435fc964bb5",
+      "candidates": 15,
+      "retained": 2
+    },
+    {
+      "file": "apps/server/src/corner-follow.test.ts",
+      "sha256": "f751752c1e1667f53204bd80445658cce69c0c1a83e84da6ad889e99ea046d4e",
+      "candidates": 0,
+      "retained": 0
+    },
+    {
+      "file": "apps/server/src/corner-follow.ts",
+      "sha256": "e9a77604bdc9c9f389796b8e2f35484f4781512186e634e529bc55a8fc68d19a",
+      "candidates": 21,
+      "retained": 4
+    },
+    {
+      "file": "apps/server/src/corner-github-cache.ts",
+      "sha256": "eba6739159938a1dffdd417007ea4de783899fde33bc175a2e28d312bf037684",
+      "candidates": 9,
+      "retained": 1
+    },
+    {
+      "file": "apps/server/src/corner-helper-close.test.ts",
+      "sha256": "51a12ce1e20ff3e262d17da8a4ad40e7c2aa2a8486f15c98964010291db5fec1",
+      "candidates": 0,
+      "retained": 0
+    },
+    {
+      "file": "apps/server/src/corner-holds.ts",
+      "sha256": "7b53f5adb3dc4b55e3f72ca0dc4c5be3d76d64d4650419106690f2cefbc0d7c4",
+      "candidates": 31,
+      "retained": 2
+    },
+    {
+      "file": "apps/server/src/corner-idle.ts",
+      "sha256": "0d8d472ba6cb959f9942cf2623d2b3d97e6887543872c52de40ec285c35f8fe1",
+      "candidates": 5,
+      "retained": 3
+    },
+    {
+      "file": "apps/server/src/corner-lifecycle-2.test.ts",
+      "sha256": "ef0d5e452fbf24f83f6b798aaaee4e2aede7705bcf3032ba1339261616f1ebdb",
+      "candidates": 0,
+      "retained": 0
+    },
+    {
+      "file": "apps/server/src/corner-lifecycle-3.test.ts",
+      "sha256": "b1970621294f36b31010a225d2843181b3ddc067fb6e2b1f645bff74ab398492",
+      "candidates": 0,
+      "retained": 0
+    },
+    {
+      "file": "apps/server/src/corner-lifecycle-4.test.ts",
+      "sha256": "a43b28f6e0e112545e2b1cbce994bd1ebbd513409f72e5552ca09f0a28455f86",
+      "candidates": 0,
+      "retained": 0
+    },
+    {
+      "file": "apps/server/src/corner-lifecycle-5.test.ts",
+      "sha256": "c6140b0479f57345a7e2fc63315499354c7995592327d75da617a3863a318e35",
+      "candidates": 0,
+      "retained": 0
+    },
+    {
+      "file": "apps/server/src/corner-lifecycle-event-replay.test.ts",
+      "sha256": "20ada35a8ae0ff43b8b9d9e2d12edf8d6effd7c14490758295423fa9e16b301b",
+      "candidates": 0,
+      "retained": 0
+    },
+    {
+      "file": "apps/server/src/corner-lifecycle-read-state.ts",
+      "sha256": "1ad9e9c561e5cd59967a54549b0a858c15caea5522ec5be9afe357a38c8b0d45",
+      "candidates": 83,
+      "retained": 32
+    },
+    {
+      "file": "apps/server/src/corner-lifecycle-review-state.ts",
+      "sha256": "c9515d41adff1b584b99096043509c7f8e33b6d5fc95db97e8835d2b857475e4",
+      "candidates": 67,
+      "retained": 2
+    },
+    {
+      "file": "apps/server/src/corner-lifecycle-values.ts",
+      "sha256": "53dc598f04bf73b84ab659adb0a1acfacfaaa05e96828115428249a8c8ceede1",
+      "candidates": 1,
+      "retained": 0
+    },
+    {
+      "file": "apps/server/src/corner-lifecycle.test.ts",
+      "sha256": "aafd3ac273471963b50fb9003b36b0c8bafafbc58aedca59c83f5e090a0c36b6",
+      "candidates": 0,
+      "retained": 0
+    },
+    {
+      "file": "apps/server/src/corner-lifecycle.ts",
+      "sha256": "8c43591cd2b5f4121e3531ce7e9975cf01717c35f8f5fe78c9f18f796e66866e",
+      "candidates": 149,
+      "retained": 36
+    },
+    {
+      "file": "apps/server/src/corner-machine.test.ts",
+      "sha256": "852ca51ade862bfd3f463f5be869268426dbd715f8543d53d015ca433da535a3",
+      "candidates": 0,
+      "retained": 0
+    },
+    {
+      "file": "apps/server/src/corner-merge-approval.ts",
+      "sha256": "6841bc2e9fd871f401ff40e21924d121c0f823e397c841e29023c2e8f67c7fab",
+      "candidates": 24,
+      "retained": 0
+    },
+    {
+      "file": "apps/server/src/corner-objective.ts",
+      "sha256": "f53c184ccdbc20835a4852b280a5f76a93b9cc35fca917395cbd4a82d0e562df",
+      "candidates": 10,
+      "retained": 1
+    },
+    {
+      "file": "apps/server/src/corner-open-from-corner.test.ts",
+      "sha256": "0595213ff511621f7af778304f4067162c8f77a3bc6aec0423046ff5dcb1fe02",
+      "candidates": 0,
+      "retained": 0
+    },
+    {
+      "file": "apps/server/src/corner-open-implementer.test.ts",
+      "sha256": "c71a6ae708eee54130d20e8a2bec73c019c0630451dbbd74ceea48de031fcce3",
+      "candidates": 0,
+      "retained": 0
+    },
+    {
+      "file": "apps/server/src/corner-open-watch.test.ts",
+      "sha256": "1c6d1db9284a49a48fa2298a8c7a4a3117481792e5e65a9943ae881f1577c507",
+      "candidates": 0,
+      "retained": 0
+    },
+    {
+      "file": "apps/server/src/corner-opening.ts",
+      "sha256": "d470e9c0d50be6ec83987cde16e83c40a462a0b03f1ce7c5afb7edc3a6fbf4ac",
+      "candidates": 8,
+      "retained": 3
+    },
+    {
+      "file": "apps/server/src/corner-owed.test.ts",
+      "sha256": "dcb0804264f638fdcc2ccd7a9efc5cd0c7f438a68a684d6c2ad566f93e8e4e4e",
+      "candidates": 0,
+      "retained": 0
+    },
+    {
+      "file": "apps/server/src/corner-owed.ts",
+      "sha256": "92e256cf8b2974defced8785bee143e1b7c34f8a0dc56e5ecb5ec54f8915136c",
+      "candidates": 108,
+      "retained": 43
+    },
+    {
+      "file": "apps/server/src/corner-person-state.production.test.ts",
+      "sha256": "48e42a0fac5e43bf668063b6b6478c69254e37b00deb307d5d8d77ccd911ce64",
+      "candidates": 1,
+      "retained": 1
+    },
+    {
+      "file": "apps/server/src/corner-person-state.test.ts",
+      "sha256": "275bc2bd1d9aa441a385697b445f4e1a5b505821fa9b79a63408bd13af2c0baa",
+      "candidates": 0,
+      "retained": 0
+    },
+    {
+      "file": "apps/server/src/corner-person-state.ts",
+      "sha256": "54ee974b01689442eb71523419b02739e729f6ae78499350fe863bff0453263e",
+      "candidates": 16,
+      "retained": 1
+    },
+    {
+      "file": "apps/server/src/corner-refusals.test.ts",
+      "sha256": "8c9bb9a127cfbe6068aea09e0241dae55e2aad11b40ddf42b97f9551106ab320",
+      "candidates": 0,
+      "retained": 0
+    },
+    {
+      "file": "apps/server/src/corner-review-dispatch-2.test.ts",
+      "sha256": "e5b40220ae256e1f9bdcbd905f071ff3fd06c2cce2416afe809790cae27f2ecd",
+      "candidates": 0,
+      "retained": 0
+    },
+    {
+      "file": "apps/server/src/corner-review-dispatch.test.ts",
+      "sha256": "68b00e3b06b639e50505d6bb6fa252ddefa5cccba7e0fcafc1c267ed450a7fcf",
+      "candidates": 0,
+      "retained": 0
+    },
+    {
+      "file": "apps/server/src/corner-reviewer-list.test.ts",
+      "sha256": "6f49032c192a06c21d205c24a9aa8d1a52fe7b70f90a54c1c2198bf9110acdce",
+      "candidates": 0,
+      "retained": 0
+    },
+    {
+      "file": "apps/server/src/corner-reviewer-override.test.ts",
+      "sha256": "3fcbc8408461bef1019ae8d43e03f59c2a7c9214ba5cdccb207f89e8a654781a",
+      "candidates": 0,
+      "retained": 0
+    },
+    {
+      "file": "apps/server/src/corner-reviewer.ts",
+      "sha256": "b34e7f89fd59ae78920173f1a435d42ebae55f11bc7156cbed5891e6a4dbb6dc",
+      "candidates": 18,
+      "retained": 0
+    },
+    {
+      "file": "apps/server/src/corner-rollback.test.ts",
+      "sha256": "e96b627efef0affafa56483c6c609c91adf31e2b35f9bd95dd5cddba57ec1ffa",
+      "candidates": 0,
+      "retained": 0
+    },
+    {
+      "file": "apps/server/src/corner-row-projection.ts",
+      "sha256": "11021c40b6c309f7813db1c4668c1ea1b4a14eb3dbe54effa5eb53a3df1bae0a",
+      "candidates": 5,
+      "retained": 1
+    },
+    {
+      "file": "apps/server/src/corner-run.ts",
+      "sha256": "3d6210973ac9de15fa794dbb1850a76f67932827c9d515279d8552db944639f2",
+      "candidates": 2,
+      "retained": 0
+    },
+    {
+      "file": "apps/server/src/corner-state-reference.test.ts",
+      "sha256": "85ac7c1e363ce89b5591ddc25bdcd5ff485cc53f4f38770a74c5465ae30a1a7d",
+      "candidates": 0,
+      "retained": 0
+    },
+    {
+      "file": "apps/server/src/corner-state.exhaustive.test.ts",
+      "sha256": "37a7fd82124adaaab3e2665d7ae9ba3e5b5cf21ef71c02f8f0cc5d0d2425c65c",
+      "candidates": 0,
+      "retained": 0
+    },
+    {
+      "file": "apps/server/src/corner-state.test.ts",
+      "sha256": "2668792b869e4fd6fc624a8feb9501b0d02cf0829d695a7b0ef1f284111eba58",
+      "candidates": 0,
+      "retained": 0
+    },
+    {
+      "file": "apps/server/src/corner-state.ts",
+      "sha256": "3acd35c1562bf17f1cfd859790780ae8516d91e88032d8116782df4cd7c585db",
+      "candidates": 4,
+      "retained": 1
+    },
+    {
+      "file": "apps/server/src/corner-title.ts",
+      "sha256": "58b6bc390abf952b78fa2542d046b86ec0319340cc5c35739632e50533a18a32",
+      "candidates": 3,
+      "retained": 0
+    },
+    {
+      "file": "apps/server/src/corner-waiting-reason.test.ts",
+      "sha256": "155fc60d1a5a114d07550f45ce2c4490b6e198e4cd3a58b2e91cdb9bd9e3293b",
+      "candidates": 0,
+      "retained": 0
+    },
+    {
+      "file": "apps/server/src/corner-waiting-report.ts",
+      "sha256": "c255df6af189e9191a1ac7b7d3fee105a5ce6a93bc11a731d78c3a57f76c425a",
+      "candidates": 9,
+      "retained": 3
+    },
+    {
+      "file": "apps/server/src/corner-wake-cleanup.ts",
+      "sha256": "ffdb47fc892ecfb7fdcacfe6d2d2e82a9612f87fe36b375cdae519647352e52a",
+      "candidates": 2,
+      "retained": 0
+    },
+    {
+      "file": "apps/server/src/corner-watch.test.ts",
+      "sha256": "d903f727a741853050da634220de2ba6886cc9ab98478230705ea9fbf50679db",
+      "candidates": 0,
+      "retained": 0
+    },
+    {
+      "file": "apps/server/src/corner-worker.ts",
+      "sha256": "27206e344e99af265621bec728f96c2c4d0665aec113e266d7927d9462711867",
+      "candidates": 6,
+      "retained": 1
+    },
+    {
+      "file": "apps/server/src/daemon-credential-lifetime.ts",
+      "sha256": "1eae9661f4025f67a1ac2d181494ba930fc2a7e20cc0429813d0aef42c1ca1bb",
+      "candidates": 2,
+      "retained": 0
+    },
+    {
+      "file": "apps/server/src/daemon-inbox-cause.test.ts",
+      "sha256": "a48151c8642acad759ae1ad07a5ed57ef5a17c4469047013f2561088fbbf8307",
+      "candidates": 0,
+      "retained": 0
+    },
+    {
+      "file": "apps/server/src/daemon-inbox-cause.ts",
+      "sha256": "b9168ace1bbc1374e3799a587626dd334216a97f39e9e9ae3e9f2eac4694d0c7",
+      "candidates": 1,
+      "retained": 0
+    },
+    {
+      "file": "apps/server/src/daemon-live.test.ts",
+      "sha256": "91ce83a5e4177ac6aff3c6ecea2a65a0e6f0ff330ea07513965c8900c687bde3",
+      "candidates": 0,
+      "retained": 0
+    },
+    {
+      "file": "apps/server/src/daemon-live.ts",
+      "sha256": "456c963e31c2cbe15879ad2da82b50a847b5e008e139efefd749dea553486948",
+      "candidates": 192,
+      "retained": 48
+    },
+    {
+      "file": "apps/server/src/daemon-service.access.test.ts",
+      "sha256": "eeb01b2f13f1e5bafb3704cd59672139f7e5a6b98bfbf1c806f6e36e7a9132df",
+      "candidates": 0,
+      "retained": 0
+    },
+    {
+      "file": "apps/server/src/daemon-service.completion-latency.test.ts",
+      "sha256": "f11e3794dd976bc3c87150de9ad30c0950c47676149059dff6320d94242bfbcf",
+      "candidates": 0,
+      "retained": 0
+    },
+    {
+      "file": "apps/server/src/daemon-service.ts",
+      "sha256": "ec4669b3e29549db5287369bd2cf32b9689845648cc3d39f5adf0e86b3fba0a8",
+      "candidates": 299,
+      "retained": 13
+    },
+    {
+      "file": "apps/server/src/daemon-storage-lifecycle.test.ts",
+      "sha256": "1e90db0b0f1ef57b15c03aa3fbffa7857277dba78cdbec518bc6cb1cae686951",
+      "candidates": 0,
+      "retained": 0
+    },
+    {
+      "file": "apps/server/src/daemon/access.ts",
+      "sha256": "e7bb314c328bee3c80ff3d389d02bf248912a8e01938decb7c97a00ef10c9ef1",
+      "candidates": 15,
+      "retained": 0
+    },
+    {
+      "file": "apps/server/src/daemon/approvals.ts",
+      "sha256": "0f2220f81a9124d4960e95785d3fbf0ed020d1612ae01c51243d7006b19f7f5a",
+      "candidates": 109,
+      "retained": 20
+    },
+    {
+      "file": "apps/server/src/daemon/apps.ts",
+      "sha256": "96cdea8031535866a79a172ffc9694d62aa1e25618e99804c125d569924a0a8e",
+      "candidates": 158,
+      "retained": 52
+    },
+    {
+      "file": "apps/server/src/daemon/authority.ts",
+      "sha256": "83f6bb8623aae4949756c7c54f0ed170a1615dd9bb44c5597271363d035b0b1c",
+      "candidates": 29,
+      "retained": 4
+    },
+    {
+      "file": "apps/server/src/daemon/configuration.ts",
+      "sha256": "2e8f1571f184a8bbd26521fdbbb3515aeeee4c05c8921c139eb1a5929390bf8e",
+      "candidates": 39,
+      "retained": 6
+    },
+    {
+      "file": "apps/server/src/daemon/connector-offers.ts",
+      "sha256": "3901d12d79fe551afad22d231c63c61b76b24da53e08e5082450c1799b71309d",
+      "candidates": 62,
+      "retained": 11
+    },
+    {
+      "file": "apps/server/src/daemon/connectors.ts",
+      "sha256": "cc86572b6c270cb848ec6584d94b4e01f83334cc61ac306d20bc82f7719449a6",
+      "candidates": 111,
+      "retained": 21
+    },
+    {
+      "file": "apps/server/src/daemon/context.ts",
+      "sha256": "da6351d347f0d06baf56bbc2d1770a1150ec350c139adf7499efba4ddec1c105",
+      "candidates": 0,
+      "retained": 0
+    },
+    {
+      "file": "apps/server/src/daemon/corner-completion.ts",
+      "sha256": "40690a56fc12886cdf84320956147f0763c2282fab7ea7d614e355816b0b1e26",
+      "candidates": 10,
+      "retained": 4
+    },
+    {
+      "file": "apps/server/src/daemon/corner-messages.ts",
+      "sha256": "ef4ddd669154b28df2285ded67880327231b8527467ca33c14e55f2fc3c384ea",
+      "candidates": 38,
+      "retained": 2
+    },
+    {
+      "file": "apps/server/src/daemon/corner-reads.ts",
+      "sha256": "7a9d740628e3c46bb0dc799d338196578456eaba5af1c6ebf79d8c2ce18bc221",
+      "candidates": 84,
+      "retained": 12
+    },
+    {
+      "file": "apps/server/src/daemon/corner-reports.ts",
+      "sha256": "fda779125b55eff50ffde786535ac6fe45b3b8a05dc0b7608dc051e26f5549ab",
+      "candidates": 91,
+      "retained": 12
+    },
+    {
+      "file": "apps/server/src/daemon/corner-writes.ts",
+      "sha256": "65cb203a054382c7950c92e11c1bfc90e0f80881f972b3a475687d7003b9254a",
+      "candidates": 72,
+      "retained": 3
+    },
+    {
+      "file": "apps/server/src/daemon/execute.ts",
+      "sha256": "4c08544d2d883ab965ad97c22315cef396263e6d12aec29a79b414ed19bc6c45",
+      "candidates": 76,
+      "retained": 41
+    },
+    {
+      "file": "apps/server/src/daemon/grants.ts",
+      "sha256": "dacfe497067f34ae992fe21531f440eb65604b359927a79e7a208b176585e707",
+      "candidates": 140,
+      "retained": 23
+    },
+    {
+      "file": "apps/server/src/daemon/inbox-roster.ts",
+      "sha256": "6feb5268551fc28aa5bd86d9a826a985aba6d7667fee7f371379dd9fee805499",
+      "candidates": 65,
+      "retained": 13
+    },
+    {
+      "file": "apps/server/src/daemon/message-reads.ts",
+      "sha256": "4f9f6199707954d704b6b0365775addc87123f490788b336f0cd0eeee5d0f260",
+      "candidates": 52,
+      "retained": 9
+    },
+    {
+      "file": "apps/server/src/daemon/messages.ts",
+      "sha256": "5270d5fc74acdfe0f32688753e2c75eed3177866644933ac46b3b4f07da7af53",
+      "candidates": 91,
+      "retained": 23
+    },
+    {
+      "file": "apps/server/src/daemon/models.ts",
+      "sha256": "9d697af23e03a676ebd2ad5194b30197b2074f72ae432622657fdf7cd331cf3f",
+      "candidates": 32,
+      "retained": 6
+    },
+    {
+      "file": "apps/server/src/daemon/operation-effects.ts",
+      "sha256": "c147de787e698a7e2ad8b37745ce964c64246104446149d5fcd6160cb834f1a3",
+      "candidates": 288,
+      "retained": 58
+    },
+    {
+      "file": "apps/server/src/daemon/operation-names.ts",
+      "sha256": "b4c834a155e2f21c3beffaabfa0ebb5d72ff31db4a0b3e6a8c07f748aa9b579b",
+      "candidates": 0,
+      "retained": 0
+    },
+    {
+      "file": "apps/server/src/daemon/operations.ts",
+      "sha256": "f681b26996a9b2edfac1dbce54c29916d7dc67745bae8e521f30c3ab195101b8",
+      "candidates": 216,
+      "retained": 183
+    },
+    {
+      "file": "apps/server/src/daemon/owned-model.ts",
+      "sha256": "cc74dc387cafe734743a36c61f2f2f983ea8b6650fc0f2f3ce0edce665ec496c",
+      "candidates": 37,
+      "retained": 2
+    },
+    {
+      "file": "apps/server/src/daemon/schedules-events.ts",
+      "sha256": "d44448e3fd775d8b77c3d65863016377d9ae1ac218c78d97fb8638b359bdb209",
+      "candidates": 86,
+      "retained": 0
+    },
+    {
+      "file": "apps/server/src/daemon/turn-receipts.ts",
+      "sha256": "a9684980bbf74019005863d1fe23fbd22845816fdcb475c51ab2f1fe2f59940e",
+      "candidates": 35,
+      "retained": 8
+    },
+    {
+      "file": "apps/server/src/daemon/values.ts",
+      "sha256": "26afceedebd0d6ce1705506854b439945b7bdfcb96d856064f8138cfef1c20d1",
+      "candidates": 47,
+      "retained": 9
+    },
+    {
+      "file": "apps/server/src/daemon/workbench.ts",
+      "sha256": "0ab102233465099c35ce457041e1a12e20e82ce918e5c0a6d6812942ea215273",
+      "candidates": 60,
+      "retained": 4
+    },
+    {
+      "file": "apps/server/src/database-2.test.ts",
+      "sha256": "2cbf6648508ab75f6b33eac5aa4c457f38342356aea4b85c331d7933ff2a175c",
+      "candidates": 0,
+      "retained": 0
+    },
+    {
+      "file": "apps/server/src/database-backfill-squire-approval-expiry.ts",
+      "sha256": "50006f981d7014dffe1785adf83ba7cf4968de3977e20f2ead1d45c37336b945",
+      "candidates": 54,
+      "retained": 5
+    },
+    {
+      "file": "apps/server/src/database-background-work.test.ts",
+      "sha256": "02ec8e460a38e288ca185319589730b609bc6d72d1b167308e1d8175371dcfcd",
+      "candidates": 0,
+      "retained": 0
+    },
+    {
+      "file": "apps/server/src/database-background-work.ts",
+      "sha256": "b76c82e04159dca18410c8641f1bcba917d599a067e17a29370e9a521b992b7a",
+      "candidates": 1,
+      "retained": 0
+    },
+    {
+      "file": "apps/server/src/database-budget.ts",
+      "sha256": "6411a1949c8fb6b209a58b12d7c7b9ae847953ae655ee977b168de525686181b",
+      "candidates": 5,
+      "retained": 0
+    },
+    {
+      "file": "apps/server/src/database-migrate.ts",
+      "sha256": "be90d2b9f283159b0f4e91062f99b265dc6a89598336299e8d609724ec2a5452",
+      "candidates": 33,
+      "retained": 2
+    },
+    {
+      "file": "apps/server/src/database-schema-agent-grants.ts",
+      "sha256": "0aa775baa8c539b0722cdb94c045202e03488e7c11319922e66486d9f20d3bb8",
+      "candidates": 112,
+      "retained": 4
+    },
+    {
+      "file": "apps/server/src/database-schema-corner-facts.ts",
+      "sha256": "b4ec54d511359e7e5ee43a23e39df7693a32d9485e60542ab1068d814779d0c6",
+      "candidates": 153,
+      "retained": 3
+    },
+    {
+      "file": "apps/server/src/database-schema-institutional-memory-items.ts",
+      "sha256": "8c02c28765c159cb5b7540c92f9dbc949e145eca121e982a0a0c0a24b4218841",
+      "candidates": 121,
+      "retained": 1
+    },
+    {
+      "file": "apps/server/src/database-schema-tables.ts",
+      "sha256": "4698aa2c91bea692fd799f7993d0c9489849275b7db22534b989837df4d7433f",
+      "candidates": 0,
+      "retained": 0
+    },
+    {
+      "file": "apps/server/src/database-schema-workflow-backfills.ts",
+      "sha256": "60d41ca15dff4b2354feb1068aa0a7a97fee050eb262c6cafa916972ff159733",
+      "candidates": 137,
+      "retained": 3
+    },
+    {
+      "file": "apps/server/src/database-work-queue.ts",
+      "sha256": "f4dc80dccdf1a03fa3ec5444f13924607a9702887865811928aea30287304673",
+      "candidates": 6,
+      "retained": 0
+    },
+    {
+      "file": "apps/server/src/database.test.ts",
+      "sha256": "4c7c88a3a9cfd0bd87b30a82759811218d09db88499410b18323f087b5d5aa0d",
+      "candidates": 0,
+      "retained": 0
+    },
+    {
+      "file": "apps/server/src/database.ts",
+      "sha256": "37c1b1d45076d794e049cf1f91cdd22f8be1d03906a5f5ccde0dafe3e945c021",
+      "candidates": 98,
+      "retained": 16
+    },
+    {
+      "file": "apps/server/src/dm-attachment.test.ts",
+      "sha256": "7ce759e553a0db402dcbf6ccce6784d31d8b1514c90c07c65be09e3a436884c1",
+      "candidates": 0,
+      "retained": 0
+    },
+    {
+      "file": "apps/server/src/durable-avatar.test.ts",
+      "sha256": "8d111d0e78c65baf689a38f0e613e827050c67cc621ac6141cc18524a83d7a6f",
+      "candidates": 0,
+      "retained": 0
+    },
+    {
+      "file": "apps/server/src/durable-avatar.ts",
+      "sha256": "ffe1aaf5eb70994350bf22165e9404b853bab585ad5a398e843a29caddb83755",
+      "candidates": 21,
+      "retained": 2
+    },
+    {
+      "file": "apps/server/src/email-art/animals.ts",
+      "sha256": "48cc7e05af30d13c544058f474b2bc6e5ba373c7a530666702138035bb47af48",
+      "candidates": 0,
+      "retained": 0
+    },
+    {
+      "file": "apps/server/src/email-art/logo.ts",
+      "sha256": "1797fd19a800c3e715b7e87f00efc377837e79ee37e330bc2a0cb63906b0fd41",
+      "candidates": 0,
+      "retained": 0
+    },
+    {
+      "file": "apps/server/src/email-art/palette.ts",
+      "sha256": "3d661965be357a2fb89bbbad653cf2f8904c9e0e2c8493f2049320ba10529094",
+      "candidates": 18,
+      "retained": 1
+    },
+    {
+      "file": "apps/server/src/email-images.ts",
+      "sha256": "6885b8a5fb55c1b2615145f5e49e9b99d64959bcfe0eb48ecae82dca0b4fc00b",
+      "candidates": 18,
+      "retained": 3
+    },
+    {
+      "file": "apps/server/src/event-cascade.test.ts",
+      "sha256": "58f25916b24261728bd448751e49c88faa13e219ed2357319cd4a8f35403734f",
+      "candidates": 0,
+      "retained": 0
+    },
+    {
+      "file": "apps/server/src/evm-chain.test.ts",
+      "sha256": "1864383db8f66895ca28298016379bc5a1a43d7db185d1deb84497fb8c08744d",
+      "candidates": 0,
+      "retained": 0
+    },
+    {
+      "file": "apps/server/src/evm-chain.ts",
+      "sha256": "32bf407288d8bcc2a7c050b08adce36e2ea408590d47d86481f85c6669e0d1c8",
+      "candidates": 66,
+      "retained": 8
+    },
+    {
+      "file": "apps/server/src/external-send-status.integration.test.ts",
+      "sha256": "e38b30b787276965947c56ac85c681063d50e4512b275eb70ae30987d86461ce",
+      "candidates": 0,
+      "retained": 0
+    },
+    {
+      "file": "apps/server/src/face-palette.generated.ts",
+      "sha256": "e74def6b7bcd3adda3c1b3d5423e4f93bd25d97342e837203e431cab1565a6dc",
+      "candidates": 17,
+      "retained": 1
+    },
+    {
+      "file": "apps/server/src/feedback-2.test.ts",
+      "sha256": "e33ddbac492ed293395e0db84e8f72a0dd40daf45c52e03b2b710e60cb7d754d",
+      "candidates": 0,
+      "retained": 0
+    },
+    {
+      "file": "apps/server/src/feedback-dispositions.ts",
+      "sha256": "d6f0eb3aaac714158dc8b2870a40c3a38e9d7bdd1423bed84f4131c1985d5a09",
+      "candidates": 20,
+      "retained": 10
+    },
+    {
+      "file": "apps/server/src/feedback-github.ts",
+      "sha256": "eab916e7cc4c9bde5d8b1a9d3015d508bf8d3ff08a9ca7fcf905c02f45cc2105",
+      "candidates": 7,
+      "retained": 2
+    },
+    {
+      "file": "apps/server/src/feedback-triage-workflow.test.ts",
+      "sha256": "c915da6ba55fb860eff9d1928e0c529a964bc8ba2908ed2d412af290fe0d487b",
+      "candidates": 0,
+      "retained": 0
+    },
+    {
+      "file": "apps/server/src/feedback-triage-workflow.ts",
+      "sha256": "9b8caecb88d70cc1eceb79db712a51fea84b42109d2e53bb37ca38679a0141a3",
+      "candidates": 23,
+      "retained": 7
+    },
+    {
+      "file": "apps/server/src/feedback-workflow-refusals.test.ts",
+      "sha256": "bd7b8e54d9c3cea870fb7836d5df87a64777290cc4f48c9a012157c686f74d12",
+      "candidates": 0,
+      "retained": 0
+    },
+    {
+      "file": "apps/server/src/feedback.test.ts",
+      "sha256": "e634f1c4842585ba3fef338c2f471b04efe2d1cd07d0517728ea7b58f47305db",
+      "candidates": 0,
+      "retained": 0
+    },
+    {
+      "file": "apps/server/src/feedback.ts",
+      "sha256": "a66927c5b1065bcb078942747de640bffaf8f8116b71cfc0d0d2be7b4f2f9a15",
+      "candidates": 103,
+      "retained": 6
+    },
+    {
+      "file": "apps/server/src/firebase-push.test.ts",
+      "sha256": "ff7245a15d1dba413869624f541c8083e40e5e348501ec8bf9a619304a3e80b7",
+      "candidates": 0,
+      "retained": 0
+    },
+    {
+      "file": "apps/server/src/firebase-push.ts",
+      "sha256": "3cbd9e6a337857b87a3d55a146335039ce1f613be53eb90c0ebc5b5356fc8831",
+      "candidates": 48,
+      "retained": 10
+    },
+    {
+      "file": "apps/server/src/first-party-integrations.ts",
+      "sha256": "070ea64bada94e0bdcff0a731a5555b599460ac4cce95f4f409fa00171fab87e",
+      "candidates": 13,
+      "retained": 2
+    },
+    {
+      "file": "apps/server/src/first-room.ts",
+      "sha256": "145c0ddf0cb63bd4d4368a93ab3e76068ea2cf2315e2cf21e77d189eddcf5b99",
+      "candidates": 7,
+      "retained": 0
+    },
+    {
+      "file": "apps/server/src/fixtures/rollout-0707-corner-worker.ts",
+      "sha256": "7ce7064bc1c309dbbc4010dd848165e355413159c9690c08d32a61cb59bbe22a",
+      "candidates": 0,
+      "retained": 0
+    },
+    {
+      "file": "apps/server/src/fixtures/sentry-22-load-corners.ts",
+      "sha256": "a374e3d45faaa3a4ed21aeb7a5149807775424f844c62c221a440482fff10de0",
+      "candidates": 0,
+      "retained": 0
+    },
+    {
+      "file": "apps/server/src/fly-machines.test.ts",
+      "sha256": "01189aced302fecdefb020a6ace1738e4cfadb04a57a1d961e00f8118f4b0499",
+      "candidates": 0,
+      "retained": 0
+    },
+    {
+      "file": "apps/server/src/fly-machines.ts",
+      "sha256": "568087aa68c7d6660a38fc22b256f184747b2d46a1d1241c47624cdfdc91d231",
+      "candidates": 56,
+      "retained": 9
+    },
+    {
+      "file": "apps/server/src/free-agent-accounting.ts",
+      "sha256": "605af7d4b79abeb3f8b1832786a0802d26d5831939d61f21748f6747347a05aa",
+      "candidates": 55,
+      "retained": 10
+    },
+    {
+      "file": "apps/server/src/free-agent-creation.ts",
+      "sha256": "4e168a0286e354c3c59222d46fce2d3f38017a5e8548621b3c94da8ddd8bf902",
+      "candidates": 8,
+      "retained": 0
+    },
+    {
+      "file": "apps/server/src/free-agent-image-input.test.ts",
+      "sha256": "bcbf772950ae68e2eed431240bc1e9b640acb77fb783d0a15db76d6ac47fa7ed",
+      "candidates": 0,
+      "retained": 0
+    },
+    {
+      "file": "apps/server/src/free-agent-image-input.ts",
+      "sha256": "9fbee29277afb07fb2a8562736b0c928efabb0326e4d044e1d7bf24961a99a6b",
+      "candidates": 28,
+      "retained": 7
+    },
+    {
+      "file": "apps/server/src/free-agent-limits.ts",
+      "sha256": "9a83b505756444631b6f31bb7872c36d1440d9098bb063ab1708b818d732bb70",
+      "candidates": 17,
+      "retained": 0
+    },
+    {
+      "file": "apps/server/src/free-agent-model-proxy.test.ts",
+      "sha256": "e48d0f3bfb55428b59163a028212ad9fccae0d7e05ee3bf92cfc248cb96d467e",
+      "candidates": 0,
+      "retained": 0
+    },
+    {
+      "file": "apps/server/src/free-agent-model-proxy.ts",
+      "sha256": "a54247e62585c29fc12e304c157d4933a18829fe1320e4a692738ccbf90f91e0",
+      "candidates": 212,
+      "retained": 37
+    },
+    {
+      "file": "apps/server/src/free-agent-owned-model.test.ts",
+      "sha256": "df0a7b256d4598912293bf2adaa0177461f731cd5f0b99f672fb3a8ec48e2c3d",
+      "candidates": 0,
+      "retained": 0
+    },
+    {
+      "file": "apps/server/src/free-agent-prompt-budget.test.ts",
+      "sha256": "c386f9421ba00b7a0fe3863d35fa7ce63bd99c4537acfdc626e05e37353ecd4f",
+      "candidates": 0,
+      "retained": 0
+    },
+    {
+      "file": "apps/server/src/free-agent-prompt-budget.ts",
+      "sha256": "f9dcf43a481f551bafdf9ddebd849f56500ca071f1f2610f12ff5668e959865f",
+      "candidates": 20,
+      "retained": 2
+    },
+    {
+      "file": "apps/server/src/free-agent-refresh.test.ts",
+      "sha256": "6778d5edc23b8ba21f7f99cfc32476e9e71500fdc995424d9cafd8d72ce9d09e",
+      "candidates": 0,
+      "retained": 0
+    },
+    {
+      "file": "apps/server/src/free-agent-turn-budget.ts",
+      "sha256": "3365c20ed87f1d43984a5f35c13151a8381661cb48c0a9aea8bb61cef0b96dbb",
+      "candidates": 12,
+      "retained": 0
+    },
+    {
+      "file": "apps/server/src/free-agent-warning.test.ts",
+      "sha256": "190b4ad77395e3be2d018b90459f20b314631105479459d99dea033999f571df",
+      "candidates": 0,
+      "retained": 0
+    },
+    {
+      "file": "apps/server/src/free-agent-warning.ts",
+      "sha256": "48e548bd95f40cac316793d74238d0fbc71afd10fda4c7734cf4acbe44e636ba",
+      "candidates": 17,
+      "retained": 1
+    },
+    {
+      "file": "apps/server/src/free-agents.test.ts",
+      "sha256": "4f6155366d8fe16102935800f2da95160a12551957f1a8e492dbd90e29bfe122",
+      "candidates": 0,
+      "retained": 0
+    },
+    {
+      "file": "apps/server/src/free-agents.ts",
+      "sha256": "ee48ca1a5b0062812e6d650e8c54bc727a6a4587b48b3d91705cd9bede731ea1",
+      "candidates": 178,
+      "retained": 27
+    },
+    {
+      "file": "apps/server/src/github-installation-store.ts",
+      "sha256": "4acf5429fab659c3ff7b56d4935f16b6c0f8213f4fd586098da75ef688f4ad8b",
+      "candidates": 10,
+      "retained": 0
+    },
+    {
+      "file": "apps/server/src/github-installation.postgres.test.ts",
+      "sha256": "94ddc51b17c62421c0c5bb7e118677c4493679cd32be9d133a4bc21f5c30d239",
+      "candidates": 1,
+      "retained": 1
+    },
+    {
+      "file": "apps/server/src/github-operations-2.test.ts",
+      "sha256": "50acb6d68d89e1dad29f9f8f09c7926b5285dc4aab4f0c365645cbe5f91b84af",
+      "candidates": 0,
+      "retained": 0
+    },
+    {
+      "file": "apps/server/src/github-operations-3.test.ts",
+      "sha256": "890b59cb6418107fcae3ac1391c98518f821c79eefc30a88a8a3839e0362807b",
+      "candidates": 0,
+      "retained": 0
+    },
+    {
+      "file": "apps/server/src/github-operations-4.test.ts",
+      "sha256": "73d0328bb1bd82de1009ca56eaca27d5c69632b703349337f29d21b2180fe476",
+      "candidates": 0,
+      "retained": 0
+    },
+    {
+      "file": "apps/server/src/github-operations-5.test.ts",
+      "sha256": "031434ee579e28a4c978c2cc440a5f95c4e2a1b66a7f6ea7198e47f7c3d252b9",
+      "candidates": 0,
+      "retained": 0
+    },
+    {
+      "file": "apps/server/src/github-operations-6.test.ts",
+      "sha256": "b385588f9fca982d4676dad058c223fa6b1c73d37569a5b6bedd3171ac0fd78f",
+      "candidates": 0,
+      "retained": 0
+    },
+    {
+      "file": "apps/server/src/github-operations-7.test.ts",
+      "sha256": "9696b418964ba34a10d838f50dce379b5dab97eb85aa22b66e113346d757fc72",
+      "candidates": 0,
+      "retained": 0
+    },
+    {
+      "file": "apps/server/src/github-operations-begin-identity.ts",
+      "sha256": "3df8234cabdd01adc6892f45c685eaaf6c5c4aaf223b30a001a1c7f75d5753d3",
+      "candidates": 183,
+      "retained": 25
+    },
+    {
+      "file": "apps/server/src/github-operations-read-pr-checks-status.ts",
+      "sha256": "5392b313a8553515db3afdf4478f03e414d9a81c637ae9b855e13dc6ffbef7bb",
+      "candidates": 95,
+      "retained": 23
+    },
+    {
+      "file": "apps/server/src/github-operations-reconcile-queued-corners.ts",
+      "sha256": "0dec9b69e0d6c3b1424dbf8da01581b41a614c7aae18434e9c95ea83dc6c5184",
+      "candidates": 101,
+      "retained": 24
+    },
+    {
+      "file": "apps/server/src/github-operations-refresh-check-rollup.ts",
+      "sha256": "4e2527a7610d936c98e7e9b073c60e0cdda1283742d5c39ffa339a350b82f9ce",
+      "candidates": 142,
+      "retained": 25
+    },
+    {
+      "file": "apps/server/src/github-operations-user-credential.ts",
+      "sha256": "a37001a01e2aff84b71df2faf56593704bc73b81cf08664f65282805de18a17c",
+      "candidates": 27,
+      "retained": 1
+    },
+    {
+      "file": "apps/server/src/github-operations.test.ts",
+      "sha256": "cfbd5100a62ff0e37c2c7380bd4268764588f4098d75b991a98237d673174747",
+      "candidates": 0,
+      "retained": 0
+    },
+    {
+      "file": "apps/server/src/github-operations.ts",
+      "sha256": "4fe4adf231473ffea203386db046c2cfe7b55a445ae13d8f06889a4f0754ac27",
+      "candidates": 243,
+      "retained": 41
+    },
+    {
+      "file": "apps/server/src/github-star-prompt.test.ts",
+      "sha256": "25258ed0aedfdb29101d854cc34e3252c63252dc0a146a4ca870c3bccac9942e",
+      "candidates": 0,
+      "retained": 0
+    },
+    {
+      "file": "apps/server/src/github-star-prompt.ts",
+      "sha256": "46eb3e0a5cf9a572cca0dbb538cac4edcf396b0e76e228af426c3d3a1b5069bb",
+      "candidates": 36,
+      "retained": 8
+    },
+    {
+      "file": "apps/server/src/github-webhook-order.test.ts",
+      "sha256": "331b19aa369fc724f83e0329c815ffe4fb24f780d44ce97d9f7656240f37a00a",
+      "candidates": 0,
+      "retained": 0
+    },
+    {
+      "file": "apps/server/src/google-workspace-journey.test.ts",
+      "sha256": "7dae86e3e0d5409eb73758fd344172a45e4a2474d58a21c4e386ad6712df3098",
+      "candidates": 0,
+      "retained": 0
+    },
+    {
+      "file": "apps/server/src/grant-policy-upgrade.test.ts",
+      "sha256": "8c9d70a44d9a9660a608d18317dc5a9df231477143b383efcd90c34dab5e4314",
+      "candidates": 0,
+      "retained": 0
+    },
+    {
+      "file": "apps/server/src/grant-policy-upgrade.ts",
+      "sha256": "8e7aa94ed3767e8cbfea70bf6a9279abc70fb17e9fce709e5700c6d85ba74dfb",
+      "candidates": 9,
+      "retained": 4
+    },
+    {
+      "file": "apps/server/src/health-query-age.test.ts",
+      "sha256": "be3529a556cf4474652df48d48b11de9a49fcf69b41ab7db0c61b9e14e712a95",
+      "candidates": 0,
+      "retained": 0
+    },
+    {
+      "file": "apps/server/src/held-review-wake.integration.test.ts",
+      "sha256": "93075d887c2233995934f16c52b343431697332d07e20df2f81c22358686fe29",
+      "candidates": 0,
+      "retained": 0
+    },
+    {
+      "file": "apps/server/src/helper-activation-schema.ts",
+      "sha256": "86799489b3578fe68e8b29d7db9b6b198148cbadefdf9cc48d519900399e6340",
+      "candidates": 21,
+      "retained": 18
+    },
+    {
+      "file": "apps/server/src/helper-activation-socket.test.ts",
+      "sha256": "9a831f86ac4c56a61df22e04a7de19481805244316e46273447a95954e0cd319",
+      "candidates": 0,
+      "retained": 0
+    },
+    {
+      "file": "apps/server/src/helper-activation.postgres.test.ts",
+      "sha256": "61d0518be6236a96d6b39834b4a909e3fa13cb0c75cd78c5099a06c82c5945e0",
+      "candidates": 1,
+      "retained": 1
+    },
+    {
+      "file": "apps/server/src/helper-activation.test.ts",
+      "sha256": "d83d0567a53425dd107c77ccfd1fea4f70564008836ea35ff9efe3abc9e1816b",
+      "candidates": 0,
+      "retained": 0
+    },
+    {
+      "file": "apps/server/src/helper-activation.ts",
+      "sha256": "87a914a700a7b91054a7842810dd68be79448b4cd6971656be98fe9a2fa3f740",
+      "candidates": 43,
+      "retained": 2
+    },
+    {
+      "file": "apps/server/src/helper-overlay.postgres.test.ts",
+      "sha256": "7405905af84ba13a2609abae7a064951749e8a29d637e9391c03b80fb382ba7e",
+      "candidates": 1,
+      "retained": 1
+    },
+    {
+      "file": "apps/server/src/helper-overlay.test.ts",
+      "sha256": "8eacbc321521d812d4a2c9e707f5563313e436f2e73ad403f6bf71e71b2dd387",
+      "candidates": 0,
+      "retained": 0
+    },
+    {
+      "file": "apps/server/src/helper-overlay.ts",
+      "sha256": "495aa0ca696fefc756e3cb0f8d52fc0e301a74397a4d13dd3dcb97f40132a592",
+      "candidates": 107,
+      "retained": 18
+    },
+    {
+      "file": "apps/server/src/helper-usage-socket.test.ts",
+      "sha256": "c20d5ea332cf7e3530f9b76bacb1e158a1a14d3d95926b66dca331d60f619452",
+      "candidates": 0,
+      "retained": 0
+    },
+    {
+      "file": "apps/server/src/helper-usage-source.ts",
+      "sha256": "ae856473776da0407589007bed57acbce3c742e06238b7afa8ce5c408886d613",
+      "candidates": 16,
+      "retained": 0
+    },
+    {
+      "file": "apps/server/src/helper-usage.postgres.test.ts",
+      "sha256": "27dc0f4b8c8533986b6fc9b25973a1b08c4129689829974b01e124e9cdc125ce",
+      "candidates": 1,
+      "retained": 1
+    },
+    {
+      "file": "apps/server/src/helper-usage.test.ts",
+      "sha256": "acfb618faa4814e8239d63885b09813e6257bd86aed40dfbf29ece891fb48eab",
+      "candidates": 0,
+      "retained": 0
+    },
+    {
+      "file": "apps/server/src/helper-usage.ts",
+      "sha256": "8fe3763ed6e8bda435171b0e13fef4058ea07ab08ec9c1afeea74ee15261de92",
+      "candidates": 39,
+      "retained": 8
+    },
+    {
+      "file": "apps/server/src/helper-version-gate.test.ts",
+      "sha256": "81b2bcb1f76c47c679457ff1a0a5596f3a52e5b69891d2ce9ba5658b6f00365f",
+      "candidates": 0,
+      "retained": 0
+    },
+    {
+      "file": "apps/server/src/helper-version-gate.ts",
+      "sha256": "a524c7274fa49de4b91703320f0ec2850e31e647bcf3efe29f23f41a403091a5",
+      "candidates": 18,
+      "retained": 0
+    },
+    {
+      "file": "apps/server/src/history-outline-cache.ts",
+      "sha256": "9f39ef70e9d66b67186985a0d6034510ab7e7ad43c07dfdf55e024839b585419",
+      "candidates": 15,
+      "retained": 1
+    },
+    {
+      "file": "apps/server/src/identity-face.ts",
+      "sha256": "a09dafc62378e8601d634f738f63f8b3f54e1fb1731c6b50b99fc09b0d322ca5",
+      "candidates": 2,
+      "retained": 1
+    },
+    {
+      "file": "apps/server/src/identity-handles.ts",
+      "sha256": "3937d4db945c0e9b0a8feb9cfed14d0477800c03f8db22272c88788e8c694687",
+      "candidates": 9,
+      "retained": 5
+    },
+    {
+      "file": "apps/server/src/identity-live.e2e.test.ts",
+      "sha256": "1493d15a107a62867dd8a8178023472f01a56221ba54cbafe2581b709031d852",
+      "candidates": 0,
+      "retained": 0
+    },
+    {
+      "file": "apps/server/src/incident-deadlocks.test.ts",
+      "sha256": "53d90445441773e697fbb5ffcd190a799fccb3da9fff61e3e155f628585c6437",
+      "candidates": 1,
+      "retained": 1
+    },
+    {
+      "file": "apps/server/src/index.ts",
+      "sha256": "214c954524b71c28d3bf226ed8051a5b4996522455721524c5eda616548054d8",
+      "candidates": 89,
+      "retained": 20
+    },
+    {
+      "file": "apps/server/src/institutional-context-hybrid.test.ts",
+      "sha256": "6f22e5358532569a23c7249c85eb3a6060e0a0789b166ac8b319ada7cc13aa42",
+      "candidates": 0,
+      "retained": 0
+    },
+    {
+      "file": "apps/server/src/institutional-corner-authority.test.ts",
+      "sha256": "d72fa95e9d8ff7fbad13f5a8e76d3a72726f07281643903e1f55fdd99e95ee9a",
+      "candidates": 0,
+      "retained": 0
+    },
+    {
+      "file": "apps/server/src/institutional-curator.test.ts",
+      "sha256": "2d6c11fd59da06f6c9b86e53bb289d6a0c6b506b4b4bb25e38ad41f8b48e4436",
+      "candidates": 0,
+      "retained": 0
+    },
+    {
+      "file": "apps/server/src/institutional-curator.ts",
+      "sha256": "8fbc0d04262c97aefed212a204afaae83b0ef7301e41471a6fd02439ede3c083",
+      "candidates": 27,
+      "retained": 2
+    },
+    {
+      "file": "apps/server/src/institutional-history.test.ts",
+      "sha256": "0dbc2783c677ee2984576860aa3474030215b887066af5ce52be66869c707437",
+      "candidates": 0,
+      "retained": 0
+    },
+    {
+      "file": "apps/server/src/institutional-history.ts",
+      "sha256": "2225bd38e64001fefcf0581f9d7d63249061fb9310f13f9c315d48798d5c7786",
+      "candidates": 26,
+      "retained": 3
+    },
+    {
+      "file": "apps/server/src/institutional-memory-corner-requester.integration.test.ts",
+      "sha256": "69ea3ca45346340000158717acbf4faf5e012548dd516b337c83ca61e152ce11",
+      "candidates": 0,
+      "retained": 0
+    },
+    {
+      "file": "apps/server/src/institutional-memory-embeddings.test.ts",
+      "sha256": "5b616e95d65715c2d987481e6dcc68d741614c9368c5af8ac29033687802166b",
+      "candidates": 0,
+      "retained": 0
+    },
+    {
+      "file": "apps/server/src/institutional-memory-embeddings.ts",
+      "sha256": "77af8a4b4c0398eb9b89a9a87f1cd76292e2984646552287e2d0ce21722d7e61",
+      "candidates": 71,
+      "retained": 7
+    },
+    {
+      "file": "apps/server/src/institutional-memory-lifecycle.test.ts",
+      "sha256": "10001af915bf73fbc46c52c6899bd2d05acef1103b26e11075087bcf57af5591",
+      "candidates": 0,
+      "retained": 0
+    },
+    {
+      "file": "apps/server/src/institutional-memory-search-recall.test.ts",
+      "sha256": "9311404442ecad1d29de658d3ce54c9f72490c25c509a1e461ba6da81d9e23d3",
+      "candidates": 0,
+      "retained": 0
+    },
+    {
+      "file": "apps/server/src/institutional-memory-shadow-2.test.ts",
+      "sha256": "edee6909b17c421cb58b253ab46099d497745d16ef404ca7c66fb3544fa89d5c",
+      "candidates": 0,
+      "retained": 0
+    },
+    {
+      "file": "apps/server/src/institutional-memory-shadow-save-institutional-memory.ts",
+      "sha256": "18f82b91a866c7d23bb2ba674c4c5e346a574b00a29304438fad2e3fa6894668",
+      "candidates": 57,
+      "retained": 7
+    },
+    {
+      "file": "apps/server/src/institutional-memory-shadow.test.ts",
+      "sha256": "8e6cf0c415c8b3cc358ce7863f682324b8a79c455b0e1a6615f26bf0d494cac5",
+      "candidates": 0,
+      "retained": 0
+    },
+    {
+      "file": "apps/server/src/institutional-memory-shadow.ts",
+      "sha256": "f7a8cf5cb51bacfbc4fbe10b6da25fff025903ae308489b58dbe9f468d216351",
+      "candidates": 97,
+      "retained": 15
+    },
+    {
+      "file": "apps/server/src/institutional-memory-turn-stats.test.ts",
+      "sha256": "8e216ea77439afbc9406e6fef3350d41ef8bd9592fef63e577f428bf918bef3f",
+      "candidates": 0,
+      "retained": 0
+    },
+    {
+      "file": "apps/server/src/institutional-skill-anchors.test.ts",
+      "sha256": "da79ca1ae7beb5b628aa0358cd164db18f11ed23858fbf7c209526d0386df988",
+      "candidates": 0,
+      "retained": 0
+    },
+    {
+      "file": "apps/server/src/institutional-skill-anchors.ts",
+      "sha256": "1fe9b3a588e02b3a338d2f0e059b9fcba63cc801b25f1596cffea33e3666ef08",
+      "candidates": 26,
+      "retained": 5
+    },
+    {
+      "file": "apps/server/src/institutional-skills.test.ts",
+      "sha256": "34b1bc7b6390881c1052bba99eb0c6dbd4059dc2ae4c77f103dc8602795da546",
+      "candidates": 0,
+      "retained": 0
+    },
+    {
+      "file": "apps/server/src/institutional-skills.ts",
+      "sha256": "281f3ddd71dc36cea555370aa932e59e9c8f2fcafd23835ea0afd94674c9be73",
+      "candidates": 62,
+      "retained": 5
+    },
+    {
+      "file": "apps/server/src/integration/account-http.test.ts",
+      "sha256": "6ee71d1ac3e9e81509ab79c8b1c2bc49c728b635fd54ae11197f6808ac8a5398",
+      "candidates": 0,
+      "retained": 0
+    },
+    {
+      "file": "apps/server/src/integration/agents-2.test.ts",
+      "sha256": "9ce55cd532e9ef3b4e0bb6a1ff45117c910031bea7b0cd5d3284b8177eec61f0",
+      "candidates": 0,
+      "retained": 0
+    },
+    {
+      "file": "apps/server/src/integration/agents.test.ts",
+      "sha256": "937c65df9ccd052ff3ff4f48128e1aa3248af994724647e9ed890c6b1db512bf",
+      "candidates": 0,
+      "retained": 0
+    },
+    {
+      "file": "apps/server/src/integration/connectors-2.test.ts",
+      "sha256": "1eba3576f066a0cb1d8f2580dc38bbfcaf8dae4bf299aa8e74412ec877e38b4c",
+      "candidates": 0,
+      "retained": 0
+    },
+    {
+      "file": "apps/server/src/integration/connectors.test.ts",
+      "sha256": "51e2af4f472774eb141e97505f5d4571d86c2ea1dfa369a0ec4085483bc16519",
+      "candidates": 0,
+      "retained": 0
+    },
+    {
+      "file": "apps/server/src/integration/corner-briefs-2.test.ts",
+      "sha256": "9dd07fe989473b91522889a5f3e383316e15a26115541fcfb226614c2d1c5443",
+      "candidates": 0,
+      "retained": 0
+    },
+    {
+      "file": "apps/server/src/integration/corner-briefs.test.ts",
+      "sha256": "c35219228b37887b3746a2483087c8a38c944a31830c58a6e37deae76140195b",
+      "candidates": 0,
+      "retained": 0
+    },
+    {
+      "file": "apps/server/src/integration/corner-turns-2.test.ts",
+      "sha256": "6bb7a875b581c3c0706695c485a1ba9e6dc238b0e85ef327c97271c6e5ef003b",
+      "candidates": 0,
+      "retained": 0
+    },
+    {
+      "file": "apps/server/src/integration/corner-turns-3.test.ts",
+      "sha256": "c96683aad716e752aaa90d66ba8be100976f222a4242a8d702055a84cf5c886f",
+      "candidates": 0,
+      "retained": 0
+    },
+    {
+      "file": "apps/server/src/integration/corner-turns.test.ts",
+      "sha256": "248c0c300dea79942561c7e1f987ced27b9b4bc5181189a8599e4ffc8c4db299",
+      "candidates": 0,
+      "retained": 0
+    },
+    {
+      "file": "apps/server/src/integration/github-repositories-2.test.ts",
+      "sha256": "7ced3e9cf8825d0172f5ec637fc4dca5e286d1562c7bd5ddce8b822e1b1be6b6",
+      "candidates": 0,
+      "retained": 0
+    },
+    {
+      "file": "apps/server/src/integration/github-repositories.test.ts",
+      "sha256": "aca87c83964a1e073a2d5e22faf044f4caee2843d1accd27fc2e037768d1aac6",
+      "candidates": 0,
+      "retained": 0
+    },
+    {
+      "file": "apps/server/src/integration/grants-approvals-2.test.ts",
+      "sha256": "7fd311ffe60cb764d679fabae468286dca84603fa7f9d34fc4af128811d83cf4",
+      "candidates": 0,
+      "retained": 0
+    },
+    {
+      "file": "apps/server/src/integration/grants-approvals-3.test.ts",
+      "sha256": "6b231f38df63711e761ccf1004459487d3f0d228c37cb8dd1d2a2cf4ecd8c5dd",
+      "candidates": 0,
+      "retained": 0
+    },
+    {
+      "file": "apps/server/src/integration/grants-approvals.test.ts",
+      "sha256": "91121b771fc6958eb6050f326ea0afc30ddab4ea77eb0b368e89d05986d2c1a2",
+      "candidates": 0,
+      "retained": 0
+    },
+    {
+      "file": "apps/server/src/integration/history-reads-2.test.ts",
+      "sha256": "5634b6ef948a195b9a25452b4f3bacbef05594054ce1605dcd7d58609ae4f4a3",
+      "candidates": 0,
+      "retained": 0
+    },
+    {
+      "file": "apps/server/src/integration/history-reads.test.ts",
+      "sha256": "7ea41bc97f0cbd668fab658bda10f569976cf29eed246b750482ae58d11b4c96",
+      "candidates": 0,
+      "retained": 0
+    },
+    {
+      "file": "apps/server/src/integration/membership-2.test.ts",
+      "sha256": "7e7237324c22605b18b73b9f6761dff6983d43276e278ed225cf4e9abd23a661",
+      "candidates": 0,
+      "retained": 0
+    },
+    {
+      "file": "apps/server/src/integration/membership-3.test.ts",
+      "sha256": "3ca9194513f81d8d995dfcfc57d593c963a186d79202c737f1b28256615025f3",
+      "candidates": 0,
+      "retained": 0
+    },
+    {
+      "file": "apps/server/src/integration/membership.test.ts",
+      "sha256": "babe0ed67ce8fd3f2d263001514115259fb724ecdeb3fed265652c80d891b2c6",
+      "candidates": 0,
+      "retained": 0
+    },
+    {
+      "file": "apps/server/src/integration/message-routing.test.ts",
+      "sha256": "cf2a9e24cff4001b7f0c2608aead95e98004918d52d1d53ad8c1d4f3c7b3a8b1",
+      "candidates": 0,
+      "retained": 0
+    },
+    {
+      "file": "apps/server/src/integration/messages-live.test.ts",
+      "sha256": "4f3e19d1646e6bdbe242f02c7abfdceb4630b240a1c61cb12940e7672e54d537",
+      "candidates": 0,
+      "retained": 0
+    },
+    {
+      "file": "apps/server/src/integration/polls-choices.test.ts",
+      "sha256": "d501984c3010203d6daa8b6f809625f5a47e56b01c4a7cf392dfaadf8bcdb9c7",
+      "candidates": 0,
+      "retained": 0
+    },
+    {
+      "file": "apps/server/src/integration/push.test.ts",
+      "sha256": "44b8dbd23d291ead5c26ccf010b8d495be851bd2383ee2590ce74ca182b37bf7",
+      "candidates": 0,
+      "retained": 0
+    },
+    {
+      "file": "apps/server/src/integration/subscriptions-events.test.ts",
+      "sha256": "6e2d646ee67b5d0d041c39b997da12b36ce2630b02d89cca6022e8f323f7e831",
+      "candidates": 0,
+      "retained": 0
+    },
+    {
+      "file": "apps/server/src/invite-join-deadline.test.ts",
+      "sha256": "ea99711a806a6c5f6618316e8f601d7d48de1ea36e39809c12193f05d2e98cbf",
+      "candidates": 0,
+      "retained": 0
+    },
+    {
+      "file": "apps/server/src/invite-preview.ts",
+      "sha256": "9ea778be6c086c2851caab81878348ee5fd2dc526c1216356b12c5b7c043f0b7",
+      "candidates": 22,
+      "retained": 1
+    },
+    {
+      "file": "apps/server/src/invite-socket.integration.test.ts",
+      "sha256": "db4907a41fd2fe52918f62a571d9f0403a9c133b0360ca85edb9236f56fe9be9",
+      "candidates": 0,
+      "retained": 0
+    },
+    {
+      "file": "apps/server/src/json-response.test.ts",
+      "sha256": "fd92c5e4d2eae3371c59811c4237add0b15df38bddc5d65f94dc31e3ac8b5f2c",
+      "candidates": 0,
+      "retained": 0
+    },
+    {
+      "file": "apps/server/src/json-response.ts",
+      "sha256": "9f7cd634740b4ac69a060b50c7b54a84ff651c4b263a1a4dfef1168219fa5013",
+      "candidates": 10,
+      "retained": 1
+    },
+    {
+      "file": "apps/server/src/legacy-daemon-migration.test.ts",
+      "sha256": "d7a2fa6303a85a964efc39e5f88ecd7193674ca65fcb0531fe8197ebc47efcb2",
+      "candidates": 0,
+      "retained": 0
+    },
+    {
+      "file": "apps/server/src/legacy-storage.test.ts",
+      "sha256": "f9c315c7df22a24b0f177bde6c2b81b8adafd79112e69f052c0553824cfd99cf",
+      "candidates": 0,
+      "retained": 0
+    },
+    {
+      "file": "apps/server/src/link-agent-wallet.test.ts",
+      "sha256": "4574e8516dbef72670bdaabec7fce3eeb2d4668f31609f3c288d30174dc1371c",
+      "candidates": 0,
+      "retained": 0
+    },
+    {
+      "file": "apps/server/src/link-agent-wallet.ts",
+      "sha256": "63dd2e2c61decf104b5193aada887ce603da07efd51f1ed38013c76fc95edead",
+      "candidates": 62,
+      "retained": 11
+    },
+    {
+      "file": "apps/server/src/live.presence-dedupe.test.ts",
+      "sha256": "39247e016f20eaa1130b30a87bea5262f8d702ca9184bc6dbfd8e910a4a8898b",
+      "candidates": 0,
+      "retained": 0
+    },
+    {
+      "file": "apps/server/src/live.ts",
+      "sha256": "f7bb7899e905da739647fb17126fe194189a8d45846988fbd8f0fa6fc584a5e9",
+      "candidates": 53,
+      "retained": 10
+    },
+    {
+      "file": "apps/server/src/luna-backfill.test.ts",
+      "sha256": "7a531f02f0b85012a11a680c22aa9669fa8905ac2d9c50d005cba295f4f2cd2b",
+      "candidates": 0,
+      "retained": 0
+    },
+    {
+      "file": "apps/server/src/luna-backfill.ts",
+      "sha256": "277a983a5c40ed34122c11c2782e4fdef31b3c9d20b9b2ba6e17ed21943081de",
+      "candidates": 23,
+      "retained": 3
+    },
+    {
+      "file": "apps/server/src/machine-connection.ts",
+      "sha256": "87e9a2afb3dcb8e28c5385702ec020f260f1e24612d5617720b4b27305e55825",
+      "candidates": 124,
+      "retained": 7
+    },
+    {
+      "file": "apps/server/src/machine-offline.test.ts",
+      "sha256": "430a1412fe72d31f5d8409e36e494340c148bdc50414bc5c084b1f4423770ba1",
+      "candidates": 0,
+      "retained": 0
+    },
+    {
+      "file": "apps/server/src/machine-offline.ts",
+      "sha256": "adba55c96e78189a37a836231f4742f6105ceb94b31011e0e19f0adc4c0ea350",
+      "candidates": 1,
+      "retained": 0
+    },
+    {
+      "file": "apps/server/src/machine-request-results.ts",
+      "sha256": "da3a23a4998d8b093b1d0ee812aae5b5fae051bb70437aea9c21c8e4ec8cb736",
+      "candidates": 25,
+      "retained": 1
+    },
+    {
+      "file": "apps/server/src/markdown-to-speech.test.ts",
+      "sha256": "e326f6d7973cf3d92bb1b835f53e5b1d81489bfd69992191ac60c5c33582751e",
+      "candidates": 0,
+      "retained": 0
+    },
+    {
+      "file": "apps/server/src/markdown-to-speech.ts",
+      "sha256": "10803ef5f020002b57e4c1351f0171f3eb5bb1d1180ccb8f25dd3d41339bd3d6",
+      "candidates": 57,
+      "retained": 5
+    },
+    {
+      "file": "apps/server/src/mcp-registry-policy.test.ts",
+      "sha256": "cd32fc15f208b5757a9614932017889364c0d4495723ff0c13d253cbe42da57d",
+      "candidates": 0,
+      "retained": 0
+    },
+    {
+      "file": "apps/server/src/mcp-registry-policy.ts",
+      "sha256": "d458668e8d6964064c2259f589b0e9cb4bcc35834e6cfb217e4b2f09b5fd2a6e",
+      "candidates": 10,
+      "retained": 0
+    },
+    {
+      "file": "apps/server/src/mcp-registry.test.ts",
+      "sha256": "627438db45f21f52ee5b3cb7acf5e17f3796319b49bb2271059c7ef53e29e24d",
+      "candidates": 0,
+      "retained": 0
+    },
+    {
+      "file": "apps/server/src/mcp-registry.ts",
+      "sha256": "974b3c5e99f5fd9dceb3aeeaff1b2d81a1e8e6560e5e16ef51981d2236083d1e",
+      "candidates": 70,
+      "retained": 4
+    },
+    {
+      "file": "apps/server/src/mcp-webhook-delivery.postgres.test.ts",
+      "sha256": "94c4dc84bbd9e671bf6d5168a9a0e1dd3cbc791ac9e4e167ce2c2904f309f099",
+      "candidates": 1,
+      "retained": 1
+    },
+    {
+      "file": "apps/server/src/measure-cli.ts",
+      "sha256": "f0ac0cc79f17237eb22ba9b58fcd3907e791ed3f6b30e59b8c9ba24a9f13c00f",
+      "candidates": 3,
+      "retained": 0
+    },
+    {
+      "file": "apps/server/src/media-object-routes.test.ts",
+      "sha256": "d53b928985a0b36c01c497d3af7f34fccecddf48151d2cefe397a431a45b81e6",
+      "candidates": 0,
+      "retained": 0
+    },
+    {
+      "file": "apps/server/src/media-ttl.ts",
+      "sha256": "cd16858b7a9c721ce70dd224160603787610dcf7d77cea0784bafbf18aa6638f",
+      "candidates": 8,
+      "retained": 1
+    },
+    {
+      "file": "apps/server/src/membership-authority-schema.ts",
+      "sha256": "6b412523f81cf87596760618ce89c9a9e760374437890ee642150b3d6941cc10",
+      "candidates": 16,
+      "retained": 10
+    },
+    {
+      "file": "apps/server/src/membership-join.ts",
+      "sha256": "a6768dadf361e6f66cebb903fac62992e5385a567ac12007d9639bddcbb04e3d",
+      "candidates": 98,
+      "retained": 10
+    },
+    {
+      "file": "apps/server/src/merge-archival.test.ts",
+      "sha256": "3b563ad0eaf80d232c114cf875e57c8cd3bd0d311dfa5c0530b5fbca674e4fe0",
+      "candidates": 1,
+      "retained": 1
+    },
+    {
+      "file": "apps/server/src/message-columns.ts",
+      "sha256": "7ac8357c9ab59260cb46c252ddea0e67132d21f2d336ff764af3a7838680f204",
+      "candidates": 2,
+      "retained": 0
+    },
+    {
+      "file": "apps/server/src/message-mentions.test.ts",
+      "sha256": "0daade736cfd01a8e93d055d1b069dd8107216103bd45d5f2116cf56387dcef7",
+      "candidates": 0,
+      "retained": 0
+    },
+    {
+      "file": "apps/server/src/message-mentions.ts",
+      "sha256": "bac3ce4ce591e3bf8ea8ad292ccff89ad2a584e24c9b48e742111f4626f81b5a",
+      "candidates": 52,
+      "retained": 5
+    },
+    {
+      "file": "apps/server/src/message-search-document-sql.ts",
+      "sha256": "a7b1c3572b4396580ccda7ba833fcd5deca69195abf6d7dfddd64f410521e962",
+      "candidates": 4,
+      "retained": 2
+    },
+    {
+      "file": "apps/server/src/migration-steps.test.ts",
+      "sha256": "d66d6471cb3a34a8f8b9a7662c46b8f9883e74bc2ef2290342bf1a9ad981b1cd",
+      "candidates": 5,
+      "retained": 5
+    },
+    {
+      "file": "apps/server/src/migration-steps.ts",
+      "sha256": "4dd59e6cf93f9d8f8a66fc22cc5f9c059ed1e3a25caaa10a7b6934699b5f74d8",
+      "candidates": 100,
+      "retained": 34
+    },
+    {
+      "file": "apps/server/src/migrations/agent-corner-holds.ts",
+      "sha256": "08be2619f4f1f4071bf086c8d6a50ae96bca2376e6ac39a127a614cea0808bd3",
+      "candidates": 7,
+      "retained": 0
+    },
+    {
+      "file": "apps/server/src/migrations/archived-corner-wakes.ts",
+      "sha256": "fb7a56a9cfcff3c1fcb69a77caee0e006214fa1a23532273a720aaf27f63e77f",
+      "candidates": 3,
+      "retained": 0
+    },
+    {
+      "file": "apps/server/src/migrations/completed-command-turns.test.ts",
+      "sha256": "e81f87aec36a93a958c57808f1f1176d5d482bfed3019a32d497657afb0a0b72",
+      "candidates": 0,
+      "retained": 0
+    },
+    {
+      "file": "apps/server/src/migrations/connected-app-turns.ts",
+      "sha256": "a9fa5e3f58abb690b7cad64618871dbf723246a6d2e1cd7ff15ac5585eb3ee81",
+      "candidates": 1,
+      "retained": 0
+    },
+    {
+      "file": "apps/server/src/migrations/corner-memberships.ts",
+      "sha256": "c06efb91078cbd72ad8e9f4ba3f7e07ac6ca6b365ad29cac3cc401722dcf9b0c",
+      "candidates": 4,
+      "retained": 1
+    },
+    {
+      "file": "apps/server/src/migrations/corner-merge-holds.ts",
+      "sha256": "56b961dc000f4f46cb82275a64f3746ae6ee4b449cc0765210c7a94c0c9ec19b",
+      "candidates": 1,
+      "retained": 0
+    },
+    {
+      "file": "apps/server/src/migrations/corner-names.test.ts",
+      "sha256": "e52264f08bfd20721ca186bd1f0d8f5452936d5551216a3ab76a1983ff5113c2",
+      "candidates": 0,
+      "retained": 0
+    },
+    {
+      "file": "apps/server/src/migrations/corner-names.ts",
+      "sha256": "72049d37edd33e3ece3465e9705de76999f9d1de5704331896183407234ad560",
+      "candidates": 4,
+      "retained": 0
+    },
+    {
+      "file": "apps/server/src/migrations/legacy-storage.ts",
+      "sha256": "48bf4ac865c937d0f4e90d11a876c6092bc0a4fb4f24a1364c46de484a74ee3a",
+      "candidates": 2,
+      "retained": 0
+    },
+    {
+      "file": "apps/server/src/migrations/one-system-thread.ts",
+      "sha256": "a5c779897487eb44b72d595dc1eb10718e34d98900e7ea81032eedab0c2fac69",
+      "candidates": 4,
+      "retained": 0
+    },
+    {
+      "file": "apps/server/src/migrations/owner-approved-grants.ts",
+      "sha256": "224cce92dd7cb3f290a7efbf147bb4d2aceace743b2c2978a1f373c90134d2a8",
+      "candidates": 1,
+      "retained": 0
+    },
+    {
+      "file": "apps/server/src/migrations/workflow-cleanup.ts",
+      "sha256": "965a277c16323a683e6d4c6a9732c4aa6a2479a0b95f5b3c1d480baad9d35922",
+      "candidates": 20,
+      "retained": 3
+    },
+    {
+      "file": "apps/server/src/mobile-minimum.test.ts",
+      "sha256": "6bbe141cd3da2c8f8064747072987e7bb20f1269529799df413da5b5e5ff918f",
+      "candidates": 0,
+      "retained": 0
+    },
+    {
+      "file": "apps/server/src/mobile-minimum.ts",
+      "sha256": "faa4deb23dfbd101e153cc57e3ccc6bae11dadeb8a4a4b085214397fefe89cde",
+      "candidates": 7,
+      "retained": 1
+    },
+    {
+      "file": "apps/server/src/model-catalog-notice.test.ts",
+      "sha256": "a6efc7f43e9055c84552ad3ad1705765844adce0cc7f49b5d57a7cf6c7cb0ec1",
+      "candidates": 0,
+      "retained": 0
+    },
+    {
+      "file": "apps/server/src/monolith-auth.test.ts",
+      "sha256": "61cae8ffbb22d71bcb65791bf64596ae051ebc4163bf693681e95b3837140590",
+      "candidates": 0,
+      "retained": 0
+    },
+    {
+      "file": "apps/server/src/monolith-auth.ts",
+      "sha256": "56a6381ec313127d83b3dfff10c316485ad3e30ff05bc960232ad085def92c37",
+      "candidates": 35,
+      "retained": 4
+    },
+    {
+      "file": "apps/server/src/monolith-paint-budgets.test.ts",
+      "sha256": "422d68c707e8d70cc69438c0f3fd2a9271b90891e94ad45d4b1b7e84f9ba38bd",
+      "candidates": 0,
+      "retained": 0
+    },
+    {
+      "file": "apps/server/src/needs-you.test.ts",
+      "sha256": "e07758cd62809e7d5a4a3d1cfa8018e81f94558d23bb92d065035ffca22da5d1",
+      "candidates": 0,
+      "retained": 0
+    },
+    {
+      "file": "apps/server/src/needs-you.ts",
+      "sha256": "40dc151061d2f5bcc3fc29deba90fa2f8b2bdecdf13c1c1695d8c4537d46f13d",
+      "candidates": 168,
+      "retained": 39
+    },
+    {
+      "file": "apps/server/src/network-router-rollout.ts",
+      "sha256": "176a62f1cfc6c1ccb16fed1f374f6ce446483a672c6e4784d665f80e5388cade",
+      "candidates": 0,
+      "retained": 0
+    },
+    {
+      "file": "apps/server/src/next-day-checkin.ts",
+      "sha256": "19d96e73f1d5587b7c2140a9504ff339c3482abccb2941cef62d66ee581201d6",
+      "candidates": 3,
+      "retained": 1
+    },
+    {
+      "file": "apps/server/src/notification-work.test.ts",
+      "sha256": "8f59b0ccc5e9139d11d0b3d957a06d482b3e80bc3a5e3e57deea93a83106b4fd",
+      "candidates": 0,
+      "retained": 0
+    },
+    {
+      "file": "apps/server/src/notification-work.ts",
+      "sha256": "0a8e5783487b14d9d5b5148c488750e76c500cff277601832b656235dd9946e1",
+      "candidates": 8,
+      "retained": 0
+    },
+    {
+      "file": "apps/server/src/object-projection.test.ts",
+      "sha256": "40125d9165d7f0785f4f1a41b1d7d95821d83d38d6a2e287d9a1112f74d1d8ae",
+      "candidates": 0,
+      "retained": 0
+    },
+    {
+      "file": "apps/server/src/object-service.test.ts",
+      "sha256": "75959c2d218c4de10feb2da20b2d022e66c4b26f857356274d9381d745ec0874",
+      "candidates": 0,
+      "retained": 0
+    },
+    {
+      "file": "apps/server/src/object-service.ts",
+      "sha256": "bcdb0adcd5195de0e2cdae2ad3db96f536aa997818a71c21c2332fe69fbffc3c",
+      "candidates": 103,
+      "retained": 13
+    },
+    {
+      "file": "apps/server/src/object-storage.retry.test.ts",
+      "sha256": "76c5cfd11d446759a95a61a59735c4b216b1e13be4846dbfc31971dc04f1e864",
+      "candidates": 0,
+      "retained": 0
+    },
+    {
+      "file": "apps/server/src/object-storage.test.ts",
+      "sha256": "6058f7a6adc6cd7eb4c8dda41e9cb1345fbd405eac7c5aabdbe2de7cdd0f2f77",
+      "candidates": 0,
+      "retained": 0
+    },
+    {
+      "file": "apps/server/src/object-storage.ts",
+      "sha256": "34c03db31c7c41ec1cc4632e70416c94d6ebd68e6857ece2a6b471d2e8ba0718",
+      "candidates": 31,
+      "retained": 3
+    },
+    {
+      "file": "apps/server/src/one-system-thread.test.ts",
+      "sha256": "5cb7596f323b6967a4f75194e6e062887feb04ad39849706b7fcbbd373f6a9f2",
+      "candidates": 0,
+      "retained": 0
+    },
+    {
+      "file": "apps/server/src/operation-outcomes.test.ts",
+      "sha256": "a4d2447df89f919dc5f246511d831a8960a34a3239222bc18a8ef207db7265c1",
+      "candidates": 0,
+      "retained": 0
+    },
+    {
+      "file": "apps/server/src/operation-outcomes.ts",
+      "sha256": "5568a6e948f9b4be78d5c4b1c35266c920f11ac11023138b95b187465aea21a8",
+      "candidates": 18,
+      "retained": 0
+    },
+    {
+      "file": "apps/server/src/operator-dashboard-2.test.ts",
+      "sha256": "79c40ab95b48f3cbdaac3582eccbe2575fb9c09173a2fb9914033e852265609d",
+      "candidates": 0,
+      "retained": 0
+    },
+    {
+      "file": "apps/server/src/operator-dashboard-cohort.ts",
+      "sha256": "8decf4d7b7b1c45eb3a9079d2dd4519bbe6d676f1f5d1e84fa37359425edd753",
+      "candidates": 0,
+      "retained": 0
+    },
+    {
+      "file": "apps/server/src/operator-dashboard-core-metrics.ts",
+      "sha256": "d64e364326093602653c9306335c8dc26587e7fe54650f228c681c370d378ac0",
+      "candidates": 85,
+      "retained": 6
+    },
+    {
+      "file": "apps/server/src/operator-dashboard-downloads.test.ts",
+      "sha256": "28dfd4c799a3821adb48a3af22560eaa0389a66f6f6444a334ddcde7d25ab97c",
+      "candidates": 0,
+      "retained": 0
+    },
+    {
+      "file": "apps/server/src/operator-dashboard-downloads.ts",
+      "sha256": "478502f6eaa853c4090072e2c872fd47e4a6da133708a3d95f0e0889eecd5e3e",
+      "candidates": 68,
+      "retained": 8
+    },
+    {
+      "file": "apps/server/src/operator-dashboard-overview.ts",
+      "sha256": "2f65c2bef0942b67154ef8dc53fb8aaddf5ead07178542d10d746cd9e8a57a63",
+      "candidates": 49,
+      "retained": 7
+    },
+    {
+      "file": "apps/server/src/operator-dashboard-periods.ts",
+      "sha256": "81d0d90119d7afc5343fc645cff4d603e16b4628c115c5d3d38e58c82d8f25fa",
+      "candidates": 16,
+      "retained": 8
+    },
+    {
+      "file": "apps/server/src/operator-dashboard-services.ts",
+      "sha256": "e6a60ef6c0fbd74bfb895dd4013041be40d6a24d2c0d6ab6c9e9b33d95f32445",
+      "candidates": 51,
+      "retained": 7
+    },
+    {
+      "file": "apps/server/src/operator-dashboard.test.ts",
+      "sha256": "5b38a5c1a5b3e3b175481f48437eac7dac2207bc7bda3ec9e64d82baa9cead0c",
+      "candidates": 0,
+      "retained": 0
+    },
+    {
+      "file": "apps/server/src/operator-dashboard.ts",
+      "sha256": "16d708df0ff3707a514274677237d228c55d219e5df4be358e5b7028587df92c",
+      "candidates": 117,
+      "retained": 40
+    },
+    {
+      "file": "apps/server/src/operator-finances-config.ts",
+      "sha256": "be555a9d5e31c2f0952b41bcd468852e9bd7a66b4c8bfd5c7a46b22489b54351",
+      "candidates": 0,
+      "retained": 0
+    },
+    {
+      "file": "apps/server/src/operator-finances-contract.ts",
+      "sha256": "e182780f928a303a26b2a3fadaf902e19ce2a9a9f6dfd6ddaeae81af678165c1",
+      "candidates": 0,
+      "retained": 0
+    },
+    {
+      "file": "apps/server/src/operator-finances-details.ts",
+      "sha256": "0c44e2a3eca567278a2710774ee4561e76c5ee326138b9910e855e50e133ff47",
+      "candidates": 0,
+      "retained": 0
+    },
+    {
+      "file": "apps/server/src/operator-finances-wire.ts",
+      "sha256": "aa1841bb01cba59b56428d296ad55e8b4d94d21cebcf5f0aab13701653eb65a3",
+      "candidates": 28,
+      "retained": 7
+    },
+    {
+      "file": "apps/server/src/operator-finances.test.ts",
+      "sha256": "b593696855da65e6b21ea0d461902acd2738e43f64eaa1f523225041163b4452",
+      "candidates": 0,
+      "retained": 0
+    },
+    {
+      "file": "apps/server/src/operator-finances.ts",
+      "sha256": "f3808c641e084caff53e4529af3bdc26038d515ad03c4fa3fde52c8466225c28",
+      "candidates": 157,
+      "retained": 24
+    },
+    {
+      "file": "apps/server/src/operator-system-dm-source.postgres.test.ts",
+      "sha256": "bc62a41aefd1fd24e716783a3ea44def3b5882b2e0596296f8b99f91394b3f98",
+      "candidates": 1,
+      "retained": 1
+    },
+    {
+      "file": "apps/server/src/operator-system-dm.test.ts",
+      "sha256": "5fd1bd4b88b41fab3bfb367acb680ee40e7b612abe5beada0bf0db495549337a",
+      "candidates": 0,
+      "retained": 0
+    },
+    {
+      "file": "apps/server/src/operator-system-dm.ts",
+      "sha256": "fc2daf6255a46ed52ceec0b8375a23b1232092591a344f987ee055509987d823",
+      "candidates": 45,
+      "retained": 4
+    },
+    {
+      "file": "apps/server/src/owed-mentions.ts",
+      "sha256": "c2c2679f1b2d31e078ade25601980b148bf31da05792a9898e47ebd10b9df9a3",
+      "candidates": 22,
+      "retained": 0
+    },
+    {
+      "file": "apps/server/src/owed-tag-replies.test.ts",
+      "sha256": "1ff2245ebb4f151c5979ba1d5dbe528e205e6b8ea70d34b48b242ef143562518",
+      "candidates": 0,
+      "retained": 0
+    },
+    {
+      "file": "apps/server/src/owned-model-attempt.test.ts",
+      "sha256": "56f9b83402af2def70bbde40b290265667622d50efb5cfa6e2cb3e94ecd76351",
+      "candidates": 0,
+      "retained": 0
+    },
+    {
+      "file": "apps/server/src/owned-model-attempt.ts",
+      "sha256": "426bb203f7d7904b9820c30a4accfbde481d2db7fbbb64eae6f9f2e2396a89a8",
+      "candidates": 101,
+      "retained": 14
+    },
+    {
+      "file": "apps/server/src/owned-model-claim-socket.test.ts",
+      "sha256": "16ff5715d609fca652ee9a9abb155567eca86ba1953e921b47fe6a53fc55ab7a",
+      "candidates": 0,
+      "retained": 0
+    },
+    {
+      "file": "apps/server/src/owned-model-claim.test.ts",
+      "sha256": "6360a6d2729a60e2f825984a3a04349ab3ac509a60611e000e485c10e67b16d7",
+      "candidates": 0,
+      "retained": 0
+    },
+    {
+      "file": "apps/server/src/owned-model-credential.test.ts",
+      "sha256": "06466f4140c8f57d3f47aed4f03c3c90a27ea7cd20f095cd4ee0ba266552bb1b",
+      "candidates": 0,
+      "retained": 0
+    },
+    {
+      "file": "apps/server/src/owned-model-credential.ts",
+      "sha256": "78084cd7b55bca81d9064fc506bb6575c786c27bfeaa535d9436b9e069c013d5",
+      "candidates": 47,
+      "retained": 4
+    },
+    {
+      "file": "apps/server/src/owned-model-errors.ts",
+      "sha256": "3181b094106e2731f33aa375293a6b1260efc54253be01568d7d8a360225a942",
+      "candidates": 1,
+      "retained": 0
+    },
+    {
+      "file": "apps/server/src/owned-model-invocation.test.ts",
+      "sha256": "f219b799af282b1f6190b7601ed9c8490ebac6f59881264d5f49d00aca691bd6",
+      "candidates": 0,
+      "retained": 0
+    },
+    {
+      "file": "apps/server/src/owned-model-parking.postgres.test.ts",
+      "sha256": "a780dbf9ebc07cfedf4aea3e0e4789327ad6ba9b66e2e501914ef3656e59e413",
+      "candidates": 1,
+      "retained": 1
+    },
+    {
+      "file": "apps/server/src/owned-model-parking.test.ts",
+      "sha256": "eeae6094f846220c2658ba7eabc3958b1499f8463aef5a16b2cbec0f0fe35eef",
+      "candidates": 0,
+      "retained": 0
+    },
+    {
+      "file": "apps/server/src/owned-model-parking.ts",
+      "sha256": "edd783bb4648d7a42102f5b2e125bf24df52fbac468b0b98d4ef1c0f3bd26d07",
+      "candidates": 29,
+      "retained": 4
+    },
+    {
+      "file": "apps/server/src/owned-model-stream.test.ts",
+      "sha256": "0ce9a6c813110328ff5f6133af7c40844cb2460b5a06722aecb7de7302efd145",
+      "candidates": 0,
+      "retained": 0
+    },
+    {
+      "file": "apps/server/src/owned-model-stream.ts",
+      "sha256": "0118c32c95a4ebb231e3ecd6f45bf32836ac5879def8e8d0366a232a372e13d8",
+      "candidates": 13,
+      "retained": 2
+    },
+    {
+      "file": "apps/server/src/owned-model.postgres.test.ts",
+      "sha256": "efe64b7edf757d3fc6250d20bbc4f54ed87f1b98a1424116f3a5a2b3d1569b90",
+      "candidates": 1,
+      "retained": 1
+    },
+    {
+      "file": "apps/server/src/owned-turn-reply.ts",
+      "sha256": "bfedde5793a9918a231780d570923ea263c8d23425812bcdd768386138d2750e",
+      "candidates": 8,
+      "retained": 1
+    },
+    {
+      "file": "apps/server/src/owner-schedule-clock.ts",
+      "sha256": "1bcc5c37a3bf70a008c2f18adce4d26c4c04790a43dc8b18b8f050c1342f4eb5",
+      "candidates": 6,
+      "retained": 0
+    },
+    {
+      "file": "apps/server/src/pending-attachment-source.ts",
+      "sha256": "0794705a3922c52750baf9cab7013a8f046bf3e395158554e77ec083de4d2693",
+      "candidates": 0,
+      "retained": 0
+    },
+    {
+      "file": "apps/server/src/permission-cards.test.ts",
+      "sha256": "7b34899040d0829363dd05623e3a16cff9cc7de3ee8207c0f210e1e6d2e902bf",
+      "candidates": 0,
+      "retained": 0
+    },
+    {
+      "file": "apps/server/src/permission-cards.ts",
+      "sha256": "bb955d298dfb342919ea5d93d3ca8f65c571589f8b3d813b6bc934b40ea7fdb1",
+      "candidates": 5,
+      "retained": 2
+    },
+    {
+      "file": "apps/server/src/phone-artifact-preview.integration.test.ts",
+      "sha256": "c62fda3f4d9597d346967b5e99ee5f57e8a3f99d45c83bbe7c90dca17dae75d8",
+      "candidates": 0,
+      "retained": 0
+    },
+    {
+      "file": "apps/server/src/phone-identity.ts",
+      "sha256": "01ed704f21379c82a0dd91ef4b171e4560830ca6a0b4f9dec0a60a1a3a554502",
+      "candidates": 8,
+      "retained": 0
+    },
+    {
+      "file": "apps/server/src/phone-live-output.test.ts",
+      "sha256": "45119477c9a6cec3de027590b39805e048e63c120a568169172f91a421a22bf6",
+      "candidates": 0,
+      "retained": 0
+    },
+    {
+      "file": "apps/server/src/phone-live-output.ts",
+      "sha256": "c9630ea150a890a9ecd62680e95d46afa9822721ca5fc5a7b6c01e05c471f31d",
+      "candidates": 10,
+      "retained": 0
+    },
+    {
+      "file": "apps/server/src/phone-media.integration.test.ts",
+      "sha256": "e5ce60f221f0f19993c0951e46f685ceb84299825860c7b968e9756b3e36b5d4",
+      "candidates": 0,
+      "retained": 0
+    },
+    {
+      "file": "apps/server/src/phone-media.ts",
+      "sha256": "b2c5b77990edbc52db549290f25192e3fbf93241449823926bdf22e5bb37ebec",
+      "candidates": 18,
+      "retained": 1
+    },
+    {
+      "file": "apps/server/src/phone-operation-names.test.ts",
+      "sha256": "95d7fcc9cbd93c6c5547508c1023a3492a50ab78851f1b7ba022d744fcd8d073",
+      "candidates": 0,
+      "retained": 0
+    },
+    {
+      "file": "apps/server/src/phone-operations.ts",
+      "sha256": "e109c86782d419d4361f1321d3f6eac72df1f2a7da36b38ff3659bf126b7296c",
+      "candidates": 153,
+      "retained": 56
+    },
+    {
+      "file": "apps/server/src/phone-read-limit.ts",
+      "sha256": "31640cbf9e842e3e6d4db2d24cd61b543876a70f991bcb203c27e3bc4887f983",
+      "candidates": 17,
+      "retained": 0
+    },
+    {
+      "file": "apps/server/src/phone-service.agent-connect.test.ts",
+      "sha256": "3eb057be85b330e2227cd3e17a14dc336f2d7cfd3c48739880eb8e629a08c498",
+      "candidates": 0,
+      "retained": 0
+    },
+    {
+      "file": "apps/server/src/phone-service.agent-profile.test.ts",
+      "sha256": "8850874078d742c7d14bdcf9e4a1f42d112c3926c54a16d829a71abf4927b334",
+      "candidates": 0,
+      "retained": 0
+    },
+    {
+      "file": "apps/server/src/phone-service.archived-corners.test.ts",
+      "sha256": "9df69747a24501b8869430245b74ec880d5250a089703dacdba265b7d99a619f",
+      "candidates": 0,
+      "retained": 0
+    },
+    {
+      "file": "apps/server/src/phone-service.corner-projection.test.ts",
+      "sha256": "34e8256761a32f8ae6d5d16fbab0feac1587b73d750c78ea6aa6d8eb49300293",
+      "candidates": 0,
+      "retained": 0
+    },
+    {
+      "file": "apps/server/src/phone-service.message-search.test.ts",
+      "sha256": "541a292c9acf4572fc3ce118826208ae01869b210b920acac612f4971cdd7455",
+      "candidates": 0,
+      "retained": 0
+    },
+    {
+      "file": "apps/server/src/phone-service.model-change-wake.test.ts",
+      "sha256": "484fc4eed7370529a178a8a3b986e1d3c784fb95a8e7cfe72032c2ec439d41d1",
+      "candidates": 0,
+      "retained": 0
+    },
+    {
+      "file": "apps/server/src/phone-service.read-room-latency.test.ts",
+      "sha256": "a2dd4ede0cf36b7fc710e57fb383f9c9d7e95efbbffb78d5880ca04ac4831c77",
+      "candidates": 0,
+      "retained": 0
+    },
+    {
+      "file": "apps/server/src/phone-service.ts",
+      "sha256": "13bc316a2cdb7f2e917d154ae2684377c4dd71e062bc13ba787cd13bb07e2315",
+      "candidates": 440,
+      "retained": 19
+    },
+    {
+      "file": "apps/server/src/phone-socket.integration.test.ts",
+      "sha256": "7e1d077bb25b88e951f15d7a92768816601ba82ddc4de928a45b842c980d455d",
+      "candidates": 0,
+      "retained": 0
+    },
+    {
+      "file": "apps/server/src/phone-socket.read.test.ts",
+      "sha256": "9c04b91c14863d451b1b54eda02089eaab21e1a7710aae8651f14c4538854b54",
+      "candidates": 0,
+      "retained": 0
+    },
+    {
+      "file": "apps/server/src/phone-socket.ts",
+      "sha256": "67a95ed3bd03c381b3f4727aa0ac677d7c97fca8a370af87b9a8ad2bcf98a1e6",
+      "candidates": 46,
+      "retained": 7
+    },
+    {
+      "file": "apps/server/src/phone-viewing.test.ts",
+      "sha256": "37ef0cd924719c9b3713f01de3413bf9d2145243bed3a44a85d7177f3d306aab",
+      "candidates": 0,
+      "retained": 0
+    },
+    {
+      "file": "apps/server/src/phone-viewing.ts",
+      "sha256": "255dac67c9f9c32148c541725d143e668a5fe38d23ccdf48b72d800758634d0d",
+      "candidates": 25,
+      "retained": 1
+    },
+    {
+      "file": "apps/server/src/phone/access.ts",
+      "sha256": "83ead1a61ec58ae1faed0ddb0ed1d3f1cc3fa1fbb9755f32e0426d38b2f4d9e2",
+      "candidates": 85,
+      "retained": 5
+    },
+    {
+      "file": "apps/server/src/phone/account-profile.ts",
+      "sha256": "796b04ec91142a601d1e103a8ce6e1dde9272d7ce2ea0143bed1a805eb03ae81",
+      "candidates": 59,
+      "retained": 9
+    },
+    {
+      "file": "apps/server/src/phone/agent-configuration.ts",
+      "sha256": "b0f2225a6b429ec781d3834aabdd8f130329af9e10abf455703bff059a72b13d",
+      "candidates": 75,
+      "retained": 13
+    },
+    {
+      "file": "apps/server/src/phone/agent-reads.ts",
+      "sha256": "596dbc20e9a808cbd4843cf64b731b53af258ff026365fce1a9b52246f014d38",
+      "candidates": 52,
+      "retained": 1
+    },
+    {
+      "file": "apps/server/src/phone/agent-removal.ts",
+      "sha256": "3fa5f17594fc8481ef200775ff3ee42973fc632ebe9a9c0bb2eac1d6675f3a71",
+      "candidates": 33,
+      "retained": 3
+    },
+    {
+      "file": "apps/server/src/phone/approvals.ts",
+      "sha256": "927658db6e6a8e4fb1a4a412bba350dcd7a754efa2995231163937f7cd740319",
+      "candidates": 63,
+      "retained": 18
+    },
+    {
+      "file": "apps/server/src/phone/chat-list.ts",
+      "sha256": "e72ac9103412a76d9e734f45195d230dc8e2bd950becfa72ad8b55aee92dba30",
+      "candidates": 55,
+      "retained": 8
+    },
+    {
+      "file": "apps/server/src/phone/command-context.ts",
+      "sha256": "dc748488d4290bb3c57da60b0db3073168bea4e284082508517fb7b9785040f5",
+      "candidates": 31,
+      "retained": 9
+    },
+    {
+      "file": "apps/server/src/phone/connection-reads.ts",
+      "sha256": "e0e2b630c4d84186e013f4ee6f7b61d251a2e812f28a32a408cbf04366deb373",
+      "candidates": 32,
+      "retained": 0
+    },
+    {
+      "file": "apps/server/src/phone/connections.ts",
+      "sha256": "5e32772545289fa6c8dd9e7b15f7a15d7dfa6075af754aa7b11314d3c3510fe1",
+      "candidates": 76,
+      "retained": 14
+    },
+    {
+      "file": "apps/server/src/phone/connector-offers.ts",
+      "sha256": "9a4c2ddfa1181af05f1018a8544739f7cc0f3a74eb1f477398081605b0eabae3",
+      "candidates": 41,
+      "retained": 15
+    },
+    {
+      "file": "apps/server/src/phone/context.ts",
+      "sha256": "f310640e791450130cb315f97782ad306747aaeb37a0dd2b0a017b1c88609625",
+      "candidates": 0,
+      "retained": 0
+    },
+    {
+      "file": "apps/server/src/phone/corner-reads.ts",
+      "sha256": "b7f74592d254a8ac0d5d75448f027584ca5156ffa0ff3a7ac6e2d03294da7fdb",
+      "candidates": 79,
+      "retained": 7
+    },
+    {
+      "file": "apps/server/src/phone/execute.ts",
+      "sha256": "8b30b976861240df2101686266048c544a7458c3d9429d6324a9b2fa1c9d520a",
+      "candidates": 7,
+      "retained": 1
+    },
+    {
+      "file": "apps/server/src/phone/history-search.ts",
+      "sha256": "32859963574246196cbc1c3399b65cc01cd846e22179b86f17f94399a26bd2cf",
+      "candidates": 49,
+      "retained": 2
+    },
+    {
+      "file": "apps/server/src/phone/live-reads.ts",
+      "sha256": "38d73a4d0e445f68f7008528a92798c419dd71e9cc0e4551b1d084c7d0f3a54f",
+      "candidates": 109,
+      "retained": 13
+    },
+    {
+      "file": "apps/server/src/phone/members-invites.ts",
+      "sha256": "9d1c0eb049fb0971dd36ae6de6f0791f543a82512cf0e7b32aab891ef5ee57fb",
+      "candidates": 60,
+      "retained": 6
+    },
+    {
+      "file": "apps/server/src/phone/mention-notices.ts",
+      "sha256": "b46a1eae12517fa94a0a66068a39a6f4432423eaa9389d683be38209d8079e0b",
+      "candidates": 49,
+      "retained": 6
+    },
+    {
+      "file": "apps/server/src/phone/message-decoration.ts",
+      "sha256": "5fa79cd32b21b84b6a54f1643e30ca3529802c9d51e9105a69d3158fab2c5081",
+      "candidates": 62,
+      "retained": 2
+    },
+    {
+      "file": "apps/server/src/phone/message-enrichment.ts",
+      "sha256": "407ddfcc96292dc2b10edb1950b011b97e2a62bdf151c1ae9533b7b922aebd3c",
+      "candidates": 58,
+      "retained": 1
+    },
+    {
+      "file": "apps/server/src/phone/messages.ts",
+      "sha256": "324953b227d04cc380f938e61ea28d5e09a54a50f083fff793652a774b3f6375",
+      "candidates": 95,
+      "retained": 11
+    },
+    {
+      "file": "apps/server/src/phone/operation-names.ts",
+      "sha256": "9be24d1a6eefab12412b70602b65d84c1e0221b3203478e667166c9ef96390ca",
+      "candidates": 3,
+      "retained": 3
+    },
+    {
+      "file": "apps/server/src/phone/operations.ts",
+      "sha256": "a98a080cd0508f4865dd465d97efe61efdf9961cd658d25c5b1d924bb0810cd3",
+      "candidates": 191,
+      "retained": 145
+    },
+    {
+      "file": "apps/server/src/phone/optional-enrichment.ts",
+      "sha256": "d72aeb5c7f88012605381892dafe4c5a1f3fb9d3e4aa43c9beaf1a9f01371388",
+      "candidates": 6,
+      "retained": 1
+    },
+    {
+      "file": "apps/server/src/phone/pairing.ts",
+      "sha256": "3825889b359d856b5ae113466f832d02407b5087b13fb5fb18ef471e4614bb11",
+      "candidates": 58,
+      "retained": 3
+    },
+    {
+      "file": "apps/server/src/phone/push-updates.ts",
+      "sha256": "f5847a067475f051f355aca514e25df7a7cfa2b3752412febd9e5c28130518f0",
+      "candidates": 20,
+      "retained": 5
+    },
+    {
+      "file": "apps/server/src/phone/read-projection.ts",
+      "sha256": "ed3ce7673db48a7dc8e5463ac734464616543e530b1d03102e09b1fae0966a35",
+      "candidates": 119,
+      "retained": 22
+    },
+    {
+      "file": "apps/server/src/phone/repositories.ts",
+      "sha256": "4b68216ced84bb582d624168d771f1850690451267c41ccaef1a2876843a1029",
+      "candidates": 54,
+      "retained": 4
+    },
+    {
+      "file": "apps/server/src/phone/room-actions.ts",
+      "sha256": "ecc5ebcbe60cc2235a3ec9d3c22291621d7189ca4b95582ca94614cce9531c63",
+      "candidates": 59,
+      "retained": 23
+    },
+    {
+      "file": "apps/server/src/phone/room-read.ts",
+      "sha256": "c08c697c031d1536d259d48ca1bc61d13c3a47cec45a7f7cab8da5e1bbb51e59",
+      "candidates": 47,
+      "retained": 0
+    },
+    {
+      "file": "apps/server/src/phone/room-writes.ts",
+      "sha256": "82dec98cf2801f0ad566b1d93385d882d7973d2004d6701e2523fa238c748048",
+      "candidates": 89,
+      "retained": 3
+    },
+    {
+      "file": "apps/server/src/phone/roster.ts",
+      "sha256": "922d8c801cfaadfe4072299457cc86bfa9420bcc6adeb1d1015417444e655b2e",
+      "candidates": 46,
+      "retained": 7
+    },
+    {
+      "file": "apps/server/src/phone/schedules.ts",
+      "sha256": "7e7540fb599269ff775979e42061362ce50eb166e95dcb516f6341cebe5687c1",
+      "candidates": 21,
+      "retained": 1
+    },
+    {
+      "file": "apps/server/src/phone/tray.ts",
+      "sha256": "93e609145ab80e14b05ff48f3a0fffb4542159fd743f88a57fb105916418a735",
+      "candidates": 34,
+      "retained": 6
+    },
+    {
+      "file": "apps/server/src/phone/types.ts",
+      "sha256": "fa8719c47d5bab495515bd052f6fee16e921f039ddaf45b646615d723c649d52",
+      "candidates": 4,
+      "retained": 0
+    },
+    {
+      "file": "apps/server/src/phone/values.ts",
+      "sha256": "29a1d44cc3c0da2d94f14c12e845948137bc7781b1bad22323a48a192c8dc4e0",
+      "candidates": 31,
+      "retained": 0
+    },
+    {
+      "file": "apps/server/src/phone/workbench-catalog.ts",
+      "sha256": "c5235bab918d8cc18cf126a8454054d1ee5ff76ed70dbd38d86714385e851aad",
+      "candidates": 51,
+      "retained": 4
+    },
+    {
+      "file": "apps/server/src/phone/workbench-reads.ts",
+      "sha256": "738149ef609b60e02ded1bf47e230a066c6194d2a9bc343419934b8968f055b8",
+      "candidates": 81,
+      "retained": 5
+    },
+    {
+      "file": "apps/server/src/phone/workspace-writes.ts",
+      "sha256": "1fff8cbaef8f30f4eff4329cd0ea7cb920afbb0a13e0c8a98f21c075799d28d7",
+      "candidates": 30,
+      "retained": 3
+    },
+    {
+      "file": "apps/server/src/phone/workspaces.ts",
+      "sha256": "dbb1af6b4f1bb50645fa69646d14aa35356ac859ff154a98c120fa4ac167ca0a",
+      "candidates": 31,
+      "retained": 2
+    },
+    {
+      "file": "apps/server/src/postgres-error.test.ts",
+      "sha256": "7a78ec53762771aec0cff7dce494b15727a46e6325e945afc925f4931f5237b2",
+      "candidates": 0,
+      "retained": 0
+    },
+    {
+      "file": "apps/server/src/postgres-error.ts",
+      "sha256": "8223b8999d2a709a9360ddc87be5df3c9cdd2c3c195a8134a950101c65a62908",
+      "candidates": 8,
+      "retained": 0
+    },
+    {
+      "file": "apps/server/src/postgres-live-2.test.ts",
+      "sha256": "f502643d38baddc70cd2185ef529d0291814952f763a36d63fc40788ebcddbdf",
+      "candidates": 0,
+      "retained": 0
+    },
+    {
+      "file": "apps/server/src/postgres-live-3.test.ts",
+      "sha256": "484886dc46deaf88e8c97d9242dd34373822beab252bc8b9a85c43c71569fdc0",
+      "candidates": 0,
+      "retained": 0
+    },
+    {
+      "file": "apps/server/src/postgres-live-decode-payload.ts",
+      "sha256": "533d52444b0363ecfff0789a173191056b77a5f857337d12347e0c234d832c8b",
+      "candidates": 52,
+      "retained": 1
+    },
+    {
+      "file": "apps/server/src/postgres-live-notifications.ts",
+      "sha256": "662ae96f51f0ba7097720d56a3c7cc8c0c111a449b233ea3e4a9e3c77f13ee11",
+      "candidates": 29,
+      "retained": 14
+    },
+    {
+      "file": "apps/server/src/postgres-live-recovery.test.ts",
+      "sha256": "af7345c43d77eacac8c37657452e760c4c429ccda47a1579960608da52686ca0",
+      "candidates": 0,
+      "retained": 0
+    },
+    {
+      "file": "apps/server/src/postgres-live-schema.ts",
+      "sha256": "5a38ac5863eeffaf9a994eede406651f67cc488b36351de1b4e7a0d6324c16ad",
+      "candidates": 38,
+      "retained": 36
+    },
+    {
+      "file": "apps/server/src/postgres-live.test.ts",
+      "sha256": "5f046443c6e8ca94ecad03973e9033c7dd7c20b30dab406cd2f171a28ceddab2",
+      "candidates": 0,
+      "retained": 0
+    },
+    {
+      "file": "apps/server/src/postgres-live.ts",
+      "sha256": "de3950f257365930a40a7d79796dfa8ad00f594f66ac67f736409dd713db7988",
+      "candidates": 184,
+      "retained": 48
+    },
+    {
+      "file": "apps/server/src/pr-checks-status-2.test.ts",
+      "sha256": "9121451ab8020230f002279f88455e47270ffa682454e1a01c15fcc9cd680946",
+      "candidates": 0,
+      "retained": 0
+    },
+    {
+      "file": "apps/server/src/pr-checks-status.test.ts",
+      "sha256": "bc2997f530767b4f3a6414ec9556f9d972391dbd5696d9a62a3364344c50eb73",
+      "candidates": 0,
+      "retained": 0
+    },
+    {
+      "file": "apps/server/src/procedure-tool-vocabulary.test.ts",
+      "sha256": "4f83d893fb5df94d31545a22afc65a4cca70224a6dbde50be5dfe7dfcd835d60",
+      "candidates": 0,
+      "retained": 0
+    },
+    {
+      "file": "apps/server/src/procedure-tool-vocabulary.ts",
+      "sha256": "663fa0a1fcf7887eea84a74850aaa620c113cf0f9b74a8b3c9039470a121dcb7",
+      "candidates": 9,
+      "retained": 0
+    },
+    {
+      "file": "apps/server/src/production-corpus-hot-reads.test.ts",
+      "sha256": "1c6f42a365c98940d23aebf51bf902f1484d0e82643166d871a27b2ed48279b9",
+      "candidates": 0,
+      "retained": 0
+    },
+    {
+      "file": "apps/server/src/production-corpus-performance.test.ts",
+      "sha256": "15f2d83a05d7fb5cb689b2d52e6e856773544ae816f17685db34197ee27c9697",
+      "candidates": 0,
+      "retained": 0
+    },
+    {
+      "file": "apps/server/src/production-corpus-performance.ts",
+      "sha256": "7dab72cc4ff8e712df7202a0c2c663fa951657279e03438f08ea577d53399ab5",
+      "candidates": 56,
+      "retained": 2
+    },
+    {
+      "file": "apps/server/src/production-corpus-width.test.ts",
+      "sha256": "bfea7a2c4149a5c96169a00cd9163b640b01658f6f823d1a1d9ddeb8b1f021f7",
+      "candidates": 0,
+      "retained": 0
+    },
+    {
+      "file": "apps/server/src/production-deadlocks.postgres.test.ts",
+      "sha256": "04decdedcfea23218f629172819927ad112d7197db8edbc1b8914747a52d8aaf",
+      "candidates": 1,
+      "retained": 1
+    },
+    {
+      "file": "apps/server/src/production-latency.test.ts",
+      "sha256": "556a50e6277864849d48a8d626ee18baf48ac5bc1914f9781eae22713d136904",
+      "candidates": 0,
+      "retained": 0
+    },
+    {
+      "file": "apps/server/src/production-release-dispatch.test.ts",
+      "sha256": "eb526e3d2d8cb562ba3ae70abe619b8c6ee5c70611fbdfd483e4590bbcc73afd",
+      "candidates": 0,
+      "retained": 0
+    },
+    {
+      "file": "apps/server/src/production-release-dispatch.ts",
+      "sha256": "c30b79d7d89254993a18d43b4d1daa83cf1fedd2d57d4a6bf0665b6c8447318a",
+      "candidates": 18,
+      "retained": 6
+    },
+    {
+      "file": "apps/server/src/provider-webhooks.integration.test.ts",
+      "sha256": "51518f7af6bdd8f025affd1b82a35d978d7542cdf7efad2bb92e6a581d316ebc",
+      "candidates": 0,
+      "retained": 0
+    },
+    {
+      "file": "apps/server/src/provider-webhooks.ts",
+      "sha256": "e21c2ad51317b7ce17e5031c00d9ddb9684003ed28f36df3da41c66bf7cab67e",
+      "candidates": 82,
+      "retained": 21
+    },
+    {
+      "file": "apps/server/src/public-join-link.test.ts",
+      "sha256": "9daa157af5056cd26717ee2d650bd2b76ffa70115dc5617902ce1ef0f2ed082e",
+      "candidates": 0,
+      "retained": 0
+    },
+    {
+      "file": "apps/server/src/push-attention.ts",
+      "sha256": "6f5ae983c5fd25887ceb6060959f6442436958d0e2f9dd211aff7f3f92157929",
+      "candidates": 1,
+      "retained": 0
+    },
+    {
+      "file": "apps/server/src/push-claim-cleanup.ts",
+      "sha256": "3c495338ef6813cc2ec9ade71f3629dc78558b6a8d9e49ff48da579f14e8962d",
+      "candidates": 0,
+      "retained": 0
+    },
+    {
+      "file": "apps/server/src/push-dm-mute.test.ts",
+      "sha256": "99925379c6209a42bf692f263d129ed4091583adbf5dde263492afdecffdd489",
+      "candidates": 0,
+      "retained": 0
+    },
+    {
+      "file": "apps/server/src/push-follow.test.ts",
+      "sha256": "83209266af83771c8b6d299e3ac335adcd4ce30d9b16bdd34f8c8df74e908c7a",
+      "candidates": 0,
+      "retained": 0
+    },
+    {
+      "file": "apps/server/src/push-outbox.test.ts",
+      "sha256": "8695bc4602bfbb139dbee7e4aa163d4c17c4bf19b27beda6561bb70f7950568c",
+      "candidates": 1,
+      "retained": 1
+    },
+    {
+      "file": "apps/server/src/push-outbox.ts",
+      "sha256": "ac6c856aa2baee3dc4c731e22f3d05eb985f1f219f9917698d02d2a3d538a270",
+      "candidates": 23,
+      "retained": 1
+    },
+    {
+      "file": "apps/server/src/push-sensitivity.test.ts",
+      "sha256": "b30eedd246158158842b3e20bda64e8e98e6b1dd2c295b2c92356241590fc4a7",
+      "candidates": 0,
+      "retained": 0
+    },
+    {
+      "file": "apps/server/src/push-turn-context.postgres.test.ts",
+      "sha256": "3c54d691dd4302d3855ca2cf95ae5d5484c0ed813379441b4c6ef3e37e941d36",
+      "candidates": 1,
+      "retained": 1
+    },
+    {
+      "file": "apps/server/src/query-profile.test.ts",
+      "sha256": "895afddcb24c75c251e973bac9d9c341412e80eda1287aa1af3d994de6af5fc5",
+      "candidates": 0,
+      "retained": 0
+    },
+    {
+      "file": "apps/server/src/query-profile.ts",
+      "sha256": "04c9a0813f9b4ff2d0d5c5f47dcbf4106624f5fa4ad6bbc3cbba91513c0e0468",
+      "candidates": 34,
+      "retained": 2
+    },
+    {
+      "file": "apps/server/src/read-cursor.test.ts",
+      "sha256": "e9f9194aecb87aef212b28736b3f17e89cbfed9805dce68535784bfd274add5c",
+      "candidates": 0,
+      "retained": 0
+    },
+    {
+      "file": "apps/server/src/read-cursor.ts",
+      "sha256": "34772831ed81c0399ebfe39fb635add6e6f6afe83a9ebcec0b259087a935a923",
+      "candidates": 5,
+      "retained": 0
+    },
+    {
+      "file": "apps/server/src/read-surface-growth.postgres.test.ts",
+      "sha256": "9cb77dfbebaea2bf0288b5742853d5e9bbe95946abf4644363c82be6a5c4e543",
+      "candidates": 1,
+      "retained": 1
+    },
+    {
+      "file": "apps/server/src/registry-mcp-oauth.test.ts",
+      "sha256": "0a961792fc2448f11cb2103437d055af776101ead545c840224896e5d66b0c86",
+      "candidates": 0,
+      "retained": 0
+    },
+    {
+      "file": "apps/server/src/registry-mcp-oauth.ts",
+      "sha256": "61a8e0fbc07d45d23cbd75f5e25798a74feaa410f9885065ca620e0211f56863",
+      "candidates": 19,
+      "retained": 0
+    },
+    {
+      "file": "apps/server/src/registry-mcp.integration.test.ts",
+      "sha256": "fced67fa0827a2c0387af13215839a88dcb58a80aba4dfb931d01d598334dfac",
+      "candidates": 0,
+      "retained": 0
+    },
+    {
+      "file": "apps/server/src/release-notify.test.ts",
+      "sha256": "be25b0b8f4249911c83f0ece3be9e515eba9d946d9a1cbde398a0fea8be8ed76",
+      "candidates": 0,
+      "retained": 0
+    },
+    {
+      "file": "apps/server/src/release-notify.ts",
+      "sha256": "7d79e996668efcd2c6b239f9cbd67a2e9a2c2c225035e7bf5508d305ca1738f4",
+      "candidates": 24,
+      "retained": 5
+    },
+    {
+      "file": "apps/server/src/reply-steps.test.ts",
+      "sha256": "89b376ef17154aa6b4b6a0ed3f8446e34f25799c54b9f7f09bdc66b653cd5670",
+      "candidates": 0,
+      "retained": 0
+    },
+    {
+      "file": "apps/server/src/repository-link-success.test.ts",
+      "sha256": "008ed8d3e8d48e178e126595fc670cc430b7672a0d6de4be7b592d5eff430623",
+      "candidates": 0,
+      "retained": 0
+    },
+    {
+      "file": "apps/server/src/repository-onboarding.test.ts",
+      "sha256": "35d7ec10a83f443cd6aae1977bd36ed1e2ade62baa9148178cf2d98cb21a4b9c",
+      "candidates": 0,
+      "retained": 0
+    },
+    {
+      "file": "apps/server/src/repository-onboarding.ts",
+      "sha256": "1ac46e5dd8bf7ade3a504b9bb276be8721cc3be0f73a1eb1cfa9bb26b4dfb074",
+      "candidates": 33,
+      "retained": 4
+    },
+    {
+      "file": "apps/server/src/repository-subscription-line.test.ts",
+      "sha256": "7771dfe70c67a5bd90da6eec1398649cda7669a1ee2bca4ec8838c2d8e472018",
+      "candidates": 0,
+      "retained": 0
+    },
+    {
+      "file": "apps/server/src/repository-subscription-line.ts",
+      "sha256": "be806f251911d8e7fba9ac08f95902ef8f2804ee01b495e667262d612727eec3",
+      "candidates": 9,
+      "retained": 0
+    },
+    {
+      "file": "apps/server/src/resource-requester.ts",
+      "sha256": "435826e49b8b711331ed1580877dc2040f195a454c922a975d4a90f333e2ad8a",
+      "candidates": 12,
+      "retained": 4
+    },
+    {
+      "file": "apps/server/src/retired-tools.test.ts",
+      "sha256": "e035e1d23a0682d74e358f8149596a96967542d0cf516f71e61a81386b08335c",
+      "candidates": 0,
+      "retained": 0
+    },
+    {
+      "file": "apps/server/src/review-access.test.ts",
+      "sha256": "cc0b6855f2586816cafa9d3752b688b1a46e343792afaf999d9db4fb5538a638",
+      "candidates": 0,
+      "retained": 0
+    },
+    {
+      "file": "apps/server/src/review-access.ts",
+      "sha256": "77e2085c9aa005d5aa0ed616dbdf24227c776c94d5a2f986150037627b987bc9",
+      "candidates": 19,
+      "retained": 0
+    },
+    {
+      "file": "apps/server/src/review-evidence.ts",
+      "sha256": "58b1b606fee11acb366ae446ff6764bcfc963f0f0665fa1228e221aeb9e00d37",
+      "candidates": 11,
+      "retained": 0
+    },
+    {
+      "file": "apps/server/src/review-proof-fixture.ts",
+      "sha256": "523d0fcd12ed8c54a7ab5063d81668a9b8bbaea95018488d3d1aee1c1c981aef",
+      "candidates": 9,
+      "retained": 0
+    },
+    {
+      "file": "apps/server/src/reviewer-approval-surface.test.ts",
+      "sha256": "393f6ff8a4139f7b51a1574be86396548d4066e532b245ec6e57fbb35e73bc6c",
+      "candidates": 0,
+      "retained": 0
+    },
+    {
+      "file": "apps/server/src/rollout-overlap.test.ts",
+      "sha256": "e4b7acd54afe028ef38f7dc4986bcc1c1aa525f03589ab7aae8f17bbfc070513",
+      "candidates": 0,
+      "retained": 0
+    },
+    {
+      "file": "apps/server/src/room-access-lock.ts",
+      "sha256": "bda8596675952ee4bad1f06f4bc2774bf0260b155c84a0485e952a451ad7103d",
+      "candidates": 4,
+      "retained": 0
+    },
+    {
+      "file": "apps/server/src/room-choice.ts",
+      "sha256": "cd020f91b98d3055c11bd9d9a803da9728a4f91fef7bee4be8bede8ef90b6865",
+      "candidates": 116,
+      "retained": 19
+    },
+    {
+      "file": "apps/server/src/room-member-model.test.ts",
+      "sha256": "bdb32d98db959cbc8db8d33494b0d9f04691d463c2898eb7d8d625932d19395f",
+      "candidates": 0,
+      "retained": 0
+    },
+    {
+      "file": "apps/server/src/room-names.ts",
+      "sha256": "e9cd9788bd7043915d3b279bdcb8e015cdadea3bbc4df053f17cdaff8f941062",
+      "candidates": 7,
+      "retained": 0
+    },
+    {
+      "file": "apps/server/src/room-router-read.ts",
+      "sha256": "7e66d3084bc61b7a7cdb243aa4e42fce1c4c91c5ab758306ae8adc2238a31821",
+      "candidates": 2,
+      "retained": 1
+    },
+    {
+      "file": "apps/server/src/room-tool-projection.test.ts",
+      "sha256": "7c81473071f195eeaa40fd419345e1cb3078d8e97d121bb2d2c697b6cbf89a07",
+      "candidates": 0,
+      "retained": 0
+    },
+    {
+      "file": "apps/server/src/room-tool-projection.ts",
+      "sha256": "e1860d5a1c7d1a8de6fccd649820b43c27d6e791ad33c841ea944b89c6885857",
+      "candidates": 10,
+      "retained": 0
+    },
+    {
+      "file": "apps/server/src/rooms-mcp-2.test.ts",
+      "sha256": "250e9785f8c689d7d20fc3c15cdbb12a55fd7f0f8b63c41f231c23d9d54d1906",
+      "candidates": 0,
+      "retained": 0
+    },
+    {
+      "file": "apps/server/src/rooms-mcp-3.test.ts",
+      "sha256": "da1532750884bb8f8dc0ab93be25e93399c0c7e3f298cbe199e271f990e1ec13",
+      "candidates": 0,
+      "retained": 0
+    },
+    {
+      "file": "apps/server/src/rooms-mcp-4.test.ts",
+      "sha256": "d30e4e73630721c1c50f93b8e9d93a8143e868becd91b7b2faad9c3e36a3bbfa",
+      "candidates": 0,
+      "retained": 0
+    },
+    {
+      "file": "apps/server/src/rooms-mcp-agent.ts",
+      "sha256": "9b906dd0ba83231485bff649533ff618004fc561b7f4ea6af8da9fc80f32e5ba",
+      "candidates": 323,
+      "retained": 98
+    },
+    {
+      "file": "apps/server/src/rooms-mcp-connections.ts",
+      "sha256": "a35fe613ff8b408864de8b86c940ff667d47777c00d82243698fdfdde919f0f2",
+      "candidates": 21,
+      "retained": 1
+    },
+    {
+      "file": "apps/server/src/rooms-mcp-consent-ui.test.ts",
+      "sha256": "0301d8a52c4b648915cf4bf270adb4435a84e9058b4f830e41c35490e4348fd9",
+      "candidates": 0,
+      "retained": 0
+    },
+    {
+      "file": "apps/server/src/rooms-mcp-consent-ui.ts",
+      "sha256": "7f284ec772b58bbf201b6b94da9a2d3515324c6607b56d490f3aa72d55f02968",
+      "candidates": 27,
+      "retained": 0
+    },
+    {
+      "file": "apps/server/src/rooms-mcp-endpoints.ts",
+      "sha256": "13caaebd8f15c670e6f8324d4bc3252cacc456213cc771c6eb61c7c8bf320403",
+      "candidates": 11,
+      "retained": 3
+    },
+    {
+      "file": "apps/server/src/rooms-mcp-events.ts",
+      "sha256": "c79fc729849ef71bb973990ee12491e65c055573e43de99e9b5da454b0ae03cf",
+      "candidates": 76,
+      "retained": 13
+    },
+    {
+      "file": "apps/server/src/rooms-mcp-logos.supported.test.ts",
+      "sha256": "e91931b8758c27124d9eb66081fbd994fe1ec21ece69bfb895eb22aaa5705543",
+      "candidates": 0,
+      "retained": 0
+    },
+    {
+      "file": "apps/server/src/rooms-mcp-logos.ts",
+      "sha256": "90939dad7e77898f7e78220f222e7d8bf248d3fecc37b2aaed466e307e32a42d",
+      "candidates": 45,
+      "retained": 3
+    },
+    {
+      "file": "apps/server/src/rooms-mcp-members.ts",
+      "sha256": "87c330f0b11610f16fd9b64ea09c81ea4c91afc15d45faf127aabde38e72a3c1",
+      "candidates": 170,
+      "retained": 13
+    },
+    {
+      "file": "apps/server/src/rooms-mcp-negotiation.test.ts",
+      "sha256": "2f11eb63f2c3700b6030d0b8a60bb64afd0d3f5253f32ffc61bac8b571d5b28b",
+      "candidates": 0,
+      "retained": 0
+    },
+    {
+      "file": "apps/server/src/rooms-mcp-oauth-completion.test.ts",
+      "sha256": "d32142af29b81d935ce3859b667d207c4f7c7c3db5b4730727e2eb6434997b83",
+      "candidates": 0,
+      "retained": 0
+    },
+    {
+      "file": "apps/server/src/rooms-mcp-oauth.ts",
+      "sha256": "a80bbed7caf53149c51e5a676d44912d748f8002c553c5c7872c6d3ccc0cde9f",
+      "candidates": 270,
+      "retained": 60
+    },
+    {
+      "file": "apps/server/src/rooms-mcp-preregistered.ts",
+      "sha256": "9facf6a9e1f73dc8678992a793461b1a121bb0d6c0b0db94a2e10418b2e62633",
+      "candidates": 2,
+      "retained": 0
+    },
+    {
+      "file": "apps/server/src/rooms-mcp-schema.ts",
+      "sha256": "36c69f59f8e88e3c6af211558578a971d2ae8c977ff34d0dd56dbcf0b3d15689",
+      "candidates": 68,
+      "retained": 6
+    },
+    {
+      "file": "apps/server/src/rooms-mcp-stream.postgres.test.ts",
+      "sha256": "d9e35455940020c61491fa79fa736bdac32051a347704bacd13a30a8a46af5f5",
+      "candidates": 1,
+      "retained": 1
+    },
+    {
+      "file": "apps/server/src/rooms-mcp-stream.test.ts",
+      "sha256": "f63f6bd9cb5e76c975fef7f7d817331f489b129d24db1ae1537d38404077e317",
+      "candidates": 0,
+      "retained": 0
+    },
+    {
+      "file": "apps/server/src/rooms-mcp-stream.ts",
+      "sha256": "5352fdcf1a656fe257f9c2bc829d39fd2a5df07f468d961e76583a6468c95a60",
+      "candidates": 83,
+      "retained": 16
+    },
+    {
+      "file": "apps/server/src/rooms-mcp.test.ts",
+      "sha256": "789be8731fcf5d8a8339586fd104b197c941059847d7a0d93ac8be2cf0240d57",
+      "candidates": 0,
+      "retained": 0
+    },
+    {
+      "file": "apps/server/src/rooms-mcp.ts",
+      "sha256": "d2ba7c94677820af36c8fe6fe4e69950d5091c7868f637adc48d4ba6324a3e26",
+      "candidates": 146,
+      "retained": 22
+    },
+    {
+      "file": "apps/server/src/router-authority-lock.ts",
+      "sha256": "2e1eb160f946d058b63b45414a59efc70e41be6858bd173005dc5eb4a1332b2a",
+      "candidates": 0,
+      "retained": 0
+    },
+    {
+      "file": "apps/server/src/router-command-coverage.ts",
+      "sha256": "96823a3455f4d2dd1ce9203ebda7d5f0caf51728f73116442f02f0bb1a7499e4",
+      "candidates": 6,
+      "retained": 1
+    },
+    {
+      "file": "apps/server/src/router-command-dispatch.integration.test.ts",
+      "sha256": "dfd02899d408b83e238afdaa90e45971ce5f586c0d6f31184e2b030b6b6f7183",
+      "candidates": 0,
+      "retained": 0
+    },
+    {
+      "file": "apps/server/src/router-command-ledger.ts",
+      "sha256": "0db88e48c12ce39af685a4f620a3940b0132b3e1295a83984bf9ac37bcaf04f2",
+      "candidates": 57,
+      "retained": 3
+    },
+    {
+      "file": "apps/server/src/router-command.integration.test.ts",
+      "sha256": "01a8272720580d0e92ad6433eb13e308c7ea30b6afeba71661f68f6c1c0c8edf",
+      "candidates": 0,
+      "retained": 0
+    },
+    {
+      "file": "apps/server/src/router-command.postgres.test.ts",
+      "sha256": "2fa8f9eb893f612dc6b414b2a2b7c5f0a322871c8e0eecf5af27b418a8456c7a",
+      "candidates": 1,
+      "retained": 1
+    },
+    {
+      "file": "apps/server/src/router-group-c-completion.postgres.test.ts",
+      "sha256": "ac170681c7cd90198b5248d0a819e7f7331f2df20cb27bb14c9ae22eedabf1bd",
+      "candidates": 1,
+      "retained": 1
+    },
+    {
+      "file": "apps/server/src/router-group-c-oauth.postgres.test.ts",
+      "sha256": "866ce472212aeac0f301b72d7e351d7347c0b472a1705779882069c4b3d5835e",
+      "candidates": 1,
+      "retained": 1
+    },
+    {
+      "file": "apps/server/src/router-schema-rollback.test.ts",
+      "sha256": "cf8b95623f6f3204e9a654c38978494cefb2e2f0289542acc5ca0f496caef20b",
+      "candidates": 0,
+      "retained": 0
+    },
+    {
+      "file": "apps/server/src/runnable-artifact.ts",
+      "sha256": "671bced426fcd037012206037e87df2f64df66c751428561ab81e0eb33796165",
+      "candidates": 15,
+      "retained": 4
+    },
+    {
+      "file": "apps/server/src/running-turn-continuity.postgres.test.ts",
+      "sha256": "76bc2a6fb3778aa17804f2467084fe760efebc6f3983ad338e4edbb8f0c2725c",
+      "candidates": 1,
+      "retained": 1
+    },
+    {
+      "file": "apps/server/src/schedule-title.test.ts",
+      "sha256": "121ce1d23004debdfb282e7c2a720a87b233b31eb66e1861ef8e2d4d4d631d7e",
+      "candidates": 0,
+      "retained": 0
+    },
+    {
+      "file": "apps/server/src/schedule-title.ts",
+      "sha256": "5fa889f2e6d7e7a37de0b04fc31f8e6268e76e95c0022b27378d11744cd69f4b",
+      "candidates": 14,
+      "retained": 2
+    },
+    {
+      "file": "apps/server/src/scheduled-work-command.integration.test.ts",
+      "sha256": "d268be68533d036935df6720f7919d634cee907e28deec6063ea8fe4a6555feb",
+      "candidates": 0,
+      "retained": 0
+    },
+    {
+      "file": "apps/server/src/self-output-wake.test.ts",
+      "sha256": "49bfa149c1999862ac6320202cc9fa3bfaffcfb677390a0db6e7cbe5208dcbae",
+      "candidates": 0,
+      "retained": 0
+    },
+    {
+      "file": "apps/server/src/sentry-expected-refusals.test.ts",
+      "sha256": "a9672f625274cbc35b3ea7a17a879e24d1eeec502ca03cebb2af7eb98adcb28d",
+      "candidates": 0,
+      "retained": 0
+    },
+    {
+      "file": "apps/server/src/sentry-refusals.test.ts",
+      "sha256": "cb2df9905799e2a75c79b192595173f5c9de4233c76934f3d14a7eb66cebe87e",
+      "candidates": 0,
+      "retained": 0
+    },
+    {
+      "file": "apps/server/src/sentry-telegram.test.ts",
+      "sha256": "77a0862eba918d34996bd99c9d8117073800c35097e5c58114217e3752ba33d5",
+      "candidates": 0,
+      "retained": 0
+    },
+    {
+      "file": "apps/server/src/sentry-telegram.ts",
+      "sha256": "498ec069f13328824dfa7e4816597ef0bb13aee0e93484ee9acb91216fa5de05",
+      "candidates": 19,
+      "retained": 3
+    },
+    {
+      "file": "apps/server/src/sentry-wake-source.ts",
+      "sha256": "57356450be28089d5d121210f87de07be2548bfb11c854d12505597edc14ee9f",
+      "candidates": 11,
+      "retained": 10
+    },
+    {
+      "file": "apps/server/src/sentry-wake.test.ts",
+      "sha256": "74dc1a954107c04930259ca19aefd706c77410cea5394371241f99934b15db0c",
+      "candidates": 0,
+      "retained": 0
+    },
+    {
+      "file": "apps/server/src/sentry-wake.ts",
+      "sha256": "ff3c2ccf12dfb2072feb5f9315f0eebd85730d1f0b3788a29769ed456069de26",
+      "candidates": 40,
+      "retained": 7
+    },
+    {
+      "file": "apps/server/src/sentry.test.ts",
+      "sha256": "2caf251c09581b140274c19d0aa87407e7602d20486995a3ee665e80cc62d627",
+      "candidates": 0,
+      "retained": 0
+    },
+    {
+      "file": "apps/server/src/sentry.ts",
+      "sha256": "49c3c6d84f1d371ee27cc78a721ab2cf22c5191a2a6158ee65568100cd3508a6",
+      "candidates": 10,
+      "retained": 4
+    },
+    {
+      "file": "apps/server/src/server-2.test.ts",
+      "sha256": "0e4c87c90e4e1220bda58ba216bd3630633d38ab925decbf87573a8c72135da4",
+      "candidates": 0,
+      "retained": 0
+    },
+    {
+      "file": "apps/server/src/server-3.test.ts",
+      "sha256": "17ba7b8d74276da3389e6d7b7cc1d7c2d4f40549ac6eefb75e48b95c7ebba048",
+      "candidates": 0,
+      "retained": 0
+    },
+    {
+      "file": "apps/server/src/server-authenticated-routes.ts",
+      "sha256": "ce9e95ca6159d435d0cd439b080147c42e746a86c255d61327069b8297c393c0",
+      "candidates": 127,
+      "retained": 43
+    },
+    {
+      "file": "apps/server/src/server-configuration.ts",
+      "sha256": "69d926a077832aea87190d4f9e4780721511413254a2ea212863d0d0d0e246d6",
+      "candidates": 3,
+      "retained": 0
+    },
+    {
+      "file": "apps/server/src/server-create-beeline-server.ts",
+      "sha256": "59e91b23e08ccf04c99f1aa0a89cb2d8ec7405682e86f54dffa839df098c758e",
+      "candidates": 28,
+      "retained": 0
+    },
+    {
+      "file": "apps/server/src/server-lease-deadlines.ts",
+      "sha256": "a8f41a41a9629cf8cf5dc1890ee0bee2eb47b56c5a63b858a8ccb2ed26f9694b",
+      "candidates": 0,
+      "retained": 0
+    },
+    {
+      "file": "apps/server/src/server-live-connection.ts",
+      "sha256": "9ad0ff2e8ec8cabe199b8c44db37d1ae27978bc3362d99041b4019b04ddadcfd",
+      "candidates": 216,
+      "retained": 61
+    },
+    {
+      "file": "apps/server/src/server-request-error-status.ts",
+      "sha256": "82fe6439cbc6b97c4cb45a8d4af86422f7eff403ff68574e0683474e490d70d8",
+      "candidates": 9,
+      "retained": 5
+    },
+    {
+      "file": "apps/server/src/server-route.ts",
+      "sha256": "33dd47296b384b9969ee95e5e50aaa2f1e3964b37e45db58b58104cc84224635",
+      "candidates": 180,
+      "retained": 64
+    },
+    {
+      "file": "apps/server/src/server.test.ts",
+      "sha256": "3639501a0dd8ee443bf4ac936db2937c6b3a8c2a87c76b727663b5401e9dced1",
+      "candidates": 0,
+      "retained": 0
+    },
+    {
+      "file": "apps/server/src/server.ts",
+      "sha256": "c8eae5e08120f611a868eb498df209fedf3258db72648a3e6028f7a55a0e9694",
+      "candidates": 170,
+      "retained": 16
+    },
+    {
+      "file": "apps/server/src/service-review.test.ts",
+      "sha256": "acd72e39c877e13f2530c827b197f32672c453b76668e3e68cc916ec3501ccf5",
+      "candidates": 0,
+      "retained": 0
+    },
+    {
+      "file": "apps/server/src/service-review.ts",
+      "sha256": "87ce68b4eb3b43182d84762b666358bf8ad3be32f5a42782403aa1ed5dd61972",
+      "candidates": 21,
+      "retained": 4
+    },
+    {
+      "file": "apps/server/src/signin-attempts.ts",
+      "sha256": "1ded31123feeda6927b3801d6ef59791751f58dd41c10aa39796fc877e587ff6",
+      "candidates": 23,
+      "retained": 7
+    },
+    {
+      "file": "apps/server/src/signin-funnel.test.ts",
+      "sha256": "c0848640620006bd7b958e547e36e1e8265a35d3c91b207f0cad213149d73163",
+      "candidates": 0,
+      "retained": 0
+    },
+    {
+      "file": "apps/server/src/signin-funnel.ts",
+      "sha256": "04695544ef6f937f6e874236e7f731258e8e024bb8db385603f563d588b5a0f6",
+      "candidates": 160,
+      "retained": 23
+    },
+    {
+      "file": "apps/server/src/site-download-taps.test.ts",
+      "sha256": "777fa4459eba6ee6fee18a2e34aaafccdd27325f18ca304e6ae618fd194824cd",
+      "candidates": 0,
+      "retained": 0
+    },
+    {
+      "file": "apps/server/src/site-download-taps.ts",
+      "sha256": "1bf0e815a03a088b8203c19a51b8ecf07973d5a9c2d58523de68dbc1bef3575e",
+      "candidates": 42,
+      "retained": 0
+    },
+    {
+      "file": "apps/server/src/slow-query-workload.postgres.test.ts",
+      "sha256": "80254b4a3ec22831215eba66e0f85808da7665b601414a0cc2754c3391b0f36d",
+      "candidates": 1,
+      "retained": 1
+    },
+    {
+      "file": "apps/server/src/solo-agent-routing.test.ts",
+      "sha256": "f46a01007e6a90d8b8633220ebe7c4f202e0e7e55c2ba293d8935f029c584311",
+      "candidates": 0,
+      "retained": 0
+    },
+    {
+      "file": "apps/server/src/speech-transcription.test.ts",
+      "sha256": "05204b84f58ac428bae18716a87ab676c806887bdec8bfc4c822455bd715f2bb",
+      "candidates": 0,
+      "retained": 0
+    },
+    {
+      "file": "apps/server/src/speech-transcription.ts",
+      "sha256": "4bf35c03d370f15804cd65867754c3f29a9acdd0615fd8f2dacccaaddda928c9",
+      "candidates": 10,
+      "retained": 1
+    },
+    {
+      "file": "apps/server/src/squire-machine.postgres.test.ts",
+      "sha256": "cd0abdef754a4c0dc287c032a9fecf6592a7e5992ede9b32b33df3df8ad1a2f5",
+      "candidates": 1,
+      "retained": 1
+    },
+    {
+      "file": "apps/server/src/squire-machine.ts",
+      "sha256": "9e80b9d726017de78ecf5057cd0c1909aef32498fbd19ada54c939a43dc21c01",
+      "candidates": 91,
+      "retained": 14
+    },
+    {
+      "file": "apps/server/src/starter-banter.test.ts",
+      "sha256": "6954fcdff0bbd52f254b79cc64b4c7d65fc3cb19c2bd206c663fd788691fc569",
+      "candidates": 0,
+      "retained": 0
+    },
+    {
+      "file": "apps/server/src/starter-banter.ts",
+      "sha256": "05b0914ecffbeaf056cad81cf4de65b46800d788d0960dd65d93bf26fdcba062",
+      "candidates": 23,
+      "retained": 1
+    },
+    {
+      "file": "apps/server/src/starter-invite.ts",
+      "sha256": "e39d4d56747c28142054def3bed2bf521200144fe1b6b3b993fe589eb44bd423",
+      "candidates": 11,
+      "retained": 0
+    },
+    {
+      "file": "apps/server/src/starter-onboarding-run.ts",
+      "sha256": "0276526f078e85d17eade824eeeb8824893d64957a2fc09e56b32ac0dc88df51",
+      "candidates": 44,
+      "retained": 6
+    },
+    {
+      "file": "apps/server/src/starter-onboarding.ts",
+      "sha256": "eeb57c2a9b4b0d79c5dc1ee83d72fcde7227fafbd071f27cfb1f0d75a89a20f9",
+      "candidates": 48,
+      "retained": 4
+    },
+    {
+      "file": "apps/server/src/startup.test.ts",
+      "sha256": "dafac5846c291b54ea850739b396cc6124007fb1b2eeb9ece900d36fe1f822f3",
+      "candidates": 0,
+      "retained": 0
+    },
+    {
+      "file": "apps/server/src/startup.ts",
+      "sha256": "409438ddfbada65c764ac6bb299c9997baa04afb1e631fea1f5bb248c652419e",
+      "candidates": 15,
+      "retained": 1
+    },
+    {
+      "file": "apps/server/src/storage-registry.test.ts",
+      "sha256": "3080c840cd029356c56cab6a9c71cd06b2037164788f56689c208ee3b7b8a8ce",
+      "candidates": 0,
+      "retained": 0
+    },
+    {
+      "file": "apps/server/src/store-download-reports.ts",
+      "sha256": "705df78079dad0ca73591285d8fe7f4dc363eb19f420eaec3a43b01dc6cc654e",
+      "candidates": 53,
+      "retained": 9
+    },
+    {
+      "file": "apps/server/src/subscription-webhooks.test.ts",
+      "sha256": "f901b90aaba2afb9cd97dbd8fb6056e5b2003de1a376bb94ee37c2c5b04f5a4e",
+      "candidates": 0,
+      "retained": 0
+    },
+    {
+      "file": "apps/server/src/subscription-webhooks.ts",
+      "sha256": "91846834dec986fd89e1145533d8d6aa91d966f21100e90e8f1dc4b7b89409d4",
+      "candidates": 94,
+      "retained": 5
+    },
+    {
+      "file": "apps/server/src/system-line.producers.test.ts",
+      "sha256": "682dc0bb55fc3541409569e28bc62269d677f1a3ccff9f37e2f7a62cd1020145",
+      "candidates": 0,
+      "retained": 0
+    },
+    {
+      "file": "apps/server/src/system-line.test.ts",
+      "sha256": "bd148409d58cc5a3124811ba01ed15ea998151d997a116863d1008f77defbb3e",
+      "candidates": 0,
+      "retained": 0
+    },
+    {
+      "file": "apps/server/src/system-line.ts",
+      "sha256": "7db28c8d8d7c5f9e7d60ac3c93efb608412af51ba0e375165abdf237088ef3af",
+      "candidates": 151,
+      "retained": 14
+    },
+    {
+      "file": "apps/server/src/test-database-snapshot.test.ts",
+      "sha256": "f7ff4a48c3ac24b6cf5730b3617792ee011954f892e6a06c624ba72b648d98fa",
+      "candidates": 0,
+      "retained": 0
+    },
+    {
+      "file": "apps/server/src/test-fixtures/concurrent-writers.ts",
+      "sha256": "f02ac9a824df598c22e694191d6e600a5b1c7d9baaa341b537a1f9c78e53a368",
+      "candidates": 0,
+      "retained": 0
+    },
+    {
+      "file": "apps/server/src/test-fixtures/corner-commands.ts",
+      "sha256": "25d6dd749619a849e1690af2bdb23f239d0d3bac8184d1e6e89dc798c8c375a8",
+      "candidates": 0,
+      "retained": 0
+    },
+    {
+      "file": "apps/server/src/test-fixtures/helper-daemon.ts",
+      "sha256": "aacad4d4f960c8d61e6f86683314e34646eb8f5257c198135152e2c9b6f4d962",
+      "candidates": 0,
+      "retained": 0
+    },
+    {
+      "file": "apps/server/src/test-fixtures/owned-model.ts",
+      "sha256": "954beed53d0e5653d2288bf852d2b7a4ec2cc0fa61b7bbc03cc7019a76f0c7a5",
+      "candidates": 0,
+      "retained": 0
+    },
+    {
+      "file": "apps/server/src/test-fixtures/preceding-owned-effect.ts",
+      "sha256": "6ac88f00a4690a0f2adb69a4668b866a8b3ad0d92b2de7f6a653dc6aa324b7ab",
+      "candidates": 0,
+      "retained": 0
+    },
+    {
+      "file": "apps/server/src/test-fixtures/squire-machines.ts",
+      "sha256": "e7a64ac4a069700955749f4c80467603ca3e9f095d094f51c9de16f8f426c1c9",
+      "candidates": 0,
+      "retained": 0
+    },
+    {
+      "file": "apps/server/src/test-fixtures/test-support-monolith.ts",
+      "sha256": "54b3d7a8dd93be8b52ca91818a4c57fcd553b3d24cee408cc36ea3798654d8fe",
+      "candidates": 0,
+      "retained": 0
+    },
+    {
+      "file": "apps/server/src/test-fixtures/test-support-phone-artifact-host.ts",
+      "sha256": "d51fac434a953f20f1e99adf8ac4c9c8d966112f221a44050c811523fa2930f6",
+      "candidates": 0,
+      "retained": 0
+    },
+    {
+      "file": "apps/server/src/test-fixtures/test-support-phone-read-host.ts",
+      "sha256": "db1f538b311526dd208cfe1bbf71266954ee39660482688faed58da9b1ecd069",
+      "candidates": 0,
+      "retained": 0
+    },
+    {
+      "file": "apps/server/src/test-fixtures/test-support-router-group-b-postgres.ts",
+      "sha256": "3b6a3d72d22777570755a9fcf1468dd41904b4d16a1531185ff9b032063a18f8",
+      "candidates": 0,
+      "retained": 0
+    },
+    {
+      "file": "apps/server/src/test-fixtures/workflow-runs.ts",
+      "sha256": "34c75606930dcd2ff408aa6160472f278e762b0b664d570281a9072a20e3dd33",
+      "candidates": 0,
+      "retained": 0
+    },
+    {
+      "file": "apps/server/src/test-support-agent-command.integration.test-support.ts",
+      "sha256": "e1d7e7d5df6c3017f7d1877ad1a6c54e9c29328e7b7c6dae86dcac1acd12a157",
+      "candidates": 0,
+      "retained": 0
+    },
+    {
+      "file": "apps/server/src/test-support-app-connections.integration.test-support.ts",
+      "sha256": "1ae9f3d128c8050192d9b08df1c8b781e72e23ba88d7f1e02361da96091ea0ea",
+      "candidates": 0,
+      "retained": 0
+    },
+    {
+      "file": "apps/server/src/test-support-background.test-support.ts",
+      "sha256": "c847025b01ded56b3fe0b31dc3f85e9704e25ac86337bc49466c3dfae422986b",
+      "candidates": 0,
+      "retained": 0
+    },
+    {
+      "file": "apps/server/src/test-support-commander-recovery.integration.test-support.ts",
+      "sha256": "2c32c2635b0226ab31f2e340d42a7694d0803d2d564f85a0b58b964343d8e64d",
+      "candidates": 0,
+      "retained": 0
+    },
+    {
+      "file": "apps/server/src/test-support-commander.integration.test-support.ts",
+      "sha256": "797efbc1095c88fe1901713f0ec62bc2626d47fa799480ed084a7d572a62ecf2",
+      "candidates": 0,
+      "retained": 0
+    },
+    {
+      "file": "apps/server/src/test-support-computer-session.test-support.ts",
+      "sha256": "8017ff7ed85c1366850e79953767f38c82ba064d68de4691f67f98d9da6e1cd9",
+      "candidates": 0,
+      "retained": 0
+    },
+    {
+      "file": "apps/server/src/test-support-corner-lifecycle.test-support.ts",
+      "sha256": "fffa6852a40da0ed4d240139055f039b2829310e94e3c12761b5688a00f18774",
+      "candidates": 0,
+      "retained": 0
+    },
+    {
+      "file": "apps/server/src/test-support-corner-review-dispatch.test-support.ts",
+      "sha256": "84f41c80a6db348ee586774c187a20e33413b452b0a4f66a2e044e6c74d6729b",
+      "candidates": 0,
+      "retained": 0
+    },
+    {
+      "file": "apps/server/src/test-support-database.test-support.ts",
+      "sha256": "2d402659ab4c716ed2c735a981cba51c7d344a9f9b858672cf076a7b261aae26",
+      "candidates": 0,
+      "retained": 0
+    },
+    {
+      "file": "apps/server/src/test-support-feedback.test-support.ts",
+      "sha256": "5bbf4ab4f9dc9f515527647143779c40d455edc7152790bc6bf09fc179a86f07",
+      "candidates": 0,
+      "retained": 0
+    },
+    {
+      "file": "apps/server/src/test-support-github-operations.test-support.ts",
+      "sha256": "4d59d11ea268aca7bd027dcd4dc54bac76b4eaaec1769538be4d2d46edf59cbf",
+      "candidates": 0,
+      "retained": 0
+    },
+    {
+      "file": "apps/server/src/test-support-institutional-memory-shadow.test-support.ts",
+      "sha256": "0bee5a666d8047eac8e8c1d1356afcd8737b8183ef0fa5603a54a05cec86a5de",
+      "candidates": 0,
+      "retained": 0
+    },
+    {
+      "file": "apps/server/src/test-support-operator-dashboard.test-support.ts",
+      "sha256": "6851f0a18c11d0c534198aa1ce2d2fb9c405d26c6d4662254b05b8c09fd57c7e",
+      "candidates": 0,
+      "retained": 0
+    },
+    {
+      "file": "apps/server/src/test-support-postgres-live.test-support.ts",
+      "sha256": "2ac809e7fb101466b6622c294a0bfdaaaa36325a86bc8461a3536d0e94391837",
+      "candidates": 0,
+      "retained": 0
+    },
+    {
+      "file": "apps/server/src/test-support-pr-checks-status.test-support.ts",
+      "sha256": "6215ab8585c2243295d0e5c1a047faa45162da405080dcd1ff665a206e3b53dc",
+      "candidates": 0,
+      "retained": 0
+    },
+    {
+      "file": "apps/server/src/test-support-rooms-mcp.test-support.ts",
+      "sha256": "e775dd59f773e642c5e3ced3beb216561db8b420f73635768fe44cf4e166f4a5",
+      "candidates": 0,
+      "retained": 0
+    },
+    {
+      "file": "apps/server/src/test-support-server.test-support.ts",
+      "sha256": "ee975da9075bba74844f1be24b0d51a0017574b17230d8f02a363005c531d6a8",
+      "candidates": 0,
+      "retained": 0
+    },
+    {
+      "file": "apps/server/src/test-support-voice-room-runtime.test-support.ts",
+      "sha256": "e02d4ee54f7d89a2ed0109b1587dbada967c2477582f1a510e44013666e9aa71",
+      "candidates": 0,
+      "retained": 0
+    },
+    {
+      "file": "apps/server/src/test-support-wallet.integration.test-support.ts",
+      "sha256": "c670a08d4352571d3c0771267909657bcd9cb59ee30d08decc6bea3ccd0b4c36",
+      "candidates": 0,
+      "retained": 0
+    },
+    {
+      "file": "apps/server/src/test-support-workbench.integration.test-support.ts",
+      "sha256": "6d20541dc2c88cefa9b1102af2e065c2098fea8d2379f8c0aa6a92c487e1b95a",
+      "candidates": 0,
+      "retained": 0
+    },
+    {
+      "file": "apps/server/src/test-support.test.ts",
+      "sha256": "d504795c6bcc5885ceb7c353a4aadd6a82df97b87ab54cddfbabdc3d3c165174",
+      "candidates": 0,
+      "retained": 0
+    },
+    {
+      "file": "apps/server/src/test-support.ts",
+      "sha256": "cbc8dcbe869f62faa3851ca163355b036b96c6876a36621225a5d4e3c5329d74",
+      "candidates": 0,
+      "retained": 0
+    },
+    {
+      "file": "apps/server/src/tray-approval-ask.test.ts",
+      "sha256": "06b22765251127674941cc211c583f483afd1612c80fd6cc9401acea93807ae6",
+      "candidates": 0,
+      "retained": 0
+    },
+    {
+      "file": "apps/server/src/tray-approval-ask.ts",
+      "sha256": "d18ace79c4f0baafffdfe173f0511abaa5d75ab199d4239eabf35b07410a89e7",
+      "candidates": 21,
+      "retained": 11
+    },
+    {
+      "file": "apps/server/src/tray-decision-command.integration.test.ts",
+      "sha256": "c992c5c24addd6d9fff1660a793678387499790fb4fea189011fb4ffb9cb7615",
+      "candidates": 0,
+      "retained": 0
+    },
+    {
+      "file": "apps/server/src/tray-decision-command.postgres.test.ts",
+      "sha256": "439f9cadbeee4fa47a4ce76167abef8fe51a788c01dc77cb83368427d565da1f",
+      "candidates": 1,
+      "retained": 1
+    },
+    {
+      "file": "apps/server/src/tray-decision-command.ts",
+      "sha256": "e7a7e1537612142361fbb70230592dbb5ed50c077d97a8b91ef27b1eb7b1f77e",
+      "candidates": 46,
+      "retained": 8
+    },
+    {
+      "file": "apps/server/src/tray-projection.ts",
+      "sha256": "b48932c75c4400dd57833c4a1dfe388f1da5eb318aaaaa9f93b4b4e1ca759331",
+      "candidates": 21,
+      "retained": 7
+    },
+    {
+      "file": "apps/server/src/tray-release-migration.test.ts",
+      "sha256": "9d274e93df9ec2652d1d5e97dcb89cdc3cebef55b8511a9e5b077e7cc9083fa5",
+      "candidates": 0,
+      "retained": 0
+    },
+    {
+      "file": "apps/server/src/turn-ownership-authority.postgres.test.ts",
+      "sha256": "a60d184e44203fd3cfbe90ea8869b012252a28b1c0b0501851367ec935f0998d",
+      "candidates": 1,
+      "retained": 1
+    },
+    {
+      "file": "apps/server/src/turn-ownership-recovery.test.ts",
+      "sha256": "aab35b962b33cd5c7a48271715a5c76cf584fe2df8aec4bc2ab356753d27ec90",
+      "candidates": 0,
+      "retained": 0
+    },
+    {
+      "file": "apps/server/src/turn-ownership-socket.test.ts",
+      "sha256": "a1e5e69682936c6efb23d8c7e45ef25035634971939bc2012fa9afc1dd136820",
+      "candidates": 0,
+      "retained": 0
+    },
+    {
+      "file": "apps/server/src/turn-ownership-terminal-receipt.test.ts",
+      "sha256": "f896b5df3328037b4c698f63b0a27ca6d813baf07a0461995fb0adf42d80bc05",
+      "candidates": 0,
+      "retained": 0
+    },
+    {
+      "file": "apps/server/src/turn-ownership.postgres.test.ts",
+      "sha256": "d54468c01277b8c034a545c36b576b91ddb8c5c5045b602a776a99c3eeafdcea",
+      "candidates": 1,
+      "retained": 1
+    },
+    {
+      "file": "apps/server/src/turn-ownership.test.ts",
+      "sha256": "e55c5a157dd72af159e007a67fd65704df55e3342f04ef1b3d38db25f2dce7e4",
+      "candidates": 0,
+      "retained": 0
+    },
+    {
+      "file": "apps/server/src/turn-ownership.ts",
+      "sha256": "413d25580bcccec516bebe9b3de63d379e833c6e75ef7d54fd8bd27933ce3c3b",
+      "candidates": 59,
+      "retained": 12
+    },
+    {
+      "file": "apps/server/src/turn-replay.integration.test.ts",
+      "sha256": "bd69f06056a5f9d52d051c1b32491c1ad4f4db3c26fb698641c1575bf78502b1",
+      "candidates": 0,
+      "retained": 0
+    },
+    {
+      "file": "apps/server/src/unfinished-app-sign-ins.test.ts",
+      "sha256": "e94a82dd2afdcd1c146165124a024dfd73962cb1eb5e4cf8b435a99043ef0f49",
+      "candidates": 0,
+      "retained": 0
+    },
+    {
+      "file": "apps/server/src/unfinished-app-sign-ins.ts",
+      "sha256": "488992e9f5b61fa6d4ea4724639b40cf42533d6e2346a8547fb2d5e1260ecbaf",
+      "candidates": 4,
+      "retained": 1
+    },
+    {
+      "file": "apps/server/src/usage-account-read.ts",
+      "sha256": "d065da9098072dfb23eb75b882ff777ccb1e464b8ac9df4d0d3c808b4e291592",
+      "candidates": 7,
+      "retained": 7
+    },
+    {
+      "file": "apps/server/src/vault-save-http.ts",
+      "sha256": "108544e168426d92e6595e882a2497e041be8a344cac84c2580d40e34fa8ba31",
+      "candidates": 34,
+      "retained": 7
+    },
+    {
+      "file": "apps/server/src/vault-save-relay.ts",
+      "sha256": "009183862e8f624f8b6e7ce0064899008e89bdeb6863c027cf243fcdbe8a1abd",
+      "candidates": 27,
+      "retained": 2
+    },
+    {
+      "file": "apps/server/src/vault-save.test.ts",
+      "sha256": "874f097bc142c4e92726293cc26a88b70291f4a2f188b2bafa974f05f205aad8",
+      "candidates": 0,
+      "retained": 0
+    },
+    {
+      "file": "apps/server/src/voice-budget.postgres.test.ts",
+      "sha256": "9c25672b25f61b2b2c65f75cc643de6528bf9149af79874cda9fc8c23f20ccab",
+      "candidates": 1,
+      "retained": 1
+    },
+    {
+      "file": "apps/server/src/voice-budget.test.ts",
+      "sha256": "19ef2def0677a2c793efeec7003a461afcdda93bd9220e231be85f0dc98c4dc5",
+      "candidates": 0,
+      "retained": 0
+    },
+    {
+      "file": "apps/server/src/voice-budget.ts",
+      "sha256": "56f287c9c8afb2dbe364dff799f36a3bb5e68ffd1e4af4cc37d2be5a0bbc44ab",
+      "candidates": 99,
+      "retained": 8
+    },
+    {
+      "file": "apps/server/src/voice-context.test.ts",
+      "sha256": "299569251058433acd7a43db07aa21ecbb4a124b60348a890126116daa2762e3",
+      "candidates": 0,
+      "retained": 0
+    },
+    {
+      "file": "apps/server/src/voice-context.ts",
+      "sha256": "a6d5f7169c1ac211d8cc73112e847fed4010f5f481f69b61abbea5e82c55cdf9",
+      "candidates": 13,
+      "retained": 0
+    },
+    {
+      "file": "apps/server/src/voice-conversation.integration.test.ts",
+      "sha256": "ea40f3c6818770a7b19818a2868c59378622b4401e76564d9fa8b21ffd06b828",
+      "candidates": 0,
+      "retained": 0
+    },
+    {
+      "file": "apps/server/src/voice-eager-reply.test.ts",
+      "sha256": "2143e55a896b95aaf45e30f4643f400c5ecb0fe9d94324dca6287c1ddfb18e33",
+      "candidates": 0,
+      "retained": 0
+    },
+    {
+      "file": "apps/server/src/voice-eager-reply.ts",
+      "sha256": "2489362b3b9ad4e2bc09bc56168999d0f61c202d9e449de985eea34df53ce194",
+      "candidates": 28,
+      "retained": 0
+    },
+    {
+      "file": "apps/server/src/voice-locks.postgres.test.ts",
+      "sha256": "ed1fc8b5dedba4c537f9e161408cef0356f8f5772fc8051338d47da4655b4557",
+      "candidates": 1,
+      "retained": 1
+    },
+    {
+      "file": "apps/server/src/voice-providers.test.ts",
+      "sha256": "add24c45f27119a9012b9f26cf648954b76913d2420ab63e8382f147b14491f7",
+      "candidates": 0,
+      "retained": 0
+    },
+    {
+      "file": "apps/server/src/voice-providers.ts",
+      "sha256": "67cd3e3188ce972bef971ede53acd962f27ec712d92d8982d08a3c281ce5d779",
+      "candidates": 165,
+      "retained": 23
+    },
+    {
+      "file": "apps/server/src/voice-reply.test.ts",
+      "sha256": "a2a9f9cc222cdc3f9218a0e6ddccaa9e419d3bd8216fd5353d8abd2df111d84e",
+      "candidates": 0,
+      "retained": 0
+    },
+    {
+      "file": "apps/server/src/voice-reply.ts",
+      "sha256": "689985df90688900725f582730e07001ac29f0dd354b18fc819069d5b095af42",
+      "candidates": 6,
+      "retained": 0
+    },
+    {
+      "file": "apps/server/src/voice-request-assembler.test.ts",
+      "sha256": "15f0f510e298c4d031680cb48add43744c3a31ad27175de7cfe1cc91dfb79e5d",
+      "candidates": 0,
+      "retained": 0
+    },
+    {
+      "file": "apps/server/src/voice-request-assembler.ts",
+      "sha256": "020e72f8361a27cca460fc6532b725fb85333499a51da4fc13d2cf0cd8221056",
+      "candidates": 47,
+      "retained": 3
+    },
+    {
+      "file": "apps/server/src/voice-room-runtime-2.test.ts",
+      "sha256": "867d71460df71224de3980bb907b01d31771c545ce3306403f48ec335ef9b564",
+      "candidates": 0,
+      "retained": 0
+    },
+    {
+      "file": "apps/server/src/voice-room-runtime-3.test.ts",
+      "sha256": "c867b8f86b210feb1e12948f6512fe5d49156dcc8b254e6d82e5c09adf154aa9",
+      "candidates": 0,
+      "retained": 0
+    },
+    {
+      "file": "apps/server/src/voice-room-runtime-4.test.ts",
+      "sha256": "5196dd6d689bd0a5d2aa6a560aad1c71cd7dd9caa3c3fa5ee53e594147e2c240",
+      "candidates": 0,
+      "retained": 0
+    },
+    {
+      "file": "apps/server/src/voice-room-runtime-check-inactivity.ts",
+      "sha256": "9f9009d32f29b7a5dc94d7abeceaa9298bce68bac90556cb33b10d4defabdafa",
+      "candidates": 165,
+      "retained": 12
+    },
+    {
+      "file": "apps/server/src/voice-room-runtime-close.ts",
+      "sha256": "aaab01d3f9286c11e49e27dfe32e222ddad48695df1823a306d57a385b03ddcf",
+      "candidates": 8,
+      "retained": 2
+    },
+    {
+      "file": "apps/server/src/voice-room-runtime-refresh-speaking-speed.ts",
+      "sha256": "9f6510b22498abb5a2ed0cc72fadf4ebdb1507e720ae97d8248580f0e01ccd8f",
+      "candidates": 114,
+      "retained": 10
+    },
+    {
+      "file": "apps/server/src/voice-room-runtime.test.ts",
+      "sha256": "828f079bc655906c73fd80b87a099c1a982b82c4e5f9bd3a37d9e941d7794e2a",
+      "candidates": 0,
+      "retained": 0
+    },
+    {
+      "file": "apps/server/src/voice-room-runtime.ts",
+      "sha256": "993c50cdca5a8a275ab87616518364733da729a2f56e7075da4bd0d2e19dc432",
+      "candidates": 248,
+      "retained": 34
+    },
+    {
+      "file": "apps/server/src/voice-schema.ts",
+      "sha256": "26a5b5d015a8ecab09dd61f986abb801b3e59d410f328b33889a4d25a92a463a",
+      "candidates": 19,
+      "retained": 1
+    },
+    {
+      "file": "apps/server/src/voice-service.integration.test.ts",
+      "sha256": "2af7cf94b03f2c62aabd7897554db561cc233d2ef88b7b95406f4f11ccc4cfb7",
+      "candidates": 0,
+      "retained": 0
+    },
+    {
+      "file": "apps/server/src/voice-service.ts",
+      "sha256": "6ac9862c126efb64987b4aad8f1b8bcfdd5d72742e138f57b62f979072cd70f2",
+      "candidates": 220,
+      "retained": 22
+    },
+    {
+      "file": "apps/server/src/voice-speech-prefetch.test.ts",
+      "sha256": "01b9547a4fb94612096c1996858aaf9612142f734547defe9a21d2ac68bbd035",
+      "candidates": 0,
+      "retained": 0
+    },
+    {
+      "file": "apps/server/src/voice-speech-prefetch.ts",
+      "sha256": "540ebba78d17a7cf9d8a232ce36a6e4d1667020a4fcbb4a562a3d37363fa81ee",
+      "candidates": 11,
+      "retained": 1
+    },
+    {
+      "file": "apps/server/src/voice-speedy-eager.test.ts",
+      "sha256": "ff348a81c1ded52981906a96ee3973aa26ac59def1b734cc84ef51f9fb9f0b49",
+      "candidates": 0,
+      "retained": 0
+    },
+    {
+      "file": "apps/server/src/voice-target.test.ts",
+      "sha256": "7238dbab5df17380d34a1578ee6d74e2f3acc545a9f8d561becc96ee1087ab87",
+      "candidates": 0,
+      "retained": 0
+    },
+    {
+      "file": "apps/server/src/voice-target.ts",
+      "sha256": "98b457a5a60167dbe8adc6261575501866deb8c8018fa013be7289f3baf542d6",
+      "candidates": 40,
+      "retained": 1
+    },
+    {
+      "file": "apps/server/src/voice-tempo.test.ts",
+      "sha256": "e31545c0033cdc631a85b1a11c7ae2eb34ff1dde3ab5fabe9f05207ae6f890c8",
+      "candidates": 0,
+      "retained": 0
+    },
+    {
+      "file": "apps/server/src/voice-tempo.ts",
+      "sha256": "89fbd34acc7b04e925f991b64fb43a83beff6ab33299b0c5dbc665e833a15961",
+      "candidates": 22,
+      "retained": 1
+    },
+    {
+      "file": "apps/server/src/wake-inbox.integration.test.ts",
+      "sha256": "f491b3f152ea31d14316196cd8e9566bb3c18da11aaea4c268832e65bf569e5a",
+      "candidates": 0,
+      "retained": 0
+    },
+    {
+      "file": "apps/server/src/wallet-notices.ts",
+      "sha256": "d122509b1124eb421581618eacf16971d30dae94350f4dcc31625428f870769b",
+      "candidates": 29,
+      "retained": 12
+    },
+    {
+      "file": "apps/server/src/wallet-post-ledger-line.ts",
+      "sha256": "6d51d2d292fce48007a33aa593494d8591b12e2b378973a47f548d61691fda93",
+      "candidates": 121,
+      "retained": 17
+    },
+    {
+      "file": "apps/server/src/wallet-venues.test.ts",
+      "sha256": "1b01bac177f7d499d92ccba3f69de4ce4c395ee3d2c5cb1cc549ecb667c8a912",
+      "candidates": 0,
+      "retained": 0
+    },
+    {
+      "file": "apps/server/src/wallet-venues.ts",
+      "sha256": "41d2b8dfa43c3d7d304e542b3b44b7182dac68188cdd5695b6e8a40c38f31372",
+      "candidates": 6,
+      "retained": 0
+    },
+    {
+      "file": "apps/server/src/wallet-webhooks.test.ts",
+      "sha256": "a76d90ac6ef202a2060b818d7574ac0f5e21e7ba597f89a4f71204fc9b68691b",
+      "candidates": 0,
+      "retained": 0
+    },
+    {
+      "file": "apps/server/src/wallet-webhooks.ts",
+      "sha256": "60e42941af1391d50705d11ff2f168434131db252cf0ee187eb96da2992b92e1",
+      "candidates": 66,
+      "retained": 8
+    },
+    {
+      "file": "apps/server/src/wallet.integration-2.test.ts",
+      "sha256": "d226be52441eaa661e3e3e9349dd25537a790672bf01e04dc93d4aa3b576b00f",
+      "candidates": 0,
+      "retained": 0
+    },
+    {
+      "file": "apps/server/src/wallet.integration.test.ts",
+      "sha256": "9ed0b95e79dead33ca80da764d269eee993131282a7319c16e3db9abd188fab4",
+      "candidates": 0,
+      "retained": 0
+    },
+    {
+      "file": "apps/server/src/wallet.live.test.ts",
+      "sha256": "a0da9ef8a882bfcefa2c8bec320526d249dad5ed567b38aca6c206dccfe8c2d2",
+      "candidates": 1,
+      "retained": 1
+    },
+    {
+      "file": "apps/server/src/wallet.ts",
+      "sha256": "e1e7f485fe3086f2fa698b484f48bd24d330a4bccce71e75fe4d828baa0969c6",
+      "candidates": 120,
+      "retained": 7
+    },
+    {
+      "file": "apps/server/src/web-push.test.ts",
+      "sha256": "0414989a138476e1a4ec7911359be047f74e777559670386bbab4fa86ca7a42f",
+      "candidates": 0,
+      "retained": 0
+    },
+    {
+      "file": "apps/server/src/web-push.ts",
+      "sha256": "9e016e41b8bdc54cdcc06d6d9296d3e929e8a68441c26d931344b48013db1f07",
+      "candidates": 36,
+      "retained": 10
+    },
+    {
+      "file": "apps/server/src/welcome-retirement.test.ts",
+      "sha256": "320eac4f1c87ebb539658e5ea054a2dd728a158d0042619488c5d4e0cc3ec1d8",
+      "candidates": 0,
+      "retained": 0
+    },
+    {
+      "file": "apps/server/src/welcome-retirement.ts",
+      "sha256": "6fa830f8fd8546c783905e7d35b54098381c7edac4f98c28a1d61529e520f46b",
+      "candidates": 21,
+      "retained": 0
+    },
+    {
+      "file": "apps/server/src/welcome-video-workflow.test.ts",
+      "sha256": "e78d8ee42920e70ec89fe7a733636815de2ca6a6d10325a4cd1521268007df1c",
+      "candidates": 0,
+      "retained": 0
+    },
+    {
+      "file": "apps/server/src/welcome-video-workflow.ts",
+      "sha256": "4004355b4f9f976af07d02d7e71b421096ea9c3a0b7904c2b06fee43e10f63a3",
+      "candidates": 6,
+      "retained": 0
+    },
+    {
+      "file": "apps/server/src/work-authority-ownership.test.ts",
+      "sha256": "a44e5e4fd7f54d59de4671517f6dd0993e19ce2cdc81d315fcba237aa9d759bd",
+      "candidates": 0,
+      "retained": 0
+    },
+    {
+      "file": "apps/server/src/workbench-companies.test.ts",
+      "sha256": "0e771a2c2b652a66f1c5bf305455291028d174c2252794774bb94c643ffc6a2e",
+      "candidates": 0,
+      "retained": 0
+    },
+    {
+      "file": "apps/server/src/workbench-companies.ts",
+      "sha256": "38cb3f262605a4d63451877275448681c369245c8032b4a583474572876ce890",
+      "candidates": 194,
+      "retained": 39
+    },
+    {
+      "file": "apps/server/src/workbench.integration-2.test.ts",
+      "sha256": "785c146260208df6ef9395b38b32ef81cc247fbba086c28c2aaf0294e09a56c2",
+      "candidates": 0,
+      "retained": 0
+    },
+    {
+      "file": "apps/server/src/workbench.integration.test.ts",
+      "sha256": "d25be154bdc999a1cee289158a3fe31e45c6213e323cb6fa119c5f900ad9ab25",
+      "candidates": 0,
+      "retained": 0
+    },
+    {
+      "file": "apps/server/src/workbench.ts",
+      "sha256": "3e00484b97788062ed2a14eab79528c7298ac88a5676824a344ed6be60352b2d",
+      "candidates": 55,
+      "retained": 5
+    },
+    {
+      "file": "apps/server/src/workflow-admin.test.ts",
+      "sha256": "f46aafa1cec6387082769ab8e1132927a354382b714a3d87ff30a4aa8d340aa1",
+      "candidates": 0,
+      "retained": 0
+    },
+    {
+      "file": "apps/server/src/workflow-admin.ts",
+      "sha256": "e35e5196a750bb3beed586f343e9668a27a65985a819fd4466b949e9949aee39",
+      "candidates": 22,
+      "retained": 0
+    },
+    {
+      "file": "apps/server/src/workflow-permissions.integration.test.ts",
+      "sha256": "9f038176692cce17ed4857d8b9b51bac24b269b0ac1a83df790792ffdaf89c2d",
+      "candidates": 0,
+      "retained": 0
+    },
+    {
+      "file": "apps/server/src/workflow-run-saved-status.ts",
+      "sha256": "f05d55012ab1ebfca89a18445d1ae730770287ff814fea26a86d2ba797be7966",
+      "candidates": 3,
+      "retained": 0
+    },
+    {
+      "file": "apps/server/src/workflow-run-views.test.ts",
+      "sha256": "716f8ed774e525eec35ee6291d646e0f5af0c5d2c6402377717932cb4a449842",
+      "candidates": 0,
+      "retained": 0
+    },
+    {
+      "file": "apps/server/src/workflow-run-views.ts",
+      "sha256": "6e2152e7b9a832b2ba9bff506373a5925039a3abb31e8d62dd4fb77e16557b38",
+      "candidates": 126,
+      "retained": 8
+    },
+    {
+      "file": "apps/server/src/workflow-runs-cancel-run-timers.ts",
+      "sha256": "a81a56af2e387a8ed6fa2aeaf2b0dd06613419b0743985d6e210e5864eceb640",
+      "candidates": 119,
+      "retained": 19
+    },
+    {
+      "file": "apps/server/src/workflow-runs-repeated-result.ts",
+      "sha256": "b390510859b385f4824027d2c68a351b58ec182bc261411cd73747e357e19b0e",
+      "candidates": 136,
+      "retained": 10
+    },
+    {
+      "file": "apps/server/src/workflow-runs-start-workflow.ts",
+      "sha256": "6744b15efd085fd605159b783d3c80d150eb00a7bf43be5d6e20897d7da4258c",
+      "candidates": 97,
+      "retained": 10
+    },
+    {
+      "file": "apps/server/src/workflow-runs.authority.test.ts",
+      "sha256": "45bd7cfca30fa29a8820e68a167d8cdc801f0c39710affd19ff536d1ed431ecf",
+      "candidates": 0,
+      "retained": 0
+    },
+    {
+      "file": "apps/server/src/workflow-runs.recovery.test.ts",
+      "sha256": "cd0a484d181ecbdd48248b02c3049b72e2243d1bce6c2459216ff659cdfac2f2",
+      "candidates": 0,
+      "retained": 0
+    },
+    {
+      "file": "apps/server/src/workflow-runs.test.ts",
+      "sha256": "c6db3ba8182a2c8489faf1fea71adb525adff7f8dc49b4b721babef2a7fc928c",
+      "candidates": 0,
+      "retained": 0
+    },
+    {
+      "file": "apps/server/src/workflow-runs.ts",
+      "sha256": "7e59a5c77ff131d576963dfe9d3eeacb10e11bacd4d50601123cb0ad5eb2edd0",
+      "candidates": 137,
+      "retained": 10
+    },
+    {
+      "file": "apps/server/src/workflow-schedules.test.ts",
+      "sha256": "0de2fbbc744f5b3087acf6c0b9f182aa3814da7223ab140b4f1235968d10663c",
+      "candidates": 0,
+      "retained": 0
+    },
+    {
+      "file": "apps/server/src/workflow-step-output.ts",
+      "sha256": "603f33660ac47c0e6bd9a71e0215e72c01611449b05bd155c3a27c45ac937665",
+      "candidates": 5,
+      "retained": 0
+    },
+    {
+      "file": "apps/server/src/workflow-transition.ts",
+      "sha256": "70ab34ed1f1821d2bfab11478a2c4cd84945edfe9e5c8a8909fadadae91d0d3e",
+      "candidates": 2,
+      "retained": 0
+    },
+    {
+      "file": "apps/server/src/workspace-creation.ts",
+      "sha256": "37fcacfd4bd2c41be8653759c8656a790f026248d08b79142922d4abe0629e25",
+      "candidates": 13,
+      "retained": 0
+    },
+    {
+      "file": "apps/server/src/workspace-role-authority.test.ts",
+      "sha256": "65b5e2c978c4f55c3f4b7a4e0ee7bb0524744aea2d431104507caaac4fd575a6",
+      "candidates": 0,
+      "retained": 0
+    },
+    {
+      "file": "apps/server/src/x-ad-reports.ts",
+      "sha256": "b322d14519270535a1ac13efd79f58e35e78550ff48406054784d33be6f2880b",
+      "candidates": 48,
+      "retained": 5
+    },
+    {
+      "file": "apps/server/src/x-ad-screen.ts",
+      "sha256": "b6f86b547edf8e2ae42be912319e5291ad49b3c28f4b47128d494dd667088991",
+      "candidates": 21,
+      "retained": 1
+    },
+    {
+      "file": "apps/server/src/x-ads.test.ts",
+      "sha256": "723cc8d3067230614cfd1cc9f69296b55b3fb2505b34caf9ee3405bc6b84110e",
+      "candidates": 0,
+      "retained": 0
+    },
+    {
+      "file": "apps/server/src/x-ads.ts",
+      "sha256": "9e28b1f50d7ffa146b34514eb0a6938e1854f7f75928157ba874c2451240f4a5",
+      "candidates": 30,
+      "retained": 4
+    },
+    {
+      "file": "apps/server/src/x-site-visits.test.ts",
+      "sha256": "2ede3c22079029b26bbfd770fdd1ca27432f65f443712c34c229016a31cd68f4",
+      "candidates": 0,
+      "retained": 0
+    },
+    {
+      "file": "apps/server/src/x-site-visits.ts",
+      "sha256": "28185c8463ff6ab5c5aad244b2575ec0195f13788c16ddb85b74a2a254902686",
+      "candidates": 30,
+      "retained": 1
+    },
+    {
+      "file": "apps/server/vitest.config.ts",
+      "sha256": "6e351f75f5059dbc5ea91026985ffc852afd950db881fadae8257e43ca232703",
+      "candidates": 1,
+      "retained": 1
+    }
+  ]
+}

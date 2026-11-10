@@ -18,14 +18,6 @@
       "phase": "M4"
     },
     {
-      "id": "apps/auth/src/store.ts::import:pg",
-      "file": "apps/auth/src/store.ts",
-      "kind": "import:pg",
-      "count": 1,
-      "compatibility": "legacy-only",
-      "phase": "M4"
-    },
-    {
       "id": "apps/body/src/agent-corner-checkout.ts::fetch",
       "file": "apps/body/src/agent-corner-checkout.ts",
       "kind": "fetch",
@@ -45,14 +37,6 @@
       "id": "apps/body/src/agent-sign-in.ts::fetch",
       "file": "apps/body/src/agent-sign-in.ts",
       "kind": "fetch",
-      "count": 1,
-      "compatibility": "legacy-only",
-      "phase": "M5"
-    },
-    {
-      "id": "apps/body/src/android-emulator-lease.ts::import:node:net",
-      "file": "apps/body/src/android-emulator-lease.ts",
-      "kind": "import:node:net",
       "count": 1,
       "compatibility": "legacy-only",
       "phase": "M5"
@@ -146,18 +130,10 @@
       "phase": "M5"
     },
     {
-      "id": "apps/body/src/corner-emulator.ts::import:node:net",
-      "file": "apps/body/src/corner-emulator.ts",
-      "kind": "import:node:net",
-      "count": 1,
-      "compatibility": "legacy-only",
-      "phase": "M5"
-    },
-    {
       "id": "apps/body/src/daemon-api-client.ts::fetch",
       "file": "apps/body/src/daemon-api-client.ts",
       "kind": "fetch",
-      "count": 3,
+      "count": 2,
       "compatibility": "legacy-only",
       "phase": "M5"
     },
@@ -181,7 +157,7 @@
       "id": "apps/body/src/free-agent-vm.ts::fetch",
       "file": "apps/body/src/free-agent-vm.ts",
       "kind": "fetch",
-      "count": 3,
+      "count": 2,
       "compatibility": "legacy-only",
       "phase": "M5"
     },
@@ -189,7 +165,7 @@
       "id": "apps/body/src/free-agent-vm.ts::fetch-impl",
       "file": "apps/body/src/free-agent-vm.ts",
       "kind": "fetch-impl",
-      "count": 2,
+      "count": 1,
       "compatibility": "legacy-only",
       "phase": "M5"
     },
@@ -205,7 +181,7 @@
       "id": "apps/body/src/institutional-context.ts::fetch",
       "file": "apps/body/src/institutional-context.ts",
       "kind": "fetch",
-      "count": 2,
+      "count": 1,
       "compatibility": "legacy-only",
       "phase": "M5"
     },
@@ -234,33 +210,9 @@
       "phase": "M5"
     },
     {
-      "id": "apps/body/src/live-link.ts::import:ws",
-      "file": "apps/body/src/live-link.ts",
-      "kind": "import:ws",
-      "count": 1,
-      "compatibility": "legacy-only",
-      "phase": "M5"
-    },
-    {
       "id": "apps/body/src/machine-control.ts::import:node:net",
       "file": "apps/body/src/machine-control.ts",
       "kind": "import:node:net",
-      "count": 1,
-      "compatibility": "legacy-only",
-      "phase": "M5"
-    },
-    {
-      "id": "apps/body/src/machine-link.ts::import:ws",
-      "file": "apps/body/src/machine-link.ts",
-      "kind": "import:ws",
-      "count": 1,
-      "compatibility": "legacy-only",
-      "phase": "M5"
-    },
-    {
-      "id": "apps/body/src/machine-link.ts::websocket",
-      "file": "apps/body/src/machine-link.ts",
-      "kind": "websocket",
       "count": 1,
       "compatibility": "legacy-only",
       "phase": "M5"
@@ -558,14 +510,6 @@
       "file": "apps/mobile/sources/auth/github-auth-session.ts",
       "kind": "fetch-impl",
       "count": 2,
-      "compatibility": "legacy-only",
-      "phase": "M4"
-    },
-    {
-      "id": "apps/mobile/sources/auth/google-auth-session.ts::fetch",
-      "file": "apps/mobile/sources/auth/google-auth-session.ts",
-      "kind": "fetch",
-      "count": 1,
       "compatibility": "legacy-only",
       "phase": "M4"
     },

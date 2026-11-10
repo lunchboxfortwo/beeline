@@ -7,7 +7,7 @@
  * `OPENAI_COMPAT_*` names.
  */
 import { accessSync, constants, existsSync, readFileSync } from 'node:fs';
-import { basename, dirname, resolve } from 'node:path';
+import { basename, delimiter, dirname, resolve } from 'node:path';
 import {
   executableOnPath,
   resolveAgentCommand, installedAgentProgramEnvironment,
@@ -453,7 +453,7 @@ export const AGENT_ENV_PASSTHROUGH_PREFIXES = [
 ] as const;
 
 function isPassthroughName(name: string, extra: Set<string>): boolean {
-  if (name === 'BEELINE_FREE_AGENT_ID' || name === 'BEELINE_FREE_AGENT_MAX_TURN_SECONDS') return true;
+  if (name === 'BEELINE_FREE_AGENT_ID') return true;
   if (/^BEELINE_(BODY_|LLM_|AGENT_PRIVATE_DIR$)/.test(name)) return true;
   if (extra.has(name)) return true;
   if ((AGENT_ENV_PASSTHROUGH_NAMES as readonly string[]).includes(name)) return true;
@@ -499,6 +499,14 @@ export function buildAgentEnv(
   // Values the child always needs a defined answer for.
   agentEnv.PATH = merged.PATH ?? process.env.PATH ?? '';
   agentEnv.HOME = merged.HOME ?? process.env.HOME ?? '';
+  // Discover tools before HOME becomes the private harness overlay. Installing
+  // a client on PATH grants no emulator authority; request_grant still owns use.
+  const sdkRoots = [merged.ANDROID_HOME, merged.ANDROID_SDK_ROOT,
+    resolve(agentEnv.HOME, 'android-sdk'), resolve(agentEnv.HOME, 'Android/Sdk')];
+  const toolDirs = sdkRoots.filter((root): root is string => Boolean(root))
+    .map(root => resolve(root, 'platform-tools'))
+    .filter(dir => { try { accessSync(resolve(dir, 'adb'), constants.X_OK); return true; } catch { return false; } });
+  agentEnv.PATH = [...new Set([...agentEnv.PATH.split(delimiter), ...toolDirs])].join(delimiter);
   agentEnv.TMPDIR = merged.TMPDIR ?? process.env.TMPDIR ?? '/tmp';
   agentEnv.RUST_LOG = merged.RUST_LOG ?? 'warn';
 

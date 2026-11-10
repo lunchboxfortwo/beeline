@@ -46,15 +46,23 @@ async function request(url: string, body: unknown, headers: Record<string,string
   if(held){if(stream)throw new Error('Held MCP completion mode invalid');admitHeldMcpCompletion(url,body);}
   if(stream&&new URL(url).pathname!=='/mcp/member-stream')throw new Error('MCP member stream route unavailable');
   return fetch(url,{method:stream?'GET':'POST',headers:{'content-type':'application/json',...headers},
-    ...((stream||held)?{dispatcher:memberStreamAgent}:{}),...(!stream?{body:JSON.stringify(body)}:{}),signal:stream ?? cancellation ?? AbortSignal.timeout(60_000)});
+    ...((stream||held)?{dispatcher:memberStreamAgent}:{}),...(!stream?{body:JSON.stringify(body)}:{}),signal:stream ?? cancellation ?? undefined});
 }
-async function postJson(url: string, body: unknown, headers: Record<string, string> = {}, signal?:AbortSignal,timeoutMs=60_000,held=false): Promise<{ status: number; value: Record<string, unknown> }> {
-  const timeout=AbortSignal.timeout(Math.max(1,timeoutMs));
-  const response = await request(url,body,headers,undefined,signal?AbortSignal.any([signal,timeout]):timeout,held);
+async function postJson(url: string, body: unknown, headers: Record<string, string> = {}, signal?:AbortSignal,_timeoutMs=60_000,held=false): Promise<{ status: number; value: Record<string, unknown> }> {
+  const response = await request(url,body,headers,undefined,signal,held);
   const text = await response.text();
   let value: Record<string, unknown> = {};
   try { value = JSON.parse(text) as Record<string, unknown>; } catch { /* not JSON */ }
   return { status: response.status, value };
+}
+
+/** Adopt an already-consented member through the existing OAuth transport owner. */
+export async function attachLocalDelivery(server:string,secret:string):Promise<Tokens & {clientId:string}> {
+  const {status,value}=await postJson(`${server}/mcp/oauth/delivery-attach`,{secret});
+  if(status!==200 || typeof value.clientId!=='string' || typeof value.access_token!=='string' ||
+    typeof value.refresh_token!=='string' || typeof value.expires_in!=='number')
+    throw new Error('The local delivery handoff ended or was already used. Ask this same connected member for setup_delivery again.');
+  return value as unknown as Tokens & {clientId:string};
 }
 
 export function handoffUri(server: string): string {
@@ -129,9 +137,11 @@ async function refresh(server: string, clientId: string, refreshToken: string): 
 /**
  * A current access token for a joined session. Refresh tokens are single-use and a reused one ends the connection,
  * so every refresh happens under the state lock and is written before anyone else reads it.
+ * An expired stream rejects only its own token; a concurrent caller's newer token can be reused under the same lock.
  */
-export async function accessToken(dir: string, key: string): Promise<string> {
-  const valid = (session: JoinedSession) => session.accessToken && (session.accessExpiresAt ?? 0) > Date.now() + 60_000 ? session.accessToken : undefined;
+export async function accessToken(dir: string, key: string, expiredToken?: string): Promise<string> {
+  const valid = (session: JoinedSession) => session.accessToken && session.accessToken !== expiredToken &&
+    (session.accessExpiresAt ?? 0) > Date.now() + 60_000 ? session.accessToken : undefined;
   const current = readState(dir).sessions.find(s => s.key === key);
   if (!current) throw new Error('This session has not joined Beeline');
   const ready = valid(current);
@@ -185,11 +195,9 @@ export async function* memberStream(session: Pick<JoinedSession,'server'|'cursor
   if(session.streamCursor) url.searchParams.set('cursor',JSON.stringify(session.streamCursor));
   const controller=new AbortController(),abort=()=>controller.abort();
   signal.addEventListener('abort',abort,{once:true});if(signal.aborted)abort();
-  const handshake=setTimeout(abort,60_000);handshake.unref?.();
   let cancel:(()=>Promise<void>)|undefined;
   try{
     const response=await request(url.toString(),undefined,{authorization:`Bearer ${token}`,accept:'application/x-ndjson'},controller.signal);
-    clearTimeout(handshake);
     if(!response.ok || !response.body || !response.headers.get('content-type')?.startsWith('application/x-ndjson'))
       throw new Error(`Beeline member stream unavailable (HTTP ${response.status})`);
     opened();
@@ -206,6 +214,6 @@ export async function* memberStream(session: Pick<JoinedSession,'server'|'cursor
       }
     }
     if(buffered.trim())throw new Error('Beeline stream ended inside a delivery');
-  } finally {clearTimeout(handshake);signal.removeEventListener('abort',abort);await cancel?.().catch(()=>undefined);}
+  } finally {signal.removeEventListener('abort',abort);await cancel?.().catch(()=>undefined);}
 
 }

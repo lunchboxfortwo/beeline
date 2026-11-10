@@ -1,11 +1,10 @@
 import { committedCommandNotificationSchema } from './postgres-live.js';
 /** A notification is only a wake hint. Every wake checks the durable row again.
  * The process's existing PostgreSQL listener calls notifyCommandCompletion;
- * reconnect calls recoverCommandCompletions after LISTEN has committed. */
+ * only committed source notifications wake its subscribers. */
 export { COMMAND_COMPLETION_CHANNEL } from './postgres-live-notifications.js';
 export interface CommandCompletionKey { principal: string; operation: string; commandId: string }
 const listeners = new Map<string, Set<() => void>>();
-const families = new Map<string, Set<(key?: CommandCompletionKey) => void>>();
 const keyOf = (key: CommandCompletionKey) => JSON.stringify([key.principal, key.operation, key.commandId]);
 export function notifyCommandCompletion(payload: string | CommandCompletionKey): void {
   let key: CommandCompletionKey;
@@ -16,17 +15,6 @@ export function notifyCommandCompletion(payload: string | CommandCompletionKey):
     if (![key.principal, key.operation, key.commandId].every(value => typeof value === 'string')) return;
   } catch { return; }
   for (const listener of listeners.get(keyOf(key)) ?? []) listener();
-  for (const listener of families.get(JSON.stringify([key.principal,key.operation])) ?? []) listener(key);
-}
-export function recoverCommandCompletions(): void {
-  for (const group of listeners.values()) for (const listener of group) listener();
-  for (const group of families.values()) for (const listener of group) listener();
-}
-/** Private committed-record control evidence; not a data-read admission. */
-export function subscribeCommandCompletionFamily(principal:string,operation:string,listener:(key?:CommandCompletionKey)=>void):()=>void{
-  const id=JSON.stringify([principal,operation]);let group=families.get(id);
-  if(!group)families.set(id,group=new Set());group.add(listener);
-  return()=>{group.delete(listener);if(!group.size)families.delete(id);};
 }
 export function subscribeCommandCompletion(key: CommandCompletionKey, listener: () => void): () => void {
   const id = keyOf(key);
@@ -36,13 +24,12 @@ export function subscribeCommandCompletion(key: CommandCompletionKey, listener: 
   return () => { group.delete(listener); if (!group.size) listeners.delete(id); };
 }
 
-/** Subscribe before the initial inspection. One terminal deadline ends this
+/** Subscribe before the initial inspection. A committed event ends this
  * wait; it never schedules another observation. Dirty coalescing preserves an
  * event received while the initial inspection is in flight. */
 export async function waitForCommittedChange<T>(
   subscribe: (listener: () => void) => (() => void) | Promise<() => void>,
   read: () => Promise<T | undefined>,
-  timeoutMs: number,
   signal?: AbortSignal,
 ): Promise<T | undefined> {
   signal?.throwIfAborted();
@@ -52,14 +39,11 @@ export async function waitForCommittedChange<T>(
     const finish = (error?: unknown, result?: T) => {
       if (settled) return;
       settled = true;
-      clearTimeout(timer);
       signal?.removeEventListener('abort', abort);
       unsubscribe?.();
       if (error !== undefined) reject(error); else resolve(result);
     };
     const abort = () => finish(signal?.reason ?? new Error('aborted'));
-    const timer = setTimeout(() => finish(), Math.max(0, timeoutMs));
-    timer.unref?.();
     const inspect = async () => {
       dirty = true;
       if (reading || settled) return;
@@ -96,10 +80,12 @@ BEGIN
        IS NOT DISTINCT FROM (previous->'status',previous->'sign_in',previous->'status_error') THEN RETURN NULL; END IF;
    command_key := jsonb_build_object('principal','connector','operation','status','commandId',item->>'id');
  ELSIF TG_TABLE_NAME='agents' THEN
-   IF TG_OP='UPDATE' AND (item->'squire_work',item->'squire_report')
-       IS NOT DISTINCT FROM (previous->'squire_work',previous->'squire_report') THEN RETURN NULL; END IF;
+   IF TG_OP='UPDATE' AND item->'squire_work' IS NOT DISTINCT FROM previous->'squire_work' THEN RETURN NULL; END IF;
    command_key := jsonb_build_object('principal','connector','operation','machine',
      'commandId',(item->>'owner_id') || ':' || COALESCE(item->>'machine_id',item->>'agent_id'));
+ ELSIF TG_TABLE_NAME='squire_machines' THEN
+   command_key := jsonb_build_object('principal','connector','operation','machine',
+     'commandId',(item->>'owner_id') || ':' || (item->>'machine_id'));
  ELSIF TG_TABLE_NAME='rooms_mcp_idempotency' THEN
    IF TG_OP='UPDATE' AND (item->'message_id',item->'result')
        IS NOT DISTINCT FROM (previous->'message_id',previous->'result') THEN RETURN NULL; END IF;
@@ -114,6 +100,9 @@ CREATE TRIGGER beeline_connector_completion AFTER INSERT OR UPDATE OR DELETE ON 
  FOR EACH ROW EXECUTE FUNCTION beeline_completion_changed();
 DROP TRIGGER IF EXISTS beeline_squire_completion ON agents;
 CREATE TRIGGER beeline_squire_completion AFTER INSERT OR UPDATE OR DELETE ON agents
+ FOR EACH ROW EXECUTE FUNCTION beeline_completion_changed();
+DROP TRIGGER IF EXISTS beeline_machine_squire_completion ON squire_machines;
+CREATE TRIGGER beeline_machine_squire_completion AFTER INSERT OR UPDATE OR DELETE ON squire_machines
  FOR EACH ROW EXECUTE FUNCTION beeline_completion_changed();
 DROP TRIGGER IF EXISTS beeline_mcp_send_completion ON rooms_mcp_idempotency;
 CREATE TRIGGER beeline_mcp_send_completion AFTER INSERT OR UPDATE OR DELETE ON rooms_mcp_idempotency

@@ -729,11 +729,17 @@ describe('the full-screen artifact viewer (mock 1c)', () => {
     expect(webview.props.javaScriptEnabled).toBe(false);
   });
 
-  it('a failed fetch is a spoken state, never a blank screen', async () => {
-    mocks.fetchArtifactBytes.mockRejectedValue(new Error('404'));
-    const renderer = render(
-      <ArtifactViewerScreen attachment={attachment()} onClose={mocks.onClose} />,
-    );
+  it('a failed socket fetch leaves recovery to the app banner without local error copy', async () => {
+    mocks.fetchArtifactBytes.mockRejectedValue(Object.assign(new Error('socket closed'), { socketRequest: true }));
+    const renderer = render(<ArtifactViewerScreen attachment={attachment()} onClose={mocks.onClose} />);
+    await flush();
+    expect(renderer.root.findAllByProps({ testID: 'artifact-viewer-failed' })).toHaveLength(0);
+    expect(renderer.root.findAllByProps({ testID: 'artifact-viewer-loading' }).length).toBeGreaterThan(0);
+  });
+
+  it('a refused file read retains its human access explanation', async () => {
+    mocks.fetchArtifactBytes.mockRejectedValue(Object.assign(new Error('This file belongs to another member.'), { status: 403 }));
+    const renderer = render(<ArtifactViewerScreen attachment={attachment()} onClose={mocks.onClose} />);
     await flush();
     expect(renderer.root.findByProps({ testID: 'artifact-viewer-failed' })).toBeDefined();
   });

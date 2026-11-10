@@ -5,7 +5,7 @@ import { desktopColumnWidths } from '@/buzz/desktop-layout-tokens';
 import { useIsDesktop as useDesktopPageLayout } from '@/utils/responsive';
 import { useLatencyRouteFrame } from '@/buzz/latency-route-hook';
 import React, { useCallback, useEffect, useRef, useState } from 'react';
-import { ActivityIndicator, AppState, Text, View } from 'react-native';
+import { ActivityIndicator, AppState, Platform, Text, View } from 'react-native';
 import { StyleSheet, useUnistyles } from 'react-native-unistyles';
 import * as WebBrowser from 'expo-web-browser';
 import { router, useLocalSearchParams, type Href } from 'expo-router';
@@ -73,10 +73,6 @@ function ConnectorSignInOverlay() {
   const [pageLoaded, setPageLoaded] = useState(false);
   const [attempt, setAttempt] = useState(0);
   const [fallback, setFallback] = useState(false);
-  // Quick-tunnel names can lag DNS: a load that fails at once usually works a
-  // few seconds later, so the page reloads itself before saying it failed.
-  const [autoReloads, setAutoReloads] = useState(0);
-  const [loadRound, setLoadRound] = useState(0);
   const { theme } = useUnistyles();
   const insets = useSafeAreaInsets();
   const desktopPageLayout = useDesktopPageLayout();
@@ -84,49 +80,29 @@ function ConnectorSignInOverlay() {
 
   const observed = useInstallObserver(workspaceId, connectorId);
   const squire = connectorId.startsWith('squire:') || connectorName === 'Trusty Squire';
+  const external = signIn.method === 'oauth' || Platform.OS === 'web';
   // A finished Squire sign-in lands on the Trusty Squire page, where the row now reads signed in.
   const finish = useCallback(() => router.replace(roomId ? (connectorOfferCompletionRoute(roomId) as Href )
           : squire ? ({ pathname: '/beeline/settings/workbench/service', params: { workspaceId, viewerId, service: 'trusty-squire' } } as Href)
             : ({ pathname: '/beeline/settings/workbench', params: { workspaceId, viewerId } } as Href),
       ), [roomId, squire, viewerId, workspaceId],
   );
-  // The page has 15 seconds to load, reloads included, then says so in full.
-  useEffect(() => {
-    if (pageLoaded || fallback || signIn.method === 'oauth') return;
-    const timer = setTimeout(() => setPageError(PAGE_LOAD_ERROR), PAGE_LOAD_TIMEOUT_MS);
-    return () => clearTimeout(timer);
-  }, [signIn.url, signIn.method, pageLoaded, fallback, loadRound]);
-  // A stalled helper completion also ends visibly after the browser loads.
-  useEffect(() => {
-    const timer = setTimeout(() => setPageError('Sign-in has not finished. Try again.'), 120_000);
-    return () => clearTimeout(timer);
-  }, [signIn.url, loadRound]);
   // Android reports a failed load as finished too; only a clean finish counts.
   const loadFailed = useRef(false);
-  const reloadTimer = useRef<ReturnType<typeof setTimeout> | undefined>(undefined);
-  useEffect(() => () => clearTimeout(reloadTimer.current), []);
   const pageFailed = useCallback(() => {
-    if (loadFailed.current) return;
-    // The finish event can arrive before the error that caused it.
     loadFailed.current = true;
     setPageLoaded(false);
-    if (autoReloads >= PAGE_AUTO_RELOADS) return;
-    reloadTimer.current = setTimeout(() => {
-      loadFailed.current = false;
-      setAutoReloads(value => value + 1); setAttempt(value => value + 1);
-    }, PAGE_RELOAD_DELAY_MS);
-  }, [autoReloads]);
+    setPageError(PAGE_LOAD_ERROR);
+  }, []);
   const retry = useCallback(async () => {
-    clearTimeout(reloadTimer.current);
     loadFailed.current = false;
     setFallback(false);
-    setAutoReloads(0);
-    setLoadRound(value => value + 1);
     setPageLoaded(false);
     setAttempt(value => value + 1);
     setPageError(null);
     try {
       if (observed.data?.steps.some(step => step.status === 'failed')) {
+        setSignIn(current => ({ ...current, url: '' }));
         const offerId = first(params.offerId);
         if (offerId) await monolithPhoneOperation('acceptConnectorOffer', { offerId });
         else if (connectorId.startsWith('squire:')) await getWorkbenchSource().pairConnector({
@@ -140,15 +116,15 @@ function ConnectorSignInOverlay() {
     if (!state) return;
     if (state.connected) { finish(); return; }
     if (state.signIn) setSignIn(current => current.url === state.signIn!.url ? current : { url: state.signIn!.url, method: state.signIn!.method });
-    else if (state.steps?.some(step => step.status === 'failed')) setPageError(`Google sign-in could not start on ${machineName}. Go back and connect it again.`);
+    else if (state.steps?.some(step => step.status === 'failed')) {
+      setSignIn(current => ({ ...current, url: '' }));
+      setPageError(state.steps.find(step => step.status === 'failed')?.reason
+        ?? `Sign-in could not start on ${machineName}. Try again.`);
+    }
   }, [observed.data, finish, machineName]);
 
   const openBrowser = useCallback(async () => {
     if (!signIn.url) return;
-    // Every browser attempt owns a fresh completion deadline, including retries
-    // after the previous deadline has already fired.
-    clearTimeout(reloadTimer.current);
-    setLoadRound(value => value + 1);
     setPageError(null);
     setFallback(true);
     try {
@@ -164,12 +140,12 @@ function ConnectorSignInOverlay() {
     return () => subscription.remove();
   }, [fallback, observed.retry]);
 
-  const failure = observed.error ?? pageError;
+  const failure = observed.error || pageError;
   const errorLine = failure === PAGE_LOAD_ERROR
     ? `${machineName}’s browser didn’t answer within 15 seconds. Try again, or finish sign-in in your phone’s browser.`
     : failure;
-  const streamed = signIn.method !== 'oauth';
-  const loading = streamed && !failure && !fallback && !pageLoaded;
+  const streamed = !external;
+  const loading = !failure && !fallback && (!signIn.url || (streamed && !pageLoaded));
   return (
     <View style={[styles.screen, { paddingTop: insets.top }]} testID="signin-overlay">
       <View style={[styles.column, desktopPageLayout && { width: '100%', maxWidth: desktopColumnWidths.detail, alignSelf: 'center' }]} testID="signin-card">
@@ -181,7 +157,7 @@ function ConnectorSignInOverlay() {
               {React.createElement(WebView, { key: `${signIn.url}:${attempt}`, onLoad: () => { if (!loadFailed.current) setPageLoaded(true); }, onError: pageFailed, onHttpError: pageFailed, renderError: () => null, source: { uri: signIn.url }, style: styles.webView, javaScriptEnabled: true, domStorageEnabled: true, testID: 'signin-webview' })}
             </View>
           ) : null}
-          {!streamed && !failure ? (
+          {!streamed && !failure && signIn.url ? (
             <View style={styles.center} testID="signin-oauth-browser">
               <Text style={styles.centerLine}>{connectorName} sign-in opens in your browser. Return here after granting access.</Text>
               <Button label={`Continue with ${connectorName}`} destination="external" onPress={() => void openBrowser()} testID="signin-open-external" />
@@ -223,9 +199,6 @@ function ConnectorSignInOverlay() {
 }
 
 /** A page that fails while its name is new reloads itself inside the 15 seconds. */
-const PAGE_AUTO_RELOADS = 2;
-const PAGE_RELOAD_DELAY_MS = 5_000;
-const PAGE_LOAD_TIMEOUT_MS = 15_000;
 const PAGE_LOAD_ERROR = 'The sign-in page did not load.';
 
 const styles = StyleSheet.create(theme => ({

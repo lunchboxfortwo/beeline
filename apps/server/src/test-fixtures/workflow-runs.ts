@@ -6,20 +6,9 @@ import type { QueryResultRow } from 'pg';
 import { type QueryResult, type SqlDatabase } from '../database.js';
 import { PgliteDatabase } from '../test-support.js';
 import { createAgentCommand, type CommandRow } from '../agent-command.js';
-import { AgentScheduleLoop } from '../agent-schedules.js';
 import { handoff, getWorkflowRun, saveWorkflow, settleWorkflowGate, startWorkflow } from '../workflow-runs.js';
 
-/**
- * Records every SQL statement issued through this wrapper, in order,
- * including inside nested `transaction()` calls (PGlite's own transaction
- * primitive serializes fully on its single embedded connection, so it never
- * surfaces a `BEGIN` through the `SqlDatabase.query()` interface handoff()
- * writes against — only the statements the application code itself issues
- * are recorded here). This is how P0-1's fix is proven: not by reproducing
- * genuine concurrent Postgres connections (PGlite architecturally cannot —
- * see the concurrency describe block below), but by asserting the run lock
- * is the first thing handoff() does, before it ever reads the run's state.
- */
+/** SQL recording for ordering assertions; real backend races live in advisory-lock-replacements.postgres.test.ts. */
 type RecordedCall = { sql: string; values?: unknown[] };
 
 export class RecordingDatabase implements SqlDatabase {
@@ -375,15 +364,7 @@ export async function runCards(runId: string): Promise<Array<{ id: string; autho
   ).rows;
 }
 
-/** Make the run's timer of this kind due now and run one scheduler pass. */
-export async function fireTimer(runId: string, timer: 'step' | 'deadline'): Promise<number> {
-  await database.query(
-    `UPDATE agent_schedules SET next_run_at=now()-interval '1 minute'
-     WHERE workflow_run->>'runId'=$1 AND workflow_run->>'timer'=$2`,
-    [runId, timer],
-  );
-  return new AgentScheduleLoop(database).runOnce();
-}
+
 
 export async function addAgent(id: string, online = true): Promise<void> {
   await database.query(`INSERT INTO agents(agent_id,owner_id,selected_model) VALUES($1,$2,'opus-4-5') ON CONFLICT DO NOTHING`, [id, OWNER]);

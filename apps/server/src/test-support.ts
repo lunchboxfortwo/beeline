@@ -85,21 +85,22 @@ export class PgliteDatabase implements SqlDatabase {
 }
 
 // A migrated schema, copied into each new test database. Vitest's global setup
-// migrates once per run (scripts/test-database-setup.ts); without it, or while
-// a coverage map is recorded, the first call in each file migrates, so the map
-// still sees every test run migrate().
+// migrates once per run (scripts/test-database-setup.ts). Coverage records for
+// consumers include the template's migration dependencies. Outside Vitest,
+// the first call migrates locally instead.
 let migratedSnapshot: Promise<Blob> | undefined;
 const sharedSnapshotKey = Symbol.for('beeline.server-test-database-snapshot');
 
 declare module 'vitest' {
   export interface ProvidedContext {
     serverTestDatabaseSnapshot?: string;
+    serverTestDatabaseSnapshotCoverage?: string;
   }
 }
 
 async function loadMigratedSnapshot(): Promise<Blob> {
   // Proof scripts also import this file outside Vitest.
-  const shared = process.env.VITEST && !process.env.SERVER_COVERAGE_MAP_DIR
+  const shared = process.env.VITEST
     ? (await import('vitest')).inject('serverTestDatabaseSnapshot') : undefined;
   if (shared) {
     // An immutable template can survive Vitest's per-file module resets.
@@ -239,8 +240,8 @@ export function describedWorkflow(value: unknown): unknown {
 
 
 /**
- * Records a corner run state as its newest handoff card, the way
- * `corner-lifecycle.ts` writes one; the card is the run state (`corner-run.ts`).
+ * Seeds an inert historical lifecycle card for compatibility fixtures.
+ * Current state belongs to `corner-lifecycle.ts`; this does not transition it.
  */
 export async function recordCornerRun(
   db: SqlDatabase, cornerId: string, toState: string, outcome?: string,
@@ -263,8 +264,8 @@ export async function recordCornerRun(
  * code now derives them. An owner with a commissioner is an opening order. An
  * owner alone becomes the corner's creator, or a person's first tag when the
  * corner already has a creator: either names it the worker without making the
- * corner agent-opened. A different worker is a later tag; the run state is a
- * handoff card. Objectives live on briefs and opening orders (`writeCornerObjective`).
+ * corner agent-opened. A different worker is a later tag; workflowState seeds a
+ * historical card. Objectives live on briefs and opening orders (`writeCornerObjective`).
  */
 export async function insertCornerFacts(db: SqlDatabase, input: {
   cornerId: string;

@@ -99,7 +99,7 @@ export default function Subscription() {
           testID="subscription-stop-error"
         />
       ) : error ? (
-        <SettingsRow title={error} action="Retry" onPress={retry}
+        <SettingsRow title={error}
           />
       ) : null}
       {loading && !work ? (

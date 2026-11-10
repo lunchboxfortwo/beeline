@@ -47,6 +47,7 @@ interface AgentBehavior {
 }
 
 interface SessionAgentBehavior {
+  joinDelivery?: 'local'|'on_demand';
   delivery?: 'socket' | 'queue';
   processNames?: readonly string[];
   clientNames?: readonly string[];
@@ -86,14 +87,14 @@ export const AGENT_BEHAVIORS: Readonly<Record<AgentKind, AgentBehavior>> = {
     label: 'Codex', cliSignIn: 'codex', roomTomlDefaults: true, codexCacheBindings: true, fastMode: true,
     quotaCredential: { homeEnv: 'CODEX_HOME', directory: '.codex', file: 'auth.json' },
     importedMcp: { format: 'toml', source: '.codex/config.toml', homeEnv: 'CODEX_HOME', file: 'config.toml' },
-    session: { delivery: 'queue', processNames: ['codex', 'codex-tui'], clientNames: ['codex'],
+    session: { joinDelivery:'local', delivery: 'queue', processNames: ['codex', 'codex-tui'], clientNames: ['codex'],
       hookOutput: { start: 'SessionStart', prompt: 'UserPromptSubmit', tool: 'PostToolUse', stop: 'block' } },
   },
   claude: {
     label: 'Claude', sharedLoginWriteBack: true,
     quotaCredential: { homeEnv: 'CLAUDE_CONFIG_DIR', directory: '.claude', file: '.credentials.json' },
     importedMcp: { format: 'json', source: '.claude.json', homeEnv: 'CLAUDE_CONFIG_DIR', file: '.claude.json' },
-    session: { delivery: 'socket', processNames: ['claude'], clientNames: ['claude-code', 'claude code'], clientExactNames: ['claude'],
+    session: { joinDelivery:'local', delivery: 'socket', processNames: ['claude'], clientNames: ['claude-code', 'claude code'], clientExactNames: ['claude'],
       hookOutput: { start: 'SessionStart', prompt: 'UserPromptSubmit', stop: 'block' } },
   },
   goose: {
@@ -107,6 +108,7 @@ export const AGENT_BEHAVIORS: Readonly<Record<AgentKind, AgentBehavior>> = {
     session: { processNames: ['pi'], clientPrefix: 'pi', mailEvents: ['poll', 'post-tool-use'], pollText: true },
   },
   grok: {
+    session: {joinDelivery:'on_demand',processNames:['grok'],clientExactNames:['grok','grok cli','grok build']},
     label: 'Grok', cliSignIn: 'grok', modelLaunch: 'native-args',
     importedMcp: { format: 'toml', source: '.grok/config.toml', homeEnv: 'GROK_HOME', file: 'config.toml' },
   },
@@ -128,9 +130,10 @@ export const IMPORTED_MCP_KINDS: readonly AgentKind[] = ['codex', 'grok', 'claud
 export const SESSION_AGENT_BEHAVIORS = {
   'claude-code': AGENT_BEHAVIORS.claude.session!,
   codex: AGENT_BEHAVIORS.codex.session!,
+  grok: AGENT_BEHAVIORS.grok.session!,
   opencode: AGENT_BEHAVIORS.opencode.session!,
   pi: AGENT_BEHAVIORS.pi.session!,
-  antigravity: { processNames: ['antigravity', 'agy'], clientNames: ['antigravity'],
+  antigravity: { joinDelivery:'local', processNames: ['antigravity', 'agy'], clientNames: ['antigravity'],
     mailEvents: ['session-start', 'user-prompt-submit', 'stop'], hookOutput: { start: 'inject', prompt: 'inject', stop: 'continue' } },
   gemini: { processNames: ['gemini'], clientNames: ['gemini'],
     hookOutput: { start: 'SessionStart', prompt: 'BeforeAgent', tool: 'AfterTool', stop: 'deny' } },
@@ -138,7 +141,7 @@ export const SESSION_AGENT_BEHAVIORS = {
   zcode: { processNames: ['zcode'], clientPrefix: 'zcode', mailEvents: ['poll'], pollText: true },
 } satisfies Record<AgentId, SessionAgentBehavior>;
 
-export const SESSION_CLIENT_ORDER = ['claude-code', 'codex', 'antigravity', 'gemini', 'opencode', 'pi', 'hermes', 'zcode'] as const;
+export const SESSION_CLIENT_ORDER = ['claude-code', 'codex', 'antigravity', 'gemini', 'opencode', 'pi', 'hermes', 'zcode', 'grok'] as const;
 
 export function sessionAgentBehavior(agent: keyof typeof SESSION_AGENT_BEHAVIORS | undefined): SessionAgentBehavior {
   return agent ? SESSION_AGENT_BEHAVIORS[agent] : {};
@@ -317,6 +320,11 @@ const execFileAsync = promisify(execFile);
 
 /** Older user CLIs can reject flags required by the latest adapter. */
 export async function explainAgentProgramFailure(error: unknown, env: NodeJS.ProcessEnv): Promise<unknown> {
+  const missingCodexPackage = /(?:Cannot find module|Missing optional dependency)[^\n]*?(@(?:openai|zed-industries)\/codex[^\s'"`]*)/i.exec(String(error));
+  if (missingCodexPackage) return new Error(
+    `Codex could not start: missing platform package ${missingCodexPackage[1]}. Reinstall the package that owns this executable with npm optional dependencies enabled (--include=optional), then retry. ${String(error)}`,
+    { cause: error },
+  );
   if (!env.CLAUDE_CODE_EXECUTABLE || !/unknown option|unrecognized (?:option|argument)|unsupported.*version|requires.*version/i.test(String(error))) return error;
   const version = await execFileAsync(env.CLAUDE_CODE_EXECUTABLE, ['--version'], { env, timeout: 3000, maxBuffer: 4096 })
     .then(result => result.stdout.trim().replace(/\s+/g, ' ').slice(0, 80)).catch(() => 'version unavailable');

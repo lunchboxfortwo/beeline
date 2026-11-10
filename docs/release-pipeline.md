@@ -1,41 +1,145 @@
 # Production release pipeline
 
 `Unified production release` is the only workflow that releases current
-`main`. It is manually dispatched; merges do not trigger a production release.
+`main` to `next`, or promotes its last successful `next` release to `latest`. It is manually dispatched; merging to main starts no workflow.
 
-## Release policy (consent gates)
+## Release tests and PR selection
 
-- **OTA is the default delivery.** A routine release promotes mobile OTA
-  updates only. It never publishes to the App Store or Play Store and never
-  requires the emulator device proof.
-- **Store publishing is explicit and consent-gated.** `store_track` stays
-  `none` unless the project owner explicitly dispatches with a track
-  (`production`, or `beta` only by the owner's explicit choice). Every release
-  that builds a new Android binary publishes it
-  to Play production as `completed` and sends the build for review automatically,
-  including explicit native recovery selection with `store_track=none`; an
-  explicit `store_track=beta` sends that release to Play beta instead. A
-  runtime-pin change does not change
-  this: the release still finishes, the OTA goes to every runtime live in the
-  stores today, and the new runtime waits for a store release the owner
-  chooses. Planning prints a notice; it never fails and never adds a store leg.
-- **iOS production includes App Review.** After Apple confirms the exact uploaded
-  build is VALID, `store_track=production` attaches it to the matching App Store
-  version, sets release notes from the committed store metadata, and submits it
-  for review with automatic release after approval. Apple API or
-  submission-state errors fail the native job;
-  successful evidence includes the review submission ID. See the
-  [store runbook](../apps/mobile/docs/store-submission.md) for retry constraints.
-- **The device proof is opt-in.** Request the existing rig's Play-reviewer OTA launch check with `inputs: { run_release_proof: true }`; default `false` adds no device wait.
-  The lane stages the candidate on beta, uses an existing `beta-apk` for a live
-  Android store runtime (never a native build from the candidate), signs in
-  through `BEELINE_REVIEW_SECRET` into Beeline Review, and verifies the candidate
-  source SHA plus a cold start to its Room list with no native crash or JS fatal.
-  The device step has a five-minute ceiling including lock wait and download;
-  missing rig, reviewer secret, matching prebuilt beta APK, or candidate evidence
-  fails closed. Only OTA promotion waits for this lane; server/helper proceed
-  independently. It checks Android; the fast static native-import gate covers
-  both platforms. An OTA promoted without the optional proof is recorded UNPROVEN.
+A PR runs the tests selected for its affected modules and every correctness
+check formerly reserved for main. `TYPECHECK`, `SHARED PACKAGE TESTS` and the
+other existing check names stay unchanged. `SERVER COVERAGE MAP` now runs on
+PRs and checks the source-reader scan against the newest usable map. There
+are no push-to-main jobs, including server-image prebuilds or main-failure
+reporting. The prebuild workflow remains available by manual dispatch.
+
+Before any delivery leg, `release_checks` calls the reusable Checks workflow
+with `suite=all` and the immutable release SHA. Every checkout uses that SHA,
+including latest promotion at an older rc commit. No PR subset is applied:
+all eight server shards, all eight integration batches, the existing
+`identity-live.e2e.test.ts`, PostgreSQL seams and every other Checks suite run
+through their existing owners. No e2e suite or second invocation is added.
+Server wall-clock tests run in the shards on release and in the hosted replay
+job on PRs, so the replay job does not repeat them during release.
+
+`RELEASE TESTS` waits for the complete Checks verdict, merges the coverage
+records from those same server/corpus/PostgreSQL executions, runs `build-map`
+and `check-map`, and publishes `server-coverage-map` with the tested release
+commit and GitHub run ID. Every delivery leg requires this gate to succeed,
+including no-op attempts and optional device/store legs. A failed gate records
+`release-tests` as the release failure class and prevents release publication.
+Validation time is included in the existing release duration measurements;
+there is no new timer or elapsed-time gate.
+
+On failure, the gate prints failing test names and files from completed job
+logs, then lists commits since the previous release that touched files those
+tests executed or read according to the coverage records. These are likely
+culprits, not a causal verdict. Missing coverage, logs or a previous release
+SHA are called out; unmapped tests can only be attributed by their own file.
+There is no automatic bisect, retry or second test run.
+
+PRs read the newest usable release map, not the workflow dispatch head.
+They diff from its embedded commit, so intervening merges are included.
+Existing age/ancestry/distance limits still fall back to full suites when the
+map cannot safely describe the PR. The manual coverage-map recovery suite
+and existing nightly suites remain available; their schedules and policies
+are unchanged. This workflow change requires no required-check renames.
+
+Offline validation (no dispatch or delivery):
+
+```sh
+node --test --test-concurrency=1 scripts/ci-release-contract.test.mjs scripts/server-test-selection.test.mjs scripts/coverage-map-artifact.test.mjs scripts/release-test-report.test.mjs
+npm run lint:workflows
+```
+
+## Next and latest
+
+The workflow has one channel selector: `channel=next` (default) or
+`channel=latest`. Routine and authorized recurring releases use `next`.
+`next` and `latest` are the only release channel names. Next versions are
+release candidates, for example `0.1.184-rc.3`; latest promotion publishes
+`0.1.184` from that candidate's commit. GitHub tags and release records retain
+the `v` prefix (`v0.1.184-rc.3` / `v0.1.184`); npm versions omit it.
+`scripts/release-record.mjs` increments the rc counter within the next unreleased
+final version. Draft attempts reserve counters; rerunning the same attempt
+reuses its identity. A reserved final draft is also skipped for new source,
+since its npm version may already be published. After final publication, next
+starts the following patch at `rc.1`. Numeric prerelease identifiers put `rc.10` after `rc.9` and every rc
+before its final version.
+Only an explicit workspace owner command promotes the current successful
+`next` release to `latest`; merges never publish either channel. Both modes use the
+existing workflow and concurrency group. The scheduled 2 a.m. run is still
+called the nightly release and targets `next`. No release, store build,
+promotion, or schedule change runs merely by installing this implementation.
+
+| Component | Next | Latest promotion |
+| --- | --- | --- |
+| Server | Deploy the shared production server; preserve compatibility with the previous app | Carry the already deployed server |
+| Phone OTA | Publish an immutable `release-<version>` branch and point `next` at it | Rebuild at the rc commit with the final version; publish a final branch and point `production` at it |
+| Android native | Only explicit `store_track=beta`; same app id/signing, build-time `next-ci` profile with `next` OTA channel | Only explicit `store_track=production`; production OTA channel |
+| iOS native | No build | Only explicit `store_track=production` |
+| Helpers | Build/stamp rc bundles, publish `/dl/next/manifest.json`; leave latest untouched | Rebuild/stamp final bundles at the rc commit; publish `/dl/manifest.json` |
+| Desktop and website | Carry latest | Build from the promoted `next` commit |
+
+A `next` GitHub release is a prerelease (`--latest=false`). Promotion creates
+its own final GitHub release at the rc's SHA and marks that release latest;
+the rc remains a prerelease. npm publishes the rc with `--tag next` and the
+final with the default latest tag through the existing tokenless OIDC path.
+Promotion never republishes an npm version or moves a dist-tag; no npm token
+is needed. Versioned outputs are rebuilt/stamped from the promoted commit,
+including helper archives, npm, phone OTA, desktop and website.
+A promotion refuses a different `release_sha` or a `release_version` other
+than the rc's final version. Promotion requires the dotted rc format; plain
+versions from the old next scheme cannot be promoted.
+
+A `next` release prepares OTA bundles for both platforms. Only Android beta
+binaries subscribe to `next`; iOS and production Android binaries remain on
+`production` until latest promotion publishes the final bundles. Both builds
+use the same native fingerprint and runtime policy. The optional existing
+device proof still uses its separate `beta` channel and never moves production
+before it succeeds. It adds no wait unless explicitly requested.
+Android OTA targeting includes published Play beta runtimes alongside
+production runtimes, including when the beta runtime is newer than production.
+Production OTA rollback reads latest, while server rollback reads the newest
+published release because the server is shared.
+
+Store publishing remains explicit (`store_track=none` by default). The `next` channel
+rejects production store submissions and native recovery without `beta`;
+latest rejects the beta track. Runtime-pin changes alone never add a native
+build. Play listing uploads remain locked unless explicitly commanded by the
+owner. iOS production submits the verified build to App Review with automatic
+release after approval, through the existing store submission path.
+
+The Android job injects `next-ci` (`extends: production-ci`, `channel:
+next`) into its temporary EAS build workspace immediately before building.
+Committed `eas.json`, app config, plugins, native files, fingerprint policy and
+runtime pins remain identical to main. No profile environment override is used.
+Pinned `eas-cli 22.2.0` maps the selected build profile channel to the Android
+job's `updates.channel`; pinned `@expo/build-tools 22.0.0` writes that channel
+to the generated Android manifest's `expo-channel-name` header, replacing the
+production header only in the build workspace. The installed `expo-updates 55.0.26` also supports the
+header-only runtime override without an anti-bricking flag, but this workflow
+uses build-time selection and needs no app setting.
+
+One-time rollout after merge (firstmate, on the owner's command): dispatch
+`channel=next, store_track=beta` to replace the Play private beta binary with
+the same application id and next OTA subscription; update the authorized
+2 a.m. nightly release schedule to use the default `next` channel. Desktop/iOS have no
+`next` installation. Configure the squire helper as described in the
+[helper channel runbook](cli-bundle-channel.md#following-next).
+
+Offline plan and channel-selection proof (no external release calls):
+
+```sh
+node --test scripts/release-channel.test.mjs scripts/unified-release.test.mjs
+npm test -w @beeline/body -- src/self-update-channel.test.ts --maxWorkers=2 --minWorkers=1
+npm test -w @beeline/server -- src/production-release-dispatch.test.ts --maxWorkers=2 --minWorkers=1
+```
+
+The plan tests print next and latest component plans and exercise restoration
+of the workflow's scalar outputs. Pages tests verify both channel manifests,
+checksums and separately stamped rc/final bytes while preserving the stable website.
+The same suite tests rc ordering/allocation, default-tag final npm publication,
+and final OTA rebuilding against local npm/eas-cli stubs.
 
 ## Production origin checks
 
@@ -59,13 +163,19 @@ OTA targets.
 
 ## Routine release
 
-Desktop installer builds run during release or explicit tester dispatch, while PRs retain the light desktop icon checks. Intel Mac helper storage, launchd and Room acceptance run in the release’s `helper_macos` leg before its archive can be promoted; the pairing acceptance uses an installation of that exact candidate archive.
+Desktop installer builds run during latest promotion or explicit tester dispatch, while PRs retain the light desktop icon checks. Intel Mac helper storage, launchd and Room acceptance run in the release’s `helper_macos` leg before its archive can be promoted; the pairing acceptance uses an installation of that exact candidate archive.
 
 Firstmate calls the first-party `dispatch_release` agent tool with `{}`, without
 creating a release worker or requesting a command grant. This path creates no
 command-approval card.
 
-Pass no inputs. Run inside an authenticated Beeline agent turn citing a human
+For `next`, pass no inputs. For owner-commanded promotion, pass
+`inputs: { channel: "latest" }`. Helper-owned and other authenticated agent turns
+use this same path. The helper connection and generation must still be current
+when its audit receipt commits; helper ownership is no longer a reason to refuse
+a release.
+
+Run inside an authenticated Beeline agent turn citing a human
 release command from a workspace owner or admin. The tool uses the existing
 repository workflow dispatch path on the server. The server derives
 agent id and handle, place, and the root human command message from the active
@@ -107,28 +217,31 @@ cancellation to finish before dispatching recovery.
 `initialize` reserves each identity as a draft GitHub release at once. A
 draft is an attempt that has not published. A later dispatch of the same commit
 resumes that draft's version, so every leg sees what the attempt already
-shipped; a dispatch of another commit skips the draft's version and is never
-blocked by it. A successful release deletes the drafts below its version.
+shipped; a next dispatch of another commit skips its reserved rc counter. A
+successful release deletes the drafts below its version.
 
-The workflow pins current `main`, includes every merge at that
-HEAD, keeps automatic component selection, uses the established `store_track=none`
-policy, promotes the OTA without a device proof (recorded UNPROVEN unless
+A `next` release pins current `main`, includes every merge at that
+HEAD, selects the server, helper and OTA components, uses `store_track=none`,
+and publishes `next` OTA without a device proof (recorded UNPROVEN unless
 `run_release_proof=true`), publishes one release record, runs component checks,
-and reports the result in the workflow summary. The operator-selected workflow inputs are
+and reports the result in the workflow summary. The channel selects next or latest promotion. Other operator-selected inputs are
 recovery- and consent-only (the server supplies attribution): operators use them to continue an existing identity,
 explicitly request the device proof, or make a deliberate store submission -
 never for a routine release.
 
 The helper leg smoke-tests the exact local npm tarball before publishing it.
-A successful `npm publish`, or an already existing version, completes that leg
+The rc CLI package publishes with npm tag `next`; promotion packs the final
+version and publishes it with npm's default latest tag. A successful
+`npm publish`, or an already existing version, completes that leg
 without waiting for npm's registry listing. A publish failure still fails the
 release. The final job records the helper version and publishes the GitHub
 release even while npm is processing the package; npm makes that same version
 installable when processing finishes, with no release rerun required.
 
 Installed helpers use the verified bundles published earlier by the daemon
-promotion step to `https://usebeeline.app/dl/manifest.json`, independently of
-npm. The final release notification verifies that the live Pages manifest matches the
+promotion step to `https://usebeeline.app/dl/manifest.json` (latest) or
+`https://usebeeline.app/dl/next/manifest.json` (next), independently of npm. The
+final release notification verifies that the live Pages manifest matches the
 release version and source commit, then wakes connected helpers even if another
 component or release bookkeeping failed. A no-op release sends no notice.
 Notification failure never changes the authoritative release outcome; their first socket
@@ -136,18 +249,19 @@ registration also checks this channel. Downloads and activation follow the
 [helper update channel](cli-bundle-channel.md), so npm processing does not delay
 fleet updates.
 
-The initializer compares the pinned main SHA with every component's own source
+The initializer compares the pinned release SHA with every component's own source
 SHA in the newest published GitHub Release's `release.json` (see *Release
 memory* below) and writes `release-plan.json`. Its explicit path map is
 `COMPONENT_PATH_RULES` in `scripts/unified-release.mjs`. The plan selects
 `server`, `helper`, `mobile-ota`, `mobile-native`, `desktop`, and `website`
-independently. `selection=all` is a recovery-only, deliberate full-release
-override. A
-non-`none` store track always selects `mobile-native`. Automatic selection with
+independently before applying the channel policy. Every new next identity
+builds helper and OTA to carry its rc version; latest builds helper, OTA,
+desktop and website to carry its final version, while carrying the deployed
+server. `selection=all` is a recovery-only, deliberate full-release
+override. An explicit compatible store track selects `mobile-native`. Automatic selection with
 `store_track=none` never builds native binaries, even when native inputs changed.
-Explicit recovery selection (`all` or `mobile-native`) also publishes every new
-Android binary to Play production by default; only explicit `store_track=beta`
-chooses Play beta. iOS store uploads require an explicit store track and only
+`next` native builds require explicit `store_track=beta`; latest native builds
+require explicit `store_track=production`. iOS store uploads require an explicit store track and only
 `production` submits for App Review. Android listing text/images remain locked unless the
 owner explicitly commands a listing publish. The pre-commit gate stops on any
 listing change; a passing build edit commits without `changesNotSentForReview`.
@@ -189,9 +303,10 @@ and UI changes select every real consumer, while their deploy contracts stay
 independently backward-compatible; no fleet-convergence or artificial
 cross-component gate serializes them.
 
-Two path rules keep releases small. Editing the release workflow or
-`scripts/unified-release.mjs` selects only the fast legs (server, mobile OTA,
-website), never the helper or desktop. The desktop app bundles the Expo web
+Two path rules identify component input changes. Editing the release workflow or
+`scripts/unified-release.mjs` marks only the fast legs (server, mobile OTA,
+website) as changed; the channel policy still selects helper/OTA for stamping.
+The desktop app bundles the Expo web
 export, so shared UI and protocol changes rebuild its installers in the same
 release. The path map includes the mobile sources/assets, exported shared
 packages, web export configuration and public files, dependency inputs and
@@ -253,8 +368,8 @@ image recovery floor before enabling commands. The combined router draft is
 not a schema-only prerequisite release. See the [T7 release sequence and proof
 limits](../data/network-ops-fixes/t7-compatibility.md).
 
-`Prebuild server image` compiles and pushes a registry image for every merge
-to main. It changes no Machines and runs no migrations. The promotion records
+`Prebuild server image` is manual-only and compiles and pushes a registry
+image for its selected commit. It changes no Machines and runs no migrations. The promotion records
 the two current Machine image refs and asks the registry for that exact source
 SHA. It verifies the image's source label, pins its digest, adds only the release
 identity metadata, and pushes the release image. An unavailable prebuild falls
@@ -311,7 +426,9 @@ Missing identities, unknown selections, missing carried references, and absent
 selected outputs fail closed. Helper fleet uptake is recorded once as
 post-release observability; installed-helper convergence never gates delivery.
 
-A repeat routine dispatch at an already-delivered HEAD succeeds as a no-op. It
+A repeat routine next dispatch at an already-delivered rc HEAD succeeds as a
+no-op. After that rc is promoted to final, next at the same HEAD starts the
+following patch's first rc. Repeating a latest promotion is also a no-op. It
 does not rebuild components, replace the release record, upload release assets,
 or send a duplicate client notification.
 
@@ -375,21 +492,44 @@ node --test scripts/unified-release.test.mjs
 Those fixtures cover canary ordering and window verdicts, rollback selection,
 no-input defaults, per-component published-input drift, shared-path fanout,
 carry-forward, same-identity no-op and reruns, and completion/publication
-checks. `scripts/release-record.test.mjs` covers identity, migration, the
-record's facts and both rollback targets; `scripts/ota-release.test.mjs` covers
-the phone OTA against a stand-in eas-cli.
+checks. `scripts/release-channel.test.mjs` covers channel planning, rc identity
+allocation, final stamping, and npm/phone OTA publication against local stubs.
 
 ## Release memory
 
-Column drops have an additional compatibility gate. A release must first stop
-reading/writing a column; a later release adds its idempotent drop under
-`apps/server/contracts/`. Before predeployment migrations, `rollout-schema.mjs`
-checks candidate and preceding serving/rollback source revisions. After both
-Machines update successfully, `run-contract-migrations.mjs` verifies the drained
-fleet and executes column contracts, including on a rerun that already serves
-the candidate image. Existing unrelated migrations retain their order. The
-incident columns remain compatibility storage in this release. Evidence and
-limits: [November rollout replay](rollout-nov03-replay.md).
+Deployment is the expand phase: retired tables, columns, notification capture
+triggers and their functions remain available to the preceding serving and
+rollback images. The deploy migration no longer removes Tray clocks,
+background ownership, retired webhook storage or other retired tables/columns.
+This preserves existing storage; it cannot recover rows an earlier release
+already dropped. No retired API or UI is restored.
+
+Schema-script indexes go through `createIndexConcurrently`, including indexes
+on previously populated tables. Existing-table CHECK and foreign-key additions
+use `NOT VALID`, then a separate `VALIDATE CONSTRAINT` statement. Historical
+same-type attachment rewrites and redundant NOT NULL scans are removed;
+new-table declarations still carry their full constraints. Auth index
+migrations also use `CONCURRENTLY`. Online PostgreSQL DDL still acquires locks;
+these forms avoid a blocking index build or validation scan under an exclusive
+table lock, rather than promising that PostgreSQL never waits.
+
+Storage removal belongs to a later, separate contract release after the
+preceding serving and supported rollback images no longer use it. Do not put
+the removed retirement SQL back into deployment, or run it automatically at
+the end of this release. Existing column contracts live under
+`apps/server/contracts/`; their runner checks source compatibility and the
+serving fleet before execution. There is no historical column-drop exemption
+list. A future table/trigger/function contract must implement its own explicit
+migration in that later release; this release intentionally contains none.
+
+The PostgreSQL overlap regression keeps an old notification transaction open
+while deployment finishes, then writes its next notification. The built MCP
+regression runs release dispatch for both legacy and helper-owned commands,
+checks the readable audit receipt and rejects missing human authorization.
+
+The locking cutover also retains `agents.squire_report` and `messages.event_woken`
+without current readers or writers; `beeline-drop-retired-turn-schema` owns
+their later contract release. Evidence and limits: [November rollout replay](rollout-nov03-replay.md).
 
 The permanent GitHub Release is the pipeline's only memory. Each published
 release carries one `release.json`, uploaded before the release is published:
@@ -459,14 +599,15 @@ stage-timing files.
 
 ## Phone OTA by channel pointer
 
-Each release publishes to its own EAS branch, `release-<version>`, one update
-per runtime live in the stores, and points the `beta` channel at it. Promotion
-points the `production` channel at the same branch
-(`eas channel:edit production --branch release-<version>`), so production
-serves the exact bundles beta got, on every live runtime at once. Every live
-runtime must be on the branch before any channel moves. A rerun publishes only
-the runtimes the branch lacks and skips a channel that already points at it; a
-branch never mixes two source commits.
+Each `next` release publishes to its own EAS branch, for example
+`release-v0.1.184-rc.3`, one update per runtime live in the stores, and points
+`next` at it. Latest promotion exports fresh bundles from that same commit
+with the final version and publishes `release-v0.1.184`, then points
+`production` at it. The next pointer keeps serving the rc. Runtime targets
+come from the existing live-store policy for the selected channel.
+Every live runtime must be on the branch before its channel moves. A rerun
+publishes only the runtimes its own release branch lacks and skips a channel
+that already points at it; a branch never mixes two source commits.
 
 `Mobile OTA rollback recovery` points `production` back: to the branch before
 the newest published release if that release is live, or to the newest
@@ -480,10 +621,26 @@ concurrency group and has a `dry_run` mode.
 ## Compatibility and signing invariants
 
 - OTA targets include each platform's newest live store runtime and the two
-  newest older runtimes confirmed live on that store. A current pin still in
-  review gets no OTA target. OTA history, uploads and TestFlight do not count as store publication.
-  Play uses `applications/app.usebeeline/tracks/production/releases` and its
-  `PUBLISHED` lifecycle state (not edit-track `completed`, which can await review).
+  newest older runtimes confirmed live on that store. A current pin alone gets no OTA target. OTA history, uploads and TestFlight do not count as store publication.
+  The Android Play package is `app.usebeeline`, matching `app.config.js` and
+  the successful Play upload path; legacy registry bundle IDs are not Play
+  package names. The `next` channel reads production and beta independently
+  through [edits.insert](https://developers.google.com/android-publisher/api-ref/rest/v3/edits/insert),
+  [edits.tracks.get](https://developers.google.com/android-publisher/api-ref/rest/v3/edits.tracks/get),
+  and [edits.delete](https://developers.google.com/android-publisher/api-ref/rest/v3/edits/delete).
+  Each temporary edit is deleted even after a failed read, and never committed.
+  Track `releases[].versionCodes` map to known runtime identities. Completed,
+  staged (`inProgress`) and halted releases retain their installed audience;
+  drafts are excluded. Edit-track status does not distinguish review approval,
+  so a completed release can receive an OTA before store review finishes.
+  Beta runtimes are added alongside the production retention window; they
+  never replace its anchor or enter production publication history. Each Play
+  track is read independently with an explicit JSON response format, so an
+  unreadable production response cannot hide a readable beta build (or vice
+  versa). Empty and malformed responses retain recorded targets and produce
+  an Actions warning and an OTA warning section in the release summary, with
+  the track, endpoint, HTTP status and response format when available. There
+  are no retries. Latest continues to read production alone.
   ASC uses distributed iOS versions and their exact build identities. Build
   numbers map to runtime pins through the committed
   `apps/mobile/store/native-runtime-builds.json`, the store builds recorded in
@@ -547,7 +704,7 @@ listeners there. The failure/redelivery fixture is its pre-merge stand-in.
 ## Minimum supported store versions
 
 The optional `mobile_store_minimum` workflow input writes platform policy only
-after successful delivery. Leave it empty for routine and nightly OTA releases.
+after successful delivery. Leave it empty for routine and next OTA releases.
 For an explicitly required store update, pass JSON such as
 `{"android":{"minVersion":"0.2.24","reason":"This version can no longer sign in."}}`.
 Only named platforms change; the database starts with no minimums. Use the same

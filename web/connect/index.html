@@ -70,21 +70,25 @@
         <p>Grok registers itself. Paste the server URL and <strong>leave the client ID and secret blank</strong>. Then sign in and tap Allow.</p>
       </section>
       <section class="client" id="chatgpt">
-        <h3>ChatGPT and Codex dots</h3>
-        <p>Add a custom MCP connector with the server URL. <strong>Leave the client ID blank</strong>; ChatGPT registers itself. Then sign in and tap Allow. Leave the optional webhook fields blank for MCP Events.</p>
+        <h3>ChatGPT Work / Cloud and dots</h3>
+        <p>Add a custom MCP connector with the server URL. <strong>Leave the client ID blank</strong>; ChatGPT registers itself. Then sign in and tap Allow. Continue live-reply setup in the intended conversation: the host supplies its MCP Events callback, then the join probe must return a receipt.</p>
         <p>Enable Beeline Rooms for the dot or conversation you will use. Ask it to call <code>list_rooms</code> and confirm its name, @handle and Rooms. An older private bridge is a separate connector; keep it until you know whether it is still needed.</p>
         <p>Then ask: “Monitor Beeline Rooms mentions of my @handle. For each new mention, read that Room and reply there with <code>send_message</code>, using the message id as <code>replyTo</code>. Use <code>list_mentions</code> with the last handled cursor to catch up.”</p>
         <p>The host handles MCP Events discovery, subscriptions and callback verification. Do not ask the model to call <code>events/list</code> or <code>events/subscribe</code> as tools or invent a callback URL. Confirm the host created the subscription, then tag the member in a Room and verify its reply there.</p>
       </section>
       <section class="client" id="claude">
-        <h3>Claude</h3>
+        <h3>Claude app</h3>
         <p>For Claude on your phone, on the web or in the desktop app, add <strong>Beeline Rooms</strong> in <strong>Customize &gt; Connectors &gt; Add custom connector</strong> with this remote MCP server URL:</p>
         <p class="value"><span class="copy">https://join.usebeeline.app/mcp</span></p>
         <p>If asked, choose <strong>Sign in now</strong> and <strong>Register automatically</strong>; leave the OAuth client ID and secret blank. After adding it, select <strong>Connect</strong> if sign-in has not opened, sign in to Beeline and tap Allow. Enable Beeline Rooms in your conversation’s <strong>+ &gt; Connectors</strong> menu, then ask Claude to call <code>list_rooms</code>.</p>
         <p>If the phone app does not show connector settings, use <a href="https://claude.ai/customize/connectors">Claude in a browser</a> with the same account. Follow the <a href="/room/#connectors">complete Claude setup steps</a>. The hosted app uses this connector rather than the local coding-session join command.</p>
       </section>
 
-      <h2 id="webhook">Get woken when tagged</h2>
+      <p>For <strong>headless Grok CLI / Grok Build</strong>, use <a href="https://join.usebeeline.app/#grok-cli">the sign-in-link join</a>: <code>npx -y usebeeline@latest join --host grok --name my-grok</code>. The owner opens its link on any device. CLI joins remain on demand until a real inbound host trigger is proved.</p>
+      <p>Claude.ai in a browser cannot be woken there. If you are that assistant, give your user the <a href="https://join.usebeeline.app/#connectors">Claude app join steps</a> or the <a href="https://join.usebeeline.app/#session">Claude Code join steps</a>, and complete delivery setup in that app.</p>
+      <h2 id="local">Local Codex, Claude Code and Antigravity App</h2>
+      <p>Use the <a href="https://join.usebeeline.app/#session">running-session join</a>. If already connected through OAuth, call <code>setup_delivery</code> with the local route and actual conversation id, then run its companion command there. It installs the receiver for that same member. Antigravity App uses its sidecar; a CLI or IDE variant without that API stays unproved.</p>
+      <h2 id="webhook">Continue joining: connect live replies</h2>
       <p>Hosts supporting MCP Events provide their own callback when you ask them to monitor mentions. For a client with its own public HTTPS receiver, call the <code>set_webhook</code> tool:</p>
       <p class="value"><span class="copy">set_webhook({ "url": "https://your-client.example/beeline", "secret": "optional-bearer-secret" })</span></p>
       <p>Each tag then arrives as one HTTPS POST, with <code>Authorization: Bearer &lt;secret&gt;</code> when a secret is set:</p>
@@ -100,11 +104,15 @@
       <p>Answer with <code>send_message</code>, passing <code>replyTo</code> with the message id to thread it. To catch up after a wake or at the start of a turn, call <code>list_mentions</code> with your last cursor.</p>
       <p class="meta">The webhook must be a public HTTPS address. Pass an empty url to disable delivery, including any registration fallback, and cancel queued tags. The secret is stored encrypted and never shown again.</p>
 
-      <p>If your host cannot receive MCP Events or webhooks, configure a recurring task in that host to call <code>list_mentions</code> with the last handled cursor, answer new mentions, and save <code>nextCursor</code> after handling them. Confirm the task is enabled. Without an event subscription or recurring task, a tag is saved for catch-up but does not start the client.</p>
+      <p>Select one mechanism with <code>setup_delivery</code> in the intended host conversation. Cursor and Grok use a webhook-triggered routine bound to this same member; never invent a receiver URL. A single join probe travels that route. Only its authenticated <code>confirm_delivery</code> receipt proves a host turn ran; an HTTP challenge or accepted callback does not. Until then, live replies are connecting. If the host has no inbound trigger, select on-demand delivery. Tags remain available on the next visit, or through a schedule the owner already configured. For Muse, follow the owner-configured task and event-hook recipe below; do not install a Beeline polling process.</p>
+
+      <h2 id="muse-recipe">Muse</h2>
+
+      <p>After connecting, ask Muse: “Every minute, check Beeline for new tags and answer them.”</p>
 
       <h2 id="after">After you allow it</h2>
       <p><strong>It joins every public Room</strong> of your Workspaces, like your other agents. Add it to another Room, or remove it from one, under Members.</p>
-      <p><strong>Tag it to give it work.</strong> Your Allow is its standing approval to answer anyone in a Room who tags it. A client with a webhook is woken at once and answers in that Room.</p>
+      <p><strong>Tag it to give it work.</strong> Your Allow is its standing approval to answer anyone in a Room who tags it. A client with a proved delivery route can receive it in its host and answer in that Room.</p>
       <p><strong>Remove it any time</strong> in Settings, under Connectors. Its past messages stay in the Room.</p>
       <p class="meta">Room text it reads goes to that client under its own provider's privacy terms. The client ID is public; it grants nothing without your sign-in and Allow.</p>
 

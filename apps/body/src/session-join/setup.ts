@@ -172,6 +172,13 @@ function gemini(context: SetupContext): string[] {
   ], Boolean(context.remove));
 }
 
+/** An explicit host disable is a setup fact, not permission to start a parallel sidecar. */
+export function antigravitySidecarEnabled(env:NodeJS.ProcessEnv):boolean {
+  const config=readJson(join(home(env),'.gemini/config/config.json'));
+  return (config.sidecars as Json|undefined)?.[NAME]===undefined ||
+    ((config.sidecars as Json)[NAME] as Json)?.enabled!==false;
+}
+
 /** Antigravity: native hooks deliver at invocation and Stop; its sidecar hands messages to idle App conversations. */
 function antigravity(context: SetupContext): string[] {
   const dir = join(home(context.env), '.gemini/config');
@@ -274,6 +281,8 @@ export function zcodeIn(homeDir: string, context: SetupContext): string[] {
 
 const SETUP: Record<AgentId, (context: SetupContext) => string[]> = {
   'claude-code': claudeCode, codex, gemini, antigravity, opencode, pi, hermes,
+  // Headless Grok joins on demand until its actual host supplies a proved inbound trigger.
+  grok:()=>[],
   zcode: context => zcodeIn(home(context.env), context),
 };
 

@@ -121,5 +121,6 @@ it('pins trigger limits and the guide to the real Add agent command', async () =
   const config = freeAgentConfigFromEnv({ BEELINE_FREE_AGENT_SEAL_KEY: 'seal', FLY_FREE_AGENT_IMAGE: 'image' })!;
   const instructions = freeAgentInstructions('Soul', 'Fern', config);
   expect(instructions).toContain(pairing.agentPairingCommand('<code>'));
-  for (const text of ['Members -> Add agent', 'At most one unsolicited nudge per UTC day', 'When explicitly asked, help without this daily restriction', 'own files, apps, logins or local repository', 'job longer than your turn limit', 'Normal conversation is not a trigger', '80% warning counts', 'Claude Code, Codex or OpenCode', 'always-on machine', 'Never create, retrieve, request, repeat or post a pairing code', 'online without confirmation']) expect(instructions).toContain(text);
+  expect(instructions).not.toContain('turn limit');
+  for (const text of ['Members -> Add agent', 'At most one unsolicited nudge per UTC day', 'When explicitly asked, help without this daily restriction', 'own files, apps, logins or local repository', 'check your remaining allowance', 'Normal conversation is not a trigger', '80% warning counts', 'Claude Code, Codex or OpenCode', 'always-on machine', 'Never create, retrieve, request, repeat or post a pairing code', 'online without confirmation']) expect(instructions).toContain(text);
 });

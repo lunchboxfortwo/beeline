@@ -1,17 +1,13 @@
+import { installShutdown } from './shutdown.js';
+import { notifyLive } from './postgres-live.js';
+import { OwnedModelCredentials } from './owned-model-credential.js';
 import { requiredServerSetting as required } from './server-configuration.js';
-import { DISPLAY_DEADLINE_KEY } from './deadline-expiry-source.js';
-import { backgroundDatabaseCut } from './background-deadline-clock.js';
-import { BackgroundRecordDeadlines, backgroundSourceFamilies, repairDeadlineFamilies, registerBackgroundDeadlineFamilies, subscribeBackgroundFamilies } from './background-deadlines.js';
 import { sentryEligibilityKey } from './sentry-wake-source.js';
-import { PENDING_ATTACHMENT_DUE_KEY } from './pending-attachment-source.js';
 import { AGENT_SCHEDULE_DUE_KEY } from './agent-schedule-source.js';
-import { ConnectorOfferExpiryLoop, CONNECTOR_OFFER_DUE_KEY } from './connector-offer-expiry.js';
 import { StarterOnboardingService } from './starter-onboarding-run.js';
-import { NextDayCheckin } from './next-day-checkin.js';
 import { RoomsMcp } from './rooms-mcp.js';
 import { RoomsMcpOAuth } from './rooms-mcp-oauth.js';
 import { runMcpWebhookDelivery } from './rooms-mcp-members.js';
-import { deliverXSignups, nextXSignupDeliveryAt } from './x-ads.js';
 import { deliverOperatorSystemDmBatch,subscribeOperatorSystemDmDeliveries } from './operator-system-dm.js';
 import { captureServerError, flushServerErrors } from './sentry.js';
 
@@ -21,8 +17,7 @@ process.on('unhandledRejection', error => {
   console.error('[unhandled-rejection]', error instanceof Error ? error.name : 'Unknown rejection');
 });
 import { sentryTelegramFromEnv } from './sentry-telegram.js';
-import { runSentryWakeDeadline, sentryWakeAgentFromEnv } from './sentry-wake.js';
-import { randomUUID } from 'node:crypto';
+import { createHash, randomUUID } from 'node:crypto';
 import { assertSchemaCurrent, markSchemaCurrent, migrate, migrateData, PostgresDatabase } from './database.js';
 import { runMigrationStep } from './migration-steps.js';
 import { databaseConnectionBudget } from './database-budget.js';
@@ -34,20 +29,17 @@ import { LiveHub } from './live.js';
 import {
   BackgroundJobRunner,
   createPushTestSender,
-  MediaExpiryLoop,
   PushDeliveryLoop,
 } from './background.js';
-import { mediaTtlHours, MEDIA_SWEEP_INTERVAL_MS } from './media-ttl.js';
-import { PendingAttachmentCleanupLoop } from './pending-attachment-cleanup.js';
-import { BackgroundLeader } from './background-leader.js';
-import { startBackgroundWork, BackgroundWork } from './background-work.js';
+import { startBackgroundWork } from './background-work.js';
+import { OwnerScheduleClock } from './owner-schedule-clock.js';
+import { backgroundDueKey } from './background-due-source.js';
+import { deliverXSignups } from './x-ads.js';
+import { sentryWakeAgentFromEnv, flushSentryWakes } from './sentry-wake.js';
 import { OperationOutcomes, startOperationOutcomeFlush } from './operation-outcomes.js';
 import { AgentScheduleLoop } from './agent-schedules.js';
-import { ChoiceExpiryLoop } from './choice-expiry.js';
 import { subscribeCommandCompletion } from './command-completion.js';
-import { DeadlineExpiry } from './deadline-expiry.js';
 import { ConnectionPresence } from './connection-presence.js';
-import { clearStalePhoneViews } from './phone-viewing.js';
 import { createFirebasePushSender } from './firebase-push.js';
 import { createApnsPushSender } from './apns-push.js';
 import { createBeelineServer, DEFAULT_MEDIA_MAXIMUM_BYTES } from './server.js';
@@ -68,17 +60,16 @@ import { VoiceService, voiceConfigFromEnv } from './voice-service.js';
 import { createWebPushSender } from './web-push.js';
 import type { MonolithAuthMount } from './monolith-auth.js';
 import { PostgresLiveListener } from './postgres-live.js';
+import { CornerMachineEvents } from './corner-attention.js';
 import { listenAfterBestEffortRecovery } from './startup.js';
 import { INSTITUTIONAL_MEMORY_ON } from './institutional-memory-shadow.js';
 import {
-  backfillInstitutionalMemoryEmbeddingsOnce,
   warnIfEmbeddingKeyMissing,
 } from './institutional-memory-embeddings.js';
 import type { InstitutionalSkillAnchorSource } from './institutional-skill-anchors.js';
 import { retireWelcomeWorkspace, welcomeRetirementPreflight } from './welcome-retirement.js';
 import { feedbackConfigFromEnv } from './feedback.js';
 import { FeedbackGitHub } from './feedback-github.js';
-import { startComputerExpirySweep } from './computer-session.js';
 import {
   addFreeAgentToWorkspace,
   FreeAgentService,
@@ -142,13 +133,7 @@ async function main() {
   }
   const enrichmentDatabase = new PostgresDatabase(connectionString, budget.enrichment, { mode: 'enrichment' });
   const jobsDatabase = new PostgresDatabase(connectionString, budget.jobs, { mode: 'long-running' });
-  // One-time sweep at server start — never on an interval; fire-and-forget so
-  // it never delays this machine coming up and serving requests. Its session
-  // lock lets only one machine run it; the other logs `skipped:true`.
   warnIfEmbeddingKeyMissing();
-  void backfillInstitutionalMemoryEmbeddingsOnce(jobsDatabase)
-    .then((counts) => console.log(`[startup] institutional memory embedding backfill: ${JSON.stringify(counts)}`))
-    .catch((error) => console.error('[startup] institutional memory embedding backfill failed:', error));
   console.log(`[database] connection budget ${JSON.stringify(budget)}`);
   const publicOrigin =
     process.env.PUBLIC_ORIGIN ?? `http://127.0.0.1:${process.env.PORT ?? '8080'}`;
@@ -161,6 +146,7 @@ async function main() {
   // Listener expands one presence NOTIFY across memberships; writers must not
   // also run broadcastAgentPresence against the same LiveHub.
   live.useListenerPresenceFanout();
+  const cornerMachine = new CornerMachineEvents(jobsDatabase, live, captureServerError);
   void liveListener.run();
   const githubConfigured =
     process.env.GITHUB_CLIENT_ID &&
@@ -273,7 +259,7 @@ async function main() {
   );
   // Each process is its own lease holder: a restarted machine is a new
   // instance, and the old one's connections expire with its lease.
-  const connectionPresence = new ConnectionPresence(database, live, undefined, undefined, {
+  const connectionPresence = new ConnectionPresence(database, live, {
     instanceId: `${process.env.FLY_MACHINE_ID ?? 'local'}:${randomUUID()}`,
   });
   const mediaExpiryMediaMaximumBytes = Number(
@@ -298,16 +284,6 @@ async function main() {
     : undefined;
   const mcpRegistry = new McpRegistryClient();
   const registryMcpOAuth = new RegistryMcpOAuth(database, publicOrigin);
-  const mediaExpiry = objectStorage
-    ? new MediaExpiryLoop(jobsDatabase, mediaTtlHours(), MEDIA_SWEEP_INTERVAL_MS, {
-        storage: objectStorage,
-        service: objectService,
-      })
-    : new MediaExpiryLoop(jobsDatabase);
-  const choiceExpiry = new ChoiceExpiryLoop(jobsDatabase);
-  const connectorOfferExpiry = new ConnectorOfferExpiryLoop(jobsDatabase);
-  const pendingAttachmentCleanup = new PendingAttachmentCleanupLoop(jobsDatabase);
-  const deadlineExpiry = new DeadlineExpiry(jobsDatabase);
   const sendPushTest = pushSender || webPushSender
     ? createPushTestSender(database, pushSender, apnsPushSender, webPushSender)
     : undefined;
@@ -384,6 +360,7 @@ async function main() {
           process.env.FLY_FREE_AGENT_API_ORIGIN || undefined,
         ),
         (agentId, transaction) => auth.createDaemonExchange(agentId, transaction),
+        undefined, connectionPresence.instanceId,
       )
     : undefined;
   if (freeAgents) phone.setFreeAgents(freeAgents);
@@ -397,15 +374,21 @@ async function main() {
           : {}),
       }
     : undefined;
+  if (freeAgentModel && freeAgentConfig) {
+    const version='free-agent-v1';
+    const key=createHash('sha256').update('beeline:owned-model:root:v1\0').update(freeAgentConfig.sealSecret).digest();
+    const ownedModel={ credentials:new OwnedModelCredentials({currentVersion:version,key:v=>v===version ? key : undefined},
+      ()=>freeAgentConfig.model),ready:()=>true };
+    Object.assign(freeAgentModel,{ownedModel});
+    daemon.setOwnedModel(ownedModel);
+  }
   const starterOnboarding = new StarterOnboardingService(database, freeAgentModel);
   phone.setStarterOnboarding(starterOnboarding);
   daemon.setStarterOnboarding(starterOnboarding);
   const backgroundJobs = new BackgroundJobRunner();
   const operationOutcomes = new OperationOutcomes();
   const sentryWakeAgentId = sentryWakeAgentFromEnv();
-  liveListener.setServerLeaseEvidence((instance, renewedAt, removed) => {
-    connectionPresence.observeServerLease(instance, renewedAt, removed);
-  });
+
   const server = createBeelineServer({
     operationOutcomes,
     roomsMcp: new RoomsMcp(new RoomsMcpOAuth(database, publicOrigin, auth, undefined, () => liveListener.projectionHealth().connected), phone, live, daemon, objectService, undefined, () => liveListener.projectionHealth().connected),
@@ -455,177 +438,54 @@ async function main() {
         : {}),
     },
   });
-  const work = new BackgroundWork();
-  let checkinClock=new Date();
-  let checkinCut:string|undefined;
-  const nextDayCheckin = new NextDayCheckin(jobsDatabase, webAppOrigins[0] ?? 'https://web.usebeeline.app', undefined, ()=>checkinClock, publicOrigin);
-  let nextDayCheckinRunning: Promise<unknown> | undefined;
-  let nextDayCheckinPending = false;
-  work.addDeadline('next-day-checkin', async () => {
-    if (nextDayCheckinRunning) { nextDayCheckinPending = true; return; }
-    nextDayCheckinRunning = backgroundJobs.run('next-day-checkin', async () => {
-      checkinCut=await backgroundDatabaseCut(jobsDatabase);checkinClock=new Date(checkinCut);await nextDayCheckin.runOnce();
-    })
-      .then(async outcome => {
-        if (outcome.ok) work.schedule('next-day-checkin', await nextDayCheckin.nextDelayMs(checkinCut));
-      }).catch(error => captureServerError(error,{background_job:'next-day-checkin'}))
-      .finally(() => {
-        nextDayCheckinRunning = undefined;
-        if(nextDayCheckinPending){nextDayCheckinPending=false;work.wake('next-day-checkin','committed-during-flight');}
-        leader.wake();
-      });
+  const eventJob = (name: string, run: () => Promise<unknown>) =>
+    startBackgroundWork(() => backgroundJobs.run(name, run));
+  const pushJob = eventJob('push', async () => { await push?.runOnce(); });
+  const sentryJob = eventJob('sentry-wakes', () => flushSentryWakes(jobsDatabase, sentryWakeAgentId));
+  const xJob = eventJob('x-signup-conversions', () => deliverXSignups(jobsDatabase));
+  const dmJob = eventJob('operator-system-dms', () => deliverOperatorSystemDmBatch(jobsDatabase));
+  const schedulesJob = eventJob('schedules', async () => {
+    scheduleClock.stop();
+    await schedules.runOnce();
+    scheduleClock.arm(await schedules.nextDelayMs());
   });
-  if (push) work.addDeadline('push', async () => {
-    const dispatched=await backgroundJobs.run('push', async () => {
-      const cut=await backgroundDatabaseCut(jobsDatabase);await push.runOnce();return cut;
-    });
-    if(!dispatched.ok)return;
-    const due = await backgroundJobs.run('push-next-due', () => push.nextDelayMs(dispatched.value));
-    if (due.ok) return due.value;
-  });
-  work.addDeadline('pending-attachment-cleanup', async () => {
-    const swept = await backgroundJobs.run('pending-attachment-cleanup', () => pendingAttachmentCleanup.runOnce());
-    if (!swept.ok) return;
-    const due = await backgroundJobs.run('pending-attachment-next-due', () => pendingAttachmentCleanup.nextDelayMs());
-    if (due.ok) return due.value;
-  });
-  work.addDeadline('schedules', async () => {
-    const fired = await backgroundJobs.run('schedules', () => schedules.runOnce());
-    if (!fired.ok) return;
-    const due = await backgroundJobs.run('schedule-next-due', () => schedules.nextDelayMs());
-    if (due.ok) return due.value;
-  });
-  work.addDeadline('sentry', async () => {
-    const due = await backgroundJobs.run('sentry-wakes', () => runSentryWakeDeadline(jobsDatabase, sentryWakeAgentId));
-    if (due.ok) return due.value;
-  });
-  work.addDeadline('connector-offer-expiry', async () => {
-    const due = await backgroundJobs.run('connector-offer-expiry', () => connectorOfferExpiry.runOnce());
-    if (due.ok) return due.value;
-  });
-  work.addDeadline('choices', async () => {
-    const due = await backgroundJobs.run('choice-expiry', () => choiceExpiry.runOnce());
-    if (due.ok) return due.value;
-  });
-  work.addDeadline('deadlines', async (newLeader) => {
-    const due = await backgroundJobs.run('deadline-expiry', () => deadlineExpiry.runOnce(newLeader));
-    if (due.ok && due.value !== null) return Math.max(0, due.value);
-  });
-  if (freeAgents) work.addDeadline('free-agents', async () => {
-    const acted=await backgroundJobs.run('free-agents', async () => {
-      const cut=await backgroundDatabaseCut(jobsDatabase);await freeAgents.sweep();return cut;
-    });
-    if(!acted.ok)return;
-    const due=await backgroundJobs.run('free-agents-next-due',()=>freeAgents.nextDelayMs(acted.value));
-    if(due.ok)return due.value;
-  });
-  // A committed signup row owns delivery. Vendor report/balance observations
-  // are explicit operator demand and never background calendar jobs.
-  work.addDeadline('x-conversions', async () => {
-    const delivered=await backgroundJobs.run('x-signup-conversions', () => deliverXSignups(jobsDatabase));
-    if(!delivered.ok)return;
-    const due=await backgroundJobs.run('x-signup-next-due',()=>nextXSignupDeliveryAt(jobsDatabase));
-    if(due.ok && due.value)return Math.max(0,due.value.getTime()-Date.now());
-  });
-  work.addDeadline('operator-system-dms',async()=>{
-    const delivered=await backgroundJobs.run('operator-system-dms',()=>deliverOperatorSystemDmBatch(jobsDatabase));
-    if(delivered.ok)return delivered.value;
-  });
-  // One startup observation per leader epoch, including when it fails.
-  // Later uncertainty needs an actual GitHub event or explicit review command.
-  if (githubJobs) work.addDeadline('repository.startupRepair', async () => {
-    await backgroundJobs.run('github-mergeability', () => githubJobs.refreshStaleMergeability());
-  });
-  const voiceDeadlines=new BackgroundRecordDeadlines('voice-call-recovery',work,()=>leader.wake());
-  const stopVoiceDeadlines=voiceDeadlines.subscribe();
-  registerBackgroundDeadlineFamilies(work,repairDeadlineFamilies(jobsDatabase,{
-    live,phone,mediaExpiry,institutionalMemory,institutionalAnchors,voice,voiceDeadlines,
-  }),(name,run)=>backgroundJobs.run(name,run),jobsDatabase);
-  const leader = new BackgroundLeader(jobsDatabase, (newLeader, signal) => work.run(newLeader, signal));
-  const wakeWork = (name: string, source = name) => { work.wake(name, source); leader.wake(); };
-  const stopBackgroundSources=subscribeBackgroundFamilies(jobsDatabase,live,backgroundSourceFamilies(),name=>wakeWork(name,'committed-family-source'));
-  const wakeSystemDms=()=>wakeWork('operator-system-dms','committed-system-dm');
-  const wakeConnectorOffers = () => wakeWork('connector-offer-expiry', 'connector-offer-source');
-  const stopConnectorOfferWake = subscribeCommandCompletion(CONNECTOR_OFFER_DUE_KEY, wakeConnectorOffers);
-  const stopConnectorOfferRecovery = jobsDatabase.onRecovery(wakeConnectorOffers);
-  const stopConnectorOfferResync = live.subscribeResync(wakeConnectorOffers);
-  const wakeDisplayDeadlines = () => wakeWork('deadlines', 'display-deadline');
-  const stopDisplayDeadline = subscribeCommandCompletion(DISPLAY_DEADLINE_KEY, wakeDisplayDeadlines);
-  const stopDisplayRecovery = jobsDatabase.onRecovery(wakeDisplayDeadlines);
-  const stopDisplayResync = live.subscribeResync(wakeDisplayDeadlines);
-  const wakeSentry = () => wakeWork('sentry', 'sentry-eligibility');
-  const stopSentryRecipient = subscribeCommandCompletion(sentryEligibilityKey(sentryWakeAgentId), wakeSentry);
-  const stopSentryRoom = subscribeCommandCompletion(sentryEligibilityKey('sentry'), wakeSentry);
-  const stopSentryRecovery = jobsDatabase.onRecovery(wakeSentry);
-  const stopSentryResync = live.subscribeResync(wakeSentry);
-  const wakeChoices = () => wakeWork('choices', 'choice-expiry');
-  const wakeAttachments = () => wakeWork('pending-attachment-cleanup', 'attachment-source');
-  const stopAttachmentWake = subscribeCommandCompletion(PENDING_ATTACHMENT_DUE_KEY, wakeAttachments);
-  const stopAttachmentRecovery = jobsDatabase.onRecovery(wakeAttachments);
-  const stopAttachmentResync = live.subscribeResync(wakeAttachments);
-  const wakeSchedules = () => wakeWork('schedules', 'schedule-source');
-  const stopScheduleWake = subscribeCommandCompletion(AGENT_SCHEDULE_DUE_KEY, wakeSchedules);
-  const stopScheduleRecovery = jobsDatabase.onRecovery(wakeSchedules);
-  const stopScheduleResync = live.subscribeResync(wakeSchedules);
-  const stopChoiceWake = subscribeCommandCompletion({ principal: 'choice', operation: 'expiry', commandId: 'pending' }, wakeChoices);
-  const stopChoiceRecovery = jobsDatabase.onRecovery(wakeChoices);
-  const stopSystemDmWake=subscribeOperatorSystemDmDeliveries(wakeSystemDms);
-  const stopSystemDmRecovery=jobsDatabase.onRecovery(wakeSystemDms);
-  if (push) liveListener.setPushWake(() => wakeWork('push'));
-  liveListener.setXSignupDeliveryWake(()=>wakeWork('x-conversions','signup-delivery'));
-  liveListener.setOwedWake((source) => { if (source === 'sentry') wakeWork('sentry', source); });
-  // Receiver latency must not block unrelated leader jobs. Existing atomic
-  // per-delivery claims serialize overlapping instances and rolling versions.
-  const mcpWork = new BackgroundWork();
+  const scheduleClock = new OwnerScheduleClock(() => schedulesJob.wake());
   const mcpStop = new AbortController();
-  mcpWork.addDeadline('mcp-webhooks', async () => {
-    const result = await backgroundJobs.run('mcp-webhooks', () => runMcpWebhookDelivery(jobsDatabase, undefined, 50, mcpStop.signal));
-    if (result.ok) return result.value;
-  });
-  const stopMcpWebhooks = startBackgroundWork(mcpWork, run => {
-    const wake = () => { mcpWork.wake('mcp-webhooks'); run(); };
-    liveListener.setMcpWebhookWake(wake);
-    const recovery = jobsDatabase.onRecovery(wake);
-    const resync = live.subscribeResync(wake);
-    return () => { recovery(); resync(); liveListener.setMcpWebhookWake(() => {}); };
-  });
+  const mcpJob = eventJob('mcp-webhooks', () => runMcpWebhookDelivery(jobsDatabase, undefined, mcpStop.signal));
+  const stops = [
+    subscribeCommandCompletion(AGENT_SCHEDULE_DUE_KEY, () => schedulesJob.wake()),
+    subscribeCommandCompletion(sentryEligibilityKey(sentryWakeAgentId), () => sentryJob.wake()),
+    subscribeCommandCompletion(sentryEligibilityKey('sentry'), () => sentryJob.wake()),
+    subscribeCommandCompletion(backgroundDueKey('push'), () => pushJob.wake()),
+    subscribeOperatorSystemDmDeliveries(() => dmJob.wake()),
+  ];
+  if (push) liveListener.setPushWake(() => pushJob.wake());
+  liveListener.setXSignupDeliveryWake(() => xJob.wake());
+  liveListener.setOwedWake(source => { if (source === 'sentry') sentryJob.wake(); });
+  liveListener.setMcpWebhookWake(() => mcpJob.wake());
   // A committed wake for a sleeping free agent starts its Machine at once;
-  // the leader sweep retries anything this misses.
-  const stopFreeAgentWake = freeAgents?.subscribeToWakes(live);
+  let stopFreeAgentWake: (()=>void) | undefined;
   const port = Number(process.env.PORT ?? '8080');
   const host = process.env.HOST ?? '127.0.0.1';
   await listenAfterBestEffortRecovery(server, async () => {
-    await clearStalePhoneViews(database, connectionPresence.instanceId);
-    await connectionPresence.renewLease();
     await connectionPresence.start();
   }, port, host);
-  void leader.run();
-  const stopOperationOutcomes = startOperationOutcomeFlush(jobsDatabase, operationOutcomes, backgroundJobs, wake => jobsDatabase.onRecovery(wake));
-  const stopComputerExpiry = startComputerExpirySweep(database, live);
-  console.log(`[server] listening on ${host}:${port}; store=postgres; background=advisory-lock`);
-  const stop = async () => {
+  stopFreeAgentWake=freeAgents?.subscribeToWakes(live);
+  schedulesJob.wake();
+  const stopOperationOutcomes = startOperationOutcomeFlush(jobsDatabase, operationOutcomes, backgroundJobs);
+  console.log(`[server] listening on ${host}:${port}; store=postgres; background=events`);
+  installShutdown(server, async () => {
     mcpStop.abort();
-    const mcpStopped = stopMcpWebhooks();
-    stopSystemDmWake();stopSystemDmRecovery();
-    stopConnectorOfferWake();stopConnectorOfferRecovery();stopConnectorOfferResync();
-    stopSentryRecipient();stopSentryRoom();stopSentryRecovery();stopSentryResync();
-    stopChoiceWake();stopChoiceRecovery();
-    stopAttachmentRecovery();stopAttachmentResync();stopAttachmentWake();
-    stopScheduleRecovery();stopScheduleResync();stopScheduleWake();
-    await leader.stop();
-    stopBackgroundSources();
-    stopVoiceDeadlines();
-    // The provider flight intentionally does not block unrelated leader jobs.
-    // Once leadership admissions stop, drain its final receipt before pools close.
-    await nextDayCheckinRunning;
-    await mcpStopped;
-    stopComputerExpiry();
-    stopDisplayDeadline();stopDisplayRecovery();stopDisplayResync();
+    liveListener.setMcpWebhookWake(() => {});
+    for (const stop of stops) stop();
+    await cornerMachine.stop();
+    scheduleClock.stop();
+    await Promise.all([pushJob.stop(), sentryJob.stop(), xJob.stop(), dmJob.stop(), schedulesJob.stop(), mcpJob.stop()]);
+    scheduleClock.stop();
     stopFreeAgentWake?.();
     await voice?.close();
     await connectionPresence.stop();
     await liveListener.stop();
-    await new Promise<void>((resolve) => server.close(() => resolve()));
     await stopOperationOutcomes();
     await mountedAuth.close();
     await Promise.all([github?.stopCheckRefreshes(), githubJobs?.stopCheckRefreshes()]);
@@ -635,32 +495,25 @@ async function main() {
       healthDatabase.close(),
       jobsDatabase.close(),
     ]);
-  };
-  process.once('SIGINT', () => void stop());
-  process.once('SIGTERM', () => void stop());
+  });
 }
 
-/** `--add-free-agent <workspaceId>`: give an existing Workspace its free agent. */
-async function runAddFreeAgent(workspaceId: string | undefined): Promise<void> {
-  if (!workspaceId) throw new Error('--add-free-agent requires a Workspace id');
+/** Operator creation or release-time warming, using the normal free-agent service. */
+async function runFreeAgentOperation(refresh: boolean, workspaceId: string | undefined): Promise<void> {
+  if (!refresh && !workspaceId) throw new Error('--add-free-agent requires a Workspace id');
   const config = freeAgentConfigFromEnv(process.env, required('PUBLIC_ORIGIN'));
   if (!config) throw new Error('free agents are not configured on this server');
   const database = new PostgresDatabase(required('DATABASE_URL'), 1, { mode: 'long-running' });
   try {
-    const service = new FreeAgentService(
-      database,
-      config,
-      new FlyMachines(
-        required('FLY_FREE_AGENT_API_TOKEN'),
-        process.env.FLY_FREE_AGENT_APP || 'beeline-free-agents',
-        fetch,
-        process.env.FLY_FREE_AGENT_API_ORIGIN || undefined,
-      ),
-      async () => {
-        throw new Error('bootstrap is served by the running server');
-      },
-    );
-    const agentId = await addFreeAgentToWorkspace(database, service, workspaceId);
+    if (refresh) {
+      await notifyLive(database,{table:'free_agents',operation:'RELEASE',roomId:''});
+      console.log('[free-agents] release inventory requested from running server owners; readiness awaits helper connections');
+      return;
+    }
+    const service = new FreeAgentService(database,config,new FlyMachines(
+      required('FLY_FREE_AGENT_API_TOKEN'),process.env.FLY_FREE_AGENT_APP || 'beeline-free-agents',fetch,
+      process.env.FLY_FREE_AGENT_API_ORIGIN || undefined),async () => { throw new Error('bootstrap is served by the running server'); });
+    const agentId = await addFreeAgentToWorkspace(database, service, workspaceId!);
     console.log(agentId
       ? `[free-agents] added free agent ${agentId} to Workspace ${workspaceId}`
       : `[free-agents] Workspace ${workspaceId} already has a free agent, or its owner is at the limit`);
@@ -682,11 +535,11 @@ async function runWelcomeRetirementPreflight(): Promise<void> {
 
 const migrationMode =
   process.argv[2] === '--migrate' || process.argv[2] === '--welcome-retirement-preflight' ||
-  process.argv[2] === '--add-free-agent';
+  process.argv[2] === '--add-free-agent' || process.argv[2] === '--refresh-free-agents';
 (process.argv[2] === '--welcome-retirement-preflight'
   ? runWelcomeRetirementPreflight()
-  : process.argv[2] === '--add-free-agent'
-    ? runAddFreeAgent(process.argv[3])
+  : process.argv[2] === '--add-free-agent' || process.argv[2] === '--refresh-free-agents'
+    ? runFreeAgentOperation(process.argv[2] === '--refresh-free-agents', process.argv[3])
   : migrationMode
     ? runReleaseMigration()
     : main()

@@ -48,3 +48,7 @@ export * from './media-metadata.js';
 export * from './external-agent-rules.js';
 
 export { isChatListView } from "./phone-guards.js";
+
+export * from './mcp-delivery.js';
+
+export * from './mcp-muse-recipe.js';

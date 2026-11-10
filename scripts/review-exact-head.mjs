@@ -43,6 +43,7 @@ export const REVIEW_BUILD_PACKAGES = [
   '@beeline/nostr',
   '@beeline/api-contract',
   '@beeline/buzz-client',
+  '@beeline/net',
   '@beeline/auth',
   '@beeline/body',
 ];
@@ -121,7 +122,7 @@ function defaultGit(args) {
 }
 
 /** Reuse only the installed generation for this exact lockfile and runtime. */
-export function reuseReviewDependencies(source, target) {
+export function reuseReviewDependencies(source, target, sourceRoot = source, targetRoot = target) {
   try {
     const lock = readFileSync(join(target, 'package-lock.json'));
     if (!lock.equals(readFileSync(join(source, 'package-lock.json')))) return false;
@@ -148,9 +149,9 @@ export function reuseReviewDependencies(source, target) {
         if (name === '.beeline-generation') continue;
         if (lstatSync(src).isSymbolicLink()) {
           const dest = resolve(dirname(src), readlinkSync(src));
-          const rel = relative(source, dest);
+          const rel = relative(sourceRoot, dest);
           symlinkSync(!rel.startsWith('../') && !isAbsolute(rel)
-            ? relative(dirname(dst), join(target, rel)) : dest, dst);
+            ? relative(dirname(dst), join(targetRoot, rel)) : dest, dst);
         } else if (!scope && name.startsWith('@')) place(src, dst, true);
         else if (!scope && name === '.bin') cpSync(src, dst, { recursive: true, verbatimSymlinks: true });
         else if (lstatSync(src).isDirectory()) symlinkSync(src, dst, 'dir');
@@ -212,7 +213,7 @@ export function reviewExactHead(argv, deps = {}) {
 
     const prepare = (part = '') => {
       const target = join(worktreeDir, part);
-      if (reuse(join(sourceRoot, part), target)) {
+      if (reuse(join(sourceRoot, part), target, sourceRoot, worktreeDir)) {
         note(`dependencies${part ? ' ' + part : ''}`, true, 'reused matching shared generation');
         return;
       }
@@ -222,8 +223,9 @@ export function reviewExactHead(argv, deps = {}) {
       const trees = new Set(['node_modules']);
       for (const path of Object.keys(lock.packages ?? {})) {
         const parts = path.split('/'), index = parts.indexOf('node_modules');
+        if (index < 0) continue;
         if (isAbsolute(path) || parts.includes('..')) throw new Error('Unsafe dependency lockfile');
-        if (index >= 0) trees.add(parts.slice(0, index + 1).join('/'));
+        trees.add(parts.slice(0, index + 1).join('/'));
       }
       for (const tree of trees) rmSync(join(target, tree), { recursive: true, force: true });
       const install = run('npm', ['ci', '--prefix', target], { cwd: worktreeDir });

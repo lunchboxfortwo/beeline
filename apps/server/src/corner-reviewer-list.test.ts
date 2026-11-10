@@ -3,10 +3,9 @@ import { cornerRunOutcomeSql, cornerRunStateSql } from './corner-run.js';
 import { migrate, PostgresDatabase, type SqlDatabase } from './database.js';
 import { Pool } from 'pg';
 import { randomUUID } from 'node:crypto';
-import { workflowRunLockKey } from './workflow-runs.js';
 import { PgliteDatabase, assignCornerWorker, insertCornerFacts } from './test-support.js';
 import { PhoneService } from './phone-service.js';
-import { DaemonService } from './daemon-service.js';
+import { HelperDaemonService as DaemonService } from './test-fixtures/helper-daemon.js';
 import { LiveHub } from './live.js';
 import { systemLine } from './system-line.js';
 import { routeSystemCommand } from './agent-command.js';
@@ -145,7 +144,7 @@ async function failTurn(c: AgentCommand) {
 }
 
 const reviews = async (agentId: string) =>
-  (await commands(agentId)).filter((c) => c.reason === 'subscribed_event');
+  (await commands(agentId)).filter((c) => ['subscribed_event', 'corner_review_dispatch'].includes(c.reason));
 
 async function setReviewer(id: string | null) {
   await phone.execute('updateRoom', { roomId: R, reviewerAgentId: id }, H);

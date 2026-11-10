@@ -5,10 +5,10 @@ by its creator, when the owner has room for both under the free-agent limit.
 Otherwise #general explains where the existing starter agents live and why a
 new team was not created.
 Existing Workspaces and the operator single-agent addition keep their existing
-behavior. Each agent runs on its own small Fly Machine in the `beeline-free-agents` app, which sleeps after
-a minute without work. People who only join an existing Workspace by invite get
+behavior. Each agent runs on its own small Fly Machine in the `beeline-free-agents` app, which sleeps when
+its work finishes. People who only join an existing Workspace by invite get
 none. Code: `apps/server/src/free-agents.ts`, `free-agent-model-proxy.ts`,
-`fly-machines.ts`; helper `apps/body/src/free-agent-vm.ts`, `free-agent-idle.ts`;
+`fly-machines.ts`; helper `apps/body/src/free-agent-vm.ts`;
 image `infra/free-agent/`.
 
 New starter teammates are named **Beebee** and **Luna**, using `@beebee` and
@@ -27,76 +27,64 @@ soul. Existing free agents keep their names.
   Beebee/Luna/Beebee banter through the shared model proxy using each agent's
   stored model and instructions. The phone supplies its timezone at creation.
   Room entry starts playback: each accepted line follows a brief working state,
-  then Beebee posts the fixed first-name hello and the repository, YouTube and
-  Something else choices. Invalid lines get one retry; a failed exchange or the
-  Room-entry deadline (20 seconds) falls back to the hello and choices.
-  Repository choices reuse the repository/starters cards; YouTube uses the
-  existing multipart connector and requires a preview Post tap before upload;
-  Something else focuses the composer. Manual reruns queue the same flow after
-  the command commits and remain outside signup funnel counts. The game and
-  explanation welcome paths are retired. The single-agent operator path retains
-  the legacy hello.
+  then Beebee posts the fixed first-name hello and asks “What should we work on?”
+  Nothing follows that open question. Invalid or late banter falls back
+  to this same hello. No option card or video workflow is created. Tic-tac-toe is
+  available through the onboarding game tool when requested. Manual reruns queue
+  the same flow after commit and remain outside signup funnel counts. The
+  single-agent operator path retains the legacy hello.
   The legacy hello teaches Room replies, corners and connectors, then asks what the person is working on. It contains no repository card; the agent offers one only for coding or GitHub-connection intent.
   The hello tags the owner through the normal mention/push path and uses the
   agent's actual handle. It creates no model turn or Machine. The first real
-  queued work provisions the Machine through `FreeAgentService.kick` or committed deadline recovery.
+  queued work provisions the Machine through `FreeAgentService.reconcile` from its committed work event.
   A creator owns at most
   `BEELINE_FREE_AGENT_MAX_PER_OWNER` (default 3) free agents.
-- **First boot.** The image builds the thin Beeline helper and its MCP entrypoint
-  from its own release SHA, alongside pinned Pi. `entrypoint.sh` runs
-  `BEELINE_LAB=1 install.sh` before launching any helper,
-  reconciling the published bundle even on a persistent rootfs. A helper refused
-  by the server's minimum-version gate exits; the entrypoint refreshes and retries.
-  A failed refresh retains the installed helper. The Machine trades its
-  one-time `BEELINE_FREE_AGENT_BOOTSTRAP` at `POST /v1/free-agents/bootstrap`. It gets
-  its keys, a fresh daemon exchange token and a revocable model token. The root
-  filesystem persists (`rootfs.persist=always`), so later boots skip this step.
-  Runtime owner records include the Linux boot id as well as process start ticks;
-  legacy tick-only records require command-line ownership. A free-agent helper
-  that has not established its runtime within five minutes reports once and
-  exits with status 78; the entrypoint stops that boot instead of retrying.
-  The boot budget spans refreshes and failed launches. A shell watchdog also
-  stops an old fallback helper after five minutes plus ten seconds; installer
-  attempts are bounded to two minutes. Establishing the runtime cancels both
-  startup watchdogs.
-- **Sleep.** The helper admits one idle episode at `POST /v1/free-agents/sleep` 60 s after the
-  last turn ends. The server refuses while a wake is pending or a connector
-  install/sign-in is active. The idle reaper respects the same connector work;
-  completion, failure or disconnect releases that protection. A refused or uncertain helper request stays parked until actual activity
-  or resume starts a new idle episode. Otherwise the server records
-  `sleeping` and asks Fly to suspend the Machine. If suspend fails, it stops the
-  Machine. A helper behind the announced release asks for `refresh` and gets a stop,
-  so its next boot installs the new release. The helper never updates in place.
-- **Wake.** The Fly adapter submits one start request per admitted action. HTTP 412 and lost replies return to the owner without a timer or resubmission (`fly-machines.test.ts`). Before starting an existing Machine, the server compares its image
-  with the configured published digest and updates it while keeping its complete
-  configuration and persistent rootfs. Cold boot reconciles the broker marker
-  directory anchor after an image replacement, preserving its account binding.
-  Every committed `agent_commands` INSERT for a free agent calls
-  `FreeAgentService.wake`. A committed connector-assignment notification also
-  wakes a free agent with active connector installation or sign-in work, through
-  the same budget and start-limit fences. Committed family sources and stored command, turn-cap, idle and retention
-  deadlines admit leader recovery; there is no 15-second sweep. A failed
-  provider observation parks until an actual input or recovery boundary. Wakes are never
-  suppressed for an offline Machine (`agentMachineOfflineSql` exempts free agents). A
-  released connection keeps presence `online`, `held`, `asleep`, so mentions never get
-  "its helper is offline". On resume the helper sees the wall clock jump past its
-  monotonic clock. It then replaces its socket at once (`LiveLink.reconnectNow`).
-  For every agent, dispatch also writes a working turn before helper pickup.
-  A helper claim replaces the reserved `pending:<command id>` generation in
-  that same row. If nobody claims it in **90 seconds**, the existing server
-  pickup deadline clears the optimistic row and invalidates the Room; the
-  command remains available. Optimistic turns are not helper-presence evidence.
-  Delayed wakes paint when released; passive computer observations stay silent.
-- **Reaper (leader).** A running Machine with no work for 5 minutes is stopped. A
-  Machine with no activity for 30 days is deleted. A later wake recreates it from the
-  sealed keys (its files are gone).
+- **First boot.** The pinned image contains its compatible helper and Pi. The
+  entrypoint launches that baked helper once; it performs no installer download,
+  refresh loop or startup watchdog. Bootstrap exchanges the Machine's saved
+  bootstrap identity for keys, daemon access and a model token. Files and account
+  binding persist on the root filesystem. A lost create reply is reconciled by
+  stable agent identity and adopts the existing Machine without replacing files
+  or rotating its bootstrap identity.
+- **Work and sleep.** Every committed command, connector report, authenticated
+  connection, removal, listener recovery and release signal enters
+  `FreeAgentService.reconcile`. That owner serializes create, image update, start,
+  suspend and destroy across servers. It reads pending/claimed commands, connector
+  work, Fly's observed machine/version and current authenticated connection.
+  Free helpers never receive Squire install assignments. Saved Squire installation
+  rows cannot keep them running or block image replacement; supported Workspace
+  connector installs still count as work, matching `daemonConnectorAssignments`.
+  Claimed invocations and connector installs finish before image replacement.
+  A connected helper with no remaining work is suspended; the provider's completed
+  snapshot hands any work committed during suspension back to the same owner.
+  There is no countdown, periodic sweep or timed retry.
+- **Image replacement and wake.** The owner preserves the full machine config and
+  persistent filesystem. A successful image POST does not establish readiness:
+  the owner observes completion for the returned Fly version before deciding
+  whether an ordinary start is required. Stopped, suspended and created machines
+  with work start once from that observation. A started machine awaits its real
+  authenticated helper connection. A lost provider reply gets one authoritative
+  observation, never a replay of the unknown mutation; saved commands remain
+  pending. Recovery after an unobservable provider completion requires another
+  actual signal. No external-completion/eventual-recovery guarantee is implied.
+  Connection registration manages connection facts only and cannot clear the
+  lifecycle owner's token. Model admission uses current connection and claimed
+  invocation authority, independently of retired lifecycle fields.
+- **Message display.** An accepted pending human command projects starting in the
+  existing thinking line. Only a real claim writes a working turn and starts its
+  elapsed counter. Terminal work clears the line. Full reads, send receipts and
+  socket command projections share the same server projection; the optional
+  `runtimePhase` wire field remains for older phones, derived from the command.
+  There is no stored preparation phase or synthetic `pending:*` working turn.
+  A released helper returns unfinished commands to pending without inventing a
+  failure. Explicit Stop, membership and retirement remain authoritative.
 - **Removal.** The existing Members remove action admits the agent owner or a
   Workspace owner/admin. Removal from any Workspace retires the free-agent runtime,
   matching the existing global daemon retirement. Its transaction keeps a permanent `removed_at` tombstone,
   revokes model/bootstrap and daemon access, and records `removed`. After commit,
   cleanup deletes the Fly Machine without delaying the removal. A later committed source or real recovery can revisit
   failed deletion, including a Machine created by provisioning already in flight.
-  Removed agents cannot bootstrap, wake, reap back into service, or be replaced by
+  Removed agents cannot bootstrap, wake, or be replaced by
   `--add-free-agent` in that Workspace. Beebee's server-posted first hello ends by explaining how
   to remove it from Members.
 - **Existing Workspaces.** An operator gives one its free agent with
@@ -116,18 +104,13 @@ soul. Existing free agents keep their names.
   owner's allowance like any turn. Several events while the Machine sleeps are
   coalesced on return into one turn.
 
-Every transition writes `free_agent_events`. These rows are the source of the
-rewake latency numbers from `scripts/prove-free-agent.mjs`: created, provisioned,
-bootstrapped, connected, sleep_requested, slept, wake_requested, machine_started,
-reaped_idle, deleted_idle and allowance_reached.
-
-`R-SQUIRE-SLEEP` in `free-agents.test.ts` covers pairing while suspended, sign-in
-sleep protection, terminal release and wake fences. After building the server,
-`node --import tsx scripts/prove-squire-free-agent-wake.mjs` exercises the built
-phone HTTP pair → committed notification → wake → helper assignment → phone
-sign-in surface → completion path. PGlite, a stateful Machines API stand-in and
-simulated helper reports isolate it from production; it does not measure live
-Fly resume or helper reconnect latency.
+`free_agent_events` records factual provisioning, connection, start requests,
+suspension, retirement and spend observations. Historical state/phase events remain
+available for audit. The physical `state`, `runtime_phase` and retired preparation
+columns remain through serving and rollback overlap; current lifecycle and model
+admission never read or write their values. Physical removal requires the existing
+post-drain contract migration. The operation token is exclusive effect ownership,
+not readiness. Only `FreeAgentService` writes and releases it.
 
 Existing free agents switch to Pi on their next cold boot. The helper upgrades
 the persisted runtime and writes a private Pi provider configuration before
@@ -144,17 +127,16 @@ and a 65,536-token output ceiling.
 ## Model access and allowances
 
 The Machine never holds a provider key. Pi's `beeline` provider points at
-`POST /v1/free-agents/model/chat/completions` with the agent's model token. The
+`POST /v1/free-agents/model/chat/completions` with the current claimed invocation’s private credential. The release-owned Pi extension supplies invocation and request-ID headers to the existing native provider transport and commits its signed response receipt; legacy agent-wide model tokens cannot call this endpoint. The
 proxy pins each new agent's stored model. Beebee uses `BEELINE_FREE_AGENT_MODEL` (default `deepseek/deepseek-v4.1-flash-1017`); Luna uses `BEELINE_FREE_AGENT_LUNA_MODEL` (default `openai/gpt-6-luna`). Existing rows without a stored model keep the configured legacy model. Both teammates reserve and settle against the same owner's allowance and shared dollar budget. It
 forwards to `BEELINE_FREE_AGENT_MODEL_UPSTREAM` (default OpenRouter) with
 `BEELINE_FREE_AGENT_MODEL_KEY`, which may be a Squire egress grant. Before each call it
 reserves an estimated prompt plus a capped reply against the
-owner's daily allowance, under a per-owner lock. Concurrent reservations
+owner's daily allowance with atomic counter updates. Concurrent reservations
 fit the cap, and each reply is bounded to the estimated room left. Actual
 usage can exceed the prompt estimate; settlement corrects the balance. On completion it settles to the reported usage.
 A refused call is
-refunded. An interrupted reply without usage releases its token reservation;
-reported usage is still charged. The default allowance is 3M tokens a day, and an owner's first 24 hours (from their first settled model call) get a larger 10M-token allowance so day one does not run out. There is no lifetime cap unless
+refunded. An uncertain helper request retains its reservation until an authoritative result can settle it; reported usage is charged. The default allowance is 3M tokens a day, and an owner's first 24 hours (from their first settled model call) get a larger 10M-token allowance so day one does not run out. There is no lifetime cap unless
 `BEELINE_FREE_AGENT_LIFETIME_TOKENS` is
 set. The first-24h allowance is `BEELINE_FREE_AGENT_FIRST_DAY_TOKENS` (default 10M,
 never below the daily cap). A charge
@@ -169,38 +151,35 @@ The proxy caps every reply at `BEELINE_FREE_AGENT_MAX_OUTPUT_TOKENS` (default
 reserves 8,192. Pi still asks for 65,536, so the cap changes with a server
 restart and needs no image rebuild.
 
-OpenRouter holds each running call's prompt plus `max_tokens` cost against an
-account in-flight budget. A call that does not fit gets HTTP 402 with
-`error.metadata.reason` `in_flight_budget_exhausted` and a `Retry-After`. The
-proxy returns that first refusal and its `Retry-After` metadata immediately,
-refunds the reservation once, and releases its call slot. It never waits and
-resubmits. A separately admitted model call can obtain a fresh result. Other
-402 reasons and other errors retain their existing refusal/refund behavior.
+Each authorized model call goes directly upstream. A provider refusal is recorded
+for that exact invocation and returned plainly. The server leaf reads its recorded
+receipt after provider transport loss; a lost helper response remains UNKNOWN,
+without a helper-side receipt request or another paid request. No process-wide call queue or per-owner
+minute throttle delays a call. Allowance and dollar reservations still happen
+atomically before provider entry.
 
-Each server process runs at most `BEELINE_FREE_AGENT_MAX_CONCURRENT_CALLS`
-(default 8) upstream calls at once, across all free agents. Further calls wait
-in arrival order. A queued call gives up when its caller disconnects or its
-turn reaches the 15-minute cap, refunds its reservation and gets HTTP 503.
-The limit is per process: production runs two machines, so the real ceiling
-is twice the setting.
-
-Helper model calls require a claimed `input`/`resume` command with a live lease and a
-claim younger than the hard turn cap. Pending and completed commands do not
+Helper model calls require a claimed `input`/`resume` command and its current
+connection owner. Every request checks current invocation authority and the shared cost
+budget; a refusal ends that turn through the single terminal owner. The Machine
+then sleeps at its normal idle boundary. Pending and completed commands do not
 permit calls, including copied model tokens used from outside Beeline. The
-helper retains the command claim through model retries and tool follow-ups;
-there is no post-completion grace that would authorize idle calls. Server-owned starter banter is a separate internal entry: a recent generating onboarding run must bind the agent and owner to the current Room team. It shares the same allowance, dollar budget, queue and settlement code; the HTTP endpoint retains its live-turn requirement.
+helper retains the command claim through model responses and tool follow-ups;
+there is no post-completion grace that would authorize idle calls. Server-owned starter banter is a separate internal entry: a recent generating onboarding run must bind the agent and owner to the current Room team. It shares the same allowance, dollar budget, settlement code; the HTTP endpoint retains its live-turn requirement.
 
-A per-owner UTC minute counter defaults to 30 admitted calls, including failed
-upstream attempts. Reservations take a global advisory lock before the owner
-lock. The shared UTC daily dollar budget defaults to **$25**. Each call reserves
+Reservations update owner lifetime accounting, daily tokens and shared dollars
+in that order within one short database transaction, refunding excess owner
+allocation when the shared budget grants less output. The legacy counter table
+retains lifetime totals only; its minute and call-count fields no longer admit or
+throttle requests. No network runs in that transaction. See `free-agent-accounting.ts`.
+The shared UTC daily dollar budget defaults to **$25**. Each call reserves
 its full uncached prompt and bounded output at configured fallback prices before
 contacting the model. Successful calls settle to OpenRouter `usage.cost`, or to
-configured input/output prices when cost is absent. Failed upstream calls refund
-the reservation; interrupted replies without usage keep it. Each settlement
+configured input/output prices when cost is absent. Definite provider refusals refund
+the reservation; unknown or interrupted outcomes without usage keep it. Each settlement
 records `model_usage` (day, charged tokens, USD). A `budget_reached` event records
-refused model calls and wakes. At the budget, calls return a first-person pause
-message and provisioning/waking cannot start Machines. Queued wakes remain for
-the next UTC day. Operators must keep fallback prices at or above their pinned
+refused model calls. At the budget, model calls refuse with the allowance reason and end the
+current turn once; provisioning and waking remain independent of model spend. A fresh request
+gets a fresh cost check without parking or rearming old commands. Operators must keep fallback prices at or above their pinned
 model's worst-case prices; changing models requires checking these prices.
 
 Admission estimates tokenized text as `ceil(UTF-8 bytes / 3) + 256`, including
@@ -223,7 +202,7 @@ cache hints are not trusted.
 The estimated reservation cannot fall below a cold text-byte ceiling plus
 256 framing tokens minus **32,768 tokens shared across all outstanding requests
 for one owner and UTC day**. `free_agent_usage.reservation_credit` tracks that
-uncertainty under the existing global/owner advisory locks, across server
+uncertainty through the same atomic daily counter update, across server
 instances. Settlement/refunds release the credit and use exact reported usage,
 including cache misses. This bounds admission uncertainty for the supported
 text representation even when every cache prediction misses; it is not a
@@ -231,26 +210,25 @@ claim to know a missing provider usage record. A crashed request can leave its
 reservation/credit held conservatively, as with the existing token reservation.
 The shared dollar budget retains its original full wire-byte reservation;
 binary/metadata accounting never creates a dollar-budget bypass. The 8 MiB
-request ceiling, owner rate limit and turn deadline also remain in force.
+request ceiling and spend accounting remain in force.
 See [SUB0ZERO admission and instruction replay proof](free-agent-token-admission-proof.md).
 
-Free-agent ACP turns have a hard wall clock cap of **15 minutes**, measured from
-local command intake across prompt retries. Activity does not extend it. The
-helper cancels the prompt, publishes a short note inviting another message, and
-discards the session. The leader reaper cancels overdue claimed commands after
-the cap plus 60 seconds of grace and stops their Machine even if it is still
-reporting activity. Idle, hard-turn and deletion durations are unchanged; the leader arms stored
-record deadlines rather than recurring discovery intervals.
+Free-agent turns end on their result, explicit Stop, removal, or actual process loss.
+There is no elapsed execution window, generated shell-time budget, model-call
+queue or per-owner calls-per-minute limit. Model calls retain current command,
+generation, connection and Room membership checks, the daily token allowance,
+and the shared daily dollar budget. Lost model responses retain their original
+invocation receipt; they do not authorize another paid request.
 
-Pi shell commands leave a delivery window before that cap. The generated
-`pi-turn-budget.ts` extension reads the current command intake time for each
-`bash` call and clamps its timeout to the remaining budget minus one minute
-(one tenth of the budget for shorter configured test turns). Shorter requested
-timeouts remain intact. During the delivery window, new shell commands are
-refused; a budget-stopped command tells the agent to deliver finished files or
-explain what remains. The hard cap and its existing plain continuation notice
-are unchanged. Regression: `pi-turn-budget.test.ts`; isolated real-Pi proof:
-build the body, then run `node scripts/prove-turn-command-budget.mjs`.
+Runtime preparation is outside execution. Pending commands are saved work;
+claims begin execution at the server claim timestamp. The image always runs its
+baked helper and pinned Pi/ACP. Free agents have no helper self-update, local
+refresh flag, sleep HTTP endpoint or settings/idle-window file. Generic helpers
+retain their own release transaction. `free-agent-acquisition.test.ts` covers
+connection/model authority, pending presentation and provider observations;
+`free-agent-ownership.postgres.test.ts` proves two independent PostgreSQL owners
+and the final-read handoff race. Run each Vitest suite separately with
+`--maxWorkers=2 --minWorkers=1`.
 
 At 80% of whichever allowance applies (2.4M of the default 3M daily cap, or 8M of the 10M first-day cap), settlement posts one plain allowance notice per owner per UTC day into the room where the person is working, with the midnight UTC reset and a Members ->
 Add agent link. The owner must be a room member; otherwise nothing is posted. Delivery does not call a model. The warning records
@@ -271,51 +249,57 @@ Free agents run when all of these are set:
 (scoped to the app), and for the model `BEELINE_FREE_AGENT_MODEL_KEY`. Optional:
 `FLY_FREE_AGENT_APP`, `FLY_FREE_AGENT_REGION`, `FLY_FREE_AGENT_CPUS`,
 `FLY_FREE_AGENT_MEMORY_MB` (1 shared CPU, 2048 MB: with 1024 MB a Machine with no swap stalled after its first turn),
-`BEELINE_FREE_AGENT_IDLE_SECONDS`, `BEELINE_FREE_AGENT_REAP_IDLE_SECONDS`,
-`BEELINE_FREE_AGENT_DELETE_AFTER_DAYS`, `BEELINE_FREE_AGENT_DAILY_TOKENS`,
+`BEELINE_FREE_AGENT_DAILY_TOKENS`,
 `BEELINE_FREE_AGENT_LIFETIME_TOKENS`,
 `BEELINE_FREE_AGENT_CACHED_TOKEN_WEIGHT` (0.25),
-`BEELINE_FREE_AGENT_CALLS_PER_MINUTE` (30),
 `BEELINE_FREE_AGENT_DAILY_BUDGET_USD` (25),
 `BEELINE_FREE_AGENT_INPUT_USD_PER_MILLION` (1),
 `BEELINE_FREE_AGENT_OUTPUT_USD_PER_MILLION` (5),
-`BEELINE_FREE_AGENT_MAX_TURN_SECONDS` (900),
 `BEELINE_FREE_AGENT_MAX_OUTPUT_TOKENS` (32768),
-`BEELINE_FREE_AGENT_MAX_CONCURRENT_CALLS` (8, per server process),
-`BEELINE_FREE_AGENT_INSTALL_BASE_URL` and
 `FLY_FREE_AGENT_API_ORIGIN` (proofs only). Fly offers no egress firewall for
 Machines, so outbound traffic is not restricted. The abuse limits are Machine
-size, sleep, the reaper, live turns, owner token/rate limits and the shared dollar budget.
+size, automatic sleep, current invocation authority, owner token allowances and the shared dollar budget.
 
 ## Image and proofs
 
-Hosted VMs include Chrome, the remote sign-in display tools and a real systemd
-user manager started by `infra/free-agent/hosted-services.sh`. Each VM keeps its
-own profile and broker sockets on its private rootfs. The image-owned Squire
-broker unit is enabled under `default.target` and starts on boot. The helper's
-existing suspend detector reruns `hosted-services.sh` before its immediate
-socket reconnect, restoring a missing user manager or broker through systemd.
-This script fixes HOME and XDG paths to the machine's root account, including
-when called from a process with an agent home. Failed recovery exits the helper
-so the existing entrypoint retries boot recovery. Hosted installation waits for both
-broker sockets before opening sign-in. The phone receives Squire's streamed
-virtual browser page. Owners' personal-computer setup keeps its existing path.
-The isolated entry is `infra/free-agent/hosted-install-proof.mjs`; evidence and
-remaining full-account checks are in [the onboarding connection proof](onboarding-connect-proof.md).
-Real Fly restart, suspend/resume and missing-manager recovery evidence:
-[broker restart proof](free-agent-broker-restart-proof.json). The disposable
-Machine uses the production helper with an empty agent inventory; it proves
-real systemd/Squire recovery and sign-in, without server registration or model
-turns. `infra/free-agent/resume-proof-helper.mjs` supplies that entry and
-`infra/free-agent/hosted-service-state.mjs` records redacted state/sign-in results.
+Hosted VMs contain agent-browser 0.41.2 (Apache-2.0) and Lightpanda 1.0.3
+(AGPL-3.0), resolved from the latest stable upstream releases and pinned by SHA-256
+in `infra/free-agent/Dockerfile`. Update the version and checksum together when
+adopting a newer release; builds never resolve a mutable latest tag. The native
+agent-browser CLI launches Lightpanda on demand. `free-agent-vm.ts` reconciles its
+engine and executable environment into new and persisted isolated agent homes.
+The browser socket directory is `/tmp/beeline-browser` inside each Room sandbox’s
+private `/tmp`, keeping Unix socket paths below the limit despite long harness homes.
+There is no Chrome, virtual display, Squire package, broker or startup service.
+A bot check, sign-in or signup ends browsing with a plain explanation and the
+suggestion to open the site personally or connect an owned agent. Do not retry
+or claim a blocked action succeeded. Server connector routes refuse Squire
+cards and assignments on free agents. Personal agents retain their own tools.
 
+Every free agent receives exactly this team guide, including existing agents on
+configuration reads: “Try to include another agent, if available, to request
+feedback on your work as much as possible.” `FREE_AGENT_TEAM_GUIDE` contains no
+question-count decay or additional directions. Personal agents do not receive it.
 
-After a server release, `.github/workflows/free-agent-image.yml` builds
-`infra/free-agent/Dockerfile`, publishes its immutable digest, stages that digest
-as the server's `FLY_FREE_AGENT_IMAGE`, and updates server Machines one at a time.
-It verifies the running image setting on each server and fails on an older ref.
-Image publication failures fail this independent workflow without holding the
-main release open. `scripts/build-free-agent-image.sh` builds the same image by hand.
+The server release leg (`.github/actions/server-leg/action.yml`) builds
+`infra/free-agent/Dockerfile` from the release checkout, publishes its immutable
+digest, and stages that digest as `FLY_FREE_AGENT_IMAGE` before the release's
+existing server rollout. Each server receives it during that rollout; no
+post-release job restarts server Machines. Publication failure stops the leg
+before deployment. After rollout, the leg verifies the image setting on each server and
+`--refresh-free-agents` publishes a release signal to the running owners. It does
+not create a second service or claim that a notification is helper readiness.
+Startup/recovery/release inventory visits every mapped machine regardless of the
+retired state, adopts known metadata mappings, leaves idle identities unprovisioned,
+and reports unmapped provider machines as preserved ownership discrepancies.
+A failed observation does not skip the rest of that finite inventory.
+After release, firstmate verifies that a stopped free agent in a firstmate-owned
+test Room answers a fresh message and checks actual image/connection/work facts;
+a successful signal or update POST alone is insufficient.
+`free-agent-refresh.test.ts` covers all retired state values, deferred claimed
+work, partial failures and preserved unmapped machines.
+`scripts/build-free-agent-image.sh` builds the
+same image by hand.
 `npm run prove:free-agent:docker-machines` stands in for the Machines API with
 Docker for a local end-to-end run (suspend = `docker pause`). `npm run
 prove:free-agent` runs the end-to-end proof and the rewake latency measurement
@@ -328,15 +312,20 @@ The image's helper build takes `BEELINE_RELEASE_SHA` and
 `BEELINE_RELEASE_VERSION`; the hand-build script supplies the checkout SHA.
 `scripts/stage-free-agent-helper.sh` builds the canonical helper bundle from
 that checkout. Image construction verifies its SHA, version and digest, then
-installs it through the existing recovery installer in an isolated build stage.
-`node --test infra/free-agent/entrypoint.test.mjs` exercises cold-boot refresh,
-fallback and startup deadlines. The [persistent boot recovery proof](free-agent-persistent-boot-proof.md)
+installs it through the existing recovery installer in an isolated build stage
+under `/opt/beeline/helper`. The entrypoint launches that image-owned helper
+directly, so an older release pointer in persistent HOME cannot select the runtime.
+`node --test infra/free-agent/entrypoint.test.mjs` covers stale-HOME boot selection,
+and helper exit propagation. The [persistent boot recovery proof](free-agent-persistent-boot-proof.md)
 records a disposable Fly Machine cold stop/start and the stale-owner regression.
 After building the server and image, `node infra/free-agent/cold-start-proof.mjs`
 creates a disposable local database and fresh test Workspace, then drives the
 real server, image and Pi through a mention and reply. Docker substitutes for
-Fly and an immediate local model response substitutes for the provider; the
-timed artifact identifies both stand-ins. Set `PROOF_IMAGE` to choose an image.
+Fly (including HOME persistence), and a deterministic
+local model response substitutes for the provider; the artifact identifies both
+stand-ins. The proof uses two server processes and answers fresh messages after
+a cold stop, an image replacement while stopped and concurrent command/release
+signals, retaining files and checking one paid-attempt receipt per command. Set `PROOF_IMAGE` to choose an image.
 
 Reproduction `cold-beebee-first-reply`, Tubing Crew on 2026-10-16: mention
 17:52:42Z; Machine booted 17:52:58Z; helper download 17:53:00–17:53:17Z;
@@ -353,21 +342,23 @@ matching image needs no reserve allocation on its first turn.
 
 ## Starter onboarding (revision 4)
 
-Beebee asks the opening question in its greeting; the welcome card contains only A–D options. Option A wakes Beebee alone. Its prompt asks for a single second opinion on the first three substantive questions when another agent is present, then only when in doubt. No server-specific review wake or review-depth rule is added. Option C and the post-game invite action print an invite link in chat; the agent invite tool does the same. The funnel invite_shared milestone means that committed chat post, not a native share action.
+The Beebee/Luna/Beebee banter precedes the greeting, which ends with “What should
+we work on?” and has no suggestions or choice card. Luna’s second line may hope
+for code in the person’s repo or one specific everyday task. The onboarding
+`invite` tool prints an invite link in chat when requested. The funnel
+`invite_shared` milestone means that committed chat post, not a native share action.
 
 
 ## Manual onboarding and Luna backfill
 
 Agents can load the `beeline-onboarding` skill, discover
 `app_tool(app:"beeline:onboarding")`, and call its `welcome` action. This reuses
-signup's welcome choices in the calling chat. An earlier onboarding question
-from the same agent is skipped without a wake; unrelated questions retain their
-normal open-choice rule. Signup still posts its welcome directly on the server.
+signup's banter and open welcome question in the calling chat. Unrelated
+questions retain their normal open-choice rule. Signup still posts its welcome directly on the server.
 
-Manual welcome cards carry `onboardingManual` and a separate run ID. Their server events
+Manual welcome messages carry `onboardingManual` and a separate run ID. Their server events
 use that run ID as an internal funnel install/attempt with version `manual`, so
-signup cohorts exclude them. Explanation cards retain the marker. Game viewer
-and invite milestones also follow the manual run. Older clients' welcome events
+signup cohorts exclude them. Game viewer and invite milestones also follow the manual run. Older clients' welcome events
 are routed to the manual run on the server.
 
 After building the server, `npm run backfill:luna` prints the production target
@@ -392,43 +383,6 @@ Luna and a deterministic per-workspace intro message together. An existing Luna,
 including a removed one, is never duplicated. It makes no Fly or model calls.
 Normal subscribed membership notifications still apply to other agents.
 
-`npm run prove:onboarding:welcome` exercises the built MCP action, active-command
-service, and phone-read welcome → explanation → game → invite path in isolation.
-PGlite, in-memory storage, and a minimal HTTP adapter stand in for production;
-this proof does not claim a native app or live model run.
-
 ## Next-morning check-in
 
-The one-time outside-person check-in uses a normal starter-agent command, Room reply and push delivery. Configuration, email behavior and isolated proof: [next-morning check-in](next-day-checkin.md).
-
-## Hosted Squire install recovery
-
-Reproduction `fb_32e642993b10b09e8a03bb7f`: helper-reported install failure settles
-the connector offer as `failed`, resumes its waiting request and frees the open
-card slot. The person can Retry the same card, or the agent can offer again.
-The maintenance sweep fails connecting offers after fifteen minutes and releases
-stale helper install work. A newer open card takes precedence over an old Retry.
-
-Run `node --import tsx scripts/prove-hosted-squire-failure.mjs` after building the
-server to demonstrate connect → accept → helper failure → phone failed card →
-resume → Retry → new assignment through built HTTP handlers. PGlite and a
-simulated helper failure stand in for production; this does not prove a live
-signup, Squire account sign-in or native Android rendering.
-
-Live diagnosis on Mahesh's Beebee (2 November, UTC): the replacement sq1139 image
-booted successfully; the user service manager responded; starting the existing
-broker unit returned active, with both broker and MCP sockets and no restarts.
-Connect then failed because the persisted marker's parent inode was 218 while
-the directory's inode was 81. Reanchoring that metadata, preserving the account
-binding, advanced connect to `needs-sign-in` with a sign-in page. Account sign-in
-and the post-release fresh-signup proof remain outstanding.
-
-The hosted broker unit also reconciles its marker in `ExecStartPre`, so a service
-restart repairs the anchor without another VM boot. `broker-image-proof.mjs`
-connects a real pinned Squire broker, replaces its persisted parent directory,
-demonstrates rejection of the stale marker, and reconnects after starting the
-same unit. It preserves a fixture account binding and profile data. This Docker
-directory-replacement proof does not claim a real signed-in account survived a
-Fly image update; that production acceptance check remains separate. Mahesh's
-never-signed-in account correctly reaches `needs-sign-in` and needs no operator
-sign-in or outward message.
+There is no automatic next-day check-in.

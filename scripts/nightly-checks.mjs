@@ -34,10 +34,21 @@ export async function runNightly({ api, save, now = () => new Date(), manual = f
     if (hour === undefined) throw new Error(`Unknown Nightly Checks schedule: ${schedule}`);
     const intended = new Date(started);
     intended.setUTCHours(hour, 7, 0, 0);
-    // Select by the trigger, not the start hour: a delayed twin must never
-    // dispatch a second Checks run or raise a false late-start alarm.
+    // The date selects the DST trigger. GitHub may start either twin hours late;
+    // the runner's start hour says nothing about which trigger owns this date.
     if (!easternSlot(intended)) return;
-    if (!easternSlot(started)) throw new Error(`Nightly Checks missed the 03:00 America/New_York slot: schedule ${schedule} started at ${started.toISOString()}`);
+    const date = new Intl.DateTimeFormat('en-CA', { timeZone: 'America/New_York', year: 'numeric', month: '2-digit', day: '2-digit' });
+    const runs = await api('GET', `actions/workflows/nightly-checks.yml/runs?branch=main&event=workflow_dispatch&created=%3E%3D${intended.toISOString().slice(0, 10)}&per_page=100`);
+    // Inspect every page: a busy dispatch day must not hide the scheduled run.
+    let page = runs;
+    for (let number = 1; ; number++) {
+      if (page.workflow_runs.some(run => date.format(new Date(run.created_at)) === date.format(intended))) {
+        const result = { schemaVersion: 1, skipped: true, reason: 'Nightly Checks was already dispatched this Eastern night' };
+        save(result); return result;
+      }
+      if (number * 100 >= runs.total_count || page.workflow_runs.length < 100) break;
+      page = await api('GET', `actions/workflows/nightly-checks.yml/runs?branch=main&event=workflow_dispatch&created=%3E%3D${intended.toISOString().slice(0, 10)}&per_page=100&page=${number + 1}`);
+    }
   }
   if (!/^\d+$/.test(requestId)) throw new Error('Invalid nightly request identity');
   const releases = await api('GET', 'actions/workflows/unified-release.yml/runs?branch=main&per_page=100');

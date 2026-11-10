@@ -99,11 +99,11 @@ export async function loadHumanElectorate(
   return rows.rows.map((row) => row.id);
 }
 
-async function loadIdentity(database: SqlDatabase, id: string): Promise<IdentityRow> {
+async function loadIdentity(database: SqlDatabase, id: string, roomId?: string): Promise<IdentityRow> {
   const row = (
     await database.query<IdentityRow>(
-      `SELECT id,kind,name,handle,avatar,face_id FROM identities WHERE id=$1`,
-      [id],
+      `SELECT id,kind,name,beeline_room_handle(id,$2) handle,avatar,face_id FROM identities WHERE id=$1`,
+      [id,roomId ?? null],
     )
   ).rows[0];
   if (!row) throw new Error('identity not found');
@@ -215,9 +215,7 @@ async function writeChoiceCard(
   // settlement: the run reads them back to tell a current card from a stale one.
   await database.query(`UPDATE messages SET card=jsonb_strip_nulls(jsonb_build_object(
     'receiptHint',card->'receiptHint','runId',card->'runId','workflowSlug',card->'workflowSlug',
-    'starterVersion',card->'starterVersion','attempt',card->'attempt','starterOnboarding',card->'starterOnboarding',
-    'onboardingManual',card->'onboardingManual','onboardingUserId',card->'onboardingUserId',
-    'onboardingRunId',card->'onboardingRunId','videoPreview',card->'videoPreview','youtubeUploadUsed',card->'youtubeUploadUsed'
+    'attempt',card->'attempt'
   )) || $2::jsonb WHERE id=$1`, [
     messageId,
     JSON.stringify(card),
@@ -349,11 +347,11 @@ export async function postRoomChoice(
     )
   ).rows[0];
   if (open && !input.workflowRunId) throw new Error('choice conflict: you already have an open choice in this Room');
-  const agent = await loadIdentity(database, input.agentId);
+  const agent = await loadIdentity(database, input.agentId,input.roomId);
   const requesterRow = input.workflowRunId && input.workflowOwnerId
-    ? await loadIdentity(database, input.workflowOwnerId)
+    ? await loadIdentity(database, input.workflowOwnerId,input.roomId)
     : agent.kind === 'agent' ? (await database.query<IdentityRow>(
-      `SELECT identity.id,identity.kind,identity.name,identity.handle,identity.avatar,identity.face_id
+      `SELECT identity.id,identity.kind,identity.name,beeline_room_handle(identity.id,command.room_id) handle,identity.avatar,identity.face_id
        FROM agent_commands command
        JOIN messages message ON message.id=command.source_message_id
        JOIN identities identity ON identity.id=message.author_id
@@ -477,43 +475,6 @@ async function wakeChoice(
     cardType: input.kind,
     card: input.card,
   });
-}
-
-/** A bounded batch of actual obligations. Capture the PostgreSQL timestamp text
- * without JS millisecond truncation; a changed deadline is a different version. */
-export async function closeExpiredChoices(database: SqlDatabase): Promise<number> {
-  const due = await database.query<{ id: string; expiry_version: string }>(
-    `SELECT id,closes_at::text expiry_version FROM room_choices
-     WHERE status='open' AND closes_at<=clock_timestamp() ORDER BY closes_at,id LIMIT 100`,
-  );
-  let closed = 0;
-  for (const row of due.rows) {
-    try {
-      const changed = await database.transaction(tx => closeExpiredChoiceVersion(tx, row.id, row.expiry_version));
-      if (changed) closed += 1;
-    } catch (error) {
-      if (error instanceof Error && error.message.includes('conflict')) continue;
-      throw error;
-    }
-  }
-  return closed;
-}
-
-/** Exact domain transition shared by the legacy batch and the owned clock.
- * The caller owns its transaction and any stronger aggregate/source fences.
- * No provider operation, scheduler or follow-up read is admitted here. */
-export async function closeExpiredChoiceVersion(database: SqlDatabase, id: string, expiryVersion: string): Promise<boolean> {
-  const current = await database.query(
-    `SELECT id FROM room_choices WHERE id=$1 AND status='open'
-     AND closes_at=$2::timestamptz AND closes_at<=clock_timestamp() FOR UPDATE`,
-    [id, expiryVersion],
-  );
-  if (!current.rowCount) return false;
-  const choice = await loadChoice(database, id);
-  if (!choice || choice.status !== 'open') return false;
-  if (choice.mode === 'question') await skipOpenChoice(database, choice, undefined, 'expired');
-  else await closeOpenPoll(database, choice);
-  return true;
 }
 
 async function closeOpenPoll(database: SqlDatabase, choice: ChoiceRow): Promise<void> {

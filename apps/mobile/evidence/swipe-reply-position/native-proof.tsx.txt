@@ -1,0 +1,68 @@
+import 'react-native-get-random-values';
+import './sources/unistyles';
+import { File, Paths } from 'expo-file-system';
+import React, { useEffect, useRef, useState } from 'react';
+import { AppRegistry, Text, TextInput, View, Pressable, Keyboard, PixelRatio } from 'react-native';
+import { GestureHandlerRootView } from 'react-native-gesture-handler';
+import { KeyboardProvider, KeyboardAvoidingView } from 'react-native-keyboard-controller';
+import { useChatCornerActions } from './sources/app/(app)/beeline/chat/useChatCornerActions';
+import { useChatMessageActions } from './sources/app/(app)/beeline/chat/useChatMessageActions';
+import { SwipeToReply } from './sources/app/(app)/beeline/chat/RoomMessageVariants-attachment-card';
+import { RoomSendList, RoomSendPreview } from './sources/buzz/room-send-list';
+import { createTranscriptScrollController, phoneTranscriptList } from './sources/buzz/transcript-scroll-controller';
+import { useScrollFollowOnLayoutChange } from './sources/buzz/room-scroll-follow';
+
+const longMessage: any = { id: 'long', text: Array.from({length:45},(_,i)=>`Reading marker ${String(i+1).padStart(3,'0')}. Keep this line anchored while replying.`).join('\n'), timestamp:1, pubkey:'reader', isUser:false, reference:{channelId:'room'} };
+const rows: any[] = [{id:'tail',text:'Newest message',timestamp:2,isUser:false},longMessage,{id:'older',text:'Older message',timestamp:0,isUser:false}];
+const noop = ()=>{};
+const receipts:any[]=[];
+const receipt=(record:any)=>{receipts.push(record);new File(Paths.document,'swipe-proof.json').write(JSON.stringify(receipts,null,2));console.log('SWIPE_REPLY_PROOF',JSON.stringify(record));};
+function Proof() {
+ const list=useRef<any>(null), input=useRef<TextInput>(null), body=useRef<Text>(null), composer=useRef<View>(null);
+ const [reply,setReply]=useState<any>(null), [corner,setCorner]=useState(false), [keyboard,setKeyboard]=useState(0), [value,setValue]=useState('');
+ const [offset,setOffset]=useState(0), [height,setHeight]=useState(0), [marker,setMarker]=useState(0);
+ const markerRef=useRef(0); markerRef.current=marker;
+ const currentOffset=useRef(0), started=useRef(0);
+ const [preview]=useState(()=>new RoomSendPreview());
+ const [adapter]=useState(()=>phoneTranscriptList(()=>list.current,()=>true));
+ const [controller]=useState(()=>createTranscriptScrollController({list:()=>adapter,rows:()=>rows,rowIndex:()=>1}));
+ const measure=(phase:string)=>{ body.current?.measureInWindow((_x,y)=>{composer.current?.measureInWindow((_cx,cy)=>receipt({phase,offset:currentOffset.current,offsetPx:currentOffset.current*PixelRatio.get(),startOffset:started.current,bodyY:y,composerY:cy,anchorFromComposerPx:(y+markerRef.current-cy)*PixelRatio.get()}));}); };
+ useEffect(()=>{
+  const show=Keyboard.addListener('keyboardDidShow',(e)=>{setKeyboard(e.endCoordinates.height);setTimeout(()=>measure('keyboard-open'),400);});
+  const hide=Keyboard.addListener('keyboardDidHide',()=>setKeyboard(0));
+  return ()=>{show.remove();hide.remove();};
+ },[]);
+ const decision=useScrollFollowOnLayoutChange({footprint:height+keyboard,isPinnedToTail:controller.isPinnedToTail(),isUserDragging:controller.isUserDragging()});
+ React.useLayoutEffect(()=>{if(decision!=='hold')controller.follow();},[decision,height,keyboard]);
+ const props:any[]=Array.from({length:36},()=>noop);
+ Object.assign(props,{0:new Map(),1:new Map(),2:{current:rows},3:'room',4:setReply,6:{current:value},7:{current:null},9:controller,10:input});
+ const [,,beginReply]=useChatMessageActions(props as any);
+ const [,beginCorner]=useChatCornerActions([false,{} as any,'proof',noop,noop,false,noop,false,false,false,{} as any,noop,undefined,'room',false,noop,()=>setCorner(true),null,'Proof']);
+ const start=()=>{started.current=currentOffset.current;measure('before-reply');beginReply(longMessage);};
+ return <View style={{flex:1,backgroundColor:'#f4efe4',paddingTop:45,paddingBottom:24}}>
+  <Text style={{fontSize:15,padding:8}}>{`swipe-reply-1 · offset ${offset.toFixed(2)} · ${corner?'corner':reply?'reply':'reading'}`}</Text>
+  <View style={{flexDirection:'row',gap:16,padding:8}}>
+   <Pressable onPress={()=>{Keyboard.dismiss();setReply(null);setCorner(false);controller.request({kind:'offset',offset:1200});setTimeout(()=>measure('reset'),400);}}><Text>Reset middle</Text></Pressable>
+   <Pressable onPress={start}><Text>Tap reply</Text></Pressable>
+   <Pressable onPress={()=>controller.request({kind:'newest'})}><Text>Tail</Text></Pressable>
+  </View>
+  <KeyboardAvoidingView behavior="padding" style={{flex:1}}>
+   <RoomSendList ref={list} preview={preview} data={rows} inverted keyExtractor={(r:any)=>r.id}
+    maintainVisibleContentPosition={controller.isPinnedToTail()?undefined:{minIndexForVisible:1}}
+    contentContainerStyle={{paddingHorizontal:16,paddingVertical:16}}
+    onLayout={()=>controller.observeLayout()} onContentSizeChange={()=>controller.observeLayout()}
+    onScroll={(e:any)=>{const n=e.nativeEvent.contentOffset.y;currentOffset.current=n;setOffset(n);controller.observeTailPinned(n<20);receipt({phase:'offset',offset:n,offsetPx:n*PixelRatio.get()});}}
+    scrollEventThrottle={16}
+    onScrollBeginDrag={()=>controller.dragStarted()} onScrollEndDrag={()=>controller.dragEnded(true)} onMomentumScrollBegin={()=>controller.momentumStarted()} onMomentumScrollEnd={()=>controller.momentumEnded()}
+    renderItem={({item}:any)=>item.id==='long'?<SwipeToReply messageId="long" isDesktop={false} onLongPress={noop} onForward={noop} onReact={noop}
+     onReply={start} onSwipeCorner={()=>{measure('before-corner');beginCorner(longMessage);setTimeout(()=>measure('after-corner'),400);}}>
+     <Text ref={body} style={{fontSize:18,lineHeight:26,color:'#343028'}} onTextLayout={e=>{const line=e.nativeEvent.lines.find(l=>l.text.includes('024.'));if(line)setMarker(line.y);}}>{item.text}</Text>
+    </SwipeToReply>:<Text style={{fontSize:18,paddingVertical:24}}>{item.text}</Text>}/>
+   <View ref={composer} onLayout={e=>setHeight(e.nativeEvent.layout.height)} style={{padding:12,borderTopWidth:1,borderColor:'#887c69'}}>
+    {reply?<Text style={{paddingBottom:8}}>Replying to reader</Text>:null}
+    <TextInput ref={input} value={value} onChangeText={setValue} placeholder="Write a reply" style={{fontSize:18,minHeight:44}}/>
+   </View>
+  </KeyboardAvoidingView>
+ </View>;
+}
+AppRegistry.registerComponent('main',()=>()=> <GestureHandlerRootView style={{flex:1}}><KeyboardProvider><Proof/></KeyboardProvider></GestureHandlerRootView>);

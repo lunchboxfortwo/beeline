@@ -1,4 +1,7 @@
-import { readAgentCommands, claimAgentCommand } from './agent-command.js';
+import {handleModelExecutionFixture as handleFreeAgentModelRequest} from './test-fixtures/free-agent-model-execution.js';
+import { claimAgentConnection } from './connection-presence.js';
+import { DaemonService } from './daemon-service.js';
+import { LiveHub } from './live.js';
 import { freeAgentModelTakesImages, IMAGE_TOKEN_RESERVATION } from './free-agent-image-input.js';
 import { createServer, type Server } from 'node:http';
 import type { AddressInfo } from 'node:net';
@@ -7,7 +10,6 @@ import {
   allowanceMessage,
   chargedTokens,
   freeAgentAllowance,
-  handleFreeAgentModelRequest,
   StreamUsageReader,
   reserveAllowance,
   promptTokenBound,
@@ -32,7 +34,7 @@ const TOKEN = `bfm_${'x'.repeat(43)}`;
 const ENABLED_ENV = { BEELINE_FREE_AGENT_SEAL_KEY: 'seal', FLY_FREE_AGENT_IMAGE: 'image' };
 const CONFIG = { model: 'deepseek/deepseek-v4-flash', dailyTokenCap: 1_000, firstDayTokenCap: 1_000, lifetimeTokenCap: 5_000 };
 
-describe('free agent model proxy', () => {
+describe('server-owned model execution and accounting', () => {
   let db: PgliteDatabase;
   let server: Server;
   let origin: string;
@@ -95,25 +97,68 @@ describe('free agent model proxy', () => {
       body: JSON.stringify(body),
     });
 
-  it('Reproduction TOKEN-PAUSE: shows real usage and parks new and existing wakes until reset', async () => {
-    config = { ...CONFIG, dailyTokenCap: 3_000_000, firstDayTokenCap: 3_000_000, lifetimeTokenCap: 0 };
-    await db.query(`INSERT INTO free_agent_usage(owner_id,day,tokens) VALUES($1,current_date,1410000)`, [OWNER]);
-    const enqueue = (id: string) => db.query(`INSERT INTO agent_commands(id,room_id,agent_id,turn_request_id,action,reason,root_command_id,root_source_message_id,agent_depth)
-      VALUES($1,$2,$3,$1,'input','schedule',$1,'source',0)`, [id, ROOM, AGENT]);
-    await enqueue('before');
-    const response = await call({ messages: [{ role: 'user', content: 'x'.repeat(5_000_000) }], max_tokens: 1024 });
-    expect((await response.json()).choices[0].message.content).toContain('1.41M of 3M');
-    await enqueue('after');
-    expect((await readAgentCommands(db, ROOM, AGENT)).commands).toHaveLength(0);
-    await expect(claimAgentCommand(db, ROOM, AGENT, 'after', 'generation')).rejects.toThrow();
-    const paused = (await db.query<{ allowance_paused_until: Date }>(`SELECT allowance_paused_until FROM free_agents WHERE agent_id=$1`, [AGENT])).rows[0]!.allowance_paused_until;
-    expect(paused.getUTCHours()).toBe(0);
-    await db.query(`UPDATE free_agents SET allowance_paused_until=now()-interval '1 second'`);
-    // Move the persisted deadline into the past to simulate crossing reset.
-    await db.query(`UPDATE agent_commands SET startup_wake_after=now()-interval '1 second' WHERE state='pending'`);
-    expect((await readAgentCommands(db, ROOM, AGENT)).commands.length).toBeGreaterThan(0);
-    await expect(claimAgentCommand(db, ROOM, AGENT, 'after', 'generation')).resolves.toBeDefined();
-    expect(upstream).toHaveLength(0);
+  it.each(['home', 'another'] as const)('admits a model call after a real tag and helper claim in %s workspace', async place => {
+    const workspaceId = place === 'home' ? WORKSPACE : '33333333-3333-4333-8333-333333333333';
+    const roomId = place === 'home' ? ROOM : '44444444-4444-4444-8444-444444444444';
+    await db.query("UPDATE agent_commands SET state='complete',completed_at=now()");
+    await db.query("UPDATE identities SET handle='beebee' WHERE id=$1", [AGENT]);
+    await db.query('INSERT INTO agents(agent_id,owner_id) VALUES($1,$2)', [AGENT, OWNER]);
+    if (place === 'another') {
+      await db.query("INSERT INTO workspaces(id,name) VALUES($1,'Other workspace')", [workspaceId]);
+      await db.query("INSERT INTO rooms(id,workspace_id,name) VALUES($1,$2,'Other Room')", [roomId, workspaceId]);
+    }
+    await db.query(`INSERT INTO memberships(workspace_id,room_id,identity_id,role)
+      VALUES($1,NULL,$3,'owner'),($1,NULL,$4,'member'),($1,$2,$3,'owner'),($1,$2,$4,'member')`,
+    [workspaceId, roomId, OWNER, AGENT]);
+    const live = new LiveHub();
+    await db.query("INSERT INTO live_server_instances(instance_id,renewed_at) VALUES('model-helper',clock_timestamp())");
+    const connectionId = 'model-helper-connection';
+    const epoch = await claimAgentConnection(db, live, AGENT, {}, { connectionId, instanceId: 'model-helper' });
+    const phone = new PhoneService(db, 'https://server.test');
+    const daemon = new DaemonService(db, live);
+    const sent = await phone.execute('sendRoomMessage', { roomId, text: '@beebee say hello' }, OWNER);
+    const commands = await daemon.execute('getAgentCommands', { roomId }, AGENT);
+    expect(commands.commands).toHaveLength(1);
+    const command = commands.commands[0]!;
+    expect(command.source.id).toBe(sent.messageId);
+    const claimed = await daemon.execute('claimAgentTurn', { roomId, commandId: command.id, generationId: 'model-generation' },
+      AGENT, { connectionId, epoch });
+    expect(claimed).not.toHaveProperty('modelCredential');
+    expect((await db.query('SELECT state,turn_owner_connection_id FROM agent_commands WHERE id=$1', [command.id])).rows)
+      .toEqual([{ state: 'claimed', turn_owner_connection_id: connectionId }]);
+    const response = await call({ messages: [{ role: 'user', content: 'say hello' }] });
+    expect({ status: response.status, body: await response.json() }).toMatchObject({
+      status: 200, body: { choices: [{ message: { content: 'done' } }] },
+    });
+    expect(upstream).toHaveLength(1);
+    expect(await freeAgentAllowance(db, OWNER, new Date())).toEqual({ today: 315, lifetime: 315 });
+
+    // The same token cannot use the old claim after its helper is replaced.
+    await claimAgentConnection(db, live, AGENT, {}, { connectionId: 'replacement-helper', instanceId: 'model-helper' });
+    const stale = await call({ messages: [] });
+    expect(stale.status).toBe(403);
+    expect((await stale.json()).error.message).toBe('free agent model access requires a live turn');
+    expect(upstream).toHaveLength(1);
+  });
+
+  let turnSequence=0;
+  const newTurn=async()=>{
+    const id='request-'+(++turnSequence);
+    await db.query(`INSERT INTO agent_commands(id,room_id,agent_id,turn_request_id,action,reason,root_command_id,root_source_message_id,agent_depth,state,claimed_at)
+      VALUES($1,$2,$3,$1,'input','human_tag',$1,'source',0,'claimed',clock_timestamp())`,[id,ROOM,AGENT]);
+  };
+
+  it('a token refusal ends the current turn and leaves fresh requests available for admission',async()=>{
+    config={...CONFIG,dailyTokenCap:3_000_000,firstDayTokenCap:3_000_000,lifetimeTokenCap:0};
+    await db.query('INSERT INTO free_agent_usage(owner_id,day,tokens) VALUES($1,current_date,1410000)',[OWNER]);
+    const response=await call({messages:[{role:'user',content:'x'.repeat(5_000_000)}],max_tokens:1024});
+    expect(response.status).toBe(403);
+    expect((await response.json()).error.message).toContain('1.41M of 3M');
+    expect((await db.query("SELECT state FROM agent_commands WHERE id='turn'")).rows).toEqual([{state:'complete'}]);
+    await newTurn();
+    expect((await call({messages:[]})).status).toBe(200);
+    expect(upstream).toHaveLength(1);
+    expect((await db.query("SELECT id FROM messages WHERE card_type='turn-failed'")).rows).toHaveLength(1);
   });
 
   it('pins each teammate to its stored model and charges the same owner allowance', async () => {
@@ -238,6 +283,7 @@ describe('free agent model proxy', () => {
     expect(await refused.text()).toContain("free allowance");
     expect(upstream).toHaveLength(0);
     config = { ...CONFIG, dailyTokenCap: 1_000_000, firstDayTokenCap: 1_000_000, lifetimeTokenCap: 0 };
+    await newTurn();
     reply = () => Response.json({ choices: [{ message: { content: 'photo' } }] });
     const accepted = await call(body);
     expect(accepted.status).toBe(200);
@@ -282,7 +328,7 @@ describe('free agent model proxy', () => {
     config = { ...CONFIG, dailyTokenCap: 1_000_000, lifetimeTokenCap: 0,
       limits: { ...DEFAULT_FREE_AGENT_LIMITS, dailyBudgetUsd: 0.1 } };
     const body = { messages: [{ role: 'user', content: 'Please summarize the conversation. '.repeat(5_455) }], max_tokens: 1024 };
-    expect((await (await call(body)).json()).choices[0].message.content).toBe(FREE_AGENT_BUDGET_MESSAGE);
+    expect((await (await call(body)).json()).error.message).toBe(FREE_AGENT_BUDGET_MESSAGE);
     expect(upstream).toEqual([]);
     expect((await freeAgentAllowance(db, OWNER, new Date())).today).toBe(0);
   });
@@ -307,13 +353,13 @@ describe('free agent model proxy', () => {
     expect(upstream).toEqual([]);
   });
 
-  it('atomically limits parallel owner calls per minute and allows the next minute', async () => {
+  it('admits parallel owner calls without the former minute limit', async () => {
     const limits = { ...DEFAULT_FREE_AGENT_LIMITS, callsPerMinute: 2 };
     const now = new Date('2026-10-16T12:00:00Z');
     const config = { ...CONFIG, dailyTokenCap: 100_000 };
     const calls = await Promise.all(Array.from({ length: 8 }, () => reserveAllowance(db, OWNER, now, config, 10, 256, limits)));
-    expect(calls.filter(call => 'reserved' in call)).toHaveLength(2);
-    expect(calls.filter(call => 'limit' in call && call.limit === 'rate')).toHaveLength(6);
+    expect(calls.filter(call => 'reserved' in call)).toHaveLength(8);
+    expect(calls.every(call=>'reserved' in call)).toBe(true);
     expect(await reserveAllowance(db, OWNER, new Date(now.getTime() + 60_000), config, 10, 256, limits)).toHaveProperty('reserved');
   });
 
@@ -330,7 +376,7 @@ describe('free agent model proxy', () => {
   it('pauses in the agent voice at the global budget without calling upstream', async () => {
     await db.query(`INSERT INTO free_agent_budget(day,usd) VALUES(current_date,25)`);
     const response = await call({ messages: [] });
-    expect((await response.json()).choices[0].message.content).toBe(FREE_AGENT_BUDGET_MESSAGE);
+    expect((await response.json()).error.message).toBe(FREE_AGENT_BUDGET_MESSAGE);
     expect(upstream).toEqual([]);
     expect((await db.query(`SELECT kind FROM free_agent_events WHERE kind='budget_reached'`)).rows).toHaveLength(1);
   });
@@ -344,36 +390,28 @@ describe('free agent model proxy', () => {
     expect(Number((await db.query(`SELECT usd FROM free_agent_budget`)).rows[0]!.usd)).toBeCloseTo(0.000273, 8);
   });
 
-  it('refuses an expired lease and an overlong claimed turn', async () => {
-    await db.query(`UPDATE agent_commands SET lease_expires_at=now()-interval '1 second'`);
-    expect((await call({ messages: [] })).status).toBe(403);
-    await db.query(`UPDATE agent_commands SET lease_expires_at=now()+interval '90 seconds',claimed_at=now()-interval '16 minutes'`);
-    expect((await call({ messages: [] })).status).toBe(403);
-    await db.query(`UPDATE agent_commands SET claimed_at=now()`);
-    await db.query(`INSERT INTO agent_turns(room_id,request_id,agent_id,status,started_at)
-      VALUES($1,'request',$2,'working',now()-interval '16 minutes')`, [ROOM, AGENT]);
-    expect((await call({ messages: [] })).status).toBe(403);
-    expect(upstream).toEqual([]);
+  it('ignores obsolete execution clocks while the invocation remains current',async()=>{
+    await db.query("UPDATE agent_commands SET lease_expires_at=now()-interval '1 second'");
+    const live=await call({messages:[]});expect(live.status).toBe(200);await live.text();
+    await db.query("UPDATE agent_commands SET claimed_at=now()-interval '16 minutes'");
+    expect((await call({messages:[]})).status).toBe(200);
+    expect((await db.query("SELECT state FROM agent_commands WHERE id='turn'")).rows).toEqual([{state:'claimed'}]);
+    expect(upstream).toHaveLength(2);
   });
 
-  it('refuses owner calls above the minute limit without calling upstream', async () => {
-    const minute = Math.floor(Date.now() / 60_000);
-    await db.query(`INSERT INTO free_agent_call_rate(owner_id,minute,calls) VALUES($1,$2,30)`, [OWNER, minute]);
-    expect((await call({ messages: [] })).status).toBe(429);
-    expect(upstream).toEqual([]);
-    await db.query(`UPDATE free_agent_call_rate SET minute=minute-1`);
-    expect((await call({ messages: [] })).status).toBe(200);
-    expect(upstream).toHaveLength(1);
+  it('ignores the retired owner-minute counter',async()=>{
+    await db.query(`INSERT INTO free_agent_call_rate(owner_id,minute,calls) VALUES($1,$2,30)`,[OWNER,Math.floor(Date.now()/60_000)]);
+    const response=await call({messages:[]});expect(response.status).toBe(200);await response.text();expect(upstream).toHaveLength(1);
   });
 
   it('uses configurable limits and rounds weighted cached tokens upward', () => {
     expect(freeAgentLimitsFromEnv({})).toEqual(DEFAULT_FREE_AGENT_LIMITS);
     expect(freeAgentLimitsFromEnv({ BEELINE_FREE_AGENT_CACHED_TOKEN_WEIGHT: '0.1', BEELINE_FREE_AGENT_CALLS_PER_MINUTE: '5',
       BEELINE_FREE_AGENT_DAILY_BUDGET_USD: '12', BEELINE_FREE_AGENT_MAX_TURN_SECONDS: '60' })).toMatchObject({
-      cachedTokenWeight: 0.1, callsPerMinute: 5, dailyBudgetUsd: 12, maxTurnMs: 60_000,
+      cachedTokenWeight: 0.1, dailyBudgetUsd: 12,
     });
     expect(freeAgentLimitsFromEnv({ BEELINE_FREE_AGENT_MAX_OUTPUT_TOKENS: '16000', BEELINE_FREE_AGENT_MAX_CONCURRENT_CALLS: '3' }))
-      .toMatchObject({ maxOutputTokens: 16_000, maxConcurrentCalls: 3 });
+      .toMatchObject({ maxOutputTokens: 16_000 });
     expect(chargedTokens({ prompt_tokens: 100, completion_tokens: 5, prompt_tokens_details: { cached_tokens: 91 } }, 0.1)).toBe(24);
   });
 
@@ -399,7 +437,8 @@ describe('free agent model proxy', () => {
     };
     const bodies = await Promise.all(Array.from({ length: parallel }, async () => (await call(request)).json()));
     const expected = limit === 'daily' ? allowanceMessage('daily', config, 0) : FREE_AGENT_BUDGET_MESSAGE;
-    expect(bodies.map(body => body.choices[0].message.content)).toEqual(Array(parallel).fill(expected));
+    expect(bodies[0].error.message).toBe(expected);
+    expect(bodies.every(body=>typeof body.error?.message==='string')).toBe(true);
     expect(upstream).toEqual([]);
     expect(await freeAgentAllowance(db, OWNER, new Date())).toEqual({ today: 0, lifetime: 0 });
     expect((await db.query(`SELECT usd FROM free_agent_budget`)).rows).toEqual([]);
@@ -461,7 +500,7 @@ describe('free agent model proxy', () => {
     expect((await db.query(`SELECT * FROM free_agent_events WHERE kind='allowance_warning'`)).rowCount).toBe(1);
     // Past the first-day cap the owner is refused; the room still reads the one notice.
     await db.query(`UPDATE free_agent_usage SET tokens=10000000 WHERE owner_id=$1`, [OWNER]);
-    expect((await (await call({ messages: [{ role: 'user', content: 'more' }] })).json()).choices[0].message.content)
+    expect((await (await call({ messages: [{ role: 'user', content: 'more' }] })).json()).error.message)
       .toBe(allowanceMessage('daily', { ...config, dailyTokenCap: 10_000_000 }));
     const refused = await phone.readRoom(ROOM, OWNER);
     expect(refused?.messages.map(message => message.text).join(' ')).toContain("I've used 80%");
@@ -522,22 +561,16 @@ describe('free agent model proxy', () => {
     expect(await freeAgentAllowance(db, OWNER, new Date())).toEqual({ today: 107, lifetime: 107 });
   });
 
-  it('answers in the agent voice instead of calling the model once the daily allowance is used', async () => {
-    const day = new Date().toISOString().slice(0, 10);
-    await db.query(`INSERT INTO free_agent_usage(owner_id,day,tokens) VALUES($1,$2::date,1000)`, [OWNER, day]);
-    const plain = await (await call({ messages: [{ role: 'user', content: 'more' }] })).json();
-    expect(plain.choices[0].message.content).toBe(allowanceMessage('daily', CONFIG));
-    expect(plain.choices[0].message.content).toContain('connect your own agent');
-    const streamed = await (await call({ stream: true, messages: [{ role: 'user', content: 'more' }] })).text();
-    expect(streamed).toContain('data: [DONE]');
-    expect(streamed).toContain("today's free allowance");
+  it('an allowance refusal ends each explicitly requested turn once, including stream requests',async()=>{
+    const day=new Date().toISOString().slice(0,10);
+    await db.query('INSERT INTO free_agent_usage(owner_id,day,tokens) VALUES($1,$2::date,1000)',[OWNER,day]);
+    const plain=await call({messages:[{role:'user',content:'more'}]});
+    expect(plain.status).toBe(403);expect((await plain.json()).error.message).toBe(allowanceMessage('daily',CONFIG));
+    await newTurn();
+    const streamed=await call({stream:true,messages:[{role:'user',content:'more'}]});
+    expect(streamed.status).toBe(403);expect((await streamed.json()).error.message).toContain("today's free allowance");
     expect(upstream).toEqual([]);
-    expect(
-      (await db.query(`SELECT detail FROM free_agent_events WHERE kind='allowance_reached'`)).rows,
-    ).toEqual([
-      { detail: { limit: 'daily', roomId: ROOM, requestId: 'request' } },
-      { detail: { limit: 'daily', roomId: ROOM, requestId: 'request' } },
-    ]);
+    expect((await db.query("SELECT id FROM messages WHERE card_type='turn-failed'")).rows).toHaveLength(2);
   });
 
   it('has no lifetime cap by default: an account past 3M lifetime tokens still spends within its daily cap', async () => {
@@ -574,7 +607,7 @@ describe('free agent model proxy', () => {
       [OWNER],
     );
     const body = await (await call({ messages: [{ role: 'user', content: 'more' }] })).json();
-    expect(body.choices[0].message.content).toBe(allowanceMessage('lifetime', CONFIG));
+    expect(body.error.message).toBe(allowanceMessage('lifetime', CONFIG));
     expect(upstream).toEqual([]);
   });
 
@@ -604,14 +637,14 @@ describe('free agent model proxy', () => {
     );
     await new Promise((resolve) => setTimeout(resolve, 500));
     release();
-    const bodies = await Promise.all(calls.map(async (pending) => (await (await pending).json()).choices[0].message.content));
+    const bodies = await Promise.all(calls.map(async (pending) => await (await pending).json()));
     // The admitted calls' reservations fit the cap; the rest were told the allowance is used.
     const reservedOutput = admitted.reduce((total, body) => total + Number(body.max_tokens), 0);
     expect(admitted.length).toBeGreaterThan(0);
     expect(admitted.length).toBeLessThan(8);
     expect(reservedOutput).toBeLessThanOrEqual(CONFIG.dailyTokenCap);
     expect(admitted.every((body) => Number(body.max_tokens) < 100_000)).toBe(true);
-    expect(bodies.filter((text) => text === allowanceMessage('daily', CONFIG))).toHaveLength(8 - admitted.length);
+    expect(bodies.filter(body=>body.error)).toHaveLength(8-admitted.length);
     const spent = await freeAgentAllowance(db, OWNER, new Date());
     expect(spent.today).toBeLessThanOrEqual(CONFIG.dailyTokenCap);
   });
@@ -636,11 +669,12 @@ describe('free agent model proxy', () => {
     expect(upstream).toHaveLength(1);
     // Past the first-day cap the owner is refused, naming the first-day size.
     await db.query(`UPDATE free_agent_usage SET tokens=9999999 WHERE owner_id=$1`, [OWNER]);
-    expect((await (await call({ messages: [{ role: 'user', content: 'more' }] })).json()).choices[0].message.content)
+    expect((await (await call({ messages: [{ role: 'user', content: 'more' }] })).json()).error.message)
       .toBe(allowanceMessage('daily', { ...config, dailyTokenCap: 10_000_000 }, 9_999_999));
+    await newTurn();
     // A model call from 25 hours ago ends the window; the daily cap applies again.
     await db.query(`INSERT INTO free_agent_events(agent_id,kind,detail,at) VALUES($1,'model_usage','{"day":"x","tokens":0}'::jsonb, now()-interval '25 hours')`, [AGENT]);
-    expect((await (await call({ messages: [{ role: 'user', content: 'more' }] })).json()).choices[0].message.content)
+    expect((await (await call({ messages: [{ role: 'user', content: 'more' }] })).json()).error.message)
       .toBe(allowanceMessage('daily', { ...config, dailyTokenCap: 3_000_000 }));
     console.log('Demonstrated R-FIRSTDAY: 3.5M passed on day one, refused past 10M, refused past 3M once 24h elapsed.');
   });
@@ -675,8 +709,24 @@ describe('free agent model proxy', () => {
     expect((await (await call({ messages: [{ role: 'user', content: 'hi' }] })).json()).choices[0].message.content).toBe('done');
     await db.query(`UPDATE free_agent_usage SET tokens=3000000 WHERE owner_id=$1`, [OWNER]);
     const response = await call({ messages: [{ role: 'user', content: 'hi' }] });
-    expect((await response.json()).choices[0].message.content).toContain('(3M tokens)');
+    expect((await response.json()).error.message).toContain('(3M tokens)');
     expect(upstream).toHaveLength(1);
+  });
+
+  it('delivers a late upstream chunk without an execution window', async () => {
+    const now = Date.now(), clock = vi.spyOn(Date, 'now').mockReturnValue(now);
+    reply = () => new Response(new ReadableStream<Uint8Array>({
+      pull(controller) {
+        clock.mockReturnValue(now + 2*60*60_000);
+        controller.enqueue(new TextEncoder().encode('expired-authorized-content'));
+        controller.close();
+      },
+    }), { headers: { 'content-type': 'text/event-stream' } });
+    try {
+      const response = await call({ stream: true, messages: [] });
+      expect(await response.text()).toContain('expired-authorized-content');
+      expect(upstream).toHaveLength(1);
+    } finally { clock.mockRestore(); }
   });
 
   it('refunds tokens and dollars when the upstream connection fails', async () => {
@@ -729,11 +779,11 @@ describe('free agent model proxy', () => {
     reader.push(',"completion_tokens":4}}\n\ndata: [DONE]\n');
     expect(reader.usage).toEqual({ prompt_tokens: 3, completion_tokens: 4 });
   });
-  it('defaults the reply cap to at least 32,768 tokens and 8 concurrent calls', () => {
+  it('retains the reply-token bound without a concurrency setting', () => {
     // "8k max tokens is too small."
     expect(DEFAULT_FREE_AGENT_LIMITS.maxOutputTokens).toBeGreaterThanOrEqual(32_768);
     expect(freeAgentLimitsFromEnv({}).maxOutputTokens).toBe(32_768);
-    expect(freeAgentLimitsFromEnv({}).maxConcurrentCalls).toBe(8);
+    expect(freeAgentLimitsFromEnv({})).not.toHaveProperty('maxConcurrentCalls');
   });
 
   it('FREE-CAP-1: sends a 65,536-token request upstream with max_tokens 32,768', async () => {
@@ -744,7 +794,7 @@ describe('free agent model proxy', () => {
     console.log('Demonstrated FREE-CAP-1: requested 65536 reply tokens; upstream max_tokens 32768.');
   });
 
-  it('FREE-INFLIGHT-1: 20 parallel calls return the first in-flight refusal with at most 8 upstream calls running', async () => {
+  it('FREE-INFLIGHT-1: 20 parallel calls return the first in-flight refusal without a process call queue', async () => {
     config = { ...CONFIG, dailyTokenCap: 1_000_000, lifetimeTokenCap: 0 };
     const refused = new Set<string>();
     let running = 0;
@@ -759,8 +809,7 @@ describe('free agent model proxy', () => {
       try {
         // Hold the initial requests until the test observes all eight slots.
         // A fixed sleep can finish before the last request arrives on busy CI.
-        if (attempts <= 8) await firstWave;
-        else await new Promise((resolve) => setTimeout(resolve, 20));
+        await firstWave;
         const id = String(JSON.parse(String(init?.body)).messages[0].content);
         if (!refused.has(id)) {
           refused.add(id);
@@ -784,7 +833,7 @@ describe('free agent model proxy', () => {
       return { status: response.status, content: (await response.json()).choices?.[0]?.message?.content };
     }));
     try {
-      await vi.waitFor(() => expect(running).toBe(8), { timeout: 5000 });
+      await vi.waitFor(() => expect(running).toBe(20), { timeout: 5000 });
     } finally {
       releaseFirstWave();
       await pendingResponses;
@@ -792,8 +841,7 @@ describe('free agent model proxy', () => {
     const responses = await pendingResponses;
     expect(responses).toEqual(Array(20).fill({ status: 402, content: undefined }));
     expect(attempts).toBe(20);
-    expect(peak).toBeLessThanOrEqual(8);
-    expect(peak).toBe(8);
+    expect(peak).toBe(20);
     expect(await freeAgentAllowance(db, OWNER, new Date())).toEqual({ today: 0, lifetime: 0 });
   }, 15_000);
 

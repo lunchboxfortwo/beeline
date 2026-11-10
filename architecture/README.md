@@ -20,14 +20,21 @@ have zero exceptions. Command creation lives in `agent-command.ts`, including
 explicit connected-app commands minted and claimed in one transaction. All helper
 and MCP acquisition uses `claimAgentCommand`; only its successful working-turn
 write can claim input/resume work. Lease progress uses a generation-fenced owner
-operation. `archiveCornerState` alone runs corner archival cleanup. Subscriptions
+operation. `corner-lifecycle.ts` alone decides and runs corner archival cleanup. Subscriptions
 live in `agent_subscriptions`; legacy JSON may be read only by named upgrade
 functions. `membership-join.ts` owns
 membership SQL and its conflict policies; callers pass their current transaction
 and retain access checks. `postgres-live.ts` owns named notifiers and SQL
-expressions for atomic CTE/trigger notifications. `background-work.ts` drives
-instance-local jobs by their queue deadlines and owns cancellable timeout chains
-for live connections. Their close handlers cancel the chain.
+expressions for atomic CTE/trigger notifications. `background-work.ts` drains work authorized by committed events. The strict
+`timers.server-timeout` rule has zero exceptions outside the named
+`apps/server/src/owner-schedule-clock.ts` and `apps/server/src/shutdown.ts` modules.
+They own owner-created schedules and bounded deploy shutdown, respectively.
+`timers.shutdown-sites` pins shutdown to three deadlines: request drain, live close,
+and process exit. The strict migration allows only this named shutdown owner;
+additional timer owners still fail. There are no connection timer chains, retry clocks,
+retention sweeps or expiry wake loops. `scripts/server-timers.test.mjs` plants
+forbidden calls and verifies the real architecture check rejects them.
+
 
 ## Storage registry (bloat inside a module)
 
@@ -68,7 +75,9 @@ each app so a module cannot grow a second path for the same job.
 Non-strict invariant changes pass CI when the candidate satisfies its declared
 rules. Strict capability boundaries reject changes to their matching scope,
 owner functions, owned sink count or zero allowance; they cannot use the weekly
-warning path to reopen a second owner. `--base` reports those changes for the weekly audit;
+warning path to reopen a second owner. A one-for-one relocation or rename is
+allowed only when the complete owning function bodies are unchanged against the
+base, with the same owned sink count and matching boundary. `--base` reports those changes for the weekly audit;
 it adds no approval or merge gate. CI executes the candidate guard. The owner
 reviews invariant and guard diffs weekly after merging.
 
@@ -83,3 +92,17 @@ remaining exceptions and why their callers still need them.
 A scheduled Beeline agent turn (a due-time wake, not a polling loop) reviews
 the week's merged PRs. The prompt is [weekly-audit.md](weekly-audit.md). It
 opens tightening PRs on its own and reports invariant, System catalog and corner reference changes to the owner weekly.
+
+## Machine connection and helper timers
+
+`scripts/machine-connection-boundaries.mjs` runs inside the architecture check.
+The helper physical connection belongs to `apps/body/src/live-link.ts`; server
+machine output and login/version changes belong to `machine-connection.ts`.
+`machine-connection-sinks.json` pins owned sink counts and can only shrink.
+A helper cannot acquire another reconnect/close/send path. Helper timers have
+zero inventory allowance, including generated child code and timer aliases.
+The sole exception is one stay-warm countdown in `AgentProcesses.workChanged`
+in `apps/body/src/agent-process.ts`. The mutation suite plants a second
+reconnect and timer and requires both to fail; TYPECHECK runs that suite.
+
+The `code.file-lines` rule caps every tracked `.ts`, `.tsx`, `.js` and `.mjs` file under `apps/`, `packages/`, `scripts/` and `tools/` at 1,000 lines, including tests. Only exact generated paths declared in the rule are exempt. New files must meet the cap when staged; there is no oversized-file allowlist. `--base` rejects relaxing the cap, its scope or its generated exclusions. Split by existing domain boundaries while preserving behavior.

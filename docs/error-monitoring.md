@@ -38,7 +38,9 @@ token; never put it in Expo public variables or app configuration.
 
 The unified release workflow supplies the public helper and mobile DSNs from
 repository variables. A local source helper uses only its explicit environment;
-local development mobile builds do not initialize Sentry. Fly secrets were
+local development mobile builds and native emulators/simulators do not initialize
+Sentry, including release APKs running production OTAs. Web and physical release
+devices retain capture. Fly secrets were
 **staged**, not applied to running machines: firstmate's next server release
 activates them. Merging alone does not deploy this receiver.
 
@@ -63,6 +65,11 @@ activates them. Merging alone does not deploy this receiver.
   Expo and React Native config: current store binaries remain OTA-compatible.
   Do not enable native Sentry or remove those exclusions without a deliberate
   native runtime/store release.
+- Web: the small `sentry-entry.web.ts` entry retains global errors and rejected promises
+  while loading the reporting SDK on the first failure. Healthy cold loads do
+  not parse its integrations. Queued failures keep their original screen pattern
+  and use the same SDK privacy filter and cap; the SDK then owns global capture.
+  Chunk recovery remains installed at startup. Native initialization stays eager.
 
 Each SDK applies a process-local rolling-hour cap after privacy filtering: one
 report per error type and message (numeric runs normalized), with a hard ceiling
@@ -137,28 +144,17 @@ of substatus, regressed issues, and triggered `event_alert` notifications. Other
 signed events are acknowledged without waking an agent. The Telegram receiver
 above remains independent.
 
-`sentry_wake_issues` stores issue metadata keyed by issue id and event type;
-retries do not re-arm an acknowledged row, and a newer occurrence updates its
-metadata. A committed digest records its time and level per issue. Repeat alerts
-across event types are suppressed for six hours from that digest, except a new
-regression or changed level. Suppressed alerts still refresh metadata and do not
-extend the suppression window. `sentry_wake_state` serializes ingestion and dispatch across server
-machines. Every accepted issue, including handled errors, queues a private command
-for Jellybean in issues-triage immediately when no batch has committed in the
-previous five minutes. Later arrivals of any severity share that durable deadline
-and coalesce into one trailing digest. Fatal and unhandled metadata remains
-recorded without changing handled errors into urgent issues.
-The command and acknowledgement commit together. The existing background leader
-reads the durable five-minute deadline after restart and PostgreSQL notifications
-re-arm it after arrivals. Pending rows from the former daily policy use this same
-deadline, so a deployment drains that backlog without another webhook. The legacy
-`last_daily_wake_at` column is retained for schema compatibility but no longer
-controls dispatch. Deadline delays use the database clock, independent of host clock skew.
-An unavailable target keeps rows pending. Empty, refused or failed observations
-park without a recurring sweep or retry timer. A committed arrival, relevant
-recipient membership, triage authority or blocking-report change, or actual database/listener
-recovery admits another observation. This changes only
-Sentry arrivals; the standing daily feedback sweep keeps its existing cadence.
+`sentry_wake_issues` stores issue metadata keyed by issue id and event type.
+Exact delivery repeats and older occurrences do not re-arm an acknowledged row;
+a changed, current occurrence admits a new event. The singleton row orders
+committed ingestion and delivery across server instances. The private command
+and its batch acknowledgement commit together.
+
+HTTP arrivals and committed eligibility changes admit delivery. Startup and idle
+time do no work. An unavailable recipient leaves pending metadata for an actual
+membership, triage authority or blocking-report change. A failed observation
+creates no retry deadline. There is no urgency, daily or elapsed-time batch gate.
+The standing feedback schedule remains an owner-created schedule.
 The server setting `BEELINE_SENTRY_TRIAGE_AGENT_ID` selects the recipient and
 defaults to Jellybean (`7eafb2e0cc049a9b3345f4322024b604358af04cb551d1fc71084ca3a99d7877`).
 The receiver and background worker share that setting. Set it consistently on
@@ -211,7 +207,7 @@ staging. Production activation remains a follow-up for the next normal release.
 **Production proof remains pending the next release:** after deployment, use
 Sentry's send-test-notification action and verify Jellybean receives the digest in
 issues-triage. Do not dispatch a release for this work. Local reproduction
-`sentry-no-wake` posts signed HTTP requests to the actual server and inspects
+`sentry-wake.test.ts` posts signed HTTP requests to the actual server and inspects
 private commands, including competing workers against isolated PostgreSQL.
 Run the PostgreSQL proof with `BEELINE_SENTRY_TEST_POSTGRES_URL` set to an isolated
 loopback database and `npm test -w @beeline/server -- src/sentry-wake.test.ts`;

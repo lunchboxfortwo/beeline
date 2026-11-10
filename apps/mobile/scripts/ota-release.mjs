@@ -12,7 +12,7 @@
 // (a rerun publishes only what is missing) and which branch a channel points
 // at (a rerun that already promoted does nothing).
 import { spawnSync } from 'node:child_process';
-import { mkdtempSync, readFileSync, writeFileSync } from 'node:fs';
+import { appendFileSync, mkdtempSync, readFileSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { fileURLToPath } from 'node:url';
 import { join, resolve } from 'node:path';
@@ -38,7 +38,7 @@ export function targetKey(target) {
 }
 
 export function releaseBranchName(version) {
-  if (!/^v\d+\.\d+\.\d+$/.test(version ?? '')) fail(`invalid release version: ${version}`);
+  if (!/^v\d+\.\d+\.\d+(?:-rc\.[1-9]\d*)?$/.test(version ?? '')) fail(`invalid release version: ${version}`);
   return `release-${version}`;
 }
 
@@ -280,7 +280,7 @@ function pointChannel(channel, branch, { dryRun } = {}) {
 // previous release record supplies identities of store builds this pipeline
 // uploaded and the runtimes it last served (used only if a store is
 // unreadable). No guess replaces a store answer.
-export function computeTargets({ memory = {}, stores, pins }) {
+export function computeTargets({ memory = {}, stores, pins, channel = 'production' }) {
   const observedLive = RELEASE_PLATFORMS.flatMap((platform) =>
     stores?.[platform]?.status === 'readable'
       ? [...stores[platform].live, ...(stores[platform].historical ?? [])]
@@ -293,6 +293,7 @@ export function computeTargets({ memory = {}, stores, pins }) {
     stores,
     previouslyLive,
     previousTargets: memory.previousTargets ?? [],
+    channel,
   });
   if (targets.length === 0) fail('no live store runtime is known; refusing to publish an OTA nobody can receive');
   for (const platform of RELEASE_PLATFORMS) {
@@ -301,20 +302,23 @@ export function computeTargets({ memory = {}, stores, pins }) {
   return { targets, previouslyLive };
 }
 
-function readStoreState(memory) {
+function readStoreState(memory, channel) {
   const input = join(mkdtempSync(join(tmpdir(), 'beeline-store-status-')), 'memory.json');
   writeJson(input, memory);
   const observed = spawnSync(process.execPath, [
     fileURLToPath(new URL('../../../scripts/read-store-runtimes.mjs', import.meta.url)), input,
-  ], { encoding: 'utf8', timeout: 180_000, maxBuffer: 8 * 1024 * 1024 });
+  ], { encoding: 'utf8', timeout: 180_000, maxBuffer: 8 * 1024 * 1024,
+    env: { ...process.env, BEELINE_RELEASE_CHANNEL: channel } });
+  const unavailable = reason => ({ stores: Object.fromEntries(
+    RELEASE_PLATFORMS.map(platform => [platform, { status: 'unavailable', reason }]),
+  ), builds: memory.builds ?? [] });
   if (observed.status !== 0) {
-    console.log(`store runtime lookup failed; using the previous release's targets: ${observed.stderr?.trim()}`);
-    return { stores: {}, builds: memory.builds ?? [] };
+    return unavailable(`store runtime reader failed (${observed.error?.message ?? observed.signal ?? observed.status}): ${observed.stderr?.trim()}`);
   }
   try {
     return JSON.parse(observed.stdout);
-  } catch {
-    return { stores: {}, builds: memory.builds ?? [] };
+  } catch (error) {
+    return unavailable(`store runtime reader returned invalid JSON: ${error.message}`);
   }
 }
 
@@ -328,11 +332,22 @@ export function latestSourceTargets(branchUpdates) {
 }
 
 function targetsCommand(options) {
+  const channel = options.channel ?? process.env.BEELINE_RELEASE_CHANNEL ?? 'production';
   const memory = options.memory ? readJson(options.memory) : {};
-  const status = options.storeStatus ? readJson(options.storeStatus) : readStoreState(memory);
+  const status = options.storeStatus ? readJson(options.storeStatus) : readStoreState(memory, channel);
+  const warnings = RELEASE_PLATFORMS.flatMap(platform => {
+    const store = status.stores?.[platform];
+    return [
+      ...(store?.status === 'readable' ? [] : [`${platform} store status unavailable (${store?.reason ?? 'not read'}); keeping the previous release's ${platform} targets`]),
+      ...(store?.warnings ?? []),
+    ];
+  });
   const unreadable = RELEASE_PLATFORMS.filter((platform) => status.stores?.[platform]?.status !== 'readable');
-  for (const platform of unreadable) {
-    console.log(`${platform} store status unavailable (${status.stores?.[platform]?.reason ?? 'not read'}); keeping the previous release's ${platform} targets`);
+  for (const warning of warnings) {
+    console.warn(`::warning::${warning.replaceAll('%', '%25').replaceAll('\r', '%0D').replaceAll('\n', '%0A')}`);
+  }
+  if (warnings.length && process.env.GITHUB_STEP_SUMMARY) {
+    appendFileSync(process.env.GITHUB_STEP_SUMMARY, `\n### OTA store runtime lookup warnings\n\n${warnings.map(warning => `- ${warning.replace(/[\r\n]/g, ' ')}`).join('\n')}\n`);
   }
   if (unreadable.length > 0 && !(memory.previousTargets?.length > 0) && !options.storeStatus) {
     // First release on this scheme: what production serves now is the
@@ -343,6 +358,7 @@ function targetsCommand(options) {
   memory.previouslyLive = [...(memory.previouslyLive ?? []), ...(status.previouslyLive ?? [])];
   const { targets, previouslyLive } = computeTargets({
     memory, stores: status.stores, pins: readPinnedRuntimeVersion(process.cwd()),
+    channel,
   });
   console.log(`ota_targets=${targets.map(targetKey).join(',')}`);
   const result = { targets, storeRuntime: { builds: status.builds ?? memory.builds ?? [], previouslyLive } };
@@ -354,7 +370,7 @@ function publish(options) {
   if (!SHA.test(options.sha ?? '')) fail('publish requires --sha <40-hex release sha>');
   const branch = options.branch ?? releaseBranchName(options.releaseVersion);
   const channel = options.channel ?? 'beta';
-  const plan = options.targets ? readJson(options.targets) : targetsCommand({ memory: options.memory });
+  const plan = options.targets ? readJson(options.targets) : targetsCommand({ memory: options.memory, channel });
   const targets = plan.targets;
   const before = listBranch(branch, options);
   const { present, missing } = planBranchPublish({ targets, branchUpdates: before, sha: options.sha });
@@ -400,24 +416,6 @@ function publish(options) {
     published: missing.map(targetKey), alreadyPresent: present.map(targetKey),
     storeRuntime: plan.storeRuntime, previousChannelBranch: pointer.previousBranch,
   };
-  writeJson(options.output, facts);
-  return facts;
-}
-
-function promote(options) {
-  if (!SHA.test(options.sha ?? '')) fail('promote requires --sha <40-hex release sha>');
-  const branch = options.branch ?? releaseBranchName(options.releaseVersion);
-  const channel = options.channel ?? 'production';
-  const targets = options.targets ? readJson(options.targets).targets : null;
-  if (!Array.isArray(targets) || targets.length === 0) fail('promote requires --targets naming every runtime the branch must serve');
-  const updates = assertBranchCovers({ branch, targets, branchUpdates: listBranch(branch), sha: options.sha });
-  const pointer = pointChannel(channel, branch, options);
-  const facts = {
-    branch, channel, sourceSha: options.sha, targets,
-    groups: Object.fromEntries(updates.map((update) => [targetKey(update), update.group])),
-    changed: pointer.changed, observedPreviousBranch: pointer.previousBranch, promotedAt: new Date().toISOString(),
-  };
-  console.log(`promoted ${channel} -> ${branch} (${targets.map(targetKey).join(', ')})`);
   writeJson(options.output, facts);
   return facts;
 }
@@ -473,8 +471,6 @@ export function main(argv = process.argv.slice(2)) {
       return targetsCommand(options);
     case 'publish':
       return publish(options);
-    case 'promote':
-      return promote(options);
     case 'rollback':
       return rollback(options);
     case 'verify-branch':
@@ -483,7 +479,7 @@ export function main(argv = process.argv.slice(2)) {
       console.log(readChannelBranch(options.channel ?? 'production') ?? '');
       return undefined;
     default:
-      fail('Usage: ota-release.mjs <targets|publish|promote|rollback|verify-branch|channel-branch> [options]');
+      fail('Usage: ota-release.mjs <targets|publish|rollback|verify-branch|channel-branch> [options]');
   }
   return undefined;
 }

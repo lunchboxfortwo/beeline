@@ -1,7 +1,6 @@
 import { EmptyState } from '@/components/buzz/EmptyState';
-import { ErrorBanner } from '@/components/buzz/ErrorBanner';
 import { SettingsRow } from '@/components/buzz/SettingsRow';
-import { appErrorCopy } from '@/buzz/app-error-copy';
+import { appErrorCopy, appReadErrorCopy } from '@/buzz/app-error-copy';
 import { desktopColumnWidths } from '@/buzz/desktop-layout-tokens';
 import { ContentTarget, InlineRow } from '@/components/buzz/IndexRow';
 import { Button } from '@/components/buzz/Button';
@@ -10,7 +9,7 @@ import { messageJumpHref, roomHref } from '@/buzz/corner-navigation';
 import { useIsDesktop } from '@/utils/responsive';
 import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
 import { AccessibilityInfo, AppState, FlatList, Text, View } from 'react-native';
-import { Ionicons } from '@expo/vector-icons';
+import Ionicons from '@expo/vector-icons/Ionicons';
 import { useFocusEffect, useLocalSearchParams, useRouter } from 'expo-router';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { StyleSheet } from 'react-native-unistyles';
@@ -114,7 +113,7 @@ function emptySection(
     <View style={styles.emptyBlock} testID={testID}>
     <Ionicons color={styles.emptyIcon.color} name={icon} size={22} />
     <Text style={styles.emptyTitle}>{title}</Text>
-    <ErrorBanner inline title={detail} />
+    <Text style={styles.empty}>{detail}</Text>
   </View>
   );
 }
@@ -226,7 +225,7 @@ export default function TrayScreen() {
     lostWorkspaceRef.current = null;
     setLostWorkspaceId(null);
     if (result.status === 'rejected')
-      setError(appErrorCopy(result.reason));
+      setError(appReadErrorCopy(result.reason));
     else if (result.value.needsError || result.value.savedError)
       setError(result.value.needsError ?? result.value.savedError ?? null);
     if (result.status === 'fulfilled')
@@ -270,7 +269,7 @@ export default function TrayScreen() {
       await loadSavedList(workspaceId, savedNext);
     } catch (cause) {
       if (generation === loadGenerationRef.current)
-        setError(appErrorCopy(cause));
+        setError(appReadErrorCopy(cause));
     } finally {
       loadingSaved.current = false;
     }
@@ -848,7 +847,7 @@ export default function TrayScreen() {
       <PageHeader backAccessibilityLabel="Back to Rooms" eyebrow={workspaceName ?? 'Workspace'}
         onBack={desktop ? undefined : () => router.back()} prominent testID="tray-header" title="Tray" />
       {error ? (
-        <SettingsRow title={error} action="Retry" onPress={() => {void load(true);}}
+        <SettingsRow title={error}
           />
       ) : null}
       <View style={styles.body}>

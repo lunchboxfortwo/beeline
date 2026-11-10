@@ -1,3 +1,4 @@
+import { ensureSquireMachine } from './squire-machine.js';
 import { systemMessage } from '@beeline/api-contract/system-message-catalog';
 import { createHash, randomUUID } from 'node:crypto';
 import { readFileSync } from 'node:fs';
@@ -18,7 +19,7 @@ import type { ConnectionGrant } from '@beeline/api-contract/daemon';
 import { SYSTEM_IDENTITY_ID } from '@beeline/api-contract/system-identity';
 import { SQUIRE_MCP_TARGET } from '@beeline/api-contract/phone';
 import type { SqlDatabase } from './database.js';
-import { notifyAgentConfigChange } from './postgres-live.js';
+import { notifyAgentConfigChange, notifyAgentConfigChanges } from './postgres-live.js';
 import {
   ensureSystemDirectMessageRoom,
   restateSystemLine,
@@ -226,8 +227,8 @@ async function postUsageReceiptCard(
 
   const agent = (
     await database.query<{ name: string; handle: string | null }>(
-      `SELECT name,handle FROM identities WHERE id=$1`,
-      [agentId],
+      `SELECT name,beeline_workspace_handle(id,$2) handle FROM identities WHERE id=$1`,
+      [agentId,connector.workspace_id],
     )
   ).rows[0];
   const connectionName = connection.label ?? connection.service ?? connection.reference;
@@ -328,59 +329,48 @@ export function isMetadataStale(lastSyncedAt: Date | null): boolean {
 /** Upserts one helper vault report into the sovereign connection rows. */
 export async function applyVaultList(
   database: SqlDatabase,
-  connector: { id?: string; owner_identity_id: string; machine_id?: string; workspace_id?: string },
+  connector: { owner_identity_id: string; machine_id: string; workspace_id: string },
   connections: readonly VaultConnectionMeta[],
-): Promise<void> {
-  const seen = new Set<string>();
-  for (const entry of connections) {
-    seen.add(entry.reference);
-    await database.query(
-      `INSERT INTO workspace_connections(
-         id,connector_id,owner_identity_id,reference,service,label,hosts,state,
-         connection_metadata,last_synced_at,machine_id,workspace_id
-       ) VALUES ($1,$2,$3,$4,$5,$6,$7::jsonb,$8,$9::jsonb,now(),$10,$11)
-       ON CONFLICT ${connector.machine_id
-         ? '(owner_identity_id,machine_id,reference) WHERE machine_id IS NOT NULL'
-         : '(connector_id,reference)'} DO UPDATE SET
-         service=EXCLUDED.service,
-         label=EXCLUDED.label,
-         hosts=EXCLUDED.hosts,
-         state=EXCLUDED.state,
-         connection_metadata=EXCLUDED.connection_metadata,
-         last_synced_at=now(),
-         updated_at=now()`,
-      [
-        randomUUID(),
-        connector.id ?? null,
-        connector.owner_identity_id,
-        entry.reference,
-        entry.service,
-        entry.label,
-        JSON.stringify(entry.allowedHosts ?? []),
-        entry.state,
-        JSON.stringify({ fieldNames: entry.fieldNames, vaultCreatedAt: entry.createdAt,
-          loginHosts: entry.loginHosts, faviconDomain: entry.faviconDomain, keyName: entry.keyName,
-          credentialKind: entry.credentialKind, expiresAt: entry.expiresAt }),
-        connector.machine_id ?? null,
-        connector.workspace_id ?? null,
-      ],
-    );
-  }
-  // A reference the vault no longer holds is gone; its ledger history goes
-  // with it (the vault is the record of what exists, not what existed).
-  const existing = await database.query<{ id: string; reference: string }>(
-    connector.machine_id
-      ? `SELECT id,reference FROM workspace_connections WHERE owner_identity_id=$1 AND machine_id=$2`
-      : `SELECT id,reference FROM workspace_connections WHERE connector_id=$1`,
-    connector.machine_id ? [connector.owner_identity_id, connector.machine_id] : [connector.id],
-  );
-  for (const row of existing.rows) {
-    if (!seen.has(row.reference))
-      await database.query(`DELETE FROM workspace_connections WHERE id=$1`, [row.id]);
-  }
-  if (connector.id) await database.query(`UPDATE workspace_connectors SET updated_at=now() WHERE id=$1`, [
-    connector.id,
-  ]);
+  report: import('@beeline/api-contract/workbench').SquireMachineReport = {status:'connected',reportedAt:Date.now()/1000},
+): Promise<boolean> {
+  const source=await ensureSquireMachine(database,connector.owner_identity_id,connector.machine_id);
+  // One statement for the whole report: a per-entry round trip held the
+  // old machine lock for seconds and starved the pool on reconnect.
+  const rows = [...new Map(connections.map(entry => [entry.reference, {
+    id: randomUUID(),
+    reference: entry.reference,
+    service: entry.service,
+    label: entry.label,
+    hosts: entry.allowedHosts ?? [],
+    state: entry.state,
+    metadata: { fieldNames: entry.fieldNames, vaultCreatedAt: entry.createdAt,
+      loginHosts: entry.loginHosts, faviconDomain: entry.faviconDomain, keyName: entry.keyName,
+      credentialKind: entry.credentialKind, expiresAt: entry.expiresAt },
+  }])).values()];
+  const result=await database.query<{applied:boolean}>(
+    `WITH accepted AS (
+      UPDATE squire_machines SET squire_report=$5::jsonb,revision=revision+1
+      WHERE owner_id=$2 AND machine_id=$3 AND revision=$6 AND generation=$8
+        AND squire_work->>'disconnected' IS DISTINCT FROM 'true' RETURNING owner_id
+    ), reported AS MATERIALIZED (
+      SELECT * FROM jsonb_to_recordset($1::jsonb) AS r(id uuid,reference text,service text,label text,
+        hosts jsonb,state text,metadata jsonb)
+    ), written AS (
+      INSERT INTO workspace_connections(id,owner_identity_id,reference,service,label,hosts,state,
+        connection_metadata,last_synced_at,machine_id,workspace_id)
+      SELECT r.id,$2::text,r.reference,r.service,r.label,r.hosts,r.state,r.metadata,now(),$3::text,$4::uuid
+        FROM reported r CROSS JOIN accepted WHERE $7::boolean
+      ON CONFLICT (owner_identity_id,machine_id,reference) WHERE machine_id IS NOT NULL
+        DO UPDATE SET service=EXCLUDED.service,label=EXCLUDED.label,hosts=EXCLUDED.hosts,
+          state=EXCLUDED.state,connection_metadata=EXCLUDED.connection_metadata,last_synced_at=now(),updated_at=now()
+    ), removed AS (
+      DELETE FROM workspace_connections cached WHERE owner_identity_id=$2 AND machine_id=$3
+        AND NOT EXISTS(SELECT 1 FROM reported WHERE reference=cached.reference)
+        AND $7::boolean AND EXISTS(SELECT 1 FROM accepted)
+    ) SELECT EXISTS(SELECT 1 FROM accepted) applied`,
+    [JSON.stringify(rows),connector.owner_identity_id,connector.machine_id,connector.workspace_id,
+      JSON.stringify(report),source.revision,report.status==='connected',source.generation]);
+  return result.rows[0]!.applied;
 }
 
 /** The default steps a freshly paired connector shows while installing. */
@@ -408,50 +398,18 @@ export async function grantSquireToOwnerMachineAgents(
   },
 ): Promise<string[]> {
   const dmRoomId = await ensureSystemDirectMessageRoom(database, input.workspaceId, input.ownerIdentityId);
-  const agents = await database.query<{ agent_id: string }>(
-    input.agentId
-      ? `SELECT a.agent_id FROM agents a
-         JOIN memberships m ON m.identity_id=a.agent_id AND m.workspace_id=$1
-           AND m.room_id IS NULL AND m.removed_at IS NULL
-         WHERE a.agent_id=$4 AND a.owner_id=$2
-           AND COALESCE(a.machine_id, a.agent_id)=$3`
-      : `SELECT a.agent_id FROM agents a
-         JOIN memberships m ON m.identity_id=a.agent_id AND m.workspace_id=$1
-           AND m.room_id IS NULL AND m.removed_at IS NULL
-         WHERE a.owner_id=$2 AND COALESCE(a.machine_id, a.agent_id)=$3`,
-    input.agentId
-      ? [input.workspaceId, input.ownerIdentityId, input.machineId, input.agentId]
-      : [input.workspaceId, input.ownerIdentityId, input.machineId],
-  );
-  const granted: string[] = [];
-  for (const agent of agents.rows) {
-    const inserted = await database.query<{ id: string }>(
-      `INSERT INTO agent_grants(
-         id,agent_id,workspace_id,kind,target,reason,requested_by,room_id,status,
-         decided_by,decided_at,auto
-       )
-       SELECT $1,$2,$3,'mcp',$4,$5,$6,$7,'approved',$6,now(),false
-       WHERE NOT EXISTS (
-         SELECT 1 FROM agent_grants
-         WHERE agent_id=$2 AND workspace_id=$3 AND kind='mcp' AND target=$4
-           AND requested_by=$6 AND status IN ('approved','once')
-           AND (expires_at IS NULL OR expires_at>now())
-       )
-       RETURNING id`,
-      [
-        randomUUID(),
-        agent.agent_id,
-        input.workspaceId,
-        SQUIRE_MCP_TARGET,
-        SQUIRE_MACHINE_GRANT_REASON,
-        input.ownerIdentityId,
-        dmRoomId,
-      ],
-    );
-    if (inserted.rowCount) {
-      granted.push(agent.agent_id);
-      await notifyAgentConfigChange(database, agent.agent_id, input.workspaceId);
-    }
-  }
-  return granted;
+  const granted=await database.query<{agent_id:string}>(`INSERT INTO agent_grants(
+    id,agent_id,workspace_id,kind,target,reason,requested_by,room_id,status,decided_by,decided_at,auto)
+    SELECT gen_random_uuid(),agent.agent_id,$1,'mcp',$4,$5,$2,$6,'approved',$2,now(),false FROM agents agent
+    WHERE agent.owner_id=$2 AND COALESCE(agent.machine_id,agent.agent_id)=$3 AND ($7::text IS NULL OR agent.agent_id=$7)
+      AND EXISTS(SELECT 1 FROM memberships member WHERE member.identity_id=agent.agent_id AND member.workspace_id=$1
+        AND member.room_id IS NULL AND member.removed_at IS NULL)
+      AND NOT EXISTS(SELECT 1 FROM agent_grants grant_row WHERE grant_row.agent_id=agent.agent_id
+        AND grant_row.workspace_id=$1 AND grant_row.kind='mcp' AND grant_row.target=$4 AND grant_row.requested_by=$2
+        AND grant_row.status IN ('approved','once') AND (grant_row.expires_at IS NULL OR grant_row.expires_at>now()))
+    RETURNING agent_id`,[input.workspaceId,input.ownerIdentityId,input.machineId,SQUIRE_MCP_TARGET,
+    SQUIRE_MACHINE_GRANT_REASON,dmRoomId,input.agentId??null]);
+  const ids=granted.rows.map(row=>row.agent_id);
+  await notifyAgentConfigChanges(database,ids,input.workspaceId);
+  return ids;
 }

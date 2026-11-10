@@ -1,3 +1,5 @@
+import { consumeLocalDelivery } from './rooms-mcp-delivery.js';
+import { MCP_LANDING_STYLE, renderMcpWorkspaceLanding, type McpWorkspaceLanding } from './rooms-mcp-landing.js';
 import { createWorkspace, defaultWorkspaceName } from './workspace-creation.js';
 import { renderMcpWorkspaceSelection, MCP_WORKSPACE_SCRIPT, MCP_WORKSPACE_STYLE } from './rooms-mcp-consent-ui.js';
 import { readFileSync } from 'node:fs';
@@ -10,7 +12,7 @@ import type { TokenAuth } from './auth.js';
 import { tokenHash } from './auth.js';
 import { connectMcp, refreshMcp, MCP_FULL_SCOPE } from './rooms-mcp-connections.js';
 import { setMcpMemberWebhook, McpToolError, ensureMcpMember, mcpMemberId, setMcpMemberProfile } from './rooms-mcp-members.js';
-import { MCP_STARTER_ROUTINE, agentHandleFromName, uniqueAgentHandle } from '@beeline/api-contract/phone';
+import { MCP_STARTER_ROUTINE, agentHandleFromName } from '@beeline/api-contract/phone';
 import { subscribeCommandCompletion,waitForCommittedChange } from './command-completion.js';
 
 export const MCP_READ = 'rooms:read';
@@ -176,7 +178,7 @@ export class RoomsMcpOAuth {
   private cookie(request: IncomingMessage): string {
     return (request.headers.cookie ?? '').split(';').map(part => part.trim()).find(part => part.startsWith('beeline_mcp='))?.slice(12) ?? '';
   }
-  private page(response: ServerResponse, title: string, content: string, status = 200): void {
+  private page(response: ServerResponse, title: string, content: string, status = 200, workspaceLanding = false): void {
     // No form-action: Chrome applies it to every redirect after a form POST, so
     // a client callback that redirects again (www.cursor.com to cursor.com) stalls.
     const nonce = randomBytes(18).toString('base64');
@@ -188,7 +190,7 @@ export class RoomsMcpOAuth {
       'content-security-policy': `default-src 'none'; ${copyScript ? `script-src 'nonce-${nonce}'; ` : ''}style-src 'unsafe-inline'; font-src 'self'; img-src data:; base-uri 'none'; frame-ancestors 'none'`,
       'x-content-type-options': 'nosniff',
     });
-    response.end(`<!doctype html><html lang="en"><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><meta name="color-scheme" content="light dark"><title>${escape(title)} · Beeline</title><style>${PAGE_STYLE}</style><main>${content}<p class="foot"><a href="https://usebeeline.app/privacy/">Privacy</a><a href="https://usebeeline.app/terms/">Terms</a><a href="mailto:hello@usebeeline.app">Support</a></p></main>${copyScript}</html>`);
+    response.end(`<!doctype html><html lang="en"><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><meta name="color-scheme" content="light dark"><title>${escape(title)} · Beeline</title><style>${PAGE_STYLE}${workspaceLanding ? MCP_LANDING_STYLE : ''}</style><main${workspaceLanding ? ' class="workspace-ready"' : ''}>${content}<p class="foot"><a href="https://usebeeline.app/privacy/">Privacy</a><a href="https://usebeeline.app/terms/">Terms</a><a href="mailto:hello@usebeeline.app">Support</a></p></main>${copyScript}</html>`);
   }
   /** The client's own mark joined to the real Beeline icon by a dashed line. */
   private brand(flow: Pick<Flow, 'name' | 'logo'>): string {
@@ -276,6 +278,14 @@ export class RoomsMcpOAuth {
   }
   async handle(request: IncomingMessage, response: ServerResponse, url: URL): Promise<boolean> {
     const path = url.pathname;
+    if(path==='/mcp/oauth/delivery-attach' && request.method==='POST') {
+      try {
+        const body=await mcpBody(request,1024);
+        if(typeof body.secret!=='string' || !/^[A-Za-z0-9_-]{43}$/.test(body.secret)) throw new Error();
+        mcpJson(response,200,await consumeLocalDelivery(this.database,body.secret));
+      } catch { mcpJson(response,400,{error:'invalid_delivery_handoff'}); }
+      return true;
+    }
     if (!path.startsWith('/mcp/oauth/') && !ISSUER_PATHS.includes(path) && !RESOURCE_PATHS.includes(path)) return false;
     if (request.method === 'GET' && /^\/mcp\/oauth\/SpaceGrotesk-(Regular|Medium|SemiBold)\.ttf$/.test(path)) {
       response.writeHead(200, { 'content-type': 'font/ttf', 'cache-control': 'public, max-age=31536000' });
@@ -401,14 +411,11 @@ export class RoomsMcpOAuth {
             ? (await this.database.query<{ name: string; handle: string | null; avatar_base64: string | null }>(`SELECT i.name,i.handle,encode(a.bytes,'base64') avatar_base64 FROM identities i LEFT JOIN agent_avatars a ON a.agent_id=i.id AND i.avatar='/v1/agent-avatars/'||a.id::text WHERE i.id=$1`, [member])).rows[0]
             : undefined;
           const name = flow.joiner_name ?? existing?.name ?? flow.name;
-          let handle = flow.joiner_handle ?? existing?.handle ?? agentHandleFromName(name);
-          if (!flow.joiner_handle && !existing && flow.joiner_name) {
-            // A proposed name gets a handle no one in the person's Workspaces holds yet, kept for Allow.
-            const taken = await this.database.query<{ handle: string }>(`SELECT DISTINCT i.handle FROM memberships owner
-              JOIN memberships m ON m.workspace_id=owner.workspace_id AND m.removed_at IS NULL JOIN identities i ON i.id=m.identity_id
-              WHERE owner.identity_id=$1 AND owner.room_id IS NULL AND owner.removed_at IS NULL AND i.handle IS NOT NULL`, [flow.identity_id]);
-            handle = uniqueAgentHandle(name, taken.rows.map(row => row.handle));
-            await this.database.query('UPDATE rooms_mcp_flows SET joiner_handle=$2 WHERE id=$1', [flow.id, handle]);
+          let handle = flow.joiner_handle ?? existing?.handle;
+          if(!handle){
+            const base=agentHandleFromName(name).replace(/(_[0-9]+)+$/,'');
+            handle=(await this.database.query<{handle:string}>(`SELECT CASE WHEN n=1 THEN $1 ELSE $1||'_'||n::text END handle
+              FROM (SELECT beeline_next_handle_number($1) n) next`,[base])).rows[0]!.handle;
           }
           const who = `<p class="who">Signed in as <b>${escape(flow.identity_name ?? 'Beeline user')}</b></p>`;
           if (url.searchParams.get('edit') === '1') {
@@ -436,7 +443,7 @@ export class RoomsMcpOAuth {
             ? `<p class="who">Supported agent · sends its code to <b>${host}</b></p>`
             : `<div class="warn"><strong>This is not a supported agent</strong><p>It calls itself <b>“${client}”</b>, but Beeline does not recognize it. Its sign-in code goes to:</p><p class="host">${host}</p><p>Only continue if you set this app up yourself and trust that address. An app pretending to be a known agent could read and post in your Rooms and act like your agents.</p></div>`;
           const confirmation = flow.supported ? '' : `<label class="check"><input type="checkbox" id="trust_app" name="trust_app" value="1"><span class="check-text">I set this app up myself and trust <b>${host}</b></span></label>`;
-          this.page(response, `Add ${flow.supported ? flow.name : 'an unsupported app'} to your team`, `${this.brand(flow)}<h1>Add ${flow.supported ? client : 'an unsupported app'} to your team</h1>${notice}${who}<p class="head">Joins as</p><div class="joins">${plate}<div class="who-am"><div class="name">${escape(name)}</div><div class="tag">@${escape(handle)} · ${flow.supported ? client : `unverified app at ${host}`}</div></div><a class="edit" href="/mcp/oauth/consent?flow=${flow.id}&amp;edit=1">Edit</a></div>${renderMcpWorkspaceSelection(workspaces.rows, defaultWorkspaceName(flow.identity_name))}<p class="head">It can</p><div class="perms"><div class="perm"><strong>Read public Rooms in selected Workspaces</strong><span>It joins their public Rooms, like your other agents. Add or remove it in any Room under Members.</span></div><div class="perm"><strong>Post as ${escape(name)}</strong><span>Its messages show as ${escape(name)}, never as you. Allowing it is your approval for it to answer anyone in a Room who tags it.</span></div><div class="perm"><strong>Act like your other agents</strong><span>It can order agents, open corners, review and merge through the same checks. It cannot spend from your wallet or run commands on your machines.</span></div></div>${flow.redirect_uri === `${this.origin}/mcp/oauth/handoff` ? `<p class="fine">${sessionMessageConsent(flow.claude_inbound_fallback, flow.name === 'Codex')}</p>` : ''}<p class="fine">Room text it reads goes to ${client} under ${terms}. Remove it any time in Settings, under Connectors.</p><form id="mcp-consent-form" method="post" action="/mcp/oauth/consent"><input type="hidden" name="flow" value="${flow.id}"><div class="field"><label for="wake_url">Webhook URL (optional)</label><input id="wake_url" name="wake_url" type="url" maxlength="2048" autocomplete="off"><p>For clients with their own HTTPS receiver. For ChatGPT or Codex dots using MCP Events, leave these fields blank; the host supplies its callback when you ask it to monitor mentions. Paste a receiver token with or without &#39;Bearer &#39;.</p></div><div class="field"><label for="wake_key">Auth token (optional)</label><input id="wake_key" name="wake_key" type="password" maxlength="512" autocomplete="new-password"></div>${confirmation}<div class="stack" style="margin-top:16px"><button class="btn primary" name="decision" value="allow"${flow.supported ? '' : ' disabled'}>Allow</button><button class="btn" name="decision" value="deny">Cancel</button></div></form><section class="routine" aria-label="Starter instructions"><h2>Starter instructions</h2><p class="fine">Paste into this agent’s saved instructions or existing routine prompt.</p><ol id="starter-routine" class="routine-text">${MCP_STARTER_ROUTINE.split('\n').filter(line => line.trim()).map(line => `<li>${escape(line)}</li>`).join('\n')}</ol><button class="copy" id="copy-routine" type="button">Copy</button><p class="copy-status" id="copy-status" role="status"></p></section>`);
+          this.page(response, `Join Beeline with ${flow.supported ? flow.name : 'an unsupported app'}`, `${this.brand(flow)}<h1>Join Beeline with ${flow.supported ? client : 'an unsupported app'}</h1>${notice}${who}<p class="head">Joins as</p><div class="joins">${plate}<div class="who-am"><div class="name">${escape(name)}</div><div class="tag">@${escape(handle)} · ${flow.supported ? client : `unverified app at ${host}`}</div></div><a class="edit" href="/mcp/oauth/consent?flow=${flow.id}&amp;edit=1">Edit</a></div>${renderMcpWorkspaceSelection(workspaces.rows, defaultWorkspaceName(flow.identity_name))}<p class="head">It can</p><div class="perms"><div class="perm"><strong>Read public Rooms in selected Workspaces</strong><span>It joins their public Rooms, like your other agents. Add or remove it in any Room under Members.</span></div><div class="perm"><strong>Post as ${escape(name)}</strong><span>Its messages show as ${escape(name)}, never as you. Allowing it is your approval for it to answer anyone in a Room who tags it.</span></div><div class="perm"><strong>Act like your other agents</strong><span>It can order agents, open corners, review and merge through the same checks. It cannot spend from your wallet or run commands on your machines.</span></div></div>${flow.redirect_uri === `${this.origin}/mcp/oauth/handoff` ? `<p class="fine">${sessionMessageConsent(flow.claude_inbound_fallback, flow.name === 'Codex')}</p>` : ''}<p class="fine">Room text it reads goes to ${client} under ${terms}. Remove it any time in Settings, under Connectors.</p><form id="mcp-consent-form" method="post" action="/mcp/oauth/consent"><input type="hidden" name="flow" value="${flow.id}"><div class="field"><label for="wake_url">Live replies · host webhook URL</label><input id="wake_url" name="wake_url" type="url" maxlength="2048" autocomplete="off"><p>Continue delivery setup for this member in its actual host. Cursor and Grok routines use their webhook-triggered receiver here. Local Codex, Claude Code and Antigravity App install their companion after Allow. ChatGPT Work and dots ask the host to subscribe to MCP Events. Blank fields leave live replies unfinished until that path is proved. Paste a receiver token with or without &#39;Bearer &#39;.</p></div><div class="field"><label for="wake_key">Host receiver auth token</label><input id="wake_key" name="wake_key" type="password" maxlength="512" autocomplete="new-password"></div>${confirmation}<div class="stack" style="margin-top:16px"><button class="btn primary" name="decision" value="allow"${flow.supported ? '' : ' disabled'}>Allow</button><button class="btn" name="decision" value="deny">Cancel</button></div></form><section class="routine" aria-label="Starter instructions"><h2>Starter instructions</h2><p class="fine">Paste into this agent’s saved instructions or existing routine prompt.</p><ol id="starter-routine" class="routine-text">${MCP_STARTER_ROUTINE.split('\n').filter(line => line.trim()).map(line => `<li>${escape(line)}</li>`).join('\n')}</ol><button class="copy" id="copy-routine" type="button">Copy</button><p class="copy-status" id="copy-status" role="status"></p></section>`);
         }
         return true;
       }
@@ -462,6 +469,7 @@ export class RoomsMcpOAuth {
           target.searchParams.set('state', flow.state); target.searchParams.set('iss', this.origin);
           if (input.decision === 'allow') {
             if (!flow.supported && input.trust_app !== '1') throw new Refusal('invalid_request', 'app_trust_unconfirmed');
+            let createdWorkspace: { id: string; roomId: string } | undefined;
             let workspaceIds = typeof input.workspace_ids === 'string' ? [input.workspace_ids] : input.workspace_ids;
             if (input.workspace_selection === '1' && (workspaceIds === undefined || (Array.isArray(workspaceIds) && !workspaceIds.length))) {
               // Serialize simultaneous first connections for this person. Only an account
@@ -470,15 +478,16 @@ export class RoomsMcpOAuth {
               const memberships = await db.query(`SELECT 1 FROM memberships WHERE identity_id=$1
                 AND room_id IS NULL AND removed_at IS NULL LIMIT 1`, [flow.identity_id]);
               if (!memberships.rowCount) {
-                const workspace = await createWorkspace(db, { name: defaultWorkspaceName(flow.identity_name) }, flow.identity_id);
+                const workspace = await createWorkspace(db, { name: defaultWorkspaceName(flow.identity_name) }, flow.identity_id, undefined, 'mcp_consent');
                 workspaceIds = [workspace.id];
+                createdWorkspace = workspace;
               }
             }
             if (input.workspace_selection !== '1' || !Array.isArray(workspaceIds) || !workspaceIds.length
               || workspaceIds.some(id => typeof id !== 'string' || !/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(id)))
               throw new Refusal('invalid_request', 'workspaces_invalid');
             try {
-              await ensureMcpMember(db, { clientId: flow.client_id, ownerId: flow.identity_id, modelLabel: flow.name,
+              await ensureMcpMember(db, { clientId: flow.client_id, ownerId: flow.identity_id, modelLabel: flow.name, initialName:flow.joiner_name??undefined,
                 workspaceIds: workspaceIds.map(id => (id as string).toLowerCase()) });
             } catch (error) {
               if (error instanceof McpToolError) throw new Refusal('invalid_request', 'workspaces_invalid');
@@ -506,6 +515,12 @@ export class RoomsMcpOAuth {
             const code = opaque();
             await db.query(`INSERT INTO rooms_mcp_codes(hash,client_id,identity_id,redirect_uri,challenge,scope,expires_at)
               VALUES($1,$2,$3,$4,$5,$6,now()+interval '10 minutes')`, [tokenHash(code), flow.client_id, flow.identity_id, flow.redirect_uri, flow.challenge, flow.scope]);
+            if (createdWorkspace && flow.redirect_uri === `${this.origin}/mcp/oauth/handoff`) {
+              await db.query(`INSERT INTO rooms_mcp_workspace_landings
+                (code_hash,browser_hash,workspace_id,room_id,workspace_name,client_name,expires_at)
+                VALUES($1,$2,$3,$4,$5,$6,now()+interval '10 minutes')`,
+                [tokenHash(code), flow.browser_hash, createdWorkspace.id, createdWorkspace.roomId, defaultWorkspaceName(flow.identity_name), flow.name]);
+            }
             target.searchParams.set('code', code);
           } else target.searchParams.set('error', 'access_denied');
           await db.query('DELETE FROM rooms_mcp_flows WHERE id=$1', [flow.id]);
@@ -521,9 +536,14 @@ export class RoomsMcpOAuth {
         if (!code && !denied) throw new Refusal('invalid_request', 'handoff_invalid');
         await this.database.query(`INSERT INTO rooms_mcp_handoffs(state_hash,code,error,expires_at) VALUES($1,$2,$3,now()+interval '10 minutes')
           ON CONFLICT(state_hash) DO NOTHING`, [tokenHash(state), code && code.length <= 100 ? code : null, code ? null : 'access_denied']);
-        this.page(response, code ? 'Connected' : 'Not connected', `<div class="brand"><img class="mark" src="${BEELINE_ICON}" alt="Beeline"></div>${code
-          ? '<h1>Connected</h1><p class="lede">Go back to your session. It finishes joining by itself.</p>'
-          : '<h1>Not connected</h1><p class="lede">You chose Cancel. Your session did not join Beeline.</p>'}`);
+        // Browser-bound first-run context survives the session consuming its OAuth code.
+        // URL parameters never select a Workspace or supply display text.
+        const landing = code && code.length <= 100 ? (await this.database.query<McpWorkspaceLanding>(
+          `SELECT workspace_id,room_id,workspace_name,client_name FROM rooms_mcp_workspace_landings
+           WHERE code_hash=$1 AND browser_hash=$2 AND expires_at>now()`, [tokenHash(code), tokenHash(this.cookie(request))])).rows[0] : undefined;
+        this.page(response, landing ? 'Your team is ready' : code ? 'Connected' : 'Not connected', `<div class="brand"><img class="mark" src="${BEELINE_ICON}" alt="Beeline"></div>${code
+          ? landing ? renderMcpWorkspaceLanding(landing, request.headers['user-agent'] ?? '') : '<h1>Connected</h1><p class="lede">Go back to your session. It finishes joining by itself.</p>'
+          : '<h1>Not connected</h1><p class="lede">You chose Cancel. Your session did not join Beeline.</p>'}`, 200, !!landing);
         return true;
       }
       if (request.method === 'POST' && path === '/mcp/oauth/handoff') {
@@ -549,8 +569,7 @@ export class RoomsMcpOAuth {
             const row=await waitForCommittedChange(
               wake=>subscribeCommandCompletion({principal:'oauth',operation:'mcp-handoff',commandId:hash},wake),
               async()=>this.completionReady()?(await this.database.query<{code:string|null;error:string|null}>(
-                'SELECT code,error FROM rooms_mcp_handoffs WHERE state_hash=$1 AND expires_at>now()',[hash])).rows[0]:undefined,
-              Number(input.waitMs),controller.signal);
+                'SELECT code,error FROM rooms_mcp_handoffs WHERE state_hash=$1 AND expires_at>now()',[hash])).rows[0]:undefined,controller.signal);
             response.end(JSON.stringify(row?(row.code?{code:row.code}:{error:row.error??'access_denied'}):{error:'authorization_pending'}));return true;
           }catch{
             if(!controller.signal.aborted)response.end(JSON.stringify({error:'completion_unavailable'}));return true;

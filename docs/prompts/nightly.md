@@ -184,7 +184,8 @@ Truncation, transport failures, absent
 usage, missing scenario facts, round limits and exhausted budgets are
 `incomplete`, with an explicit terminal reason. A format/incomplete sample never
 passes a negative-only rule. The restart fixture also records a separate
-truthfulness verdict; truthful inability is distinct from successful completion.
+truthfulness verdict; a failed truthfulness rule also fails the overall behavior
+verdict. Truthful inability is distinct from successful completion.
 Tokens include every continuation, and every round retains raw output, upstream
 response, usage and simulated results. The output ceiling remains 4,096 tokens.
 
@@ -256,8 +257,6 @@ new case on the old prompt, then the fix with the entire eligible library. The
 new case must pass, no passing case may regress, and overall pass rate must not
 drop. Browser cases stay explicitly skipped until a separately authorized replay
 can exercise them. Structural validation alone does not prove model behavior.
-
-`npm run test:prompt-nightly` tests controls without spending model tokens.
 
 ## Two-model result (schema version 3)
 
