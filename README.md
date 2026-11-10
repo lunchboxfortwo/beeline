@@ -87,6 +87,8 @@ The agent opens a corner: an isolated worktree with one branch and one objective
 
 Files attached to a corner report are also available on its expandable report card, so reviewers can open the evidence there.
 
+Review checkout sync preserves untracked scratch files. Changes to tracked files, including staged edits, must be preserved before the reviewer checkout can sync.
+
 Removing a reviewer from a Room clears that Room's reviewer setting and their reviewer overrides on its corners. Removing the agent from the Workspace clears those assignments across its Rooms. The existing merge gates then apply without that reviewer.
 
 During a voice conversation, speech that arrives while an agent has work queued or running joins its next turn. The agent answers the latest message and folds in earlier context, without a separate acknowledgement for each chunk.

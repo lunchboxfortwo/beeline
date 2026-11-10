@@ -86,7 +86,7 @@ import { MonolithCornerTurnLoop, execFileAsync } from './monolith-corner-turn.js
     if(ctx.forcedStop||(ctx.currentTurn&&ctx.stoppedTurns.has(ctx.currentTurn.requestId)))stop.abort();
     try {
       if (ctx.reviewerCheckout) {
-        if ((await execFileAsync('git', ['-C', ctx.options.worktreePath, 'status', '--porcelain'])).stdout.trim())
+        if ((await execFileAsync('git', ['-C', ctx.options.worktreePath, 'status', '--porcelain', '--untracked-files=no'])).stdout.trim())
           throw new Error('review checkout has uncommitted work; preserve it before syncing');
         const env = { ...process.env, GH_TOKEN: token, GITHUB_TOKEN: token, GIT_TERMINAL_PROMPT: '0' };
         const ref = `refs/remotes/origin/${repository.featureBranch}`;
