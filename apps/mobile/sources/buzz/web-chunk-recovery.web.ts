@@ -3,6 +3,7 @@ import { flushActiveTextDrafts } from './text-draft-store';
 const RETRY_KEY = 'beeline.web-chunk-reload.v1';
 const CHUNK_PATH = /\/_expo\/static\/js\/[^\s"'<>)]*\.js(?:[?#][^\s"'<>)]*)?/;
 let recovering = false;
+let installed = false;
 const recognizedErrors = new WeakSet<object>();
 
 // Only the deferred boot scripts identify an export; lazy scripts vary as a tab is used.
@@ -53,7 +54,8 @@ export function recoverWebChunk(value: unknown): boolean {
 }
 
 export function installWebChunkRecovery(): void {
-  if (typeof window === 'undefined') return;
+  if (typeof window === 'undefined' || installed) return;
+  installed = true;
   window.addEventListener('error', (event) => {
     const target = event.target;
     const failure = target instanceof HTMLScriptElement ? { request: target.src } : event;

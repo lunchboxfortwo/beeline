@@ -43,9 +43,9 @@ vi.mock('@/track', () => ({
 vi.mock('react-native-safe-area-context', () => ({
   useSafeAreaInsets: () => ({ top: 0, right: 0, bottom: 0, left: 0 }),
 }));
-vi.mock('@expo/vector-icons', async () => {
+vi.mock('@expo/vector-icons/Ionicons', async () => {
   const ReactModule = await import('react');
-  return { Ionicons: (props: any) => ReactModule.createElement('Ionicons', props) };
+  return { default: (props: any) => ReactModule.createElement('Ionicons', props) };
 });
 vi.mock('@/components/StyledText', async () => {
   const ReactModule = await import('react');

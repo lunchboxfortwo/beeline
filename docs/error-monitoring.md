@@ -65,6 +65,11 @@ activates them. Merging alone does not deploy this receiver.
   Expo and React Native config: current store binaries remain OTA-compatible.
   Do not enable native Sentry or remove those exclusions without a deliberate
   native runtime/store release.
+- Web: the small `sentry-entry.web.ts` entry retains global errors and rejected promises
+  while loading the reporting SDK on the first failure. Healthy cold loads do
+  not parse its integrations. Queued failures keep their original screen pattern
+  and use the same SDK privacy filter and cap; the SDK then owns global capture.
+  Chunk recovery remains installed at startup. Native initialization stays eager.
 
 Each SDK applies a process-local rolling-hour cap after privacy filtering: one
 report per error type and message (numeric runs normalized), with a hard ceiling

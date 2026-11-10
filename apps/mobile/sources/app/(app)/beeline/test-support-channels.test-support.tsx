@@ -57,9 +57,9 @@ vi.mock('react', async (importOriginal) => {
   } };
 });
 
-vi.mock('@expo/vector-icons', async () => {
+vi.mock('@expo/vector-icons/Ionicons', async () => {
   const R = await import('react');
-  return { Ionicons: (props: any) => R.createElement('Ionicons', props) };
+  return { default: (props: any) => R.createElement('Ionicons', props) };
 });
 
 vi.mock('react-native-keyboard-controller', async () => {

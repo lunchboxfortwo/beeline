@@ -21,7 +21,7 @@ type Props = [
   setRenameEditing: React.Dispatch<React.SetStateAction<boolean>>,
   isCorner: boolean,
   setRoomActionsVisible: (visible: boolean) => void | undefined,
-  openingRandomCorner: boolean,
+  openingRandomCorner: React.RefObject<boolean>,
   isArchived: boolean,
   viewerIsAgent: boolean,
   transport: BuzzRigTransport | null,
@@ -58,7 +58,7 @@ export function useChatCornerActions([
 
 
   const handleOpenRandomCorner = useCallback(async (attempt?: CornerOpenAttempt) => {
-    if (openingRandomCorner) return cornerOpenTappedAgain();
+    if (openingRandomCorner.current) return cornerOpenTappedAgain();
     if (isArchived || viewerIsAgent) return;
     if (!transport) {
       void Haptics.notificationAsync(Haptics.NotificationFeedbackType.Error);
@@ -107,7 +107,7 @@ export function useChatCornerActions([
    */
   const handleForwardToNewCorner = useCallback(
     (message: ChatDisplayMessage) => {
-      if (openingRandomCorner || isArchived || viewerIsAgent || desktopExperience) return;
+      if (openingRandomCorner.current || isArchived || viewerIsAgent || desktopExperience) return;
       if (!transport) {
         void Haptics.notificationAsync(Haptics.NotificationFeedbackType.Error);
         Modal.alert(
@@ -128,7 +128,7 @@ export function useChatCornerActions([
   ) => {
     const target = retry?.target ?? forwardCornerPrompt;
     if (!target) return;
-    if (openingRandomCorner || isArchived || viewerIsAgent || desktopExperience) return;
+    if (openingRandomCorner.current || isArchived || viewerIsAgent || desktopExperience) return;
     if (!transport) return;
     setForwardCornerPrompt(null);
     setOpeningRandomCorner(true);

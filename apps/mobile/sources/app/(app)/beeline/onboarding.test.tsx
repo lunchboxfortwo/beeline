@@ -1,5 +1,5 @@
 vi.mock('@/utils/responsive', () => ({ useIsDesktop: () => false }));
-vi.mock('@expo/vector-icons', async () => { const R = await import('react'); return { Ionicons: (props: any) => R.createElement('Ionicons', props) }; });
+vi.mock('@expo/vector-icons/Ionicons', async () => { const R = await import('react'); return { default: (props: any) => R.createElement('Ionicons', props) }; });
 vi.mock('expo-haptics', () => ({ ImpactFeedbackStyle: { Light: 'Light' }, impactAsync: async () => undefined }));
 vi.mock('react-native-keyboard-controller', async () => { const R = await import('react'); return { KeyboardAvoidingView: (props: any) => R.createElement('View', props, props.children) }; });
 import * as React from 'react';
@@ -209,17 +209,18 @@ describe('onboarding — a pending sign-in leaves the buttons usable', () => {
     await act(async () => {
       tree = create(React.createElement(BuzzOnboarding));
     });
-    await act(async () => {
-      await Promise.resolve();
-      await Promise.resolve();
-    });
     const button = () => tree.root.findAll(
       (node: any) => node.props?.testID === 'onboarding-google-sign-in' && node.type === 'Button',
     )[0];
     const github = () => tree.root.findAll(
       (node: any) => node.props?.testID === 'onboarding-github-sign-in' && node.type === 'Button',
     )[0];
-    expect(button().props.disabled).toBe(false);
+    // The device check awaits several stores before it enables the buttons.
+    // Wait for it to finish instead of a fixed number of microtask turns.
+    await vi.waitFor(async () => {
+      await act(async () => { await new Promise((done) => setTimeout(done, 0)); });
+      expect(button().props.disabled).toBe(false);
+    });
     await act(async () => { button().props.onPress(); });
     expect(googleSignIn).toHaveBeenCalledTimes(1);
     expect(button().props.disabled).toBe(false);

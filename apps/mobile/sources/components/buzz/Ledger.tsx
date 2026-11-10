@@ -3,7 +3,7 @@ import { BYLINE_DOT_SIZE } from './Ledger-ledger-steer';
 import React, { useEffect, useRef, useState } from 'react';
 import { Platform, Pressable, Text, View, type StyleProp, type ViewStyle } from 'react-native';
 import Animated, { cancelAnimation, Easing, runOnJS, useAnimatedStyle, useReducedMotion, useSharedValue, withTiming } from 'react-native-reanimated';
-import { Ionicons } from '@expo/vector-icons';
+import Ionicons from '@expo/vector-icons/Ionicons';
 import { useFonts } from 'expo-font';
 // @ts-expect-error Metro resolves font assets to native asset modules.
 import spaceGroteskMedium from '@/assets/fonts/SpaceGrotesk-Medium.ttf';

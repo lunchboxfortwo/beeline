@@ -170,11 +170,14 @@ export function useChatMembershipActions([
 
 
   const returnToRoomList = useCallback(() => {
-    setRosterVisible(false);
-    setRoomActionsVisible(false);
     router.replace({
       pathname: '/beeline/channels',
       ...(activeCommunityId ? { params: { communityId: activeCommunityId } } : {}),
+    });
+    // Let the accepted destination render before cleaning up this departing Room.
+    React.startTransition(() => {
+      setRosterVisible(false);
+      setRoomActionsVisible(false);
     });
   }, [activeCommunityId]);
 
@@ -215,7 +218,7 @@ export function useChatMembershipActions([
           appErrorCopy(err, `Could not ${deleting ? 'delete' : 'leave'} ${ROOM_LABEL}.`),
         );
       } finally {
-        setRoomLifecycleBusy(false);
+        React.startTransition(() => setRoomLifecycleBusy(false));
       }
     },
     [

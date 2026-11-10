@@ -1,5 +1,5 @@
 import { useArtifactRowVisible } from '@/buzz/artifact-viewport';
-import { Ionicons } from '@expo/vector-icons';
+import Ionicons from '@expo/vector-icons/Ionicons';
 import { LedgerUntaggedHint } from '@/components/buzz/Ledger';
 import { TurnSettledLine } from '@/components/buzz/TurnProgressLine';
 import React, { useCallback, useEffect, useMemo, useRef } from 'react';

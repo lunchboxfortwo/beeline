@@ -119,7 +119,7 @@ type Props = {
   setInputSelection: React.Dispatch<React.SetStateAction<{ start: number; end: number; }>>;
 };
 
-export function ChatSurfaceComposer({
+export const ChatSurfaceComposer = React.memo(function ChatSurfaceComposer({
   desktopExperience,
   setTurnChromeTopInset,
   composerAck,
@@ -553,4 +553,4 @@ export function ChatSurfaceComposer({
                   </Animated.View>
                 )}
               </View>);
-}
+});

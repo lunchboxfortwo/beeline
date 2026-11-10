@@ -1,4 +1,4 @@
-import { Ionicons } from '@expo/vector-icons';
+import Ionicons from '@expo/vector-icons/Ionicons';
 import { useRoomOutboxFailure } from '@/buzz/message-outbox-observer';
 import { voiceCallHumanNames } from '@/buzz/voice-call-members';
 import React from 'react';

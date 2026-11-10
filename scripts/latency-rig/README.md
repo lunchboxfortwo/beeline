@@ -850,3 +850,34 @@ source message after removal, not a forwarded message in a destination Room that
 this route never opens. Missing visibility stays null. The dismissal audit retains its two-frame
 completion boundary alongside accepted-result timing; the direct tap-to-gone value excludes those
 frames and the pre-click driver dispatch.
+
+### Web route coverage
+
+Route discovery excludes extracted hook/support modules and includes browser-share
+and Google callback screens. The current inventory contains 44 routes (88 cold/warm
+variants), rather than the historical 38 missing page loads. Each has an explicit
+content predicate in `web-route-fixtures.mjs`; redirects and terminal unavailable
+states are labelled in `route-summary.json`. Headers and spinners alone do not
+settle a page load. The wallet read uses a deterministic zero-balance DTO over the
+local socket, with no provider or wallet writes. App/key pages read metadata-only
+rows in the disposable local database. These are rendering fixtures, not proof of
+provider sign-in, usable credentials, wallet balances or spending.
+
+`web-run.sh` captures routes by default in the same browser after interactions.
+Each route variant has two captures of three document loads; route percentiles
+are coverage observations at a 450 ms budget, not the forty-sample performance
+proof required for the slow-path fixes. Cold document loads clear HTTP and app
+surface caches while preserving authentication; warm loads retain those caches.
+Set `LATENCY_RIG_WEB_ROUTES_ONLY=1` for the independent route lane. For setup
+smoke checks, `LATENCY_RIG_ROUTE_SMOKE_SAMPLES=1` runs one incomplete capture;
+its gaps stay explicit and Insights rejects it as a timing series.
+
+Attachment timing starts at file selection through the real web document picker,
+then includes upload, Send, the rendered message and a committed attachment check.
+It excludes human time in OS picker chrome. `web-run.sh` starts a disposable,
+loopback-only object store with synthetic keys (at most 1 MiB per fixture object),
+then shuts it down with the local server. No production object storage is used.
+Mark-read/unread have no current user controls; agent workflow start/handoff have
+no web tap controls; exact-head merge approval and provider consent remain explicit
+unavailable/external rows. Opening a workflow or connection page is never counted
+as completing those actions.

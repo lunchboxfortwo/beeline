@@ -131,6 +131,26 @@ export async function seedWebFixtures(db) {
         [wid, who],
       );
   }
+  const artifactRoom = uuid('route-artifact-room');
+  await db.query(`INSERT INTO rooms(id,workspace_id,created_by,name) VALUES($1,$2,$3,'web-route-artifact') ON CONFLICT(id) DO NOTHING`, [artifactRoom, workspace, viewer]);
+  await db.query(`INSERT INTO memberships(workspace_id,room_id,identity_id,role) SELECT $1,$2,$3,'owner' WHERE NOT EXISTS(SELECT 1 FROM memberships WHERE room_id=$2 AND identity_id=$3 AND removed_at IS NULL)`, [workspace, artifactRoom, viewer]);
+  await db.query(`INSERT INTO messages(id,room_id,author_id,text,created_at) VALUES($1,$2,$3,$4,'2026-01-01T11:59:00Z') ON CONFLICT(id) DO UPDATE SET room_id=EXCLUDED.room_id`, [hash('route-code'), artifactRoom, viewer, '```text\nlatency route code\n```']);
+  // Metadata-only connector fixtures: no remote service, account or key is used.
+  await db.query(
+    `INSERT INTO workspace_connectors(id,workspace_id,owner_identity_id,connector_type,helper_agent_id,status,connected_at)
+    VALUES($1,$2,$3,'registry-mcp',$4,'connected',now()) ON CONFLICT(id) DO NOTHING`,
+    [uuid('route-connector'), workspace, viewer, agent],
+  );
+  await db.query(
+    `INSERT INTO workspace_apps(id,workspace_id,owner_identity_id,app_key,display_name,domain,transport,route,connector_id,authorised_at)
+    VALUES($1,$2,$3,'latency-local','Local latency app','localhost','registry-mcp','registry-mcp',$4,now()) ON CONFLICT(id) DO NOTHING`,
+    [uuid('route-app'), workspace, viewer, uuid('route-connector')],
+  );
+  await db.query(
+    `INSERT INTO workspace_connections(id,connector_id,owner_identity_id,reference,service,label,hosts,last_synced_at)
+    VALUES($1,$2,$3,'local-latency-metadata-only','latency-local','Local latency key','["localhost"]',now()) ON CONFLICT(id) DO NOTHING`,
+    [uuid('route-key'), uuid('route-connector'), viewer],
+  );
   for (const name of Object.keys(scenarios)) {
     const f = fixture(name);
     await db.query(
@@ -318,6 +338,10 @@ export async function verifyWebEffect(db, f, token) {
     ],
     'create-corner': [`SELECT 1 FROM rooms WHERE parent_id=$1 AND id<>$2`, [f.roomId, f.cornerId]],
     'send-text': [`SELECT 1 FROM messages WHERE room_id=$1 AND text=$2`, [f.roomId, token]],
+    'send-attachment': [
+      `SELECT 1 FROM messages WHERE room_id=$1 AND attachments @> $2::jsonb`,
+      [f.roomId, JSON.stringify([{ name: `${token}.txt` }])],
+    ],
     'forward-message': [
       `SELECT 1 FROM messages WHERE room_id=$1 AND position($2 in text)>0`,
       [fixture('open-room').roomId, f.messageId],

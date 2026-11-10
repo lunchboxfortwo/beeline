@@ -3,7 +3,7 @@ vi.mock('expo-crypto', () => ({ randomUUID: () => '11111111-2222-4333-8444-55555
 vi.mock('@/sync/transport/monolith-operation', () => ({ monolithPhoneOperation: controls.operation }));
 vi.mock('@/buzz/community-storage', () => ({ saveActiveCommunityId: vi.fn(async () => undefined) }));
 vi.mock('@/buzz/enter-workspace', () => ({ enterWorkspaceRoom: controls.enter }));
-vi.mock('@expo/vector-icons', async () => { const R = await import('react'); return { Ionicons: (props: any) => R.createElement('Ionicons', props) }; });
+vi.mock('@expo/vector-icons/Ionicons', async () => { const R = await import('react'); return { default: (props: any) => R.createElement('Ionicons', props) }; });
 vi.mock('expo-haptics', () => ({ ImpactFeedbackStyle: { Light: 'Light' }, impactAsync: async () => undefined }));
 vi.mock('react-native-keyboard-controller', async () => { const R = await import('react'); return { KeyboardAvoidingView: (props: any) => R.createElement('View', props, props.children) }; });
 import * as React from 'react';

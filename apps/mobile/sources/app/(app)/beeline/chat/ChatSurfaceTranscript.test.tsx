@@ -44,3 +44,22 @@ it('keeps a short-message viewport in the eager phone window through draft repla
     expect(list.props.maintainVisibleContentPosition.minIndexForVisible).toBe(1);
   }
 });
+
+it('does not redraw unchanged transcript rows when surrounding conversation state updates', () => {
+  Object.assign(globalThis, { IS_REACT_ACT_ENVIRONMENT: true });
+  const renderItem = vi.fn(({ item }: { item: ChatDisplayMessage }) => <React.Fragment>{item.text}</React.Fragment>);
+  const props = {
+    desktopTranscript: true,
+    transcriptMessages: [{ id: 'one', text: 'one', timestamp: 1, isUser: false }],
+    getDesktopRowRefCallback: () => undefined,
+    scrollController: {}, phoneScrollList: {}, starPrompt: { prompt: null }, renderItem,
+  } as unknown as Props;
+  act(() => { renderer = create(<ChatSurfaceTranscript {...props} />); });
+  expect(renderItem).toHaveBeenCalledTimes(1);
+  act(() => renderer.update(<ChatSurfaceTranscript {...props} />));
+  expect(renderItem).toHaveBeenCalledTimes(1);
+  act(() => renderer.update(<ChatSurfaceTranscript {...props} transcriptMessages={[
+    ...props.transcriptMessages, { id: 'two', text: 'two', timestamp: 2, isUser: false },
+  ]} />));
+  expect(renderItem).toHaveBeenCalledTimes(3);
+});

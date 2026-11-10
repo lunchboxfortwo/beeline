@@ -179,9 +179,9 @@ vi.mock('react-native-safe-area-context', () => ({
   useSafeAreaInsets: () => ({ top: 0, right: 0, bottom: safeArea.bottom, left: 0 }),
 }));
 
-vi.mock('@expo/vector-icons', async () => {
+vi.mock('@expo/vector-icons/Ionicons', async () => {
   const ReactModule = await import('react');
-  return { Ionicons: (props: any) => ReactModule.createElement('Ionicons', props) };
+  return { default: (props: any) => ReactModule.createElement('Ionicons', props) };
 });
 
 vi.mock('@/auth/buzz-identity-storage', () => auth);

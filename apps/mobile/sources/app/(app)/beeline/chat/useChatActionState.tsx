@@ -1,3 +1,4 @@
+import { prefetchRoomOpen } from '@/push/push-room-prefetch';
 import { type PendingComposerAck } from '@/buzz/room-indicators';
 import { focusComposerSelection } from '@/buzz/composer-selection';
 import { useTextDraft } from '@/buzz/use-text-draft';
@@ -73,7 +74,7 @@ export function useChatActionState([
   renameDraft: string,
   setRenameBusy: React.Dispatch<React.SetStateAction<boolean>>,
   renameTextDraft: import("@/buzz/text-draft-store").TextDraft<string>,
-  openingRandomCorner: boolean,
+  openingRandomCorner: React.RefObject<boolean>,
   setOpeningRandomCorner: React.Dispatch<React.SetStateAction<boolean>>,
   setForwardCornerPrompt: React.Dispatch<React.SetStateAction<ChatDisplayMessage | null>>,
   forwardCornerPrompt: ChatDisplayMessage | null,
@@ -135,6 +136,12 @@ export function useChatActionState([
   );
 
   const [cornerActionsVisible, setCornerActionsVisible] = useState(false);
+  const returnRoomId = roomSurface?.room.parentId;
+  useEffect(() => {
+    // The close action returns here after acceptance. Read its authorized
+    // response while the person is choosing, rather than after route mount.
+    if (cornerActionsVisible && returnRoomId) prefetchRoomOpen(returnRoomId);
+  }, [cornerActionsVisible, returnRoomId]);
 
   const [dmActionsVisible, setDmActionsVisible] = useState(false);
 
@@ -150,7 +157,12 @@ export function useChatActionState([
 
   const [renameError, setRenameError] = useState<string | null>(null);
 
-  const [openingRandomCorner, setOpeningRandomCorner] = useState(false);
+  // This is an in-flight guard, not visible conversation state. The shared
+  // corner status owns pending feedback without redrawing this transcript.
+  const openingRandomCorner = useRef(false);
+  const setOpeningRandomCorner = useCallback<React.Dispatch<React.SetStateAction<boolean>>>((next) => {
+    openingRandomCorner.current = typeof next === 'function' ? next(openingRandomCorner.current) : next;
+  }, []);
 
   const [forwardCornerPrompt, setForwardCornerPrompt] = useState<ChatDisplayMessage | null>(null);
 

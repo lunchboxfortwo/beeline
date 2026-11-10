@@ -38,6 +38,8 @@ export async function measureLongPress(page, prepared) {
               const end = performance.now();
               const holdStart = window.__latencyHoldStart;
               if (!Number.isFinite(holdStart)) return resolve(null);
+              performance.mark('rig:long-press-recognized', { startTime: holdStart + threshold });
+              performance.mark('rig:visible-result', { startTime: end });
               resolve({
                 holdStartMs: holdStart,
                 recognitionStartMs: holdStart + threshold,

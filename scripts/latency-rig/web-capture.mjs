@@ -8,6 +8,7 @@ import { pathToFileURL } from 'node:url';
 import { execFileSync } from 'node:child_process';
 import { fixture, scenarios, resetWebFixture, verifyWebEffect } from './web-fixtures.mjs';
 import { steps, exclusions } from './web-steps.mjs';
+import { captureRoutes } from './web-route-capture.mjs';
 import { measureLongPress } from './web-long-press.mjs';
 import { armForwardTiming, readForwardTiming } from './web-forward-timing.mjs';
 async function bounded(work, milliseconds, label) {
@@ -35,7 +36,7 @@ export function validateInventory(inventory, fixtures = scenarios, drivers = ste
       throw new Error(`Missing driver step: ${name}`);
   }
 }
-export function summarize(inventory, captures) {
+export function summarize(inventory, captures, { samplesPerCapture = 20, budgetMs = 150 } = {}) {
   const rows = [],
     unmeasured = [];
   for (const name of inventory) {
@@ -46,18 +47,24 @@ export function summarize(inventory, captures) {
       !paired.every((c) => [1, 2].includes(c.capture)) ||
       paired.some(
         (c) =>
-          c.samples.length !== 20 ||
+          c.samples.length !== samplesPerCapture ||
           c.reason ||
           c.samples.some((n) => !Number.isFinite(n) || n <= 0),
       )
     ) {
       unmeasured.push({
         name,
+        availability: ['switch-workspace', 'create-room'].includes(name)
+          ? 'out-of-scope'
+          : exclusions[name]
+            ? ['approve-merge', 'connect-app'].includes(name) ? 'external' : 'unavailable'
+            : 'incomplete',
         reason:
           paired
             .filter((c) => c.reason)
             .map((c) => `Capture ${c.capture}: ${c.reason}`)
-            .join('; ') || 'Requires two complete captures of twenty positive finite samples',
+            .join('; ') ||
+          `Requires two complete captures of ${samplesPerCapture} positive finite samples`,
         captures: paired.map((c) => ({ capture: c.capture, samples: c.samples.length })),
       });
       continue;
@@ -69,12 +76,19 @@ export function summarize(inventory, captures) {
     const forward = paired.flatMap((c) => c.forwardTimings ?? []);
     rows.push({
       name,
-      samples: 40,
+      samples: samplesPerCapture * 2,
+      ...(name === 'send-attachment'
+        ? {
+            timingContract:
+              'web file selection through upload, Send, rendered attachment and two frames; excludes human time in OS picker chrome',
+          }
+        : {}),
       p50Ms: percentile(values, 0.5),
       p95Ms: percentile(values, 0.95),
       ...(forward.length === 40
         ? {
-            timingContract: 'action start to accepted visible feedback plus two frames, or picker removal plus two frames on clients without feedback',
+            timingContract:
+              'action start to accepted visible feedback plus two frames, or picker removal plus two frames on clients without feedback',
             driverObserved: {
               p50Ms: percentile(
                 forward.map((t) => t.driverObservedMs),
@@ -127,7 +141,7 @@ export function summarize(inventory, captures) {
         : {}),
       captures: paired.map((c) => ({
         capture: c.capture,
-        samples: 20,
+        samples: samplesPerCapture,
         p50Ms: percentile(c.samples, 0.5),
         p95Ms: percentile(c.samples, 0.95),
       })),
@@ -136,11 +150,11 @@ export function summarize(inventory, captures) {
   // A percentage of interactions meeting the existing 150ms tap p50 budget.
   // Incomplete inventories have no score, not a misleading partial average.
   return {
-    fullInventoryScore: unmeasured.length
-      ? null
-      : (100 * rows.filter((r) => r.p50Ms < 150).length) / inventory.length,
-    scoreDefinition:
-      'Percentage of the complete interaction inventory with paired pooled p50 below 150 ms; null if any item is unmeasured',
+    fullInventoryScore:
+      unmeasured.length || !inventory.length
+        ? null
+        : (100 * rows.filter((r) => r.p50Ms < budgetMs).length) / inventory.length,
+    scoreDefinition: `Percentage of the complete inventory with paired pooled p50 below ${budgetMs} ms; null if any item is unmeasured`,
     coverage: { measured: rows.length, total: inventory.length },
     rows,
     unmeasured,
@@ -177,7 +191,8 @@ async function main() {
   const selected = process.env.LATENCY_RIG_WEB_INTERACTION;
   if (selected && !inventory.includes(selected))
     throw new Error(`Unknown interaction: ${selected}`);
-  const captureInventory = selected ? [selected] : inventory;
+  const captureInventory =
+    process.env.LATENCY_RIG_WEB_ROUTES_ONLY === '1' ? [] : selected ? [selected] : inventory;
   const routes = JSON.parse(await readFile(new URL('./routes.json', import.meta.url), 'utf8'));
   for (const name of inventory)
     if (!routes.some((route) => route.path === fixture(name).route))
@@ -194,6 +209,10 @@ async function main() {
         'web-fixtures.mjs',
         'web-steps.mjs',
         'web-capture.mjs',
+        'web-route-capture.mjs',
+        'web-route-fixtures.mjs',
+        'local-object-store.mjs',
+        'check-routes.mjs',
         'web-forward-timing.mjs',
         'web-long-press.mjs',
         'interactions.json',
@@ -210,7 +229,8 @@ async function main() {
   try {
     browser = await chromium.launch({ headless: true, args: ['--no-sandbox'] });
     for (let capture = 1; capture <= 2; capture++) {
-      for (const name of inventory) await resetWebFixture(db, fixture(name), false);
+      for (const name of inventory)
+        if (!exclusions[name]) await resetWebFixture(db, fixture(name), false);
       const context = await browser.newContext({
         viewport: { width: 390, height: 844 },
         baseURL: origin.origin,
@@ -381,7 +401,23 @@ async function main() {
       }
       await context.close();
     }
+    const selectedRoute = process.env.LATENCY_RIG_WEB_ROUTE;
+    if (selectedRoute && !routes.some((route) => route.path === selectedRoute))
+      throw new Error(`Unknown web route: ${selectedRoute}`);
+    const routeInventory =
+      process.env.LATENCY_RIG_WEB_ROUTES === '1' || process.env.LATENCY_RIG_WEB_ROUTES_ONLY === '1'
+        ? await captureRoutes({
+            browser,
+            routes: selectedRoute ? routes.filter((route) => route.path === selectedRoute) : routes,
+            origin,
+            backend,
+            secret,
+            out,
+            blockedRequests,
+          })
+        : undefined;
     const summary = {
+      routeInventory,
       schemaVersion: 1,
       longPressContract:
         'pointerdown + threshold from source to existing result plus two frames; observed during hold; gesture-inclusive timings retained separately',

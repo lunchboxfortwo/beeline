@@ -2,7 +2,7 @@ import { ErrorBanner } from './ErrorBanner';
 import { ContentTarget } from '@/components/buzz/IndexRow';
 import { Button, type ButtonDestination } from '@/components/buzz/Button';
 import { CloseButton } from '@/components/buzz/CloseGlyph';
-import { Ionicons } from '@expo/vector-icons';
+import Ionicons from '@expo/vector-icons/Ionicons';
 import { InlineRow, TranscriptFactRow } from './IndexRow';
 import { LedgerDisclosure } from './LedgerDisclosure';
 import { HullDialogInput } from '@/components/buzz/HullDialog';

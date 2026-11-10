@@ -107,7 +107,7 @@ The agent stays on your machine. Your computer keeps one connection for all its 
 
 Server updates no longer revoke your existing Always and Once approvals solely because an older grant has no record of its original request message.
 
-The nightly latency report includes paired web interaction timings and an explicit reason for each unmeasured interaction. Its full-inventory score stays unavailable until every interaction has two complete captures. [Rig and measurement limits](scripts/latency-rig/README.md#paired-web-interaction-inventory).
+The nightly latency report includes paired web interaction timings and an explicit reason for each unmeasured interaction. It also records cold and warm web route loads, labelling redirects and local integration fixtures; attachment timing includes the real web picker, local upload and delivered message. Its full-inventory score stays unavailable until every interaction has two complete captures. [Rig and measurement limits](scripts/latency-rig/README.md#paired-web-interaction-inventory).
 
 Nightly Checks accepts a Beeline dispatch at 03:07 New York time. The GitHub timers remain as fallbacks and skip a night already dispatched. Pages deployment retries an empty status once immediately, then fails instead of waiting for the deployment timeout.
 

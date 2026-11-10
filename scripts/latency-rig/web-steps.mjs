@@ -7,12 +7,12 @@ const visible = (locator) => locator.waitFor({ state: 'visible' });
 const hidden = (locator) => locator.waitFor({ state: 'hidden' });
 const click = (locator) => locator.click();
 export const exclusions = {
+  'switch-workspace': 'Cancelled by the owner; outside this latency assignment.',
+  'create-room': 'Cancelled by the owner; outside this latency assignment.',
   'mark-read':
     'The current phone UI advances read marks automatically from the visible message viewport; it has no standalone Mark as read control. Room opening is measured separately.',
   'mark-unread':
     'The current phone UI has no Mark as unread control; only the internal room session method remains. The rig does not invoke an internal method as a user interaction.',
-  'send-attachment':
-    'OS file-picker completion is outside headless page rendering; this web capture does not claim native picker or upload timing.',
   'approve-merge':
     'A valid merge gate needs live GitHub checks and exact-head approval; the deterministic offline fixture has no repository or GitHub connection. No merge request is sent.',
   'start-workflow':
@@ -124,6 +124,32 @@ export const steps = {
     return {
       act: () => id(p, 'chat-input').press('Enter'),
       done: () => visible(p.getByText(token, { exact: true }).first()),
+    };
+  },
+  'send-attachment': async (p, f, token) => {
+    await room(p, f);
+    await click(id(p, 'chat-attach-button'));
+    const chosen = p.waitForEvent('filechooser');
+    await click(id(p, 'attachment-picker-document'));
+    const chooser = await chosen;
+    return {
+      // Start at web file selection, not time spent choosing a file in OS chrome.
+      act: async () => {
+        await chooser.setFiles({
+          name: `${token}.txt`,
+          mimeType: 'text/plain',
+          buffer: Buffer.from('Local Beeline latency attachment\n'),
+        });
+        await p
+          .getByTestId('pending-chat-attachment-state-0')
+          .getByText('Ready', { exact: true })
+          .waitFor();
+        await click(id(p, 'chat-send'));
+      },
+      done: async () => {
+        await hidden(id(p, 'pending-chat-attachment-0'));
+        await visible(p.getByText(`${token}.txt`, { exact: true }).first());
+      },
     };
   },
   'forward-message': async (p, f) => {

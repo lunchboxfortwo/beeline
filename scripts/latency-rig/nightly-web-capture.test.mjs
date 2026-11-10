@@ -25,6 +25,7 @@ test('corner clock follows the source threshold and observes completion before r
   let release;
   let observed = false;
   let released = false;
+  const marks = [];
   const held = new Promise((resolve) => {
     release = resolve;
   });
@@ -39,7 +40,7 @@ test('corner clock follows the source threshold and observes completion before r
       };
       globalThis.window = { __latencyHoldStart: 100, __latencyStart: 80 };
       globalThis.requestAnimationFrame = (callback) => callback();
-      globalThis.performance = { now: () => 100 + threshold + 25 };
+      globalThis.performance = { now: () => 100 + threshold + 25, mark: (name, options) => marks.push([name, options.startTime]) };
       try {
         const timing = await fn(value);
         assert.equal(released, false);
@@ -68,6 +69,7 @@ test('corner clock follows the source threshold and observes completion before r
   assert.equal(released, true);
   assert.equal(timing.recognitionStartMs, timing.holdStartMs + threshold);
   assert.equal(timing.postRecognitionMs, 25);
+  assert.deepEqual(marks, [['rig:long-press-recognized', 100 + threshold], ['rig:visible-result', 100 + threshold + 25]]);
   assert.equal(timing.gestureInclusiveMs, threshold + 45);
 });
 
@@ -142,6 +144,13 @@ test('recognition summaries retain separately labelled gesture-inclusive percent
   assert.deepEqual(row.gestureInclusive, { p50Ms: 609, p95Ms: 618 });
 });
 test('missing, partial, failed and nonfinite captures keep score unavailable and retain the exact reason', () => {
+  for (const [name, availability] of [
+    ['mark-read', 'unavailable'], ['mark-unread', 'unavailable'],
+    ['start-workflow', 'unavailable'], ['handoff-workflow', 'unavailable'],
+    ['approve-merge', 'external'], ['connect-app', 'external'],
+  ]) {
+    assert.equal(summarize([name], []).unmeasured[0].availability, availability);
+  }
   for (const bad of [
     [],
     [{ ...pair('open-room')[0], samples: [1] }],
@@ -177,6 +186,7 @@ test('nightly verdict carries web coverage, timings and every exact gap to the m
   assert.equal(result.unmeasured.length, 1);
   assert.match(result.text, /Web open-room: n=40 p50=109 ms p95=118 ms/);
   assert.match(result.text, /Provider consent is external/);
+  assert.match(result.text, /Web connect-app: external —/);
   const missing = attachWebInventory({ text: '' }, undefined, inventory, 'Expo export failed');
   assert.equal(missing.unmeasured.length, inventory.length);
   assert.ok(missing.unmeasured.every((g) => g.reason === 'Expo export failed'));
@@ -221,7 +231,7 @@ test('Insights publishes valid paired web cases and gaps independently of native
   assert.match(output.loops[0].note, /1\/2; full-inventory score unavailable/);
   assert.match(
     output.loops[0].log[0].text,
-    /connect-app: unmeasured — Capture 1: External consent/,
+    /connect-app: external — Capture 1: External consent/,
   );
   assert.equal(output.loops[1].note, 'keep');
   assert.deepEqual(current.loops[0].charts, []);
@@ -267,16 +277,66 @@ test('unobserved source visibility stays unavailable instead of becoming zero mi
   assert.deepEqual(field, { p50Ms: null, p95Ms: null, observedSamples: 0 });
 });
 
+test('route loads retain their states and sample contract in the nightly card', async () => {
+  const { latencyLoops } = await import('./nightly-insights.mjs');
+  const routeInventory = {
+    ...summarize(
+      ['/settings (cold)'],
+      [1, 2].map((capture) => ({
+        name: '/settings (cold)',
+        capture,
+        samples: [300, 320, 310],
+      })),
+      { samplesPerCapture: 3, budgetMs: 450 },
+    ),
+    samplesPerCapture: 3,
+    states: { '/settings': 'settings-redirect' },
+  };
+  const web = { ...summarize([], []), commit: 'head', routeInventory };
+  const verdict = attachWebInventory(
+    { text: '', final: true, night: '2026-11-09', head: 'head', runId: 'routes', failures: [] },
+    web,
+    [],
+  );
+  assert.match(verdict.text, /Web routes: 1\/1/);
+  const result = latencyLoops({ loops: [{ slug: 'latency', charts: [] }] }, verdict);
+  assert.equal(result.loops[0].charts.length, 1);
+  assert.match(result.loops[0].log[0].text, /settings-redirect/);
+  const partial = structuredClone(verdict);
+  partial.webInventory.routeInventory.rows[0].captures[0].samples = 2;
+  assert.equal(
+    latencyLoops({ loops: [{ slug: 'latency', charts: [] }] }, partial).loops[0].charts.length,
+    0,
+  );
+});
 
 test('Room-open setup waits for the actual destination row before the action clock', async () => {
   let release;
-  const rowReady = new Promise(resolve => { release = resolve; });
+  const rowReady = new Promise((resolve) => {
+    release = resolve;
+  });
   let prepared;
-  const row = { filter() { return this; }, waitFor: () => rowReady, click: async () => {} };
-  const header = { filter() { return this; }, waitFor: async () => {} };
-  const page = { goto: async () => {}, getByTestId: id => id.startsWith('room-') ? row : header };
-  const setup = steps['open-room'](page, fixture('open-room')).then(value => { prepared = value; });
-  await new Promise(resolve => setImmediate(resolve));
+  const row = {
+    filter() {
+      return this;
+    },
+    waitFor: () => rowReady,
+    click: async () => {},
+  };
+  const header = {
+    filter() {
+      return this;
+    },
+    waitFor: async () => {},
+  };
+  const page = {
+    goto: async () => {},
+    getByTestId: (id) => (id.startsWith('room-') ? row : header),
+  };
+  const setup = steps['open-room'](page, fixture('open-room')).then((value) => {
+    prepared = value;
+  });
+  await new Promise((resolve) => setImmediate(resolve));
   assert.equal(prepared, undefined, 'an absent row is fixture setup, not tap latency');
   release();
   await setup;

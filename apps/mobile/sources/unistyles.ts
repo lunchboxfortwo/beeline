@@ -10,7 +10,7 @@ import {
 } from './theme';
 import * as SystemUI from 'expo-system-ui';
 import { applySystemBackground } from './buzz/system-background';
-import { captureMobileError } from './buzz/sentry';
+import { captureMobileError } from './buzz/sentry-entry';
 import { setAndroidNavigationBarStyle } from './buzz/android-navigation-bar';
 import { LAYOUT_BREAKPOINTS } from './utils/layoutClass';
 import type { LocalSettings } from './sync/localSettings';

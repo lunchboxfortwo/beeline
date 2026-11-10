@@ -25,7 +25,15 @@ export function latencyLoops(current, verdict, updatedAt = new Date().toISOStrin
     row.captures?.length === 2 && new Set(row.captures.map(pair => pair.capture)).size === 2 &&
     row.captures.every(pair => [1, 2].includes(pair.capture) && pair.samples === 20))
     .map(row => ({ ...row, kind: 'web', variant: 'paired', budgetMs: 150 }));
-  for (const row of [...rows, ...webRows]) {
+  const routeCaptureSize = web?.routeInventory?.samplesPerCapture;
+  const routeRows = (currentWeb && Number.isInteger(routeCaptureSize) && routeCaptureSize >= 3
+    ? web.routeInventory.rows ?? [] : []).filter(row =>
+      row.samples === routeCaptureSize * 2 && Number.isFinite(row.p50Ms) && row.p50Ms > 0 &&
+      Number.isFinite(row.p95Ms) && row.p95Ms >= row.p50Ms && row.captures?.length === 2 &&
+      new Set(row.captures.map(pair => pair.capture)).size === 2 &&
+      row.captures.every(pair => [1, 2].includes(pair.capture) && pair.samples === routeCaptureSize))
+    .map(row => ({ ...row, kind: 'web-route', variant: 'paired', budgetMs: 450 }));
+  for (const row of [...rows, ...webRows, ...routeRows]) {
     const key = caseKey(row);
     const seriesKey = (percentile) => `case:${key}:${percentile}`;
     let chart = loop.charts.find((chart) => chart.series.some((series) => series.key === seriesKey('p50')));
@@ -50,11 +58,14 @@ export function latencyLoops(current, verdict, updatedAt = new Date().toISOStrin
     ? web.fullInventoryScore : null;
   const webNote = verdict.webInventory !== undefined
     ? ` Web inventory: ${webRows.length}/${web?.coverage?.total ?? verdict.unmeasured?.length ?? 'unknown'}; full-inventory score ${webScore ?? 'unavailable'}. Web timings are headless rendered-feedback upper bounds.` : '';
-  loop.note = note + webNote;
+  const routeNote = web?.routeInventory ? ` Web routes: ${routeRows.length}/${web.routeInventory.coverage?.total ?? 'unknown'}; fixture states: ${JSON.stringify(web.routeInventory.states)}.` : '';
+  loop.note = note + webNote + routeNote;
   loop.log ??= [];
-  const webDetails = [...webRows.map(row => `${row.name}: p50=${row.p50Ms} ms p95=${row.p95Ms} ms`),
-    ...(verdict.unmeasured ?? []).map(gap => `${gap.name}: unmeasured — ${gap.reason}`)];
-  loop.log = [{ date: verdict.night, text: `${note}${webNote} Run ${verdict.runId}. ${verdict.failures.join('; ')}${webDetails.length ? ` ${webDetails.join('; ')}` : ''}` },
+  const webDetails = [...routeRows.map(row => `${row.name}: p50=${row.p50Ms} ms p95=${row.p95Ms} ms`),
+    ...(web?.routeInventory?.unmeasured ?? []).map(gap => `${gap.name}: unmeasured — ${gap.reason}`),
+    ...webRows.map(row => `${row.name}: p50=${row.p50Ms} ms p95=${row.p95Ms} ms`),
+    ...(verdict.unmeasured ?? []).map(gap => `${gap.name}: ${gap.availability ?? 'unmeasured'} — ${gap.reason}`)];
+  loop.log = [{ date: verdict.night, text: `${note}${webNote}${routeNote} Run ${verdict.runId}. ${verdict.failures.join('; ')}${webDetails.length ? ` ${webDetails.join('; ')}` : ''}` },
     ...loop.log.filter((entry) => entry.date !== verdict.night)];
   result.updatedAt = updatedAt;
   return result;

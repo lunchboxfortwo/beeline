@@ -67,7 +67,7 @@ type Props = {
   setRenameError: React.Dispatch<React.SetStateAction<string | null>>;
 };
 
-export function ChatSurfaceHeaderView({
+export const ChatSurfaceHeaderView = React.memo(function ChatSurfaceHeaderView({
   insets,
   isCorner,
   desktopExperience,
@@ -328,4 +328,4 @@ export function ChatSurfaceHeaderView({
               </View>
             )}
           </View>);
-}
+});

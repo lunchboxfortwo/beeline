@@ -25,7 +25,7 @@ vi.mock('react-native', async () => {
 });
 vi.mock('react-native-unistyles', () => ({ StyleSheet: { create: (fn: any) => fn({ buzz: { type: { sectionHead: {}, sectionLabel: { fontSize: 13, lineHeight: 19, letterSpacing: 2 }, sectionCount: { fontSize: 15, lineHeight: 22 } }, space: {}, roomList: { edge: 20 } } }), hairlineWidth: 1 } }));
 vi.mock('react-native-safe-area-context', () => ({ useSafeAreaInsets: () => ({ top: 0, bottom: 0 }) }));
-vi.mock('@expo/vector-icons', () => ({ Ionicons: () => null }));
+vi.mock('@expo/vector-icons/Ionicons', () => ({ default: () => null }));
 vi.mock('@/components/buzz/PageHeader', () => ({ PageHeader: () => null }));
 vi.mock('@/components/buzz/SettingsRow', async () => {
   const { createElement } = await import('react');

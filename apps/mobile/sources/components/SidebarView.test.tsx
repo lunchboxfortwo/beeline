@@ -193,9 +193,9 @@ vi.mock('react-native-unistyles', async () => {
   },
   useUnistyles: () => ({ theme: fullTheme }),
 }); });
-vi.mock('@expo/vector-icons', async () => {
+vi.mock('@expo/vector-icons/Ionicons', async () => {
   const ReactModule = await import('react');
-  return { Ionicons: (props: any) => ReactModule.createElement('Ionicons', props) };
+  return { default: (props: any) => ReactModule.createElement('Ionicons', props) };
 });
 vi.mock('react-native-safe-area-context', () => ({ useSafeAreaInsets: () => ({ top: 0 }) }));
 vi.mock('expo-router', async () => {

@@ -53,7 +53,7 @@ type Props = {
   landAtNewestMessage: () => void;
 };
 
-export function ChatSurfaceTranscript({
+export const ChatSurfaceTranscript = React.memo(function ChatSurfaceTranscript({
   desktopTranscript,
   setDesktopScrollNode,
   handleDesktopScroll,
@@ -294,4 +294,4 @@ export function ChatSurfaceTranscript({
                 onJumpToNewest={landAtNewestMessage}
               />
             </View>);
-}
+});

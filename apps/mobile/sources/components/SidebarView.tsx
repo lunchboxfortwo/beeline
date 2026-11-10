@@ -49,7 +49,7 @@ import {
   type WorkspaceListView,
   isWorkspaceListView,
 } from '@beeline/buzz-client';
-import { Ionicons } from '@expo/vector-icons';
+import Ionicons from '@expo/vector-icons/Ionicons';
 import { useGlobalSearchParams, usePathname, useRouter, type Href } from 'expo-router';
 import * as React from 'react';
 import {

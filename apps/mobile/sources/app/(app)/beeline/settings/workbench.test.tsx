@@ -101,7 +101,7 @@ vi.mock('@/components/buzz/IdentityMark', async () => {
   return { IdentityMark: (props: any) => ReactModule.createElement('IdentityMark', props) };
 });
 
-vi.mock('@expo/vector-icons', () => ({ Ionicons: () => null }));
+vi.mock('@expo/vector-icons/Ionicons', () => ({ default: () => null }));
 
 vi.mock('react-native', async () => {
   const ReactModule = await import('react');
