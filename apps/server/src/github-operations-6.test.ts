@@ -3,7 +3,32 @@ import { describe, expect, it, vi, GitHubAppClient, GitHubOAuthClient, GitHubOpe
 describe('GitHub phone operations', () => {
 const scope1 = fixtureScope1();
 
-  it('CHECK-DEADLOCK-1: wakes on first failure and settled followup once across rollback and a new explicit event', async () => {
+  it('AC-7: two failures produce one implementer wake only after the last check finishes', async () => {
+    const {corners,app,payload}=await scope1.checksFixture();
+    const corner=corners[0]!;
+    let checks: {name:string;status:'failed'|'pending'}[]=[
+      {name:'typecheck',status:'failed'},{name:'desktop',status:'pending'},
+    ];
+    app.readCommitCheckRollup.mockImplementation(async()=>({
+      state:checks.some(check=>check.status==='pending')?'pending' as const:'failed' as const,
+      total:checks.length,failing:checks.filter(check=>check.status==='failed').map(check=>check.name),checks:[...checks],
+    }));
+    const operations=new GitHubOperations(scope1.database,{} as GitHubOAuthClient,app as unknown as GitHubAppClient,'secret');
+    const wakes=async()=>(await scope1.database.query<{body:string}>(
+      `SELECT source.text body FROM agent_commands command JOIN messages source ON source.id=command.source_message_id
+       WHERE command.room_id=$1 AND command.reason='corner_check'`,[corner])).rows;
+    await operations.processWebhook('check_run',{...payload,check_run:{...payload.check_run,name:'typecheck',conclusion:'failure'}});
+    expect(await wakes()).toEqual([]);
+    checks=checks.map(check=>({...check,status:'failed'}));
+    await operations.processWebhook('check_run',{...payload,check_run:{...payload.check_run,name:'desktop',conclusion:'failure'}});
+    expect(await wakes()).toHaveLength(1);
+    expect((await wakes())[0]!.body).toContain('typecheck');
+    expect((await wakes())[0]!.body).toContain('desktop');
+    await operations.processWebhook('check_run',payload);
+    expect(await wakes()).toHaveLength(1);
+  });
+
+  it('CHECK-DEADLOCK-1: wakes once after all checks settle across rollback and a new explicit event', async () => {
     const { corners, headSha, app, payload } = await scope1.checksFixture();
     const corner = corners[0]!;
     const checks = [
@@ -31,6 +56,12 @@ const scope1 = fixtureScope1();
        ORDER BY message.created_at,message.id`, [corner],
     )).rows;
 
+    await operations.processWebhook('check_run',failure('TYPECHECK'));
+    checks[1]={name:'desktop',status:'failed',url:'https://github.com/owner/widgets/actions/runs/10/job/102',jobId:102};
+    await operations.processWebhook('check_run',failure('desktop'));
+    expect(await wakes()).toHaveLength(0);
+    expect(readJobLog).not.toHaveBeenCalled();
+    checks[2]={name:'lint',status:'passed'};
     const transaction = scope1.database.transaction.bind(scope1.database);
     let replay = true;
     vi.spyOn(scope1.database, 'transaction').mockImplementation(work => transaction(async tx => {
@@ -55,20 +86,10 @@ const scope1 = fixtureScope1();
     expect(inbox.commands[0]?.source.body).toContain('> ##[error]TS2345 bad type');
     expect(inbox.commands[0]?.source.body).toContain('untrusted outside data');
 
-    checks[1] = { name: 'desktop', status: 'failed', url: 'https://github.com/owner/widgets/actions/runs/10/job/102', jobId: 102 };
-    await operations.processWebhook('check_run', failure('desktop'));
-    expect((await wakes())).toHaveLength(1);
-    checks[2] = { name: 'lint', status: 'passed' };
-    replay = true;
-    await expect(operations.processWebhook('check_run', payload)).rejects.toMatchObject({ code: '40P01' });
+    expect((await wakes())[0]?.body).toContain('desktop');
+    expect(inbox.commands.some(command=>command.source.body.includes('https://github.com/owner/widgets/actions/runs/10/job/102'))).toBe(true);
+    await operations.processWebhook('check_run',payload);
     expect(await wakes()).toHaveLength(1);
-    await operations.processWebhook('check_run', payload);
-    expect((await wakes())).toHaveLength(2);
-    expect((await wakes())[1]?.body).toContain('desktop');
-    const followupInbox = await readAgentCommands(scope1.database, corner, REVIEWER);
-    expect(followupInbox.commands.some(command => command.source.body.includes('https://github.com/owner/widgets/actions/runs/10/job/102'))).toBe(true);
-    await operations.processWebhook('check_run', payload);
-    expect((await wakes())).toHaveLength(2);
     expect(readJobLog).toHaveBeenCalledTimes(4);
   });
 

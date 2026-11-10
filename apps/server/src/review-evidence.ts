@@ -1,8 +1,5 @@
 import type { SqlDatabase } from './database.js';
 
-/** A review must actually deliver a decision or actionable findings. */
-export const REVIEW_VERDICT_SQL = String.raw`(^|\n)[[:space:]>#*-]*(@[[:alnum:]_-]+[[:space:]]+)?((done|failed|blocked):[[:space:]]*)?(verdict:[[:space:]]*)?(PASS|FAIL)([[:space:]:*]|$)|(^|[[:space:]])F[0-9]+:|\mapproved\M|\mneeds? (a )?fix\M|\mfix (that|the|this)\M|\mbefore I can PASS\M`;
-
 /** Claim only delivery here, not evidence discussed in a PR or requested later. */
 function claimsAttachedEvidence(text: string): boolean {
   // Separate independent clauses before evaluating the words governing each claim.

@@ -1,3 +1,4 @@
+import { cornerWaitingSql } from './corner-waiting.js';
 import { currentCornerCommandTargetSql } from './agent-command.js';
 import type { CornerMachine } from './corner-lifecycle.js';
 import { commandOwnerLiveSql, workingTurnFreshSql } from './turn-ownership.js';
@@ -212,23 +213,8 @@ export function cornerBlockerSql(sourcePredicate = 'true', newestFirst = false):
     SELECT ranked.* FROM (
       SELECT blockers.*,person.name person_name
       FROM (
-      SELECT owed.message_id item_id,owed.person_id,owed.created_at,
-        CASE WHEN item.card_type IN ('squire-approval','permission','grant-request') THEN 'approve'
-          WHEN item.card_type IN ('connector-offer','app-sign-in','agent-sign-in') THEN 'connect'
-          ELSE 'question' END reason,'message'::text kind
-      FROM corner_owed owed
-      JOIN messages item ON item.id=owed.message_id
-      JOIN memberships current_member ON current_member.room_id=c.parent_id
-        AND current_member.identity_id=owed.person_id AND current_member.removed_at IS NULL
-      WHERE owed.corner_id=c.id AND owed.blocking
-        AND (owed.expires_at IS NULL OR owed.expires_at>now())
-      UNION ALL
-      SELECT COALESCE(report.message_id,report.report_id),report.person_id,report.created_at,'question',
-        CASE WHEN report.return_room_id=c.id AND report.message_id IS NOT NULL THEN 'message'
-          ELSE 'report' END FROM (${cornerWaitingReportSql('c')}) report
-      JOIN identities recipient ON recipient.id=report.person_id
-        AND (recipient.kind='human' OR report.person_id=report.commander_id)
-      WHERE report.corner_id=c.id
+      SELECT waiting.item_id,waiting.person_id,waiting.created_at,waiting.reason,waiting.kind
+      FROM (${cornerWaitingSql('c')}) waiting WHERE NOT waiting.private
       UNION ALL
       SELECT hold.id::text,hold.actor_id,hold.set_at,'approve','merge-hold' FROM corner_merge_holds hold
       JOIN identities holder ON holder.id=hold.actor_id AND holder.kind='human'

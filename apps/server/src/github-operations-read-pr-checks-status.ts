@@ -12,7 +12,7 @@ import type { SqlDatabase } from './database.js';
 import { GITHUB_SUBJECT, systemLine } from './system-line.js';
 import { recordPersonMergeYes, withdrawPullRequestMergeApprovals } from './corner-merge-approval.js';
 import { assertCornerBriefAllowsMerge } from './corner-brief.js';
-import { advanceCorner, cornerReviewWokenSql, blockingReview, confirmCornerMergeAuthority, lockCornerLifecycle, cornerMergeGate, cornerMergeability } from './corner-lifecycle.js';
+import { advanceCorner, cornerReviewWokenSql, confirmCornerMergeAuthority, lockCornerLifecycle, cornerMergeGate, cornerMergeability } from './corner-lifecycle.js';
 import { queueCornerMergeConflict, reconcileCornerMergeBlockers } from './agent-command.js';
 import { GitHubOperations, reviewerWakeFromFacts, Input, LandCornerOutcome, CornerWebhookTarget, record, mergeConflictKey, hash, text } from './github-operations.js';
 
@@ -155,17 +155,6 @@ import { GitHubOperations, reviewerWakeFromFacts, Input, LandCornerOutcome, Corn
       checks,
       reviewWoken: corner.review_woken,
     });
-    if (reviewerWake.status === 'dispatched' && !gate.approved) {
-      const delivery = (await ctx.database.query<{ ended: boolean; live: boolean }>(
-        `SELECT bool_or(command.state='complete') ended,
-           bool_or(command.state='pending' OR (command.state='claimed' AND ${commandOwnerLiveSql('command')})) live
-         FROM agent_commands command WHERE command.room_id=$1
-           AND command.review_context->>'headSha'=$2 AND command.review_context->'pullRequest'=$3::jsonb
-           AND command.review_context->>'purpose' IS NULL`,
-        [input.cornerId,pr.headSha,JSON.stringify(number)])).rows[0];
-      if (delivery?.ended && !delivery.live && !await blockingReview(ctx.database,input.cornerId,pr.headSha))
-        reviewerWake = {status:'waiting',detail:'The reviewer ended without a verdict; ownership returns to the implementer or commander once.'};
-    }
     const mergeDecision = cornerMergeability({
       checks,
       approved: gate.approved,

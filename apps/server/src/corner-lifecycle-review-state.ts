@@ -1,6 +1,6 @@
 import { ROUTER_AUTHORITY_LOCK } from './router-authority-lock.js';
 import { systemMessage } from '@beeline/api-contract/system-message-catalog';
-import { REVIEW_VERDICT_SQL, missingReviewAttachments } from './review-evidence.js';
+import { missingReviewAttachments } from './review-evidence.js';
 import { cornerReviewerSql } from './corner-reviewer.js';
 import { CornerAccessDatabase } from './corner-access-database.js';
 import { isZeroCheckCommander } from './corner-merge-approval.js';
@@ -9,43 +9,17 @@ import type { activeCornerHolds } from './corner-holds.js';
 import { createHash } from 'node:crypto';
 import { SYSTEM_IDENTITY_ID } from '@beeline/api-contract/system-identity';
 import type { SqlDatabase } from './database.js';
-import { repairReviewerCornerMembership, type CommandRow } from './agent-command.js';
+import { repairReviewerCornerMembership } from './agent-command.js';
 import { assertCornerBriefAllowsMerge } from './corner-brief.js';
 import { cornerImplementerSql } from './corner-worker.js';
 
-import { advanceCorner } from './corner-lifecycle.js';
 import { CornerRow, loadCorner } from './corner-lifecycle-read-state.js';
-import { REVIEWER_NOT_PARENT_MEMBER, REVIEWER_NOT_CORNER_MEMBER, CORNER_LIFECYCLE_SLUG } from './corner-lifecycle-values.js';
+import { greenReviewRequestSql, REVIEWER_NOT_PARENT_MEMBER, REVIEWER_NOT_CORNER_MEMBER, CORNER_LIFECYCLE_SLUG } from './corner-lifecycle-values.js';
 
 
 
 export async function lockCornerLifecycle(db: SqlDatabase, cornerId: string): Promise<void> {
   await db.query('SELECT corner_id FROM corner_facts WHERE corner_id=$1 FOR UPDATE', [cornerId]);
-}
-
-
-export type RevisionWake = { queued: boolean; agentId?: string; reason?: string };
-
-export type CornerAdvance = {
-  archived?: boolean;
-  state: string | undefined;
-  accepted: boolean;
-  wake?: RevisionWake;
-  command?: CommandRow;
-};
-
-export type Applied = { ok: true; wake?: RevisionWake };
-
-
-/** Startup/data migration admission uses committed facts only, never GitHub. */
-export async function backfillCornerLifecycleRuns(db: SqlDatabase): Promise<number> {
-  const rows = (
-    await db.query<{ corner_id: string }>(
-      'SELECT corner_id FROM corner_facts WHERE machine IS NULL',
-    )
-  ).rows;
-  for (const row of rows) await advanceCorner(db, row.corner_id, { kind: 'reconcile' });
-  return rows.length;
 }
 
 
@@ -56,18 +30,12 @@ export async function lockCornerArchivalAuthority(database: SqlDatabase): Promis
 }
 
 
-/** A confirmed merge is an event; callers never write archive state themselves. */
-export async function archiveCornerState(database: SqlDatabase, cornerId: string): Promise<boolean> {
-  return (await advanceCorner(database, cornerId, { kind: 'merged', contents: {} })).archived === true;
-}
-
-
-/** Delivery diagnostic reads exact-target command evidence, never the broad Review badge. */
+/** Delivery diagnostic requires a green-head request, never a notice or the broad Review badge. */
 export function cornerReviewWokenSql(cornerId: string): string {
   return `EXISTS(SELECT 1 FROM agent_commands review JOIN rooms corner ON corner.id=review.room_id
     JOIN rooms parent ON parent.id=corner.parent_id JOIN corner_github_cache cache ON cache.corner_id=corner.id WHERE corner.id=${cornerId}
-      AND review.agent_id=${cornerReviewerSql()} AND review.action='input'
-      AND review.state IN ('pending','claimed','complete') AND review.review_context->>'purpose' IS NULL
+      AND review.agent_id=${cornerReviewerSql()} AND ${greenReviewRequestSql('review')}
+      AND review.reason='corner_review_dispatch' AND review.state IN ('pending','claimed','complete')
       AND review.review_context->>'headSha'=cache.lifecycle->'pr'->>'headSha'
       AND review.review_context->'pullRequest'=cache.lifecycle->'pr'->'number')`;
 }
@@ -90,63 +58,51 @@ export async function noteReviewDispatchFailure(
 }
 
 
-/**
- * The reviewer's finished review of this head (callers have already checked
- * for an approval on the head), while the corner was still in review. Another
- * review wake for the same head would only repeat that verdict. A later brief
- * revision does not reopen it: the code is unchanged. A new head does.
- * Delivered failed/blocked reports retain their head even if checks changed
- * during the turn; a failed execution without a delivered decision does not.
- */
-export async function blockingReview(
-  db: SqlDatabase,
-  cornerId: string,
-  headSha: string | null,
-): Promise<string | undefined> {
-  if (!headSha) return undefined;
-  return (
-    await db.query<{ id: string }>(
-      `SELECT command.id FROM agent_commands command
-       JOIN rooms corner ON corner.id=command.room_id
-       JOIN rooms parent ON parent.id=corner.parent_id
-       LEFT JOIN messages source ON source.id=command.source_message_id
-       JOIN agent_turns turn ON turn.room_id=command.room_id
-         AND turn.agent_id=command.agent_id AND turn.request_id=command.turn_request_id
-       LEFT JOIN LATERAL (SELECT true delivered FROM agent_commands repair
-         WHERE repair.room_id=command.room_id AND repair.parent_command_id=command.id AND repair.reason='order'
-           AND repair.private_payload->>'authorId'=command.agent_id
-           AND repair.review_context->>'purpose'='repair'
-           AND repair.review_context->>'headSha'=$2
-           AND repair.review_context->'pullRequest'=command.review_context->'pullRequest'
-           AND repair.private_payload->>'text' ~* $3 LIMIT 1) repair_verdict ON true
-       WHERE command.room_id=$1 AND command.action='input'
-         AND (command.state='complete' AND turn.status='complete'
-           OR COALESCE(command.private_payload->>'reportedOutcome',command.report_outcome) IN ('failed','blocked') OR repair_verdict.delivered)
-         AND (EXISTS (SELECT 1 FROM messages verdict
-           WHERE verdict.room_id=command.room_id AND verdict.author_id=command.agent_id
-             AND (verdict.id=command.result_message_id OR verdict.request_id=command.turn_request_id
-               OR verdict.id IN (SELECT jsonb_array_elements_text(COALESCE(command.review_context->'reportIds','[]'::jsonb))))
-             AND verdict.deleted_at IS NULL AND verdict.text ~* $3)
-           OR EXISTS (SELECT 1 FROM agent_commands report
-             WHERE report.id IN (SELECT jsonb_array_elements_text(COALESCE(command.review_context->'reportIds','[]'::jsonb)))
-               AND report.private_payload->>'authorId'=command.agent_id AND report.private_payload->>'text' ~* $3)
-           OR repair_verdict.delivered)
-         AND command.agent_id=${cornerReviewerSql()}
-         AND (command.reason='corner_review_dispatch'
-           OR (command.reason IN ('agent_tag','order') AND command.review_context IS NOT NULL
-             AND command.review_context->>'purpose' IS DISTINCT FROM 'repair')
-           OR (command.reason='subscribed_event' AND source.system_event->>'kind'='check-passed'))
-         AND command.review_context->>'headSha'=$2
-         AND command.review_context->'pullRequest'=(
-           SELECT lifecycle->'pr'->'number' FROM corner_github_cache WHERE corner_id=$1)
-       ORDER BY command.created_at DESC,command.id DESC LIMIT 1`,
-      [
-        cornerId,
-        headSha,
-        `${REVIEW_VERDICT_SQL}|(^|\\n)[[:space:]]*blocked:[[:space:]]*[^[:space:]]`,
-      ],
-    )
-  ).rows[0]?.id;
+export async function loadCornerReviewState(db: SqlDatabase, cornerId: string, headSha: string | undefined) {
+  const empty = {pending:false,requests:0,ended:undefined as undefined | {
+    id:string;findings?:string;emptyCount:number;delivered:boolean;
+  }};
+  if(!headSha) return empty;
+  const rows=(await db.query<{id:string;state:string;ended:boolean;findings:string|null;delivered:boolean}>(
+    `SELECT command.id,command.state,
+      command.state IN ('complete','cancelled') AND NOT EXISTS (SELECT 1 FROM agent_turns running
+        WHERE running.room_id=command.room_id AND running.agent_id=command.agent_id
+          AND running.request_id=command.turn_request_id AND running.status='working') ended,
+      verdict.text findings,COALESCE(verdict.delivered,false) delivered
+     FROM agent_commands command JOIN rooms corner ON corner.id=command.room_id
+     JOIN rooms parent ON parent.id=corner.parent_id
+     LEFT JOIN LATERAL (
+       SELECT repair.private_payload->>'text' text,true delivered FROM agent_commands repair
+       WHERE repair.parent_command_id=command.id AND repair.reason='order'
+         AND repair.private_payload->>'authorId'=command.agent_id
+         AND repair.review_context->>'purpose'='repair' AND repair.private_payload->>'text' ~* $3
+       UNION ALL
+       SELECT message.text,false FROM messages message
+       WHERE message.room_id=command.room_id AND message.author_id=command.agent_id
+         AND (message.id=command.result_message_id OR message.request_id=command.turn_request_id
+           OR message.id IN (SELECT jsonb_array_elements_text(COALESCE(command.review_context->'reportIds','[]'::jsonb))))
+         AND message.deleted_at IS NULL AND message.text ~* $3
+       UNION ALL
+       SELECT report.private_payload->>'text',false FROM agent_commands report
+       WHERE report.id IN (SELECT jsonb_array_elements_text(COALESCE(command.review_context->'reportIds','[]'::jsonb)))
+         AND report.private_payload->>'authorId'=command.agent_id AND report.private_payload->>'text' ~* $3
+       ORDER BY delivered DESC LIMIT 1
+     ) verdict ON true
+     WHERE command.room_id=$1 AND command.agent_id=${cornerReviewerSql()}
+       AND (command.state<>'cancelled' OR EXISTS (SELECT 1 FROM agent_turns finished
+         WHERE finished.room_id=command.room_id AND finished.agent_id=command.agent_id
+           AND finished.request_id=command.turn_request_id AND finished.status<>'working'))
+       AND ${greenReviewRequestSql('command')} AND command.review_context->>'headSha'=$2
+       AND command.review_context->'pullRequest'=(SELECT lifecycle->'pr'->'number' FROM corner_github_cache WHERE corner_id=$1)
+     ORDER BY command.inbox_sequence DESC`,
+    [cornerId,headSha,String.raw`(^|\n)[[:space:]>#*-]*(@[[:alnum:]_-]+[[:space:]]+)?((done|failed|blocked):[[:space:]]*)?(verdict:[[:space:]]*)?FAIL([[:space:]:*]|$)|(^|[[:space:]])F[0-9]+:|\mneeds? (a )?fix\M|\mfix (that|the|this)\M|\mbefore I can PASS\M`],
+  )).rows;
+  const latest=rows[0];
+  let emptyCount=0;
+  for(const row of rows) {if(!row.ended || row.findings) break; emptyCount++;}
+  return {pending:rows.some(row=>row.state==='pending'||row.state==='claimed'),requests:rows.length,
+    ended:latest && (latest.ended||latest.findings) ? {id:latest.id,findings:latest.findings??undefined,
+      emptyCount,delivered:latest.delivered}:undefined};
 }
 
 

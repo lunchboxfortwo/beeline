@@ -51,7 +51,10 @@ export function cornerHumanReportsSql(cornerId: string, workerId: string): strin
  */
 export function cornerWaitingReportSql(corner: string, includeAnswered = false): string {
   return `SELECT ${corner}.id corner_id,latest.report_id,latest.message_id,latest.card_id,
-    latest.return_room_id,latest.created_at,latest.commander_id,person.id person_id
+    latest.return_room_id,latest.created_at,
+    CASE WHEN latest.report_id IS NULL THEN latest.created_at
+      ELSE COALESCE((SELECT created_at FROM messages WHERE id=latest.card_id),latest.created_at) END asked_at,
+    latest.commander_id,person.id person_id
   FROM corner_facts waiting_fact
   CROSS JOIN LATERAL (
     SELECT reports.* FROM (
@@ -89,19 +92,4 @@ export function cornerWaitingReportSql(corner: string, includeAnswered = false):
   WHERE waiting_fact.corner_id=${corner}.id
     AND latest.text ~ '^(needs-decision|blocked):'
     ${includeAnswered ? '' : "AND latest.answered IS DISTINCT FROM 'true'"}`;
-}
-
-/**
- * The same wait as a database function, for gates on the claim path. Postgres
- * does not inline a plpgsql body, so the claim query plans one call instead of
- * the whole derivation. The migration rebuilds it from this builder.
- */
-export function cornerWaitingFunctionSql(): string {
-  return `CREATE OR REPLACE FUNCTION corner_has_explicit_wait(waiting_corner_id uuid) RETURNS boolean
-LANGUAGE plpgsql STABLE AS $corner_wait$
-BEGIN
-  RETURN EXISTS (SELECT 1 FROM rooms waiting_corner
-    CROSS JOIN LATERAL (${cornerWaitingReportSql('waiting_corner')}) waiting
-    WHERE waiting_corner.id=waiting_corner_id);
-END $corner_wait$;`;
 }

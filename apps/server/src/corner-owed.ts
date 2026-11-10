@@ -1,3 +1,4 @@
+import { cornerCommanderInputSql, cornerWaitingSql } from './corner-waiting.js';
 import { cornerImplementerSql, cornerOwnerSql } from './corner-worker.js';
 import { cornerCommissionerSql } from './corner-opening.js';
 import { cornerWaitingReportSql, humanReportCornerSql, cornerHumanReportsSql, reportAnswerMessageSql } from './corner-waiting-report.js';
@@ -243,39 +244,22 @@ export function cornerOwedAnswerTimesSql(corner: string, externalOnly = false): 
     GROUP BY owed.message_id,owed.person_id`;
 }
 
-/** The same answer predicate clears a live report and dates its historical resolution. */
-function reportAnswerSql(report: string, answer: string, order = false): string {
-  if (order) return `${answer}.room_id=${report}.corner_id
-    AND ${answer}.private_payload->>'kind'='order'
-    AND ${answer}.private_payload->>'authorId'=${report}.commander_id`;
-  return `${reportAnswerMessageSql(answer)}
-    AND ${answer}.room_id IN (${report}.corner_id,${report}.return_room_id)
-    AND ${answer}.created_at>${report}.created_at
-    AND (${answer}.author_id=${report}.commander_id OR EXISTS (
-      SELECT 1 FROM room_access member JOIN identities author ON author.id=member.identity_id
-      WHERE member.room_id=${report}.corner_id AND member.removed_at IS NULL
-        AND author.id=${answer}.author_id AND author.kind='human'))`;
-}
-
 /** Answered worker reports, read from the command/message log, date their resolution. */
 export function cornerReportAnswerTimesSql(corner: string): string {
   return `WITH report_corner AS MATERIALIZED (
       SELECT history_corner.id,${cornerImplementerSql('history_fact', 'history_corner')} worker_id
       FROM rooms history_corner JOIN corner_facts history_fact ON history_fact.corner_id=history_corner.id
       WHERE history_corner.id=${corner} AND history_corner.archived_at IS NULL
-    ), report_orders AS MATERIALIZED (
-      SELECT answer.created_at,answer.private_payload->>'authorId' author_id
-      FROM report_corner scope JOIN agent_commands answer ON answer.room_id=scope.id
-      WHERE answer.private_payload->>'kind'='order'
     ), reports AS (
-    SELECT scope.id corner_id,report.room_id return_room_id,report.created_at,report.agent_id commander_id
+    SELECT scope.id corner_id,scope.worker_id,report.room_id return_room_id,
+      COALESCE((SELECT created_at FROM messages WHERE id=encode(sha256(convert_to('agent-command-card:'||report.id,'UTF8')),'hex')),report.created_at) created_at
     FROM report_corner scope JOIN agent_commands report
       ON report.private_payload->>'fromRoomId'=scope.id::text AND report.private_payload->>'kind'='report'
     WHERE report.private_payload->>'authorId'=scope.worker_id
       AND report.private_payload->>'text' ~ '^(needs-decision|blocked):'
       AND report.private_payload->>'waitingAnswered'='true'
     UNION ALL
-    SELECT scope.id,item.room_id,item.created_at,item.card->>'reportToId'
+    SELECT scope.id,scope.worker_id,item.room_id,item.created_at
     FROM report_corner scope CROSS JOIN LATERAL (
       SELECT item.* FROM (${cornerHumanReportsSql('scope.id', 'scope.worker_id')}) item
       WHERE item.author_id=scope.worker_id AND item.card->>'reportToId' IS NOT NULL
@@ -285,28 +269,10 @@ export function cornerReportAnswerTimesSql(corner: string): string {
         AND item.card->>'waitingAnswered'='true'
       OFFSET 0
     ) item
-  ) SELECT resolution.ended_at FROM reports report
-    CROSS JOIN LATERAL (SELECT min(answered.at) ended_at FROM (
-      SELECT answer.created_at at
-      FROM (SELECT DISTINCT unnest(ARRAY[report.corner_id,report.return_room_id]) room_id) scope
-      CROSS JOIN LATERAL (
-        SELECT report.commander_id person_id
-        UNION
-        SELECT member.identity_id FROM room_access member JOIN identities person ON person.id=member.identity_id
-        WHERE member.room_id=report.corner_id AND member.removed_at IS NULL AND person.kind='human'
-      ) person
-      CROSS JOIN LATERAL (
-        SELECT answer.created_at FROM messages answer
-        WHERE answer.room_id=scope.room_id AND answer.author_id=person.person_id
-          AND ${reportAnswerMessageSql('answer')}
-          AND answer.created_at>report.created_at
-        ORDER BY answer.created_at LIMIT 1
-      ) answer
-      UNION ALL
-      SELECT answer.created_at FROM report_orders answer WHERE answer.author_id=report.commander_id
-        -- Orders can clear a wait within the same transaction/timestamp.
-        AND answer.created_at>=report.created_at
-    ) answered) resolution`;
+  ) SELECT resolution.answered_at ended_at FROM reports report JOIN rooms answer_corner ON answer_corner.id=report.corner_id
+    CROSS JOIN LATERAL (${cornerCommanderInputSql('answer_corner','report.worker_id','report.created_at','report.return_room_id')}) resolution
+    WHERE resolution.answered_at IS NOT NULL`;
+
 }
 
 /** Refresh report-derived attention after edits or membership changes in its return Room. */
@@ -378,18 +344,15 @@ CREATE INDEX IF NOT EXISTS corner_private_reports_origin ON agent_commands
   ((private_payload->>'fromRoomId'),(private_payload->>'authorId'),created_at DESC,id DESC)
   WHERE private_payload->>'kind'='report';
 CREATE OR REPLACE FUNCTION clear_corner_report_blockers() RETURNS trigger LANGUAGE plpgsql AS $report$
-DECLARE scope uuid; answer_author text; answer_at timestamptz; answer_room uuid; candidate_ids uuid[];
+DECLARE scope uuid; answer_room uuid; candidate_ids uuid[];
 BEGIN
   IF TG_TABLE_NAME='messages' THEN
     IF NOT (${reportAnswerMessageSql('NEW')}) THEN RETURN NULL; END IF;
-    answer_author=NEW.author_id; answer_at=NEW.created_at; answer_room=NEW.room_id;
+    answer_room=NEW.room_id;
   ELSIF TG_TABLE_NAME='agent_commands' THEN
-    IF NEW.private_payload->>'kind' IS DISTINCT FROM 'order' THEN RETURN NULL; END IF;
-    scope=NEW.room_id; answer_author=NEW.private_payload->>'authorId';
-  ELSE
-    IF NEW.lifecycle->'pr'->>'headSha' IS NOT DISTINCT FROM OLD.lifecycle->'pr'->>'headSha'
-      OR NEW.lifecycle->'pr'->>'headSha' IS NULL THEN RETURN NULL; END IF;
-    scope=NEW.corner_id;
+    IF NEW.private_payload->>'kind' IS DISTINCT FROM 'order' AND NEW.reason<>'corner_brief_revision' THEN RETURN NULL; END IF;
+    scope=NEW.room_id;
+  ELSE RETURN NULL;
   END IF;
   -- Most Room inserts cannot answer a corner report. Resolve the small indexed
   -- candidate set before planning/evaluating the full waiting-report projection.
@@ -403,14 +366,10 @@ BEGIN
   ), answered AS MATERIALIZED (
     SELECT DISTINCT waiting.report_id,waiting.message_id,waiting.card_id
     FROM report_corners report_corner CROSS JOIN LATERAL (${cornerWaitingReportSql('report_corner')}) waiting
-    WHERE (TG_TABLE_NAME='corner_github_cache'
-        OR (TG_TABLE_NAME='agent_commands' AND waiting.commander_id=answer_author)
-        OR (TG_TABLE_NAME='messages' AND waiting.created_at<answer_at
-          AND (waiting.corner_id=answer_room OR waiting.return_room_id=answer_room)
-          AND (waiting.commander_id=answer_author OR EXISTS (
-            SELECT 1 FROM room_access member JOIN identities author ON author.id=member.identity_id
-            WHERE member.room_id=waiting.corner_id AND member.removed_at IS NULL
-              AND author.id=answer_author AND author.kind='human'))))
+    CROSS JOIN LATERAL (${cornerCommanderInputSql('report_corner',
+      "(SELECT "+cornerImplementerSql('answer_fact','report_corner')+" FROM corner_facts answer_fact WHERE answer_fact.corner_id=report_corner.id)",
+      'waiting.asked_at','waiting.return_room_id')}) resolution
+    WHERE resolution.answered_at IS NOT NULL
   ), commands AS (
     UPDATE agent_commands SET private_payload=jsonb_set(private_payload,'{waitingAnswered}','true')
       WHERE id IN (SELECT report_id FROM answered) RETURNING id
@@ -427,7 +386,6 @@ DROP TRIGGER IF EXISTS corner_report_order ON agent_commands;
 CREATE TRIGGER corner_report_order AFTER INSERT ON agent_commands FOR EACH ROW EXECUTE FUNCTION clear_corner_report_blockers();
 DROP TRIGGER IF EXISTS corner_report_push ON corner_facts;
 DROP TRIGGER IF EXISTS corner_report_push ON corner_github_cache;
-CREATE TRIGGER corner_report_push AFTER UPDATE OF lifecycle ON corner_github_cache FOR EACH ROW EXECUTE FUNCTION clear_corner_report_blockers();
 -- A queued automatic wake predating the report is not new input either.
 CREATE OR REPLACE FUNCTION quiet_corner_report_wakes() RETURNS trigger LANGUAGE plpgsql AS $quiet$
 DECLARE corner uuid; ignored bigint;
@@ -444,7 +402,7 @@ BEGIN
     END IF;
   END IF;
   IF NOT EXISTS(SELECT 1 FROM rooms report_corner
-    CROSS JOIN LATERAL (${cornerWaitingReportSql('report_corner')}) waiting WHERE report_corner.id=corner) THEN RETURN NULL; END IF;
+    CROSS JOIN LATERAL (${cornerWaitingSql('report_corner')}) waiting WHERE report_corner.id=corner) THEN RETURN NULL; END IF;
   WITH cancelled AS (
     SELECT (terminal.ended).* FROM (SELECT beeline_end_agent_turn(command.id,command.generation_id,'cancelled','corner_waiting',NULL) ended FROM agent_commands command WHERE command.room_id=corner AND command.state='pending' AND command.action IN ('input','resume')
       AND command.private_payload->>'kind' IS DISTINCT FROM 'order'

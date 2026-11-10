@@ -64,7 +64,7 @@ import { CHOICE_EXPIRY_SCHEMA } from './choice-expiry-schema.js';
 import { askingMessageSql, cardExpiresAtSql, EXPIRING_CARD_TYPES } from './needs-you.js';
 import { cancelArchivedCornerAssignments } from './corner-close.js';
 import { cornerOwedSchemaSql } from './corner-owed.js';
-import { cornerWaitingFunctionSql } from './corner-waiting-report.js';
+import { cornerWaitingFunctionSql } from './corner-waiting.js';
 import { CORNER_ATTENTION_SCHEMA } from './corner-attention.js';
 import { backfillCornerFollows, cornerFollowsSchemaSql } from './corner-follow.js';
 import { alreadyNoOp, alreadySatisfied, triggerAlreadyCurrent, runMigrationStep, splitMigrationStatements } from './migration-steps.js';

@@ -554,13 +554,15 @@ const fixture = monolithFixture();
     );
     expect(await state()).toBe('idle');
 
+    updates += 1;
     await fixture.database.query(
       `INSERT INTO messages(id,room_id,author_id,text,presentation,card_type,card,created_at)
-       VALUES('crowded-question',$1,$2,'Hinged or loose?','card','choice',$3::jsonb,now())`,
+       VALUES('crowded-question',$1,$2,'Hinged or loose?','card','choice',$3::jsonb,now()+$4::interval)`,
       [
         cornerId,
         AGENT,
         JSON.stringify({ mode: 'question', status: 'open', requester: { pubkey: HUMAN } }),
+        `${updates} seconds`,
       ],
     );
     await crowd();
@@ -570,19 +572,21 @@ const fixture = monolithFixture();
     );
     expect(await state()).toBe('idle');
 
+    updates += 1;
     const grantId = '99999999-9999-4999-8999-999999999992';
     await fixture.database.query(
-      `INSERT INTO agent_grants(id,agent_id,workspace_id,kind,target,reason,requested_by,room_id,status)
-       VALUES($1,$2,$3,'host','example.com','fetch docs',$2,$4,'pending')`,
-      [grantId, AGENT, WORKSPACE, cornerId],
+      `INSERT INTO agent_grants(id,agent_id,workspace_id,kind,target,reason,requested_by,room_id,status,created_at)
+       VALUES($1,$2,$3,'host','example.com','fetch docs',$2,$4,'pending',now()+$5::interval)`,
+      [grantId, AGENT, WORKSPACE, cornerId, `${updates} seconds`],
     );
     await fixture.database.query(
       `INSERT INTO messages(id,room_id,author_id,text,presentation,card_type,card,created_at)
-       VALUES('crowded-grant',$1,$2,'Allow Bee to reach example.com','card','grant-request',$3::jsonb,now())`,
+       VALUES('crowded-grant',$1,$2,'Allow Bee to reach example.com','card','grant-request',$3::jsonb,now()+$4::interval)`,
       [
         cornerId,
         AGENT,
         JSON.stringify({ grants: [{ grantId, kind: 'host', target: 'example.com' }] }),
+        `${updates} seconds`,
       ],
     );
     await crowd();

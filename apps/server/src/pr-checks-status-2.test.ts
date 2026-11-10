@@ -3,6 +3,22 @@ import { cornerFeatureBranch, describe, expect, it, R, C, AUTHOR, REVIEWER, URL,
 describe('zero-check worker completion', () => {
 const scope2 = fixtureScope2();
 
+  async function expectNoCiReview(reasons: string[]) {
+    expect(reasons).toEqual(['corner_review_dispatch']);
+    const reviews = (await rootFixture.db.query(
+      `SELECT reason,review_context FROM agent_commands
+       WHERE room_id=$1 AND agent_id=$2 AND state='pending'`, [C,REVIEWER],
+    )).rows;
+    expect(reviews).toEqual([expect.objectContaining({
+      reason: 'corner_review_dispatch',
+      review_context: expect.objectContaining({
+        cornerId: C,headSha: SHA,pullRequest: 614,
+        checks: {status:'passing',checks:null},
+      }),
+    })]);
+  }
+
+
 
   it('finishes a head with workflows but no registered suites or runs in one explicit confirmation', async () => {
     rootFixture.rollupState = null;
@@ -12,7 +28,7 @@ const scope2 = fixtureScope2();
     rootFixture.pullBaseSha = rootFixture.mainHead;
     const after = await scope2.finishPrTurn(rootFixture.mainHead);
     expect(after.lifecycle).toMatchObject({ checks: 'passing', checksSummary: { total: 0 } });
-    expect(after.reviewer).toEqual(['subscribed_event']);
+    await expectNoCiReview(after.reviewer);
   }, 20_000);
 
 
@@ -59,7 +75,7 @@ const scope2 = fixtureScope2();
     console.info(
       `Reproduction ZC-2: zero contexts, worker completed; reviewer commands=${JSON.stringify(after.reviewer)}`,
     );
-    expect(after.reviewer).toEqual(['subscribed_event']);
+    await expectNoCiReview(after.reviewer);
     expect(after.lifecycle).toMatchObject({ checks: 'passing', checksSummary: { total: 0 } });
     expect(after.worker).toEqual([]);
     expect(await gate()).toMatchObject({ approved: false, mergeAllowed: false });

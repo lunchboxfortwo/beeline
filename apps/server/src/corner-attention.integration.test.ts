@@ -520,7 +520,7 @@ it('Reproduction R1: a worker order waiting on an offline helper stays working',
   expect(await state()).toBe('idle');
 });
 
-it.each(['agent', 'human'] as const)('REPORT-WAITING-DERIVED: %s report quiets wakes and clears on each authorized input', async recipientKind => {
+it.each(['agent', 'human'] as const)('REPORT-WAITING-DERIVED: %s report clears on commander input and remains waiting across a push', async recipientKind => {
   const { reportToCommander } = await import('./commander.js');
   const recipient = recipientKind === 'agent' ? COMMANDER : HUMAN;
   await db.query(`UPDATE agent_commands SET private_payload=jsonb_set(private_payload,'{authorId}',to_jsonb($1::text))
@@ -570,6 +570,9 @@ it.each(['agent', 'human'] as const)('REPORT-WAITING-DERIVED: %s report quiets w
         await db.query(`UPDATE agent_turns SET status='complete' WHERE room_id=$1 AND request_id=$2`, [C,next!.turn_request_id]);
       } else {
         await db.query(`UPDATE corner_github_cache SET lifecycle='{"pr":{"headSha":"new-head"},"checks":"failing"}'::jsonb WHERE corner_id=$1`, [C]);
+        expect(await cornerReportWaiting(db, C)).toBe(true);
+        await db.query(`INSERT INTO messages(id,room_id,author_id,text,presentation)
+          VALUES('after-push-answer',$1,$2,'Proceed','message')`, [ROOM,HUMAN]);
       }
       expect(await cornerReportWaiting(db, C)).toBe(false);
       if (unlisten) expect(changes).toContain(C);
@@ -718,4 +721,40 @@ it('Reproduction SENTRY-4B: persistent lock timeout stops after its one retry', 
     await expect(refreshCornerAttention(db, C)).rejects.toBe(failure);
     expect(observe).toHaveBeenCalledTimes(2);
   } finally { observe.mockRestore(); }
+});
+
+
+it('AC-8: reports, an open question and an approval share waiting and commander-reply clearing', async () => {
+  const {reportToCommander}=await import('./commander.js');
+  const {CHOICE_CARD_TYPE}=await import('@beeline/api-contract/phone');
+  const seedCommands=(await db.query<{id:string}>('SELECT id FROM agent_commands')).rows.map(row=>row.id);
+  const seedMessages=(await db.query<{id:string}>('SELECT id FROM messages')).rows.map(row=>row.id);
+  for(const kind of ['blocked','needs-decision','question','approval'] as const) {
+    await db.query(`DELETE FROM agent_commands WHERE NOT(id=ANY($1::text[]))`,[seedCommands]);
+    await db.query(`DELETE FROM agent_turns WHERE room_id=$1`,[C]);
+    await db.query(`DELETE FROM agent_grants WHERE room_id=$1`,[C]);
+    await db.query(`DELETE FROM messages WHERE room_id IN ($1,$2) AND NOT(id=ANY($3::text[]))`,[C,ROOM,seedMessages]);
+    await db.query(`UPDATE corner_facts SET machine=NULL WHERE corner_id=$1`,[C]);
+    if(kind==='blocked'||kind==='needs-decision') {
+      await reportToCommander(db,C,WORKER,`${kind}: choose the next step`);
+    } else if(kind==='question') {
+      await db.query(`INSERT INTO messages(id,room_id,author_id,presentation,text,card_type,card)
+        VALUES('common-question',$1,$2,'message','Choose the next step',$3,$4::jsonb)`,[C,WORKER,CHOICE_CARD_TYPE,
+        JSON.stringify({mode:'question',status:'open',mentionIds:[HUMAN],requester:{pubkey:HUMAN}})]);
+    } else {
+      const grant='77777777-7777-4777-8777-777777777777';
+      await db.query(`INSERT INTO agent_grants(id,agent_id,workspace_id,kind,target,reason,requested_by,room_id,status)
+        VALUES($1,$2,$3,'host','example.test','Need access',$4,$5,'pending')`,[grant,WORKER,WS,HUMAN,C]);
+      await db.query(`INSERT INTO messages(id,room_id,author_id,presentation,text,card_type,card)
+        VALUES('common-approval',$1,$2,'message','Approve access','grant-request',$3::jsonb)`,[C,WORKER,
+        JSON.stringify({grants:[{grantId:grant}]})]);
+    }
+    expect(await state(),kind).toBe('waiting');
+    expect(await cornerReportWaiting(db,C),kind).toBe(true);
+    await post(`answer-${kind}`,'Proceed with the requested work',HUMAN);
+    expect(await cornerReportWaiting(db,C),kind).toBe(false);
+    expect(await state(),kind).toBe('idle');
+    if(kind==='approval') expect((await db.query(`SELECT status FROM agent_grants WHERE room_id=$1`,[C])).rows)
+      .toEqual([{status:'pending'}]);
+  }
 });

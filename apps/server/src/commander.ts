@@ -9,7 +9,7 @@ import { SYSTEM_IDENTITY_ID } from '@beeline/api-contract/system-identity';
 import { normalizeAgentAsk } from './tray-approval-ask.js';
 import { createHash, randomBytes } from 'node:crypto';
 import type { SqlDatabase } from './database.js';
-import { createAgentCommand, refuseVerdictedReviewerWake, repairReviewerCornerMembership, nextAgentDepth, type CommandRow, type PrivateCommandPayload } from './agent-command.js';
+import { createAgentCommand, hasPendingCornerReview, repairReviewerCornerMembership, nextAgentDepth, type CommandRow, type PrivateCommandPayload } from './agent-command.js';
 import { resolveCurrentMemberMentions } from './message-mentions.js';
 import { cornerImplementerSql } from './corner-worker.js';
 import { CommandRefusalError } from './command-refusal.js';
@@ -455,9 +455,9 @@ export async function reportToCommander(
       });
       if (!queued) {
         const head = typeof command?.review_context?.headSha === 'string' ? command.review_context.headSha : undefined;
-        // The verdict was routed back to the reviewer who already has this head.
+        // The report was routed back to a reviewer with a pending request.
         // Skip the wake instead of failing the report.
-        if (head && await refuseVerdictedReviewerWake(db, wakeRoom, recipient, head))
+        if (head && await hasPendingCornerReview(db, wakeRoom, recipient, head))
           return { id: reportId, createdAt: Math.floor(Date.now() / 1000), delivered: true, skipped: true };
         throw new CommandRefusalError('commander could not receive report', 409);
       }

@@ -208,7 +208,7 @@ it.each(['room', 'corner'] as const)('Reproduction R1: post then a differently w
 });
 
 
-it.each(['done','no-reply'])('WAKE-STORM: auth-failed reviewer reports once; its later command keeps its own result (%s)', async outcome => {
+it.each(['done','no-reply'])('WAKE-STORM: auth-failed reviewer retries once and reports once; later commands keep their own results (%s)', async outcome => {
   const NIGLET = '6'.repeat(64), SOL = '7'.repeat(64);
   await rootFixture.db.query(`INSERT INTO identities(id,kind,name,handle) VALUES($1,'agent','Niglet','niglet'),($2,'agent','Sol','sol') ON CONFLICT DO NOTHING`, [NIGLET,SOL]);
   await rootFixture.db.query('INSERT INTO agents(agent_id,owner_id) VALUES($1,$3),($2,$3) ON CONFLICT DO NOTHING', [NIGLET,SOL,HUMAN]);
@@ -235,7 +235,10 @@ it.each(['done','no-reply'])('WAKE-STORM: auth-failed reviewer reports once; its
   await rootFixture.daemon.execute('postAgentTurnReceipt', {...authority(review),status:'failed',reason:'ACP error -32000: Authentication required'}, SOL);
   const {reconcileConfiguredCornerReviewers} = await import('./agent-command.js');
   for (let cycle=0;cycle<5;cycle++) await reconcileConfiguredCornerReviewers(rootFixture.db,ROOM);
-  expect(await commands(opened.cornerId,SOL)).toHaveLength(0);
+  const retry=await commands(opened.cornerId,SOL);
+  expect(retry).toHaveLength(1);
+  expect(retry[0]?.reason).toBe('corner_review_dispatch');
+  expect(retry[0]?.id).not.toBe(review.id);
   const failures = (await commands(DM,RUBY)).filter(c=>c.reason==='report');
   expect(failures).toHaveLength(1);
   if (outcome === 'done') await rootFixture.daemon.execute('report', {...authority(rootFixture.order),status:'done',text:'done: the assigned coordination is complete'}, RUBY);
@@ -251,6 +254,7 @@ it.each(['done','no-reply'])('WAKE-STORM: auth-failed reviewer reports once; its
   for(let attempt=0;attempt<5;attempt++) await rootFixture.daemon.execute('postAgentTurnReceipt',
     {...authority(review),status:'failed',reason:'ACP error -32000: Authentication required'},SOL);
   expect((await rootFixture.db.query(`SELECT 1 FROM agent_commands WHERE agent_id=$1 AND reason='report' AND private_payload->>'authorId'=$2`,[RUBY,SOL])).rowCount).toBe(1);
+  expect((await commands(opened.cornerId,SOL)).map(command=>command.id)).toEqual(retry.map(command=>command.id));
   // Closing the source corner silences both old pending and fresh reports.
   await rootFixture.db.query('UPDATE rooms SET archived_at=now() WHERE id=$1',[opened.cornerId]);
   expect(await rootFixture.db.transaction(tx=>reportToCommander(tx,opened.cornerId,SOL,'failed: another auth failure',row,'after-close',{automatic:true})))

@@ -3534,7 +3534,8 @@
         "purpose": "existing before the registry; weekly audit reviews",
         "pullRequest": "existing before the registry; weekly audit reviews",
         "cornerId": "existing before the registry; weekly audit reviews",
-        "briefRevision": "The brief revision captured at review dispatch; it must remain comparable with the current revision."
+        "briefRevision": "The brief revision captured at review dispatch; it must remain comparable with the current revision.",
+        "checks": "The checks captured at dispatch distinguish a pre-green wake from the first green-head review; current check facts cannot recover that earlier state."
       },
       "wake_context": {},
       "coalesced_attachments": {},

@@ -249,7 +249,7 @@ describe('corner_owed', () => {
     await step(idle);
   });
 
-  it('keeps a question card owed until it is answered or closed, whatever the person posts', async () => {
+  it('keeps a question card owed after a commander reply clears Waiting', async () => {
     const question = (status: string) => ({
       mode: 'question',
       status,
@@ -262,7 +262,9 @@ describe('corner_owed', () => {
     });
     await step(blockingToViewer);
     await post('chatter', OWNER, 'Let me think.');
-    await step(blockingToViewer);
+    await step(owedToViewer);
+    expect((await database.query(`SELECT card->>'status' status FROM messages WHERE id='question'`)).rows)
+      .toEqual([{status:'open'}]);
     await database.query(
       `UPDATE messages SET card=jsonb_set(card,'{status}','"answered"') WHERE id='question'`,
     );
@@ -280,7 +282,7 @@ describe('corner_owed', () => {
     await step(idle);
   });
 
-  it('keeps a grant card owed to whoever can decide it until it is decided', async () => {
+  it('keeps a grant pending and owed after a commander reply clears Waiting', async () => {
     const grantId = '99999999-9999-4999-8999-999999999999';
     await database.query(
       `INSERT INTO agent_grants(id,agent_id,workspace_id,kind,target,reason,requested_by,room_id,status)
@@ -295,7 +297,9 @@ describe('corner_owed', () => {
     });
     await step(blockingToViewer);
     await post('chatter', OWNER, 'Looking.');
-    await step(blockingToViewer);
+    await step(owedToViewer);
+    expect((await database.query(`SELECT status FROM agent_grants WHERE id=$1`,[grantId])).rows)
+      .toEqual([{status:'pending'}]);
     await database.query(`UPDATE agent_grants SET status='approved' WHERE id=$1`, [grantId]);
     await step(idle);
   });
@@ -450,7 +454,7 @@ describe('corner_owed', () => {
     await step(owedToViewer);
   });
 
-  it('reads chat-list owed facts from corner_owed with only an item-id lookup for the reason', async () => {
+  it('reads owed facts from corner_owed and bounds commander reply probes', async () => {
     const queries: { sql: string; values: unknown[] }[] = [];
     const spy = new PhoneService(
       {
@@ -484,10 +488,13 @@ describe('corner_owed', () => {
     // by message id. The waiting reason reads the indexed blocker message by
     // its primary key too; owed facts still come from corner_owed.
     const messageScans = scans.filter((scan) => scan.relation === 'messages');
-    // Running, pending and held activity each resolve their dispatched check
-    // source by id; these do not recover owed facts.
+    expect(corners!.sql).toContain('message.room_id IN (c.id,waiting.return_room_id)');
+    expect(corners!.sql).toContain('message.author_id=commander.id');
+    expect(corners!.sql).toContain('message.created_at>waiting.asked_at');
+    // Activity resolves three dispatched sources. The common waiting rule
+    // resolves three commander/order source ids; neither recovers owed facts.
     const isDispatchSource = (alias: string) => /^source(?:_\d+)?$/.test(alias);
-    expect(messageScans.filter((scan) => isDispatchSource(scan.alias))).toHaveLength(3);
+    expect(messageScans.filter((scan) => isDispatchSource(scan.alias))).toHaveLength(6);
     expect(messageScans.filter((scan) => scan.alias === 'item')).toHaveLength(1);
     expect(corners!.sql).toContain('JOIN messages item ON item.id=owed.message_id');
     // Each unread-cursor branch checks legacy corner visibility against the
@@ -500,8 +507,10 @@ describe('corner_owed', () => {
     const isTargetSource = (alias: string) => /^target_source(?:_\d+)?$/.test(alias);
     expect(messageScans.filter((scan) => isTargetSource(scan.alias))).toHaveLength(2);
     expect(messageScans.filter((scan) => scan.alias === 'visible')).toHaveLength(1);
+    // The common clearing rule adds the report publication boundary and
+    // commander reply probes, bounded above by Room, author and ask time.
     expect(messageScans.filter((scan) => scan.alias !== 'item' && scan.alias !== 'visible' &&
       !isDispatchSource(scan.alias) && !isTargetSource(scan.alias) && !scan.alias.startsWith('callsite') &&
-      !scan.alias.startsWith('run_card'))).toHaveLength(6);
+      !scan.alias.startsWith('run_card'))).toHaveLength(8);
   });
 });

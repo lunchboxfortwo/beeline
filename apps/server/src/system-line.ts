@@ -468,8 +468,6 @@ export async function systemLine(
         requestId: input.requestId,
         causeId: input.causeId,
         commandId: input.commandId,
-        followup: input.kind === 'check-failed' &&
-          Boolean((input.payload as { followup?: unknown } | undefined)?.followup),
       });
       if (input.kind && isSubscribableEventKind(input.kind) && subscriptions.some(row => row.prompt !== null)) {
         for (const subscription of subscriptions.filter(row => row.prompt !== null)) {

@@ -27,6 +27,13 @@ beforeAll(async () => {
     ALTER TABLE rooms ADD COLUMN workspace_id uuid DEFAULT '11111111-1111-4111-8111-111111111111';
     ALTER TABLE memberships ADD COLUMN workspace_id uuid DEFAULT '11111111-1111-4111-8111-111111111111';`);
   await db.exec(WORKSPACE_HANDLE_SCHEMA);
+  // The common waiting predicate also reads approval and commander-input facts.
+  await db.exec(`CREATE TABLE agent_grants(id uuid,room_id uuid,status text,created_at timestamp,
+      superseded_at timestamp,expires_at timestamp);
+    CREATE TABLE corner_brief_revisions(corner_id uuid,revision integer,author_id text,
+      source_room_id uuid,approval_basis jsonb,created_at timestamp);
+    ALTER TABLE agent_commands ADD COLUMN parent_command_id text,
+      ADD COLUMN root_source_message_id text,ADD COLUMN source_message_id text;`);
 });
 afterAll(() => db.close());
 

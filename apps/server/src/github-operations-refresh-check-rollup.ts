@@ -6,7 +6,7 @@ import type { CornerLifecycleView } from '@beeline/api-contract/phone';
 import type { SqlDatabase } from './database.js';
 import { GITHUB_SUBJECT, systemLine, type SystemPhrase } from './system-line.js';
 import { archiveCornerState, lockCornerArchivalAuthority } from './corner-close.js';
-import { advanceCorner, planCornerCheckObservation, checksSettled, checksRestarted, actionsJobId, lockCornerLifecycle } from './corner-lifecycle.js';
+import { advanceCorner, planCornerCheckObservation, checksSettled, actionsJobId, lockCornerLifecycle } from './corner-lifecycle.js';
 import { reconcileCornerMergeBlockers, routeSystemCommand } from './agent-command.js';
 import { GitHubOperations, CornerWebhookTarget, checkFact, jobErrorLines, text, hash } from './github-operations.js';
 
@@ -81,25 +81,11 @@ import { GitHubOperations, CornerWebhookTarget, checkFact, jobErrorLines, text, 
         const beforeFetch = await ctx.lifecycle(target.corner_id, database);
         if (beforeFetch.pr?.headSha && beforeFetch.pr.headSha !== checkHeadSha) return;
         const oldReport = beforeFetch.checksSummary as (typeof beforeFetch.checksSummary & {
-          reportedHeadSha?: string; reportedFailing?: readonly string[]; failureFollowupSent?: boolean;
-          partialRepairSent?: boolean; attempt?: number;
+          reportedHeadSha?: string; reportedFailing?: readonly string[];
         }) | undefined;
-        const restarting = checksRestarted(oldReport?.checks, rollup.checks);
-        const alreadyReported = oldReport?.reportedHeadSha === checkHeadSha && !restarting
-          ? oldReport.reportedFailing ?? [] : [];
-        const candidateFailures = failedChecks.filter(item => !alreadyReported.includes(item.name));
-        // Logs for a newly failed job are readable while the rest of the run
-        // is open. Skip the fetch only when a repair turn is already open.
-        const repairOpen = alreadyReported.length > 0 && !checksSettled(rollup.checks)
-          ? (await database.query(
-              `SELECT 1 FROM agent_commands WHERE room_id=$1 AND reason='corner_check'
-                 AND state IN ('pending','claimed') LIMIT 1`,
-              [target.corner_id],
-            )).rowCount > 0
-          : false;
-        const logCandidates = candidateFailures.length &&
-          (!alreadyReported.length || (checksSettled(rollup.checks) && !oldReport?.failureFollowupSent) || !repairOpen)
-          ? candidateFailures : [];
+        const reported = oldReport?.reportedHeadSha === checkHeadSha && Boolean(oldReport.reportedFailing?.length);
+        const logCandidates = !reported && rollup.state !== 'pending' && checksSettled(rollup.checks)
+          ? failedChecks : [];
         const jobLogs = await Promise.all(logCandidates.map(async item => {
           const jobId = actionsJobId(item.url);
           if (!jobId) return { name: item.name, ...(item.url ? { url: item.url } : {}) };
@@ -158,11 +144,9 @@ import { GitHubOperations, CornerWebhookTarget, checkFact, jobErrorLines, text, 
             fetchStartedAt,
           };
           const priorReport = current.checksSummary;
-          const workerBusy = (await database.query(`SELECT 1 FROM agent_commands WHERE room_id=$1 AND reason='corner_check'
-            AND state IN ('pending','claimed') LIMIT 1`, [target.corner_id])).rowCount > 0;
-          const { sameReportedHead, newAttempt, attempt, newFailures, followup, partialRepair, reportFailure, storedSummary } =
-            planCornerCheckObservation({ headSha: checkHeadSha, previousHeadSha: current.pr?.headSha,
-              prior: priorReport, next: summary, workerBusy });
+          const {sameReportedHead,newAttempt,attempt,reportFailure,storedSummary} =
+            planCornerCheckObservation({headSha:checkHeadSha,previousHeadSha:current.pr?.headSha,
+              prior:priorReport,next:summary,settled:rollup.state !== 'pending'});
           await ctx.updateLifecycle(
             target.corner_id,
             {
@@ -199,16 +183,12 @@ import { GitHubOperations, CornerWebhookTarget, checkFact, jobErrorLines, text, 
                 || (current.pr?.number ? `pull request #${current.pr.number}` : 'the pull request'),
             };
           }
-          // The first failed job wakes immediately, even while other checks
-          // run. A later failed job wakes once more if that turn has ended,
-          // without waiting for the rest of the run. Completion wakes once
-          // more when the run settles. Replays share the attempt's id.
           const becameFailing = reportFailure;
           // A green/red rollup is a property of the whole head, not of the one
           // check that happened to arrive last. Name the actual failing jobs
           // on a failure, so the implementer knows what to fix and a passing
           // check can never be described as the failure.
-          const failing = reportFailure && newFailures.length ? newFailures : summary.failing?.length ? summary.failing : [check.name];
+          const failing = summary.failing.length ? summary.failing : [check.name];
           if (becamePassing || becameFailing || (check.status === 'failed' && !options?.quiet))
           noteInserted = await ctx.systemNote(
             target.corner_id,
@@ -241,18 +221,13 @@ import { GitHubOperations, CornerWebhookTarget, checkFact, jobErrorLines, text, 
                   ? { consequence: check.conclusion }
                   : {}),
               ...(becameFailing ? { payload: {
-                failedJobs: jobLogs.filter(item => newFailures.includes(item.name)),
-                // The failed jobs are already a fix turn. A GitHub rerun of a
-                // job in this workflow waits until the run ends; the wake says
-                // to push now instead of waiting for the other checks.
-                ...(!checksSettled(summary.checks) ? { runInProgress: true } : {}),
-                ...(followup || partialRepair || newAttempt ? { followup: true } : {}),
+                failedJobs: jobLogs,
               } } : {}),
             },
             becamePassing
               ? `github:checks:green:${check.headSha}:${attempt}`
               : becameFailing
-                ? `github:checks:failed:${check.headSha}:${attempt}:${followup ? 'followup' : partialRepair ? 'partial' : 'first'}`
+                ? `github:checks:failed:${check.headSha}`
               : `github:checks:${label}:${check.name}:${check.headSha ?? hash(JSON.stringify(check))}`,
             database,
             true,
@@ -336,8 +311,6 @@ import { GitHubOperations, CornerWebhookTarget, checkFact, jobErrorLines, text, 
         sourceMessageId: note.id,
         kind: phrase.kind,
         targets: [],
-        followup: phrase.kind === 'check-failed' &&
-          Boolean((phrase.payload as { followup?: unknown } | undefined)?.followup),
       });
     return note.inserted;
   }

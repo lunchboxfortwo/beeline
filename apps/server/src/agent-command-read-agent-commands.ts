@@ -160,7 +160,6 @@ export async function routeSystemCommand(
     requestId?: string;
     causeId?: string;
     commandId?: string;
-    followup?: boolean;
   },
 ): Promise<void> {
   if (!input.kind) return;
@@ -173,7 +172,6 @@ export async function routeSystemCommand(
         kind: 'checks',
         result: input.kind === 'check-passed' ? 'passing' : 'failing',
         sourceMessageId: input.sourceMessageId,
-        ...(input.followup ? { followup: true } : {}),
       });
       return;
     }
