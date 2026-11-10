@@ -1,3 +1,4 @@
+import { useSendConfirmationState } from './send-confirmation';
 import { prefetchRoomOpen } from '@/push/push-room-prefetch';
 import { type PendingComposerAck } from '@/buzz/room-indicators';
 import { focusComposerSelection } from '@/buzz/composer-selection';
@@ -217,17 +218,7 @@ export function useChatActionState([
     text: string;
   } | null>(null);
 
-  // Armed the instant a message this client believes addresses an agent is
-  // sent, so the composer never shows dead air waiting on the real WORKING
-  // receipt (API write + pickup + receipt + refetch). See
-  // `selectComposerAckState`.
-  const [pendingAck, setPendingAck] = useState<PendingComposerAck | null>(null);
-
-  const [receivedSteer, setReceivedSteer] = useState<{
-    agentPubkey: string;
-    turnRequestId: string;
-    receivedAt: number;
-  } | null>(null);
+  const { pendingAck, setPendingAck, receivedSteer, setReceivedSteer } = useSendConfirmationState();
 
 
   useLayoutEffect(() => {

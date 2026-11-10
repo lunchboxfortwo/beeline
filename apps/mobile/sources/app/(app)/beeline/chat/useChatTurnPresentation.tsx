@@ -9,8 +9,8 @@ import { useAnimatedStyle } from 'react-native-reanimated';
 import { Modal } from '@/modal';
 import { type ChatDisplayMessage } from '@/buzz/room-view-presentation';
 import { cornerProposalDecision } from '@/buzz/corner-proposal';
-import { STEER_RECEIVED_VISIBLE_MS, hasComposerAckReceipt, selectComposerAckPresentation, type ComposerAckPresentation } from '@/buzz/room-indicators';
-import { useComposerAckExpiry } from '@/buzz/use-composer-ack-expiry';
+import { selectComposerAckPresentation, type ComposerAckPresentation } from '@/buzz/room-indicators';
+import { useSendConfirmationReceipts } from './send-confirmation';
 import { formatTerminalTurnOverlay, type TurnVerb } from '@/buzz/turn-clock';
 import { useScrollFollowOnLayoutChange } from '@/buzz/room-scroll-follow';
 import { composerBottomPadding } from '@/buzz/composer-keyboard';
@@ -111,38 +111,7 @@ export function useChatTurnPresentation([
     sameMessageRefMap,
   );
 
-  // Once the matching server-indexed receipt lands there is nothing left for
-  // the local ack to guess at. A terminal receipt is still confirmation: the
-  // old active-only check missed the case where WORKING had already become
-  // COMPLETE before this screen observed it.
-  useEffect(() => {
-    if (pendingAck && !pendingAck.externalHandles?.length && hasComposerAckReceipt(pendingAck.requestId, agentTurnMarkers)) {
-      setPendingAck(null);
-    }
-  }, [agentTurnMarkers, pendingAck]);
-
-
-  useComposerAckExpiry(pendingAck, setPendingAck);
-
-  // A committed steer is a brief confirmation, not a new lifecycle. It stays
-  // on the exact running turn the server accepted it into and then clears.
-  useEffect(() => {
-    if (!receivedSteer) return;
-    if (
-      !activeAgentTurn ||
-      activeAgentTurn.agentPubkey !== receivedSteer.agentPubkey ||
-      activeAgentTurn.requestId !== receivedSteer.turnRequestId
-    ) {
-      setReceivedSteer(null);
-      return;
-    }
-    const delay = Math.max(
-      1,
-      receivedSteer.receivedAt + STEER_RECEIVED_VISIBLE_MS - Date.now() + 1,
-    );
-    const timer = setTimeout(() => setReceivedSteer(null), delay);
-    return () => clearTimeout(timer);
-  }, [activeAgentTurn, receivedSteer]);
+  useSendConfirmationReceipts(pendingAck, setPendingAck, receivedSteer, setReceivedSteer, agentTurnMarkers, activeAgentTurn);
 
 
   /**

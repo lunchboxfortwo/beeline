@@ -1,3 +1,4 @@
+import { createSendConfirmation } from './send-confirmation';
 import { type PendingComposerAck } from '@/buzz/room-indicators';
 import { trackDictatedMessage } from '@/buzz/dictation-timing';
 import { appErrorCopy } from '@/buzz/app-error-copy';
@@ -106,6 +107,10 @@ export function useChatComposerSend([
   handleCornerProposalDecision: (message: ChatDisplayMessage, decision: "open" | "cancel") => void,
 ] {
 
+  const confirmation = createSendConfirmation({
+    setPendingAck, setReceivedSteer, setSending, desktopExperience, setDesktopDeliveryState,
+  });
+
   const handleSend = useCallback(
     async (shortcut?: MessageShortcut, dictated?: DictatedSend) => {
       // A leaked responder event must never read as a shortcut (#1340's
@@ -160,12 +165,7 @@ export function useChatComposerSend([
       let activeOutbox = outbox.current();
       sendInFlightRef.current = true;
       const listPreview = !desktopTranscript && activePendingAttachments.length === 0;
-      const updateSendStatus = () => {
-        setReceivedSteer(null);
-        setPendingAck(addressesAgent ? { sentAt: Date.now() } : null);
-        setSending(true);
-        if (desktopExperience) setDesktopDeliveryState('sending');
-      };
+      const updateSendStatus = () => confirmation.begin(addressesAgent);
       if (!listPreview) updateSendStatus();
       // Text feedback lands in the local overlay in this same turn. Signing,
       // transport startup and outbox persistence can all take longer than a
@@ -232,12 +232,11 @@ export function useChatComposerSend([
         // ■ on a dictated message drops it at any step before it enters the Room.
         const dictationCancelled = () => {
           if (!dictated?.cancelled) return false;
-          setPendingAck(null);
+          confirmation.cancelled();
           if (provisionalId) {
             sendPreview.remove(preparedEvent?.id ?? provisionalId);
             removeOptimistic(preparedEvent?.id ?? provisionalId);
           }
-          if (desktopExperience) setDesktopDeliveryState(null);
           return true;
         };
         if (dictationCancelled()) return;
@@ -283,11 +282,7 @@ export function useChatComposerSend([
                   }
                 : undefined,
             );
-        if (addressesAgent) {
-          setPendingAck((current) =>
-            current ? { ...current, requestId: preparedEvent!.id } : current,
-          );
-        }
+        confirmation.signed(preparedEvent.id, addressesAgent);
         if (provisionalId) {
           if (listPreview) sendPreview.reconcile(provisionalId, preparedEvent.id);
           else reconcileOptimistic(provisionalId, preparedEvent.id);
@@ -352,35 +347,13 @@ export function useChatComposerSend([
         }
         const writeResult = await activeOutbox.send(preparedEvent.id);
         if (!writeResult) {
-          if (desktopExperience) setDesktopDeliveryState(null);
+          confirmation.pending();
           return true;
         }
         recordUntaggedSend(preparedEvent.id);
         if (writeResult.message) applyRoomMessageResult(writeResult.message);
         if (writeResult.pendingAgentCommands) applyPendingAgentCommands(writeResult.pendingAgentCommands);
-        if (
-          isCorner &&
-          activeAgentTurn &&
-          writeResult.activeSteerAgentIds?.includes(activeAgentTurn.agentPubkey)
-        ) {
-          setReceivedSteer({
-            agentPubkey: activeAgentTurn.agentPubkey,
-            turnRequestId: activeAgentTurn.requestId,
-            receivedAt: Date.now(),
-          });
-        }
-        if (desktopExperience) setDesktopDeliveryState('delivered');
-        // Storage retires the sending bridge. External recipients get a brief
-        // static confirmation; only a real working receipt drives native status.
-        const acceptedAt = Date.now();
-        const ackedRequestId = preparedEvent.id;
-        setPendingAck((current) =>
-          writeResult.externalAgentHandles?.length
-            ? { sentAt: acceptedAt, requestId: ackedRequestId, externalHandles: writeResult.externalAgentHandles }
-            : current && (current.requestId === undefined || current.requestId === ackedRequestId)
-            ? null
-            : current,
-        );
+        confirmation.accepted(preparedEvent.id, writeResult, isCorner, activeAgentTurn);
         // The server moved our read mark with the send itself, so a message we
         // wrote never golds the Room list (room-list-row.ts) and the viewport
         // has no mark left to write for it. The write receipt or live delta
@@ -395,16 +368,15 @@ export function useChatComposerSend([
         if (provisionalId && !preparedEvent) {
           removeOptimistic(provisionalId);
         }
-        if (desktopExperience) setDesktopDeliveryState('failed');
         // Delivery errors stay in the outbox. Preparation errors keep the draft.
-        setPendingAck(null);
+        confirmation.failed();
         if (isFocused() && (!preparedEvent || !activeOutbox?.get(preparedEvent.id))) {
           Modal.alert('Could not prepare message', appErrorCopy(err));
         }
         return false;
       } finally {
         sendInFlightRef.current = false;
-        setSending(false);
+        confirmation.finished();
       }
     },
     [
