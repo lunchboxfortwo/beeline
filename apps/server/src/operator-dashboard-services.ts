@@ -1,3 +1,4 @@
+import { githubProviderKey } from './providers/index.js';
 /** Operator-only dependency inventory. Evidence and exclusions: docs/operator-services.md. */
 import type { OperatorFinancesDetails } from './operator-finances-details.js';
 type Environment = Record<string, string | undefined>;
@@ -52,7 +53,7 @@ const inventory: Service[] = [
     'fixed plan', 'https://dash.cloudflare.com/'),
   service('expo', 'Expo EAS', 'Mobile builds and over-the-air app updates', ['EXPO_TOKEN'],
     'pay-as-you-go card', 'https://expo.dev/accounts', 'No balance API available to the server; release token lives in CI'),
-  service('github', 'GitHub', 'Repository access, pull requests, checks and releases',
+  service(githubProviderKey, 'GitHub', 'Repository access, pull requests, checks and releases',
     ['GITHUB_APP_ID', 'GITHUB_APP_PRIVATE_KEY', 'GITHUB_CLIENT_ID', 'GITHUB_CLIENT_SECRET'],
     'pay-as-you-go card', 'https://github.com/organizations/Beeline-Work/settings/billing',
     'No balance API with repository installation tokens; organization billing requires billing permissions'),

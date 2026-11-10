@@ -1,3 +1,4 @@
+import { providerAdapter } from '../providers/index.js';
 import { systemMessage } from '@beeline/api-contract/system-message-catalog';
 import { ExpectedRefusalError } from '../command-refusal.js';
 import { CommandRefusalError } from '../commander.js';
@@ -45,11 +46,8 @@ import { daemonRequestAgentGrant, daemonGrantRequester, daemonConsumeAgentGrant 
       'chatgpt', 'openai chatgpt', 'claude', 'cursor', 'mcp', 'beeline connector'].includes(assistant))
       return { status: 'ready', app: 'Beeline Rooms',
         next: 'In your AI assistant, add a custom connector with URL https://join.usebeeline.app, sign in with your Beeline account, tap Allow, then add the new member to a Room via its Members sheet > +. Muse can connect now through a custom connector at https://join.usebeeline.app; only its directory listing is pending.' };
-    // Remove an entry when its provider approves Beeline sign-in.
-    const pendingProviderApproval = new Set(['tiktok']);
-    if (pendingProviderApproval.has(appIdentity(service)?.key ?? assistant))
-      return { status: 'unavailable', app: service,
-        next: 'TikTok sign-in is waiting on TikTok’s approval of Beeline. There is no working sign-in card yet.' };
+    const unavailable = providerAdapter(appIdentity(service)?.key ?? assistant)?.signInUnavailable;
+    if (unavailable) return { status: 'unavailable', app: service, next: unavailable };
     const postCard = async (database: SqlDatabase, card: {
       appId: string; appKey: string; name: string; connectorId?: string;
       connectKind?: string; resumeOnConnect?: boolean;

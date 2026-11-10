@@ -1,3 +1,4 @@
+import { providerAdapter } from './providers/index.js';
 import { systemMessage } from '@beeline/api-contract/system-message-catalog';
 import { machineSquireReport } from './squire-machine.js';
 import { randomUUID } from 'node:crypto';
@@ -10,10 +11,7 @@ export { connectApp, disconnectApp, recordOwnerGitHubSelection, completeComposio
 
 
 /** Direct OAuth remotes verified against the official MCP Registry. */
-export const OFFICIAL_REGISTRY_APPS: Readonly<Record<string, string>> = {
-  stripe: 'com.stripe/mcp',
-  linear: 'app.linear/linear',
-};
+export { officialRegistryApps as OFFICIAL_REGISTRY_APPS } from './providers/index.js';
 
 
 /**
@@ -81,7 +79,7 @@ export async function resolveAppRoute(
   probes: AppRouteProbes,
 ): Promise<AppRouteDecision> {
   const existing = input.existing?.state === 'active' ? input.existing : undefined;
-  if (input.appKey === 'github') {
+  if (providerAdapter(input.appKey ?? '')?.preferVault) {
     const backing = await probes.workbench();
     if (backing?.transport === 'squire-api')
       return { kind: 'route', route: 'workbench', transport: backing.transport,

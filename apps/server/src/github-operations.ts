@@ -1,3 +1,4 @@
+import { githubProviderKey } from './providers/index.js';
 import { NotificationWork } from './notification-work.js';
 import { CommandRefusalError } from './command-refusal.js';
 import type { RepositorySignals } from './repository-onboarding.js';
@@ -319,7 +320,7 @@ async readCornerPullRequest(cornerId: string): Promise<CornerPullRequestResult> 
         )
           owner = (
             await this.database.query<{ identity_id: string }>(
-              `SELECT identity_id FROM identity_external_links WHERE provider='github' AND subject=$1`,
+              `SELECT identity_id FROM identity_external_links WHERE provider='${githubProviderKey}' AND subject=$1`,
               [String((sender as Record<string, unknown>).id)],
             )
           ).rows[0]?.identity_id;

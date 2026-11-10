@@ -1,3 +1,4 @@
+import { githubProviderKey } from './providers/index.js';
 import { GitHubCredentialRejectedError } from '@beeline/auth/github';
 import type { SqlDatabase } from './database.js';
 import { GitHubOperations } from './github-operations.js';
@@ -17,7 +18,7 @@ import { GitHubOperations } from './github-operations.js';
         encrypted_refresh_token: string | null;
         expires_at: string | Date | null;
       }>(
-        `SELECT l.subject,t.encrypted_token,t.encrypted_refresh_token,t.expires_at,t.stale_at FROM identity_external_links l LEFT JOIN github_user_tokens t ON t.subject=l.subject WHERE l.provider='github' AND l.identity_id=$1`,
+        `SELECT l.subject,t.encrypted_token,t.encrypted_refresh_token,t.expires_at,t.stale_at FROM identity_external_links l LEFT JOIN github_user_tokens t ON t.subject=l.subject WHERE l.provider='${githubProviderKey}' AND l.identity_id=$1`,
         [viewerId],
       )
     ).rows[0];

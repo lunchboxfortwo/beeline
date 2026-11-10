@@ -1,3 +1,4 @@
+import { githubProviderKey } from './providers/index.js';
 import { systemMessage } from '@beeline/api-contract/system-message-catalog';
 import { randomUUID } from 'node:crypto';
 import { appIdentity, appResourceTarget, registryServerAppKey, registryServerDomain, type AppTransport, type ConnectAppStatus } from '@beeline/api-contract/workbench';
@@ -344,7 +345,7 @@ async function recordExistingOwnerGitHubSelection(
   params: ConnectAppParams,
 ): Promise<void> {
   if (
-    row?.app_key !== 'github' ||
+    row?.app_key !== githubProviderKey ||
     decision.kind !== 'keep' ||
     params.requestedBy !== params.ownerId
   ) return;
@@ -374,7 +375,7 @@ export async function recordOwnerGitHubSelection(
   const app = (
     await database.query<{ route: string; transport: string }>(
       `SELECT route,transport FROM workspace_apps
-     WHERE id=$1::uuid AND owner_identity_id=$2 AND app_key='github'
+     WHERE id=$1::uuid AND owner_identity_id=$2 AND app_key='${githubProviderKey}'
        AND state='active' AND transport=$3
        AND ($4::uuid IS NULL OR connector_id=$4::uuid) FOR UPDATE`,
       [appId, ownerId, transport, connectorId ?? null],

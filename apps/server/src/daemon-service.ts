@@ -1,3 +1,4 @@
+import { githubProviderKey } from './providers/index.js';
 import type { CommandArguments, DaemonDependencies, DaemonContext } from './daemon/context.js';
 import type { HelperTurnOwnershipSource } from '@beeline/api-contract/helper-turn-ownership';
 import type { StarterOnboardingService } from './starter-onboarding-run.js';
@@ -104,7 +105,7 @@ export class DaemonService {
     /** The GitHub read behind `read_pull_request`. */
      readonly readPullRequest?: DaemonDependencies['readPullRequest'],
      readonly subscriptionReceiverUrl?: DaemonDependencies['subscriptionReceiverUrl'],
-     readonly github?: DaemonDependencies['github'],
+     readonly github?: DaemonDependencies[typeof githubProviderKey],
   ) {
     this.database = new CornerAccessDatabase(database);
   }

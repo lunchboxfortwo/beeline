@@ -1,3 +1,4 @@
+import { githubProviderKey } from '../providers/index.js';
 import { type PushLevel } from '@beeline/api-contract/phone';
 import type { PhoneContext } from './context.js';
 import { Input, RoomRow } from './types.js';
@@ -112,15 +113,15 @@ import { unix } from './values.js';
       )
     ).rows[0];
     const links = await ctx.database.query<{
-      provider: 'google' | 'github';
+      provider: 'google' | typeof githubProviderKey;
       provider_login: string | null;
       reconnect: boolean;
     }>(
       `SELECT link.provider,link.provider_login,
-         (link.provider='github' AND (token.subject IS NULL OR token.stale_at IS NOT NULL)) AS reconnect
+         (link.provider='${githubProviderKey}' AND (token.subject IS NULL OR token.stale_at IS NOT NULL)) AS reconnect
        FROM identity_external_links link LEFT JOIN github_user_tokens token
-         ON link.provider='github' AND token.subject=link.subject
-       WHERE link.identity_id=$1 AND link.provider IN ('google','github') ORDER BY link.provider`,
+         ON link.provider='${githubProviderKey}' AND token.subject=link.subject
+       WHERE link.identity_id=$1 AND link.provider IN ('google','${githubProviderKey}') ORDER BY link.provider`,
       [viewerId],
     );
     return {
@@ -156,7 +157,7 @@ import { unix } from './values.js';
     const link = (
       await ctx.database.query<{ provider_login: string | null }>(
         `SELECT provider_login FROM identity_external_links
-         WHERE provider='github' AND identity_id=$1`,
+         WHERE provider='${githubProviderKey}' AND identity_id=$1`,
         [viewerId],
       )
     ).rows[0];

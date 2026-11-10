@@ -1,3 +1,4 @@
+import { githubProviderKey, isProviderService } from './providers/index.js';
 import { readPersonDiagnostics, renderPersonDiagnostics } from './operator-diagnostics.js';
 import { ingestDiagnostics } from './diagnostics.js';
 import type { IncomingMessage, ServerResponse } from "node:http";
@@ -627,7 +628,7 @@ a:focus-visible { outline: 3px solid #c8a8e8; outline-offset: 4px; }
     if (typeof input.oidcToken !== 'string') throw new Error('oidcToken is required');
     const tokens=await options.auth.exchangeGitHubOidc(input.oidcToken, input.xAttribution);
     const funnel=parseSigninFunnelEvent(input.funnel);
-    if(funnel && funnel.event==='provider_tapped' && funnel.provider==='github') {
+    if(funnel && funnel.event==='provider_tapped' && funnel.provider===githubProviderKey) {
       await recordSigninFunnelEvent(options.database,{...funnel,event:'signed_in'},'server',tokens.identityId).catch(()=>undefined);
     }
     json(response,200,tokens);
@@ -728,11 +729,11 @@ a:focus-visible { outline: 3px solid #c8a8e8; outline-offset: 4px; }
     return;
   }
 
-  const providerWebhookPath = /^\/v1\/connectors\/events\/(linear|stripe)\/([0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12})$/.exec(url.pathname);
-  if (method === 'POST' && providerWebhookPath) {
+  const providerWebhookPath = /^\/v1\/connectors\/events\/([^/]+)\/([0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12})$/.exec(url.pathname);
+  if (method === 'POST' && providerWebhookPath && isProviderService(providerWebhookPath[1]!)) {
     const raw = await bytes(request, MAX_JSON_BYTES);
     const accepted = await ingestProviderWebhook(options.database,
-      providerWebhookPath[1] as 'linear' | 'stripe', providerWebhookPath[2]!, raw, request.headers);
+      providerWebhookPath[1], providerWebhookPath[2]!, raw, request.headers);
     if (!accepted) {
       json(response, 401, { error: 'invalid_webhook_signature' });
       return;

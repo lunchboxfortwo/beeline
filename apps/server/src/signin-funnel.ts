@@ -1,3 +1,4 @@
+import { githubProviderKey } from './providers/index.js';
 import { compactDiagnostics } from './diagnostics.js';
 import {
   FUNNEL_FIRST_SESSION_MS,
@@ -426,7 +427,7 @@ export async function dashboardSigninFunnel(
       stage.dropOffRate = previous ? (previous - stage.count) / previous : null;
       previous = stage.count;
     }
-    const providers = ['github', 'google'].map((provider) => {
+    const providers = [githubProviderKey, 'google'].map((provider) => {
       const started = rows.find(
         (r) =>
           r.platform === platform &&

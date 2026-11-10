@@ -1,3 +1,4 @@
+import { githubProviderKey } from './providers/index.js';
 import { restoreRoomMemberships, restoreRoomMembershipsSql } from './membership-join.js';
 import { roomEventSubscriptions } from './agent-subscriptions.js';
 import { systemMessage } from '@beeline/api-contract/system-message-catalog';
@@ -289,7 +290,7 @@ function labeledPhrase(phrase: SystemPhrase, identities: ReadonlyMap<string, Ide
   const fallbackSubjectName =
     phrase.subject.kind === 'agent'
       ? systemMessage("system-line.identity-mention", agentHandle(phrase.subject.name))
-      : phrase.subject.kind === 'github'
+      : phrase.subject.kind === githubProviderKey
         ? phrase.kind === 'subscription-fired' && phrase.subject.name === 'GitHub'
           ? systemMessage("system-line.github")
           : systemMessage("system-line.identity-mention", clause(phrase.subject.name).replace(/^@/, ''))
@@ -697,7 +698,7 @@ export function identitySubject(row: {
   return { kind: row.kind === 'agent' ? 'agent' : 'person', id: row.id, name: row.name };
 }
 
-export const GITHUB_SUBJECT: SystemSubject = { kind: 'github', name: systemMessage("system-line.github") };
+export const GITHUB_SUBJECT: SystemSubject = { kind: githubProviderKey, name: systemMessage("system-line.github") };
 
 /** Retire historical human-facing browser observations without losing agent context. */
 export async function backfillComputerObservations(database: SqlDatabase): Promise<void> {

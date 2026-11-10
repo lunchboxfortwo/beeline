@@ -1,3 +1,4 @@
+import { githubProviderKey } from './providers/index.js';
 import { installShutdown } from './shutdown.js';
 import { notifyLive } from './postgres-live.js';
 import { OwnedModelCredentials } from './owned-model-credential.js';
@@ -211,7 +212,7 @@ async function main() {
         githubClients.app,
         process.env.GITHUB_CLIENT_SECRET!,
         mountedAuth.sealedGitHubUserToken,
-        (roomId) => live.publish({ type: 'invalidate', roomId, reason: 'github' }),
+        (roomId) => live.publish({ type: 'invalidate', roomId, reason: githubProviderKey }),
       )
     : undefined;
   const githubJobs = githubClients
@@ -221,7 +222,7 @@ async function main() {
         githubClients.app,
         process.env.GITHUB_CLIENT_SECRET!,
         mountedAuth.sealedGitHubUserToken,
-        (roomId) => live.publish({ type: 'invalidate', roomId, reason: 'github' }),
+        (roomId) => live.publish({ type: 'invalidate', roomId, reason: githubProviderKey }),
       )
     : undefined;
   // Generated procedures are anchored to real code, so the curator's staleness

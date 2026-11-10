@@ -1,3 +1,4 @@
+import { githubProviderKey } from './providers/index.js';
 import { consumeLocalDelivery } from './rooms-mcp-delivery.js';
 import { MCP_LANDING_STYLE, renderMcpWorkspaceLanding, type McpWorkspaceLanding } from './rooms-mcp-landing.js';
 import { createWorkspace, defaultWorkspaceName } from './workspace-creation.js';
@@ -380,7 +381,7 @@ export class RoomsMcpOAuth {
       if (request.method === 'GET' && path === '/mcp/oauth/login') {
         const flow = await this.flow(url.searchParams.get('flow'), request);
         const provider = url.searchParams.get('provider');
-        if (!['google', 'github'].includes(provider ?? '')) throw new Refusal('invalid_request', 'provider_invalid');
+        if (!['google', githubProviderKey].includes(provider ?? '')) throw new Refusal('invalid_request', 'provider_invalid');
         await this.database.query('UPDATE rooms_mcp_flows SET provider=$2,identity_id=NULL WHERE id=$1', [flow.id, provider]);
         const target = new URL(provider === 'google' ? '/auth/oidc/start' : '/auth/github/start', this.origin);
         target.searchParams.set('app_redirect', `${this.origin}/mcp/oauth/callback/${provider}`);
@@ -647,7 +648,7 @@ export class RoomsMcpOAuth {
       const status = message === 'invalid_client' ? 401 : 400;
       // A person sees browser steps, so they get the step and reason in words; client endpoints keep the OAuth JSON body.
       if (step) {
-        const label = step === 'callback' ? `Signing in with ${path.endsWith('github') ? 'GitHub' : 'Google'}` : BROWSER_STEPS[step]!;
+        const label = step === 'callback' ? `Signing in with ${path.endsWith(githubProviderKey) ? 'GitHub' : 'Google'}` : BROWSER_STEPS[step]!;
         const reference = `${step} · ${reason} · ${new Date().toISOString().slice(0, 19)}Z`;
         this.page(response, 'Connection stopped', `<div class="brand"><img class="mark" src="${BEELINE_ICON}" alt="Beeline"></div><p class="head">${escape(label)}</p><h1>This connection stopped</h1><p class="lede">${escape(BROWSER_REFUSALS[reason] ?? BROWSER_REFUSALS.invalid_parameter!)} Go back to the app and connect again. If it stops here again, send this reference to Support.</p><p class="meta">Reference: ${escape(reference)}</p>`, status);
       } else mcpJson(response, status, { error: message });

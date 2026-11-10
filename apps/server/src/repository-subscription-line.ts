@@ -1,3 +1,4 @@
+import { githubProviderKey } from './providers/index.js';
 import { systemMessage } from '@beeline/api-contract/system-message-catalog';
 import type { SystemEvent } from '@beeline/api-contract/phone';
 
@@ -19,7 +20,7 @@ export function repositorySubscriptionLine(
     ? systemMessage("repository-subscription-line.item-number", details.number) : '';
   const star = event.startsWith('star.');
   return {
-    subject: { kind: 'github', name: systemMessage("repository-subscription-line.github") },
+    subject: { kind: githubProviderKey, name: systemMessage("repository-subscription-line.github") },
     verb: verbs[event]!,
     object: {
       text: star ? repository : [number, shortTitle].filter(Boolean).join(systemMessage("repository-subscription-line.space")) || repository,

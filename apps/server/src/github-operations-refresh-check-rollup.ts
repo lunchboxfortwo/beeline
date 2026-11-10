@@ -1,3 +1,4 @@
+import { githubProviderKey } from './providers/index.js';
 import { storeGitHubInstallations } from './github-installation-store.js';
 import { systemMessage } from '@beeline/api-contract/system-message-catalog';
 import { deleteArchivedCornerBranch } from './corner-branch-cleanup.js';
@@ -423,7 +424,7 @@ import { GitHubOperations, CornerWebhookTarget, checkFact, jobErrorLines, text, 
       );
       const merged: SystemPhrase = {
         subject: pullRequest.mergedBy
-          ? { kind: 'github', name: pullRequest.mergedBy }
+          ? { kind: githubProviderKey, name: pullRequest.mergedBy }
           : GITHUB_SUBJECT,
         verb: systemMessage("github-operations.merged"),
         kind: 'merged',

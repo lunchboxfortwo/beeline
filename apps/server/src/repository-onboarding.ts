@@ -1,3 +1,4 @@
+import { githubProviderKey } from './providers/index.js';
 import { systemMessage } from '@beeline/api-contract/system-message-catalog';
 import { createHash } from 'node:crypto';
 import { CommandRefusalError } from './command-refusal.js';
@@ -54,7 +55,7 @@ export async function postRepositoryOnboarding(database: SqlDatabase, github: Gi
      (SELECT owner.handle FROM memberships membership JOIN identities owner ON owner.id=membership.identity_id
       WHERE membership.workspace_id=r.workspace_id AND membership.room_id IS NULL AND membership.role='owner'
       AND membership.removed_at IS NULL ORDER BY owner.id LIMIT 1) owner_handle,
-     EXISTS(SELECT 1 FROM identity_external_links link WHERE link.identity_id=$3 AND link.provider='github') github_linked FROM rooms r
+     EXISTS(SELECT 1 FROM identity_external_links link WHERE link.identity_id=$3 AND link.provider='${githubProviderKey}') github_linked FROM rooms r
      JOIN memberships m ON m.room_id=r.id AND m.identity_id=$2 AND m.removed_at IS NULL
      JOIN memberships w ON w.workspace_id=r.workspace_id AND w.room_id IS NULL AND w.identity_id=$3 AND w.removed_at IS NULL
      JOIN identities i ON i.id=$2

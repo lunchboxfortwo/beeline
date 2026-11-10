@@ -1,3 +1,4 @@
+import { defaultCatalogKeys } from '../providers/index.js';
 import { MCP_SCOPES } from '../rooms-mcp-connections.js';
 import { mcpClientLogo } from '../rooms-mcp-logos.js';
 import { assetUrl } from '../phone-identity.js';
@@ -207,18 +208,7 @@ import { seconds } from './values.js';
     const apps = (await readOwnerApps(ctx.database, viewerId, ctx.composio))
       .filter((app) => app.transport !== 'squire-api' && app.hasConnected);
     const catalogKeys = new Set([
-      'gmail',
-      'googlecalendar',
-      'slack',
-      'googledrive',
-      'googlesheets',
-      'notion',
-      'linear',
-      'hubspot',
-      'airtable',
-      'asana',
-      'jira',
-      'supabase',
+      ...defaultCatalogKeys,
       ...apps
         .filter((app) => app.transport === 'composio')
         .map((app) => composioToolkitForApp(app.appKey)),
