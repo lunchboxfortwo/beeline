@@ -2,7 +2,7 @@
   "version": 1,
   "name": "feedback-triage",
   "description": "Daily Beeline feedback sweep; steps: feedback-triage-steps",
-  "summary": "Rank human pain and repeated feedback with the morning walk, then check released fixes the next day.",
+  "summary": "Rank human pain and repeated feedback, then check released fixes the next day.",
   "roles": [
     "triager"
   ],
@@ -75,11 +75,10 @@
       "timeoutSeconds": 1800
     },
     "present": {
-      "does": "Merge feedback and the completed 6am walk into one list ranked by people affected.",
+      "does": "Present ranked feedback problems as one list ordered by people affected.",
       "role": "triager",
       "requires": [
-        "rankedProblems",
-        "walkRunId"
+        "rankedProblems"
       ],
       "on": {
         "presented": "done",
