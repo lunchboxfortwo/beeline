@@ -105,6 +105,49 @@ describe('owed Room tags', () => {
     finally { await db.query('UPDATE memberships SET removed_at=NULL WHERE room_id=$1 AND identity_id=$2', [room, helper]); }
   });
 
+  it('Reproduction owed-tags-1: real-list helper answers and closed commands leave tool replies without hiding unanswered tags', async () => {
+    // 10 Nov production: proof169 had a visible answer with request_id but no
+    // reply_to_message_id. The old fix only tested explicitly threaded replies.
+    const answered = '841917f5eabd7bfb481b2037ae1920d723c2aed4069bbf075938ee12fd69ee72';
+    await db.query(`INSERT INTO messages(id,room_id,author_id,text) VALUES($1,$2,$3,
+      '@helper For proof169, consider three different ways to arrange books in a small library.')`, [answered, room, owner]);
+    await recordMcpMention(db, helper, room, answered);
+    await db.query(`INSERT INTO messages(id,room_id,author_id,text,request_id)
+      VALUES($1,$2,$3,'Three ways to arrange books',$4)`, [id(), room, helper, answered]);
+    const closed = id();
+    await db.query(`INSERT INTO messages(id,room_id,author_id,text) VALUES($1,$2,$3,'@helper closed conversation')`, [closed, room, owner]);
+    await routeHumanMessage(db, closed);
+    await db.query(`UPDATE agent_commands SET state='cancelled',completed_at=now()
+      WHERE agent_id=$1 AND source_message_id=$2`, [helper, closed]);
+    const pending = await tag(helper), unrelated = await tag(other, '@pidoong please answer');
+    const activityOnly = await tag(helper);
+    await db.query(`INSERT INTO messages(id,room_id,author_id,text,presentation,request_id)
+      VALUES($1,$2,$3,'','activity',$4)`, [id(), room, helper, activityOnly]);
+    const retried = id();
+    await db.query(`INSERT INTO messages(id,room_id,author_id,text) VALUES($1,$2,$3,'@helper retry answer')`, [retried, room, owner]);
+    await routeHumanMessage(db, retried);
+    const request = id();
+    await db.query(`UPDATE agent_commands SET turn_request_id=$3 WHERE agent_id=$1 AND source_message_id=$2`, [helper, retried, request]);
+    await db.query(`INSERT INTO messages(id,room_id,author_id,text,request_id)
+      VALUES($1,$2,$3,'Answer after a renewed turn',$4)`, [id(), room, helper, request]);
+    const read = () => daemon.execute('getOwedMentions', {}, helper);
+    const remaining = (await read()).owedMentions.map(m => m.messageId);
+    expect(remaining).not.toContain(answered);
+    expect(remaining).not.toContain(closed);
+    expect(remaining).not.toContain(unrelated);
+    expect(remaining).not.toContain(retried);
+    expect(remaining).toEqual(expect.arrayContaining([pending, activityOnly]));
+    const page = (await call('list_mentions', {}, helper)).mentions.map((m: any) => m.id);
+    for (const source of [answered, closed, retried]) expect(page).not.toContain(source);
+    expect(page).toEqual(expect.arrayContaining([pending, activityOnly]));
+    // A completed activation with no answer still owes its human a reply.
+    await db.query(`UPDATE agent_commands SET state='complete' WHERE agent_id=$1 AND source_message_id=$2`, [helper, closed]);
+    expect((await read()).owedMentions.map(m => m.messageId)).toContain(closed);
+    await db.query(`UPDATE rooms SET archived_at=now() WHERE id=$1`, [room]);
+    try { expect((await read()).owedMentions).toEqual([]); }
+    finally { await db.query(`UPDATE rooms SET archived_at=NULL WHERE id=$1`, [room]); }
+  });
+
   it('C6 owed-only list and legacy cursor paging', async () => {
     const a = await tag(), b = await tag();
     const seq = (await db.query<{seq: string}>('SELECT seq::text seq FROM rooms_mcp_mentions WHERE member_id=$1 AND message_id=$2', [member, a])).rows[0]!.seq;

@@ -2,7 +2,7 @@ import { readMemberDelivery, setupMemberDelivery, confirmMemberDelivery, prepare
 import { memberStreamEnabled, serveMcpMemberStream, type McpStreamCursor } from './rooms-mcp-stream.js';
 import type { SqlDatabase } from './database.js';
 import { waitForConnection } from './connection-wait.js';
-import { mentionRouting, mentionReplyKey, mentionReplyId, mentionAnswerKey, owedMentions } from './owed-mentions.js';
+import { mentionRouting, mentionReplyKey, mentionReplyId, mentionAnswerKey, owedMentions, OWED_MENTION_OPEN_SQL } from './owed-mentions.js';
 import { RoomsMcpEvents, McpEventError } from './rooms-mcp-events.js';
 import type { IncomingMessage, ServerResponse } from 'node:http';
 import { createHash } from 'node:crypto';
@@ -278,6 +278,7 @@ export class RoomsMcp {
        JOIN messages m ON m.id=mention.message_id AND m.deleted_at IS NULL
        LEFT JOIN identities i ON i.id=m.author_id
        WHERE mention.member_id=$1 AND mention.cleared_at IS NULL AND mention.seq>$2::bigint
+         AND ${OWED_MENTION_OPEN_SQL}
          AND EXISTS(SELECT 1 FROM rooms active WHERE active.id=mention.room_id AND active.archived_at IS NULL)
        ORDER BY mention.seq LIMIT $3`, [member, cursor, limit + 1])).rows;
     const page = rows.slice(0, limit);

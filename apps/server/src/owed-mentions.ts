@@ -36,6 +36,28 @@ export function isMentionReplyInput(input: object): boolean {
   return serverMentionInputs.has(input);
 }
 
+/** Both catch-up pages and tool reminders read the same outstanding obligation.
+ * Helper final answers carry request_id even when they have no replyTo. A
+ * cancelled source command closes that conversation; completion alone does not
+ * prove an answer (historical failed activations also completed commands).
+ */
+export const OWED_MENTION_OPEN_SQL = `
+  NOT EXISTS(SELECT 1 FROM messages reply WHERE reply.room_id=mention.room_id
+    AND reply.author_id=mention.member_id AND reply.reply_to_message_id=mention.message_id
+    AND reply.deleted_at IS NULL AND reply.presentation='message')
+  AND NOT EXISTS(SELECT 1 FROM messages reply WHERE reply.room_id=mention.room_id
+    AND reply.author_id=mention.member_id AND reply.request_id=mention.message_id
+    AND reply.deleted_at IS NULL AND reply.presentation='message')
+  AND NOT EXISTS(SELECT 1 FROM agent_commands source
+    JOIN messages reply ON reply.room_id=source.room_id AND reply.author_id=source.agent_id
+      AND reply.request_id=source.turn_request_id AND reply.deleted_at IS NULL AND reply.presentation='message'
+    WHERE source.source_message_id=mention.message_id AND source.room_id=mention.room_id
+      AND source.agent_id=mention.member_id)
+  AND (NOT EXISTS(SELECT 1 FROM agent_commands source WHERE source.source_message_id=mention.message_id
+      AND source.room_id=mention.room_id AND source.agent_id=mention.member_id AND source.state='cancelled')
+    OR EXISTS(SELECT 1 FROM agent_commands source WHERE source.source_message_id=mention.message_id
+      AND source.room_id=mention.room_id AND source.agent_id=mention.member_id AND source.state IN ('pending','claimed')))`;
+
 /** Private, current membership-scoped reminder accompanying tool results. */
 export async function owedMentions(db: SqlDatabase, member: string) {
   const rows = (await db.query<{room_id: string; message_id: string; author_handle: string | null}>(`SELECT mention.room_id,mention.message_id,beeline_room_handle(author.id,mention.room_id) author_handle
@@ -45,9 +67,7 @@ export async function owedMentions(db: SqlDatabase, member: string) {
     WHERE mention.member_id=$1 AND mention.cleared_at IS NULL
       AND EXISTS(SELECT 1 FROM effective_memberships rm WHERE rm.room_id=r.id AND rm.identity_id=$1 AND rm.removed_at IS NULL)
       AND EXISTS(SELECT 1 FROM memberships wm WHERE wm.workspace_id=r.workspace_id AND wm.room_id IS NULL AND wm.identity_id=$1 AND wm.removed_at IS NULL)
-      AND NOT EXISTS(SELECT 1 FROM messages reply WHERE reply.room_id=mention.room_id
-        AND reply.author_id=$1 AND reply.reply_to_message_id=mention.message_id AND reply.deleted_at IS NULL
-        AND reply.presentation='message')
+      AND ${OWED_MENTION_OPEN_SQL}
     ORDER BY mention.seq LIMIT 100`, [member])).rows;
   return rows.map(row => mentionRouting(member, row.room_id, row.message_id, row.author_handle));
 }

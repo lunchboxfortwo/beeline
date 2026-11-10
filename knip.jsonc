@@ -81,6 +81,7 @@
         "scripts/prove-schedule-report-owner.mjs",
         // The Body guide invokes this isolated agent-tool regression proof by path.
         "scripts/prove-agent-tool-traps.mjs",
+        "scripts/prove-owed-tags.mjs",
         // BRIEF-CITATION invokes the isolated built Body/HTTP proof by path.
         "scripts/prove-brief-citation.mjs",
         // The corner membership migration guide invokes the owner-shaped HTTP/socket proof by path.
