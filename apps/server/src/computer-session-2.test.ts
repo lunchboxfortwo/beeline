@@ -360,8 +360,10 @@ const scope1 = fixtureScope1();
       response.end(`<!doctype html><head><meta name="viewport" content="width=device-width,initial-scale=1"><style>
         html,body{margin:0;width:100%;height:100%}#screen{width:100vw;height:100vh}</style></head><body>
         <div id="bar"><button id="focus"></button></div>
-        <div id="screen"><canvas id="canvas" width="800" height="600"></canvas></div>
-        <script>const socket = new WebSocket(new URL("stream", location.href));
+        <div id="screen"><canvas id="canvas" width="0" height="0"></canvas></div>
+        <script>// Reproduction viewer-flake-1: remote dimensions arrive after the old 1.5s sleep.
+        setTimeout(() => {const c=document.getElementById('canvas');c.width=800;c.height=600;}, 3_000);
+        const socket = new WebSocket(new URL("stream", location.href));
         function send(message){if(socket.readyState===WebSocket.OPEN)socket.send(JSON.stringify(message));}
         function point(event){const canvas=document.getElementById('canvas');const r=canvas.getBoundingClientRect();
           const scale=r.width/canvas.width;return {x:(event.clientX-r.left)/scale,y:(event.clientY-r.top)/scale};}</script></body>`);

@@ -184,6 +184,7 @@ export function fixtureScope1() {
       '--remote-debugging-address=127.0.0.1', '--remote-debugging-port=0',
       `--user-data-dir=${profile}`, pageUrl,
     ], { stdio: 'ignore' });
+    let viewerSocket: WebSocket | undefined;
     try {
       const port = await until(async () => {
         try {
@@ -194,7 +195,7 @@ export function fixtureScope1() {
       const page = await until(async () => {
         try { return await findChromiumPage(`http://127.0.0.1:${port}`); } catch { return undefined; }
       });
-      const socket = new WebSocket(page.webSocketDebuggerUrl!);
+      const socket = viewerSocket = new WebSocket(page.webSocketDebuggerUrl!);
       await opened(socket);
       let serial = 0;
       const pending = new Map<number, (value: Record<string, unknown>) => void>();
@@ -209,7 +210,9 @@ export function fixtureScope1() {
       });
       const evaluate = async <T>(expression: string) => {
         const result = await command('Runtime.evaluate', { expression, returnByValue: true });
-        return (result as { result?: { value?: T } }).result?.value;
+        const reply = result as { result?: { value?: T }; exceptionDetails?: unknown };
+        if (reply.exceptionDetails) throw new Error(`Viewer script failed: ${JSON.stringify(reply.exceptionDetails)}`);
+        return reply.result?.value;
       };
       await command('Runtime.enable');
       await command('Page.enable');
@@ -219,7 +222,23 @@ export function fixtureScope1() {
       const settle = () => new Promise((resolve) => setTimeout(resolve, 300));
       const reload = async () => {
         await command('Page.reload');
-        await new Promise((resolve) => setTimeout(resolve, 1_500));
+        let lastState: unknown;
+        let lastError: unknown;
+        await until(async () => {
+          try {
+            lastState = await evaluate<{ ready: boolean }>(`(() => {
+              const el = document.getElementById('canvas') || document.getElementById('screen');
+              const rect = el?.getBoundingClientRect();
+              return { ready: document.readyState === 'complete' && !!el?.style.width
+                && rect.width > 0 && rect.height > 0,
+                documentState: document.readyState, surface: el?.id,
+                width: el?.style.width, height: el?.style.height };
+            })()`);
+            return (lastState as { ready?: boolean })?.ready ? true : undefined;
+          } catch (error) { lastError = error; return undefined; }
+        }, 30_000).catch((error: Error) => {
+          throw new Error(`${error.message}: viewer did not load; state=${JSON.stringify(lastState)}; last error=${String(lastError)}`);
+        });
       };
       const touch = async (type: string, points: Record<string, number>[]) => {
         await command('Input.dispatchTouchEvent', { type, touchPoints: points });
@@ -287,6 +306,7 @@ export function fixtureScope1() {
       return { before, afterPinchOut, afterPinchIn, afterPinchOutAgain, afterPan,
         tapPoint, tapRect, tapRemote, scale, viewport, bodyTouchAction };
     } finally {
+      viewerSocket?.terminate();
       if (chrome.exitCode === null && chrome.signalCode === null) {
         chrome.kill('SIGTERM');
         await new Promise<void>((resolve) => chrome.once('exit', () => resolve()));
