@@ -284,7 +284,11 @@ export async function runAdapterInstall(
   opts: { cwd?: string; env?: NodeJS.ProcessEnv; stdio?: 'inherit' | 'ignore' } = {},
 ): Promise<void> {
   await new Promise<void>((resolveInstall, rejectInstall) => {
-    const child = spawn(install.command, [...install.args, '--omit=optional'], {
+    // Codex's Linux executable is shipped as an optional platform package.
+    const linuxCodex = process.platform === 'linux' && install.args.some(
+      (arg) => /^@agentclientprotocol\/codex-acp(?:@|$)/.test(arg),
+    );
+    const child = spawn(install.command, [...install.args, linuxCodex ? '--include=optional' : '--omit=optional'], {
       ...(opts.cwd ? { cwd: opts.cwd } : {}),
       env: opts.env ?? process.env,
       stdio: opts.stdio ?? 'inherit',

@@ -18,6 +18,8 @@ Connect the coding agent you already run to a Room in the Beeline app. Tag it li
 
 Repository corners prepare shared package exports before the first agent turn. Agents cannot order themselves; they continue the work in their current turn.
 
+Linux Codex adapter setup includes the optional platform package required to launch Codex. Managed adapter installs use exact versions selected by the helper's release-age policy.
+
 Android SDK platform-tools are available on the helper session PATH when installed; emulator use still requires the host grant. A newly approved host grant works on the next tool call in the same session. For long builds, read `scripts/corner-job.mjs` and the build script, then request a host command grant for `node scripts/corner-job.mjs start <new-job-directory> <command> <args...>` and run it through `run_granted_command`. The host job retains `output.log` and `result.json` across turns and stops after four hours. Use a job directory in the corner worktree or persistent private state, outside session scratch; read it with `node scripts/corner-job.mjs status <job-directory>`. Starting the script in a harness shell ties its lifetime to that harness instead. Failed Android release builds print their exit status; missing Codex platform packages report the package name and an optional-dependency repair command.
 
 Stop ends the agent's running batch and clears its thinking status; later work stays queued. Refused turn writes name the failed ownership condition in the helper error and server log, including the age of a stale server lease.

@@ -12,7 +12,8 @@ adapters, waiting **24 hours from the npm registry publish time** before adoptio
 While the newest release ages, the newest eligible prior release is considered.
 Each candidate installs at an exact version in a unique prefix under
 `$XDG_DATA_HOME/beeline/adapters` (default `~/.local/share/beeline/adapters`),
-omitting optional bundled native harness binaries. It never replaces a global
+omitting optional bundled native harness binaries except for Linux Codex, whose
+platform executable package must be included for its adapter to start. It never replaces a global
 adapter or an already adopted prefix.
 
 Before promotion, `adapter-session-check.ts` runs the production `AcpClient`
