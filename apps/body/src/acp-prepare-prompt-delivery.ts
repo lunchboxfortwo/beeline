@@ -304,7 +304,6 @@ import { AcpClient, isPiAcpHarness, flattenHarnessCause, AcpRuntimeExitedError, 
     const asyncTasks = new Map<string,ToolCallEntry>();
     const invocationToolsPending = () => [...toolCallEntries(updates),...asyncTasks.values()].some(call =>
       !call.resultReceived && !['completed','failed'].includes(call.status ?? ''));
-    let toolsSettled: (() => void) | undefined;
     const checkTerminalContext = () => {
       if (!contextPath || terminalReason) return;
       try {
@@ -337,7 +336,6 @@ import { AcpClient, isPiAcpHarness, flattenHarnessCause, AcpRuntimeExitedError, 
       updates.push(u);
       const asyncTask = asyncTaskCall(u.update);
       if (asyncTask?.id) asyncTasks.set(asyncTask.id,{...asyncTasks.get(asyncTask.id),...asyncTask});
-      if (!invocationToolsPending()) toolsSettled?.();
       checkTerminalContext();
       if (terminalReason) return;
       promptRunId ??= ctx.activeRunIdFromUpdate(u.update);
@@ -381,22 +379,8 @@ import { AcpClient, isPiAcpHarness, flattenHarnessCause, AcpRuntimeExitedError, 
         },
       )])) as { stopReason?: string };
 
-      // Some harnesses return end_turn before background MCP calls finish.
-      // Silence is part of this turn, never a detached job or a new trigger.
-      if (!terminalReason && invocationToolsPending()) {
-        let runtimeExited: (() => void) | undefined;
-        try {
-          await Promise.race([terminal, new Promise<void>((resolve, reject) => {
-            toolsSettled = resolve;
-            runtimeExited = () => reject(new AcpRuntimeExitedError('runtime exited awaiting invocation tool result'));
-            ctx.once('exit', runtimeExited);
-            if (!ctx.alive) runtimeExited();
-          })]);
-        } finally {
-          if (runtimeExited) ctx.off('exit', runtimeExited);
-          toolsSettled = undefined;
-        }
-      }
+      // The correlated prompt result ends this invocation. Tool-status metadata
+      // can remain unfinished after end_turn and cannot hold the next command.
       checkTerminalContext();
       const agentText = terminalReason ? '' : finalAgentMessageText(updates, ctx.agentLabel);
 
