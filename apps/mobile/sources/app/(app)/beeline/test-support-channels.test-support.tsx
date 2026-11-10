@@ -294,6 +294,7 @@ vi.mock('@/auth/github-installation-host', () => ({
 vi.mock('@/auth/buzz-identity-storage', () => ({
   getEffectiveRelayUrl: vi.fn(async () => 'https://relay.test'),
   loadBuzzIdentity: vi.fn(async () => ({ publicKey: 'viewer', secretKey: new Uint8Array(32) })),
+  peekBuzzViewerContext: () => ({ relayUrl: 'https://relay.test', viewerPubkey: 'viewer' }),
 }));
 
 vi.mock('@/buzz/community-storage', () => ({
@@ -306,16 +307,34 @@ vi.mock('@/buzz/community-storage', () => ({
   }),
 }));
 
-vi.mock('@/buzz/surface-storage', () => {
+vi.mock('@/buzz/surface-storage', async () => {
+  const { roomSurfaceRecords } = await import('@/buzz/room-message-records');
+  const { nextSurfaceStamp } = await import('@/buzz/surface-clock');
+  const selected = new Map<string, { value: unknown; projection: unknown }>();
+  const parsed = (address: string) => {
+    const [relayOrigin, viewerPubkey, endpoint, params] = JSON.parse(address);
+    return { relayOrigin, viewerPubkey, endpoint, params };
+  };
   const notify = (address: string) => {
     for (const listener of hotSurfaces.listeners.get(address) ?? []) listener();
   };
+  roomSurfaceRecords.subscribe((scope, roomId) => {
+    for (const address of hotSurfaces.values.keys()) if (roomSurfaceRecords.matches(parsed(address), scope, roomId)) {
+      selected.delete(address);
+      notify(address);
+    }
+  });
   const cache = {
-    peek: vi.fn((address: string) =>
-      deck.withholdWorkspaceSnapshot && address.includes('/workspaces')
-        ? null
-        : (hotSurfaces.values.get(address) ?? null),
-    ),
+    peek: vi.fn((address: string) => {
+      if (deck.withholdWorkspaceSnapshot && address.includes('/workspaces')) return null;
+      const value = hotSurfaces.values.get(address);
+      if (!value) return null;
+      const memo = selected.get(address);
+      if (memo?.value === value) return memo.projection;
+      const projection = roomSurfaceRecords.snapshot(parsed(address), value);
+      selected.set(address, { value, projection });
+      return projection;
+    }),
     read: vi.fn(async () => null),
     write: vi.fn(async (address: string, value: unknown, _guard: unknown) => {
       cache.publish(address, value);
@@ -328,8 +347,9 @@ vi.mock('@/buzz/surface-storage', () => {
     clear: vi.fn(() => {
       hotSurfaces.values.clear();
     }),
-    publish: vi.fn((address: string, value: unknown) => {
-      hotSurfaces.values.set(address, value);
+    publish: vi.fn((address: string, value: unknown, _guard?: unknown, stamp = nextSurfaceStamp()) => {
+      hotSurfaces.values.set(address, roomSurfaceRecords.store(parsed(address), value, stamp));
+      selected.delete(address);
       notify(address);
       return value;
     }),
@@ -393,7 +413,9 @@ vi.mock('@/sync/transport', () => ({
 }));
 
 // The app-level Room list store watches through the shared live connection.
-vi.mock('@/sync/transport/live-connection', () => ({
+vi.mock('@/sync/transport/live-connection', async () => {
+  const { publishPhoneLiveEvent } = await import('@/sync/transport/phone-live-events');
+  return {
   useConnectionState: () => deck.connectionState,
   reconnectNow: () => {
     deck.reconnects += 1;
@@ -409,7 +431,12 @@ vi.mock('@/sync/transport/live-connection', () => ({
       filters: readonly { readonly '#h'?: readonly string[] }[],
       listener: (event: MonolithSurfaceEvent) => void,
     ) => {
-      deck.subscriptions.push({ filters, emit: listener });
+      // The badge's identity-wide watch is outside this deck fixture.
+      if (!filters.length) return () => undefined;
+      deck.subscriptions.push({ filters, emit: event => {
+        if ('monolithLive' in event) publishPhoneLiveEvent(event.monolithLive);
+        listener(event);
+      } });
       return () => undefined;
     },
     whenSubscribed: async () => undefined,
@@ -418,7 +445,8 @@ vi.mock('@/sync/transport/live-connection', () => ({
       deck.reconnects += 1;
     },
   }),
-}));
+  };
+});
 
 vi.mock('@/sync/transport/room-view-client', async () => ({
   isRoomViewTimeoutError: (
@@ -542,10 +570,13 @@ export function roomWatch() {
 export const quiet = () => act(() => new Promise((resolve) => setTimeout(resolve, 1_100)));
 
 
+const mountedDecks = new Set<ReactTestRenderer>();
+
 export async function mountDeck(): Promise<ReactTestRenderer> {
   let renderer!: ReactTestRenderer;
   await act(async () => {
     renderer = create(React.createElement(BuzzChannels));
+    mountedDecks.add(renderer);
   });
   await vi.waitFor(() => expect(() => roomWatch()).not.toThrow());
   await quiet();
@@ -553,7 +584,11 @@ export async function mountDeck(): Promise<ReactTestRenderer> {
 }
 
 
-beforeEach(() => {
+beforeEach(async () => {
+  await act(async () => {
+    resetChatListStoresForTest();
+    resetClientState();
+  });
   resetInitialLandingForTests();
   deck.pathname = '/beeline/channels';
   deck.initialUrl = null;
@@ -567,8 +602,6 @@ beforeEach(() => {
   vi.mocked(loadPendingInvite).mockClear();
   transitions.held = false;
   transitions.pending = [];
-  // A case that never unmounts its deck must not hand its live list to the next.
-  resetChatListStoresForTest();
   vi.mocked(mobileSurfaceCache.read).mockReset().mockResolvedValue(null);
   resetRoomCornerStore();
   deck.appState = 'active';
@@ -601,7 +634,11 @@ beforeEach(() => {
 });
 
 
-afterEach(() => {
+afterEach(async () => {
+  await act(async () => {
+    for (const renderer of mountedDecks) renderer.unmount();
+    mountedDecks.clear();
+  });
   vi.unstubAllGlobals();
   deck.focusEffect = null;
   deck.focusEffects.clear();

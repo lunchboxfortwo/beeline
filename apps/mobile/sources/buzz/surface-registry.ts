@@ -8,6 +8,12 @@ type Observer = (address: SurfaceCacheAddress, value: unknown, stamp: number) =>
 const MAX_HOT_SURFACES = 128;
 const MAX_INACTIVE_ROOMS = 3;
 type DeferWrite = (key: string, work: () => Promise<void>) => Promise<void>;
+type Records = {
+  store(address: SurfaceCacheAddress, value: unknown, stamp: number): unknown;
+  snapshot(address: SurfaceCacheAddress, value: unknown): unknown;
+  subscribe(listener: (scope: string, roomId: string) => void): () => void;
+  matches(address: SurfaceCacheAddress, scope: string, roomId: string): boolean;
+};
 
 /** Validated projections shared by mounted routes and restored from durable storage on a miss. */
 export class SurfaceRegistry {
@@ -27,7 +33,18 @@ export class SurfaceRegistry {
     private readonly normalize: (value: unknown) => unknown = (value) => value,
     private readonly select: Select = (_address, value) => value,
     private readonly deferWrite: DeferWrite = (_key, work) => work(),
-  ) {}
+    private readonly records?: Records,
+  ) {
+    records?.subscribe((scope, roomId) => {
+      for (const key of [...this.values.keys()]) {
+        const parts = JSON.parse(key) as [string, string, string, string];
+        const address = { relayOrigin: parts[1], viewerPubkey: parts[2], endpoint: parts[3] };
+        if (!records.matches(address, scope, roomId)) continue;
+        this.selected.delete(key);
+        this.notify(key);
+      }
+    });
+  }
 
   peek<T>(address: SurfaceCacheAddress, guard: Guard<T>): T | null {
     const key = surfaceCacheKey(address);
@@ -64,7 +81,7 @@ export class SurfaceRegistry {
   private projection(key: string, address: SurfaceCacheAddress, value: unknown): unknown {
     const memo = this.selected.get(key);
     if (memo && memo.value === value) return memo.projection;
-    const projection = this.select(address, value, this.stamps.get(key) ?? 0);
+    const projection = this.select(address, this.records?.snapshot(address, value) ?? value, this.stamps.get(key) ?? 0);
     this.selected.set(key, { value, projection });
     return projection;
   }
@@ -95,6 +112,7 @@ export class SurfaceRegistry {
   }
 
   private remember(key: string, address: SurfaceCacheAddress, value: unknown, stamp: number): void {
+    value = this.records?.store(address, value, stamp) ?? value;
     this.values.delete(key);
     this.values.set(key, value);
     this.stamps.set(key, stamp);

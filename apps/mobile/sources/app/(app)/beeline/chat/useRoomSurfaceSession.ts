@@ -33,7 +33,7 @@ import {
   reconcileRoomTurnDelta,
   type ChatDisplayMessage,
 } from '@/buzz/room-view-presentation';
-import { offerRoomTurns, roomTurns, stampRoomMessageRows, useRoomTurnRecords, writeRoomMessage, writeRoomTurn } from '@/buzz/room-message-records';
+import { selectRoomViewRecords, useRoomTurnRecords, writeRoomMessage } from '@/buzz/room-message-records';
 import { saveActiveCommunityId, saveLastViewedChannel } from '@/buzz/community-storage';
 import { ReadCursorAdvancer } from '@/buzz/read-cursor-advance';
 import { liveDraftRowId } from '@/buzz/draft-settle';
@@ -303,10 +303,7 @@ export function useRoomSurfaceSession({
       const view = identityRecordScope
         ? new IdentitySelection(identityRecordScope, roomReadStampRef.current).roomView(roomSurface)
         : roomSurface;
-      stampRoomMessageRows(view.messages, roomReadStampRef.current);
-      return turnRecords === view.latestAgentTurns ||
-        (turnRecords.length === 0 && view.latestAgentTurns.length === 0)
-        ? view : { ...view, latestAgentTurns: turnRecords };
+      return reconcileRoomView(roomSurface, selectRoomViewRecords(identityRecordScope, view));
     },
     [roomSurface, identityRecordScope, identityVersion, turnRecords],
   );

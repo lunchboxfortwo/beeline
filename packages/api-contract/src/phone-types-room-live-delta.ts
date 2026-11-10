@@ -192,18 +192,15 @@ export type ChatListItem = {
   readonly agentsOffline?: boolean;
   /** Hidden from the deck for this viewer until explicit reopen or newer incoming activity. */
   readonly closed?: boolean;
-  readonly latestMessage?: {
-    readonly id: string;
-    readonly text: string;
-    readonly createdAt: number;
-    readonly author: RoomViewIdentity;
-    /** Present so attachment-only latest messages remain visible in compact previews. */
-    readonly attachments?: readonly AttachmentReference[];
+  /** Complete latest row on current servers; legacy servers supplied only text/author/time. */
+  readonly latestMessage?: Pick<RoomViewMessage, 'id' | 'text' | 'createdAt' | 'author'> & Partial<RoomViewMessage> & {
     /** The server resolved the viewer as an exact tag on this message. */
     readonly mentionsViewer?: true;
   };
   /** Absent when the server omitted it: the count is unknown, never zero. */
   readonly memberCount?: number;
+  /** This Room's own turns; agentState also includes child corners. */
+  readonly latestAgentTurns?: readonly RoomViewAgentTurn[];
   /**
    * Unarchived corners on this Room. Absent when the server omitted it: the
    * deck row then shows neither the count nor its expansion toggle, and the

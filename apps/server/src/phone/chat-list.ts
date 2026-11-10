@@ -11,6 +11,12 @@ import { RoomRow, MessageRow } from './types.js';
 import { reviveDates, roomHeader } from './read-projection.js';
 import { phoneOptionalEnrichment } from './optional-enrichment.js';
 import { unix } from './values.js';
+import { workingTurnFreshSql } from '../turn-ownership.js';
+import { phoneProjectAgentTurns } from './message-enrichment.js';
+import type { AgentTurnRow } from './types.js';
+import { projectedMessage, reactionIdentitiesSql } from './read-projection.js';
+import { roomMessageTagsSql } from '../room-router-read.js';
+import { turnRootMessageSql } from '../agent-command.js';
 
 
 
@@ -29,16 +35,8 @@ import { unix } from './values.js';
         voice_call: ChatListItem['voiceCall'] | null;
         member_count: string;
         leave_deletes_room: boolean;
-        latest_id: string | null;
-        latest_text: string | null;
-        latest_attachments: MessageRow['attachments'] | null;
-        latest_created_at: Date | null;
-        latest_author_id: string | null;
-        latest_author_kind: 'human' | 'agent' | null;
-        latest_author_name: string | null;
-        latest_author_handle: string | null;
-        latest_author_avatar: string | null;
-        latest_author_face: string | null;
+        latest_row: MessageRow | null;
+        turns: AgentTurnRow[];
         latest_tags_viewer: boolean;
         attention_actor_name: string | null;
         peer_id: string | null;
@@ -77,10 +75,23 @@ import { unix } from './values.js';
           WHERE other_room.room_id=COALESCE(r.parent_id,r.id) AND other_room.removed_at IS NULL
             AND other_room.identity_id<>$2
         ) leave_deletes_room,
-        lm.id latest_id,lm.text latest_text,lm.attachments latest_attachments,lm.created_at latest_created_at,lm.author_id latest_author_id,
+        CASE WHEN lm.id IS NOT NULL THEN to_jsonb(lm) || jsonb_build_object(
+          'author_kind',li.kind,'author_name',li.name,'author_handle',beeline_workspace_handle(li.id,r.workspace_id),
+          'author_avatar',li.avatar,'author_face',li.face_id,
+          'tagged_ids',${roomMessageTagsSql('lm')},
+          'reaction_identities',${reactionIdentitiesSql('lm')},
+          'bookmarked',EXISTS(SELECT 1 FROM message_bookmarks bookmark WHERE bookmark.message_id=lm.id AND bookmark.identity_id=$2),
+          'feedback_reported',EXISTS(SELECT 1 FROM feedback_items report WHERE report.trigger_message_id=lm.id AND report.source_kind='human')
+        ) END latest_row,
+        COALESCE((SELECT jsonb_agg(to_jsonb(turn) || jsonb_build_object('requested_by',requester.id)) FROM (
+          SELECT DISTINCT ON(agent_id) * FROM agent_turns
+          WHERE room_id=r.id AND (status<>'working' OR ${workingTurnFreshSql('agent_turns')})
+          ORDER BY agent_id,(status='working') DESC,created_at DESC,request_id DESC
+        ) turn
+        LEFT JOIN messages trigger ON trigger.id=${turnRootMessageSql('turn')}
+        LEFT JOIN identities requester ON requester.id=trigger.author_id AND requester.kind='human'),'[]'::jsonb) turns,
         COALESCE(lm.author_id<>$2 AND ${tagsKnownIdentitySql('lm', '$2',
           '(SELECT handle FROM identities WHERE id=$2)', '(SELECT kind FROM identities WHERE id=$2)')},false) latest_tags_viewer,
-        li.kind latest_author_kind,li.name latest_author_name,beeline_workspace_handle(li.id,r.workspace_id) latest_author_handle,li.avatar latest_author_avatar,li.face_id latest_author_face,
         ${roomAttentionActorSql('r')} attention_actor_name,
         peer.id peer_id,peer.kind peer_kind,peer.name peer_name,beeline_workspace_handle(peer.id,r.workspace_id) peer_handle,peer.avatar peer_avatar,peer.face_id peer_face,
         NULL::jsonb peer_presence_body,NULL::timestamptz peer_presence_updated_at,
@@ -104,6 +115,7 @@ import { unix } from './values.js';
       LEFT JOIN LATERAL (
         SELECT ${messageColumns('message')} FROM messages message
         WHERE message.room_id=r.id AND ${visibleChatMessageSql('message')}
+          AND (message.card_type IS DISTINCT FROM 'repository-onboarding' OR message.card->>'requesterId'=$2)
         ORDER BY created_at DESC,id DESC LIMIT 1
       ) lm ON true
       LEFT JOIN identities li ON li.id=lm.author_id
@@ -125,7 +137,7 @@ import { unix } from './values.js';
     if (!current) return null;
     reviveDates(current, ['updated_at']);
     const rooms = { rows: result.rows[0]!.room_rows.map((row) =>
-      reviveDates(row, ['created_at', 'updated_at', 'archived_at', 'latest_created_at',
+      reviveDates(row, ['created_at', 'updated_at', 'archived_at',
         'peer_presence_updated_at', 'peer_activity_at'])) };
     const roomIds = rooms.rows.map((room) => room.id);
     const enrichment = await ctx.optionalEnrichment(
@@ -241,52 +253,14 @@ import { unix } from './values.js';
           ...(row.agents_offline ? { agentsOffline: true } : {}),
           ...(row.closed ? { closed: true } : {}),
           memberCount: Number(row.member_count),
+          latestAgentTurns: phoneProjectAgentTurns(ctx, (row.turns ?? []).map(turn => reviveDates(turn, ['started_at', 'created_at']))),
           ...(countsByRoom
             ? (countsByRoom.get(row.id) ?? { cornerCount: 0, waitingCornerCount: 0, mineCornerCount: 0 })
             : {}),
-          ...(row.latest_id &&
-          row.latest_created_at &&
-          row.latest_author_id &&
-          row.latest_author_kind &&
-          row.latest_author_name
-            ? {
-                latestMessage: {
-                  id: row.latest_id,
-                  text: row.latest_text ?? '',
-                  createdAt: unix(row.latest_created_at),
-                  ...(row.latest_attachments?.length
-                    ? {
-                        attachments: (
-                          row.latest_attachments as NonNullable<RoomViewMessage['attachments']>
-                        ).map((attachment) => ({
-                          ...attachment,
-                          url: attachment.url.startsWith('/')
-                            ? `${ctx.publicOrigin}${attachment.url}`
-                            : attachment.url,
-                          ...(attachment.previewUrl?.startsWith('/')
-                            ? { previewUrl: `${ctx.publicOrigin}${attachment.previewUrl}` }
-                            : {}),
-                          ...(attachment.thumbnailUrl?.startsWith('/')
-                            ? { thumbnailUrl: `${ctx.publicOrigin}${attachment.thumbnailUrl}` }
-                            : {}),
-                        })),
-                      }
-                    : {}),
-                  author: identity(
-                    {
-                      id: row.latest_author_id,
-                      kind: row.latest_author_kind,
-                      name: row.latest_author_name,
-                      handle: row.latest_author_handle,
-                      avatar: row.latest_author_avatar,
-                      face_id: row.latest_author_face,
-                    },
-                    ctx.publicOrigin,
-                  ),
-                  ...(row.latest_tags_viewer ? { mentionsViewer: true as const } : {}),
-                },
-              }
-            : {}),
+          ...(row.latest_row ? { latestMessage: {
+            ...projectedMessage(reviveDates(row.latest_row, ['created_at', 'deleted_at']), ctx.publicOrigin, viewerId),
+            ...(row.latest_tags_viewer ? { mentionsViewer: true as const } : {}),
+          } } : {}),
           ...(row.peer_id && row.peer_kind && row.peer_name
             ? {
                 directMessage: {

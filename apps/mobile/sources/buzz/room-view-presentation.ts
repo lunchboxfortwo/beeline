@@ -72,41 +72,11 @@ function shareResponseArrayByKey<T>(
     : shared;
 }
 
-function messageTimeMs(message: RoomViewMessage): number {
-  return message.createdAtMs ?? message.createdAt * 1_000;
-}
-
-/** Keep a committed live delta that a slightly stale full snapshot has not
- * caught yet. The next window remains the authority for everything else. */
-function mergeNewerCommittedMessages(
-  previous: readonly RoomViewMessage[],
-  next: readonly RoomViewMessage[],
-): readonly RoomViewMessage[] {
-  if (previous.length === 0) return next;
-  const heldById = new Map(previous.map((message) => [message.id, message]));
-  next = next.map((message) => {
-    const held = heldById.get(message.id);
-    return held && (held.version ?? 0) > (message.version ?? 0) ? held : message;
-  });
-  const nextIds = new Set(next.map((message) => message.id));
-  const nextNewest = next.reduce((newest, message) => Math.max(newest, messageTimeMs(message)), 0);
-  const extras = previous.filter(
-    (message) => !nextIds.has(message.id) && messageTimeMs(message) >= nextNewest,
-  );
-  if (extras.length === 0) return next;
-  return [...next, ...extras]
-    .sort(
-      (left, right) =>
-        messageTimeMs(left) - messageTimeMs(right) || left.id.localeCompare(right.id),
-    )
-    .slice(-ROOM_VIEW_MESSAGE_LIMIT);
-}
-
 export function reconcileRoomView(previous: RoomView | null, next: RoomView): RoomView {
   if (!previous) return next;
   const messages = shareResponseArrayByKey(
     previous.messages,
-    mergeNewerCommittedMessages(previous.messages, next.messages),
+    next.messages,
     (message) => message.id,
   );
   const members = shareResponseArrayByKey(

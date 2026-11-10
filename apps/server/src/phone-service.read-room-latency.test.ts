@@ -652,6 +652,36 @@ describe('PhoneService.readRoom latency', () => {
     expect(deltas.has(outsider)).toBe(false);
   });
 
+  it('returns the same complete latest message and Room turns to the deck and transcript', async () => {
+    const phone = new PhoneService(database, 'https://server.usebeeline.app');
+    const [deck, room] = await Promise.all([phone.readChats(WORKSPACE, VIEWER), phone.readRoom(ROOM, VIEWER)]);
+    const chat = deck!.chats.find(item => item.room.id === ROOM)!;
+    expect(chat.latestMessage).toEqual(room!.messages.find(message => message.id === chat.latestMessage?.id));
+    expect(chat.latestAgentTurns).toEqual(room!.latestAgentTurns);
+  });
+
+  it('keeps another viewer’s repository setup card out of complete deck message records', async () => {
+    const other = 'f'.repeat(64), id = 'e'.repeat(64);
+    const card = { id, roomId: ROOM, agentId: '0'.repeat(64), requesterId: other, kind: 'repository',
+      state: 'no_repo_linked', status: 'open', canLink: false, defaultName: 'Private setup', repositories: [], starters: [] };
+    await database.query(`INSERT INTO identities(id,kind,name,handle) VALUES($1,'human','Private reviewer','private-reviewer')`, [other]);
+    await database.query(`INSERT INTO memberships(workspace_id,room_id,identity_id,role) VALUES($1,NULL,$2,'member'),($1,$3,$2,'member')`, [WORKSPACE, other, ROOM]);
+    await database.query(`INSERT INTO messages(id,room_id,author_id,text,presentation,card_type,card,created_at)
+      VALUES($1,$2,$3,'Private setup','card','repository-onboarding',$4,now()+interval '1 hour')`, [id, ROOM, '0'.repeat(64), card]);
+    try {
+      const phone = new PhoneService(database, 'https://server.usebeeline.app');
+      const deck = await phone.readChats(WORKSPACE, VIEWER);
+      expect(deck!.chats.find(item => item.room.id === ROOM)!.latestMessage?.id).not.toBe(id);
+      expect((await phone.readRoom(ROOM, VIEWER))!.messages.some(message => message.id === id)).toBe(false);
+      const own = await phone.readChats(WORKSPACE, other);
+      expect(own!.chats.find(item => item.room.id === ROOM)!.latestMessage?.onboarding?.requesterId).toBe(other);
+    } finally {
+      await database.query(`DELETE FROM messages WHERE id=$1`, [id]);
+      await database.query(`DELETE FROM memberships WHERE identity_id=$1`, [other]);
+      await database.query(`DELETE FROM identities WHERE id=$1`, [other]);
+    }
+  });
+
   it('carries the next visible deck preview when the latest message is deleted', async () => {
     await database.query(`UPDATE messages SET deleted_at=now() WHERE id='reply-message'`);
     try {

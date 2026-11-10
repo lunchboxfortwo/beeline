@@ -24,7 +24,7 @@ import {
   keepUnavailableChatFacts,
 } from './chat-list-delta';
 import { applyChatListCorners, cornerStoreClock, getRoomCornerSummary } from './room-corner-store';
-import { currentSurfaceStamp } from './surface-clock';
+import { currentSurfaceStamp, nextSurfaceStamp } from './surface-clock';
 import { observeRoomLiveState } from './room-live-state';
 
 observeRoomLiveState(mobileSurfaceCache, () => peekBuzzViewerContext());
@@ -78,7 +78,6 @@ namespace ChatReads {
     private watchGeneration = 0;
     private watched = new Set<string>();
     private reading = false;
-    private readStamp = 0;
     private deltasDuringRead: Parameters<typeof applyChatListDelta>[1][] = [];
     private missed = false;
     private confirmedRead = false;
@@ -100,7 +99,7 @@ namespace ChatReads {
 
       this.missed = false;
       this.reading = true;
-      this.readStamp = currentSurfaceStamp();
+      const readStamp = nextSurfaceStamp();
       this.deltasDuringRead = [];
       const cornerClock = cornerStoreClock();
 
@@ -120,7 +119,7 @@ namespace ChatReads {
           withoutCornerFacts(keepUnavailableChatFacts(held, read)),
         );
         this.confirmedRead = true;
-        mobileSurfaceCache.publish(this.address, value, isChatListView, this.readStamp);
+        mobileSurfaceCache.publish(this.address, value, isChatListView, readStamp);
         void mobileSurfaceCache.persist(this.address, this.saved(value), isChatListView);
         for (const consumer of this.consumers) consumer.onRead?.();
         if (chatWatchFiltersKey(value.watchFilters) !== this.watchKey)

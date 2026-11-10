@@ -1,3 +1,5 @@
+import { offerRoomView, selectRoomViewRecords, writeRoomMessage } from './room-message-records';
+import { currentSurfaceStamp } from './surface-clock';
 import { describe, expect, it } from 'vitest';
 import type { RoomView, RoomViewMessage } from '@beeline/buzz-client';
 import { buildTurnActivity } from './activity-timeline';
@@ -164,10 +166,14 @@ describe('Room view presentation', () => {
       author: { pubkey: 'human', kind: 'human', name: 'Captain' },
       presentation: 'message',
     };
-    const openRoom = reconcileRoomMessageDelta({ ...emptyRoom(), messages: [older] }, newest);
+    const scope = JSON.stringify(['https://stale-read.test', 'viewer']);
     const staleRead = { ...emptyRoom(), messages: [older] };
+    offerRoomView(scope, staleRead, currentSurfaceStamp());
+    const readStarted = currentSurfaceStamp();
+    writeRoomMessage(scope, staleRead.room.id, newest);
+    offerRoomView(scope, staleRead, readStarted);
 
-    expect(reconcileRoomView(openRoom, staleRead).messages.map((message) => message.id)).toEqual([
+    expect(selectRoomViewRecords(scope, staleRead).messages.map((message) => message.id)).toEqual([
       'older',
       'newest',
     ]);

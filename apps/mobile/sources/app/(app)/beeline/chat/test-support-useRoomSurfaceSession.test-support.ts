@@ -6,6 +6,7 @@ import { observeRoomLiveState } from '@/buzz/room-live-state';
 import { publishPhoneLiveEvent } from '@/sync/transport/phone-live-events';
 
 import { roomTransitionWork } from '@/buzz/room-transition-work';
+import { resetClientState } from '@/sync/client-reset';
 
 // @ts-expect-error react-test-renderer has no declarations in this workspace.
 import { act, create, type ReactTestRenderer } from 'react-test-renderer';
@@ -277,11 +278,32 @@ vi.mock('@/buzz/community-storage', () => ({
 }));
 
 
-vi.mock('@/buzz/surface-storage', () => ({
+vi.mock('@/buzz/surface-storage', async () => {
+  const { offerRoomView, selectRoomViewRecords, roomSurfaceRecords } = await import('@/buzz/room-message-records');
+  const { reconcileRoomView } = await import('@/buzz/room-view-presentation');
+  const { nextSurfaceStamp } = await import('@/buzz/surface-clock');
+  let selected: RoomView | null = null;
+  let installed: RoomView | null = null;
+  let installing = false;
+  roomSurfaceRecords.subscribe(() => controls.cacheListeners.forEach(listener => listener()));
+  const { identityScope } = await import('@/buzz/identity-records');
+  const cached = () => {
+    if (!controls.cached) return null;
+    const scope = identityScope('https://relay.test', controls.viewerPubkey ?? 'viewer');
+    if (!installing && installed !== controls.cached) {
+      installing = true;
+      installed = roomSurfaceRecords.store({ relayOrigin: 'https://relay.test', viewerPubkey: controls.viewerPubkey ?? 'viewer', endpoint: `/room/${controls.cached.room.id}` }, controls.cached, installed ? nextSurfaceStamp() : 0) as RoomView;
+      controls.cached = installed;
+      installing = false;
+    }
+    selected = reconcileRoomView(selected, selectRoomViewRecords(scope, controls.cached));
+    return selected;
+  };
+  return ({
   restoreStoredSurface: (path: string) => path.startsWith('/room/') ? controls.cached : null,
   mobileSurfaceCache: {
-    peek: vi.fn((path: string | { endpoint: string }) => ((typeof path === 'string' ? path : path.endpoint).startsWith('/room/') ? controls.cached : null)),
-    read: vi.fn(async () => controls.cached),
+    peek: vi.fn((path: string | { endpoint: string }) => ((typeof path === 'string' ? path : path.endpoint).startsWith('/room/') ? cached() : null)),
+    read: vi.fn(async () => cached()),
     write: vi.fn(async (_address: unknown, view: RoomView) => {
       controls.cached = view;
       controls.cacheListeners.forEach(listener => listener());
@@ -318,7 +340,8 @@ vi.mock('@/buzz/surface-storage', () => ({
     remove: vi.fn(async () => undefined),
     get: controls.outboxGet,
   })),
-}));
+});
+});
 
 
 vi.mock('@/buzz/chat-list-store', () => ({
@@ -540,6 +563,7 @@ afterAll(() => { stopRoomLiveState(); vi.restoreAllMocks(); });
 
 
 beforeEach(() => {
+  resetClientState();
   controls.routeChannelId = 'room-a';
   controls.scopeProbe = null;
   controls.routerMode = 'legacy';

@@ -18,7 +18,7 @@ import { visibleMessageSql, visibleChatMessageSql, viewerReadCursorSql } from '.
 import { readStarPrompt } from '../github-star-prompt.js';
 import type { PhoneContext } from './context.js';
 import { phoneDecorateCornerOpenCards } from './message-decoration.js';
-import { projectedMessage, decorateAttachments, reactionIdentitiesSql } from './read-projection.js';
+import { projectedMessage, decorateAttachments, reactionIdentitiesSql, reviveDates } from './read-projection.js';
 import { phoneAttachmentFacts, phoneProjectAgentTurns, phoneProjectPendingAgentCommands } from './message-enrichment.js';
 import { messageId, unix } from './values.js';
 import { AgentTurnRow, MessageRow, deckCornerSummary } from './types.js';
@@ -128,17 +128,7 @@ import { phoneListRoomWorkflowRuns } from './schedules.js';
     const row = (
       await database.query<MessageRow & {
         authorized_viewers: string[];
-        deck_latest_id: string | null;
-        deck_latest_text: string | null;
-        deck_latest_attachments: MessageRow['attachments'] | null;
-        deck_latest_created_at: Date | null;
-        deck_latest_author_id: string | null;
-        deck_latest_author_kind: 'human' | 'agent' | null;
-        deck_latest_author_name: string | null;
-        deck_latest_author_handle: string | null;
-        deck_latest_author_avatar: string | null;
-        deck_latest_author_face: string | null;
-        deck_latest_tagged_ids: string[] | null;
+        deck_latest_row: MessageRow | null;
       }>(
         `WITH authorized AS (
            SELECT member.identity_id FROM rooms room
@@ -155,18 +145,13 @@ import { phoneListRoomWorkflowRuns } from './schedules.js';
            ${reactionIdentitiesSql('message')} reaction_identities,
            ${taggedIdentityIdsSql('message')} tagged_ids,
            ARRAY(SELECT identity_id FROM authorized) authorized_viewers,
-           latest.id deck_latest_id,latest.text deck_latest_text,
-           latest.attachments deck_latest_attachments,
-           latest.created_at deck_latest_created_at,
-           preview_author.id deck_latest_author_id,
-           preview_author.kind deck_latest_author_kind,
-           preview_author.name deck_latest_author_name,
-           beeline_room_handle(preview_author.id,latest.room_id) deck_latest_author_handle,
-           preview_author.avatar deck_latest_author_avatar,
-           preview_author.face_id deck_latest_author_face,
-           CASE WHEN message.deleted_at IS NOT NULL
-             THEN ${taggedIdentityIdsSql('latest')}
-             ELSE '{}'::text[] END deck_latest_tagged_ids
+           CASE WHEN latest.id IS NOT NULL THEN to_jsonb(latest) || jsonb_build_object(
+             'author_kind',preview_author.kind,'author_name',preview_author.name,
+             'author_handle',beeline_room_handle(preview_author.id,latest.room_id),
+             'author_avatar',preview_author.avatar,'author_face',preview_author.face_id,
+             'tagged_ids',${taggedIdentityIdsSql('latest')},
+             'reaction_identities',${reactionIdentitiesSql('latest')}
+           ) END deck_latest_row
          FROM rooms room
          JOIN messages message ON message.room_id=room.id AND message.id=$2
          JOIN identities author ON author.id=message.author_id
@@ -200,35 +185,12 @@ import { phoneListRoomWorkflowRuns } from './schedules.js';
       projectedMessage(row, ctx.publicOrigin),
     ]))[0]!;
     const facts = await ctx.attachmentFacts([base]);
-    const preview: ChatListItem['latestMessage'] | null =
-      row.deck_latest_id && row.deck_latest_created_at && row.deck_latest_author_id &&
-      row.deck_latest_author_kind && row.deck_latest_author_name
-        ? {
-            id: row.deck_latest_id,
-            text: row.deck_latest_text ?? '',
-            createdAt: unix(row.deck_latest_created_at),
-            author: identity({
-              id: row.deck_latest_author_id, kind: row.deck_latest_author_kind,
-              name: row.deck_latest_author_name, handle: row.deck_latest_author_handle,
-              avatar: row.deck_latest_author_avatar, face_id: row.deck_latest_author_face,
-            }, ctx.publicOrigin),
-            ...(row.deck_latest_attachments?.length ? {
-              attachments: (row.deck_latest_attachments as NonNullable<RoomViewMessage['attachments']>)
-                .map((attachment) => ({
-                ...attachment,
-                url: attachment.url.startsWith('/')
-                  ? `${ctx.publicOrigin}${attachment.url}` : attachment.url,
-                ...(attachment.previewUrl?.startsWith('/')
-                  ? { previewUrl: `${ctx.publicOrigin}${attachment.previewUrl}` } : {}),
-                ...(attachment.thumbnailUrl?.startsWith('/')
-                  ? { thumbnailUrl: `${ctx.publicOrigin}${attachment.thumbnailUrl}` } : {}),
-                })),
-            } : {}),
-          }
-        : null;
     for (const viewer of row.authorized_viewers) {
       if (row.card_type === 'repository-onboarding' &&
         (readRepositoryOnboardingCard(row.card)?.requesterId !== viewer)) continue;
+      const preview = row.deck_latest_row && (row.deck_latest_row.card_type !== 'repository-onboarding' ||
+        readRepositoryOnboardingCard(row.deck_latest_row.card)?.requesterId === viewer)
+        ? projectedMessage(reviveDates(row.deck_latest_row, ['created_at', 'deleted_at']), ctx.publicOrigin, viewer) : null;
       const message = { ...projectedMessage(row, ctx.publicOrigin, viewer),
         ...(base.daemonFact ? { daemonFact: base.daemonFact } : {}) };
       deltas.set(viewer, {
@@ -237,7 +199,7 @@ import { phoneListRoomWorkflowRuns } from './schedules.js';
         ...(typeof row.version === 'number' ? { version: row.version } : {}),
         ...(row.deleted_at ? { deckPreview: preview ? {
           ...preview,
-          ...(row.deck_latest_tagged_ids?.includes(viewer) ? { mentionsViewer: true as const } : {}),
+          ...(row.deck_latest_row?.tagged_ids?.includes(viewer) ? { mentionsViewer: true as const } : {}),
         } : null } : {}),
       });
     }

@@ -559,7 +559,9 @@ export function readLatest(value: unknown): NonNullable<ChatListItem['latestMess
   ) {
     return null;
   }
+  const message = item.presentation === undefined ? null : readRoomViewMessage(item);
   return {
+    ...message,
     id: item.id,
     text: item.text,
     createdAt: item.createdAt,
@@ -670,6 +672,7 @@ export function readChat(value: unknown): ChatListItem | null {
     ...field('closed', typeof item.closed === 'boolean' ? item.closed : undefined),
     ...field('voiceCall', readVoiceCall(item.voiceCall)),
     ...field('latestMessage', readLatest(item.latestMessage)),
+    ...field('latestAgentTurns', readList(item.latestAgentTurns, readAgentTurn)),
     ...field(
       'repositoryName',
       typeof item.repositoryName === 'string' ? item.repositoryName : undefined,
