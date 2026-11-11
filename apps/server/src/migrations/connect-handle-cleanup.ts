@@ -24,11 +24,11 @@ export async function cleanupConnectHandles(database: SqlDatabase) {
     if (target) {
       if (target.owner_id !== OWNER || target.name !== 'Milo' || !['bruin','milo'].includes(target.handle))
         throw new Error('Milo cleanup target changed; review before repairing');
+      await db.query(`INSERT INTO identity_handle_counters(name,n) VALUES('milo',1)
+        ON CONFLICT(name) DO UPDATE SET n=greatest(identity_handle_counters.n,excluded.n)`);
       if ((await db.query(`SELECT 1 FROM workspace_handles WHERE workspace_id=$1 AND handle='milo' AND identity_id<>$2
         UNION ALL SELECT 1 FROM identities WHERE kind='human' AND lower(handle)='milo'`, [WORKSPACE,MILO])).rowCount)
         throw new Error('Milo still has an active handle collision; review before repairing');
-      await db.query(`INSERT INTO identity_handle_counters(name,n) VALUES('milo',1)
-        ON CONFLICT(name) DO UPDATE SET n=greatest(identity_handle_counters.n,excluded.n)`);
       await db.query(`UPDATE workspace_handles SET handle='milo' WHERE workspace_id=$1 AND identity_id=$2 AND handle<>'milo'`, [WORKSPACE,MILO]);
       await db.query(`UPDATE identities SET workspace_handle_base='milo',updated_at=now()
         WHERE id=$1 AND workspace_handle_base IS DISTINCT FROM 'milo'`, [MILO]);
