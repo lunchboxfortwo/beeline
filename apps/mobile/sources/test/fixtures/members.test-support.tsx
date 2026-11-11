@@ -24,6 +24,9 @@ export { profileLane };
 
 
 
+vi.mock('tamagui', async () => (await import('@/ui/screens/transcript/grammar-hosts.test-support')).tamaguiHosts());
+vi.mock('lucide-react-native', async () => (await import('@/ui/screens/transcript/grammar-hosts.test-support')).lucideHosts());
+
 vi.mock('@/utils/responsive', async (importOriginal) => ({ ...(await importOriginal<typeof import('@/utils/responsive')>()), useIsDesktop: () => false }));
 
 vi.mock('@expo/vector-icons/Ionicons', async () => { const R = await import('react'); return { default: (props: any) => R.createElement('Ionicons', props) }; });
@@ -191,6 +194,8 @@ export { client };
 const phoneOperation = vi.hoisted(() =>
   vi.fn(async (name: string, input: any): Promise<any> => {
     if (['addWorkspaceMember', 'removeWorkspaceMember'].includes(name)) return;
+    // A direct profile open reads authority and detail in one answer.
+    if (name === 'readAgentProfile') return { workspace: state.workspace, agent: state.agent };
     if (name === 'updateAgentWake') {
       state.agent = { ...state.agent, wake: { url: input.url || null, keySet: Boolean(input.key) } };
       return state.agent;
@@ -218,7 +223,8 @@ vi.mock('@/sync/transport/monolith-operation', () => ({ monolithPhoneOperation: 
 
 
 vi.mock('expo-router', () => ({
-  router: { back: vi.fn(), push: vi.fn(), replace: vi.fn(), navigate: vi.fn() },
+  Redirect: () => null,
+  router: { back: vi.fn(), push: vi.fn(), replace: vi.fn(), navigate: vi.fn(), canGoBack: () => true },
   useLocalSearchParams: () => routeParams,
   useNavigation: () => ({
     addListener: (_event: string, callback: (event: any) => void) => {
@@ -403,13 +409,6 @@ vi.mock('@/components/buzz/SurfaceGlyphLoader', async () => {
   const ReactModule = await import('react');
   return {
     SurfaceGlyphLoader: (props: any) => ReactModule.createElement('SurfaceGlyphLoader', props),
-  };
-});
-
-vi.mock('@/components/buzz/MemberPickerSheet', async () => {
-  const ReactModule = await import('react');
-  return {
-    MemberPickerSheet: (props: any) => ReactModule.createElement('MemberPickerSheet', props),
   };
 });
 
@@ -698,9 +697,6 @@ beforeEach(() => {
 });
 
 
-export function sheet(renderer: ReactTestRenderer) {
-  return renderer.root.findByType('MemberPickerSheet' as any);
-}
 export function fixtureScope1() {
 
 

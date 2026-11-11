@@ -3,7 +3,8 @@ import Ionicons from '@expo/vector-icons/Ionicons';
 import { LedgerUntaggedHint } from '@/components/buzz/Ledger';
 import { TurnSettledLine } from '@/components/buzz/TurnProgressLine';
 import React, { useCallback, useEffect, useMemo, useRef } from 'react';
-import { Pressable, Text, View } from 'react-native';
+import { Text, View } from 'react-native';
+import { ContentTarget } from '@/components/buzz/IndexRow';
 import { StyleSheet } from 'react-native-unistyles';
 import { agentActivityReplyExcerpt, canBeginReply } from '@/buzz/message-reply';
 import { resolvePendingAgentDisplay } from '@/buzz/agent-display';
@@ -33,16 +34,17 @@ import { parseCornerProposal } from '@/buzz/corner-proposal';
 import { LedgerEntry, LedgerGhostLine, LedgerSystemLine, LedgerSteer, type LedgerByline } from '@/components/buzz/Ledger';
 import { NewMessageMaterialize } from '@/components/buzz/MonoHull';
 import { TranscriptCard } from '@/components/buzz/TranscriptCard';
+import { TranscriptLine } from '@/ui/screens/transcript/TranscriptLine';
+import { RequestFrame } from '@/ui/screens/transcript/cards/RequestCard';
 import { forwardedMessageParts } from '@/buzz/message-forward';
 import { agentMessageJsonMarkdown } from '@/buzz/agent-message-json';
-import { OrdinaryLedgerMessageProps, agentBylineLabel, SwipeToReply, ConnectorReceiptCard, AttachmentCard, ViewerContextReference } from './RoomMessageVariants-attachment-card';
+import { OrdinaryLedgerMessageProps, SwipeToReply, ConnectorReceiptCard, AttachmentCard, ViewerContextReference } from './RoomMessageVariants-attachment-card';
 
 
 
 export const OrdinaryLedgerMessage = React.memo(function OrdinaryLedgerMessage({
   message,
   agent,
-  agentModel,
   participantsHydrated,
   personName,
   personAvatar,
@@ -135,17 +137,14 @@ export const OrdinaryLedgerMessage = React.memo(function OrdinaryLedgerMessage({
       (message.pubkey ? fallbackMemberName(message.pubkey) : 'SOMEONE'));
   const markSeed = message.pubkey ?? (isSelfSteer ? viewerPubkey || 'self' : 'unknown-person');
   const byline: LedgerByline | undefined =
+    // The same rule for people and agents: follow-ups sit under the sender line.
     continuedRun &&
-    !isAgent &&
     !announcementFeed &&
     !message.bookmarked &&
     !message.feedbackReported
       ? undefined
       : {
-          // The viewer is named like every other speaker. Brass on the name
-          // (`isViewer`, drawn in Ledger.tsx) is the ONE thing that marks
-          // them; a "You" caption beside it says the same thing twice and
-          // breaks the run of names down the left edge.
+          // The viewer is named like every other speaker; their body is brass.
           name: voiceName,
           onOpenProfile:
             !announcementFeed && message.pubkey && onOpenProfile
@@ -156,7 +155,6 @@ export const OrdinaryLedgerMessage = React.memo(function OrdinaryLedgerMessage({
           // the row's long-press action makes React Native cancel its onPress
           // on release instead of navigating behind the actions sheet.
           onLongPress: onMessageActions ? () => onMessageActions(message) : undefined,
-          role: isAgent ? agentBylineLabel(agentModel) : undefined,
           stamp,
           isViewer: isSelfSteer,
           bookmarked: message.bookmarked,
@@ -231,6 +229,10 @@ export const OrdinaryLedgerMessage = React.memo(function OrdinaryLedgerMessage({
     if (message.text.toLocaleLowerCase().includes('@system')) handles.push(SYSTEM_MENTION_HANDLE);
     return handles;
   }, [participantHandles, taggedMentionPubkeys, message.text, isAgent]);
+  const viewerHandle = useMemo(
+    () => participantHandles.find((participant) => participant.pubkey === viewerPubkey)?.handle,
+    [participantHandles, viewerPubkey],
+  );
   const handleMention = useCallback(
     (handle: string) => {
       if (handle === SYSTEM_MENTION_HANDLE) {
@@ -266,7 +268,6 @@ export const OrdinaryLedgerMessage = React.memo(function OrdinaryLedgerMessage({
             active={message.isAgentLiveTurn === true}
             chronological={desktopLayout}
             handle={!continuedRun && isAgent ? voiceName : undefined}
-            role={agentBylineLabel(agentModel)}
             mark={
               !continuedRun && isAgent
                 ? {
@@ -360,6 +361,9 @@ export const OrdinaryLedgerMessage = React.memo(function OrdinaryLedgerMessage({
   const groupedPhotoArtifacts =
     livePhotoArtifacts && livePhotoArtifacts.length > 1 ? livePhotoArtifacts : undefined;
   const firstGroupedPhoto = groupedPhotoArtifacts?.[0];
+  const command = message.agentCommand;
+  const askingViewer = command?.kind === 'report' && command.status === 'needs-decision' &&
+    Boolean(viewerPubkey) && command.recipient.id === viewerPubkey ? command : null;
   const attachments = message.attachments?.map((attachment, index) => {
     if (viewerMessage.context && index === 0 &&
       (viewerMessage.context.startsWith('Viewing artifact:') || attachment.name === 'browser-screen.jpg')) return null;
@@ -418,6 +422,7 @@ export const OrdinaryLedgerMessage = React.memo(function OrdinaryLedgerMessage({
             bodyText={viewerMessage.body}
             pending={Boolean(sendState)}
             mentionHandles={mentionHandles}
+            viewerHandle={viewerHandle}
             onMention={handleMention}
             channelIndex={channelIndex}
             onChannelReference={onChannelReference}
@@ -488,6 +493,19 @@ export const OrdinaryLedgerMessage = React.memo(function OrdinaryLedgerMessage({
             stamp={ledgerStamp(message.timestamp)}
             onOpenUrl={(url) => void openExternalUrl(url).catch(() => undefined)}
           />
+        ) : askingViewer ? (
+          // A decision report to you reads as the agent's question (build spec, thread frame).
+          <LedgerEntry
+            itemId={message.id}
+            byline={byline}
+            continued={continuedRun}
+            chronological={desktopLayout}
+            precededByDayCaption={dayOpener}
+            bodyText=""
+            bodyTestID={`chat-message-text-${message.id}`}
+            replyReference={messageReference}
+            attachments={<RequestFrame ask={askingViewer.text} testID={`request-${message.id}`}>{attachments}</RequestFrame>}
+          />
         ) : (
           <LedgerEntry
             itemId={message.id}
@@ -500,6 +518,7 @@ export const OrdinaryLedgerMessage = React.memo(function OrdinaryLedgerMessage({
             settleFrom={settleFrom}
             bodyText={renderedBody}
             mentionHandles={mentionHandles}
+            viewerHandle={viewerHandle}
             onMention={handleMention}
             channelIndex={channelIndex}
             onChannelReference={onChannelReference}
@@ -512,47 +531,53 @@ export const OrdinaryLedgerMessage = React.memo(function OrdinaryLedgerMessage({
             attachments={attachments}
           />
         )}
-        {receiptCard}
-        {forwarded.caption ? (
-          forwardSource && onOpenSource ? (
-            <Pressable
-              accessibilityLabel="Open original forwarded message"
-              accessibilityRole="button"
-              onPress={() => onOpenSource(forwardSource.roomId, forwardSource.messageId)}
-              testID={`forward-source-caption-${message.id}`}
-            >
+        {receiptCard || forwarded.caption || message.reactions?.length ||
+          (untaggedHint && isSelfSteer) || (message.isUser && sendState && sendFailureIds?.length) ? (
+          // Everything under a message sits in its column, clear of the face.
+          <TranscriptLine>
+          {receiptCard}
+          {forwarded.caption ? (
+            forwardSource && onOpenSource ? (
+              <ContentTarget
+                accessibilityLabel="Open original forwarded message"
+                accessibilityRole="button"
+                onPress={() => onOpenSource(forwardSource.roomId, forwardSource.messageId)}
+                testID={`forward-source-caption-${message.id}`}
+              >
+                <Text style={styles.forwardCaption} testID={`forward-caption-${message.id}`}>
+                  {forwarded.caption}
+                </Text>
+              </ContentTarget>
+            ) : (
               <Text style={styles.forwardCaption} testID={`forward-caption-${message.id}`}>
                 {forwarded.caption}
               </Text>
-            </Pressable>
-          ) : (
-            <Text style={styles.forwardCaption} testID={`forward-caption-${message.id}`}>
-              {forwarded.caption}
-            </Text>
-          )
-        ) : null}
-        {untaggedHint && isSelfSteer && !deliveryFailed &&
-          (message.pubkey ?? indexedAuthor?.pubkey) === viewerPubkey ? (
-          <LedgerUntaggedHint messageId={message.id} />
-        ) : null}
-        {message.isUser && sendState && sendState.kind !== 'sending' && sendFailureIds?.length ? (
-          <TurnSettledLine inset={false} leadingGlyph={false}
-            line={sendFailureIds.length > 1 ? `${sendFailureIds.length} not sent` : sendState.text}
-            action={onRetry ? { label: sendFailureIds.length > 1 ? 'Retry all' : 'Retry', onPress: () => onRetry(sendFailureIds) } : undefined}
-            testID={`outbox-delivery-failed-${message.id}`} />
-        ) : null}
-        {message.reactions?.length ? (
-          <View style={styles.reactionChips} testID={`reaction-chips-${message.id}`}>
-            {message.reactions.map((reaction) => (
-              <MessageReactionRoster
-                desktop={desktopLayout}
-                key={reaction.emoji}
-                messageId={message.id}
-                onReact={() => onReact(message, reaction.emoji)}
-                reaction={reaction}
-              />
-            ))}
-          </View>
+            )
+          ) : null}
+          {untaggedHint && isSelfSteer && !deliveryFailed &&
+            (message.pubkey ?? indexedAuthor?.pubkey) === viewerPubkey ? (
+            <LedgerUntaggedHint messageId={message.id} />
+          ) : null}
+          {message.isUser && sendState && sendState.kind !== 'sending' && sendFailureIds?.length ? (
+            <TurnSettledLine inset={false} leadingGlyph={false}
+              line={sendFailureIds.length > 1 ? `${sendFailureIds.length} not sent` : sendState.text}
+              action={onRetry ? { label: sendFailureIds.length > 1 ? 'Retry all' : 'Retry', onPress: () => onRetry(sendFailureIds) } : undefined}
+              testID={`outbox-delivery-failed-${message.id}`} />
+          ) : null}
+          {message.reactions?.length ? (
+            <View style={styles.reactionChips} testID={`reaction-chips-${message.id}`}>
+              {message.reactions.map((reaction) => (
+                <MessageReactionRoster
+                  desktop={desktopLayout}
+                  key={reaction.emoji}
+                  messageId={message.id}
+                  onReact={() => onReact(message, reaction.emoji)}
+                  reaction={reaction}
+                />
+              ))}
+            </View>
+          ) : null}
+          </TranscriptLine>
         ) : null}
       </View>
     </NewMessageMaterialize>
@@ -652,7 +677,6 @@ export const styles = StyleSheet.create((theme) => ({
   forwardCaption: {
     ...theme.buzz.type.sectionHead,
     marginTop: theme.buzz.space.xs,
-    marginLeft: 8,
     color: theme.buzz.ledgerQuiet,
   },
   replySwipeAction: {
@@ -687,37 +711,9 @@ export const styles = StyleSheet.create((theme) => ({
     marginTop: theme.buzz.space.xs,
     color: theme.buzz.textMuted,
   },
-  attachmentCard: {
-    minWidth: 0,
-    width: '100%',
-    minHeight: 58,
-    marginTop: 8,
-    paddingVertical: theme.buzz.space.sm,
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: theme.buzz.space.sm,
-  },
-  attachmentThumbnail: { width: 46, height: 46, backgroundColor: theme.buzz.bgHighlight },
-  attachmentFileGlyph: { width: 46, height: 46, alignItems: 'center', justifyContent: 'center' },
-  attachmentFileGlyphText: { ...theme.buzz.type.hero, color: theme.buzz.steel },
-  attachmentCopy: { flex: 1, minWidth: 0 },
-  attachmentExpired: { color: theme.buzz.textMuted },
-  attachmentName: {
-    ...theme.buzz.type.body,
-    fontSize: theme.buzz.transcriptCard.rowTitleSize,
-    color: theme.buzz.textPrimary,
-  },
-  attachmentMeta: {
-    ...theme.buzz.type.machine,
-    fontSize: theme.buzz.transcriptCard.rowKindSize,
-    marginTop: theme.buzz.space.xs,
-    color: theme.buzz.textMuted,
-  },
-  attachmentOpenGlyph: {
-    width: 22,
-    alignItems: 'center',
-  },
-  attachmentOpenGlyphInk: { color: theme.buzz.steel },
+  // A file with no preview is one raised row (`ui/screens/transcript/FileRow`).
+  attachmentTarget: { minWidth: 0, width: '100%', marginTop: theme.buzz.space.sm },
+  attachmentThumbnail: { width: 44, height: 44, borderRadius: theme.buzz.radius, backgroundColor: theme.buzz.bgHighlight },
 
 replyDesktopLabel: {
     ...theme.buzz.type.sectionHead,

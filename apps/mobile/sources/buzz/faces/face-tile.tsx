@@ -49,10 +49,6 @@ function faceLayers(figure: React.ReactElement, mode: FaceMode): React.ReactElem
   );
 }
 
-/** A person's creature: hue-for-brass figure over its contrast edge layer. */
-export function personFaceLayers(face: FaceId, hue: string, mode: FaceMode): React.ReactElement {
-  return faceLayers(FACES[face]({ palette: { brass: hue, bone: BONE, ink: INK } }), mode);
-}
 
 /** An agent's creature: the same drawing in bone and ink, edged for the light
  *  plate; the caller paints that plate in the agent's hue. */

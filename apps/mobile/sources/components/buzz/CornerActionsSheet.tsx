@@ -1,8 +1,13 @@
 import React, { useEffect, useRef, useState } from 'react';
-import { HullActionSheetCancel, HullActionSheetModal, HullActionSheetRow } from './HullActionSheet';
-import { CornerLockAction } from './CornerLockAction';
+import { ListItem, Separator, Switch, XStack, YStack } from 'tamagui';
+import { Archive, Lock } from 'lucide-react-native';
+import { Btn, Copy, Glyph, HEIGHT, SheetFrame, T } from '@/ui/grammar';
 
-/** Closing the surface leaves the request running, but retires its navigation. */
+/**
+ * ⋯ on a thread (header B): Lock corner, Close corner, Cancel. Closing the
+ * surface leaves a request running, but retires its navigation. The lock
+ * value comes from the current server Room read.
+ */
 export function CornerActionsSheet({
   visible,
   title,
@@ -27,9 +32,10 @@ export function CornerActionsSheet({
   onError: (error: unknown) => void;
 }) {
   const [closing, setClosing] = useState(false);
+  const [saving, setSaving] = useState(false);
   const generation = useRef(0);
   const pending = useRef(false);
-  const lockGeneration = useRef(-1);
+  const savingRef = useRef(false);
   useEffect(() => {
     generation.current += 1;
     setClosing(false);
@@ -60,38 +66,51 @@ export function CornerActionsSheet({
       }
     }
   };
+  const lockDisabled = closing || !connected || saving;
+  const changeLock = async (value: boolean) => {
+    if (savingRef.current || closing || !connected) return;
+    const attempt = generation.current;
+    savingRef.current = true;
+    setSaving(true);
+    try {
+      await setLocked(value);
+      if (attempt === generation.current) onSaved();
+    } catch (error) {
+      if (attempt === generation.current) onError(error);
+    } finally {
+      savingRef.current = false;
+      setSaving(false);
+    }
+  };
   return (
-    <HullActionSheetModal
-      accessibilityLabel="Close corner actions"
-      onClose={dismiss}
-      testID="corner-actions-sheet"
-      title={title}
-      visible={visible}
-    >
-      <CornerLockAction
-        locked={locked}
-        disabled={closing || !connected}
-        save={async (value) => {
-          lockGeneration.current = generation.current;
-          await setLocked(value);
-        }}
-        onSaved={() => {
-          if (lockGeneration.current === generation.current) onSaved();
-        }}
-        onError={(error) => {
-          if (lockGeneration.current === generation.current) onError(error);
-        }}
-      />
-      <HullActionSheetRow
-        accessibilityLabel="Close corner"
-        description="Ends the edit session and archives this corner. Unmerged work is lost."
-        destructive
-        disabled={closing}
-        label={closing ? 'Closing corner…' : 'Close corner'}
-        onPress={() => void close()}
-        testID="close-corner-action"
-      />
-      <HullActionSheetCancel onPress={dismiss} testID="corner-actions-close" />
-    </HullActionSheetModal>
+    <SheetFrame open={visible} close={dismiss} title={title} testID="corner-actions-sheet">
+      <ListItem padding="0" paddingVertical="3" gap="3" alignItems="flex-start" backgroundColor="raised"
+        minHeight={HEIGHT.sheetRow} disabled={lockDisabled} onPress={() => void changeLock(!locked)}
+        aria-label="Lock corner" accessibilityRole="switch" accessibilityState={{ checked: locked, disabled: lockDisabled }}
+        testID="lock-corner-action">
+        <YStack paddingTop="0.5"><Glyph icon={Lock} size={18} /></YStack>
+        <YStack flex={1} minWidth={0} gap="1">
+          <Copy>Lock corner</Copy>
+          <Copy small quiet>Stops agents from closing this corner, including after a merge. You can still close it.</Copy>
+        </YStack>
+        <Switch checked={locked} disabled={lockDisabled} onCheckedChange={(value: boolean) => void changeLock(value)}
+          backgroundColor={locked ? 'needsYou' : 'highlight'} aria-label="Lock corner" testID="lock-corner-switch">
+          <Switch.Thumb backgroundColor="ink" />
+        </Switch>
+      </ListItem>
+      <Separator borderColor="stroke" />
+      <ListItem padding="0" paddingVertical="3" gap="3" alignItems="flex-start" backgroundColor="raised"
+        minHeight={HEIGHT.sheetRow} disabled={closing} onPress={() => void close()}
+        aria-label="Close corner" accessibilityRole="button" testID="close-corner-action">
+        <YStack paddingTop="0.5"><Glyph icon={Archive} size={18} /></YStack>
+        <YStack flex={1} minWidth={0} gap="1">
+          <T v="heading" color="removed">{closing ? 'Closing corner…' : 'Close corner'}</T>
+          <Copy small quiet>Ends the edit session and archives this corner. Unmerged work is lost.</Copy>
+        </YStack>
+      </ListItem>
+      <XStack paddingTop="2">
+        <Btn kind="secondary" label="Cancel" flex={1} minHeight={HEIGHT.primary} onPress={dismiss} testID="corner-actions-close">Cancel</Btn>
+      </XStack>
+    </SheetFrame>
   );
 }

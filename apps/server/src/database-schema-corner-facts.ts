@@ -198,6 +198,13 @@ CREATE TABLE IF NOT EXISTS avatars (
   bytes bytea NOT NULL CHECK (octet_length(bytes) BETWEEN 1 AND 131072)
 );
 
+-- One current personal photo per person; independent of attachment expiry.
+CREATE TABLE IF NOT EXISTS person_avatars (
+  id uuid PRIMARY KEY,
+  identity_id text NOT NULL UNIQUE REFERENCES identities(id) ON DELETE CASCADE,
+  bytes bytea NOT NULL CHECK (octet_length(bytes) BETWEEN 1 AND 131072)
+);
+
 -- One current generated portrait per agent; independent of attachment expiry.
 CREATE TABLE IF NOT EXISTS agent_avatars (
   id uuid PRIMARY KEY,

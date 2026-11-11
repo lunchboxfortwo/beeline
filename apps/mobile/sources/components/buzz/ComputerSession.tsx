@@ -1,19 +1,16 @@
-import { IndexRow } from '@/components/buzz/IndexRow';
-import { Button } from './Button';
-import { CloseButton } from './CloseGlyph';
-import { ContentTarget, InlineRow } from './IndexRow';
 import React from 'react';
-import { AppState, BackHandler, Platform, Text, View } from 'react-native';
+import { AppState, BackHandler, Platform, View } from 'react-native';
 import { Image } from 'expo-image';
 import * as Clipboard from 'expo-clipboard';
 import { StyleSheet } from 'react-native-unistyles';
-import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { useSandboxWebView } from '@/components/buzz/sandbox-webview';
 import { monolithPhoneOperation } from '@/sync/transport/monolith-operation';
 import { Modal } from '@/modal';
 import { openComputerInDesktopWorkPane } from '@/buzz/desktop-computer-pane';
 import { openExternalUrl } from '@/utils/open-external-url';
 import { ViewerConversationDock } from '@/components/buzz/ViewerConversationDock';
+import { BrowserCard, BrowserStreamNote, BrowserViewerFrame } from '@/ui/screens/viewers/BrowserChrome';
+import { KeyBar } from '@/ui/screens/viewers/KeyBar';
 import { currentViewerConversation, subscribeViewerConversation } from '@/buzz/viewer-conversation';
 import { useArtifactRowVisible } from '@/buzz/artifact-viewport';
 import {
@@ -52,10 +49,14 @@ function useViewerRoomFocused(roomId: string | undefined): boolean {
 import type { ComputerSessionView } from '@/buzz/computer-session';
 export type { ComputerSessionView } from '@/buzz/computer-session';
 
-function ComputerStream({ session, preview = false, onEnded, onFirstFrame, onAccessRejected, captureRef, warm = false, interactive = true }: {
+/** Posts one bridge message into the stream page, the way paste reaches it. */
+type StreamPost = (message: Record<string, unknown>) => void;
+
+function ComputerStream({ session, preview = false, onEnded, onFirstFrame, onAccessRejected, captureRef, postRef, warm = false, interactive = true }: {
   session: ComputerSessionView; preview?: boolean; onEnded?: () => void; onFirstFrame?: () => void;
   onAccessRejected?: () => void; warm?: boolean; interactive?: boolean;
   captureRef?: React.MutableRefObject<(() => Promise<string | null>) | null>;
+  postRef?: React.MutableRefObject<StreamPost | null>;
 }) {
   const WebView = useSandboxWebView();
   const iframeRef = React.useRef<HTMLIFrameElement | null>(null);
@@ -100,6 +101,15 @@ function ComputerStream({ session, preview = false, onEnded, onFirstFrame, onAcc
     });
     return () => { captureRef.current = null; releaseCaptures(); };
   }, [captureRef, preview, releaseCaptures, session.id, session.status, url]);
+  React.useEffect(() => {
+    if (!postRef) return;
+    // The key bar rides the same bridge as viewer paste: a message posted
+    // into the page's own window, which forwards it on its stream socket.
+    postRef.current = (message) => {
+      webViewRef.current?.injectJavaScript(`window.postMessage(${JSON.stringify({ ...message, id: session.id })}, '*'); true;`);
+    };
+    return () => { postRef.current = null; };
+  }, [postRef, session.id]);
   const setViewerMode = React.useCallback(() => {
     if (!warm) return;
     const mode = { type: 'viewer-mode', id: session.id, interactive };
@@ -124,14 +134,8 @@ function ComputerStream({ session, preview = false, onEnded, onFirstFrame, onAcc
       }
     } catch { /* Ignore unrelated page messages. */ }
   };
-  if (session.status === 'ended')
-    return (
-      <View style={styles.ended} testID="computer-session-ended"><Text style={styles.endedText}>Browser session ended</Text></View>
-    );
-  if (!session.access)
-    return (
-      <View style={styles.ended}><Text style={styles.endedText}>Connecting to browser…</Text></View>
-    );
+  if (session.status === 'ended') return <BrowserStreamNote text="Browser session ended" testID="computer-session-ended" />;
+  if (!session.access) return <BrowserStreamNote text="Connecting to browser…" />;
   if (Platform.OS === 'web') return React.createElement('iframe', {
     ref: iframeRef,
     src: url,
@@ -152,9 +156,7 @@ function ComputerStream({ session, preview = false, onEnded, onFirstFrame, onAcc
     scrollEnabled={false} setBuiltInZoomControls={false} setDisplayZoomControls={false}
     automaticallyAdjustContentInsets={false} contentInsetAdjustmentBehavior="never" style={styles.stream} testID={preview ? 'computer-session-preview-webview' : 'computer-session-view-webview'} />
     );
-  return (
-    <View style={styles.ended}><Text style={styles.endedText}>Opening browser…</Text></View>
-  );
+  return <BrowserStreamNote text="Opening browser…" />;
 }
 
 /** Only actual visible rows stream; opening captures the latest frame once. */
@@ -196,43 +198,16 @@ export function ComputerSessionCard({ session, messageId, roomId, isDesktop, age
     await openComputerSessionViewer({ ...session, access,
       previewFrame: captureRef.current?.() }, isDesktop, roomId, agentHandle);
   };
-  const openInBrowser = async () => {
-    if (!visible || !access || session.status !== 'live') return;
-    try {
-      const { access: freshAccess } = await monolithPhoneOperation('openComputerSession', { id: session.id });
-      const url = new URL(session.url);
-      url.searchParams.set('access', freshAccess);
-      await openExternalUrl(url.toString());
-    } catch {
-      Modal.alert('Could not open browser', 'The live browser is unavailable. Try again.');
-    }
-  };
+  const live = session.status === 'live' && Boolean(access);
   return (
-    <View style={styles.card} testID={`computer-session-card-${session.status}`}>
-      {session.status === 'live' && access ? (
-        <ContentTarget onPress={() => void open()} accessibilityRole="button" accessibilityLabel={`Open ${session.title} browser`}>
-      <View style={styles.preview} pointerEvents="none">{visible && !fullViewer ? <ComputerStream session={{ ...session, access }} preview captureRef={captureRef} /> : null}</View>
-      <View style={styles.caption}><Text numberOfLines={1} style={styles.title}>{session.title}</Text>
-        <Text style={styles.kind}>Live browser</Text></View>
-    </ContentTarget>
-      ) : (
-        <View style={styles.caption}><Text numberOfLines={1} style={styles.title}>{session.title}</Text>
-      <Text style={styles.kind}>{session.status === 'ended' ? 'Session ended' : 'Live browser'}</Text></View>
-      )}
-      {session.status === 'live' && access ? (
-        <InlineRow style={styles.footer}>
-          <Button label="Open in browser" destination="external" variant="quiet"
-            appearance={{ control: undefined, label: styles.footerQuiet }}
-            accessibilityRole="link" accessibilityLabel="Open in browser"
-            testID="computer-session-card-open-browser" onPress={() => void openInBrowser()} />
-          <View style={styles.footerSpacer} />
-          <Button label="Open" destination="screen" variant="quiet"
-            appearance={{ control: undefined, label: styles.footerPrimary }}
-            accessibilityRole="link" accessibilityLabel="Open live browser"
-            testID="computer-session-open" onPress={() => void open()} />
-        </InlineRow>
-      ) : null}
-    </View>
+    <BrowserCard
+      status={session.status}
+      title={session.title}
+      live={live}
+      frame={live && visible && !fullViewer ? <ComputerStream session={{ ...session, access: access! }} preview captureRef={captureRef} /> : null}
+      onOpen={() => void open()}
+      testID={`computer-session-card-${session.status}`}
+    />
   );
 }
 
@@ -294,8 +269,9 @@ export function ComputerSessionViewer({ session, onClose, roomId, agentHandle, a
   const focused = useViewerRoomFocused(roomId);
   const displayed = active && focused && foreground;
   React.useLayoutEffect(() => displayed ? retainFullViewer(session.id) : undefined, [displayed, session.id]);
-  const insets = useSafeAreaInsets();
   const captureRef = React.useRef<(() => Promise<string | null>) | null>(null);
+  const postRef = React.useRef<StreamPost | null>(null);
+  const [keysOpen, setKeysOpen] = React.useState(false);
   const [ended, setEnded] = React.useState(session.status === 'ended');
   const [unavailable, setUnavailable] = React.useState(false);
   const [refreshedAccess, setRefreshedAccess] = React.useState<string>();
@@ -345,85 +321,54 @@ export function ComputerSessionViewer({ session, onClose, roomId, agentHandle, a
       Modal.alert('Could not open browser', 'The live browser is unavailable. Try again.');
     }
   };
+  const post = (message: Record<string, unknown>) => postRef.current?.(message);
+  const live = !ended && !unavailable && Boolean(session.access);
   return (
-    <View style={[styles.viewer, { paddingTop: insets.top, paddingBottom: insets.bottom }]} testID="computer-session-viewer">
-      <InlineRow style={styles.controls} testID="computer-session-controls">
-        {!ended && !unavailable && session.access ? (
-          <Button
-            label="Open in browser"
-            destination="external"
-            size="inline"
-            style={styles.openBrowser}
-            accessibilityRole="link"
-            variant="secondary"
-            onPress={() => void openInBrowser()}
-            accessibilityLabel="Open in browser"
-            testID="computer-session-open-browser"
-          />
-        ) : null}
-        <CloseButton
-          onPress={onClose}
-          accessibilityLabel="Close browser"
-          testID="computer-session-close"
+    <BrowserViewerFrame
+      safeArea
+      keysOpen={keysOpen}
+      // Native viewers bridge keys into the page; a desktop browser types into the frame itself.
+      onToggleKeys={Platform.OS !== 'web' && live ? () => setKeysOpen((value) => !value) : undefined}
+      onOpenInBrowser={live ? () => void openInBrowser() : undefined}
+      onClose={onClose}
+      stream={
+        <>
+          {unavailable ? (
+            <BrowserStreamNote text="Browser is unavailable" />
+          ) : displayed ? (
+            <ComputerStream session={shownSession} warm={warm} interactive={active} onEnded={() => setEnded(true)}
+              onFirstFrame={() => { firstFrame.current = true; setPreviewFrame(null); }}
+              onAccessRejected={() => {
+                if (accessRejected && refreshedAccess) setUnavailable(true);
+                else setAccessRejected(true);
+              }} captureRef={captureRef} postRef={postRef} />
+          ) : null}
+          {!ended && !unavailable && previewFrame ? (
+            <View pointerEvents="none" style={styles.previewFrame}>
+              <Image source={{ uri: `data:image/jpeg;base64,${previewFrame}` }} contentFit="cover" contentPosition="top"
+                style={styles.stream} testID="computer-session-opening-frame" />
+            </View>
+          ) : null}
+        </>
+      }
+      keyBar={keysOpen && live ? (
+        <KeyBar
+          onText={(text) => post({ type: 'viewer-paste', text })}
+          onKey={(key) => post({ type: 'viewer-key', key })}
+          onPaste={() => void Clipboard.getStringAsync().then((text) => { if (text) post({ type: 'viewer-paste', text }); }).catch(() => {})}
+          onClose={() => setKeysOpen(false)}
         />
-      </InlineRow>
-      <View style={styles.viewerStream}>
-        {unavailable ? (
-          <View style={styles.failureInset} >
-            <IndexRow inset="flush" title="Browser unavailable" description={"Browser is unavailable"} />
-          </View>
-        ) : displayed ? (
-          <ComputerStream session={shownSession} warm={warm} interactive={active} onEnded={() => setEnded(true)}
-          onFirstFrame={() => { firstFrame.current = true; setPreviewFrame(null); }}
-          onAccessRejected={() => {
-            if (accessRejected && refreshedAccess) setUnavailable(true);
-            else setAccessRejected(true);
-          }} captureRef={captureRef} />
-        ) : null}
-        {!ended && !unavailable && previewFrame ? (
-          <View pointerEvents="none" style={styles.previewFrame}>
-        <Image source={{ uri: `data:image/jpeg;base64,${previewFrame}` }} contentFit="cover" contentPosition="top"
-          style={styles.stream} testID="computer-session-opening-frame" />
-      </View>
-        ) : null}
-      </View>
-      {displayed ? (
-        <ViewerConversationDock keyboardAvoidedByParent={!warm} kind="computer" title={session.title} roomId={roomId}
-      agentHandle={agentHandle} captureScreen={() => captureRef.current?.() ?? Promise.resolve(null)} />
       ) : null}
-    </View>
+      dock={displayed ? (
+        <ViewerConversationDock keyboardAvoidedByParent={!warm} kind="computer" title={session.title} roomId={roomId}
+          agentHandle={agentHandle} captureScreen={() => captureRef.current?.() ?? Promise.resolve(null)} />
+      ) : null}
+    />
   );
 }
 
 const styles = StyleSheet.create((theme) => ({
-  failureInset: { paddingHorizontal: theme.buzz.roomList.edge },
   warmHost: { position: 'absolute', top: 0, left: 0, right: 0, bottom: 0, zIndex: 100 },
-  card: { width: '100%', marginTop: theme.buzz.transcriptCard.marginTop, borderWidth: 1, borderColor: theme.buzz.borderStrong, borderRadius: theme.buzz.transcriptCard.cornerRadius, overflow: 'hidden' },
-  preview: { height: 218, backgroundColor: theme.buzz.bgBase },
   stream: { width: '100%', height: '100%', backgroundColor: theme.buzz.bgBase },
-  caption: { paddingHorizontal: theme.buzz.transcriptCard.side, paddingVertical: theme.buzz.space.sm, gap: theme.buzz.space.xs },
-  title: { ...theme.buzz.type.bodyStrong, color: theme.buzz.textPrimary },
-  kind: { ...theme.buzz.type.machine, color: theme.buzz.ledgerQuiet },
-  footerSpacer: { flex: 1 },
-  footerQuiet: { ...theme.buzz.type.body, color: theme.buzz.ledgerQuiet },
-  footerPrimary: { ...theme.buzz.type.body, color: theme.buzz.accent },
-  footer: { paddingVertical: theme.buzz.transcriptCard.footerVertical, minHeight: theme.buzz.transcriptCard.footerMinHeight, paddingHorizontal: theme.buzz.transcriptCard.side, flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', borderTopWidth: 1, borderTopColor: theme.buzz.border },
-  viewer: { flex: 1, backgroundColor: theme.buzz.bgBase },
-  viewerStream: { flex: 1, minHeight: 0 },
   previewFrame: { position: 'absolute', inset: 0, width: '100%', height: '100%' },
-  controls: { flexDirection: 'row', alignItems: 'center', justifyContent: 'flex-end', gap: theme.buzz.space.sm,
-    marginTop: theme.buzz.space.md, marginHorizontal: theme.buzz.space.md, marginBottom: theme.buzz.space.sm },
-  openBrowser: { alignSelf: 'center' },
-  control: {
-    width: 44,
-    height: 44,
-    borderRadius: theme.buzz.radius,
-    borderWidth: 1,
-    borderColor: theme.buzz.borderStrong,
-    backgroundColor: theme.buzz.bgBase,
-    alignItems: 'center',
-    justifyContent: 'center',
-  },
-  ended: { width: '100%', height: '100%', alignItems: 'center', justifyContent: 'center', backgroundColor: theme.buzz.bgBase },
-  endedText: { ...theme.buzz.type.body, color: theme.buzz.textPrimary },
 }));

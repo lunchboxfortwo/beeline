@@ -570,6 +570,10 @@ export async function serveComputerSession(
       beelinePaste.addEventListener('keyup',()=>beelineCanvas.focus());
       addEventListener('message',event=>{if(event.source!==window||event.data?.type!=='viewer-paste'||event.data.id!=='${id}')return;
         if(typeof event.data.text==='string'&&event.data.text)sendText(event.data.text);});
+      // The phone's key bar (Esc, Tab, Backspace, Enter, arrows) rides the
+      // same bridge and reaches the page as the key Squire's own viewer sends.
+      addEventListener('message',event=>{if(event.source!==window||event.data?.type!=='viewer-key'||event.data.id!=='${id}')return;
+        if(typeof event.data.key==='string'&&event.data.key)send({type:'key',key:event.data.key,ctrl:false,meta:false});});
       // Signal a decoded canvas paint, not merely the receipt of JPEG bytes.
       let beelineFirstFrame=false;
       const beelineContext=beelineCanvas?.getContext('2d');

@@ -1,31 +1,17 @@
 import { appErrorCopy } from '@/buzz/app-error-copy';
-import { type ChatListHandle } from '@/buzz/chat-list-store';
 import { roomRowName } from '@/buzz/room-list-row';
 import { useRoomListGestures } from '@/buzz/use-room-list-gestures';
 import { leaveRoomWithConfirmation } from '@/buzz/room-leave';
 import { ROOM_LABEL } from '@/buzz/vocabulary';
 import { Modal } from '@/modal';
-import { BuzzRigTransport } from '@/sync/transport';
 import { type ChatListItem } from '@beeline/buzz-client';
 import * as Haptics from 'expo-haptics';
 import { useCallback, useRef } from 'react';
 import { Swipeable } from 'react-native-gesture-handler';
+import type { DeckState } from './useChannelsRouteState';
 
-type Props = [
-  transport: BuzzRigTransport,
-  chatStore: import("react/index").RefObject<ChatListHandle | null>,
-  setError: import("react/index").Dispatch<import("react/index").SetStateAction<string | null>>,
-];
-export function useChannelsRoomActions([
-  transport, chatStore, setError,
-]: Props): [
-  roomListGestures: { swipesEnabled: boolean; canInteract: () => boolean; touchHandlers: { onStartShouldSetResponderCapture: () => false; onTouchEnd: () => void; onTouchCancel: () => void; }; listHandlers: { onScrollBeginDrag: () => void; onScrollEndDrag: (event: import("react-native").NativeSyntheticEvent<import("react-native").NativeScrollEvent>) => void; onMomentumScrollBegin: () => void; onMomentumScrollEnd: () => void; }; },
-  swipeableRefs: import("react/index").RefObject<Map<string, Swipeable | null>>,
-  handleLeaveRoom: (item: ChatListItem) => Promise<void>,
-  handleCloseChat: (item: ChatListItem) => Promise<void>,
-] {
-
-
+/** Swipe gestures and the swipe actions: leave a chat, close a direct message. */
+export function useChannelsRoomActions({ transport, chatStore, setError }: DeckState) {
   const swipeableRefs = useRef<Map<string, Swipeable | null>>(new Map());
   const roomListGestures = useRoomListGestures();
 
@@ -71,7 +57,5 @@ export function useChannelsRoomActions([
     },
     [transport],
   );
-return [
-    roomListGestures, swipeableRefs, handleLeaveRoom, handleCloseChat,
-  ];
+  return { roomListGestures, swipeableRefs, handleLeaveRoom, handleCloseChat };
 }

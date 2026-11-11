@@ -27,7 +27,6 @@ type Props = [
   routeChannelTitle: string | undefined,
   routeCommunityId: string | undefined,
   participantPickerVisible: boolean,
-  rosterVisible: boolean,
   setMembershipError: React.Dispatch<React.SetStateAction<string | null>>,
   profileKind: "human" | "agent",
   profileAgentId: string | null,
@@ -37,7 +36,7 @@ export function useChatDesktopLayout([
   desktopWorkPaneRef, setDesktopWorkPane, desktopExperience, desktopAvailableWidth, decodedId,
   userPubkey, roomSurface, routeParentChannelId, isDirectMessage, desktopWorkPaneContent,
   roomClient, firstUnreadMessageId, allowOlderHistoryRef, routeChannelTitle, routeCommunityId,
-  participantPickerVisible, rosterVisible, setMembershipError, profileKind, profileAgentId,
+  participantPickerVisible, setMembershipError, profileKind, profileAgentId,
 ]: Props): [
   chatListKey: { relayUrl: string; viewerPubkey: string; workspaceId: string; } | null,
   isArchived: boolean,
@@ -133,7 +132,7 @@ export function useChatDesktopLayout([
 
   const readPickerRoster=useCallback((workspaceId:string)=>roomClient!.workspace(workspaceId),[roomClient]);
 
-  const {value:workspaceRoster,open:openWorkspaceRoster}=useRoomRoster(activeCommunityId,userPubkey,participantPickerVisible||rosterVisible,roomClient?readPickerRoster:undefined,setMembershipError);
+  const {value:workspaceRoster,open:openWorkspaceRoster}=useRoomRoster(activeCommunityId,userPubkey,participantPickerVisible,roomClient?readPickerRoster:undefined,setMembershipError);
 
   const usageProfileFocused = useSurfaceFocus();
 

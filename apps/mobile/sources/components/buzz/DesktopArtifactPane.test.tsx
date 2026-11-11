@@ -38,6 +38,8 @@ vi.mock('react-native', async () => {
     View: host('View'),
   };
 });
+vi.mock('tamagui', async () => (await import('@/ui/screens/transcript/grammar-hosts.test-support')).tamaguiHosts());
+vi.mock('lucide-react-native', async () => (await import('@/ui/screens/transcript/grammar-hosts.test-support')).lucideHosts());
 vi.mock('react-native-reanimated', () => ({
   default: {
     View: (props: Record<string, unknown>) =>
@@ -275,7 +277,7 @@ describe('the desktop work pane artifact view', () => {
         .transform[0],
     ).toEqual({ translateX: 40 });
     const reset = renderer.root.findByProps({ testID: 'desktop-artifact-zoom-reset' });
-    expect(reset.props.accessibilityLabel).toBe('Reset image zoom');
+    expect(reset.props.label).toBe('Reset image zoom');
     expect(reset.props.disabled).toBe(false);
     act(() => reset.props.onPress());
     expect(

@@ -17,8 +17,8 @@ import {
 } from '@/buzz/tool-ledger';
 import { BeelineMarkSpinner } from './BeelineMarkSpinner';
 import { ToolOutputSheet } from './ToolOutputSheet';
+import { TranscriptLine } from '@/ui/screens/transcript/TranscriptLine';
 import {
-  LedgerBylineView,
   ledgerEntryRhythm,
   provisionalProseStyle,
   settledAgentProseStyle,
@@ -33,8 +33,6 @@ type ActivityTimelineProps = {
   active?: boolean;
   items: readonly AgentActivityItem[];
   handle?: string;
-  /** Model text shown in the agent byline; defaults to the legacy role label. */
-  role?: string;
   stamp?: string;
   /** Desktop transcripts flow chronologically; phone transcripts are inverted. */
   chronological?: boolean;
@@ -42,7 +40,7 @@ type ActivityTimelineProps = {
   messageDraft?: string;
   messageDraftKey?: string;
   /** The streaming speaker's identity mark — the SAME mark the settled row's
-   *  byline renders (`Ledger.LedgerBylineView`), so the draft lane carries the
+   *  sender line renders (`TranscriptLine`), so the draft lane carries the
    *  agent tile and the byline never moves when the draft settles. The words
    *  below it DO change: a draft is written in the provisional face and tone
    *  and cross-fades into the settled reply (C98). */
@@ -257,7 +255,6 @@ export const TurnStepsLine = React.memo(function TurnStepsLine({
 export const ActivityTimeline = React.memo(function ActivityTimeline({
   active = false,
   handle,
-  role = 'agent',
   items,
   stamp,
   chronological = false,
@@ -288,9 +285,7 @@ export const ActivityTimeline = React.memo(function ActivityTimeline({
 
   return (
     <View style={ledgerEntryRhythm({ hasByline: Boolean(handle), chronological })} testID={testID}>
-      {handle ? (
-        <LedgerBylineView byline={{ name: handle, role, stamp: stamp ?? '', mark }} />
-      ) : null}
+      <TranscriptLine sender={handle ? { name: handle, stamp: stamp ?? '', mark } : undefined}>
       {turn.narration.map((narration, index) => (
         <MonoMarkdown
           key={`${index}:${narration}`}
@@ -309,6 +304,7 @@ export const ActivityTimeline = React.memo(function ActivityTimeline({
           testID="activity-message-draft"
         />
       ) : null}
+      </TranscriptLine>
       <ToolOutputSheet
         detail={sheetLine?.detail}
         outputHidden={sheetLine?.outputHidden}

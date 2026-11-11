@@ -32,17 +32,12 @@ export function useChatActionState([
   setMembershipError: React.Dispatch<React.SetStateAction<string | null>>,
   isDirectMessage: boolean,
   participantPickerVisible: boolean,
-  rosterVisible: boolean,
   roomRepoAccessIssue: { fullName: string; reason: "revoked" | "not_granted"; installationId?: number; } | null,
   setCornerOpenRepoPrompt: React.Dispatch<React.SetStateAction<boolean>>,
   participantPickerKind: "agent" | "person" | null,
   composerFocused: boolean,
   directMessage: import("@beeline/api-contract/phone").RoomDirectMessageView | null,
-  agentPairBusy: boolean,
   setAgentConnectVisible: React.Dispatch<React.SetStateAction<boolean>>,
-  setAgentPairCommand: React.Dispatch<React.SetStateAction<string | null>>,
-  setAgentPairError: React.Dispatch<React.SetStateAction<string | null>>,
-  setAgentPairBusy: React.Dispatch<React.SetStateAction<boolean>>,
   setParticipantPickerKind: React.Dispatch<React.SetStateAction<"agent" | "person" | null>>,
   setParticipantPickerVisible: React.Dispatch<React.SetStateAction<boolean>>,
   targetBranchActionId: string | null,
@@ -62,10 +57,6 @@ export function useChatActionState([
   setConnectorOfferActionId: React.Dispatch<React.SetStateAction<string | null>>,
   setTargetBranchNotice: React.Dispatch<React.SetStateAction<{ proposalId: string; text: string; } | null>>,
   setTargetBranchActionId: React.Dispatch<React.SetStateAction<string | null>>,
-  setMembershipActionPubkey: React.Dispatch<React.SetStateAction<string | null>>,
-  memberInviteBusy: boolean,
-  setMemberInviteBusy: React.Dispatch<React.SetStateAction<boolean>>,
-  setRosterVisible: React.Dispatch<React.SetStateAction<boolean>>,
   setRoomActionsVisible: (visible: boolean) => void | undefined,
   roomLifecycleBusy: boolean,
   setRoomLifecycleBusy: React.Dispatch<React.SetStateAction<boolean>>,
@@ -92,9 +83,7 @@ export function useChatActionState([
   cornerOpenRepoPrompt: boolean,
   ownerGrant: OwnerGrantNeeded | null,
   setComposerFocused: React.Dispatch<React.SetStateAction<boolean>>,
-  membershipActionPubkey: string | null,
   membershipError: string | null,
-  closeRoster: () => void,
   roomActionsRef: React.RefObject<RoomActionsSheetHandle | null>,
   renameEditing: boolean,
   setRenameDraft: (update: string | ((previous: string) => string)) => void,
@@ -102,8 +91,6 @@ export function useChatActionState([
   dmActionsVisible: boolean,
   cornerActionsVisible: boolean,
   agentConnectVisible: boolean,
-  agentPairError: string | null,
-  agentPairCommand: string | null,
   createPollVisible: boolean,
 ] {
 
@@ -122,10 +109,6 @@ export function useChatActionState([
     reason: 'revoked' | 'not_granted';
     installationId?: number;
   } | null>(null);
-
-  const [rosterVisible, setRosterVisible] = useState(false);
-
-  const closeRoster = useCallback(() => setRosterVisible(false), []);
 
   const roomActionsRef = useRef<RoomActionsSheetHandle>(null);
 
@@ -175,17 +158,7 @@ export function useChatActionState([
 
   const [membershipError, setMembershipError] = useState<string | null>(null);
 
-  const [memberInviteBusy, setMemberInviteBusy] = useState(false);
-
   const [agentConnectVisible, setAgentConnectVisible] = useState(false);
-
-  const [agentPairCommand, setAgentPairCommand] = useState<string | null>(null);
-
-  const [agentPairBusy, setAgentPairBusy] = useState(false);
-
-  const [agentPairError, setAgentPairError] = useState<string | null>(null);
-
-  const [membershipActionPubkey, setMembershipActionPubkey] = useState<string | null>(null);
 
   const [roomLifecycleBusy, setRoomLifecycleBusy] = useState(false);
 
@@ -262,22 +235,18 @@ export function useChatActionState([
     });
   }, [composerMounted, decodedId]);
   return [
-    setMembershipError, isDirectMessage, participantPickerVisible, rosterVisible,
-    roomRepoAccessIssue, setCornerOpenRepoPrompt, participantPickerKind, composerFocused,
-    directMessage, agentPairBusy, setAgentConnectVisible, setAgentPairCommand, setAgentPairError,
-    setAgentPairBusy, setParticipantPickerKind, setParticipantPickerVisible, targetBranchActionId,
+    setMembershipError, isDirectMessage, participantPickerVisible, roomRepoAccessIssue, setCornerOpenRepoPrompt, participantPickerKind, composerFocused,
+    directMessage, setAgentConnectVisible, setParticipantPickerKind, setParticipantPickerVisible, targetBranchActionId,
     pendingAck, setPendingAck, receivedSteer, setReceivedSteer, setPermissionActionId,
     grantActionId, setGrantActionId, choiceActionId, setChoiceActionId, createPollBusy,
     setCreatePollBusy, setCreatePollVisible, connectorOfferActionId, setConnectorOfferActionId,
-    setTargetBranchNotice, setTargetBranchActionId, setMembershipActionPubkey, memberInviteBusy,
-    setMemberInviteBusy, setRosterVisible, setRoomActionsVisible, roomLifecycleBusy,
+    setTargetBranchNotice, setTargetBranchActionId, setRoomActionsVisible, roomLifecycleBusy,
     setRoomLifecycleBusy, renameBusy, setRenameEditing, setRenameError, renameDraft, setRenameBusy,
     renameTextDraft, openingRandomCorner, setOpeningRandomCorner, setForwardCornerPrompt,
     forwardCornerPrompt, uncoveredOwnersRef, setOwnerGrant, setRoomRepoAccessIssue,
     permissionActionId, appSignInActionId, setAppSignInActionId, targetBranchNotice,
     conversationFrameRef, setCornerActionsVisible, setDmActionsVisible, cornerOpenRepoPrompt,
-    ownerGrant, setComposerFocused, membershipActionPubkey, membershipError, closeRoster,
-    roomActionsRef, renameEditing, setRenameDraft, renameError, dmActionsVisible,
-    cornerActionsVisible, agentConnectVisible, agentPairError, agentPairCommand, createPollVisible,
+    ownerGrant, setComposerFocused, membershipError, roomActionsRef, renameEditing, setRenameDraft, renameError, dmActionsVisible,
+    cornerActionsVisible, agentConnectVisible, createPollVisible,
   ];
 }

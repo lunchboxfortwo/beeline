@@ -7,6 +7,7 @@ import { StyleSheet } from 'react-native-unistyles';
 import { beelineThemes } from '../sources/buzz/groknight';
 import { boneTheme, boneSmallTheme, boneLargeTheme, obsidianTheme, obsidianSmallTheme, obsidianLargeTheme } from '../sources/theme';
 import { ConversationComposer } from '../sources/components/buzz/ConversationComposer';
+import { GrammarProvider } from '../sources/ui/GrammarProvider';
 
 StyleSheet.configure({ themes: { bone: boneTheme, boneSmall: boneSmallTheme, boneLarge: boneLargeTheme,
   obsidian: obsidianTheme, obsidianSmall: obsidianSmallTheme, obsidianLarge: obsidianLargeTheme },
@@ -47,4 +48,4 @@ function Proof() {
     </View>
   </KeyboardAvoidingView>;
 }
-registerRootComponent(Proof);
+registerRootComponent(() => <GrammarProvider><Proof /></GrammarProvider>);

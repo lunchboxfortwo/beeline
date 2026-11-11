@@ -20,7 +20,7 @@ import { splitComposerTags } from '@/buzz/composer-tags';
 import { mentionKeyboardAction } from '@/buzz/composer-keyboard';
 import { TurnProgressLine } from '@/components/buzz/TurnProgressLine';
 import { ChannelSuggestionMenu, MentionSuggestionMenu } from '@/components/buzz/MentionSuggestionMenu';
-import { type RoomRosterParticipant } from '@/components/buzz/RoomRosterSheet';
+import { type RoomRosterParticipant } from '@/buzz/room-participants';
 import { RepoPicker } from '@/components/buzz/RepoPicker';
 import { SlashVerbPicker } from '@/components/buzz/SlashVerbPicker';
 import { Button } from '@/components/buzz/Button';
@@ -217,6 +217,12 @@ export const ChatSurfaceComposer = React.memo(function ChatSurfaceComposer({
     const contentHeight = Math.ceil(event.nativeEvent.contentSize.height);
     setComposerHeight(Math.min(COMPOSER_MAX_HEIGHT, Math.max(COMPOSER_MIN_HEIGHT, contentHeight)));
   }, [setComposerHeight]);
+  // "Message #beeline" in a chat, "Reply in thread" in a corner; a DM keeps its own hint.
+  const roomName = roomSurface?.room?.name?.trim();
+  const composerPlaceholder = isCorner
+    ? 'Reply in thread'
+    : !isDirectMessage && roomName ? `Message #${roomName}` : undefined;
+  const mentionPlace = isCorner ? 'this thread' : !isDirectMessage && roomName ? `#${roomName}` : undefined;
   return (<View style={[styles.bottomChromeStack, desktopExperience && styles.desktopReadingColumn]} testID="room-bottom-chrome">
                 {/* Phone turn chrome overlays the fixed transcript tail.
                 Its canvas fits below the whole newest row, including reactions;
@@ -288,6 +294,7 @@ export const ChatSurfaceComposer = React.memo(function ChatSurfaceComposer({
                         onSelect={selectMention}
                         overflow={mentionSuggestions.overflow}
                         personAvatar={(pubkey) => personProfileByPubkey.get(pubkey)?.avatar}
+                        place={mentionPlace}
                       />
                     )}
                     {channelMenuVisible && (
@@ -393,6 +400,7 @@ export const ChatSurfaceComposer = React.memo(function ChatSurfaceComposer({
                     ) : null}
                     <ConversationComposer
                       isDirectMessage={isDirectMessage}
+                      placeholder={composerPlaceholder}
                       hasAgentMembers={Boolean(roomSurface?.members.some(member => member.identity.kind === 'agent'))}
                       voice={!isCorner && roomSurface?.members.some(member => member.identity.kind === 'agent') ? voice : undefined}
                       onStop={

@@ -1,4 +1,4 @@
-import React, { useCallback, useMemo } from 'react';
+import React, { createContext, useCallback, useContext, useMemo } from 'react';
 import { Text, View, type StyleProp, type TextStyle } from 'react-native';
 import { StyleSheet } from 'react-native-unistyles';
 import { parseMarkdown, type MarkdownSpan } from '@/components/markdown/parseMarkdown';
@@ -10,6 +10,9 @@ import {
 } from '@/buzz/channel-reference';
 import { messageLinkId, openMessageLink } from '@/buzz/message-link';
 import { openExternalUrl } from '@/utils/open-external-url';
+
+/** The viewer's own normalized handle; a mention of it is highlighted. */
+const ViewerMention = createContext<string | undefined>(undefined);
 
 /**
  * A span split out of plain prose by `glossMentions` / `glossChannelReferences`
@@ -130,6 +133,8 @@ type MonoMarkdownProps = {
   leadingInline?: React.ReactNode;
   /** Handles backed by this event's real p-tags and current Room members. */
   mentionHandles?: readonly string[];
+  /** The viewer's own handle; a resolved mention of it is highlighted. */
+  viewerHandle?: string;
   /** Invoked for a resolved member mention. The handle is normalized. */
   onMention?: (handle: string) => void;
   /** Known rooms/corners of THIS workspace; omitted → no reference is linked. */
@@ -209,7 +214,7 @@ export function tableColumnWeights(rows: string[][]): number[] {
 /** Block kinds whose renderer starts with a `Text` that can host the handle. */
 const INLINE_HOSTS = new Set(['text', 'header', 'list', 'numbered-list']);
 
-function spanStyle(span: MentionSpan, base: StyleProp<TextStyle>, tailStyle?: TextStyle) {
+function spanStyle(span: MentionSpan, base: StyleProp<TextStyle>, tailStyle?: TextStyle, viewerHandle?: string) {
   return [
     base,
     span.styles.includes('bold') && styles.bold,
@@ -220,6 +225,9 @@ function spanStyle(span: MentionSpan, base: StyleProp<TextStyle>, tailStyle?: Te
     // A resolved channel reference shares the tagged-token brass: the same
     // interactive-text vocabulary as a @mention, never a new accent or chip.
     (span.mention || span.channelRef) && styles.mention,
+    // A mention of the viewer: semibold brass on the highlight, small radius.
+    span.mention && viewerHandle !== undefined &&
+      span.text.slice(1).normalize('NFKC').toLocaleLowerCase() === viewerHandle && styles.mentionViewer,
     // Last, so the arriving tail's tone wins over the settled body's.
     span.tail && tailStyle,
   ];
@@ -247,6 +255,7 @@ function InlineMarkdown({
   // One funnel: every prose block (text, header, list items) renders its spans
   // here, so a mention or a channel reference glosses identically wherever it
   // is spoken.
+  const viewerHandle = useContext(ViewerMention);
   const glossed = markTailSpans(
     glossChannelReferences(glossMentions(spans, liveMentionHandles), channelIndex),
     tail?.length ?? 0,
@@ -270,7 +279,7 @@ function InlineMarkdown({
                   ? () => onLink(span.url!)
                   : undefined
           }
-          style={spanStyle(span, base, tail?.style)}
+          style={spanStyle(span, base, tail?.style, viewerHandle)}
         >
           {span.text}
         </Text>
@@ -323,6 +332,7 @@ export function monoMarkdownPropsAreEqual(
     previous.codeSource?.messageId === next.codeSource?.messageId &&
     previous.onOpenCode === next.onOpenCode &&
     previous.onMention === next.onMention &&
+    previous.viewerHandle === next.viewerHandle &&
     previous.testID === next.testID &&
     previous.tail?.length === next.tail?.length &&
     previous.tail?.style === next.tail?.style &&
@@ -379,6 +389,7 @@ export const MonoMarkdown = React.memo(function MonoMarkdown({
   document = false,
   leadingInline,
   mentionHandles,
+  viewerHandle,
   onMention,
   channelIndex,
   onChannelReference,
@@ -411,7 +422,9 @@ export const MonoMarkdown = React.memo(function MonoMarkdown({
     INLINE_HOSTS.has(first.type) &&
     !('items' in first && first.items.length === 0);
 
+  const viewerMention = viewerHandle?.replace(/^@/, '').normalize('NFKC').toLocaleLowerCase();
   return (
+    <ViewerMention.Provider value={viewerMention}>
     <View style={styles.root} testID={testID}>
       {leadingInline && !inlineHosted ? (
         <Text selectable style={[base, styles.block]}>
@@ -550,6 +563,7 @@ export const MonoMarkdown = React.memo(function MonoMarkdown({
         return null;
       })}
     </View>
+    </ViewerMention.Provider>
   );
 }, monoMarkdownPropsAreEqual);
 
@@ -576,6 +590,11 @@ const styles = StyleSheet.create((theme) => ({
   // A tagged identity pops in the theme's brass — the one chromatic spend in
   // prose, shared with every other "this is addressed/live" signal.
   mention: { color: theme.buzz.accent },
+  mentionViewer: {
+    fontFamily: theme.buzz.proseSemibold,
+    backgroundColor: theme.buzz.bgHighlight,
+    borderRadius: theme.buzz.radius,
+  },
   heading: {
     fontFamily: theme.buzz.proseSemibold,
     color: theme.buzz.ledgerBright,

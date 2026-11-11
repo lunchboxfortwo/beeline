@@ -71,10 +71,14 @@ function squireRow(status: 'connected' | 'not-added' = 'connected'): import('@be
     status: status === 'connected' ? 'Ready' : 'Not added', items: [], machines: [{ id: 'machine-one', name: 'Laptop', online: true, status }] };
 }
 import ConnectorServiceScreen from './service';
+import { ConnectorRow } from '@/ui/screens/settings/connectors/ConnectorParts';
+import { Btn, SheetFrame, SheetRow } from '@/ui/grammar';
 
 const navigation = vi.hoisted(() => ({ back: vi.fn(), push: vi.fn() }));
 vi.mock('@/buzz/use-active-community', () => ({ useActiveCommunityId: () => 'ws' }));
-vi.mock('@/components/buzz/SurfaceGlyphLoader', () => ({ SurfaceGlyphLoader: () => null }));
+vi.mock('tamagui', async () => (await import('@/ui/screens/transcript/grammar-hosts.test-support')).tamaguiHosts());
+vi.mock('@/components/buzz/SurfaceGlyphLoader', async () => { const R = await import('react'); return { SurfaceGlyphLoader: (props: any) => R.createElement('SurfaceGlyphLoader', props) }; });
+vi.mock('lucide-react-native', async () => (await import('@/ui/screens/transcript/grammar-hosts.test-support')).lucideHosts());
 const params = vi.hoisted(() => ({ service: 'vercel', helperId: '' }));
 const browser = vi.hoisted(() => ({ open: vi.fn().mockResolvedValue({ type: 'dismiss' }) }));
 vi.mock('expo-router', () => ({ router: navigation,
@@ -86,16 +90,8 @@ vi.mock('react-native', async () => { const R = await import('react');
   const host = (name: string) => (props: any) => R.createElement(name, props, props.children);
   return { ScrollView: host('ScrollView'), Text: host('Text'), View: host('View') };
 });
-vi.mock('@/components/buzz/PageHeader', () => ({ PageHeader: (props: any) => React.createElement('PageHeader', props) }));
 vi.mock('@/components/buzz/ServiceMark', () => ({ ServiceMark: (props: any) => React.createElement('ServiceMark', props) }));
 vi.mock('@/components/buzz/IdentityMark', () => ({ IdentityMark: (props: any) => React.createElement('IdentityMark', props) }));
-vi.mock('@/components/buzz/SettingsRow', () => ({ SettingsRow: (props: any) => React.createElement('SettingsRow', props) }));
-vi.mock('@/components/buzz/Button', () => ({ Button: (props: any) => React.createElement('Button', props) }));
-vi.mock('@/components/buzz/HullActionSheet', () => ({
-  HullActionSheetModal: (props: any) => React.createElement('HullActionSheetModal', props, props.children),
-  HullActionSheetRow: (props: any) => React.createElement('HullActionSheetRow', props),
-  HullActionSheetCancel: (props: any) => React.createElement('HullActionSheetCancel', props),
-}));
 
 beforeEach(() => {
   mobileSurfaceCache.clear();
@@ -117,9 +113,9 @@ describe('company detail', () => {
     expect(key.props.onPress).toBeUndefined(); expect(key.props.chevron).toBeUndefined();
     expect(renderer.root.findByProps({ testID: 'connector-info-status' }).props.value).toBe('Connected');
     expect(renderer.root.findByProps({ testID: 'connector-info-agents' }).props.children).toBe('Agents call Vercel with your keys, only on the hosts you allow.');
-    expect([...renderer.root.findAllByType('SettingsRow'), ...renderer.root.findAllByType('Button')]
+    expect([...renderer.root.findAllByType(ConnectorRow), ...renderer.root.findAllByType(Btn)]
       .some((node: any) => /Disconnect/.test(`${node.props.title ?? ''} ${node.props.label ?? ''}`))).toBe(false);
-    expect(renderer.root.findAllByType('HullActionSheetModal').every((sheet: any) => !sheet.props.visible)).toBe(true);
+    expect(renderer.root.findAllByType(SheetFrame).every((sheet: any) => !sheet.props.open)).toBe(true);
     await act(async () => renderer.root.findByProps({ testID: 'connector-squire-vault' }).props.onPress());
     expect(browser.open).toHaveBeenCalledWith('https://trustysquire.ai/vault');
     expect(navigation.push).not.toHaveBeenCalled();
@@ -136,14 +132,14 @@ describe('company detail', () => {
   it('shows only eligible computers in the sign-in service, with no key controls', async () => {
     params.service = 'trusty-squire'; const renderer = await render();
     expect(renderer.root.findAllByProps({ testID: 'company-item-vercel-key' })).toHaveLength(0);
-    expect(renderer.root.findAllByType('SettingsRow').map((r: any) => r.props.title)).toEqual(['Trusty Squire', 'Laptop']);
+    expect(renderer.root.findAllByType(ConnectorRow).map((r: any) => r.props.title)).toEqual(['Trusty Squire', 'Laptop']);
   });
   it('disconnects the selected computer and refreshes the server answer', async () => {
     params.service = 'trusty-squire'; const source = new MockWorkbenchSource();
     const read = vi.spyOn(source, 'readWorkbench').mockResolvedValue(companyWorkbench([squireRow()]));
     const disconnect = vi.spyOn(source, 'disconnectConnector').mockResolvedValue(undefined); setWorkbenchSource(source);
     const renderer = await render(); await act(async () => renderer.root.findByProps({ testID: 'squire-computer-machine-one' }).props.onPress());
-    await act(async () => renderer.root.findByType('HullActionSheetRow').props.onPress());
+    await act(async () => renderer.root.findByType(SheetRow).props.onPress());
     expect(disconnect).toHaveBeenCalledWith({ workspaceId: 'ws', connectorId: 'squire:machine-one' }); expect(read.mock.calls.length).toBeGreaterThan(1);
   });
 });
@@ -176,9 +172,9 @@ describe('AI app info page', () => {
     expect(renderer.root.findAllByProps({ testID: 'connector-squire-vault' })).toHaveLength(0);
     await act(async () => renderer.root.findByProps({ testID: 'ai-client-agent' }).props.onPress());
     expect(navigation.push).toHaveBeenCalledWith({ pathname: '/beeline/agent-profile', params: { communityId: 'ws', agentId: 'agent-pidoong' } });
-    expect(renderer.root.findAllByType('HullActionSheetModal').every((sheet: any) => !sheet.props.visible)).toBe(true);
+    expect(renderer.root.findAllByType(SheetFrame).every((sheet: any) => !sheet.props.open)).toBe(true);
     await act(async () => status.props.onPress());
-    const sheet = renderer.root.findAllByType('HullActionSheetModal').find((node: any) => node.props.visible)!;
+    const sheet = renderer.root.findAllByType(SheetFrame).find((node: any) => node.props.open)!;
     expect(sheet.props.title).toBe('ChatGPT');
     await act(async () => renderer.root.findByProps({ testID: 'ai-client-disconnect' }).props.onPress());
     expect(disconnect).toHaveBeenCalledWith({ clientId: 'chatgpt' });
@@ -275,7 +271,7 @@ describe('app connections on the info page', () => {
     await act(async () => { await row.props.onPress(); });
     expect(begin).toHaveBeenCalledWith({ appId: 'notion' });
     expect(disconnect).not.toHaveBeenCalled();
-    expect(renderer.root.findAllByType('HullActionSheetModal').every((sheet: any) => !sheet.props.visible)).toBe(true);
+    expect(renderer.root.findAllByType(SheetFrame).every((sheet: any) => !sheet.props.open)).toBe(true);
     await act(async () => renderer.unmount());
   });
   it('connected: disconnects from the info page itself, with no app page pushed', async () => {
@@ -289,9 +285,9 @@ describe('app connections on the info page', () => {
     expect(appRow.props.action).toBeUndefined();
     await act(async () => appRow.props.onPress());
     expect(navigation.push).not.toHaveBeenCalled();
-    const sheet = renderer.root.findAllByType('HullActionSheetModal').find((node: any) => node.props.title === 'Notion');
-    expect(sheet.props.visible).toBe(true);
-    await act(async () => { sheet.findByType('HullActionSheetRow').props.onPress(); await Promise.resolve(); });
+    const sheet = renderer.root.findAllByType(SheetFrame).find((node: any) => node.props.title === 'Notion');
+    expect(sheet.props.open).toBe(true);
+    await act(async () => { sheet.findByType(SheetRow).props.onPress(); await Promise.resolve(); });
     expect(disconnect).toHaveBeenCalledWith({ workspaceId: 'ws', appId: 'notion' });
     expect(navigation.push).not.toHaveBeenCalled();
     await act(async () => renderer.unmount());
@@ -376,7 +372,7 @@ describe('three-state connection status', () => {
     }]), apps: [googleApp('gmail', 'Gmail', 'connected'), googleApp('cal', 'Google Calendar', 'connected'), googleApp('drive', 'Google Drive', 'connected')] });
     setWorkbenchSource(source); params.service = 'google';
     const renderer = await render();
-    const connected = renderer.root.findAllByType('SettingsRow').filter((row: any) => row.props.value === 'Connected');
+    const connected = renderer.root.findAllByType(ConnectorRow).filter((row: any) => row.props.value === 'Connected');
     expect(connected).toHaveLength(1);
     expect(connected[0].props.testID).toBe('connector-info-status');
     for (const id of ['gmail', 'cal', 'drive', 'builtin:google']) {
@@ -416,7 +412,7 @@ describe('three-state connection status', () => {
     expect(error.props.action).toBe('Reconnect');
     expect(healthy.props.value).toBeUndefined();
     expect(healthy.props.action).toBeUndefined();
-    const copy = renderer.root.findAllByType('SettingsRow').flatMap((row: any) =>
+    const copy = renderer.root.findAllByType(ConnectorRow).flatMap((row: any) =>
       [row.props.value, row.props.action, row.props.title, row.props.description]).join(' ');
     expect(copy).not.toMatch(/Offline/);
     await act(async () => renderer.unmount());

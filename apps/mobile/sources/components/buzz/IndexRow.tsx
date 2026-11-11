@@ -21,17 +21,6 @@ import { StateDot } from './StateDot';
 export type IndexRowInset = 'row' | 'sheet' | 'flush';
 export const IndexRowInsetContext = React.createContext<IndexRowInset>('row');
 
-/** Title edge after the row's leading identity mark. */
-export function indexRowTitleInset(
-  space: { sm: number; md: number },
-  markSize: number,
-  inset: IndexRowInset = 'row',
-): number {
-  return (
-    (inset === 'flush' ? 0 : inset === 'sheet' ? HULL_SHEET_INSET : space.sm) + markSize + space.md
-  );
-}
-
 /** Shared rich-content target: preserves the content surface's layout and nested actions. */
 export function ContentTarget(props: PressableProps) {
   return <Pressable {...props} />;
@@ -43,11 +32,6 @@ export function ContentTarget(props: PressableProps) {
 export function InlineRow({ style, onPress, ...props }: ViewProps & { onPress?: () => void }) {
   if (onPress) return <Pressable {...props} onPress={onPress} style={[inlineStyles.row, style]} />;
   return <View {...props} style={[inlineStyles.row, style]} />;
-}
-
-/** A contextual action or failure occupying the standard list footer height. */
-export function InlineActionRow(props: Omit<ViewProps, 'style'>) {
-  return <View {...props} style={inlineStyles.actionRow} />;
 }
 
 /** Transcript navigation keeps rich text, an optional hanging glyph, and two
@@ -119,7 +103,7 @@ export function TranscriptNavigationRow({
   );
 }
 
-const inlineStyles = StyleSheet.create(() => ({ row: { flexDirection: 'row' }, actionRow: { minHeight: 44, justifyContent: 'center' } }));
+const inlineStyles = StyleSheet.create(() => ({ row: { flexDirection: 'row' } }));
 const navigationStyles = StyleSheet.create(({ buzz }) => ({
   row: { minHeight: 44, flexDirection: 'row', alignItems: 'flex-start', gap: buzz.space.sm },
   divider: { borderTopWidth: StyleSheet.hairlineWidth, borderTopColor: buzz.border },
@@ -634,23 +618,3 @@ const styles = StyleSheet.create((theme) => {
   };
 });
 
-/** Compact, wrapping facts inside a transcript card. */
-export function TranscriptFactRow({ label, value }: { label: string; value: string }) {
-  return (
-    <View style={factStyles.row}>
-      <Text style={factStyles.label}>{label}</Text>
-      <Text style={factStyles.value}>{value}</Text>
-    </View>
-  );
-}
-const factStyles = StyleSheet.create(({ buzz }) => ({
-  row: {
-    flexDirection: 'row',
-    gap: buzz.space.sm,
-    paddingVertical: buzz.space.sm,
-    borderTopWidth: StyleSheet.hairlineWidth,
-    borderTopColor: buzz.border,
-  },
-  label: { ...buzz.type.meta, color: buzz.ledgerQuiet },
-  value: { ...buzz.type.meta, color: buzz.textPrimary, flex: 1, textAlign: 'right' },
-}));

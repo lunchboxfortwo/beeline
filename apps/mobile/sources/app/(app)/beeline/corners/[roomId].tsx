@@ -1,135 +1,50 @@
-import { SettingsRow } from '@/components/buzz/SettingsRow';
-import { desktopColumnWidths } from '@/buzz/desktop-layout-tokens';
 import { useLatencyRouteFrame } from '@/buzz/latency-route-hook';
-import React, { useEffect, useMemo, useRef, useState } from 'react';
-import { Text, TouchableOpacity, View } from 'react-native';
-import { StyleSheet } from 'react-native-unistyles';
-import { router, useLocalSearchParams, type Href } from 'expo-router';
-import { useSafeAreaInsets } from 'react-native-safe-area-context';
-import type { Identity } from '@beeline/buzz-client';
-import { roomTitle } from '@beeline/api-contract/phone';
-import { RoomViewClient } from '@/sync/transport/room-view-client';
-import { getEffectiveRelayUrl, loadBuzzIdentity } from '@/auth/buzz-identity-storage';
-import { CHANGES_LABEL, CORNER_LABEL, WORKSPACE_LABEL } from '@/buzz/vocabulary';
-import { Button } from '@/components/buzz/Button';
-import { SurfaceGlyphLoader } from '@/components/buzz/SurfaceGlyphLoader';
-import { RoomCornersHeader } from '@/components/buzz/RoomCornersHeader';
-import { RoomCornersList } from '@/components/buzz/RoomCornersList';
+import React, { useEffect, useRef, useState } from 'react';
+import { router, useLocalSearchParams } from 'expo-router';
+import { YStack } from 'tamagui';
+import { CornerDownRight, Plus } from 'lucide-react-native';
+import { cornerShortTitle, roomTitle } from '@beeline/api-contract/phone';
+import { loadBuzzIdentity } from '@/auth/buzz-identity-storage';
+import { CORNER_LABEL } from '@/buzz/vocabulary';
 import { CornerOpenRow } from '@/components/buzz/CornerOpenToast';
+import { SurfaceGlyphLoader } from '@/components/buzz/SurfaceGlyphLoader';
 import { BuzzRigTransport } from '@/sync/transport';
-import { Typography } from '@/constants/Typography';
-import { BuzzCommunityShell } from '@/components/buzz/CommunityRail';
-import { cornerHref } from '@/buzz/corner-navigation';
+import { cornerHref, roomHref } from '@/buzz/corner-navigation';
 import { openRoomListCorner } from '@/buzz/room-list-new-corner';
 import type { CornerOpenAttempt } from '@/buzz/open-random-corner';
 import { phoneOperationFailureReason } from '@/sync/transport/monolith-operation';
 import { Modal } from '@/modal';
-import { archivedCornersByClosure, type ArchivedCornersState } from '@/buzz/archived-corners';
-import { useIsDesktop } from '@/utils/responsive';
-import { liveRoomRuns, useRoomWorkflowRuns } from '@/buzz/use-room-workflow-run';
-import { workflowRunHref } from '@/buzz/workflow-run-copy';
-import { openCornerBriefViewer } from '@/components/buzz/corner-brief-viewer';
 import { useRoomCorners } from '@/buzz/use-room-corners';
+import { Btn, Copy, Glyph, Screen } from '@/ui/grammar';
+import { ThreadLine } from '@/ui/screens/thread/ThreadLine';
 
-/** The footer's read status; the archived rows themselves live in the corner record. */
-type ArchivedFooter =
-  | { readonly status: 'idle' }
-  | { readonly status: 'loading' }
-  | {
-      readonly status: 'ready';
-      readonly more?:
-        | { readonly status: 'loading' }
-        | { readonly status: 'error'; readonly reason: string };
-    }
-  | { readonly status: 'error'; readonly reason: string };
-
+/**
+ * A chat's active threads on their own page. Reached from older links,
+ * notification stacks and `/corners`; the chat's "Threads · N active"
+ * drop-down is the everyday way in, and finished threads live in chat info.
+ */
 export default function BuzzCorners() {
   useLatencyRouteFrame('/beeline/corners/[roomId]');
   const { roomId } = useLocalSearchParams<{ roomId: string }>();
   const decodedId = roomId ? decodeURIComponent(roomId) : '';
-  const insets = useSafeAreaInsets();
-  // The Room's one corner record: rows the Room lane already heard paint with
-  // no read, whichever screen held the lane when they arrived.
+  // The Room's one corner record: rows the Room lane already heard paint with no read.
   const corners = useRoomCorners(decodedId || undefined);
   const surface = corners.view ?? null;
   useLatencyRouteFrame('/beeline/corners/[roomId]', surface !== null, true);
-  const error = corners.error;
-  const [refreshing, setRefreshing] = useState(false);
   const creatingRef = useRef(false);
   const [creating, setCreating] = useState(false);
-  const [archivedStatus, setArchivedStatus] = useState<ArchivedFooter>({ status: 'idle' });
-  const desktop = useIsDesktop();
-  // Desktop cells name each corner's live workflow; one read covers the Room.
-  const workflows = useRoomWorkflowRuns(desktop && decodedId ? decodedId : undefined);
   useEffect(() => {
     void loadBuzzIdentity().then((identity) => {
       if (!identity) router.replace('/beeline/onboarding');
     });
   }, []);
-  const archivedRows = corners.record?.archived;
-  const archived = useMemo<ArchivedCornersState>(
-    () =>
-      archivedStatus.status === 'ready' && archivedRows
-        ? {
-            status: 'ready',
-            corners: archivedCornersByClosure(archivedRows.corners),
-            ...(archivedRows.next ? { next: archivedRows.next } : {}),
-            ...(archivedStatus.more ? { more: archivedStatus.more } : {}),
-          }
-        : archivedStatus.status === 'ready'
-          ? { status: 'loading' }
-          : archivedStatus,
-    [archivedRows, archivedStatus],
-  );
 
-  const title = useMemo(
-    () => (surface ? (roomTitle(surface.room.name) ?? surface.room.name) : 'Room'),
-    [surface],
-  );
-  /** The list knows only that a brief exists; its text comes with the corner's own view. */
-  const openBrief = async (cornerId: string) => {
-    try {
-      const identity = (await loadBuzzIdentity()) as Identity | null;
-      if (!identity) throw new Error('Beeline identity is unavailable');
-      const relayUrl = await getEffectiveRelayUrl();
-      const view = await new RoomViewClient({ baseUrl: relayUrl, identity }).room(cornerId);
-      if (!view.cornerBrief) throw new Error('This corner has no brief yet');
-      openCornerBriefViewer(view.cornerBrief);
-    } catch (reason) {
-      Modal.alert('Could not open the brief', phoneOperationFailureReason(reason));
-    }
-  };
-  /**
-   * Closed corners are not in the live surface, so the archived footer pays
-   * for its own read the first time it is tapped. A read already in flight or
-   * already landed is not repeated; a failed one is, because the footer offers
-   * the retry in its own label. The server sends ten at a time. The rows live
-   * in the Room's corner record, which re-reads them when a corner closes.
-   */
-  const loadArchived = async () => {
-    if (archivedStatus.status === 'loading' || archivedStatus.status === 'ready') return;
-    setArchivedStatus({ status: 'loading' });
-    try {
-      await corners.loadArchived(false);
-      setArchivedStatus({ status: 'ready' });
-    } catch (reason) {
-      setArchivedStatus({ status: 'error', reason: phoneOperationFailureReason(reason) });
-    }
-  };
-  const loadMoreArchived = async () => {
-    if (archived.status !== 'ready' || !archived.next || archived.more?.status === 'loading') {
-      return;
-    }
-    setArchivedStatus({ status: 'ready', more: { status: 'loading' } });
-    try {
-      await corners.loadArchived(true);
-      setArchivedStatus({ status: 'ready' });
-    } catch (reason) {
-      setArchivedStatus({
-        status: 'ready',
-        more: { status: 'error', reason: phoneOperationFailureReason(reason) },
-      });
-    }
+  const name = surface?.room.name ?? null;
+  const title = name ? (roomTitle(name) ?? name) : 'Threads';
+  const back = () => {
+    if (router.canGoBack()) router.back();
+    else if (decodedId) router.replace(roomHref(decodedId));
+    else router.replace('/beeline/channels');
   };
 
   const createCorner = async (attempt?: CornerOpenAttempt) => {
@@ -142,16 +57,10 @@ export default function BuzzCorners() {
       await openRoomListCorner({
         roomId: decodedId,
         attempt,
-        createCorner: (roomId, title, cornerId) =>
-          new BuzzRigTransport(identity).createHumanCorner(
-            roomId,
-            title,
-            undefined,
-            true,
-            cornerId,
-          ),
-        openCorner: (cornerId, title) =>
-          router.push(cornerHref(cornerId, decodedId, title, 'corners')),
+        createCorner: (parentId, cornerTitle, cornerId) =>
+          new BuzzRigTransport(identity).createHumanCorner(parentId, cornerTitle, undefined, true, cornerId),
+        openCorner: (cornerId, cornerTitle) =>
+          router.push(cornerHref(cornerId, decodedId, cornerTitle, 'corners')),
         retry: (failed) => void createCorner(failed),
       });
     } catch (reason) {
@@ -162,95 +71,38 @@ export default function BuzzCorners() {
     }
   };
 
-  if (!surface && !error) {
-    return (
-      <View style={[styles.container, styles.center, { paddingTop: insets.top }]}>
-        <SurfaceGlyphLoader testID="changes-loader" />
-        <Text style={styles.loading}>Loading {CHANGES_LABEL}…</Text>
-      </View>
-    );
-  }
-  if (!surface) {
-    return (
-      <View style={[styles.container, styles.center, { paddingTop: insets.top }]}>
-        <SettingsRow title={error!} />
-      </View>
-    );
-  }
-
+  const rows = corners.openRows;
+  const more = corners.record?.nextOpen ? Math.max(0, (corners.record.summary?.cornerCount ?? 0) - rows.length) : 0;
   return (
-    <BuzzCommunityShell
-      communities={
-        surface.room.workspaceId
-          ? [{ communityId: surface.room.workspaceId, name: WORKSPACE_LABEL }]
-          : []
-      }
-      activeCommunityId={surface.room.workspaceId ?? null}
-      onSelect={(communityId) =>
-        communityId &&
-        router.replace({ pathname: '/beeline/channels', params: { communityId } } as never)
-      }
-      onAdd={() => router.push('/beeline/community' as Href)}
-      onSettings={() => router.push('/beeline/settings' as Href)}
-      viewerPubkey={surface.viewer.identity.pubkey}
-      viewerAvatarUrl={surface.viewer.identity.avatar}
-      viewerFace={surface.viewer.identity.face}
+    <Screen
+      title={name ? `${title} · Threads` : title}
+      back={back}
+      testID="room-corners"
+      right={surface ? (
+        <Btn kind="icon" label={`New ${CORNER_LABEL}`} disabled={creating} onPress={() => void createCorner()} testID="room-corners-new">
+          <Glyph icon={Plus} />
+        </Btn>
+      ) : undefined}
     >
-      <View style={[styles.container, { paddingTop: insets.top }, desktop && { width: '100%', maxWidth: desktopColumnWidths.list, alignSelf: 'center' }]}>
-        {/* Chrome sits on the slab: no plate, no texture, one hairline and
-          type weight — the same header the Members screen carries. */}
-        <RoomCornersHeader
-          desktop={desktop}
-          title={title}
-          onBack={() => router.back()}
-          busy={creating}
-          onAdd={() => void createCorner()}
-        />
-        {!!error && (
-          <SettingsRow title={error!} />
-        )}
-        <CornerOpenRow roomId={decodedId} />
-        <RoomCornersList
-          corners={corners.openRows}
-          onMoreOpen={() => void corners.loadMoreOpen()}
-          moreOpen={!!corners.record?.nextOpen}
-          parentRoomId={decodedId}
-          parentRoomName={title}
-          refreshing={refreshing}
-          // The list runs to the bottom edge, so it clears the gesture bar
-          // itself rather than tucking its last row under it.
-          bottomInset={insets.bottom}
-          archived={archived}
-          onShowArchived={() => void loadArchived()}
-          onMoreArchived={() => void loadMoreArchived()}
-          desktop={desktop}
-          liveRuns={(cornerId) => liveRoomRuns(cornerId, workflows)}
-          onOpenWorkflow={(run) => router.push(workflowRunHref(run))}
-          onOpenBrief={(item) => void openBrief(item.corner.id)}
-          onRefresh={() => {
-            setRefreshing(true);
-            void corners.refresh().finally(() => setRefreshing(false));
-          }}
-        />
-      </View>
-    </BuzzCommunityShell>
+      <CornerOpenRow roomId={decodedId} />
+      {!surface && !corners.error ? <SurfaceGlyphLoader testID="changes-loader" /> : null}
+      {corners.error ? <Copy quiet testID="room-corners-error">{corners.error}</Copy> : null}
+      {surface ? (
+        <YStack testID="room-corners-list">
+          {rows.map((row) => (
+            <ThreadLine key={row.corner.id} title={cornerShortTitle(name, row.corner.name, row.corner.id)} state={row.state}
+              onPress={() => router.push(cornerHref(row.corner.id, decodedId, row.corner.name, 'corners'))}
+              testID={`thread-row-${row.corner.id}`} />
+          ))}
+          {corners.record?.nextOpen ? (
+            <Btn kind="quiet" label="More threads" justifyContent="flex-start" gap="2"
+              onPress={() => void corners.loadMoreOpen()} testID="room-corners-more">
+              <Glyph icon={CornerDownRight} size={16} />
+              <Copy small quiet>{more ? `${more} more` : 'More'}</Copy>
+            </Btn>
+          ) : null}
+        </YStack>
+      ) : null}
+    </Screen>
   );
 }
-
-const styles = StyleSheet.create((theme) => {
-  const hull = theme.buzz;
-  return {
-    container: { flex: 1, backgroundColor: hull.bgTerminal },
-    center: {
-      alignItems: 'center',
-      justifyContent: 'center',
-      gap: hull.space.md,
-      paddingHorizontal: hull.space.lg,
-    },
-    loading: { ...Typography.default(), ...hull.type.meta, color: hull.textMuted },
-    errorPanel: { paddingHorizontal: hull.space.md, paddingVertical: hull.space.sm },
-    // F9: one error voice; only the full-screen state centres it.
-    error: { ...Typography.default(), ...hull.type.meta, color: hull.danger },
-    errorCentered: { textAlign: 'center' },
-  };
-});

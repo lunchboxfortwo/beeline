@@ -15,7 +15,7 @@
     "coldDepthMax": 1
   },
   {
-    "path": "/beeline/agents",
+    "path": "/beeline/brief",
     "coldHttpMax": 1,
     "coldDepthMax": 1
   },
@@ -26,6 +26,11 @@
   },
   {
     "path": "/beeline/channels",
+    "coldHttpMax": 1,
+    "coldDepthMax": 1
+  },
+  {
+    "path": "/beeline/chat-info",
     "coldHttpMax": 1,
     "coldDepthMax": 1
   },
@@ -78,6 +83,11 @@
     "path": "/beeline/onboarding",
     "coldHttpMax": 0,
     "coldDepthMax": 0
+  },
+  {
+    "path": "/beeline/people",
+    "coldHttpMax": 1,
+    "coldDepthMax": 1
   },
   {
     "path": "/beeline/settings",

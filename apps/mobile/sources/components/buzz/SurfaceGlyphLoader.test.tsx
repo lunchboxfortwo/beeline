@@ -28,13 +28,11 @@ const LOADING_SURFACES: readonly LoadingSurface[] = [
   { id: 'room-corner-entry', file: 'app/(app)/beeline/chat/_chat-surface.tsx', treatment: 'glyph' },
   { id: 'room-deck', file: 'components/buzz/RoomDeckLoadingView.tsx', treatment: 'glyph' },
   { id: 'changes-list', file: 'app/(app)/beeline/corners/[roomId].tsx', treatment: 'glyph' },
-  { id: 'members', file: 'app/(app)/beeline/members.tsx', treatment: 'glyph' },
-  {
-    id: 'workspace-settings',
-    file: 'components/buzz/WorkspaceSettingsPanel.tsx',
-    treatment: 'glyph',
-  },
-  { id: 'community', file: 'app/(app)/beeline/community.tsx', treatment: 'glyph' },
+  { id: 'people', file: 'ui/screens/people/PeopleTabScreen.tsx', treatment: 'glyph' },
+  { id: 'workspace-settings', file: 'ui/screens/settings/WorkspaceSettings.tsx', treatment: 'glyph' },
+  { id: 'agent-profile', file: 'ui/screens/profiles/AgentProfileScreen.tsx', treatment: 'glyph' },
+  { id: 'person-profile', file: 'ui/screens/profiles/PersonProfileScreen.tsx', treatment: 'glyph' },
+  { id: 'community', file: 'ui/screens/onboarding/WorkspaceSetup.tsx', treatment: 'glyph' },
   { id: 'schedules', file: 'app/(app)/beeline/settings/schedules.tsx', treatment: 'glyph' },
   { id: 'workbench', file: 'app/(app)/beeline/settings/workbench.tsx', treatment: 'glyph' },
   {
@@ -44,7 +42,6 @@ const LOADING_SURFACES: readonly LoadingSurface[] = [
   },
   { id: 'wallet', file: 'app/(app)/beeline/settings/workbench/wallet.tsx', treatment: 'glyph' },
   { id: 'tray', file: 'app/(app)/beeline/tray.tsx', treatment: 'glyph' },
-  { id: 'member-picker', file: 'components/buzz/MemberPickerSheet.tsx', treatment: 'glyph' },
   {
     id: 'forward-picker',
     file: 'components/buzz/ForwardMessagePickerSheet.tsx',
@@ -70,7 +67,7 @@ const LOADING_SURFACES: readonly LoadingSurface[] = [
   },
   {
     id: 'ota-check-busy',
-    file: 'app/(app)/beeline/settings/identity.tsx',
+    file: 'ui/screens/settings/YouSettings.tsx',
     treatment: 'exception',
     reason:
       'Trailing Settings-row busy while a version check returns; same compact-control case as a button, not a page load gate.',

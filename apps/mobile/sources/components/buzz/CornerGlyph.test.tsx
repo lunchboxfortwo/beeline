@@ -1,5 +1,3 @@
-import { readFileSync } from 'node:fs';
-import path from 'node:path';
 import * as React from 'react';
 // @ts-expect-error react-test-renderer has no declarations in this workspace.
 import { act, create } from 'react-test-renderer';
@@ -78,33 +76,5 @@ describe('CornerGlyph', () => {
   it('keeps the inline sizes on the meta and status lines', () => {
     expect(CORNER_META_SIZE).toBe(13);
     expect(CORNER_STATUS_SIZE).toBe(11);
-  });
-
-  it('uses theme brass in the Room header and keeps the default at inline mounts', () => {
-    const roots = path.resolve(__dirname, '../..');
-    const headerSource = readFileSync(
-      path.join(roots, 'app/(app)/beeline/chat/ChatSurfaceHeader.tsx'),
-      'utf8',
-    );
-    const headerMounts = [...headerSource.matchAll(/<CornerGlyph\b[^>]*\/?>/g)].map(
-      (match) => match[0],
-    );
-    expect(headerMounts).toContainEqual(
-      expect.stringContaining('color={styles.roomCornersGlyph.color}'),
-    );
-    expect(readFileSync(path.join(roots, 'app/(app)/beeline/chat/chat-surface-styles.ts'), 'utf8')).toContain('roomCornersGlyph: { color: groknight.accent }');
-
-    const inlineSites = [
-      'app/(app)/beeline/tray.tsx',
-      'components/buzz/WritePermissionOutcome.tsx',
-    ];
-    for (const site of inlineSites) {
-      const source = readFileSync(path.join(roots, site), 'utf8');
-      const mounts = [...source.matchAll(/<CornerGlyph\b[^>]*\/?>/g)].map((match) => match[0]);
-      expect(mounts.length, `${site} mounts CornerGlyph`).toBeGreaterThan(0);
-      for (const mount of mounts) {
-        expect(mount, `${site} restains CornerGlyph`).not.toContain('color=');
-      }
-    }
   });
 });

@@ -42,19 +42,24 @@ export const scenarios = {
 };
 export function fixture(name) {
   if (!Object.hasOwn(scenarios, name)) throw new Error(`No web fixture: ${name}`);
+  // Where the measured action starts.
   const route = [
     'switch-workspace',
     'create-room',
-    'create-dm',
+    'create-corner',
     'mark-read',
     'mark-unread',
   ].includes(name)
     ? '/beeline/channels'
-    : ['choose-model', 'change-yolo'].includes(name)
-      ? '/beeline/members'
+    : ['choose-model', 'change-yolo', 'create-dm'].includes(name)
+      ? '/beeline/agent-profile'
       : name === 'answer-approval'
         ? '/beeline/tray'
-        : '/beeline/chat/[channelId]';
+        : name === 'open-corner'
+          ? '/beeline/corners/[roomId]'
+          : name === 'leave-room'
+            ? '/beeline/chat-info'
+            : '/beeline/chat/[channelId]';
   return {
     route,
     name,

@@ -1,21 +1,17 @@
 import { appReadErrorCopy } from '@/buzz/app-error-copy';
-import { IndexRow } from '@/components/buzz/IndexRow';
 import { useArtifactRecoveryGeneration } from '@/buzz/use-artifact-recovery';
-import { Button } from '@/components/buzz/Button';
-import { CloseButton } from '@/components/buzz/CloseGlyph';
 import React, { useEffect, useRef, useState } from 'react';
-import { Platform, Pressable, ScrollView, Text, View } from 'react-native';
-import { StyleSheet, useUnistyles } from 'react-native-unistyles';
-import { useSafeAreaInsets } from 'react-native-safe-area-context';
+import { Platform } from 'react-native';
+import { StyleSheet } from 'react-native-unistyles';
+import { Copy as CopyIcon, RefreshCw, Share2 } from 'lucide-react-native';
 import type { AttachmentReference } from '@beeline/buzz-client';
 
 import { artifactFormat, createInitialLoadGuard, wrapArtifactMarkup } from '@/buzz/artifact';
-import { artifactPdfLocalUri, fetchArtifactBytes, fetchArtifactText, subscribeArtifactBytesPurge } from '@/buzz/artifact-link';
+import { artifactPdfLocalUri, fetchArtifactBytes, fetchArtifactText, openArtifactInBrowserOrExplain, subscribeArtifactBytesPurge } from '@/buzz/artifact-link';
 import { artifactWebViewProps } from '@/components/buzz/artifact-webview';
 import { useSandboxWebView, useSandboxWebViewStatus } from '@/components/buzz/sandbox-webview';
 import { ArtifactText } from '@/components/buzz/ArtifactMedia';
 import { ZoomableArtifactImage } from '@/components/buzz/ZoomableArtifactImage';
-import { CHEVRON_ROW_SIZE, ChevronGlyph } from '@/components/buzz/ChevronGlyph';
 import { ArtifactPdfView } from '@/components/buzz/ArtifactPdfView';
 import { MonoMarkdown } from '@/components/buzz/MonoMarkdown';
 import { CodeHighlighter } from '@/components/buzz/CodeHighlighter';
@@ -25,7 +21,10 @@ import { copyPicture, sharePicture } from '@/buzz/picture-actions';
 import { useCopiedToast } from '@/components/buzz/CopiedToast';
 import { ViewerConversationDock } from '@/components/buzz/ViewerConversationDock';
 import { RunnableArtifact } from './RunnableArtifact';
-import { PageHeaderTitle } from './PageHeader';
+import {
+  PhotoStepper, ViewerAction, ViewerBody, ViewerHeader, ViewerInscription, ViewerNotice, ViewerPlaceholder,
+  ViewerScreen, ViewerScroll,
+} from '@/ui/screens/viewers/ViewerChrome';
 
 /**
  * The full-screen artifact viewer (mock 1c): the whole page, still guarded —
@@ -87,21 +86,27 @@ export function ArtifactViewerScreen({
         : notice.title;
   // The viewer fills the whole screen (HullModal placement 'fill', which is
   // translucent under both system bars on Android's mandatory edge-to-edge),
-  // so the header row — title and the ✕ that closes the viewer — must clear
-  // the status tray the way every full-screen surface does.
-  const { theme } = useUnistyles();
-  const insets = useSafeAreaInsets();
+  // so the header clears the status tray the way every full-screen surface does.
   const { showCopied, showCopyFailed, toast } = useCopiedToast('artifact-viewer-copied');
+  // Reopen restarts an interactive artifact from its first frame.
+  const [runKey, setRunKey] = useState(0);
   return (
-    <View style={styles.screen} testID="artifact-viewer">
-      <View style={[styles.header, { paddingTop: insets.top + theme.buzz.space.md }]}>
-        <PageHeaderTitle numberOfLines={1} style={styles.headerTitle}>
-          {format === 'game' ? `Interactive · ${title}` : title}
-        </PageHeaderTitle>
-        {format === 'code' && document ? (
-          <Button
-            accessibilityLabel="Copy code"
-            accessibilityRole="button"
+    <ViewerScreen testID="artifact-viewer">
+      <ViewerHeader
+        safeTop
+        title={format === 'game' ? `Interactive · ${title}` : title}
+        onClose={onClose}
+        closeLabel="Close artifact viewer"
+        closeTestID="artifact-viewer-close"
+      >
+        {format === 'game' ? (
+          <ViewerAction label="Reopen" title="Reopen" icon={RefreshCw}
+            onPress={() => setRunKey((key) => key + 1)} testID="artifact-viewer-reopen" />
+        ) : format === 'code' && document ? (
+          <ViewerAction
+            label="Copy code"
+            title="Copy"
+            icon={CopyIcon}
             onPress={() =>
               void Clipboard.setStringAsync(document.code).then(
                 (copied) =>
@@ -110,55 +115,33 @@ export function ArtifactViewerScreen({
               )
             }
             testID="artifact-viewer-copy"
-            label={'Copy'}
-            variant="quiet"
-            appearance={{ control: styles.headerAction, label: styles.headerActionText }}
           />
         ) : format === 'image' ? (
           <>
-            <Button
-              accessibilityLabel="Copy image"
-              accessibilityRole="button"
+            <ViewerAction
+              label="Copy image"
+              title="Copy"
+              icon={CopyIcon}
               onPress={() =>
                 void copyPicture(attachment!).then((copied) =>
                   copied ? showCopied('Image copied to clipboard') : showCopyFailed("Couldn't copy image"),
                 )
               }
               testID="artifact-viewer-copy"
-              label={'Copy'}
-              variant="quiet"
-              appearance={{ control: styles.headerAction, label: styles.headerActionText }}
             />
-              <Button
-                accessibilityLabel="Share image"
-                accessibilityRole="button"
-                onPress={() => void sharePicture(attachment!)}
-                testID="artifact-viewer-share"
-                label={'Share'}
-                variant="quiet"
-                appearance={{ control: styles.headerAction, label: styles.headerActionText }}
-              />
+            <ViewerAction label="Share image" title="Share" icon={Share2}
+              onPress={() => void sharePicture(attachment!)} testID="artifact-viewer-share" />
           </>
         ) : null}
-        <CloseButton
-          accessibilityLabel="Close artifact viewer"
-          onPress={onClose}
-          testID="artifact-viewer-close"
-        />
-      </View>
-      <View style={styles.body}>
+      </ViewerHeader>
+      <ViewerBody>
         {format === 'code' && document ? (
-          <ScrollView
-            contentContainerStyle={[styles.codeBody, { paddingBottom: theme.buzz.space.md + insets.bottom }]}
-            testID="artifact-viewer-code"
-          >
-            <Text style={styles.codeInscription}>{document.inscription}</Text>
+          <ViewerScroll testID="artifact-viewer-code">
+            <ViewerInscription>{document.inscription}</ViewerInscription>
             <CodeHighlighter code={document.code} language={document.language} />
-          </ScrollView>
+          </ViewerScroll>
         ) : format === 'notice' ? (
-          <View style={styles.placeholder} testID="artifact-viewer-notice">
-            <Text style={styles.placeholderText}>{notice!.message}</Text>
-          </View>
+          <ViewerPlaceholder text={notice!.message} testID="artifact-viewer-notice" />
         ) : markdown ? (
           <ArtifactViewerMarkdownBody markdown={markdown.text} />
         ) : format === 'markdown' ? (
@@ -166,34 +149,8 @@ export function ArtifactViewerScreen({
         ) : format === 'image' ? (
           <>
             {isPhotoGroup ? (
-              <View style={styles.photoNavigation}>
-                <Pressable
-                  accessibilityLabel="Previous photo"
-                  accessibilityRole="button"
-                  onPress={() => changePhoto(-1)}
-                  style={styles.headerAction}
-                  testID="artifact-viewer-photo-previous"
-                >
-                  <ChevronGlyph color={theme.buzz.textPrimary} direction="left" size={CHEVRON_ROW_SIZE} />
-                </Pressable>
-                <Text
-                  accessibilityLabel={`Photo ${photoIndex + 1} of ${photos!.length}`}
-                  accessibilityLiveRegion="polite"
-                  style={styles.photoPosition}
-                  testID="artifact-viewer-photo-position"
-                >
-                  {photoIndex + 1} of {photos!.length}
-                </Text>
-                <Pressable
-                  accessibilityLabel="Next photo"
-                  accessibilityRole="button"
-                  onPress={() => changePhoto(1)}
-                  style={styles.headerAction}
-                  testID="artifact-viewer-photo-next"
-                >
-                  <ChevronGlyph color={theme.buzz.textPrimary} direction="right" size={CHEVRON_ROW_SIZE} />
-                </Pressable>
-              </View>
+              <PhotoStepper index={photoIndex} count={photos!.length}
+                onPrevious={() => changePhoto(-1)} onNext={() => changePhoto(1)} />
             ) : null}
             <ZoomableArtifactImage
               key={attachment!.url}
@@ -205,7 +162,7 @@ export function ArtifactViewerScreen({
         ) : format === 'text' ? (
           <ArtifactText attachment={attachment!} crop={false} testID="artifact-viewer-text" />
         ) : format === 'game' ? (
-          <RunnableArtifact attachment={attachment!} />
+          <RunnableArtifact key={runKey} attachment={attachment!} />
         ) : format === 'pdf' && Platform.OS !== 'ios' ? (
           <ArtifactPdfView attachment={attachment!} mode="viewer" testID="artifact-viewer-pdf" />
         ) : (
@@ -214,11 +171,11 @@ export function ArtifactViewerScreen({
             format={format as 'html' | 'svg' | 'pdf' | 'document'}
           />
         )}
-      </View>
+      </ViewerBody>
       <ViewerConversationDock keyboardAvoidedByParent kind="artifact" title={attachment?.name ?? title} roomId={roomId} agentHandle={authorHandle}
         {...(attachment ? { artifact: attachment } : {})} />
       {toast}
-    </View>
+    </ViewerScreen>
   );
 }
 
@@ -233,12 +190,13 @@ export function ArtifactViewerSandbox({
   const recovery = useArtifactRecoveryGeneration();
   const [source, setSource] = useState<{ html: string } | { uri: string } | null>(null);
   const [failed, setFailed] = useState<string | null>(null);
+  const [unpreviewable, setUnpreviewable] = useState(false);
   const guardRef = useRef(createInitialLoadGuard());
   useEffect(() => {
     let live = true;
     const controller = new AbortController();
     const stopPurge = subscribeArtifactBytesPurge(attachment, () => { controller.abort(); setSource(null); setFailed('This file is no longer available.'); });
-    setSource(null); setFailed(null);
+    setSource(null); setFailed(null); setUnpreviewable(false);
     void (async () => {
       try {
         if (format === 'pdf') {
@@ -254,7 +212,7 @@ export function ArtifactViewerSandbox({
           }
           return;
         }
-        if (live) setFailed('This file type has no inline preview — open it in a browser instead.');
+        if (live) setUnpreviewable(true);
       } catch (cause) {
         if (live && !controller.signal.aborted) setFailed(appReadErrorCopy(cause) || null);
       }
@@ -272,12 +230,14 @@ export function ArtifactViewerSandbox({
       setFailed('The in-app page renderer is unavailable — open it in a browser instead.');
     }
   }, [source, WebView, webviewStatus]);
-  if (failed) {
+  if (unpreviewable) {
     return (
-      <View style={styles.failureInset} testID="artifact-viewer-failed">
-        <IndexRow inset="flush" title="Page unavailable" description={(failed)} />
-      </View>
+      <ViewerNotice title="Preview unavailable" message="Open the file to view it."
+        onOpenInBrowser={() => void openArtifactInBrowserOrExplain(attachment)} testID="artifact-viewer-failed" />
     );
+  }
+  if (failed) {
+    return <ViewerNotice title="Page unavailable" message={failed} testID="artifact-viewer-failed" />;
   }
   if (source && WebView) {
     return (
@@ -288,11 +248,7 @@ export function ArtifactViewerSandbox({
       />
     );
   }
-  return (
-    <View style={styles.placeholder} testID="artifact-viewer-loading">
-      <Text style={styles.placeholderText}>Loading…</Text>
-    </View>
-  );
+  return <ViewerPlaceholder text="Loading…" testID="artifact-viewer-loading" />;
 }
 
 function ArtifactViewerMarkdown({ attachment }: { attachment: AttachmentReference }) {
@@ -315,80 +271,20 @@ function ArtifactViewerMarkdown({ attachment }: { attachment: AttachmentReferenc
       live = false; controller.abort(); stopPurge();
     };
   }, [attachment, recovery]);
-  if (failed) {
-    return (
-      <View style={styles.failureInset} testID="artifact-viewer-failed">
-        <IndexRow inset="flush" title="Page unavailable" />
-      </View>
-    );
-  }
-  if (markdown == null) {
-    return (
-      <View style={styles.placeholder} testID="artifact-viewer-loading">
-        <Text style={styles.placeholderText}>Loading…</Text>
-      </View>
-    );
-  }
+  if (failed) return <ViewerNotice title="Page unavailable" testID="artifact-viewer-failed" />;
+  if (markdown == null) return <ViewerPlaceholder text="Loading…" testID="artifact-viewer-loading" />;
   return <ArtifactViewerMarkdownBody markdown={markdown} />;
 }
 
 function ArtifactViewerMarkdownBody({ markdown }: { markdown: string }) {
-  const { theme } = useUnistyles();
-  const insets = useSafeAreaInsets();
   return (
-    <ScrollView
-      contentContainerStyle={[styles.markdownBody, { paddingBottom: theme.buzz.space.xl + insets.bottom }]}
-      testID="artifact-viewer-markdown"
-    >
+    <ViewerScroll testID="artifact-viewer-markdown">
       <MonoMarkdown markdown={markdown} textStyle={styles.markdownText} document />
-    </ScrollView>
+    </ViewerScroll>
   );
 }
 
 const styles = StyleSheet.create((theme) => ({
-  failureInset: { paddingHorizontal: theme.buzz.roomList.edge },
-  screen: { flex: 1, backgroundColor: theme.buzz.bgBase },
-  header: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: theme.buzz.space.sm,
-    paddingHorizontal: theme.buzz.space.md,
-    // The top clearance over the status tray is supplied by the screen
-    // (insets.top + space.md); the sheet never carries a second one.
-    paddingBottom: theme.buzz.space.sm,
-    borderBottomWidth: 1,
-    borderBottomColor: theme.buzz.border,
-  },
-  headerTitle: {
-    ...theme.buzz.type.bodyStrong,
-    color: theme.buzz.textPrimary,
-    flex: 1,
-    minWidth: 0,
-  },
-  headerAction: {
-    minWidth: 44,
-    minHeight: 44,
-    alignItems: 'center',
-    justifyContent: 'center',
-  },
-  headerActionText: { ...theme.buzz.type.meta, color: theme.buzz.accent },
-  body: { flex: 1 },
-  photoNavigation: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'center',
-    gap: theme.buzz.space.sm,
-  },
-  photoPosition: { ...theme.buzz.type.machine, color: theme.buzz.ledgerQuiet },
   webview: { flex: 1, backgroundColor: 'transparent' },
-  codeBody: { flexGrow: 1, padding: theme.buzz.space.md },
-  codeInscription: {
-    ...theme.buzz.type.machine,
-    color: theme.buzz.ledgerBody,
-    marginBottom: theme.buzz.space.md,
-  },
-  markdownBody: { width: '100%', maxWidth: 760, alignSelf: 'center', padding: theme.buzz.space.md, paddingBottom: theme.buzz.space.xl },
   markdownText: { ...theme.buzz.type.body, color: theme.buzz.textPrimary },
-  placeholder: { flex: 1, alignItems: 'center', justifyContent: 'center' },
-  placeholderText: { ...theme.buzz.type.meta, color: theme.buzz.ledgerQuiet },
 }));

@@ -8,20 +8,25 @@ const content = (selector, extra = {}) => ({ selector, state: 'content', ...extr
 const text = (value, extra = {}) => ({ text: value, state: 'content', ...extra });
 const deck = content(id(`room-${room.roomId}`));
 const settings = content(id('sign-out-setting'));
-const members = content(id(`agent-${agent}-identity`));
+// The Members page and the People tab both list the fixture agent as a member row.
+const members = content(id(`member-${agent}`));
 // Redirect cases measure their real destination and retain that fact in evidence.
 export const routeFixtures = {
   '/': deck,
   '/artifact-viewer': text('latency route code', {
     params: { roomId: uuid('route-artifact-room'), messageId: hash('route-code'), blockIndex: '0' },
   }),
-  '/beeline/agent-profile': content(id('edit-agent-soul'), { params: { agentId: agent } }),
-  '/beeline/agents': { ...members, state: 'redirect-to-members' },
+  '/beeline/agent-profile': content(id('agent-profile-head'), { params: { agentId: agent } }),
+  '/beeline/brief': text('This corner has no brief yet', {
+    params: { roomId: corners.cornerId },
+    state: 'corner-without-brief',
+  }),
   '/beeline/browser-share': text('This shared browser link is invalid.', { state: 'invalid-link' }),
   '/beeline/channels': deck,
+  '/beeline/chat-info': content(id('chat-kind'), { params: { roomId: room.roomId } }),
   '/beeline/chat/[channelId]': text(room.text),
-  '/beeline/community': content(id('choice-title'), { params: { mode: 'join' } }),
-  '/beeline/corners/[roomId]': content(id(`room-corner-${corners.cornerId}`), {
+  '/beeline/community': content(id('choice-join-input'), { params: { mode: 'join' } }),
+  '/beeline/corners/[roomId]': content(id(`thread-row-${corners.cornerId}`), {
     params: { roomId: corners.roomId },
   }),
   '/beeline/create-workspace': content(id('create-workspace-name')),
@@ -31,9 +36,10 @@ export const routeFixtures = {
     state: 'connection-error',
   }),
   '/beeline/google-callback': { ...deck, state: 'callback-redirect' },
-  '/beeline/human-profile': content(id('member-grants-empty'), { params: { memberId: peer } }),
-  '/beeline/members': members,
+  '/beeline/human-profile': content(id('human-profile-head'), { params: { memberId: peer } }),
+  '/beeline/members': { ...members, params: { roomId: room.roomId } },
   '/beeline/onboarding': { ...deck, state: 'signed-in-redirect' },
+  '/beeline/people': members,
   '/beeline/settings': settings,
   '/beeline/settings/identity': settings,
   '/beeline/settings/schedule': content(id('schedule-gone'), { state: 'stopped-schedule' }),

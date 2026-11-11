@@ -1,20 +1,13 @@
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
-import { IndexRow } from '@/components/buzz/IndexRow';
 import { type MutableRefObject } from 'react';
-import { View, Text, TouchableOpacity, Platform } from 'react-native';
+import { View, Text, Platform } from 'react-native';
 import { KeyboardAvoidingView } from 'react-native-keyboard-controller';
 import { router, type Href } from 'expo-router';
-import { Modal } from '@/modal';
 import { CORNER_LABEL, ROOM_LABEL } from '@/buzz/vocabulary';
-import { openExternalUrl } from '@/utils/open-external-url';
 import { type RoomSurfaceSessionBindings, type UseRoomSurfaceSessionResult } from './useRoomSurfaceSession';
 import { BuzzCommunityShell } from '@/components/buzz/CommunityRail';
-import { CornerObjectiveLine } from '@/components/buzz/CornerObjectiveLine';
-import { CornerStatusLine } from '@/components/buzz/CornerStatusLine';
 import { RoomActionsBackground } from '@/components/buzz/RoomRepositoryChoice';
-import { CHEVRON_BACK_SIZE, ChevronGlyph } from '@/components/buzz/ChevronGlyph';
 import { RoomReviewerSurfaceNotice } from '@/components/buzz/RoomReviewerActions';
-import { ChannelHeaderTitle } from '@/components/buzz/ChannelHeaderTitle';
 import { VoiceCallCard } from '@/components/buzz/VoiceCallCard';
 import { SurfaceGlyphLoader } from '@/components/buzz/SurfaceGlyphLoader';
 import { useChatRoute } from './useChatRoute';
@@ -45,7 +38,10 @@ import { useChatNavigation } from './useChatNavigation';
 import { useChatComposerCommands } from './useChatComposerCommands';
 import { useChatTranscriptRenderer } from './useChatTranscriptRenderer';
 import { styles } from './chat-surface-styles';
-import { ChatSurfaceHeaderView as ChatSurfaceHeader } from './ChatSurfaceHeader';
+import { ChatSurfaceErrorHeader, ChatSurfaceHeaderView as ChatSurfaceHeader } from './ChatSurfaceHeader';
+import { useChatThreadHeader } from './useChatThreadHeader';
+import { ThreadsDropdown } from '@/ui/screens/chat/ThreadsDropdown';
+import { openPlace } from '@/ui/shell/panel';
 import { ChatSurfaceTranscript } from './ChatSurfaceTranscript';
 import { ChatSurfaceComposer } from './ChatSurfaceComposer';
 import { ChatSurfaceWorkPane } from './ChatSurfaceWorkPane';
@@ -122,8 +118,7 @@ export function BuzzChatSurface({
     setForwardError, forwardTarget, forwardBusyRoomId, setForwardBusyRoomId, composerDraft,
     replyTarget, pendingAttachmentsRef, setSending, attachmentUploader, activeComposerDraftRef,
     setComposerInputRevision, setComposerHeight, replacePendingAttachments, setCornerProposalAction,
-    pendingAttachments, setAttachmentPickerVisible, setHighlightedMentionIndex, addingMembers,
-    setAddingMembers, setRoomRepoListLoading, setRoomRepoError, setShowRoomRepoPicker,
+    pendingAttachments, setAttachmentPickerVisible, setHighlightedMentionIndex, setRoomRepoListLoading, setRoomRepoError, setShowRoomRepoPicker,
     setRoomRepoNotice, roomRepoBusy, setRoomRepoBusy, roomRepoListLoading, roomRepoError,
     roomRepoNotice, showRoomRepoPicker, sending, setDismissedSlashText, highlightedSlashVerbIndex,
     failedOutboxIds, cornerProposalAction, turnChromeTopInset, setTurnChromeTopInset,
@@ -133,23 +128,19 @@ export function BuzzChatSurface({
     decodedId, userPubkey, desktopExperience, desktopAvailableWidth, outbox, transport,
   ]);
   const [
-    setMembershipError, isDirectMessage, participantPickerVisible, rosterVisible,
-    roomRepoAccessIssue, setCornerOpenRepoPrompt, participantPickerKind, composerFocused,
-    directMessage, agentPairBusy, setAgentConnectVisible, setAgentPairCommand, setAgentPairError,
-    setAgentPairBusy, setParticipantPickerKind, setParticipantPickerVisible, targetBranchActionId,
+    setMembershipError, isDirectMessage, participantPickerVisible, roomRepoAccessIssue, setCornerOpenRepoPrompt, participantPickerKind, composerFocused,
+    directMessage, setAgentConnectVisible, setParticipantPickerKind, setParticipantPickerVisible, targetBranchActionId,
     pendingAck, setPendingAck, receivedSteer, setReceivedSteer, setPermissionActionId,
     grantActionId, setGrantActionId, choiceActionId, setChoiceActionId, createPollBusy,
     setCreatePollBusy, setCreatePollVisible, connectorOfferActionId, setConnectorOfferActionId,
-    setTargetBranchNotice, setTargetBranchActionId, setMembershipActionPubkey, memberInviteBusy,
-    setMemberInviteBusy, setRosterVisible, setRoomActionsVisible, roomLifecycleBusy,
+    setTargetBranchNotice, setTargetBranchActionId, setRoomActionsVisible, roomLifecycleBusy,
     setRoomLifecycleBusy, renameBusy, setRenameEditing, setRenameError, renameDraft, setRenameBusy,
     renameTextDraft, openingRandomCorner, setOpeningRandomCorner, setForwardCornerPrompt,
     forwardCornerPrompt, uncoveredOwnersRef, setOwnerGrant, setRoomRepoAccessIssue,
     permissionActionId, appSignInActionId, setAppSignInActionId, targetBranchNotice,
     conversationFrameRef, setCornerActionsVisible, setDmActionsVisible, cornerOpenRepoPrompt,
-    ownerGrant, setComposerFocused, membershipActionPubkey, membershipError, closeRoster,
-    roomActionsRef, renameEditing, setRenameDraft, renameError, dmActionsVisible,
-    cornerActionsVisible, agentConnectVisible, agentPairError, agentPairCommand, createPollVisible,
+    ownerGrant, setComposerFocused, membershipError, roomActionsRef, renameEditing, setRenameDraft, renameError, dmActionsVisible,
+    cornerActionsVisible, agentConnectVisible, createPollVisible,
   ] = useChatActionState([
     decodedId, userPubkey, roomSurface, inputTextRef, inputText, setDesktopDeliveryState,
     setInputText, setInputSelection, setDismissedMentionKey, composerRef,
@@ -163,7 +154,7 @@ export function BuzzChatSurface({
     desktopWorkPaneRef, setDesktopWorkPane, desktopExperience, desktopAvailableWidth, decodedId,
     userPubkey, roomSurface, routeParentChannelId, isDirectMessage, desktopWorkPaneContent,
     roomClient, firstUnreadMessageId, allowOlderHistoryRef, routeChannelTitle, routeCommunityId,
-    participantPickerVisible, rosterVisible, setMembershipError, profileKind, profileAgentId,
+    participantPickerVisible, setMembershipError, profileKind, profileAgentId,
   ]);
   const [
     revealTranscriptThrough, transcriptHistoryStatus, transcriptJump, endTranscriptJump,
@@ -186,7 +177,7 @@ export function BuzzChatSurface({
     transcriptHostIdsRef, foldedMessages, loadOlderTranscriptMessages, anchoredSegmentActive,
     conversationIdentities, durableMessages, unprojectedMessages, combinedMessages, arrivalMessages,
     unreadLine, transcriptArrivalObservation, addMessages, removeOptimistic, reconcileOptimistic,
-    openCurrentBrief, arrivingCardIds, transcriptCardMotionStore, firstNewMessageId,
+    openCurrentBrief, firstNewMessageId,
     cornerObjectiveText, openRoomWorkflowRun, roomWorkflowRun, roomOtherLiveRuns,
     transcriptHistoryLine, transcriptForwardLine, loadOlderTranscriptIfReaderAsked,
   ] = useChatTranscriptHistory([
@@ -200,13 +191,11 @@ export function BuzzChatSurface({
   ]);
   const [
     roomParticipants, agentPresences, describedRoomParticipants, participantsHydrated,
-    personProfileByPubkey, agentByPubkey, roomAgents, participantPickerCandidates,
-    roomMemberPubkeys, agentProfileModelByPubkey, speakerRoleByPubkey, composerTagHandles,
-    speechHints, roomMemberByPubkey, visibleRosterMembers, roomParticipantTotal,
-    participantPickerWorkspacePeers,
-  ] = useChatRoster([
+    personProfileByPubkey, agentByPubkey, roomAgents, agentProfileModelByPubkey, speakerRoleByPubkey, composerTagHandles,
+    speechHints, roomParticipantTotal,
+    ] = useChatRoster([
     roomSurface, conversationIdentities, durableMessages, resolvedChannelName, userPubkey,
-    workspaceRoster, participantPickerKind, heartbeatPresences,
+    workspaceRoster, heartbeatPresences,
   ]);
   const [
     directMessageListItem, isReadOnlyDirectMessage, messages, activeAgentTurns,
@@ -219,7 +208,7 @@ export function BuzzChatSurface({
     roomParticipants, agentPresences, presenceNow, inputSelection, inputText,
     describedRoomParticipants, composerFocused, dismissedMentionKey, isDirectMessage,
     parentChannelId, decodedId, roomClient, workspaceChats, roomSurface, presenceReconnectGrace,
-    unprojectedMessages, participantsHydrated, rosterVisible, participantPickerVisible,
+    unprojectedMessages, participantsHydrated, participantPickerVisible,
     viewerPubkey, agentCommandsByScope, agentFastModeByScope, agentCanLoginByScope,
     combinedMessages, roomRepository, activeCommunityId, setAgentCommandsByScope,
     setAgentCanLoginByScope, setAgentFastModeByScope,
@@ -228,14 +217,13 @@ export function BuzzChatSurface({
     emptyLedgerVariant, displayRoomName, roomName, firstRoomAgent, startCornerMessage,
     focusComposer, starterPrompts, starterIntro, storedRoomName, headerTitleKind,
     displayHeaderTitle, dmPeerPubkey, dmPeerIdentity, dmPeerAgentDisplay, dmPeerProfile,
-    dmHeaderPresence, headerTitle, closeAgentConnect, connectAgent, copyPairCommand,
+    dmHeaderPresence, headerTitle, closeAgentConnect, connectAgent, dmPeerMark,
   ] = useChatHeader([
     parentChannelId, roomSurface, resolvedChannelName, isCorner, channelKind, decodedId,
     isDirectMessage, userPubkey, directMessage, personProfileByPubkey, directMessageListItem,
     agentByPubkey, presenceNow, workspaceRoster, isReadOnlyDirectMessage, composerRef, inputTextRef,
     selectedAgentMentionsRef, selectedMentionsRef, setInputText, setInputSelection,
-    activeCommunityId, agentPairBusy, viewerIsAgent, setAgentConnectVisible, setAgentPairCommand,
-    setAgentPairError, setAgentPairBusy, transport, setSessionTransport, canManageWorkspace,
+    activeCommunityId, viewerIsAgent, setAgentConnectVisible, canManageWorkspace,
     setMembershipError, setParticipantPickerKind, openWorkspaceRoster, setParticipantPickerVisible,
   ]);
   const [
@@ -249,6 +237,11 @@ export function BuzzChatSurface({
     desktopExperience, viewerIsAgent, emptyLedgerVariant, isDirectMessage, displayRoomName,
     roomName, firstRoomAgent, startCornerMessage, focusComposer, starterPrompts, starterIntro,
   ]);
+  const threadHeader = useChatThreadHeader({
+    isCorner, roomSurface, resolvedChannelName, decodedId, parentChannelId,
+    state: cornerHeaderDisplay?.status, running: activeAgentTurns.length,
+    objective: cornerObjectiveText, isArchived, isDesktop, positions: transcriptPositions,
+  });
   const [
     desktopScrollNodeRef, heldLandingFromOldestRef, phoneContentHeightRef, phoneScrollOffsetRef,
     heldLandingShortRef, phoneListHeightRef, observeVisibleMessages, chronologicalMessagesRef,
@@ -348,13 +341,10 @@ export function BuzzChatSurface({
     setTargetBranchNotice, setTargetBranchActionId, applyRoomRepositoryResult,
   ]);
   const [
-    closeRoomActions, handleConnectAgent, handleRemoveRoomMember, handleRenameRoom,
-    handleRoomLifecycle, handleAddRoomMembers, handleInvitePerson,
-  ] = useChatMembershipActions([
-    transport, activeCommunityId, canManageWorkspace, addingMembers, participantPickerCandidates,
-    roomMemberPubkeys, setAddingMembers, setMembershipError, decodedId, setParticipantPickerVisible,
-    userPubkey, setMembershipActionPubkey, memberInviteBusy, setMemberInviteBusy,
-    setSessionTransport, setRosterVisible, setRoomActionsVisible, roomLifecycleBusy,
+    closeRoomActions, handleConnectAgent, handleRenameRoom,
+    handleRoomLifecycle, ] = useChatMembershipActions([
+    transport, activeCommunityId, canManageWorkspace, setMembershipError, decodedId, setParticipantPickerVisible,
+    setRoomActionsVisible, roomLifecycleBusy,
     setRoomLifecycleBusy, displayRoomName, roomSurface, readRoom, renameBusy, setRenameEditing,
     setRenameError, renameDraft, isCorner, canRenameTitle, setRenameBusy, renameTextDraft,
     applyRoomName,
@@ -423,41 +413,19 @@ export function BuzzChatSurface({
     bylineOpeners, hintMessageIds, failedOutboxIds, outbox, speakerWorking, answerByMessageId,
     cornerProposalAction, speakerRoleByPubkey, visibleMessageById, channelReferenceKey,
     visibleMessages, continuedAttributionIds, immediatelyPrecedingVisibleMessageById,
-    arrivingCardIds, transcriptCardMotionStore, firstNewMessageId, arrivalFlashMessageId,
+    firstNewMessageId, arrivalFlashMessageId,
     sourceLandingFlashMessageId,
   ]);
 
   if (!roomSurface) {
     if (transcriptHydrationFailed) {
       return (
-        <View style={[styles.container, { paddingTop: insets.top }]} testID="room-hydration-error">
-          <View style={styles.hydrationErrorHeader}>
-            {(!isDesktop || isCorner) && (
-              <TouchableOpacity
-                accessibilityLabel="Back to Rooms"
-                onPress={handleBack}
-                style={styles.backButton}
-                testID="chat-back"
-              >
-                <ChevronGlyph
-                  color={styles.backText.color}
-                  direction="left"
-                  size={CHEVRON_BACK_SIZE}
-                  testID="chat-back-glyph"
-                />
-              </TouchableOpacity>
-            )}
-            <View style={styles.headerCenter}>
-              <ChannelHeaderTitle
-                kind={headerTitleKind}
-                title={displayHeaderTitle ?? routeChannelTitle ?? ROOM_LABEL}
-              />
-            </View>
-          </View>
-          <View style={styles.hydrationFailureInset}>
-            {transcriptHydrationError && <IndexRow inset="flush" title={transcriptHydrationError} testID="room-read-error" />}
-          </View>
-        </View>
+        <ChatSurfaceErrorHeader
+          title={displayHeaderTitle ?? routeChannelTitle ?? ROOM_LABEL}
+          showBack={!isDesktop || isCorner}
+          handleBack={handleBack}
+          error={transcriptHydrationError}
+        />
       );
     }
     return <ChatOpeningSurface isCorner={isCorner} />;
@@ -478,48 +446,32 @@ export function BuzzChatSurface({
           {/* Header. No surface of its own — the chrome sits on the same
             obsidian as the transcript, parted only by a hairline. */}
           <ChatSurfaceHeader
-  insets={insets}
   isCorner={isCorner}
-  desktopExperience={desktopExperience}
-  isDesktop={isDesktop}
-  cornerReturnTarget={cornerReturnTarget}
-  handleBack={handleBack}
-  cornerOwnerPubkey={cornerOwnerPubkey}
-  cornerOwnerDisplay={cornerOwnerDisplay}
-  cornerOwnerWorking={cornerOwnerWorking}
   isDirectMessage={isDirectMessage}
-  isReadOnlyDirectMessage={isReadOnlyDirectMessage}
-  dmPeerPubkey={dmPeerPubkey}
-  dmPeerIdentity={dmPeerIdentity}
-  directMessageListItem={directMessageListItem}
-  dmPeerAgentDisplay={dmPeerAgentDisplay}
-  dmPeerProfile={dmPeerProfile}
-  displayRoomName={displayRoomName}
-  displayHeaderTitle={displayHeaderTitle}
-  headerTitleKind={headerTitleKind}
-  canRenameTitle={canRenameTitle}
-  startRenameFromTitle={startRenameFromTitle}
-  setRoomActionsVisible={setRoomActionsVisible}
-  handleOpenGitHubEvent={handleOpenGitHubEvent}
-  roomRepository={roomRepository}
-  cornerHeaderWord={cornerHeaderWord}
-  cornerHeaderDisplay={cornerHeaderDisplay}
-  cornerHeaderSource={cornerHeaderSource}
-  viewerPubkey={viewerPubkey}
-  scrollController={scrollController}
-  jumpToTranscriptMessage={jumpToTranscriptMessage}
+  showBack={!isDesktop || isCorner}
+  handleBack={handleBack}
+  title={displayHeaderTitle}
+  memberCount={roomParticipantTotal}
+  openChatInfo={() => openPlace({ kind: 'chat-info', roomId: decodedId }, isDesktop)}
+  openMembers={() => openPlace({ kind: 'members', roomId: decodedId }, isDesktop)}
+  dmPeer={dmPeerMark}
   dmHeaderPresence={dmHeaderPresence}
-  parentChannelId={parentChannelId}
-  handleOpenRandomCorner={handleOpenRandomCorner}
-  decodedId={decodedId}
-  viewerIsAgent={viewerIsAgent}
-  isArchived={isArchived}
-  setCornerActionsVisible={setCornerActionsVisible}
-  setMembershipError={setMembershipError}
-  setDmActionsVisible={setDmActionsVisible}
-  setRenameEditing={setRenameEditing}
-  setRenameError={setRenameError}
+  openDmActions={!viewerIsAgent && !isArchived ? () => {
+    setMembershipError(null);
+    setDmActionsVisible(true);
+  } : undefined}
+  thread={threadHeader.thread}
+  threadCollapsed={threadHeader.collapsed}
+  openParentChat={threadHeader.openParentChat}
+  openBrief={threadHeader.openBrief}
+  openCornerActions={!viewerIsAgent && !isArchived ? () => setCornerActionsVisible(true) : undefined}
+  threadBarRef={threadHeader.barRef}
+  onThreadBarLayout={threadHeader.onBarLayout}
 />
+
+          {!isCorner && !isDirectMessage && (
+            <ThreadsDropdown roomId={decodedId} chatName={resolvedChannelName} openThread={openCorner} />
+          )}
 
           {!isCorner && !isDirectMessage && (() => {
             const call = workspaceChats.find(chat => chat.room.id === decodedId)?.voiceCall;
@@ -538,36 +490,8 @@ export function BuzzChatSurface({
             style={styles.keyboardBody}
             behavior={Platform.OS === 'ios' ? 'padding' : 'translate-with-padding'}
           >
-            {/* What the corner is for, held under the header for its whole life:
-            the human's own request, inscribed rather than framed. The header
-            carries a short corner name, so without this the objective survives
-            only until the first message lands. */}
-            {isCorner && (
-              <CornerObjectiveLine
-                objective={cornerObjectiveText}
-                onOpenBrief={openCurrentBrief}
-                onOpenWorkflow={openRoomWorkflowRun}
-                workflow={roomWorkflowRun}
-                otherLiveRuns={roomOtherLiveRuns}
-              />
-            )}
-
-            {/* The corner's PR state, inscribed above the transcript: one line
-            that links to GitHub, where review and merge happen. */}
-            {isCorner && (
-              <View style={styles.cornerStatusInset}>
-                <CornerStatusLine
-                  lifecycle={roomSurface?.cornerLifecycle}
-                  archived={isArchived}
-                  onOpenPullRequest={(url) => {
-                    void openExternalUrl(url).catch(() => {
-                      Modal.alert('Could not open pull request', 'Open the PR from GitHub instead.');
-                    });
-                  }}
-                />
-              </View>
-            )}
-
+            {/* A corner's title, status, PR, objective and brief are the
+            transcript's first block (header B, `useChatThreadHeader`). */}
             <ChatSurfaceTranscript
   desktopTranscript={desktopTranscript}
   setDesktopScrollNode={setDesktopScrollNode}
@@ -608,6 +532,7 @@ export function BuzzChatSurface({
   newMessageBadgeCount={newMessageBadgeCount}
   newestJumpDiscShown={newestJumpDiscShown}
   landAtNewestMessage={landAtNewestMessage}
+  leadBlock={threadHeader.titleBlock}
 />
 
             {/* P2: Archived channels are read-only */}
@@ -766,24 +691,10 @@ export function BuzzChatSurface({
   forwardToRoom={forwardToRoom}
   forwardRooms={forwardRooms}
   forwardTarget={forwardTarget}
-  insets={insets}
   roomSurface={roomSurface}
   isDirectMessage={isDirectMessage}
-  roomMemberByPubkey={roomMemberByPubkey}
-  membershipActionPubkey={membershipActionPubkey}
   membershipError={membershipError}
-  visibleRosterMembers={visibleRosterMembers}
-  setMembershipError={setMembershipError}
-  setParticipantPickerKind={setParticipantPickerKind}
-  openWorkspaceRoster={openWorkspaceRoster}
   setParticipantPickerVisible={setParticipantPickerVisible}
-  closeRoster={closeRoster}
-  handleRemoveRoomMember={handleRemoveRoomMember}
-  handleOpenProfile={handleOpenProfile}
-  speakerWorking={speakerWorking}
-  parentChannelId={parentChannelId}
-  personProfileByPubkey={personProfileByPubkey}
-  userPubkey={userPubkey}
   memberManagement={memberManagement}
   renameBusy={renameBusy}
   closeRoomActions={closeRoomActions}
@@ -809,7 +720,6 @@ export function BuzzChatSurface({
   roomParticipantTotal={roomParticipantTotal}
   participantsHydrated={participantsHydrated}
   setRoomActionsVisible={setRoomActionsVisible}
-  setRosterVisible={setRosterVisible}
   activeCommunityId={activeCommunityId}
   roomLifecycleBusy={roomLifecycleBusy}
   handleRoomLifecycle={handleRoomLifecycle}
@@ -824,21 +734,9 @@ export function BuzzChatSurface({
   setCornerActionsVisible={setCornerActionsVisible}
   handleBack={handleBack}
   readRoom={readRoom}
-  addingMembers={addingMembers}
-  memberInviteBusy={memberInviteBusy}
-  participantPickerCandidates={participantPickerCandidates}
   participantPickerKind={participantPickerKind}
-  participantPickerWorkspacePeers={participantPickerWorkspacePeers}
-  handleAddRoomMembers={handleAddRoomMembers}
-  handleConnectAgent={handleConnectAgent}
-  handleInvitePerson={handleInvitePerson}
-  agentPairBusy={agentPairBusy}
   agentConnectVisible={agentConnectVisible}
-  agentPairError={agentPairError}
   closeAgentConnect={closeAgentConnect}
-  connectAgent={connectAgent}
-  copyPairCommand={copyPairCommand}
-  agentPairCommand={agentPairCommand}
   createPollVisible={createPollVisible}
   createPollBusy={createPollBusy}
   setCreatePollVisible={setCreatePollVisible}

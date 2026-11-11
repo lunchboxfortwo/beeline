@@ -914,6 +914,15 @@
       "phase": "M2"
     },
     {
+      "id": "apps/server/src/phone/email-invite.ts::fetch",
+      "file": "apps/server/src/phone/email-invite.ts",
+      "kind": "fetch",
+      "count": 1,
+      "compatibility": "legacy-only",
+      "phase": "M2",
+      "reason": "Email invites send through Resend (owner decision 2026-11-11)."
+    },
+    {
       "id": "apps/server/src/postgres-live.ts::import:pg",
       "file": "apps/server/src/postgres-live.ts",
       "kind": "import:pg",

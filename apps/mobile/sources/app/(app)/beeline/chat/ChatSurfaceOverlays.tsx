@@ -13,7 +13,6 @@ import { type ChatDisplayMessage } from '@/buzz/room-view-presentation';
 import { CORNER_LABEL, ROOM_LABEL } from '@/buzz/vocabulary';
 import { ROOM_SLUG_HINT, roomNameEntry, validRoomSlug } from '@/buzz/room-name';
 import { formatRoomParticipantTotal } from '@/buzz/room-participants';
-import { MemberPickerSheet, type MemberPickerCandidate } from '@/components/buzz/MemberPickerSheet';
 import { agentActivityReplyExcerpt, canBeginReply } from '@/buzz/message-reply';
 import { monolithPhoneOperation } from '@/sync/transport/monolith-operation';
 import { type ForwardTarget } from '@/buzz/message-forward';
@@ -26,9 +25,10 @@ import { RoomActionsSheet, type RoomActionsSheetHandle, type RoomRepositoryOptio
 import { RoomReviewerActions } from '@/components/buzz/RoomReviewerActions';
 import { HullDialog, HullDialogInput } from '@/components/buzz/HullDialog';
 import { type CornerOpenAttempt } from '@/buzz/open-random-corner';
-import { RoomRosterSheet, type RoomRosterParticipant } from '@/components/buzz/RoomRosterSheet';
+import { ChatAddSheet, WorkspaceAddAgentSheet } from '@/ui/screens/members/ChatAddSheets';
+import { openPlace } from '@/ui/shell/panel';
+import { useIsDesktop } from '@/utils/responsive';
 import { CreatePollSheet, type PollDraft } from '@/components/buzz/CreatePollSheet';
-import { RoomMemberOption } from './chat-surface-values';
 import { styles } from './chat-surface-styles';
 
 type Props = {
@@ -63,25 +63,11 @@ type Props = {
   forwardToRoom: (target: ForwardTarget) => Promise<boolean>;
   forwardRooms: readonly ForwardTarget[] | null;
   forwardTarget: ChatDisplayMessage | null;
-  insets: import("react-native-safe-area-context/lib/typescript/src/SafeArea.types").EdgeInsets;
   roomSurface: NonNullable<import("@beeline/api-contract/phone").RoomView | null>;
   isDirectMessage: boolean;
-  roomMemberByPubkey: Map<string, { pubkey: string; role: "owner" | "admin" | "member" | "spectator"; }>;
-  membershipActionPubkey: string | null;
   membershipError: string | null;
-  visibleRosterMembers: RoomRosterParticipant[];
-  setMembershipError: React.Dispatch<React.SetStateAction<string | null>>;
-  setParticipantPickerKind: React.Dispatch<React.SetStateAction<"agent" | "person" | null>>;
-  openWorkspaceRoster: () => void;
   setParticipantPickerVisible: React.Dispatch<React.SetStateAction<boolean>>;
-  closeRoster: () => void;
-  handleRemoveRoomMember: (participant: RoomMemberOption) => Promise<void>;
-  handleOpenProfile: (agentId: string, kind?: "human" | "agent") => void;
-  speakerWorking: Readonly<Record<string, true>>;
-  parentChannelId: string | undefined;
-  personProfileByPubkey: Map<string, { face?: string | undefined; avatar?: string | undefined; handle?: string | undefined; pubkey: string; name: string; }>;
-  userPubkey: string;
-  memberManagement: { canOpenRoster: boolean; rosterVisible: boolean; pickerVisible: boolean; };
+  memberManagement: { canOpenRoster: boolean; pickerVisible: boolean; };
   renameBusy: boolean;
   closeRoomActions: () => void;
   canRenameTitle: boolean;
@@ -106,7 +92,6 @@ type Props = {
   roomParticipantTotal: number;
   participantsHydrated: boolean;
   setRoomActionsVisible: (visible: boolean) => void | undefined;
-  setRosterVisible: React.Dispatch<React.SetStateAction<boolean>>;
   activeCommunityId: string | null;
   roomLifecycleBusy: boolean;
   handleRoomLifecycle: (action: "delete" | "leave") => Promise<void>;
@@ -121,21 +106,9 @@ type Props = {
   setCornerActionsVisible: React.Dispatch<React.SetStateAction<boolean>>;
   handleBack: () => void;
   readRoom: () => void;
-  addingMembers: boolean;
-  memberInviteBusy: boolean;
-  participantPickerCandidates: MemberPickerCandidate[] | null;
   participantPickerKind: "agent" | "person" | null;
-  participantPickerWorkspacePeers: number;
-  handleAddRoomMembers: (pubkeys: string[]) => Promise<void>;
-  handleConnectAgent: () => void;
-  handleInvitePerson: () => Promise<void>;
-  agentPairBusy: boolean;
   agentConnectVisible: boolean;
-  agentPairError: string | null;
   closeAgentConnect: () => void;
-  connectAgent: () => Promise<void>;
-  copyPairCommand: (command: string) => Promise<void>;
-  agentPairCommand: string | null;
   createPollVisible: boolean;
   createPollBusy: boolean;
   setCreatePollVisible: React.Dispatch<React.SetStateAction<boolean>>;
@@ -173,24 +146,10 @@ export function ChatSurfaceOverlays({
   forwardToRoom,
   forwardRooms,
   forwardTarget,
-  insets,
   roomSurface,
   isDirectMessage,
-  roomMemberByPubkey,
-  membershipActionPubkey,
   membershipError,
-  visibleRosterMembers,
-  setMembershipError,
-  setParticipantPickerKind,
-  openWorkspaceRoster,
   setParticipantPickerVisible,
-  closeRoster,
-  handleRemoveRoomMember,
-  handleOpenProfile,
-  speakerWorking,
-  parentChannelId,
-  personProfileByPubkey,
-  userPubkey,
   memberManagement,
   renameBusy,
   closeRoomActions,
@@ -216,7 +175,6 @@ export function ChatSurfaceOverlays({
   roomParticipantTotal,
   participantsHydrated,
   setRoomActionsVisible,
-  setRosterVisible,
   activeCommunityId,
   roomLifecycleBusy,
   handleRoomLifecycle,
@@ -231,26 +189,16 @@ export function ChatSurfaceOverlays({
   setCornerActionsVisible,
   handleBack,
   readRoom,
-  addingMembers,
-  memberInviteBusy,
-  participantPickerCandidates,
   participantPickerKind,
-  participantPickerWorkspacePeers,
-  handleAddRoomMembers,
-  handleConnectAgent,
-  handleInvitePerson,
-  agentPairBusy,
   agentConnectVisible,
-  agentPairError,
   closeAgentConnect,
-  connectAgent,
-  copyPairCommand,
-  agentPairCommand,
   createPollVisible,
   createPollBusy,
   setCreatePollVisible,
   handleCreatePoll,
-}: Props) { return <>
+}: Props) {
+  const desktop = useIsDesktop();
+  return <>
       <AttachmentPickerSheet
         visible={attachmentPickerVisible}
         onClose={() => setAttachmentPickerVisible(false)}
@@ -408,33 +356,6 @@ export function ChatSurfaceOverlays({
         visible={Boolean(forwardTarget)}
       />
 
-      <RoomRosterSheet
-        bottomInset={insets.bottom}
-        canManage={roomSurface?.viewer.permissions.manage ?? false}
-        isDirectMessage={isDirectMessage}
-        memberByPubkey={roomMemberByPubkey}
-        membershipActionPubkey={membershipActionPubkey}
-        membershipError={membershipError}
-        members={visibleRosterMembers}
-        onAddMembers={() => {
-          setMembershipError(null);
-          // One counted Members section owns one add control, so the picker it
-          // opens lists both kinds and carries its own invite-a-person and
-          // connect-an-agent rows.
-          setParticipantPickerKind(null);
-          openWorkspaceRoster();setParticipantPickerVisible(true);
-        }}
-        onClose={closeRoster}
-        onRemove={handleRemoveRoomMember}
-        onOpenProfile={(participant) =>
-          handleOpenProfile(participant.pubkey, participant.kind === 'agent' ? 'agent' : 'human')
-        }
-        workingByPubkey={speakerWorking}
-        parentChannelId={parentChannelId ?? null}
-        personProfileByPubkey={personProfileByPubkey}
-        userPubkey={userPubkey}
-        visible={memberManagement.rosterVisible}
-      />
 
       <RoomActionsSheet
         accessibilityLabel={`Close ${ROOM_LABEL} actions`}
@@ -514,7 +435,7 @@ export function ChatSurfaceOverlays({
               }
               onPress={() => {
                 setRoomActionsVisible(false);
-                openWorkspaceRoster();setRosterVisible(true);
+                openPlace({ kind: 'members', roomId: decodedId }, desktop);
               }}
               testID="room-participant-roster-trigger"
             />
@@ -681,36 +602,13 @@ export function ChatSurfaceOverlays({
         ) : null}
       </HullDialog>
 
-      <MemberPickerSheet
-        busy={addingMembers || memberInviteBusy}
-        canManage={roomSurface?.viewer.permissions.manage ?? false}
-        canConnectAgent
-        candidates={participantPickerCandidates}
-        error={membershipError}
-        kind={participantPickerKind}
-        workspacePeerCount={participantPickerWorkspacePeers}
-        onAdd={(pubkeys) => void handleAddRoomMembers(pubkeys)}
-        onClose={() => setParticipantPickerVisible(false)}
-        onConnectAgent={handleConnectAgent}
-        onInvitePerson={() => void handleInvitePerson()}
-        visible={memberManagement.pickerVisible}
-      />
-      <MemberPickerSheet
-        agentConnectOnly
-        busy={agentPairBusy}
-        canManage={canManageWorkspace}
-        canConnectAgent={!viewerIsAgent}
-        candidates={undefined}
-        error={agentConnectVisible ? agentPairError : null}
-        onAdd={() => undefined}
-        onClose={closeAgentConnect}
-        onConnectAgent={() => void connectAgent()}
-        onCopyPairCommand={(command) => void copyPairCommand(command)}
-        onInvitePerson={() => undefined}
-        pairCommand={agentPairCommand}
-        testID="room-agent-connect-sheet"
-        visible={agentConnectVisible}
-      />
+      {memberManagement.pickerVisible ? (
+        <ChatAddSheet roomId={decodedId} sheet={participantPickerKind === 'person' ? 'people' : 'agents'}
+          close={() => setParticipantPickerVisible(false)} />
+      ) : null}
+      {agentConnectVisible && activeCommunityId ? (
+        <WorkspaceAddAgentSheet workspaceId={activeCommunityId} close={closeAgentConnect} />
+      ) : null}
       <CreatePollSheet
         draftContext={decodedId}
         visible={createPollVisible}

@@ -466,7 +466,6 @@ namespace TrayReads {
     slots.clear();
     needsIntents.clear();
     savedIntents.clear();
-    heldNeeds.clear();
     viewer = undefined;
     resolving = undefined;
     liveStop?.();
@@ -699,7 +698,6 @@ namespace TrayReads {
   }
   const needsIntents = new Map<string, Set<HiddenIntent>>();
   const savedIntents = new Map<string, Set<HiddenIntent>>();
-  const heldNeeds = new Map<string, ReadonlySet<string>>();
   function reconcileIntents(slot: Slot): void {
     for (const [kind, map] of [
       ['needs', needsIntents],
@@ -714,16 +712,6 @@ namespace TrayReads {
         if (!intent.ids.size) map.get(slot.key)?.delete(intent);
       }
     }
-  }
-  export function revealSavedItems(workspaceId: string, ids: Iterable<string>): void {
-    const slot = current(workspaceId);
-    if (!slot) return;
-    const revealed = new Set(ids);
-    for (const intent of savedIntents.get(slot.key) ?? []) {
-      for (const id of revealed) intent.ids.delete(id);
-      if (!intent.ids.size) savedIntents.get(slot.key)?.delete(intent);
-    }
-    notify();
   }
   function hide(slot: Slot | undefined, ids: Iterable<string>, kind: 'needs' | 'saved') {
     if (!slot || slot.forgotten)
@@ -758,21 +746,11 @@ namespace TrayReads {
       restore: cancel,
     };
   }
-  export function hideSavedItems(workspaceId: string, messageIds: Iterable<string>) {
-    return hide(current(workspaceId), messageIds, 'saved');
-  }
   export function removeNeedsYou(workspaceId: string, messageIds: Iterable<string>) {
     return hide(current(workspaceId), messageIds, 'needs');
   }
-  export function holdNeedsYou(workspaceId: string, messageIds: readonly string[]): void {
-    const slot = current(workspaceId);
-    if (slot) {
-      heldNeeds.set(slot.key, new Set(messageIds));
-      notify();
-    }
-  }
   function hidden(slot: Slot | undefined, kind: 'needs' | 'saved'): ReadonlySet<string> {
-    const ids = new Set<string>(kind === 'needs' && slot ? heldNeeds.get(slot.key) : []);
+    const ids = new Set<string>();
     if (slot)
       for (const intent of (kind === 'needs' ? needsIntents : savedIntents).get(slot.key) ?? [])
         for (const id of intent.ids) ids.add(id);
@@ -933,19 +911,15 @@ export const chatListSnapshot = ChatReads.chatListSnapshot;
 export const refreshChatList = ChatReads.refreshChatList;
 export const resetChatListStoresForTest = ChatReads.reset;
 export const loadNeedsYouList = TrayReads.loadNeedsYouList;
-export const loadSavedList = TrayReads.loadSavedList;
 export const loadTrayList = TrayReads.loadTrayList;
 /** @public The phone list-store bootstrap imports this owner operation. */
 export const seedNeedsYouList = TrayReads.seedNeedsYouList;
 export const forgetTray = TrayReads.forgetTray;
 export const removeNeedsYou = TrayReads.removeNeedsYou;
-export const holdNeedsYou = TrayReads.holdNeedsYou;
 export const subscribeTrayGap = TrayReads.subscribeTrayGap;
 export const useTrayList = TrayReads.useTrayList;
 export const useNeedsYouCount = TrayReads.useNeedsYouCount;
 export const acknowledgePaintedNeedsYou = TrayReads.acknowledgePaintedNeedsYou;
-export const hideSavedItems = TrayReads.hideSavedItems;
-export const revealSavedItems = TrayReads.revealSavedItems;
 
 /** Existing Forward gesture only. All other consumers attach observations. */
 export function readChatList(key: ChatListKey): Promise<ChatListView> {

@@ -1,0 +1,69 @@
+import React from 'react';
+// @ts-expect-error react-test-renderer has no declarations in this workspace.
+import { act, create } from 'react-test-renderer';
+import { describe, expect, it, vi } from 'vitest';
+
+vi.mock('react-native', () => ({ Platform: { OS: 'web' }, Text: 'Text', View: 'View' }));
+vi.mock('tamagui', async () => (await import('@/ui/screens/transcript/grammar-hosts.test-support')).tamaguiHosts());
+vi.mock('lucide-react-native', async () => (await import('@/ui/screens/transcript/grammar-hosts.test-support')).lucideHosts());
+vi.mock('react-native-safe-area-context', () => ({ useSafeAreaInsets: () => ({ top: 0, bottom: 0, left: 0, right: 0 }) }));
+vi.mock('./IdentityMark', () => ({ IdentityMark: () => null }));
+vi.mock('./ErrorBanner', () => ({ ErrorBanner: () => null }));
+vi.mock('@/ui/screens/transcript/cards/RequestMedia', () => ({ RequestMedia: () => null }));
+
+import { GrantRequestCard } from './GrantRequestCard';
+
+const OWNER = 'a'.repeat(64);
+const AGENT = { pubkey: 'b'.repeat(64), kind: 'agent', name: 'Alan', handle: 'alan' } as const;
+const grant = {
+    grantId: 'grant-1', kind: 'command', target: 'npm test', reason: 'Run the tests', status: 'pending',
+    requestedBy: AGENT, roomId: 'room', createdAt: 1, auto: false,
+};
+const message = {
+    id: 'm1', text: '', isUser: false, timestamp: 1793700000,
+    grantRequest: { agent: AGENT, owner: { pubkey: OWNER, kind: 'human', name: 'Dan' }, grants: [grant] },
+} as never;
+
+function render(props: Partial<React.ComponentProps<typeof GrantRequestCard>> = {}) {
+    let tree: any;
+    act(() => {
+        tree = create(<GrantRequestCard message={message} viewerIsAgent={false} viewerPubkey={OWNER}
+            actionId={null} onDecision={() => undefined} {...props} />);
+    });
+    return tree;
+}
+const button = (tree: any, testID: string) => tree.root.find((node: any) => node.type === 'Button' && node.props.testID === testID);
+
+describe('grant request card', () => {
+    it('is one raised request card with Approve first, then Once and Deny', () => {
+        const tree = render();
+        expect(tree.root.find((node: any) => node.type === 'Card').props.backgroundColor).toBe('raised');
+        const labels = tree.root.findAll((node: any) => node.type === 'Button').map((node: any) => node.props['aria-label']);
+        expect(labels).toEqual(['Approve', 'Once', 'Deny']);
+    });
+
+    it('sends today’s decisions: Approve is always, Once is once, Deny is deny', () => {
+        const onDecision = vi.fn();
+        const tree = render({ onDecision });
+        act(() => { button(tree, 'grant-grant-1-always').props.onPress(); });
+        act(() => { button(tree, 'grant-grant-1-once').props.onPress(); });
+        act(() => { button(tree, 'grant-grant-1-deny').props.onPress(); });
+        expect(onDecision.mock.calls).toEqual([['grant-1', 'always'], ['grant-1', 'once'], ['grant-1', 'deny']]);
+    });
+
+    it('holds every decision while one is sending', () => {
+        const tree = render({ actionId: 'grant-1' });
+        expect(tree.root.findAll((node: any) => node.type === 'Button').every((node: any) => node.props.disabled)).toBe(true);
+    });
+
+    it('settles into one quiet line naming who decided', () => {
+        const settled = { ...message as any, grantRequest: { ...(message as any).grantRequest,
+            grants: [{ ...grant, status: 'approved', decidedBy: { pubkey: OWNER, kind: 'human', name: 'Dan' }, decidedAt: 1793700000 }] } };
+        const tree = render({ message: settled });
+        expect(tree.root.findAll((node: any) => node.type === 'Button')).toHaveLength(0);
+        expect(tree.root.find((node: any) => node.type === 'Card').props.backgroundColor).toBe('raised');
+        const outcome = tree.root.find((node: any) => node.type === 'Text' && node.props.testID === 'grant-grant-1-outcome');
+        expect(String(outcome.props.children)).toMatch(/^Always · Allowed by you · /);
+        expect(tree.root.findAll((node: any) => node.type === 'Icon.Check')).toHaveLength(1);
+    });
+});

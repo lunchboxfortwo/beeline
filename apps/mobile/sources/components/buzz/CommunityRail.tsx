@@ -1,8 +1,6 @@
-import { Button } from '@/components/buzz/Button';
 import { CloseButton } from '@/components/buzz/CloseGlyph';
-import { useIsDesktop } from '@/utils/responsive';
 import React, { createContext, useCallback, useContext, useState } from 'react';
-import { Pressable, ScrollView, Text, TouchableOpacity, View } from 'react-native';
+import { Pressable, ScrollView, Text, View } from 'react-native';
 import { StyleSheet } from 'react-native-unistyles';
 import { space } from '@/buzz/groknight';
 import * as Haptics from 'expo-haptics';
@@ -20,14 +18,12 @@ import { WORKSPACE_LABEL } from '@/buzz/vocabulary';
 import { Typography } from '@/constants/Typography';
 import { IdentityMark } from '@/components/buzz/IdentityMark';
 import {
-  WORKSPACE_HEADER_PLATE,
   WORKSPACE_RAIL_TILE,
   workspacePictureSeat,
 } from '@/buzz/workspace-tile';
-import { CHEVRON_ROW_SIZE, ChevronGlyph } from '@/components/buzz/ChevronGlyph';
 import Svg, { Circle, Path } from 'react-native-svg';
 import { DECORATIVE_GLYPH_PROPS } from '@/components/buzz/decorative-glyph';
-import { ContentTarget, InlineRow } from '@/components/buzz/IndexRow';
+import { ContentTarget } from '@/components/buzz/IndexRow';
 import { chromeStrokeWidth } from '@/buzz/chrome-geometry';
 
 const DRAWER_WIDTH = 72;
@@ -36,16 +32,13 @@ const DRAWER_DURATION_MS = 180;
 /**
  * The Workspace tile, and the picture seated in its bezel like a picture in a
  * frame rather than clipped against it (`buzz/workspace-tile`). Same tile as
- * the desktop rail (`DesktopWorkspaceRail`); the room-list header plate below
- * is that tile rescaled, seated by the same rule.
+ * the desktop rail (`DesktopWorkspaceRail`).
  */
 const TILE = WORKSPACE_RAIL_TILE;
 const TILE_SIZE = TILE.size;
 const TILE_RADIUS = TILE.radius;
 const TILE_BORDER_WIDTH = TILE.borderWidth;
 const TILE_SEAT = workspacePictureSeat(TILE);
-const HEADER_PLATE = WORKSPACE_HEADER_PLATE;
-const HEADER_PLATE_SEAT = workspacePictureSeat(HEADER_PLATE);
 
 export type CommunityRailItem = {
   communityId: string;
@@ -101,7 +94,7 @@ function RailButton({
   return (
     <View style={[styles.railButtonSlot, column && styles.columnButtonSlot]}>
       {active && <View style={styles.selectionBar} />}
-      <TouchableOpacity
+      <ContentTarget
         accessibilityRole="button"
         accessibilityLabel={label}
         accessibilityState={{ selected: active }}
@@ -115,7 +108,7 @@ function RailButton({
         ]}
       >
         {children}
-      </TouchableOpacity>
+      </ContentTarget>
       {exitArmed && (
         <CloseButton
           accessibilityLabel={`Exit ${label}`}
@@ -345,118 +338,9 @@ type CommunityDrawerContextValue = {
 
 const CommunityDrawerContext = createContext<CommunityDrawerContextValue | null>(null);
 
-type CommunityDrawerTriggerProps = {
-  community?: CommunityRailItem | null;
-};
-
-type CommunitySwitcherTriggerProps = CommunityDrawerTriggerProps & {
-  expanded: boolean;
-  /** Omit while the Room list is unavailable to show the same identity without a control. */
-  onPress?: () => void;
-  attention?: boolean;
-  pickerTitle?: string;
-};
-
-/**
- * The Workspace identity *is* the switcher: one press target holding the mark,
- * the name, and a disclosure caret. Two adjacent targets doing the same thing
- * (the previous avatar + chevron pair) read as an accident.
- */
-export function CommunityDrawerTrigger({ community }: CommunityDrawerTriggerProps) {
-  const drawer = useContext(CommunityDrawerContext);
-  if (!drawer) {
-    throw new Error('CommunityDrawerTrigger must be rendered inside the Workspace shell.');
-  }
-  return (
-    <CommunitySwitcherTrigger
-      community={community}
-      expanded={drawer.drawerOpen}
-      onPress={drawer.openDrawer}
-    />
-  );
-}
-
-function CommunityHeaderIdentity({
-  community,
-  pickerTitle,
-  attention,
-  interactive,
-}: CommunityDrawerTriggerProps & { pickerTitle?: string | false; attention: boolean; interactive: boolean }) {
-  const desktop = useIsDesktop();
-  return (
-    <>
-      {!pickerTitle && (
-        <View style={styles.drawerTriggerPlate} testID="workspace-header-plate">
-          <View style={styles.drawerTriggerPictureSeat}>
-            <IdentityMark
-              kind="workspace"
-              seed={community?.communityId ?? 'workspace-loading'}
-              avatarUrl={community?.avatar}
-              name={community?.name}
-              size={HEADER_PLATE_SEAT.pictureSize}
-              testID="workspace-avatar-header"
-            />
-          </View>
-          {attention && <View style={desktop ? desktopAttentionStyles.workspaceAttentionDot : styles.workspaceAttentionMark} testID="workspace-attention" />}
-        </View>
-      )}
-      <Text
-        numberOfLines={1}
-        style={styles.drawerTriggerName}
-        testID={
-          pickerTitle
-            ? 'workspace-picker-title'
-            : community
-              ? `workspace-active-${community.communityId}`
-              : 'workspace-active-loading'
-        }
-      >
-        {pickerTitle || community?.name || WORKSPACE_LABEL}
-      </Text>
-      {interactive && (
-        <ChevronGlyph
-          color={styles.drawerTriggerCaret.color}
-          direction={pickerTitle ? 'up' : 'down'}
-          size={CHEVRON_ROW_SIZE}
-        />
-      )}
-    </>
-  );
-}
-
-export function CommunitySwitcherTrigger({
-  community,
-  expanded,
-  onPress,
-  attention = false,
-  pickerTitle,
-}: CommunitySwitcherTriggerProps) {
-  const showingPickerTitle = expanded && pickerTitle;
-
-  if (!onPress) {
-    return (
-      <InlineRow style={styles.drawerTrigger}>
-        <CommunityHeaderIdentity community={community} pickerTitle={showingPickerTitle} attention={attention} interactive={false} />
-      </InlineRow>
-    );
-  }
-  return (
-    <Button
-      accessibilityLabel={
-        showingPickerTitle
-          ? `Close ${pickerTitle}`
-          : `${community?.name ?? WORKSPACE_LABEL} — switch ${WORKSPACE_LABEL}`
-      }
-      accessibilityRole="button"
-      accessibilityState={{ expanded }}
-      onPress={onPress}
-      label=""
-      variant="quiet"
-      appearance={{ control: styles.drawerTrigger }}
-      icon={<CommunityHeaderIdentity community={community} pickerTitle={showingPickerTitle} attention={attention} interactive />}
-      testID="workspace-avatar-trigger"
-    />
-  );
+/** Today's Workspace switcher, opened from the list header inside the shell. */
+export function useCommunityDrawer(): CommunityDrawerContextValue | null {
+  return useContext(CommunityDrawerContext);
 }
 
 type BuzzCommunityShellProps = CommunityRailProps & {
@@ -573,20 +457,6 @@ export function BuzzCommunityShell({
   );
 }
 
-
-const desktopAttentionStyles = StyleSheet.create((theme) => ({
-    workspaceAttentionDot: {
-      position: 'absolute',
-      top: -4,
-      right: -4,
-      width: 12,
-      height: 12,
-      borderRadius: 12 / 2,
-      borderWidth: 2,
-      borderColor: theme.colors.groupped.background,
-      backgroundColor: theme.buzz.accent,
-    },
-}));
 
 const styles = StyleSheet.create((theme, runtime) => {
   const groknight = theme.buzz;
@@ -770,52 +640,5 @@ const styles = StyleSheet.create((theme, runtime) => {
       left: drawerWidth,
       backgroundColor: groknight.bgTerminal,
     },
-    drawerTrigger: {
-      minHeight: 44,
-      flex: 1,
-      minWidth: 0,
-      paddingRight: 8,
-      flexDirection: 'row',
-      alignItems: 'center',
-      gap: 8,
-    },
-    /* The room-list header plate: the desktop tile treatment scaled down —
-     * 26px picture, radius scaled with the tile (14 × 26/48 ≈ 8) and the same
-     * brass bezel. The trigger always shows the current Workspace. */
-    drawerTriggerPlate: {
-      position: 'relative',
-      width: HEADER_PLATE.size,
-      height: HEADER_PLATE.size,
-      alignItems: 'center',
-      justifyContent: 'center',
-      borderRadius: HEADER_PLATE.radius,
-      borderWidth: HEADER_PLATE.borderWidth,
-      borderColor: groknight.selectedBorder,
-    },
-    /* The picture's seat in that plate, rounded by the same rule the rail tile
-     * uses: the plate's inner radius less the slab around the picture, so the
-     * two curves stay concentric at this size too. */
-    drawerTriggerPictureSeat: {
-      width: HEADER_PLATE_SEAT.pictureSize,
-      height: HEADER_PLATE_SEAT.pictureSize,
-      alignItems: 'center',
-      justifyContent: 'center',
-      borderRadius: HEADER_PLATE_SEAT.pictureRadius,
-      overflow: 'hidden',
-    },
-    workspaceAttentionMark: {
-      position: 'absolute',
-      right: 0,
-      bottom: 0,
-      width: 7,
-      height: 7,
-      backgroundColor: groknight.selectedBorder,
-    },
-    drawerTriggerName: {
-      ...theme.buzz.type.bodyStrong,
-      flexShrink: 1,
-      color: groknight.textPrimary,
-    },
-    drawerTriggerCaret: { color: groknight.steel },
   };
 });

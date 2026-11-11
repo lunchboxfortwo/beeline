@@ -1,9 +1,9 @@
-// Static marketing fixture. The header, transcript, faces and composer are the app's own components.
+// Static marketing fixture. The transcript, faces and composer are the app's own components; the
+// title is drawn inline in the chat header's hero type with the brass sigil.
 import React from 'react';
 import { createRoot } from 'react-dom/client';
 import { View, Text } from 'react-native';
 import { useUnistyles } from 'react-native-unistyles';
-import { ChannelHeaderTitle } from '../../apps/mobile/sources/components/buzz/ChannelHeaderTitle';
 import { LedgerEntry } from '../../apps/mobile/sources/components/buzz/Ledger';
 import { ConversationComposer } from '../../apps/mobile/sources/components/buzz/ConversationComposer';
 const noop = () => {};
@@ -21,7 +21,10 @@ function Room() {
         }}
       >
         <Text style={{ ...t.type.meta, color: t.textSecondary, marginBottom: 8 }}>Alex’s team</Text>
-        <ChannelHeaderTitle title="#general" kind="room" numberOfLines={0} />
+        <Text style={{ ...t.type.hero, color: t.textPrimary }}>
+          <Text style={{ color: t.accent }}>#</Text>
+          general
+        </Text>
       </View>
       <View style={{ flex: 1, paddingHorizontal: 24, paddingTop: 24 }}>
         <LedgerEntry

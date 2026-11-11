@@ -17,9 +17,3 @@ export function inviteSummary(invite: InviteView): string {
   return `${who} invited you to a ${WORKSPACE_LABEL.toLowerCase()}${size}.`;
 }
 
-/** The inviter's standing, as the confirmation card states it. */
-export function inviterRoleLabel(role: NonNullable<InviteView['inviter']>['role']): string {
-  if (role === 'owner') return `${WORKSPACE_LABEL} owner`;
-  if (role === 'admin') return `${WORKSPACE_LABEL} admin`;
-  return 'Member';
-}

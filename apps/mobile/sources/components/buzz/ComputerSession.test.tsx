@@ -20,6 +20,8 @@ vi.mock('react-native', async () => {
   return { AppState: { get currentState() { return foreground.state; }, addEventListener: (_: string, listener: () => void) => { foreground.listeners.add(listener); return { remove: () => foreground.listeners.delete(listener) }; } }, BackHandler: { addEventListener: vi.fn(() => ({ remove: vi.fn() })) }, Platform: { OS: 'android' }, Image: host('Image'), Pressable: host('Pressable'), Text: host('Text'), View: host('View') };
 });
 vi.mock('expo-clipboard', () => clipboard);
+vi.mock('tamagui', async () => (await import('@/ui/screens/transcript/grammar-hosts.test-support')).tamaguiHosts());
+vi.mock('lucide-react-native', async () => (await import('@/ui/screens/transcript/grammar-hosts.test-support')).lucideHosts());
 vi.mock('react-native-safe-area-context', () => ({ useSafeAreaInsets: () => ({ top: 0, bottom: 24 }) }));
 vi.mock('expo-image', async () => {
   const ReactModule = await import('react');
@@ -50,6 +52,7 @@ import { Modal } from '@/modal';
 import { Platform } from 'react-native';
 import { publishViewerConversation, removeViewerConversation } from '@/buzz/viewer-conversation';
 import { observeArtifactRows, setArtifactViewportActive } from '@/buzz/artifact-viewport';
+import { Btn, SafeBottom, SafeTop } from '@/ui/grammar';
 import { ComputerSessionCard, ComputerSessionViewer, WarmComputerSessionHost, openComputerSessionViewer, type ComputerSessionView } from './ComputerSession';
 
 const session = {
@@ -107,22 +110,52 @@ it('mints a fresh steering token before opening the system browser', async () =>
   await act(async () => tree!.unmount());
 });
 
-it('keeps only Open and Close above the page; closing never controls or ends the share', async () => {
+it('keeps the keyboard, Open in browser and Close above the page; closing never controls or ends the share', async () => {
   const onClose = vi.fn();
   let tree: ReturnType<typeof create>;
   await act(async () => { tree = create(<ComputerSessionViewer session={session} onClose={onClose} />); });
-  expect(tree!.root.findByProps({ testID: 'computer-session-viewer' }).props.style[1]).toEqual({ paddingTop: 0, paddingBottom: 24 });
+  const viewer = tree!.root.findByProps({ testID: 'computer-session-viewer' });
+  expect(viewer.findAllByType(SafeTop)).toHaveLength(1);
+  expect(viewer.findAllByType(SafeBottom)).toHaveLength(1);
   const controls = tree!.root.findByProps({ testID: 'computer-session-controls' });
-  expect(controls.props.style.position).toBeUndefined();
-  expect(controls.props.style.alignItems).toBe('center');
-  expect(tree!.root.findByProps({ testID: 'computer-session-open-browser' }).props.style).toEqual({ alignSelf: 'center' });
-  expect(controls.props.style.marginTop + controls.props.style.marginBottom).toBe(24);
-  expect(controls.props.style.marginHorizontal).toBe(16);
-  expect(controls.findAllByType('Pressable').map((button: any) => button.props.accessibilityLabel))
-    .toEqual(['Open in browser', 'Close browser']);
+  expect(controls.findAllByType(Btn).map((button: any) => button.props.label))
+    .toEqual(['Keyboard controls', 'Open in browser', 'Close browser']);
   await act(async () => tree!.root.findByProps({ testID: 'computer-session-close' }).props.onPress());
   expect(onClose).toHaveBeenCalledOnce();
   expect(phoneOperation).toHaveBeenCalledExactlyOnceWith('openComputerSession', { id: 'session-1' });
+  await act(async () => tree!.unmount());
+});
+
+it('key bar: the field types into the page, keys and Paste ride the paste bridge', async () => {
+  let tree: ReturnType<typeof create>;
+  await act(async () => { tree = create(<ComputerSessionViewer session={session} onClose={() => {}} />); });
+  expect(tree!.root.findAllByProps({ testID: 'computer-session-key-bar' })).toHaveLength(0);
+  await act(async () => tree!.root.findByProps({ testID: 'computer-session-keyboard-toggle' }).props.onPress());
+  const sent = () => injectJavaScript.mock.calls.map(([script]: any[]) =>
+    JSON.parse(/window\.postMessage\((.*), '\*'\)/.exec(script)![1]!)).filter((message: any) => message.type !== 'viewer-mode');
+  injectJavaScript.mockClear();
+  const field = () => tree!.root.findByProps({ testID: 'computer-session-key-field' });
+  await act(async () => field().props.onChangeText('LG'));
+  await act(async () => field().props.onChangeText('LGTM'));
+  await act(async () => field().props.onChangeText('LGT'));
+  expect(sent()).toEqual([
+    { type: 'viewer-paste', text: 'LG', id: 'session-1' },
+    { type: 'viewer-paste', text: 'TM', id: 'session-1' },
+    { type: 'viewer-key', key: 'Backspace', id: 'session-1' },
+  ]);
+  injectJavaScript.mockClear();
+  for (const key of ['Escape', 'Tab', 'Backspace', 'Enter', 'ArrowLeft', 'ArrowUp', 'ArrowDown', 'ArrowRight'])
+    await act(async () => tree!.root.findByProps({ testID: `computer-session-key-${key}` }).props.onPress());
+  expect(sent().map((message: any) => message.key)).toEqual(
+    ['Escape', 'Tab', 'Backspace', 'Enter', 'ArrowLeft', 'ArrowUp', 'ArrowDown', 'ArrowRight']);
+  injectJavaScript.mockClear();
+  await act(async () => {
+    tree!.root.findByProps({ testID: 'computer-session-key-paste' }).props.onPress();
+    await vi.waitFor(() => expect(sent()).toEqual([{ type: 'viewer-paste', text: 'from my phone', id: 'session-1' }]));
+  });
+  expect(tree!.root.findByProps({ testID: 'computer-session-key-sent' }).props.children).toBe('Sent Paste to the page');
+  await act(async () => tree!.root.findByProps({ testID: 'computer-session-key-bar-close' }).props.onPress());
+  expect(tree!.root.findAllByProps({ testID: 'computer-session-key-bar' })).toHaveLength(0);
   await act(async () => tree!.unmount());
 });
 
@@ -149,7 +182,7 @@ it('opens with the preview access immediately while a fresh authorization RPC is
   const preview = () => tree!.root.findAll((node: { type: unknown; props: Record<string, any> }) => typeof node.type === 'function' && node.props.preview === true)[0]!;
   expect(preview().props.session.access).toBe('old-token');
   const previewMessage = tree!.root.findByType('WebView').props.onMessage;
-  const open = tree!.root.findAllByType('Pressable').find((node: { props: Record<string, any> }) => node.props.testID === 'computer-session-open')!;
+  const open = tree!.root.findByProps({ testID: 'computer-session-open' });
   await act(async () => { await open.props.onPress(); });
   expect(Modal.show).toHaveBeenCalledWith(expect.objectContaining({props: expect.objectContaining({session: expect.objectContaining({access: 'old-token'})})}));
   expect(preview().props.session.access).toBe('old-token');
@@ -419,27 +452,23 @@ it.each([false, true])('assigns keyboard avoidance to the correct computer viewe
   await act(async () => tree!.unmount());
 });
 
-it('matches artifact footer destinations and refreshes access for external opening', async () => {
+it('the card offers one Open, which opens the shared browser viewer', async () => {
   let tree: ReturnType<typeof create>;
   await act(async () => { tree = create(<ComputerSessionCard messageId="message-1" roomId="computer-test" session={session} />); });
-  const external = tree!.root.findByProps({ testID: 'computer-session-card-open-browser' });
-  const internal = tree!.root.findByProps({ testID: 'computer-session-open' });
-  expect(external.props.label).toBe('Open in browser');
-  expect(external.props.destination).toBe('external');
-  expect(internal.props.label).toBe('Open');
-  expect(internal.props.destination).toBe('screen');
-  await act(async () => { external.props.onPress(); });
-  expect(openExternalUrl).toHaveBeenCalledWith('https://server.usebeeline.app/s/session-1/?access=fresh-token');
-  expect(Modal.show).not.toHaveBeenCalled();
+  expect(tree!.root.findAllByProps({ testID: 'computer-session-card-open-browser' })).toHaveLength(0);
+  const open = tree!.root.findByProps({ testID: 'computer-session-open' });
+  expect(open.props.label).toBe('Open shared browser');
+  await act(async () => { await open.props.onPress(); });
+  expect(Modal.show).toHaveBeenCalledOnce();
+  expect(openExternalUrl).not.toHaveBeenCalled();
   await act(async () => { tree!.unmount(); });
 });
 
-
-it('does not open an external browser when fresh card access is refused', async () => {
+it('does not open an external browser when fresh viewer access is refused', async () => {
   let tree: ReturnType<typeof create>;
-  await act(async () => { tree = create(<ComputerSessionCard messageId="message-1" roomId="computer-test" session={session} />); });
+  await act(async () => { tree = create(<ComputerSessionViewer session={session} onClose={() => undefined} />); });
   phoneOperation.mockRejectedValueOnce(new Error('access denied'));
-  await act(async () => { tree!.root.findByProps({ testID: 'computer-session-card-open-browser' }).props.onPress(); });
+  await act(async () => { tree!.root.findByProps({ testID: 'computer-session-open-browser' }).props.onPress(); });
   expect(openExternalUrl).not.toHaveBeenCalled();
   expect(Modal.alert).toHaveBeenCalledWith('Could not open browser', 'The live browser is unavailable. Try again.');
   await act(async () => tree!.unmount());
@@ -451,7 +480,7 @@ it('settles an unfinished preview capture when the session ends', async () => {
   await act(async () => { tree = create(<ComputerSessionCard messageId="message-1" roomId="computer-test" session={session} />); });
   try {
     const message = tree.root.findByType('WebView').props.onMessage;
-    const open = tree.root.findAllByType('Pressable').find((node: { props: Record<string, any> }) => node.props.testID === 'computer-session-open')!;
+    const open = tree.root.findByProps({ testID: 'computer-session-open' });
     await act(async () => { await open.props.onPress(); });
     const shown = vi.mocked(Modal.show).mock.calls[0]![0] as any;
     const capture = shown.props.session.previewFrame;

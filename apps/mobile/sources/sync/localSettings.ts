@@ -2,6 +2,8 @@ import * as z from 'zod';
 
 export const LocalSettingsSchema = z.object({
     appearance: z.enum(['system', 'light', 'dark']),
+    // The grammar's colour set: Brass (default) or neutral Stone on the same components.
+    palette: z.enum(['brass', 'stone']),
     roomOpenTraceOverlay: z.boolean(),
     uiSize: z.enum(['small', 'medium', 'large']),
     zenMode: z.boolean(),
@@ -11,6 +13,7 @@ export type LocalSettings = z.infer<typeof LocalSettingsSchema>;
 
 export const localSettingsDefaults: LocalSettings = Object.freeze({
     appearance: 'system',
+    palette: 'brass',
     roomOpenTraceOverlay: false,
     uiSize: 'medium',
     zenMode: false,

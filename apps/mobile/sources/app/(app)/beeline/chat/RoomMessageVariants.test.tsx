@@ -2,11 +2,14 @@ import React from 'react';
 // @ts-expect-error react-test-renderer has no declarations in this workspace.
 import { act, create, type ReactTestRenderer } from 'react-test-renderer';
 import { afterEach, beforeEach, expect, it, vi } from 'vitest';
-import type { ChoiceCardView, RoomView } from '@beeline/api-contract/phone';
+import type { ChoiceCardView } from '@beeline/api-contract/phone';
 import type { ChatDisplayMessage } from '@/buzz/room-view-presentation';
 import { TranscriptCardChoicePlate } from '@/components/buzz/ChoicePlate';
 
 vi.mock('react-native', () => ({ Platform: { OS: 'web' }, Pressable: 'Pressable', Text: 'Text', View: 'View' }));
+vi.mock('tamagui', async () => (await import('@/ui/screens/transcript/grammar-hosts.test-support')).tamaguiHosts());
+vi.mock('lucide-react-native', async () => (await import('@/ui/screens/transcript/grammar-hosts.test-support')).lucideHosts());
+vi.mock('react-native-safe-area-context', () => ({ useSafeAreaInsets: () => ({ top: 0, bottom: 0, left: 0, right: 0 }) }));
 vi.mock('@/components/buzz/ChoiceVideoPreview', () => ({ ChoiceVideoPreview: vi.fn(() => null) }));
 vi.mock('@/components/buzz/Ledger', () => ({ LedgerUntaggedHint: vi.fn(() => null), LedgerEntry: vi.fn(() => null), LedgerGhostLine: vi.fn(() => null), LedgerSystemLine: vi.fn(() => null), LedgerSteer: vi.fn(() => null) }));
 vi.mock('@/components/buzz/ErrorBanner', () => ({ ErrorBanner: vi.fn(() => null) }));
@@ -53,7 +56,6 @@ vi.mock('@/components/buzz/TranscriptCard', () => ({
 
 import { ChoiceCard } from './RoomMessageVariants';
 import { OrdinaryLedgerMessage } from './RoomMessageVariants-ordinary-ledger-message';
-import { useChatRoster } from './useChatRoster';
 import { LedgerEntry, LedgerSteer } from '@/components/buzz/Ledger';
 import { NewMessageMaterialize } from '@/components/buzz/MonoHull';
 import { TurnSettledLine } from '@/components/buzz/TurnProgressLine';
@@ -198,41 +200,3 @@ it('SEND-ACTIONS keeps tap and long press on the existing message-actions path',
 });
 
 
-it('renders free-agent model labels from Room members with no cached Workspace roster', () => {
-  const props = ordinaryProps();
-  // Reuse the ordinary transcript boundary and paint its byline role as text.
-  vi.mocked(LedgerEntry).mockImplementation(({ byline }: any) =>
-    React.createElement('Text', { testID: `model-${byline.name}` }, byline.role));
-  const members: RoomView['members'] = [
-    { identity: { pubkey: 'b'.repeat(64), kind: 'agent', name: 'Beebee' }, role: 'member', model: 'beeline/deepseek/deepseek-v4.1-flash-1017' },
-    { identity: { pubkey: 'c'.repeat(64), kind: 'agent', name: 'Luna' }, role: 'member', model: 'beeline/openai/gpt-6-luna' },
-    { identity: { pubkey: 'd'.repeat(64), kind: 'agent', name: 'BBC' }, role: 'member', model: '6.1 Sol' },
-    { identity: { pubkey: 'e'.repeat(64), kind: 'agent', name: 'Unknown' }, role: 'member' },
-  ];
-  const room: RoomView = {
-    room: { id: 'room', workspaceId: 'workspace', name: 'general', archived: false, createdAt: 1, updatedAt: 1 },
-    messages: [], members, latestAgentTurns: [],
-    viewer: { identity: { pubkey: VIEWER, kind: 'human', name: 'Reader' }, role: 'owner', permissions: { send: true, manage: true } },
-    repositoryResolution: 'none', watchFilters: [],
-  };
-  function Transcript({ view }: { view: RoomView }) {
-    const roster = useChatRoster([view, new Map(), [], 'general', VIEWER, null, null, {}]);
-    return <>{view.members.map(member => <OrdinaryLedgerMessage {...props}
-      key={member.identity.pubkey}
-      message={{ id: member.identity.pubkey, text: 'Hello', isUser: false, pubkey: member.identity.pubkey, timestamp: 1,
-        authorIdentity: member.identity }}
-      agent={roster[5].get(member.identity.pubkey)}
-      agentModel={roster[9].get(member.identity.pubkey)}
-      continued={false}
-    />)}</>;
-  }
-  act(() => { renderer = create(<Transcript view={room} />); });
-  expect(renderer.root.findByProps({ testID: 'model-Beebee' }).props.children).toBe('deepseek-v4.1-flash-1017');
-  expect(renderer.root.findByProps({ testID: 'model-Luna' }).props.children).toBe('gpt-6-luna');
-  expect(renderer.root.findByProps({ testID: 'model-BBC' }).props.children).toBe('6.1 Sol');
-  expect(renderer.root.findByProps({ testID: 'model-Unknown' }).props.children).toBe('AGENT');
-  act(() => renderer.update(<Transcript view={{ ...room, members: room.members.map(member =>
-    member.identity.name === 'Luna' ? { ...member, model: '6 Luna' } : member) }} />));
-  expect(renderer.root.findByProps({ testID: 'model-Luna' }).props.children).toBe('6 Luna');
-  vi.mocked(LedgerEntry).mockReset();
-});

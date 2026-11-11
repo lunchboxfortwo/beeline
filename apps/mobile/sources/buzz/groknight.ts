@@ -424,3 +424,25 @@ export type BeelineThemeTokens = (typeof beelineThemes)[BeelineThemeName];
 
 /** Backward-compatible name for the new default token set. */
 export const groknight = beelineThemes.obsidian;
+
+/**
+ * The grammar's second colour set (Settings → Device → Color set): neutral
+ * Stone on the same components. Overrides the neutral ladder and brass only.
+ */
+export const stonePalette: Record<'dark' | 'light', Partial<Record<keyof BeelineThemeTokens, string>>> = {
+    dark: {
+        bgBase: '#171717', bgRaised: '#222222', bgHighlight: '#2c2c2c', bgUnread: '#242424',
+        textPrimary: '#fafaf9', textSecondary: '#d6d3d1', textMuted: '#a8a29e',
+        border: '#353535', borderStrong: '#57534e', accent: '#d6d3d1',
+        buttonPrimaryFill: '#f5f5f4', buttonPrimaryText: '#1c1917',
+    },
+    light: {
+        bgBase: '#fafaf9', bgRaised: '#f5f5f4', bgHighlight: '#e7e5e4', bgUnread: '#f0efed',
+        textPrimary: '#1c1917', textSecondary: '#44403c', textMuted: '#78716c',
+        border: '#e7e5e4', borderStrong: '#d6d3d1', accent: '#57534e',
+        buttonPrimaryFill: '#1c1917', buttonPrimaryText: '#fafaf9',
+    },
+};
+
+/** The one scrim behind every sheet. */
+export const SCRIM = 'rgba(0,0,0,0.8)';

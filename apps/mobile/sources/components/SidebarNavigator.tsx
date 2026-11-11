@@ -7,6 +7,7 @@ import * as React from 'react';
 import { Drawer } from 'expo-router/drawer';
 import { useIsDesktop, useIsTablet, useHeaderHeight } from '@/utils/responsive';
 import { SidebarView } from './SidebarView';
+import { DesktopPanel } from '@/ui/shell/DesktopPanel';
 import { useWindowDimensions, View, Pressable, Platform, PanResponder } from 'react-native';
 import { useLocalSetting, useLocalSettingMutable } from '@/sync/storage';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
@@ -211,6 +212,7 @@ export const SidebarNavigator = React.memo(() => {
           drawerContent={showSessionChrome ? drawerContent : undefined}
         />
         </View>
+        {showSessionChrome && <DesktopPanel />}
         {document && desktopLayout.availableWidth >= DESKTOP_WORK_PANE_THRESHOLD && (
           <View style={{ width: desktopDocumentPaneWidth(desktopLayout.availableWidth) }}>
             <DesktopArtifactPane {...document} onClose={() => setDocument(null)} />

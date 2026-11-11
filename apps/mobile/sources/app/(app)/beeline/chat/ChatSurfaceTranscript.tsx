@@ -51,6 +51,8 @@ type Props = {
   newMessageBadgeCount: number;
   newestJumpDiscShown: boolean;
   landAtNewestMessage: () => void;
+  /** The transcript's first (oldest) block: a thread's title block (header B). */
+  leadBlock?: React.ReactNode;
 };
 
 export const ChatSurfaceTranscript = React.memo(function ChatSurfaceTranscript({
@@ -93,6 +95,7 @@ export const ChatSurfaceTranscript = React.memo(function ChatSurfaceTranscript({
   newMessageBadgeCount,
   newestJumpDiscShown,
   landAtNewestMessage,
+  leadBlock,
 }: Props) {
   return (<View style={styles.transcriptViewport}>
               {desktopTranscript ? (
@@ -120,6 +123,7 @@ export const ChatSurfaceTranscript = React.memo(function ChatSurfaceTranscript({
                       transcriptMessages.length === 0 && styles.messageListContentEmpty,
                     ]}
                   >
+                    {leadBlock}
                     {emptyLedger}
                     {transcriptMessages.length > 0 && (
                       <>
@@ -255,7 +259,7 @@ export const ChatSurfaceTranscript = React.memo(function ChatSurfaceTranscript({
                   onScrollToIndexFailed={phoneScrollList.scrollToIndexFailed}
                   onEndReached={loadOlderTranscriptIfReaderAsked}
                   onEndReachedThreshold={0.5}
-                  ListEmptyComponent={emptyLedger}
+                  ListEmptyComponent={leadBlock ? <>{leadBlock}{emptyLedger}</> : emptyLedger}
                   // Inverted native list: the header is the newest end of the transcript.
                   ListHeaderComponent={
                     starPrompt.prompt || transcriptForwardLine ? (
@@ -276,6 +280,7 @@ export const ChatSurfaceTranscript = React.memo(function ChatSurfaceTranscript({
                   // Inverted native list: the footer is the visual top.
                   ListFooterComponent={
                     <>
+                      {transcriptMessages.length > 0 && leadBlock}
                       {transcriptHistoryLine}
                       {transcriptMessages.length > 0 && emptyLedger}
                     </>

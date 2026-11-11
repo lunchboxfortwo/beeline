@@ -1,23 +1,19 @@
-import { ErrorBanner } from '@/components/buzz/ErrorBanner';
 import React, { useEffect, useState } from 'react';
-import { Text, View } from 'react-native';
 import { NotificationLifecycleCard } from '@/components/buzz/PrLifecycleCard';
-import { StyleSheet } from 'react-native-unistyles';
 import { CHOICE_NOTE_MAX_LENGTH, formatChoiceClock } from '@beeline/api-contract/phone';
 import type { AgentPresentation, ChatDisplayMessage } from '@/buzz/room-view-presentation';
 import { resolveAgentDisplayIdentity } from '@/buzz/agent-display';
 import { connectorOfferWaitingLine } from '@/buzz/connector-offer-copy';
 import { AppMark } from '@/components/buzz/AppMark';
 import { INSTAGRAM_SIGN_IN_REQUIREMENT } from '@/buzz/app-sign-in-copy';
-import { appBoardColors } from '@/buzz/app-board-style';
 import { ledgerStamp } from '@/buzz/relative-time';
 import { squireApprovalAction } from '@beeline/api-contract/phone';
 import { AgentApprovalCard, approvalAudience, approvalDecisionNote } from '@/components/buzz/AgentApprovalCard';
 import { openExternalUrl } from '@/utils/open-external-url';
+import { RequestMedia } from '@/ui/screens/transcript/cards/RequestMedia';
 import { IdentityMark } from '@/components/buzz/IdentityMark';
-import { Button } from '@/components/buzz/Button';
 import { TranscriptCard, TranscriptCardHandle, type TranscriptCardAction, type TranscriptCardChoice } from '@/components/buzz/TranscriptCard';
-import { OrdinaryLedgerMessageProps, agentBylineLabel, ConnectorReceiptCard } from './RoomMessageVariants-attachment-card';
+import { OrdinaryLedgerMessageProps, ConnectorReceiptCard } from './RoomMessageVariants-attachment-card';
 import { OrdinaryLedgerMessage } from './RoomMessageVariants-ordinary-ledger-message';
 
 
@@ -72,19 +68,19 @@ export const WritePermissionCard = React.memo(function WritePermissionCard({
     pending && canDecide && permission.repository
       ? [
           {
-            label: 'No',
-            secondary: true,
-            disabled: busy,
-            onPress: () => onDecision(message, 'deny'),
-            testID: 'write-permission-deny',
-          },
-          {
-            label: squireSpending ? 'Allow once' : 'Allow',
+            label: 'Approve',
             primary: true,
             disabled: busy,
             loading: busy,
             onPress: () => onDecision(message, 'allow'),
             testID: 'write-permission-allow',
+          },
+          {
+            label: 'Deny',
+            secondary: true,
+            disabled: busy,
+            onPress: () => onDecision(message, 'deny'),
+            testID: 'write-permission-deny',
           },
         ]
       : !pending && permission.status === 'allowed' && permission.subchannelId
@@ -104,8 +100,9 @@ export const WritePermissionCard = React.memo(function WritePermissionCard({
       title={<><TranscriptCardHandle>@{display.name.replace(/^@/, '')}</TranscriptCardHandle>{' '}{squireSpending ? 'wants to spend with Trusty Squire' : 'wants to open an edit corner'}</>}
       subline={`${squireSpending ? roomName ? `#${roomName}` : 'Room' : permission.repository ?? 'Repository'} · ${approvalAudience(permission.requester, viewerPubkey)}`}
       stamp={ledgerStamp(message.timestamp)} body={permission.reason}
-      facts={squireSpending ? [{ label: 'Uses', value: permission.tool }, { label: 'Can', value: 'Pay with a saved card at checkout' }]
-        : [{ label: 'Repository', value: permission.repository ?? 'Missing target' }, { label: 'Branch from', value: targetBranch ?? 'main' }, { label: 'Can', value: 'Push to its own branch · merge still needs you' }]}
+      media={pending ? <RequestMedia message={message} /> : undefined}
+      facts={squireSpending ? [{ label: 'Uses', value: permission.tool }]
+        : [{ label: 'Repository', value: permission.repository ?? 'Missing target' }, { label: 'Branch from', value: targetBranch ?? 'main' }]}
       footerNote={footerNote} decisionNote={!pending}
       footerNoteTestID={pending && permission.repository && !canDecide ? 'brief-approval-audience-wait' : undefined}
       footerNoteTone={permission.status === 'failed' || (pending && !permission.repository) ? 'failed' : 'quiet'}
@@ -139,20 +136,21 @@ export const SquireApprovalCard = React.memo(function SquireApprovalCard({
   const facts = approval.facts ?? (approval.tool === 'inject_card'
     ? [{ label: 'From', value: parts[1]?.replace(/^at /, '') || 'Checkout' }, ...(parts[2] ? [{ label: 'Amount', value: parts[2] }] : [])]
     : [{ label: approval.tool === 'operate_login' ? 'Site' : 'Key', value: reference ? 'Saved credential' : parts[0]?.replace(/^(Reveal|Edit|Delete|Sign in to) /, '') || 'Saved credential' },
-       { label: 'Can', value: approval.tool === 'fetch_credential' ? 'Read the key value' : approval.action ?? squireApprovalAction(approval.tool, approval.detail, approval.linkKind) }]);
+      ]);
   const actions: TranscriptCardAction[] = [];
   if (approval.sourceRoomId && approval.sourceMessageId && onOpenSource) actions.push({
     label: 'View request', accessibilityRole: 'link',
     onPress: () => onOpenSource(approval.sourceRoomId!, approval.sourceMessageId!), testID: 'squire-approval-source',
   });
-  if (!settled) actions.push({ label: approval.linkKind === 'passkey' ? 'Use passkey' : approval.linkKind === 'vouch' ? 'Vouch' : 'Review',
+  // Approve opens the exact page Squire returned; Squire's own passkey decides there.
+  if (!settled) actions.push({ label: 'Approve', primary: true,
     accessibilityRole: 'link', destination: 'external', onPress: () => void openExternalUrl(approval.approvalUrl), testID: 'squire-approval-open' });
   return <AgentApprovalCard tier={settled ? 'record' : 'ask'} testID="squire-approval-card" wrapTitle
     askingAgent={approval.agent} agent={agent}
     title={`@${name.replace(/^@/, '')} wants to ${approval.action ?? squireApprovalAction(approval.tool, approval.detail, approval.linkKind)}`}
     subline={`${approval.tool === 'Link' ? 'Link' : 'Trusty Squire'} · ${approvalAudience(approval.owner, viewerPubkey)}`}
     sublineTestID="squire-approval-detail" stamp={ledgerStamp(message.timestamp)}
-    body={approval.reason} facts={facts} foldCode codeLabel="vault reference" code={reference} codePath={reference ? 'vault reference' : undefined}
+    body={approval.reason} media={settled ? undefined : <RequestMedia message={message} />} facts={facts} foldCode codeLabel="vault reference" code={reference} codePath={reference ? 'vault reference' : undefined}
     footerNote={approval.status ? approvalDecisionNote(approval.status, approval.decidedBy, approval.decidedAt ?? message.timestamp, viewerPubkey, approval.action ?? squireApprovalAction(approval.tool, approval.detail, approval.linkKind)) : undefined}
     decisionNote={settled} actions={actions} />;
 });
@@ -194,58 +192,30 @@ export function AppSignInCard({ message, agentName, canConnect, onConnect, busy 
   const app = message.appSignIn!;
   if (app.status === 'connected')
     return (
-      <Text style={appSignInStyles.settled}>{app.name.toUpperCase()} CONNECTED · {agentName.toUpperCase()} CONTINUES</Text>
+      <TranscriptCard tier="record" title={`${app.name} connected · ${agentName} continues`}
+        identity={<AppMark name={app.name} domain={app.domain} logo={app.logo} size={28} />}
+        testID={`app-sign-in-${app.appKey}-connected`} />
     );
   return (
-    <View style={appSignInStyles.wrap} testID={`app-sign-in-${app.appKey}`}>
-      <View style={appSignInStyles.card}>
-        <View style={appSignInStyles.heading}>
-          <AppMark
-            name={app.name}
-            domain={app.domain}
-            logo={app.logo}
-            size={36}
-          />
-          <Text style={appSignInStyles.title}>Connect {app.name}</Text>
-        </View>
-        <Text style={appSignInStyles.detail}>Sign in once. {app.continuation ?? `${agentName} continues the request right after.`}</Text>
-        {app.appKey === 'instagram' ? (
-          <Text style={appSignInStyles.detail}>{INSTAGRAM_SIGN_IN_REQUIREMENT}</Text>
-        ) : null}
-        {app.status === 'failed' ? (
-          <ErrorBanner inline title={(app.errorMessage ?? 'App sign-in failed. Try again.')} />
-        ) : null}
-        {canConnect ? (
-          <Button disabled={busy} label={busy ? 'Connecting' : app.status === 'failed' ? `Retry ${app.name}` : `Connect ${app.name}`} onPress={onConnect} style={appSignInStyles.button} testID={`app-sign-in-${app.appKey}-connect`} />
-        ) : (
-          <Text style={appSignInStyles.detail}>Waiting for the account owner to connect {app.name}.</Text>
-        )}
-      </View>
-    </View>
+    <TranscriptCard
+      tier="ask"
+      wrapTitle
+      title={`Connect ${app.name}`}
+      testID={`app-sign-in-${app.appKey}`}
+      body={`Sign in once. ${app.continuation ?? `${agentName} continues the request right after.`}${app.appKey === 'instagram' ? `\n${INSTAGRAM_SIGN_IN_REQUIREMENT}` : ''}`}
+      inlineError={app.status === 'failed' ? { title: app.errorMessage ?? 'App sign-in failed. Try again.' } : undefined}
+      footerNote={canConnect ? undefined : `Waiting for the account owner to connect ${app.name}.`}
+      actions={canConnect ? [{
+        label: busy ? 'Connecting' : app.status === 'failed' ? `Retry ${app.name}` : `Connect ${app.name}`,
+        primary: true,
+        disabled: busy,
+        loading: busy,
+        onPress: onConnect,
+        testID: `app-sign-in-${app.appKey}-connect`,
+      }] : []}
+    />
   );
 }
-
-
-const appSignInStyles = StyleSheet.create(theme => {
-  const board = appBoardColors(theme.buzz);
-  return {
-  wrap: { gap: 8, marginVertical: 8, marginHorizontal: 8 },
-  // The TranscriptCard frame, read from the same tokens (DESIGN.md → Transcript cards).
-  card: {
-    borderWidth: 1,
-    borderColor: theme.buzz.borderStrong,
-    borderRadius: theme.buzz.transcriptCard.cornerRadius,
-    padding: theme.buzz.transcriptCard.side,
-    gap: theme.buzz.space.sm,
-  },
-  heading: { flexDirection: 'row', alignItems: 'center', gap: theme.buzz.space.sm },
-  title: { ...theme.buzz.type.bodyStrong, color: board.ink },
-  detail: { ...theme.buzz.type.meta, color: board.secondary },
-  // A single decision sits where a ButtonRow puts its confirm: at the trailing edge.
-  button: { alignSelf: 'flex-end' },
-  settled: { ...theme.buzz.type.sectionHead, color: board.quiet, marginVertical: 8, marginHorizontal: 8 },
-  };
-});
 
 
 export const ConnectorOfferCard = React.memo(function ConnectorOfferCard({
@@ -275,7 +245,7 @@ export const ConnectorOfferCard = React.memo(function ConnectorOfferCard({
     (pending || failed) && canAccept
       ? [
           {
-            label: failed ? offer.replacementMessageId ? 'Open current card' : 'Retry' : offer.intent === 'switch' ? 'Switch' : offer.intent === 'reconnect' ? 'Reconnect' : 'Add',
+            label: failed ? offer.replacementMessageId ? 'Open current card' : 'Retry' : 'Approve',
             primary: true,
             disabled: actionId !== null,
             loading: busy,
@@ -337,7 +307,7 @@ export const ConnectorOfferCard = React.memo(function ConnectorOfferCard({
               : `connector-offer-${offer.offerId}-waiting`
             : `connector-offer-${offer.offerId}-outcome`
       }
-      actions={pending && canAccept && onDecline ? [{ label: 'No', secondary: true, onPress: () => onDecline(offer.offerId), testID: `connector-offer-${offer.offerId}-deny`, disabled: actionId !== null }, ...actions] : actions}
+      actions={pending && canAccept && onDecline ? [...actions, { label: 'Deny', secondary: true, onPress: () => onDecline(offer.offerId), testID: `connector-offer-${offer.offerId}-deny`, disabled: actionId !== null }] : actions}
     />
   );
 });
@@ -627,12 +597,12 @@ export const TargetBranchProposalCard = React.memo(function TargetBranchProposal
       title={`@${askingAgent ?? 'Agent'} wants to change the target branch`}
       subline={`${roomName ? `#${roomName}` : proposal.repository ?? 'Room'} · for you`}
       stamp={ledgerStamp(message.timestamp)} body={proposal.purpose}
-      facts={[{ label: 'From', value: proposal.from }, { label: 'To', value: proposal.to }, { label: 'Can', value: `Rebase open corners onto ${proposal.to}` }]}
+      facts={[{ label: 'From', value: proposal.from }, { label: 'To', value: proposal.to }]}
       footerNote={settled ? approvalDecisionNote(proposal.status ?? 'allowed', proposal.decidedBy, proposal.decidedAt ?? message.timestamp, viewerPubkey) : canConfirm ? notice ?? undefined : 'waiting for a Workspace manager'}
       decisionNote={settled}
       actions={!settled && canConfirm ? [
-        ...(onDeny ? [{ label: 'No', secondary: true, disabled: busy, onPress: () => onDeny(message), testID: 'target-branch-deny' }] : []),
-        { label: 'Confirm', primary: true, loading: busy, disabled: busy, onPress: () => onConfirm(message), testID: 'target-branch-confirm' },
+        { label: 'Approve', primary: true, loading: busy, disabled: busy, onPress: () => onConfirm(message), testID: 'target-branch-confirm' },
+        ...(onDeny ? [{ label: 'Deny', secondary: true, disabled: busy, onPress: () => onDeny(message), testID: 'target-branch-deny' }] : []),
       ] : []} />
   );
 });
@@ -640,6 +610,5 @@ export { GitHubEventCard, DaemonFactCard } from '@/components/buzz/LifecycleCard
 export { NotificationLifecycleCard };
 export { GrantRequestCard, type GrantDecision, type GrantRequestCardProps } from '@/components/buzz/GrantRequestCard';
 export type { OrdinaryLedgerMessageProps } from './RoomMessageVariants-attachment-card';
-export { agentBylineLabel } from './RoomMessageVariants-attachment-card';
 export { ConnectorReceiptCard } from './RoomMessageVariants-attachment-card';
 export { OrdinaryLedgerMessage } from './RoomMessageVariants-ordinary-ledger-message';

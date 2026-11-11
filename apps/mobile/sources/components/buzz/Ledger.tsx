@@ -1,18 +1,10 @@
 import { StyleSheet } from 'react-native-unistyles';
-import { BYLINE_DOT_SIZE } from './Ledger-ledger-steer';
 import React, { useEffect, useRef, useState } from 'react';
-import { Platform, Pressable, Text, View, type StyleProp, type ViewStyle } from 'react-native';
+import { View, type StyleProp, type ViewStyle } from 'react-native';
+import { ContentTarget } from './IndexRow';
 import Animated, { cancelAnimation, Easing, runOnJS, useAnimatedStyle, useReducedMotion, useSharedValue, withTiming } from 'react-native-reanimated';
-import Ionicons from '@expo/vector-icons/Ionicons';
-import { useFonts } from 'expo-font';
-// @ts-expect-error Metro resolves font assets to native asset modules.
-import spaceGroteskMedium from '@/assets/fonts/SpaceGrotesk-Medium.ttf';
-// @ts-expect-error Metro resolves font assets to native asset modules.
-import ibmPlexMonoRegular from '@/assets/fonts/IBMPlexMono-Regular.ttf';
 import { hasMessageRevealed, markMessageRevealed } from '@/buzz/message-reveal';
-import { identityPalette, isGeneratedAgentAvatarUrl } from '@/buzz/identity-mark';
-import { IdentityMark } from './IdentityMark';
-import { InlineRow } from './IndexRow';
+import { TranscriptLine, type TranscriptSender } from '@/ui/screens/transcript/TranscriptLine';
 import { MonoMarkdown } from './MonoMarkdown';
 import type { ChannelReferenceIndex, ChannelReferenceTarget } from '@/buzz/channel-reference';
 import { provisionalProseStyle, settledAgentProseStyle } from './Ledger-styles';
@@ -21,80 +13,23 @@ import { LedgerSteer, LedgerRoomUpdate, LedgerHistoryLine, LedgerSystemLine, Led
 
 
 /**
- * The one transcript primitive a Room and a Corner both render, in the
- * approved Editorial direction: ONE message size everywhere (16/~1.55), Space
- * Grotesk prose with IBM Plex Mono reserved for bylines, code, tool readouts,
- * and system lines. Hierarchy on a long agent turn comes from
- * brightness — a regular bright lead line, then regular secondary
- * prose — never from size. Same-speaker chunks use one compact vertical
- * rhythm; a new byline gets exactly twice that separation on its visual-top
- * edge so a voice change reads without speaker rails, bubbles, dividers, or
- * boxes. Extra air lives on that incoming edge, not on whichever outgoing
- * row happens to wear a byline — agents always re-announce, people often
- * don't, and those two speaker-change gaps must still match.
+ * The one transcript primitive a Room and a Corner both render. The same rule
+ * holds for people and agents (build spec → "Transcript line"): a 28 px face in
+ * a 44 px tap target, the name and the time open each sender group, and
+ * follow-ups sit in the same column under it. The viewer's own messages are
+ * brass body text; a mention of the viewer is highlighted.
  *
- * Identity lives in the byline above every agent prose message and the first
- * message in a human run: the speaker's
- * 26px face tile, then the name in the identity's own hue at body size, the
- * quiet mono model metadata (`claude-opus-4-1`, or the `AGENT` fallback), and
- *         the mono stamp pinned right (clock, or `17 SEP 16:58` on a past-day
- * byline). A human message is plain body text — regular weight, primary tone,
- * same size as everything — so nothing but the brass byline name marks it as
- * the viewer's own.
- *
- * A Corner's top bar complements the message author; it never replaces the
- * author byline. A Room can hold several agents and several people. In either
- * surface, consecutive human messages may share a byline, while each agent
- * message states its own author. Same component, one prop.
+ * The layout lives in `ui/screens/transcript/TranscriptLine.tsx`; this file
+ * keeps the list mechanics (rhythm on the upright cell, the reveal, the settle).
  */
 
-/** The right margin the ghosted stamp hangs in, clear of the flowing column. */
-export const LEDGER_MARGINALIA_WIDTH = 36;
+/** The speaker's identity mark on the sender line. */
+export type LedgerBylineMark = NonNullable<TranscriptSender['mark']>;
 
-
-/** Transcript scale for the speaker's face tile. 26px is where the creature
- *  and the plate polarity (person vs agent) still resolve; an 8px dot never
- *  did, which is why the byline leads with a tile now. */
-export const LEDGER_MARK_SIZE = 26;
-
-
-/** The speaker's identity tile (`components/buzz/IdentityMark.tsx`), rendered
- *  at transcript scale in place of the generic byline dot. No new vocabulary:
- *  the same creature, hue and plate every other surface renders, gold ring
- *  while the agent works. */
-export type LedgerBylineMark = {
-  /** The speaker's stable seed (pubkey); same seed, same mark as everywhere. */
-  seed: string;
-  kind: 'agent' | 'human';
-  /** The creature the speaker chose; absent → derived from the seed. */
-  face?: string;
-  /** Fixed server-owned connector logo; ordinary profile-photo URLs stay inert. */
-  avatarUrl?: string;
-  /** Agents only: working right now → the gold ring. */
-  alive?: boolean;
-};
-
-
-/** The author byline; human continuations may omit it. */
-export type LedgerByline = {
-  onOpenProfile?: () => void;
-  /** Claims a long press before the nested profile control can turn it into a tap. */
-  onLongPress?: () => void;
-  /** The voice's display name. */
-  name?: string;
-  /** Quiet agent metadata, e.g. `claude-opus-4-1` (or the `AGENT` fallback). */
-  role?: string;
-  /** The 24h clock stamp, mono. */
-  stamp: string;
-  /** True only for the viewer's own turn — switches the name to brass. */
+/** The author byline; continuations omit it. */
+export type LedgerByline = TranscriptSender & {
+  /** True only for the viewer's own turn. */
   isViewer?: boolean;
-  /** Private viewer state; the marker is status, never a separate control. */
-  bookmarked?: boolean;
-  /** Someone reported this message to the Beeline feedback loop. Shared room
-   *  state, shown to every member as a quiet status word, never a control. */
-  feedbackReported?: boolean;
-  /** The speaker's identity mark. Omitted → the plain dot fallback renders. */
-  mark?: LedgerBylineMark;
 };
 
 
@@ -142,6 +77,8 @@ export type LedgerBodyProps = {
   settleFrom?: string;
   /** Handles backed by this message's real p-tags and current Room members. */
   mentionHandles?: readonly string[];
+  /** The viewer's own handle: a mention of it is highlighted. */
+  viewerHandle?: string;
   /** Invoked when a resolved member mention is pressed. */
   onMention?: (handle: string) => void;
   /** Known rooms/corners of THIS workspace; omitted → no `#` reference links. */
@@ -180,102 +117,13 @@ export function ledgerEntryRhythm({
 const TYPEWRITER_MS_PER_CHARACTER = 10;
 
 
-// Same inline constructs `parseMarkdownSpans` renders: bold, italic, link, code.
-const LEAD_INLINE_PATTERN =
-  /(\*\*(.*?)\*\*)|((?<!\*)\*(?!\*)(.*?)\*(?!\*))|(\[([^\]]+)\]\(([^)]+)\))|(`(.*?)`)/g;
-
-const LEAD_ABBREVIATIONS = new Set(['e.g.', 'i.e.', 'vs.', 'cf.']);
-
-
-/** A first line `parseMarkdownBlock` draws as its own block, not as prose. */
-function isBlockLine(line: string, nextLine: string | undefined): boolean {
-  const trimmed = line.trim();
-  if (/^(#{1,6}\s|>|```|<options>|\d+\.\s|[-*+]\s)/.test(trimmed)) return true;
-  if (trimmed === '---' || /^!\[[^\]]*\]\([^)]+\)$/.test(trimmed)) return true;
-  const separator = nextLine?.trim() ?? '';
-  return trimmed.includes('|') && /^[|\s\-:=]*$/.test(separator) && separator.includes('-');
-}
-
-
-/** True when the period at `end` closes an abbreviation or a bare number, not a sentence. */
-function isFalseSentenceEnd(line: string, end: number): boolean {
-  const lead = line.slice(0, end + 1).replace(/^["'(\[*_]+/, '');
-  const word = lead
-    .split(/\s/)
-    .pop()!
-    .replace(/^["'(\[*_]+/, '')
-    .toLowerCase();
-  if (LEAD_ABBREVIATIONS.has(word)) return true;
-  // `etc.` ends a sentence unless the next word carries on in lower case.
-  if (word === 'etc.') return /^\s+[a-z]/.test(line.slice(end + 1));
-  return /^\d+\.$/.test(word) && lead === word;
-}
-
-
-/** Index just past the first real sentence end in `line` between `from` and `to`, or -1. */
-function findSentenceEnd(line: string, from = 0, to = line.length): number {
-  for (let index = from; index < to; index++) {
-    if (!/[.!?]/.test(line[index])) continue;
-    let end = index;
-    while (/["')\]]/.test(line[end + 1] ?? '')) end++;
-    if (/^(\s|$)/.test(line.slice(end + 1)) && !isFalseSentenceEnd(line, index)) return end + 1;
-    index = end;
-  }
-  return -1;
-}
-
-
-/**
- * Split a turn into its emphasized lead sentence and regular body copy. The
- * two halves render as separate Markdown blocks, so the cut never lands inside
- * an inline construct, and a first line that is itself a block (list item,
- * heading, quote, table, image, options) is left whole.
- */
-export function splitLeadSentence(text: string): [string, string] {
-  const normalized = text.trim();
-  if (!normalized) return ['', ''];
-  const lines = normalized.split('\n');
-  const firstLine = lines[0];
-  if (isBlockLine(firstLine, lines[1])) return ['', normalized];
-  const rest = lines.slice(1).join('\n');
-
-  const constructs: { start: number; end: number; closesSentence: boolean }[] = [];
-  for (const match of firstLine.matchAll(LEAD_INLINE_PATTERN)) {
-    const visible = match[2] ?? match[4] ?? match[6] ?? '';
-    constructs.push({
-      start: match.index!,
-      end: match.index! + match[0].length,
-      closesSentence: match[8] === undefined && findSentenceEnd(visible) >= 0,
-    });
-  }
-
-  let cut = -1;
-  let index = 0;
-  while (index < firstLine.length && cut < 0) {
-    const construct = constructs.find((c) => c.start === index);
-    if (construct) {
-      index = construct.end;
-      if (construct.closesSentence && /^(\s|$)/.test(firstLine.slice(index))) cut = index;
-      continue;
-    }
-    const nextConstruct = constructs.find((c) => c.start > index)?.start ?? firstLine.length;
-    const end = findSentenceEnd(firstLine, index, nextConstruct);
-    if (end >= 0) cut = end;
-    index = nextConstruct;
-  }
-
-  if (cut < 0) return [firstLine, rest.trim()];
-  const remainder = [firstLine.slice(cut).trim(), rest].filter(Boolean).join('\n').trim();
-  return [firstLine.slice(0, cut), remainder];
-}
-
-
 function TypewriterMarkdown({
   markdown,
   textStyle,
   testID,
   revealId,
   mentionHandles,
+  viewerHandle,
   onMention,
   channelIndex,
   onChannelReference,
@@ -293,6 +141,7 @@ function TypewriterMarkdown({
    */
   revealId?: string;
   mentionHandles?: readonly string[];
+  viewerHandle?: string;
   onMention?: (handle: string) => void;
   channelIndex?: ChannelReferenceIndex;
   onChannelReference?: (target: ChannelReferenceTarget, text: string) => void;
@@ -339,6 +188,7 @@ function TypewriterMarkdown({
       <MonoMarkdown
         markdown={markdown}
         mentionHandles={mentionHandles}
+        viewerHandle={viewerHandle}
         onMention={onMention}
         channelIndex={channelIndex}
         onChannelReference={onChannelReference}
@@ -348,194 +198,6 @@ function TypewriterMarkdown({
         textStyle={textStyle}
       />
     </Animated.View>
-  );
-}
-
-
-/**
- * The ghosted margin: a fixed-width clock stamp, and (when a voice first
- * announces itself in a Room) an optional secondary detail under it.
- *
- * Hung in the right margin rather than set into the flow, so the centre stays a
- * clean column — editor line numbers, verse numbers. It is absolutely
- * positioned against the entry so it can never push the prose around, and it
- * takes the dimmest tier because none of it is information the reader is
- * looking for; it is information the reader occasionally checks.
- *
- * The Editorial direction folds the stamp into the byline for prose turns;
- * this gutter survives for the rows that keep the wider margin (the folded
- * tool run), where a stamp without a byline is still worth hanging.
- */
-function LedgerMarginalia({
-  stamp,
-  detail,
-  testID,
-}: {
-  stamp: string;
-  /** Optional secondary detail for surfaces that have one. */
-  detail?: string | null;
-  testID?: string;
-}) {
-  if (!stamp && !detail) return null;
-  return (
-    <View pointerEvents="none" style={styles.marginalia} testID={testID}>
-      {stamp ? (
-        <Text numberOfLines={1} style={styles.marginaliaStamp}>
-          {stamp}
-        </Text>
-      ) : null}
-      {detail ? (
-        <Text numberOfLines={1} style={styles.marginaliaDetail}>
-          {detail}
-        </Text>
-      ) : null}
-    </View>
-  );
-}
-
-
-/** The one byline view: identity tile (or viewer dot) + name, role tag, stamp.
- *  Exported so the live draft lane's byline (`ActivityTimeline`) is exactly
- *  the settled row's byline — the tile, the name and the stamp are byte-for-byte
- *  the same, so NOTHING MOVES when a draft settles. What changes is the prose
- *  itself: provisional text is italic and quiet while it is being written, and
- *  cross-fades into the upright, content-toned reply (C98, `SettleFade`). */
-export const LedgerBylineView = Byline;
-
-
-const bylineFonts = {
-  'SpaceGrotesk-Medium': spaceGroteskMedium,
-  'IBMPlexMono-Regular': ibmPlexMonoRegular,
-};
-
-
-export function Byline({ byline }: { byline: LedgerByline }) {
-  const [fontsReady] = useFonts(bylineFonts);
-  const [wordsWidth, setWordsWidth] = useState<number>();
-  // Android caches the fallback's width if an unloaded family is requested.
-  // Changing the family explicitly when ready gives it a fresh measurement,
-  // while keeping text readable and navigation mounted during font loading.
-  const nameFont = fontsReady
-    ? 'SpaceGrotesk-Medium'
-    : Platform.OS === 'ios' ? 'System' : 'sans-serif';
-  const metadataFont = fontsReady
-    ? 'IBMPlexMono-Regular'
-    : Platform.OS === 'ios' ? 'Courier' : 'monospace';
-  const metadataFace = { fontFamily: metadataFont };
-  // Reserve only the inter-item gaps. Metadata may use the remaining space,
-  // but must never take it from a name that would otherwise fit.
-  const nameLimit = wordsWidth == null ? '100%' : Math.max(0, wordsWidth - (byline.role ? 16 : 8));
-  const mark = byline.mark;
-  // Generated portraits sit on a fixed brass plate; use the theme's readable
-  // brass for their names. Drawn faces keep their seed hue.
-  const nameHue =
-    mark && !byline.isViewer
-      ? mark.kind === 'agent' && isGeneratedAgentAvatarUrl(mark.avatarUrl)
-        ? styles.bylineNameViewer
-        : { color: identityPalette(mark.seed, mark.kind).mid }
-      : undefined;
-  const Container = byline.onOpenProfile ? Pressable : View;
-  return (
-    <Container
-      style={styles.byline}
-      onPress={byline.onOpenProfile}
-      onLongPress={byline.onLongPress}
-      delayLongPress={byline.onLongPress ? 450 : undefined}
-      hitSlop={byline.onOpenProfile ? { top: 9, bottom: 9 } : undefined}
-      accessibilityRole={byline.onOpenProfile ? 'button' : undefined}
-      accessibilityLabel={
-        byline.onOpenProfile ? `Open ${byline.name ?? 'agent'} profile` : undefined
-      }
-      testID={byline.onOpenProfile ? 'chat-byline-profile' : undefined}
-    >
-      {mark ? (
-        mark.kind === 'agent' ? (
-          <IdentityMark
-            seed={mark.seed}
-            kind="agent"
-            face={mark.face}
-            avatarUrl={mark.avatarUrl}
-            alive={Boolean(mark.alive)}
-            size={LEDGER_MARK_SIZE}
-            testID="chat-byline-mark"
-          />
-        ) : (
-          <IdentityMark
-            seed={mark.seed}
-            kind="human"
-            face={mark.face}
-            avatarUrl={mark.avatarUrl}
-            size={LEDGER_MARK_SIZE}
-            testID="chat-byline-mark"
-          />
-        )
-      ) : (
-        <View
-          style={[styles.bylineDot, byline.isViewer && styles.bylineDotViewer]}
-          testID="chat-byline-dot"
-        />
-      )}
-      {/* The three written parts sit on ONE baseline. They are set at two sizes
-       *  in two faces (16px prose name, 13px `machine` tag and stamp), so centring
-       *  them against each other leaves the small type floating half a line
-       *  above the name's feet. Baseline alignment is the type rule; the mark
-       *  is a picture, not a word, so it stays centred on the row — hence the
-       *  nested row, which keeps `alignItems: 'center'` for the tile. */}
-      <InlineRow
-        style={styles.bylineWords}
-        onLayout={(event) => setWordsWidth(event.nativeEvent.layout.width)}
-        testID="chat-byline-words"
-      >
-        {byline.name ? (
-          <Text
-            numberOfLines={1}
-            style={[
-              styles.bylineName,
-              { fontFamily: nameFont, maxWidth: nameLimit },
-              nameHue,
-              byline.isViewer && styles.bylineNameViewer,
-            ]}
-            testID="chat-byline-name"
-          >
-            {byline.name}
-          </Text>
-        ) : null}
-        {byline.role ? (
-          <Text
-            ellipsizeMode="tail"
-            numberOfLines={1}
-            style={[styles.bylineTag, { fontFamily: metadataFont }]}
-            testID="chat-byline-role"
-          >
-            {byline.role}
-          </Text>
-        ) : null}
-        <InlineRow style={styles.bylineStatus} testID="chat-byline-status">
-          {byline.feedbackReported ? (
-            <Text
-              accessibilityLabel="Reported to Beeline"
-              numberOfLines={1}
-              style={[styles.bylineStamp, metadataFace]}
-              testID="chat-reported-marker"
-            >
-              Reported
-            </Text>
-          ) : null}
-          {byline.bookmarked ? (
-            <Ionicons
-              accessibilityLabel="Bookmarked"
-              color={styles.bookmarkMark.color}
-              name="bookmark"
-              size={11}
-              testID="chat-bookmark-marker"
-            />
-          ) : null}
-          <Text numberOfLines={1} style={[styles.bylineStamp, metadataFace]} testID="chat-byline-stamp">
-            {byline.stamp}
-          </Text>
-        </InlineRow>
-      </InlineRow>
-    </Container>
   );
 }
 
@@ -588,13 +250,9 @@ function SettleFade({ provisional, children }: { provisional: string; children: 
 
 
 /**
- * One turn, written straight onto the slab in the Editorial direction.
- *
- * An agent turn (`luminous`) may lead with one medium-weight line in the
- * primary tone — hierarchy by weight and brightness at the SAME size — then
- * flows in regular secondary prose. Everyone else writes plain body text at
- * the identical size. Every message keeps the same compact spacing; a human
- * continuation of the voice directly above simply omits the repeated byline.
+ * One turn on the transcript line: plain body text in ink for every speaker
+ * (an agent's settled reply may type out once), under the sender line when it
+ * opens a group.
  */
 export function LedgerEntry({
   itemId,
@@ -612,63 +270,48 @@ export function LedgerEntry({
   typewriter = false,
   settleFrom,
   mentionHandles,
+  viewerHandle,
   onMention,
   channelIndex,
   onChannelReference,
   codeRoomId,
   onOpenCode,
 }: Omit<LedgerBodyProps, 'marginalia'> & { luminous?: boolean }) {
-  const [leadText, remainingText] =
-    bodyText && !continued && luminous ? splitLeadSentence(bodyText) : ['', bodyText ?? ''];
+  const text = bodyText ?? '';
   const bodyTextStyle = luminous ? styles.ledgerTextLuminous : styles.ledgerText;
   // A settling reply was already typed out, live, in front of the reader. It
   // cross-fades; it never re-types itself.
   const typeOut = typewriter && !settleFrom;
-  const body = (
-    <>
-      {leadText ? (
-        <MonoMarkdown
-          markdown={leadText}
-          mentionHandles={mentionHandles}
-          onMention={onMention}
-          channelIndex={channelIndex}
-          onChannelReference={onChannelReference}
-          codeSource={codeRoomId ? { roomId: codeRoomId, messageId: itemId } : undefined}
-          onOpenCode={onOpenCode}
-          testID={remainingText ? `${bodyTestID}-lead` : bodyTestID}
-          textStyle={styles.ledgerLead}
-        />
-      ) : null}
-      {remainingText ? (
-        typeOut ? (
-          <TypewriterMarkdown
-            markdown={remainingText}
-            testID={bodyTestID}
-            textStyle={bodyTextStyle}
-            revealId={itemId}
-            mentionHandles={mentionHandles}
-            onMention={onMention}
-            channelIndex={channelIndex}
-            onChannelReference={onChannelReference}
-            codeRoomId={codeRoomId}
-            onOpenCode={onOpenCode}
-          />
-        ) : (
-          <MonoMarkdown
-            markdown={remainingText}
-            mentionHandles={mentionHandles}
-            onMention={onMention}
-            channelIndex={channelIndex}
-            onChannelReference={onChannelReference}
-            codeSource={codeRoomId ? { roomId: codeRoomId, messageId: itemId } : undefined}
-            onOpenCode={onOpenCode}
-            testID={bodyTestID}
-            textStyle={bodyTextStyle}
-          />
-        )
-      ) : null}
-    </>
-  );
+  const body = text ? (
+    typeOut ? (
+      <TypewriterMarkdown
+        markdown={text}
+        testID={bodyTestID}
+        textStyle={bodyTextStyle}
+        revealId={itemId}
+        mentionHandles={mentionHandles}
+        viewerHandle={viewerHandle}
+        onMention={onMention}
+        channelIndex={channelIndex}
+        onChannelReference={onChannelReference}
+        codeRoomId={codeRoomId}
+        onOpenCode={onOpenCode}
+      />
+    ) : (
+      <MonoMarkdown
+        markdown={text}
+        mentionHandles={mentionHandles}
+        viewerHandle={viewerHandle}
+        onMention={onMention}
+        channelIndex={channelIndex}
+        onChannelReference={onChannelReference}
+        codeSource={codeRoomId ? { roomId: codeRoomId, messageId: itemId } : undefined}
+        onOpenCode={onOpenCode}
+        testID={bodyTestID}
+        textStyle={bodyTextStyle}
+      />
+    )
+  ) : null;
   return (
     <View
       style={ledgerEntryRhythm({
@@ -678,24 +321,25 @@ export function LedgerEntry({
       })}
       testID={`chat-message-${itemId}`}
     >
-      {byline ? <Byline byline={byline} /> : null}
-      {replyReference}
-      {bodyAction && (leadText || remainingText) ? (
-        <Pressable
-          accessibilityLabel={bodyAction.accessibilityLabel}
-          accessibilityRole="button"
-          onPress={bodyAction.onPress}
-          testID={bodyAction.testID}
-        >
-          {settleFrom ? <SettleFade provisional={settleFrom}>{body}</SettleFade> : body}
-        </Pressable>
-      ) : settleFrom && (leadText || remainingText) ? (
-        <SettleFade provisional={settleFrom}>{body}</SettleFade>
-      ) : (
-        body
-      )}
-      {machineNoise}
-      {attachments}
+      <TranscriptLine sender={byline}>
+        {replyReference}
+        {bodyAction && body ? (
+          <ContentTarget
+            accessibilityLabel={bodyAction.accessibilityLabel}
+            accessibilityRole="button"
+            onPress={bodyAction.onPress}
+            testID={bodyAction.testID}
+          >
+            {settleFrom ? <SettleFade provisional={settleFrom}>{body}</SettleFade> : body}
+          </ContentTarget>
+        ) : settleFrom && body ? (
+          <SettleFade provisional={settleFrom}>{body}</SettleFade>
+        ) : (
+          body
+        )}
+        {machineNoise}
+        {attachments}
+      </TranscriptLine>
     </View>
   );
 }
@@ -750,12 +394,17 @@ export { settledAgentProseStyle } from './Ledger-styles';
 
 
 
+/** Right padding that keeps a pinned clock stamp clear of its line. */
+const STAMP_GUTTER = 44;
+
 export const styles = StyleSheet.create((theme) => ({
+  /** A system line read inside an opened pill: no pinned stamp, no gutter. */
+  systemLineBare: { paddingRight: 0, paddingVertical: 0, marginBottom: 0 },
+  systemLineTextBare: { color: theme.buzz.ledgerBright },
   untaggedHint: {
     ...theme.buzz.type.meta,
     color: theme.buzz.ledgerQuiet,
     marginTop: theme.buzz.space.xs,
-    marginLeft: theme.buzz.space.sm,
   },
   entry: {
     width: '100%',
@@ -780,70 +429,6 @@ export const styles = StyleSheet.create((theme) => ({
   entryWithBylineChronological: {
     paddingTop: theme.buzz.messagePaddingVertical * 3,
   },
-  dayCaption: {
-    ...theme.buzz.type.sectionHead,
-    fontFamily: theme.buzz.type.machine.fontFamily,
-    color: theme.buzz.ledgerQuiet,
-    marginVertical: theme.buzz.space.md,
-  },
-  byline: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 8,
-    marginBottom: theme.buzz.space.sm,
-  },
-  // The words of the byline, on one baseline. `flex: 1` so the stamp's auto
-  // margin still has the whole remaining row to push against, `minWidth: 0`
-  // so metadata can give way, followed by names that exhaust the row.
-  bylineWords: {
-    flex: 1,
-    minWidth: 0,
-    flexDirection: 'row',
-    alignItems: 'baseline',
-    gap: 8,
-  },
-  bylineDot: {
-    width: BYLINE_DOT_SIZE,
-    height: BYLINE_DOT_SIZE,
-    borderRadius: BYLINE_DOT_SIZE / 2,
-    backgroundColor: theme.buzz.agentRail,
-  },
-  bylineDotViewer: { backgroundColor: theme.buzz.accent },
-  // The name reads at body size, medium weight, sentence case — the one line
-  // that says who is talking is no longer styled like a timestamp.
-  bylineName: {
-    fontFamily: theme.buzz.proseMedium,
-    color: theme.buzz.ledgerBright,
-    fontSize: theme.buzz.proseSize,
-    lineHeight: theme.buzz.proseLineHeight,
-    flexShrink: 0,
-  },
-  bylineNameViewer: { color: theme.buzz.accent },
-  // The quiet role tag and the clock stamp keep the mono metadata voice.
-  bylineTag: {
-    ...theme.buzz.type.machine,
-    minWidth: 0,
-    maxWidth: '44%',
-    flexShrink: 1,
-    color: theme.buzz.ledgerQuiet,
-  },
-  bylineStamp: {
-    ...theme.buzz.type.machine,
-    color: theme.buzz.ledgerQuiet,
-    minWidth: 0,
-    flexShrink: 1,
-  },
-  bylineStatus: { marginLeft: 'auto', minWidth: 0, flexShrink: 1, overflow: 'hidden', flexDirection: 'row', alignItems: 'center', gap: theme.buzz.space.xs },
-  bookmarkMark: { color: theme.buzz.accent },
-  // One face and size throughout the turn; the lead differs only in brightness.
-  ledgerLead: {
-    fontFamily: theme.buzz.proseRegular,
-    width: '100%',
-    minWidth: 0,
-    color: theme.buzz.ledgerBright,
-    fontSize: theme.buzz.proseSize,
-    lineHeight: theme.buzz.proseLineHeight,
-  },
   /** Hung over the settled words, so the dissolve never moves the column. */
   settleGhost: { position: 'absolute', left: 0, right: 0, top: 0 },
   /**
@@ -864,7 +449,7 @@ export const styles = StyleSheet.create((theme) => ({
     fontFamily: theme.buzz.proseRegular,
     width: '100%',
     minWidth: 0,
-    color: theme.buzz.ledgerBody,
+    color: theme.buzz.ledgerBright,
     fontSize: theme.buzz.proseSize,
     lineHeight: theme.buzz.proseLineHeight,
   },
@@ -876,13 +461,12 @@ export const styles = StyleSheet.create((theme) => ({
     fontSize: theme.buzz.proseSize,
     lineHeight: theme.buzz.proseLineHeight,
   },
-  // Your own turn: plain body, regular weight, primary tone — never bolded,
-  // never enlarged, never inset. The byline carries the ownership signal.
+  // Your own turn: brass body, regular weight, same size as everyone's.
   steerText: (pending: boolean) => ({
     fontFamily: theme.buzz.proseRegular,
     minWidth: 0,
     width: '100%',
-    color: pending ? theme.buzz.textMuted : theme.buzz.ledgerBright,
+    color: pending ? theme.buzz.textMuted : theme.buzz.accent,
     fontSize: theme.buzz.proseSize,
     lineHeight: theme.buzz.proseLineHeight,
   }),
@@ -891,7 +475,7 @@ export const styles = StyleSheet.create((theme) => ({
     width: '100%',
     minWidth: 0,
     paddingVertical: theme.buzz.space.xs,
-    paddingRight: LEDGER_MARGINALIA_WIDTH + 8,
+    paddingRight: STAMP_GUTTER,
     marginBottom: theme.buzz.space.md,
   },
   roomUpdateLine: {
@@ -911,23 +495,12 @@ export const styles = StyleSheet.create((theme) => ({
     textAlign: 'right',
   },
   historyFailure: { paddingHorizontal: theme.buzz.roomList.edge },
-  historyLine: {
-    width: '100%',
-    paddingVertical: theme.buzz.space.md,
-    alignItems: 'center',
-  },
-  historyLineText: {
-    ...theme.buzz.type.meta,
-    fontFamily: theme.buzz.proseRegular,
-    color: theme.buzz.ledgerQuiet,
-    textAlign: 'center',
-  },
   systemLine: {
     position: 'relative',
     width: '100%',
     minWidth: 0,
     paddingVertical: theme.buzz.space.xs,
-    paddingRight: LEDGER_MARGINALIA_WIDTH + theme.buzz.space.sm,
+    paddingRight: STAMP_GUTTER,
     marginBottom: theme.buzz.space.md,
   },
   systemLineText: {
@@ -955,22 +528,6 @@ export const styles = StyleSheet.create((theme) => ({
     marginTop: 4,
     marginLeft: theme.buzz.space.md,
     color: theme.buzz.ledgerBody,
-  },
-  marginalia: {
-    position: 'absolute',
-    top: theme.buzz.messagePaddingVertical + 2,
-    right: 0,
-    width: LEDGER_MARGINALIA_WIDTH,
-    alignItems: 'flex-end',
-  },
-  marginaliaStamp: {
-    ...theme.buzz.type.machine,
-    color: theme.buzz.ledgerGhost,
-  },
-  marginaliaDetail: {
-    ...theme.buzz.type.machine,
-    marginTop: theme.buzz.space.xs,
-    color: theme.buzz.ledgerGhost,
   },
   // Tool readouts take the quiet left-rule mono treatment — clearly not
   // conversation.

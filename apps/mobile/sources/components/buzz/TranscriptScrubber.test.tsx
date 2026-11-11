@@ -169,7 +169,7 @@ describe('TranscriptScrubber', () => {
     expect(
       renderer.root.findByProps({ testID: 'transcript-scrubber-bubble' }).findByType('Text').props
         .children,
-    ).toBe('TUE 1 SEP');
+    ).toBe('Tue 1 Sep');
     // Past the top: the list goes to its oldest loaded row and no further.
     act(() => grab().props.onPanResponderMove({}, { dy: -RAIL }));
     expect(listToOffset).toHaveBeenLastCalledWith(5_000);

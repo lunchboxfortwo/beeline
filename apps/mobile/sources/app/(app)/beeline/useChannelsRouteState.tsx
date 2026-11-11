@@ -1,110 +1,31 @@
 import { useNeedsYouCount } from '@/buzz/needs-you-store';
 import { type ChatListHandle } from '@/buzz/chat-list-store';
-import { useCornerDropdowns } from '@/buzz/corner-dropdowns';
-import { type RepoCandidate } from '@/buzz/room-repo-picker';
 import { mobileSurfaceCache, surfaceAddress, restoreStoredSurface } from '@/buzz/surface-storage';
 import { useGitHubAccess } from '@/buzz/github-access-surface';
 import { useSurfaceSnapshot } from '@/buzz/use-shared-surface';
 import { BuzzRigTransport } from '@/sync/transport';
 import { useIsDesktop } from '@/utils/responsive';
-import { isChatListView, isWorkspaceListView, type ChatListView, type Identity, type WorkspaceListView } from '@beeline/buzz-client';
+import { isChatListView, isWorkspaceListView, type ChatListView } from '@beeline/buzz-client';
 import { useLocalSearchParams } from 'expo-router';
 import { useCallback, useContext, useEffect, useMemo, useRef, useState } from 'react';
 import { AppState } from 'react-native';
-import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { useLatencyRouteFrame } from '@/buzz/latency-route-hook';
 import { afterFirstFrame, FirstContentDrawContext } from '@/navigation/initial-landing';
-import { firstParam, DeckSession } from './channels';
+import type { NewChatStep } from '@/ui/screens/chats/NewChatSheet';
+import { firstParam, type DeckSession } from './channels';
 
-type Props = [
-  session: DeckSession,
-];
-export function useChannelsRouteState([
-  session,
-]: Props): [
-  workspaceList: WorkspaceListView | null,
-  requestedWorkspaceId: string | undefined,
-  chatList: ChatListView | null,
-  identity: Identity,
-  relayUrl: string,
-  isDesktop: boolean,
-  requestedNewRoom: string | undefined,
-  handledNewRoomRequest: import("react/index").RefObject<string | null>,
-  setShowCreateRoom: import("react/index").Dispatch<import("react/index").SetStateAction<boolean>>,
-  requestedNewDirectMessage: string | undefined,
-  setMemberPickerVisible: import("react/index").Dispatch<import("react/index").SetStateAction<boolean>>,
-  readWorkspaceRef: import("react/index").RefObject<(() => Promise<void>) | null>,
-  chatStore: import("react/index").RefObject<ChatListHandle | null>,
-  deckMissedRef: import("react/index").RefObject<{ workspaces: boolean; }>,
-  transport: BuzzRigTransport,
-  setError: import("react/index").Dispatch<import("react/index").SetStateAction<string | null>>,
-  drawn: boolean,
-  setConfirmedWorkspaceCount: import("react/index").Dispatch<import("react/index").SetStateAction<number | null>>,
-  deckVisible: () => boolean,
-  deckFocusedRef: import("react/index").RefObject<boolean>,
-  setDeletedWorkspaceNotice: import("react/index").Dispatch<import("react/index").SetStateAction<string | null>>,
-  selectedId: string | undefined,
-  setChatList: import("react/index").Dispatch<import("react/index").SetStateAction<ChatListView | null>>,
-  setRefreshing: import("react/index").Dispatch<import("react/index").SetStateAction<boolean>>,
-  setNeedsYouSignal: import("react/index").Dispatch<import("react/index").SetStateAction<number>>,
-  retryGeneration: number,
-  setAgeNow: import("react/index").Dispatch<import("react/index").SetStateAction<number>>,
-  memberPickerVisible: boolean,
-  cornerDropdowns: { expanded: ReadonlySet<string>; setExpanded: import("react/index").Dispatch<import("react/index").SetStateAction<ReadonlySet<string>>>; toggle: (roomId: string) => void; },
-  messagingPubkey: string | null,
-  setMessagingPubkey: import("react/index").Dispatch<import("react/index").SetStateAction<string | null>>,
-  githubScope: { relay: string; viewer: string; } | null,
-  setRepoPickerError: import("react/index").Dispatch<import("react/index").SetStateAction<string | null>>,
-  setRepoAccessLoading: import("react/index").Dispatch<import("react/index").SetStateAction<boolean>>,
-  setShowRepoPicker: import("react/index").Dispatch<import("react/index").SetStateAction<boolean>>,
-  setPendingRepo: import("react/index").Dispatch<import("react/index").SetStateAction<RepoCandidate | null>>,
-  setInviteOnly: import("react/index").Dispatch<import("react/index").SetStateAction<boolean>>,
-  setRepoPickerNotice: import("react/index").Dispatch<import("react/index").SetStateAction<string | null>>,
-  setCreatingRepository: import("react/index").Dispatch<import("react/index").SetStateAction<boolean>>,
-  creatingRoom: boolean,
-  creatingRepository: boolean,
-  setCreatingRoom: import("react/index").Dispatch<import("react/index").SetStateAction<boolean>>,
-  inviteOnly: boolean,
-  confirmedWorkspaceCount: number | null,
-  error: string | null,
-  pairingBusy: boolean,
-  setAgentConnectVisible: import("react/index").Dispatch<import("react/index").SetStateAction<boolean>>,
-  setPairCommand: import("react/index").Dispatch<import("react/index").SetStateAction<string | null>>,
-  setPairingError: import("react/index").Dispatch<import("react/index").SetStateAction<string | null>>,
-  setPairingBusy: import("react/index").Dispatch<import("react/index").SetStateAction<boolean>>,
-  insets: import("react-native-safe-area-context/lib/typescript/src/SafeArea.types").EdgeInsets,
-  setRetryGeneration: import("react/index").Dispatch<import("react/index").SetStateAction<number>>,
-  onLayout: () => void,
-  refreshing: boolean,
-  needsYouCount: number,
-  showCreateRoom: boolean,
-  pendingRepo: RepoCandidate | null,
-  showRepoPicker: boolean,
-  repoAccessLoading: boolean,
-  repoCandidates: RepoCandidate[],
-  repoInstallations: import("@beeline/buzz-client").GitHubInstallationAccess[],
-  repoPickerError: string | null,
-  repoPickerNotice: string | null,
-  agentConnectVisible: boolean,
-  pairingError: string | null,
-  pairCommand: string | null,
-  deletedWorkspaceNotice: string | null,
-  ageNow: number,
-] {
-
-  const [retryGeneration, setRetryGeneration] = useState(0);
-  const insets = useSafeAreaInsets();
+/** The deck's route, live list and sheet state, shared by the deck's other hooks. */
+export function useChannelsRouteState(session: DeckSession) {
+  const [retryGeneration] = useState(0);
   const isDesktop = useIsDesktop();
   const params = useLocalSearchParams<{
     communityId?: string | string[];
     newRoom?: string | string[];
-    newDirectMessage?: string | string[];
   }>();
   const requestedWorkspaceId = firstParam(params.communityId);
   // The route's Workspace wins; without one the deck follows the current Workspace.
   const deckWorkspaceId = requestedWorkspaceId ?? session.workspaceId;
   const requestedNewRoom = firstParam(params.newRoom);
-  const requestedNewDirectMessage = firstParam(params.newDirectMessage);
   const { identity, relayUrl } = session;
   const transport = useMemo(() => new BuzzRigTransport(identity), [identity]);
   const workspaceListAddress = useMemo(
@@ -137,23 +58,13 @@ export function useChannelsRouteState([
     needsYouSignal === 0 ? undefined : needsYouSignal,
     () => deckVisible(),
   );
-  const cornerDropdowns = useCornerDropdowns(chatList?.chats);
   const [refreshing, setRefreshing] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [deletedWorkspaceNotice, setDeletedWorkspaceNotice] = useState<string | null>(null);
   const [ageNow, setAgeNow] = useState(() => Date.now());
-  const [memberPickerVisible, setMemberPickerVisible] = useState(false);
   const [agentConnectVisible, setAgentConnectVisible] = useState(false);
-  const [pairCommand, setPairCommand] = useState<string | null>(null);
-  const [pairingBusy, setPairingBusy] = useState(false);
-  const [pairingError, setPairingError] = useState<string | null>(null);
-  const [messagingPubkey, setMessagingPubkey] = useState<string | null>(null);
-  const [showCreateRoom, setShowCreateRoom] = useState(false);
-  const [inviteOnly, setInviteOnly] = useState(false);
+  const [newChatStep, setNewChatStep] = useState<NewChatStep | null>(null);
   const [creatingRoom, setCreatingRoom] = useState(false);
-  const [creatingRepository, setCreatingRepository] = useState(false);
-  const [showRepoPicker, setShowRepoPicker] = useState(false);
-  const [pendingRepo, setPendingRepo] = useState<RepoCandidate | null>(null);
   const githubScope = relayUrl && identity ? { relay: relayUrl, viewer: identity.publicKey } : null;
   const githubAccess = useGitHubAccess(githubScope);
   const repoCandidates = githubAccess?.candidates ?? [];
@@ -171,19 +82,17 @@ export function useChannelsRouteState([
   );
   /** Reads the hidden deck skipped; returning to it makes exactly those. */
   const deckMissedRef = useRef({ workspaces: false });
-return [
+  return {
     workspaceList, requestedWorkspaceId, chatList, identity, relayUrl, isDesktop, requestedNewRoom,
-    handledNewRoomRequest, setShowCreateRoom, requestedNewDirectMessage, setMemberPickerVisible,
-    readWorkspaceRef, chatStore, deckMissedRef, transport, setError, drawn,
-    setConfirmedWorkspaceCount, deckVisible, deckFocusedRef, setDeletedWorkspaceNotice, selectedId,
-    setChatList, setRefreshing, setNeedsYouSignal, retryGeneration, setAgeNow, memberPickerVisible,
-    cornerDropdowns, messagingPubkey, setMessagingPubkey, githubScope, setRepoPickerError,
-    setRepoAccessLoading, setShowRepoPicker, setPendingRepo, setInviteOnly, setRepoPickerNotice,
-    setCreatingRepository, creatingRoom, creatingRepository, setCreatingRoom, inviteOnly,
-    confirmedWorkspaceCount, error, pairingBusy, setAgentConnectVisible, setPairCommand,
-    setPairingError, setPairingBusy, insets, setRetryGeneration, onLayout, refreshing,
-    needsYouCount, showCreateRoom, pendingRepo, showRepoPicker, repoAccessLoading, repoCandidates,
-    repoInstallations, repoPickerError, repoPickerNotice, agentConnectVisible, pairingError,
-    pairCommand, deletedWorkspaceNotice, ageNow,
-  ];
+    handledNewRoomRequest, newChatStep, setNewChatStep, readWorkspaceRef, chatStore, deckMissedRef,
+    transport, setError, drawn, setConfirmedWorkspaceCount, deckVisible, deckFocusedRef,
+    setDeletedWorkspaceNotice, selectedId, setChatList, setRefreshing, setNeedsYouSignal,
+    retryGeneration, setAgeNow, githubScope, setRepoPickerError, setRepoAccessLoading,
+    setRepoPickerNotice, creatingRoom, setCreatingRoom, confirmedWorkspaceCount, error,
+    setAgentConnectVisible, onLayout, refreshing,
+    needsYouCount, repoAccessLoading, repoCandidates, repoInstallations, repoPickerError,
+    repoPickerNotice, agentConnectVisible, deletedWorkspaceNotice, ageNow,
+  };
 }
+
+export type DeckState = ReturnType<typeof useChannelsRouteState>;

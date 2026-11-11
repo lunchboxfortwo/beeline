@@ -20,7 +20,7 @@ import { fallbackMemberName } from '@/buzz/member-display';
 import { looksLikeCornerOpenIntent, type RepoCandidate } from '@/buzz/room-repo-picker';
 import { type PickedChatAttachment } from '@/buzz/chat-attachment';
 import { prepareMessageReply, type MessageReplyDisplayTarget, type MessageReplyTarget } from '@/buzz/message-reply';
-import { type RoomRosterParticipant } from '@/components/buzz/RoomRosterSheet';
+import { type RoomRosterParticipant } from '@/buzz/room-participants';
 import { type DictatedSend } from '@/components/buzz/ConversationComposer';
 import { MessageShortcut, NO_SELECTED_MENTIONS, COMPOSER_MIN_HEIGHT } from './chat-surface-values';
 

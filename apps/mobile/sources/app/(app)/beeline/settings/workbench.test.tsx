@@ -102,6 +102,9 @@ vi.mock('@/components/buzz/IdentityMark', async () => {
 });
 
 vi.mock('@expo/vector-icons/Ionicons', () => ({ default: () => null }));
+vi.mock('tamagui', async () => (await import('@/ui/screens/transcript/grammar-hosts.test-support')).tamaguiHosts());
+vi.mock('@/components/buzz/SurfaceGlyphLoader', async () => { const R = await import('react'); return { SurfaceGlyphLoader: (props: any) => R.createElement('SurfaceGlyphLoader', props) }; });
+vi.mock('lucide-react-native', async () => (await import('@/ui/screens/transcript/grammar-hosts.test-support')).lucideHosts());
 
 vi.mock('react-native', async () => {
   const ReactModule = await import('react');
@@ -122,6 +125,7 @@ vi.mock('react-native', async () => {
     Text: host('Text'),
     TouchableOpacity: host('TouchableOpacity'),
     View: host('View'),
+    useWindowDimensions: () => ({ width: 390, height: 844 }),
     Animated: {
       Value: (v: number) => ({
         _value: v,
@@ -136,37 +140,10 @@ vi.mock('react-native', async () => {
   };
 });
 
-vi.mock('@/components/buzz/SettingsRow', async () => {
-  const ReactModule = await import('react');
-  return {
-    SettingsRow: (props: any) => ReactModule.createElement('SettingsRow', props),
-  };
-});
-vi.mock('@/components/buzz/HullDialog', async () => {
-  const ReactModule = await import('react');
-  return {
-    HullDialogInput: (props: any) => ReactModule.createElement('HullDialogInput', props),
-  };
-});
-vi.mock('@/components/buzz/HullActionSheet', async () => {
-  const ReactModule = await import('react');
-  const host = (name: string) => (props: any) => ReactModule.createElement(name, props, props.children);
-  return {
-    HullActionSheetModal: host('HullActionSheetModal'),
-    HullActionSheetRow: host('HullActionSheetRow'),
-    HullActionSheetCancel: host('HullActionSheetCancel'),
-  };
-});
 
 vi.mock('expo-clipboard', () => ({
   setStringAsync: vi.fn(async () => undefined),
 }));
-vi.mock('@/components/buzz/SurfaceGlyphLoader', async () => {
-  const ReactModule = await import('react');
-  return {
-    SurfaceGlyphLoader: (props: any) => ReactModule.createElement('SurfaceGlyphLoader', props),
-  };
-});
 
 /** Synthetic server answers. Tests must never recreate company grouping on the phone. */
 function companyRow(id: string, name = id, section: import('@beeline/api-contract/workbench').WorkbenchCompany['section'] = 'keys'): import('@beeline/api-contract/workbench').WorkbenchCompany {
@@ -188,6 +165,8 @@ function squireRow(status: 'connected' | 'not-added' = 'connected'): import('@be
     status: status === 'connected' ? 'Ready' : 'Not added', items: [], machines: [{ id: 'machine-one', name: 'Laptop', online: true, status }] };
 }
 import WorkbenchScreen from './workbench';
+import { ConnectorRow } from '@/ui/screens/settings/connectors/ConnectorParts';
+import { SheetFrame } from '@/ui/grammar';
 import { WALLET_GRANT_ENDED_MESSAGE, type WorkbenchView } from '@/buzz/workbench';
 import { workbenchSummary } from '@/buzz/connectors-model';
 import { setWorkbenchSource } from '@/buzz/workbench-source';
@@ -244,7 +223,7 @@ async function render(): Promise<ReactTestRenderer> {
 describe('Connectors server-owned settings screen', () => {
   it('renders the server companies once with authoritative marks and company detail targets', async () => {
     const renderer = await render();
-    const rows = renderer.root.findAllByType('SettingsRow');
+    const rows = renderer.root.findAllByType(ConnectorRow);
     expect(rows.map((r: any) => r.props.title)).toEqual(['Trusty Squire', 'Vercel']);
     expect(rows[1].props.leading.props.mark.uri).toContain('/v1/company-logos/vercel');
     await act(async () => rows[1].props.onPress());
@@ -254,23 +233,31 @@ describe('Connectors server-owned settings screen', () => {
   });
   it('renders the search hint as a search cell and opens the existing search', async () => {
     const renderer = await render();
-    const hint = renderer.root.findByType('HullDialogInput');
-    expect(hint.props.testID).toBe('connectors-search');
-    expect(hint.props.variant).toBe('search');
-    expect(hint.props.editable).toBe(false);
-    expect(hint.props.placeholder).toBe('Search apps, keys, and websites');
-    expect(hint.props.value).toBe('');
-    expect(hint.props.placeholderTextColor).toBeTruthy();
-    expect(hint.props.placeholderTextColor).not.toMatch(/#f0f0f3|#171310/i);
+    const hint = renderer.root.findByProps({ testID: 'connectors-search' });
+    expect(hint.props.label).toBe('Search apps, keys, and logins');
+    expect(renderer.root.findByProps({ testID: 'connectors-search-sheet' }).props.open).toBe(false);
     await act(async () => hint.props.onPress());
-    expect(renderer.root.findByProps({ testID: 'connectors-search-sheet' }).props.visible).toBe(true);
+    expect(renderer.root.findByProps({ testID: 'connectors-search-sheet' }).props.open).toBe(true);
+  });
+  it('lists apps, then keys and logins together under Vault', async () => {
+    const source = new MockWorkbenchSource();
+    source.readWorkbench = async () => companyWorkbench([companyRow('sentry', 'Sentry', 'attention'), squireRow(),
+      companyRow('github', 'GitHub', 'apps'), companyRow('vercel', 'Vercel')]);
+    setWorkbenchSource(source);
+    const renderer = await render();
+    const titles = (id: string) => renderer.root.findByProps({ testID: id }).findAllByType(ConnectorRow).map((r: any) => r.props.title);
+    expect(renderer.root.findByProps({ testID: 'connectors-attention' }).props.title).toBe('Needs attention');
+    expect(titles('connectors-attention')).toEqual(['Sentry']);
+    expect(titles('connectors-apps')).toEqual(['GitHub']);
+    expect(renderer.root.findByProps({ testID: 'connectors-vault' }).props.title).toBe('Vault');
+    expect(titles('connectors-vault')).toEqual(['Trusty Squire', 'Vercel']);
   });
   it('only shows suggestions in the body for an empty account', async () => {
     const source = new MockWorkbenchSource();
     source.readWorkbench = async () => companyWorkbench([], [companyOption('trusty-squire', 'Trusty Squire', 'squire')]);
     setWorkbenchSource(source);
     const renderer = await render();
-    const suggestion = renderer.root.findByType('SettingsRow');
+    const suggestion = renderer.root.findByType(ConnectorRow);
     expect(suggestion.props.title).toBe('Trusty Squire');
     await act(async () => suggestion.props.onPress());
     expect(navigation.push).toHaveBeenCalledWith(expect.objectContaining({ params: expect.objectContaining({ connectorId: 'trusty-squire' }) }));
@@ -284,7 +271,7 @@ describe('Connectors server-owned settings screen', () => {
     value = companyWorkbench([companyRow('sentry', 'Sentry', 'attention')]);
     await act(async () => { for (const listener of liveListeners) listener({ monolithLive: { type: 'resource-change', roomId: '', resource: 'workbench' } }); await Promise.resolve(); });
     expect(read.mock.calls.length).toBeGreaterThan(1);
-    expect(renderer.root.findByType('SettingsRow').props.title).toBe('Sentry');
+    expect(renderer.root.findByType(ConnectorRow).props.title).toBe('Sentry');
   });
   it('refreshes a stale stored server answer once per session', async () => {
     const source = new MockWorkbenchSource();
@@ -293,7 +280,7 @@ describe('Connectors server-owned settings screen', () => {
     await mobileSurfaceCache.write({ relayOrigin: 'https://relay.test', viewerPubkey: 'human-dani', endpoint: '/workspace/:id/workbench',
       params: { workspaceId: 'workspace-1', viewerId: 'human-dani' } }, companyWorkbench([squireRow('not-added')]), (v): v is WorkbenchView => Boolean(v));
     const renderer = await render();
-    await vi.waitFor(() => expect(renderer.root.findByType('SettingsRow').props.value).toBe('Ready'));
+    await vi.waitFor(() => expect(renderer.root.findByType(ConnectorRow).props.value).toBe('Ready'));
   });
   it('creates and delegates the suggested wallet with the active workspace fallback', async () => {
     searchParams.params.workspaceId = '';
@@ -301,7 +288,7 @@ describe('Connectors server-owned settings screen', () => {
     setWorkbenchSource(source);
     const wallet = new MockWalletSource(); const create = vi.spyOn(wallet, 'createWallet'); const grant = vi.spyOn(wallet, 'grantDelegation'); setWalletSource(wallet);
     const renderer = await render();
-    await act(async () => { await renderer.root.findByType('SettingsRow').props.onPress(); });
+    await act(async () => { await renderer.root.findByType(ConnectorRow).props.onPress(); });
     await vi.waitFor(() => expect(grant).toHaveBeenCalledWith({ workspaceId: 'workspace-active' }));
     expect(create).toHaveBeenCalledWith({ workspaceId: 'workspace-active' });
   });
@@ -311,7 +298,7 @@ describe('Connectors server-owned settings screen', () => {
     const cancel = vi.spyOn(source, 'cancelLinkSignIn').mockResolvedValue(undefined);
     vi.mocked(WebBrowser.openAuthSessionAsync).mockResolvedValueOnce({ type: 'dismiss' as WebBrowser.WebBrowserResultType.DISMISS });
     setWorkbenchSource(source); const renderer = await render();
-    await act(async () => { await renderer.root.findByType('SettingsRow').props.onPress(); });
+    await act(async () => { await renderer.root.findByType(ConnectorRow).props.onPress(); });
     await vi.waitFor(() => expect(cancel).toHaveBeenCalledWith('pending'));
   });
 });
@@ -348,7 +335,7 @@ describe('one tap from a Connectors row', () => {
     expect(subtitle.root.findAll((node: any) => node.props?.children === 'Pidoong').length).toBeGreaterThan(0);
     await act(async () => chatgpt.props.onPress());
     expect(navigation.push.mock.calls).toEqual([[{ pathname: '/beeline/settings/workbench/service', params: { ...scope, service: 'rooms:chatgpt' } }]]);
-    expect(renderer.root.findAllByType('HullActionSheetModal').every((sheet: any) => !sheet.props.visible)).toBe(true);
+    expect(renderer.root.findAllByType(SheetFrame).every((sheet: any) => !sheet.props.open)).toBe(true);
   });
   it('not connected: the suggestion starts its own connect flow', async () => {
     serve(companyWorkbench([], [companyOption('tailscale', 'Tailscale', 'tailscale')]));

@@ -8,116 +8,29 @@ import { router } from 'expo-router';
 import { loadBuzzIdentity } from '@/auth/buzz-identity-storage';
 import { resetClientState } from '@/sync/client-reset';
 import { mobileSurfaceCache } from '@/buzz/surface-storage';
-import { ConversationRow } from '@/components/buzz/ConversationRow';
-import { RoomListSectionHeader } from '@/components/buzz/RoomListSectionHeader';
-import { CornerOpenToast } from '@/components/buzz/CornerOpenToast';
+import { ChatListHeader } from '@/ui/screens/chats/ChatListHeader';
 import { getRoomCornerSummary } from '@/buzz/room-corner-store';
 import { type ChatListView, type WorkspaceListView } from '@beeline/buzz-client';
 
 describe('Room deck live path', () => {
 
-  it('shows a long-press corner open as pending, then unreachable with Retry for the same corner', async () => {
+  it('filters chats by search and lists message matches below them', async () => {
+    deck.chatsResponse = listOf([room('room-a', 20), room('room-b', 10, { unread: true })]);
     const renderer = await mountDeck();
-    let toast!: ReactTestRenderer;
-    act(() => {
-      toast = create(React.createElement(CornerOpenToast));
-    });
-    const list = renderer.root.find((node: any) => node.type === 'SectionList');
-    let row: ReactTestRenderer;
-    await act(async () => {
-      row = create(
-        list.props.renderItem({
-          item: { ...paintedRows(renderer)[0], cornerCount: 1 },
-          index: 0,
-          section: { data: [paintedRows(renderer)[0]] },
-        }),
-      );
-    });
-    const conversation = row!.root.findByType(ConversationRow);
-    let fail!: (error: Error) => void;
-    deck.createCorner.mockImplementationOnce(
-      () => new Promise<string>((_, reject) => (fail = reject)),
-    );
-    vi.mocked(router.push).mockClear();
-    const text = (node: any): string =>
-      node.children.map((child: any) => (typeof child === 'string' ? child : text(child))).join('');
-
-    await act(async () => {
-      void conversation.props.onLongPressCorners(conversation.props.item.room.id);
-    });
-    expect(text(toast.root.findByProps({ testID: 'corner-open-pending' }))).toBe(
-      'Opening corner…Waiting for server · 0s',
-    );
-    // A second press while the first waits says so instead of doing nothing.
-    await act(async () => {
-      void conversation.props.onLongPressCorners(conversation.props.item.room.id);
-    });
-    expect(deck.createCorner).toHaveBeenCalledOnce();
-    expect(text(toast.root.findByProps({ testID: 'corner-open-pending' }))).toBe(
-      'Opening corner…Still opening…',
-    );
-
-    await act(async () => fail(new TypeError('Network request failed')));
-    expect(toast.toJSON()).toBeNull();
-    expect(router.push).not.toHaveBeenCalled();
-    expect(deck.createCorner).toHaveBeenCalledOnce();
-    act(() => {
-      toast.unmount();
-      row!.unmount();
-      renderer.unmount();
-    });
-  });
-
-
-  it('draws the header agents and tray icons in the search icon grey, brass left to the count', async () => {
-    const renderer = await mountDeck();
-    const members = renderer.root.findByProps({ testID: 'workspace-members' });
-    const tray = renderer.root.findByType('TrayGlyph' as any);
-    const { beelineThemes } = await import('@/buzz/groknight');
-    expect(members.props.icon.props.color).toBe(tray.props.color);
-    expect(Object.values(beelineThemes).map((hull) => hull.ledgerQuiet)).toContain(
-      tray.props.color,
-    );
-    act(() => renderer.unmount());
-  });
-
-
-  it('heads Rooms and Direct messages without a row count', async () => {
-    const renderer = await mountDeck();
-    const list = renderer.root.find((node: any) => node.type === 'SectionList');
-    for (const [kind, title] of [
-      ['rooms', 'Rooms'],
-      ['messages', 'Direct messages'],
-    ]) {
-      const header = list.props.renderSectionHeader({
-        section: { kind, title, data: [{}, {}, {}] },
-      });
-      expect(header.type).toBe(RoomListSectionHeader);
-      expect(header.props.title).toBe(title);
-      expect(header.props.inset).toBe('roomList');
-      expect(header.props.count).toBeUndefined();
-    }
-    act(() => renderer.unmount());
-  });
-
-
-  it('lists search matches without section heads', async () => {
-    const renderer = await mountDeck();
-    const list = () => renderer.root.find((node: any) => node.type === 'SectionList');
-    const header = () =>
-      list().props.renderSectionHeader({ section: { kind: 'rooms', title: 'Rooms', data: [] } });
-    expect(header()).not.toBeNull();
-    await act(async () =>
-      renderer.root.findByType('RoomListToolbar' as any).props.onQuery('general'),
-    );
-    expect(header()).toBeNull();
+    const header = () => renderer.root.findByType(ChatListHeader);
+    await act(async () => header().props.onSearch({ open: true, query: 'room-a', chips: [] }));
     expect(paintedRows(renderer).map((item) => item.room.id)).toEqual(['room-a']);
+    await act(async () => header().props.onSearch({ open: true, query: '', chips: ['unread'] }));
+    expect(paintedRows(renderer).map((item) => item.room.id)).toEqual(['room-b']);
+    await act(async () => header().props.onSearch({ open: true, query: 'hello', chips: [] }));
+    const list = renderer.root.find((node: any) => node.type === 'FlatList');
     let footer!: ReactTestRenderer;
     await act(async () => {
-      footer = create(list().props.ListFooterComponent);
+      footer = create(list.props.ListFooterComponent);
     });
     expect(footer.root.findAllByProps({ testID: 'message-search-results' })).not.toHaveLength(0);
-    expect(footer.root.findAllByType('RoomListSectionHeader' as any)).toHaveLength(0);
+    await act(async () => header().props.onSearch({ open: false, query: '', chips: [] }));
+    expect(paintedRows(renderer).map((item) => item.room.id)).toEqual(['room-a', 'room-b']);
     act(() => {
       footer.unmount();
       renderer.unmount();
@@ -212,26 +125,6 @@ describe('Room deck live path', () => {
       cornerCount: 2,
       openCorners: [{ id: 'corner-1', name: 'fix', state: 'waiting' }],
     });
-    await act(async () => renderer.unmount());
-  });
-
-
-  it('mounts a fresh card frame when a reorder changes its rounded edges', async () => {
-    deck.chatsResponse = listOf([room('room-a', 30), room('room-b', 20), room('room-c', 10)]);
-    const renderer = await mountDeck();
-    const list = renderer.root.find(
-      (node: { type: unknown; props: { testID?: string } }) =>
-        node.type === 'SectionList' && node.props.testID === 'room-list',
-    );
-    const data = paintedRows(renderer);
-    const frameKey = (index: number) => {
-      const cell = list.props.renderItem({ item: data[2], index, section: { data } });
-      return cell.props.children.props.children.key;
-    };
-
-    // room-c moving from last to first or middle must not reuse its clipped frame.
-    expect(new Set([frameKey(0), frameKey(1), frameKey(2)]).size).toBe(3);
-    expect(frameKey(1)).toBe(frameKey(1));
     await act(async () => renderer.unmount());
   });
 

@@ -31,7 +31,6 @@ vi.mock('@/components/buzz/SettingsRow', async () => {
   const { createElement } = await import('react');
   return { SettingsRow: (props: any) => createElement('SettingsRow', props, props.leading) };
 });
-vi.mock('@/components/buzz/WorkflowGlyph', () => ({ WorkflowGlyph: () => null }));
 vi.mock('@/components/buzz/WorkflowRunLine', () => ({ WorkflowRunLine: () => null }));
 vi.mock('@/components/buzz/CornerGlyph', () => ({ CORNER_META_SIZE: 10, CornerGlyph: () => null }));
 vi.mock('@/components/buzz/SurfaceGlyphLoader', () => ({ SurfaceGlyphLoader: () => null }));

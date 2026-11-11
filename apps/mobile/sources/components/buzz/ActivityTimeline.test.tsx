@@ -23,6 +23,8 @@ vi.mock('react-native', async () => {
   };
 });
 
+vi.mock('tamagui', async () => (await import('@/ui/screens/transcript/grammar-hosts.test-support')).tamaguiHosts());
+vi.mock('lucide-react-native', async () => (await import('@/ui/screens/transcript/grammar-hosts.test-support')).lucideHosts());
 vi.mock('react-native-safe-area-context', () => ({
   useSafeAreaInsets: () => ({ top: 0, right: 0, bottom: 0, left: 0 }),
 }));
@@ -681,16 +683,14 @@ describe('agent prose and drafts', () => {
     expect(renderedText(renderer)).toContain('**The reply is ready**');
   });
 
-  it("renders the settled row's byline — IdentityMark + name + model + stamp — on the live draft", () => {
-    // Captain report C42: the streamed draft lane's byline must be exactly
-    // the settled message byline (`Ledger.LedgerBylineView`), so the agent
-    // triangle is present and nothing changes visually when the draft
-    // settles in place.
+  it("renders the settled row's sender line — face, name and time — on the live draft", () => {
+    // Captain report C42: the streamed draft lane's sender line is exactly
+    // the settled message's (`TranscriptLine`), so nothing changes visually
+    // when the draft settles in place.
     const renderer = render(
       <ActivityTimeline
         active
         handle="Codex"
-        role="openrouter/deepseek-deepseek-v.4.1-flash"
         stamp="14:02"
         items={[{ kind: 'tool', id: 'edit', title: 'Edit files', toolKind: 'edit' }]}
         messageDraft="Working on it now."
@@ -699,39 +699,10 @@ describe('agent prose and drafts', () => {
     );
     const mark = renderer.root.findByProps({ testID: 'chat-byline-mark' });
     expect(mark.props).toEqual(
-      expect.objectContaining({
-        seed: 'agent-pubkey',
-        kind: 'agent',
-        alive: true,
-        size: 26,
-      }),
+      expect.objectContaining({ seed: 'agent-pubkey', kind: 'agent', alive: true, size: 28 }),
     );
-    const byline = mark.parent.parent;
-    const textStrings: string[] = [];
-    const collect = (node: any) => {
-      if (typeof node === 'string') textStrings.push(node);
-      if (Array.isArray(node)) node.forEach(collect);
-      else if (node && typeof node === 'object' && node.props)
-        React.Children.forEach(node.props.children, collect);
-    };
-    byline.findAll((node: any) => node.type === 'Text').forEach(collect);
-    const bylineText = textStrings.join('');
-    expect(bylineText).toContain('Codex');
-    expect(bylineText).toContain('openrouter/deepseek-deepseek-v.4.1-flash');
-    expect(bylineText).not.toContain('effort');
-    expect(bylineText).toContain('14:02');
-    const role = renderer.root.findByProps({ testID: 'chat-byline-role' });
-    expect(role.props.numberOfLines).toBe(1);
-    expect(role.props.ellipsizeMode).toBe('tail');
-  });
-
-  it('keeps a streaming author readable while its real font loads', () => {
-    vi.mocked(useFonts).mockReturnValue([false, null]);
-    const renderer = render(<ActivityTimeline active handle="Ruby" role="Opus 5.5" stamp="22:45" items={[]} messageDraft="Working" />);
-    const name = renderer.root.findByProps({ testID: 'chat-byline-name' });
-    expect(Object.assign({}, ...name.props.style.filter(Boolean)).fontFamily).toBe('sans-serif');
-    expect(name.props.children).toBe('Ruby');
-    vi.mocked(useFonts).mockReturnValue([true, null]);
+    expect(renderer.root.findByProps({ testID: 'chat-byline-name' }).props.children).toBe('Codex');
+    expect(renderer.root.findByProps({ testID: 'chat-byline-stamp' }).props.children).toBe('14:02');
   });
 
   it('renders no identity mark when no byline handle is present', () => {

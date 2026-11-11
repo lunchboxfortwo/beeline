@@ -3,20 +3,5 @@ export const WORKSPACE_LABEL = 'Workspace';
 export const ROOM_LABEL = 'Room';
 export const CORNER_LABEL = 'corner';
 
-export const WORKSPACES_LABEL = `${WORKSPACE_LABEL}s`;
 export const ROOMS_LABEL = `${ROOM_LABEL}s`;
-export const CHANGES_LABEL = `${CORNER_LABEL}s`;
 
-/**
- * The one word for "the people and agents in this Workspace", used by every
- * route into the members screen — the Room-list header, the empty-state entry,
- * and Workspace settings. Three surfaces previously reached the same screen
- * under three different words ("PEOPLE", "Members", "MEMBERS").
- *
- * Chrome next to bookmarks uses `MembersGlyph`; the word remains the accessible
- * name and the in-list entries' title. The angular hexagon `⌬` (captain report
- * C73) and the Ionicons `people-outline` stand-in stay retired: they never
- * belonged to the creature motif, and a Speakeasy animal would collide with
- * identity marks. `members-glyph.test.ts` holds that rule.
- */
-export const MEMBERS_LABEL = 'Members';

@@ -33,6 +33,7 @@ import { turnRootMessageSql } from '../agent-command.js';
         role: 'owner' | 'admin' | 'member' | 'spectator';
         updated_at: Date;
       };
+      joinable_rows: { id: string; name: string; memberCount: number }[];
       room_rows: (RoomRow & {
         voice_call: ChatListItem['voiceCall'] | null;
         member_count: string;
@@ -142,7 +143,17 @@ import { turnRootMessageSql } from '../agent-command.js';
       -- them once instead of converting every nested message into JSONB again.
       SELECT row_to_json(visible_workspace) workspace,
         (SELECT row_to_json(viewer) FROM identities viewer WHERE viewer.id=$2) viewer_row,
-        COALESCE((SELECT json_agg(visible_rooms) FROM visible_rooms),'[]'::json) room_rows
+        COALESCE((SELECT json_agg(visible_rooms) FROM visible_rooms),'[]'::json) room_rows,
+        -- Public chats the viewer has not joined: memberships is the only join store.
+        COALESCE((SELECT json_agg(json_build_object('id',open_room.id,'name',open_room.name,
+            'memberCount',(SELECT count(*) FROM memberships rm WHERE rm.room_id=open_room.id AND rm.removed_at IS NULL))
+            ORDER BY open_room.updated_at DESC,open_room.id)
+          FROM (SELECT r.id,r.name,r.updated_at FROM rooms r
+            WHERE r.workspace_id=$1 AND r.parent_id IS NULL AND r.archived_at IS NULL
+              AND r.visibility='public' AND r.direct_participants IS NULL
+              AND NOT EXISTS (SELECT 1 FROM memberships mine WHERE mine.room_id=r.id
+                AND mine.identity_id=$2 AND mine.removed_at IS NULL)
+            ORDER BY r.updated_at DESC,r.id LIMIT 200) open_room),'[]'::json) joinable_rows
       FROM visible_workspace`,
       [workspaceId, viewerId], 'phone-chats-0',
     );
@@ -320,6 +331,7 @@ import { turnRootMessageSql } from '../agent-command.js';
       viewer: identity(result.rows[0]!.viewer_row, ctx.publicOrigin),
       truncated: rooms.rows.length > 200,
       ...(unavailable.length ? { unavailable } : {}),
+      joinable: result.rows[0]!.joinable_rows,
       watchFilters: rooms.rows.length
         ? [{ kinds: [9, 9000, 9001, 9002, 9007, 9008], '#h': rooms.rows.map((row) => row.id) }]
         : [],

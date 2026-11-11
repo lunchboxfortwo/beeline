@@ -5,23 +5,18 @@ import { validateInventory, summarize } from './web-capture.mjs';
 import { attachWebInventory } from './nightly-local.mjs';
 import { scenarios, fixture } from './web-fixtures.mjs';
 import { steps } from './web-steps.mjs';
-import { cornerLongPressThreshold, measureLongPress } from './web-long-press.mjs';
+import { CHAT_ROW_SOURCE, cornerLongPressThreshold, measureLongPress } from './web-long-press.mjs';
 const inventory = JSON.parse(
   await readFile(new URL('./interactions.json', import.meta.url), 'utf8'),
 );
 test('corner clock follows the source threshold and observes completion before release', async () => {
-  const source = await readFile(
-    new URL(
-      '../../apps/mobile/sources/app/(app)/beeline/chat/ChatSurfaceHeader.tsx',
-      import.meta.url,
-    ),
-    'utf8',
-  );
+  const source = await readFile(CHAT_ROW_SOURCE, 'utf8');
   const threshold = await cornerLongPressThreshold();
-  const control = source
-    .split('<TouchableOpacity')
-    .find((part) => part.includes('testID="room-corners-menu"'));
-  assert.equal(threshold, Number(control.match(/delayLongPress=\{(\d+)\}/)[1]));
+  // The chat row's mark holds for this long before it opens a new thread.
+  const hold = source.match(/useHold\(NEW_THREAD_HOLD_MS, onNewThread/);
+  assert.ok(hold, 'the mark hold uses the shared threshold');
+  assert.equal(threshold, Number(source.match(/NEW_THREAD_HOLD_MS = (\d+);/)[1]));
+  assert.equal(threshold, 450);
   let release;
   let observed = false;
   let released = false;

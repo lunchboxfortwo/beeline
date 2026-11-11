@@ -1,13 +1,9 @@
 import { ErrorBanner } from '@/components/buzz/ErrorBanner';
 import type { DictationTiming } from '@/buzz/dictation-timing';
-import { InlineRow } from './IndexRow';
-import { Button } from '@/components/buzz/Button';
-import { CloseButton } from '@/components/buzz/CloseGlyph';
 import * as React from 'react';
 import {
   Text,
   TextInput,
-  TouchableOpacity,
   View,
   Keyboard,
   Linking,
@@ -21,16 +17,29 @@ import {
 import { StyleSheet, useUnistyles } from 'react-native-unistyles';
 import { groknight } from '@/buzz/groknight';
 import { HullDialog } from './HullDialog';
-import { ArrowUpGlyph, COMPOSER_GLYPH_SIZE, MicGlyph, PlusGlyph, StopGlyph, WaveformGlyph } from './MicGlyph';
+import { COMPOSER_GLYPH_SIZE } from './MicGlyph';
 import { VoiceAgentStrip, VoiceBar } from './VoiceBar';
 import { RuntimeErrorBoundary } from './RuntimeErrorBoundary';
 import type { VoiceCallState } from '@/buzz/use-voice-call';
-import { VOICE_LONG_PRESS_MS } from '@beeline/api-contract/phone';
 import { BeelineMarkSpinner } from './BeelineMarkSpinner';
 import { SurfaceGlyphLoader } from './SurfaceGlyphLoader';
-import { DictationWaveform } from './DictationWaveform';
 import { useSpeechInput } from '@/buzz/speech-input';
 import { composerBackspaceCursor, deleteComposerTagBackward, splitComposerTags } from '@/buzz/composer-tags';
+import { ArrowUp, AudioLines, Mic, Plus, Square } from 'lucide-react-native';
+import {
+  ComposerAdjuncts,
+  ComposerAttachment,
+  ComposerButton,
+  ComposerGlyph,
+  ComposerControls,
+  ComposerFrame,
+  ComposerListening,
+  ComposerMoreAttachments,
+  ComposerNote,
+  ComposerReply,
+  ComposerStatus,
+  useComposerInk,
+} from '@/ui/screens/composer/ComposerChrome';
 
 /**
  * A dictated message on its way out. Stop sets `cancelled` until the parent sets
@@ -114,6 +123,8 @@ type Props = {
   attachmentsUploading?: boolean;
   onRemoveAttachment?(index: number): void;
   onRetryAttachment?(index: number): void;
+  /** The field's hint: "Message #chat" in a chat, "Reply in thread" in a corner. */
+  placeholder?: string;
 };
 
 export const COMPOSER_SINGLE_LINE_INPUT_HEIGHT = 26;
@@ -163,9 +174,10 @@ function ConversationComposerContent({
   attachmentsUploading = false,
   onRemoveAttachment,
   onRetryAttachment,
+  placeholder,
 }: Props) {
   const { theme } = useUnistyles();
-  const voiceHeld = React.useRef(false);
+  const { ink, hint } = useComposerInk();
   const containerRef = React.useRef<HTMLElement | null>(null);
   const ownInputRef = React.useRef<TextInput | null>(null);
   const [textOffset, setTextOffset] = React.useState(0);
@@ -407,123 +419,47 @@ function ConversationComposerContent({
   };
   const visibleAttachments = attachments.slice(0, 3);
   const hiddenAttachmentCount = Math.max(0, attachments.length - visibleAttachments.length);
+  const permissionDeniedNative = speech.state === 'permission-denied' && Platform.OS !== 'web';
   return (
     <>
     {(conversationActive || voice?.connecting) && voice && <VoiceAgentStrip voice={voice} />}
-    <View
-      ref={containerRef as React.Ref<View>}
-      {...containerProps}
-      style={[styles.composer, focused && styles.composerFocused,
-        ...(viewerPill ? [styles.viewerPill] : [])]}
-    >
+    <View ref={containerRef as React.Ref<View>} {...containerProps}>
       {(reply || attachments.length > 0) && (
-        <View style={styles.adjuncts} testID={`${testIDPrefix}-composer-adjuncts`}>
-          {reply && (
-            <View style={styles.reply} testID="reply-composer-banner">
-              <View style={styles.replyCopy}>
-                <Text numberOfLines={1} style={styles.replyLabel}>
-                  <Text style={styles.replyGlyph}>↩</Text> Replying to{' '}
-                  <Text style={styles.replyHandle}>@{reply.handle}</Text>
-                </Text>
-                <Text numberOfLines={1} ellipsizeMode="tail" style={styles.replyPreview}>
-                  {reply.preview}
-                </Text>
-              </View>
-              <CloseButton
-                accessibilityLabel="Cancel reply"
-                onPress={onCancelReply}
-                testID="reply-composer-cancel"
-                control={styles.removeButton}
-              />
-            </View>
-          )}
+        <ComposerAdjuncts testID={`${testIDPrefix}-composer-adjuncts`}>
+          {reply && <ComposerReply handle={reply.handle} preview={reply.preview} onCancel={onCancelReply} />}
           {visibleAttachments.map((attachment, index) => (
-            <View
+            <ComposerAttachment
               key={`${attachment.uri}:${index}`}
-              style={[styles.attachment, (reply || index > 0) && styles.adjunctDivider]}
-              testID={`pending-chat-attachment-${index}`}
-            >
-              <View style={styles.attachmentCopy}>
-                  <Text numberOfLines={1} ellipsizeMode="tail" style={styles.attachmentName}>
-                    {attachment.name}
-                  </Text>
-                  <InlineRow style={styles.attachmentInfo}>
-                    <Text
-                      numberOfLines={1}
-                      style={styles.attachmentMeta}
-                      testID={`pending-chat-attachment-meta-${index}`}
-                    >
-                      <Text
-                        style={attachment.uploadState === 'failed' && styles.attachmentFailed}
-                        testID={`pending-chat-attachment-state-${index}`}
-                      >
-                        {attachment.uploadState === 'uploaded'
-                          ? 'Ready'
-                          : attachment.uploadState === 'failed'
-                            ? 'Upload failed'
-                            : 'Uploading…'}
-                      </Text>{' '}
-                      · {attachment.sizeLabel} · {attachment.mimeType.toUpperCase()}
-                    </Text>
-                    {attachment.uploadState === 'failed' && (
-                      <Button
-                        label="Retry"
-                        size="inline"
-                        variant="secondary"
-                        accessibilityLabel={`Retry uploading ${attachment.name}`}
-                        disabled={attachmentsUploading}
-                        onPress={() => onRetryAttachment?.(index)}
-                        style={styles.attachmentRetry}
-                        testID={`pending-chat-attachment-retry-${index}`}
-                      />
-                    )}
-                  </InlineRow>
-                </View>
-
-                <CloseButton
-                accessibilityLabel={`Remove ${attachment.name}`}
-                disabled={attachmentsUploading}
-                onPress={() => onRemoveAttachment?.(index)}
-                testID={`pending-chat-attachment-remove-${index}`}
-                control={styles.removeButton}
-              />
-            </View>
+              index={index}
+              name={attachment.name}
+              sizeLabel={attachment.sizeLabel}
+              mimeType={attachment.mimeType}
+              uploadState={attachment.uploadState}
+              busy={attachmentsUploading}
+              onRetry={() => onRetryAttachment?.(index)}
+              onRemove={() => onRemoveAttachment?.(index)}
+            />
           ))}
-          {hiddenAttachmentCount > 0 && (
-            <View
-              style={[styles.moreAttachments, styles.adjunctDivider]}
-              testID="pending-chat-attachments-more"
-            >
-              <Text style={styles.moreAttachmentsText}>{hiddenAttachmentCount} more</Text>
-            </View>
-          )}
-        </View>
+          {hiddenAttachmentCount > 0 && <ComposerMoreAttachments count={hiddenAttachmentCount} />}
+        </ComposerAdjuncts>
       )}
+      <ComposerFrame focused={focused} pill={viewerPill}>
       {conversationActive && voice ? (
         <VoiceBar voice={voice} testIDPrefix={testIDPrefix} />
       ) : (
-        <View
-        style={[styles.inputRow, viewerPill && styles.viewerPillRow, multiline && styles.composerMultiline]}
-        testID={`${testIDPrefix}-composer-input-row`}
-      >
+        <ComposerControls multiline={multiline} testID={`${testIDPrefix}-composer-input-row`}>
         {/* Room attachments remain available while dictating. */}
         {!viewerPill && (
-        <TouchableOpacity
-          accessibilityLabel="Attach photo or document"
-          accessibilityRole="button"
-          disabled={attachDisabled || !onAttach}
-          hitSlop={9}
-          onPress={onAttach}
-          style={styles.attachButton}
-          testID={`${testIDPrefix}-attach-button`}
-        >
-          <PlusGlyph
-            color={attachDisabled || !onAttach ? theme.buzz.textMuted : theme.buzz.textPrimary}
-            testID={`${testIDPrefix}-attach-glyph`}
-          />
-        </TouchableOpacity>
+          <ComposerButton
+            label="Attach photo or document"
+            disabled={attachDisabled || !onAttach}
+            onPress={onAttach}
+            testID={`${testIDPrefix}-attach-button`}
+          >
+            <ComposerGlyph icon={Plus} />
+          </ComposerButton>
         )}
-        <View style={styles.inputWrapper}>
+        <View style={[styles.inputWrapper, viewerPill && styles.viewerPillField]}>
           {Platform.OS !== 'web' ? (
             <Text
               accessible={false}
@@ -547,11 +483,12 @@ function ConversationComposerContent({
             autoFocus={focused}
             style={[
               styles.input,
+              { color: ink },
               // Web sets the changing height on the element (growth loop note above).
               Platform.OS === 'ios' || Platform.OS === 'web' ? undefined : { height: inputHeight, maxHeight },
               Platform.OS === 'android' && styles.inputAndroid,
               { transform: [{ translateY: drawingOffset }] },
-              // The input stays mounted under the waveform; its typed text
+              // The input stays mounted under the listening line; its typed text
               // returns when dictation ends.
               dictationBusy ? styles.inputHidden : undefined,
             ]}
@@ -592,8 +529,8 @@ function ConversationComposerContent({
               selectionRef.current = event.nativeEvent.selection;
               onSelectionChange?.(event);
             }}
-            placeholder={!isDirectMessage && hasAgentMembers ? 'Tag an agent with @' : 'Message'}
-            placeholderTextColor={theme.buzz.dim}
+            placeholder={placeholder ?? (!isDirectMessage && hasAgentMembers ? 'Tag an agent with @' : 'Message')}
+            placeholderTextColor={hint}
             multiline
             // Android keyboards otherwise take the whole screen in landscape and
             // type into the OS extract editor instead of this composer. The prop
@@ -606,57 +543,37 @@ function ConversationComposerContent({
             accessibilityLabel="Message"
           />
           {dictationBusy ? (
-            <View style={styles.waveformOverlay}>
-              {/* The leading tags stay in view, as text, while the take is recorded. */}
-              {tagSplit.tags.length > 0 ? (
-                <Text numberOfLines={1} style={styles.dictationTags} testID={`${testIDPrefix}-dictation-tags`}>
-                  {tagSplit.prefix.trimEnd()}
-                </Text>
-              ) : null}
-              <DictationWaveform
-                level={speech.volumeLevel}
-                live={isListening}
-                testID={`${testIDPrefix}-speech-waveform`}
-              />
-            </View>
+            <ComposerListening
+              tags={tagSplit.tags.length > 0 ? tagSplit.prefix.trimEnd() : undefined}
+              testID={`${testIDPrefix}-speech-waveform`}
+              tagsTestID={`${testIDPrefix}-dictation-tags`}
+            />
           ) : null}
         </View>
         {speechAvailable && dictationBusy ? (
           // Keyed apart from the mic, so a press in flight on one never lands on the other.
-          <TouchableOpacity
+          <ComposerButton
             key="stop"
-            accessibilityLabel="Stop recording"
-            accessibilityHint="Discards this take; typed text stays"
-            accessibilityRole="button"
+            label="Stop recording"
+            hint="Discards this take; typed text stays"
             disabled={sendingTake?.committed}
-            hitSlop={9}
             onPress={discardTake}
-            style={styles.controlSlot}
             testID={`${testIDPrefix}-speech-discard`}
           >
-            <StopGlyph color={theme.buzz.textPrimary} testID={`${testIDPrefix}-stop-glyph`} />
-          </TouchableOpacity>
+            <ComposerGlyph icon={Square} />
+          </ComposerButton>
         ) : speechAvailable ? (
-          <TouchableOpacity
+          <ComposerButton
             key="mic"
-            accessibilityLabel={
-              speech.state === 'permission-denied' && Platform.OS !== 'web'
-                ? 'Open microphone settings'
-                : 'Start speech input'
-            }
-            accessibilityRole="button"
-            accessibilityHint="Dictates into the message field"
-            hitSlop={9}
-            delayLongPress={VOICE_LONG_PRESS_MS}
-            onPressIn={() => { voiceHeld.current = false; }}
-            onLongPress={voice && !disabled ? () => {
-              voiceHeld.current = true;
+            label={permissionDeniedNative ? 'Open microphone settings' : 'Start speech input'}
+            hint="Dictates into the message field"
+            dimmed={speech.state === 'permission-denied'}
+            onHold={voice && !disabled ? () => {
               Keyboard.dismiss();
               void voice.join();
             } : undefined}
             onPress={() => {
-              if (voiceHeld.current) return;
-              if (speech.state === 'permission-denied' && Platform.OS !== 'web') {
+              if (permissionDeniedNative) {
                 void Linking.openSettings();
                 return;
               }
@@ -665,94 +582,65 @@ function ConversationComposerContent({
               Keyboard.dismiss();
               speech.start();
             }}
-            style={[
-              styles.controlSlot,
-              speech.state === 'permission-denied' && styles.micButtonDimmed,
-            ]}
             testID={`${testIDPrefix}-mic`}
           >
-            <MicGlyph
-              color={theme.buzz.textPrimary}
-              size={COMPOSER_GLYPH_SIZE}
-              testID={`${testIDPrefix}-mic-glyph`}
-            />
-          </TouchableOpacity>
+            <ComposerGlyph icon={Mic} />
+          </ComposerButton>
         ) : null}
         {showConversation ? (
-          <TouchableOpacity
-            accessibilityLabel={voice?.connecting ? 'Connecting conversation mode' : 'Conversation mode'}
-            accessibilityRole="button"
+          <ComposerButton
+            label={voice?.connecting ? 'Connecting conversation mode' : 'Conversation mode'}
             disabled={disabled || voice?.connecting}
-            accessibilityState={{ disabled: disabled || voice?.connecting, busy: voice?.connecting }}
-            aria-busy={Boolean(voice?.connecting)}
-            hitSlop={9}
+            busy={voice?.connecting}
             onPress={() => {
               Keyboard.dismiss();
               void voice?.join();
             }}
-            style={styles.controlSlot}
             testID={`${testIDPrefix}-conversation`}
           >
             {voice?.connecting ? <SurfaceGlyphLoader compact size={COMPOSER_GLYPH_SIZE} testID="voice-startup-loader" />
-              : <WaveformGlyph color={disabled ? theme.buzz.textMuted : theme.buzz.textPrimary} />}
-          </TouchableOpacity>
+              : <ComposerGlyph icon={AudioLines} />}
+          </ComposerButton>
         ) : (
-          <TouchableOpacity
-            accessibilityLabel={sendingSpeech ? 'Finishing speech input' : 'Send message'}
-            accessibilityHint={
+          <ComposerButton
+            primary
+            label={sendingSpeech ? 'Finishing speech input' : 'Send message'}
+            hint={
               sendingSpeech
                 ? 'Waits for the final transcription before sending'
                 : isListening
                   ? 'Stops dictation and sends'
                   : undefined
             }
-            accessibilityRole="button"
-            accessibilityState={{ disabled: sendDisabled, busy: sendingSpeech }}
             disabled={sendDisabled}
-            hitSlop={9}
+            busy={sendingSpeech}
             // Never pass the responder event itself: the Room's handleSend
             // reads its first argument as a MessageShortcut, and a PressEvent
             // (truthy, no `.text`) made it skip the composer-clear block so
             // the field kept its text after every send.
             onPress={() => (isListening ? sendTake() : onSend?.())}
-            style={styles.controlSlot}
             testID={`${testIDPrefix}-send`}
           >
             {sendingSpeech ? (
-              <BeelineMarkSpinner
-                ink={theme.buzz.accent}
-                live
-                testID={`${testIDPrefix}-speech-finalizing`}
-              />
+              <BeelineMarkSpinner ink={theme.buzz.accent} live testID={`${testIDPrefix}-speech-finalizing`} />
             ) : (
-              <ArrowUpGlyph
-                color={sendDisabled ? theme.buzz.textMuted : theme.buzz.accent}
-                testID={`${testIDPrefix}-send-glyph`}
-              />
+              <ComposerGlyph icon={ArrowUp} primary />
             )}
-          </TouchableOpacity>
+          </ComposerButton>
         )}
-      </View>
+        </ComposerControls>
       )}
-      {dailyLimitError && <View style={styles.statusLine}>
+      {dailyLimitError && <ComposerNote>
         <ErrorBanner inline title={dailyLimitError} titleTestID="voice-connection-error" />
-      </View>}
+      </ComposerNote>}
       {statusLine ? (
-        <TouchableOpacity
-          accessibilityLabel={statusLine}
-          accessibilityLiveRegion="polite"
-          accessibilityRole={speech.state === 'permission-denied' && Platform.OS !== 'web' ? 'button' : 'text'}
-          activeOpacity={speech.state === 'permission-denied' && Platform.OS !== 'web' ? 0.7 : 1}
-          disabled={speech.state !== 'permission-denied' || Platform.OS === 'web'}
-          onPress={
-            speech.state === 'permission-denied' && Platform.OS !== 'web' ? () => void Linking.openSettings() : undefined
-          }
-          style={styles.statusLine}
+        <ComposerStatus
+          text={statusLine}
+          onPress={permissionDeniedNative ? () => void Linking.openSettings() : undefined}
           testID={`${testIDPrefix}-speech-status`}
-        >
-          <Text style={styles.statusText}>{statusLine}</Text>
-        </TouchableOpacity>
+        />
       ) : null}
+      </ComposerFrame>
       <HullDialog
         visible={speech.modelDownloadOffered}
         title="Download the voice model?"
@@ -778,26 +666,17 @@ function ConversationComposerContent({
   );
 }
 
-const CONTROL_SIZE = 26;
-
 const styles = StyleSheet.create((theme) => ({
-  // The voice spot and the go action: one 26pt slot each, reached by a 44pt
-  // target, so no swap ever moves a control or the input's width.
-  controlSlot: {
-    width: CONTROL_SIZE,
-    height: CONTROL_SIZE,
-    marginLeft: 8,
-    alignItems: 'center',
-    justifyContent: 'center',
-  },
-  micButtonDimmed: {
-    opacity: 0.4,
-  },
   inputWrapper: {
     flex: 1,
     position: 'relative',
     minWidth: 0,
+    justifyContent: 'center',
+    minHeight: 44,
+    paddingVertical: theme.buzz.space.xs,
   },
+  // The viewer pill keeps a little room before its trailing controls.
+  viewerPillField: { paddingLeft: theme.buzz.space.sm },
   inputHidden: {
     position: 'absolute',
     left: 0,
@@ -805,107 +684,6 @@ const styles = StyleSheet.create((theme) => ({
     top: 0,
     opacity: 0,
   },
-  waveformOverlay: {
-    minHeight: COMPOSER_SINGLE_LINE_INPUT_HEIGHT,
-    flexDirection: 'row',
-    alignItems: 'center',
-  },
-  statusLine: {
-    paddingHorizontal: theme.buzz.space.md,
-    paddingTop: theme.buzz.space.xs,
-    paddingBottom: theme.buzz.space.sm,
-  },
-  statusText: {
-    ...(theme.buzz.type.machine as any),
-    color: theme.buzz.ledgerQuiet,
-    textTransform: 'uppercase',
-  },
-  // End speech recognition styles
-  composer: {
-    minHeight: 44,
-    borderRadius: 10,
-    borderWidth: 1,
-    borderColor: theme.buzz.border,
-    backgroundColor: theme.buzz.bgRaised,
-    overflow: 'hidden',
-  },
-  inputRow: {
-    minHeight: 42,
-    maxHeight: COMPOSER_MAX_INPUT_HEIGHT + 18,
-    flexDirection: 'row',
-    alignItems: 'center',
-    paddingVertical: 8,
-    paddingHorizontal: theme.buzz.space.sm,
-  },
-  composerMultiline: { alignItems: 'flex-end' },
-  composerFocused: {
-    borderColor: theme.buzz.accent,
-  },
-  viewerPill: { borderWidth: 0, borderRadius: 0, backgroundColor: 'transparent' },
-  // Without the Room's two border insets, the row itself fills the 44dp field.
-  viewerPillRow: { minHeight: 44 },
-  adjuncts: { borderBottomWidth: 1, borderBottomColor: theme.buzz.border },
-  adjunctDivider: { borderTopWidth: 1, borderTopColor: theme.buzz.border },
-  reply: {
-    minHeight: 62,
-    flexDirection: 'row',
-    alignItems: 'center',
-    paddingLeft: 16,
-  },
-  replyCopy: { flex: 1, minWidth: 0, paddingVertical: theme.buzz.space.sm },
-  replyLabel: { ...theme.buzz.type.meta, color: theme.buzz.ledgerQuiet },
-  replyGlyph: { color: theme.buzz.accent },
-  replyHandle: { color: theme.buzz.accent },
-  replyPreview: {
-    ...theme.buzz.type.meta,
-    marginTop: theme.buzz.space.xs,
-    color: theme.buzz.textSecondary,
-  },
-  attachment: {
-    minHeight: 56,
-    flexDirection: 'row',
-    alignItems: 'center',
-    paddingLeft: 16,
-  },
-  attachmentCopy: { flex: 1, minWidth: 0 },
-  attachmentName: {
-    ...theme.buzz.type.body,
-    fontSize: theme.buzz.transcriptCard.rowTitleSize,
-    color: theme.buzz.textPrimary,
-  },
-  attachmentInfo: { flexDirection: 'row', alignItems: 'center', gap: theme.buzz.space.sm },
-  attachmentMeta: {
-    flexShrink: 1,
-    ...theme.buzz.type.machine,
-    fontSize: theme.buzz.transcriptCard.rowKindSize,
-    color: theme.buzz.ledgerGhost,
-  },
-  attachmentFailed: { color: theme.buzz.textPrimary },
-  // The file details truncate. Retry keeps the width of its label.
-  attachmentRetry: { flexShrink: 0 },
-  removeButton: {
-    width: 44,
-    minHeight: 44,
-    alignSelf: 'stretch',
-    alignItems: 'center',
-    justifyContent: 'center',
-  },
-  moreAttachments: { minHeight: 36, justifyContent: 'center', paddingHorizontal: 16 },
-  moreAttachmentsText: { ...theme.buzz.type.meta, color: theme.buzz.accent },
-  attachButton: {
-    width: CONTROL_SIZE,
-    height: CONTROL_SIZE,
-    marginRight: 4,
-    alignItems: 'center',
-    justifyContent: 'center',
-  },
-  dictationTags: {
-    ...theme.buzz.type.body,
-    ...Platform.select({ android: { lineHeight: undefined }, default: {} }),
-    flexShrink: 1,
-    marginRight: theme.buzz.space.xs,
-    color: theme.buzz.textSecondary,
-  } as any,
   input: {
     ...theme.buzz.type.body,
     // The wrapper owns the row's flexible width. Its children sit in Yoga's
@@ -926,7 +704,6 @@ const styles = StyleSheet.create((theme) => ({
       android: { lineHeight: undefined },
       default: { lineHeight: 20 },
     }),
-    color: theme.buzz.textSecondary,
     minHeight: COMPOSER_SINGLE_LINE_INPUT_HEIGHT,
     maxHeight: COMPOSER_MAX_INPUT_HEIGHT,
     paddingVertical: 0,

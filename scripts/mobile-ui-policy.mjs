@@ -25,7 +25,6 @@ const COMPONENT_RULES = new Set(['raw-button', 'custom-row', 'custom-header']);
 export const SHARED_CONTROL_OWNERS = new Set([
   'components/buzz/Button.tsx',
   'components/buzz/ButtonRow.tsx',
-  'components/buzz/ConversationRow.tsx',
   'components/buzz/EmptyState.tsx',
   'components/buzz/ErrorBanner.tsx',
   'components/buzz/HullActionSheet.tsx',

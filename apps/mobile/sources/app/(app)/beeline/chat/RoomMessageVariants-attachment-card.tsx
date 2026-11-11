@@ -9,7 +9,6 @@ import { MESSAGE_REACTION_EMOJIS, type AttachmentReference, type MessageReaction
 import type { AgentPresentation, ChatDisplayMessage } from '@/buzz/room-view-presentation';
 import type { ChannelReferenceIndex, ChannelReferenceTarget } from '@/buzz/channel-reference';
 import { type MessageReplyDisplayTarget } from '@/buzz/message-reply';
-import { displayModel } from '@/buzz/model-display';
 import { currentViewerConversation, subscribeViewerConversation, viewerContextLabel } from '@/buzz/viewer-conversation';
 import { type ConnectorReceipt } from '@/buzz/connector-receipt';
 import { attachmentOpenUrl, formatAttachmentSize } from '@/buzz/chat-attachment';
@@ -22,13 +21,13 @@ import { ArtifactViewerScreen } from '@/components/buzz/ArtifactViewer';
 import { showPictureActions } from '@/buzz/picture-actions';
 import { CORNER_LABEL } from '@/buzz/vocabulary';
 import { CornerGlyph } from '@/components/buzz/CornerGlyph';
-import { CHEVRON_ROW_SIZE, ChevronGlyph } from '@/components/buzz/ChevronGlyph';
 import { ContentTarget } from '@/components/buzz/IndexRow';
 import { Modal } from '@/modal';
 import { openExternalUrl } from '@/utils/open-external-url';
 import { IdentityMark } from '@/components/buzz/IdentityMark';
 import { ALIVE_RING_PAD } from '@/buzz/identity-mark';
 import { styles } from './RoomMessageVariants-ordinary-ledger-message';
+import { FileRow } from '@/ui/screens/transcript/FileRow';
 
 
 
@@ -72,20 +71,10 @@ export function AttachmentCard({
     return (
       <View
         accessibilityLabel={`Expired attachment ${attachment.name}`}
-        style={styles.attachmentCard}
+        style={styles.attachmentTarget}
         testID={`chat-attachment-expired-${attachment.name}`}
       >
-        <View style={styles.attachmentFileGlyph}>
-          <Text style={[styles.attachmentFileGlyphText, styles.attachmentExpired]}>▧</Text>
-        </View>
-        <View style={styles.attachmentCopy}>
-          <Text numberOfLines={1} style={[styles.attachmentName, styles.attachmentExpired]}>
-            {attachment.name}
-          </Text>
-          <Text numberOfLines={1} style={styles.attachmentMeta}>
-            EXPIRED · {metadata}
-          </Text>
-        </View>
+        <FileRow name={attachment.name} meta={`EXPIRED · ${metadata}`} opens={false} quiet />
       </View>
     );
   }
@@ -103,7 +92,7 @@ export function AttachmentCard({
           : undefined
       }
       onPress={open}
-      style={styles.attachmentCard}
+      style={styles.attachmentTarget}
       testID={`chat-attachment-${attachment.name}`}
       {...(isDesktop && attachment.mimeType.startsWith('image/')
         ? ({
@@ -115,29 +104,19 @@ export function AttachmentCard({
           } as any)
         : {})}
     >
-      {image ? (
-        <ArtifactImage
-          attachment={attachment}
-          fit="cover"
-          style={styles.attachmentThumbnail}
-          testID={`chat-attachment-thumbnail-${attachment.name}`}
-        />
-      ) : (
-        <View style={styles.attachmentFileGlyph}>
-          <Text style={styles.attachmentFileGlyphText}>▧</Text>
-        </View>
-      )}
-      <View style={styles.attachmentCopy}>
-        <Text numberOfLines={1} style={styles.attachmentName}>
-          {attachment.name}
-        </Text>
-        <Text numberOfLines={1} style={styles.attachmentMeta}>
-          {metadata}
-        </Text>
-      </View>
-      <View style={styles.attachmentOpenGlyph}>
-        <ChevronGlyph color={styles.attachmentOpenGlyphInk.color} size={CHEVRON_ROW_SIZE} />
-      </View>
+      <FileRow
+        name={attachment.name}
+        meta={metadata}
+        opens
+        leading={image ? (
+          <ArtifactImage
+            attachment={attachment}
+            fit="cover"
+            style={styles.attachmentThumbnail}
+            testID={`chat-attachment-thumbnail-${attachment.name}`}
+          />
+        ) : undefined}
+      />
     </ContentTarget>
   );
 }
@@ -390,10 +369,6 @@ export function SwipeToReply({
 export interface OrdinaryLedgerMessageProps {
   message: ChatDisplayMessage;
   agent?: AgentPresentation;
-  /** The model stamped on the message at generation time, rendered verbatim
-   *  in the agent byline. Absent keeps the plain `AGENT` word — never a live
-   *  roster lookup, which would retro-label old messages with today's setting. */
-  agentModel?: string;
   participantsHydrated: boolean;
   personName?: string;
   /** Current person portrait from the roster. Wins over a cached author snapshot. */
@@ -447,14 +422,6 @@ export interface OrdinaryLedgerMessageProps {
 }
 
 
-/** The byline's quiet role tag carries the model the agent serves — the name
- *  already says who the speaker is, so the model REPLACES the old `AGENT`
- *  label rather than sitting beside it (captain ruling 2026-09-15). An agent
- *  with no known model keeps the plain `AGENT` word. */
-export function agentBylineLabel(model?: string): string {
-  const selectedModel = model?.trim();
-  return selectedModel ? displayModel(selectedModel) : 'AGENT';
-}
 
 
 /**

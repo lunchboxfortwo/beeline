@@ -11,7 +11,7 @@ import { availableAgentMentionCommands, fastModeCommandState, slashVerbQuery, ag
 import { isAgentTurnActive, activeMentionCandidates } from '@/buzz/agent-presence';
 import { sameElementRefs, useStable } from '@/buzz/use-stable';
 import { roomMemberManagementState } from '@/buzz/room-member-management';
-import { type RoomRosterParticipant } from '@/components/buzz/RoomRosterSheet';
+import { type RoomRosterParticipant } from '@/buzz/room-participants';
 import { CHANNEL_MENTION_OPTION, SYSTEM_MENTION_OPTION } from './chat-surface-values';
 
 type Props = [
@@ -32,7 +32,6 @@ type Props = [
   presenceReconnectGrace: Record<string, number>,
   unprojectedMessages: ChatDisplayMessage[],
   participantsHydrated: boolean,
-  rosterVisible: boolean,
   participantPickerVisible: boolean,
   viewerPubkey: string | undefined,
   agentCommandsByScope: Record<string, readonly AgentComposerCommand[]>,
@@ -50,7 +49,7 @@ export function useChatComposerSuggestions([
   roomParticipants, agentPresences, presenceNow, inputSelection, inputText,
   describedRoomParticipants, composerFocused, dismissedMentionKey, isDirectMessage, parentChannelId,
   decodedId, roomClient, workspaceChats, roomSurface, presenceReconnectGrace, unprojectedMessages,
-  participantsHydrated, rosterVisible, participantPickerVisible, viewerPubkey, agentCommandsByScope,
+  participantsHydrated, participantPickerVisible, viewerPubkey, agentCommandsByScope,
   agentFastModeByScope, agentCanLoginByScope, combinedMessages, roomRepository, activeCommunityId,
   setAgentCommandsByScope, setAgentCanLoginByScope, setAgentFastModeByScope,
 ]: Props): [
@@ -78,7 +77,7 @@ export function useChatComposerSuggestions([
   suggestionCount: number,
   mentionMenuKey: string | null,
   channelMenuKey: string | null,
-  memberManagement: { canOpenRoster: boolean; rosterVisible: boolean; pickerVisible: boolean; },
+  memberManagement: { canOpenRoster: boolean; pickerVisible: boolean; },
 ] {
 
   const mentionableAgents = useMemo(
@@ -236,7 +235,6 @@ export function useChatComposerSuggestions([
   const memberManagement = roomMemberManagementState({
     isDirectMessage,
     participantsHydrated,
-    rosterRequested: rosterVisible,
     pickerRequested: participantPickerVisible,
   });
 

@@ -187,16 +187,6 @@ export function createRoomMessageProjector(): RoomMessageProjector {
   };
 }
 
-export type WorkspaceMemberDisplayItem = {
-  peerPubkey: string;
-  peerName: string;
-  peerKind: 'person' | 'agent';
-  avatarUrl?: string;
-  /** The chosen face id; absent → derived from the pubkey. */
-  face?: string;
-  role?: 'owner' | 'admin' | 'member' | 'spectator';
-};
-
 /** Presentation-only row. It is recomputed from server DTO partitions and is never persisted. */
 export type ChatDisplayMessage = {
   id: string;
@@ -276,6 +266,8 @@ export type ChatDisplayMessage = {
   /** Original server ordering for each durable message in a folded row. */
   foldedReadBoundaries?: { id: string; orderAtMs: number }[];
   notificationLifecycleRun?: import('./pr-lifecycle').NotificationLifecycleRun;
+  /** A run of consecutive pills folded into this row (`buzz/transcript-pills.ts`). */
+  pillRun?: ChatDisplayMessage[];
   githubEvent?: NonNullable<RoomViewMessage['githubEvent']>;
   /** Daemon lifecycle facts are server-projected cards, never prose rows. */
   daemonFact?: NonNullable<RoomViewMessage['daemonFact']>;

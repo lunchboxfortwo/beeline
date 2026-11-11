@@ -1,7 +1,7 @@
-import { ContentTarget } from '@/components/buzz/IndexRow';
 import React, { useEffect, useRef } from 'react';
-import { ScrollView, Text, View } from 'react-native';
-import { StyleSheet } from 'react-native-unistyles';
+import { ScrollView } from 'tamagui';
+import { AlertTriangle, AtSign, Check, CornerDownRight, Hash } from 'lucide-react-native';
+import { Glyph } from '@/ui/grammar';
 import { resolveAgentDisplayIdentity } from '@/buzz/agent-display';
 import {
   CHANNEL_MENTION_PUBKEY,
@@ -9,18 +9,18 @@ import {
   SYSTEM_MENTION_PUBKEY,
 } from '@/buzz/room-participants';
 import { channelCornerRoom, type ChannelSuggestion } from '@/buzz/channel-suggestions';
-import { CornerGlyph } from '@/components/buzz/CornerGlyph';
 import { IdentityMark } from '@/components/buzz/IdentityMark';
 import { memberRosterModel, memberRosterSubtitle } from '@/components/buzz/MemberRosterRow';
-import type { RoomRosterParticipant } from '@/components/buzz/RoomRosterSheet';
+import type { RoomRosterParticipant } from '@/buzz/room-participants';
+import { SuggestionCard, SuggestionGlyph, SuggestionRow } from '@/ui/screens/composer/Suggestions';
 
-/** One-line mention row height; also the unit of the scroll cap. */
-export const MENTION_ROW_HEIGHT = 44;
+/** One mention row's height (`SUGGESTION_ROW_HEIGHT`); also the unit of the scroll cap. */
+export const MENTION_ROW_HEIGHT = 56;
 
-/** Keep the highlighted row inside the 3-row (keyboard open) or 5-row scroll window. */
+/** Keep the highlighted row inside the 3-row (keyboard open) or 6-row scroll window. */
 function useHighlightedRowScroll(highlightedIndex: number, keyboardOpen: boolean) {
-  const visibleRows = keyboardOpen ? 3 : 5;
-  const scrollRef = useRef<ScrollView>(null);
+  const visibleRows = keyboardOpen ? 3 : 6;
+  const scrollRef = useRef<{ scrollTo(options: { y: number; animated: boolean }): void } | null>(null);
   const scrollOffset = useRef(0);
 
   useEffect(() => {
@@ -40,10 +40,10 @@ function useHighlightedRowScroll(highlightedIndex: number, keyboardOpen: boolean
 }
 
 /**
- * The composer's @-mention menu. The MENTION label stays fixed; rows scroll
- * under a cap of 3 rows while the keyboard is open (so the text input stays
- * above it) and 5 rows otherwise. As the tag menu, `checkedHandles` marks the
- * agents already tagged with ✓, and a tap toggles the tag.
+ * The composer's @-mention menu, headed "People and agents in #chat". Rows
+ * scroll under a cap of 3 rows while the keyboard is open (so the field stays
+ * above it) and 6 otherwise. As the tag menu, `checkedHandles` marks the
+ * agents already tagged, and a tap toggles the tag.
  */
 export function MentionSuggestionMenu({
   matches,
@@ -53,6 +53,7 @@ export function MentionSuggestionMenu({
   personAvatar,
   onSelect,
   checkedHandles,
+  place,
 }: {
   matches: readonly RoomRosterParticipant[];
   overflow: number;
@@ -61,6 +62,8 @@ export function MentionSuggestionMenu({
   personAvatar: (pubkey: string) => string | undefined;
   onSelect: (participant: RoomRosterParticipant) => void;
   checkedHandles?: ReadonlySet<string>;
+  /** Where the people are: `#beeline`, or "this thread". */
+  place?: string;
 }) {
   const { visibleRows, scrollRef, scrollOffset } = useHighlightedRowScroll(
     highlightedIndex,
@@ -68,21 +71,22 @@ export function MentionSuggestionMenu({
   );
 
   return (
-    <View
-      accessibilityLabel="Mention a Room participant"
-      style={styles.mentionMenu}
+    <SuggestionCard
+      title={`People and agents in ${place ?? 'this chat'}`}
+      label="Mention a chat participant"
       testID="mention-suggestions"
+      overflow={overflow}
+      overflowTestID="mention-suggestion-overflow"
     >
-      <Text style={styles.mentionMenuLabel}>MENTION</Text>
       <ScrollView
         keyboardShouldPersistTaps="handled"
         onScroll={(event) => {
           scrollOffset.current = event.nativeEvent.contentOffset.y;
         }}
-        ref={scrollRef}
+        ref={scrollRef as never}
         scrollEventThrottle={16}
         showsVerticalScrollIndicator={false}
-        style={{ maxHeight: visibleRows * MENTION_ROW_HEIGHT }}
+        maxHeight={visibleRows * MENTION_ROW_HEIGHT}
         testID="mention-suggestion-scroll"
       >
         {matches.map((participant, index) => {
@@ -96,8 +100,8 @@ export function MentionSuggestionMenu({
           const display = participant.agent
             ? resolveAgentDisplayIdentity(participant.pubkey, participant.agent)
             : undefined;
-          // A member row reads like the roster: the handle, with an agent's
-          // model on the right; under it the agent's owner or the person's role.
+          // A member row reads like the roster: the agent's owner and model,
+          // or the person's role.
           const subtitle = reserved
             ? undefined
             : participant.kind === 'agent'
@@ -107,9 +111,17 @@ export function MentionSuggestionMenu({
             participant.kind === 'agent' && !reserved
               ? memberRosterModel({ kind: 'agent', model: participant.model })
               : undefined;
+          const detail = participant.pubkey === CHANNEL_MENTION_PUBKEY
+            ? 'Everyone in this chat'
+            : participant.pubkey === SYSTEM_MENTION_PUBKEY
+              ? SYSTEM_MENTION_LABEL
+              : [subtitle, model].filter(Boolean).join(' · ') || undefined;
           return (
-            <ContentTarget
-              accessibilityLabel={
+            <SuggestionRow
+              key={participant.pubkey}
+              first={index === 0}
+              selected={selected}
+              label={
                 participant.pubkey === SYSTEM_MENTION_PUBKEY
                   ? `${SYSTEM_MENTION_LABEL}, @${participant.handle}`
                   : !reserved
@@ -118,96 +130,49 @@ export function MentionSuggestionMenu({
                         .join(', ')
                     : `${participant.name}, @${participant.handle}, ${participant.kind}`
               }
-              accessibilityRole={checkedHandles ? 'checkbox' : 'button'}
-              accessibilityState={checkedHandles ? { checked } : { selected }}
-              key={participant.pubkey}
+              role={checkedHandles ? 'checkbox' : 'button'}
+              state={checkedHandles ? { checked } : { selected }}
               onPress={() => onSelect(participant)}
-              style={({ pressed }) => [styles.mentionRow, selected && styles.mentionRowSelected, pressed && { opacity: 0.2 }]}
               testID={`mention-suggestion-${participant.handle}`}
-            >
-              {reserved ? (
-                <View style={styles.mentionChannelGlyph}>
-                  <Text style={styles.mentionChannelGlyphText}>
-                    {participant.pubkey === SYSTEM_MENTION_PUBKEY ? '!' : '@'}
-                  </Text>
-                </View>
-              ) : display ? (
-                <IdentityMark
-                  kind="agent"
-                  seed={display.avatarSeed ?? participant.pubkey}
-                  avatarUrl={display.avatarUrl}
-                  face={display.face}
-                  name={display.name}
-                  size={24}
-                />
-              ) : (
-                <IdentityMark
-                  kind="human"
-                  seed={participant.pubkey}
-                  avatarUrl={personAvatar(participant.pubkey)}
-                  face={participant.face}
-                  name={participant.name}
-                  size={24}
-                />
-              )}
-              {!reserved ? (
-                <View style={styles.mentionAgentIdentity}>
-                  <View style={styles.mentionTitleLine}>
-                    <Text style={[styles.mentionName, checked && styles.mentionNameChecked]}>
-                      @{participant.handle}
-                    </Text>
-                    {checked ? (
-                      <Text
-                        style={styles.mentionCheck}
-                        testID={`mention-suggestion-${participant.handle}-checked`}
-                      >
-                        ✓
-                      </Text>
-                    ) : model ? (
-                      <Text numberOfLines={1} style={styles.mentionModel}>
-                        {model}
-                      </Text>
-                    ) : null}
-                  </View>
-                  {subtitle !== undefined ? (
-                    <Text numberOfLines={1} style={styles.mentionHandle}>
-                      {subtitle}
-                    </Text>
-                  ) : null}
-                </View>
-              ) : (
-                <>
-                  <View style={styles.mentionIdentity}>
-                    <Text numberOfLines={1} style={styles.mentionName}>
-                      {participant.pubkey === CHANNEL_MENTION_PUBKEY
-                        ? 'Everyone in this Room'
-                        : SYSTEM_MENTION_LABEL}
-                    </Text>
-                    <Text numberOfLines={1} style={styles.mentionHandle}>
-                      @{participant.handle}
-                    </Text>
-                  </View>
-                  <Text style={styles.mentionKind}>
-                    {participant.pubkey === CHANNEL_MENTION_PUBKEY ? 'ROOM' : 'REPORT'}
-                  </Text>
-                </>
-              )}
-            </ContentTarget>
+              name={`@${participant.handle}`}
+              nameAccent={checked}
+              detail={detail}
+              mark={
+                reserved ? (
+                  <SuggestionGlyph icon={participant.pubkey === SYSTEM_MENTION_PUBKEY ? AlertTriangle : AtSign} />
+                ) : display ? (
+                  <IdentityMark
+                    kind="agent"
+                    seed={display.avatarSeed ?? participant.pubkey}
+                    avatarUrl={display.avatarUrl}
+                    face={display.face}
+                    name={display.name}
+                    size={28}
+                  />
+                ) : (
+                  <IdentityMark
+                    kind="human"
+                    seed={participant.pubkey}
+                    avatarUrl={personAvatar(participant.pubkey)}
+                    face={participant.face}
+                    name={participant.name}
+                    size={28}
+                  />
+                )
+              }
+              trailing={checked ? <Glyph icon={Check} size={16} accent /> : undefined}
+            />
           );
         })}
-        {overflow > 0 && (
-          <Text style={styles.mentionOverflow} testID="mention-suggestion-overflow">
-            AND {overflow} OTHERS
-          </Text>
-        )}
       </ScrollView>
-    </View>
+    </SuggestionCard>
   );
 }
 
 /**
- * The composer's `#` menu: Rooms with the `#` glyph, corners with the corner
- * glyph. Same shell, scroll cap and row height as the @-mention menu.
+ * The composer's `#` menu: chats and this chat's threads ("Chats and
+ * threads"), or one chat's threads after `#chat/` ("Threads in #chat"). Same
+ * card, scroll cap and row height as the @-mention menu.
  */
 export function ChannelSuggestionMenu({
   query,
@@ -230,172 +195,43 @@ export function ChannelSuggestionMenu({
   );
   const cornerRoom = channelCornerRoom(query, matches);
   return (
-    <View
-      accessibilityLabel="Reference a Room or corner"
-      style={styles.mentionMenu}
+    <SuggestionCard
+      title={cornerRoom ? `Threads in #${cornerRoom}` : 'Chats and threads'}
+      label="Reference a chat or thread"
       testID="channel-suggestions"
+      overflow={overflow}
+      overflowTestID="channel-suggestion-overflow"
     >
-      <Text style={styles.mentionMenuLabel}>
-        {cornerRoom ? `CORNERS IN #${cornerRoom.toUpperCase()}` : 'ROOMS AND CORNERS'}
-      </Text>
       <ScrollView
         keyboardShouldPersistTaps="handled"
         onScroll={(event) => {
           scrollOffset.current = event.nativeEvent.contentOffset.y;
         }}
-        ref={scrollRef}
+        ref={scrollRef as never}
         scrollEventThrottle={16}
         showsVerticalScrollIndicator={false}
-        style={{ maxHeight: visibleRows * MENTION_ROW_HEIGHT }}
+        maxHeight={visibleRows * MENTION_ROW_HEIGHT}
       >
         {matches.map((suggestion, index) => {
-          const selected = index === highlightedIndex;
-          const kind = suggestion.kind === 'room' ? 'ROOM' : 'CORNER';
           const subtitle = cornerRoom ? undefined : suggestion.subtitle;
           return (
-            <ContentTarget
-              accessibilityLabel={[`#${suggestion.token}`, subtitle, suggestion.kind]
+            <SuggestionRow
+              key={suggestion.id}
+              first={index === 0}
+              selected={index === highlightedIndex}
+              label={[`#${suggestion.token}`, subtitle, suggestion.kind === 'room' ? 'chat' : 'thread']
                 .filter(Boolean)
                 .join(', ')}
-              accessibilityRole="button"
-              accessibilityState={{ selected }}
-              key={suggestion.id}
+              state={{ selected: index === highlightedIndex }}
               onPress={() => onSelect(suggestion)}
-              style={({ pressed }) => [styles.mentionRow, selected && styles.mentionRowSelected, pressed && { opacity: 0.2 }]}
               testID={`channel-suggestion-${suggestion.token}`}
-            >
-              <View style={styles.mentionChannelGlyph}>
-                {suggestion.kind === 'room' ? (
-                  <Text style={styles.mentionChannelGlyphText}>#</Text>
-                ) : (
-                  <CornerGlyph color={styles.mentionChannelGlyphText.color} size={14} />
-                )}
-              </View>
-              <View style={styles.mentionAgentIdentity}>
-                <Text numberOfLines={1} style={[styles.mentionName, styles.channelToken]}>
-                  #{suggestion.token}
-                </Text>
-                {subtitle ? (
-                  <Text numberOfLines={1} style={styles.mentionHandle}>
-                    {subtitle}
-                  </Text>
-                ) : null}
-              </View>
-              <Text style={styles.mentionKind}>{kind}</Text>
-            </ContentTarget>
+              name={`#${suggestion.token}`}
+              detail={subtitle}
+              mark={<SuggestionGlyph icon={suggestion.kind === 'room' ? Hash : CornerDownRight} />}
+            />
           );
         })}
-        {overflow > 0 && (
-          <Text style={styles.mentionOverflow} testID="channel-suggestion-overflow">
-            AND {overflow} OTHERS
-          </Text>
-        )}
       </ScrollView>
-    </View>
+    </SuggestionCard>
   );
 }
-
-const styles = StyleSheet.create((theme) => {
-  const groknight = theme.buzz;
-  return {
-    mentionMenu: {
-      marginBottom: groknight.space.sm,
-      overflow: 'hidden',
-      borderWidth: 1,
-      borderColor: groknight.borderStrong,
-      borderRadius: groknight.radius,
-      backgroundColor: groknight.bgBase,
-    },
-    mentionMenuLabel: {
-      ...groknight.type.sectionHead,
-      fontFamily: groknight.monoSemibold,
-      paddingHorizontal: groknight.space.sm,
-      paddingVertical: groknight.space.xs,
-      color: groknight.textMuted,
-    },
-    mentionRow: {
-      height: MENTION_ROW_HEIGHT,
-      flexDirection: 'row',
-      alignItems: 'center',
-      gap: groknight.space.sm,
-      paddingHorizontal: groknight.space.sm,
-      borderTopWidth: 1,
-      borderTopColor: groknight.border,
-    },
-    mentionRowSelected: {
-      backgroundColor: groknight.selection,
-    },
-    mentionIdentity: {
-      flex: 1,
-      minWidth: 0,
-      flexDirection: 'row',
-      alignItems: 'center',
-      gap: groknight.space.sm,
-    },
-    mentionAgentIdentity: {
-      flex: 1,
-      minWidth: 0,
-      justifyContent: 'center',
-    },
-    mentionTitleLine: {
-      flexDirection: 'row',
-      alignItems: 'baseline',
-      gap: groknight.space.sm,
-    },
-    mentionModel: {
-      ...groknight.type.machine,
-      flexShrink: 1,
-      marginLeft: 'auto',
-      textAlign: 'right',
-      color: groknight.textMuted,
-    },
-    mentionChannelGlyph: {
-      width: 24,
-      height: 24,
-      alignItems: 'center',
-      justifyContent: 'center',
-      borderWidth: 1,
-      borderColor: groknight.borderStrong,
-      borderRadius: groknight.radius,
-    },
-    mentionChannelGlyphText: {
-      ...groknight.type.meta,
-      fontFamily: groknight.proseSemibold,
-      color: groknight.accent,
-    },
-    mentionName: {
-      ...groknight.type.meta,
-      fontFamily: groknight.proseSemibold,
-      flexShrink: 0,
-      color: groknight.textPrimary,
-    },
-    mentionNameChecked: { color: groknight.accent },
-    mentionCheck: {
-      ...groknight.type.machine,
-      marginLeft: 'auto',
-      color: groknight.accent,
-    },
-    channelToken: {
-      flexShrink: 1,
-    },
-    mentionHandle: {
-      ...groknight.type.machine,
-      flexShrink: 1,
-      color: groknight.textMuted,
-    },
-    mentionKind: {
-      ...groknight.type.sectionHead,
-      fontFamily: groknight.monoSemibold,
-      color: groknight.faint,
-    },
-    mentionOverflow: {
-      ...groknight.type.sectionHead,
-      fontFamily: groknight.monoSemibold,
-      paddingHorizontal: groknight.space.sm,
-      paddingVertical: groknight.space.sm,
-      borderTopWidth: 1,
-      borderTopColor: groknight.border,
-      color: groknight.textMuted,
-    },
-  };
-});

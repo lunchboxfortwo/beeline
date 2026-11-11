@@ -7,6 +7,7 @@ import { StyleSheet, UnistylesRuntime } from 'react-native-unistyles';
 import { boneTheme, obsidianTheme } from '../../sources/theme';
 import { LAYOUT_BREAKPOINTS } from '../../sources/utils/layoutClass';
 import { resumeInitialGitHubInstallation, githubInstallationReturnPath, completeGitHubInstallationRoute } from '../../sources/auth/github-auth-session';
+import { GrammarProvider } from '../../sources/ui/GrammarProvider';
 StyleSheet.configure({ themes: { bone: boneTheme, obsidian: obsidianTheme }, breakpoints: LAYOUT_BREAKPOINTS, settings: { initialTheme: 'bone' } });
 const { RepositoryOnboardingCard } = require('../../sources/app/(app)/beeline/chat/RepositoryOnboardingCard');
 const { Button } = require('../../sources/components/buzz/Button');
@@ -36,4 +37,4 @@ function Root() {
     <Text style={{color:theme==='bone'?'#171717':'#ffffff'}}>{result}</Text>
   </ScrollView></SafeAreaProvider>:null;
 }
-registerRootComponent(Root);
+registerRootComponent(() => <GrammarProvider><Root /></GrammarProvider>);

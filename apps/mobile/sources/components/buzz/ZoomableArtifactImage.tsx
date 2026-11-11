@@ -1,12 +1,11 @@
-import { Button } from '@/components/buzz/Button';
 import React, { useEffect, useRef, useState } from 'react';
-import { PanResponder, Platform, Pressable, Text, View } from 'react-native';
+import { PanResponder, Platform, Pressable, View } from 'react-native';
 import { StyleSheet } from 'react-native-unistyles';
-import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import type { AttachmentReference } from '@beeline/buzz-client';
 
 import { ArtifactImage } from '@/components/buzz/ArtifactMedia';
 import { showPictureActions } from '@/buzz/picture-actions';
+import { ZoomBar } from '@/ui/screens/viewers/ViewerChrome';
 import {
   MAX_IMAGE_ZOOM,
   clampImageZoom,
@@ -29,7 +28,6 @@ export function ZoomableArtifactImage({
   onSwipePhoto?: (direction: -1 | 1) => void;
   testIDPrefix?: string;
 }) {
-  const insets = useSafeAreaInsets();
   const [zoom, setZoom] = useState<ImageZoom>({ scale: 1, x: 0, y: 0 });
   const zoomRef = useRef(zoom);
   const frameRef = useRef<ImageFrame>({ width: 0, height: 0 });
@@ -258,72 +256,20 @@ export function ZoomableArtifactImage({
           />
         </Pressable>
       </View>
-      <View style={[styles.zoomControls, { paddingBottom: insets.bottom + 8 }]}>
-        <Button
-          accessibilityRole="button"
-          accessibilityLabel="Zoom out"
-          accessibilityState={{ disabled: zoom.scale <= 1 }}
-          disabled={zoom.scale <= 1}
-          onPress={() => step(1 / 1.5)}
-          testID={`${testIDPrefix}-zoom-out`}
-          label=""
-          icon={<Text style={styles.zoomText}>{'−'}</Text>}
-          variant="quiet"
-          iconOnly
-          appearance={{ control: styles.zoomButton, label: undefined }}
-        />
-        <Text
-          accessibilityLabel={`Image zoom ${Math.round(zoom.scale * 100)} percent`}
-          style={styles.zoomLevel}
-        >
-          {Math.round(zoom.scale * 100)}%
-        </Text>
-        <Button
-          accessibilityRole="button"
-          accessibilityLabel="Zoom in"
-          accessibilityState={{ disabled: zoom.scale >= MAX_IMAGE_ZOOM }}
-          disabled={zoom.scale >= MAX_IMAGE_ZOOM}
-          onPress={() => step(1.5)}
-          testID={`${testIDPrefix}-zoom-in`}
-          label=""
-          icon={<Text style={styles.zoomText}>{'+'}</Text>}
-          variant="quiet"
-          iconOnly
-          appearance={{ control: styles.zoomButton, label: undefined }}
-        />
-          <Button
-            accessibilityRole="button"
-            accessibilityLabel="Reset image zoom"
-            accessibilityState={{ disabled: zoom.scale === 1 }}
-            disabled={zoom.scale === 1}
-            onPress={() => setImageZoom({ scale: 1, x: 0, y: 0 })}
-            testID={`${testIDPrefix}-zoom-reset`}
-            label={'Reset'}
-            variant="quiet"
-            appearance={{ control: styles.zoomButton, label: styles.zoomResetText }}
-          />
-      </View>
+      <ZoomBar
+        scale={zoom.scale}
+        canZoomIn={zoom.scale < MAX_IMAGE_ZOOM}
+        onZoomOut={() => step(1 / 1.5)}
+        onZoomIn={() => step(1.5)}
+        onReset={() => setImageZoom({ scale: 1, x: 0, y: 0 })}
+        testIDPrefix={testIDPrefix}
+      />
     </View>
   );
 }
 
-const styles = StyleSheet.create((theme) => ({
+const styles = StyleSheet.create(() => ({
   imageViewer: { flex: 1 },
   imageViewport: { flex: 1, overflow: 'hidden' },
   image: { height: '100%', width: '100%' },
-  zoomControls: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'center',
-    paddingVertical: theme.buzz.space.sm,
-  },
-  zoomButton: { minWidth: 44, minHeight: 44, alignItems: 'center', justifyContent: 'center' },
-  zoomText: { ...theme.buzz.type.bodyStrong, color: theme.buzz.textPrimary },
-  zoomLevel: {
-    ...theme.buzz.type.meta,
-    color: theme.buzz.ledgerQuiet,
-    minWidth: 52,
-    textAlign: 'center',
-  },
-  zoomResetText: { ...theme.buzz.type.meta, color: theme.buzz.accent },
 }));

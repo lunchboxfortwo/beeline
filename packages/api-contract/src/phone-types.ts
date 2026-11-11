@@ -496,7 +496,14 @@ export type NeedsYouApprovalKind =
   | 'squire'
   | 'choice'
   | 'connector'
-  | 'sign-in';
+  | 'sign-in'
+  /**
+   * A corner's question asking the viewer, a Workspace owner or admin, to
+   * approve merging that corner's open pull request. Approve is the phone's
+   * `approveCornerMerge` on the cell's `roomId`; it carries no action, so an
+   * older phone shows it as a question it can open.
+   */
+  | 'merge';
 
 
 /** An existing decision operation, projected only after its server authority check. */
@@ -532,9 +539,26 @@ export type NeedsYouApprovalView = {
   readonly actions?: readonly NeedsYouActionView[];
   /** Shared grant details, shown before its folded script disclosure. */
   readonly purpose?: string;
+  /** A shared grant's details, or a Trusty Squire card's own facts (card, merchant, amount). */
   readonly facts?: readonly { readonly label: string; readonly value: string }[];
   /** Full script bytes bound to the first grant, available on request. */
   readonly script?: { readonly path: string; readonly contents: string };
+  /** A merge ask's pull request, from the corner's recorded lifecycle; counts only when recorded. */
+  readonly pullRequest?: {
+    readonly number: number;
+    readonly title: string;
+    readonly url: string;
+    readonly additions?: number;
+    readonly deletions?: number;
+    readonly files?: number;
+    readonly checks?: {
+      readonly status: 'pending' | 'passing' | 'failing' | 'unknown';
+      readonly total?: number;
+      readonly failing?: number;
+    };
+  };
+  /** The asking message's first image attachment, shown full width on the card. */
+  readonly image?: AttachmentReference;
 };
 
 

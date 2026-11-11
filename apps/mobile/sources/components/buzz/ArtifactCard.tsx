@@ -1,7 +1,7 @@
 import { appReadErrorCopy } from '@/buzz/app-error-copy';
 import { useArtifactRecoveryGeneration } from '@/buzz/use-artifact-recovery';
-import { ContentTarget, IndexRow, InlineRow } from './IndexRow';
-import { Button } from '@/components/buzz/Button';
+import { ContentTarget, IndexRow } from './IndexRow';
+import { ArtifactCardFrame, ArtifactFileRow } from '@/ui/screens/transcript/cards/ArtifactCardFrame';
 import React, { useCallback, useEffect, useState } from 'react';
 import { Image, Platform, Pressable, Text, View } from 'react-native';
 import { StyleSheet } from 'react-native-unistyles';
@@ -19,7 +19,6 @@ import {
   releaseArtifactImageSource,
   subscribeArtifactBytesPurge,
   fetchArtifactText,
-  openArtifactInBrowserOrExplain,
 } from '@/buzz/artifact-link';
 import { ArtifactDocumentPreview } from './ArtifactDocumentPreview';
 import { formatAttachmentSize } from '@/buzz/chat-attachment';
@@ -101,13 +100,8 @@ export const ArtifactCard = React.memo(function ArtifactCard({
     isDesktop ? 'desktop' : Platform.OS === 'ios' ? 'ios' : 'android',
   );
   const title = activeAttachment.title ?? activeAttachment.name;
-  const kindWord = format === 'game' ? 'Interactive'
-    : format === 'document' ? activeAttachment.mimeType.toLowerCase() : format;
+  const kindWord = artifactKindWord(activeAttachment.mimeType, format);
   const kindLine = `${activeAuthorHandle ? `@${activeAuthorHandle.replace(/^@/, '')} · ` : ''}${kindWord} · ${formatAttachmentSize(activeAttachment.size)}`;
-  const openInBrowser = useCallback(
-    () => void openArtifactInBrowserOrExplain(activeAttachment),
-    [activeAttachment],
-  );
   const openFull = useCallback(() => {
     openArtifactViewer(activeAttachment, isDesktop, currentViewerConversation()?.roomId,
       activeAuthorHandle, isPhotoGroup ? photoAttachments : undefined);
@@ -116,37 +110,25 @@ export const ArtifactCard = React.memo(function ArtifactCard({
   // What is left external is what nothing on the device can paint — a ZIP, an
   // octet-stream, anything unrecognized. Those keep the file-style row and the
   // signed browser link, which is the only way to reach their contents.
+  // What nothing on the device can paint (a ZIP, an octet-stream) is one row;
+  // the viewer says “Preview unavailable” and offers Open in browser.
   if (capabilities.preview === 'external') {
-    const actions =
-      capabilities.viewer === 'external' ? (['browser'] as const) : (['browser', 'open'] as const);
     return (
-      <ArtifactCardShell
+      <ArtifactFileRow
         title={title}
         kindLine={kindLine}
-        actions={actions}
-        onOpenInBrowser={openInBrowser}
-        onOpenFull={openFull}
+        onOpen={openFull}
         testID={`artifact-document-${activeAttachment.name}`}
-      >
-        <View style={styles.docRow} testID="artifact-document-body">
-          <Text style={styles.docGlyph}>▧</Text>
-          <Text numberOfLines={1} style={styles.docName}>
-            {activeAttachment.name} · {formatAttachmentSize(activeAttachment.size)}
-          </Text>
-        </View>
-      </ArtifactCardShell>
+      />
     );
   }
   return (
-    <ArtifactCardShell
+    <ArtifactCardFrame
       title={title}
       kindLine={kindLine}
-      actions={['browser', 'open']}
-      onOpenInBrowser={openInBrowser}
-      onOpenFull={openFull}
+      onOpen={openFull}
       testID={isPhotoGroup ? 'artifact-photo-group' : `artifact-${format}-${activeAttachment.name}`}
-    >
-      <ContentTarget
+      preview={<ContentTarget
         accessibilityLabel={`Open ${title} full screen`}
         accessibilityRole="button"
         onPress={openFull}
@@ -223,69 +205,18 @@ export const ArtifactCard = React.memo(function ArtifactCard({
             format={format === 'pdf' ? 'pdf' : format === 'svg' ? 'svg' : 'html'}
           />
         )}
-      </ContentTarget>
-    </ArtifactCardShell>
+      </ContentTarget>}
+    />
   );
 });
 
-/** Shared shell: preview body, caption, footer — the mock 1b grammar. */
-function ArtifactCardShell({
-  title,
-  kindLine,
-  actions,
-  onOpenInBrowser,
-  onOpenFull,
-  children,
-  testID,
-}: {
-  title: string;
-  kindLine: string;
-  actions: readonly ('browser' | 'open')[];
-  onOpenInBrowser(): void;
-  onOpenFull(): void;
-  children: React.ReactNode;
-  testID: string;
-}) {
-  return (
-    <View style={styles.card} testID={testID}>
-      {children}
-      <View style={styles.caption}>
-        <Text numberOfLines={1} style={styles.captionTitle} testID="artifact-title">
-          {title}
-        </Text>
-        <Text numberOfLines={1} style={styles.captionKind} testID="artifact-kind-line">
-          {kindLine}
-        </Text>
-      </View>
-      <InlineRow style={styles.footer}>
-        {actions.includes('browser') ? (
-          <Button
-            accessibilityLabel="Open in browser"
-            accessibilityRole="link"
-            onPress={onOpenInBrowser}
-            testID="artifact-open-browser"
-            label="Open in browser"
-            destination="external"
-            variant="quiet"
-            appearance={{ control: undefined, label: styles.footerQuiet }}
-          />
-        ) : null}
-        <View style={styles.footerSpacer} />
-        {actions.includes('open') ? (
-          <Button
-            accessibilityLabel="Open artifact"
-            accessibilityRole="link"
-            onPress={onOpenFull}
-            testID="artifact-open"
-            label="Open"
-            destination="screen"
-            variant="quiet"
-            appearance={{ control: undefined, label: styles.footerPrimary }}
-          />
-        ) : null}
-      </InlineRow>
-    </View>
-  );
+/** “PNG”, “PDF”, “HTML”, “Interactive”, or a whole document type (“TEXT/CSV”). */
+export function artifactKindWord(mimeType: string, format: ReturnType<typeof artifactFormat>): string {
+  if (format === 'game') return 'Interactive';
+  const mime = mimeType.toLowerCase().split(';')[0]!.trim();
+  if (format === 'document') return mime.toUpperCase();
+  const subtype = mime.split('/')[1]?.split('+')[0] ?? format;
+  return (subtype === 'plain' ? 'text' : subtype).toUpperCase();
 }
 
 type SandboxPreviewFormat = 'html' | 'svg' | 'pdf';
@@ -375,22 +306,8 @@ export function ArtifactMarkdownPreview({ attachment }: { attachment: Attachment
 
 const styles = StyleSheet.create((theme) => ({
   failureInset: { paddingHorizontal: theme.buzz.roomList.edge },
-  // The TranscriptCard frame (DESIGN.md → Transcript cards), read from the
-  // same tokens: radius 10, 1 px borderStrong, no fill of its own.
-  card: {
-    minWidth: 0,
-    width: '100%',
-    marginTop: theme.buzz.transcriptCard.marginTop,
-    borderWidth: 1,
-    borderColor: theme.buzz.borderStrong,
-    borderRadius: theme.buzz.transcriptCard.cornerRadius,
-    overflow: 'hidden',
-  },
   previewPress: { minWidth: 0 },
-  preview: {
-    height: ARTIFACT_MAX_PREVIEW_HEIGHT,
-    backgroundColor: theme.buzz.bgHighlight,
-  },
+  preview: { height: ARTIFACT_MAX_PREVIEW_HEIGHT },
   previewImage: { width: '100%', height: '100%' },
   photoNavigation: {
     position: 'absolute',
@@ -435,47 +352,8 @@ const styles = StyleSheet.create((theme) => ({
     height: ARTIFACT_MAX_PREVIEW_HEIGHT,
     alignItems: 'center',
     justifyContent: 'center',
-    backgroundColor: theme.buzz.bgHighlight,
-  },
-  docRow: {
-    minHeight: 58,
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: theme.buzz.space.sm,
-    paddingHorizontal: theme.buzz.transcriptCard.side,
   },
   docGlyph: { ...theme.buzz.type.body, color: theme.buzz.steel },
-  docName: {
-    ...theme.buzz.type.body,
-    color: theme.buzz.textPrimary,
-    flex: 1,
-    minWidth: 0,
-  },
-  caption: {
-    flexDirection: 'row',
-    alignItems: 'baseline',
-    gap: theme.buzz.space.sm,
-    paddingHorizontal: theme.buzz.transcriptCard.side,
-    paddingTop: theme.buzz.space.sm,
-  },
-  captionTitle: {
-    ...theme.buzz.type.bodyStrong,
-    color: theme.buzz.textPrimary,
-    flexShrink: 1,
-  },
-  captionKind: { ...theme.buzz.type.machine, color: theme.buzz.ledgerQuiet },
-  footer: {
-    minHeight: theme.buzz.transcriptCard.footerMinHeight,
-    flexDirection: 'row',
-    alignItems: 'center',
-    paddingHorizontal: theme.buzz.transcriptCard.side,
-    paddingVertical: theme.buzz.transcriptCard.footerVertical,
-    borderTopWidth: 1,
-    borderTopColor: theme.buzz.border,
-  },
-  footerSpacer: { flex: 1 },
-  footerQuiet: { ...theme.buzz.type.body, color: theme.buzz.ledgerQuiet },
-  footerPrimary: { ...theme.buzz.type.body, color: theme.buzz.accent },
 }));
 
 // Referenced by tests and the cache module's key derivation.

@@ -260,8 +260,7 @@ const styles = StyleSheet.create((theme) => ({
     borderBottomWidth: StyleSheet.hairlineWidth,
     borderBottomColor: theme.buzz.border,
   },
-  // The same rail + copy treatment as the corner's own objective line
-  // (components/buzz/CornerObjectiveLine.tsx).
+  // A rail + secondary copy, like a thread's objective.
   summaryLine: {
     flexDirection: 'row',
     alignItems: 'flex-start',

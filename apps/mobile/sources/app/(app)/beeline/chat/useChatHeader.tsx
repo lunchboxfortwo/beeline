@@ -1,23 +1,20 @@
-import { appErrorCopy } from '@/buzz/app-error-copy';
 import React, { useCallback, useMemo } from 'react';
 import { TextInput } from 'react-native';
-import * as Clipboard from 'expo-clipboard';
 import { router } from 'expo-router';
-import { loadBuzzIdentity } from '@/auth/buzz-identity-storage';
-import { BuzzRigTransport } from '@/sync/transport';
 import { type ChatListItem } from '@beeline/buzz-client';
 import { directMessageTitle } from '@beeline/api-contract/phone';
 import { scheduleAnimationFrame } from '@/buzz/host-scheduler';
 import { planComposerFill, type ComposerMention } from '@/buzz/composer-fill';
 import { roomStarterIntro, roomStarterPrompts } from '@/buzz/starter-prompts';
-import { agentPairingCommand } from '@/buzz/agent-pairing-command';
 import { ROOM_LABEL } from '@/buzz/vocabulary';
 import { resolveAgentDisplayIdentity } from '@/buzz/agent-display';
 import { directMessageHeaderIdentity } from '@/buzz/member-display';
 import { directMessageAgentHeaderMeta, directMessageHeaderPresence } from '@/buzz/direct-message-header-presence';
 import { channelHeaderTitle, type ChannelKind } from '@/buzz/corner-session';
 import { type EmptyLedgerVariant } from '@/components/buzz/EmptyLedgerState';
-import type { ChannelHeaderKind } from '@/buzz/channel-header-title';
+import { isConnectorLogoUrl } from '@beeline/api-contract/phone';
+import { SYSTEM_IDENTITY_PUBKEY } from '@/buzz/system-identity';
+import type { DirectMessagePeerMark } from './ChatSurfaceHeader';
 
 type Props = [
   parentChannelId: string | undefined,
@@ -42,14 +39,8 @@ type Props = [
   setInputText: (update: string | ((previous: string) => string)) => void,
   setInputSelection: React.Dispatch<React.SetStateAction<{ start: number; end: number; }>>,
   activeCommunityId: string | null,
-  agentPairBusy: boolean,
   viewerIsAgent: boolean,
   setAgentConnectVisible: React.Dispatch<React.SetStateAction<boolean>>,
-  setAgentPairCommand: React.Dispatch<React.SetStateAction<string | null>>,
-  setAgentPairError: React.Dispatch<React.SetStateAction<string | null>>,
-  setAgentPairBusy: React.Dispatch<React.SetStateAction<boolean>>,
-  transport: BuzzRigTransport | null,
-  setSessionTransport: (transport: BuzzRigTransport) => void,
   canManageWorkspace: boolean,
   setMembershipError: React.Dispatch<React.SetStateAction<string | null>>,
   setParticipantPickerKind: React.Dispatch<React.SetStateAction<"agent" | "person" | null>>,
@@ -62,8 +53,7 @@ export function useChatHeader([
   isDirectMessage, userPubkey, directMessage, personProfileByPubkey, directMessageListItem,
   agentByPubkey, presenceNow, workspaceRoster, isReadOnlyDirectMessage, composerRef, inputTextRef,
   selectedAgentMentionsRef, selectedMentionsRef, setInputText, setInputSelection, activeCommunityId,
-  agentPairBusy, viewerIsAgent, setAgentConnectVisible, setAgentPairCommand, setAgentPairError,
-  setAgentPairBusy, transport, setSessionTransport, canManageWorkspace, setMembershipError,
+  viewerIsAgent, setAgentConnectVisible, canManageWorkspace, setMembershipError,
   setParticipantPickerKind, openWorkspaceRoster, setParticipantPickerVisible,
 ]: Props): [
   emptyLedgerVariant: EmptyLedgerVariant,
@@ -75,7 +65,7 @@ export function useChatHeader([
   starterPrompts: { lead: string; detail: string; testID: string; onPress: () => void; }[] | undefined,
   starterIntro: string | undefined,
   storedRoomName: string,
-  headerTitleKind: ChannelHeaderKind,
+  headerTitleKind: 'room' | 'dm' | 'corner',
   displayHeaderTitle: string | null,
   dmPeerPubkey: string | undefined,
   dmPeerIdentity: import("@beeline/api-contract/phone").RoomViewIdentity | undefined,
@@ -85,7 +75,7 @@ export function useChatHeader([
   headerTitle: string | null,
   closeAgentConnect: () => void,
   connectAgent: () => Promise<void>,
-  copyPairCommand: (command: string) => Promise<void>,
+  dmPeerMark: DirectMessagePeerMark | undefined,
 ] {
 
   // `null` means "show a skeleton": the channel kind or its name is still
@@ -162,6 +152,24 @@ export function useChatHeader([
         )
       : dmPeerPresence;
 
+  // The DM header's mark: the peer, except a read-only announcement channel
+  // that is neither the system account nor a connector with its own logo.
+  const dmConnectorAvatar = dmPeerIdentity?.avatar ?? directMessageListItem?.directMessage?.peer.avatar;
+  const dmPeerMark: DirectMessagePeerMark | undefined =
+    isDirectMessage && dmPeerPubkey &&
+    !(isReadOnlyDirectMessage && dmPeerPubkey !== SYSTEM_IDENTITY_PUBKEY && !isConnectorLogoUrl(dmConnectorAvatar))
+      ? {
+          kind: dmPeerAgentDisplay || dmPeerIdentity?.kind === 'agent' ? 'agent' : 'human',
+          seed: dmPeerAgentDisplay?.avatarSeed ?? dmPeerPubkey,
+          ...((dmPeerAgentDisplay?.avatarUrl ?? dmConnectorAvatar ?? dmPeerProfile?.avatar)
+            ? { avatarUrl: dmPeerAgentDisplay?.avatarUrl ?? dmConnectorAvatar ?? dmPeerProfile?.avatar }
+            : {}),
+          ...((dmPeerAgentDisplay?.face ?? dmPeerIdentity?.face ?? dmPeerProfile?.face)
+            ? { face: dmPeerAgentDisplay?.face ?? dmPeerIdentity?.face ?? dmPeerProfile?.face }
+            : {}),
+        }
+      : undefined;
+
   const dmAnnouncementAuthor = dmPeerPubkey
     ? roomSurface?.messages.find((message) => message.author.pubkey === dmPeerPubkey)?.author
     : undefined;
@@ -194,7 +202,7 @@ export function useChatHeader([
   // peer is known, which the cached roster usually already answers.
   const displayHeaderTitle = dmPeerPubkey ? displayRoomName : headerTitle;
 
-  const headerTitleKind: ChannelHeaderKind = isCorner ? 'corner' : dmPeerPubkey ? 'dm' : 'room';
+  const headerTitleKind: 'room' | 'dm' | 'corner' = isCorner ? 'corner' : dmPeerPubkey ? 'dm' : 'room';
 
   const emptyLedgerVariant: EmptyLedgerVariant = isCorner
     ? 'corner'
@@ -245,41 +253,15 @@ export function useChatHeader([
     });
   }, [fillComposer, firstRoomAgent, focusComposer]);
 
-  // The same minted pairing command the Room deck and the create wizard show,
-  // in the same sheet: a Room with no agent has nobody to ask yet.
+  // A Room with no agent has nobody to ask yet: the People tab's Add an agent
+  // sheet opens here (it mints the pairing command itself).
   const connectAgent = useCallback(async () => {
-    if (!activeCommunityId || agentPairBusy || viewerIsAgent) return;
+    if (!activeCommunityId || viewerIsAgent) return;
     setAgentConnectVisible(true);
-    setAgentPairCommand(null);
-    setAgentPairError(null);
-    setAgentPairBusy(true);
-    try {
-      let pairingTransport = transport;
-      if (!pairingTransport) {
-        const identity = await loadBuzzIdentity();
-        if (!identity) throw new Error('Beeline identity is unavailable');
-        pairingTransport = new BuzzRigTransport(identity);
-        setSessionTransport(pairingTransport);
-      }
-      const pairing = await (
-        await pairingTransport.ensureClient()
-      ).createAgentPairingCode(activeCommunityId);
-      setAgentPairCommand(agentPairingCommand(pairing.code));
-    } catch (reason) {
-      setAgentPairError(appErrorCopy(reason, `Could not create agent invite.`));
-    } finally {
-      setAgentPairBusy(false);
-    }
-  }, [activeCommunityId, agentPairBusy, setSessionTransport, transport, viewerIsAgent]);
+  }, [activeCommunityId, viewerIsAgent]);
 
   const closeAgentConnect = useCallback(() => {
     setAgentConnectVisible(false);
-    setAgentPairCommand(null);
-    setAgentPairError(null);
-  }, []);
-
-  const copyPairCommand = useCallback(async (command: string) => {
-    await Clipboard.setStringAsync(command);
   }, []);
 
   const starterPromptDefs = useMemo(() => {
@@ -334,6 +316,6 @@ export function useChatHeader([
     emptyLedgerVariant, displayRoomName, roomName, firstRoomAgent, startCornerMessage,
     focusComposer, starterPrompts, starterIntro, storedRoomName, headerTitleKind,
     displayHeaderTitle, dmPeerPubkey, dmPeerIdentity, dmPeerAgentDisplay, dmPeerProfile,
-    dmHeaderPresence, headerTitle, closeAgentConnect, connectAgent, copyPairCommand,
+    dmHeaderPresence, headerTitle, closeAgentConnect, connectAgent, dmPeerMark,
   ];
 }

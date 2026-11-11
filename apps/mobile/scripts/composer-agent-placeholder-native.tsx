@@ -11,6 +11,7 @@ import { OrdinaryLedgerMessage } from '../sources/app/(app)/beeline/chat/RoomMes
 import { GestureHandlerRootView } from 'react-native-gesture-handler';
 import { useUntaggedMessageHints } from '../sources/buzz/use-untagged-message-hints';
 import { resolveComposerMentions } from '../sources/buzz/room-participants';
+import { GrammarProvider } from '../sources/ui/GrammarProvider';
 
 StyleSheet.configure({ themes: { bone: boneTheme, boneSmall: boneSmallTheme, boneLarge: boneLargeTheme,
   obsidian: obsidianTheme, obsidianSmall: obsidianSmallTheme, obsidianLarge: obsidianLargeTheme },
@@ -82,4 +83,4 @@ function Proof() {
       onChangeText={setValue} onSend={() => send(value)} onContentSizeChange={() => {}} />
   </ScrollView>;
 }
-registerRootComponent(() => <GestureHandlerRootView style={{ flex: 1 }}><Proof /></GestureHandlerRootView>);
+registerRootComponent(() => <GestureHandlerRootView style={{ flex: 1 }}><GrammarProvider><Proof /></GrammarProvider></GestureHandlerRootView>);

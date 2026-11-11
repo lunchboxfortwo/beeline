@@ -24,6 +24,7 @@ import { GestureHandlerRootView } from 'react-native-gesture-handler';
 import { SidebarNavigator } from '@/components/SidebarNavigator';
 import { AppState, View, Platform } from 'react-native';
 import { ModalProvider } from '@/modal';
+import { GrammarProvider } from '@/ui/GrammarProvider';
 import { WarmComputerSessionHost } from '@/components/buzz/ComputerSession';
 import { PostHogProvider } from 'posthog-react-native';
 import { tracking } from '@/track/tracking';
@@ -401,6 +402,7 @@ export default function RootLayout() {
         >
           <UpdateProvider active={drawn}>
             <ThemeProvider value={navigationTheme}>
+            <GrammarProvider>
               <StatusBarProvider />
               {drawn && <BackgroundEffects />}
               <StoreUpdateGate fontsReady={initialized} active={drawn}>
@@ -416,6 +418,7 @@ export default function RootLayout() {
               </ModalProvider>
               <UpdateReadyPrompt />
               </StoreUpdateGate>
+            </GrammarProvider>
             </ThemeProvider>
           </UpdateProvider>
         </GestureHandlerRootView>

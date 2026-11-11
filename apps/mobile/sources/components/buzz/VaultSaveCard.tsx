@@ -5,7 +5,7 @@ import { readVaultSaveCard, type VaultSaveCard as Card } from '@beeline/api-cont
 import { TranscriptCard } from './TranscriptCard';
 import { HullDialogInput } from './HullDialog';
 import { Button } from './Button';
-import { IdentityMark } from './IdentityMark';
+import { AgentCardLine } from './AgentApprovalCard';
 import { monolithSession } from '@/auth/monolith-session';
 import { getBuzzRuntimeConfig } from '@/buzz/runtime-config';
 
@@ -56,13 +56,16 @@ export function VaultSaveCard({
     });
     return () => listener.remove();
   }, []);
+  // The asking agent's transcript line carries the card (build spec, chat-milo-cards).
+  const line = (node: React.ReactNode) => (
+    <AgentCardLine sender={{ name: agentName, stamp: stamp ?? '', mark: { kind: 'agent', seed: card.agentId } }}>{node}</AgentCardLine>
+  );
   if (!isOwner && !settled)
-    return (
+    return line(
       <TranscriptCard
         tier="record"
         title={`${agentName} wants a vault entry`}
         subline={`waiting for @${card.ownerName}`}
-        stamp={stamp}
         testID="vault-save-waiting"
       />
     );
@@ -105,14 +108,12 @@ export function VaultSaveCard({
   const time = card.savedAt
     ? new Date(card.savedAt * 1000).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })
     : null;
-  return (
+  return line(
     <TranscriptCard
       tier={canType ? 'ask' : 'record'}
       title={`${agentName} wants a ${card.service} ${card.authStrategy === 'username_password' ? 'login' : 'entry'}`}
-      stamp={stamp}
       wrapTitle
       decisionNote
-      identity={<IdentityMark kind="agent" seed={card.agentId} size={26} name={agentName} />}
       subline={isOwner ? 'to your vault · for you' : `to @${card.ownerName}'s vault`}
       facts={[
         { label: 'For', value: card.purpose },
@@ -134,21 +135,21 @@ export function VaultSaveCard({
         canType
           ? [
               {
-                label: 'Not now',
-                dismiss: true,
-                onPress: () => {
-                  setValues({});
-                  setShown({});
-                  setDismissed(true);
-                },
-              },
-              {
-                label: 'Save to vault',
+                label: 'Approve',
                 primary: true,
                 loading: busy,
                 disabled: busy || card.fields.some((f) => !values[f.name]?.length),
                 onPress: () => {
                   void submit();
+                },
+              },
+              {
+                label: 'Deny',
+                secondary: true,
+                onPress: () => {
+                  setValues({});
+                  setShown({});
+                  setDismissed(true);
                 },
               },
             ]
@@ -210,7 +211,7 @@ export function VaultSaveCard({
 }
 
 const styles = StyleSheet.create(({ buzz }) => ({
-  fields: { gap: buzz.space.md, paddingHorizontal: buzz.space.md, paddingBottom: buzz.space.md },
+  fields: { gap: buzz.space.md },
   field: { gap: buzz.space.sm },
   label: { ...buzz.type.meta, color: buzz.textPrimary },
   note: { ...buzz.type.meta, color: buzz.textMuted },

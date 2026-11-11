@@ -53,14 +53,8 @@ vi.mock('@react-native-async-storage/async-storage', () => ({ default: {
   removeItem: vi.fn(async (key: string) => { storedReturn.delete(key); }),
 } }));
 
-vi.mock('@/components/buzz/Button', async () => {
-  const R = await import('react');
-  // The one Button, as a host press target carrying its label.
-  return {
-    Button: ({ label, ...props }: any) =>
-      R.createElement('TouchableOpacity', { ...props, label }, R.createElement('Text', null, label)),
-  };
-});
+vi.mock('tamagui', async () => (await import('@/ui/screens/transcript/grammar-hosts.test-support')).tamaguiHosts());
+vi.mock('lucide-react-native', async () => (await import('@/ui/screens/transcript/grammar-hosts.test-support')).lucideHosts());
 vi.mock('react-native', async () => {
   const ReactModule = await import('react');
   const host = (name: string) => (props: any) =>
@@ -84,20 +78,6 @@ vi.mock('react-native-safe-area-context', () => ({
   useSafeAreaInsets: () => ({ top: 0, right: 0, bottom: 0, left: 0 }),
 }));
 
-vi.mock('@/components/buzz/ConnectProgress', async () => {
-  const ReactModule = await import('react');
-  const host = (name: string) => (props: any) => ReactModule.createElement(name, props);
-  return { RingSpinner: host('RingSpinner'), ConnectStepDot: host('ConnectStepDot'),
-    ConnectStepBar: host('ConnectStepBar'), LoadingBar: host('LoadingBar') };
-});
-
-vi.mock('@/components/buzz/PageHeader', async () => {
-  const ReactModule = await import('react');
-  return {
-    PageHeader: (props: any) => ReactModule.createElement('PageHeader', props),
-  };
-});
-
 vi.mock('@/components/buzz/sandbox-webview', async () => {
   const ReactModule = await import('react');
   return { useSandboxWebView: () => (props: any) => ReactModule.createElement('WebView', props) };
@@ -108,6 +88,7 @@ vi.mock('@/buzz/workbench-source', () => ({
 }));
 
 import ConnectorSignInScreen from './connect-signin';
+import { ScreenHeader } from '@/ui/grammar';
 import * as WebBrowser from 'expo-web-browser';
 import { router } from 'expo-router';
 import { Platform } from 'react-native';
@@ -160,7 +141,7 @@ describe('ConnectorSignInScreen', () => {
     let renderer!: ReactTestRenderer;
     try {
       await act(async () => { renderer = create(<ConnectorSignInScreen />); });
-      expect(JSON.stringify(renderer.toJSON())).toContain('The sign-in page expired. Retry.');
+      expect(renderer.root.findByProps({ testID: 'signin-error-line' }).props.children).toContain('The sign-in page expired. Retry.');
       expect(renderer.root.findAllByProps({ testID: 'signin-open-external' })).toHaveLength(0);
       readInstallState.mockResolvedValue({ connected: false, steps: [],
         signIn: { method: 'oauth', url: 'https://trustysquire.ai/install?token=fresh' } });
@@ -211,7 +192,7 @@ describe('ConnectorSignInScreen', () => {
       expect(readInstallState).toHaveBeenCalledOnce();
       await act(async () => refuse(new Error('Request deadline exceeded')));
       expect(renderer.root.findAllByProps({ testID: 'signin-retry' })).toHaveLength(0);
-      expect(renderer.root.findByType('PageHeader').props.title).toBe('Sign in to Google');
+      expect(renderer.root.findByType(ScreenHeader).props.title).toBe('Sign in to Google');
       await act(async () => {
         for (const listener of liveListeners) listener({ monolithLive: { type: 'invalidate', roomId: '', reason: 'reconnect' } });
       });
@@ -453,13 +434,13 @@ describe('ConnectorSignInScreen', () => {
     completeAppSignIn.mockRejectedValueOnce(new Error('Sign-in was denied'));
     let renderer!: ReactTestRenderer;
     await act(async () => { renderer = create(React.createElement(ConnectorSignInScreen)); await Promise.resolve(); });
-    expect(JSON.stringify(renderer.toJSON())).toContain('Sign-in was denied');
+    expect(renderer.root.findByProps({ testID: 'app-sign-in-error' }).props.children).toContain('Sign-in was denied');
     expect(router.replace).not.toHaveBeenCalled();
   });
 
   it('keeps an ordinary helper sign-in in the existing Workbench overlay', async () => {
     let renderer!: ReactTestRenderer;
     await act(async () => { renderer = create(React.createElement(ConnectorSignInScreen)); });
-    expect(renderer.root.findByProps({ testID: 'signin-header' }).props.title).toBe('Sign in to Tailscale');
+    expect(renderer.root.findByType(ScreenHeader).props.title).toBe('Sign in to Tailscale');
   });
 });

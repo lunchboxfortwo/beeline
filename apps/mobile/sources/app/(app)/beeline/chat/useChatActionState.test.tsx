@@ -25,8 +25,8 @@ it('guards corner creation without redrawing the departing conversation', async 
   function Fixture() {
     renders++;
     const state = useChatActionState(['room', 'viewer', null, { current: '' }, '', vi.fn(), vi.fn(), vi.fn(), vi.fn(), { current: null }]);
-    const props = [false, {}, 'Room', vi.fn(), vi.fn(), false, vi.fn(), state[46], false, false,
-      { createHumanCorner }, state[47], undefined, 'room', false, vi.fn(), vi.fn(), null, 'Room'];
+    const props = [false, {}, 'Room', vi.fn(), vi.fn(), false, vi.fn(), state[37], false, false,
+      { createHumanCorner }, state[38], undefined, 'room', false, vi.fn(), vi.fn(), null, 'Room'];
     [, , open] = useChatCornerActions(props as unknown as Parameters<typeof useChatCornerActions>[0]);
     return null;
   }
@@ -50,7 +50,7 @@ it('warms the parent only when its corner actions are opened', () => {
   function Fixture() {
     const surface = { room: { parentId: 'parent' } } as unknown as Parameters<typeof useChatActionState>[0][2];
     const state = useChatActionState(['corner', 'viewer', surface, { current: '' }, '', vi.fn(), vi.fn(), vi.fn(), vi.fn(), { current: null }]);
-    show = state[58];
+    show = state[49];
     return null;
   }
   let renderer!: ReturnType<typeof create>;

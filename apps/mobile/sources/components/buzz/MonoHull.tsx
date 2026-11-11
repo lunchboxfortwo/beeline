@@ -23,10 +23,8 @@ import Animated, {
   type SharedValue,
 } from 'react-native-reanimated';
 import { hasMessageRevealed, markMessageRevealed } from '@/buzz/message-reveal';
-import type { CornerVisualState } from '@/buzz/corners';
 
 export const motionTokens = {
-  reveal: 176,
   confirm: 240,
   loaderFrame: 133,
   liveCycle: 1120,
@@ -159,121 +157,6 @@ function LoaderCell({
 }
 
 /**
- * #419 unified the Room and corner treatments but accidentally promoted their
- * geometry to 20px/14px. Keep the unified vocabulary at the compact deck scale:
- * the Room mark restores the former 9px attention-dot footprint, and a corner
- * stays subordinate at 7px.
- */
-export const stateCircleDiameter = { room: 9, corner: 7 } as const;
-
-/**
- * The one state glyph used at BOTH hierarchy levels: hollow grey circle when
- * idle, grey ring with a rotating brass top arc while working, and a gently
- * pulsing filled brass circle when it needs you. The word exists only as
- * invisible accessibility metadata.
- */
-export function StateCircle({
-  state,
-  tone,
-  scale = 'corner',
-  style,
-  testID,
-}: {
-  state: CornerVisualState;
-  tone?: 'brass' | 'quiet' | 'ghost';
-  scale?: 'corner' | 'room';
-  style?: StyleProp<ViewStyle>;
-  testID?: string;
-}) {
-  const reducedMotion = useReducedMotion();
-  const rotation = useSharedValue(0);
-  const { progress: pulseProgress, still: pulseStill } = useLiveCycle(state === 'needs-you');
-  const spin = useAnimatedStyle(() => ({
-    transform: [{ rotate: `${rotation.value * 360}deg` }],
-  }));
-  const pulseRing = useAnimatedStyle(() => {
-    if (pulseStill) return { opacity: 0, transform: [{ scale: 1 }] };
-    const phase = Math.sin(pulseProgress.value * Math.PI);
-    return {
-      opacity: 0.28 * (1 - phase),
-      transform: [{ scale: 1 + 0.55 * phase }],
-    };
-  });
-
-  useEffect(() => {
-    if (state !== 'working' || reducedMotion) {
-      rotation.value = 0;
-      return;
-    }
-    rotation.value = withRepeat(
-      withTiming(1, {
-        duration: 900,
-        easing: Easing.linear,
-        reduceMotion: ReduceMotion.System,
-      }),
-      -1,
-      false,
-    );
-  }, [rotation, reducedMotion, state]);
-
-  const diameter = stateCircleDiameter[scale];
-  const geometry = { width: diameter, height: diameter, borderRadius: diameter / 2 };
-  const mark =
-    state === 'waiting' ? (
-      <View style={[{width:diameter,height:diameter}, styles.stateCircleWaiting]} />
-    ) : state === 'working' ? (
-      <Animated.View
-        style={[
-          geometry,
-          styles.stateCircleWorking,
-          reducedMotion && styles.stateCircleWorkingStill,
-          tone === 'brass' && styles.stateCircleWorkingBrass,
-          tone === 'quiet' && styles.stateCircleWorkingQuiet,
-          tone === 'ghost' && styles.stateCircleWorkingGhost,
-          styles.stateCircleWorkingGap,
-          spin,
-        ]}
-      />
-    ) : (
-      <View
-        style={[
-          geometry,
-          state === 'needs-you' ? styles.stateCircleNeedsYou : styles.stateCircleIdle,
-          tone === 'brass' &&
-            (state === 'needs-you' ? styles.stateCircleFillBrass : styles.stateCircleStrokeBrass),
-          tone === 'quiet' &&
-            (state === 'needs-you' ? styles.stateCircleFillQuiet : styles.stateCircleStrokeQuiet),
-          tone === 'ghost' &&
-            (state === 'needs-you' ? styles.stateCircleFillGhost : styles.stateCircleStrokeGhost),
-        ]}
-      />
-    );
-  return (
-    <View
-      accessible
-      accessibilityLabel={state}
-      accessibilityRole={state === 'working' ? 'progressbar' : 'image'}
-      style={[styles.stateCircleSlot, geometry, style]}
-      testID={testID}
-    >
-      {state === 'needs-you' && !reducedMotion && (
-        <Animated.View
-          pointerEvents="none"
-          style={[
-            geometry,
-            styles.stateCircleNeedsYouPulse,
-            tone === 'quiet' && styles.stateCirclePulseQuiet,
-            tone === 'ghost' && styles.stateCirclePulseGhost,
-            pulseRing,
-          ]}
-        />
-      )}
-      {mark}
-    </View>
-  );
-}
-
-/**
  * The one continuous loop the app runs while it is on screen and unattended:
  * a linear 0→1 cycle other live primitives read a phase off. Kept here so
  * every "something is alive" signal in the product breathes on the same clock
@@ -342,28 +225,6 @@ export function HullLivePulse({
   return <Animated.View style={[style, pulse]}>{children}</Animated.View>;
 }
 
-export function PixelGateReveal({ children, style }: HullSurfaceProps) {
-  const reducedMotion = useReducedMotion();
-  const progress = useSharedValue(reducedMotion ? 1 : 0);
-
-  useEffect(() => {
-    progress.value = withTiming(1, {
-      duration: motionTokens.reveal,
-      easing: easeOutQuint,
-      reduceMotion: ReduceMotion.System,
-    });
-  }, [progress]);
-
-  const contentStyle = useAnimatedStyle(() => ({ opacity: progress.value }));
-  return (
-    <Animated.View style={[style, contentStyle]}>
-      {children}
-      {!reducedMotion &&
-        [0, 1, 2, 3].map((index) => <RevealStrip key={index} index={index} progress={progress} />)}
-    </Animated.View>
-  );
-}
-
 export function NewMessageMaterialize({
   children,
   enabled = true,
@@ -395,19 +256,6 @@ export function NewMessageMaterialize({
   }, [animate, messageId]);
   if (!animate) return <View>{children}</View>;
   return <Animated.View entering={getNewMessageEntering()}>{children}</Animated.View>;
-}
-
-function RevealStrip({ index, progress }: { index: number; progress: SharedValue<number> }) {
-  const style = useAnimatedStyle(() => ({
-    opacity: 1 - progress.value,
-    transform: [{ translateX: (index % 2 === 0 ? -4 : 4) * progress.value }],
-  }));
-  return (
-    <Animated.View
-      pointerEvents="none"
-      style={[styles.revealStrip, { top: `${index * 25}%`, height: '25%' }, style]}
-    />
-  );
 }
 
 const styles = StyleSheet.create((theme) => {
@@ -470,60 +318,5 @@ const styles = StyleSheet.create((theme) => {
       backgroundColor: groknight.borderQuiet,
     },
     mechanismRailLive: { backgroundColor: groknight.accent },
-    /* ── Unified state circle: Room rollup and corner state ──────────── */
-    stateCircleSlot: {
-      alignItems: 'center',
-      justifyContent: 'center',
-    },
-    stateCircleNeedsYou: {
-      backgroundColor: groknight.accent,
-    },
-    stateCircleNeedsYouPulse: {
-      position: 'absolute',
-      borderWidth: 1,
-      borderColor: groknight.accent,
-    },
-    stateCircleWaiting: {
-      borderLeftWidth: 2,
-      borderRightWidth: 2,
-      borderColor: groknight.accent,
-    },
-    stateCircleIdle: {
-      borderWidth: 1,
-      borderColor: groknight.steel,
-      backgroundColor: 'transparent',
-    },
-    stateCircleWorking: {
-      borderWidth: 1,
-      borderColor: groknight.bgTexturePeak,
-      borderTopColor: groknight.accent,
-      backgroundColor: 'transparent',
-    },
-    stateCircleWorkingBrass: {
-      borderColor: groknight.accent,
-      borderTopColor: groknight.accent,
-    },
-    stateCircleWorkingQuiet: {
-      borderColor: groknight.ledgerQuiet,
-      borderTopColor: groknight.ledgerQuiet,
-    },
-    stateCircleWorkingGhost: {
-      borderColor: groknight.ledgerGhost,
-      borderTopColor: groknight.ledgerGhost,
-    },
-    stateCircleFillBrass: { backgroundColor: groknight.accent },
-    stateCircleFillQuiet: { backgroundColor: groknight.ledgerQuiet },
-    stateCircleFillGhost: { backgroundColor: groknight.ledgerGhost },
-    stateCircleStrokeBrass: { borderColor: groknight.accent },
-    stateCircleStrokeQuiet: { borderColor: groknight.ledgerQuiet },
-    stateCircleStrokeGhost: { borderColor: groknight.ledgerGhost },
-    stateCirclePulseQuiet: { borderColor: groknight.ledgerQuiet },
-    stateCirclePulseGhost: { borderColor: groknight.ledgerGhost },
-    stateCircleWorkingGap: { borderRightColor: 'transparent' },
-    stateCircleWorkingStill: {
-      borderColor: groknight.steel,
-      borderTopColor: groknight.steel,
-    },
-    revealStrip: { position: 'absolute', right: 0, left: 0, backgroundColor: groknight.bgRaised },
   };
 });

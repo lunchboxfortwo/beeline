@@ -9,6 +9,7 @@ import { SafeAreaProvider } from 'react-native-safe-area-context';
 import { ViewerConversationDock } from '../sources/components/buzz/ViewerConversationDock';
 import { TranscriptReference } from '../sources/components/buzz/TranscriptReference';
 import { publishViewerConversation } from '../sources/buzz/viewer-conversation';
+import { GrammarProvider } from '../sources/ui/GrammarProvider';
 UnistylesRuntime.setTheme('bone');
 publishViewerConversation({ roomId: 'proof', messages: [], send: async () => true });
 function Proof() {
@@ -37,4 +38,4 @@ function Proof() {
     </View>
   </KeyboardProvider></SafeAreaProvider>;
 }
-registerRootComponent(Proof);
+registerRootComponent(() => <GrammarProvider><Proof /></GrammarProvider>);

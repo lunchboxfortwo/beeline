@@ -48,17 +48,6 @@ export const styles = StyleSheet.create((theme) => {
       alignItems: 'center',
       justifyContent: 'center',
     },
-    hydrationFailureInset: { paddingHorizontal: theme.buzz.roomList.edge },
-    hydrationErrorHeader: {
-      flexDirection: 'row',
-      alignItems: 'center',
-      minHeight: 60,
-      paddingHorizontal: groknight.space.md,
-      paddingBottom: 8,
-      borderBottomWidth: 1,
-      borderBottomColor: groknight.border,
-      backgroundColor: groknight.bgBase,
-    },
     loadingText: {
       ...theme.buzz.type.sectionHead,
       fontFamily: groknight.monoSemibold,
@@ -66,108 +55,6 @@ export const styles = StyleSheet.create((theme) => {
       color: groknight.textMuted,
     },
 
-    // ── Header ──────────────────────────────────────────────────────
-    header: {
-      zIndex: 1,
-      flexDirection: 'row',
-      alignItems: 'center',
-      paddingHorizontal: groknight.space.md,
-      paddingBottom: 8,
-      borderBottomWidth: 1,
-      borderBottomColor: groknight.border,
-      backgroundColor: groknight.bgBase,
-    },
-    // The leading gutter is 16 (header padding) + 44 + 8, so the title starts
-    // on the SAME left axis as a Room-list row's name (16 + 40 tile slot + 12,
-    // `channels.tsx`) and pushing a row open never shifts the name sideways.
-    backButton: {
-      width: 44,
-      height: 44,
-      marginRight: groknight.space.sm,
-      alignItems: 'center',
-      justifyContent: 'center',
-    },
-    backText: { color: groknight.muted },
-    cornerBackText: { color: groknight.textMuted },
-    // The single agent's faceted mark, stated once for the whole corner — the
-    // slot itself is the shared HeaderIdentitySlot primitive.
-    headerCenter: {
-      flex: 1,
-      minHeight: 44,
-      minWidth: 0,
-      justifyContent: 'center',
-    },
-    // Stands in for the name until the channel's own read lands, so the header
-    // never has to guess between "Room" and a corner slug.
-    channelNameSkeleton: {
-      width: 132,
-      height: 13,
-      marginVertical: groknight.space.xs,
-      backgroundColor: groknight.bgHover,
-      borderRadius: groknight.radius,
-    },
-    cornerChannelNameSkeleton: { width: 108 },
-    // The one thing on the corner's meta row with unbounded length, so it is
-    // the one that gives: an unshrinkable name pushed the member count off
-    // the right edge.
-    cornerHeaderAgent: {
-      ...theme.buzz.type.machine,
-      fontFamily: groknight.monoSemibold,
-      flexShrink: 1,
-      minWidth: 0,
-      color: groknight.textSecondary,
-    },
-    cornerHeaderWorking: { color: groknight.ledgerQuiet },
-    cornerHeaderReview: { color: groknight.ledgerQuiet },
-    cornerHeaderWaiting: { color: groknight.accent },
-    cornerHeaderArchived: { color: groknight.ledgerGhost },
-    // The title and its metadata keep a clear gap before the trailing action.
-    // Corner overflow stays a lone 44pt edge control. The Room's pair does not
-    // cluster: the corners door owns a 44pt-tall target of its own and the
-    // overflow's box touches it, matching the Room-list pair.
-    roomActionsButton: {
-      minWidth: 44,
-      minHeight: 44,
-      marginLeft: groknight.space.sm,
-      alignItems: 'center',
-      justifyContent: 'center',
-    },
-    // Captain 2026-09-20: the door is the sigil alone — no word beside it. It
-    // still owns a real 44pt target of its own rather than borrowing the
-    // menu's.
-    roomCornersButton: {
-      minWidth: 44,
-      minHeight: 44,
-      marginLeft: groknight.space.sm,
-      alignItems: 'center',
-      justifyContent: 'center',
-    },
-    // Siblings, not a cluster: the same 44pt box as the corners door. The
-    // boxes touch, so the 28 marks sit 16pt apart — the same ink gap the
-    // Room-list pair already has.
-    roomClusteredActionsButton: {
-      minWidth: 44,
-      minHeight: 44,
-      marginLeft: 0,
-      alignItems: 'center',
-      justifyContent: 'center',
-    },
-    // Destination marks use the same theme brass as Bookmarks. Overflow stays
-    // steel chrome.
-    roomCornersGlyph: { color: groknight.accent },
-    roomActionsGlyph: { color: groknight.steel },
-    archivedBadge: {
-      backgroundColor: groknight.bgHighlight,
-      borderRadius: groknight.radius,
-      marginLeft: groknight.space.sm,
-      paddingHorizontal: groknight.space.sm,
-      paddingVertical: groknight.space.xs,
-    },
-    archivedBadgeText: {
-      ...theme.buzz.type.machine,
-      fontFamily: groknight.monoSemibold,
-      color: groknight.textMuted,
-    },
     // ── Room / corner actions sheet ──────────────────────────────────
     // The sheet itself, its rows and its trailing vocabulary live in
     // `components/buzz/HullActionSheet.tsx`. What is left here is only what
@@ -227,7 +114,6 @@ export const styles = StyleSheet.create((theme) => {
       overflowY: 'auto',
       overflowAnchor: 'none',
     } as any,
-    cornerStatusInset: { paddingHorizontal: groknight.space.md },
     messageListContent: {
       paddingHorizontal: groknight.space.md,
       paddingVertical: groknight.space.md,

@@ -1,10 +1,7 @@
-import { presentPersonInvite } from '@/components/buzz/PersonInviteSheet';
 import { appErrorCopy } from '@/buzz/app-error-copy';
 import React, { useEffect } from 'react';
 import { router } from 'expo-router';
 import { type AgentDetailView, type Identity, type WorkspaceView } from '@beeline/buzz-client';
-import { createCommunityInviteUrl, resolveCommunityInvitePublicOrigin } from '@/buzz/community-invite';
-import { getBuzzRuntimeConfig } from '@/buzz/runtime-config';
 import { agentPairingCommand } from '@/buzz/agent-pairing-command';
 import { navigateToRoom } from '@/buzz/corner-navigation';
 import { BuzzRigTransport } from '@/sync/transport';
@@ -40,31 +37,11 @@ export function useMembersMembership([
   recordScope,
 ]: Props): [
   messagePerson: (pubkey: string) => Promise<void>,
-  invitePerson: () => Promise<void>,
   loadMoreMembers: (kind: "human" | "agent") => Promise<void>,
   connectAgent: () => Promise<void>,
   closePicker: () => void,
 ] {
 
-
-  const invitePerson = async () => {
-    if (!surface?.viewer.permissions.manage || !workspaceId || !relayUrl) return;
-    setWorking('invite-person');
-    setError(null);
-    try {
-      const publicInviteOrigin = resolveCommunityInvitePublicOrigin(getBuzzRuntimeConfig());
-      const url = await createCommunityInviteUrl(
-        await writeClient(),
-        workspaceId,
-        publicInviteOrigin,
-      );
-      await presentPersonInvite(url);
-    } catch (reason) {
-      setError(appErrorCopy(reason, `Could not create person invite.`));
-    } finally {
-      setWorking(null);
-    }
-  };
 
   /**
    * Connecting a NEW agent: the app-minted code is the complete authorization
@@ -94,11 +71,7 @@ export function useMembersMembership([
 
   useEffect(() => {
     if (!focused || !surface || requestedActionHandledRef.current) return;
-    if (requestedAction === 'invite') {
-      if (!surface.viewer.permissions.manage) return;
-      requestedActionHandledRef.current = true;
-      void invitePerson();
-    } else if (requestedAction === 'add-agent') {
+    if (requestedAction === 'add-agent') {
       requestedActionHandledRef.current = true;
       void connectAgent();
     }
@@ -169,6 +142,6 @@ export function useMembersMembership([
     }
   };
 return [
-    messagePerson, invitePerson, loadMoreMembers, connectAgent, closePicker,
+    messagePerson, loadMoreMembers, connectAgent, closePicker,
   ];
 }

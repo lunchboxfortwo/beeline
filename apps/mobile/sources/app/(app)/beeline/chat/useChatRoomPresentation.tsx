@@ -19,6 +19,7 @@ import { shallowEqualRecord, useStable } from '@/buzz/use-stable';
 import { useVoiceCall } from '@/buzz/use-voice-call';
 import { subscribeDesktopWorkCorner } from '@/buzz/desktop-work-pane';
 import { INITIAL_CORNER_MESSAGE_WINDOW, INITIAL_MESSAGE_WINDOW } from './chat-surface-values';
+import { openPlace } from '@/ui/shell/panel';
 
 type Props = [
   chatListKey: { relayUrl: string; viewerPubkey: string; workspaceId: string; } | null,
@@ -358,23 +359,17 @@ export function useChatRoomPresentation([
         router.push('/beeline/settings' as Href);
         return;
       }
-      setProfileKind(kind);
       if (!activeCommunityId) return;
-      if (desktopExperience) setProfileAgentId(agentId);
-      else
-        router.push(
-          kind === 'human'
-            ? ({
-                pathname: '/beeline/human-profile',
-                params: { communityId: activeCommunityId, memberId: agentId },
-              } as Href)
-            : ({
-                pathname: '/beeline/agent-profile',
-                params: { communityId: activeCommunityId, agentId, roomId:decodedId },
-              } as Href),
-        );
+      // A transcript face opens the profile: the right panel on desktop, a
+      // pushed screen on a phone.
+      openPlace(
+        kind === 'human'
+          ? { kind: 'person', memberId: agentId, workspaceId: activeCommunityId }
+          : { kind: 'agent', agentId, workspaceId: activeCommunityId },
+        desktopExperience,
+      );
     },
-    [activeCommunityId, desktopExperience, cacheViewerPubkey,decodedId],
+    [activeCommunityId, desktopExperience, cacheViewerPubkey],
   );
 
   const openingMentionRef = useRef<string | null>(null);

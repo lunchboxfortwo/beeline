@@ -8,6 +8,7 @@ import { obsidianTheme, obsidianSmallTheme, obsidianLargeTheme, boneTheme, boneS
 import { ViewerConversationDock } from '../sources/components/buzz/ViewerConversationDock';
 import { publishViewerConversation } from '../sources/buzz/viewer-conversation';
 import type { RoomViewMessage } from '@beeline/api-contract/phone';
+import { GrammarProvider } from '../sources/ui/GrammarProvider';
 StyleSheet.configure({ themes: { obsidian: obsidianTheme, obsidianSmall: obsidianSmallTheme, obsidianLarge: obsidianLargeTheme, bone: boneTheme, boneSmall: boneSmallTheme, boneLarge: boneLargeTheme }, settings: { initialTheme: 'obsidian' } });
 const text = '**FIRST LINE**\n\n' + Array.from({ length: 45 }, (_, i) => `- **State ${i+1}**: A long reply about call states and endings remains readable while the artifact stays visible.`).join('\n') + '\n\n**NEWEST LINE**';
 const send = async () => {
@@ -28,4 +29,4 @@ function Proof() {
     <ViewerConversationDock kind="artifact" title="Call states and endings (1–9)" roomId="proof" agentHandle="ruby" />
   </View></SafeAreaProvider>;
 }
-registerRootComponent(Proof);
+registerRootComponent(() => <GrammarProvider><Proof /></GrammarProvider>);

@@ -39,6 +39,7 @@ const phoneOperations = {
   createGitHubRepository: true,
   createHumanCorner: true,
   createInvite: true,
+  inviteByEmail: true,
   createRoom: true,
   createRoomPoll: true,
   createWallet: true,

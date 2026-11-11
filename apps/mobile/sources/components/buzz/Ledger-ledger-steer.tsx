@@ -5,19 +5,16 @@ import { Platform, Pressable, ScrollView, Text, View } from 'react-native';
 import { MonoMarkdown } from './MonoMarkdown';
 import { ContentTarget } from './IndexRow';
 import type { SystemEvent, SystemSubject } from '@beeline/api-contract/phone';
-import { LedgerBodyProps, ledgerEntryRhythm, Byline, SystemLineCutSearch, webFitsTwoLines, startCutSearch, closedCutLength } from './Ledger';
+import { LedgerBodyProps, ledgerEntryRhythm, SystemLineCutSearch, webFitsTwoLines, startCutSearch, closedCutLength } from './Ledger';
+import { TranscriptLine } from '@/ui/screens/transcript/TranscriptLine';
+import { DayCaption, HistoryLine } from '@/ui/screens/transcript/TranscriptMarkers';
 import { styles } from './Ledger';
 
 
 
 /**
- * You, steering.
- *
- * Under the Editorial direction your message is NOT emphasized: plain body
- * text, regular weight, primary tone, one size — deliberately not bolded and
- * not enlarged. The ONLY thing marking the turn as yours is the byline's
- * brass dot and brass name. A run of your own messages keeps flowing as one
- * passage: no repeated byline, no internal divider.
+ * You, steering: the same transcript line as everyone, with the body in brass.
+ * A run of your own messages keeps flowing under one sender line.
  */
 export function LedgerSteer({
   itemId,
@@ -31,15 +28,13 @@ export function LedgerSteer({
   bodyAction,
   attachments,
   mentionHandles,
+  viewerHandle,
   onMention,
   channelIndex,
   onChannelReference,
   codeRoomId,
   onOpenCode,
 }: Omit<LedgerBodyProps, 'marginalia' | 'machineNoise' | 'typewriter' | 'settleFrom'> & { pending?: boolean }) {
-  // Deliberately NO lead split here: a human message never takes the
-  // emphasized lead treatment. Weight, size, and tone are exactly the agent
-  // body's; ownership reads from the byline alone.
   return (
     <View
       style={ledgerEntryRhythm({
@@ -49,7 +44,7 @@ export function LedgerSteer({
       })}
       testID={`chat-message-${itemId}`}
     >
-      {byline ? <Byline byline={byline} /> : null}
+      <TranscriptLine sender={byline}>
       {replyReference}
       {bodyText ? (
         bodyAction ? (
@@ -62,6 +57,7 @@ export function LedgerSteer({
             <MonoMarkdown
               markdown={bodyText}
               mentionHandles={mentionHandles}
+              viewerHandle={viewerHandle}
               onMention={onMention}
               channelIndex={channelIndex}
               onChannelReference={onChannelReference}
@@ -75,6 +71,7 @@ export function LedgerSteer({
           <MonoMarkdown
             markdown={bodyText}
             mentionHandles={mentionHandles}
+            viewerHandle={viewerHandle}
             onMention={onMention}
             channelIndex={channelIndex}
             onChannelReference={onChannelReference}
@@ -86,6 +83,7 @@ export function LedgerSteer({
         )
       ) : null}
       {attachments}
+      </TranscriptLine>
     </View>
   );
 }
@@ -137,11 +135,7 @@ export function LedgerRoomUpdate({
 
 /** Paging state belongs inside the transcript as one quiet line, never a card. */
 export function LedgerHistoryLine({ text }: { text: string }) {
-  return (
-    <View style={styles.historyLine} testID="transcript-history-status">
-      <Text style={styles.historyLineText}>{text}</Text>
-    </View>
-  );
+  return <HistoryLine text={text} />;
 }
 
 
@@ -160,11 +154,14 @@ export function LedgerSystemLine({
   onOpenIdentity,
   onOpenUrl,
   onOpenBrief,
+  bare = false,
 }: {
   id: string;
   text: string;
   event?: SystemEvent;
   stamp: string;
+  /** Read inside an opened pill, whose header already carries the time. */
+  bare?: boolean;
   onOpenIdentity?: (identityId: string) => void;
   onOpenUrl?: (url: string) => void;
   /** Opens the corner's latest brief; a revision notice links to it. */
@@ -339,7 +336,7 @@ export function LedgerSystemLine({
   const closedLength = cutAt === null ? null : closedCutLength(fullText, cutAt);
   const body = (
     <Text
-      style={styles.systemLineText}
+      style={bare ? [styles.systemLineText, styles.systemLineTextBare] : styles.systemLineText}
       numberOfLines={expanded ? undefined : 2}
       ellipsizeMode="tail"
       testID={`system-line-text-${id}`}
@@ -360,7 +357,7 @@ export function LedgerSystemLine({
     'aria-hidden': true,
   } as const;
   return (
-    <View style={styles.systemLine} testID={`system-line-${id}`}>
+    <View style={bare ? [styles.systemLine, styles.systemLineBare] : styles.systemLine} testID={`system-line-${id}`}>
       <View>
         {/* Measure unclamped copy: native reports lines, web reports its laid-out height.
             Android ignores pointerEvents on Text, so the View keeps the copy from taking
@@ -437,25 +434,22 @@ export function LedgerSystemLine({
           </>
         ) : null}
       </View>
-      <Text numberOfLines={1} style={styles.roomUpdateStamp} testID={`system-line-stamp-${id}`}>
-        {stamp}
-      </Text>
+      {bare ? null : (
+        <Text numberOfLines={1} style={styles.roomUpdateStamp} testID={`system-line-stamp-${id}`}>
+          {stamp}
+        </Text>
+      )}
     </View>
   );
 }
 
 
 /**
- * The transcript's day caption: sectionHead metrics in the machine face,
- * ledgerQuiet ink, space.md vertical spacing. In-flow on the day-opener
- * cell — never a separate list row, never sticky.
+ * The transcript's day caption (grammar meta, secondary, sentence case). In-flow
+ * on the day-opener cell — never a separate list row, never sticky.
  */
 export function LedgerDayCaption({ label }: { label: string }) {
-  return (
-    <Text testID="ledger-day-caption" style={styles.dayCaption}>
-      {label}
-    </Text>
-  );
+  return <DayCaption label={label} />;
 }
 
 
@@ -508,9 +502,6 @@ export function LedgerGhostLine({
     </LedgerLogGroup>
   );
 }
-
-
-export const BYLINE_DOT_SIZE = 5;
 
 
 /** Private teaching feedback beneath a locally sent message. */

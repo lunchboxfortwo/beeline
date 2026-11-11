@@ -193,6 +193,8 @@ export type PhoneOperationMap = PhoneRouteOperationMap & {
   removeRoomMember: { input: RoomMemberInput; output: void };
   resolveDirectMessage: { input: ResolveDirectMessageInput; output: DirectMessageResult };
   createInvite: { input: WorkspaceInput; output: InviteTokenResult };
+  /** Same authority as createInvite: mints an invite link and emails it once (Resend). */
+  inviteByEmail: { input: InviteByEmailInput; output: void };
   resolveInvite: { input: InviteTokenInput; output: InviteView };
   redeemInvite: { input: InviteTokenInput; output: InviteMembershipResult };
   createAgentPairingCode: { input: WorkspaceInput; output: PairingCodeResult };
@@ -696,6 +698,8 @@ export type InviteTokenResult = InviteTokenInput & {
   /** Absolute Unix timestamp in seconds; zero for a permanent public link. */
   readonly expiresAt: number;
 };
+/** `roomId` only names the chat in the email; the invite itself is to the Workspace. */
+export type InviteByEmailInput = WorkspaceInput & { readonly roomId?: string; readonly email: string };
 export type PairingCodeInput = { readonly code: string };
 export type PairingCodeResult = PairingCodeInput & { readonly expiresAt: number };
 export type UpdateAgentSoulInput = WorkspaceAgentInput & {

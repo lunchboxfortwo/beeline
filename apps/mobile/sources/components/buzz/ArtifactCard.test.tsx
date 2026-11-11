@@ -22,7 +22,9 @@ vi.mock('react-native-unistyles', async () => {
   return { StyleSheet: { create: (factory: any) => factory({ buzz: groknight }) } };
 });
 vi.mock('./IndexRow', () => ({ IndexRow: 'IndexRow', ContentTarget: 'ContentTarget', InlineRow: 'InlineRow' }));
-vi.mock('./Button', () => ({ Button: 'Button' }));
+vi.mock('tamagui', async () => (await import('@/ui/screens/transcript/grammar-hosts.test-support')).tamaguiHosts());
+vi.mock('lucide-react-native', async () => (await import('@/ui/screens/transcript/grammar-hosts.test-support')).lucideHosts());
+vi.mock('react-native-safe-area-context', () => ({ useSafeAreaInsets: () => ({ top: 0, bottom: 0, left: 0, right: 0 }) }));
 vi.mock('./ArtifactMedia', () => ({ ArtifactImage: 'ArtifactImage', ArtifactText: 'ArtifactText' }));
 vi.mock('./ArtifactViewer', () => ({ ArtifactViewerScreen: 'ArtifactViewerScreen' }));
 vi.mock('./ChevronGlyph', () => ({ CHEVRON_ROW_SIZE: 16, ChevronGlyph: 'ChevronGlyph' }));
@@ -49,7 +51,8 @@ vi.mock('@/buzz/artifact-byte-store', () => ({ createArtifactByteStore: () => ({
 vi.mock('@/utils/open-external-url', () => ({ openExternalUrl: vi.fn() }));
 vi.mock('@/modal', () => ({ Modal: { show: vi.fn() } }));
 
-import { ArtifactCard } from './ArtifactCard';
+import { ArtifactCard, artifactKindWord } from './ArtifactCard';
+import { Modal } from '@/modal';
 import { fetchArtifactBytes } from '@/buzz/artifact-link';
 import { ARTIFACT_MAX_PREVIEW_HEIGHT } from '@/buzz/artifact';
 import { loadPdfViewerDocument } from '@/buzz/artifact-pdf';
@@ -157,5 +160,34 @@ describe('agent-posted artifact card previews', () => {
     const tree = await render();
     expect(tree.root.findByProps({ testID: 'artifact-preview-failed' })).toBeDefined();
     expect(host.fetch).not.toHaveBeenCalled();
+  });
+});
+
+describe('artifact card chrome', () => {
+  it('names the artifact as @author · FORMAT · size with one Open into the viewer', async () => {
+    const tree = await render({ authorHandle: 'alan' });
+    expect(tree.root.findByProps({ testID: 'artifact-title' }).props.children).toBe('mock.html');
+    expect(tree.root.findByProps({ testID: 'artifact-kind-line' }).props.children).toBe(`@agent · HTML · ${attachment.size} B`);
+    expect(tree.root.findAllByProps({ testID: 'artifact-open-browser' })).toHaveLength(0);
+    act(() => { tree.root.findByProps({ testID: 'artifact-open' }).props.onPress(); });
+    expect(Modal.show).toHaveBeenCalledWith(expect.objectContaining({ placement: 'fill' }));
+  });
+  it('draws a file with no preview as one row that opens the viewer', async () => {
+    const zip = { ...attachment, name: 'quotas.zip', mimeType: 'application/zip' };
+    let tree!: ReactTestRenderer;
+    await act(async () => { tree = create(<ArtifactCard attachment={zip} />); });
+    renderers.push(tree);
+    const row = tree.root.find((node: any) => node.type === 'ListItem' && node.props.testID === 'artifact-document-quotas.zip');
+    expect(row.props['aria-label']).toBe('Open quotas.zip');
+    expect(tree.root.findByProps({ testID: 'artifact-kind-line' }).props.children).toBe(`@agent · APPLICATION/ZIP · ${attachment.size} B`);
+    act(() => { row.props.onPress(); });
+    expect(Modal.show).toHaveBeenCalled();
+    expect(host.operation).not.toHaveBeenCalled();
+  });
+  it.each([
+    ['image/png', 'image', 'PNG'], ['application/pdf', 'pdf', 'PDF'], ['text/plain', 'text', 'TEXT'],
+    ['image/svg+xml', 'svg', 'SVG'], ['text/csv', 'document', 'TEXT/CSV'], ['application/x-game', 'game', 'Interactive'],
+  ] as const)('%s reads as %s → %s', (mime, format, word) => {
+    expect(artifactKindWord(mime, format as never)).toBe(word);
   });
 });

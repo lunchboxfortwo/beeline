@@ -1,5 +1,6 @@
 import React from 'react';
 import { Text, View } from 'react-native';
+import { RequestMedia } from '@/ui/screens/transcript/cards/RequestMedia';
 import { AGENT_GRANT_VERBS, grantPresentation } from '@beeline/api-contract/agent-grants';
 import type { AgentPresentation, ChatDisplayMessage } from '@/buzz/room-view-presentation';
 import { resolveAgentDisplayIdentity } from '@/buzz/agent-display';
@@ -58,26 +59,28 @@ export const GrantRequestCard = React.memo(function GrantRequestCard({
         const actions: TranscriptCardAction[] =
           pendingGrant && canDecide
             ? [
+                // Approve is today's standing allow; Once stays as the second allow it already was.
                 {
-                  label: 'No',
-                  secondary: true,
-                  disabled: actionId !== null,
-                  onPress: () => onDecision(grant.grantId, 'deny'),
-                  testID: `grant-${grant.grantId}-deny`,
-                },
-                ...(!sharedAssetRequest ? [{
-                  label: 'Once',
-                  disabled: actionId !== null,
-                  onPress: () => onDecision(grant.grantId, 'once'),
-                  testID: `grant-${grant.grantId}-once`,
-                }] : []),
-                {
-                  label: 'Always',
+                  label: 'Approve',
                   primary: true,
                   disabled: actionId !== null,
                   loading: busy,
                   onPress: () => onDecision(grant.grantId, 'always'),
                   testID: `grant-${grant.grantId}-always`,
+                },
+                ...(!sharedAssetRequest ? [{
+                  label: 'Once',
+                  secondary: true,
+                  disabled: actionId !== null,
+                  onPress: () => onDecision(grant.grantId, 'once'),
+                  testID: `grant-${grant.grantId}-once`,
+                }] : []),
+                {
+                  label: 'Deny',
+                  secondary: true,
+                  disabled: actionId !== null,
+                  onPress: () => onDecision(grant.grantId, 'deny'),
+                  testID: `grant-${grant.grantId}-deny`,
                 },
               ]
             : [];
@@ -105,6 +108,7 @@ export const GrantRequestCard = React.memo(function GrantRequestCard({
             stamp={ledgerStamp(message.timestamp)}
             subline={`${grant.machine ? `${grant.machine} · ` : ''}${approvalAudience(request.owner, viewerPubkey)}`}
             body={purpose}
+            media={pendingGrant ? <RequestMedia message={message} /> : undefined}
             facts={facts}
             foldCode
             code={script}

@@ -1,54 +1,11 @@
-vi.mock('@/components/buzz/Button', async () => {
-  const React = await import('react');
-  return { Button: (props: any) => React.createElement('Button', props, React.createElement('Text', null, props.label)) };
-});
 import * as React from 'react';
 // @ts-expect-error react-test-renderer has no declarations in this workspace.
 import { act, create, type ReactTestRenderer } from 'react-test-renderer';
 import { afterAll, beforeAll, describe, expect, it, vi } from 'vitest';
 
-vi.mock('react-native', async () => {
-  const ReactModule = await import('react');
-  const host = (name: string) => (props: any) =>
-    ReactModule.createElement(name, props, props.children);
-  return {
-    Platform: { OS: 'android', select: (choices: Record<string, unknown>) => choices.default },
-    Pressable: host('Pressable'),
-    ScrollView: host('ScrollView'),
-    StyleSheet: { create: (styles: unknown) => styles, hairlineWidth: 1 },
-    Text: host('Text'),
-    TouchableOpacity: host('TouchableOpacity'),
-    View: host('View'),
-  };
-});
-
-vi.mock('react-native-unistyles', async () => {
-  const { typeRoles } = await import('@/buzz/groknight');
-  // The picker's factory reads only `theme.buzz` tokens; a stub palette keeps
-  // StyleSheet.create resolvable without pulling the real theme module.
-  return {
-    StyleSheet: {
-      create: (factory: (theme: { buzz: Record<string, unknown> }) => unknown) =>
-        factory({
-          buzz: {
-            border: '#000',
-            borderQuiet: '#111',
-            bgBase: '#000',
-            bgHover: '#111',
-            radius: 3,
-            textMuted: '#888',
-            textSecondary: '#999',
-            textPrimary: '#fff',
-            textDisabled: '#555',
-            accent: '#d7af5f',
-            type: typeRoles,
-            space: { xs: 4, sm: 8, md: 16 },
-          },
-        }),
-      hairlineWidth: 1,
-    },
-  };
-});
+vi.mock('tamagui', async () => (await import('@/ui/screens/transcript/grammar-hosts.test-support')).tamaguiHosts());
+vi.mock('lucide-react-native', async () => (await import('@/ui/screens/transcript/grammar-hosts.test-support')).lucideHosts());
+vi.mock('react-native-safe-area-context', () => ({ useSafeAreaInsets: () => ({ top: 0, bottom: 0, left: 0, right: 0 }) }));
 
 import type { AgentPaletteCommand } from '@/buzz/slash-verbs';
 import { availableAgentMentionCommands, insertAgentSlashCommand } from '@/buzz/slash-verbs';
@@ -92,11 +49,9 @@ const advertisedCommands: AgentPaletteCommand[] = [
 ];
 
 function find_by_test_id(renderer: ReactTestRenderer, testId: string) {
-  // The pass-through host mock propagates props to children, so restrict to
-  // the touchable host nodes that actually own the testID.
+  // Rows render as Tamagui ListItem hosts; restrict to the host that owns the testID.
   return renderer.root.findAll(
-    (node: any) =>
-      (node.type === 'TouchableOpacity' || node.type === 'Pressable') && node.props.testID === testId,
+    (node: any) => node.type === 'ListItem' && node.props.testID === testId,
   );
 }
 
@@ -143,7 +98,7 @@ describe('SlashVerbPicker agent command palette', () => {
     console.log(`Reproduction login-suggestion (shared phone/desktop picker): /lo → login row → ${composer}`);
   });
 
-  it('shows the owner Fast mode as an ON/OFF switch and selects it by name', () => {
+  it('shows the owner Fast mode as an On/Off switch and selects it by name', () => {
     const onCommand = vi.fn();
     const picker = (enabled: boolean) =>
       render(
@@ -169,10 +124,10 @@ describe('SlashVerbPicker agent command palette', () => {
     expect(row).toHaveLength(1);
     expect(row[0].props.accessibilityRole).toBe('switch');
     expect(row[0].props.accessibilityState).toEqual({ selected: true, checked: false });
-    expect(stateText(off)).toBe('OFF');
+    expect(stateText(off)).toBe('Off');
     row[0].props.onPress();
     expect(onCommand).toHaveBeenCalledWith('fast-mode');
-    expect(stateText(picker(true))).toBe('ON');
+    expect(stateText(picker(true))).toBe('On');
   });
 
   it('shows the server restart command and selects it when the harness has no catalog', () => {
@@ -297,13 +252,13 @@ describe('SlashVerbPicker agent command palette', () => {
       }),
     );
     const noteViews = renderer.root.findAll(
-      (node: any) => node.type === 'View' && node.props.testID === 'slash-agent-no-commands',
+      (node: any) => node.type === 'YStack' && node.props.testID === 'slash-agent-no-commands',
     );
     expect(noteViews).toHaveLength(1);
     // Read `.props.children` directly — JSON.stringify on test-instance props
     // walks the circular Fiber graph.
     const noteLabel = noteViews[0].findByType('Text').props.children as string;
-    expect(noteLabel).toContain('PI RUNNER');
+    expect(noteLabel).toBe('pi runner does not advertise commands');
     // And the palette still shows Beeline's built-in verbs.
     expect(find_by_test_id(renderer, 'slash-verb-open-corner')).toHaveLength(1);
   });

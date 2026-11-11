@@ -1,19 +1,13 @@
-import { ErrorBanner } from '@/components/buzz/ErrorBanner';
 import { appErrorCopy } from '@/buzz/app-error-copy';
-import { Button } from './Button';
 import React from 'react';
-import { Animated, FlatList, Platform, Text, View, useWindowDimensions } from 'react-native';
-import { StyleSheet, useUnistyles } from 'react-native-unistyles';
+import { Platform, useWindowDimensions } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import type { AttachmentReference } from '@beeline/buzz-client';
 import type { RoomViewMessage } from '@beeline/api-contract/phone';
 import { currentViewerConversation, subscribeViewerConversation, viewerAgentHandle, viewerContext, viewerContextLabel } from '@/buzz/viewer-conversation';
-import { withAlpha } from '@/buzz/groknight';
 import { useKeyboardState } from 'react-native-keyboard-controller';
 import { COMPOSER_SINGLE_LINE_INPUT_HEIGHT, ConversationComposer, type DictatedSend } from '@/components/buzz/ConversationComposer';
-import { TranscriptReference } from './TranscriptReference';
-import { ConversationGlyph } from './MicGlyph';
-import { MonoMarkdown } from './MonoMarkdown';
+import { TalkDock } from '@/ui/screens/viewers/TalkDock';
 
 type Entry = { id: string; speaker: string; text: string; context?: string };
 
@@ -30,16 +24,8 @@ export function ViewerConversationDock({
   /** HullModal already moves its content above the keyboard; warm viewers do not. */
   keyboardAvoidedByParent?: boolean;
 }) {
-  const { theme } = useUnistyles();
   const insets = useSafeAreaInsets();
   const { height: windowHeight } = useWindowDimensions();
-  const transcriptScroll = React.useRef<FlatList<Entry>>(null);
-  const scrollToNewest = () => {
-    const scroll = () => transcriptScroll.current?.scrollToEnd({ animated: false });
-    // Native layout commits after the content-size callback; web layout is already available.
-    if (Platform.OS === 'web') scroll();
-    else requestAnimationFrame(scroll);
-  };
   const conversation = React.useSyncExternalStore(
     subscribeViewerConversation,
     () => currentViewerConversation(roomId),
@@ -56,12 +42,11 @@ export function ViewerConversationDock({
   const [revision, setRevision] = React.useState(0);
   const [focused, setFocused] = React.useState(false);
   const [open, setOpen] = React.useState(false);
-  const [pillHeight, setPillHeight] = React.useState(44);
+  // The closed pill is one control tall; the transcript rises above it.
+  const pillHeight = 44;
   const [tickerVisible, setTickerVisible] = React.useState(false);
   const [sending, setSending] = React.useState(false);
   const [error, setError] = React.useState<string | null>(null);
-  const [availableWidth, setAvailableWidth] = React.useState(366);
-  const width = React.useRef(new Animated.Value(44)).current;
   const keyboardHeight = useKeyboardState((state) => state.height);
   const keyboardLift = Platform.OS !== 'web' && focused && open ? keyboardHeight : 0;
   const bottom = keyboardLift > 0
@@ -94,14 +79,6 @@ export function ViewerConversationDock({
       text: message.text,
     }))].slice(-8));
   }, [conversation?.messages, currentAgent]);
-
-  React.useEffect(() => {
-    Animated.timing(width, {
-      toValue: open ? Math.max(44, availableWidth) : 44,
-      duration: 220,
-      useNativeDriver: false,
-    }).start();
-  }, [availableWidth, open, width]);
 
   React.useEffect(() => {
     if (!entries.length) return;
@@ -148,119 +125,39 @@ export function ViewerConversationDock({
   const showTranscript = Boolean(error || (open && entries.length) || (tickerVisible && agentReplies.length));
   const recent = open ? entries.slice(-3) : agentReplies.slice(-2);
   return (
-    <View pointerEvents="box-none" style={styles.overlay} testID="viewer-conversation-dock"
-    onLayout={(event) => setAvailableWidth(event.nativeEvent.layout.width - 24)}>
-      {showTranscript ? (
-        <View
-      style={[styles.transcript, { bottom: bottom + pillHeight + 9 }, { maxHeight: transcriptMaxHeight }]}
-      testID="viewer-conversation-transcript"
-    >
-          <Text style={styles.transcriptHeading}>Recent conversation · {currentAgent ?? 'agent'}</Text>
-          {open ? (
-            <FlatList ref={transcriptScroll} style={styles.transcriptScroll}
-              data={recent} keyExtractor={entry => entry.id}
-              testID="viewer-conversation-scroll" keyboardShouldPersistTaps="handled"
-              onLayout={scrollToNewest} onContentSizeChange={scrollToNewest}
-              renderItem={({ item: entry }) => (
-                <View style={styles.transcriptEntry}>
-                  <Text style={styles.transcriptSpeaker}>{entry.speaker}</Text>
-                  <MonoMarkdown markdown={entry.text} textStyle={styles.transcriptText} />
-                  {entry.context ? (
-                    <TranscriptReference viewer>{viewerContextLabel(entry.context)}</TranscriptReference>
-                  ) : null}
-                </View>
-              )}
-              ListFooterComponent={error ? <ErrorBanner inline title={error} /> : null}
-            />
-          ) : (
-            <>
-              {recent.map((entry) => (
-                <View key={entry.id} style={styles.transcriptEntry}>
-                  <Text style={styles.transcriptSpeaker}>{entry.speaker}</Text>
-                  <Text numberOfLines={2} style={styles.transcriptText}>{entry.text}</Text>
-                  {entry.context ? (
-                    <TranscriptReference viewer>{viewerContextLabel(entry.context)}</TranscriptReference>
-                  ) : null}
-                </View>
-              ))}
-              {error ? <Text style={styles.error}>{error}</Text> : null}
-            </>
-          )}
-        </View>
-      ) : null}
-      <Animated.View style={[styles.pill, { width, bottom }, kind === 'computer' && styles.computerRadius]} testID="viewer-conversation-pill"
-      onLayout={(event) => setPillHeight(event.nativeEvent.layout.height)}>
-        <Button label="" variant="secondary" icon={<ConversationGlyph color={open ? theme.buzz.accent : theme.buzz.textPrimary} />}
-        accessibilityRole="button" accessibilityLabel={open ? 'Collapse conversation' : 'Talk to agent'}
-        accessibilityState={{ expanded: open }} hitSlop={1}
-        onPress={() => {
-          if (open) setTickerVisible(false);
-          setOpen((value) => !value);
-        }}
-        style={[styles.control, open && styles.controlOpen, kind === 'computer' && !open && styles.computerRadius]}
-        testID="viewer-conversation-toggle"
-      />
-        {open ? (
-          <View style={styles.composerWrap}><ConversationComposer
-        viewerPill value={draft} height={height} focused={focused} disabled={sending || !conversation}
-        inputRevision={revision} testIDPrefix="viewer" speechEnabled
-        onBlur={() => setFocused(false)} onFocus={() => setFocused(true)}
-        onChangeText={(text) => { draftRef.current = text; setDraft(text); }}
-        onContentSizeChange={(event) => setHeight(draft.trim()
-          ? Math.max(COMPOSER_SINGLE_LINE_INPUT_HEIGHT,
-              Math.min(120, Math.ceil(event.nativeEvent.contentSize.height)))
-          : COMPOSER_SINGLE_LINE_INPUT_HEIGHT)}
-        onKeyPress={(event) => { if (Platform.OS === 'web' && event.nativeEvent.key === 'Enter' &&
-          !(event.nativeEvent as unknown as { shiftKey?: boolean }).shiftKey) {
-          event.preventDefault(); void send();
-        } }}
-        onSend={send}
-      /></View>
-        ) : null}
-      </Animated.View>
-    </View>
+    <TalkDock
+      open={open}
+      onToggle={() => {
+        if (open) setTickerVisible(false);
+        setOpen((value) => !value);
+      }}
+      bottom={bottom}
+      maxTranscriptHeight={transcriptMaxHeight}
+      heading={`Recent conversation · ${currentAgent ?? 'agent'}`}
+      entries={recent.map((entry) => ({
+        id: entry.id, speaker: entry.speaker, text: entry.text, mine: entry.speaker === 'You',
+        ...(entry.context ? { context: viewerContextLabel(entry.context) } : {}),
+      }))}
+      showTranscript={showTranscript}
+      error={error}
+      contextLabel={viewerContextLabel(context)}
+      composer={
+        <ConversationComposer
+          viewerPill value={draft} height={height} focused={focused} disabled={sending || !conversation}
+          inputRevision={revision} testIDPrefix="viewer" speechEnabled
+          onBlur={() => setFocused(false)} onFocus={() => setFocused(true)}
+          onChangeText={(text) => { draftRef.current = text; setDraft(text); }}
+          onContentSizeChange={(event) => setHeight(draft.trim()
+            ? Math.max(COMPOSER_SINGLE_LINE_INPUT_HEIGHT,
+                Math.min(120, Math.ceil(event.nativeEvent.contentSize.height)))
+            : COMPOSER_SINGLE_LINE_INPUT_HEIGHT)}
+          onKeyPress={(event) => { if (Platform.OS === 'web' && event.nativeEvent.key === 'Enter' &&
+            !(event.nativeEvent as unknown as { shiftKey?: boolean }).shiftKey) {
+            event.preventDefault(); void send();
+          } }}
+          onSend={send}
+        />
+      }
+    />
   );
 }
-
-const styles = StyleSheet.create((theme) => ({
-  overlay: { ...StyleSheet.absoluteFillObject, zIndex: 20 },
-  pill: {
-    position: 'absolute',
-    right: 12,
-    minHeight: 44,
-    borderRadius: theme.buzz.radius,
-    borderWidth: 1,
-    borderColor: theme.buzz.borderStrong,
-    backgroundColor: theme.buzz.bgRaised,
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'center',
-    overflow: 'hidden',
-  },
-  control: {
-    // The enclosing 1 dp border completes the 44 dp closed square.
-    width: 42,
-    minWidth: 42,
-    height: 42,
-    minHeight: 42,
-    borderWidth: 0,
-    paddingHorizontal: 0,
-    borderRadius: theme.buzz.radius,
-    backgroundColor: theme.buzz.bgBase,
-    alignItems: 'center',
-    justifyContent: 'center',
-  },
-  computerRadius: { borderRadius: 14 },
-  controlOpen: { width: 44, minWidth: 44, height: 'auto', alignSelf: 'stretch', borderRightWidth: 1, borderRightColor: theme.buzz.borderStrong, borderRadius: 0,
-    backgroundColor: 'transparent' },
-  composerWrap: { flex: 1, minWidth: 0 },
-  transcript: { overflow: 'hidden', position: 'absolute', left: 16, right: 16, padding: theme.buzz.space.md, borderRadius: 10,
-    borderWidth: 1, borderColor: theme.buzz.borderStrong,
-    backgroundColor: withAlpha(theme.buzz.bgRaised, 0.8) },
-  transcriptScroll: { flexShrink: 1, minHeight: 0 },
-  transcriptHeading: { ...theme.buzz.type.machine, color: theme.buzz.ledgerQuiet, marginBottom: theme.buzz.space.sm },
-  transcriptEntry: { marginTop: 4 },
-  transcriptSpeaker: { ...theme.buzz.type.machine, color: theme.buzz.accent },
-  transcriptText: { ...theme.buzz.type.body, color: theme.buzz.textPrimary },
-  error: { ...theme.buzz.type.body, color: theme.buzz.dialogDanger, marginTop: 4 },
-}));

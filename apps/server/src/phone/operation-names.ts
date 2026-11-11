@@ -87,6 +87,7 @@ export const PHONE_OPERATION_NAMES = new Set<keyof PhoneOperationMap>([
   'removeRoomMember',
   'resolveDirectMessage',
   'createInvite',
+  'inviteByEmail',
   'resolveInvite',
   'redeemInvite',
   'createAgentPairingCode',

@@ -40,6 +40,7 @@ import { phoneCreateRoomPoll, phoneActOnRepositoryCard, phoneAnswerChoice, phone
 import { phoneCreateWorkspace, phoneUpdateWorkspace, phoneLeaveWorkspace, phoneDeleteWorkspace } from './workspace-writes.js';
 import { phoneAddWorkspaceMember, phoneRemoveWorkspaceMember, phoneResolveDirectMessage, phoneCreateInvite, phoneRedeemInvite } from './members-invites.js';
 import { phoneReadInvite, phoneClaimAgentPairing } from './pairing.js';
+import { phoneInviteByEmail } from './email-invite.js';
 import { phoneReadAgent } from './agent-reads.js';
 import { phoneUpdateAgentYolo, phoneUpdateAgentAccessPolicy, phoneRemoveAgent } from './agent-removal.js';
 import { phoneUpdateProfile, phoneUpdateFace, phoneUpdateRoomPushState, phoneUpdatePushLevel, phoneDeleteAccount } from './account-profile.js';
@@ -370,6 +371,9 @@ import { phoneReadConnectionDetail, phoneRevokeConnectionGrants } from './connec
         )) as Output<Name>;
       case 'createInvite':
         return (await phoneCreateInvite(ctx, input as Input<'createInvite'>, viewerId)) as Output<Name>;
+      case 'inviteByEmail':
+        await phoneInviteByEmail(ctx, input as Input<'inviteByEmail'>, viewerId);
+        return undefined as Output<Name>;
       case 'resolveInvite': {
         const invite = await phoneReadInvite(ctx, (input as Input<'resolveInvite'>).token, viewerId);
         if (!invite) throw new Error('invite not found');

@@ -682,6 +682,15 @@
           "generated_at": "existing before the registry; weekly audit reviews"
         }
       },
+      "person_avatars": {
+        "module": "Agent types",
+        "reason": "A person's uploaded profile photo, durable past attachment expiry (owner decision 2026-11-11 lifted photo overrides).",
+        "columns": {
+          "id": "Served id in /v1/person-avatars/<id>; changes on every replacement.",
+          "identity_id": "The one person this photo belongs to.",
+          "bytes": "The normalized image bytes."
+        }
+      },
       "agent_commands": {
         "module": "Work authority",
         "reason": "existing before the registry; weekly audit reviews",

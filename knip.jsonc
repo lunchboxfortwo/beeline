@@ -15,8 +15,6 @@
     "web/marketing/demo-source.mjs": ["exports"],
     // CONNECT-RING-1 selects router/transport aliases and the temporary Metro adapter.
     "apps/mobile/scripts/connect-ring-proof/{state.ts,metro.cjs}": ["exports"],
-    // Metro selects the fitted web title implementation through this platform export.
-    "apps/mobile/sources/buzz/use-autofit-text.web.ts": ["exports"],
     // The local GitHub card proof resolves these exports through temporary Metro aliases.
     "apps/mobile/scripts/github-card-proof-{adapters.tsx,metro.cjs}": ["exports"],
     // Metro injects these disposable server/router adapters into the native proof.
@@ -53,6 +51,8 @@
         "scripts/connector-preview/room.tsx",
         // TYPECHECK invokes the architecture guard by path.
         "scripts/check-architecture.mjs",
+        // TYPECHECK invokes the design grammar guard by path.
+        "scripts/check-mobile-grammar.mjs",
         // Accepted audit decisions: explicit one-time operator entrypoints.
         "scripts/audit-decisions-cleanup.mjs",
         "scripts/audit-decisions-prod-read.mjs",

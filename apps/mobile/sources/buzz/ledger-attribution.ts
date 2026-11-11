@@ -1,3 +1,4 @@
+import { isAgentToAgentMessage, isPillMessage } from './transcript-pills';
 /**
  * A voice announces itself once per run, not once per paragraph.
  *
@@ -84,6 +85,8 @@ export type LedgerAttributionMessage = {
   choice?: unknown;
   writePermission?: unknown;
   targetBranchProposal?: unknown;
+  /** A folded run of pills (`buzz/transcript-pills.ts`). */
+  pillRun?: unknown;
 };
 
 /**
@@ -119,6 +122,10 @@ export function ledgerSpeakerKey(
   )
     return null;
   if (message.writePermission || message.targetBranchProposal) return null;
+  // A pill (system line, agent-to-agent message) is not a voice: the speaker
+  // after it opens a new sender group. Callers pass full transcript rows.
+  const row = message as Parameters<typeof isPillMessage>[0];
+  if (message.pillRun || isPillMessage(row) || isAgentToAgentMessage(row, knownAgentPubkeys)) return null;
   const isAgent =
     message.isAgentAuthor ||
     message.isAgentActivity ||

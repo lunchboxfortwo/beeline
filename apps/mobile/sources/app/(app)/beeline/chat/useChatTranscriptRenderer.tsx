@@ -21,9 +21,12 @@ import { GitHubEventCard, NotificationLifecycleCard, DaemonFactCard, GrantReques
 import { monolithPhoneOperation, phoneOperationFailureReason } from '@/sync/transport/monolith-operation';
 import { CornerOpenedMarkers } from '@/components/buzz/CornerOpenedMarker';
 import { LedgerRoomUpdate, LedgerSystemLine } from '@/components/buzz/Ledger';
-import { type RoomRosterParticipant } from '@/components/buzz/RoomRosterSheet';
+import { type RoomRosterParticipant } from '@/buzz/room-participants';
 import { rosterAgent, durableFactLine, knownAgentPubkeysFor } from './chat-surface-values';
 import { styles } from './chat-surface-styles';
+import { TranscriptPills, type PillIdentityResolver } from '@/components/buzz/TranscriptPills';
+import { isAgentToAgentMessage, isPillMessage } from '@/buzz/transcript-pills';
+import { SYSTEM_IDENTITY_PUBKEY } from '@/buzz/system-identity';
 
 type Props = [
   viewerIsAgent: boolean,
@@ -92,8 +95,6 @@ type Props = [
   visibleMessages: ChatDisplayMessage[],
   continuedAttributionIds: Set<string>,
   immediatelyPrecedingVisibleMessageById: Map<string, ChatDisplayMessage>,
-  arrivingCardIds: ReadonlySet<string>,
-  transcriptCardMotionStore: import("@/components/buzz/transcript-card-motion-context").TranscriptCardMotionStore,
   firstNewMessageId: string | null,
   arrivalFlashMessageId: string | null,
   sourceLandingFlashMessageId: string | null,
@@ -114,11 +115,31 @@ export function useChatTranscriptRenderer([
   isDirectMessage, isArchived, handleCornerProposalDecision, dismissOutboxMessage, isDesktop,
   bylineOpeners, hintMessageIds, failedOutboxIds, outbox, speakerWorking, answerByMessageId,
   cornerProposalAction, speakerRoleByPubkey, visibleMessageById, channelReferenceKey,
-  visibleMessages, continuedAttributionIds, immediatelyPrecedingVisibleMessageById, arrivingCardIds,
-  transcriptCardMotionStore, firstNewMessageId, arrivalFlashMessageId, sourceLandingFlashMessageId,
+  visibleMessages, continuedAttributionIds, immediatelyPrecedingVisibleMessageById,
+  firstNewMessageId, arrivalFlashMessageId, sourceLandingFlashMessageId,
 ]: Props): [
   renderItem: ({ item }: { item: ChatDisplayMessage; }) => import("react/jsx-runtime").JSX.Element,
 ] {
+
+  const knownAgentPubkeys = useMemo(() => knownAgentPubkeysFor(agentByPubkey), [agentByPubkey]);
+  // A pill face: the Beeline account, or the roster's agent or person by id.
+  const resolvePillIdentity = useCallback<PillIdentityResolver>((id, name, kind) => {
+    if (id === SYSTEM_IDENTITY_PUBKEY) return { kind: 'system', name: 'Beeline' };
+    const agent = agentByPubkey.get(id);
+    if (agent || (kind === 'agent' && !personProfileByPubkey.has(id))) {
+      return {
+        kind: 'agent', seed: id, name: agent?.displayName || name,
+        ...(agent?.face ? { face: agent.face } : {}),
+        ...(agent?.avatar ? { avatarUrl: agent.avatar } : {}),
+      };
+    }
+    const person = personProfileByPubkey.get(id);
+    return {
+      kind: 'human', seed: id, name: person?.name || name,
+      ...(person?.face ? { face: person.face } : {}),
+      ...(person?.avatar ? { avatarUrl: person.avatar } : {}),
+    };
+  }, [agentByPubkey, personProfileByPubkey]);
 
   const renderMessage = useCallback(
     (
@@ -158,7 +179,6 @@ export function useChatTranscriptRenderer([
         agentAvatar: rowAgentAvatar,
         agentFace: rowAgentFace,
         agentHandle: rowAgentHandle,
-        agentModel: rowAgentModel,
       }: RoomMessageRenderContext,
     ) => {
       // Props win over the closed-over renderer. The cell only re-renders a row
@@ -187,9 +207,6 @@ export function useChatTranscriptRenderer([
         : (item.pubkey ? personProfileByPubkey.get(item.pubkey)?.name : undefined);
       const profileAvatar = rosterFromProps ? rowPersonAvatar : undefined;
       const profileFace = rosterFromProps ? rowPersonFace : undefined;
-      const modelForRow = rosterFromProps
-        ? rowAgentModel
-        : (item.pubkey ? agentProfileModelByPubkey.get(item.pubkey) : undefined);
       const agentFor = (pubkey: string | undefined) =>
         rosterAgent(pubkey, {
           agentPubkey: rowAgentPubkey,
@@ -198,6 +215,23 @@ export function useChatTranscriptRenderer([
           agentFace: rowAgentFace,
           agentHandle: rowAgentHandle,
         }, agentByPubkey);
+      // System lines and agent-to-agent messages are avatar-only pills; a
+      // folded run shares one wrapping row.
+      const pillRun = item.pillRun ??
+        (isPillMessage(item) || isAgentToAgentMessage(item, knownAgentPubkeys) ? [item] : null);
+      if (pillRun) {
+        return (
+          <TranscriptPills
+            run={pillRun}
+            resolve={resolvePillIdentity}
+            onOpenIdentity={handleOpenSystemIdentity}
+            onOpenUrl={handleOpenGitHubEvent}
+            onOpenBrief={openCurrentBrief}
+            onOpenCorner={openCorner}
+            cornerId={isCorner ? decodedId : undefined}
+          />
+        );
+      }
       // An agent's order or report is ordinary transcript: the recipient leads
       // the text as an @mention and the row keeps its own author's byline.
       item = agentCommandTranscriptMessage(item, roomParticipants);
@@ -477,9 +511,6 @@ export function useChatTranscriptRenderer([
         <OrdinaryLedgerMessage
           message={item}
           firstBylineOfDay={firstBylineOfDay}
-          // The byline shows the agent's model from its profile; an agent
-          // with no profile model keeps the plain `AGENT` word.
-          agentModel={modelForRow}
           desktopLayout={rowDesktopLayout}
           announcementFeed={isReadOnlyDirectMessage}
           {...(knownAgent ? { agent: knownAgent } : {})}
@@ -542,6 +573,8 @@ export function useChatTranscriptRenderer([
       );
     },
     [
+      knownAgentPubkeys,
+      resolvePillIdentity,
       rowActions,
       openCorner,
       isDirectMessage,
@@ -686,12 +719,12 @@ export function useChatTranscriptRenderer([
       immediatelyPrecedingMessage: preceding,
       continued: continuedSpeakerIds(pair.map(message => ({
         id: message.id,
-        speaker: ledgerSpeakerKey(message, knownAgentPubkeysFor(agentByPubkey)),
+        speaker: ledgerSpeakerKey(message, knownAgentPubkeys),
         isMachine: message.isAgentActivity,
         hasReplyReference: Boolean(message.replyToId),
       }))).has(item.id),
     };
-  }, [agentByPubkey, visibleMessages]);
+  }, [knownAgentPubkeys, visibleMessages]);
 
   const renderItem = useRoomMessageRenderItem({
     render: renderMessage,
@@ -700,8 +733,6 @@ export function useChatTranscriptRenderer([
     continuedIds: continuedAttributionIds,
     precedingMessageById: immediatelyPrecedingVisibleMessageById,
     messageById: visibleMessageById,
-    arrivingCardIds,
-    cardMotionStore: transcriptCardMotionStore,
     firstNewMessageId,
     arrivalFlashMessageId,
     sourceLandingFlashMessageId,

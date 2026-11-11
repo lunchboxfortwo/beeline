@@ -10,6 +10,7 @@ import { HullModal } from '../sources/components/buzz/HullDialog';
 import { ViewerConversationDock } from '../sources/components/buzz/ViewerConversationDock';
 import { publishViewerConversation } from '../sources/buzz/viewer-conversation';
 import type { RoomViewMessage } from '@beeline/api-contract/phone';
+import { GrammarProvider } from '../sources/ui/GrammarProvider';
 UnistylesRuntime.setTheme('obsidian');
 const text = '**FIRST LINE**\n\n' + Array.from({ length: 45 }, (_, i) => `- **State ${i+1}**: A long reply about call states and endings remains readable while the artifact stays visible.`).join('\n') + '\n\n**NEWEST LINE**';
 const send = async () => {
@@ -42,4 +43,4 @@ function Proof() {
   </View>;
   return <SafeAreaProvider><KeyboardProvider preload={false}>{warm ? content : <HullModal visible placement="fill" dismissOnBackdrop={false} onRequestClose={() => {}}>{content}</HullModal>}</KeyboardProvider></SafeAreaProvider>;
 }
-registerRootComponent(Proof);
+registerRootComponent(() => <GrammarProvider><Proof /></GrammarProvider>);

@@ -1,6 +1,6 @@
 import React, { useEffect, useState } from 'react';
 import { Image, Platform, StyleSheet, View } from 'react-native';
-import Svg, { G, Path, Rect, SvgUri } from 'react-native-svg';
+import Svg, { G, Path, Rect, SvgUri, Text as SvgText } from 'react-native-svg';
 import { isConnectorLogoUrl } from '@beeline/api-contract/phone';
 import {
   ALIVE_RING_PAD,
@@ -14,7 +14,8 @@ import {
   type IdentityPalette,
 } from '@/buzz/identity-mark';
 import { resolveFace } from '@/buzz/faces';
-import { PERSON_PLATE, agentFaceLayers, personFaceLayers } from '@/buzz/faces/face-tile';
+import { PERSON_PLATE, agentFaceLayers } from '@/buzz/faces/face-tile';
+import { INK } from '@/buzz/faces/animals';
 import { SYSTEM_IDENTITY_PUBKEY } from '@/buzz/system-identity';
 import beelineMark from '@/buzz/beeline-mark.json';
 import { HullLivePulse } from './MonoHull';
@@ -29,6 +30,8 @@ type IdentityMarkBaseProps = {
    *  "Index rows" — selection reads three redundant ways, none a box). */
   selected?: boolean;
   name?: string;
+  /** A person's handle: the initial's source when there is no display name. */
+  handle?: string;
   avatarUrl?: string;
   testID?: string;
 };
@@ -62,10 +65,10 @@ export type IdentityMarkProps = AgentIdentityMarkProps | NonAgentIdentityMarkPro
 
 // ── The face tile ────────────────────────────────────────────────────────────
 //
-// People and agents are Speakeasy's twelve creatures (`buzz/faces`). The tile
-// is a square plate at the house radius; the plate's polarity is the class:
-// a coloured creature on ink is a person, an ink creature on colour is an
-// agent. The gold alive ring is drawn around the plate.
+// Agents are Speakeasy's twelve creatures (`buzz/faces`) on a plate in their
+// hue. A person is their first initial in their hue on the person plate the
+// animals use, framed the same way (build spec → Identity marks). The gold
+// alive ring is drawn around the plate.
 
 /** The one box radius in the product (`groknight.radius`). */
 const FACE_PLATE_RADIUS = 3;
@@ -125,6 +128,17 @@ function leftHalfPath(): string {
     `M${right} ${top}H${left + r}A${r} ${r} 0 0 0 ${left} ${top + r}` +
     `V${bottom - r}A${r} ${r} 0 0 0 ${left + r} ${bottom}H${right}Z`
   );
+}
+
+/** A person's generated mark: the first letter of the display name, else the handle. */
+export function personInitial(name?: string, handle?: string): string {
+  const source = (name?.trim() || handle?.trim() || '').replace(/^[@#]+/, '').trim();
+  return (Array.from(source)[0] ?? '?').toUpperCase();
+}
+
+/** A personal photo the server stored durably for this person (`/v1/person-avatars/`). */
+export function isPersonPictureUrl(avatarUrl?: string): boolean {
+  return Boolean(avatarUrl && /\/v1\/person-avatars\/[0-9a-f-]{36}$/i.test(avatarUrl));
 }
 
 function cellFill(cell: CypherCell, palette: IdentityPalette): string {
@@ -211,7 +225,7 @@ function WorkspacePlate({
  * correctly.
  */
 export const IdentityMark = React.memo(function IdentityMark(props: IdentityMarkProps) {
-  const { seed, kind, size = 40, selected = false, name, avatarUrl, testID } = props;
+  const { seed, kind, size = 40, selected = false, name, handle, avatarUrl, testID } = props;
   // Defensive, not just typed: even a value smuggled past the union at runtime
   // (an untyped caller, a stale bundle) can only ever light gold on an agent.
   const alive = props.kind === 'agent' ? Boolean(props.alive) : false;
@@ -224,10 +238,13 @@ export const IdentityMark = React.memo(function IdentityMark(props: IdentityMark
   // narrow lane does not weaken the product-wide no-photo rule for humans.
   const showConnectorLogo =
     kind === 'human' && isConnectorLogoUrl(avatarUrl) && failedAvatar !== avatarUrl;
-  // Workspace pictures are the sole photo exception. Human and agent relay
-  // photos stay inert even when an untyped/stale caller supplies avatarUrl.
+  // Pictures: a workspace's upload, an agent's generated portrait, and a
+  // person's own uploaded photo. Any other relay URL (a sign-in provider's
+  // photo) stays inert, so a person shows their initial until they upload.
   const showGeneratedAvatar =
     kind === 'agent' && Boolean(isGeneratedAgentAvatarUrl(avatarUrl) && failedAvatar !== avatarUrl);
+  const showPersonPicture =
+    kind === 'human' && isPersonPictureUrl(avatarUrl) && failedAvatar !== avatarUrl;
   const showRelayAvatar = kind === 'workspace' && Boolean(avatarUrl && failedAvatar !== avatarUrl);
 
   useEffect(() => setFailedAvatar(null), [avatarUrl]);
@@ -313,6 +330,47 @@ export const IdentityMark = React.memo(function IdentityMark(props: IdentityMark
   const plate = kind === 'agent' ? palette.mid : PERSON_PLATE[mode];
   const ringSide = size + ALIVE_RING_PAD * 2;
 
+  if (kind === 'human') {
+    // One image named once: the letter is SVG text, so the tile is the image
+    // and its label is what a screen reader hears.
+    return (
+      <View
+        accessibilityLabel={label}
+        accessibilityRole="image"
+        accessible
+        style={[styles.frame, { width: size, height: size }]}
+        testID={testID}
+      >
+        <View style={[styles.plate, { width: size, height: size, backgroundColor: plate }]} testID="identity-face-plate">
+          {showPersonPicture ? (
+            <Image
+              source={{ uri: avatarUrl! }}
+              resizeMode="cover"
+              style={styles.image}
+              onError={() => setFailedAvatar(avatarUrl ?? null)}
+              testID="identity-person-picture"
+            />
+          ) : (
+            // The initial in the person's hue; on the cream plate it carries
+            // the animals' Ink contrast edge, because the hue alone is too faint.
+            <Svg width={size} height={size} viewBox="0 0 100 100" testID="identity-person-initial">
+              <Rect width={100} height={100} fill={PERSON_PLATE[mode]} />
+              {mode === 'light' ? (
+                <SvgText x={50} y={69} textAnchor="middle" fontSize={56} fontFamily="SpaceGrotesk-SemiBold"
+                  fill={INK} stroke={INK} strokeWidth={5} strokeLinejoin="round">
+                  {personInitial(name, handle)}
+                </SvgText>
+              ) : null}
+              <SvgText x={50} y={69} textAnchor="middle" fontSize={56} fontFamily="SpaceGrotesk-SemiBold" fill={palette.mid}>
+                {personInitial(name, handle)}
+              </SvgText>
+            </Svg>
+          )}
+        </View>
+      </View>
+    );
+  }
+
   return (
     <View
       accessibilityLabel={label}
@@ -333,7 +391,7 @@ export const IdentityMark = React.memo(function IdentityMark(props: IdentityMark
           />
         ) : (
           <Svg width={size} height={size} viewBox="0 0 100 100">
-            {kind === 'agent' ? agentFaceLayers(face) : personFaceLayers(face, palette.mid, mode)}
+            {agentFaceLayers(face)}
           </Svg>
         )}
       </View>

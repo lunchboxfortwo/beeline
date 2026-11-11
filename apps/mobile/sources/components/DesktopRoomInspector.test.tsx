@@ -1,6 +1,9 @@
 const computerFocus = vi.hoisted(() => ({ active: true }));
 vi.mock('@/buzz/use-surface-focus', () => ({ useSurfaceFocus: () => computerFocus.active }));
 vi.mock('@expo/vector-icons/Ionicons', async () => { const R = await import('react'); return { default: (props: any) => R.createElement('Ionicons', props) }; });
+vi.mock('tamagui', async () => (await import('@/ui/screens/transcript/grammar-hosts.test-support')).tamaguiHosts());
+vi.mock('lucide-react-native', async () => (await import('@/ui/screens/transcript/grammar-hosts.test-support')).lucideHosts());
+vi.mock('react-native-safe-area-context', () => ({ useSafeAreaInsets: () => ({ top: 0, bottom: 0, left: 0, right: 0 }) }));
 vi.mock('expo-haptics', () => ({ ImpactFeedbackStyle: { Light: 'Light' }, impactAsync: async () => undefined }));
 vi.mock('react-native-keyboard-controller', async () => { const R = await import('react'); return { KeyboardAvoidingView: (props: any) => R.createElement('View', props, props.children) }; });
 import * as React from 'react';
@@ -26,7 +29,7 @@ vi.mock('@/buzz/surface-storage', () => ({
 const phoneOperation = vi.hoisted(() => vi.fn());
 const publishMessage = vi.hoisted(() => vi.fn<(event: { text: string }) => Promise<unknown>>());
 const modalConfirm = vi.hoisted(() => vi.fn());
-const openCornerBriefViewer = vi.hoisted(() => vi.fn());
+const openPlace = vi.hoisted(() => vi.fn());
 /** Scroll calls the transcript makes on its list, in order. */
 const listScrolls = vi.hoisted(() => [] as string[]);
 
@@ -122,6 +125,10 @@ vi.mock('@/components/buzz/CornerOpenedMarker', async () => {
   const ReactModule = await import('react');
   return { CornerOpenedMarkers: (props: any) => ReactModule.createElement('CornerOpenedMarkers', props) };
 });
+vi.mock('@/components/buzz/TranscriptPills', async () => {
+  const ReactModule = await import('react');
+  return { TranscriptPills: (props: any) => ReactModule.createElement('TranscriptPills', props) };
+});
 vi.mock('@/components/buzz/Ledger', async () => {
   const ReactModule = await import('react');
   return {
@@ -177,7 +184,7 @@ vi.mock('@/sync/transport', () => ({
 }));
 vi.mock('@/sync/transport/monolith-operation', () => ({ monolithPhoneOperation: phoneOperation, phoneOperationFailureReason: (reason: unknown) => String(reason) }));
 vi.mock('@/modal', () => ({ Modal: { confirm: modalConfirm } }));
-vi.mock('@/components/buzz/corner-brief-viewer', () => ({ openCornerBriefViewer }));
+vi.mock('@/ui/shell/panel', () => ({ openPlace }));
 vi.mock('@/buzz/desktop-workbench-state', async (importOriginal) => ({
   ...(await importOriginal<typeof import('@/buzz/desktop-workbench-state')>()),
   loadDesktopPaneWidth: vi.fn(async () => 400),
@@ -188,6 +195,7 @@ import { loadBuzzIdentity } from '@/auth/buzz-identity-storage';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { textDraftKey } from '@/buzz/text-draft-store';
 import { acceptCornerStatusFrame, resetRoomCornerStore } from '@/buzz/room-corner-store';
+import { Btn } from '@/ui/grammar';
 import { DesktopRoomInspector } from './DesktopRoomInspector';
 import { buildChannelReferenceIndex } from '@/buzz/channel-reference';
 
@@ -381,8 +389,9 @@ describe('DesktopRoomInspector work pane', () => {
       act(() => marker.props.onOpenCorner('opened-target'));
     } else {
       expect(tree.root.findAllByType('CornerOpenedMarkers' as any)).toHaveLength(0);
-      const row = tree.root.findByType('NotificationLifecycleCard' as any);
-      expect(row.props.message.notificationLifecycleRun.items[0]).toMatchObject({ state: 'Opened', kind: 'corner', cornerId: 'opened-target' });
+      // The lifecycle run is a system pill; its rows open their thread.
+      const row = tree.root.findByType('TranscriptPills' as any);
+      expect(row.props.run[0].notificationLifecycleRun.items[0]).toMatchObject({ state: 'Opened', kind: 'corner', cornerId: 'opened-target' });
       act(() => row.props.onOpenCorner('opened-target'));
     }
     expect(onOpenCorner).toHaveBeenCalledWith('opened-target');
@@ -611,7 +620,8 @@ describe('DesktopRoomInspector work pane', () => {
     await act(async () => {
       tree = create(<DesktopRoomInspector {...props({ client, selectedCornerId: 'working' })} />);
     });
-    expect(tree.root.findAllByType('LedgerSystemLine' as any)).toHaveLength(1);
+    // The system notice is a pill from the Beeline account.
+    expect(tree.root.findAllByType('TranscriptPills' as any).map((node: any) => node.props.run.map((m: any) => m.id))).toEqual([['notice']]);
     expect(
       tree.root.findAllByType('OrdinaryLedgerMessage' as any).map((node: any) => ({
         id: node.props.message.id,
@@ -653,8 +663,8 @@ describe('DesktopRoomInspector work pane', () => {
     expect(tree.root.findByProps({ testID: 'desktop-work-corner-transcript' })).toBeTruthy();
     expect(tree.root.findByType('ConversationComposer' as any).props.placeholder).toBeUndefined();
     const header = tree.root.findByProps({ testID: 'desktop-work-cockpit-header' });
-    const buttons = header.findAllByType('Pressable' as any);
-    expect(buttons.map((button: any) => button.props.accessibilityLabel)).toEqual([
+    const buttons = header.findAllByType(Btn);
+    expect(buttons.map((button: any) => button.props.label)).toEqual([
       'Open in the main pane',
       'Close work pane',
     ]);
@@ -680,13 +690,10 @@ describe('DesktopRoomInspector work pane', () => {
         />,
       );
     });
-    const link = tree.root
-      .findAllByType('Pressable' as any)
-      .find((node: any) => node.props.testID === 'desktop-work-brief');
-    expect(link.props.accessibilityRole).toBe('link');
-    expect(link.props.accessibilityLabel).toBe('Read brief');
+    const link = tree.root.findAllByType(Btn).find((node: any) => node.props.testID === 'desktop-work-brief')!;
+    expect(link.props.label).toBe('Read the brief');
     act(() => link.props.onPress());
-    expect(openCornerBriefViewer).toHaveBeenCalledWith(cornerBrief);
+    expect(openPlace).toHaveBeenCalledWith({ kind: 'brief', roomId: 'working' }, true);
 
     await act(async () => tree.unmount());
     const bare = { ...detail, cornerBrief: undefined };
@@ -698,7 +705,7 @@ describe('DesktopRoomInspector work pane', () => {
       );
     });
     expect(
-      tree.root.findAllByType('Pressable' as any).filter((node: any) => node.props.testID === 'desktop-work-brief'),
+      tree.root.findAllByType(Btn).filter((node: any) => node.props.testID === 'desktop-work-brief'),
     ).toHaveLength(0);
   });
 
