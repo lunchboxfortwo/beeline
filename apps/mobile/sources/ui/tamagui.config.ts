@@ -1,6 +1,9 @@
 import { createTamagui } from 'tamagui';
 import { defaultConfig } from '@tamagui/config/v6';
-import { animationsCSS } from '@tamagui/config/animations-css';
+// `animations` is the driver both platforms export: CSS on web, React Native
+// animations on phones. `animationsCSS` exists only on web, so on phones every
+// Sheet threw Tamagui error 008 (no animation driver).
+import { animations } from '@tamagui/config/animations-css';
 import { beelineThemes, stonePalette as STONE, type BeelineThemeTokens } from '@/buzz/groknight';
 
 /**
@@ -72,7 +75,7 @@ const body = {
 
 export const tamaguiConfig = createTamagui({
     ...defaultConfig,
-    animations: animationsCSS,
+    animations,
     // Longhand style props (paddingHorizontal, backgroundColor) are the grammar's spelling.
     settings: { ...defaultConfig.settings, onlyAllowShorthands: false },
     themes,
