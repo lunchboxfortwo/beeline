@@ -35,11 +35,12 @@ export function versionAtLeast(actual: string, minimum: string): boolean {
 
 /** One cancellable update attempt; no agent or control request awaits it. */
 export class ReleaseTransaction {
-  #attempt?: { controller: AbortController; timer: NodeJS.Timeout };
+  #attempt?: { controller: AbortController; timer?: NodeJS.Timeout };
   #preparing?: Promise<void>;
   #handingOff?: Promise<void>;
   #prepared?: string;
   #minimum?: string;
+  #force = false;
   #completed = false;
   #pendingCheck = false;
   constructor(
@@ -58,8 +59,8 @@ export class ReleaseTransaction {
   get pending(): Promise<void> | undefined { return this.#preparing ?? this.#handingOff; }
 
   private begin() {
-    if (this.#attempt) return this.#attempt;
-    const controller = new AbortController();
+    if (this.#attempt?.timer) return this.#attempt;
+    const controller = this.#attempt?.controller ?? new AbortController();
     const timer = setTimeout(() => this.fail(controller.signal,
       new Error('update handoff timed out; keeping current release')), UPDATE_HANDOFF_TIMEOUT_MS);
     timer.unref();
@@ -115,8 +116,9 @@ export class ReleaseTransaction {
     this.#preparing = operation;
   }
 
-  async prepared(releaseId: string): Promise<void> {
+  async prepared(releaseId: string, force = false): Promise<void> {
     if (this.#completed) return;
+    this.#force ||= force;
     const { signal } = this.begin().controller;
     try {
       const targetLayout = { ...this.options.layout,
@@ -147,11 +149,15 @@ export class ReleaseTransaction {
 
   idleChanged(): void {
     if (this.#completed || !this.#prepared || this.#preparing || this.#handingOff) return;
+    // Preparation is complete. Waiting for idle has no deadline; keep the
+    // verified boot selection until an idle event or the next native restart.
+    clearTimeout(this.#attempt?.timer);
+    if (this.#attempt) this.#attempt.timer = undefined;
+    const interrupted = this.#force || Boolean(this.#minimum);
+    if (!interrupted && !this.options.idle()) return;
     const { signal } = this.begin().controller;
     const operation = Promise.resolve().then(async () => {
       if (signal.aborted) return;
-      const interrupted = Boolean(this.#minimum);
-      if (!interrupted && !this.options.idle()) return;
       await this.options.handoff(this.#prepared!, interrupted, signal);
       if (!signal.aborted) {
         this.#completed = true;
@@ -167,6 +173,7 @@ export class ReleaseTransaction {
 
   dispose(): void {
     this.#pendingCheck = false;
+    this.#force = false;
     if (!this.#attempt) return;
     clearTimeout(this.#attempt.timer);
     this.#attempt.controller.abort();

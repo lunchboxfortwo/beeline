@@ -87,16 +87,23 @@ it('abandons a wedged handoff once and fences its late completion', async () => 
     await stuck;
   });
   const { update, failed } = fixture(handoff);
-  const preparing = update.prepared('new');
+  let idle = false;
+  update.options.idle = () => idle;
+  await update.prepared('new');
+  vi.advanceTimersByTime(30 * 60_000);
+  expect(failed).not.toHaveBeenCalled();
+  idle = true;
+  update.idleChanged();
   await entered;
   const pending = update.pending;
-  vi.runOnlyPendingTimers();
+  vi.advanceTimersByTime(179_999);
+  expect(signal?.aborted).toBe(false);
+  vi.advanceTimersByTime(1);
   expect(signal?.aborted).toBe(true);
   expect(failed).toHaveBeenCalledTimes(1);
   expect(String(failed.mock.calls[0]![0])).toContain('update handoff timed out');
   expect(update.desiredRelease).toBeUndefined();
   release();
-  await preparing;
   await pending;
   update.idleChanged();
   expect(handoff).toHaveBeenCalledTimes(1);
@@ -151,6 +158,47 @@ it('hands over on the next idle event without pausing active work', async () => 
   expect(handoff).toHaveBeenCalledWith('new', false, expect.any(AbortSignal));
   expect(failed).not.toHaveBeenCalled();
   expect(vi.getTimerCount()).toBe(0);
+});
+
+it('keeps a prepared release staged throughout a long busy period, then hands off', async () => {
+  vi.useFakeTimers();
+  const root = await mkdtemp(join(tmpdir(), 'beeline-busy-update-'));
+  const layout = { libDir: join(root, 'lib'), releasesRoot: join(root, 'releases'), binDir: join(root, 'bin') };
+  let idle = false;
+  const handoff = vi.fn(async () => {});
+  const failed = vi.fn();
+  const update = new ReleaseTransaction({ layout, loadedRelease: 'old', env: {}, idle: () => idle,
+    prepare: async () => { await writeUpdateState(layout, { stagedReleaseId: 'new', lastCheckResult: 'verified' }); },
+    handoff, failed, changed: vi.fn() });
+  try {
+    update.notify('new');
+    await update.pending;
+    await update.pending;
+    vi.advanceTimersByTime(30 * 60_000);
+    await update.pending;
+    expect(failed).not.toHaveBeenCalled();
+    expect(update.desiredRelease).toBe('new');
+    expect((await readUpdateState(layout)).stagedReleaseId).toBe('new');
+    expect(handoff).not.toHaveBeenCalled();
+    expect(vi.getTimerCount()).toBe(0);
+    idle = true;
+    update.idleChanged();
+    await update.pending;
+    expect(handoff).toHaveBeenCalledWith('new', false, expect.any(AbortSignal));
+    expect(handoff).toHaveBeenCalledTimes(1);
+  } finally { update.dispose(); await rm(root, { recursive: true, force: true }); }
+});
+
+it('hands off a forced update while agents are busy', async () => {
+  const handoff = vi.fn(async () => {});
+  const { update, failed } = fixture(handoff);
+  update.options.idle = () => false;
+  try {
+    await update.prepared('new', true);
+    await update.pending;
+    expect(handoff).toHaveBeenCalledWith('new', true, expect.any(AbortSignal));
+    expect(failed).not.toHaveBeenCalled();
+  } finally { update.dispose(); }
 });
 
 it('preserves a release notification arriving during an earlier preparation', async () => {

@@ -662,7 +662,7 @@ async function serveMachineHelper(
       layout &&
       (!request.sourceGeneration || request.sourceGeneration === generation)
     ) {
-      void update?.prepared(request.releaseId)
+      void update?.prepared(request.releaseId, request.force === true)
         .catch(error => console.error('[helper] update handoff failed:', error));
     }
     writeStatus();

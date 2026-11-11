@@ -196,8 +196,11 @@ policy, homes and sessions. Revoked or unrecognized identities show `needs
 reconnect`; other agents continue serving.
 
 One release transaction prepares in a private worker while intake stays open.
-It hands over at a quiet gap. Preparation, idle waiting and handoff share one
-three-minute timeout. If that attempt cannot finish, Beeline cancels it,
+It hands over at a quiet gap. Preparation and handoff each use the same
+three-minute timeout, disarmed while waiting for idle. A prepared release stays
+staged throughout busy periods and boots on the next restart if no quiet gap
+arrives. `beeline update --force` hands off while busy, journaling interrupted
+commands through the same path as a server minimum. If an operation cannot finish, Beeline cancels it,
 records the failure in local helper status and keeps the current release
 serving; it does not schedule a retry. A later explicit release notification
 or update request can start a new attempt. Pending wakes stay on the server
@@ -248,7 +251,7 @@ Paths and commands below are relative to the repository root. Read these invaria
 - **`<prefix>/lib/beeline` is the active bundle anchor**, a symlink into `lib/beeline-releases/<id>` swung by rename(2) (`self-update.ts`). Never suggest `npx beeline` (an unrelated package); recovery is `npx usebeeline update`.
 - **Update restarts are silent and exit directly.** `runMachineHelper` closes the machine link with `HELPER_UPDATE_CLOSE_CODE`/`HELPER_UPDATE_CLOSE_REASON`, then exits synchronously without awaiting agent teardown; `DaemonAgentSession` releases presence without an offline notice only for that signal. Unexpected loss still notices the owner (`machine-offline.test.ts`, `daemon-live.test.ts`, `machine-update-handoff.test.ts`). Release delivery pushes helpers only (`release-notify.ts`).
 - **Linux handovers use a fixed one-second native restart delay.** `native-helper.ts` renders no escalating restart steps. The running helper refreshes the installed unit with `daemon-reload`, without restarting the service. `recovery.startup.test.ts` proves verified staged/active boot makes no publication request; `systemd.test.ts` covers unit convergence.
-- **Routine release notices preserve active turns.** `ReleaseNotifier` pushes published helper releases; `MachineLink` reconciles the manifest once after first registration, with no periodic check. `ReleaseTransaction` dispatches preparation and waits for an idle event without pausing admission. One three-minute timeout abandons an unfinished attempt and preserves serving on the current release. Server minimums journal and interrupt immediately before the verified handoff. Late asynchronous completions cannot restart the helper after cancellation (`managed-update.startup.test.ts`, `machine-update-handoff.test.ts`, `agent-runtime.startup.test.ts`). Installation remains checksum verification plus atomic activation.
+- **Routine release notices preserve active turns.** `ReleaseNotifier` pushes published helper releases; `MachineLink` reconciles the manifest once after first registration, with no periodic check. `ReleaseTransaction` dispatches preparation and waits for an idle event without pausing admission or discarding the staged boot selection. Its single three-minute timeout bounds preparation and handoff separately, never idle waiting. Server minimums and explicit forced updates journal and interrupt immediately before the verified handoff. Late asynchronous completions cannot restart the helper after cancellation (`managed-update.startup.test.ts`, `machine-update-handoff.test.ts`, `agent-runtime.startup.test.ts`). Installation remains checksum verification plus atomic activation.
 - `unified-release.yml` builds Linux and Mac bundles in parallel; `.github/actions/daemon-leg/` collects and promotes their verified outputs; `launchd.ts` supervises macOS (no bwrap). `https://usebeeline.app/dl/manifest.json` stays pinned; runbook `docs/cli-bundle-channel.md`.
 
 ### Installed bundle retention
