@@ -1,3 +1,4 @@
+import { activateAgentSession, discardAgentSession, sessionHasCurrentContext, watchSessionClaudeLogin } from './agent-session-lifecycle.js';
 import { helperUsageBinding, postChangedAgentUsage } from './helper-usage-binding.js';
 import { agentBehavior } from './agent-command.js';
 import { dependencyFingerprint } from './dependency-generation.js';
@@ -5,7 +6,7 @@ import { mergeHarnessTurnMetrics } from './harness-turn-tokens.js';
 import type { InterruptedTurn } from './force-update-journal.js';
 
 import { AcpClient } from './acp.js';
-import { expectedMountedImportedMcpServerNames, repairRoomAgentCredentialLinks, watchRoomClaudeLogin, writeBackRoomClaudeLogin } from './agent-home.js';
+import { expectedMountedImportedMcpServerNames, writeBackRoomClaudeLogin } from './agent-home.js';
 import { readOpenRouterKeyUsage } from './openrouter-key-usage.js';
 import { HarnessQuotaReader, quotaAxiProvider } from './harness-quota.js';
 import { sessionConfigFingerprint } from './session-config-fingerprint.js';
@@ -245,12 +246,7 @@ import { MonolithCornerTurnLoop, WorkspaceRoster } from './monolith-corner-turn.
    * corner is idle reaches other Rooms at once (see `watchRoomClaudeLogin`).
    */
   export function monolithCornerTurnLoopWatchClaudeLogin(ctx: MonolithCornerTurnLoop): void {
-    ctx.stopClaudeLoginWatch();
-    if (!agentBehavior(ctx.options.config.agentKind).sharedLoginWriteBack || !ctx.options.config.agentHomeRoot) return;
-    ctx.claudeLoginWatch = watchRoomClaudeLogin({
-      root: ctx.options.config.agentHomeRoot,
-      operatorHome: ctx.options.config.operatorHome,
-    });
+    watchSessionClaudeLogin(ctx);
   }
 
 
@@ -261,20 +257,14 @@ import { MonolithCornerTurnLoop, WorkspaceRoster } from './monolith-corner-turn.
 
 
   export async function monolithCornerTurnLoopDiscardSession(ctx: MonolithCornerTurnLoop, preserveConversation = false, stopBackground = false): Promise<void> {
-    if (!preserveConversation) ctx.warmTranscript.forgetSession();
-    const client = ctx.client;
-    ctx.stopClaudeLoginWatch();
-    ctx.client = undefined;
-    ctx.sessionId = undefined;
-    ctx.sessionContextPath = undefined;
-    ctx.sessionFingerprint = undefined;
-    ctx.sessionCodegraphReady = false;
-    ctx.pinnedProviderOverride = undefined;
-    ctx.sessionModel = null;
-    const cancelled = ctx.closePushed || ctx.forcedStop || ctx.options.signal?.aborted ||
-      (ctx.currentTurn && ctx.stoppedTurns.has(ctx.currentTurn.requestId));
-    if (client?.hasBackgroundTools && !cancelled && !stopBackground) void ctx.retainBackgroundClient(client);
-    else if (client) await stopAgentProcess(client);
+    await discardAgentSession(ctx, preserveConversation, () => {
+      ctx.sessionModel = null;
+    }, async client => {
+      const cancelled = ctx.closePushed || ctx.forcedStop || ctx.options.signal?.aborted ||
+        (ctx.currentTurn && ctx.stoppedTurns.has(ctx.currentTurn.requestId));
+      if (client.hasBackgroundTools && !cancelled && !stopBackground) void ctx.retainBackgroundClient(client);
+      else await stopAgentProcess(client);
+    });
   }
 
 
@@ -282,7 +272,7 @@ import { MonolithCornerTurnLoop, WorkspaceRoster } from './monolith-corner-turn.
    *  session whose persona, model pin, or mounted MCP set the operator has
    *  since changed, or whose harness process has exited. */
   export async function monolithCornerTurnLoopSessionIsCurrent(ctx: MonolithCornerTurnLoop): Promise<boolean> {
-    if (!ctx.client?.isAlive || ctx.sessionContextPath !== ctx.commandContext.path) return false;
+    if (!sessionHasCurrentContext(ctx)) return false;
     return (await ctx.currentSessionFingerprint()) === ctx.sessionFingerprint;
   }
 
@@ -343,25 +333,5 @@ import { MonolithCornerTurnLoop, WorkspaceRoster } from './monolith-corner-turn.
 
   export async function monolithCornerTurnLoopActivate(ctx: MonolithCornerTurnLoop, trace?: TurnTrace): Promise<string> {
     if (ctx.options.config.agentProgramError) throw new Error(ctx.options.config.agentProgramError);
-    if (ctx.client?.isAlive && ctx.sessionId && ctx.sessionContextPath === ctx.commandContext.path) {
-      if (ctx.options.config.agentHomeRoot) {
-        await repairRoomAgentCredentialLinks({
-          root: ctx.options.config.agentHomeRoot,
-          operatorHome: ctx.options.config.operatorHome,
-          writeBackNewerClaudeLogin: agentBehavior(ctx.options.config.agentKind).sharedLoginWriteBack === true,
-        });
-      }
-      return ctx.sessionId;
-    }
-    // A client without a usable session still owns a harness process.
-    if (ctx.client) await ctx.discardSession(true);
-    try {
-      return await ctx.activateCold(trace);
-    } catch (error) {
-      // Cleanup must not hide the activation failure that owns the receipt.
-      await ctx.discardSession(true).catch(cleanupError =>
-        console.error('[body] failed to stop harness after activation failure:', cleanupError),
-      );
-      throw error;
-    }
+    return activateAgentSession(ctx, () => ctx.activateCold(trace));
   }

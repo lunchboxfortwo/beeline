@@ -1,3 +1,4 @@
+import { activateAgentSession, discardAgentSession, sessionHasCurrentContext, watchSessionClaudeLogin } from './agent-session-lifecycle.js';
 import { helperUsageBinding, postChangedAgentUsage } from './helper-usage-binding.js';
 import { agentBehavior } from './agent-command.js';
 import { mergeHarnessTurnMetrics } from './harness-turn-tokens.js';
@@ -5,7 +6,7 @@ import type { InterruptedTurn } from './force-update-journal.js';
 import { homedir } from 'node:os';
 import { join } from 'node:path';
 import { workspaceAssetPaths, workspaceCacheEnv } from './workspace-assets.js';
-import { expectedMountedImportedMcpServerNames, mountedImportedMcpServerNames, repairRoomAgentCredentialLinks, watchRoomClaudeLogin, writeBackRoomClaudeLogin } from './agent-home.js';
+import { expectedMountedImportedMcpServerNames, mountedImportedMcpServerNames, writeBackRoomClaudeLogin } from './agent-home.js';
 import { readOpenRouterKeyUsage } from './openrouter-key-usage.js';
 import { HarnessQuotaReader, quotaAxiProvider } from './harness-quota.js';
 import { deliverAttachments, withoutImageData, type DeliveredAttachment } from './attachment-delivery.js';
@@ -293,12 +294,7 @@ import { MonolithRoomTurnLoop, WorkspaceRoster, HumanMessage, RoomRepositoryStat
    * Room is idle reaches other Rooms at once (see `watchRoomClaudeLogin`).
    */
   export function monolithRoomTurnLoopWatchClaudeLogin(ctx: MonolithRoomTurnLoop): void {
-    ctx.stopClaudeLoginWatch();
-    if (!agentBehavior(ctx.options.config.agentKind).sharedLoginWriteBack || !ctx.options.config.agentHomeRoot) return;
-    ctx.claudeLoginWatch = watchRoomClaudeLogin({
-      root: ctx.options.config.agentHomeRoot,
-      operatorHome: ctx.options.config.operatorHome,
-    });
+    watchSessionClaudeLogin(ctx);
   }
 
 
@@ -309,35 +305,17 @@ import { MonolithRoomTurnLoop, WorkspaceRoster, HumanMessage, RoomRepositoryStat
 
 
   export async function monolithRoomTurnLoopDiscardSession(ctx: MonolithRoomTurnLoop, preserveConversation = false): Promise<void> {
-    if (!preserveConversation) ctx.warmTranscript.forgetSession();
-    const client = ctx.client;
-    ctx.stopClaudeLoginWatch();
-    ctx.client = undefined;
-    ctx.sessionId = undefined;
-    ctx.sessionContextPath = undefined;
-    ctx.sessionCwd = undefined;
-    ctx.sessionCommit = undefined;
-    ctx.sessionGitHubToken = undefined;
-    ctx.sessionFingerprint = undefined;
-    ctx.sessionCodegraphReady = false;
-    ctx.pinnedProviderOverride = undefined;
-    if (client) await stopAgentProcess(client);
+    await discardAgentSession(ctx, preserveConversation, () => {
+      ctx.sessionCwd = undefined;
+      ctx.sessionCommit = undefined;
+      ctx.sessionGitHubToken = undefined;
+    }, client => stopAgentProcess(client));
   }
 
 
-  /**
-   * Whether the retained session still matches the agent's server-side
-   * configuration. Retention (C104) is a saving only while what it keeps is
-   * still current, and a session's persona, model pin, and mounted MCP set are
-   * fixed when it opens: they cannot be corrected in place, so a changed one
-   * has to cost a respawn. The check is one round trip — the roster half of
-   * which the turn was going to fetch anyway — against a cold spawn measured
-   * in seconds. A harness process that has exited (a memory-limit kill, a
-   * crash) is never current: handing it back fails the turn with
-   * `AcpClient not started` instead of spawning a fresh one.
-   */
+  /** Retention requires a live harness and unchanged checkout, configuration and MCP context. */
   export async function monolithRoomTurnLoopSessionIsCurrent(ctx: MonolithRoomTurnLoop): Promise<boolean> {
-    if (!ctx.client?.isAlive || ctx.sessionContextPath !== ctx.commandContext.path) return false;
+    if (!sessionHasCurrentContext(ctx)) return false;
     await ctx.refreshTurnCheckout();
     return (
       ctx.sessionCwd === ctx.options.cwd &&
@@ -432,25 +410,5 @@ import { MonolithRoomTurnLoop, WorkspaceRoster, HumanMessage, RoomRepositoryStat
       previousStep = now;
     };
     await ctx.refreshTurnCheckout();
-    if (ctx.client?.isAlive && ctx.sessionId && ctx.sessionContextPath === ctx.commandContext.path) {
-      if (ctx.options.config.agentHomeRoot) {
-        await repairRoomAgentCredentialLinks({
-          root: ctx.options.config.agentHomeRoot,
-          operatorHome: ctx.options.config.operatorHome,
-          writeBackNewerClaudeLogin: agentBehavior(ctx.options.config.agentKind).sharedLoginWriteBack === true,
-        });
-      }
-      return ctx.sessionId;
-    }
-    // A client without a usable session still owns a harness process.
-    if (ctx.client) await ctx.discardSession(true);
-    try {
-      return await ctx.activateCold(trace, startupStep);
-    } catch (error) {
-      // Cleanup must not hide the activation failure that owns the receipt.
-      await ctx.discardSession(true).catch(cleanupError =>
-        console.error('[body] failed to stop harness after activation failure:', cleanupError),
-      );
-      throw error;
-    }
+    return activateAgentSession(ctx, () => ctx.activateCold(trace, startupStep));
   }
