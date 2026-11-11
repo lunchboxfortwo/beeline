@@ -25,46 +25,6 @@ export function grantAskLine(grant: Pick<AgentGrantView, 'kind' | 'target' | 'ap
   return `${VERBS[grant.kind]} ${grant.target}`;
 }
 
-/** The single action line on a pending resource permission. */
-export function grantRequestLine(
-  requester: string,
-  agent: string,
-  grant: Pick<AgentGrantView, 'kind' | 'target' | 'appName'>,
-): string {
-  const app = connectionInstallName(grant);
-  if (app) return `${agent} wants to connect ${app}`;
-  const action = grant.kind === 'path' ? 'read' : grant.kind === 'repository' ? 'write'
-    : grant.kind === 'shared_asset' ? 'isolate' : 'use';
-  return `${requester} wants ${agent} to ${action} ${grant.target}`;
-}
-
-function clock(seconds: number): string {
-  return new Date(seconds * 1000).toLocaleTimeString(undefined, {
-    hour: '2-digit',
-    minute: '2-digit',
-  });
-}
-
-/** `Charles allowed always · 12:41`, `Charles allowed once · 12:41`, `Charles declined · 12:41`. */
-export function grantOutcomeLine(
-  grant: Pick<AgentGrantView, 'status' | 'decidedBy' | 'decidedAt' | 'auto'>,
-): string | null {
-  if (grant.status === 'pending') return null;
-  const who = grant.auto ? 'Beeline' : (grant.decidedBy?.name ?? 'the owner');
-  const verb =
-    grant.status === 'approved'
-      ? grant.auto
-        ? 'auto-approved'
-        : 'allowed always'
-      : grant.status === 'once'
-        ? 'allowed once'
-        : grant.status === 'denied'
-          ? 'declined'
-          : 'revoked';
-  const stamp = grant.decidedAt !== undefined ? ` · ${clock(grant.decidedAt)}` : '';
-  return `${who} ${verb}${stamp}`;
-}
-
 function day(seconds: number): string {
   return new Date(seconds * 1000).toLocaleDateString(undefined, {
     day: 'numeric',
@@ -79,9 +39,7 @@ function day(seconds: number): string {
  * `· one-time` for a grant consumed by its first run, and `denied by` /
  * `revoked by` for the two settled refusals (a refusal has no duration to
  * state). `· auto-approved` marks automatic access, and an expiry is appended
- * when the vault recorded one. Distinct from `grantOutcomeLine`, which stamps
- * the decision with a clock for the transcript card; this one states a date
- * and the grant's standing, which is what a ledger row is read for.
+ * when the vault recorded one. It states a date and the grant's standing, which is what a ledger row is read for.
  */
 export function grantProvenanceLine(
   grant: Pick<

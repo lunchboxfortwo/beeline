@@ -65,6 +65,41 @@ export const SYSTEM_MESSAGE_DAEMON_SERVICE = {
     variables: [],
   },
 
+  'daemon-service.wants-to': {
+    parts: ["wants to"],
+    variables: [],
+  },
+
+  'daemon-service.run': {
+    parts: ["run"],
+    variables: [],
+  },
+
+  'daemon-service.edit': {
+    parts: ["edit"],
+    variables: [],
+  },
+
+  'daemon-service.reach': {
+    parts: ["reach"],
+    variables: [],
+  },
+
+  'daemon-service.spend': {
+    parts: ["spend"],
+    variables: [],
+  },
+
+  'daemon-service.connect-app': {
+    parts: ["connect ", ""],
+    variables: ["app"],
+  },
+
+  'daemon-service.grant-action': {
+    parts: ["", " ", ""],
+    variables: ["verb", "target"],
+  },
+
   'daemon-service.wants': {
     parts: ['wants'],
     variables: [],

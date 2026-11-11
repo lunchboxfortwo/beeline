@@ -204,7 +204,7 @@ export function validateGrantScript(
 
 /** One action line for each remaining permission ask. */
 export function grantCardPhrase(
-  requester: { pubkey: string; kind: 'human' | 'agent'; name: string },
+  _requester: { pubkey: string; kind: 'human' | 'agent'; name: string },
   agent: { pubkey: string; name: string },
   grants: readonly { kind: AgentGrantKind; target: string; appName?: string }[],
 ): SystemPhrase {
@@ -212,20 +212,25 @@ export function grantCardPhrase(
     return { subject: { kind: 'agent', id: agent.pubkey, name: agent.name },
       verb: systemMessage("daemon-service.wants-to-connect"), object: grants.map(grant => connectionInstallName(grant)).join(systemMessage("daemon-service.and")) };
   }
+  const verbs: Record<AgentGrantKind, string> = {
+    command: systemMessage("daemon-service.run"),
+    path: systemMessage("daemon-service.read"),
+    repository: systemMessage("daemon-service.edit"),
+    secret: systemMessage("daemon-service.use"),
+    device: systemMessage("daemon-service.use"),
+    mcp: systemMessage("daemon-service.use"),
+    host: systemMessage("daemon-service.reach"),
+    budget: systemMessage("daemon-service.spend"),
+    shared_asset: systemMessage("daemon-service.isolate"),
+  };
   return {
-    subject: {
-      kind: requester.kind === 'human' ? 'person' : 'agent',
-      id: requester.pubkey,
-      name: requester.name,
-    },
-    verb: systemMessage("daemon-service.wants"),
-    object: grants
-      .map(
-        (grant) =>
-          connectionInstallName(grant) ? systemMessage("daemon-service.to-connect", agent.name, connectionInstallName(grant))
-            : systemMessage("daemon-service.to", agent.name, grant.kind === 'path' ? systemMessage("daemon-service.read") : grant.kind === 'repository' ? systemMessage("daemon-service.write") : grant.kind === 'shared_asset' ? systemMessage("daemon-service.isolate") : systemMessage("daemon-service.use"), grant.target),
-      )
-      .join(systemMessage("daemon-service.and")),
+    subject: { kind: 'agent', id: agent.pubkey, name: agent.name },
+    verb: systemMessage("daemon-service.wants-to"),
+    object: grants.map(grant => {
+      const app = connectionInstallName(grant);
+      return app ? systemMessage("daemon-service.connect-app", app)
+        : systemMessage("daemon-service.grant-action", verbs[grant.kind], grant.target);
+    }).join(systemMessage("daemon-service.and")),
   };
 }
 

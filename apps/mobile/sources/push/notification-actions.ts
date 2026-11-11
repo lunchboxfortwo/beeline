@@ -5,7 +5,6 @@ import {
   grantDecisionForPushAction,
   type AgentGrantDecision,
 } from '@beeline/api-contract/phone';
-import { grantAskLine } from '@/buzz/agent-grant-copy';
 
 /**
  * Inline notification actions: a grant card's No / Once / Always and a Reply
@@ -200,24 +199,14 @@ export interface OutcomeNotification {
 }
 
 const GRANT_DONE: Readonly<Record<AgentGrantDecision, string>> = {
-  once: 'Allowed once',
-  always: 'Always allowed',
+  once: 'Accepted',
+  always: 'Accepted',
   deny: 'Denied',
 };
 
 function withoutAction(data: Data): Data {
   const { categoryId: _categoryId, ...rest } = data;
   return rest;
-}
-
-function grantSubject(data: Data): string {
-  const agent = data.agentName ? `@${data.agentName.replace(/^@/, '')}` : 'The agent';
-  if (!data.grantKind || !data.grantTarget) return agent;
-  const ask = grantAskLine({
-    kind: data.grantKind as Parameters<typeof grantAskLine>[0]['kind'],
-    target: data.grantTarget,
-  });
-  return `${agent} can ${ask}`;
 }
 
 /**
@@ -256,15 +245,14 @@ function platformOutcomeNotification(
         ? {
             identifier: request.notificationId,
             title: 'Beeline',
-            body: request.body,
-            subtitle: GRANT_DONE[request.decision],
+            body: GRANT_DONE[request.decision],
             data: withoutAction(request.data),
             quiet: true,
           }
         : {
             identifier: `${request.notificationId}#done`,
             title: 'Beeline',
-            body: `${GRANT_DONE[request.decision]} · ${grantSubject(request.data)}`,
+            body: GRANT_DONE[request.decision],
             data: withoutAction(request.data),
             quiet: true,
           };

@@ -816,7 +816,7 @@ export const wireShapes: readonly WireShape[] = [
   shape({"kind":"union","choices":[6,812]}),
   shape({"kind":"array","item":813}),
   shape({"kind":"union","choices":[117,118]}),
-  shape({"kind":"union","choices":[12,354,815,800,355]}),
+  shape({"kind":"union","choices":[12,800,354,815,355]}),
   shape({"kind":"literal","value":"squire"}),
   shape({"kind":"union","choices":[6,810]}),
   shape({"kind":"object","properties":{"value":{"node":1,"optional":false},"attention":{"node":5,"optional":true}}}),

@@ -2,8 +2,6 @@ import { describe, expect, it } from 'vitest';
 import type { AgentGrantView } from '@beeline/api-contract/phone';
 import {
   grantAskLine,
-  grantRequestLine,
-  grantOutcomeLine,
   grantProvenanceLine,
 } from './agent-grant-copy';
 
@@ -27,23 +25,6 @@ function grant(overrides: Partial<AgentGrantView>): AgentGrantView {
 }
 
 describe('grant copy', () => {
-  it('R1: names the asking agent and the app on connection cards', () => {
-    expect(grantRequestLine('Alex', '@Bee', { kind: 'mcp', target: 'connection-install:github' }))
-      .toBe('@Bee wants to connect GitHub');
-    expect(grantRequestLine('Alex', '@Bee', { kind: 'mcp', target: 'connection-install:acme', appName: 'Acme Cloud' }))
-      .toBe('@Bee wants to connect Acme Cloud');
-  });
-  it('states each remaining ask as one specific action line', () => {
-    expect(grantRequestLine('Alex', '@Bee', { kind: 'path', target: '/home/alex/report' })).toBe(
-      'Alex wants @Bee to read /home/alex/report',
-    );
-    expect(grantRequestLine('Alex', '@Bee', { kind: 'mcp', target: 'openaiDeveloperDocs' })).toBe(
-      'Alex wants @Bee to use openaiDeveloperDocs',
-    );
-    expect(grantRequestLine('Alex', '@Bee', { kind: 'repository', target: 'team/repo' })).toBe(
-      'Alex wants @Bee to write team/repo',
-    );
-  });
   it('prints one verb per kind in front of the target', () => {
     expect(grantAskLine({ kind: 'command', target: 'fly deploy' })).toBe('run fly deploy');
     expect(grantAskLine({ kind: 'path', target: '~/Design/assets' })).toBe('read ~/Design/assets');
@@ -54,19 +35,6 @@ describe('grant copy', () => {
       'spend $10 of API spend',
     );
     expect(grantAskLine({ kind: 'mcp', target: 'squire' })).toBe('use squire');
-  });
-
-  it('settles into the write-permission style outcome line, and stays silent while pending', () => {
-    expect(
-      grantOutcomeLine(grant({ status: 'pending', decidedBy: undefined, decidedAt: undefined })),
-    ).toBeNull();
-    expect(grantOutcomeLine(grant({}))).toMatch(/^Charles allowed always · \d/);
-    expect(grantOutcomeLine(grant({ status: 'once' }))).toMatch(/^Charles allowed once · \d/);
-    expect(grantOutcomeLine(grant({ status: 'denied' }))).toMatch(/^Charles declined · \d/);
-    expect(grantOutcomeLine(grant({ status: 'revoked' }))).toMatch(/^Charles revoked · \d/);
-    expect(grantOutcomeLine(grant({ auto: true, decidedBy: undefined }))).toMatch(
-      /^Beeline auto-approved · \d/,
-    );
   });
 
   it('states a ledger row\u2019s provenance, standing, yolo mark, and expiry', () => {
