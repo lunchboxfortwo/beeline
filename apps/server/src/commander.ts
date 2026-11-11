@@ -48,17 +48,18 @@ export async function commandAddress(
   if (!/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(address))
     throw new CommandRefusalError('address requires current membership', 403);
   const row = (
-    await db.query<{ id: string; worker: string | null; parent_id: string | null }>(
-      `SELECT room.id,room.parent_id,${cornerImplementerSql('fact', 'room')} worker
+    await db.query<{ id: string; worker: string | null; parent_id: string | null; archived: boolean }>(
+      `SELECT room.id,room.parent_id,room.archived_at IS NOT NULL archived,${cornerImplementerSql('fact', 'room')} worker
      FROM rooms room LEFT JOIN corner_facts fact ON fact.corner_id=room.id
      JOIN memberships member ON member.room_id=COALESCE(room.parent_id,room.id)
        AND member.identity_id=$2 AND member.removed_at IS NULL
-     WHERE room.id=$1 AND ($3::boolean OR room.archived_at IS NULL)
+     WHERE room.id=$1
      LIMIT 1 FOR SHARE OF room`,
-      [address, agentId, allowArchived],
+      [address, agentId],
     )
   ).rows[0];
   if (!row) throw new CommandRefusalError('address requires current membership', 403);
+  if (row.archived && !allowArchived) throw new CommandRefusalError('address is archived', 409);
   return row;
 }
 

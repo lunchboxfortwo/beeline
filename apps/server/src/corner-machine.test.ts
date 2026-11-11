@@ -40,7 +40,7 @@ describe('corner transition table', () => {
     ['reviewer processing only a check notice', { ...green, reviewerActive: true, reviewRequestActive: false }, observe, 'review', 'review'],
     ['reviewer has an actual review request', { ...green, reviewerActive: true, reviewRequestActive: true }, observe, 'review', undefined],
     ['review requests changes', { ...green, reviewEnded: { id: 'review', findings: 'FAIL: missing test' } }, observe, 'working', 'review-findings'],
-    ['first review ends without verdict', { ...green, reviewRequests: 1, reviewEnded: { id: 'review', emptyCount: 1 } }, observe, 'review', 'review'],
+    ['first review ends without verdict', { ...green, reviewRequests: 1, reviewEnded: { id: 'review', emptyCount: 1 } }, observe, 'working', 'review-findings'],
     ['second review ends without verdict', { ...green, reviewRequests: 2, reviewEnded: { id: 'review', emptyCount: 2 } }, observe, 'working', 'review-findings'],
     ['no reviewer', { ...green, reviewerConfigured: false }, observe, 'review', 'review-gap'],
     ['yes before green continues landing', { ...green, approved: true }, observe, 'working', 'land'],

@@ -405,8 +405,7 @@ export async function advanceCorner(
             );
             break;
           }
-          const retry = facts.reviewEnded?.emptyCount === 1;
-          const source = retry ? null :
+          const source =
             event.kind === 'checks' && sourceId ? sourceId :
             (
               await systemLine(db, {
@@ -422,7 +421,6 @@ export async function advanceCorner(
             agentId: reviewer,
             sourceMessageId: source,
             reason: 'corner_review_dispatch',
-            ...(retry ? {id:createHash('sha256').update(`review-retry:${cornerId}:${head}:${facts.reviewEnded!.id}`).digest('hex')} : {}),
           });
           if (queued.blocked || queued.command && ['pending','claimed'].includes(queued.command.state))
             delete plan.state.reviewDue;
@@ -450,8 +448,16 @@ export async function advanceCorner(
           );
           break;
         case 'review-findings': {
-          const reason = (facts.reviewEnded?.emptyCount ?? 0) >= 2
-            ? 'reviewer gave no verdict twice' : facts.reviewEnded?.findings ?? 'Review failed';
+          if (facts.reviewEnded?.emptyCount) {
+            await systemLine(db, {
+              roomId: cornerId,
+              authorId: SYSTEM_IDENTITY_ID,
+              subject: GITHUB_SUBJECT,
+              verb: systemMessage('corner-lifecycle.blocked', 'reviewer gave no verdict'),
+            });
+            break;
+          }
+          const reason = facts.reviewEnded?.findings ?? 'Review failed';
           const command = corner.worker_agent_id ? await createAgentCommand(db,{
             id:createHash('sha256').update(`review-failed:${cornerId}:${head}:${facts.reviewEnded!.id}`).digest('hex'),
             roomId:cornerId,agentId:corner.worker_agent_id,sourceMessageId:null,reason:'corner_review_needed',
@@ -683,9 +689,20 @@ export async function queueReviewerCommand(
     return { blocked: true };
   const prior = (
     await db.query<{ text: string }>(
-      `SELECT result.text FROM agent_commands command JOIN messages result ON result.id=command.result_message_id
-     WHERE command.room_id=$1 AND command.agent_id=$2 AND command.review_context IS NOT NULL
-       AND command.state='complete' ORDER BY command.created_at DESC,command.id DESC LIMIT 1`,
+      `SELECT evidence.text FROM agent_commands command
+       CROSS JOIN LATERAL (
+         SELECT message.text,message.created_at FROM messages message
+         WHERE message.author_id=command.agent_id AND message.deleted_at IS NULL
+           AND (message.id=command.result_message_id OR message.id IN (
+             SELECT jsonb_array_elements_text(COALESCE(command.review_context->'reportIds','[]'::jsonb))))
+         UNION ALL
+         SELECT report.private_payload->>'text',report.created_at FROM agent_commands report
+         WHERE report.id IN (SELECT jsonb_array_elements_text(COALESCE(command.review_context->'reportIds','[]'::jsonb)))
+           AND report.private_payload->>'authorId'=command.agent_id
+       ) evidence
+       WHERE command.room_id=$1 AND command.agent_id=$2 AND command.review_context IS NOT NULL
+         AND command.state='complete'
+       ORDER BY command.inbox_sequence DESC,evidence.created_at DESC LIMIT 1`,
       [input.roomId, input.agentId],
     )
   ).rows[0]?.text;
