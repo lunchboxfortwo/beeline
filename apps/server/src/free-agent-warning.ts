@@ -29,7 +29,7 @@ export async function warnFreeAgentOwner(
           AND event.at<($3::date::timestamp AT TIME ZONE 'UTC')+interval '2 days')>=$5::numeric*0.8
   ), inserted AS (
     INSERT INTO messages(id,room_id,author_id,text)
-    SELECT $6,$4,agent_id,$7 || workspace_id::text || $8 FROM candidate
+    SELECT $6,$4,agent_id,$7 || candidate.workspace_id::text || $8 FROM candidate
     ON CONFLICT DO NOTHING RETURNING id,author_id
   ), undismissed AS (
     DELETE FROM chat_dismissals WHERE room_id=$4 AND identity_id=$2 AND EXISTS(SELECT 1 FROM inserted)

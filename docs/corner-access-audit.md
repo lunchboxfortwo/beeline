@@ -2,7 +2,7 @@
 
 Corners have no stored memberships. `room_access` is a read-only surface-access projection: its corner branch joins `rooms.parent_id` directly to the current physical Room membership and overlays sparse preferences. Implementer/reviewer roles remain in `corner_facts` and parent reviewer configuration. It excludes archived corners; explicit history reads use the parent key directly.
 
-`CornerAccessDatabase` resolves generic membership reads through this projection; explicit parent-key and locking queries stay on physical Room memberships. The retired `effective_memberships` alias remains for preceding serving/rollback images; current surface readers use `room_access`.
+`CornerAccessDatabase` resolves generic membership reads through this projection; explicit parent-key and locking queries stay on physical Room memberships. This cleanup release no longer creates the retired `effective_memberships` alias; existing copies remain until a later contract release. All surface readers use `room_access`.
 
 The inventory below includes every production query call site referencing physical membership or the access projection, including Workspace/DM-only readers. Function names identify the paths; named source and tests own query details. Schema SQL and constants are summarized separately below.
 

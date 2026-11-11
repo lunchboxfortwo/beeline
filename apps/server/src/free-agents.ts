@@ -27,7 +27,6 @@ import { createStarterOnboardingRun } from './starter-onboarding-run.js';
 export const FREE_AGENTS_SCHEMA = `
 CREATE TABLE IF NOT EXISTS free_agents (
   agent_id text PRIMARY KEY REFERENCES identities(id) ON DELETE CASCADE,
-  workspace_id uuid REFERENCES workspaces(id) ON DELETE SET NULL,
   owner_id text NOT NULL REFERENCES identities(id),
   state text NOT NULL DEFAULT 'provisioning'
     CHECK (state IN ('provisioning','waking','running','sleeping','stopped','failed','destroyed')),
@@ -44,11 +43,6 @@ CREATE TABLE IF NOT EXISTS free_agents (
   created_at timestamptz NOT NULL DEFAULT now(),
   updated_at timestamptz NOT NULL DEFAULT now()
 );
--- Retired membership metadata stays readable through serving/rollback overlap.
-ALTER TABLE free_agents ALTER COLUMN workspace_id DROP NOT NULL;
-ALTER TABLE free_agents DROP CONSTRAINT IF EXISTS free_agents_workspace_id_fkey;
-ALTER TABLE free_agents ADD CONSTRAINT free_agents_workspace_id_fkey
-  FOREIGN KEY(workspace_id) REFERENCES workspaces(id) ON DELETE SET NULL;
 ALTER TABLE free_agents ADD COLUMN IF NOT EXISTS removed_at timestamptz;
 ALTER TABLE free_agents ADD COLUMN IF NOT EXISTS removal_cleaned_at timestamptz;
 ALTER TABLE free_agents ADD COLUMN IF NOT EXISTS runtime_operation_id text;
@@ -65,7 +59,6 @@ CREATE UNIQUE INDEX IF NOT EXISTS free_agents_bootstrap_hash ON free_agents(boot
 CREATE UNIQUE INDEX IF NOT EXISTS free_agents_model_token_hash ON free_agents(model_token_hash)
   WHERE model_token_hash IS NOT NULL;
 CREATE INDEX IF NOT EXISTS free_agents_owner ON free_agents(owner_id);
-CREATE INDEX IF NOT EXISTS free_agents_workspace ON free_agents(workspace_id);
 CREATE TABLE IF NOT EXISTS free_agent_usage (
   owner_id text NOT NULL REFERENCES identities(id) ON DELETE CASCADE,
   day date NOT NULL,
@@ -711,9 +704,9 @@ export class FreeAgentService {
           `SELECT f.agent_id,f.owner_id,member.workspace_id,w.name workspace_name,f.sealed_keys,
                   i.name,a.soul,f.model
            FROM free_agents f
-           JOIN LATERAL (SELECT workspace_id FROM memberships
-             WHERE identity_id=f.agent_id AND room_id IS NULL AND removed_at IS NULL
-             ORDER BY joined_at,id LIMIT 1) member ON true
+           JOIN LATERAL (SELECT workspace.workspace_id FROM memberships workspace
+             WHERE workspace.identity_id=f.agent_id AND workspace.room_id IS NULL AND workspace.removed_at IS NULL
+             ORDER BY workspace.joined_at,workspace.id LIMIT 1) member ON true
            JOIN workspaces w ON w.id=member.workspace_id
            JOIN identities i ON i.id=f.agent_id JOIN agents a ON a.agent_id=f.agent_id
            WHERE f.bootstrap_hash=$1 AND f.removed_at IS NULL
