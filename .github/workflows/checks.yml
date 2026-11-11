@@ -789,8 +789,10 @@ jobs:
       - name: Lint GitHub Actions workflows
         run: docker run --rm -v "$GITHUB_WORKSPACE:/repo" -w /repo ghcr.io/beeline-work/ci-actionlint:1.7.7@sha256:887a259a5a534f3c4f36cb02dca341673c6089431057242cdc931e9f133147e9 -config-file .github/actionlint.yaml
         if: steps.changes.outputs.run == 'true'
-      - name: Install ShellCheck
-        run: sudo apt-get update && sudo apt-get install -y shellcheck
+      # Hosted Ubuntu already includes ShellCheck. Refreshing every apt source
+      # can spend the whole job budget on unrelated mirror/DNS failures.
+      - name: Verify runner ShellCheck
+        run: shellcheck --version
         if: steps.changes.outputs.run == 'true'
       - name: Lint tracked shell scripts
         run: npm run lint:shell

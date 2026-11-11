@@ -70,3 +70,11 @@ test('workspace archives and provenance use the checkout SHA when a release prom
     if (step.with?.key?.startsWith('ci-build-')) assert.match(step.with.key, /steps.checkout.outputs.sha/);
   }
 });
+
+test('ACTIONLINT uses the runner ShellCheck without refreshing apt mirrors', () => {
+  const job = checks.jobs.actionlint;
+  assert.equal(job['timeout-minutes'], 5);
+  assert.ok(job.steps.some(step => step.run === 'shellcheck --version'));
+  assert.ok(job.steps.some(step => step.run === 'npm run lint:shell'));
+  for (const step of job.steps) assert.doesNotMatch(step.run ?? '', /\bapt(?:-get)?\b/);
+});
