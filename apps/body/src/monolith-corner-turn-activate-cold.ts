@@ -7,7 +7,7 @@ import { CODE_OWNED_HOST_MCP_NAMES } from './mcp-route-class.js';
 import { createRoomPermissionHandler } from './monolith-room-turn.js';
 import { modelContextWindowTokens } from './model-context-window.js';
 import { existsSync } from 'node:fs';
-import { mkdir } from 'node:fs/promises';
+import { mkdir, rm } from 'node:fs/promises';
 import { homedir } from 'node:os';
 import { dirname, join, resolve } from 'node:path';
 import { machineHost } from './machine-host.js';
@@ -307,7 +307,10 @@ import { MonolithCornerTurnLoop, execFileAsync } from './monolith-corner-turn.js
       existsSync(resolve(ctx.options.worktreePath, part, 'node_modules/.beeline-generation')))) {
       throw new Error('Beeline shared dependencies require a working bubblewrap sandbox. Restore sandbox support before resuming this checkout.');
     }
-    if (repository && !repository.readOnly && ctx.options.config.bwrapPath && (ctx.repositoryWork || existsSync(resolve(ctx.options.worktreePath, 'node_modules')))) {
+    const mobile = resolve(ctx.options.worktreePath, 'apps/mobile');
+    const prepareRoot = ctx.repositoryWork || existsSync(resolve(ctx.options.worktreePath, 'node_modules'));
+    const needsMobile = () => existsSync(resolve(mobile, 'node_modules')) || existsSync(resolve(ctx.options.worktreePath, dependencyRequest));
+    if (repository && !repository.readOnly && ctx.options.config.bwrapPath && (prepareRoot || needsMobile())) {
       const npm = (await execFileAsync('which', ['npm'])).stdout.trim();
       const install = (cwd: string) => async () => {
         const command = wrapAgentCommand({ bwrapPath: ctx.options.config.bwrapPath,
@@ -316,23 +319,27 @@ import { MonolithCornerTurnLoop, execFileAsync } from './monolith-corner-turn.js
           cwd, env: { ...process.env, ...agentEnv }, maxBuffer: 16 * 1024 * 1024,
         });
       };
-      dependencyPaths.push(...await prepareDependencyGeneration({
-        root: ctx.options.worktreePath, store: warmNodeModulesStoreDir(ctx.options.runtime.supervisorRoot), npm, cache: npmCacheDir, install: install(ctx.options.worktreePath),
-      }));
-      if (cornerPrepareScript) {
-        const command = wrapAgentCommand({ bwrapPath: ctx.options.config.bwrapPath,
-          spec: sandboxSpec, command: npm, args: ['run', 'corner:prepare'] });
-        await execFileAsync(command.command, command.args, {
-          cwd: ctx.options.worktreePath,
-          env: { ...process.env, ...agentEnv, BEELINE_READONLY_DEPENDENCIES: '1' },
-          maxBuffer: 16 * 1024 * 1024,
-        });
+      if (prepareRoot) {
+        dependencyPaths.push(...await prepareDependencyGeneration({
+          root: ctx.options.worktreePath, store: warmNodeModulesStoreDir(ctx.options.runtime.supervisorRoot), npm, cache: npmCacheDir, install: install(ctx.options.worktreePath),
+        }));
+        if (cornerPrepareScript) {
+          const command = wrapAgentCommand({ bwrapPath: ctx.options.config.bwrapPath,
+            spec: sandboxSpec, command: npm, args: ['run', 'corner:prepare'] });
+          await execFileAsync(command.command, command.args, {
+            cwd: ctx.options.worktreePath,
+            env: { ...process.env, ...agentEnv, BEELINE_READONLY_DEPENDENCIES: '1' },
+            maxBuffer: 16 * 1024 * 1024,
+          });
+        }
       }
-      const mobile = resolve(ctx.options.worktreePath, 'apps/mobile');
-      if (existsSync(resolve(mobile, 'node_modules')) || existsSync(resolve(ctx.options.worktreePath, dependencyRequest))) dependencyPaths.push(...await prepareDependencyGeneration({
-        root: mobile, store: mobileNodeModulesStoreDir(ctx.options.runtime.supervisorRoot), npm, cache: npmCacheDir, install: install(mobile),
-      }));
-      for (const extra of await extraDependencyRoots(ctx.options.worktreePath, ctx.options.config.agentHomeRoot)) {
+      if (needsMobile()) {
+        dependencyPaths.push(...await prepareDependencyGeneration({
+          root: mobile, store: mobileNodeModulesStoreDir(ctx.options.runtime.supervisorRoot), npm, cache: npmCacheDir, install: install(mobile),
+        }));
+        await rm(resolve(ctx.options.worktreePath, dependencyRequest), { force: true });
+      }
+      if (prepareRoot) for (const extra of await extraDependencyRoots(ctx.options.worktreePath, ctx.options.config.agentHomeRoot)) {
         dependencyPaths.push(...await prepareDependencyGeneration({
           root: extra, store: warmNodeModulesStoreDir(ctx.options.runtime.supervisorRoot),
           npm, cache: npmCacheDir, install: install(extra),

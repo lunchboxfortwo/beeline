@@ -1,7 +1,9 @@
 import { activateAgentSession, discardAgentSession, sessionHasCurrentContext, watchSessionClaudeLogin } from './agent-session-lifecycle.js';
 import { helperUsageBinding, postChangedAgentUsage } from './helper-usage-binding.js';
 import { agentBehavior } from './agent-command.js';
-import { dependencyFingerprint } from './dependency-generation.js';
+import { dependencyFingerprint, dependencyRequest } from './dependency-generation.js';
+import { existsSync } from 'node:fs';
+import { resolve } from 'node:path';
 import { mergeHarnessTurnMetrics } from './harness-turn-tokens.js';
 import type { InterruptedTurn } from './force-update-journal.js';
 
@@ -333,5 +335,9 @@ import { MonolithCornerTurnLoop, WorkspaceRoster } from './monolith-corner-turn.
 
   export async function monolithCornerTurnLoopActivate(ctx: MonolithCornerTurnLoop, trace?: TurnTrace): Promise<string> {
     if (ctx.options.config.agentProgramError) throw new Error(ctx.options.config.agentProgramError);
+    // New read-only mounts require a new namespace, even for a retained session.
+    const mobileRequested = Boolean(ctx.options.repository && !ctx.options.repository.readOnly &&
+      ctx.options.config.bwrapPath && existsSync(resolve(ctx.options.worktreePath, dependencyRequest)));
+    if (mobileRequested && ctx.client) await ctx.discardSession(true, true);
     return activateAgentSession(ctx, () => ctx.activateCold(trace));
   }
