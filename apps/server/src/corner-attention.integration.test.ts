@@ -697,32 +697,60 @@ it.each(['human-order', 'human-member-order', 'human-member-reply', 'worker-push
   else expect(await state()).not.toBe('waiting');
 });
 
-it.each(['55P03', '08006'])('Reproduction SENTRY-4B: refresh retries only a lock timeout (%s)', async code => {
+it.each(['55P03', '08006'])('Reproduction SENTRY-4B: refresh never replays a failed transaction (%s)', async code => {
   const failure = Object.assign(new Error('refresh failed'), { code });
-  const observe = vi.spyOn(db, 'transaction').mockRejectedValueOnce(failure);
-  const live = new LiveHub(), publish = vi.spyOn(live, 'publish');
-  const runtime = new CornerMachineEvents(db, live, () => {});
-  try {
-    if (code === '55P03') {
-      await runtime.refresh(C);
-      expect(observe).toHaveBeenCalledTimes(2);
-      expect(publish).toHaveBeenCalledWith({ type: 'invalidate', roomId: ROOM, reason: 'corner-status' });
-    } else {
-      await expect(runtime.refresh(C)).rejects.toBe(failure);
-      expect(observe).toHaveBeenCalledTimes(1);
-    }
-  } finally { observe.mockRestore(); await runtime.stop(); }
-});
-
-it('Reproduction SENTRY-4B: persistent lock timeout stops after its one retry', async () => {
-  const failure = Object.assign(new Error('lock timeout'), { code: '55P03' });
   const observe = vi.spyOn(db, 'transaction').mockRejectedValue(failure);
   try {
     await expect(refreshCornerAttention(db, C)).rejects.toBe(failure);
-    expect(observe).toHaveBeenCalledTimes(2);
+    expect(observe).toHaveBeenCalledTimes(1);
   } finally { observe.mockRestore(); }
 });
 
+it('Reproduction SENTRY-4B: overlapping events collapse into one committed-event follow-up', async () => {
+  let release!: () => void, entered!: () => void;
+  const held = new Promise<void>(resolve => { entered = resolve; });
+  const gate = new Promise<void>(resolve => { release = resolve; });
+  const transaction = db.transaction.bind(db);
+  const observe = vi.spyOn(db, 'transaction').mockImplementation(async work => {
+    entered(); await gate; return transaction(work);
+  });
+  const live = new LiveHub(), publish = vi.spyOn(live, 'publish');
+  const runtime = new CornerMachineEvents(db, live, () => {});
+  try {
+    const first = runtime.refresh(C); await held;
+    const second = runtime.refresh(C);
+    const duplicate = runtime.refresh(C);
+    release(); await Promise.all([first, second, duplicate]);
+    expect(observe).toHaveBeenCalledTimes(2);
+    expect(publish).toHaveBeenCalledTimes(2);
+    expect((await phone.readCorners(ROOM, HUMAN))!.corners.find(corner => corner.corner.id === C)?.state).toBe('idle');
+  } finally { release(); observe.mockRestore(); await runtime.stop(); }
+});
+
+
+it('Reproduction SENTRY-4B: a committed command during refresh completion reaches the phone badge', async () => {
+  let release!: () => void, entered!: () => void;
+  const held = new Promise<void>(resolve => { entered = resolve; });
+  const gate = new Promise<void>(resolve => { release = resolve; });
+  const transaction = db.transaction.bind(db);
+  let firstTransaction = true;
+  const observe = vi.spyOn(db, 'transaction').mockImplementation(async work => {
+    const result = await transaction(work);
+    if (firstTransaction) {
+      firstTransaction = false;
+      entered(); await gate;
+    }
+    return result;
+  });
+  const runtime = new CornerMachineEvents(db, new LiveHub(), () => {});
+  try {
+    const first = runtime.refresh(C); await held;
+    await wake(WORKER, 'committed-during-refresh-completion');
+    const second = runtime.refresh(C);
+    release(); await Promise.all([first, second]);
+    expect((await phone.readCorners(ROOM, HUMAN))!.corners.find(corner => corner.corner.id === C)?.state).toBe('working');
+  } finally { release(); observe.mockRestore(); await runtime.stop(); }
+});
 
 it('AC-8: reports, an open question and an approval share waiting and commander-reply clearing', async () => {
   const {reportToCommander}=await import('./commander.js');

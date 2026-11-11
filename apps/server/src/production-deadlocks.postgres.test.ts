@@ -4,7 +4,7 @@ import { seedCornerOpening } from './test-fixtures/corner-commands.js';
 import { subscribeConfiguredReviewers } from './agent-subscriptions.js';
 import { seedSquireMachine } from './test-fixtures/squire-machines.js';
 import { randomUUID } from 'node:crypto';
-import { Pool, type PoolClient } from 'pg';
+import { Client, Pool, type PoolClient } from 'pg';
 import { afterAll, beforeAll, describe, expect, it, vi } from 'vitest';
 import { migrate, PostgresDatabase } from './database.js';
 import { DaemonService } from './daemon-service.js';
@@ -16,7 +16,8 @@ import {reconcileConfiguredCornerReviewers} from './agent-command.js';
 import {postgresErrorContext} from './postgres-error.js';
 import {announceAgentLifecycle,claimAgentConnection,releaseAgentConnection} from './connection-presence.js';
 import { PhoneService } from './phone-service.js';
-import { refreshCornerAttention } from './corner-attention.js';
+import { CornerMachineEvents, refreshCornerAttention } from './corner-attention.js';
+import { PostgresLiveListener } from './postgres-live.js';
 import { ensureSystemIdentity } from './system-line.js';
 import { SYSTEM_IDENTITY_ID } from '@beeline/api-contract/system-identity';
 import { HelperDaemonService } from './test-fixtures/helper-daemon.js';
@@ -241,40 +242,52 @@ describe.skipIf(!url)('production transaction lock ordering', () => {
     expect((await first.query<{ install: string }>(`SELECT squire_work->>'install' install FROM squire_machines WHERE (owner_id,machine_id)=(SELECT owner_id,COALESCE(machine_id,agent_id) FROM agents WHERE agent_id=$1)`, [agent])).rows[0]?.install).toBe('true');
   });
 
-  it('Reproduction SENTRY-4B: retries a real lifecycle timeout while the turn row stays locked', async () => {
+  it('Reproduction SENTRY-4B: committed events cover a skipped locked row and deliver the working badge', async () => {
     const id = randomUUID();
     await first.query(`INSERT INTO rooms(id,workspace_id,parent_id,created_by,name) VALUES($1,$2,$3,$4,'Busy corner')`, [id, workspace, room, agent]);
     await first.query('INSERT INTO corner_facts(corner_id) VALUES($1)', [id]);
     await seedCornerOpening(first, { cornerId: id, agentId: agent, commissionedBy: owner });
-    await first.query(`INSERT INTO agent_turns(room_id,request_id,agent_id,status,generation_id)
-      VALUES($1,'held-turn',$2,'working','held-generation')`, [id, agent]);
-    let release!: () => void, entered!: () => void;
+    await first.query("UPDATE agent_commands SET state='complete' WHERE room_id=$1", [id]);
+    const live = new LiveHub(), errors: unknown[] = [];
+    const client = new Client(config);
+    let ready!: () => void;
+    const connected = new Promise<void>(resolve => { ready = resolve; });
+    const unready = live.subscribeResync(ready);
+    const listener = new PostgresLiveListener(second, live, () => client);
+    void listener.run(); await connected; unready();
+    const runtime = new CornerMachineEvents(second, live, error => errors.push(error));
+    let release!: () => void, entered!: () => void, notified!: () => void;
     const gate = new Promise<void>(resolve => { release = resolve; });
     const held = new Promise<void>(resolve => { entered = resolve; });
-    const turn = first.transaction(async db => {
-      await db.query('SELECT 1 FROM agent_turns WHERE room_id=$1 FOR UPDATE', [id]);
-      entered(); await gate;
+    const delivered = new Promise<void>(resolve => { notified = resolve; });
+    const unlisten = live.subscribeAll(event => {
+      if (event.type === 'invalidate' && event.roomId === id && event.reason === 'postgres:corner_state') notified();
     });
-    await held;
-    await observer.query('BEGIN');
-    await observer.query('SELECT corner_id FROM corner_facts WHERE corner_id=$1 FOR UPDATE', [id]);
-    await second.query("SET lock_timeout='100ms'");
     const transaction = second.transaction.bind(second);
     let attempts = 0;
     const observe = vi.spyOn(second, 'transaction').mockImplementation(async work => {
-      attempts++;
-      try { return await transaction(work); }
-      catch (error) { await observer.query('ROLLBACK'); throw error; }
+      const result = await transaction(work);
+      if (++attempts === 1) { entered(); await gate; }
+      return result;
     });
+    await observer.query('BEGIN');
+    await observer.query('SELECT corner_id FROM corner_facts WHERE corner_id=$1 FOR UPDATE', [id]);
+    await second.query("SET lock_timeout='100ms'");
     try {
-      expect(await refreshCornerAttention(second, id)).toEqual({ parentId: room });
-      expect(attempts).toBe(2);
-      // Read the projected user surface before releasing the turn writer.
+      const initial = runtime.refresh(id); await held;
+      expect(attempts).toBe(1);
+      await observer.query("UPDATE agent_commands SET state='pending' WHERE room_id=$1 AND reason='corner_objective'", [id]);
+      await observer.query('COMMIT');
+      await delivered; // Real LISTEN -> live hub -> runtime, without a manual second refresh.
+      release(); await initial;
       const result = await new PhoneService(second, 'https://beeline.invalid').readCorners(room, owner);
-      expect(result!.corners.some(corner => corner.corner.id === id)).toBe(true);
+      expect(result!.corners.find(corner => corner.corner.id === id)?.state).toBe('working');
+      expect((await second.query("SELECT state FROM agent_commands WHERE room_id=$1 AND reason='corner_objective'", [id])).rows).toEqual([{ state: 'pending' }]);
+      expect(errors).toEqual([]);
     } finally {
-      observe.mockRestore(); await observer.query('ROLLBACK');
-      release(); await turn; await second.query('RESET lock_timeout');
+      release(); await observer.query('ROLLBACK'); unlisten();
+      await listener.stop(); await runtime.stop(); observe.mockRestore();
+      await second.query('RESET lock_timeout');
     }
   });
 

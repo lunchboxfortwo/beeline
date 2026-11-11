@@ -26,7 +26,7 @@ Stop ends the agent's running batch and clears its thinking status; later work s
 
 Always command approvals are reused while their scope and script bytes still match. Inline code, interpreter stdin and scripts launched from writable PATH directories show their exact code on the existing approval card. Agents can request literal inline arguments with a JSON argv target, or stdin with a JSON target containing `argv` and `stdin`. Refused commands identify the closest grant and the mismatching prefix word, expiry or script binding without printing secret values.
 
-Account deletion retries once if PostgreSQL rolls it back for a deadlock. Corner status refresh runs independently of turn writes and retries one lock timeout. Android theme changes ignore only the system background rejection caused by an activity that has already closed.
+Account deletion retries once if PostgreSQL rolls it back for a deadlock. Corner status refresh runs independently of turn writes and skips an already locked lifecycle row without retrying a failure. Android theme changes ignore only the system background rejection caused by an activity that has already closed.
 
 Agents start their local process when work arrives and stay warm for 30 minutes after their last work completes. New work resets that countdown. Beeline has no simultaneous agent process limit; setup warns when the connected agents may strain this machine's available memory or CPU.
 
@@ -77,7 +77,7 @@ The phone keeps saved Rooms visible during a network interruption. It reconnects
 
 Forwarding marks the selected destination FORWARDED as soon as the send is accepted, before the picker finishes closing.
 
-During server deploys, Beeline stops accepting new requests, lets admitted requests finish for up to five seconds, and sends live connections a restart close so they can reconnect. Shutdown is bounded to ten seconds; Fly allows twenty seconds before forcing a stop.
+During server deploys, Beeline stops accepting new requests, lets admitted requests finish for up to five seconds, and sends live connections a restart close so they can reconnect. Shutdown is bounded to ten seconds; Fly allows twenty seconds before forcing a stop. Chat lists remain available when optional side details time out. Side reads use the spare per-server database capacity after core reads and background work; overlapping corner status notifications share one pending follow-up so work committed during a refresh reaches the badge.
 
 ## One message
 

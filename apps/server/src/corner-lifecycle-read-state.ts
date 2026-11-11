@@ -57,7 +57,7 @@ export type CornerRow = {
 };
 
 
-export async function loadCorner(db: SqlDatabase, cornerId: string, retain = true): Promise<CornerRow | undefined> {
+export async function loadCorner(db: SqlDatabase, cornerId: string, retain: boolean | 'skip-locked' = true): Promise<CornerRow | undefined> {
   db = new CornerAccessDatabase(db);
   return (
     await db.query<CornerRow>(
@@ -81,7 +81,7 @@ export async function loadCorner(db: SqlDatabase, cornerId: string, retain = tru
        JOIN rooms parent ON parent.id=corner.parent_id
        LEFT JOIN identities configured ON configured.id=${cornerReviewerSql()}
        WHERE fact.corner_id=$1
-       ${retain ? 'FOR UPDATE OF fact' : ''}`,
+       ${retain === 'skip-locked' ? 'FOR UPDATE OF fact SKIP LOCKED' : retain ? 'FOR UPDATE OF fact' : ''}`,
       [cornerId],
     )
   ).rows[0];
