@@ -1,4 +1,5 @@
 import React from 'react';
+import { Platform } from 'react-native';
 // @ts-expect-error react-test-renderer has no declarations in this workspace.
 import { act, create, type ReactTestRenderer } from 'react-test-renderer';
 import { afterEach, expect, it, vi } from 'vitest';
@@ -213,4 +214,32 @@ it.each(['lands', 'cancelled'])('waits for the complete killed-notification targ
   expect(controller.isHoldingLanding()).toBe(true);
   expect(client.historyAround).toHaveBeenCalledOnce();
   expect(client.historyAfter).toHaveBeenCalledOnce();
+});
+
+
+it.each(['onWheel', 'onTouchMove'])('pages older history after a narrow web %s gesture (history-14)', (gesture) => {
+  Object.assign(globalThis, { IS_REACT_ACT_ENVIRONMENT: true });
+  const previous = Platform.OS;
+  Object.assign(Platform, { OS: 'web' });
+  try {
+    const allowOlderHistoryRef = { current: false };
+    const loadOlder = vi.fn();
+    const userScrolled = vi.fn();
+    const props = {
+      desktopTranscript: false, transcriptMessages: [],
+      scrollController: { userScrolled }, phoneScrollList: {}, starPrompt: { prompt: null },
+      allowOlderHistoryRef,
+      loadOlderTranscriptIfReaderAsked: () => { if (allowOlderHistoryRef.current) loadOlder(); },
+    } as unknown as Props;
+    act(() => { renderer = create(<ChatSurfaceTranscript {...props} />); });
+    const list = renderer.root.findByType('RoomSendList');
+    act(() => list.props.onEndReached());
+    expect(loadOlder).not.toHaveBeenCalled();
+    act(() => list.props[gesture]());
+    act(() => list.props.onEndReached());
+    expect(loadOlder).toHaveBeenCalledOnce();
+    expect(userScrolled).toHaveBeenCalledOnce();
+  } finally {
+    Object.assign(Platform, { OS: previous });
+  }
 });

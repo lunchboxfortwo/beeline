@@ -748,12 +748,12 @@ it('Reproduction files-2: explicit post binds uploaded media before the turn fin
      VALUES($1,$2,'artifact',$3,'text/plain','evidence.txt',2,$4,'ready',now()+interval '24 hours')`,
     [media, RUBY, 'artifact/' + media, randomBytes(32).toString('hex')],
   );
+  // A post before the upload has no files to deliver.
+  const elsewhere = await rootFixture.daemon.execute('postCornerMessage', { ...authority(rootFixture.order), cornerId: ROOM, text: 'Work started' }, RUBY);
+  expect((await rootFixture.daemon.execute('getRoomMessage', { roomId: ROOM, messageId: elsewhere.id }, WORKER)).attachments).toHaveLength(0);
   await rootFixture.daemon.execute('postAgentAttachment', { ...authority(rootFixture.order), attachment: {
     url: 'http://test/v1/media/' + media, name: 'evidence.txt', mimeType: 'text/plain', size: 2,
   } }, RUBY);
-  // Posting elsewhere must not drain files scoped to the private current place.
-  const elsewhere = await rootFixture.daemon.execute('postCornerMessage', { ...authority(rootFixture.order), cornerId: ROOM, text: 'Work started' }, RUBY);
-  expect((await rootFixture.daemon.execute('getRoomMessage', { roomId: ROOM, messageId: elsewhere.id }, WORKER)).attachments).toHaveLength(0);
   const posted = await rootFixture.daemon.execute('postCornerMessage', { ...authority(rootFixture.order), cornerId: DM, text: 'evidence.txt attached' }, RUBY);
   const read = await rootFixture.daemon.execute('getRoomMessage', { roomId: DM, messageId: posted.id }, RUBY);
   expect(read.attachments).toEqual([expect.objectContaining({ name: 'evidence.txt', url: 'http://test/v1/media/' + media })]);

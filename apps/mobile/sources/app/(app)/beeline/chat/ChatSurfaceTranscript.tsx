@@ -240,8 +240,14 @@ export const ChatSurfaceTranscript = React.memo(function ChatSurfaceTranscript({
                   // scroll is the same signal there.
                   {...(Platform.OS === 'web'
                     ? {
-                        onTouchMove: scrollController.userScrolled,
-                        onWheel: scrollController.userScrolled,
+                        onTouchMove: () => {
+                          allowOlderHistoryRef.current = true;
+                          scrollController.userScrolled();
+                        },
+                        onWheel: () => {
+                          allowOlderHistoryRef.current = true;
+                          scrollController.userScrolled();
+                        },
                       }
                     : {})}
                   onLayout={(event) => {

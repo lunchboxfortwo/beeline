@@ -36,7 +36,6 @@ import { Input, id, seconds, AccessDeniedError, Output } from './values.js';
         `WITH pending AS (
            DELETE FROM agent_pending_attachments
            WHERE room_id=$5 AND agent_id=$3 AND request_id=$6 AND generation_id=$7
-             AND room_id=$2
            RETURNING url,name,mime_type,size,created_at,id
          )
          INSERT INTO messages(id,room_id,author_id,text,presentation,agent_model,request_id,legacy_event,attachments,reply_to_message_id,root_message_id)
