@@ -344,9 +344,12 @@ describe('corner message attribution', () => {
     const [review] = await commands(B, C);
     await claim(review!);
     // A check event is not a human assignment, even when its fixture author is human.
-    await expect(result(review!, '@human the reproduction is missing. Fix that and push.'))
-      .rejects.toThrow('not your direct commander');
-    await result(review!, 'The reproduction is missing. Fix that and push.');
+    // The tag comes off and the rest lands as an ordinary review note.
+    const dropped = await result(review!, '@human the reproduction is missing. Fix that and push.');
+    expect(dropped.receipt).toContain('tag @human');
+    expect((await rootFixture.db.query<{ text: string }>(
+      `SELECT text FROM messages WHERE id=$1`, [dropped.id],
+    )).rows[0]?.text).toBe('the reproduction is missing. Fix that and push.');
     expect(await commands(A, C)).toEqual([]);
     expect((await rootFixture.db.query<{ workflow_state: string }>(
       `SELECT ${cornerRunStateSql('$1::uuid')} workflow_state`, [C],

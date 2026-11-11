@@ -421,6 +421,7 @@ export async function postRepositoryOnboardingOperation<Name extends keyof Daemo
         if (request.kind === 'repository') await ctx.github?.refresh(owner);
         const card = await ctx.database.transaction(database => postRepositoryOnboarding(database, ctx.github, {
           roomId: request.roomId, agentId: authenticatedAgentId, requesterId: owner, kind: request.kind,
+          ...(request.repository ? { repository: request.repository } : {}),
         }));
         ctx.live.publish({ type: 'invalidate', roomId: request.roomId, reason: 'message', agentId: authenticatedAgentId });
         return card as Output<Name>;

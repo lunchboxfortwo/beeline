@@ -414,7 +414,7 @@ export type DaemonOperationMap = {
   postStarterGame: Operation<RoomInput, { readonly status: 'posted' }>;
   postStarterWelcome: Operation<RoomInput, { readonly status: 'started' }>;
   postRoomInvite: Operation<RoomInput, { readonly url: string; readonly message: string; readonly messageId: string }>;
-  postRepositoryOnboarding: Operation<RoomInput & { readonly kind: 'repository' | 'starters' }, RepositoryOnboardingCard>;
+  postRepositoryOnboarding: Operation<RoomInput & { readonly kind: 'repository' | 'starters'; readonly repository?: string }, RepositoryOnboardingCard>;
   askRoomChoice: Operation<AskRoomChoiceInput, AskRoomChoiceResult>;
   openRoomPoll: Operation<OpenRoomPollInput, AskRoomChoiceResult>;
   listAgentGrants: Operation<AgentInput & { readonly roomId?: string }, AgentGrantListResult>;

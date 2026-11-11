@@ -10,7 +10,7 @@ import { normalizeAgentAsk } from './tray-approval-ask.js';
 import { createHash, randomBytes } from 'node:crypto';
 import type { SqlDatabase } from './database.js';
 import { createAgentCommand, hasPendingCornerReview, repairReviewerCornerMembership, nextAgentDepth, type CommandRow, type PrivateCommandPayload } from './agent-command.js';
-import { resolveCurrentMemberMentions } from './message-mentions.js';
+import { isChannelMentionToken, resolveCurrentMemberMentions, typedMentionHandles } from './message-mentions.js';
 import { cornerImplementerSql } from './corner-worker.js';
 import { CommandRefusalError } from './command-refusal.js';
 import { systemIdentityMention, systemLine } from './system-line.js';
@@ -510,29 +510,35 @@ export async function reportToCommander(
     receipt: member.kind === 'agent' ? 'Report queued privately; not confirmation of execution.' : 'Report stored and visible.' };
 }
 
-/** Human conversation replies stay here; escalations use the opening return place. */
-export async function refuseTagPastCommander(
+/**
+ * Tags that used to refuse the whole post. A typed person above the commander
+ * comes out, and @channel comes out when it would reach such a person, so the
+ * rest can land. The commander and the person who asked this turn stay.
+ * Unknown handles and @system stay: a system tag files feedback.
+ */
+export async function mentionHandlesToDrop(
   db: SqlDatabase, roomId: string, agentId: string, text: string, command?: CommandRow,
-): Promise<void> {
-  if (!(await db.query('SELECT 1 FROM rooms WHERE id=$1 AND parent_id IS NOT NULL', [roomId])).rowCount) return;
-  const people = (await resolveCurrentMemberMentions(db, roomId, text, agentId)).filter(m => m.kind === 'human');
-  if (!people.length) return;
+): Promise<string[]> {
+  const typed = [...typedMentionHandles(text)];
+  if (!typed.length) return [];
+  if (!(await db.query('SELECT 1 FROM rooms WHERE id=$1 AND parent_id IS NOT NULL', [roomId])).rowCount)
+    return [];
+  const resolved = await resolveCurrentMemberMentions(db, roomId, text, agentId);
+  const people = resolved.filter((member) => member.kind === 'human');
   const { recipient, returnRoom } = await commanderReportAddress(db, roomId, command);
-  // A later person's question permits a normal reply to that person here.
-  // It never selects the recipient of report().
   const reply = command?.room_id === roomId && command.source_message_id
     ? (await db.query<{ author_id: string }>(`SELECT author_id FROM messages
         WHERE id=$1 AND room_id=$2 AND presentation='message' AND system_event IS NULL AND deleted_at IS NULL`,
       [command.source_message_id, roomId])).rows[0]?.author_id : undefined;
-  const skipped = people.filter(person => person.id !== reply && !(person.id === recipient && returnRoom === roomId));
-  if (!skipped.length) return;
-  const commander = recipient && returnRoom ? (await db.query<{ handle: string | null; name: string; place: string }>(
-    `SELECT beeline_workspace_handle(identity.id,room.workspace_id) handle,identity.name,room.name place FROM identities identity, rooms room
-     WHERE identity.id=$1 AND room.id=$2`, [recipient, returnRoom])).rows[0] : undefined;
-  const who = commander ? `@${(commander.handle ?? commander.name).replace(/^@/, '')} in ${commander.place}` : 'whoever opened this corner';
-  throw new CommandRefusalError(
-    `post refused: ${skipped.map(person => `@${person.handle}`).join(', ')} is not your direct commander at this place. ` +
-    `Your commander is ${who}. Use report(needs-decision:) and they decide whether to ask further up.`, 403);
+  const skipped = people.filter((person) => person.id !== reply && !(person.id === recipient && returnRoom === roomId));
+  if (!skipped.length) return [];
+  const typedLower = new Set(typed.map((handle) => handle.toLowerCase()));
+  const dropped = new Set<string>();
+  for (const person of skipped) {
+    if (typedLower.has(person.handle.toLowerCase())) dropped.add(person.handle);
+  }
+  if (typed.some((handle) => isChannelMentionToken(handle))) dropped.add('channel');
+  return [...dropped];
 }
 
 /** Approved revisions replace the opening route without changing its provenance. */

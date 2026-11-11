@@ -4,7 +4,7 @@ import { spawn, spawnSync, type ChildProcess } from 'node:child_process';
 import { resolve } from 'node:path';
 import { createRoomPermissionHandler, roomPermissionDecision } from './monolith-room-turn.js';
 import { sandboxMountPlan, buildBwrapArgv, credentialMaskPaths } from './bwrap-sandbox.js';
-import { agentGrantAutoApproves, parseCommandGrantTarget } from '@beeline/api-contract/agent-grants';
+import { agentGrantAutoApproves, commandRuleEscalations, isPreapprovedReadOnlyCommand, parseCommandGrantTarget } from '@beeline/api-contract/agent-grants';
 import { requestGrant, readGrantScript } from './read-only-mcp-agent-grant-deps.js';
 import { sessionGrantedResources } from './room-session.js';
 import type { BodyConfig } from './config.js';
@@ -63,6 +63,113 @@ it.each(['task', 'python3', 'node', 'env', 'timeout'])('R-SCRIPT-1 writable PATH
   await expect(runner.run({ roomId: 'room', argv: [name, '--version'] })).rejects.toThrow('script hash does not match');
   await expect(runner.run({ roomId: 'room', argv: ['different', 'private-value'] })).rejects.toThrow('prefix word (1)');
   expect(readGrantScript(parseCommandGrantTarget('echo approved'), { roomId: 'room', scriptRoots: [root], scriptEnv: { PATH: '/usr/bin:/bin' }, execute: async () => ({}) })).toBeUndefined();
+});
+
+it('writable gh and git launchers still need a script binding, including after the bytes change', async () => {
+  const root = fixture();
+  for (const name of ['gh', 'git']) writeFileSync(resolve(root, name), '#!/bin/sh\nprintf approved', { mode: 0o755 });
+  const deps = { roomId: 'room', scriptRoots: [root], scriptEnv: { PATH: root }, execute: async () => ({}) };
+  const ghScript = readGrantScript(parseCommandGrantTarget('gh pr view'), deps);
+  const gitScript = readGrantScript(parseCommandGrantTarget('git status'), deps);
+  expect(ghScript?.contents).toContain('printf approved');
+  expect(gitScript?.contents).toContain('printf approved');
+  const ghRule = parseCommandGrantTarget('gh pr view');
+  expect(commandRuleEscalations(ghRule, ghScript)).toContain('unseen-script');
+  expect(agentGrantAutoApproves({
+    kind: 'command', target: 'gh pr view', escalations: commandRuleEscalations(ghRule, ghScript),
+  })).toBe(false);
+  expect(readGrantScript(parseCommandGrantTarget('gh pr view .env'), deps)?.contents).toContain('printf approved');
+  const grants = [{ grantId: 'view', workspaceId: 'workspace', kind: 'command', target: 'gh pr view', status: 'approved', requestedBy: 'owner' }];
+  const runner = new GrantCommandRunner({ agentId: 'agent', env: { PATH: `${root}:/usr/bin:/bin`, HOME: root },
+    api: { execute: async (op: string) => op === 'listTurnAgentGrants' ? { grants } : {} } as never });
+  runner.register('room', { workspaceId: 'workspace', cwd: root, turn: () => ({ requestId: 'request', generationId: 'generation' }), writePolicy: () => ({ surface: 'corner' }) });
+  await expect(runner.run({ roomId: 'room', argv: ['gh', 'pr', 'view'] })).rejects.toThrow(/script path or binding/);
+  Object.assign(grants[0]!, { script: ghScript });
+  expect((await runner.run({ roomId: 'room', argv: ['gh', 'pr', 'view'] })).output).toContain('approved');
+  writeFileSync(resolve(root, 'gh'), '#!/bin/sh\nprintf changed');
+  await expect(runner.run({ roomId: 'room', argv: ['gh', 'pr', 'view'] })).rejects.toThrow(/script hash does not match/);
+  await expect(runner.run({ roomId: 'room', argv: ['gh', 'pr', 'view', '.env'] })).rejects.toThrow(/credential|environment file/);
+  await expect(runner.run({ roomId: 'room', argv: ['gh', 'pr', 'view', '--with', 'FLY_TOKEN'] })).rejects.toThrow(/credential|environment file|script path or binding/);
+  Object.assign(grants[0]!, { grantId: 'status', target: 'git status', script: undefined });
+  await expect(runner.run({ roomId: 'room', argv: ['git', 'status'] })).rejects.toThrow(/script path or binding/);
+});
+
+it('a summary git grant does not print a blob or a patch that contains a secret marker', async () => {
+  const root = fixture();
+  const git = (args: string[]) => spawnSync('git', ['-c', 'user.email=t@example.com', '-c', 'user.name=t', '-c', 'commit.gpgsign=false', ...args], {
+    cwd: root, encoding: 'utf8',
+  });
+  expect(git(['init']).status, git(['init']).stderr).toBe(0);
+  writeFileSync(resolve(root, 'secret.txt'), 'PRIVATE_FIXTURE_MARKER\n');
+  expect(git(['add', 'secret.txt']).status).toBe(0);
+  expect(git(['commit', '-m', 'add secret']).status, git(['commit', '-m', 'add secret']).stderr).toBe(0);
+  const blob = git(['rev-parse', 'HEAD:secret.txt']).stdout.trim();
+  expect(git(['show', '--stat', blob]).stdout).toContain('PRIVATE_FIXTURE_MARKER');
+  expect(git(['show', '--stat', '-p', 'HEAD']).stdout).toContain('PRIVATE_FIXTURE_MARKER');
+  expect(git(['log', '-1', '-p']).stdout).toContain('PRIVATE_FIXTURE_MARKER');
+  expect(git(['show', 'HEAD']).stdout).toContain('PRIVATE_FIXTURE_MARKER');
+  expect(isPreapprovedReadOnlyCommand(['git', 'show', '--stat', blob])).toBe(false);
+  expect(isPreapprovedReadOnlyCommand(['git', 'show', '--stat', blob.slice(0, 4)])).toBe(false);
+  expect(isPreapprovedReadOnlyCommand(['git', 'show', '--stat', 'HEAD:secret.txt'])).toBe(false);
+  expect(isPreapprovedReadOnlyCommand(['git', 'show', '--stat', '-p', 'HEAD'])).toBe(false);
+  expect(isPreapprovedReadOnlyCommand(['gh', 'pr', 'diff'])).toBe(false);
+  expect(isPreapprovedReadOnlyCommand(['gh', 'pr', 'diff', '12'])).toBe(false);
+  const grants = [
+    { grantId: 'stat', workspaceId: 'workspace', kind: 'command', target: 'git show --stat', status: 'approved', requestedBy: 'owner' },
+    { grantId: 'log', workspaceId: 'workspace', kind: 'command', target: 'git log', status: 'approved', requestedBy: 'owner' },
+  ];
+  const runner = new GrantCommandRunner({ agentId: 'agent', env: { PATH: '/usr/bin:/bin', HOME: root },
+    api: { execute: async (op: string) => op === 'listTurnAgentGrants' ? { grants } : {} } as never });
+  runner.register('room', { workspaceId: 'workspace', cwd: root, turn: () => ({ requestId: 'request', generationId: 'generation' }), writePolicy: () => ({ surface: 'corner' }) });
+  const summary = await runner.run({ roomId: 'room', argv: ['git', 'show', '--stat', 'HEAD'] });
+  expect(summary.output).not.toContain('PRIVATE_FIXTURE_MARKER');
+  await expect(runner.run({ roomId: 'room', argv: ['git', 'show', '--stat', blob] })).rejects.toThrow(/file contents or a full patch/);
+  await expect(runner.run({ roomId: 'room', argv: ['git', 'show', '--stat', blob.slice(0, 4)] })).rejects.toThrow(/file contents or a full patch/);
+  await expect(runner.run({ roomId: 'room', argv: ['git', 'show', '--stat', 'HEAD:secret.txt'] })).rejects.toThrow(/file contents or a full patch/);
+  await expect(runner.run({ roomId: 'room', argv: ['git', 'show', '--stat', '-p', 'HEAD'] })).rejects.toThrow(/file contents or a full patch/);
+  await expect(runner.run({ roomId: 'room', argv: ['git', 'log', '-1', '-p'] })).rejects.toThrow(/file contents or a full patch/);
+  await expect(runner.run({ roomId: 'room', argv: ['git', 'show', 'HEAD'] })).rejects.toThrow(/no approved command grant|file contents or a full patch/);
+  await expect(runner.run({ roomId: 'room', argv: ['gh', 'pr', 'diff', '12'] })).rejects.toThrow(/no approved command grant|file contents or a full patch/);
+});
+
+it('a git show probe does not run a launcher with a missing binding or changed bytes', async () => {
+  const root = fixture();
+  const marker = resolve(root, 'probe-marker');
+  const launcher = resolve(root, 'git');
+  const body = `#!/bin/sh\ntouch '${marker}'\nexec /usr/bin/git "$@"\n`;
+  writeFileSync(launcher, body, { mode: 0o755 });
+  const realGit = (args: string[]) => spawnSync('/usr/bin/git', ['-c', 'user.email=t@example.com', '-c', 'user.name=t', '-c', 'commit.gpgsign=false', ...args], {
+    cwd: root, encoding: 'utf8',
+  });
+  const init = realGit(['init']);
+  expect(init.status, init.stderr).toBe(0);
+  writeFileSync(resolve(root, 'secret.txt'), 'PRIVATE_FIXTURE_MARKER\n');
+  expect(realGit(['add', 'secret.txt']).status).toBe(0);
+  const committed = realGit(['commit', '-m', 'add secret']);
+  expect(committed.status, committed.stderr).toBe(0);
+  const blob = realGit(['rev-parse', 'HEAD:secret.txt']).stdout.trim();
+  const pathEnv = { PATH: `${root}:/usr/bin:/bin` };
+  const script = readGrantScript(parseCommandGrantTarget('git show --stat'), {
+    roomId: 'room', scriptRoots: [root], scriptEnv: pathEnv, execute: async () => ({}),
+  });
+  expect(script?.contents).toContain('probe-marker');
+  const grants = [{ grantId: 'stat', workspaceId: 'workspace', kind: 'command', target: 'git show --stat', status: 'approved', requestedBy: 'owner' }];
+  const runner = new GrantCommandRunner({ agentId: 'agent', env: { ...pathEnv, HOME: root },
+    api: { execute: async (op: string) => op === 'listTurnAgentGrants' ? { grants } : {} } as never });
+  runner.register('room', { workspaceId: 'workspace', cwd: root, turn: () => ({ requestId: 'request', generationId: 'generation' }), writePolicy: () => ({ surface: 'corner' }) });
+  await expect(runner.run({ roomId: 'room', argv: ['git', 'show', '--stat', 'HEAD'] })).rejects.toThrow(/script path or binding/);
+  expect(existsSync(marker)).toBe(false);
+  Object.assign(grants[0]!, { script });
+  writeFileSync(launcher, `${body}# changed\n`, { mode: 0o755 });
+  await expect(runner.run({ roomId: 'room', argv: ['git', 'show', '--stat', 'HEAD'] })).rejects.toThrow(/script hash does not match/);
+  expect(existsSync(marker)).toBe(false);
+  writeFileSync(launcher, body, { mode: 0o755 });
+  const summary = await runner.run({ roomId: 'room', argv: ['git', 'show', '--stat', 'HEAD'] });
+  expect(summary.output).not.toContain('PRIVATE_FIXTURE_MARKER');
+  expect(existsSync(marker)).toBe(true);
+  rmSync(marker);
+  await expect(runner.run({ roomId: 'room', argv: ['git', 'show', '--stat', blob] })).rejects.toThrow(/file contents or a full patch/);
+  expect(existsSync(marker)).toBe(true);
 });
 
 it('R-GRANT-REFUSAL names an expired closest grant without echoing private argument values', async () => {

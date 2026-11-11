@@ -69,8 +69,11 @@ it.each(['approved', 'legacy', 'agent-order', 'different-dispatch', 'same-issuer
   const wake = await createAgentCommand(db, { roomId: opened.cornerId, agentId: WORKER, sourceMessageId: null, reason: 'corner_check' });
   const turn = (await commands(opened.cornerId, WORKER)).find(c => c.id === wake!.id)!;
   await claim(turn);
-  await expect(daemon.execute('postCornerMessage', { ...authority(turn), cornerId: opened.cornerId,
-    text: '@captain Choose the endpoint' }, WORKER)).rejects.toThrow(approved ? `@boss in ${['different-dispatch', 'same-issuer-in-flight'].includes(mode) ? 'Dispatch Room' : 'Target Room'}` : '@ruby in Captain and Ruby');
+  const posted = await daemon.execute('postCornerMessage', { ...authority(turn), cornerId: opened.cornerId,
+    text: '@captain Choose the endpoint' }, WORKER);
+  expect(posted.receipt).toContain('tag @captain');
+  expect((await db.query<{ text: string }>(`SELECT text FROM messages WHERE id=$1`, [posted.id])).rows[0]?.text)
+    .toBe('Choose the endpoint');
   const chain = (await db.query<{ id: string }>(`SELECT id FROM rooms corner WHERE corner.id=$1 AND EXISTS (
     SELECT 1 FROM (${commanderChainSql('corner', '$2', 'now()')}) commanders WHERE commanders.id=$3)`, [opened.cornerId, WORKER, BOSS])).rows;
   expect(chain.length).toBe(approved ? 1 : 0);

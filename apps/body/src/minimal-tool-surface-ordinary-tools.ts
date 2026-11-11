@@ -95,10 +95,10 @@ export const ORDINARY_TOOLS: ToolDefinition[] = [
           "maxItems": 6,
           "items": {
             "type": "string",
-            "minLength": 3,
+            "minLength": 2,
             "maxLength": 32,
-            "pattern": "^[a-z0-9][a-z0-9_./-]{2,31}$",
-            "description": "One distinctive single lower-case word of 3 to 32 characters (letters, digits, or _./-). A multi-word phrase, an upper-case or stopword keyword is refused."
+            "pattern": "^[a-z0-9][a-z0-9_./-]{1,31}$",
+            "description": "One distinctive word of 2 to 32 characters (letters, digits, or _./-). Upper case is saved in lower case. A short word such as ci is kept. A stopword is refused."
           }
         },
         "source_message_ids": {"type": "array", "minItems": 1, "maxItems": 16, "items": {"type": "string", "minLength": 1}},
@@ -155,7 +155,7 @@ export const ORDINARY_TOOLS: ToolDefinition[] = [
   },
   {
     "name": "open_corner",
-    "description": "Create one unit of work in a member Room; the complete brief bounds its scope. Human approval is not required to open. Use a name of at most 3 hyphenated words and an objective of at most 24 words. Objective is navigation. Opening wakes its worker and watches automatically. Keep the Room's designated reviewer out of implementation unless necessary, then set reviewer to an independent agent handle. A reviewer cannot be the implementer or a commit author. hold:true requires sourceMessageId citing a readable person’s request to hold.",
+    "description": "Create one unit of work in a member Room; the complete brief bounds its scope. Human approval is not required to open. A name of at most 3 words is saved with hyphens, and an objective past 24 words or 2000 characters is cut at a word boundary. The result names that change. Objective is navigation. Opening wakes its worker and watches automatically. Keep the Room's designated reviewer out of implementation unless necessary, then set reviewer to an independent agent handle. A reviewer cannot be the implementer or a commit author. hold:true requires sourceMessageId citing a readable person’s request to hold.",
     "inputSchema": {
       "type": "object",
       "required": ["room", "brief", "implementer"],
@@ -169,7 +169,7 @@ export const ORDINARY_TOOLS: ToolDefinition[] = [
           "type": "string",
           "minLength": 1,
           "maxLength": 120,
-          "description": "The corner's title: at most 3 words joined by hyphens, no whitespace."
+          "description": "The corner's title. Spaces become hyphens, and only the first 3 words are kept."
         },
         "objective": {
           "type": "string",

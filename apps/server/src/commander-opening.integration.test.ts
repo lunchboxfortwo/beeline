@@ -52,14 +52,18 @@ it('later human orders get ordinary replies here while escalations still go to t
     .toMatchObject({ recipient: RUBY, returnRoom: DM });
 });
 
-it('refuses an escalation tag to the human opener when their surface is elsewhere', async () => {
+it('drops an escalation tag to the human opener when their surface is elsewhere and posts the rest', async () => {
   const opened = await open();
   const command = await createAgentCommand(rootFixture.db, { roomId: opened.cornerId, agentId: RUBY,
     sourceMessageId: null, reason: 'corner_check' });
   const turn = (await commands(opened.cornerId, RUBY)).find(turn => turn.id === command!.id)!;
   await claim(turn);
-  await expect(rootFixture.daemon.execute('postCornerMessage', { ...authority(turn), cornerId: opened.cornerId,
-    text: '@captain Choose the endpoint' }, RUBY)).rejects.toThrow('Use report');
+  const posted = await rootFixture.daemon.execute('postCornerMessage', { ...authority(turn), cornerId: opened.cornerId,
+    text: '@captain Choose the endpoint' }, RUBY);
+  expect(posted.receipt).toContain('tag @captain');
+  expect((await rootFixture.db.query<{ text: string }>(`SELECT text FROM messages WHERE id=$1`, [posted.id])).rows[0]?.text)
+    .toBe('Choose the endpoint');
+  expect((await commands(DM, RUBY)).filter(command => command.reason === 'report')).toEqual([]);
 });
 
 it.each([false, true])('nested corners report one step up even with opening parent removed=%s', async removed => {

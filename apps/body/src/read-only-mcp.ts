@@ -3,7 +3,7 @@ import { realpathSync, lstatSync, existsSync, statSync, readFileSync, writeFileS
 import { resolve, isAbsolute, relative, sep, join, basename } from "node:path";
 import { AsyncLocalStorage } from "node:async_hooks";
 import { isNetworkFailure } from "./network-failure.js";
-import { cornerTextRefusal, normalizeCornerText, encodeArtifactTitleHeader } from "@beeline/api-contract/daemon";
+import { fixCornerText, encodeArtifactTitleHeader } from "@beeline/api-contract/daemon";
 import { fetchBoundedBytes, BoundedSizeError, MAX_ATTACHMENT_BYTES, FETCH_TIMEOUT_MS, EXPIRED_REASON } from "./attachment-delivery.js";
 import { assertScratchWriteBudget } from "./scratch-lifecycle.js";
 import { createHash } from "node:crypto";
@@ -527,16 +527,16 @@ export async function daemonExecute(name: string, input: JsonObject): Promise<Js
 
 
 
-/** The corner's two texts, flattened and judged. Anything that reads as a
- *  refusal is one plain sentence naming the limit and the actual count: a
- *  refused call the model cannot understand is a silent one (C90). */
-export function cornerCallText(args: JsonObject): { name: string; objective: string } {
-  const refusal =
-    cornerTextRefusal('name', args.name) ?? cornerTextRefusal('objective', args.objective);
-  if (refusal) throw new Error(refusal);
+/** The corner's two texts, flattened. Spaces in a name become hyphens. A long
+ *  objective is cut on a word boundary. Empty text still throws. */
+export function cornerCallText(args: JsonObject): { name: string; objective: string; notes?: string[] } {
+  const name = fixCornerText('name', args.name);
+  const objective = fixCornerText('objective', args.objective);
+  const notes = [name.note, objective.note].filter((note): note is string => Boolean(note));
   return {
-    name: String(args.name),
-    objective: normalizeCornerText(String(args.objective)),
+    name: name.text,
+    objective: objective.text,
+    ...(notes.length ? { notes } : {}),
   };
 }
 

@@ -50,17 +50,18 @@ import { pathGrantAllowsWrite } from '@beeline/api-contract/agent-grants';
  * last-resort fallback. Values are injected into the child's env and scrubbed
  * from its output; they never reach the transcript, the ledger, or the model.
  */
-import { execFile } from 'node:child_process';
+import { execFile, spawnSync } from 'node:child_process';
 import { createHash, randomBytes, randomUUID } from 'node:crypto';
 import { chmod, mkdir, readFile, readdir, rename, rm, rmdir, stat, writeFile } from 'node:fs/promises';
 import { createServer, type Server } from 'node:http';
 import type { AddressInfo } from 'node:net';
-import { dirname, resolve } from 'node:path';
+import { dirname, isAbsolute, resolve } from 'node:path';
 import {
   commandGrantEscalationsBeyondRule,
   commandGrantMatches,
   formatGrantEscalationReason,
   parseCommandGrantTarget,
+  repositoryContentBeyondRule,
   type CommandGrantRule,
 } from '@beeline/api-contract/agent-grants';
 import type { DaemonOperationMap } from '@beeline/api-contract/daemon';
@@ -479,8 +480,19 @@ export class GrantCommandRunner {
         bindingFailure ??= new Error(`Closest grant ${candidate.grantId}: extra prefix words name a credential or environment file; this run needs its own approval.`);
         continue;
       }
-      try { await this.checkScriptBinding(candidate, room.cwd, checkEnv, argv, stdin); }
+      if (repositoryContentBeyondRule(possible.rule.argv, argv)) {
+        bindingFailure ??= new Error(`Closest grant ${candidate.grantId}: this command can print file contents or a full patch; it needs its own approval.`);
+        continue;
+      }
+      // Hash the launcher before any content probe. A PATH lookup here would run
+      // an unbound writable git and could create files before the refusal.
+      let executable: string | undefined;
+      try { executable = await this.checkScriptBinding(candidate, room.cwd, checkEnv, argv, stdin); }
       catch (error) { bindingFailure ??= error as Error; continue; }
+      if (gitShowPrintsFileContents(room.cwd, checkEnv, argv, executable)) {
+        bindingFailure ??= new Error(`Closest grant ${candidate.grantId}: this command can print file contents or a full patch; it needs its own approval.`);
+        continue;
+      }
       match = possible;
       break;
     }
@@ -655,6 +667,8 @@ export class GrantCommandRunner {
    * script the agent rewrote after the human answered no longer matches, and a
    * script that appeared where the card had none was never approved at all. A
    * line with no such file (`python3 -V`) has nothing to bind and passes.
+   * The return is that executable when the binding matches, so a later probe
+   * cannot look up a different file on PATH.
    */
   private async checkScriptBinding(
     grant: LiveGrant,
@@ -662,25 +676,27 @@ export class GrantCommandRunner {
     env: NodeJS.ProcessEnv,
     argv: readonly string[],
     stdin?: string,
-  ): Promise<void> {
+  ): Promise<string | undefined> {
     const context = resolveGrantCommand(argv, cwd, env);
     const argument = grantScriptArgument(context);
     if (!argument) return;
     const note = ` Closest grant ${grant.grantId}:`;
     if (stdin !== undefined && !argument.stdin) throw new Error(`${note} stdin is only supported when the interpreter reads its approved code from stdin.`);
     if (argument.stdin && stdin === undefined) throw new Error(`${note} stdin bytes are unavailable; save them as a script file or approve exact stdin code.`);
-    if (installedGrantExecutable(argument, context.cwd, context.env) && !grant.script) return;
+    const installed = installedGrantExecutable(argument, context.cwd, context.env);
+    if (installed && !grant.script) return installed;
     const candidates = scriptCandidates(cwd, argv, env);
     let bytes: Buffer | undefined = argument.stdin ? Buffer.from(stdin!) : argument.inline === undefined ? undefined : Buffer.from(argument.inline);
+    let validated: string | undefined;
     for (const candidate of candidates) {
       bytes = await readFile(candidate).catch(() => undefined);
-      if (bytes) break;
+      if (bytes) { validated = candidate; break; }
     }
     const script = grant.script;
     if (!bytes) {
       throw new Error(`${note} script cannot be read at execution cwd ${context.cwd}; check cwd and script path. Ask with request_grant kind=command again.`);
     }
-    if (!script && argument.direct && argument.path.includes('/') && isNativeGrantExecutable(bytes)) return;
+    if (!script && argument.direct && argument.path.includes('/') && isNativeGrantExecutable(bytes)) return validated;
     if (!script || script.path !== argument.path) {
       throw new Error(
         `${note} script path or binding does not match; ${argument.path} is a script no human has read under this grant. ` +
@@ -693,7 +709,31 @@ export class GrantCommandRunner {
           'Ask with request_grant kind=command again so a human reads what runs now.',
       );
     }
+    return validated;
   }
+}
+
+/**
+ * `git show --stat` of a blob, tree, or `rev:path` prints the file. A commit
+ * object stays a summary. `executable` is the binary or launcher whose binding
+ * already matched. The probe runs that file only, never a PATH lookup of `git`,
+ * and its output is never returned to the agent.
+ */
+function gitShowPrintsFileContents(
+  cwd: string,
+  env: NodeJS.ProcessEnv,
+  argv: readonly string[],
+  executable: string | undefined,
+): boolean {
+  if (argv[0] !== 'git' || argv[1] !== 'show' || !argv.includes('--stat')) return false;
+  const objects = argv.slice(2).filter((word) => word !== '--stat' && !word.startsWith('-'));
+  if (objects.length === 0) return false;
+  if (!executable || !isAbsolute(executable)) return true;
+  for (const word of objects) {
+    const probe = spawnSync(executable, ['cat-file', '-t', '--', word], { cwd, env, encoding: 'utf8' });
+    if ((probe.stdout ?? '').trim() !== 'commit') return true;
+  }
+  return false;
 }
 
 /** Resolve exactly as exec does: relative script paths are relative to cwd.

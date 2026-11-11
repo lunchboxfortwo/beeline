@@ -425,8 +425,92 @@ export function commandGrantEscalations(
 ): AgentGrantEscalation[] {
   const found = new Set<AgentGrantEscalation>();
   if (options.hasScript) found.add('unseen-script');
-  if (namesCredentialFile(argv)) found.add('credential');
+  if (namesCredentialFile(argv) || namesEnvSecret(argv)) found.add('credential');
   return AGENT_GRANT_ESCALATIONS.filter((entry) => found.has(entry));
+}
+
+/**
+ * Read-only commands that skip the approval card. A full diff, a patch, or
+ * `git show` of a blob can print a file, so only status, log, and summary
+ * forms are listed. `gh pr diff` asks. Anything that names a credential file
+ * or an env secret still asks. Inline eval and every other writable script
+ * still ask.
+ */
+export const PREAPPROVED_READ_ONLY_COMMANDS = [
+  'gh pr view',
+  'gh pr checks',
+  'gh pr list',
+  'git status',
+  'git log',
+  'git diff --stat',
+  'git show --stat',
+] as const;
+
+/** A raw git object id, including a short hash. `git show --stat` still prints a blob. */
+function gitObjectId(word: string): boolean {
+  return /^[0-9a-f]{1,64}$/i.test(word);
+}
+
+/** Flags that turn a summary into a full patch. */
+function patchFlag(word: string): boolean {
+  return /^(?:-p|-u|--patch|--raw|-c|--cc|-m|-W|--function-context|--word-diff(?:-regex(?:=.*)?)?|--color-words|--patch-with-raw|--patch-with-stat)$/.test(word)
+    || /^-U\d*$/.test(word)
+    || /^--unified(?:=.*)?$/.test(word);
+}
+
+function namesEnvSecret(argv: readonly string[]): boolean {
+  return argv.slice(1).some((word) =>
+    /^(?:--with|--env)(?:=|$)/.test(word) ||
+    /^(?:printenv|env)$/i.test(word) ||
+    /^[A-Za-z_][A-Za-z0-9_]*(?:TOKEN|SECRET|KEY|PASSWORD|CREDENTIAL)=/i.test(word));
+}
+
+function readOnlyTail(words: readonly string[], allow: (word: string, next: () => string | undefined) => boolean): boolean {
+  for (let index = 0; index < words.length; index += 1) {
+    const word = words[index]!;
+    const next = () => words[++index];
+    if (!allow(word, next)) return false;
+  }
+  return true;
+}
+
+/** A bare `gh` or `git` with one of the named read-only subcommands and a tight tail. */
+export function isPreapprovedReadOnlyCommand(argv: readonly string[]): boolean {
+  if (argv[0] !== 'gh' && argv[0] !== 'git') return false;
+  if (namesCredentialFile(argv) || namesEnvSecret(argv)) return false;
+  if (argv[0] === 'gh') {
+    if (argv[1] !== 'pr' || !['view', 'checks', 'list'].includes(argv[2] ?? '')) return false;
+    return readOnlyTail(argv.slice(3), (word, next) => {
+      if (word === '--comments') return true;
+      if (word === '--json') return /^[A-Za-z0-9,]{1,200}$/.test(next() ?? '');
+      if (word === '--state') return /^(?:open|closed|merged|all)$/.test(next() ?? '');
+      if (word === '--limit') return /^[0-9]{1,4}$/.test(next() ?? '');
+      return !word.startsWith('-') && /^[A-Za-z0-9._/#-]{1,200}$/.test(word);
+    });
+  }
+  if (argv[1] === 'diff') {
+    const summary = ['--stat', '--name-only', '--shortstat'];
+    return argv.length > 2 && argv.slice(2).every((word) => summary.includes(word));
+  }
+  if (argv[1] === 'show') {
+    if (!argv.includes('--stat')) return false;
+    return readOnlyTail(argv.slice(2), (word) =>
+      word === '--stat' || (revisionWord(word) && !gitObjectId(word)));
+  }
+  if (!['status', 'log'].includes(argv[1] ?? '')) return false;
+  return readOnlyTail(argv.slice(2), (word, next) => {
+    if (argv[1] === 'status') return word === '--short' || word === '--branch';
+    if (['--oneline', '--shortstat', '-s'].includes(word)) return true;
+    if (word === '--max-count' || word === '-n') return /^[0-9]{1,6}$/.test(next() ?? '');
+    if (/^-[0-9]{1,6}$/.test(word)) return true;
+    return revisionWord(word);
+  });
+}
+
+/** A git revision, not a path. A dot or slash can name a file, so it asks. */
+function revisionWord(word: string): boolean {
+  return !word.startsWith('-') && !word.includes('.') && !word.includes('/')
+    && /^[A-Za-z0-9_@^{}~-]{1,200}$/.test(word);
 }
 
 /**
@@ -438,7 +522,46 @@ export function commandRuleEscalations(
   rule: CommandGrantRule,
   script?: CommandGrantScript,
 ): AgentGrantEscalation[] {
-  return commandGrantEscalations(rule.argv, { hasScript: Boolean(script) });
+  // A read-only argv is not an exemption from the script card. An immutable
+  // installed executable never arrives with script bytes. A writable launcher
+  // still carries those bytes and stays unseen until a person reads them.
+  return commandGrantEscalations(rule.argv, {
+    hasScript: Boolean(script),
+  });
+}
+
+/**
+ * Extra words a shorter approval never named that print a file or a full patch.
+ * An exact approval of those words is the human's decision. A prefix is not.
+ * `git show --stat` of a blob is handled at execution, because the hash alone
+ * does not say whether the object is a commit.
+ */
+export function repositoryContentBeyondRule(
+  ruleArgv: readonly string[],
+  argv: readonly string[],
+): boolean {
+  const summary = ['--stat', '--name-only', '--shortstat'];
+  const printsPatch = (command: readonly string[]) =>
+    (command[0] === 'gh' && command[1] === 'pr' && command[2] === 'diff') ||
+    (command[0] === 'git' && command[1] === 'show' &&
+      (!command.includes('--stat') || command.slice(2).some(patchFlag))) ||
+    (command[0] === 'git' && command[1] === 'log' && command.slice(2).some(patchFlag)) ||
+    (command[0] === 'git' && command[1] === 'diff' && (command.length === 2 ||
+      command.slice(2).some((word) => !summary.includes(word))));
+  if (!printsPatch(argv)) return false;
+  return ruleArgv.length !== argv.length || ruleArgv.some((word, index) => word !== argv[index]);
+}
+
+/**
+ * `git show --stat` can still print a blob, a tree, or `HEAD:path`. A symbolic
+ * revision such as `HEAD` is a summary. Object ids are checked against the
+ * repository at execution, because a commit hash is safe and a blob hash is not.
+ */
+export function gitShowStatNamesFile(argv: readonly string[]): boolean {
+  if (argv[0] !== 'git' || argv[1] !== 'show' || !argv.includes('--stat')) return false;
+  return argv.slice(2).some((word) => word !== '--stat' && (
+    gitObjectId(word) || word.includes(':') || word.includes('.') || word.includes('/')
+  ));
 }
 
 /**
@@ -452,8 +575,9 @@ export function commandGrantEscalationsBeyondRule(
   rule: CommandGrantRule,
   argv: readonly string[],
 ): AgentGrantEscalation[] {
-  if (!namesCredentialFile(argv)) return [];
-  return namesCredentialFile(rule.argv) ? [] : ['credential'];
+  const freshFile = namesCredentialFile(argv) && !namesCredentialFile(rule.argv);
+  const freshSecret = namesEnvSecret(argv) && !namesEnvSecret(rule.argv);
+  return freshFile || freshSecret ? ['credential'] : [];
 }
 
 /**

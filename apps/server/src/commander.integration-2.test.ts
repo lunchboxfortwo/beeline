@@ -627,7 +627,10 @@ it('Reproduction R1: each post receipt lists only that post tags', async () => {
   expect((await post('@other this post is for you')).woken).toEqual(['other']);
   const second = await post('No tag in this next post.');
   expect(second.woken).toEqual([]);
-  await expect(post('@captain see this')).rejects.toThrow('Your commander is @ruby in Captain and Ruby');
+  const skipped = await post('@captain see this');
+  expect(skipped.woken).toEqual([]);
+  expect(skipped.receipt).toContain('tag @captain');
+  expect((await rootFixture.db.query<{ text: string }>(`SELECT text FROM messages WHERE id=$1`, [skipped.id])).rows[0]?.text).toBe('see this');
   const quoted = await post('"@ruby, or any squire agent except Speedy."');
   expect(quoted.woken).toEqual([]);
   expect((await post('Correction: my quote of "@ruby" in that reply woke Ruby. That was my error. Ruby has no task here.')).woken).toEqual([]);

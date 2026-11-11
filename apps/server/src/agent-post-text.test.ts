@@ -1,5 +1,5 @@
 import { expect, it } from 'vitest';
-import { agentPostText } from './agent-post-text.js';
+import { agentPostText, repairAgentPost } from './agent-post-text.js';
 
 it.each(['think', 'thinking', 'THINK', 'THINKING'])(
   'R-REASONING-POST: removes leading %s while preserving the final reply', (tag) => {
@@ -9,6 +9,19 @@ it.each(['think', 'thinking', 'THINK', 'THINKING'])(
     expect(agentPostText(`<${tag}>Unfinished reasoning`)).toBe('');
   },
 );
+
+it('R-REASONING-POST: an unclosed thinking block drops every private paragraph', () => {
+  const privateOnly = repairAgentPost('<thinking>First private paragraph.\n\nSecond private paragraph.');
+  expect(privateOnly.text).toBe('');
+  expect(privateOnly.removed).toEqual(['unclosed <thinking> block']);
+  expect(privateOnly.text).not.toContain('private paragraph');
+  const repaired = repairAgentPost('Ship the rest.\n\n<thinking>First private paragraph.\n\nSecond private paragraph.');
+  expect(repaired.text).toBe('Ship the rest.');
+  expect(repaired.removed).toEqual(['unclosed <thinking> block']);
+  expect(repaired.text).not.toContain('private paragraph');
+  expect(repairAgentPost('<thinking>\nprivate notes\n\nShip the rest.').text).toBe('');
+  expect(agentPostText('<thinking>Unfinished reasoning')).toBe('');
+});
 
 it('R-REASONING-POST: removes repeated blocks but preserves quoted examples and ordinary replies', () => {
   expect(agentPostText('<think>First</think>\n<thinking>Second</thinking>Final.')).toBe('Final.');

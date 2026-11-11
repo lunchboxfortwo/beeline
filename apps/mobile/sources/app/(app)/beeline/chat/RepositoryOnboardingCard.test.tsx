@@ -58,6 +58,14 @@ it('marks the current repo and sends the other repository id to the server', asy
   await act(async () => props.choices[1].onPress());
   expect(mocks.operation).toHaveBeenCalledWith('actOnRepositoryCard', expect.objectContaining({ action:'link', repositoryId:43, cardId:card.id }));
 });
+it('opens the picker with the named repo pre-selected', async () => {
+  (globalThis as any).IS_REACT_ACT_ENVIRONMENT=true;
+  let rendered: any;
+  await act(async () => { rendered=create(<RepositoryOnboardingCard card={{...card, selected:'test/other'}} viewerId={H} />); });
+  const props=rendered.root.findByType('TranscriptCard').props;
+  expect(props.choices.find((choice: any) => choice.label === 'test/other').selected).toBe(true);
+  expect(props.choices.find((choice: any) => choice.label === 'test/current').selected).toBe(true);
+});
 it('does not offer actions to another viewer or repeat a settled task', async () => {
   let rendered: any;
   await act(async () => { rendered=create(<RepositoryOnboardingCard card={card} viewerId={'d'.repeat(64)} />); });

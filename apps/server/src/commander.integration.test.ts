@@ -100,14 +100,14 @@ it.each(['needs_decision: choose the product scope', 'needs-decision: choose the
 it('chain of command: a corner agent cannot tag a person above its commander', async () => {
   const opened = await open(), turn = await worker(opened.cornerId);
   const text = '@captain Approve the reviewer-link fetch here?';
-  await expect(rootFixture.daemon.execute('postCornerMessage', { ...authority(turn), cornerId: opened.cornerId, text }, WORKER))
-    .rejects.toThrow('@captain is not your direct commander at this place. Your commander is @ruby in Captain and Ruby.');
-  await expect(rootFixture.daemon.execute('postCornerMessage', { ...authority(turn), cornerId: opened.cornerId, text: '@channel approve?' }, WORKER))
-    .rejects.toThrow('not your direct commander');
-  await expect(rootFixture.daemon.execute('postRoomMessage', { ...authority(turn), text }, WORKER))
-    .rejects.toThrow('not your direct commander');
-  expect((await rootFixture.db.query(`SELECT 1 FROM messages WHERE text=$1`, [text])).rowCount).toBe(0);
-  // The same ask goes up by report, and Ruby asks the Captain where the Captain gave the order.
+  const posted = await rootFixture.daemon.execute('postCornerMessage', { ...authority(turn), cornerId: opened.cornerId, text }, WORKER);
+  expect(posted.receipt).toContain('tag @captain');
+  expect((await rootFixture.db.query<{ text: string }>(`SELECT text FROM messages WHERE id=$1`, [posted.id])).rows[0]?.text)
+    .toBe('Approve the reviewer-link fetch here?');
+  const channel = await rootFixture.daemon.execute('postCornerMessage', { ...authority(turn), cornerId: opened.cornerId, text: '@channel approve?' }, WORKER);
+  expect(channel.receipt).toContain('tag @channel');
+  expect((await rootFixture.db.query<{ text: string }>(`SELECT text FROM messages WHERE id=$1`, [channel.id])).rows[0]?.text).toBe('approve?');
+  // A room post completes the turn, so the report goes out while this turn is still claimed.
   await rootFixture.daemon.execute('report', { status: 'needs_decision', ...authority(turn), text: 'needs-decision: Approve the reviewer-link fetch?' }, WORKER);
   const report = (await commands(DM, RUBY)).find(c => c.reason === 'report')!;
   await claim(report);
@@ -115,6 +115,49 @@ it('chain of command: a corner agent cannot tag a person above its commander', a
   const tray = await rootFixture.phone.execute('readNeedsYou', { workspaceId: WS }, HUMAN);
   expect(tray.items.map(item => [item.roomId, item.text])).toEqual([[DM, 'Approve the reviewer-link fetch?']]);
   expect((await rootFixture.db.query(`SELECT 1 FROM messages WHERE room_id=$1 AND text LIKE '%@captain%'`, [opened.cornerId])).rowCount).toBe(0);
+  expect((await rootFixture.db.query(`SELECT 1 FROM messages WHERE text=$1`, [text])).rowCount).toBe(0);
+});
+
+it('a final reply drops a tag above the commander and names it', async () => {
+  const opened = await open(), turn = await worker(opened.cornerId);
+  const text = '@captain Approve the reviewer-link fetch here?';
+  const room = await rootFixture.daemon.execute('postRoomMessage', { ...authority(turn), text }, WORKER);
+  expect(room.receipt).toContain('tag @captain');
+  expect((await rootFixture.db.query<{ text: string }>(`SELECT text FROM messages WHERE id=$1`, [room.id])).rows[0]?.text)
+    .toBe('Approve the reviewer-link fetch here?');
+});
+
+it('posts the rest when the thinking block is unclosed or the reply link is broken', async () => {
+  const opened = await open(), turn = await worker(opened.cornerId);
+  const privateText = '<thinking>First private paragraph.\n\nSecond private paragraph.';
+  await expect(rootFixture.daemon.execute('postCornerMessage', {
+    ...authority(turn), cornerId: opened.cornerId, text: privateText,
+  }, WORKER)).rejects.toThrow('no public reply');
+  const thinking = await rootFixture.daemon.execute('postCornerMessage', {
+    ...authority(turn), cornerId: opened.cornerId,
+    text: 'Ship the rest.\n\n<thinking>First private paragraph.\n\nSecond private paragraph.',
+  }, WORKER);
+  expect(thinking.receipt).toContain('unclosed <thinking> block');
+  const stored = (await rootFixture.db.query<{ text: string }>(`SELECT text FROM messages WHERE id=$1`, [thinking.id])).rows[0]?.text;
+  expect(stored).toBe('Ship the rest.');
+  expect(stored).not.toContain('private paragraph');
+  const read = await rootFixture.phone.readRoom(opened.cornerId, HUMAN);
+  expect(read?.messages.some((message) => message.id === thinking.id && message.text === 'Ship the rest.' && !message.text.includes('private paragraph'))).toBe(true);
+  expect((await rootFixture.db.query(`SELECT 1 FROM messages WHERE text LIKE '%Second private paragraph%'`)).rowCount).toBe(0);
+  const quoted = await rootFixture.daemon.execute('postCornerMessage', {
+    ...authority(turn), cornerId: opened.cornerId,
+    text: '@captain Here is the exact quote: "@captain approved it".',
+  }, WORKER);
+  expect(quoted.receipt).toContain('tag @captain');
+  expect((await rootFixture.db.query<{ text: string }>(`SELECT text FROM messages WHERE id=$1`, [quoted.id])).rows[0]?.text)
+    .toBe('Here is the exact quote: "@captain approved it".');
+  const broken = await rootFixture.daemon.execute('postCornerMessage', {
+    ...authority(turn), cornerId: opened.cornerId, text: 'Still here.', replyTo: 'not-a-message',
+  }, WORKER);
+  expect(broken.receipt).toContain('reply link');
+  expect((await rootFixture.db.query<{ text: string; reply_to_message_id: string | null }>(
+    `SELECT text, reply_to_message_id FROM messages WHERE id=$1`, [broken.id])).rows[0])
+    .toEqual({ text: 'Still here.', reply_to_message_id: null });
 });
 
 it('chain of command: a corner agent may tag the person who directed this turn', async () => {

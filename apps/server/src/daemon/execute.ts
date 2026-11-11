@@ -19,7 +19,7 @@ import type { DaemonContext } from './context.js';
 import { Input, OwnedModelClaimCapability, Output, CORNER_REACH_OPERATIONS, AccessDeniedError, CORNER_CLEANUP_OPERATIONS, id, seconds } from './values.js';
 import { daemonAccess, daemonReviewSourceAccess } from './access.js';
 import { daemonReach, daemonWriteResult } from './corner-messages.js';
-import { daemonPostRoomMessage, daemonPersistTurnTrace } from './messages.js';
+import { daemonPostRoomMessage, daemonPersistTurnTrace, roomPostBody } from './messages.js';
 import { daemonReconcileZeroCheckWorkerCompletion } from './corner-completion.js';
 import { createDaemonCommandService } from '../daemon-service.js';
 import { daemonLockOwnedTurnAccess } from './owned-model.js';
@@ -405,7 +405,21 @@ import { daemonExecuteOperation } from './operations.js';
                 [command.result_message_id],
               )
             ).rows[0]!;
-            if (saved.text !== candidate.text) throw new CommandRefusalError('Reply not delivered: command result conflict; this job already has an answer.', 409);
+            if (saved.text !== candidate.text) {
+              const submitted = typeof candidate.text === 'string' ? candidate.text : undefined;
+              let intended: string | undefined;
+              if (submitted !== undefined) {
+                try {
+                  intended = (await roomPostBody(db, scopedRoom, authenticatedAgentId, {
+                    text: submitted,
+                    presentation: candidate.presentation === 'card' ? 'card' : 'message',
+                  }, command)).text;
+                } catch (error) {
+                  if (!(error instanceof CommandRefusalError)) throw error;
+                }
+              }
+              if (saved.text !== intended) throw new CommandRefusalError('Reply not delivered: command result conflict; this job already has an answer.', 409);
+            }
             return {
               id: saved.id,
               createdAt: seconds(saved.created_at),
