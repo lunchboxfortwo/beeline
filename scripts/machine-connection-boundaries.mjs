@@ -27,7 +27,7 @@ export function inspectMachineConnectionSource(file,text){
   const errors=[];
   const deny=(node,reason)=>errors.push(`${file}:${source.getLineAndCharacterOfPosition(node.getStart(source)).line+1}: machine connection boundary: ${reason}`);
   const timerAliases=new Set(TIMER_NAMES);
-  let warmCountdownSites=0, updateHandoffSites=0;
+  let warmCountdownSites=0, updateHandoffSites=0, turnDeadlineSites=0;
   const warmCountdown=node=>{
     if(file!==BODY+'agent-process.ts'||name(node.expression)!=='setTimeout'||method(node)!=='workChanged')return false;
     for(let parent=node.parent;parent;parent=parent.parent)if(ts.isClassDeclaration(parent))return parent.name?.text==='AgentProcesses';
@@ -38,10 +38,15 @@ export function inspectMachineConnectionSource(file,text){
     for(let parent=node.parent;parent;parent=parent.parent)if(ts.isClassDeclaration(parent))return parent.name?.text==='ReleaseTransaction';
     return false;
   };
+  const turnDeadline=node=>{
+    if(file!==BODY+'agent-turn-deadline.ts'||name(node.expression)!=='setTimeout'||method(node)!=='run')return false;
+    for(let parent=node.parent;parent;parent=parent.parent)if(ts.isClassDeclaration(parent))return parent.name?.text==='AgentTurnDeadline';
+    return false;
+  };
   function visit(node){
     if(file.startsWith(BODY)){
       if(ts.isIdentifier(node)&&['setTimeout','setInterval','setImmediate'].includes(node.text)&&!typeOnly(node)&&
-        !(ts.isCallExpression(node.parent)&&node.parent.expression===node&&(warmCountdown(node.parent)||updateHandoff(node.parent))))
+        !(ts.isCallExpression(node.parent)&&node.parent.expression===node&&(warmCountdown(node.parent)||updateHandoff(node.parent)||turnDeadline(node.parent))))
         deny(node,'helper timer references and destructured aliases are forbidden');
       if(ts.isCallExpression(node)&&(node.expression.kind===ts.SyntaxKind.ImportKeyword||name(node.expression)==='require')&&
         node.arguments[0]&&ts.isStringLiteralLike(node.arguments[0])&&/^(?:node:)?timers(?:\/promises)?$/.test(node.arguments[0].text))
@@ -57,6 +62,7 @@ export function inspectMachineConnectionSource(file,text){
         // One stay-warm countdown and one cancellable update attempt.
         if(warmCountdown(node)){if(++warmCountdownSites>1)deny(node,'AgentProcesses.workChanged may own only one stay-warm countdown');}
         else if(updateHandoff(node)){if(++updateHandoffSites>1)deny(node,'ReleaseTransaction.begin may own only one update handoff timeout');}
+        else if(turnDeadline(node)){if(++turnDeadlineSites>1)deny(node,'AgentTurnDeadline.run may own only one model deadline');}
         else deny(node,'helper timers are forbidden outside the stay-warm and update handoff owners');
       }
       // Generated plugin/bridge code is executable too, not a place to hide a timer.

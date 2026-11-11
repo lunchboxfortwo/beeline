@@ -21,7 +21,7 @@ it.each(['final', 'post-final', 'silent', 'post-silent'] as const)('Reproduction
   }
   if (mode.endsWith('silent')) {
     await rootFixture.daemon.execute('markAgentTurnSilent', authority(wake), RUBY);
-    await rootFixture.daemon.execute('postRoomMessage', { ...authority(wake), text: 'This must remain silent.' }, RUBY);
+    await expect(rootFixture.daemon.execute('postRoomMessage', { ...authority(wake), text: 'This must remain silent.' }, RUBY)).rejects.toThrow('not delivered');
   } else {
     await rootFixture.daemon.execute('postRoomMessage', { ...authority(wake), text: 'Here is the image.' }, RUBY);
   }
@@ -175,7 +175,7 @@ it.each(['room', 'corner'] as const)('Reproduction R1: silent %s rejects late fi
   if (scope === 'room') await rootFixture.db.query(`UPDATE agent_commands SET reason='report' WHERE id=$1`, [turn.id]);
   await rootFixture.daemon.execute('postAgentTurnReceipt', { ...authority(turn), status: 'working' }, turn.agentId);
   await rootFixture.daemon.execute('markAgentTurnSilent', authority(turn), turn.agentId);
-  await rootFixture.daemon.execute('postRoomMessage', { ...authority(turn), text: 'This must never be a message.' }, turn.agentId);
+  await expect(rootFixture.daemon.execute('postRoomMessage', { ...authority(turn), text: 'This must never be a message.' }, turn.agentId)).rejects.toThrow('not delivered');
   expect((await rootFixture.db.query(`SELECT id FROM messages WHERE room_id=$1 AND author_id=$2 AND request_id=$3`,
     [turn.roomId, turn.agentId, turn.turnRequestId])).rows).toEqual([]);
   await rootFixture.daemon.execute('postAgentTurnReceipt', { ...authority(turn), status: 'complete' }, turn.agentId);
@@ -262,7 +262,7 @@ it.each(['done','no-reply'])('WAKE-STORM: auth-failed reviewer reports once with
   // Closing the source corner silences both old pending and fresh reports.
   await rootFixture.db.query('UPDATE rooms SET archived_at=now() WHERE id=$1',[opened.cornerId]);
   expect(await rootFixture.db.transaction(tx=>reportToCommander(tx,opened.cornerId,SOL,'failed: another auth failure',row,'after-close',{automatic:true})))
-    .toMatchObject({skipped:true});
+    .toMatchObject({skipped:true,delivered:false,receipt:expect.stringContaining('not delivered')});
   expect((await commands(DM,RUBY)).filter(c=>c.reason==='report')).toHaveLength(0);
 });
 

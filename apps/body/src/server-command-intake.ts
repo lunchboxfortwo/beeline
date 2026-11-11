@@ -1,3 +1,4 @@
+import { AgentTurnDeadline } from './agent-turn-deadline.js';
 import {OwnedModelFiles} from './owned-model-files.js';
 import {bindOwnedModelTurn,releaseOwnedModelTurn} from './owned-model-turn.js';
 import type {OwnedModelCredential} from '@beeline/api-contract/helper-model';
@@ -398,7 +399,7 @@ export async function runServerCommandIntake(options: {
               const currentOwner = api.turnOwnershipScope?.();
               if (claimOwner && currentOwner && (currentOwner.connectionId !== claimOwner.connectionId || currentOwner.epoch !== claimOwner.epoch))
                 throw new Error('Turn owner changed before activation');
-              return options.run(command);
+              return new AgentTurnDeadline().run(() => options.run(command), () => options.stop(command.turnRequestId));
             })
             .catch(async (error) => {
               options.onError?.(error);

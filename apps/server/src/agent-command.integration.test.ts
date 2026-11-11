@@ -4,7 +4,7 @@ import { describe, expect, it, taggedIdentityIdsSql, seedCornerOpening, PhoneSer
 
 
 it.each(['ordinary', 'tagged', 'threaded', 'private', 'private-agent', 'corner', 'dm'])(
-  'Reproduction R1: discards final text after no-reply on the %s output path', async path => {
+  'Reproduction R1: refuses final text after no-reply on the %s output path', async path => {
     const roomId = path === 'corner' ? C : R;
     if (path === 'dm')
       await rootFixture.db.query(`UPDATE rooms SET direct_participants=$2::jsonb WHERE id=$1`, [R, JSON.stringify([H, A])]);
@@ -24,10 +24,9 @@ it.each(['ordinary', 'tagged', 'threaded', 'private', 'private-agent', 'corner',
     const text = `R1 unwanted closing sentence${path === 'tagged' ? ' @goosy' : ''}`;
     const parent = path === 'threaded' ? await send('Thread parent') : undefined;
     const before = (await rootFixture.phone.readRoom(roomId, H))!.messages.map(m => m.id);
-    // A successful acknowledgement lets an old helper finish without retrying
-    // or converting deliberate silence into a failure notice.
-    await result(command, text, 'g1', parent ? { replyToMessageId: parent.messageId } : {});
-    await result(command, text, 'g1', parent ? { replyToMessageId: parent.messageId } : {});
+    // Deliberate silence remains terminal; attempted text receives an explicit refusal.
+    await expect(result(command, text, 'g1', parent ? { replyToMessageId: parent.messageId } : {})).rejects.toThrow('not delivered');
+    await expect(result(command, text, 'g1', parent ? { replyToMessageId: parent.messageId } : {})).rejects.toThrow('not delivered');
     await expect(result(command, text, 'other-generation')).rejects.toThrow('authority rejected');
     expect((await rootFixture.phone.readRoom(roomId, H))!.messages.map(m => m.id)).toEqual(before);
     expect((await rootFixture.db.query(`SELECT 1 FROM messages WHERE author_id=$1 AND text=$2`, [A, text])).rowCount).toBe(0);
@@ -75,8 +74,8 @@ it('WAKE-STORM: a no_reply_needed receipt posts nothing on a system wake', async
       status: 'complete', completionKind: 'no-reply',
     }, A, await helperOwner(A));
     const text = 'Nonhuman wake only … Ending silently';
-    await result(command, text);
-    await result(command, text);
+    await expect(result(command, text)).rejects.toThrow('not delivered');
+    await expect(result(command, text)).rejects.toThrow('not delivered');
     expect((await rootFixture.db.query('SELECT 1 FROM messages WHERE request_id=$1 AND author_id=$2', [command.turnRequestId, A])).rowCount).toBe(0);
     expect((await rootFixture.db.query('SELECT completion_kind FROM agent_turns WHERE request_id=$1 AND agent_id=$2', [command.turnRequestId, A])).rows[0]?.completion_kind).toBe('no-reply');
     await expect(result(command, text, 'wrong-generation')).rejects.toThrow('authority rejected');

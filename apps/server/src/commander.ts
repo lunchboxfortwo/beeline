@@ -357,7 +357,7 @@ export async function reportToCommander(
   // an ancestor Room merely because that Room still exists.
   if (origin && (await db.query(`SELECT 1 FROM rooms corner
     WHERE corner.id=$1 AND corner.archived_at IS NOT NULL`, [origin])).rowCount)
-    return { id: reportId, createdAt: Math.floor(Date.now() / 1000), delivered: true, skipped: true };
+    return { id: reportId, createdAt: Math.floor(Date.now() / 1000), delivered: false, skipped: true, receipt: 'Report not delivered: the source corner is closed.' };
   if (!recipient || !returnRoom) {
     if (strict) throw new CommandRefusalError('this order has no commander return address', 409);
     console.error(`[commander] ${roomId}: cannot route report without recorded opening provenance`);

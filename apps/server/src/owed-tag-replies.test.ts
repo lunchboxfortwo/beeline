@@ -319,7 +319,7 @@ describe('owed Room tags', () => {
     await db.query(`UPDATE agent_commands SET state='pending',generation_id=NULL,lease_expires_at=NULL,turn_request_id=$2 WHERE id=$1`, [command.id, id()]);
     const retry = (await daemon.execute('getAgentCommands', { roomId: room }, helper)).commands.find(c => c.id === command.id)!;
     await daemon.execute('claimAgentCommand', { roomId: room, commandId: command.id, generationId: 'retry' }, helper);
-    await daemon.execute('postRoomMessage', { roomId: room, requestId: retry.turnRequestId, generationId: 'retry', text: 'retry answer', replyToMessageId: source }, helper);
+    await expect(daemon.execute('postRoomMessage', { roomId: room, requestId: retry.turnRequestId, generationId: 'retry', text: 'retry answer', replyToMessageId: source }, helper)).rejects.toThrow('not delivered');
     expect((await db.query('SELECT id FROM messages WHERE author_id=$1 AND reply_to_message_id=$2', [helper, source])).rows).toEqual([{ id: first.id }]);
     expect((await owedMentions(db, helper)).some(m => m.messageId === source)).toBe(false);
   });

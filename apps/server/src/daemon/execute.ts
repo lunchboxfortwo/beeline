@@ -1,3 +1,5 @@
+import { typedMentionHandles } from '../message-mentions.js';
+import { authorizeAgentReply, requeueRefusedReply } from '../agent-reply-authority.js';
 import { endAgentTurn } from '../agent-turn-end.js';
 import { recordAgentTurnFailure } from '../agent-turn-failure.js';
 import { parkOwnedModelTerminal, OwnedModelOwnerEndRefusal } from '../owned-model-parking.js';
@@ -11,7 +13,6 @@ import { randomBytes } from 'node:crypto';
 import type { DaemonOperationMap } from '@beeline/api-contract/daemon';
 import { lockCornerLifecycle } from '../corner-lifecycle.js';
 import { LiveHub, type LiveEvent } from '../live.js';
-import { typedMentionHandles } from '../message-mentions.js';
 import { precomputeInstitutionalQueryEmbedding } from '../institutional-memory-shadow.js';
 import type { AfterCommit } from '../institutional-memory-embeddings.js';
 import type { DaemonContext } from './context.js';
@@ -29,6 +30,25 @@ import { daemonExecuteOperation } from './operations.js';
 
 
   export async function daemonExecute<Name extends keyof DaemonOperationMap>(ctx: DaemonContext,
+    name: Name, input: Input<Name>, authenticatedAgentId: string,
+    turnOwner?: HelperTurnOwnershipSource, modelClaim?: OwnedModelClaimCapability,
+  ): Promise<Output<Name>> {
+    try { return await daemonExecuteInternal(ctx, name, input, authenticatedAgentId, turnOwner, modelClaim); }
+    catch (error) {
+      // A policy/argument refusal leaves the current turn available for a
+      // corrected tool call. Transport, authority loss and storage failures
+      // return the matching reply claim to the queue.
+      if (!ctx.commandTransaction && name === 'postRoomMessage' &&
+          (!(error instanceof CommandRefusalError) || error.message.startsWith('command output authority rejected'))) {
+        const reply = input as Input<'postRoomMessage'>;
+        if (await requeueRefusedReply(ctx.database, reply.roomId, authenticatedAgentId, reply.requestId, reply.generationId))
+          ctx.live.publish({type:'invalidate',roomId:reply.roomId,reason:'postgres:agent_commands',targetAgentId:authenticatedAgentId,commandReleased:true});
+      }
+      throw error;
+    }
+  }
+
+  async function daemonExecuteInternal<Name extends keyof DaemonOperationMap>(ctx: DaemonContext,
     name: Name,
     input: Input<Name>,
     authenticatedAgentId: string,
@@ -278,7 +298,7 @@ import { daemonExecuteOperation } from './operations.js';
         // before authority/command rows. Only owned paths that actually need
         // lifecycle take it first; ordinary activity retains independent lanes.
         if (ownedIntent && needsLifecycle) await lockCornerLifecycle(db, scopedRoom);
-        if (ownedIntent) await daemonLockOwnedTurnAccess(ctx, db, scopedRoom, authenticatedAgentId);
+        if (ownedIntent && name !== 'postRoomMessage') await daemonLockOwnedTurnAccess(ctx, db, scopedRoom, authenticatedAgentId);
         if (turnOwner) await assertCurrentTurnOwner(db, authenticatedAgentId, turnOwner);
         // Result publication keeps lifecycle and command locks in the same order as cancellation.
         if (!ownedIntent && needsLifecycle)
@@ -313,7 +333,9 @@ import { daemonExecuteOperation } from './operations.js';
           (name === 'postRoomMessage' && candidate.relay === undefined) ||
           name === 'retractAgentLiveOutput' ||
           (name === 'postAgentTurnReceipt' && ['complete','failed'].includes(String(candidate.status)));
-        const command = await authorizeCommandOutput(
+        const command = name === 'postRoomMessage'
+          ? await authorizeAgentReply(db, scopedRoom, authenticatedAgentId, requestId, candidate.generationId)
+          : await authorizeCommandOutput(
           db, scopedRoom, authenticatedAgentId, requestId, candidate.generationId, allowCompleted,
         );
         if (name === 'postAgentTurnReceipt' && command.turn_owner_connection_id) {
@@ -340,7 +362,7 @@ import { daemonExecuteOperation } from './operations.js';
              AND completion_kind='no-reply'`,
           [scopedRoom, authenticatedAgentId, requestId],
         )).rowCount)
-          return daemonWriteResult(ctx) as Output<Name>;
+          throw new CommandRefusalError('Reply not delivered: text was dropped because this turn chose no reply.', 409);
         // A corner is the ordered work's own address: its viewers watch the
         // turn's live work and progress there. Urgent terminal prose still
         // reports privately; done uses the explicit guarded report tool.
@@ -383,7 +405,7 @@ import { daemonExecuteOperation } from './operations.js';
                 [command.result_message_id],
               )
             ).rows[0]!;
-            if (saved.text !== candidate.text) throw new Error('command result conflict');
+            if (saved.text !== candidate.text) throw new CommandRefusalError('Reply not delivered: command result conflict; this job already has an answer.', 409);
             return {
               id: saved.id,
               createdAt: seconds(saved.created_at),

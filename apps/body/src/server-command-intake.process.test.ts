@@ -218,3 +218,40 @@ it('never falls back to a partial claim when grouped claims are unsupported',asy
     expect(observed.map(group=>group.map(item=>item.id))).toEqual([['first','second']]);
   }finally{abort.abort();await running;await rm(root,{recursive:true,force:true});}
 });
+
+it('a never-returning model fails its message, releases intake and runs the next message', async () => {
+  const {AGENT_TURN_DEADLINE_MS} = await import('./agent-turn-deadline.js');
+  const root=await mkdtemp(join(tmpdir(),'beeline-timeout-intake-'));
+  const controller=new AbortController(), context=new CommandExecutionContext(root);
+  const first=command('hung'), next=command('next');
+  let enter!:()=>void;
+  const entered=new Promise<void>(resolve=>{enter=resolve;});
+  const stop=vi.fn(), outcomes:{requestId?:string;status?:string;reason?:string}[]=[], runs:string[]=[];
+  const execute=vi.fn(async(name:string,input:{commandId?:string;requestId?:string;status?:string;reason?:string})=>{
+    if(name==='getAgentCommands')return {commandProtocol:1,commands:[first]};
+    if(name==='claimAgentTurn')return {commands:[input.commandId==='hung'?first:next]};
+    if(name==='postAgentTurnReceipt'){outcomes.push(input);return {};}
+    if(name==='releaseAgentTurn')return {commands:runs.length===1?[next]:[]};
+    return {};
+  });
+  vi.useFakeTimers({toFake:['setTimeout','clearTimeout']});
+  const running=runServerCommandIntake({api:{execute} as unknown as DaemonApiClient,roomId:'room',agentId:'agent',context,
+    signal:controller.signal,stop,onError:()=>{},run:async item=>{
+      runs.push(item.id);
+      if(item.id==='hung'){enter();return new Promise<void>(()=>{});}
+      controller.abort();
+    }});
+  try{
+    await entered;
+    await vi.advanceTimersByTimeAsync(AGENT_TURN_DEADLINE_MS);
+    await running;
+    expect(runs).toEqual(['hung','next']);
+    expect(outcomes).toContainEqual(expect.objectContaining({requestId:'hung',status:'failed',reason:expect.stringContaining('timed out')}));
+    expect(stop).toHaveBeenCalledWith('hung');
+    expect(context.current).toBeUndefined();
+  }finally{
+    vi.useRealTimers();
+    controller.abort();
+    await rm(root,{recursive:true,force:true});
+  }
+});
