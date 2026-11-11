@@ -128,7 +128,6 @@ export class DaemonAgentSession {
   get usageAccountV1():boolean{return this.presence.usageAccountV1===true&&helperUsageEnabled()&&this.usageOwnerId!==undefined&&this.epoch!==undefined;}
   get overlayV1():boolean{return this.presence.overlayV1===true&&helperOverlayEnabled()&&this.epoch!==undefined;}
   get activationContextV1():boolean{return this.presence.activationContextV1===true&&helperActivationEnabled()&&this.epoch!==undefined;}
-  get turnContinuationV1():boolean{return this.presence.turnRuntimeId!==undefined;}
   get turnOwnershipV1():boolean{return this.turnSource!==undefined&&Number.isSafeInteger(this.epoch)&&Number(this.epoch)>0;}
   get ownedModelV1():boolean{return this.turnOwnershipV1&&this.#ownedModelCapability!==undefined&&this.deps.daemon.ownedModelReady();}
 
@@ -138,7 +137,6 @@ export class DaemonAgentSession {
     private readonly transport: DaemonSessionTransport,
     private readonly presence: {
       lifecycleId?: string;
-      turnRuntimeId?: string;
       releaseVersion?: string;
       sourceSha?: string;
       overlayV1?: boolean;
@@ -263,7 +261,13 @@ export class DaemonAgentSession {
         return;
       }
       this.epoch = epoch;
-      this.turnSource = {connectionId:this.connectionId,epoch};
+      this.turnSource = this.presence.turnOwnershipV1 && this.presence.lifecycleId
+        ? (await this.deps.database.query<{connectionId:string;epoch:number}>(`SELECT
+        COALESCE(turn_connection_id,connection_id) "connectionId",COALESCE(turn_connection_epoch,epoch)::integer epoch
+        FROM agent_connections WHERE agent_id=$1 AND connection_id=$2 AND epoch=$3 AND released_at IS NULL`,
+        [this.agentId,this.connectionId,epoch])).rows[0]
+        : {connectionId:this.connectionId,epoch};
+      if (!this.turnSource) throw new Error('connection replaced during registration');
       const model = await this.deps.daemon.negotiateOwnedModel(this.agentId,
         this.turnSource, this.presence.ownedModelV1 === true && this.presence.ownedModelUnboundedV1 === true);
       this.#ownedModelCapability = model?.capability;

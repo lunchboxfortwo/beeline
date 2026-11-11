@@ -47,6 +47,34 @@ it('a new authenticated connection returns the displaced owner’s commands to p
   await vi.waitFor(async()=>expect((await database.query('SELECT state FROM agent_commands WHERE id=$1',[command.id])).rows).toEqual([{state:'pending'}]));
   expect((await database.query('SELECT status FROM agent_turns WHERE request_id=$1',[command.turn_request_id])).rows).toEqual([{status:'working'}]);
 });
+it('keeps a surviving helper generation across socket loss, but admits output only after reconnect',async()=>{
+  const metadata={lifecycleId:'surviving-helper',turnOwnershipV1:true};
+  const source={connectionId:'first-socket',epoch:await presence.claimConnection(AGENT,{...metadata,connectionId:'first-socket'})};
+  const command=(await createAgentCommand(database,{roomId:ROOM,agentId:AGENT,sourceMessageId:null,reason:'system'}))!;
+  await database.transaction(db=>claimAgentCommand(db,ROOM,AGENT,command.id,'generation',source));
+  const output=()=>database.transaction(db=>authorizeCommandOutput(db,ROOM,AGENT,command.turn_request_id,'generation'));
+  const binding=(await database.query('SELECT * FROM agent_command_generation_owners WHERE command_id=$1',[command.id])).rows;
+  vi.spyOn(console,'error').mockImplementation(()=>{});
+  await presence.releaseConnection(AGENT,source.connectionId);
+  await expect(output()).rejects.toThrow('connection/epoch mismatch');
+  expect((await database.query('SELECT state FROM agent_commands WHERE id=$1',[command.id])).rows).toEqual([{state:'claimed'}]);
+  await presence.claimConnection(AGENT,{...metadata,connectionId:'second-socket'});
+  await expect(output()).resolves.toMatchObject({generation_id:'generation',turn_owner_connection_id:source.connectionId});
+  // A late close cannot release the replacement transport or the retained source.
+  await presence.releaseConnection(AGENT,source.connectionId);
+  await expect(output()).resolves.toMatchObject({generation_id:'generation'});
+  expect((await database.query('SELECT * FROM agent_command_generation_owners WHERE command_id=$1',[command.id])).rows).toEqual(binding);
+  // A different helper runtime cannot inherit that generation.
+  const replacement={connectionId:'third-socket',epoch:await presence.claimConnection(AGENT,{...metadata,lifecycleId:'replacement-helper',connectionId:'third-socket'})};
+  await expect(output()).rejects.toThrow('command output authority rejected');
+  await vi.waitFor(async()=>expect((await database.query('SELECT state FROM agent_commands WHERE id=$1',[command.id])).rows).toEqual([{state:'pending'}]));
+  await database.transaction(db=>claimAgentCommand(db,ROOM,AGENT,command.id,'replacement-generation',replacement));
+  // A delayed Room announcement from the displaced helper is not a connection claim.
+  await presence.announce(ROOM,AGENT,{lifecycleId:metadata.lifecycleId});
+  await presence.claimConnection(AGENT,{...metadata,connectionId:'old-helper-back'});
+  await expect(database.transaction(db=>authorizeCommandOutput(db,ROOM,AGENT,command.turn_request_id,'replacement-generation')))
+    .rejects.toThrow('command output authority rejected');
+});
 it('turn age and incoming messages never arm a presence or stalled-turn watchdog',async()=>{
   const {command}=await claimed();const schedule=vi.spyOn(globalThis,'setTimeout');
   await database.query(`UPDATE agent_turns SET created_at=now()-interval '1 day' WHERE request_id=$1`,[command.turn_request_id]);

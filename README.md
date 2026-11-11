@@ -77,7 +77,7 @@ The phone keeps saved Rooms visible during a network interruption. It reconnects
 
 Forwarding marks the selected destination FORWARDED as soon as the send is accepted, before the picker finishes closing.
 
-During server deploys, Beeline stops accepting new requests, lets admitted requests finish for up to five seconds, and sends live connections a restart close so they can reconnect. Shutdown is bounded to ten seconds; Fly allows twenty seconds before forcing a stop. Chat lists remain available when optional side details time out. Side reads use the spare per-server database capacity after core reads and background work; overlapping corner status notifications share one pending follow-up so work committed during a refresh reaches the badge.
+During server deploys, Beeline stops accepting new requests, lets admitted requests finish for up to five seconds, and sends live connections a restart close so they can reconnect. Running agent turns keep their generation when the same helper reconnects to the replacement server, so their output can finish after the deploy. Shutdown is bounded to ten seconds; Fly allows twenty seconds before forcing a stop. Chat lists remain available when optional side details time out. Side reads use the spare per-server database capacity after core reads and background work; overlapping corner status notifications share one pending follow-up so work committed during a refresh reaches the badge.
 
 ## One message
 

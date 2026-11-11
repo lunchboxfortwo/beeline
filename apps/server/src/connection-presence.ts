@@ -14,7 +14,7 @@ function presenceRoomId(roomId: string | undefined): string | null {
 }
 
 export const DELIVERY_PICKUP_WINDOW_MS = 90_000;
-/** A server that has not renewed for this long is gone; its connections are released. */
+/** An expired server lease cannot authorize output. */
 export const SERVER_LEASE_EXPIRY_MS = 90_000;
 
 interface PresenceMetadata {
@@ -22,7 +22,7 @@ interface PresenceMetadata {
   sourceSha?: string;
   available?: boolean;
   lifecycleId?: string;
-  turnRuntimeId?: string;
+  turnOwnershipV1?: boolean;
 }
 
 /** One live helper connection for one agent, held by one server instance. */
@@ -124,16 +124,30 @@ export async function claimAgentConnection(
   const claimedConnection = await database.transaction(async (db) => {
     const claimed = await db.query<{ epoch: string | number }>(
       `INSERT INTO agent_connections(agent_id,epoch,connection_id,instance_id,connected_at,released_at,turn_connection_id,turn_connection_epoch,turn_transport_id)
-       VALUES($1,1,$2,$3,clock_timestamp(),NULL,$4,CASE WHEN $4::text IS NOT NULL THEN 1 END,$2)
+       VALUES($1,1,$2,$3,clock_timestamp(),NULL,CASE WHEN $4::text IS NOT NULL THEN $2 END,
+         CASE WHEN $4::text IS NOT NULL THEN 1 END,$2)
        ON CONFLICT(agent_id) DO UPDATE SET epoch=agent_connections.epoch+1,
          connection_id=EXCLUDED.connection_id,instance_id=EXCLUDED.instance_id,
          connected_at=EXCLUDED.connected_at,released_at=NULL,
-         turn_connection_id=EXCLUDED.turn_connection_id,turn_transport_id=EXCLUDED.turn_transport_id,
+         turn_transport_id=EXCLUDED.turn_transport_id,
+         turn_connection_id=CASE WHEN $4::text IS NULL THEN NULL
+           WHEN EXISTS(SELECT 1 FROM live_outputs presence WHERE presence.agent_id=$1 AND presence.kind='presence'
+             AND presence.body->>'connectionId'=agent_connections.connection_id
+             AND COALESCE(presence.body->>'connectionLifecycleId',presence.body->>'lifecycleId')=$4)
+             THEN COALESCE(agent_connections.turn_connection_id,agent_connections.connection_id)
+           ELSE EXCLUDED.turn_connection_id END,
          turn_connection_epoch=CASE WHEN EXCLUDED.turn_connection_id IS NULL THEN NULL
-           WHEN agent_connections.turn_connection_id=EXCLUDED.turn_connection_id THEN agent_connections.turn_connection_epoch
+           WHEN EXISTS(SELECT 1 FROM live_outputs presence WHERE presence.agent_id=$1 AND presence.kind='presence'
+             AND presence.body->>'connectionId'=agent_connections.connection_id
+             AND COALESCE(presence.body->>'connectionLifecycleId',presence.body->>'lifecycleId')=$4)
+             THEN COALESCE(agent_connections.turn_connection_epoch,agent_connections.epoch)
            ELSE agent_connections.epoch+1 END
        RETURNING epoch`,
-      [agentId, connection.connectionId, connection.instanceId, metadata.turnRuntimeId ?? null],
+      // The helper's existing lifecycle id identifies a surviving runtime, not
+      // a socket. Preserve its immutable generation source while moving the
+      // physical connection (and its server lease) to this instance. The
+      // COALESCE also adopts a claim made by a pre-continuation server.
+      [agentId, connection.connectionId, connection.instanceId, metadata.turnOwnershipV1 ? metadata.lifecycleId ?? null : null],
     );
     // Pre-upgrade helpers claimed without a connection source. This registration
     // supersedes those claims once; MCP calls/orders retain their own leases.
@@ -170,11 +184,13 @@ export async function releaseAgentConnection(
       [agentId, connectionId],
     );
     if (!current.rowCount) return undefined;
+    // A surviving runtime keeps its generation across transport loss. The
+    // released connection still refuses effects until authenticated reconnect.
     await db.query(`UPDATE agent_commands command SET state='pending',generation_id=NULL,
       lease_expires_at=NULL,claimed_at=NULL,turn_owner_connection_id=NULL,turn_owner_epoch=NULL
       FROM agent_connections connection WHERE connection.agent_id=$1 AND connection.connection_id=$2
-        AND command.agent_id=$1 AND command.state='claimed'
-        AND (command.turn_owner_connection_id=COALESCE(connection.turn_connection_id,connection.connection_id)
+        AND command.agent_id=$1 AND command.state='claimed' AND connection.turn_connection_id IS NULL
+        AND (command.turn_owner_connection_id=connection.connection_id
           OR (command.turn_owner_connection_id IS NULL AND command.reason<>'mcp_call'
             AND COALESCE(command.generation_id,'') NOT LIKE 'mcp:%'))`,[agentId,connectionId]);
 
@@ -235,7 +251,9 @@ async function writeAgentAnnouncement(
     ...(metadata.lifecycleId ? {lifecycleId:metadata.lifecycleId} : {}),
     ...(metadata.releaseVersion ? {releaseVersion:metadata.releaseVersion} : {}),
     ...(metadata.sourceSha ? {sourceSha:metadata.sourceSha} : {}),
-    ...(connection ? {held:true,connectionId:connection.connectionId} : {}),
+    // Room announcements can arrive late from a replaced runtime. Only a
+    // registration changes the lifecycle attached to this held connection.
+    ...(connection ? {held:true,connectionId:connection.connectionId,connectionLifecycleId:metadata.lifecycleId??null} : {}),
   };
   const written = await db.query<{previous:Record<string,unknown>|null}>(`WITH previous AS MATERIALIZED (
       SELECT room_id,body FROM live_outputs WHERE agent_id=$1 AND kind='presence' FOR UPDATE
@@ -247,7 +265,8 @@ async function writeAgentAnnouncement(
       SELECT target.room_id,$1,'presence','presence',$3::jsonb,clock_timestamp() FROM target WHERE room_id IS NOT NULL
       ON CONFLICT(agent_id) WHERE kind='presence' DO UPDATE
         SET body=jsonb_strip_nulls(jsonb_build_object('releaseVersion',live_outputs.body->'releaseVersion',
-          'sourceSha',live_outputs.body->'sourceSha','held',live_outputs.body->'held','connectionId',live_outputs.body->'connectionId'))
+          'sourceSha',live_outputs.body->'sourceSha','held',live_outputs.body->'held','connectionId',live_outputs.body->'connectionId',
+          'connectionLifecycleId',live_outputs.body->'connectionLifecycleId'))
           || EXCLUDED.body || jsonb_build_object('observedAt',
           GREATEST((EXCLUDED.body->>'observedAt')::bigint,COALESCE((live_outputs.body->>'observedAt')::bigint,0)+1)),
           updated_at=clock_timestamp()
