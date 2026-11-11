@@ -204,6 +204,41 @@ function ConversationComposerContent({
     },
     [inputRef],
   );
+  // Web growth loop (typing reached the wrap point, then "Maximum update depth
+  // exceeded" and the composer's error boundary). With the changing height in
+  // the Unistyles style array, each height change made the textarea render
+  // without its stylesheet rule, in the browser's default font. Where Space
+  // Grotesk wraps the text and the default font does not, RN-web's
+  // content-size reading flipped between two lines and one (40px, 32px), and
+  // every reading resized the composer again. RN-web also measures inside its
+  // ref callback, which re-attaches on every render here, so nothing settled.
+  // On web the height is therefore set on the element, outside Unistyles, and
+  // the content size is read after commit, once that height is in place, and
+  // reported only when it changes.
+  React.useLayoutEffect(() => {
+    if (Platform.OS !== 'web') return;
+    const growingTextarea = ownInputRef.current as unknown as HTMLTextAreaElement | null;
+    if (!growingTextarea?.style) return;
+    growingTextarea.style.height = `${inputHeight}px`;
+    growingTextarea.style.maxHeight = `${maxHeight}px`;
+  });
+  const reportedContentSize = React.useRef<{ height: number; width: number; revision: number } | null>(null);
+  const contentSizeHandler = React.useRef(onContentSizeChange);
+  contentSizeHandler.current = onContentSizeChange;
+  React.useLayoutEffect(() => {
+    if (Platform.OS !== 'web') return;
+    const measuredTextarea = ownInputRef.current as unknown as HTMLTextAreaElement | null;
+    if (!measuredTextarea || typeof measuredTextarea.scrollHeight !== 'number') return;
+    const contentHeight = measuredTextarea.scrollHeight;
+    const contentWidth = measuredTextarea.scrollWidth;
+    const reported = reportedContentSize.current;
+    // A replaced input (a new revision) reports once, as RN-web did on attach.
+    if (reported && reported.revision === inputRevision && reported.height === contentHeight && reported.width === contentWidth) return;
+    reportedContentSize.current = { height: contentHeight, width: contentWidth, revision: inputRevision };
+    contentSizeHandler.current({
+      nativeEvent: { contentSize: { height: contentHeight, width: contentWidth } },
+    } as NativeSyntheticEvent<TextInputContentSizeChangeEventData>);
+  });
   const commitInputChange = (nextValue: string) => {
     if (isInputRevisionCurrent?.(inputRevision) === false) return;
     onChangeText(nextValue);
@@ -512,7 +547,8 @@ function ConversationComposerContent({
             autoFocus={focused}
             style={[
               styles.input,
-              Platform.OS === 'ios' ? undefined : { height: inputHeight, maxHeight },
+              // Web sets the changing height on the element (growth loop note above).
+              Platform.OS === 'ios' || Platform.OS === 'web' ? undefined : { height: inputHeight, maxHeight },
               Platform.OS === 'android' && styles.inputAndroid,
               { transform: [{ translateY: drawingOffset }] },
               // The input stays mounted under the waveform; its typed text
@@ -521,7 +557,8 @@ function ConversationComposerContent({
             ]}
             value={value}
             onChangeText={Platform.OS === 'web' ? commitInputChange : commitNativeChange}
-            onContentSizeChange={onContentSizeChange}
+            // Web reads its content size after commit (growth loop note above).
+            onContentSizeChange={Platform.OS === 'web' ? undefined : onContentSizeChange}
             onFocus={onFocus}
             onBlur={onBlur}
             onKeyPress={(event) => {
