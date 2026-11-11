@@ -239,12 +239,10 @@ describe('@agent login: Claude sign-in at the call site', () => {
     await settled(command, 'pending');
   });
 
-  it('refuses a non-owner, even a Workspace admin, with a system line and no card', async () => {
+  it('refuses a non-owner silently, even a Workspace admin, without a card', async () => {
     helper(() => ({ kind: 'paste-code', authorizeUrl: LINK }));
     const command = await send(MEMBER, '@clara login');
-    expect(await systemLines()).toContain(
-      '@clara did not sign in to Claude · only its owner may sign it in',
-    );
+    expect(await systemLines()).toEqual([]);
     expect(await card(command)).toBeUndefined();
     expect(helperFrames).toEqual([]);
   });
@@ -263,11 +261,9 @@ describe('@agent login: Claude sign-in at the call site', () => {
     expect(helperFrames.map((frame) => frame.step)).toEqual(['start']);
   });
 
-  it('tells the owner when its harness cannot sign in from Beeline', async () => {
+  it('does not post a notice when its harness cannot sign in from Beeline', async () => {
     await send(OWNER, '@codie login');
-    expect(await systemLines()).toContain(
-      '@codie did not sign in · sign-in from Beeline is not available for its harness',
-    );
+    expect(await systemLines()).toEqual([]);
     expect(helperFrames).toEqual([]);
     expect(
       (await database.query(`SELECT 1 FROM agent_commands WHERE agent_id=$1`, [OTHER_AGENT]))
@@ -415,13 +411,13 @@ describe('@agent login: Claude sign-in at the call site', () => {
     {
       kind: 'paste-code',
       harness: 'claude',
-      denied: 'did not sign in to Claude',
+
       link: { kind: 'paste-code', authorizeUrl: LINK },
     },
     {
       kind: 'device-code',
       harness: 'codex',
-      denied: 'did not sign in to ChatGPT',
+
       link: {
         kind: 'device-code',
         authorizeUrl: 'https://auth.openai.com/codex/device',
@@ -432,13 +428,13 @@ describe('@agent login: Claude sign-in at the call site', () => {
     {
       kind: 'approve-wait',
       harness: 'cursor',
-      denied: 'did not sign in to Cursor',
+
       link: { kind: 'approve-wait', authorizeUrl: 'https://cursor.com/loginDeepControl?challenge=x&uuid=y' },
     },
     {
       kind: 'api-key',
       harness: 'pi',
-      denied: 'did not take a new key',
+
       link: { kind: 'api-key', provider: 'openrouter' },
     },
   ] as const;
@@ -447,7 +443,7 @@ describe('@agent login: Claude sign-in at the call site', () => {
     return (await database.query(`SELECT 1 FROM agent_commands WHERE agent_id=$1`, [AGENT])).rowCount;
   }
 
-  describe.each(KINDS)('$kind sign-in ($harness)', ({ harness, denied, link }) => {
+  describe.each(KINDS)('$kind sign-in ($harness)', ({ harness, link }) => {
     beforeEach(async () => {
       await database.query(`UPDATE agents SET harness=$2 WHERE agent_id=$1`, [AGENT, harness]);
     });
@@ -460,10 +456,10 @@ describe('@agent login: Claude sign-in at the call site', () => {
       expect(await modelCommands()).toBe(0);
     });
 
-    it('refuses a non-owner with a system line naming the right service, and no card', async () => {
+    it('refuses a non-owner without a system line or a card', async () => {
       helper(() => ({ ...link }));
       const command = await send(MEMBER, '@clara /login');
-      expect(await systemLines()).toContain(`@clara ${denied} · only its owner may sign it in`);
+      expect(await systemLines()).toEqual([]);
       expect(await card(command)).toBeUndefined();
       expect(helperFrames).toEqual([]);
       expect(await modelCommands()).toBe(0);

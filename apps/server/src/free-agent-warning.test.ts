@@ -5,15 +5,14 @@ import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import { migrateData } from './database.js';
 import { PgliteDatabase, migratedDatabase } from './test-support.js';
 import { FREE_AGENT_CONNECT_GUIDE, freeAgentConfigFromEnv, freeAgentInstructions } from './free-agents.js';
-import { recordAgentConnectedAfterNudge, warnFreeAgentOwner } from './free-agent-warning.js';
+import { recordAgentConnectedAfterNudge } from './free-agent-warning.js';
 import { PhoneService } from './phone-service.js';
 
 const OWNER = 'a'.repeat(64), AGENT = 'b'.repeat(64), OTHER = 'c'.repeat(64);
 const WORKSPACE = '11111111-1111-4111-8111-111111111111';
 const ROOM = '22222222-2222-4222-8222-222222222222';
-const DAY = '2026-10-16';
 
-describe('free agent owner warning', () => {
+describe('historical free agent nudge conversions', () => {
   let db: PgliteDatabase;
   beforeEach(async () => {
     db = await migratedDatabase();
@@ -28,53 +27,11 @@ describe('free agent owner warning', () => {
       `INSERT INTO memberships(workspace_id,room_id,identity_id,role) VALUES($1,$2,$3,'member')`, [WORKSPACE, ROOM, member]);
   });
   afterEach(async () => { await db.close(); });
-  const usage = async (day: string, tokens: number) => {
-    await db.query(`INSERT INTO free_agent_usage(owner_id,day,tokens) VALUES($1,$2,$3) ON CONFLICT(owner_id,day) DO UPDATE SET tokens=$3`, [OWNER, day, tokens]);
-    await db.query(`DELETE FROM free_agent_events WHERE kind='model_usage' AND detail->>'day'=$1`, [day]);
-    await db.query(`INSERT INTO free_agent_events(agent_id,kind,detail,at) VALUES($1,'model_usage',$2::jsonb,($3::date::timestamp AT TIME ZONE 'UTC'))`, [AGENT, JSON.stringify({ day, tokens }), day]);
-  };
-  const warn = (day = DAY) => warnFreeAgentOwner(db, AGENT, OWNER, day, 1000, ROOM);
-
-  it('delivers once per UTC day at 80% into the working room, readable by the owner', async () => {
-    await usage(DAY, 799);
-    await db.query(`UPDATE free_agent_usage SET tokens=1000`);
-    await warn();
-    expect((await db.query(`SELECT * FROM messages`)).rowCount).toBe(0);
-    await usage(DAY, 800);
-    await warn();
-    await warn();
-    const messages = await db.query<{ room_id: string; text: string }>(`SELECT room_id,text FROM messages`);
-    expect(messages.rowCount).toBe(1);
-    expect(messages.rows[0]!.text).toContain('midnight UTC');
-    expect(messages.rows[0]!.text).toContain(`members?communityId=${WORKSPACE}&action=add-agent`);
-    expect(messages.rows[0]!.room_id).toBe(ROOM);
-    const phone = new PhoneService(db, 'https://server.test');
-    const view = await phone.readRoom(ROOM, OWNER);
-    expect(JSON.stringify(view)).toContain("I've used 80%");
-    expect(await phone.readRoom(ROOM, OTHER)).toBeNull();
-    await usage('2026-10-17', 801);
-    await warn('2026-10-17');
-    expect((await db.query(`SELECT * FROM messages`)).rowCount).toBe(2);
-    expect((await db.query(`SELECT * FROM free_agent_events WHERE kind='allowance_warning'`)).rowCount).toBe(2);
-  });
-
-  it('warns at 2.4M settled tokens with the default 3M allowance', async () => {
-    const config = freeAgentConfigFromEnv({
-      BEELINE_FREE_AGENT_SEAL_KEY: 'seal', FLY_FREE_AGENT_IMAGE: 'image',
-    }, 'https://server.test')!;
-    await usage(DAY, 2_399_999);
-    await warnFreeAgentOwner(db, AGENT, OWNER, DAY, config.dailyTokenCap, ROOM);
-    expect((await db.query(`SELECT * FROM messages`)).rowCount).toBe(0);
-    await usage(DAY, 2_400_000);
-    await warnFreeAgentOwner(db, AGENT, OWNER, DAY, config.dailyTokenCap, ROOM);
-    const phone = new PhoneService(db, 'https://server.test');
-    const room = (await db.query<{ room_id: string }>(`SELECT room_id FROM messages`)).rows[0]!;
-    expect(JSON.stringify(await phone.readRoom(room.room_id, OWNER))).toContain("I've used 80%");
-  });
+  const historicalWarning = () => db.query(`INSERT INTO free_agent_events(agent_id,kind,detail)
+    VALUES($1,'allowance_warning','{}'::jsonb)`, [AGENT]);
 
   it('records a non-free agent connected within 24 hours once, excludes old warnings', async () => {
-    await usage(DAY, 800);
-    await warn();
+    await historicalWarning();
     await recordAgentConnectedAfterNudge(db, OWNER, WORKSPACE, OTHER);
     await recordAgentConnectedAfterNudge(db, OWNER, WORKSPACE, OTHER);
     await recordAgentConnectedAfterNudge(db, OWNER, WORKSPACE, AGENT);
@@ -89,8 +46,7 @@ describe('free agent owner warning', () => {
     const phone = new PhoneService(db, 'https://server.test');
     await phone.execute('createAgentPairingCode', { workspaceId: WORKSPACE }, OWNER);
     expect((await db.query(`SELECT * FROM free_agent_events WHERE kind='guide_started'`)).rowCount).toBe(0);
-    await usage(DAY, 800);
-    await warn();
+    await historicalWarning();
     await phone.execute('createAgentPairingCode', { workspaceId: WORKSPACE }, OTHER);
     expect((await db.query(`SELECT * FROM free_agent_events WHERE kind='guide_started'`)).rowCount).toBe(0);
     await phone.execute('createAgentPairingCode', { workspaceId: WORKSPACE }, OWNER);
@@ -122,5 +78,5 @@ it('pins trigger limits and the guide to the real Add agent command', async () =
   const instructions = freeAgentInstructions('Soul', 'Fern', config);
   expect(instructions).toContain(pairing.agentPairingCommand('<code>'));
   expect(instructions).not.toContain('turn limit');
-  for (const text of ['Members -> Add agent', 'At most one unsolicited nudge per UTC day', 'When explicitly asked, help without this daily restriction', 'own files, apps, logins or local repository', 'check your remaining allowance', 'Normal conversation is not a trigger', '80% warning counts', 'Claude Code, Codex or OpenCode', 'always-on machine', 'Never create, retrieve, request, repeat or post a pairing code', 'online without confirmation']) expect(instructions).toContain(text);
+  for (const text of ['Members -> Add agent', 'At most one unsolicited nudge per UTC day', 'When explicitly asked, help without this daily restriction', 'own files, apps, logins or local repository', 'check your remaining allowance', 'Normal conversation is not a trigger', 'Claude Code, Codex or OpenCode', 'always-on machine', 'Never create, retrieve, request, repeat or post a pairing code', 'online without confirmation']) expect(instructions).toContain(text);
 });

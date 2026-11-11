@@ -333,12 +333,7 @@ describe('agent reply completion latency', () => {
           [ROOM, request],
         )
       ).rows,
-    ).toEqual([
-      {
-        text: '@agent could not finish this request · temporary failure',
-        state: 'failed',
-      },
-    ]);
+    ).toEqual([]);
   });
 
   it('commits a claimed turn in one representative database round trip', async () => {

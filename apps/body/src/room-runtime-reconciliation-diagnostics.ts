@@ -603,11 +603,6 @@ import { RoomRuntimeCoordinator, WorkspaceMembershipStatus, REMOVAL_CONFIRMATION
         },
       );
       if (!fetched) {
-        void ctx.options.daemonApi
-          .execute('noteEmptyRoomRepository', { roomId })
-          .catch((error) =>
-            console.warn(`[thin-core] Room ${roomId} empty-repository notice failed:`, error),
-          );
         return ctx.roomRoot(roomId);
       }
       await execFileAsync(

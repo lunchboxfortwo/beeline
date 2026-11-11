@@ -125,39 +125,16 @@ export async function routeTaggedLifecycleCommand(
   // which decides only who may give it work. Sign-in stays with the agent's owner.
   const ownsAgent = target.owner_id === source.author_id;
   const loginHarness = isAgentSignInHarness(target.harness) ? target.harness : undefined;
-  const deniedVerb =
-    action !== 'login'
-      ? systemMessage("agent-command.did-not", action)
-      : !loginHarness
-        ? systemMessage("agent-command.did-not-sign-in")
-        : agentSignInUsesKey(loginHarness)
-          ? systemMessage("agent-command.did-not-take-a-new-key")
-          : systemMessage("agent-command.did-not-sign-in-to", AGENT_SIGN_IN_SERVICE_LABELS[loginHarness]);
-  const deny = async (consequence: string) => {
-    await systemLine(db, {
-      id: createHash('sha256')
-        .update(`agent-lifecycle:${sourceId}:${target.agent_id}:denied`)
-        .digest('hex'),
-      roomId: source.room_id,
-      authorId: target.agent_id,
-      subject: lifecycleSubject(target),
-      verb: deniedVerb,
-      consequence,
-      afterMessageId: sourceId,
-    });
-  };
   if (action === 'login') {
     // Claude Code's own `/login`, at the call site, for every harness: the
     // card carries what the machine answers (a link, a device code, or a key
     // field) once `beginAgentSignInCards` asks after this transaction commits.
     // A code or key is pasted into the card, never sent as a message.
     if (!ownsAgent) {
-      await deny(systemMessage("agent-command.only-its-owner-may-sign-it-in"));
       return true;
     }
     const harness = loginHarness;
     if (!harness) {
-      await deny(systemMessage("agent-command.sign-in-from-beeline-is-not-available-for-its-harness"));
       return true;
     }
     await systemLine(db, {
@@ -249,7 +226,6 @@ export async function routeTaggedLifecycleCommand(
   }
   if (action === 'stop') {
     if (!active) {
-      await line(systemMessage("agent-command.has-nothing-to-stop"));
       return true;
     }
     await lockAgentCommandQueue(db, source.room_id, target.agent_id);
@@ -291,7 +267,6 @@ export async function routeTaggedLifecycleCommand(
       )
     ).rows[0];
     if (!failed) {
-      await line(systemMessage("agent-command.has-no-failed-turn-to-retry"));
       return true;
     }
     await createAgentCommand(db, {
@@ -316,7 +291,6 @@ export async function routeTaggedLifecycleCommand(
     reason: 'tagged_lifecycle_restart',
   });
   if (!restart) {
-    await line(systemMessage("agent-command.already-has-a-restart-in-progress"));
     return true;
   }
   await db.query(`UPDATE agent_commands SET lifecycle_before=$2 WHERE id=$1`, [restart.id,target.lifecycle_id]);

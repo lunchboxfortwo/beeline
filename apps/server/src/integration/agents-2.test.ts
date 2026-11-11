@@ -215,10 +215,7 @@ const fixture = monolithFixture();
        FROM messages WHERE room_id=$1 AND presentation='system'`,
       [cornerId],
     );
-    expect(notes.rows.map((row) => row.text)).toContain(
-      '@stranger could not be reached · not a member of this corner',
-    );
-    expect(notes.rows.find((row) => row.text.startsWith('@stranger'))?.tagged_ids).toEqual([]);
+    expect(notes.rows.filter(row => row.text.startsWith('@stranger'))).toEqual([]);
 
     const phoneCorners = await fixture.request(`/v1/phone/rooms/${ROOM}/corners`);
     expect(await phoneCorners.json()).toEqual(
@@ -252,19 +249,8 @@ const fixture = monolithFixture();
     });
     expect(failed.status).toBe(200);
     expect(await failed.json()).not.toMatchObject({ hiccupRestart: true });
-    expect(
-      (
-        await fixture.database.query<{ text: string; state: string }>(
-          `SELECT message.text,command.state FROM agent_commands command
-           JOIN messages message ON message.card_type='turn-failed' AND message.card->>'requestId'=command.turn_request_id
-           WHERE command.turn_request_id=$1`,
-          [requestId],
-        )
-      ).rows[0],
-    ).toEqual({
-      text: '@bee could not finish this request · model selection unavailable',
-      state: 'complete',
-    });
+    expect((await fixture.database.query("SELECT 1 FROM messages WHERE card_type='turn-failed' AND card->>'requestId'=$1", [requestId])).rowCount).toBe(0);
+    expect((await fixture.database.query('SELECT state FROM agent_commands WHERE turn_request_id=$1', [requestId])).rows[0]).toEqual({state: 'complete'});
     expect(
       (
         await fixture.daemonOperation('postAgentTurnReceipt', {

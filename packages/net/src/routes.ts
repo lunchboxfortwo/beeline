@@ -273,7 +273,6 @@ const daemonOperations = {
   loadWorkspaceSkill: true,
   markAgentTurnSilent: true,
   mergeCorner: true,
-  noteEmptyRoomRepository: true,
   notifyFeedbackFixed: true,
   offerConnector: true,
   openRoomPoll: true,

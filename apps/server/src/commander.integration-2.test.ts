@@ -809,7 +809,7 @@ it.each(['agent_tag','corner_review_dispatch'])('Reproduction F1: a failed %s wa
   expect(reports[0]!.source.body).toContain(opened.cornerId);
 });
 
-it('Reproduction F1: a failed explicit corner order reports to its issuer rather than its opener',async()=>{
+it('Reproduction F1: a failed human-issued corner order ends without reporting to the human or the opener',async()=>{
   const opened=await open(), initial=await worker(opened.cornerId);
   await rootFixture.daemon.execute('postAgentTurnReceipt',{...authority(initial),status:'complete'},WORKER);
   const queued=(await createAgentCommand(rootFixture.db,{roomId:opened.cornerId,agentId:WORKER,
@@ -819,5 +819,6 @@ it('Reproduction F1: a failed explicit corner order reports to its issuer rather
   await rootFixture.daemon.execute('postAgentTurnReceipt',{...authority(turn),status:'failed',reason:'spawn failed'},WORKER);
   expect((await commands(DM,RUBY)).filter(command=>command.reason==='report')).toHaveLength(0);
   expect((await rootFixture.phone.readRoom(ROOM,HUMAN))!.messages.some(message=>
-    message.text.startsWith('failed:') && message.text.includes('spawn failed') && message.text.includes(opened.cornerId))).toBe(true);
+    message.text.startsWith('failed:') && message.text.includes('spawn failed') && message.text.includes(opened.cornerId))).toBe(false);
+  expect((await rootFixture.db.query('SELECT state FROM agent_commands WHERE id=$1',[queued.id])).rows[0]).toEqual({state:'complete'});
 });

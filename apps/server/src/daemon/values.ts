@@ -352,7 +352,6 @@ export const DAEMON_OPERATION_ROUTES: Record<keyof DaemonOperationMap, true> = {
   getCornerCloseRequests: true,
   listUntrackedCorners: true,
   getRoomRepositoryState: true,
-  noteEmptyRoomRepository: true,
   getRoomGitHubToken: true,
   dispatchRoomWorkflow: true,
   getRoomTargetBranch: true,

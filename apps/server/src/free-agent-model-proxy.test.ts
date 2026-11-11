@@ -157,7 +157,7 @@ describe('server-owned model execution and accounting', () => {
     await newTurn();
     expect((await call({messages:[]})).status).toBe(200);
     expect(upstream).toHaveLength(1);
-    expect((await db.query("SELECT id FROM messages WHERE card_type='turn-failed'")).rows).toHaveLength(1);
+    expect((await db.query("SELECT id FROM messages WHERE card_type='turn-failed'")).rows).toHaveLength(0);
   });
 
   it('pins each teammate to its stored model and charges the same owner allowance', async () => {
@@ -459,24 +459,25 @@ describe('server-owned model execution and accounting', () => {
     expect(upstream).toEqual([]);
   });
 
-  it('settles a real model request and posts the 80% warning in the working room', async () => {
+  it('settles a real model request across 80% without posting a notice', async () => {
     await db.query(`INSERT INTO memberships(workspace_id,room_id,identity_id,role)
       VALUES($1,NULL,$3,'owner'),($1,NULL,$4,'member'),($1,$2,$3,'owner'),($1,$2,$4,'member')`,
     [WORKSPACE, ROOM, OWNER, AGENT]);
     reply = () => Response.json({ choices: [{ message: { role: 'assistant', content: 'done' } }], usage: { prompt_tokens: 500, completion_tokens: 300 } });
     expect((await call({ messages: [{ role: 'user', content: 'hi' }] })).status).toBe(200);
     const warning = (await db.query<{ room_id: string }>(`SELECT room_id FROM messages WHERE author_id=$1`, [AGENT])).rows;
-    expect(warning).toHaveLength(1);
-    expect(warning[0]!.room_id).toBe(ROOM);
+    expect(warning).toEqual([]);
+    expect((await db.query('SELECT tokens::int AS tokens FROM free_agent_usage WHERE owner_id=$1',[OWNER])).rows)
+      .toEqual([{tokens:800}]);
     const phone = new PhoneService(db, 'https://server.test');
     const view = await phone.readRoom(ROOM, OWNER);
-    expect(view?.messages.map(message => message.text).join(' ')).toContain("I've used 80%");
+    expect(view?.messages).toEqual([]);
     expect(upstream).toHaveLength(1);
     await call({ messages: [{ role: 'user', content: 'more' }] });
-    expect((await db.query(`SELECT * FROM free_agent_events WHERE kind='allowance_warning'`)).rowCount).toBe(1);
+    expect((await db.query(`SELECT * FROM free_agent_events WHERE kind IN ('allowance_warning','nudge_shown')`)).rowCount).toBe(0);
   });
 
-  it('delivers the near-cap notice in the working room after the first-day threshold, once, and still reads it after refusal', async () => {
+  it('settles the first-day threshold and refuses the cap without posting notices', async () => {
     config = { ...CONFIG, dailyTokenCap: 3_000_000, firstDayTokenCap: 10_000_000, lifetimeTokenCap: 0 };
     await db.query(`INSERT INTO memberships(workspace_id,room_id,identity_id,role)
       VALUES($1,NULL,$3,'owner'),($1,NULL,$4,'member'),($1,$2,$3,'owner'),($1,$2,$4,'member')`,
@@ -490,20 +491,21 @@ describe('server-owned model execution and accounting', () => {
     expect((await call({ messages: [{ role: 'user', content: 'build the game' }] })).status).toBe(200);
     const phone = new PhoneService(db, 'https://server.test');
     const crossed = await phone.readRoom(ROOM, OWNER);
-    expect(crossed?.messages.map(message => message.text).join(' ')).toContain("I've used 80%");
-    expect(crossed?.messages.map(message => message.text).join(' ')).toContain('midnight UTC');
-    // Within the same UTC day the notice is deduplicated, even through another call.
+    expect(crossed?.messages).toEqual([]);
+    expect((await db.query('SELECT tokens::int AS tokens FROM free_agent_usage WHERE owner_id=$1',[OWNER])).rows)
+      .toEqual([{tokens:8_400_000}]);
+    // Another settled call stays silent too.
     reply = () => Response.json({ choices: [{ message: { role: 'assistant', content: 'done' } }], usage: { prompt_tokens: 100, completion_tokens: 100 } });
     await call({ messages: [{ role: 'user', content: 'again' }] });
-    expect((await db.query(`SELECT * FROM free_agent_events WHERE kind='allowance_warning'`)).rowCount).toBe(1);
-    // Past the first-day cap the owner is refused; the room still reads the one notice.
+    expect((await db.query(`SELECT * FROM free_agent_events WHERE kind IN ('allowance_warning','nudge_shown')`)).rowCount).toBe(0);
+    // Past the first-day cap the owner is refused without adding a chat notice.
     await db.query(`UPDATE free_agent_usage SET tokens=10000000 WHERE owner_id=$1`, [OWNER]);
     expect((await (await call({ messages: [{ role: 'user', content: 'more' }] })).json()).error.message)
       .toBe(allowanceMessage('daily', { ...config, dailyTokenCap: 10_000_000 }));
     const refused = await phone.readRoom(ROOM, OWNER);
-    expect(refused?.messages.map(message => message.text).join(' ')).toContain("I've used 80%");
-    expect((await db.query(`SELECT * FROM free_agent_events WHERE kind='allowance_warning'`)).rowCount).toBe(1);
-    console.log('Demonstrated working-room near-cap notice: first-day threshold crossed, one deduplicated notice, still readable after refusal.');
+    expect(refused?.messages).toEqual([]);
+    expect((await db.query(`SELECT * FROM free_agent_events WHERE kind IN ('allowance_warning','nudge_shown')`)).rowCount).toBe(0);
+    console.log('Demonstrated silent model accounting: first-day threshold crossed and cap refused without a chat notice.');
   });
 
   it('pins the default October model, adds the server key and charges uncached prompt plus completion tokens', async () => {
@@ -568,7 +570,7 @@ describe('server-owned model execution and accounting', () => {
     const streamed=await call({stream:true,messages:[{role:'user',content:'more'}]});
     expect(streamed.status).toBe(403);expect((await streamed.json()).error.message).toContain("today's free allowance");
     expect(upstream).toEqual([]);
-    expect((await db.query("SELECT id FROM messages WHERE card_type='turn-failed'")).rows).toHaveLength(2);
+    expect((await db.query("SELECT id FROM messages WHERE card_type='turn-failed'")).rows).toHaveLength(0);
   });
 
   it('has no lifetime cap by default: an account past 3M lifetime tokens still spends within its daily cap', async () => {

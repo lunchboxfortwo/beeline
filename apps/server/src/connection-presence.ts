@@ -1,11 +1,9 @@
 import { commandOwnerExpiredSql } from './turn-ownership.js';
 import { endAgentTurn } from './agent-turn-end.js';
-import { systemMessage } from '@beeline/api-contract/system-message-catalog';
-import { createHash, randomUUID } from 'node:crypto';
+import { randomUUID } from 'node:crypto';
 import type { SqlDatabase } from './database.js';
 import { LiveHub } from './live.js';
 import { freeAgentReachableSql } from './free-agents.js';
-import { systemLine } from './system-line.js';
 import { notifyAgentConnection } from './postgres-live.js';
 
 export const DELIVERY_PICKUP_WINDOW_MS = 90_000;
@@ -281,20 +279,7 @@ async function finishAgentAnnouncement(database: SqlDatabase, agentId: string,
     for (const restart of restarts.rows) {
       if (!await endAgentTurn(db,restart,'complete')) continue;
       await db.query('UPDATE agent_commands SET restart_confirmed_at=now() WHERE id=$1',[restart.id]);
-      await systemLine(db, {
-        id: createHash('sha256')
-          .update(`agent-restart-confirmed:${restart.id}:${lifecycle}`)
-          .digest('hex'),
-        roomId: restart.room_id,
-        authorId: agentId,
-        subject: {
-          kind: 'agent',
-          id: agentId,
-          name: restart.handle ? systemMessage("connection-presence.agent-mention", restart.handle) : restart.name,
-        },
-        verb: systemMessage("connection-presence.reconnected-after-restart"),
-        afterMessageId: restart.source_message_id,
-      });
+
     }
   });
 }

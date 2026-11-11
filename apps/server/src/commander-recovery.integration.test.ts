@@ -356,6 +356,9 @@ it('routes zero-check completion through a durable lifecycle fact', async () => 
   );
   await zero.execute('postAgentTurnReceipt', { ...authority(turn), agentId: WORKER, status: 'complete' }, WORKER);
   expect((await rootFixture.db.query(`SELECT lifecycle->>'checks' checks FROM corner_github_cache WHERE corner_id=$1`, [opened.cornerId])).rows[0]?.checks).toBe('passing');
+  expect((await rootFixture.db.query(
+    "SELECT 1 FROM messages WHERE room_id=$1 AND text LIKE '%zero-check pull request%'", [opened.cornerId],
+  )).rowCount).toBe(0);
   await advanceCorner(rootFixture.db, opened.cornerId, { kind: 'reconcile' });
   expect(
     (await commands(DM, RUBY)).some(

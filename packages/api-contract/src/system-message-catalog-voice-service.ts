@@ -45,10 +45,6 @@ export const SYSTEM_MESSAGE_VOICE_SERVICE = {
     variables: [],
   },
 
-  'wallet-notices.could-not-confirm': { parts: ['could not confirm'], variables: [] },
-
-  'wallet-notices.submission-outcome-unknown': { parts: ['submission outcome unknown'], variables: [] },
-
   'wallet-notices.could-not-complete': {
     parts: ['could not complete'],
     variables: [],
@@ -149,58 +145,8 @@ export const SYSTEM_MESSAGE_VOICE_SERVICE = {
     variables: [],
   },
 
-  'workbench.b': {
-    parts: ['', ' B'],
-    variables: ['bytes'],
-  },
-
-  'workbench.kb': {
-    parts: ['', ' kB'],
-    variables: ['bytes_1024_toFixed_1'],
-  },
-
-  'workbench.mb': {
-    parts: ['', ' MB'],
-    variables: ['bytes_1024_1024_toFixed_1'],
-  },
-
-  'workbench.calls': {
-    parts: ['', ' calls · ', ''],
-    variables: ['records_length', 'formatBytes_totalBytes'],
-  },
-
-  'workbench.grant': {
-    parts: ['grant ', ''],
-    variables: ['records_0_grantLabel_records_0'],
-  },
-
-  'workbench.separator': {
-    parts: [' · '],
-    variables: [],
-  },
-
-  'workbench.agent': {
-    parts: ['agent'],
-    variables: [],
-  },
-
-  'workbench.used': {
-    parts: ['used'],
-    variables: [],
-  },
-
   'workflow-runs.offline': {
     parts: ['offline'],
-    variables: [],
-  },
-
-  'workflow-runs.recent-failure': {
-    parts: ['recent failure'],
-    variables: [],
-  },
-
-  'workflow-runs.out-of-credit': {
-    parts: ['out of credit'],
     variables: [],
   },
 
@@ -229,46 +175,6 @@ export const SYSTEM_MESSAGE_VOICE_SERVICE = {
     variables: [],
   },
 
-  'workflow-runs.no-agent-on-the-role-s-list': {
-    parts: ['No agent on the ', " role's list"],
-    variables: ['input_role'],
-  },
-
-  'workflow-runs.is-healthy': {
-    parts: ['is healthy'],
-    variables: [],
-  },
-
-  'workflow-runs.ask-an-agent-to-call-assign-workflow-role-to-bind-another-agent-i': {
-    parts: ['', 'ask an agent to call assign_workflow_role to bind another agent in this Room'],
-    variables: ['reasons_reasons_in_run_shortRunId'],
-  },
-
-  'workflow-runs.in-run': {
-    parts: ['', ' in run ', '; '],
-    variables: ['reasons', 'shortRunId_input_runId'],
-  },
-
-  'workflow-runs.in-run-2': {
-    parts: ['in run ', '; '],
-    variables: ['shortRunId_input_runId'],
-  },
-
-  'workflow-runs.h': {
-    parts: ['', ' h'],
-    variables: ['seconds_3600'],
-  },
-
-  'workflow-runs.min': {
-    parts: ['', ' min'],
-    variables: ['seconds_60'],
-  },
-
-  'workflow-runs.s': {
-    parts: ['', ' s'],
-    variables: ['seconds'],
-  },
-
   'workflow-runs.space': {
     parts: [' '],
     variables: [],
@@ -277,11 +183,6 @@ export const SYSTEM_MESSAGE_VOICE_SERVICE = {
   'workflow-runs.choose-the-next-step-for': {
     parts: ['Choose the next step for ', ''],
     variables: ['input_contract_name_replace_g'],
-  },
-
-  'workflow-runs.no-answer-in-applies': {
-    parts: ['No answer in ', ' applies ', ''],
-    variables: ['durationText_input_state_timeoutSeconds', 'input_state_default'],
   },
 
   'workflow-runs.continue-to': {
@@ -400,50 +301,9 @@ export const SYSTEM_MESSAGE_VOICE_SERVICE = {
     variables: ['scope_stateName', 'shortRunId_scope_runId', 'toState'],
   },
 
-  'workflow-runs.the-gate-of': {
-    parts: ['The ', ' gate of ', ''],
-    variables: ['scope_stateName', 'scope_run_workflowSlug'],
-  },
-
-  'workflow-runs.took-its-default': {
-    parts: ['took its default'],
-    variables: [],
-  },
-
-  'workflow-runs.skipped-it-in-run': {
-    parts: ['', ' skipped it in run ', ''],
-    variables: ['systemIdentityMention_viewer_handle_viewer_handle', 'shortRunId_scope_runId'],
-  },
-
-  'workflow-runs.at-and-went-to-because-nobody-answered-in-in-run-of': {
-    parts: ['at ', ' and went to ', ' because nobody answered in ', ' in run ', ' of ', ''],
-    variables: [
-      'scope_stateName',
-      'toState',
-      'after',
-      'shortRunId_scope_runId',
-      'scope_run_workflowSlug',
-    ],
-  },
-
-  'workflow-runs.nobody-answered-in-in-run': {
-    parts: ['nobody answered in ', ' in run ', ''],
-    variables: ['after', 'shortRunId_scope_runId'],
-  },
-
-  'workflow-runs.of': {
-    parts: [' of ', ''],
-    variables: ['durationText_seconds'],
-  },
-
   'workflow-runs.closed': {
     parts: ['closed'],
     variables: [],
-  },
-
-  'workflow-runs.as-failed-at-because-it-passed-its-deadline': {
-    parts: ['as failed at ', ' because it passed its deadline', ''],
-    variables: ['scope_stateName', 'after'],
   },
 
   'workflow-runs.as-abandoned-at-because-its-corner-closed': {
@@ -690,11 +550,6 @@ export const SYSTEM_MESSAGE_VOICE_SERVICE = {
     variables: ['head', 'event_object_text'],
   },
 
-  'turn-silence.its-provider-is-failing-switch-its-model-in-the-agent-s-settings': {
-    parts: ["its provider is failing; switch its model in the agent's settings."],
-    variables: [],
-  },
-
   'turn-silence.node': {
     parts: ['Node'],
     variables: [],
@@ -734,65 +589,5 @@ export const SYSTEM_MESSAGE_VOICE_SERVICE = {
   'turn-silence.the-repository': {
     parts: ['the repository'],
     variables: [],
-  },
-
-  'turn-silence.clipped-consequence': {
-    parts: ['', '…'],
-    variables: ['consequence_slice_0_Math_max'],
-  },
-
-  'turn-silence.could-not-answer': {
-    parts: ['could not answer'],
-    variables: [],
-  },
-
-  'turn-silence.the-selected-model-isn-t-available-pick-another-in-the-agent-s-se': {
-    parts: ["the selected model isn't available. Pick another in the agent's settings."],
-    variables: [],
-  },
-
-  'turn-silence.the-provider-allowance-is-spent-until-top-up-or-move-the-agent-to': {
-    parts: [
-      'the provider allowance is spent until ',
-      '. Top up, or move the agent to another provider.',
-    ],
-    variables: ['until'],
-  },
-
-  'turn-silence.the-provider-allowance-is-spent-top-up-or-move-the-agent-to-anoth': {
-    parts: ['the provider allowance is spent. Top up, or move the agent to another provider.'],
-    variables: [],
-  },
-
-  'turn-silence.the-helper-could-not-authenticate-with-the-provider-check-its-log': {
-    parts: [
-      "the helper could not authenticate with the provider. Check its log for the failed turn; if its login expired, run `beeline connect` on the helper's machine.",
-    ],
-    variables: [],
-  },
-
-  'turn-silence.needs-a-new-provider-key': {
-    parts: ['needs a new provider key'],
-    variables: [],
-  },
-
-  'turn-silence.needs-a-sign-in': {
-    parts: ['needs a ', ' sign-in'],
-    variables: ['AGENT_SIGN_IN_SERVICE_LABELS'],
-  },
-
-  'turn-silence.send-login-here': {
-    parts: ['send @', ' login here.'],
-    variables: ['handle'],
-  },
-
-  'turn-silence.if-that-fails-its-owner-can-run-beeline-connect-on-its-machine': {
-    parts: ['', ' If that fails, its owner can run `beeline connect` on its machine.'],
-    variables: ['command'],
-  },
-
-  'turn-silence.the-helper-couldn-t-get-a-working-copy-of-check-the-repository-is': {
-    parts: ["the helper couldn't get a working copy of ", '. Check the repository is reachable.'],
-    variables: ['classified_repo_the_repository'],
   },
 } as const;

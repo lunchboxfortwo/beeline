@@ -36,7 +36,7 @@ import { phoneExecuteOperation } from './phone/operations.js';
 import { phoneMarkRead, phoneMarkUnread, phoneUploadMedia, phoneObserveSentMessage, phoneSendMessage, phoneSendReply, phoneReactToMessage, phoneDeleteRoomMessage, phoneSetMessageBookmark, phoneClearMessageBookmarks } from './phone/messages.js';
 import { phoneListRoomSchedules, phoneReadScheduledWork, phoneListRoomWorkflowRuns, phoneReadWorkflowRun, phoneDeleteRoomSchedule } from './phone/schedules.js';
 import { phoneReadNeedsYou, phoneReadTray, phoneCountNeedsYou, phoneClearNeedsYou, phoneClearNeedsYouSection, phoneListMessageBookmarks } from './phone/tray.js';
-import { phoneReceiptMessage, phonePendingAgentCommandsForMessage, phoneNoteUnansweredMentions, phoneWriteMentionNotice, phoneUnansweredMentionPhrase, phoneUnansweredMentionTargets } from './phone/mention-notices.js';
+import { phoneReceiptMessage, phonePendingAgentCommandsForMessage, phoneNoteUnansweredMentions, phoneUnansweredMentionTargets } from './phone/mention-notices.js';
 import { phoneCancelAgentTurn, phoneRequestCornerClose, phoneDecideApprovalCard, phoneDecidePermission } from './phone/approvals.js';
 import { phoneCreateWorkspace, phoneUpdateWorkspace, phoneLeaveWorkspace, phoneDeleteWorkspace } from './phone/workspace-writes.js';
 import { phoneCreateRoom, phoneCreateHumanCorner, phoneRenameCorner, phoneUpdateRoom, phoneDeleteRoom, phoneDeleteRoomRows, phoneLeaveRoom, phoneCloseChat, phoneReopenChat, phoneAddRoomMember, phoneRemoveRoomMember } from './phone/room-writes.js';
@@ -377,43 +377,6 @@ export class PhoneService {
   async receiptMessage(roomId: string, viewerId: string, messageIdValue: string, database: SqlDatabase) { return phoneReceiptMessage(this, roomId, viewerId, messageIdValue, database); }
   async pendingAgentCommandsForMessage(database: SqlDatabase, roomId: string, messageIdValue: string): Promise<NonNullable<RoomView['pendingAgentCommands']>> { return phonePendingAgentCommandsForMessage(this, database, roomId, messageIdValue); }
   async noteUnansweredMentions(roomId: string, senderId: string, agentIds: readonly string[], afterMessageId?: string): Promise<void> { return phoneNoteUnansweredMentions(this, roomId, senderId, agentIds, afterMessageId); }
-  async writeMentionNotice(database: SqlDatabase, input: {
-    readonly roomId: string;
-    readonly id: string;
-    readonly agentId: string;
-    readonly agentName: string;
-    readonly phrase: {
-        readonly reason: string;
-        readonly verb: string;
-        readonly consequence: string;
-        readonly object?: {
-            text: string;
-            id: string;
-        };
-    };
-    readonly afterMessageId?: string;
-}): Promise<void> { return phoneWriteMentionNotice(this, database, input); }
-  unansweredMentionPhrase(agent: {
-    agent_id: string;
-    agent_name: string;
-    agent_handle: string | null;
-    access_policy: unknown;
-    owner_id: string | null;
-    owner_handle: string | null;
-    member: boolean;
-    corner: boolean;
-}, sender: {
-    kind: 'human' | 'agent';
-    handle: string | null;
-}, senderId: string): {
-    reason: string;
-    verb: string;
-    consequence: string;
-    object?: {
-        text: string;
-        id: string;
-    };
-} | undefined { return phoneUnansweredMentionPhrase(this, agent, sender, senderId); }
   async unansweredMentionTargets(roomId: string, author: string, text: string, source?: {
     authorKind: 'human' | 'agent';
     direct: boolean;

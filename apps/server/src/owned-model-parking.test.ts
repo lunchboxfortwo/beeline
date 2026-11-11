@@ -122,16 +122,16 @@ describe('causal owned-model generation parking', () => {
     expect(await row()).toEqual({ state: 'claimed', generation_id: input.generationId });
   });
 
-  it('actual terminal service ingress ends once with a plain failure and preserves UNKNOWN', async () => {
+  it('actual terminal service ingress ends once without a chat notice and preserves UNKNOWN', async () => {
     const live = new LiveHub(), events: unknown[] = []; live.publish = event => { events.push(event); };
     const daemon = new DaemonService(f.db, live);
     await daemon.execute('postAgentTurnReceipt', terminal, MODEL_AGENT, MODEL_SOURCE);
     expect(events).toEqual([]);
     expect((await f.db.query('SELECT status FROM agent_turns')).rows).toEqual([{status:'failed'}]);
     expect(await row()).toEqual({state:'complete',generation_id:input.generationId});
-    expect((await f.db.query("SELECT 1 FROM messages WHERE card_type='turn-failed'")).rowCount).toBe(1);
+    expect((await f.db.query("SELECT 1 FROM messages WHERE card_type='turn-failed'")).rowCount).toBe(0);
     await daemon.execute('postAgentTurnReceipt',terminal,MODEL_AGENT,MODEL_SOURCE);
-    expect((await f.db.query("SELECT 1 FROM messages WHERE card_type='turn-failed'")).rowCount).toBe(1);
+    expect((await f.db.query("SELECT 1 FROM messages WHERE card_type='turn-failed'")).rowCount).toBe(0);
     expect((await f.db.query('SELECT state FROM owned_model_attempts')).rows[0]?.state).toBe('unknown');
   });
 

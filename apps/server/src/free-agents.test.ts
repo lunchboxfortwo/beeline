@@ -16,6 +16,7 @@ import {
   addFreeAgentToWorkspace,
   currentFreeAgentInstructions,
   FREE_AGENT_TEAM_GUIDE,
+  FREE_AGENT_CONNECT_GUIDE,
   FREE_AGENT_BROWSER_GUIDE,
   FREE_AGENT_EXIT_NOTE,
   FREE_AGENT_TURN_GUIDE,
@@ -142,10 +143,12 @@ async function settle(): Promise<void> {
 
 describe('current starter instructions', () => {
   it('replaces retired hosted policy on an existing soul and keeps its persona', () => {
-    const prior = 'Be curious.\n\nFor Grok/xAI old hosted sign-in guide.\n\nWhen the person picks "Make a welcome video and post it to my YouTube", use old tools.\n\nYou are on a team with another free starter agent. Old rule.';
+    const prior = 'Be curious.\n\nOffer help bringing their own agent when the server 80% warning fires.\n\nWhen they accept, guide them one step at a time with the old warning.\n\nFor Grok/xAI old hosted sign-in guide.\n\nWhen the person picks "Make a welcome video and post it to my YouTube", use old tools.\n\nYou are on a team with another free starter agent. Old rule.';
     const current = currentFreeAgentInstructions(prior);
     expect(current).toContain('Be curious.');
     expect(current).toContain(FREE_AGENT_BROWSER_GUIDE);
+    expect(current).toContain(FREE_AGENT_CONNECT_GUIDE);
+    expect(current).not.toContain('80%');
     expect(current).toContain(FREE_AGENT_TEAM_GUIDE);
     expect(current).not.toMatch(/Trusty Squire|video_preview|welcome-video|old hosted|Old rule/);
     expect(currentFreeAgentInstructions(current)).toBe(current);
@@ -605,8 +608,7 @@ describe('free starter agents', () => {
     expect((await db.query(`SELECT 1 FROM free_agents JOIN memberships workspace_member ON workspace_member.identity_id=free_agents.agent_id AND workspace_member.room_id IS NULL WHERE workspace_member.workspace_id=$1`, [id])).rowCount).toBe(0);
     const notice = (await db.query<{ text: string }>(`SELECT text FROM messages message JOIN rooms room ON room.id=message.room_id
       WHERE room.workspace_id=$1 AND message.presentation='system'`, [id])).rows;
-    expect(notice.some(line => line.text.includes('Your starter agents are already in') &&
-      line.text.includes('Once') && line.text.includes('free-agent limit'))).toBe(true);
+    expect(notice).toEqual([]);
     expect(
       (await db.query(`SELECT 1 FROM free_agents WHERE owner_id=$1`, [OWNER])).rowCount,
     ).toBe(2);

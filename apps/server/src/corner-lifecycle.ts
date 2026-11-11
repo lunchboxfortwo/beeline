@@ -448,15 +448,7 @@ export async function advanceCorner(
           );
           break;
         case 'review-findings': {
-          if (facts.reviewEnded?.emptyCount) {
-            await systemLine(db, {
-              roomId: cornerId,
-              authorId: SYSTEM_IDENTITY_ID,
-              subject: GITHUB_SUBJECT,
-              verb: systemMessage('corner-lifecycle.blocked', 'reviewer gave no verdict'),
-            });
-            break;
-          }
+          if (facts.reviewEnded?.emptyCount) break;
           const reason = facts.reviewEnded?.findings ?? 'Review failed';
           const command = corner.worker_agent_id ? await createAgentCommand(db,{
             id:createHash('sha256').update(`review-failed:${cornerId}:${head}:${facts.reviewEnded!.id}`).digest('hex'),
@@ -491,19 +483,12 @@ export async function advanceCorner(
           break;
         case 'merge-refused': {
           if (event.kind !== 'merge-refused') break;
-          const line = await systemLine(db, {
-            roomId: cornerId,
-            authorId: corner.worker_agent_id ?? SYSTEM_IDENTITY_ID,
-            subject: GITHUB_SUBJECT,
-            verb: systemMessage('corner-lifecycle.refused-to-merge'),
-            object: { text: corner.lifecycle.pr?.title ?? 'Pull request', headSha: head },
-            consequence: event.reason,
-          });
           const command = corner.worker_agent_id
             ? await createAgentCommand(db, {
                 roomId: cornerId,
                 agentId: corner.worker_agent_id,
-                sourceMessageId: line.id,
+                sourceMessageId: null,
+                privatePayload: { kind: 'lifecycle', authorId: SYSTEM_IDENTITY_ID, fromRoomId: cornerId, text: event.reason },
                 reason: 'corner_merge_refused',
               })
             : undefined;
@@ -521,7 +506,8 @@ export async function advanceCorner(
     for (const notice of plan.notifications) {
       if (notice.kind === 'draft') await reportToCommander(db, cornerId, corner.worker_agent_id ?? SYSTEM_IDENTITY_ID,
         systemMessage('agent-command.blocked-pr-is-a-draft-marking-it-ready-for-review-failed'), undefined,
-        createHash('sha256').update(`draft-blocked:${cornerId}:${head}`).digest('hex'));
+        createHash('sha256').update(`draft-blocked:${cornerId}:${head}`).digest('hex'),
+        { agentOnly: true });
       if (notice.kind === 'idle' && row) {
         await reportToCommander(
           db,
@@ -625,6 +611,7 @@ export async function noteReviewBlocked(
       systemMessage('corner-lifecycle.blocked', reason),
       undefined,
       createHash('sha256').update(`review-gap:${episode}`).digest('hex'),
+      { agentOnly: true },
     );
   const command = corner.worker_agent_id
     ? await createAgentCommand(db, {

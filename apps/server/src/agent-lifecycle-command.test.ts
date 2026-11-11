@@ -199,7 +199,22 @@ describe('tagged agent lifecycle commands', () => {
            WHERE presentation='system' AND system_event->>'verb'='reconnected after restart'`,
         )
       ).rows[0]?.text,
-    ).toBe('@bee reconnected after restart');
+    ).toBeUndefined();
+  });
+
+  it('keeps empty stop/retry requests silent', async () => {
+    await send('e'.repeat(64), OWNER, '@bee stop');
+    await send('f'.repeat(64), OWNER, '@bee retry');
+    expect((await database.query("SELECT 1 FROM messages WHERE presentation='system'")).rowCount).toBe(0);
+    expect((await database.query('SELECT 1 FROM agent_commands')).rowCount).toBe(0);
+  });
+
+  it('keeps a duplicate restart request silent while retaining the accepted restart history', async () => {
+    await send('d'.repeat(64), OWNER, '@bee restart');
+    await send('e'.repeat(64), OWNER, '@bee restart');
+    expect((await database.query("SELECT text FROM messages WHERE presentation='system'")).rows)
+      .toEqual([expect.objectContaining({ text: expect.stringContaining('queued a restart') })]);
+    expect((await database.query("SELECT 1 FROM agent_commands WHERE action='restart'")).rowCount).toBe(1);
   });
 
   it('maps stop and retry onto authoritative turn state', async () => {

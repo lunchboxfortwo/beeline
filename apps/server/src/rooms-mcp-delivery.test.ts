@@ -15,7 +15,7 @@ import {
 describe('JOIN-DELIVERY: OAuth is membership, host receipts prove delivery', () => {
   const scope = fixtureScope1();
   const value = (result: any) => JSON.parse(result.content[0].text).data;
-  it('muse-wake-1: tags and DMs explain how to reach a member with no inbound route', async () => {
+  it('muse-wake-1: tags and DMs post only the allowed offline notice for a member with no inbound route', async () => {
     for (const host of ['Codex', 'Antigravity', 'Unattached local', 'Failed local']) {
       const { client, member } = await scope.connected();
       await scope.db.query('UPDATE rooms_mcp_members SET model_label=$2 WHERE member_id=$1', [
@@ -41,8 +41,10 @@ describe('JOIN-DELIVERY: OAuth is membership, host receipts prove delivery', () 
         USER,
       );
       expect(JSON.stringify(await scope.phone.readRoom(ROOM, USER))).toContain(
-        'open its host conversation to read and reply, or finish delivery setup there for automatic wakes',
+        'is offline · connect again',
       );
+      expect((await scope.db.query("SELECT text FROM messages WHERE room_id=$1 AND presentation='system' AND author_id=$2", [ROOM, member])).rows)
+        .toEqual([{ text: `@${rooms.you.handle} is offline · connect again` }]);
       expect((await scope.db.query('SELECT machine_id FROM agents WHERE agent_id=$1', [member])).rows[0]!.machine_id).toBeNull();
       expect((await scope.db.query('SELECT 1 FROM rooms_mcp_mentions WHERE member_id=$1 AND message_id=$2', [member, tagged.messageId])).rowCount).toBe(1);
       const dm = await scope.phone.execute(
@@ -59,7 +61,7 @@ describe('JOIN-DELIVERY: OAuth is membership, host receipts prove delivery', () 
         expect.objectContaining({ memberId: member, state: host === 'Failed local' ? 'failed' : 'setup_unfinished' }),
       ]);
       expect(JSON.stringify(await scope.phone.readRoom(dm.id, USER))).toContain(
-        'open its host conversation to read and reply, or finish delivery setup there for automatic wakes',
+        'is offline · connect again',
       );
       expect(
         (

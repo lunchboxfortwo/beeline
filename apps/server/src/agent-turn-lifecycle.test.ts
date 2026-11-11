@@ -56,10 +56,10 @@ it('a connected claimed turn never becomes reclaimable merely because time passe
   await expect(claimAgentCommand(db,R,A,c.id,'other')).rejects.toThrow('claim conflict');
   expect((await notices()).rowCount).toBe(0);
 });
-it('one failed result ends the turn, posts one plain failure and creates no retry',async()=>{
+it('one failed result ends the turn silently and creates no retry',async()=>{
   const c=await ask();await receipt(c.turnRequestId,'failed');
   await receipt(c.turnRequestId,'failed');
-  expect((await notices()).rowCount).toBe(1);
+  expect((await notices()).rowCount).toBe(0);
   expect((await readAgentCommands(db,R,A)).commands).toEqual([]);
   expect((await db.query('SELECT status FROM agent_turns WHERE request_id=$1',[c.turnRequestId])).rows).toEqual([{status:'failed'}]);
 });
@@ -75,7 +75,7 @@ it('a failed result ends even when its commander has left the return Room',async
   await db.query('UPDATE memberships SET removed_at=now() WHERE room_id=$1 AND identity_id=$2',[R,commander]);
   await receipt(c.turn_request_id,'failed');
   expect((await db.query('SELECT state FROM agent_commands WHERE id=$1',[c.id])).rows).toEqual([{state:'complete'}]);
-  expect((await notices()).rowCount).toBe(1);
+  expect((await notices()).rowCount).toBe(0);
   expect((await readAgentCommands(db,R,A)).commands).toEqual([]);
 });
 it('Stop wins over a late result and uses the same terminal owner',async()=>{

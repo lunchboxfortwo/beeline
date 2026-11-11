@@ -364,8 +364,7 @@ describe('blocked: an agent that cannot do its step hands it on', () => {
     const notice = (await database.query<{ text: string }>(
       `SELECT text FROM messages WHERE room_id=$1 AND text LIKE '%closer role''s list%'`, [ROOM],
     )).rows;
-    expect(notice).toHaveLength(1);
-    expect(notice[0]!.text).toContain('@ada blocked (cannot close)');
+    expect(notice).toEqual([]);
   });
 });
 
@@ -439,7 +438,7 @@ describe('gates with a timeout and a default', () => {
       .rejects.toThrow('deadlineSeconds must be a whole number from 60 to 2592000');
   });
 
-  it('applies the default on a person\'s Skip, with the same notice, and refuses Skip on a gate with no default', async () => {
+  it('records the default on a person\'s Skip without a duplicate DM, and refuses Skip without a default', async () => {
     await database.query(`UPDATE identities SET handle='owner' WHERE id=$1`, [OWNER]);
     const runId = await startedGatedRun({ room_id: ROOM, agent_id: OWNER });
     await reachGate(runId);
@@ -447,9 +446,7 @@ describe('gates with a timeout and a default', () => {
     expect((await getWorkflowRun(database, ROOM, runId)).history.at(-1)).toMatchObject({
       outcome: 'stop', actorId: OWNER, contents: { decision: 'stop', defaultedBy: OWNER },
     });
-    expect(await ownerNotices(OWNER)).toEqual([
-      `The sign_off gate of gated took its default stop · @owner skipped it in run ${runId.slice(0, 8)}`,
-    ]);
+    expect(await ownerNotices(OWNER)).toEqual([]);
     const plain = await startedRun(OWNER);
     await withoutTimeouts('corner', 'human_approve');
     await driveToApprovalGate(plain.runId);

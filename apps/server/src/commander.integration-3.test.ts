@@ -237,9 +237,14 @@ it.each(['done','no-reply'])('WAKE-STORM: auth-failed reviewer reports once with
   for (let cycle=0;cycle<5;cycle++) await reconcileConfiguredCornerReviewers(rootFixture.db,ROOM);
   expect(await commands(opened.cornerId,SOL)).toEqual([]);
   const corner = await rootFixture.phone.readRoom(opened.cornerId,HUMAN);
-  expect(JSON.stringify(corner)).toContain('Authentication required');
+  expect(corner?.messages.some(message=>message.text.includes('Authentication required'))).toBe(false);
+  expect(corner?.messages.some(message=>message.text.includes('reviewer gave no verdict'))).toBe(false);
+  expect(corner?.latestAgentTurns).toContainEqual(expect.objectContaining({
+    agentPubkey:SOL,requestId:review.turnRequestId,status:'failed',
+  }));
   const failures = (await commands(DM,RUBY)).filter(c=>c.reason==='report');
   expect(failures).toHaveLength(1);
+  expect(failures[0]!.source.body).toContain('Authentication required');
   if (outcome === 'done') await rootFixture.daemon.execute('report', {...authority(rootFixture.order),status:'done',text:'done: the assigned coordination is complete'}, RUBY);
   else await rootFixture.daemon.execute('postAgentTurnReceipt', {...authority(rootFixture.order),status:'complete',completionKind:'no-reply'}, RUBY);
   const upstreamResults = outcome === 'done' ? 1 : 0;

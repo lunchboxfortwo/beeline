@@ -1,8 +1,24 @@
 import { queueReviewerCommand } from './corner-lifecycle.js';
-import { cornerReviewWokenSql } from './corner-lifecycle-review-state.js';
+import { commanderReportAddress } from './commander.js';
+import { noteReviewDispatchFailure, noteUnreachableReviewer, cornerReviewWokenSql } from './corner-lifecycle-review-state.js';
 import { describe, expect, it, vi, assignCornerWorker, DaemonService, LiveHub, PushDeliveryLoop, systemLine, createAgentCommand, reconcileConfiguredCornerReviewers, REVIEWER_DISPATCH_REASONS, reviewerDispatchCarriesHead, routeSystemCommand, advanceCorner, H, A, B, R, C, db, phone, daemon, commands, claim, result, greenHead, rootFixture } from './test-support-corner-review-dispatch.test-support.js';
 
 describe('corner message attribution', () => {
+  it('keeps automatic review errors out of a human commander’s conversation', async () => {
+    const opened = await rootFixture.phone.execute('createHumanCorner', { roomId: R, title: 'human-work' }, H);
+    expect(await commanderReportAddress(rootFixture.db, opened.id)).toMatchObject({ recipient: H, returnRoom: R });
+    const before = (await rootFixture.db.query('SELECT id FROM messages')).rowCount;
+    await noteReviewDispatchFailure(rootFixture.db, opened.id, 'a'.repeat(40), 'review queue unavailable');
+    const opening = (await rootFixture.db.query<{id:string}>(
+      "SELECT id FROM messages WHERE room_id=$1 AND card->>'cornerId'=$2", [R, opened.id],
+    )).rows[0]!;
+    await noteUnreachableReviewer(rootFixture.db, {
+      cornerId: opened.id, sourceMessageId: opening.id, reviewerId: B, reviewerKind: 'agent',
+      reviewerName: 'Reviewer', reason: 'offline',
+    });
+    expect((await rootFixture.db.query('SELECT id FROM messages')).rowCount).toBe(before);
+  });
+
 
   it('requests review after a new green event despite a historical verdict or brief change', async () => {
     const head = 'f'.repeat(40);
@@ -526,7 +542,7 @@ describe('the corner implementer the workflow wakes follows a person hand-over',
 });
 
 
-it.each(['empty','status','failed'])('a %s review result leaves its cause without retrying',async ending=>{
+it.each(['empty','status','failed'])('a %s review result ends silently without retrying',async ending=>{
   await rootFixture.phone.execute('updateRoom',{roomId:R,reviewerAgentId:B},H);
   await greenHead(91,'d'.repeat(40));
   const [review]=await commands(B,C);await claim(review!);
@@ -536,7 +552,7 @@ it.each(['empty','status','failed'])('a %s review result leaves its cause withou
   for(let event=0;event<3;event++)await reconcileConfiguredCornerReviewers(rootFixture.db,R);
   expect(await commands(B,C)).toEqual([]);
   expect((await rootFixture.db.query<{text:string}>(`SELECT text FROM messages WHERE room_id=$1`,[C])).rows
-    .some(line=>line.text.includes('reviewer gave no verdict'))).toBe(true);
+    .some(line=>line.text.includes('reviewer gave no verdict'))).toBe(false);
   if(ending==='failed')expect((await commands(A,R)).filter(c=>c.reason==='report'&&c.source.body.includes('failed:'))).toHaveLength(1);
 
 });
@@ -884,12 +900,10 @@ it('committed-event recovery: startup green, lost command and reviewer completio
     await claim(review!);
     await rootFixture.daemon.execute('postAgentTurnReceipt', { roomId: C, requestId: review!.turnRequestId,
       generationId: 'g1', status: 'complete' }, B);
-    await vi.waitFor(async () => {
-      const lines=(await rootFixture.db.query<{text:string}>(`SELECT text FROM messages WHERE room_id=$1`,[C])).rows;
-      expect(lines.some(line=>line.text.includes('reviewer gave no verdict'))).toBe(true);
-    });
     for (let replay = 0; replay < 3; replay++) live.publish({ type: 'invalidate', roomId: C, reason: 'postgres:corner_state' });
     await machine.refresh(C);
+    const lines=(await rootFixture.db.query<{text:string}>(`SELECT text FROM messages WHERE room_id=$1`,[C])).rows;
+    expect(lines.some(line=>line.text.includes('reviewer gave no verdict'))).toBe(false);
     expect((await commands(A, C)).filter(command => command.reason === 'corner_review_needed')).toHaveLength(0);
     expect(await commands(B, C)).toEqual([]);
     expect(errors).toEqual([]);

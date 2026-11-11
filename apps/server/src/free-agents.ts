@@ -3,7 +3,6 @@ import {FREE_AGENT_CREATION_SCHEMA,reserveStarterAgents,refundStarterAgent} from
 import { FREE_AGENT_ACCOUNTING_SCHEMA } from './free-agent-accounting.js';
 import { setRoomEventSubscriptions } from './agent-subscriptions.js';
 import { SYSTEM_IDENTITY_ID } from '@beeline/api-contract/system-identity';
-import { systemMessage } from '@beeline/api-contract/system-message-catalog';
 import { createCipheriv, createDecipheriv, createECDH, createHash, randomBytes, randomUUID } from 'node:crypto';
 import { assignSeededAgentIdentity, resolveFace, agentHandleFromName } from '@beeline/api-contract/phone';
 import { createAgentCommand } from './agent-command.js';
@@ -13,7 +12,6 @@ import { FlyApiError, sameMachineImage } from './fly-machines.js';
 import type { LiveHub } from './live.js';
 import { freeAgentDailyTokenCapFromEnv, freeAgentFirstDayTokenCapFromEnv, freeAgentLimitsFromEnv, type FreeAgentLimits } from './free-agent-limits.js';
 import { createInvitedWorkspaceMembership, joinRooms } from './membership-join.js';
-import { ensureSystemIdentity, systemLine } from './system-line.js';
 import { createStarterOnboardingRun } from './starter-onboarding-run.js';
 
 /**
@@ -222,7 +220,7 @@ export const FREE_AGENT_EXIT_NOTE =
 /** Membership events every free agent hears in #general from creation. */
 export const FREE_AGENT_EVENT_SUBSCRIPTIONS = ['joined', 'left'] as const;
 
-export const FREE_AGENT_CONNECT_GUIDE = `Offer help bringing their own agent only on real triggers: someone requests their own files, apps, logins or local repository that you cannot access, or the server's 80% allowance warning has fired. Explain the limitation and offer to guide them. At most one unsolicited nudge per UTC day; the 80% warning counts as that day's nudge. Check the conversation before nudging; if unsure whether you already nudged today, do not nudge. Normal conversation is not a trigger. When explicitly asked, help without this daily restriction.
+export const FREE_AGENT_CONNECT_GUIDE = `Offer help bringing their own agent only on real triggers: someone requests their own files, apps, logins or local repository that you cannot access. Explain the limitation and offer to guide them. At most one unsolicited nudge per UTC day. Check the conversation before nudging; if unsure whether you already nudged today, do not nudge. Normal conversation is not a trigger. When explicitly asked, help without this daily restriction.
 
 When they accept, guide them one step at a time, waiting for the result of each step. Help them choose their own computer or an always-on machine they control. Install Node.js and an agent CLI (Claude Code, Codex or OpenCode), and help them sign in to that CLI. Send them to Members -> Add agent in their Workspace to copy the command. The command format is npx usebeeline connect <code>; they must run the actual command copied from Add agent on their chosen machine. Never create, retrieve, request, repeat or post a pairing code in a Room. Troubleshoot using redacted errors, never secrets. Keep helping until Members shows their new agent online, then have them tag it with a small task. Do not claim it is online without confirmation.`;
 
@@ -239,8 +237,8 @@ export const FREE_AGENT_BROWSER_GUIDE = `Use agent-browser with the installed Li
 /** Retain the agent's persona while replacing release-owned hosted policy on every read. */
 export function currentFreeAgentInstructions(instructions: string): string {
   const retained = instructions.split(/\n\n/u).filter(paragraph =>
-    paragraph !== FREE_AGENT_TEAM_GUIDE && !/^(?:For Grok\/xAI|When the person picks "Make a welcome video|You are on a team with another free starter agent|Use agent-browser with)/u.test(paragraph));
-  return [...retained, FREE_AGENT_APP_CONNECT_GUIDE, FREE_AGENT_BROWSER_GUIDE, FREE_AGENT_TEAM_GUIDE].join('\n\n');
+    paragraph !== FREE_AGENT_TEAM_GUIDE && !/^(?:Offer help bringing their own agent|When they accept, guide them one step at a time|For Grok\/xAI|When the person picks "Make a welcome video|You are on a team with another free starter agent|Use agent-browser with)/u.test(paragraph));
+  return [...retained, FREE_AGENT_CONNECT_GUIDE, FREE_AGENT_APP_CONNECT_GUIDE, FREE_AGENT_BROWSER_GUIDE, FREE_AGENT_TEAM_GUIDE].join('\n\n');
 }
 
 export function freeAgentInstructions(seededSoul: string, name: string, config: FreeAgentConfig): string {
@@ -515,20 +513,6 @@ export class FreeAgentService {
     if (!input.team) return createFreeAgentInWorkspace(database,this.config,input);
     await database.query('SELECT id FROM workspaces WHERE id=$1 FOR UPDATE', [input.workspaceId]);
     if (!await reserveStarterAgents(database,input.creatorId,2,this.config.maxPerOwner)) {
-      const existing = (await database.query<{ name: string; workspace_name: string }>(
-        `SELECT identity.name,workspace.name workspace_name FROM free_agents free
-         JOIN identities identity ON identity.id=free.agent_id
-         JOIN memberships member ON member.identity_id=free.agent_id AND member.room_id IS NULL AND member.removed_at IS NULL
-         JOIN workspaces workspace ON workspace.id=member.workspace_id
-         WHERE free.owner_id=$1 AND free.removed_at IS NULL ORDER BY free.created_at,free.agent_id`,
-        [input.creatorId],
-      )).rows;
-      await ensureSystemIdentity(database);
-      await systemLine(database, { roomId: input.roomId, authorId: SYSTEM_IDENTITY_ID,
-        subject: { kind: 'system', name: systemMessage("free-agents.your-starter-agents") },
-        verb: existing.length ? systemMessage("free-agents.are-already-in") : systemMessage("free-agents.could-not-be-added"),
-        ...(existing.length ? { object: existing.map(agent => systemMessage("free-agents.starter-location", agent.name, agent.workspace_name)).join(systemMessage("free-agents.list-separator")) } : {}),
-        consequence: systemMessage("free-agents.your-account-has-reached-its-free-agent-limit") });
       return undefined;
     }
     const beebee = await createReservedFreeAgent(database, this.config, { ...input, silent: true, team: true });

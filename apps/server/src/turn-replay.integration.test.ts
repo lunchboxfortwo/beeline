@@ -136,7 +136,7 @@ it.each([
       expect(settled).toBe(false);
       expect((await db.query('SELECT state FROM agent_commands WHERE turn_request_id=$1',[trigger])).rows).toEqual([{state:'complete'}]);
       expect((await db.query('SELECT status FROM agent_turns WHERE request_id=$1',[trigger])).rows).toEqual([{status:'failed'}]);
-      expect((await db.query("SELECT 1 FROM messages WHERE room_id=$1 AND card_type='turn-failed' AND card->>'requestId'=$2",[roomId,trigger])).rowCount).toBe(1);
+      expect((await db.query("SELECT 1 FROM messages WHERE room_id=$1 AND card_type='turn-failed' AND card->>'requestId'=$2",[roomId,trigger])).rowCount).toBe(0);
       const nudge = randomUUID();answeredTrigger=nudge;
       await db.query(`INSERT INTO messages(id,room_id,author_id,text) VALUES($1,$2,$3,'Continue with the interrupted work')`, [nudge,roomId,HUMAN]);
       await createAgentCommand(db, { roomId, agentId: AGENT, sourceMessageId: nudge, reason: 'human_tag' });

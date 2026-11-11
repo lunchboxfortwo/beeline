@@ -171,39 +171,39 @@ async function runRunnerTurn(reason?: string, orders:readonly {authorId:string;f
   try {
     await runServerCommandIntake({api,roomId:R,agentId:A,context,signal:abort.signal,
       stop:()=>{},run:async()=>{if(reason)throw new Error(reason);}});
-    return {room:(await phone.readRoom(R,H))!,command};
+    return {room:(await phone.readRoom(R,H))!,command,commands};
   } finally {abort.abort();await rm(scratch,{recursive:true,force:true});}
 }
 
 it.each(['review checkout has uncommitted work', 'agent process exited before output'])(
-  'Reproduction F1: runner failure reaches the sender and stays failed after release (%s)', async reason => {
+  'Reproduction F1: runner failure stays failed after release without a chat notice (%s)', async reason => {
     await runRunnerTurn();
     const {room,command}=await runRunnerTurn(reason);
     expect(room.latestAgentTurns).toContainEqual(expect.objectContaining({
       requestId:command.turn_request_id,status:'failed',
     }));
     expect(room.messages.some(message=>message.text.startsWith('failed:') && message.text.includes(reason)
-      && message.text.includes('@worker') && message.text.includes(R))).toBe(true);
-    expect(room.messages.some(message=>message.systemEvent?.verb==='could not finish this request' && message.text.includes(reason))).toBe(true);
+      && message.text.includes('@worker') && message.text.includes(R))).toBe(false);
+    expect(room.messages.some(message=>message.systemEvent?.verb==='could not finish this request' && message.text.includes(reason))).toBe(false);
   });
 
-it('Reproduction F1: repeated failures send one update until a successful quiet turn clears the streak',async()=>{
+it('Reproduction F1: repeated failures stay silent across a successful quiet turn',async()=>{
   const reports=(room:Awaited<ReturnType<typeof runRunnerTurn>>['room'])=>
     room.messages.filter(message=>message.text.startsWith('failed:')).length;
   const baseline=reports((await runRunnerTurn()).room);
   for(let attempt=1;attempt<=4;attempt++){
     const {room}=await runRunnerTurn('checkout preparation failed');
-    expect(reports(room)).toBe(baseline+Math.min(attempt,2));
+    expect(reports(room)).toBe(baseline);
   }
   const success=await runRunnerTurn();
   expect(success.room.latestAgentTurns).toContainEqual(expect.objectContaining({
     requestId:success.command.turn_request_id,status:'complete',
   }));
-  expect(reports((await runRunnerTurn('another early crash')).room)).toBe(baseline+3);
+  expect(reports((await runRunnerTurn('another early crash')).room)).toBe(baseline);
 });
 
 it.each(['distinct issuers and places','same issuer','same place'])(
-  'Reproduction F1: batched failures preserve each return route and bound repeated reports (%s)',async kind=>{
+  'Reproduction F1: batched failures complete each request without posting to human return routes (%s)',async kind=>{
     await runRunnerTurn();
     const other='c'.repeat(64), firstPlace=randomUUID(), secondPlace=kind==='same place'?firstPlace:randomUUID();
     await db.query("INSERT INTO identities(id,kind,name,handle) VALUES($1,'human','Other owner','otherowner') ON CONFLICT DO NOTHING",[other]);
@@ -215,7 +215,6 @@ it.each(['distinct issuers and places','same issuer','same place'])(
     const orders=[{authorId:H,fromRoomId:firstPlace},
       {authorId:kind==='same issuer'?H:other,fromRoomId:secondPlace}];
     orders.push({...orders[0]!});
-    const routeCount=2;
     const reportCount=async()=>{
       let count=0;
       for(const place of new Set([firstPlace,secondPlace])) {
@@ -228,10 +227,14 @@ it.each(['distinct issuers and places','same issuer','same place'])(
       return count;
     };
     for(let attempt=1;attempt<=4;attempt++) {
-      await runRunnerTurn('checkout preparation failed',orders);
-      expect(await reportCount()).toBe(routeCount*Math.min(attempt,2));
+      const {commands}=await runRunnerTurn('checkout preparation failed',orders);
+      expect(await reportCount()).toBe(0);
+      expect((await db.query('SELECT state FROM agent_commands WHERE id=ANY($1::text[])',[commands.map(command=>command.id)])).rows)
+        .toEqual(commands.map(()=>({state:'complete'})));
+      expect((await db.query('SELECT status FROM agent_turns WHERE request_id=ANY($1::text[])',[commands.map(command=>command.turn_request_id)])).rows)
+        .toEqual(commands.map(()=>({status:'failed'})));
     }
     await runRunnerTurn();
     await runRunnerTurn('checkout preparation failed',orders);
-    expect(await reportCount()).toBe(routeCount*3);
+    expect(await reportCount()).toBe(0);
   });

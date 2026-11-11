@@ -237,17 +237,10 @@ connection/model authority, pending presentation and provider observations;
 and the final-read handoff race. Run each Vitest suite separately with
 `--maxWorkers=2 --minWorkers=1`.
 
-At 80% of whichever allowance applies (2.4M of the default 3M daily cap, or 8M of the 10M first-day cap), settlement posts one plain allowance notice per owner per UTC day into the room where the person is working, with the midnight UTC reset and a Members ->
-Add agent link. The owner must be a room member; otherwise nothing is posted. Delivery does not call a model. The warning records
-`allowance_warning` and `nudge_shown`; pairing a non-free agent in the same
-Workspace within 24 hours records `agent_connected_after_nudge` once per agent.
-Reaching the Add agent command within 24 hours of a warning records `guide_started`
-once per warning. This measures that concrete setup step, not conversational acceptance.
-Model-authored nudges are not reliably observable server-side and are not counted.
-Instructions limit unsolicited
-offers to inaccessible work or the warning, once per UTC day, and guide people
-through running their own CLI without requesting or posting pairing codes.
-Existing free-agent souls receive the guide during data migration.
+Model settlement records spend without posting allowance notices to chat.
+Historical warning conversions remain queryable: pairing a non-free agent in the same Workspace within 24 hours of a stored warning records `agent_connected_after_nudge`, and reaching Add agent records `guide_started` once per stored warning.
+Instructions limit unsolicited offers to requested work the agent cannot access, once per UTC day, and guide people through running their own CLI without requesting or posting pairing codes.
+Current instruction reads replace the retired warning-triggered guide while preserving the agent's soul.
 
 ## Server configuration
 

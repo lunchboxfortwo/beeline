@@ -875,7 +875,10 @@
           "workflow_slug": "existing before the registry; weekly audit reviews",
           "human_command_message_id": "existing before the registry; weekly audit reviews",
           "title": "existing before the registry; weekly audit reviews",
-          "last_reported_blocking_run_id": "existing before the registry; weekly audit reviews",
+          "last_reported_blocking_run_id": {
+            "reason": "existing before the registry; weekly audit reviews",
+            "drop": "docs/agent-system-events.md#retired-status-storage"
+          },
           "updated_by": "existing before the registry; weekly audit reviews",
           "owner_id": "existing before the registry; weekly audit reviews",
           "failed_due_at": "Records the exact failed scheduled occurrence so the same due work cannot retry on a timer.",
@@ -1074,8 +1077,14 @@
           "bytes": "existing before the registry; weekly audit reviews",
           "grant_info": "existing before the registry; weekly audit reviews",
           "turn_key": "existing before the registry; weekly audit reviews",
-          "message_id": "existing before the registry; weekly audit reviews",
-          "event_class": "existing before the registry; weekly audit reviews",
+          "message_id": {
+            "reason": "existing before the registry; weekly audit reviews",
+            "drop": "docs/agent-system-events.md#retired-status-storage"
+          },
+          "event_class": {
+            "reason": "existing before the registry; weekly audit reviews",
+            "drop": "docs/agent-system-events.md#retired-status-storage"
+          },
           "created_at": "existing before the registry; weekly audit reviews"
         }
       },
@@ -1387,7 +1396,10 @@
           },
           "runtime_operation_id": "Fences provider results against a newer lifecycle operation; only FreeAgentService writes it.",
           "runtime_owner": "Binds the in-flight provider action to its existing server-source owner across instances.",
-          "runtime_phase": {"reason":"Retained inertly through serving and rollback overlap; pending UI is projected from commands.","drop":"Post-drain contract: docs/agent-server-surfaces.md#turn-recovery-storage-retirement"}
+          "runtime_phase": {
+            "reason": "Retained inertly through serving and rollback overlap; pending UI is projected from commands.",
+            "drop": "Post-drain contract: docs/agent-server-surfaces.md#turn-recovery-storage-retirement"
+          }
         }
       },
       "github_auth_flows": {
@@ -1546,7 +1558,10 @@
           "profile_bytes": "existing before the registry; weekly audit reviews",
           "skill_index_bytes": "existing before the registry; weekly audit reviews",
           "wrapper_bytes": "existing before the registry; weekly audit reviews",
-          "total_bytes": "existing before the registry; weekly audit reviews",
+          "total_bytes": {
+            "reason": "existing before the registry; weekly audit reviews",
+            "drop": "docs/agent-system-events.md#retired-status-storage"
+          },
           "estimated_tokens": "existing before the registry; weekly audit reviews",
           "actual_input_tokens": "existing before the registry; weekly audit reviews",
           "prompt_bytes": "existing before the registry; weekly audit reviews",

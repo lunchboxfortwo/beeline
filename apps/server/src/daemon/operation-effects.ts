@@ -13,13 +13,11 @@ import { vaultSaveRequest, type VaultSaveCard } from '@beeline/api-contract/daem
 import { FIRST_PARTY_INTEGRATIONS } from '../first-party-integrations.js';
 import { setCornerHold } from '../corner-holds.js';
 import { authorizeCommandOutput, claimAgentCommand, StaleWakeClaimRefused, readAgentCommands, type CommandRow } from '../agent-command.js';
-import { createHash } from 'node:crypto';
 import { endComputerSession, getComputerSession } from '../computer-session.js';
 import type { DaemonOperationMap } from '@beeline/api-contract/daemon';
 import { recordPersonMergeYes } from '../corner-merge-approval.js';
 import { advanceCorner, lockCornerLifecycle } from '../corner-lifecycle.js';
-import { SYSTEM_IDENTITY_ID } from '@beeline/api-contract/system-identity';
-import { ensureSystemIdentity, systemLine } from '../system-line.js';
+import { systemLine } from '../system-line.js';
 import { appIdentity } from '@beeline/api-contract/workbench';
 import { connectorIntentIndex } from '../connector-intent-index.js';
 import { composioToolkitForApp } from '../composio-apps.js';
@@ -30,7 +28,6 @@ import type { DaemonContext } from './context.js';
 import { Input, OwnedModelClaimCapability, Output, id, seconds } from './values.js';
 import { daemonLockOwnedTurnAccess, daemonOwnedModelReady, daemonModelClaimCredentials } from './owned-model.js';
 import { daemonWriteResult } from './corner-messages.js';
-import { daemonRepository } from './corner-reads.js';
 import { daemonPostRoomMessage } from './messages.js';
 import { daemonAccess } from './access.js';
 import { daemonLinkSpendApproval } from './approvals.js';
@@ -234,24 +231,6 @@ export async function acknowledgeAgentCommandOperation<Name extends keyof Daemon
 
 }
 
-export async function noteEmptyRoomRepositoryOperation<Name extends keyof DaemonOperationMap>(ctx: DaemonContext, name: Name, input: Input<Name>, authenticatedAgentId: string, turnOwner: HelperTurnOwnershipSource | undefined, modelClaim: OwnedModelClaimCapability | undefined, candidate: Record<string, unknown>, scopedRoom: string | undefined, ownedIntent: boolean): Promise<Output<Name>> {
-
-        const roomId = (input as Input<'noteEmptyRoomRepository'>).roomId;
-        const repository = await daemonRepository(ctx, roomId, authenticatedAgentId);
-        if (repository.resolution !== 'repository')
-          throw new Error('Room is not repository-backed');
-        await ensureSystemIdentity(ctx.database);
-        const line = await systemLine(ctx.database, {
-          id: createHash('sha256').update(`room-empty-repository:v1:${roomId}`).digest('hex'),
-          roomId,
-          authorId: SYSTEM_IDENTITY_ID,
-          subject: { kind: 'system', name: systemMessage("daemon-service.this-repository") },
-          verb: systemMessage("daemon-service.has-no-commits-yet-push-a-first-commit-and-i-ll-pick-it-up"),
-        });
-        return { id: line.id, createdAt: seconds(new Date()) } as Output<Name>;
-
-}
-
 export async function getRoomGitHubTokenOperation<Name extends keyof DaemonOperationMap>(ctx: DaemonContext, name: Name, input: Input<Name>, authenticatedAgentId: string, turnOwner: HelperTurnOwnershipSource | undefined, modelClaim: OwnedModelClaimCapability | undefined, candidate: Record<string, unknown>, scopedRoom: string | undefined, ownedIntent: boolean): Promise<Output<Name>> {
 
         if (!ctx.roomGitHubToken) throw new Error('GitHub room token service unavailable');
@@ -265,16 +244,6 @@ export async function getRoomGitHubTokenOperation<Name extends keyof DaemonOpera
             error instanceof Error &&
             error.message === 'GitHub repository installation not found'
           ) {
-            await ensureSystemIdentity(ctx.database);
-            await systemLine(ctx.database, {
-              id: createHash('sha256')
-                .update(`room-github-installation-unavailable:v1:${roomId}`)
-                .digest('hex'),
-              roomId,
-              authorId: SYSTEM_IDENTITY_ID,
-              subject: { kind: 'system', name: systemMessage("daemon-service.install-or-grant-the-beeline-github-app") },
-              verb: systemMessage("daemon-service.to-access-this-repository"),
-            });
             throw new CommandRefusalError('Room repository access needs the Beeline GitHub App', 409);
           }
           throw error;
