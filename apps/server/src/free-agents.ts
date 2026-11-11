@@ -704,9 +704,9 @@ export class FreeAgentService {
           `SELECT f.agent_id,f.owner_id,member.workspace_id,w.name workspace_name,f.sealed_keys,
                   i.name,a.soul,f.model
            FROM free_agents f
-           JOIN LATERAL (SELECT workspace_id FROM memberships
-             WHERE identity_id=f.agent_id AND room_id IS NULL AND removed_at IS NULL
-             ORDER BY joined_at,id LIMIT 1) member ON true
+           JOIN LATERAL (SELECT workspace.workspace_id FROM memberships workspace
+             WHERE workspace.identity_id=f.agent_id AND workspace.room_id IS NULL AND workspace.removed_at IS NULL
+             ORDER BY workspace.joined_at,workspace.id LIMIT 1) member ON true
            JOIN workspaces w ON w.id=member.workspace_id
            JOIN identities i ON i.id=f.agent_id JOIN agents a ON a.agent_id=f.agent_id
            WHERE f.bootstrap_hash=$1 AND f.removed_at IS NULL

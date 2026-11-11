@@ -68,7 +68,7 @@ import { CORNER_ATTENTION_SCHEMA } from './corner-attention.js';
 import { backfillCornerFollows, cornerFollowsSchemaSql } from './corner-follow.js';
 import { alreadyNoOp, alreadySatisfied, triggerAlreadyCurrent, runMigrationStep, splitMigrationStatements } from './migration-steps.js';
 import { SqlDatabase, SCHEMA, MESSAGE_CURSOR_MS_SQL } from './database.js';
-import { consolidateWorkspaceMembers, retireOrphanRoomMemberships } from './membership-join.js';
+import { retireOrphanRoomMemberships } from './membership-join.js';
 import { createIndexConcurrently, backfillMessageSearchDocuments, backfillSquireApprovalExpiry, compactWebhookDeliveries, compactPushClaims, backfillCornerOwed, backfillSystemEventKinds, backfillPerItemEventSubscriptions, backfillInstitutionalMemoryRollout, retireStandingPreferences, backfillConnectorMachineId } from './database-backfill-squire-approval-expiry.js';
 
 
@@ -156,16 +156,9 @@ export async function migrate(
     DROP FUNCTION IF EXISTS defer_startup_wake();
   `);
   await ddlScript('free agents schema', FREE_AGENTS_SCHEMA);
-  await runMigrationStep('one Workspace member list', async () => {
-    await workflowBackfillOnce(database, 'workspace-members-v1', async db => { await consolidateWorkspaceMembers(db); });
-  });
-  // Contract release: merge only after the expand release replaces old readers.
-  await runMigrationStep('retired membership storage', async () => {
-    await workflowBackfillOnce(database, 'workspace-members-contract-v1', db => db.transaction(async tx => {
+  await runMigrationStep('Workspace member cleanup', async () => {
+    await workflowBackfillOnce(database, 'workspace-members-cleanup-v1', db => db.transaction(async tx => {
       await retireOrphanRoomMemberships(tx);
-      await tx.query(`ALTER TABLE free_agents DROP COLUMN IF EXISTS workspace_id;
-        ALTER TABLE rooms_mcp_members DROP COLUMN IF EXISTS workspace_ids;
-        DROP VIEW IF EXISTS effective_memberships;`);
     }));
   });
   await ddlScript('machine Squire source', SQUIRE_MACHINE_SCHEMA);

@@ -482,10 +482,9 @@ export async function retireMembershipSubscriptionLists(database: SqlDatabase): 
 }
 
 /** End joins recreated by preceding images without deleting their history. */
-export async function retireOrphanRoomMemberships(db: SqlDatabase) {
-  const orphans = await db.query<{ room_id: string; identity_id: string; kind: string }>(
-    `SELECT member.room_id,member.identity_id,identity.kind FROM memberships member
-     JOIN identities identity ON identity.id=member.identity_id
+export async function retireOrphanRoomMemberships(db: SqlDatabase): Promise<void> {
+  const orphans = await db.query<{ room_id: string; identity_id: string }>(
+    `SELECT member.room_id,member.identity_id FROM memberships member
      WHERE member.room_id IS NOT NULL AND member.removed_at IS NULL
        AND NOT EXISTS(SELECT 1 FROM memberships workspace
          WHERE workspace.workspace_id=member.workspace_id AND workspace.room_id IS NULL
@@ -493,48 +492,4 @@ export async function retireOrphanRoomMemberships(db: SqlDatabase) {
      FOR UPDATE OF member`,
   );
   for (const row of orphans.rows) await removeRoomMembership(db, [row.room_id, row.identity_id]);
-  return { removedChatJoins: orphans.rowCount,
-    people: new Set(orphans.rows.filter(row => row.kind === 'human').map(row => row.identity_id)).size,
-    agents: new Set(orphans.rows.filter(row => row.kind === 'agent').map(row => row.identity_id)).size };
-}
-
-/** Move the two agent-specific membership sources into ordinary member rows.
- * Existing departures win over source metadata. Orphan chat joins keep their
- * history, but cannot regain access when a Workspace member is backfilled. */
-export async function consolidateWorkspaceMembers(database: SqlDatabase) {
-  return database.transaction(async db => {
-    const orphans = await retireOrphanRoomMemberships(db);
-    const columns = (await db.query<{ table_name: string }>(
-      `SELECT table_name FROM information_schema.columns WHERE table_schema=current_schema()
-       AND ((table_name='free_agents' AND column_name='workspace_id')
-         OR (table_name='rooms_mcp_members' AND column_name='workspace_ids'))`,
-    )).rows.map(row => row.table_name);
-    let free = 0, mcp = 0;
-    if (columns.includes('free_agents')) {
-      free = (await db.query(`INSERT INTO memberships(workspace_id,identity_id,role,invited_by,joined_at,removed_at)
-        SELECT free.workspace_id,free.agent_id,'member',free.owner_id,free.created_at,
-          COALESCE(free.removed_at,CASE WHEN owner.id IS NULL THEN now() END)
-        FROM free_agents free LEFT JOIN memberships owner
-          ON owner.workspace_id=free.workspace_id AND owner.room_id IS NULL
-            AND owner.identity_id=free.owner_id AND owner.removed_at IS NULL
-        WHERE free.workspace_id IS NOT NULL
-        ON CONFLICT(workspace_id,identity_id) WHERE room_id IS NULL DO NOTHING`)).rowCount;
-    }
-    if (columns.includes('rooms_mcp_members')) {
-      mcp = (await db.query(`INSERT INTO memberships(workspace_id,identity_id,role,invited_by,joined_at,removed_at)
-        SELECT DISTINCT workspace.id,member.member_id,'member',member.owner_id,member.created_at,
-          CASE WHEN owner.id IS NULL OR connection.revoked_at IS NOT NULL THEN now() END
-        FROM rooms_mcp_members member
-        JOIN workspaces workspace ON workspace.id=ANY(member.workspace_ids)
-          OR (member.workspace_ids IS NULL AND EXISTS(SELECT 1 FROM memberships eligible
-            WHERE eligible.workspace_id=workspace.id AND eligible.identity_id=member.owner_id
-              AND eligible.room_id IS NULL AND eligible.removed_at IS NULL))
-        LEFT JOIN memberships owner ON owner.workspace_id=workspace.id AND owner.room_id IS NULL
-          AND owner.identity_id=member.owner_id AND owner.removed_at IS NULL
-        LEFT JOIN rooms_mcp_connections connection
-          ON connection.client_id=member.client_id AND connection.identity_id=member.owner_id
-        ON CONFLICT(workspace_id,identity_id) WHERE room_id IS NULL DO NOTHING`)).rowCount;
-    }
-    return { ...orphans, free, mcp };
-  });
 }

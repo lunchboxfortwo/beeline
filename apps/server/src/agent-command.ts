@@ -739,7 +739,7 @@ export async function insertAgentCommand(db: SqlDatabase, input: AgentCommandInp
         AND earlier.state='pending'
         AND earlier.private_payload->>'authorId'=$4
         AND COALESCE(earlier.private_payload->>'originCornerId',earlier.private_payload->>'fromRoomId')=$5
-        AND substring(earlier.private_payload->>'text' from '^(done|blocked|needs-decision|failed):')=$6) terminal) SELECT * FROM superseded`,
+        AND substring(earlier.private_payload->>'text' from '^(done|blocked|needs-decision|failed):')=$6) terminal) SELECT 1 FROM superseded`,
     [input.roomId,input.agentId,id,privatePayload!.authorId,
       privatePayload!.originCornerId ?? privatePayload!.fromRoomId,reportStatus]);
   }
