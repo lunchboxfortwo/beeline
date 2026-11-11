@@ -4,13 +4,14 @@ import { CommandRefusalError } from "./commander.js";
 import { WorkspaceSkillNotFoundError } from "./institutional-skills.js";
 import { institutionalMemoryErrorStatus } from "./institutional-memory-shadow.js";
 import { AGENT_OWNER_AUTHORITY_MESSAGE, WORKSPACE_ADMIN_AUTHORITY_MESSAGE, SPENDING_OWNER_AUTHORITY_MESSAGE, YOLO_AUTHORITY_MESSAGE, CONNECTOR_OFFER_AUTHORITY_MESSAGE, CONNECTOR_OFFER_WALLET_AUTHORITY_MESSAGE } from "./phone-service.js";
-import { GitHubHttpError } from "@beeline/auth/github";
+import { GitHubHttpError, ProductionReleaseBusyError } from "@beeline/auth/github";
 
 
 
 
 
 export function requestErrorStatus(error: unknown): number {
+  if (error instanceof ProductionReleaseBusyError) return 409;
   if (error instanceof PhoneOperationError) return error.status;
   const message = error instanceof Error ? error.message : 'request failed';
   let status =

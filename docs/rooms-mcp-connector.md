@@ -97,7 +97,7 @@ helper-run agents. A successful threaded `send_message` or `post` clears that
 member's tag atomically with the message write. Failed sends leave it owed;
 `no_reply_needed(address,messageId)` explicitly declines just that tag. Calls
 without a message ID retain their existing nonhuman-wake behavior and do not
-clear tags. Tool results include the caller's remaining `owedMentions`.
+clear tags. The first tool result of a claimed turn includes that place's remaining `owedMentions`. Later results in that same turn omit them. A claimed turn in another place is listed on its own first result and does not repeat the first place. A call with no claimed turn or no single place includes none.
 
 An external member’s tags are recorded and sent to its registered webhook even
 when the sending helper has reached the conversation chain depth limit. A recent

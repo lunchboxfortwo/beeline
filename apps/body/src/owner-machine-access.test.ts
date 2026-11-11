@@ -79,6 +79,15 @@ it('R-GRANT-REFUSAL names an expired closest grant without echoing private argum
   }
 });
 
+it('an approved host grant names the command kind the run needs', async () => {
+  const root = fixture();
+  const runner = new GrantCommandRunner({ agentId: 'agent', api: { execute: async (op: string) => op === 'listAgentGrantRequests' ? { grants: [
+    { grantId: 'host-rule', workspaceId: 'workspace', kind: 'host', target: 'api.example.com', status: 'approved' },
+  ] } : { grants: [] } } as never });
+  runner.register('room', { workspaceId: 'workspace', cwd: root, turn: () => ({ requestId: 'request', generationId: 'generation' }), writePolicy: () => ({ surface: 'corner' }) });
+  await expect(runner.run({ roomId: 'room', argv: ['curl', 'https://api.example.com'] })).rejects.toThrow(/kind host[\s\S]*kind=command/);
+});
+
 it('R-SCRIPT-1 stdin is shown and byte-bound, while missing and changed input refuse', async () => {
   const root = fixture(); const argv = ['bash', '-s']; const stdin = 'printf approved';
   const target = JSON.stringify({ argv, stdin });

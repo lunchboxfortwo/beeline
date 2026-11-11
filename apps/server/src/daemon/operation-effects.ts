@@ -263,7 +263,8 @@ export async function markAgentTurnSilentOperation<Name extends keyof DaemonOper
             'corner_review_dispatch', 'corner_merge_conflict', 'computer_activity',
             'schedule', 'subscribed_event', 'system', 'agent_tag', 'corner_objective',
             'corner_land', 'corner_merge_refused', 'corner_merge_unconfirmed',
-            'corner_background_tool', 'corner_brief_revision'].includes(command.reason))
+            'corner_background_tool', 'corner_brief_revision',
+            'joined', 'join_probe', 'tagged_lifecycle_retry', 'tagged_lifecycle_restart', 'corner_lifecycle'].includes(command.reason))
             throw new CommandRefusalError('no_reply_needed requires a nonhuman wake. Call post({text: <your reply>}), then end the turn.', 400);
           if (!(await ctx.database.query(`SELECT 1 FROM agent_pending_attachments
             WHERE room_id=$1 AND agent_id=$2 AND request_id=$3 AND generation_id=$4 LIMIT 1`,

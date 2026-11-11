@@ -396,7 +396,11 @@ function capOutput(value: string, cap: number): string {
 function closestCommandGrant(grants: readonly Pick<LiveGrant, 'kind' | 'target' | 'grantId' | 'workspaceId' | 'expiresAt' | 'status'>[], workspaceId: string, argv: readonly string[]): string {
   let nearest: { id: string; score: number; fields: string[] } | undefined;
   for (const grant of grants) {
-    if (grant.kind !== 'command') continue;
+    if (grant.kind !== 'command') {
+      if (grant.workspaceId === workspaceId && (grant.status === 'approved' || grant.status === 'once') && !nearest)
+        nearest = { id: grant.grantId, score: -1, fields: [`kind ${grant.kind}`] };
+      continue;
+    }
     let rule: CommandGrantRule;
     try { rule = parseCommandGrantTarget(grant.target); } catch { continue; }
     const fields: string[] = [];

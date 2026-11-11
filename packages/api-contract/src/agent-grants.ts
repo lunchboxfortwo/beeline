@@ -635,7 +635,8 @@ export function grantPresentation(grant: {
   if (grant.kind === 'command') {
     try {
       const rule = parseCommandGrantTarget(grant.target);
-      runs = rule.argv.join(' ');
+      const approved = grant.target.trimStart();
+      runs = approved.startsWith('[') || approved.startsWith('{') ? grant.target : rule.argv.join(' ');
       uses = rule.secrets.join(', ') || undefined;
     } catch { /* Legacy command targets may predate the command grammar. */ }
   }

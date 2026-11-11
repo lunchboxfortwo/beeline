@@ -298,6 +298,9 @@ it('R2: derives the same purpose and fact rows for a card and tray grant', () =>
     ] });
   expect(grantPresentation({ kind: 'command', target: 'legacy && command', reason: 'Legacy request' }))
     .toEqual({ purpose: 'Legacy request', facts: [] });
+  const split = JSON.stringify(['echo', 'hello world']);
+  expect(grantPresentation({ kind: 'command', target: split, purpose: 'Say it' }))
+    .toEqual({ purpose: 'Say it', facts: [{ label: 'Runs', value: split }] });
 });
 
 

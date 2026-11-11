@@ -25,6 +25,14 @@ export function githubHeaders(token?: string): Record<string, string> {
   };
 }
 
+/** A production release that is already running. The answer is busy, not an incident. */
+export class ProductionReleaseBusyError extends Error {
+  constructor() {
+    super('busy');
+    this.name = 'ProductionReleaseBusyError';
+  }
+}
+
 export class GitHubHttpError extends Error {
   constructor(
     label: string,

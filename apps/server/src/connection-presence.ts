@@ -6,6 +6,13 @@ import { LiveHub } from './live.js';
 import { freeAgentReachableSql } from './free-agents.js';
 import { notifyAgentConnection } from './postgres-live.js';
 
+const FULL_ROOM_ID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+
+/** A shortened id must not be cast to uuid; the previous presence room stays. */
+function presenceRoomId(roomId: string | undefined): string | null {
+  return roomId && FULL_ROOM_ID.test(roomId) ? roomId : null;
+}
+
 export const DELIVERY_PICKUP_WINDOW_MS = 90_000;
 /** A server that has not renewed for this long is gone; its connections are released. */
 export const SERVER_LEASE_EXPIRY_MS = 90_000;
@@ -245,7 +252,7 @@ async function writeAgentAnnouncement(
           GREATEST((EXCLUDED.body->>'observedAt')::bigint,COALESCE((live_outputs.body->>'observedAt')::bigint,0)+1)),
           updated_at=clock_timestamp()
       RETURNING agent_id
-    ) SELECT (SELECT body FROM previous) previous FROM written`, [agentId,roomId??null,JSON.stringify(body)]);
+    ) SELECT (SELECT body FROM previous) previous FROM written`, [agentId,presenceRoomId(roomId),JSON.stringify(body)]);
   return {changed:Boolean(written.rowCount),previous:written.rows[0]?.previous??undefined};
 }
 
@@ -320,7 +327,7 @@ export async function recordAgentEvidence(
          ),updated_at=EXCLUDED.updated_at
        RETURNING 1
      ) SELECT 1 FROM written`,
-    [agentId, roomId ?? null, Math.floor(Date.now() / 1000), randomUUID()],
+    [agentId, presenceRoomId(roomId), Math.floor(Date.now() / 1000), randomUUID()],
   );
   // One canonical presence row produces one PostgreSQL notification. Local
   // subscribers still receive the same membership-authorized projection.

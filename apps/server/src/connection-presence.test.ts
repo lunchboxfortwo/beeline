@@ -66,6 +66,11 @@ it('actual authenticated evidence advances the current lifecycle without a timer
   expect(await body()).toMatchObject({lifecycleId:'boot',releaseVersion:'v1.0.0',status:'online'});
   expect(Number((await body())?.observedAt)).toBeGreaterThan(Number(before?.observedAt));
 });
+it('a shortened room id still advances online status',async()=>{
+  await presence.announce(ROOM,AGENT,{lifecycleId:'boot'});
+  await presence.evidence(ROOM.slice(0,8),AGENT);
+  expect(await body()).toMatchObject({status:'online',lifecycleId:'boot'});
+});
 it('evidence merges with a concurrent lifecycle announcement',async()=>{
   await presence.announce(ROOM,AGENT,{lifecycleId:'boot-1'});
   await Promise.all([presence.announce(ROOM,AGENT,{lifecycleId:'boot-2',releaseVersion:'v2.0.0'}),recordAgentEvidence(database,live,ROOM,AGENT)]);

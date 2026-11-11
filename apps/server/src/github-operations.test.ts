@@ -486,6 +486,22 @@ const scope1 = fixtureScope1();
     expect(await readLine()).toBe('PR #1 · all 1 test passed');
   });
 
+  it('a head that already contains current main does not wake a merge conflict', async () => {
+    const { corners, headSha, app } = await scope1.checksFixture();
+    const corner = corners[0]!;
+    const main = 'a'.repeat(40);
+    await scope1.database.query(`UPDATE corner_github_cache SET lifecycle=jsonb_set(lifecycle,'{pr,mergeability}','"dirty"') WHERE corner_id=$1`, [corner]);
+    app.readPullRequest.mockResolvedValue({ number: 1, headSha, url: 'https://github.com/owner/widgets/pull/1', mergeability: 'dirty' });
+    Object.assign(app, {
+      readBranchHead: vi.fn(async () => main),
+      readRepositoryJson: vi.fn(async () => ({ merge_base_commit: { sha: main } })),
+    });
+    const operations = new GitHubOperations(scope1.database, {} as GitHubOAuthClient, app as unknown as GitHubAppClient, 'secret');
+    await operations.refreshStaleMergeability(corner);
+    expect((await scope1.database.query(`SELECT 1 FROM agent_commands WHERE room_id=$1 AND reason='corner_merge_conflict'`, [corner])).rowCount).toBe(0);
+    expect((await scope1.database.query<{ mergeability: string }>(`SELECT lifecycle->'pr'->>'mergeability' mergeability FROM corner_github_cache WHERE corner_id=$1`, [corner])).rows[0]?.mergeability).toBe('clean');
+  });
+
 
   it('CLOSED-1: archived corners cannot merge even with passing checks and a current yes', async () => {
     const { corners, headSha, app } = await scope1.checksFixture();
