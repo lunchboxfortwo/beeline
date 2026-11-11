@@ -452,20 +452,16 @@ export async function serveComputerSession(
       #bar{position:fixed!important;z-index:2;right:12px;bottom:max(12px,env(safe-area-inset-bottom))!important;padding:0!important;background:transparent!important}
       #state{display:none!important}
       body.beeline-embedded #bar{bottom:12px!important}
+      body.beeline-keyboard #screen{flex:none!important;height:var(--beeline-visible-height)!important;max-height:var(--beeline-visible-height)!important;margin-top:var(--beeline-visible-top)!important}
+      body.beeline-keyboard #bar{bottom:auto!important;top:var(--beeline-button-top)!important}
       #focus{width:42px;height:42px;margin:0!important;padding:0;border:1px solid #ffffff44;border-radius:14px;background:#261a2ae8;color:#f6edf4;font-size:0}
       #focus::before{content:'⌨';font-size:20px}
-      body.beeline-remote-login #bar{display:none!important}
       @media(pointer:fine){#bar{display:none!important}}
     </style>`;
     const bridge = `<script>
       const beelineScreen=document.getElementById('screen'),beelineCanvas=document.getElementById('canvas');
       const beelineQuery=new URLSearchParams(location.search),beelinePreview=beelineQuery.has('preview');
       if(beelineQuery.has('embedded'))document.body.classList.add('beeline-embedded');
-      // The shared page already reports navigation. The remote login window
-      // owns its own keyboard control; ordinary browser pages use ours.
-      socket.addEventListener('message',event=>{let message;try{message=JSON.parse(event.data);}catch{return;}
-        if(message.type!=='navigation'||typeof message.url!=='string')return;
-        try{const page=new URL(message.url);document.body.classList.toggle('beeline-remote-login',page.pathname.endsWith('/vnc.html'));}catch{}});
       if(beelinePreview||beelineQuery.has('warm'))document.getElementById('bar').style.display='none';
       let beelineInteractive=!beelineQuery.has('warm');
       function beelineMode(){if(socket.readyState===WebSocket.OPEN)socket.send(JSON.stringify({type:'viewer-mode',interactive:beelineInteractive}));
@@ -485,7 +481,44 @@ export async function serveComputerSession(
         beelineCanvas.style.width=Math.ceil(beelineView.width)+'px';beelineCanvas.style.height=Math.ceil(beelineView.height)+'px';
         beelineCanvas.style.left=Math.round(beelineView.left)+'px';beelineCanvas.style.top=Math.round(beelineView.top)+'px';}
       new MutationObserver(beelineFit).observe(beelineCanvas,{attributes:true,attributeFilter:['width','height']});
-      addEventListener('resize',beelineFit);beelineFit();
+      // Keep the page in the space above the phone keyboard. A tiny viewport
+      // difference is not a keyboard and must not move the closed layout.
+      // Squire's #screen uses flex:1, so a plain height grows back to the
+      // layout viewport. Pin the used box, fit to that box, and put the
+      // keyboard button inside the visible viewport. Closing the keyboard
+      // restores the flex layout and the bottom-anchored button.
+      let beelineSavedZoom=1,beelineKeyboardOpen=false,beelineKeyboardFitted=false;
+      function beelinePlaceKeyboard(open){
+        if(!open){document.body.classList.remove('beeline-keyboard');return;}
+        const vv=window.visualViewport,visible=Math.round(vv.height),origin=Math.round(vv.offsetTop);
+        const button=document.getElementById('focus'),buttonHeight=(button&&button.offsetHeight)||42;
+        const root=document.documentElement;
+        root.style.setProperty('--beeline-visible-height',visible+'px');
+        root.style.setProperty('--beeline-visible-top',origin+'px');
+        root.style.setProperty('--beeline-button-top',Math.max(origin,origin+visible-buttonHeight-12)+'px');
+        document.body.classList.add('beeline-keyboard');
+      }
+      function beelineAboveKeyboard(){
+        if(scrollX||scrollY)scrollTo(0,0);
+        const vv=window.visualViewport,raw=vv?Math.max(0,Math.round(innerHeight-vv.height-vv.offsetTop)):0,inset=raw>=80?raw:0;
+        if(inset>0&&vv){
+          if(!beelineKeyboardOpen){beelineSavedZoom=beelineView.zoom||1;beelineKeyboardOpen=true;beelineKeyboardFitted=false;}
+          beelinePlaceKeyboard(true);
+          const boxChanged=!beelineKeyboardFitted||beelineView.viewHeight!==beelineScreen.clientHeight||beelineView.remoteWidth!==beelineCanvas.width||beelineView.remoteHeight!==beelineCanvas.height;
+          beelineFit();
+          if(boxChanged&&beelineView.minZoom){beelineKeyboardFitted=true;beelineView.zoom=beelineView.minZoom;beelineFit();}
+        }else{
+          if(beelineKeyboardOpen){beelineKeyboardOpen=false;beelineKeyboardFitted=false;beelineView.zoom=beelineSavedZoom;beelinePlaceKeyboard(false);}
+          beelineFit();
+        }
+      }
+      const beelineKeys=document.getElementById('keyboard'),beelineShow=document.getElementById('focus');
+      if(beelineShow&&beelineKeys)beelineShow.onclick=()=>{
+        beelineKeys.style.cssText='position:fixed;left:0;top:0;width:1px;height:1px;margin:0;padding:0;border:0;opacity:0';
+        beelineKeys.focus({preventScroll:true});
+      };
+      if(window.visualViewport){visualViewport.addEventListener('resize',beelineAboveKeyboard);visualViewport.addEventListener('scroll',beelineAboveKeyboard);}
+      addEventListener('resize',beelineAboveKeyboard);beelineAboveKeyboard();
       function beelinePans(dx,dy){return beelineView.zoom>1||(Math.abs(dx)>Math.abs(dy)&&beelineView.width>beelineScreen.clientWidth);}
       // A trackpad pinch arrives as ctrl+wheel. Zoomed in, the wheel pans the page view.
       beelineCanvas.addEventListener('wheel',event=>{if(!event.ctrlKey&&!beelinePans(event.deltaX,event.deltaY))return;
@@ -501,7 +534,7 @@ export async function serveComputerSession(
           if(pointers.size===2){const [a,b]=[...pointers.values()];pinch={distance:Math.hypot(a.x-b.x,a.y-b.y),zoom:beelineView.zoom,
             left:beelineView.left,top:beelineView.top,x:(a.x+b.x)/2-beelineScreen.getBoundingClientRect().left,
             y:(a.y+b.y)/2-beelineScreen.getBoundingClientRect().top};if(drag)drag.moved=true;}
-          beelineCanvas.focus();},true);
+          beelineCanvas.focus({preventScroll:true});},true);
         beelineCanvas.addEventListener('pointermove',event=>{if(event.pointerType!=='touch'||!pointers.has(event.pointerId))return;
           event.preventDefault();event.stopImmediatePropagation();pointers.set(event.pointerId,{x:event.clientX,y:event.clientY});
           if(pinch&&pointers.size>=2){const [a,b]=[...pointers.values()],distance=Math.hypot(a.x-b.x,a.y-b.y),ratio=Math.max(.25,distance/pinch.distance);

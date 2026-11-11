@@ -19,7 +19,7 @@ export function computerViewerHtml(id: string): string {
   #controls{position:absolute;top:env(safe-area-inset-top,12px);right:12px;display:flex;gap:8px}
   button,a{border:1px solid #ffffff44;border-radius:999px;background:#261a2ad9;color:#f6edf4;padding:10px 14px;font:500 13px system-ui,sans-serif;text-decoration:none;cursor:pointer}
   body.embedded #controls{display:none}
-  #keys{position:absolute;opacity:0;width:1px;height:1px;left:0;bottom:0}
+  #keys{position:fixed;opacity:0;width:1px;height:1px;left:0;top:0}
   </style></head><body><div id="stage"><img id="screen" alt="Live browser"></div><div id="ended">Browser session ended</div><input id="keys" autocomplete="off" autocapitalize="off"><div id="controls"><button id="back" aria-label="Close browser">✕</button></div><script>
   const query=new URLSearchParams(location.search);let preview=query.has('preview')||query.has('warm');
   if(query.has('embedded')) document.body.classList.add('embedded');
@@ -81,7 +81,7 @@ export function computerViewerHtml(id: string): string {
         pinch={d:m.d,zoom:view.zoom,left:view.left,top:view.top,x:m.x-stage.getBoundingClientRect().left,y:m.y-stage.getBoundingClientRect().top};
         if(touch)touch.moved=true;}
       return;}
-    keys.focus();cdp('Input.dispatchMouseEvent',{type:'mousePressed',x:p.x,y:p.y,button:'left',clickCount:1});});
+    keys.focus({preventScroll:true});cdp('Input.dispatchMouseEvent',{type:'mousePressed',x:p.x,y:p.y,button:'left',clickCount:1});});
   image.addEventListener('pointermove',event=>{if(!controlling)return;
     if(event.pointerType==='touch'&&pointers.has(event.pointerId)){
       event.preventDefault();pointers.set(event.pointerId,{x:event.clientX,y:event.clientY});
@@ -100,7 +100,7 @@ export function computerViewerHtml(id: string): string {
     if(event.pointerType==='touch'){
       const wasPinch=Boolean(pinch);pointers.delete(event.pointerId);
       if(pointers.size<2)pinch=undefined;
-      if(touch?.id===event.pointerId&&!touch.moved&&!wasPinch){cdp('Input.dispatchMouseEvent',{type:'mousePressed',x:p.x,y:p.y,button:'left',clickCount:1});cdp('Input.dispatchMouseEvent',{type:'mouseReleased',x:p.x,y:p.y,button:'left',clickCount:1});keys.focus();}
+      if(touch?.id===event.pointerId&&!touch.moved&&!wasPinch){cdp('Input.dispatchMouseEvent',{type:'mousePressed',x:p.x,y:p.y,button:'left',clickCount:1});cdp('Input.dispatchMouseEvent',{type:'mouseReleased',x:p.x,y:p.y,button:'left',clickCount:1});keys.focus({preventScroll:true});}
       touch=undefined;
       if(pointers.size===1){const [id,remaining]=[...pointers.entries()][0];touch={id,clientX:remaining.x,clientY:remaining.y,moved:true};}
       return;}
