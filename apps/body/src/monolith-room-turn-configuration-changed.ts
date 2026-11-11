@@ -132,9 +132,6 @@ import { MonolithRoomTurnLoop, WorkspaceRoster, HumanMessage, RoomRepositoryStat
   }
 
 
-  export async function monolithRoomTurnLoopPrepareForForcedUpdateRestart(_ctx: MonolithRoomTurnLoop): Promise<void> {
-    // Ordinary managed updates keep their existing idle/drain behavior.
-  }
 
 
   export function monolithRoomTurnLoopInterruptedTurn(ctx: MonolithRoomTurnLoop): InterruptedTurn | undefined {

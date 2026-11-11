@@ -26,7 +26,7 @@ it('rechecks a promoted channel even when the build identity was already announc
   const update = new ReleaseTransaction({
     // No real install, network, native manager, or update worker participates.
     layout: { libDir: '/unavailable-beeline-test/lib', binDir: '/unavailable-beeline-test/bin', releasesRoot: '/unavailable-beeline-test/releases' },
-    env: {}, prepare, idle: () => true, drain: vi.fn(), interrupt: vi.fn(),
+    env: {}, prepare, idle: () => true,
     handoff: vi.fn(), changed: vi.fn(), failed: vi.fn(),
   });
   update.notify('v0.1.2:next-sha');

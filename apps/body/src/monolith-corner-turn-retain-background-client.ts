@@ -85,10 +85,6 @@ import { MonolithCornerTurnLoop, WorkspaceRoster } from './monolith-corner-turn.
   }
 
 
-  export async function monolithCornerTurnLoopPrepareForForcedUpdateRestart(ctx: MonolithCornerTurnLoop): Promise<void> {
-    ctx.forcedStop = true;
-    ctx.branchSyncController?.abort();
-  }
 
 
   export function monolithCornerTurnLoopInterruptedTurn(ctx: MonolithCornerTurnLoop): InterruptedTurn | undefined {

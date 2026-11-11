@@ -16,7 +16,6 @@ import {
 } from './agent-command.js';
 import { activeAdapterCommand } from './adapter-store.js';
 import type { AgentAccessPolicy } from './access-policy.js';
-import type { ModelUnavailableState } from './model-availability.js';
 import type { ExternalMcpCapability } from './external-mcp-capabilities.js';
 import type { McpServerWire } from './acp.js';
 
@@ -139,8 +138,6 @@ export interface BodyConfig {
    * explicit in-app selection (#223) for this agent.
    */
   modelSelection?: { model?: string; effort?: string };
-  /** Startup catalog validation failed; serve Rooms but never start an ACP turn. */
-  modelUnavailable?: ModelUnavailableState;
   /**
    * Absolute path to a `bwrap` that passed `detectBwrapSandbox`'s self-test at
    * daemon start. Present means every ACP child is spawned inside the mount

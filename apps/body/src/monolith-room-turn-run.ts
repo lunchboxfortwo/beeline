@@ -20,7 +20,7 @@ import { MonolithRoomTurnLoop } from './monolith-room-turn.js';
           ...(ctx.options.config.daemonSourceSha
             ? { sourceSha: ctx.options.config.daemonSourceSha }
             : {}),
-          available: !ctx.options.config.modelUnavailable,
+          available: true,
         },
         onWake: (wake) => {
           ctx.wakeIntake = wake;

@@ -57,6 +57,13 @@ test('the sole warm countdown is pinned to AgentProcesses.workChanged',()=>{
   assert.ok(inspectMachineConnectionSource(file,'class AgentProcesses { extra(){setTimeout(stop,60000)} }').length);
 });
 
+test('the sole update timeout is pinned to ReleaseTransaction.begin',()=>{
+  const file='apps/body/src/managed-update.ts';
+  assert.deepEqual(inspectMachineConnectionSource(file,'class ReleaseTransaction { begin(){setTimeout(abandon,180000)} }'),[]);
+  assert.ok(inspectMachineConnectionSource(file,'class ReleaseTransaction { begin(){setTimeout(abandon,180000);setTimeout(retry,10)} }').length);
+  assert.ok(inspectMachineConnectionSource(file,'class ReleaseTransaction { idleChanged(){setTimeout(retry,180000)} }').length);
+});
+
 
 test('server shutdown sinks follow only an unchanged mechanical owner move',()=>{
   const before='export function createBeelineServer(){ for(const client of webSockets.clients) client.terminate(); webSockets.close(); }';

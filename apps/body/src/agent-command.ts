@@ -34,7 +34,6 @@ interface AgentBehavior {
   fastMode?: boolean;
   modelLaunch?: 'native-args' | 'command';
   hostedModelConfig?: 'model-file' | 'inline-provider';
-  validateHostedModelInSession?: boolean;
   resolveCommandOnStart?: boolean;
   identityLabel?: string;
   cliModelCatalog?: boolean;
@@ -103,7 +102,7 @@ export const AGENT_BEHAVIORS: Readonly<Record<AgentKind, AgentBehavior>> = {
     importedMcp: { format: 'extensions', source: '.config/goose/config.yaml', homeEnv: 'GOOSE_PATH_ROOT', file: 'config/config.yaml' },
   },
   pi: {
-    label: 'Pi', providerKeyStore: 'env', hostedModelConfig: 'model-file', validateHostedModelInSession: true,
+    label: 'Pi', providerKeyStore: 'env', hostedModelConfig: 'model-file',
     importedMcp: { format: 'json', source: '.pi/agent/mcp.json', homeEnv: 'PI_CODING_AGENT_DIR', file: 'mcp.json' },
     session: { processNames: ['pi'], clientPrefix: 'pi', mailEvents: ['poll', 'post-tool-use'], pollText: true },
   },

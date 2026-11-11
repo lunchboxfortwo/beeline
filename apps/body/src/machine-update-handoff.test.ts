@@ -27,7 +27,11 @@ it('exits for a verified idle update without waiting for retained local clients'
   };
   const config = join(root, 'agent/runtime.json');
   const signals = new EventEmitter();
-  const exit = vi.fn();
+  let exited!: () => void;
+  const exitObserved = new Promise<void>(done => { exited = done; });
+  const exit = vi.fn(() => exited());
+  let registered!: () => void;
+  const registration = new Promise<void>(done => { registered = done; });
   const sockets = new Set<WebSocket>();
   const server = new WebSocketServer({ port: 0, host: '127.0.0.1' });
   await once(server, 'listening');
@@ -115,6 +119,7 @@ it('exits for a verified idle update without waiting for retained local clients'
           onOpen: () => {
             connected = true;
             host.established(identity.publicKey);
+            registered();
           },
           onClose: () => {
             connected = false;
@@ -136,10 +141,11 @@ it('exits for a verified idle update without waiting for retained local clients'
     },
   });
   try {
-    await vi.waitFor(() => expect(connected).toBe(true));
+    await registration;
     stageNew = true;
     releaseAvailable!();
-    await vi.waitFor(() => expect(exit).toHaveBeenCalledWith(0));
+    await exitObserved;
+    expect(exit).toHaveBeenCalledWith(0);
     expect(connected).toBe(false);
     expect(cleanupFinished).toBe(false);
     expect(retained.destroyed).toBe(false);
@@ -148,7 +154,7 @@ it('exits for a verified idle update without waiting for retained local clients'
     retained.end('{}');
     await once(retained, 'close');
     signals.emit('SIGTERM');
-    await helper;
+    await (await helper).settled;
     for (const socket of sockets) socket.terminate();
     await new Promise<void>((done) => server.close(() => done()));
     await rm(root, { recursive: true, force: true });
