@@ -332,6 +332,7 @@ export class PhoneService {
     eventSubscriptions?: readonly string[];
 }): Promise<{
     status: 'finished';
+    agentHandle: string;
 } | {
     status: 'not_found' | 'expired';
 }> { return phoneFinishAgentConnectPairing(this, input); }

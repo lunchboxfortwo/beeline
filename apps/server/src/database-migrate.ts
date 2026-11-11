@@ -1,3 +1,4 @@
+import { cleanupConnectHandles } from './migrations/connect-handle-cleanup.js';
 import { DIAGNOSTIC_COMMAND_SCHEMA } from './diagnostics-schema.js';
 import { SQUIRE_MACHINE_SCHEMA } from './squire-machine.js';
 import { backfillSquireMachines } from './squire-machine.js';
@@ -581,6 +582,8 @@ export async function migrateData(database: SqlDatabase): Promise<void> {
     });
     return result;
   };
+  await dataStep('connect handle cleanup', () => workflowBackfillOnce(
+    database, 'connect-handle-cleanup-v1', cleanupConnectHandles));
   await dataStep('departed reviewers', () => workflowBackfillOnce(
     database, 'departed-reviewers-v1', clearDepartedReviewers));
   await dataStep('archived corner holds', () => releaseArchivedCornerHolds(database));

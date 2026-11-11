@@ -145,10 +145,10 @@ export async function finishConnectedAgentPairing(
   workspaceJoined: boolean,
   eventSubscriptions: readonly string[],
   fetchImpl: typeof fetch,
-): Promise<void> {
+): Promise<string | undefined> {
   const normalizedPairingCode = normalizeAgentPairingCode(pairingCode);
   if (!normalizedPairingCode) throw new Error('invalid pairing code');
-  await jsonRequest<{ ok: true }>(
+  const finished = await jsonRequest<{ ok: true; agent_handle?: string }>(
     `${baseUrl}/auth/agent/connect/finish`,
     {
       pairing_code: normalizedPairingCode,
@@ -157,6 +157,7 @@ export async function finishConnectedAgentPairing(
     },
     fetchImpl,
   );
+  return finished.agent_handle;
 }
 
 
@@ -293,73 +294,95 @@ export async function runConnectWizard(
     /\/$/,
     '',
   );
+  const installedRelease = await brassSpinner(
+    'Installing the Beeline daemon…',
+    () => installCurrentRelease(fetchImpl),
+    (release) => `Installed Beeline helper ${release.version}`,
+  );
   const machineInfo = await readMachineId(process.env);
   const claimed = await brassSpinner(
     'Connecting to your Beeline Workspace…',
     () => requestConnectGrant(baseUrl, pairingCode, selection, fetchImpl, machineInfo),
     (connectedGrant) => `Connected to ${connectedGrant.workspace_name}`,
   );
-  // The server seeded this agent's animal, name and soul from its Workspace
-  // roster. Show what to look for in the app, and offer the one rename the
-  // terminal gets before the helper starts under that name.
-  const grant = {
-    ...claimed,
-    agent_name: await confirmSeededName(baseUrl, pairingCode, claimed, fetchImpl),
-  };
-  // Only now is the agent's final name on record: join it into the Workspace's
-  // Rooms and let the "joined" line land under that name, not the seeded one.
-  await finishConnectedAgentPairing(
-    baseUrl,
-    pairingCode,
-    grant.workspace_joined,
-    eventSubscriptions,
-    fetchImpl,
-  );
-  const agentCount = (await findAgentRuntimeConfigPaths()).length + 1;
-  const computeWarning = agentComputeWarning(agentCount);
-  if (computeWarning) clack.log.warn(brass(computeWarning));
-  const installedRelease = await brassSpinner(
-    'Installing the Beeline daemon…',
-    () => installCurrentRelease(fetchImpl),
-    (release) => `Installed Beeline helper ${release.version}`,
-  );
-  const llmEnvFile = await writeProviderEnv(selection, grant.agent_pubkey);
-  const grantPath = resolve(
-    defaultSupervisorRoot(process.env),
-    'beeline',
-    'connect',
-    `grant-${process.pid}-${Date.now()}.json`,
-  );
-  await writePrivateJson(grantPath, {
-    agentSecretKey: grant.agent_secret_key,
-    bodySecretKey: grant.body_secret_key,
-    agentName: grant.agent_name,
-    harness: grant.harness,
-    model: grant.model,
-    // The server echoes back what it stored; the wizard's own answer is the
-    // fallback for a server too old to carry the effort through.
-    ...((grant.effort ?? selection.effort) ? { effort: grant.effort ?? selection.effort } : {}),
-    soul: grant.soul,
-    workspaceId: grant.workspace_id,
-    workspaceName: grant.workspace_name,
-    pairedBy: grant.paired_by,
-    monolithBaseUrl: baseUrl,
-    daemonExchangeToken: grant.daemon_exchange_token,
-    ...(llmEnvFile ? { llmEnvFile } : {}),
-    ...(accessPolicy ? { accessPolicy } : {}),
-  } satisfies DevicePairingGrant);
-  await brassSpinner(
-    'Starting your agent…',
-    () => runInstalledFinish(installedRelease.binary, grantPath),
-    () => `Started ${grant.agent_name}`,
-  );
-  console.log('');
-  console.log(`${brass('Agent')}      ${seededIdentityLine(grant)}`);
-  console.log(`${brass('Workspace')}  ${grant.workspace_name}`);
-  clack.outro(brass('Say hi in the app.'));
+  try {
+    // The server seeded this agent's animal, name and soul from its Workspace
+    // roster. Show what to look for in the app, and offer the one rename the
+    // terminal gets before the helper starts under that name.
+    const grant = {
+      ...claimed,
+      agent_name: await confirmSeededName(baseUrl, pairingCode, claimed, fetchImpl),
+    };
+    const agentCount = (await findAgentRuntimeConfigPaths()).length + 1;
+    const computeWarning = agentComputeWarning(agentCount);
+    if (computeWarning) clack.log.warn(brass(computeWarning));
+    const llmEnvFile = await writeProviderEnv(selection, grant.agent_pubkey);
+    const grantPath = resolve(
+      defaultSupervisorRoot(process.env),
+      'beeline',
+      'connect',
+      `grant-${process.pid}-${Date.now()}.json`,
+    );
+    await writePrivateJson(grantPath, {
+      agentSecretKey: grant.agent_secret_key,
+      bodySecretKey: grant.body_secret_key,
+      agentName: grant.agent_name,
+      harness: grant.harness,
+      model: grant.model,
+      // The server echoes back what it stored; the wizard's own answer is the
+      // fallback for a server too old to carry the effort through.
+      ...((grant.effort ?? selection.effort) ? { effort: grant.effort ?? selection.effort } : {}),
+      soul: grant.soul,
+      workspaceId: grant.workspace_id,
+      workspaceName: grant.workspace_name,
+      pairedBy: grant.paired_by,
+      monolithBaseUrl: baseUrl,
+      daemonExchangeToken: grant.daemon_exchange_token,
+      ...(llmEnvFile ? { llmEnvFile } : {}),
+      ...(accessPolicy ? { accessPolicy } : {}),
+    } satisfies DevicePairingGrant);
+    await brassSpinner(
+      'Starting your agent…',
+      () => runInstalledFinish(installedRelease.binary, grantPath),
+      () => `Started ${grant.agent_name}`,
+    );
+    const assignedHandle = await finishConnectedAgentPairing(
+      baseUrl, pairingCode, grant.workspace_joined, eventSubscriptions, fetchImpl,
+    );
+    console.log('');
+    console.log(`${brass('Agent')}      ${seededIdentityLine(grant)}`);
+    if (assignedHandle) console.log(`${brass('Handle')}     @${assignedHandle}`);
+    console.log(`${brass('Workspace')}  ${grant.workspace_name}`);
+    clack.outro(brass('Say hi in the app.'));
+  } catch (error) {
+    // Covers every failure after claiming, including local writes and helper
+    // startup. The server refuses rollback once this agent has done real work.
+    await fetchImpl(`${baseUrl}/v1/auth/daemon/rollback`, {
+      method: 'POST', headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ exchangeToken: claimed.daemon_exchange_token }),
+    }).catch(() => undefined);
+    throw error;
+  }
 }
 
 
+
+// After a remote claim, cancellation must unwind through the wizard's rollback.
+// Ordinary setup prompts can still exit directly before anything is registered.
+const connectNamePrompts: Pick<ConnectPrompts, 'select' | 'text'> = {
+  async select<T extends string>(input: { message: string; options: Array<{ value: T; label: string; hint?: string }>; initialValue?: T }) {
+    clackPromptOutput();
+    const result = await clack.select<T>(input as clack.SelectOptions<T>);
+    if (clack.isCancel(result)) throw new ConnectFailureError('Connection cancelled.');
+    return result;
+  },
+  async text(input) {
+    const result = await clack.text({ ...input, output: clackPromptOutput(),
+      validate: input.validate ? value => input.validate!(value ?? '') : undefined });
+    if (clack.isCancel(result)) throw new ConnectFailureError('Connection cancelled.');
+    return result;
+  },
+};
 
 /**
  * Print the seeded identity, then two keys: keep it, or rename it here. The
@@ -371,7 +394,7 @@ export async function confirmSeededName(
   pairingCode: string,
   grant: { agent_name: string; agent_face?: string },
   fetchImpl: typeof fetch,
-  prompts: Pick<ConnectPrompts, 'select' | 'text'> = clackPrompts,
+  prompts: Pick<ConnectPrompts, 'select' | 'text'> = connectNamePrompts,
 ): Promise<string> {
   clack.log.info(brass(`Your agent is ${seededIdentityLine(grant)}.`));
   const choice = await prompts.select<'keep' | 'rename'>({
