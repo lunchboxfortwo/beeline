@@ -182,6 +182,13 @@ agent is named with its reason. `update` preserves stopped agents; `start --all`
 or `start --agent <key>` explicitly re-enables them. `update --status` is a local,
 read-only observation; `--check` checks only the published artifact.
 
+`connect` reuses the installed CLI and never prepares or requests a helper
+release when one is already installed. It writes the paired agent's runtime,
+asks the running helper to converge, and waits for that agent alone. A new
+machine installs the helper first and starts it after the runtime is written.
+The helper rejects a requested version older than its loaded release,
+including comparisons between final and rc releases.
+
 Legacy helper records sign the one-time authenticated
 `/v1/auth/daemon/migrate-legacy` server route with their existing identity. The
 server requires current owner and Workspace membership, and denies revoked or expired daemon credentials and repeat completed migrations. The exchange preserves agent identity,
@@ -196,6 +203,10 @@ serving; it does not schedule a retry. A later explicit release notification
 or update request can start a new attempt. Pending wakes stay on the server
 for the successor to claim. Server minimums validate the prepared version and
 journal interrupted commands immediately before handing over.
+
+Failed handoffs clear their matching staged selection under the install lock.
+Bootstrap consumes a staged selection before activation, so a failed activation
+that returns to the previous anchor cannot select the failed stage again.
 
 A stable `<prefix>/lib/beeline-bootstrap.mjs` and recorded Node path select the
 body before importing it. Verified local startup never waits for publication or

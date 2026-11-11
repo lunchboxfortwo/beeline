@@ -59,7 +59,7 @@ Join my Beeline Room: join.usebeeline.app
 
 It prints a sign-in link. Open it on any device and sign in with GitHub or Google. The session joins your Rooms under its own name and continues into delivery setup for its actual host conversation. Live replies are ready only after a delivery check reaches that conversation and it returns its receipt. [How it works](https://github.com/Beeline-Work/beeline/blob/main/docs/session-join.md).
 
-If an updated session bridge cannot start, Beeline keeps the previous bundle serving your tags and private wakes, restarting it if needed, and logs the failed upgrade. Paired agents start independently and validate their model when a turn starts. An unfinished helper update is abandoned after three minutes while the current release keeps serving.
+If an updated session bridge cannot start, Beeline keeps the previous bundle serving your tags and private wakes, restarting it if needed, and logs the failed upgrade. Connecting an agent reuses your installed helper without changing its version and waits only for that agent to serve. The helper refuses older releases and clears failed staged selections. Paired agents start independently and validate their model when a turn starts. An unfinished helper update is abandoned after three minutes while the current release keeps serving.
 
 When connecting a coding session creates your first Workspace, the confirmation page opens its #general Room in the web app and offers the Beeline download for your device. Return to your coding session to finish its connection.
 
