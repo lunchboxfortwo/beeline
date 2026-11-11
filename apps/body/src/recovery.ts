@@ -15,6 +15,7 @@ import {
   beelineInstallLayout,
   prepareLatestRelease,
   readUpdateState,
+  writeUpdateState,
   readInstalledBundleIdentity,
   resolveBundleEntrypoint,
   type BeelineInstallLayout,
@@ -83,10 +84,9 @@ export async function convergeMachine(
           : undefined,
       ),
   );
-  const required = new Set([
-    ...configured.filter((id): id is string => Boolean(id)),
-    ...(options.agentIds ?? []),
-  ]);
+  // Pairing waits for its agent alone; update/start without a selection still
+  // prove every enabled runtime. A sibling's sign-in cannot hold connect open.
+  const required = new Set(options.agentIds ?? configured.filter((id): id is string => Boolean(id)));
   const current = await requestMachine(stateRoot, { operation: 'status' }, () => true, 1000).catch(
     () => undefined,
   );
@@ -97,7 +97,9 @@ export async function convergeMachine(
     await withInstallLock(layout, () => activateRelease(layout, options.releaseId!), {
       waitMs: Math.max(0, deadlineAt - Date.now()),
     });
-  await convergeNativeHelper({
+  // A live helper can pick up one paired runtime directly. Avoid rewriting its
+  // native service from a potentially older connect bundle.
+  if (!hasControl || !options.agentIds) await convergeNativeHelper({
     env: { ...env, BEELINE_LIB_DIR: layout.libDir },
     ...(options.run ? { run: options.run } : {}),
     // A pre-control helper cannot acknowledge this protocol. Its first forward migration replaces it once.
@@ -123,7 +125,7 @@ export async function convergeMachine(
     stateRoot,
     request,
     (status) => {
-      if (status.generation === current?.generation && status.desiredRelease)
+      if (options.releaseId && status.generation === current?.generation && status.desiredRelease)
         expectedRelease = status.desiredRelease;
       if (
         expectedRelease &&
@@ -137,7 +139,7 @@ export async function convergeMachine(
       )
         return false;
       const agents = Object.entries(status.agents).filter(
-        ([id, agent]) => required.has(id) || agent.enabled !== false,
+        ([id, agent]) => required.has(id) || (!options.agentIds && agent.enabled !== false),
       );
       const refused = agents.filter(
         ([, agent]) =>
@@ -180,6 +182,13 @@ export async function bootstrapMachine(env: NodeJS.ProcessEnv = process.env): Pr
   // after registration while Room intake is open.
   const state = await readUpdateState(layout);
   const active = await activeReleaseId(layout);
+  // Consume a staged boot selection once, before activation can fail. If the
+  // native launcher returns to the old anchor, it must not retry that selection.
+  if (state.stagedReleaseId) await withInstallLock(layout, async () => {
+    const current = await readUpdateState(layout);
+    if (current.stagedReleaseId === state.stagedReleaseId)
+      await writeUpdateState(layout, { ...current, stagedReleaseId: undefined });
+  });
   let releaseId: string | undefined;
   for (const id of [state.stagedReleaseId, active]) {
     if (!id || !/^[a-zA-Z0-9][a-zA-Z0-9._-]*$/.test(id)) continue;

@@ -11,6 +11,7 @@ import {
   readUpdateState,
   resolveBundleEntrypoint,
   hostPlatformKey,
+  activateRelease,
 } from './self-update.js';
 import {
   resolveManifestUrl,
@@ -19,7 +20,7 @@ import {
 } from './self-update-manifest.js';
 import { requestMachine } from './machine-control.js';
 import { nativeHelperStatus } from './native-helper.js';
-import { runManagedUpdateWorker } from './managed-update.js';
+import { runManagedUpdateWorker, withInstallLock } from './managed-update.js';
 
 async function main(): Promise<void> {
   process.env.BEELINE_RECOVERY_ENTRY = process.argv[1];
@@ -163,7 +164,6 @@ async function main(): Promise<void> {
     return;
   }
   const stateRoot = process.env.XDG_STATE_HOME || resolve(process.env.HOME || '', '.local/state');
-  let selectedRelease: string | undefined;
   if (command === 'start') {
     for (let i = 1; i < args.length; i++) {
       const arg = args[i]!;
@@ -212,10 +212,12 @@ async function main(): Promise<void> {
     );
     return;
   }
-  if (command === 'connect' && !args.includes('--help') && !args.includes('-h')) {
+  if (command === 'connect' && !args.includes('--help') && !args.includes('-h') &&
+      !(await resolveBundleEntrypoint(layout.libDir))) {
+    // Install only on a new machine. Pairing starts/converges the helper after
+    // writing the new agent's configuration, without selecting a release.
     const target = await prepareMachineRelease(layout, { deadlineAt });
-    await convergeMachine({ layout, releaseId: target.releaseId, deadlineAt });
-    selectedRelease = target.releaseId;
+    await withInstallLock(layout, () => activateRelease(layout, target.releaseId));
   }
   const entry = await resolveBundleEntrypoint(layout.libDir);
   if (!entry) throw new Error('no installed Beeline body; run npx usebeeline connect');
@@ -223,7 +225,6 @@ async function main(): Promise<void> {
     env: {
       ...process.env,
       BEELINE_LIB_DIR: layout.libDir,
-      ...(selectedRelease ? { BEELINE_RECOVERY_SELECTED_RELEASE: selectedRelease } : {}),
     },
     stdio: 'inherit',
   });

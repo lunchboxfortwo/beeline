@@ -6,6 +6,7 @@ import {
   prepareLatestRelease,
   readInstalledBundleIdentity,
   readUpdateState,
+  writeUpdateState,
   type BeelineInstallLayout,
 } from './self-update.js';
 
@@ -20,11 +21,14 @@ export function withInstallLock<T>(
 }
 
 export function versionAtLeast(actual: string, minimum: string): boolean {
-  const parse = (value: string) => /^v?(\d+)\.(\d+)\.(\d+)$/.exec(value)?.slice(1).map(Number);
+  const parse = (value: string) => {
+    const match = /^v?(\d+)\.(\d+)\.(\d+)(?:-rc\.(\d+))?$/.exec(value);
+    return match ? [...match.slice(1, 4).map(Number), match[4] === undefined ? Infinity : Number(match[4])] : undefined;
+  };
   const left = parse(actual),
     right = parse(minimum);
   if (!left || !right) return false;
-  for (let index = 0; index < 3; index++)
+  for (let index = 0; index < 4; index++)
     if (left[index] !== right[index]) return left[index]! > right[index]!;
   return true;
 }
@@ -62,13 +66,28 @@ export class ReleaseTransaction {
     return this.#attempt = { controller, timer };
   }
 
-  private fail(signal: AbortSignal, error: unknown): void {
+  private fail(signal: AbortSignal, error: unknown, releaseId = this.#prepared): void {
     if (this.#attempt?.controller.signal !== signal) return;
     this.dispose();
     this.#prepared = undefined;
     this.#preparing = this.#handingOff = undefined;
     this.options.changed(undefined);
     this.options.failed(error, this.#minimum);
+    if (releaseId) {
+      // A failed/rolled-back handoff must not remain a boot selection. Only
+      // discard this attempt's target: a newer worker may already have staged.
+      const cleanup = withInstallLock(this.options.layout, async () => {
+        const state = await readUpdateState(this.options.layout);
+        if (state.stagedReleaseId === releaseId)
+          await writeUpdateState(this.options.layout, { ...state, stagedReleaseId: undefined,
+            lastCheckResult: 'failed', lastCheckError: String(error) });
+      }).catch(cleanupError => this.options.failed(cleanupError, this.#minimum)).finally(() => {
+        if (this.#preparing !== cleanup) return;
+        this.#preparing = undefined;
+        if (this.#pendingCheck) this.notify();
+      });
+      this.#preparing = cleanup;
+    }
   }
 
   notify(_releaseKey?: string, minimum?: string): void {
@@ -100,11 +119,16 @@ export class ReleaseTransaction {
     if (this.#completed) return;
     const { signal } = this.begin().controller;
     try {
+      const targetLayout = { ...this.options.layout,
+        libDir: resolve(this.options.layout.releasesRoot, releaseId) };
+      const identity = await readInstalledBundleIdentity(targetLayout);
+      const loaded = this.options.loadedRelease ? await readInstalledBundleIdentity({
+        ...this.options.layout, libDir: resolve(this.options.layout.releasesRoot, this.options.loadedRelease),
+      }) : undefined;
+      if (identity?.version && loaded?.version && identity.version !== loaded.version &&
+          versionAtLeast(loaded.version, identity.version) && !versionAtLeast(identity.version, loaded.version))
+        throw new Error(`requested helper ${identity.version} is older than running ${loaded.version}`);
       if (this.#minimum) {
-        const identity = await readInstalledBundleIdentity({
-          ...this.options.layout,
-          libDir: resolve(this.options.layout.releasesRoot, releaseId),
-        });
         if (!identity?.version || !versionAtLeast(identity.version, this.#minimum))
           throw new Error(`published helper ${identity?.version ?? 'unknown'} is below required ${this.#minimum}`);
       }
@@ -118,7 +142,7 @@ export class ReleaseTransaction {
       this.#prepared = releaseId;
       this.options.changed(releaseId);
       this.idleChanged();
-    } catch (error) { this.fail(signal, error); }
+    } catch (error) { this.fail(signal, error, releaseId); }
   }
 
   idleChanged(): void {
