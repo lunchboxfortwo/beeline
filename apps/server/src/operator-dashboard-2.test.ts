@@ -494,7 +494,20 @@ const scope3 = fixtureScope3();
   });
 
 
-  it('shows today on GET /v1/admin/dashboard and leaves yesterday unknown', async () => {
+  it.each([
+    '2026-11-11T00:00:00.000Z', // UTC midnight, still November 10 in Eastern.
+    '2026-11-11T04:59:00.000Z', // Eastern 23:59.
+    '2026-11-11T05:00:00.000Z', // Eastern midnight.
+    '2026-11-11T05:06:00.000Z', // Eastern 00:06, the release failure time.
+  ])('shows today on GET /v1/admin/dashboard and leaves yesterday unknown at %s', async (measuredAt) => {
+    vi.useFakeTimers({ toFake: ['Date'] });
+    vi.setSystemTime(new Date(measuredAt));
+    // The migrated snapshot can predate Eastern midnight. This scenario starts
+    // invite measurement today, independently of when the suite built its template.
+    await rootFixture.db.query(
+      `UPDATE operator_metric_epochs SET started_at=$1 WHERE metric='invite'`,
+      [measuredAt],
+    );
     const human = '1'.repeat(64);
     const internal = '2'.repeat(64);
     const forgotten = '3'.repeat(64);
@@ -517,19 +530,19 @@ const scope3 = fixtureScope3();
       [human, internal, forgotten],
     );
     await rootFixture.db.query(
-      `INSERT INTO invites(token_hash,workspace_id,created_by,expires_at)
-       VALUES('core-http-live',$1,$2,now() + interval '1 day')`,
-      [workspace, human],
+      `INSERT INTO invites(token_hash,workspace_id,created_by,expires_at,created_at)
+       VALUES('core-http-live',$1,$2,$3::timestamptz + interval '1 day',$3)`,
+      [workspace, human, measuredAt],
     );
     await rootFixture.db.query(
       `INSERT INTO invites(token_hash,workspace_id,created_by,expires_at,created_at)
-       VALUES('core-http-null',$1,$2,now() + interval '1 day',NULL)`,
-      [workspace, forgotten],
+       VALUES('core-http-null',$1,$2,$3::timestamptz + interval '1 day',NULL)`,
+      [workspace, forgotten, measuredAt],
     );
     await rootFixture.db.query(
-      `INSERT INTO invites(token_hash,workspace_id,created_by,expires_at)
-       VALUES('core-http-internal',$1,$2,now() + interval '1 day')`,
-      [coreWorkspace, internal],
+      `INSERT INTO invites(token_hash,workspace_id,created_by,expires_at,created_at)
+       VALUES('core-http-internal',$1,$2,$3::timestamptz + interval '1 day',$3)`,
+      [coreWorkspace, internal, measuredAt],
     );
     const response = await get('?platforms=ios');
     expect(response.status).toBe(200);
@@ -537,6 +550,9 @@ const scope3 = fixtureScope3();
     expect(payload.schemaVersion).toBe(1);
     const invites = payload.coreMetrics.invites;
     expect(invites.state).toBe('measured');
+    expect(invites.measuredAt).toBe(measuredAt);
+    expect(invites.data.since).toBe(measuredAt);
+    expect(invites.data.timeZone).toBe('America/New_York');
     expect(payload.coreMetrics.onboarding.state).toBe('measured');
     expect(payload.coreMetrics.ownAgents.state).toBe('measured');
     expect(payload.coreMetrics.repositories.state).toBe('measured');
@@ -555,6 +571,25 @@ const scope3 = fixtureScope3();
     expect(body).not.toContain(forgotten);
     expect(body).not.toContain(secret);
   }, 30_000);
+
+
+  it('keeps the invite epoch day measured when a dashboard read crosses Eastern midnight', async () => {
+    const startedAt = '2026-11-11T04:59:00.000Z'; // November 10 at 23:59 Eastern.
+    vi.useFakeTimers({ toFake: ['Date'] });
+    vi.setSystemTime(new Date('2026-11-11T05:06:00.000Z'));
+    await rootFixture.db.query(
+      `UPDATE operator_metric_epochs SET started_at=$1 WHERE metric='invite'`,
+      [startedAt],
+    );
+    const response = await get('?platforms=ios');
+    expect(response.status).toBe(200);
+    const { coreMetrics: { invites } } = await response.json();
+    expect(invites.state).toBe('measured');
+    expect(invites.data.since).toBe(startedAt);
+    expect(corePoint(invites.data.daily, '2026-11-09').inviters).toBeNull();
+    expect(corePoint(invites.data.daily, '2026-11-10').inviters).toBe(0);
+    expect(corePoint(invites.data.daily, '2026-11-11').inviters).toBe(0);
+  });
 
 
   it('Reproduction CORE-OWN-WEEK: an unmeasured own-agent week stays null on the dashboard', async () => {
