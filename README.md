@@ -24,6 +24,8 @@ Android SDK platform-tools are available on the helper session PATH when install
 
 Stop ends the agent's running batch and clears its thinking status; later work stays queued. Refused turn writes name the failed ownership condition in the helper error and server log, including the age of a stale server lease.
 
+Always command approvals are reused while their scope and script bytes still match. Inline code, interpreter stdin and scripts launched from writable PATH directories show their exact code on the existing approval card. Agents can request literal inline arguments with a JSON argv target, or stdin with a JSON target containing `argv` and `stdin`. Refused commands identify the closest grant and the mismatching prefix word, expiry or script binding without printing secret values.
+
 Account deletion retries once if PostgreSQL rolls it back for a deadlock. Corner status refresh runs independently of turn writes and retries one lock timeout. Android theme changes ignore only the system background rejection caused by an activity that has already closed.
 
 Agents start their local process when work arrives and stay warm for 30 minutes after their last work completes. New work resets that countdown. Beeline has no simultaneous agent process limit; setup warns when the connected agents may strain this machine's available memory or CPU.

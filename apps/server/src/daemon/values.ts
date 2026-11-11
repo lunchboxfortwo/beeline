@@ -173,13 +173,26 @@ export function validateGrantScript(
   rule: CommandGrantRule,
   script: unknown,
 ): CommandGrantScript | undefined {
-  const argument = interpreterScriptArgument(rule.argv);
-  if (script === undefined || script === null) return undefined;
+  // Only the helper can resolve PATH. A shadowed interpreter or wrapper is
+  // itself the script, rather than the operand its name would normally imply.
+  const argument = isCommandGrantScript(script) && script.path === rule.argv[0]
+    ? { path: script.path, inline: undefined, stdin: undefined }
+    : interpreterScriptArgument(rule.argv, true);
+  if (rule.stdin !== undefined && !argument?.stdin) throw new Error('grant stdin is invalid: only interpreter stdin code is supported');
+  if (script === undefined || script === null) {
+    if (argument?.inline !== undefined || argument?.stdin)
+      throw new Error('grant script is required: show the exact inline or stdin code');
+    return undefined;
+  }
   if (!argument) throw new Error('grant script is only for an interpreter command');
   if (!isCommandGrantScript(script)) throw new Error('grant script is invalid');
   if (script.path !== argument.path) {
     throw new Error(`grant script must be the command's script argument (${argument.path})`);
   }
+  if (argument.inline !== undefined && script.contents !== argument.inline)
+    throw new Error('grant script is invalid: inline code does not match the command');
+  if (argument.stdin && script.contents !== rule.stdin)
+    throw new Error('grant script is invalid: stdin code does not match the command');
   // The hash is the binding, so the server re-derives it rather than trusting
   // the number it was handed: the bytes on the card and the bytes the runner
   // will check must be the same bytes.

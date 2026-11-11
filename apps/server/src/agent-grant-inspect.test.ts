@@ -97,6 +97,18 @@ describe('listAgentGrantRequests', () => {
     expect(listed.grants).toEqual([]);
   });
 
+  it('keeps expired command grants inspectable for refusal diagnostics without authorizing them', async () => {
+    const grantId = '10000000-0000-4000-8000-000000000099';
+    await db.query(`INSERT INTO agent_grants(id,agent_id,workspace_id,kind,target,reason,requested_by,room_id,status,expires_at)
+      VALUES($1,$2,$3,'command','echo expired','diagnostic proof',$4,$5,'approved',now()-interval '1 second')`,
+      [grantId, AGENT, WORKSPACE, OWNER, ROOM]);
+    const history = await daemon.execute('listAgentGrantRequests', { roomId: ROOM }, AGENT);
+    expect(history.grants.find(grant => grant.grantId === grantId)?.expiresAt).toBeLessThan(Date.now() / 1000);
+    const live = await daemon.execute('listAgentGrants', { roomId: ROOM }, AGENT);
+    expect(live.grants.some(grant => grant.grantId === grantId)).toBe(false);
+    await db.query('DELETE FROM agent_grants WHERE id=$1', [grantId]);
+  });
+
   it('keeps pending decisions separate across agents in different Rooms of one Workspace', async () => {
     await db.query(`INSERT INTO rooms(id,workspace_id,name) VALUES($1,$2,'Other')`, [OTHER_ROOM, WORKSPACE]);
     await db.query(

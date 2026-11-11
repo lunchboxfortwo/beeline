@@ -555,6 +555,16 @@ const fixture = monolithFixture();
     expect(live.grants.find((entry) => entry.grantId === interpreter.grantId)!.script).toEqual(
       expect.objectContaining({ path: 'fix.py', contents: script }),
     );
+    // R-ALWAYS-1: the same bytes after Always reuse the original grant.
+    const binding = { path: 'fix.py', contents: script, bytes: Buffer.byteLength(script),
+      sha256: createHash('sha256').update(script).digest('hex') };
+    const repeated = await ask('python3 fix.py', { script: binding });
+    expect(repeated).toMatchObject({ grantId: interpreter.grantId, status: 'approved', auto: true });
+    expect(repeated.messageId).toBeUndefined();
+    const changed = script + '# changed\n';
+    expect(await ask('python3 fix.py', { script: { ...binding, contents: changed,
+      bytes: Buffer.byteLength(changed), sha256: createHash('sha256').update(changed).digest('hex') } }))
+      .toMatchObject({ status: 'pending', auto: false });
 
     // The hash is the binding, so contents that do not hash to it are refused.
     const lying = await fixture.daemonOperation('requestAgentGrant', {

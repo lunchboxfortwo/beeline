@@ -1,7 +1,7 @@
 import { type SecretResolver, operatorSecretResolver, storeOperatorSecret } from "./grant-runner.js";
 import { pathGrantAllowsWrite } from '@beeline/api-contract/agent-grants';
-import { type CommandGrantRule, type CommandGrantScript, interpreterScriptArgument, GRANT_SCRIPT_MAX_BYTES, GRANT_SCRIPT_MAX_LINES, grantScriptTooLongMessage, isRequestableAgentGrantKind, REQUESTABLE_AGENT_GRANT_KINDS, AGENT_GRANT_TARGET_MAX_LENGTH, parseCommandGrantTarget, AGENT_GRANT_REASON_MAX_LENGTH, HOST_EMULATOR_TARGET, AGENT_GRANT_VERBS, type AgentGrantEscalation, formatGrantEscalationReason, isSharedAssetCategory, SHARED_ASSET_CATEGORIES, COMMAND_SECRET_NAME } from "@beeline/api-contract/agent-grants";
-import { resolveGrantCommand, resolveGrantScriptExecutable, isNativeGrantExecutable, installedGrantExecutable } from "./grant-script.js";
+import { type CommandGrantRule, type CommandGrantScript, GRANT_SCRIPT_MAX_BYTES, GRANT_SCRIPT_MAX_LINES, grantScriptTooLongMessage, isRequestableAgentGrantKind, REQUESTABLE_AGENT_GRANT_KINDS, AGENT_GRANT_TARGET_MAX_LENGTH, parseCommandGrantTarget, AGENT_GRANT_REASON_MAX_LENGTH, HOST_EMULATOR_TARGET, AGENT_GRANT_VERBS, type AgentGrantEscalation, formatGrantEscalationReason, isSharedAssetCategory, SHARED_ASSET_CATEGORIES, COMMAND_SECRET_NAME } from "@beeline/api-contract/agent-grants";
+import { grantScriptArgument, resolveGrantCommand, resolveGrantScriptExecutable, isNativeGrantExecutable, installedGrantExecutable } from "./grant-script.js";
 import { readFileSync } from "node:fs";
 import { createHash } from "node:crypto";
 import { hostEmulatorSerials } from "./machine-control.js";
@@ -77,13 +77,15 @@ export function readGrantScript(
   const roots = deps.scriptRoots ?? [];
   if (!roots.length) return undefined;
   const context = resolveGrantCommand(rule.argv, roots[0]!, deps.scriptEnv ?? process.env);
-  const argument = interpreterScriptArgument(context.argv, true);
+  const argument = grantScriptArgument(context);
   if (!argument) return undefined;
+  if (rule.stdin !== undefined && !argument.stdin) throw new Error('stdin is only supported when the interpreter reads its approved code from stdin.');
+  if (argument.stdin && rule.stdin === undefined) throw new Error('Interpreter stdin needs exact bytes: use a JSON target with argv and stdin, or save the input as a script file.');
   if (installedGrantExecutable(argument, context.cwd, context.env)) return undefined;
   const candidatePath = resolveGrantScriptExecutable(argument, context.cwd, context.env);
   const executable = argument.direct ? candidatePath : undefined;
-  if (argument.direct && !executable) return undefined;
-  if (argument.direct) {
+  if (argument.direct && !executable) throw new Error('Command executable cannot be resolved for script approval.');
+  if (argument.direct && argument.path.includes('/')) {
     // Native executable paths do not need a script card, including binaries
     // outside the attachment roots. Script paths still meet the root check below.
     let candidate: Buffer;
@@ -92,25 +94,27 @@ export function readGrantScript(
     } catch { return undefined; }
     if (isNativeGrantExecutable(candidate)) return undefined;
   }
-  let resolved: string;
-  try {
-    resolved = resolveAttachPath(roots, candidatePath ?? argument.path);
-  } catch (error) {
-    // A script that exists but sits outside the checkout and the scratch cannot
-    // be put in front of a human, so it is not approvable from here.
-    const message = error instanceof Error ? error.message : String(error);
-    if (message.includes('outside')) {
-      throw new Error(
-        `${argument.path} is outside your checkout and scratch directory, so its contents ` +
-          'cannot be shown on the approval card. Move the script into your checkout or scratch, ' +
-          'or open a corner with open_corner and make the change there.',
-      );
+  let resolved: string = '';
+  if (argument.inline === undefined && !argument.stdin) {
+    try {
+      resolved = argument.direct && !argument.path.includes('/') ? candidatePath! : resolveAttachPath(roots, candidatePath ?? argument.path);
+    } catch (error) {
+      // A script that exists but sits outside the checkout and the scratch cannot
+      // be put in front of a human, so it is not approvable from here.
+      const message = error instanceof Error ? error.message : String(error);
+      if (message.includes('outside')) {
+        throw new Error(
+          `${argument.path} is outside your checkout and scratch directory, so its contents ` +
+            'cannot be shown on the approval card. Move the script into your checkout or scratch, ' +
+            'or open a corner with open_corner and make the change there.',
+        );
+      }
+      return undefined;
     }
-    return undefined;
   }
-  const bytes = (deps.readScript ?? readFileSync)(resolved);
+  const bytes = argument.stdin ? Buffer.from(rule.stdin!) : argument.inline === undefined ? (deps.readScript ?? readFileSync)(resolved) : Buffer.from(argument.inline);
   // Direct native executables retain ordinary command grant behavior.
-  if (argument.direct && isNativeGrantExecutable(bytes)) return undefined;
+  if (argument.direct && argument.path.includes('/') && isNativeGrantExecutable(bytes)) return undefined;
   const contents = bytes.toString('utf8');
   const lines = contents.split('\n').length;
   if (bytes.byteLength > GRANT_SCRIPT_MAX_BYTES || lines > GRANT_SCRIPT_MAX_LINES) {
@@ -155,7 +159,7 @@ export async function requestGrant(
   const rule = kind === 'command' ? parseCommandGrantTarget(target) : undefined;
   const script = rule ? readGrantScript(rule, deps) : undefined;
   const commandContext = rule ? resolveGrantCommand(rule.argv, deps.scriptRoots?.[0] ?? '.', deps.scriptEnv ?? process.env) : undefined;
-  const commandArgument = commandContext ? interpreterScriptArgument(commandContext.argv, true) : undefined;
+  const commandArgument = commandContext ? grantScriptArgument(commandContext) : undefined;
   const installedPath = commandArgument && commandContext
     ? installedGrantExecutable(commandArgument, commandContext.cwd, commandContext.env) : undefined;
   const reason = stringArg(args, 'reason')?.trim();

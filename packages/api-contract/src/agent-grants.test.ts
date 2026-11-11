@@ -299,3 +299,24 @@ it('R2: derives the same purpose and fact rows for a card and tray grant', () =>
   expect(grantPresentation({ kind: 'command', target: 'legacy && command', reason: 'Legacy request' }))
     .toEqual({ purpose: 'Legacy request', facts: [] });
 });
+
+
+it('R-SCRIPT-1 preserves literal inline and stdin bytes and identifies interpreter input modes', () => {
+  const code = 'console.log("approved")';
+  expect(parseCommandGrantTarget(JSON.stringify(['node', '-e', code])).argv).toEqual(['node', '-e', code]);
+  expect(parseCommandGrantTarget(JSON.stringify({ argv: ['bash', '-s'], stdin: 'echo approved' })).stdin).toBe('echo approved');
+  for (const argv of [['bash', '-lc', code], ['python3', '-c', code], ['python3.12', '-c', code], ['node', '--eval', code], ['node', '--eval=' + code], ['php', '-r', code]]) {
+    expect(interpreterScriptArgument(argv)).toMatchObject({ path: '<inline>', inline: code });
+  }
+  expect(() => interpreterScriptArgument(['node', '--require', 'bootstrap', 'task.js'])).toThrow('code-loading options');
+  for (const option of ['--import=data:text/javascript,console.log(1)', '--require=bootstrap', '-rbootstrap', '--loader=bootstrap']) {
+    expect(() => interpreterScriptArgument(['node', '-e', code, option])).toThrow('code-loading options');
+    expect(() => interpreterScriptArgument(['node', option, '-e', code])).toThrow('code-loading options');
+  }
+  expect(interpreterScriptArgument(['bash', '-s'])).toMatchObject({ path: '<stdin>', stdin: true });
+  expect(interpreterScriptArgument(['bash', '-s', '-c', code])).toMatchObject({ path: '<inline>', inline: code });
+  expect(interpreterScriptArgument(['python3'])).toMatchObject({ path: '<stdin>', stdin: true });
+  expect(interpreterScriptArgument(['env', '-S', 'bash task.sh'], true)).toMatchObject({ path: 'task.sh' });
+  expect(() => interpreterScriptArgument(['node', '-e', code, '-e', 'unapproved'])).toThrow('Multiple interpreter eval');
+  expect(() => parseCommandGrantTarget('bash -c echo; touch other')).toThrow('shell metacharacters');
+});

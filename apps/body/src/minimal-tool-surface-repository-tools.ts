@@ -70,6 +70,7 @@ export const RUNNER_TOOL: ToolDefinition = {
     "type": "object",
     "required": ["argv"],
     "properties": {
+      "stdin": { "type": "string", "maxLength": 4096, "description": "Exact input bytes approved with a JSON command target containing argv and stdin." },
       "argv": {
         "type": "array",
         "minItems": 1,

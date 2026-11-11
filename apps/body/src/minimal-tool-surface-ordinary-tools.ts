@@ -588,7 +588,7 @@ export const ORDINARY_TOOLS: ToolDefinition[] = [
           "type": "string",
           "minLength": 1,
           "maxLength": 512,
-          "description": "What you need: a repository, a path, a host, a secret name, a device, the exact command line (with optional `--with SECRET_NAME` suffixes), or — for kind mcp — the exact name of a host MCP server as spelled in the operator harness config."
+          "description": "What you need: a path, host, secret name, device, or command line (optional --with SECRET_NAME suffixes). For inline code use a JSON argv array; for interpreter stdin use a JSON object with argv and stdin. MCP targets name the host server."
         },
         "touches": { "type": "string", "minLength": 1, "maxLength": 240, "description": "Files or resources this command touches, in plain language. Omit when unknown." },
         "capabilities": { "type": "string", "minLength": 1, "maxLength": 240, "description": "What this command can do, for example Delete files. Omit when unknown; never invent a scope." },

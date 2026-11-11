@@ -1,6 +1,6 @@
-import { COMMAND_WRAPPERS } from '@beeline/api-contract/agent-grants';
-import { accessSync, constants, statSync } from 'node:fs';
-import { resolve } from 'node:path';
+import { interpreterScriptArgument, COMMAND_WRAPPERS } from '@beeline/api-contract/agent-grants';
+import { accessSync, constants, statSync, realpathSync } from 'node:fs';
+import { resolve, dirname } from 'node:path';
 
 /** Resolve GNU env options without changing the argv sent to the child. */
 export function resolveGrantCommand(input: readonly string[], cwd: string, env: NodeJS.ProcessEnv): {
@@ -14,6 +14,8 @@ export function resolveGrantCommand(input: readonly string[], cwd: string, env: 
   const optional = ['block-signal', 'default-signal', 'ignore-signal'];
   const names = [...noValue, ...required, ...optional];
   while (COMMAND_WRAPPERS.has(argv[head]?.split('/').pop() ?? '')) {
+    const executable = argv[head]!;
+    if (resolveGrantExecutable(executable, cwd, result) && !trustedGrantExecutable(executable, cwd, result)) break;
     const wrapper = argv[head++]!.split('/').pop();
     if (wrapper !== 'env') {
       // Preserve the contract's existing traversal of other command wrappers.
@@ -100,10 +102,29 @@ function resolveGrantExecutable(path: string, cwd: string, env: NodeJS.ProcessEn
   return undefined;
 }
 
-/** Bare PATH tools are installed commands; explicit script files keep byte binding. */
+/** Only a root-owned executable in an unmodifiable root-owned tree is installed. */
 export function installedGrantExecutable(argument: { path: string; direct?: true }, cwd: string, env: NodeJS.ProcessEnv): string | undefined {
-  return argument.direct && !argument.path.includes('/')
-    ? resolveGrantExecutable(argument.path, cwd, env) : undefined;
+  if (!argument.direct || argument.path.includes('/')) return undefined;
+  return trustedGrantExecutable(argument.path, cwd, env);
+}
+
+function trustedGrantExecutable(path: string, cwd: string, env: NodeJS.ProcessEnv): string | undefined {
+  const candidate = resolveGrantExecutable(path, cwd, env);
+  if (!candidate) return undefined;
+  const trustedTree = (path: string): boolean => {
+    for (;;) {
+      const info = statSync(path);
+      // A sandbox user namespace may present host root as the overflow UID.
+      // In either view the agent must neither own nor be able to modify it.
+      if (info.uid === process.getuid?.() || (info.mode & 0o022)) return false;
+      try { accessSync(path, constants.W_OK); return false; } catch { /* Not writable. */ }
+      if (path === dirname(path)) return true;
+      path = dirname(path);
+    }
+  };
+  try {
+    return trustedTree(candidate) && trustedTree(realpathSync(candidate)) ? candidate : undefined;
+  } catch { return undefined; }
 }
 
 /** Native executable headers; other direct files may use the ENOEXEC shell fallback. */
@@ -125,4 +146,14 @@ export function resolveGrantScriptExecutable(
   env: NodeJS.ProcessEnv,
 ): string | undefined {
   return argument.direct ? resolveGrantExecutable(argument.path, cwd, env) : resolve(cwd, argument.path);
+}
+
+/** Classify the resolved executable before trusting interpreter or wrapper names. */
+export function grantScriptArgument(context: ReturnType<typeof resolveGrantCommand>): ReturnType<typeof interpreterScriptArgument> {
+  const path = context.argv[0];
+  if (path && resolveGrantExecutable(path, context.cwd, context.env) &&
+      !trustedGrantExecutable(path, context.cwd, context.env)) {
+    return { index: 0, path, direct: true };
+  }
+  return interpreterScriptArgument(context.argv, true);
 }

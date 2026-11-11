@@ -1,5 +1,5 @@
 import { waitForPathRemoval } from './filesystem-change.js';
-import { resolveGrantCommand, isNativeGrantExecutable, resolveGrantScriptExecutable } from './grant-script.js';
+import { grantScriptArgument, resolveGrantCommand, isNativeGrantExecutable, resolveGrantScriptExecutable, installedGrantExecutable } from './grant-script.js';
 import { pathGrantAllowsWrite } from '@beeline/api-contract/agent-grants';
 /**
  * The command-kind grant runner (Agent Grants, slice 2).
@@ -60,7 +60,6 @@ import {
   commandGrantEscalationsBeyondRule,
   commandGrantMatches,
   formatGrantEscalationReason,
-  interpreterScriptArgument,
   parseCommandGrantTarget,
   type CommandGrantRule,
 } from '@beeline/api-contract/agent-grants';
@@ -358,7 +357,7 @@ export function validateGrantArgv(value: unknown): string[] {
   if (value.length > ARGV_MAX_WORDS) throw new Error(`argv exceeds ${ARGV_MAX_WORDS} words`);
   return value.map((word) => {
     if (typeof word !== 'string' || !word) throw new Error('argv words must be non-empty strings');
-    if (word.length > ARGV_WORD_MAX_LENGTH || /[\0\r\n]/.test(word)) {
+    if (word.length > ARGV_WORD_MAX_LENGTH || /[\0\r]/.test(word)) {
       throw new Error('argv words must be single-line and bounded');
     }
     return word;
@@ -391,6 +390,27 @@ function capOutput(value: string, cap: number): string {
   return `${bytes.subarray(0, half).toString('utf8')}\n…[${bytes.length - cap} bytes omitted]…\n${bytes
     .subarray(bytes.length - half)
     .toString('utf8')}`;
+}
+
+/** Name a rule and mismatch positions without echoing argument or secret values. */
+function closestCommandGrant(grants: readonly Pick<LiveGrant, 'kind' | 'target' | 'grantId' | 'workspaceId' | 'expiresAt' | 'status'>[], workspaceId: string, argv: readonly string[]): string {
+  let nearest: { id: string; score: number; fields: string[] } | undefined;
+  for (const grant of grants) {
+    if (grant.kind !== 'command') continue;
+    let rule: CommandGrantRule;
+    try { rule = parseCommandGrantTarget(grant.target); } catch { continue; }
+    const fields: string[] = [];
+    let score = 0;
+    rule.argv.forEach((word, index) => {
+      if (word === argv[index]) score += 1;
+      else fields.push(`prefix word (${index + 1})`);
+    });
+    if (grant.workspaceId !== workspaceId) fields.push('workspace');
+    if (grant.expiresAt && grant.expiresAt <= Date.now() / 1000) fields.push('expiry');
+    if (grant.status !== 'approved' && grant.status !== 'once') fields.push(`status (${grant.status})`);
+    if (!nearest || score > nearest.score) nearest = { id: grant.grantId, score, fields };
+  }
+  return nearest ? ` Closest grant ${nearest.id}: ${nearest.fields.join(', ') || 'not live'} does not match.` : ' No live command grants are available on this host; check expiry or revocation with request_grant action=list.';
 }
 
 function scrubSecrets(value: string, secrets: ReadonlyMap<string, string>): string {
@@ -428,11 +448,14 @@ export class GrantCommandRunner {
     this.rooms.delete(roomId);
   }
 
-  async run(input: { roomId: unknown; argv: unknown }): Promise<GrantRunResult> {
+  async run(input: { roomId: unknown; argv: unknown; stdin?: unknown }): Promise<GrantRunResult> {
     if (typeof input.roomId !== 'string' || !input.roomId) throw new Error('roomId is required');
     const room = this.rooms.get(input.roomId);
     if (!room) throw new Error('this daemon is not serving that Room');
     const argv = validateGrantArgv(input.argv);
+    if (input.stdin !== undefined && (typeof input.stdin !== 'string' || Buffer.byteLength(input.stdin) > 4096 || input.stdin.includes('\0')))
+      throw new Error('stdin must be bounded text');
+    const stdin = input.stdin as string | undefined;
     const turn = room.turn();
     if (!turn?.requestId || !turn.generationId) throw new Error('command requires an active turn');
     const live = await this.options.api.execute('listTurnAgentGrants', {
@@ -440,10 +463,29 @@ export class GrantCommandRunner {
       requestId: turn.requestId,
       generationId: turn.generationId,
     });
-    const match = matchCommandGrant(live.grants, room.workspaceId, argv);
+    const policy = room.writePolicy();
+    const checkEnv = { ...(this.options.env ?? process.env), ...policy.toolEnv };
+    let match: ReturnType<typeof matchCommandGrant>;
+    let bindingFailure: Error | undefined;
+    // A newer legacy or broad grant must not shadow an approval whose bytes match.
+    for (const candidate of live.grants) {
+      const possible = matchCommandGrant([candidate], room.workspaceId, argv);
+      if (!possible) continue;
+      if (commandGrantEscalationsBeyondRule(possible.rule, argv).length) {
+        bindingFailure ??= new Error(`Closest grant ${candidate.grantId}: extra prefix words name a credential or environment file; this run needs its own approval.`);
+        continue;
+      }
+      try { await this.checkScriptBinding(candidate, room.cwd, checkEnv, argv, stdin); }
+      catch (error) { bindingFailure ??= error as Error; continue; }
+      match = possible;
+      break;
+    }
     if (!match) {
+      if (bindingFailure) throw bindingFailure;
+      const history = await this.options.api.execute('listAgentGrantRequests', { agentId: this.options.agentId, roomId: input.roomId });
+      const nearest = closestCommandGrant(history.grants ?? live.grants, room.workspaceId, argv);
       throw new Error(
-        `no approved command grant matches: ${argv.join(' ')}. Call request_grant(${JSON.stringify({ action: 'request', kind: 'command', target: argv.join(' '), reason: 'Run the blocked command', purpose: 'Complete the blocked host operation' })}).`,
+        `no approved command grant matches.${nearest} Check the named mismatch before asking again with request_grant kind=command for this argv.`,
       );
     }
     const { grant, rule } = match;
@@ -458,8 +500,7 @@ export class GrantCommandRunner {
       );
     }
     // Use the same surface policy for the entire run.
-    const policy = room.writePolicy();
-    await this.checkScriptBinding(grant, scriptCandidates(room.cwd, argv, { ...(this.options.env ?? process.env), ...policy.toolEnv }), argv);
+    await this.checkScriptBinding(grant, room.cwd, checkEnv, argv, stdin);
     const secrets = new Map<string, string>();
     for (const name of rule.secrets) {
       const value = await this.resolveSecret(name);
@@ -495,7 +536,7 @@ export class GrantCommandRunner {
           live.grants.filter(entry => entry.kind === 'path' && entry.status === 'approved' && entry.target.startsWith('/'))
             .map(entry => ({ path: entry.target, writable: pathGrantAllowsWrite(entry.capabilities) })));
     // Re-check after secret resolution and Once consumption, immediately before exec.
-    await this.checkScriptBinding(grant, scriptCandidates(room.cwd, argv, env), argv);
+    await this.checkScriptBinding(grant, room.cwd, env, argv, stdin);
     const outcome = await new Promise<{
       exitCode: number | null;
       signal?: string;
@@ -530,6 +571,7 @@ export class GrantCommandRunner {
           });
         },
       );
+      child.stdin?.end(stdin);
     });
     // The record says what happened: a refused write is the Room boundary doing
     // its job, and the agent is told where the work belongs instead.
@@ -612,33 +654,38 @@ export class GrantCommandRunner {
    */
   private async checkScriptBinding(
     grant: LiveGrant,
-    candidates: readonly string[],
+    cwd: string,
+    env: NodeJS.ProcessEnv,
     argv: readonly string[],
+    stdin?: string,
   ): Promise<void> {
-    argv = resolveGrantCommand(argv, '.', {}).argv;
-    const argument = interpreterScriptArgument(argv, true);
+    const context = resolveGrantCommand(argv, cwd, env);
+    const argument = grantScriptArgument(context);
     if (!argument) return;
-    if (argument.direct && !argument.path.includes('/') && candidates.length && !grant.script) return;
-    let bytes: Buffer | undefined;
+    const note = ` Closest grant ${grant.grantId}:`;
+    if (stdin !== undefined && !argument.stdin) throw new Error(`${note} stdin is only supported when the interpreter reads its approved code from stdin.`);
+    if (argument.stdin && stdin === undefined) throw new Error(`${note} stdin bytes are unavailable; save them as a script file or approve exact stdin code.`);
+    if (installedGrantExecutable(argument, context.cwd, context.env) && !grant.script) return;
+    const candidates = scriptCandidates(cwd, argv, env);
+    let bytes: Buffer | undefined = argument.stdin ? Buffer.from(stdin!) : argument.inline === undefined ? undefined : Buffer.from(argument.inline);
     for (const candidate of candidates) {
       bytes = await readFile(candidate).catch(() => undefined);
       if (bytes) break;
     }
     const script = grant.script;
     if (!bytes) {
-      if (script) throw new Error(`${argument.path} cannot be read. Ask with request_grant kind=command again.`);
-      return;
+      throw new Error(`${note} script cannot be read at execution cwd ${context.cwd}; check cwd and script path. Ask with request_grant kind=command again.`);
     }
-    if (!script && argument.direct && isNativeGrantExecutable(bytes)) return;
+    if (!script && argument.direct && argument.path.includes('/') && isNativeGrantExecutable(bytes)) return;
     if (!script || script.path !== argument.path) {
       throw new Error(
-        `${argument.path} is a script no human has read: this grant was approved without it. ` +
+        `${note} script path or binding does not match; ${argument.path} is a script no human has read under this grant. ` +
           'Ask with request_grant kind=command so the card carries what the command runs.',
       );
     }
     if (createHash('sha256').update(bytes).digest('hex') !== script.sha256) {
       throw new Error(
-        `${argument.path} changed after it was approved, so the approval no longer covers it. ` +
+        `${note} script hash does not match for ${argument.path} at execution cwd ${context.cwd}; it changed after approval or cwd resolves a different file. ` +
           'Ask with request_grant kind=command again so a human reads what runs now.',
       );
     }
@@ -654,8 +701,9 @@ function scriptCandidates(
   env: NodeJS.ProcessEnv,
 ): string[] {
   const context = resolveGrantCommand(argv, cwd, env);
-  const argument = interpreterScriptArgument(context.argv, true);
+  const argument = grantScriptArgument(context);
   if (!argument) return [];
+  if (argument.inline !== undefined || argument.stdin) return [];
   const path = resolveGrantScriptExecutable(argument, context.cwd, context.env);
   return path ? [path] : [];
 }
@@ -755,8 +803,9 @@ export class GrantRunnerServer {
       const body = JSON.parse(Buffer.concat(chunks).toString('utf8')) as {
         roomId?: unknown;
         argv?: unknown;
+        stdin?: unknown;
       };
-      send(200, await this.runner.run({ roomId: body.roomId, argv: body.argv }));
+      send(200, await this.runner.run({ roomId: body.roomId, argv: body.argv, stdin: body.stdin }));
     } catch (error) {
       send(400, { error: error instanceof Error ? error.message : String(error) });
     }

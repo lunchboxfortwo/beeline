@@ -8,7 +8,91 @@ import { agentGrantAutoApproves, parseCommandGrantTarget } from '@beeline/api-co
 import { requestGrant, readGrantScript } from './read-only-mcp-agent-grant-deps.js';
 import { sessionGrantedResources } from './room-session.js';
 import type { BodyConfig } from './config.js';
+import { installedGrantExecutable } from './grant-script.js';
 import { GrantCommandRunner } from './grant-runner.js';
+
+it.each([
+  ['bash', '-c', 'printf approved'],
+  ['python3', '-c', 'print("approved")'],
+  ['node', '-e', 'console.log("approved")'],
+  ['bash', '-c', 'python3 <<\'PY\'\nprint("approved")\nPY'],
+])('R-SCRIPT-1 exact inline bytes for %s require approval and run repeatedly', async (...argv: string[]) => {
+  const root = fixture();
+  const deps = { roomId: 'room', scriptRoots: [root], scriptEnv: { PATH: '/usr/bin:/bin' }, execute: async () => ({}) };
+  // setup-node can point /usr/bin/node into a runner-writable tool cache.
+  // That executable must be refused, not treated as an immutable interpreter.
+  if (argv[0] === 'node' && !installedGrantExecutable({ path: 'node', direct: true }, root, deps.scriptEnv)) {
+    expect(() => readGrantScript(parseCommandGrantTarget(JSON.stringify(argv)), deps)).toThrow('too long');
+    return;
+  }
+  const script = readGrantScript(parseCommandGrantTarget(JSON.stringify(argv)), deps);
+  expect(script?.contents).toBe(argv[2]);
+  const grants = [{ grantId: 'inline', workspaceId: 'workspace', kind: 'command', target: JSON.stringify(argv), status: 'approved', requestedBy: 'owner' }];
+  const runner = new GrantCommandRunner({ agentId: 'agent', env: { PATH: '/usr/bin:/bin', HOME: root },
+    api: { execute: async (op: string) => op === 'listTurnAgentGrants' ? { grants } : {} } as never });
+  runner.register('room', { workspaceId: 'workspace', cwd: root, turn: () => ({ requestId: 'request', generationId: 'generation' }), writePolicy: () => ({ surface: 'corner' }) });
+  await expect(runner.run({ roomId: 'room', argv })).rejects.toThrow('Closest grant inline');
+  Object.assign(grants[0]!, { script });
+  if (argv[0] === 'node') {
+    await expect(runner.run({ roomId: 'room', argv: [...argv, '--import=data:text/javascript,console.log("unreviewed")'] }))
+      .rejects.toThrow('code-loading options');
+  }
+  for (let repeat = 0; repeat < 2; repeat++) {
+    const result = await runner.run({ roomId: 'room', argv });
+    expect(result.exitCode).toBe(0); expect(result.output).toContain('approved');
+  }
+});
+
+it.each(['task', 'python3', 'node', 'env', 'timeout'])('R-SCRIPT-1 writable PATH %s scripts bind their bytes and a stale broad rule cannot hide a valid Always approval', async (name) => {
+  const root = fixture(); const path = resolve(root, name);
+  writeFileSync(path, '#!/bin/sh\nprintf approved', { mode: 0o755 });
+  const script = readGrantScript(parseCommandGrantTarget(name + ' --version'), { roomId: 'room', scriptRoots: [root], scriptEnv: { PATH: root }, execute: async () => ({}) });
+  expect(script?.contents).toContain('printf approved');
+  const grant = { grantId: 'standing', workspaceId: 'workspace', kind: 'command', target: name, status: 'approved', requestedBy: 'owner', script };
+  const grants = [{ ...grant, grantId: 'legacy', script: undefined }, grant];
+  const runner = new GrantCommandRunner({ agentId: 'agent', env: { PATH: `${root}:/usr/bin:/bin`, HOME: root },
+    api: { execute: async (op: string) => op === 'listTurnAgentGrants' ? { grants } : {} } as never });
+  runner.register('room', { workspaceId: 'workspace', cwd: root, turn: () => ({ requestId: 'request', generationId: 'generation' }), writePolicy: () => ({ surface: 'corner' }) });
+  grants.splice(1, 1);
+  await expect(runner.run({ roomId: 'room', argv: [name, '--version'] })).rejects.toThrow('script path or binding');
+  grants.push(grant);
+  expect((await runner.run({ roomId: 'room', argv: [name, '--version'] })).grantId).toBe('standing');
+  writeFileSync(path, '#!/bin/sh\nprintf changed');
+  await expect(runner.run({ roomId: 'room', argv: [name, '--version'] })).rejects.toThrow(/Closest grant.*script/);
+  grants.splice(0, 1);
+  await expect(runner.run({ roomId: 'room', argv: [name, '--version'] })).rejects.toThrow('script hash does not match');
+  await expect(runner.run({ roomId: 'room', argv: ['different', 'private-value'] })).rejects.toThrow('prefix word (1)');
+  expect(readGrantScript(parseCommandGrantTarget('echo approved'), { roomId: 'room', scriptRoots: [root], scriptEnv: { PATH: '/usr/bin:/bin' }, execute: async () => ({}) })).toBeUndefined();
+});
+
+it('R-GRANT-REFUSAL names an expired closest grant without echoing private argument values', async () => {
+  const root = fixture();
+  const runner = new GrantCommandRunner({ agentId: 'agent', api: { execute: async (op: string) => op === 'listAgentGrantRequests' ? { grants: [
+    { grantId: 'expired-rule', workspaceId: 'workspace', kind: 'command', target: 'echo private-argument', status: 'approved', expiresAt: 1 },
+  ] } : { grants: [] } } as never });
+  runner.register('room', { workspaceId: 'workspace', cwd: root, turn: () => ({ requestId: 'request', generationId: 'generation' }), writePolicy: () => ({ surface: 'corner' }) });
+  try { await runner.run({ roomId: 'room', argv: ['echo', 'different'] }); throw new Error('expected refusal'); }
+  catch (error) {
+    expect(String(error)).toContain('Closest grant expired-rule');
+    expect(String(error)).toContain('prefix word (2)'); expect(String(error)).toContain('expiry');
+    expect(String(error)).not.toContain('private-argument');
+  }
+});
+
+it('R-SCRIPT-1 stdin is shown and byte-bound, while missing and changed input refuse', async () => {
+  const root = fixture(); const argv = ['bash', '-s']; const stdin = 'printf approved';
+  const target = JSON.stringify({ argv, stdin });
+  const deps = { roomId: 'room', scriptRoots: [root], scriptEnv: { PATH: '/usr/bin:/bin' }, execute: async () => ({}) };
+  expect(() => readGrantScript(parseCommandGrantTarget('bash -s'), deps)).toThrow('exact bytes');
+  const script = readGrantScript(parseCommandGrantTarget(target), deps);
+  expect(script?.contents).toBe(stdin);
+  const runner = new GrantCommandRunner({ agentId: 'agent', env: { PATH: '/usr/bin:/bin', HOME: root },
+    api: { execute: async (op: string) => op === 'listTurnAgentGrants' ? { grants: [{ grantId: 'stdin', workspaceId: 'workspace', kind: 'command', target, status: 'approved', requestedBy: 'owner', script }] } : {} } as never });
+  runner.register('room', { workspaceId: 'workspace', cwd: root, turn: () => ({ requestId: 'request', generationId: 'generation' }), writePolicy: () => ({ surface: 'corner' }) });
+  expect((await runner.run({ roomId: 'room', argv, stdin })).output).toBe('approved');
+  await expect(runner.run({ roomId: 'room', argv })).rejects.toThrow('stdin bytes are unavailable');
+  await expect(runner.run({ roomId: 'room', argv, stdin: 'printf changed' })).rejects.toThrow('script hash does not match');
+});
 
 const roots: string[] = [];
 const children: ChildProcess[] = [];
@@ -62,16 +146,13 @@ it.each(['/tmp', '/var/tmp'])('R2 a write path grant under %s retains its capabi
   expect(existsSync(resolve(target, 'written'))).toBe(true);
 });
 
-it('R2 installed PATH tools need no script card while interpreter files remain bound', async () => {
+it('R2 writable PATH tools require readable script cards while interpreter files remain bound', async () => {
   const root = fixture(); const bin = resolve(root, 'bin'); mkdirSync(bin);
   writeFileSync(resolve(bin, 'pnpm'), '#!/bin/sh\n' + '# installed tool\n'.repeat(150), { mode: 0o755 });
   writeFileSync(resolve(root, 'task.js'), 'console.log("read me")');
   const deps = { roomId: 'room', scriptRoots: [root], scriptEnv: { PATH: bin },
-    execute: async (_name: string, input: Record<string, unknown>) => {
-      expect(input.script).toBeUndefined(); expect(input.touches).toBe(resolve(bin, 'pnpm'));
-      return { auto: true, grantId: 'tool' };
-    } };
-  expect(await requestGrant({ kind: 'command', target: 'pnpm build', reason: 'Build', purpose: 'Build project' }, deps)).toContain('approved: run pnpm build');
+    execute: async () => { throw new Error('oversized script must not create an ask'); } };
+  await expect(requestGrant({ kind: 'command', target: 'pnpm build', reason: 'Build', purpose: 'Build project' }, deps)).rejects.toThrow('too long');
   expect(readGrantScript(parseCommandGrantTarget('node task.js'), deps)?.contents).toBe('console.log("read me")');
   expect(() => readGrantScript(parseCommandGrantTarget('./bin/pnpm build'), deps)).toThrow('too long');
 });

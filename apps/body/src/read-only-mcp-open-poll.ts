@@ -48,7 +48,7 @@ export async function openPoll(
 
 export interface GrantRunDeps {
   roomId: string;
-  run: (input: { roomId: string; argv: string[] }) => Promise<JsonObject>;
+  run: (input: { roomId: string; argv: string[]; stdin?: string }) => Promise<JsonObject>;
 }
 
 
@@ -67,7 +67,8 @@ export async function runGrantedCommand(
   ) {
     throw new Error('argv must be a non-empty array of words');
   }
-  const result = await deps.run({ roomId: deps.roomId, argv: argv as string[] });
+  if (args.stdin !== undefined && typeof args.stdin !== 'string') throw new Error('stdin must be text');
+  const result = await deps.run({ roomId: deps.roomId, argv: argv as string[], ...(typeof args.stdin === 'string' ? { stdin: args.stdin } : {}) });
   const grantId = typeof result.grantId === 'string' ? result.grantId : 'unknown';
   const verdict =
     result.sandboxFailure === true

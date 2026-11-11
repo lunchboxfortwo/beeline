@@ -1,4 +1,4 @@
-import { agentGrantAutoApproves, HOST_EMULATOR_TARGET } from '@beeline/api-contract/agent-grants';
+import { agentGrantAutoApproves, HOST_EMULATOR_TARGET, commandGrantMatches, commandGrantEscalationsBeyondRule } from '@beeline/api-contract/agent-grants';
 import { resourceRequester } from '../resource-requester.js';
 import { cornerReviewerSql } from '../corner-reviewer.js';
 import { normalizeAgentAsk } from '../tray-approval-ask.js';
@@ -105,6 +105,23 @@ import { daemonWriteResult } from './corner-messages.js';
     if (!context) throw new Error('agent not found');
     const source = await daemonApprovalSource(ctx, 'grant-request');
     const requesterRow = await daemonGrantRequester(ctx);
+    // Re-requesting a standing command permission must not create another card.
+    // Use the live authorization query so expiry, revocation and owner changes
+    // retain precisely the same authority as execution.
+    if (rule && !requireOwnerApproval) {
+      const live = await daemonListAgentGrants(ctx, agentId, input.roomId);
+      for (const grant of live.grants) {
+        if (grant.kind !== 'command' || grant.status !== 'approved') continue;
+        let approved: CommandGrantRule;
+        try { approved = parseCommandGrantTarget(grant.target); } catch { continue; }
+        if (!commandGrantMatches(approved, rule.argv) ||
+            commandGrantEscalationsBeyondRule(approved, rule.argv).length ||
+            approved.secrets.length !== rule.secrets.length ||
+            approved.secrets.some(name => !rule!.secrets.includes(name))) continue;
+        if (script ? grant.script?.path !== script.path || grant.script.sha256 !== script.sha256 : Boolean(grant.script)) continue;
+        return { grantId: grant.grantId, status: 'approved' as const, auto: true, messageId: undefined };
+      }
+    }
     const connectionInstall = kind === 'mcp' && target.startsWith('connection-install:');
     const appOwner = (target.startsWith('app:') || connectionInstall) && input.appId
       ? (await ctx.database.query<{ id: string; name: string; handle: string | null;
@@ -480,6 +497,7 @@ import { daemonWriteResult } from './corner-messages.js';
            AND ${cornerReviewerSql()}=$1
        )) AND g.superseded_at IS NULL
          AND ((g.status IN ('pending','approved','once') AND (g.expires_at IS NULL OR g.expires_at>now()))
+           OR (g.kind='command' AND g.agent_id=$1 AND g.status IN ('approved','once','revoked','denied'))
            OR (g.kind='host' AND g.target=$3 AND g.status IN ('denied','revoked')))
          AND ($2::uuid IS NULL OR g.workspace_id=(SELECT workspace_id FROM rooms WHERE id=$2))
        ORDER BY g.created_at DESC,g.id`,

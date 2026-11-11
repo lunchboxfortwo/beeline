@@ -94,6 +94,7 @@ const SHELL_METACHARACTERS = /[;&|<>$`\\'"(){}\n\r\t*?[\]~#!]/;
 export const COMMAND_SECRET_NAME = /^[A-Z][A-Z0-9_]{0,63}$/;
 
 export type CommandGrantRule = {
+  readonly stdin?: string;
   /** The approved argv prefix, shell-word split on single spaces. */
   readonly argv: readonly string[];
   /** Secret names the rule names with `--with NAME`. */
@@ -108,6 +109,20 @@ export type CommandGrantRule = {
 export function parseCommandGrantTarget(target: string): CommandGrantRule {
   if (typeof target !== 'string' || !target.trim()) {
     throw new Error('command target is required');
+  }
+  // A JSON argv preserves inline code as one literal argument. It is never
+  // evaluated by a shell; the legacy single-space grammar remains unchanged.
+  if (target.startsWith('[') || target.startsWith('{')) {
+    const parsed = JSON.parse(target);
+    const argv: unknown = Array.isArray(parsed) ? parsed : parsed.argv;
+    if (!Array.isArray(argv) || !argv.length || argv.length > 256 ||
+        argv.some(word => typeof word !== 'string' || !word || word.length > 4096 || /[\0\r]/.test(word))) {
+      throw new Error('command target must be a bounded JSON argv array');
+    }
+    const stdin = Array.isArray(parsed) ? undefined : parsed.stdin;
+    if (stdin !== undefined && (typeof stdin !== 'string' || stdin.length > 4096 || /\0/.test(stdin)))
+      throw new Error('command stdin must be bounded text');
+    return { argv, secrets: [], ...(stdin !== undefined ? { stdin } : {}) };
   }
   if (target !== target.trim() || /\s{2,}/.test(target)) {
     throw new Error('command target must be one line with single spaces');
@@ -503,7 +518,7 @@ export function grantScriptTooLongMessage(path: string, bytes: number, lines: nu
 export function interpreterScriptArgument(
   argv: readonly string[],
   includePathCommands = false,
-): { index: number; path: string; direct?: true } | undefined {
+): { index: number; path: string; direct?: true; inline?: string; stdin?: true } | undefined {
   // Step over `env FOO=1 …`, `sudo …`, `timeout 30 …`: the interpreter is what
   // matters, and a wrapper must not be a way around the binding.
   const skippable = (word: string) =>
@@ -517,6 +532,14 @@ export function interpreterScriptArgument(
       while (head < argv.length - 1) {
         const word = argv[head]!;
         if (word === '--') { head += 1; break; }
+        if (word === '-S' || word === '--split-string' || word.startsWith('--split-string=') || word.startsWith('-S')) {
+          const split = word === '-S' || word === '--split-string' ? argv[head + 1]
+            : word.startsWith('--split-string=') ? word.slice('--split-string='.length) : word.slice(2);
+          if (split === undefined || /[^a-zA-Z0-9_./:=,+% @-]/.test(split))
+            throw new Error('Cannot safely resolve env wrapper options: unsupported split string.');
+          const remaining = argv.slice(head + (word === '-S' || word === '--split-string' ? 2 : 1));
+          return interpreterScriptArgument([...split.trim().split(/ +/).filter(Boolean), ...remaining], includePathCommands);
+        }
         if (['-u', '--unset', '-C', '--chdir', '-a', '--argv0'].includes(word)) {
           head += 2;
         } else if (word.startsWith('-') || /^[A-Za-z_][A-Za-z0-9_]*=/.test(word)) {
@@ -528,18 +551,53 @@ export function interpreterScriptArgument(
       while (head < argv.length - 1 && skippable(argv[head]!)) head += 1;
     }
   }
-  if (!INTERPRETER_COMMANDS.has(commandBasename(argv[head] ?? ''))) {
+  const executableName = commandBasename(argv[head] ?? '');
+  if (!INTERPRETER_COMMANDS.has(executableName) && !/^(?:python|pypy|ruby|perl|php|lua|node)(?:\d+(?:\.\d+)*)$/.test(executableName)) {
     // Explicit executable paths may be scripts too. Callers inspect the bytes
     // to distinguish native executables from scripts and ENOEXEC shell text.
     const path = argv[head];
     return path && (includePathCommands || path.includes('/')) ? { index: head, path, direct: true } : undefined;
   }
+  // Code-loading options can execute before or after the visible eval body.
+  // Refuse them anywhere, including after the first body or script operand.
+  if (/^node(?:\d+(?:\.\d+)*)?$/.test(executableName) &&
+      argv.slice(head + 1).some(word => /^(?:-r.*|--(?:require|import|loader|experimental-loader|experimental-import|experimental-policy|policy-integrity|env-file|env-file-if-exists)(?:=.*)?)$/.test(word))) {
+    throw new Error('Interpreter code-loading options need an explicit script file showing all code.');
+  }
+  let readsStdin = false;
+  const inlineArgument = (index: number, inline: string) => {
+    // Some runtimes concatenate repeated evals; others execute the last one.
+    // A prefix approval over the first body must never license a later body.
+    if (argv.slice(index + 1).some(word => /^(?:-[cep](?:.*)?|--(?:eval|print)(?:=.*)?|-Command|-command)$/.test(word)))
+      throw new Error('Multiple interpreter eval options need an explicit script file showing all code.');
+    return { index, path: '<inline>', inline };
+  };
   for (let index = head + 1; index < argv.length; index += 1) {
     const word = argv[index]!;
+    if (word === '--') {
+      const path = argv[index + 1];
+      return path && !readsStdin ? { index: index + 1, path } : { index, path: '<stdin>', stdin: true };
+    }
+    if (word === '-') return { index, path: '<stdin>', stdin: true };
+    if (word === '-s') { readsStdin = true; continue; }
+    if (['-c', '-e', '-p', '--eval', '--print', '-Command', '-command'].includes(word) ||
+        (word === '-r' && /^php(?:\d+(?:\.\d+)*)?$/.test(executableName)) ||
+        (/^-[a-zA-Z]*c$/.test(word) && /^(?:ba|da|z|k|a)?sh$/.test(commandBasename(argv[head]!)))) {
+      const inline = argv[index + 1];
+      return inline === undefined ? { index, path: '<stdin>', stdin: true }
+        : inlineArgument(index + 1, inline);
+    }
+    const attached = word.match(/^(?:--(?:eval|print)=|-[ce])(.+)$/);
+    if (attached) return inlineArgument(index, attached[1]!);
+    // Runtime options with operands must not mistake the operand for a script.
+    if (['-r', '--require', '--import', '--loader', '--experimental-loader', '-W', '-X'].includes(word)) { index += 1; continue; }
+    if (word === '-m') throw new Error('Interpreter module execution needs an explicit script file for approval.');
     if (word.startsWith('-')) continue;
+    if (readsStdin) return { index, path: '<stdin>', stdin: true };
     return { index, path: word };
   }
-  return undefined;
+  if (argv.slice(head + 1).some(word => ['-V', '--version', '-h', '--help'].includes(word))) return undefined;
+  return { index: head, path: '<stdin>', stdin: true };
 }
 
 /** Existing Android emulator access on the host adb server requires human consent. */
