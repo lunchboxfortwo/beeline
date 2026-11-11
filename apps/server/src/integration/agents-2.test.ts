@@ -1,3 +1,4 @@
+import { agentInvitationPickerGuide } from '@beeline/api-contract/agent-invitation-guide';
 import { createHash } from 'node:crypto';
 import { describe, expect, it } from 'vitest';
 import { CORNER_BRIEF_SPEC_MAX_LENGTH } from '@beeline/api-contract/daemon';
@@ -403,6 +404,7 @@ const fixture = monolithFixture();
     expect(await pairing.json()).toEqual({
       code: expect.stringMatching(/^[0-9A-F]{8}-[0-9A-F]{8}$/),
       expiresAt: expect.any(Number),
+      invitationGuide: agentInvitationPickerGuide(),
     });
     expect(
       (

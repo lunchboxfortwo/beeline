@@ -7,6 +7,7 @@ import { PgliteDatabase, migratedDatabase } from './test-support.js';
 import { FREE_AGENT_CONNECT_GUIDE, freeAgentConfigFromEnv, freeAgentInstructions } from './free-agents.js';
 import { recordAgentConnectedAfterNudge } from './free-agent-warning.js';
 import { PhoneService } from './phone-service.js';
+import { AGENT_INVITATION_PATHS, AGENT_INVITATION_PROMPT } from '@beeline/api-contract/agent-invitation-guide';
 
 const OWNER = 'a'.repeat(64), AGENT = 'b'.repeat(64), OTHER = 'c'.repeat(64);
 const WORKSPACE = '11111111-1111-4111-8111-111111111111';
@@ -68,7 +69,7 @@ describe('historical free agent nudge conversions', () => {
   });
 });
 
-it('pins trigger limits and the guide to the real Add agent command', async () => {
+it('keeps the real Add agent command on demand without computer-only or daily-nudge prompt restrictions', async () => {
   // Compile the pure mobile helper without loading Expo's tsconfig in server-only CI.
   const source = readFileSync(new URL('../../mobile/sources/buzz/agent-pairing-command.ts', import.meta.url), 'utf8');
   const pairing = {} as { agentPairingCommand: (code: string) => string };
@@ -76,7 +77,9 @@ it('pins trigger limits and the guide to the real Add agent command', async () =
     { exports: pairing }, { timeout: 1000 });
   const config = freeAgentConfigFromEnv({ BEELINE_FREE_AGENT_SEAL_KEY: 'seal', FLY_FREE_AGENT_IMAGE: 'image' })!;
   const instructions = freeAgentInstructions('Soul', 'Fern', config);
-  expect(instructions).toContain(pairing.agentPairingCommand('<code>'));
+  expect(AGENT_INVITATION_PATHS.helper).toContain(pairing.agentPairingCommand('<code>'));
+  expect(instructions).toContain(AGENT_INVITATION_PROMPT);
   expect(instructions).not.toContain('turn limit');
-  for (const text of ['Members -> Add agent', 'At most one unsolicited nudge per UTC day', 'When explicitly asked, help without this daily restriction', 'own files, apps, logins or local repository', 'check your remaining allowance', 'Normal conversation is not a trigger', 'Claude Code, Codex or OpenCode', 'always-on machine', 'Never create, retrieve, request, repeat or post a pairing code', 'online without confirmation']) expect(instructions).toContain(text);
+  expect(instructions).not.toContain('At most one unsolicited nudge');
+  for (const text of ['check your remaining allowance', 'device, assistant and plan', 'Never create, retrieve, request, repeat or post a pairing code', 'Confirm a tagged reply']) expect(instructions).toContain(text);
 });

@@ -42,6 +42,8 @@ The transcript scroll thumb stays still while idle rows remeasure or native anch
 
 ## Install
 
+Adding an agent depends on its app, device and account plan. Ask a Beeline agent for the current invitation guide: chat apps use an OAuth custom connector, an existing coding session can join directly, and a helper-managed agent needs a computer. The guide distinguishes phone setup from computer setup and automatic replies from on-demand access. Connecting a tool alone does not prove that an agent can receive tags.
+
 ```sh
 npx usebeeline connect
 ```
@@ -57,7 +59,7 @@ Already in a Claude Code, Codex, OpenCode, Pi, Antigravity, Gemini CLI, Hermes o
 Join my Beeline Room: join.usebeeline.app
 ```
 
-It prints a sign-in link. Open it on any device and sign in with GitHub or Google. The session joins your Rooms under its own name and continues into delivery setup for its actual host conversation. Live replies are ready only after a delivery check reaches that conversation and it returns its receipt. [How it works](https://github.com/Beeline-Work/beeline/blob/main/docs/session-join.md).
+It prints a sign-in link. Open it on any device and sign in with GitHub or Google. The session joins your Rooms under its own name. Codex, Claude Code and Antigravity can receive automatic wakes once their local receiver returns its delivery receipt. Pi, OpenCode, Hermes, ZCode, Gemini CLI and Grok CLI reply on demand; new tags do not wake those sessions. Run `npx -y usebeeline@latest join --help` (or `-h`) for usage without signing in. If a local receiver fails, run join again in the same session and check that its computer can create and run the receiver; opening the join website cannot fix that local failure. [How it works](https://github.com/Beeline-Work/beeline/blob/main/docs/session-join.md).
 
 If an updated session bridge cannot start, Beeline keeps the previous bundle serving your tags and private wakes, restarting it if needed, and logs the failed upgrade. Connecting an agent reuses your installed helper without changing its version and waits only for that agent to serve. The helper refuses older releases and clears failed staged selections. Paired agents start independently and validate their model when a turn starts. Helper update preparation and handoff each time out after three minutes; a prepared release stays staged while agents are busy and takes over at the next idle moment or restart. `beeline update --force` interrupts active sessions to hand off immediately.
 

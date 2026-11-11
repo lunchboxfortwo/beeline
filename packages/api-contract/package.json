@@ -9,6 +9,11 @@
       "import": "./dist/mobile-minimum.js",
       "default": "./dist/mobile-minimum.js"
     },
+    "./agent-invitation-guide": {
+      "types": "./dist/agent-invitation-guide.d.ts",
+      "import": "./dist/agent-invitation-guide.js",
+      "default": "./dist/agent-invitation-guide.js"
+    },
     "./phone": {
       "types": "./dist/phone.d.ts",
       "import": "./dist/phone.js",

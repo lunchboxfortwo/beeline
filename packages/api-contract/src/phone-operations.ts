@@ -701,7 +701,14 @@ export type InviteTokenResult = InviteTokenInput & {
 /** `roomId` only names the chat in the email; the invite itself is to the Workspace. */
 export type InviteByEmailInput = WorkspaceInput & { readonly roomId?: string; readonly email: string };
 export type PairingCodeInput = { readonly code: string };
-export type PairingCodeResult = PairingCodeInput & { readonly expiresAt: number };
+export interface AgentInvitationPickerGuide {
+  readonly lines: Readonly<Record<string, string>>;
+  readonly other: string;
+}
+export type PairingCodeResult = PairingCodeInput & {
+  readonly expiresAt: number;
+  readonly invitationGuide?: AgentInvitationPickerGuide;
+};
 export type UpdateAgentSoulInput = WorkspaceAgentInput & {
   readonly name: string;
   readonly instructions: string;

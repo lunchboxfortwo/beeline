@@ -618,7 +618,7 @@ export const ORDINARY_TOOLS: ToolDefinition[] = [
   },
   {
     "name": "connect",
-    "description": "mode discover searches integrations; status silently reads readiness; ensure connects/reconnects through the approved route. Setup never grants use authority. Never show secrets/sign-in links. Linked-repository writes use the Beeline GitHub App; personal GitHub serves lookups and person-scoped actions. Report exact denials; never fall back from App to personal for linked-repository writes or retry person-scoped actions as App. Also advertises optional first-party app_tool capabilities.",
+    "description": "mode discover searches integrations; status silently reads readiness; ensure connects/reconnects through the approved route. For Beeline product or agent invitations, ensure with service=assistant name or Beeline connector and reason=device, app and plan returns current guidance. Setup never grants use authority. Never show secrets/sign-in links. Linked-repository writes use the Beeline GitHub App; personal GitHub serves lookups and person-scoped actions. Report exact denials; never fall back from App to personal for linked-repository writes or retry person-scoped actions as App. Also advertises optional first-party app_tool capabilities.",
     "inputSchema": {
       "type": "object",
       "properties": {

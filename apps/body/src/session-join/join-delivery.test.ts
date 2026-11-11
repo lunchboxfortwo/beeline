@@ -1,10 +1,11 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
-import { mkdtempSync, mkdirSync, rmSync } from 'node:fs';
+import { mkdtempSync, mkdirSync, readdirSync, rmSync } from 'node:fs';
 import { join } from 'node:path';
 import { deliver, renderWake, acceptMemberDelivery } from './bridge.js';
 import { antigravityOnce } from './pull-apps.js';
 import { queueInbox, readState, takeInbox, updateState, type JoinedSession } from './store.js';
-import { findOwnSession } from './command.js';
+import * as SessionAgents from './agents.js';
+import { findOwnSession, runSessionCommand } from './command.js';
 
 const root = join(process.cwd(), '.beeline-proof');
 const folders: string[] = [];
@@ -34,12 +35,30 @@ afterEach(() => {
 });
 
 describe('JOIN-DELIVERY local hosts', () => {
+  it.each(['--help', '-h'])('join %s prints usage before host discovery, network or state writes', async flag => {
+    const dir = scratch();
+    const log = vi.spyOn(console, 'log').mockImplementation(() => {});
+    const detect = vi.spyOn(SessionAgents, 'detectAgent').mockImplementation(() => { throw new Error('Help must not discover a host'); });
+    const fetcher = vi.spyOn(globalThis, 'fetch');
+    await runSessionCommand(['join', flag], { HOME: dir, XDG_CONFIG_HOME: dir, XDG_STATE_HOME: dir });
+    expect(log).toHaveBeenCalledWith('Usage: usebeeline join [--name <name>] [--server <url>] [--host <host>] [--conversation <id>]\nJoin from the running coding session; approve the printed sign-in link on any device.\nHeadless Grok: usebeeline join --host grok --name my-grok\nOptions: --help, -h  Show this help without signing in.');
+    expect(detect).not.toHaveBeenCalled();
+    expect(fetcher).not.toHaveBeenCalled();
+    expect(readdirSync(dir)).toEqual([]);
+  });
   it('uses a host-reported Codex thread when discovery has no matching process', () => {
     const found = findOwnSession(
       { BEELINE_SESSION_AGENT: 'codex', CODEX_THREAD_ID: 'host-reported-thread' },
       scratch(),
     );
     expect(found.sessionId).toBe('host-reported-thread');
+  });
+  it('names every supported host and the headless Grok alternative when no session is detected', () => {
+    vi.spyOn(SessionAgents, 'detectAgent').mockReturnValue(undefined);
+    let message = '';
+    try { findOwnSession({}, scratch()); } catch (error) { message = (error as Error).message; }
+    for (const host of SessionAgents.AGENTS) expect(message).toContain(SessionAgents.agentLabel(host));
+    expect(message).toContain('join --host grok --name my-grok');
   });
   it('recognizes headless Grok for the link-based join without a native OAuth TUI', () => {
     expect(

@@ -520,6 +520,15 @@ describe('prompt assembly guards', () => {
     }
   });
 
+  it('replays free and CLI agents with their actual connection capabilities', () => {
+    const content = (freeAgent: boolean) => beelineManagedSkills('test', { isReviewer: false, freeAgent })
+      .find(skill => skill.name === 'beeline-connecting-services')!.content;
+    expect(content(true)).toContain('Lightpanda');
+    expect(content(true)).not.toContain('operate_drive');
+    expect(content(false)).toContain('operate_drive');
+    for (const free of [true, false]) expect(content(free)).toContain('For adding agents, call connect');
+  });
+
 
   it('gives every surface the newer-human-instruction rule the skill used to carry', () => {
     const skill = beelineManagedSkills('test', { isReviewer: true })

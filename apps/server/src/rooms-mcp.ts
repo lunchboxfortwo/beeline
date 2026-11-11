@@ -1,3 +1,4 @@
+import { LOCAL_RECEIVER_RECOVERY } from '@beeline/api-contract/phone';
 import { readMemberDelivery, setupMemberDelivery, confirmMemberDelivery, prepareLocalDelivery, localDeliveryProbe, failMemberDelivery, recoverMemberDelivery } from './rooms-mcp-delivery.js';
 import { memberStreamEnabled, serveMcpMemberStream, type McpStreamCursor } from './rooms-mcp-stream.js';
 import type { SqlDatabase } from './database.js';
@@ -266,7 +267,7 @@ export class RoomsMcp {
        JOIN identities owner ON owner.id=member.owner_id WHERE member.member_id=$1`, [member])).rows[0];
     const delivery=await readMemberDelivery(this.oauth.database,member);
     return row ? { owner: { name: row.name, handle: row.handle }, delivery,
-      ...(!['proved_ready','host_without_live_delivery'].includes(delivery.state) ? { setup: SETUP_NOTE+(/muse/i.test(row.model_label)?'\n'+MUSE_SETUP_RECIPE:'') } : {}) } : {delivery};
+      ...(!['proved_ready','host_without_live_delivery'].includes(delivery.state) ? { setup: SETUP_NOTE+(/muse/i.test(row.model_label)?'\n'+MUSE_SETUP_RECIPE:'')+(delivery.mechanism==='local'&&delivery.failure==='local_receiver_setup_failed'?'\n'+LOCAL_RECEIVER_RECOVERY:'') } : {}) } : {delivery};
   }
   /** Complete a saved post, including a retry after the HTTP request was interrupted. */
   private async finishPost(member: string, roomId: string, messageId: string, key: string | null) {
@@ -330,7 +331,7 @@ export class RoomsMcp {
       if(args.mechanism==='local' && args.installed!==true) return prepareLocalDelivery(db,principal,this.oauth.origin,args);
       return setupMemberDelivery(db,principal,args);
     }
-    if(name==='delivery_failed') { await failMemberDelivery(db,member,textArg(args.generation,100),textArg(args.reason,300));return {delivery:await readMemberDelivery(db,member)}; }
+    if(name==='delivery_failed') { await failMemberDelivery(db,member,textArg(args.generation,100),textArg(args.reason,300));const delivery=await readMemberDelivery(db,member);return {delivery,...(delivery.mechanism==='local'&&delivery.failure==='local_receiver_setup_failed'?{next:LOCAL_RECEIVER_RECOVERY}:{})}; }
     if(name==='confirm_delivery') return confirmMemberDelivery(db,principal,args);
     if (name === 'list_rooms') {
       const rooms = (await db.query(`WITH readable AS (${READABLE}) SELECT id,name,workspace_id FROM readable WHERE parent_id IS NULL ORDER BY id LIMIT 100`, [viewer])).rows;

@@ -1,3 +1,4 @@
+import type { AgentInvitationPickerGuide } from '@beeline/api-contract/phone';
 import React, { useEffect, useState } from 'react';
 import { Image, Separator, Spinner, XStack, YStack } from 'tamagui';
 import { Globe, Terminal } from 'lucide-react-native';
@@ -38,6 +39,7 @@ export function AddAgentSheet({ open, close, workspaceId, workspaceName, agents 
 }) {
     const [step, setStep] = useState<Step>('root');
     const [known, setKnown] = useState<ReadonlySet<string> | null>(null);
+    const [invitationGuide, setInvitationGuide] = useState<AgentInvitationPickerGuide | null>(null);
     const [command, setCommand] = useState<string | null>(null);
     const [error, setError] = useState<string | null>(null);
     const harness = typeof step === 'object' ? HARNESSES.find((h) => h.id === step.harness) : undefined;
@@ -49,15 +51,16 @@ export function AddAgentSheet({ open, close, workspaceId, workspaceName, agents 
     }, [waiting, agents]);
 
     useEffect(() => {
-        if (!open || step !== 'create') return;
+        if (!open) return;
         let cancelled = false;
         setCommand(null);
+        setInvitationGuide(null);
         setError(null);
         void monolithPhoneOperation('createAgentPairingCode', { workspaceId })
-            .then((pairing) => { if (!cancelled) setCommand(agentPairingCommand(pairing.code)); })
+            .then((pairing) => { if (!cancelled) { setCommand(agentPairingCommand(pairing.code)); setInvitationGuide(pairing.invitationGuide ?? null); } })
             .catch((reason) => { if (!cancelled) setError(appErrorCopy(reason, 'Could not create agent invite.')); });
         return () => { cancelled = true; };
-    }, [open, step, workspaceId]);
+    }, [open, workspaceId]);
 
     const shut = () => { setStep('root'); setKnown(null); setCommand(null); setError(null); close(); };
     const joined = newcomer(agents, known);
@@ -77,6 +80,7 @@ export function AddAgentSheet({ open, close, workspaceId, workspaceName, agents 
                 </>
             ) : step === 'external' ? (
                 <YStack>
+                    {invitationGuide && <CopyLine line={invitationGuide.other} label="Copy ChatGPT, Cursor and Goose setup steps" onCopy={copyText} />}
                     {HARNESSES.map((h, index) => (
                         <React.Fragment key={h.id}>
                             <SheetRow
@@ -92,14 +96,14 @@ export function AddAgentSheet({ open, close, workspaceId, workspaceName, agents 
                 </YStack>
             ) : harness ? (
                 <YStack gap="3">
-                    <Copy>{`Paste this into your ${harness.name} session. It joins ${workspaceName}.`}</Copy>
-                    <CopyLine line={harness.line} label={`Copy the ${harness.name} join line`} onCopy={copyText} />
+                    <Copy>{`Follow these steps for ${harness.name}.`}</Copy>
+                    {invitationGuide?.lines[harness.id] ? <CopyLine line={invitationGuide.lines[harness.id]} label={`Copy ${harness.name} join line`} onCopy={copyText} /> : <Copy>Ask a Beeline agent for current setup steps.</Copy>}
                     <Waiting joined={joined} where={workspaceName} />
                     <Btn kind="primary" label="Done" onPress={shut}>Done</Btn>
                 </YStack>
             ) : (
                 <YStack gap="3">
-                    <Copy>{`Run this where the agent will work. It sets the agent up and adds it to ${workspaceName}.`}</Copy>
+                    <Copy>{`Run this on your computer with a signed-in agent CLI (Claude Code, Cursor or Goose). Codex managed helper: not verified. It sets the agent up and adds it to ${workspaceName}.`}</Copy>
                     {command ? <CopyLine line={command} label="Copy connect command" onCopy={copyText} /> : null}
                     {error ? <Copy small quiet role="alert">{error}</Copy> : <Waiting joined={joined} where={workspaceName} />}
                     <Btn kind="primary" label="Done" onPress={shut}>Done</Btn>

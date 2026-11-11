@@ -1,4 +1,5 @@
 import { seedSquireMachine } from './test-fixtures/squire-machines.js';
+import { agentInvitationGuide, BEELINE_ROOMS_MCP_URL } from '@beeline/api-contract/agent-invitation-guide';
 import { phoneFetch, describe, expect, it, vi, randomBytes, LinkAgentWallet, migrate, DaemonService, PhoneService, LiveHub, ConnectionPresence, applyVaultList, recordSquireSignIn, readOwnerApps, resolveAppRoute, createBeelineServer, captureServerError, WORKSPACE, ROOM, OWNER, HELPER, COMMAND, GENERATION, turn, linearServer, fakeRegistry, fixtureScope1, fixtureScope2, type AddressInfo, type TokenAuth } from './test-support-app-connections.integration.test-support.js';
 
 describe('the app route order', () => {
@@ -159,12 +160,16 @@ const scope2 = fixtureScope2();
     const registry = fakeRegistry([]);
     const daemon = scope2.daemonWith(registry.client);
     for (const service of ['grok', 'xai', 'grok bot', 'muse', 'meta muse', 'meta ai',
-      'chatgpt', 'openai chatgpt', 'claude', 'cursor', 'mcp', 'beeline connector']) {
+      'chatgpt', 'openai chatgpt', 'claude', 'cursor', 'mcp', 'beeline connector',
+      'gemini', 'codex', 'claude code', 'beeline helper', 'opencode', 'pi', 'hermes', 'zcode', 'goose']) {
       const result = await daemon.execute('connect', { ...turn, service, reason: 'Join my Room' }, HELPER);
       expect(result).toMatchObject({ status: 'ready', app: 'Beeline Rooms' });
-      expect(result.next).toContain('https://join.usebeeline.app');
-      expect(result.next).toContain('Members sheet > +');
-      expect(result.next).toContain('Muse can connect now through a custom connector at https://join.usebeeline.app; only its directory listing is pending.');
+      expect(result.next).toBe(agentInvitationGuide(service));
+      if (service !== 'codex') {
+        expect(result.next).toContain(BEELINE_ROOMS_MCP_URL);
+        expect(result.next).toContain('Members sheet > +');
+      } else expect(result.next).not.toContain(BEELINE_ROOMS_MCP_URL);
+      expect(result.next).not.toContain('directory listing');
     }
     expect((await scope2.database.query('SELECT id FROM workspace_apps')).rowCount).toBe(0);
     expect((await scope2.database.query("SELECT id FROM messages WHERE card_type IS NOT NULL")).rowCount).toBe(0);

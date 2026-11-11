@@ -1,3 +1,4 @@
+import { AGENT_INVITATION_PROMPT, BEELINE_PRODUCT_GUIDE } from '@beeline/api-contract/agent-invitation-guide';
 import { notifyLive } from './postgres-live.js';
 import {FREE_AGENT_CREATION_SCHEMA,reserveStarterAgents,refundStarterAgent} from './free-agent-creation.js';
 import { FREE_AGENT_ACCOUNTING_SCHEMA } from './free-agent-accounting.js';
@@ -220,11 +221,9 @@ export const FREE_AGENT_EXIT_NOTE =
 /** Membership events every free agent hears in #general from creation. */
 export const FREE_AGENT_EVENT_SUBSCRIPTIONS = ['joined', 'left'] as const;
 
-export const FREE_AGENT_CONNECT_GUIDE = `Offer help bringing their own agent only on real triggers: someone requests their own files, apps, logins or local repository that you cannot access. Explain the limitation and offer to guide them. At most one unsolicited nudge per UTC day. Check the conversation before nudging; if unsure whether you already nudged today, do not nudge. Normal conversation is not a trigger. When explicitly asked, help without this daily restriction.
+export const FREE_AGENT_CONNECT_GUIDE = `When asked to add an agent, help one step at a time and wait for each result. Ask which device, assistant and plan they have when needed to select the supported steps. Do not require a computer for a supported chat-app connector. Never create, retrieve, request, repeat or post a pairing code in a Room; use redacted errors. Confirm a tagged reply before claiming setup complete.`;
 
-When they accept, guide them one step at a time, waiting for the result of each step. Help them choose their own computer or an always-on machine they control. Install Node.js and an agent CLI (Claude Code, Codex or OpenCode), and help them sign in to that CLI. Send them to Members -> Add agent in their Workspace to copy the command. The command format is npx usebeeline connect <code>; they must run the actual command copied from Add agent on their chosen machine. Never create, retrieve, request, repeat or post a pairing code in a Room. Troubleshoot using redacted errors, never secrets. Keep helping until Members shows their new agent online, then have them tag it with a small task. Do not claim it is online without confirmation.`;
-
-export const FREE_AGENT_APP_CONNECT_GUIDE = `For Grok/xAI, Muse/Meta AI, ChatGPT, Claude or Cursor, use connect for Beeline Rooms steps: in that assistant add https://join.usebeeline.app as a custom connector, sign in to Beeline, tap Allow, then Room Members > + to add the new member. Muse can connect now through a custom connector at https://join.usebeeline.app; only its directory listing is pending. TikTok sign-in awaits TikTok's approval of Beeline; never claim it works or offer sign-in. For apps requiring a browser sign-in or signup, explain that they need to open the site themselves or connect their own agent.`;
+export const FREE_AGENT_APP_CONNECT_GUIDE = AGENT_INVITATION_PROMPT;
 
 export const FREE_AGENT_REPOSITORY_GUIDE = `Post the repository card only when the person asks for coding work on a codebase (writing, fixing or reviewing code in a repo), or asks to connect GitHub or a repository. For non-coding requests, never suggest linking a repository; do the requested research, writing, drafting or other work directly. For example, "help me write a cold email" needs no repository card; "fix the login bug in my app" needs the repository card if this Room has no repository. On those coding or connection requests, call app_tool(app:"beeline:onboarding", tool:"repository", args:{}). For other repository work, discover the repository and starters tools with app_tool(app:"beeline:onboarding"). If the card fails, explain the actual reason and the concrete next step to connect the repository. For coding work when a Room has no repository, post its repository card instead of sending anyone to Settings or a CLI. When a person wants to switch repositories, post the same card. After linking, offer the starters card, grounded in recent commits, CI and open issues. A tapped starter is an instruction to start that task now: open a repository corner with a complete brief using their selection as approval, do the work, and use the normal checks, independent review and merge path.`;
 
@@ -237,8 +236,9 @@ export const FREE_AGENT_BROWSER_GUIDE = `Use agent-browser with the installed Li
 /** Retain the agent's persona while replacing release-owned hosted policy on every read. */
 export function currentFreeAgentInstructions(instructions: string): string {
   const retained = instructions.split(/\n\n/u).filter(paragraph =>
-    paragraph !== FREE_AGENT_TEAM_GUIDE && !/^(?:Offer help bringing their own agent|When they accept, guide them one step at a time|For Grok\/xAI|When the person picks "Make a welcome video|You are on a team with another free starter agent|Use agent-browser with)/u.test(paragraph));
-  return [...retained, FREE_AGENT_CONNECT_GUIDE, FREE_AGENT_APP_CONNECT_GUIDE, FREE_AGENT_BROWSER_GUIDE, FREE_AGENT_TEAM_GUIDE].join('\n\n');
+    paragraph !== FREE_AGENT_TEAM_GUIDE && paragraph !== AGENT_INVITATION_PROMPT && paragraph !== BEELINE_PRODUCT_GUIDE &&
+    !/^(?:For Grok\/xAI|Offer help bringing their own agent|When they accept, guide them|When asked to add an agent|When the person picks "Make a welcome video|You are on a team with another free starter agent|Use agent-browser with)/u.test(paragraph));
+  return [...retained, BEELINE_PRODUCT_GUIDE, FREE_AGENT_CONNECT_GUIDE, FREE_AGENT_APP_CONNECT_GUIDE, FREE_AGENT_BROWSER_GUIDE, FREE_AGENT_TEAM_GUIDE].join('\n\n');
 }
 
 export function freeAgentInstructions(seededSoul: string, name: string, config: FreeAgentConfig): string {
@@ -262,6 +262,8 @@ If several members left since your last note, name them all in that one note.
 Leaving the Workspace itself is silent in Beeline; you only hear about leaves and removals in #general.
 
 You have a free daily allowance of model tokens. If it runs out, say so plainly and tell them they can connect their own agent from the Members page to keep going.
+
+${BEELINE_PRODUCT_GUIDE}
 
 ${FREE_AGENT_TURN_GUIDE}
 

@@ -1,3 +1,4 @@
+import { LOCAL_RECEIVER_RECOVERY } from '@beeline/api-contract/phone';
 import {
   describe,
   expect,
@@ -33,7 +34,12 @@ describe('JOIN-DELIVERY: OAuth is membership, host receipts prove delivery', () 
         } });
       }
       if (host === 'Failed local') {
-        await scope.db.query("UPDATE rooms_mcp_delivery SET failure='stream_ended' WHERE member_id=$1", [member]);
+        const binding = value(await client.callTool({ name: 'list_rooms', arguments: {} }));
+        const failed = value(await client.callTool({ name: 'delivery_failed', arguments: {
+          generation: binding.delivery.generation, reason: 'local_receiver_setup_failed',
+        } }));
+        expect(failed.next).toBe('The local Beeline receiver failed to start. Run npx -y usebeeline@latest join again in the same coding session. If it still fails, check that this computer can create and run its local receiver. Opening the join website cannot repair a local receiver failure.');
+        expect(value(await client.callTool({ name: 'list_rooms', arguments: {} })).setup).toContain(LOCAL_RECEIVER_RECOVERY);
       }
       const tagged = await scope.phone.execute(
         'sendRoomMessage',

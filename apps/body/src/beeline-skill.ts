@@ -1,3 +1,4 @@
+import { AGENT_INVITATION_PROMPT, BEELINE_PRODUCT_GUIDE } from '@beeline/api-contract/agent-invitation-guide';
 import { readFileSync } from 'node:fs';
 import { resolve } from 'node:path';
 import { MESSAGE_REACTION_EMOJIS } from '@beeline/api-contract/phone';
@@ -197,12 +198,20 @@ export function beelineConnectSkillMarkdown(releaseId: string, freeAgent = false
   if (freeAgent) return skillMarkdown(BEELINE_CONNECT_SKILL_NAME,
     'Browse public websites with Lightpanda or connect supported apps.', releaseId, `Use agent-browser with Lightpanda for browser tasks. Run agent-browser skills get core before first use. A bot check, sign-in or signup means stop, explain the block plainly, and suggest the person opens it themselves or connects their own agent. Never retry or claim success without reading the result.
 
+${BEELINE_PRODUCT_GUIDE}
+
+${AGENT_INVITATION_PROMPT}
+
 Use connect for supported app connections and app_tool for their actual tools. Follow the returned readiness. When an app needs an unavailable browser or account, explain the limitation. For repository work, use the Room repository card and normal corner workflow.`);
   return skillMarkdown(
     BEELINE_CONNECT_SKILL_NAME,
     'Reach an app, API, website, GitHub, Tailscale, wallet or host command: connect, app_tool, Squire, grants and keys.',
     releaseId,
     `# Connecting services
+
+${BEELINE_PRODUCT_GUIDE}
+
+${AGENT_INVITATION_PROMPT}
 
 ## Tools and keys
 
@@ -281,14 +290,14 @@ You keep memory yourself. No background reviewer exists: what you do not keep cu
 /** The Beeline-owned skills a session's harness home installs. */
 export function beelineManagedSkills(
   releaseId: string,
-  options: { isReviewer: boolean },
+  options: { isReviewer: boolean; freeAgent?: boolean },
 ): Array<{ name: string; content: string }> {
   return [
     { name: BEELINE_ONBOARDING_SKILL_NAME, content: beelineOnboardingSkillMarkdown(releaseId) },
     { name: BEELINE_FILES_SKILL_NAME, content: beelineFilesSkillMarkdown(releaseId) },
     { name: BEELINE_CORNERS_SKILL_NAME, content: beelineCornersSkillMarkdown(releaseId) },
     { name: BEELINE_WAKES_SKILL_NAME, content: beelineWakesSkillMarkdown(releaseId) },
-    { name: BEELINE_CONNECT_SKILL_NAME, content: beelineConnectSkillMarkdown(releaseId, Boolean(process.env.BEELINE_FREE_AGENT_ID)) },
+    { name: BEELINE_CONNECT_SKILL_NAME, content: beelineConnectSkillMarkdown(releaseId, options.freeAgent ?? Boolean(process.env.BEELINE_FREE_AGENT_ID)) },
     { name: BEELINE_MEMORY_SKILL_NAME, content: beelineMemorySkillMarkdown(releaseId) },
     { name: BEELINE_TRIAGE_SKILL_NAME, content: beelineTriageSkillMarkdown(releaseId) },
     { name: BEELINE_SPEC_SKILL_NAME, content: beelineSpecSkillMarkdown(releaseId) },

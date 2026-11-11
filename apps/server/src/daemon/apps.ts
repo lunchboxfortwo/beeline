@@ -1,3 +1,4 @@
+import { agentInvitationGuide } from '@beeline/api-contract/agent-invitation-guide';
 import { providerAdapter } from '../providers/index.js';
 import { systemMessage } from '@beeline/api-contract/system-message-catalog';
 import { ExpectedRefusalError } from '../command-refusal.js';
@@ -42,10 +43,8 @@ import { daemonRequestAgentGrant, daemonGrantRequester, daemonConsumeAgentGrant 
     const context = await ctx.offerContext(input.roomId, agentId);
     const commandId = ctx.authorizedCommand?.id;
     const assistant = service.toLowerCase().replace(/[-_\s]+/g, ' ');
-    if (['grok', 'xai', 'x ai', 'grok bot', 'muse', 'meta muse', 'meta ai',
-      'chatgpt', 'openai chatgpt', 'claude', 'cursor', 'mcp', 'beeline connector'].includes(assistant))
-      return { status: 'ready', app: 'Beeline Rooms',
-        next: 'In your AI assistant, add a custom connector with URL https://join.usebeeline.app, sign in with your Beeline account, tap Allow, then add the new member to a Room via its Members sheet > +. Muse can connect now through a custom connector at https://join.usebeeline.app; only its directory listing is pending.' };
+    const invitation = agentInvitationGuide(service);
+    if (invitation) return { status: 'ready', app: 'Beeline Rooms', next: invitation };
     const unavailable = providerAdapter(appIdentity(service)?.key ?? assistant)?.signInUnavailable;
     if (unavailable) return { status: 'unavailable', app: service, next: unavailable };
     const postCard = async (database: SqlDatabase, card: {

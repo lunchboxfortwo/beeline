@@ -1,3 +1,4 @@
+import { SESSION_ON_DEMAND_NOTICE } from '@beeline/api-contract/agent-invitation-guide';
 // `usebeeline join` and `usebeeline session …`: a coding session that is already running joins a person's Beeline
 // Rooms as its own member, from one pasted line and one sign-in on any device.
 import { sessionAgentBehavior } from '../agent-command.js';
@@ -5,7 +6,7 @@ import { spawn, spawnSync } from 'node:child_process';
 import { closeSync, constants, copyFileSync, existsSync, fsyncSync, mkdirSync, openSync, readFileSync, readdirSync, renameSync, rmSync, writeFileSync } from 'node:fs';
 import { delimiter, dirname, join, resolve } from 'node:path';
 import { createHash, randomUUID } from 'node:crypto';
-import { agentLabel, defaultName, detectAgent, isAgentId, pickName, type AgentId } from './agents.js';
+import { AGENTS, agentLabel, defaultName, detectAgent, isAgentId, pickName, type AgentId } from './agents.js';
 import { accessToken, attachLocalDelivery, callTool, DEFAULT_SERVER, finishSignIn, NOT_JOINED, registerClient, signInLink, SignInEndedError, type SignIn } from './beeline-api.js';
 import { bridgeRunning, ensureBridge, notifyBridgeSessions, renderMention, renderRules, renderWake, runBridge, toolViaBridge, toolViaOutbox, type Mention, type Runner, type Wake } from './bridge.js';
 import { chosenName, claudeTranscript, heldBy, inboundSetting, permissionMode, postToClaude, scanClaude } from './claude.js';
@@ -101,7 +102,7 @@ interface Found { agent: AgentId; cwd: string; sessionId?: string; pid?: number;
 /** Which app and conversation this command runs in. */
 export function findOwnSession(env: NodeJS.ProcessEnv, dir: string): Found {
   const detected = detectAgent(env);
-  if (!detected) throw new Error('Run this from inside a coding session (Claude Code, Codex, OpenCode, Pi, Antigravity, Gemini CLI, Hermes or ZCode).');
+  if (!detected) throw new Error(`Run this from inside a coding session (${AGENTS.map(agentLabel).join(', ')}). For headless Grok, use npx -y usebeeline@latest join --host grok --name my-grok.`);
   const cwd = process.cwd();
   if (detected.agent === 'claude-code') {
     const sessions = scanClaude(env);
@@ -167,7 +168,7 @@ async function joinCommand(args: string[], env: NodeJS.ProcessEnv): Promise<void
       await bindLocalDelivery(dir,current,await accessToken(dir,key),env);
       if(current.deliveryMechanism==='local'){setupAgent(current.agent,{env,node:run.node,bundle:run.bundle});
       await ensureBridge(dir, run, env);}
-      console.log(`This ${agentLabel(own.agent)} session is on Beeline as @${existing.handle ?? existing.name}. Live replies are connecting until this host returns the delivery receipt. Run session status to read the current server proof.`);
+      console.log(`This ${agentLabel(own.agent)} session is on Beeline as @${existing.handle ?? existing.name}. ${current.deliveryMechanism==='on_demand'?SESSION_ON_DEMAND_NOTICE:'Live replies are connecting until this host returns the delivery receipt.'} Run session status to read the current server proof.`);
       return;
     }
   }
@@ -199,7 +200,7 @@ async function joinCommand(args: string[], env: NodeJS.ProcessEnv): Promise<void
     `  ${signIn.url}`,
     '',
     `This ${agentLabel(own.agent)} session joins their Beeline Rooms as "${name}" (they can rename it on the Allow page).`,
-    ...(sessionAgentBehavior(own.agent).joinDelivery==='on_demand' ? ['After Allow, run usebeeline session status to confirm your member identity. This CLI uses on-demand Room tools until its host provides a proved inbound trigger.'] : [`After Allow, Beeline sets up this session’s receiver and sends one delivery check here. Return its receipt from this conversation. Until then, membership is joined and live replies are connecting. The sign-in link expires in 10 minutes.`]),
+    ...(sessionAgentBehavior(own.agent).joinDelivery!=='local' ? [`After Allow, run usebeeline session status to confirm your member identity. ${SESSION_ON_DEMAND_NOTICE}`] : [`After Allow, Beeline sets up this session’s receiver and sends one delivery check here. Return its receipt from this conversation. Until then, membership is joined and live replies are connecting. The sign-in link expires in 10 minutes.`]),
     ...(env.BEELINE_SESSION_DEBUG ? [`(log: ${out})`] : []),
   ].join('\n'));
 }
@@ -274,7 +275,7 @@ async function finishJoinOwned(file: string, env: NodeJS.ProcessEnv): Promise<vo
       const child=spawn(run.node,[run.bundle,'session','antigravity-sidecar'],{detached:true,stdio:'ignore',env});child.unref();
     }
     const rooms = me.rooms.map(r => r.name).slice(0, 5).join(', ');
-    if(joined.deliveryMechanism==='on_demand'){console.log(`Joined on demand as @${joined.handle??joined.name}. Run session status to read the approved member and owner.`);return;}
+    if(joined.deliveryMechanism==='on_demand'){console.log(`Joined on demand as @${joined.handle??joined.name}. Run session status to read the approved member and owner. ${SESSION_ON_DEMAND_NOTICE}`);return;}
     await announce(joined, `Beeline: joined · connecting live replies as @${joined.handle ?? joined.name}${rooms ? ` in ${rooms}` : ''}. A separate delivery check must reach this conversation and return its receipt before live replies are proved ready. Incoming Room messages include the command that answers them.${changes.length ? `\n(${changes.join('; ')})` : ''}\n\n${renderRules(joined, run)}`, dir);
     } catch(error) { if(generation) await callTool(joined,tokens.access_token,'delivery_failed',{generation,reason:'local_receiver_setup_failed'}).catch(()=>undefined);throw error; }
   }catch(error){retain=!(error instanceof SignInEndedError);throw error;}
@@ -320,6 +321,11 @@ async function ownTool(dir: string, joined: JoinedSession, name: string, args: R
   }
   return callTool(joined, await accessToken(dir, joined.key), name, args);
 }
+
+const JOIN_USAGE = `Usage: usebeeline join [--name <name>] [--server <url>] [--host <host>] [--conversation <id>]
+Join from the running coding session; approve the printed sign-in link on any device.
+Headless Grok: usebeeline join --host grok --name my-grok
+Options: --help, -h  Show this help without signing in.`;
 
 const VALUED = ['--as', '--room', '--reply-to', '--server', '--name', '--session', '--state', '--limit'];
 
@@ -419,6 +425,10 @@ function readStdin(_limitMs: number): Promise<string> {
 
 export async function runSessionCommand(args: string[], env: NodeJS.ProcessEnv = process.env): Promise<void> {
   if (args[0] === 'join') {
+    if (args.slice(1).some(arg => arg === '--help' || arg === '-h')) {
+      console.log(JOIN_USAGE);
+      return;
+    }
     try {
       return await joinCommand(args.slice(1), env);
     } catch (error) {
