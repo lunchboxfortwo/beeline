@@ -56,9 +56,6 @@ LEFT JOIN memberships workspace ON workspace.workspace_id=corner.workspace_id
 LEFT JOIN corner_person_state state ON state.corner_id=corner.id AND state.identity_id=parent.identity_id
 WHERE corner.parent_id IS NOT NULL AND corner.archived_at IS NULL;
 
--- Retained for the preceding serving/rollback images; current reads use room_access.
-CREATE OR REPLACE VIEW effective_memberships AS SELECT * FROM room_access;
-
 `;
 
 /** Preserve sparse preferences before the release removes legacy corner roster rows. */

@@ -481,21 +481,29 @@ export async function retireMembershipSubscriptionLists(database: SqlDatabase): 
   await database.query(`UPDATE memberships SET event_subscriptions='[]'::jsonb WHERE event_subscriptions<>'[]'::jsonb`);
 }
 
+/** End joins recreated by preceding images without deleting their history. */
+export async function retireOrphanRoomMemberships(db: SqlDatabase) {
+  const orphans = await db.query<{ room_id: string; identity_id: string; kind: string }>(
+    `SELECT member.room_id,member.identity_id,identity.kind FROM memberships member
+     JOIN identities identity ON identity.id=member.identity_id
+     WHERE member.room_id IS NOT NULL AND member.removed_at IS NULL
+       AND NOT EXISTS(SELECT 1 FROM memberships workspace
+         WHERE workspace.workspace_id=member.workspace_id AND workspace.room_id IS NULL
+           AND workspace.identity_id=member.identity_id AND workspace.removed_at IS NULL)
+     FOR UPDATE OF member`,
+  );
+  for (const row of orphans.rows) await removeRoomMembership(db, [row.room_id, row.identity_id]);
+  return { removedChatJoins: orphans.rowCount,
+    people: new Set(orphans.rows.filter(row => row.kind === 'human').map(row => row.identity_id)).size,
+    agents: new Set(orphans.rows.filter(row => row.kind === 'agent').map(row => row.identity_id)).size };
+}
+
 /** Move the two agent-specific membership sources into ordinary member rows.
  * Existing departures win over source metadata. Orphan chat joins keep their
  * history, but cannot regain access when a Workspace member is backfilled. */
 export async function consolidateWorkspaceMembers(database: SqlDatabase) {
   return database.transaction(async db => {
-    const orphans = await db.query<{ room_id: string; identity_id: string; kind: string }>(
-      `SELECT member.room_id,member.identity_id,identity.kind FROM memberships member
-       JOIN identities identity ON identity.id=member.identity_id
-       WHERE member.room_id IS NOT NULL AND member.removed_at IS NULL
-         AND NOT EXISTS(SELECT 1 FROM memberships workspace
-           WHERE workspace.workspace_id=member.workspace_id AND workspace.room_id IS NULL
-             AND workspace.identity_id=member.identity_id AND workspace.removed_at IS NULL)
-       FOR UPDATE OF member`,
-    );
-    for (const row of orphans.rows) await removeRoomMembership(db, [row.room_id, row.identity_id]);
+    const orphans = await retireOrphanRoomMemberships(db);
     const columns = (await db.query<{ table_name: string }>(
       `SELECT table_name FROM information_schema.columns WHERE table_schema=current_schema()
        AND ((table_name='free_agents' AND column_name='workspace_id')
@@ -527,9 +535,6 @@ export async function consolidateWorkspaceMembers(database: SqlDatabase) {
           ON connection.client_id=member.client_id AND connection.identity_id=member.owner_id
         ON CONFLICT(workspace_id,identity_id) WHERE room_id IS NULL DO NOTHING`)).rowCount;
     }
-    return { removedChatJoins: orphans.rowCount,
-      people: new Set(orphans.rows.filter(row => row.kind === 'human').map(row => row.identity_id)).size,
-      agents: new Set(orphans.rows.filter(row => row.kind === 'agent').map(row => row.identity_id)).size,
-      free, mcp };
+    return { ...orphans, free, mcp };
   });
 }

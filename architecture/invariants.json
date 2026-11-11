@@ -1352,7 +1352,6 @@
         "module": "Agent types",
         "reason": "existing before the registry; weekly audit reviews",
         "columns": {
-          "workspace_id": {"reason":"Retained for preceding serving and rollback images; current runtime uses ordinary memberships.","drop":"After membership-one-list releases replace all old images: fm/membership-one-list-contract."},
           "agent_id": "existing before the registry; weekly audit reviews",
           "owner_id": "existing before the registry; weekly audit reviews",
           "state": "existing before the registry; weekly audit reviews",
@@ -2463,7 +2462,6 @@
         "module": "Tools and connectors",
         "reason": "existing before the registry; weekly audit reviews",
         "columns": {
-          "workspace_ids": {"reason":"Retained for preceding serving and rollback images; current runtime uses ordinary memberships.","drop":"After membership-one-list releases replace all old images: fm/membership-one-list-contract."},
           "client_id": "existing before the registry; weekly audit reviews",
           "owner_id": "existing before the registry; weekly audit reviews",
           "member_id": "existing before the registry; weekly audit reviews",

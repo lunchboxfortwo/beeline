@@ -1,6 +1,7 @@
 import { afterEach, beforeEach, expect, it } from 'vitest';
 import { migratedDatabase, type PgliteDatabase } from './test-support.js';
 import { consolidateWorkspaceMembers } from './membership-join.js';
+import { migrate } from './database.js';
 import { PhoneService } from './phone-service.js';
 import { ensureSystemDirectMessageRoomResult } from './system-line.js';
 import { SYSTEM_IDENTITY_ID } from '@beeline/api-contract/system-identity';
@@ -110,7 +111,6 @@ it('retains free-machine cleanup metadata when its final Workspace is deleted', 
   await db.query(`INSERT INTO memberships(workspace_id,identity_id,role) VALUES($1,$2,'member')`,[W,FREE]);
   await db.query(`INSERT INTO free_agents(agent_id,owner_id,sealed_keys,fly_machine_id,bootstrap_hash,model_token_hash)
     VALUES($1,$2,'fixture','machine','bootstrap','model')`,[FREE,OWNER]);
-  expect((await db.query(`SELECT workspace_id FROM free_agents WHERE agent_id=$1`,[FREE])).rows).toEqual([{workspace_id:null}]);
   expect((await consolidateWorkspaceMembers(db)).free).toBe(0);
   await phone.execute('deleteWorkspace',{workspaceId:W},OWNER);
   expect((await db.query(`SELECT fly_machine_id,removed_at IS NOT NULL removed,bootstrap_hash,model_token_hash
@@ -118,4 +118,36 @@ it('retains free-machine cleanup metadata when its final Workspace is deleted', 
     {fly_machine_id:'machine',removed:true,bootstrap_hash:null,model_token_hash:null},
   ]);
   expect((await db.query(`SELECT 1 FROM memberships WHERE workspace_id=$1`,[W])).rowCount).toBe(0);
+});
+
+it('contracts the preceding release without deleting canonical members, joins or agent metadata', async () => {
+  // Simulate an expand image, including an orphan join recreated during overlap.
+  await db.query(`DELETE FROM workflow_backfills WHERE name='workspace-members-contract-v1';
+    ALTER TABLE free_agents ADD COLUMN workspace_id uuid;
+    ALTER TABLE rooms_mcp_members ADD COLUMN workspace_ids uuid[];
+    CREATE VIEW effective_memberships AS SELECT * FROM room_access;`);
+  await db.query(`INSERT INTO free_agents(agent_id,owner_id,workspace_id,sealed_keys) VALUES($1,$2,$3,'fixture')`,[FREE,OWNER,W]);
+  await db.query(`INSERT INTO rooms_mcp_clients(id,name,redirects) VALUES('client','App','[]')`);
+  await db.query(`INSERT INTO rooms_mcp_members(client_id,owner_id,member_id,model_label,workspace_ids)
+    VALUES('client',$1,$2,'App',ARRAY[$3::uuid])`,[OWNER,MCP,W]);
+  const orphan = 'e'.repeat(64);
+  await db.query(`INSERT INTO identities(id,kind,name) VALUES($1,'human','Former member')`,[orphan]);
+  await db.query(`INSERT INTO memberships(workspace_id,room_id,identity_id,role) VALUES
+    ($1,NULL,$2,'member'),($1,NULL,$3,'member'),($1,$4,$2,'member'),
+    ($1,$5,$3,'member'),($1,$4,$6,'member'),($1,$4,$7,'member')`,[W,FREE,MCP,PRIVATE,PUBLIC,HUMAN,orphan]);
+  const records = async () => (await db.query(`SELECT id,workspace_id,room_id,identity_id,role,joined_at,push_muted
+    FROM memberships ORDER BY id`)).rows;
+  const before = await records();
+  await migrate(db);
+  expect(await records()).toEqual(before);
+  expect((await db.query(`SELECT 1 FROM memberships WHERE identity_id=$1 AND removed_at IS NULL`,[orphan])).rowCount).toBe(0);
+  expect((await db.query(`SELECT 1 FROM free_agents WHERE agent_id=$1`,[FREE])).rowCount).toBe(1);
+  expect((await db.query(`SELECT 1 FROM rooms_mcp_members WHERE member_id=$1`,[MCP])).rowCount).toBe(1);
+  expect((await db.query(`SELECT 1 FROM information_schema.columns WHERE table_schema=current_schema()
+    AND ((table_name='free_agents' AND column_name='workspace_id') OR (table_name='rooms_mcp_members' AND column_name='workspace_ids'))`)).rowCount).toBe(0);
+  expect((await db.query(`SELECT 1 FROM pg_views WHERE schemaname=current_schema() AND viewname='effective_memberships'`)).rowCount).toBe(0);
+  expect(await phone.readRoom(PRIVATE,HUMAN)).not.toBeNull();
+  expect(await phone.readRoom(PUBLIC,MCP)).not.toBeNull();
+  await migrate(db);
+  expect(await records()).toEqual(before);
 });

@@ -32,9 +32,6 @@ CREATE TABLE IF NOT EXISTS rooms_mcp_members (
   created_at timestamptz NOT NULL DEFAULT now(),
   PRIMARY KEY (client_id, owner_id)
 );
--- Retained for older images; new connections carry no legacy Workspace grant.
-ALTER TABLE rooms_mcp_members ADD COLUMN IF NOT EXISTS workspace_ids uuid[];
-ALTER TABLE rooms_mcp_members ALTER COLUMN workspace_ids SET DEFAULT '{}'::uuid[];
 CREATE INDEX IF NOT EXISTS rooms_mcp_members_member ON rooms_mcp_members(member_id);
 -- Each member sets its own inbound webhook, so a shared published client id
 -- never routes one person's Room text to another person's receiver.
