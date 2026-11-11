@@ -667,7 +667,7 @@
       "apps/server/src",
       "apps/auth/src"
     ],
-    "bootstrapTotal": 1660,
+    "bootstrapTotal": 1658,
     "unusedTotal": 172,
     "tables": {
       "agent_avatars": {
@@ -1352,8 +1352,8 @@
         "module": "Agent types",
         "reason": "existing before the registry; weekly audit reviews",
         "columns": {
+          "workspace_id": {"reason":"Retained for preceding serving and rollback images; current runtime uses ordinary memberships.","drop":"After membership-one-list releases replace all old images: fm/membership-one-list-contract."},
           "agent_id": "existing before the registry; weekly audit reviews",
-          "workspace_id": "existing before the registry; weekly audit reviews",
           "owner_id": "existing before the registry; weekly audit reviews",
           "state": "existing before the registry; weekly audit reviews",
           "fly_machine_id": "existing before the registry; weekly audit reviews",
@@ -2463,12 +2463,12 @@
         "module": "Tools and connectors",
         "reason": "existing before the registry; weekly audit reviews",
         "columns": {
+          "workspace_ids": {"reason":"Retained for preceding serving and rollback images; current runtime uses ordinary memberships.","drop":"After membership-one-list releases replace all old images: fm/membership-one-list-contract."},
           "client_id": "existing before the registry; weekly audit reviews",
           "owner_id": "existing before the registry; weekly audit reviews",
           "member_id": "existing before the registry; weekly audit reviews",
           "model_label": "existing before the registry; weekly audit reviews",
           "created_at": "existing before the registry; weekly audit reviews",
-          "workspace_ids": "existing before the registry; weekly audit reviews",
           "callback_url": "existing before the registry; weekly audit reviews",
           "callback_secret": "existing before the registry; weekly audit reviews",
           "profile_set": "existing before the registry; weekly audit reviews"

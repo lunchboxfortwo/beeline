@@ -52,8 +52,7 @@ describe('server-owned model execution and accounting', () => {
     );
     await db.query(`INSERT INTO workspaces(id,name) VALUES($1,'Hive')`, [WORKSPACE]);
     await db.query(
-      `INSERT INTO free_agents(agent_id,workspace_id,owner_id,sealed_keys,model_token_hash,state)
-       VALUES($1,$2,$3,'sealed',$4,'running')`,
+      `WITH workspace AS (SELECT $2::uuid) INSERT INTO free_agents(agent_id,owner_id,sealed_keys,model_token_hash,state) VALUES($1,$3,'sealed',$4,'running')`,
       [AGENT, WORKSPACE, OWNER, tokenHash(TOKEN)],
     );
     await db.query(`INSERT INTO rooms(id,workspace_id,created_by,name,visibility) VALUES($1,$2,$3,'General','public')`, [ROOM, WORKSPACE, OWNER]);
@@ -165,8 +164,7 @@ describe('server-owned model execution and accounting', () => {
     const luna = 'c'.repeat(64);
     const lunaToken = `bfm_${'y'.repeat(43)}`;
     await db.query(`INSERT INTO identities(id,kind,name) VALUES($1,'agent','Luna')`, [luna]);
-    await db.query(`INSERT INTO free_agents(agent_id,workspace_id,owner_id,sealed_keys,model_token_hash,state,model)
-      VALUES($1,$2,$3,'sealed',$4,'running','openai/gpt-6-luna')`, [luna, WORKSPACE, OWNER, tokenHash(lunaToken)]);
+    await db.query(`WITH workspace AS (SELECT $2::uuid) INSERT INTO free_agents(agent_id,owner_id,sealed_keys,model_token_hash,state,model) VALUES($1,$3,'sealed',$4,'running','openai/gpt-6-luna')`, [luna, WORKSPACE, OWNER, tokenHash(lunaToken)]);
     await db.query(`INSERT INTO agent_commands(id,room_id,agent_id,turn_request_id,action,reason,
       root_command_id,root_source_message_id,agent_depth,state,claimed_at,lease_expires_at)
       VALUES('luna-turn',$1,$2,'luna-request','input','human_tag','luna-turn','source',0,'claimed',now(),now()+interval '90 seconds')`, [ROOM, luna]);

@@ -65,7 +65,7 @@ export async function owedMentions(db: SqlDatabase, member: string) {
     JOIN identities author ON author.id=m.author_id
     JOIN rooms r ON r.id=mention.room_id AND r.archived_at IS NULL
     WHERE mention.member_id=$1 AND mention.cleared_at IS NULL
-      AND EXISTS(SELECT 1 FROM effective_memberships rm WHERE rm.room_id=r.id AND rm.identity_id=$1 AND rm.removed_at IS NULL)
+      AND EXISTS(SELECT 1 FROM room_access rm WHERE rm.room_id=r.id AND rm.identity_id=$1 AND rm.removed_at IS NULL)
       AND EXISTS(SELECT 1 FROM memberships wm WHERE wm.workspace_id=r.workspace_id AND wm.room_id IS NULL AND wm.identity_id=$1 AND wm.removed_at IS NULL)
       AND ${OWED_MENTION_OPEN_SQL}
     ORDER BY mention.seq LIMIT 100`, [member])).rows;

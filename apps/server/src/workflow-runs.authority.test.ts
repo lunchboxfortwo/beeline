@@ -283,7 +283,6 @@ describe('agent workflow run reads and cancellation', () => {
 
   it('allows a human Workspace admin and records that human as the actor', async () => {
     await database.query(`UPDATE identities SET handle='owner' WHERE id=$1`, [OWNER]);
-    await database.query(`INSERT INTO memberships(workspace_id,room_id,identity_id,role) VALUES($1,NULL,$2,'owner')`, [WORKSPACE, OWNER]);
     const { runId } = await startedRun();
     const command = await commandFor(IMPLEMENTER, await rootMessage(OWNER));
     await cancelWorkflowRun(database, command, { runId, reason: 'Admin stopped' });
@@ -334,7 +333,6 @@ describe('run owner', () => {
     const parent = '20000000-0000-4000-8000-000000000099';
     await database.query(`INSERT INTO rooms(id,workspace_id,name,created_by) VALUES($1,$2,'Parent',$3)`, [parent, WORKSPACE, OWNER]);
     await database.query(`UPDATE memberships SET room_id=$1 WHERE room_id=$2`, [parent, ROOM]);
-    await database.query(`INSERT INTO memberships(workspace_id,identity_id,role) VALUES($1,$2,'owner')`, [WORKSPACE, OWNER]);
     await database.query(`UPDATE rooms SET parent_id=$1 WHERE id=$2`, [parent, ROOM]);
     await insertCornerFacts(database, { cornerId: ROOM, ownerAgentId: WORKER_A, workerAgentId: WORKER_A });
     const asked = await rootMessage(OWNER, '@wa run gated every day');

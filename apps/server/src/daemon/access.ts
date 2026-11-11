@@ -1,6 +1,7 @@
 import { systemMessage } from '@beeline/api-contract/system-message-catalog';
 import { cornerReviewerSql } from '../corner-reviewer.js';
 import { agentMemberMetadata } from '../agent-member-metadata.js';
+import { CornerAccessDatabase } from '../corner-access-database.js';
 import type { DaemonContext } from './context.js';
 import { AccessDeniedError, id } from './values.js';
 
@@ -56,7 +57,8 @@ import { AccessDeniedError, id } from './values.js';
   export async function daemonAccess(ctx: DaemonContext, roomId: string, agentId: string, requestId?: unknown): Promise<{ cornerReviewer: boolean; isCorner: boolean; privateCommand: boolean; voiceAgentName?: string | null }> {
     if (!/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(roomId))
       throw new AccessDeniedError();
-    const result = await ctx.database.query<{ corner_reviewer: boolean; is_corner: boolean; private_command: boolean; voice_agent_name: string | null }>(
+    // Both joins target physical rows; reading the view here inverts locks with view replacement.
+    const result = await CornerAccessDatabase.physical(ctx.database).query<{ corner_reviewer: boolean; is_corner: boolean; private_command: boolean; voice_agent_name: string | null }>(
       `SELECT EXISTS(
          SELECT 1 FROM rooms corner JOIN rooms parent ON parent.id=corner.parent_id
          WHERE corner.id=$1 AND (
@@ -73,6 +75,8 @@ import { AccessDeniedError, id } from './values.js';
        FROM rooms addressed
        JOIN memberships parent_member ON parent_member.room_id=COALESCE(addressed.parent_id,addressed.id)
          AND parent_member.identity_id=$2 AND parent_member.removed_at IS NULL
+       JOIN memberships workspace_member ON workspace_member.workspace_id=addressed.workspace_id
+         AND workspace_member.room_id IS NULL AND workspace_member.identity_id=$2 AND workspace_member.removed_at IS NULL
        WHERE addressed.id=$1`,
       [roomId, agentId, typeof requestId === 'string' ? requestId : null],
     );

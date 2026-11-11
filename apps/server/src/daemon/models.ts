@@ -1,4 +1,4 @@
-import { restoreRoomMembership } from '../membership-join.js';
+import { restoreRoomMemberships } from '../membership-join.js';
 import { systemMessage } from '@beeline/api-contract/system-message-catalog';
 import { modelChoiceLabel } from '@beeline/api-contract/phone';
 import { renderAgentAvatar } from '../agent-avatar.js';
@@ -67,8 +67,7 @@ import { daemonWriteResult } from './corner-messages.js';
         VALUES($1,$2,$3,'Direct message','invite-only',$4::jsonb) ON CONFLICT DO NOTHING`,
         [roomId, request.workspace_id, request.author_id, JSON.stringify(participants)],
       );
-      for (const participant of participants)
-        await restoreRoomMembership(ctx.database, [request.workspace_id, roomId, participant]);
+      await restoreRoomMemberships(ctx.database, request.workspace_id, roomId, participants);
       await systemLine(ctx.database, {
         roomId,
         subject: { kind: 'agent', id: agentId, name: systemMessage("daemon-service.your-agent") },

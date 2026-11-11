@@ -47,7 +47,7 @@ export class StarterOnboardingService {
        RETURNING id,time_zone,user_id,(SELECT name FROM identities WHERE id=user_id) name`, [roomId])).rows[0];
     if (!run) return;
     const agents = (await this.database.query<BanterAgent & { starter_role: string }>(
-      `SELECT i.id,i.name,beeline_workspace_handle(i.id,f.workspace_id) handle,a.soul->>'instructions' instructions,f.starter_role
+      `SELECT i.id,i.name,beeline_room_handle(i.id,r.room_id) handle,a.soul->>'instructions' instructions,f.starter_role
        FROM starter_onboarding_runs r JOIN free_agents f ON f.agent_id=ANY(ARRAY[r.beebee_id,r.luna_id])
        JOIN identities i ON i.id=f.agent_id JOIN agents a ON a.agent_id=i.id
        WHERE r.id=$1 AND f.removed_at IS NULL`, [run.id])).rows;
@@ -82,8 +82,11 @@ export class StarterOnboardingService {
   async queueRerun(database: SqlDatabase, roomId: string, userId: string, agentId: string) {
     const team = (await database.query<{ beebee_id: string; luna_id: string; time_zone: string; locale: string | null }>(
       `SELECT b.agent_id beebee_id,l.agent_id luna_id,COALESCE((SELECT time_zone FROM starter_onboarding_runs
-         WHERE user_id=$3 ORDER BY created_at DESC LIMIT 1),'UTC') time_zone,(SELECT locale FROM starter_onboarding_runs WHERE user_id=$3 ORDER BY created_at DESC LIMIT 1) locale FROM free_agents b JOIN free_agents l
-       ON l.owner_id=b.owner_id AND l.workspace_id=b.workspace_id AND l.starter_role='luna'
+         WHERE user_id=$3 ORDER BY created_at DESC LIMIT 1),'UTC') time_zone,(SELECT locale FROM starter_onboarding_runs WHERE user_id=$3 ORDER BY created_at DESC LIMIT 1) locale FROM free_agents b
+       JOIN memberships beebee ON beebee.identity_id=b.agent_id AND beebee.room_id IS NULL AND beebee.removed_at IS NULL
+       JOIN rooms room ON room.id=$1 AND room.workspace_id=beebee.workspace_id
+       JOIN memberships luna ON luna.workspace_id=beebee.workspace_id AND luna.room_id IS NULL AND luna.removed_at IS NULL
+       JOIN free_agents l ON l.agent_id=luna.identity_id AND l.owner_id=b.owner_id AND l.starter_role='luna'
        JOIN memberships bm ON bm.identity_id=b.agent_id AND bm.room_id=$1 AND bm.removed_at IS NULL
        JOIN memberships lm ON lm.identity_id=l.agent_id AND lm.room_id=$1 AND lm.removed_at IS NULL
        WHERE b.agent_id=$2 AND b.starter_role='beebee' AND b.removed_at IS NULL AND l.removed_at IS NULL`, [roomId, agentId, userId])).rows[0];

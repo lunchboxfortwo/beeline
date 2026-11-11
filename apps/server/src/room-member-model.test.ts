@@ -26,7 +26,7 @@ beforeAll(async () => {
       ($1,NULL,$2,'owner'),($1,$3,$2,'member')`, [WORKSPACE, id, ROOM]);
   }
   for (const id of [BEEBEE, LUNA]) await database.query(
-    `INSERT INTO free_agents(agent_id,workspace_id,owner_id,sealed_keys) VALUES($1,$2,$3,'fixture')`, [id, WORKSPACE, OWNER]);
+    `WITH workspace AS (SELECT $2::uuid) INSERT INTO free_agents(agent_id,owner_id,sealed_keys) VALUES($1,$3,'fixture')`, [id, WORKSPACE, OWNER]);
   phone = new PhoneService(database, 'http://local.test');
 }, 30000);
 afterAll(async () => database.close());

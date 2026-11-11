@@ -77,15 +77,7 @@ export async function retireAgentFromWorkspace(
   },
 ) {
   const { workspaceId, agentId, remover, removed } = input;
-  // Keep the row as a tombstone: operator add and every wake must see the removal.
-  await database.query(
-    `WITH removed AS (
-       UPDATE free_agents SET removed_at=clock_timestamp(),bootstrap_hash=NULL,model_token_hash=NULL,
-         wake_requested_at=NULL,updated_at=now()
-       WHERE agent_id=$1 AND removed_at IS NULL RETURNING agent_id
-     ) INSERT INTO free_agent_events(agent_id,kind) SELECT agent_id,'removed' FROM removed`,
-    [agentId],
-  );
+  await retireFreeAgentRuntime(database, agentId);
   await revokeDaemonCredentials(database, agentId);
   await removeWorkspaceMemberships(database, [workspaceId, agentId]);
   // No surface may draw it as a member again, whatever it reads from.
@@ -128,4 +120,13 @@ export async function retireAgentFromWorkspace(
   // the historical "opened by"; the merge webhook and a human close still
   // reach the corner, and a later helper can be addressed in it.
   // The committed state is the silent audit record.
+}
+
+/** Retain machine cleanup metadata after the last Workspace membership ends. */
+export async function retireFreeAgentRuntime(database: SqlDatabase, agentId: string) {
+  await database.query(`WITH removed AS (
+    UPDATE free_agents SET removed_at=clock_timestamp(),bootstrap_hash=NULL,model_token_hash=NULL,
+      wake_requested_at=NULL,updated_at=now()
+    WHERE agent_id=$1 AND removed_at IS NULL RETURNING agent_id
+  ) INSERT INTO free_agent_events(agent_id,kind) SELECT agent_id,'removed' FROM removed`, [agentId]);
 }

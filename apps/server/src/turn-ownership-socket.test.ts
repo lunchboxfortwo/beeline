@@ -177,8 +177,7 @@ describe.each(['pglite', ...(postgresUrl ? ['postgres'] : [])])('P12 actual sele
   });
 
   it('binds a free-agent claim to its machine while the optional model rollout is disabled', async () => {
-    await db.query(`INSERT INTO free_agents(agent_id,workspace_id,owner_id,state,sealed_keys,model_token_hash)
-      VALUES($1,$2,$3,'running','fixture',$4)`,[agent,workspace,owner,'c'.repeat(64)]);
+    await db.query(`WITH workspace AS (SELECT $2::uuid) INSERT INTO free_agents(agent_id,owner_id,state,sealed_keys,model_token_hash) VALUES($1,$3,'running','fixture',$4)`,[agent,workspace,owner,'c'.repeat(64)]);
     expect(daemon.ownedModelReady()).toBe(false);
     const client=await connect();
     expect(client.registered.capabilities).toMatchObject({turnOwnershipV1:true});

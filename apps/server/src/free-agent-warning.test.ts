@@ -21,7 +21,7 @@ describe('free agent owner warning', () => {
     await db.query(`INSERT INTO workspaces(id,name) VALUES($1,'Workspace')`, [WORKSPACE]);
     for (const member of [OWNER, AGENT, OTHER]) await db.query(
       `INSERT INTO memberships(workspace_id,identity_id,role) VALUES($1,$2,'member')`, [WORKSPACE, member]);
-    await db.query(`INSERT INTO free_agents(agent_id,workspace_id,owner_id,sealed_keys,state) VALUES($1,$2,$3,'sealed','running')`, [AGENT, WORKSPACE, OWNER]);
+    await db.query(`WITH workspace AS (SELECT $2::uuid) INSERT INTO free_agents(agent_id,owner_id,sealed_keys,state) VALUES($1,$3,'sealed','running')`, [AGENT, WORKSPACE, OWNER]);
     // The person's working room: OWNER and AGENT in, OTHER out.
     await db.query(`INSERT INTO rooms(id,workspace_id,created_by,name,visibility) VALUES($1,$2,$3,'General','public')`, [ROOM, WORKSPACE, OWNER]);
     for (const member of [OWNER, AGENT]) await db.query(

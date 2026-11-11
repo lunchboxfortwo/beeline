@@ -23,8 +23,8 @@ async function fixture() {
       CREATE TABLE agents(agent_id text PRIMARY KEY,owner_id text);
       CREATE TABLE workspaces(id uuid PRIMARY KEY,name text);
       CREATE TABLE rooms(id uuid PRIMARY KEY,workspace_id uuid,name text,parent_id uuid,archived_at timestamptz);
-      CREATE TABLE memberships(workspace_id uuid,room_id uuid,identity_id text,role text,removed_at timestamptz);
-      CREATE TABLE free_agents(agent_id text PRIMARY KEY,workspace_id uuid,owner_id text,sealed_keys text,
+      CREATE TABLE memberships(id bigserial,joined_at timestamptz DEFAULT now(),workspace_id uuid,room_id uuid,identity_id text,role text,removed_at timestamptz);
+      CREATE TABLE free_agents(agent_id text PRIMARY KEY,owner_id text,sealed_keys text,
         model_token_hash text,state text,model text,removed_at timestamptz);
       CREATE TABLE live_server_instances(instance_id text PRIMARY KEY,renewed_at timestamptz);
       CREATE TABLE agent_connections(agent_id text PRIMARY KEY,connection_id text,epoch bigint,instance_id text,released_at timestamptz);

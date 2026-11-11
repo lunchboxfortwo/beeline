@@ -417,7 +417,7 @@ const scope1 = fixtureScope1();
       [url],
     );
     expect(participants.rows.map((row) => row.identity_id).sort()).toEqual(
-      [HUMAN, SYSTEM_IDENTITY_ID].sort(),
+      [HUMAN],
     );
   });
 

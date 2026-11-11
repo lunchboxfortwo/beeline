@@ -12,7 +12,7 @@ import { Webhook } from 'standardwebhooks';
 
 import { MCP_ORDER_WAKE_HINT, MCP_REVIEW_WAKE_HINT, MCP_WAKE_HINT, RoomsMcpEvents } from './rooms-mcp-events.js';
 
-import { backfillMcpMemberRoomsAndAvatars, ensureMcpMember, MCP_TAG_INSTRUCTION, postMcpWebhook } from './rooms-mcp-members.js';
+import { backfillMcpMemberAvatars, ensureMcpMember, MCP_TAG_INSTRUCTION, postMcpWebhook } from './rooms-mcp-members.js';
 
 import { randomBytes, createHash, randomUUID } from 'node:crypto';
 
@@ -328,7 +328,7 @@ export { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it, vi } 
 export { createServer } from 'node:http';
 export { Webhook } from 'standardwebhooks';
 export { MCP_ORDER_WAKE_HINT, MCP_REVIEW_WAKE_HINT, MCP_WAKE_HINT, RoomsMcpEvents } from './rooms-mcp-events.js';
-export { backfillMcpMemberRoomsAndAvatars, ensureMcpMember, MCP_TAG_INSTRUCTION, postMcpWebhook, deliverMcpMemberWebhooks, runMcpWebhookDelivery } from './rooms-mcp-members.js';
+export { backfillMcpMemberAvatars, ensureMcpMember, MCP_TAG_INSTRUCTION, postMcpWebhook, deliverMcpMemberWebhooks, runMcpWebhookDelivery } from './rooms-mcp-members.js';
 export { randomBytes, createHash, randomUUID } from 'node:crypto';
 export { Client } from '@modelcontextprotocol/sdk/client/index.js';
 export { StreamableHTTPClientTransport } from '@modelcontextprotocol/sdk/client/streamableHttp.js';

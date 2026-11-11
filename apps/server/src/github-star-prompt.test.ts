@@ -145,7 +145,7 @@ beforeEach(async () => {
 
 it.each(['helper', 'free/hosted'])('shows the card on a fresh account’s 3rd completed reply (%s) and stars with the person token', async (runtime) => {
   if (runtime === 'free/hosted') await db.query(
-    `INSERT INTO free_agents(agent_id,workspace_id,owner_id,sealed_keys,state) VALUES($1,$2,$3,'fixture','running')`,
+    `WITH workspace AS (SELECT $2::uuid) INSERT INTO free_agents(agent_id,owner_id,sealed_keys,state) VALUES($1,$3,'fixture','running')`,
     [A, W, H],
   );
   await turn('one');

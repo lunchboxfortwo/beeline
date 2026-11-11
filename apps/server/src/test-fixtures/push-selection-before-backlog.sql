@@ -8,7 +8,7 @@
         JOIN LATERAL (SELECT * FROM messages WHERE id=queued.message_id OFFSET 0) m ON true
         JOIN push_message_context context ON context.message_id=m.id
         JOIN push_delivery_floors floor ON floor.id='message-delivery'
-        JOIN effective_memberships member ON member.room_id=m.room_id AND member.removed_at IS NULL
+        JOIN room_access member ON member.room_id=m.room_id AND member.removed_at IS NULL
           AND member.identity_id<>m.author_id
         JOIN push_devices d ON d.token=queued.device_token AND d.identity_id=member.identity_id AND m.created_at>=d.registered_at
         WHERE m.created_at>=floor.started_at

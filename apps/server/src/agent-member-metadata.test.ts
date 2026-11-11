@@ -79,7 +79,7 @@ it('returns provider quota, billing and parent reviewer roles only to Room membe
 });
 
 it('includes a known free token allowance without inventing billing', async () => {
-  await database.query(`INSERT INTO free_agents(agent_id,workspace_id,owner_id,sealed_keys) VALUES($1,$2,$3,'fixture')`, [NEW, WORKSPACE, OWNER]);
+  await database.query(`WITH workspace AS (SELECT $2::uuid) INSERT INTO free_agents(agent_id,owner_id,sealed_keys) VALUES($1,$3,'fixture')`, [NEW, WORKSPACE, OWNER]);
   await database.query(`INSERT INTO free_agent_usage(owner_id,day,tokens) VALUES($1,(now() AT TIME ZONE 'UTC')::date,123000)`, [OWNER]);
   const result = await service.execute('listRoomMembers', { roomId: ROOM }, JELLYBEAN);
   // A free agent with no settled model call yet is in its owner's first-day allowance.

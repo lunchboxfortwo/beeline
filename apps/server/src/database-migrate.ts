@@ -25,7 +25,7 @@ import { MOBILE_MINIMUM_SCHEMA } from './mobile-minimum.js';
 import { STARTER_ONBOARDING_SCHEMA } from './starter-onboarding-run.js';
 import { NEXT_DAY_CHECKIN_SCHEMA } from './next-day-checkin.js';
 import { ROOMS_MCP_SCHEMA } from './rooms-mcp-schema.js';
-import { backfillMcpMemberRoomsAndAvatars, backfillMcpMembers } from './rooms-mcp-members.js';
+import { backfillMcpMemberAvatars, backfillMcpMembers } from './rooms-mcp-members.js';
 import { seedPreregisteredMcpClients } from './rooms-mcp-preregistered.js';
 import { backfillCornerHoldMessages, releaseArchivedCornerHolds } from './corner-holds.js';
 import { OPERATOR_SYSTEM_DM_SCHEMA } from './operator-system-dm.js';
@@ -56,7 +56,6 @@ import { withdrawSupersededGrantAsks } from './grant-policy-upgrade.js';
 import { restoreOwnerApprovedGrants } from './migrations/owner-approved-grants.js';
 import { clearDepartedReviewers } from './migrations/departed-reviewers.js';
 import { backfillRegistryApps } from './app-connections.js';
-import { syncTopLevelSharedRoomRoles } from './membership-join.js';
 import { postgresLiveSchema } from './postgres-live.js';
 import { TURN_OWNERSHIP_SCHEMA } from './turn-ownership.js';
 import { COMPUTER_EXPIRY_SCHEMA } from './computer-expiry-schema.js';
@@ -69,6 +68,7 @@ import { CORNER_ATTENTION_SCHEMA } from './corner-attention.js';
 import { backfillCornerFollows, cornerFollowsSchemaSql } from './corner-follow.js';
 import { alreadyNoOp, alreadySatisfied, triggerAlreadyCurrent, runMigrationStep, splitMigrationStatements } from './migration-steps.js';
 import { SqlDatabase, SCHEMA, MESSAGE_CURSOR_MS_SQL } from './database.js';
+import { consolidateWorkspaceMembers } from './membership-join.js';
 import { createIndexConcurrently, backfillMessageSearchDocuments, backfillSquireApprovalExpiry, compactWebhookDeliveries, compactPushClaims, backfillCornerOwed, backfillSystemEventKinds, backfillPerItemEventSubscriptions, backfillInstitutionalMemoryRollout, retireStandingPreferences, backfillConnectorMachineId } from './database-backfill-squire-approval-expiry.js';
 
 
@@ -156,6 +156,9 @@ export async function migrate(
     DROP FUNCTION IF EXISTS defer_startup_wake();
   `);
   await ddlScript('free agents schema', FREE_AGENTS_SCHEMA);
+  await runMigrationStep('one Workspace member list', async () => {
+    await workflowBackfillOnce(database, 'workspace-members-v1', async db => { await consolidateWorkspaceMembers(db); });
+  });
   await ddlScript('machine Squire source', SQUIRE_MACHINE_SCHEMA);
   await ddlScript('workspace handles', WORKSPACE_HANDLE_SCHEMA);
   await ddlScript('stable identity handles', IDENTITY_HANDLE_SCHEMA);
@@ -163,9 +166,6 @@ export async function migrate(
     'messages_pending_app_sign_in_unique',`CREATE UNIQUE INDEX CONCURRENTLY messages_pending_app_sign_in_unique
       ON messages(room_id,(card->>'appId'),(card->>'ownerId')) NULLS NOT DISTINCT
       WHERE card_type='app-sign-in' AND card->>'status'='pending'`));
-  await runMigrationStep('one Luna per workspace',()=>createIndexConcurrently(database,
-    'free_agents_workspace_luna_unique',`CREATE UNIQUE INDEX CONCURRENTLY free_agents_workspace_luna_unique
-      ON free_agents(workspace_id) WHERE starter_role='luna'`));
   await runMigrationStep('one presence per agent', async()=>{
     await database.query(`DELETE FROM live_outputs presence USING (
       SELECT room_id,agent_id,turn_id,row_number() OVER(PARTITION BY agent_id ORDER BY updated_at DESC,room_id,turn_id) position
@@ -626,13 +626,9 @@ export async function migrateData(database: SqlDatabase): Promise<void> {
   await dataStep('rooms MCP preregistered clients', () => seedPreregisteredMcpClients(database));
   const mcpMembers = await dataStep('rooms MCP members', () => backfillMcpMembers(database));
   if (mcpMembers) console.log(`backfillMcpMembers: created ${mcpMembers} member(s)`);
-  await dataStep('rooms MCP member public Rooms and logos', () =>
-    workflowBackfillOnce(database, 'rooms-mcp-member-public-rooms-v1', backfillMcpMemberRoomsAndAvatars));
-  await dataStep('rooms MCP app default pictures', () =>
-    workflowBackfillOnce(database, 'rooms-mcp-app-default-pictures-v2', backfillMcpMemberRoomsAndAvatars));
   // ChatGPT moves from Dots to the OpenAI mark; Cursor and apps without a logo get the bot face.
   await dataStep('rooms MCP app logo pictures', () =>
-    workflowBackfillOnce(database, 'rooms-mcp-app-default-pictures-v3', backfillMcpMemberRoomsAndAvatars));
+    workflowBackfillOnce(database, 'rooms-mcp-app-default-pictures-v3', backfillMcpMemberAvatars));
   await dataStep('stored corner workflows', () => deleteStoredCornerWorkflows(database));
   await dataStep('corner lifecycle runs', () => backfillCornerLifecycleRuns(database));
   await dataStep('feedback triage workflow', () =>
@@ -654,10 +650,7 @@ export async function migrateData(database: SqlDatabase): Promise<void> {
   await dataStep('workflow run status', () => saveUnsavedWorkflowRunStatus(database));
   await dataStep('abandoned workflow endings', () =>
     workflowBackfillOnce(database, 'abandoned-workflow-endings-v1', reportAbandonedWorkflowEndings));
-  // A timer lost after any release stalls its run; re-arm missing ones every boot.
-  const syncedRoomRoles = await dataStep('top-level Room roles', () =>
-    syncTopLevelSharedRoomRoles(database));
-  console.log(`syncTopLevelSharedRoomRoles: updated ${syncedRoomRoles} stale Room role(s)`);
+
   await dataStep('system event kinds', () => backfillSystemEventKinds(database));
   const strippedSubscriptions = await dataStep('per-item event subscriptions', () =>
     backfillPerItemEventSubscriptions(database));

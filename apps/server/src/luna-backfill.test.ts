@@ -43,19 +43,19 @@ it('dry-runs without writes, adds the same model and team prompt once, and skips
   expect((await backfillLuna(db, config, { apply: true, approvedTargets })).find(row => row.workspace_id === workspaceId)!.result).toBe('added Luna and intro');
   expect((await backfillLuna(db, config, { apply: true, approvedTargets })).find(row => row.workspace_id === workspaceId)!.result).toBe('already present');
   const luna = (await db.query<{ model: string; selected_model: string; soul: { instructions: string } }>(
-    `SELECT f.model,a.selected_model,a.soul FROM free_agents f JOIN agents a ON a.agent_id=f.agent_id
-     WHERE f.workspace_id=$1 AND f.starter_role='luna'`, [workspaceId])).rows;
+    `SELECT f.model,a.selected_model,a.soul FROM free_agents f JOIN memberships workspace_member ON workspace_member.identity_id=f.agent_id AND workspace_member.room_id IS NULL JOIN agents a ON a.agent_id=f.agent_id
+     WHERE workspace_member.workspace_id=$1 AND f.starter_role='luna'`, [workspaceId])).rows;
   expect(luna).toHaveLength(1);
   expect(luna[0]!.model).toBe(config.lunaModel);
   expect(luna[0]!.soul.instructions).toContain('The server already posts your first hello');
   expect((await db.query(`SELECT 1 FROM messages WHERE room_id=$1 AND text=$2`, [room, intro(`owner${owner.slice(0, 8)}`)])).rowCount).toBe(1);
-  expect((await db.query(`SELECT 1 FROM free_agents WHERE workspace_id=ANY($1::uuid[]) AND workspace_id<>$2 AND starter_role='luna'`, [[...LUNA_BACKFILL_SKIP], LUNA_BACKFILL_SKIP[0]])).rowCount).toBe(0);
+  expect((await db.query(`SELECT 1 FROM free_agents JOIN memberships workspace_member ON workspace_member.identity_id=free_agents.agent_id AND workspace_member.room_id IS NULL WHERE workspace_member.workspace_id=ANY($1::uuid[]) AND workspace_member.workspace_id<>$2 AND starter_role='luna'`, [[...LUNA_BACKFILL_SKIP], LUNA_BACKFILL_SKIP[0]])).rowCount).toBe(0);
   expect((await db.query(`SELECT 1 FROM memberships m JOIN free_agents f ON f.agent_id=m.identity_id
     WHERE f.starter_role='luna' AND m.room_id=$1`, [LUNA_BACKFILL_EXTRA_ROOM])).rowCount).toBe(1);
   expect((await db.query(`SELECT 1 FROM memberships m JOIN free_agents f ON f.agent_id=m.identity_id
     WHERE f.starter_role='luna' AND m.room_id=$1`, [otherRoom])).rowCount).toBe(0);
   expect((await db.query(`SELECT 1 FROM messages m JOIN free_agents f ON f.agent_id=m.author_id
     WHERE f.starter_role='luna' AND m.room_id=$1 AND m.system_event IS NULL`, [LUNA_BACKFILL_EXTRA_ROOM])).rowCount).toBe(1);
-  expect((await db.query(`SELECT 1 FROM free_agents WHERE workspace_id=$1 AND starter_role='luna'`, [unapprovedWorkspace])).rowCount).toBe(0);
+  expect((await db.query(`SELECT 1 FROM free_agents JOIN memberships workspace_member ON workspace_member.identity_id=free_agents.agent_id AND workspace_member.room_id IS NULL WHERE workspace_member.workspace_id=$1 AND starter_role='luna'`, [unapprovedWorkspace])).rowCount).toBe(0);
   expect((await db.query(`SELECT 1 FROM agent_commands c JOIN free_agents f ON f.agent_id=c.agent_id WHERE f.starter_role='luna'`)).rowCount).toBe(0);
 });

@@ -167,7 +167,7 @@ export async function ensureSystemDirectMessageRoomResult(
   if (!inserted.rowCount) {
     await database.query(`UPDATE rooms SET visibility='invite-only' WHERE id=$1`, [roomId]);
   }
-  await restoreRoomMemberships(database,workspaceId,roomId,participants);
+  await restoreRoomMemberships(database,workspaceId,roomId,[personId]);
   return { id: roomId, created: Boolean(inserted.rowCount) };
 }
 
@@ -751,6 +751,7 @@ export async function sendSystemNotices(database: SqlDatabase, workspaceId: stri
     SELECT $2::uuid workspace_id,thread.id room_id,participant identity_id
     FROM notices notice JOIN threads thread ON thread.id=notice.room
       CROSS JOIN LATERAL jsonb_array_elements_text(notice.participants) participant
+    WHERE participant<>$3
   ), restored AS (
     ${restoreRoomMembershipsSql('members')}
   ) INSERT INTO messages(id,room_id,author_id,text,presentation,system_event)

@@ -3,7 +3,7 @@ import { observeOnboardingInvite } from '../signin-funnel.js';
 import { randomBytes } from 'node:crypto';
 import { createCommunityInviteToken, isCommunityInviteToken } from '@beeline/api-contract/phone';
 import { firstAccessibleRoomId } from '../first-room.js';
-import { removeWorkspaceMemberships, restoreWorkspaceMembershipRole, ensureWorkspaceMembershipRole, createDirectMessageMembership, redeemWorkspaceMembership, joinRooms, syncTopLevelSharedRoomRoles } from '../membership-join.js';
+import { removeWorkspaceMemberships, restoreWorkspaceMembershipRole, ensureWorkspaceMembershipRole, restoreRoomMemberships, redeemWorkspaceMembership, joinRooms } from '../membership-join.js';
 import { directMessageRoomId, ensureSystemDirectMessageRoomResult } from '../system-line.js';
 import { SYSTEM_IDENTITY_ID } from '@beeline/api-contract/system-identity';
 import type { PhoneContext } from './context.js';
@@ -41,7 +41,6 @@ import { WORKSPACE_ADMIN_AUTHORITY_MESSAGE, token, hash } from './values.js';
       }
       if (target) {
         await restoreWorkspaceMembershipRole(database, [input.workspaceId, input.memberId, input.role, viewerId]);
-        await syncTopLevelSharedRoomRoles(database, input.workspaceId, input.memberId);
         if (target.removed_at)
           await joinRooms(database, {
             workspaceId: input.workspaceId,
@@ -141,8 +140,7 @@ import { WORKSPACE_ADMIN_AUTHORITY_MESSAGE, token, hash } from './values.js';
         [id, input.workspaceId, viewerId, JSON.stringify(participants)],
       );
       if (!inserted.rowCount) return false;
-      for (const member of participants)
-        await createDirectMessageMembership(db, [input.workspaceId, id, member]);
+      await restoreRoomMemberships(db, input.workspaceId, id, participants);
       return true;
     });
     return { id, created };
@@ -248,7 +246,8 @@ import { WORKSPACE_ADMIN_AUTHORITY_MESSAGE, token, hash } from './values.js';
       await observeOnboardingInvite(database, hash(input.token), viewerId, joined.rowCount > 0);
       if (roomId && joined.rowCount > 0) {
         if (ctx.freeAgents && !(await database.query(
-          `SELECT 1 FROM free_agents WHERE workspace_id=$1`, [row.workspace_id])).rowCount) {
+          `SELECT 1 FROM memberships member JOIN free_agents free ON free.agent_id=member.identity_id
+           WHERE member.workspace_id=$1 AND member.room_id IS NULL AND member.removed_at IS NULL`, [row.workspace_id])).rowCount) {
           await ctx.freeAgents.createInWorkspace(database, { workspaceId: row.workspace_id, creatorId: viewerId, roomId });
         }
       }

@@ -248,7 +248,6 @@ describe('save_workflow error reasons', () => {
 describe('start_workflow', () => {
   it('Reproduction workflow-notice-1: reads compact workflow cards through the phone service, retaining text and wakes (workflow-line-1)', async () => {
     await database.query(`UPDATE identities SET handle='impy' WHERE id=$1`, [IMPLEMENTER]);
-    await database.query(`INSERT INTO memberships(workspace_id,identity_id,role) VALUES($1,$2,'owner')`, [WORKSPACE, OWNER]);
     const command = await commandFor(IMPLEMENTER);
     await saveWorkflow(database, command, { contract: describedWorkflow(CONTRACT) });
     const { runId } = await startWorkflow(database, command, {
@@ -308,7 +307,7 @@ describe('start_workflow', () => {
     const wrap = (inner: SqlDatabase): SqlDatabase => ({
       async query<Row extends QueryResultRow = QueryResultRow>(sql: string, values?: unknown[]) {
         const result = await inner.query<Row>(sql, values);
-        if (!removed && sql.includes('SELECT member.identity_id,') && sql.includes('FROM effective_memberships member')) {
+        if (!removed && sql.includes('SELECT member.identity_id,') && sql.includes('FROM room_access member')) {
           // Model a committed removal between READ COMMITTED statements. PGlite
           // serializes transactions, so remove through the same connection.
           removed = true;

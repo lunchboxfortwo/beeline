@@ -1,22 +1,20 @@
 import { migrate } from './database.js';
-import { phoneFetch, describe, expect, it, vi, MCP_ORDER_WAKE_HINT, MCP_REVIEW_WAKE_HINT, backfillMcpMemberRoomsAndAvatars, ensureMcpMember, randomBytes, createHash, randomUUID, Client, StreamableHTTPClientTransport, tokenHash, MCP_AGENT_EXCLUSIONS, MCP_APP_ROUTE_OPERATIONS, createAgentCommand, routeHumanMessage, routeAgentResult, openSecrets, deliverMcpMemberWebhooks, PREREGISTERED_MCP_CLIENTS, readFileSync, sharp, FACE_SOULS, USER, OTHER, AGENT, WORKSPACE, ROOM, PRIVATE, CORNER, opaque, fixtureScope1, fixtureScope2, fixtureScope3 } from './test-support-rooms-mcp.test-support.js';
+import { phoneFetch, describe, expect, it, vi, MCP_ORDER_WAKE_HINT, MCP_REVIEW_WAKE_HINT, backfillMcpMemberAvatars, ensureMcpMember, randomBytes, createHash, randomUUID, Client, StreamableHTTPClientTransport, tokenHash, MCP_AGENT_EXCLUSIONS, MCP_APP_ROUTE_OPERATIONS, createAgentCommand, routeHumanMessage, routeAgentResult, openSecrets, deliverMcpMemberWebhooks, PREREGISTERED_MCP_CLIENTS, readFileSync, sharp, FACE_SOULS, USER, OTHER, AGENT, WORKSPACE, ROOM, PRIVATE, CORNER, opaque, fixtureScope1, fixtureScope2, fixtureScope3 } from './test-support-rooms-mcp.test-support.js';
 import { bundledMcpLogo } from './rooms-mcp-logos.js';
 
 describe('Rooms connector HTTP OAuth and MCP', () => {
 const scope1 = fixtureScope1();
 
-  it('MCP-WORKSPACE-1: legacy connections retain all-Workspace behavior until explicit re-consent', async () => {
+  it('MCP-WORKSPACE-1: ordinary membership never follows the owner into another Workspace automatically', async () => {
     const grant = await scope1.authorize();
-    await scope1.db.query('UPDATE rooms_mcp_members SET workspace_ids=NULL WHERE client_id=$1', [grant.clientId]);
     const laterWorkspace = randomUUID(), laterRoom = randomUUID();
     await scope1.db.query(`INSERT INTO workspaces(id,name) VALUES($1,'New legacy Workspace')`, [laterWorkspace]);
     await scope1.db.query(`INSERT INTO memberships(workspace_id,identity_id,role) VALUES($1,$2,'owner')`, [laterWorkspace, USER]);
     await scope1.db.query(`INSERT INTO rooms(id,workspace_id,name,visibility) VALUES($1,$2,'Legacy public Room','public')`, [laterRoom, laterWorkspace]);
     try {
       const member = await ensureMcpMember(scope1.db, { clientId: grant.clientId, ownerId: USER, modelLabel: 'Local MCP reviewer' });
-      expect((await scope1.db.query('SELECT 1 FROM memberships WHERE identity_id=$1 AND room_id=$2 AND removed_at IS NULL', [member, laterRoom])).rowCount).toBe(1);
-      expect((await scope1.db.query<{ workspace_ids: string[] | null }>('SELECT workspace_ids FROM rooms_mcp_members WHERE client_id=$1', [grant.clientId])).rows[0]!.workspace_ids).toBeNull();
-      await scope1.authorize(undefined, 'allow', grant.clientId);
+      expect((await scope1.db.query('SELECT 1 FROM memberships WHERE identity_id=$1 AND room_id=$2 AND removed_at IS NULL', [member, laterRoom])).rowCount).toBe(0);
+      await scope1.authorize(undefined, 'allow', grant.clientId, undefined, { workspace_ids: [WORKSPACE,laterWorkspace] });
       await ensureMcpMember(scope1.db, { clientId: grant.clientId, ownerId: USER, modelLabel: 'Local MCP reviewer' });
       expect((await scope1.db.query('SELECT 1 FROM memberships WHERE identity_id=$1 AND workspace_id=$2 AND removed_at IS NULL', [member, laterWorkspace])).rowCount).toBe(2);
     } finally { await scope1.db.query('DELETE FROM workspaces WHERE id=$1', [laterWorkspace]); }
@@ -140,8 +138,8 @@ const scope1 = fixtureScope1();
       const duplicateFlow = new URLSearchParams(body); duplicateFlow.append('flow', flow);
       expect((await submit(duplicateFlow)).status).toBe(400);
       expect((await submit(body)).status).toBe(302);
-      const saved = (await scope1.db.query<{ workspace_ids: string[] }>('SELECT workspace_ids FROM rooms_mcp_members WHERE client_id=$1', [clientId])).rows[0]!;
-      expect([...saved.workspace_ids].sort()).toEqual([WORKSPACE, secondWorkspace].sort());
+      const saved = (await scope1.db.query<{ workspace_id: string }>(`SELECT joined.workspace_id FROM memberships joined JOIN rooms_mcp_members member ON member.member_id=joined.identity_id WHERE member.client_id=$1 AND joined.room_id IS NULL AND joined.removed_at IS NULL`, [clientId])).rows;
+      expect(saved.map(row => row.workspace_id).sort()).toEqual([WORKSPACE, secondWorkspace].sort());
     } finally { await scope1.db.query('DELETE FROM workspaces WHERE id=$1', [secondWorkspace]); }
   });
 
@@ -188,14 +186,14 @@ const scope1 = fixtureScope1();
     // A default from the old bundled mark is upgraded; custom provenance wins,
     // including legacy request ids that predate drawing.source.
     await scope1.db.query("UPDATE agent_avatars SET bytes=$2 WHERE agent_id=$1", [member.member_id, Buffer.from('old default')]);
-    await backfillMcpMemberRoomsAndAvatars(scope1.db);
+    await backfillMcpMemberAvatars(scope1.db);
     const updated = (await scope1.db.query<{ bytes: Buffer; id: string }>('SELECT bytes,id FROM agent_avatars WHERE agent_id=$1', [member.member_id])).rows[0]!;
     expect(Buffer.from(updated.bytes).toString()).not.toBe('old default');
-    await backfillMcpMemberRoomsAndAvatars(scope1.db);
+    await backfillMcpMemberAvatars(scope1.db);
     expect((await scope1.db.query<{ id: string }>('SELECT id FROM agent_avatars WHERE agent_id=$1', [member.member_id])).rows[0]!.id).toBe(updated.id);
     for (const [request, drawing] of [['rooms-mcp-set_profile', { source: 'set_profile' }], ['mcp-set-profile-hotfix', []], ['rooms-mcp-client-logo', { source: 'set_profile' }]]) {
       await scope1.db.query("UPDATE agent_avatars SET request_id=$2,drawing=$3::jsonb WHERE agent_id=$1", [member.member_id, request, JSON.stringify(drawing)]);
-      await backfillMcpMemberRoomsAndAvatars(scope1.db);
+      await backfillMcpMemberAvatars(scope1.db);
       expect((await scope1.db.query<{ id: string }>('SELECT id FROM agent_avatars WHERE agent_id=$1', [member.member_id])).rows[0]!.id).toBe(updated.id);
     }
   });

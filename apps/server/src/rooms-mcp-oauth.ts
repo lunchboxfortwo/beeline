@@ -427,7 +427,9 @@ export class RoomsMcpOAuth {
             `SELECT w.id,w.name,(SELECT count(*)::integer FROM rooms r WHERE r.workspace_id=w.id
                AND r.parent_id IS NULL AND r.direct_participants IS NULL AND r.archived_at IS NULL
                AND r.visibility='public') AS "publicRoomCount",
-               (member.workspace_ids IS NULL OR w.id=ANY(member.workspace_ids)) selected,
+               (member.member_id IS NULL OR EXISTS(SELECT 1 FROM memberships selected
+                 WHERE selected.workspace_id=w.id AND selected.identity_id=member.member_id
+                   AND selected.room_id IS NULL AND selected.removed_at IS NULL)) selected,
                EXISTS(SELECT 1 FROM memberships joined WHERE joined.workspace_id=w.id
                  AND joined.identity_id=member.member_id AND joined.room_id IS NULL
                  AND joined.removed_at IS NULL) AS "alreadyConnected"

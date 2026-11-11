@@ -105,7 +105,7 @@ describe('command-owned coherent activation context',()=>{
     await expect(daemon.execute('authorizeSquireCall',context,agent)).rejects.toThrow('resource owner access denied');
   });
   it('omits optional repository guidance from free-agent configuration with no verified requester',async()=>{
-    await db.query(`INSERT INTO free_agents(agent_id,workspace_id,owner_id,sealed_keys) VALUES($1,$2,$3,'synthetic')`,[agent,workspace,owner]);
+    await db.query(`WITH workspace AS (SELECT $2::uuid) INSERT INTO free_agents(agent_id,owner_id,sealed_keys) VALUES($1,$3,'synthetic')`,[agent,workspace,owner]);
     try{
       expect((await daemon.readCommandActivation(input,agent)).configuration.soul?.instructions).toContain(FREE_AGENT_REPOSITORY_GUIDE);
       await db.query(`UPDATE agent_commands SET root_source_message_id=id WHERE id=$1`,[input.commandId]);

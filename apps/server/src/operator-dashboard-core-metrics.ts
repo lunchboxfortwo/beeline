@@ -220,8 +220,9 @@ free_days AS MATERIALIZED (
   FROM free_agent_events event
   JOIN free_agents f ON f.agent_id=event.agent_id
   JOIN eligible owner ON owner.id=f.owner_id
-  JOIN production_workspaces w ON w.id=f.workspace_id
-  WHERE event.kind='model_usage' AND ${IN_WINDOW('event.at')}
+  WHERE EXISTS(SELECT 1 FROM memberships member JOIN production_workspaces w ON w.id=member.workspace_id
+    WHERE member.identity_id=f.agent_id AND member.room_id IS NULL)
+  AND event.kind='model_usage' AND ${IN_WINDOW('event.at')}
 ),
 own_turns AS MATERIALIZED (
   SELECT ${DAY('t.created_at')} metric_day,

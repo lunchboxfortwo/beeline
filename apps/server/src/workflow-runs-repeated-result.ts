@@ -495,7 +495,7 @@ export async function validateWorkflowBindings(
   input: { roleBindings: Readonly<Record<string, WorkflowRoleBinding>> },
 ): Promise<void> {
   const members = (await db.query<{ identity_id: string; handle: string | null; kind: string }>(
-    `SELECT member.identity_id,beeline_workspace_handle(identity.id,member.workspace_id) handle,identity.kind FROM effective_memberships member
+    `SELECT member.identity_id,beeline_workspace_handle(identity.id,member.workspace_id) handle,identity.kind FROM room_access member
      JOIN identities identity ON identity.id=member.identity_id
      WHERE member.room_id=$1 AND member.removed_at IS NULL`, [roomId],
   )).rows;

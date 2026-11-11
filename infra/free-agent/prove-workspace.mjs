@@ -127,7 +127,7 @@ try {
   };
   const workspace = await request('/v1/phone/operations/createWorkspace', { name: 'Isolated Pi Workspace proof' });
   const { roomId } = workspace;
-  const agent = (await db.query('SELECT a.agent_id,a.harness,i.handle FROM agents a JOIN free_agents f ON f.agent_id=a.agent_id JOIN identities i ON i.id=a.agent_id WHERE f.workspace_id=$1', [workspace.id])).rows[0];
+  const agent = (await db.query('SELECT a.agent_id,a.harness,i.handle FROM agents a JOIN free_agents f ON f.agent_id=a.agent_id JOIN memberships member ON member.identity_id=f.agent_id AND member.room_id IS NULL JOIN identities i ON i.id=a.agent_id WHERE member.workspace_id=$1', [workspace.id])).rows[0];
   if (!agent || agent.harness !== 'pi') throw new Error('new Workspace did not create a Pi agent');
   const sentId = randomBytes(32).toString('hex');
   await request('/v1/phone/operations/sendRoomMessage', { roomId, messageId: sentId, text: `@${agent.handle} reply with ${expected}`, mentions: [agent.agent_id] });

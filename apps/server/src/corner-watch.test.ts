@@ -24,6 +24,8 @@ beforeAll(async () => {
   );
   await db.query(`INSERT INTO agents(agent_id,owner_id) VALUES($1,$2)`, [W, H]);
   await db.query(`INSERT INTO workspaces(id,name) VALUES($1,'Watch test')`, [WS]);
+  await db.query(`INSERT INTO memberships(workspace_id,identity_id,role)
+    VALUES($1,$2,'owner'),($1,$3,'member')`, [WS,H,W]);
   await db.query(
     `INSERT INTO rooms(id,workspace_id,name,parent_id) VALUES($1,$4,'Parent',NULL),($2,$4,'A',$1),($3,$4,'B',$1)`,
     [P, A, B, WS],

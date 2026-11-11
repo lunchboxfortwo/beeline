@@ -17,7 +17,10 @@ export async function warnFreeAgentOwner(
   if (dailyTokenCap <= 0) return;
   const id = createHash('sha256').update(`free-agent-warning:${ownerId}:${day}`).digest('hex');
   await database.query(`WITH candidate AS (
-    SELECT free.agent_id,free.workspace_id FROM free_agents free WHERE free.agent_id=$1 AND free.owner_id=$2
+    SELECT free.agent_id,member.workspace_id FROM free_agents free
+    JOIN memberships member ON member.identity_id=free.agent_id AND member.room_id IS NULL AND member.removed_at IS NULL
+    JOIN rooms room ON room.id=$4 AND room.workspace_id=member.workspace_id
+    WHERE free.agent_id=$1 AND free.owner_id=$2
       AND EXISTS(SELECT 1 FROM memberships WHERE room_id=$4 AND identity_id=$2 AND removed_at IS NULL)
       AND (SELECT COALESCE(SUM((event.detail->>'tokens')::bigint),0)
         FROM free_agent_events event JOIN free_agents agent ON agent.agent_id=event.agent_id
@@ -46,7 +49,9 @@ export async function recordAgentConnectedAfterNudge(
 ): Promise<void> {
   await db.query(`INSERT INTO free_agent_events(agent_id,kind,detail)
     SELECT free.agent_id,'agent_connected_after_nudge',jsonb_build_object('connectedAgentId',$3::text)
-    FROM free_agents free WHERE free.owner_id=$1 AND free.workspace_id=$2
+    FROM free_agents free JOIN memberships member ON member.identity_id=free.agent_id
+      AND member.room_id IS NULL AND member.removed_at IS NULL
+    WHERE free.owner_id=$1 AND member.workspace_id=$2
       AND NOT EXISTS(SELECT 1 FROM free_agents own WHERE own.agent_id=$3)
       AND EXISTS(SELECT 1 FROM free_agent_events event WHERE event.agent_id=free.agent_id
         AND event.kind IN ('allowance_warning','nudge_shown') AND event.at>=now()-interval '24 hours')
@@ -59,12 +64,14 @@ export async function recordAgentConnectedAfterNudge(
 export async function recordFreeAgentGuideStarted(database: SqlDatabase, ownerId: string, workspaceId: string): Promise<void> {
   await database.query(`INSERT INTO free_agent_events(agent_id,kind,detail)
     SELECT free.agent_id,'guide_started',jsonb_build_object('source','add_agent_command','warningId',warning.id)
-    FROM free_agents free JOIN LATERAL (
+    FROM free_agents free JOIN memberships member ON member.identity_id=free.agent_id
+      AND member.room_id IS NULL AND member.removed_at IS NULL
+    JOIN LATERAL (
       SELECT event.id FROM free_agent_events event WHERE event.agent_id=free.agent_id
         AND event.kind='allowance_warning' AND event.at>=now()-interval '24 hours'
       ORDER BY event.at DESC,event.id DESC LIMIT 1
     ) warning ON true
-    WHERE free.owner_id=$1 AND free.workspace_id=$2
+    WHERE free.owner_id=$1 AND member.workspace_id=$2
       AND NOT EXISTS(SELECT 1 FROM free_agent_events started WHERE started.agent_id=free.agent_id
         AND started.kind='guide_started' AND started.detail->>'warningId'=warning.id::text)
     ON CONFLICT DO NOTHING`,

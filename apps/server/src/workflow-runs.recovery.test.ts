@@ -8,7 +8,7 @@ import { LiveHub } from './live.js';
 import { describedWorkflow } from './test-support.js';
 import { SYSTEM_IDENTITY_ID } from '@beeline/api-contract/system-identity';
 import { createHash, randomBytes, randomUUID } from 'node:crypto';
-import { beforeEach, describe, expect, it, vi } from 'vitest';
+import { describe, expect, it, vi } from 'vitest';
 import { migrate, migrateData, type SqlDatabase } from './database.js';
 import { claimAgentCommand, createAgentCommand, readAgentCommands, type CommandRow } from './agent-command.js';
 import { postRoomChoice } from './room-choice.js';
@@ -116,10 +116,6 @@ describe('backfillWorkflowSkillDescriptions', () => {
       expect(version.markdown).not.toContain('describe what this step does');
       expect(version.content_hash).toBe(createHash('sha256').update(version.markdown).digest('hex'));
     }
-    await database.query(
-      `INSERT INTO memberships(workspace_id,room_id,identity_id,role) VALUES($1,NULL,$2,'owner')`,
-      [WORKSPACE, OWNER],
-    );
     const command = await commandFor(WORKER_A);
     const { runId } = await startWorkflow(database, command, {
       name: 'feedback-triage', roleBindings: { triager: WORKER_A },
@@ -375,7 +371,6 @@ describe('blocked: an agent that cannot do its step hands it on', () => {
 
 describe('a result ends its turn without implicitly moving a workflow', () => {
   it('keeps the explicit workflow step after an answer and a late preceding receipt (WORKFLOW-NO-HANDOFF-1)', async () => {
-    await database.query(`INSERT INTO memberships(workspace_id,room_id,identity_id,role) VALUES($1,NULL,$2,'member')`,[WORKSPACE,WORKER_A]);
     await saveWorkflow(database, await commandFor(WORKER_A), { contract: describedWorkflow({
       version: 1, name: 'reply-failover', description: 'Exercise overlapping workflow turns',
       roles: ['maker', 'checker'], start: 'script', handoffs: {
@@ -511,7 +506,6 @@ describe('Reproduction workflow-stalls', () => {
   });
 
   it('commits a completed turn even when its workflow contract is missing', async () => {
-    await database.query(`INSERT INTO memberships(workspace_id,room_id,identity_id,role) VALUES($1,NULL,$2,'member')`,[WORKSPACE,WORKER_A]);
     const { runId } = await startedListRun();
     const command = (await database.query<CommandRow>(`SELECT * FROM agent_commands WHERE source_message_id=$1 AND agent_id=$2`, [runId, WORKER_A])).rows[0]!;
     const generationId = 'workflow-stalls-3';
@@ -541,11 +535,6 @@ describe('Reproduction workflow-stalls', () => {
 });
 
 describe('Reproduction run-status: one saved status for every reader', () => {
-  beforeEach(async () => {
-    // The app's run views also require the viewer's Workspace membership.
-    await database.query(`INSERT INTO memberships(workspace_id,room_id,identity_id,role) VALUES($1,NULL,$2,'owner')`, [WORKSPACE, OWNER]);
-  });
-
   async function savedStatus(runId: string): Promise<string | null> {
     return (await database.query<{ run_status: string | null }>(
       `SELECT card->>'runStatus' run_status FROM messages WHERE id=$1`, [runId],

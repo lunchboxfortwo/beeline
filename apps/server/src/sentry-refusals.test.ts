@@ -39,6 +39,8 @@ it('Reproduction SENTRY-3: missing installation posts the install prompt and ref
     await db.query(`INSERT INTO identities(id,kind,name) VALUES($1,'agent','Agent'),($2,'human','Owner')`, [agent, owner]);
     await db.query(`INSERT INTO agents(agent_id,owner_id) VALUES($1,$2)`, [agent, owner]);
     await db.query(`INSERT INTO workspaces(id,name) VALUES($1,'Refusal test')`, [workspace]);
+    await db.query(`INSERT INTO memberships(workspace_id,identity_id,role)
+      VALUES($1,$2,'owner'),($1,$3,'member')`, [workspace,owner,agent]);
     await db.query(`INSERT INTO rooms(id,workspace_id,name) VALUES($1,$2,'Room')`, [room, workspace]);
     await db.query(`INSERT INTO memberships(workspace_id,room_id,identity_id,role) VALUES($1,$2,$3,'member')`, [workspace, room, agent]);
     const daemon = new DaemonService(db, new LiveHub(), async () => { throw new Error('GitHub repository installation not found'); });

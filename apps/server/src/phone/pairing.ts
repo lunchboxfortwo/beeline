@@ -8,7 +8,7 @@ import { machineSquireReport } from '../squire-machine.js';
 import type { AgentPairingClaimView, InviteView } from '@beeline/api-contract/phone';
 import { assignSeededAgentIdentity, uniqueAgentHandle, isCommunityInviteToken, resolveFace } from '@beeline/api-contract/phone';
 import { type SqlDatabase } from '../database.js';
-import { ensureInvitedWorkspaceMembership, restorePairedWorkspaceMembership, joinRooms } from '../membership-join.js';
+import { ensureInvitedWorkspaceMembership, restoreInvitedWorkspaceMembership, joinRooms } from '../membership-join.js';
 import { grantSquireToOwnerMachineAgents } from '../workbench.js';
 import type { PhoneContext } from './context.js';
 import { hash, unix, normalizeAgentName, CONNECT_RENAME_WINDOW_MS } from './values.js';
@@ -266,7 +266,7 @@ import { hash, unix, normalizeAgentName, CONNECT_RENAME_WINDOW_MS } from './valu
         `UPDATE agent_pairing_codes SET claimed_by=$2,claimed_at=now() WHERE code_hash=$1`,
         [hash(input.code), input.agentPubkey],
       );
-      const workspaceMembership = await restorePairedWorkspaceMembership(database, [pairing.workspace_id, input.agentPubkey, pairing.created_by]);
+      const workspaceMembership = await restoreInvitedWorkspaceMembership(database, [pairing.workspace_id, input.agentPubkey, pairing.created_by]);
       // A deferring CLI joins Rooms itself through `finishAgentConnectPairing`
       // once its rename decision settles — a system line is a fact written
       // once, never rewritten by a later rename, so it must not be written

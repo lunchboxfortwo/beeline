@@ -73,8 +73,7 @@ describe('release refresh and committed free-agent sleep events', () => {
     const agent = agentId(n);
     await db.query(`INSERT INTO identities(id,kind,name) VALUES($1,'agent','Starter')`, [agent]);
     await db.query(`INSERT INTO agents(agent_id,owner_id) VALUES($1,$2)`, [agent, OWNER]);
-    await db.query(`INSERT INTO free_agents(agent_id,owner_id,workspace_id,sealed_keys,state,fly_machine_id,removed_at,created_at)
-      VALUES($1,$2,$3,'sealed',$4,$5,CASE WHEN $6 THEN now() END,now()-interval '30 days')`,
+    await db.query(`WITH member AS (INSERT INTO memberships(workspace_id,identity_id,role) SELECT $3,$1,'member' WHERE NOT EXISTS(SELECT 1 FROM memberships WHERE workspace_id=$3 AND identity_id=$1 AND room_id IS NULL)) INSERT INTO free_agents(agent_id,owner_id,sealed_keys,state,fly_machine_id,removed_at,created_at) VALUES($1,$2,'sealed',$4,$5,CASE WHEN $6 THEN now() END,now()-interval '30 days')`,
     [agent, OWNER, WORKSPACE, state, machine ? `m${n}` : null, removed]);
     fleet.set(`m${n}`, { state: flyState, instance_id: `v${n}`, config: {
       image: 'registry.fly.io/beeline-free-agents:old@sha256:old',

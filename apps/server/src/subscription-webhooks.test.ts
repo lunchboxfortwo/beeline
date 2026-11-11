@@ -22,7 +22,7 @@ async function fixture() {
   await db.query(`INSERT INTO workspaces(id,name) VALUES($1,'Workspace')`, [WORKSPACE]);
   await db.query(`INSERT INTO rooms(id,workspace_id,created_by,name) VALUES($1,$2,$3,'Room')`, [ROOM, WORKSPACE, OWNER]);
   await db.query(`INSERT INTO memberships(workspace_id,room_id,identity_id,role) VALUES
-    ($1,NULL,$2,'owner'),($1,$3,$2,'owner'),($1,$3,$4,'member'),($1,NULL,$5,'member'),($1,$3,$5,'admin')`,
+    ($1,NULL,$2,'owner'),($1,$3,$2,'owner'),($1,NULL,$4,'member'),($1,$3,$4,'member'),($1,NULL,$5,'member'),($1,$3,$5,'admin')`,
   [WORKSPACE, OWNER, ROOM, AGENT, MEMBER]);
   const root = 'd'.repeat(64);
   await db.query(`INSERT INTO messages(id,room_id,author_id,text) VALUES($1,$2,$3,'Make a webhook')`, [root, ROOM, OWNER]);

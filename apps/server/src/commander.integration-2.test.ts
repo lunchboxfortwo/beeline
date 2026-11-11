@@ -724,7 +724,7 @@ it('Reproduction R1: a same-place closing summary stays in activity even with an
 
 
 it('R-onb-15: a free agent post stays visible and the paraphrased final becomes activity', async () => {
-  await rootFixture.db.query(`INSERT INTO free_agents(agent_id,workspace_id,owner_id,sealed_keys) VALUES($1,$2,$3,'fixture')`,
+  await rootFixture.db.query(`WITH workspace AS (SELECT $2::uuid) INSERT INTO free_agents(agent_id,owner_id,sealed_keys) VALUES($1,$3,'fixture')`,
     [RUBY,WS,HUMAN]);
   const earlier = 'The card is up. Sign in to Link, then name the repository and I will start.';
   const final = 'The Link sign-in card is in the Room now. Sign in, then name the repo and I start.';

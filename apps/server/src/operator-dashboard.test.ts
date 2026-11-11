@@ -264,8 +264,7 @@ describe('private operator dashboard', () => {
     await rootFixture.db.query(`UPDATE identities SET created_at=$2::timestamptz-interval '14 days' WHERE id=$1`, [agent,today]);
     await rootFixture.db.query(`INSERT INTO agents(agent_id,owner_id) VALUES($1,$2),($3,$2),($4,$5)`,
       [freeFirst,freeOwner,ownLater,freeLater,human]);
-    await rootFixture.db.query(`INSERT INTO free_agents(agent_id,owner_id,workspace_id,sealed_keys,state,removed_at)
-      VALUES($1,$2,$3,'test','destroyed',now()),($4,$5,$3,'test','running',NULL)`,
+    await rootFixture.db.query(`WITH workspace AS (SELECT $3::uuid) INSERT INTO free_agents(agent_id,owner_id,sealed_keys,state,removed_at) VALUES($1,$2,'test','destroyed',now()),($4,$5,'test','running',NULL)`,
       [freeFirst,freeOwner,workspace,freeLater,human]);
     await rootFixture.db.query(`INSERT INTO push_devices(token,identity_id,platform,environment) VALUES
       ('free-owner',$1,'android','physical'),('no-agent',$2,'android','physical')`, [freeOwner,noAgent]);
@@ -717,7 +716,7 @@ it('counts addressed free-agent conversations and confirmed links within the sel
   const human = (n: number) => `a${n.toString(16).padStart(63, '0')}`;
   const agent = (n: number) => `b${n.toString(16).padStart(63, '0')}`;
   for (const n of [1, 2, 3, 7]) await rootFixture.db.query(
-    `INSERT INTO free_agents(agent_id,owner_id,workspace_id,sealed_keys) VALUES($1,$2,$3,'unused')`,
+    `WITH workspace AS (SELECT $3::uuid) INSERT INTO free_agents(agent_id,owner_id,sealed_keys) VALUES($1,$2,'unused')`,
     [agent(n), human(n), workspace],
   );
   async function conversation(id: string, owner: number, target: number, reply = true, state = 'complete', presentation = 'message') {

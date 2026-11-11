@@ -66,6 +66,8 @@ export function fixtureScope1() {
     await database.query(`INSERT INTO workspaces(id,name) VALUES($1,'Hive')`, [workspace]);
     await database.query(`INSERT INTO identities(id,kind,name) VALUES($1,'agent','Reviewer')`, [REVIEWER]);
     await database.query(`INSERT INTO agents(agent_id,owner_id,yolo_mode) VALUES($1,$2,true)`, [REVIEWER, HUMAN]);
+    await database.query(`INSERT INTO memberships(workspace_id,identity_id,role)
+      VALUES($1,$2,'member')`, [workspace, REVIEWER]);
     await database.query(`INSERT INTO github_installations(
       installation_id,owner_id,account_id,account_login,account_type,repository_selection,status
     ) VALUES(77,$1,'42','owner','User','selected','active')`, [HUMAN]);

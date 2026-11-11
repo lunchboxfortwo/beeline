@@ -32,7 +32,7 @@ describe('listAgentGrantRequests', () => {
       WORKSPACE,
     ]);
     await db.query(
-      `INSERT INTO memberships(workspace_id,room_id,identity_id,role) VALUES($1,$2,$3,'member')`,
+      `INSERT INTO memberships(workspace_id,room_id,identity_id,role) VALUES($1,NULL,$3,'member'),($1,$2,$3,'member')`,
       [WORKSPACE, ROOM, AGENT],
     );
     await db.query(
@@ -86,7 +86,7 @@ describe('listAgentGrantRequests', () => {
     );
     await db.query(`INSERT INTO agents(agent_id,owner_id) VALUES($1,$2)`, [stranger, OWNER]);
     await db.query(
-      `INSERT INTO memberships(workspace_id,room_id,identity_id,role) VALUES($1,$2,$3,'member')`,
+      `INSERT INTO memberships(workspace_id,room_id,identity_id,role) VALUES($1,NULL,$3,'member'),($1,$2,$3,'member')`,
       [WORKSPACE, ROOM, stranger],
     );
     const listed = await daemon.execute(
@@ -118,7 +118,7 @@ describe('listAgentGrantRequests', () => {
     const corner = '44444444-4444-4444-8444-444444444444';
     const grantId = '10000000-0000-4000-8000-000000000005';
     await db.query(`INSERT INTO memberships(workspace_id,room_id,identity_id,role)
-      VALUES($1,NULL,$2,'member')`, [WORKSPACE, OTHER_AGENT]);
+      VALUES($1,NULL,$2,'member') ON CONFLICT DO NOTHING`, [WORKSPACE, OTHER_AGENT]);
     await db.query(`INSERT INTO memberships(workspace_id,room_id,identity_id,role)
       VALUES($1,$2,$3,'member') ON CONFLICT DO NOTHING`, [WORKSPACE, ROOM, OTHER_AGENT]);
     await db.query(`INSERT INTO rooms(id,workspace_id,parent_id,name,created_by)

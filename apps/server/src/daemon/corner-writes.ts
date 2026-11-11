@@ -1,5 +1,5 @@
 import { cornerCommanderIdSql } from '../corner-commander.js';
-import { ensureRoomMembership } from '../membership-join.js';
+import { joinRooms } from '../membership-join.js';
 import { systemMessage } from '@beeline/api-contract/system-message-catalog';
 import { cornerObjectiveSql, readCornerObjective } from '../corner-objective.js';
 import { deleteCornerBranchBestEffort } from '../corner-branch-cleanup.js';
@@ -503,13 +503,13 @@ import { daemonReach, daemonWriteResult } from './corner-messages.js';
 
   export async function daemonEnsureMembership(ctx: DaemonContext, input: Input<'ensureAgentMembership'>, agentId: string) {
     const room = (
-      await ctx.database.query<{ workspace_id: string; parent_id: string | null }>(
-        `SELECT workspace_id,parent_id FROM rooms WHERE id=$1`,
+      await ctx.database.query<{ workspace_id: string; parent_id: string | null; visibility: string; direct_participants: unknown; archived_at: Date | null }>(
+        `SELECT workspace_id,parent_id,visibility,direct_participants,archived_at FROM rooms WHERE id=$1`,
         [input.roomId],
       )
     ).rows[0];
     if (!room) throw new Error('room not found');
-    if (room.parent_id) {
+    if (room.parent_id || room.visibility !== 'public' || room.direct_participants || room.archived_at) {
       await daemonAccess(ctx, input.roomId, agentId);
       return daemonWriteResult(ctx);
     }
@@ -518,6 +518,8 @@ import { daemonReach, daemonWriteResult } from './corner-messages.js';
       [room.workspace_id, agentId],
     );
     if (!workspaceMember.rowCount) throw new Error('daemon workspace access denied');
-    await ensureRoomMembership(ctx.database, [room.workspace_id, input.roomId, agentId]);
+    await joinRooms(ctx.database, { workspaceId: room.workspace_id, identityId: agentId,
+      invitedById: agentId, rooms: { type: 'rooms', roomIds: [input.roomId], publicOnly: true } });
+    await daemonAccess(ctx, input.roomId, agentId);
     return daemonWriteResult(ctx);
   }

@@ -27,7 +27,7 @@ import { createStarterOnboardingRun } from './starter-onboarding-run.js';
 export const FREE_AGENTS_SCHEMA = `
 CREATE TABLE IF NOT EXISTS free_agents (
   agent_id text PRIMARY KEY REFERENCES identities(id) ON DELETE CASCADE,
-  workspace_id uuid NOT NULL REFERENCES workspaces(id) ON DELETE CASCADE,
+  workspace_id uuid REFERENCES workspaces(id) ON DELETE SET NULL,
   owner_id text NOT NULL REFERENCES identities(id),
   state text NOT NULL DEFAULT 'provisioning'
     CHECK (state IN ('provisioning','waking','running','sleeping','stopped','failed','destroyed')),
@@ -44,6 +44,11 @@ CREATE TABLE IF NOT EXISTS free_agents (
   created_at timestamptz NOT NULL DEFAULT now(),
   updated_at timestamptz NOT NULL DEFAULT now()
 );
+-- Retired membership metadata stays readable through serving/rollback overlap.
+ALTER TABLE free_agents ALTER COLUMN workspace_id DROP NOT NULL;
+ALTER TABLE free_agents DROP CONSTRAINT IF EXISTS free_agents_workspace_id_fkey;
+ALTER TABLE free_agents ADD CONSTRAINT free_agents_workspace_id_fkey
+  FOREIGN KEY(workspace_id) REFERENCES workspaces(id) ON DELETE SET NULL;
 ALTER TABLE free_agents ADD COLUMN IF NOT EXISTS removed_at timestamptz;
 ALTER TABLE free_agents ADD COLUMN IF NOT EXISTS removal_cleaned_at timestamptz;
 ALTER TABLE free_agents ADD COLUMN IF NOT EXISTS runtime_operation_id text;
@@ -288,6 +293,7 @@ type FreeAgentCreationInput={workspaceId:string;creatorId:string;roomId:string;n
 
 export async function createFreeAgentInWorkspace(database:SqlDatabase,config:FreeAgentConfig,
   input:FreeAgentCreationInput):Promise<string|undefined>{
+  await database.query('SELECT id FROM workspaces WHERE id=$1 FOR UPDATE', [input.workspaceId]);
   if (!await reserveStarterAgents(database,input.creatorId,1,config.maxPerOwner)) return undefined;
   return createReservedFreeAgent(database,config,input);
 }
@@ -295,6 +301,13 @@ export async function createFreeAgentInWorkspace(database:SqlDatabase,config:Fre
 async function createReservedFreeAgent(database:SqlDatabase,config:FreeAgentConfig,
   input:FreeAgentCreationInput):Promise<string|undefined>{
   const name = input.name ?? 'Beebee';
+  if (name === 'Luna' && (await database.query(`SELECT 1 FROM memberships member
+    JOIN free_agents free ON free.agent_id=member.identity_id
+    WHERE member.workspace_id=$1 AND member.room_id IS NULL AND free.starter_role='luna'`,
+    [input.workspaceId])).rowCount) {
+    await refundStarterAgent(database,input.creatorId);
+    return undefined;
+  }
   const agent = generateAgentKeypair();
   const body = generateAgentKeypair();
   const roster = await database.query<{ id: string; name: string; face_id: string | null; handle: string | null }>(
@@ -328,25 +341,17 @@ async function createReservedFreeAgent(database:SqlDatabase,config:FreeAgentConf
       FREE_AGENT_HARNESS,
     ],
   );
-  const claimed = await database.query(
-    `INSERT INTO free_agents(agent_id,workspace_id,owner_id,sealed_keys,model,starter_role)
-     VALUES($1,$2,$3,$4,$5,$6) ON CONFLICT(workspace_id) WHERE starter_role='luna' DO NOTHING RETURNING agent_id`,
+  await database.query(
+    `INSERT INTO free_agents(agent_id,owner_id,sealed_keys,model,starter_role)
+     VALUES($1,$2,$3,$4,$5)`,
     [
       agent.publicKey,
-      input.workspaceId,
       input.creatorId,
       sealSecrets(config.sealSecret, { agent: agent.secretKey, body: body.secretKey }),
       config.model,
       input.team ? name.toLowerCase() : null,
     ],
   );
-  if (!claimed.rowCount) {
-    await refundStarterAgent(database,input.creatorId);
-    // No membership, hello, key exchange or provisioning can observe a loser.
-    await database.query('DELETE FROM agents WHERE agent_id=$1', [agent.publicKey]);
-    await database.query('DELETE FROM identities WHERE id=$1', [agent.publicKey]);
-    return undefined;
-  }
   await createInvitedWorkspaceMembership(database, [input.workspaceId, agent.publicKey, input.creatorId]);
   await joinRooms(database, {
     workspaceId: input.workspaceId,
@@ -407,7 +412,9 @@ export async function addFreeAgentToWorkspace(
   const agentId = await database.transaction(async (db) => {
     // Serialize operator retries so two additions cannot post two first hellos.
     await db.query(`SELECT id FROM workspaces WHERE id=$1 FOR UPDATE`, [workspaceId]);
-    const existing = await db.query(`SELECT 1 FROM free_agents WHERE workspace_id=$1`, [workspaceId]);
+    const existing = await db.query(`SELECT 1 FROM memberships member
+      JOIN free_agents free ON free.agent_id=member.identity_id
+      WHERE member.workspace_id=$1 AND member.room_id IS NULL`, [workspaceId]);
     if (existing.rowCount) return undefined;
     const target = (
       await db.query<{ owner_id: string; room_id: string }>(
@@ -513,11 +520,13 @@ export class FreeAgentService {
     input: { workspaceId: string; creatorId: string; roomId: string; team?: boolean; timeZone?: string; locale?: string },
   ): Promise<string | undefined> {
     if (!input.team) return createFreeAgentInWorkspace(database,this.config,input);
+    await database.query('SELECT id FROM workspaces WHERE id=$1 FOR UPDATE', [input.workspaceId]);
     if (!await reserveStarterAgents(database,input.creatorId,2,this.config.maxPerOwner)) {
       const existing = (await database.query<{ name: string; workspace_name: string }>(
         `SELECT identity.name,workspace.name workspace_name FROM free_agents free
          JOIN identities identity ON identity.id=free.agent_id
-         JOIN workspaces workspace ON workspace.id=free.workspace_id
+         JOIN memberships member ON member.identity_id=free.agent_id AND member.room_id IS NULL AND member.removed_at IS NULL
+         JOIN workspaces workspace ON workspace.id=member.workspace_id
          WHERE free.owner_id=$1 AND free.removed_at IS NULL ORDER BY free.created_at,free.agent_id`,
         [input.creatorId],
       )).rows;
@@ -699,9 +708,13 @@ export class FreeAgentService {
           soul: { instructions?: string } | null;
           model: string | null;
         }>(
-          `SELECT f.agent_id,f.owner_id,f.workspace_id,w.name workspace_name,f.sealed_keys,
+          `SELECT f.agent_id,f.owner_id,member.workspace_id,w.name workspace_name,f.sealed_keys,
                   i.name,a.soul,f.model
-           FROM free_agents f JOIN workspaces w ON w.id=f.workspace_id
+           FROM free_agents f
+           JOIN LATERAL (SELECT workspace_id FROM memberships
+             WHERE identity_id=f.agent_id AND room_id IS NULL AND removed_at IS NULL
+             ORDER BY joined_at,id LIMIT 1) member ON true
+           JOIN workspaces w ON w.id=member.workspace_id
            JOIN identities i ON i.id=f.agent_id JOIN agents a ON a.agent_id=f.agent_id
            WHERE f.bootstrap_hash=$1 AND f.removed_at IS NULL
            FOR UPDATE OF f`,

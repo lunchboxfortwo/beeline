@@ -208,14 +208,14 @@ describe('free starter agents', () => {
     const workspace = await phone.execute('createWorkspace', { name: 'Manual welcome', timeZone: 'America/New_York' }, FRIEND);
     await finishWelcome(workspace.roomId!, FRIEND);
     const roomId = workspace.roomId!;
-    const beebee = (await db.query<{ agent_id: string }>(`SELECT agent_id FROM free_agents WHERE workspace_id=$1 AND starter_role='beebee'`, [workspace.id])).rows[0]!.agent_id;
+    const beebee = (await db.query<{ agent_id: string }>(`SELECT agent_id FROM free_agents JOIN memberships workspace_member ON workspace_member.identity_id=free_agents.agent_id AND workspace_member.room_id IS NULL WHERE workspace_member.workspace_id=$1 AND starter_role='beebee'`, [workspace.id])).rows[0]!.agent_id;
     const installId = '11111111-1111-4111-8111-111111111111', attemptId = '22222222-2222-4222-8222-222222222222';
     await recordSigninFunnelEvent(db, { event: 'signed_in', installId, attemptId, platform: 'android', version: 'test', environment: 'production', timestamp: new Date().toISOString() }, 'server', FRIEND);
     await db.query(`INSERT INTO signin_funnel_events(install_id,attempt_id,event,platform,version,source,occurred_at) VALUES($1,$2,'signup','android','test','server',now())`, [installId, attemptId]);
     // Run in another Room, proving the action does not silently target General.
     const other = await phone.execute('createRoom', { workspaceId: workspace.id, name: 'onboarding-test' }, FRIEND);
     await phone.execute('addRoomMember', { roomId: other.id, memberId: beebee }, FRIEND);
-    const luna = (await db.query<{ agent_id: string }>(`SELECT agent_id FROM free_agents WHERE workspace_id=$1 AND starter_role='luna'`, [workspace.id])).rows[0]!.agent_id;
+    const luna = (await db.query<{ agent_id: string }>(`SELECT agent_id FROM free_agents JOIN memberships workspace_member ON workspace_member.identity_id=free_agents.agent_id AND workspace_member.room_id IS NULL WHERE workspace_member.workspace_id=$1 AND starter_role='luna'`, [workspace.id])).rows[0]!.agent_id;
     await phone.execute('addRoomMember', { roomId: other.id, memberId: luna }, FRIEND);
     const source = 'e'.repeat(64);
     await db.query(`INSERT INTO messages(id,room_id,author_id,text) VALUES($1,$2,$3,'run onboarding')`, [source, other.id, FRIEND]);
@@ -323,7 +323,7 @@ describe('free starter agents', () => {
     await finishWelcome(workspace.roomId!, OWNER);
     await phone.execute('sendRoomMessage', { roomId: workspace.roomId!, text: 'Plan a picnic' }, OWNER);
     const root = (await db.query<CommandRow>(`SELECT * FROM agent_commands WHERE room_id=$1`, [workspace.roomId])).rows[0]!;
-    const peer = (await db.query<{ agent_id: string }>(`SELECT agent_id FROM free_agents WHERE workspace_id=$1 AND starter_role='luna'`, [workspace.id])).rows[0]!.agent_id;
+    const peer = (await db.query<{ agent_id: string }>(`SELECT agent_id FROM free_agents JOIN memberships workspace_member ON workspace_member.identity_id=free_agents.agent_id AND workspace_member.room_id IS NULL WHERE workspace_member.workspace_id=$1 AND starter_role='luna'`, [workspace.id])).rows[0]!.agent_id;
     let parent = root;
     for (const [index, target] of [peer, root.agent_id, peer].entries()) {
       const source = String(index + 1).repeat(64);
@@ -398,7 +398,7 @@ describe('free starter agents', () => {
   const createWorkspace = async (name = 'Fresh', viewer = OWNER) => {
     const result = await phone.execute('createWorkspace', { name }, viewer) as { id: string; roomId: string };
     await finishWelcome(result.roomId!, viewer);
-    const agent = (await db.query<{ agent_id: string }>(`SELECT f.agent_id FROM free_agents f JOIN identities i ON i.id=f.agent_id WHERE workspace_id=$1 ORDER BY i.name`, [result.id])).rows[0];
+    const agent = (await db.query<{ agent_id: string }>(`SELECT f.agent_id FROM free_agents f JOIN memberships workspace_member ON workspace_member.identity_id=f.agent_id AND workspace_member.room_id IS NULL JOIN identities i ON i.id=f.agent_id WHERE workspace_member.workspace_id=$1 ORDER BY i.name`, [result.id])).rows[0];
     if (agent) {
       await createAgentCommand(db, { roomId: result.roomId, agentId: agent.agent_id, sourceMessageId: null, reason: 'human_tag' });
       await freeAgents.reconcile(agent.agent_id);
@@ -409,7 +409,7 @@ describe('free starter agents', () => {
   const freeAgentOf = async (workspaceId: string) =>
     (
       await db.query<{ agent_id: string; state: string; fly_machine_id: string | null }>(
-        `SELECT f.agent_id,f.state,f.fly_machine_id FROM free_agents f JOIN identities i ON i.id=f.agent_id WHERE workspace_id=$1 ORDER BY i.name`,
+        `SELECT f.agent_id,f.state,f.fly_machine_id FROM free_agents f JOIN memberships workspace_member ON workspace_member.identity_id=f.agent_id AND workspace_member.room_id IS NULL JOIN identities i ON i.id=f.agent_id WHERE workspace_member.workspace_id=$1 ORDER BY i.name`,
         [workspaceId],
       )
     ).rows[0]!;
@@ -431,7 +431,7 @@ describe('free starter agents', () => {
   it('replaces old team guidance for both existing free agents, including legacy roles, without changing personal agents', async () => {
     const workspace = await phone.execute('createWorkspace', { name: 'Feedback guide' }, OWNER);
     const members = (await db.query<{agent_id:string;soul:{instructions:string}}>(`SELECT f.agent_id,a.soul
-      FROM free_agents f JOIN agents a ON a.agent_id=f.agent_id WHERE f.workspace_id=$1`, [workspace.id])).rows;
+      FROM free_agents f JOIN memberships workspace_member ON workspace_member.identity_id=f.agent_id AND workspace_member.room_id IS NULL JOIN agents a ON a.agent_id=f.agent_id WHERE workspace_member.workspace_id=$1`, [workspace.id])).rows;
     expect(members).toHaveLength(2);
     const daemon = new DaemonService(db, live);
     const old = 'Original persona.\n\nYou are on a team with another free starter agent. Ask on the first three substantive questions, then only when in doubt. One review round per answer.';
@@ -542,7 +542,7 @@ describe('free starter agents', () => {
     const { id, roomId } = await phone.execute('createWorkspace', { name: 'Fresh' }, OWNER) as { id: string; roomId: string };
     await finishWelcome(roomId, OWNER);
     const team = (await db.query<{ agent_id: string }>(
-      `SELECT agent_id FROM free_agents WHERE workspace_id=$1 ORDER BY starter_role`, [id],
+      `SELECT agent_id FROM free_agents JOIN memberships workspace_member ON workspace_member.identity_id=free_agents.agent_id AND workspace_member.room_id IS NULL WHERE workspace_member.workspace_id=$1 ORDER BY starter_role`, [id],
     )).rows.map((row) => row.agent_id);
     expect(team).toHaveLength(2);
     expect((await db.query(`SELECT 1 FROM starter_onboarding_runs WHERE user_id=$1`, [OWNER])).rowCount).toBe(1);
@@ -597,12 +597,12 @@ describe('free starter agents', () => {
     await phone.execute('createWorkspace', { workspaceId, name: 'Once' }, OWNER);
     await phone.execute('createWorkspace', { workspaceId, name: 'Once' }, OWNER);
     expect(
-      (await db.query(`SELECT 1 FROM free_agents WHERE workspace_id=$1`, [workspaceId])).rowCount,
+      (await db.query(`SELECT 1 FROM free_agents JOIN memberships workspace_member ON workspace_member.identity_id=free_agents.agent_id AND workspace_member.room_id IS NULL WHERE workspace_member.workspace_id=$1`, [workspaceId])).rowCount,
     ).toBe(2);
     await createWorkspace('Two');
     await createWorkspace('Three');
     const { id } = await createWorkspace('Four');
-    expect((await db.query(`SELECT 1 FROM free_agents WHERE workspace_id=$1`, [id])).rowCount).toBe(0);
+    expect((await db.query(`SELECT 1 FROM free_agents JOIN memberships workspace_member ON workspace_member.identity_id=free_agents.agent_id AND workspace_member.room_id IS NULL WHERE workspace_member.workspace_id=$1`, [id])).rowCount).toBe(0);
     const notice = (await db.query<{ text: string }>(`SELECT text FROM messages message JOIN rooms room ON room.id=message.room_id
       WHERE room.workspace_id=$1 AND message.presentation='system'`, [id])).rows;
     expect(notice.some(line => line.text.includes('Your starter agents are already in') &&

@@ -1,4 +1,4 @@
-import { phoneFetch, describe, expect, it, vi, createServer, Webhook, MCP_ORDER_WAKE_HINT, MCP_REVIEW_WAKE_HINT, MCP_WAKE_HINT, backfillMcpMemberRoomsAndAvatars, ensureMcpMember, postMcpWebhook, randomBytes, createHash, randomUUID, Client, StreamableHTTPClientTransport, tokenHash, recordSigninAttempt, pendingMcpWakes, createAgentCommand, routeHumanMessage, openSecrets, deliverMcpMemberWebhooks, runMcpWebhookDelivery, USER, OTHER, AGENT, WORKSPACE, ROOM, opaque, fixtureScope1, type AddressInfo } from './test-support-rooms-mcp.test-support.js';
+import { phoneFetch, describe, expect, it, vi, createServer, Webhook, MCP_ORDER_WAKE_HINT, MCP_REVIEW_WAKE_HINT, MCP_WAKE_HINT, backfillMcpMemberAvatars, ensureMcpMember, postMcpWebhook, randomBytes, createHash, randomUUID, Client, StreamableHTTPClientTransport, tokenHash, recordSigninAttempt, pendingMcpWakes, createAgentCommand, routeHumanMessage, openSecrets, deliverMcpMemberWebhooks, runMcpWebhookDelivery, USER, OTHER, AGENT, WORKSPACE, ROOM, opaque, fixtureScope1, type AddressInfo } from './test-support-rooms-mcp.test-support.js';
 import { MCP_WEBHOOK_TABLE, POSTGRES_LIVE_CHANNEL } from './postgres-live-notifications.js';
 
 describe('Rooms connector HTTP OAuth and MCP', () => {
@@ -14,9 +14,8 @@ const scope1 = fixtureScope1();
       const grant = await scope1.authorize();
       expect(grant.consentHtml).toContain('Workspaces');
       expect(grant.consentHtml).toContain('Other eligible Workspace');
-      const member = (await scope1.db.query<{ member_id: string; workspace_ids: string[] }>(
-        'SELECT member_id,workspace_ids FROM rooms_mcp_members WHERE client_id=$1 AND owner_id=$2', [grant.clientId, USER])).rows[0]!;
-      expect(member.workspace_ids).toEqual([WORKSPACE]);
+      const member = (await scope1.db.query<{ member_id: string }>(
+        'SELECT member_id FROM rooms_mcp_members WHERE client_id=$1 AND owner_id=$2', [grant.clientId, USER])).rows[0]!;
       const response = await scope1.exchange(grant);
       expect(response.status).toBe(200);
       const tokens = await response.json() as { access_token: string; refresh_token: string };
@@ -31,7 +30,7 @@ const scope1 = fixtureScope1();
       expect((await scope1.post('/mcp/oauth/token', { grant_type: 'refresh_token', refresh_token: tokens.refresh_token,
         client_id: grant.clientId, resource: scope1.origin + '/mcp' })).status).toBe(200);
       await ensureMcpMember(scope1.db, { clientId: grant.clientId, ownerId: USER, modelLabel: 'Local MCP reviewer' });
-      await backfillMcpMemberRoomsAndAvatars(scope1.db);
+      await backfillMcpMemberAvatars(scope1.db);
       expect(await activeWorkspaces()).toEqual([WORKSPACE]);
       // Reconnecting may add a Workspace; deselection preserves existing memberships.
       const both = await scope1.authorize(undefined, 'allow', grant.clientId, undefined, { workspace_ids: [WORKSPACE, secondWorkspace] });
@@ -43,7 +42,7 @@ const scope1 = fixtureScope1();
       expect((await scope1.db.query('SELECT 1 FROM memberships WHERE identity_id=$1 AND workspace_id=$2 AND removed_at IS NULL', [member.member_id, WORKSPACE])).rowCount).toBeGreaterThan(0);
       expect((await client.callTool({ name: 'read_messages', arguments: { room: ROOM } })).isError).not.toBe(true);
       await ensureMcpMember(scope1.db, { clientId: grant.clientId, ownerId: USER, modelLabel: 'Local MCP reviewer' });
-      await backfillMcpMemberRoomsAndAvatars(scope1.db);
+      await backfillMcpMemberAvatars(scope1.db);
       expect(await activeWorkspaces()).toEqual([WORKSPACE, secondWorkspace].sort());
       const reconnect = await scope1.prepareAuthorization(undefined, grant.clientId);
       const checkboxes = reconnect.consentHtml.match(/<input\b[^>]*type="checkbox"[^>]*name="workspace_ids"[^>]*>/g) ?? [];

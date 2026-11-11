@@ -11,7 +11,7 @@ import { identitySubject, systemLine } from '../system-line.js';
 import { writeCornerTitle } from '../corner-title.js';
 import type { PhoneContext } from './context.js';
 import { Input } from './types.js';
-import { phoneRequireWorkspaceManager, phoneRequireTopLevelRoom, phoneRequireIdentity, phoneRequireTopLevelChatMember } from './access.js';
+import { phoneRequireWorkspaceManager, phoneRequireWorkspaceMember, phoneRequireTopLevelRoom, phoneRequireIdentity, phoneRequireTopLevelChatMember } from './access.js';
 import { normalizeHumanCornerTitle, UUID_PATTERN } from './values.js';
 
 
@@ -191,6 +191,7 @@ import { normalizeHumanCornerTitle, UUID_PATTERN } from './values.js';
     const name = input.name === undefined ? undefined : requireRoomSlug(input.name);
     const reviewerAgentId = input.reviewerAgentId;
     await ctx.database.transaction(async (database) => {
+      await database.query('SELECT id FROM workspaces WHERE id=$1 FOR UPDATE', [room.workspace_id]);
       if (name !== undefined)
         await reserveRoomName(database, room.workspace_id, name, input.roomId);
       const current = (
@@ -351,16 +352,23 @@ import { normalizeHumanCornerTitle, UUID_PATTERN } from './values.js';
     if (!memberIds.length || memberIds.length > ROOM_VIEW_MEMBER_LIMIT)
       throw new Error('invalid Room member list');
     const room = await phoneRequireTopLevelRoom(ctx, input.roomId);
-    await phoneRequireWorkspaceManager(ctx, room.workspace_id, viewerId);
-    const workspaceMembers = await ctx.database.query<{ identity_id: string }>(
+    return ctx.database.transaction(async (database) => {
+      await database.query('SELECT id FROM workspaces WHERE id=$1 FOR UPDATE', [room.workspace_id]);
+      const current = (await database.query<{visibility:string;archived_at:Date|null}>(
+        'SELECT visibility,archived_at FROM rooms WHERE id=$1 FOR UPDATE', [input.roomId])).rows[0];
+      if (!current) throw new Error('room not found');
+      if (current.archived_at) throw new Error('room is archived');
+      if (current.visibility === 'public' && memberIds.every(id => id === viewerId))
+        await phoneRequireWorkspaceMember(ctx, room.workspace_id, viewerId, database);
+      else await phoneRequireWorkspaceManager(ctx, room.workspace_id, viewerId, database);
+      const workspaceMembers = await database.query<{ identity_id: string }>(
       `SELECT identity_id FROM memberships
        WHERE workspace_id=$1 AND room_id IS NULL AND identity_id=ANY($2::text[])
          AND removed_at IS NULL`,
       [room.workspace_id, memberIds],
     );
-    if (workspaceMembers.rowCount !== memberIds.length)
-      throw new Error('workspace membership required');
-    return ctx.database.transaction(async (database) => {
+      if (workspaceMembers.rowCount !== memberIds.length)
+        throw new Error('workspace membership required');
       const joinedIds: string[] = [];
       for (const memberId of memberIds) {
         const result = await joinRooms(database, {

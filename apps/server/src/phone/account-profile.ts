@@ -4,7 +4,7 @@ import { cornerOwnerSql } from '../corner-worker.js';
 import { collapseTombstonedCornerHolds } from '../corner-holds.js';
 import { isFaceId, isPushLevel } from '@beeline/api-contract/phone';
 import { lockCornerLifecycle, clearCornerReviewers } from '../corner-lifecycle.js';
-import { transferWorkspaceOwnership, transferRoomOwnership, writeSurfacePushState } from '../membership-join.js';
+import { transferWorkspaceOwnership, writeSurfacePushState } from '../membership-join.js';
 import { ARTIFACT_TTL_HOURS, mediaTtlHours } from '../media-ttl.js';
 import { closeCornerState, lockCornerArchivalAuthority, markOwnedCornersAbandoned } from '../corner-close.js';
 import { DELETED_ACCOUNT_IDENTITY_ID, DELETED_ACCOUNT_NAME, SYSTEM_IDENTITY_ID } from '@beeline/api-contract/system-identity';
@@ -149,7 +149,6 @@ import { phoneManagedIdentity } from './repositories.js';
       // Ownership the account held alone passes to the longest-serving
       // remaining human (admin first), so the shared surfaces stay manageable.
       await transferWorkspaceOwnership(database, [gone]);
-      await transferRoomOwnership(database, [gone]);
 
       // Authored content survives as the shared record, anonymised to the one
       // hidden tombstone author. Nothing strips the tags those people were

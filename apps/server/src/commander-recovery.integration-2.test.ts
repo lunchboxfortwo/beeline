@@ -169,7 +169,8 @@ it('R1 carries a closed corner artifact into a successor brief and refuses priva
   await rootFixture.db.query(`UPDATE memberships SET removed_at=NULL WHERE room_id=$1 AND identity_id=$2`, [privateRoom, HUMAN]);
   const outsider = 'f'.repeat(64);
   await rootFixture.db.query(`INSERT INTO identities(id,kind,name,handle) VALUES($1,'human','Reader','reader')`, [outsider]);
-  await rootFixture.db.query(`INSERT INTO memberships(workspace_id,room_id,identity_id,role) VALUES($1,$2,$3,'member')`, [WS, ROOM, outsider]);
+  await rootFixture.db.query(`INSERT INTO memberships(workspace_id,room_id,identity_id,role)
+    VALUES($1,NULL,$3,'member'),($1,$2,$3,'member')`, [WS, ROOM, outsider]);
   await expect(tryPrivate()).rejects.toThrow('missing or unavailable in this Room');
   await rootFixture.db.query(`DELETE FROM memberships WHERE identity_id=$1`, [outsider]);
   const remoteSuccessor = await tryPrivate();
@@ -400,7 +401,8 @@ it('Reproduction R-ID: supplied private report and order ids reopen their payloa
   // A current Room member who is neither sender nor recipient cannot see it.
   const outsider = 'e'.repeat(64);
   await rootFixture.db.query(`INSERT INTO identities(id,kind,name) VALUES($1,'agent','Observer') ON CONFLICT DO NOTHING`, [outsider]);
-  await rootFixture.db.query(`INSERT INTO memberships(workspace_id,room_id,identity_id,role) VALUES($1,$2,$3,'member')`, [WS, ROOM, outsider]);
+  await rootFixture.db.query(`INSERT INTO memberships(workspace_id,room_id,identity_id,role)
+    VALUES($1,NULL,$3,'member'),($1,$2,$3,'member')`, [WS, ROOM, outsider]);
   await expect(read(report.id, outsider, ROOM)).rejects.toThrow('message access denied');
   await expect(read(turn.id, outsider, ROOM)).rejects.toThrow('message access denied');
   await rootFixture.db.query(`UPDATE memberships SET removed_at=now() WHERE room_id=$1 AND identity_id=$2`, [DM, RUBY]);

@@ -160,7 +160,7 @@ const scope1 = fixtureScope1();
     const freeAgent = 'e'.repeat(64);
     await scope1.database.query("INSERT INTO identities(id,kind,name) VALUES($1,'agent','Free server')", [freeAgent]);
     await scope1.database.query('INSERT INTO agents(agent_id,owner_id) VALUES($1,$2)', [freeAgent, HUMAN]);
-    await scope1.database.query("INSERT INTO free_agents(agent_id,workspace_id,owner_id,sealed_keys,state) VALUES($1,$2,$3,'sealed','running')", [freeAgent, WORKSPACE, HUMAN]);
+    await scope1.database.query("WITH workspace AS (SELECT $2::uuid) INSERT INTO free_agents(agent_id,owner_id,sealed_keys,state) VALUES($1,$3,'sealed','running')", [freeAgent, WORKSPACE, HUMAN]);
     await scope1.database.query("INSERT INTO memberships(workspace_id,identity_id,role) VALUES($1,$2,'member')", [WORKSPACE, freeAgent]);
     await scope1.daemonOperation('postConnectorVault', { connections: [{ reference: 'synthetic-login', service: 'x-y-z', label: 'production-login',
       allowedHosts: [], loginHosts: ['login.example.co.uk'], faviconDomain: 'example.co.uk', keyName: 'EXAMPLE_LOGIN', credentialKind: 'login', expiresAt: 1,
