@@ -6,12 +6,20 @@ import * as Native from 'react-native';
 const { ScrollView, Text, View } = Native;
 import { beelineThemes } from '@/buzz/groknight';
 import { reportClientError, type ClientErrorScope } from '@/buzz/client-error-report';
+import { checkNativeUpdate, reloadNativeUpdate } from '@/hooks/useUpdates';
 
 /** Uses plain token styles, with no theme, navigation, modal or safe-area hooks. */
 export function RuntimeErrorView({ error, retry, scope }: {
   error: unknown; retry(): void; scope: ClientErrorScope;
 }) {
   React.useEffect(() => { void reportClientError(scope, error); }, [scope, error]);
+  React.useEffect(() => {
+    if (scope !== 'app' || Native.Platform.OS === 'web') return;
+    // The root boundary replaces UpdateProvider, so recovery owns one check here.
+    void checkNativeUpdate().then(async (update) => {
+      if (update.available) await reloadNativeUpdate();
+    }).catch(() => { /* Keep the original error and Retry available. */ });
+  }, [scope]);
   const theme = Native.Appearance.getColorScheme() === 'dark' ? beelineThemes.obsidian : beelineThemes.bone;
   const explanation = scope === 'app' ? 'Beeline could not display this screen' : 'Conversation mode could not start';
   return (
