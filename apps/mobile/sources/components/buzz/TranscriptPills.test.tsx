@@ -60,3 +60,65 @@ it('MERGE-ROWS-1 shows the merge count immediately and expands every stored even
   expect(control('notification-run-more-merge-0').props.accessibilityLabel).toBe('12 more events');
   act(() => tree.unmount());
 });
+
+// Exercise the production chat renderer's row choice with native hosts replaced.
+vi.mock('expo-router', () => ({ router: {} }));
+vi.mock('@/modal', () => ({ Modal: {} }));
+vi.mock('@/buzz/app-sign-in', () => ({ openAppSignIn: vi.fn() }));
+vi.mock('@/sync/transport/monolith-operation', () => ({ monolithPhoneOperation: vi.fn(), phoneOperationFailureReason: vi.fn() }));
+vi.mock('@/components/buzz/VaultSaveCard', () => ({ VaultSaveCard: () => null }));
+vi.mock('@/components/buzz/AgentSignInCard', () => ({ AgentSignInCard: () => null }));
+vi.mock('@/components/buzz/ComputerSession', () => ({ ComputerSessionCard: () => null }));
+vi.mock('@/components/buzz/CornerOpenedMarker', () => ({ CornerOpenedMarkers: () => null }));
+vi.mock('@/components/buzz/GrantRequestCard', () => ({ canDecideGrantRequest: () => false, GrantRequestPill: () => null }));
+vi.mock('@/app/(app)/beeline/chat/RepositoryOnboardingCard', () => ({ RepositoryOnboardingCard: () => null }));
+vi.mock('@/app/(app)/beeline/chat/chat-surface-values', () => ({
+  knownAgentPubkeysFor: (agents: Map<string, unknown>) => new Set(agents.keys()),
+  rosterAgent: () => undefined, durableFactLine: () => '',
+}));
+vi.mock('@/buzz/room-message-cell', () => ({
+  messageFailureGroups: () => new Map(), archiveActionPresentation: () => ({}),
+  liveCardPresentation: () => ({}), messageRosterPresentation: () => ({}),
+  useRoomMessageRenderItem: ({ render }: any) => ({ item }: any) => render(item, {}),
+}));
+vi.mock('@/app/(app)/beeline/chat/RoomMessageVariants', async () => {
+  const { agentCommandTranscriptMessage } = await import('@/buzz/agent-command-transcript');
+  const { Text } = await import('react-native');
+  return {
+    agentCommandTranscriptMessage,
+    OrdinaryLedgerMessage: ({ message }: any) => <Text>{message.text}</Text>,
+    GitHubEventCard: () => null, NotificationLifecycleCard: () => null, DaemonFactCard: () => null,
+    GrantRequestCard: () => null, SquireApprovalCard: () => null, ConnectorOfferCard: () => null,
+    AppSignInCard: () => null, ChoiceCard: () => null, WalletCards: () => null,
+    TargetBranchProposalCard: () => null, WritePermissionCard: () => null,
+  };
+});
+import { useChatTranscriptRenderer } from '@/app/(app)/beeline/chat/useChatTranscriptRenderer';
+
+it.each([false, true])('UAR-1 chat renders person-facing report text immediately (desktop=%s)', desktop => {
+  Object.assign(globalThis, { IS_REACT_ACT_ENVIRONMENT: true });
+  const args: unknown[] = Array(69).fill(undefined);
+  args[10] = new Map(); args[11] = new Map(); args[12] = new Map([['ruby', {}], ['worker', {}]]);
+  args[13] = []; args[17] = {}; args[20] = desktop; args[52] = desktop;
+  args[53] = new Set(); args[54] = new Set(); args[55] = new Set();
+  args[56] = { states: new Map(), retry: vi.fn() }; args[63] = [];
+  const message = (kind: 'human' | 'agent' | undefined): ChatDisplayMessage => ({
+    id: 'report', text: 'Ruby reported to recipient', isUser: false, timestamp: 1_800_000_000,
+    pubkey: 'ruby', isAgentAuthor: true, mentionPubkeys: ['worker'],
+    agentCommand: { kind: 'report', recipient: { id: 'recipient', name: 'Recipient', handle: 'recipient', kind },
+      text: 'needs-decision: Choose the endpoint' },
+  });
+  function Harness({ kind }: { kind: 'human' | 'agent' | undefined }) {
+    const [render] = useChatTranscriptRenderer(args as Parameters<typeof useChatTranscriptRenderer>[0]);
+    return render({ item: message(kind) });
+  }
+  let tree: any;
+  act(() => { tree = create(<Harness kind="human" />); });
+  const renderedText = () => tree.root.findAllByType('Text').flatMap((node: any) => node.props.children).join(' ');
+  expect(renderedText()).toContain('@recipient needs-decision: Choose the endpoint');
+  act(() => tree.update(<Harness kind={undefined} />));
+  expect(renderedText()).toContain('@recipient needs-decision: Choose the endpoint');
+  act(() => tree.update(<Harness kind="agent" />));
+  expect(renderedText()).not.toContain('Choose the endpoint');
+  act(() => tree.unmount());
+});

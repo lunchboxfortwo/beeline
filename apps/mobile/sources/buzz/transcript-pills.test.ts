@@ -16,9 +16,22 @@ describe('transcript pills', () => {
     expect(isPillMessage(system('s'))).toBe(true);
     expect(isPillMessage(row('b', { pubkey: SYSTEM_IDENTITY_PUBKEY }))).toBe(true);
     expect(isPillMessage(row('o', {
-      pubkey: 'alan', agentCommand: { kind: 'order', recipient: { id: 'jimmy', name: 'Jimmy' }, text: 'Go' },
+      pubkey: 'alan', agentCommand: { kind: 'order', recipient: { id: 'jimmy', name: 'Jimmy', kind: 'agent' }, text: 'Go' },
     }))).toBe(true);
     expect(isPillMessage(row('m', { pubkey: 'dan' }))).toBe(false);
+  });
+
+  it.each(['human', undefined] as const)('UAR-1 keeps %s recipients readable and breaks pill runs', (kind) => {
+    const report = row('report', { isSystemNotice: true, pubkey: 'alan', isAgentAuthor: true,
+      mentionPubkeys: ['jimmy'],
+      agentCommand: { kind: 'report', recipient: { id: 'person', name: 'Person', kind }, text: 'Please choose the scope' } });
+    expect(isPillMessage(report)).toBe(false);
+    expect(isAgentToAgentMessage(report, AGENTS)).toBe(false);
+    const rows = foldPillRuns([system('before1'), system('before2'), report, system('after1'), system('after2')]);
+    expect(rows.map(message => message.id)).toEqual(['before1', 'report', 'after1']);
+    expect(rows[0]!.foldedReadBoundaries?.map(boundary => boundary.id)).toEqual(['before1', 'before2']);
+    expect(rows[1]!.pillRun).toBeUndefined();
+    expect(rows[2]!.foldedReadBoundaries?.map(boundary => boundary.id)).toEqual(['after1', 'after2']);
   });
 
   it('keeps cards and attachments out of pills', () => {
@@ -62,7 +75,7 @@ describe('transcript pills', () => {
   it('opens a new sender group after a pill', () => {
     expect(ledgerSpeakerKey(row('o', {
       pubkey: 'alan', isAgentAuthor: true,
-      agentCommand: { kind: 'order', recipient: { id: 'jimmy', name: 'Jimmy' }, text: 'Go' },
+      agentCommand: { kind: 'order', recipient: { id: 'jimmy', name: 'Jimmy', kind: 'agent' }, text: 'Go' },
     }), AGENTS)).toBeNull();
     expect(ledgerSpeakerKey(row('a2a', { pubkey: 'alan', isAgentAuthor: true, mentionPubkeys: ['jimmy'] }), AGENTS)).toBeNull();
     expect(ledgerSpeakerKey(row('reply', { pubkey: 'alan', isAgentAuthor: true }), AGENTS)).toBe('agent:alan');

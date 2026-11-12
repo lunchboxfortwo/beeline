@@ -40,13 +40,15 @@ function ownsCard(message: PillFields): boolean {
 export function isPillMessage(message: PillFields): boolean {
   if (message.notificationLifecycleRun && !message.deleted) return true;
   if (ownsCard(message)) return false;
-  if (message.isSystemNotice || message.agentCommand) return true;
+  if (message.agentCommand) return message.agentCommand.recipient.kind === 'agent';
+  if (message.isSystemNotice) return true;
   return (message.authorIdentity?.pubkey ?? message.pubkey) === SYSTEM_IDENTITY_PUBKEY;
 }
 
 /** An agent author whose message mentions only agents. */
 export function isAgentToAgentMessage(message: PillFields, knownAgentPubkeys: ReadonlySet<string>): boolean {
   if (ownsCard(message)) return false;
+  if (message.agentCommand) return message.agentCommand.recipient.kind === 'agent';
   const author = message.authorIdentity?.pubkey ?? message.pubkey;
   const agentAuthor = message.authorIdentity?.kind === 'agent' ||
     Boolean(message.isAgentAuthor) || Boolean(author && knownAgentPubkeys.has(author));

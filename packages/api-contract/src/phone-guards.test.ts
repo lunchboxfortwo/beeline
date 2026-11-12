@@ -3,6 +3,12 @@ import { m45_describe, m45_expect, m45_it, m45_ROOM_VIEW_MESSAGE_LIMIT, m45_read
 mergedDescribe45("phone-guards.tolerance.test.ts", () => {
 const scope1 = fixtureScope1();
 m45_describe('phone surface readers', () => {
+  m45_it.each(['agent', 'human', undefined, 'invalid'])('UAR-1 preserves known command recipient kind %s', (kind) => {
+    const agentCommand = { kind: 'report', text: 'Choose the scope', recipient: { id: 'recipient', name: 'Recipient', kind } };
+    const parsed = m45_readRoomViewMessage({ ...scope1.message, agentCommand });
+    m45_expect(parsed?.agentCommand?.recipient.kind).toBe(kind === 'agent' || kind === 'human' ? kind : undefined);
+  });
+
   m45_it('preserves the current-card link on expired connector offers and drops invalid links', () => {
     const replacementMessageId = 'f'.repeat(64);
     m45_expect(m45_readConnectorOfferCardView({ ...scope1.connectorOffer, status: 'failed', replacementMessageId }))

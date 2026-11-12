@@ -68,9 +68,9 @@ it('records each corner order and report as one collapsed card in the corner onl
     [opened.cornerId])).rows;
   expect(cards.map(({ id: _id, ...card }) => card)).toEqual(expect.arrayContaining([
     { author_id: WORKER, presentation: 'card', text: '@worker reported to @ruby · blocked',
-      card: { kind: 'report', recipient: { id: RUBY, name: 'Ruby', handle: 'ruby' }, status: 'blocked', text: reportText, waitingAnswered: true } },
+      card: { kind: 'report', recipient: { id: RUBY, name: 'Ruby', handle: 'ruby', kind: 'agent' }, status: 'blocked', text: reportText, waitingAnswered: true } },
     { author_id: RUBY, presentation: 'card', text: '@ruby ordered @worker',
-      card: { kind: 'order', recipient: { id: WORKER, name: 'Worker', handle: 'worker' }, text: 'Use endpoint v2' } },
+      card: { kind: 'order', recipient: { id: WORKER, name: 'Worker', handle: 'worker', kind: 'agent' }, text: 'Use endpoint v2' } },
   ]));
   expect(cards).toHaveLength(2);
   // The parent Room and the commander's DM gain nothing; the cards wake nobody.
@@ -79,8 +79,8 @@ it('records each corner order and report as one collapsed card in the corner onl
   expect(await unread()).toBe(unreadBefore);
   const view = (await rootFixture.phone.readRoom(opened.cornerId, HUMAN))!.messages.filter(m => m.agentCommand);
   expect(view.map(m => [m.author.pubkey, m.agentCommand])).toEqual(expect.arrayContaining([
-    [WORKER, { kind: 'report', recipient: { id: RUBY, name: 'Ruby', handle: 'ruby' }, status: 'blocked', text: reportText, waitingAnswered: true }],
-    [RUBY, { kind: 'order', recipient: { id: WORKER, name: 'Worker', handle: 'worker' }, text: 'Use endpoint v2' }],
+    [WORKER, { kind: 'report', recipient: { id: RUBY, name: 'Ruby', handle: 'ruby', kind: 'agent' }, status: 'blocked', text: reportText, waitingAnswered: true }],
+    [RUBY, { kind: 'order', recipient: { id: WORKER, name: 'Worker', handle: 'worker', kind: 'agent' }, text: 'Use endpoint v2' }],
   ]));
 });
 

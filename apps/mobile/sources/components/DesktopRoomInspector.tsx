@@ -49,6 +49,7 @@ import { IdentityMark } from '@/components/buzz/IdentityMark';
 import { InspectorHeader, InspectorObjective } from '@/ui/screens/viewers/InspectorChrome';
 import { TranscriptPills, type PillIdentityResolver } from '@/components/buzz/TranscriptPills';
 import { isPillMessage } from '@/buzz/transcript-pills';
+import { agentCommandTranscriptMessage } from '@/buzz/agent-command-transcript';
 import { SYSTEM_IDENTITY_PUBKEY } from '@/buzz/system-identity';
 import { isAgentTurnActive } from '@/buzz/agent-presence';
 import { scheduleAnimationFrame } from '@/buzz/host-scheduler';
@@ -505,6 +506,8 @@ function CornerCockpit({
     }): React.ReactElement | null => {
       const openUrl = (url: string) => void openExternalUrl(url).catch(() => undefined);
       const immediatelyPrecedingMessage = index > 0 ? messages[index - 1] : undefined;
+      item = agentCommandTranscriptMessage(item, (detail?.members ?? []).flatMap(({ identity }) =>
+        identity.handle ? [{ pubkey: identity.pubkey, handle: identity.handle }] : []));
       const kind = inspectorMessageKind(item);
       if (kind === 'hidden') return null;
       const pillRun = item.pillRun ?? (isPillMessage(item) ? [item] : null);

@@ -83,6 +83,7 @@ function readAgentCommand(value: unknown): NonNullable<RoomViewMessage['agentCom
     recipient: {
       id: recipient.id,
       name: recipient.name,
+      ...field('kind', oneOf(recipient.kind, ['agent', 'human'])),
       ...field('handle', typeof recipient.handle === 'string' ? recipient.handle : undefined),
     },
     ...field('status', oneOf(item.status, ['done', 'blocked', 'needs-decision', 'failed'])),

@@ -355,6 +355,17 @@ describe('DesktopRoomInspector work pane', () => {
     await act(async () => tree.update(<DesktopRoomInspector {...options} />));
     expect(tree.root.findByType('ComputerSessionViewer' as any).props.active).toBe(false);
   });
+  it.each(['human', undefined] as const)('UAR-1 shows the complete report to a %s recipient without opening a pill', async kind => {
+    const detail = { ...room(), room: corners[0].corner, parent: room().room,
+      messages: [{ id: 'person-report', text: '@codex reported to @avery', createdAt: 5, author: agent,
+        presentation: 'card', agentCommand: { kind: 'report', text: 'needs-decision: Choose the endpoint',
+          recipient: { id: person.pubkey, name: person.name, handle: person.handle, kind } } }] } as any;
+    const tree = await render(props({ client: { room: vi.fn(async () => detail) } }));
+    const report = tree.root.findByType('OrdinaryLedgerMessage' as any);
+    expect(report.props.message.text).toBe('@avery needs-decision: Choose the endpoint');
+    expect(tree.root.findAllByProps({ testID: 'agent-pill' })).toHaveLength(0);
+  });
+
   it('hides standalone corner-close notices in the inspector transcript', async () => {
     const detail = { ...room(), room: corners[0].corner, parent: room().room,
       messages: [{ id: 'closed-fact', text: 'Corner closed', createdAt: 5, author: agent,
