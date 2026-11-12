@@ -124,7 +124,8 @@ function Options({ item, value, onChange }: { item: NeedsYouItemView; value: str
               borderColor={on ? 'strongStroke' : 'stroke'} backgroundColor={on ? 'highlight' : 'raised'}
               minHeight={HEIGHT.control} onPress={() => onChange(option.optionId)} aria-label={option.label}
               testID={`tag-option-${option.optionId}`}>
-              <RadioGroup.Item value={option.optionId} id={`${item.messageId}-${option.optionId}`} marginTop="1" aria-label={option.label}>
+              <RadioGroup.Item value={option.optionId} id={`${item.messageId}-${option.optionId}`} marginTop="1" aria-label={option.label}
+                theme={on ? 'brand' : undefined}>
                 <RadioGroup.Indicator />
               </RadioGroup.Item>
               <YStack flex={1} minWidth={0} gap="1">
