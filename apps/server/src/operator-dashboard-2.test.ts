@@ -447,9 +447,17 @@ const scope3 = fixtureScope3();
     expect(corePoint(own.daily, '2026-10-02')).toMatchObject({ connectAttempted: 0, connectSucceeded: 0 });
     expect(corePoint(own.daily, '2026-10-20')).toMatchObject({ connectAttempted: 1, connectSucceeded: 0 });
     expect(corePoint(own.daily, '2026-10-21')).toMatchObject({ connectAttempted: 1, connectSucceeded: 1 });
-    expect(corePoint(own.daily, '2026-10-22')).toMatchObject({ connectAttempted: 1, connectSucceeded: 1 });
-    expect(own.prior7).toEqual({ connectAttempted: 1, connectSucceeded: 0 });
-    expect(own.last7).toEqual({ connectAttempted: 1, connectSucceeded: 2 });
+    // L's agent got a daemon token on 10-22 but never took a turn, so it is no success.
+    expect(corePoint(own.daily, '2026-10-22')).toMatchObject({ connectAttempted: 1, connectSucceeded: 0 });
+    const noConnector = { connectAttempted: 0, connectSucceeded: 0 };
+    expect(own.prior7).toEqual({
+      connectAttempted: 1, connectSucceeded: 0,
+      byRoute: { code: { connectAttempted: 1, connectSucceeded: 0 }, connector: noConnector },
+    });
+    expect(own.last7).toEqual({
+      connectAttempted: 1, connectSucceeded: 1,
+      byRoute: { code: { connectAttempted: 1, connectSucceeded: 1 }, connector: noConnector },
+    });
 
     expect(corePoint(repos.daily, '2026-10-19')).toMatchObject({ linkAttempted: 1, linkSucceeded: 0 });
     expect(corePoint(repos.daily, '2026-10-20')).toMatchObject({ linkAttempted: 1, linkSucceeded: 0 });
@@ -477,6 +485,105 @@ const scope3 = fixtureScope3();
     });
     const body = JSON.stringify(metrics);
     for (const n of [scope3.A, scope3.B, scope3.F, scope3.K, scope3.INTERNAL, scope3.ANDROID, scope3.NULL_INVITE]) expect(body).not.toContain(coreId(n));
+  }, 30_000);
+
+
+  it('Reproduction CORE-TRUTH: counts outside people only, ties accepted invites to counted invites, and splits connects by route', async () => {
+    await rootFixture.db.query(`INSERT INTO workspaces(id,name,internal) VALUES($1,'Internal',true)`, [coreWorkspace]);
+    await rootFixture.db.query(
+      `UPDATE operator_metric_epochs SET started_at=$1 WHERE metric IN ('invite','agent_pairing')`,
+      ['2026-10-01T16:00:00.000Z'],
+    );
+    await rootFixture.db.query(`INSERT INTO rooms_mcp_clients(id,name,redirects) VALUES('core-client','Claude Code','[]')`);
+    const OUT = 50, TEAM = 51, TRIER = 52, OLD_INVITER = 53;
+    const connector = async (agentId: number, owner: number, at: string) => {
+      await scope3.ownAgent(agentId, owner);
+      await rootFixture.db.query(
+        `INSERT INTO rooms_mcp_members(client_id,owner_id,member_id,model_label,created_at) VALUES('core-client',$1,$2,'Claude',$3)`,
+        [coreId(owner), coreId(agentId), at],
+      );
+      await rootFixture.db.query(
+        `INSERT INTO messages(id,room_id,author_id,text,presentation,system_event,created_at)
+         VALUES($1,$2,$3,'joined','system','{"kind":"joined"}'::jsonb,$4)`,
+        [`joined-${agentId}`, room, coreId(agentId), at],
+      );
+    };
+    // The outside person and a team member do the same things. The team member
+    // also belongs to an internal workspace, and every action happens outside it.
+    for (const [person, base] of [[OUT, 60], [TEAM, 70]] as const) {
+      await scope3.person(person, 'ios', coreAt('2026-10-21', 10));
+      if (person === TEAM) await scope3.join(person, coreWorkspace);
+      const agent = base, free = base + 1, invitee = base + 2, connected = base + 3;
+      await scope3.ownAgent(agent, person);
+      await scope3.ownAgent(free, person, { free: true });
+      await rootFixture.db.query(
+        `INSERT INTO free_agent_events(agent_id,kind,at,detail) VALUES($1,'model_usage',$2,'{"tokens":70}'::jsonb)`,
+        [coreId(free), coreAt('2026-10-21')],
+      );
+      await scope3.invite(`truth-${person}`, person, workspace, coreAt('2026-10-21'));
+      await scope3.identity(invitee, 'human');
+      await scope3.join(invitee, workspace, coreAt('2026-10-22'), person);
+      await scope3.pairing(`truth-${person}`, person, workspace, coreAt('2026-10-21', 11));
+      await rootFixture.db.query(
+        `INSERT INTO daemon_tokens(token_hash,agent_id,created_at) VALUES($1,$2,$3)`,
+        [person.toString(16).padStart(64, 'e'), coreId(agent), coreAt('2026-10-21', 12)],
+      );
+      await rootFixture.db.query(
+        `INSERT INTO agent_turns(room_id,request_id,agent_id,status,created_at,input_tokens,output_tokens)
+         VALUES($1,$2,$3,'complete',$4,400,100)`,
+        [room, `truth-${person}`, coreId(agent), coreAt('2026-10-21')],
+      );
+      await scope3.say(`truth-reply-${person}`, agent, coreAt('2026-10-21'));
+      await scope3.repoCard(`truth-card-${person}`, person, coreAt('2026-10-21'), 'repository');
+      await rootFixture.db.query(
+        `INSERT INTO repository_link_successes(identity_id,workspace_id,first_linked_at) VALUES($1,$2,$3)`,
+        [coreId(person), workspace, coreAt('2026-10-22')],
+      );
+      await connector(connected, person, coreAt('2026-10-23'));
+      await scope3.say(`truth-connector-${person}`, connected, coreAt('2026-10-24'));
+    }
+    // Joined through a connector and never took a turn: a try, not a success.
+    await scope3.person(TRIER, 'ios');
+    await connector(80, TRIER, coreAt('2026-10-24'));
+    // Invites made before invite times were recorded, or before the epoch,
+    // count for neither the inviter nor the acceptance.
+    await scope3.person(OLD_INVITER, 'ios');
+    await scope3.invite('truth-null', OLD_INVITER, workspace, null);
+    await scope3.invite('truth-old', OLD_INVITER, workspace, coreAt('2026-09-20'));
+    await scope3.identity(81, 'human');
+    await scope3.join(81, workspace, coreAt('2026-10-22'), OLD_INVITER);
+
+    const metrics = await dashboardCoreMetrics(rootFixture.db, ['ios'], coreMeasuredAt);
+    if (metrics.invites.state !== 'measured' || metrics.onboarding.state !== 'measured'
+      || metrics.ownAgents.state !== 'measured' || metrics.repositories.state !== 'measured'
+      || metrics.tokens.state !== 'measured') throw new Error('core metrics unavailable');
+    expect(metrics.invites.data.last7).toEqual({ inviters: 1, invitesAccepted: 1 });
+    expect(corePoint(metrics.invites.data.daily, '2026-10-22')).toMatchObject({ invitesAccepted: 1 });
+    expect(metrics.onboarding.data.last7.completedOnboarding).toBe(1);
+    expect(metrics.repositories.data.last7).toEqual({ linkAttempted: 1, linkSucceeded: 1 });
+    expect(metrics.tokens.data.last7).toEqual({ freeAgentTokens: 70, ownAgentTokens: 500, ownAgentTurnsUnmeasured: 0 });
+    expect(metrics.ownAgents.data.last7).toEqual({
+      connectAttempted: 2,
+      connectSucceeded: 1,
+      byRoute: {
+        code: { connectAttempted: 1, connectSucceeded: 1 },
+        connector: { connectAttempted: 2, connectSucceeded: 1 },
+      },
+    });
+    const own = metrics.ownAgents.data.daily;
+    expect(corePoint(own, '2026-10-21')).toMatchObject({
+      connectAttempted: 1, connectSucceeded: 1,
+      byRoute: { code: { connectAttempted: 1, connectSucceeded: 1 }, connector: { connectAttempted: 0, connectSucceeded: 0 } },
+    });
+    expect(corePoint(own, '2026-10-24')).toMatchObject({
+      connectAttempted: 1, connectSucceeded: 0,
+      byRoute: { code: { connectAttempted: 0, connectSucceeded: 0 }, connector: { connectAttempted: 1, connectSucceeded: 1 } },
+    });
+    // Connector joins were always recorded, so that route has no unknown days.
+    expect(corePoint(own, '2026-09-15')).toMatchObject({
+      connectAttempted: null,
+      byRoute: { code: { connectAttempted: null }, connector: { connectAttempted: 0 } },
+    });
   }, 30_000);
 
 
