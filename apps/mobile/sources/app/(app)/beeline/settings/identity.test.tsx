@@ -5,6 +5,7 @@ vi.mock('@/components/buzz/Button', async () => {
 vi.mock('@expo/vector-icons/Ionicons', async () => { const R = await import('react'); return { default: (props: any) => R.createElement('Ionicons', props) }; });
 vi.mock('react-native-keyboard-controller', async () => { const R = await import('react'); return { KeyboardAvoidingView: (props: any) => R.createElement('View', props, props.children) }; });
 import * as React from 'react';
+import type { ManagedIdentityResult } from '@beeline/api-contract/phone';
 // @ts-expect-error react-test-renderer has no declarations in this workspace.
 import { act, create, type ReactTestRenderer } from 'react-test-renderer';
 import { afterAll, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest';
@@ -314,7 +315,7 @@ function renderedText(renderer: ReactTestRenderer): string {
 
 const PHOTO = 'https://beeline.test/v1/person-avatars/11111111-1111-4111-8111-111111111111';
 const byId = (renderer: ReactTestRenderer, id: string): any => renderer.root.findAll((node: any) => node.props.testID === id)[0];
-function managed(avatar?: string) {
+function managed(avatar?: string): ManagedIdentityResult {
   return { personId: 'a'.repeat(64), name: 'Dan', handle: 'lunchboxfortwo', pushLevel: 'attention', providers: [], ...(avatar ? { avatar } : {}) };
 }
 function operations(state: { avatar?: string }) {
@@ -338,6 +339,23 @@ describe('Settings → You → Profile picture', () => {
     expect(renderedText(renderer)).toContain('Your generated mark');
     expect(byId(renderer, 'profile-picture-upload')).toBeDefined();
     expect(byId(renderer, 'profile-picture-remove')).toBeUndefined();
+  });
+
+  it('SETTINGS-PICTURE-1: refreshes an older settings identity when the shared viewer already has a photo', async () => {
+    operations({ avatar: PHOTO });
+    const { surfaceAddress } = await import('@/buzz/surface-storage');
+    const { isManagedIdentity } = await import('@/buzz/managed-identity-surface');
+    const { isWorkspaceListView } = await import('@beeline/buzz-client');
+    await mobileSurfaceCache.write(surfaceAddress('https://relay.test', 'a'.repeat(64), '/identity/managed'), managed(), isManagedIdentity);
+    await mobileSurfaceCache.write(surfaceAddress('https://relay.test', 'a'.repeat(64), '/workspaces'), {
+      viewer: { pubkey: 'a'.repeat(64), kind: 'human', name: 'Dan', avatar: PHOTO }, workspaces: [], truncated: false, watchFilters: [],
+    }, isWorkspaceListView);
+    const renderer = await renderScreen();
+    await vi.waitFor(() => expect(byId(renderer, 'profile-picture-mark').props.avatarUrl).toBe(PHOTO));
+    expect(renderedText(renderer)).toContain('Your photo');
+    expect(byId(renderer, 'profile-picture-remove')).toBeDefined();
+    expect(phoneOperation.mock.calls.filter(([name]) => name === 'readIdentitySettings')).toHaveLength(1);
+    expect(phoneOperation).not.toHaveBeenCalledWith('getManagedIdentity', {});
   });
 
   it('uploads a photo with the Workspace picture picker and saves it on the profile', async () => {
