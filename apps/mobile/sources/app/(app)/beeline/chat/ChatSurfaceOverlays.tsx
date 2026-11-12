@@ -200,13 +200,13 @@ export function ChatSurfaceOverlays({
 }: Props) {
   const desktop = useIsDesktop();
   return <>
-      <AttachmentPickerSheet
+      {attachmentPickerVisible && <AttachmentPickerSheet
         visible={attachmentPickerVisible}
         onClose={() => setAttachmentPickerVisible(false)}
         onPickDocument={() => void pickDocument()}
         onPickPhoto={() => void pickPhoto()}
         onPickPasted={desktopExperience ? undefined : () => void pasteImage()}
-      />
+      />}
 
       <HullActionSheetModal
         accessibilityLabel="Close message actions"
@@ -531,7 +531,7 @@ export function ChatSurfaceOverlays({
         />
       </HullActionSheetModal>
 
-      <CornerActionsSheet
+      {cornerActionsVisible && <CornerActionsSheet
         title={headerTitle ?? cornerOwnerDisplay?.name ?? CORNER_TITLE}
         visible={cornerActionsVisible}
         locked={roomSurface?.cornerLocked === true}
@@ -555,7 +555,7 @@ export function ChatSurfaceOverlays({
           void Haptics.notificationAsync(Haptics.NotificationFeedbackType.Error);
           Modal.alert('Could not complete request', appErrorCopy(error));
         }}
-      />
+      />}
 
       <HullDialog
         actions={[

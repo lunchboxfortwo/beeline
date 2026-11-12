@@ -337,3 +337,45 @@ test('Room-open setup waits for the actual destination row before the action clo
   await setup;
   assert.equal(typeof prepared.act, 'function');
 });
+
+test('the attachment tap starts after file preparation and sends the same selected file', async () => {
+  const actions = [];
+  const chooser = {
+    setFiles: async (file) => {
+      assert.equal(file.name, 'selected-fixture.txt');
+      actions.push('upload');
+    },
+  };
+  const target = (id) => ({
+    filter() {
+      return this;
+    },
+    first() {
+      return this;
+    },
+    getByText() {
+      return this;
+    },
+    waitFor: async () => {
+      if (id === 'pending-chat-attachment-state-0') actions.push('ready');
+    },
+    click: async () => {
+      if (id === 'chat-send') actions.push('send');
+    },
+  });
+  const page = {
+    goto: async () => {},
+    getByTestId: target,
+    getByText: () => target('message'),
+    waitForEvent: async () => chooser,
+  };
+  const prepared = await steps['send-attachment'](
+    page,
+    fixture('send-attachment'),
+    'selected-fixture',
+  );
+  assert.deepEqual(actions, ['upload', 'ready']);
+  assert.ok(Number.isFinite(prepared.uploadMs));
+  await prepared.act();
+  assert.deepEqual(actions, ['upload', 'ready', 'send']);
+});

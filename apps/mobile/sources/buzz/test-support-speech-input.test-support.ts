@@ -52,7 +52,7 @@ vi.mock('./speech-transcription', () => ({
 vi.mock('./client-error-report', () => ({ reportClientError: vi.fn(async () => {}) }));
 
 vi.mock('./speech-locale', () => ({
-  getDeviceSpeechLocale: () => 'en-GB',
+  getDeviceSpeechLocale: vi.fn(() => 'en-GB'),
 }));
 
 

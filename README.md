@@ -125,7 +125,7 @@ Permission requests name the asking agent: “Jellybean wants to run …”. Aft
 
 Server updates no longer revoke your existing Always and Once approvals solely because an older grant has no record of its original request message.
 
-The nightly latency report includes paired web interaction timings and an explicit reason for each unmeasured interaction. It also records cold and warm web route loads, labelling redirects and local integration fixtures; attachment timing includes the real web picker, local upload and delivered message. Its full-inventory score stays unavailable until every interaction has two complete captures. [Rig and measurement limits](scripts/latency-rig/README.md#paired-web-interaction-inventory).
+The nightly latency report measures each web interaction and route load in a fresh browser context and records browser and host resource use outside the response clock. It labels redirects, local integration fixtures and unmeasured interactions. File-send timing starts on Send and requires the delivered file content; real picker and upload preparation are recorded separately. Its full-inventory score stays unavailable until every interaction has two complete captures. [Rig and measurement limits](scripts/latency-rig/README.md#paired-web-interaction-inventory).
 
 Nightly Checks accepts a Beeline dispatch at 03:07 New York time. The GitHub timers remain as fallbacks and skip a night already dispatched. Helper updates keep their existing download URLs and use public GitHub Release assets through Cloudflare. Helper releases no longer upload archives to GitHub Pages or wait for a Pages deployment. [Download routing and rollout](infra/helper-downloads/README.md).
 
