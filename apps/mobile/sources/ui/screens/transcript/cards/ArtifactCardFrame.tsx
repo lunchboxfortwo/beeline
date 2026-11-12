@@ -14,12 +14,15 @@ export function ArtifactCardFrame({
     kindLine,
     onOpen,
     preview,
+    rows,
     testID,
 }: {
     title: string;
     kindLine: string;
     onOpen(): void;
     preview: React.ReactNode;
+    /** The stacked card's file list, between the kind line and Open. */
+    rows?: React.ReactNode;
     testID?: string;
 }) {
     return (
@@ -31,6 +34,7 @@ export function ArtifactCardFrame({
                 <Copy strong numberOfLines={1} testID="artifact-title">{title}</Copy>
                 <Copy small quiet numberOfLines={1} testID="artifact-kind-line">{kindLine}</Copy>
             </YStack>
+            {rows}
             <XStack justifyContent="flex-end">
                 <Btn kind="secondary" label="Open artifact" accessibilityRole="link" onPress={onOpen} testID="artifact-open">Open</Btn>
             </XStack>

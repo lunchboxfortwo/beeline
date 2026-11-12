@@ -24,7 +24,8 @@ import { ViewerConversationDock } from '@/components/buzz/ViewerConversationDock
 import { RunnableArtifact } from './RunnableArtifact';
 import { DocumentFrame, TypedView } from '@/ui/grammar';
 import {
-  ViewerAction, ViewerBody, ViewerHeader, ViewerNotice, ViewerPlaceholder, ViewerScreen, ViewerScroll,
+  useFilePaging, ViewerAction, ViewerBody, ViewerHeader, ViewerNotice, ViewerPager, ViewerPlaceholder,
+  ViewerPosition, ViewerScreen, ViewerScroll,
 } from '@/ui/screens/viewers/ViewerChrome';
 
 /**
@@ -41,7 +42,8 @@ import {
  * for a reader who wants the file in a tab of their own.
  */
 export function DesktopArtifactPane({
-  attachment,
+  attachment: selectedAttachment,
+  groupAttachments,
   markdown,
   authorHandle,
   roomId,
@@ -49,6 +51,10 @@ export function DesktopArtifactPane({
 }: {
   onClose(): void;
 } & DesktopArtifactSelection) {
+  // A stacked card hands over its whole message; the pane pages through it.
+  const paging = useFilePaging(selectedAttachment, groupAttachments);
+  const attachment = paging.file;
+  const noun = groupAttachments?.every((file) => artifactFormat(file.mimeType) === 'image') ? 'photo' : 'file';
   const format = markdown ? 'markdown' : artifactFormat(attachment!.mimeType);
   const title = markdown?.title ?? attachment!.title ?? attachment!.name;
   const { showCopied, showCopyFailed, toast } = useCopiedToast('desktop-artifact-copied');
@@ -65,6 +71,7 @@ export function DesktopArtifactPane({
         closeLabel="Close artifact pane"
         closeTestID="desktop-artifact-close"
       >
+        {paging.paged ? <ViewerPosition index={paging.index} count={paging.count} noun={noun} /> : null}
         {attachment && format === 'game' ? (
           <ViewerAction label="Reopen" title="Reopen" icon={RefreshCw}
             onPress={() => setRunKey((key) => key + 1)} testID="desktop-artifact-reopen" />
@@ -91,7 +98,7 @@ export function DesktopArtifactPane({
             onPress={() => void openArtifactInBrowserOrExplain(attachment)} testID="desktop-artifact-open-browser" />
         ) : null}
       </ViewerHeader>
-      <ViewerBody>
+      <ViewerBody key={attachment?.url}>
         {markdown ? (
           <ViewerScroll testID="desktop-artifact-markdown">
             <TypedView view={MonoMarkdown} markdown={markdown.text} document />
@@ -107,6 +114,7 @@ export function DesktopArtifactPane({
             attachment={attachment}
             title={title}
             testIDPrefix="desktop-artifact"
+            {...(paging.paged ? { onSwipePhoto: paging.step } : {})}
           />
         ) : format === 'text' ? (
           <ArtifactText attachment={attachment} crop={false} testID="desktop-artifact-text" />
@@ -117,6 +125,10 @@ export function DesktopArtifactPane({
             onOpenInBrowser={() => void openArtifactInBrowserOrExplain(attachment)} testID="desktop-artifact-handoff" />
         )}
       </ViewerBody>
+      {paging.paged ? (
+        <ViewerPager index={paging.index} count={paging.count} noun={noun}
+          onPrevious={() => paging.step(-1)} onNext={() => paging.step(1)} />
+      ) : null}
       {attachment && <ViewerConversationDock kind="artifact" title={attachment.name} roomId={roomId} agentHandle={authorHandle}
         artifact={attachment} />}
       {toast}

@@ -7,6 +7,7 @@ import { Copy as CopyIcon, RefreshCw, Share2 } from 'lucide-react-native';
 import type { AttachmentReference } from '@beeline/buzz-client';
 
 import { artifactFormat, createInitialLoadGuard, wrapArtifactMarkup } from '@/buzz/artifact';
+import { authorKindLine } from '@/buzz/artifact-group';
 import { artifactPdfLocalUri, fetchArtifactBytes, fetchArtifactText, openArtifactInBrowserOrExplain, subscribeArtifactBytesPurge } from '@/buzz/artifact-link';
 import { artifactWebViewProps } from '@/components/buzz/artifact-webview';
 import { useSandboxWebView, useSandboxWebViewStatus } from '@/components/buzz/sandbox-webview';
@@ -22,8 +23,8 @@ import { useCopiedToast } from '@/components/buzz/CopiedToast';
 import { ViewerConversationDock } from '@/components/buzz/ViewerConversationDock';
 import { RunnableArtifact } from './RunnableArtifact';
 import {
-  PhotoStepper, ViewerAction, ViewerBody, ViewerHeader, ViewerInscription, ViewerNotice, ViewerPlaceholder,
-  ViewerScreen, ViewerScroll,
+  useFilePaging, ViewerAction, ViewerBody, ViewerHeader, ViewerInscription, ViewerNotice, ViewerPager,
+  ViewerPlaceholder, ViewerPosition, ViewerScreen, ViewerScroll,
 } from '@/ui/screens/viewers/ViewerChrome';
 
 /**
@@ -39,7 +40,7 @@ import {
  */
 export function ArtifactViewerScreen({
   attachment: initialAttachment,
-  photoAttachments,
+  groupAttachments,
   document,
   markdown,
   notice,
@@ -54,22 +55,15 @@ export function ArtifactViewerScreen({
 ) & {
   authorHandle?: string;
   roomId?: string;
-  photoAttachments?: readonly AttachmentReference[];
+  /** Every live file of the message; the viewer pages through them. */
+  groupAttachments?: readonly AttachmentReference[];
   onClose: () => void;
 }) {
-  const photos = initialAttachment && artifactFormat(initialAttachment.mimeType) === 'image'
-    ? photoAttachments
-    : undefined;
-  const [photoIndex, setPhotoIndex] = useState(() =>
-    Math.max(0, photos?.findIndex((photo) => photo.url === initialAttachment?.url) ?? 0),
-  );
-  const attachment = photos?.[photoIndex] ?? initialAttachment;
-  const isPhotoGroup = Boolean(photos && photos.length > 1);
-  const changePhoto = (direction: -1 | 1) => {
-    if (isPhotoGroup) {
-      setPhotoIndex((index) => (index + direction + photos!.length) % photos!.length);
-    }
-  };
+  const paging = useFilePaging(initialAttachment, groupAttachments);
+  const attachment = paging.file;
+  // A message of photos pages as photos; a mixed message pages as files.
+  const noun = groupAttachments?.every((file) => artifactFormat(file.mimeType) === 'image') ? 'photo' : 'file';
+  const changeFile = paging.paged ? paging.step : undefined;
   const format = attachment
     ? artifactFormat(attachment.mimeType)
     : document
@@ -95,15 +89,18 @@ export function ArtifactViewerScreen({
       <ViewerHeader
         safeTop
         title={format === 'game' ? `Interactive · ${title}` : title}
+        // A paged viewer names each file's author, kind and size (stacked mock).
+        {...(paging.paged ? { detail: authorKindLine(attachment!, authorHandle) } : {})}
         onClose={onClose}
         closeLabel="Close artifact viewer"
         closeTestID="artifact-viewer-close"
       >
+        {paging.paged ? <ViewerPosition index={paging.index} count={paging.count} noun={noun} /> : null}
         {format === 'game' ? (
-          <ViewerAction label="Reopen" title="Reopen" icon={RefreshCw}
+          <ViewerAction compact={paging.paged} label="Reopen" title="Reopen" icon={RefreshCw}
             onPress={() => setRunKey((key) => key + 1)} testID="artifact-viewer-reopen" />
         ) : format === 'code' && document ? (
-          <ViewerAction
+          <ViewerAction compact={paging.paged}
             label="Copy code"
             title="Copy"
             icon={CopyIcon}
@@ -118,7 +115,7 @@ export function ArtifactViewerScreen({
           />
         ) : format === 'image' ? (
           <>
-            <ViewerAction
+            <ViewerAction compact={paging.paged}
               label="Copy image"
               title="Copy"
               icon={CopyIcon}
@@ -129,12 +126,12 @@ export function ArtifactViewerScreen({
               }
               testID="artifact-viewer-copy"
             />
-            <ViewerAction label="Share image" title="Share" icon={Share2}
+            <ViewerAction compact={paging.paged} label="Share image" title="Share" icon={Share2}
               onPress={() => void sharePicture(attachment!)} testID="artifact-viewer-share" />
           </>
         ) : null}
       </ViewerHeader>
-      <ViewerBody>
+      <ViewerBody key={attachment?.url}>
         {format === 'code' && document ? (
           <ViewerScroll testID="artifact-viewer-code">
             <ViewerInscription>{document.inscription}</ViewerInscription>
@@ -147,18 +144,12 @@ export function ArtifactViewerScreen({
         ) : format === 'markdown' ? (
           <ArtifactViewerMarkdown attachment={attachment!} />
         ) : format === 'image' ? (
-          <>
-            {isPhotoGroup ? (
-              <PhotoStepper index={photoIndex} count={photos!.length}
-                onPrevious={() => changePhoto(-1)} onNext={() => changePhoto(1)} />
-            ) : null}
-            <ZoomableArtifactImage
-              key={attachment!.url}
-              attachment={attachment!}
-              title={title}
-              onSwipePhoto={isPhotoGroup ? changePhoto : undefined}
-            />
-          </>
+          <ZoomableArtifactImage
+            key={attachment!.url}
+            attachment={attachment!}
+            title={title}
+            onSwipePhoto={changeFile}
+          />
         ) : format === 'text' ? (
           <ArtifactText attachment={attachment!} crop={false} testID="artifact-viewer-text" />
         ) : format === 'game' ? (
@@ -172,6 +163,10 @@ export function ArtifactViewerScreen({
           />
         )}
       </ViewerBody>
+      {paging.paged ? (
+        <ViewerPager index={paging.index} count={paging.count} noun={noun}
+          onPrevious={() => paging.step(-1)} onNext={() => paging.step(1)} />
+      ) : null}
       <ViewerConversationDock keyboardAvoidedByParent kind="artifact" title={attachment?.name ?? title} roomId={roomId} agentHandle={authorHandle}
         {...(attachment ? { artifact: attachment } : {})} />
       {toast}

@@ -5,8 +5,8 @@ import { ArtifactCardFrame, ArtifactFileRow } from '@/ui/screens/transcript/card
 import React, { useCallback, useEffect, useState } from 'react';
 import { Platform } from 'react-native';
 import { Image, XStack, YStack } from 'tamagui';
-import { ChevronLeft, ChevronRight } from 'lucide-react-native';
-import { Glyph, T, TypedView } from '@/ui/grammar';
+import { ChevronLeft, ChevronRight, File, FileCode, FileText, Image as ImageIcon } from 'lucide-react-native';
+import { Copy, Glyph, HEIGHT, T, TypedView } from '@/ui/grammar';
 import type { AttachmentReference } from '@beeline/buzz-client';
 
 import {
@@ -23,7 +23,9 @@ import {
   fetchArtifactText,
 } from '@/buzz/artifact-link';
 import { ArtifactDocumentPreview } from './ArtifactDocumentPreview';
-import { formatAttachmentSize } from '@/buzz/chat-attachment';
+import { ARTIFACT_GROUP_VISIBLE_ROWS, authorKindLine, fileKindLine } from '@/buzz/artifact-group';
+
+export { artifactKindWord } from '@/buzz/artifact-group';
 import { openArtifactInDesktopWorkPane } from '@/buzz/desktop-artifact-pane';
 import { ArtifactImage, ArtifactText } from '@/components/buzz/ArtifactMedia';
 import { ArtifactViewerScreen } from '@/components/buzz/ArtifactViewer';
@@ -34,7 +36,7 @@ import { Modal } from '@/modal';
 /** Reopen the same artifact surface from a card or transcript reference. */
 export function openArtifactViewer(attachment: AttachmentReference, isDesktop = false,
   roomId = currentViewerConversation()?.roomId, authorHandle = attachment.author,
-  photoAttachments?: readonly AttachmentReference[]) {
+  groupAttachments?: readonly AttachmentReference[]) {
   const format = artifactFormat(attachment.mimeType);
   const objectId = mediaIdFromUrl(attachment.url);
   // A picture is not a document: every surface opens the same centered
@@ -50,6 +52,8 @@ export function openArtifactViewer(attachment: AttachmentReference, isDesktop = 
       attachment,
       authorHandle,
       roomId,
+      // The pane pages through the whole message, as the viewer does.
+      ...(groupAttachments && groupAttachments.length > 1 ? { groupAttachments } : {}),
     })
   )
     return;
@@ -59,7 +63,7 @@ export function openArtifactViewer(attachment: AttachmentReference, isDesktop = 
       attachment,
       authorHandle,
       roomId,
-      ...(photoAttachments && photoAttachments.length > 1 ? { photoAttachments } : {}),
+      ...(groupAttachments && groupAttachments.length > 1 ? { groupAttachments } : {}),
     },
     // The viewer is a full-screen surface: the default centered placement
     // constrains width to 460 and no height, collapsing its flex:1 root to
@@ -68,48 +72,62 @@ export function openArtifactViewer(attachment: AttachmentReference, isDesktop = 
   });
 }
 
+function previewSurface(isDesktop: boolean) {
+  return isDesktop ? 'desktop' : Platform.OS === 'ios' ? 'ios' : 'android';
+}
+
 /**
  * Visible cards use an excerpt, thumbnail, or bounded sandbox render. Hidden
  * transcript rows retain the same frame without starting a byte request.
+ * A message with two or more live files passes them all as `groupAttachments`
+ * and draws one stacked card.
  */
 export const ArtifactCard = React.memo(function ArtifactCard({
   attachment,
   authorHandle,
   isDesktop = false,
-  photoAttachments,
+  groupAttachments,
   visible = true,
 }: {
   visible?: boolean;
   attachment: AttachmentReference;
   authorHandle?: string;
   isDesktop?: boolean;
-  /** Live image artifacts carried by the same message. Omitted for one photo. */
-  photoAttachments?: readonly AttachmentReference[];
+  /** Every live artifact of the same message. Omitted for one file. */
+  groupAttachments?: readonly AttachmentReference[];
 }) {
-  const [photoIndex, setPhotoIndex] = useState(0);
-  const isPhotoGroup = Boolean(photoAttachments && photoAttachments.length > 1);
-  useEffect(() => {
-    setPhotoIndex((index) => Math.min(index, Math.max(0, (photoAttachments?.length ?? 1) - 1)));
-  }, [photoAttachments?.length]);
-  const activeAttachment =
-    (isPhotoGroup ? photoAttachments?.[photoIndex] : undefined) ?? attachment;
-  const activeAuthorHandle = activeAttachment.author ?? authorHandle;
-  const format = artifactFormat(activeAttachment.mimeType);
-  const capabilities = artifactCapabilities(
-    activeAttachment.mimeType,
-    isDesktop ? 'desktop' : Platform.OS === 'ios' ? 'ios' : 'android',
+  if (groupAttachments && groupAttachments.length > 1) {
+    return (
+      <ArtifactStackCard
+        files={groupAttachments}
+        authorHandle={authorHandle}
+        isDesktop={isDesktop}
+        visible={visible}
+      />
+    );
+  }
+  return (
+    <ArtifactSingleCard
+      attachment={attachment}
+      authorHandle={authorHandle}
+      isDesktop={isDesktop}
+      visible={visible}
+    />
   );
-  const title = activeAttachment.title ?? activeAttachment.name;
-  const kindWord = artifactKindWord(activeAttachment.mimeType, format);
-  const kindLine = `${activeAuthorHandle ? `@${activeAuthorHandle.replace(/^@/, '')} · ` : ''}${kindWord} · ${formatAttachmentSize(activeAttachment.size)}`;
-  const openFull = useCallback(() => {
-    openArtifactViewer(activeAttachment, isDesktop, currentViewerConversation()?.roomId,
-      activeAuthorHandle, isPhotoGroup ? photoAttachments : undefined);
-  }, [activeAttachment, activeAuthorHandle, isDesktop, isPhotoGroup, photoAttachments]);
+});
 
-  // What is left external is what nothing on the device can paint — a ZIP, an
-  // octet-stream, anything unrecognized. Those keep the file-style row and the
-  // signed browser link, which is the only way to reach their contents.
+function ArtifactSingleCard({ attachment, authorHandle, isDesktop, visible }: {
+  attachment: AttachmentReference; authorHandle?: string; isDesktop: boolean; visible: boolean;
+}) {
+  const activeAuthorHandle = attachment.author ?? authorHandle;
+  const format = artifactFormat(attachment.mimeType);
+  const capabilities = artifactCapabilities(attachment.mimeType, previewSurface(isDesktop));
+  const title = attachment.title ?? attachment.name;
+  const kindLine = authorKindLine(attachment, authorHandle);
+  const openFull = useCallback(() => {
+    openArtifactViewer(attachment, isDesktop, currentViewerConversation()?.roomId, activeAuthorHandle);
+  }, [attachment, activeAuthorHandle, isDesktop]);
+
   // What nothing on the device can paint (a ZIP, an octet-stream) is one row;
   // the viewer says “Preview unavailable” and offers Open in browser.
   if (capabilities.preview === 'external') {
@@ -118,7 +136,7 @@ export const ArtifactCard = React.memo(function ArtifactCard({
         title={title}
         kindLine={kindLine}
         onOpen={openFull}
-        testID={`artifact-document-${activeAttachment.name}`}
+        testID={`artifact-document-${attachment.name}`}
       />
     );
   }
@@ -127,89 +145,191 @@ export const ArtifactCard = React.memo(function ArtifactCard({
       title={title}
       kindLine={kindLine}
       onOpen={openFull}
-      testID={isPhotoGroup ? 'artifact-photo-group' : `artifact-${format}-${activeAttachment.name}`}
+      testID={`artifact-${format}-${attachment.name}`}
       preview={<YStack
         minWidth={0}
         accessibilityLabel={`Open ${title} full screen`}
         accessibilityRole="button"
         onPress={openFull}
-        testID={`artifact-preview-${activeAttachment.name}`}
+        testID={`artifact-preview-${attachment.name}`}
       >
-        {!visible ? (
-          <PreviewLoading />
-        ) : format === 'markdown' ? (
-          <ArtifactMarkdownPreview attachment={activeAttachment} />
-        ) : format === 'text' ? (
-          <YStack height={ARTIFACT_MAX_PREVIEW_HEIGHT}>
-            <ArtifactText attachment={activeAttachment} crop testID="artifact-preview-text" />
-            <PreviewFade />
-          </YStack>
-        ) : format === 'image' ? (
-          <YStack height={ARTIFACT_MAX_PREVIEW_HEIGHT}>
-            <ArtifactImage
-              attachment={activeAttachment}
-              fit="cover"
-              testID="artifact-preview-image"
-            />
-            {isPhotoGroup ? (
-              <XStack pointerEvents="box-none" position="absolute" left={8} right={8} bottom={8} alignItems="center" justifyContent="space-between">
-                <PhotoStep
-                  accessibilityLabel="Previous photo"
-                  accessibilityRole="button"
-                  onPress={(event) => {
-                    event?.stopPropagation();
-                    setPhotoIndex((index) =>
-                      index === 0 ? photoAttachments!.length - 1 : index - 1,
-                    );
-                  }}
-                  testID="artifact-photo-previous"
-                >
-                  <Glyph icon={ChevronLeft} size={14} color="ink" />
-                </PhotoStep>
-                <T
-                  v="code"
-                  accessibilityLabel={`Photo ${photoIndex + 1} of ${photoAttachments!.length}`}
-                  accessibilityLiveRegion="polite"
-                  backgroundColor="canvas"
-                  borderRadius="sm"
-                  paddingHorizontal="2"
-                  paddingVertical="1"
-                  testID="artifact-photo-position"
-                >
-                  {photoIndex + 1} of {photoAttachments!.length}
-                </T>
-                <PhotoStep
-                  accessibilityLabel="Next photo"
-                  accessibilityRole="button"
-                  onPress={(event) => {
-                    event?.stopPropagation();
-                    setPhotoIndex((index) => (index + 1) % photoAttachments!.length);
-                  }}
-                  testID="artifact-photo-next"
-                >
-                  <Glyph icon={ChevronRight} size={14} color="ink" />
-                </PhotoStep>
-              </XStack>
-            ) : null}
-          </YStack>
-        ) : (
-          <ArtifactSandboxPreview
-            attachment={activeAttachment}
-            format={format === 'pdf' ? 'pdf' : format === 'svg' ? 'svg' : 'html'}
-          />
-        )}
+        <ArtifactPreviewBody attachment={attachment} visible={visible} />
       </YStack>}
     />
   );
-});
+}
 
-/** “PNG”, “PDF”, “HTML”, “Interactive”, or a whole document type (“TEXT/CSV”). */
-export function artifactKindWord(mimeType: string, format: ReturnType<typeof artifactFormat>): string {
-  if (format === 'game') return 'Interactive';
-  const mime = mimeType.toLowerCase().split(';')[0]!.trim();
-  if (format === 'document') return mime.toUpperCase();
-  const subtype = mime.split('/')[1]?.split('+')[0] ?? format;
-  return (subtype === 'plain' ? 'text' : subtype).toUpperCase();
+/** The cropped preview of one file, by format. */
+function ArtifactPreviewBody({ attachment, visible }: { attachment: AttachmentReference; visible: boolean }) {
+  const format = artifactFormat(attachment.mimeType);
+  if (!visible) return <PreviewLoading />;
+  if (format === 'markdown') return <ArtifactMarkdownPreview attachment={attachment} />;
+  if (format === 'text') {
+    return (
+      <YStack height={ARTIFACT_MAX_PREVIEW_HEIGHT}>
+        <ArtifactText attachment={attachment} crop testID="artifact-preview-text" />
+        <PreviewFade />
+      </YStack>
+    );
+  }
+  if (format === 'image') {
+    return (
+      <YStack height={ARTIFACT_MAX_PREVIEW_HEIGHT}>
+        <ArtifactImage attachment={attachment} fit="cover" testID="artifact-preview-image" />
+      </YStack>
+    );
+  }
+  return (
+    <ArtifactSandboxPreview
+      attachment={attachment}
+      format={format === 'pdf' ? 'pdf' : format === 'svg' ? 'svg' : 'html'}
+    />
+  );
+}
+
+/**
+ * Two or more live files of one message in one card (approved stacked mock):
+ * the selected file's preview with arrows and “1 of N”, its title and kind
+ * line, one row per file, and one Open. The preview box and every row have a
+ * fixed height, so stepping through the files never moves the transcript.
+ */
+function ArtifactStackCard({ files, authorHandle, isDesktop, visible }: {
+  files: readonly AttachmentReference[]; authorHandle?: string; isDesktop: boolean; visible: boolean;
+}) {
+  const [index, setIndex] = useState(0);
+  const [expanded, setExpanded] = useState(false);
+  useEffect(() => {
+    setIndex((current) => Math.min(current, files.length - 1));
+  }, [files.length]);
+  const active = files[Math.min(index, files.length - 1)]!;
+  const activeAuthorHandle = active.author ?? authorHandle;
+  const title = active.title ?? active.name;
+  const external = artifactCapabilities(active.mimeType, previewSurface(isDesktop)).preview === 'external';
+  const openFull = useCallback(() => {
+    openArtifactViewer(active, isDesktop, currentViewerConversation()?.roomId, activeAuthorHandle, files);
+  }, [active, activeAuthorHandle, files, isDesktop]);
+  const step = (direction: -1 | 1) => setIndex((current) => (current + direction + files.length) % files.length);
+  const shownFiles = expanded ? files : files.slice(0, ARTIFACT_GROUP_VISIBLE_ROWS);
+  const hiddenCount = files.length - shownFiles.length;
+  const selectionFolded = index >= shownFiles.length;
+  return (
+    <ArtifactCardFrame
+      title={title}
+      kindLine={`${authorKindLine(active, authorHandle)} · ${files.length} files`}
+      onOpen={openFull}
+      testID="artifact-stack"
+      preview={
+        <YStack
+          minWidth={0}
+          height={ARTIFACT_MAX_PREVIEW_HEIGHT}
+          // Web views are not positioned by default; the arrows anchor here.
+          position="relative"
+          overflow="hidden"
+          accessibilityLabel={`Open ${title} full screen`}
+          accessibilityRole="button"
+          onPress={openFull}
+          testID={`artifact-preview-${active.name}`}
+        >
+          {external ? (
+            <YStack flex={1} alignItems="center" justifyContent="center" gap="1" padding="4" testID="artifact-preview-unavailable">
+              <Copy>Preview unavailable</Copy>
+              <Copy small quiet>Open the file to view it.</Copy>
+            </YStack>
+          ) : (
+            <ArtifactPreviewBody key={active.url} attachment={active} visible={visible} />
+          )}
+          <XStack pointerEvents="box-none" position="absolute" left={8} right={8} bottom={8} alignItems="center" justifyContent="space-between">
+            <PreviewStep
+              accessibilityLabel="Previous file"
+              accessibilityRole="button"
+              onPress={(event) => { event?.stopPropagation(); step(-1); }}
+              testID="artifact-stack-previous"
+            >
+              <Glyph icon={ChevronLeft} size={14} color="ink" />
+            </PreviewStep>
+            <T
+              v="code"
+              accessibilityLabel={`File ${index + 1} of ${files.length}`}
+              accessibilityLiveRegion="polite"
+              backgroundColor="canvas"
+              borderRadius="sm"
+              paddingHorizontal="2"
+              paddingVertical="1"
+              testID="artifact-stack-position"
+            >
+              {`${index + 1} of ${files.length}`}
+            </T>
+            <PreviewStep
+              accessibilityLabel="Next file"
+              accessibilityRole="button"
+              onPress={(event) => { event?.stopPropagation(); step(1); }}
+              testID="artifact-stack-next"
+            >
+              <Glyph icon={ChevronRight} size={14} color="ink" />
+            </PreviewStep>
+          </XStack>
+        </YStack>
+      }
+      rows={
+        <YStack testID="artifact-stack-rows">
+          {shownFiles.map((file, rowIndex) => {
+            const selected = rowIndex === index;
+            const fileTitle = file.title ?? file.name;
+            return (
+              <XStack
+                key={file.url}
+                minHeight={HEIGHT.control}
+                alignItems="center"
+                gap="3"
+                borderTopWidth={1}
+                borderColor="stroke"
+                accessibilityRole="button"
+                accessibilityLabel={`Show ${fileTitle}`}
+                accessibilityState={{ selected }}
+                onPress={() => setIndex(rowIndex)}
+                testID={`artifact-stack-row-${rowIndex}`}
+              >
+                <Glyph icon={fileGlyph(file.mimeType)} size={16} accent={selected} />
+                <YStack flex={1} minWidth={0}>
+                  <Copy strong={selected} numberOfLines={1}>{fileTitle}</Copy>
+                  <Copy small quiet numberOfLines={1}>{fileKindLine(file)}</Copy>
+                </YStack>
+                <Glyph icon={ChevronRight} size={14} />
+              </XStack>
+            );
+          })}
+          {hiddenCount > 0 ? (
+            <XStack
+              minHeight={HEIGHT.control}
+              alignItems="center"
+              gap="3"
+              borderTopWidth={1}
+              borderColor="stroke"
+              accessibilityRole="button"
+              accessibilityState={{ selected: selectionFolded }}
+              onPress={() => setExpanded(true)}
+              testID="artifact-stack-more"
+            >
+              {/* Lines up with the file titles, past the row glyph. */}
+              <YStack width={16} />
+              {/* A selected file under the fold marks the fold, so the list
+                  always shows where the selection is. */}
+              <Copy small quiet={!selectionFolded} strong={selectionFolded}>{`Show ${hiddenCount} more`}</Copy>
+            </XStack>
+          ) : null}
+        </YStack>
+      }
+    />
+  );
+}
+
+/** The row glyph: a picture, markup, a page, or a plain file. */
+function fileGlyph(mimeType: string) {
+  const format = artifactFormat(mimeType);
+  if (format === 'image') return ImageIcon;
+  if (format === 'html' || format === 'svg' || format === 'game') return FileCode;
+  if (format === 'pdf' || format === 'markdown' || format === 'text') return FileText;
+  return File;
 }
 
 type SandboxPreviewFormat = 'html' | 'svg' | 'pdf';
@@ -310,8 +430,8 @@ function PreviewFade() {
   return <YStack pointerEvents="none" position="absolute" left={0} right={0} bottom={0} height={44} backgroundColor="canvas" opacity={0.8} />;
 }
 
-/** One square photo step over the image: 44, stroked, on canvas. */
-function PhotoStep({ children, ...rest }: {
+/** One square step over the preview: 44, stroked, on canvas. */
+function PreviewStep({ children, ...rest }: {
   children: React.ReactNode; accessibilityLabel: string; accessibilityRole: 'button'; testID: string;
   onPress: (event?: { stopPropagation: () => void }) => void;
 }) {

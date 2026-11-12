@@ -3,6 +3,7 @@ import Ionicons from '@expo/vector-icons/Ionicons';
 import { LedgerUntaggedHint } from '@/components/buzz/Ledger';
 import { TurnSettledLine } from '@/components/buzz/TurnProgressLine';
 import React, { useCallback, useEffect, useMemo, useRef } from 'react';
+import type { AttachmentReference } from '@beeline/buzz-client';
 import { XStack, YStack } from 'tamagui';
 import { ContentTarget } from '@/components/buzz/IndexRow';
 import { agentActivityReplyExcerpt, canBeginReply } from '@/buzz/message-reply';
@@ -19,7 +20,7 @@ import { parseConnectorReceipt } from '@/buzz/connector-receipt';
 import { ledgerStamp } from '@/buzz/relative-time';
 import { isLedgerDayOpener } from '@/buzz/message-dates';
 import { useTranscriptStamp } from '@/buzz/use-transcript-stamp';
-import { artifactFormat } from '@/buzz/artifact';
+import { messageArtifactGroup } from '@/buzz/artifact-group';
 import { TranscriptReference } from '@/components/buzz/TranscriptReference';
 import { ArtifactCard } from '@/components/buzz/ArtifactCard';
 import { CORNER_LABEL } from '@/buzz/vocabulary';
@@ -350,25 +351,24 @@ export const OrdinaryLedgerMessage = React.memo(function OrdinaryLedgerMessage({
         {stepsLine}
       </>
     ) : null;
-  const livePhotoArtifacts = message.attachments?.filter(
-    (attachment) =>
-      attachment.kind === 'artifact' &&
-      !attachment.expired &&
-      artifactFormat(attachment.mimeType) === 'image',
-  );
-  const groupedPhotoArtifacts =
-    livePhotoArtifacts && livePhotoArtifacts.length > 1 ? livePhotoArtifacts : undefined;
-  const firstGroupedPhoto = groupedPhotoArtifacts?.[0];
+  // The first attachment of a "Viewing artifact" message is the viewed file,
+  // already named by the viewer reference line.
+  const viewerContext = viewerMessage.context;
+  const viewedAttachment = useCallback((attachment: AttachmentReference, index: number) =>
+    Boolean(viewerContext) && index === 0 &&
+    (viewerContext!.startsWith('Viewing artifact:') || attachment.name === 'browser-screen.jpg'), [viewerContext]);
+  // Two or more live files share one stacked card at the first file's place.
+  // Memoized so the memoized card is not redrawn by an unrelated row update.
+  const artifactGroup = useMemo(() => messageArtifactGroup(message.attachments, viewedAttachment),
+    [message.attachments, viewedAttachment]);
+  const firstGroupArtifact = artifactGroup?.[0];
   const command = message.agentCommand;
   const askingViewer = command?.kind === 'report' && command.status === 'needs-decision' &&
     Boolean(viewerPubkey) && command.recipient.id === viewerPubkey ? command : null;
   const attachments = message.attachments?.map((attachment, index) => {
-    if (viewerMessage.context && index === 0 &&
-      (viewerMessage.context.startsWith('Viewing artifact:') || attachment.name === 'browser-screen.jpg')) return null;
+    if (viewedAttachment(attachment, index)) return null;
     if (attachment.kind === 'artifact' && !attachment.expired) {
-      if (groupedPhotoArtifacts && artifactFormat(attachment.mimeType) === 'image') {
-        if (attachment !== firstGroupedPhoto) return null;
-      }
+      if (artifactGroup && attachment !== firstGroupArtifact) return null;
       return (
         <ArtifactCard
           visible={artifactVisible}
@@ -381,7 +381,7 @@ export const OrdinaryLedgerMessage = React.memo(function OrdinaryLedgerMessage({
           }
           isDesktop={desktopLayout}
           key={`${message.id}-${attachment.url}`}
-          {...(attachment === firstGroupedPhoto ? { photoAttachments: groupedPhotoArtifacts } : {})}
+          {...(artifactGroup ? { groupAttachments: artifactGroup } : {})}
         />
       );
     }

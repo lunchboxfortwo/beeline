@@ -47,7 +47,7 @@ export function ViewerHeader({ title, detail, leading, children, onClose, closeL
 }
 
 /** A small secondary header action: Copy, Share, Reopen, Open in browser. */
-export function ViewerAction({ label, title, icon, onPress, testID, disabled }: {
+export function ViewerAction({ label, title, icon, onPress, testID, disabled, compact = false }: {
     /** The accessible name. */
     label: string;
     /** The visible word. */
@@ -56,7 +56,12 @@ export function ViewerAction({ label, title, icon, onPress, testID, disabled }: 
     onPress: () => void;
     testID?: string;
     disabled?: boolean;
+    /** Icon only: a paged viewer's header also carries “2 of 5”, so the title keeps its room. */
+    compact?: boolean;
 }) {
+    if (compact && icon) {
+        return <Btn kind="icon" label={label} onPress={onPress} testID={testID} disabled={disabled}><Glyph icon={icon} color="ink" /></Btn>;
+    }
     return (
         <Btn kind="secondary" label={label} onPress={onPress} testID={testID} disabled={disabled} paddingHorizontal="3">
             <XStack gap="2" alignItems="center">
@@ -144,15 +149,55 @@ export function ZoomBar({ scale, canZoomIn, onZoomOut, onZoomIn, onReset, testID
     );
 }
 
-/** Previous / position / next for a message's group of photos. */
-export function PhotoStepper({ index, count, onPrevious, onNext }: { index: number; count: number; onPrevious: () => void; onNext: () => void }) {
+/**
+ * Paging through a message's files (approved stacked mock): the file the
+ * viewer shows, its place, and a step that wraps at both ends. One file, or
+ * no group, never pages.
+ */
+export function useFilePaging<F extends { url: string }>(initial: F | undefined, group: readonly F[] | undefined) {
+    const files = initial && group && group.length > 1 ? group : undefined;
+    const start = () => Math.max(0, files?.findIndex((file) => file.url === initial?.url) ?? 0);
+    const [paging, setPaging] = React.useState(() => ({ initial, files, index: start() }));
+    // A new selection (the desktop pane keeps its instance) starts on its own file.
+    const current = paging.initial === initial && paging.files === files;
+    if (!current) setPaging({ initial, files, index: start() });
+    const index = current ? paging.index : start();
+    const file = files?.[index] ?? initial;
+    const step = React.useCallback((direction: -1 | 1) => {
+        if (files) setPaging((state) => ({ ...state, index: (state.index + direction + files.length) % files.length }));
+    }, [files]);
+    return { file, index, count: files?.length ?? 1, paged: Boolean(files), step };
+}
+
+/** “2 of 5” at the header's end: where this file sits in its message. */
+export function ViewerPosition({ index, count, noun }: { index: number; count: number; noun: 'photo' | 'file' }) {
+    const label = `${noun === 'photo' ? 'Photo' : 'File'} ${index + 1} of ${count}`;
     return (
-        <XStack gap="2" alignItems="center" justifyContent="center" minHeight={HEIGHT.control}>
-            <Btn kind="icon" label="Previous photo" onPress={onPrevious} testID="artifact-viewer-photo-previous"><Glyph icon={ChevronLeft} /></Btn>
-            <Copy small quiet aria-label={`Photo ${index + 1} of ${count}`} accessibilityLabel={`Photo ${index + 1} of ${count}`} accessibilityLiveRegion="polite" testID="artifact-viewer-photo-position">
-                {`${index + 1} of ${count}`}
-            </Copy>
-            <Btn kind="icon" label="Next photo" onPress={onNext} testID="artifact-viewer-photo-next"><Glyph icon={ChevronRight} /></Btn>
-        </XStack>
+        <T v="code" aria-label={label} accessibilityLabel={label} accessibilityLiveRegion="polite" testID="artifact-viewer-photo-position">
+            {`${index + 1} of ${count}`}
+        </T>
+    );
+}
+
+/** The pager under the body: previous, one dot per file, next. */
+export function ViewerPager({ index, count, noun, onPrevious, onNext }: {
+    index: number; count: number; noun: 'photo' | 'file'; onPrevious: () => void; onNext: () => void;
+}) {
+    return (
+        <>
+            <Separator borderColor="stroke" />
+            <XStack paddingHorizontal="3" paddingVertical="1" alignItems="center" justifyContent="space-between" backgroundColor="canvas" testID="artifact-viewer-pager">
+                <Btn kind="icon" label={`Previous ${noun}`} onPress={onPrevious} testID="artifact-viewer-photo-previous"><Glyph icon={ChevronLeft} color="ink" /></Btn>
+                <XStack flexShrink={1} flexWrap="wrap" justifyContent="center" gap="2" importantForAccessibility="no-hide-descendants" aria-hidden>
+                    {Array.from({ length: count }, (_, dot) => (
+                        <YStack key={dot} width={6} height={6} borderRadius="full"
+                            // The accent, as the stacked mock: brass in Brass, neutral in Stone.
+                            backgroundColor={dot === index ? 'needsYou' : 'strongStroke'}
+                            testID={dot === index ? 'artifact-viewer-dot-current' : 'artifact-viewer-dot'} />
+                    ))}
+                </XStack>
+                <Btn kind="icon" label={`Next ${noun}`} onPress={onNext} testID="artifact-viewer-photo-next"><Glyph icon={ChevronRight} color="ink" /></Btn>
+            </XStack>
+        </>
     );
 }

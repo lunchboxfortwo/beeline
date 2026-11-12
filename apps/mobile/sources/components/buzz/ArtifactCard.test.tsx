@@ -30,7 +30,6 @@ vi.mock('@/buzz/artifact-pdf', async importOriginal => ({
   ...await importOriginal<typeof import('@/buzz/artifact-pdf')>(),
   loadPdfViewerDocument: vi.fn(async () => '<html>PDF page one</html>'),
 }));
-vi.mock('@/buzz/chat-attachment', () => ({ formatAttachmentSize: (size: number) => `${size} B` }));
 vi.mock('@/buzz/desktop-artifact-pane', () => ({ openArtifactInDesktopWorkPane: vi.fn() }));
 vi.mock('@/buzz/viewer-conversation', () => ({ currentViewerConversation: () => null }));
 vi.mock('@/buzz/use-artifact-recovery', () => ({ useArtifactRecoveryGeneration: () => 0 }));
@@ -49,6 +48,7 @@ vi.mock('@/modal', () => ({ Modal: { show: vi.fn() } }));
 
 import { ArtifactCard, artifactKindWord } from './ArtifactCard';
 import { Modal } from '@/modal';
+import { openArtifactInDesktopWorkPane } from '@/buzz/desktop-artifact-pane';
 import { fetchArtifactBytes } from '@/buzz/artifact-link';
 import { ARTIFACT_MAX_PREVIEW_HEIGHT } from '@/buzz/artifact';
 import { loadPdfViewerDocument } from '@/buzz/artifact-pdf';
@@ -163,7 +163,7 @@ describe('artifact card chrome', () => {
   it('names the artifact as @author · FORMAT · size with one Open into the viewer', async () => {
     const tree = await render({ authorHandle: 'alan' });
     expect(tree.root.findByProps({ testID: 'artifact-title' }).props.children).toBe('mock.html');
-    expect(tree.root.findByProps({ testID: 'artifact-kind-line' }).props.children).toBe(`@agent · HTML · ${attachment.size} B`);
+    expect(tree.root.findByProps({ testID: 'artifact-kind-line' }).props.children).toBe(`@agent · HTML · ${Math.ceil(attachment.size / 1024)} KB`);
     expect(tree.root.findAllByProps({ testID: 'artifact-open-browser' })).toHaveLength(0);
     act(() => { tree.root.findByProps({ testID: 'artifact-open' }).props.onPress(); });
     expect(Modal.show).toHaveBeenCalledWith(expect.objectContaining({ placement: 'fill' }));
@@ -175,7 +175,7 @@ describe('artifact card chrome', () => {
     renderers.push(tree);
     const row = tree.root.find((node: any) => node.type === 'ListItem' && node.props.testID === 'artifact-document-quotas.zip');
     expect(row.props['aria-label']).toBe('Open quotas.zip');
-    expect(tree.root.findByProps({ testID: 'artifact-kind-line' }).props.children).toBe(`@agent · APPLICATION/ZIP · ${attachment.size} B`);
+    expect(tree.root.findByProps({ testID: 'artifact-kind-line' }).props.children).toBe(`@agent · APPLICATION/ZIP · ${Math.ceil(attachment.size / 1024)} KB`);
     act(() => { row.props.onPress(); });
     expect(Modal.show).toHaveBeenCalled();
     expect(host.operation).not.toHaveBeenCalled();
@@ -185,5 +185,86 @@ describe('artifact card chrome', () => {
     ['image/svg+xml', 'svg', 'SVG'], ['text/csv', 'document', 'TEXT/CSV'], ['application/x-game', 'game', 'Interactive'],
   ] as const)('%s reads as %s → %s', (mime, format, word) => {
     expect(artifactKindWord(mime, format as never)).toBe(word);
+  });
+});
+
+describe('stacked card for a message with several files', () => {
+  const png = { ...attachment, url: '/v1/media/33333333-3333-4333-8333-333333333333', name: 'shot.png', title: 'Room list, before', mimeType: 'image/png', size: 212 };
+  const zip = { ...attachment, url: '/v1/media/44444444-4444-4444-8444-444444444444', name: 'logs.zip', mimeType: 'application/zip', size: 9 };
+  const pdf = { ...attachment, url: '/v1/media/55555555-5555-4555-8555-555555555555', name: 'report.pdf', mimeType: 'application/pdf', size: 340 };
+  const md = { ...attachment, url: '/v1/media/66666666-6666-4666-8666-666666666666', name: 'notes.md', mimeType: 'text/markdown', size: 4 };
+  async function stack(files: (typeof attachment)[], isDesktop = false) {
+    let tree!: ReactTestRenderer;
+    await act(async () => { tree = create(<ArtifactCard attachment={files[0]!} groupAttachments={files} visible={false} isDesktop={isDesktop} />); });
+    renderers.push(tree);
+    return tree;
+  }
+  const byId = (tree: ReactTestRenderer, testID: string) => tree.root.find((node: any) => typeof node.type === 'string' && node.props.testID === testID);
+  const rows = (tree: ReactTestRenderer) => tree.root.findAll((node: any) => typeof node.type === 'string' && /^artifact-stack-row-\d+$/.test(node.props.testID ?? ''));
+
+  it('draws one card with a row per file, the first selected', async () => {
+    const tree = await stack([png, attachment]);
+    expect(tree.root.findAll((node: any) => typeof node.type === 'string' && node.props.testID === 'artifact-stack')).toHaveLength(1);
+    expect(byId(tree, 'artifact-stack-position').props.children).toBe('1 of 2');
+    expect(byId(tree, 'artifact-title').props.children).toBe('Room list, before');
+    expect(byId(tree, 'artifact-kind-line').props.children).toBe('@agent · PNG · 212 B · 2 files');
+    expect(rows(tree).map((row: any) => row.props.accessibilityState.selected)).toEqual([true, false]);
+  });
+
+  it('steps with the arrows and the rows, and keeps the preview box one height', async () => {
+    const tree = await stack([png, attachment, zip]);
+    const previewHeight = () => tree.root.find((node: any) => typeof node.type === 'string' && /^artifact-preview-/.test(node.props.testID ?? '') && node.props.accessibilityRole === 'button').props.height;
+    expect(previewHeight()).toBe(ARTIFACT_MAX_PREVIEW_HEIGHT);
+    act(() => { byId(tree, 'artifact-stack-next').props.onPress({ stopPropagation() {} }); });
+    expect(byId(tree, 'artifact-title').props.children).toBe('mock.html');
+    expect(byId(tree, 'artifact-stack-position').props.children).toBe('2 of 3');
+    act(() => { byId(tree, 'artifact-stack-row-2').props.onPress(); });
+    expect(byId(tree, 'artifact-preview-unavailable')).toBeDefined();
+    expect(previewHeight()).toBe(ARTIFACT_MAX_PREVIEW_HEIGHT);
+    act(() => { byId(tree, 'artifact-stack-next').props.onPress({ stopPropagation() {} }); });
+    expect(byId(tree, 'artifact-title').props.children).toBe('Room list, before');
+    act(() => { byId(tree, 'artifact-stack-previous').props.onPress({ stopPropagation() {} }); });
+    expect(byId(tree, 'artifact-stack-position').props.children).toBe('3 of 3');
+  });
+
+  it('folds files past three into Show N more', async () => {
+    const tree = await stack([png, attachment, zip, pdf, md]);
+    expect(rows(tree)).toHaveLength(3);
+    const more = byId(tree, 'artifact-stack-more');
+    expect(more.props.accessibilityState.selected).toBe(false);
+    act(() => { byId(tree, 'artifact-stack-previous').props.onPress({ stopPropagation() {} }); });
+    expect(byId(tree, 'artifact-stack-position').props.children).toBe('5 of 5');
+    expect(byId(tree, 'artifact-stack-more').props.accessibilityState.selected).toBe(true);
+    expect(rows(tree).map((row: any) => row.props.accessibilityState.selected)).toEqual([false, false, false]);
+    act(() => { byId(tree, 'artifact-stack-more').props.onPress(); });
+    expect(rows(tree)).toHaveLength(5);
+    expect(rows(tree)[4].props.accessibilityState.selected).toBe(true);
+    expect(tree.root.findAll((node: any) => typeof node.type === 'string' && node.props.testID === 'artifact-stack-more')).toHaveLength(0);
+  });
+
+  it('opens the viewer on the selected file with every file of the message', async () => {
+    const files = [png, attachment, zip];
+    const tree = await stack(files);
+    act(() => { byId(tree, 'artifact-stack-row-1').props.onPress(); });
+    act(() => { byId(tree, 'artifact-open').props.onPress(); });
+    expect(Modal.show).toHaveBeenLastCalledWith(expect.objectContaining({
+      placement: 'fill',
+      props: expect.objectContaining({ attachment, groupAttachments: files }),
+    }));
+  });
+
+  it('hands the desktop pane the selected document with every file of the message', async () => {
+    vi.mocked(openArtifactInDesktopWorkPane).mockReturnValueOnce(true);
+    const files = [png, attachment, zip];
+    const tree = await stack(files, true);
+    act(() => { byId(tree, 'artifact-stack-row-1').props.onPress(); });
+    act(() => { byId(tree, 'artifact-open').props.onPress(); });
+    expect(openArtifactInDesktopWorkPane).toHaveBeenLastCalledWith(expect.objectContaining({ attachment, groupAttachments: files }));
+  });
+
+  it('starts no byte request while the row is hidden', async () => {
+    await stack([png, attachment]);
+    expect(host.operation).not.toHaveBeenCalled();
+    expect(host.fetch).not.toHaveBeenCalled();
   });
 });

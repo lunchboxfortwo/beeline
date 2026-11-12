@@ -92,11 +92,7 @@ export async function pastedImageAttachment(
   };
 }
 
-export function formatAttachmentSize(size: number): string {
-  if (size < 1024) return `${size} B`;
-  if (size < 1024 * 1024) return `${Math.ceil(size / 1024)} KB`;
-  return `${(size / (1024 * 1024)).toFixed(size >= 10 * 1024 * 1024 ? 0 : 1)} MB`;
-}
+export { formatAttachmentSize } from './artifact';
 
 /** Active file cards use the isolated renderer; ordinary files keep their media URL. */
 export function attachmentOpenUrl(attachment: AttachmentReference): string {

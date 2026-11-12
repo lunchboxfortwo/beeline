@@ -79,11 +79,14 @@
     "components/buzz/ArtifactCard.tsx": [
       "ArtifactCard",
       "ArtifactMarkdownPreview",
+      "ArtifactPreviewBody",
       "ArtifactSandboxPreview",
-      "PhotoStep",
+      "ArtifactSingleCard",
+      "ArtifactStackCard",
       "PreviewFade",
       "PreviewFailed",
-      "PreviewLoading"
+      "PreviewLoading",
+      "PreviewStep"
     ],
     "components/buzz/ArtifactDocumentPreview.tsx": [
       "ArtifactDocumentPreview",

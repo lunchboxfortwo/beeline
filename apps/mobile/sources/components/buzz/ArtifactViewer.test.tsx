@@ -463,7 +463,7 @@ describe('the full-screen artifact viewer (mock 1c)', () => {
   function gallery(selected = 2) {
     mocks.onClose.mockClear();
     mocks.platformOS.value = 'android';
-    return render(<ArtifactViewerScreen attachment={photos[selected]!} photoAttachments={photos} onClose={mocks.onClose} />);
+    return render(<ArtifactViewerScreen attachment={photos[selected]!} groupAttachments={photos} onClose={mocks.onClose} />);
   }
 
   it('opens a non-first photo and swipes both ways, wrapping within its message group', () => {
@@ -612,6 +612,24 @@ describe('the full-screen artifact viewer (mock 1c)', () => {
     expect(text.props.crop).toBe(false);
     expect(text.props.testID).toBe('artifact-viewer-text');
     expect(mocks.openArtifactInBrowserOrExplain).not.toHaveBeenCalled();
+  });
+  it('pages a mixed message from a photo to its HTML mock and back, as files', async () => {
+    mocks.platformOS.value = 'android';
+    mocks.fetchArtifactBytes.mockResolvedValue(new TextEncoder().encode('<p>mock</p>'));
+    const html = attachment();
+    const mixed = [photos[0]!, html];
+    const renderer = render(<ArtifactViewerScreen attachment={html} groupAttachments={mixed} onClose={mocks.onClose} />);
+    expect(renderer.root.findByProps({ accessibilityLabel: 'File 2 of 2' })).toBeDefined();
+    await flush();
+    expect(renderer.root.findByType('WebView')).toBeDefined();
+    act(() => renderer.root.findByProps({ testID: 'artifact-viewer-photo-next' }).props.onPress());
+    expect(currentPhoto(renderer)).toBe(photos[0]);
+    expect(renderer.root.findByProps({ accessibilityLabel: 'File 1 of 2' })).toBeDefined();
+    expect(renderer.root.findAllByType('WebView')).toHaveLength(0);
+    swipe(renderer, -120);
+    expect(renderer.root.findByProps({ accessibilityLabel: 'File 2 of 2' })).toBeDefined();
+    await flush();
+    expect(renderer.root.findByType('WebView')).toBeDefined();
   });
 
   it('every navigation after the initial load is denied', async () => {
