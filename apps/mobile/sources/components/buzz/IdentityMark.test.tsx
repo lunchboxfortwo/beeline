@@ -13,9 +13,13 @@ vi.mock('react-native-svg', () => {
   const names = ['G', 'Path', 'Rect', 'SvgUri', 'Polygon', 'Circle', 'Ellipse', 'Line', 'Polyline'];
   return { default: host('Svg'), Text: host('SvgText'), ...Object.fromEntries(names.map((name) => [name, host(name)])) };
 });
-vi.mock('react-native-unistyles', () => ({
-  useUnistyles: () => ({ theme: { buzz: { dark: theme.dark, brandMark: 'brand', accent: 'accent' } } }),
+vi.mock('tamagui', async () => ({
+  ...(await import('@/ui/screens/transcript/grammar-hosts.test-support')).tamaguiHosts(),
+  useThemeName: () => (theme.dark ? 'dark_brass' : 'light_brass'),
 }));
+vi.mock('lucide-react-native', async () => (await import('@/ui/screens/transcript/grammar-hosts.test-support')).lucideHosts());
+vi.mock('react-native-safe-area-context', () => ({ useSafeAreaInsets: () => ({ top: 0, bottom: 0, left: 0, right: 0 }) }));
+vi.mock('@/sync/storage', () => ({ useLocalSetting: () => 'medium' }));
 vi.mock('./MonoHull', () => ({ HullLivePulse: (props: any) => React.createElement('View', props, props.children) }));
 import { IdentityMark, isPersonPictureUrl, personInitial } from './IdentityMark';
 import { PERSON_PLATE } from '@/buzz/faces/face-tile';
@@ -58,7 +62,7 @@ describe('person marks', () => {
 
   it('names the tile once as an image', async () => {
     const tree = await render(<IdentityMark kind="human" seed="pk-k" name="Kai" testID="kai" />);
-    const tile = tree.root.find((node: any) => node.props.testID === 'kai' && node.type === 'View');
+    const tile = tree.root.find((node: any) => node.props.testID === 'kai' && node.type === 'YStack');
     expect(tile.props.accessibilityRole).toBe('image');
     expect(tile.props.accessibilityLabel).toBe('Kai, person');
   });

@@ -1,18 +1,16 @@
 import { useLatencyRouteFrame } from '@/buzz/latency-route-hook';
 import React, { useEffect } from 'react';
-import { ScrollView, View, Text } from 'react-native';
+import { ScrollView, Separator, YStack } from 'tamagui';
 import { router } from 'expo-router';
-import { StyleSheet } from 'react-native-unistyles';
-import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { MonoMarkdown } from '@/components/buzz/MonoMarkdown';
 import { getChangelogEntries, getLatestTitle, setLastViewedTitle } from '@/changelog';
 import { layout } from '@/components/layout';
 import { useLayoutClass } from '@/utils/responsive';
 import { PageHeader } from '@/components/buzz/PageHeader';
+import { SafeBottom, SafeTop, T, TypedView } from '@/ui/grammar';
 
 export default function ChangelogScreen() {
   useLatencyRouteFrame('/changelog', true, true);
-    const insets = useSafeAreaInsets();
     const isCompact = useLayoutClass() === 'compact';
     const entries = getChangelogEntries();
 
@@ -25,51 +23,55 @@ export default function ChangelogScreen() {
 
     if (entries.length === 0) {
         return (
-            <View style={[styles.container, { paddingTop: insets.top }]}>
+            <YStack flex={1} backgroundColor="canvas">
+                <SafeTop />
                 <ChangelogHeader />
-                <View style={styles.emptyState}>
-                    <Text style={styles.emptyText}>
+                <YStack flex={1} alignItems="center" justifyContent="center" padding="8">
+                    <T v="body" color="secondary" textAlign="center">
                         {"No changelog entries available."}
-                    </Text>
-                </View>
-            </View>
+                    </T>
+                </YStack>
+            </YStack>
         );
     }
 
     return (
-        <View style={[styles.container, { paddingTop: insets.top }]}>
+        <YStack flex={1} backgroundColor="canvas">
+            <SafeTop />
             <ChangelogHeader />
             <ScrollView
-                style={styles.container}
-                contentContainerStyle={[
-                    styles.content,
-                    {
-                        paddingBottom: insets.bottom + 32,
-                        maxWidth: isCompact ? '100%' : layout.maxWidth,
-                        alignSelf: 'center',
-                        width: '100%'
-                    }
-                ]}
+                flex={1}
+                backgroundColor="canvas"
                 showsVerticalScrollIndicator={false}
             >
-                {entries.map((entry, index) => (
-                    <View key={entry.title} style={styles.entryContainer}>
-                        {index > 0 ? <View style={styles.entryDivider} /> : null}
-                        <Text style={styles.titleText}>
-                            {entry.title}
-                        </Text>
-                        {entry.summary ? (
-                            <Text style={styles.summaryText}>
-                                {entry.summary}
-                            </Text>
-                        ) : null}
-                        {entry.markdown ? (
-                            <MonoMarkdown markdown={entry.markdown} textStyle={styles.bodyText} />
-                        ) : null}
-                    </View>
-                ))}
+                <YStack
+                    paddingHorizontal="4"
+                    paddingTop="4"
+                    paddingBottom="8"
+                    maxWidth={isCompact ? '100%' : layout.maxWidth}
+                    alignSelf="center"
+                    width="100%"
+                >
+                    {entries.map((entry, index) => (
+                        <YStack key={entry.title} marginBottom="8">
+                            {index > 0 ? <Separator borderColor="stroke" marginBottom="8" /> : null}
+                            <T v="title" marginBottom="2">
+                                {entry.title}
+                            </T>
+                            {entry.summary ? (
+                                <T v="body" color="secondary" marginBottom="4">
+                                    {entry.summary}
+                                </T>
+                            ) : null}
+                            {entry.markdown ? (
+                                <TypedView view={MonoMarkdown} v="body" color="ink" markdown={entry.markdown} />
+                            ) : null}
+                        </YStack>
+                    ))}
+                </YStack>
+                <SafeBottom />
             </ScrollView>
-        </View>
+        </YStack>
     );
 }
 
@@ -84,47 +86,3 @@ function ChangelogHeader() {
         />
     );
 }
-
-const styles = StyleSheet.create((theme) => ({
-    container: {
-        flex: 1,
-        backgroundColor: theme.buzz.bgTerminal,
-    },
-    content: {
-        paddingHorizontal: 16,
-        paddingTop: 16,
-    },
-    entryContainer: {
-        marginBottom: 32,
-    },
-    entryDivider: {
-        height: StyleSheet.hairlineWidth,
-        backgroundColor: theme.buzz.borderQuiet,
-        marginBottom: 32,
-    },
-    titleText: {
-        ...theme.buzz.type.hero,
-        color: theme.buzz.textPrimary,
-        marginBottom: 8,
-    },
-    summaryText: {
-        ...theme.buzz.type.body,
-        color: theme.buzz.textSecondary,
-        marginBottom: 16,
-    },
-    bodyText: {
-        ...theme.buzz.type.body,
-        color: theme.buzz.ledgerBody,
-    },
-    emptyState: {
-        flex: 1,
-        alignItems: 'center',
-        justifyContent: 'center',
-        padding: theme.buzz.space.xxl,
-    },
-    emptyText: {
-        ...theme.buzz.type.body,
-        color: theme.buzz.textSecondary,
-        textAlign: 'center',
-    }
-}));

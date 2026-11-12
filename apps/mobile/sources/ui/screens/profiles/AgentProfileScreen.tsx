@@ -250,9 +250,9 @@ function AgentWake({ p, wake }: { p: AgentProfile; wake: NonNullable<AgentDetail
                 <YStack paddingVertical="3"><T v="code" testID="mcp-starter-routine-text">{MCP_STARTER_ROUTINE}</T></YStack>
             </Section>
             <Section title="Webhook">
-                <Row label="Webhook URL" detail={error ?? wake.url ?? 'For bots that only run when called.'} last={!open && !wake.url}
+                <Row label="Webhook URL" detail={error ?? wake.url ?? 'For bots that only run when called.'}
                     right={<Btn label={wake.url ? 'Replace' : 'Set'} disabled={saving} onPress={() => { setUrl(wake.url ?? ''); setKey(''); setOpen(true); }}>{wake.url ? 'Replace' : 'Set'}</Btn>} />
-                <Copy small quiet>{wake.keySet ? 'Auth token: set' : 'Auth token: not set'}</Copy>
+                <Row label="Auth token" value={wake.keySet ? 'Set' : 'Not set'} last={!open && !wake.url} testID="webhook-auth-token" />
                 {open ? (
                     <YStack paddingVertical="3" gap="2">
                         <Input minHeight={HEIGHT.control} aria-label="Webhook URL" value={url} onChangeText={setUrl} autoCapitalize="none" autoCorrect={false} keyboardType="url" maxLength={2048} disabled={saving} />
@@ -264,7 +264,8 @@ function AgentWake({ p, wake }: { p: AgentProfile; wake: NonNullable<AgentDetail
                         </XStack>
                     </YStack>
                 ) : null}
-                {wake.url ? <Btn kind="quiet" alignSelf="flex-start" label="Clear webhook" disabled={saving} onPress={() => void update(true)}>Clear webhook</Btn> : null}
+                {open && wake.url ? <Separator borderColor="stroke" /> : null}
+                {wake.url ? <Row label="Clear webhook" tone="removed" onPress={saving ? undefined : () => void update(true)} last testID="webhook-clear" /> : null}
             </Section>
         </>
     );

@@ -65,6 +65,13 @@ it('keeps the bar slim, and gives it the title with a status dot once the block 
   const title = byTestID(tree, 'thread-bar-title')[0];
   expect(title.findByType('T').props.children).toBe('Reconnect keeps place');
   expect(byTestID(tree, 'thread-status-dot')[0].props.backgroundColor).toBe('added');
+  // A long chat name must not starve the title: both stack and wrap, never a fixed-width chat link.
+  const names = byTestID(tree, 'thread-bar-names')[0];
+  expect(names.findAll((n: any) => n.props.testID === 'thread-chat-link' && typeof n.type === 'string')).toHaveLength(1);
+  expect(names.findAll((n: any) => n.props.testID === 'thread-bar-title' && typeof n.type === 'string')).toHaveLength(1);
+  expect(byTestID(tree, 'thread-chat-link')[0].props.flexShrink).not.toBe(0);
+  expect(byTestID(tree, 'thread-chat-link')[0].findByType('T').props.flexShrink).toBe(1);
+  expect(title.findByType('T').props.flexShrink).toBe(1);
   act(() => tree.unmount());
 });
 

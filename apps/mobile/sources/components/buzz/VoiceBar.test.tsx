@@ -39,7 +39,7 @@ it('pins with the brass badge, unpins from the same chip, and ends the call from
     { pubkey: 'alan', kind: 'agent' as const, name: 'Alan', face: 'fox' },
     { pubkey: 'jimmy', kind: 'agent' as const, name: 'Jimmy', face: 'owl' },
   ];
-  const voice = { agents, target: 'alan', speaker: null, muted: false, humans: 1, connecting: false,
+  const voice = { agents, target: 'alan', speaker: null, muted: false, level: 0.4, humans: 1, connecting: false,
     aim: vi.fn(), toggleMute: vi.fn(), end: vi.fn() } as unknown as VoiceCallState;
   let tree: any;
   await act(async () => { tree = create(<><VoiceAgentStrip voice={voice} /><VoiceBar voice={voice} /></>); });
@@ -53,6 +53,8 @@ it('pins with the brass badge, unpins from the same chip, and ends the call from
     expect(voice.aim).toHaveBeenCalledWith('jimmy');
     const status = tree.root.find((node: any) => node.type === 'XStack' && node.props.testID === 'voice-waveform');
     expect(status.props['aria-label']).toBe('Listening');
+    // While it listens, the bar draws the speaking waveform.
+    expect(tree.root.findAll((node: any) => node.props?.testID === 'voice-level-line')).not.toHaveLength(0);
     chip('Mute microphone').props.onPress();
     expect(voice.toggleMute).toHaveBeenCalled();
     chip('End call').props.onPress();

@@ -1,5 +1,6 @@
 import React, { useMemo } from 'react';
-import { Text, View } from 'react-native';
+import { YStack } from 'tamagui';
+import { T } from '@/ui/grammar';
 import { PillRow, type PillFace, type PillItem } from '@/ui/screens/transcript/PillRow';
 import { RequestMedia } from '@/ui/screens/transcript/cards/RequestMedia';
 import { AGENT_GRANT_VERBS, grantPresentation } from '@beeline/api-contract/agent-grants';
@@ -8,7 +9,7 @@ import { resolveAgentDisplayIdentity } from '@/buzz/agent-display';
 import { ledgerStamp } from '@/buzz/relative-time';
 import { AgentApprovalCard, approvalAudience, approvalDecisionNote } from './AgentApprovalCard';
 import { type TranscriptCardAction } from './TranscriptCard';
-import { ledgerEntryRhythm } from './Ledger';
+import { LedgerEntryFrame } from './Ledger';
 
 export type GrantDecision = 'always' | 'once' | 'deny';
 
@@ -63,7 +64,7 @@ export const GrantRequestCard = React.memo(function GrantRequestCard({
   const canDecide = canDecideGrantRequest(request, viewerPubkey, viewerIsAgent, viewerCanManageWorkspace);
   const anyPending = request.grants.some((grant) => grant.status === 'pending');
   return (
-    <View testID={`grant-request-${anyPending ? 'pending' : 'settled'}`}>
+    <YStack testID={`grant-request-${anyPending ? 'pending' : 'settled'}`}>
       {request.grants.map((grant) => {
         const script = grant.script?.contents ?? (grant.kind === 'command' ? grant.target : undefined);
         const { purpose, facts } = grantPresentation(grant);
@@ -115,9 +116,9 @@ export const GrantRequestCard = React.memo(function GrantRequestCard({
             agent={agent}
             wrapTitle
             title={
-              <Text testID={`grant-${grant.grantId}-ask`}>
+              <T v="heading" testID={`grant-${grant.grantId}-ask`}>
                 {`@${agentName.replace(/^@/, '')} wants to ${grant.kind === 'command' ? grant.purpose || grant.script ? 'run a script' : 'run a command' : `${grant.kind === 'mcp' && grant.target.startsWith('connection-install:') ? 'connect' : AGENT_GRANT_VERBS[grant.kind]} ${grant.appName ?? grant.target}`}`}
-              </Text>
+              </T>
             }
             stamp={ledgerStamp(message.timestamp)}
             subline={`${grant.machine ? `${grant.machine} · ` : ''}${approvalAudience(request.owner, viewerPubkey)}`}
@@ -152,7 +153,7 @@ export const GrantRequestCard = React.memo(function GrantRequestCard({
           />
         );
       })}
-    </View>
+    </YStack>
   );
 });
 
@@ -176,8 +177,8 @@ export function GrantRequestPill({ message, resolve, card }: {
     body: card,
   }], [message.id, message.timestamp, request.agent.pubkey, request.agent.name, request.owner.pubkey, request.owner.name, resolve, card]);
   return (
-    <View style={ledgerEntryRhythm({ hasByline: true })} testID={`chat-message-${message.id}`}>
+    <LedgerEntryFrame hasByline testID={`chat-message-${message.id}`}>
       <PillRow items={items} testID={`grant-request-pill-${message.id}`} />
-    </View>
+    </LedgerEntryFrame>
   );
 }

@@ -1,8 +1,9 @@
 import React, { useCallback, useEffect, useState } from 'react';
-import { Text, View } from 'react-native';
-import Animated, { FadeInDown, FadeOutDown } from 'react-native-reanimated';
-import { StyleSheet, useUnistyles } from 'react-native-unistyles';
+import { FadeInDown, FadeOutDown } from 'react-native-reanimated';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
+import { XStack, YStack } from 'tamagui';
+import { Motion, STEP, T } from '@/ui/grammar';
+import { layout } from '@/buzz/groknight';
 
 /** How long a copy confirmation stays up before it dismisses itself. */
 export const COPIED_TOAST_MS = 2000;
@@ -17,7 +18,6 @@ export function useCopiedToast(testID: string): {
   showCopyFailed(message: string): void;
   toast: React.ReactNode;
 } {
-  const { theme } = useUnistyles();
   const insets = useSafeAreaInsets();
   const [shown, setShown] = useState<{
     message: string;
@@ -38,60 +38,44 @@ export function useCopiedToast(testID: string): {
   const toast = shown ? (
     // Rides one row above the viewer's foot so it clears the image zoom bar
     // and the home indicator.
-    <View
+    <YStack
       pointerEvents="none"
-      style={[
-        styles.dock,
-        { bottom: insets.bottom + theme.buzz.layout.row + theme.buzz.space.md },
-      ]}
+      position="absolute"
+      left={0}
+      right={0}
+      alignItems="center"
+      bottom={insets.bottom + layout.row + STEP['4']}
     >
-      <Animated.View
-        accessibilityLiveRegion="polite"
-        accessibilityRole="alert"
-        entering={FadeInDown}
-        exiting={FadeOutDown}
-        style={styles.pill}
-        testID={testID}
-      >
-        <View style={[styles.check, shown.failed && styles.failedMark]}>
-          <Text style={styles.checkMark}>{shown.failed ? '!' : '✓'}</Text>
-        </View>
-        <Text style={styles.message}>{shown.message}</Text>
-      </Animated.View>
-    </View>
+      <Motion entering={FadeInDown} exiting={FadeOutDown}>
+        <XStack
+          accessibilityLiveRegion="polite"
+          accessibilityRole="alert"
+          alignItems="center"
+          gap="2"
+          paddingVertical="2"
+          paddingHorizontal="4"
+          borderRadius="sm"
+          borderWidth={1}
+          borderColor="stroke"
+          backgroundColor="raised"
+          testID={testID}
+        >
+          <YStack
+            width={CHECK_SIZE}
+            height={CHECK_SIZE}
+            borderRadius="full"
+            alignItems="center"
+            justifyContent="center"
+            backgroundColor={shown.failed ? 'removed' : 'added'}
+          >
+            <T v="meta" color="canvas">{shown.failed ? '!' : '✓'}</T>
+          </YStack>
+          <T v="meta">{shown.message}</T>
+        </XStack>
+      </Motion>
+    </YStack>
   ) : null;
   return { showCopied, showCopyFailed, toast };
 }
 
 const CHECK_SIZE = 18;
-
-const styles = StyleSheet.create((theme) => ({
-  dock: {
-    position: 'absolute',
-    left: 0,
-    right: 0,
-    alignItems: 'center',
-  },
-  pill: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: theme.buzz.space.sm,
-    paddingVertical: theme.buzz.space.sm,
-    paddingHorizontal: theme.buzz.space.md,
-    borderRadius: theme.buzz.radius,
-    borderWidth: 1,
-    borderColor: theme.buzz.border,
-    backgroundColor: theme.buzz.bgRaised,
-  },
-  check: {
-    width: CHECK_SIZE,
-    height: CHECK_SIZE,
-    borderRadius: CHECK_SIZE / 2,
-    alignItems: 'center',
-    justifyContent: 'center',
-    backgroundColor: theme.buzz.success,
-  },
-  failedMark: { backgroundColor: theme.buzz.dialogDanger },
-  checkMark: { ...theme.buzz.type.meta, color: theme.buzz.bgBase },
-  message: { ...theme.buzz.type.meta, color: theme.buzz.textPrimary },
-}));

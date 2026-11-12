@@ -119,9 +119,13 @@ it.each(['expired · no answer', 'skipped · @alex.chen'])('shows the settled fo
   expect(plates()).toHaveLength(0);
 });
 
+/** The tappable choice plates (host nodes that carry the press). */
+const choicePlates = () => renderer.root.findAll((node: any) =>
+  typeof node.type === 'string' && node.props.accessibilityRole === 'button' && typeof node.props.onPress === 'function');
+
 it('answers an open question on tap, then removes controls when its closed DTO arrives', () => {
   act(() => { renderer = create(element({ ...choice, runId: 'run' })); });
-  const buttons = renderer.root.findAllByType('Pressable');
+  const buttons = choicePlates();
   expect(buttons).toHaveLength(2);
   act(() => buttons[1].props.onPress());
   expect(onAnswer).toHaveBeenCalledWith(choice.choiceId, 'B');
@@ -129,13 +133,13 @@ it('answers an open question on tap, then removes controls when its closed DTO a
   expect(cardProps().subline).toContain('No answer in 24 h applies abandon');
   expect(cardProps().actions[0].label).toBe('Skip');
   act(() => renderer.update(element({ ...choice, status: 'closed', runId: 'run' })));
-  expect(renderer.root.findAllByType('Pressable')).toHaveLength(0);
+  expect(choicePlates()).toHaveLength(0);
   expect(cardProps().noteInput).toBeUndefined();
 });
 
 it('answers an open poll on tap', () => {
   act(() => { renderer = create(element({ ...choice, mode: 'poll' })); });
-  act(() => renderer.root.findAllByType('Pressable')[0].props.onPress());
+  act(() => choicePlates()[0].props.onPress());
   expect(onAnswer).toHaveBeenCalledWith(choice.choiceId, 'A');
 });
 
@@ -145,7 +149,7 @@ it('keeps closed poll result plates and their vote counts', () => {
   })); });
   expect(plates()).toHaveLength(2);
   expect(plates()[1].props.choice.votes).toBe(1);
-  expect(renderer.root.findAllByType('Pressable')).toHaveLength(0);
+  expect(choicePlates()).toHaveLength(0);
 });
 
 function ordinaryProps(): React.ComponentProps<typeof OrdinaryLedgerMessage> {

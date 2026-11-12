@@ -409,16 +409,6 @@ export const beelineThemes = {
   },
 } as const;
 
-/**
- * A theme colour at a given opacity, for washes and glows that fade a token
- * (`withAlpha(theme.buzz.accent, 0.14)`). Takes a `#rrggbb` token.
- */
-export function withAlpha(color: string, alpha: number): string {
-  const hex = color.replace('#', '');
-  const channel = (offset: number) => parseInt(hex.slice(offset, offset + 2), 16);
-  return `rgba(${channel(0)},${channel(2)},${channel(4)},${alpha})`;
-}
-
 export type BeelineThemeName = keyof typeof beelineThemes;
 export type BeelineThemeTokens = (typeof beelineThemes)[BeelineThemeName];
 
@@ -446,3 +436,17 @@ export const stonePalette: Record<'dark' | 'light', Partial<Record<keyof Beeline
 
 /** The one scrim behind every sheet. */
 export const SCRIM = 'rgba(0,0,0,0.8)';
+
+/** Android notification channel light (ARGB). */
+export const NOTIFICATION_LIGHT = '#FF231F7C';
+
+/**
+ * Identity art (the face tiles): fixed inks that are the identity, not chrome,
+ * so they do not follow the theme. `bone`/`ink` draw the creature;
+ * `plateDark`/`plateLight` are the person plate per mode.
+ */
+export const IDENTITY_ART = { bone: '#F2E9D8', ink: '#14091A', plateDark: '#0f0a13', plateLight: '#F5EEE2' } as const;
+
+/** Paper and ink that scanners read in every theme (wallet QR, embedded documents). */
+export const QR_PAPER = '#ffffff';
+export const QR_INK = '#171310';

@@ -13,6 +13,9 @@ import type { RepositoryOnboardingCard as Card } from '@beeline/api-contract/pho
 const mocks = vi.hoisted(() => ({ enabled: true, params: {} as Record<string, string | undefined>, operation: vi.fn<(...args: any[]) => Promise<any>>(async () => ({})) }));
 vi.mock('@/components/buzz/IdentityMark', () => ({ IdentityMark: () => null }));
 vi.mock('react-native', () => ({ AppState: {}, Platform: { OS: 'android' } }));
+vi.mock('tamagui', async () => (await import('@/ui/screens/transcript/grammar-hosts.test-support')).tamaguiHosts());
+vi.mock('lucide-react-native', async () => (await import('@/ui/screens/transcript/grammar-hosts.test-support')).lucideHosts());
+vi.mock('react-native-safe-area-context', () => ({ useSafeAreaInsets: () => ({ top: 0, bottom: 0, left: 0, right: 0 }) }));
 vi.mock('@/components/buzz/TranscriptCard', () => ({ TranscriptCard: (props: any) => React.createElement('TranscriptCard', props) }));
 vi.mock('@/sync/transport/monolith-operation', () => ({ monolithPhoneOperation: mocks.operation }));
 vi.mock('@/auth/auth-session', () => ({ authSessionOptions: () => ({}) }));
@@ -92,7 +95,7 @@ it('E4/E9: offers Connect GitHub to the Google owner and names that owner for a 
   await act(async () => { renderer.update(<RepositoryOnboardingCard card={{...missing,canLink:false}} viewerId={H} />); });
   const props=renderer.root.findByType('TranscriptCard').props;
   expect(props.actions).toEqual([]);
-  expect(props.body).toBe('Ask @alex.chen to link a repository for this Room');
+  expect(props.body).toBe('Ask @alex.chen to link a repository for this chat');
 });
 it('R-GITHUB-CARD: consumes the return only on its initiating card, once', async () => {
   mocks.params = { repositoryPicker: card.id, githubConnectionError: 'github_account_already_linked', installed: '0' };

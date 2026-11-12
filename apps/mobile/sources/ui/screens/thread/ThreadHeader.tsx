@@ -49,24 +49,27 @@ export function ThreadBar({ h, collapsed, expanded, back, openChat, expand, open
                     {back ? <Btn kind="icon" label="Back" onPress={back} testID="chat-back"><Glyph icon={ArrowLeft} /></Btn> : null}
                     <XStack flex={1} minWidth={0} gap="2" alignItems="center">
                         {h.repositoryAvatar || h.repositoryFavicon ? <RepositoryMark avatarUrl={h.repositoryAvatar} faviconUrl={h.repositoryFavicon} size={28} /> : null}
-                        {h.chatTag ? (
-                            <ListItem padding="0" minHeight={HEIGHT.control} flexGrow={0} flexShrink={0} width="auto"
-                                backgroundColor="transparent" justifyContent="flex-start" onPress={openChat}
-                                aria-label={`Open chat ${h.chatTag}`} accessibilityRole="button" testID="thread-chat-link">
-                                <T v="metaStrong" color="needsYou">{h.chatTag}</T>
-                            </ListItem>
-                        ) : null}
-                        {collapsed && !expanded ? (
-                            <ListItem padding="0" minHeight={HEIGHT.control} flex={1} minWidth={0} gap="2"
-                                backgroundColor="transparent" justifyContent="flex-start" onPress={expand}
-                                aria-label={h.title} accessibilityRole={expand ? 'button' : 'text'} testID="thread-bar-title">
-                                {h.state ? <StatusDot state={h.state} /> : null}
-                                <T v="metaStrong" numberOfLines={1}>{h.title}</T>
-                            </ListItem>
-                        ) : null}
+                        {/* The chat and the title stack, so each wraps across the bar's full width and neither starves the other. */}
+                        <YStack flex={1} minWidth={0} justifyContent="center" minHeight={HEIGHT.control} testID="thread-bar-names">
+                            {h.chatTag ? (
+                                <ListItem padding="0" minHeight={0} alignSelf="flex-start" width="auto" maxWidth="100%"
+                                    backgroundColor="transparent" justifyContent="flex-start" onPress={openChat}
+                                    aria-label={`Open chat ${h.chatTag}`} accessibilityRole="button" testID="thread-chat-link">
+                                    <T v="metaStrong" color="needsYou" flexShrink={1}>{h.chatTag}</T>
+                                </ListItem>
+                            ) : null}
+                            {collapsed && !expanded ? (
+                                <ListItem padding="0" minHeight={0} gap="2" alignItems="center"
+                                    backgroundColor="transparent" justifyContent="flex-start" onPress={expand}
+                                    aria-label={h.title} accessibilityRole={expand ? 'button' : 'text'} testID="thread-bar-title">
+                                    {h.state ? <StatusDot state={h.state} /> : null}
+                                    <T v="metaStrong" flexShrink={1}>{h.title}</T>
+                                </ListItem>
+                            ) : null}
+                        </YStack>
                     </XStack>
                     {openActions ? (
-                        <Btn kind="icon" label="Corner actions" onPress={openActions} testID="corner-actions-menu">
+                        <Btn kind="icon" label="Thread actions" onPress={openActions} testID="corner-actions-menu">
                             <Glyph icon={MoreHorizontal} />
                         </Btn>
                     ) : null}

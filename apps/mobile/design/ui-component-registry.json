@@ -11,6 +11,7 @@
       "CornerCockpit",
       "DesktopRoomInspector",
       "HeaderIconControl",
+      "TranscriptGap",
       "captioned",
       "control",
       "node",
@@ -58,6 +59,8 @@
     ],
     "components/buzz/AgentSignInCard.tsx": [
       "AgentSignInCard",
+      "Step",
+      "StepBody",
       "failureLine",
       "field",
       "linkStep",
@@ -75,7 +78,11 @@
     "components/buzz/ArtifactCard.tsx": [
       "ArtifactCard",
       "ArtifactMarkdownPreview",
-      "ArtifactSandboxPreview"
+      "ArtifactSandboxPreview",
+      "PhotoStep",
+      "PreviewFade",
+      "PreviewFailed",
+      "PreviewLoading"
     ],
     "components/buzz/ArtifactDocumentPreview.tsx": [
       "ArtifactDocumentPreview",
@@ -141,11 +148,14 @@
     ],
     "components/buzz/CodeBlock.tsx": [
       "CodeBlock",
+      "CopyVerb",
       "PEEK_LINE_COUNT",
-      "body"
+      "body",
+      "copy"
     ],
     "components/buzz/CodeHighlighter.tsx": [
-      "CodeHighlighter"
+      "CodeHighlighter",
+      "Span"
     ],
     "components/buzz/CommunityRail.tsx": [
       "BuzzCommunityShell",
@@ -219,7 +229,8 @@
       "TILE",
       "TILE_RADIUS",
       "TILE_SEAT",
-      "TILE_SIZE"
+      "TILE_SIZE",
+      "TileLabel"
     ],
     "components/buzz/DirectMessagePickerSheet.tsx": [
       "DirectMessagePickerSheet",
@@ -270,14 +281,18 @@
       "HullDialogInput",
       "HullFloatingSurface",
       "HullModal",
+      "KeyboardFrame",
       "StableHullModal",
-      "body"
+      "body",
+      "box",
+      "field"
     ],
     "components/buzz/HullSwitch.tsx": [
       "HullSwitch"
     ],
     "components/buzz/IdentityMark.tsx": [
       "IdentityMark",
+      "PlateFill",
       "WorkspacePlate"
     ],
     "components/buzz/IndexRow.tsx": [
@@ -288,6 +303,7 @@
       "TranscriptNavigationRow",
       "body",
       "chevron",
+      "glyph",
       "trailingColumn",
       "trailingMark"
     ],
@@ -310,6 +326,7 @@
     "components/buzz/Ledger.tsx": [
       "LedgerDayCaption",
       "LedgerEntry",
+      "LedgerEntryFrame",
       "LedgerGhostLine",
       "LedgerHistoryLine",
       "LedgerRoomUpdate",
@@ -465,7 +482,8 @@
     ],
     "components/buzz/RuntimeErrorBoundary.tsx": [
       "RuntimeErrorBoundary",
-      "RuntimeErrorView"
+      "RuntimeErrorView",
+      "body"
     ],
     "components/buzz/ScheduledWorkDetail.tsx": [
       "DetailRailLine",
@@ -497,6 +515,7 @@
       "StarPromptCard"
     ],
     "components/buzz/StateDot.tsx": [
+      "Dot",
       "PulsingDot",
       "StateDot"
     ],
@@ -540,6 +559,7 @@
       "glyph"
     ],
     "components/buzz/TurnLineFrame.tsx": [
+      "COVERAGE",
       "TurnBandSlot",
       "TurnLineBar"
     ],

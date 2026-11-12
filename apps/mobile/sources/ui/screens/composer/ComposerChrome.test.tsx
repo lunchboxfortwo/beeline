@@ -7,7 +7,7 @@ vi.mock('tamagui', async () => (await import('@/ui/screens/transcript/grammar-ho
 vi.mock('lucide-react-native', async () => (await import('@/ui/screens/transcript/grammar-hosts.test-support')).lucideHosts());
 vi.mock('react-native-safe-area-context', () => ({ useSafeAreaInsets: () => ({ top: 0, bottom: 0, left: 0, right: 0 }) }));
 vi.mock('@beeline/api-contract/phone', () => ({ VOICE_LONG_PRESS_MS: 450 }));
-import { ComposerAttachment, ComposerButton, ComposerFrame } from './ComposerChrome';
+import { ComposerAttachment, ComposerButton, ComposerFrame, ComposerListening } from './ComposerChrome';
 
 (globalThis as typeof globalThis & { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
 
@@ -51,4 +51,13 @@ it('a failed upload says so and offers Retry beside Remove', () => {
   expect(state.props.children).toBe('Upload failed');
   tree.root.find((node: any) => node.type === 'Button' && node.props.testID === 'pending-chat-attachment-retry-0').props.onPress();
   expect(onRetry).toHaveBeenCalled();
+});
+
+it('draws the speaking waveform while dictation listens', () => {
+    let tree: any;
+    act(() => { tree = create(<ComposerListening level={0.6} live testID="chat-speech-waveform" tagsTestID="tags" />); });
+    const line = tree.root.findAll((node: any) => node.props?.testID === 'chat-speech-waveform-level' && typeof node.type === 'string');
+    expect(line).toHaveLength(1);
+    expect(line[0].findAll((node: any) => node.type === 'YStack' && node.props.backgroundColor === 'needsYou')).toHaveLength(1);
+    act(() => tree.unmount());
 });

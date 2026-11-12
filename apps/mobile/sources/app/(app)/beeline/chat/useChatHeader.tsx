@@ -1,12 +1,12 @@
 import React, { useCallback, useMemo } from 'react';
-import { TextInput } from 'react-native';
+import type { TextInput } from 'react-native';
 import { router } from 'expo-router';
 import { type ChatListItem } from '@beeline/buzz-client';
 import { directMessageTitle } from '@beeline/api-contract/phone';
 import { scheduleAnimationFrame } from '@/buzz/host-scheduler';
 import { planComposerFill, type ComposerMention } from '@/buzz/composer-fill';
 import { roomStarterIntro, roomStarterPrompts } from '@/buzz/starter-prompts';
-import { ROOM_LABEL } from '@/buzz/vocabulary';
+import { ROOM_TITLE } from '@/buzz/vocabulary';
 import { resolveAgentDisplayIdentity } from '@/buzz/agent-display';
 import { directMessageHeaderIdentity } from '@/buzz/member-display';
 import { directMessageAgentHeaderMeta, directMessageHeaderPresence } from '@/buzz/direct-message-header-presence';
@@ -105,9 +105,9 @@ export function useChatHeader([
   // Room-lifecycle copy ("Delete <name>?"), rename drafts, and cache writes
   // use the STORED name — the `#` mark is display-only and must never leak
   // into a mutation path. The header renders through `headerTitle` instead.
-  const roomName = headerTitle ?? ROOM_LABEL;
+  const roomName = headerTitle ?? ROOM_TITLE;
 
-  const storedRoomName = resolvedChannelName?.trim() || ROOM_LABEL;
+  const storedRoomName = resolvedChannelName?.trim() || ROOM_TITLE;
 
   // A DM's title is its peer's identity. Derived from cached state rather
   // than resolved inside the enter-room fetch chain, so it is right on the

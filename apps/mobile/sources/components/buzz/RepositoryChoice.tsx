@@ -1,15 +1,14 @@
 import { RepositoryMark } from './RepositoryMark';
-import { IndexRow, IndexRowInsetContext, InlineRow } from './IndexRow';
+import { IndexRow, IndexRowInsetContext } from './IndexRow';
 import { Button } from './Button';
 import { ErrorBanner } from './ErrorBanner';
 import { HullActionSheetRow } from './HullActionSheet';
 import { HULL_SHEET_ROW_HEIGHT } from '@/buzz/hull-sheet-layout';
 import React, { useEffect, useRef, useState } from 'react';
-import { ScrollView, Text, View } from 'react-native';
-import { StyleSheet, useUnistyles } from 'react-native-unistyles';
+import { ScrollView, XStack, YStack } from 'tamagui';
 import type { GitHubInstallationAccess } from '@beeline/buzz-client';
 import { githubFullNameFromInput, type RepoCandidate } from '@/buzz/room-repo-picker';
-import { Typography } from '@/constants/Typography';
+import { Copy, STEP, T } from '@/ui/grammar';
 
 export type RepoMode = 'none' | 'link' | 'create';
 
@@ -159,7 +158,6 @@ export function RepositoryChoice({
   notice,
   reserveOwnerMenuSpace = false,
 }: Props) {
-  const { theme } = useUnistyles();
   const [menuHeight, setMenuHeight] = useState(0);
   const [headHeight, setHeadHeight] = useState(0);
   const connectRow = <IndexRow title="GitHub" value="Connect GitHub" chevron="right"
@@ -171,7 +169,7 @@ export function RepositoryChoice({
       accessibilityLabel={linkRepo ? `Linked repository ${repoFullName(linkRepo) ?? linkRepo.name}` : 'Choose a repo'}
       disabled={busy} onPress={onOpenList} chevron="right" testID={`${p}-repo-link`} />;
   };
-  const createRow = () => <View testID={`${p}-repo-create`}>
+  const createRow = () => <YStack testID={`${p}-repo-create`}>
     <IndexRow leading={<RepositoryMark avatarUrl={selectedInstallation?.accountAvatarUrl} faviconUrl={selectedInstallation?.faviconUrl} size={28} />} title={selectedInstallation?.accountLogin ?? ''} disabled={busy}
       accessibilityLabel={`Owner ${selectedInstallation?.accountLogin ?? ''}, change`}
       accessibilityState={{ expanded: ownerMenuOpen }} onPress={() => setOwnerMenuOpen(!ownerMenuOpen)}
@@ -179,18 +177,29 @@ export function RepositoryChoice({
     <IndexRow title={createName || 'room-name'} tone={createName ? undefined : 'quiet'} />
     {takenRepo && <IndexRow title="Already exists." actionControl={{label:'Link it instead',
       onPress:()=>onLinkInstead(takenRepo),testID:`${p}-repo-link-instead`}} />}
-  </View>;
+  </YStack>;
 
   const ownerMenu = (
-    <View
+    // The owner menu hangs above the row it changes and covers the switch.
+    <YStack
       onLayout={(event) => setMenuHeight(event.nativeEvent.layout.height)}
-      style={styles.ownerMenu}
+      position="absolute"
+      left={0}
+      right={0}
+      bottom="100%"
+      marginBottom="1"
+      zIndex={3}
+      padding="1"
+      borderWidth={1}
+      borderColor="strongStroke"
+      borderRadius="sm"
+      backgroundColor="raised"
       testID={`${p}-owner-menu`}
     >
       <ScrollView
         keyboardShouldPersistTaps="handled"
         nestedScrollEnabled
-        style={{ maxHeight: HULL_SHEET_ROW_HEIGHT * OWNER_MENU_MAX_ROWS }}
+        maxHeight={HULL_SHEET_ROW_HEIGHT * OWNER_MENU_MAX_ROWS}
       >
         {activeInstallations.map((installation) => (
           <HullActionSheetRow
@@ -217,7 +226,7 @@ export function RepositoryChoice({
           testID={`${p}-owner-connect`}
         />
       )}
-    </View>
+    </YStack>
   );
 
   const slot = () => {
@@ -229,89 +238,44 @@ export function RepositoryChoice({
   // The menu ends `xs` above the slot, which starts `sm` below the switch.
   const reserved =
     reserveOwnerMenuSpace && menuShown
-      ? Math.max(0, menuHeight + theme.buzz.space.xs - headHeight - theme.buzz.space.sm)
+      ? Math.max(0, menuHeight + STEP['1'] - headHeight - STEP['2'])
       : 0;
 
   return (
     <IndexRowInsetContext.Provider value="flush">
-    <View style={styles.repoBlock}>
-      {reserved > 0 && <View style={{ height: reserved }} testID={`${p}-owner-menu-space`} />}
-      <View
+    <YStack paddingVertical="2">
+      {reserved > 0 && <YStack height={reserved} testID={`${p}-owner-menu-space`} />}
+      <YStack
         onLayout={(event) => setHeadHeight(event.nativeEvent.layout.height)}
         testID={`${p}-repo-head`}
       >
-        <View style={styles.labelLine}>
-          <Text style={styles.fieldLabel}>Repository</Text>
-        </View>
-        <InlineRow style={styles.segments} testID={`${p}-repo-mode`}>
-          {MODES.map(({mode:option,label})=><Button key={option} label={label}
+        {/* Open, the label keeps the place and the type of the closed sheet row. */}
+        <YStack paddingVertical="2" justifyContent="center">
+          <Copy>Repository</Copy>
+        </YStack>
+        {/* A quiet switch on the sheet's own surface: no track fill. */}
+        <XStack marginTop="1" gap="1" testID={`${p}-repo-mode`}>
+          {MODES.map(({mode:option,label})=><YStack key={option} flex={1}><Button label={label}
             variant={mode===option ? 'brass' : 'secondary'} disabled={busy}
             accessibilityState={{selected:mode===option}} onPress={()=>onChooseMode(option)}
-            style={{flex:1}} testID={`${p}-repo-mode-${option}`} />)}
-        </InlineRow>
-      </View>
+            fullWidth testID={`${p}-repo-mode-${option}`} /></YStack>)}
+        </XStack>
+      </YStack>
       {mode !== 'none' && (
-        <View style={styles.slot}>
+        <YStack position="relative" zIndex={2} marginTop="2">
           {menuShown && ownerMenu}
           {slot()}
-        </View>
+        </YStack>
       )}
       {!!error && (
         <ErrorBanner inline title={error} testID={`${p}-repo-error`} />
       )}
       {mode !== 'none' && !error && !!notice && (
-        <Text accessibilityLiveRegion="polite" style={styles.hint}>
+        <T v="meta" color="secondary" marginTop="2" accessibilityLiveRegion="polite">
           {notice}
-        </Text>
+        </T>
       )}
-    </View>
+    </YStack>
     </IndexRowInsetContext.Provider>
   );
 }
-
-const styles = StyleSheet.create((theme) => {
-  const hull = theme.buzz;
-  return {
-    // Open, the label keeps the place and the type of the closed sheet row
-    // (HullActionSheetRow); the switch and picker sit inside that row.
-    labelLine: { minHeight: 52 - 2 * hull.space.sm, justifyContent: 'center' },
-    fieldLabel: {
-      ...Typography.default(),
-      ...hull.type.body,
-      fontFamily: hull.proseRegular,
-      color: hull.textPrimary,
-    },
-    hint: {
-      ...Typography.default(),
-      ...hull.type.meta,
-      color: hull.textMuted,
-      marginTop: hull.space.sm,
-    },
-    repoBlock: {
-      paddingVertical: hull.space.sm,
-    },
-    // A quiet switch on the sheet's own surface: no track fill. The selected
-    // segment is marked the way the owner menu marks its pick; in dark the
-    // outline carries it, since bgHighlight sits close to the sheet.
-    segments: {
-      flexDirection: 'row',
-      marginTop: hull.space.xs,
-      gap: hull.space.xs,
-    },
-    // The owner menu hangs above the row it changes and covers the switch.
-    slot: { position: 'relative', zIndex: 2, marginTop: hull.space.sm },
-    ownerMenu: {
-      position: 'absolute',
-      left: 0,
-      right: 0,
-      bottom: '100%',
-      marginBottom: hull.space.xs,
-      zIndex: 3,
-      padding: hull.space.xs,
-      borderWidth: 1,
-      borderColor: hull.borderStrong,
-      borderRadius: hull.radius,
-      backgroundColor: hull.bgRaised,
-    },
-  };
-});

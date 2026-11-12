@@ -1,5 +1,6 @@
 import React, { useContext, useEffect, useState } from 'react';
-import { Text, type TextStyle } from 'react-native';
+import type { TextStyle } from 'react-native';
+import { ProseRun } from '@/ui/grammar';
 import { type LiveDraftDrainStore } from '@/buzz/live-draft-drain';
 
 import { RoomPresentationContext } from '@/buzz/room-presentation-context';
@@ -39,22 +40,24 @@ export function StreamingProse({
   const store = suppliedStore ?? visitStore;
   if (!streamKey) {
     return (
-      <Text selectable style={textStyle} testID={testID}>
+      <ProseRun userSelect="text" body={textStyle} testID={testID}>
         {markdown ?? ''}
-      </Text>
+      </ProseRun>
     );
   }
   return (
-    <LiveDraftText store={store} streamKey={streamKey} testID={testID} textStyle={textStyle} />
+    <LiveDraftText store={store} streamKey={streamKey} testID={testID} body={textStyle} />
   );
 }
 
 function LiveDraftText({
   store,
   streamKey,
-  textStyle,
+  body,
   testID,
-}: Required<Pick<StreamingProseProps, 'store' | 'streamKey' | 'textStyle'>> & {
+}: Required<Pick<StreamingProseProps, 'store' | 'streamKey'>> & {
+  /** The caller's `textStyle`, the run's body. */
+  body: TextStyle;
   testID?: string;
 }) {
   const [text, setText] = useState(() => store.getPresentation(streamKey).text);
@@ -72,8 +75,8 @@ function LiveDraftText({
   }, [store, streamKey]);
 
   return (
-    <Text selectable style={textStyle} testID={testID}>
+    <ProseRun userSelect="text" body={body} testID={testID}>
       {text}
-    </Text>
+    </ProseRun>
   );
 }

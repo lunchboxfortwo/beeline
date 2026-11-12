@@ -5,6 +5,9 @@ import { expect, it, vi } from 'vitest';
 import type { ChatDisplayMessage } from '@/buzz/room-view-presentation';
 
 vi.mock('react-native', () => ({ View: 'View', Text: 'Text', Pressable: 'Pressable' }));
+vi.mock('tamagui', async () => (await import('@/ui/screens/transcript/grammar-hosts.test-support')).tamaguiHosts());
+vi.mock('lucide-react-native', async () => (await import('@/ui/screens/transcript/grammar-hosts.test-support')).lucideHosts());
+vi.mock('@/ui/grammar', () => ({ T: 'Text', TypedView: 'View', Inked: 'Pressable', HEIGHT: { control: 44, row: 44 } }));
 vi.mock('react-native-unistyles', () => ({
   StyleSheet: { create: () => ({}) },
   useUnistyles: () => ({ theme: { buzz: {} } }),
@@ -39,7 +42,7 @@ it('MERGE-ROWS-1 shows the merge count immediately and expands every stored even
   let tree: any;
   act(() => { tree = create(<>{rows.map(row => <TranscriptPills key={row.id}
     run={row.pillRun ?? [row]} resolve={() => ({ kind: 'system', name: 'Beeline' })} onOpenUrl={openUrl} />)}</>); });
-  const control = (id: string) => tree.root.find((node: any) => node.type === 'Pressable' && node.props.testID === id);
+  const control = (id: string) => tree.root.find((node: any) => typeof node.type === 'string' && node.props.testID === id);
   expect(control('notification-run-expand-merge-0').props.accessibilityLabel).toBe('14 PRs merged');
   act(() => control('notification-run-expand-merge-0').props.onPress());
   expect(control('notification-run-more-merge-0').props.accessibilityLabel).toBe('12 more events');

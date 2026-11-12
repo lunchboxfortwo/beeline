@@ -4,7 +4,7 @@ import { type PendingComposerAck } from '@/buzz/room-indicators';
 import { focusComposerSelection } from '@/buzz/composer-selection';
 import { useTextDraft } from '@/buzz/use-text-draft';
 import React, { useEffect, useLayoutEffect, useState, useRef, useCallback } from 'react';
-import { View, TextInput, Platform } from 'react-native';
+import { Platform, type TextInput, type View } from 'react-native';
 import { type ChatDisplayMessage } from '@/buzz/room-view-presentation';
 import { scheduleAnimationFrame } from '@/buzz/host-scheduler';
 import { activeMentionAtCursor } from '@/buzz/room-participants';

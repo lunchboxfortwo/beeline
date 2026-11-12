@@ -1,5 +1,5 @@
 import React, { useCallback } from 'react';
-import { TextInput } from 'react-native';
+import type { TextInput } from 'react-native';
 import * as Clipboard from 'expo-clipboard';
 import * as Haptics from 'expo-haptics';
 import { router, type Href } from 'expo-router';

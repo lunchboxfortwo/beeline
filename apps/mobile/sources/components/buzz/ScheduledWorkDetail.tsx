@@ -1,11 +1,11 @@
 import { RoomListSectionHeader } from '@/components/buzz/RoomListSectionHeader';
 import React, { useState } from 'react';
-import { Text, View } from 'react-native';
+import { YStack, XStack } from 'tamagui';
 import { router } from 'expo-router';
-import { StyleSheet } from 'react-native-unistyles';
 import { workflowDisplayName } from '@/buzz/workflow-graph';
 import { SettingsRow } from './SettingsRow';
 import { ScheduledWorkWhere } from './ScheduledWorkWhere';
+import { T } from '@/ui/grammar';
 
 /**
  * The parts a schedule's or subscription's own page is built from, cut from the
@@ -15,21 +15,29 @@ import { ScheduledWorkWhere } from './ScheduledWorkWhere';
  */
 export function DetailSection({ title, testID }: { title: string; testID?: string }) {
   return (
-    <View style={styles.section} testID={testID}>
+    <XStack
+      marginTop="2"
+      paddingHorizontal="4"
+      alignItems="center"
+      justifyContent="space-between"
+      borderBottomWidth={1}
+      borderBottomColor="stroke"
+      testID={testID}
+    >
       <RoomListSectionHeader title={title} inset="content" spacing="flush"/>
-    </View>
+    </XStack>
   );
 }
 
 /** The run page's summary line: a human rail beside quiet copy. */
 export function DetailRailLine({ children, testID }: { children: React.ReactNode; testID?: string }) {
   return (
-    <View style={styles.summaryLine}>
-      <View style={styles.summaryRail} />
-      <Text selectable style={styles.summary} testID={testID}>
+    <XStack alignItems="flex-start" marginHorizontal="4" marginVertical="4">
+      <YStack position="absolute" left={-8} top={0} bottom={0} width={2} backgroundColor="needsYou" />
+      <T v="meta" color="secondary" userSelect="text" flex={1} minWidth={0} testID={testID}>
         {children}
-      </Text>
-    </View>
+      </T>
+    </XStack>
   );
 }
 
@@ -48,7 +56,7 @@ export function ScheduledWorkFacts({
   testID?: string;
 }) {
   return (
-    <View style={styles.facts} testID={testID}>
+    <YStack paddingHorizontal="2" testID={testID}>
       <SettingsRow description={runs} testID={`${testID}-when`} title="When" />
       <SettingsRow
         description={agents.length ? agents.map((name) => `@${name}`).join(', ') : 'None'}
@@ -58,7 +66,7 @@ export function ScheduledWorkFacts({
       <SettingsRow description={where}
         descriptionContent={whereCorner ? <ScheduledWorkWhere corner={whereCorner} /> : undefined}
         testID={`${testID}-where`} title="Where" />
-    </View>
+    </YStack>
   );
 }
 
@@ -73,7 +81,7 @@ export function ScheduledWorkDoes({ roomId, prompt, workflowSlug }: {
       <DetailSection title="Does" testID="scheduled-work-does-header" />
       {workflowSlug ? (
         <>
-          <View style={styles.facts}>
+          <YStack paddingHorizontal="2">
             <SettingsRow
               chevron="right"
               description="Workflow"
@@ -81,7 +89,7 @@ export function ScheduledWorkDoes({ roomId, prompt, workflowSlug }: {
               testID="scheduled-work-workflow"
               title={workflowDisplayName(workflowSlug)}
             />
-          </View>
+          </YStack>
         </>
       ) : (
         <DetailRailLine testID="scheduled-work-prompt">{prompt}</DetailRailLine>
@@ -108,7 +116,7 @@ export function StopScheduledWork({
 }) {
   const [confirming, setConfirming] = useState(false);
   return (
-    <View style={styles.facts}>
+    <YStack paddingHorizontal="2">
       {confirming ? (
         <SettingsRow
           accessibilityLabel={`Confirm ${label.toLowerCase()}`}
@@ -134,37 +142,6 @@ export function StopScheduledWork({
           tone="destructive"
         />
       )}
-    </View>
+    </YStack>
   );
 }
-
-const styles = StyleSheet.create((theme) => ({
-  section: {
-    minHeight: 32,
-    marginTop: theme.buzz.space.sm,
-    paddingHorizontal: theme.buzz.space.md,
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'space-between',
-    borderBottomWidth: StyleSheet.hairlineWidth,
-    borderBottomColor: theme.buzz.border,
-  },
-  summaryLine: {
-    flexDirection: 'row',
-    alignItems: 'flex-start',
-    marginHorizontal: theme.buzz.space.md,
-    marginVertical: theme.buzz.space.md,
-  },
-  summaryRail: {
-    position: 'absolute', left: -theme.buzz.space.sm, top: 0, bottom: 0,
-    width: 2, backgroundColor: theme.buzz.humanRail,
-  },
-  summary: {
-    ...theme.buzz.type.meta,
-    flex: 1,
-    minWidth: 0,
-    color: theme.buzz.textSecondary,
-  },
-  // SettingsRow pads by `space.sm`; the page's copy sits at `space.md`.
-  facts: { paddingHorizontal: theme.buzz.space.sm },
-}));

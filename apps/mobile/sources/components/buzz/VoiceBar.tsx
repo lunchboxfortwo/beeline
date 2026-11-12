@@ -3,6 +3,7 @@ import * as React from 'react';
 import { Card, XStack, YStack, useTheme } from 'tamagui';
 import { AudioLines, Mic, MicOff, Square } from 'lucide-react-native';
 import { Btn, Glyph, HEIGHT, T } from '@/ui/grammar';
+import { Waveform } from '@/ui/screens/composer/Waveform';
 import { SurfaceGlyphLoader } from './SurfaceGlyphLoader';
 import { PinGlyph } from './PinGlyph';
 import { IdentityMark } from './IdentityMark';
@@ -57,7 +58,8 @@ export function VoiceBar({ voice, testIDPrefix = 'chat' }: {
           {voice.connecting ? <SurfaceGlyphLoader compact testID="voice-startup-loader" />
             : warning ? <T v="meta" color="needsYou" numberOfLines={1} aria-live="polite" testID="conversation-tip">{warning}</T>
               : voice.error ? <ErrorBanner inline title={voice.error} titleTestID={voice.quotaExhausted ? 'voice-quota-error' : 'voice-connection-error'} />
-                : <><Glyph icon={AudioLines} accent={Boolean(speaker)} /><T v="meta" color="secondary" numberOfLines={1}>{state}</T></>}
+                : speaker ? <><Glyph icon={AudioLines} accent /><T v="meta" color="secondary" numberOfLines={1}>{state}</T></>
+                  : <Waveform level={voice.level} live={!voice.muted} testID="voice-level-line" />}
         </XStack>
         <Btn kind="icon" label={voice.muted ? 'Unmute microphone' : 'Mute microphone'} onPress={() => void voice.toggleMute()}
           disabled={voice.connecting || voice.quotaExhausted} accessibilityState={{ selected: voice.muted }} testID={`${testIDPrefix}-mic`}>

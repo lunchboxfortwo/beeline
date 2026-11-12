@@ -145,7 +145,7 @@ describe('Chat info', () => {
         const list = tree.root.findByType('RepoList');
         act(() => list.props.onSelect(list.props.candidates[0]));
         await act(async () => control(tree, 'chat-repository-save').props.onPress());
-        expect(modal.confirm).toHaveBeenCalledWith('Change Room repo?', expect.stringContaining('owner/old'), expect.objectContaining({ confirmText: 'Change anyway' }));
+        expect(modal.confirm).toHaveBeenCalledWith('Change chat repo?', expect.stringContaining('owner/old'), expect.objectContaining({ confirmText: 'Change anyway' }));
         expect(operation.mock.calls.map(call => call[0])).toEqual(['listGitHubRepositories']);
         expect(refresh).not.toHaveBeenCalled();
     });

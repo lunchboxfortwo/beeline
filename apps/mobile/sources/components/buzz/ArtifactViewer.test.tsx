@@ -61,13 +61,6 @@ vi.mock('lucide-react-native', async () => (await import('@/ui/screens/transcrip
 vi.mock('react-native-webview', () => ({
   default: (props: Record<string, unknown>) => React.createElement('WebView', props, null),
 }));
-vi.mock('react-native-unistyles', () => ({
-  StyleSheet: {
-    hairlineWidth: 1,
-    create: (factory: (theme: unknown) => unknown) => factory({ buzz: theme.buzz }),
-  },
-  useUnistyles: () => ({ theme }),
-}));
 vi.mock('react-native-safe-area-context', () => ({
   useSafeAreaInsets: () => ({
     top: mocks.safeAreaTop.value,
@@ -396,11 +389,7 @@ describe('the full-screen artifact viewer (mock 1c)', () => {
       viewport.props.onPanResponderMove({ nativeEvent: { touches: [point(180, 100)] } });
     });
     const image = renderer.root.findByProps({ testID: 'artifact-viewer-image-actions' });
-    expect(image.props.style[1].transform).toEqual([
-      { translateX: 80 },
-      { translateY: 0 },
-      { scale: 2 },
-    ]);
+    expect({ x: image.props.x, y: image.props.y, scale: image.props.scale }).toEqual({ x: 80, y: 0, scale: 2 });
   });
 
   it('zooms with the desktop wheel and allows reset', () => {
@@ -409,7 +398,7 @@ describe('the full-screen artifact viewer (mock 1c)', () => {
       const photo = attachment({ mimeType: 'image/png', name: 'photo.png' });
       const renderer = render(<ArtifactViewerScreen attachment={photo} onClose={mocks.onClose} />);
       const viewport = renderer.root.findByProps({ testID: 'artifact-viewer-image-viewport' });
-      expect(Object.assign({}, ...viewport.props.style.filter(Boolean)).touchAction).toBe('none');
+      expect(viewport.props.touchAction).toBe('none');
       act(() => viewport.props.onLayout({ nativeEvent: { layout: { width: 400, height: 300 } } }));
       const preventDefault = vi.fn();
       act(() =>
@@ -517,7 +506,7 @@ describe('the full-screen artifact viewer (mock 1c)', () => {
     });
     swipe(renderer, 80);
     expect(currentPhoto(renderer)).toBe(photos[2]);
-    expect(renderer.root.findByProps({ testID: 'artifact-viewer-image-actions' }).props.style[1].transform[0]).toEqual({ translateX: 80 });
+    expect(renderer.root.findByProps({ testID: 'artifact-viewer-image-actions' }).props.x).toBe(80);
     act(() => renderer.root.findByProps({ testID: 'artifact-viewer-photo-next' }).props.onPress());
     expect(currentPhoto(renderer)).toBe(photos[0]);
     expect(renderer.root.findByProps({ accessibilityLabel: 'Image zoom 100 percent' })).toBeDefined();
@@ -581,7 +570,7 @@ describe('the full-screen artifact viewer (mock 1c)', () => {
     });
     swipe(renderer, 80);
     act(() => staleSize(100, 1000));
-    expect(renderer.root.findByProps({ testID: 'artifact-viewer-image-actions' }).props.style[1].transform[0]).toEqual({ translateX: 80 });
+    expect(renderer.root.findByProps({ testID: 'artifact-viewer-image-actions' }).props.x).toBe(80);
     expect(currentPhoto(renderer)).toBe(photos[1]);
   });
 

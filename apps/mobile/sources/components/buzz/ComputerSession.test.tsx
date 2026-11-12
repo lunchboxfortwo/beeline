@@ -27,13 +27,6 @@ vi.mock('expo-image', async () => {
   const ReactModule = await import('react');
   return { Image: (props: any) => ReactModule.createElement('Image', props) };
 });
-vi.mock('react-native-unistyles', () => ({
-  StyleSheet: { create: (factory: any) => factory({ buzz: { roomList: { edge: 20 },
-    transcriptCard: { marginTop: 8, cornerRadius: 12, side: 16, footerMinHeight: 40 },
-    space: { xs: 4, sm: 8, md: 16 }, type: { body: {}, bodyStrong: {}, machine: {} },
-    border: '#444', borderStrong: '#555', bgBase: '#111', textPrimary: '#fff', ledgerQuiet: '#aaa', accent: '#c90',
-  } }) },
-}));
 vi.mock('@/components/buzz/sandbox-webview', async () => {
   const ReactModule = await import('react');
   const WebView = ReactModule.forwardRef((props: any, ref) => {

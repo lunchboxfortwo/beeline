@@ -1,10 +1,8 @@
 import * as React from 'react';
-import { Pressable, Text, View, type StyleProp, type ViewStyle } from 'react-native';
-import { StyleSheet } from 'react-native-unistyles';
-import { Typography } from '@/constants/Typography';
+import { XStack, YStack } from 'tamagui';
 import { typeRoles } from '@/buzz/groknight';
-import { HULL_SHEET_INSET } from '@/buzz/hull-sheet-layout';
 import Svg, { Path } from 'react-native-svg';
+import { Inked, T } from '@/ui/grammar';
 import { DECORATIVE_GLYPH_PROPS } from './decorative-glyph';
 
 /** A word beside the label that acts on the whole section (CLEAR). */
@@ -56,45 +54,39 @@ export function RoomListSectionHeader({
   /** Preserve the desktop sidebar tap line. */
   tapLineHeight?: boolean;
 }) {
+  // Later rules win, as the old style list did: flush, then the + row, then phone and sheet spacing.
+  const flushTop = spacing === 'flush' || Boolean(onAction && !tapLineHeight);
+  const roomyTop = !tapLineHeight || surface === 'sheet';
   return (
-    <View
-      style={[
-        styles.sectionHeader,
-        surface === 'screen' && styles.screenSurface,
-        inset === 'content' && styles.contentInset,
-        inset === 'row' && styles.rowInset,
-        inset === 'sheet' && styles.sheetInset,
-        inset === 'roomList' && (tapLineHeight ? styles.roomListCompactInset : styles.roomListInset),
-        surface === 'sheet' && styles.sheetSurface,
-        !tapLineHeight && styles.phoneSpacing,
-        onAction && !tapLineHeight && styles.actionSpacing,
-        spacing === 'flush' && styles.flushSpacing,
-      ]}
+    <XStack
+      alignItems="center"
+      paddingTop={flushTop ? '0' : roomyTop ? '4' : '6'}
+      paddingBottom={onAction && !tapLineHeight ? '0' : '1'}
+      minHeight={onAction && !tapLineHeight ? 44 : 0}
+      backgroundColor={surface === 'screen' ? 'canvas' : 'transparent'}
+      paddingLeft={inset === 'content' ? '0' : inset === 'row' ? '2' : inset === 'sheet' ? '6' : inset === 'roomList' ? '5' : '4'}
+      paddingRight={inset === 'content' ? '0' : inset === 'row' ? '2' : inset === 'sheet' ? '6' : inset === 'roomList' ? (tapLineHeight ? '4' : '2') : '4'}
     >
-      <Text testID={testID} accessibilityRole="header" style={styles.sectionHeaderText}>
+      <T v="metaStrong" color="secondary" flex={1} testID={testID} accessibilityRole="header">
         {title.toUpperCase()}
-      </Text>
-      {count !== undefined && <Text style={styles.sectionCount}>{count}</Text>}
+      </T>
+      {count !== undefined && <T v="meta" color="secondary">{count}</T>}
       {wordAction ? (
-        <Pressable
+        <YStack
           accessibilityLabel={wordAction.accessibilityLabel ?? wordAction.label}
           accessibilityRole="button"
           accessibilityState={{ disabled: wordAction.disabled }}
-          disabled={wordAction.disabled}
           hitSlop={WORD_HIT_SLOP}
-          onPress={wordAction.onPress}
-          style={({ pressed }) => [
-            styles.wordAction,
-            pressed && styles.pressed,
-            wordAction.disabled && styles.disabled,
-          ]}
+          onPress={wordAction.disabled ? undefined : wordAction.onPress}
+          marginLeft="2"
+          opacity={wordAction.disabled ? 0.42 : 1}
           testID={wordAction.testID}
         >
-          <Text style={styles.wordActionText}>{wordAction.label.toUpperCase()}</Text>
-        </Pressable>
+          <T v="metaStrong" color="needsYou">{wordAction.label.toUpperCase()}</T>
+        </YStack>
       ) : null}
       {onAction ? (
-        <View style={tapLineHeight && styles.tapLine}>
+        <YStack minHeight={tapLineHeight ? 44 : 0} justifyContent={tapLineHeight ? 'center' : undefined}>
           <SectionAddButton
             accessibilityLabel={actionAccessibilityLabel}
             onPress={onAction}
@@ -102,39 +94,41 @@ export function RoomListSectionHeader({
             compact={tapLineHeight}
             testID={actionTestID}
           />
-        </View>
+        </YStack>
       ) : null}
-    </View>
+    </XStack>
   );
 }
 
 /** Shared Members add action, including its glyph and phone touch target. */
-export function SectionAddButton({ accessibilityLabel, onPress, disabled, compact = false, testID, style }: {
+export function SectionAddButton({ accessibilityLabel, onPress, disabled, compact = false, testID }: {
   accessibilityLabel?: string;
   onPress: () => void;
   disabled?: boolean;
   compact?: boolean;
   testID?: string;
-  style?: StyleProp<ViewStyle>;
 }) {
   return (
-    <Pressable
+    <YStack
       accessibilityLabel={accessibilityLabel}
       accessibilityRole="button"
-      onPress={onPress}
-      disabled={disabled}
+      onPress={disabled ? undefined : onPress}
       accessibilityState={{ disabled }}
       hitSlop={compact ? ACTION_HIT_SLOP : undefined}
-      style={({ pressed }) => [styles.sectionHeaderAction, compact && styles.compactAction, pressed && styles.pressed, style]}
+      width={compact ? ACTION_GLYPH : 44}
+      height={compact ? ACTION_GLYPH : 44}
+      marginLeft="2"
+      alignItems="center"
+      justifyContent="center"
       testID={testID}
     >
-      <SectionAddGlyph color={styles.sectionHeaderActionGlyph.color} />
-    </Pressable>
+      <Inked color="needsYou" glyph={SectionAddGlyph} />
+    </YStack>
   );
 }
 
 /** A heavy, round-capped plus: the old thin stroke was hard to see. */
-function SectionAddGlyph({ color }: { color: string }) {
+function SectionAddGlyph({ color }: { color?: string }) {
   return (
     <Svg
       {...DECORATIVE_GLYPH_PROPS}
@@ -163,62 +157,3 @@ const ACTION_HIT_SLOP = {
 };
 /** A word sits on the label's line; slop lifts its tap area to 44 px. */
 const WORD_HIT_SLOP = { top: (44 - LABEL_LINE) / 2, bottom: (44 - LABEL_LINE) / 2, left: 8, right: 8 };
-
-const styles = StyleSheet.create((theme) => {
-  const hull = theme.buzz;
-  return {
-    sectionHeader: {
-      flexDirection: 'row',
-      alignItems: 'center',
-      paddingTop: hull.space.lg,
-      paddingBottom: hull.space.xs,
-      paddingHorizontal: hull.space.md,
-    },
-    phoneSpacing: { paddingTop: hull.space.md },
-    screenSurface: { backgroundColor: hull.bgTerminal },
-    actionSpacing: { paddingTop: 0, paddingBottom: 0, minHeight: 44 },
-    contentInset: { paddingHorizontal: 0 },
-    rowInset: { paddingHorizontal: hull.space.sm },
-    sheetInset: { paddingHorizontal: HULL_SHEET_INSET },
-    roomListInset: {
-      paddingLeft: hull.roomList.edge,
-      paddingRight: hull.roomList.addEnd,
-    },
-    roomListCompactInset: {
-      paddingLeft: hull.roomList.edge,
-      paddingRight: hull.roomList.compactAddEnd,
-    },
-    sheetSurface: { paddingTop: hull.space.md, backgroundColor: 'transparent' },
-    flushSpacing: { paddingTop: 0 },
-    sectionHeaderText: {
-      ...Typography.default('semiBold'),
-      ...hull.type.sectionLabel,
-      lineHeight: hull.type.sectionCount.lineHeight,
-      color: hull.textMuted,
-      flex: 1,
-    },
-    tapLine: { minHeight: 44, justifyContent: 'center' },
-    sectionHeaderAction: {
-      width: 44,
-      height: 44,
-      marginLeft: hull.space.sm,
-      alignItems: 'center',
-      justifyContent: 'center',
-    },
-    compactAction: { width: ACTION_GLYPH, height: ACTION_GLYPH },
-    sectionHeaderActionGlyph: { color: hull.accent },
-    pressed: { opacity: 0.7 },
-    disabled: { opacity: 0.42 },
-    wordAction: { marginLeft: hull.space.sm },
-    wordActionText: {
-      ...Typography.default('semiBold'),
-      ...hull.type.sectionLabel,
-      color: hull.accent,
-    },
-    // Held to the label's line so the count never makes the header taller.
-    sectionCount: {
-      ...hull.type.sectionCount,
-      color: hull.ledgerQuiet,
-    },
-  };
-});

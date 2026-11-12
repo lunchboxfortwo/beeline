@@ -334,7 +334,7 @@ m45_describe('phone surface readers', () => {
     const summary = {
       cornerCount: 2, waitingCornerCount: 1, mineCornerCount: 1,
       openCorners: [{ id: cornerId, name: 'Mine', state: 'waiting', mine: true,
-        waitingSince: 5, attention: true }],
+        waitingSince: 5, lastActivityAt: 5, attention: true }],
     };
     m45_expect(m45_readCornerListView({ ...base, summary })?.summary).toEqual(summary);
     m45_expect(m45_readCornerListView({ ...base, summary: { ...summary, cornerCount: -1 } }))

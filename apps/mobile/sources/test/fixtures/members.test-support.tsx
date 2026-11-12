@@ -281,47 +281,6 @@ vi.mock('react-native', async () => {
   };
 });
 
-const unistylesTheme = vi.hoisted(() => ({
-  buzz: {
-    type: {
-      hero: { fontSize: 22 },
-      body: { fontSize: 16 },
-      meta: { fontSize: 13 },
-      sectionHead: { fontSize: 10 }, sectionLabel: { fontSize: 13, lineHeight: 19, letterSpacing: 2 }, sectionCount: { fontSize: 15, lineHeight: 22 },
-      machine: { fontSize: 13 },
-    },
-    agentProfileTypography: { name: { fontSize: 28, lineHeight: 36 } },
-    space: { xs: 4, sm: 8, md: 16, lg: 24, xl: 32, xxl: 48 },
-    transcriptCard: { identitySize: 26 },
-    roomList: { edge: 20 },
-    layout: { row: 64, sectionGap: 24 },
-    radius: 3,
-    dialogDanger: '#c4544d',
-    bgTerminal: '#000',
-    bgRaised: '#111',
-    bgPressed: '#222',
-    textMuted: '#888',
-    textPrimary: '#fff',
-    border: '#333',
-    chrome: '#aaa',
-    accent: '#d7af5f',
-    danger: '#f00',
-  },
-}));
-export { unistylesTheme };
-
-vi.mock('react-native-unistyles', () => ({
-  StyleSheet: {
-    hairlineWidth: 1,
-    create: (factory: any) => factory(unistylesTheme),
-  },
-  useUnistyles: () => ({ theme: unistylesTheme }),
-}));
-
-vi.mock('@/constants/Typography', () => ({
-  Typography: { mono: () => ({}), default: () => ({}), ledger: () => ({}) },
-}));
-
 vi.mock('@/auth/buzz-identity-storage', () => ({
   getEffectiveRelayUrl: vi.fn(async () => 'https://relay.test'),
   loadBuzzIdentity: vi.fn(async () => ({ publicKey: VIEWER, secretKey: new Uint8Array(32) })),

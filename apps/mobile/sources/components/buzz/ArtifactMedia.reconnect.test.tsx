@@ -23,6 +23,10 @@ vi.mock('@/buzz/artifact-link', () => ({
   subscribeArtifactBytesPurge: () => () => {}, fetchArtifactText: vi.fn(),
 }));
 vi.mock('./IndexRow', () => ({ IndexRow: 'IndexRow' }));
+vi.mock('tamagui', async () => (await import('@/ui/screens/transcript/grammar-hosts.test-support')).tamaguiHosts());
+vi.mock('lucide-react-native', async () => (await import('@/ui/screens/transcript/grammar-hosts.test-support')).lucideHosts());
+vi.mock('react-native-reanimated', () => ({ default: { View: 'AnimatedView' } }));
+vi.mock('react-native-safe-area-context', () => ({ useSafeAreaInsets: () => ({ top: 0, bottom: 0, left: 0, right: 0 }) }));
 
 import { ArtifactImage } from './ArtifactMedia';
 import { reconnectNow, resetSharedLiveConnection, sharedLiveConnection, useConnectionFailure } from '@/sync/transport/live-connection';

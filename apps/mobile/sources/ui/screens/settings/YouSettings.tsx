@@ -8,7 +8,7 @@ import { IdentityMark, isPersonPictureUrl } from '@/components/buzz/IdentityMark
 import { ServiceMark } from '@/components/buzz/ServiceMark';
 import { BeelineMark } from '@/components/buzz/BeelineMark';
 import { useLocalSettingMutable } from '@/sync/storage';
-import { applyAppearanceChoice, setAppDisplay } from '@/unistyles';
+import { applyAppearanceChoice } from '@/display';
 import { APP_UI_SIZE_LABELS, APP_UI_SIZE_OPTIONS } from '@/ui-size';
 import { roomOpenTraceEnabled } from '@/buzz/room-open-trace';
 import { openExternalUrl } from '@/utils/open-external-url';
@@ -22,7 +22,7 @@ const PUSH_LEVEL_LABELS: Readonly<Record<PushLevel, string>> = { off: 'Off', att
 const PUSH_LEVEL_DETAILS: Readonly<Record<PushLevel, string>> = {
     off: 'No push notifications.',
     attention: 'Tags, DMs and replies to you, from people or agents.',
-    full: 'Everything in Attention, plus every human message and every final agent reply in all your Rooms and corners.',
+    full: 'Everything in Attention, plus every human message and every final agent reply in all your chats and threads.',
 };
 const SPEAKING_SPEED_LABELS = { 1.15: 'Normal', 1.3: 'Medium', 1.5: 'Fast' } as const;
 const APPEARANCES = [['system', 'System'], ['light', 'Light'], ['dark', 'Dark']] as const;
@@ -90,7 +90,7 @@ export function YouSettings({ you }: { you: You }) {
                         if (!next) return;
                         const choice = next as typeof appearance;
                         setAppearance(choice);
-                        applyAppearanceChoice(choice, uiSize);
+                        applyAppearanceChoice(choice);
                     }} flexDirection="row" alignSelf="flex-start" gap="2" backgroundColor="raised" aria-label="Appearance">
                         {APPEARANCES.map(([value, label]) => (
                             <ToggleGroup.Item key={value} value={value} aria-label={label} width="auto" height={HEIGHT.control} minHeight={HEIGHT.control} paddingHorizontal="3" borderRadius="full" borderWidth={1}
@@ -121,8 +121,8 @@ export function YouSettings({ you }: { you: You }) {
                 <Row label={sizeLabel} value={APP_UI_SIZE_LABELS[uiSize]} onPress={() => setSheet('size')} testID="ui-size-setting" />
                 <Row label="Speaking speed" value={SPEAKING_SPEED_LABELS[you.speakingSpeed]} onPress={() => setSheet('speed')} testID="speaking-speed-setting" last={!roomOpenTraceEnabled()} />
                 {roomOpenTraceEnabled() ? (
-                    <Row label="Room open trace" detail="Show open timings on screen" testID="debug-room-open-trace" last
-                        right={<Switch checked={roomOpenTrace} onCheckedChange={setRoomOpenTrace} aria-label="Room open trace"><Switch.Thumb /></Switch>} />
+                    <Row label="Chat open trace" detail="Show open timings on screen" testID="debug-room-open-trace" last
+                        right={<Switch checked={roomOpenTrace} onCheckedChange={setRoomOpenTrace} aria-label="Chat open trace"><Switch.Thumb /></Switch>} />
                 ) : null}
             </Section>
 
@@ -182,7 +182,7 @@ export function YouSettings({ you }: { you: You }) {
                 value={you.push.level} onChoose={(level) => void you.push.change(level)}
                 choices={PUSH_LEVELS.map((level) => ({ value: level, label: PUSH_LEVEL_LABELS[level], detail: PUSH_LEVEL_DETAILS[level] }))} />
             <ChoiceSheet open={sheet === 'size'} close={() => setSheet(null)} title={sizeLabel} testID="ui-size-sheet" value={uiSize}
-                onChoose={(next) => { setUiSize(next); setAppDisplay(appearance, next); }}
+                onChoose={(next) => setUiSize(next)}
                 choices={APP_UI_SIZE_OPTIONS.map((size) => ({ value: size, label: APP_UI_SIZE_LABELS[size] }))} />
             <ChoiceSheet open={sheet === 'speed'} close={() => setSheet(null)} title="Speaking speed" testID="speaking-speed-sheet" value={you.speakingSpeed}
                 onChoose={you.changeSpeakingSpeed}

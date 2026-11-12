@@ -1,14 +1,15 @@
 import { LedgerDisclosure, LedgerLogGroup } from './LedgerDisclosure';
 import { webhookCallerMessage } from '@/buzz/system-lines';
 import React, { useEffect, useLayoutEffect, useRef, useState } from 'react';
-import { Platform, Pressable, ScrollView, Text, View } from 'react-native';
+import { Platform } from 'react-native';
+import { ScrollView, XStack, YStack } from 'tamagui';
+import { T, TypedView } from '@/ui/grammar';
 import { MonoMarkdown } from './MonoMarkdown';
 import { ContentTarget } from './IndexRow';
 import type { SystemEvent, SystemSubject } from '@beeline/api-contract/phone';
-import { LedgerBodyProps, ledgerEntryRhythm, SystemLineCutSearch, webFitsTwoLines, startCutSearch, closedCutLength } from './Ledger';
+import { LedgerBodyProps, LedgerEntryFrame, SystemLineCutSearch, webFitsTwoLines, startCutSearch, closedCutLength } from './Ledger';
 import { TranscriptLine } from '@/ui/screens/transcript/TranscriptLine';
 import { DayCaption, HistoryLine } from '@/ui/screens/transcript/TranscriptMarkers';
-import { styles } from './Ledger';
 
 
 
@@ -36,12 +37,10 @@ export function LedgerSteer({
   onOpenCode,
 }: Omit<LedgerBodyProps, 'marginalia' | 'machineNoise' | 'typewriter' | 'settleFrom'> & { pending?: boolean }) {
   return (
-    <View
-      style={ledgerEntryRhythm({
-        hasByline: Boolean(byline),
-        chronological,
-        precededByDayCaption,
-      })}
+    <LedgerEntryFrame
+      hasByline={Boolean(byline)}
+      chronological={chronological}
+      precededByDayCaption={precededByDayCaption}
       testID={`chat-message-${itemId}`}
     >
       <TranscriptLine sender={byline}>
@@ -54,7 +53,10 @@ export function LedgerSteer({
             onPress={bodyAction.onPress}
             testID={bodyAction.testID}
           >
-            <MonoMarkdown
+            <TypedView
+              view={MonoMarkdown}
+              v="body"
+              color={pending ? 'secondary' : 'needsYou'}
               markdown={bodyText}
               mentionHandles={mentionHandles}
               viewerHandle={viewerHandle}
@@ -63,12 +65,14 @@ export function LedgerSteer({
               onChannelReference={onChannelReference}
               codeSource={codeRoomId ? { roomId: codeRoomId, messageId: itemId } : undefined}
               onOpenCode={onOpenCode}
-              textStyle={styles.steerText(pending)}
               testID={bodyTestID}
             />
           </ContentTarget>
         ) : (
-          <MonoMarkdown
+          <TypedView
+            view={MonoMarkdown}
+            v="body"
+            color={pending ? 'secondary' : 'needsYou'}
             markdown={bodyText}
             mentionHandles={mentionHandles}
             viewerHandle={viewerHandle}
@@ -77,14 +81,13 @@ export function LedgerSteer({
             onChannelReference={onChannelReference}
             codeSource={codeRoomId ? { roomId: codeRoomId, messageId: itemId } : undefined}
             onOpenCode={onOpenCode}
-            textStyle={styles.steerText(pending)}
             testID={bodyTestID}
           />
         )
       ) : null}
       {attachments}
       </TranscriptLine>
-    </View>
+    </LedgerEntryFrame>
   );
 }
 
@@ -108,27 +111,28 @@ export function LedgerRoomUpdate({
   tone?: 'quiet' | 'brass';
 }) {
   return (
-    <View style={styles.roomUpdate} testID={`room-update-${id}`}>
-      <Text
-        numberOfLines={1}
-        style={
-          tone === 'brass'
-            ? [styles.roomUpdateLine, styles.roomUpdateLineBrass]
-            : styles.roomUpdateLine
-        }
-        testID={`room-update-line-${id}`}
-      >
-        {line}
-      </Text>
-      <Text numberOfLines={1} style={styles.roomUpdateStamp} testID={`room-update-stamp-${id}`}>
+    // The row keeps its stamp pinned right, clear of the line beside it.
+    <XStack width="100%" minWidth={0} gap="2" alignItems="flex-start" paddingVertical="1" marginBottom="4" testID={`room-update-${id}`}>
+      <YStack flex={1} minWidth={0}>
+        <T
+          v="meta"
+          color={tone === 'brass' ? 'needsYou' : 'secondary'}
+          numberOfLines={1}
+          testID={`room-update-line-${id}`}
+        >
+          {line}
+        </T>
+        {digest ? (
+          <T v="meta" color="secondary" numberOfLines={2} marginTop="1" marginLeft="4" testID={`room-update-digest-${id}`}>
+            {digest}
+          </T>
+        ) : null}
+      </YStack>
+      {/* No fixed width: a 36px box clips `17:06` to `17:…`. */}
+      <T v="code" color="secondary" textAlign="right" flexShrink={0} numberOfLines={1} testID={`room-update-stamp-${id}`}>
         {stamp}
-      </Text>
-      {digest ? (
-        <Text numberOfLines={2} style={styles.roomUpdateDigest} testID={`room-update-digest-${id}`}>
-          {digest}
-        </Text>
-      ) : null}
-    </View>
+      </T>
+    </XStack>
   );
 }
 
@@ -173,8 +177,8 @@ export function LedgerSystemLine({
   const [width, setWidth] = useState<number | null>(null);
   const [search, setSearch] = useState<SystemLineCutSearch | null>(null);
   const [cut, setCut] = useState<{ key: string; at: number } | null>(null);
-  const measurementRef = useRef<Text>(null);
-  const probeRef = useRef<Text>(null);
+  const measurementRef = useRef<unknown>(null);
+  const probeRef = useRef<unknown>(null);
   const fullText = event
     ? `${event.subject.name} ${event.verb}${event.object?.text ? ` ${event.object.text}` : ''}${event.consequence ? ` · ${event.consequence}` : ''}`
     : text;
@@ -218,9 +222,10 @@ export function LedgerSystemLine({
     if (fits !== null) settleProbe(fits);
   }, [probeCandidate, cutKey]);
   const name = (subject: SystemSubject, index: number) => (piece: string) => (
-    <Text
+    <T
+      v="meta"
+      color="needsYou"
       key={`${subject.id ?? subject.name}-${index}`}
-      style={styles.systemLineName}
       onPress={
         subject.id && onOpenIdentity
           ? (event) => {
@@ -232,7 +237,7 @@ export function LedgerSystemLine({
       testID={`system-line-name-${id}-${index}`}
     >
       {piece}
-    </Text>
+    </T>
   );
   // Each segment renders any prefix of its text, so the closed cut keeps names and links.
   const segments: { text: string; render?: (piece: string) => React.ReactNode }[] = [];
@@ -252,9 +257,11 @@ export function LedgerSystemLine({
         segments.push({
           text: object.text,
           render: (piece) => (
-            <Text
+            <T
+              v="meta"
+              color="secondary"
+              textDecorationLine="underline"
               key="object"
-              style={styles.systemLineLink}
               accessibilityRole="link"
               onPress={(event) => {
                 event.stopPropagation();
@@ -263,16 +270,17 @@ export function LedgerSystemLine({
               testID={`system-line-object-${id}`}
             >
               {piece}
-            </Text>
+            </T>
           ),
         });
       } else if (object.id) {
         segments.push({
           text: object.text,
           render: (piece) => (
-            <Text
+            <T
+              v="meta"
+              color="needsYou"
               key="object"
-              style={styles.systemLineName}
               onPress={
                 onOpenIdentity
                   ? (event) => {
@@ -284,16 +292,18 @@ export function LedgerSystemLine({
               testID={`system-line-object-${id}`}
             >
               {piece}
-            </Text>
+            </T>
           ),
         });
       } else if (object.url) {
         segments.push({
           text: object.text,
           render: (piece) => (
-            <Text
+            <T
+              v="meta"
+              color="secondary"
+              textDecorationLine="underline"
               key="object"
-              style={styles.systemLineLink}
               onPress={
                 onOpenUrl
                   ? (event) => {
@@ -305,7 +315,7 @@ export function LedgerSystemLine({
               testID={`system-line-object-${id}`}
             >
               {piece}
-            </Text>
+            </T>
           ),
         });
       } else {
@@ -329,14 +339,15 @@ export function LedgerSystemLine({
   };
   // A non-breaking space binds the word to the text, so it never sits alone on a new line.
   const toggleWord = (word: 'more' | 'less') => (
-    <Text key="toggle" style={styles.systemLineToggle} testID={`system-line-toggle-word-${id}`}>
+    <T v="metaStrong" color="needsYou" key="toggle" testID={`system-line-toggle-word-${id}`}>
       {` ${word}`}
-    </Text>
+    </T>
   );
   const closedLength = cutAt === null ? null : closedCutLength(fullText, cutAt);
   const body = (
-    <Text
-      style={bare ? [styles.systemLineText, styles.systemLineTextBare] : styles.systemLineText}
+    <T
+      v="meta"
+      color={bare ? 'ink' : 'secondary'}
       numberOfLines={expanded ? undefined : 2}
       ellipsizeMode="tail"
       testID={`system-line-text-${id}`}
@@ -348,7 +359,7 @@ export function LedgerSystemLine({
           : event
             ? renderSegments()
             : text}
-    </Text>
+    </T>
   );
   const hiddenText = {
     accessible: false,
@@ -357,20 +368,33 @@ export function LedgerSystemLine({
     'aria-hidden': true,
   } as const;
   return (
-    <View style={bare ? [styles.systemLine, styles.systemLineBare] : styles.systemLine} testID={`system-line-${id}`}>
-      <View>
+    <XStack
+      width="100%"
+      minWidth={0}
+      gap="2"
+      alignItems="flex-start"
+      paddingVertical={bare ? 0 : '1'}
+      marginBottom={bare ? 0 : '4'}
+      testID={`system-line-${id}`}
+    >
+      <YStack flex={1} minWidth={0}>
         {/* Measure unclamped copy: native reports lines, web reports its laid-out height.
-            Android ignores pointerEvents on Text, so the View keeps the copy from taking
+            Android ignores pointerEvents on Text, so the view keeps the copy from taking
             taps where it overflows onto the row below. */}
-        <View
+        <YStack
           pointerEvents="none"
-          style={styles.systemLineMeasurement}
+          position="absolute"
+          top={0}
+          left={0}
+          right={0}
+          opacity={0}
           onLayout={({ nativeEvent }) => setWidth(nativeEvent.layout.width)}
         >
-          <Text
-            ref={measurementRef}
+          <T
+            v="meta"
+            color="secondary"
+            ref={measurementRef as never}
             testID={`system-line-measurement-${id}`}
-            style={styles.systemLineText}
             {...hiddenText}
             onTextLayout={
               Platform.OS === 'web'
@@ -382,15 +406,16 @@ export function LedgerSystemLine({
             onLayout={Platform.OS === 'web' ? measureWebOverflow : undefined}
           >
             {fullText}
-          </Text>
-        </View>
+          </T>
+        </YStack>
         {probeCandidate !== null ? (
-          <View pointerEvents="none" style={styles.systemLineMeasurement}>
-            <Text
+          <YStack pointerEvents="none" position="absolute" top={0} left={0} right={0} opacity={0}>
+            <T
+              v="meta"
+              color="secondary"
               key={`${probing!.mode}-${probeCandidate}`}
-              ref={probeRef}
+              ref={probeRef as never}
               testID={`system-line-probe-${id}`}
-              style={styles.systemLineText}
               {...hiddenText}
               onTextLayout={
                 Platform.OS === 'web'
@@ -399,8 +424,8 @@ export function LedgerSystemLine({
               }
             >
               {fullText.slice(0, closedCutLength(fullText, probeCandidate))}…{toggleWord('more')}
-            </Text>
-          </View>
+            </T>
+          </YStack>
         ) : null}
         {overflows ? (
           <LedgerDisclosure
@@ -420,26 +445,27 @@ export function LedgerSystemLine({
         )}
         {callerMessage !== undefined ? (
           <>
-            <Text style={styles.systemLineText} testID={`system-line-caller-label-${id}`}>
+            <T v="meta" color="secondary" testID={`system-line-caller-label-${id}`}>
               Caller's message:
-            </Text>
-            <Text
-              selectable
+            </T>
+            <T
+              v="meta"
+              color="secondary"
+              userSelect="text"
               dataDetectorType="none"
-              style={styles.systemLineText}
               testID={`system-line-caller-message-${id}`}
             >
               {`“${callerMessage}”`}
-            </Text>
+            </T>
           </>
         ) : null}
-      </View>
+      </YStack>
       {bare ? null : (
-        <Text numberOfLines={1} style={styles.roomUpdateStamp} testID={`system-line-stamp-${id}`}>
+        <T v="code" color="secondary" textAlign="right" flexShrink={0} numberOfLines={1} testID={`system-line-stamp-${id}`}>
           {stamp}
-        </Text>
+        </T>
       )}
-    </View>
+    </XStack>
   );
 }
 
@@ -457,10 +483,10 @@ export function withLedgerDayCaption(node: React.ReactNode, label: string | null
   if (!label) return node;
   const caption = <LedgerDayCaption label={label} />;
   return (
-    <View>
+    <YStack>
       {caption}
       {node}
-    </View>
+    </YStack>
   );
 }
 
@@ -484,7 +510,8 @@ export function LedgerGhostLine({
 }) {
   const [expanded, setExpanded] = useState(false);
   return (
-    <LedgerLogGroup style={styles.ghostBlock} testID={testID}>
+    // Tool readouts take the quiet mono treatment — clearly not conversation.
+    <LedgerLogGroup width="100%" minWidth={0} testID={testID}>
       <LedgerDisclosure
         expanded={expanded}
         accessibilityLabel={label}
@@ -494,9 +521,9 @@ export function LedgerGhostLine({
       >{label}</LedgerDisclosure>
       {expanded ? (
         <ScrollView horizontal nestedScrollEnabled showsHorizontalScrollIndicator>
-          <Text selectable style={styles.ghostBody} testID={testID ? `${testID}-body` : undefined}>
+          <T v="code" color="secondary" userSelect="text" marginTop="1" testID={testID ? `${testID}-body` : undefined}>
             {body}
-          </Text>
+          </T>
         </ScrollView>
       ) : null}
     </LedgerLogGroup>
@@ -506,7 +533,9 @@ export function LedgerGhostLine({
 
 /** Private teaching feedback beneath a locally sent message. */
 export function LedgerUntaggedHint({ messageId }: { messageId: string }) {
-  return <Text style={styles.untaggedHint} testID={`untagged-message-hint-${messageId}`}>
-    No agent was tagged
-  </Text>;
+  return (
+    <T v="meta" color="secondary" marginTop="1" testID={`untagged-message-hint-${messageId}`}>
+      No agent was tagged
+    </T>
+  );
 }

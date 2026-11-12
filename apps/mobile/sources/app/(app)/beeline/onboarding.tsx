@@ -650,7 +650,7 @@ export default function BuzzOnboarding() {
             <>
               <T v="meta" color="secondary">
                 Replacing the device key moves this GitHub link to your new key. Your Workspaces,
-                Rooms, and repository approvals follow this account — agents and people you work with
+                chats, and repository approvals follow this account — agents and people you work with
                 keep working with you, no re-invites.
               </T>
               <Primary

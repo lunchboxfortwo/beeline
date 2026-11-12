@@ -1,6 +1,7 @@
 import * as React from 'react';
-import { Platform, Text, View } from 'react-native';
-import { StyleSheet } from 'react-native-unistyles';
+import { Platform } from 'react-native';
+import { XStack, YStack } from 'tamagui';
+import { T } from '@/ui/grammar';
 import {
     formatShortcut,
     GLOBAL_SHORTCUTS,
@@ -23,55 +24,6 @@ const ShortcutHintsContext = React.createContext<ShortcutHintsContextValue>({
     browserSafeShortcuts: false,
     sessionShortcutNumbers: EMPTY_SESSION_SHORTCUT_NUMBERS,
 });
-
-const stylesheet = StyleSheet.create((theme) => ({
-    overlay: {
-        position: 'absolute',
-        right: theme.buzz.space.lg,
-        bottom: theme.buzz.space.lg,
-        zIndex: 2000,
-        flexDirection: 'row',
-        flexWrap: 'wrap',
-        justifyContent: 'flex-end',
-        gap: theme.buzz.space.sm,
-        maxWidth: 520,
-        padding: theme.buzz.space.sm,
-        borderRadius: theme.buzz.radius,
-        borderWidth: StyleSheet.hairlineWidth,
-        borderColor: theme.buzz.borderStrong,
-        backgroundColor: theme.buzz.bgRaised,
-    },
-    overlayItem: {
-        flexDirection: 'row',
-        alignItems: 'center',
-        gap: theme.buzz.space.sm,
-        paddingVertical: theme.buzz.space.xs,
-        paddingHorizontal: theme.buzz.space.sm,
-        borderRadius: theme.buzz.radius,
-        backgroundColor: theme.colors.surfaceHigh,
-    },
-    overlayLabel: {
-        ...theme.buzz.type.meta,
-        fontFamily: theme.buzz.proseSemibold,
-        color: theme.colors.text,
-    },
-    keycap: {
-        minWidth: 30,
-        alignItems: 'center',
-        justifyContent: 'center',
-        paddingHorizontal: theme.buzz.space.sm,
-        paddingVertical: theme.buzz.space.xs,
-        borderRadius: theme.buzz.radius,
-        borderWidth: StyleSheet.hairlineWidth,
-        borderColor: theme.colors.divider,
-        backgroundColor: theme.colors.surface,
-    },
-    keycapText: {
-        ...theme.buzz.type.machine,
-        fontFamily: theme.buzz.monoSemibold,
-        color: theme.colors.text,
-    },
-}));
 
 const shortcutLabels: Record<GlobalShortcutId, () => string> = {
     newSession: () => "New session",
@@ -105,19 +57,35 @@ export function ShortcutHintsProvider({
         <ShortcutHintsContext.Provider value={value}>
             {children}
             {visible && modifier && (
-                <View pointerEvents="none" style={stylesheet.overlay} testID="shortcut-hints-overlay">
+                <XStack
+                    pointerEvents="none"
+                    position="absolute"
+                    right={24}
+                    bottom={24}
+                    zIndex={2000}
+                    flexWrap="wrap"
+                    justifyContent="flex-end"
+                    gap="2"
+                    maxWidth={520}
+                    padding="2"
+                    borderRadius="md"
+                    borderWidth={1}
+                    borderColor="strongStroke"
+                    backgroundColor="raised"
+                    testID="shortcut-hints-overlay"
+                >
                     {GLOBAL_SHORTCUTS
                         .map((shortcut) => (
-                            <View key={shortcut.id} style={stylesheet.overlayItem}>
-                                <View style={stylesheet.keycap}>
-                                    <Text style={stylesheet.keycapText}>
+                            <XStack key={shortcut.id} alignItems="center" gap="2" paddingVertical="1" paddingHorizontal="2" borderRadius="md" backgroundColor="highlight">
+                                <YStack minWidth={30} alignItems="center" justifyContent="center" paddingHorizontal="2" paddingVertical="1" borderRadius="md" borderWidth={1} borderColor="stroke" backgroundColor="canvas">
+                                    <T v="code">
                                         {formatShortcut(modifier, shortcut.keyLabel, browserSafeShortcuts)}
-                                    </Text>
-                                </View>
-                                <Text style={stylesheet.overlayLabel}>{shortcutLabels[shortcut.id]()}</Text>
-                            </View>
+                                    </T>
+                                </YStack>
+                                <T v="metaStrong">{shortcutLabels[shortcut.id]()}</T>
+                            </XStack>
                         ))}
-                </View>
+                </XStack>
             )}
         </ShortcutHintsContext.Provider>
     );

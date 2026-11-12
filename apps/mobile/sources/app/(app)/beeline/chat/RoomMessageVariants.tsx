@@ -97,8 +97,8 @@ export const WritePermissionCard = React.memo(function WritePermissionCard({
     <AgentApprovalCard
       tier={pending ? 'ask' : 'record'} testID={`write-permission-${permission.status}`} wrapTitle
       askingAgent={{ pubkey: permission.agentPubkey, kind: 'agent', name: display.name }} agent={agent}
-      title={<><TranscriptCardHandle>@{display.name.replace(/^@/, '')}</TranscriptCardHandle>{' '}{squireSpending ? 'wants to spend with Trusty Squire' : 'wants to open an edit corner'}</>}
-      subline={`${squireSpending ? roomName ? `#${roomName}` : 'Room' : permission.repository ?? 'Repository'} · ${approvalAudience(permission.requester, viewerPubkey)}`}
+      title={<><TranscriptCardHandle>@{display.name.replace(/^@/, '')}</TranscriptCardHandle>{' '}{squireSpending ? 'wants to spend with Trusty Squire' : 'wants to open an edit thread'}</>}
+      subline={`${squireSpending ? roomName ? `#${roomName}` : 'Chat' : permission.repository ?? 'Repository'} · ${approvalAudience(permission.requester, viewerPubkey)}`}
       stamp={ledgerStamp(message.timestamp)} body={permission.reason}
       media={pending ? <RequestMedia message={message} /> : undefined}
       facts={squireSpending ? [{ label: 'Uses', value: permission.tool }]
@@ -595,7 +595,7 @@ export const TargetBranchProposalCard = React.memo(function TargetBranchProposal
     <AgentApprovalCard tier={settled ? 'record' : 'ask'} testID="target-branch-proposal" wrapTitle
       askingAgent={{ pubkey: proposal.agentPubkey ?? '', kind: 'agent', name: askingAgent ?? 'Agent' }} agent={agent}
       title={`@${askingAgent ?? 'Agent'} wants to change the target branch`}
-      subline={`${roomName ? `#${roomName}` : proposal.repository ?? 'Room'} · for you`}
+      subline={`${roomName ? `#${roomName}` : proposal.repository ?? 'Chat'} · for you`}
       stamp={ledgerStamp(message.timestamp)} body={proposal.purpose}
       facts={[{ label: 'From', value: proposal.from }, { label: 'To', value: proposal.to }]}
       footerNote={settled ? approvalDecisionNote(proposal.status ?? 'allowed', proposal.decidedBy, proposal.decidedAt ?? message.timestamp, viewerPubkey) : canConfirm ? notice ?? undefined : 'waiting for a Workspace manager'}

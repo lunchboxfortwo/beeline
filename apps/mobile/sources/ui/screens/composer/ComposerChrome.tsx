@@ -1,7 +1,8 @@
 import React, { useEffect, useRef } from 'react';
-import { Card, XStack, YStack, useTheme } from 'tamagui';
-import { AudioLines, CornerUpLeft, FileText, X } from 'lucide-react-native';
+import { Card, XStack, YStack } from 'tamagui';
+import { CornerUpLeft, FileText, X } from 'lucide-react-native';
 import { VOICE_LONG_PRESS_MS } from '@beeline/api-contract/phone';
+import { Waveform } from './Waveform';
 import { Btn, Glyph, T } from '@/ui/grammar';
 
 /**
@@ -9,12 +10,6 @@ import { Btn, Glyph, T } from '@/ui/grammar';
  * native text field and its measurement stay in `ConversationComposer.tsx`;
  * everything drawn around it lives here.
  */
-
-/** Theme ink for the native field, which cannot take Tamagui tokens itself. */
-export function useComposerInk(): { ink: string; hint: string } {
-    const theme = useTheme() as Record<string, { val: string } | undefined>;
-    return { ink: theme.ink?.val ?? '', hint: theme.secondary?.val ?? '' };
-}
 
 /** The card: raised, large radius, a stroke that turns brass while the field has focus. */
 export function ComposerFrame({ focused, pill = false, children }: { focused: boolean; pill?: boolean; children: React.ReactNode }) {
@@ -84,12 +79,11 @@ export function ComposerGlyph({ icon, primary = false }: { icon: IconComponent; 
 }
 
 /** While dictating, the field reads "Listening"; leading tags stay in view as text. */
-export function ComposerListening({ tags, testID, tagsTestID }: { tags?: string; testID: string; tagsTestID: string }) {
+export function ComposerListening({ tags, level, live, testID, tagsTestID }: { tags?: string; level: number; live: boolean; testID: string; tagsTestID: string }) {
     return (
-        <XStack flex={1} minWidth={0} gap="1" alignItems="center" aria-label="Listening" testID={testID}>
+        <XStack flex={1} minWidth={0} gap="2" alignItems="center" aria-label="Listening" testID={testID}>
             {tags ? <T v="body" color="secondary" numberOfLines={1} testID={tagsTestID}>{tags}</T> : null}
-            <Glyph icon={AudioLines} />
-            <T v="meta" color="secondary">Listening</T>
+            <Waveform level={level} live={live} testID={`${testID}-level`} />
         </XStack>
     );
 }

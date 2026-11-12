@@ -1,19 +1,13 @@
 import React from 'react';
-import { Text, View } from 'react-native';
-import { StyleSheet } from 'react-native-unistyles';
+import { XStack } from 'tamagui';
+import { T } from '@/ui/grammar';
 import { CORNER_META_SIZE, CornerGlyph } from './CornerGlyph';
 
 /** The only two places a Room's scheduled work can run. */
 export function ScheduledWorkWhere({ corner, isDirectMessage = false }: { corner?: { id: string; name: string } | null; isDirectMessage?: boolean }) {
-  if (!corner) return <Text numberOfLines={1} style={styles.room}>{isDirectMessage ? 'this DM' : 'this Room'}</Text>;
-  return <View style={styles.corner}>
+  if (!corner) return <T v="meta" color="secondary" numberOfLines={1} flexShrink={0}>{isDirectMessage ? 'this DM' : 'this chat'}</T>;
+  return <XStack alignItems="center" gap="1" flexShrink={0} maxWidth="75%">
     <CornerGlyph size={CORNER_META_SIZE} />
-    <Text numberOfLines={1} style={styles.name}>{corner.name}</Text>
-  </View>;
+    <T v="meta" color="secondary" numberOfLines={1} minWidth={0}>{corner.name}</T>
+  </XStack>;
 }
-
-const styles = StyleSheet.create((theme) => ({
-  corner: { flexDirection: 'row', alignItems: 'center', gap: theme.buzz.space.xs, flexShrink: 0, maxWidth: '75%' },
-  name: { ...theme.buzz.type.meta, color: theme.buzz.textMuted, flexShrink: 1, minWidth: 0 },
-  room: { ...theme.buzz.type.meta, color: theme.buzz.textMuted, flexShrink: 0 },
-}));

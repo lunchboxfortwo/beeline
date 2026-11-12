@@ -2,7 +2,7 @@ import { appReadErrorCopy } from '@/buzz/app-error-copy';
 import { useArtifactRecoveryGeneration } from '@/buzz/use-artifact-recovery';
 import React, { useEffect, useRef, useState } from 'react';
 import { Platform } from 'react-native';
-import { StyleSheet } from 'react-native-unistyles';
+import { FillView, TypedView } from '@/ui/grammar';
 import { Copy as CopyIcon, RefreshCw, Share2 } from 'lucide-react-native';
 import type { AttachmentReference } from '@beeline/buzz-client';
 
@@ -241,9 +241,9 @@ export function ArtifactViewerSandbox({
   }
   if (source && WebView) {
     return (
-      <WebView
+      <FillView
+        view={WebView}
         {...artifactWebViewProps({ source, guard: guardRef.current, scrollEnabled: true })}
-        style={styles.webview}
         testID="artifact-viewer-webview"
       />
     );
@@ -279,12 +279,7 @@ function ArtifactViewerMarkdown({ attachment }: { attachment: AttachmentReferenc
 function ArtifactViewerMarkdownBody({ markdown }: { markdown: string }) {
   return (
     <ViewerScroll testID="artifact-viewer-markdown">
-      <MonoMarkdown markdown={markdown} textStyle={styles.markdownText} document />
+      <TypedView view={MonoMarkdown} markdown={markdown} document />
     </ViewerScroll>
   );
 }
-
-const styles = StyleSheet.create((theme) => ({
-  webview: { flex: 1, backgroundColor: 'transparent' },
-  markdownText: { ...theme.buzz.type.body, color: theme.buzz.textPrimary },
-}));

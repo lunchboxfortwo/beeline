@@ -596,6 +596,7 @@ function readChatCorner(value: unknown): ChatListCorner | null {
     ...field('blocker', readCornerBlocker(item.blocker)),
     ...field('itemId', nonempty(item.itemId) ? item.itemId : undefined),
     ...field('waitingSince', integer(item.waitingSince) ? item.waitingSince : undefined),
+    ...field('lastActivityAt', integer(item.lastActivityAt) ? item.lastActivityAt : undefined),
     ...field('attention', item.attention === true ? (true as const) : undefined),
   };
 }

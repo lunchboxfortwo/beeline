@@ -13,8 +13,8 @@
  * the flip takes effect immediately without a restart.
  */
 import React from 'react';
-import { Text, View } from 'react-native';
-import { StyleSheet } from 'react-native-unistyles';
+import { YStack } from 'tamagui';
+import { T } from '@/ui/grammar';
 import { useLocalSetting } from '@/sync/storage';
 import {
   observeRoomOpenTrace,
@@ -37,36 +37,30 @@ export function RoomOpenTraceOverlay({ testID }: { testID?: string }) {
   const total = rows[rows.length - 1]?.ms ?? 0;
 
   return (
-    <View pointerEvents="none" style={styles.panel} testID={testID ?? 'room-open-trace'}>
-      <Text style={styles.total}>open {total}ms</Text>
+    <YStack
+      pointerEvents="none"
+      position="absolute"
+      top={4}
+      right={4}
+      maxWidth="86%"
+      padding="1"
+      borderRadius="sm"
+      backgroundColor="raised"
+      opacity={0.94}
+      testID={testID ?? 'room-open-trace'}
+    >
+      {/* Type styles, not raw sizes: a diagnostic is not a licence to invent a text size. */}
+      <T v="meta" color="needsYou">open {total}ms</T>
       {rows.map((row, index) => {
         // The gap from the previous mark is the number that matters: it is the
         // cost of that step, not the running total.
         const previous = index === 0 ? 0 : (rows[index - 1]?.ms ?? 0);
         return (
-          <Text key={`${row.phase}-${index}`} style={styles.row}>
+          <T v="code" color="secondary" key={`${row.phase}-${index}`}>
             {`${String(row.ms).padStart(5)}  +${String(row.ms - previous).padStart(4)}  ${row.phase}`}
-          </Text>
+          </T>
         );
       })}
-    </View>
+    </YStack>
   );
 }
-
-const styles = StyleSheet.create((theme) => ({
-  panel: {
-    position: 'absolute',
-    top: theme.buzz.space.xs,
-    right: theme.buzz.space.xs,
-    maxWidth: '86%',
-    paddingHorizontal: theme.buzz.space.xs,
-    paddingVertical: theme.buzz.space.xs,
-    borderRadius: theme.buzz.radius,
-    backgroundColor: theme.buzz.bgTerminal,
-    opacity: 0.94,
-  },
-  // Tracked type roles, not raw sizes: this panel is diagnostic, and a
-  // diagnostic is not a licence to invent a fourteenth text size.
-  total: { ...theme.buzz.type.meta, color: theme.buzz.accent },
-  row: { ...theme.buzz.type.machine, color: theme.buzz.textMuted },
-}));

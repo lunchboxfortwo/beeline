@@ -3,14 +3,15 @@ import { ErrorBanner } from '@/components/buzz/ErrorBanner';
 import { CornerActionsSheet } from '@/components/buzz/CornerActionsSheet';
 import { HullDialogActions } from '@/components/buzz/HullDialog';
 import React from 'react';
-import { View, Text } from 'react-native';
+import type { View } from 'react-native';
+import { YStack } from 'tamagui';
 import * as Haptics from 'expo-haptics';
 import { router, type Href } from 'expo-router';
 import { Modal } from '@/modal';
 import { BuzzRigTransport } from '@/sync/transport';
 import { type RoomRepository, type MessageReactionEmoji } from '@beeline/buzz-client';
 import { type ChatDisplayMessage } from '@/buzz/room-view-presentation';
-import { CORNER_LABEL, ROOM_LABEL } from '@/buzz/vocabulary';
+import { CORNER_LABEL, CORNER_TITLE, ROOM_LABEL } from '@/buzz/vocabulary';
 import { ROOM_SLUG_HINT, roomNameEntry, validRoomSlug } from '@/buzz/room-name';
 import { formatRoomParticipantTotal } from '@/buzz/room-participants';
 import { agentActivityReplyExcerpt, canBeginReply } from '@/buzz/message-reply';
@@ -29,7 +30,7 @@ import { ChatAddSheet, WorkspaceAddAgentSheet } from '@/ui/screens/members/ChatA
 import { openPlace } from '@/ui/shell/panel';
 import { useIsDesktop } from '@/utils/responsive';
 import { CreatePollSheet, type PollDraft } from '@/components/buzz/CreatePollSheet';
-import { styles } from './chat-surface-styles';
+import { T } from '@/ui/grammar';
 
 type Props = {
   attachmentPickerVisible: boolean;
@@ -372,13 +373,16 @@ export function ChatSurfaceOverlays({
       >
         <>
             {!isCorner && canRenameTitle && renameEditing && (
-              <View style={styles.roomRenameEditor} testID="rename-room-editor">
-                <Text style={styles.roomRenameLabel}>New {ROOM_LABEL.toLowerCase()} name</Text>
+              // Hangs between the sheet's rows, on their 24pt inset.
+              <YStack paddingHorizontal="6" paddingVertical="2" borderTopWidth={1} borderTopColor="stroke" testID="rename-room-editor">
+                <T v="meta" color="secondary">New {ROOM_LABEL.toLowerCase()} name</T>
+                <YStack marginTop="1">
                 <HullDialogInput
                   accessibilityLabel={`New ${ROOM_LABEL} name`}
                   autoCapitalize="none"
                   autoCorrect={false}
-                  editable={!renameBusy}
+                  // The native field's own prop; the Tamagui field type does not name it.
+                  {...{ editable: !renameBusy }}
                   onChangeText={(value) => {
                     setRenameDraft(roomNameEntry(value));
                     if (value.trim()) setRenameError(null);
@@ -386,18 +390,20 @@ export function ChatSurfaceOverlays({
                   onSubmitEditing={() => void handleRenameRoom()}
                   returnKeyType="done"
                   selectTextOnFocus
-                  style={styles.roomRenameInput}
                   testID="rename-room-input"
                   value={renameDraft}
                 />
+                </YStack>
                 {!validRoomSlug(renameDraft.trim()) && (
-                  <Text style={styles.roomRenameLabel}>{ROOM_SLUG_HINT}</Text>
+                  <T v="meta" color="secondary">{ROOM_SLUG_HINT}</T>
                 )}
-                <HullDialogActions style={styles.roomRenameControls} actions={[{ disabled: renameBusy, label: "Cancel", onPress: () => {
+                <YStack marginTop="2">
+                <HullDialogActions actions={[{ disabled: renameBusy, label: "Cancel", onPress: () => {
                       setRenameEditing(false);
                       setRenameError(null);
                     }, variant: "quiet" }, { disabled: renameBusy || !validRoomSlug(renameDraft.trim()), label: renameBusy ? 'Renaming…' : 'Save', loading: renameBusy, onPress: () => void handleRenameRoom(), testID: "apply-room-rename", variant: 'primary' }]} />
-              </View>
+                </YStack>
+              </YStack>
             )}
             <RoomReviewerActions
               agents={(roomSurface?.members ?? [])
@@ -473,9 +479,9 @@ export function ChatSurfaceOverlays({
               testID="leave-room-action"
             />
             {(renameError || membershipError) && (
-              <View accessibilityRole="alert" style={styles.membershipError}>
+              <YStack accessibilityRole="alert" marginHorizontal="6" marginTop="2" padding="2" borderWidth={1} borderColor="strongStroke" backgroundColor="highlight">
                 <ErrorBanner inline title={renameError ?? membershipError ?? ''} />
-              </View>
+              </YStack>
             )}
         </>
       </RoomActionsSheet>
@@ -515,9 +521,9 @@ export function ChatSurfaceOverlays({
           />
         )}
         {membershipError && (
-          <View accessibilityRole="alert" style={styles.membershipError}>
+          <YStack accessibilityRole="alert" marginHorizontal="6" marginTop="2" padding="2" borderWidth={1} borderColor="strongStroke" backgroundColor="highlight">
             <ErrorBanner inline title={membershipError} />
-          </View>
+          </YStack>
         )}
         <HullActionSheetCancel
           onPress={() => setDmActionsVisible(false)}
@@ -526,7 +532,7 @@ export function ChatSurfaceOverlays({
       </HullActionSheetModal>
 
       <CornerActionsSheet
-        title={headerTitle ?? cornerOwnerDisplay?.name ?? CORNER_LABEL}
+        title={headerTitle ?? cornerOwnerDisplay?.name ?? CORNER_TITLE}
         visible={cornerActionsVisible}
         locked={roomSurface?.cornerLocked === true}
         connected={Boolean(transport)}
@@ -585,7 +591,8 @@ export function ChatSurfaceOverlays({
           autoCapitalize="none"
           autoCorrect={false}
           autoFocus
-          editable={!renameBusy}
+          // The native field's own prop; the Tamagui field type does not name it.
+          {...{ editable: !renameBusy }}
           maxLength={120}
           onChangeText={(value) => {
             setRenameDraft(roomNameEntry(value));

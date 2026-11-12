@@ -1,8 +1,8 @@
-import { Button } from '@/components/buzz/Button';
 import * as React from 'react';
-import { Platform, Pressable, Text, View } from 'react-native';
-import { StyleSheet } from 'react-native-unistyles';
-import Animated, {
+import { Platform } from 'react-native';
+import { YStack } from 'tamagui';
+import { Plus } from 'lucide-react-native';
+import {
   Easing,
   ReduceMotion,
   useAnimatedStyle,
@@ -17,6 +17,7 @@ import {
   cancelScheduledAnimationFrame,
   scheduleAnimationFrame,
 } from '@/buzz/host-scheduler';
+import { Glyph, Motion, ScrimButton, T } from '@/ui/grammar';
 
 const RAIL_WIDTH = 76;
 
@@ -27,7 +28,6 @@ const RAIL_WIDTH = 76;
  */
 const TILE = WORKSPACE_RAIL_TILE;
 const TILE_SIZE = TILE.size;
-const TILE_RADIUS = TILE.radius;
 const TILE_SEAT = workspacePictureSeat(TILE);
 
 export type DesktopWorkspaceRailItem = {
@@ -66,7 +66,6 @@ export function DesktopWorkspaceRail({
   viewerAvatarUrl,
   viewerFace,
 }: DesktopWorkspaceRailProps) {
-  const styles = stylesheet;
   const reducedMotion = useReducedMotion();
   const railX = useSharedValue(reducedMotion ? 0 : -RAIL_WIDTH);
   const tileRefs = React.useRef<Array<any>>([]);
@@ -153,300 +152,271 @@ export function DesktopWorkspaceRail({
 
   return (
     <DesktopWorkspacePortal>
-      <View
+      <YStack
         accessibilityLabel="Workspace switcher"
         accessibilityViewIsModal
-        style={styles.overlay}
+        position={'fixed' as any}
+        top={0}
+        right={0}
+        bottom={0}
+        left={0}
+        zIndex={2000}
         testID="desktop-workspace-rail-overlay"
       >
-        <Button
-          label=""
-          variant="quiet"
-          accessibilityLabel="Close Workspace switcher"
-          accessibilityRole="button"
+        <ScrimButton
+          label="Close Workspace switcher"
           onPress={onClose}
-          appearance={{ control: styles.scrim }}
           testID="desktop-workspace-rail-scrim"
         />
-        <Animated.View
+        <YStack
           accessibilityLabel="Workspaces"
           accessibilityRole="menu"
-          style={[styles.rail, animatedRailStyle]}
+          position="absolute"
+          top={0}
+          bottom={0}
+          left={0}
+          width={RAIL_WIDTH}
+          overflow="visible"
           testID="desktop-workspace-rail"
         >
-          <View style={styles.workspaceList}>
-            {workspaces.map((workspace, index) => {
-              const current = workspace.id === activeWorkspaceId;
-              const labelled = (hoveredWorkspaceId ?? focusedWorkspaceId) === workspace.id;
-              const roomLabel = `${workspace.roomCount} Rooms`;
-              return (
-                <View key={workspace.id} style={styles.tileSlot}>
-                  {(current || workspace.needsAttention) && (
-                    <View
-                      style={[styles.pill, current ? styles.currentPill : styles.attentionPill]}
-                      testID={
-                        current
-                          ? `desktop-workspace-current-${workspace.id}`
-                          : `desktop-workspace-needs-you-${workspace.id}`
-                      }
-                    />
-                  )}
-                  <Pressable
-                    accessibilityLabel={`${workspace.name}, ${roomLabel}${
-                      current ? ', you are here' : workspace.needsAttention ? ', needs you' : ''
-                    }`}
-                    accessibilityRole="menuitem"
-                    accessibilityState={{ selected: current }}
-                    onBlur={() => {
-                      setFocusedWorkspaceId(null);
-                    }}
-                    onFocus={() => {
-                      focusedIndexRef.current = index;
-                      setFocusedWorkspaceId(workspace.id);
-                    }}
-                    onHoverIn={() => setHoveredWorkspaceId(workspace.id)}
-                    onHoverOut={() => setHoveredWorkspaceId(null)}
-                    onPress={() => (current ? onClose() : onSelect(workspace.id))}
-                    ref={(node) => {
-                      tileRefs.current[index] = node;
-                    }}
-                    style={[
-                      styles.tile,
-                      current && styles.currentTile,
-                      focusedWorkspaceId === workspace.id && styles.focusedTile,
-                    ]}
-                    testID={`desktop-workspace-tile-${workspace.id}`}
-                  >
-                    <View style={styles.tilePictureSeat}>
-                      <IdentityMark
-                        avatarUrl={workspace.avatar}
-                        kind="workspace"
-                        name={workspace.name}
-                        seed={workspace.id}
-                        size={TILE_SEAT.pictureSize}
-                        testID={`desktop-workspace-mark-${workspace.id}`}
-                      />
-                    </View>
-                  </Pressable>
-                  {labelled && (
-                    <View
-                      pointerEvents="none"
-                      style={styles.label}
-                      testID="desktop-workspace-label"
+          <Motion fill motion={animatedRailStyle}>
+            <YStack
+              flex={1}
+              overflow="visible"
+              alignItems="center"
+              backgroundColor="raised"
+              borderRightWidth={1}
+              borderRightColor="strongStroke"
+            >
+              <YStack paddingTop="4" alignItems="center" gap="2" overflow="visible">
+                {workspaces.map((workspace, index) => {
+                  const current = workspace.id === activeWorkspaceId;
+                  const labelled = (hoveredWorkspaceId ?? focusedWorkspaceId) === workspace.id;
+                  const roomLabel = `${workspace.roomCount} chats`;
+                  const pillHeight = current ? 36 : 10;
+                  return (
+                    <YStack
+                      key={workspace.id}
+                      position="relative"
+                      width={TILE_SIZE}
+                      height={TILE_SIZE}
+                      overflow="visible"
                     >
-                      <Text numberOfLines={1} style={styles.labelName}>
-                        {workspace.name}
-                      </Text>
-                      <Text style={styles.labelMeta}>
-                        {roomLabel}
-                        {current ? ' · you are here' : ''}
-                      </Text>
-                    </View>
-                  )}
-                </View>
-              );
-            })}
-            <View style={styles.separator} />
-            <Button
-              accessibilityLabel="Create or join a Workspace"
-              accessibilityRole="menuitem"
-              onBlur={() => setAddFocused(false)}
-              onFocus={() => {
-                focusedIndexRef.current = workspaces.length;
-                setAddFocused(true);
-              }}
-              onPress={onAdd}
-              ref={(node) => {
-                tileRefs.current[workspaces.length] = node;
-              }}
-              testID="desktop-workspace-add"
-              label=""
-              icon={<Text style={styles.addGlyph}>{'+'}</Text>}
-              variant="quiet"
-              iconOnly
-              appearance={{
-                control: [styles.tile, styles.addTile, addFocused && styles.focusedTile],
-                label: undefined,
-              }}
-            />
-            <View style={styles.separator} />
-            {/* The account hub. The rail's scrim covers the navigation pane
-                that also names it, so without this the rail is a dead end for
-                everything that is not a Workspace. */}
-            <View style={styles.tileSlot}>
-              <Pressable
-                accessibilityLabel={viewerName ? `${viewerName} — Settings` : 'Settings'}
-                accessibilityRole="menuitem"
-                onBlur={() => setAccountFocused(false)}
-                onFocus={() => {
-                  focusedIndexRef.current = workspaces.length + 1;
-                  setAccountFocused(true);
-                }}
-                onHoverIn={() => setAccountHovered(true)}
-                onHoverOut={() => setAccountHovered(false)}
-                onPress={onOpenAccount}
-                ref={(node) => {
-                  tileRefs.current[workspaces.length + 1] = node;
-                }}
-                style={[styles.tile, accountFocused && styles.focusedTile]}
-                testID="desktop-workspace-account"
-              >
-                {viewerPubkey ? (
-                  <IdentityMark
-                    avatarUrl={viewerAvatarUrl}
-                    face={viewerFace}
-                    kind="human"
-                    name={viewerName ?? 'You'}
-                    seed={viewerPubkey}
-                    size={32}
-                    testID="desktop-workspace-account-mark"
-                  />
-                ) : (
-                  // The identity has not loaded yet. Hold the mark's box open
-                  // rather than drawing a stand-in, exactly as the navigation
-                  // pane's own account row does.
-                  <View style={styles.accountMarkSlot} />
-                )}
-              </Pressable>
-              {(accountHovered || accountFocused) && (
-                <View
-                  pointerEvents="none"
-                  style={styles.label}
-                  testID="desktop-workspace-account-label"
+                      {(current || workspace.needsAttention) && (
+                        <YStack
+                          position="absolute"
+                          left={-14}
+                          top={(TILE_SIZE - pillHeight) / 2}
+                          width={4}
+                          height={pillHeight}
+                          borderTopRightRadius="sm"
+                          borderBottomRightRadius="sm"
+                          backgroundColor="needsYou"
+                          testID={
+                            current
+                              ? `desktop-workspace-current-${workspace.id}`
+                              : `desktop-workspace-needs-you-${workspace.id}`
+                          }
+                        />
+                      )}
+                      <YStack
+                        accessibilityLabel={`${workspace.name}, ${roomLabel}${
+                          current ? ', you are here' : workspace.needsAttention ? ', needs you' : ''
+                        }`}
+                        accessibilityRole="menuitem"
+                        accessibilityState={{ selected: current }}
+                        tabIndex={0}
+                        onBlur={() => {
+                          setFocusedWorkspaceId(null);
+                        }}
+                        onFocus={() => {
+                          focusedIndexRef.current = index;
+                          setFocusedWorkspaceId(workspace.id);
+                        }}
+                        onMouseEnter={() => setHoveredWorkspaceId(workspace.id)}
+                        onMouseLeave={() => setHoveredWorkspaceId(null)}
+                        onPress={() => (current ? onClose() : onSelect(workspace.id))}
+                        ref={(node: any) => {
+                          tileRefs.current[index] = node;
+                        }}
+                        width={TILE_SIZE}
+                        height={TILE_SIZE}
+                        minWidth={44}
+                        minHeight={44}
+                        alignItems="center"
+                        justifyContent="center"
+                        borderRadius="lg"
+                        backgroundColor="highlight"
+                        borderWidth={current || focusedWorkspaceId === workspace.id ? 2 : 0}
+                        borderColor="needsYou"
+                        outlineStyle="none"
+                        cursor="pointer"
+                        testID={`desktop-workspace-tile-${workspace.id}`}
+                      >
+                        {/* The picture's seat: square, centred, and rounded
+                            parallel to the bezel, so it does not move when a
+                            Workspace becomes current and the tile puts its
+                            bezel on. */}
+                        <YStack
+                          width={TILE_SEAT.pictureSize}
+                          height={TILE_SEAT.pictureSize}
+                          alignItems="center"
+                          justifyContent="center"
+                          borderRadius="md"
+                          overflow="hidden"
+                        >
+                          <IdentityMark
+                            avatarUrl={workspace.avatar}
+                            kind="workspace"
+                            name={workspace.name}
+                            seed={workspace.id}
+                            size={TILE_SEAT.pictureSize}
+                            testID={`desktop-workspace-mark-${workspace.id}`}
+                          />
+                        </YStack>
+                      </YStack>
+                      {labelled && (
+                        <TileLabel testID="desktop-workspace-label" name={workspace.name}>
+                          {roomLabel}
+                          {current ? ' · you are here' : ''}
+                        </TileLabel>
+                      )}
+                    </YStack>
+                  );
+                })}
+                <YStack width={32} height={1} marginVertical="1" backgroundColor="strongStroke" />
+                <YStack
+                  accessibilityLabel="Create or join a Workspace"
+                  accessibilityRole="menuitem"
+                  tabIndex={0}
+                  onBlur={() => setAddFocused(false)}
+                  onFocus={() => {
+                    focusedIndexRef.current = workspaces.length;
+                    setAddFocused(true);
+                  }}
+                  onPress={onAdd}
+                  ref={(node: any) => {
+                    tileRefs.current[workspaces.length] = node;
+                  }}
+                  width={TILE_SIZE}
+                  height={TILE_SIZE}
+                  minWidth={44}
+                  minHeight={44}
+                  alignItems="center"
+                  justifyContent="center"
+                  borderRadius="lg"
+                  backgroundColor="transparent"
+                  borderWidth={addFocused ? 2 : 1}
+                  borderStyle="dashed"
+                  borderColor={addFocused ? 'needsYou' : 'strongStroke'}
+                  outlineStyle="none"
+                  cursor="pointer"
+                  testID="desktop-workspace-add"
                 >
-                  <Text numberOfLines={1} style={styles.labelName}>
-                    Settings
-                  </Text>
-                  {viewerName ? <Text style={styles.labelMeta}>{viewerName}</Text> : null}
-                </View>
-              )}
-            </View>
-          </View>
-        </Animated.View>
-      </View>
+                  <Glyph icon={Plus} accent />
+                </YStack>
+                <YStack width={32} height={1} marginVertical="1" backgroundColor="strongStroke" />
+                {/* The account hub. The rail's scrim covers the navigation pane
+                    that also names it, so without this the rail is a dead end for
+                    everything that is not a Workspace. */}
+                <YStack position="relative" width={TILE_SIZE} height={TILE_SIZE} overflow="visible">
+                  <YStack
+                    accessibilityLabel={viewerName ? `${viewerName} — Settings` : 'Settings'}
+                    accessibilityRole="menuitem"
+                    tabIndex={0}
+                    onBlur={() => setAccountFocused(false)}
+                    onFocus={() => {
+                      focusedIndexRef.current = workspaces.length + 1;
+                      setAccountFocused(true);
+                    }}
+                    onMouseEnter={() => setAccountHovered(true)}
+                    onMouseLeave={() => setAccountHovered(false)}
+                    onPress={onOpenAccount}
+                    ref={(node: any) => {
+                      tileRefs.current[workspaces.length + 1] = node;
+                    }}
+                    width={TILE_SIZE}
+                    height={TILE_SIZE}
+                    minWidth={44}
+                    minHeight={44}
+                    alignItems="center"
+                    justifyContent="center"
+                    borderRadius="lg"
+                    backgroundColor="highlight"
+                    borderWidth={accountFocused ? 2 : 0}
+                    borderColor="needsYou"
+                    outlineStyle="none"
+                    cursor="pointer"
+                    testID="desktop-workspace-account"
+                  >
+                    {viewerPubkey ? (
+                      <IdentityMark
+                        avatarUrl={viewerAvatarUrl}
+                        face={viewerFace}
+                        kind="human"
+                        name={viewerName ?? 'You'}
+                        seed={viewerPubkey}
+                        size={32}
+                        testID="desktop-workspace-account-mark"
+                      />
+                    ) : (
+                      // The identity has not loaded yet. Hold the mark's box open
+                      // rather than drawing a stand-in, exactly as the navigation
+                      // pane's own account row does.
+                      <YStack width={32} height={32} />
+                    )}
+                  </YStack>
+                  {(accountHovered || accountFocused) && (
+                    <TileLabel testID="desktop-workspace-account-label" name="Settings">
+                      {viewerName}
+                    </TileLabel>
+                  )}
+                </YStack>
+              </YStack>
+            </YStack>
+          </Motion>
+        </YStack>
+      </YStack>
     </DesktopWorkspacePortal>
   );
 }
 
-const stylesheet = StyleSheet.create((theme) => {
-  const hull = theme.buzz;
-  return {
-    overlay: {
-      position: 'fixed',
-      top: 0,
-      right: 0,
-      bottom: 0,
-      left: 0,
-      zIndex: 2000,
-    } as any,
-    scrim: {
-      ...StyleSheet.absoluteFillObject,
-      left: RAIL_WIDTH,
-      // The canvas color itself plus alpha, so the dim reads as "this
-      // theme's own ground, deepened" on either Obsidian or Bone rather than
-      // a hardcoded Obsidian aubergine dimming a Bone app to near-black.
-      // Web theme colors are CSS variables; hex alpha suffixes are invalid there.
-      backgroundColor: Platform.OS === 'web'
-        ? `color-mix(in srgb, ${hull.bgVoid} 66%, transparent)`
-        : `${hull.bgVoid}A8`,
-    },
-    rail: {
-      position: 'absolute',
-      top: 0,
-      bottom: 0,
-      left: 0,
-      width: RAIL_WIDTH,
-      overflow: 'visible',
-      alignItems: 'center',
-      backgroundColor: hull.bgRaised,
-      borderRightWidth: StyleSheet.hairlineWidth,
-      borderRightColor: hull.borderStrong,
-    },
-    workspaceList: { paddingTop: hull.space.md, alignItems: 'center', gap: hull.space.sm, overflow: 'visible' },
-    tileSlot: {
-      position: 'relative',
-      width: TILE_SIZE,
-      height: TILE_SIZE,
-      overflow: 'visible',
-    },
-    tile: {
-      width: TILE_SIZE,
-      height: TILE_SIZE,
-      minWidth: 44,
-      minHeight: 44,
-      alignItems: 'center',
-      justifyContent: 'center',
-      borderRadius: TILE_RADIUS,
-      backgroundColor: hull.bgHighlight,
-      outlineStyle: 'none',
-    } as any,
-    /* The picture's seat: square, centred, and rounded parallel to the bezel.
-     * It rounds the picture's own corners; the generated Workspace plate fills
-     * this box the same way, with its own frame following the same curve. Centred in the tile, so the seat does not move when a Workspace
-     * becomes current and the tile puts its bezel on. */
-    tilePictureSeat: {
-      width: TILE_SEAT.pictureSize,
-      height: TILE_SEAT.pictureSize,
-      alignItems: 'center',
-      justifyContent: 'center',
-      borderRadius: TILE_SEAT.pictureRadius,
-      overflow: 'hidden',
-    },
-    currentTile: { borderWidth: 2, borderColor: hull.accent },
-    focusedTile: { borderWidth: 2, borderColor: hull.accent },
-    pill: {
-      position: 'absolute',
-      left: -14,
-      top: '50%',
-      width: 4,
-      borderTopRightRadius: 3,
-      borderBottomRightRadius: 3,
-      backgroundColor: hull.accent,
-      transform: [{ translateY: '-50%' }],
-    } as any,
-    currentPill: { height: 36 },
-    attentionPill: { height: 10 },
-    label: {
-      position: 'absolute',
-      // The rail centres each `TILE_SIZE` tile in `RAIL_WIDTH`, so a slot's
-      // left edge sits `(RAIL_WIDTH - TILE_SIZE) / 2` in; a label hung at
-      // `RAIL_WIDTH` from the slot's origin therefore lands exactly on the
-      // rail's right edge with a zero-pixel gap and reads as glued to it.
-      // RAIL_WIDTH / 2 + TILE_SIZE / 2 is the slot-relative distance to that
-      // edge; one spacing step past it is the deliberate breathing room.
-      left: RAIL_WIDTH / 2 + TILE_SIZE / 2 + hull.space.sm,
-      top: '50%',
-      minWidth: 120,
-      maxWidth: 260,
-      paddingHorizontal: hull.space.sm,
-      paddingVertical: hull.space.sm,
-      borderWidth: StyleSheet.hairlineWidth,
-      borderColor: hull.borderStrong,
-      borderRadius: 8,
-      backgroundColor: hull.bgHighlight,
-      transform: [{ translateY: '-50%' }],
-      zIndex: 2,
-    } as any,
-    labelName: {
-      ...hull.type.meta,
-      color: hull.textPrimary,
-    },
-    labelMeta: {
-      ...hull.type.meta,
-      color: hull.textMuted,
-      ...(Platform.OS === 'web' ? { whiteSpace: 'nowrap' } : {}),
-    } as any,
-    separator: { width: 32, height: 1, marginVertical: 4, backgroundColor: hull.borderStrong },
-    addTile: {
-      backgroundColor: 'transparent',
-      borderWidth: StyleSheet.hairlineWidth,
-      borderStyle: 'dashed',
-      borderColor: hull.borderStrong,
-    },
-    addGlyph: {
-      ...hull.type.hero,
-      color: hull.accent,
-    },
-    accountMarkSlot: { width: 32, height: 32 },
-  };
-});
+/**
+ * A tile's name card, hung off the rail's right edge and centred on the tile.
+ * The rail centres each `TILE_SIZE` tile in `RAIL_WIDTH`, so the rail's right
+ * edge sits `RAIL_WIDTH / 2 + TILE_SIZE / 2` from the slot's origin; one
+ * spacing step past it is the deliberate breathing room.
+ */
+function TileLabel({ name, children, testID }: { name: string; children?: React.ReactNode; testID: string }) {
+  return (
+    <YStack
+      pointerEvents="none"
+      position="absolute"
+      left={RAIL_WIDTH / 2 + TILE_SIZE / 2 + 8}
+      top={0}
+      bottom={0}
+      justifyContent="center"
+      zIndex={2}
+    >
+      <YStack
+        minWidth={120}
+        maxWidth={260}
+        padding="2"
+        borderWidth={1}
+        borderColor="strongStroke"
+        borderRadius="md"
+        backgroundColor="highlight"
+        testID={testID}
+      >
+        <T v="meta" numberOfLines={1}>
+          {name}
+        </T>
+        {children ? (
+          <T v="meta" color="secondary" numberOfLines={1}>
+            {children}
+          </T>
+        ) : null}
+      </YStack>
+    </YStack>
+  );
+}

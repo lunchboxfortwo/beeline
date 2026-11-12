@@ -37,13 +37,13 @@ export function cornerOpenAction(
   if (!cornerId) {
     return {
       type: 'explain',
-      message: 'This corner has no channel address yet. Refresh the Room and try again.',
+      message: 'This thread has no channel address yet. Refresh the chat and try again.',
     };
   }
   if (cornerId === currentChannelId) {
     return {
       type: 'explain',
-      message: 'This corner points to the channel already on screen.',
+      message: 'This thread points to the channel already on screen.',
     };
   }
   return { type: 'open-corner', cornerId };

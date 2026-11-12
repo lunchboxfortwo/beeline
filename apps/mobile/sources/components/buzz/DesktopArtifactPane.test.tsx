@@ -63,13 +63,6 @@ const theme = vi.hoisted(() => ({
     type: { body: {}, bodyStrong: {}, machine: {}, meta: {} },
   },
 }));
-vi.mock('react-native-unistyles', () => ({
-  StyleSheet: {
-    hairlineWidth: 1,
-    create: (factory: (theme: unknown) => unknown) => factory(theme),
-  },
-  useUnistyles: () => ({ theme }),
-}));
 vi.mock('@/buzz/artifact-link', () => ({
   subscribeArtifactBytesPurge: () => () => {},
   fetchArtifactBytes: mocks.fetchArtifactBytes,
@@ -273,9 +266,8 @@ describe('the desktop work pane artifact view', () => {
       viewport.props.onPanResponderMove({ nativeEvent: { pageX: 140, pageY: 100 } });
     });
     expect(
-      renderer.root.findByProps({ testID: 'desktop-artifact-image-actions' }).props.style[1]
-        .transform[0],
-    ).toEqual({ translateX: 40 });
+      renderer.root.findByProps({ testID: 'desktop-artifact-image-actions' }).props.x,
+    ).toBe(40);
     const reset = renderer.root.findByProps({ testID: 'desktop-artifact-zoom-reset' });
     expect(reset.props.label).toBe('Reset image zoom');
     expect(reset.props.disabled).toBe(false);

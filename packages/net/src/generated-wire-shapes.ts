@@ -746,7 +746,7 @@ export const wireShapes: readonly WireShape[] = [
   shape({"kind":"literal","value":"complete"}),
   shape({"kind":"union","choices":[6,743]}),
   shape({"kind":"array","item":744}),
-  shape({"kind":"object","properties":{"id":{"node":1,"optional":false},"name":{"node":1,"optional":false},"state":{"node":745,"optional":false},"reason":{"node":746,"optional":true},"blocker":{"node":749,"optional":true},"itemId":{"node":5,"optional":true},"mine":{"node":498,"optional":true},"waitingSince":{"node":17,"optional":true},"attention":{"node":498,"optional":true}}}),
+  shape({"kind":"object","properties":{"id":{"node":1,"optional":false},"name":{"node":1,"optional":false},"state":{"node":745,"optional":false},"reason":{"node":746,"optional":true},"blocker":{"node":749,"optional":true},"itemId":{"node":5,"optional":true},"mine":{"node":498,"optional":true},"waitingSince":{"node":17,"optional":true},"lastActivityAt":{"node":17,"optional":true},"attention":{"node":498,"optional":true}}}),
   shape({"kind":"union","choices":[306,307,308,309]}),
   shape({"kind":"union","choices":[6,419,747,748]}),
   shape({"kind":"literal","value":"connect"}),

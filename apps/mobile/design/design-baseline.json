@@ -1,11 +1,1 @@
-{
-  "radius": {},
-  "spacing": {
-    "components/buzz/IndexRow.tsx": 2,
-    "components/buzz/Ledger.tsx": 2,
-    "components/buzz/TranscriptScrubber.tsx": 1,
-    "components/buzz/TurnLineFrame.tsx": 1,
-    "components/buzz/WalletQr.tsx": 1,
-    "components/buzz/WorkflowRunLine.tsx": 2
-  }
-}
+{}

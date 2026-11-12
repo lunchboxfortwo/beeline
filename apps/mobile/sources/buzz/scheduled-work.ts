@@ -50,8 +50,8 @@ export function scheduleWhere(
   isDirectMessage = false,
 ): string {
   return work.corner
-    ? `corner ${cornerShortTitle(roomName, work.corner.name, work.corner.id)}`
-    : isDirectMessage ? 'this DM' : 'this Room';
+    ? `thread ${cornerShortTitle(roomName, work.corner.name, work.corner.id)}`
+    : isDirectMessage ? 'this DM' : 'this chat';
 }
 
 /** The longest a derived schedule title runs before it stops at a word boundary. */
@@ -136,13 +136,13 @@ export function subscriptionWhen(subscription: RoomSubscriptionView, isDirectMes
     };
     return `On ${action[subscription.event] ?? `an event in ${repository}`}`;
   }
-  const place = isDirectMessage ? 'this DM' : 'this Room';
+  const place = isDirectMessage ? 'this DM' : 'this chat';
   const action: Record<string, string> = {
     joined: `someone joining ${place}`,
     'schedule-ran': `a schedule running in ${place}`,
-    'corner-opened': `a corner opening in ${place}`,
-    'check-passed': 'corner checks passing',
-    'check-failed': 'corner checks failing',
+    'corner-opened': `a thread opening in ${place}`,
+    'check-passed': 'thread checks passing',
+    'check-failed': 'thread checks failing',
     'workflow-handoff': 'a workflow moving to its next step',
   };
   return `On ${action[subscription.event] ?? `an event in ${place}`}`;

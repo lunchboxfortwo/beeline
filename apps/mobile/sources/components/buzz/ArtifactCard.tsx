@@ -1,10 +1,12 @@
 import { appReadErrorCopy } from '@/buzz/app-error-copy';
 import { useArtifactRecoveryGeneration } from '@/buzz/use-artifact-recovery';
-import { ContentTarget, IndexRow } from './IndexRow';
+import { IndexRow } from './IndexRow';
 import { ArtifactCardFrame, ArtifactFileRow } from '@/ui/screens/transcript/cards/ArtifactCardFrame';
 import React, { useCallback, useEffect, useState } from 'react';
-import { Image, Platform, Pressable, Text, View } from 'react-native';
-import { StyleSheet } from 'react-native-unistyles';
+import { Platform } from 'react-native';
+import { Image, XStack, YStack } from 'tamagui';
+import { ChevronLeft, ChevronRight } from 'lucide-react-native';
+import { Glyph, T, TypedView } from '@/ui/grammar';
 import type { AttachmentReference } from '@beeline/buzz-client';
 
 import {
@@ -22,12 +24,10 @@ import {
 } from '@/buzz/artifact-link';
 import { ArtifactDocumentPreview } from './ArtifactDocumentPreview';
 import { formatAttachmentSize } from '@/buzz/chat-attachment';
-import { withAlpha } from '@/buzz/groknight';
 import { openArtifactInDesktopWorkPane } from '@/buzz/desktop-artifact-pane';
 import { ArtifactImage, ArtifactText } from '@/components/buzz/ArtifactMedia';
 import { ArtifactViewerScreen } from '@/components/buzz/ArtifactViewer';
 import { currentViewerConversation } from '@/buzz/viewer-conversation';
-import { CHEVRON_ROW_SIZE, ChevronGlyph } from '@/components/buzz/ChevronGlyph';
 import { MonoMarkdown } from '@/components/buzz/MonoMarkdown';
 import { Modal } from '@/modal';
 
@@ -128,33 +128,32 @@ export const ArtifactCard = React.memo(function ArtifactCard({
       kindLine={kindLine}
       onOpen={openFull}
       testID={isPhotoGroup ? 'artifact-photo-group' : `artifact-${format}-${activeAttachment.name}`}
-      preview={<ContentTarget
+      preview={<YStack
+        minWidth={0}
         accessibilityLabel={`Open ${title} full screen`}
         accessibilityRole="button"
         onPress={openFull}
-        style={styles.previewPress}
         testID={`artifact-preview-${activeAttachment.name}`}
       >
         {!visible ? (
-          <View style={styles.previewPlaceholder} testID="artifact-preview-loading"><Text style={styles.docGlyph}>▧</Text></View>
+          <PreviewLoading />
         ) : format === 'markdown' ? (
           <ArtifactMarkdownPreview attachment={activeAttachment} />
         ) : format === 'text' ? (
-          <View style={styles.preview}>
+          <YStack height={ARTIFACT_MAX_PREVIEW_HEIGHT}>
             <ArtifactText attachment={activeAttachment} crop testID="artifact-preview-text" />
-            <View style={styles.previewFade} pointerEvents="none" />
-          </View>
+            <PreviewFade />
+          </YStack>
         ) : format === 'image' ? (
-          <View style={styles.preview}>
+          <YStack height={ARTIFACT_MAX_PREVIEW_HEIGHT}>
             <ArtifactImage
               attachment={activeAttachment}
               fit="cover"
-              style={styles.previewImage}
               testID="artifact-preview-image"
             />
             {isPhotoGroup ? (
-              <View pointerEvents="box-none" style={styles.photoNavigation}>
-                <Pressable
+              <XStack pointerEvents="box-none" position="absolute" left={8} right={8} bottom={8} alignItems="center" justifyContent="space-between">
+                <PhotoStep
                   accessibilityLabel="Previous photo"
                   accessibilityRole="button"
                   onPress={(event) => {
@@ -163,49 +162,43 @@ export const ArtifactCard = React.memo(function ArtifactCard({
                       index === 0 ? photoAttachments!.length - 1 : index - 1,
                     );
                   }}
-                  style={styles.photoNavigationButton}
                   testID="artifact-photo-previous"
                 >
-                  <ChevronGlyph
-                    color={styles.photoNavigationMark.color}
-                    direction="left"
-                    size={CHEVRON_ROW_SIZE}
-                  />
-                </Pressable>
-                <Text
+                  <Glyph icon={ChevronLeft} size={14} color="ink" />
+                </PhotoStep>
+                <T
+                  v="code"
                   accessibilityLabel={`Photo ${photoIndex + 1} of ${photoAttachments!.length}`}
                   accessibilityLiveRegion="polite"
-                  style={styles.photoPosition}
+                  backgroundColor="canvas"
+                  borderRadius="sm"
+                  paddingHorizontal="2"
+                  paddingVertical="1"
                   testID="artifact-photo-position"
                 >
                   {photoIndex + 1} of {photoAttachments!.length}
-                </Text>
-                <Pressable
+                </T>
+                <PhotoStep
                   accessibilityLabel="Next photo"
                   accessibilityRole="button"
                   onPress={(event) => {
                     event?.stopPropagation();
                     setPhotoIndex((index) => (index + 1) % photoAttachments!.length);
                   }}
-                  style={styles.photoNavigationButton}
                   testID="artifact-photo-next"
                 >
-                  <ChevronGlyph
-                    color={styles.photoNavigationMark.color}
-                    direction="right"
-                    size={CHEVRON_ROW_SIZE}
-                  />
-                </Pressable>
-              </View>
+                  <Glyph icon={ChevronRight} size={14} color="ink" />
+                </PhotoStep>
+              </XStack>
             ) : null}
-          </View>
+          </YStack>
         ) : (
           <ArtifactSandboxPreview
             attachment={activeAttachment}
             format={format === 'pdf' ? 'pdf' : format === 'svg' ? 'svg' : 'html'}
           />
         )}
-      </ContentTarget>}
+      </YStack>}
     />
   );
 });
@@ -252,13 +245,11 @@ export function ArtifactSandboxPreview({
     return () => { live = false; controller.abort(); stopPurge(); releaseArtifactImageSource(loaded); };
   }, [attachment, recovery]);
   if (failed) return (
-    <View style={styles.failureInset} testID="artifact-preview-failed">
-      <IndexRow inset="flush" title="Preview unavailable" />
-    </View>
+    <PreviewFailed />
   );
   if (renderDocument) return <ArtifactDocumentPreview attachment={attachment} format={format} />;
-  if (source) return <View style={styles.preview} testID="artifact-preview-snapshot"><Image source={source} resizeMode="cover" onError={() => setFailed(true)} style={styles.previewImage} /></View>;
-  return <View style={styles.previewPlaceholder} testID="artifact-preview-loading"><Text style={styles.docGlyph}>▧</Text></View>;
+  if (source) return <YStack height={ARTIFACT_MAX_PREVIEW_HEIGHT} testID="artifact-preview-snapshot"><Image source={source} resizeMode="cover" onError={() => setFailed(true)} width="100%" height="100%" /></YStack>;
+  return <PreviewLoading />;
 }
 
 /** Markdown renders through the app's own message renderer, cropped to the card. */
@@ -281,80 +272,55 @@ export function ArtifactMarkdownPreview({ attachment }: { attachment: Attachment
     };
   }, [attachment, recovery]);
   if (failed) return (
-    <View style={styles.failureInset} testID="artifact-preview-failed">
-      <IndexRow inset="flush" title="Preview unavailable" />
-    </View>
+    <PreviewFailed />
   );
-  if (markdown == null) {
-    return (
-      <View style={styles.previewPlaceholder} testID="artifact-preview-loading">
-        <Text style={styles.docGlyph}>▧</Text>
-      </View>
-    );
-  }
+  if (markdown == null) return <PreviewLoading />;
   return (
-    <View
+    <YStack
       pointerEvents="none"
-      style={[styles.preview, styles.markdownCrop]}
+      height={ARTIFACT_MAX_PREVIEW_HEIGHT}
+      overflow="hidden"
+      padding="2"
       testID="artifact-preview-markdown"
     >
-      <MonoMarkdown markdown={markdown} textStyle={styles.markdownText} />
-      <View style={styles.previewFade} />
-    </View>
+      <TypedView view={MonoMarkdown} v="body" markdown={markdown} />
+      <PreviewFade />
+    </YStack>
   );
 }
 
-const styles = StyleSheet.create((theme) => ({
-  failureInset: { paddingHorizontal: theme.buzz.roomList.edge },
-  previewPress: { minWidth: 0 },
-  preview: { height: ARTIFACT_MAX_PREVIEW_HEIGHT },
-  previewImage: { width: '100%', height: '100%' },
-  photoNavigation: {
-    position: 'absolute',
-    left: theme.buzz.space.sm,
-    right: theme.buzz.space.sm,
-    bottom: theme.buzz.space.sm,
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'space-between',
-  },
-  photoNavigationButton: {
-    width: 44,
-    height: 44,
-    alignItems: 'center',
-    justifyContent: 'center',
-    borderWidth: 1,
-    borderColor: theme.buzz.border,
-    borderRadius: theme.buzz.radius,
-    backgroundColor: withAlpha(theme.buzz.bgBase, 0.9),
-  },
-  photoNavigationMark: { color: theme.buzz.textPrimary },
-  photoPosition: {
-    ...theme.buzz.type.machine,
-    color: theme.buzz.textPrimary,
-    backgroundColor: withAlpha(theme.buzz.bgBase, 0.9),
-    borderRadius: theme.buzz.radius,
-    paddingHorizontal: theme.buzz.space.sm,
-    paddingVertical: 4,
-  },
-  previewWeb: { width: '100%', height: '100%', backgroundColor: 'transparent' },
-  previewFade: {
-    position: 'absolute',
-    left: 0,
-    right: 0,
-    bottom: 0,
-    height: 44,
-    backgroundColor: withAlpha(theme.buzz.bgBase, 0.8),
-  },
-  markdownCrop: { overflow: 'hidden', padding: theme.buzz.space.sm },
-  markdownText: { ...theme.buzz.type.body, color: theme.buzz.textPrimary },
-  previewPlaceholder: {
-    height: ARTIFACT_MAX_PREVIEW_HEIGHT,
-    alignItems: 'center',
-    justifyContent: 'center',
-  },
-  docGlyph: { ...theme.buzz.type.body, color: theme.buzz.steel },
-}));
+function PreviewLoading() {
+  return (
+    <YStack height={ARTIFACT_MAX_PREVIEW_HEIGHT} alignItems="center" justifyContent="center" testID="artifact-preview-loading">
+      <T color="secondary">▧</T>
+    </YStack>
+  );
+}
+
+function PreviewFailed() {
+  return (
+    <YStack paddingHorizontal="5" testID="artifact-preview-failed">
+      <IndexRow inset="flush" title="Preview unavailable" />
+    </YStack>
+  );
+}
+
+/** Canvas over the crop's foot, so a cut-off preview reads as continuing. */
+function PreviewFade() {
+  return <YStack pointerEvents="none" position="absolute" left={0} right={0} bottom={0} height={44} backgroundColor="canvas" opacity={0.8} />;
+}
+
+/** One square photo step over the image: 44, stroked, on canvas. */
+function PhotoStep({ children, ...rest }: {
+  children: React.ReactNode; accessibilityLabel: string; accessibilityRole: 'button'; testID: string;
+  onPress: (event?: { stopPropagation: () => void }) => void;
+}) {
+  return (
+    <YStack {...rest} width={44} height={44} alignItems="center" justifyContent="center" borderWidth={1} borderColor="stroke" borderRadius="sm" backgroundColor="canvas">
+      {children}
+    </YStack>
+  );
+}
 
 // Referenced by tests and the cache module's key derivation.
 export { mediaIdFromUrl } from '@/buzz/artifact';

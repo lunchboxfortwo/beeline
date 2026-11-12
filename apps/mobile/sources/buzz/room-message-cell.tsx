@@ -1,14 +1,14 @@
 import type { MessageSendState } from './message-outbox';
 import React from 'react';
-import { View } from 'react-native';
-import Animated, {
+import { YStack } from 'tamagui';
+import {
   useAnimatedStyle,
   useReducedMotion,
   useSharedValue,
   withDelay,
   withTiming,
 } from 'react-native-reanimated';
-import { StyleSheet } from 'react-native-unistyles';
+import { Motion } from '@/ui/grammar';
 import { parseCornerProposal } from './corner-proposal';
 import type { ChatDisplayMessage } from './room-view-presentation';
 import { messageContainsBoundary } from './room-new-message-boundary';
@@ -492,10 +492,10 @@ function ArrivalFlashGround({
   tint?: FlashTint;
 }) {
   return (
-    <View>
+    <YStack>
       {flashing ? <ArrivalFlashFill tint={tint} /> : null}
       {children}
-    </View>
+    </YStack>
   );
 }
 
@@ -524,31 +524,20 @@ function ArrivalFlashFill({ tint }: { tint: FlashTint }) {
 
   const groundStyle = useAnimatedStyle(() => ({ opacity: fill.value }));
   return (
-    <Animated.View
-      accessibilityElementsHidden
-      importantForAccessibility="no-hide-descendants"
-      pointerEvents="none"
-      style={[
-        tint === 'brass' ? styles.sourceLandingFlashGround : styles.arrivalFlashGround,
-        groundStyle,
-      ]}
-      testID="arrival-flash-ground"
-    />
+    <Motion overlay pointerEvents="none" motion={groundStyle}>
+      {/* Area, not stroke: the fill is the signal, and it sits behind the row's
+          own content so the transcript's layout is untouched while it plays.
+          A reader-initiated jump to one exact message reads as a brass wash,
+          not the passive highlight arrival pointer. */}
+      <YStack
+        flex={1}
+        accessibilityElementsHidden
+        importantForAccessibility="no-hide-descendants"
+        pointerEvents="none"
+        backgroundColor={tint === 'brass' ? 'needsYou' : 'highlight'}
+        opacity={tint === 'brass' ? 0.28 : 1}
+        testID="arrival-flash-ground"
+      />
+    </Motion>
   );
 }
-
-const styles = StyleSheet.create((theme) => ({
-  // Area, not stroke: the fill is the signal, and it sits behind the row's
-  // own content so the transcript's layout is untouched while it plays.
-  arrivalFlashGround: {
-    ...StyleSheet.absoluteFillObject,
-    backgroundColor: theme.buzz.bgHighlight,
-  },
-  // A reader-initiated jump to one exact message (a quote reference, a
-  // forward source, a notification target) reads as brass, not the passive
-  // bgHighlight arrival pointer above — the existing token, never a new one.
-  sourceLandingFlashGround: {
-    ...StyleSheet.absoluteFillObject,
-    backgroundColor: theme.buzz.brassWashStrong,
-  },
-}));

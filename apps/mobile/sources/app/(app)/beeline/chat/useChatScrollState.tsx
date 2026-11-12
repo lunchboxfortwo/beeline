@@ -1,5 +1,6 @@
 import React, { useState, useRef } from 'react';
-import { View, FlatList, type ViewProps } from 'react-native';
+import type { FlatList, ViewProps } from 'react-native';
+import { ListCell } from '@/ui/grammar-root';
 import { type ChatDisplayMessage } from '@/buzz/room-view-presentation';
 import { RoomSendPreview } from '@/buzz/room-send-list';
 import { desktopTranscriptList, phoneTranscriptList, useTranscriptScrollController } from '@/buzz/transcript-scroll-controller';
@@ -165,7 +166,7 @@ export function useChatScrollState([
         ...props
       }: ViewProps & { cellKey: string; index: number; item: ChatDisplayMessage }) {
         return (
-          <View
+          <ListCell
             {...props}
             onLayout={(event) => {
               onLayout?.(event);

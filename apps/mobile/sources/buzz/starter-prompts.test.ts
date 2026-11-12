@@ -85,7 +85,7 @@ describe('the first Room starter prompts', () => {
     });
     expect(prompts[1]!.action).toEqual({
       kind: 'fill',
-      text: '@scout Open a corner to ',
+      text: '@scout Open a thread to ',
       mention: { handle: 'scout', pubkey: 'agent-1' },
     });
   });
@@ -107,7 +107,7 @@ describe('the first Room starter prompts', () => {
       workspaceName: 'Northstar Lab',
     });
     expect(prompts.map((prompt) => `${prompt.lead} ${prompt.detail}`)).toEqual([
-      'Connect an agent so this Room has someone to ask',
+      'Connect an agent so this chat has someone to ask',
       'Invite someone to Northstar Lab',
     ]);
     expect(roomStarterIntro(prompts)).toBe('Connect an agent, then ask it for something here.');

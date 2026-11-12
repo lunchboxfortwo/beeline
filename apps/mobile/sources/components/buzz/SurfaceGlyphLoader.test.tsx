@@ -139,6 +139,10 @@ vi.mock('react-native', async () => {
   };
 });
 
+vi.mock('react-native-safe-area-context', () => ({ useSafeAreaInsets: () => ({ top: 0, bottom: 0, left: 0, right: 0 }) }));
+vi.mock('lucide-react-native', async () => (await import('@/ui/screens/transcript/grammar-hosts.test-support')).lucideHosts());
+vi.mock('tamagui', async () => (await import('@/ui/screens/transcript/grammar-hosts.test-support')).tamaguiHosts());
+
 vi.mock('react-native-svg', async () => {
   const ReactModule = await import('react');
   const host = (name: string) => (props: any) =>
@@ -153,17 +157,6 @@ const motion = vi.hoisted(() => ({
 
 const themeRef = vi.hoisted(() => ({
   current: { buzz: { dark: true } },
-}));
-
-vi.mock('react-native-unistyles', () => ({
-  useUnistyles: () => ({ theme: themeRef.current }),
-  StyleSheet: {
-    hairlineWidth: 1,
-    create: (definition: unknown) =>
-      typeof definition === 'function'
-        ? (definition as (value: typeof themeRef.current) => unknown)(themeRef.current)
-        : definition,
-  },
 }));
 
 vi.mock('react-native-reanimated', async () => {

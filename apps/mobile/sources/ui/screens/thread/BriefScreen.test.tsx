@@ -58,6 +58,6 @@ it('reads a cold brief once when nothing is held, and says when there is none', 
   await act(async () => { tree = create(<BriefScreen roomId="corner-1" close={vi.fn()} />); });
   expect(fixture.fetch).toHaveBeenCalledTimes(1);
   expect(tree.root.findByType('Screen').props.title).toBe('Brief');
-  expect(tree.root.findByType('Copy').props.children).toBe('This corner has no brief yet');
+  expect(tree.root.findByType('Copy').props.children).toBe('This thread has no brief yet');
   act(() => tree.unmount());
 });

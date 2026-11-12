@@ -5,8 +5,9 @@ import { HULL_SHEET_ROW_HEIGHT } from '@/buzz/hull-sheet-layout';
 import { RoomListSectionHeader } from './RoomListSectionHeader';
 import { HullDialogInput } from '@/components/buzz/HullDialog';
 import React, { useMemo } from 'react';
-import { SectionList, View } from 'react-native';
-import { StyleSheet, useUnistyles } from 'react-native-unistyles';
+import { SectionList } from 'react-native';
+import { YStack } from 'tamagui';
+import { Placeheld } from '@/ui/grammar';
 import { useTextDraft } from '@/buzz/use-text-draft';
 import {
   filterRepoCandidates,
@@ -14,7 +15,6 @@ import {
   repoShortName,
   type RepoCandidate,
 } from '@/buzz/room-repo-picker';
-import { Typography } from '@/constants/Typography';
 
 // Six rows, then the list scrolls.
 const LIST_MAX_HEIGHT = HULL_SHEET_ROW_HEIGHT * 6;
@@ -40,7 +40,6 @@ export function RepoList({
   testIDPrefix,
   draftContext,
 }: Props) {
-  const { theme } = useUnistyles();
   const [query, setQuery] = useTextDraft(`repo-search:${draftContext}:${testIDPrefix}`, '');
   const sections = useMemo(
     () =>
@@ -53,54 +52,48 @@ export function RepoList({
   );
 
   return (
-    <View style={styles.container} testID={testIDPrefix}>
-      <HullDialogInput
+    <YStack flexShrink={1} minHeight={0} testID={testIDPrefix}>
+      <Placeheld
+        input={HullDialogInput}
         accessibilityLabel="Search repos"
         autoCapitalize="none"
         autoCorrect={false}
         onChangeText={setQuery}
         placeholder="Search repos"
-        placeholderTextColor={theme.buzz.textMuted}
         variant="sheetSearch"
         testID={`${testIDPrefix}-search`}
         value={query}
       />
-      <SectionList
-        keyboardShouldPersistTaps="handled"
-        ListEmptyComponent={
-          <EmptyState testID={`${testIDPrefix}-empty`} title={loading ? 'Loading repos…' : 'No repos match.'} />
-        }
-        nestedScrollEnabled
-        renderItem={({ item, section }) => (
-          <HullActionSheetRow
-            accessibilityLabel={item.name}
-            label={repoShortName(item, section.owner)}
-            leading={<RepositoryMark avatarUrl={item.avatarUrl} faviconUrl={item.faviconUrl} size={28} />}
-            selected={item.key === currentKey}
-            onPress={() => onSelect(item)}
-            testID={`${testIDPrefix}-candidate-${item.key}`}
-          />
-        )}
-        renderSectionHeader={({ section }) =>
-          section.owner ? (
-            <RoomListSectionHeader
-              title={section.owner ?? ''} inset="content" surface="sheet"
-              testID={`${testIDPrefix}-group-${section.owner.toLowerCase()}`}
+      <YStack maxHeight={LIST_MAX_HEIGHT}>
+        <SectionList
+          keyboardShouldPersistTaps="handled"
+          ListEmptyComponent={
+            <EmptyState testID={`${testIDPrefix}-empty`} title={loading ? 'Loading repos…' : 'No repos match.'} />
+          }
+          nestedScrollEnabled
+          renderItem={({ item, section }) => (
+            <HullActionSheetRow
+              accessibilityLabel={item.name}
+              label={repoShortName(item, section.owner)}
+              leading={<RepositoryMark avatarUrl={item.avatarUrl} faviconUrl={item.faviconUrl} size={28} />}
+              selected={item.key === currentKey}
+              onPress={() => onSelect(item)}
+              testID={`${testIDPrefix}-candidate-${item.key}`}
             />
-          ) : null
-        }
-        sections={sections}
-        stickySectionHeadersEnabled={false}
-        style={{ flexGrow: 0, maxHeight: LIST_MAX_HEIGHT }}
-        testID={`${testIDPrefix}-list`}
-      />
-    </View>
+          )}
+          renderSectionHeader={({ section }) =>
+            section.owner ? (
+              <RoomListSectionHeader
+                title={section.owner ?? ''} inset="content" surface="sheet"
+                testID={`${testIDPrefix}-group-${section.owner.toLowerCase()}`}
+              />
+            ) : null
+          }
+          sections={sections}
+          stickySectionHeadersEnabled={false}
+          testID={`${testIDPrefix}-list`}
+        />
+      </YStack>
+    </YStack>
   );
 }
-
-const styles = StyleSheet.create((theme) => {
-  const hull = theme.buzz;
-  return {
-    container: { flexShrink: 1, minHeight: 0 },
-  };
-});

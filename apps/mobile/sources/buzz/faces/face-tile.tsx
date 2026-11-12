@@ -25,12 +25,13 @@ import React from 'react';
 import { G } from 'react-native-svg';
 import { BONE, FACES, INK, type FaceId } from './animals';
 import { recolorEdge } from './edge';
+import { IDENTITY_ART } from '@/buzz/groknight';
 
 export type FaceMode = 'dark' | 'light';
 
 /** The person plate per theme mode — the approved contact sheet's grounds:
  *  a shade under the obsidian canvas, and the light cream. */
-export const PERSON_PLATE: Record<FaceMode, string> = { dark: '#0f0a13', light: '#F5EEE2' };
+export const PERSON_PLATE: Record<FaceMode, string> = { dark: IDENTITY_ART.plateDark, light: IDENTITY_ART.plateLight };
 
 /** The edge layer's colours per mode: (vanishing tone → contrast tone). */
 export const EDGE_COLORS: Record<FaceMode, { target: string; edge: string }> = {

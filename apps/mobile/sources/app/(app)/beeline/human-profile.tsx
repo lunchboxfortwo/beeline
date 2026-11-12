@@ -1,7 +1,6 @@
 import { router, useLocalSearchParams } from 'expo-router';
 import { useLatencyRouteFrame } from '@/buzz/latency-route-hook';
 import { PersonProfileScreen } from '@/ui/screens/profiles/PersonProfileScreen';
-import { SafeTop } from '@/ui/grammar';
 
 const first = (value: string | string[] | undefined) => Array.isArray(value) ? value[0] : value;
 
@@ -10,10 +9,7 @@ export default function HumanProfileRoute() {
   useLatencyRouteFrame('/beeline/human-profile');
   const params = useLocalSearchParams<{ memberId: string; workspaceId?: string; communityId?: string }>();
   return (
-    <>
-      <SafeTop />
-      <PersonProfileScreen memberId={first(params.memberId) ?? ''} workspaceId={first(params.workspaceId) ?? first(params.communityId)} close={() => router.back()} />
-    </>
+    <PersonProfileScreen memberId={first(params.memberId) ?? ''} workspaceId={first(params.workspaceId) ?? first(params.communityId)} close={() => router.back()} />
   );
 }
 

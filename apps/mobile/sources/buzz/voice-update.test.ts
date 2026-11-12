@@ -4,8 +4,15 @@ import { act, create } from 'react-test-renderer';
 import { beforeEach, expect, it, vi } from 'vitest';
 (globalThis as typeof globalThis & {IS_REACT_ACT_ENVIRONMENT?: boolean;}).IS_REACT_ACT_ENVIRONMENT = true;
 const openURL = vi.hoisted(() => vi.fn(async (_url: string) => {}));
-vi.mock('react-native', () => ({ Platform: { OS: 'ios' }, Linking: { openURL }, View: 'View', Text: 'Text', Pressable: 'Pressable' }));
+vi.mock('react-native', () => ({ Platform: { OS: 'ios' }, Linking: { openURL }, View: 'View', Text: 'Text', Pressable: 'Pressable', PixelRatio: { get: () => 2, getFontScale: () => 1, roundToNearestPixel: (n: number) => n } }));
 vi.mock('@/components/buzz/HullDialog', () => ({ HullDialog: (props: any) => React.createElement('HullDialog', props) }));
+vi.mock('tamagui', async () => (await import('@/ui/screens/transcript/grammar-hosts.test-support')).tamaguiHosts());
+vi.mock('lucide-react-native', async () => (await import('@/ui/screens/transcript/grammar-hosts.test-support')).lucideHosts());
+vi.mock('react-native-safe-area-context', () => ({ useSafeAreaInsets: () => ({ top: 0, bottom: 0, left: 0, right: 0 }) }));
+vi.mock('@/ui/grammar', async () => {
+  const host = (name: string) => (props: any) => React.createElement(name, props, props.children);
+  return { T: host('T'), HEIGHT: { control: 44, primary: 48, tabBar: 52, sheetRow: 56 } };
+});
 import { Modal } from '@/modal/ModalManager';
 import { WebAlertModal } from '@/modal/components/WebAlertModal';
 import { VoiceCallCard } from '@/components/buzz/VoiceCallCard';

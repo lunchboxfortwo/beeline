@@ -1,8 +1,9 @@
 import React from 'react';
-import { AppState, BackHandler, Platform, View } from 'react-native';
+import { AppState, BackHandler, Platform } from 'react-native';
+import { YStack } from 'tamagui';
 import { Image } from 'expo-image';
 import * as Clipboard from 'expo-clipboard';
-import { StyleSheet } from 'react-native-unistyles';
+import { FillView } from '@/ui/grammar';
 import { useSandboxWebView } from '@/components/buzz/sandbox-webview';
 import { monolithPhoneOperation } from '@/sync/transport/monolith-operation';
 import { Modal } from '@/modal';
@@ -147,14 +148,14 @@ function ComputerStream({ session, preview = false, onEnded, onFirstFrame, onAcc
   });
   if (WebView)
     return (
-      <WebView ref={webViewRef} source={{ uri: url }} javaScriptEnabled domStorageEnabled
+      <FillView view={WebView} backgroundColor="canvas" ref={webViewRef} source={{ uri: url }} javaScriptEnabled domStorageEnabled
     onMessage={onStreamMessage} onLoadEnd={setViewerMode}
     onHttpError={(event: { nativeEvent: { statusCode: number } }) => {
       if (event.nativeEvent.statusCode === 401 || event.nativeEvent.statusCode === 403) onAccessRejected?.();
       if (event.nativeEvent.statusCode === 410) onEnded?.();
     }}
     scrollEnabled={false} setBuiltInZoomControls={false} setDisplayZoomControls={false}
-    automaticallyAdjustContentInsets={false} contentInsetAdjustmentBehavior="never" style={styles.stream} testID={preview ? 'computer-session-preview-webview' : 'computer-session-view-webview'} />
+    automaticallyAdjustContentInsets={false} contentInsetAdjustmentBehavior="never" testID={preview ? 'computer-session-preview-webview' : 'computer-session-view-webview'} />
     );
   return <BrowserStreamNote text="Opening browser…" />;
 }
@@ -250,14 +251,14 @@ export function WarmComputerSessionHost() {
   }, [warm?.visible, focused]);
   if (Platform.OS === 'web' || !warm?.visible) return null;
   return (
-    <View style={[styles.warmHost, { opacity: focused ? 1 : 0 }]}
+    <YStack position="absolute" top={0} left={0} right={0} bottom={0} zIndex={100} opacity={focused ? 1 : 0}
     pointerEvents={focused ? 'auto' : 'none'}
     accessibilityViewIsModal={focused} accessibilityElementsHidden={!focused}
     importantForAccessibility={focused ? 'auto' : 'no-hide-descendants'}
     testID="computer-session-warm-host">
     <ComputerSessionViewer key={warm.session.id} session={warm.session} active={focused} warm
       roomId={warm.roomId} agentHandle={warm.agentHandle} onClose={closeWarmComputerSession} />
-  </View>
+  </YStack>
   );
 }
 
@@ -344,10 +345,10 @@ export function ComputerSessionViewer({ session, onClose, roomId, agentHandle, a
               }} captureRef={captureRef} postRef={postRef} />
           ) : null}
           {!ended && !unavailable && previewFrame ? (
-            <View pointerEvents="none" style={styles.previewFrame}>
-              <Image source={{ uri: `data:image/jpeg;base64,${previewFrame}` }} contentFit="cover" contentPosition="top"
-                style={styles.stream} testID="computer-session-opening-frame" />
-            </View>
+            <YStack pointerEvents="none" position="absolute" top={0} left={0} right={0} bottom={0} width="100%" height="100%">
+              <FillView view={Image} backgroundColor="canvas" source={{ uri: `data:image/jpeg;base64,${previewFrame}` }} contentFit="cover" contentPosition="top"
+                testID="computer-session-opening-frame" />
+            </YStack>
           ) : null}
         </>
       }
@@ -366,9 +367,3 @@ export function ComputerSessionViewer({ session, onClose, roomId, agentHandle, a
     />
   );
 }
-
-const styles = StyleSheet.create((theme) => ({
-  warmHost: { position: 'absolute', top: 0, left: 0, right: 0, bottom: 0, zIndex: 100 },
-  stream: { width: '100%', height: '100%', backgroundColor: theme.buzz.bgBase },
-  previewFrame: { position: 'absolute', inset: 0, width: '100%', height: '100%' },
-}));

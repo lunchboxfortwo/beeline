@@ -9,10 +9,10 @@ const host = vi.hoisted(() => ({
   purge: undefined as (() => void) | undefined,
 }));
 vi.mock('react-native', () => ({ Image: 'Image', ScrollView: 'ScrollView', Text: 'Text', View: 'View' }));
-vi.mock('react-native-unistyles', async () => {
-  const { groknight } = await import('@/buzz/groknight');
-  return { StyleSheet: { create: (factory: any) => factory({ buzz: groknight }) } };
-});
+vi.mock('tamagui', async () => (await import('@/ui/screens/transcript/grammar-hosts.test-support')).tamaguiHosts());
+vi.mock('lucide-react-native', async () => (await import('@/ui/screens/transcript/grammar-hosts.test-support')).lucideHosts());
+vi.mock('react-native-reanimated', () => ({ default: { View: 'AnimatedView' } }));
+vi.mock('react-native-safe-area-context', () => ({ useSafeAreaInsets: () => ({ top: 0, bottom: 0, left: 0, right: 0 }) }));
 vi.mock('./IndexRow', () => ({ IndexRow: 'IndexRow' }));
 vi.mock('@/buzz/use-artifact-recovery', () => ({ useArtifactRecoveryGeneration: () => host.recovery }));
 vi.mock('@/buzz/artifact-link', () => ({
@@ -32,7 +32,7 @@ afterEach(async () => { await act(async () => tree?.unmount()); tree = undefined
 // They must not cancel a download that is slower than transcript updates.
 describe.each(['image', 'text'] as const)('%s byte demand', kind => {
   const render = (file = attachment) => kind === 'image'
-    ? <ArtifactImage attachment={file} fit="cover" style={{ width: 46, height: 46 }} testID="loaded" />
+    ? <ArtifactImage attachment={file} fit="cover" testID="loaded" />
     : <ArtifactText attachment={file} crop testID="loaded" />;
   const read = () => kind === 'image' ? host.image : host.text;
   it('finishes the original read across equivalent DTOs and socket recovery without refetching', async () => {
@@ -41,11 +41,11 @@ describe.each(['image', 'text'] as const)('%s byte demand', kind => {
     await act(async () => { tree = create(render()); });
     if (kind === 'image') {
       const placeholder = tree!.root.findByProps({ testID: 'artifact-image-loading' });
-      const style = Object.assign({}, ...placeholder.props.style);
-      // A growing/padded View consumes the filename column in a compact row.
-      expect(style).toMatchObject({ width: 46, height: 46 });
-      expect(style.flex).toBeUndefined();
-      expect(style.padding).toBeUndefined();
+      // A growing/padded View consumes the filename column in a compact row:
+      // the placeholder fills the caller's frame and nothing more.
+      expect(placeholder.props).toMatchObject({ width: '100%', height: '100%' });
+      expect(placeholder.props.flex).toBeUndefined();
+      expect(placeholder.props.padding).toBeUndefined();
     }
     const signal = read().mock.calls[0][1].signal as AbortSignal;
     for (let n = 0; n < 6; n++) {

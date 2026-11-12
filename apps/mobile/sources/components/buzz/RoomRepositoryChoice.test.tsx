@@ -9,6 +9,7 @@ vi.mock('react-native', () => ({
   TouchableOpacity: 'TouchableOpacity',
   View: 'View',
 }));
+vi.mock('tamagui', async () => (await import('@/ui/screens/transcript/grammar-hosts.test-support')).tamaguiHosts());
 vi.mock('./Button', () => ({ Button: 'Button' }));
 vi.mock('./HullDialog', () => ({ HullDialogActions: 'Actions' }));
 vi.mock('./HullActionSheet', async () => {

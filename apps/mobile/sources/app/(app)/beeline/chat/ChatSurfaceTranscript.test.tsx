@@ -10,7 +10,14 @@ import { createTranscriptScrollController } from '@/buzz/transcript-scroll-contr
 import { useChatTranscriptLanding } from './useChatTranscriptLanding';
 
 vi.mock('react-native', () => ({ View: 'View', FlatList: 'FlatList', Platform: { OS: 'android' } }));
-vi.mock('./chat-surface-styles', () => ({ styles: {} }));
+vi.mock('tamagui', () => ({ YStack: 'YStack' }));
+vi.mock('@/ui/grammar', async () => {
+  const { createElement } = await import('react');
+  return {
+    DesktopScroll: 'DesktopScroll',
+    ListPad: ({ list, x: _x, y: _y, top: _top, emptyGrow: _grow, ...rest }: any) => createElement(list, rest),
+  };
+});
 vi.mock('@/buzz/activity-timeline', () => ({ buildTurnActivity: vi.fn() }));
 vi.mock('@/components/buzz/ConversationComposer', () => ({ COMPOSER_MAX_INPUT_HEIGHT: 100, COMPOSER_SINGLE_LINE_INPUT_HEIGHT: 40 }));
 vi.mock('@/buzz/room-send-list', () => ({ RoomSendList: 'RoomSendList' }));

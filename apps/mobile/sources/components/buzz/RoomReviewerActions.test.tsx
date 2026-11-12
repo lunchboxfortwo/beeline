@@ -9,13 +9,6 @@ const { mockBuzzTheme } = vi.hoisted(() => ({
     buzz: { type: { meta: {} }, space: {}, border: '', radius: 0, textPrimary: '', dim: '' },
   },
 }));
-vi.mock('react-native-unistyles', () => ({
-  StyleSheet: {
-    create: (styles: any) => styles(mockBuzzTheme),
-    hairlineWidth: 1,
-  },
-  useUnistyles: () => ({ theme: mockBuzzTheme }),
-}));
 vi.mock('react-native', async () => {
   const ReactModule = await import('react');
   const host = (name: string) => (props: any) =>
@@ -23,6 +16,9 @@ vi.mock('react-native', async () => {
   return { ScrollView: host('ScrollView'), Text: host('Text'), View: host('View') };
 });
 
+vi.mock('tamagui', async () => (await import('@/ui/screens/transcript/grammar-hosts.test-support')).tamaguiHosts());
+vi.mock('@/ui/grammar', () => ({ T: 'Text' }));
+vi.mock('@/components/buzz/ErrorBanner', () => ({ ErrorBanner: 'ErrorBanner' }));
 vi.mock('./HullActionSheet', async () => {
   const ReactModule = await import('react');
   return {
@@ -79,7 +75,7 @@ function render(overrides: Partial<React.ComponentProps<typeof RoomReviewerActio
 
 function renderedNotice(renderer: ReactTestRenderer, testID: string) {
   return renderer.root
-    .findAllByType('View')
+    .findAllByType('YStack')
     .filter((node: { props: { testID?: string } }) => node.props.testID === testID);
 }
 
@@ -196,7 +192,7 @@ describe('RoomReviewerActions', () => {
     expect(notice.props.accessibilityRole).toBe('alert');
     const text = notice.findByType('Text').props.children.join('');
     expect(text).toContain('This repository allows auto-merge');
-    expect(text).toContain("If auto-merge is turned on for a corner's pull request");
+    expect(text).toContain("If auto-merge is turned on for a thread's pull request");
     expect(text).toContain('GitHub merges it as soon as checks pass');
     expect(text).toContain('before the Beeline reviewer is asked to look');
     expect(text).toContain("Turn off auto-merge in this repository's GitHub settings");
@@ -228,7 +224,7 @@ describe('RoomReviewerActions', () => {
     expect(sheet.props.scrollBody).toBe(false);
     const list = renderer.root.findByProps({ testID: 'room-reviewer-list' });
     expect(list.props.nestedScrollEnabled).toBe(true);
-    expect(list.props.style.maxHeight).toBe(5 * 52);
+    expect(list.props.maxHeight).toBe(5 * 52);
     expect(list.findAllByType('Row')).toHaveLength(13);
     expect(list.findAllByProps({ testID: 'room-reviewer-close' })).toHaveLength(0);
     expect(renderer.root.findAllByProps({ testID: 'room-reviewer-close' }).length).toBeGreaterThan(

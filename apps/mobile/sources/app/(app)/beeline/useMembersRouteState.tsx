@@ -5,7 +5,7 @@ import { useLatencyRouteFrame } from '@/buzz/latency-route-hook';
 import { useTextDraft } from '@/buzz/use-text-draft';
 import React, { useEffect, useMemo, useRef, useState } from 'react';
 import { AppState } from 'react-native';
-import { useUnistyles } from 'react-native-unistyles';
+import { useTheme } from 'tamagui';
 import { useLocalSearchParams, useNavigation } from 'expo-router';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { isAgentDetailView, isAllowedAgentModelConfigCategory, isWorkspaceView, type AgentDetailView, type Identity, type WorkspaceView } from '@beeline/buzz-client';
@@ -85,7 +85,7 @@ export function useMembersRouteState([
   modelAppliesNote: ModelAxisKind | null,
   modelAxisError: ModelAxisKind | null,
   selectedAgentOwnerByline: string | undefined,
-  theme: ReturnType<typeof useUnistyles>['theme'],
+  theme: ReturnType<typeof useTheme>,
   accessError: string | null,
   yoloError: string | null,
   insets: import("react-native-safe-area-context/lib/typescript/src/SafeArea.types").EdgeInsets,
@@ -101,7 +101,7 @@ export function useMembersRouteState([
   focusedRef.current = focused;
   useLatencyRouteFrame('/beeline/members');
   const desktop = useIsDesktop();
-  const { theme } = useUnistyles();
+  const theme = useTheme();
   const insets = useSafeAreaInsets();
   const params = useLocalSearchParams<{
     communityId?: string | string[];

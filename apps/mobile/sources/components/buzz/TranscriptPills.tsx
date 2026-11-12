@@ -1,12 +1,12 @@
 import React, { useMemo } from 'react';
-import { View } from 'react-native';
+import { YStack } from 'tamagui';
+import { TypedView } from '@/ui/grammar';
 import type { ChatDisplayMessage } from '@/buzz/room-view-presentation';
 import { ledgerStamp } from '@/buzz/relative-time';
 import { SYSTEM_IDENTITY_PUBKEY } from '@/buzz/system-identity';
 import { PillRow, type PillFace, type PillItem } from '@/ui/screens/transcript/PillRow';
-import { LedgerSystemLine, ledgerEntryRhythm } from './Ledger';
+import { LedgerSystemLine } from './Ledger';
 import { MonoMarkdown } from './MonoMarkdown';
-import { settledAgentProseStyle } from './Ledger-styles';
 import { NotificationLifecycleCard } from './PrLifecycleCard';
 
 const BEELINE: PillFace = { kind: 'system', name: 'Beeline' };
@@ -69,7 +69,8 @@ function pillItem(message: ChatDisplayMessage, resolve: PillIdentityResolver, ha
     to,
     time,
     body: (
-      <MonoMarkdown markdown={text} textStyle={settledAgentProseStyle()} testID={`pill-message-${message.id}`} />
+      // The settled agent-prose tone: body in ink.
+      <TypedView view={MonoMarkdown} v="body" color="ink" markdown={text} testID={`pill-message-${message.id}`} />
     ),
   };
 }
@@ -92,11 +93,12 @@ export function TranscriptPills({
     [run, resolve, onOpenIdentity, onOpenUrl, onOpenBrief, onOpenCorner, cornerId],
   );
   return (
-    <View style={ledgerEntryRhythm({ hasByline: true })} testID={`chat-message-${run[0]?.id ?? ''}`}>
+    // The ledger's bylined entry rhythm: the speaker-change air on top.
+    <YStack width="100%" minWidth={0} paddingTop="4" paddingBottom="2" testID={`chat-message-${run[0]?.id ?? ''}`}>
       {run.length === 1 && run[0]?.notificationLifecycleRun ? (
         <NotificationLifecycleCard message={run[0]} cornerId={cornerId}
           onOpenCorner={onOpenCorner ?? (() => {})} onOpenUrl={onOpenUrl ?? (() => {})} />
       ) : <PillRow items={items} testID={`pill-row-${run[0]?.id ?? ''}`} />}
-    </View>
+    </YStack>
   );
 }

@@ -4,7 +4,7 @@ import { trackDictatedMessage } from '@/buzz/dictation-timing';
 import { appErrorCopy } from '@/buzz/app-error-copy';
 import React, { useRef, useCallback } from 'react';
 import { Buffer } from 'buffer';
-import { TextInput, Platform } from 'react-native';
+import { type TextInput, Platform } from 'react-native';
 import { useFocusEffect } from 'expo-router';
 import { loadBuzzIdentity } from '@/auth/buzz-identity-storage';
 import { readGitHubAccess } from '@/buzz/github-access-surface';

@@ -2,9 +2,7 @@ import { ErrorBanner } from '@/components/buzz/ErrorBanner';
 import type { DictationTiming } from '@/buzz/dictation-timing';
 import * as React from 'react';
 import {
-  Text,
-  TextInput,
-  View,
+  type TextInput,
   Keyboard,
   Linking,
   Platform,
@@ -14,7 +12,9 @@ import {
   type TextInputSelectionChangeEventData,
   type TextLayoutEvent,
 } from 'react-native';
-import { StyleSheet, useUnistyles } from 'react-native-unistyles';
+import { YStack, useTheme } from 'tamagui';
+import { useTextScale } from '@/ui/grammar';
+import { NativeTypeInput, NativeTypeMeasure } from '@/ui/grammar-root';
 import { groknight } from '@/buzz/groknight';
 import { HullDialog } from './HullDialog';
 import { COMPOSER_GLYPH_SIZE } from './MicGlyph';
@@ -38,7 +38,6 @@ import {
   ComposerNote,
   ComposerReply,
   ComposerStatus,
-  useComposerInk,
 } from '@/ui/screens/composer/ComposerChrome';
 
 /**
@@ -176,23 +175,34 @@ function ConversationComposerContent({
   onRetryAttachment,
   placeholder,
 }: Props) {
-  const { theme } = useUnistyles();
-  const { ink, hint } = useComposerInk();
+  const brass = useTheme().needsYou?.val as string;
+  const textScale = useTextScale();
   const containerRef = React.useRef<HTMLElement | null>(null);
   const ownInputRef = React.useRef<TextInput | null>(null);
   const [textOffset, setTextOffset] = React.useState(0);
   const [nativeLineHeight, setNativeLineHeight] = React.useState(COMPOSER_SINGLE_LINE_INPUT_HEIGHT);
-  // A scaled single line is still one line. Bottom-align only a paragraph
-  // taller than the measured line, so the viewer's spare space stays balanced.
-  const multiline = height > Math.max(COMPOSER_SINGLE_LINE_INPUT_HEIGHT, Math.ceil(nativeLineHeight));
+  // An empty field shows its hint. At a large Text size the hint can wrap, and
+  // the field must grow to show every line (the content size counts only text).
+  const placeholderText = placeholder ?? (!isDirectMessage && hasAgentMembers ? 'Tag an agent with @' : 'Message');
+  const [placeholderHeight, setPlaceholderHeight] = React.useState(0);
+  const emptyHeight = value ? 0 : Math.min(maxHeight, placeholderHeight);
   // A caller can keep an empty field at 26dp (the viewer does). A scaled
   // natural line must still fit before Android can center its baseline.
-  const inputHeight = Platform.OS === 'android' ? Math.max(height, Math.ceil(nativeLineHeight)) : height;
+  const inputHeight = Platform.OS === 'android'
+    ? Math.max(height, Math.ceil(nativeLineHeight), emptyHeight)
+    : Math.max(height, emptyHeight);
+  // A scaled single line is still one line. Bottom-align only a paragraph
+  // taller than the measured line, so the viewer's spare space stays balanced.
+  const multiline = Math.max(height, emptyHeight) > Math.max(COMPOSER_SINGLE_LINE_INPUT_HEIGHT, Math.ceil(nativeLineHeight));
   // iOS top-aligns its intrinsic text. Its 26dp minimum leaves extra space
   // only for a short single line; a grown paragraph has no such extra inset.
   const drawingOffset = textOffset + (Platform.OS === 'ios' && !multiline
     ? Math.max(0, COMPOSER_SINGLE_LINE_INPUT_HEIGHT - nativeLineHeight) / 2
     : 0);
+  const measurePlaceholder = React.useCallback((event: TextLayoutEvent) => {
+    const lines = event.nativeEvent.lines;
+    setPlaceholderHeight(Math.ceil(lines.reduce((sum, line) => sum + line.height, 0)));
+  }, []);
   const measureTextBody = React.useCallback((event: TextLayoutEvent) => {
     const line = event.nativeEvent.lines[0];
     if (!line) return;
@@ -324,7 +334,7 @@ function ConversationComposerContent({
       window.removeEventListener('resize', measure);
       observer?.disconnect();
     };
-  }, [height, inputRevision, theme.buzz.type.body]);
+  }, [height, inputRevision, textScale]);
 
   // Speech recognition — internal hook, scoped to the composer.
   // What the current take added to the text, so Stop can take exactly that out.
@@ -423,7 +433,7 @@ function ConversationComposerContent({
   return (
     <>
     {(conversationActive || voice?.connecting) && voice && <VoiceAgentStrip voice={voice} />}
-    <View ref={containerRef as React.Ref<View>} {...containerProps}>
+    <YStack ref={containerRef as never} {...containerProps}>
       {(reply || attachments.length > 0) && (
         <ComposerAdjuncts testID={`${testIDPrefix}-composer-adjuncts`}>
           {reply && <ComposerReply handle={reply.handle} preview={reply.preview} onCancel={onCancelReply} />}
@@ -459,39 +469,59 @@ function ConversationComposerContent({
             <ComposerGlyph icon={Plus} />
           </ComposerButton>
         )}
-        <View style={[styles.inputWrapper, viewerPill && styles.viewerPillField]}>
+        <YStack flex={1} position="relative" minWidth={0} justifyContent="center" minHeight={44} paddingVertical="1" paddingLeft={viewerPill ? '2' : undefined}>
           {Platform.OS !== 'web' ? (
-            <Text
+            <NativeTypeMeasure
+              line={Platform.OS === 'android' ? 'unset' : 'type'}
+              centered={Platform.OS === 'android'}
               accessible={false}
               accessibilityElementsHidden
               importantForAccessibility="no-hide-descendants"
               pointerEvents="none"
               numberOfLines={1}
               onTextLayout={measureTextBody}
-              style={[styles.textMeasurement, Platform.OS === 'android' && styles.inputAndroid]}
               testID={`${testIDPrefix}-text-measurement`}
             >
               Message
-            </Text>
+            </NativeTypeMeasure>
           ) : null}
-          <TextInput
+          {Platform.OS !== 'web' && !value ? (
+            <NativeTypeMeasure
+              line={Platform.OS === 'android' ? 'unset' : 'type'}
+              centered={Platform.OS === 'android'}
+              fill
+              accessible={false}
+              accessibilityElementsHidden
+              importantForAccessibility="no-hide-descendants"
+              pointerEvents="none"
+              onTextLayout={measurePlaceholder}
+              testID={`${testIDPrefix}-placeholder-measurement`}
+            >
+              {placeholderText}
+            </NativeTypeMeasure>
+          ) : null}
+          <NativeTypeInput
             key={inputRevision}
             ref={setInputRef}
             // A successful send replaces this native input to fence off stale
             // text events. If the consumed input was focused, transfer focus
             // to its empty replacement so consecutive messages need no tap.
             autoFocus={focused}
-            style={[
-              styles.input,
-              { color: ink },
-              // Web sets the changing height on the element (growth loop note above).
-              Platform.OS === 'ios' || Platform.OS === 'web' ? undefined : { height: inputHeight, maxHeight },
-              Platform.OS === 'android' && styles.inputAndroid,
-              { transform: [{ translateY: drawingOffset }] },
-              // The input stays mounted under the listening line; its typed text
-              // returns when dictation ends.
-              dictationBusy ? styles.inputHidden : undefined,
-            ]}
+            // Not the body line height on web: kept below Space Grotesk's real
+            // glyph bounds so centering never crops accents or descenders
+            // (`chat.composer-layout.test.ts`). Android unsets it: an inline tag
+            // starts the text span mid-line and Android's partial relayout then
+            // drops the tag's line from the measured height on alternate keystrokes.
+            line={Platform.OS === 'ios' ? 'type' : Platform.OS === 'android' ? 'unset' : 20}
+            centered={Platform.OS === 'android'}
+            // Web sets the changing height on the element (growth loop note above).
+            box={Platform.OS === 'ios' || Platform.OS === 'web'
+              ? { minHeight: COMPOSER_SINGLE_LINE_INPUT_HEIGHT, maxHeight: COMPOSER_MAX_INPUT_HEIGHT }
+              : { minHeight: COMPOSER_SINGLE_LINE_INPUT_HEIGHT, height: inputHeight, maxHeight }}
+            translateY={drawingOffset}
+            // The input stays mounted under the listening line; its typed text
+            // returns when dictation ends.
+            hidden={dictationBusy}
             value={value}
             onChangeText={Platform.OS === 'web' ? commitInputChange : commitNativeChange}
             // Web reads its content size after commit (growth loop note above).
@@ -529,8 +559,7 @@ function ConversationComposerContent({
               selectionRef.current = event.nativeEvent.selection;
               onSelectionChange?.(event);
             }}
-            placeholder={placeholder ?? (!isDirectMessage && hasAgentMembers ? 'Tag an agent with @' : 'Message')}
-            placeholderTextColor={hint}
+            placeholder={placeholderText}
             multiline
             // Android keyboards otherwise take the whole screen in landscape and
             // type into the OS extract editor instead of this composer. The prop
@@ -545,11 +574,13 @@ function ConversationComposerContent({
           {dictationBusy ? (
             <ComposerListening
               tags={tagSplit.tags.length > 0 ? tagSplit.prefix.trimEnd() : undefined}
+              level={speech.volumeLevel}
+              live={isListening}
               testID={`${testIDPrefix}-speech-waveform`}
               tagsTestID={`${testIDPrefix}-dictation-tags`}
             />
           ) : null}
-        </View>
+        </YStack>
         {speechAvailable && dictationBusy ? (
           // Keyed apart from the mic, so a press in flight on one never lands on the other.
           <ComposerButton
@@ -622,7 +653,7 @@ function ConversationComposerContent({
             testID={`${testIDPrefix}-send`}
           >
             {sendingSpeech ? (
-              <BeelineMarkSpinner ink={theme.buzz.accent} live testID={`${testIDPrefix}-speech-finalizing`} />
+              <BeelineMarkSpinner ink={brass} live testID={`${testIDPrefix}-speech-finalizing`} />
             ) : (
               <ComposerGlyph icon={ArrowUp} primary />
             )}
@@ -661,65 +692,7 @@ function ConversationComposerContent({
         ]}
         testID={`${testIDPrefix}-speech-model-dialog`}
       />
-    </View>
+    </YStack>
     </>
   );
 }
-
-const styles = StyleSheet.create((theme) => ({
-  inputWrapper: {
-    flex: 1,
-    position: 'relative',
-    minWidth: 0,
-    justifyContent: 'center',
-    minHeight: 44,
-    paddingVertical: theme.buzz.space.xs,
-  },
-  // The viewer pill keeps a little room before its trailing controls.
-  viewerPillField: { paddingLeft: theme.buzz.space.sm },
-  inputHidden: {
-    position: 'absolute',
-    left: 0,
-    right: 0,
-    top: 0,
-    opacity: 0,
-  },
-  input: {
-    ...theme.buzz.type.body,
-    // The wrapper owns the row's flexible width. Its children sit in Yoga's
-    // default column axis, where flex growth would become a height constraint
-    // and suppress iOS TextInput's intrinsic multiline growth. Android gets
-    // its controlled height above; iOS remains intrinsic.
-    minWidth: 0,
-    // Not the body role's lineHeight: kept below Space Grotesk's real glyph
-    // bounds at this size on web so centering never removes native font
-    // padding in a way that could crop accents or descenders
-    // (`chat.composer-layout.test.ts`). Android unsets the body role's line
-    // height: React Native marks each styled span with its own line height,
-    // and an inline tag starts the text span mid-line. Android's partial
-    // relayout then drops the tag's line from the measured height on
-    // alternate keystrokes, so the transcript above the composer jitters.
-    ...Platform.select({
-      ios: {},
-      android: { lineHeight: undefined },
-      default: { lineHeight: 20 },
-    }),
-    minHeight: COMPOSER_SINGLE_LINE_INPUT_HEIGHT,
-    maxHeight: COMPOSER_MAX_INPUT_HEIGHT,
-    paddingVertical: 0,
-    textAlignVertical: 'top',
-    outlineStyle: 'none',
-  } as any,
-  textMeasurement: {
-    ...theme.buzz.type.body,
-    ...Platform.select({ android: { lineHeight: undefined }, default: {} }),
-    position: 'absolute',
-    opacity: 0,
-  },
-  // Keep lineHeight unset so leading tags cannot jitter the measurement.
-  // The measured drawing offset above balances the actual cap-height body.
-  inputAndroid: {
-    includeFontPadding: false,
-    textAlignVertical: 'center',
-  },
-}));

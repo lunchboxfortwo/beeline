@@ -269,10 +269,6 @@ function BuzzChannels({ session }: { session: DeckSession }) {
       activeCommunityId={activeCommunityId}
       onSelect={selectWorkspace}
       onAdd={() => router.push('/beeline/community' as Href)}
-      onSettings={() => router.push('/beeline/settings' as Href)}
-      viewerPubkey={identity?.publicKey}
-      viewerAvatarUrl={chatList.viewer.avatar}
-      viewerFace={chatList.viewer.face}
     >
       <YStack flex={1} minHeight={0} backgroundColor="canvas" onLayout={onLayout} testID={refreshing ? 'room-list-refreshing' : 'room-list-idle'}>
         {isDesktop ? null : (

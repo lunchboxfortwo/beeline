@@ -39,6 +39,7 @@ vi.mock('react-native', async () => {
     ReactModule.createElement(name, props, props.children);
   return { StyleSheet: { flatten: (style: any): any => Array.isArray(style) ? Object.assign({}, ...style.map((part: any) => Array.isArray(part) ? Object.assign({}, ...part) : part)) : style },
     AppState: { addEventListener: () => ({ remove: () => undefined }) },
+    PixelRatio: { get: () => 1 },
     FlatList: ReactModule.forwardRef((props: any, ref: any) => {
       ReactModule.useImperativeHandle(ref, () => ({
         scrollToEnd: () => listScrolls.push('end'),
@@ -85,16 +86,6 @@ const theme = vi.hoisted(() => ({
       type: { hero: {}, body: {}, bodyStrong: {}, meta: {}, machine: {}, sectionHead: {} },
     },
 }));
-vi.mock('react-native-unistyles', async () => {
-  const { completeTestTheme } = await import('../../../../tests/helpers/phone');
-  const fullTheme = completeTestTheme(theme);
-  return ({
-  StyleSheet: {
-    hairlineWidth: 1,
-    create: (factory: any) => (typeof factory === 'function' ? factory(fullTheme) : factory),
-  },
-  useUnistyles: () => ({ theme: fullTheme }),
-}); });
 vi.mock('@/components/buzz/IdentityMark', async () => {
   const ReactModule = await import('react');
   return { IdentityMark: (props: any) => ReactModule.createElement('IdentityMark', props) };

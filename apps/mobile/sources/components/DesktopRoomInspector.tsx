@@ -8,8 +8,8 @@ import { resolveComposerMentions } from '@/buzz/room-participants';
 import { useTextDraft } from '@/buzz/use-text-draft';
 import * as React from 'react';
 import { observeRoomResource, useObservedResource } from '@/buzz/use-observed-resource';
-import { FlatList, PanResponder, Platform, View } from 'react-native';
-import { StyleSheet } from 'react-native-unistyles';
+import { FlatList, PanResponder, Platform } from 'react-native';
+import { XStack, YStack } from 'tamagui';
 import type { CornerListItem, RoomView, RoomViewMessage } from '@beeline/buzz-client';
 import { cornerTitle } from '@beeline/api-contract/phone';
 import type { RoomViewClient } from '@/sync/transport/room-view-client';
@@ -200,18 +200,29 @@ export function DesktopRoomInspector({
     : undefined;
 
   return (
-    <View
-      style={[styles.inspector, { width: renderedWidth }]}
+    <YStack
+      width={renderedWidth}
+      height="100%"
+      position="relative"
+      backgroundColor="canvas"
+      borderLeftWidth={1}
+      borderLeftColor="stroke"
       onLayout={(event) => {
         const { x, width: laidOutWidth } = event.nativeEvent.layout;
         setRowWidth(Math.round(x + laidOutWidth));
       }}
       testID="desktop-inspector"
     >
-      <View
-        {...resizePan.panHandlers}
+      <YStack
+        {...(resizePan.panHandlers as object)}
         accessibilityLabel="Resize work pane"
-        style={styles.resizer}
+        position="absolute"
+        left={-3}
+        top={0}
+        bottom={0}
+        width={7}
+        cursor="col-resize"
+        zIndex={4}
         testID="desktop-inspector-resizer"
       />
       {content.kind === 'artifact' ? (
@@ -246,8 +257,13 @@ export function DesktopRoomInspector({
           />
         </>
       )}
-    </View>
+    </YStack>
   );
+}
+
+/** The transcript's gap between cells. */
+function TranscriptGap() {
+  return <YStack paddingTop="2" />;
 }
 
 function scheduleFrame(callback: () => void) {
@@ -535,31 +551,33 @@ function CornerCockpit({
         );
       const captioned = withLedgerDayCaption(
         item.cornerMarkers?.length ? (
-          <View>
+          <YStack>
             {node}
             <CornerOpenedMarkers message={item} onOpenCorner={onOpenCorner} onOpenUrl={openUrl} />
-          </View>
+          </YStack>
         ) : node,
         ledgerDayCaption(item.timestamp, immediatelyPrecedingMessage?.timestamp),
       ) as React.ReactElement | null;
       if (focusMessageId && messageMatchesFocus(item, focusMessageId)) {
         return (
-          <View style={styles.focusedMessage} testID="desktop-work-focused-message">
-            {captioned}
-          </View>
+          <YStack paddingHorizontal="4">
+            <YStack backgroundColor="highlight" testID="desktop-work-focused-message">
+              {captioned}
+            </YStack>
+          </YStack>
         );
       }
-      return captioned;
+      return captioned ? <YStack paddingHorizontal="4">{captioned}</YStack> : null;
     },
     [bylineOpeners, channelIndex, detail, focusMessageId, hintMessageIds, messages, onOpenCorner, onChannelReference, resolvePillIdentity, roomId],
   );
   const storedName = summary?.corner.name ?? detail?.room.name;
   const shownCornerId = summary?.corner.id ?? detail?.room.id;
-  const title = shownCornerId ? cornerTitle(parentRoomName, storedName, shownCornerId) : 'Corner';
+  const title = shownCornerId ? cornerTitle(parentRoomName, storedName, shownCornerId) : 'Thread';
   const objective = summary?.corner.about ?? detail?.room.about ?? storedName ?? title;
   const cornerBrief = detail?.cornerBrief;
   return (
-    <View style={styles.cockpit} testID="desktop-work-cockpit">
+    <YStack flex={1} testID="desktop-work-cockpit">
       <InspectorHeader
         leading={summary?.agent ? (
           <IdentityMark
@@ -585,9 +603,9 @@ function CornerCockpit({
       />
       {loading || !detail ? (
         loading ? (
-          <View style={styles.loadingBlock} testID="desktop-corner-loader">
+          <YStack alignItems="center" justifyContent="center" padding="4" testID="desktop-corner-loader">
             <SurfaceGlyphLoader />
-          </View>
+          </YStack>
         ) : (
           null
         )
@@ -597,8 +615,9 @@ function CornerCockpit({
           data={messages}
           keyExtractor={(message) => message.id}
           renderItem={renderMessage}
-          style={styles.transcript}
-          contentContainerStyle={styles.transcriptContent}
+          ListHeaderComponent={TranscriptGap}
+          ItemSeparatorComponent={TranscriptGap}
+          ListFooterComponent={TranscriptGap}
           onScrollToIndexFailed={({ index }) => {
             scheduleFrame(() =>
               transcriptRef.current?.scrollToIndex({
@@ -612,9 +631,12 @@ function CornerCockpit({
         />
       )}
       {detail && detail.room.archived === false ? (
-        <View style={styles.cockpitComposer}>
+        <YStack paddingHorizontal="4" paddingBottom="4">
           {sendError ? <ErrorBanner inline title={sendError} /> : null}
-          <View style={styles.cockpitStatusSlot} testID="desktop-work-corner-status-slot">
+          <XStack alignItems="center" testID="desktop-work-corner-status-slot">
+            {/* A strut holds the slot open at the turn line's height, so the composer never jumps. */}
+            <YStack height={TURN_LINE_BOX_HEIGHT} />
+            <YStack flex={1}>
             {ack && (
               <TurnProgressLine
                 inset={false}
@@ -625,7 +647,8 @@ function CornerCockpit({
                 testID="desktop-work-corner-progress"
               />
             )}
-          </View>
+            </YStack>
+          </XStack>
           <ConversationComposer
             hasAgentMembers={detail.members.some(member => member.identity.kind === 'agent')}
             onStop={ack?.stop ? stop : undefined}
@@ -660,35 +683,8 @@ function CornerCockpit({
             onSend={() => void send()}
             testIDPrefix="desktop-work-corner"
           />
-        </View>
+        </YStack>
       ) : null}
-    </View>
+    </YStack>
   );
 }
-
-const styles = StyleSheet.create((theme) => ({
-  inspector: {
-    height: '100%',
-    backgroundColor: theme.colors.groupped.background,
-    borderLeftWidth: StyleSheet.hairlineWidth,
-    borderLeftColor: theme.colors.divider,
-    position: 'relative',
-  },
-  resizer: {
-    position: 'absolute',
-    left: -3,
-    top: 0,
-    bottom: 0,
-    width: 7,
-    cursor: 'col-resize',
-    zIndex: 4,
-  } as any,
-  cockpit: { flex: 1 },
-  transcript: { flex: 1 },
-  transcriptContent: { paddingHorizontal: 16, paddingVertical: 8, gap: 8 },
-  focusedMessage: { backgroundColor: theme.buzz.bgHighlight },
-  cockpitComposer: { paddingHorizontal: 16, paddingBottom: 16 },
-  cockpitStatusSlot: { minHeight: TURN_LINE_BOX_HEIGHT, justifyContent: 'center' },
-  empty: { ...theme.buzz.type.meta, color: theme.colors.textSecondary, padding: 16 },
-  loadingBlock: { alignItems: 'center', justifyContent: 'center', padding: 16 },
-}));

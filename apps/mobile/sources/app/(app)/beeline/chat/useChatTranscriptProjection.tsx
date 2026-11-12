@@ -1,5 +1,6 @@
 import React, { useRef, useCallback, useMemo } from 'react';
-import { View, Keyboard } from 'react-native';
+import { Keyboard } from 'react-native';
+import { YStack } from 'tamagui';
 import { type ChatDisplayMessage } from '@/buzz/room-view-presentation';
 import { continuedSpeakerIds, ledgerSpeakerKey } from '@/buzz/ledger-attribution';
 import { useCornerHeaderItem } from '@/buzz/use-room-corners';
@@ -11,7 +12,6 @@ import { resolveCornerViewAgentPubkey } from '@/buzz/corner-session';
 import { sameStringSet, shallowEqualRecord, useStable } from '@/buzz/use-stable';
 import { EmptyLedgerState, cornerNeedsStarter, type EmptyLedgerVariant } from '@/components/buzz/EmptyLedgerState';
 import { knownAgentPubkeysFor } from './chat-surface-values';
-import { styles } from './chat-surface-styles';
 
 type Props = [
   isCorner: boolean,
@@ -183,7 +183,7 @@ export function useChatTranscriptProjection([
     : transcriptMessages.length === 0;
 
   const emptyLedger = showEmptyLedger ? (
-    <View style={styles.emptyState}>
+    <YStack flexGrow={1}>
       <EmptyLedgerState
         variant={emptyLedgerVariant}
         name={isDirectMessage ? displayRoomName : isCorner ? undefined : roomName}
@@ -192,7 +192,7 @@ export function useChatTranscriptProjection([
         starterPrompts={starterPrompts}
         starterIntro={starterIntro}
       />
-    </View>
+    </YStack>
   ) : null;
 
   // Landing retries can outlive the render that scheduled them. Read the

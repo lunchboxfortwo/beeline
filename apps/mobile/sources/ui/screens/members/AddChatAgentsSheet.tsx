@@ -35,7 +35,7 @@ export function AddChatAgentsSheet({ open, close, roomId, roomTag, workspaceName
             onAdded();
             shut();
         } catch (reason) {
-            setError(appErrorCopy(reason, 'Could not add Room members.'));
+            setError(appErrorCopy(reason, 'Could not add chat members.'));
         } finally {
             setAdding(false);
         }

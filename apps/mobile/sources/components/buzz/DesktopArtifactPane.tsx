@@ -3,7 +3,6 @@ import { useArtifactRecoveryGeneration } from '@/buzz/use-artifact-recovery';
 import React, { useEffect, useState } from 'react';
 import { Platform } from 'react-native';
 import { Copy as CopyIcon, ExternalLink, RefreshCw, Share2 } from 'lucide-react-native';
-import { StyleSheet } from 'react-native-unistyles';
 import type { AttachmentReference } from '@beeline/buzz-client';
 import type { DesktopArtifactSelection } from '@/buzz/desktop-artifact-pane';
 
@@ -23,6 +22,7 @@ import { ArtifactPdfView } from '@/components/buzz/ArtifactPdfView';
 import { MonoMarkdown } from '@/components/buzz/MonoMarkdown';
 import { ViewerConversationDock } from '@/components/buzz/ViewerConversationDock';
 import { RunnableArtifact } from './RunnableArtifact';
+import { DocumentFrame, TypedView } from '@/ui/grammar';
 import {
   ViewerAction, ViewerBody, ViewerHeader, ViewerNotice, ViewerPlaceholder, ViewerScreen, ViewerScroll,
 } from '@/ui/screens/viewers/ViewerChrome';
@@ -94,7 +94,7 @@ export function DesktopArtifactPane({
       <ViewerBody>
         {markdown ? (
           <ViewerScroll testID="desktop-artifact-markdown">
-            <MonoMarkdown markdown={markdown.text} textStyle={styles.markdownText} document />
+            <TypedView view={MonoMarkdown} markdown={markdown.text} document />
           </ViewerScroll>
         ) : !attachment ? null : format === 'game' ? (
           <RunnableArtifact key={runKey} attachment={attachment} />
@@ -154,13 +154,7 @@ export function DesktopArtifactFrame({
   if (failed) return <ViewerNotice title="Page unavailable" testID="desktop-artifact-failed" />;
   if (html == null) return <ViewerPlaceholder text="Loading…" testID="desktop-artifact-loading" />;
   if (Platform.OS === 'web') {
-    return React.createElement('iframe', {
-      srcDoc: html,
-      sandbox: '',
-      style: sandboxedFrameStyle,
-      title: attachment.name,
-      'data-testid': 'desktop-artifact-frame',
-    });
+    return <DocumentFrame srcDoc={html} sandbox="" title={attachment.name} testID="desktop-artifact-frame" paper />;
   }
   return <ViewerPlaceholder text="Loading…" testID="desktop-artifact-loading" />;
 }
@@ -189,18 +183,7 @@ function DesktopArtifactMarkdown({ attachment }: { attachment: AttachmentReferen
   if (markdown == null) return <ViewerPlaceholder text="Loading…" testID="desktop-artifact-loading" />;
   return (
     <ViewerScroll testID="desktop-artifact-markdown">
-      <MonoMarkdown markdown={markdown} textStyle={styles.markdownText} document />
+      <TypedView view={MonoMarkdown} markdown={markdown} document />
     </ViewerScroll>
   );
 }
-
-const sandboxedFrameStyle: React.CSSProperties = {
-  border: 'none',
-  width: '100%',
-  height: '100%',
-  backgroundColor: '#ffffff',
-};
-
-const styles = StyleSheet.create((theme) => ({
-  markdownText: { ...theme.buzz.type.body, color: theme.buzz.textPrimary },
-}));

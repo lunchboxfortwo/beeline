@@ -1,10 +1,8 @@
 import { EmptyState } from './EmptyState';
 import { IndexRow } from './IndexRow';
 import React from 'react';
-import { View } from 'react-native';
-import { StyleSheet } from 'react-native-unistyles';
+import { YStack } from 'tamagui';
 import { RoomGlyph } from '@/components/buzz/RoomGlyph';
-import { Typography } from '@/constants/Typography';
 
 export type EmptyLedgerVariant = 'room' | 'corner' | 'dm';
 
@@ -52,7 +50,7 @@ function emptyLedgerCopy(
   return {
     glyph: null,
     title: 'Nothing in the log yet',
-    body: 'Start with the work, question, or decision this Room is for.',
+    body: 'Start with the work, question, or decision this chat is for.',
   };
 }
 
@@ -76,41 +74,24 @@ export function EmptyLedgerState({
   const copy = emptyLedgerCopy(variant, name, agentHandle);
   if (variant === 'room' && starterPrompts?.length) {
     return (
-      <View style={styles.pressable} testID={testID}>
-        <View style={styles.content}>
+      <YStack flex={1} minHeight={44} alignItems="center" justifyContent="center" paddingHorizontal="6" paddingVertical="6" testID={testID}>
+        <YStack width="100%" maxWidth={360} alignItems="center">
           <RoomGlyph size={28} />
-          <EmptyState title={name ? `${name} is empty` : 'This Room is empty'} description={starterIntro} />
-          <View style={styles.prompts}>
+          <EmptyState title={name ? `${name} is empty` : 'This chat is empty'} description={starterIntro} />
+          <YStack alignSelf="stretch" gap="2" marginTop="6">
             {starterPrompts.map((prompt) => (
               <IndexRow key={prompt.lead} title={prompt.lead} description={prompt.detail} accessibilityLabel={`${prompt.lead} ${prompt.detail}`}
                 onPress={prompt.onPress} testID={prompt.testID} />
             ))}
-          </View>
-        </View>
-      </View>
+          </YStack>
+        </YStack>
+      </YStack>
     );
   }
   return (
-    <View style={styles.pressable} testID={testID}>
+    <YStack flex={1} minHeight={44} alignItems="center" justifyContent="center" paddingHorizontal="6" paddingVertical="6" testID={testID}>
       <EmptyState title={variant === 'corner' ? 'Nothing in the log yet' : copy.title} description={copy.body}
         action={{label:copy.title, onPress, accessibilityLabel:`${copy.title}. ${copy.body}`}} />
-    </View>
+    </YStack>
   );
 }
-
-const styles = StyleSheet.create((theme) => ({
-  pressable: {
-    flex: 1,
-    minHeight: 44,
-    alignItems: 'center',
-    justifyContent: 'center',
-    paddingHorizontal: 24,
-    paddingVertical: 24,
-  },
-  content: {
-    width: '100%',
-    maxWidth: 360,
-    alignItems: 'center',
-  },
-  prompts: { alignSelf: 'stretch', gap: theme.buzz.space.sm, marginTop: theme.buzz.space.lg },
-}));

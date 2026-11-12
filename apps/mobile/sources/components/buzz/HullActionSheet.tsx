@@ -1,20 +1,11 @@
-import { HULL_SHEET_INSET as sheetInset, HULL_SHEET_ROW_HEIGHT } from '@/buzz/hull-sheet-layout';
+import { HULL_SHEET_INSET as sheetInset } from '@/buzz/hull-sheet-layout';
 export const HULL_SHEET_INSET = sheetInset;
 import { Button } from './Button';
 import React from 'react';
-import {
-  Keyboard,
-  Pressable,
-  ScrollView,
-  Text,
-  View,
-  useWindowDimensions,
-  type StyleProp,
-  type ViewStyle,
-} from 'react-native';
+import { Keyboard, useWindowDimensions } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
-import { StyleSheet } from 'react-native-unistyles';
-import { Typography } from '@/constants/Typography';
+import { ScrollView, YStack } from 'tamagui';
+import { HEIGHT, T } from '@/ui/grammar';
 import { useIsDesktop } from '@/utils/responsive';
 import { HullFloatingSurface, HullModal } from './HullDialog';
 import { IndexRow } from './IndexRow';
@@ -31,7 +22,8 @@ type HullActionSheetProps = {
   /** A virtualized child list owns scrolling for this sheet body. */
   scrollBody?: boolean;
   grip?: boolean;
-  style?: StyleProp<ViewStyle>;
+  /** Clears the device's bottom inset, then leaves the sheet's bottom gap. */
+  bottomInset?: boolean;
   subtitle?: string;
   testID?: string;
   title?: string;
@@ -85,7 +77,7 @@ export function HullActionSheet({
   navigation,
   onTitlePress,
   sticky,
-  style,
+  bottomInset = false,
   subtitle,
   testID,
   title,
@@ -116,50 +108,63 @@ export function HullActionSheet({
       <ScrollView
         keyboardShouldPersistTaps="handled"
         nestedScrollEnabled
-        style={[styles.bodyScroll, bodyMaxHeight != null && { maxHeight: bodyMaxHeight }]}
+        flexGrow={0}
+        flexShrink={1}
+        maxHeight={bodyMaxHeight}
         testID={testID ? `${testID}-body` : undefined}
       >
         {children}
       </ScrollView>
     ) : (
-      <View style={[styles.bodyScroll, bodyMaxHeight != null && { maxHeight: bodyMaxHeight }]}>
+      <YStack flexGrow={0} flexShrink={1} maxHeight={bodyMaxHeight}>
         {children}
-      </View>
+      </YStack>
     );
   return (
-    <HullFloatingSurface style={[styles.sheet, style]} testID={testID}>
+    <HullFloatingSurface width="100%" testID={testID}>
       {grip ? (
-        <View
+        <YStack
           accessibilityElementsHidden
           importantForAccessibility="no-hide-descendants"
-          style={styles.gripSlot}
+          height={SHEET_GRIP_HEIGHT}
+          alignItems="center"
+          justifyContent="center"
         >
-          <View style={styles.grip} />
-        </View>
+          <YStack width={34} height={3} borderRadius="sm" backgroundColor="secondary" opacity={0.55} />
+        </YStack>
       ) : null}
       {navigation}
       {title && onTitlePress ? (
-        <Pressable
+        <YStack
           accessibilityLabel={titleAccessibilityLabel}
           accessibilityRole="button"
           onPress={onTitlePress}
           testID={titleTestID}
         >
-          <Text numberOfLines={1} style={styles.title}>{title}</Text>
-        </Pressable>
+          <T v="heading" numberOfLines={1} paddingHorizontal="6" paddingTop="1" paddingBottom="2">{title}</T>
+        </YStack>
       ) : title ? (
-        <Text accessibilityRole="header" numberOfLines={1} style={styles.title} testID={titleTestID}>
+        <T
+          v="heading"
+          accessibilityRole="header"
+          numberOfLines={1}
+          paddingHorizontal="6"
+          paddingTop="1"
+          paddingBottom="2"
+          testID={titleTestID}
+        >
           {title}
-        </Text>
+        </T>
       ) : null}
       {subtitle ? (
-        <Text numberOfLines={2} style={styles.subtitle}>
+        <T v="meta" color="secondary" numberOfLines={2} paddingHorizontal="6" paddingBottom="2">
           {subtitle}
-        </Text>
+        </T>
       ) : null}
       {sticky}
       {body}
       {footer}
+      {bottomInset ? <YStack height={sheetBottomPadding(insets.bottom)} /> : null}
     </HullFloatingSurface>
   );
 }
@@ -235,16 +240,25 @@ export function HullActionSheetCancel({
   onPress: () => void;
   testID?: string;
 }) {
+  // Cancel is one more row: the sheet row's height on the sheet's edge.
   return (
-    <Button
-      label={label}
-      variant="quiet"
-      fullWidth
-      disabled={disabled}
-      onPress={onPress}
-      testID={testID}
-      style={styles.cancel}
-    />
+    <YStack
+      minHeight={HEIGHT.tabBar}
+      paddingHorizontal="6"
+      alignItems="center"
+      justifyContent="center"
+      borderTopWidth={0.5}
+      borderTopColor="stroke"
+    >
+      <Button
+        label={label}
+        variant="quiet"
+        fullWidth
+        disabled={disabled}
+        onPress={onPress}
+        testID={testID}
+      />
+    </YStack>
   );
 }
 
@@ -253,7 +267,7 @@ type HullActionSheetModalProps = {
   accessibilityLabel?: string;
   /** Widens the centred desktop sheet past the dialog cap. Only a sheet whose
    *  body is sized by its content — machine output — asks for this. */
-  contentStyle?: StyleProp<ViewStyle>;
+  contentMaxWidth?: number;
   /** Held false while a row's inline editor has unsaved work in flight. */
   dismissOnBackdrop?: boolean;
   /** Pinned under the title. */
@@ -279,7 +293,7 @@ type HullActionSheetModalProps = {
 export function HullActionSheetModal({
   accessibilityLabel,
   children,
-  contentStyle,
+  contentMaxWidth,
   dismissOnBackdrop,
   footer,
   scrollBody,
@@ -298,13 +312,13 @@ export function HullActionSheetModal({
   visible,
   withinScreen,
 }: HullActionSheetModalProps) {
-  const insets = useSafeAreaInsets();
   const isDesktop = useIsDesktop();
   const { height: windowHeight } = useWindowDimensions();
   return (
     <HullModal
       accessibilityLabel={accessibilityLabel ?? 'Close action sheet'}
-      contentStyle={[styles.modalContent, isDesktop && { maxWidth: 560 }, contentStyle, isDesktop && { maxHeight: windowHeight * SHEET_MAX_HEIGHT_FRACTION }]}
+      contentMaxWidth={contentMaxWidth ?? (isDesktop ? 560 : undefined)}
+      contentMaxHeight={isDesktop ? windowHeight * SHEET_MAX_HEIGHT_FRACTION : undefined}
       dismissOnBackdrop={dismissOnBackdrop}
       onDismiss={onDismiss}
       onRequestClose={onClose}
@@ -321,7 +335,7 @@ export function HullActionSheetModal({
         grip={!isDesktop}
         navigation={navigation}
         sticky={sticky}
-        style={{ paddingBottom: sheetBottomPadding(insets.bottom) }}
+        bottomInset
         subtitle={subtitle}
         testID={testID}
         onTitlePress={onTitlePress}
@@ -334,51 +348,3 @@ export function HullActionSheetModal({
     </HullModal>
   );
 }
-
-const styles = StyleSheet.create((theme) => {
-  const hull = theme.buzz;
-  return {
-    modalContent: { paddingHorizontal: 0 },
-    sheet: {
-      width: '100%',
-    },
-    bodyScroll: {
-      flexGrow: 0,
-      flexShrink: 1,
-    },
-    gripSlot: { height: SHEET_GRIP_HEIGHT, alignItems: 'center', justifyContent: 'center' },
-    grip: {
-      width: 34,
-      height: 3,
-      borderRadius: hull.radius,
-      backgroundColor: hull.textDisabled,
-      opacity: 0.55,
-    },
-    title: {
-      ...Typography.default('semiBold'),
-      ...hull.type.bodyStrong,
-      paddingHorizontal: HULL_SHEET_INSET,
-      paddingTop: hull.space.xs,
-      paddingBottom: hull.space.sm,
-      color: hull.textPrimary,
-      fontFamily: hull.proseSemibold,
-    },
-    subtitle: {
-      ...Typography.default(),
-      ...hull.type.meta,
-      paddingHorizontal: HULL_SHEET_INSET,
-      paddingBottom: hull.space.sm,
-      color: hull.textSecondary,
-      fontFamily: hull.proseRegular,
-    },
-    // Cancel is one more row: the sheet row's height on the sheet's edge.
-    cancel: {
-      minHeight: HULL_SHEET_ROW_HEIGHT,
-      paddingHorizontal: HULL_SHEET_INSET,
-      alignItems: 'center',
-      justifyContent: 'center',
-      borderTopWidth: StyleSheet.hairlineWidth,
-      borderTopColor: hull.border,
-    },
-  };
-});

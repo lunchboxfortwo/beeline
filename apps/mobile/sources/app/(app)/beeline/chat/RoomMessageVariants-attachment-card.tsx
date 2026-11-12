@@ -1,6 +1,7 @@
 import type { MessageSendState } from '@/buzz/message-outbox';
 import React, { useCallback, useEffect, useLayoutEffect, useRef, useState, useSyncExternalStore } from 'react';
-import { Platform, Pressable, Text, View } from 'react-native';
+import { Platform, type View } from 'react-native';
+import { XStack, YStack } from 'tamagui';
 import TranscriptSwipeable, { type TranscriptSwipeableMethods as SwipeableMethods } from '@/components/buzz/TranscriptSwipeable';
 import { DesktopMessageAction } from '@/components/buzz/DesktopMessageAction';
 import { ButtonRowFrame } from '@/components/buzz/ButtonRow';
@@ -19,15 +20,13 @@ import { openComputerSessionViewer } from '@/components/buzz/ComputerSession';
 import { openArtifactViewer } from '@/components/buzz/ArtifactCard';
 import { ArtifactViewerScreen } from '@/components/buzz/ArtifactViewer';
 import { showPictureActions } from '@/buzz/picture-actions';
-import { CORNER_LABEL } from '@/buzz/vocabulary';
-import { CornerGlyph } from '@/components/buzz/CornerGlyph';
 import { ContentTarget } from '@/components/buzz/IndexRow';
 import { Modal } from '@/modal';
 import { openExternalUrl } from '@/utils/open-external-url';
 import { IdentityMark } from '@/components/buzz/IdentityMark';
-import { ALIVE_RING_PAD } from '@/buzz/identity-mark';
-import { styles } from './RoomMessageVariants-ordinary-ledger-message';
 import { FileRow } from '@/ui/screens/transcript/FileRow';
+import { CornerDownRight, CornerUpLeft } from 'lucide-react-native';
+import { EmojiGlyph, Filled, Glyph, RingOutset, T } from '@/ui/grammar';
 
 
 
@@ -69,16 +68,20 @@ export function AttachmentCard({
   const metadata = `${attachment.mimeType.toUpperCase()} · ${formatAttachmentSize(attachment.size)}`;
   if (attachment.expired) {
     return (
-      <View
+      <YStack
         accessibilityLabel={`Expired attachment ${attachment.name}`}
-        style={styles.attachmentTarget}
+        minWidth={0}
+        width="100%"
+        marginTop="2"
         testID={`chat-attachment-expired-${attachment.name}`}
       >
         <FileRow name={attachment.name} meta={`EXPIRED · ${metadata}`} opens={false} quiet />
-      </View>
+      </YStack>
     );
   }
+  // A file with no preview is one raised row (`ui/screens/transcript/FileRow`).
   return (
+    <YStack minWidth={0} width="100%" marginTop="2">
     <ContentTarget
       accessibilityLabel={`Open attachment ${attachment.name}`}
       accessibilityRole={attachment.mimeType.startsWith('image/') ? 'button' : 'link'}
@@ -92,7 +95,6 @@ export function AttachmentCard({
           : undefined
       }
       onPress={open}
-      style={styles.attachmentTarget}
       testID={`chat-attachment-${attachment.name}`}
       {...(isDesktop && attachment.mimeType.startsWith('image/')
         ? ({
@@ -109,18 +111,53 @@ export function AttachmentCard({
         meta={metadata}
         opens
         leading={image ? (
-          <ArtifactImage
-            attachment={attachment}
-            fit="cover"
-            style={styles.attachmentThumbnail}
-            testID={`chat-attachment-thumbnail-${attachment.name}`}
-          />
+          <YStack width={44} height={44} borderRadius="sm" overflow="hidden" backgroundColor="highlight">
+            <Filled
+              view={ArtifactImage}
+              attachment={attachment}
+              fit="cover"
+              testID={`chat-attachment-thumbnail-${attachment.name}`}
+            />
+          </YStack>
         ) : undefined}
       />
     </ContentTarget>
+    </YStack>
   );
 }
 
+
+/**
+ * A swipe panel behind a message: the action's glyph beside its name, on the
+ * raised surface, edged on the message's side. Glyph and name sit on one line so
+ * a one-line message row holds them. Both stay mounted while hidden, so the
+ * width the swipeable measures for the open distance does not change.
+ */
+function SwipeAction({ side, icon, label, accessibilityLabel, shown, testID }: {
+  side: 'left' | 'right'; icon: React.ComponentProps<typeof Glyph>['icon']; label: string; accessibilityLabel: string; shown: boolean; testID: string;
+}) {
+  return (
+    <XStack
+      accessibilityLabel={accessibilityLabel}
+      accessibilityElementsHidden={!shown}
+      importantForAccessibility={shown ? 'auto' : 'no-hide-descendants'}
+      paddingHorizontal="3"
+      marginBottom="2"
+      gap="1"
+      alignItems="center"
+      justifyContent="center"
+      backgroundColor="raised"
+      borderColor="stroke"
+      borderLeftWidth={side === 'right' ? 1 : 0}
+      borderRightWidth={side === 'left' ? 1 : 0}
+      opacity={shown ? 1 : 0}
+      testID={testID}
+    >
+      <Glyph icon={icon} size={16} accent />
+      <T v="meta" color="secondary" numberOfLines={1}>{label}</T>
+    </XStack>
+  );
+}
 
 export function SwipeToReply({
   children,
@@ -133,7 +170,7 @@ export function SwipeToReply({
   onForward,
   onBookmark = () => undefined,
   onReportIssue,
-  onSwipeCorner,
+  onSwipeThread,
   bookmarked = false,
   isDesktop,
   replyOnly = false,
@@ -152,8 +189,8 @@ export function SwipeToReply({
   /** Report issue — files the message with the Beeline feedback loop. Omitted
    *  where the row offers no report (the desktop work pane's read-only copy). */
   onReportIssue?(): void;
-  /** Mobile swipe right — forward the message into a new corner. */
-  onSwipeCorner?(): void;
+  /** Mobile swipe right — open a new thread from the message. */
+  onSwipeThread?(): void;
   bookmarked?: boolean;
   isDesktop: boolean;
   replyOnly?: boolean;
@@ -169,7 +206,7 @@ export function SwipeToReply({
     swipeableRef.current?.close();
     // Install the quote before a composer update can recycle this row.
     if (direction === 'left') onReply?.();
-    else onSwipeCorner?.();
+    else onSwipeThread?.();
   };
   const [desktopActionsVisible, setDesktopActionsVisible] = useState(false);
   const [desktopRowHovered, setDesktopRowHovered] = useState(false);
@@ -222,24 +259,23 @@ export function SwipeToReply({
     };
   }, [isDesktop, messageId, reactionPickerVisible]);
   const message = isDesktop ? (
-    <Pressable
-      accessibilityHint="Long press to copy the entire message"
-      accessibilityLabel="Message"
-      delayLongPress={450}
-      onLongPress={onLongPress}
-      onPress={onPress}
-      style={isDesktop ? styles.replyDesktopMessage : undefined}
-      testID={`copy-message-${messageId}`}
-    >
-      {children}
-    </Pressable>
+    <YStack flex={1} minWidth={0}>
+      <ContentTarget
+        accessibilityHint="Long press to copy the entire message"
+        accessibilityLabel="Message"
+        onLongPress={onLongPress}
+        onPress={onPress}
+        testID={`copy-message-${messageId}`}
+      >
+        {children}
+      </ContentTarget>
+    </YStack>
   ) : (
     <ContentTarget
       // The long press is the row's action sheet — reactions, copy, reply,
       // forward — so it deliberately claims what native text selection once
       // held on this row; Copy on the sheet is the way to the full text now.
       // A normal press opens unsent-message actions or dismisses the composer.
-      delayLongPress={450}
       onLongPress={onActions}
       onPress={onPress}
       testID={`copy-message-${messageId}`}
@@ -249,8 +285,9 @@ export function SwipeToReply({
   );
   if (isDesktop) {
     return (
-      <View
-        style={styles.replyDesktopRow}
+      <XStack
+        position="relative"
+        alignItems="flex-start"
         {...({
           onMouseEnter: () => setDesktopRowHovered(true),
           onMouseLeave: () => setDesktopRowHovered(false),
@@ -260,10 +297,15 @@ export function SwipeToReply({
         <ButtonRowFrame
           ref={actionsRef}
           accessibilityLabel="Message actions"
-          style={[
-            styles.replyDesktopActions,
-            (desktopActionsVisible || desktopRowHovered || reactionPickerVisible) && styles.replyDesktopActionsVisible,
-          ]}
+          position="absolute"
+          top={0}
+          right={0}
+          flexDirection="row"
+          opacity={desktopActionsVisible || desktopRowHovered || reactionPickerVisible ? 1 : 0}
+          borderWidth={1}
+          borderColor="strongStroke"
+          borderRadius="sm"
+          backgroundColor="canvas"
           testID={`message-actions-${messageId}`}
         >
           {!replyOnly ? (
@@ -285,11 +327,21 @@ export function SwipeToReply({
           <DesktopWorkspacePortal>
             <ButtonRowFrame
               ref={pickerRef}
-              style={[styles.reactionPicker, pickerPosition ?? { opacity: 0 }]}
+              position={'fixed' as 'absolute'}
+              zIndex={4}
+              top={pickerPosition?.top}
+              left={pickerPosition?.left}
+              opacity={pickerPosition ? 1 : 0}
+              flexDirection="row"
+              padding="1"
+              borderWidth={1}
+              borderColor="strongStroke"
+              borderRadius="sm"
+              backgroundColor="canvas"
               testID={`reaction-picker-${messageId}`}
             >
             {MESSAGE_REACTION_EMOJIS.map((emoji) => (
-              <Pressable
+              <YStack
                 accessibilityLabel={`React with ${emoji}`}
                 accessibilityRole="button"
                 key={emoji}
@@ -297,70 +349,50 @@ export function SwipeToReply({
                   onReact(emoji);
                   setReactionPickerVisible(false);
                 }}
-                style={({ pressed }) => [
-                  styles.reactionPickerChoice,
-                  pressed && styles.replyDesktopPressed,
-                ]}
+                width={36}
+                height={34}
+                alignItems="center"
+                justifyContent="center"
+                cursor="pointer"
                 testID={`reaction-choice-${messageId}-${emoji}`}
               >
-                <Text style={styles.reactionEmoji}>{emoji}</Text>
-              </Pressable>
+                <EmojiGlyph>{emoji}</EmojiGlyph>
+              </YStack>
             ))}
             </ButtonRowFrame>
           </DesktopWorkspacePortal>
         ) : null}
-      </View>
+      </XStack>
     );
   }
-  const cornerAction = (poseStyle?: object) => (
-    <View
-      accessibilityLabel={`Forward message to a new ${CORNER_LABEL}`}
-      accessibilityElementsHidden={!swipeShown}
-      importantForAccessibility={swipeShown ? 'auto' : 'no-hide-descendants'}
-      style={[styles.cornerSwipeAction, !swipeShown && styles.swipeActionAtRest, poseStyle]}
-      testID={`corner-swipe-action-${messageId}`}
-    >
-      {swipeShown ? <>
-        <CornerGlyph color={styles.cornerSwipeGlyph.color} size={20} />
-        <Text style={styles.replySwipeLabel}>{CORNER_LABEL.toUpperCase()}</Text>
-      </> : null}
-    </View>
-  );
+  // Swipeable's container clips (`overflow: 'hidden'`) at the row's content
+  // edge, where the byline tile sits — and a live agent's gold ring paints
+  // `ALIVE_RING_PAD` (one step) outside that tile. The clip box is outset by
+  // the ring gutter and the children padded back by the same amount, so the
+  // copy column never moves and the whole tile, ring included, stays visible.
   const swipeRow = () => (
+    <RingOutset>
     <TranscriptSwipeable
       ref={swipeableRef}
-      // Swipeable's container clips (`overflow: 'hidden'`) at the row's content
-      // edge, where the byline tile sits — and a live agent's gold ring paints
-      // `ALIVE_RING_PAD` outside that tile. The clip box is outset by the ring
-      // gutter and the children padded back by the same amount, so the copy
-      // column never moves and the whole tile, ring included, stays visible.
-      // These third-party style props need plain values: Unistyles web styles
-      // hide their properties until a supported host style prop resolves them.
-      containerStyle={{ marginHorizontal: -ALIVE_RING_PAD }}
-      childrenContainerStyle={{ paddingHorizontal: ALIVE_RING_PAD }}
       dragOffsetFromRightEdge={18}
       friction={1.35}
       onSwipeableWillOpen={commitSwipe}
       onSwipeableClose={hideSwipe}
       onSwipeableOpenStartDrag={showSwipe}
-      renderLeftActions={onSwipeCorner ? () => cornerAction() : undefined}
-      renderRightActions={onReply ? () => (
-        <View
-          accessibilityLabel="Reply to message"
-          style={styles.replySwipeAction}
-          testID={`reply-swipe-action-${messageId}`}
-        >
-          {swipeShown ? <>
-            <Text style={styles.replySwipeGlyph}>↩</Text>
-            <Text style={styles.replySwipeLabel}>REPLY</Text>
-          </> : null}
-        </View>
+      renderLeftActions={onSwipeThread ? () => (
+        <SwipeAction side="left" icon={CornerDownRight} label="New thread" accessibilityLabel="Open a new thread from this message"
+          shown={swipeShown} testID={`thread-swipe-action-${messageId}`} />
       ) : undefined}
-      enabled={Boolean(onReply || onSwipeCorner)}
+      renderRightActions={onReply ? () => (
+        <SwipeAction side="right" icon={CornerUpLeft} label="Reply" accessibilityLabel="Reply to message"
+          shown={swipeShown} testID={`reply-swipe-action-${messageId}`} />
+      ) : undefined}
+      enabled={Boolean(onReply || onSwipeThread)}
       testID={`swipe-reply-${messageId}`}
     >
-      {message}
+      <YStack paddingHorizontal="1">{message}</YStack>
     </TranscriptSwipeable>
+    </RingOutset>
   );
   return swipeRow();
 }
@@ -439,8 +471,8 @@ export const ConnectorReceiptCard = React.memo(function ConnectorReceiptCard({
   identity?: ChatDisplayMessage['authorIdentity'];
 }) {
   return (
-    <View style={styles.connectorReceipt} testID="connector-receipt-card">
-      <View style={styles.connectorReceiptIdentity}>
+    <YStack marginTop="1" marginHorizontal="2" borderWidth={1} borderColor="strongStroke" borderRadius="sm" padding="2" gap="1" testID="connector-receipt-card">
+      <XStack alignItems="center" gap="2">
         {identity?.avatar ? (
           <IdentityMark
             kind="human"
@@ -451,13 +483,13 @@ export const ConnectorReceiptCard = React.memo(function ConnectorReceiptCard({
             testID="connector-receipt-logo"
           />
         ) : null}
-        <Text style={styles.connectorReceiptHead}>{identity?.name ?? connectorName}</Text>
-      </View>
-      <Text style={styles.connectorReceiptLine}>
+        <T v="metaStrong" color="secondary" textTransform="uppercase">{identity?.name ?? connectorName}</T>
+      </XStack>
+      <T v="code" color="secondary">
         {receipt.connection} · {receipt.operation}
         {receipt.helper ? ` · on ${receipt.helper}` : ''}
-      </Text>
-      <Text style={styles.connectorReceiptLine}>
+      </T>
+      <T v="code" color="secondary">
         {[
           receipt.grant ? `grant ${receipt.grant}` : undefined,
           receipt.calls !== undefined
@@ -467,9 +499,9 @@ export const ConnectorReceiptCard = React.memo(function ConnectorReceiptCard({
         ]
           .filter(Boolean)
           .join(' · ')}
-      </Text>
+      </T>
       {/* One flat summary string; test assertions read it as a plain prop. */}
-      <Text style={styles.connectorReceiptLine} testID="connector-receipt-summary">
+      <T v="code" color="secondary" testID="connector-receipt-summary">
         {[
           receipt.connection,
           receipt.operation,
@@ -482,8 +514,8 @@ export const ConnectorReceiptCard = React.memo(function ConnectorReceiptCard({
         ]
           .filter(Boolean)
           .join(' · ')}
-      </Text>
-    </View>
+      </T>
+    </YStack>
   );
 });
 

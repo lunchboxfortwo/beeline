@@ -10,7 +10,7 @@ vi.mock('react-native-safe-area-context', () => ({ useSafeAreaInsets: () => ({ t
 vi.mock('./IdentityMark', () => ({ IdentityMark: () => null }));
 vi.mock('./ErrorBanner', () => ({ ErrorBanner: () => null }));
 vi.mock('@/ui/screens/transcript/cards/RequestMedia', () => ({ RequestMedia: () => null }));
-vi.mock('./Ledger', () => ({ ledgerEntryRhythm: () => ({}) }));
+vi.mock('./Ledger', () => ({ LedgerEntryFrame: ({ children }: { children: React.ReactNode }) => children }));
 vi.mock('@/components/buzz/IdentityMark', () => ({ IdentityMark: () => null }));
 
 import { canDecideGrantRequest, GrantRequestCard, GrantRequestPill } from './GrantRequestCard';

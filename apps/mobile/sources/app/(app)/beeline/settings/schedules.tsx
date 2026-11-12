@@ -3,11 +3,9 @@ import { useIsDesktop as useDesktopPageLayout } from '@/utils/responsive';
 import { Button } from '@/components/buzz/Button';
 import { useLatencyRouteFrame } from '@/buzz/latency-route-hook';
 import React from 'react';
-import { Pressable, ScrollView, Text, View } from 'react-native';
+import { ScrollView, YStack } from 'tamagui';
 import Ionicons from '@expo/vector-icons/Ionicons';
 import { router, useLocalSearchParams } from 'expo-router';
-import { useSafeAreaInsets } from 'react-native-safe-area-context';
-import { StyleSheet } from 'react-native-unistyles';
 import { cornerShortTitle, roomTitle, type RoomScheduleView, type RoomSubscriptionView } from '@beeline/api-contract/phone';
 import {
   scheduleTitle,
@@ -21,9 +19,15 @@ import { PageHeader } from '@/components/buzz/PageHeader';
 import { ScheduledWorkWhere } from '@/components/buzz/ScheduledWorkWhere';
 import { SettingsRow } from '@/components/buzz/SettingsRow';
 import { SurfaceGlyphLoader } from '@/components/buzz/SurfaceGlyphLoader';
+import { Copy, Inked, SafeBottom, SafeTop, T } from '@/ui/grammar';
 
 function first(value: string | string[] | undefined): string | undefined {
   return Array.isArray(value) ? value[0] : value;
+}
+
+/** Ionicons' clock in the shape Inked colours. */
+function TimeOutline(props: { color?: string; size?: number }) {
+  return <Ionicons name="time-outline" {...props} />;
 }
 
 type WorkEntry =
@@ -52,8 +56,8 @@ function ListAttribution({ agent, corner, roomName, isDirectMessage }: {
   corner?: { id: string; name: string } | null;
 }) {
   return <>
-    <Text numberOfLines={1} style={styles.listAgent}>@{agent}</Text>
-    <Text style={styles.listDot}>{' · '}</Text>
+    <Copy small quiet numberOfLines={1} minWidth={0}>@{agent}</Copy>
+    <Copy small quiet flexShrink={0}>{' · '}</Copy>
     <ScheduledWorkWhere isDirectMessage={isDirectMessage} corner={corner ? { ...corner, name: cornerShortTitle(roomName, corner.name, corner.id) } : undefined} />
   </>;
 }
@@ -65,7 +69,6 @@ function ListAttribution({ agent, corner, roomName, isDirectMessage }: {
  */
 export default function ScheduledWork() {
   useLatencyRouteFrame('/beeline/settings/schedules');
-  const insets = useSafeAreaInsets();
   const desktopPageLayout = useDesktopPageLayout();
   const params = useLocalSearchParams<{
     roomId?: string | string[];
@@ -86,7 +89,7 @@ export default function ScheduledWork() {
     <SettingsRow
       chevron="right"
       description={scheduleTrigger(schedule)}
-      descriptionContent={<Text numberOfLines={1} style={styles.listTrigger}>{scheduleTrigger(schedule)}</Text>}
+      descriptionContent={<Copy small quiet numberOfLines={1}>{scheduleTrigger(schedule)}</Copy>}
       descriptionDetail={`@${work?.agentNames.get(schedule.agentId) ?? 'Agent'} · ${scheduleWhere(schedule, work?.roomName, work?.isDirectMessage)}`}
       descriptionDetailContent={<ListAttribution
         isDirectMessage={work?.isDirectMessage} roomName={work?.roomName} agent={work?.agentNames.get(schedule.agentId) ?? 'Agent'} corner={schedule.corner} />}
@@ -101,7 +104,7 @@ export default function ScheduledWork() {
     <SettingsRow
       chevron="right"
       description={subscriptionWhen(subscription, work?.isDirectMessage)}
-      descriptionContent={<Text numberOfLines={1} style={styles.listTrigger}>{subscriptionWhen(subscription, work?.isDirectMessage)}</Text>}
+      descriptionContent={<Copy small quiet numberOfLines={1}>{subscriptionWhen(subscription, work?.isDirectMessage)}</Copy>}
       descriptionDetail={`@${work?.agentNames.get(subscription.agentId) ?? 'Agent'} · ${scheduleWhere(subscription, work?.roomName, work?.isDirectMessage)}`}
       descriptionDetailContent={<ListAttribution
         isDirectMessage={work?.isDirectMessage} roomName={work?.roomName} agent={work?.agentNames.get(subscription.agentId) ?? 'Agent'} corner={subscription.corner} />}
@@ -118,10 +121,13 @@ export default function ScheduledWork() {
   );
 
   return (
-    <View style={[styles.screen, desktopPageLayout && { width: '100%', maxWidth: desktopColumnWidths.list, alignSelf: 'center' }, { paddingTop: insets.top }]}>
+    <YStack flex={1} backgroundColor="canvas"
+      width={desktopPageLayout ? '100%' : undefined} maxWidth={desktopPageLayout ? desktopColumnWidths.list : undefined}
+      alignSelf={desktopPageLayout ? 'center' : undefined}>
+      <SafeTop />
       <PageHeader
-        backAccessibilityLabel={work?.isDirectMessage ? 'Back to DM' : 'Back to Room'}
-        eyebrow={work?.isDirectMessage ? 'DM' : roomTitle(work?.roomName) ?? 'Room'}
+        backAccessibilityLabel={work?.isDirectMessage ? 'Back to DM' : 'Back to chat'}
+        eyebrow={work?.isDirectMessage ? 'DM' : roomTitle(work?.roomName) ?? 'Chat'}
         onBack={() => router.back()}
         testID="scheduled-work-header"
         title="Schedules and subscriptions"
@@ -129,50 +135,31 @@ export default function ScheduledWork() {
       {error && <SettingsRow title={error}
           />}
       {loading ? (
-        <View style={styles.loading}>
+        <YStack padding="8" alignItems="center" justifyContent="center">
           <SurfaceGlyphLoader testID="schedules-loader" />
-        </View>
+        </YStack>
       ) : (
         <ScrollView
-          contentContainerStyle={{ paddingBottom: 24 + insets.bottom }}
           keyboardShouldPersistTaps="handled"
           testID="scheduled-work-list"
         >
           {entries.length === 0 ? (
-            <View style={styles.emptyBlock} testID="scheduled-work-empty">
-              <Ionicons color={styles.emptyIcon.color} name="time-outline" size={22} />
-              <Text style={styles.emptyTitle}>Nothing wakes agents here yet</Text>
-              <Text style={styles.empty}>
-                Agents set up schedules and subscriptions. Ask an agent in {work?.isDirectMessage ? 'this DM' : 'this Room'} to add one.
-              </Text>
-            </View>
+            <YStack padding="8" alignItems="flex-start" justifyContent="center" testID="scheduled-work-empty">
+              <Inked color="needsYou" glyph={TimeOutline} size={22} />
+              <T v="heading" marginTop="2">Nothing wakes agents here yet</T>
+              <Copy small quiet marginTop="2">
+                Agents set up schedules and subscriptions. Ask an agent in {work?.isDirectMessage ? 'this DM' : 'this chat'} to add one.
+              </Copy>
+            </YStack>
           ) : (
-            <View style={styles.rows}>{entries.map((entry) => entry.kind === 'schedule'
-            ? renderSchedule(entry.value) : renderSubscription(entry.value))}</View>
+            // SettingsRow pads by 8; keep the flat list on the 16pt page axis.
+            <YStack paddingHorizontal="2">{entries.map((entry) => entry.kind === 'schedule'
+            ? renderSchedule(entry.value) : renderSubscription(entry.value))}</YStack>
           )}
+          <YStack paddingBottom="6" />
+          <SafeBottom />
         </ScrollView>
       )}
-    </View>
+    </YStack>
   );
 }
-
-const styles = StyleSheet.create((theme) => ({
-  screen: { flex: 1, backgroundColor: theme.buzz.bgBase },
-  loading: { padding: theme.buzz.space.xl, alignItems: 'center', justifyContent: 'center' },
-  // SettingsRow pads by `space.sm`; keep the flat list on the 16pt page axis.
-  rows: { paddingHorizontal: theme.buzz.space.sm },
-  listTrigger: { ...theme.buzz.type.meta, color: theme.buzz.textSecondary, flexShrink: 1 },
-  listDot: { ...theme.buzz.type.meta, color: theme.buzz.textMuted },
-  listAgent: { ...theme.buzz.type.meta, color: theme.buzz.textMuted, flexShrink: 1, minWidth: 0 },
-  emptyBlock: { padding: theme.buzz.space.xl, alignItems: 'flex-start', justifyContent: 'center' },
-  emptyIcon: { color: theme.buzz.accent },
-  emptyTitle: { ...theme.buzz.type.bodyStrong, color: theme.buzz.textPrimary, marginTop: theme.buzz.space.sm },
-  empty: { ...theme.buzz.type.meta, color: theme.buzz.textSecondary, marginTop: theme.buzz.space.sm },
-  error: {
-    minHeight: 44,
-    justifyContent: 'center',
-    paddingHorizontal: 16,
-    backgroundColor: theme.buzz.bgHighlight,
-  },
-  errorText: { ...theme.buzz.type.meta, color: theme.buzz.textSecondary },
-}));
