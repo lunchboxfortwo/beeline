@@ -64,7 +64,7 @@ describe.each(['pglite', ...(postgresUrl ? ['postgres'] : [])])('P12 actual sele
     await listener?.stop(); await listening; listener = undefined; listening = undefined;
     await Promise.all(releases.splice(0)); await presence?.stop(); vi.useRealTimers(); vi.restoreAllMocks(); vi.unstubAllEnvs(); await closeDatabase?.();
   });
-  async function connect(enabled = true, identity = agent) {
+  async function connect(enabled = true, identity = agent, lifecycleId = 'synthetic-lifecycle') {
     vi.stubEnv('BEELINE_NETWORK_ROUTER_V1', enabled ? '1' : '0');
     if (!server) {
       server = createBeelineServer({ database: db, live, daemon, connectionPresence: presence,
@@ -90,7 +90,7 @@ describe.each(['pglite', ...(postgresUrl ? ['postgres'] : [])])('P12 actual sele
       });
     };
     const send = (frame: Frame) => socket.send(JSON.stringify({ agentId: identity, ...frame }));
-    send({ type: 'register', token: identity === agent ? 'bdt_synthetic' : 'bdt_synthetic_peer', lifecycleId: 'synthetic-lifecycle', turnOwnershipV1: true, intakeHeartbeat: true });
+    send({ type: 'register', token: identity === agent ? 'bdt_synthetic' : 'bdt_synthetic_peer', lifecycleId, turnOwnershipV1: true, intakeHeartbeat: true });
     const registered = await next(frame => frame.type === 'registered');
     return { socket, frames, send, next, registered };
   }
@@ -100,7 +100,7 @@ describe.each(['pglite', ...(postgresUrl ? ['postgres'] : [])])('P12 actual sele
     return client.next(frame => frame.type === 'turn-result' && frame.requestId === requestId, `turn result ${requestId}`);
   }
 
-  it('requeues on every actual socket close, reclaims a fresh generation, and retains the Squire verdict', async () => {
+  it('retains the running generation and Squire verdict across same-helper socket reconnects', async () => {
     const bootstrap=await connect();bootstrap.socket.terminate();
     const helperSockets:WebSocket[]=[];
     const vault=vi.fn(async()=>({connections:[{reference:'synthetic-credential',service:'example',label:'connected',
@@ -112,26 +112,25 @@ describe.each(['pglite', ...(postgresUrl ? ['postgres'] : [])])('P12 actual sele
     const api=new DaemonApiClient(baseUrl,'bdt_synthetic',agent,fetch,undefined,undefined,machine);
     try {
       await api.execute('getAgentCommands',{roomId:room});
+      const turn={roomId:room,requestId:command.turn_request_id,generationId:'surviving-generation'};
+      await api.execute('claimAgentCommand',{roomId:room,commandId:command.id,generationId:turn.generationId});
+      const previous=api.turnOwnershipScope()!,lost=vi.fn();
+      api.noteOwnedTurnClaim(turn,previous,lost);
       for(let drop=0;drop<3;drop++){
-        const generationId=`before-drop-${drop}`;
-        await api.execute('claimAgentCommand',{roomId:room,commandId:command.id,generationId});
-        const previous=api.turnOwnershipScope()!,lost=vi.fn();
-        api.noteOwnedTurnClaim({roomId:room,requestId:command.turn_request_id,generationId},previous,lost);
         const dropped=helperSockets.at(-1)!;
         const closed=new Promise<void>(resolve=>dropped.once('close',()=>resolve()));
         dropped.terminate();await closed;
         await api.waitForConnection();
-        await vi.waitFor(async()=>expect((await db.query('SELECT state FROM agent_commands WHERE id=$1',[command.id])).rows[0]).toMatchObject({state:'pending'}));
-        expect(api.turnOwnershipScope()).not.toEqual(previous);
-        expect(lost).toHaveBeenCalledTimes(1);
+        expect((await db.query('SELECT state,generation_id FROM agent_commands WHERE id=$1',[command.id])).rows[0])
+          .toMatchObject({state:'claimed',generation_id:turn.generationId});
+        expect(api.turnOwnershipScope()).toEqual(previous);
+        expect(lost).not.toHaveBeenCalled();
         expect(await expireOwnedAgentTurns(db,live,agent)).toBe(0);
       }
       await machine.refreshVault();
       expect((await daemon.execute('getConnectorStatus',{agentId:agent,connectorId:`squire:${agent}`},agent)).status).toBe('connected');
       vault.mockRejectedValueOnce(new Error('Squire MCP session closed'));await machine.refreshVault();
       expect((await daemon.execute('getConnectorStatus',{agentId:agent,connectorId:`squire:${agent}`},agent)).status).toBe('connected');
-      const turn={roomId:room,requestId:command.turn_request_id,generationId:'final-generation'};
-      await api.execute('claimAgentCommand',{roomId:room,commandId:command.id,generationId:turn.generationId});
       await api.execute('postRoomMessage',{...turn,text:'Finished after three connection drops.'});
       await api.execute('postAgentTurnReceipt',{agentId:agent,...turn,status:'complete'});
       expect((await db.query('SELECT state,generation_id FROM agent_commands WHERE id=$1',[command.id])).rows[0])
@@ -240,14 +239,16 @@ describe.each(['pglite', ...(postgresUrl ? ['postgres'] : [])])('P12 actual sele
     expect(execute).not.toHaveBeenCalled();
   });
 
-  it('applies owner loss once and keeps the generation bound after its active row is requeued', async () => {
+  it('requeues on helper replacement and keeps the prior generation bound to its original owner', async () => {
     const first = await connect(); expect(await claim(first)).toHaveProperty('result');
     first.socket.terminate();
-    await vi.waitFor(async () => expect((await db.query(`SELECT state FROM agent_commands WHERE id=$1`, [command.id])).rows[0]!.state).toBe('pending'));
+    await vi.waitFor(async () => expect((await db.query(`SELECT released_at FROM agent_connections WHERE agent_id=$1`, [agent])).rows[0]!.released_at).not.toBeNull());
+    expect((await db.query(`SELECT state FROM agent_commands WHERE id=$1`, [command.id])).rows[0]!.state).toBe('claimed');
     const facts = (await db.query(`SELECT count(*)::int count FROM messages WHERE presentation='system'`)).rows;
     expect(await expireOwnedAgentTurns(db, live, agent)).toBe(0);
     expect((await db.query(`SELECT count(*)::int count FROM messages WHERE presentation='system'`)).rows).toEqual(facts);
-    const second = await connect();
+    const second = await connect(true, agent, 'replacement-lifecycle');
+    await vi.waitFor(async () => expect((await db.query(`SELECT state FROM agent_commands WHERE id=$1`, [command.id])).rows[0]!.state).toBe('pending'));
     expect(await claim(second, 'generation', 'same-generation')).toHaveProperty('error');
     expect(await claim(second, 'new-generation', 'new-owner')).toHaveProperty('result');
     expect((await db.query(`SELECT turn_owner_epoch::integer turn_owner_epoch FROM agent_commands WHERE id=$1`, [command.id])).rows[0]!.turn_owner_epoch)
