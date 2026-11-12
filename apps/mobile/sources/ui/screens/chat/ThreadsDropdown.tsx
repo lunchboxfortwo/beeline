@@ -2,12 +2,13 @@ import React, { useCallback, useContext, useEffect, useState } from 'react';
 import { useFocusEffect } from 'expo-router';
 import { usePanel } from '@/ui/shell/panel';
 import { Platform, useWindowDimensions } from 'react-native';
-import { Collapsible, ScrollView, Separator, YStack } from 'tamagui';
+import { Collapsible, ScrollView, Separator, XStack, YStack } from 'tamagui';
 import { ChevronDown, ChevronUp, CornerDownRight } from 'lucide-react-native';
 import { cornerShortTitle, type CornerState } from '@beeline/api-contract/phone';
 import { useRoomCornerSummary } from '@/buzz/room-corner-store';
 import { useRoomCorners } from '@/buzz/use-room-corners';
-import { Btn, Copy, Glyph } from '@/ui/grammar';
+import { Btn, Copy, Glyph, HEIGHT } from '@/ui/grammar';
+import { ForwardCornerSheet } from '@/components/buzz/ForwardCornerSheet';
 import { ThreadLine } from '@/ui/screens/thread/ThreadLine';
 
 /** The list is at most this share of the window and scrolls inside itself. */
@@ -35,37 +36,49 @@ export function ThreadsDropdownScope({ children }: { children: React.ReactNode }
  * "Threads · N active" under the chat header. The count is the Room's
  * server corner summary; opening it reads the Room's open corner pages.
  */
-export function ThreadsDropdown({ roomId, chatName, openThread }: {
+export function ThreadsDropdown({ roomId, chatName, openThread, onNewThread, newThreadDisabled = false }: {
     roomId: string; chatName: string | null; openThread: (cornerId: string) => void;
+    onNewThread: () => void; newThreadDisabled?: boolean;
 }) {
+    const [newThreadPrompt, setNewThreadPrompt] = useState(false);
     const summary = useRoomCornerSummary(roomId);
     const local = useState(false);
     const scope = useContext(DropdownContext);
     const { open, setOpen } = scope ?? { open: local[0], setOpen: local[1] };
     const count = summary?.cornerCount ?? 0;
-    // The hairline under the chat header stays when there are no threads.
-    if (!count) return <Separator borderColor="stroke" marginTop="2" />;
     return (
         <YStack testID="threads-dropdown" onTouchStart={event => event.stopPropagation()}
             // Tamagui's native pointer adapter drops SyntheticEvent prototype
             // methods. Native containment uses the original touch event instead.
             {...(Platform.OS === 'web' ? { onPointerDown: (event: React.PointerEvent) => event.stopPropagation() } : {})}>
             <Collapsible open={open} onOpenChange={setOpen}>
-                <Collapsible.Trigger asChild>
-                    <Btn
-                        kind="quiet" label={`${count} active threads in ${chatName ?? 'this chat'}`}
-                        marginHorizontal="3" backgroundColor="raised" justifyContent="flex-start" gap="1" aria-expanded={open}
-                        testID="threads-dropdown-trigger"
-                    >
-                        <Copy small>{`Threads · ${count} active`}</Copy>
-                        <Glyph icon={open ? ChevronUp : ChevronDown} size={14} />
+                <XStack marginHorizontal="3" backgroundColor="raised" borderRadius="sm" alignItems="center">
+                    <Collapsible.Trigger asChild>
+                        <Btn
+                            kind="quiet" label={`${count} active threads in ${chatName ?? 'this chat'}`}
+                            flex={1} minWidth={HEIGHT.control} height="auto" justifyContent="flex-start" gap="1" aria-expanded={open}
+                            testID="threads-dropdown-trigger"
+                        >
+                            <Copy small>{`Threads · ${count} active`}</Copy>
+                            <Glyph icon={open ? ChevronUp : ChevronDown} size={14} />
+                        </Btn>
+                    </Collapsible.Trigger>
+                    <Separator vertical borderColor="stroke" height="4" />
+                    <Btn kind="quiet" label="New thread" gap="1" flexShrink={1} minWidth={HEIGHT.control} height="auto"
+                        disabled={newThreadDisabled} testID="threads-new-thread"
+                        onPress={() => { setOpen(false); setNewThreadPrompt(true); }}>
+                        <Glyph icon={CornerDownRight} size={16} />
+                        <Copy small>New thread</Copy>
                     </Btn>
-                </Collapsible.Trigger>
+                </XStack>
                 <Collapsible.Content>
                     {open ? <ThreadsDropdownList roomId={roomId} chatName={chatName} count={count}
                         fallback={summary?.openCorners ?? []} openThread={openThread} /> : null}
                 </Collapsible.Content>
             </Collapsible>
+            {newThreadPrompt ? <ForwardCornerSheet visible fromMessage={false}
+                onClose={() => setNewThreadPrompt(false)}
+                onOpen={() => { setNewThreadPrompt(false); onNewThread(); }} /> : null}
             <Separator borderColor="stroke" marginTop="2" />
         </YStack>
     );
