@@ -94,7 +94,7 @@ export function externalAgentRules(surface: ExternalAgentSurface, tool = "the se
   return EXTERNAL_AGENT_RULES.map(rule => `- ${surface === 'mcp' ? rule.mcp : rule.session.replace('{tool}', tool)}`).join('\n');
 }
 
-/** Per-message routing stays explicit even when the surrounding instructions are truncated. */
+/** Per-message routing names only the reply target and asker. */
 export function mentionReplyRule(messageId: string, askerHandle: string | null | undefined): string {
-  return `answer in this Room with replyTo ${messageId} and start with ${askerHandle ? `@${askerHandle}` : "the asker's exact @handle"}`;
+  return `Reply (start with ${askerHandle ? `@${askerHandle}` : "the asker's exact @handle"}): replyTo ${messageId}`;
 }

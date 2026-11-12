@@ -166,18 +166,22 @@ it('releases delegated turns on every surface so reports can wake a new turn', (
 mergedDescribe23("owed-tag-prompt.test.ts", () => {m23_describe('owed tag delivery', () => {
 const scope16 = fixtureScope16();
 
-  m23_it.each(['claude-code', 'codex'] as const)('C3 %s helper injection prefixes header, IDs and rule before long text', agent => {
+  m23_it.each(['claude-code', 'codex'] as const)('C3 %s joined-session mention keeps compact header, quoted text and routing commands', agent => {
     const text = m23_renderMention({ id: scope16.routing.messageId, room_id: scope16.routing.roomId, memberId: scope16.routing.memberId,
       room_name: scope16.routing.roomName, author_name: scope16.routing.fromName, author_handle: scope16.routing.fromHandle, text: 'x'.repeat(30000) },
     { key: 'joined', agent, cwd: '/', name: 'Helper', server: '', clientId: '', refreshToken: '', cursor: '0', deliveredWakes: [], joinedAt: '' },
     { node: '/node', bundle: '/bundle' });
-    m23_expect(text.startsWith('[Beeline · Room Design · message message-id · from @ruby_2]')).toBe(true);
-    for (const value of [scope16.routing.roomId, scope16.routing.messageId, scope16.routing.memberId, 'answer in this Room with replyTo message-id and start with @ruby_2']) m23_expect(text.slice(0,400)).toContain(value);
+    m23_expect(text).toBe([
+      '[Beeline · #Design · @ruby_2 tagged you]',
+      '> ' + 'x'.repeat(30000),
+      'Reply (start with @ruby_2): /node /bundle session reply --room room-id --reply-to message-id "<your answer>" --as joined',
+      'Context: /node /bundle session read --room room-id --as joined',
+    ].join('\n'));
   });
 
   m23_it('C2 managed helper prompt routing survives a truncated long instruction', () => {
     const result = m23_assembleTurnPrompt({ surface: 'room', routing: scope16.routing, sessionPrefix: 'x'.repeat(10000), task: { body: 'long task' } });
-    for (const value of [scope16.routing.roomId, scope16.routing.messageId, scope16.routing.memberId, 'answer in this Room with replyTo message-id and start with @ruby_2']) m23_expect(result.text.slice(0,400)).toContain(value);
+    for (const value of [scope16.routing.roomId, scope16.routing.messageId, scope16.routing.memberId, 'Reply (start with @ruby_2): replyTo message-id']) m23_expect(result.text.slice(0,400)).toContain(value);
   });
 });
 m23_describe('helper owed context', () => {
@@ -204,7 +208,7 @@ const scope17 = fixtureScope17();
     m23_vi.stubEnv('BEELINE_DAEMON_TOKEN', 'local-test');
     m23_vi.stubEnv('BEELINE_DAEMON_ROOM_ID', 'room');
     m23_vi.stubEnv('BEELINE_TURN_CONTEXT_FILE', '');
-    const owedMentions = [{ roomId: 'room', messageId: 'message', memberId: 'member', replyRule: 'answer in this Room with replyTo message and start with @asker' }];
+    const owedMentions = [{ roomId: 'room', messageId: 'message', memberId: 'member', replyRule: 'Reply (start with @asker): replyTo message' }];
     const fetch = m23_vi.fn(async (url: URL, init: RequestInit) => {
       m23_expect(url.pathname).toBe('/v1/daemon/operations/listRooms');
       m23_expect(init.headers).toMatchObject({ 'x-beeline-tool-result': '1' });

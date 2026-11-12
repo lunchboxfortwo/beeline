@@ -276,7 +276,7 @@ deletion. Unsubscribe/disconnect cascade pending deliveries. Expiry is evaluated
 This event has no protocol replay: `cursor` is always `null`, and non-null
 subscription cursors are refused. Use `list_mentions` for ledger catch-up.
 User-authored text stays data. Every mention delivery carries `roomId`, `messageId`,
-`memberId`, `replyRule` ("answer in this Room with replyTo <messageId> and start with @<asker handle>") and
+`memberId`, `replyRule` ("Reply (start with @<asker handle>): replyTo <messageId>") and
 `idempotencyKey` before the message text. These routing fields also accompany
 legacy bearer webhooks, `list_mentions` results and helper prompts. The legacy
 `set_webhook` and profile webhook settings continue independently; a member

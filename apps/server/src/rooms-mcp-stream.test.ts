@@ -5,6 +5,7 @@ import { mkdirSync, mkdtempSync, rmSync, watch, writeFileSync } from 'node:fs';
 import { createServer } from 'node:http';
 import { createServer as createSocketServer } from 'node:net';
 import { join } from 'node:path';
+import { tmpdir } from 'node:os';
 import { fileURLToPath } from 'node:url';
 import type { ServerResponse } from 'node:http';
 import { afterAll, afterEach, beforeAll, describe, expect, it, vi } from 'vitest';
@@ -92,7 +93,7 @@ describe.each(['pglite',...(postgresUrl?['postgres']:[])])('P12 MCP committed me
     expect(output.frames[1]).toMatchObject({type:'delivery',deliveryId:'mention:first:0',mentionCursor:'1'});
     expect(output.frames[2]).toMatchObject({type:'checkpoint',cursor:{through:1}});
     expect(read).toHaveBeenCalledTimes(2);
-    const proofRoot=fileURLToPath(new URL('../../../.beeline-proof/',import.meta.url));mkdirSync(proofRoot,{recursive:true});
+    const proofRoot=tmpdir();
     const dir=mkdtempSync(join(proofRoot,'mcp-durability-')),key='codex:/synthetic/project';
     const runner={node:'/synthetic/node',bundle:'/synthetic/beeline.js'};
     try{
@@ -128,7 +129,7 @@ describe.each(['pglite',...(postgresUrl?['postgres']:[])])('P12 MCP committed me
     expect(output.frames).toHaveLength(1);expect(read).toHaveBeenCalledTimes(1);
   });
   it('refreshes the joined Claude bridge once after database-clock expiry, replays the missed tag once, and parks on revocation',async()=>{
-    const proofRoot=fileURLToPath(new URL('../../../.beeline-proof/',import.meta.url));mkdirSync(proofRoot,{recursive:true});
+    const proofRoot=tmpdir();
     const dir=mkdtempSync(join(proofRoot,'mcp-expiry-')),stateDir=join(dir,'state'),socket=join(dir,'claude.sock');
     const key=`claude-code:${dir}`,connections:{output:Reply;url:URL;token:string}[]=[],messages:string[]=[],refreshes:unknown[]=[];
     const events=new EventEmitter(),deadline=AbortSignal.timeout(10_000);
@@ -186,7 +187,7 @@ describe.each(['pglite',...(postgresUrl?['postgres']:[])])('P12 MCP committed me
       await until(()=>!!readState(stateDir).sessions[0]?.streamCursor);
       await db.query(`INSERT INTO rooms_mcp_mentions(member_id,room_id,message_id) VALUES('member',$1,'before-expiry')`,[room]);
       await until(()=>messages.length===1&&readState(stateDir).sessions[0]?.cursor!=='1');
-      expect(messages[0]).toContain('message before-expiry');
+      expect(messages[0]).toContain('--reply-to before-expiry');
       // Use PostgreSQL's actual clock. The local token deliberately still looks
       // valid for an hour, so recovery must invalidate the rejected token.
       const expiry=(await db.query<{expires_at:Date}>(`UPDATE rooms_mcp_tokens SET expires_at=clock_timestamp()+interval '200 milliseconds'
@@ -209,8 +210,8 @@ describe.each(['pglite',...(postgresUrl?['postgres']:[])])('P12 MCP committed me
       expect(connections[1]!.token).toBe('fresh-token');
       expect(connections[1]!.url.searchParams.get('mentions')).toBe(saved.cursor);
       expect(JSON.parse(connections[1]!.url.searchParams.get('cursor')!)).toEqual(saved.streamCursor);
-      expect(messages[1]).toContain('message during-expiry');
-      expect(messages.filter(text=>text.includes('message during-expiry'))).toHaveLength(1);
+      expect(messages[1]).toContain('--reply-to during-expiry');
+      expect(messages.filter(text=>text.includes('--reply-to during-expiry'))).toHaveLength(1);
       expect(readState(stateDir).sessions[0]).toMatchObject({accessToken:'fresh-token',refreshToken:'fresh-refresh'});
       const revoked=once(connections[1]!.output,'close');
       await db.query(`UPDATE rooms_mcp_connections SET revoked_at=now()`);await revoked;

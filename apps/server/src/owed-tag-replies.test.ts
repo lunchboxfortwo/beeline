@@ -58,7 +58,7 @@ describe('owed Room tags', () => {
     const payloads: any[] = [];
     await deliverMcpMemberWebhooks(db, async (_url, init) => { payloads.push(JSON.parse(init.body)); return new Response('', { status: 200 }); });
     const payload = payloads.find(p => p.messageId === message);
-    const expected = { roomId: room, messageId: message, memberId: member, replyRule: `answer in this Room with replyTo ${message} and start with @owner` };
+    const expected = { roomId: room, messageId: message, memberId: member, replyRule: `Reply (start with @owner): replyTo ${message}` };
     expect(payload).toMatchObject(expected);
     const cut = { ...payload, instruction: payload.instruction.slice(0, 200) };
     expect(cut).toMatchObject(expected);

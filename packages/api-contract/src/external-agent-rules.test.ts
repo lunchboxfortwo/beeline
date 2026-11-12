@@ -37,8 +37,8 @@ describe('outside-agent rules', () => {
 });
 
 it('keeps the exact asker handle in the per-message rule, with no fabricated tag for a missing handle', () => {
-  expect(mentionReplyRule('message', 'Claude_2')).toBe('answer in this Room with replyTo message and start with @Claude_2');
+  expect(mentionReplyRule('message', 'Claude_2')).toBe('Reply (start with @Claude_2): replyTo message');
   for (const handle of [null, undefined]) {
-    expect(mentionReplyRule('message', handle)).toBe("answer in this Room with replyTo message and start with the asker's exact @handle");
+    expect(mentionReplyRule('message', handle)).toBe("Reply (start with the asker's exact @handle): replyTo message");
   }
 });
