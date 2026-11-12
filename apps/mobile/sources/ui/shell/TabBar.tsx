@@ -1,4 +1,5 @@
 import React from 'react';
+import { Platform } from 'react-native';
 import { router } from 'expo-router';
 import { Separator, Tabs, XStack } from 'tamagui';
 import { AtSign, MessagesSquare, Settings, Users } from 'lucide-react-native';
@@ -12,6 +13,10 @@ const TABS: { value: Tab; label: string; icon: typeof MessagesSquare }[] = [
     { value: 'people', label: 'People', icon: Users },
     { value: 'settings', label: 'Settings', icon: Settings },
 ];
+
+// Phone text sizes can wrap "People" to "Peopl" + a hidden "e"; native keeps one line and shrinks to fit.
+// Web has no shrink-to-fit (it would cut the label with an ellipsis), and its labels fit already.
+const ONE_LINE = Platform.OS === 'web' ? {} : { numberOfLines: 1, adjustsFontSizeToFit: true, minimumFontScale: 0.5 };
 
 /** The phone's four places. Chats leads; Tags carries the live count. */
 export function TabBar({ active, tagsCount = 0 }: { active: Tab; tagsCount?: number }) {
@@ -31,7 +36,7 @@ export function TabBar({ active, tagsCount = 0 }: { active: Tab; tagsCount?: num
                                 <Glyph icon={tab.icon} accent={active === tab.value} />
                                 {tab.value === 'tags' && tagsCount ? <CountPill n={tagsCount} /> : null}
                             </XStack>
-                            <T v="meta" color={active === tab.value ? 'needsYou' : 'secondary'}>{tab.label}</T>
+                            <T v="meta" color={active === tab.value ? 'needsYou' : 'secondary'} {...ONE_LINE}>{tab.label}</T>
                         </Tabs.Tab>
                     ))}
                 </Tabs.List>
