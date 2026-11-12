@@ -17,7 +17,6 @@ import { Image } from 'expo-image';
 import { Filled, Glyph } from '@/ui/grammar';
 import { PaneResizer } from '@/ui/grammar-root';
 import { isTauri } from '@/utils/isTauri';
-import { APP_UI_SIZE_SCALE } from '@/ui-size';
 import {
   canRouteForward,
   canUseRouteBack,
@@ -232,7 +231,6 @@ const PersistentHeader = React.memo(() => {
   const safeArea = useSafeAreaInsets();
   const headerHeight = useHeaderHeight();
   const router = useRouter();
-  const uiSize = useLocalSetting('uiSize');
   const [zenMode, setZenMode] = useLocalSettingMutable('zenMode');
   const inTauri = isTauri();
   const isDesktop = useIsDesktop();
@@ -282,7 +280,7 @@ const PersistentHeader = React.memo(() => {
       pointerEvents="box-none"
       data-tauri-drag-region={inTauri ? 'true' : undefined}
     >
-      <YStack width={isMacTauri ? Math.ceil(92 / APP_UI_SIZE_SCALE[uiSize]) : 16} />
+      <YStack width={isMacTauri ? 92 : 16} />
       {/* Zen / Back / Forward buttons */}
       {!isDesktop && (
         <XStack

@@ -37,30 +37,40 @@ export type Variant = 'title' | 'listTitle' | 'heading' | 'body' | 'meta' | 'met
 const REGULAR = 'SpaceGrotesk-Regular' as any;
 const SEMIBOLD = 'SpaceGrotesk-SemiBold' as any;
 const MONO = 'IBMPlexMono-Regular' as any;
+/** Settings → You → Text size. GrammarProvider supplies it. */
+export type TextSize = 'small' | 'medium' | 'large';
+type TypeRole = { size: number; line: number; face: any };
+const roles = (title: [number, number], listTitle: [number, number], heading: [number, number], body: [number, number], meta: [number, number], code: [number, number]): Record<Variant, TypeRole> => ({
+    title: { size: title[0], line: title[1], face: SEMIBOLD },
+    listTitle: { size: listTitle[0], line: listTitle[1], face: SEMIBOLD },
+    heading: { size: heading[0], line: heading[1], face: SEMIBOLD },
+    body: { size: body[0], line: body[1], face: REGULAR },
+    meta: { size: meta[0], line: meta[1], face: REGULAR },
+    metaStrong: { size: meta[0], line: meta[1], face: SEMIBOLD },
+    code: { size: code[0], line: code[1], face: MONO },
+});
 /**
- * Size and line height at Medium. `title` heads a page (the chat header, every
- * pushed page, every sheet); `listTitle` names a chat in a list.
+ * Size and line height of each type style at each Text size, tuned by hand
+ * (not multiplied). `title` heads a page (the chat header, every pushed page,
+ * every sheet); `listTitle` names a chat in a list.
  */
-export const TYPE_SCALE: Record<Variant, { size: number; line: number; face: any }> = {
-    title: { size: 24, line: 31, face: SEMIBOLD },
-    listTitle: { size: 19, line: 25, face: SEMIBOLD },
-    heading: { size: 16, line: 23, face: SEMIBOLD },
-    body: { size: 16, line: 23, face: REGULAR },
-    meta: { size: 13, line: 19, face: REGULAR },
-    metaStrong: { size: 13, line: 19, face: SEMIBOLD },
-    code: { size: 13, line: 19, face: MONO },
+export const TYPE_PRESETS: Record<TextSize, Record<Variant, TypeRole>> = {
+    small: roles([22, 29], [18, 24], [16, 23], [15, 22], [12, 18], [13, 19]),
+    medium: roles([24, 31], [19, 25], [16, 23], [16, 23], [13, 19], [13, 19]),
+    large: roles([26, 34], [21, 28], [19, 27], [19, 28], [15, 22], [15, 22]),
 };
+/** The type styles at Medium. */
+export const TYPE_SCALE = TYPE_PRESETS.medium;
 
-/** Settings → You → Text size: 0.86, 1 or 1.2. GrammarProvider supplies it. */
-export const TextScaleContext = React.createContext(1);
-export function useTextScale(): number {
-    return React.useContext(TextScaleContext);
+export const TextSizeContext = React.createContext<TextSize>('medium');
+export function useTextSize(): TextSize {
+    return React.useContext(TextSizeContext);
 }
 
-/** One type style at a text scale. */
-export function typeStyle(v: Variant, scale: number) {
-    const { size, line, face } = TYPE_SCALE[v];
-    return { fontSize: Math.round(size * scale), lineHeight: Math.round(line * scale), fontFamily: face };
+/** One type style at a Text size. */
+export function typeStyle(v: Variant, textSize: TextSize) {
+    const { size, line, face } = TYPE_PRESETS[textSize][v];
+    return { fontSize: size, lineHeight: line, fontFamily: face };
 }
 
 /**
@@ -74,21 +84,30 @@ export function points<S>(style: S): S {
 }
 
 export type Step = '0' | '0.5' | '1' | '2' | '3' | '4' | '5' | '6' | '8';
+/**
+ * Spacing steps in points at each Text size. Steps 0 to 2 stay fixed; 3 is
+ * row padding and 4 the gutters.
+ */
+export const STEP_PRESETS: Record<TextSize, Record<Step, number>> = {
+    small: { '0': 0, '0.5': 2, '1': 4, '2': 8, '3': 8, '4': 12, '5': 16, '6': 20, '8': 24 },
+    medium: { '0': 0, '0.5': 2, '1': 4, '2': 8, '3': 12, '4': 16, '5': 20, '6': 24, '8': 32 },
+    large: { '0': 0, '0.5': 2, '1': 4, '2': 8, '3': 16, '4': 20, '5': 24, '6': 28, '8': 36 },
+};
 /** Spacing steps in points at Medium. */
-export const STEP: Record<Step, number> = { '0': 0, '0.5': 2, '1': 4, '2': 8, '3': 12, '4': 16, '5': 20, '6': 24, '8': 32 };
+export const STEP = STEP_PRESETS.medium;
 /**
  * Spacing that follows Text size. Text rows (chat list, transcript, settings
- * rows) space themselves with `step('3')` so their gaps scale with their type.
+ * rows) space themselves with `step('3')` so their gaps follow their type.
  */
 export function useStep(): (s: Step) => number {
-    const scale = useTextScale();
-    return React.useCallback((s: Step) => Math.round(STEP[s] * scale), [scale]);
+    const size = useTextSize();
+    return React.useCallback((s: Step) => STEP_PRESETS[size][s], [size]);
 }
 
 type TextProps = React.ComponentProps<typeof Text>;
 /** The whole type scale. Nothing else may set a font, size or weight. */
 export function T({ v = 'body', children, ...rest }: { v?: Variant; children?: React.ReactNode } & Omit<TextProps, 'fontSize' | 'fontFamily' | 'fontWeight' | 'lineHeight'>) {
-    const style = points(typeStyle(v, useTextScale()));
+    const style = points(typeStyle(v, useTextSize()));
     return <Text {...style} fontWeight="400" flexShrink={1} color="ink" {...rest}>{children}</Text>;
 }
 
@@ -391,9 +410,9 @@ export function SafeSides({ children }: { children: React.ReactNode }) {
 export type ColorToken = 'canvas' | 'raised' | 'highlight' | 'stroke' | 'strongStroke' | 'ink' | 'secondary'
     | 'needsYou' | 'added' | 'removed' | 'primaryFill' | 'primaryInk' | 'transparent';
 function useTypeStyle(v: Variant, color: ColorToken = 'ink'): import('react-native').TextStyle {
-    const scale = useTextScale();
+    const textSize = useTextSize();
     const ink = (useTheme() as Record<string, { val: string } | undefined>)[color]?.val;
-    return React.useMemo(() => ({ ...typeStyle(v, scale), fontWeight: '400' as const, color: ink }), [v, scale, ink]);
+    return React.useMemo(() => ({ ...typeStyle(v, textSize), fontWeight: '400' as const, color: ink }), [v, textSize, ink]);
 }
 
 /**
@@ -532,7 +551,7 @@ const GROW_CONTENT = { flexGrow: 1 } as const;
  * clips the fallback emoji font's taller glyph.
  */
 export function EmojiGlyph({ v = 'body', children, ...rest }: { v?: Variant; children?: React.ReactNode } & Omit<TextProps, 'fontSize' | 'fontFamily' | 'fontWeight' | 'lineHeight'>) {
-    const { fontSize, fontFamily } = typeStyle(v, useTextScale());
+    const { fontSize, fontFamily } = typeStyle(v, useTextSize());
     return <Text fontSize={fontSize} fontFamily={fontFamily} fontWeight="400" color="ink" {...rest}>{children}</Text>;
 }
 
@@ -567,7 +586,7 @@ export function ProseRun({ body, marks, level, fade, children, ...rest }: Omit<T
     children?: React.ReactNode;
 }) {
     const t = useTheme() as Record<string, { val: string } | undefined>;
-    const scale = useTextScale();
+    const textSize = useTextSize();
     const marked = (marks ?? []).map(mark => {
         switch (mark) {
             case 'strong': return { fontFamily: SEMIBOLD, color: t.ink?.val };
@@ -581,7 +600,7 @@ export function ProseRun({ body, marks, level, fade, children, ...rest }: Omit<T
         }
     });
     const heading = level ? HEADING_LEVELS[level - 1] : undefined;
-    const levelStyle = heading ? { ...typeStyle(heading[0], scale), color: t[heading[1]]?.val } : null;
+    const levelStyle = heading ? { ...typeStyle(heading[0], textSize), color: t[heading[1]]?.val } : null;
     return <Text {...rest} style={points([body, ...marked, levelStyle, fade]) as any}>{children}</Text>;
 }
 

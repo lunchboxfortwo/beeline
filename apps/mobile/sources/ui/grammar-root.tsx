@@ -6,7 +6,7 @@ import { useReanimatedKeyboardAnimation } from 'react-native-keyboard-controller
 import Reanimated, { useAnimatedStyle } from 'react-native-reanimated';
 import { canvasColor } from '@/buzz/groknight';
 import { useTheme } from 'tamagui';
-import { typeStyle, useTextScale, type ColorToken, type Variant } from './grammar';
+import { typeStyle, useTextSize, type ColorToken, type TextSize, type Variant } from './grammar';
 
 /**
  * The app root, mounted above the grammar's theme (part of the grammar, kept
@@ -51,8 +51,8 @@ const KEYBOARD_BODY = { flex: 1 } as const;
  * and centres the line; `hidden` lays it out of sight under another view.
  */
 type NativeTypeProps = { v?: Variant; line?: 'type' | 'unset' | number; color?: ColorToken; centered?: boolean };
-function nativeType({ v = 'body', line = 'type', color = 'ink' }: NativeTypeProps, scale: number, theme: Record<string, { val: string } | undefined>) {
-    const type = typeStyle(v, scale);
+function nativeType({ v = 'body', line = 'type', color = 'ink' }: NativeTypeProps, textSize: TextSize, theme: Record<string, { val: string } | undefined>) {
+    const type = typeStyle(v, textSize);
     return {
         ...type,
         fontWeight: '400' as const,
@@ -67,14 +67,14 @@ export function NativeTypeInput({ v, line, color, centered = false, hidden = fal
         box?: { height?: number; minHeight?: number; maxHeight?: number };
     }) {
     const theme = useTheme() as Record<string, { val: string } | undefined>;
-    const scale = useTextScale();
+    const textSize = useTextSize();
     return (
         <Native.TextInput
             ref={ref}
             placeholderTextColor={theme.secondary?.val}
             {...rest}
             style={[
-                nativeType({ v, line, color }, scale, theme),
+                nativeType({ v, line, color }, textSize, theme),
                 { minWidth: 0, paddingVertical: 0, textAlignVertical: 'top', outlineStyle: 'none', ...box } as unknown as Native.TextStyle,
                 centered ? { includeFontPadding: false, textAlignVertical: 'center' } : null,
                 { transform: [{ translateY }] },
@@ -89,12 +89,12 @@ export function NativeTypeMeasure({ v, line, color, centered = false, fill = fal
         fill?: boolean;
     }) {
     const theme = useTheme() as Record<string, { val: string } | undefined>;
-    const scale = useTextScale();
+    const textSize = useTextSize();
     return (
         <Native.Text
             {...rest}
             style={[
-                nativeType({ v, line, color }, scale, theme),
+                nativeType({ v, line, color }, textSize, theme),
                 { position: 'absolute', opacity: 0 },
                 fill ? { left: 0, right: 0 } : null,
                 centered ? { includeFontPadding: false, textAlignVertical: 'center' } : null,

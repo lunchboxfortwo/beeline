@@ -209,11 +209,11 @@ export const ChatRow = React.memo(function ChatRow({ item, viewer, now, first, d
         <YStack flex={1} minWidth={0} gap={step('1')}>
           <ChatName v="listTitle" name={title} testID={`room-${item.room.id}-title`} />
           {refused ? (
-            <Copy small numberOfLines={2} color="removed" testID={`room-${item.room.id}-preview`}>Not sent: {refused.row.text}</Copy>
+            <Copy small color="removed" testID={`room-${item.room.id}-preview`}>Not sent: {refused.row.text}</Copy>
           ) : call ? (
-            <Copy small accent numberOfLines={2} testID={`room-${item.room.id}-preview`}>Ongoing call: {voiceCallHumanNames(call, viewer)}</Copy>
+            <Copy small accent testID={`room-${item.room.id}-preview`}>Ongoing call: {voiceCallHumanNames(call, viewer)}</Copy>
           ) : (
-            <Copy small quiet={!unread} numberOfLines={2} testID={`room-${item.room.id}-preview`}>
+            <Copy small quiet={!unread} testID={`room-${item.room.id}-preview`}>
               {preview.who ? <T v="metaStrong" color="secondary">{preview.who}: </T> : null}
               {preview.text}
             </Copy>

@@ -9,29 +9,49 @@ vi.mock('tamagui', async () => (await import('@/ui/screens/transcript/grammar-ho
 vi.mock('lucide-react-native', async () => (await import('@/ui/screens/transcript/grammar-hosts.test-support')).lucideHosts());
 const insets = vi.hoisted(() => ({ top: 24, bottom: 48, left: 0, right: 0 }));
 vi.mock('react-native-safe-area-context', () => ({ useSafeAreaInsets: () => insets }));
-import { APP_UI_SIZE_SCALE } from '@/ui-size';
-import { ChatName, Indent, PlaceHeader, SheetFrame, STEP, T, TextScaleContext, TYPE_SCALE, useStep } from './grammar';
+import { ChatName, HEIGHT, Indent, PlaceHeader, SheetFrame, STEP_PRESETS, T, TextSizeContext, TYPE_SCALE, useStep, type TextSize } from './grammar';
 
 beforeEach(() => { (globalThis as any).IS_REACT_ACT_ENVIRONMENT = true; });
 
 const textOf = (tree: any) => tree.root.findAll((node: any) => node.type === 'Text')[0].props;
 
-it.each(Object.entries(APP_UI_SIZE_SCALE))('Text size %s scales every type style and its line height', (_size, scale) => {
-    for (const [v, { size, line }] of Object.entries(TYPE_SCALE)) {
+// The approved Small, Medium and Large presets: size/line per type style, and spacing steps.
+const PRESETS: Record<TextSize, { type: Record<string, [number, number]>; steps: Record<string, number> }> = {
+    small: {
+        type: { title: [22, 29], listTitle: [18, 24], heading: [16, 23], body: [15, 22], meta: [12, 18], metaStrong: [12, 18], code: [13, 19] },
+        steps: { '0': 0, '0.5': 2, '1': 4, '2': 8, '3': 8, '4': 12, '5': 16, '6': 20, '8': 24 },
+    },
+    medium: {
+        type: { title: [24, 31], listTitle: [19, 25], heading: [16, 23], body: [16, 23], meta: [13, 19], metaStrong: [13, 19], code: [13, 19] },
+        steps: { '0': 0, '0.5': 2, '1': 4, '2': 8, '3': 12, '4': 16, '5': 20, '6': 24, '8': 32 },
+    },
+    large: {
+        type: { title: [26, 34], listTitle: [21, 28], heading: [19, 27], body: [19, 28], meta: [15, 22], metaStrong: [15, 22], code: [15, 22] },
+        steps: { '0': 0, '0.5': 2, '1': 4, '2': 8, '3': 16, '4': 20, '5': 24, '6': 28, '8': 36 },
+    },
+};
+const SIZES = Object.keys(PRESETS) as TextSize[];
+
+it.each(SIZES)('Text size %s draws every type style at its preset size and line height', (textSize) => {
+    for (const [v, [size, line]] of Object.entries(PRESETS[textSize].type)) {
         let tree: any;
-        act(() => { tree = create(<TextScaleContext.Provider value={scale}><T v={v as any}>x</T></TextScaleContext.Provider>); });
+        act(() => { tree = create(<TextSizeContext.Provider value={textSize}><T v={v as any}>x</T></TextSizeContext.Provider>); });
         const props = textOf(tree);
-        expect(props.fontSize).toBe(Math.round(size * scale));
+        expect([v, props.fontSize]).toEqual([v, size]);
         // Tamagui native reads a bare number as a multiple of fontSize (23 → 368 pt); points go as px.
-        expect(props.lineHeight).toBe(`${Math.round(line * scale)}px`);
+        expect([v, props.lineHeight]).toEqual([v, `${line}px`]);
     }
 });
 
-it('scales spacing steps with Text size', () => {
-    let seen: number[] = [];
-    function Probe() { const step = useStep(); seen = [step('1'), step('3'), step('8')]; return null; }
-    act(() => { create(<TextScaleContext.Provider value={1.2}><Probe /></TextScaleContext.Provider>); });
-    expect(seen).toEqual([Math.round(STEP['1'] * 1.2), Math.round(STEP['3'] * 1.2), Math.round(STEP['8'] * 1.2)]);
+it.each(SIZES)('Text size %s spaces with its preset steps', (textSize) => {
+    let seen: Record<string, number> = {};
+    function Probe() { const step = useStep(); seen = Object.fromEntries(Object.keys(STEP_PRESETS.medium).map((s) => [s, step(s as any)])); return null; }
+    act(() => { create(<TextSizeContext.Provider value={textSize}><Probe /></TextSizeContext.Provider>); });
+    expect(seen).toEqual(PRESETS[textSize].steps);
+});
+
+it('keeps control heights fixed at every Text size', () => {
+    expect(HEIGHT).toEqual({ control: 44, primary: 48, tabBar: 52, sheetRow: 56 });
 });
 
 it('gives chat titles their own title styles: 24 for a header, 19 for a list row', () => {
@@ -60,14 +80,14 @@ it("draws a chat name's # in brass", () => {
     expect(texts[0].props.children).toContain('beeline');
 });
 
-const at = (scale: number, node: React.ReactElement) => {
+const at = (textSize: TextSize, node: React.ReactElement) => {
     let tree: any;
-    act(() => { tree = create(<TextScaleContext.Provider value={scale}>{node}</TextScaleContext.Provider>); });
+    act(() => { tree = create(<TextSizeContext.Provider value={textSize}>{node}</TextSizeContext.Provider>); });
     return tree;
 };
-const scaled = (s: keyof typeof STEP, scale: number) => Math.round(STEP[s] * scale);
+const scaled = (s: string, textSize: TextSize) => PRESETS[textSize].steps[s];
 
-it.each(Object.entries(APP_UI_SIZE_SCALE))('Text size %s scales the place header padding and gaps', (_size, scale) => {
+it.each(SIZES)('Text size %s spaces the place header with its preset steps', (scale) => {
     const tree = at(scale, <PlaceHeader title="Chat" back={vi.fn()} safeTop={false} testID="head" />);
     const row = tree.root.find((node: any) => node.type === 'XStack' && node.props.testID === 'head');
     expect([row.props.paddingHorizontal, row.props.paddingTop, row.props.paddingBottom, row.props.gap])
@@ -76,18 +96,18 @@ it.each(Object.entries(APP_UI_SIZE_SCALE))('Text size %s scales the place header
     expect(titleRow.props.gap).toBe(scaled('3', scale));
 });
 
-it.each(Object.entries(APP_UI_SIZE_SCALE))('Text size %s scales the sheet padding and keeps it clear of the bottom system bar', (_size, scale) => {
+it.each(SIZES)('Text size %s pads the sheet with its preset steps and keeps it clear of the bottom system bar', (scale) => {
     const tree = at(scale, <SheetFrame open close={vi.fn()} title="Attach"><T>row</T></SheetFrame>);
     const body = tree.root.findAll((node: any) => node.type === 'YStack' && node.props.paddingBottom !== undefined)[0];
     expect([body.props.padding, body.props.paddingTop, body.props.gap])
         .toEqual([scaled('4', scale), scaled('3', scale), scaled('2', scale)]);
-    // The physical inset is added after the scaled step, unscaled.
+    // The physical inset is added after the preset step, unchanged.
     expect(body.props.paddingBottom).toBe(scaled('6', scale) + insets.bottom);
     const head = tree.root.findAll((node: any) => node.type === 'XStack' && node.props.minHeight !== undefined)[0];
     expect([head.props.gap, head.props.paddingBottom]).toEqual([scaled('2', scale), scaled('2', scale)]);
 });
 
-it.each(Object.entries(APP_UI_SIZE_SCALE))('Text size %s indents nested list levels 16 a level at any depth', (_size, scale) => {
+it.each(SIZES)('Text size %s indents nested list levels one gutter a level at any depth', (scale) => {
     for (const depth of [0, 1, 2, 3, 5]) {
         const tree = at(scale, <Indent depth={depth}><T>item</T></Indent>);
         const box = tree.root.find((node: any) => node.type === 'YStack');
