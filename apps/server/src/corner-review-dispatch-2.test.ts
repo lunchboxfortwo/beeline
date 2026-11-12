@@ -1,6 +1,6 @@
 import { queueReviewerCommand } from './corner-lifecycle.js';
 import { commanderReportAddress } from './commander.js';
-import { noteReviewDispatchFailure, noteUnreachableReviewer, cornerReviewWokenSql } from './corner-lifecycle-review-state.js';
+import { noteReviewDispatchFailure, cornerReviewWokenSql } from './corner-lifecycle-review-state.js';
 import { describe, expect, it, vi, assignCornerWorker, DaemonService, LiveHub, PushDeliveryLoop, systemLine, createAgentCommand, reconcileConfiguredCornerReviewers, REVIEWER_DISPATCH_REASONS, reviewerDispatchCarriesHead, routeSystemCommand, advanceCorner, H, A, B, R, C, db, phone, daemon, commands, claim, result, greenHead, rootFixture } from './test-support-corner-review-dispatch.test-support.js';
 
 describe('corner message attribution', () => {
@@ -9,13 +9,6 @@ describe('corner message attribution', () => {
     expect(await commanderReportAddress(rootFixture.db, opened.id)).toMatchObject({ recipient: H, returnRoom: R });
     const before = (await rootFixture.db.query('SELECT id FROM messages')).rowCount;
     await noteReviewDispatchFailure(rootFixture.db, opened.id, 'a'.repeat(40), 'review queue unavailable');
-    const opening = (await rootFixture.db.query<{id:string}>(
-      "SELECT id FROM messages WHERE room_id=$1 AND card->>'cornerId'=$2", [R, opened.id],
-    )).rows[0]!;
-    await noteUnreachableReviewer(rootFixture.db, {
-      cornerId: opened.id, sourceMessageId: opening.id, reviewerId: B, reviewerKind: 'agent',
-      reviewerName: 'Reviewer', reason: 'offline',
-    });
     expect((await rootFixture.db.query('SELECT id FROM messages')).rowCount).toBe(before);
   });
 

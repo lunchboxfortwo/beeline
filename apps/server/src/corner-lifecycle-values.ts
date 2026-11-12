@@ -19,10 +19,6 @@ export const reviewChecksSql = `jsonb_build_object('status',lifecycle->>'checks'
    FROM jsonb_array_elements(COALESCE(lifecycle->'checksSummary'->'checks','[]'::jsonb)) item))`;
 
 
-export const REVIEWER_NOT_PARENT_MEMBER = 'not a current member of the parent Room';
-
-export const REVIEWER_NOT_CORNER_MEMBER = 'not a current member of this corner';
-
 export function greenReviewRequestSql(command: string): string {
   return `${command}.action='input' AND ${command}.reason IN ('corner_review_dispatch','agent_tag','order')
     AND ${command}.review_context->>'purpose' IS NULL

@@ -45,7 +45,7 @@ import {
   deleteStoredCornerWorkflows,
 } from './corner-lifecycle.js';
 
-import { createAgentCommand, repairReviewerCornerMembership, queueCornerMergeConflict, reconcileCornerMergeBlockers, CORNER_CHECKS_BLOCKED_CARD_TYPE, type CommandRow } from './agent-command.js';
+import { createAgentCommand, queueCornerMergeConflict, reconcileCornerMergeBlockers, CORNER_CHECKS_BLOCKED_CARD_TYPE, type CommandRow } from './agent-command.js';
 
 import { CORNER_LIFECYCLE_CARD_TYPE } from './room-choice.js';
 
@@ -528,7 +528,6 @@ export async function fallback(cornerId: string, online = true) {
   await db.query(`INSERT INTO agents(agent_id,owner_id) VALUES($1,$2) ON CONFLICT DO NOTHING`, [F, H]);
   for (const roomId of [null, R])
     await db.query(`INSERT INTO memberships(workspace_id,room_id,identity_id,role) VALUES($1,$2,$3,'member') ON CONFLICT DO NOTHING`, [W, roomId, F]);
-  await repairReviewerCornerMembership(db, cornerId, F);
   if (online) await db.query(`INSERT INTO live_outputs(room_id,agent_id,turn_id,kind,body) VALUES($1,$2,'presence','presence','{"status":"online"}')`, [R, F]);
 }
 export const rootFixture = {
@@ -941,7 +940,7 @@ export { systemLine } from './system-line.js';
 export { addressedToPersonSql } from './corner-owed.js';
 export { GitHubHttpError } from '@beeline/auth/github';
 export { advanceCorner, backfillCornerLifecycleRuns, CORNER_LIFECYCLE_SLUG, cornerMergeGate, confirmCornerMergeAuthority, deleteStoredCornerWorkflows } from './corner-lifecycle.js';
-export { createAgentCommand, repairReviewerCornerMembership, queueCornerMergeConflict, reconcileCornerMergeBlockers, CORNER_CHECKS_BLOCKED_CARD_TYPE } from './agent-command.js';
+export { createAgentCommand, queueCornerMergeConflict, reconcileCornerMergeBlockers, CORNER_CHECKS_BLOCKED_CARD_TYPE } from './agent-command.js';
 export { CORNER_LIFECYCLE_CARD_TYPE } from './room-choice.js';
 export { cornerImplementerSql, cornerOwnerSql } from './corner-worker.js';
 export { cornerRunStateSql } from './corner-run.js';

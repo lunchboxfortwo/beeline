@@ -602,18 +602,24 @@ import { GitHubOperations, Input, hash, challenge, record, GitHubRecord, text, i
       return;
     }
     if (pr.merged || pr.headSha === stored.head) return;
+    await moveStoredCornerHead(ctx, cornerId, stored.number, stored.head, pr.headSha);
+  }
+
+
+  /** Move the stored PR head to GitHub's live head, as its missed push webhook would. */
+  export async function moveStoredCornerHead(ctx: GitHubOperations, cornerId: string, number: number, from: string, to: string) {
     await ctx.database.transaction(async db => {
       await lockCornerLifecycle(db, cornerId);
       const changed = await db.query(
-        `UPDATE corner_github_cache SET lifecycle=jsonb_set(
-           jsonb_set(lifecycle-'checksSummary'-'checkRefreshRetry','{pr,headSha}',to_jsonb($4::text)),
-           '{checks}','"pending"')
+        `UPDATE corner_github_cache SET lifecycle=jsonb_set(jsonb_set(
+           jsonb_set(lifecycle-'checksSummary','{pr,headSha}',to_jsonb($4::text)),
+           '{pr,mergeability}','"unknown"'),'{checks}','"pending"')
          WHERE corner_id=$1 AND lifecycle->'pr'->>'number'=$2
            AND lifecycle->'pr'->>'headSha'=$3 RETURNING corner_id`,
-        [cornerId, String(stored.number), stored.head, pr.headSha],
+        [cornerId, String(number), from, to],
       );
       if (changed.rowCount) await advanceCorner(db, cornerId,
-        { kind: 'push', headSha: pr.headSha, contents: { headSha: pr.headSha } });
+        { kind: 'push', headSha: to, contents: { headSha: to } });
     });
   }
 

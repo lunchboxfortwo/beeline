@@ -304,23 +304,9 @@ export async function advanceCorner(
       const sourceId = event.kind === 'checks' ? event.sourceMessageId : checkSource?.id;
       switch (effect.kind) {
         case 'merge-conflict': {
-          const source =
-            event.kind === 'merge-conflict'
-              ? event.sourceMessageId
-              : (
-                  await systemLine(db, {
-                    id: createHash('sha256')
-                      .update(
-                        `beeline:${cornerId}:github:merge-conflict:${corner.lifecycle.pr?.number}:${head}`,
-                      )
-                      .digest('hex'),
-                    roomId: cornerId,
-                    authorId: corner.worker_agent_id ?? SYSTEM_IDENTITY_ID,
-                    subject: GITHUB_SUBJECT,
-                    verb: systemMessage('agent-command.found-merge-conflicts-in'),
-                    object: { text: corner.lifecycle.pr?.title ?? 'Pull request', headSha: head },
-                  })
-                ).id;
+          // The machine wakes this effect only for a live-read conflict event.
+          if (event.kind !== 'merge-conflict') break;
+          const source = event.sourceMessageId;
           const command = corner.worker_agent_id
             ? await createAgentCommand(db, {
                 roomId: cornerId,
@@ -393,7 +379,7 @@ export async function advanceCorner(
           }
           break;
         case 'review': {
-          const reviewer = await reachableReviewer(db, cornerId, corner, sourceId ?? cornerId);
+          const reviewer = reachableReviewer(corner);
           if (!reviewer) {
             result = await noteReviewBlocked(
               db,

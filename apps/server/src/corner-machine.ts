@@ -206,7 +206,8 @@ export function transitionCorner(
     (!f.turnRunning || event.kind === 'checks')
   )
     wake('checks-failed', redKey);
-  if (f.lifecycle?.pr?.mergeability === 'dirty') wake('merge-conflict');
+  // Only a live GitHub read emits this event; a stored verdict never wakes.
+  if (event.kind === 'merge-conflict' && f.lifecycle?.pr?.mergeability === 'dirty') wake('merge-conflict');
   if (checks === 'passing' && headSha && f.lifecycle?.pr?.mergeability !== 'dirty') {
     if (f.approved) {
       if (

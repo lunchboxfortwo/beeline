@@ -656,8 +656,6 @@ export type ReviewerWakeStatus = 'unconfigured' | 'unreachable' | 'waiting' | 'd
 export function reviewerWakeFromFacts(input: {
   configuredReviewerId: string | null;
   reviewerHandle: string | null;
-  parentMember: boolean;
-  cornerMember: boolean;
   /** The live GitHub verdict reported beside this status, never the stored lifecycle. */
   checks: string | undefined;
   /** The run sits in `review` after a green head woke the reviewer. */
@@ -668,18 +666,6 @@ export function reviewerWakeFromFacts(input: {
     return {
       status: 'unconfigured',
       detail: 'No reviewer is configured for this corner, so no agent is woken for review.',
-    };
-  }
-  if (!input.parentMember) {
-    return {
-      status: 'unreachable',
-      detail: `${label} is configured as reviewer but is not a current member of the parent Room, so the checks-passed transition cannot wake them.`,
-    };
-  }
-  if (!input.cornerMember) {
-    return {
-      status: 'unreachable',
-      detail: `${label} is configured as reviewer but is not a current member of this corner, so the checks-passed transition cannot wake them.`,
     };
   }
   if (input.reviewWoken) {

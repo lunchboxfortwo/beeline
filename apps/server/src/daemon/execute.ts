@@ -23,6 +23,8 @@ import { daemonReconcileZeroCheckWorkerCompletion } from './corner-completion.js
 import { createDaemonCommandService } from '../daemon-service.js';
 import { daemonLockOwnedTurnAccess } from './owned-model.js';
 import { daemonReport } from './corner-reports.js';
+import { daemonApproveCornerMerge } from './corner-reads.js';
+import { isCornerReviewer } from '../agent-health.js';
 import { daemonAuthorizeScopedGrant } from './grants.js';
 import { daemonExecuteOperation } from './operations.js';
 
@@ -221,6 +223,21 @@ import { daemonExecuteOperation } from './operations.js';
         name === 'postRoomMessage' && candidate.relay === undefined)) {
         await ctx.github.refreshCornerReviewHead?.(scopedRoom);
       }
+    }
+    // A reviewer's PASS report is its yes on the head it reviewed, through the
+    // same approval path as approve_merge (item 9, 12 Nov morning card).
+    if (!ctx.commandTransaction && name === 'report' && candidate.status === 'done' &&
+        /^\s*PASS\b/.test(String(candidate.text ?? '')) && typeof candidate.requestId === 'string') {
+      const review = (await ctx.database.query<{ corner_id: string; head_sha: string }>(
+        `SELECT review.* FROM (SELECT COALESCE(review_context->>'cornerId',room_id::text) corner_id,
+           review_context->>'headSha' head_sha FROM agent_commands
+           WHERE agent_id=$1 AND turn_request_id=$2 AND review_context->>'headSha' IS NOT NULL
+           ORDER BY created_at DESC LIMIT 1) review
+         WHERE NOT EXISTS (SELECT 1 FROM corner_merge_approvals approval WHERE approval.corner_id::text=review.corner_id
+           AND approval.head_sha=review.head_sha AND approval.approved_by=$1)`,
+        [authenticatedAgentId, candidate.requestId])).rows[0];
+      if (review && await isCornerReviewer(ctx.database, review.corner_id, authenticatedAgentId))
+        await daemonApproveCornerMerge(ctx, { cornerId: review.corner_id, headSha: review.head_sha }, authenticatedAgentId);
     }
     if (voiceAgentName && typeof candidate.text === 'string')
       candidate.text = cleanVoiceReply(candidate.text, voiceAgentName);

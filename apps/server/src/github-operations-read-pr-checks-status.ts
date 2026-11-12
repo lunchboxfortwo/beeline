@@ -12,6 +12,7 @@ import type { SqlDatabase } from './database.js';
 import { GITHUB_SUBJECT, systemLine } from './system-line.js';
 import { recordPersonMergeYes, withdrawPullRequestMergeApprovals } from './corner-merge-approval.js';
 import { assertCornerBriefAllowsMerge } from './corner-brief.js';
+import { moveStoredCornerHead } from './github-operations-begin-identity.js';
 import { advanceCorner, cornerReviewWokenSql, confirmCornerMergeAuthority, lockCornerLifecycle, cornerMergeGate, cornerMergeability } from './corner-lifecycle.js';
 import { queueCornerMergeConflict, reconcileCornerMergeBlockers } from './agent-command.js';
 import { GitHubOperations, reviewerWakeFromFacts, Input, LandCornerOutcome, CornerWebhookTarget, record, mergeConflictKey, hash, text } from './github-operations.js';
@@ -27,9 +28,6 @@ import { GitHubOperations, reviewerWakeFromFacts, Input, LandCornerOutcome, Corn
         archived: boolean;
         review_woken: boolean;
         configured_reviewer_id: string | null;
-        reviewer_identity_id: string | null;
-        parent_reviewer_id: string | null;
-        corner_reviewer_id: string | null;
         reviewer_handle: string | null;
         author_id: string;
         corner_name: string;
@@ -39,19 +37,12 @@ import { GitHubOperations, reviewerWakeFromFacts, Input, LandCornerOutcome, Corn
                 r.archived_at IS NOT NULL archived,
                 ${cornerReviewWokenSql('r.id')} review_woken,
                 ${cornerReviewerSql('r')} configured_reviewer_id,
-                reviewer_identity.id reviewer_identity_id,
-                parent_member.identity_id parent_reviewer_id,
-                corner_member.identity_id corner_reviewer_id,
                 beeline_room_handle(reviewer_identity.id,$1) reviewer_handle
          FROM rooms r
          JOIN corner_github_cache f ON f.corner_id=r.id
          JOIN rooms parent ON parent.id=r.parent_id
          LEFT JOIN identities reviewer_identity ON reviewer_identity.id=${cornerReviewerSql('r')}
            AND reviewer_identity.kind='agent'
-         LEFT JOIN room_access parent_member ON parent_member.room_id=parent.id
-           AND parent_member.identity_id=${cornerReviewerSql('r')} AND parent_member.removed_at IS NULL
-         LEFT JOIN room_access corner_member ON corner_member.room_id=r.id
-           AND corner_member.identity_id=${cornerReviewerSql('r')} AND corner_member.removed_at IS NULL
          WHERE r.id=$1`,
         [input.cornerId],
       )
@@ -91,6 +82,14 @@ import { GitHubOperations, reviewerWakeFromFacts, Input, LandCornerOutcome, Corn
         mergedAt: pr.mergedAt, mergeCommitSha: pr.mergeCommitSha, mergedBy: pr.mergedBy,
         commits: 0, files: 0,
       }, ctx.database, number);
+    }
+    // A missed push or synchronize webhook leaves the stored head behind GitHub.
+    // This live read moves it, so the display and the gate below use GitHub's head.
+    const storedHead = corner.lifecycle.pr?.headSha;
+    if (!corner.archived && pr.state !== 'closed' && corner.lifecycle.pr?.number === number &&
+      storedHead && storedHead !== pr.headSha) {
+      await moveStoredCornerHead(ctx, input.cornerId, number, storedHead, pr.headSha);
+      corner.lifecycle = await ctx.lifecycle(input.cornerId);
     }
     let rollup = await ctx.app.readCommitCheckRollup(
       target.token,
@@ -150,8 +149,6 @@ import { GitHubOperations, reviewerWakeFromFacts, Input, LandCornerOutcome, Corn
     let reviewerWake = reviewerWakeFromFacts({
       configuredReviewerId,
       reviewerHandle: corner.reviewer_handle,
-      parentMember: Boolean(configuredReviewerId && corner.reviewer_identity_id && corner.parent_reviewer_id),
-      cornerMember: Boolean(configuredReviewerId && corner.reviewer_identity_id && corner.corner_reviewer_id),
       checks,
       reviewWoken: corner.review_woken,
     });

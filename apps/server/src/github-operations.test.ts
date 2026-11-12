@@ -402,6 +402,45 @@ const scope1 = fixtureScope1();
     });
 
 
+  it.each(['missed push webhook', 'failed provider read'])(
+    'Reproduction CHECKS-LIVE-1: after a %s, a live read shows GitHub\'s finished checks and opens the gate', async cause => {
+      const { corners, app, payload, headSha } = await scope1.checksFixture();
+      const corner = corners[0]!;
+      await scope1.database.query(`UPDATE corner_github_cache SET lifecycle=jsonb_set(jsonb_set(lifecycle,
+        '{pr,title}','"Fix checks"'),'{pr,targetBranch}','"main"') WHERE corner_id=$1`, [corner]);
+      await scope1.database.query(`INSERT INTO memberships(workspace_id,room_id,identity_id,role)
+        SELECT workspace_id,id,$2,'member' FROM rooms WHERE id=$1`, ['22222222-2222-4222-8222-222222222222', HUMAN]);
+      await scope1.database.query(`INSERT INTO memberships(workspace_id,identity_id,role)
+        VALUES('11111111-1111-4111-8111-111111111111',$1,'owner')`, [HUMAN]);
+      const operations = new GitHubOperations(scope1.database, {} as GitHubOAuthClient,
+        app as unknown as GitHubAppClient, 'secret');
+      const phone = new PhoneService(scope1.database, 'http://local.test');
+      const line = async () => checkStatusLine(readRoomView(await phone.readRoom(corner, HUMAN))!.cornerLifecycle);
+      const green = { state: 'passed', total: 2, failing: [], checks: [{ name: 'lint', status: 'passed' }, { name: 'tests', status: 'passed' }] };
+      app.readCommitCheckRollup.mockResolvedValue(green);
+      await operations.processWebhook('check_run', payload);
+      expect(await line()).toBe('PR #1 · all 2 tests passed');
+      let liveHead = headSha;
+      if (cause === 'missed push webhook') {
+        liveHead = '2'.repeat(40);
+        const previous = await app.readPullRequest('room-token', 'owner/widgets', 1);
+        app.readPullRequest.mockResolvedValue({ ...previous, headSha: liveHead });
+      } else {
+        // A transient GitHub error on a rerun event must not overwrite the recorded result.
+        app.readCommitCheckRollup.mockRejectedValueOnce(new GitHubHttpError('Checks', 502));
+        await expect(operations.processWebhook('check_run', payload)).rejects.toMatchObject({ status: 502 });
+        expect(await line()).toBe('PR #1 · all 2 tests passed');
+      }
+      const status = await operations.prChecksStatus({ cornerId: corner });
+      console.info(`Reproduction CHECKS-LIVE-1 (${cause}): phone → ${await line()}; gate → ${status.blockedReason}`);
+      expect(status).toMatchObject({ checks: 'passed', headSha: liveHead });
+      expect(status.blockedReason).not.toMatch(/PR head changed|checks are/);
+      expect(await line()).toBe('PR #1 · all 2 tests passed');
+      expect((await scope1.database.query<{ head: string }>(
+        `SELECT lifecycle->'pr'->>'headSha' head FROM corner_github_cache WHERE corner_id=$1`, [corner])).rows[0]?.head).toBe(liveHead);
+    });
+
+
   it('IDLE-DERIVED: identical GitHub reads retain the check status timestamp', async () => {
     const { corners, app, payload } = await scope1.checksFixture();
     const corner = corners[0]!;
@@ -481,6 +520,9 @@ const scope1 = fixtureScope1();
     app.readPullRequest.mockResolvedValue({ ...clean, mergeability: 'dirty' });
     await operations.processWebhook('check_run', payload);
     expect(await readLine()).toBe('PR #1 · merge conflict');
+    // The gate reads the same live verdict: GitHub would refuse this merge.
+    expect(await operations.prChecksStatus({ cornerId: corner })).toMatchObject({
+      mergeAllowed: false, blockedReason: expect.stringContaining('merge conflicts') });
     app.readPullRequest.mockResolvedValue(clean);
     await operations.refreshStaleMergeability(corner);
     expect(await readLine()).toBe('PR #1 · all 1 test passed');

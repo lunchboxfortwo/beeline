@@ -9,12 +9,11 @@ import type { activeCornerHolds } from './corner-holds.js';
 import { createHash } from 'node:crypto';
 import { SYSTEM_IDENTITY_ID } from '@beeline/api-contract/system-identity';
 import type { SqlDatabase } from './database.js';
-import { repairReviewerCornerMembership } from './agent-command.js';
 import { assertCornerBriefAllowsMerge } from './corner-brief.js';
 import { cornerImplementerSql } from './corner-worker.js';
 
 import { CornerRow, loadCorner } from './corner-lifecycle-read-state.js';
-import { greenReviewRequestSql, REVIEWER_NOT_PARENT_MEMBER, REVIEWER_NOT_CORNER_MEMBER, CORNER_LIFECYCLE_SLUG } from './corner-lifecycle-values.js';
+import { greenReviewRequestSql, CORNER_LIFECYCLE_SLUG } from './corner-lifecycle-values.js';
 
 
 
@@ -116,101 +115,10 @@ export function independentReviewerConfigured(corner: CornerRow): boolean {
 }
 
 
-/**
- * Which reviewer a green head wakes, or undefined (after naming the gap in the
- * corner) when the configured reviewer cannot be reached. A configured
- * reviewer who is not a current member is never "no reviewer": it does not
- * fall through to the no-reviewer path.
- */
-export async function reachableReviewer(
-  db: SqlDatabase,
-  cornerId: string,
-  corner: CornerRow,
-  sourceMessageId: string,
-): Promise<string | undefined> {
+/** Which reviewer a green head wakes: the corner's reviewer, unless it is the implementer. */
+export function reachableReviewer(corner: CornerRow): string | undefined {
   const reviewerId = corner.configured_reviewer_id;
-  if (!reviewerId || reviewerId === corner.worker_agent_id) return undefined;
-  if (!corner.reviewer_parent_member) {
-    await noteUnreachableReviewer(db, {
-      cornerId,
-      sourceMessageId,
-      reviewerId,
-      reviewerKind: corner.configured_reviewer_kind,
-      reviewerName: corner.configured_reviewer_name,
-      reason: REVIEWER_NOT_PARENT_MEMBER,
-    });
-    return undefined;
-  }
-  return (await readableByReviewer(db, cornerId, reviewerId, sourceMessageId))
-    ? reviewerId
-    : undefined;
-}
-
-
-/**
- * Dispatch only when the reviewer can read the corner; a missing projection
- * is repaired, an unreachable reviewer is named instead of rerouting the
- * review to the owner (whose daemon would post it under the owner's name).
- */
-export async function readableByReviewer(
-  db: SqlDatabase,
-  cornerId: string,
-  reviewerAgentId: string,
-  sourceMessageId: string,
-): Promise<boolean> {
-  if (await repairReviewerCornerMembership(db, cornerId, reviewerAgentId)) return true;
-  const reviewer = (
-    await db.query<{ kind: string; name: string }>(`SELECT kind,name FROM identities WHERE id=$1`, [
-      reviewerAgentId,
-    ])
-  ).rows[0];
-  await noteUnreachableReviewer(db, {
-    cornerId,
-    sourceMessageId,
-    reviewerId: reviewerAgentId,
-    reviewerKind: reviewer?.kind ?? null,
-    reviewerName: reviewer?.name ?? null,
-    reason: REVIEWER_NOT_CORNER_MEMBER,
-  });
-  return false;
-}
-
-
-/**
- * A configured reviewer that cannot be dispatched is named in the corner, not
- * collapsed into the no-reviewer path. Deterministic id so a later retry of
- * the same gap does not spam.
- */
-export async function noteUnreachableReviewer(
-  db: SqlDatabase,
-  input: {
-    cornerId: string;
-    sourceMessageId: string;
-    reviewerId: string;
-    reviewerKind: string | null;
-    reviewerName: string | null;
-    reason: string;
-  },
-): Promise<void> {
-  console.error(
-    `[corner-lifecycle] ${input.cornerId}: reviewer ${input.reviewerId} ${input.reason}; reporting to the commander`,
-  );
-  const id = createHash('sha256')
-    .update(`beeline:${input.cornerId}:reviewer-unreachable:${input.reviewerId}:${input.reason}`)
-    .digest('hex');
-  await reportToCommander(
-    db,
-    input.cornerId,
-    input.reviewerId,
-    systemMessage(
-      'corner-lifecycle.blocked-configured-reviewer-could-not-be-reached',
-      input.reviewerName ?? input.reviewerId,
-      input.reason,
-    ),
-    undefined,
-    id,
-    { agentOnly: true },
-  );
+  return reviewerId && reviewerId !== corner.worker_agent_id ? reviewerId : undefined;
 }
 
 
@@ -253,6 +161,7 @@ export function cornerMergeability(input: CornerMergeabilityInput) {
       ? 'PR head changed; checks and approval must match the corner head'
       : '',
     input.mergeability === 'draft' ? 'PR is a draft' : '',
+    input.mergeability === 'dirty' ? 'GitHub reports merge conflicts with the base branch' : '',
     input.checks !== 'passed' ? `checks are ${input.checks}` : '',
     input.evidenceMissing
       ? 'missing review attachments: attach the screenshots or files claimed by the verdict'
@@ -292,15 +201,9 @@ export async function cornerMergeGate(
                 WHERE approval.corner_id=fact.corner_id AND approval.pull_request_number=$2
                   AND approval.head_sha=$3
                   AND (
-                    -- A configured reviewer agent, still a parent member.
-                    EXISTS (
-                      SELECT 1 FROM memberships member
-                      JOIN identities reviewer ON reviewer.id=member.identity_id AND reviewer.kind='agent'
-                      WHERE member.room_id=parent.id AND member.identity_id=approval.approved_by
-                        AND approval.approved_by IS DISTINCT FROM ${cornerImplementerSql('fact', 'corner')}
-                        AND member.removed_at IS NULL
-                        AND approval.approved_by=${cornerReviewerSql()}
-                    )
+                    -- The corner's reviewer, who is not its implementer.
+                    (approval.approved_by=${cornerReviewerSql()}
+                      AND approval.approved_by IS DISTINCT FROM ${cornerImplementerSql('fact', 'corner')})
                     -- Or a current Workspace owner or admin.
                     OR EXISTS (
                       SELECT 1 FROM memberships workspace_member

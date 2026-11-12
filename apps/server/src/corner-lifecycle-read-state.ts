@@ -53,7 +53,6 @@ export type CornerRow = {
   configured_reviewer_id: string | null;
   configured_reviewer_kind: string | null;
   configured_reviewer_name: string | null;
-  reviewer_parent_member: boolean;
 };
 
 
@@ -67,15 +66,7 @@ export async function loadCorner(db: SqlDatabase, cornerId: string, retain: bool
               corner.archived_at IS NOT NULL archived,
               ${cornerReviewerSql()} configured_reviewer_id,
               configured.kind configured_reviewer_kind,
-              configured.name configured_reviewer_name,
-              EXISTS (
-                SELECT 1 FROM memberships reviewer_membership
-                JOIN identities reviewer ON reviewer.id=reviewer_membership.identity_id
-                  AND reviewer.kind='agent'
-                WHERE reviewer_membership.room_id=parent.id
-                  AND reviewer_membership.identity_id=${cornerReviewerSql()}
-                  AND reviewer_membership.removed_at IS NULL
-              ) reviewer_parent_member
+              configured.name configured_reviewer_name
        FROM corner_facts fact
        JOIN rooms corner ON corner.id=fact.corner_id
        JOIN rooms parent ON parent.id=corner.parent_id
