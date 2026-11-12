@@ -192,7 +192,7 @@ export function ChatInfoScreen({ roomId, close }: { roomId: string; close: () =>
             )}
 
             {rows.length ? (
-                <Section title="Schedules and subscriptions" testID="chat-schedules">
+                <Section title="Routines" testID="chat-schedules">
                     {rows.map((row, index) => (
                         <Row key={row.id} label={row.label} detail={row.detail} onPress={openScheduled(row)} last={index === rows.length - 1} testID={`scheduled-${row.id}`} />
                     ))}

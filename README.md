@@ -143,3 +143,5 @@ Beeline is in beta (`0.0.x`). [Current limits](https://github.com/Beeline-Work/b
 ## Device diagnostics
 
 Beeline keeps a private, content-free timeline of device sessions and action outcomes for support. It records sign-in steps, Workspace creation sources and assistant delivery results without message contents, keystrokes or session replay. See [device and session diagnostics](docs/device-session-diagnostics.md).
+
+Routines groups scheduled and event-driven work by chat. Open a routine to read its full instruction, timing, destination, agent and recent posted messages, or stop it.

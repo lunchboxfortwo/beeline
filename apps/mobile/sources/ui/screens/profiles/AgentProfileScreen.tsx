@@ -105,7 +105,7 @@ function AgentProfileBody({ p, detail }: { p: AgentProfile; detail: AgentDetailV
                 <Row label="Answer scope" value={detail.access?.policy === 'everyone' ? 'Everyone' : 'Owner only'} last />
             </Section>
             {detail.schedules?.length ? (
-                <Section title="Schedules" testID="agent-schedules">
+                <Section title="Routines" testID="agent-schedules">
                     {detail.schedules.map((schedule, index) => {
                         const room = detail.rooms?.find((candidate) => candidate.id === schedule.roomId);
                         return (

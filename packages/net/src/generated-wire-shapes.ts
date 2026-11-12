@@ -222,7 +222,7 @@ export const wireShapes: readonly WireShape[] = [
   shape({"kind":"literal","value":"card"}),
   shape({"kind":"literal","value":"activity"}),
   shape({"kind":"union","choices":[6,220]}),
-  shape({"kind":"object","properties":{"subject":{"node":221,"optional":false},"verb":{"node":1,"optional":false},"object":{"node":224,"optional":true},"consequence":{"node":5,"optional":true},"kind":{"node":226,"optional":true},"scheduleId":{"node":5,"optional":true},"payload":{"node":245,"optional":true},"subscriptionPrompt":{"node":5,"optional":true},"subscriptionWorkflowSlug":{"node":5,"optional":true}}}),
+  shape({"kind":"object","properties":{"subject":{"node":221,"optional":false},"verb":{"node":1,"optional":false},"object":{"node":224,"optional":true},"consequence":{"node":5,"optional":true},"kind":{"node":226,"optional":true},"scheduleId":{"node":5,"optional":true},"payload":{"node":245,"optional":true},"subscriptionId":{"node":5,"optional":true},"subscriptionPrompt":{"node":5,"optional":true},"subscriptionWorkflowSlug":{"node":5,"optional":true}}}),
   shape({"kind":"object","properties":{"kind":{"node":222,"optional":false},"id":{"node":5,"optional":true},"name":{"node":1,"optional":false}}}),
   shape({"kind":"union","choices":[50,212,223,215]}),
   shape({"kind":"literal","value":"person"}),
@@ -1009,132 +1009,135 @@ export const wireShapes: readonly WireShape[] = [
   shape({"kind":"object","properties":{"before":{"node":5,"optional":true},"messageId":{"node":5,"optional":true}}}),
   shape({"kind":"object","properties":{"roomId":{"node":1,"optional":false},"messages":{"node":907,"optional":false},"next":{"node":5,"optional":true}}}),
   shape({"kind":"intersection","choices":[524,535,1007]}),
-  shape({"kind":"object","properties":{"isDirectMessage":{"node":20,"optional":true},"roomName":{"node":154,"optional":false},"agentNames":{"node":1008,"optional":false}}}),
+  shape({"kind":"object","properties":{"recentRuns":{"node":1008,"optional":true},"isDirectMessage":{"node":20,"optional":true},"roomName":{"node":154,"optional":false},"agentNames":{"node":1011,"optional":false}}}),
+  shape({"kind":"union","choices":[6,1009]}),
+  shape({"kind":"array","item":1010}),
+  shape({"kind":"object","properties":{"routineId":{"node":1,"optional":false},"roomId":{"node":1,"optional":false},"messageId":{"node":1,"optional":false},"text":{"node":1,"optional":false},"at":{"node":18,"optional":false}}}),
   shape({"kind":"array","item":990}),
-  shape({"kind":"object","properties":{"prompt":{"node":1010,"optional":false}}}),
+  shape({"kind":"object","properties":{"prompt":{"node":1013,"optional":false}}}),
   shape({"kind":"union","choices":[155,617]}),
-  shape({"kind":"intersection","choices":[36,1012]}),
+  shape({"kind":"intersection","choices":[36,1015]}),
   shape({"kind":"object","properties":{"markSeen":{"node":20,"optional":true}}}),
-  shape({"kind":"object","properties":{"needs":{"node":1014,"optional":true},"saved":{"node":1015,"optional":true},"needsError":{"node":5,"optional":true},"savedError":{"node":5,"optional":true}}}),
+  shape({"kind":"object","properties":{"needs":{"node":1017,"optional":true},"saved":{"node":1018,"optional":true},"needsError":{"node":5,"optional":true},"savedError":{"node":5,"optional":true}}}),
   shape({"kind":"union","choices":[6,936]}),
   shape({"kind":"union","choices":[6,518]}),
-  shape({"kind":"intersection","choices":[152,1017]}),
+  shape({"kind":"intersection","choices":[152,1020]}),
   shape({"kind":"object","properties":{"limit":{"node":17,"optional":true}}}),
-  shape({"kind":"object","properties":{"entries":{"node":1019,"optional":false}}}),
-  shape({"kind":"array","item":1020}),
+  shape({"kind":"object","properties":{"entries":{"node":1022,"optional":false}}}),
+  shape({"kind":"array","item":1023}),
   shape({"kind":"object","properties":{"direction":{"node":456,"optional":false},"agentName":{"node":154,"optional":false},"amountText":{"node":1,"optional":false},"counterparty":{"node":1,"optional":false},"chain":{"node":169,"optional":false},"balanceAfterUsd":{"node":1,"optional":false},"txUrl":{"node":154,"optional":false},"createdAt":{"node":18,"optional":false}}}),
   shape({"kind":"object","properties":{"publicKey":{"node":154,"optional":false}}}),
-  shape({"kind":"intersection","choices":[25,1023]}),
+  shape({"kind":"intersection","choices":[25,1026]}),
   shape({"kind":"object","properties":{"name":{"node":1,"optional":false}}}),
-  shape({"kind":"object","properties":{"contract":{"node":1025,"optional":false},"runs":{"node":559,"optional":false}}}),
-  shape({"kind":"intersection","choices":[1026,1027]}),
+  shape({"kind":"object","properties":{"contract":{"node":1028,"optional":false},"runs":{"node":559,"optional":false}}}),
+  shape({"kind":"intersection","choices":[1029,1030]}),
   shape({"kind":"object","properties":{"version":{"node":784,"optional":false},"start":{"node":1,"optional":false},"name":{"node":1,"optional":false},"description":{"node":1,"optional":false},"summary":{"node":5,"optional":true},"roles":{"node":29,"optional":false},"deadlineSeconds":{"node":17,"optional":true}}}),
-  shape({"kind":"object","properties":{"handoffs":{"node":1028,"optional":false},"implicitEdges":{"node":34,"optional":true},"externalOutcomes":{"node":34,"optional":true}}}),
-  shape({"kind":"object","properties":{},"index":1029}),
-  shape({"kind":"union","choices":[1030,1033,1035,1037,1038,1041]}),
-  shape({"kind":"object","properties":{"does":{"node":5,"optional":true},"hint":{"node":5,"optional":true},"kind":{"node":6,"optional":true},"role":{"node":1,"optional":false},"requires":{"node":29,"optional":false},"on":{"node":133,"optional":false},"loop":{"node":1031,"optional":true},"timeoutSeconds":{"node":17,"optional":true}}}),
-  shape({"kind":"union","choices":[6,1032]}),
+  shape({"kind":"object","properties":{"handoffs":{"node":1031,"optional":false},"implicitEdges":{"node":34,"optional":true},"externalOutcomes":{"node":34,"optional":true}}}),
+  shape({"kind":"object","properties":{},"index":1032}),
+  shape({"kind":"union","choices":[1033,1036,1038,1040,1041,1044]}),
+  shape({"kind":"object","properties":{"does":{"node":5,"optional":true},"hint":{"node":5,"optional":true},"kind":{"node":6,"optional":true},"role":{"node":1,"optional":false},"requires":{"node":29,"optional":false},"on":{"node":133,"optional":false},"loop":{"node":1034,"optional":true},"timeoutSeconds":{"node":17,"optional":true}}}),
+  shape({"kind":"union","choices":[6,1035]}),
   shape({"kind":"object","properties":{"onEdge":{"node":1,"optional":false},"cap":{"node":18,"optional":false},"onExceeded":{"node":1,"optional":false}}}),
-  shape({"kind":"intersection","choices":[1030,1034]}),
+  shape({"kind":"intersection","choices":[1033,1037]}),
   shape({"kind":"object","properties":{"roleBinding":{"node":5,"optional":true}}}),
-  shape({"kind":"object","properties":{"does":{"node":5,"optional":true},"hint":{"node":5,"optional":true},"kind":{"node":1036,"optional":false},"role":{"node":5,"optional":true},"requires":{"node":29,"optional":false},"on":{"node":133,"optional":false},"loop":{"node":1031,"optional":true}}}),
+  shape({"kind":"object","properties":{"does":{"node":5,"optional":true},"hint":{"node":5,"optional":true},"kind":{"node":1039,"optional":false},"role":{"node":5,"optional":true},"requires":{"node":29,"optional":false},"on":{"node":133,"optional":false},"loop":{"node":1034,"optional":true}}}),
   shape({"kind":"literal","value":"server"}),
   shape({"kind":"object","properties":{"does":{"node":5,"optional":true},"hint":{"node":5,"optional":true},"kind":{"node":307,"optional":false},"role":{"node":5,"optional":true}}}),
-  shape({"kind":"object","properties":{"does":{"node":5,"optional":true},"hint":{"node":5,"optional":true},"kind":{"node":1039,"optional":false},"status":{"node":1040,"optional":false}}}),
+  shape({"kind":"object","properties":{"does":{"node":5,"optional":true},"hint":{"node":5,"optional":true},"kind":{"node":1042,"optional":false},"status":{"node":1043,"optional":false}}}),
   shape({"kind":"literal","value":"terminal"}),
   shape({"kind":"union","choices":[317,473,452]}),
-  shape({"kind":"object","properties":{"does":{"node":5,"optional":true},"hint":{"node":5,"optional":true},"kind":{"node":1042,"optional":false},"role":{"node":1,"optional":false},"requires":{"node":29,"optional":false},"on":{"node":133,"optional":false},"timeoutSeconds":{"node":17,"optional":true},"default":{"node":5,"optional":true}}}),
+  shape({"kind":"object","properties":{"does":{"node":5,"optional":true},"hint":{"node":5,"optional":true},"kind":{"node":1045,"optional":false},"role":{"node":1,"optional":false},"requires":{"node":29,"optional":false},"on":{"node":133,"optional":false},"timeoutSeconds":{"node":17,"optional":true},"default":{"node":5,"optional":true}}}),
   shape({"kind":"literal","value":"gate"}),
-  shape({"kind":"intersection","choices":[25,1044]}),
+  shape({"kind":"intersection","choices":[25,1047]}),
   shape({"kind":"object","properties":{"runId":{"node":1,"optional":false}}}),
-  shape({"kind":"object","properties":{"run":{"node":560,"optional":false},"contract":{"node":1025,"optional":false},"history":{"node":1046,"optional":false},"roleHolders":{"node":1073,"optional":false},"viewer":{"node":562,"optional":true}}}),
-  shape({"kind":"array","item":1047}),
-  shape({"kind":"object","properties":{"visitId":{"node":5,"optional":true},"outputTurns":{"node":34,"optional":true},"liveOutput":{"node":5,"optional":true},"finalReply":{"node":1048,"optional":true},"fromState":{"node":5,"optional":true},"outcome":{"node":5,"optional":true},"toState":{"node":1,"optional":false},"status":{"node":1050,"optional":true},"displayStatus":{"node":1051,"optional":true},"actor":{"node":562,"optional":true},"at":{"node":18,"optional":false},"receipt":{"node":1053,"optional":true},"gate":{"node":1068,"optional":true},"openedCorners":{"node":1070,"optional":true}}}),
-  shape({"kind":"union","choices":[6,1049]}),
+  shape({"kind":"object","properties":{"run":{"node":560,"optional":false},"contract":{"node":1028,"optional":false},"history":{"node":1049,"optional":false},"roleHolders":{"node":1076,"optional":false},"viewer":{"node":562,"optional":true}}}),
+  shape({"kind":"array","item":1050}),
+  shape({"kind":"object","properties":{"visitId":{"node":5,"optional":true},"outputTurns":{"node":34,"optional":true},"liveOutput":{"node":5,"optional":true},"finalReply":{"node":1051,"optional":true},"fromState":{"node":5,"optional":true},"outcome":{"node":5,"optional":true},"toState":{"node":1,"optional":false},"status":{"node":1053,"optional":true},"displayStatus":{"node":1054,"optional":true},"actor":{"node":562,"optional":true},"at":{"node":18,"optional":false},"receipt":{"node":1056,"optional":true},"gate":{"node":1071,"optional":true},"openedCorners":{"node":1073,"optional":true}}}),
+  shape({"kind":"union","choices":[6,1052]}),
   shape({"kind":"object","properties":{"messageId":{"node":1,"optional":false},"text":{"node":1,"optional":false}}}),
   shape({"kind":"union","choices":[6,317,473,452]}),
-  shape({"kind":"union","choices":[6,317,452,1052]}),
+  shape({"kind":"union","choices":[6,317,452,1055]}),
   shape({"kind":"literal","value":"current"}),
-  shape({"kind":"union","choices":[6,1054]}),
-  shape({"kind":"intersection","choices":[1055,1066]}),
-  shape({"kind":"object","properties":{"line":{"node":5,"optional":true},"refs":{"node":1056,"optional":true}}}),
   shape({"kind":"union","choices":[6,1057]}),
-  shape({"kind":"array","item":1058}),
-  shape({"kind":"object","properties":{"kind":{"node":1059,"optional":false},"label":{"node":1,"optional":false},"url":{"node":1,"optional":false}}}),
-  shape({"kind":"union","choices":[1060,1061,1062,1063,1064,216,1065]}),
+  shape({"kind":"intersection","choices":[1058,1069]}),
+  shape({"kind":"object","properties":{"line":{"node":5,"optional":true},"refs":{"node":1059,"optional":true}}}),
+  shape({"kind":"union","choices":[6,1060]}),
+  shape({"kind":"array","item":1061}),
+  shape({"kind":"object","properties":{"kind":{"node":1062,"optional":false},"label":{"node":1,"optional":false},"url":{"node":1,"optional":false}}}),
+  shape({"kind":"union","choices":[1063,1064,1065,1066,1067,216,1068]}),
   shape({"kind":"literal","value":"url"}),
   shape({"kind":"literal","value":"pr"}),
   shape({"kind":"literal","value":"checks"}),
   shape({"kind":"literal","value":"brief"}),
   shape({"kind":"literal","value":"file"}),
   shape({"kind":"literal","value":"memory"}),
-  shape({"kind":"object","properties":{"exit":{"node":1067,"optional":false}}}),
+  shape({"kind":"object","properties":{"exit":{"node":1070,"optional":false}}}),
   shape({"kind":"object","properties":{"gate":{"node":1,"optional":false},"actorId":{"node":1,"optional":false},"sourceMessageId":{"node":5,"optional":true}}}),
-  shape({"kind":"union","choices":[6,1069]}),
+  shape({"kind":"union","choices":[6,1072]}),
   shape({"kind":"object","properties":{"status":{"node":62,"optional":false},"answer":{"node":5,"optional":true},"answeredBy":{"node":562,"optional":true},"answeredAt":{"node":17,"optional":true},"sourceMessageId":{"node":5,"optional":true}}}),
-  shape({"kind":"union","choices":[6,1071]}),
-  shape({"kind":"array","item":1072}),
+  shape({"kind":"union","choices":[6,1074]}),
+  shape({"kind":"array","item":1075}),
   shape({"kind":"object","properties":{"id":{"node":1,"optional":false},"name":{"node":1,"optional":false},"parentRoomId":{"node":1,"optional":false}}}),
   shape({"kind":"object","properties":{},"index":563}),
   shape({"kind":"object","properties":{"workspaceId":{"node":1,"optional":false}}}),
-  shape({"kind":"intersection","choices":[1076,1077]}),
+  shape({"kind":"intersection","choices":[1079,1080]}),
   shape({"kind":"object","properties":{"workspaceId":{"node":1,"optional":false}}}),
   shape({"kind":"object","properties":{"memberId":{"node":5,"optional":true},"ownerId":{"node":5,"optional":true},"q":{"node":5,"optional":true},"kind":{"node":449,"optional":true},"offset":{"node":17,"optional":true}}}),
-  shape({"kind":"object","properties":{"viewer":{"node":1079,"optional":true},"members":{"node":716,"optional":false},"agents":{"node":717,"optional":false},"grants":{"node":1080,"optional":true},"peopleTotal":{"node":17,"optional":true},"agentTotal":{"node":17,"optional":true},"membersTruncated":{"node":32,"optional":false},"agentsTruncated":{"node":32,"optional":false}}}),
+  shape({"kind":"object","properties":{"viewer":{"node":1082,"optional":true},"members":{"node":716,"optional":false},"agents":{"node":717,"optional":false},"grants":{"node":1083,"optional":true},"peopleTotal":{"node":17,"optional":true},"agentTotal":{"node":17,"optional":true},"membersTruncated":{"node":32,"optional":false},"agentsTruncated":{"node":32,"optional":false}}}),
   shape({"kind":"union","choices":[6,720]}),
-  shape({"kind":"union","choices":[6,1081]}),
-  shape({"kind":"array","item":1082}),
-  shape({"kind":"intersection","choices":[323,1083]}),
+  shape({"kind":"union","choices":[6,1084]}),
+  shape({"kind":"array","item":1085}),
+  shape({"kind":"intersection","choices":[323,1086]}),
   shape({"kind":"object","properties":{"roomName":{"node":5,"optional":true},"agent":{"node":210,"optional":false}}}),
-  shape({"kind":"intersection","choices":[31,1085]}),
+  shape({"kind":"intersection","choices":[31,1088]}),
   shape({"kind":"object","properties":{"workspaceId":{"node":1,"optional":false},"roomId":{"node":5,"optional":true}}}),
-  shape({"kind":"object","properties":{"status":{"node":1087,"optional":false},"reason":{"node":5,"optional":true},"retryAfter":{"node":17,"optional":true}}}),
-  shape({"kind":"union","choices":[317,669,640,641,642,643,1088]}),
+  shape({"kind":"object","properties":{"status":{"node":1090,"optional":false},"reason":{"node":5,"optional":true},"retryAfter":{"node":17,"optional":true}}}),
+  shape({"kind":"union","choices":[317,669,640,641,642,643,1091]}),
   shape({"kind":"literal","value":"no_answer"}),
-  shape({"kind":"object","properties":{"token":{"node":1,"optional":false},"platform":{"node":1090,"optional":false},"environment":{"node":1094,"optional":false},"keys":{"node":1097,"optional":true}}}),
-  shape({"kind":"union","choices":[1091,1092,1093]}),
+  shape({"kind":"object","properties":{"token":{"node":1,"optional":false},"platform":{"node":1093,"optional":false},"environment":{"node":1097,"optional":false},"keys":{"node":1100,"optional":true}}}),
+  shape({"kind":"union","choices":[1094,1095,1096]}),
   shape({"kind":"literal","value":"ios"}),
   shape({"kind":"literal","value":"android"}),
   shape({"kind":"literal","value":"web"}),
-  shape({"kind":"union","choices":[1095,1096]}),
+  shape({"kind":"union","choices":[1098,1099]}),
   shape({"kind":"literal","value":"physical"}),
   shape({"kind":"literal","value":"emulator"}),
-  shape({"kind":"union","choices":[6,1098]}),
+  shape({"kind":"union","choices":[6,1101]}),
   shape({"kind":"object","properties":{"p256dh":{"node":1,"optional":false},"auth":{"node":1,"optional":false}}}),
   shape({"kind":"object","properties":{"accepted":{"node":32,"optional":false}}}),
-  shape({"kind":"intersection","choices":[25,1101]}),
+  shape({"kind":"intersection","choices":[25,1104]}),
   shape({"kind":"object","properties":{"memberId":{"node":1,"optional":false}}}),
-  shape({"kind":"intersection","choices":[36,1103]}),
+  shape({"kind":"intersection","choices":[36,1106]}),
   shape({"kind":"object","properties":{"memberId":{"node":1,"optional":false}}}),
-  shape({"kind":"object","properties":{"scope":{"node":1105,"optional":false},"message":{"node":1,"optional":false},"stack":{"node":1,"optional":false},"platform":{"node":1,"optional":false},"platformVersion":{"node":1,"optional":false},"releaseSha":{"node":1,"optional":false},"runtimeVersion":{"node":1,"optional":false},"updateId":{"node":1,"optional":false},"device":{"node":5,"optional":true},"appVersion":{"node":5,"optional":true},"crashTimestamp":{"node":5,"optional":true}}}),
-  shape({"kind":"union","choices":[1106,815,1107,1108,1109]}),
+  shape({"kind":"object","properties":{"scope":{"node":1108,"optional":false},"message":{"node":1,"optional":false},"stack":{"node":1,"optional":false},"platform":{"node":1,"optional":false},"platformVersion":{"node":1,"optional":false},"releaseSha":{"node":1,"optional":false},"runtimeVersion":{"node":1,"optional":false},"updateId":{"node":1,"optional":false},"device":{"node":5,"optional":true},"appVersion":{"node":5,"optional":true},"crashTimestamp":{"node":5,"optional":true}}}),
+  shape({"kind":"union","choices":[1109,815,1110,1111,1112]}),
   shape({"kind":"literal","value":"conversation"}),
   shape({"kind":"literal","value":"voice-join"}),
   shape({"kind":"literal","value":"voice-cleanup"}),
   shape({"kind":"literal","value":"native-crash"}),
-  shape({"kind":"object","properties":{"schemaVersion":{"node":784,"optional":false},"deviceId":{"node":1,"optional":false},"sessionId":{"node":1,"optional":false},"viewId":{"node":1,"optional":false},"bindingKey":{"node":1,"optional":false},"descriptor":{"node":1111,"optional":false},"events":{"node":1129,"optional":false}}}),
-  shape({"kind":"object","properties":{"platform":{"node":1112,"optional":false},"client":{"node":1116,"optional":false},"version":{"node":1,"optional":false},"environment":{"node":1119,"optional":false},"osVersion":{"node":5,"optional":true},"releaseSha":{"node":5,"optional":true},"buildNumber":{"node":5,"optional":true},"browserVersion":{"node":5,"optional":true},"browser":{"node":1124,"optional":true},"runtimeVersion":{"node":5,"optional":true},"updateId":{"node":5,"optional":true}}}),
-  shape({"kind":"union","choices":[1091,1092,1093,1113,1114,1115]}),
+  shape({"kind":"object","properties":{"schemaVersion":{"node":784,"optional":false},"deviceId":{"node":1,"optional":false},"sessionId":{"node":1,"optional":false},"viewId":{"node":1,"optional":false},"bindingKey":{"node":1,"optional":false},"descriptor":{"node":1114,"optional":false},"events":{"node":1132,"optional":false}}}),
+  shape({"kind":"object","properties":{"platform":{"node":1115,"optional":false},"client":{"node":1119,"optional":false},"version":{"node":1,"optional":false},"environment":{"node":1122,"optional":false},"osVersion":{"node":5,"optional":true},"releaseSha":{"node":5,"optional":true},"buildNumber":{"node":5,"optional":true},"browserVersion":{"node":5,"optional":true},"browser":{"node":1127,"optional":true},"runtimeVersion":{"node":5,"optional":true},"updateId":{"node":5,"optional":true}}}),
+  shape({"kind":"union","choices":[1094,1095,1096,1116,1117,1118]}),
   shape({"kind":"literal","value":"macos"}),
   shape({"kind":"literal","value":"windows"}),
   shape({"kind":"literal","value":"linux"}),
-  shape({"kind":"union","choices":[1093,1117,1118]}),
+  shape({"kind":"union","choices":[1096,1120,1121]}),
   shape({"kind":"literal","value":"expo_native"}),
   shape({"kind":"literal","value":"tauri"}),
-  shape({"kind":"union","choices":[1120,1121,1122,1123]}),
+  shape({"kind":"union","choices":[1123,1124,1125,1126]}),
   shape({"kind":"literal","value":"production"}),
   shape({"kind":"literal","value":"development"}),
   shape({"kind":"literal","value":"preview"}),
   shape({"kind":"literal","value":"lab"}),
-  shape({"kind":"union","choices":[6,608,1125,1126,1127,1128]}),
+  shape({"kind":"union","choices":[6,608,1128,1129,1130,1131]}),
   shape({"kind":"literal","value":"chrome"}),
   shape({"kind":"literal","value":"safari"}),
   shape({"kind":"literal","value":"firefox"}),
   shape({"kind":"literal","value":"edge"}),
-  shape({"kind":"array","item":1130}),
-  shape({"kind":"intersection","choices":[1131,1241]}),
-  shape({"kind":"object","properties":{"name":{"node":1132,"optional":false},"outcome":{"node":1166,"optional":true},"code":{"node":1169,"optional":true},"phase":{"node":1191,"optional":true},"route":{"node":1192,"optional":true},"operation":{"node":5,"optional":true},"actionId":{"node":5,"optional":true},"requestId":{"node":5,"optional":true},"attemptId":{"node":5,"optional":true},"workspaceId":{"node":5,"optional":true},"commandId":{"node":5,"optional":true},"durationMs":{"node":17,"optional":true},"httpStatus":{"node":17,"optional":true},"creationSource":{"node":1237,"optional":true},"deliveryState":{"node":1239,"optional":true}}}),
-  shape({"kind":"union","choices":[1133,1134,1135,1136,1137,1138,1139,1140,1141,1142,1143,1144,1145,1146,1147,1148,1149,1150,1151,1152,1153,1154,1155,1156,1157,1158,1159,1160,1161,1162,1163,1164,1165]}),
+  shape({"kind":"array","item":1133}),
+  shape({"kind":"intersection","choices":[1134,1244]}),
+  shape({"kind":"object","properties":{"name":{"node":1135,"optional":false},"outcome":{"node":1169,"optional":true},"code":{"node":1172,"optional":true},"phase":{"node":1194,"optional":true},"route":{"node":1195,"optional":true},"operation":{"node":5,"optional":true},"actionId":{"node":5,"optional":true},"requestId":{"node":5,"optional":true},"attemptId":{"node":5,"optional":true},"workspaceId":{"node":5,"optional":true},"commandId":{"node":5,"optional":true},"durationMs":{"node":17,"optional":true},"httpStatus":{"node":17,"optional":true},"creationSource":{"node":1240,"optional":true},"deliveryState":{"node":1242,"optional":true}}}),
+  shape({"kind":"union","choices":[1136,1137,1138,1139,1140,1141,1142,1143,1144,1145,1146,1147,1148,1149,1150,1151,1152,1153,1154,1155,1156,1157,1158,1159,1160,1161,1162,1163,1164,1165,1166,1167,1168]}),
   shape({"kind":"literal","value":"workspace_created"}),
   shape({"kind":"literal","value":"session_started"}),
   shape({"kind":"literal","value":"session_bound"}),
@@ -1168,10 +1171,10 @@ export const wireShapes: readonly WireShape[] = [
   shape({"kind":"literal","value":"ota_update_available"}),
   shape({"kind":"literal","value":"ota_update_applied"}),
   shape({"kind":"literal","value":"coverage"}),
-  shape({"kind":"union","choices":[6,317,608,1167,743,1168,547]}),
+  shape({"kind":"union","choices":[6,317,608,1170,743,1171,547]}),
   shape({"kind":"literal","value":"success"}),
   shape({"kind":"literal","value":"started"}),
-  shape({"kind":"union","choices":[6,669,1170,1171,1172,743,1173,1174,1175,1176,1177,1178,1179,547,1180,1181,1182,1183,1184,1185,1186,1187,1188,1189,1190]}),
+  shape({"kind":"union","choices":[6,669,1173,1174,1175,743,1176,1177,1178,1179,1180,1181,1182,547,1183,1184,1185,1186,1187,1188,1189,1190,1191,1192,1193]}),
   shape({"kind":"literal","value":"provider_error"}),
   shape({"kind":"literal","value":"invalid_callback"}),
   shape({"kind":"literal","value":"exchange_failed"}),
@@ -1193,8 +1196,8 @@ export const wireShapes: readonly WireShape[] = [
   shape({"kind":"literal","value":"http_error"}),
   shape({"kind":"literal","value":"network_error"}),
   shape({"kind":"literal","value":"telemetry_disabled"}),
-  shape({"kind":"union","choices":[6,1133,1134,1135,1136,1137,1138,1139,1140,1141,1142,1143,1144,1145,1146,1147,1148,1149,1150,1151,1152,1153,1154,1155,1156,1157,1158,1159,1160,1161,1162,1163,1164,1165]}),
-  shape({"kind":"union","choices":[6,1193,1194,1195,1196,1197,1198,1199,1200,1201,1202,1203,1204,1205,1206,1207,1208,1209,1210,1211,1212,1213,1214,1215,1216,1217,1218,1219,1220,1221,1222,1223,1224,1225,1226,1227,1228,1229,1230,1231,1232,1233,1234,1235,1236]}),
+  shape({"kind":"union","choices":[6,1136,1137,1138,1139,1140,1141,1142,1143,1144,1145,1146,1147,1148,1149,1150,1151,1152,1153,1154,1155,1156,1157,1158,1159,1160,1161,1162,1163,1164,1165,1166,1167,1168]}),
+  shape({"kind":"union","choices":[6,1196,1197,1198,1199,1200,1201,1202,1203,1204,1205,1206,1207,1208,1209,1210,1211,1212,1213,1214,1215,1216,1217,1218,1219,1220,1221,1222,1223,1224,1225,1226,1227,1228,1229,1230,1231,1232,1233,1234,1235,1236,1237,1238,1239]}),
   shape({"kind":"literal","value":"index"}),
   shape({"kind":"literal","value":"artifact-viewer"}),
   shape({"kind":"literal","value":"beeline/agent-profile"}),
@@ -1239,23 +1242,23 @@ export const wireShapes: readonly WireShape[] = [
   shape({"kind":"literal","value":"review/[secret]"}),
   shape({"kind":"literal","value":"settings"}),
   shape({"kind":"literal","value":"text-selection"}),
-  shape({"kind":"union","choices":[6,176,177,1238,178]}),
+  shape({"kind":"union","choices":[6,176,177,1241,178]}),
   shape({"kind":"literal","value":"mcp_consent"}),
-  shape({"kind":"union","choices":[6,317,608,1240,63]}),
+  shape({"kind":"union","choices":[6,317,608,1243,63]}),
   shape({"kind":"literal","value":"delivered"}),
   shape({"kind":"object","properties":{"eventId":{"node":1,"optional":false},"sequence":{"node":18,"optional":false},"occurredAt":{"node":1,"optional":false}}}),
   shape({"kind":"object","properties":{"accepted":{"node":902,"optional":false}}}),
-  shape({"kind":"intersection","choices":[25,1244]}),
+  shape({"kind":"intersection","choices":[25,1247]}),
   shape({"kind":"object","properties":{"messageId":{"node":1,"optional":false},"note":{"node":5,"optional":true}}}),
   shape({"kind":"object","properties":{"itemId":{"node":1,"optional":false},"duplicate":{"node":32,"optional":false}}}),
-  shape({"kind":"object","properties":{"durationMs":{"node":18,"optional":false},"failed":{"node":32,"optional":false},"network":{"node":1247,"optional":true}}}),
-  shape({"kind":"union","choices":[6,1248]}),
+  shape({"kind":"object","properties":{"durationMs":{"node":18,"optional":false},"failed":{"node":32,"optional":false},"network":{"node":1250,"optional":true}}}),
+  shape({"kind":"union","choices":[6,1251]}),
   shape({"kind":"object","properties":{"requestToFirstByteMs":{"node":18,"optional":false},"serverProcessingMs":{"node":18,"optional":false},"jsResponseDelayMs":{"node":17,"optional":true}}}),
-  shape({"kind":"object","properties":{"deviceId":{"node":1,"optional":false},"previousDeviceId":{"node":5,"optional":true},"platform":{"node":1250,"optional":true},"updateId":{"node":5,"optional":true},"channel":{"node":5,"optional":true},"group":{"node":5,"optional":true},"runtimeVersion":{"node":5,"optional":true},"releaseVersion":{"node":5,"optional":true},"sourceSha":{"node":5,"optional":true}}}),
-  shape({"kind":"union","choices":[6,1091,1092,1113,1114,1115]}),
-  shape({"kind":"object","properties":{"event":{"node":1252,"optional":false}}}),
-  shape({"kind":"object","properties":{"event":{"node":1253,"optional":false},"installId":{"node":1,"optional":false},"attemptId":{"node":1,"optional":false},"platform":{"node":1112,"optional":false},"version":{"node":1,"optional":false},"environment":{"node":1279,"optional":false},"provider":{"node":1280,"optional":true},"outcome":{"node":1281,"optional":true},"errorCode":{"node":1282,"optional":true},"screen":{"node":1192,"optional":true},"option":{"node":1283,"optional":true},"durationMs":{"node":17,"optional":true},"artifactId":{"node":5,"optional":true},"timestamp":{"node":1,"optional":false}}}),
-  shape({"kind":"union","choices":[1254,1255,1256,1257,1258,1259,1260,1261,1262,1263,1264,1265,1266,1267,1268,1269,1270,1271,1272,1273,1274,1275,1276,1133,1277,1278]}),
+  shape({"kind":"object","properties":{"deviceId":{"node":1,"optional":false},"previousDeviceId":{"node":5,"optional":true},"platform":{"node":1253,"optional":true},"updateId":{"node":5,"optional":true},"channel":{"node":5,"optional":true},"group":{"node":5,"optional":true},"runtimeVersion":{"node":5,"optional":true},"releaseVersion":{"node":5,"optional":true},"sourceSha":{"node":5,"optional":true}}}),
+  shape({"kind":"union","choices":[6,1094,1095,1116,1117,1118]}),
+  shape({"kind":"object","properties":{"event":{"node":1255,"optional":false}}}),
+  shape({"kind":"object","properties":{"event":{"node":1256,"optional":false},"installId":{"node":1,"optional":false},"attemptId":{"node":1,"optional":false},"platform":{"node":1115,"optional":false},"version":{"node":1,"optional":false},"environment":{"node":1282,"optional":false},"provider":{"node":1283,"optional":true},"outcome":{"node":1284,"optional":true},"errorCode":{"node":1285,"optional":true},"screen":{"node":1195,"optional":true},"option":{"node":1286,"optional":true},"durationMs":{"node":17,"optional":true},"artifactId":{"node":5,"optional":true},"timestamp":{"node":1,"optional":false}}}),
+  shape({"kind":"union","choices":[1257,1258,1259,1260,1261,1262,1263,1264,1265,1266,1267,1268,1269,1270,1271,1272,1273,1274,1275,1276,1277,1278,1279,1136,1280,1281]}),
   shape({"kind":"literal","value":"banter_shown"}),
   shape({"kind":"literal","value":"welcome_shown"}),
   shape({"kind":"literal","value":"user_answered"}),
@@ -1281,18 +1284,18 @@ export const wireShapes: readonly WireShape[] = [
   shape({"kind":"literal","value":"signed_in"}),
   shape({"kind":"literal","value":"first_message_sent"}),
   shape({"kind":"literal","value":"screen_shown"}),
-  shape({"kind":"union","choices":[1120,1121,1122,1123,306]}),
+  shape({"kind":"union","choices":[1123,1124,1125,1126,306]}),
   shape({"kind":"union","choices":[6,50,51]}),
-  shape({"kind":"union","choices":[6,1167,743,121]}),
-  shape({"kind":"union","choices":[6,669,188,1170,1171,1172,608]}),
+  shape({"kind":"union","choices":[6,1170,743,121]}),
+  shape({"kind":"union","choices":[6,669,188,1173,1174,1175,608]}),
   shape({"kind":"union","choices":[6,427,428,429,430]}),
-  shape({"kind":"intersection","choices":[36,1285]}),
+  shape({"kind":"intersection","choices":[36,1288]}),
   shape({"kind":"object","properties":{"participantId":{"node":1,"optional":false}}}),
-  shape({"kind":"intersection","choices":[138,1287]}),
+  shape({"kind":"intersection","choices":[138,1290]}),
   shape({"kind":"object","properties":{"created":{"node":32,"optional":false}}}),
-  shape({"kind":"object","properties":{"name":{"node":1,"optional":false},"avatar":{"node":5,"optional":true},"expiresAt":{"node":18,"optional":false},"joinedWorkspaceId":{"node":5,"optional":true},"inviter":{"node":1289,"optional":true},"memberCount":{"node":17,"optional":true},"agentCount":{"node":17,"optional":true}}}),
-  shape({"kind":"union","choices":[6,1290]}),
-  shape({"kind":"object","properties":{"name":{"node":1,"optional":false},"handle":{"node":5,"optional":true},"face":{"node":5,"optional":true},"role":{"node":1291,"optional":true}}}),
+  shape({"kind":"object","properties":{"name":{"node":1,"optional":false},"avatar":{"node":5,"optional":true},"expiresAt":{"node":18,"optional":false},"joinedWorkspaceId":{"node":5,"optional":true},"inviter":{"node":1292,"optional":true},"memberCount":{"node":17,"optional":true},"agentCount":{"node":17,"optional":true}}}),
+  shape({"kind":"union","choices":[6,1293]}),
+  shape({"kind":"object","properties":{"name":{"node":1,"optional":false},"handle":{"node":5,"optional":true},"face":{"node":5,"optional":true},"role":{"node":1294,"optional":true}}}),
   shape({"kind":"union","choices":[6,39,40,41,42]}),
   shape({"kind":"object","properties":{"messageId":{"node":1,"optional":false}}}),
   shape({"kind":"object","properties":{"roomId":{"node":1,"optional":false},"messageId":{"node":1,"optional":false},"workspaceId":{"node":1,"optional":false}}}),
@@ -1305,84 +1308,84 @@ export const wireShapes: readonly WireShape[] = [
   shape({"kind":"object","properties":{"token":{"node":1,"optional":false}}}),
   shape({"kind":"object","properties":{"workspaceId":{"node":1,"optional":false},"agentId":{"node":1,"optional":false},"voiceId":{"node":1,"optional":false}}}),
   shape({"kind":"object","properties":{"workspaceId":{"node":1,"optional":false},"query":{"node":1,"optional":false},"before":{"node":5,"optional":true}}}),
-  shape({"kind":"object","properties":{"workspaceId":{"node":1,"optional":false},"results":{"node":1304,"optional":false},"nextBefore":{"node":5,"optional":true}}}),
-  shape({"kind":"array","item":1305}),
-  shape({"kind":"object","properties":{"messageId":{"node":1,"optional":false},"roomId":{"node":1,"optional":false},"roomName":{"node":1,"optional":false},"directMessage":{"node":32,"optional":false},"authorName":{"node":1,"optional":false},"createdAt":{"node":18,"optional":false},"snippet":{"node":1306,"optional":false}}}),
-  shape({"kind":"array","item":1307}),
+  shape({"kind":"object","properties":{"workspaceId":{"node":1,"optional":false},"results":{"node":1307,"optional":false},"nextBefore":{"node":5,"optional":true}}}),
+  shape({"kind":"array","item":1308}),
+  shape({"kind":"object","properties":{"messageId":{"node":1,"optional":false},"roomId":{"node":1,"optional":false},"roomName":{"node":1,"optional":false},"directMessage":{"node":32,"optional":false},"authorName":{"node":1,"optional":false},"createdAt":{"node":18,"optional":false},"snippet":{"node":1309,"optional":false}}}),
+  shape({"kind":"array","item":1310}),
   shape({"kind":"object","properties":{"text":{"node":1,"optional":false},"match":{"node":32,"optional":false}}}),
   shape({"kind":"object","properties":{"query":{"node":1,"optional":false}}}),
-  shape({"kind":"intersection","choices":[152,1310]}),
+  shape({"kind":"intersection","choices":[152,1313]}),
   shape({"kind":"object","properties":{"completionV1":{"node":501,"optional":true},"chain":{"node":169,"optional":false},"asset":{"node":1,"optional":false},"amount":{"node":1,"optional":false},"to":{"node":1,"optional":false}}}),
-  shape({"kind":"union","choices":[1312,1314,1316,1318,1319]}),
-  shape({"kind":"object","properties":{"outcome":{"node":1313,"optional":false},"txUrl":{"node":1,"optional":false},"amountText":{"node":1,"optional":false},"balanceAfterUsd":{"node":1,"optional":false}}}),
+  shape({"kind":"union","choices":[1315,1317,1319,1321,1322]}),
+  shape({"kind":"object","properties":{"outcome":{"node":1316,"optional":false},"txUrl":{"node":1,"optional":false},"amountText":{"node":1,"optional":false},"balanceAfterUsd":{"node":1,"optional":false}}}),
   shape({"kind":"literal","value":"sent"}),
-  shape({"kind":"object","properties":{"outcome":{"node":1315,"optional":false},"asset":{"node":1,"optional":false},"needed":{"node":1,"optional":false},"available":{"node":1,"optional":false}}}),
+  shape({"kind":"object","properties":{"outcome":{"node":1318,"optional":false},"asset":{"node":1,"optional":false},"needed":{"node":1,"optional":false},"available":{"node":1,"optional":false}}}),
   shape({"kind":"literal","value":"insufficient"}),
-  shape({"kind":"object","properties":{"outcome":{"node":1317,"optional":false}}}),
+  shape({"kind":"object","properties":{"outcome":{"node":1320,"optional":false}}}),
   shape({"kind":"literal","value":"delegation-expired"}),
   shape({"kind":"object","properties":{"outcome":{"node":317,"optional":false},"reason":{"node":1,"optional":false}}}),
   shape({"kind":"object","properties":{"outcome":{"node":190,"optional":false},"reason":{"node":1,"optional":false},"txUrl":{"node":5,"optional":true}}}),
-  shape({"kind":"intersection","choices":[25,1321]}),
+  shape({"kind":"intersection","choices":[25,1324]}),
   shape({"kind":"object","properties":{"messageId":{"node":5,"optional":true},"text":{"node":1,"optional":false},"mentions":{"node":34,"optional":true},"attachments":{"node":248,"optional":true}}}),
-  shape({"kind":"intersection","choices":[196,1323]}),
-  shape({"kind":"object","properties":{"externalAgentHandles":{"node":34,"optional":true},"externalAgentDelivery":{"node":1324,"optional":true},"activeSteerAgentIds":{"node":34,"optional":true},"message":{"node":1328,"optional":true},"pendingAgentCommands":{"node":977,"optional":true}}}),
-  shape({"kind":"union","choices":[6,1325]}),
-  shape({"kind":"array","item":1326}),
-  shape({"kind":"intersection","choices":[655,1327]}),
+  shape({"kind":"intersection","choices":[196,1326]}),
+  shape({"kind":"object","properties":{"externalAgentHandles":{"node":34,"optional":true},"externalAgentDelivery":{"node":1327,"optional":true},"activeSteerAgentIds":{"node":34,"optional":true},"message":{"node":1331,"optional":true},"pendingAgentCommands":{"node":977,"optional":true}}}),
+  shape({"kind":"union","choices":[6,1328]}),
+  shape({"kind":"array","item":1329}),
+  shape({"kind":"intersection","choices":[655,1330]}),
   shape({"kind":"object","properties":{"memberId":{"node":1,"optional":false},"handle":{"node":1,"optional":false}}}),
   shape({"kind":"union","choices":[6,202]}),
-  shape({"kind":"intersection","choices":[25,1321,1330]}),
+  shape({"kind":"intersection","choices":[25,1324,1333]}),
   shape({"kind":"object","properties":{"parentMessageId":{"node":1,"optional":false}}}),
   shape({"kind":"object","properties":{"cornerId":{"node":1,"optional":false},"releaseHoldId":{"node":5,"optional":true},"sourceMessageId":{"node":5,"optional":true}}}),
   shape({"kind":"object","properties":{"holdId":{"node":1,"optional":false},"roomId":{"node":1,"optional":false}}}),
-  shape({"kind":"intersection","choices":[25,1334]}),
+  shape({"kind":"intersection","choices":[25,1337]}),
   shape({"kind":"object","properties":{"locked":{"node":32,"optional":false}}}),
-  shape({"kind":"intersection","choices":[25,1336]}),
+  shape({"kind":"intersection","choices":[25,1339]}),
   shape({"kind":"object","properties":{"messageId":{"node":1,"optional":false},"bookmarked":{"node":32,"optional":false}}}),
   shape({"kind":"object","properties":{"bookmarked":{"node":32,"optional":false}}}),
-  shape({"kind":"intersection","choices":[25,1339]}),
+  shape({"kind":"intersection","choices":[25,1342]}),
   shape({"kind":"object","properties":{"key":{"node":1,"optional":false},"name":{"node":1,"optional":false},"remote":{"node":1,"optional":false},"targetBranch":{"node":1,"optional":false},"githubInstallationId":{"node":17,"optional":true}}}),
-  shape({"kind":"object","properties":{"channelId":{"node":1,"optional":false},"binding":{"node":1341,"optional":false},"targetBranch":{"node":1,"optional":false},"updatedAt":{"node":18,"optional":false},"githubEventsEnabled":{"node":32,"optional":false},"source":{"node":1342,"optional":false}}}),
+  shape({"kind":"object","properties":{"channelId":{"node":1,"optional":false},"binding":{"node":1344,"optional":false},"targetBranch":{"node":1,"optional":false},"updatedAt":{"node":18,"optional":false},"githubEventsEnabled":{"node":32,"optional":false},"source":{"node":1345,"optional":false}}}),
   shape({"kind":"object","properties":{"key":{"node":1,"optional":false},"name":{"node":1,"optional":false},"remote":{"node":1,"optional":false},"localOnly":{"node":21,"optional":false},"githubInstallationId":{"node":17,"optional":true}}}),
   shape({"kind":"literal","value":"config"}),
-  shape({"kind":"intersection","choices":[25,1344]}),
+  shape({"kind":"intersection","choices":[25,1347]}),
   shape({"kind":"object","properties":{"targetBranch":{"node":1,"optional":false}}}),
   shape({"kind":"object","properties":{"choiceId":{"node":1,"optional":false}}}),
-  shape({"kind":"intersection","choices":[25,1347]}),
-  shape({"kind":"object","properties":{"name":{"node":1,"optional":false},"roleBindings":{"node":1348,"optional":false}}}),
-  shape({"kind":"object","properties":{},"index":1349}),
+  shape({"kind":"intersection","choices":[25,1350]}),
+  shape({"kind":"object","properties":{"name":{"node":1,"optional":false},"roleBindings":{"node":1351,"optional":false}}}),
+  shape({"kind":"object","properties":{},"index":1352}),
   shape({"kind":"union","choices":[1,29]}),
   shape({"kind":"object","properties":{"runId":{"node":1,"optional":false},"state":{"node":1,"optional":false}}}),
   shape({"kind":"object","properties":{"workspaceId":{"node":1,"optional":false},"connectorId":{"node":1,"optional":false}}}),
-  shape({"kind":"intersection","choices":[36,704,1353]}),
+  shape({"kind":"intersection","choices":[36,704,1356]}),
   shape({"kind":"object","properties":{"policy":{"node":692,"optional":false},"allow":{"node":34,"optional":true}}}),
-  shape({"kind":"intersection","choices":[36,704,1355,1356]}),
+  shape({"kind":"intersection","choices":[36,704,1358,1359]}),
   shape({"kind":"object","properties":{"model":{"node":5,"optional":true}}}),
   shape({"kind":"object","properties":{"effort":{"node":459,"optional":true},"fastMode":{"node":20,"optional":true}}}),
-  shape({"kind":"intersection","choices":[36,704,1358]}),
+  shape({"kind":"intersection","choices":[36,704,1361]}),
   shape({"kind":"object","properties":{"name":{"node":1,"optional":false},"instructions":{"node":1,"optional":false},"avatarSeed":{"node":1,"optional":false},"avatar":{"node":5,"optional":true}}}),
-  shape({"kind":"intersection","choices":[36,704,1360]}),
+  shape({"kind":"intersection","choices":[36,704,1363]}),
   shape({"kind":"object","properties":{"url":{"node":1,"optional":false},"key":{"node":5,"optional":true}}}),
-  shape({"kind":"intersection","choices":[36,704,1362]}),
+  shape({"kind":"intersection","choices":[36,704,1365]}),
   shape({"kind":"object","properties":{"enabled":{"node":32,"optional":false}}}),
   shape({"kind":"object","properties":{"faceId":{"node":154,"optional":false}}}),
   shape({"kind":"object","properties":{"pushLevel":{"node":52,"optional":false}}}),
-  shape({"kind":"object","properties":{"speakingSpeed":{"node":1366,"optional":false}}}),
+  shape({"kind":"object","properties":{"speakingSpeed":{"node":1369,"optional":false}}}),
   shape({"kind":"union","choices":[57,58,59]}),
   shape({"kind":"object","properties":{"name":{"node":5,"optional":true},"handle":{"node":5,"optional":true},"avatar":{"node":5,"optional":true}}}),
   shape({"kind":"object","properties":{"personId":{"node":1,"optional":false},"name":{"node":1,"optional":false},"handle":{"node":5,"optional":true},"avatar":{"node":5,"optional":true}}}),
-  shape({"kind":"intersection","choices":[25,1370]}),
+  shape({"kind":"intersection","choices":[25,1373]}),
   shape({"kind":"object","properties":{"name":{"node":5,"optional":true},"visibility":{"node":144,"optional":true},"reviewerAgentId":{"node":459,"optional":true}}}),
-  shape({"kind":"intersection","choices":[25,1372]}),
+  shape({"kind":"intersection","choices":[25,1375]}),
   shape({"kind":"object","properties":{"muted":{"node":20,"optional":true},"viewing":{"node":20,"optional":true},"sessionId":{"node":5,"optional":true}}}),
   shape({"kind":"object","properties":{"muted":{"node":32,"optional":false}}}),
-  shape({"kind":"intersection","choices":[36,1375]}),
+  shape({"kind":"intersection","choices":[36,1378]}),
   shape({"kind":"object","properties":{"allowFixSweep":{"node":20,"optional":true},"name":{"node":5,"optional":true},"avatar":{"node":5,"optional":true},"visibility":{"node":144,"optional":true}}}),
   shape({"kind":"object","properties":{"roomId":{"node":1,"optional":false}}}),
   shape({"kind":"union","choices":[155,206]}),
   shape({"kind":"object","properties":{"callId":{"node":1,"optional":false},"sessionId":{"node":5,"optional":true}}}),
-  shape({"kind":"object","properties":{"state":{"node":1380,"optional":false},"agentName":{"node":5,"optional":true}}}),
-  shape({"kind":"union","choices":[353,1381,1382]}),
+  shape({"kind":"object","properties":{"state":{"node":1383,"optional":false},"agentName":{"node":5,"optional":true}}}),
+  shape({"kind":"union","choices":[353,1384,1385]}),
   shape({"kind":"literal","value":"ready"}),
   shape({"kind":"literal","value":"parked"}),
   shape({"kind":"object","properties":{"roomId":{"node":1,"optional":false},"expectedCallId":{"node":5,"optional":true}}}),
@@ -1392,596 +1395,596 @@ export const wireShapes: readonly WireShape[] = [
   shape({"kind":"object","properties":{"callId":{"node":1,"optional":false},"sessionId":{"node":1,"optional":false}}}),
   shape({"kind":"object","properties":{"resumed":{"node":22,"optional":false}}}),
   shape({"kind":"object","properties":{"callId":{"node":1,"optional":false},"sessionId":{"node":5,"optional":true}}}),
-  shape({"kind":"intersection","choices":[1391,1392]}),
+  shape({"kind":"intersection","choices":[1394,1395]}),
   shape({"kind":"object","properties":{"roomId":{"node":1,"optional":false}}}),
   shape({"kind":"object","properties":{"commandId":{"node":1,"optional":false},"generationId":{"node":1,"optional":false}}}),
   shape({"kind":"object","properties":{"id":{"node":1,"optional":false},"createdAt":{"node":18,"optional":false},"failureReportDelivered":{"node":20,"optional":true}}}),
-  shape({"kind":"intersection","choices":[1395,1396]}),
-  shape({"kind":"object","properties":{"agentId":{"node":1,"optional":false}}}),
-  shape({"kind":"object","properties":{"requestId":{"node":1,"optional":false},"outcome":{"node":1086,"optional":false}}}),
   shape({"kind":"intersection","choices":[1398,1399]}),
+  shape({"kind":"object","properties":{"agentId":{"node":1,"optional":false}}}),
+  shape({"kind":"object","properties":{"requestId":{"node":1,"optional":false},"outcome":{"node":1089,"optional":false}}}),
+  shape({"kind":"intersection","choices":[1401,1402]}),
   shape({"kind":"object","properties":{"cornerId":{"node":1,"optional":false}}}),
   shape({"kind":"object","properties":{"headSha":{"node":1,"optional":false}}}),
   shape({"kind":"object","properties":{"status":{"node":189,"optional":false},"pullRequestNumber":{"node":18,"optional":false},"headSha":{"node":1,"optional":false}}}),
-  shape({"kind":"intersection","choices":[1398,1402]}),
+  shape({"kind":"intersection","choices":[1401,1405]}),
   shape({"kind":"object","properties":{"roomId":{"node":5,"optional":true},"generationId":{"node":5,"optional":true},"requestId":{"node":5,"optional":true}}}),
-  shape({"kind":"intersection","choices":[1391,1404,1405]}),
+  shape({"kind":"intersection","choices":[1394,1407,1408]}),
   shape({"kind":"object","properties":{"generationId":{"node":5,"optional":true},"requestId":{"node":5,"optional":true}}}),
   shape({"kind":"object","properties":{"name":{"node":1,"optional":false}}}),
   shape({"kind":"object","properties":{"slug":{"node":1,"optional":false},"archived":{"node":32,"optional":false}}}),
-  shape({"kind":"intersection","choices":[1404,1391,1408]}),
+  shape({"kind":"intersection","choices":[1407,1394,1411]}),
   shape({"kind":"object","properties":{"ask":{"node":5,"optional":true},"prompt":{"node":1,"optional":false},"constraint":{"node":5,"optional":true},"options":{"node":149,"optional":false},"ttlSeconds":{"node":17,"optional":true}}}),
   shape({"kind":"object","properties":{"choiceId":{"node":1,"optional":false},"messageId":{"node":1,"optional":false},"mode":{"node":420,"optional":false},"electorateCount":{"node":18,"optional":false},"closesAt":{"node":17,"optional":true}}}),
-  shape({"kind":"intersection","choices":[1391,1404,1411]}),
+  shape({"kind":"intersection","choices":[1394,1407,1414]}),
   shape({"kind":"object","properties":{"runId":{"node":1,"optional":false},"role":{"node":1,"optional":false},"targetAgentId":{"node":1,"optional":false}}}),
   shape({"kind":"object","properties":{"runId":{"node":1,"optional":false},"state":{"node":1,"optional":false}}}),
-  shape({"kind":"intersection","choices":[1395,1414,1417]}),
-  shape({"kind":"object","properties":{"source":{"node":1415,"optional":false},"account":{"node":1416,"optional":false},"revision":{"node":1,"optional":false}}}),
+  shape({"kind":"intersection","choices":[1398,1417,1420]}),
+  shape({"kind":"object","properties":{"source":{"node":1418,"optional":false},"account":{"node":1419,"optional":false},"revision":{"node":1,"optional":false}}}),
   shape({"kind":"object","properties":{"connectionId":{"node":1,"optional":false},"epoch":{"node":18,"optional":false}}}),
   shape({"kind":"object","properties":{"provider":{"node":1,"optional":false},"key":{"node":1,"optional":false}}}),
-  shape({"kind":"object","properties":{"source":{"node":1418,"optional":false}}}),
+  shape({"kind":"object","properties":{"source":{"node":1421,"optional":false}}}),
   shape({"kind":"object","properties":{"connectionId":{"node":1,"optional":false},"epoch":{"node":18,"optional":false}}}),
-  shape({"kind":"intersection","choices":[1404,1391]}),
-  shape({"kind":"object","properties":{"allowed":{"node":32,"optional":false},"grantId":{"node":5,"optional":true},"status":{"node":1421,"optional":true},"messageId":{"node":5,"optional":true}}}),
+  shape({"kind":"intersection","choices":[1407,1394]}),
+  shape({"kind":"object","properties":{"allowed":{"node":32,"optional":false},"grantId":{"node":5,"optional":true},"status":{"node":1424,"optional":true},"messageId":{"node":5,"optional":true}}}),
   shape({"kind":"union","choices":[6,188,189,190,183,191]}),
-  shape({"kind":"intersection","choices":[1404,1391,1423]}),
+  shape({"kind":"intersection","choices":[1407,1394,1426]}),
   shape({"kind":"object","properties":{"target":{"node":1,"optional":false},"consume":{"node":20,"optional":true},"operation":{"node":5,"optional":true}}}),
-  shape({"kind":"intersection","choices":[1395,1425]}),
+  shape({"kind":"intersection","choices":[1398,1428]}),
   shape({"kind":"object","properties":{"connectorId":{"node":1,"optional":false}}}),
   shape({"kind":"object","properties":{"state":{"node":1,"optional":false},"redirectUri":{"node":1,"optional":false},"expiresAt":{"node":18,"optional":false}}}),
-  shape({"kind":"intersection","choices":[1391,1404,1428]}),
+  shape({"kind":"intersection","choices":[1394,1407,1431]}),
   shape({"kind":"object","properties":{"runId":{"node":1,"optional":false},"reason":{"node":1,"optional":false}}}),
   shape({"kind":"object","properties":{"runId":{"node":1,"optional":false},"state":{"node":1,"optional":false},"status":{"node":473,"optional":false},"reason":{"node":1,"optional":false}}}),
-  shape({"kind":"intersection","choices":[1393,1431]}),
-  shape({"kind":"object","properties":{"modelCredential":{"node":1432,"optional":true},"recoveryContext":{"node":5,"optional":true},"activitySource":{"node":1434,"optional":true}}}),
-  shape({"kind":"union","choices":[6,1433]}),
+  shape({"kind":"intersection","choices":[1396,1434]}),
+  shape({"kind":"object","properties":{"modelCredential":{"node":1435,"optional":true},"recoveryContext":{"node":5,"optional":true},"activitySource":{"node":1437,"optional":true}}}),
+  shape({"kind":"union","choices":[6,1436]}),
   shape({"kind":"object","properties":{"v":{"node":784,"optional":false},"token":{"node":1,"optional":false},"expiresAt":{"node":173,"optional":false}}}),
-  shape({"kind":"union","choices":[6,1435]}),
+  shape({"kind":"union","choices":[6,1438]}),
   shape({"kind":"object","properties":{"body":{"node":1,"optional":false},"systemEvent":{"node":220,"optional":false}}}),
-  shape({"kind":"intersection","choices":[1393,1437]}),
-  shape({"kind":"object","properties":{"commands":{"node":1438,"optional":false},"modelCredential":{"node":1432,"optional":true},"recoveryContext":{"node":5,"optional":true},"activitySource":{"node":1448,"optional":true}}}),
-  shape({"kind":"array","item":1439}),
-  shape({"kind":"object","properties":{"id":{"node":1,"optional":false},"roomId":{"node":1,"optional":false},"agentId":{"node":1,"optional":false},"sourceMessageId":{"node":1,"optional":false},"turnRequestId":{"node":1,"optional":false},"action":{"node":1440,"optional":false},"reason":{"node":1,"optional":false},"scheduleId":{"node":5,"optional":true},"rootCommandId":{"node":1,"optional":false},"parentCommandId":{"node":5,"optional":true},"rootSourceMessageId":{"node":1,"optional":false},"agentDepth":{"node":18,"optional":false},"private":{"node":20,"optional":true},"generationId":{"node":5,"optional":true},"source":{"node":1445,"optional":false},"recoveryContext":{"node":5,"optional":true}}}),
-  shape({"kind":"union","choices":[1441,1442,1443,1444]}),
+  shape({"kind":"intersection","choices":[1396,1440]}),
+  shape({"kind":"object","properties":{"commands":{"node":1441,"optional":false},"modelCredential":{"node":1435,"optional":true},"recoveryContext":{"node":5,"optional":true},"activitySource":{"node":1451,"optional":true}}}),
+  shape({"kind":"array","item":1442}),
+  shape({"kind":"object","properties":{"id":{"node":1,"optional":false},"roomId":{"node":1,"optional":false},"agentId":{"node":1,"optional":false},"sourceMessageId":{"node":1,"optional":false},"turnRequestId":{"node":1,"optional":false},"action":{"node":1443,"optional":false},"reason":{"node":1,"optional":false},"scheduleId":{"node":5,"optional":true},"rootCommandId":{"node":1,"optional":false},"parentCommandId":{"node":5,"optional":true},"rootSourceMessageId":{"node":1,"optional":false},"agentDepth":{"node":18,"optional":false},"private":{"node":20,"optional":true},"generationId":{"node":5,"optional":true},"source":{"node":1448,"optional":false},"recoveryContext":{"node":5,"optional":true}}}),
+  shape({"kind":"union","choices":[1444,1445,1446,1447]}),
   shape({"kind":"literal","value":"input"}),
   shape({"kind":"literal","value":"resume"}),
   shape({"kind":"literal","value":"stop"}),
   shape({"kind":"literal","value":"restart"}),
-  shape({"kind":"object","properties":{"id":{"node":1,"optional":false},"cursor":{"node":5,"optional":true},"authorId":{"node":1,"optional":false},"createdAt":{"node":18,"optional":false},"type":{"node":1,"optional":false},"body":{"node":1,"optional":false},"agentAuthor":{"node":20,"optional":true},"replyToMessageId":{"node":5,"optional":true},"replyToAuthorId":{"node":5,"optional":true},"replyToAuthorName":{"node":5,"optional":true},"replyToExcerpt":{"node":5,"optional":true},"rootMessageId":{"node":5,"optional":true},"requestId":{"node":5,"optional":true},"requestAuthorId":{"node":5,"optional":true},"agentHopCount":{"node":17,"optional":true},"attachments":{"node":1446,"optional":false},"systemEvent":{"node":219,"optional":true}}}),
-  shape({"kind":"array","item":1447}),
+  shape({"kind":"object","properties":{"id":{"node":1,"optional":false},"cursor":{"node":5,"optional":true},"authorId":{"node":1,"optional":false},"createdAt":{"node":18,"optional":false},"type":{"node":1,"optional":false},"body":{"node":1,"optional":false},"agentAuthor":{"node":20,"optional":true},"replyToMessageId":{"node":5,"optional":true},"replyToAuthorId":{"node":5,"optional":true},"replyToAuthorName":{"node":5,"optional":true},"replyToExcerpt":{"node":5,"optional":true},"rootMessageId":{"node":5,"optional":true},"requestId":{"node":5,"optional":true},"requestAuthorId":{"node":5,"optional":true},"agentHopCount":{"node":17,"optional":true},"attachments":{"node":1449,"optional":false},"systemEvent":{"node":219,"optional":true}}}),
+  shape({"kind":"array","item":1450}),
   shape({"kind":"object","properties":{"url":{"node":1,"optional":false},"expired":{"node":20,"optional":true},"name":{"node":5,"optional":true},"mimeType":{"node":5,"optional":true},"size":{"node":17,"optional":true},"thumbnailUrl":{"node":5,"optional":true},"sha256":{"node":5,"optional":true}}}),
-  shape({"kind":"union","choices":[6,1449]}),
+  shape({"kind":"union","choices":[6,1452]}),
   shape({"kind":"object","properties":{"body":{"node":1,"optional":false},"systemEvent":{"node":220,"optional":false}}}),
-  shape({"kind":"intersection","choices":[1395,1451]}),
+  shape({"kind":"intersection","choices":[1398,1454]}),
   shape({"kind":"object","properties":{"connectorId":{"node":1,"optional":false},"state":{"node":1,"optional":false}}}),
-  shape({"kind":"union","choices":[1453,1454,1455]}),
+  shape({"kind":"union","choices":[1456,1457,1458]}),
   shape({"kind":"object","properties":{"status":{"node":190,"optional":false},"expiresAt":{"node":18,"optional":false}}}),
   shape({"kind":"object","properties":{"status":{"node":318,"optional":false}}}),
-  shape({"kind":"object","properties":{"status":{"node":1381,"optional":false},"code":{"node":1,"optional":false}}}),
-  shape({"kind":"union","choices":[1457,1458]}),
+  shape({"kind":"object","properties":{"status":{"node":1384,"optional":false},"code":{"node":1,"optional":false}}}),
+  shape({"kind":"union","choices":[1460,1461]}),
   shape({"kind":"object","properties":{"status":{"node":65,"optional":false},"pullRequestNumber":{"node":18,"optional":false},"url":{"node":1,"optional":false}}}),
   shape({"kind":"object","properties":{"status":{"node":451,"optional":false},"blocker":{"node":1,"optional":false}}}),
-  shape({"kind":"intersection","choices":[1395,1460]}),
-  shape({"kind":"object","properties":{"id":{"node":1,"optional":false},"operation":{"node":1461,"optional":false},"providerId":{"node":5,"optional":true},"signingSecret":{"node":5,"optional":true},"accountContext":{"node":5,"optional":true},"livemode":{"node":20,"optional":true},"error":{"node":5,"optional":true}}}),
-  shape({"kind":"union","choices":[1462,1463]}),
+  shape({"kind":"intersection","choices":[1398,1463]}),
+  shape({"kind":"object","properties":{"id":{"node":1,"optional":false},"operation":{"node":1464,"optional":false},"providerId":{"node":5,"optional":true},"signingSecret":{"node":5,"optional":true},"accountContext":{"node":5,"optional":true},"livemode":{"node":20,"optional":true},"error":{"node":5,"optional":true}}}),
+  shape({"kind":"union","choices":[1465,1466]}),
   shape({"kind":"literal","value":"register"}),
   shape({"kind":"literal","value":"remove"}),
-  shape({"kind":"intersection","choices":[1465,1466]}),
+  shape({"kind":"intersection","choices":[1468,1469]}),
   shape({"kind":"object","properties":{"requestId":{"node":5,"optional":true},"roomId":{"node":1,"optional":false},"reason":{"node":1,"optional":false},"generationId":{"node":5,"optional":true},"continuation":{"node":5,"optional":true},"reconnect":{"node":20,"optional":true},"noApi":{"node":20,"optional":true}}}),
   shape({"kind":"object","properties":{"service":{"node":1,"optional":false},"switchGoogleAccount":{"node":20,"optional":true},"squireAvailable":{"node":20,"optional":true},"signedInUrl":{"node":5,"optional":true},"squireSignedIn":{"node":20,"optional":true}}}),
-  shape({"kind":"intersection","choices":[1468,1470]}),
-  shape({"kind":"object","properties":{"route":{"node":126,"optional":true},"app":{"node":1,"optional":false},"connectionReference":{"node":5,"optional":true},"appId":{"node":5,"optional":true},"appKey":{"node":5,"optional":true},"transport":{"node":1469,"optional":true},"connectorId":{"node":5,"optional":true},"authorizationUrl":{"node":5,"optional":true},"next":{"node":1,"optional":false}}}),
+  shape({"kind":"intersection","choices":[1471,1473]}),
+  shape({"kind":"object","properties":{"route":{"node":126,"optional":true},"app":{"node":1,"optional":false},"connectionReference":{"node":5,"optional":true},"appId":{"node":5,"optional":true},"appKey":{"node":5,"optional":true},"transport":{"node":1472,"optional":true},"connectorId":{"node":5,"optional":true},"authorizationUrl":{"node":5,"optional":true},"next":{"node":1,"optional":false}}}),
   shape({"kind":"union","choices":[6,117,118,124,125]}),
-  shape({"kind":"object","properties":{"status":{"node":1471,"optional":false},"squire":{"node":1475,"optional":true},"approvalUrl":{"node":5,"optional":true},"grantId":{"node":5,"optional":true}}}),
-  shape({"kind":"union","choices":[121,1472,1473,983,1381,1474]}),
+  shape({"kind":"object","properties":{"status":{"node":1474,"optional":false},"squire":{"node":1478,"optional":true},"approvalUrl":{"node":5,"optional":true},"grantId":{"node":5,"optional":true}}}),
+  shape({"kind":"union","choices":[121,1475,1476,983,1384,1477]}),
   shape({"kind":"literal","value":"needs_sign_in"}),
   shape({"kind":"literal","value":"needs_squire"}),
   shape({"kind":"literal","value":"needs_approval"}),
-  shape({"kind":"union","choices":[6,1476]}),
+  shape({"kind":"union","choices":[6,1479]}),
   shape({"kind":"object","properties":{"url":{"node":1,"optional":false},"goal":{"node":1,"optional":false}}}),
-  shape({"kind":"intersection","choices":[1404,1391,1478]}),
+  shape({"kind":"intersection","choices":[1407,1394,1481]}),
   shape({"kind":"object","properties":{"app":{"node":1,"optional":false},"reason":{"node":1,"optional":false},"continuation":{"node":5,"optional":true},"reconnect":{"node":20,"optional":true},"noApi":{"node":20,"optional":true}}}),
-  shape({"kind":"object","properties":{"status":{"node":1480,"optional":false},"appId":{"node":5,"optional":true},"app":{"node":1,"optional":false},"appKey":{"node":5,"optional":true},"route":{"node":126,"optional":true},"transport":{"node":1469,"optional":true},"connectorId":{"node":5,"optional":true},"connectionReference":{"node":5,"optional":true},"authorizationUrl":{"node":5,"optional":true},"next":{"node":1,"optional":false}}}),
-  shape({"kind":"union","choices":[121,122,4,1472,1473,983]}),
-  shape({"kind":"intersection","choices":[1404,1391,1482]}),
+  shape({"kind":"object","properties":{"status":{"node":1483,"optional":false},"appId":{"node":5,"optional":true},"app":{"node":1,"optional":false},"appKey":{"node":5,"optional":true},"route":{"node":126,"optional":true},"transport":{"node":1472,"optional":true},"connectorId":{"node":5,"optional":true},"connectionReference":{"node":5,"optional":true},"authorizationUrl":{"node":5,"optional":true},"next":{"node":1,"optional":false}}}),
+  shape({"kind":"union","choices":[121,122,4,1475,1476,983]}),
+  shape({"kind":"intersection","choices":[1407,1394,1485]}),
   shape({"kind":"object","properties":{"serverName":{"node":1,"optional":false},"version":{"node":1,"optional":false},"reason":{"node":1,"optional":false},"handoffToOwner":{"node":20,"optional":true}}}),
-  shape({"kind":"union","choices":[1484,1486,1487]}),
-  shape({"kind":"object","properties":{"status":{"node":1485,"optional":false},"connectorId":{"node":1,"optional":false}}}),
+  shape({"kind":"union","choices":[1487,1489,1490]}),
+  shape({"kind":"object","properties":{"status":{"node":1488,"optional":false},"connectorId":{"node":1,"optional":false}}}),
   shape({"kind":"union","choices":[122,4]}),
-  shape({"kind":"object","properties":{"status":{"node":1472,"optional":false},"connectorId":{"node":1,"optional":false},"authorizationUrl":{"node":1,"optional":false}}}),
-  shape({"kind":"object","properties":{"status":{"node":1488,"optional":false},"reason":{"node":1,"optional":false}}}),
+  shape({"kind":"object","properties":{"status":{"node":1475,"optional":false},"connectorId":{"node":1,"optional":false},"authorizationUrl":{"node":1,"optional":false}}}),
+  shape({"kind":"object","properties":{"status":{"node":1491,"optional":false},"reason":{"node":1,"optional":false}}}),
   shape({"kind":"literal","value":"unsupported"}),
   shape({"kind":"object","properties":{"grantId":{"node":1,"optional":false}}}),
-  shape({"kind":"intersection","choices":[1395,1391,1491]}),
+  shape({"kind":"intersection","choices":[1398,1394,1494]}),
   shape({"kind":"object","properties":{"title":{"node":5,"optional":true},"workflowName":{"node":5,"optional":true},"prompt":{"node":1,"optional":false},"cadence":{"node":527,"optional":false},"maxRuns":{"node":17,"optional":true}}}),
   shape({"kind":"object","properties":{"scheduleId":{"node":1,"optional":false},"nextRunAt":{"node":18,"optional":false}}}),
-  shape({"kind":"intersection","choices":[1391,1494]}),
+  shape({"kind":"intersection","choices":[1394,1497]}),
   shape({"kind":"object","properties":{"source":{"node":538,"optional":false},"event":{"node":1,"optional":false},"repository":{"node":5,"optional":true},"channelId":{"node":5,"optional":true},"channelName":{"node":5,"optional":true},"title":{"node":5,"optional":true},"when":{"node":5,"optional":true},"prompt":{"node":1,"optional":false},"workflowName":{"node":5,"optional":true}}}),
-  shape({"kind":"intersection","choices":[1404,1391,1496]}),
-  shape({"kind":"object","properties":{"implementer":{"node":5,"optional":true},"reviewer":{"node":5,"optional":true},"hold":{"node":20,"optional":true},"sourceMessageId":{"node":5,"optional":true},"targetRoomId":{"node":5,"optional":true},"requestId":{"node":1,"optional":false},"idempotencyKey":{"node":5,"optional":true},"name":{"node":1,"optional":false},"objective":{"node":1,"optional":false},"brief":{"node":1497,"optional":true},"repository":{"node":5,"optional":true},"targetBranch":{"node":5,"optional":true}}}),
-  shape({"kind":"union","choices":[6,1498]}),
-  shape({"kind":"object","properties":{"spec":{"node":1,"optional":false},"repositoryWork":{"node":20,"optional":true},"approval":{"node":1499,"optional":true},"attachments":{"node":1501,"optional":true},"change":{"node":5,"optional":true}}}),
-  shape({"kind":"union","choices":[6,1500]}),
+  shape({"kind":"intersection","choices":[1407,1394,1499]}),
+  shape({"kind":"object","properties":{"implementer":{"node":5,"optional":true},"reviewer":{"node":5,"optional":true},"hold":{"node":20,"optional":true},"sourceMessageId":{"node":5,"optional":true},"targetRoomId":{"node":5,"optional":true},"requestId":{"node":1,"optional":false},"idempotencyKey":{"node":5,"optional":true},"name":{"node":1,"optional":false},"objective":{"node":1,"optional":false},"brief":{"node":1500,"optional":true},"repository":{"node":5,"optional":true},"targetBranch":{"node":5,"optional":true}}}),
+  shape({"kind":"union","choices":[6,1501]}),
+  shape({"kind":"object","properties":{"spec":{"node":1,"optional":false},"repositoryWork":{"node":20,"optional":true},"approval":{"node":1502,"optional":true},"attachments":{"node":1504,"optional":true},"change":{"node":5,"optional":true}}}),
+  shape({"kind":"union","choices":[6,1503]}),
   shape({"kind":"object","properties":{"sourceMessageId":{"node":1,"optional":false}}}),
-  shape({"kind":"union","choices":[6,1502]}),
-  shape({"kind":"array","item":1503}),
+  shape({"kind":"union","choices":[6,1505]}),
+  shape({"kind":"array","item":1506}),
   shape({"kind":"object","properties":{"objectId":{"node":1,"optional":false},"purpose":{"node":1,"optional":false},"required":{"node":32,"optional":false}}}),
-  shape({"kind":"object","properties":{"cornerId":{"node":1,"optional":false},"warnings":{"node":34,"optional":true},"watch":{"node":1505,"optional":true}}}),
-  shape({"kind":"union","choices":[6,1506]}),
-  shape({"kind":"object","properties":{"roomId":{"node":1,"optional":false},"kinds":{"node":1507,"optional":false}}}),
-  shape({"kind":"array","item":1508}),
-  shape({"kind":"union","choices":[227,1509]}),
+  shape({"kind":"object","properties":{"cornerId":{"node":1,"optional":false},"warnings":{"node":34,"optional":true},"watch":{"node":1508,"optional":true}}}),
+  shape({"kind":"union","choices":[6,1509]}),
+  shape({"kind":"object","properties":{"roomId":{"node":1,"optional":false},"kinds":{"node":1510,"optional":false}}}),
+  shape({"kind":"array","item":1511}),
+  shape({"kind":"union","choices":[227,1512]}),
   shape({"kind":"literal","value":"opened"}),
-  shape({"kind":"intersection","choices":[1395,1391,1511]}),
-  shape({"kind":"object","properties":{"merchant":{"node":1,"optional":false},"merchantUrl":{"node":5,"optional":true},"amount":{"node":18,"optional":false},"description":{"node":1,"optional":false},"test":{"node":20,"optional":true},"idempotencyKey":{"node":1,"optional":false},"credentialType":{"node":1512,"optional":true},"networkId":{"node":5,"optional":true}}}),
-  shape({"kind":"union","choices":[6,217,1513]}),
+  shape({"kind":"intersection","choices":[1398,1394,1514]}),
+  shape({"kind":"object","properties":{"merchant":{"node":1,"optional":false},"merchantUrl":{"node":5,"optional":true},"amount":{"node":18,"optional":false},"description":{"node":1,"optional":false},"test":{"node":20,"optional":true},"idempotencyKey":{"node":1,"optional":false},"credentialType":{"node":1515,"optional":true},"networkId":{"node":5,"optional":true}}}),
+  shape({"kind":"union","choices":[6,217,1516]}),
   shape({"kind":"literal","value":"shared_payment_token"}),
   shape({"kind":"object","properties":{"id":{"node":1,"optional":false},"status":{"node":1,"optional":false},"approvalUrl":{"node":5,"optional":true}}}),
-  shape({"kind":"intersection","choices":[1395,1391,1516]}),
+  shape({"kind":"intersection","choices":[1398,1394,1519]}),
   shape({"kind":"object","properties":{"scheduleId":{"node":1,"optional":false},"selfOnly":{"node":20,"optional":true}}}),
-  shape({"kind":"intersection","choices":[1391,1518]}),
+  shape({"kind":"intersection","choices":[1394,1521]}),
   shape({"kind":"object","properties":{"subscriptionId":{"node":1,"optional":false}}}),
-  shape({"kind":"object","properties":{"itemId":{"node":1,"optional":false},"version":{"node":18,"optional":false},"reason":{"node":1520,"optional":false},"agentId":{"node":1,"optional":false},"roomId":{"node":1,"optional":false},"requestId":{"node":5,"optional":true},"generationId":{"node":5,"optional":true},"sourceMessageIds":{"node":29,"optional":false},"personAsked":{"node":32,"optional":false}}}),
-  shape({"kind":"union","choices":[1521,1522,1523]}),
+  shape({"kind":"object","properties":{"itemId":{"node":1,"optional":false},"version":{"node":18,"optional":false},"reason":{"node":1523,"optional":false},"agentId":{"node":1,"optional":false},"roomId":{"node":1,"optional":false},"requestId":{"node":5,"optional":true},"generationId":{"node":5,"optional":true},"sourceMessageIds":{"node":29,"optional":false},"personAsked":{"node":32,"optional":false}}}),
+  shape({"kind":"union","choices":[1524,1525,1526]}),
   shape({"kind":"literal","value":"wrong"}),
   shape({"kind":"literal","value":"duplicate"}),
   shape({"kind":"literal","value":"obsolete"}),
   shape({"kind":"object","properties":{"itemId":{"node":1,"optional":false},"version":{"node":18,"optional":false}}}),
-  shape({"kind":"intersection","choices":[1391,1404,1526]}),
+  shape({"kind":"intersection","choices":[1394,1407,1529]}),
   shape({"kind":"object","properties":{"slug":{"node":1,"optional":false},"version":{"node":18,"optional":false},"sourceMessageIds":{"node":29,"optional":false}}}),
-  shape({"kind":"object","properties":{"slug":{"node":1,"optional":false},"kind":{"node":1528,"optional":false},"version":{"node":18,"optional":false},"deleted":{"node":22,"optional":false}}}),
-  shape({"kind":"union","choices":[1529,1530]}),
+  shape({"kind":"object","properties":{"slug":{"node":1,"optional":false},"kind":{"node":1531,"optional":false},"version":{"node":18,"optional":false},"deleted":{"node":22,"optional":false}}}),
+  shape({"kind":"union","choices":[1532,1533]}),
   shape({"kind":"literal","value":"workflow"}),
   shape({"kind":"literal","value":"procedure"}),
-  shape({"kind":"intersection","choices":[1391,1404,1532]}),
-  shape({"kind":"object","properties":{"requestId":{"node":1,"optional":false},"inputs":{"node":1533,"optional":true}}}),
+  shape({"kind":"intersection","choices":[1394,1407,1535]}),
+  shape({"kind":"object","properties":{"requestId":{"node":1,"optional":false},"inputs":{"node":1536,"optional":true}}}),
   shape({"kind":"union","choices":[6,133]}),
   shape({"kind":"object","properties":{"auditMessageId":{"node":1,"optional":false}}}),
-  shape({"kind":"intersection","choices":[1391,1536]}),
+  shape({"kind":"intersection","choices":[1394,1539]}),
   shape({"kind":"object","properties":{"sessionId":{"node":1,"optional":false}}}),
-  shape({"kind":"intersection","choices":[1395,1391]}),
-  shape({"kind":"intersection","choices":[1404,1395,1391,1539]}),
-  shape({"kind":"object","properties":{"appId":{"node":1,"optional":false},"tool":{"node":1,"optional":false},"arguments":{"node":1540,"optional":false}}}),
+  shape({"kind":"intersection","choices":[1398,1394]}),
+  shape({"kind":"intersection","choices":[1407,1398,1394,1542]}),
+  shape({"kind":"object","properties":{"appId":{"node":1,"optional":false},"tool":{"node":1,"optional":false},"arguments":{"node":1543,"optional":false}}}),
   shape({"kind":"object","properties":{},"index":245}),
-  shape({"kind":"union","choices":[1542,1544,1546]}),
-  shape({"kind":"object","properties":{"status":{"node":1543,"optional":false},"data":{"node":245,"optional":false}}}),
+  shape({"kind":"union","choices":[1545,1547,1549]}),
+  shape({"kind":"object","properties":{"status":{"node":1546,"optional":false},"data":{"node":245,"optional":false}}}),
   shape({"kind":"literal","value":"executed"}),
-  shape({"kind":"object","properties":{"status":{"node":1545,"optional":false},"grantId":{"node":1,"optional":false}}}),
+  shape({"kind":"object","properties":{"status":{"node":1548,"optional":false},"grantId":{"node":1,"optional":false}}}),
   shape({"kind":"literal","value":"needs_permission"}),
-  shape({"kind":"object","properties":{"status":{"node":1547,"optional":false}}}),
+  shape({"kind":"object","properties":{"status":{"node":1550,"optional":false}}}),
   shape({"kind":"literal","value":"needs_connection"}),
-  shape({"kind":"intersection","choices":[1391,1549]}),
+  shape({"kind":"intersection","choices":[1394,1552]}),
   shape({"kind":"object","properties":{"query":{"node":1,"optional":false}}}),
-  shape({"kind":"object","properties":{"matches":{"node":1551,"optional":false},"unavailableSources":{"node":29,"optional":false}}}),
-  shape({"kind":"array","item":1552}),
-  shape({"kind":"object","properties":{"key":{"node":1,"optional":false},"service":{"node":1,"optional":false},"name":{"node":1,"optional":false},"website":{"node":5,"optional":true},"source":{"node":1553,"optional":false},"status":{"node":1557,"optional":false}}}),
-  shape({"kind":"union","choices":[1554,830,117,1555,1556]}),
+  shape({"kind":"object","properties":{"matches":{"node":1554,"optional":false},"unavailableSources":{"node":29,"optional":false}}}),
+  shape({"kind":"array","item":1555}),
+  shape({"kind":"object","properties":{"key":{"node":1,"optional":false},"service":{"node":1,"optional":false},"name":{"node":1,"optional":false},"website":{"node":5,"optional":true},"source":{"node":1556,"optional":false},"status":{"node":1560,"optional":false}}}),
+  shape({"kind":"union","choices":[1557,830,117,1558,1559]}),
   shape({"kind":"literal","value":"machine"}),
   shape({"kind":"literal","value":"first-party"}),
   shape({"kind":"literal","value":"registry"}),
-  shape({"kind":"union","choices":[122,1558,1559]}),
+  shape({"kind":"union","choices":[122,1561,1562]}),
   shape({"kind":"literal","value":"not-connected"}),
   shape({"kind":"literal","value":"broken"}),
   shape({"kind":"object","properties":{"url":{"node":1,"optional":false},"siteUrl":{"node":5,"optional":true}}}),
   shape({"kind":"object","properties":{"drawing":{"node":245,"optional":false},"soul":{"node":245,"optional":false}}}),
-  shape({"kind":"object","properties":{"commandProtocol":{"node":784,"optional":false},"commands":{"node":1438,"optional":false}}}),
-  shape({"kind":"intersection","choices":[1395,1564]}),
+  shape({"kind":"object","properties":{"commandProtocol":{"node":784,"optional":false},"commands":{"node":1441,"optional":false}}}),
+  shape({"kind":"intersection","choices":[1398,1567]}),
   shape({"kind":"object","properties":{"roomId":{"node":5,"optional":true}}}),
-  shape({"kind":"object","properties":{"soul":{"node":1566,"optional":true},"model":{"node":5,"optional":true},"effort":{"node":5,"optional":true},"fastMode":{"node":20,"optional":true},"commands":{"node":1568,"optional":false},"yoloMode":{"node":32,"optional":false},"isReviewer":{"node":32,"optional":false},"reviewerHandle":{"node":5,"optional":true},"registryMcpRoutes":{"node":1570,"optional":true}}}),
-  shape({"kind":"union","choices":[6,1567]}),
+  shape({"kind":"object","properties":{"soul":{"node":1569,"optional":true},"model":{"node":5,"optional":true},"effort":{"node":5,"optional":true},"fastMode":{"node":20,"optional":true},"commands":{"node":1571,"optional":false},"yoloMode":{"node":32,"optional":false},"isReviewer":{"node":32,"optional":false},"reviewerHandle":{"node":5,"optional":true},"registryMcpRoutes":{"node":1573,"optional":true}}}),
+  shape({"kind":"union","choices":[6,1570]}),
   shape({"kind":"object","properties":{"name":{"node":1,"optional":false},"instructions":{"node":1,"optional":false}}}),
-  shape({"kind":"array","item":1569}),
-  shape({"kind":"object","properties":{"name":{"node":1,"optional":false},"description":{"node":5,"optional":true}}}),
-  shape({"kind":"union","choices":[6,1571]}),
   shape({"kind":"array","item":1572}),
+  shape({"kind":"object","properties":{"name":{"node":1,"optional":false},"description":{"node":5,"optional":true}}}),
+  shape({"kind":"union","choices":[6,1574]}),
+  shape({"kind":"array","item":1575}),
   shape({"kind":"object","properties":{"connectorId":{"node":1,"optional":false},"serverName":{"node":1,"optional":false},"displayName":{"node":1,"optional":false},"routeName":{"node":1,"optional":false},"target":{"node":1,"optional":false}}}),
-  shape({"kind":"object","properties":{"status":{"node":1574,"optional":false},"observedAt":{"node":17,"optional":true},"releaseVersion":{"node":5,"optional":true},"sourceSha":{"node":5,"optional":true}}}),
-  shape({"kind":"union","choices":[669,670,1575]}),
+  shape({"kind":"object","properties":{"status":{"node":1577,"optional":false},"observedAt":{"node":17,"optional":true},"releaseVersion":{"node":5,"optional":true},"sourceSha":{"node":5,"optional":true}}}),
+  shape({"kind":"union","choices":[669,670,1578]}),
   shape({"kind":"literal","value":"dormant"}),
-  shape({"kind":"object","properties":{"status":{"node":1577,"optional":false},"generation":{"node":17,"optional":true}}}),
-  shape({"kind":"union","choices":[983,1578,1579]}),
+  shape({"kind":"object","properties":{"status":{"node":1580,"optional":false},"generation":{"node":17,"optional":true}}}),
+  shape({"kind":"union","choices":[983,1581,1582]}),
   shape({"kind":"literal","value":"valid"}),
   shape({"kind":"literal","value":"invalid"}),
   shape({"kind":"union","choices":[155,623]}),
-  shape({"kind":"intersection","choices":[1395,1582]}),
+  shape({"kind":"intersection","choices":[1398,1585]}),
   shape({"kind":"object","properties":{"ref":{"node":1,"optional":false}}}),
-  shape({"kind":"object","properties":{"metadata":{"node":1584,"optional":false},"grants":{"node":1585,"optional":false},"ledger":{"node":1587,"optional":false}}}),
+  shape({"kind":"object","properties":{"metadata":{"node":1587,"optional":false},"grants":{"node":1588,"optional":false},"ledger":{"node":1590,"optional":false}}}),
   shape({"kind":"object","properties":{"reference":{"node":1,"optional":false},"service":{"node":154,"optional":false},"label":{"node":1,"optional":false},"fieldNames":{"node":29,"optional":false},"allowedHosts":{"node":29,"optional":false},"loginHosts":{"node":34,"optional":true},"faviconDomain":{"node":5,"optional":true},"keyName":{"node":5,"optional":true},"credentialKind":{"node":5,"optional":true},"expiresAt":{"node":17,"optional":true},"createdAt":{"node":18,"optional":false},"stale":{"node":32,"optional":false},"state":{"node":843,"optional":false}}}),
-  shape({"kind":"array","item":1586}),
+  shape({"kind":"array","item":1589}),
   shape({"kind":"object","properties":{"grantId":{"node":1,"optional":false},"credentialRef":{"node":1,"optional":false},"createdAt":{"node":18,"optional":false},"revokedAt":{"node":17,"optional":true},"revokingAt":{"node":17,"optional":true},"rateLimitPerHour":{"node":17,"optional":true},"spendCapUsd":{"node":17,"optional":true}}}),
-  shape({"kind":"array","item":1588}),
-  shape({"kind":"object","properties":{"id":{"node":1,"optional":false},"timestamp":{"node":18,"optional":false},"action":{"node":1,"optional":false},"actor":{"node":5,"optional":true},"status":{"node":17,"optional":true},"bytes":{"node":17,"optional":true},"anomaly":{"node":20,"optional":true},"anomalyReason":{"node":5,"optional":true}}}),
-  shape({"kind":"object","properties":{"assignments":{"node":1590,"optional":false}}}),
   shape({"kind":"array","item":1591}),
-  shape({"kind":"union","choices":[1592,1605,1607,1609,1611,1613]}),
-  shape({"kind":"object","properties":{"kind":{"node":13,"optional":false},"connectorId":{"node":1,"optional":false},"connectorType":{"node":1593,"optional":false},"pairingGeneration":{"node":17,"optional":true},"registryServerName":{"node":5,"optional":true},"registryVersion":{"node":5,"optional":true},"registryManifest":{"node":1594,"optional":true},"forceReloginProvider":{"node":5,"optional":true}}}),
+  shape({"kind":"object","properties":{"id":{"node":1,"optional":false},"timestamp":{"node":18,"optional":false},"action":{"node":1,"optional":false},"actor":{"node":5,"optional":true},"status":{"node":17,"optional":true},"bytes":{"node":17,"optional":true},"anomaly":{"node":20,"optional":true},"anomalyReason":{"node":5,"optional":true}}}),
+  shape({"kind":"object","properties":{"assignments":{"node":1593,"optional":false}}}),
+  shape({"kind":"array","item":1594}),
+  shape({"kind":"union","choices":[1595,1608,1610,1612,1614,1616]}),
+  shape({"kind":"object","properties":{"kind":{"node":13,"optional":false},"connectorId":{"node":1,"optional":false},"connectorType":{"node":1596,"optional":false},"pairingGeneration":{"node":17,"optional":true},"registryServerName":{"node":5,"optional":true},"registryVersion":{"node":5,"optional":true},"registryManifest":{"node":1597,"optional":true},"forceReloginProvider":{"node":5,"optional":true}}}),
   shape({"kind":"union","choices":[358,359,360,90,91,92,93,124]}),
-  shape({"kind":"union","choices":[6,1595]}),
-  shape({"kind":"object","properties":{"name":{"node":1,"optional":false},"version":{"node":1,"optional":false},"title":{"node":5,"optional":true},"description":{"node":5,"optional":true},"websiteUrl":{"node":5,"optional":true},"repository":{"node":1596,"optional":true},"remotes":{"node":1598,"optional":false},"packages":{"node":1603,"optional":false},"secretInputNames":{"node":29,"optional":false}}}),
-  shape({"kind":"union","choices":[6,1597]}),
+  shape({"kind":"union","choices":[6,1598]}),
+  shape({"kind":"object","properties":{"name":{"node":1,"optional":false},"version":{"node":1,"optional":false},"title":{"node":5,"optional":true},"description":{"node":5,"optional":true},"websiteUrl":{"node":5,"optional":true},"repository":{"node":1599,"optional":true},"remotes":{"node":1601,"optional":false},"packages":{"node":1606,"optional":false},"secretInputNames":{"node":29,"optional":false}}}),
+  shape({"kind":"union","choices":[6,1600]}),
   shape({"kind":"object","properties":{"url":{"node":5,"optional":true},"source":{"node":5,"optional":true}}}),
-  shape({"kind":"array","item":1599}),
-  shape({"kind":"object","properties":{"type":{"node":1600,"optional":false},"url":{"node":1,"optional":false}}}),
-  shape({"kind":"union","choices":[1601,1602]}),
+  shape({"kind":"array","item":1602}),
+  shape({"kind":"object","properties":{"type":{"node":1603,"optional":false},"url":{"node":1,"optional":false}}}),
+  shape({"kind":"union","choices":[1604,1605]}),
   shape({"kind":"literal","value":"streamable-http"}),
   shape({"kind":"literal","value":"sse"}),
-  shape({"kind":"array","item":1604}),
+  shape({"kind":"array","item":1607}),
   shape({"kind":"object","properties":{"registryType":{"node":5,"optional":true},"identifier":{"node":5,"optional":true},"version":{"node":5,"optional":true},"transport":{"node":5,"optional":true}}}),
-  shape({"kind":"object","properties":{"kind":{"node":1606,"optional":false},"connectorId":{"node":1,"optional":false},"connectorType":{"node":1593,"optional":false}}}),
+  shape({"kind":"object","properties":{"kind":{"node":1609,"optional":false},"connectorId":{"node":1,"optional":false},"connectorType":{"node":1596,"optional":false}}}),
   shape({"kind":"literal","value":"sync"}),
-  shape({"kind":"object","properties":{"kind":{"node":1608,"optional":false},"connectorId":{"node":1,"optional":false},"connectorType":{"node":1593,"optional":false}}}),
+  shape({"kind":"object","properties":{"kind":{"node":1611,"optional":false},"connectorId":{"node":1,"optional":false},"connectorType":{"node":1596,"optional":false}}}),
   shape({"kind":"literal","value":"refresh-google-grant"}),
-  shape({"kind":"object","properties":{"kind":{"node":1610,"optional":false},"connectorId":{"node":1,"optional":false},"connectorType":{"node":1593,"optional":false},"reference":{"node":1,"optional":false}}}),
+  shape({"kind":"object","properties":{"kind":{"node":1613,"optional":false},"connectorId":{"node":1,"optional":false},"connectorType":{"node":1596,"optional":false},"reference":{"node":1,"optional":false}}}),
   shape({"kind":"literal","value":"revoke-grants"}),
-  shape({"kind":"object","properties":{"kind":{"node":1612,"optional":false},"connectorId":{"node":1,"optional":false},"connectorType":{"node":1593,"optional":false},"pairingGeneration":{"node":17,"optional":true}}}),
+  shape({"kind":"object","properties":{"kind":{"node":1615,"optional":false},"connectorId":{"node":1,"optional":false},"connectorType":{"node":1596,"optional":false},"pairingGeneration":{"node":17,"optional":true}}}),
   shape({"kind":"literal","value":"uninstall"}),
-  shape({"kind":"object","properties":{"kind":{"node":1614,"optional":false},"connectorId":{"node":1,"optional":false},"id":{"node":1,"optional":false},"service":{"node":1615,"optional":false},"event":{"node":1,"optional":false},"receiverUrl":{"node":1,"optional":false},"operation":{"node":1461,"optional":false},"providerId":{"node":5,"optional":true},"signingSecret":{"node":5,"optional":true},"accountContext":{"node":5,"optional":true},"livemode":{"node":20,"optional":true}}}),
+  shape({"kind":"object","properties":{"kind":{"node":1617,"optional":false},"connectorId":{"node":1,"optional":false},"id":{"node":1,"optional":false},"service":{"node":1618,"optional":false},"event":{"node":1,"optional":false},"receiverUrl":{"node":1,"optional":false},"operation":{"node":1464,"optional":false},"providerId":{"node":5,"optional":true},"signingSecret":{"node":5,"optional":true},"accountContext":{"node":5,"optional":true},"livemode":{"node":20,"optional":true}}}),
   shape({"kind":"literal","value":"provider-webhook"}),
-  shape({"kind":"union","choices":[1616,1617]}),
+  shape({"kind":"union","choices":[1619,1620]}),
   shape({"kind":"literal","value":"linear"}),
   shape({"kind":"literal","value":"stripe"}),
-  shape({"kind":"intersection","choices":[1395,1619]}),
+  shape({"kind":"intersection","choices":[1398,1622]}),
   shape({"kind":"object","properties":{"connectorId":{"node":5,"optional":true}}}),
-  shape({"kind":"object","properties":{"connections":{"node":1621,"optional":false}}}),
-  shape({"kind":"array","item":1584}),
-  shape({"kind":"intersection","choices":[1398,1623]}),
+  shape({"kind":"object","properties":{"connections":{"node":1624,"optional":false}}}),
+  shape({"kind":"array","item":1587}),
+  shape({"kind":"intersection","choices":[1401,1626]}),
   shape({"kind":"object","properties":{"after":{"node":5,"optional":true}}}),
-  shape({"kind":"object","properties":{"dispatchVersion":{"node":1625,"optional":true},"items":{"node":1626,"optional":false},"cursor":{"node":5,"optional":true},"closeRequested":{"node":20,"optional":true}}}),
+  shape({"kind":"object","properties":{"dispatchVersion":{"node":1628,"optional":true},"items":{"node":1629,"optional":false},"cursor":{"node":5,"optional":true},"closeRequested":{"node":20,"optional":true}}}),
   shape({"kind":"union","choices":[6,784]}),
-  shape({"kind":"array","item":1445}),
-  shape({"kind":"object","properties":{"implementerAgentId":{"node":5,"optional":true},"cornerId":{"node":1,"optional":false},"openedFromCornerId":{"node":5,"optional":true},"archived":{"node":20,"optional":true},"parentRoomId":{"node":5,"optional":true},"objective":{"node":1,"optional":false},"brief":{"node":1628,"optional":true},"title":{"node":5,"optional":true},"titleGenerated":{"node":20,"optional":true},"kind":{"node":449,"optional":true},"featureBranch":{"node":5,"optional":true},"requestId":{"node":5,"optional":true},"closeRequested":{"node":32,"optional":false},"held":{"node":20,"optional":true},"holds":{"node":1640,"optional":true},"lifecycle":{"node":1002,"optional":true},"mergeApproval":{"node":1644,"optional":true},"state":{"node":1646,"optional":true},"activity":{"node":1647,"optional":true},"lastMessage":{"node":1648,"optional":true},"awaiting":{"node":1651,"optional":true}}}),
-  shape({"kind":"union","choices":[6,1629]}),
-  shape({"kind":"object","properties":{"id":{"node":1,"optional":false},"revision":{"node":18,"optional":false},"spec":{"node":1,"optional":false},"repositoryWork":{"node":20,"optional":true},"approval":{"node":1630,"optional":true},"change":{"node":5,"optional":true},"authorId":{"node":1,"optional":false},"sourceRoomId":{"node":1,"optional":false},"sourceMessageId":{"node":5,"optional":true},"attachments":{"node":1638,"optional":false}}}),
-  shape({"kind":"union","choices":[6,1631]}),
-  shape({"kind":"object","properties":{"kind":{"node":1632,"optional":true},"replyToMessageId":{"node":459,"optional":true},"replyToAttachmentIds":{"node":34,"optional":true},"replyToCreatedAt":{"node":459,"optional":true},"approvedAt":{"node":5,"optional":true},"sourceMessageId":{"node":1,"optional":false},"text":{"node":1,"optional":false},"approvedBy":{"node":1,"optional":false},"approverName":{"node":1,"optional":false}}}),
-  shape({"kind":"union","choices":[6,1633,1634,1635,1636,1637]}),
+  shape({"kind":"array","item":1448}),
+  shape({"kind":"object","properties":{"implementerAgentId":{"node":5,"optional":true},"cornerId":{"node":1,"optional":false},"openedFromCornerId":{"node":5,"optional":true},"archived":{"node":20,"optional":true},"parentRoomId":{"node":5,"optional":true},"objective":{"node":1,"optional":false},"brief":{"node":1631,"optional":true},"title":{"node":5,"optional":true},"titleGenerated":{"node":20,"optional":true},"kind":{"node":449,"optional":true},"featureBranch":{"node":5,"optional":true},"requestId":{"node":5,"optional":true},"closeRequested":{"node":32,"optional":false},"held":{"node":20,"optional":true},"holds":{"node":1643,"optional":true},"lifecycle":{"node":1002,"optional":true},"mergeApproval":{"node":1647,"optional":true},"state":{"node":1649,"optional":true},"activity":{"node":1650,"optional":true},"lastMessage":{"node":1651,"optional":true},"awaiting":{"node":1654,"optional":true}}}),
+  shape({"kind":"union","choices":[6,1632]}),
+  shape({"kind":"object","properties":{"id":{"node":1,"optional":false},"revision":{"node":18,"optional":false},"spec":{"node":1,"optional":false},"repositoryWork":{"node":20,"optional":true},"approval":{"node":1633,"optional":true},"change":{"node":5,"optional":true},"authorId":{"node":1,"optional":false},"sourceRoomId":{"node":1,"optional":false},"sourceMessageId":{"node":5,"optional":true},"attachments":{"node":1641,"optional":false}}}),
+  shape({"kind":"union","choices":[6,1634]}),
+  shape({"kind":"object","properties":{"kind":{"node":1635,"optional":true},"replyToMessageId":{"node":459,"optional":true},"replyToAttachmentIds":{"node":34,"optional":true},"replyToCreatedAt":{"node":459,"optional":true},"approvedAt":{"node":5,"optional":true},"sourceMessageId":{"node":1,"optional":false},"text":{"node":1,"optional":false},"approvedBy":{"node":1,"optional":false},"approverName":{"node":1,"optional":false}}}),
+  shape({"kind":"union","choices":[6,1636,1637,1638,1639,1640]}),
   shape({"kind":"literal","value":"agent-initiated"}),
   shape({"kind":"literal","value":"initiating-command"}),
   shape({"kind":"literal","value":"explicit-human-answer"}),
   shape({"kind":"literal","value":"commander-order"}),
   shape({"kind":"literal","value":"commander-direct"}),
-  shape({"kind":"array","item":1639}),
-  shape({"kind":"object","properties":{"objectId":{"node":1,"optional":false},"title":{"node":1,"optional":false},"purpose":{"node":1,"optional":false},"required":{"node":32,"optional":false},"mime":{"node":1,"optional":false},"sha256":{"node":1,"optional":false},"size":{"node":18,"optional":false}}}),
-  shape({"kind":"union","choices":[6,1641]}),
   shape({"kind":"array","item":1642}),
-  shape({"kind":"object","properties":{"id":{"node":1,"optional":false},"actorId":{"node":1,"optional":false},"holderId":{"node":1,"optional":false},"holderName":{"node":1,"optional":false},"standing":{"node":1643,"optional":false},"setAt":{"node":1,"optional":false},"sourceMessageId":{"node":459,"optional":true},"sourceAuthorId":{"node":459,"optional":true},"sourceAuthorName":{"node":459,"optional":true},"sourceText":{"node":459,"optional":true}}}),
+  shape({"kind":"object","properties":{"objectId":{"node":1,"optional":false},"title":{"node":1,"optional":false},"purpose":{"node":1,"optional":false},"required":{"node":32,"optional":false},"mime":{"node":1,"optional":false},"sha256":{"node":1,"optional":false},"size":{"node":18,"optional":false}}}),
+  shape({"kind":"union","choices":[6,1644]}),
+  shape({"kind":"array","item":1645}),
+  shape({"kind":"object","properties":{"id":{"node":1,"optional":false},"actorId":{"node":1,"optional":false},"holderId":{"node":1,"optional":false},"holderName":{"node":1,"optional":false},"standing":{"node":1646,"optional":false},"setAt":{"node":1,"optional":false},"sourceMessageId":{"node":459,"optional":true},"sourceAuthorId":{"node":459,"optional":true},"sourceAuthorName":{"node":459,"optional":true},"sourceText":{"node":459,"optional":true}}}),
   shape({"kind":"union","choices":[39,40,41]}),
-  shape({"kind":"union","choices":[6,1645]}),
+  shape({"kind":"union","choices":[6,1648]}),
   shape({"kind":"object","properties":{"pullRequestNumber":{"node":18,"optional":false},"headSha":{"node":1,"optional":false}}}),
   shape({"kind":"union","choices":[6,306,307,308,309,310]}),
   shape({"kind":"union","choices":[6,592,309]}),
-  shape({"kind":"union","choices":[6,1649]}),
-  shape({"kind":"object","properties":{"authorId":{"node":1,"optional":false},"createdAt":{"node":1,"optional":false},"type":{"node":1650,"optional":false},"excerpt":{"node":1,"optional":false}}}),
-  shape({"kind":"union","choices":[215,216,217]}),
   shape({"kind":"union","choices":[6,1652]}),
-  shape({"kind":"literal","value":"reply"}),
-  shape({"kind":"object","properties":{"storageRooms":{"node":1654,"optional":true},"workspaceIds":{"node":29,"optional":false},"pendingRooms":{"node":1657,"optional":true},"rooms":{"node":1660,"optional":false}}}),
+  shape({"kind":"object","properties":{"authorId":{"node":1,"optional":false},"createdAt":{"node":1,"optional":false},"type":{"node":1653,"optional":false},"excerpt":{"node":1,"optional":false}}}),
+  shape({"kind":"union","choices":[215,216,217]}),
   shape({"kind":"union","choices":[6,1655]}),
-  shape({"kind":"array","item":1656}),
-  shape({"kind":"object","properties":{"workspaceId":{"node":5,"optional":true},"roomId":{"node":1,"optional":false},"archived":{"node":32,"optional":false},"landedHeadSha":{"node":5,"optional":true}}}),
+  shape({"kind":"literal","value":"reply"}),
+  shape({"kind":"object","properties":{"storageRooms":{"node":1657,"optional":true},"workspaceIds":{"node":29,"optional":false},"pendingRooms":{"node":1660,"optional":true},"rooms":{"node":1663,"optional":false}}}),
   shape({"kind":"union","choices":[6,1658]}),
   shape({"kind":"array","item":1659}),
+  shape({"kind":"object","properties":{"workspaceId":{"node":5,"optional":true},"roomId":{"node":1,"optional":false},"archived":{"node":32,"optional":false},"landedHeadSha":{"node":5,"optional":true}}}),
+  shape({"kind":"union","choices":[6,1661]}),
+  shape({"kind":"array","item":1662}),
   shape({"kind":"object","properties":{"roomId":{"node":1,"optional":false},"parentRoomId":{"node":5,"optional":true},"openedBy":{"node":5,"optional":true}}}),
-  shape({"kind":"array","item":1661}),
+  shape({"kind":"array","item":1664}),
   shape({"kind":"object","properties":{"roomId":{"node":1,"optional":false},"archived":{"node":32,"optional":false},"repositoryRevision":{"node":5,"optional":true}}}),
-  shape({"kind":"intersection","choices":[1395,1663]}),
+  shape({"kind":"intersection","choices":[1398,1666]}),
   shape({"kind":"object","properties":{"connectorId":{"node":1,"optional":false}}}),
-  shape({"kind":"object","properties":{"status":{"node":1665,"optional":false},"credentials":{"node":1666,"optional":true}}}),
-  shape({"kind":"union","choices":[190,1381]}),
-  shape({"kind":"union","choices":[6,1667]}),
+  shape({"kind":"object","properties":{"status":{"node":1668,"optional":false},"credentials":{"node":1669,"optional":true}}}),
+  shape({"kind":"union","choices":[190,1384]}),
+  shape({"kind":"union","choices":[6,1670]}),
   shape({"kind":"object","properties":{"accessToken":{"node":1,"optional":false},"expiresAt":{"node":18,"optional":false},"accountEmail":{"node":5,"optional":true},"scopes":{"node":29,"optional":false}}}),
   shape({"kind":"object","properties":{"identityId":{"node":1,"optional":false}}}),
   shape({"kind":"object","properties":{"currentIdentityId":{"node":1,"optional":false},"predecessors":{"node":29,"optional":false}}}),
-  shape({"kind":"intersection","choices":[1391,1404]}),
-  shape({"kind":"object","properties":{"snapshotRevision":{"node":18,"optional":false},"text":{"node":1,"optional":false},"itemIds":{"node":29,"optional":false},"totalBytes":{"node":18,"optional":false},"omitted":{"node":285,"optional":false},"embeddingMs":{"node":17,"optional":true},"embeddingOutcome":{"node":1672,"optional":true}}}),
-  shape({"kind":"union","choices":[6,121,1673,1674,1675]}),
+  shape({"kind":"intersection","choices":[1394,1407]}),
+  shape({"kind":"object","properties":{"snapshotRevision":{"node":18,"optional":false},"text":{"node":1,"optional":false},"itemIds":{"node":29,"optional":false},"totalBytes":{"node":18,"optional":false},"omitted":{"node":285,"optional":false},"embeddingMs":{"node":17,"optional":true},"embeddingOutcome":{"node":1675,"optional":true}}}),
+  shape({"kind":"union","choices":[6,121,1676,1677,1678]}),
   shape({"kind":"literal","value":"served"}),
   shape({"kind":"literal","value":"timed-out"}),
   shape({"kind":"literal","value":"disabled"}),
-  shape({"kind":"intersection","choices":[1391,1395,1404]}),
+  shape({"kind":"intersection","choices":[1394,1398,1407]}),
   shape({"kind":"object","properties":{"searchCalls":{"node":18,"optional":false},"searchMisses":{"node":18,"optional":false}}}),
-  shape({"kind":"intersection","choices":[1391,1679,1680]}),
+  shape({"kind":"intersection","choices":[1394,1682,1683]}),
   shape({"kind":"object","properties":{"principalId":{"node":1,"optional":false}}}),
   shape({"kind":"object","properties":{"missionId":{"node":1,"optional":false},"exercise":{"node":1,"optional":false}}}),
-  shape({"kind":"object","properties":{"status":{"node":1682,"optional":false},"reason":{"node":5,"optional":true},"generation":{"node":17,"optional":true}}}),
-  shape({"kind":"union","choices":[188,983,1683]}),
+  shape({"kind":"object","properties":{"status":{"node":1685,"optional":false},"reason":{"node":5,"optional":true},"generation":{"node":17,"optional":true}}}),
+  shape({"kind":"union","choices":[188,983,1686]}),
   shape({"kind":"literal","value":"authorized"}),
-  shape({"kind":"object","properties":{"owedMentions":{"node":1685,"optional":false}}}),
-  shape({"kind":"array","item":1686}),
+  shape({"kind":"object","properties":{"owedMentions":{"node":1688,"optional":false}}}),
+  shape({"kind":"array","item":1689}),
   shape({"kind":"object","properties":{"roomId":{"node":1,"optional":false},"messageId":{"node":1,"optional":false},"memberId":{"node":1,"optional":false},"replyRule":{"node":1,"optional":false},"idempotencyKey":{"node":1,"optional":false}}}),
-  shape({"kind":"intersection","choices":[1391,1679,1688]}),
+  shape({"kind":"intersection","choices":[1394,1682,1691]}),
   shape({"kind":"object","properties":{"permissionId":{"node":1,"optional":false},"actionId":{"node":5,"optional":true}}}),
-  shape({"kind":"intersection","choices":[1398,1690]}),
-  shape({"kind":"object","properties":{"pullRequest":{"node":1691,"optional":true}}}),
+  shape({"kind":"intersection","choices":[1401,1693]}),
+  shape({"kind":"object","properties":{"pullRequest":{"node":1694,"optional":true}}}),
   shape({"kind":"union","choices":[6,1,18]}),
-  shape({"kind":"object","properties":{"stage":{"node":1693,"optional":false},"checks":{"node":1697,"optional":false},"checkCount":{"node":18,"optional":false},"checkStates":{"node":1698,"optional":false},"pullRequest":{"node":1,"optional":false},"headSha":{"node":1,"optional":false},"approved":{"node":32,"optional":false},"reviewer":{"node":154,"optional":false},"reviewerExists":{"node":32,"optional":false},"reviewerWake":{"node":1699,"optional":false},"held":{"node":32,"optional":false},"holds":{"node":1641,"optional":false},"mergeAllowed":{"node":32,"optional":false},"blockedReason":{"node":5,"optional":true}}}),
-  shape({"kind":"union","choices":[65,227,1694,1695,1696]}),
+  shape({"kind":"object","properties":{"stage":{"node":1696,"optional":false},"checks":{"node":1700,"optional":false},"checkCount":{"node":18,"optional":false},"checkStates":{"node":1701,"optional":false},"pullRequest":{"node":1,"optional":false},"headSha":{"node":1,"optional":false},"approved":{"node":32,"optional":false},"reviewer":{"node":154,"optional":false},"reviewerExists":{"node":32,"optional":false},"reviewerWake":{"node":1702,"optional":false},"held":{"node":32,"optional":false},"holds":{"node":1644,"optional":false},"mergeAllowed":{"node":32,"optional":false},"blockedReason":{"node":5,"optional":true}}}),
+  shape({"kind":"union","choices":[65,227,1697,1698,1699]}),
   shape({"kind":"literal","value":"building"}),
   shape({"kind":"literal","value":"checking"}),
   shape({"kind":"literal","value":"waiting_for_yes"}),
   shape({"kind":"union","choices":[317,895,190]}),
   shape({"kind":"object","properties":{"passed":{"node":18,"optional":false},"pending":{"node":18,"optional":false},"failed":{"node":18,"optional":false},"unlisted":{"node":18,"optional":false},"pendingNames":{"node":902,"optional":false},"failedNames":{"node":902,"optional":false}}}),
-  shape({"kind":"object","properties":{"status":{"node":1700,"optional":false},"detail":{"node":1,"optional":false}}}),
-  shape({"kind":"union","choices":[307,604,1701,1702]}),
+  shape({"kind":"object","properties":{"status":{"node":1703,"optional":false},"detail":{"node":1,"optional":false}}}),
+  shape({"kind":"union","choices":[307,604,1704,1705]}),
   shape({"kind":"literal","value":"unconfigured"}),
   shape({"kind":"literal","value":"dispatched"}),
-  shape({"kind":"intersection","choices":[1391,1704]}),
+  shape({"kind":"intersection","choices":[1394,1707]}),
   shape({"kind":"object","properties":{"requestId":{"node":1,"optional":false}}}),
-  shape({"kind":"object","properties":{"openedCornerId":{"node":5,"optional":true},"completed":{"node":32,"optional":false},"outcome":{"node":1706,"optional":true},"failureReason":{"node":5,"optional":true}}}),
+  shape({"kind":"object","properties":{"openedCornerId":{"node":5,"optional":true},"completed":{"node":32,"optional":false},"outcome":{"node":1709,"optional":true},"failureReason":{"node":5,"optional":true}}}),
   shape({"kind":"union","choices":[6,317,744]}),
-  shape({"kind":"intersection","choices":[1391,1679]}),
-  shape({"kind":"object","properties":{"workspaceId":{"node":1,"optional":false},"role":{"node":1709,"optional":true},"member":{"node":32,"optional":false},"principalKind":{"node":449,"optional":true},"archived":{"node":32,"optional":false},"mayAddressAgent":{"node":20,"optional":true}}}),
+  shape({"kind":"intersection","choices":[1394,1682]}),
+  shape({"kind":"object","properties":{"workspaceId":{"node":1,"optional":false},"role":{"node":1712,"optional":true},"member":{"node":32,"optional":false},"principalKind":{"node":449,"optional":true},"archived":{"node":32,"optional":false},"mayAddressAgent":{"node":20,"optional":true}}}),
   shape({"kind":"union","choices":[6,39,40,41]}),
-  shape({"kind":"intersection","choices":[1391,1711,1712]}),
+  shape({"kind":"intersection","choices":[1394,1714,1715]}),
   shape({"kind":"object","properties":{"after":{"node":5,"optional":true},"limit":{"node":17,"optional":true}}}),
-  shape({"kind":"object","properties":{"window":{"node":1713,"optional":true},"before":{"node":5,"optional":true},"narrationRequestId":{"node":5,"optional":true}}}),
-  shape({"kind":"union","choices":[6,1714,1715,1716]}),
+  shape({"kind":"object","properties":{"window":{"node":1716,"optional":true},"before":{"node":5,"optional":true},"narrationRequestId":{"node":5,"optional":true}}}),
+  shape({"kind":"union","choices":[6,1717,1718,1719]}),
   shape({"kind":"literal","value":"recent"}),
   shape({"kind":"literal","value":"earliest"}),
   shape({"kind":"literal","value":"continuity"}),
-  shape({"kind":"intersection","choices":[1624,1718]}),
+  shape({"kind":"intersection","choices":[1627,1721]}),
   shape({"kind":"object","properties":{"savedNarration":{"node":34,"optional":true}}}),
   shape({"kind":"object","properties":{"token":{"node":1,"optional":false},"expiresAt":{"node":18,"optional":false}}}),
-  shape({"kind":"object","properties":{"status":{"node":1665,"optional":false},"connectedTypes":{"node":34,"optional":true},"credentialsByType":{"node":1721,"optional":true},"credentials":{"node":1724,"optional":true}}}),
-  shape({"kind":"union","choices":[6,1722]}),
-  shape({"kind":"object","properties":{},"index":1723}),
-  shape({"kind":"object","properties":{"accessToken":{"node":1,"optional":false},"expiresAt":{"node":18,"optional":false},"scopes":{"node":29,"optional":false}}}),
+  shape({"kind":"object","properties":{"status":{"node":1668,"optional":false},"connectedTypes":{"node":34,"optional":true},"credentialsByType":{"node":1724,"optional":true},"credentials":{"node":1727,"optional":true}}}),
   shape({"kind":"union","choices":[6,1725]}),
+  shape({"kind":"object","properties":{},"index":1726}),
   shape({"kind":"object","properties":{"accessToken":{"node":1,"optional":false},"expiresAt":{"node":18,"optional":false},"scopes":{"node":29,"optional":false}}}),
-  shape({"kind":"intersection","choices":[1391,1711]}),
-  shape({"kind":"intersection","choices":[1391,1728]}),
+  shape({"kind":"union","choices":[6,1728]}),
+  shape({"kind":"object","properties":{"accessToken":{"node":1,"optional":false},"expiresAt":{"node":18,"optional":false},"scopes":{"node":29,"optional":false}}}),
+  shape({"kind":"intersection","choices":[1394,1714]}),
+  shape({"kind":"intersection","choices":[1394,1731]}),
   shape({"kind":"object","properties":{"messageId":{"node":1,"optional":false},"attachmentId":{"node":5,"optional":true},"offset":{"node":17,"optional":true},"requestId":{"node":5,"optional":true},"generationId":{"node":5,"optional":true}}}),
-  shape({"kind":"object","properties":{"messageId":{"node":1,"optional":false},"body":{"node":1,"optional":false},"nextOffset":{"node":17,"optional":true},"attachments":{"node":1446,"optional":false}}}),
-  shape({"kind":"object","properties":{"repositoryOnboarding":{"node":20,"optional":true},"key":{"node":5,"optional":true},"remote":{"node":5,"optional":true},"targetBranch":{"node":5,"optional":true},"resolution":{"node":1731,"optional":false},"directParticipants":{"node":34,"optional":true}}}),
+  shape({"kind":"object","properties":{"messageId":{"node":1,"optional":false},"body":{"node":1,"optional":false},"nextOffset":{"node":17,"optional":true},"attachments":{"node":1449,"optional":false}}}),
+  shape({"kind":"object","properties":{"repositoryOnboarding":{"node":20,"optional":true},"key":{"node":5,"optional":true},"remote":{"node":5,"optional":true},"targetBranch":{"node":5,"optional":true},"resolution":{"node":1734,"optional":false},"directParticipants":{"node":34,"optional":true}}}),
   shape({"kind":"union","choices":[326,606,1001]}),
   shape({"kind":"object","properties":{"targetBranch":{"node":1,"optional":false},"updatedAt":{"node":18,"optional":false}}}),
-  shape({"kind":"intersection","choices":[1395,1391,1734]}),
+  shape({"kind":"intersection","choices":[1398,1394,1737]}),
   shape({"kind":"object","properties":{"targetAgentId":{"node":1,"optional":false},"controllerAgentId":{"node":1,"optional":false}}}),
-  shape({"kind":"intersection","choices":[1736,1404,1391]}),
+  shape({"kind":"intersection","choices":[1739,1407,1394]}),
   shape({"kind":"object","properties":{"agentId":{"node":1,"optional":false},"chain":{"node":158,"optional":true}}}),
-  shape({"kind":"union","choices":[1738,1741]}),
-  shape({"kind":"object","properties":{"totalUsd":{"node":1,"optional":false},"coins":{"node":156,"optional":false},"unreadChains":{"node":1739,"optional":true}}}),
-  shape({"kind":"union","choices":[6,1740]}),
+  shape({"kind":"union","choices":[1741,1744]}),
+  shape({"kind":"object","properties":{"totalUsd":{"node":1,"optional":false},"coins":{"node":156,"optional":false},"unreadChains":{"node":1742,"optional":true}}}),
+  shape({"kind":"union","choices":[6,1743]}),
   shape({"kind":"array","item":169}),
-  shape({"kind":"object","properties":{"status":{"node":1742,"optional":false},"grantId":{"node":5,"optional":true}}}),
+  shape({"kind":"object","properties":{"status":{"node":1745,"optional":false},"grantId":{"node":5,"optional":true}}}),
   shape({"kind":"literal","value":"permission-required"}),
-  shape({"kind":"intersection","choices":[1744,1404,1391]}),
+  shape({"kind":"intersection","choices":[1747,1407,1394]}),
   shape({"kind":"object","properties":{"agentId":{"node":1,"optional":false}}}),
-  shape({"kind":"union","choices":[1746,1747]}),
+  shape({"kind":"union","choices":[1749,1750]}),
   shape({"kind":"object","properties":{"chains":{"node":167,"optional":false}}}),
-  shape({"kind":"object","properties":{"status":{"node":1742,"optional":false},"grantId":{"node":5,"optional":true}}}),
-  shape({"kind":"intersection","choices":[1749,1404,1391]}),
+  shape({"kind":"object","properties":{"status":{"node":1745,"optional":false},"grantId":{"node":5,"optional":true}}}),
+  shape({"kind":"intersection","choices":[1752,1407,1394]}),
   shape({"kind":"object","properties":{"agentId":{"node":1,"optional":false},"limit":{"node":17,"optional":true}}}),
-  shape({"kind":"union","choices":[1751,1752]}),
-  shape({"kind":"object","properties":{"entries":{"node":1019,"optional":false}}}),
-  shape({"kind":"object","properties":{"status":{"node":1742,"optional":false},"grantId":{"node":5,"optional":true}}}),
-  shape({"kind":"intersection","choices":[1754,1404,1391]}),
+  shape({"kind":"union","choices":[1754,1755]}),
+  shape({"kind":"object","properties":{"entries":{"node":1022,"optional":false}}}),
+  shape({"kind":"object","properties":{"status":{"node":1745,"optional":false},"grantId":{"node":5,"optional":true}}}),
+  shape({"kind":"intersection","choices":[1757,1407,1394]}),
   shape({"kind":"object","properties":{"agentId":{"node":1,"optional":false},"chain":{"node":169,"optional":false},"asset":{"node":1,"optional":false},"amount":{"node":1,"optional":false}}}),
-  shape({"kind":"union","choices":[1756,1757]}),
+  shape({"kind":"union","choices":[1759,1760]}),
   shape({"kind":"object","properties":{"feeUsd":{"node":154,"optional":false},"sponsored":{"node":32,"optional":false},"sufficient":{"node":32,"optional":false},"available":{"node":1,"optional":false},"asset":{"node":1,"optional":false},"chain":{"node":169,"optional":false},"unread":{"node":20,"optional":true}}}),
-  shape({"kind":"object","properties":{"status":{"node":1742,"optional":false},"grantId":{"node":5,"optional":true}}}),
-  shape({"kind":"intersection","choices":[1759,1404,1391]}),
+  shape({"kind":"object","properties":{"status":{"node":1745,"optional":false},"grantId":{"node":5,"optional":true}}}),
+  shape({"kind":"intersection","choices":[1762,1407,1394]}),
   shape({"kind":"object","properties":{"agentId":{"node":1,"optional":false}}}),
-  shape({"kind":"union","choices":[1761,1764]}),
-  shape({"kind":"object","properties":{"ownerIdentityId":{"node":154,"optional":false},"wallet":{"node":1762,"optional":false}}}),
-  shape({"kind":"union","choices":[155,1763]}),
+  shape({"kind":"union","choices":[1764,1767]}),
+  shape({"kind":"object","properties":{"ownerIdentityId":{"node":154,"optional":false},"wallet":{"node":1765,"optional":false}}}),
+  shape({"kind":"union","choices":[155,1766]}),
   shape({"kind":"object","properties":{"address":{"node":1,"optional":false},"solanaAddress":{"node":154,"optional":false}}}),
-  shape({"kind":"object","properties":{"status":{"node":1742,"optional":false},"grantId":{"node":5,"optional":true}}}),
-  shape({"kind":"intersection","choices":[1395,1391,1766]}),
+  shape({"kind":"object","properties":{"status":{"node":1745,"optional":false},"grantId":{"node":5,"optional":true}}}),
+  shape({"kind":"intersection","choices":[1398,1394,1769]}),
   shape({"kind":"object","properties":{"scheduleId":{"node":1,"optional":false},"revision":{"node":18,"optional":false}}}),
-  shape({"kind":"intersection","choices":[1391,1768]}),
+  shape({"kind":"intersection","choices":[1394,1771]}),
   shape({"kind":"object","properties":{"runId":{"node":1,"optional":false}}}),
-  shape({"kind":"object","properties":{"runId":{"node":1,"optional":false},"workflowSlug":{"node":1,"optional":false},"workflowVersion":{"node":18,"optional":false},"state":{"node":1,"optional":false},"attempt":{"node":18,"optional":false},"status":{"node":1770,"optional":false},"role":{"node":5,"optional":true},"boundAgentId":{"node":5,"optional":true},"allowedOutcomes":{"node":133,"optional":false},"requiredFields":{"node":29,"optional":false},"receiptHint":{"node":5,"optional":true},"cancellation":{"node":1771,"optional":true},"contract":{"node":1025,"optional":false},"history":{"node":1773,"optional":false}}}),
+  shape({"kind":"object","properties":{"runId":{"node":1,"optional":false},"workflowSlug":{"node":1,"optional":false},"workflowVersion":{"node":18,"optional":false},"state":{"node":1,"optional":false},"attempt":{"node":18,"optional":false},"status":{"node":1773,"optional":false},"role":{"node":5,"optional":true},"boundAgentId":{"node":5,"optional":true},"allowedOutcomes":{"node":133,"optional":false},"requiredFields":{"node":29,"optional":false},"receiptHint":{"node":5,"optional":true},"cancellation":{"node":1774,"optional":true},"contract":{"node":1028,"optional":false},"history":{"node":1776,"optional":false}}}),
   shape({"kind":"union","choices":[317,473,354,452]}),
-  shape({"kind":"union","choices":[6,1772]}),
+  shape({"kind":"union","choices":[6,1775]}),
   shape({"kind":"object","properties":{"reason":{"node":1,"optional":false},"actorId":{"node":1,"optional":false}}}),
-  shape({"kind":"array","item":1774}),
-  shape({"kind":"object","properties":{"messageId":{"node":1,"optional":false},"actorId":{"node":1,"optional":false},"at":{"node":18,"optional":false},"fromState":{"node":5,"optional":true},"toState":{"node":1,"optional":false},"outcome":{"node":5,"optional":true},"contents":{"node":245,"optional":true},"receipt":{"node":1053,"optional":true},"reassigned":{"node":501,"optional":true},"status":{"node":1050,"optional":true},"cancellation":{"node":1775,"optional":true}}}),
-  shape({"kind":"union","choices":[6,1776]}),
+  shape({"kind":"array","item":1777}),
+  shape({"kind":"object","properties":{"messageId":{"node":1,"optional":false},"actorId":{"node":1,"optional":false},"at":{"node":18,"optional":false},"fromState":{"node":5,"optional":true},"toState":{"node":1,"optional":false},"outcome":{"node":5,"optional":true},"contents":{"node":245,"optional":true},"receipt":{"node":1056,"optional":true},"reassigned":{"node":501,"optional":true},"status":{"node":1053,"optional":true},"cancellation":{"node":1778,"optional":true}}}),
+  shape({"kind":"union","choices":[6,1779]}),
   shape({"kind":"object","properties":{"reason":{"node":1,"optional":false},"actorId":{"node":1,"optional":false}}}),
-  shape({"kind":"intersection","choices":[1395,1778]}),
+  shape({"kind":"intersection","choices":[1398,1781]}),
   shape({"kind":"object","properties":{"workspaceId":{"node":1,"optional":false}}}),
-  shape({"kind":"object","properties":{"members":{"node":1780,"optional":false}}}),
-  shape({"kind":"array","item":1781}),
-  shape({"kind":"intersection","choices":[1782,1796]}),
-  shape({"kind":"object","properties":{"model":{"node":459,"optional":true},"billing":{"node":1783,"optional":true},"remainingAllowance":{"node":1786,"optional":true},"reviewer":{"node":1792,"optional":true},"owner":{"node":1794,"optional":true},"machine":{"node":459,"optional":true},"online":{"node":20,"optional":true}}}),
-  shape({"kind":"union","choices":[6,1784,1785]}),
+  shape({"kind":"object","properties":{"members":{"node":1783,"optional":false}}}),
+  shape({"kind":"array","item":1784}),
+  shape({"kind":"intersection","choices":[1785,1799]}),
+  shape({"kind":"object","properties":{"model":{"node":459,"optional":true},"billing":{"node":1786,"optional":true},"remainingAllowance":{"node":1789,"optional":true},"reviewer":{"node":1795,"optional":true},"owner":{"node":1797,"optional":true},"machine":{"node":459,"optional":true},"online":{"node":20,"optional":true}}}),
+  shape({"kind":"union","choices":[6,1787,1788]}),
   shape({"kind":"literal","value":"subscription"}),
   shape({"kind":"literal","value":"pay-per-use"}),
-  shape({"kind":"union","choices":[6,1787]}),
-  shape({"kind":"object","properties":{"updatedAt":{"node":18,"optional":false},"windows":{"node":1788,"optional":false},"usd":{"node":17,"optional":true},"credits":{"node":17,"optional":true},"tokens":{"node":1790,"optional":true}}}),
-  shape({"kind":"array","item":1789}),
+  shape({"kind":"union","choices":[6,1790]}),
+  shape({"kind":"object","properties":{"updatedAt":{"node":18,"optional":false},"windows":{"node":1791,"optional":false},"usd":{"node":17,"optional":true},"credits":{"node":17,"optional":true},"tokens":{"node":1793,"optional":true}}}),
+  shape({"kind":"array","item":1792}),
   shape({"kind":"object","properties":{"rateLimitType":{"node":1,"optional":false},"remaining":{"node":18,"optional":false},"resetsAt":{"node":17,"optional":true}}}),
-  shape({"kind":"union","choices":[6,1791]}),
+  shape({"kind":"union","choices":[6,1794]}),
   shape({"kind":"object","properties":{"remaining":{"node":18,"optional":false},"resetsAt":{"node":18,"optional":false}}}),
-  shape({"kind":"union","choices":[6,1793]}),
+  shape({"kind":"union","choices":[6,1796]}),
   shape({"kind":"literal","value":"primary"}),
-  shape({"kind":"union","choices":[6,1795]}),
-  shape({"kind":"object","properties":{"id":{"node":1,"optional":false},"handle":{"node":154,"optional":false},"name":{"node":1,"optional":false}}}),
-  shape({"kind":"object","properties":{"identityId":{"node":1,"optional":false},"kind":{"node":211,"optional":false},"name":{"node":1,"optional":false},"handle":{"node":5,"optional":true},"role":{"node":1643,"optional":false},"soul":{"node":1797,"optional":true}}}),
   shape({"kind":"union","choices":[6,1798]}),
+  shape({"kind":"object","properties":{"id":{"node":1,"optional":false},"handle":{"node":154,"optional":false},"name":{"node":1,"optional":false}}}),
+  shape({"kind":"object","properties":{"identityId":{"node":1,"optional":false},"kind":{"node":211,"optional":false},"name":{"node":1,"optional":false},"handle":{"node":5,"optional":true},"role":{"node":1646,"optional":false},"soul":{"node":1800,"optional":true}}}),
+  shape({"kind":"union","choices":[6,1801]}),
   shape({"kind":"object","properties":{"name":{"node":1,"optional":false},"instructions":{"node":1,"optional":false},"avatarSeed":{"node":1,"optional":false},"avatar":{"node":5,"optional":true},"authoredBy":{"node":1,"optional":false},"updatedAt":{"node":18,"optional":false}}}),
-  shape({"kind":"intersection","choices":[1391,1404,1800]}),
-  shape({"kind":"object","properties":{"runId":{"node":1,"optional":false},"outcome":{"node":1,"optional":false},"contents":{"node":245,"optional":false},"receipt":{"node":1801,"optional":true},"attempt":{"node":17,"optional":true}}}),
-  shape({"kind":"union","choices":[6,1055]}),
-  shape({"kind":"union","choices":[1803,1805]}),
-  shape({"kind":"object","properties":{"runId":{"node":1,"optional":false},"state":{"node":1,"optional":false},"attempt":{"node":18,"optional":false},"status":{"node":1804,"optional":true}}}),
+  shape({"kind":"intersection","choices":[1394,1407,1803]}),
+  shape({"kind":"object","properties":{"runId":{"node":1,"optional":false},"outcome":{"node":1,"optional":false},"contents":{"node":245,"optional":false},"receipt":{"node":1804,"optional":true},"attempt":{"node":17,"optional":true}}}),
+  shape({"kind":"union","choices":[6,1058]}),
+  shape({"kind":"union","choices":[1806,1808]}),
+  shape({"kind":"object","properties":{"runId":{"node":1,"optional":false},"state":{"node":1,"optional":false},"attempt":{"node":18,"optional":false},"status":{"node":1807,"optional":true}}}),
   shape({"kind":"union","choices":[6,317,452]}),
-  shape({"kind":"object","properties":{"alreadyAdvanced":{"node":22,"optional":false},"runId":{"node":1,"optional":false},"state":{"node":1,"optional":false},"seq":{"node":18,"optional":false},"status":{"node":1050,"optional":true}}}),
-  shape({"kind":"intersection","choices":[1395,1807]}),
-  shape({"kind":"object","properties":{"connectorId":{"node":1,"optional":false},"pairingGeneration":{"node":17,"optional":true},"config":{"node":1808,"optional":true},"squireVersion":{"node":5,"optional":true},"signedInAs":{"node":5,"optional":true},"signIn":{"node":593,"optional":true}}}),
-  shape({"kind":"union","choices":[6,1540]}),
-  shape({"kind":"intersection","choices":[1395,1810]}),
+  shape({"kind":"object","properties":{"alreadyAdvanced":{"node":22,"optional":false},"runId":{"node":1,"optional":false},"state":{"node":1,"optional":false},"seq":{"node":18,"optional":false},"status":{"node":1053,"optional":true}}}),
+  shape({"kind":"intersection","choices":[1398,1810]}),
+  shape({"kind":"object","properties":{"connectorId":{"node":1,"optional":false},"pairingGeneration":{"node":17,"optional":true},"config":{"node":1811,"optional":true},"squireVersion":{"node":5,"optional":true},"signedInAs":{"node":5,"optional":true},"signIn":{"node":593,"optional":true}}}),
+  shape({"kind":"union","choices":[6,1543]}),
+  shape({"kind":"intersection","choices":[1398,1813]}),
   shape({"kind":"object","properties":{"roomId":{"node":5,"optional":true}}}),
-  shape({"kind":"object","properties":{"grants":{"node":1812,"optional":false}}}),
-  shape({"kind":"array","item":1813}),
+  shape({"kind":"object","properties":{"grants":{"node":1815,"optional":false}}}),
+  shape({"kind":"array","item":1816}),
   shape({"kind":"object","properties":{"grantId":{"node":1,"optional":false},"agentId":{"node":5,"optional":true},"workspaceId":{"node":1,"optional":false},"roomId":{"node":1,"optional":false},"kind":{"node":324,"optional":false},"target":{"node":1,"optional":false},"reason":{"node":1,"optional":false},"status":{"node":187,"optional":false},"auto":{"node":32,"optional":false},"requestedBy":{"node":1,"optional":false},"requestedByName":{"node":5,"optional":true},"createdAt":{"node":18,"optional":false},"expiresAt":{"node":17,"optional":true}}}),
-  shape({"kind":"intersection","choices":[1395,1815]}),
+  shape({"kind":"intersection","choices":[1398,1818]}),
   shape({"kind":"object","properties":{"roomId":{"node":5,"optional":true}}}),
-  shape({"kind":"object","properties":{"grants":{"node":1817,"optional":false}}}),
-  shape({"kind":"array","item":1818}),
+  shape({"kind":"object","properties":{"grants":{"node":1820,"optional":false}}}),
+  shape({"kind":"array","item":1821}),
   shape({"kind":"object","properties":{"grantId":{"node":1,"optional":false},"workspaceId":{"node":1,"optional":false},"roomId":{"node":1,"optional":false},"kind":{"node":324,"optional":false},"target":{"node":1,"optional":false},"capabilities":{"node":5,"optional":true},"status":{"node":187,"optional":false},"requestedBy":{"node":1,"optional":false},"requestedByName":{"node":5,"optional":true},"expiresAt":{"node":17,"optional":true},"script":{"node":334,"optional":true}}}),
-  shape({"kind":"intersection","choices":[1395,1391,1820]}),
+  shape({"kind":"intersection","choices":[1398,1394,1823]}),
   shape({"kind":"object","properties":{"selfOnly":{"node":20,"optional":true}}}),
-  shape({"kind":"object","properties":{"schedules":{"node":1822,"optional":false}}}),
-  shape({"kind":"array","item":1823}),
-  shape({"kind":"object","properties":{"paused":{"node":20,"optional":true},"title":{"node":5,"optional":true},"roomId":{"node":5,"optional":true},"roomName":{"node":5,"optional":true},"workflowName":{"node":5,"optional":true},"scheduleId":{"node":1,"optional":false},"agentId":{"node":1,"optional":false},"agentHandle":{"node":5,"optional":true},"prompt":{"node":1,"optional":false},"cadence":{"node":527,"optional":false},"maxRuns":{"node":17,"optional":true},"runCount":{"node":18,"optional":false},"nextRunAt":{"node":18,"optional":false},"activeRunIds":{"node":34,"optional":true}}}),
-  shape({"kind":"object","properties":{"watches":{"node":1825,"optional":false}}}),
+  shape({"kind":"object","properties":{"schedules":{"node":1825,"optional":false}}}),
   shape({"kind":"array","item":1826}),
-  shape({"kind":"object","properties":{"address":{"node":1,"optional":false},"kinds":{"node":1507,"optional":false}}}),
-  shape({"kind":"intersection","choices":[1404,1395,1391,1828]}),
+  shape({"kind":"object","properties":{"paused":{"node":20,"optional":true},"title":{"node":5,"optional":true},"roomId":{"node":5,"optional":true},"roomName":{"node":5,"optional":true},"workflowName":{"node":5,"optional":true},"scheduleId":{"node":1,"optional":false},"agentId":{"node":1,"optional":false},"agentHandle":{"node":5,"optional":true},"prompt":{"node":1,"optional":false},"cadence":{"node":527,"optional":false},"maxRuns":{"node":17,"optional":true},"runCount":{"node":18,"optional":false},"nextRunAt":{"node":18,"optional":false},"activeRunIds":{"node":34,"optional":true}}}),
+  shape({"kind":"object","properties":{"watches":{"node":1828,"optional":false}}}),
+  shape({"kind":"array","item":1829}),
+  shape({"kind":"object","properties":{"address":{"node":1,"optional":false},"kinds":{"node":1510,"optional":false}}}),
+  shape({"kind":"intersection","choices":[1407,1398,1394,1831]}),
   shape({"kind":"object","properties":{"appId":{"node":1,"optional":false},"query":{"node":5,"optional":true}}}),
-  shape({"kind":"object","properties":{"tools":{"node":1830,"optional":false},"transport":{"node":1469,"optional":true},"next":{"node":5,"optional":true},"service":{"node":5,"optional":true},"credentials":{"node":1832,"optional":true}}}),
-  shape({"kind":"array","item":1831}),
-  shape({"kind":"object","properties":{"slug":{"node":1,"optional":false},"name":{"node":1,"optional":false},"description":{"node":1,"optional":false},"inputParameters":{"node":245,"optional":true}}}),
-  shape({"kind":"union","choices":[6,1833]}),
+  shape({"kind":"object","properties":{"tools":{"node":1833,"optional":false},"transport":{"node":1472,"optional":true},"next":{"node":5,"optional":true},"service":{"node":5,"optional":true},"credentials":{"node":1835,"optional":true}}}),
   shape({"kind":"array","item":1834}),
+  shape({"kind":"object","properties":{"slug":{"node":1,"optional":false},"name":{"node":1,"optional":false},"description":{"node":1,"optional":false},"inputParameters":{"node":245,"optional":true}}}),
+  shape({"kind":"union","choices":[6,1836]}),
+  shape({"kind":"array","item":1837}),
   shape({"kind":"object","properties":{"reference":{"node":1,"optional":false},"allowedHosts":{"node":29,"optional":false}}}),
-  shape({"kind":"intersection","choices":[1398,1836]}),
+  shape({"kind":"intersection","choices":[1401,1839]}),
   shape({"kind":"object","properties":{"beforeRevision":{"node":17,"optional":true},"afterRevision":{"node":17,"optional":true},"limit":{"node":17,"optional":true}}}),
-  shape({"kind":"object","properties":{"revisions":{"node":1838,"optional":false},"nextBeforeRevision":{"node":17,"optional":true}}}),
-  shape({"kind":"array","item":1629}),
-  shape({"kind":"object","properties":{"kinds":{"node":1840,"optional":false}}}),
-  shape({"kind":"array","item":1841}),
+  shape({"kind":"object","properties":{"revisions":{"node":1841,"optional":false},"nextBeforeRevision":{"node":17,"optional":true}}}),
+  shape({"kind":"array","item":1632}),
+  shape({"kind":"object","properties":{"kinds":{"node":1843,"optional":false}}}),
+  shape({"kind":"array","item":1844}),
   shape({"kind":"union","choices":[227,228,229,230,231,232,233,234,235,236,237,238,239,240,241,242,243]}),
-  shape({"kind":"intersection","choices":[1391,1843]}),
+  shape({"kind":"intersection","choices":[1394,1846]}),
   shape({"kind":"object","properties":{"activeOnly":{"node":20,"optional":true}}}),
-  shape({"kind":"object","properties":{"corners":{"node":1845,"optional":false}}}),
-  shape({"kind":"array","item":1846}),
+  shape({"kind":"object","properties":{"corners":{"node":1848,"optional":false}}}),
+  shape({"kind":"array","item":1849}),
   shape({"kind":"object","properties":{"cornerId":{"node":1,"optional":false},"parentRoomId":{"node":1,"optional":false},"name":{"node":5,"optional":true},"objective":{"node":5,"optional":true},"createdBy":{"node":1,"optional":false},"archived":{"node":32,"optional":false},"closedAt":{"node":17,"optional":true},"pullRequestNumber":{"node":17,"optional":true},"mergeCommitSha":{"node":5,"optional":true}}}),
-  shape({"kind":"intersection","choices":[1391,1848]}),
+  shape({"kind":"intersection","choices":[1394,1851]}),
   shape({"kind":"object","properties":{"activeOnly":{"node":20,"optional":true}}}),
-  shape({"kind":"object","properties":{"members":{"node":1850,"optional":false}}}),
-  shape({"kind":"array","item":1851}),
-  shape({"kind":"intersection","choices":[1782,1852]}),
+  shape({"kind":"object","properties":{"members":{"node":1853,"optional":false}}}),
+  shape({"kind":"array","item":1854}),
+  shape({"kind":"intersection","choices":[1785,1855]}),
   shape({"kind":"object","properties":{"id":{"node":1,"optional":false},"kind":{"node":211,"optional":false},"name":{"node":1,"optional":false},"handle":{"node":154,"optional":false},"role":{"node":1,"optional":false}}}),
-  shape({"kind":"object","properties":{"rooms":{"node":1854,"optional":false}}}),
-  shape({"kind":"array","item":1855}),
-  shape({"kind":"object","properties":{"roomId":{"node":1,"optional":false},"name":{"node":1,"optional":false},"parentRoomId":{"node":5,"optional":true},"directMessage":{"node":32,"optional":false}}}),
-  shape({"kind":"object","properties":{"events":{"node":1857,"optional":false}}}),
+  shape({"kind":"object","properties":{"rooms":{"node":1857,"optional":false}}}),
   shape({"kind":"array","item":1858}),
-  shape({"kind":"union","choices":[1859,1862,1865]}),
-  shape({"kind":"object","properties":{"service":{"node":550,"optional":false},"event":{"node":1860,"optional":false},"label":{"node":1861,"optional":false}}}),
+  shape({"kind":"object","properties":{"roomId":{"node":1,"optional":false},"name":{"node":1,"optional":false},"parentRoomId":{"node":5,"optional":true},"directMessage":{"node":32,"optional":false}}}),
+  shape({"kind":"object","properties":{"events":{"node":1860,"optional":false}}}),
+  shape({"kind":"array","item":1861}),
+  shape({"kind":"union","choices":[1862,1865,1868]}),
+  shape({"kind":"object","properties":{"service":{"node":550,"optional":false},"event":{"node":1863,"optional":false},"label":{"node":1864,"optional":false}}}),
   shape({"kind":"literal","value":"new_message"}),
   shape({"kind":"literal","value":"new message in a Slack channel"}),
-  shape({"kind":"object","properties":{"service":{"node":551,"optional":false},"event":{"node":1863,"optional":false},"label":{"node":1864,"optional":false}}}),
+  shape({"kind":"object","properties":{"service":{"node":551,"optional":false},"event":{"node":1866,"optional":false},"label":{"node":1867,"optional":false}}}),
   shape({"kind":"literal","value":"issue.created"}),
   shape({"kind":"literal","value":"new issue in Linear"}),
-  shape({"kind":"object","properties":{"service":{"node":552,"optional":false},"event":{"node":1866,"optional":false},"label":{"node":1867,"optional":false}}}),
+  shape({"kind":"object","properties":{"service":{"node":552,"optional":false},"event":{"node":1869,"optional":false},"label":{"node":1870,"optional":false}}}),
   shape({"kind":"literal","value":"payment_intent.succeeded"}),
   shape({"kind":"literal","value":"payment succeeded in Stripe"}),
   shape({"kind":"object","properties":{"agentId":{"node":1,"optional":false},"roomId":{"node":1,"optional":false},"requestId":{"node":5,"optional":true},"generationId":{"node":5,"optional":true},"slug":{"node":1,"optional":false}}}),
-  shape({"kind":"object","properties":{"activeRunIds":{"node":34,"optional":true},"skillId":{"node":1,"optional":false},"slug":{"node":1,"optional":false},"description":{"node":1,"optional":false},"version":{"node":18,"optional":false},"markdown":{"node":1,"optional":false},"sourceRoomId":{"node":1,"optional":false},"anchor":{"node":1870,"optional":false}}}),
+  shape({"kind":"object","properties":{"activeRunIds":{"node":34,"optional":true},"skillId":{"node":1,"optional":false},"slug":{"node":1,"optional":false},"description":{"node":1,"optional":false},"version":{"node":18,"optional":false},"markdown":{"node":1,"optional":false},"sourceRoomId":{"node":1,"optional":false},"anchor":{"node":1873,"optional":false}}}),
   shape({"kind":"object","properties":{"repository":{"node":1,"optional":false},"targetCommit":{"node":1,"optional":false},"path":{"node":5,"optional":true}}}),
-  shape({"kind":"intersection","choices":[1391,1404,1872]}),
+  shape({"kind":"intersection","choices":[1394,1407,1875]}),
   shape({"kind":"object","properties":{"messageId":{"node":5,"optional":true}}}),
-  shape({"kind":"union","choices":[1874,1878]}),
-  shape({"kind":"object","properties":{"status":{"node":1875,"optional":false},"headSha":{"node":1,"optional":false}}}),
-  shape({"kind":"union","choices":[1876,1877]}),
+  shape({"kind":"union","choices":[1877,1881]}),
+  shape({"kind":"object","properties":{"status":{"node":1878,"optional":false},"headSha":{"node":1,"optional":false}}}),
+  shape({"kind":"union","choices":[1879,1880]}),
   shape({"kind":"literal","value":"merge-started"}),
   shape({"kind":"literal","value":"queued"}),
-  shape({"kind":"object","properties":{"status":{"node":451,"optional":false},"blocker":{"node":1,"optional":false},"holds":{"node":1640,"optional":true}}}),
-  shape({"kind":"intersection","choices":[1880,1404]}),
+  shape({"kind":"object","properties":{"status":{"node":451,"optional":false},"blocker":{"node":1,"optional":false},"holds":{"node":1643,"optional":true}}}),
+  shape({"kind":"intersection","choices":[1883,1407]}),
   shape({"kind":"object","properties":{"roomId":{"node":1,"optional":false},"itemIds":{"node":29,"optional":false},"title":{"node":1,"optional":false},"prUrl":{"node":1,"optional":false},"notify":{"node":20,"optional":true}}}),
   shape({"kind":"object","properties":{"resolved":{"node":18,"optional":false},"notified":{"node":18,"optional":false}}}),
-  shape({"kind":"intersection","choices":[1404,1391,1883]}),
-  shape({"kind":"object","properties":{"connectorType":{"node":1,"optional":false},"reason":{"node":1,"optional":false},"intent":{"node":1884,"optional":true}}}),
+  shape({"kind":"intersection","choices":[1407,1394,1886]}),
+  shape({"kind":"object","properties":{"connectorType":{"node":1,"optional":false},"reason":{"node":1,"optional":false},"intent":{"node":1887,"optional":true}}}),
   shape({"kind":"union","choices":[6,364]}),
-  shape({"kind":"object","properties":{"offerId":{"node":1,"optional":false},"status":{"node":1886,"optional":false},"messageId":{"node":1,"optional":false},"joined":{"node":32,"optional":false}}}),
+  shape({"kind":"object","properties":{"offerId":{"node":1,"optional":false},"status":{"node":1889,"optional":false},"messageId":{"node":1,"optional":false},"joined":{"node":32,"optional":false}}}),
   shape({"kind":"union","choices":[190,8]}),
-  shape({"kind":"intersection","choices":[1404,1391,1888]}),
+  shape({"kind":"intersection","choices":[1407,1394,1891]}),
   shape({"kind":"object","properties":{"prompt":{"node":1,"optional":false},"constraint":{"node":5,"optional":true},"options":{"node":149,"optional":false},"ttlSeconds":{"node":18,"optional":false}}}),
-  shape({"kind":"intersection","choices":[1391,1404,1890]}),
+  shape({"kind":"intersection","choices":[1394,1407,1893]}),
   shape({"kind":"object","properties":{"address":{"node":1,"optional":false},"text":{"node":1,"optional":false},"agent":{"node":5,"optional":true}}}),
-  shape({"kind":"intersection","choices":[1398,1404,1391,1892]}),
+  shape({"kind":"intersection","choices":[1401,1407,1394,1895]}),
   shape({"kind":"object","properties":{"requestId":{"node":1,"optional":false}}}),
   shape({"kind":"object","properties":{"roomId":{"node":1,"optional":false},"headSha":{"node":1,"optional":false}}}),
-  shape({"kind":"intersection","choices":[1404,1395,1391,1895]}),
-  shape({"kind":"object","properties":{"requestId":{"node":1,"optional":false},"cornerActivityKey":{"node":5,"optional":true},"agentModel":{"node":459,"optional":true},"activity":{"node":1896,"optional":false}}}),
-  shape({"kind":"array","item":1897}),
-  shape({"kind":"object","properties":{"kind":{"node":276,"optional":false},"title":{"node":1,"optional":false},"text":{"node":5,"optional":true},"operation":{"node":5,"optional":true},"status":{"node":5,"optional":true},"command":{"node":5,"optional":true},"input":{"node":5,"optional":true},"output":{"node":5,"optional":true},"requestedBy":{"node":1898,"optional":true},"files":{"node":1900,"optional":true},"continues":{"node":20,"optional":true},"plan":{"node":1903,"optional":true}}}),
-  shape({"kind":"union","choices":[6,1899]}),
+  shape({"kind":"intersection","choices":[1407,1398,1394,1898]}),
+  shape({"kind":"object","properties":{"requestId":{"node":1,"optional":false},"cornerActivityKey":{"node":5,"optional":true},"agentModel":{"node":459,"optional":true},"activity":{"node":1899,"optional":false}}}),
+  shape({"kind":"array","item":1900}),
+  shape({"kind":"object","properties":{"kind":{"node":276,"optional":false},"title":{"node":1,"optional":false},"text":{"node":5,"optional":true},"operation":{"node":5,"optional":true},"status":{"node":5,"optional":true},"command":{"node":5,"optional":true},"input":{"node":5,"optional":true},"output":{"node":5,"optional":true},"requestedBy":{"node":1901,"optional":true},"files":{"node":1903,"optional":true},"continues":{"node":20,"optional":true},"plan":{"node":1906,"optional":true}}}),
+  shape({"kind":"union","choices":[6,1902]}),
   shape({"kind":"object","properties":{"pubkey":{"node":1,"optional":false},"name":{"node":5,"optional":true}}}),
-  shape({"kind":"union","choices":[6,1901]}),
-  shape({"kind":"array","item":1902}),
-  shape({"kind":"object","properties":{"path":{"node":1,"optional":false},"status":{"node":5,"optional":true}}}),
   shape({"kind":"union","choices":[6,1904]}),
-  shape({"kind":"object","properties":{"objective":{"node":5,"optional":true},"items":{"node":1905,"optional":false}}}),
-  shape({"kind":"array","item":1906}),
+  shape({"kind":"array","item":1905}),
+  shape({"kind":"object","properties":{"path":{"node":1,"optional":false},"status":{"node":5,"optional":true}}}),
+  shape({"kind":"union","choices":[6,1907]}),
+  shape({"kind":"object","properties":{"objective":{"node":5,"optional":true},"items":{"node":1908,"optional":false}}}),
+  shape({"kind":"array","item":1909}),
   shape({"kind":"object","properties":{"step":{"node":1,"optional":false},"status":{"node":296,"optional":false}}}),
-  shape({"kind":"intersection","choices":[1404,1391,1908]}),
-  shape({"kind":"object","properties":{"attachment":{"node":1447,"optional":false}}}),
-  shape({"kind":"intersection","choices":[1391,1910]}),
+  shape({"kind":"intersection","choices":[1407,1394,1911]}),
+  shape({"kind":"object","properties":{"attachment":{"node":1450,"optional":false}}}),
+  shape({"kind":"intersection","choices":[1394,1913]}),
   shape({"kind":"object","properties":{"drawing":{"node":245,"optional":false}}}),
-  shape({"kind":"intersection","choices":[1395,1912]}),
-  shape({"kind":"object","properties":{"workspaceId":{"node":1,"optional":false},"commands":{"node":1913,"optional":false}}}),
-  shape({"kind":"array","item":1914}),
+  shape({"kind":"intersection","choices":[1398,1915]}),
+  shape({"kind":"object","properties":{"workspaceId":{"node":1,"optional":false},"commands":{"node":1916,"optional":false}}}),
+  shape({"kind":"array","item":1917}),
   shape({"kind":"object","properties":{"name":{"node":1,"optional":false},"description":{"node":5,"optional":true},"inputHint":{"node":5,"optional":true}}}),
-  shape({"kind":"intersection","choices":[1404,1395,1391,1916]}),
+  shape({"kind":"intersection","choices":[1407,1398,1394,1919]}),
   shape({"kind":"object","properties":{"turnId":{"node":1,"optional":false},"text":{"node":1,"optional":false},"latestChunk":{"node":5,"optional":true}}}),
   shape({"kind":"object","properties":{"machineId":{"node":1,"optional":false},"machineName":{"node":1,"optional":false}}}),
-  shape({"kind":"intersection","choices":[1395,1919]}),
-  shape({"kind":"object","properties":{"workspaceId":{"node":1,"optional":false},"options":{"node":1920,"optional":false},"selection":{"node":1928,"optional":true},"unavailable":{"node":682,"optional":true},"harness":{"node":5,"optional":true}}}),
-  shape({"kind":"array","item":1921}),
-  shape({"kind":"object","properties":{"id":{"node":1,"optional":false},"category":{"node":1922,"optional":false},"currentValue":{"node":5,"optional":true},"options":{"node":1926,"optional":false}}}),
-  shape({"kind":"union","choices":[683,1923,684,1924,1925]}),
+  shape({"kind":"intersection","choices":[1398,1922]}),
+  shape({"kind":"object","properties":{"workspaceId":{"node":1,"optional":false},"options":{"node":1923,"optional":false},"selection":{"node":1931,"optional":true},"unavailable":{"node":682,"optional":true},"harness":{"node":5,"optional":true}}}),
+  shape({"kind":"array","item":1924}),
+  shape({"kind":"object","properties":{"id":{"node":1,"optional":false},"category":{"node":1925,"optional":false},"currentValue":{"node":5,"optional":true},"options":{"node":1929,"optional":false}}}),
+  shape({"kind":"union","choices":[683,1926,684,1927,1928]}),
   shape({"kind":"literal","value":"thought_level"}),
   shape({"kind":"literal","value":"reasoning_effort"}),
   shape({"kind":"literal","value":"model_config"}),
-  shape({"kind":"array","item":1927}),
+  shape({"kind":"array","item":1930}),
   shape({"kind":"object","properties":{"id":{"node":1,"optional":false},"name":{"node":5,"optional":true},"description":{"node":5,"optional":true}}}),
-  shape({"kind":"union","choices":[6,1929]}),
+  shape({"kind":"union","choices":[6,1932]}),
   shape({"kind":"object","properties":{"model":{"node":5,"optional":true},"effort":{"node":5,"optional":true}}}),
-  shape({"kind":"intersection","choices":[1395,1391,1931]}),
-  shape({"kind":"object","properties":{"generation":{"node":18,"optional":false},"mandate":{"node":1932,"optional":false}}}),
-  shape({"kind":"object","properties":{"beneficiary":{"node":1,"optional":false},"action":{"node":1,"optional":false},"scope":{"node":1933,"optional":false},"expiresAt":{"node":17,"optional":true}}}),
-  shape({"kind":"union","choices":[1934,1940,1942,1947,1953]}),
-  shape({"kind":"object","properties":{"type":{"node":1935,"optional":false},"workspaceId":{"node":1,"optional":false},"roomId":{"node":1,"optional":false},"name":{"node":1,"optional":false},"visibility":{"node":1936,"optional":false},"participantIds":{"node":29,"optional":false},"agentIds":{"node":29,"optional":false},"repository":{"node":1938,"optional":true}}}),
+  shape({"kind":"intersection","choices":[1398,1394,1934]}),
+  shape({"kind":"object","properties":{"generation":{"node":18,"optional":false},"mandate":{"node":1935,"optional":false}}}),
+  shape({"kind":"object","properties":{"beneficiary":{"node":1,"optional":false},"action":{"node":1,"optional":false},"scope":{"node":1936,"optional":false},"expiresAt":{"node":17,"optional":true}}}),
+  shape({"kind":"union","choices":[1937,1943,1945,1950,1956]}),
+  shape({"kind":"object","properties":{"type":{"node":1938,"optional":false},"workspaceId":{"node":1,"optional":false},"roomId":{"node":1,"optional":false},"name":{"node":1,"optional":false},"visibility":{"node":1939,"optional":false},"participantIds":{"node":29,"optional":false},"agentIds":{"node":29,"optional":false},"repository":{"node":1941,"optional":true}}}),
   shape({"kind":"literal","value":"room.create"}),
-  shape({"kind":"union","choices":[1937,145]}),
+  shape({"kind":"union","choices":[1940,145]}),
   shape({"kind":"literal","value":"workspace"}),
-  shape({"kind":"union","choices":[6,1939]}),
+  shape({"kind":"union","choices":[6,1942]}),
   shape({"kind":"object","properties":{"key":{"node":1,"optional":false},"targetBranch":{"node":1,"optional":false}}}),
-  shape({"kind":"object","properties":{"type":{"node":1941,"optional":false},"currency":{"node":1,"optional":false},"maxMinorUnits":{"node":18,"optional":false},"merchant":{"node":1,"optional":false},"purpose":{"node":1,"optional":false},"connectorId":{"node":1,"optional":false}}}),
+  shape({"kind":"object","properties":{"type":{"node":1944,"optional":false},"currency":{"node":1,"optional":false},"maxMinorUnits":{"node":18,"optional":false},"merchant":{"node":1,"optional":false},"purpose":{"node":1,"optional":false},"connectorId":{"node":1,"optional":false}}}),
   shape({"kind":"literal","value":"money.spend"}),
-  shape({"kind":"object","properties":{"type":{"node":1943,"optional":false},"connectorId":{"node":1,"optional":false},"target":{"node":1,"optional":false},"payloadDigest":{"node":1,"optional":false}}}),
-  shape({"kind":"union","choices":[1944,1945,1946]}),
+  shape({"kind":"object","properties":{"type":{"node":1946,"optional":false},"connectorId":{"node":1,"optional":false},"target":{"node":1,"optional":false},"payloadDigest":{"node":1,"optional":false}}}),
+  shape({"kind":"union","choices":[1947,1948,1949]}),
   shape({"kind":"literal","value":"message.send"}),
   shape({"kind":"literal","value":"content.publish"}),
   shape({"kind":"literal","value":"operation.execute"}),
-  shape({"kind":"object","properties":{"type":{"node":1948,"optional":false},"operation":{"node":1949,"optional":false},"scheduleId":{"node":1,"optional":false},"revisionDigest":{"node":1,"optional":false}}}),
+  shape({"kind":"object","properties":{"type":{"node":1951,"optional":false},"operation":{"node":1952,"optional":false},"scheduleId":{"node":1,"optional":false},"revisionDigest":{"node":1,"optional":false}}}),
   shape({"kind":"literal","value":"schedule.change"}),
-  shape({"kind":"union","choices":[11,1950,1951,1952]}),
+  shape({"kind":"union","choices":[11,1953,1954,1955]}),
   shape({"kind":"literal","value":"update"}),
   shape({"kind":"literal","value":"pause"}),
   shape({"kind":"literal","value":"delete"}),
-  shape({"kind":"object","properties":{"type":{"node":1954,"optional":false},"missionId":{"node":1,"optional":false},"workspaceId":{"node":1,"optional":false},"roomId":{"node":1,"optional":false},"controllerAgentId":{"node":1,"optional":false},"repository":{"node":1955,"optional":false},"cornerOperations":{"node":1956,"optional":false},"scheduleOperations":{"node":1959,"optional":false}}}),
+  shape({"kind":"object","properties":{"type":{"node":1957,"optional":false},"missionId":{"node":1,"optional":false},"workspaceId":{"node":1,"optional":false},"roomId":{"node":1,"optional":false},"controllerAgentId":{"node":1,"optional":false},"repository":{"node":1958,"optional":false},"cornerOperations":{"node":1959,"optional":false},"scheduleOperations":{"node":1962,"optional":false}}}),
   shape({"kind":"literal","value":"mission.control"}),
   shape({"kind":"object","properties":{"key":{"node":1,"optional":false},"targetBranch":{"node":1,"optional":false}}}),
-  shape({"kind":"array","item":1957}),
-  shape({"kind":"union","choices":[64,1958]}),
-  shape({"kind":"literal","value":"close"}),
   shape({"kind":"array","item":1960}),
-  shape({"kind":"union","choices":[11,1950,1951,1952,1961]}),
+  shape({"kind":"union","choices":[64,1961]}),
+  shape({"kind":"literal","value":"close"}),
+  shape({"kind":"array","item":1963}),
+  shape({"kind":"union","choices":[11,1953,1954,1955,1964]}),
   shape({"kind":"literal","value":"fire"}),
-  shape({"kind":"intersection","choices":[1395,1391,1963]}),
-  shape({"kind":"object","properties":{"diagnosticsOnly":{"node":20,"optional":true},"modelOwnerEnd":{"node":1964,"optional":true},"trace":{"node":1967,"optional":true},"requestId":{"node":1,"optional":false},"status":{"node":742,"optional":false},"completionKind":{"node":1977,"optional":true},"generationId":{"node":5,"optional":true},"heartbeat":{"node":20,"optional":true},"reason":{"node":5,"optional":true},"inputTokens":{"node":17,"optional":true},"promptBytes":{"node":17,"optional":true},"totalInputTokens":{"node":17,"optional":true},"outputTokens":{"node":17,"optional":true},"modelCalls":{"node":17,"optional":true},"modelCallsWithoutUsage":{"node":17,"optional":true},"toolCalls":{"node":17,"optional":true},"reasonKind":{"node":1979,"optional":true}}}),
-  shape({"kind":"union","choices":[6,1965,1966]}),
+  shape({"kind":"intersection","choices":[1398,1394,1966]}),
+  shape({"kind":"object","properties":{"diagnosticsOnly":{"node":20,"optional":true},"modelOwnerEnd":{"node":1967,"optional":true},"trace":{"node":1970,"optional":true},"requestId":{"node":1,"optional":false},"status":{"node":742,"optional":false},"completionKind":{"node":1980,"optional":true},"generationId":{"node":5,"optional":true},"heartbeat":{"node":20,"optional":true},"reason":{"node":5,"optional":true},"inputTokens":{"node":17,"optional":true},"promptBytes":{"node":17,"optional":true},"totalInputTokens":{"node":17,"optional":true},"outputTokens":{"node":17,"optional":true},"modelCalls":{"node":17,"optional":true},"modelCallsWithoutUsage":{"node":17,"optional":true},"toolCalls":{"node":17,"optional":true},"reasonKind":{"node":1982,"optional":true}}}),
+  shape({"kind":"union","choices":[6,1968,1969]}),
   shape({"kind":"object","properties":{"requestId":{"node":1,"optional":false}}}),
   shape({"kind":"object","properties":{"journalUnavailable":{"node":22,"optional":false}}}),
-  shape({"kind":"union","choices":[6,1968]}),
-  shape({"kind":"object","properties":{"reason":{"node":5,"optional":true},"reasonKind":{"node":5,"optional":true},"totalMs":{"node":18,"optional":false},"attempts":{"node":1969,"optional":false}}}),
-  shape({"kind":"array","item":1970}),
-  shape({"kind":"object","properties":{"attempt":{"node":18,"optional":false},"phases":{"node":1971,"optional":false},"tools":{"node":1972,"optional":false}}}),
-  shape({"kind":"object","properties":{},"index":18}),
+  shape({"kind":"union","choices":[6,1971]}),
+  shape({"kind":"object","properties":{"reason":{"node":5,"optional":true},"reasonKind":{"node":5,"optional":true},"totalMs":{"node":18,"optional":false},"attempts":{"node":1972,"optional":false}}}),
   shape({"kind":"array","item":1973}),
-  shape({"kind":"object","properties":{"name":{"node":1,"optional":false},"outcome":{"node":1974,"optional":false},"durationMs":{"node":18,"optional":false},"outputBytes":{"node":17,"optional":true},"error":{"node":5,"optional":true}}}),
-  shape({"kind":"union","choices":[121,547,1975,1976]}),
+  shape({"kind":"object","properties":{"attempt":{"node":18,"optional":false},"phases":{"node":1974,"optional":false},"tools":{"node":1975,"optional":false}}}),
+  shape({"kind":"object","properties":{},"index":18}),
+  shape({"kind":"array","item":1976}),
+  shape({"kind":"object","properties":{"name":{"node":1,"optional":false},"outcome":{"node":1977,"optional":false},"durationMs":{"node":18,"optional":false},"outputBytes":{"node":17,"optional":true},"error":{"node":5,"optional":true}}}),
+  shape({"kind":"union","choices":[121,547,1978,1979]}),
   shape({"kind":"literal","value":"ok"}),
   shape({"kind":"literal","value":"unfinished"}),
-  shape({"kind":"union","choices":[6,1978]}),
+  shape({"kind":"union","choices":[6,1981]}),
   shape({"kind":"literal","value":"no-reply"}),
-  shape({"kind":"union","choices":[6,669,1980,1981,1982,1983,1984,1985,1986,1987,1988,1989,1990]}),
+  shape({"kind":"union","choices":[6,669,1983,1984,1985,1986,1987,1988,1989,1990,1991,1992,1993]}),
   shape({"kind":"literal","value":"hiccup"}),
   shape({"kind":"literal","value":"wrong-model"}),
   shape({"kind":"literal","value":"allowance-spent"}),
@@ -1993,272 +1996,272 @@ export const wireShapes: readonly WireShape[] = [
   shape({"kind":"literal","value":"context-overflow"}),
   shape({"kind":"literal","value":"resource-limit"}),
   shape({"kind":"literal","value":"model-selection-unavailable"}),
-  shape({"kind":"intersection","choices":[1395,1992]}),
-  shape({"kind":"object","properties":{"usage":{"node":623,"optional":false},"usageSource":{"node":1993,"optional":true}}}),
-  shape({"kind":"union","choices":[6,1994]}),
-  shape({"kind":"object","properties":{"v":{"node":784,"optional":false},"ownerId":{"node":1,"optional":false},"source":{"node":1415,"optional":false},"revision":{"node":18,"optional":false}}}),
-  shape({"kind":"intersection","choices":[1404,1391,1996]}),
-  shape({"kind":"object","properties":{"toolCallId":{"node":1,"optional":false},"title":{"node":1,"optional":false},"status":{"node":1997,"optional":false}}}),
+  shape({"kind":"intersection","choices":[1398,1995]}),
+  shape({"kind":"object","properties":{"usage":{"node":623,"optional":false},"usageSource":{"node":1996,"optional":true}}}),
+  shape({"kind":"union","choices":[6,1997]}),
+  shape({"kind":"object","properties":{"v":{"node":784,"optional":false},"ownerId":{"node":1,"optional":false},"source":{"node":1418,"optional":false},"revision":{"node":18,"optional":false}}}),
+  shape({"kind":"intersection","choices":[1407,1394,1999]}),
+  shape({"kind":"object","properties":{"toolCallId":{"node":1,"optional":false},"title":{"node":1,"optional":false},"status":{"node":2000,"optional":false}}}),
   shape({"kind":"union","choices":[317,298]}),
-  shape({"kind":"intersection","choices":[1404,1391,1999]}),
+  shape({"kind":"intersection","choices":[1407,1394,2002]}),
   shape({"kind":"object","properties":{"sessionId":{"node":1,"optional":false},"upstreamUrl":{"node":1,"optional":false},"title":{"node":5,"optional":true},"expiresAt":{"node":17,"optional":true}}}),
   shape({"kind":"object","properties":{"id":{"node":1,"optional":false},"url":{"node":1,"optional":false},"messageId":{"node":1,"optional":false},"beelineUrl":{"node":1,"optional":false}}}),
-  shape({"kind":"object","properties":{"requestId":{"node":1,"optional":false},"agentId":{"node":1,"optional":false},"roomId":{"node":5,"optional":true},"cornerId":{"node":5,"optional":true},"usage":{"node":2002,"optional":false}}}),
-  shape({"kind":"array","item":2003}),
-  shape({"kind":"object","properties":{"ref":{"node":1,"optional":false},"service":{"node":154,"optional":false},"operation":{"node":1,"optional":false},"statusCode":{"node":18,"optional":false},"bytes":{"node":18,"optional":false},"grantId":{"node":5,"optional":true},"grantLabel":{"node":5,"optional":true},"eventClass":{"node":2004,"optional":true}}}),
-  shape({"kind":"union","choices":[6,349,2005]}),
+  shape({"kind":"object","properties":{"requestId":{"node":1,"optional":false},"agentId":{"node":1,"optional":false},"roomId":{"node":5,"optional":true},"cornerId":{"node":5,"optional":true},"usage":{"node":2005,"optional":false}}}),
+  shape({"kind":"array","item":2006}),
+  shape({"kind":"object","properties":{"ref":{"node":1,"optional":false},"service":{"node":154,"optional":false},"operation":{"node":1,"optional":false},"statusCode":{"node":18,"optional":false},"bytes":{"node":18,"optional":false},"grantId":{"node":5,"optional":true},"grantLabel":{"node":5,"optional":true},"eventClass":{"node":2007,"optional":true}}}),
+  shape({"kind":"union","choices":[6,349,2008]}),
   shape({"kind":"literal","value":"vault-change"}),
-  shape({"kind":"intersection","choices":[1395,2007]}),
-  shape({"kind":"object","properties":{"connectorId":{"node":1,"optional":false},"pairingGeneration":{"node":17,"optional":true},"steps":{"node":589,"optional":false},"squireVersion":{"node":5,"optional":true},"signedInAs":{"node":5,"optional":true},"signIn":{"node":2008,"optional":true},"errorMessage":{"node":5,"optional":true}}}),
+  shape({"kind":"intersection","choices":[1398,2010]}),
+  shape({"kind":"object","properties":{"connectorId":{"node":1,"optional":false},"pairingGeneration":{"node":17,"optional":true},"steps":{"node":589,"optional":false},"squireVersion":{"node":5,"optional":true},"signedInAs":{"node":5,"optional":true},"signIn":{"node":2011,"optional":true},"errorMessage":{"node":5,"optional":true}}}),
   shape({"kind":"union","choices":[6,155,594]}),
-  shape({"kind":"intersection","choices":[1395,2010]}),
-  shape({"kind":"object","properties":{"connections":{"node":1621,"optional":false},"errorMessage":{"node":5,"optional":true},"notAdded":{"node":20,"optional":true}}}),
-  shape({"kind":"intersection","choices":[1398,1391,1404,2012]}),
+  shape({"kind":"intersection","choices":[1398,2013]}),
+  shape({"kind":"object","properties":{"connections":{"node":1624,"optional":false},"errorMessage":{"node":5,"optional":true},"notAdded":{"node":20,"optional":true}}}),
+  shape({"kind":"intersection","choices":[1401,1394,1407,2015]}),
   shape({"kind":"object","properties":{"text":{"node":1,"optional":false},"replyTo":{"node":5,"optional":true}}}),
-  shape({"kind":"object","properties":{"id":{"node":1,"optional":false},"createdAt":{"node":18,"optional":false},"stored":{"node":22,"optional":false},"visible":{"node":22,"optional":false},"receipt":{"node":1,"optional":false},"effect":{"node":1106,"optional":false},"address":{"node":1,"optional":false},"visibility":{"node":146,"optional":false},"reportsAssignment":{"node":21,"optional":false},"woken":{"node":29,"optional":false},"notWoken":{"node":2014,"optional":false}}}),
-  shape({"kind":"array","item":2015}),
+  shape({"kind":"object","properties":{"id":{"node":1,"optional":false},"createdAt":{"node":18,"optional":false},"stored":{"node":22,"optional":false},"visible":{"node":22,"optional":false},"receipt":{"node":1,"optional":false},"effect":{"node":1109,"optional":false},"address":{"node":1,"optional":false},"visibility":{"node":146,"optional":false},"reportsAssignment":{"node":21,"optional":false},"woken":{"node":29,"optional":false},"notWoken":{"node":2017,"optional":false}}}),
+  shape({"kind":"array","item":2018}),
   shape({"kind":"object","properties":{"handle":{"node":1,"optional":false},"reason":{"node":1,"optional":false}}}),
-  shape({"kind":"intersection","choices":[1398,2017]}),
-  shape({"kind":"object","properties":{"objective":{"node":5,"optional":true},"items":{"node":2018,"optional":false}}}),
-  shape({"kind":"array","item":2019}),
+  shape({"kind":"intersection","choices":[1401,2020]}),
+  shape({"kind":"object","properties":{"objective":{"node":5,"optional":true},"items":{"node":2021,"optional":false}}}),
+  shape({"kind":"array","item":2022}),
   shape({"kind":"object","properties":{"step":{"node":1,"optional":false},"status":{"node":296,"optional":false}}}),
-  shape({"kind":"intersection","choices":[1398,2021]}),
-  shape({"kind":"object","properties":{"branch":{"node":1,"optional":false},"state":{"node":2022,"optional":false},"checks":{"node":881,"optional":false},"pullRequest":{"node":2024,"optional":true}}}),
-  shape({"kind":"union","choices":[608,308,880,2023]}),
+  shape({"kind":"intersection","choices":[1401,2024]}),
+  shape({"kind":"object","properties":{"branch":{"node":1,"optional":false},"state":{"node":2025,"optional":false},"checks":{"node":881,"optional":false},"pullRequest":{"node":2027,"optional":true}}}),
+  shape({"kind":"union","choices":[608,308,880,2026]}),
   shape({"kind":"literal","value":"gone"}),
-  shape({"kind":"union","choices":[6,2025]}),
+  shape({"kind":"union","choices":[6,2028]}),
   shape({"kind":"object","properties":{"number":{"node":18,"optional":false},"url":{"node":1,"optional":false},"title":{"node":1,"optional":false},"targetBranch":{"node":1,"optional":false},"headSha":{"node":1,"optional":false},"mergeability":{"node":886,"optional":true}}}),
-  shape({"kind":"intersection","choices":[1391,1679,1688,2027]}),
-  shape({"kind":"object","properties":{"status":{"node":2028,"optional":false},"result":{"node":5,"optional":true}}}),
-  shape({"kind":"union","choices":[317,1168,2029]}),
+  shape({"kind":"intersection","choices":[1394,1682,1691,2030]}),
+  shape({"kind":"object","properties":{"status":{"node":2031,"optional":false},"result":{"node":5,"optional":true}}}),
+  shape({"kind":"union","choices":[317,1171,2032]}),
   shape({"kind":"literal","value":"succeeded"}),
-  shape({"kind":"intersection","choices":[1391,1679,2031]}),
-  shape({"kind":"object","properties":{"purpose":{"node":5,"optional":true},"permissionId":{"node":1,"optional":false},"requestId":{"node":1,"optional":false},"scope":{"node":1933,"optional":false}}}),
-  shape({"kind":"intersection","choices":[1391,2033]}),
+  shape({"kind":"intersection","choices":[1394,1682,2034]}),
+  shape({"kind":"object","properties":{"purpose":{"node":5,"optional":true},"permissionId":{"node":1,"optional":false},"requestId":{"node":1,"optional":false},"scope":{"node":1936,"optional":false}}}),
+  shape({"kind":"intersection","choices":[1394,2036]}),
   shape({"kind":"object","properties":{"kind":{"node":406,"optional":false},"repository":{"node":5,"optional":true}}}),
-  shape({"kind":"intersection","choices":[1404,1391,2035]}),
+  shape({"kind":"intersection","choices":[1407,1394,2038]}),
   shape({"kind":"object","properties":{"kind":{"node":1,"optional":false},"consequence":{"node":1,"optional":false},"mentionAgentIds":{"node":34,"optional":true}}}),
   shape({"kind":"object","properties":{"url":{"node":1,"optional":false},"message":{"node":1,"optional":false},"messageId":{"node":1,"optional":false}}}),
-  shape({"kind":"intersection","choices":[1404,1391,2038]}),
-  shape({"kind":"object","properties":{"requestId":{"node":5,"optional":true},"text":{"node":1,"optional":false},"presentation":{"node":2039,"optional":true},"tags":{"node":1533,"optional":true},"replyToMessageId":{"node":5,"optional":true},"triggerMessageId":{"node":5,"optional":true},"steps":{"node":2040,"optional":true}}}),
+  shape({"kind":"intersection","choices":[1407,1394,2041]}),
+  shape({"kind":"object","properties":{"requestId":{"node":5,"optional":true},"text":{"node":1,"optional":false},"presentation":{"node":2042,"optional":true},"tags":{"node":1536,"optional":true},"replyToMessageId":{"node":5,"optional":true},"triggerMessageId":{"node":5,"optional":true},"steps":{"node":2043,"optional":true}}}),
   shape({"kind":"union","choices":[6,216,217]}),
-  shape({"kind":"union","choices":[6,1896]}),
-  shape({"kind":"intersection","choices":[1393,2042]}),
+  shape({"kind":"union","choices":[6,1899]}),
+  shape({"kind":"intersection","choices":[1396,2045]}),
   shape({"kind":"object","properties":{"receipt":{"node":5,"optional":true}}}),
-  shape({"kind":"intersection","choices":[340,1404,1391,2044]}),
+  shape({"kind":"intersection","choices":[340,1407,1394,2047]}),
   shape({"kind":"object","properties":{"tool":{"node":1,"optional":false},"title":{"node":1,"optional":false},"detail":{"node":1,"optional":false},"approvalUrl":{"node":1,"optional":false},"approvalId":{"node":5,"optional":true},"linkKind":{"node":346,"optional":false},"expiresAt":{"node":17,"optional":true},"signInUrl":{"node":5,"optional":true}}}),
-  shape({"kind":"intersection","choices":[1391,2046]}),
-  shape({"kind":"object","properties":{"requestId":{"node":1,"optional":false},"approvalId":{"node":1,"optional":false},"status":{"node":2047,"optional":false},"tool":{"node":1,"optional":false},"title":{"node":1,"optional":false},"detail":{"node":1,"optional":false}}}),
+  shape({"kind":"intersection","choices":[1394,2049]}),
+  shape({"kind":"object","properties":{"requestId":{"node":1,"optional":false},"approvalId":{"node":1,"optional":false},"status":{"node":2050,"optional":false},"tool":{"node":1,"optional":false},"title":{"node":1,"optional":false},"detail":{"node":1,"optional":false}}}),
   shape({"kind":"union","choices":[188,318,189]}),
-  shape({"kind":"intersection","choices":[1404,1391,2049]}),
-  shape({"kind":"object","properties":{"wall":{"node":2050,"optional":false},"message":{"node":1,"optional":false}}}),
-  shape({"kind":"union","choices":[2051,2052,2053]}),
+  shape({"kind":"intersection","choices":[1407,1394,2052]}),
+  shape({"kind":"object","properties":{"wall":{"node":2053,"optional":false},"message":{"node":1,"optional":false}}}),
+  shape({"kind":"union","choices":[2054,2055,2056]}),
   shape({"kind":"literal","value":"google_session"}),
   shape({"kind":"literal","value":"oauth_sign_in"}),
   shape({"kind":"literal","value":"awaiting_human"}),
   shape({"kind":"object","properties":{"id":{"node":1,"optional":false},"createdAt":{"node":18,"optional":false},"cardPosted":{"node":32,"optional":false},"offerId":{"node":5,"optional":true}}}),
-  shape({"kind":"object","properties":{"status":{"node":2056,"optional":false}}}),
+  shape({"kind":"object","properties":{"status":{"node":2059,"optional":false}}}),
   shape({"kind":"literal","value":"posted"}),
-  shape({"kind":"object","properties":{"status":{"node":1168,"optional":false}}}),
-  shape({"kind":"intersection","choices":[1391,2059]}),
+  shape({"kind":"object","properties":{"status":{"node":1171,"optional":false}}}),
+  shape({"kind":"intersection","choices":[1394,2062]}),
   shape({"kind":"object","properties":{"purpose":{"node":5,"optional":true},"requestId":{"node":1,"optional":false},"from":{"node":1,"optional":false},"to":{"node":1,"optional":false},"repository":{"node":1,"optional":false}}}),
-  shape({"kind":"intersection","choices":[1391,1404,2061]}),
+  shape({"kind":"intersection","choices":[1394,1407,2064]}),
   shape({"kind":"object","properties":{"service":{"node":1,"optional":false},"label":{"node":1,"optional":false},"purpose":{"node":1,"optional":false},"fields":{"node":372,"optional":false},"allowedHosts":{"node":29,"optional":false},"authStrategy":{"node":374,"optional":false}}}),
-  shape({"kind":"intersection","choices":[1395,2063]}),
-  shape({"kind":"object","properties":{"usage":{"node":623,"optional":false},"revision":{"node":1,"optional":false},"ownerId":{"node":1,"optional":false},"source":{"node":2064,"optional":false}}}),
+  shape({"kind":"intersection","choices":[1398,2066]}),
+  shape({"kind":"object","properties":{"usage":{"node":623,"optional":false},"revision":{"node":1,"optional":false},"ownerId":{"node":1,"optional":false},"source":{"node":2067,"optional":false}}}),
   shape({"kind":"object","properties":{"connectionId":{"node":1,"optional":false},"epoch":{"node":18,"optional":false}}}),
-  shape({"kind":"intersection","choices":[1393,2066]}),
+  shape({"kind":"intersection","choices":[1396,2069]}),
   shape({"kind":"object","properties":{"accountId":{"node":1,"optional":false},"ownerId":{"node":1,"optional":false},"revision":{"node":1,"optional":false},"superseded":{"node":501,"optional":true}}}),
-  shape({"kind":"intersection","choices":[1391,2068]}),
+  shape({"kind":"intersection","choices":[1394,2071]}),
   shape({"kind":"object","properties":{"messageId":{"node":1,"optional":false},"emoji":{"node":256,"optional":false}}}),
-  shape({"kind":"intersection","choices":[1391,2070]}),
+  shape({"kind":"intersection","choices":[1394,2073]}),
   shape({"kind":"object","properties":{"address":{"node":1,"optional":false},"limit":{"node":17,"optional":true}}}),
-  shape({"kind":"object","properties":{"addressee":{"node":2072,"optional":false},"owner":{"node":2073,"optional":false},"catalog":{"node":2074,"optional":false},"connections":{"node":2078,"optional":false},"registryServers":{"node":2080,"optional":false},"firstPartyIntegrations":{"node":2082,"optional":true},"apps":{"node":2085,"optional":true},"machine":{"node":2088,"optional":false}}}),
+  shape({"kind":"object","properties":{"addressee":{"node":2075,"optional":false},"owner":{"node":2076,"optional":false},"catalog":{"node":2077,"optional":false},"connections":{"node":2081,"optional":false},"registryServers":{"node":2083,"optional":false},"firstPartyIntegrations":{"node":2085,"optional":true},"apps":{"node":2088,"optional":true},"machine":{"node":2091,"optional":false}}}),
   shape({"kind":"object","properties":{"identityId":{"node":1,"optional":false},"name":{"node":1,"optional":false},"handle":{"node":5,"optional":true}}}),
   shape({"kind":"object","properties":{"identityId":{"node":1,"optional":false},"name":{"node":1,"optional":false},"handle":{"node":5,"optional":true}}}),
-  shape({"kind":"array","item":2075}),
-  shape({"kind":"object","properties":{"connectorType":{"node":1,"optional":false},"name":{"node":1,"optional":false},"purpose":{"node":1,"optional":false},"available":{"node":32,"optional":false},"offerable":{"node":32,"optional":false},"paired":{"node":2076,"optional":true}}}),
-  shape({"kind":"union","choices":[6,2077]}),
+  shape({"kind":"array","item":2078}),
+  shape({"kind":"object","properties":{"connectorType":{"node":1,"optional":false},"name":{"node":1,"optional":false},"purpose":{"node":1,"optional":false},"available":{"node":32,"optional":false},"offerable":{"node":32,"optional":false},"paired":{"node":2079,"optional":true}}}),
+  shape({"kind":"union","choices":[6,2080]}),
   shape({"kind":"object","properties":{"status":{"node":586,"optional":false},"helperName":{"node":1,"optional":false},"onThisMachine":{"node":32,"optional":false},"errorMessage":{"node":5,"optional":true}}}),
-  shape({"kind":"array","item":2079}),
+  shape({"kind":"array","item":2082}),
   shape({"kind":"object","properties":{"connectorType":{"node":1,"optional":false},"service":{"node":154,"optional":false},"label":{"node":1,"optional":false},"state":{"node":843,"optional":false}}}),
-  shape({"kind":"array","item":2081}),
-  shape({"kind":"object","properties":{"connectorId":{"node":1,"optional":false},"serverName":{"node":1,"optional":false},"version":{"node":1,"optional":false},"displayName":{"node":1,"optional":false},"status":{"node":586,"optional":false},"websiteUrl":{"node":5,"optional":true},"onThisMachine":{"node":32,"optional":false}}}),
-  shape({"kind":"union","choices":[6,2083]}),
   shape({"kind":"array","item":2084}),
-  shape({"kind":"object","properties":{"key":{"node":1,"optional":false},"name":{"node":1,"optional":false},"status":{"node":1557,"optional":false}}}),
+  shape({"kind":"object","properties":{"connectorId":{"node":1,"optional":false},"serverName":{"node":1,"optional":false},"version":{"node":1,"optional":false},"displayName":{"node":1,"optional":false},"status":{"node":586,"optional":false},"websiteUrl":{"node":5,"optional":true},"onThisMachine":{"node":32,"optional":false}}}),
   shape({"kind":"union","choices":[6,2086]}),
   shape({"kind":"array","item":2087}),
-  shape({"kind":"object","properties":{"appId":{"node":1,"optional":false},"appKey":{"node":1,"optional":false},"name":{"node":1,"optional":false},"transport":{"node":123,"optional":false},"selectedByOwner":{"node":20,"optional":true},"connectorId":{"node":5,"optional":true},"connectionReference":{"node":5,"optional":true},"status":{"node":1480,"optional":false},"errorMessage":{"node":5,"optional":true}}}),
+  shape({"kind":"object","properties":{"key":{"node":1,"optional":false},"name":{"node":1,"optional":false},"status":{"node":1560,"optional":false}}}),
+  shape({"kind":"union","choices":[6,2089]}),
+  shape({"kind":"array","item":2090}),
+  shape({"kind":"object","properties":{"appId":{"node":1,"optional":false},"appKey":{"node":1,"optional":false},"name":{"node":1,"optional":false},"transport":{"node":123,"optional":false},"selectedByOwner":{"node":20,"optional":true},"connectorId":{"node":5,"optional":true},"connectionReference":{"node":5,"optional":true},"status":{"node":1483,"optional":false},"errorMessage":{"node":5,"optional":true}}}),
   shape({"kind":"object","properties":{"machineId":{"node":1,"optional":false},"name":{"node":1,"optional":false},"squire":{"node":855,"optional":true}}}),
-  shape({"kind":"object","properties":{"agentId":{"node":1,"optional":false},"roomId":{"node":1,"optional":false},"workspaceId":{"node":1,"optional":false},"commandId":{"node":1,"optional":false},"generationId":{"node":1,"optional":false},"source":{"node":2090,"optional":false}}}),
+  shape({"kind":"object","properties":{"agentId":{"node":1,"optional":false},"roomId":{"node":1,"optional":false},"workspaceId":{"node":1,"optional":false},"commandId":{"node":1,"optional":false},"generationId":{"node":1,"optional":false},"source":{"node":2093,"optional":false}}}),
   shape({"kind":"object","properties":{"connectionId":{"node":1,"optional":false},"epoch":{"node":18,"optional":false}}}),
-  shape({"kind":"object","properties":{"v":{"node":784,"optional":false},"capturedAt":{"node":18,"optional":false},"validUntil":{"node":17,"optional":true},"authority":{"node":2092,"optional":false},"configuration":{"node":1565,"optional":false},"roster":{"node":1779,"optional":false},"grants":{"node":1816,"optional":false},"repository":{"node":1730,"optional":false},"corner":{"node":2093,"optional":true},"agentId":{"node":1,"optional":false},"roomId":{"node":1,"optional":false},"workspaceId":{"node":1,"optional":false},"commandId":{"node":1,"optional":false},"generationId":{"node":1,"optional":false},"source":{"node":2090,"optional":false}}}),
+  shape({"kind":"object","properties":{"v":{"node":784,"optional":false},"capturedAt":{"node":18,"optional":false},"validUntil":{"node":17,"optional":true},"authority":{"node":2095,"optional":false},"configuration":{"node":1568,"optional":false},"roster":{"node":1782,"optional":false},"grants":{"node":1819,"optional":false},"repository":{"node":1733,"optional":false},"corner":{"node":2096,"optional":true},"agentId":{"node":1,"optional":false},"roomId":{"node":1,"optional":false},"workspaceId":{"node":1,"optional":false},"commandId":{"node":1,"optional":false},"generationId":{"node":1,"optional":false},"source":{"node":2093,"optional":false}}}),
   shape({"kind":"object","properties":{"generation":{"node":1,"optional":false},"revision":{"node":18,"optional":false},"commandRevision":{"node":1,"optional":false}}}),
-  shape({"kind":"union","choices":[6,1627]}),
-  shape({"kind":"union","choices":[2095,2104]}),
-  shape({"kind":"object","properties":{"status":{"node":1975,"optional":false},"number":{"node":18,"optional":false},"url":{"node":1,"optional":false},"title":{"node":5,"optional":true},"headSha":{"node":1,"optional":false},"merged":{"node":32,"optional":false},"files":{"node":2096,"optional":false},"reviews":{"node":2098,"optional":false},"reviewComments":{"node":2100,"optional":false},"comments":{"node":2102,"optional":false}}}),
-  shape({"kind":"array","item":2097}),
+  shape({"kind":"union","choices":[6,1630]}),
+  shape({"kind":"union","choices":[2098,2107]}),
+  shape({"kind":"object","properties":{"status":{"node":1978,"optional":false},"number":{"node":18,"optional":false},"url":{"node":1,"optional":false},"title":{"node":5,"optional":true},"headSha":{"node":1,"optional":false},"merged":{"node":32,"optional":false},"files":{"node":2099,"optional":false},"reviews":{"node":2101,"optional":false},"reviewComments":{"node":2103,"optional":false},"comments":{"node":2105,"optional":false}}}),
+  shape({"kind":"array","item":2100}),
   shape({"kind":"object","properties":{"filename":{"node":1,"optional":false},"status":{"node":1,"optional":false},"additions":{"node":18,"optional":false},"deletions":{"node":18,"optional":false}}}),
-  shape({"kind":"array","item":2099}),
+  shape({"kind":"array","item":2102}),
   shape({"kind":"object","properties":{"author":{"node":1,"optional":false},"state":{"node":1,"optional":false},"body":{"node":1,"optional":false},"submittedAt":{"node":5,"optional":true}}}),
-  shape({"kind":"array","item":2101}),
+  shape({"kind":"array","item":2104}),
   shape({"kind":"object","properties":{"author":{"node":1,"optional":false},"path":{"node":1,"optional":false},"line":{"node":17,"optional":true},"body":{"node":1,"optional":false},"createdAt":{"node":5,"optional":true}}}),
-  shape({"kind":"array","item":2103}),
+  shape({"kind":"array","item":2106}),
   shape({"kind":"object","properties":{"author":{"node":1,"optional":false},"body":{"node":1,"optional":false},"createdAt":{"node":5,"optional":true}}}),
   shape({"kind":"object","properties":{"status":{"node":451,"optional":false},"blocker":{"node":1,"optional":false}}}),
-  shape({"kind":"intersection","choices":[1395,1391,1404,2106]}),
+  shape({"kind":"intersection","choices":[1398,1394,1407,2109]}),
   shape({"kind":"object","properties":{"requestId":{"node":1,"optional":false},"sendId":{"node":1,"optional":false}}}),
   shape({"kind":"object","properties":{"sendId":{"node":1,"optional":false},"recipients":{"node":18,"optional":false},"delivered":{"node":18,"optional":false},"failed":{"node":18,"optional":false},"pending":{"node":18,"optional":false}}}),
-  shape({"kind":"intersection","choices":[1391,2109]}),
+  shape({"kind":"intersection","choices":[1394,2112]}),
   shape({"kind":"object","properties":{"sessionId":{"node":1,"optional":false},"upstreamUrl":{"node":1,"optional":false},"expiresAt":{"node":18,"optional":false}}}),
   shape({"kind":"object","properties":{"live":{"node":32,"optional":false}}}),
-  shape({"kind":"intersection","choices":[1391,2112]}),
+  shape({"kind":"intersection","choices":[1394,2115]}),
   shape({"kind":"object","properties":{"generationId":{"node":1,"optional":false}}}),
-  shape({"kind":"intersection","choices":[1393,2114]}),
-  shape({"kind":"object","properties":{"commands":{"node":1438,"optional":false}}}),
-  shape({"kind":"intersection","choices":[1404,1398,2116]}),
-  shape({"kind":"object","properties":{"roomId":{"node":5,"optional":true},"name":{"node":5,"optional":true},"reviewer":{"node":5,"optional":true},"objective":{"node":5,"optional":true},"brief":{"node":1497,"optional":true}}}),
+  shape({"kind":"intersection","choices":[1396,2117]}),
+  shape({"kind":"object","properties":{"commands":{"node":1441,"optional":false}}}),
+  shape({"kind":"intersection","choices":[1407,1401,2119]}),
+  shape({"kind":"object","properties":{"roomId":{"node":5,"optional":true},"name":{"node":5,"optional":true},"reviewer":{"node":5,"optional":true},"objective":{"node":5,"optional":true},"brief":{"node":1500,"optional":true}}}),
   shape({"kind":"object","properties":{"cornerId":{"node":1,"optional":false},"name":{"node":1,"optional":false}}}),
-  shape({"kind":"intersection","choices":[1391,1404,2119]}),
-  shape({"kind":"object","properties":{"status":{"node":2120,"optional":false},"text":{"node":1,"optional":false},"ask":{"node":5,"optional":true}}}),
-  shape({"kind":"union","choices":[317,451,452,2121]}),
+  shape({"kind":"intersection","choices":[1394,1407,2122]}),
+  shape({"kind":"object","properties":{"status":{"node":2123,"optional":false},"text":{"node":1,"optional":false},"ask":{"node":5,"optional":true}}}),
+  shape({"kind":"union","choices":[317,451,452,2124]}),
   shape({"kind":"literal","value":"needs_decision"}),
-  shape({"kind":"union","choices":[2123,2126,2128,2130,2133,2134]}),
-  shape({"kind":"intersection","choices":[2124,2125]}),
+  shape({"kind":"union","choices":[2126,2129,2131,2133,2136,2137]}),
+  shape({"kind":"intersection","choices":[2127,2128]}),
   shape({"kind":"object","properties":{"agentId":{"node":1,"optional":false},"attemptId":{"node":1,"optional":false}}}),
   shape({"kind":"object","properties":{"kind":{"node":395,"optional":false},"authorizeUrl":{"node":1,"optional":false}}}),
-  shape({"kind":"intersection","choices":[2124,2127]}),
+  shape({"kind":"intersection","choices":[2127,2130]}),
   shape({"kind":"object","properties":{"kind":{"node":396,"optional":false},"authorizeUrl":{"node":1,"optional":false},"userCode":{"node":1,"optional":false},"expiresAt":{"node":18,"optional":false}}}),
-  shape({"kind":"intersection","choices":[2124,2129]}),
+  shape({"kind":"intersection","choices":[2127,2132]}),
   shape({"kind":"object","properties":{"kind":{"node":397,"optional":false},"authorizeUrl":{"node":1,"optional":false}}}),
-  shape({"kind":"intersection","choices":[2124,2131]}),
-  shape({"kind":"object","properties":{"kind":{"node":398,"optional":false},"provider":{"node":2132,"optional":false}}}),
+  shape({"kind":"intersection","choices":[2127,2134]}),
+  shape({"kind":"object","properties":{"kind":{"node":398,"optional":false},"provider":{"node":2135,"optional":false}}}),
   shape({"kind":"union","choices":[51,400,401,402,403]}),
   shape({"kind":"object","properties":{"agentId":{"node":1,"optional":false},"attemptId":{"node":1,"optional":false},"cardId":{"node":5,"optional":true},"outcome":{"node":391,"optional":false}}}),
   shape({"kind":"object","properties":{"agentId":{"node":1,"optional":false},"attemptId":{"node":1,"optional":false},"cardId":{"node":5,"optional":true},"outcome":{"node":317,"optional":false},"error":{"node":1,"optional":false}}}),
-  shape({"kind":"intersection","choices":[2136,1404]}),
+  shape({"kind":"intersection","choices":[2139,1407]}),
   shape({"kind":"object","properties":{"roomId":{"node":1,"optional":false},"category":{"node":1,"optional":false},"summary":{"node":1,"optional":false},"detail":{"node":5,"optional":true},"toolName":{"node":5,"optional":true},"errorExcerpt":{"node":5,"optional":true},"promptSectionIds":{"node":34,"optional":true}}}),
   shape({"kind":"object","properties":{"itemId":{"node":1,"optional":false},"duplicate":{"node":32,"optional":false}}}),
   shape({"kind":"object","properties":{"agentId":{"node":1,"optional":false},"roomId":{"node":1,"optional":false},"requestId":{"node":5,"optional":true},"generationId":{"node":5,"optional":true},"itemIds":{"node":34,"optional":true},"snapshotItems":{"node":701,"optional":true}}}),
   shape({"kind":"object","properties":{"refreshed":{"node":18,"optional":false}}}),
-  shape({"kind":"intersection","choices":[1404,1391,2141]}),
+  shape({"kind":"intersection","choices":[1407,1394,2144]}),
   shape({"kind":"object","properties":{"kind":{"node":324,"optional":false},"target":{"node":1,"optional":false},"purpose":{"node":1,"optional":false},"touches":{"node":5,"optional":true},"capabilities":{"node":5,"optional":true},"reason":{"node":1,"optional":false},"appId":{"node":5,"optional":true},"ttlSeconds":{"node":17,"optional":true},"script":{"node":334,"optional":true}}}),
-  shape({"kind":"object","properties":{"grantId":{"node":1,"optional":false},"status":{"node":187,"optional":false},"auto":{"node":32,"optional":false},"messageId":{"node":5,"optional":true},"approval":{"node":2143,"optional":true},"escalations":{"node":2153,"optional":true}}}),
-  shape({"kind":"union","choices":[6,2144]}),
-  shape({"kind":"object","properties":{"destination":{"node":2145,"optional":false},"authority":{"node":2149,"optional":false}}}),
-  shape({"kind":"union","choices":[522,2146,2147,2148]}),
+  shape({"kind":"object","properties":{"grantId":{"node":1,"optional":false},"status":{"node":187,"optional":false},"auto":{"node":32,"optional":false},"messageId":{"node":5,"optional":true},"approval":{"node":2146,"optional":true},"escalations":{"node":2156,"optional":true}}}),
+  shape({"kind":"union","choices":[6,2147]}),
+  shape({"kind":"object","properties":{"destination":{"node":2148,"optional":false},"authority":{"node":2152,"optional":false}}}),
+  shape({"kind":"union","choices":[522,2149,2150,2151]}),
   shape({"kind":"literal","value":"system-dm"}),
   shape({"kind":"literal","value":"trusty-squire-dm"}),
   shape({"kind":"literal","value":"wallet-dm"}),
-  shape({"kind":"union","choices":[2150,2151,2152]}),
+  shape({"kind":"union","choices":[2153,2154,2155]}),
   shape({"kind":"literal","value":"workspace-manager"}),
   shape({"kind":"literal","value":"workspace-manager-or-agent-owner"}),
   shape({"kind":"literal","value":"resource-owner"}),
-  shape({"kind":"union","choices":[6,2154]}),
-  shape({"kind":"array","item":2155}),
-  shape({"kind":"union","choices":[2156,2157]}),
+  shape({"kind":"union","choices":[6,2157]}),
+  shape({"kind":"array","item":2158}),
+  shape({"kind":"union","choices":[2159,2160]}),
   shape({"kind":"literal","value":"unseen-script"}),
   shape({"kind":"literal","value":"credential"}),
-  shape({"kind":"intersection","choices":[1404,1395,1391,2159]}),
-  shape({"kind":"object","properties":{"turnId":{"node":1,"optional":false},"kind":{"node":2160,"optional":false}}}),
-  shape({"kind":"union","choices":[889,2161]}),
+  shape({"kind":"intersection","choices":[1407,1398,1394,2162]}),
+  shape({"kind":"object","properties":{"turnId":{"node":1,"optional":false},"kind":{"node":2163,"optional":false}}}),
+  shape({"kind":"union","choices":[889,2164]}),
   shape({"kind":"literal","value":"thought"}),
-  shape({"kind":"intersection","choices":[1395,1391,2163]}),
+  shape({"kind":"intersection","choices":[1398,1394,2166]}),
   shape({"kind":"object","properties":{"id":{"node":1,"optional":false}}}),
-  shape({"kind":"object","properties":{"id":{"node":1,"optional":false},"status":{"node":1,"optional":false},"approvalUrl":{"node":5,"optional":true},"nextAction":{"node":2165,"optional":true},"card":{"node":2167,"optional":true},"sharedPaymentToken":{"node":2171,"optional":true}}}),
-  shape({"kind":"union","choices":[6,2166]}),
+  shape({"kind":"object","properties":{"id":{"node":1,"optional":false},"status":{"node":1,"optional":false},"approvalUrl":{"node":5,"optional":true},"nextAction":{"node":2168,"optional":true},"card":{"node":2170,"optional":true},"sharedPaymentToken":{"node":2174,"optional":true}}}),
+  shape({"kind":"union","choices":[6,2169]}),
   shape({"kind":"object","properties":{"resolution":{"node":5,"optional":true},"displayMessage":{"node":5,"optional":true},"actionUrl":{"node":5,"optional":true}}}),
-  shape({"kind":"union","choices":[6,2168]}),
-  shape({"kind":"object","properties":{"number":{"node":1,"optional":false},"cvc":{"node":5,"optional":true},"expMonth":{"node":18,"optional":false},"expYear":{"node":18,"optional":false},"billingAddress":{"node":2169,"optional":true},"validUntil":{"node":5,"optional":true}}}),
-  shape({"kind":"union","choices":[6,2170]}),
+  shape({"kind":"union","choices":[6,2171]}),
+  shape({"kind":"object","properties":{"number":{"node":1,"optional":false},"cvc":{"node":5,"optional":true},"expMonth":{"node":18,"optional":false},"expYear":{"node":18,"optional":false},"billingAddress":{"node":2172,"optional":true},"validUntil":{"node":5,"optional":true}}}),
+  shape({"kind":"union","choices":[6,2173]}),
   shape({"kind":"object","properties":{"name":{"node":5,"optional":true},"postalCode":{"node":5,"optional":true},"line1":{"node":5,"optional":true},"city":{"node":5,"optional":true},"state":{"node":5,"optional":true},"country":{"node":5,"optional":true}}}),
-  shape({"kind":"union","choices":[6,2172]}),
+  shape({"kind":"union","choices":[6,2175]}),
   shape({"kind":"object","properties":{"id":{"node":1,"optional":false},"validUntil":{"node":5,"optional":true}}}),
-  shape({"kind":"intersection","choices":[1404,1398,2174]}),
-  shape({"kind":"object","properties":{"reviewer":{"node":5,"optional":true},"requestId":{"node":1,"optional":false},"roomId":{"node":5,"optional":true},"expectedRevision":{"node":18,"optional":false},"brief":{"node":1498,"optional":false}}}),
-  shape({"kind":"intersection","choices":[1629,2176]}),
-  shape({"kind":"object","properties":{"warnings":{"node":34,"optional":true},"wake":{"node":2177,"optional":false}}}),
+  shape({"kind":"intersection","choices":[1407,1401,2177]}),
+  shape({"kind":"object","properties":{"reviewer":{"node":5,"optional":true},"requestId":{"node":1,"optional":false},"roomId":{"node":5,"optional":true},"expectedRevision":{"node":18,"optional":false},"brief":{"node":1501,"optional":false}}}),
+  shape({"kind":"intersection","choices":[1632,2179]}),
+  shape({"kind":"object","properties":{"warnings":{"node":34,"optional":true},"wake":{"node":2180,"optional":false}}}),
   shape({"kind":"object","properties":{"queued":{"node":32,"optional":false},"agentId":{"node":5,"optional":true},"reason":{"node":5,"optional":true}}}),
   shape({"kind":"object","properties":{"revoked":{"node":18,"optional":false},"failed":{"node":18,"optional":false}}}),
-  shape({"kind":"object","properties":{"memoryKind":{"node":2180,"optional":false},"canonicalKey":{"node":1,"optional":false},"body":{"node":1,"optional":false},"keywords":{"node":29,"optional":false},"confidence":{"node":18,"optional":false},"agentId":{"node":1,"optional":false},"roomId":{"node":1,"optional":false},"requestId":{"node":5,"optional":true},"generationId":{"node":5,"optional":true},"sourceMessageIds":{"node":29,"optional":false},"personAsked":{"node":32,"optional":false}}}),
-  shape({"kind":"union","choices":[2181,2182]}),
+  shape({"kind":"object","properties":{"memoryKind":{"node":2183,"optional":false},"canonicalKey":{"node":1,"optional":false},"body":{"node":1,"optional":false},"keywords":{"node":29,"optional":false},"confidence":{"node":18,"optional":false},"agentId":{"node":1,"optional":false},"roomId":{"node":1,"optional":false},"requestId":{"node":5,"optional":true},"generationId":{"node":5,"optional":true},"sourceMessageIds":{"node":29,"optional":false},"personAsked":{"node":32,"optional":false}}}),
+  shape({"kind":"union","choices":[2184,2185]}),
   shape({"kind":"literal","value":"workspace_fact"}),
   shape({"kind":"literal","value":"human_profile_fact"}),
-  shape({"kind":"intersection","choices":[1391,1404,2184]}),
+  shape({"kind":"intersection","choices":[1394,1407,2187]}),
   shape({"kind":"object","properties":{"slug":{"node":1,"optional":false},"description":{"node":1,"optional":false},"markdown":{"node":1,"optional":false}}}),
-  shape({"kind":"object","properties":{"slug":{"node":1,"optional":false},"version":{"node":18,"optional":false},"similarSkills":{"node":2186,"optional":false}}}),
-  shape({"kind":"array","item":2187}),
+  shape({"kind":"object","properties":{"slug":{"node":1,"optional":false},"version":{"node":18,"optional":false},"similarSkills":{"node":2189,"optional":false}}}),
+  shape({"kind":"array","item":2190}),
   shape({"kind":"object","properties":{"slug":{"node":1,"optional":false},"description":{"node":1,"optional":false}}}),
-  shape({"kind":"intersection","choices":[1391,1404,2189]}),
+  shape({"kind":"intersection","choices":[1394,1407,2192]}),
   shape({"kind":"object","properties":{"contract":{"node":245,"optional":false}}}),
   shape({"kind":"object","properties":{"slug":{"node":1,"optional":false},"version":{"node":18,"optional":false}}}),
   shape({"kind":"object","properties":{"agentId":{"node":1,"optional":false},"roomId":{"node":1,"optional":false},"requestId":{"node":5,"optional":true},"generationId":{"node":5,"optional":true},"query":{"node":1,"optional":false},"limit":{"node":17,"optional":true}}}),
-  shape({"kind":"object","properties":{"results":{"node":2193,"optional":false},"windowDays":{"node":18,"optional":false},"omitted":{"node":18,"optional":false},"capped":{"node":32,"optional":false}}}),
-  shape({"kind":"array","item":2194}),
+  shape({"kind":"object","properties":{"results":{"node":2196,"optional":false},"windowDays":{"node":18,"optional":false},"omitted":{"node":18,"optional":false},"capped":{"node":32,"optional":false}}}),
+  shape({"kind":"array","item":2197}),
   shape({"kind":"object","properties":{"messageId":{"node":1,"optional":false},"roomId":{"node":1,"optional":false},"roomName":{"node":1,"optional":false},"authorId":{"node":1,"optional":false},"createdAt":{"node":18,"optional":false},"snippet":{"node":1,"optional":false},"rank":{"node":18,"optional":false}}}),
   shape({"kind":"object","properties":{"agentId":{"node":1,"optional":false},"roomId":{"node":1,"optional":false},"requestId":{"node":5,"optional":true},"generationId":{"node":5,"optional":true},"query":{"node":1,"optional":false},"limit":{"node":17,"optional":true}}}),
-  shape({"kind":"object","properties":{"results":{"node":2197,"optional":false},"quotedContext":{"node":22,"optional":false}}}),
-  shape({"kind":"array","item":2198}),
-  shape({"kind":"intersection","choices":[2199,2200]}),
-  shape({"kind":"object","properties":{"version":{"node":18,"optional":false},"id":{"node":1,"optional":false},"kind":{"node":2180,"optional":false},"canonicalKey":{"node":1,"optional":false},"body":{"node":1,"optional":false}}}),
+  shape({"kind":"object","properties":{"results":{"node":2200,"optional":false},"quotedContext":{"node":22,"optional":false}}}),
+  shape({"kind":"array","item":2201}),
+  shape({"kind":"intersection","choices":[2202,2203]}),
+  shape({"kind":"object","properties":{"version":{"node":18,"optional":false},"id":{"node":1,"optional":false},"kind":{"node":2183,"optional":false},"canonicalKey":{"node":1,"optional":false},"body":{"node":1,"optional":false}}}),
   shape({"kind":"object","properties":{"standingOrder":{"node":32,"optional":false}}}),
-  shape({"kind":"intersection","choices":[1391,2202]}),
+  shape({"kind":"intersection","choices":[1394,2205]}),
   shape({"kind":"object","properties":{"query":{"node":1,"optional":false},"limit":{"node":17,"optional":true}}}),
-  shape({"kind":"object","properties":{"servers":{"node":2204,"optional":false}}}),
-  shape({"kind":"array","item":1595}),
-  shape({"kind":"intersection","choices":[1395,1391,1404,2206]}),
-  shape({"kind":"object","properties":{"requestId":{"node":1,"optional":false},"recipients":{"node":1349,"optional":false},"text":{"node":1,"optional":false}}}),
+  shape({"kind":"object","properties":{"servers":{"node":2207,"optional":false}}}),
+  shape({"kind":"array","item":1598}),
+  shape({"kind":"intersection","choices":[1398,1394,1407,2209]}),
+  shape({"kind":"object","properties":{"requestId":{"node":1,"optional":false},"recipients":{"node":1352,"optional":false},"text":{"node":1,"optional":false}}}),
   shape({"kind":"object","properties":{"sendId":{"node":1,"optional":false},"recipients":{"node":18,"optional":false},"delivered":{"node":18,"optional":false},"failed":{"node":18,"optional":false},"pending":{"node":18,"optional":false}}}),
-  shape({"kind":"intersection","choices":[1391,2209]}),
+  shape({"kind":"intersection","choices":[1394,2212]}),
   shape({"kind":"object","properties":{"scheduleId":{"node":5,"optional":true},"subscriptionId":{"node":5,"optional":true},"paused":{"node":32,"optional":false}}}),
-  shape({"kind":"intersection","choices":[1331,1404,1391,2211]}),
+  shape({"kind":"intersection","choices":[1334,1407,1394,2214]}),
   shape({"kind":"object","properties":{"requestId":{"node":1,"optional":false}}}),
   shape({"kind":"object","properties":{"holdId":{"node":1,"optional":false},"roomId":{"node":1,"optional":false}}}),
-  shape({"kind":"intersection","choices":[1391,2214]}),
+  shape({"kind":"intersection","choices":[1394,2217]}),
   shape({"kind":"object","properties":{"kinds":{"node":29,"optional":false}}}),
-  shape({"kind":"intersection","choices":[1391,1404,2216]}),
-  shape({"kind":"object","properties":{"name":{"node":1,"optional":false},"roleBindings":{"node":2217,"optional":false}}}),
-  shape({"kind":"object","properties":{},"index":2218}),
+  shape({"kind":"intersection","choices":[1394,1407,2219]}),
+  shape({"kind":"object","properties":{"name":{"node":1,"optional":false},"roleBindings":{"node":2220,"optional":false}}}),
+  shape({"kind":"object","properties":{},"index":2221}),
   shape({"kind":"union","choices":[1,29]}),
   shape({"kind":"object","properties":{"runId":{"node":1,"optional":false},"state":{"node":1,"optional":false}}}),
-  shape({"kind":"intersection","choices":[1391,1404,2221]}),
+  shape({"kind":"intersection","choices":[1394,1407,2224]}),
   shape({"kind":"object","properties":{"address":{"node":1,"optional":false},"agent":{"node":5,"optional":true}}}),
   shape({"kind":"object","properties":{"stopped":{"node":32,"optional":false},"address":{"node":1,"optional":false},"agent":{"node":1,"optional":false},"droppedOrders":{"node":17,"optional":true},"receipt":{"node":1,"optional":false}}}),
-  shape({"kind":"intersection","choices":[1395,1391,2224]}),
-  shape({"kind":"object","properties":{"title":{"node":5,"optional":true},"workflowName":{"node":5,"optional":true},"scheduleId":{"node":1,"optional":false},"selfOnly":{"node":20,"optional":true},"prompt":{"node":5,"optional":true},"cadence":{"node":2225,"optional":true},"maxRuns":{"node":17,"optional":true}}}),
+  shape({"kind":"intersection","choices":[1398,1394,2227]}),
+  shape({"kind":"object","properties":{"title":{"node":5,"optional":true},"workflowName":{"node":5,"optional":true},"scheduleId":{"node":1,"optional":false},"selfOnly":{"node":20,"optional":true},"prompt":{"node":5,"optional":true},"cadence":{"node":2228,"optional":true},"maxRuns":{"node":17,"optional":true}}}),
   shape({"kind":"union","choices":[6,528,530]}),
   shape({"kind":"object","properties":{"itemId":{"node":1,"optional":false},"version":{"node":18,"optional":false},"body":{"node":1,"optional":false},"keywords":{"node":34,"optional":true},"agentId":{"node":1,"optional":false},"roomId":{"node":1,"optional":false},"requestId":{"node":5,"optional":true},"generationId":{"node":5,"optional":true},"sourceMessageIds":{"node":29,"optional":false},"personAsked":{"node":32,"optional":false}}}),
-  shape({"kind":"intersection","choices":[2228,2231,1404,1391]}),
-  shape({"kind":"object","properties":{"completionV1":{"node":501,"optional":true},"chain":{"node":169,"optional":false},"contract":{"node":1,"optional":false},"data":{"node":1,"optional":false},"value":{"node":5,"optional":true},"approve":{"node":2229,"optional":true}}}),
-  shape({"kind":"union","choices":[6,2230]}),
+  shape({"kind":"intersection","choices":[2231,2234,1407,1394]}),
+  shape({"kind":"object","properties":{"completionV1":{"node":501,"optional":true},"chain":{"node":169,"optional":false},"contract":{"node":1,"optional":false},"data":{"node":1,"optional":false},"value":{"node":5,"optional":true},"approve":{"node":2232,"optional":true}}}),
+  shape({"kind":"union","choices":[6,2233]}),
   shape({"kind":"object","properties":{"asset":{"node":1,"optional":false},"amount":{"node":1,"optional":false}}}),
   shape({"kind":"object","properties":{"agentId":{"node":1,"optional":false}}}),
-  shape({"kind":"union","choices":[1312,1314,1316,1318,1319,2233]}),
-  shape({"kind":"object","properties":{"status":{"node":1742,"optional":false},"grantId":{"node":5,"optional":true}}}),
-  shape({"kind":"intersection","choices":[1310,2235,1404,1391]}),
+  shape({"kind":"union","choices":[1315,1317,1319,1321,1322,2236]}),
+  shape({"kind":"object","properties":{"status":{"node":1745,"optional":false},"grantId":{"node":5,"optional":true}}}),
+  shape({"kind":"intersection","choices":[1313,2238,1407,1394]}),
   shape({"kind":"object","properties":{"agentId":{"node":1,"optional":false}}}),
-  shape({"kind":"union","choices":[1312,1314,1316,1318,1319,2237]}),
-  shape({"kind":"object","properties":{"status":{"node":1742,"optional":false},"grantId":{"node":5,"optional":true}}}),
-  shape({"kind":"intersection","choices":[2239,2244,1404,1391]}),
-  shape({"kind":"object","properties":{"domain":{"node":2240,"optional":false},"types":{"node":2241,"optional":false},"primaryType":{"node":1,"optional":false},"message":{"node":2240,"optional":false}}}),
+  shape({"kind":"union","choices":[1315,1317,1319,1321,1322,2240]}),
+  shape({"kind":"object","properties":{"status":{"node":1745,"optional":false},"grantId":{"node":5,"optional":true}}}),
+  shape({"kind":"intersection","choices":[2242,2247,1407,1394]}),
+  shape({"kind":"object","properties":{"domain":{"node":2243,"optional":false},"types":{"node":2244,"optional":false},"primaryType":{"node":1,"optional":false},"message":{"node":2243,"optional":false}}}),
   shape({"kind":"object","properties":{},"index":245}),
-  shape({"kind":"object","properties":{},"index":2242}),
-  shape({"kind":"array","item":2243}),
+  shape({"kind":"object","properties":{},"index":2245}),
+  shape({"kind":"array","item":2246}),
   shape({"kind":"object","properties":{"name":{"node":1,"optional":false},"type":{"node":1,"optional":false}}}),
   shape({"kind":"object","properties":{"agentId":{"node":1,"optional":false}}}),
-  shape({"kind":"union","choices":[1316,1318,2246,2248]}),
-  shape({"kind":"object","properties":{"outcome":{"node":2247,"optional":false},"signature":{"node":1,"optional":false}}}),
+  shape({"kind":"union","choices":[1319,1321,2249,2251]}),
+  shape({"kind":"object","properties":{"outcome":{"node":2250,"optional":false},"signature":{"node":1,"optional":false}}}),
   shape({"kind":"literal","value":"signed"}),
-  shape({"kind":"object","properties":{"status":{"node":1742,"optional":false},"grantId":{"node":5,"optional":true}}}),
-  shape({"kind":"intersection","choices":[2250,1404,1391]}),
+  shape({"kind":"object","properties":{"status":{"node":1745,"optional":false},"grantId":{"node":5,"optional":true}}}),
+  shape({"kind":"intersection","choices":[2253,1407,1394]}),
   shape({"kind":"object","properties":{"completionV1":{"node":501,"optional":true},"agentId":{"node":1,"optional":false},"fromAsset":{"node":1,"optional":false},"toAsset":{"node":1,"optional":false},"amount":{"node":1,"optional":false},"chain":{"node":158,"optional":true}}}),
-  shape({"kind":"union","choices":[1314,1316,1318,1319,2252,2253]}),
-  shape({"kind":"object","properties":{"outcome":{"node":1313,"optional":false},"txUrl":{"node":1,"optional":false},"fromAmountText":{"node":1,"optional":false},"toAmountText":{"node":1,"optional":false},"balanceAfterUsd":{"node":1,"optional":false}}}),
-  shape({"kind":"object","properties":{"status":{"node":1742,"optional":false},"grantId":{"node":5,"optional":true}}}),
-  shape({"kind":"intersection","choices":[1404,1391,2255]}),
-  shape({"kind":"object","properties":{"cornerId":{"node":1,"optional":false},"kinds":{"node":1507,"optional":false}}}),
-  shape({"kind":"object","properties":{"kinds":{"node":1507,"optional":false},"state":{"node":2257,"optional":false},"woken":{"node":20,"optional":true},"snapshot":{"node":2258,"optional":false}}}),
+  shape({"kind":"union","choices":[1317,1319,1321,1322,2255,2256]}),
+  shape({"kind":"object","properties":{"outcome":{"node":1316,"optional":false},"txUrl":{"node":1,"optional":false},"fromAmountText":{"node":1,"optional":false},"toAmountText":{"node":1,"optional":false},"balanceAfterUsd":{"node":1,"optional":false}}}),
+  shape({"kind":"object","properties":{"status":{"node":1745,"optional":false},"grantId":{"node":5,"optional":true}}}),
+  shape({"kind":"intersection","choices":[1407,1394,2258]}),
+  shape({"kind":"object","properties":{"cornerId":{"node":1,"optional":false},"kinds":{"node":1510,"optional":false}}}),
+  shape({"kind":"object","properties":{"kinds":{"node":1510,"optional":false},"state":{"node":2260,"optional":false},"woken":{"node":20,"optional":true},"snapshot":{"node":2261,"optional":false}}}),
   shape({"kind":"union","choices":[65,227,513]}),
   shape({"kind":"object","properties":{"id":{"node":1,"optional":false},"name":{"node":1,"optional":false},"workflowState":{"node":154,"optional":false},"pullRequestNumber":{"node":173,"optional":false},"pullRequestUrl":{"node":154,"optional":false},"headSha":{"node":154,"optional":false},"checks":{"node":154,"optional":false},"mergeCommitSha":{"node":154,"optional":false}}})
 ];
@@ -2645,23 +2648,23 @@ export const operationShapes = {
   },
   "phone.readStarPrompt": {
     "input": 113,
-    "output": 1009
+    "output": 1012
   },
   "phone.readTray": {
-    "input": 1011,
-    "output": 1013
+    "input": 1014,
+    "output": 1016
   },
   "phone.readWallet": {
     "input": 152,
     "output": 153
   },
   "phone.readWalletHistory": {
-    "input": 1016,
-    "output": 1018
+    "input": 1019,
+    "output": 1021
   },
   "phone.readWebPushKey": {
     "input": 43,
-    "output": 1021
+    "output": 1024
   },
   "phone.readWelcomeCards": {
     "input": 113,
@@ -2672,20 +2675,20 @@ export const operationShapes = {
     "output": 776
   },
   "phone.readWorkflowDefinition": {
-    "input": 1022,
-    "output": 1024
+    "input": 1025,
+    "output": 1027
   },
   "phone.readWorkflowRun": {
-    "input": 1043,
-    "output": 1045
+    "input": 1046,
+    "output": 1048
   },
   "phone.readWorkspace": {
-    "input": 1074,
+    "input": 1077,
     "output": 706
   },
   "phone.readWorkspaceMembers": {
-    "input": 1075,
-    "output": 1078
+    "input": 1078,
+    "output": 1081
   },
   "phone.readWorkspaces": {
     "input": 113,
@@ -2697,7 +2700,7 @@ export const operationShapes = {
   },
   "phone.redeemInvite": {
     "input": 140,
-    "output": 1084
+    "output": 1087
   },
   "phone.refreshAgentModelCatalog": {
     "input": 703,
@@ -2705,22 +2708,22 @@ export const operationShapes = {
   },
   "phone.refreshAgentUsage": {
     "input": 703,
-    "output": 1086
+    "output": 1089
   },
   "phone.refreshWallet": {
     "input": 43,
     "output": 153
   },
   "phone.registerPushDevice": {
-    "input": 1089,
-    "output": 1099
+    "input": 1092,
+    "output": 1102
   },
   "phone.removeAgent": {
     "input": 703,
     "output": 98
   },
   "phone.removeRoomMember": {
-    "input": 1100,
+    "input": 1103,
     "output": 98
   },
   "phone.removeRoomRepository": {
@@ -2728,7 +2731,7 @@ export const operationShapes = {
     "output": 98
   },
   "phone.removeWorkspaceMember": {
-    "input": 1102,
+    "input": 1105,
     "output": 98
   },
   "phone.reopenChat": {
@@ -2736,27 +2739,27 @@ export const operationShapes = {
     "output": 98
   },
   "phone.reportClientError": {
-    "input": 1104,
+    "input": 1107,
     "output": 98
   },
   "phone.reportDiagnostics": {
-    "input": 1110,
-    "output": 1242
-  },
-  "phone.reportMessageIssue": {
-    "input": 1243,
+    "input": 1113,
     "output": 1245
   },
-  "phone.reportPageLoad": {
+  "phone.reportMessageIssue": {
     "input": 1246,
-    "output": 98
+    "output": 1248
   },
-  "phone.reportRunningUpdate": {
+  "phone.reportPageLoad": {
     "input": 1249,
     "output": 98
   },
+  "phone.reportRunningUpdate": {
+    "input": 1252,
+    "output": 98
+  },
   "phone.reportSigninFunnel": {
-    "input": 1251,
+    "input": 1254,
     "output": 155
   },
   "phone.requestCornerClose": {
@@ -2764,147 +2767,147 @@ export const operationShapes = {
     "output": 98
   },
   "phone.resolveDirectMessage": {
-    "input": 1284,
-    "output": 1286
+    "input": 1287,
+    "output": 1289
   },
   "phone.resolveInvite": {
     "input": 140,
-    "output": 1288
+    "output": 1291
   },
   "phone.resolveMessageLink": {
-    "input": 1292,
-    "output": 1293
+    "input": 1295,
+    "output": 1296
   },
   "phone.revealWebhookToken": {
-    "input": 1294,
-    "output": 1295
+    "input": 1297,
+    "output": 1298
   },
   "phone.revokeAgentGrant": {
-    "input": 1296,
+    "input": 1299,
     "output": 186
   },
   "phone.revokeConnectionGrants": {
-    "input": 1297,
-    "output": 1298
+    "input": 1300,
+    "output": 1301
   },
   "phone.revokeWalletDelegation": {
     "input": 113,
     "output": 98
   },
   "phone.rotateWebhookToken": {
-    "input": 1299,
-    "output": 1300
-  },
-  "phone.saveAgentVoice": {
-    "input": 1301,
-    "output": 725
-  },
-  "phone.searchMessages": {
     "input": 1302,
     "output": 1303
   },
+  "phone.saveAgentVoice": {
+    "input": 1304,
+    "output": 725
+  },
+  "phone.searchMessages": {
+    "input": 1305,
+    "output": 1306
+  },
   "phone.searchWorkbenchApps": {
-    "input": 1308,
+    "input": 1311,
     "output": 860
   },
   "phone.sendFromWallet": {
-    "input": 1309,
-    "output": 1311
+    "input": 1312,
+    "output": 1314
   },
   "phone.sendPushTest": {
     "input": 43,
     "output": 98
   },
   "phone.sendRoomMessage": {
-    "input": 1320,
-    "output": 1322
+    "input": 1323,
+    "output": 1325
   },
   "phone.sendRoomReply": {
-    "input": 1329,
-    "output": 1322
+    "input": 1332,
+    "output": 1325
   },
   "phone.setCornerHold": {
-    "input": 1331,
-    "output": 1332
+    "input": 1334,
+    "output": 1335
   },
   "phone.setCornerLocked": {
-    "input": 1333,
+    "input": 1336,
     "output": 98
   },
   "phone.setMessageBookmark": {
-    "input": 1335,
-    "output": 1337
-  },
-  "phone.setRoomRepository": {
     "input": 1338,
     "output": 1340
   },
+  "phone.setRoomRepository": {
+    "input": 1341,
+    "output": 1343
+  },
   "phone.setRoomTargetBranch": {
-    "input": 1343,
-    "output": 1340
+    "input": 1346,
+    "output": 1343
   },
   "phone.skipChoice": {
-    "input": 1345,
+    "input": 1348,
     "output": 61
   },
   "phone.startOwnedWorkflow": {
-    "input": 1346,
-    "output": 1350
+    "input": 1349,
+    "output": 1353
   },
   "phone.unpairConnector": {
-    "input": 1351,
+    "input": 1354,
     "output": 98
   },
   "phone.unregisterPushDevice": {
-    "input": 1089,
+    "input": 1092,
     "output": 98
   },
   "phone.updateAgentAccessPolicy": {
-    "input": 1352,
+    "input": 1355,
     "output": 619
   },
   "phone.updateAgentModelSelection": {
-    "input": 1354,
-    "output": 619
-  },
-  "phone.updateAgentSoul": {
     "input": 1357,
     "output": 619
   },
+  "phone.updateAgentSoul": {
+    "input": 1360,
+    "output": 619
+  },
   "phone.updateAgentWake": {
-    "input": 1359,
+    "input": 1362,
     "output": 619
   },
   "phone.updateAgentYolo": {
-    "input": 1361,
+    "input": 1364,
     "output": 619
   },
   "phone.updateIdentityFace": {
-    "input": 1363,
+    "input": 1366,
     "output": 98
   },
   "phone.updateIdentityPushLevel": {
-    "input": 1364,
+    "input": 1367,
     "output": 45
   },
   "phone.updateIdentitySpeakingSpeed": {
-    "input": 1365,
+    "input": 1368,
     "output": 45
   },
   "phone.updatePersonProfile": {
-    "input": 1367,
-    "output": 1368
+    "input": 1370,
+    "output": 1371
   },
   "phone.updateRoom": {
-    "input": 1369,
+    "input": 1372,
     "output": 98
   },
   "phone.updateRoomPushState": {
-    "input": 1371,
-    "output": 1373
+    "input": 1374,
+    "output": 1376
   },
   "phone.updateWorkspace": {
-    "input": 1374,
+    "input": 1377,
     "output": 98
   },
   "phone.uploadMedia": {
@@ -2912,711 +2915,711 @@ export const operationShapes = {
     "output": 250
   },
   "phone.voiceCurrent": {
-    "input": 1376,
-    "output": 1377
+    "input": 1379,
+    "output": 1380
   },
   "phone.voiceIdle": {
-    "input": 1378,
-    "output": 1379
+    "input": 1381,
+    "output": 1382
   },
   "phone.voiceJoin": {
-    "input": 1383,
-    "output": 1384
+    "input": 1386,
+    "output": 1387
   },
   "phone.voiceLeave": {
-    "input": 1385,
-    "output": 1386
+    "input": 1388,
+    "output": 1389
   },
   "phone.voiceResume": {
-    "input": 1387,
-    "output": 1388
+    "input": 1390,
+    "output": 1391
   },
   "phone.voiceState": {
-    "input": 1389,
-    "output": 1379
+    "input": 1392,
+    "output": 1382
   },
   "daemon.acknowledgeAgentCommand": {
-    "input": 1390,
-    "output": 1393
+    "input": 1393,
+    "output": 1396
   },
   "daemon.answerUsageRefresh": {
-    "input": 1394,
+    "input": 1397,
     "output": 98
   },
   "daemon.approveCornerMerge": {
-    "input": 1397,
-    "output": 1400
+    "input": 1400,
+    "output": 1403
   },
   "daemon.archiveCorner": {
-    "input": 1401,
-    "output": 1393
+    "input": 1404,
+    "output": 1396
   },
   "daemon.archiveWorkflow": {
-    "input": 1403,
-    "output": 1406
-  },
-  "daemon.askRoomChoice": {
-    "input": 1407,
+    "input": 1406,
     "output": 1409
   },
-  "daemon.assignWorkflowRole": {
+  "daemon.askRoomChoice": {
     "input": 1410,
     "output": 1412
   },
-  "daemon.attachAgentUsageAccount": {
+  "daemon.assignWorkflowRole": {
     "input": 1413,
-    "output": 1393
+    "output": 1415
+  },
+  "daemon.attachAgentUsageAccount": {
+    "input": 1416,
+    "output": 1396
   },
   "daemon.authorizeHostCall": {
-    "input": 1419,
-    "output": 1420
+    "input": 1422,
+    "output": 1423
   },
   "daemon.authorizeRepositoryCall": {
-    "input": 1419,
-    "output": 1420
+    "input": 1422,
+    "output": 1423
   },
   "daemon.authorizeResourceCall": {
-    "input": 1422,
-    "output": 1420
+    "input": 1425,
+    "output": 1423
   },
   "daemon.authorizeSquireCall": {
-    "input": 1419,
-    "output": 1420
+    "input": 1422,
+    "output": 1423
   },
   "daemon.beginRegistryMcpOAuth": {
-    "input": 1424,
-    "output": 1426
-  },
-  "daemon.cancelWorkflowRun": {
     "input": 1427,
     "output": 1429
   },
+  "daemon.cancelWorkflowRun": {
+    "input": 1430,
+    "output": 1432
+  },
   "daemon.claimAgentCommand": {
-    "input": 1390,
-    "output": 1430
+    "input": 1393,
+    "output": 1433
   },
   "daemon.claimAgentTurn": {
-    "input": 1390,
-    "output": 1436
+    "input": 1393,
+    "output": 1439
   },
   "daemon.claimRegistryMcpOAuthCode": {
-    "input": 1450,
-    "output": 1452
+    "input": 1453,
+    "output": 1455
   },
   "daemon.closeCornerPullRequest": {
-    "input": 1398,
-    "output": 1456
+    "input": 1401,
+    "output": 1459
   },
   "daemon.completeProviderWebhookAssignment": {
-    "input": 1459,
-    "output": 1393
+    "input": 1462,
+    "output": 1396
   },
   "daemon.connect": {
-    "input": 1464,
-    "output": 1467
+    "input": 1467,
+    "output": 1470
   },
   "daemon.connectApp": {
-    "input": 1477,
-    "output": 1479
+    "input": 1480,
+    "output": 1482
   },
   "daemon.connectMcpServer": {
-    "input": 1481,
-    "output": 1483
+    "input": 1484,
+    "output": 1486
   },
   "daemon.consumeAgentGrant": {
-    "input": 1489,
-    "output": 1393
+    "input": 1492,
+    "output": 1396
   },
   "daemon.createAgentSchedule": {
-    "input": 1490,
-    "output": 1492
+    "input": 1493,
+    "output": 1495
   },
   "daemon.createAgentSubscription": {
-    "input": 1493,
+    "input": 1496,
     "output": 537
   },
   "daemon.createCorner": {
-    "input": 1495,
-    "output": 1504
+    "input": 1498,
+    "output": 1507
   },
   "daemon.createLinkSpendRequest": {
-    "input": 1510,
-    "output": 1514
+    "input": 1513,
+    "output": 1517
   },
   "daemon.deleteAgentSchedule": {
-    "input": 1515,
-    "output": 1393
+    "input": 1518,
+    "output": 1396
   },
   "daemon.deleteAgentSubscription": {
-    "input": 1517,
-    "output": 1393
+    "input": 1520,
+    "output": 1396
   },
   "daemon.deleteInstitutionalMemory": {
-    "input": 1519,
-    "output": 1524
-  },
-  "daemon.deleteSkill": {
-    "input": 1525,
+    "input": 1522,
     "output": 1527
   },
+  "daemon.deleteSkill": {
+    "input": 1528,
+    "output": 1530
+  },
   "daemon.dispatchRoomWorkflow": {
-    "input": 1531,
-    "output": 1534
+    "input": 1534,
+    "output": 1537
   },
   "daemon.endComputerSession": {
-    "input": 1535,
-    "output": 1393
+    "input": 1538,
+    "output": 1396
   },
   "daemon.ensureAgentMembership": {
-    "input": 1537,
-    "output": 1393
+    "input": 1540,
+    "output": 1396
   },
   "daemon.executeAppTool": {
-    "input": 1538,
-    "output": 1541
+    "input": 1541,
+    "output": 1544
   },
   "daemon.findConnectors": {
-    "input": 1548,
-    "output": 1550
+    "input": 1551,
+    "output": 1553
   },
   "daemon.forgetSquireSignIn": {
-    "input": 1560,
-    "output": 1393
+    "input": 1563,
+    "output": 1396
   },
   "daemon.getAgentAvatar": {
-    "input": 1391,
-    "output": 1561
+    "input": 1394,
+    "output": 1564
   },
   "daemon.getAgentCommands": {
-    "input": 1391,
-    "output": 1562
-  },
-  "daemon.getAgentConfiguration": {
-    "input": 1563,
+    "input": 1394,
     "output": 1565
   },
-  "daemon.getAgentPresence": {
-    "input": 1537,
-    "output": 1573
+  "daemon.getAgentConfiguration": {
+    "input": 1566,
+    "output": 1568
   },
-  "daemon.getAgentToolMandate": {
-    "input": 1537,
+  "daemon.getAgentPresence": {
+    "input": 1540,
     "output": 1576
   },
-  "daemon.getAgentUsage": {
-    "input": 1395,
-    "output": 1580
+  "daemon.getAgentToolMandate": {
+    "input": 1540,
+    "output": 1579
   },
-  "daemon.getConnectionDetail": {
-    "input": 1581,
+  "daemon.getAgentUsage": {
+    "input": 1398,
     "output": 1583
   },
+  "daemon.getConnectionDetail": {
+    "input": 1584,
+    "output": 1586
+  },
   "daemon.getConnectorAssignments": {
-    "input": 1395,
-    "output": 1589
+    "input": 1398,
+    "output": 1592
   },
   "daemon.getConnectorStatus": {
-    "input": 1618,
+    "input": 1621,
     "output": 585
   },
   "daemon.getConnectorVaultList": {
-    "input": 1395,
-    "output": 1620
+    "input": 1398,
+    "output": 1623
   },
   "daemon.getCornerCloseRequests": {
-    "input": 1622,
-    "output": 1624
-  },
-  "daemon.getCornerRestoreState": {
-    "input": 1398,
+    "input": 1625,
     "output": 1627
   },
+  "daemon.getCornerRestoreState": {
+    "input": 1401,
+    "output": 1630
+  },
   "daemon.getDaemonBootstrap": {
-    "input": 1395,
-    "output": 1653
+    "input": 1398,
+    "output": 1656
   },
   "daemon.getGoogleOAuthGrant": {
-    "input": 1662,
-    "output": 1664
+    "input": 1665,
+    "output": 1667
   },
   "daemon.getIdentitySuccession": {
-    "input": 1668,
-    "output": 1669
+    "input": 1671,
+    "output": 1672
   },
   "daemon.getInstitutionalContext": {
-    "input": 1670,
-    "output": 1671
+    "input": 1673,
+    "output": 1674
   },
   "daemon.getInstitutionalMemoryTurnStats": {
-    "input": 1676,
-    "output": 1677
+    "input": 1679,
+    "output": 1680
   },
   "daemon.getMissionAuthority": {
-    "input": 1678,
-    "output": 1681
+    "input": 1681,
+    "output": 1684
   },
   "daemon.getOwedMentions": {
     "input": 113,
-    "output": 1684
+    "output": 1687
   },
   "daemon.getPermissionAuthority": {
-    "input": 1687,
-    "output": 1681
+    "input": 1690,
+    "output": 1684
   },
   "daemon.getPrChecksStatus": {
-    "input": 1689,
-    "output": 1692
+    "input": 1692,
+    "output": 1695
   },
   "daemon.getRequestCompletion": {
-    "input": 1703,
-    "output": 1705
-  },
-  "daemon.getRoomAuthority": {
-    "input": 1707,
+    "input": 1706,
     "output": 1708
   },
-  "daemon.getRoomConversation": {
+  "daemon.getRoomAuthority": {
     "input": 1710,
-    "output": 1717
+    "output": 1711
   },
-  "daemon.getRoomGitHubToken": {
-    "input": 1391,
-    "output": 1719
-  },
-  "daemon.getRoomGoogleGrant": {
-    "input": 1391,
+  "daemon.getRoomConversation": {
+    "input": 1713,
     "output": 1720
   },
+  "daemon.getRoomGitHubToken": {
+    "input": 1394,
+    "output": 1722
+  },
+  "daemon.getRoomGoogleGrant": {
+    "input": 1394,
+    "output": 1723
+  },
   "daemon.getRoomInbox": {
-    "input": 1726,
-    "output": 1624
+    "input": 1729,
+    "output": 1627
   },
   "daemon.getRoomMessage": {
-    "input": 1727,
-    "output": 1729
-  },
-  "daemon.getRoomRepositoryState": {
-    "input": 1391,
-    "output": 1730
-  },
-  "daemon.getRoomTargetBranch": {
-    "input": 1391,
+    "input": 1730,
     "output": 1732
   },
+  "daemon.getRoomRepositoryState": {
+    "input": 1394,
+    "output": 1733
+  },
+  "daemon.getRoomTargetBranch": {
+    "input": 1394,
+    "output": 1735
+  },
   "daemon.getTargetAgentAuthority": {
-    "input": 1733,
-    "output": 1681
+    "input": 1736,
+    "output": 1684
   },
   "daemon.getWalletToolBalance": {
-    "input": 1735,
-    "output": 1737
+    "input": 1738,
+    "output": 1740
   },
   "daemon.getWalletToolChains": {
-    "input": 1743,
-    "output": 1745
+    "input": 1746,
+    "output": 1748
   },
   "daemon.getWalletToolHistory": {
-    "input": 1748,
-    "output": 1750
+    "input": 1751,
+    "output": 1753
   },
   "daemon.getWalletToolQuote": {
-    "input": 1753,
-    "output": 1755
+    "input": 1756,
+    "output": 1758
   },
   "daemon.getWalletToolState": {
-    "input": 1758,
-    "output": 1760
+    "input": 1761,
+    "output": 1763
   },
   "daemon.getWorkScheduleAuthority": {
-    "input": 1765,
-    "output": 1681
+    "input": 1768,
+    "output": 1684
   },
   "daemon.getWorkflowRun": {
-    "input": 1767,
-    "output": 1769
+    "input": 1770,
+    "output": 1772
   },
   "daemon.getWorkspaceRoster": {
-    "input": 1777,
-    "output": 1779
+    "input": 1780,
+    "output": 1782
   },
   "daemon.handoff": {
-    "input": 1799,
-    "output": 1802
+    "input": 1802,
+    "output": 1805
   },
   "daemon.installConnector": {
-    "input": 1806,
-    "output": 1393
+    "input": 1809,
+    "output": 1396
   },
   "daemon.listAgentGrantRequests": {
-    "input": 1809,
-    "output": 1811
+    "input": 1812,
+    "output": 1814
   },
   "daemon.listAgentGrants": {
-    "input": 1814,
-    "output": 1816
+    "input": 1817,
+    "output": 1819
   },
   "daemon.listAgentSchedules": {
-    "input": 1819,
-    "output": 1821
+    "input": 1822,
+    "output": 1824
   },
   "daemon.listAgentSubscriptions": {
-    "input": 1391,
+    "input": 1394,
     "output": 535
   },
   "daemon.listAgentWatches": {
-    "input": 1391,
-    "output": 1824
+    "input": 1394,
+    "output": 1827
   },
   "daemon.listAppTools": {
-    "input": 1827,
-    "output": 1829
+    "input": 1830,
+    "output": 1832
   },
   "daemon.listCornerBriefRevisions": {
-    "input": 1835,
-    "output": 1837
+    "input": 1838,
+    "output": 1840
   },
   "daemon.listEventSubscriptions": {
-    "input": 1391,
-    "output": 1839
+    "input": 1394,
+    "output": 1842
   },
   "daemon.listReachableCorners": {
-    "input": 1842,
-    "output": 1844
+    "input": 1845,
+    "output": 1847
   },
   "daemon.listRoomCorners": {
-    "input": 1847,
-    "output": 1844
+    "input": 1850,
+    "output": 1847
   },
   "daemon.listRoomMembers": {
-    "input": 1391,
-    "output": 1849
+    "input": 1394,
+    "output": 1852
   },
   "daemon.listRooms": {
-    "input": 1391,
-    "output": 1853
-  },
-  "daemon.listServiceSubscriptionEvents": {
-    "input": 1391,
+    "input": 1394,
     "output": 1856
   },
+  "daemon.listServiceSubscriptionEvents": {
+    "input": 1394,
+    "output": 1859
+  },
   "daemon.listTurnAgentGrants": {
-    "input": 1419,
-    "output": 1816
+    "input": 1422,
+    "output": 1819
   },
   "daemon.listUntrackedCorners": {
-    "input": 1391,
-    "output": 1844
+    "input": 1394,
+    "output": 1847
   },
   "daemon.loadWorkspaceSkill": {
-    "input": 1868,
-    "output": 1869
+    "input": 1871,
+    "output": 1872
   },
   "daemon.markAgentTurnSilent": {
-    "input": 1871,
-    "output": 1393
+    "input": 1874,
+    "output": 1396
   },
   "daemon.mergeCorner": {
-    "input": 1398,
-    "output": 1873
+    "input": 1401,
+    "output": 1876
   },
   "daemon.notifyFeedbackFixed": {
-    "input": 1879,
-    "output": 1881
+    "input": 1882,
+    "output": 1884
   },
   "daemon.offerConnector": {
-    "input": 1882,
-    "output": 1885
+    "input": 1885,
+    "output": 1888
   },
   "daemon.openRoomPoll": {
-    "input": 1887,
-    "output": 1409
+    "input": 1890,
+    "output": 1412
   },
   "daemon.order": {
-    "input": 1889,
-    "output": 1393
+    "input": 1892,
+    "output": 1396
   },
   "daemon.orderCornerMerge": {
-    "input": 1891,
-    "output": 1893
+    "input": 1894,
+    "output": 1896
   },
   "daemon.postAgentActivity": {
-    "input": 1894,
-    "output": 1393
+    "input": 1897,
+    "output": 1396
   },
   "daemon.postAgentAttachment": {
-    "input": 1907,
-    "output": 1393
+    "input": 1910,
+    "output": 1396
   },
   "daemon.postAgentAvatar": {
-    "input": 1909,
-    "output": 1393
+    "input": 1912,
+    "output": 1396
   },
   "daemon.postAgentCommands": {
-    "input": 1911,
-    "output": 1393
+    "input": 1914,
+    "output": 1396
   },
   "daemon.postAgentDraft": {
-    "input": 1915,
-    "output": 1393
+    "input": 1918,
+    "output": 1396
   },
   "daemon.postAgentMachineReport": {
-    "input": 1917,
-    "output": 1393
+    "input": 1920,
+    "output": 1396
   },
   "daemon.postAgentModelCatalog": {
-    "input": 1918,
-    "output": 1393
+    "input": 1921,
+    "output": 1396
   },
   "daemon.postAgentThought": {
-    "input": 1915,
-    "output": 1393
+    "input": 1918,
+    "output": 1396
   },
   "daemon.postAgentToolMandate": {
-    "input": 1930,
-    "output": 1393
+    "input": 1933,
+    "output": 1396
   },
   "daemon.postAgentTurnReceipt": {
-    "input": 1962,
-    "output": 1393
+    "input": 1965,
+    "output": 1396
   },
   "daemon.postAgentUsage": {
-    "input": 1991,
-    "output": 1393
+    "input": 1994,
+    "output": 1396
   },
   "daemon.postBackgroundToolCompletion": {
-    "input": 1995,
-    "output": 1393
+    "input": 1998,
+    "output": 1396
   },
   "daemon.postComputerSession": {
-    "input": 1998,
-    "output": 2000
+    "input": 2001,
+    "output": 2003
   },
   "daemon.postConnectionUsage": {
-    "input": 2001,
-    "output": 1393
+    "input": 2004,
+    "output": 1396
   },
   "daemon.postConnectorStatus": {
-    "input": 2006,
-    "output": 1393
+    "input": 2009,
+    "output": 1396
   },
   "daemon.postConnectorVault": {
-    "input": 2009,
-    "output": 1393
+    "input": 2012,
+    "output": 1396
   },
   "daemon.postCornerMessage": {
-    "input": 2011,
-    "output": 2013
+    "input": 2014,
+    "output": 2016
   },
   "daemon.postCornerPlan": {
-    "input": 2016,
-    "output": 1393
+    "input": 2019,
+    "output": 1396
   },
   "daemon.postCornerRemoteState": {
-    "input": 2020,
-    "output": 1393
+    "input": 2023,
+    "output": 1396
   },
   "daemon.postPermissionExecution": {
-    "input": 2026,
-    "output": 1393
+    "input": 2029,
+    "output": 1396
   },
   "daemon.postPermissionRequest": {
-    "input": 2030,
-    "output": 1393
+    "input": 2033,
+    "output": 1396
   },
   "daemon.postRepositoryOnboarding": {
-    "input": 2032,
+    "input": 2035,
     "output": 405
   },
   "daemon.postRoomEvent": {
-    "input": 2034,
-    "output": 1393
+    "input": 2037,
+    "output": 1396
   },
   "daemon.postRoomInvite": {
-    "input": 1391,
-    "output": 2036
+    "input": 1394,
+    "output": 2039
   },
   "daemon.postRoomMessage": {
-    "input": 2037,
-    "output": 2041
+    "input": 2040,
+    "output": 2044
   },
   "daemon.postSquireApproval": {
-    "input": 2043,
-    "output": 1393
+    "input": 2046,
+    "output": 1396
   },
   "daemon.postSquireApprovalDecision": {
-    "input": 2045,
-    "output": 1393
+    "input": 2048,
+    "output": 1396
   },
   "daemon.postSquireLoginWall": {
-    "input": 2048,
-    "output": 2054
-  },
-  "daemon.postStarterGame": {
-    "input": 1391,
-    "output": 2055
-  },
-  "daemon.postStarterWelcome": {
-    "input": 1391,
+    "input": 2051,
     "output": 2057
   },
+  "daemon.postStarterGame": {
+    "input": 1394,
+    "output": 2058
+  },
+  "daemon.postStarterWelcome": {
+    "input": 1394,
+    "output": 2060
+  },
   "daemon.postTargetBranchProposal": {
-    "input": 2058,
-    "output": 1393
+    "input": 2061,
+    "output": 1396
   },
   "daemon.postVaultSaveCard": {
-    "input": 2060,
-    "output": 1393
+    "input": 2063,
+    "output": 1396
   },
   "daemon.publishAgentUsageAccount": {
-    "input": 2062,
-    "output": 2065
+    "input": 2065,
+    "output": 2068
   },
   "daemon.reactToRoomMessage": {
-    "input": 2067,
-    "output": 1393
+    "input": 2070,
+    "output": 1396
   },
   "daemon.read": {
-    "input": 2069,
-    "output": 1717
+    "input": 2072,
+    "output": 1720
   },
   "daemon.readAgentWorkbench": {
-    "input": 1391,
-    "output": 2071
+    "input": 1394,
+    "output": 2074
   },
   "daemon.readCommandActivation": {
-    "input": 2089,
-    "output": 2091
-  },
-  "daemon.readCornerPullRequest": {
-    "input": 1398,
+    "input": 2092,
     "output": 2094
   },
-  "daemon.readOperatorSystemDm": {
-    "input": 2105,
-    "output": 2107
+  "daemon.readCornerPullRequest": {
+    "input": 1401,
+    "output": 2097
   },
-  "daemon.refreshComputerSession": {
+  "daemon.readOperatorSystemDm": {
     "input": 2108,
     "output": 2110
   },
-  "daemon.releaseAgentTurn": {
+  "daemon.refreshComputerSession": {
     "input": 2111,
     "output": 2113
   },
+  "daemon.releaseAgentTurn": {
+    "input": 2114,
+    "output": 2116
+  },
   "daemon.renameCorner": {
-    "input": 2115,
-    "output": 2117
+    "input": 2118,
+    "output": 2120
   },
   "daemon.report": {
-    "input": 2118,
-    "output": 1393
+    "input": 2121,
+    "output": 1396
   },
   "daemon.reportAgentSignIn": {
-    "input": 2122,
+    "input": 2125,
     "output": 98
   },
   "daemon.reportFeedback": {
-    "input": 2135,
-    "output": 2137
+    "input": 2138,
+    "output": 2140
   },
   "daemon.reportInstitutionalMemoryUsed": {
-    "input": 2138,
-    "output": 2139
-  },
-  "daemon.requestAgentGrant": {
-    "input": 2140,
+    "input": 2141,
     "output": 2142
   },
+  "daemon.requestAgentGrant": {
+    "input": 2143,
+    "output": 2145
+  },
   "daemon.retractAgentLiveOutput": {
-    "input": 2158,
-    "output": 1393
+    "input": 2161,
+    "output": 1396
   },
   "daemon.retrieveLinkSpendRequest": {
-    "input": 2162,
-    "output": 2164
+    "input": 2165,
+    "output": 2167
   },
   "daemon.reviseCornerBrief": {
-    "input": 2173,
-    "output": 2175
-  },
-  "daemon.revokeConnectionGrants": {
-    "input": 1581,
+    "input": 2176,
     "output": 2178
   },
+  "daemon.revokeConnectionGrants": {
+    "input": 1584,
+    "output": 2181
+  },
   "daemon.saveInstitutionalMemory": {
-    "input": 2179,
-    "output": 1524
+    "input": 2182,
+    "output": 1527
   },
   "daemon.saveSkill": {
-    "input": 2183,
-    "output": 2185
+    "input": 2186,
+    "output": 2188
   },
   "daemon.saveWorkflow": {
-    "input": 2188,
-    "output": 2190
+    "input": 2191,
+    "output": 2193
   },
   "daemon.searchInstitutionalHistory": {
-    "input": 2191,
-    "output": 2192
+    "input": 2194,
+    "output": 2195
   },
   "daemon.searchInstitutionalMemory": {
-    "input": 2195,
-    "output": 2196
+    "input": 2198,
+    "output": 2199
   },
   "daemon.searchMcpRegistry": {
-    "input": 2201,
-    "output": 2203
+    "input": 2204,
+    "output": 2206
   },
   "daemon.sendOperatorSystemDm": {
-    "input": 2205,
-    "output": 2207
+    "input": 2208,
+    "output": 2210
   },
   "daemon.setAgentWakePaused": {
-    "input": 2208,
-    "output": 1393
+    "input": 2211,
+    "output": 1396
   },
   "daemon.setCornerHold": {
-    "input": 2210,
-    "output": 2212
+    "input": 2213,
+    "output": 2215
   },
   "daemon.setEventSubscriptions": {
-    "input": 2213,
-    "output": 1839
+    "input": 2216,
+    "output": 1842
   },
   "daemon.startWorkflow": {
-    "input": 2215,
-    "output": 2219
-  },
-  "daemon.stopAgentTurn": {
-    "input": 2220,
+    "input": 2218,
     "output": 2222
   },
-  "daemon.updateAgentSchedule": {
+  "daemon.stopAgentTurn": {
     "input": 2223,
-    "output": 1492
+    "output": 2225
+  },
+  "daemon.updateAgentSchedule": {
+    "input": 2226,
+    "output": 1495
   },
   "daemon.updateInstitutionalMemory": {
-    "input": 2226,
-    "output": 1524
+    "input": 2229,
+    "output": 1527
   },
   "daemon.walletContractCall": {
-    "input": 2227,
-    "output": 2232
+    "input": 2230,
+    "output": 2235
   },
   "daemon.walletPay": {
-    "input": 2234,
-    "output": 2236
+    "input": 2237,
+    "output": 2239
   },
   "daemon.walletSignTypedData": {
-    "input": 2238,
-    "output": 2245
+    "input": 2241,
+    "output": 2248
   },
   "daemon.walletSwap": {
-    "input": 2249,
-    "output": 2251
+    "input": 2252,
+    "output": 2254
   },
   "daemon.watchCorner": {
-    "input": 2254,
-    "output": 2256
+    "input": 2257,
+    "output": 2259
   }
 } as const;

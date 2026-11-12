@@ -74,7 +74,7 @@ describe('agent profile', () => {
     const mark = tree.root.findAll((node: any) => node.type === 'IdentityMark')[0];
     expect(mark.props).toMatchObject({ kind: 'agent', size: 72, face: 'fox' });
     const content = text(tree);
-    for (const label of ['@alan', 'owned by @lunchboxfortwo', 'Soul', 'Read full soul', 'Model / difficulty', 'Claude Opus 5.5', 'Usage', 'Voice', 'Access', 'Ask first', 'Everyone', 'Schedules', 'Dependency check', 'Chats', '#beeline', '#milo'])
+    for (const label of ['@alan', 'owned by @lunchboxfortwo', 'Soul', 'Read full soul', 'Model / difficulty', 'Claude Opus 5.5', 'Usage', 'Voice', 'Access', 'Ask first', 'Everyone', 'Routines', 'Dependency check', 'Chats', '#beeline', '#milo'])
       expect(content).toContain(label);
     for (const cut of ['Recent work', 'Grants', 'Generate avatar', 'Skills'])
       expect(content).not.toContain(cut);

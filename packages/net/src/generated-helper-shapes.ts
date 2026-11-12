@@ -29,7 +29,7 @@ export const helperShapes: readonly WireShape[] = [
   shape({"kind":"union","choices":[7,2]}),
   shape({"kind":"union","choices":[7,26]}),
   shape({"kind":"object","properties":{"body":{"node":2,"optional":false},"systemEvent":{"node":27,"optional":false}}}),
-  shape({"kind":"object","properties":{"subject":{"node":28,"optional":false},"verb":{"node":2,"optional":false},"object":{"node":34,"optional":true},"consequence":{"node":24,"optional":true},"kind":{"node":36,"optional":true},"scheduleId":{"node":24,"optional":true},"payload":{"node":55,"optional":true},"subscriptionPrompt":{"node":24,"optional":true},"subscriptionWorkflowSlug":{"node":24,"optional":true}}}),
+  shape({"kind":"object","properties":{"subject":{"node":28,"optional":false},"verb":{"node":2,"optional":false},"object":{"node":34,"optional":true},"consequence":{"node":24,"optional":true},"kind":{"node":36,"optional":true},"scheduleId":{"node":24,"optional":true},"payload":{"node":55,"optional":true},"subscriptionId":{"node":24,"optional":true},"subscriptionPrompt":{"node":24,"optional":true},"subscriptionWorkflowSlug":{"node":24,"optional":true}}}),
   shape({"kind":"object","properties":{"kind":{"node":29,"optional":false},"id":{"node":24,"optional":true},"name":{"node":2,"optional":false}}}),
   shape({"kind":"union","choices":[30,31,32,33]}),
   shape({"kind":"literal","value":"github"}),

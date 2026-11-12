@@ -416,7 +416,7 @@ export async function fireServiceSubscriptions(db: SqlDatabase, body: Record<str
             ? { name: typeof (data.sender as Record<string, unknown>).name === 'string'
               ? ((data.sender as Record<string, unknown>).name as string).slice(0, 100) : undefined }
             : undefined },
-        subscriptionPrompt: current.prompt ?? undefined, subscriptionWorkflowSlug: current.workflow_slug ?? undefined,
+        subscriptionId: row.id, subscriptionPrompt: current.prompt ?? undefined, subscriptionWorkflowSlug: current.workflow_slug ?? undefined,
       });
       if (line.inserted) await tx.query(`UPDATE agent_subscriptions
         SET last_fired_at=now(),fired_count=fired_count+1 WHERE id=$1`, [row.id]);
@@ -480,7 +480,7 @@ export async function fireRepositorySubscriptions(
         id, roomId: row.room_id, authorId: SYSTEM_IDENTITY_ID,
         ...repositorySubscriptionLine(eventName, repository, details),
         kind: 'subscription-fired', payload, wakes: [row.agent_id],
-        subscriptionPrompt: current.prompt ?? undefined, subscriptionWorkflowSlug: current.workflow_slug ?? undefined,
+        subscriptionId: row.id, subscriptionPrompt: current.prompt ?? undefined, subscriptionWorkflowSlug: current.workflow_slug ?? undefined,
       });
       if (line.inserted) await tx.query(`UPDATE agent_subscriptions
         SET last_fired_at=now(),fired_count=fired_count+1 WHERE id=$1`, [row.id]);
