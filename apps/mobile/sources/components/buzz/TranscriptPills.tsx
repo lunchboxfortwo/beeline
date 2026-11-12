@@ -32,21 +32,6 @@ type PillHandlers = {
 function pillItem(message: ChatDisplayMessage, resolve: PillIdentityResolver, handlers: PillHandlers): PillItem {
   const time = ledgerStamp(message.timestamp);
   const author = message.authorIdentity?.pubkey ?? message.pubkey;
-  if (message.notificationLifecycleRun) {
-    // A PR / thread lifecycle run is a system notice; its rows open their PR or thread.
-    const noop = () => {};
-    return {
-      id: message.id,
-      system: true,
-      from: BEELINE,
-      to: systemTarget(message, resolve),
-      time,
-      body: (
-        <NotificationLifecycleCard message={message} cornerId={handlers.cornerId}
-          onOpenCorner={handlers.onOpenCorner ?? noop} onOpenUrl={handlers.onOpenUrl ?? noop} />
-      ),
-    };
-  }
   if (message.isSystemNotice || author === SYSTEM_IDENTITY_PUBKEY || !author) {
     return {
       id: message.id,
@@ -108,7 +93,10 @@ export function TranscriptPills({
   );
   return (
     <View style={ledgerEntryRhythm({ hasByline: true })} testID={`chat-message-${run[0]?.id ?? ''}`}>
-      <PillRow items={items} testID={`pill-row-${run[0]?.id ?? ''}`} />
+      {run.length === 1 && run[0]?.notificationLifecycleRun ? (
+        <NotificationLifecycleCard message={run[0]} cornerId={cornerId}
+          onOpenCorner={onOpenCorner ?? (() => {})} onOpenUrl={onOpenUrl ?? (() => {})} />
+      ) : <PillRow items={items} testID={`pill-row-${run[0]?.id ?? ''}`} />}
     </View>
   );
 }

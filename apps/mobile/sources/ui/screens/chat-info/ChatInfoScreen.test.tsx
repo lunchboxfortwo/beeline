@@ -20,30 +20,34 @@ const router = vi.hoisted(() => ({ push: vi.fn(), replace: vi.fn() }));
 vi.mock('expo-router', () => ({ router }));
 const panel = vi.hoisted(() => ({ openPlace: vi.fn(), closePanel: vi.fn() }));
 vi.mock('@/ui/shell/panel', () => panel);
-const operation = vi.hoisted(() => vi.fn(async () => undefined));
+const operation = vi.hoisted(() => vi.fn());
+const refresh = vi.hoisted(() => vi.fn(async () => undefined));
 vi.mock('@/sync/transport/monolith-operation', () => ({ monolithPhoneOperation: operation }));
 const leave = vi.hoisted(() => vi.fn(async (_title: string, _deletes: boolean, run: (confirm: boolean) => Promise<unknown>) => { await run(false); return true; }));
 vi.mock('@/buzz/room-leave', () => ({ leaveRoomWithConfirmation: leave }));
 const modal = vi.hoisted(() => ({ confirm: vi.fn(async () => true) }));
 vi.mock('@/modal', () => ({ Modal: modal }));
 vi.mock('@/buzz/corner-navigation', () => ({ cornerHref: (id: string, parent: string, title: string) => ({ pathname: 'corner', params: { id, parent, title } }) }));
-const data = vi.hoisted(() => ({ room: null as any, archived: [] as any[], total: 27 }));
-vi.mock('@/ui/screens/members/use-room-view', () => ({ useRoomView: () => ({ room: data.room, error: null, refresh: vi.fn() }) }));
+vi.mock('@/components/buzz/RepoList', () => ({ RepoList: (props: any) => React.createElement('RepoList', props) }));
+const data = vi.hoisted(() => ({ room: null as any, archived: [] as any[], openCorners: 0, total: 27 }));
+vi.mock('@/ui/screens/members/use-room-view', () => ({ useRoomView: () => ({ room: data.room, error: null, refresh }) }));
 vi.mock('@/ui/screens/people/use-workspace-roster', () => ({ useWorkspaceRoster: () => ({ surface: { workspace: { name: 'Beeline Work' } } }) }));
 vi.mock('@/buzz/scheduled-work', () => ({
     useScheduledWork: () => ({ work: null }),
     scheduleTitle: () => '', scheduleTrigger: () => '', subscriptionTitle: () => '', subscriptionWhen: () => '',
 }));
 const loadArchived = vi.hoisted(() => vi.fn(async () => undefined));
-vi.mock('@/buzz/use-room-corners', () => ({ useRoomCorners: () => ({ record: { archived: { corners: data.archived, total: data.total } }, loadArchived }) }));
+vi.mock('@/buzz/use-room-corners', () => ({ useRoomCorners: () => ({ record: { archived: { corners: data.archived, total: data.total }, summary: { cornerCount: data.openCorners } }, loadArchived }) }));
 
 import { ChatInfoScreen } from './ChatInfoScreen';
+(globalThis as typeof globalThis & { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
 
 const ROOM = '22222222-2222-4222-8222-222222222222';
 const WORKSPACE = '11111111-1111-4111-8111-111111111111';
 const CORNER = '33333333-3333-4333-8333-333333333333';
 const flat = (tree: any) => tree.root.findAll((node: any) => node.type === 'Text').map((node: any) => node.props.children)
     .flat(3).filter((value: unknown) => typeof value === 'string').join('|');
+const control = (tree: any, id: string) => tree.root.find((node: any) => typeof node.type === 'string' && node.props.testID === id);
 const pressable = (tree: any, testID: string) => tree.root.find((node: any) => node.type === 'ListItem' && node.props.testID === testID);
 
 function render() {
@@ -54,10 +58,19 @@ function render() {
 
 beforeEach(() => {
     vi.clearAllMocks();
+    operation.mockReset().mockResolvedValue(undefined);
+    modal.confirm.mockResolvedValue(true);
+    data.openCorners = 0;
+    refresh.mockImplementation(async () => {
+        const [name, input] = operation.mock.calls.at(-1) ?? [];
+        if (name === 'updateRoom') data.room = { ...data.room, room: { ...data.room.room, name: input.name } };
+        if (name === 'setRoomRepository') data.room = { ...data.room, repository: input };
+        if (name === 'removeRoomRepository') data.room = { ...data.room, repository: undefined };
+    });
     data.room = {
         room: { id: ROOM, workspaceId: WORKSPACE, name: 'beeline', visibility: 'public' },
         members: [{ identity: { pubkey: 'a', kind: 'human', name: 'a' }, role: 'owner' }, { identity: { pubkey: 'b', kind: 'agent', name: 'b' }, role: 'member' }],
-        viewer: { permissions: { manage: true, send: true } },
+        viewer: { identity: { kind: 'human', pubkey: 'a' }, permissions: { manage: true, send: true } },
     };
     data.archived = [{ corner: { id: CORNER, name: 'agent-identity-tiles' }, closedAt: undefined }];
 });
@@ -68,6 +81,97 @@ describe('Chat info', () => {
         expect(flat(tree)).toContain('Public · anyone in Beeline Work can join · 2 members');
         act(() => { pressable(tree, 'chat-members').props.onPress(); });
         expect(panel.openPlace).toHaveBeenCalledWith({ kind: 'members', roomId: ROOM }, false);
+    });
+
+    it('renames a chat from Chat info with the existing update operation', async () => {
+        const tree = render();
+        act(() => pressable(tree, 'chat-name').props.onPress());
+        act(() => control(tree, 'chat-name-input').props.onChangeText('new room'));
+        await act(async () => control(tree, 'chat-name-save').props.onPress());
+        expect(operation).toHaveBeenCalledWith('updateRoom', { roomId: ROOM, name: 'new-room' });
+        expect(refresh).toHaveBeenCalled();
+        expect(flat(tree)).toContain('#new-room');
+        expect(tree.root.findAll((node: any) => node.props.testID === 'chat-name-input')).toHaveLength(0);
+    });
+
+    it('links a repository from Chat info with the existing repository operation', async () => {
+        operation.mockResolvedValueOnce({ installations: [], repositories: [{ id: 9, fullName: 'owner/repo', installationId: 77, defaultBranch: 'develop', private: true }] });
+        const tree = render();
+        await act(async () => pressable(tree, 'chat-repository').props.onPress());
+        expect(operation).toHaveBeenCalledWith('listGitHubRepositories', {});
+        const list = tree.root.findByType('RepoList');
+        act(() => list.props.onSelect(list.props.candidates[0]));
+        await act(async () => control(tree, 'chat-repository-save').props.onPress());
+        expect(operation).toHaveBeenCalledWith('setRoomRepository', {
+            roomId: ROOM, key: 'github:9', name: 'owner/repo', remote: 'git://github.com/owner/repo', targetBranch: 'develop', githubInstallationId: 77,
+        });
+        expect(refresh).toHaveBeenCalled();
+        expect(flat(tree)).toContain('owner/repo');
+    });
+
+    it.each([
+        ['human', true, true, true],
+        ['human', false, false, false],
+        ['agent', true, false, true],
+    ] as const)('keeps existing edit permissions for %s with manage=%s', (kind, manage, rename, repository) => {
+        data.room.viewer = { ...data.room.viewer, identity: { kind }, permissions: { manage, send: true } };
+        const tree = render();
+        expect(typeof control(tree, 'chat-name').props.onPress === 'function').toBe(rename);
+        expect(typeof control(tree, 'chat-repository').props.onPress === 'function').toBe(repository);
+    });
+
+    it('validates a name and preserves the editor on a refused rename', async () => {
+        const tree = render();
+        act(() => pressable(tree, 'chat-name').props.onPress());
+        act(() => control(tree, 'chat-name-input').props.onChangeText('Invalid!'));
+        expect(control(tree, 'chat-name-save').props.disabled).toBe(true);
+        await act(async () => control(tree, 'chat-name-save').props.onPress());
+        expect(operation).not.toHaveBeenCalled();
+        act(() => control(tree, 'chat-name-input').props.onChangeText('new-name'));
+        operation.mockRejectedValueOnce(Object.assign(new Error('You no longer manage this Workspace.'), { status: 403 }));
+        await act(async () => control(tree, 'chat-name-save').props.onPress());
+        expect(flat(tree)).toContain('You no longer manage this Workspace.');
+        expect(control(tree, 'chat-name-input').props.value).toBe('new-name');
+        expect(refresh).not.toHaveBeenCalled();
+    });
+
+    it('does not replace a repository with open threads when the existing confirmation is declined', async () => {
+        data.room.repository = { key: 'github:8', name: 'owner/old', remote: 'git://github.com/owner/old', targetBranch: 'main' };
+        data.openCorners = 2;
+        modal.confirm.mockResolvedValueOnce(false);
+        operation.mockResolvedValueOnce({ installations: [], repositories: [{ id: 9, fullName: 'owner/new', installationId: 77, defaultBranch: 'main' }] });
+        const tree = render();
+        await act(async () => pressable(tree, 'chat-repository').props.onPress());
+        const list = tree.root.findByType('RepoList');
+        act(() => list.props.onSelect(list.props.candidates[0]));
+        await act(async () => control(tree, 'chat-repository-save').props.onPress());
+        expect(modal.confirm).toHaveBeenCalledWith('Change Room repo?', expect.stringContaining('owner/old'), expect.objectContaining({ confirmText: 'Change anyway' }));
+        expect(operation.mock.calls.map(call => call[0])).toEqual(['listGitHubRepositories']);
+        expect(refresh).not.toHaveBeenCalled();
+    });
+
+    it('unlinks the current repository after confirmation using the existing remove operation', async () => {
+        data.room.repository = { key: 'github:8', name: 'owner/old', remote: 'git://github.com/owner/old', targetBranch: 'main' };
+        operation.mockResolvedValueOnce({ installations: [], repositories: [] });
+        const tree = render();
+        await act(async () => pressable(tree, 'chat-repository').props.onPress());
+        act(() => pressable(tree, 'chat-repository-none').props.onPress());
+        await act(async () => control(tree, 'chat-repository-save').props.onPress());
+        expect(modal.confirm).toHaveBeenCalledWith('Unlink owner/old?', expect.stringContaining('chat-only'), expect.objectContaining({ destructive: true }));
+        expect(operation).toHaveBeenCalledWith('removeRoomRepository', { roomId: ROOM });
+        expect(refresh).toHaveBeenCalled();
+    });
+
+    it('does not write if edit permission disappears while the repository picker is open', async () => {
+        operation.mockResolvedValueOnce({ installations: [], repositories: [{ id: 9, fullName: 'owner/new', installationId: 77, defaultBranch: 'main' }] });
+        const tree = render();
+        await act(async () => pressable(tree, 'chat-repository').props.onPress());
+        const list = tree.root.findByType('RepoList');
+        act(() => list.props.onSelect(list.props.candidates[0]));
+        data.room.viewer.permissions.manage = false;
+        act(() => tree.update(<ChatInfoScreen roomId={ROOM} close={vi.fn()} />));
+        await act(async () => control(tree, 'chat-repository-save').props.onPress());
+        expect(operation.mock.calls.map(call => call[0])).toEqual(['listGitHubRepositories']);
     });
 
     it('lists finished threads (read on open) and opens one', () => {

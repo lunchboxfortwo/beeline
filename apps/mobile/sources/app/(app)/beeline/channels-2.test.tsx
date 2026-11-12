@@ -1,4 +1,5 @@
 import { deck, hotSurfaces, viewer, agent, chatList, room, listOf, paintedRows, roomWatch, quiet, mountDeck, fixtureScope7 } from './test-support-channels.test-support';
+import AsyncStorage from '@react-native-async-storage/async-storage';
 import * as React from 'react';
 // @ts-expect-error react-test-renderer has no declarations in this workspace.
 import { act, create, type ReactTestRenderer } from 'react-test-renderer';
@@ -37,6 +38,36 @@ describe('Room deck live path', () => {
     });
   });
 
+
+  it.each(['unread', 'pinned'] as const)('keeps the %s filter after a Room visit, search close and app remount', async chip => {
+    const saved = new Map<string, string>([['@beeline/room-pins/viewer/workspace', JSON.stringify(['room-b'])]]);
+    const get = vi.spyOn(AsyncStorage, 'getItem').mockImplementation(async key => saved.get(key) ?? null);
+    const set = vi.spyOn(AsyncStorage, 'setItem').mockImplementation(async (key, value) => { saved.set(key, value); });
+    let renderer: ReactTestRenderer | undefined;
+    try {
+      deck.chatsResponse = listOf([room('room-a', 20), room('room-b', 10, { unread: true })]);
+      renderer = await mountDeck();
+      const header = () => renderer!.root.findByType(ChatListHeader);
+      await act(async () => header().props.onSearch({ open: true, query: '', chips: [chip] }));
+      expect(paintedRows(renderer).map(item => item.room.id)).toEqual(['room-b']);
+      await act(async () => deck.blur?.());
+      await act(async () => { deck.blur = (deck.focusEffect?.() as (() => void) | undefined) ?? null; });
+      expect(header().props.search.chips).toEqual([chip]);
+      expect(paintedRows(renderer).map(item => item.room.id)).toEqual(['room-b']);
+      await act(async () => header().props.onSearch({ open: false, query: '', chips: [] }));
+      expect(paintedRows(renderer).map(item => item.room.id)).toEqual(['room-b']);
+      await act(async () => renderer!.unmount());
+      await act(async () => { resetClientState(); });
+      renderer = await mountDeck();
+      expect(header().props.search.chips).toEqual([chip]);
+      expect(paintedRows(renderer).map(item => item.room.id)).toEqual(['room-b']);
+      await act(async () => header().props.onSearch({ open: true, query: '', chips: [] }));
+      expect(paintedRows(renderer).map(item => item.room.id)).toEqual(['room-a', 'room-b']);
+    } finally {
+      if (renderer) act(() => renderer!.unmount());
+      get.mockRestore(); set.mockRestore();
+    }
+  });
 
   it('paints a Room delta into the list without a chats read, and ignores drafts', async () => {
     const renderer = await mountDeck();

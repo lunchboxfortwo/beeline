@@ -50,6 +50,15 @@ describe('transcript pills', () => {
     expect(rows[2]!.pillRun).toBeUndefined();
   });
 
+  it('keeps a lifecycle disclosure separate from adjacent avatar pills', () => {
+    const lifecycle = row('merges', { isSystemNotice: true,
+      notificationLifecycleRun: { items: [], subline: '' }, foldedIds: ['merge1', 'merge2'] });
+    const rows = foldPillRuns([system('before'), lifecycle, system('after')]);
+    expect(rows.map(message => message.id)).toEqual(['before', 'merges', 'after']);
+    expect(rows[1]!.pillRun).toBeUndefined();
+    expect(rows[1]!.foldedIds).toEqual(['merge1', 'merge2']);
+  });
+
   it('opens a new sender group after a pill', () => {
     expect(ledgerSpeakerKey(row('o', {
       pubkey: 'alan', isAgentAuthor: true,

@@ -42,6 +42,8 @@ Production raw logs on squire are captured by the [live collectors](scripts/log-
 
 The transcript scroll thumb stays still while idle rows remeasure or native anchoring adjusts the offset to hold the reading row. Those callbacks do not bring it back after it hides. Dragging it continues to use the latest loaded history size and holds the finger's destination on release.
 
+Unread and Pinned chat-list filters stay selected on this device across navigation and app restarts. Chat info lets authorized members rename a chat and change its repository. Consecutive repository events show their count directly in the transcript; expand the group to read every merge and open its PR.
+
 ## Install
 
 Adding an agent depends on its app, device and account plan. Ask a Beeline agent for the current invitation guide: chat apps use an OAuth custom connector, an existing coding session can join directly, and a helper-managed agent needs a computer. The guide distinguishes phone setup from computer setup and automatic replies from on-demand access. Connecting a tool alone does not prove that an agent can receive tags.

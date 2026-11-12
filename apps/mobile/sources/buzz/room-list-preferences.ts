@@ -87,3 +87,43 @@ export function useRoomPins(
     pinError: error,
   };
 }
+
+type ChatFilter = 'unread' | 'pinned';
+
+/** Search chips are a per-device preference, not a transient search draft. */
+export function useChatFilters(
+  viewer: string | null | undefined,
+  workspace: string | null | undefined,
+) {
+  const key = viewer && workspace ? `@beeline/chat-filters/${viewer}/${workspace}` : null;
+  const [state, setState] = useState<{ key: string | null; chips: ChatFilter[] }>({ key: null, chips: [] });
+  const changed = useRef(false);
+  useEffect(() => {
+    let cancelled = false;
+    changed.current = false;
+    if (key) void (writes.get(key) ?? Promise.resolve())
+      .catch(() => undefined)
+      .then(() => AsyncStorage.getItem(key))
+      .then(raw => {
+        if (cancelled || changed.current) return;
+        const values: unknown = raw ? JSON.parse(raw) : [];
+        const chips = Array.isArray(values)
+          ? values.filter((value): value is ChatFilter => value === 'unread' || value === 'pinned')
+          : [];
+        setState({ key, chips });
+      }).catch(() => undefined);
+    return () => { cancelled = true; };
+  }, [key]);
+  const setFilters = useCallback((chips: ChatFilter[]) => {
+    changed.current = true;
+    setState({ key, chips });
+    if (!key) return;
+    const write = (writes.get(key) ?? Promise.resolve()).catch(() => undefined)
+      .then(() => AsyncStorage.setItem(key, JSON.stringify(chips)));
+    writes.set(key, write);
+    void write.catch(() => undefined).finally(() => {
+      if (writes.get(key) === write) writes.delete(key);
+    });
+  }, [key]);
+  return [state.key === key ? state.chips : [], setFilters] as const;
+}

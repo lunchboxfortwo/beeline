@@ -5,7 +5,7 @@ import type { ChatDisplayMessage } from '@/buzz/room-view-presentation';
  * Pills (build spec, decision 15): system messages and agent-to-agent messages
  * render as avatar-only pills (from face → to face); a tap reads the message.
  * Consecutive pills share one wrapping row, so the transcript folds a run of
- * them into one host row the way it folds PR lifecycle runs.
+ * them into one host row. PR lifecycle runs keep their own counted disclosure.
  */
 
 type PillFields = Pick<
@@ -54,7 +54,7 @@ export function isAgentToAgentMessage(message: PillFields, knownAgentPubkeys: Re
   return agentAuthor && mentions.length > 0 && mentions.every((pubkey) => pubkey !== author && knownAgentPubkeys.has(pubkey));
 }
 
-/** Fold each run of consecutive pills into its first row (`pillRun`). Lone pills stay as they are. */
+/** Fold consecutive avatar pills into `pillRun`; lifecycle disclosures and lone pills stay separate. */
 export function foldPillRuns(messages: readonly ChatDisplayMessage[]): ChatDisplayMessage[] {
   const result: ChatDisplayMessage[] = [];
   let run: ChatDisplayMessage[] = [];
@@ -78,7 +78,8 @@ export function foldPillRuns(messages: readonly ChatDisplayMessage[]): ChatDispl
     run = [];
   };
   for (const message of messages) {
-    if (isPillMessage(message)) {
+    // Lifecycle runs already own a counted disclosure; keep it visible between pills.
+    if (isPillMessage(message) && !message.notificationLifecycleRun) {
       run.push(message);
       continue;
     }
