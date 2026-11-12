@@ -712,6 +712,10 @@ export type PairingCodeInput = { readonly code: string };
 export interface AgentInvitationPickerGuide {
   readonly lines: Readonly<Record<string, string>>;
   readonly other: string;
+  /** The one copyable prompt on Invite an external agent. */
+  readonly prompt?: string;
+  /** The full list of agents that accept the prompt. */
+  readonly listUrl?: string;
 }
 export type PairingCodeResult = PairingCodeInput & {
   readonly expiresAt: number;

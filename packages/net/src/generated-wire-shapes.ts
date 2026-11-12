@@ -134,7 +134,7 @@ export const wireShapes: readonly WireShape[] = [
   shape({"kind":"intersection","choices":[102,130]}),
   shape({"kind":"object","properties":{"expiresAt":{"node":18,"optional":false},"invitationGuide":{"node":131,"optional":true}}}),
   shape({"kind":"union","choices":[6,132]}),
-  shape({"kind":"object","properties":{"lines":{"node":133,"optional":false},"other":{"node":1,"optional":false}}}),
+  shape({"kind":"object","properties":{"lines":{"node":133,"optional":false},"other":{"node":1,"optional":false},"prompt":{"node":5,"optional":true},"listUrl":{"node":5,"optional":true}}}),
   shape({"kind":"object","properties":{},"index":1}),
   shape({"kind":"object","properties":{"installationId":{"node":18,"optional":false},"name":{"node":1,"optional":false},"description":{"node":5,"optional":true},"private":{"node":20,"optional":true}}}),
   shape({"kind":"object","properties":{"id":{"node":18,"optional":false},"fullName":{"node":1,"optional":false},"installationId":{"node":18,"optional":false},"defaultBranch":{"node":1,"optional":false},"private":{"node":32,"optional":false}}}),
