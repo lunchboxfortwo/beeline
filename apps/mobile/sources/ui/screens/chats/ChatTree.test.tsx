@@ -13,7 +13,7 @@ vi.mock('@/buzz/room-corner-store', () => ({ useRoomCornerSummary: () => null })
 vi.mock('@/components/buzz/IdentityMark', () => ({ IdentityMark: () => null }));
 
 import type { ChatListItem } from '@beeline/buzz-client';
-import { ChatRow, NEW_THREAD_HOLD_MS } from './ChatTree';
+import { ChatRow, ChatRowDivider, NEW_THREAD_HOLD_MS } from './ChatTree';
 import { CornerDownRight } from 'lucide-react-native';
 
 (globalThis as typeof globalThis & { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
@@ -95,4 +95,36 @@ it('shows the repository mark on the chat row and the ↳ glyph on its thread ro
   expect(threadRow.findAll((node:any)=>node.type==='RepositoryMark')).toHaveLength(0);
   expect(threadRow.findAll((node:any)=>node.props?.icon===CornerDownRight)).not.toHaveLength(0);
   act(() => tree.unmount());
+});
+
+// A swipeable row must start on its divider and end on the next one, with the
+// same unswiped spacing as a row that draws its own divider.
+it('with the divider outside, the row spans divider to divider and keeps its spacing', () => {
+  const props = { item, now: 1_700_000_000_000, onOpen: vi.fn(), onPin: vi.fn(), onOpenThread: vi.fn() };
+  const vertical = (tree: ReactTestRenderer) => {
+    const box = byTestID(tree, `chat-${ROOM}`);
+    const separator = box.findAll((node: any) => node.type === 'Separator');
+    return { top: box.props.paddingTop, bottom: box.props.paddingBottom, separator, gap: separator[0]?.props.marginBottom };
+  };
+  let inside!: ReactTestRenderer;
+  let outside!: ReactTestRenderer;
+  let last!: ReactTestRenderer;
+  let divider!: ReactTestRenderer;
+  act(() => {
+    inside = create(<ChatRow {...props} first={false} />);
+    outside = create(<ChatRow {...props} first={false} dividerOutside />);
+    last = create(<ChatRow {...props} first={false} dividerOutside last />);
+    divider = create(<ChatRowDivider roomId={ROOM} />);
+  });
+  const before = vertical(inside);
+  const after = vertical(outside);
+  expect(before.separator).toHaveLength(1);
+  expect(after.separator).toHaveLength(0);
+  expect(divider.root.findAll((node: any) => node.type === 'Separator')).toHaveLength(1);
+  // Divider to content: unchanged.
+  expect(after.top).toBe(before.gap);
+  // Content to the next divider: this row's bottom plus the next row's top, as before.
+  expect(after.bottom).toBe(before.bottom + before.top);
+  expect(vertical(last).bottom).toBe(before.bottom);
+  for (const tree of [inside, outside, last, divider]) act(() => tree.unmount());
 });

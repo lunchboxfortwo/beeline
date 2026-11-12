@@ -134,6 +134,9 @@ type ChatRowProps = {
   viewer?: string;
   now: number;
   first: boolean;
+  /** The list draws the divider outside a swipeable row, so the row starts on it. */
+  dividerOutside?: boolean;
+  last?: boolean;
   selected?: boolean;
   pinned?: boolean;
   onOpen: (roomId: string) => void;
@@ -144,7 +147,7 @@ type ChatRowProps = {
 };
 
 /** One chat: mark, #name, "Who: last message", age and status, then its active threads on a rail. */
-export const ChatRow = React.memo(function ChatRow({ item, viewer, now, first, selected = false, pinned = false, onOpen, onPin, onOpenThread, onNewThread }: ChatRowProps) {
+export const ChatRow = React.memo(function ChatRow({ item, viewer, now, first, dividerOutside = false, last = false, selected = false, pinned = false, onOpen, onPin, onOpenThread, onNewThread }: ChatRowProps) {
   const refused = useRoomOutboxFailure(item.room.id);
   const summary = useRoomCornerSummary(item.room.id);
   const threads = chatThreads(item, summary?.openCorners ?? item.openCorners, now);
@@ -161,8 +164,14 @@ export const ChatRow = React.memo(function ChatRow({ item, viewer, now, first, s
   const threadHold = useHold(NEW_THREAD_HOLD_MS, onNewThread ? () => onNewThread(item.room.id) : undefined, open, true);
   const step = useStep();
   return (
-    <YStack paddingHorizontal="4" paddingVertical={step('3')} testID={`chat-${item.room.id}`}>
-      {first ? null : <Separator borderColor="stroke" marginBottom={step('3')} />}
+    <YStack
+      paddingHorizontal="4"
+      paddingTop={step('3')}
+      // With the divider outside, this row also owns the gap above the next divider.
+      paddingBottom={dividerOutside && !last ? step('6') : step('3')}
+      testID={`chat-${item.room.id}`}
+    >
+      {first || dividerOutside ? null : <Separator borderColor="stroke" marginBottom={step('3')} />}
       <ListItem
         minHeight={HEIGHT.control}
         padding="0"
@@ -232,6 +241,15 @@ export const ChatRow = React.memo(function ChatRow({ item, viewer, now, first, s
   const { item: afterItem, ...after } = next;
   return equal(beforeItem, afterItem) && Object.keys(before).every((key) => before[key as keyof typeof before] === after[key as keyof typeof after]);
 });
+
+/** The divider above a chat row whose swipe must span exactly the row between dividers. */
+export function ChatRowDivider({ roomId }: { roomId: string }) {
+  return (
+    <YStack paddingHorizontal="4" testID={`chat-divider-${roomId}`}>
+      <Separator borderColor="stroke" />
+    </YStack>
+  );
+}
 
 /** Public chats in the Workspace the viewer has not joined, each with Join. */
 export function JoinableChats({ chats, joining, onJoin }: {

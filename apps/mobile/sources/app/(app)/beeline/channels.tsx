@@ -19,7 +19,7 @@ import { RoomDeckLoadingView } from '@/components/buzz/RoomDeckLoadingView';
 import { WORKSPACE_LABEL } from '@/buzz/vocabulary';
 import { Btn, Copy, Glyph, SafeTop, T } from '@/ui/grammar';
 import { ChatListHeader } from '@/ui/screens/chats/ChatListHeader';
-import { ChatRow, JoinableChats } from '@/ui/screens/chats/ChatTree';
+import { ChatRow, ChatRowDivider, JoinableChats } from '@/ui/screens/chats/ChatTree';
 import { MessageMatches } from '@/ui/screens/chats/MessageMatches';
 import { NewChatSheet } from '@/ui/screens/chats/NewChatSheet';
 import { isWorkspaceListView, type ChatListItem, type Identity } from '@beeline/buzz-client';
@@ -154,18 +154,20 @@ function DeckHeader(props: Omit<React.ComponentProps<typeof ChatListHeader>, 'on
   return <ChatListHeader {...props} onWorkspace={drawer?.openDrawer} />;
 }
 
+const EMPTY_CHATS: readonly ChatListItem[] = [];
+
 function BuzzChannels({ session }: { session: DeckSession }) {
   const state = useChannelsRouteState(session);
   const view = useChannelsPresentation(state);
   const { refreshMissed, refreshNow } = useChannelsRequestedActions(state, view);
-  const actions = useChannelsRoomActions(state);
+  const actions = useChannelsRoomActions(state, view.rows, state.chatList?.chats ?? EMPTY_CHATS);
   useChannelsSubscriptions(state, view.activeCommunityId, refreshMissed);
   const { selectWorkspace, rowActions, openRoom, joining, join } = useChannelsNavigation(state, view, actions);
   const repositories = useChannelsRepositories(state, view, openRoom);
   const { landing, closeAgentConnect, connectAgent } = useChannelsCompose(state, view);
   const { chatList, identity, isDesktop, error, refreshing, needsYouCount, ageNow, onLayout } = state;
-  const { activeCommunity, activeCommunityId, viewerIsAgent, canManageWorkspace, search, setSearch, rows, pinned } = view;
-  const { roomListGestures, swipeableRefs, handleLeaveRoom, handleCloseChat } = actions;
+  const { activeCommunity, activeCommunityId, viewerIsAgent, canManageWorkspace, search, setSearch, pinned } = view;
+  const { roomListGestures, swipeableRefs, handleLeaveRoom, handleCloseChat, visibleRows: rows } = actions;
   const canCreate = !viewerIsAgent && canManageWorkspace;
   const workspaceName = chatList?.workspace.name ?? activeCommunity?.name ?? WORKSPACE_LABEL;
   // Desktop has no bare list in the middle: the top chat of the already loaded
@@ -220,6 +222,8 @@ function BuzzChannels({ session }: { session: DeckSession }) {
         viewer={chatList.viewer.pubkey}
         now={ageNow}
         first={index === 0}
+        dividerOutside={!viewerIsAgent}
+        last={index === rows.length - 1}
         pinned={pinned.includes(item.room.id)}
         onOpen={rowActions.press}
         onPin={rowActions.pin}
@@ -230,36 +234,39 @@ function BuzzChannels({ session }: { session: DeckSession }) {
     if (viewerIsAgent) return row;
     const title = `${roomRowName(item).sigil}${roomRowName(item).name}`;
     return (
-      <Swipeable
-        enabled={roomListGestures.swipesEnabled}
-        activeOffsetX={[-15, 15]}
-        failOffsetY={[-10, 10]}
-        ref={(ref) => {
-          if (ref) swipeableRefs.current.set(item.room.id, ref);
-          else swipeableRefs.current.delete(item.room.id);
-        }}
-        friction={1}
-        overshootRight={false}
-        rightThreshold={ROW_HEIGHT}
-        renderRightActions={() => (
-          <YStack width={ROW_HEIGHT} backgroundColor="highlight" alignItems="center" justifyContent="center">
-            {item.directMessage ? (
-              <Btn kind="icon" label={`Close ${title}`} testID={`chat-close-action-${item.room.id}`}
-                onPress={() => { if (roomListGestures.canInteract()) void handleCloseChat(item); }}>
-                <Glyph icon={LogOut} />
-              </Btn>
-            ) : (
-              <Btn kind="icon" label={`Leave ${title}`} testID={`room-leave-action-${item.room.id}`}
-                onPress={() => { if (roomListGestures.canInteract()) void handleLeaveRoom(item); }}>
-                <Glyph icon={LogOut} />
-              </Btn>
-            )}
-          </YStack>
-        )}
-        testID={`chat-close-swipe-${item.room.id}`}
-      >
-        {row}
-      </Swipeable>
+      <>
+        {index === 0 ? null : <ChatRowDivider roomId={item.room.id} />}
+        <Swipeable
+          enabled={roomListGestures.swipesEnabled}
+          activeOffsetX={[-15, 15]}
+          failOffsetY={[-10, 10]}
+          ref={(ref) => {
+            if (ref) swipeableRefs.current.set(item.room.id, ref);
+            else swipeableRefs.current.delete(item.room.id);
+          }}
+          friction={1}
+          overshootRight={false}
+          rightThreshold={ROW_HEIGHT}
+          renderRightActions={() => (
+            <YStack width={ROW_HEIGHT} backgroundColor="highlight" alignItems="center" justifyContent="center">
+              {item.directMessage ? (
+                <Btn kind="icon" label={`Close ${title}`} testID={`chat-close-action-${item.room.id}`}
+                  onPress={() => { if (roomListGestures.canInteract()) void handleCloseChat(item); }}>
+                  <Glyph icon={LogOut} />
+                </Btn>
+              ) : (
+                <Btn kind="icon" label={`Leave ${title}`} testID={`room-leave-action-${item.room.id}`}
+                  onPress={() => { if (roomListGestures.canInteract()) void handleLeaveRoom(item); }}>
+                  <Glyph icon={LogOut} />
+                </Btn>
+              )}
+            </YStack>
+          )}
+          testID={`chat-close-swipe-${item.room.id}`}
+        >
+          {row}
+        </Swipeable>
+      </>
     );
   };
 
