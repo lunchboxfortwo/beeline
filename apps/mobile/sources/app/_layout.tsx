@@ -31,8 +31,9 @@ import { KeyboardShortcutsProvider } from '@/components/KeyboardShortcutsProvide
 import { StatusBarProvider } from '@/components/StatusBarProvider';
 // import * as SystemUI from 'expo-system-ui';
 import { initConsoleLogging } from '@/utils/consoleLogging';
-import { useAppMode } from '@/display';
-import { NOTIFICATION_LIGHT, beelineThemes } from '@/buzz/groknight';
+import { setAppPalette, useAppMode } from '@/display';
+import { NOTIFICATION_LIGHT, canvasColor } from '@/buzz/groknight';
+import { useLocalSetting } from '@/sync/storage';
 import { SafeSides } from '@/ui/grammar';
 import { AppRoot } from '@/ui/grammar-root';
 import { AsyncLock } from '@/utils/lock';
@@ -276,11 +277,13 @@ export default function RootLayout() {
   useTauriZoom();
   useTauriDrag();
   const mode = useAppMode();
+  const palette = useLocalSetting('palette');
+  React.useLayoutEffect(() => { setAppPalette(palette); }, [palette]);
   const navigationTheme = React.useMemo(() => {
     const base = mode === 'dark' ? DarkTheme : DefaultTheme;
-    const background = beelineThemes[mode === 'dark' ? 'obsidian' : 'bone'].bgBase;
+    const background = canvasColor(mode, palette);
     return { ...base, colors: { ...base.colors, background } };
-  }, [mode]);
+  }, [mode, palette]);
 
   //
   // Init sequence
@@ -369,6 +372,7 @@ export default function RootLayout() {
         <AppRoot
           desktop={isDesktop}
           mode={mode}
+          palette={palette}
           {...(latencyFrameTraceEnabled ? { onTouchStartCapture: markLatencyTouch } : {})}
         >
           <UpdateProvider active={drawn}>

@@ -1,5 +1,5 @@
 import { ScrollViewStyleReset } from 'expo-router/html';
-import { beelineThemes } from '../buzz/groknight';
+import { beelineThemes, stonePalette } from '../buzz/groknight';
 
 // This file is web-only and used to configure the root HTML for every
 // web page during static rendering.
@@ -42,7 +42,7 @@ body { background-color: #F3EEE4; }
 }`;
 
 // Mirrors sync/browser-string-storage.ts's namespacing ('beeline.settings.' +
-// 'local-settings') and localSettings.ts's `appearance` field — kept as a
+// 'local-settings') and localSettings.ts's `appearance` and `palette` fields — kept as a
 // literal read rather than importing those modules, since this file must stay
 // framework-free (it runs in Node during static export, per the comment
 // above; this string only ever executes in the browser).
@@ -53,9 +53,15 @@ const appearanceOverrideScript = `
     var parsed = raw ? JSON.parse(raw) : null;
     var migrated = window.localStorage.getItem('beeline.settings.appearance-system-v1') === 'done';
     var choice = migrated && parsed ? parsed.appearance : 'system';
+    var stone = parsed && parsed.palette === 'stone';
+    var style = document.createElement('style');
     if (choice === 'light' || choice === 'dark') {
-      var style = document.createElement('style');
-      style.textContent = 'body { background-color: ' + (choice === 'dark' ? ${JSON.stringify(beelineThemes.obsidian.bgVoid)} : ${JSON.stringify(beelineThemes.bone.bgVoid)}) + '; }';
+      style.textContent = 'body { background-color: ' + (stone
+        ? (choice === 'dark' ? ${JSON.stringify(stonePalette.dark.bgBase)} : ${JSON.stringify(stonePalette.light.bgBase)})
+        : (choice === 'dark' ? ${JSON.stringify(beelineThemes.obsidian.bgVoid)} : ${JSON.stringify(beelineThemes.bone.bgVoid)})) + '; }';
+      document.head.appendChild(style);
+    } else if (stone) {
+      style.textContent = 'body { background-color: ' + ${JSON.stringify(stonePalette.light.bgBase)} + '; } @media (prefers-color-scheme: dark) { body { background-color: ' + ${JSON.stringify(stonePalette.dark.bgBase)} + '; } }';
       document.head.appendChild(style);
     }
   } catch (e) {}

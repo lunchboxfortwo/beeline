@@ -11,18 +11,21 @@ import {
     pinAndroidLaunchAppearance,
 } from './buzz/android-launch-appearance';
 import { resolveAppAppearance, seedAppAppearanceFromSystem } from './buzz/app-appearance-seed';
-import { beelineThemes } from './buzz/groknight';
+import { canvasColor } from './buzz/groknight';
 
 /**
  * Light or dark for the whole app. Settings → Appearance writes it; the grammar
- * (GrammarProvider) reads it. The native root and system bars follow the canvas.
+ * (GrammarProvider) reads it. The native root and system bars follow the canvas
+ * of the mode and the colour set (Settings → Color set).
  */
 export type AppMode = 'light' | 'dark';
 
 // Complete the one-time migration before any settings consumers mount.
 seedAppAppearanceFromSystem();
-let appearance: LocalSettings['appearance'] = loadLocalSettings().appearance;
+const initialSettings = loadLocalSettings();
+let appearance: LocalSettings['appearance'] = initialSettings.appearance;
 let mode: AppMode = resolveAppAppearance(appearance);
+let palette: LocalSettings['palette'] = initialSettings.palette;
 const listeners = new Set<() => void>();
 
 /** Obsidian (dark) needs light navigation buttons; bone (light) needs dark ones. */
@@ -31,7 +34,7 @@ export function navigationBarStyleForMode(next: AppMode): 'light' | 'dark' {
 }
 
 function applyRootBackground(next: AppMode): void {
-    const rootColor = beelineThemes[next === 'dark' ? 'obsidian' : 'bone'].bgBase;
+    const rootColor = canvasColor(next, palette);
     void applySystemBackground(() => SystemUI.setBackgroundColorAsync(rootColor),
         error => captureMobileError('system-background', error));
     if (Platform.OS === 'android') {
@@ -49,6 +52,13 @@ export function setAppDisplay(next: LocalSettings['appearance']): void {
     mode = resolved;
     applyRootBackground(mode);
     for (const listener of listeners) listener();
+}
+
+/** Settings → Color set: carry the native root to the colour set's canvas. */
+export function setAppPalette(next: LocalSettings['palette']): void {
+    if (next === palette) return;
+    palette = next;
+    applyRootBackground(mode);
 }
 
 /** Settings → Appearance: also pins the Android launch screen to the choice. */

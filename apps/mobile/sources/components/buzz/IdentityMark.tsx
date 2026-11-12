@@ -15,8 +15,7 @@ import {
   type IdentityPalette,
 } from '@/buzz/identity-mark';
 import { resolveFace } from '@/buzz/faces';
-import { PERSON_PLATE, agentFaceLayers } from '@/buzz/faces/face-tile';
-import { INK } from '@/buzz/faces/animals';
+import { agentFaceLayers, personMarkInks } from '@/buzz/faces/face-tile';
 import { SYSTEM_IDENTITY_PUBKEY } from '@/buzz/system-identity';
 import beelineMark from '@/buzz/beeline-mark.json';
 import brand from '@/buzz/brand.json';
@@ -239,7 +238,9 @@ export const IdentityMark = React.memo(function IdentityMark(props: IdentityMark
   const alive = props.kind === 'agent' ? Boolean(props.alive) : false;
   const live = kind === 'agent' && alive;
   const theme = useTheme();
-  const dark = useThemeName().startsWith('dark');
+  const themeName = useThemeName();
+  const dark = themeName.startsWith('dark');
+  const stone = /^(dark|light)_stone(_|$)/.test(themeName);
   const [failedAvatar, setFailedAvatar] = useState<string | null>(null);
   // Connector speakers use their server-owned SVG marks rather than a person's photo.
   const showConnectorLogo =
@@ -336,7 +337,8 @@ export const IdentityMark = React.memo(function IdentityMark(props: IdentityMark
   const mode = dark ? 'dark' : 'light';
   // Plate polarity IS the class read: ink plate under a coloured person, hue
   // plate under an ink agent.
-  const plate = kind === 'agent' ? palette.mid : PERSON_PLATE[mode];
+  const personInks = personMarkInks(mode, stone ? 'stone' : 'brass');
+  const plate = kind === 'agent' ? palette.mid : personInks.plate;
   const ringSide = size + ALIVE_RING_PAD * 2;
 
   if (kind === 'human') {
@@ -369,10 +371,10 @@ export const IdentityMark = React.memo(function IdentityMark(props: IdentityMark
             // The initial in the person's hue; on the cream plate it carries
             // the animals' Ink contrast edge, because the hue alone is too faint.
             <Svg width={size} height={size} viewBox="0 0 100 100" testID="identity-person-initial">
-              <Rect width={100} height={100} fill={PERSON_PLATE[mode]} />
+              <Rect width={100} height={100} fill={personInks.plate} />
               {mode === 'light' ? (
                 <DrawnType view={SvgText} v="heading" size={56} x={50} y={69} textAnchor="middle"
-                  fill={INK} stroke={INK} strokeWidth={5} strokeLinejoin="round">
+                  fill={personInks.outline} stroke={personInks.outline} strokeWidth={5} strokeLinejoin="round">
                   {personInitial(name, handle)}
                 </DrawnType>
               ) : null}

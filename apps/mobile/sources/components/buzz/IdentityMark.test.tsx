@@ -3,7 +3,7 @@ import * as React from 'react';
 import { act, create } from 'react-test-renderer';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 
-const theme = vi.hoisted(() => ({ dark: true }));
+const theme = vi.hoisted(() => ({ dark: true, palette: 'brass' as 'brass' | 'stone' }));
 vi.mock('react-native', () => {
   const host = (name: string) => (props: any) => React.createElement(name, props, props.children);
   return { StyleSheet: { create: (value: unknown) => value }, Platform: { OS: 'android' }, View: host('View'), Image: host('Image') };
@@ -15,7 +15,7 @@ vi.mock('react-native-svg', () => {
 });
 vi.mock('tamagui', async () => ({
   ...(await import('@/ui/screens/transcript/grammar-hosts.test-support')).tamaguiHosts(),
-  useThemeName: () => (theme.dark ? 'dark_brass' : 'light_brass'),
+  useThemeName: () => `${theme.dark ? 'dark' : 'light'}_${theme.palette}`,
 }));
 vi.mock('lucide-react-native', async () => (await import('@/ui/screens/transcript/grammar-hosts.test-support')).lucideHosts());
 vi.mock('react-native-safe-area-context', () => ({ useSafeAreaInsets: () => ({ top: 0, bottom: 0, left: 0, right: 0 }) }));
@@ -36,7 +36,7 @@ async function render(element: React.ReactElement) {
 const letters = (tree: any) => tree.root.findAll((node: any) => node.type === 'SvgText');
 
 describe('person marks', () => {
-  afterEach(() => { theme.dark = true; });
+  afterEach(() => { theme.dark = true; theme.palette = 'brass'; });
 
   it('draws the display name initial in the person hue on the dark person plate', async () => {
     const tree = await render(<IdentityMark kind="human" seed="pk-dan" name="dan" handle="lunchbox" face="fox" />);
@@ -58,6 +58,27 @@ describe('person marks', () => {
     expect(glyphs[0].props.fill).toBe(INK);
     expect(glyphs[1].props.stroke).toBeUndefined();
     expect(tree.root.findAll((node: any) => node.type === 'Rect')[0].props.fill).toBe(PERSON_PLATE.light);
+  });
+
+  it.each([
+    ['brass', 'light', '#F5EEE2', '#14091A'],
+    ['brass', 'dark', '#0f0a13', null],
+    ['stone', 'light', '#f5f5f4', '#1c1917'],
+    ['stone', 'dark', '#222222', null],
+  ] as const)('puts the %s %s letter on its plate with its outline', async (palette, mode, plate, outline) => {
+    theme.palette = palette;
+    theme.dark = mode === 'dark';
+    const tree = await render(<IdentityMark kind="human" seed="pk-dan" name="Dan" />);
+    expect(tree.root.findAll((node: any) => node.type === 'Rect')[0].props.fill).toBe(plate);
+    const glyphs = letters(tree);
+    expect(glyphs.at(-1).props.fill).toBe(identityPalette('pk-dan', 'human').mid);
+    if (outline) {
+      expect(glyphs).toHaveLength(2);
+      expect(glyphs[0].props.stroke).toBe(outline);
+      expect(glyphs[0].props.fill).toBe(outline);
+    } else {
+      expect(glyphs).toHaveLength(1);
+    }
   });
 
   it('names the tile once as an image', async () => {

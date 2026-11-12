@@ -4,18 +4,18 @@ import { View, type ViewProps } from 'react-native';
 import { GestureHandlerRootView } from 'react-native-gesture-handler';
 import { useReanimatedKeyboardAnimation } from 'react-native-keyboard-controller';
 import Reanimated, { useAnimatedStyle } from 'react-native-reanimated';
-import { beelineThemes } from '@/buzz/groknight';
+import { canvasColor } from '@/buzz/groknight';
 import { useTheme } from 'tamagui';
 import { typeStyle, useTextScale, type ColorToken, type Variant } from './grammar';
 
 /**
  * The app root, mounted above the grammar's theme (part of the grammar, kept
  * apart so screens and their tests do not load the gesture runtime): fills the
- * window on the canvas colour of the current mode. Desktop windows keep their
- * own chrome.
+ * window on the canvas colour of the current mode and colour set. Desktop
+ * windows keep their own chrome.
  */
-export function AppRoot({ children, desktop, mode, ...rest }: React.ComponentProps<typeof GestureHandlerRootView> & { desktop: boolean; mode: 'light' | 'dark' }) {
-    const canvas = beelineThemes[mode === 'dark' ? 'obsidian' : 'bone'].bgBase;
+export function AppRoot({ children, desktop, mode, palette, ...rest }: React.ComponentProps<typeof GestureHandlerRootView> & { desktop: boolean; mode: 'light' | 'dark'; palette: 'brass' | 'stone' }) {
+    const canvas = canvasColor(mode, palette);
     return <GestureHandlerRootView {...rest} style={desktop ? { flex: 1 } : { flex: 1, backgroundColor: canvas }}>{children}</GestureHandlerRootView>;
 }
 

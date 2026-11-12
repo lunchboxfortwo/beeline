@@ -434,6 +434,16 @@ export const stonePalette: Record<'dark' | 'light', Partial<Record<keyof Beeline
     },
 };
 
+/**
+ * The window canvas under the grammar's theme, for the layers mounted above it
+ * (native root, system bars, navigation container, web body): the colour set's
+ * own canvas in the current mode.
+ */
+export function canvasColor(mode: 'dark' | 'light', palette: 'brass' | 'stone'): string {
+    return (palette === 'stone' ? stonePalette[mode].bgBase : undefined)
+        ?? beelineThemes[mode === 'dark' ? 'obsidian' : 'bone'].bgBase;
+}
+
 /** The one scrim behind every sheet. */
 export const SCRIM = 'rgba(0,0,0,0.8)';
 
