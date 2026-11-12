@@ -88,7 +88,7 @@ describe('agent invitation concordance', () => {
     expect(AGENT_INVITATION_OTHER_STARTS).toMatchSnapshot();
     const picker = readFileSync(new URL('../../mobile/sources/ui/screens/people/AddAgentSheet.tsx', import.meta.url), 'utf8');
     expect(picker).not.toContain('Join my Beeline Room: join.usebeeline.app');
-    expect(picker).toContain('line={invitationGuide.other}');
+    expect(picker).not.toContain('invitationGuide.other');
     expect(picker).not.toContain('agentInvitationJoinLine');
     expect(picker).toContain('invitationGuide?.lines[harness.id]');
     const projected = agentInvitationPickerGuide();

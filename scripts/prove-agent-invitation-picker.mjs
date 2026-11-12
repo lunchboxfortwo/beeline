@@ -5,7 +5,7 @@ import { resolve } from 'node:path';
 import { createRequire } from 'node:module';
 import { build } from 'esbuild';
 import { chromium } from 'playwright';
-import { agentInvitationJoinLine, agentInvitationPickerGuide, AGENT_INVITATION_OTHER_STARTS } from '../packages/api-contract/src/agent-invitation-guide.ts';
+import { agentInvitationJoinLine, agentInvitationPickerGuide } from '../packages/api-contract/src/agent-invitation-guide.ts';
 const root = resolve(import.meta.dirname, '..');
 const mobile = createRequire(resolve(root, 'apps/mobile/package.json'));
 const out = resolve(root, '.beeline-proof/agent-invitations/picker');
@@ -38,8 +38,6 @@ try {
   await page.setContent('<div id="root"></div>');
   await page.addScriptTag({content:result.outputFiles[0].text});
   await page.getByTestId('agent-external').click();
-  await page.getByLabel('Copy ChatGPT, Cursor and Goose setup steps').click();
-  assert.equal(await page.evaluate(()=>window.copied),AGENT_INVITATION_OTHER_STARTS);
   for(const id of ['grok','muse','claude','codex','gemini','opencode','pi','hermes','zcode']) {
    await page.getByTestId(`harness-${id}`).click();
    await page.getByLabel(/^Copy .* join line$/).click();
@@ -47,21 +45,12 @@ try {
    await page.screenshot({path:resolve(out,`${id}-${device}.png`),fullPage:true});
    await page.getByRole('button',{name:'Back',exact:true}).click();
   }
-  // Follow only navigation named in the copied directions, from their own screen.
-  await page.getByLabel('Copy ChatGPT, Cursor and Goose setup steps').click();
-  const copied = await page.evaluate(()=>window.copied);
-  const route = copied.match(/Cursor and Goose: from "([^"]+)", tap "([^"]+)" to "([^"]+)", then tap "([^"]+)"/);
-  assert.ok(route, 'Copied Cursor/Goose directions must name each navigation step');
-  assert.equal(await page.getByRole('heading').innerText(), route[1]);
-  await page.getByRole('button',{name:route[2],exact:true}).click();
-  assert.equal(await page.getByRole('heading').innerText(), route[3]);
-  await page.getByRole('button',{name:route[4],exact:true}).click();
-  assert.equal(await page.getByRole('heading').innerText(), route[4]);
-  assert.match(await page.locator('body').innerText(),/Codex managed helper: not verified/);
+  await page.getByRole('button',{name:'Back',exact:true}).click();
+  await page.getByTestId('agent-create').click();
   await page.getByLabel('Copy connect command').click();
   assert.equal(await page.evaluate(()=>window.copied),'npx usebeeline connect REDACTED');
   await page.close();
  }
  writeFileSync(resolve(out,'result.json'),JSON.stringify({reproduction:'onboarding-picker-1',pass:true,adapter:'production AddAgentSheet with DOM native-control adapters; no native-device claim'},null,2));
- console.log('Reproduction onboarding-picker-1: People → Agents + → every harness → copy canonical steps; other paths and computer-only helper guidance pass.');
+ console.log('Reproduction onboarding-picker-1: People → Agents + → every harness → copy canonical steps; computer-only helper command passes.');
 } finally {await browser.close();}
