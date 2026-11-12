@@ -26,7 +26,7 @@ const PUSH_LEVEL_DETAILS: Readonly<Record<PushLevel, string>> = {
 };
 const SPEAKING_SPEED_LABELS = { 1.15: 'Normal', 1.3: 'Medium', 1.5: 'Fast' } as const;
 const APPEARANCES = [['system', 'System'], ['light', 'Light'], ['dark', 'Dark']] as const;
-const PALETTES = [['brass', 'Brass', 'Aubergine, Bone and brass. Default.'], ['stone', 'Stone', 'Neutral Stone on the same components.']] as const;
+const PALETTES = [['brass', 'Brass', 'Aubergine, Bone and brass.'], ['stone', 'Stone', 'Neutral Stone on the same components. Default.']] as const;
 const capitalize = (text: string) => text.charAt(0).toUpperCase() + text.slice(1);
 const open = (url: string) => () => void openExternalUrl(url).catch(() => undefined);
 

@@ -91,3 +91,11 @@ export function migrateSystemAppearance(): void {
   saveAppearanceChoice('system');
   mmkv.set('appearance-system-v1', 'done');
 }
+
+/** Move existing installations to the Stone colour set once. A Brass choice
+ * made after this runs is kept, because the marker stops a second move. */
+export function migrateStonePalette(): void {
+  if (mmkv.getString('palette-stone-v1') === 'done') return;
+  saveLocalSettings({ ...loadLocalSettings(), palette: 'stone' });
+  mmkv.set('palette-stone-v1', 'done');
+}

@@ -1,6 +1,6 @@
 import { Appearance } from 'react-native';
 import type { LocalSettings } from '@/sync/localSettings';
-import { loadLocalSettings, migrateSystemAppearance } from '@/sync/persistence';
+import { loadLocalSettings, migrateStonePalette, migrateSystemAppearance } from '@/sync/persistence';
 
 export function resolveAppAppearance(
   appearance: LocalSettings['appearance'],
@@ -12,5 +12,6 @@ export function resolveAppAppearance(
 /** Run before any settings consumers mount. */
 export function seedAppAppearanceFromSystem(): 'light' | 'dark' {
   migrateSystemAppearance();
+  migrateStonePalette();
   return resolveAppAppearance(loadLocalSettings().appearance);
 }
