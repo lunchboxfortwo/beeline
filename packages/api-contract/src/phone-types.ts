@@ -190,6 +190,7 @@ export type RoomViewHeader = {
   readonly name: string;
   readonly about?: string;
   readonly avatar?: string;
+  readonly favicon?: string;
   readonly visibility?: 'public' | 'invite-only';
   /** Agent configured to review repository corners opened from this Room. */
   readonly reviewerAgentId?: string;
@@ -469,6 +470,8 @@ export type NeedsYouItemView = {
   readonly roomId: string;
   /** Room or corner name; for a DM, the other participant's name. */
   readonly roomName: string;
+  readonly roomAvatar?: string;
+  readonly roomFavicon?: string;
   readonly roomKind: 'room' | 'corner' | 'direct';
   /** For a corner, its parent Room's name. */
   readonly parentRoomName?: string;

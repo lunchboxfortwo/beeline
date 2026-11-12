@@ -1,3 +1,4 @@
+import { RepositoryMark } from './RepositoryMark';
 import { IndexRow, IndexRowInsetContext, InlineRow } from './IndexRow';
 import { Button } from './Button';
 import { ErrorBanner } from './ErrorBanner';
@@ -166,12 +167,12 @@ export function RepositoryChoice({
   const loadingRow = <IndexRow title="Loading GitHub…" tone="quiet" testID={`${p}-repo-loading`} />;
   const linkRow = () => {
     const parts = linkRepo ? splitFullName(linkRepo) : null;
-    return <IndexRow title={parts?.name ?? 'Choose a repo'} description={parts?.owner ?? undefined}
+    return <IndexRow leading={linkRepo ? <RepositoryMark avatarUrl={linkRepo.avatarUrl} faviconUrl={linkRepo.faviconUrl} size={28} /> : undefined} title={parts?.name ?? 'Choose a repo'} description={parts?.owner ?? undefined}
       accessibilityLabel={linkRepo ? `Linked repository ${repoFullName(linkRepo) ?? linkRepo.name}` : 'Choose a repo'}
       disabled={busy} onPress={onOpenList} chevron="right" testID={`${p}-repo-link`} />;
   };
   const createRow = () => <View testID={`${p}-repo-create`}>
-    <IndexRow title={selectedInstallation?.accountLogin ?? ''} disabled={busy}
+    <IndexRow leading={<RepositoryMark avatarUrl={selectedInstallation?.accountAvatarUrl} faviconUrl={selectedInstallation?.faviconUrl} size={28} />} title={selectedInstallation?.accountLogin ?? ''} disabled={busy}
       accessibilityLabel={`Owner ${selectedInstallation?.accountLogin ?? ''}, change`}
       accessibilityState={{ expanded: ownerMenuOpen }} onPress={() => setOwnerMenuOpen(!ownerMenuOpen)}
       chevron={ownerMenuOpen ? 'up' : 'down'} testID={`${p}-repo-owner`} />

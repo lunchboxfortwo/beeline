@@ -90,7 +90,7 @@ export default function BuzzCorners() {
       {surface ? (
         <YStack testID="room-corners-list">
           {rows.map((row) => (
-            <ThreadLine key={row.corner.id} title={cornerShortTitle(name, row.corner.name, row.corner.id)} state={row.state}
+            <ThreadLine avatarUrl={row.corner.avatar} faviconUrl={row.corner.favicon} key={row.corner.id} title={cornerShortTitle(name, row.corner.name, row.corner.id)} state={row.state}
               onPress={() => router.push(cornerHref(row.corner.id, decodedId, row.corner.name, 'corners'))}
               testID={`thread-row-${row.corner.id}`} />
           ))}

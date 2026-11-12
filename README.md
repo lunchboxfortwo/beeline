@@ -16,6 +16,8 @@
 
 Connect the coding agent you already run to a Room in the Beeline app. Tag it like a teammate. New agents get a plain handle in each Workspace, with a number only for a local clash. Existing handles stay unchanged. Work starts from messages, decisions and schedules you create; idle time never sends a follow-up nudge. Unfinished requests wait for it to reconnect. Agent message reads start with the newest messages. Answered tags and closed conversations leave its owed list, including answers posted by a helper without an explicit threaded reply. Editing a scheduled task keeps its title unless you rename it. On return, the agent takes one turn per place to handle what needs attention now, including private orders, instead of replaying every missed notification; you see its answer or a single failure message.
 
+People use their uploaded picture or stored Google/GitHub photo. Repository chats and threads use their GitHub owner's picture, with a favicon fallback. Agent profiles show the reported runtime model and thinking level, keeping saved next-session choices separate. Joined sessions show connected while their existing delivery stream is open. Chat info counts all finished threads, and invites offer Copy link and Share.
+
 If a turn crashes before it can start, its place shows the failure reason and its sender receives a failure report. Repeated failures send one update until a turn succeeds. Repository corners prepare shared package exports before the first agent turn. Agents cannot order themselves; they continue the work in their current turn.
 
 Linux Codex adapter setup includes the optional platform package required to launch Codex. Managed adapter installs use exact versions selected by the helper's release-age policy.

@@ -1,12 +1,12 @@
+import { memberPresenceSql } from '../member-presence.js';
 import { phoneIdentity as identity, type PhoneIdentityRow as IdentityRow } from '../phone-identity.js';
-import { mcpClientName } from '../rooms-mcp-logos.js';
 import { agentUsageColumns, projectAgentUsage } from '../agent-usage.js';
 import { ROOM_VIEW_CHAT_LIMIT, WORKSPACE_MEMBER_PAGE_SIZE } from '@beeline/api-contract/phone';
 import type { RoomViewIdentity, RoomViewMember, WorkspaceAgentView, WorkspaceMemberListQuery, WorkspaceMemberListView } from '@beeline/api-contract/phone';
 import type { PhoneContext } from './context.js';
 import { MemberRow, RosterAgentRow, mcpClientIdentitySql } from './types.js';
 import { phoneOptionalEnrichment } from './optional-enrichment.js';
-import { reviveDates, selectedModelLabel, projectAgentPresence } from './read-projection.js';
+import { reviveDates, runtimeModelLabel, projectAgentPresence } from './read-projection.js';
 
 
 
@@ -118,9 +118,7 @@ import { reviveDates, selectedModelLabel, projectAgentPresence } from './read-pr
             presence.updated_at presence_updated_at
           FROM memberships member
           JOIN LATERAL(
-            SELECT body,updated_at FROM live_outputs
-            WHERE agent_id=member.identity_id AND kind='presence'
-            ORDER BY updated_at DESC LIMIT 1
+            ${memberPresenceSql('member.identity_id')}
           ) presence ON true
           WHERE member.workspace_id=$1 AND member.room_id IS NULL
             AND member.removed_at IS NULL AND member.identity_id=ANY($2::text[])`,
@@ -147,14 +145,12 @@ import { reviveDates, selectedModelLabel, projectAgentPresence } from './read-pr
   }
 
 
-  /** Roster agent rows with their selected model and owner, as every roster read shows them. */
+  /** Roster agent rows with their reported runtime model and owner, as every roster read shows them. */
   export function phoneProjectWorkspaceAgents(ctx: PhoneContext, rows: MemberRow[], configs: RosterAgentRow[]): WorkspaceAgentView[] {
     const agentConfig = new Map(configs.map((row) => [row.id, row]));
     return phoneProjectMembers(ctx, rows, null).map((member) => {
       const config = agentConfig.get(member.identity.pubkey);
-      const model = config?.mcp_client
-        ? mcpClientName(config.mcp_client.name, config.mcp_client.redirects)
-        : config ? selectedModelLabel(config.selected_model, config.model_catalog ?? []) : undefined;
+      const model = config ? runtimeModelLabel(config.model_catalog ?? []) : undefined;
       // Usage columns are owner-filtered in SQL; other viewers' rows carry nulls.
       const usage = (config) ? projectAgentUsage(config) : undefined;
       return {
@@ -203,9 +199,7 @@ import { reviveDates, selectedModelLabel, projectAgentPresence } from './read-pr
            presence.updated_at presence_updated_at
          FROM memberships member
          JOIN LATERAL(
-           SELECT body,updated_at FROM live_outputs
-           WHERE agent_id=member.identity_id AND kind='presence'
-           ORDER BY updated_at DESC LIMIT 1
+           ${memberPresenceSql('member.identity_id')}
          ) presence ON true
          WHERE member.workspace_id=$1 AND ($2::uuid IS NULL AND member.room_id IS NULL OR member.room_id=$2)
            AND member.removed_at IS NULL AND ($3::text IS NULL OR member.identity_id=$3)`,
@@ -223,10 +217,7 @@ import { reviveDates, selectedModelLabel, projectAgentPresence } from './read-pr
 
   export function phoneProjectMembers(ctx: PhoneContext, rows: readonly MemberRow[], roomId: string | null): RoomViewMember[] {
     return rows.map((row) => {
-      const model = row.kind === 'agent'
-        ? row.mcp_client ? mcpClientName(row.mcp_client.name, row.mcp_client.redirects)
-          : selectedModelLabel(row.selected_model ?? null, row.model_catalog ?? [])
-        : undefined;
+      const model = row.kind === 'agent' ? runtimeModelLabel(row.model_catalog ?? []) : undefined;
       return {
         identity: identity(row, ctx.publicOrigin),
         role: row.role,

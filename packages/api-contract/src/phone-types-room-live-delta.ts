@@ -573,6 +573,8 @@ export type CornerListView = {
   readonly corners: readonly CornerListItem[];
   /** On an archived page: the cursor that reads the next page. Absent on the last one. */
   readonly nextArchived?: string;
+  /** Total finished corners, independent of the archived page size. */
+  readonly archivedCount?: number;
   /** Cursor for the next page of open corners. */
   readonly nextOpen?: string;
   /** On the first open page of a top-level Room: the Room list row's corner

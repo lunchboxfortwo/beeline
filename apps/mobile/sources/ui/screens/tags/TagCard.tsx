@@ -1,6 +1,7 @@
+import { RepositoryMark } from '@/components/buzz/RepositoryMark';
 import React, { useEffect, useState } from 'react';
 import { Card, Image, ListItem, RadioGroup, XStack, YStack } from 'tamagui';
-import { Check, CornerDownRight, MessagesSquare } from 'lucide-react-native';
+import { Check, CornerDownRight } from 'lucide-react-native';
 import type { AttachmentReference } from '@beeline/buzz-client';
 import type { NeedsYouActionView, NeedsYouApprovalView, NeedsYouItemView } from '@beeline/api-contract/phone';
 import { artifactImageSource, releaseArtifactImageSource } from '@/buzz/artifact-link';
@@ -15,21 +16,12 @@ export type TagCardActions = {
   openImage: (item: NeedsYouItemView, image: AttachmentReference) => void;
 };
 
-/** The chat's mark at 20: today's chats carry no picture of their own. */
-function ChatMark() {
-  return (
-    <YStack width={20} height={20} borderRadius="sm" backgroundColor="highlight" alignItems="center" justifyContent="center">
-      <Glyph icon={MessagesSquare} size={14} />
-    </YStack>
-  );
-}
-
 /** One header on every card: the chat, then ↳ the thread or "· in the chat", the age in brass. */
 function Where({ item, age }: { item: NeedsYouItemView; age: string }) {
   const place = tagPlace(item);
   return (
     <XStack gap="2" alignItems="flex-start" testID={`tag-where-${item.messageId}`}>
-      <ChatMark />
+      <RepositoryMark avatarUrl={item.roomAvatar} faviconUrl={item.roomFavicon} size={20} />
       <XStack flex={1} minWidth={0} gap="1" alignItems="flex-start">
         {place.chat ? <Copy small strong>{place.chat}</Copy> : null}
         {place.thread ? (

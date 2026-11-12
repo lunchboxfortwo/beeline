@@ -41,13 +41,15 @@ export function useChatThreadHeader({
     const prLine = threadPrLine(roomSurface?.cornerLifecycle, isArchived);
     return {
       chatTag: parentName ? (roomTitle(parentName) ?? null) : null,
+      repositoryAvatar: roomSurface?.room.avatar,
+      repositoryFavicon: roomSurface?.room.favicon,
       title: cornerShortTitle(parentName, resolvedChannelName, decodedId),
       ...(state ? { state } : isArchived ? { state: 'archived' as const } : {}),
       running,
       ...(prLine ? { prLine } : {}),
       ...(objective.trim() ? { objective: objective.trim() } : {}),
     };
-  }, [decodedId, isArchived, isCorner, objective, parentName, resolvedChannelName, roomSurface?.cornerLifecycle, running, state]);
+  }, [decodedId, isArchived, isCorner, objective, parentName, resolvedChannelName, roomSurface?.cornerLifecycle, roomSurface?.room.avatar, roomSurface?.room.favicon, running, state]);
 
   const openBrief = useMemo(
     () => (isCorner && hasBrief ? () => openPlace({ kind: 'brief', roomId: decodedId }, isDesktop) : undefined),

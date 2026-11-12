@@ -63,15 +63,17 @@ describe('person marks', () => {
     expect(tile.props.accessibilityLabel).toBe('Kai, person');
   });
 
-  it('fills the same box with an uploaded photo, and ignores other relay pictures', async () => {
+  it('fills the same box with uploaded and stored provider photos', async () => {
     const photo = 'https://beeline.example/v1/person-avatars/11111111-1111-4111-8111-111111111111';
     const uploaded = await render(<IdentityMark kind="human" seed="pk" name="Dan" avatarUrl={photo} />);
     const image = uploaded.root.find((node: any) => node.type === 'Image');
     expect(image.props.source).toEqual({ uri: photo });
     expect(letters(uploaded)).toHaveLength(0);
     const provider = await render(<IdentityMark kind="human" seed="pk" name="Dan" avatarUrl="https://lh3.googleusercontent.com/a/photo" />);
-    expect(provider.root.findAll((node: any) => node.type === 'Image')).toHaveLength(0);
-    expect(letters(provider)[0].props.children).toBe('D');
+    expect(provider.root.find((node: any) => node.type === 'Image').props.source.uri).toBe('https://lh3.googleusercontent.com/a/photo');
+    expect(letters(provider)).toHaveLength(0);
+    const github = await render(<IdentityMark kind="human" seed="pk" name="Dan" avatarUrl="https://avatars.githubusercontent.com/u/42" />);
+    expect(github.root.find((node: any) => node.type === 'Image').props.source.uri).toBe('https://avatars.githubusercontent.com/u/42');
   });
 
   it('keeps agents as animals', async () => {

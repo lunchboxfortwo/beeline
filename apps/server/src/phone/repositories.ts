@@ -213,6 +213,7 @@ import { unix } from './values.js';
         accountId: row.account_id ?? row.account_login,
         accountLogin: row.account_login,
         accountType: row.account_type,
+        faviconUrl: 'https://github.githubassets.com/favicons/favicon.png',
         ...(row.account_avatar_url ? { accountAvatarUrl: row.account_avatar_url } : {}),
         repositorySelection: row.repository_selection,
         status: row.status,

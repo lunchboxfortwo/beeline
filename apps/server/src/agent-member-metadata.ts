@@ -1,3 +1,4 @@
+import { memberPresenceSql } from './member-presence.js';
 import { cornerReviewerSql } from './corner-reviewer.js';
 import type { AgentMemberMetadata } from '@beeline/api-contract/daemon';
 import { AGENT_REACHABLE_HORIZON_MS } from '@beeline/api-contract/agent-access';
@@ -19,8 +20,7 @@ export async function agentMemberMetadata<T extends {
        a.machine_name,
        (SELECT lo.body->>'status'='online' AND
           (lo.body->>'held'='true' OR lo.updated_at >= now()-make_interval(secs => $2::double precision / 1000))
-        FROM live_outputs lo WHERE lo.agent_id=a.agent_id AND lo.kind='presence'
-        ORDER BY lo.updated_at DESC LIMIT 1) online
+        FROM (${memberPresenceSql('a.agent_id')}) lo) online
      FROM agents a JOIN identities owner ON owner.id=a.owner_id
      WHERE a.agent_id=ANY($1::text[])`,
     [ids, AGENT_REACHABLE_HORIZON_MS,roomId ?? null],
@@ -30,7 +30,8 @@ export async function agentMemberMetadata<T extends {
   const details = roomId ? await database.query<AgentUsageRow & {
     agent_id: string; selected_model: string | null;
     reviewer_agent_id: string | null;
-  }>(`SELECT a.agent_id,a.selected_model,${agentUsageColumns('a', 'a.owner_id')},
+  }>(`SELECT a.agent_id,(SELECT axis->>'currentValue' FROM jsonb_array_elements(a.model_catalog) axis
+         WHERE axis->>'category'='model' LIMIT 1) selected_model,${agentUsageColumns('a', 'a.owner_id')},
        ${cornerReviewerSql('room')} reviewer_agent_id
      FROM agents a CROSS JOIN rooms room
      JOIN rooms parent ON parent.id=COALESCE(room.parent_id,room.id)

@@ -3,6 +3,7 @@ import * as React from 'react';
 import { act, create, type ReactTestRenderer } from 'react-test-renderer';
 import { afterEach, beforeEach, expect, it, vi } from 'vitest';
 
+vi.mock('@/components/buzz/RepositoryMark', () => ({ RepositoryMark: (props: any) => React.createElement('RepositoryMark', props) }));
 vi.mock('tamagui', async () => (await import('./tamagui-hosts.test-support')).tamaguiHosts());
 vi.mock('lucide-react-native', async () => (await import('./tamagui-hosts.test-support')).lucideHosts());
 vi.mock('react-native-svg', async () => (await import('./tamagui-hosts.test-support')).svgHosts());
@@ -84,4 +85,15 @@ it('holding the row toggles its pin instead of opening it', () => {
   expect(onPin).toHaveBeenCalledWith(ROOM);
   expect(onOpen).not.toHaveBeenCalled();
   expect(tree.root.findAll((node: any) => node.props?.testID === `room-${ROOM}-new-thread`)).toHaveLength(0);
+});
+
+it('uses the parent repository mark for both a chat and its thread row', () => {
+  let tree!: ReactTestRenderer;
+  const marked = { ...item, room: {...item.room,avatar:'https://avatars.githubusercontent.com/u/42',favicon:'https://github.githubassets.com/favicons/favicon.png'},
+    openCorners:[{id:'thread',name:'Thread',state:'idle',lifecycle:{lifecycle:'idle',checks:'unknown'}}] } as unknown as ChatListItem;
+  act(() => { tree = create(<ChatRow item={marked} now={1_700_000_000_000} first onOpen={vi.fn()} onPin={vi.fn()} onOpenThread={vi.fn()} />); });
+  const marks = tree.root.findAll((node:any)=>node.type==='RepositoryMark');
+  expect(marks).toHaveLength(2);
+  for (const mark of marks) expect(mark.props).toMatchObject({avatarUrl:marked.room.avatar,faviconUrl:marked.room.favicon});
+  act(() => tree.unmount());
 });

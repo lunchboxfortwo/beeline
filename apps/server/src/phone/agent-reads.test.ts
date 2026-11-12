@@ -42,6 +42,10 @@ describe('agent profile schedules and chats', () => {
          ($1,$2,$6,'member'),($1,$4,$6,'member')`,
       [workspace, shared, hidden, archived, agent, viewer],
     );
+    await database.query(`UPDATE agents SET selected_model='next-model',selected_effort='low',model_catalog=$2::jsonb WHERE agent_id=$1`, [agent, JSON.stringify([
+      {id:'model',category:'model',currentValue:'running-model',options:[{id:'running-model',name:'Running model'}]},
+      {id:'effort',category:'reasoning_effort',currentValue:'high',options:[{id:'high',name:'High'}]},
+    ])]);
     const cadence = JSON.stringify({ kind: 'interval', everyMinutes: 1440 });
     const schedule = (id: string, roomId: string, nextRunAt: string) =>
       database.query(
@@ -55,6 +59,7 @@ describe('agent profile schedules and chats', () => {
     await schedule('44444444-4444-4444-8444-000000000004', archived, '2030-01-01T00:00:00Z');
 
     const detail = await new PhoneService(database, 'https://server.example').readAgent(workspace, agent, viewer);
+    expect(detail?.runtimeSelection).toEqual({ model: 'running-model', effort: 'high' });
     expect(detail?.rooms).toEqual([{ id: shared, name: 'Shared', visibility: 'invite-only' }]);
     expect(detail?.schedules?.map((row) => [row.id, row.roomId, row.corner?.name])).toEqual([
       ['44444444-4444-4444-8444-000000000002', sharedCorner, 'Shared thread'],

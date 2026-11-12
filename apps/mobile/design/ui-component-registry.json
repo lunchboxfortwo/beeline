@@ -413,6 +413,9 @@
       "loadingRow",
       "ownerMenu"
     ],
+    "components/buzz/RepositoryMark.tsx": [
+      "RepositoryMark"
+    ],
     "components/buzz/RoomDeckComposeMenu.tsx": [
       "ComposeGlyph",
       "RoomDeckComposeMenu"

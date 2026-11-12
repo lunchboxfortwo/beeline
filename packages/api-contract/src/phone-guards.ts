@@ -166,6 +166,7 @@ export function readHeader(value: unknown): RoomViewHeader | null {
     ...field('parentId', parentId),
     ...field('about', typeof item.about === 'string' ? item.about : undefined),
     ...field('avatar', typeof item.avatar === 'string' ? item.avatar : undefined),
+    ...field('favicon', typeof item.favicon === 'string' ? item.favicon : undefined),
     ...field('visibility', oneOf(item.visibility, ['public', 'invite-only'])),
     ...field('reviewerAgentId', reviewerAgentId),
   };

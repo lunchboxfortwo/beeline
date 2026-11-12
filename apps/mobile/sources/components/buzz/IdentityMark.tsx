@@ -136,9 +136,15 @@ export function personInitial(name?: string, handle?: string): string {
   return (Array.from(source)[0] ?? '?').toUpperCase();
 }
 
-/** A personal photo the server stored durably for this person (`/v1/person-avatars/`). */
+/** An uploaded photo or the sign-in provider photo stored on this identity. */
 export function isPersonPictureUrl(avatarUrl?: string): boolean {
-  return Boolean(avatarUrl && /\/v1\/person-avatars\/[0-9a-f-]{36}$/i.test(avatarUrl));
+  if (!avatarUrl) return false;
+  if (/\/v1\/person-avatars\/[0-9a-f-]{36}$/i.test(avatarUrl)) return true;
+  try {
+    const url = new URL(avatarUrl);
+    return url.protocol === 'https:' && (url.hostname === 'avatars.githubusercontent.com' ||
+      url.hostname.endsWith('.googleusercontent.com'));
+  } catch { return false; }
 }
 
 function cellFill(cell: CypherCell, palette: IdentityPalette): string {
@@ -233,14 +239,11 @@ export const IdentityMark = React.memo(function IdentityMark(props: IdentityMark
   const { theme } = useUnistyles();
   const groknight = theme.buzz;
   const [failedAvatar, setFailedAvatar] = useState<string | null>(null);
-  // Connector identities are fixed server-owned speakers, not people opting
-  // into profile photos. Their logo URL is the identity mark itself, so this
-  // narrow lane does not weaken the product-wide no-photo rule for humans.
+  // Connector speakers use their server-owned SVG marks rather than a person's photo.
   const showConnectorLogo =
     kind === 'human' && isConnectorLogoUrl(avatarUrl) && failedAvatar !== avatarUrl;
-  // Pictures: a workspace's upload, an agent's generated portrait, and a
-  // person's own uploaded photo. Any other relay URL (a sign-in provider's
-  // photo) stays inert, so a person shows their initial until they upload.
+  // The server keeps uploaded photos ahead of stored sign-in provider photos.
+  // Both fill the same identity tile; a missing or failed image uses the initial.
   const showGeneratedAvatar =
     kind === 'agent' && Boolean(isGeneratedAgentAvatarUrl(avatarUrl) && failedAvatar !== avatarUrl);
   const showPersonPicture =

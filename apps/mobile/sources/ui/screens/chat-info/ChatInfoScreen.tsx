@@ -1,7 +1,8 @@
+import { RepositoryMark } from '@/components/buzz/RepositoryMark';
 import React, { useEffect, useMemo, useState } from 'react';
 import { router, type Href } from 'expo-router';
 import { Card, ListItem, Separator, Switch, XStack, YStack } from 'tamagui';
-import { Check, MessagesSquare } from 'lucide-react-native';
+import { Check } from 'lucide-react-native';
 import { cornerShortTitle, roomTitle } from '@beeline/api-contract/phone';
 import { Btn, Copy, Glyph, HEIGHT, Row, Screen, Section, SheetFrame, SheetRow, T } from '@/ui/grammar';
 import { closePanel, openPlace } from '@/ui/shell/panel';
@@ -124,9 +125,7 @@ export function ChatInfoScreen({ roomId, close }: { roomId: string; close: () =>
         <Screen title="Chat info" back={close} testID="chat-info">
             <XStack gap="3" alignItems="center">
                 {direct ? null : (
-                    <YStack width={40} height={40} borderRadius="sm" backgroundColor="highlight" alignItems="center" justifyContent="center" testID="chat-info-mark">
-                        <Glyph icon={MessagesSquare} />
-                    </YStack>
+                    <RepositoryMark avatarUrl={room?.room.avatar} faviconUrl={room?.room.favicon} size={40} />
                 )}
                 <YStack flex={1} minWidth={0} gap="1">
                     <T v="title">{tag || name}</T>
@@ -161,11 +160,11 @@ export function ChatInfoScreen({ roomId, close }: { roomId: string; close: () =>
                 </Section>
             ) : null}
 
-            <Section title={`Finished threads · ${finished.length}`} note="moved here from the chat list" testID="finished">
+            <Section title={`Finished threads · ${corners.record?.archived?.total ?? finished.length}`} note="moved here from the chat list" testID="finished">
                 {finished.length ? finished.map((item, index) => {
                     const title = cornerShortTitle(name, item.corner.name, item.corner.id);
                     return (
-                        <Row key={item.corner.id} label={title} detail={finishedWhen(item.closedAt)}
+                        <Row leading={item.corner.avatar || item.corner.favicon ? <RepositoryMark avatarUrl={item.corner.avatar} faviconUrl={item.corner.favicon} size={28} /> : undefined} key={item.corner.id} label={title} detail={finishedWhen(item.closedAt)}
                             onPress={() => router.push(cornerHref(item.corner.id, roomId, title))}
                             last={index === finished.length - 1 && !corners.record?.archived?.next} testID={`finished-${item.corner.id}`} />
                     );

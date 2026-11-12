@@ -639,6 +639,7 @@ export function readCornerListView(value: unknown): CornerListView | null {
         ? item.nextArchived
         : undefined,
     ),
+    ...field('archivedCount', typeof item.archivedCount === 'number' && Number.isSafeInteger(item.archivedCount) && item.archivedCount >= 0 ? item.archivedCount : undefined),
     ...field('nextOpen', typeof item.nextOpen === 'string' && item.nextOpen.length <= 128
       ? item.nextOpen : undefined),
     ...field('summary', readCornerSummary(item.summary)),

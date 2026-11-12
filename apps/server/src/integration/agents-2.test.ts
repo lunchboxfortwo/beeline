@@ -348,8 +348,8 @@ const fixture = monolithFixture();
       instructions: 'Be brisk and kind.',
       avatarSeed: AGENT,
     });
-    // The selection reaches the phone even before the daemon has posted any
-    // catalog: the MODEL / EFFORT rows show the current value regardless.
+    // The saved preference remains editable before a runtime report arrives;
+    // the roster must not present it as a running model.
     expect(view?.catalog).toEqual([]);
     expect(view?.selected).toEqual({ model: 'gpt-5.6' });
     expect(view?.commands).toEqual([
@@ -362,10 +362,11 @@ const fixture = monolithFixture();
     const workspace = await phone.readWorkspace(WORKSPACE, HUMAN);
     expect(workspace?.agents).toEqual([
       expect.objectContaining({
-        model: 'gpt-5.6',
         owner: { pubkey: HUMAN, kind: 'human', name: 'Owner', handle: 'owner' },
       }),
     ]);
+    expect(workspace?.agents[0]).not.toHaveProperty('model');
+    expect(view?.runtimeSelection).toBeUndefined();
     // The phone build's surface guard must accept the readAgent output as-is.
     expect(isAgentDetailView(view)).toBe(true);
   });

@@ -17,7 +17,8 @@ type Line = { id: string; title: string; state: CornerState };
  * "Threads · N active" under the chat header. The count is the Room's
  * server corner summary; opening it reads the Room's open corner pages.
  */
-export function ThreadsDropdown({ roomId, chatName, openThread }: {
+export function ThreadsDropdown({ roomId, chatName, openThread, repositoryAvatar, repositoryFavicon }: {
+    repositoryAvatar?: string; repositoryFavicon?: string;
     roomId: string; chatName: string | null; openThread: (cornerId: string) => void;
 }) {
     const summary = useRoomCornerSummary(roomId);
@@ -39,7 +40,7 @@ export function ThreadsDropdown({ roomId, chatName, openThread }: {
                     </Btn>
                 </Collapsible.Trigger>
                 <Collapsible.Content>
-                    {open ? <ThreadsDropdownList roomId={roomId} chatName={chatName} count={count}
+                    {open ? <ThreadsDropdownList repositoryAvatar={repositoryAvatar} repositoryFavicon={repositoryFavicon} roomId={roomId} chatName={chatName} count={count}
                         fallback={summary?.openCorners ?? []} openThread={openThread} /> : null}
                 </Collapsible.Content>
             </Collapsible>
@@ -48,7 +49,8 @@ export function ThreadsDropdown({ roomId, chatName, openThread }: {
     );
 }
 
-function ThreadsDropdownList({ roomId, chatName, count, fallback, openThread }: {
+function ThreadsDropdownList({ roomId, chatName, count, fallback, openThread, repositoryAvatar, repositoryFavicon }: {
+    repositoryAvatar?: string; repositoryFavicon?: string;
     roomId: string; chatName: string | null; count: number;
     fallback: readonly { id: string; name: string; state: CornerState }[];
     openThread: (cornerId: string) => void;
@@ -63,7 +65,7 @@ function ThreadsDropdownList({ roomId, chatName, count, fallback, openThread }: 
         <ScrollView maxHeight={Math.round(height * THREADS_DROPDOWN_SHARE)} testID="threads-dropdown-list">
             <YStack marginLeft="6" marginRight="4" marginTop="1" paddingLeft="3" borderLeftWidth={1} borderColor="strongStroke">
                 {lines.map((line) => (
-                    <ThreadLine key={line.id} title={line.title} state={line.state}
+                    <ThreadLine avatarUrl={repositoryAvatar} faviconUrl={repositoryFavicon} key={line.id} title={line.title} state={line.state}
                         onPress={() => openThread(line.id)} testID={`thread-row-${line.id}`} />
                 ))}
                 {more ? (

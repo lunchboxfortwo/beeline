@@ -533,7 +533,7 @@ const scope1 = fixtureScope1();
     await scope1.db.query("UPDATE agents SET selected_model='agent' WHERE agent_id=$1", [member]);
     await scope1.db.query("UPDATE identities SET name='My reviewer' WHERE id=$1", [member]);
     const roster = await scope1.phone.readWorkspaceMembers(WORKSPACE, USER, { q: 'My reviewer' });
-    expect(roster?.agents.find(agent => agent.identity.pubkey === member)?.model).toBe(label);
+    expect(roster?.agents.find(agent => agent.identity.pubkey === member)?.model).toBeUndefined();
     const profile = await scope1.phone.readAgent(WORKSPACE, member, USER);
     expect(profile?.selected?.model).toBe(label);
     expect(profile?.seededSoul).toContain(`Connected through ${label}.`);

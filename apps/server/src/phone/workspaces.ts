@@ -1,3 +1,4 @@
+import { memberPresenceSql } from '../member-presence.js';
 import { assetUrl, phoneIdentity as identity, type PhoneIdentityRow as IdentityRow } from '../phone-identity.js';
 import { ROOM_VIEW_CHAT_LIMIT, WORKSPACE_MEMBER_PAGE_SIZE } from '@beeline/api-contract/phone';
 import type { WorkspaceListView, WorkspaceMemberListQuery, WorkspaceMemberListView, WorkspaceView } from '@beeline/api-contract/phone';
@@ -200,10 +201,8 @@ import { phoneProjectMemberGrantRows } from './agent-reads.js';
     if (presenceRows.length) {
       const presence = await ctx.optionalEnrichment('member-presence',
         ctx.enrichmentDatabase.query<{ id: string; presence_body: MemberRow['presence_body'];
-          presence_updated_at: Date }>(`SELECT DISTINCT ON (agent_id) agent_id id,body presence_body,
-            updated_at presence_updated_at
-          FROM live_outputs WHERE agent_id=ANY($1::text[]) AND kind='presence'
-          ORDER BY agent_id,updated_at DESC`, [presenceRows.map((entry) => entry.id)]));
+          presence_updated_at: Date }>(`SELECT member.id, presence.body presence_body,presence.updated_at presence_updated_at
+          FROM unnest($1::text[]) member(id) JOIN LATERAL (${memberPresenceSql('member.id')}) presence ON true`, [presenceRows.map((entry) => entry.id)]));
       const byId = new Map(presence?.rows.map((entry) => [entry.id, entry]) ?? []);
       for (const entry of presenceRows) {
         entry.presence_body = byId.get(entry.id)?.presence_body ?? null;

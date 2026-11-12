@@ -1,3 +1,4 @@
+import { memberPresenceSql } from '../member-presence.js';
 import { phoneIdentity as identity } from '../phone-identity.js';
 import { cornerOwnerSql } from '../corner-worker.js';
 import { mcpClientName } from '../rooms-mcp-logos.js';
@@ -142,9 +143,7 @@ import { reviveDates, roomSchedule } from './read-projection.js';
     const presence = (await phoneOptionalEnrichment(ctx, 'member-presence',
       ctx.enrichmentDatabase.query<{
         presence_body: MemberRow['presence_body']; presence_updated_at: Date | null;
-      }>(`SELECT live.body presence_body,live.updated_at presence_updated_at
-        FROM live_outputs live WHERE live.agent_id=$1 AND live.kind='presence'
-        ORDER BY live.updated_at DESC LIMIT 1`, [agentId])));
+      }>(`SELECT live.body presence_body,live.updated_at presence_updated_at FROM (${memberPresenceSql('$1')}) live`, [agentId])));
     const presenceRow = presence?.rows[0];
     // An AI-client member's instructions live in its own app, so its profile
     // names that app instead of a made-up animal soul.
@@ -164,6 +163,8 @@ import { reviveDates, roomSchedule } from './read-projection.js';
       presence_body: presenceRow?.presence_body ?? null,
       presence_updated_at: presenceRow?.presence_updated_at ?? null,
     }], null)[0]!;
+    const runtimeModel = config.model_catalog?.find(axis => axis.category === 'model')?.currentValue;
+    const runtimeEffort = config.model_catalog?.find(axis => ['thought_level', 'effort', 'reasoning_effort'].includes(axis.category))?.currentValue;
     const recentWork = config.recent_work;
     const grants = phoneProjectAgentGrants(ctx, config.grants);
     const workPage = recentWork.slice(0, 5);
@@ -210,6 +211,10 @@ import { reviveDates, roomSchedule } from './read-projection.js';
           }
         : {}),
       catalog: config?.model_catalog ?? [],
+      ...(runtimeModel || runtimeEffort ? { runtimeSelection: {
+        ...(runtimeModel ? { model: runtimeModel } : {}),
+        ...(runtimeEffort ? { effort: runtimeEffort } : {}),
+      } } : {}),
       fastMode: Boolean(
         config?.fast_mode &&
         (!config.selected_model ||

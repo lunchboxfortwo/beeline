@@ -3,6 +3,7 @@ import React from 'react';
 import { act, create } from 'react-test-renderer';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 
+vi.mock('react-native', () => ({ Share: { share: vi.fn(async () => ({ action: 'sharedAction' })), sharedAction: 'sharedAction' } }));
 vi.mock('tamagui', async () => (await import('@/ui/screens/transcript/grammar-hosts.test-support')).tamaguiHosts());
 vi.mock('lucide-react-native', async () => (await import('@/ui/screens/transcript/grammar-hosts.test-support')).lucideHosts());
 vi.mock('react-native-safe-area-context', () => ({ useSafeAreaInsets: () => ({ top: 0, bottom: 0, left: 0, right: 0 }) }));
@@ -13,6 +14,7 @@ vi.mock('expo-clipboard', () => clipboard);
 const operation = vi.hoisted(() => vi.fn());
 vi.mock('@/sync/transport/monolith-operation', () => ({ monolithPhoneOperation: operation }));
 
+import { Share } from 'react-native';
 import { InvitePeopleSheet } from './InvitePeopleSheet';
 
 const WORKSPACE = '11111111-1111-4111-8111-111111111111';
@@ -41,7 +43,12 @@ describe('Invite people', () => {
         const tree = await open({ roomId: ROOM, roomTag: '#beeline' });
         expect(operation).toHaveBeenCalledWith('createInvite', { workspaceId: WORKSPACE });
         const link = `https://usebeeline.app/join/${encodeURIComponent(TOKEN)}`;
-        expect(text(tree)).toContain(`${link} · joins Beeline Work and #beeline`);
+        expect(text(tree)).toContain('joins Beeline Work and #beeline');
+        expect(text(tree)).toContain('Copy link');
+        expect(text(tree)).not.toContain(link);
+        const share = vi.spyOn(Share, 'share').mockResolvedValue({ action: Share.sharedAction });
+        await act(async () => { await byTestID(tree, 'invite-share-link').props.onPress(); });
+        expect(share).toHaveBeenCalledWith({ message: link });
         await act(async () => { await byTestID(tree, 'invite-copy-link').props.onPress(); });
         expect(clipboard.setStringAsync).toHaveBeenCalledWith(link);
         expect(text(tree)).toContain('Link copied');

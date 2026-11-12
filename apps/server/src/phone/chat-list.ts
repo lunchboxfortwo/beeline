@@ -1,3 +1,5 @@
+import { repositoryMarkColumnsSql } from '../repository-mark.js';
+import { memberPresenceSql } from '../member-presence.js';
 import { messageColumns } from '../message-columns.js';
 import { assetUrl, phoneIdentity as identity, type PhoneIdentityRow as IdentityRow } from '../phone-identity.js';
 import type { ChatListView, ChatListItem, RoomViewMessage } from '@beeline/api-contract/phone';
@@ -68,7 +70,7 @@ import { turnRootMessageSql } from '../agent-command.js';
          FROM workspaces w JOIN workspace_members wm ON wm.workspace_id=w.id
          WHERE w.id=$1 AND wm.identity_id=$2
        ), visible_rooms AS (
-      SELECT r.*,
+      SELECT r.*,${repositoryMarkColumnsSql('r')},
         (SELECT message.card FROM voice_calls call JOIN messages message ON message.id=call.message_id
           WHERE call.room_id=r.id AND call.ended_at IS NULL) voice_call,
         (SELECT count(*)::text FROM memberships rm WHERE rm.room_id=COALESCE(r.parent_id,r.id) AND rm.removed_at IS NULL) member_count,
@@ -190,8 +192,7 @@ import { turnRootMessageSql } from '../agent-command.js';
               THEN room.direct_participants ELSE '[]'::jsonb END
           ) participant WHERE participant<>$2 LIMIT 1)
           LEFT JOIN LATERAL(
-            SELECT body,updated_at FROM live_outputs
-            WHERE agent_id=peer.id AND kind='presence' ORDER BY updated_at DESC LIMIT 1
+            ${memberPresenceSql('peer.id')}
           ) presence ON peer.kind='agent'
           LEFT JOIN LATERAL(
             SELECT count(*)::int agent_count,
@@ -204,9 +205,7 @@ import { turnRootMessageSql } from '../agent-command.js';
             JOIN identities agent ON agent.id=member.identity_id
               AND agent.kind='agent' AND agent.hidden_from_roster=false
             LEFT JOIN LATERAL(
-              SELECT body,updated_at FROM live_outputs
-              WHERE agent_id=member.identity_id AND kind='presence'
-              ORDER BY updated_at DESC LIMIT 1
+              ${memberPresenceSql('member.identity_id')}
             ) agent_status ON true
             WHERE member.room_id=COALESCE(room.parent_id,room.id) AND member.removed_at IS NULL
           ) agent_presence ON true

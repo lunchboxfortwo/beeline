@@ -1,3 +1,4 @@
+import { RepositoryMark } from './RepositoryMark';
 import { EmptyState } from './EmptyState';
 import { ErrorBanner } from './ErrorBanner';
 import { InlineRow } from './IndexRow';
@@ -157,6 +158,7 @@ export const RepoPicker = memo(function RepoPicker({
       disabled={busy}
       key={candidate.key}
       label={repoShortName(candidate, owner)}
+      leading={<RepositoryMark avatarUrl={candidate.avatarUrl} faviconUrl={candidate.faviconUrl} size={28} />}
       selected={candidate.key === currentKey}
       onPress={() => onSelect(candidate)}
       testID={`${testIDPrefix}-candidate-${candidate.key}`}

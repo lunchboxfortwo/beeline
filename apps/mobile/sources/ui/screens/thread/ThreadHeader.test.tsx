@@ -3,6 +3,7 @@ import React from 'react';
 import { act, create } from 'react-test-renderer';
 import { beforeEach, expect, it, vi } from 'vitest';
 
+vi.mock('@/components/buzz/RepositoryMark', () => ({ RepositoryMark: (props: any) => React.createElement('RepositoryMark', props) }));
 vi.mock('tamagui', () => ({ ListItem: 'ListItem', XStack: 'XStack', YStack: 'YStack' }));
 vi.mock('lucide-react-native', () => ({ ArrowLeft: 'ArrowLeft', CornerDownRight: 'CornerDownRight', GitPullRequest: 'GitPullRequest', MoreHorizontal: 'MoreHorizontal' }));
 vi.mock('@/ui/grammar', () => ({ Btn: 'Btn', Glyph: 'Glyph', T: 'T', SafeTop: 'SafeTop', HEIGHT: { control: 44 } }));
@@ -64,5 +65,12 @@ it('keeps the bar slim, and gives it the title with a status dot once the block 
   const title = byTestID(tree, 'thread-bar-title')[0];
   expect(title.findByType('T').props.children).toBe('Reconnect keeps place');
   expect(byTestID(tree, 'thread-status-dot')[0].props.backgroundColor).toBe('added');
+  act(() => tree.unmount());
+});
+
+it('keeps the repository mark beside the parent chat in a thread header', () => {
+  let tree: any;
+  act(() => { tree = create(<ThreadBar h={{...reconnect,repositoryAvatar:'https://avatars.githubusercontent.com/u/42'}} collapsed={false} openChat={vi.fn()} />); });
+  expect(tree.root.findByType('RepositoryMark').props.avatarUrl).toBe('https://avatars.githubusercontent.com/u/42');
   act(() => tree.unmount());
 });

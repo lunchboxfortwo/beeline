@@ -808,6 +808,7 @@ export type GitHubInstallation = {
   readonly accountLogin: string;
   readonly accountType: 'User' | 'Organization';
   readonly accountAvatarUrl?: string;
+  readonly faviconUrl?: string;
   readonly repositorySelection: 'all' | 'selected';
   readonly status: 'active' | 'revoked' | 'suspended';
   readonly repositoryCount: number;

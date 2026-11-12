@@ -3,6 +3,7 @@ import * as React from 'react';
 import { act, create, type ReactTestRenderer } from 'react-test-renderer';
 import { expect, it, vi } from 'vitest';
 
+vi.mock('@/components/buzz/RepositoryMark', () => ({ RepositoryMark: (props: any) => React.createElement('RepositoryMark', props) }));
 vi.mock('tamagui', async () => (await import('./tamagui-hosts.test-support')).tamaguiHosts());
 vi.mock('lucide-react-native', async () => (await import('./tamagui-hosts.test-support')).lucideHosts());
 vi.mock('react-native-svg', async () => (await import('./tamagui-hosts.test-support')).svgHosts());
@@ -100,4 +101,18 @@ it('switches the list header to a search field with Unread and Pinned chips', ()
   expect(search).toEqual({ open: true, query: '', chips: ['unread'] });
   act(() => byTestID(tree, 'room-search-close').props.onPress());
   expect(search).toEqual(CLOSED_SEARCH);
+});
+
+it('shows repository candidate owner photos and favicon fallbacks in New chat', () => {
+  const candidates = [
+    { key: 'github:1', name: 'Beeline-Work/beeline', avatarUrl: 'https://avatars.githubusercontent.com/u/42', faviconUrl: 'https://github.githubassets.com/favicons/favicon.png' },
+    { key: 'github:2', name: 'other/repo', faviconUrl: 'https://github.githubassets.com/favicons/favicon.png' },
+    { key: 'github:3', name: 'local/repo' },
+  ];
+  const { tree } = sheet('github', { candidates });
+  for (const candidate of candidates) {
+    const mark = byTestID(tree, `repo-row-${candidate.key}`).findByType('RepositoryMark');
+    expect(mark.props).toMatchObject({ avatarUrl: candidate.avatarUrl, faviconUrl: candidate.faviconUrl });
+  }
+  expect(tree.root.findAll((node: any) => node.type === 'Icon.GitBranch')).toHaveLength(0);
 });

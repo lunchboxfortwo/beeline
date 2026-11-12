@@ -1,7 +1,8 @@
+import { RepositoryMark } from '@/components/buzz/RepositoryMark';
 import React from 'react';
 import type { View } from 'react-native';
 import { ListItem, XStack, YStack } from 'tamagui';
-import { ArrowLeft, MessagesSquare, MoreHorizontal, Settings } from 'lucide-react-native';
+import { ArrowLeft, MoreHorizontal, Settings } from 'lucide-react-native';
 import { IdentityMark } from '@/components/buzz/IdentityMark';
 import { Btn, Glyph, SafeTop, T } from '@/ui/grammar';
 import { ThreadBar, type ThreadHeaderData } from '@/ui/screens/thread/ThreadHeader';
@@ -22,6 +23,8 @@ type Props = {
   /** `#beeline` or `@handle`; null while the name has not landed. */
   title: string | null;
   memberCount: number;
+  repositoryAvatar?: string;
+  repositoryFavicon?: string;
   openChatInfo: () => void;
   openMembers: () => void;
   /** A DM's peer, when its mark should show. */
@@ -37,13 +40,9 @@ type Props = {
   onThreadBarLayout?: () => void;
 };
 
-/** The chat mark: the chat glyph on its own plate (the chat has no picture of its own). */
-export function ChatMark({ size = 36 }: { size?: 36 | 28 }) {
-  return (
-    <YStack width={size} height={size} borderRadius="sm" backgroundColor="highlight" alignItems="center" justifyContent="center" testID="chat-mark">
-      <Glyph icon={MessagesSquare} size={size === 36 ? 20 : 16} />
-    </YStack>
-  );
+/** A repository's owner picture or favicon, otherwise the shared chat glyph tile. */
+export function ChatMark({ size = 36, avatarUrl, faviconUrl }: { size?: 36 | 28; avatarUrl?: string; faviconUrl?: string }) {
+  return <RepositoryMark size={size} avatarUrl={avatarUrl} faviconUrl={faviconUrl} />;
 }
 
 function TitleSkeleton() {
@@ -68,7 +67,7 @@ export function ChatSurfaceErrorHeader({ title, showBack, handleBack, error }: {
 
 /**
  * A chat: #name (opens chat info), a plain "N members" under it (opens
- * Members) and ⚙ (opens chat info). No faces, no repository. A thread is
+ * Members) and ⚙ (opens chat info), beside its repository mark. A thread is
  * header B (`ThreadBar`); a DM names its peer.
  */
 export const ChatSurfaceHeaderView = React.memo(function ChatSurfaceHeaderView({
@@ -78,6 +77,8 @@ export const ChatSurfaceHeaderView = React.memo(function ChatSurfaceHeaderView({
   handleBack,
   title,
   memberCount,
+  repositoryAvatar,
+  repositoryFavicon,
   openChatInfo,
   openMembers,
   dmPeer,
@@ -105,7 +106,7 @@ export const ChatSurfaceHeaderView = React.memo(function ChatSurfaceHeaderView({
         <XStack flex={1} minWidth={0} gap="3" alignItems="center">
           {isDirectMessage
             ? dmPeer ? <IdentityMark kind={dmPeer.kind} seed={dmPeer.seed} avatarUrl={dmPeer.avatarUrl} face={dmPeer.face} name={title ?? ''} size={36} /> : null
-            : <ChatMark />}
+            : <ChatMark avatarUrl={repositoryAvatar} faviconUrl={repositoryFavicon} />}
           <YStack flex={1} minWidth={0}>
             {title === null ? <TitleSkeleton /> : isDirectMessage ? (
               <T v="title" numberOfLines={1} testID="chat-title">{title}</T>

@@ -1,3 +1,4 @@
+import { RepositoryMark } from '@/components/buzz/RepositoryMark';
 import React from 'react';
 import type { View } from 'react-native';
 import { ListItem, XStack, YStack } from 'tamagui';
@@ -16,6 +17,8 @@ export type ThreadHeaderData = {
     /** `#beeline`, or null while the parent's name has not landed. */
     chatTag: string | null;
     title: string;
+    repositoryAvatar?: string;
+    repositoryFavicon?: string;
     /** Undefined until the parent Room's corner row lands. */
     state?: CornerState;
     running: number;
@@ -39,6 +42,7 @@ export function ThreadBar({ h, collapsed, back, openChat, openBrief, openActions
             <XStack paddingHorizontal="2" paddingVertical="1" gap="2" alignItems="center" testID="thread-header">
                 {back ? <Btn kind="icon" label="Back" onPress={back} testID="chat-back"><Glyph icon={ArrowLeft} /></Btn> : null}
                 <XStack flex={1} minWidth={0} gap="2" alignItems="center">
+                    {h.repositoryAvatar || h.repositoryFavicon ? <RepositoryMark avatarUrl={h.repositoryAvatar} faviconUrl={h.repositoryFavicon} size={28} /> : null}
                     {h.chatTag ? (
                         <ListItem padding="0" minHeight={HEIGHT.control} flexGrow={0} flexShrink={0} width="auto"
                             backgroundColor="transparent" justifyContent="flex-start" onPress={openChat}

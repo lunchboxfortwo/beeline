@@ -1,8 +1,9 @@
 import React, { useState } from 'react';
 import { Input, ListItem, ScrollView, Spinner, Switch, XStack, YStack, useTheme } from 'tamagui';
-import { GitBranch, Lock, Pencil, Search } from 'lucide-react-native';
+import { Lock, Pencil, Search } from 'lucide-react-native';
 import Svg, { Path } from 'react-native-svg';
 import type { GitHubInstallationAccess } from '@beeline/buzz-client';
+import { RepositoryMark } from '@/components/buzz/RepositoryMark';
 import { ROOM_SLUG_HINT, roomNameEntry, validRoomSlug } from '@/buzz/room-name';
 import { filterRepoCandidates, type RepoCandidate } from '@/buzz/room-repo-picker';
 import { ROOM_LABEL } from '@/buzz/vocabulary';
@@ -124,7 +125,7 @@ function RepositoryStep({ candidates, installations, loading, error, notice, bus
             accessibilityRole="button"
             testID={`repo-row-${candidate.key}`}
           >
-            <Glyph icon={GitBranch} />
+            <RepositoryMark avatarUrl={candidate.avatarUrl} faviconUrl={candidate.faviconUrl} size={24} />
             <YStack flex={1} minWidth={0}><Copy>{candidate.name}</Copy></YStack>
             {candidate.private ? <Glyph icon={Lock} size={18} /> : null}
           </ListItem>

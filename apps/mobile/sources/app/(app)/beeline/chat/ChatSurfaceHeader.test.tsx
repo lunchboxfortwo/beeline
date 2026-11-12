@@ -3,6 +3,7 @@ import React from 'react';
 import { act, create } from 'react-test-renderer';
 import { beforeEach, expect, it, vi } from 'vitest';
 
+vi.mock('@/components/buzz/RepositoryMark', () => ({ RepositoryMark: 'RepositoryMark' }));
 vi.mock('tamagui', () => ({ ListItem: 'ListItem', XStack: 'XStack', YStack: 'YStack' }));
 vi.mock('lucide-react-native', () => ({ ArrowLeft: 'ArrowLeft', MessagesSquare: 'MessagesSquare', MoreHorizontal: 'MoreHorizontal', Settings: 'Settings' }));
 vi.mock('@/ui/grammar', () => ({ Btn: 'Btn', Glyph: 'Glyph', T: 'T', SafeTop: 'SafeTop' }));
@@ -61,5 +62,12 @@ it('gives a thread header B', () => {
   expect(bar.props.h).toBe(thread);
   expect(bar.props.collapsed).toBe(true);
   expect(byTestID(tree, 'chat-header')).toHaveLength(0);
+  act(() => tree.unmount());
+});
+
+it('shows the repository owner image on the chat header', () => {
+  let tree: any;
+  act(() => { tree = create(<ChatSurfaceHeaderView {...base} repositoryAvatar="https://avatars.githubusercontent.com/u/42" repositoryFavicon="https://github.githubassets.com/favicons/favicon.png" />); });
+  expect(tree.root.findByType('RepositoryMark').props).toMatchObject({avatarUrl:'https://avatars.githubusercontent.com/u/42',faviconUrl:'https://github.githubassets.com/favicons/favicon.png'});
   act(() => tree.unmount());
 });

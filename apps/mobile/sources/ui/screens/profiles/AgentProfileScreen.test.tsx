@@ -97,6 +97,27 @@ describe('agent profile', () => {
     expect(byId(tree, 'edit-agent-soul')).toBeUndefined();
   });
 
+  it('shows the running model and thinking level ahead of a saved next-session selection', async () => {
+    profile.value = agent({ detail: detail({
+      selected: { model: 'next-model', effort: 'low' },
+      runtimeSelection: { model: 'running-model', effort: 'high' },
+      catalog: [
+        { id: 'model', category: 'model', currentValue: 'catalog-model', options: [{id:'running-model',name:'Running model'}] },
+        { id: 'effort', category: 'reasoning_effort', currentValue: 'medium', options: [{id:'high',name:'High'}] },
+      ],
+    }) });
+    const tree = await render();
+    expect(byId(tree, 'model-axis-model').props.value).toBe('Running model');
+    expect(byId(tree, 'model-axis-effort').props.value).toBe('High');
+  });
+
+  it('does not present a saved selection as a running model when the runtime has not reported', async () => {
+    profile.value = agent({ detail: detail({ selected: {model:'next-model',effort:'high'},catalog:[] }) });
+    const tree = await render();
+    expect(byId(tree, 'model-axis-model').props.value).toBe('Not available');
+    expect(byId(tree, 'model-axis-effort').props.value).toBe('Not available');
+  });
+
   it('opens the model picker only while editing, and picks a model', async () => {
     const axis = { id: 'model', category: 'model', currentValue: 'claude-opus-5-5', options: [{ id: 'claude-opus-5-5', name: 'Claude Opus 5.5' }, { id: 'gpt-5-5', name: 'GPT-5.5' }] };
     profile.value = agent({ modelAxes: { model: axis, effort: undefined, fast: undefined } });

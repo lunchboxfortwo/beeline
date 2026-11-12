@@ -3,6 +3,7 @@ import React from 'react';
 import { act, create } from 'react-test-renderer';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 
+vi.mock('@/components/buzz/RepositoryMark', () => ({ RepositoryMark: (props: any) => React.createElement('RepositoryMark', props) }));
 vi.mock('tamagui', async () => {
     const hosts = (await import('@/ui/screens/transcript/grammar-hosts.test-support')).tamaguiHosts();
     const R = await import('react');
@@ -26,7 +27,7 @@ vi.mock('@/buzz/room-leave', () => ({ leaveRoomWithConfirmation: leave }));
 const modal = vi.hoisted(() => ({ confirm: vi.fn(async () => true) }));
 vi.mock('@/modal', () => ({ Modal: modal }));
 vi.mock('@/buzz/corner-navigation', () => ({ cornerHref: (id: string, parent: string, title: string) => ({ pathname: 'corner', params: { id, parent, title } }) }));
-const data = vi.hoisted(() => ({ room: null as any, archived: [] as any[] }));
+const data = vi.hoisted(() => ({ room: null as any, archived: [] as any[], total: 27 }));
 vi.mock('@/ui/screens/members/use-room-view', () => ({ useRoomView: () => ({ room: data.room, error: null, refresh: vi.fn() }) }));
 vi.mock('@/ui/screens/people/use-workspace-roster', () => ({ useWorkspaceRoster: () => ({ surface: { workspace: { name: 'Beeline Work' } } }) }));
 vi.mock('@/buzz/scheduled-work', () => ({
@@ -34,7 +35,7 @@ vi.mock('@/buzz/scheduled-work', () => ({
     scheduleTitle: () => '', scheduleTrigger: () => '', subscriptionTitle: () => '', subscriptionWhen: () => '',
 }));
 const loadArchived = vi.hoisted(() => vi.fn(async () => undefined));
-vi.mock('@/buzz/use-room-corners', () => ({ useRoomCorners: () => ({ record: { archived: { corners: data.archived } }, loadArchived }) }));
+vi.mock('@/buzz/use-room-corners', () => ({ useRoomCorners: () => ({ record: { archived: { corners: data.archived, total: data.total } }, loadArchived }) }));
 
 import { ChatInfoScreen } from './ChatInfoScreen';
 
@@ -72,7 +73,7 @@ describe('Chat info', () => {
     it('lists finished threads (read on open) and opens one', () => {
         const tree = render();
         expect(loadArchived).toHaveBeenCalledWith(false);
-        expect(flat(tree)).toContain('Finished threads · 1');
+        expect(flat(tree)).toContain('Finished threads · 27');
         act(() => { pressable(tree, `finished-${CORNER}`).props.onPress(); });
         expect(router.push).toHaveBeenCalledWith(expect.objectContaining({ params: expect.objectContaining({ id: CORNER, parent: ROOM }) }));
     });

@@ -20,8 +20,8 @@ import { ChatRows, ProfileHead, accessCaption, yoloCaption, yoloSetByLine } from
 
 type Axis = 'model' | 'effort';
 const axisValue = (detail: AgentDetailView, kind: Axis, axis: AgentModelConfigOption | undefined) => kind === 'model'
-    ? detail.selected?.model ?? detail.runtimeSelection?.model ?? axis?.currentValue
-    : detail.selected?.effort ?? detail.runtimeSelection?.effort ?? axis?.currentValue;
+    ? detail.runtimeSelection?.model ?? axis?.currentValue
+    : detail.runtimeSelection?.effort ?? axis?.currentValue;
 
 /** An agent's profile: face, owner, Message and Edit; soul, model, usage, voice, access, schedules and chats. */
 export function AgentProfileScreen({ agentId, workspaceId, close, roomId }: { agentId: string; workspaceId?: string; close: () => void; roomId?: string }) {

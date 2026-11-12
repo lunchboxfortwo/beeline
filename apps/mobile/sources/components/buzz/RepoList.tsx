@@ -1,3 +1,4 @@
+import { RepositoryMark } from './RepositoryMark';
 import { EmptyState } from './EmptyState';
 import { HullActionSheetRow } from './HullActionSheet';
 import { HULL_SHEET_ROW_HEIGHT } from '@/buzz/hull-sheet-layout';
@@ -74,6 +75,7 @@ export function RepoList({
           <HullActionSheetRow
             accessibilityLabel={item.name}
             label={repoShortName(item, section.owner)}
+            leading={<RepositoryMark avatarUrl={item.avatarUrl} faviconUrl={item.faviconUrl} size={28} />}
             selected={item.key === currentKey}
             onPress={() => onSelect(item)}
             testID={`${testIDPrefix}-candidate-${item.key}`}

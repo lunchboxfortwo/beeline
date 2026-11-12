@@ -76,12 +76,11 @@ export function reviveDates<Row extends object>(row: Row, fields: readonly strin
 }
 
 
-export function selectedModelLabel(
-  selected: string | null,
+export function runtimeModelLabel(
   catalog: AgentDetailView['catalog'],
 ): string | undefined {
   const axis = catalog.find((candidate) => candidate.category === 'model');
-  return modelChoiceLabel(axis, selected ?? axis?.currentValue);
+  return modelChoiceLabel(axis, axis?.currentValue);
 }
 
 /**
@@ -106,6 +105,8 @@ export function effortCatalogAxis(
 export function roomHeader(row: RoomHeaderRow, publicOrigin: string) {
   return {
     id: row.id,
+    ...(row.repository_avatar ? { avatar: row.repository_avatar } : {}),
+    ...(row.repository_favicon ? { favicon: row.repository_favicon } : {}),
     workspaceId: row.workspace_id,
     ...(row.parent_id ? { parentId: row.parent_id } : {}),
     name: row.name,

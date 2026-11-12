@@ -1,6 +1,7 @@
+import { RepositoryMark } from '@/components/buzz/RepositoryMark';
 import React, { useEffect, useRef, useState } from 'react';
 import { Collapsible, ListItem, Separator, XStack, YStack } from 'tamagui';
-import { ChevronDown, ChevronUp, CornerDownRight, MessagesSquare, Pin } from 'lucide-react-native';
+import { ChevronDown, ChevronUp, CornerDownRight, Pin } from 'lucide-react-native';
 import equal from 'fast-deep-equal';
 import { voiceDuration } from '@beeline/api-contract/phone';
 import type { ChatListCorner } from '@beeline/api-contract/phone';
@@ -64,19 +65,15 @@ function useHold(ms: number, onHold: (() => void) | undefined, contain = false) 
   };
 }
 
-/** A chat's mark: the peer's identity for a direct message, the chat glyph tile otherwise. */
-function ChatMark({ item }: { item: Pick<ChatListItem, 'directMessage'> }) {
+/** A chat's mark: the peer's identity for a direct message, the repository mark or chat glyph otherwise. */
+function ChatMark({ item }: { item: Partial<Pick<ChatListItem, 'directMessage' | 'room'>> }) {
   const peer = item.directMessage?.peer;
   if (peer) {
     return peer.kind === 'agent'
       ? <IdentityMark kind="agent" seed={peer.pubkey} name={peer.name} avatarUrl={peer.avatar} face={peer.face} size={MARK} />
       : <IdentityMark kind="human" seed={peer.pubkey} name={peer.name} avatarUrl={peer.avatar} face={peer.face} size={MARK} />;
   }
-  return (
-    <YStack width={MARK} height={MARK} borderRadius="sm" backgroundColor="highlight" alignItems="center" justifyContent="center">
-      <Glyph icon={MessagesSquare} />
-    </YStack>
-  );
+  return <RepositoryMark avatarUrl={item.room?.avatar} faviconUrl={item.room?.favicon} size={MARK} />;
 }
 
 /** One active thread under its chat: ↳, the short title, and its state (brass when it waits on you). */
@@ -98,7 +95,9 @@ function ThreadLine({ item, corner, onOpen }: { item: ChatListItem; corner: Chat
       accessibilityRole="button"
       testID={`thread-row-${corner.id}`}
     >
-      <YStack paddingTop="0.5"><Glyph icon={CornerDownRight} size={16} accent={waiting} /></YStack>
+      <YStack paddingTop="0.5">{item.room.avatar || item.room.favicon
+        ? <RepositoryMark avatarUrl={item.room.avatar} faviconUrl={item.room.favicon} size={16} />
+        : <Glyph icon={CornerDownRight} size={16} accent={waiting} />}</YStack>
       <YStack flex={1} minWidth={0} gap="1">
         <Copy numberOfLines={1}>{title}</Copy>
         <Copy small accent={waiting} quiet={!waiting}>{word}</Copy>

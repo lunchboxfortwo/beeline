@@ -1,6 +1,7 @@
 import React, { useEffect, useState } from 'react';
+import { Share } from 'react-native';
 import { Input, Separator, XStack, YStack } from 'tamagui';
-import { Check, Link as LinkIcon, Mail } from 'lucide-react-native';
+import { Check, Link as LinkIcon, Mail, Share2 } from 'lucide-react-native';
 import { Btn, Copy, Glyph, HEIGHT, SheetFrame, SheetRow } from '@/ui/grammar';
 import { appErrorCopy } from '@/buzz/app-error-copy';
 import { buildCommunityInviteUrl, resolveCommunityInvitePublicOrigin } from '@/buzz/community-invite';
@@ -69,10 +70,12 @@ export function InvitePeopleSheet({ open, close, workspaceId, workspaceName, roo
             <SheetRow
                 testID="invite-copy-link"
                 icon={copied ? <Glyph icon={Check} accent /> : <Glyph icon={LinkIcon} />}
-                label={copied ? 'Link copied' : 'Copy invite link'}
-                detail={link ? `${link} · joins ${workspaceName}${where}` : `joins ${workspaceName}${where}`}
+                label={copied ? 'Link copied' : 'Copy link'}
+                detail={`joins ${workspaceName}${where}`}
                 onPress={() => void copyLink()}
             />
+            <SheetRow testID="invite-share-link" icon={<Glyph icon={Share2} />} label="Share"
+                onPress={() => { if (link) void Share.share({ message: link }); }} />
             <Separator borderColor="stroke" />
             {emailOpen ? (
                 <YStack gap="2" paddingVertical="2" testID="invite-email-form">

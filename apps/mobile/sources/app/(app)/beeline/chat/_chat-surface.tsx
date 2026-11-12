@@ -452,6 +452,8 @@ export function BuzzChatSurface({
   handleBack={handleBack}
   title={displayHeaderTitle}
   memberCount={roomParticipantTotal}
+  repositoryAvatar={roomSurface?.room.avatar}
+  repositoryFavicon={roomSurface?.room.favicon}
   openChatInfo={() => openPlace({ kind: 'chat-info', roomId: decodedId }, isDesktop)}
   openMembers={() => openPlace({ kind: 'members', roomId: decodedId }, isDesktop)}
   dmPeer={dmPeerMark}
@@ -470,7 +472,7 @@ export function BuzzChatSurface({
 />
 
           {!isCorner && !isDirectMessage && (
-            <ThreadsDropdown roomId={decodedId} chatName={resolvedChannelName} openThread={openCorner} />
+            <ThreadsDropdown repositoryAvatar={roomSurface?.room.avatar} repositoryFavicon={roomSurface?.room.favicon} roomId={decodedId} chatName={resolvedChannelName} openThread={openCorner} />
           )}
 
           {!isCorner && !isDirectMessage && (() => {
