@@ -331,7 +331,7 @@ const scope1 = fixtureScope1();
       expect(html).toContain('function viewerLayout(');
       // The viewer owns the gesture: no document zoom and no upstream viewport.
       expect(html).toContain('maximum-scale=1,user-scalable=no');
-      expect(html).toContain('html,body{background:#1b1320!important;touch-action:none!important');
+      expect(html).toContain('html,body{background:var(--beeline-canvas,Canvas)!important;touch-action:none!important');
       expect(html).not.toContain('shrink-to-fit=yes');
       expect(html).not.toContain('beeline-handback');
       expect(html).not.toContain('beeline-end');

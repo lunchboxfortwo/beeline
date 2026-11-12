@@ -20,7 +20,7 @@ export const COLOR_TOKENS = new Set([
 ]);
 // 0, 4, 8, 12, 16, 20, 24, 32 and the one 2 px optical nudge.
 export const SPACE_TOKENS = new Set(['0', '1', '2', '3', '4', '5', '6', '8', '0.5']);
-export const RADIUS_TOKENS = new Set(['sm', 'md', 'lg', 'full']);
+export const RADIUS_TOKENS = new Set(['sm', 'md', 'lg', 'full', 'transcript', 'viewer']);
 export const CONTROL_HEIGHTS = new Set([44, 48, 52, 56]);
 
 const TYPE_PROPS = new Set(['fontSize', 'fontFamily', 'fontWeight', 'lineHeight', 'letterSpacing', 'fontStyle']);
@@ -78,7 +78,7 @@ function judge(prop, values) {
         return `${prop}=${JSON.stringify(v.value)} is off the spacing scale (0 4 8 12 16 20 24 32)`;
     } else if (RADIUS_PROPS.has(prop)) {
       if (!(v.kind === 'string' && RADIUS_TOKENS.has(v.value)) && !(v.kind === 'number' && v.value === 0))
-        return `${prop}=${JSON.stringify(v.value)} is not sm, md, lg or full`;
+        return `${prop}=${JSON.stringify(v.value)} is not a named grammar radius`;
     } else if (prop === 'minHeight') {
       if (!(v.kind === 'height') && !(v.kind === 'number' && (CONTROL_HEIGHTS.has(v.value) || v.value === 0)))
         return `minHeight=${JSON.stringify(v.value)} is not a control height (44, 48, 52, 56)`;

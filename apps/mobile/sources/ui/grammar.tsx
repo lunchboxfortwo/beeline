@@ -133,8 +133,10 @@ type ButtonProps = React.ComponentProps<typeof TButton>;
  * Buttons: primary (one per view, 48), secondary (bordered), icon (round 44),
  * quiet (no frame), destructive (removed ink), accent (brass frame).
  */
-export function Btn({ kind = 'secondary', label, children, disabled, ...rest }: {
+export function Btn({ kind = 'secondary', label, children, disabled, viewerInset = false, ...rest }: {
     kind?: ButtonKind; label: string; children?: React.ReactNode;
+    /** The 42 px inner face inside the historical viewer's 44 px bordered pill. */
+    viewerInset?: boolean;
 } & Omit<ButtonProps, 'children' | 'aria-label'>) {
     const shape: Partial<ButtonProps> =
         kind === 'primary' ? { theme: 'button' as any, minHeight: HEIGHT.primary }
@@ -155,6 +157,7 @@ export function Btn({ kind = 'secondary', label, children, disabled, ...rest }: 
             disabled={disabled}
             opacity={disabled ? 0.5 : 1}
             {...shape}
+            {...(viewerInset ? { minHeight: HEIGHT.control - 2 } : null)}
             {...rest}
         >
             {content}

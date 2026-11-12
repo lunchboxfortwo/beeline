@@ -9,7 +9,7 @@ vi.mock('tamagui', async () => (await import('@/ui/screens/transcript/grammar-ho
 vi.mock('lucide-react-native', async () => (await import('@/ui/screens/transcript/grammar-hosts.test-support')).lucideHosts());
 const insets = vi.hoisted(() => ({ top: 24, bottom: 48, left: 0, right: 0 }));
 vi.mock('react-native-safe-area-context', () => ({ useSafeAreaInsets: () => insets }));
-import { ChatName, HEIGHT, Indent, PlaceHeader, SheetFrame, STEP_PRESETS, T, TextSizeContext, TYPE_SCALE, useStep, type TextSize } from './grammar';
+import { Btn, ChatName, HEIGHT, Indent, PlaceHeader, SheetFrame, STEP_PRESETS, T, TextSizeContext, TYPE_SCALE, useStep, type TextSize } from './grammar';
 
 beforeEach(() => { (globalThis as any).IS_REACT_ACT_ENVIRONMENT = true; });
 
@@ -122,4 +122,12 @@ it('lowers the keyboard as a sheet opens, so the sheet is never drawn under it',
     expect(dismiss).not.toHaveBeenCalled();
     act(() => { tree.update(<SheetFrame open close={() => undefined} title="Attach"><></></SheetFrame>); });
     expect(dismiss).toHaveBeenCalledTimes(1);
+});
+
+it('preserves the inset viewer face inside its existing bordered target', () => {
+    let tree: any;
+    act(() => { tree = create(<Btn kind="icon" label="Talk to agent" viewerInset />); });
+    expect(tree.root.findByType('Button').props.minHeight).toBe(42);
+    act(() => { tree.update(<Btn kind="icon" label="Close" />); });
+    expect(tree.root.findByType('Button').props.minHeight).toBe(44);
 });

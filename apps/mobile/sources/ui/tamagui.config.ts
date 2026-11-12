@@ -76,6 +76,8 @@ const body = {
 
 export const tamaguiConfig = createTamagui({
     ...defaultConfig,
+    // Historical browser surfaces retain their pre-redesign geometry.
+    tokens: { ...defaultConfig.tokens, radius: { ...defaultConfig.tokens.radius, transcript: 10, viewer: 14 } },
     animations,
     // Longhand style props (paddingHorizontal, backgroundColor) are the grammar's spelling.
     settings: { ...defaultConfig.settings, onlyAllowShorthands: false },

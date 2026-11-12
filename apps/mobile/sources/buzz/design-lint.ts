@@ -35,6 +35,8 @@ export const DESIGN_ALLOWLIST: Readonly<Record<DesignRule, Readonly<Record<strin
     'app/_layout.tsx': 'Native splash and root background before the theme has loaded.',
   },
   spacing: {
+    'ui/screens/viewers/TalkDock.tsx': 'Captain explicitly requires the pre-4234 browser geometry: 42px inner control, 44px outer pill and 9px transcript clearance (brief revision 3).',
+    'ui/screens/viewers/BrowserChrome.tsx': 'Captain explicitly requires the pre-4234 browser card preview height of 218px (brief revision 3).',
     'components/buzz/SettingsRow.tsx':
       'Owner-approved subtitle row metrics: 14 above and below, 2 between title and subtitle, so two lines of text clear both hairlines.',
     'buzz/room-bottom-chrome.ts':
