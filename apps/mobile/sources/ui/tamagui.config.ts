@@ -1,5 +1,6 @@
 import { createTamagui } from 'tamagui';
 import { defaultConfig } from '@tamagui/config/v6';
+import { installWebControlProps } from './web-control-props';
 // `animations` is the driver both platforms export: CSS on web, React Native
 // animations on phones. `animationsCSS` exists only on web, so on phones every
 // Sheet threw Tamagui error 008 (no animation driver).
@@ -83,6 +84,9 @@ export const tamaguiConfig = createTamagui({
 });
 
 export type AppTamaguiConfig = typeof tamaguiConfig;
+
+// Web host: accessibilityRole and accessibilityLabel become role and aria-label.
+installWebControlProps();
 
 declare module 'tamagui' {
     interface TamaguiCustomConfig extends AppTamaguiConfig {}
