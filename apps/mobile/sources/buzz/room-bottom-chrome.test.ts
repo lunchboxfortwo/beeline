@@ -61,13 +61,3 @@ describe('phone thinking line and newest transcript row', () => {
     expect(TURN_LINE_BAR_MARGIN_BOTTOM).toBe(9);
   });
 });
-
-describe('composer over the keyboard', () => {
-  // The keyboard leaves the column less height than a long suggestion list
-  // needs. The stack and row must shrink (React Native items do not by
-  // default), so the list scrolls inside and the field stays above the keyboard.
-  it('lets the stack and the composer row shrink to the height left', () => {
-    expect(chrome.stack).toMatchObject({ flexShrink: 1, minHeight: 0 });
-    expect(chrome.composerRow).toMatchObject({ flexShrink: 1, minHeight: 0 });
-  });
-});

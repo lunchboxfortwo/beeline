@@ -45,7 +45,7 @@ export function SlashVerbPicker({
       dismissTestID="slash-verb-dismiss"
     >
       {commandCount > 0 || verbs.length > 0 ? (
-        <ScrollView keyboardShouldPersistTaps="handled" showsVerticalScrollIndicator={false} maxHeight={VISIBLE_ROWS * 56}>
+        <ScrollView keyboardShouldPersistTaps="handled" showsVerticalScrollIndicator={false} maxHeight={VISIBLE_ROWS * 56} flexShrink={1} testID="slash-verb-scroll">
           {agentLacksCommands && commandCount === 0 ? (
             <YStack paddingVertical="2" testID="slash-agent-no-commands">
               <T v="meta" color="secondary" numberOfLines={2}>

@@ -262,4 +262,18 @@ describe('SlashVerbPicker agent command palette', () => {
     // And the palette still shows Beeline's built-in verbs.
     expect(find_by_test_id(renderer, 'slash-verb-open-corner')).toHaveLength(1);
   });
+
+  it('lets its scroll give up height above the keyboard so the field stays visible', () => {
+    const renderer = render(
+      React.createElement(SlashVerbPicker, {
+        verbs, query: '', highlightedIndex: 0, onDismiss: () => undefined, onSelect: () => undefined,
+        commands: advertisedCommands, agentName: 'lena', agentLacksCommands: false,
+        onSelectCommand: () => undefined,
+      }),
+    );
+    const scroll = renderer.root.find(
+      (node: any) => node.type === 'ScrollView' && node.props.testID === 'slash-verb-scroll',
+    );
+    expect(scroll.props.flexShrink).toBe(1);
+  });
 });

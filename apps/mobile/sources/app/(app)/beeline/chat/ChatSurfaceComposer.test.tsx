@@ -67,3 +67,33 @@ it('COMPOSER-SIZE-1: settles ref measurements, grows and shrinks, then sends the
   expect(composer().props.height).toBe(26);
   expect(measurement.reads).toBe(1);
 });
+
+// Reproduction R1: over the Android keyboard, the @ list plus an attachment
+// needed more height than was left. The rendered chrome and composer row must
+// shrink so the list scrolls; the field, attachments and keyboard foot do not.
+it.each([false, true])('COMPOSER-KEYBOARD-1: desktop=%s, only the phone chrome lets the list give up height', (desktop) => {
+  Object.assign(globalThis, { IS_REACT_ACT_ENVIRONMENT: true });
+  const props = {
+    desktopExperience: desktop, mentionMenuVisible: true, keyboardHeight: 300,
+    mentionSuggestions: { matches: [], overflow: 18 }, personProfileByPubkey: new Map(),
+    pendingAttachments: [{ uri: 'file:///29819.jpg', name: '29819.jpg', mimeType: 'image/jpeg', size: 1 }],
+    attachmentUploader: { state: () => undefined }, composerTagHandles: new Set(),
+    voice: {}, roomSurface: { members: [] }, composerInputRevisionRef: { current: 0 },
+    composerHeight: 26, setComposerHeight: () => undefined, inputText: '@',
+    inputTextRef: { current: '@' }, setInputText: () => undefined,
+  } as unknown as Props;
+  act(() => { renderer = create(<ChatSurfaceComposer {...props} />); });
+  const chrome = renderer!.root.find((node: any) => node.type === 'YStack' && node.props.testID === 'room-bottom-chrome');
+  const composer = renderer!.root.findByType('Composer');
+  // composer.parent is the mocked ConversationComposer; its parent is the row.
+  const row = composer.parent!.parent!;
+  expect(row.type).toBe('YStack');
+  expect(composer.props.attachments).toHaveLength(1);
+  const shrink = desktop ? { flexShrink: undefined, minHeight: undefined } : { flexShrink: 1, minHeight: 0 };
+  for (const node of [chrome, row]) {
+    expect({ flexShrink: node.props.flexShrink, minHeight: node.props.minHeight }).toEqual(shrink);
+  }
+  // The field (with its attachment strip) and the keyboard foot keep their height.
+  expect(composer.props.flexShrink).toBeUndefined();
+  expect(row.findByType('Motion').props.flexShrink).toBeUndefined();
+});

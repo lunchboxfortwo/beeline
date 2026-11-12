@@ -227,9 +227,15 @@ export const ChatSurfaceComposer = React.memo(function ChatSurfaceComposer({
   const mentionPlace = isCorner ? 'this thread' : !isDirectMessage && roomName ? `#${roomName}` : undefined;
   // Keep the hanging line and every gap around the field above the scrolling
   // transcript, on the same opaque canvas (`buzz/room-bottom-chrome.ts`).
+  // On the phone, a tall @, # or / list can need more height than the keyboard
+  // leaves. The chrome and the composer row may shrink (React Native items do
+  // not by default); only the list's scroll inside them gives up height, so the
+  // field, attachments and keyboard spacer keep theirs.
+  const phoneShrink = desktopExperience ? undefined : { flexShrink: 1, minHeight: 0 };
   return (<YStack
                 position="relative"
                 zIndex={1}
+                {...phoneShrink}
                 backgroundColor="canvas"
                 width={desktopExperience ? '100%' : undefined}
                 maxWidth={desktopExperience ? 720 : undefined}
@@ -289,6 +295,7 @@ export const ChatSurfaceComposer = React.memo(function ChatSurfaceComposer({
                 ) : (
                   <YStack
                     position="relative"
+                    {...phoneShrink}
                     paddingHorizontal="4"
                     paddingTop="2"
                     // The Room-open geometry's 1px edge, painted as the same opaque canvas.
