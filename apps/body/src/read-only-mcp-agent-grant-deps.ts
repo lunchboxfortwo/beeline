@@ -2,6 +2,7 @@ import { type SecretResolver, operatorSecretResolver, storeOperatorSecret } from
 import { pathGrantAllowsWrite } from '@beeline/api-contract/agent-grants';
 import { type CommandGrantRule, type CommandGrantScript, GRANT_SCRIPT_MAX_BYTES, GRANT_SCRIPT_MAX_LINES, grantScriptTooLongMessage, isRequestableAgentGrantKind, REQUESTABLE_AGENT_GRANT_KINDS, AGENT_GRANT_TARGET_MAX_LENGTH, parseCommandGrantTarget, AGENT_GRANT_REASON_MAX_LENGTH, HOST_EMULATOR_TARGET, AGENT_GRANT_VERBS, type AgentGrantEscalation, formatGrantEscalationReason, isSharedAssetCategory, SHARED_ASSET_CATEGORIES, COMMAND_SECRET_NAME } from "@beeline/api-contract/agent-grants";
 import { grantScriptArgument, resolveGrantCommand, resolveGrantScriptExecutable, isNativeGrantExecutable, installedGrantExecutable } from "./grant-script.js";
+import { committedGrantScript, OversizedGrantScriptError } from "./committed-grant-script.js";
 import { readFileSync } from "node:fs";
 import { createHash } from "node:crypto";
 import { hostEmulatorSerials } from "./machine-control.js";
@@ -65,9 +66,9 @@ export function agentGrantDepsFromEnv(): AgentGrantDeps {
  *
  * `python3 fix.py` tells the person deciding nothing about what runs, so the
  * bytes travel with the ask and the approval is bound to their hash. A file too
- * long to read on a card is REFUSED, never truncated — an honest card is the
- * whole point, and a body that size belongs in a corner as a branch and a pull
- * request. A line with no script argument (`python3 -V`) has nothing to bind;
+ * long to read on a card requires an immutable reference to the same bytes
+ * committed in the corner PR; inline and uncommitted code is never truncated.
+ * A line with no script argument (`python3 -V`) has nothing to bind;
  * it still asks a human, because the interpreter class is never covered by yolo.
  */
 export function readGrantScript(
@@ -118,7 +119,9 @@ export function readGrantScript(
   const contents = bytes.toString('utf8');
   const lines = contents.split('\n').length;
   if (bytes.byteLength > GRANT_SCRIPT_MAX_BYTES || lines > GRANT_SCRIPT_MAX_LINES) {
-    throw new Error(grantScriptTooLongMessage(argument.path, bytes.byteLength, lines));
+    const message = grantScriptTooLongMessage(argument.path, bytes.byteLength, lines);
+    if (!Buffer.from(contents, 'utf8').equals(bytes)) throw new Error(message);
+    throw new OversizedGrantScriptError(argument.path, resolved, bytes, message);
   }
   if (!Buffer.from(contents, 'utf8').equals(bytes)) {
     throw new Error(
@@ -157,7 +160,15 @@ export async function requestGrant(
   if (!target) throw new Error('target must be a non-empty string');
   if (target.length > AGENT_GRANT_TARGET_MAX_LENGTH) throw new Error('target is too long');
   const rule = kind === 'command' ? parseCommandGrantTarget(target) : undefined;
-  const script = rule ? readGrantScript(rule, deps) : undefined;
+  let script: CommandGrantScript | undefined;
+  if (rule) {
+    try { script = readGrantScript(rule, deps); }
+    catch (error) {
+      if (!(error instanceof OversizedGrantScriptError) || !error.resolved) throw error;
+      const pr = await deps.execute('readCornerPullRequest', { cornerId: deps.roomId }).catch(() => { throw error; });
+      script = await committedGrantScript(error, deps.scriptRoots![0]!, pr);
+    }
+  }
   const commandContext = rule ? resolveGrantCommand(rule.argv, deps.scriptRoots?.[0] ?? '.', deps.scriptEnv ?? process.env) : undefined;
   const commandArgument = commandContext ? grantScriptArgument(commandContext) : undefined;
   const installedPath = commandArgument && commandContext
@@ -263,7 +274,7 @@ export async function requestGrant(
   return (
     `pending, card posted: ${ask} [grant ${grantId}]. ` +
     (because ? `A human always answers this one because ${because}. ` : '') +
-    (script
+    (script && !script.committed
       ? `The card shows ${script.path} in full, and the approval is bound to those bytes. `
       : '') +
     `${authority} must answer ${kind === 'command' ? 'Approve always or Deny' : 'ALWAYS, ONCE, or NO'} ${destination}; ` +

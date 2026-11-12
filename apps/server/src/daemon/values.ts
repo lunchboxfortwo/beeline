@@ -11,9 +11,9 @@ import { setCornerHold } from '../corner-holds.js';
 import { claimAgentCommand } from '../agent-command.js';
 import { createHash, randomBytes } from 'node:crypto';
 import { endComputerSession, refreshComputerSession } from '../computer-session.js';
-import type { DaemonAttachment, DaemonOperationMap } from '@beeline/api-contract/daemon';
+import type { CornerPullRequestResult, DaemonAttachment, DaemonOperationMap } from '@beeline/api-contract/daemon';
 import { REPLY_EXCERPT_MAX_LENGTH } from '@beeline/api-contract/daemon';
-import { GRANT_SCRIPT_MAX_BYTES, GRANT_SCRIPT_MAX_LINES, grantScriptTooLongMessage, interpreterScriptArgument, connectionInstallName, isCommandGrantScript, type AgentGrantKind, type CommandGrantRule, type CommandGrantScript } from '@beeline/api-contract/agent-grants';
+import { committedGrantScriptContents, GRANT_SCRIPT_MAX_BYTES, GRANT_SCRIPT_MAX_LINES, grantScriptTooLongMessage, interpreterScriptArgument, connectionInstallName, isCommandGrantScript, type AgentGrantKind, type CommandGrantRule, type CommandGrantScript } from '@beeline/api-contract/agent-grants';
 import { MESSAGE_CURSOR_MS_SQL } from '../database.js';
 import { type SystemPhrase } from '../system-line.js';
 import { mediaIdFromUrl } from '../media-ttl.js';
@@ -172,6 +172,8 @@ export type OwnedModelNegotiation = Readonly<{ freeAgent: boolean; capability?: 
 export function validateGrantScript(
   rule: CommandGrantRule,
   script: unknown,
+  pr?: CornerPullRequestResult,
+  blobSha?: string,
 ): CommandGrantScript | undefined {
   // Only the helper can resolve PATH. A shadowed interpreter or wrapper is
   // itself the script, rather than the operand its name would normally imply.
@@ -193,6 +195,17 @@ export function validateGrantScript(
     throw new Error('grant script is invalid: inline code does not match the command');
   if (argument.stdin && script.contents !== rule.stdin)
     throw new Error('grant script is invalid: stdin code does not match the command');
+  if (script.committed) {
+    const ref = script.committed;
+    const url = pr?.status === 'ok'
+      ? `${pr.url.replace(/\/pull\/\d+$/, '')}/blob/${pr.headSha}/${ref.path.split('/').map(encodeURIComponent).join('/')}` : undefined;
+    if (argument.inline !== undefined || argument.stdin || pr?.status !== 'ok' || pr.merged ||
+        pr.headSha !== ref.commit || !pr.files.some(file => file.filename === ref.path && file.status !== 'removed') ||
+        ref.blobSha !== blobSha || ref.url !== url || script.contents !== committedGrantScriptContents(script) ||
+        !Number.isSafeInteger(script.bytes) || script.bytes < 0)
+      throw new Error('grant script is invalid');
+    return script;
+  }
   // The hash is the binding, so the server re-derives it rather than trusting
   // the number it was handed: the bytes on the card and the bytes the runner
   // will check must be the same bytes.

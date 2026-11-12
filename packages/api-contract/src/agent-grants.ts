@@ -592,8 +592,8 @@ export function commandGrantEscalationsBeyondRule(
  *
  * The cap is a card a person can actually read on a phone: past
  * {@link GRANT_SCRIPT_MAX_BYTES} / {@link GRANT_SCRIPT_MAX_LINES} the ask is
- * REFUSED rather than truncated — a body that long is a change, and a change
- * belongs in a corner where it is a branch and a pull request.
+ * represented by an immutable file URL and hash when its bytes are committed
+ * in the current corner PR. Uncommitted and inline code is still refused.
  */
 export const GRANT_SCRIPT_MAX_BYTES = 4_096;
 export const GRANT_SCRIPT_MAX_LINES = 120;
@@ -601,11 +601,12 @@ export const GRANT_SCRIPT_MAX_LINES = 120;
 export type CommandGrantScript = {
   /** The script argument exactly as it appears in the command line. */
   readonly path: string;
-  /** SHA-256 of the bytes the card showed; the runner re-checks it. */
+  /** SHA-256 of the approved file bytes; the runner re-checks it. */
   readonly sha256: string;
   readonly bytes: number;
-  /** The whole file. Never truncated — an oversized script is refused instead. */
+  /** The whole file, or an immutable PR file reference for a committed script. */
   readonly contents: string;
+  readonly committed?: { readonly commit: string; readonly path: string; readonly url: string; readonly blobSha: string };
 };
 
 export function isCommandGrantScript(value: unknown): value is CommandGrantScript {
@@ -616,8 +617,23 @@ export function isCommandGrantScript(value: unknown): value is CommandGrantScrip
     typeof script.sha256 === 'string' &&
     /^[0-9a-f]{64}$/.test(script.sha256) &&
     typeof script.bytes === 'number' &&
-    typeof script.contents === 'string'
+    typeof script.contents === 'string' &&
+    (script.committed === undefined || isCommittedGrantScript(script.committed))
   );
+}
+
+function isCommittedGrantScript(value: unknown): boolean {
+  if (!value || typeof value !== 'object') return false;
+  const ref = value as Record<string, unknown>;
+  return typeof ref.commit === 'string' && /^[0-9a-f]{40}$/.test(ref.commit) &&
+    typeof ref.path === 'string' && Boolean(ref.path) && !ref.path.startsWith('/') &&
+    !ref.path.split('/').some(part => part === '..' || part === '.' || !part) &&
+    typeof ref.url === 'string' && typeof ref.blobSha === 'string' && /^[0-9a-f]{40}$/.test(ref.blobSha);
+}
+
+/** The card uses identifiers instead of copying a reviewed file into the ask. */
+export function committedGrantScriptContents(script: Pick<CommandGrantScript, 'sha256' | 'committed'>): string {
+  return `${script.committed!.url}\n${script.sha256}`;
 }
 
 /** The refusal an oversized script gets, in both the tool and the server. */

@@ -703,7 +703,8 @@ export class GrantCommandRunner {
           'Ask with request_grant kind=command so the card carries what the command runs.',
       );
     }
-    if (createHash('sha256').update(bytes).digest('hex') !== script.sha256) {
+    if (createHash('sha256').update(bytes).digest('hex') !== script.sha256 ||
+        (script.committed && createHash('sha1').update(`blob ${bytes.length}\0`).update(bytes).digest('hex') !== script.committed.blobSha)) {
       throw new Error(
         `${note} script hash does not match for ${argument.path} at execution cwd ${context.cwd}; it changed after approval or cwd resolves a different file. ` +
           'Ask with request_grant kind=command again so a human reads what runs now.',
