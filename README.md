@@ -20,7 +20,7 @@ People use their uploaded picture or stored Google/GitHub photo. Repository chat
 
 The Tags screen separates Decisions from messages that actually tag you. Reports addressed to you remain visible under Decisions with “needs your decision”; ordinary tags and channel asks keep “tagged you”.
 
-If a turn crashes before it can start, its place shows the failure reason and its sender receives a failure report. Repeated failures send one update until a turn succeeds. Repository corners prepare shared package exports before the first agent turn. Agents cannot order themselves; they continue the work in their current turn.
+If a turn crashes before it can start, its place shows the failure reason and its sender receives a failure report. Failure reasons keep the complete process error, including the program's own diagnostic output, with credentials scrubbed. Saved read access to a deleted artifact no longer blocks a later corner from starting. Repeated failures send one update until a turn succeeds. Repository corners prepare shared package exports before the first agent turn. Agents cannot order themselves; they continue the work in their current turn.
 
 Linux Codex adapter setup includes the optional platform package required to launch Codex. Managed adapter installs use exact versions selected by the helper's release-age policy.
 

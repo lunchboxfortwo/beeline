@@ -64,6 +64,27 @@ it('one failed result ends the turn silently and creates no retry',async()=>{
   expect((await readAgentCommands(db,R,A)).commands).toEqual([]);
   expect((await db.query('SELECT status FROM agent_turns WHERE request_id=$1',[c.turnRequestId])).rows).toEqual([{status:'failed'}]);
 });
+it('stores and delivers a complete child-process failure beyond the manual report limit, including stderr',async()=>{
+  const commander='c'.repeat(64);
+  await db.query("INSERT INTO identities(id,kind,name) VALUES($1,'agent','Commander')",[commander]);
+  await db.query('INSERT INTO agents(agent_id,owner_id) VALUES($1,$2)',[commander,H]);
+  await db.query(`INSERT INTO memberships(workspace_id,room_id,identity_id,role)
+    VALUES($1,NULL,$3,'member'),($1,$2,$3,'member')`,[W,R,commander]);
+  const c=(await createAgentCommand(db,{roomId:R,agentId:A,sourceMessageId:null,reason:'order',
+    privatePayload:{kind:'order',text:'Do this task',authorId:commander,fromRoomId:R}}))!;
+  await claimAgentCommand(db,R,A,c.id,'generation',owner);
+  const reason='Command failed: /usr/bin/bwrap '+ '--bind /long/corner/path /long/corner/path '.repeat(500)+
+    "\nbwrap: Can't find source path /deleted/.corner-artifacts/threads-refresh: No such file or directory";
+  await daemon.execute('postAgentTurnReceipt',{
+    roomId:R,requestId:c.turn_request_id,generationId:'generation',status:'failed',reason,
+  },A,owner);
+  expect((await db.query('SELECT failure_reason FROM agent_turns WHERE request_id=$1',[c.turn_request_id])).rows)
+    .toEqual([{failure_reason:reason}]);
+  const reports=(await db.query<{text:string}>(`SELECT private_payload->>'text' text FROM agent_commands
+    WHERE agent_id=$1 AND reason='report'`,[commander])).rows;
+  expect(reports).toHaveLength(1);
+  expect(reports[0]!.text).toContain(reason);
+});
 it('a failed result ends even when its commander has left the return Room',async()=>{
   const commander='c'.repeat(64);
   await db.query("INSERT INTO identities(id,kind,name) VALUES($1,'agent','Commander')",[commander]);

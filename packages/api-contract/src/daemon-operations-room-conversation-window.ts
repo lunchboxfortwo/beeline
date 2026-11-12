@@ -484,7 +484,7 @@ export type PostTurnReceiptInput = AgentRoomInput & {
   readonly generationId?: string;
   /** Refreshes an existing working receipt; never starts or resurrects a turn. */
   readonly heartbeat?: boolean;
-  /** One distilled line (≤200 chars, no stack, secrets scrubbed) sent only with `failed`. */
+  /** Complete failure diagnostic, including child stderr (no stack, secrets scrubbed), sent only with `failed`. */
   readonly reason?: string;
   /**
    * The turn's REAL prompt token cost as the harness itself reported it (pi's

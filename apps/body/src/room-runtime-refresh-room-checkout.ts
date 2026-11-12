@@ -6,7 +6,7 @@ import { DaemonApiError } from './daemon-api-client.js';
 import { redactReplayError, type RoomGitHubTokenResult, type RoomRepositoryStateResult } from '@beeline/api-contract/daemon';
 import { MonolithCornerTurnLoop } from './monolith-corner-turn.js';
 import { cornerHasRepositoryWork } from './prompt-assembly.js';
-import { distillTurnFailureReason } from './turn-failure-reason.js';
+import { distillTurnFailureReason, redactToolDetail } from './turn-failure-reason.js';
 import { writePrivateFileAtomically } from './atomic-private-file.js';
 import { rememberStorageOwner, readStorageOwners } from './storage-owners.js';
 import { isStandingRuntimeFault } from './runtime-start-fault.js';
@@ -109,9 +109,13 @@ import { RoomRuntimeCoordinator, roomCheckoutRemote, execFileAsync, DesiredCorne
           return { ...readCheckout, writable };
         }
         if (!worktree || !existsSync(resolve(worktree.path, '.git'))) {
+          // This callback may run hours after the Room-only corner started.
+          // Resolve its credential when creating the private checkout, rather
+          // than capturing the startup installation token until it expires.
+          const credential = await ctx.cornerRepositoryToken(corner.parentRoomId);
           worktree = await ctx.materializeCornerWorktree({
             cornerId: corner.cornerId, remote: repository.remote!, targetBranch: targetBranch!,
-            featureBranch: featureBranch!, token: granted!.token,
+            featureBranch: featureBranch!, token: credential.token,
             migrateLegacy: implementerAgentId === ctx.agent.publicKey,
           });
           await rememberStorageOwner(ctx.runtime.supervisorRoot, { workspaceId: ctx.runtime.communityId,
@@ -428,12 +432,10 @@ import { RoomRuntimeCoordinator, roomCheckoutRemote, execFileAsync, DesiredCorne
         roomId:cornerId,commandId:pending.id,generationId,
       });
       claimed = true;
-      const diagnostic = error && typeof error === 'object' && 'stderr' in error &&
-        typeof error.stderr === 'string' && error.stderr.trim() ? error.stderr : error;
-      const reason = distillTurnFailureReason(diagnostic);
+      const reason = distillTurnFailureReason(error);
       for (const command of result.commands) await api.execute('postAgentTurnReceipt', {
         agentId:ctx.agent.publicKey,roomId:cornerId,requestId:command.turnRequestId,generationId,
-        status:'failed',reason:reason.text,reasonKind:'workspace-failure',
+        status:'failed',reason:redactToolDetail(reason.text),reasonKind:'workspace-failure',
         trace:{totalMs:0,attempts:[],reason:redactReplayError(reason.text),reasonKind:'workspace-failure'},
       });
       return true;

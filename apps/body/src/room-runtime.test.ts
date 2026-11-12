@@ -110,24 +110,29 @@ mergedDescribe35("room-runtime.agent-checkout.test.ts", () => {
 const scope4 = fixtureScope4();
 
 
-m35_it('read-only assignments reuse the Room checkout, then select a private copy after a writable brief revision', async () => {
+m35_it.each(['brief revision', 'review request'] as const)(
+  'a late %s selects a private checkout with a current credential', async mode => {
   const root = await m35_mkdtemp(m35_resolve(m35_tmpdir(), 'corner-readonly-'));
   const identity = m35_identityFromKey('11'.repeat(32), 'Bee');
   const runtime = { agent: { name: 'Bee', publicKey: identity.publicKey, secretKeyHex: '11'.repeat(32) },
     rooms: [], communityId: 'workspace', supervisorRoot: root,
     transport: { kind: 'monolith', baseUrl: 'https://server.example', daemonToken: 'fixture' } } as m35_AgentRuntimeRecord;
-  let writable = false;
+  let writable = mode === 'review request', reviewer = false;
   let assignedBrief = true;
+  let now = Date.now(), token = 'startup-token';
   const remote = m35_resolve(root, 'remote.git'), roomCheckout = m35_resolve(root, 'room');
   const execute = m35_vi.fn(async (name: string) => {
     if (name === 'getCornerRestoreState') return { cornerId: 'corner', objective: 'Read source', closeRequested: false,
-      implementerAgentId: identity.publicKey, ...(assignedBrief ? { brief: { repositoryWork: writable } } : {}) };
+      implementerAgentId: mode === 'review request' ? 'c'.repeat(64) : identity.publicKey,
+      ...(assignedBrief ? { brief: { repositoryWork: writable } } : {}) };
+    if (name === 'getAgentConfiguration') return { isReviewer: reviewer };
     if (name === 'getRoomRepositoryState') return { resolution: 'repository', key: 'owner/repo', remote: `file://${remote}` };
-    if (name === 'getRoomGitHubToken') return { token: 'fixture', expiresAt: Date.now() + 60_000 };
+    if (name === 'getRoomGitHubToken') return { token, expiresAt: now + 60_000 };
     return {};
   });
   const coordinator = new m35_RoomRuntimeCoordinator(runtime, m35_resolve(root, 'runtime.json'), { workspaceRoot: root } as never,
-    { daemonApi: { execute } as unknown as m35_DaemonApiClient });
+    { daemonApi: { execute } as unknown as m35_DaemonApiClient, now: () => now });
+  const materialize = m35_vi.spyOn(coordinator, 'materializeCornerWorktree');
   let loop!: m35_MonolithCornerTurnLoop;
   const run = m35_vi.spyOn(m35_MonolithCornerTurnLoop.prototype, 'run').mockImplementation(function (this: m35_MonolithCornerTurnLoop) {
     loop = this;
@@ -155,20 +160,27 @@ m35_it('read-only assignments reuse the Room checkout, then select a private cop
     });
     await m35_expect(m35_access(own.path)).rejects.toThrow();
     m35_expect(await m35_readStorageOwners(root)).toEqual([]);
+    // The loop has stayed alive beyond the startup installation token's life.
+    // A review/order may first ask for a private checkout hours later.
+    now += 2 * 60 * 60_000;
+    token = 'current-token';
     writable = true;
+    reviewer = mode === 'review request';
     await turn.withCheckout(async () => {
       m35_expect(turn.options.worktreePath).toBe(own.path);
       m35_expect(turn.options.repository.readOnly).toBe(false);
     });
+    m35_expect(materialize).toHaveBeenLastCalledWith(m35_expect.objectContaining({ token: 'current-token' }));
     m35_expect(await m35_readStorageOwners(root)).toContainEqual(m35_expect.objectContaining({ roomId: 'corner', agentId: identity.publicKey }));
     writable = false;
+    reviewer = false;
     await turn.withCheckout(async () => m35_expect(turn.options.worktreePath).toBe(roomCheckout));
     assignedBrief = false;
     await turn.withCheckout(async () => {
       m35_expect(turn.options.worktreePath).toBe(own.path);
       m35_expect(turn.options.repository.readOnly).toBe(false);
     });
-  } finally { run.mockRestore(); await coordinator.shutdown(); await m35_rm(root, { recursive: true, force: true }); }
+  } finally { run.mockRestore(); materialize.mockRestore(); await coordinator.shutdown(); await m35_rm(root, { recursive: true, force: true }); }
 });
 
 

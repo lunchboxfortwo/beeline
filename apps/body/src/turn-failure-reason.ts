@@ -2,11 +2,10 @@ import { ModelSelectionUnavailableError } from './model-config.js';
 import { classifyTurnSilence, type TurnReceiptReasonKind } from '@beeline/api-contract/daemon';
 
 /**
- * One distilled line for a failed turn receipt. The Room carries a plain
- * failure; the full error stays in the daemon log. Never a stack trace,
- * at most 200 chars.
+ * A failed turn receipt retains the complete diagnostic, including child
+ * stderr. Callers scrub secrets before publishing; JavaScript stacks stay in
+ * the daemon log.
  */
-export const TURN_FAILURE_REASON_MAX = 200;
 
 export interface DistilledTurnFailureReason {
   readonly text: string;
@@ -54,7 +53,7 @@ export function distillTurnFailureReason(error: unknown): DistilledTurnFailureRe
   if (error instanceof ModelSelectionUnavailableError) {
     return { text: 'model selection unavailable', kind: 'model-selection-unavailable' };
   }
-  const raw =
+  let raw =
     error instanceof Error
       ? error.message
       : typeof error === 'string'
@@ -64,6 +63,11 @@ export function distillTurnFailureReason(error: unknown): DistilledTurnFailureRe
           : error == null
             ? ''
             : String(error);
+  if (error && typeof error === 'object' && 'stderr' in error) {
+    const stderr = typeof error.stderr === 'string' ? error.stderr :
+      Buffer.isBuffer(error.stderr) ? error.stderr.toString('utf8') : '';
+    if (stderr.trim() && !raw.includes(stderr.trim())) raw += `\n${stderr}`;
+  }
   // ACP -32000 is the harness's explicit authentication-required refusal.
   // Unlike a provider token-refresh race, retrying it cannot sign the agent in.
   if (/^ACP error -32000: Authentication required(?:[.;]|$)/i.test(raw.trim())) {
@@ -71,21 +75,11 @@ export function distillTurnFailureReason(error: unknown): DistilledTurnFailureRe
   }
   const informative = raw
     .split(/\r?\n/)
-    .map((line) => line.trim())
-    .filter((line) => line && !/^at\s/.test(line));
-  const firstLine = informative[0] ?? '';
-  const stripped = firstLine.replace(/^(?:[A-Za-z]*Error|Error):\s*/, '').replace(/\s+/g, ' ');
+    .filter((line) => !/^\s*at\s/.test(line));
   const classified = classifyTurnSilence(
     informative.join(' ').replace(/\s+/g, ' '),
   );
-  const clean = classified.kind === 'hiccup' && classified.fault?.startsWith("it couldn't start:")
-    ? classified.fault
-    : stripped.trim();
-  const text = !clean
-    ? 'turn failed'
-    : clean.length > TURN_FAILURE_REASON_MAX
-      ? `${clean.slice(0, TURN_FAILURE_REASON_MAX - 1)}…`
-      : clean;
+  const text = informative.join('\n').trim().replace(/^(?:[A-Za-z]*Error|Error):\s*/, '') || 'turn failed';
   // Keep the diagnostic wire classification; the server records the result
   // without a retry budget or automatic escalation.
   const kind: TurnReceiptReasonKind =

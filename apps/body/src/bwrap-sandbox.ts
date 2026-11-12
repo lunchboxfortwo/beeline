@@ -380,11 +380,21 @@ function normalize(paths: Array<string | undefined>): string[] {
 
 
 /**
- * The exact mount table for one session. Pure — no filesystem access — so the
- * room-vs-corner difference is a unit-testable value, not spawn-time behaviour.
+ * The exact mount table for one session. Resolve optional capabilities here;
+ * required private boundaries retain their fail-closed validation below.
  */
 export function sandboxMountPlan(spec: SandboxSessionSpec): SandboxMountPlan {
-  const ownerPaths = [...(spec.grantedPaths ?? [])];
+  const ownerPaths: NonNullable<SandboxMountPlan['ownerPaths']> = [];
+  for (const grant of spec.grantedPaths ?? []) {
+    try {
+      // Bind the actual destination, never a symlink mountpoint. A saved grant
+      // may outlive its source, or point through a broken/unreachable link.
+      const path = realpathSync(grant.path);
+      // Read access already comes from the root mount. Only /tmp needs
+      // restoring through its private tmpfs; old grants must not pin artifacts.
+      if (grant.writable || isUnderTmp(path)) ownerPaths.push({ path, writable: grant.writable });
+    } catch { /* An unavailable optional capability mounts nothing. */ }
+  }
   if (spec.operatorHome && agentGrantAutoApproves({ kind: 'path', target: spec.operatorHome }))
     ownerPaths.unshift({ path: resolve(spec.operatorHome), writable: true });
   const userBus = spec.operatorHome && spec.userRuntimeDir &&
@@ -599,7 +609,7 @@ export function buildBwrapArgv(input: {
   args.push('--proc', '/proc', '--tmpfs', '/tmp');
   for (const path of input.plan.readOnly) args.push('--ro-bind', path, path);
   for (const binding of input.plan.ownerPaths ?? [])
-    args.push(binding.writable ? '--bind' : '--ro-bind', binding.path, binding.path);
+    args.push(binding.writable ? '--bind-try' : '--ro-bind-try', binding.path, binding.path);
   if (input.plan.userBus) {
     args.push('--bind', input.plan.userBus, input.plan.userBus,
       '--setenv', 'XDG_RUNTIME_DIR', input.plan.userBus,

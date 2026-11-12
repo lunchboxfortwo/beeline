@@ -23,7 +23,7 @@ import { daemonWriteResult } from './corner-messages.js';
     }
     const reason =
       input.status === 'failed' && typeof input.reason === 'string'
-        ? input.reason.replace(/\s+/g, ' ').trim().slice(0, 200) || null
+        ? input.reason.trim() || null
         : null;
     // Wire-supplied counts are only ever stored when they are what they claim:
     // a negative, fractional, or absurd value is dropped, never clamped into a
