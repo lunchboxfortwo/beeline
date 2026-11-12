@@ -370,6 +370,9 @@ export class DaemonAgentSession {
       const refusal = this.transport.authenticateOperation ? await this.transport.authenticateOperation()
         : {error:'daemon_token_required',status:401};
       if(refusal){reply(refusal);return;}
+      // Turn output on this socket is this instance's live traffic, as the old
+      // HTTP ingress was. Without it a busy socket's lease ages out at 90 s.
+      await this.deps.connectionPresence?.renewLease();
       if(item.type === 'request-result') { reply(await results.read(this.agentId,requestId,this.#closedSignal.signal));return; }
       if(item.type === 'request-ack') { await results.acknowledge(this.agentId,requestId);return; }
       reply(await results.execute(this.agentId,requestId,{operation:item.operation,input:item.input},async()=>{

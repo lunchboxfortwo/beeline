@@ -392,6 +392,47 @@ describe('held presence for a live connection', () => {
     }
   });
 
+  // Reproduction R1: a live instance whose only traffic is turn output on the
+  // agent socket must keep its own lease; a stopped instance must not.
+  it('lands turn output sent over a quiet socket after 90 seconds, and refuses it once the instance stops', async () => {
+    const database = await seeded();
+    requestDatabases.push(database);
+    const live = new LiveHub(), daemon = new DaemonService(database, live);
+    const presence = new ConnectionPresence(database, live);
+    const error = vi.spyOn(console, 'error').mockImplementation(() => undefined);
+    try {
+      const { port } = await start({ database, live, daemon, connectionPresence: presence });
+      const client = await machine(port);
+      client.send({ type: 'register', agentId: AGENT_A, token: 'bdt_a', daemonOperationsV1: true });
+      await client.next(frame => frame.type === 'registered');
+      const command = (await createAgentCommand(database, { roomId: ROOM, agentId: AGENT_A, sourceMessageId: null, reason: 'system' }))!;
+      const owner = (await database.query<{ connectionId: string; epoch: number }>(
+        `SELECT connection_id "connectionId",epoch::integer epoch FROM agent_connections WHERE agent_id=$1`, [AGENT_A],
+      )).rows[0]!;
+      await daemon.execute('claimAgentCommand', { roomId: ROOM, commandId: command.id, generationId: 'generation' }, AGENT_A, owner);
+      const quiet = () => database.query(`UPDATE live_server_instances SET renewed_at=clock_timestamp()-interval '120 seconds'
+        WHERE instance_id=$1`, [presence.instanceId]);
+      const post = async (requestId: string, text: string) => {
+        client.send({ type: 'daemon-operation', agentId: AGENT_A, requestId, operation: 'postCornerMessage',
+          input: { roomId: ROOM, cornerId: ROOM, requestId: command.turn_request_id, generationId: 'generation', text } });
+        return client.next(frame => frame.requestId === requestId);
+      };
+      await quiet();
+      const landed = await post('live', 'Landed after a quiet socket');
+      expect(landed.error).toBeUndefined();
+      expect(landed).toMatchObject({ type: 'daemon-operation-result', result: expect.any(Object) });
+      expect((await database.query(`SELECT 1 FROM messages WHERE text='Landed after a quiet socket'`)).rowCount).toBe(1);
+      await presence.stop();
+      await quiet();
+      expect(await post('stopped', 'Refused from a stopped instance')).toMatchObject({
+        error: expect.stringContaining('server instance lease stale'),
+      });
+    } finally {
+      error.mockRestore();
+      await presence.stop();
+    }
+  });
+
   it.each(['update', 'crash', 'ordinary-close'] as const)('releases a %s socket silently and retains offline presence', async (kind) => {
     const database = await seeded();
     const live = new LiveHub();
