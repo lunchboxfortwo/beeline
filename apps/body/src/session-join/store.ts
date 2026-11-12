@@ -17,7 +17,7 @@ export interface JoinedSession {
   handle?: string;
   server: string;
   clientId: string;
-  refreshToken: string;
+  refreshToken?: string;
   accessToken?: string;
   accessExpiresAt?: number;
   /** The app's own conversation id when it was last seen (Claude Code session, Codex thread, …). */

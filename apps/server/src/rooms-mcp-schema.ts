@@ -156,9 +156,10 @@ CREATE TRIGGER beeline_mcp_handoff_completion AFTER INSERT OR UPDATE ON rooms_mc
 CREATE TABLE IF NOT EXISTS rooms_mcp_tokens (
   hash text PRIMARY KEY, client_id text NOT NULL REFERENCES rooms_mcp_clients(id) ON DELETE CASCADE,
   identity_id text NOT NULL REFERENCES identities(id) ON DELETE CASCADE,
-  scope text NOT NULL, expires_at timestamptz NOT NULL,
+  scope text NOT NULL, expires_at timestamptz,
   revoked_at timestamptz, window_at timestamptz NOT NULL DEFAULT now(), calls integer NOT NULL DEFAULT 0
 );
+ALTER TABLE rooms_mcp_tokens ALTER COLUMN expires_at DROP NOT NULL;
 ALTER TABLE rooms_mcp_tokens ADD COLUMN IF NOT EXISTS family_id text REFERENCES rooms_mcp_families(id) ON DELETE CASCADE;
 CREATE INDEX IF NOT EXISTS rooms_mcp_tokens_family ON rooms_mcp_tokens(family_id);
 CREATE INDEX IF NOT EXISTS rooms_mcp_tokens_identity ON rooms_mcp_tokens(identity_id);

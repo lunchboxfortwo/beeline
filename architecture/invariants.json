@@ -2512,8 +2512,14 @@
         "module": "Tools and connectors",
         "reason": "existing before the registry; weekly audit reviews",
         "columns": {
-          "hash": "existing before the registry; weekly audit reviews",
-          "family_id": "existing before the registry; weekly audit reviews",
+          "hash": {
+            "reason": "existing before the registry; weekly audit reviews",
+            "drop": "https://github.com/Beeline-Work/beeline/pull/4272 (refresh issuance retired; retain held credentials for compatibility adoption and revocation until installed expiring-token clients converge and rollback drains; separate contract migration)"
+          },
+          "family_id": {
+            "reason": "existing before the registry; weekly audit reviews",
+            "drop": "https://github.com/Beeline-Work/beeline/pull/4272 (refresh issuance retired; retain family links for compatibility adoption and revocation until installed expiring-token clients converge and rollback drains; separate contract migration)"
+          },
           "consumed_at": "existing before the registry; weekly audit reviews"
         }
       },
@@ -2525,7 +2531,10 @@
           "client_id": "existing before the registry; weekly audit reviews",
           "identity_id": "existing before the registry; weekly audit reviews",
           "scope": "existing before the registry; weekly audit reviews",
-          "expires_at": "existing before the registry; weekly audit reviews",
+          "expires_at": {
+            "reason": "existing before the registry; weekly audit reviews",
+            "drop": "https://github.com/Beeline-Work/beeline/pull/4272 (access-token expiry retired; retain column through serving and rollback overlap, then remove in a separate contract migration)"
+          },
           "revoked_at": "existing before the registry; weekly audit reviews",
           "window_at": "existing before the registry; weekly audit reviews",
           "calls": "existing before the registry; weekly audit reviews",

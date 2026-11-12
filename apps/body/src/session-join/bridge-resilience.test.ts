@@ -66,7 +66,7 @@ for (const { dead, bad, hook } of cases) {
     await updateState(dir, state => { state.sessions = [{ key, agent: 'claude-code', cwd: home, name: 'Claude',
       server: `http://127.0.0.1:${address.port}`, clientId: 'synthetic', refreshToken: 'synthetic',
       accessToken: 'synthetic', accessExpiresAt: Date.now() + 3_600_000, cursor: '0', deliveredWakes: [],
-      sessionId: 'resilience', pid: process.pid, joinedAt: '' }]; });
+      sessionId: 'resilience', pid: process.pid, joinedAt: '', deliveryGeneration: 'bound-resilience', deliveryMechanism: 'local' }]; });
     mkdirSync(join(env.CLAUDE_CONFIG_DIR, 'sessions'), { recursive: true });
     writeFileSync(join(env.CLAUDE_CONFIG_DIR, 'sessions', `${process.pid}.json`), JSON.stringify({
       pid: process.pid, sessionId: 'resilience', cwd: home, messagingSocketPath: socket,

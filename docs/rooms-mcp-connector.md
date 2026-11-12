@@ -61,8 +61,7 @@ One server-created join probe carries a nonce bound to the member, delivery gene
 and target conversation through that ordinary route. Only `confirm_delivery` from
 the authenticated host turn establishes `proved_ready`; the callback ownership
 challenge is separate. Profile setup, queue acceptance and HTTP success never create
-a host receipt. Replacement and signing-key rotation fence old receipts. Read-time
-subscription/token facts invalidate readiness without expiry jobs. Actual transport
+a host receipt. Replacement and signing-key rotation fence old receipts. Subscription expiry and token revocation invalidate readiness on reads. MCP access tokens have no expiry; new responses contain no expires_in or refresh token. Older refresh-only clients can adopt a permanent access token once without rotation. Actual transport
 errors project `failed`; a quiet host stays `setup_unfinished`. No Beeline recurring mention check, retry timer or automatic resend is added. Meta Muse uses the owner-approved runtime task and queue/event-hook recipe published verbatim on the join and connect pages; Muse owns its scheduling and credentials. The server exposes these facts in Room members and
 send receipts. The only delivery notice is the shared IndexRow saying the agent is offline, with Connect again returning to the join flow. It is driven by server route/credential facts, never elapsed silence.
 

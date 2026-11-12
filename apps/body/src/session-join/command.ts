@@ -177,9 +177,8 @@ async function joinCommand(args: string[], env: NodeJS.ProcessEnv): Promise<void
   const previous=existingPending(dir,own,server);
   const clientId = previous?.pending.clientId??await registerClient(server, agentLabel(own.agent));
   const available=previous?await tryWithKernelLock(finisherKey(previous.file),async()=>true):true;
-  const known=previous?.pending.signIn.tokens,receivedAt=previous?.pending.signIn.tokensAt;
-  const knownUntil=known&&receivedAt!==undefined?receivedAt+known.expires_in*1000:NaN;
-  const resume=previous&&(available!==true||Number.isFinite(knownUntil)&&knownUntil>Date.now()||
+  const known=previous?.pending.signIn.tokens;
+  const resume=previous&&(available!==true||Boolean(known)||
     !known&&!previous.pending.signIn.exchangeStarted&&previous.pending.startedAt+600_000>Date.now());
   const signIn = resume?previous.pending.signIn:signInLink(server, clientId, name, own.claudeInboundFallback);
   const pending: Pending = resume?previous.pending:{ server, clientId, signIn, agent: own.agent, cwd: own.cwd, name, sessionId: own.sessionId, pid: own.pid,
@@ -236,7 +235,7 @@ async function finishJoinOwned(file: string, env: NodeJS.ProcessEnv): Promise<vo
     }
     const key = sessionKey(pending.agent, pending.cwd);
     const joined: JoinedSession = { key, agent: pending.agent, cwd: pending.cwd, name: pending.name, server: pending.server, clientId: pending.clientId,
-      deliveryMechanism:'unfinished', refreshToken: tokens.refresh_token, accessToken: tokens.access_token, accessExpiresAt: Date.now() + tokens.expires_in * 1000,
+      deliveryMechanism:'unfinished', accessToken: tokens.access_token,
       sessionId: pending.sessionId, pid: pending.pid, cursor: '0', deliveredWakes: [], agentBin: pending.agentBin, joinedAt: new Date().toISOString() };
     // A tag sent immediately after Allow is already owed, even before the background finisher gets its token.
     const first = await callTool(joined, tokens.access_token, 'list_mentions', {}) as { mentions: Mention[]; nextCursor: string; wakes: Wake[] };
@@ -399,7 +398,7 @@ async function session(args: string[], env: NodeJS.ProcessEnv): Promise<void> {
   if (sub === 'leave') {
     const joined = own(rest, env);
     await fetch(`${joined.server}/mcp/oauth/revoke`, { method: 'POST', headers: { 'content-type': 'application/json' },
-      body: JSON.stringify({ client_id: joined.clientId, token: joined.refreshToken }), signal: undefined }).catch(() => undefined);
+      body: JSON.stringify({ client_id: joined.clientId, token: joined.accessToken ?? joined.refreshToken }), signal: undefined }).catch(() => undefined);
     const left = await updateState(dir, state => {
       state.sessions = state.sessions.filter(s => s.key !== joined.key);
       return state.sessions;

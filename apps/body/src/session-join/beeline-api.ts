@@ -16,7 +16,7 @@ export const DISCONNECTED = 'Beeline disconnected this session (it was disconnec
   + 'Tell your person; only they can reconnect it. Do not run usebeeline join on your own.';
 const opaque = () => randomBytes(32).toString('base64url');
 
-export interface Tokens { access_token: string; refresh_token: string; expires_in: number }
+export interface Tokens { access_token: string }
 
 // Fetch supplies its own five-minute body timeout even when an Agent default
 // is zero. Override that option only on the persistent stream dispatcher. The
@@ -60,7 +60,7 @@ async function postJson(url: string, body: unknown, headers: Record<string, stri
 export async function attachLocalDelivery(server:string,secret:string):Promise<Tokens & {clientId:string}> {
   const {status,value}=await postJson(`${server}/mcp/oauth/delivery-attach`,{secret});
   if(status!==200 || typeof value.clientId!=='string' || typeof value.access_token!=='string' ||
-    typeof value.refresh_token!=='string' || typeof value.expires_in!=='number')
+    !value.access_token)
     throw new Error('The local delivery handoff ended or was already used. Ask this same connected member for setup_delivery again.');
   return value as unknown as Tokens & {clientId:string};
 }
@@ -95,11 +95,7 @@ export function signInLink(server: string, clientId: string, memberName: string,
 /** Waits for the person to finish on any device, then trades the code for tokens. */
 export async function finishSignIn(server: string, clientId: string, signIn: SignIn, deadlineAt = Date.now() + 10 * 60_000,
   persist:(signIn:SignIn)=>void=()=>{}): Promise<Tokens> {
-  if(signIn.tokens&&signIn.tokensAt!==undefined){
-    const expires=signIn.tokens.expires_in-Math.floor((Date.now()-signIn.tokensAt)/1000);
-    if(expires<=0)throw new SignInPendingError('The sign-in result needs a new explicit authorization');
-    return {...signIn.tokens,expires_in:expires};
-  }
+  if(signIn.tokens) return signIn.tokens;
   if(signIn.exchangeStarted)throw new SignInPendingError('The sign-in result is unknown; no code exchange was repeated');
   if(Date.now()>=deadlineAt)throw new SignInEndedError('The sign-in link expired after 10 minutes');
   if(!signIn.code){
@@ -120,10 +116,9 @@ export async function finishSignIn(server: string, clientId: string, signIn: Sig
   try{token=await postJson(`${server}/mcp/oauth/token`,{grant_type:'authorization_code',client_id:clientId,code:signIn.code,
     code_verifier:signIn.verifier,redirect_uri:handoffUri(server),resource:`${server}/mcp`});}
   catch{throw new SignInPendingError('The sign-in result is unknown; no code exchange was repeated');}
-  if(token.status!==200||typeof token.value.access_token!=='string'||!token.value.access_token||typeof token.value.refresh_token!=='string'||
-    !token.value.refresh_token||typeof token.value.expires_in!=='number'||!Number.isFinite(token.value.expires_in)||token.value.expires_in<=0)
+  if(token.status!==200||typeof token.value.access_token!=='string'||!token.value.access_token)
     throw new SignInPendingError('The sign-in result is unknown; explicit authorization is required');
-  signIn.tokens={access_token:token.value.access_token,refresh_token:token.value.refresh_token,expires_in:token.value.expires_in};
+  signIn.tokens={access_token:token.value.access_token};
   signIn.tokensAt=Date.now();persist(signIn);return signIn.tokens;
 }
 
@@ -131,31 +126,25 @@ async function refresh(server: string, clientId: string, refreshToken: string): 
   const { status, value } = await postJson(`${server}/mcp/oauth/token`, { grant_type: 'refresh_token', client_id: clientId, refresh_token: refreshToken,
     resource: `${server}/mcp` });
   if (status !== 200) throw new Error(status === 400 ? DISCONNECTED : `Beeline token refresh failed (HTTP ${status})`);
-  return value as unknown as Tokens;
+  if (typeof value.access_token !== 'string' || !value.access_token) throw new Error(DISCONNECTED);
+  return {access_token:value.access_token};
 }
 
-/**
- * A current access token for a joined session. Refresh tokens are single-use and a reused one ends the connection,
- * so every refresh happens under the state lock and is written before anyone else reads it.
- * An expired stream rejects only its own token; a concurrent caller's newer token can be reused under the same lock.
- */
-export async function accessToken(dir: string, key: string, expiredToken?: string): Promise<string> {
-  const valid = (session: JoinedSession) => session.accessToken && session.accessToken !== expiredToken &&
-    (session.accessExpiresAt ?? 0) > Date.now() + 60_000 ? session.accessToken : undefined;
+/** Access tokens stay valid until revoked. Adopt a refresh-only legacy join once under its state lock. */
+export async function accessToken(dir: string, key: string): Promise<string> {
   const current = readState(dir).sessions.find(s => s.key === key);
   if (!current) throw new Error('This session has not joined Beeline');
-  const ready = valid(current);
-  if (ready) return ready;
+  if (current.accessToken) return current.accessToken;
   return withLock(dir, async () => {
     const state = readState(dir);
     const session = state.sessions.find(s => s.key === key);
     if (!session) throw new Error('This session has not joined Beeline');
-    const fresh = valid(session);
-    if (fresh) return fresh;
+    if (session.accessToken) return session.accessToken;
+    if (!session.refreshToken) throw new Error(DISCONNECTED);
     const tokens = await refresh(session.server, session.clientId, session.refreshToken);
     session.accessToken = tokens.access_token;
-    session.refreshToken = tokens.refresh_token;
-    session.accessExpiresAt = Date.now() + tokens.expires_in * 1000;
+    delete session.refreshToken;
+    delete session.accessExpiresAt;
     writeState(dir, state);
     return tokens.access_token;
   });

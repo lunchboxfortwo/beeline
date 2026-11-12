@@ -1,9 +1,10 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { mkdtempSync, mkdirSync, readdirSync, rmSync } from 'node:fs';
 import { join } from 'node:path';
-import { deliver, renderWake, acceptMemberDelivery } from './bridge.js';
+import { deliver, renderWake, acceptMemberDelivery, flush } from './bridge.js';
 import { antigravityOnce } from './pull-apps.js';
 import { queueInbox, readState, takeInbox, updateState, type JoinedSession } from './store.js';
+import * as BeelineApi from './beeline-api.js';
 import * as SessionAgents from './agents.js';
 import { findOwnSession, runSessionCommand } from './command.js';
 
@@ -118,6 +119,23 @@ describe('JOIN-DELIVERY local hosts', () => {
     expect(await acceptMemberDelivery(dir, session.key, runner, frame)).toBe(0);
     expect(takeInbox(dir, session.key)).toBe('');
     expect(readState(dir).sessions[0]).not.toHaveProperty('receipt_at');
+  });
+  it.each([undefined, 'local'] as const)('backfills a live unchanged legacy session with mechanism %s once', async mechanism => {
+    const dir = scratch(), session = joined(dir);
+    session.deliveryMechanism = mechanism;
+    session.pid = 123;
+    await updateState(dir, state => state.sessions.push(session));
+    vi.spyOn(BeelineApi, 'accessToken').mockResolvedValue('fixture-token');
+    const setup = vi.spyOn(BeelineApi, 'callTool').mockResolvedValue({ delivery: { generation: 'bound-generation' } });
+    const sources = { claude: () => [], codex: () => [], hooks: () => [{ agent: 'codex' as const,
+      sessionId: session.sessionId!, pid: session.pid, cwd: dir, seenAt: Date.now() }] };
+    await flush(dir, sources);
+    expect(setup).toHaveBeenCalledWith(expect.anything(), 'fixture-token', 'setup_delivery', {
+      mechanism: 'local', host: 'codex', surface: 'local_session', conversation: session.sessionId, installed: true,
+    });
+    expect(readState(dir).sessions[0]).toMatchObject({ deliveryGeneration: 'bound-generation', deliveryMechanism: 'local' });
+    await flush(dir, sources);
+    expect(setup).toHaveBeenCalledOnce();
   });
   it('reproduces a joined Codex host that rejects its queue: work stays owed and no watcher resend occurs', async () => {
     const dir = scratch(),

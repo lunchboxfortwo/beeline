@@ -264,15 +264,15 @@ export class RoomsMcpOAuth {
       JOIN identities i ON i.id=t.identity_id AND i.kind='human'
       LEFT JOIN rooms_mcp_members m ON m.client_id=t.client_id AND m.owner_id=t.identity_id
       LEFT JOIN rooms_mcp_families f ON f.id=t.family_id
-      LEFT JOIN rooms_mcp_connections c ON c.client_id=f.client_id AND c.identity_id=f.identity_id
-      WHERE t.hash=$1 AND t.revoked_at IS NULL AND t.expires_at>now()
-      AND (t.family_id IS NULL OR (f.revoked_at IS NULL AND c.revoked_at IS NULL))`, [tokenHash(raw)])).rows[0];
+      JOIN rooms_mcp_connections c ON c.client_id=t.client_id AND c.identity_id=t.identity_id AND c.revoked_at IS NULL
+      WHERE t.hash=$1 AND t.revoked_at IS NULL
+      AND (t.family_id IS NULL OR (f.id IS NOT NULL AND f.revoked_at IS NULL))`, [tokenHash(raw)])).rows[0];
   }
   async take(principal: McpPrincipal): Promise<boolean> {
     const result = await this.database.query(`UPDATE rooms_mcp_tokens SET
       calls=CASE WHEN window_at<=now()-interval '1 minute' THEN 1 ELSE calls+1 END,
       window_at=CASE WHEN window_at<=now()-interval '1 minute' THEN now() ELSE window_at END
-      WHERE hash=$1 AND revoked_at IS NULL AND expires_at>now()
+      WHERE hash=$1 AND revoked_at IS NULL
         AND (window_at<=now()-interval '1 minute' OR calls<60) RETURNING hash`, [principal.hash]);
     if (result.rowCount) await this.database.query('UPDATE rooms_mcp_connections SET last_used_at=now() WHERE client_id=$1 AND identity_id=$2 AND revoked_at IS NULL', [principal.client_id, principal.identity_id]);
     return result.rowCount > 0;

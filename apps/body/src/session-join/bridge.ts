@@ -154,16 +154,18 @@ export async function flush(dir: string, sources: Sources, deps: DeliverDeps = r
   const live = liveSessions(sources);
   for (const joined of state.sessions) {
     const session = findSession(joined, live, state.sessions);
-    if (session && (session.sessionId !== joined.sessionId || session.pid !== joined.pid)) {
-      if(joined.deliveryGeneration && session.sessionId!==joined.sessionId) {
+    if (session && (session.sessionId !== joined.sessionId || session.pid !== joined.pid ||
+      (hasLocalDelivery(joined) && !joined.deliveryGeneration))) {
+      if(hasLocalDelivery(joined) && (!joined.deliveryGeneration || session.sessionId!==joined.sessionId)) {
         const binding=await callTool(joined,await accessToken(dir,joined.key),'setup_delivery',{
           mechanism:'local',host:joined.agent,surface:joined.agent==='antigravity'?'app':'local_session',
           conversation:session.sessionId,installed:true}) as {delivery:{generation:string}};
         joined.deliveryGeneration=binding.delivery.generation;
+        joined.deliveryMechanism='local';
       }
       await updateState(dir, s => {
         const current = s.sessions.find(x => x.key === joined.key);
-        if (current) { current.sessionId = session.sessionId; current.pid = session.pid; current.deliveryGeneration=joined.deliveryGeneration; }
+        if (current) { current.sessionId = session.sessionId; current.pid = session.pid; current.deliveryGeneration=joined.deliveryGeneration; current.deliveryMechanism=joined.deliveryMechanism; }
       });
       log(dir, `${joined.key}: in session ${session.sessionId}`);
     }
@@ -359,11 +361,10 @@ export async function runBridge(dir: string, runner: Runner): Promise<void> {
     const controller=new AbortController(),entry:Stream={fingerprint:fingerprint(joined),controller,recovered};
     streams.set(joined.key,entry);
     const job = (async()=>{
-      let expiredToken:string|undefined;
       while(!controller.signal.aborted){
         let opened=false,terminal=false;
         try{
-          const token=await accessToken(dir,joined.key,expiredToken);
+          const token=await accessToken(dir,joined.key);
           const current=readState(dir).sessions.find(session=>session.key===joined.key);
           if (!current) { failedStartup('session disappeared'); changed(); return; }
           if (staged && !activated) entry.fingerprint = fingerprint(current);
@@ -386,8 +387,7 @@ export async function runBridge(dir: string, runner: Runner): Promise<void> {
               if (committed?.epoch === frame.cursor.epoch && committed.through > frame.cursor.through) continue;
             }
             if(frame.type==='ended'){
-              terminal=frame.reason!=='expired';
-              if(!terminal)expiredToken=token;
+              terminal=true;
               break;
             }
             if(await acceptMemberDelivery(dir,joined.key,runner,frame)){entry.recovered=false;await flush(dir,sources);}
@@ -398,7 +398,7 @@ export async function runBridge(dir: string, runner: Runner): Promise<void> {
         }
         if (!activated) failedStartup('member stream ended before activation');
         if(controller.signal.aborted||terminal||!opened||entry.recovered)return;
-        // One replacement after an established stream drops or expires. A failed initial
+        // One replacement after an established stream drops. A failed initial
         // or replacement connection parks until credentials/join state changes.
         entry.recovered=true;
       }

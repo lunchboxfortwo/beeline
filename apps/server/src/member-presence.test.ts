@@ -23,7 +23,7 @@ it('reads joined-session presence from its existing connection, and clears on di
   expect(await presence()).toMatchObject({status:'offline',held:false});
   await db.query("UPDATE rooms_mcp_tokens SET revoked_at=NULL; UPDATE rooms_mcp_connections SET revoked_at=now()");
   expect(await presence()).toMatchObject({status:'offline',held:false});
-  await db.query("UPDATE rooms_mcp_connections SET revoked_at=NULL; UPDATE rooms_mcp_tokens SET expires_at=now()-interval '1 second'");
-  expect(await presence()).toMatchObject({status:'offline',held:false});
+  await db.query("UPDATE rooms_mcp_connections SET revoked_at=NULL; UPDATE rooms_mcp_tokens SET expires_at=now()-interval '2 hours'");
+  expect(await presence()).toMatchObject({status:'online',held:true});
   expect(await presence('helper')).toEqual({status:'online',held:true});
 });
