@@ -281,10 +281,15 @@ export async function runServerCommandIntake(options: {
                 command = turnCommands.at(-1)!;
                 const privateDeliveries = turnCommands.filter(item => item.private &&
                   (item.reason === 'order' || item.reason === 'report' || item.reason === 'corner_objective'));
-                const latestWake = turnCommands.filter(item => !privateDeliveries.includes(item)).at(-1);
+                // Schedule prompts live outside the conversation; folding one
+                // away loses its scheduled work, so each claimed run keeps its prompt.
+                const scheduleRuns = turnCommands.filter(item => item.reason === 'schedule' && !privateDeliveries.includes(item));
+                const latestWake = turnCommands.filter(item => !privateDeliveries.includes(item) && !scheduleRuns.includes(item)).at(-1);
                 command = { ...command, source: { ...command.source,
-                  body: 'This is one turn for the current state of this place. Read its current conversation, brief and relevant live state, then resolve what still needs attention now. Missed mentions, schedule runs and lifecycle wakes are notifications, not separate jobs to replay or report on individually. This turn consumes the claimed wakes; they will not be replayed when it ends.\n' +
+                  body: 'This is one turn for the current state of this place. Read its current conversation, brief and relevant live state, then resolve what still needs attention now. Missed mentions and lifecycle wakes are notifications, not separate jobs to replay or report on individually. This turn consumes the claimed wakes; they will not be replayed when it ends.\n' +
                     (latestWake ? '\nLatest wake:\n' + JSON.stringify({requestId:latestWake.turnRequestId,reason:latestWake.reason,source:latestWake.source}) + '\n' : '') +
+                    (scheduleRuns.length ? '\nSchedule runs, each included once. Do each schedule\u2019s prompt in this turn:\n' +
+                      scheduleRuns.map(item => JSON.stringify({requestId:item.turnRequestId,reason:item.reason,source:item.source})).join('\n') + '\n' : '') +
                     (privateDeliveries.length ? '\nPrivate deliveries, each included once. Preserve their instructions and files. Use a delivery’s requestId when directing tools for it. In a corner, reports follow its current human-approved brief commander or opening route. Earlier explicit orders retain their issuer; later deliveries do not transfer command:\n' +
                       privateDeliveries.map(item => JSON.stringify({requestId:item.turnRequestId,reason:item.reason,source:item.source})).join('\n') : ''),
                 } };

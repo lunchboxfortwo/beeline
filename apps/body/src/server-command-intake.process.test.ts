@@ -255,3 +255,21 @@ it('a never-returning model fails its message, releases intake and runs the next
     await rm(root,{recursive:true,force:true});
   }
 });
+
+it('gives a turn every claimed schedule prompt once',async()=>{
+  const root=await mkdtemp(join(tmpdir(),'beeline-schedule-fold-'));
+  const controller=new AbortController();
+  const schedule=(id:string,body:string):AgentCommand=>({...command(id,body),reason:'schedule',source:{...command(id,body).source,authorId:'agent'}});
+  const claimed=[schedule('card','Post the 9am morning card'),schedule('sweep','Run the corner supervision sweep'),command('tag','hello')];
+  const execute=vi.fn(async(name:string)=>name==='getAgentCommands'?{commandProtocol:1,commands:claimed}:name==='claimAgentTurn'?{commands:claimed}:{});
+  const bodies:string[]=[];
+  const running=runServerCommandIntake({api:{execute} as unknown as DaemonApiClient,roomId:'room',agentId:'agent',
+    context:new CommandExecutionContext(root),signal:controller.signal,stop:()=>{},onError:()=>{},
+    run:async item=>{bodies.push(item.source.body);controller.abort();}});
+  try{
+    await running;
+    expect(bodies).toHaveLength(1);
+    for(const prompt of ['Post the 9am morning card','Run the corner supervision sweep'])
+      expect(bodies[0]!.split(prompt)).toHaveLength(2);
+  }finally{controller.abort();await rm(root,{recursive:true,force:true});}
+});
