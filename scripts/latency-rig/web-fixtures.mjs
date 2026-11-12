@@ -261,6 +261,13 @@ export async function resetWebFixture(db, f, activateTurn = true) {
       `DELETE FROM messages WHERE room_id=$1 AND id<>$2 AND card_type IS DISTINCT FROM 'grant-request'`,
       [f.roomId, f.messageId],
     );
+    // Object bytes live only for this rig run. A prior run's dedupe row cannot
+    // stand in for bytes in the new disposable object store.
+    if (f.name === 'send-attachment')
+      await db.query(`DELETE FROM objects WHERE owner_id=$1 AND sha256=$2`, [
+        viewer,
+        createHash('sha256').update('Local Beeline latency attachment\n').digest('hex'),
+      ]);
     if (f.name === 'create-dm')
       await db.query(
         `DELETE FROM rooms WHERE workspace_id=$1 AND direct_participants @> $2::jsonb`,

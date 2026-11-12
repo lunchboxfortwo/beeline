@@ -11,7 +11,7 @@ import { compactRelativeTime } from '@/buzz/relative-time';
 import { useRoomCornerSummary } from '@/buzz/room-corner-store';
 import { voiceCallHumanNames } from '@/buzz/voice-call-members';
 import { IdentityMark } from '@/components/buzz/IdentityMark';
-import { Btn, Copy, Glyph, HEIGHT, StatusMark, T } from '@/ui/grammar';
+import { Btn, ChatName, Copy, Glyph, HEIGHT, StatusMark, T, useStep } from '@/ui/grammar';
 import {
   VISIBLE_THREADS,
   chatPreview,
@@ -74,12 +74,13 @@ function ThreadLine({ item, corner, onOpen }: { item: ChatListItem; corner: Chat
   const waiting = threadWaitsOnViewer(corner);
   const title = threadTitle(item, corner);
   const word = threadWord(corner);
+  const step = useStep();
   return (
     <ListItem
       minHeight={HEIGHT.control}
       padding="0"
-      paddingVertical="2"
-      gap="2"
+      paddingVertical={step('2')}
+      gap={step('2')}
       alignItems="flex-start"
       justifyContent="flex-start"
       backgroundColor="transparent"
@@ -91,8 +92,8 @@ function ThreadLine({ item, corner, onOpen }: { item: ChatListItem; corner: Chat
       <YStack paddingTop="0.5">{item.room.avatar || item.room.favicon
         ? <RepositoryMark avatarUrl={item.room.avatar} faviconUrl={item.room.favicon} size={16} />
         : <Glyph icon={CornerDownRight} size={16} accent={waiting} />}</YStack>
-      <YStack flex={1} minWidth={0} gap="1">
-        <Copy numberOfLines={1}>{title}</Copy>
+      <YStack flex={1} minWidth={0} gap={step('1')}>
+        <Copy>{title}</Copy>
         <Copy small accent={waiting} quiet={!waiting}>{word}</Copy>
       </YStack>
     </ListItem>
@@ -148,7 +149,7 @@ type ChatRowProps = {
 export const ChatRow = React.memo(function ChatRow({ item, viewer, now, first, selected = false, pinned = false, onOpen, onPin, onOpenThread, onNewThread }: ChatRowProps) {
   const refused = useRoomOutboxFailure(item.room.id);
   const summary = useRoomCornerSummary(item.room.id);
-  const threads = chatThreads(item, summary?.openCorners ?? item.openCorners);
+  const threads = chatThreads(item, summary?.openCorners ?? item.openCorners, now);
   const title = chatTitle(item);
   const preview = chatPreview(item, viewer);
   const unread = item.unread === true;
@@ -160,9 +161,10 @@ export const ChatRow = React.memo(function ChatRow({ item, viewer, now, first, s
   const open = () => onOpen(item.room.id);
   const pinHold = useHold(PIN_HOLD_MS, () => onPin(item.room.id), open);
   const threadHold = useHold(NEW_THREAD_HOLD_MS, onNewThread ? () => onNewThread(item.room.id) : undefined, open, true);
+  const step = useStep();
   return (
-    <YStack paddingHorizontal="4" paddingVertical="3" testID={`chat-${item.room.id}`}>
-      {first ? null : <Separator borderColor="stroke" marginBottom="3" />}
+    <YStack paddingHorizontal="4" paddingVertical={step('3')} testID={`chat-${item.room.id}`}>
+      {first ? null : <Separator borderColor="stroke" marginBottom={step('3')} />}
       <ListItem
         minHeight={HEIGHT.control}
         padding="0"
@@ -197,8 +199,8 @@ export const ChatRow = React.memo(function ChatRow({ item, viewer, now, first, s
             <ChatMark item={item} />
           </YStack>
         ) : <ChatMark item={item} />}
-        <YStack flex={1} minWidth={0} gap="1">
-          <T v={unread ? 'heading' : 'body'} numberOfLines={1}>{title}</T>
+        <YStack flex={1} minWidth={0} gap={step('1')}>
+          <ChatName v="listTitle" name={title} testID={`room-${item.room.id}-title`} />
           {refused ? (
             <Copy small numberOfLines={2} color="removed" testID={`room-${item.room.id}-preview`}>Not sent: {refused.row.text}</Copy>
           ) : call ? (
@@ -217,7 +219,7 @@ export const ChatRow = React.memo(function ChatRow({ item, viewer, now, first, s
         </YStack>
       </ListItem>
       {threads.length ? (
-        <YStack marginLeft="4" marginTop="2" paddingLeft="4" borderLeftWidth={1} borderColor="strongStroke" testID={`nest-${item.room.id}`}>
+        <YStack marginLeft="4" marginTop={step('2')} paddingLeft="4" borderLeftWidth={1} borderColor="strongStroke" testID={`nest-${item.room.id}`}>
           {threads.slice(0, VISIBLE_THREADS).map((corner) => <ThreadLine key={corner.id} item={item} corner={corner} onOpen={onOpenThread} />)}
           {threads.length > VISIBLE_THREADS
             ? <MoreThreads item={item} rest={threads.slice(VISIBLE_THREADS)} onOpen={onOpenThread} />
@@ -248,7 +250,7 @@ export function JoinableChats({ chats, joining, onJoin }: {
         <XStack key={chat.id} gap="3" alignItems="center" paddingVertical="2" testID={`joinable-${chat.id}`}>
           <ChatMark item={{}} />
           <YStack flex={1} minWidth={0}>
-            <Copy numberOfLines={1}>{joinableTitle(chat.name)}</Copy>
+            <Copy>{joinableTitle(chat.name)}</Copy>
             <Copy small quiet>{chat.memberCount} {chat.memberCount === 1 ? 'member' : 'members'}</Copy>
           </YStack>
           <Btn kind="accent" label={`Join ${joinableTitle(chat.name)}`} disabled={joining !== null} onPress={() => onJoin(chat.id, chat.name)} testID={`join-${chat.id}`}>Join</Btn>

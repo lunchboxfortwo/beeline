@@ -51,9 +51,10 @@ const chats = vi.hoisted(() =>
                   name: 'Fix fixture',
                   state: openCornerState.current,
                   mine: true,
+                  lastActivityAt: Math.floor(Date.now() / 1000),
                   ...(openCornerState.current === 'waiting' ? { attention: true } : {}),
                 },
-                { id: 'corner-theirs', name: 'Their fix', state: 'waiting' },
+                { id: 'corner-theirs', name: 'Their fix', state: 'waiting', lastActivityAt: Math.floor(Date.now() / 1000) },
               ],
             },
             {
@@ -183,16 +184,6 @@ const theme = vi.hoisted(() => ({
     type: { body: {}, bodyStrong: {}, hero: {}, machine: {}, meta: { fontSize: 13, lineHeight: 19, fontFamily: 'SpaceGrotesk-Regular' }, sectionHead: {} },
   },
 }));
-vi.mock('react-native-unistyles', async () => {
-  const { completeTestTheme } = await import('../../../../tests/helpers/phone');
-  const fullTheme = completeTestTheme(theme);
-  return ({
-  StyleSheet: {
-    hairlineWidth: 1,
-    create: (factory: any) => (typeof factory === 'function' ? factory(fullTheme) : factory),
-  },
-  useUnistyles: () => ({ theme: fullTheme }),
-}); });
 vi.mock('@expo/vector-icons/Ionicons', async () => {
   const ReactModule = await import('react');
   return { default: (props: any) => ReactModule.createElement('Ionicons', props) };

@@ -25,18 +25,35 @@ describe('chat rows', () => {
     expect(chatTagged(chat('a', { agentState: 'needs-you' }))).toBe(true);
   });
 
+  const now = 1_800_000_000_000;
+  const ago = (hours: number) => now / 1000 - hours * 60 * 60;
+
   it('orders threads waiting on the viewer first, then their own, then the rest', () => {
     const corners = [
-      { id: '1', name: 'one', state: 'working' as const },
-      { id: '2', name: 'two', state: 'waiting' as const },
-      { id: '3', name: 'three', state: 'idle' as const, mine: true as const },
-      { id: '4', name: 'four', state: 'waiting' as const, mine: true as const },
+      { id: '1', name: 'one', state: 'working' as const, lastActivityAt: ago(1) },
+      { id: '2', name: 'two', state: 'waiting' as const, lastActivityAt: ago(1) },
+      { id: '3', name: 'three', state: 'idle' as const, mine: true as const, lastActivityAt: ago(1) },
+      { id: '4', name: 'four', state: 'waiting' as const, mine: true as const, lastActivityAt: ago(1) },
     ];
-    expect(chatThreads(chat('a'), corners).map((corner) => corner.id)).toEqual(['4', '3', '1', '2']);
+    expect(chatThreads(chat('a'), corners, now).map((corner) => corner.id)).toEqual(['4', '3', '1', '2']);
     expect(threadWord(corners[3]!)).toBe('waiting on you');
     expect(threadWord(corners[1]!)).toBe('waiting');
     // A direct message has no threads.
-    expect(chatThreads(chat('dm', { directMessage: { peer: alan } }), corners)).toEqual([]);
+    expect(chatThreads(chat('dm', { directMessage: { peer: alan } }), corners, now)).toEqual([]);
+  });
+
+  it('lists threads from the last day, and threads waiting on the viewer for a week', () => {
+    const corners = [
+      { id: 'fresh', name: 'fresh', state: 'working' as const, lastActivityAt: ago(23) },
+      { id: 'stale', name: 'stale', state: 'idle' as const, mine: true as const, lastActivityAt: ago(25) },
+      { id: 'others-wait', name: 'others-wait', state: 'waiting' as const, lastActivityAt: ago(25) },
+      { id: 'owed-week', name: 'owed-week', state: 'waiting' as const, mine: true as const, lastActivityAt: ago(6 * 24) },
+      { id: 'owed-old', name: 'owed-old', state: 'waiting' as const, mine: true as const, lastActivityAt: ago(8 * 24) },
+      { id: 'silent', name: 'silent', state: 'working' as const },
+    ];
+    expect(chatThreads(chat('a'), corners, now).map((corner) => corner.id)).toEqual(['owed-week', 'fresh']);
+    // No thread qualifies: the chat shows no thread lines.
+    expect(chatThreads(chat('a'), corners.slice(1, 3), now)).toEqual([]);
   });
 });
 

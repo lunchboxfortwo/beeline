@@ -34,6 +34,12 @@ describe('Buzz composer built-in slash verbs', () => {
     expect(slashVerbQuery('')).toBeNull();
   });
 
+  it('words every visible verb as a chat or thread, never a Room or corner', () => {
+    const shown = availableSlashVerbs(allAvailable, '').map((verb) => `${verb.label} ${verb.description}`);
+    expect(shown).toContain('Build something Start a new thread in this chat');
+    expect(shown.filter((text) => /\b(rooms?|corners?)\b/i.test(text))).toEqual([]);
+  });
+
   it('lists only real controls currently available in this Room or corner', () => {
     const verbs = availableSlashVerbs(
       {

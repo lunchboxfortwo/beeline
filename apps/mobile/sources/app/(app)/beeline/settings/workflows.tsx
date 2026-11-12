@@ -4,23 +4,21 @@ import { desktopColumnWidths } from '@/buzz/desktop-layout-tokens';
 import { useIsDesktop as useDesktopPageLayout } from '@/utils/responsive';
 import { useLatencyRouteFrame } from '@/buzz/latency-route-hook';
 import React, { useCallback, useState } from 'react';
-import { ScrollView, Text, TouchableOpacity, View } from 'react-native';
+import { ScrollView, XStack, YStack } from 'tamagui';
 import { router, useFocusEffect, useLocalSearchParams, type Href } from 'expo-router';
-import { useSafeAreaInsets } from 'react-native-safe-area-context';
-import { StyleSheet } from 'react-native-unistyles';
 import {
   roomTitle,
   type RoomWorkflowListResult,
   type RoomWorkflowView,
 } from '@beeline/api-contract/phone';
 import { getEffectiveRelayUrl, loadBuzzIdentity } from '@/auth/buzz-identity-storage';
-import { Typography } from '@/constants/Typography';
 import { SurfaceGlyphLoader } from '@/components/buzz/SurfaceGlyphLoader';
 import { PageHeader } from '@/components/buzz/PageHeader';
 import { RoomViewClient } from '@/sync/transport/room-view-client';
 import { monolithPhoneOperation } from '@/sync/transport/monolith-operation';
 import { Modal } from '@/modal/ModalManager';
 import { CHEVRON_ROW_SIZE, ChevronGlyph } from '@/components/buzz/ChevronGlyph';
+import { Copy, Inked, SafeBottom, SafeTop, T } from '@/ui/grammar';
 
 function first(value: string | string[] | undefined): string | undefined {
   return Array.isArray(value) ? value[0] : value;
@@ -31,11 +29,10 @@ const LAST_RUN = new Intl.DateTimeFormat(undefined, { dateStyle: 'medium', timeS
 /** Repository workflows remain a Room-manager action; this route is only an entry surface. */
 export default function RoomWorkflows() {
   useLatencyRouteFrame('/beeline/settings/workflows');
-  const insets = useSafeAreaInsets();
   const desktopPageLayout = useDesktopPageLayout();
   const params = useLocalSearchParams<{ roomId?: string | string[] }>();
   const roomId = first(params.roomId);
-  const [roomName, setRoomName] = useState('Room');
+  const [roomName, setRoomName] = useState('Chat');
   const [list, setList] = useState<RoomWorkflowListResult | null>(null);
   const [loading, setLoading] = useState(true);
   useLatencyRouteFrame('/beeline/settings/workflows', !loading, true);
@@ -57,7 +54,7 @@ export default function RoomWorkflows() {
       const relayUrl = await getEffectiveRelayUrl();
       const room = await new RoomViewClient({ baseUrl: relayUrl, identity }).room(roomId);
       if (!room.viewer.permissions.manage) throw new Error('Workspace admins only');
-      if (room.repositoryResolution !== 'repository') throw new Error('Room repository required');
+      if (room.repositoryResolution !== 'repository') throw new Error('Chat repository required');
       const workflows = await monolithPhoneOperation('listRoomWorkflows', { roomId });
       setRoomName(room.room.name);
       setList(workflows);
@@ -103,23 +100,27 @@ export default function RoomWorkflows() {
   );
 
   return (
-    <View style={[styles.container, desktopPageLayout && { width: '100%', maxWidth: desktopColumnWidths.list, alignSelf: 'center' }, { paddingTop: insets.top, paddingBottom: insets.bottom }]}>
+    <YStack flex={1} backgroundColor="canvas"
+      width={desktopPageLayout ? '100%' : undefined} maxWidth={desktopPageLayout ? desktopColumnWidths.list : undefined}
+      alignSelf={desktopPageLayout ? 'center' : undefined}>
+      <SafeTop />
       <PageHeader
-        backAccessibilityLabel="Back to Room"
-        eyebrow={roomTitle(roomName) ?? 'Room'}
+        backAccessibilityLabel="Back to chat"
+        eyebrow={roomTitle(roomName) ?? 'Chat'}
         onBack={() => router.back()}
         testID="workflows-room"
         title="Workflows"
       />
       {loading ? (
-        <View style={styles.loading}>
+        <YStack flex={1} alignItems="center" justifyContent="center">
           <SurfaceGlyphLoader testID="workflows-loader" />
-        </View>
+        </YStack>
       ) : (
-        <ScrollView contentContainerStyle={styles.content}>
-          <Text style={styles.notice}>
+        <ScrollView>
+          <YStack padding="4" gap="2">
+          <Copy small quiet marginBottom="1">
             Dispatches run on {list?.defaultBranch ?? 'the repository default branch'}.
-          </Text>
+          </Copy>
           {list?.workflows.length ? (
             list.workflows.map((workflow) => {
               const busy = running === workflow.name;
@@ -127,34 +128,35 @@ export default function RoomWorkflows() {
                 ? `${LAST_RUN.format(new Date(workflow.lastRunAt * 1_000))} · ${workflow.conclusion ?? 'running'}`
                 : 'Never run';
               return (
-                <TouchableOpacity
+                <XStack
                   accessibilityLabel={`Run ${workflow.name}`}
                   accessibilityRole="button"
                   disabled={Boolean(running)}
                   key={workflow.name}
-                  onPress={() => void run(workflow)}
-                  style={styles.workflowRow}
+                  onPress={running ? undefined : () => void run(workflow)}
+                  minHeight={56}
+                  borderTopWidth={1}
+                  borderTopColor="stroke"
+                  paddingVertical="2"
+                  alignItems="center"
+                  gap="2"
                   testID={`room-workflow-${workflow.name}`}
                 >
-                  <View style={styles.workflowCopy}>
-                    <Text style={styles.workflowName}>{workflow.name}</Text>
-                    <Text style={styles.workflowMeta}>{lastRun}</Text>
-                  </View>
-                  <View style={styles.run}>
-                    <Text style={styles.runText}>{busy ? 'RUNNING…' : 'RUN'}</Text>
+                  <YStack flex={1} minWidth={0} gap="1">
+                    <T v="heading">{workflow.name}</T>
+                    <Copy small quiet>{lastRun}</Copy>
+                  </YStack>
+                  <XStack alignItems="center" gap="1">
+                    <T v="metaStrong" color="needsYou">{busy ? 'RUNNING…' : 'RUN'}</T>
                     {!busy ? (
-                      <ChevronGlyph
-                        color={styles.runGlyph.color}
-                        direction="right"
-                        size={CHEVRON_ROW_SIZE}
-                      />
+                      <Inked color="needsYou" glyph={ChevronGlyph} direction="right" size={CHEVRON_ROW_SIZE} />
                     ) : null}
-                  </View>
-                </TouchableOpacity>
+                  </XStack>
+                </XStack>
               );
             })
           ) : (
-            <Text style={styles.empty}>No dispatchable workflows in this Room.</Text>
+            <Copy small quiet>No dispatchable workflows in this chat.</Copy>
           )}
           {error && (
             <SettingsRow
@@ -162,45 +164,10 @@ export default function RoomWorkflows() {
               testID="workflows-error"
             />
           )}
+          </YStack>
         </ScrollView>
       )}
-    </View>
+      <SafeBottom />
+    </YStack>
   );
 }
-
-const styles = StyleSheet.create((theme) => ({
-  container: { flex: 1, backgroundColor: theme.buzz.bgTerminal },
-  loading: { flex: 1, alignItems: 'center', justifyContent: 'center' },
-  content: { padding: 16, gap: theme.buzz.space.sm },
-  notice: {
-    ...Typography.default(),
-    ...theme.buzz.type.meta,
-    color: theme.buzz.textMuted,
-    marginBottom: theme.buzz.space.xs,
-  },
-  workflowRow: {
-    minHeight: 58,
-    borderTopWidth: 1,
-    borderTopColor: theme.buzz.border,
-    paddingVertical: theme.buzz.space.sm,
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: theme.buzz.space.sm,
-  },
-  workflowCopy: { flex: 1, minWidth: 0, gap: 4 },
-  workflowName: {
-    ...Typography.default('semiBold'),
-    ...theme.buzz.type.bodyStrong,
-    color: theme.buzz.textPrimary,
-  },
-  workflowMeta: { ...Typography.default(), ...theme.buzz.type.meta, color: theme.buzz.textMuted },
-  run: { flexDirection: 'row', alignItems: 'center', gap: theme.buzz.space.xs },
-  runText: {
-    ...Typography.default('semiBold'),
-    ...theme.buzz.type.sectionHead,
-    color: theme.buzz.accent,
-  },
-  runGlyph: { color: theme.buzz.accent },
-  empty: { ...Typography.default(), ...theme.buzz.type.meta, color: theme.buzz.textMuted },
-  error: { ...Typography.default(), ...theme.buzz.type.meta, color: theme.buzz.danger },
-}));

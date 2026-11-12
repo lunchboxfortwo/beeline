@@ -23,6 +23,11 @@ vi.mock('react-native', () => ({
   View: (props: Record<string, unknown>) => React.createElement('View', props),
 }));
 
+vi.mock('tamagui', async () => (await import('@/ui/screens/transcript/grammar-hosts.test-support')).tamaguiHosts());
+vi.mock('@/ui/grammar', () => ({
+  Motion: (props: Record<string, unknown>) => React.createElement('Motion', props),
+}));
+
 vi.mock('@/ui/screens/transcript/TranscriptMarkers', () => ({
   NewMessagesRule: () => React.createElement('new-messages-rule', { testID: 'new-messages-divider' }),
 }));

@@ -1,6 +1,7 @@
 import React, { createContext, useCallback, useContext, useMemo } from 'react';
-import { Text, View, type StyleProp, type TextStyle } from 'react-native';
-import { StyleSheet } from 'react-native-unistyles';
+import type { StyleProp, TextStyle } from 'react-native';
+import { XStack, YStack } from 'tamagui';
+import { Indent, ProseRun, T, type ProseMark } from '@/ui/grammar';
 import { parseMarkdown, type MarkdownSpan } from '@/components/markdown/parseMarkdown';
 import { CodeBlock } from '@/components/buzz/CodeBlock';
 import {
@@ -214,28 +215,32 @@ export function tableColumnWeights(rows: string[][]): number[] {
 /** Block kinds whose renderer starts with a `Text` that can host the handle. */
 const INLINE_HOSTS = new Set(['text', 'header', 'list', 'numbered-list']);
 
-function spanStyle(span: MentionSpan, base: StyleProp<TextStyle>, tailStyle?: TextStyle, viewerHandle?: string) {
-  return [
-    base,
-    span.styles.includes('bold') && styles.bold,
-    span.styles.includes('semibold') && styles.bold,
-    span.styles.includes('italic') && styles.italic,
-    span.styles.includes('code') && styles.inlineCode,
-    span.url && styles.link,
-    // A resolved channel reference shares the tagged-token brass: the same
-    // interactive-text vocabulary as a @mention, never a new accent or chip.
-    (span.mention || span.channelRef) && styles.mention,
-    // A mention of the viewer: semibold brass on the highlight, small radius.
-    span.mention && viewerHandle !== undefined &&
-      span.text.slice(1).normalize('NFKC').toLocaleLowerCase() === viewerHandle && styles.mentionViewer,
-    // Last, so the arriving tail's tone wins over the settled body's.
-    span.tail && tailStyle,
-  ];
+/**
+ * A span's marks over its block's. Emphasis is a luminance step, never a
+ * heavier cut: `**strong**` climbs to ink in the semibold face (a no-op on
+ * agent output, already the brightest tier). Space Grotesk ships no italic, so
+ * emphasis is spoken by weight in the prose family.
+ */
+function spanMarks(span: MentionSpan, viewerHandle?: string): ProseMark[] {
+  const marks: ProseMark[] = [];
+  if (span.styles.includes('bold') || span.styles.includes('semibold')) marks.push('strong');
+  if (span.styles.includes('italic')) marks.push('emphasis');
+  if (span.styles.includes('code')) marks.push('code');
+  if (span.url) marks.push('link');
+  // A tagged identity, and a resolved channel reference, pop in the theme's
+  // brass: the one chromatic spend in prose, never a new accent or chip.
+  if (span.mention || span.channelRef) marks.push('brass');
+  // A mention of the viewer: semibold brass on the highlight.
+  if (span.mention && viewerHandle !== undefined &&
+    span.text.slice(1).normalize('NFKC').toLocaleLowerCase() === viewerHandle) marks.push('viewer');
+  return marks;
 }
 
 function InlineMarkdown({
   spans,
   base,
+  baseMarks = [],
+  level,
   onLink,
   liveMentionHandles,
   onMention,
@@ -245,6 +250,10 @@ function InlineMarkdown({
 }: {
   spans: MarkdownSpan[];
   base: StyleProp<TextStyle>;
+  /** The block's own marks (a heading's ink, a quote's secondary). */
+  baseMarks?: ProseMark[];
+  /** A document heading's level. */
+  level?: 1 | 2 | 3 | 4 | 5 | 6;
   onLink: (url: string) => void;
   liveMentionHandles: ReadonlySet<string>;
   onMention?: (handle: string) => void;
@@ -263,7 +272,7 @@ function InlineMarkdown({
   return (
     <>
       {glossed.map((span, index) => (
-        <Text
+        <ProseRun
           accessibilityRole={
             (span.mention && onMention) || (span.channelRef && onChannelReference) || span.url
               ? 'link'
@@ -279,10 +288,14 @@ function InlineMarkdown({
                   ? () => onLink(span.url!)
                   : undefined
           }
-          style={spanStyle(span, base, tail?.style, viewerHandle)}
+          body={base}
+          marks={[...baseMarks, ...spanMarks(span, viewerHandle)]}
+          level={level}
+          // Last, so the arriving tail's tone wins over the settled body's.
+          fade={span.tail ? tail?.style : undefined}
         >
           {span.text}
-        </Text>
+        </ProseRun>
       ))}
     </>
   );
@@ -357,29 +370,34 @@ function MarkdownTable({ headers, rows, onLink }: { headers: MarkdownSpan[][]; r
   const grid = [headers, ...rows];
   const weights = useMemo(() => tableColumnWeights(grid.map((row) => row.map(markdownTableCellText))), [headers, rows]);
   return (
-    <View style={styles.table}>
+    <YStack width="100%" minWidth={0}>
       {grid.map((row, rowIndex) => (
-        <View
+        // A hairline between rows in the machine vocabulary; the header lifts to ink.
+        <XStack
           key={rowIndex}
-          style={[styles.tableRow, rowIndex === grid.length - 1 && styles.tableLastRow]}
+          alignItems="flex-start"
+          columnGap="2"
+          paddingVertical="1"
+          borderBottomWidth={rowIndex === grid.length - 1 ? 0 : 1}
+          borderBottomColor="stroke"
         >
           {Array.from({ length: weights.length }, (_, column) => (
-            <View key={column} style={[styles.tableCell, { flex: weights[column] ?? 1 }]}>
-              <Text selectable style={[styles.codeBlock, rowIndex === 0 && styles.tableHeadText]}>
+            <YStack key={column} minWidth={0} flex={weights[column] ?? 1}>
+              <T v="code" userSelect="text" color={rowIndex === 0 ? 'ink' : 'secondary'}>
                 {(row[column] ?? []).map((span, spanIndex) => (
-                  <Text
+                  <ProseRun
                     key={spanIndex}
                     accessibilityRole={span.url ? 'link' : undefined}
                     onPress={span.url ? () => onLink(span.url!) : undefined}
-                    style={[span.styles.includes('bold') && styles.bold, span.styles.includes('italic') && styles.italic, span.url && styles.link]}
-                  >{span.text}</Text>
+                    marks={[span.styles.includes('bold') && 'strong', span.styles.includes('italic') && 'emphasis', Boolean(span.url) && 'link']}
+                  >{span.text}</ProseRun>
                 ))}
-              </Text>
-            </View>
+              </T>
+            </YStack>
           ))}
-        </View>
+        </XStack>
       ))}
-    </View>
+    </YStack>
   );
 }
 
@@ -425,22 +443,22 @@ export const MonoMarkdown = React.memo(function MonoMarkdown({
   const viewerMention = viewerHandle?.replace(/^@/, '').normalize('NFKC').toLocaleLowerCase();
   return (
     <ViewerMention.Provider value={viewerMention}>
-    <View style={styles.root} testID={testID}>
+    <YStack width="100%" minWidth={0} testID={testID}>
       {leadingInline && !inlineHosted ? (
-        <Text selectable style={[base, styles.block]}>
+        <ProseRun userSelect="text" marginBottom="2" body={base}>
           {leadingInline}
-        </Text>
+        </ProseRun>
       ) : null}
+      {/* Blocks sit 8 apart; full-page attachments read at 16. */}
       {blocks.map((block, index) => {
         const last = index === blocks.length - 1;
-        const blockStyle = [styles.block, document && styles.documentBlock, last && styles.lastBlock];
         const lead = inlineHosted && index === 0 ? leadingInline : null;
         // The stream is always writing at the end of the message.
         const trail = last ? tail : undefined;
 
         if (block.type === 'text') {
           return (
-            <Text key={index} selectable style={[base, blockStyle]}>
+            <ProseRun key={index} userSelect="text" marginBottom={last ? 0 : document ? '4' : '2'} body={base}>
               {lead}
               <InlineMarkdown
                 spans={block.content}
@@ -452,18 +470,28 @@ export const MonoMarkdown = React.memo(function MonoMarkdown({
                 onChannelReference={onChannelReference}
                 tail={trail}
               />
-            </Text>
+            </ProseRun>
           );
         }
         if (block.type === 'header') {
-          // Unistyles web properties are non-enumerable; spreading them drops heading type.
-          const headingBase = [base, styles.heading, document && styles[`documentHeading${block.level}`]];
+          // A heading gets air rather than mass, in ink; a document heading takes its level's type style.
+          const level = document ? (Math.min(6, Math.max(1, block.level)) as 1 | 2 | 3 | 4 | 5 | 6) : undefined;
           return (
-            <Text key={index} selectable style={[base, styles.heading, document && styles[`documentHeading${block.level}`], blockStyle, document && styles.documentHeadingSpace, document && index === 0 && styles.documentFirstHeading]}>
+            <ProseRun
+              key={index}
+              userSelect="text"
+              marginTop={document ? (index === 0 ? 0 : '4') : '1'}
+              marginBottom={document || !last ? '2' : 0}
+              body={base}
+              marks={['strong']}
+              level={level}
+            >
               {lead}
               <InlineMarkdown
                 spans={block.content}
-                base={headingBase}
+                base={base}
+                baseMarks={['strong']}
+                level={level}
                 onLink={onLink}
                 liveMentionHandles={liveMentionHandles}
                 onMention={onMention}
@@ -471,44 +499,46 @@ export const MonoMarkdown = React.memo(function MonoMarkdown({
                 onChannelReference={onChannelReference}
                 tail={trail}
               />
-            </Text>
+            </ProseRun>
           );
         }
         if (block.type === 'quote') {
           return (
-            <View key={index} style={[styles.quote, document && styles.documentQuote, blockStyle]}>
-              <Text selectable style={[base, styles.quoteText]}>
-                <InlineMarkdown spans={block.content} base={{ ...base, ...styles.quoteText }} onLink={onLink} liveMentionHandles={liveMentionHandles} onMention={onMention} channelIndex={channelIndex} onChannelReference={onChannelReference} tail={trail} />
-              </Text>
-            </View>
+            <YStack key={index} borderLeftWidth={2} borderLeftColor="stroke" paddingLeft="4" paddingVertical={document ? '2' : 0} marginBottom={last ? 0 : document ? '4' : '2'}>
+              <ProseRun userSelect="text" body={base} marks={['quiet']}>
+                <InlineMarkdown spans={block.content} base={base} baseMarks={['quiet']} onLink={onLink} liveMentionHandles={liveMentionHandles} onMention={onMention} channelIndex={channelIndex} onChannelReference={onChannelReference} tail={trail} />
+              </ProseRun>
+            </YStack>
           );
         }
         if (block.type === 'list' || block.type === 'numbered-list') {
           return (
-            <View key={index} style={[styles.list, document && styles.documentList, blockStyle]}>
+            <YStack key={index} width="100%" gap={document ? '2' : '1'} marginBottom={last ? 0 : document ? '4' : '2'}>
               {block.items.map((item, itemIndex) => (
-                <Text
-                  key={itemIndex}
-                  selectable
-                  style={[base, styles.listItem, document && styles.documentListItem, { paddingLeft: Math.max(0, item.depth) * 16 }]}
-                >
-                  {itemIndex === 0 ? lead : null}
-                  <Text style={styles.listGlyph}>
-                    {'number' in item ? `${item.number}. ` : '· '}
-                  </Text>
-                  <InlineMarkdown
-                    spans={item.spans}
-                    base={base}
-                    onLink={onLink}
-                    liveMentionHandles={liveMentionHandles}
-                    onMention={onMention}
-                    channelIndex={channelIndex}
-                    onChannelReference={onChannelReference}
-                    tail={itemIndex === block.items.length - 1 ? trail : undefined}
-                  />
-                </Text>
+                <Indent key={itemIndex} depth={item.depth}>
+                  <ProseRun
+                    userSelect="text"
+                    width="100%"
+                    body={base}
+                  >
+                    {itemIndex === 0 ? lead : null}
+                    <ProseRun marks={['quiet']}>
+                      {'number' in item ? `${item.number}. ` : '· '}
+                    </ProseRun>
+                    <InlineMarkdown
+                      spans={item.spans}
+                      base={base}
+                      onLink={onLink}
+                      liveMentionHandles={liveMentionHandles}
+                      onMention={onMention}
+                      channelIndex={channelIndex}
+                      onChannelReference={onChannelReference}
+                      tail={itemIndex === block.items.length - 1 ? trail : undefined}
+                    />
+                  </ProseRun>
+                </Indent>
               ))}
-            </View>
+            </YStack>
           );
         }
         if (block.type === 'code-block' || block.type === 'mermaid') {
@@ -520,7 +550,7 @@ export const MonoMarkdown = React.memo(function MonoMarkdown({
               (candidate) => candidate.type === 'code-block' || candidate.type === 'mermaid',
             ).length;
           return (
-            <View key={index} style={blockStyle}>
+            <YStack key={index} marginBottom={last ? 0 : document ? '4' : '2'}>
               <CodeBlock
                 code={code}
                 language={language}
@@ -529,126 +559,43 @@ export const MonoMarkdown = React.memo(function MonoMarkdown({
                 blockIndex={blockIndex}
                 onOpen={onOpenCode}
               />
-            </View>
+            </YStack>
           );
         }
         if (block.type === 'horizontal-rule') {
-          return <View key={index} style={[styles.rule, blockStyle]} />;
+          return <YStack key={index} height={1} backgroundColor="stroke" marginTop="1" marginBottom={last ? 0 : document ? '4' : '2'} />;
         }
         if (block.type === 'table') {
+          // Tables share the 2px left-rule vocabulary; fenced code owns its frame in CodeBlock.tsx.
           return (
-            <View key={index} style={[styles.codeFrame, blockStyle]}>
+            <YStack key={index} maxWidth="100%" paddingLeft="4" paddingVertical="1" borderLeftWidth={2} borderLeftColor="strongStroke" marginBottom={last ? 0 : document ? '4' : '2'}>
               <MarkdownTable headers={block.headers} rows={block.rows} onLink={onLink} />
-            </View>
+            </YStack>
           );
         }
         if (block.type === 'options') {
           return (
-            <Text key={index} selectable style={[base, blockStyle]}>
+            <ProseRun key={index} userSelect="text" marginBottom={last ? 0 : document ? '4' : '2'} body={base}>
               {block.items.map((item) => `· ${item}`).join('\n')}
-            </Text>
+            </ProseRun>
           );
         }
         if (block.type === 'image') {
           return (
-            <Text
+            <ProseRun
               key={index}
-              style={[base, styles.link, blockStyle]}
+              marginBottom={last ? 0 : document ? '4' : '2'}
+              body={base}
+              marks={['link']}
               onPress={() => onLink(block.url)}
             >
               {block.alt || block.url}
-            </Text>
+            </ProseRun>
           );
         }
         return null;
       })}
-    </View>
+    </YStack>
     </ViewerMention.Provider>
   );
 }, monoMarkdownPropsAreEqual);
-
-const styles = StyleSheet.create((theme) => ({
-  root: { width: '100%', minWidth: 0 },
-  block: { marginBottom: 8 },
-  documentBlock: { marginBottom: theme.buzz.space.md },
-  lastBlock: { marginBottom: 0 },
-  /**
-   * Emphasis is a luminance step, never a heavier cut.
-   *
-   * Bold fought the inscribed feel — on a black slab a fat stroke reads as a
-   * smear, not as importance. `**strong**` therefore climbs to the top of the
-   * ledger's ladder instead: a no-op on agent output (already the brightest
-   * tier) and one real step up on everything else. Same for a heading, which
-   * additionally gets air and tracking rather than mass.
-   */
-  bold: { fontFamily: theme.buzz.proseSemibold, color: theme.buzz.ledgerBright },
-  // Space Grotesk ships no italic: emphasis is spoken by weight, in the
-  // prose family, so an emphasised word never switches typeface.
-  italic: { fontFamily: theme.buzz.proseMedium },
-  inlineCode: { fontFamily: theme.buzz.monoRegular, color: theme.buzz.ledgerQuiet },
-  link: { textDecorationLine: 'underline' },
-  // A tagged identity pops in the theme's brass — the one chromatic spend in
-  // prose, shared with every other "this is addressed/live" signal.
-  mention: { color: theme.buzz.accent },
-  mentionViewer: {
-    fontFamily: theme.buzz.proseSemibold,
-    backgroundColor: theme.buzz.bgHighlight,
-    borderRadius: theme.buzz.radius,
-  },
-  heading: {
-    fontFamily: theme.buzz.proseSemibold,
-    color: theme.buzz.ledgerBright,
-    marginTop: theme.buzz.space.xs,
-  },
-  documentHeading1: { ...theme.buzz.type.hero, fontFamily: theme.buzz.proseSemibold, color: theme.buzz.textPrimary },
-  documentHeading2: { ...theme.buzz.type.bodyStrong, color: theme.buzz.textPrimary },
-  documentHeading3: { ...theme.buzz.type.bodyStrong, color: theme.buzz.ledgerQuiet },
-  documentHeading4: { ...theme.buzz.type.body, color: theme.buzz.ledgerQuiet },
-  documentHeading5: { ...theme.buzz.type.meta, fontFamily: theme.buzz.proseSemibold, color: theme.buzz.ledgerQuiet },
-  documentHeading6: { ...theme.buzz.type.meta, color: theme.buzz.ledgerQuiet },
-  documentHeadingSpace: { marginTop: theme.buzz.space.md, marginBottom: theme.buzz.space.sm },
-  documentFirstHeading: { marginTop: 0 },
-  list: { width: '100%', gap: theme.buzz.space.xs },
-  documentList: { gap: theme.buzz.space.sm },
-  listItem: { width: '100%' },
-  documentListItem: { paddingLeft: theme.buzz.space.sm },
-  listGlyph: { color: theme.buzz.ledgerQuiet },
-  quote: { borderLeftWidth: 2, borderLeftColor: theme.buzz.border, paddingLeft: theme.buzz.space.md },
-  documentQuote: { paddingVertical: theme.buzz.space.sm },
-  quoteText: { color: theme.buzz.ledgerQuiet },
-  /**
-   * Tables share the 2px left-rule vocabulary. Fenced code owns its own frame
-   * in CodeBlock.tsx (Two Inks structure, inscribed-and-opened).
-   */
-  codeFrame: {
-    maxWidth: '100%',
-    paddingLeft: theme.buzz.space.md,
-    paddingVertical: theme.buzz.space.xs,
-    borderLeftWidth: 2,
-    borderLeftColor: theme.buzz.bgTexturePeak,
-  },
-  codeBlock: {
-    ...theme.buzz.type.machine,
-    color: theme.buzz.ledgerQuiet,
-  },
-  /**
-   * A pipe table keeps the fenced block's machine frame and mono body, but
-   * lays out as an aligned wrapping grid: one shared flex weight per column
-   * (`tableColumnWeights`), a hairline divider between rows in the machine
-   * vocabulary, and the header lifted to the ledger's bright tier. No
-   * horizontal scroll — a table fits the tile or its cells wrap.
-   */
-  table: { width: '100%', minWidth: 0 },
-  tableRow: {
-    flexDirection: 'row',
-    alignItems: 'flex-start',
-    columnGap: 8,
-    paddingVertical: theme.buzz.space.xs,
-    borderBottomWidth: StyleSheet.hairlineWidth,
-    borderBottomColor: theme.buzz.borderQuiet,
-  },
-  tableLastRow: { borderBottomWidth: 0 },
-  tableCell: { minWidth: 0 },
-  tableHeadText: { color: theme.buzz.ledgerBright },
-  rule: { height: 1, backgroundColor: theme.buzz.borderQuiet, marginVertical: theme.buzz.space.xs },
-}));

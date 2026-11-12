@@ -136,12 +136,6 @@ vi.mock('@/buzz/runtime-config', () => ({
 vi.mock('@/sync/appConfig', () => ({
   loadAppConfig: () => ({ releaseVersion: 'v0.0.1', releaseSha: null }),
 }));
-vi.mock('@/constants/Typography', () => ({
-  Typography: {
-    default: () => ({}),
-    mono: () => ({}),
-  },
-}));
 vi.mock('@/components/buzz/MonoHull', async () => {
   const ReactModule = await import('react');
   const host = (name: string) => (props: React.Attributes) => ReactModule.createElement(name, props);
@@ -164,9 +158,9 @@ vi.mock('@/components/buzz/BeelineMark', async () => {
 vi.mock('@/utils/open-external-url', () => ({
   openExternalUrl: vi.fn(async () => undefined),
 }));
-// Real @/unistyles boots Unistyles and MMKV-backed local settings, neither of
-// which this screen's own tests exercise or mock elsewhere.
-vi.mock('@/unistyles', () => ({ applyAppearanceChoice: vi.fn(), setAppDisplay: vi.fn() }));
+// Real @/display boots native system chrome and MMKV-backed local settings,
+// neither of which this screen's own tests exercise or mock elsewhere.
+vi.mock('@/display', () => ({ applyAppearanceChoice: vi.fn(), useAppMode: () => 'dark' }));
 vi.mock('@/sync/storage', () => ({
   useLocalSettingMutable: (name: string) => [name === 'appearance' ? 'dark' : name === 'palette' ? 'brass' : name === 'roomOpenTraceOverlay' ? false : 'medium', vi.fn()],
 }));
@@ -226,17 +220,6 @@ vi.mock('@/buzz/surface-storage', () => {
     },
   };
 });
-vi.mock('react-native-unistyles', () => ({
-  StyleSheet: {
-    create: (styles: unknown) =>
-      typeof styles === 'function'
-        ? (styles as (theme: unknown) => unknown)({ buzz: beelineThemes.obsidian })
-        : styles,
-  },
-  useUnistyles: () => ({
-    theme: { buzz: { textPrimary: '#fff', bgRaised: '#111', chrome: '#d7af5f' } },
-  }),
-}));
 vi.mock('react-native', async () => {
   const ReactModule = await import('react');
   const host = (name: string) => (props: React.Attributes) =>

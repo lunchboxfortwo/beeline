@@ -164,9 +164,9 @@ describe('AI app info page', () => {
     expect(status.props).toMatchObject({ title: 'ChatGPT', value: 'Connected', chevron: 'right' });
     expect(status.props.leading.props.mark).toEqual({ kind: 'image', uri: 'data:image/png;base64,AA==', plate: 'light' });
     expect(renderer.root.findByProps({ testID: 'connector-info-agents' }).props.children)
-      .toBe('Pidoong uses ChatGPT to read your Rooms and post. It posts as Pidoong, not as you.');
+      .toBe('Pidoong uses ChatGPT to read your chats and post. It posts as Pidoong, not as you.');
     expect(renderer.root.findByProps({ testID: 'ai-client-agent' }).props).toMatchObject({ title: 'Pidoong', description: '@pidoong_2' });
-    expect(renderer.root.findByProps({ testID: 'ai-client-can-read' }).props.title).toBe('Read messages in your Rooms');
+    expect(renderer.root.findByProps({ testID: 'ai-client-can-read' }).props.title).toBe('Read messages in your chats');
     expect(renderer.root.findByProps({ testID: 'ai-client-can-post' }).props.title).toBe('Post and reply as Pidoong');
     expect(renderer.root.findByProps({ testID: 'ai-client-dates' }).props.children).toBe('Connected Oct 31 · last used today.');
     expect(renderer.root.findAllByProps({ testID: 'connector-squire-vault' })).toHaveLength(0);
@@ -186,7 +186,7 @@ describe('AI app info page', () => {
     const renderer = await render();
     expect(renderer.root.findAllByProps({ testID: 'ai-client-agent' })).toHaveLength(0);
     expect(renderer.root.findByProps({ testID: 'connector-info-agents' }).props.children)
-      .toBe('ChatGPT reads your Rooms and posts as its own agent, not as you.');
+      .toBe('ChatGPT reads your chats and posts as its own agent, not as you.');
     expect(renderer.root.findByProps({ testID: 'ai-client-can-post' }).props.title).toBe('Post and reply as its agent');
   });
 });

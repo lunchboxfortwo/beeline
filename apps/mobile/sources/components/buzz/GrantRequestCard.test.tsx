@@ -10,7 +10,7 @@ vi.mock('react-native-safe-area-context', () => ({ useSafeAreaInsets: () => ({ t
 vi.mock('./IdentityMark', () => ({ IdentityMark: () => null }));
 vi.mock('./ErrorBanner', () => ({ ErrorBanner: () => null }));
 vi.mock('@/ui/screens/transcript/cards/RequestMedia', () => ({ RequestMedia: () => null }));
-vi.mock('./Ledger', () => ({ ledgerEntryRhythm: () => ({}) }));
+vi.mock('./Ledger', () => ({ LedgerEntryFrame: ({ children }: { children: React.ReactNode }) => children }));
 vi.mock('@/components/buzz/IdentityMark', () => ({ IdentityMark: () => null }));
 
 import { canDecideGrantRequest, GrantRequestCard, GrantRequestPill } from './GrantRequestCard';
@@ -37,20 +37,19 @@ function render(props: Partial<React.ComponentProps<typeof GrantRequestCard>> = 
 const button = (tree: any, testID: string) => tree.root.find((node: any) => node.type === 'Button' && node.props.testID === testID);
 
 describe('grant request card', () => {
-    it('is one raised request card with Approve first, then Once and Deny', () => {
+    it('is one raised request card with Approve always and Deny for commands', () => {
         const tree = render();
         expect(tree.root.find((node: any) => node.type === 'Card').props.backgroundColor).toBe('raised');
         const labels = tree.root.findAll((node: any) => node.type === 'Button').map((node: any) => node.props['aria-label']);
-        expect(labels).toEqual(['Approve', 'Once', 'Deny']);
+        expect(labels).toEqual(['Approve always', 'Deny']);
     });
 
-    it('sends today’s decisions: Approve is always, Once is once, Deny is deny', () => {
+    it('sends today’s decisions: Approve always is always and Deny is deny', () => {
         const onDecision = vi.fn();
         const tree = render({ onDecision });
         act(() => { button(tree, 'grant-grant-1-always').props.onPress(); });
-        act(() => { button(tree, 'grant-grant-1-once').props.onPress(); });
         act(() => { button(tree, 'grant-grant-1-deny').props.onPress(); });
-        expect(onDecision.mock.calls).toEqual([['grant-1', 'always'], ['grant-1', 'once'], ['grant-1', 'deny']]);
+        expect(onDecision.mock.calls).toEqual([['grant-1', 'always'], ['grant-1', 'deny']]);
     });
 
     it('holds every decision while one is sending', () => {

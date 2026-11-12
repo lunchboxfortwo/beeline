@@ -59,11 +59,11 @@ beforeEach(() => {
 });
 
 describe('chat Members', () => {
-    it('has exactly two sections, People and Agents, each with its own +, under the chat kind line', () => {
+    it('has exactly two sections, People and Agents, each with its own +, and no visibility preamble', () => {
         let tree: any;
         act(() => { tree = create(<MembersScreen roomId={ROOM} close={vi.fn()} />); });
         const all = flat(tree);
-        expect(all).toContain('#beeline is public: anyone in Beeline Work can join it.');
+        expect(String(all)).not.toMatch(/can join it/);
         expect(all).toContain('People · 2');
         expect(all).toContain('Agents · 2');
         expect(all).toContain('Owner');

@@ -47,7 +47,7 @@ it('closes the corner once, even when pressed twice, then leaves', async () => {
   act(() => byTestID(tree, 'close-corner-action').props.onPress());
   act(() => byTestID(tree, 'close-corner-action').props.onPress());
   expect(p.closeCorner).toHaveBeenCalledTimes(1);
-  expect(byTestID(tree, 'close-corner-action').findByType('T').props.children).toBe('Closing corner…');
+  expect(byTestID(tree, 'close-corner-action').findByType('T').props.children).toBe('Closing thread…');
   await act(async () => { finish(); await Promise.resolve(); });
   expect(p.onClosed).toHaveBeenCalledTimes(1);
   act(() => tree.unmount());

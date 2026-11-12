@@ -45,6 +45,7 @@ vi.mock('react-native', async () => {
     ReactModule.createElement(name, props, props.children);
   return { StyleSheet: { flatten: (style: any): any => Array.isArray(style) ? Object.assign({}, ...style.map((part: any) => Array.isArray(part) ? Object.assign({}, ...part) : part)) : style },
     AppState: { currentState: 'active', addEventListener: () => ({ remove: () => undefined }) },
+    PixelRatio: { get: () => 1 },
     FlatList: ReactModule.forwardRef((props: any, ref: any) => {
       ReactModule.useImperativeHandle(ref, () => ({
         scrollToEnd: () => listScrolls.push('end'),
@@ -91,16 +92,6 @@ const theme = vi.hoisted(() => ({
       type: { hero: {}, body: {}, bodyStrong: {}, meta: {}, machine: {}, sectionHead: {} },
     },
 }));
-vi.mock('react-native-unistyles', async () => {
-  const { completeTestTheme } = await import('../../../../tests/helpers/phone');
-  const fullTheme = completeTestTheme(theme);
-  return ({
-  StyleSheet: {
-    hairlineWidth: 1,
-    create: (factory: any) => (typeof factory === 'function' ? factory(fullTheme) : factory),
-  },
-  useUnistyles: () => ({ theme: fullTheme }),
-}); });
 vi.mock('@/components/buzz/IdentityMark', async () => {
   const ReactModule = await import('react');
   return { IdentityMark: (props: any) => ReactModule.createElement('IdentityMark', props) };
@@ -371,6 +362,17 @@ describe('DesktopRoomInspector work pane', () => {
     await act(async () => tree.update(<DesktopRoomInspector {...options} />));
     expect(tree.root.findByType('ComputerSessionViewer' as any).props.active).toBe(false);
   });
+  it.each(['human', undefined] as const)('UAR-1 shows the complete report to a %s recipient without opening a pill', async kind => {
+    const detail = { ...room(), room: corners[0].corner, parent: room().room,
+      messages: [{ id: 'person-report', text: '@codex reported to @avery', createdAt: 5, author: agent,
+        presentation: 'card', agentCommand: { kind: 'report', text: 'needs-decision: Choose the endpoint',
+          recipient: { id: person.pubkey, name: person.name, handle: person.handle, kind } } }] } as any;
+    const tree = await render(props({ client: { room: vi.fn(async () => detail) } }));
+    const report = tree.root.findByType('OrdinaryLedgerMessage' as any);
+    expect(report.props.message.text).toBe('@avery needs-decision: Choose the endpoint');
+    expect(tree.root.findAllByProps({ testID: 'agent-pill' })).toHaveLength(0);
+  });
+
   it('hides standalone corner-close notices in the inspector transcript', async () => {
     const detail = { ...room(), room: corners[0].corner, parent: room().room,
       messages: [{ id: 'closed-fact', text: 'Corner closed', createdAt: 5, author: agent,

@@ -1,6 +1,6 @@
 import React from 'react';
 import { Platform, Switch } from 'react-native';
-import { useUnistyles } from 'react-native-unistyles';
+import { YStack, useTheme, useThemeName } from 'tamagui';
 
 export type HullSwitchProps = {
   accessibilityLabel?: string;
@@ -13,7 +13,7 @@ export type HullSwitchProps = {
 };
 
 /**
- * The one switch: brass when on, the disabled-text colour when off. The thumb
+ * The one switch: brass when on, the secondary-text colour when off. The thumb
  * stays light in both themes so it reads against either track.
  */
 export function HullSwitch({
@@ -24,27 +24,27 @@ export function HullSwitch({
   testID,
   value,
 }: HullSwitchProps) {
-  const { theme } = useUnistyles();
-  const hull = theme.buzz;
-  const thumb = hull.dark ? hull.textPrimary : hull.textInverted;
+  const t = useTheme();
+  const dark = useThemeName().startsWith('dark');
+  const thumb = dark ? t.ink?.val : t.canvas?.val;
+  const off = t.secondary?.val;
   return (
-    <Switch
-      accessibilityLabel={accessibilityLabel}
-      disabled={disabled}
-      // The off track must stand apart from the surface, or the thumb floats
-      // alone and the state cannot be read.
-      ios_backgroundColor={hull.textDisabled}
-      onValueChange={onValueChange}
-      // Custom track colours stop the platform from dimming a disabled switch.
-      style={disabled && dimWhenDisabled ? styles.disabled : undefined}
-      testID={testID}
-      thumbColor={thumb}
-      // react-native-web paints the on thumb from its own prop.
-      {...(Platform.OS === 'web' ? { activeThumbColor: thumb } : {})}
-      trackColor={{ false: hull.textDisabled, true: hull.accent }}
-      value={value}
-    />
+    // Custom track colours stop the platform from dimming a disabled switch.
+    <YStack opacity={disabled && dimWhenDisabled ? 0.42 : 1}>
+      <Switch
+        accessibilityLabel={accessibilityLabel}
+        disabled={disabled}
+        // The off track must stand apart from the surface, or the thumb floats
+        // alone and the state cannot be read.
+        ios_backgroundColor={off}
+        onValueChange={onValueChange}
+        testID={testID}
+        thumbColor={thumb}
+        // react-native-web paints the on thumb from its own prop.
+        {...(Platform.OS === 'web' ? { activeThumbColor: thumb } : {})}
+        trackColor={{ false: off, true: t.needsYou?.val }}
+        value={value}
+      />
+    </YStack>
   );
 }
-
-const styles = { disabled: { opacity: 0.42 } } as const;

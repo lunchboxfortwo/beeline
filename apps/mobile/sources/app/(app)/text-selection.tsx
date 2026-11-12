@@ -1,14 +1,13 @@
 import { Button } from '@/components/buzz/Button';
 import { useLatencyRouteFrame } from '@/buzz/latency-route-hook';
 import React from 'react';
-import { Pressable, ScrollView, Text, View } from 'react-native';
+import { ScrollView, YStack } from 'tamagui';
 import { useLocalSearchParams, useRouter } from 'expo-router';
-import { StyleSheet } from 'react-native-unistyles';
-import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { retrieveTempText } from '@/sync/persistence';
 import * as Clipboard from 'expo-clipboard';
 import { HullDialog } from '@/components/buzz/HullDialog';
 import { PageHeader } from '@/components/buzz/PageHeader';
+import { SafeBottom, SafeTop, T } from '@/ui/grammar';
 
 type Notice = {
     title: string;
@@ -20,7 +19,6 @@ export default function TextSelectionScreen() {
   useLatencyRouteFrame('/text-selection', true, true);
     const router = useRouter();
     const { textId } = useLocalSearchParams<{ textId: string }>();
-    const insets = useSafeAreaInsets();
     const [fullText, setFullText] = React.useState('');
     const [loading, setLoading] = React.useState(true);
     const [notice, setNotice] = React.useState<Notice | null>(null);
@@ -74,7 +72,8 @@ export default function TextSelectionScreen() {
     };
 
     return (
-        <View style={[styles.container, { paddingTop: insets.top }]}>
+        <YStack flex={1} backgroundColor="canvas">
+            <SafeTop />
             <PageHeader
                 action={
                     <Button
@@ -84,13 +83,9 @@ export default function TextSelectionScreen() {
                       onPress={handleCopyAll}
                       testID="text-selection-copy"
                       label=""
-                      icon={<Text style={[styles.copyGlyph, copyDisabled && styles.copyGlyphDisabled]}>{'⧉'}</Text>}
+                      icon={<T v="code" color={copyDisabled ? 'secondary' : 'ink'}>{'⧉'}</T>}
                       variant="quiet"
                       iconOnly
-                      appearance={{
-                        control: ({ pressed }) => [styles.copyButton, pressed && styles.copyButtonPressed],
-                        label: undefined,
-                      }}
                     />
                 }
                 backAccessibilityLabel={"Back"}
@@ -99,23 +94,23 @@ export default function TextSelectionScreen() {
                 title={"Select Text"}
             />
             {loading ? (
-                <Text style={styles.loadingText}>{"Loading..."}</Text>
+                <T v="body" color="secondary" marginTop="8" textAlign="center">{"Loading..."}</T>
             ) : (
                 <ScrollView
-                    style={styles.textContainer}
+                    flex={1}
                     showsVerticalScrollIndicator
-                    contentContainerStyle={[
-                        styles.scrollContent,
-                        { paddingBottom: insets.bottom + 16 },
-                    ]}
                 >
-                    <Text
-                        accessibilityLabel={"Select Text"}
-                        selectable
-                        style={styles.textContent}
-                    >
-                        {fullText}
-                    </Text>
+                    <YStack paddingHorizontal="4" paddingTop="4" paddingBottom="4">
+                        <T
+                            v="code"
+                            accessibilityLabel={"Select Text"}
+                            userSelect="text"
+                            textAlignVertical="top"
+                        >
+                            {fullText}
+                        </T>
+                    </YStack>
+                    <SafeBottom />
                 </ScrollView>
             )}
 
@@ -128,54 +123,6 @@ export default function TextSelectionScreen() {
                 testID="text-selection-notice"
                 actions={[{ label: "OK", onPress: dismissNotice }]}
             />
-        </View>
+        </YStack>
     );
 }
-
-const styles = StyleSheet.create((theme) => ({
-    container: {
-        flex: 1,
-        backgroundColor: theme.buzz.bgTerminal,
-    },
-    loadingText: {
-        marginTop: theme.buzz.space.xxl,
-        color: theme.buzz.textMuted,
-        ...theme.buzz.type.body,
-        textAlign: 'center',
-    },
-    textContainer: {
-        flex: 1,
-        paddingHorizontal: theme.buzz.space.md,
-    },
-    scrollContent: {
-        flexGrow: 1,
-        paddingTop: theme.buzz.space.md,
-    },
-    textContent: {
-        minHeight: 200,
-        paddingHorizontal: 0,
-        paddingVertical: 0,
-        borderWidth: 0,
-        backgroundColor: 'transparent',
-        color: theme.buzz.textPrimary,
-        ...theme.buzz.type.machine,
-        textAlignVertical: 'top',
-    },
-    copyButton: {
-        minWidth: 44,
-        minHeight: 44,
-        alignItems: 'center',
-        justifyContent: 'center',
-    },
-    copyButtonPressed: {
-        backgroundColor: theme.buzz.bgPressed,
-    },
-    copyGlyph: {
-        color: theme.buzz.chrome,
-        ...theme.buzz.type.meta,
-        fontFamily: theme.buzz.monoSemibold,
-    },
-    copyGlyphDisabled: {
-        color: theme.buzz.textMuted,
-    },
-}));

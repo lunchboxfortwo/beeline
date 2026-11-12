@@ -558,7 +558,7 @@ const scope5 = fixtureScope5();
     deck.chatsResponse = listOf([
       room('room-a', 10, {
         cornerCount: 1,
-        openCorners: [{ id: 'corner-1', name: 'fix', state: 'working', mine: true }],
+        openCorners: [{ id: 'corner-1', name: 'fix', state: 'working', mine: true, lastActivityAt: Math.floor(Date.now() / 1000) }],
       }),
     ]);
     const renderer = await mountDeck();
@@ -707,10 +707,10 @@ describe('Room deck live path', () => {
       room('room-a', 10, {
         cornerCount: 4,
         openCorners: [
-          { id: 'corner-1', name: 'one', state: 'working' },
-          { id: 'corner-2', name: 'two', state: 'idle' },
-          { id: 'corner-3', name: 'three', state: 'review', mine: true },
-          { id: 'corner-4', name: 'four', state: 'waiting', mine: true },
+          { id: 'corner-1', name: 'one', state: 'working', lastActivityAt: Math.floor(Date.now() / 1000) },
+          { id: 'corner-2', name: 'two', state: 'idle', lastActivityAt: Math.floor(Date.now() / 1000) },
+          { id: 'corner-3', name: 'three', state: 'review', mine: true, lastActivityAt: Math.floor(Date.now() / 1000) },
+          { id: 'corner-4', name: 'four', state: 'waiting', mine: true, lastActivityAt: Math.floor(Date.now() / 1000) },
         ],
       }),
     ]);

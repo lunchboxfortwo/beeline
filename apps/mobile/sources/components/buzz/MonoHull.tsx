@@ -1,16 +1,7 @@
 import React, { useEffect, useRef, useState } from 'react';
+import { AppState, Platform, type AppStateStatus } from 'react-native';
+import { XStack, YStack, type YStackProps } from 'tamagui';
 import {
-  AppState,
-  Platform,
-  type AppStateStatus,
-  type StyleProp,
-  Text,
-  View,
-  type ViewProps,
-  type ViewStyle,
-} from 'react-native';
-import { StyleSheet } from 'react-native-unistyles';
-import Animated, {
   Easing,
   FadeInDown,
   ReduceMotion,
@@ -23,6 +14,7 @@ import Animated, {
   type SharedValue,
 } from 'react-native-reanimated';
 import { hasMessageRevealed, markMessageRevealed } from '@/buzz/message-reveal';
+import { Motion, T } from '@/ui/grammar';
 
 export const motionTokens = {
   confirm: 240,
@@ -59,50 +51,48 @@ function getNewMessageEntering() {
   return (newMessageEntering ??= buildNewMessageEntering());
 }
 
-type HullSurfaceProps = Omit<ViewProps, 'children' | 'style'> & {
+type HullSurfaceProps = YStackProps & {
   children?: React.ReactNode;
   strength?: 'quiet' | 'raised' | 'code';
-  style?: StyleProp<ViewStyle>;
   testID?: string;
 };
 
 const SCRATCHES = [7, 15, 24, 31, 40, 48, 57, 66, 74, 83, 91];
+/** A hairline rule: half a point, one device pixel on a 2x screen. */
+const HAIRLINE = 0.5;
 
-export function HullSurface({
-  children,
-  strength = 'quiet',
-  style,
-  testID,
-  ...props
-}: HullSurfaceProps) {
+export function HullSurface({ children, strength = 'quiet', testID, ...props }: HullSurfaceProps) {
   return (
-    <View {...props} style={[styles.hullSurface, style]} testID={testID}>
-      <View pointerEvents="none" style={styles.textureLayer}>
+    <YStack position="relative" overflow="hidden" {...props} testID={testID}>
+      <YStack pointerEvents="none" position="absolute" top={0} right={0} bottom={0} left={0}>
         {SCRATCHES.map((top, index) => (
-          <View
+          <YStack
             key={top}
-            style={[
-              styles.scratch,
-              { left: `${(index * 17) % 31}%`, right: `${(index * 11) % 27}%`, top: `${top}%` },
-            ]}
+            position="absolute"
+            height={HAIRLINE}
+            backgroundColor="strongStroke"
+            opacity={0.03}
+            left={`${(index * 17) % 31}%`}
+            right={`${(index * 11) % 27}%`}
+            top={`${top}%`}
           />
         ))}
         {strength !== 'quiet' && (
           <>
-            <View style={[styles.fleck, { left: '13%', top: '27%' }]} />
-            <View style={[styles.fleck, { right: '19%', top: '64%' }]} />
-            <View style={styles.raisedEdge} />
+            <YStack position="absolute" width={1} height={2} backgroundColor="secondary" opacity={0.025} left="13%" top="27%" />
+            <YStack position="absolute" width={1} height={2} backgroundColor="secondary" opacity={0.025} right="19%" top="64%" />
+            <YStack position="absolute" top={0} right={0} left={0} height={HAIRLINE} backgroundColor="secondary" opacity={0.03} />
           </>
         )}
         {strength === 'code' && (
           <>
-            <View style={[styles.codeNotch, styles.codeNotchTop]} />
-            <View style={[styles.codeNotch, styles.codeNotchBottom]} />
+            <YStack position="absolute" width={8} height={2} backgroundColor="strongStroke" opacity={0.7} top={0} left={0} />
+            <YStack position="absolute" width={8} height={2} backgroundColor="strongStroke" opacity={0.7} right={0} bottom={0} />
           </>
         )}
-      </View>
+      </YStack>
       {children}
-    </View>
+    </YStack>
   );
 }
 
@@ -124,19 +114,22 @@ export function PixelLoader({ compact = false }: { compact?: boolean }) {
   }, [frame, reducedMotion]);
 
   return (
-    <View
+    <XStack
       accessibilityLabel="Loading"
       accessibilityRole="progressbar"
-      style={[styles.pixelLoader, compact && styles.pixelLoaderCompact]}
+      width={compact ? 32 : 42}
+      height={compact ? 10 : 14}
+      alignItems="center"
+      gap="1"
     >
       {reducedMotion ? (
-        <Text style={styles.staticLoader}>◇</Text>
+        <T v="code" color="ink">◇</T>
       ) : (
         [0, 1, 2, 3].map((index) => (
           <LoaderCell key={index} frame={frame} index={index} compact={compact} />
         ))
       )}
-    </View>
+    </XStack>
   );
 }
 
@@ -153,7 +146,11 @@ function LoaderCell({
     const active = Math.floor(frame.value) % 4 === index;
     return { opacity: active ? 1 : 0.28 };
   });
-  return <Animated.View style={[styles.loaderCell, compact && styles.loaderCellCompact, style]} />;
+  return (
+    <Motion motion={style}>
+      <YStack width={compact ? 5 : 7} height={compact ? 5 : 7} backgroundColor="ink" />
+    </Motion>
+  );
 }
 
 /**
@@ -209,11 +206,9 @@ const LIVE_PULSE_FLOOR = 0.55;
 export function HullLivePulse({
   active = true,
   children,
-  style,
 }: {
   active?: boolean;
   children: React.ReactNode;
-  style?: StyleProp<ViewStyle>;
 }) {
   const { progress, still } = useLiveCycle(active);
   const pulse = useAnimatedStyle(() => {
@@ -222,7 +217,7 @@ export function HullLivePulse({
       opacity: LIVE_PULSE_FLOOR + (1 - LIVE_PULSE_FLOOR) * Math.sin(progress.value * Math.PI) ** 2,
     };
   });
-  return <Animated.View style={[style, pulse]}>{children}</Animated.View>;
+  return <Motion motion={pulse}>{children}</Motion>;
 }
 
 export function NewMessageMaterialize({
@@ -254,69 +249,6 @@ export function NewMessageMaterialize({
   useEffect(() => {
     if (animate && messageId !== undefined) markMessageRevealed(messageId);
   }, [animate, messageId]);
-  if (!animate) return <View>{children}</View>;
-  return <Animated.View entering={getNewMessageEntering()}>{children}</Animated.View>;
+  if (!animate) return <YStack>{children}</YStack>;
+  return <Motion entering={getNewMessageEntering()}>{children}</Motion>;
 }
-
-const styles = StyleSheet.create((theme) => {
-  const groknight = theme.buzz;
-  return {
-    hullSurface: { position: 'relative', overflow: 'hidden' },
-    cornerGlyphLive: { color: groknight.accent },
-    textureLayer: { ...StyleSheet.absoluteFillObject, opacity: 1 },
-    scratch: {
-      position: 'absolute',
-      height: StyleSheet.hairlineWidth,
-      backgroundColor: groknight.bgTexturePeak,
-      opacity: 0.03,
-    },
-    fleck: {
-      position: 'absolute',
-      width: 1,
-      height: 2,
-      backgroundColor: groknight.steel,
-      opacity: 0.025,
-    },
-    raisedEdge: {
-      position: 'absolute',
-      top: 0,
-      right: 0,
-      left: 0,
-      height: StyleSheet.hairlineWidth,
-      backgroundColor: groknight.focus,
-      opacity: 0.03,
-    },
-    codeNotch: {
-      position: 'absolute',
-      width: 8,
-      height: 2,
-      backgroundColor: groknight.borderStrong,
-      opacity: 0.7,
-    },
-    codeNotchTop: { top: 0, left: 0 },
-    codeNotchBottom: { right: 0, bottom: 0 },
-    pixelLoader: { width: 42, height: 14, flexDirection: 'row', alignItems: 'center', gap: 4 },
-    pixelLoaderCompact: { width: 32, height: 10, gap: 4 },
-    loaderCell: { width: 7, height: 7, backgroundColor: groknight.signalBright },
-    loaderCellCompact: { width: 5, height: 5 },
-    staticLoader: {
-      ...groknight.type.meta,
-      fontFamily: groknight.monoSemibold,
-      color: groknight.signalBright,
-    },
-    /**
-     * Geometry, not chroma, carries the status: a fixed 2px column at the
-     * mechanism indent, so a reader scans one edge instead of reading every
-     * label. It is `alignSelf: 'stretch'` rather than a fixed height because the
-     * row it marks can wrap.
-     */
-    mechanismRail: {
-      width: 2,
-      alignSelf: 'stretch',
-      minHeight: 14,
-      flexShrink: 0,
-      backgroundColor: groknight.borderQuiet,
-    },
-    mechanismRailLive: { backgroundColor: groknight.accent },
-  };
-});

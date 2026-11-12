@@ -1,12 +1,10 @@
 import { HullDialogActions } from '@/components/buzz/HullDialog';
 import React, { useEffect, useState } from 'react';
-import { Text, TouchableOpacity, View, Platform, Keyboard, type ViewProps } from 'react-native';
-import { StyleSheet } from 'react-native-unistyles';
+import { Platform, Keyboard, type View } from 'react-native';
+import { YStack } from 'tamagui';
 import type { GitHubInstallationAccess } from '@beeline/buzz-client';
 import type { RepoCandidate } from '@/buzz/room-repo-picker';
-import { Typography } from '@/constants/Typography';
-import { Button } from './Button';
-import { HULL_SHEET_INSET, HullActionSheetRow, HullActionSheetModal } from './HullActionSheet';
+import { HullActionSheetRow, HullActionSheetModal } from './HullActionSheet';
 import { RepoList } from './RepoList';
 import {
   RepositoryChoice,
@@ -188,7 +186,7 @@ export function useRoomRepositoryChoice({
     ) : null;
 
   const list = (
-    <View style={styles.inset}>
+    <YStack paddingHorizontal="6" paddingTop="1">
       <RepoList
         candidates={candidates}
         currentKey={draft?.key ?? null}
@@ -201,43 +199,27 @@ export function useRoomRepositoryChoice({
         }}
         testIDPrefix="room-repo-list"
       />
-    </View>
+    </YStack>
   );
 
   const footer =
     control || listOpen ? (
-      <HullDialogActions style={styles.actions} actions={[{ label: listOpen ? 'Back' : 'Cancel', variant: "quiet", disabled: busy && !listOpen, onPress: () => (listOpen ? setListOpen(false) : onCancel()), testID: "room-actions-close" }, ...(canManage && !listOpen ? [{ disabled: !canSave, label: busy ? 'Saving…' : 'Save', loading: busy, onPress: save, testID: "room-repo-save", variant: 'primary' as const }] : [])]} />
+      <YStack paddingHorizontal="6" paddingTop="2"><HullDialogActions actions={[{ label: listOpen ? 'Back' : 'Cancel', variant: "quiet", disabled: busy && !listOpen, onPress: () => (listOpen ? setListOpen(false) : onCancel()), testID: "room-actions-close" }, ...(canManage && !listOpen ? [{ disabled: !canSave, label: busy ? 'Saving…' : 'Save', loading: busy, onPress: save, testID: "room-repo-save", variant: 'primary' as const }] : [])]} /></YStack>
     ) : null;
 
   return {
     listOpen,
     row,
-    control: control ? <View style={styles.controlInset}>{control}</View> : null,
+    // The open control is the Repository row itself, on the rows' own inset.
+    control: control ? <YStack paddingHorizontal="6">{control}</YStack> : null,
     list,
     footer,
   };
 }
 
-const styles = StyleSheet.create((theme) => {
-  const hull = theme.buzz;
-  return {
-    inset: { paddingHorizontal: HULL_SHEET_INSET, paddingTop: hull.space.xs },
-    // The open control is the Repository row itself, on the rows' own inset.
-    controlInset: { paddingHorizontal: HULL_SHEET_INSET },
-    actions: {
-      flexDirection: 'row',
-      justifyContent: 'flex-end',
-      alignItems: 'center',
-      gap: hull.space.sm,
-      paddingHorizontal: HULL_SHEET_INSET,
-      paddingTop: hull.space.sm,
-    },
-  };
-});
-
 /** Existing conversation layout, also the accessibility boundary behind its sheet. */
-export function RoomActionsBackground(props: ViewProps & { ref?: React.Ref<View> }) {
-  return <View {...props} />;
+export function RoomActionsBackground(props: React.ComponentProps<typeof YStack>) {
+  return <YStack {...props} />;
 }
 
 export type RoomActionsSheetHandle = { setVisible: (visible: boolean) => void };

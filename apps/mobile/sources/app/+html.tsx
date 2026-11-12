@@ -1,5 +1,4 @@
 import { ScrollViewStyleReset } from 'expo-router/html';
-import '../unistyles';
 import { beelineThemes } from '../buzz/groknight';
 
 // This file is web-only and used to configure the root HTML for every

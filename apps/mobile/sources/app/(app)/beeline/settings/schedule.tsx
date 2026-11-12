@@ -4,10 +4,8 @@ import { useIsDesktop as useDesktopPageLayout } from '@/utils/responsive';
 import { Button } from '@/components/buzz/Button';
 import { useLatencyRouteFrame } from '@/buzz/latency-route-hook';
 import React, { useState } from 'react';
-import { Pressable, ScrollView, Text, View } from 'react-native';
+import { ScrollView, YStack } from 'tamagui';
 import { router, useLocalSearchParams } from 'expo-router';
-import { useSafeAreaInsets } from 'react-native-safe-area-context';
-import { StyleSheet } from 'react-native-unistyles';
 import { scheduleTitle, scheduleRuns, scheduleWhere, stopSchedule, useScheduledWork } from '@/buzz/scheduled-work';
 import { PageHeader } from '@/components/buzz/PageHeader';
 import {
@@ -16,6 +14,7 @@ import {
   StopScheduledWork,
 } from '@/components/buzz/ScheduledWorkDetail';
 import { SurfaceGlyphLoader } from '@/components/buzz/SurfaceGlyphLoader';
+import { Copy, SafeBottom, SafeTop } from '@/ui/grammar';
 
 function first(value: string | string[] | undefined): string | undefined {
   return Array.isArray(value) ? value[0] : value;
@@ -26,7 +25,6 @@ function first(value: string | string[] | undefined): string | undefined {
  */
 export default function PromptSchedule() {
   useLatencyRouteFrame('/beeline/settings/schedule');
-  const insets = useSafeAreaInsets();
   const desktopPageLayout = useDesktopPageLayout();
   const params = useLocalSearchParams<{
     roomId?: string | string[];
@@ -56,7 +54,10 @@ export default function PromptSchedule() {
   };
 
   return (
-    <View style={[styles.screen, desktopPageLayout && { width: '100%', maxWidth: desktopColumnWidths.detail, alignSelf: 'center' }, { paddingTop: insets.top }]}>
+    <YStack flex={1} backgroundColor="canvas"
+      width={desktopPageLayout ? '100%' : undefined} maxWidth={desktopPageLayout ? desktopColumnWidths.detail : undefined}
+      alignSelf={desktopPageLayout ? 'center' : undefined}>
+      <SafeTop />
       <PageHeader
         backAccessibilityLabel="Back to Schedules and subscriptions"
         eyebrow="Schedules and subscriptions"
@@ -76,14 +77,11 @@ export default function PromptSchedule() {
           />
       ) : null}
       {loading && !work ? (
-        <View style={styles.loading}>
+        <YStack padding="8" alignItems="center" justifyContent="center">
           <SurfaceGlyphLoader testID="schedule-loader" />
-        </View>
+        </YStack>
       ) : schedule ? (
-        <ScrollView
-          contentContainerStyle={{ paddingBottom: 24 + insets.bottom }}
-          testID="schedule-page"
-        >
+        <ScrollView testID="schedule-page">
           <ScheduledWorkFacts
             agents={[work?.agentNames.get(schedule.agentId) ?? 'Agent']}
             runs={scheduleRuns(schedule)}
@@ -98,27 +96,14 @@ export default function PromptSchedule() {
             testID="stop-schedule"
             working={working}
           />
+          <YStack paddingBottom="6" />
+          <SafeBottom />
         </ScrollView>
       ) : work ? (
-        <Text style={styles.gone} testID="schedule-gone">
+        <Copy small quiet padding="4" testID="schedule-gone">
           This schedule has stopped.
-        </Text>
+        </Copy>
       ) : null}
-    </View>
+    </YStack>
   );
 }
-
-const styles = StyleSheet.create((theme) => ({
-  screen: { flex: 1, backgroundColor: theme.buzz.bgBase },
-  loading: { padding: theme.buzz.space.xl, alignItems: 'center', justifyContent: 'center' },
-  gone: { ...theme.buzz.type.meta, color: theme.buzz.textSecondary, padding: theme.buzz.space.md },
-  error: {
-    minHeight: 44,
-    justifyContent: 'center',
-    gap: theme.buzz.space.sm,
-    paddingHorizontal: theme.buzz.space.md,
-    paddingVertical: theme.buzz.space.sm,
-    backgroundColor: theme.buzz.bgHighlight,
-  },
-  errorText: { ...theme.buzz.type.meta, color: theme.buzz.textSecondary },
-}));

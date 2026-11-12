@@ -1,6 +1,9 @@
 // This suite exercises an installed old-server path, with explicit legacy negotiation.
 
 
+vi.mock('tamagui', async () => (await import('@/ui/screens/transcript/grammar-hosts.test-support')).tamaguiHosts());
+vi.mock('lucide-react-native', async () => (await import('@/ui/screens/transcript/grammar-hosts.test-support')).lucideHosts());
+vi.mock('@/sync/storage', () => ({ useLocalSetting: () => 'medium' }));
 vi.mock('@/utils/responsive', () => ({ useIsDesktop: () => false }));
 vi.mock('expo-clipboard', () => ({ setStringAsync: vi.fn(async () => undefined) }));
 vi.mock('expo-haptics', () => ({ ImpactFeedbackStyle: { Light: 'Light' }, impactAsync: async () => undefined }));
@@ -23,7 +26,6 @@ vi.mock('react-native', async () => {
   const host = (name: string) => (props: any) => createElement(name, props, props.children);
   return { AppState: { currentState: 'active', addEventListener: () => ({ remove() {} }) }, Platform: { OS: 'ios', select: (options: any) => options.ios ?? options.default }, StyleSheet: { flatten: (style: any): any => Array.isArray(style) ? Object.assign({}, ...style.map((part: any) => Array.isArray(part) ? Object.assign({}, ...part) : part)) : style }, Pressable: host('Pressable'), TouchableOpacity: host('TouchableOpacity'), Text: host('Text'), ScrollView: host('ScrollView'), View: host('View') };
 });
-vi.mock('react-native-unistyles', () => ({ StyleSheet: { create: (fn: any) => fn({ buzz: { type: { sectionHead: {}, sectionLabel: { fontSize: 13, lineHeight: 19, letterSpacing: 2 }, sectionCount: { fontSize: 15, lineHeight: 22 } }, space: {}, roomList: { edge: 20 } } }), hairlineWidth: 1 } }));
 vi.mock('react-native-safe-area-context', () => ({ useSafeAreaInsets: () => ({ top: 0, bottom: 0 }) }));
 vi.mock('@expo/vector-icons/Ionicons', () => ({ default: () => null }));
 vi.mock('@/components/buzz/PageHeader', () => ({ PageHeader: () => null }));
@@ -127,7 +129,7 @@ it('lists every entry as one row in the shared grammar, each opening its own pag
     expect(row('scheduled-work-video').props.leading).toBeUndefined();
     expect(row('scheduled-work-daily').props.leading).toBeUndefined();
     expect(row('subscription-sub').props.leading).toBeUndefined();
-    expect(row('subscription-sub').props).toMatchObject({ title: 'Triage new issues', description: 'On new issue in owner/widgets', descriptionDetail: '@Hoots · this Room' });
+    expect(row('subscription-sub').props).toMatchObject({ title: 'Triage new issues', description: 'On new issue in owner/widgets', descriptionDetail: '@Hoots · this chat' });
     act(() => row('scheduled-work-daily').props.onPress());
     act(() => row('scheduled-work-video').props.onPress());
     act(() => row('subscription-sub').props.onPress());
@@ -266,9 +268,9 @@ it('names empty and legacy corner names through the shared title grammar (J40)',
   try {
     const tree = await render(<ScheduledWork />);
     const row = (testID: string) => tree.root.findByProps({ testID });
-    expect(row('scheduled-work-unnamed').props.descriptionDetail).toContain('corner');
-    expect(row('scheduled-work-legacy').props.descriptionDetail).toContain('corner');
-    expect(row('subscription-sub').props.descriptionDetail).toContain('@Hoots · corner triage');
+    expect(row('scheduled-work-unnamed').props.descriptionDetail).toContain('thread');
+    expect(row('scheduled-work-legacy').props.descriptionDetail).toContain('thread');
+    expect(row('subscription-sub').props.descriptionDetail).toContain('@Hoots · thread triage');
     tree.unmount();
   } finally {
     operation.mockImplementation(original);
@@ -278,7 +280,7 @@ it('names empty and legacy corner names through the shared title grammar (J40)',
 it('keeps old subscription rows named and dates a one-time wake in local time', () => {
   expect(subscriptionTitle({ prompt: '   ' } as any)).toBe('React to this event');
   expect(subscriptionWhen({ source: 'room', event: 'check-failed' } as any))
-    .toBe('On corner checks failing');
+    .toBe('On thread checks failing');
   const now = new Date(2026, 9, 22, 12);
   const next = new Date(2026, 9, 23, 10);
   expect(scheduleTrigger({ maxRuns: 1, nextRunAt: next.getTime() / 1000 } as any, now))
@@ -289,8 +291,8 @@ it('keeps old subscription rows named and dates a one-time wake in local time', 
 it('uses the server DM flag for location and fallback trigger wording, not a missing Room name', () => {
   expect(scheduleWhere({}, null, true)).toBe('this DM');
   expect(subscriptionWhere({} as any, null, true)).toBe('this DM');
-  expect(scheduleWhere({}, null)).toBe('this Room');
-  expect(scheduleWhere({}, 'Room', false)).toBe('this Room');
+  expect(scheduleWhere({}, null)).toBe('this chat');
+  expect(scheduleWhere({}, 'Room', false)).toBe('this chat');
   expect(subscriptionWhen({ source: 'room', event: 'joined' } as any, true)).toBe('On someone joining this DM');
   expect(subscriptionWhen({ source: 'room', event: 'other' } as any, true)).toBe('On an event in this DM');
 });

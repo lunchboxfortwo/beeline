@@ -2,11 +2,10 @@ import { RoomListSectionHeader } from '@/components/buzz/RoomListSectionHeader';
 import { HullDialogInput } from '@/components/buzz/HullDialog';
 import { useTextDraft } from '@/buzz/use-text-draft';
 import React, { useEffect, useMemo, useState } from 'react';
-import { ScrollView, Text, View } from 'react-native';
-import { StyleSheet, useUnistyles } from 'react-native-unistyles';
+import { ScrollView, YStack } from 'tamagui';
+import { T } from '@/ui/grammar';
 import type { ForwardTarget, ForwardTargetGroup } from '@/buzz/message-forward';
 import {
-  HULL_SHEET_INSET,
   HullActionSheetCancel,
   HullActionSheetModal,
   HullActionSheetRow,
@@ -27,7 +26,7 @@ type ForwardMessagePickerSheetProps = {
 const SECTIONS: readonly { group: ForwardTargetGroup; label: string }[] = [
   { group: 'people', label: 'PEOPLE' },
   { group: 'agents', label: 'AGENTS' },
-  { group: 'rooms', label: 'ROOMS' },
+  { group: 'rooms', label: 'CHATS' },
 ];
 
 export function ForwardMessagePickerSheet({
@@ -40,7 +39,6 @@ export function ForwardMessagePickerSheet({
   visible,
   draftContext = 'global',
 }: ForwardMessagePickerSheetProps) {
-  const { theme } = useUnistyles();
   const [completedTarget, setCompletedTarget] = useState<string | null>(null);
   const [resultLaidOut, setResultLaidOut] = useState(false);
   useEffect(() => {
@@ -69,7 +67,7 @@ export function ForwardMessagePickerSheet({
       accessibilityLabel="Close forward picker"
       onClose={onClose}
       onDismiss={onDismiss}
-      subtitle="Choose a Room or member in this Workspace"
+      subtitle="Choose a chat or member in this Workspace"
       testID="forward-room-picker"
       title="Forward message"
       visible={visible}
@@ -80,28 +78,31 @@ export function ForwardMessagePickerSheet({
         autoCorrect={false}
         onChangeText={setQuery}
         placeholder="Search destinations"
-        placeholderTextColor={theme.buzz.textMuted}
         returnKeyType="search"
         variant="sheetSearch"
         testID="forward-room-search"
         value={query}
       />
       <ScrollView
-        contentContainerStyle={styles.list}
         keyboardDismissMode="on-drag"
         keyboardShouldPersistTaps="handled"
-        style={styles.listViewport}
+        maxHeight={360}
+        flexGrow={0}
         testID="forward-room-list"
       >
+        <YStack paddingBottom="1">
         {targets === null ? (
-          <View
+          <YStack
             accessibilityLiveRegion="polite"
-            style={styles.loading}
+            alignItems="center"
+            paddingHorizontal="6"
+            paddingVertical="4"
+            gap="2"
             testID="forward-destinations-loader"
           >
             <SurfaceGlyphLoader compact />
-            <Text style={styles.status}>LOADING DESTINATIONS…</Text>
-          </View>
+            <T v="metaStrong" color="secondary" textAlign="center">LOADING DESTINATIONS…</T>
+          </YStack>
         ) : filteredTargets.length ? (
           SECTIONS.map((section) => {
             const sectionTargets = filteredTargets.filter(
@@ -112,7 +113,7 @@ export function ForwardMessagePickerSheet({
               <React.Fragment key={section.group}>
                 <RoomListSectionHeader title={section.label} surface="sheet" />
                 {sectionTargets.map((target) => (
-                  <View
+                  <YStack
                     key={`${target.kind}:${target.id}:${completedTarget === target.id ? 'accepted' : 'pending'}`}
                     testID={completedTarget === target.id ? 'forward-accepted-result' : undefined}
                     onLayout={completedTarget === target.id ? () => setResultLaidOut(true) : undefined}
@@ -129,40 +130,22 @@ export function ForwardMessagePickerSheet({
                       }}
                       testID={`forward-${target.kind}-${target.id}`}
                     />
-                  </View>
+                  </YStack>
                 ))}
               </React.Fragment>
             );
           })
         ) : (
-          <Text accessibilityLiveRegion="polite" style={styles.status}>
+          <T v="metaStrong" color="secondary" textAlign="center" accessibilityLiveRegion="polite">
             {error ??
               (query.trim()
                 ? `No destinations match “${query.trim()}”.`
                 : 'NO OTHER DESTINATIONS AVAILABLE')}
-          </Text>
+          </T>
         )}
+        </YStack>
       </ScrollView>
       <HullActionSheetCancel onPress={onClose} testID="forward-room-cancel" />
     </HullActionSheetModal>
   );
 }
-
-const styles = StyleSheet.create((theme) => {
-  const groknight = theme.buzz;
-  return {
-    listViewport: { maxHeight: 360, flexGrow: 0 },
-    list: { paddingBottom: 4 },
-    loading: {
-      alignItems: 'center',
-      paddingHorizontal: HULL_SHEET_INSET,
-      paddingVertical: groknight.space.md,
-      gap: 8,
-    },
-    status: {
-      ...groknight.type.sectionHead,
-      color: groknight.textMuted,
-      textAlign: 'center',
-    },
-  };
-});

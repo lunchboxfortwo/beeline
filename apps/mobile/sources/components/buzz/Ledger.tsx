@@ -1,14 +1,12 @@
-import { StyleSheet } from 'react-native-unistyles';
 import React, { useEffect, useRef, useState } from 'react';
-import { View, type StyleProp, type ViewStyle } from 'react-native';
+import { YStack } from 'tamagui';
 import { ContentTarget } from './IndexRow';
-import Animated, { cancelAnimation, Easing, runOnJS, useAnimatedStyle, useReducedMotion, useSharedValue, withTiming } from 'react-native-reanimated';
+import { cancelAnimation, Easing, runOnJS, useAnimatedStyle, useReducedMotion, useSharedValue, withTiming } from 'react-native-reanimated';
 import { hasMessageRevealed, markMessageRevealed } from '@/buzz/message-reveal';
 import { TranscriptLine, type TranscriptSender } from '@/ui/screens/transcript/TranscriptLine';
 import { MonoMarkdown } from './MonoMarkdown';
+import { Motion, TypedView } from '@/ui/grammar';
 import type { ChannelReferenceIndex, ChannelReferenceTarget } from '@/buzz/channel-reference';
-import { provisionalProseStyle, settledAgentProseStyle } from './Ledger-styles';
-import { LedgerSteer, LedgerRoomUpdate, LedgerHistoryLine, LedgerSystemLine, LedgerDayCaption, withLedgerDayCaption, LedgerGhostLine, LedgerUntaggedHint } from './Ledger-ledger-steer';
 
 
 
@@ -95,22 +93,39 @@ export type LedgerBodyProps = {
  * The transcript's one paragraph and speaker rhythm. Activity rows share this
  * with durable prose so crossing the streaming boundary cannot add a second
  * margin system.
+ *
+ * Adjacent compact rows give 4 below and 8 above, a 12 pt same-speaker gap. A
+ * bylined row takes 20 on its visual-top edge, so with the preceding row's 4
+ * the speaker-change boundary is 24 pt whether that row is an agent (always
+ * bylined) or a person continuation (no byline). Both lists are upright within
+ * a cell (the chronological desktop list is upright; the inverted phone list
+ * flips the column and each cell back), so the byline's air belongs on the
+ * top in BOTH.
  */
-export function ledgerEntryRhythm({
+export function LedgerEntryFrame({
   hasByline,
-  chronological = false,
+  chronological: _chronological = false,
   precededByDayCaption = false,
+  testID,
+  children,
 }: {
   hasByline: boolean;
   chronological?: boolean;
   precededByDayCaption?: boolean;
-}): StyleProp<ViewStyle> {
-  return [
-    styles.entry,
-    hasByline &&
-      !precededByDayCaption &&
-      (chronological ? styles.entryWithBylineChronological : styles.entryWithByline),
-  ];
+  testID?: string;
+  children: React.ReactNode;
+}) {
+  return (
+    <YStack
+      width="100%"
+      minWidth={0}
+      paddingTop={hasByline && !precededByDayCaption ? '5' : '2'}
+      paddingBottom="1"
+      testID={testID}
+    >
+      {children}
+    </YStack>
+  );
 }
 
 
@@ -119,7 +134,6 @@ const TYPEWRITER_MS_PER_CHARACTER = 10;
 
 function TypewriterMarkdown({
   markdown,
-  textStyle,
   testID,
   revealId,
   mentionHandles,
@@ -131,7 +145,6 @@ function TypewriterMarkdown({
   onOpenCode,
 }: {
   markdown: string;
-  textStyle: React.ComponentProps<typeof MonoMarkdown>['textStyle'];
   testID: string;
   /** Stable id of the message this prose belongs to. The reveal plays at
    *  most once per id per app session — the SAME consume-once registry the
@@ -184,8 +197,11 @@ function TypewriterMarkdown({
   }, [markdown, reducedMotion, animate, opacity]);
 
   return (
-    <Animated.View style={revealStyle}>
-      <MonoMarkdown
+    <Motion motion={revealStyle}>
+      <TypedView
+        view={MonoMarkdown}
+        v="body"
+        color="ink"
         markdown={markdown}
         mentionHandles={mentionHandles}
         viewerHandle={viewerHandle}
@@ -195,9 +211,8 @@ function TypewriterMarkdown({
         codeSource={codeRoomId && revealId ? { roomId: codeRoomId, messageId: revealId } : undefined}
         onOpenCode={onOpenCode}
         testID={testID}
-        textStyle={textStyle}
       />
-    </Animated.View>
+    </Motion>
   );
 }
 
@@ -235,16 +250,19 @@ function SettleFade({ provisional, children }: { provisional: string; children: 
   }, [reducedMotion, progress]);
   if (complete || reducedMotion) return <>{children}</>;
   return (
-    <View testID="ledger-settle">
-      <Animated.View style={settledStyle}>{children}</Animated.View>
-      <Animated.View pointerEvents="none" style={[styles.settleGhost, ghostStyle]}>
-        <MonoMarkdown
+    <YStack testID="ledger-settle">
+      <Motion motion={settledStyle}>{children}</Motion>
+      {/* Hung over the settled words, so the dissolve never moves the column. */}
+      <Motion overlay pointerEvents="none" motion={ghostStyle}>
+        <TypedView
+          view={MonoMarkdown}
+          v="body"
+          color="secondary"
           markdown={provisional}
           testID="ledger-settle-ghost"
-          textStyle={styles.ledgerProvisional}
         />
-      </Animated.View>
-    </View>
+      </Motion>
+    </YStack>
   );
 }
 
@@ -262,7 +280,7 @@ export function LedgerEntry({
   continued = false,
   chronological = false,
   precededByDayCaption = false,
-  luminous = false,
+  luminous: _luminous = false,
   replyReference,
   bodyAction,
   attachments,
@@ -278,7 +296,6 @@ export function LedgerEntry({
   onOpenCode,
 }: Omit<LedgerBodyProps, 'marginalia'> & { luminous?: boolean }) {
   const text = bodyText ?? '';
-  const bodyTextStyle = luminous ? styles.ledgerTextLuminous : styles.ledgerText;
   // A settling reply was already typed out, live, in front of the reader. It
   // cross-fades; it never re-types itself.
   const typeOut = typewriter && !settleFrom;
@@ -287,7 +304,6 @@ export function LedgerEntry({
       <TypewriterMarkdown
         markdown={text}
         testID={bodyTestID}
-        textStyle={bodyTextStyle}
         revealId={itemId}
         mentionHandles={mentionHandles}
         viewerHandle={viewerHandle}
@@ -298,7 +314,10 @@ export function LedgerEntry({
         onOpenCode={onOpenCode}
       />
     ) : (
-      <MonoMarkdown
+      <TypedView
+        view={MonoMarkdown}
+        v="body"
+        color="ink"
         markdown={text}
         mentionHandles={mentionHandles}
         viewerHandle={viewerHandle}
@@ -308,17 +327,14 @@ export function LedgerEntry({
         codeSource={codeRoomId ? { roomId: codeRoomId, messageId: itemId } : undefined}
         onOpenCode={onOpenCode}
         testID={bodyTestID}
-        textStyle={bodyTextStyle}
       />
     )
   ) : null;
   return (
-    <View
-      style={ledgerEntryRhythm({
-        hasByline: Boolean(byline),
-        chronological,
-        precededByDayCaption,
-      })}
+    <LedgerEntryFrame
+      hasByline={Boolean(byline)}
+      chronological={chronological}
+      precededByDayCaption={precededByDayCaption}
       testID={`chat-message-${itemId}`}
     >
       <TranscriptLine sender={byline}>
@@ -340,7 +356,7 @@ export function LedgerEntry({
         {machineNoise}
         {attachments}
       </TranscriptLine>
-    </View>
+    </LedgerEntryFrame>
   );
 }
 
@@ -387,157 +403,3 @@ export { LedgerDayCaption } from './Ledger-ledger-steer';
 export { withLedgerDayCaption } from './Ledger-ledger-steer';
 export { LedgerGhostLine } from './Ledger-ledger-steer';
 export { LedgerUntaggedHint } from './Ledger-ledger-steer';
-export { provisionalProseStyle } from './Ledger-styles';
-export { settledAgentProseStyle } from './Ledger-styles';
-
-
-
-
-
-/** Right padding that keeps a pinned clock stamp clear of its line. */
-const STAMP_GUTTER = 44;
-
-export const styles = StyleSheet.create((theme) => ({
-  /** A system line read inside an opened pill: no pinned stamp, no gutter. */
-  systemLineBare: { paddingRight: 0, paddingVertical: 0, marginBottom: 0 },
-  systemLineTextBare: { color: theme.buzz.ledgerBright },
-  untaggedHint: {
-    ...theme.buzz.type.meta,
-    color: theme.buzz.ledgerQuiet,
-    marginTop: theme.buzz.space.xs,
-  },
-  entry: {
-    width: '100%',
-    minWidth: 0,
-    paddingTop: theme.buzz.messagePaddingVertical,
-    paddingBottom: theme.buzz.messagePaddingVertical,
-    marginBottom: theme.buzz.messageGap,
-  },
-  // Adjacent compact rows contribute 6px each for a 12px same-speaker gap.
-  // A bylined row contributes the extra 12px on its visual-top edge, so the
-  // preceding row's compact 6px makes the speaker-change boundary 24px
-  // whether that preceding row is an agent (always bylined) or a person
-  // continuation (no byline). Both lists are upright within a cell: the
-  // chronological desktop list is upright, and the inverted phone list flips
-  // the whole column and each cell back. A byline's air therefore belongs on
-  // `paddingTop` in BOTH — putting it on `paddingBottom` dropped the 24px
-  // speaker-change air on the message's visual BOTTOM instead, which is what
-  // left a 30px tail under the newest turn and a 12px gap above the next one.
-  entryWithByline: {
-    paddingTop: theme.buzz.messagePaddingVertical * 3,
-  },
-  entryWithBylineChronological: {
-    paddingTop: theme.buzz.messagePaddingVertical * 3,
-  },
-  /** Hung over the settled words, so the dissolve never moves the column. */
-  settleGhost: { position: 'absolute', left: 0, right: 0, top: 0 },
-  /**
-   * A turn still being written (C98). Same face, size, leading and column as
-   * the settled body — the ONLY difference is the quiet tone, so a settling
-   * reply changes how the words read without moving them (one family means
-   * no wrap point shifts at the settle).
-   */
-  ledgerProvisional: {
-    fontFamily: theme.buzz.proseRegular,
-    width: '100%',
-    minWidth: 0,
-    color: theme.buzz.ledgerQuiet,
-    fontSize: theme.buzz.proseSize,
-    lineHeight: theme.buzz.proseLineHeight,
-  },
-  ledgerTextLuminous: {
-    fontFamily: theme.buzz.proseRegular,
-    width: '100%',
-    minWidth: 0,
-    color: theme.buzz.ledgerBright,
-    fontSize: theme.buzz.proseSize,
-    lineHeight: theme.buzz.proseLineHeight,
-  },
-  ledgerText: {
-    fontFamily: theme.buzz.proseRegular,
-    width: '100%',
-    minWidth: 0,
-    color: theme.buzz.ledgerBright,
-    fontSize: theme.buzz.proseSize,
-    lineHeight: theme.buzz.proseLineHeight,
-  },
-  // Your own turn: brass body, regular weight, same size as everyone's.
-  steerText: (pending: boolean) => ({
-    fontFamily: theme.buzz.proseRegular,
-    minWidth: 0,
-    width: '100%',
-    color: pending ? theme.buzz.textMuted : theme.buzz.accent,
-    fontSize: theme.buzz.proseSize,
-    lineHeight: theme.buzz.proseLineHeight,
-  }),
-  roomUpdate: {
-    position: 'relative',
-    width: '100%',
-    minWidth: 0,
-    paddingVertical: theme.buzz.space.xs,
-    paddingRight: STAMP_GUTTER,
-    marginBottom: theme.buzz.space.md,
-  },
-  roomUpdateLine: {
-    ...theme.buzz.type.meta,
-    fontFamily: theme.buzz.proseRegular,
-    color: theme.buzz.ledgerQuiet,
-  },
-  roomUpdateLineBrass: { color: theme.buzz.accent },
-  // No fixed width: a 36px box clips `17:06` (39px in 13px Plex Mono) to
-  // `17:…`. The row's right padding already keeps the clock clear.
-  roomUpdateStamp: {
-    ...theme.buzz.type.machine,
-    position: 'absolute',
-    top: theme.buzz.space.xs,
-    right: 0,
-    color: theme.buzz.ledgerGhost,
-    textAlign: 'right',
-  },
-  historyFailure: { paddingHorizontal: theme.buzz.roomList.edge },
-  systemLine: {
-    position: 'relative',
-    width: '100%',
-    minWidth: 0,
-    paddingVertical: theme.buzz.space.xs,
-    paddingRight: STAMP_GUTTER,
-    marginBottom: theme.buzz.space.md,
-  },
-  systemLineText: {
-    ...theme.buzz.type.meta,
-    fontFamily: theme.buzz.proseRegular,
-    color: theme.buzz.ledgerQuiet,
-  },
-  systemLineMeasurement: {
-    position: 'absolute',
-    top: 0,
-    left: 0,
-    right: 0,
-    opacity: 0,
-  },
-  systemLineName: { fontFamily: theme.buzz.proseRegular, color: theme.buzz.accent },
-  systemLineToggle: { fontFamily: theme.buzz.proseMedium, color: theme.buzz.accent },
-  systemLineLink: {
-    fontFamily: theme.buzz.proseRegular,
-    color: theme.buzz.ledgerBody,
-    textDecorationLine: 'underline',
-  },
-  roomUpdateDigest: {
-    ...theme.buzz.type.meta,
-    fontFamily: theme.buzz.proseRegular,
-    marginTop: 4,
-    marginLeft: theme.buzz.space.md,
-    color: theme.buzz.ledgerBody,
-  },
-  // Tool readouts take the quiet left-rule mono treatment — clearly not
-  // conversation.
-  ghostBlock: {
-    width: '100%',
-    minWidth: 0,
-  },
-  ghostBody: {
-    ...theme.buzz.type.machine,
-    marginTop: 4,
-    color: theme.buzz.ledgerGhost,
-  },
-}));

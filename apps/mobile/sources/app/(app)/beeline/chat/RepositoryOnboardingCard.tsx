@@ -107,7 +107,7 @@ function EnabledRepositoryOnboardingCard({ card, viewerId, author }: Props) {
     body={linked || error ? undefined : card.kind === 'repository' ? card.canLink ? needsConnection
       ? 'Connect GitHub to link one you own or create a new private repo. You approve once on github.com, then come back here.'
       : `New repo: ${card.defaultName}`
-      : card.ownerHandle ? `Ask @${card.ownerHandle} to link a repository for this Room` : 'Ask a Workspace owner or admin to choose a repository for this Room.' : undefined}
+      : card.ownerHandle ? `Ask @${card.ownerHandle} to link a repository for this chat` : 'Ask a Workspace owner or admin to choose a repository for this chat.' : undefined}
     choices={linked || error ? [] : choices} actions={shownActions}
     footerNote={!linked && busy ? 'Working…' : undefined}>
     {!linked && !error && picker && !card.repositories.length ?

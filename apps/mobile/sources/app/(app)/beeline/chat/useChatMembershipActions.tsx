@@ -6,7 +6,7 @@ import { Modal } from '@/modal';
 import { leaveRoomWithConfirmation } from '@/buzz/room-leave';
 import { BuzzRigTransport } from '@/sync/transport';
 import { roomTitle } from '@beeline/api-contract/phone';
-import { CORNER_LABEL, ROOM_LABEL } from '@/buzz/vocabulary';
+import { CORNER_LABEL, CORNER_TITLE, ROOM_LABEL, ROOM_TITLE } from '@/buzz/vocabulary';
 import { ROOM_SLUG_HINT, validRoomSlug } from '@/buzz/room-name';
 
 type Props = [
@@ -137,7 +137,7 @@ export function useChatMembershipActions([
     const name = renameDraft.trim();
     const kindLabel = isCorner ? CORNER_LABEL : ROOM_LABEL;
     if (!name) {
-      setRenameError(`${kindLabel} name cannot be empty.`);
+      setRenameError(`${isCorner ? CORNER_TITLE : ROOM_TITLE} name cannot be empty.`);
       return;
     }
     if (!isCorner && !validRoomSlug(name)) {

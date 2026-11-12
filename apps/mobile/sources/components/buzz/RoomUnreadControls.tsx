@@ -1,7 +1,6 @@
 import React from 'react';
-import { Pressable, Text, View } from 'react-native';
-import { StyleSheet } from 'react-native-unistyles';
-import { Typography } from '@/constants/Typography';
+import { YStack } from 'tamagui';
+import { Inked, T } from '@/ui/grammar';
 import { ChevronGlyph } from '@/components/buzz/ChevronGlyph';
 import { compactNewMessageCount } from '@/buzz/room-new-message-boundary';
 import { TURN_LINE_BAR_MARGIN_BOTTOM, TURN_LINE_ROW_MIN_HEIGHT } from '@/buzz/room-bottom-chrome';
@@ -46,7 +45,7 @@ export function RoomUnreadControls({
   return (
     <>
       {discVisible && (
-        <Pressable
+        <YStack
           accessibilityLabel={
             badgeShown
               ? `${badgeCount} new ${badgeCount === 1 ? 'message' : 'messages'}. Jump to newest message`
@@ -54,76 +53,50 @@ export function RoomUnreadControls({
           }
           accessibilityRole="button"
           onPress={onJumpToNewest}
-          style={({ pressed }) => [
-            styles.hitTarget,
-            bottomInset !== undefined && { bottom: bottomInset + 4 },
-            pressed && styles.pressed,
-          ]}
+          position="absolute"
+          right={12}
+          // Desktop and archived transcripts have no measured hanging status slot.
+          bottom={bottomInset !== undefined ? bottomInset + 4 : 4 + TURN_LINE_ROW_MIN_HEIGHT + TURN_LINE_BAR_MARGIN_BOTTOM}
+          width={DISC_SIZE}
+          height={DISC_SIZE}
+          alignItems="center"
+          justifyContent="center"
+          cursor="pointer"
           testID="newest-jump-disc"
         >
-          <View style={styles.disc}>
-            <ChevronGlyph color={styles.chevron.color} direction="down" size={CHEVRON_SIZE} />
-          </View>
+          <YStack
+            width={DISC_SIZE}
+            height={DISC_SIZE}
+            borderRadius="full"
+            alignItems="center"
+            justifyContent="center"
+            borderWidth={1}
+            borderColor="strongStroke"
+            backgroundColor="highlight"
+          >
+            <Inked color="ink" glyph={ChevronGlyph} direction="down" size={CHEVRON_SIZE} />
+          </YStack>
+          {/* The count rides the disc's top-right corner, so the chevron keeps the
+              whole plate and the number never widens the control. */}
           {badgeShown && (
-            <View style={styles.badge} testID="newest-jump-badge">
-              <Text style={styles.badgeText}>{compactNewMessageCount(badgeCount)}</Text>
-            </View>
+            <YStack
+              position="absolute"
+              top={0}
+              right={0}
+              minWidth={BADGE_SIZE}
+              height={BADGE_SIZE}
+              paddingHorizontal="1"
+              borderRadius="full"
+              alignItems="center"
+              justifyContent="center"
+              backgroundColor="needsYou"
+              testID="newest-jump-badge"
+            >
+              <T v="metaStrong" color="canvas" fontVariant={['tabular-nums']}>{compactNewMessageCount(badgeCount)}</T>
+            </YStack>
           )}
-        </Pressable>
+        </YStack>
       )}
     </>
   );
 }
-
-const styles = StyleSheet.create((theme) => {
-  const groknight = theme.buzz;
-  return {
-    hitTarget: {
-      position: 'absolute',
-      right: 12,
-      // Desktop and archived transcripts have no measured hanging status slot.
-      bottom: 4 + TURN_LINE_ROW_MIN_HEIGHT + TURN_LINE_BAR_MARGIN_BOTTOM,
-      width: DISC_SIZE,
-      height: DISC_SIZE,
-      alignItems: 'center',
-      justifyContent: 'center',
-    },
-    pressed: {
-      opacity: 0.72,
-    },
-    disc: {
-      width: DISC_SIZE,
-      height: DISC_SIZE,
-      borderRadius: DISC_SIZE / 2,
-      alignItems: 'center',
-      justifyContent: 'center',
-      borderWidth: StyleSheet.hairlineWidth,
-      borderColor: groknight.borderStrong,
-      backgroundColor: groknight.bgHighlight,
-    },
-    /** The chevron drawn on that plate; a glyph takes its colour as a prop. */
-    chevron: {
-      color: groknight.ledgerBody,
-    },
-    // The count rides the disc's top-right corner, so the chevron keeps the
-    // whole plate and the number never widens the control.
-    badge: {
-      position: 'absolute',
-      top: 0,
-      right: 0,
-      minWidth: BADGE_SIZE,
-      height: BADGE_SIZE,
-      paddingHorizontal: groknight.space.xs,
-      borderRadius: BADGE_SIZE / 2,
-      alignItems: 'center',
-      justifyContent: 'center',
-      backgroundColor: groknight.accent,
-    },
-    badgeText: {
-      ...Typography.default('semiBold'),
-      ...groknight.type.meta,
-      color: groknight.textInverted,
-      fontVariant: ['tabular-nums'],
-    },
-  };
-});

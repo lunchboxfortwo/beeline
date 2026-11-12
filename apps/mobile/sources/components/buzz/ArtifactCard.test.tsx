@@ -17,10 +17,6 @@ vi.mock('expo-crypto', async () => {
   const { sha256 } = await import('@noble/hashes/sha2.js');
   return { CryptoDigestAlgorithm: { SHA256: 'SHA256' }, digest: async (_algorithm: string, bytes: Uint8Array) => sha256(bytes).buffer };
 });
-vi.mock('react-native-unistyles', async () => {
-  const { groknight } = await import('@/buzz/groknight');
-  return { StyleSheet: { create: (factory: any) => factory({ buzz: groknight }) } };
-});
 vi.mock('./IndexRow', () => ({ IndexRow: 'IndexRow', ContentTarget: 'ContentTarget', InlineRow: 'InlineRow' }));
 vi.mock('tamagui', async () => (await import('@/ui/screens/transcript/grammar-hosts.test-support')).tamaguiHosts());
 vi.mock('lucide-react-native', async () => (await import('@/ui/screens/transcript/grammar-hosts.test-support')).lucideHosts());
@@ -101,7 +97,7 @@ describe('agent-posted artifact card previews', () => {
     expect(frame.props.srcDoc).toContain("default-src 'none'");
     expect(frame.props.sandbox).toBe('');
     expect(frame.props.tabIndex).toBe(-1);
-    expect(tree.root.findByProps({ testID: 'artifact-preview-render' }).props.style[0].height).toBe(ARTIFACT_MAX_PREVIEW_HEIGHT);
+    expect(tree.root.findByProps({ testID: 'artifact-preview-render' }).props.height).toBe(ARTIFACT_MAX_PREVIEW_HEIGHT);
     expect(tree.root.findAllByProps({ testID: 'artifact-preview-failed' })).toHaveLength(0);
     expect(host.fetch).toHaveBeenCalledTimes(1);
     expect(new TextDecoder().decode(await fetchArtifactBytes(attachment))).toBe(html);

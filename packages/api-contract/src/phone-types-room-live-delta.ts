@@ -168,6 +168,9 @@ export type ChatListCorner = {
   /** On the viewer's waiting corners: when the corner last spoke (unix
    * seconds), the moment it handed back. It counts as Room activity. */
   readonly waitingSince?: number;
+  /** When the corner last spoke (unix seconds), on every corner. The chat
+   * list shows a thread line only while this is recent. */
+  readonly lastActivityAt?: number;
   /** The corner owes the viewer something they have not opened it to see
    * since. Only these open the Room's corner dropdown on their own. */
   readonly attention?: true;

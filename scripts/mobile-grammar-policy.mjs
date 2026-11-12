@@ -3,12 +3,15 @@ import path from 'node:path';
 import ts from 'typescript';
 
 /**
- * The one design grammar (DESIGN.md → Grammar). Every Tamagui surface in
- * apps/mobile/sources may only use these values; the type scale itself lives
- * in GRAMMAR_FILE and nowhere else sets a font, size or weight.
+ * The one design grammar (DESIGN.md → Grammar). Every screen, component and
+ * module in apps/mobile/sources may only use these values; the type scale
+ * itself lives in GRAMMAR_FILE and nowhere else sets a font, size or weight.
+ * Colour values exist only in the token files.
  */
 export const GRAMMAR_FILE = 'ui/grammar.tsx';
-export const CONFIG_FILE = 'ui/tamagui.config.ts';
+// The app root lives beside the grammar so screens do not load the gesture runtime.
+export const GRAMMAR_FILES = new Set([GRAMMAR_FILE, 'ui/grammar-root.tsx']);
+export const TOKEN_FILES = new Set(['ui/tamagui.config.ts', 'buzz/groknight.ts']);
 
 export const COLOR_TOKENS = new Set([
   'canvas', 'raised', 'highlight', 'stroke', 'strongStroke', 'ink', 'secondary',
@@ -32,7 +35,14 @@ const SPACE_PROPS = new Set([
 const RADIUS_PROPS = new Set([
   'borderRadius', 'borderTopLeftRadius', 'borderTopRightRadius', 'borderBottomLeftRadius', 'borderBottomRightRadius',
 ]);
-const STYLE_ESCAPES = new Set(['style', 'contentContainerStyle']);
+// `style`, `contentContainerStyle`, `columnWrapperStyle` and every other style-object prop.
+const isStyleEscape = (prop, expr) => (prop === 'style' || /[a-z]Style$/.test(prop)) && !(expr && ts.isStringLiteral(expr));
+// The component lock: screens compose Tamagui and the grammar, not raw React Native views.
+const LOCKED_PRIMITIVES = new Set([
+  'View', 'Text', 'Pressable', 'TouchableOpacity', 'TouchableHighlight', 'TouchableWithoutFeedback',
+  'TextInput', 'ScrollView', 'SafeAreaView', 'StyleSheet',
+]);
+const LEGACY_STYLE_MODULES = /^react-native-unistyles(\/|$)/;
 
 function literalValues(expr) {
   if (!expr) return [];
@@ -44,6 +54,10 @@ function literalValues(expr) {
   if (ts.isConditionalExpression(expr)) return [...literalValues(expr.whenTrue), ...literalValues(expr.whenFalse)];
   if (expr.kind === ts.SyntaxKind.UndefinedKeyword || (ts.isIdentifier(expr) && expr.text === 'undefined')) return [];
   if (ts.isAsExpression(expr)) return literalValues(expr.expression);
+  // step('3') from useStep(): a spacing step that follows Text size.
+  if (ts.isCallExpression(expr) && ts.isIdentifier(expr.expression) && expr.expression.text === 'step'
+    && expr.arguments.length === 1 && ts.isStringLiteral(expr.arguments[0]))
+    return [{ kind: 'step', value: expr.arguments[0].text }];
   if (ts.isPropertyAccessExpression(expr) && ts.isIdentifier(expr.expression) && expr.expression.text === 'HEIGHT')
     return [{ kind: 'height', value: expr.name.text }];
   return [{ kind: 'dynamic', value: expr.getText() }];
@@ -52,6 +66,10 @@ function literalValues(expr) {
 function judge(prop, values) {
   for (const v of values) {
     if (v.kind === 'dynamic') return `${prop} must be a grammar literal, not ${v.value}`;
+    if (v.kind === 'step') {
+      if (!SPACE_PROPS.has(prop) || !SPACE_TOKENS.has(v.value)) return `${prop}=step(${JSON.stringify(v.value)}) is not a spacing step`;
+      continue;
+    }
     if (COLOR_PROPS.has(prop)) {
       if (v.kind !== 'string' || !COLOR_TOKENS.has(v.value)) return `${prop}=${JSON.stringify(v.value)} is not a colour token`;
     } else if (SPACE_PROPS.has(prop)) {
@@ -71,29 +89,60 @@ function judge(prop, values) {
 /** Scan one source text; returns violations with 1-based lines. */
 export function scanGrammarSource(file, text) {
   const errors = [];
-  if (file === CONFIG_FILE) return errors;
-  const isGrammar = file === GRAMMAR_FILE;
+  if (TOKEN_FILES.has(file)) return errors;
+  const isGrammar = GRAMMAR_FILES.has(file);
   const source = ts.createSourceFile(file, text, ts.ScriptTarget.Latest, true, file.endsWith('x') ? ts.ScriptKind.TSX : ts.ScriptKind.TS);
-  const usesTamagui = source.statements.some(s => ts.isImportDeclaration(s) && /^(tamagui|@tamagui\/)/.test(s.moduleSpecifier.text));
-  const usesGrammar = source.statements.some(s => ts.isImportDeclaration(s) && /(^|\/)ui\/grammar$/.test(s.moduleSpecifier.text));
-  if (!usesTamagui && !usesGrammar) return errors;
   const line = node => source.getLineAndCharacterOfPosition(node.getStart()).line + 1;
+  const judgeProp = (node, prop, expr) => {
+    if (TYPE_PROPS.has(prop) && !isGrammar)
+      errors.push({ file, line: line(node), rule: 'type-scale', message: `${prop} is set outside the six type styles (use <T v=…>)` });
+    else if (isStyleEscape(prop, expr) && !isGrammar)
+      errors.push({ file, line: line(node), rule: 'style-escape', message: `${prop} bypasses the grammar; use grammar props` });
+    else if (COLOR_PROPS.has(prop) || SPACE_PROPS.has(prop) || RADIUS_PROPS.has(prop) || prop === 'minHeight') {
+      // The grammar file composes its primitives from typed props; only its literals are judged.
+      const values = literalValues(expr).filter(v => !(isGrammar && v.kind === 'dynamic'));
+      const problem = judge(prop, values);
+      if (problem) errors.push({ file, line: line(node), rule: 'off-grammar', message: problem });
+    }
+  };
+  // styled(Component, { ...props, variants: { ... } }) is judged like JSX props.
+  const judgeStyledObject = object => {
+    for (const property of object.properties) {
+      if (!ts.isPropertyAssignment(property)) continue;
+      const name = property.name.getText().replace(/^['"]|['"]$/g, '');
+      if (ts.isObjectLiteralExpression(property.initializer)) judgeStyledObject(property.initializer);
+      else judgeProp(property, name, property.initializer);
+    }
+  };
+  for (const statement of source.statements) {
+    if (!ts.isImportDeclaration(statement) || isGrammar) continue;
+    const from = statement.moduleSpecifier.text;
+    if (LEGACY_STYLE_MODULES.test(from))
+      errors.push({ file, line: line(statement), rule: 'legacy-styles', message: `${from} is the old theme; use Tamagui and the grammar` });
+    if (from !== 'react-native') continue;
+    const names = statement.importClause?.namedBindings;
+    if (!names || !ts.isNamedImports(names) || statement.importClause.isTypeOnly) continue;
+    for (const element of names.elements) {
+      if (element.isTypeOnly) continue;
+      const name = (element.propertyName ?? element.name).text;
+      if (LOCKED_PRIMITIVES.has(name))
+        errors.push({ file, line: line(element), rule: 'component-lock', message: `react-native ${name} is locked; use the Tamagui and grammar components` });
+    }
+  }
   const visit = node => {
     if (ts.isStringLiteral(node) && /^(#[0-9a-fA-F]{3,8}|rgba?\(|hsla?\()/.test(node.text) && !isGrammar)
       errors.push({ file, line: line(node), rule: 'colour-literal', message: `${node.text} is not a theme token` });
     if (ts.isJsxAttribute(node)) {
-      const prop = node.name.getText();
       const expr = node.initializer && (ts.isJsxExpression(node.initializer) ? node.initializer.expression : node.initializer);
-      if (TYPE_PROPS.has(prop) && !isGrammar)
-        errors.push({ file, line: line(node), rule: 'type-scale', message: `${prop} is set outside the six type styles (use <T v=…>)` });
-      else if (STYLE_ESCAPES.has(prop) && !isGrammar)
-        errors.push({ file, line: line(node), rule: 'style-escape', message: `${prop} bypasses the grammar; use grammar props` });
-      else if (COLOR_PROPS.has(prop) || SPACE_PROPS.has(prop) || RADIUS_PROPS.has(prop) || prop === 'minHeight') {
-        // The grammar file composes its primitives from typed props; only its literals are judged.
-        const values = literalValues(expr).filter(v => !(isGrammar && v.kind === 'dynamic'));
-        const problem = judge(prop, values);
-        if (problem) errors.push({ file, line: line(node), rule: 'off-grammar', message: problem });
-      }
+      judgeProp(node, node.name.getText(), expr);
+    }
+    // {...{ style: x }} spreads are judged like the props they spread.
+    if (ts.isJsxSpreadAttribute(node) && ts.isObjectLiteralExpression(node.expression))
+      for (const property of node.expression.properties)
+        if (ts.isPropertyAssignment(property)) judgeProp(property, property.name.getText().replace(/^['"]|['"]$/g, ''), property.initializer);
+    if (ts.isCallExpression(node) && ts.isIdentifier(node.expression) && node.expression.text === 'styled') {
+      const options = node.arguments[1];
+      if (options && ts.isObjectLiteralExpression(options)) judgeStyledObject(options);
     }
     ts.forEachChild(node, visit);
   };
@@ -110,7 +159,7 @@ function walk(dir, out = []) {
   return out;
 }
 
-/** Scan apps/mobile/sources under a repository root. */
+/** Scan every module in apps/mobile/sources under a repository root. */
 export function scanGrammarTree(root) {
   const sources = path.join(root, 'apps/mobile/sources');
   const errors = [];

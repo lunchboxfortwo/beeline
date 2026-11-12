@@ -1,6 +1,6 @@
 import React from 'react';
-import { Text, View } from 'react-native';
-import { StyleSheet } from 'react-native-unistyles';
+import { XStack } from 'tamagui';
+import { T } from '@/ui/grammar';
 import { Button, type ButtonDestination, type ButtonVariant } from './Button';
 
 /**
@@ -45,20 +45,20 @@ export function ErrorBanner({
   titleTestID?: string;
 }) {
   return (
-    <View
+    <XStack
       accessibilityLiveRegion="polite"
       accessibilityRole="alert"
-      style={styles.inline}
+      flexWrap="wrap"
+      alignItems="center"
+      columnGap="2"
       testID={testID}
     >
       {icon}
-      <Text style={styles.inlineText} testID={titleTestID}>
+      <T v="meta" color="removed" flexShrink={1} testID={titleTestID}>
         {description ? `${title} ${description}` : title}
-      </Text>
+      </T>
       {onRetry || secondaryAction ? (
-        <View
-          style={styles.inlineActions}
-        >
+        <XStack maxWidth="100%" flexWrap="wrap" alignItems="center" gap="4">
           {onRetry ? (
             <Button
               size="inline"
@@ -83,28 +83,8 @@ export function ErrorBanner({
               variant="quiet"
             />
           ) : null}
-        </View>
+        </XStack>
       ) : null}
-    </View>
+    </XStack>
   );
 }
-
-const styles = StyleSheet.create((theme) => {
-  const hull = theme.buzz;
-  return {
-    inline: {
-      flexDirection: 'row',
-      flexWrap: 'wrap',
-      alignItems: 'center',
-      columnGap: hull.space.sm,
-    },
-    inlineText: { ...hull.type.meta, color: hull.dialogDanger, flexShrink: 1 },
-    inlineActions: {
-      maxWidth: '100%',
-      flexDirection: 'row',
-      flexWrap: 'wrap',
-      alignItems: 'center',
-      gap: hull.space.md,
-    },
-  };
-});

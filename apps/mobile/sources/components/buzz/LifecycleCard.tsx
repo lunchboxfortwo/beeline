@@ -1,6 +1,6 @@
 import type { ChatDisplayMessage } from '@/buzz/room-view-presentation';
 import React from 'react';
-import { View } from 'react-native';
+import { YStack } from 'tamagui';
 
 import { RepositoryLifecycleRow } from './PrLifecycleCard';
 import { lifecycleCornerTitle, type NotificationLifecycleRun } from '@/buzz/pr-lifecycle';
@@ -21,9 +21,9 @@ export function LifecycleRecordCard({
   onOpenUrl(url: string): void;
 }) {
   return (
-    <View testID={testID}>
+    <YStack testID={testID}>
       <RepositoryLifecycleRow item={item} onOpenCorner={onOpenCorner} onOpenUrl={onOpenUrl} />
-    </View>
+    </YStack>
   );
 }
 
@@ -103,7 +103,7 @@ export const DaemonFactCard = React.memo(function DaemonFactCard({
         title,
         state,
         kind: 'corner',
-        kindLine: `corner${prNumber ? ` · PR #${prNumber}` : ''}`,
+        kindLine: `thread${prNumber ? ` · PR #${prNumber}` : ''}`,
         cornerId: fact.cornerId,
         url: fact.pullRequest?.url,
         actor: agent ?? '',
@@ -111,7 +111,7 @@ export const DaemonFactCard = React.memo(function DaemonFactCard({
       }}
       timestamp={message.timestamp}
       objective={fact.type === 'corner-open' ? fact.objective : undefined}
-      authorPrefix={fact.type === 'corner-open' ? 'corner · opened by ' : undefined}
+      authorPrefix={fact.type === 'corner-open' ? 'thread · opened by ' : undefined}
       testID={
         fact.type === 'corner-complete' && (landedCorner || fact.pullRequest)
           ? 'corner-summary-card'

@@ -1,5 +1,6 @@
 import React, { useEffect, useState } from 'react';
-import { Image, Platform, StyleSheet, View } from 'react-native';
+import { Image, Platform } from 'react-native';
+import { YStack, useTheme, useThemeName } from 'tamagui';
 import Svg, { G, Path, Rect, SvgUri, Text as SvgText } from 'react-native-svg';
 import { isConnectorLogoUrl } from '@beeline/api-contract/phone';
 import {
@@ -18,8 +19,9 @@ import { PERSON_PLATE, agentFaceLayers } from '@/buzz/faces/face-tile';
 import { INK } from '@/buzz/faces/animals';
 import { SYSTEM_IDENTITY_PUBKEY } from '@/buzz/system-identity';
 import beelineMark from '@/buzz/beeline-mark.json';
+import brand from '@/buzz/brand.json';
+import { DrawnType, Filled } from '@/ui/grammar';
 import { HullLivePulse } from './MonoHull';
-import { useUnistyles } from 'react-native-unistyles';
 
 type IdentityMarkBaseProps = {
   /** The identity's stable seed: a pubkey for an agent or a person, the
@@ -236,8 +238,8 @@ export const IdentityMark = React.memo(function IdentityMark(props: IdentityMark
   // (an untyped caller, a stale bundle) can only ever light gold on an agent.
   const alive = props.kind === 'agent' ? Boolean(props.alive) : false;
   const live = kind === 'agent' && alive;
-  const { theme } = useUnistyles();
-  const groknight = theme.buzz;
+  const theme = useTheme();
+  const dark = useThemeName().startsWith('dark');
   const [failedAvatar, setFailedAvatar] = useState<string | null>(null);
   // Connector speakers use their server-owned SVG marks rather than a person's photo.
   const showConnectorLogo =
@@ -256,9 +258,12 @@ export const IdentityMark = React.memo(function IdentityMark(props: IdentityMark
 
   if (kind === 'human' && seed === SYSTEM_IDENTITY_PUBKEY) {
     return (
-      <View
+      <YStack
         accessibilityLabel="System, Beeline logo"
-        style={[styles.frame, { width: size, height: size }]}
+        alignItems="center"
+        justifyContent="center"
+        width={size}
+        height={size}
         testID={testID ?? 'identity-system-logo'}
       >
         <Svg
@@ -278,40 +283,41 @@ export const IdentityMark = React.memo(function IdentityMark(props: IdentityMark
             <Path
               d={beelineMark.path}
               fillRule={beelineMark.fillRule as 'evenodd' | 'nonzero'}
-              fill={groknight.brandMark}
+              fill={brand.mark}
             />
           </G>
         </Svg>
-      </View>
+      </YStack>
     );
   }
 
   if (kind === 'workspace') {
     return (
-      <View
-        accessibilityLabel={label}
-        style={[styles.frame, { width: size, height: size }]}
-        testID={testID}
-      >
+      <YStack accessibilityLabel={label} alignItems="center" justifyContent="center" width={size} height={size} testID={testID}>
         {showRelayAvatar ? (
-          <Image
+          <Filled
+            view={Image}
             onError={() => setFailedAvatar(avatarUrl ?? null)}
             resizeMode="cover"
             source={{ uri: avatarUrl! }}
-            style={styles.image}
           />
         ) : (
           <WorkspacePlate seed={seed} size={size} selected={selected} />
         )}
-      </View>
+      </YStack>
     );
   }
 
   if (showConnectorLogo) {
     return (
-      <View
+      <YStack
         accessibilityLabel={label}
-        style={[styles.frame, styles.plate, { width: size, height: size }]}
+        alignItems="center"
+        justifyContent="center"
+        borderRadius="sm"
+        overflow="hidden"
+        width={size}
+        height={size}
         testID={testID}
       >
         <SvgUri
@@ -321,13 +327,13 @@ export const IdentityMark = React.memo(function IdentityMark(props: IdentityMark
           height={size}
           testID="identity-connector-logo"
         />
-      </View>
+      </YStack>
     );
   }
 
   const face = resolveFace(props.face, seed);
   const palette = identityPalette(seed, kind);
-  const mode = groknight.dark ? 'dark' : 'light';
+  const mode = dark ? 'dark' : 'light';
   // Plate polarity IS the class read: ink plate under a coloured person, hue
   // plate under an ink agent.
   const plate = kind === 'agent' ? palette.mid : PERSON_PLATE[mode];
@@ -337,58 +343,59 @@ export const IdentityMark = React.memo(function IdentityMark(props: IdentityMark
     // One image named once: the letter is SVG text, so the tile is the image
     // and its label is what a screen reader hears.
     return (
-      <View
+      <YStack
         accessibilityLabel={label}
         accessibilityRole="image"
         accessible
-        style={[styles.frame, { width: size, height: size }]}
+        alignItems="center"
+        justifyContent="center"
+        width={size}
+        height={size}
         testID={testID}
       >
-        <View style={[styles.plate, { width: size, height: size, backgroundColor: plate }]} testID="identity-face-plate">
+        <YStack borderRadius="sm" overflow="hidden" width={size} height={size} testID="identity-face-plate">
           {showPersonPicture ? (
-            <Image
-              source={{ uri: avatarUrl! }}
-              resizeMode="cover"
-              style={styles.image}
-              onError={() => setFailedAvatar(avatarUrl ?? null)}
-              testID="identity-person-picture"
-            />
+            <>
+              <PlateFill size={size} fill={plate} />
+              <Filled
+                view={Image}
+                source={{ uri: avatarUrl! }}
+                resizeMode="cover"
+                onError={() => setFailedAvatar(avatarUrl ?? null)}
+                testID="identity-person-picture"
+              />
+            </>
           ) : (
             // The initial in the person's hue; on the cream plate it carries
             // the animals' Ink contrast edge, because the hue alone is too faint.
             <Svg width={size} height={size} viewBox="0 0 100 100" testID="identity-person-initial">
               <Rect width={100} height={100} fill={PERSON_PLATE[mode]} />
               {mode === 'light' ? (
-                <SvgText x={50} y={69} textAnchor="middle" fontSize={56} fontFamily="SpaceGrotesk-SemiBold"
+                <DrawnType view={SvgText} v="heading" size={56} x={50} y={69} textAnchor="middle"
                   fill={INK} stroke={INK} strokeWidth={5} strokeLinejoin="round">
                   {personInitial(name, handle)}
-                </SvgText>
+                </DrawnType>
               ) : null}
-              <SvgText x={50} y={69} textAnchor="middle" fontSize={56} fontFamily="SpaceGrotesk-SemiBold" fill={palette.mid}>
+              <DrawnType view={SvgText} v="heading" size={56} x={50} y={69} textAnchor="middle" fill={palette.mid}>
                 {personInitial(name, handle)}
-              </SvgText>
+              </DrawnType>
             </Svg>
           )}
-        </View>
-      </View>
+        </YStack>
+      </YStack>
     );
   }
 
   return (
-    <View
-      accessibilityLabel={label}
-      style={[styles.frame, { width: size, height: size }]}
-      testID={testID}
-    >
-      <View
-        style={[styles.plate, { width: size, height: size, backgroundColor: plate }]}
-        testID="identity-face-plate"
-      >
+    <YStack accessibilityLabel={label} alignItems="center" justifyContent="center" width={size} height={size} testID={testID}>
+      <YStack borderRadius="sm" overflow="hidden" width={size} height={size} testID="identity-face-plate">
+        {/* The plate in the agent's hue, under its portrait or creature. */}
+        <PlateFill size={size} fill={plate} />
         {showGeneratedAvatar ? (
-          <Image
+          <Filled
+            view={Image}
             source={{ uri: avatarUrl! }}
             resizeMode="cover"
-            style={styles.image}
             onError={() => setFailedAvatar(avatarUrl ?? null)}
             testID="generated-agent-avatar"
           />
@@ -397,7 +404,7 @@ export const IdentityMark = React.memo(function IdentityMark(props: IdentityMark
             {agentFaceLayers(face)}
           </Svg>
         )}
-      </View>
+      </YStack>
 
       {/*
         Gold means one thing product-wide: an agent is working. It is drawn
@@ -408,7 +415,14 @@ export const IdentityMark = React.memo(function IdentityMark(props: IdentityMark
         quiet row pays for no animation at all.
       */}
       {live && (
-        <HullLivePulse style={styles.aliveRing}>
+        <YStack
+          position="absolute"
+          left={-ALIVE_RING_PAD}
+          top={-ALIVE_RING_PAD}
+          right={-ALIVE_RING_PAD}
+          bottom={-ALIVE_RING_PAD}
+        >
+        <HullLivePulse>
           <Svg width={ringSide} height={ringSide} viewBox={`0 0 ${ringSide} ${ringSide}`}>
             <Rect
               x={2}
@@ -417,7 +431,7 @@ export const IdentityMark = React.memo(function IdentityMark(props: IdentityMark
               height={ringSide - 4}
               rx={FACE_PLATE_RADIUS + 2}
               fill="none"
-              stroke={groknight.accent}
+              stroke={theme.needsYou?.val}
               strokeWidth={4}
               opacity={0.14}
             />
@@ -428,28 +442,24 @@ export const IdentityMark = React.memo(function IdentityMark(props: IdentityMark
               height={ringSide - 4}
               rx={FACE_PLATE_RADIUS + 2}
               fill="none"
-              stroke={groknight.accent}
+              stroke={theme.needsYou?.val}
               strokeWidth={1.5}
             />
           </Svg>
         </HullLivePulse>
+        </YStack>
       )}
-    </View>
+    </YStack>
   );
 });
 
-const styles = StyleSheet.create({
-  // No border, no fill, no radius on the frame itself: for a Workspace the
-  // plate's own silhouette is the shape; for a face the tile plate below is
-  // the one box, at the house radius.
-  frame: { alignItems: 'center', justifyContent: 'center' },
-  plate: { borderRadius: FACE_PLATE_RADIUS, overflow: 'hidden' },
-  image: { width: '100%', height: '100%' },
-  aliveRing: {
-    position: 'absolute',
-    left: -ALIVE_RING_PAD,
-    top: -ALIVE_RING_PAD,
-    right: -ALIVE_RING_PAD,
-    bottom: -ALIVE_RING_PAD,
-  },
-});
+/** The tile's plate colour, drawn as the layer under its picture or creature. */
+function PlateFill({ size, fill }: { size: number; fill: string }) {
+  return (
+    <YStack position="absolute" top={0} left={0}>
+      <Svg width={size} height={size} viewBox="0 0 100 100">
+        <Rect width={100} height={100} fill={fill} />
+      </Svg>
+    </YStack>
+  );
+}

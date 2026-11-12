@@ -48,11 +48,22 @@ export function threadTitle(item: ChatListItem, corner: ChatListCorner): string 
   return cornerShortTitle(item.room.name, corner.name, corner.id);
 }
 
-/** Active threads, the ones waiting on the viewer first, then the viewer's own, then the rest in server order. */
-export function chatThreads(item: ChatListItem, corners: readonly ChatListCorner[] | undefined): ChatListCorner[] {
+const DAY_SECONDS = 24 * 60 * 60;
+
+/** A thread line stays under its chat for a day after it last spoke, or a week while it waits on the viewer. */
+function threadIsRecent(corner: ChatListCorner, nowSeconds: number): boolean {
+  const at = corner.lastActivityAt ?? corner.waitingSince;
+  if (at === undefined) return false;
+  return nowSeconds - at <= (threadWaitsOnViewer(corner) ? 7 * DAY_SECONDS : DAY_SECONDS);
+}
+
+/** Recent threads, the ones waiting on the viewer first, then the viewer's own, then the rest in server order. */
+export function chatThreads(item: ChatListItem, corners: readonly ChatListCorner[] | undefined, now: number): ChatListCorner[] {
   if (item.directMessage || !corners?.length) return [];
+  const nowSeconds = now / 1000;
   const rank = (corner: ChatListCorner) => (threadWaitsOnViewer(corner) ? 0 : corner.mine ? 1 : 2);
   return corners
+    .filter((corner) => threadIsRecent(corner, nowSeconds))
     .map((corner, index) => ({ corner, index }))
     .sort((left, right) => rank(left.corner) - rank(right.corner) || left.index - right.index)
     .map(({ corner }) => corner);

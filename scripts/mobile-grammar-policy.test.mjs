@@ -29,6 +29,20 @@ test('colour literals and style escapes fail', () => {
   assert.deepEqual(rules(tamagui(`<YStack style={{ padding: 3 }} />`)), ['style-escape']);
 });
 
-test('files that use neither Tamagui nor the grammar are out of scope', () => {
-  assert.deepEqual(rules(`export const c = '#ffffff';\n`), []);
+test('every module is in scope, not only Tamagui screens', () => {
+  assert.deepEqual(rules(`export const c = '#ffffff';\n`), ['colour-literal']);
+  assert.deepEqual(rules(`import { View } from 'react-native';\n`), ['component-lock']);
+  assert.deepEqual(rules(`import { StyleSheet } from 'react-native-unistyles';\n`), ['legacy-styles']);
+  assert.deepEqual(rules(`export const c = '#ffffff';\n`, 'buzz/groknight.ts'), []);
+});
+
+test('spacing that follows Text size uses step() with a grammar step', () => {
+  assert.deepEqual(rules(tamagui(`<YStack gap={step('3')} />`)), []);
+  assert.deepEqual(rules(tamagui(`<YStack gap={step('7')} />`)), ['off-grammar']);
+  assert.deepEqual(rules(tamagui(`<YStack borderRadius={step('3')} />`)), ['off-grammar']);
+});
+
+test('spread object props are judged like written props', () => {
+  assert.deepEqual(rules(tamagui(`<YStack {...{ style: { padding: 3 } }} />`)), ['style-escape']);
+  assert.deepEqual(rules(tamagui(`<YStack {...{ padding: '3' }} />`)), []);
 });

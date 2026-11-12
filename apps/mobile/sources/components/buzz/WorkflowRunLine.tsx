@@ -1,7 +1,6 @@
 import React, { useMemo, useState } from 'react';
-import { Linking, Pressable, Text, View } from 'react-native';
 import Svg, { Circle, Path } from 'react-native-svg';
-import { StyleSheet } from 'react-native-unistyles';
+import { XStack, YStack, useTheme } from 'tamagui';
 import {
   identityHandle,
   type WorkflowActorView,
@@ -21,14 +20,14 @@ import {
   workflowStepAssignee,
   workflowStepMeta,
 } from '@/buzz/workflow-run-copy';
-import { identityPalette, isGeneratedAgentAvatarUrl } from '@/buzz/identity-mark';
+import { isGeneratedAgentAvatarUrl } from '@/buzz/identity-mark';
+import { Inked, T } from '@/ui/grammar';
 import { findRoomCornerRow, useRoomCornerRecord } from '@/buzz/room-corner-store';
 import { CORNER_META_SIZE, CornerGlyph } from './CornerGlyph';
 import { CHEVRON_ROW_SIZE, ChevronGlyph } from './ChevronGlyph';
 import { ContentTarget } from './IndexRow';
 import { DECORATIVE_GLYPH_PROPS } from './decorative-glyph';
 import { IdentityMark } from './IdentityMark';
-import { provisionalProseStyle, settledAgentProseStyle } from './Ledger';
 import { HullLivePulse } from './MonoHull';
 
 const CLOCK = new Intl.DateTimeFormat(undefined, { hour: 'numeric', minute: '2-digit' });
@@ -71,7 +70,7 @@ export function WorkflowStepCircle({
   size?: number;
   testID?: string;
 }) {
-  const { brass, ground, hollow, ink } = palette();
+  const { brass, ground, hollow, ink } = usePalette();
   return (
     <Svg
       {...DECORATIVE_GLYPH_PROPS}
@@ -109,21 +108,31 @@ export function WorkflowStepCircle({
   );
 }
 
-function palette() {
+/** The SVG inks: react-native-svg takes colour strings, read from the theme. */
+function usePalette() {
+  const t = useTheme() as Record<string, { val: string } | undefined>;
   return {
-    brass: styles.brass.color,
-    quiet: styles.quietLine.color,
-    ground: styles.ground.color,
-    hollow: styles.hollow.color,
-    ink: styles.ink.color,
+    brass: t.needsYou?.val,
+    ground: t.canvas?.val,
+    hollow: t.secondary?.val,
+    ink: t.secondary?.val,
   };
 }
 
-/** A 2pt piece of the line, solid brass or quiet. */
-function Segment({ tone, style, testID }: { tone: SegmentTone; vertical: boolean; style: object; testID?: string }) {
-  const { brass, quiet } = palette();
-  return <View style={[style, { backgroundColor: tone === 'brass' ? brass : quiet }]}
-    testID={testID ? `${testID}-${tone}` : undefined} />;
+/** A 2pt piece of the line, solid brass or quiet: above the circle, or from below it to the row's foot. */
+function Segment({ tone, below, testID }: { tone: SegmentTone; below: boolean; testID?: string }) {
+  return (
+    <YStack
+      position="absolute"
+      left={LINE_X - 1}
+      width={2}
+      top={below ? CIRCLE_TOP + CIRCLE : 0}
+      height={below ? undefined : CIRCLE_TOP}
+      bottom={below ? 0 : undefined}
+      backgroundColor={tone === 'brass' ? 'needsYou' : 'strongStroke'}
+      testID={testID ? `${testID}-${tone}` : undefined}
+    />
+  );
 }
 
 /**
@@ -168,7 +177,9 @@ export function WorkflowRunLine({
     [detail.contract, detail.history, detail.run],
   );
   return (
-    <View style={styles.list} testID={testID}>
+    // The current step's halo (HALO, wider than the circle it rings) would
+    // otherwise touch whatever sits directly above the rail.
+    <YStack paddingTop="2" testID={testID}>
       {line.map((step, index) => (
         <StepRow
           above={index > 0 ? segmentTone(line[index - 1]!, step) : undefined}
@@ -183,7 +194,7 @@ export function WorkflowRunLine({
           testID={`${testID}-step-${step.state}${line.slice(0, index).some((previous) => previous.state === step.state) ? `-visit-${index}` : ''}`}
         />
       ))}
-    </View>
+    </YStack>
   );
 }
 
@@ -197,17 +208,16 @@ function Assignee({
   viewer: boolean;
   testID: string;
 }) {
-  const hue =
-    viewer || (actor.kind === 'agent' && isGeneratedAgentAvatarUrl(actor.avatar))
-      ? styles.brass
-      : { color: identityPalette(actor.id, actor.kind).mid };
+  const brass = viewer || (actor.kind === 'agent' && isGeneratedAgentAvatarUrl(actor.avatar));
   return (
     // The row's own label already names the assignee.
-    <View
+    <XStack
       accessibilityElementsHidden
       aria-hidden
       importantForAccessibility="no-hide-descendants"
-      style={styles.assignee}
+      alignItems="center"
+      gap="2"
+      maxWidth={140}
       testID={`${testID}-assignee${viewer ? '-viewer' : ''}`}
     >
       <IdentityMark
@@ -219,10 +229,10 @@ function Assignee({
         size={ASSIGNEE_MARK}
         testID={`${testID}-assignee-mark`}
       />
-      <Text numberOfLines={1} style={[styles.handle, hue]} testID={`${testID}-assignee-handle`}>
+      <T v="meta" color={brass ? 'needsYou' : 'secondary'} numberOfLines={1} testID={`${testID}-assignee-handle`}>
         {`@${identityHandle(actor)}`}
-      </Text>
-    </View>
+      </T>
+    </XStack>
   );
 }
 
@@ -236,11 +246,11 @@ function OpenedCorners({
   testID: string;
 }) {
   return (
-    <View style={styles.corners} testID={`${testID}-corners`}>
+    <YStack marginTop="2" testID={`${testID}-corners`}>
       {corners.map((corner) => (
         <OpenedCorner corner={corner} key={corner.id} onOpenCorner={onOpenCorner} />
       ))}
-    </View>
+    </YStack>
   );
 }
 
@@ -261,17 +271,20 @@ function OpenedCorner({
   const named = row ? { ...corner, name: row.corner.name } : corner;
   return (
     <ContentTarget
-      accessibilityLabel={`Open corner ${named.name}`}
+      accessibilityLabel={`Open thread ${named.name}`}
       accessibilityRole="link"
       onPress={() => onOpenCorner(named)}
-      style={({ pressed }) => [styles.cornerLink, pressed && styles.pressed]}
+      minHeight={44}
+      flexDirection="row"
+      alignItems="center"
+      gap="2"
       testID={`workflow-run-corner-${corner.id}`}
     >
       <CornerGlyph size={CORNER_META_SIZE} />
-      <Text numberOfLines={1} style={styles.cornerName}>
+      <T v="meta" color="ink" flex={1} minWidth={0} numberOfLines={1}>
         {named.name}
-      </Text>
-      <ChevronGlyph color={styles.cornerArrow.color} size={CHEVRON_ROW_SIZE} />
+      </T>
+      <Inked color="needsYou" glyph={ChevronGlyph} size={CHEVRON_ROW_SIZE} />
     </ContentTarget>
   );
 }
@@ -333,156 +346,88 @@ function StepRow({
   const seconds = stepSeconds(step, now);
   // The terminal that ends the run reads by the clock it was reached, not an elapsed span.
   const reachedAt = step.kind === 'terminal' ? visit?.enteredAt : undefined;
-  const dimmed = step.status === 'pending' ? styles.dimmed : null;
+  const dimmed = step.status === 'pending' ? 0.45 : 1;
   // Every step starts open; a tap collapses it to its one-line description,
   // and a second tap reopens it.
   const hasDetail = Boolean(draft || final || gateLine || visit?.openedCorners?.length);
   const [expanded, setExpanded] = useState(true);
   const open = expanded || !hasDetail;
   return (
-    <View style={styles.step} testID={testID}>
-      {above ? <Segment style={styles.lineAbove} testID={`${testID}-above`} tone={above} vertical /> : null}
-      {below ? <Segment style={styles.lineBelow} testID={`${testID}-below`} tone={below} vertical /> : null}
-      <Pressable
+    <YStack position="relative" testID={testID}>
+      {above ? <Segment below={false} testID={`${testID}-above`} tone={above} /> : null}
+      {below ? <Segment below testID={`${testID}-below`} tone={below} /> : null}
+      <XStack
         accessibilityHint={hasDetail ? (expanded ? 'Hides this step’s output' : 'Shows this step’s output') : undefined}
         accessibilityLabel={label}
         accessibilityRole={hasDetail ? 'button' : undefined}
         accessibilityState={hasDetail ? { expanded } : undefined}
         aria-expanded={hasDetail ? expanded : undefined}
         onPress={hasDetail ? () => setExpanded((value) => !value) : undefined}
-        style={({ pressed }) => [styles.summary, pressed && hasDetail && styles.pressed]}
+        alignItems="flex-start"
+        paddingRight="4"
         testID={`${testID}-header`}
       >
         {current ? (
-          <HullLivePulse style={styles.halo}>
-            <View style={styles.haloRing} testID={`${testID}-halo`} />
-          </HullLivePulse>
+          <YStack position="absolute" left={LINE_X - HALO / 2} top={CIRCLE_TOP + CIRCLE / 2 - HALO / 2} width={HALO} height={HALO}>
+            <HullLivePulse>
+              <YStack width={HALO} height={HALO} borderRadius="full" borderWidth={1} borderColor="needsYou" testID={`${testID}-halo`} />
+            </HullLivePulse>
+          </YStack>
         ) : null}
-        <View style={styles.circle}>
+        <YStack position="absolute" left={LINE_X - CIRCLE / 2} top={CIRCLE_TOP}>
           <WorkflowStepCircle status={step.status} testID={`${testID}-circle-${step.status}`} />
-        </View>
-        <View style={[styles.copy, dimmed]}>
-          <Text style={current ? styles.nameCurrent : styles.name}>
+        </YStack>
+        <YStack width={COPY_X} />
+        <YStack flex={1} minWidth={0} paddingVertical="2" opacity={dimmed}>
+          <T v={current ? 'heading' : 'body'} color="ink">
             {name}
-            {meta ? <Text style={styles.meta}>{` · ${meta}`}</Text> : null}
-          </Text>
-        </View>
-        <View style={[styles.right, dimmed]}>
+            {meta ? <T v="meta" color="secondary">{` · ${meta}`}</T> : null}
+          </T>
+        </YStack>
+        <XStack alignItems="center" gap="2" paddingTop="2" opacity={dimmed}>
           {assignee ? <Assignee actor={assignee} testID={testID} viewer={isViewer} /> : null}
           {reachedAt !== undefined ? (
-            <Text style={styles.duration} testID={`${testID}-duration`}>{CLOCK.format(new Date(reachedAt * 1_000))}</Text>
+            <T v="code" color="secondary" testID={`${testID}-duration`}>{CLOCK.format(new Date(reachedAt * 1_000))}</T>
           ) : seconds !== undefined ? (
-            <Text style={styles.duration} testID={`${testID}-duration`}>{formatRunDuration(seconds)}</Text>
+            <T v="code" color="secondary" testID={`${testID}-duration`}>{formatRunDuration(seconds)}</T>
           ) : null}
-        </View>
-      </Pressable>
-      <View style={[styles.outcome, dimmed]}>
-        {does ? <Text style={styles.does} testID={`${testID}-description`}>{does}</Text> : null}
-        {open && draft ? (
-          <Text
-            ellipsizeMode="head"
-            numberOfLines={2}
-            style={[provisionalProseStyle(), styles.live]}
-            testID={`${testID}-live`}
-          >
-            {draft.replace(/\s+/g, ' ').trim()}
-          </Text>
-        ) : null}
-        {open && final ? (
-          <Text style={[settledAgentProseStyle(), styles.final]} testID={`${testID}-final`}>{final.text}</Text>
-        ) : null}
-        {open && gateLine ? (
-          gate?.sourceMessageId && onOpenMessage ? (
-            <Text
-              accessibilityRole="link"
-              onPress={() => onOpenMessage(gate.sourceMessageId!)}
-              style={[styles.gateLine, styles.gateLink]}
-              testID={`${testID}-gate`}
-            >
-              {gateLine}
-            </Text>
-          ) : (
-            <Text style={styles.gateLine} testID={`${testID}-gate`}>{gateLine}</Text>
-          )
-        ) : null}
-        {open && visit?.openedCorners?.length ? (
-          <OpenedCorners corners={visit.openedCorners} onOpenCorner={onOpenCorner} testID={testID} />
-        ) : null}
-      </View>
-    </View>
+        </XStack>
+      </XStack>
+      <XStack paddingRight="4" paddingBottom="2" opacity={dimmed}>
+        <YStack width={COPY_X} />
+        <YStack flex={1} minWidth={0}>
+          {does ? <T v="meta" color="secondary" marginTop="1" testID={`${testID}-description`}>{does}</T> : null}
+          {open && draft ? (
+            // Transient while it's still being written: the provisional (quiet) prose tone.
+            <T v="meta" color="secondary" marginTop="1" ellipsizeMode="head" numberOfLines={2} testID={`${testID}-live`}>
+              {draft.replace(/\s+/g, ' ').trim()}
+            </T>
+          ) : null}
+          {open && final ? (
+            <T v="meta" color="ink" marginTop="1" testID={`${testID}-final`}>{final.text}</T>
+          ) : null}
+          {open && gateLine ? (
+            gate?.sourceMessageId && onOpenMessage ? (
+              <T
+                v="meta"
+                color="needsYou"
+                marginTop="1"
+                textDecorationLine="underline"
+                accessibilityRole="link"
+                onPress={() => onOpenMessage(gate.sourceMessageId!)}
+                testID={`${testID}-gate`}
+              >
+                {gateLine}
+              </T>
+            ) : (
+              <T v="meta" color="secondary" marginTop="1" testID={`${testID}-gate`}>{gateLine}</T>
+            )
+          ) : null}
+          {open && visit?.openedCorners?.length ? (
+            <OpenedCorners corners={visit.openedCorners} onOpenCorner={onOpenCorner} testID={testID} />
+          ) : null}
+        </YStack>
+      </XStack>
+    </YStack>
   );
 }
-
-const styles = StyleSheet.create((theme) => {
-  const { type, space } = theme.buzz;
-  return {
-    brass: { color: theme.buzz.accent },
-    quietLine: { color: theme.buzz.borderStrong },
-    ground: { color: theme.buzz.bgBase },
-    hollow: { color: theme.buzz.textMuted },
-    quiet: { color: theme.buzz.ledgerQuiet },
-    ink: { color: theme.buzz.textSecondary },
-    // The current step's halo (HALO, wider than the circle it rings) would
-    // otherwise touch whatever sits directly above the rail — the page's
-    // section divider when the run's first step is the one running. The
-    // same space.sm rhythm the row's own text uses keeps it clear.
-    list: { paddingTop: space.sm },
-    step: { position: 'relative' },
-    lineAbove: { position: 'absolute', left: LINE_X - 1, width: 2, top: 0, height: CIRCLE_TOP },
-    lineBelow: {
-      position: 'absolute',
-      left: LINE_X - 1,
-      width: 2,
-      top: CIRCLE_TOP + CIRCLE,
-      bottom: 0,
-    },
-    outcome: { marginLeft: COPY_X, marginRight: space.md, paddingBottom: space.sm },
-    summary: {
-      flexDirection: 'row',
-      alignItems: 'flex-start',
-      paddingLeft: COPY_X,
-      paddingRight: space.md,
-    },
-    pressed: { backgroundColor: theme.buzz.bgPressed },
-    circle: { position: 'absolute', left: LINE_X - CIRCLE / 2, top: CIRCLE_TOP },
-    halo: {
-      position: 'absolute',
-      left: LINE_X - HALO / 2,
-      top: CIRCLE_TOP + CIRCLE / 2 - HALO / 2,
-      width: HALO,
-      height: HALO,
-    },
-    haloRing: {
-      width: HALO,
-      height: HALO,
-      borderRadius: HALO / 2,
-      borderWidth: 1,
-      borderColor: theme.buzz.accent,
-    },
-    copy: { flex: 1, minWidth: 0, paddingTop: space.sm, paddingBottom: space.sm },
-    name: { ...type.body, color: theme.buzz.textPrimary },
-    nameCurrent: { ...type.bodyStrong, color: theme.buzz.textPrimary },
-    meta: { ...type.meta, color: theme.buzz.ledgerQuiet },
-    right: { flexDirection: 'row', alignItems: 'center', gap: space.sm, paddingTop: CIRCLE_TOP },
-    assignee: { flexDirection: 'row', alignItems: 'center', gap: space.sm, maxWidth: 140 },
-    handle: { ...type.meta, flexShrink: 1 },
-    does: { ...type.meta, color: theme.buzz.textSecondary, marginTop: 4 },
-    dimmed: { opacity: 0.45 },
-    // Colour and face come from the shared provisional/settled prose styles
-    // (components/buzz/Ledger.tsx) — the same tones a live draft and a
-    // finished agent reply already read in, elsewhere in the app — but sized
-    // down to `type.meta` (applied after, so it wins): a step's one-line
-    // description sets the scale here, not the Room's full message size.
-    // Transient while it's still being written: italic, on top of the shared
-    // provisional tone — visibly distinct from a final reply's settled style.
-    live: { ...type.meta, marginTop: space.xs, fontStyle: 'italic' },
-    final: { ...type.meta, marginTop: space.xs },
-    gateLine: { ...type.meta, color: theme.buzz.textSecondary, marginTop: space.xs },
-    gateLink: { color: theme.buzz.accent, textDecorationLine: 'underline' },
-    duration: { ...type.machine, color: theme.buzz.ledgerGhost },
-    corners: { marginTop: space.sm },
-    cornerLink: { minHeight: 44, flexDirection: 'row', alignItems: 'center', gap: space.sm },
-    cornerName: { ...type.meta, flex: 1, minWidth: 0, color: theme.buzz.textPrimary },
-    cornerArrow: { color: theme.buzz.accent },
-  };
-});

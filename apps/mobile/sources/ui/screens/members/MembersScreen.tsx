@@ -12,7 +12,6 @@ import { InvitePeopleSheet } from '@/ui/screens/people/InvitePeopleSheet';
 import { useWorkspaceRoster } from '@/ui/screens/people/use-workspace-roster';
 import { AddChatAgentsSheet } from './AddChatAgentsSheet';
 import { useRoomView } from './use-room-view';
-import { visibilityLine } from './members-lines';
 
 /**
  * A chat's Members: exactly two sections, People and Agents, each with its own
@@ -51,11 +50,9 @@ export function MembersScreen({ roomId, close }: { roomId: string; close: () => 
     const openAgent = (row: PeopleRow) => () => openPlace({ kind: 'agent', agentId: row.id, workspaceId }, desktop);
     const canInvite = roster.surface?.viewer.permissions.manage === true;
     const canAddAgents = room?.viewer.permissions.manage === true;
-    const line = room ? visibilityLine(tag, room.room.visibility, workspaceName) : undefined;
 
     return (
         <Screen title="Members" back={close} testID="members">
-            {line ? <Copy small quiet testID="members-visibility">{line}</Copy> : null}
             {error ? <Copy small quiet role="alert">{error}</Copy> : null}
             <YStack gap="2" testID="members-people">
                 <SectionHead title={`People · ${people.length}`} addLabel="Add people" testID="add-people"

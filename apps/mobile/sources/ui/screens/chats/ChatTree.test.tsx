@@ -85,7 +85,7 @@ it('holding the row toggles its pin instead of opening it, even when both touch 
 it('uses the parent repository mark for both a chat and its thread row', () => {
   let tree!: ReactTestRenderer;
   const marked = { ...item, room: {...item.room,avatar:'https://avatars.githubusercontent.com/u/42',favicon:'https://github.githubassets.com/favicons/favicon.png'},
-    openCorners:[{id:'thread',name:'Thread',state:'idle',lifecycle:{lifecycle:'idle',checks:'unknown'}}] } as unknown as ChatListItem;
+    openCorners:[{id:'thread',name:'Thread',state:'idle',lifecycle:{lifecycle:'idle',checks:'unknown'},lastActivityAt:1_700_000_000}] } as unknown as ChatListItem;
   act(() => { tree = create(<ChatRow item={marked} now={1_700_000_000_000} first onOpen={vi.fn()} onPin={vi.fn()} onOpenThread={vi.fn()} />); });
   const marks = tree.root.findAll((node:any)=>node.type==='RepositoryMark');
   expect(marks).toHaveLength(2);

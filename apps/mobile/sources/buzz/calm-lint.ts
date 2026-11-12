@@ -54,7 +54,9 @@ export const CALM_PENDING_HEADER_UNIFY: Readonly<Record<string, string>> = {};
  */
 export const CALM_TOKEN_SOURCES: ReadonlySet<string> = new Set([
   'buzz/groknight.ts',
-  'theme.ts',
+  // The design grammar's type scale (scaled by Text size) and its app-root views.
+  'ui/grammar.tsx',
+  'ui/grammar-root.tsx',
   'buzz/calm-lint.ts',
   'buzz/design-lint.ts',
 ]);

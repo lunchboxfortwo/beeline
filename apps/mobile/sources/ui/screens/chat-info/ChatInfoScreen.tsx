@@ -4,7 +4,7 @@ import { router, type Href } from 'expo-router';
 import { Card, Input, ListItem, Separator, Switch, XStack, YStack } from 'tamagui';
 import { Check } from 'lucide-react-native';
 import { cornerShortTitle, roomTitle } from '@beeline/api-contract/phone';
-import { Btn, Copy, Glyph, HEIGHT, Row, Screen, Section, SheetFrame, SheetRow, T } from '@/ui/grammar';
+import { Btn, ChatName, Copy, Glyph, HEIGHT, PlaceHeader, Row, Screen, Section, SheetFrame, SheetRow, T } from '@/ui/grammar';
 import { closePanel, openPlace } from '@/ui/shell/panel';
 import { useIsDesktop } from '@/utils/responsive';
 import { useLatencyRouteFrame } from '@/buzz/latency-route-hook';
@@ -202,16 +202,13 @@ export function ChatInfoScreen({ roomId, close }: { roomId: string; close: () =>
     } as unknown as Href);
 
     return (
-        <Screen title="Chat info" back={close} testID="chat-info">
-            <XStack gap="3" alignItems="center">
-                {direct ? null : (
-                    <RepositoryMark avatarUrl={room?.room.avatar} faviconUrl={room?.room.favicon} size={40} />
-                )}
-                <YStack flex={1} minWidth={0} gap="1">
-                    <T v="title">{tag || name}</T>
-                    {room && !direct ? <Copy small quiet testID="chat-kind">{chatKindLine(room.room.visibility, workspaceName, room.members.length)}</Copy> : null}
-                </YStack>
-            </XStack>
+        <Screen title="Chat info" back={close} testID="chat-info" header={(
+            // The chat's own header frame, so entering chat info keeps the name in place.
+            <PlaceHeader back={close} testID="chat-info-header"
+                mark={direct ? null : <RepositoryMark avatarUrl={room?.room.avatar} faviconUrl={room?.room.favicon} size={36} />}
+                title={<ChatName name={tag || name} />}
+                meta={room && !direct ? <Copy small quiet testID="chat-kind">{chatKindLine(room.room.visibility, workspaceName, room.members.length)}</Copy> : null} />
+        )}>
             {roomError || error ? <Copy small quiet role="alert">{error ?? roomError}</Copy> : null}
 
             <Section title="Chat">

@@ -83,6 +83,7 @@ function readAgentCommand(value: unknown): NonNullable<RoomViewMessage['agentCom
     recipient: {
       id: recipient.id,
       name: recipient.name,
+      ...field('kind', oneOf(recipient.kind, ['agent', 'human'])),
       ...field('handle', typeof recipient.handle === 'string' ? recipient.handle : undefined),
     },
     ...field('status', oneOf(item.status, ['done', 'blocked', 'needs-decision', 'failed'])),
@@ -596,6 +597,7 @@ function readChatCorner(value: unknown): ChatListCorner | null {
     ...field('blocker', readCornerBlocker(item.blocker)),
     ...field('itemId', nonempty(item.itemId) ? item.itemId : undefined),
     ...field('waitingSince', integer(item.waitingSince) ? item.waitingSince : undefined),
+    ...field('lastActivityAt', integer(item.lastActivityAt) ? item.lastActivityAt : undefined),
     ...field('attention', item.attention === true ? (true as const) : undefined),
   };
 }

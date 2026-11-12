@@ -1,6 +1,6 @@
 import { resolveCornerCardAgentPubkey } from '@/buzz/agent-display';
 import { cornerShortTitle, cornerTitle, roomTitle } from '@beeline/api-contract/phone';
-import { ROOM_LABEL } from '@/buzz/vocabulary';
+import { ROOM_TITLE } from '@/buzz/vocabulary';
 import type { ChatDisplayMessage, CornerProcessState } from '@/buzz/room-view-presentation';
 
 /**
@@ -62,7 +62,7 @@ export function channelHeaderTitle(
     if (!options.directMessage && kind === 'room') return roomTitle(trimmed) ?? trimmed;
     return trimmed;
   }
-  return kind === 'room' ? ROOM_LABEL : null;
+  return kind === 'room' ? ROOM_TITLE : null;
 }
 
 /**

@@ -1,9 +1,13 @@
-import { useSafeAreaInsets } from 'react-native-safe-area-context';
-import { type MutableRefObject } from 'react';
-import { View, Text, Platform } from 'react-native';
-import { KeyboardAvoidingView } from 'react-native-keyboard-controller';
+import { type MutableRefObject, type Ref } from 'react';
+import { Platform } from 'react-native';
+import { useReanimatedKeyboardAnimation } from 'react-native-keyboard-controller';
+import { useAnimatedStyle } from 'react-native-reanimated';
+import { YStack } from 'tamagui';
+import { composerBottomPadding } from '@/buzz/composer-keyboard';
+import { SafeTop, T } from '@/ui/grammar';
+import { KeyboardBody } from '@/ui/grammar-root';
 import { router, type Href } from 'expo-router';
-import { CORNER_LABEL, ROOM_LABEL } from '@/buzz/vocabulary';
+import { CORNER_LABEL, CORNER_TITLE, ROOM_LABEL, ROOM_TITLE } from '@/buzz/vocabulary';
 import { type RoomSurfaceSessionBindings, type UseRoomSurfaceSessionResult } from './useRoomSurfaceSession';
 import { BuzzCommunityShell } from '@/components/buzz/CommunityRail';
 import { RoomActionsBackground } from '@/components/buzz/RoomRepositoryChoice';
@@ -37,7 +41,6 @@ import { useChatRepositories } from './useChatRepositories';
 import { useChatNavigation } from './useChatNavigation';
 import { useChatComposerCommands } from './useChatComposerCommands';
 import { useChatTranscriptRenderer } from './useChatTranscriptRenderer';
-import { styles } from './chat-surface-styles';
 import { ChatSurfaceErrorHeader, ChatSurfaceHeaderView as ChatSurfaceHeader } from './ChatSurfaceHeader';
 import { useChatThreadHeader } from './useChatThreadHeader';
 import { ThreadsDropdown } from '@/ui/screens/chat/ThreadsDropdown';
@@ -51,14 +54,16 @@ import { ChatSurfaceOverlays } from './ChatSurfaceOverlays';
 
 /** The existing loading surface, without mounting an empty transcript. */
 export function ChatOpeningSurface({ isCorner }: { isCorner: boolean }) {
-  const insets = useSafeAreaInsets();
   return (
-    <View style={[styles.container, styles.center, { paddingTop: insets.top }]}>
-      <SurfaceGlyphLoader testID="room-surface-loader" />
-      <Text style={styles.loadingText}>
-        LOADING {(isCorner ? CORNER_LABEL : ROOM_LABEL).toUpperCase()}
-      </Text>
-    </View>
+    <YStack flex={1} backgroundColor="canvas">
+      <SafeTop />
+      <YStack flex={1} alignItems="center" justifyContent="center">
+        <SurfaceGlyphLoader testID="room-surface-loader" />
+        <T v="metaStrong" color="secondary" marginTop="2">
+          LOADING {(isCorner ? CORNER_LABEL : ROOM_LABEL).toUpperCase()}
+        </T>
+      </YStack>
+    </YStack>
   );
 }
 
@@ -284,7 +289,7 @@ export function BuzzChatSurface({
   ]);
   const [
     bylineOpeners, answerByMessageId, visibleMessageById, immediatelyPrecedingVisibleMessageById,
-    composerAck, settledTurn, stoppingThisTurn, handleStopTurn, composerBottomInsetStyle,
+    composerAck, settledTurn, stoppingThisTurn, handleStopTurn, ,
     keyboardHeight,
   ] = useChatTurnPresentation([
     visibleMessages, pendingAck, agentTurnMarkers, setPendingAck, receivedSteer, activeAgentTurn,
@@ -292,6 +297,13 @@ export function BuzzChatSurface({
     insets, composerHeight, scrollController, decodedId, readRoom, desktopExperience,
     setDesktopDeliveryState, agentPresences, setPresenceNow, presenceNow,
   ]);
+  // The composer's foot follows the keyboard on the UI thread: the same inset
+  // as the turn presentation's padding, drawn as the height under the row.
+  const { progress: keyboardProgress } = useReanimatedKeyboardAnimation();
+  const composerBottomInset = useAnimatedStyle(
+    () => ({ height: composerBottomPadding(Platform.OS, insets.bottom, keyboardProgress.value) }),
+    [insets.bottom],
+  );
   const [
     replyTargetForMessage, beginForward, beginReply, openMessageActions, handleReactToMessage,
     handleBookmarkMessage, handleReportMessage, dismissOutboxMessage, messageIsBookmarked,
@@ -421,7 +433,7 @@ export function BuzzChatSurface({
     if (transcriptHydrationFailed) {
       return (
         <ChatSurfaceErrorHeader
-          title={displayHeaderTitle ?? routeChannelTitle ?? ROOM_LABEL}
+          title={displayHeaderTitle ?? routeChannelTitle ?? ROOM_TITLE}
           showBack={!isDesktop || isCorner}
           handleBack={handleBack}
           error={transcriptHydrationError}
@@ -437,12 +449,9 @@ export function BuzzChatSurface({
       activeCommunityId={activeCommunityId}
       onSelect={handleCommunitySelect}
       onAdd={() => router.push('/beeline/community' as Href)}
-      onSettings={() => router.push('/beeline/settings' as Href)}
-      viewerPubkey={userPubkey || undefined}
-      viewerAvatarUrl={personProfileByPubkey.get(userPubkey)?.avatar}
     >
-      <RoomActionsBackground style={styles.desktopConversationFrame} ref={conversationFrameRef}>
-        <View style={styles.container}>
+      <ConversationFrame flex={1} minWidth={0} flexDirection="row" position="relative" ref={conversationFrameRef as unknown as Ref<never>}>
+        <YStack flex={1} backgroundColor="canvas">
           {/* Header. No surface of its own — the chrome sits on the same
             obsidian as the transcript, parted only by a hairline. */}
           <ChatSurfaceHeader
@@ -489,8 +498,7 @@ export function BuzzChatSurface({
             reviewerAgentId={roomSurface?.room.reviewerAgentId}
           />
 
-          <KeyboardAvoidingView
-            style={styles.keyboardBody}
+          <KeyboardBody
             behavior={Platform.OS === 'ios' ? 'padding' : 'translate-with-padding'}
           >
             {/* A corner's title, status, PR, objective and brief are the
@@ -540,13 +548,23 @@ export function BuzzChatSurface({
 
             {/* P2: Archived channels are read-only */}
             {isArchived ? (
-              <View style={[styles.archivedInputBar, readOnlyFooterInset]}>
-                <Text
-                  style={[styles.archivedInputText, isCorner && styles.cornerArchivedInputText]}
+              <>
+                <YStack
+                  paddingHorizontal="4"
+                  paddingTop="4"
+                  paddingBottom={readOnlyFooterInset.paddingBottom === undefined ? '2' : 0}
+                  borderTopWidth={1}
+                  borderTopColor="stroke"
+                  backgroundColor="canvas"
+                  alignItems="center"
                 >
-                  {parentChannelId ? 'Corner' : ROOM_LABEL} archived (read-only)
-                </Text>
-              </View>
+                  <T v={isCorner ? 'code' : 'meta'} color="secondary">
+                    {parentChannelId ? CORNER_TITLE : ROOM_TITLE} archived (read-only)
+                  </T>
+                  {readOnlyFooterInset.paddingBottom === undefined ? null : <YStack height={readOnlyFooterInset.paddingBottom} />}
+                </YStack>
+                {readOnlyFooterInset.marginBottom === undefined ? null : <YStack height={readOnlyFooterInset.marginBottom} />}
+              </>
             ) : (
               <ChatSurfaceComposer
   desktopExperience={desktopExperience}
@@ -560,7 +578,7 @@ export function BuzzChatSurface({
   retryHydration={retryHydration}
   isReadOnlyDirectMessage={isReadOnlyDirectMessage}
   readOnlyFooterInset={readOnlyFooterInset}
-  composerBottomInsetStyle={composerBottomInsetStyle}
+  composerBottomInset={composerBottomInset}
   slashMenuVisible={slashMenuVisible}
   mentionSlashAgentPubkey={mentionSlashAgentPubkey}
   agentByPubkey={agentByPubkey}
@@ -639,9 +657,9 @@ export function BuzzChatSurface({
   setInputSelection={setInputSelection}
 />
             )}
-          </KeyboardAvoidingView>
+          </KeyboardBody>
           {reportToast}
-        </View>
+        </YStack>
 <ChatSurfaceWorkPane
   profileAgentId={profileAgentId}
   desktopExperience={desktopExperience}
@@ -660,7 +678,7 @@ export function BuzzChatSurface({
   expandDesktopCorner={expandDesktopCorner}
   closeDesktopWorkPane={closeDesktopWorkPane}
 />
-      </RoomActionsBackground>
+      </ConversationFrame>
 
 <ChatSurfaceOverlays
   attachmentPickerVisible={attachmentPickerVisible}
@@ -748,3 +766,6 @@ export function BuzzChatSurface({
     </BuzzCommunityShell>
   );
 }
+
+/** The frosted-behind frame of the conversation and its desktop work pane, laid out across. */
+const ConversationFrame = RoomActionsBackground;

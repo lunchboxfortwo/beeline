@@ -6,8 +6,19 @@ import { ANDROID_GOOGLE_RECOGNITION_SERVICE, SPEECH_FINALIZATION_TIMEOUT_MS, SPE
 import { getRecognitionModule } from './speech-recognition-adapter';
 import { startDictationUpload } from './speech-transcription';
 import { dictationWaveformLevel } from './waveform-level';
+import { getDeviceSpeechLocale } from './speech-locale';
 
 describe('useSpeechInput', () => {
+  it('leaves speech locale discovery off Room opening until dictation starts', async () => {
+    vi.mocked(getDeviceSpeechLocale).mockClear();
+    const { renderer, speech } = renderHook();
+    expect(getDeviceSpeechLocale).not.toHaveBeenCalled();
+    await act(async () => { await speech().start(); });
+    expect(getDeviceSpeechLocale).toHaveBeenCalledOnce();
+    expect(mockMod.start).toHaveBeenCalledWith(expect.objectContaining({ lang: 'en-GB' }));
+    act(() => renderer.unmount());
+  });
+
   it('start -> interim -> final -> stop commits finals immediately', async () => {
     vi.useFakeTimers();
     const { renderer, onResult, speech, probe } = renderHook();

@@ -1,3 +1,6 @@
+vi.mock('tamagui', async () => (await import('@/ui/screens/transcript/grammar-hosts.test-support')).tamaguiHosts());
+vi.mock('lucide-react-native', async () => (await import('@/ui/screens/transcript/grammar-hosts.test-support')).lucideHosts());
+vi.mock('@/sync/storage', () => ({ useLocalSetting: () => 'medium' }));
 vi.mock('@/utils/responsive', () => ({ useIsDesktop: () => false }));
 import React from 'react';
 // @ts-expect-error react-test-renderer has no declarations in this workspace.
@@ -13,7 +16,7 @@ vi.mock('@/buzz/latency-route-hook',()=>({useLatencyRouteFrame:()=>undefined}));
 vi.mock('@/auth/github-auth-session',()=>({clearPendingGitHubInstallation:mocks.clear,githubInstallationReturnPath:mocks.path,completeGitHubInstallationRoute:mocks.complete}));
 vi.mock('@/sync/transport/monolith-operation',()=>({monolithPhoneOperation:mocks.operation}));
 vi.mock('react-native',()=>({Platform:{OS:'web'},View:(props:any)=>React.createElement('View',props,props.children),Text:(props:any)=>React.createElement('Text',props,props.children)}));
-vi.mock('react-native-unistyles',()=>({StyleSheet:{create:()=>({page:{},copy:{}})}}));
+vi.mock('react-native-safe-area-context', () => ({ useSafeAreaInsets: () => ({ top: 0, bottom: 0, left: 0, right: 0 }) }));
 vi.mock('@/components/buzz/SettingsRow',()=>({SettingsRow:(props:any)=>React.createElement('SettingsRow',props)}));
 vi.mock('@/components/buzz/Button',()=>({Button:(props:any)=>React.createElement('Button',props)}));
 vi.mock('@/components/buzz/PageHeader',()=>({PageHeader:(props:any)=>React.createElement('PageHeader',props)}));
@@ -42,7 +45,7 @@ it('GH-WEB-1: failed refresh offers the primary Room recovery action',async()=>{
   expect(renderer.root.findByType('PageHeader').props.title).toBe('GitHub needs another try');
   expect(mocks.browserComplete).not.toHaveBeenCalled();
   const button = renderer.root.findByType('SettingsRow');
-  expect(button.props.action).toBe('Back to Room');
+  expect(button.props.action).toBe('Back to chat');
   expect(mocks.clear).not.toHaveBeenCalled();
   await act(async()=>{button.props.onPress();});
   expect(mocks.operation).toHaveBeenCalledTimes(1);

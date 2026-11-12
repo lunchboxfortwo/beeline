@@ -265,17 +265,17 @@ export async function stopCommandedTurn(
 }
 
 /**
- * One collapsed record card per order or report in a corner transcript. The
- * line names only sender, receiver and status; the full text stays in the
- * card for people to expand. It has no event kind, so it wakes nobody, and
- * its card type keeps it out of pushes and unread counts.
+ * One record card per order or report in a corner transcript. Recipient kind
+ * lets clients show person-facing text immediately and collapse agent traffic.
+ * It has no event kind, so it wakes nobody, and its card type keeps it out of
+ * pushes and unread counts.
  */
 async function recordAgentCommandCard(db: SqlDatabase, input: {
   id: string; cornerId: string; kind: 'order' | 'report'; authorId: string; recipientId: string;
   text: string; status?: string; attachments?: PrivateCommandPayload['attachments'];
 }) {
-  const recipient = (await db.query<{ name: string; handle: string | null }>(
-    'SELECT name,beeline_room_handle(id,$2) handle FROM identities WHERE id=$1', [input.recipientId,input.cornerId])).rows[0];
+  const recipient = (await db.query<{ name: string; handle: string | null; kind: 'agent' | 'human' }>(
+    'SELECT name,kind,beeline_room_handle(id,$2) handle FROM identities WHERE id=$1', [input.recipientId,input.cornerId])).rows[0];
   const card = await systemLine(db, {
     id: createHash('sha256').update(`agent-command-card:${input.id}`).digest('hex'),
     roomId: input.cornerId,
@@ -288,7 +288,7 @@ async function recordAgentCommandCard(db: SqlDatabase, input: {
     cardType: AGENT_COMMAND_CARD_TYPE,
     card: {
       kind: input.kind,
-      recipient: { id: input.recipientId, name: recipient?.name ?? '', ...(recipient?.handle ? { handle: recipient.handle } : {}) },
+      recipient: { id: input.recipientId, name: recipient?.name ?? '', ...(recipient ? { kind: recipient.kind } : {}), ...(recipient?.handle ? { handle: recipient.handle } : {}) },
       ...(input.status ? { status: input.status } : {}),
       text: input.text,
     },

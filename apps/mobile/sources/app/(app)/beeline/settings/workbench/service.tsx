@@ -30,8 +30,8 @@ export function aiClientDay(seconds: number, now = new Date()): string {
 const aiClientDates = (client: AiClientConnection) =>
   `Connected ${aiClientDay(client.connectedAt)} · last used ${client.lastUsedAt ? aiClientDay(client.lastUsedAt) : 'not yet'}.`;
 const aiClientNote = (client: AiClientConnection) => client.agent
-  ? `${client.agent.name} uses ${client.name} to read your Rooms and post. It posts as ${client.agent.name}, not as you.`
-  : `${client.name} reads your Rooms and posts as its own agent, not as you.`;
+  ? `${client.agent.name} uses ${client.name} to read your chats and post. It posts as ${client.agent.name}, not as you.`
+  : `${client.name} reads your chats and posts as its own agent, not as you.`;
 /** Signed in means a settled Google session; anything else needs sign-in (mock v3). */
 const signedIn = (m: Machine) => m.status === 'connected' && !m.reconnecting && !m.error;
 const signedInLine = (m: Machine) => m.signedInAs ? `Signed in as ${m.signedInAs}` : 'Signed in';
@@ -154,7 +154,7 @@ export default function ConnectorServiceScreen() {
           </Section> : null}
           {aiClient ? <YStack gap="2">
             <Section title="What it can do">
-              {aiClient.scopes.includes('rooms:read') ? <ConnectorRow title="Read messages in your Rooms" last={!aiClient.scopes.includes('rooms:write')} testID="ai-client-can-read" /> : null}
+              {aiClient.scopes.includes('rooms:read') ? <ConnectorRow title="Read messages in your chats" last={!aiClient.scopes.includes('rooms:write')} testID="ai-client-can-read" /> : null}
               {aiClient.scopes.includes('rooms:write') ? <ConnectorRow title={`Post and reply as ${agent?.name ?? 'its agent'}`} last testID="ai-client-can-post" /> : null}
             </Section>
             <ConnectorNote testID="ai-client-dates">{aiClientDates(aiClient)}</ConnectorNote>

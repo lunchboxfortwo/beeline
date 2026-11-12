@@ -1,14 +1,14 @@
 import React from 'react';
-import { BackHandler, Linking, Platform, ScrollView, Text, View } from 'react-native';
+import { BackHandler, Linking, Platform } from 'react-native';
 import * as Application from 'expo-application';
-import { StyleSheet } from 'react-native-unistyles';
-import { SafeAreaView } from 'react-native-safe-area-context';
+import { YStack } from 'tamagui';
 import type { MobileMinimum, StorePlatform } from '@beeline/api-contract/mobile-minimum';
 import { fetchStoreUpdate, hourlyStoreUpdateCheck, STORE_LISTINGS } from '@/buzz/store-update';
 import { subscribeUpdateConnections } from '@/buzz/update-connections';
 import { getBuzzRuntimeConfig } from '@/buzz/runtime-config';
 import { Button } from '@/components/buzz/Button';
 import { BeelineGlyphPaint } from '@/components/buzz/BeelineGlyphPaint';
+import { GrowScroll, SafeBottom, SafeTop, T } from '@/ui/grammar';
 
 const checkStoreUpdate = hourlyStoreUpdateCheck(() =>
   fetchStoreUpdate(getBuzzRuntimeConfig().monolithUrl, Platform.OS, Application.nativeApplicationVersion));
@@ -17,24 +17,28 @@ export function StoreUpdateScreen({ minimum, installed, platform }: {
   minimum: MobileMinimum; installed: string; platform: StorePlatform;
 }) {
   return (
-    <SafeAreaView style={styles.screen} testID="store-update-required">
-      <ScrollView contentContainerStyle={styles.content}>
-        <View style={styles.column}>
-          <View style={styles.mark}>
-            <BeelineGlyphPaint size={44} framing="cell" loop="once" live={false} />
-          </View>
-        <View style={styles.copy}>
-          <Text accessibilityRole="header" style={styles.title}>Update Beeline to keep going</Text>
-          <Text style={styles.reason}>{minimum.reason}</Text>
-          <Text style={styles.versions}>{installed} → {minimum.minVersion}</Text>
-          <Button fullWidth destination="external" label={platform === 'android' ? 'Update on Google Play' : 'Update on the App Store'}
-            style={styles.buttonSpacing}
-            appearance={{ control: ({ pressed }) => [styles.button, pressed && styles.pressed], label: styles.buttonLabel }}
-            onPress={() => { void Linking.openURL(STORE_LISTINGS[platform]).catch(() => {}); }} />
-        </View>
-        </View>
-      </ScrollView>
-    </SafeAreaView>
+    <YStack flex={1} backgroundColor="canvas" testID="store-update-required">
+      <SafeTop />
+      <GrowScroll flex={1}>
+        <YStack flexGrow={1} padding="6">
+          <YStack flexGrow={1} width="100%" maxWidth={400} alignSelf="center">
+            <YStack paddingTop="6" paddingBottom="8">
+              <BeelineGlyphPaint size={44} framing="cell" loop="once" live={false} />
+            </YStack>
+            <YStack flexGrow={1} />
+            <YStack gap="2">
+              <T v="title" accessibilityRole="header">Update Beeline to keep going</T>
+              <T v="body" color="secondary">{minimum.reason}</T>
+              <T v="code" color="secondary" marginTop="2">{installed} → {minimum.minVersion}</T>
+              <Button fullWidth destination="external" label={platform === 'android' ? 'Update on Google Play' : 'Update on the App Store'}
+                marginTop="4"
+                onPress={() => { void Linking.openURL(STORE_LISTINGS[platform]).catch(() => {}); }} />
+            </YStack>
+          </YStack>
+        </YStack>
+      </GrowScroll>
+      <SafeBottom />
+    </YStack>
   );
 }
 
@@ -68,19 +72,3 @@ export function StoreUpdateGate({ children, fontsReady = true, active = true }: 
     ? <StoreUpdateScreen minimum={minimum} installed={Application.nativeApplicationVersion!} platform={Platform.OS} />
     : <>{children}</>;
 }
-
-const styles = StyleSheet.create(({ buzz }) => ({
-  screen: { flex: 1, backgroundColor: buzz.bgBase },
-  content: { flexGrow: 1, padding: buzz.space.lg },
-  column: { flexGrow: 1, width: '100%', maxWidth: 400, alignSelf: 'center' },
-  mark: { marginBottom: 'auto', paddingTop: buzz.space.lg, paddingBottom: buzz.space.xxl },
-  copy: { gap: buzz.space.sm },
-  title: { ...buzz.type.hero, color: buzz.textPrimary },
-  reason: { ...buzz.type.body, color: buzz.textSecondary },
-  versions: { ...buzz.type.machine, color: buzz.textMuted, marginTop: buzz.space.sm },
-  buttonSpacing: { marginTop: buzz.space.md },
-  button: { minHeight: 44, paddingHorizontal: buzz.space.md, paddingVertical: buzz.space.sm,
-    alignItems: 'center', justifyContent: 'center', borderRadius: buzz.radius, backgroundColor: buzz.accent },
-  buttonLabel: { ...buzz.type.bodyStrong, color: buzz.bgBase },
-  pressed: { opacity: 0.85 },
-}));

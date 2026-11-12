@@ -111,7 +111,7 @@ export function BriefScreen({ roomId, close }: { roomId: string; close: () => vo
         <Screen title={brief ? `Brief · revision ${brief.revision}` : 'Brief'} back={close} testID="brief">
             {brief ? <BriefBody brief={brief} />
                 : error ? <Copy quiet>{error}</Copy>
-                    : view ? <Copy quiet>This corner has no brief yet</Copy>
+                    : view ? <Copy quiet>This thread has no brief yet</Copy>
                         : <Spinner size="small" color="secondary" />}
         </Screen>
     );

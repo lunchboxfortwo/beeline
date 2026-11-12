@@ -1,8 +1,8 @@
 import { Button } from '@/components/buzz/Button';
 import { voiceCallHumanNames } from '@/buzz/voice-call-members';
 import * as React from 'react';
-import { Pressable, Text, View } from 'react-native';
-import { StyleSheet } from 'react-native-unistyles';
+import { XStack, YStack } from 'tamagui';
+import { HEIGHT, T } from '@/ui/grammar';
 import { type VoiceCall, voiceDuration } from '@beeline/api-contract/phone';
 
 /** The running call occupies its own row below the Room header. */
@@ -17,11 +17,12 @@ export function VoiceCallCard({ call, joined, onJoin, connecting = false, viewer
   }, [call.endedAt]);
   if (call.endedAt) return null;
   return (
-    <View style={styles.row} testID="voice-call-header">
-    <View style={styles.pill}>
-      <View style={styles.dot} />
-      <Text style={styles.title} numberOfLines={1}>Call · {voiceDuration(now - call.startedAt)} · {voiceCallHumanNames(call, viewer)}</Text>
-      {!joined && (
+    <YStack paddingHorizontal="4" paddingVertical="2" testID="voice-call-header">
+      <XStack minHeight={HEIGHT.control} alignItems="center" paddingHorizontal="4" gap="2"
+        borderWidth={1} borderRadius="md" borderColor="stroke" backgroundColor="raised">
+        <YStack width={8} height={8} borderRadius="full" backgroundColor="needsYou" />
+        <T v="meta" color="ink" flex={1} numberOfLines={1}>Call · {voiceDuration(now - call.startedAt)} · {voiceCallHumanNames(call, viewer)}</T>
+        {!joined && (
           <Button
             onPress={onJoin}
             disabled={connecting}
@@ -35,15 +36,7 @@ export function VoiceCallCard({ call, joined, onJoin, connecting = false, viewer
             loading={connecting}
           />
         )}
-    </View>
-  </View>
+      </XStack>
+    </YStack>
   );
 }
-const styles = StyleSheet.create((theme) => ({
-  row: { paddingHorizontal: 16, paddingVertical: 8 },
-  pill: { minHeight: 44, flexDirection: 'row', alignItems: 'center', paddingHorizontal: 16, gap: 8,
-    borderWidth: 1, borderRadius: 10, borderColor: theme.buzz.border, backgroundColor: theme.buzz.bgRaised },
-  dot: { width: 8, height: 8, borderRadius: 999, backgroundColor: theme.buzz.accent },
-  title: { ...theme.buzz.type.meta, color: theme.buzz.textPrimary, flex: 1 },
-
-}));

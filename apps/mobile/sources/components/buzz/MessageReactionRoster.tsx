@@ -1,11 +1,9 @@
 import { MemberRosterRow } from './MemberRosterRow';
 import React, { useRef, useState } from 'react';
-import { Pressable, ScrollView, Text, View } from 'react-native';
-import { StyleSheet } from 'react-native-unistyles';
+import { ScrollView, XStack, YStack } from 'tamagui';
 import type { MessageReactionView, RoomViewIdentity } from '@beeline/buzz-client';
-import { emojiTextStyle } from '@/buzz/emoji-text';
-import { IdentityMark } from './IdentityMark';
-import { HULL_SHEET_INSET, HullActionSheetCancel, HullActionSheetModal } from './HullActionSheet';
+import { EmojiGlyph, T } from '@/ui/grammar';
+import { HullActionSheetCancel, HullActionSheetModal } from './HullActionSheet';
 import { HullFloatingSurface } from './HullDialog';
 
 function rosterSubtitle(identity: RoomViewIdentity): string {
@@ -24,7 +22,7 @@ function ReactionMembers({
   sheet?: boolean;
 }) {
   return (
-    <View style={styles.memberList}>
+    <YStack width="100%">
       {members.map((member) => (
         <MemberRosterRow
           key={member.pubkey}
@@ -41,7 +39,7 @@ function ReactionMembers({
           testID={`reaction-member-${messageId}-${member.pubkey}`}
         />
       ))}
-    </View>
+    </YStack>
   );
 }
 
@@ -71,8 +69,8 @@ export function MessageReactionRoster({
   const desktopRosterVisible = desktop && rosterAvailable && (hovered || focused);
 
   return (
-    <View
-      style={styles.anchor}
+    <YStack
+      position="relative"
       {...(desktop
         ? ({
             onMouseEnter: () => setHovered(true),
@@ -81,7 +79,7 @@ export function MessageReactionRoster({
         : {})}
       testID={`reaction-roster-anchor-${messageId}-${reaction.emoji}`}
     >
-      <Pressable
+      <XStack
         accessibilityHint={
           rosterAvailable
             ? desktop
@@ -107,20 +105,33 @@ export function MessageReactionRoster({
           if (Date.now() < suppressPressUntil.current) return;
           onReact();
         }}
-        style={[styles.chip, reaction.reacted && styles.chipMine]}
+        alignItems="center"
+        gap="1"
+        height={28}
+        paddingHorizontal="2"
+        borderWidth={1}
+        borderColor={reaction.reacted ? 'needsYou' : 'stroke'}
+        borderRadius="sm"
+        backgroundColor={reaction.reacted ? 'highlight' : 'canvas'}
         testID={`reaction-chip-${messageId}-${reaction.emoji}`}
       >
-        <Text style={styles.emoji}>{reaction.emoji}</Text>
-        <Text style={styles.count}>{reaction.count}</Text>
-      </Pressable>
+        <EmojiGlyph v="body">{reaction.emoji}</EmojiGlyph>
+        <T v="meta" color="secondary">{reaction.count}</T>
+      </XStack>
 
       {desktopRosterVisible ? (
         <HullFloatingSurface
           accessibilityLabel={`${reactionLabel}. Reacted by ${reactors.map((member) => member.name).join(', ')}`}
-          style={styles.popover}
+          position="absolute"
+          bottom={34}
+          left={0}
+          zIndex={12}
+          width={232}
+          paddingVertical="2"
+          paddingHorizontal="4"
           testID={`reaction-popover-${messageId}-${reaction.emoji}`}
         >
-          <Text style={styles.popoverTitle}>Reacted with {reaction.emoji}</Text>
+          <T v="meta" color="secondary" marginBottom="1">Reacted with {reaction.emoji}</T>
           <ReactionMembers members={reactors} messageId={messageId} />
         </HullFloatingSurface>
       ) : null}
@@ -134,7 +145,7 @@ export function MessageReactionRoster({
           title={`Reacted with ${reaction.emoji}`}
           visible={sheetVisible}
         >
-          <ScrollView style={styles.sheetList}>
+          <ScrollView maxHeight={360}>
             <ReactionMembers members={reactors} messageId={messageId} sheet />
           </ScrollView>
           <HullActionSheetCancel
@@ -143,46 +154,6 @@ export function MessageReactionRoster({
           />
         </HullActionSheetModal>
       ) : null}
-    </View>
+    </YStack>
   );
 }
-
-const styles = StyleSheet.create((theme) => {
-  const hull = theme.buzz;
-  return {
-    anchor: { position: 'relative' },
-    chip: {
-      flexDirection: 'row',
-      alignItems: 'center',
-      gap: hull.space.xs,
-      minHeight: 28,
-      paddingHorizontal: hull.space.sm,
-      borderWidth: 1,
-      borderColor: hull.border,
-      borderRadius: hull.radius,
-      backgroundColor: hull.bgBase,
-    },
-    chipMine: {
-      borderColor: hull.accent,
-      backgroundColor: hull.bgHighlight,
-    },
-    emoji: emojiTextStyle(hull.type.body),
-    count: { ...hull.type.meta, color: hull.textSecondary },
-    popover: {
-      position: 'absolute',
-      bottom: 34,
-      left: 0,
-      zIndex: 12,
-      width: 232,
-      paddingVertical: hull.space.sm,
-      paddingHorizontal: hull.space.md,
-    },
-    popoverTitle: {
-      ...hull.type.meta,
-      color: hull.ledgerQuiet,
-      marginBottom: hull.space.xs,
-    },
-    sheetList: { maxHeight: 360 },
-    memberList: { width: '100%' },
-  };
-});

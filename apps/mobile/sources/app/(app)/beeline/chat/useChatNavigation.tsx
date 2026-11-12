@@ -82,7 +82,7 @@ export function useChatNavigation([
       handleBack();
     } catch (error) {
       readRoom();
-      Modal.alert('Could not close corner', appErrorCopy(error));
+      Modal.alert('Could not close thread', appErrorCopy(error));
     } finally {
       closeCornerPending.current = false;
     }
@@ -102,7 +102,7 @@ export function useChatNavigation([
     (subchannelId: string | undefined) => {
       const action = cornerOpenAction(subchannelId, decodedId);
       if (action.type === 'explain') {
-        Modal.alert('Corner unavailable', action.message);
+        Modal.alert('Thread unavailable', action.message);
         return;
       }
       if (desktopExperience) openDesktopCorner(decodedId, action.cornerId);

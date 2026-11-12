@@ -4,7 +4,7 @@ import type { View } from 'react-native';
 import { ListItem, XStack, YStack } from 'tamagui';
 import { ArrowLeft, MoreHorizontal, Settings } from 'lucide-react-native';
 import { IdentityMark } from '@/components/buzz/IdentityMark';
-import { Btn, Glyph, SafeTop, T } from '@/ui/grammar';
+import { Btn, ChatMark, ChatName, Glyph, PlaceHeader, SafeTop, T } from '@/ui/grammar';
 import { ThreadBar, type ThreadHeaderData } from '@/ui/screens/thread/ThreadHeader';
 
 export type DirectMessagePeerMark = {
@@ -42,10 +42,7 @@ type Props = {
   onThreadBarLayout?: () => void;
 };
 
-/** A repository's owner picture or favicon, otherwise the shared chat glyph tile. */
-export function ChatMark({ size = 36, avatarUrl, faviconUrl }: { size?: 36 | 28; avatarUrl?: string; faviconUrl?: string }) {
-  return <RepositoryMark size={size} avatarUrl={avatarUrl} faviconUrl={faviconUrl} />;
-}
+export { ChatMark };
 
 function TitleSkeleton() {
   return <YStack width={120} height={24} borderRadius="sm" backgroundColor="highlight" aria-label="Loading name" testID="chat-title-skeleton" />;
@@ -60,7 +57,7 @@ export function ChatSurfaceErrorHeader({ title, showBack, handleBack, error }: {
       <SafeTop />
       <XStack paddingHorizontal="3" paddingTop="3" paddingBottom="2" gap="2" alignItems="center">
         {showBack ? <Btn kind="icon" label="Back" onPress={handleBack} testID="chat-back"><Glyph icon={ArrowLeft} /></Btn> : null}
-        <T v="title" numberOfLines={1} flex={1}>{title}</T>
+        <T v="title" flex={1}>{title}</T>
       </XStack>
       {error ? <YStack paddingHorizontal="4" paddingVertical="3"><T v="body" color="secondary" testID="room-read-error">{error}</T></YStack> : null}
     </YStack>
@@ -101,47 +98,45 @@ export const ChatSurfaceHeaderView = React.memo(function ChatSurfaceHeaderView({
         expand={expandThread} openActions={openCornerActions} barRef={threadBarRef} onBarLayout={onThreadBarLayout} />
     );
   }
+  const name = title === null ? <TitleSkeleton /> : isDirectMessage ? (
+    <T v="title" testID="chat-title">{title}</T>
+  ) : (
+    <ListItem padding="0" minHeight={0} justifyContent="flex-start" backgroundColor="transparent"
+      onPress={openChatInfo} aria-label={`Chat info: ${title}`} accessibilityRole="button" testID="chat-title-link">
+      <ChatName name={title} testID="chat-title" />
+    </ListItem>
+  );
+  const meta = isDirectMessage ? (
+    dmHeaderPresence ? <T v="meta" color="secondary" numberOfLines={1} testID="room-header-meta">{dmHeaderPresence}</T> : null
+  ) : (
+    <ListItem padding="0" paddingVertical="1" minHeight={0} alignSelf="flex-start" width="auto" justifyContent="flex-start"
+      backgroundColor="transparent" onPress={openMembers}
+      aria-label={`${memberCount} members: open Members`} accessibilityRole="button" testID="chat-members-link">
+      <T v="meta" color="secondary">{memberCount === 1 ? '1 member' : `${memberCount} members`}</T>
+    </ListItem>
+  );
+  const right = isDirectMessage ? (
+    openDmActions ? (
+      <Btn kind="icon" label="Conversation actions" onPress={openDmActions} testID="dm-actions-menu">
+        <Glyph icon={MoreHorizontal} />
+      </Btn>
+    ) : null
+  ) : (
+    <Btn kind="icon" label="Chat settings" onPress={openChatInfo} testID="chat-settings">
+      <Glyph icon={Settings} />
+    </Btn>
+  );
   return (
-    <YStack backgroundColor="canvas">
-      <SafeTop />
-      <XStack paddingHorizontal="3" paddingTop="3" paddingBottom="2" gap="2" alignItems="center" testID="chat-header">
-        {showBack ? <Btn kind="icon" label="Back" onPress={handleBack} testID="chat-back"><Glyph icon={ArrowLeft} /></Btn> : null}
-        <XStack flex={1} minWidth={0} gap="3" alignItems="center">
-          {isDirectMessage
-            ? dmPeer ? <IdentityMark kind={dmPeer.kind} seed={dmPeer.seed} avatarUrl={dmPeer.avatarUrl} face={dmPeer.face} name={title ?? ''} size={36} /> : null
-            : <ChatMark avatarUrl={repositoryAvatar} faviconUrl={repositoryFavicon} />}
-          <YStack flex={1} minWidth={0}>
-            {title === null ? <TitleSkeleton /> : isDirectMessage ? (
-              <T v="title" numberOfLines={1} testID="chat-title">{title}</T>
-            ) : (
-              <ListItem padding="0" minHeight={0} justifyContent="flex-start" backgroundColor="transparent"
-                onPress={openChatInfo} aria-label={`Chat info: ${title}`} accessibilityRole="button" testID="chat-title-link">
-                <T v="title" numberOfLines={1} testID="chat-title">{title}</T>
-              </ListItem>
-            )}
-            {isDirectMessage ? (
-              dmHeaderPresence ? <T v="meta" color="secondary" numberOfLines={1} testID="room-header-meta">{dmHeaderPresence}</T> : null
-            ) : (
-              <ListItem padding="0" paddingVertical="1" minHeight={0} alignSelf="flex-start" width="auto" justifyContent="flex-start"
-                backgroundColor="transparent" onPress={openMembers}
-                aria-label={`${memberCount} members: open Members`} accessibilityRole="button" testID="chat-members-link">
-                <T v="meta" color="secondary">{memberCount === 1 ? '1 member' : `${memberCount} members`}</T>
-              </ListItem>
-            )}
-          </YStack>
-        </XStack>
-        {isDirectMessage ? (
-          openDmActions ? (
-            <Btn kind="icon" label="Conversation actions" onPress={openDmActions} testID="dm-actions-menu">
-              <Glyph icon={MoreHorizontal} />
-            </Btn>
-          ) : null
-        ) : (
-          <Btn kind="icon" label="Chat settings" onPress={openChatInfo} testID="chat-settings">
-            <Glyph icon={Settings} />
-          </Btn>
-        )}
-      </XStack>
-    </YStack>
+    <PlaceHeader
+      testID="chat-header"
+      back={showBack ? handleBack : undefined}
+      backTestID="chat-back"
+      mark={isDirectMessage
+        ? dmPeer ? <IdentityMark kind={dmPeer.kind} seed={dmPeer.seed} avatarUrl={dmPeer.avatarUrl} face={dmPeer.face} name={title ?? ''} size={36} /> : null
+        : <RepositoryMark avatarUrl={repositoryAvatar} faviconUrl={repositoryFavicon} size={36} />}
+      title={name}
+      meta={meta}
+      right={right}
+    />
   );
 });

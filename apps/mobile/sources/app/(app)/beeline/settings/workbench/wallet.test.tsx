@@ -63,32 +63,6 @@ vi.mock('expo-router', () => ({
   useLocalSearchParams: () => ({ workspaceId: route.workspaceId }),
 }));
 
-vi.mock('react-native-unistyles', () => {
-  const hull = {
-    textPrimary: '#fff',
-    textSecondary: '#aaa',
-    textMuted: '#888',
-    accent: '#d7af5f',
-    border: '#333',
-    agentAccent: '#d7af5f',
-    space: { xs: 4, sm: 8, md: 16, lg: 24, xl: 32, xxl: 48 },
-    roomList: { edge: 20 },
-    radius: 3,
-    type: { hero: {}, body: {}, meta: {}, sectionHead: {}, sectionLabel: { fontSize: 13, lineHeight: 19, letterSpacing: 2 }, sectionCount: { fontSize: 15, lineHeight: 22 }, machine: {} },
-    layout: { sectionGap: 16, row: 56 },
-  };
-  return {
-    StyleSheet: {
-      create: (styles: unknown) =>
-        typeof styles === 'function'
-          ? (styles as (theme: { buzz: typeof hull }) => unknown)({ buzz: hull })
-          : styles,
-      hairlineWidth: 1,
-    },
-    useUnistyles: () => ({ theme: { buzz: hull } }),
-  };
-});
-
 vi.mock('tamagui', async () => (await import('@/ui/screens/transcript/grammar-hosts.test-support')).tamaguiHosts());
 vi.mock('lucide-react-native', async () => (await import('@/ui/screens/transcript/grammar-hosts.test-support')).lucideHosts());
 vi.mock('react-native', async () => {

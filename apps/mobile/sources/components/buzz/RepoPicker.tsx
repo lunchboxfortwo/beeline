@@ -1,15 +1,15 @@
 import { RepositoryMark } from './RepositoryMark';
 import { EmptyState } from './EmptyState';
 import { ErrorBanner } from './ErrorBanner';
-import { InlineRow } from './IndexRow';
 import { HullActionSheetRow } from './HullActionSheet';
 import { HullDialogActions } from '@/components/buzz/HullDialog';
 import { RoomListSectionHeader } from './RoomListSectionHeader';
 import { HullDialogInput } from '@/components/buzz/HullDialog';
 import { useTextDraft } from '@/buzz/use-text-draft';
 import React, { memo, useMemo, useState } from 'react';
-import { SectionList, Text, View } from 'react-native';
-import { StyleSheet, useUnistyles } from 'react-native-unistyles';
+import { SectionList } from 'react-native';
+import { XStack, YStack } from 'tamagui';
+import { T } from '@/ui/grammar';
 import type { GitHubInstallationAccess } from '@beeline/buzz-client';
 import type { GitHubRepositoryLinkagePlan, RepoCandidate } from '@/buzz/room-repo-picker';
 import {
@@ -22,7 +22,6 @@ import {
   repoShortName,
 } from '@/buzz/room-repo-picker';
 import { OwnerGrantNeededCard, type OwnerGrantNeeded } from './OwnerGrantNeededCard';
-import { Typography } from '@/constants/Typography';
 
 export type RepoPickerProps = {
   candidates: RepoCandidate[];
@@ -40,7 +39,6 @@ export type RepoPickerProps = {
   ownerGrant?: OwnerGrantNeeded | null;
   onSelect: (candidate: RepoCandidate) => void;
   onSelectNoRepository?: () => void;
-  noRepositoryInset?: number;
   onAddAccount?: (owner?: string) => void;
   onManageInstallation?: (installation: GitHubInstallationAccess) => void;
   onCreateRepository?: (installationId: number, name: string) => Promise<void> | void;
@@ -83,7 +81,6 @@ export const RepoPicker = memo(function RepoPicker({
   ownerGrant,
   onSelect,
   onSelectNoRepository,
-  noRepositoryInset = 0,
   onAddAccount,
   onManageInstallation,
   onCreateRepository,
@@ -95,8 +92,6 @@ export const RepoPicker = memo(function RepoPicker({
   testIDPrefix = 'repo-picker',
   draftContext = 'global',
 }: RepoPickerProps) {
-  const { theme } = useUnistyles();
-  const groknight = theme.buzz;
   const [query, setQuery] = useTextDraft(`repo-search:${draftContext}:${testIDPrefix}`, '');
   const [creating, setCreating] = useState(false);
   const [createInstallationId, setCreateInstallationId] = useState<number | null>(null);
@@ -166,50 +161,57 @@ export const RepoPicker = memo(function RepoPicker({
   );
 
   return (
-    <View
-      style={[styles.container, fillAvailableHeight && styles.containerFill]}
-      testID={testIDPrefix}
-    >
+    <YStack flexShrink={1} minHeight={0} flex={fillAvailableHeight ? 1 : undefined} testID={testIDPrefix}>
       <HullDialogInput
         accessibilityLabel="Search repositories or paste a GitHub URL"
         autoCapitalize="none"
         autoCorrect={false}
-        editable={!busy}
+        readOnly={busy}
         onChangeText={(value) => {
           setQuery(value);
           setPendingLinkage(null);
         }}
         placeholder="Search or paste owner/repo"
-        placeholderTextColor={groknight.dim}
+        placeholderTextColor="secondary"
         variant="sheetSearch"
         value={query}
       />
       {onSelectNoRepository && (
-        <View style={{ marginHorizontal: -noRepositoryInset }}>
-          <HullActionSheetRow
-            label="No repository"
-            selected={!currentKey}
-            onPress={onSelectNoRepository}
-            testID={`${testIDPrefix}-no-repository`}
-          />
-        </View>
+        <HullActionSheetRow
+          label="No repository"
+          selected={!currentKey}
+          onPress={onSelectNoRepository}
+          testID={`${testIDPrefix}-no-repository`}
+        />
       )}
       {ownerGrant && <OwnerGrantNeededCard {...ownerGrant} />}
+      {/* Height-bounded so a 100+ repo account scrolls instead of rendering past
+          the fold; six sheet rows, see REPO_CANDIDATE_LIST_MAX_HEIGHT. */}
+      <YStack
+        flexGrow={0}
+        flex={fillAvailableHeight ? 1 : undefined}
+        flexShrink={fillAvailableHeight ? 1 : undefined}
+        minHeight={0}
+        maxHeight={REPO_CANDIDATE_LIST_MAX_HEIGHT}
+      >
       <SectionList
         keyboardShouldPersistTaps="handled"
         ListEmptyComponent={
           showLoadingPlaceholders ? (
-            <View accessibilityLabel="Loading repositories" testID={`${testIDPrefix}-loading`}>
+            <YStack accessibilityLabel="Loading repositories" testID={`${testIDPrefix}-loading`}>
               {Array.from({ length: REPO_CANDIDATE_VISIBLE_ROWS }, (_, index) => (
-                <InlineRow
+                <XStack
                   key={index}
-                  style={styles.placeholderRow}
+                  minHeight={52}
+                  alignItems="center"
+                  borderBottomWidth={1}
+                  borderBottomColor="stroke"
                   testID={`${testIDPrefix}-placeholder-${index}`}
                 >
-                  <View style={styles.placeholderBar} />
-                </InlineRow>
+                  <YStack height={1} width="42%" backgroundColor="stroke" />
+                </XStack>
               ))}
-            </View>
+            </YStack>
           ) : !error && !pastedFullName ? (
             <EmptyState title="No repositories match." />
           ) : null
@@ -218,30 +220,32 @@ export const RepoPicker = memo(function RepoPicker({
         renderItem={({ item, section }) => candidateRow(item, section.owner)}
         renderSectionHeader={({ section }) =>
           section.owner ? (
-            <InlineRow
-              style={styles.groupHeader}
+            // This SectionList sticks the whole row, including the trailing count.
+            <XStack
+              backgroundColor="highlight"
+              alignItems="center"
+              justifyContent="space-between"
+              gap="2"
+              paddingTop="4"
+              paddingBottom="1"
               testID={`${testIDPrefix}-group-${section.owner.toLowerCase()}`}
             >
               <RoomListSectionHeader title={section.owner ?? ''} inset="content" spacing="flush" />
-              <Text style={styles.groupMeta}>
+              <T v="meta" color="secondary">
                 {section.installation && section.installation.status !== 'active'
                   ? section.installation.status.toUpperCase()
                   : `${section.data.length} ${section.data.length === 1 ? 'REPO' : 'REPOS'}`}
-              </Text>
-            </InlineRow>
+              </T>
+            </XStack>
           ) : null
         }
         sections={sections}
-        style={[
-          styles.candidateScroll,
-          fillAvailableHeight && styles.candidateScrollFill,
-          { maxHeight: REPO_CANDIDATE_LIST_MAX_HEIGHT },
-        ]}
         testID={`${testIDPrefix}-list`}
       />
+      </YStack>
       {pastedFullName && !exactCandidate && (
-        <View>
-          {missing && <Text style={styles.connectReason} testID={`${testIDPrefix}-missing-reason`}>{missing.message}</Text>}
+        <YStack>
+          {missing && <T v="meta" color="secondary" testID={`${testIDPrefix}-missing-reason`}>{missing.message}</T>}
           <HullActionSheetRow
             label={pastedFullName}
             description={ownerInstallation?.status === 'active'
@@ -256,13 +260,13 @@ export const RepoPicker = memo(function RepoPicker({
             }}
             testID={`${testIDPrefix}-connect-card`}
           />
-        </View>
+        </YStack>
       )}
       {pendingLinkage && (
-        <View style={styles.instructionCard} testID={`${testIDPrefix}-link-instruction`}>
-          <Text style={styles.instructionTitle}>ON GITHUB</Text>
-          <Text style={styles.instructionText}>{GITHUB_REPOSITORY_SELECTION_INSTRUCTION}</Text>
-          <HullDialogActions style={styles.instructionActions} actions={[{ label: "Cancel", variant: "quiet", onPress: () => setPendingLinkage(null) }, { label: pendingLinkage.kind === 'owner-grant'
+        <YStack borderWidth={1} borderColor="needsYou" padding="3" gap="2" marginVertical="2" testID={`${testIDPrefix}-link-instruction`}>
+          <T v="code" color="needsYou">ON GITHUB</T>
+          <T v="code">{GITHUB_REPOSITORY_SELECTION_INSTRUCTION}</T>
+          <HullDialogActions actions={[{ label: "Cancel", variant: "quiet", onPress: () => setPendingLinkage(null) }, { label: pendingLinkage.kind === 'owner-grant'
                   ? 'Share install link'
                   : 'Continue to GitHub', ...(pendingLinkage.kind === 'owner-grant' ? {} : { destination: 'external' as const }), variant: "primary", onPress: () => {
                 const plan = pendingLinkage;
@@ -271,10 +275,10 @@ export const RepoPicker = memo(function RepoPicker({
                 else if (plan.kind === 'owner-grant') onAskOwnerGrant?.(plan.fullName);
                 else onAddAccount?.(plan.owner || undefined);
               }, testID: `${testIDPrefix}-link-continue` }]} />
-        </View>
+        </YStack>
       )}
       {onCreateRepository && activeInstallations.length > 0 && (
-        <View>
+        <YStack>
           <HullActionSheetRow
             label="Create repository"
             disabled={busy}
@@ -291,8 +295,8 @@ export const RepoPicker = memo(function RepoPicker({
             testID={`${testIDPrefix}-create-repo`}
           />
           {creating && !onStartCreateRepository && (
-            <View style={styles.createForm}>
-              <View>
+            <YStack gap="2" paddingBottom="4">
+              <YStack>
                 {activeInstallations.map((installation) => (
                   <HullActionSheetRow
                     key={installation.installationId}
@@ -302,17 +306,18 @@ export const RepoPicker = memo(function RepoPicker({
                     onPress={() => setCreateInstallationId(installation.installationId)}
                   />
                 ))}
-              </View>
-              <InlineRow style={styles.createRow}>
-                <HullDialogInput
-                  autoCapitalize="none"
-                  autoCorrect={false}
-                  onChangeText={setNewName}
-                  placeholder="repository-name"
-                  placeholderTextColor={groknight.dim}
-                  style={styles.createInput}
-                  value={newName}
-                />
+              </YStack>
+              <XStack gap="2">
+                <YStack flex={1} minWidth={0}>
+                  <HullDialogInput
+                    autoCapitalize="none"
+                    autoCorrect={false}
+                    onChangeText={setNewName}
+                    placeholder="repository-name"
+                    placeholderTextColor="secondary"
+                    value={newName}
+                  />
+                </YStack>
                 <HullDialogActions actions={[{
                   label: 'CREATE',
                   variant: 'primary',
@@ -328,10 +333,10 @@ export const RepoPicker = memo(function RepoPicker({
                       .catch(() => undefined);
                   },
                 }]} />
-              </InlineRow>
-            </View>
+              </XStack>
+            </YStack>
           )}
-        </View>
+        </YStack>
       )}
       {onAddAccount && (
         <HullActionSheetRow
@@ -352,82 +357,13 @@ export const RepoPicker = memo(function RepoPicker({
         />
       ) : null}
       {notice && !error && (
-        <Text accessibilityLiveRegion="polite" style={styles.notice}>
+        <T v="code" color="secondary" paddingTop="2" accessibilityLiveRegion="polite">
           {notice}
-        </Text>
+        </T>
       )}
       {error && (
         <ErrorBanner inline title={`! ${error}`} />
       )}
-    </View>
+    </YStack>
   );
-});
-
-const styles = StyleSheet.create((theme) => {
-  const groknight = theme.buzz;
-  return {
-    container: { flexShrink: 1, minHeight: 0 },
-    containerFill: { flex: 1 },
-    candidateScroll: {
-      // Height-bounded so a 100+ repo account scrolls instead of rendering past
-      // the fold; six sheet rows, see REPO_CANDIDATE_LIST_MAX_HEIGHT.
-      flexGrow: 0,
-    },
-    placeholderRow: {
-      minHeight: REPO_CANDIDATE_ROW_MIN_HEIGHT,
-      justifyContent: 'center',
-      borderBottomWidth: StyleSheet.hairlineWidth,
-      borderBottomColor: groknight.border,
-    },
-    placeholderBar: {
-      height: StyleSheet.hairlineWidth,
-      width: '42%',
-      backgroundColor: groknight.border,
-    },
-    candidateScrollFill: { flex: 1, flexShrink: 1, minHeight: 0 },
-    groupHeader: {
-      // This SectionList sticks the whole row, including the trailing count.
-      backgroundColor: groknight.bgHighlight,
-      flexDirection: 'row',
-      alignItems: 'center',
-      justifyContent: 'space-between',
-      gap: groknight.space.sm,
-      paddingTop: groknight.space.md,
-      paddingBottom: groknight.space.xs,
-    },
-    groupMeta: { ...groknight.type.meta, color: groknight.textMuted },
-    // The secondary-caption role, not another raw size (DESIGN.md → Type).
-    connectReason: { ...groknight.type.meta, color: groknight.textMuted },
-    instructionCard: {
-      borderWidth: 1,
-      borderColor: groknight.accent,
-      padding: groknight.space.md,
-      gap: groknight.space.sm,
-      marginVertical: 8,
-    },
-    instructionTitle: { ...groknight.type.sectionHead, fontFamily: groknight.monoRegular, color: groknight.accent },
-    instructionText: { ...groknight.type.machine, color: groknight.textPrimary },
-    instructionActions: {
-      flexDirection: 'row',
-      flexWrap: 'wrap',
-      justifyContent: 'flex-end',
-      gap: groknight.space.sm,
-    },
-    createForm: { gap: 8, paddingBottom: groknight.space.md },
-    createRow: { flexDirection: 'row', gap: 8 },
-    createInput: {
-      ...groknight.type.machine,
-      flex: 1,
-      minWidth: 0,
-      minHeight: 40,
-      color: groknight.textPrimary,
-      borderBottomWidth: 1,
-      borderBottomColor: groknight.border,
-    },
-    notice: {
-      ...groknight.type.machine,
-      color: groknight.textMuted,
-      paddingTop: 8,
-    },
-  };
 });

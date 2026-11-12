@@ -266,7 +266,7 @@ export async function requestGrant(
     (script
       ? `The card shows ${script.path} in full, and the approval is bound to those bytes. `
       : '') +
-    `${authority} must answer ALWAYS, ONCE, or NO ${destination}; ` +
+    `${authority} must answer ${kind === 'command' ? 'Approve always or Deny' : 'ALWAYS, ONCE, or NO'} ${destination}; ` +
     'your turn is paused on this grant. Tell the human what you are waiting for and end your turn now; ' +
     (kind === 'mcp'
       ? 'the approval wake starts the fresh session with that route mounted, so use it immediately without restarting or scheduling another turn.'

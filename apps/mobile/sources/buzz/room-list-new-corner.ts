@@ -43,7 +43,7 @@ export async function openRoomListCorner(input: {
     void Haptics.notificationAsync(Haptics.NotificationFeedbackType.Error);
     Modal.alert(
       `Could not open ${CORNER_LABEL}`,
-      `A new ${CORNER_LABEL} could not be opened while Rooms are loading. Try again.`,
+      `A new ${CORNER_LABEL} could not be opened while chats are loading. Try again.`,
     );
     return;
   }

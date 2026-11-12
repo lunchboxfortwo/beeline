@@ -1,7 +1,8 @@
 import { VaultSaveCard } from '@/components/buzz/VaultSaveCard';
 import { RepositoryOnboardingCard } from './RepositoryOnboardingCard';
 import React, { useCallback, useMemo } from 'react';
-import { View, Text } from 'react-native';
+import { YStack } from 'tamagui';
+import { T } from '@/ui/grammar';
 import { router } from 'expo-router';
 import { Modal } from '@/modal';
 import { type RoomRepository, type MessageReactionEmoji } from '@beeline/buzz-client';
@@ -23,7 +24,6 @@ import { CornerOpenedMarkers } from '@/components/buzz/CornerOpenedMarker';
 import { LedgerRoomUpdate, LedgerSystemLine } from '@/components/buzz/Ledger';
 import { type RoomRosterParticipant } from '@/buzz/room-participants';
 import { rosterAgent, durableFactLine, knownAgentPubkeysFor } from './chat-surface-values';
-import { styles } from './chat-surface-styles';
 import { TranscriptPills, type PillIdentityResolver } from '@/components/buzz/TranscriptPills';
 import { canDecideGrantRequest, GrantRequestPill } from '@/components/buzz/GrantRequestCard';
 import { isAgentToAgentMessage, isPillMessage } from '@/buzz/transcript-pills';
@@ -461,22 +461,22 @@ export function useChatTranscriptRenderer([
 
       if (item.daemonFact) {
         return (
-          <View>
+          <YStack>
             <DaemonFactCard
               message={item}
               onOpenCorner={openCorner}
               onOpenUrl={handleOpenGitHubEvent}
             />
-          </View>
+          </YStack>
         );
       }
 
       // ── Archived notice ──────────────────────────────────────────
       if (item.isArchivedNotice) {
         return (
-          <View style={styles.archivedBubble}>
-            <Text style={styles.archivedText}>□ CORNER ARCHIVED · READ-ONLY</Text>
-          </View>
+          <YStack paddingVertical="2" marginBottom="4" alignSelf="center" maxWidth="90%">
+            <T v="code" color="secondary" textAlign="center">□ THREAD ARCHIVED · READ-ONLY</T>
+          </YStack>
         );
       }
 
@@ -568,10 +568,10 @@ export function useChatTranscriptRenderer([
         />
       );
       return item.cornerMarkers?.length ? (
-        <View>
+        <YStack>
           {ledgerMessage}
           <CornerOpenedMarkers message={item} onOpenCorner={openCorner} onOpenUrl={handleOpenGitHubEvent} />
-        </View>
+        </YStack>
       ) : (
         ledgerMessage
       );

@@ -1,6 +1,7 @@
 import React, { useEffect, useState } from 'react';
-import { AppState, Text, View } from 'react-native';
-import { StyleSheet } from 'react-native-unistyles';
+import { AppState } from 'react-native';
+import { YStack } from 'tamagui';
+import { T } from '@/ui/grammar';
 import { readVaultSaveCard, type VaultSaveCard as Card } from '@beeline/api-contract/phone';
 import { TranscriptCard } from './TranscriptCard';
 import { HullDialogInput } from './HullDialog';
@@ -164,10 +165,10 @@ export function VaultSaveCard({
       } : undefined}
     >
       {canType && (
-        <View style={styles.fields}>
+        <YStack gap="4">
           {card.fields.map((field) => (
-            <View key={field.name} style={styles.field}>
-              <Text style={styles.label}>{field.label}</Text>
+            <YStack key={field.name} gap="2">
+              <T v="meta" color="ink">{field.label}</T>
               <HullDialogInput
                 variant="boxed"
                 accessibilityLabel={field.label}
@@ -181,7 +182,7 @@ export function VaultSaveCard({
                 autoComplete="off"
                 importantForAutofill="no"
                 textContentType="none"
-                editable={!busy}
+                readOnly={busy}
                 maxLength={16_384}
                 placeholder={field.label}
                 testID={`vault-save-${field.name}`}
@@ -198,21 +199,14 @@ export function VaultSaveCard({
                   ) : undefined
                 }
               />
-            </View>
+            </YStack>
           ))}
-          <Text style={styles.note}>
+          <T v="meta" color="secondary">
             Goes from this card straight to your Trusty Squire vault. {agentName} and the chat only
             learn that it was saved.
-          </Text>
-        </View>
+          </T>
+        </YStack>
       )}
     </TranscriptCard>
   );
 }
-
-const styles = StyleSheet.create(({ buzz }) => ({
-  fields: { gap: buzz.space.md },
-  field: { gap: buzz.space.sm },
-  label: { ...buzz.type.meta, color: buzz.textPrimary },
-  note: { ...buzz.type.meta, color: buzz.textMuted },
-}));

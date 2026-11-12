@@ -57,20 +57,7 @@ export const DESIGN_ALLOWLIST: Readonly<Record<DesignRule, Readonly<Record<strin
  */
 export const DESIGN_BASELINE_REASONS: Readonly<Partial<Record<DesignRule, Readonly<Record<string, string>>>>> = {
   radius: {},
-  spacing: {
-    'components/buzz/IndexRow.tsx':
-      'The approved row mock: a row with a subtitle sits 14 inside each hairline with 2 between title and subtitle, so one subtitle line keeps the row near 64.',
-    'components/buzz/Ledger.tsx':
-      'Reserves the 36-point marginalia column the timestamp hangs in, plus space.sm.',
-    'components/buzz/TranscriptScrubber.tsx':
-      'Centres the 3-point bar under the 6-point handle: half the width difference.',
-    'components/buzz/TurnLineFrame.tsx':
-      'TURN_LINE_BAR_MARGIN_BOTTOM is derived from the turn line’s exact-pixel row budget (buzz/room-bottom-chrome.ts).',
-    'components/buzz/WalletQr.tsx':
-      'The QR quiet zone is one module wide by the QR specification, not a layout step.',
-    'components/buzz/WorkflowRunLine.tsx':
-      'Step copy starts at COPY_X, the column right of the rail circle and its halo.',
-  },
+  spacing: {},
 };
 
 const COLOUR_LITERAL =

@@ -3,7 +3,7 @@ import { githubInstallationRedirectUri } from '@/auth/github-auth-session';
 import { useGitHubInstallationSession } from '@/auth/github-installation-host';
 import { validRoomSlug } from '@/buzz/room-name';
 import { inviteOnlyForRepository, type RepoCandidate } from '@/buzz/room-repo-picker';
-import { ROOM_LABEL } from '@/buzz/vocabulary';
+import { ROOM_LABEL, ROOM_TITLE } from '@/buzz/vocabulary';
 import { readGitHubAccess } from '@/buzz/github-access-surface';
 import { chatNameForRepository } from '@/ui/screens/chats/chat-tree-model';
 import { useCallback } from 'react';
@@ -94,7 +94,7 @@ export function useChannelsRepositories(
       } catch (reason) {
         setError(
           publishAcknowledged
-            ? appErrorCopy(reason, `${ROOM_LABEL} created, but membership is still syncing.`)
+            ? appErrorCopy(reason, `${ROOM_TITLE} created, but membership is still syncing.`)
             : appErrorCopy(reason, `Could not create ${ROOM_LABEL}.`),
         );
       } finally {

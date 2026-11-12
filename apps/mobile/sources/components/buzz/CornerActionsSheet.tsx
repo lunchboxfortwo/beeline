@@ -4,7 +4,7 @@ import { Archive, Lock } from 'lucide-react-native';
 import { Btn, Copy, Glyph, HEIGHT, SheetFrame, T } from '@/ui/grammar';
 
 /**
- * ⋯ on a thread (header B): Lock corner, Close corner, Cancel. Closing the
+ * ⋯ on a thread (header B): Lock thread, Close thread, Cancel. Closing the
  * surface leaves a request running, but retires its navigation. The lock
  * value comes from the current server Room read.
  */
@@ -86,26 +86,26 @@ export function CornerActionsSheet({
     <SheetFrame open={visible} close={dismiss} title={title} testID="corner-actions-sheet">
       <ListItem padding="0" paddingVertical="3" gap="3" alignItems="flex-start" backgroundColor="raised"
         minHeight={HEIGHT.sheetRow} disabled={lockDisabled} onPress={() => void changeLock(!locked)}
-        aria-label="Lock corner" accessibilityRole="switch" accessibilityState={{ checked: locked, disabled: lockDisabled }}
+        aria-label="Lock thread" accessibilityRole="switch" accessibilityState={{ checked: locked, disabled: lockDisabled }}
         testID="lock-corner-action">
         <YStack paddingTop="0.5"><Glyph icon={Lock} size={18} /></YStack>
         <YStack flex={1} minWidth={0} gap="1">
-          <Copy>Lock corner</Copy>
-          <Copy small quiet>Stops agents from closing this corner, including after a merge. You can still close it.</Copy>
+          <Copy>Lock thread</Copy>
+          <Copy small quiet>Stops agents from closing this thread, including after a merge. You can still close it.</Copy>
         </YStack>
         <Switch checked={locked} disabled={lockDisabled} onCheckedChange={(value: boolean) => void changeLock(value)}
-          backgroundColor={locked ? 'needsYou' : 'highlight'} aria-label="Lock corner" testID="lock-corner-switch">
+          backgroundColor={locked ? 'needsYou' : 'highlight'} aria-label="Lock thread" testID="lock-corner-switch">
           <Switch.Thumb backgroundColor="ink" />
         </Switch>
       </ListItem>
       <Separator borderColor="stroke" />
       <ListItem padding="0" paddingVertical="3" gap="3" alignItems="flex-start" backgroundColor="raised"
         minHeight={HEIGHT.sheetRow} disabled={closing} onPress={() => void close()}
-        aria-label="Close corner" accessibilityRole="button" testID="close-corner-action">
+        aria-label="Close thread" accessibilityRole="button" testID="close-corner-action">
         <YStack paddingTop="0.5"><Glyph icon={Archive} size={18} /></YStack>
         <YStack flex={1} minWidth={0} gap="1">
-          <T v="heading" color="removed">{closing ? 'Closing corner…' : 'Close corner'}</T>
-          <Copy small quiet>Ends the edit session and archives this corner. Unmerged work is lost.</Copy>
+          <T v="heading" color="removed">{closing ? 'Closing thread…' : 'Close thread'}</T>
+          <Copy small quiet>Ends the edit session and archives this thread. Unmerged work is lost.</Copy>
         </YStack>
       </ListItem>
       <XStack paddingTop="2">

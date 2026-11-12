@@ -1,6 +1,6 @@
 import { focusComposerSelection } from '@/buzz/composer-selection';
 import React, { useCallback } from 'react';
-import { TextInput, Platform } from 'react-native';
+import { type TextInput, Platform } from 'react-native';
 import * as Clipboard from 'expo-clipboard';
 import * as Haptics from 'expo-haptics';
 import * as ImagePicker from 'expo-image-picker';

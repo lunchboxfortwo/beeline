@@ -382,7 +382,7 @@ export type RoomViewMessage = {
   /** An agent's order into, or report from, a corner. The author is the sender. */
   readonly agentCommand?: {
     readonly kind: 'order' | 'report';
-    readonly recipient: { readonly id: string; readonly name: string; readonly handle?: string };
+    readonly recipient: { readonly id: string; readonly name: string; readonly handle?: string; readonly kind?: 'agent' | 'human' };
     readonly status?: 'done' | 'blocked' | 'needs-decision' | 'failed';
     readonly text: string;
   };

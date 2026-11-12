@@ -8,7 +8,9 @@ import React, {
   useState,
   useSyncExternalStore,
 } from 'react';
-import { FlatList, View, type FlatListProps } from 'react-native';
+import { FlatList, type FlatListProps } from 'react-native';
+import { YStack } from 'tamagui';
+import { ContainedList } from '@/ui/grammar';
 import type { ChatDisplayMessage } from './room-view-presentation';
 import { yieldToNextPaint } from './host-scheduler';
 
@@ -129,13 +131,13 @@ function SendHeader({
   return (
     <>
       {pending && (
-        <View
+        <YStack
           key={pending.key}
           testID="room-send-preview"
           onLayout={() => preview.laidOut(pending.message.id)}
         >
           <PreviewMessage message={pending.message} renderItem={renderItem} />
-        </View>
+        </YStack>
       )}
       {React.isValidElement(header) ? header : header ? React.createElement(header) : null}
     </>
@@ -243,8 +245,15 @@ export const RoomSendList = forwardRef<FlatList<ChatDisplayMessage>, Props>(func
     ),
     [preview, renderItem],
   );
+  // The caller's container layout passes straight through; this list adds no styling of its own.
+  const container: Props['contentContainerStyle'] = [
+    contentContainerStyle,
+    data.length === 0 && !previewInEmptyRoom ? emptyContentContainerStyle : null,
+  ];
   return (
-    <FlatList
+    <ContainedList
+      list={FlatList<ChatDisplayMessage>}
+      container={container}
       {...props}
       ref={ref}
       data={data}
@@ -263,10 +272,6 @@ export const RoomSendList = forwardRef<FlatList<ChatDisplayMessage>, Props>(func
         <SendHeader preview={preview} renderItem={renderItem} header={ListHeaderComponent} />
       }
       ListEmptyComponent={previewInEmptyRoom ? null : ListEmptyComponent}
-      contentContainerStyle={[
-        contentContainerStyle,
-        data.length === 0 && !previewInEmptyRoom ? emptyContentContainerStyle : null,
-      ]}
       onViewableItemsChanged={viewable}
       onScroll={scroll}
       onContentSizeChange={content}

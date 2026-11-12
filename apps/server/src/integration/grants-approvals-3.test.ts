@@ -375,11 +375,24 @@ const fixture = monolithFixture();
   );
 
 
-  it('host emulator refusal stays visible to the agent without granting access', async () => {
+  it.each(['host', 'command'] as const)('%s refusal stays visible to the agent without granting access', async kind => {
+    await fixture.database.query(`UPDATE agents SET yolo_mode=false WHERE agent_id=$1`, [AGENT]);
     const ask = (await (await fixture.daemonOperation('requestAgentGrant', {
-      roomId: ROOM, kind: 'host', target: '127.0.0.1:5037',
-      reason: 'Test the Android app', purpose: 'Use an existing host emulator',
+      roomId: ROOM, kind, target: kind === 'host' ? '127.0.0.1:5037' : 'python3 checks.py',
+      ...(kind === 'command' ? { script: { path: 'checks.py', contents: 'print(1)\n',
+        sha256: createHash('sha256').update('print(1)\n').digest('hex'), bytes: 9 } } : {}),
+      reason: 'Test the app', purpose: 'Run the checks',
     })).json()) as { grantId: string };
+    if (kind === 'command') {
+      const tray = await (await fixture.operation('readNeedsYou', { workspaceId: WORKSPACE })).json() as {
+        items: Array<{ approval?: { actions?: Array<{ grantId?: string; label: string; decision?: string }> } }>;
+      };
+      const actions = tray.items.flatMap(item => item.approval?.actions ?? [])
+        .filter(action => action.grantId === ask.grantId);
+      expect(actions.map(action => [action.label, action.decision])).toEqual([
+        ['Approve always', 'always'], ['Deny', 'deny'],
+      ]);
+    }
     expect((await fixture.operation('decideAgentGrant', { grantId: ask.grantId, decision: 'deny' })).status).toBe(200);
     const live = await (await fixture.daemonOperation('listAgentGrants', { roomId: ROOM })).json();
     expect(live).toEqual({ grants: [] });

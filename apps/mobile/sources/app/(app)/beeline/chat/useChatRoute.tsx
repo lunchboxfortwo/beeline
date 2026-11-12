@@ -1,7 +1,6 @@
 import { useDesktopLayout } from '@/buzz/desktop-layout-state';
 import React, { useEffect, useState, useRef, useMemo } from 'react';
 import { Platform } from 'react-native';
-import { useUnistyles } from 'react-native-unistyles';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { useLocalSearchParams, useNavigation } from 'expo-router';
 import { RoomSendPreview } from '@/buzz/room-send-list';
@@ -37,8 +36,6 @@ export function useChatRoute([
   isDesktop: boolean,
   readOnlyFooterInset: { marginBottom: number; paddingBottom?: undefined; } | { paddingBottom: number; marginBottom?: undefined; },
 ] {
-
-  const { theme } = useUnistyles();
 
   const isDesktop = useIsDesktop();
 

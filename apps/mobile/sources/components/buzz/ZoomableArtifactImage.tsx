@@ -1,6 +1,6 @@
 import React, { useEffect, useRef, useState } from 'react';
-import { PanResponder, Platform, Pressable, View } from 'react-native';
-import { StyleSheet } from 'react-native-unistyles';
+import { PanResponder, Platform } from 'react-native';
+import { YStack } from 'tamagui';
 import type { AttachmentReference } from '@beeline/buzz-client';
 
 import { ArtifactImage } from '@/components/buzz/ArtifactMedia';
@@ -207,31 +207,32 @@ export function ZoomableArtifactImage({
   };
 
   return (
-    <View style={styles.imageViewer}>
-      <View
+    <YStack flex={1}>
+      <YStack
+        flex={1}
+        overflow="hidden"
+        touchAction={Platform.OS === 'web' ? 'none' : undefined}
         onLayout={(event) => {
           frameRef.current = { ...frameRef.current, ...event.nativeEvent.layout };
           setImageZoom(clampImageZoom(zoomRef.current, frameRef.current));
         }}
-        style={[
-          styles.imageViewport,
-          Platform.OS === 'web' && ({ touchAction: 'none' } as object),
-        ]}
         testID={`${testIDPrefix}-image-viewport`}
-        {...gesture.panHandlers}
+        {...(gesture.panHandlers as object)}
         {...(Platform.OS === 'web' ? ({ onWheel: wheel } as object) : {})}
       >
-        <Pressable
+        <YStack
           accessibilityLabel={`Image ${title}`}
-          delayLongPress={450}
+          // Tamagui's press events honour delayLongPress on native; its stack types omit it.
+          {...({ delayLongPress: 450 } as object)}
           onLongPress={() => {
             swipeRef.current = false;
             showPictureActions(attachment);
           }}
-          style={[
-            styles.image,
-            { transform: [{ translateX: zoom.x }, { translateY: zoom.y }, { scale: zoom.scale }] },
-          ]}
+          width="100%"
+          height="100%"
+          x={zoom.x}
+          y={zoom.y}
+          scale={zoom.scale}
           testID={`${testIDPrefix}-image-actions`}
           {...(Platform.OS === 'web'
             ? {
@@ -251,11 +252,10 @@ export function ZoomableArtifactImage({
               frameRef.current = { ...frameRef.current, imageWidth, imageHeight };
               setImageZoom(clampImageZoom(zoomRef.current, frameRef.current));
             }}
-            style={styles.image}
             testID={`${testIDPrefix}-image`}
           />
-        </Pressable>
-      </View>
+        </YStack>
+      </YStack>
       <ZoomBar
         scale={zoom.scale}
         canZoomIn={zoom.scale < MAX_IMAGE_ZOOM}
@@ -264,12 +264,6 @@ export function ZoomableArtifactImage({
         onReset={() => setImageZoom({ scale: 1, x: 0, y: 0 })}
         testIDPrefix={testIDPrefix}
       />
-    </View>
+    </YStack>
   );
 }
-
-const styles = StyleSheet.create(() => ({
-  imageViewer: { flex: 1 },
-  imageViewport: { flex: 1, overflow: 'hidden' },
-  image: { height: '100%', width: '100%' },
-}));

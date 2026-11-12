@@ -12,7 +12,7 @@ export function ProfileHead({ mark, title, line, testID }: { mark: React.ReactNo
         <XStack gap="4" alignItems="center" testID={testID}>
             {mark}
             <YStack flex={1} minWidth={0} gap="1">
-                <T v="title" numberOfLines={1}>{title}</T>
+                <T v="title">{title}</T>
                 {line ? <Copy small quiet>{line}</Copy> : null}
             </YStack>
         </XStack>
@@ -40,7 +40,7 @@ export function ChatRows({ title, rooms }: { title: string; rooms: readonly { id
 export function accessCaption(access: AgentDetailView['access'], agentName: string): string {
     const change = 'Only the owner can change this.';
     if (access?.policy === 'everyone')
-        return `Anyone in the Room can have ${agentName} run commands, install software and change ` +
+        return `Anyone in the chat can have ${agentName} run commands, install software and change ` +
             `configuration on your machine. Turn this off and only you may ask them.`;
     if (access?.policy === 'allowlist') return `Only allowed members may ask this agent. ${change}`;
     const owner = access?.owner?.handle ? `@${access.owner.handle}` : 'the owner';

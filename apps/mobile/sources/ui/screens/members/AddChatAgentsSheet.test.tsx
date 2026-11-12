@@ -19,7 +19,6 @@ const operation = vi.hoisted(() => vi.fn());
 vi.mock('@/sync/transport/monolith-operation', () => ({ monolithPhoneOperation: operation }));
 
 import { AddChatAgentsSheet, addLabel } from './AddChatAgentsSheet';
-import { visibilityLine } from './members-lines';
 import type { PeopleRow } from '@/ui/screens/people/people-rows';
 
 const ROOM = '22222222-2222-4222-8222-222222222222';
@@ -70,10 +69,3 @@ describe('Agents + in a chat', () => {
     });
 });
 
-describe('Members visibility line', () => {
-    it("states the chat's kind from its own visibility", () => {
-        expect(visibilityLine('#beeline', 'public', 'Beeline Work')).toBe('#beeline is public: anyone in Beeline Work can join it.');
-        expect(visibilityLine('#milo', 'invite-only', 'Beeline Work')).toBe('#milo is private: only the people added here can see it.');
-        expect(visibilityLine('#x', undefined, 'Beeline Work')).toBeUndefined();
-    });
-});

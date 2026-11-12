@@ -6,7 +6,15 @@ import { beforeEach, expect, it, vi } from 'vitest';
 vi.mock('@/components/buzz/RepositoryMark', () => ({ RepositoryMark: 'RepositoryMark' }));
 vi.mock('tamagui', () => ({ ListItem: 'ListItem', XStack: 'XStack', YStack: 'YStack' }));
 vi.mock('lucide-react-native', () => ({ ArrowLeft: 'ArrowLeft', MessagesSquare: 'MessagesSquare', MoreHorizontal: 'MoreHorizontal', Settings: 'Settings' }));
-vi.mock('@/ui/grammar', () => ({ Btn: 'Btn', Glyph: 'Glyph', T: 'T', SafeTop: 'SafeTop' }));
+vi.mock('@/ui/grammar', async () => {
+  const { createElement } = await import('react');
+  return {
+    Btn: 'Btn', Glyph: 'Glyph', T: 'T', SafeTop: 'SafeTop', ChatMark: 'ChatMark',
+    ChatName: ({ name, testID }: any) => createElement('ChatName', { testID }, name),
+    PlaceHeader: (p: any) => createElement('PlaceHeader', { testID: p.testID },
+      p.back ? createElement('Btn', { testID: p.backTestID, onPress: p.back }) : null, p.mark, p.title, p.meta, p.right),
+  };
+});
 vi.mock('@/components/buzz/IdentityMark', () => ({ IdentityMark: 'IdentityMark' }));
 vi.mock('@/ui/screens/thread/ThreadHeader', () => ({ ThreadBar: 'ThreadBar' }));
 import { ChatSurfaceHeaderView } from './ChatSurfaceHeader';

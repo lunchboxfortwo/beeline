@@ -171,7 +171,7 @@ function PersonProfile({ workspaceId, memberId, close }: { workspaceId: string; 
     const removeMember = async () => {
         if (!canEditRole || !member) return;
         const confirmed = await Modal.confirm(`Remove ${member.identity.name}?`,
-            'This removes them from every Room and the Workspace. They can rejoin only with a new invite.',
+            'This removes them from every chat and the Workspace. They can rejoin only with a new invite.',
             { cancelText: 'Cancel', confirmText: 'Remove', destructive: true });
         if (confirmed) await perform(async () => {
             await monolithPhoneOperation('removeWorkspaceMember', { workspaceId, memberId });
