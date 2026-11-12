@@ -470,7 +470,7 @@ export function BuzzChatSurface({
 />
 
           {!isCorner && !isDirectMessage && (
-            <ThreadsDropdown repositoryAvatar={roomSurface?.room.avatar} repositoryFavicon={roomSurface?.room.favicon} roomId={decodedId} chatName={resolvedChannelName} openThread={openCorner} />
+            <ThreadsDropdown roomId={decodedId} chatName={resolvedChannelName} openThread={openCorner} />
           )}
 
           {!isCorner && !isDirectMessage && (() => {

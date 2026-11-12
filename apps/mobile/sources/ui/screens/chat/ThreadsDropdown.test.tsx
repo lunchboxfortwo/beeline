@@ -139,7 +139,8 @@ it('names the active count, then lists every thread inside a list capped at 45% 
     loadMoreOpen,
   };
   let tree: any;
-  act(() => { tree = create(<ThreadsDropdown roomId="r" chatName="beeline" openThread={openThread} />); });
+  act(() => { tree = create(<ThreadsDropdown roomId="r" chatName="beeline" openThread={openThread}
+    {...{ repositoryAvatar: 'https://example.com/project.png', repositoryFavicon: 'https://example.com/favicon.ico' }} />); });
   const trigger = byTestID(tree, 'threads-dropdown-trigger')[0];
   expect(trigger.findByType('Copy').props.children).toBe('Threads · 3 active');
   expect(trigger.props.label).toBe('3 active threads in beeline');
@@ -152,6 +153,10 @@ it('names the active count, then lists every thread inside a list capped at 45% 
   // instead of only lowering the keyboard.
   expect(list[0].props.keyboardShouldPersistTaps).toBe('handled');
   const lines = tree.root.findAllByType('ThreadLine');
+  for (const line of lines) {
+    expect(line.props.avatarUrl).toBeUndefined();
+    expect(line.props.faviconUrl).toBeUndefined();
+  }
   expect(lines.map((line: any) => [line.props.title, line.props.state])).toEqual([['one-row-header', 'waiting'], ['reconnect', 'review']]);
   act(() => lines[1].props.onPress());
   expect(openThread).toHaveBeenCalledWith('b');

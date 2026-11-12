@@ -1,0 +1,33 @@
+
+ RUN  v3.2.7 /home/lunchbox/.local/state/beeline/corners/30344582a9e67718d6bc6cfb035baf616f7862b13fcaf336c4631f6858da6806/apps/mobile
+
+stderr | sources/ui/screens/chat/ThreadsDropdown.test.tsx > closes the expanded list when Chat info opens (desktop: false)
+react-test-renderer is deprecated. See https://react.dev/warnings/react-test-renderer
+
+stderr | sources/ui/screens/chat/ThreadsDropdown.test.tsx > closes the expanded list when Chat info opens (desktop: true)
+react-test-renderer is deprecated. See https://react.dev/warnings/react-test-renderer
+
+stderr | sources/ui/screens/chat/ThreadsDropdown.test.tsx > dismisses on outside input without consuming it (onTouchStart)
+react-test-renderer is deprecated. See https://react.dev/warnings/react-test-renderer
+
+stderr | sources/ui/screens/chat/ThreadsDropdown.test.tsx > dismisses on outside input without consuming it (onPointerDown)
+react-test-renderer is deprecated. See https://react.dev/warnings/react-test-renderer
+
+stderr | sources/ui/screens/chat/ThreadsDropdown.test.tsx > opens Threads and delivers outside actions with native touch events (android)
+react-test-renderer is deprecated. See https://react.dev/warnings/react-test-renderer
+
+stderr | sources/ui/screens/chat/ThreadsDropdown.test.tsx > opens Threads and delivers outside actions with native touch events (ios)
+react-test-renderer is deprecated. See https://react.dev/warnings/react-test-renderer
+
+stderr | sources/ui/screens/chat/ThreadsDropdown.test.tsx > is only the header hairline with no active threads
+react-test-renderer is deprecated. See https://react.dev/warnings/react-test-renderer
+
+stderr | sources/ui/screens/chat/ThreadsDropdown.test.tsx > names the active count, then lists every thread inside a list capped at 45% of the window
+react-test-renderer is deprecated. See https://react.dev/warnings/react-test-renderer
+
+ ✓ sources/ui/screens/chat/ThreadsDropdown.test.tsx (8 tests) 549ms
+
+ Test Files  1 passed (1)
+      Tests  8 passed (8)
+   Start at  12:09:55
+   Duration  6.72s (transform 2.94s, setup 336ms, collect 3.79s, tests 549ms, environment 0ms, prepare 708ms)

@@ -1,0 +1,190 @@
+[
+  {
+    "version": "before",
+    "theme": "light_brass",
+    "headerImages": 1,
+    "rows": [
+      {
+        "id": "thread-row-glyph",
+        "images": 1,
+        "glyphs": 0
+      },
+      {
+        "id": "thread-row-output",
+        "images": 1,
+        "glyphs": 0
+      },
+      {
+        "id": "thread-row-palette",
+        "images": 1,
+        "glyphs": 0
+      }
+    ]
+  },
+  {
+    "version": "before",
+    "theme": "dark_brass",
+    "headerImages": 1,
+    "rows": [
+      {
+        "id": "thread-row-glyph",
+        "images": 1,
+        "glyphs": 0
+      },
+      {
+        "id": "thread-row-output",
+        "images": 1,
+        "glyphs": 0
+      },
+      {
+        "id": "thread-row-palette",
+        "images": 1,
+        "glyphs": 0
+      }
+    ]
+  },
+  {
+    "version": "before",
+    "theme": "light_stone",
+    "headerImages": 1,
+    "rows": [
+      {
+        "id": "thread-row-glyph",
+        "images": 1,
+        "glyphs": 0
+      },
+      {
+        "id": "thread-row-output",
+        "images": 1,
+        "glyphs": 0
+      },
+      {
+        "id": "thread-row-palette",
+        "images": 1,
+        "glyphs": 0
+      }
+    ]
+  },
+  {
+    "version": "before",
+    "theme": "dark_stone",
+    "headerImages": 1,
+    "rows": [
+      {
+        "id": "thread-row-glyph",
+        "images": 1,
+        "glyphs": 0
+      },
+      {
+        "id": "thread-row-output",
+        "images": 1,
+        "glyphs": 0
+      },
+      {
+        "id": "thread-row-palette",
+        "images": 1,
+        "glyphs": 0
+      }
+    ]
+  },
+  {
+    "version": "after",
+    "theme": "light_brass",
+    "headerImages": 1,
+    "rows": [
+      {
+        "id": "thread-row-glyph",
+        "images": 0,
+        "glyphs": 1,
+        "color": "#8a6323"
+      },
+      {
+        "id": "thread-row-output",
+        "images": 0,
+        "glyphs": 1,
+        "color": "#4A4038"
+      },
+      {
+        "id": "thread-row-palette",
+        "images": 0,
+        "glyphs": 1,
+        "color": "#4A4038"
+      }
+    ]
+  },
+  {
+    "version": "after",
+    "theme": "dark_brass",
+    "headerImages": 1,
+    "rows": [
+      {
+        "id": "thread-row-glyph",
+        "images": 0,
+        "glyphs": 1,
+        "color": "#b08a4a"
+      },
+      {
+        "id": "thread-row-output",
+        "images": 0,
+        "glyphs": 1,
+        "color": "#c9c9d1"
+      },
+      {
+        "id": "thread-row-palette",
+        "images": 0,
+        "glyphs": 1,
+        "color": "#c9c9d1"
+      }
+    ]
+  },
+  {
+    "version": "after",
+    "theme": "light_stone",
+    "headerImages": 1,
+    "rows": [
+      {
+        "id": "thread-row-glyph",
+        "images": 0,
+        "glyphs": 1,
+        "color": "#57534e"
+      },
+      {
+        "id": "thread-row-output",
+        "images": 0,
+        "glyphs": 1,
+        "color": "#44403c"
+      },
+      {
+        "id": "thread-row-palette",
+        "images": 0,
+        "glyphs": 1,
+        "color": "#44403c"
+      }
+    ]
+  },
+  {
+    "version": "after",
+    "theme": "dark_stone",
+    "headerImages": 1,
+    "rows": [
+      {
+        "id": "thread-row-glyph",
+        "images": 0,
+        "glyphs": 1,
+        "color": "#d6d3d1"
+      },
+      {
+        "id": "thread-row-output",
+        "images": 0,
+        "glyphs": 1,
+        "color": "#d6d3d1"
+      },
+      {
+        "id": "thread-row-palette",
+        "images": 0,
+        "glyphs": 1,
+        "color": "#d6d3d1"
+      }
+    ]
+  }
+]
