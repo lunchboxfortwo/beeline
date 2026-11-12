@@ -192,6 +192,8 @@ export type HullActionSheetAction = {
   destructive?: boolean;
   disabled?: boolean;
   label: string;
+  /** Keep long labels readable as the row grows to fit their lines. */
+  wrap?: boolean;
   leading?: React.ReactNode;
   /** The row's current value, on the trailing axis. Never in the label. */
   metadata?: string;

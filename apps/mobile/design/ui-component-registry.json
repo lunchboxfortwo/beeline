@@ -419,6 +419,7 @@
     "components/buzz/PushLevelSetting.tsx": [
       "PushLevelSetting"
     ],
+    "components/buzz/SelectedRepositoryPill.tsx": ["SelectedRepositoryPill"],
     "components/buzz/RepoList.tsx": [
       "RepoList"
     ],

@@ -31,16 +31,18 @@ for (const [outcome, expected] of [['success', 0], ['failure', 7], ['timeout', 1
     try {
       const bin = resolve(temporary, 'bin');
       mkdirSync(bin);
-      // Exercise the real GNU timeout deadline without waiting four hours.
-      writeFileSync(resolve(bin, 'timeout'), '#!/bin/sh\nshift 3\nexec /usr/bin/timeout --signal=TERM --kill-after=1s 0.5s "$@"\n', { mode: 0o755 });
+      // Keep a safety bound; trigger GNU timeout only after the child is ready.
+      // SIGALRM is the signal its deadline uses, so runner startup is not timed.
+      writeFileSync(resolve(bin, 'timeout'), '#!/bin/sh\nshift 3\nexec /usr/bin/timeout --signal=TERM --kill-after=1s 30s "$@"\n', { mode: 0o755 });
       const childCode = `process.on('SIGTERM', () => {}); require('node:fs').writeFileSync(${JSON.stringify(ready)}, String(process.pid)); setInterval(() => {}, 1000);`;
       const parentCode = `
         const fs = require('node:fs');
-        require('node:child_process').spawn(process.execPath, ['-e', ${JSON.stringify(childCode)}], { stdio: 'ignore' }).unref();
+        // Reproduce a busy runner taking longer than the old half-second deadline.
+        setTimeout(() => require('node:child_process').spawn(process.execPath, ['-e', ${JSON.stringify(childCode)}], { stdio: 'ignore' }).unref(), 750);
         const wait = setInterval(() => {
           if (!fs.existsSync(${JSON.stringify(ready)})) return;
           clearInterval(wait);
-          ${outcome === 'timeout' ? 'setInterval(() => {}, 1000);' : `process.exitCode = ${expected};`}
+          ${outcome === 'timeout' ? "setInterval(() => {}, 1000); process.kill(process.ppid, 'SIGALRM');" : `process.exitCode = ${expected};`}
         }, 10);
       `;
       execFileSync(process.execPath, ['scripts/corner-job.mjs', 'start', directory, process.execPath, '-e', parentCode], {
