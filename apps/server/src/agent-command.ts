@@ -286,9 +286,7 @@ export function commandValidityCtes(roomSql: string, agentSql: string, claimFenc
               (SELECT max(revision)::text FROM corner_brief_revisions WHERE corner_id=command.room_id)))
       OR (command.wake_context IS NULL AND EXISTS (SELECT 1 FROM corner_brief_revisions brief
           WHERE brief.corner_id=command.room_id AND brief.created_at>command.created_at)
-        AND (command.reason='corner_brief_revision'
-          OR (command.reason IN ('corner_review_dispatch','subscribed_event')
-            AND command.private_payload->>'text' LIKE '%Review against brief revision%')))
+        AND command.reason='corner_brief_revision')
   ), cancelled_wakes AS (
     SELECT ended.* FROM command_scope scoped
     LEFT JOIN stale_wakes stale ON stale.id=scoped.id
@@ -623,8 +621,6 @@ export async function insertAgentCommand(db: SqlDatabase, input: AgentCommandInp
     if (headSha && await hasPendingCornerReview(db, input.roomId, input.agentId, headSha, pullRequest))
       return undefined;
   }
-  if (reviewContext) input = { ...input, wakeNote: [input.wakeNote,
-    `Current handoff target: PR #${reviewContext.pullRequest} at ${reviewContext.headSha}. Older heads in the conversation are historical.`].filter(Boolean).join('\n') };
   const sourceText = member.rows[0]!.source_text;
   const note = input.wakeNote ? `\n${input.wakeNote}` : '';
   const privatePayload = input.privatePayload ? { ...input.privatePayload, text: input.privatePayload.text + note }

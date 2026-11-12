@@ -403,7 +403,6 @@ it('keeps reviewer subscriptions mandatory and reconciles an unreviewed green he
     expect.objectContaining({
       reason: 'corner_review_dispatch',
       private: true,
-      source: expect.objectContaining({ body: expect.stringContaining('Current handoff target: PR #17') }),
     }),
   ]);
   await expect(reconcileConfiguredCornerReviewers(rootFixture.db, R)).resolves.toEqual({
@@ -568,7 +567,7 @@ it('runs revised-brief refusal, repair, rereview, exact-head approval, and imple
   // The server lands a PASS itself; the implementer hears only the reviewer's tag.
   const implementerBodies = (await commands(B, C)).map((command) => command.source.body);
   expect(implementerBodies).toEqual(
-    expect.arrayContaining([expect.stringContaining(`@goosy approved ${approvedHead}, merge\nCurrent handoff target: PR #7 at ${approvedHead}`)]),
+    expect.arrayContaining([expect.stringContaining(`@goosy approved ${approvedHead}, merge`)]),
   );
   expect(implementerBodies).not.toContain('@system handed off review');
 });

@@ -363,9 +363,13 @@ export async function reportToCommander(
     console.error(`[commander] ${roomId}: cannot route report without recorded opening provenance`);
     return { id: reportId, createdAt: Math.floor(Date.now() / 1000), delivered: false };
   }
-  const wakeRoom = options.automatic && options.agentOnly && options.wakeInCorner && origin &&
-    (await db.query('SELECT 1 FROM room_access WHERE room_id=$1 AND identity_id=$2 AND removed_at IS NULL',
-      [origin,recipient])).rowCount ? origin : returnRoom;
+  // A report about a corner's work wakes the agent that does that work in the
+  // corner itself; the parent Room has no worktree or PR route for it.
+  const wakeRoom = origin && (await db.query(`SELECT 1 FROM room_access member
+      JOIN corner_facts fact ON fact.corner_id=member.room_id JOIN rooms corner ON corner.id=fact.corner_id
+      WHERE member.room_id=$1 AND member.identity_id=$2 AND member.removed_at IS NULL
+        AND ($3::boolean OR ${cornerImplementerSql('fact', 'corner')}=$2)`,
+    [origin, recipient, Boolean(options.automatic && options.agentOnly && options.wakeInCorner)])).rowCount ? origin : returnRoom;
   const recipientKind=(await db.query<{kind:string}>('SELECT kind FROM identities WHERE id=$1',[recipient])).rows[0]?.kind;
   if(recipientKind==='agent')
     await lockAgentCommandQueue(db,[{roomId:returnRoom,agentId:recipient},{roomId:wakeRoom,agentId:recipient}]);

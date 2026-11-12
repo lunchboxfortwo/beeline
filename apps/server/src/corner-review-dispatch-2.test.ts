@@ -72,7 +72,7 @@ describe('corner message attribution', () => {
     await verdict('rerun');
     const [current]=await commands(B,C);
     expect(current?.reason).toBe('corner_review_dispatch');
-    expect(current?.source.body).toContain('Review against brief revision 2');
+    expect(current?.source.body).not.toMatch(/brief revision/i);
   });
 
 
