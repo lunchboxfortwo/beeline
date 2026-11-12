@@ -25,10 +25,7 @@ import type { ChannelReferenceIndex, ChannelReferenceTarget } from '@/buzz/chann
 export type LedgerBylineMark = NonNullable<TranscriptSender['mark']>;
 
 /** The author byline; continuations omit it. */
-export type LedgerByline = TranscriptSender & {
-  /** True only for the viewer's own turn. */
-  isViewer?: boolean;
-};
+export type LedgerByline = TranscriptSender;
 
 
 export type LedgerBodyProps = {

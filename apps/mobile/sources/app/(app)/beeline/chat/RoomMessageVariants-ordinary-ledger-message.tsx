@@ -142,7 +142,7 @@ export const OrdinaryLedgerMessage = React.memo(function OrdinaryLedgerMessage({
     !message.feedbackReported
       ? undefined
       : {
-          // The viewer is named like every other speaker; their body is brass.
+          // The viewer's name is brass; their body is ink like everyone's.
           name: voiceName,
           onOpenProfile:
             !announcementFeed && message.pubkey && onOpenProfile

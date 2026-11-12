@@ -14,7 +14,8 @@ import { DayCaption, HistoryLine } from '@/ui/screens/transcript/TranscriptMarke
 
 
 /**
- * You, steering: the same transcript line as everyone, with the body in brass.
+ * You, steering: the same transcript line as everyone, with your name in brass
+ * and the body in ink.
  * A run of your own messages keeps flowing under one sender line.
  */
 export function LedgerSteer({
@@ -56,7 +57,7 @@ export function LedgerSteer({
             <TypedView
               view={MonoMarkdown}
               v="body"
-              color={pending ? 'secondary' : 'needsYou'}
+              color={pending ? 'secondary' : 'ink'}
               markdown={bodyText}
               mentionHandles={mentionHandles}
               viewerHandle={viewerHandle}
@@ -72,7 +73,7 @@ export function LedgerSteer({
           <TypedView
             view={MonoMarkdown}
             v="body"
-            color={pending ? 'secondary' : 'needsYou'}
+            color={pending ? 'secondary' : 'ink'}
             markdown={bodyText}
             mentionHandles={mentionHandles}
             viewerHandle={viewerHandle}

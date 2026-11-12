@@ -27,6 +27,8 @@ export type TranscriptSender = {
     onLongPress?: () => void;
     bookmarked?: boolean;
     feedbackReported?: boolean;
+    /** True only for the viewer's own turn: the name is brass, the body stays ink. */
+    isViewer?: boolean;
 };
 
 function SenderFace({ sender }: { sender: TranscriptSender }) {
@@ -79,7 +81,7 @@ export function TranscriptLine({ sender, children, testID }: {
                 {sender ? (
                     <XStack gap="2" alignItems="baseline" minWidth={0} testID="chat-byline-words">
                         {sender.name ? (
-                            <T v="metaStrong" numberOfLines={1} testID="chat-byline-name">{sender.name}</T>
+                            <T v="metaStrong" color={sender.isViewer ? 'needsYou' : 'ink'} numberOfLines={1} testID="chat-byline-name">{sender.name}</T>
                         ) : null}
                         <T v="meta" color="secondary" numberOfLines={1} testID="chat-byline-stamp">{sender.stamp}</T>
                         {sender.feedbackReported ? (
