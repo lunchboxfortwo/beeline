@@ -71,7 +71,7 @@ export default {
         scheme,
         userInterfaceStyle: "automatic",
         ios: {
-            runtimeVersion: runtimeVersionOverride || "38",
+            runtimeVersion: runtimeVersionOverride || "39",
             // Keep the launcher identity stable across system appearance modes.
             // iOS masks this full-size source; only Android adaptive layers need
             // the separately inset safe-zone treatment.
@@ -106,7 +106,7 @@ export default {
             }
         },
         android: {
-            runtimeVersion: runtimeVersionOverride || "49",
+            runtimeVersion: runtimeVersionOverride || "50",
             versionCode: 27,
             adaptiveIcon: {
                 foregroundImage: "./sources/assets/images/icon-adaptive.png",
@@ -235,20 +235,20 @@ export default {
                         image: "./sources/assets/images/splash-android-light.png",
                         imageWidth: 125,
                         resizeMode: "contain",
-                        backgroundColor: "#F3EEE4",
+                        backgroundColor: "#FAFAF9",
                         dark: {
                             image: "./sources/assets/images/splash-android-dark.png",
-                            backgroundColor: "#14091A",
+                            backgroundColor: "#171717",
                         }
                     },
                     android: {
                         image: "./sources/assets/images/splash-android-light.png",
                         imageWidth: 125,
                         resizeMode: "contain",
-                        backgroundColor: "#F3EEE4",
+                        backgroundColor: "#FAFAF9",
                         dark: {
                             image: "./sources/assets/images/splash-android-dark.png",
-                            backgroundColor: "#14091A",
+                            backgroundColor: "#171717",
                         }
                     }
                 }
