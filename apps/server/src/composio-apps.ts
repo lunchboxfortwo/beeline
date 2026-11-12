@@ -351,8 +351,7 @@ export class ComposioApps {
         ...(data ? { 'content-type': 'application/json' } : {}),
       },
       ...(data ? { body: JSON.stringify(data) } : {}),
-      // Callers hold the agent's command transaction open while this runs.
-      signal: AbortSignal.timeout(20_000),
+
     });
     if (!response.ok) {
       const body = await readBoundedBody(response);

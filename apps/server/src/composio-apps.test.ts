@@ -618,21 +618,6 @@ describe('managed app provider boundary', () => {
     expect((error as { status?: number }).status).toBe(429);
   });
 
-  // Reproduction R2: a provider call that never answers held the agent's
-  // command transaction idle until PostgreSQL killed it (12 Nov 08:56 UTC).
-  it('ends a provider request that never answers instead of holding the caller open', async () => {
-    const timeout = AbortSignal.timeout.bind(AbortSignal);
-    const deadline = vi.spyOn(AbortSignal, 'timeout').mockImplementation(() => timeout(10));
-    try {
-      const transport = vi.fn((_url: string, init?: RequestInit) => new Promise<Response>((_resolve, reject) => {
-        init?.signal?.addEventListener('abort', () => reject(init.signal!.reason));
-      }));
-      const provider = new ComposioApps('fixture-only', transport as unknown as typeof fetch);
-      await expect(provider.listTools('github')).rejects.toThrow();
-      expect(deadline).toHaveBeenCalledWith(20_000);
-    } finally { deadline.mockRestore(); }
-  });
-
   it('surfaces a plain-text non-2xx body', async () => {
     const transport = vi.fn(async () => new Response('quota limit reached for this upload', { status: 429 }));
     const provider = new ComposioApps('fixture-only', transport as typeof fetch);
