@@ -18,8 +18,14 @@ function create(element: React.ReactElement) {
   return tree;
 }
 afterEach(async () => { await act(async () => mounted.splice(0).forEach(tree => tree.unmount())); });
-const roomWire = vi.hoisted(() => ({ listener: undefined as any }));
-vi.mock('@/sync/transport/live-connection', () => ({ sharedLiveConnection: () => ({ register: async (_: unknown, listener: unknown) => { roomWire.listener = listener; return () => undefined; }, whenSubscribed: async () => undefined }) }));
+const roomWire = vi.hoisted(() => {
+  const listeners = new Set<(event: unknown) => void>();
+  return { listeners, viewing: [] as string[], listener: (event: unknown) => listeners.forEach(listener => listener(event)) };
+});
+vi.mock('@/sync/transport/live-connection', () => ({ sharedLiveConnection: () => ({
+  register: async (_: unknown, listener: (event: unknown) => void) => { roomWire.listeners.add(listener); return () => roomWire.listeners.delete(listener); },
+  view: (roomId: string) => { roomWire.viewing.push(roomId); return () => { roomWire.viewing.splice(roomWire.viewing.indexOf(roomId), 1); }; },
+  whenSubscribed: async () => undefined }) }));
 vi.mock('@/sync/transport/room-view-client', () => ({ RoomViewClient: class {} }));
 vi.mock('@/buzz/surface-storage', () => ({
   mobileSurfaceCache: { read: async () => null, write: async () => undefined },
@@ -38,7 +44,7 @@ vi.mock('react-native', async () => {
   const host = (name: string) => (props: any) =>
     ReactModule.createElement(name, props, props.children);
   return { StyleSheet: { flatten: (style: any): any => Array.isArray(style) ? Object.assign({}, ...style.map((part: any) => Array.isArray(part) ? Object.assign({}, ...part) : part)) : style },
-    AppState: { addEventListener: () => ({ remove: () => undefined }) },
+    AppState: { currentState: 'active', addEventListener: () => ({ remove: () => undefined }) },
     FlatList: ReactModule.forwardRef((props: any, ref: any) => {
       ReactModule.useImperativeHandle(ref, () => ({
         scrollToEnd: () => listScrolls.push('end'),
@@ -194,6 +200,7 @@ vi.mock('@/buzz/desktop-workbench-state', async (importOriginal) => ({
 import { loadBuzzIdentity } from '@/auth/buzz-identity-storage';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { textDraftKey } from '@/buzz/text-draft-store';
+import { liveDraftDrainStore } from '@/buzz/live-draft-drain';
 import { acceptCornerStatusFrame, resetRoomCornerStore } from '@/buzz/room-corner-store';
 import { Btn } from '@/ui/grammar';
 import { DesktopRoomInspector } from './DesktopRoomInspector';
@@ -517,6 +524,21 @@ describe('DesktopRoomInspector work pane', () => {
     expect(text(tree)).not.toContain('No dispatchable workflows');
     expect(text(tree)).not.toContain('Could not load workflows');
     expect(phoneOperation).not.toHaveBeenCalled();
+  });
+
+  it('Reproduction CLO-1: a corner open beside its Room is viewed and streams its working line and draft', async () => {
+    const detail = { ...room(), room: corners[0].corner, parent: room().room, latestAgentTurns: [
+      { agentPubkey: agent.pubkey, requestId: 'turn-1', status: 'working', createdAt: Date.now() / 1000 }] } as any;
+    const tree = await render(props({ client: { room: vi.fn(async () => detail) }, selectedCornerId: 'working' }));
+    // The server streams an agent's draft only to a place someone views.
+    expect(roomWire.viewing).toEqual(['working']);
+    expect(tree.root.findByType('TurnProgressLine' as any).props.label).toMatch(/^Codex /);
+    await act(async () => roomWire.listener({ monolithLive: { type: 'draft', roomId: 'working', agentId: agent.pubkey, turnId: 'turn-1', text: 'Reading the pane' } }));
+    const draft = tree.root.findAllByType('OrdinaryLedgerMessage' as any).find((row: any) => row.props.message.isAgentDraft);
+    expect(draft?.props.message).toMatchObject({ pubkey: agent.pubkey, isAgentLiveTurn: true });
+    expect(liveDraftDrainStore.getReceived(draft!.props.message.agentMessageDraftKey)).toBe('Reading the pane');
+    await act(async () => tree.unmount());
+    expect(roomWire.viewing).toEqual([]);
   });
 
   // Stop is open to anyone who may act in the Room, whatever their role.

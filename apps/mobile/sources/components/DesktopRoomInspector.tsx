@@ -51,6 +51,8 @@ import { TranscriptPills, type PillIdentityResolver } from '@/components/buzz/Tr
 import { isPillMessage } from '@/buzz/transcript-pills';
 import { SYSTEM_IDENTITY_PUBKEY } from '@/buzz/system-identity';
 import { isAgentTurnActive } from '@/buzz/agent-presence';
+import { liveDraftMessages } from '@/buzz/live-turn-stream';
+import { usePaneLiveDrafts } from '@/buzz/use-pane-live-drafts';
 import { scheduleAnimationFrame } from '@/buzz/host-scheduler';
 import { selectComposerAckPresentation } from '@/buzz/room-indicators';
 import { TURN_LINE_BOX_HEIGHT } from '@/buzz/room-bottom-chrome';
@@ -378,15 +380,20 @@ function CornerCockpit({
     detail?.toolRows ?? noRows,
   ]);
   const projector = React.useMemo(() => createRoomMessageProjector(), [detail?.room.id]);
+  // The draft an agent is writing here, streamed as in a routed transcript.
+  const liveOverlays = usePaneLiveDrafts(roomId);
   const messages = React.useMemo(
     () =>
       detail
-        ? foldTranscriptRows(projector.project(
-            roomViewTranscriptMessages({ messages: [...historyRows, ...tailRows], toolRows }),
-            detail.viewer.identity.pubkey,
-          ), null).rows
+        ? [
+            ...foldTranscriptRows(projector.project(
+              roomViewTranscriptMessages({ messages: [...historyRows, ...tailRows], toolRows }),
+              detail.viewer.identity.pubkey,
+            ), null).rows,
+            ...liveDraftMessages(liveOverlays, [...historyRows, ...tailRows], detail.latestAgentTurns),
+          ]
         : [],
-    [detail, historyRows, projector, tailRows, toolRows],
+    [detail, historyRows, liveOverlays, projector, tailRows, toolRows],
   );
   React.useEffect(() => {
     focusedAnchorRef.current = null;
