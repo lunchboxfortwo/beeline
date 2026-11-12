@@ -8,7 +8,7 @@ import { createServer } from 'node:http';
 import { parse } from 'yaml';
 import { releaseChannel, channelComponents, promotionSource } from './release-channel.mjs';
 import { initializeRelease, planOutputs, restoreReleasePlan, applyJobFacts, applyComponentCheckpoints, checkpointsFromJobs } from './unified-release.mjs';
-import { latestPublished, assignReleaseVersion, compareVersions, versionedReleases, staleDrafts } from './release-record.mjs';
+import { latestPublished, assignReleaseVersion, compareVersions, versionedReleases, staleDrafts, listReleasePage, releaseIdentityReads, releaseStartRestCallCount } from './release-record.mjs';
 import { pagesChannelTag, publishPagesChannel, downloadPagesChannel } from './pages-channel.mjs';
 import { buildPagesSite } from './pages-site.mjs';
 import { deployPages } from './deploy-pages.mjs';
@@ -723,3 +723,15 @@ test('Android channel injection is temporary and leaves production config bytes 
   assert.deepEqual(temporary, JSON.parse(productionBytes));
   assert.equal(JSON.parse(productionBytes).build['next-ci'], undefined);
 }));
+
+test('release identity reads one page even when that page is full', () => {
+  let calls = 0;
+  const page = listReleasePage(endpoint => {
+    calls += 1;
+    assert.equal(endpoint, releaseIdentityReads()[0]);
+    return Array.from({ length: 100 }, () => ({ tag_name: 'v0.1.203-rc.2', draft: false }));
+  });
+  assert.equal(calls, 1);
+  assert.equal(page.length, 100);
+  assert.equal(releaseStartRestCallCount(), 4);
+});

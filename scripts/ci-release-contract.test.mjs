@@ -2,6 +2,8 @@ import assert from 'node:assert/strict';
 import { readFileSync, readdirSync } from 'node:fs';
 import test from 'node:test';
 import { parse } from 'yaml';
+import { coverageMapReads } from '../apps/server/scripts/coverage-map-artifact.mjs';
+import { releaseIdentityReads, releaseStartRestCallCount } from './release-record.mjs';
 
 const workflow = name => parse(readFileSync(`.github/workflows/${name}.yml`, 'utf8'));
 const checks = workflow('checks');
@@ -59,7 +61,61 @@ test('every delivery leg requires successful release tests, including jobs with 
   assert.match(build.run, /check-map/);
   assert.ok(gate.steps.some(step => step.run?.includes('release-test-report.mjs')));
   assert.ok(gate.steps.some(step => step.uses === 'actions/upload-artifact@v4' && step.with.name === 'server-coverage-map'));
+  const saved = gate.steps.find(step => step.uses === 'actions/cache/save@v4');
+  assert.equal(saved.with.path, '${{ runner.temp }}/map/server-coverage-map.json');
+  assert.equal(saved.with.key, 'server-coverage-map-${{ needs.initialize.outputs.release_sha }}');
+  assert.equal(saved['continue-on-error'], true);
+  const shard = checks.jobs['server-suite-shard'];
+  const restored = shard.steps.find(step => step.uses === 'actions/cache/restore@v4' && step.with.key === 'server-coverage-map-${{ github.sha }}');
+  assert.equal(restored.with['restore-keys'], 'server-coverage-map-');
+  assert.match(restored.if, /github.event_name == 'pull_request'/);
+  const mapCheck = checks.jobs['coverage-map-check'];
+  assert.ok(mapCheck.steps.some(step => step.uses === 'actions/cache/restore@v4' && step.with.key === 'server-coverage-map-${{ github.sha }}'));
+  assert.equal(shard.steps.some(step => step.run?.includes('coverage-map-artifact.mjs')), false);
   assert.match(final.steps.find(step => step.id === 'notification').if, /needs.release_validation.result == 'success'/);
+});
+
+test('the on-demand coverage map can save its cache only when every caller allows it', () => {
+  const map = workflow('server-coverage-map').jobs.map.permissions;
+  assert.equal(map.contents, 'read');
+  assert.equal(map.actions, 'write');
+  const caller = checks.jobs['coverage-map'];
+  assert.equal(caller.uses, './.github/workflows/server-coverage-map.yml');
+  assert.equal(caller.permissions.contents, 'read');
+  assert.equal(caller.permissions.actions, 'write');
+  const releaseCaller = release.jobs.release_checks.permissions;
+  assert.equal(releaseCaller.contents, 'read');
+  assert.equal(releaseCaller.actions, 'write');
+  assert.equal(releaseCaller.packages, 'write');
+});
+
+test('one pull request Checks run fetches the coverage map from one job', () => {
+  let jobs = 0;
+  for (const job of Object.values(checks.jobs)) {
+    if ((job.steps ?? []).some(step => step.run?.includes('coverage-map-artifact.mjs')))
+      jobs += job.strategy?.matrix?.shard?.length ?? 1;
+  }
+  assert.equal(jobs, 1);
+  // Two list reads plus the zip of the chosen map.
+  assert.equal(coverageMapReads().length + 1, 3);
+});
+
+test('a release start lists one page and creates its draft once', () => {
+  assert.deepEqual(releaseIdentityReads(), ['releases?per_page=100']);
+  assert.equal(releaseStartRestCallCount(), 4);
+  const steps = release.jobs.initialize.steps;
+  const identity = steps.find(step => step.id === 'identity');
+  const clock = steps.find(step => step.id === 'clock');
+  const mint = steps.find(step => step.id === 'app_token');
+  assert.equal((identity.run.match(/gh release create/g) ?? []).length, 1);
+  assert.doesNotMatch(identity.run, /ghr_|gh-release-retry/);
+  assert.match(clock.with.script, /getWorkflowRun/);
+  assert.match(mint.run, /github-app-installation-token\.mjs/);
+  assert.equal(mint.env.GITHUB_APP_ID, '${{ secrets.BEELINE_GITHUB_APP_ID }}');
+  assert.equal(mint.env.GITHUB_APP_PRIVATE_KEY, '${{ secrets.BEELINE_GITHUB_APP_PRIVATE_KEY }}');
+  assert.equal(clock.with['github-token'], '${{ steps.app_token.outputs.token }}');
+  assert.equal(identity.env.GH_TOKEN, '${{ steps.app_token.outputs.token }}');
+  assert.ok(steps.findIndex(step => step.id === 'app_token') < steps.findIndex(step => step.id === 'clock'));
 });
 
 test('workspace archives and provenance use the checkout SHA when a release promotes an older commit', () => {

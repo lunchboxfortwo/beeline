@@ -38,6 +38,8 @@ SHA are called out; unmapped tests can only be attributed by their own file.
 There is no automatic bisect, retry or second test run.
 
 PRs read the newest usable release map, not the workflow dispatch head.
+SERVER COVERAGE MAP is the only pull-request job that calls GitHub for that
+file. The server shards reuse the cached copy and otherwise run the full suite.
 They diff from its embedded commit, so intervening merges are included.
 Existing age/ancestry/distance limits still fall back to full suites when the
 map cannot safely describe the PR. The manual coverage-map recovery suite
@@ -47,7 +49,7 @@ are unchanged. This workflow change requires no required-check renames.
 Offline validation (no dispatch or delivery):
 
 ```sh
-node --test --test-concurrency=1 scripts/ci-release-contract.test.mjs scripts/server-test-selection.test.mjs scripts/coverage-map-artifact.test.mjs scripts/release-test-report.test.mjs
+node --test --test-concurrency=1 scripts/ci-release-contract.test.mjs scripts/github-app-installation-token.test.mjs scripts/server-test-selection.test.mjs scripts/coverage-map-artifact.test.mjs scripts/release-test-report.test.mjs
 npm run lint:workflows
 ```
 
@@ -218,7 +220,12 @@ cancellation to finish before dispatching recovery.
 draft is an attempt that has not published. A later dispatch of the same commit
 resumes that draft's version, so every leg sees what the attempt already
 shipped; a next dispatch of another commit skips its reserved rc counter. A
-successful release deletes the drafts below its version.
+successful release deletes the drafts below its version. The workflow-run
+read, the one release page, the `release.json` download, and that draft create
+use a Beeline GitHub App installation token minted in the job from
+`BEELINE_GITHUB_APP_ID` and `BEELINE_GITHUB_APP_PRIVATE_KEY`. They do not use
+the workflow token. The mint is the installation lookup plus one
+repository-scoped access token. The four start calls stay on that token.
 
 A `next` release pins current `main`, includes every merge at that
 HEAD, selects the server, helper and OTA components, uses `store_track=none`,

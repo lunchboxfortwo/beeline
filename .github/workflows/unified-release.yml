@@ -127,10 +127,20 @@ jobs:
               }
             }
             await core.summary.addHeading('Release dispatch').addCodeBlock(JSON.stringify(provenance, null, 2), 'json').write();
+      - name: Mint the Beeline GitHub App token
+        id: app_token
+        env:
+          GITHUB_APP_ID: ${{ secrets.BEELINE_GITHUB_APP_ID }}
+          GITHUB_APP_PRIVATE_KEY: ${{ secrets.BEELINE_GITHUB_APP_PRIVATE_KEY }}
+        run: |
+          token=$(node scripts/github-app-installation-token.mjs)
+          echo "::add-mask::$token"
+          echo "token=$token" >> "$GITHUB_OUTPUT"
       - name: Record dispatch clock
         id: clock
         uses: actions/github-script@v7
         with:
+          github-token: ${{ steps.app_token.outputs.token }}
           script: |
             const run = await github.rest.actions.getWorkflowRun({
               owner: context.repo.owner, repo: context.repo.repo, run_id: context.runId,
@@ -142,10 +152,9 @@ jobs:
           CHANNEL: ${{ inputs.channel || 'next' }}
           REQUESTED_SHA: ${{ inputs.release_sha || '' }}
           REQUESTED_VERSION: ${{ inputs.release_version || '' }}
-          GH_TOKEN: ${{ github.token }}
+          GH_TOKEN: ${{ steps.app_token.outputs.token }}
         run: |
           set -euo pipefail
-          . scripts/gh-release-retry.sh
           release_sha=''
           if [ "$CHANNEL" = next ]; then
             release_sha=$(git rev-parse --verify "${REQUESTED_SHA:-$GITHUB_SHA}^{commit}")
@@ -164,8 +173,9 @@ jobs:
           has_release=$(sed -n 's/^has_release=//p' "$RUNNER_TEMP/identity.txt")
           if [ "$has_release" != true ]; then
             # Reserve the identity at once, so a failed attempt's version is
-            # never handed to a different commit.
-            ghr_create "$version" --target "$release_sha" --title "$version" --notes 'Release in progress.' --draft
+            # never handed to a different commit. One create: a rate-limit
+            # failure must not be retried.
+            gh release create "$version" --target "$release_sha" --title "$version" --notes 'Release in progress.' --draft
           fi
           {
             echo "release_sha=$release_sha"
@@ -259,10 +269,11 @@ jobs:
   release_checks:
     needs: initialize
     # A called workflow may not request more than its caller grants; checks.yml
-    # declares packages: write for its on-demand image mirror job.
+    # declares packages: write for its on-demand image mirror and actions: write
+    # for the on-demand coverage map cache.
     permissions:
       contents: read
-      actions: read
+      actions: write
       packages: write
     uses: ./.github/workflows/checks.yml
     with:
@@ -277,7 +288,7 @@ jobs:
     timeout-minutes: 10
     permissions:
       contents: read
-      actions: read
+      actions: write
     steps:
       - uses: actions/checkout@v4
         with:
@@ -296,12 +307,15 @@ jobs:
           merge-multiple: true
           path: ${{ runner.temp }}/coverage-records
       - name: Build and check the release coverage map
+        id: coverage-map
         if: needs.release_checks.result == 'success'
         env:
           RELEASE_SHA: ${{ needs.initialize.outputs.release_sha }}
         run: |
           node apps/server/scripts/test-selection.mjs build-map --records "$RUNNER_TEMP/coverage-records" --commit "$RELEASE_SHA" --release-run "$GITHUB_RUN_ID" --out "$RUNNER_TEMP/server-coverage-map.json"
           node apps/server/scripts/test-selection.mjs check-map "$RUNNER_TEMP/server-coverage-map.json"
+          mkdir -p "$RUNNER_TEMP/map"
+          cp "$RUNNER_TEMP/server-coverage-map.json" "$RUNNER_TEMP/map/server-coverage-map.json"
       - name: Publish release coverage for later PR selections
         if: needs.release_checks.result == 'success'
         uses: actions/upload-artifact@v4
@@ -310,6 +324,12 @@ jobs:
           path: ${{ runner.temp }}/server-coverage-map.json
           retention-days: 14
           if-no-files-found: error
+      - uses: actions/cache/save@v4
+        if: steps.coverage-map.outcome == 'success'
+        continue-on-error: true
+        with:
+          path: ${{ runner.temp }}/map/server-coverage-map.json
+          key: server-coverage-map-${{ needs.initialize.outputs.release_sha }}
       - name: Print failing tests and likely commits since the previous release
         if: "!cancelled() && (failure() || needs.release_checks.result != 'success')"
         env:

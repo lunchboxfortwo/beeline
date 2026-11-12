@@ -279,12 +279,14 @@ jobs:
       - uses: ./.github/actions/ci-workspace
         id: workspace
         if: steps.changes.outputs.run == 'true'
-      - name: Download the newest usable coverage map
-        env:
-          GH_TOKEN: ${{ github.token }}
-        run: node apps/server/scripts/coverage-map-artifact.mjs --out "$RUNNER_TEMP/map"
+      # SERVER COVERAGE MAP is the only job that reads this file from GitHub.
+      - uses: actions/cache/restore@v4
+        id: coverage-map
         if: steps.changes.outputs.run == 'true' && github.event_name == 'pull_request'
-        continue-on-error: true
+        with:
+          path: ${{ runner.temp }}/map/server-coverage-map.json
+          key: server-coverage-map-${{ github.sha }}
+          restore-keys: server-coverage-map-
       - name: Select server tests in this shard
         if: steps.changes.outputs.run == 'true' && (github.event_name == 'pull_request')
         continue-on-error: true
@@ -326,11 +328,18 @@ jobs:
         with:
           fetch-depth: 0
       - uses: ./.github/actions/ci-workspace
+      - uses: actions/cache/restore@v4
+        with:
+          path: ${{ runner.temp }}/map/server-coverage-map.json
+          key: server-coverage-map-${{ github.sha }}
+          restore-keys: server-coverage-map-
       - name: Check the map used by PR selection
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
-          node apps/server/scripts/coverage-map-artifact.mjs --out "$RUNNER_TEMP/map"
+          if [ ! -f "$RUNNER_TEMP/map/server-coverage-map.json" ]; then
+            node apps/server/scripts/coverage-map-artifact.mjs --out "$RUNNER_TEMP/map"
+          fi
           if [ -f "$RUNNER_TEMP/map/server-coverage-map.json" ]; then
             node apps/server/scripts/test-selection.mjs check-map "$RUNNER_TEMP/map/server-coverage-map.json"
           else
@@ -339,6 +348,11 @@ jobs:
   coverage-map:
     name: SERVER COVERAGE MAP (on demand)
     if: github.event_name == 'workflow_dispatch' && inputs.suite == 'coverage-map'
+    # The called map job saves a cache, which needs actions: write. A caller
+    # that omits it makes GitHub reject this file before any Checks job starts.
+    permissions:
+      contents: read
+      actions: write
     uses: ./.github/workflows/server-coverage-map.yml
   server-claim-latency:
     name: SERVER CLAIM LATENCY
@@ -798,7 +812,7 @@ jobs:
         run: npm run lint:shell
         if: steps.changes.outputs.run == 'true'
       - name: Test release preflight, failure intake and governor regressions
-        run: node --test --test-concurrency=1 scripts/unified-release.test.mjs scripts/release-channel.test.mjs scripts/helper-downloads.test.mjs scripts/pr-store-build.test.mjs scripts/ota-launch-proof.test.mjs scripts/npm-package-visibility.test.mjs scripts/smoke-helper-package.test.mjs       scripts/release-artifact-allowlist.test.mjs scripts/assert-mobile-release-origin.test.mjs scripts/rollout-schema.test.mjs scripts/release-test-report.test.mjs scripts/ci-release-contract.test.mjs
+        run: node --test --test-concurrency=1 scripts/unified-release.test.mjs scripts/release-channel.test.mjs scripts/helper-downloads.test.mjs scripts/pr-store-build.test.mjs scripts/ota-launch-proof.test.mjs scripts/npm-package-visibility.test.mjs scripts/smoke-helper-package.test.mjs       scripts/release-artifact-allowlist.test.mjs scripts/assert-mobile-release-origin.test.mjs scripts/rollout-schema.test.mjs scripts/release-test-report.test.mjs scripts/ci-release-contract.test.mjs scripts/github-app-installation-token.test.mjs
         if: steps.changes.outputs.run == 'true'
       - name: Refuse release state in artifacts and caches
         run: node scripts/release-artifact-allowlist.mjs

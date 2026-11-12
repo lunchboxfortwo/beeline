@@ -30,6 +30,7 @@ const VERSION_SHA = '\\$\\{\\{ (?:needs\\.initialize\\.outputs|inputs)\\.release
 // Every allowed name is a build output, named for the run that built it.
 export const ALLOWED = [
   { category: 'release test coverage', kind: 'artifact', file: '.github/workflows/unified-release.yml', pattern: /^server-coverage-(?:map|records-\*)$/ },
+  { category: 'release test coverage', kind: 'cache', file: '.github/workflows/unified-release.yml', pattern: /^server-coverage-map-\$\{\{ needs\.initialize\.outputs\.release_sha \}\}$/ },
   { category: 'Linux helper archive and compiled CLI', kind: 'artifact', pattern: new RegExp(`^helper-linux-${ID}$`) },
   { category: 'Mac helper binaries', kind: 'artifact', pattern: new RegExp(`^daemon-(?:darwin-arm64|darwin-x64|\\$\\{\\{ matrix\\.platform \\}\\})-${ID}$`) },
   { category: 'Android AAB for the emulator test', kind: 'artifact', pattern: new RegExp(`^mobile-native-android-build-${ID}$`) },
