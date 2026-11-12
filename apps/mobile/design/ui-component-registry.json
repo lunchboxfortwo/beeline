@@ -139,6 +139,9 @@
       "ButtonRow",
       "ButtonRowFrame"
     ],
+    "components/buzz/ChatOpeningSurface.tsx": [
+      "ChatOpeningSurface"
+    ],
     "components/buzz/ChevronGlyph.tsx": [
       "ChevronGlyph"
     ],
@@ -201,10 +204,6 @@
     ],
     "components/buzz/CornerActionsSheet.tsx": [
       "CornerActionsSheet"
-    ],
-    "components/buzz/CornerGlyph.tsx": [
-      "CORNER_POINTS",
-      "CornerGlyph"
     ],
     "components/buzz/CornerOpenToast.tsx": [
       "CornerOpenRow",
@@ -444,9 +443,6 @@
     ],
     "components/buzz/RoomDeckLoadingView.tsx": [
       "RoomDeckLoadingView"
-    ],
-    "components/buzz/RoomGlyph.tsx": [
-      "RoomGlyph"
     ],
     "components/buzz/RoomListSectionHeader.tsx": [
       "LABEL_LINE",

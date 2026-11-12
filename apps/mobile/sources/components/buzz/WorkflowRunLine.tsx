@@ -1,4 +1,5 @@
 import React, { useMemo, useState } from 'react';
+import { CornerDownRight, type LucideProps } from 'lucide-react-native';
 import Svg, { Circle, Path } from 'react-native-svg';
 import { XStack, YStack, useTheme } from 'tamagui';
 import {
@@ -23,7 +24,6 @@ import {
 import { isGeneratedAgentAvatarUrl } from '@/buzz/identity-mark';
 import { Inked, T } from '@/ui/grammar';
 import { findRoomCornerRow, useRoomCornerRecord } from '@/buzz/room-corner-store';
-import { CORNER_META_SIZE, CornerGlyph } from './CornerGlyph';
 import { CHEVRON_ROW_SIZE, ChevronGlyph } from './ChevronGlyph';
 import { ContentTarget } from './IndexRow';
 import { DECORATIVE_GLYPH_PROPS } from './decorative-glyph';
@@ -280,7 +280,7 @@ function OpenedCorner({
       gap="2"
       testID={`workflow-run-corner-${corner.id}`}
     >
-      <CornerGlyph size={CORNER_META_SIZE} />
+      <Inked<LucideProps> glyph={CornerDownRight} color="secondary" size={13} strokeWidth={1.7} />
       <T v="meta" color="ink" flex={1} minWidth={0} numberOfLines={1}>
         {named.name}
       </T>

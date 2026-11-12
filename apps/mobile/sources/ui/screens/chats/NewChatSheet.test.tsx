@@ -8,6 +8,11 @@ vi.mock('tamagui', async () => (await import('./tamagui-hosts.test-support')).ta
 vi.mock('lucide-react-native', async () => (await import('./tamagui-hosts.test-support')).lucideHosts());
 vi.mock('react-native-svg', async () => (await import('./tamagui-hosts.test-support')).svgHosts());
 vi.mock('react-native-safe-area-context', () => ({ useSafeAreaInsets: () => ({ top: 0, bottom: 0 }) }));
+vi.mock('react-native', () => ({
+  FlatList: ({ data, renderItem, ListFooterComponent, ListEmptyComponent, ...props }: any) => React.createElement('FlatList', props,
+    data.length ? data.slice(0, 10).map((item: any, index: number) => React.createElement(React.Fragment, { key: item.key }, renderItem({ item, index }))) : ListEmptyComponent,
+    ListFooterComponent),
+}));
 
 import { NewChatSheet, type NewChatSheetProps, type NewChatStep } from './NewChatSheet';
 import { ChatListHeader, CLOSED_SEARCH, type ChatSearch } from './ChatListHeader';
@@ -71,6 +76,15 @@ it('asks to connect GitHub when no repository is reachable', () => {
   const { tree, props } = sheet('github', { candidates: [] });
   act(() => byTestID(tree, 'repo-connect-github').props.onPress());
   expect(props.onConnectGitHub).toHaveBeenCalledOnce();
+});
+
+it('defers offscreen repositories when opening and can still find and select the last one', () => {
+  const candidates = Array.from({ length: 1000 }, (_, index) => ({ key: `repo-${index}`, name: `owner/repository-${index}` }));
+  const { tree, props } = sheet('github', { candidates });
+  expect(tree.root.findAll((node: any) => typeof node.type === 'string' && node.props.testID === 'repo-row-repo-999')).toHaveLength(0);
+  act(() => byTestID(tree, 'repo-search').props.onChangeText('repository-999'));
+  act(() => byTestID(tree, 'repo-row-repo-999').props.onPress());
+  expect(props.onPickRepository).toHaveBeenCalledWith(candidates[999]);
 });
 
 it('starts an empty chat only from a valid name, public by default', () => {

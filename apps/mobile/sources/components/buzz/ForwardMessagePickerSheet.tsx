@@ -101,7 +101,7 @@ export function ForwardMessagePickerSheet({
             testID="forward-destinations-loader"
           >
             <SurfaceGlyphLoader compact />
-            <T v="metaStrong" color="secondary" textAlign="center">LOADING DESTINATIONS…</T>
+            <T v="meta" color="secondary" textAlign="center">LOADING DESTINATIONS…</T>
           </YStack>
         ) : filteredTargets.length ? (
           SECTIONS.map((section) => {

@@ -1,11 +1,11 @@
 import React, { useState } from 'react';
 import { XStack } from 'tamagui';
-import { T } from '@/ui/grammar';
+import { Inked, T } from '@/ui/grammar';
+import { CornerDownRight, type LucideProps } from 'lucide-react-native';
 import type { ChatDisplayMessage } from '@/buzz/room-view-presentation';
 import { lifecycleSummary, type NotificationLifecycleRun } from '@/buzz/pr-lifecycle';
 import { TranscriptNavigationRow } from './IndexRow';
 import { LedgerDisclosure, LedgerLogGroup } from './LedgerDisclosure';
-import { CornerGlyph, CORNER_META_SIZE } from './CornerGlyph';
 
 interface NotificationLifecycleCardProps {
   message: ChatDisplayMessage;
@@ -96,7 +96,7 @@ export function RepositoryLifecycleRow({
         testID={`notification-run-cell-${item.id}`}
         divider={divider}
         singleDestination
-        leading={item.cornerId ? <CornerGlyph size={CORNER_META_SIZE} /> : undefined}
+        leading={item.cornerId ? <Inked<LucideProps> glyph={CornerDownRight} color="secondary" size={13} strokeWidth={1.7} /> : undefined}
         trailing={
           item.cornerId
             ? {

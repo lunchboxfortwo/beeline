@@ -4,16 +4,17 @@ import { useReanimatedKeyboardAnimation } from 'react-native-keyboard-controller
 import { useAnimatedStyle } from 'react-native-reanimated';
 import { YStack } from 'tamagui';
 import { composerBottomPadding } from '@/buzz/composer-keyboard';
-import { SafeTop, T } from '@/ui/grammar';
+import { T } from '@/ui/grammar';
 import { KeyboardBody } from '@/ui/grammar-root';
 import { router, type Href } from 'expo-router';
-import { CORNER_LABEL, CORNER_TITLE, ROOM_LABEL, ROOM_TITLE } from '@/buzz/vocabulary';
+import { CORNER_TITLE, ROOM_TITLE } from '@/buzz/vocabulary';
 import { type RoomSurfaceSessionBindings, type UseRoomSurfaceSessionResult } from './useRoomSurfaceSession';
 import { BuzzCommunityShell } from '@/components/buzz/CommunityRail';
 import { RoomActionsBackground } from '@/components/buzz/RoomRepositoryChoice';
 import { RoomReviewerSurfaceNotice } from '@/components/buzz/RoomReviewerActions';
 import { VoiceCallCard } from '@/components/buzz/VoiceCallCard';
-import { SurfaceGlyphLoader } from '@/components/buzz/SurfaceGlyphLoader';
+import { ChatOpeningSurface } from '@/components/buzz/ChatOpeningSurface';
+export { ChatOpeningSurface } from '@/components/buzz/ChatOpeningSurface';
 import { useChatRoute } from './useChatRoute';
 import { useChatScrollState } from './useChatScrollState';
 import { useChatComposerRefs } from './useChatComposerRefs';
@@ -43,7 +44,7 @@ import { useChatComposerCommands } from './useChatComposerCommands';
 import { useChatTranscriptRenderer } from './useChatTranscriptRenderer';
 import { ChatSurfaceErrorHeader, ChatSurfaceHeaderView as ChatSurfaceHeader } from './ChatSurfaceHeader';
 import { useChatThreadHeader } from './useChatThreadHeader';
-import { ThreadsDropdown } from '@/ui/screens/chat/ThreadsDropdown';
+import { ThreadsDropdown, ThreadsDropdownScope } from '@/ui/screens/chat/ThreadsDropdown';
 import { openPlace } from '@/ui/shell/panel';
 import { ChatSurfaceTranscript } from './ChatSurfaceTranscript';
 import { ChatSurfaceComposer } from './ChatSurfaceComposer';
@@ -52,20 +53,6 @@ import { ChatSurfaceOverlays } from './ChatSurfaceOverlays';
 
 
 
-/** The existing loading surface, without mounting an empty transcript. */
-export function ChatOpeningSurface({ isCorner }: { isCorner: boolean }) {
-  return (
-    <YStack flex={1} backgroundColor="canvas">
-      <SafeTop />
-      <YStack flex={1} alignItems="center" justifyContent="center">
-        <SurfaceGlyphLoader testID="room-surface-loader" />
-        <T v="metaStrong" color="secondary" marginTop="2">
-          LOADING {(isCorner ? CORNER_LABEL : ROOM_LABEL).toUpperCase()}
-        </T>
-      </YStack>
-    </YStack>
-  );
-}
 
 export function BuzzChatSurface({
   session,
@@ -444,6 +431,7 @@ export function BuzzChatSurface({
   }
 
   return (
+    <ThreadsDropdownScope>
     <BuzzCommunityShell
       communities={communities}
       activeCommunityId={activeCommunityId}
@@ -762,6 +750,7 @@ export function BuzzChatSurface({
   handleCreatePoll={handleCreatePoll}
 />
     </BuzzCommunityShell>
+    </ThreadsDropdownScope>
   );
 }
 

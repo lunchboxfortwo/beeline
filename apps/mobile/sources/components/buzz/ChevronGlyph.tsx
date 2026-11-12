@@ -4,7 +4,7 @@ import { DECORATIVE_GLYPH_PROPS } from './decorative-glyph';
 import brand from '@/buzz/brand.json';
 
 /**
- * Header chrome shares a 24 viewBox with RoomGlyph and MembersGlyph. At the
+ * Header chrome shares a 24 viewBox with the other header marks. At the
  * 16px chrome size this paints ~1.33px, the same band as its peers.
  */
 export const CHEVRON_GLYPH_STROKE_WIDTH = 2;

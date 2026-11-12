@@ -14,7 +14,7 @@ export function RoomDeckLoadingView({ onLayout }: { onLayout?: React.ComponentPr
     <YStack flex={1} alignSelf="stretch" alignItems="center" justifyContent="center" gap="4" paddingHorizontal="8"
       backgroundColor="canvas" testID="rooms-loader-gate" onLayout={onLayout}>
       <SurfaceGlyphLoader compact size={SURFACE_GLYPH_SIZE} testID="rooms-loader" />
-      <T v="metaStrong" color="secondary">Loading chats</T>
+      <T v="meta" color="secondary">Loading chats</T>
     </YStack>
   );
 }

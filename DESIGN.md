@@ -192,6 +192,8 @@ The transcript's day caption is the one caption exception: `sectionHead` in the 
 
 **The Mono Is For Machines Rule.** Space Grotesk carries names, rows, buttons, labels and bylines. Mono is for strings a machine produced, plus the byline's model tag and stamp.
 
+Status text has fixed grammar roles: loading captions use `meta`, sign-in status uses `body`, and the shared empty state uses `body` for its title and `meta` for its description. Status copy cannot select headings or strong variants. `scripts/mobile-visual-policy.mjs` owns these component roles and the approved concept-icon inventory: threads use `CornerDownRight` (↳), chats use `Hash` (#), and message actions retain `MessagesSquare`. The grammar and UI lint enforce these rules without a legacy allowance; the retired corner and square Room marks cannot return.
+
 ## Layout
 
 - **Spacing scale** (`space`): 4 · 8 · 16 · 24 · 32 · 48 (`xs`…`xxl`). `layout`: rows 64, sections 24 apart, screens start 24 below the header.

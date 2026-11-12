@@ -41,7 +41,10 @@ for (const success of [true, false]) it(`accepted=${success} controls feedback b
     targets: [{ kind: 'room' as const, id: 'target', label: '#target', group: 'rooms' as const }], visible: true,
   };
   let tree: any;
-  await act(async () => { tree = create(<ForwardMessagePickerSheet {...props} />); });
+  await act(async () => { tree = create(<ForwardMessagePickerSheet {...props} targets={null} />); });
+  const loading = tree.root.findAllByType('Text').find((node: any) => node.props.children === 'LOADING DESTINATIONS…');
+  expect(loading.props.fontFamily).toBe('SpaceGrotesk-Regular');
+  await act(async () => { tree.update(<ForwardMessagePickerSheet {...props} />); });
   let sending: Promise<void>;
   await act(async () => { sending = tree.root.findByType('Row').props.onPress(); });
   expect(tree.root.findByType('Row').props.metadata).toBeUndefined();

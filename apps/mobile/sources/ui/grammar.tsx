@@ -14,10 +14,10 @@ import {
     useTheme,
     useThemeName,
 } from 'tamagui';
-import { ArrowLeft, Check, ChevronRight, Copy as CopyIcon, MessagesSquare } from 'lucide-react-native';
+import { ArrowLeft, Check, ChevronRight, Copy as CopyIcon, Hash } from 'lucide-react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import Animated, { type AnimatedProps, type AnimatedStyle } from 'react-native-reanimated';
-import type { ViewProps, ViewStyle } from 'react-native';
+import type { ColorValue, ViewProps, ViewStyle } from 'react-native';
 import { QR_INK, QR_PAPER, SCRIM } from '@/buzz/groknight';
 
 /**
@@ -243,7 +243,7 @@ export function Screen({ title, back, children, testID, right, header }: { title
 export function ChatMark({ size = 36 }: { size?: 36 | 28 }) {
     return (
         <YStack width={size} height={size} borderRadius="sm" backgroundColor="highlight" alignItems="center" justifyContent="center" testID="chat-mark">
-            <Glyph icon={MessagesSquare} size={size === 36 ? 20 : 16} />
+            <Glyph icon={Hash} size={size === 36 ? 20 : 16} />
         </YStack>
     );
 }
@@ -401,7 +401,7 @@ function useTypeStyle(v: Variant, color: ColorToken = 'ink'): import('react-nati
  * takes its ink as a colour string: draws `glyph` with the theme value of the
  * `color` token. `<Inked color="secondary" glyph={ChevronGlyph} size={14} />`.
  */
-export function Inked<P extends { color?: string }>({ color, glyph: Glyph, ...rest }: { color: ColorToken; glyph: React.ComponentType<P> } & Omit<P, 'color'>) {
+export function Inked<P extends { color?: ColorValue }>({ color, glyph: Glyph, ...rest }: { color: ColorToken; glyph: React.ComponentType<P> } & Omit<P, 'color'>) {
     const ink = (useTheme() as Record<string, { val: string } | undefined>)[color]?.val;
     return <Glyph {...(rest as unknown as P)} color={ink} />;
 }

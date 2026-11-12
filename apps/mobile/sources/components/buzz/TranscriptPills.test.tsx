@@ -16,7 +16,6 @@ vi.mock('./Ledger', () => ({ ledgerEntryRhythm: () => ({}), LedgerSystemLine: ()
 vi.mock('./Ledger-styles', () => ({ settledAgentProseStyle: () => ({}) }));
 vi.mock('./MonoMarkdown', () => ({ MonoMarkdown: () => null }));
 vi.mock('@/ui/screens/transcript/PillRow', () => ({ PillRow: () => <React.Fragment /> }));
-vi.mock('./CornerGlyph', () => ({ CornerGlyph: () => null, CORNER_META_SIZE: 14 }));
 vi.mock('./ChevronGlyph', () => ({ ChevronGlyph: () => null, CHEVRON_ROW_SIZE: 14 }));
 vi.mock('./IndexRow', () => ({
   InlineRow: ({ children }: any) => <>{children}</>,

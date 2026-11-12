@@ -34,7 +34,6 @@ vi.mock('@/components/buzz/SettingsRow', async () => {
   return { SettingsRow: (props: any) => createElement('SettingsRow', props, props.leading) };
 });
 vi.mock('@/components/buzz/WorkflowRunLine', () => ({ WorkflowRunLine: () => null }));
-vi.mock('@/components/buzz/CornerGlyph', () => ({ CORNER_META_SIZE: 10, CornerGlyph: () => null }));
 vi.mock('@/components/buzz/SurfaceGlyphLoader', () => ({ SurfaceGlyphLoader: () => null }));
 vi.mock('@/auth/buzz-identity-storage', () => ({ loadBuzzIdentity: async () => ({ publicKey: 'viewer' }), getEffectiveRelayUrl: async () => 'http://local' }));
 vi.mock('@/sync/transport/room-view-client', () => ({ RoomViewClient: class { room = room; } }));

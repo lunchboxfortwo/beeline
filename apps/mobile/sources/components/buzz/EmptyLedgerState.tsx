@@ -2,7 +2,8 @@ import { EmptyState } from './EmptyState';
 import { IndexRow } from './IndexRow';
 import React from 'react';
 import { YStack } from 'tamagui';
-import { RoomGlyph } from '@/components/buzz/RoomGlyph';
+import { Hash, type LucideProps } from 'lucide-react-native';
+import { Inked } from '@/ui/grammar';
 
 export type EmptyLedgerVariant = 'room' | 'corner' | 'dm';
 
@@ -76,7 +77,7 @@ export function EmptyLedgerState({
     return (
       <YStack flex={1} minHeight={44} alignItems="center" justifyContent="center" paddingHorizontal="6" paddingVertical="6" testID={testID}>
         <YStack width="100%" maxWidth={360} alignItems="center">
-          <RoomGlyph size={28} />
+          <Inked<LucideProps> glyph={Hash} color="secondary" size={28} strokeWidth={1.7} />
           <EmptyState title={name ? `${name} is empty` : 'This chat is empty'} description={starterIntro} />
           <YStack alignSelf="stretch" gap="2" marginTop="6">
             {starterPrompts.map((prompt) => (

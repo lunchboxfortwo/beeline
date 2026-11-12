@@ -3,8 +3,18 @@ import React from 'react';
 import { act, create } from 'react-test-renderer';
 import { beforeEach, expect, it, vi } from 'vitest';
 
-const fixture = vi.hoisted(() => ({ summary: undefined as any, corners: undefined as any }));
-vi.mock('react-native', () => ({ useWindowDimensions: () => ({ width: 390, height: 844 }) }));
+const fixture = vi.hoisted(() => ({ summary: undefined as any, corners: undefined as any, blur: () => {}, platform: 'web' }));
+vi.mock('expo-router', async () => {
+  const R = await import('react');
+  return {
+    router: { push: vi.fn(() => fixture.blur()) },
+    useFocusEffect: (effect: () => (() => void)) => R.useEffect(() => {
+      fixture.blur = effect();
+      return fixture.blur;
+    }, [effect]),
+  };
+});
+vi.mock('react-native', () => ({ Platform: { get OS() { return fixture.platform; } }, useWindowDimensions: () => ({ width: 390, height: 844 }) }));
 vi.mock('tamagui', async () => {
   const R = await import('react');
   const Open = R.createContext<any>(null);
@@ -19,18 +29,95 @@ vi.mock('tamagui', async () => {
       Content: (props: any) => props.children,
     },
   );
-  return { Collapsible, ScrollView: 'ScrollView', Separator: 'Separator', YStack: 'YStack' };
+  // Match Tamagui's native pointerEvents helper: its spread of the touch event
+  // drops inherited SyntheticEvent methods such as stopPropagation.
+  const YStack = ({ onPointerDown, onTouchStart, ...props }: any) => R.createElement('YStack', {
+    ...props,
+    ...(fixture.platform === 'web' ? { onPointerDown, onTouchStart } : {
+      onTouchStart: (event: any) => {
+        onTouchStart?.(event);
+        onPointerDown?.({ ...event, pointerType: 'touch', pointerId: event.nativeEvent.identifier });
+      },
+    }),
+  });
+  return { Collapsible, ScrollView: 'ScrollView', Separator: 'Separator', YStack };
 });
 vi.mock('lucide-react-native', () => ({ ChevronDown: 'ChevronDown', ChevronUp: 'ChevronUp', CornerDownRight: 'CornerDownRight' }));
 vi.mock('@/ui/grammar', () => ({ Btn: 'Btn', Copy: 'Copy', Glyph: 'Glyph' }));
 vi.mock('@/ui/screens/thread/ThreadLine', () => ({ ThreadLine: 'ThreadLine' }));
 vi.mock('@/buzz/room-corner-store', () => ({ useRoomCornerSummary: () => fixture.summary }));
 vi.mock('@/buzz/use-room-corners', () => ({ useRoomCorners: () => fixture.corners }));
-import { ThreadsDropdown } from './ThreadsDropdown';
+import { ThreadsDropdown, ThreadsDropdownScope } from './ThreadsDropdown';
+import { closePanel, openPlace } from '@/ui/shell/panel';
 
 const byTestID = (tree: any, testID: string) => tree.root.findAll((node: any) => node.props.testID === testID && typeof node.type === 'string');
 
-beforeEach(() => { (globalThis as any).IS_REACT_ACT_ENVIRONMENT = true; });
+beforeEach(() => { (globalThis as any).IS_REACT_ACT_ENVIRONMENT = true; fixture.platform = 'web'; });
+
+it.each([false, true])('closes the expanded list when Chat info opens (desktop: %s)', (desktop) => {
+  closePanel();
+  fixture.summary = { cornerCount: 1, openCorners: [] };
+  fixture.corners = { openRows: [], record: {} };
+  let tree: any;
+  act(() => { tree = create(<ThreadsDropdownScope>
+    <button onClick={() => openPlace({ kind: 'chat-info', roomId: 'r' }, desktop)}>Chat info</button>
+    <ThreadsDropdown roomId="r" chatName="beeline" openThread={vi.fn()} />
+  </ThreadsDropdownScope>); });
+  act(() => byTestID(tree, 'threads-dropdown-trigger')[0].props.onPress());
+  expect(byTestID(tree, 'threads-dropdown-list')).toHaveLength(1);
+  act(() => tree.root.findByType('button').props.onClick());
+  expect(byTestID(tree, 'threads-dropdown-trigger')[0].props['aria-expanded']).toBe(false);
+  expect(byTestID(tree, 'threads-dropdown-list')).toHaveLength(0);
+  act(() => tree.unmount());
+  closePanel();
+});
+
+it.each(['onTouchStart', 'onPointerDown'])('dismisses on outside input without consuming it (%s)', (event) => {
+  fixture.summary = { cornerCount: 1, openCorners: [] };
+  fixture.corners = { openRows: [], record: {} };
+  let tree: any;
+  act(() => { tree = create(<ThreadsDropdownScope><ThreadsDropdown roomId="r" chatName="beeline" openThread={vi.fn()} /></ThreadsDropdownScope>); });
+  act(() => byTestID(tree, 'threads-dropdown-trigger')[0].props.onPress());
+  const stopPropagation = vi.fn();
+  act(() => byTestID(tree, 'threads-dropdown')[0].props[event]({ stopPropagation }));
+  expect(stopPropagation).toHaveBeenCalledOnce();
+  expect(byTestID(tree, 'threads-dropdown-list')).toHaveLength(1);
+  act(() => byTestID(tree, 'threads-dismiss-scope')[0].props[event]());
+  expect(byTestID(tree, 'threads-dropdown-list')).toHaveLength(0);
+  act(() => tree.unmount());
+});
+
+it.each(['android', 'ios'])('opens Threads and delivers outside actions with native touch events (%s)', (platform) => {
+  fixture.platform = platform;
+  fixture.summary = { cornerCount: 1, openCorners: [{ id: 'a', name: 'Thread', state: 'waiting' }] };
+  fixture.corners = { openRows: [], record: {} };
+  const outsidePress = vi.fn();
+  let tree: any;
+  act(() => { tree = create(<ThreadsDropdownScope>
+    <button onClick={outsidePress}>Composer</button>
+    <ThreadsDropdown roomId="r" chatName="beeline" openThread={vi.fn()} />
+  </ThreadsDropdownScope>); });
+  const nativeEvent = () => Object.assign(Object.create({ stopPropagation: vi.fn() }), {
+    nativeEvent: { identifier: 1, pageX: 20, pageY: 100, locationX: 20, locationY: 10 },
+  });
+  // Native touch start bubbles before the trigger's press is delivered.
+  act(() => byTestID(tree, 'threads-dropdown')[0].props.onTouchStart(nativeEvent()));
+  act(() => byTestID(tree, 'threads-dropdown-trigger')[0].props.onPress());
+  expect(byTestID(tree, 'threads-dropdown-list')).toHaveLength(1);
+  const inside = nativeEvent();
+  act(() => byTestID(tree, 'threads-dropdown')[0].props.onTouchStart(inside));
+  expect(inside.stopPropagation).toHaveBeenCalledOnce();
+  expect(byTestID(tree, 'threads-dropdown-list')).toHaveLength(1);
+  const outside = nativeEvent();
+  act(() => {
+    byTestID(tree, 'threads-dismiss-scope')[0].props.onTouchStart(outside);
+    tree.root.findByType('button').props.onClick();
+  });
+  expect(outside.stopPropagation).not.toHaveBeenCalled();
+  expect(outsidePress).toHaveBeenCalledOnce();
+  expect(byTestID(tree, 'threads-dropdown-list')).toHaveLength(0);
+  act(() => tree.unmount());
+});
 
 it('is only the header hairline with no active threads', () => {
   fixture.summary = { cornerCount: 0, openCorners: [] };

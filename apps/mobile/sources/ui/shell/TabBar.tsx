@@ -2,13 +2,13 @@ import React from 'react';
 import { Platform } from 'react-native';
 import { router } from 'expo-router';
 import { Separator, Tabs, XStack } from 'tamagui';
-import { AtSign, MessagesSquare, Settings, Users } from 'lucide-react-native';
+import { AtSign, Hash, Settings, Users } from 'lucide-react-native';
 import { CountPill, Glyph, HEIGHT, SafeBottom, T } from '@/ui/grammar';
 
 import { TAB_ROUTES, type Tab } from './tab-routes';
 
-const TABS: { value: Tab; label: string; icon: typeof MessagesSquare }[] = [
-    { value: 'chats', label: 'Chats', icon: MessagesSquare },
+const TABS: { value: Tab; label: string; icon: typeof Hash }[] = [
+    { value: 'chats', label: 'Chats', icon: Hash },
     { value: 'tags', label: 'Tags', icon: AtSign },
     { value: 'people', label: 'People', icon: Users },
     { value: 'settings', label: 'Settings', icon: Settings },

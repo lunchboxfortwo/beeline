@@ -25,7 +25,7 @@ const LOADING_SURFACES: readonly LoadingSurface[] = [
   { id: 'voice-startup', file: 'components/buzz/VoiceBar.tsx', treatment: 'glyph' },
   { id: 'thinking', file: 'components/buzz/TurnProgressLine.tsx', treatment: 'glyph' },
   { id: 'activity-working', file: 'components/buzz/ActivityTimeline.tsx', treatment: 'glyph' },
-  { id: 'room-corner-entry', file: 'app/(app)/beeline/chat/_chat-surface.tsx', treatment: 'glyph' },
+  { id: 'room-corner-entry', file: 'components/buzz/ChatOpeningSurface.tsx', treatment: 'glyph' },
   { id: 'room-deck', file: 'components/buzz/RoomDeckLoadingView.tsx', treatment: 'glyph' },
   { id: 'changes-list', file: 'app/(app)/beeline/corners/[roomId].tsx', treatment: 'glyph' },
   { id: 'people', file: 'ui/screens/people/PeopleTabScreen.tsx', treatment: 'glyph' },
@@ -139,7 +139,8 @@ vi.mock('react-native', async () => {
   };
 });
 
-vi.mock('react-native-safe-area-context', () => ({ useSafeAreaInsets: () => ({ top: 0, bottom: 0, left: 0, right: 0 }) }));
+const safeArea = vi.hoisted(() => ({ bottom: 0 }));
+vi.mock('react-native-safe-area-context', () => ({ useSafeAreaInsets: () => ({ top: 0, bottom: safeArea.bottom, left: 0, right: 0 }) }));
 vi.mock('lucide-react-native', async () => (await import('@/ui/screens/transcript/grammar-hosts.test-support')).lucideHosts());
 vi.mock('tamagui', async () => (await import('@/ui/screens/transcript/grammar-hosts.test-support')).tamaguiHosts());
 
@@ -212,6 +213,7 @@ beforeEach(() => {
 });
 
 afterEach(() => {
+  safeArea.bottom = 0;
   motion.reducedMotion = false;
   motion.repeats = [];
   themeRef.current = { buzz: beelineThemes.obsidian };
@@ -281,6 +283,25 @@ describe('Room loading boundary', () => {
     expect(deck.root.findByProps({ testID: 'rooms-loader-gate' })).toBeTruthy();
     expect(deck.root.findByProps({ testID: 'rooms-loader' })).toBeTruthy();
     expect(deck.root.findAllByType('Svg')).toHaveLength(1);
+    const label = deck.root.findAllByType('Text').find((node: any) => node.props.children === 'Loading chats');
+    expect(label?.props.fontFamily).toBe('SpaceGrotesk-Regular');
+  });
+});
+
+describe('Room/thread opening safe area', () => {
+  it.each([0, 24, 48])('reserves the composer foot above a bottom inset of %s', async (bottom) => {
+    const { ChatOpeningSurface } = await import('./ChatOpeningSurface');
+    const { composerBottomPadding } = await import('@/buzz/composer-keyboard');
+    safeArea.bottom = bottom;
+    const tree = render(<ChatOpeningSurface isCorner />);
+    const foot = tree.root.findAllByType('AnimatedView').find((node: any) => node.props.testID === 'room-loading-safe-bottom');
+    const style = Array.isArray(foot.props.style) ? Object.assign({}, ...foot.props.style) : foot.props.style;
+    expect(style.height).toBe(composerBottomPadding('android', bottom, 0));
+    const footer = tree.root.findByProps({ testID: 'room-loading-footer' });
+    expect(footer.props.minHeight).toBe(44);
+    const caption = tree.root.findAllByType('Text').find((node: any) => node.props.testID === 'room-loading-caption');
+    expect(caption.props.fontFamily).toBe('SpaceGrotesk-Regular');
+    act(() => tree.unmount());
   });
 });
 

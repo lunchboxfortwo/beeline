@@ -16,6 +16,6 @@ it('shows the stored owner photo, falls back to the favicon on failure, then the
   expect(image().props.source.uri).toBe('https://github.githubassets.com/favicons/favicon.png');
   await act(async()=>image().props.onError());
   expect(tree.root.findAll((node:any)=>node.type==='Image')).toHaveLength(0);
-  expect(tree.root.findAll((node:any)=>node.type==='Icon.MessagesSquare')).toHaveLength(1);
+  expect(tree.root.findAll((node:any)=>node.type==='Icon.Hash')).toHaveLength(1);
   await act(async()=>tree.unmount());
 });

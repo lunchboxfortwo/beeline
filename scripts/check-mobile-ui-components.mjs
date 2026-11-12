@@ -3,6 +3,7 @@ import { readFileSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
 import path from 'node:path';
 import { judgeUiRegistry, REGISTRY_PATH, registryAtRef, scanUiTree } from './mobile-ui-policy.mjs';
+import { scanGrammarTree } from './mobile-grammar-policy.mjs';
 
 const args = process.argv.slice(2);
 const baseFlag = args.indexOf('--base');
@@ -17,7 +18,8 @@ const root = path.resolve(rootArg ?? fileURLToPath(new URL('..', import.meta.url
 try {
   const scans = scanUiTree(root);
   const registry = JSON.parse(readFileSync(path.join(root, REGISTRY_PATH), 'utf8'));
-  const errors = [...judgeUiRegistry(scans, registry, base ? registryAtRef(root, base) : undefined), ...checkConnectionUiTree(root)];
+  const typography = scanGrammarTree(root).filter(error => ['type-scale', 'role-lock', 'glyph-lock'].includes(error.rule));
+  const errors = [...judgeUiRegistry(scans, registry, base ? registryAtRef(root, base) : undefined), ...checkConnectionUiTree(root), ...typography];
   for (const error of errors)
     console.error(
       `apps/mobile/sources/${error.file}:${error.line} [${error.rule}] ${error.message}`,

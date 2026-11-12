@@ -5,7 +5,7 @@ import { beforeEach, expect, it, vi } from 'vitest';
 
 vi.mock('@/components/buzz/RepositoryMark', () => ({ RepositoryMark: 'RepositoryMark' }));
 vi.mock('tamagui', () => ({ ListItem: 'ListItem', XStack: 'XStack', YStack: 'YStack' }));
-vi.mock('lucide-react-native', () => ({ ArrowLeft: 'ArrowLeft', MessagesSquare: 'MessagesSquare', MoreHorizontal: 'MoreHorizontal', Settings: 'Settings' }));
+vi.mock('lucide-react-native', () => ({ ArrowLeft: 'ArrowLeft', Hash: 'Hash', MoreHorizontal: 'MoreHorizontal', Settings: 'Settings' }));
 vi.mock('@/ui/grammar', async () => {
   const { createElement } = await import('react');
   return {

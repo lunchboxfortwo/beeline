@@ -1,5 +1,7 @@
-import React, { useState } from 'react';
-import { useWindowDimensions } from 'react-native';
+import React, { useCallback, useContext, useEffect, useState } from 'react';
+import { useFocusEffect } from 'expo-router';
+import { usePanel } from '@/ui/shell/panel';
+import { Platform, useWindowDimensions } from 'react-native';
 import { Collapsible, ScrollView, Separator, YStack } from 'tamagui';
 import { ChevronDown, ChevronUp, CornerDownRight } from 'lucide-react-native';
 import { cornerShortTitle, type CornerState } from '@beeline/api-contract/phone';
@@ -13,6 +15,22 @@ export const THREADS_DROPDOWN_SHARE = 0.45;
 
 type Line = { id: string; title: string; state: CornerState };
 
+const DropdownContext = React.createContext<{
+    open: boolean; setOpen: (open: boolean) => void;
+} | null>(null);
+
+/** Outside touches dismiss without claiming the responder or consuming the tap. */
+export function ThreadsDropdownScope({ children }: { children: React.ReactNode }) {
+    const [open, setOpen] = useState(false);
+    const close = useCallback(() => setOpen(false), []);
+    const panel = usePanel();
+    useEffect(close, [close, panel]);
+    useFocusEffect(useCallback(() => close, [close]));
+    return <DropdownContext.Provider value={{ open, setOpen }}>
+        <YStack flex={1} onTouchStart={close} {...(Platform.OS === 'web' ? { onPointerDown: close } : {})} testID="threads-dismiss-scope">{children}</YStack>
+    </DropdownContext.Provider>;
+}
+
 /**
  * "Threads · N active" under the chat header. The count is the Room's
  * server corner summary; opening it reads the Room's open corner pages.
@@ -22,12 +40,17 @@ export function ThreadsDropdown({ roomId, chatName, openThread, repositoryAvatar
     roomId: string; chatName: string | null; openThread: (cornerId: string) => void;
 }) {
     const summary = useRoomCornerSummary(roomId);
-    const [open, setOpen] = useState(false);
+    const local = useState(false);
+    const scope = useContext(DropdownContext);
+    const { open, setOpen } = scope ?? { open: local[0], setOpen: local[1] };
     const count = summary?.cornerCount ?? 0;
     // The hairline under the chat header stays when there are no threads.
     if (!count) return <Separator borderColor="stroke" marginTop="2" />;
     return (
-        <YStack testID="threads-dropdown">
+        <YStack testID="threads-dropdown" onTouchStart={event => event.stopPropagation()}
+            // Tamagui's native pointer adapter drops SyntheticEvent prototype
+            // methods. Native containment uses the original touch event instead.
+            {...(Platform.OS === 'web' ? { onPointerDown: (event: React.PointerEvent) => event.stopPropagation() } : {})}>
             <Collapsible open={open} onOpenChange={setOpen}>
                 <Collapsible.Trigger asChild>
                     <Btn

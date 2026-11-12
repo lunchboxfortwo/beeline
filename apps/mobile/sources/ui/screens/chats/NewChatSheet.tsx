@@ -1,5 +1,6 @@
 import React, { useState } from 'react';
-import { Input, ListItem, ScrollView, Spinner, Switch, XStack, YStack, useTheme } from 'tamagui';
+import { Input, ListItem, Spinner, Switch, XStack, YStack, useTheme } from 'tamagui';
+import { FlatList } from 'react-native';
 import { Lock, Pencil, Search } from 'lucide-react-native';
 import Svg, { Path } from 'react-native-svg';
 import type { GitHubInstallationAccess } from '@beeline/buzz-client';
@@ -109,30 +110,37 @@ function RepositoryStep({ candidates, installations, loading, error, notice, bus
       </XStack>
       {error ? <Copy small color="removed" testID="repo-picker-error">{error}</Copy> : null}
       {notice ? <Copy small quiet testID="repo-picker-notice">{notice}</Copy> : null}
-      <ScrollView maxHeight={420} keyboardShouldPersistTaps="handled" testID="repo-list">
-        {found.map((candidate) => (
-          <ListItem
-            key={candidate.key}
-            minHeight={HEIGHT.primary}
-            paddingHorizontal="1"
-            gap="3"
-            alignItems="center"
-            justifyContent="flex-start"
-            backgroundColor="raised"
-            disabled={busy}
-            onPress={() => onPickRepository(candidate)}
-            aria-label={`${candidate.name}${candidate.private ? ', private' : ''}`}
-            accessibilityRole="button"
-            testID={`repo-row-${candidate.key}`}
-          >
-            <RepositoryMark avatarUrl={candidate.avatarUrl} faviconUrl={candidate.faviconUrl} size={24} />
-            <YStack flex={1} minWidth={0}><Copy>{candidate.name}</Copy></YStack>
-            {candidate.private ? <Glyph icon={Lock} size={18} /> : null}
-          </ListItem>
-        ))}
-        {loading ? <YStack padding="3" alignItems="center"><Spinner /></YStack> : null}
-        {!loading && connected && found.length === 0 ? <Copy quiet>No repositories match.</Copy> : null}
-      </ScrollView>
+      <YStack maxHeight={420}>
+        <FlatList
+          keyboardShouldPersistTaps="handled"
+          nestedScrollEnabled
+          testID="repo-list"
+          data={found}
+          keyExtractor={candidate => candidate.key}
+          renderItem={({ item: candidate }) => (
+            <ListItem
+              key={candidate.key}
+              minHeight={HEIGHT.primary}
+              paddingHorizontal="1"
+              gap="3"
+              alignItems="center"
+              justifyContent="flex-start"
+              backgroundColor="raised"
+              disabled={busy}
+              onPress={() => onPickRepository(candidate)}
+              aria-label={`${candidate.name}${candidate.private ? ', private' : ''}`}
+              accessibilityRole="button"
+              testID={`repo-row-${candidate.key}`}
+            >
+              <RepositoryMark avatarUrl={candidate.avatarUrl} faviconUrl={candidate.faviconUrl} size={24} />
+              <YStack flex={1} minWidth={0}><Copy>{candidate.name}</Copy></YStack>
+              {candidate.private ? <Glyph icon={Lock} size={18} /> : null}
+            </ListItem>
+          )}
+          ListFooterComponent={loading ? <YStack padding="3" alignItems="center"><Spinner /></YStack> : null}
+          ListEmptyComponent={!loading && connected ? <Copy quiet>No repositories match.</Copy> : null}
+        />
+      </YStack>
       {!loading && !connected ? (
         <Btn label="Connect GitHub" onPress={onConnectGitHub} testID="repo-connect-github">Connect GitHub</Btn>
       ) : busy ? <Spinner /> : null}

@@ -1,6 +1,7 @@
 import { readdirSync, readFileSync, statSync } from 'node:fs';
 import path from 'node:path';
 import ts from 'typescript';
+import { scanVisualSource } from './mobile-visual-policy.mjs';
 
 /**
  * The one design grammar (DESIGN.md → Grammar). Every screen, component and
@@ -89,13 +90,18 @@ function judge(prop, values) {
 /** Scan one source text; returns violations with 1-based lines. */
 export function scanGrammarSource(file, text) {
   const errors = [];
-  if (TOKEN_FILES.has(file)) return errors;
   const isGrammar = GRAMMAR_FILES.has(file);
   const source = ts.createSourceFile(file, text, ts.ScriptTarget.Latest, true, file.endsWith('x') ? ts.ScriptKind.TSX : ts.ScriptKind.TS);
+  errors.push(...scanVisualSource(file, source));
+  if (TOKEN_FILES.has(file)) return errors;
   const line = node => source.getLineAndCharacterOfPosition(node.getStart()).line + 1;
+  const judgedTypeNodes = new Set();
   const judgeProp = (node, prop, expr) => {
-    if (TYPE_PROPS.has(prop) && !isGrammar)
-      errors.push({ file, line: line(node), rule: 'type-scale', message: `${prop} is set outside the six type styles (use <T v=…>)` });
+    if (TYPE_PROPS.has(prop) && !isGrammar) {
+      if (!judgedTypeNodes.has(node))
+        errors.push({ file, line: line(node), rule: 'type-scale', message: `${prop} is set outside the grammar type styles (use <T v=…>)` });
+      judgedTypeNodes.add(node);
+    }
     else if (isStyleEscape(prop, expr) && !isGrammar)
       errors.push({ file, line: line(node), rule: 'style-escape', message: `${prop} bypasses the grammar; use grammar props` });
     else if (COLOR_PROPS.has(prop) || SPACE_PROPS.has(prop) || RADIUS_PROPS.has(prop) || prop === 'minHeight') {
@@ -130,6 +136,18 @@ export function scanGrammarSource(file, text) {
     }
   }
   const visit = node => {
+    // StyleSheet/plain objects and later assignments must not bypass JSX checks.
+    let faceName;
+    if (ts.isPropertyAssignment(node) || ts.isShorthandPropertyAssignment(node)) {
+      const name = ts.isComputedPropertyName(node.name) ? node.name.expression : node.name;
+      faceName = ts.isIdentifier(name) || ts.isStringLiteral(name) ? name.text : undefined;
+    } else if (ts.isBinaryExpression(node) && node.operatorToken.kind === ts.SyntaxKind.EqualsToken) {
+      const target = node.left;
+      if (ts.isPropertyAccessExpression(target)) faceName = target.name.text;
+      else if (ts.isElementAccessExpression(target) && ts.isStringLiteral(target.argumentExpression))
+        faceName = target.argumentExpression.text;
+    }
+    if (faceName === 'fontFamily' || faceName === 'fontWeight') judgeProp(node, faceName);
     if (ts.isStringLiteral(node) && /^(#[0-9a-fA-F]{3,8}|rgba?\(|hsla?\()/.test(node.text) && !isGrammar)
       errors.push({ file, line: line(node), rule: 'colour-literal', message: `${node.text} is not a theme token` });
     if (ts.isJsxAttribute(node)) {

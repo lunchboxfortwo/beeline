@@ -166,13 +166,13 @@ function ConnectorSignInOverlay() {
         ) : fallback ? (
           <SignInCenter testID="signin-finishing">
             <Spinner color="needsYou" accessibilityLabel="Finishing sign-in" />
-            <T v="heading" textAlign="center">Finishing sign-in…</T>
+            <T v="body" textAlign="center">Finishing sign-in…</T>
             <Copy small quiet textAlign="center">You signed in on Chrome. {machineName} is saving the session. This page switches to connected by itself.</Copy>
           </SignInCenter>
         ) : loading ? (
           <SignInCenter cover testID="signin-webview-loading">
             <Spinner color="needsYou" accessibilityLabel="Loading Google sign-in" />
-            <T v="heading" textAlign="center">{squire ? 'Loading Google sign-in…' : `Loading ${connectorName} sign-in…`}</T>
+            <T v="body" textAlign="center">{squire ? 'Loading Google sign-in…' : `Loading ${connectorName} sign-in…`}</T>
             <Copy small quiet textAlign="center">From {machineName}’s secure browser</Copy>
           </SignInCenter>
         ) : null}
