@@ -21,6 +21,7 @@ vi.mock('expo-router', () => ({ router }));
 const panel = vi.hoisted(() => ({ openPlace: vi.fn(), closePanel: vi.fn() }));
 vi.mock('@/ui/shell/panel', () => panel);
 const operation = vi.hoisted(() => vi.fn());
+const infoReads = vi.hoisted(() => vi.fn());
 const refresh = vi.hoisted(() => vi.fn(async () => undefined));
 vi.mock('@/sync/transport/monolith-operation', () => ({ monolithPhoneOperation: operation }));
 const leave = vi.hoisted(() => vi.fn(async (_title: string, _deletes: boolean, run: (confirm: boolean) => Promise<unknown>) => { await run(false); return true; }));
@@ -30,7 +31,7 @@ vi.mock('@/modal', () => ({ Modal: modal }));
 vi.mock('@/buzz/corner-navigation', () => ({ cornerHref: (id: string, parent: string, title: string) => ({ pathname: 'corner', params: { id, parent, title } }) }));
 vi.mock('@/components/buzz/RepoList', () => ({ RepoList: (props: any) => React.createElement('RepoList', props) }));
 const data = vi.hoisted(() => ({ room: null as any, archived: [] as any[], openCorners: 0, total: 27 }));
-vi.mock('@/ui/screens/members/use-room-view', () => ({ useRoomView: () => ({ room: data.room, error: null, refresh }) }));
+vi.mock('@/ui/screens/members/use-room-view', () => ({ useRoomView: () => { infoReads(); return { room: data.room, error: null, refresh }; } }));
 vi.mock('@/ui/screens/people/use-workspace-roster', () => ({ useWorkspaceRoster: () => ({ surface: { workspace: { name: 'Beeline Work' } } }) }));
 vi.mock('@/buzz/scheduled-work', () => ({
     useScheduledWork: () => ({ work: null }),
@@ -107,6 +108,24 @@ describe('Chat info', () => {
         });
         expect(refresh).toHaveBeenCalled();
         expect(flat(tree)).toContain('owner/repo');
+    });
+
+    it('CHAT-REPO-1: opens and selects without rerendering Chat info while the read is pending', async () => {
+        let resolve!: (result: unknown) => void;
+        operation.mockImplementationOnce(() => new Promise(done => { resolve = done; }));
+        const tree = render();
+        infoReads.mockClear();
+        act(() => pressable(tree, 'chat-repository').props.onPress());
+        expect(tree.root.findAllByType('Sheet')[0].props.open).toBe(true);
+        expect(infoReads).not.toHaveBeenCalled();
+        expect(tree.root.findByType('RepoList').props.loading).toBe(true);
+        await act(async () => resolve({ repositories: [{ id: 9, fullName: 'owner/repo', installationId: 77, defaultBranch: 'main' }] }));
+        const list = tree.root.findByType('RepoList');
+        act(() => list.props.onSelect(list.props.candidates[0]));
+        expect(infoReads).not.toHaveBeenCalled();
+        act(() => tree.root.findAllByType('Button').find((node: any) => node.props['aria-label'] === 'Cancel').props.onPress());
+        expect(tree.root.findAllByType('Sheet')[0].props.open).toBe(false);
+        expect(infoReads).not.toHaveBeenCalled();
     });
 
     it.each([

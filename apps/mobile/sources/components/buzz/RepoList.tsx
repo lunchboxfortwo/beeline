@@ -66,6 +66,7 @@ export function RepoList({
       />
       <YStack maxHeight={LIST_MAX_HEIGHT}>
         <SectionList
+          initialNumToRender={6}
           keyboardShouldPersistTaps="handled"
           ListEmptyComponent={
             <EmptyState testID={`${testIDPrefix}-empty`} title={loading ? 'Loading repos…' : 'No repos match.'} />

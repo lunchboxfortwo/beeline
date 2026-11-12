@@ -57,8 +57,8 @@ export function useRoomRepositoryChoice({
   busy,
   error,
   notice,
-  listOpen,
-  setListOpen,
+  listOpen: requestedListOpen,
+  setListOpen: setRequestedListOpen,
   onLoad,
   onConnect,
   onLink,
@@ -67,6 +67,19 @@ export function useRoomRepositoryChoice({
   onCancel,
   draftContext,
 }: Options) {
+  // List navigation belongs to this sheet, so a tap never rerenders the chat.
+  // The route flag is only needed for a cold return from GitHub installation.
+  const [listOpen, setLocalListOpen] = useState(requestedListOpen);
+  const setListOpen = (open: boolean) => {
+    setLocalListOpen(open);
+    if (!open && requestedListOpen) setRequestedListOpen(false);
+  };
+  useEffect(() => {
+    setLocalListOpen(requestedListOpen);
+  }, [requestedListOpen]);
+  useEffect(() => {
+    if (!visible) setLocalListOpen(false);
+  }, [visible]);
   const [revealed, setRevealed] = useState(false);
   const [mode, setMode] = useState<RepoMode>('none');
   const [draft, setDraft] = useState<RepoCandidate | null>(null);
@@ -105,7 +118,8 @@ export function useRoomRepositoryChoice({
 
   const reveal = () => {
     setRevealed(true);
-    onLoad();
+    // Repository presentation is urgent; refreshing the chat-owned access state is not.
+    React.startTransition(onLoad);
   };
 
   const chooseMode = (next: RepoMode) => {
@@ -209,6 +223,7 @@ export function useRoomRepositoryChoice({
 
   return {
     listOpen,
+    closeList: () => setListOpen(false),
     row,
     // The open control is the Repository row itself, on the rows' own inset.
     control: control ? <YStack paddingHorizontal="6">{control}</YStack> : null,
@@ -275,8 +290,9 @@ export function RoomActionsSheet({
       withinScreen={Platform.OS === 'android'}
       visible={visible}
       footer={choice.footer}
+      scrollBody={!choice.listOpen}
       sticky={choice.listOpen ? undefined : choice.control}
-      onClose={() => (choice.listOpen ? repository.setListOpen(false) : props.onClose())}
+      onClose={() => (choice.listOpen ? choice.closeList() : props.onClose())}
       onTitlePress={choice.listOpen ? undefined : props.onTitlePress}
       title={choice.listOpen ? 'Choose a repo' : props.title}
       titleAccessibilityLabel={choice.listOpen ? undefined : props.titleAccessibilityLabel}

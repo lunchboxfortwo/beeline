@@ -5,7 +5,7 @@ import { ArtifactCardFrame, ArtifactFileRow } from '@/ui/screens/transcript/card
 import React, { useCallback, useEffect, useState } from 'react';
 import { Platform } from 'react-native';
 import { Image, XStack, YStack } from 'tamagui';
-import { ChevronLeft, ChevronRight, File, FileCode, FileText, Image as ImageIcon } from 'lucide-react-native';
+import { ChevronLeft, ChevronRight, FileText, Image as ImageIcon } from 'lucide-react-native';
 import { Copy, Glyph, HEIGHT, T, TypedView } from '@/ui/grammar';
 import type { AttachmentReference } from '@beeline/buzz-client';
 
@@ -323,13 +323,11 @@ function ArtifactStackCard({ files, authorHandle, isDesktop, visible }: {
   );
 }
 
-/** The row glyph: a picture, markup, a page, or a plain file. */
+/** Pictures use the image mark; other files use the approved document mark. */
 function fileGlyph(mimeType: string) {
   const format = artifactFormat(mimeType);
   if (format === 'image') return ImageIcon;
-  if (format === 'html' || format === 'svg' || format === 'game') return FileCode;
-  if (format === 'pdf' || format === 'markdown' || format === 'text') return FileText;
-  return File;
+  return FileText;
 }
 
 type SandboxPreviewFormat = 'html' | 'svg' | 'pdf';

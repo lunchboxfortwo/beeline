@@ -1,4 +1,5 @@
 import React from 'react';
+import { BackHandler, Platform } from 'react-native';
 import { Clipboard, FileText, Image as Photo } from 'lucide-react-native';
 import { Glyph, SheetFrame, SheetRow } from '@/ui/grammar';
 
@@ -18,6 +19,14 @@ export function AttachmentPickerSheet({
   onPickPhoto,
   onPickPasted,
 }: AttachmentPickerSheetProps) {
+  React.useLayoutEffect(() => {
+    if (!visible || Platform.OS !== 'android') return;
+    const back = BackHandler.addEventListener('hardwareBackPress', () => {
+      onClose();
+      return true;
+    });
+    return () => back.remove();
+  }, [visible, onClose]);
   // The sheet is drawn in-app (no native modal), so a native picker can open at once.
   const choose = (action: () => void) => {
     onClose();

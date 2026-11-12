@@ -13,16 +13,14 @@ import { useScheduledWork } from '@/buzz/scheduled-work';
 import { useRoomCorners } from '@/buzz/use-room-corners';
 import { cornerHref } from '@/buzz/corner-navigation';
 import { leaveRoomWithConfirmation } from '@/buzz/room-leave';
-import { RepoList } from '@/components/buzz/RepoList';
 import { ROOM_SLUG_HINT, roomNameEntry, validRoomSlug } from '@/buzz/room-name';
-import { confirmRoomRepoReplacement } from '@/buzz/room-repo-replacement';
-import type { RepoCandidate } from '@/buzz/room-repo-picker';
 import { CORNER_LABEL, ROOM_LABEL } from '@/buzz/vocabulary';
 import { Modal } from '@/modal';
 import { monolithPhoneOperation } from '@/sync/transport/monolith-operation';
 import { handleOf } from '@/ui/screens/people/people-rows';
 import { useWorkspaceRoster } from '@/ui/screens/people/use-workspace-roster';
 import { useRoomView } from '@/ui/screens/members/use-room-view';
+import { ChatRepositoryEditor } from './ChatRepositoryEditor';
 import { chatKindLine, finishedWhen, scheduledRows } from './chat-info-lines';
 
 /**
@@ -43,32 +41,12 @@ export function ChatInfoScreen({ roomId, close }: { roomId: string; close: () =>
     const [reviewerOpen, setReviewerOpen] = useState(false);
     const [busy, setBusy] = useState<'mute' | 'reviewer' | 'leave' | 'delete' | 'name' | 'repository' | null>(null);
     const [error, setError] = useState<string | null>(null);
-    const [editor, setEditor] = useState<'name' | 'repository' | null>(null);
+    const [editor, setEditor] = useState<'name' | null>(null);
     const [nameDraft, setNameDraft] = useState('');
-    const [repositoryDraft, setRepositoryDraft] = useState<RepoCandidate | null>(null);
-    const [repositories, setRepositories] = useState<RepoCandidate[]>([]);
-    const [repositoriesLoading, setRepositoriesLoading] = useState(false);
     const [editError, setEditError] = useState<string | null>(null);
     const loadArchived = corners.loadArchived;
 
     useEffect(() => { setEditor(null); }, [roomId]);
-    useEffect(() => {
-        if (editor !== 'repository') return;
-        let cancelled = false;
-        setRepositoriesLoading(true);
-        void monolithPhoneOperation('listGitHubRepositories', {}).then(result => {
-            if (!cancelled) setRepositories(result.repositories.map(repository => ({
-                key: `github:${repository.id}`, name: repository.fullName,
-                remote: `git://github.com/${repository.fullName}`,
-                githubInstallationId: repository.installationId, defaultBranch: repository.defaultBranch,
-                private: repository.private,
-            })));
-        }).catch(reason => {
-            if (!cancelled) setEditError(appErrorCopy(reason, 'Could not load repos.'));
-        }).finally(() => { if (!cancelled) setRepositoriesLoading(false); });
-        return () => { cancelled = true; };
-    }, [editor, roomId]);
-
     useEffect(() => { void loadArchived(false).catch(() => undefined); }, [loadArchived]);
 
     const name = room?.room.name ?? '';
@@ -99,41 +77,6 @@ export function ChatInfoScreen({ roomId, close }: { roomId: string; close: () =>
         } catch (reason) { setEditError(appErrorCopy(reason, 'Could not rename chat.')); }
         finally { setBusy(null); }
     };
-    const openRepository = () => {
-        if (!canEditRepository || busy) return;
-        const current = room?.repository;
-        setRepositoryDraft(current ? { ...current, defaultBranch: current.targetBranch } : null);
-        setRepositories([]); setEditError(null); setEditor('repository');
-    };
-    const saveRepository = async () => {
-        const current = room?.repository;
-        if (!canEditRepository || busy || (repositoryDraft?.key ?? null) === (current?.key ?? null)) return;
-        setBusy('repository'); setEditError(null);
-        try {
-            if (repositoryDraft) {
-                if (!repositoryDraft.remote) return;
-                if (!(await confirmRoomRepoReplacement(current?.name, corners.record?.summary?.cornerCount ?? 0))) return;
-                await monolithPhoneOperation('setRoomRepository', {
-                    roomId, key: repositoryDraft.key, name: repositoryDraft.name, remote: repositoryDraft.remote,
-                    targetBranch: repositoryDraft.defaultBranch ?? 'main',
-                    ...(repositoryDraft.githubInstallationId ? { githubInstallationId: repositoryDraft.githubInstallationId } : {}),
-                });
-            } else {
-                if (!current) return;
-                const hasOpenCorners = (corners.record?.summary?.cornerCount ?? 0) > 0;
-                const confirmed = await Modal.confirm(`Unlink ${current.name}?`, hasOpenCorners
-                    ? `This ${ROOM_LABEL} becomes chat-only. Open ${CORNER_LABEL}s keep their copies of the repo; messages and history are untouched.`
-                    : `This ${ROOM_LABEL} becomes chat-only. Messages and history are untouched.`,
-                    { cancelText: 'Cancel', confirmText: 'Unlink repo', destructive: true });
-                if (!confirmed) return;
-                await monolithPhoneOperation('removeRoomRepository', { roomId });
-            }
-            await refresh();
-            setEditor(null);
-        } catch (reason) { setEditError(appErrorCopy(reason, 'Could not change repository.')); }
-        finally { setBusy(null); }
-    };
-
     const leaveToChats = () => {
         closePanel();
         router.replace({ pathname: '/beeline/channels', ...(workspaceId ? { params: { communityId: workspaceId } } : {}) } as Href);
@@ -228,7 +171,9 @@ export function ChatInfoScreen({ roomId, close }: { roomId: string; close: () =>
                             </XStack>
                         </YStack>
                     ) : null}
-                    <Row label="Repository" value={room?.repository?.name ?? 'None'} onPress={canEditRepository ? openRepository : undefined} testID="chat-repository" />
+                    <ChatRepositoryEditor roomId={roomId} current={room?.repository ?? null} canEditRepository={canEditRepository}
+                        disabled={busy !== null} openCorners={corners.record?.summary?.cornerCount ?? 0} refresh={refresh}
+                        onBusyChange={saving => setBusy(saving ? 'repository' : null)} onOpen={() => { if (editor) setEditor(null); }} />
                 </> : null}
                 {room?.repository && !direct ? (
                     <Row label="Reviewer" value={reviewer ? handleOf(reviewer.identity) : 'None'}
@@ -285,19 +230,6 @@ export function ChatInfoScreen({ roomId, close }: { roomId: string; close: () =>
                     ) : null}
                 </Card>
             )}
-
-            <SheetFrame open={editor === 'repository' && canEditRepository} close={() => { if (!busy) setEditor(null); }} title="Repository" testID="chat-repository-sheet">
-                <SheetRow label="None" icon={!repositoryDraft ? <Glyph icon={Check} accent /> : null}
-                    onPress={() => { if (!busy) setRepositoryDraft(null); }} testID="chat-repository-none" />
-                <RepoList candidates={repositories} currentKey={repositoryDraft?.key ?? null} loading={repositoriesLoading}
-                    onSelect={candidate => { if (!busy) setRepositoryDraft(candidate); }} draftContext={roomId} testIDPrefix="chat-repository-list" />
-                {editError ? <Copy small quiet role="alert">{editError}</Copy> : null}
-                <XStack gap="2" justifyContent="flex-end">
-                    <Btn kind="quiet" label="Cancel" disabled={busy !== null} onPress={() => setEditor(null)}>Cancel</Btn>
-                    <Btn kind="primary" label="Save" disabled={busy !== null || (repositoryDraft?.key ?? null) === (room?.repository?.key ?? null)}
-                        onPress={() => void saveRepository()} testID="chat-repository-save">{busy === 'repository' ? 'Saving…' : 'Save'}</Btn>
-                </XStack>
-            </SheetFrame>
 
             <SheetFrame open={reviewerOpen} close={() => setReviewerOpen(false)} title="Reviewer" testID="sheet-reviewer">
                 <SheetRow icon={reviewer ? null : <Glyph icon={Check} accent />} label="None" onPress={() => void chooseReviewer(null)} testID="reviewer-none" />
