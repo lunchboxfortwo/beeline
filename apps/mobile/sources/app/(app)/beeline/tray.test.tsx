@@ -49,6 +49,20 @@ const choice = () => need({
 });
 
 describe('Tags cards', () => {
+  it('TAGS-1: groups addressed decisions separately and never labels them as tags', async () => {
+    serve({ needs: [need(), need({ messageId: 'decision', addressedReport: true,
+      text: 'Run the proof on your laptop?', author: { pubkey: 'ruby', kind: 'agent', name: 'Ruby' } })] });
+    const tree = await renderTags();
+    const text = textOf(tree);
+    const decisionText = textOf({ root: byTestId(tree, 'tag-card-decision') } as any);
+    expect(decisionText).toContain('Ruby needs your decision:');
+    expect(decisionText).not.toContain('tagged you');
+    expect(text).toContain('Maya tagged you:');
+    expect(byTestId(tree, 'tray-decisions-heading').props.children).toBe('DECISIONS');
+    expect(byTestId(tree, 'tray-tags-heading').props.children).toBe('TAGS');
+    expect(text.indexOf('Run the proof on your laptop?')).toBeLessThan(text.indexOf('Maya tagged you:'));
+  });
+
   it('draws a plain tag as "<who> tagged you:" in its chat, outlined in brass while it is fresh', async () => {
     serve({ needs: [need({ createdAt: nowSeconds() })] });
     const tree = await renderTags();

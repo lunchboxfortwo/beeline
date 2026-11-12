@@ -191,11 +191,16 @@ type Row = {
   author_handle: string | null;
   author_avatar: string | null;
   author_face: string | null;
+  addressed_report: boolean;
 };
 
 const ROW_COLUMNS = `
   ${repositoryMarkColumnsSql('room')},
   m.id message_id,m.room_id,m.text,m.card,m.attachments,m.created_at,mark.first_seen_at,mark.cleared_at,
+  CASE WHEN m.text ~ '^(needs-decision|blocked):' AND m.card->>'reportToId'=$2
+    THEN NOT (SELECT ${tagsKnownIdentitySql('m', 'report_viewer.id', 'report_viewer.handle', 'report_viewer.kind')}
+      FROM identities report_viewer WHERE report_viewer.id=$2)
+    ELSE false END addressed_report,
   CASE WHEN room.direct_participants IS NOT NULL THEN COALESCE((
       SELECT peer.name FROM room_access peer_member
       JOIN identities peer ON peer.id=peer_member.identity_id
@@ -625,6 +630,7 @@ export async function needsYouItems(database: SqlDatabase, workspaceId: string, 
         }
       : {}),
     ...(approval ? { approval } : {}),
+    ...(!approval && row.addressed_report ? { addressedReport: true as const } : {}),
   }));
   const nextExpiry=built.reduce((next,{row})=>Math.min(next,
     (row.approval_kind?row.approval_expires_at?.getTime():

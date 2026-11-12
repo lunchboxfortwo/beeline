@@ -26,6 +26,8 @@ export function tagPlace(item: NeedsYouItemView): { chat: string; thread?: strin
  */
 export function tagSentence(item: NeedsYouItemView): { lead: string; text: string; literal: boolean } {
   const approval = item.approval;
+  if (!approval && item.addressedReport)
+    return { lead: item.author?.name ? `${item.author.name} needs your decision:` : 'Needs your decision:', text: item.text, literal: false };
   if (!approval)
     return { lead: item.author?.name ? `${item.author.name} tagged you:` : '', text: item.text, literal: false };
   if (approval.kind === 'merge') return { lead: `${approval.actor} asks:`, text: item.text, literal: false };

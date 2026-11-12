@@ -256,7 +256,7 @@ describe('PhoneService Needs-you tray', () => {
     expect(items[0]!.approval).toBeUndefined();
   });
 
-  it('holds an untagged blocked or needs-decision report addressed to the reader as commander', async () => {
+  it('TAGS-1: distinguishes addressed reports from tags without inheriting a reply chain', async () => {
     const report = async (text: string, reportToId: string, ageMinutes: number) => {
       const id = await post(ROOM, AGENT, text, ageMinutes);
       await database.query(`UPDATE messages SET card=$2::jsonb WHERE id=$1`, [id, JSON.stringify({ reportToId })]);
@@ -264,13 +264,22 @@ describe('PhoneService Needs-you tray', () => {
     };
     const decision = await report('needs-decision: Approve the reviewer-link fetch?', VIEWER, 30);
     const blocked = await report('blocked: The emulator needs a production sign-in.', VIEWER, 20);
+    const parent = await post(ROOM, PEER, '@hoots please check with Juniper', 19);
+    const reply = await post(ROOM, AGENT, '@juniper I asked Hoots to check. This still needs you.', 18);
+    await database.query(`UPDATE messages SET reply_to_message_id=$2,root_message_id=$3 WHERE id=$1`, [parent, decision, decision]);
+    await database.query(`UPDATE messages SET reply_to_message_id=$2,root_message_id=$3 WHERE id=$1`, [reply, parent, decision]);
+    const tagged = await report('needs-decision: @ada please choose the endpoint', VIEWER, 17);
+    const channel = await report('blocked: @channel please check the endpoint', VIEWER, 16);
     await report('needs-decision: Pick an endpoint for Juniper?', PEER, 10);
     await post(ROOM, AGENT, 'needs-decision: No commander recorded on this one?', 5);
 
     const { items } = await read();
-    expect(items.map((item) => item.messageId)).toEqual([decision, blocked]);
-    expect(items[0]).toMatchObject({ text: 'Approve the reviewer-link fetch?', author: { name: 'Hoots' } });
-    expect(await count()).toBe(2);
+    expect(items.map((item) => item.messageId)).toEqual([decision, blocked, tagged, channel]);
+    expect(items[0]).toMatchObject({ text: 'Approve the reviewer-link fetch?', author: { name: 'Hoots' }, addressedReport: true });
+    expect(items[1]).toHaveProperty('addressedReport', true);
+    expect(items[2]).not.toHaveProperty('addressedReport');
+    expect(items[3]).not.toHaveProperty('addressedReport');
+    expect(await count()).toBe(4);
   });
 
   it('F04: an empty live snapshot skips cell projection and a later ask is still delivered', async () => {

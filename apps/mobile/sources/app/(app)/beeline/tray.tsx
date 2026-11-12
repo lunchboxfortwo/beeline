@@ -23,6 +23,7 @@ import {
   subscribeTrayGap,
 } from '@/buzz/needs-you-store';
 import { SurfaceGlyphLoader } from '@/components/buzz/SurfaceGlyphLoader';
+import { RoomListSectionHeader } from '@/components/buzz/RoomListSectionHeader';
 import { openArtifactViewer } from '@/components/buzz/ArtifactCard';
 import { prefetchPushRoom } from '@/push/push-room-prefetch';
 import { monolithPhoneOperation } from '@/sync/transport/monolith-operation';
@@ -276,18 +277,26 @@ export default function TrayScreen() {
   }), [clear, desktop, router]);
 
   const items = loading || workspaceLost ? EMPTY_NEEDS : (needs ?? EMPTY_NEEDS);
+  const decisions = useMemo(() => items.filter(item => item.approval || item.addressedReport), [items]);
+  const tags = useMemo(() => items.filter(item => !item.approval && !item.addressedReport), [items]);
+  const groupedItems = useMemo(() => [...decisions, ...tags], [decisions, tags]);
   // Ages are read when the projection changes, so unchanged cards do not re-render.
   const now = useMemo(() => Date.now(), [items]);
   const goToChats = useCallback(() => router.replace(TAB_ROUTES.chats as never), [router]);
 
   const list = (
     <FlatList
-      data={items}
+      data={groupedItems}
       keyExtractor={(item) => item.messageId}
       onViewableItemsChanged={onViewableItemsChanged}
       viewabilityConfig={viewabilityConfig}
-      renderItem={({ item }) => (
+      renderItem={({ item, index }) => (
         <YStack paddingHorizontal="3" paddingTop="3">
+          {index === 0 && decisions.length > 0 ? (
+            <RoomListSectionHeader title="Decisions" count={decisions.length} inset="content" spacing="flush" testID="tray-decisions-heading" />
+          ) : index === decisions.length ? (
+            <RoomListSectionHeader title="Tags" count={tags.length} inset="content" spacing="flush" testID="tray-tags-heading" />
+          ) : null}
           <TagCard item={item} now={now} actions={actions} />
         </YStack>
       )}
