@@ -517,9 +517,10 @@ m9_describe('beeline-agent request_grant', () => {
       /^pending, card posted: run fly deploy -a beeline-preview --with FLY_TOKEN \[grant g-1\]/,
     );
     m9_expect(reply).toContain('paused');
-    m9_expect(reply).toContain('ALWAYS, ONCE, or NO');
+    m9_expect(reply).toContain('Approve always or Deny');
+    m9_expect(reply).not.toContain('ONCE');
     m9_expect(reply).toContain(
-      "The resource owner must answer ALWAYS, ONCE, or NO in the resource owner's private @system DM",
+      "The resource owner must answer Approve always or Deny in the resource owner's private @system DM",
     );
     m9_expect(reply).not.toContain('in this Room');
   });

@@ -74,16 +74,15 @@ export const GrantRequestCard = React.memo(function GrantRequestCard({
         const actions: TranscriptCardAction[] =
           pendingGrant && canDecide
             ? [
-                // Approve is today's standing allow; Once stays as the second allow it already was.
                 {
-                  label: 'Approve',
+                  label: grant.kind === 'command' ? 'Approve always' : 'Approve',
                   primary: true,
                   disabled: actionId !== null,
                   loading: busy,
                   onPress: () => onDecision(grant.grantId, 'always'),
                   testID: `grant-${grant.grantId}-always`,
                 },
-                ...(!sharedAssetRequest ? [{
+                ...(!sharedAssetRequest && grant.kind !== 'command' ? [{
                   label: 'Once',
                   secondary: true,
                   disabled: actionId !== null,
