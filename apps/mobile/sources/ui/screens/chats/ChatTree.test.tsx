@@ -14,6 +14,7 @@ vi.mock('@/components/buzz/IdentityMark', () => ({ IdentityMark: () => null }));
 
 import type { ChatListItem } from '@beeline/buzz-client';
 import { ChatRow, NEW_THREAD_HOLD_MS } from './ChatTree';
+import { CornerDownRight } from 'lucide-react-native';
 
 (globalThis as typeof globalThis & { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
 
@@ -82,13 +83,16 @@ it('holding the row toggles its pin instead of opening it, even when both touch 
   expect(tree.root.findAll((node: any) => node.props?.testID === `room-${ROOM}-new-thread`)).toHaveLength(0);
 });
 
-it('uses the parent repository mark for both a chat and its thread row', () => {
+it('shows the repository mark on the chat row and the ↳ glyph on its thread row', () => {
   let tree!: ReactTestRenderer;
   const marked = { ...item, room: {...item.room,avatar:'https://avatars.githubusercontent.com/u/42',favicon:'https://github.githubassets.com/favicons/favicon.png'},
     openCorners:[{id:'thread',name:'Thread',state:'idle',lifecycle:{lifecycle:'idle',checks:'unknown'},lastActivityAt:1_700_000_000}] } as unknown as ChatListItem;
   act(() => { tree = create(<ChatRow item={marked} now={1_700_000_000_000} first onOpen={vi.fn()} onPin={vi.fn()} onOpenThread={vi.fn()} />); });
   const marks = tree.root.findAll((node:any)=>node.type==='RepositoryMark');
-  expect(marks).toHaveLength(2);
-  for (const mark of marks) expect(mark.props).toMatchObject({avatarUrl:marked.room.avatar,faviconUrl:marked.room.favicon});
+  expect(marks).toHaveLength(1);
+  expect(marks[0].props).toMatchObject({avatarUrl:marked.room.avatar,faviconUrl:marked.room.favicon});
+  const threadRow = tree.root.find((node:any)=>node.props?.testID==='thread-row-thread');
+  expect(threadRow.findAll((node:any)=>node.type==='RepositoryMark')).toHaveLength(0);
+  expect(threadRow.findAll((node:any)=>node.props?.icon===CornerDownRight)).not.toHaveLength(0);
   act(() => tree.unmount());
 });

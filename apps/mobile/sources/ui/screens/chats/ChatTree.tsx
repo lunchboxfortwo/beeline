@@ -89,9 +89,7 @@ function ThreadLine({ item, corner, onOpen }: { item: ChatListItem; corner: Chat
       accessibilityRole="button"
       testID={`thread-row-${corner.id}`}
     >
-      <YStack paddingTop="0.5">{item.room.avatar || item.room.favicon
-        ? <RepositoryMark avatarUrl={item.room.avatar} faviconUrl={item.room.favicon} size={16} />
-        : <Glyph icon={CornerDownRight} size={16} accent={waiting} />}</YStack>
+      <YStack paddingTop="0.5"><Glyph icon={CornerDownRight} size={16} accent={waiting} /></YStack>
       <YStack flex={1} minWidth={0} gap={step('1')}>
         <Copy>{title}</Copy>
         <Copy small accent={waiting} quiet={!waiting}>{word}</Copy>
