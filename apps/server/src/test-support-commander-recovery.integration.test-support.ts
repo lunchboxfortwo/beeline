@@ -130,7 +130,7 @@ export const authority = (command: AgentCommand) => ({
 
 export const commands = async (roomId: string, agentId: string) => {
 
-  return (await readAgentCommands(db, roomId, agentId)).commands;
+  return (await readAgentCommands(db, roomId, agentId)).commands.filter(command => !command.generationId);
 };
 
 export async function open(name = 'Widget') {

@@ -2,12 +2,10 @@ import { OwnedModelRefusal, OwnedModelUnknownGeneration, OWNED_MODEL_UNKNOWN_GEN
 import type { OwnedModelAttemptReceipt } from '@beeline/api-contract/helper-model';
 export type { OwnedModelAttemptReceipt } from '@beeline/api-contract/helper-model';
 import { createHash } from 'node:crypto';
-import { performance } from 'node:perf_hooks';
 import { CommandRefusalError } from './command-refusal.js';
 import type { SqlDatabase } from './database.js';
 import type { OwnedModelCredentials, AuthenticatedOwnedModel, OwnedModelBinding } from './owned-model-credential.js';
 import { lockRoomAccess } from './room-access-lock.js';
-import { assertCurrentTurnOwner } from './turn-ownership.js';
 import { AllowanceRefusal } from './free-agent-accounting.js';
 
 /** Same body bound as the existing model HTTP endpoint, never a larger escape. */
@@ -228,7 +226,6 @@ export class OwnedModelAttempts {
     try {
       await this.database.transaction(async database => {
         if (!await lockRoomAccess(database, [owned.roomId], [owned.agentId])) throw new OwnedModelRefusal();
-        await assertCurrentTurnOwner(database, owned.agentId, { connectionId: owned.connectionId, epoch: owned.connectionEpoch });
         await this.credentials.lockInvocation(database, pending.actor);
         await database.query('SELECT agent_id FROM free_agents WHERE agent_id=$1 FOR SHARE NOWAIT', [owned.agentId]);
         await database.query('SELECT agent_id FROM agents WHERE agent_id=$1 FOR SHARE NOWAIT', [owned.agentId]);
@@ -238,10 +235,7 @@ export class OwnedModelAttempts {
         if (!row || row.state !== 'unknown' || row.evidence || row.payload_digest !== pending.digest) throw new OwnedModelRefusal();
         if ((await database.query(`SELECT 1 FROM owned_model_attempts WHERE command_id=$1 AND generation_id<>$2 AND state='unknown' LIMIT 1`,
           [owned.commandId, owned.generationId])).rowCount) throw new OwnedModelUnknownGeneration();
-        const began = performance.now(), current = await this.credentials.assertCurrent(database, pending.actor);
-        // Subtract the entire DB round trip rather than assuming host/DB clocks
-        // agree or allowing a lease to expire between the query and handoff.
-        if (performance.now() - began >= current.untilMs - current.nowMs) throw new OwnedModelRefusal();
+        await this.credentials.assertCurrent(database, pending.actor);
         pending.entered = true;
         completion = start(pending.body);
         if (!(completion instanceof Promise)) throw new Error('Owned model handoff must return its transport promise');

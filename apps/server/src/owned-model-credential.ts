@@ -2,7 +2,7 @@ import { OwnedModelRefusal, OwnedModelUnknownGeneration } from './owned-model-er
 import type { OwnedModelCredential } from '@beeline/api-contract/helper-model';
 import { createHash, createHmac, randomBytes, timingSafeEqual } from 'node:crypto';
 import type { SqlDatabase } from './database.js';
-import { invocationCommandSql, registerOwnedEffectFence } from './turn-ownership.js';
+import { invocationCommandSql, registerOwnedAccessCheck } from './turn-ownership.js';
 
 /** Release-installed additive primitive for the claim/router/provider adapters;
  * this module creates no transport or rollout switch. */
@@ -13,13 +13,20 @@ CREATE TABLE IF NOT EXISTS owned_model_credentials (
  token_hash text NOT NULL CHECK(token_hash ~ '^[a-f0-9]{64}$'),
  agent_id text NOT NULL, owner_id text NOT NULL, workspace_id uuid NOT NULL, room_id uuid NOT NULL,
  command_id text NOT NULL, generation_id text NOT NULL, request_id text NOT NULL,
- connection_id text NOT NULL, connection_epoch bigint NOT NULL CHECK(connection_epoch>0), instance_id text NOT NULL,
+ connection_id text, connection_epoch bigint CHECK(connection_epoch>0), instance_id text,
  model text NOT NULL, agent_model text, model_token_hash text NOT NULL,
  expires_ms bigint CHECK(expires_ms>0),
  created_at timestamptz NOT NULL DEFAULT clock_timestamp(), revoked_at timestamptz,
  UNIQUE(command_id,generation_id)
 );
+-- One invocation has one credential: a resumed batch member finds it by
+-- agent and generation, whichever member's claim created it.
+CREATE INDEX IF NOT EXISTS owned_model_credentials_invocation ON owned_model_credentials(agent_id,generation_id,created_at);
 ALTER TABLE owned_model_credentials ALTER COLUMN expires_ms DROP NOT NULL;
+-- A credential belongs to its invocation. Older rows keep their recorded
+-- connection only as signed history; new rows record none.
+ALTER TABLE owned_model_credentials ALTER COLUMN connection_id DROP NOT NULL,
+ ALTER COLUMN connection_epoch DROP NOT NULL, ALTER COLUMN instance_id DROP NOT NULL;
 CREATE OR REPLACE FUNCTION beeline_owned_model_credential_immutable() RETURNS trigger AS $$
 BEGIN
  IF TG_OP='DELETE' THEN RAISE EXCEPTION 'owned model credential identity is retained' USING ERRCODE='23514'; END IF;
@@ -44,9 +51,10 @@ export interface OwnedModelBinding {
   readonly commandId: string;
   readonly generationId: string;
   readonly requestId: string;
-  readonly connectionId: string;
-  readonly connectionEpoch: number;
-  readonly instanceId: string;
+  /** Signed history of older credentials only; never compared to live state. */
+  readonly connectionId: string | null;
+  readonly connectionEpoch: number | null;
+  readonly instanceId: string | null;
   readonly model: string;
   readonly agentModel: string | null;
   readonly modelTokenHash: string;
@@ -54,15 +62,14 @@ export interface OwnedModelBinding {
 }
 interface CredentialRow {
   id: string; key_version: string; token_hash: string; agent_id: string; owner_id: string; workspace_id: string; room_id: string;
-  command_id: string; generation_id: string; request_id: string; connection_id: string; connection_epoch: string | number;
-  instance_id: string; model: string; agent_model: string | null; model_token_hash: string; expires_ms: string | number | null;
+  command_id: string; generation_id: string; request_id: string; connection_id: string | null; connection_epoch: string | number | null;
+  instance_id: string | null; model: string; agent_model: string | null; model_token_hash: string; expires_ms: string | number | null;
   revoked_at: Date | null;
 }
 interface CurrentRow {
   agent_id: string; owner_id: string; workspace_id: string; room_id: string; parent_id: string | null;
-  command_id: string; generation_id: string; request_id: string; connection_id: string; connection_epoch: string | number;
-  instance_id: string; model: string; agent_model: string | null; model_token_hash: string;
-  expires_ms: string | number | null; now_ms: string | number; lease_ms: string | number;
+  command_id: string; generation_id: string; request_id: string;
+  model: string; agent_model: string | null; model_token_hash: string; expires_ms: string | number | null;
 }
 declare const authenticated: unique symbol;
 export type AuthenticatedOwnedModel = Readonly<{ readonly [authenticated]: true; readonly binding: OwnedModelBinding }>;
@@ -78,14 +85,14 @@ function fixedEqual(a: Buffer, b: Buffer): boolean { return a.length === b.lengt
 function binding(row: CredentialRow): OwnedModelBinding {
   const value = Object.freeze({ id: row.id, keyVersion: row.key_version, agentId: row.agent_id, ownerId: row.owner_id,
     workspaceId: row.workspace_id, roomId: row.room_id, commandId: row.command_id, generationId: row.generation_id,
-    requestId: row.request_id, connectionId: row.connection_id, connectionEpoch: Number(row.connection_epoch),
-    instanceId: row.instance_id, model: row.model, agentModel: row.agent_model, modelTokenHash: row.model_token_hash,
+    requestId: row.request_id, connectionId: row.connection_id,
+    connectionEpoch: row.connection_epoch === null ? null : Number(row.connection_epoch), instanceId: row.instance_id, model: row.model, agentModel: row.agent_model, modelTokenHash: row.model_token_hash,
     expiresMs: row.expires_ms === null ? null : Number(row.expires_ms) });
   if (!/^[a-f0-9]{32}$/.test(value.id) || !/^[A-Za-z0-9._-]{1,32}$/.test(value.keyVersion) ||
-      !Number.isSafeInteger(value.connectionEpoch) || value.connectionEpoch < 1 || (value.expiresMs !== null && (!Number.isSafeInteger(value.expiresMs) || value.expiresMs < 1)) ||
+      (value.connectionEpoch !== null && (!Number.isSafeInteger(value.connectionEpoch) || value.connectionEpoch < 1)) || (value.expiresMs !== null && (!Number.isSafeInteger(value.expiresMs) || value.expiresMs < 1)) ||
       !/^[a-f0-9]{64}$/.test(value.modelTokenHash) || Object.entries(value).some(([key, item]) =>
-        key !== 'expiresMs' && key !== 'connectionEpoch' && key !== 'agentModel' && !scalar(item)) ||
-      value.agentModel !== null && !scalar(value.agentModel)) throw new OwnedModelRefusal();
+        !['expiresMs', 'connectionEpoch', 'agentModel', 'connectionId', 'instanceId'].includes(key) && !scalar(item)) ||
+      [value.agentModel, value.connectionId, value.instanceId].some(item => item !== null && !scalar(item))) throw new OwnedModelRefusal();
   return value;
 }
 function signatureData(value: OwnedModelBinding): string {
@@ -94,30 +101,19 @@ function signatureData(value: OwnedModelBinding): string {
     value.model, value.agentModel, value.modelTokenHash, value.expiresMs]);
 }
 
-/** Explicit aggregate/source/command/free-agent checks. Callers choose read
- * versus final-lock mode; provider entry must use the latter after its queue.
- * Current membership is resolved from stored parent rows, never HTTP metadata. */
+/** The durable invocation plus current membership, account and model policy.
+ * No socket, epoch, server instance or lease takes part. Membership is
+ * resolved from stored parent rows, never HTTP metadata. */
 const CURRENT = `SELECT command.agent_id,starter.owner_id,room.workspace_id,room.id room_id,room.parent_id,
  command.id command_id,command.generation_id,command.turn_request_id request_id,
- COALESCE(connection.turn_connection_id,connection.connection_id) connection_id,COALESCE(connection.turn_connection_epoch,connection.epoch) connection_epoch,
- CASE WHEN connection.turn_connection_id IS NOT NULL THEN COALESCE(issued.instance_id,connection.instance_id)
-   ELSE connection.instance_id END instance_id,
  COALESCE(starter.model,$4::text) model,starter.model agent_model,starter.model_token_hash,
- NULL::bigint expires_ms,
- floor(extract(epoch FROM clock_timestamp())*1000)::bigint now_ms,
- floor(extract(epoch FROM (server.renewed_at+interval '90 seconds'))*1000)::bigint lease_ms
+ NULL::bigint expires_ms
  FROM agent_commands command JOIN rooms room ON room.id=command.room_id
  JOIN rooms parent ON parent.id=COALESCE(room.parent_id,room.id)
  JOIN agents agent ON agent.agent_id=command.agent_id
  JOIN free_agents starter ON starter.agent_id=command.agent_id AND starter.owner_id=agent.owner_id
- JOIN agent_connections connection ON connection.agent_id=command.agent_id
- JOIN live_server_instances server ON server.instance_id=connection.instance_id
- LEFT JOIN owned_model_credentials issued ON issued.command_id=command.id AND issued.generation_id=command.generation_id
- JOIN agent_command_generation_owners immutable ON immutable.command_id=command.id AND immutable.generation_id=command.generation_id
-   AND immutable.connection_id=command.turn_owner_connection_id AND immutable.connection_epoch=command.turn_owner_epoch
  WHERE command.id=$1 AND command.agent_id=$2 AND command.generation_id=$3 AND command.action IN ('input','resume')
-   AND command.turn_owner_connection_id=COALESCE(connection.turn_connection_id,connection.connection_id) AND command.turn_owner_epoch=COALESCE(connection.turn_connection_epoch,connection.epoch)
-   AND connection.released_at IS NULL AND starter.removed_at IS NULL
+   AND starter.removed_at IS NULL
    AND starter.model_token_hash IS NOT NULL AND command.claimed_at IS NOT NULL
    AND room.archived_at IS NULL AND parent.archived_at IS NULL
    AND EXISTS(SELECT 1 FROM memberships workspace WHERE workspace.workspace_id=room.workspace_id AND workspace.room_id IS NULL
@@ -141,49 +137,49 @@ export class OwnedModelCredentials {
     return `bfmc_v1.${value.id}.${mac}`;
   }
 
-  /** Compose inside the successful owned claim transaction, after its existing
-   * lifecycle/authority/source/command fences. No new transaction or renewal.
-   * Only opaque ID, token hash and immutable DB-derived metadata are stored. */
+  /** Compose inside the successful claim transaction. A repeated claim of the
+   * same invocation, through any of its batch members, returns its one
+   * credential, so its attempt ledger stays whole. Only opaque ID, token hash
+   * and immutable DB-derived metadata are stored. */
   async issueInTransaction(database: SqlDatabase, input: {
-    agentId: string; commandId: string; generationId: string; source: { connectionId: string; epoch: number };
+    agentId: string; commandId: string; generationId: string;
   }): Promise<OwnedModelCredential> {
-    if (![input.agentId, input.commandId, input.generationId, input.source?.connectionId].every(value => scalar(value)) ||
-        !Number.isSafeInteger(input.source.epoch) || input.source.epoch < 1) throw new OwnedModelRefusal();
+    if (![input.agentId, input.commandId, input.generationId].every(value => scalar(value))) throw new OwnedModelRefusal();
     // The actual claim already owns this row. The explicit read fence also
     // makes direct composition safe against an old in-flight reservation.
     // NOWAIT refuses existing inverse lock owners without a retry timer.
     await database.query('SELECT id FROM agent_commands WHERE id=$1 AND agent_id=$2 FOR SHARE NOWAIT', [input.commandId, input.agentId]);
     const model = this.currentDefaultModel();
-    const current = (await database.query<CurrentRow>(CURRENT, [input.commandId, input.agentId, input.generationId, model])).rows[0];
-    if (!current || current.connection_id !== input.source.connectionId || Number(current.connection_epoch) !== input.source.epoch) throw new OwnedModelRefusal();
-    let row = (await database.query<CredentialRow>('SELECT * FROM owned_model_credentials WHERE command_id=$1 AND generation_id=$2',
-      [input.commandId, input.generationId])).rows[0];
+    const invocation = () => database.query<CredentialRow>(`SELECT * FROM owned_model_credentials
+      WHERE agent_id=$1 AND generation_id=$2 ORDER BY created_at,id LIMIT 1`, [input.agentId, input.generationId]);
+    let row = (await invocation()).rows[0];
+    // The credential's own command stays its anchor after that member ends.
+    const current = (await database.query<CurrentRow>(CURRENT,
+      [row?.command_id ?? input.commandId, input.agentId, input.generationId, model])).rows[0];
+    if (!current) throw new OwnedModelRefusal();
     if (!row) {
       if ((await database.query(`SELECT 1 FROM owned_model_attempts WHERE command_id=$1 AND generation_id<>$2 AND state='unknown' LIMIT 1`,
         [input.commandId, input.generationId])).rowCount) throw new OwnedModelUnknownGeneration();
-      await registerOwnedEffectFence(database, { id: current.command_id, agent_id: current.agent_id, generation_id: current.generation_id,
-        turn_owner_connection_id: current.connection_id, turn_owner_epoch: current.connection_epoch });
+      await registerOwnedAccessCheck(database, { id: current.command_id, agent_id: current.agent_id, generation_id: current.generation_id });
       const candidate: CredentialRow = { id: randomBytes(16).toString('hex'), key_version: this.keys.currentVersion,
         token_hash: '', agent_id: current.agent_id, owner_id: current.owner_id, workspace_id: current.workspace_id, room_id: current.room_id,
         command_id: current.command_id, generation_id: current.generation_id, request_id: current.request_id,
-        connection_id: current.connection_id, connection_epoch: current.connection_epoch, instance_id: current.instance_id,
+        connection_id: null, connection_epoch: null, instance_id: null,
         model: current.model, agent_model: current.agent_model, model_token_hash: current.model_token_hash, expires_ms: current.expires_ms, revoked_at: null };
       const value = binding(candidate); candidate.token_hash = hash(this.token(value));
       row = (await database.query<CredentialRow>(`INSERT INTO owned_model_credentials(id,key_version,token_hash,agent_id,owner_id,workspace_id,room_id,
-        command_id,generation_id,request_id,connection_id,connection_epoch,instance_id,model,agent_model,model_token_hash,expires_ms)
-        VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17)
+        command_id,generation_id,request_id,model,agent_model,model_token_hash,expires_ms)
+        VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14)
         ON CONFLICT(command_id,generation_id) DO NOTHING RETURNING *`, [candidate.id, candidate.key_version, candidate.token_hash,
         candidate.agent_id, candidate.owner_id, candidate.workspace_id, candidate.room_id, candidate.command_id, candidate.generation_id,
-        candidate.request_id, candidate.connection_id, candidate.connection_epoch, candidate.instance_id, candidate.model, candidate.agent_model,
+        candidate.request_id, candidate.model, candidate.agent_model,
         candidate.model_token_hash, candidate.expires_ms])).rows[0];
-      row ??= (await database.query<CredentialRow>('SELECT * FROM owned_model_credentials WHERE command_id=$1 AND generation_id=$2',
-        [input.commandId, input.generationId])).rows[0];
+      row ??= (await invocation()).rows[0];
     }
     if (!row || row.revoked_at) throw new OwnedModelRefusal();
     const value = binding(row), token = this.token(value);
-    if (value.connectionId !== current.connection_id || value.connectionEpoch !== Number(current.connection_epoch) ||
-        value.ownerId !== current.owner_id || value.workspaceId !== current.workspace_id || value.roomId !== current.room_id ||
-        value.requestId !== current.request_id || value.instanceId !== current.instance_id || value.model !== current.model ||
+    if (value.ownerId !== current.owner_id || value.workspaceId !== current.workspace_id || value.roomId !== current.room_id ||
+        value.requestId !== current.request_id || value.model !== current.model ||
         value.agentModel !== current.agent_model || value.modelTokenHash !== current.model_token_hash ||
         !fixedEqual(Buffer.from(hash(token), 'hex'), Buffer.from(row.token_hash, 'hex')))
       throw new OwnedModelRefusal();
@@ -216,14 +212,12 @@ export class OwnedModelCredentials {
     const owned=this.actor(actor);
     await database.query(`SELECT id FROM agent_commands
       WHERE room_id=$1 AND agent_id=$2 AND generation_id=$3
-        AND turn_owner_connection_id=$4 AND turn_owner_epoch=$5
       ORDER BY created_at,id FOR SHARE NOWAIT`,
-      [owned.roomId,owned.agentId,owned.generationId,owned.connectionId,owned.connectionEpoch]);
+      [owned.roomId,owned.agentId,owned.generationId]);
   }
 
-  /** Read-only final predicate after the caller acquired its ordered locks.
-   * Returns a conservative DB-clock lifetime for immediate synchronous entry. */
-  async assertCurrent(database: SqlDatabase, actor: AuthenticatedOwnedModel): Promise<{ nowMs: number; untilMs: number }> {
+  /** Read-only final predicate after the caller acquired its ordered locks. */
+  async assertCurrent(database: SqlDatabase, actor: AuthenticatedOwnedModel): Promise<void> {
     const owned = this.actors.get(actor);
     if (!owned) throw new OwnedModelRefusal();
     const value = owned.binding, model = this.currentDefaultModel();
@@ -232,11 +226,7 @@ export class OwnedModelCredentials {
       throw new OwnedModelRefusal();
     const current = (await database.query<CurrentRow>(CURRENT, [value.commandId, value.agentId, value.generationId, model])).rows[0];
     if (!current || current.owner_id !== value.ownerId || current.workspace_id !== value.workspaceId || current.room_id !== value.roomId ||
-        current.request_id !== value.requestId || current.connection_id !== value.connectionId || Number(current.connection_epoch) !== value.connectionEpoch ||
-        current.instance_id !== value.instanceId || current.model !== value.model || current.agent_model !== value.agentModel ||
+        current.request_id !== value.requestId || current.model !== value.model || current.agent_model !== value.agentModel ||
         current.model_token_hash !== value.modelTokenHash) throw new OwnedModelRefusal();
-    const nowMs = Number(current.now_ms), untilMs = Number(current.lease_ms);
-    if (!Number.isSafeInteger(nowMs) || !Number.isSafeInteger(untilMs) || untilMs <= nowMs) throw new OwnedModelRefusal();
-    return { nowMs, untilMs };
   }
 }

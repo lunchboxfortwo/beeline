@@ -1,7 +1,7 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { PgliteDatabase } from './test-support.js';
 import {
-  TURN_OWNERSHIP_SCHEMA, assertCurrentTurnOwner, commandOwnerExpiredSql, commandOwnerLiveSql, turnOwnershipEnabled, workingTurnFreshSql,
+  TURN_OWNERSHIP_SCHEMA, commandOwnerLiveSql, turnOwnershipEnabled, workingTurnFreshSql,
 } from './turn-ownership.js';
 
 describe('effective command ownership', () => {
@@ -22,75 +22,51 @@ describe('effective command ownership', () => {
         VALUES('owned','agent','claimed',NULL,'generation','connection',1);`);
   });
   afterEach(async () => { vi.unstubAllEnvs(); await db.close(); });
-  const active = async (db: PgliteDatabase) => (await db.query<{ id: string; active: boolean | null; expired: boolean | null }>(
-    `SELECT command.id,${commandOwnerLiveSql('command')} active,${commandOwnerExpiredSql('command')} expired
+  const active = async (db: PgliteDatabase) => (await db.query<{ id: string; active: boolean | null }>(
+    `SELECT command.id,${commandOwnerLiveSql('command')} active
       FROM agent_commands command ORDER BY command.id`)).rows;
 
   it('ignores command expiry timestamps and a disabled admission gate cannot reinterpret an owned row', async () => {
     vi.stubEnv('BEELINE_NETWORK_ROUTER_V1', '0'); expect(turnOwnershipEnabled()).toBe(false);
     expect(await active(db)).toEqual([
-      { id: 'legacy-dead', active: true, expired: false }, { id: 'legacy-live', active: true, expired: false },
-      { id: 'legacy-null', active: false, expired: true }, { id: 'owned', active: true, expired: false },
+      { id: 'legacy-dead', active: true }, { id: 'legacy-live', active: true },
+      { id: 'legacy-null', active: false }, { id: 'owned', active: true },
     ]);
   });
-  it('fences replacement epoch, explicit release and actual server lease expiry', async () => {
-    await db.transaction(tx => assertCurrentTurnOwner(tx, 'agent', { connectionId: 'connection', epoch: 1 }));
+  it('keeps a claimed turn live through a replaced socket, a stale server lease and a released connection', async () => {
+    const owned = async () => (await active(db)).find(row => row.id === 'owned')!.active;
     await db.query(`UPDATE agent_connections SET connection_id='replacement',epoch=2`);
-    expect((await active(db)).find(row => row.id === 'owned')!.active).toBe(false);
-    await expect(db.transaction(tx => assertCurrentTurnOwner(tx, 'agent', { connectionId: 'connection', epoch: 1 }))).rejects.toThrow('source changed');
-    await db.query(`UPDATE agent_commands SET generation_id='replacement-generation',turn_owner_connection_id='replacement',turn_owner_epoch=2 WHERE id='owned'`);
-    expect((await active(db)).find(row => row.id === 'owned')!.active).toBe(true);
-    await db.query(`UPDATE live_server_instances SET renewed_at=clock_timestamp()-interval '91 seconds'`);
-    expect((await active(db)).find(row => row.id === 'owned')!.active).toBe(false);
-    await db.query(`UPDATE live_server_instances SET renewed_at=clock_timestamp(); UPDATE agent_connections SET released_at=clock_timestamp()`);
-    expect((await active(db)).find(row => row.id === 'owned')!.active).toBe(false);
-  });
-  it('retains a runtime owner while offline but admits effects only after registration, and fences a replacement runtime', async () => {
-    await db.query(`UPDATE agent_connections SET turn_connection_id=connection_id,turn_connection_epoch=epoch,
-      released_at=clock_timestamp();UPDATE live_server_instances SET renewed_at=clock_timestamp()-interval '1 day'`);
-    expect((await active(db)).find(row=>row.id==='owned')!.active).toBe(true);
-    await expect(db.transaction(tx=>assertCurrentTurnOwner(tx,'agent',{connectionId:'connection',epoch:1}))).rejects.toThrow('source changed');
-    await db.query(`UPDATE agent_connections SET connection_id='next-socket',turn_transport_id='next-socket',epoch=2,released_at=NULL;
-      UPDATE live_server_instances SET renewed_at=clock_timestamp()`);
-    await db.transaction(tx=>assertCurrentTurnOwner(tx,'agent',{connectionId:'connection',epoch:1}));
-    expect((await active(db)).find(row=>row.id==='owned')!.active).toBe(true);
-    await db.query(`UPDATE agent_connections SET turn_connection_id='new-runtime',turn_connection_epoch=3`);
-    expect((await active(db)).find(row=>row.id==='owned')!.active).toBe(false);
-    await expect(db.transaction(tx=>assertCurrentTurnOwner(tx,'agent',{connectionId:'connection',epoch:1}))).rejects.toThrow('source changed');
-  });
-
-  it('clears a continuation when a pre-continuation server replaces the physical connection',async()=>{
-    await db.query(`UPDATE agent_connections SET turn_connection_id='connection',turn_connection_epoch=1,
-      turn_transport_id=connection_id`);
-    await db.query(`UPDATE agent_connections SET connection_id='old-server-socket',epoch=2,released_at=NULL`);
-    expect((await db.query('SELECT turn_connection_id,turn_connection_epoch FROM agent_connections')).rows[0])
-      .toEqual({turn_connection_id:null,turn_connection_epoch:null});
-    expect((await active(db)).find(row=>row.id==='owned')!.active).toBe(false);
-    await db.transaction(tx=>assertCurrentTurnOwner(tx,'agent',{connectionId:'old-server-socket',epoch:2}));
+    expect(await owned()).toBe(true);
+    await db.query(`UPDATE live_server_instances SET renewed_at=clock_timestamp()-interval '1 day'`);
+    expect(await owned()).toBe(true);
+    await db.query(`UPDATE agent_connections SET released_at=clock_timestamp()`);
+    expect(await owned()).toBe(true);
+    await db.query(`UPDATE agent_commands SET state='pending',generation_id=NULL,turn_owner_connection_id=NULL,turn_owner_epoch=NULL WHERE id='owned'`);
+    expect(await owned()).toBe(false);
   });
 
   it('rejects a partial owner pair and arbitrary SQL aliases', async () => {
     await expect(db.query(`UPDATE agent_commands SET turn_owner_epoch=NULL WHERE id='owned'`)).rejects.toThrow();
     expect(() => commandOwnerLiveSql('command; SELECT 1')).toThrow('alias');
   });
-  it('retains generation ownership across requeue and cleans only with its command', async () => {
+  it('records each generation once, never as an owner, and cleans it only with its command', async () => {
     await db.query(`UPDATE agent_commands SET state='pending',generation_id=NULL,turn_owner_connection_id=NULL,turn_owner_epoch=NULL WHERE id='owned'`);
-    await expect(db.query(`UPDATE agent_commands SET state='claimed',generation_id='generation',
-      turn_owner_connection_id='replacement',turn_owner_epoch=2 WHERE id='owned'`)).rejects.toThrow('generation owner changed');
-    await expect(db.query(`UPDATE agent_commands SET state='claimed',generation_id='generation' WHERE id='owned'`)).rejects.toThrow('generation owner changed');
+    // The same generation continues from another connection; its record is history only.
+    await db.query(`UPDATE agent_commands SET state='claimed',generation_id='generation',
+      turn_owner_connection_id='replacement',turn_owner_epoch=2 WHERE id='owned'`);
     expect((await db.query(`SELECT * FROM agent_command_generation_owners WHERE command_id='owned'`)).rowCount).toBe(1);
     await expect(db.query(`UPDATE agent_command_generation_owners SET connection_id='replacement' WHERE command_id='owned'`)).rejects.toThrow('immutable');
     await expect(db.query(`DELETE FROM agent_command_generation_owners WHERE command_id='owned'`)).rejects.toThrow('immutable');
     await db.query(`DELETE FROM agent_commands WHERE id='owned'`);
     expect((await db.query(`SELECT * FROM agent_command_generation_owners WHERE command_id='owned'`)).rowCount).toBe(0);
   });
-  it('keeps an old healthy owned turn visible and never borrows legacy freshness after owner loss/requeue', async () => {
+  it('keeps a claimed turn visible after its connection drops and ends it only on requeue', async () => {
     await db.query(`UPDATE agent_commands SET room_id='room',turn_request_id='request' WHERE id='owned';
       INSERT INTO agent_turns VALUES('room','request','agent','generation',now()-interval '10 minutes');`);
     const fresh = async () => (await db.query<{ fresh: boolean }>(`SELECT ${workingTurnFreshSql('turn')} fresh FROM agent_turns turn`)).rows[0]!.fresh;
     expect(await fresh()).toBe(true);
     await db.query(`UPDATE agent_connections SET released_at=clock_timestamp();UPDATE agent_turns SET created_at=now()`);
-    expect(await fresh()).toBe(false);
+    expect(await fresh()).toBe(true);
     await db.query(`UPDATE agent_commands SET state='pending',generation_id=NULL,turn_owner_connection_id=NULL,turn_owner_epoch=NULL WHERE id='owned'`);
     expect(await fresh()).toBe(false);
   });

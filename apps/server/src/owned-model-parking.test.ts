@@ -2,8 +2,8 @@ import { releaseAgentConnection } from './connection-presence.js';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import { OwnedModelAttempts } from './owned-model-attempt.js';
 import { parkOwnedModelGeneration, parkOwnedModelTerminal } from './owned-model-parking.js';
-import { commandOwnerLiveSql, commandOwnerExpiredSql, registerOwnedEffectFence } from './turn-ownership.js';
-import { createAgentCommand, claimAgentCommand } from './agent-command.js';
+import { commandOwnerLiveSql, registerOwnedAccessCheck } from './turn-ownership.js';
+import { authorizeCommandOutput, createAgentCommand, claimAgentCommand } from './agent-command.js';
 import { DaemonService } from './daemon-service.js';
 import { LiveHub } from './live.js';
 
@@ -28,7 +28,6 @@ describe('causal owned-model generation parking', () => {
   it.each(['unknown','succeeded'] as const)('journal loss ends authority without altering a %s attempt or inventing its identity',async outcome=>{
     if(outcome==='succeeded')await attempts.settleUsage(f.actor,ONE,{tokens:2,usd:0},'succeeded',async()=>{});
     const receipt={...input,status:'failed' as const,modelOwnerEnd:{journalUnavailable:true as const}};
-    await expect(f.db.transaction(tx=>parkOwnedModelTerminal(tx,receipt,MODEL_AGENT,{...MODEL_SOURCE,epoch:2}))).rejects.toThrow();
     expect(await f.db.transaction(tx=>parkOwnedModelTerminal(tx,receipt,MODEL_AGENT,MODEL_SOURCE))).toBe(true);
     expect((await f.db.query('SELECT model_request_id FROM agent_command_owner_ends')).rows).toEqual([{model_request_id:null}]);
     expect((await f.db.query('SELECT state FROM owned_model_attempts')).rows).toEqual([{state:outcome}]);
@@ -40,8 +39,8 @@ describe('causal owned-model generation parking', () => {
     expect(await row()).toEqual({ state: 'claimed', generation_id: input.generationId });
     expect((await f.db.query(`SELECT state FROM owned_model_attempts`)).rows).toEqual([{ state: 'unknown' }]);
     expect((await f.db.query('SELECT status FROM agent_turns')).rows).toEqual([{status:'working'}]);
-    expect((await f.db.query(`SELECT ${commandOwnerLiveSql()} live,${commandOwnerExpiredSql()} expired FROM agent_commands`)).rows[0])
-      .toEqual({ live: false, expired: false });
+    expect((await f.db.query(`SELECT ${commandOwnerLiveSql()} live FROM agent_commands`)).rows[0])
+      .toEqual({ live: false });
     expect((await f.db.query('SELECT * FROM messages')).rowCount).toBe(0);
     expect(await f.db.transaction(tx => parkOwnedModelTerminal(tx, terminal, MODEL_AGENT, MODEL_SOURCE))).toBe(true);
     expect((await f.db.query('SELECT * FROM agent_command_owner_ends')).rowCount).toBe(1);
@@ -61,20 +60,19 @@ describe('causal owned-model generation parking', () => {
     expect(await row()).toEqual({ state: 'claimed', generation_id: input.generationId });
   });
 
-  it('connection closure hands work back without inventing a model outcome or owner-end receipt', async () => {
+  it('connection closure keeps the turn claimed without inventing a model outcome or owner-end receipt', async () => {
     expect((await f.db.query(`SELECT ${commandOwnerLiveSql()} live FROM agent_commands`)).rows[0]?.live).toBe(true);
     await releaseAgentConnection(f.db,new LiveHub(),MODEL_AGENT,MODEL_SOURCE.connectionId);
-    expect((await f.db.query('SELECT state,generation_id FROM agent_commands')).rows).toEqual([{state:'pending',generation_id:null}]);
+    expect((await f.db.query('SELECT state,generation_id FROM agent_commands')).rows).toEqual([{state:'claimed',generation_id:input.generationId}]);
     expect((await f.db.query('SELECT * FROM agent_command_owner_ends')).rowCount).toBe(0);
     expect((await f.db.query('SELECT state FROM owned_model_attempts')).rows).toEqual([{state:'unknown'}]);
     expect((await f.db.query('SELECT * FROM messages')).rowCount).toBe(0);
   });
 
-  it('wrong request, generation, source and invalid terminal shape refuse without falling through', async () => {
+  it('wrong request, generation and invalid terminal shape refuse without falling through', async () => {
     for (const [receipt, source] of [
       [{ ...terminal, modelOwnerEnd: { requestId: TWO } }, MODEL_SOURCE],
       [{ ...terminal, generationId: 'foreign-generation' }, MODEL_SOURCE],
-      [terminal, { ...MODEL_SOURCE, epoch: 2 }],
       [{ ...terminal, status: 'working' as const }, MODEL_SOURCE],
     ] as const) await expect(f.db.transaction(tx => parkOwnedModelTerminal(tx, receipt, MODEL_AGENT, source))).rejects.toThrow('could not be authorized');
     await expect(f.db.transaction(tx => parkOwnedModelTerminal(tx, terminal, MODEL_AGENT))).rejects.toThrow('could not be authorized');
@@ -135,27 +133,16 @@ describe('causal owned-model generation parking', () => {
     expect((await f.db.query('SELECT state FROM owned_model_attempts')).rows[0]?.state).toBe('unknown');
   });
 
-  it('only the parking transaction gets its own commit exception; later effects and expired sources roll back', async () => {
+  it('only the parking transaction gets its own commit exception; later effects are refused', async () => {
     const command = { id: MODEL_CLAIM.commandId, agent_id: MODEL_AGENT, generation_id: input.generationId,
       turn_owner_connection_id: MODEL_SOURCE.connectionId, turn_owner_epoch: MODEL_SOURCE.epoch };
     await f.db.transaction(async tx => {
-      await registerOwnedEffectFence(tx, command); await parkOwnedModelTerminal(tx, terminal, MODEL_AGENT, MODEL_SOURCE);
+      await registerOwnedAccessCheck(tx, command); await parkOwnedModelTerminal(tx, terminal, MODEL_AGENT, MODEL_SOURCE);
     });
     await expect(f.db.transaction(async tx => {
-      await registerOwnedEffectFence(tx, command);
+      await authorizeCommandOutput(tx, MODEL_ROOM, MODEL_AGENT, input.requestId, input.generationId);
       await tx.query(`INSERT INTO owned_model_test_accounting VALUES('late-effect',1)`);
     })).rejects.toThrow();
     expect((await f.db.query(`SELECT * FROM owned_model_test_accounting WHERE id='late-effect'`)).rowCount).toBe(0);
-  });
-
-  it('parking does not excuse actual source expiry at the same deferred commit', async () => {
-    await expect(f.db.transaction(async tx => {
-      await registerOwnedEffectFence(tx, { id: MODEL_CLAIM.commandId, agent_id: MODEL_AGENT, generation_id: input.generationId,
-        turn_owner_connection_id: MODEL_SOURCE.connectionId, turn_owner_epoch: MODEL_SOURCE.epoch });
-      await parkOwnedModelTerminal(tx, terminal, MODEL_AGENT, MODEL_SOURCE);
-      await tx.query(`UPDATE live_server_instances SET renewed_at=clock_timestamp()-interval '91 seconds'`);
-    })).rejects.toThrow();
-    expect((await f.db.query('SELECT * FROM agent_command_owner_ends')).rowCount).toBe(0);
-    expect((await f.db.query('SELECT status FROM agent_turns')).rows[0]?.status).toBe('working');
   });
 });

@@ -834,6 +834,8 @@ const scope2 = fixtureScope2();
     const generationId = owned ? 'owned-provider-parity' : GENERATION;
     if (presence) {
       const epoch = await presence.claimConnection(HELPER, {connectionId:'owned-provider-parity'});
+      // The fixture's turn was claimed outside a helper; this helper claims it afresh.
+      await scope2.database.query(`UPDATE agent_commands SET state='pending',generation_id=NULL,claimed_at=NULL WHERE id=$1`, [COMMAND]);
       await daemon.execute('claimAgentCommand', { roomId: ROOM, commandId: COMMAND, generationId },
         HELPER, { connectionId: 'owned-provider-parity', epoch });
     }
@@ -898,10 +900,12 @@ const scope2 = fixtureScope2();
       lastUse: { agentId: HELPER, agentName: 'Bee', roomId: ROOM,
         roomName: 'Tools', usedAt: afterUse.lastUsedAt } });
     if (presence) {
+      // A dropped socket and a new helper process keep the turn and its tool access.
       await presence.releaseConnection(HELPER, 'owned-provider-parity');
-      await expect(daemon.execute('executeAppTool', { ...callTurn, appId: first.appId!,
-        tool: 'SLACK_POST_MESSAGE', arguments: { text: 'must not dispatch after owner loss' } }, HELPER)).rejects.toThrow();
-      expect(provider.execute).toHaveBeenCalledTimes(1);
+      await presence.claimConnection(HELPER, { connectionId: 'restarted-helper', lifecycleId: 'restarted-helper' });
+      await daemon.execute('executeAppTool', { ...callTurn, appId: first.appId!,
+        tool: 'SLACK_POST_MESSAGE', arguments: { text: 'Launch notes, continued' } }, HELPER);
+      expect(provider.execute).toHaveBeenCalledTimes(2);
     }
     } finally { await presence?.stop(); }
   });

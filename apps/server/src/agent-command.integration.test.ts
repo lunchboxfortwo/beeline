@@ -126,8 +126,9 @@ it.each(['deleted', 'stopped'])('QUEUED-TAGS-REPEAT: reconnect preserves unrelat
   else await rootFixture.phone.execute('cancelAgentTurn', { roomId: R, agentId: A, requestId: messages[1]!.messageId }, H);
   await disconnectHelper();
   await helperOwner(A);
-  await claim(snapshot[0]!, 'reclaimed');
-  await result(snapshot[0]!, 'First answer', 'reclaimed');
+  // The reconnected helper resumes the running turn in its own generation.
+  await claim(snapshot[0]!);
+  await result(snapshot[0]!, 'First answer');
   expect((await commands()).filter(command => command.action === 'input').map(command => command.sourceMessageId)).toEqual([messages[2]!.messageId]);
 });
 

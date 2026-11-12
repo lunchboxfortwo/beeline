@@ -17,11 +17,10 @@ import { captureConnectionUsage } from './connector-runner.js';
 import { distillTurnFailureReason, turnErrorDetail } from './turn-failure-reason.js';
 import { allocatedDirectoryBytes, scratchBudgetMessage, scratchGrowthExceedsBudget } from './scratch-lifecycle.js';
 import { awaitInstitutionalContext, startInstitutionalContextFetch } from './institutional-context.js';
-import { approvedDeviceGrant, deviceGrantResumePrompt } from './monolith-room-turn.js';
+import { approvedDeviceGrant, dependencyMountResumePrompt, deviceGrantResumePrompt } from './monolith-room-turn.js';
 import { isAccountOrProviderRefusal, isContextOverflowTurn, shouldFailOverProviderError, shouldRetryEmptyTurn, turnFailureReasonWithProvider } from './empty-turn.js';
 import { assembleTurnPrompt, CORNER_DELIVERY_NUDGE, cornerHasRepositoryWork, CORNER_REVIEWER_SESSION_INSTRUCTION, CORNER_CHECKS_NUDGE, roomMentionDirectory, renderReplyContext } from './prompt-assembly.js';
 import { isAgentProcessExit } from './agent-process.js';
-import { withTurnReceiptHeartbeat } from './turn-receipt-heartbeat.js';
 
 import { MonolithCornerTurnLoop, isCornerReviewTurn, DaemonActivity, toolCallKey, toolCallSettled, cornerToolActivity, isCornerChecksTurn, cornerUndeliveredRepositoryState } from './monolith-corner-turn.js';
 
@@ -91,15 +90,7 @@ import { MonolithCornerTurnLoop, isCornerReviewTurn, DaemonActivity, toolCallKey
     };
     try {
       if (freeAgent) await ctx.freeContinuation.begin(ctx.commandContext.current?.source.body ?? trigger);
-      await withTurnReceiptHeartbeat(
-        api,
-        {
-          agentId: ctx.agent.publicKey,
-          roomId: cornerId,
-          requestId,
-          generationId: ctx.commandContext.generationId,
-        },
-        async () => {
+      await (async () => {
           trace.noteScheduler('queue', ctx.options.scheduler.snapshot());
           trace.start('queue-wait');
           return ctx.withCheckout(() => ctx.options.scheduler.run(
@@ -629,6 +620,19 @@ import { MonolithCornerTurnLoop, isCornerReviewTurn, DaemonActivity, toolCallKey
                   await ctx.writeBackClaudeLogin();
                 }
               };
+              // Every prompt settles here. Requested dependencies mount only in
+              // a new sandbox: activation mounts them, and this same turn
+              // continues there, whichever prompt asked for them.
+              const settle = async (settled: PromptResult): Promise<PromptResult> => {
+                trace.promptSettled();
+                if (['no-reply', 'repeated-tool-call'].includes(settled.stopReason) || !ctx.dependencyMountRequested()) return settled;
+                await flushToolCalls(settled.toolCalls, '');
+                trace.retry({ reason: 'dependency mount' });
+                await trace.measure('activation', () => ctx.activate(trace));
+                // The continuation settles too: a mount it requests mounts
+                // in the next sandbox, until no mount remains requested.
+                return settle(await runPrompt(undefined, dependencyMountResumePrompt(settled.agentText)));
+              };
               const completeTerminal = async (result: PromptResult): Promise<boolean> => {
                 if (!['no-reply', 'repeated-tool-call'].includes(result.stopReason)) return false;
                 stream.close();
@@ -637,8 +641,7 @@ import { MonolithCornerTurnLoop, isCornerReviewTurn, DaemonActivity, toolCallKey
                 await ctx.discardSession();
                 return true;
               };
-              let result = await runPrompt();
-              trace.promptSettled();
+              let result = await settle(await runPrompt());
               if (await completeTerminal(result)) return;
               // An instantly approved device grant cannot reach the running
               // sandbox: replace the session and continue this same turn there.
@@ -654,7 +657,7 @@ import { MonolithCornerTurnLoop, isCornerReviewTurn, DaemonActivity, toolCallKey
                   undefined,
                   deviceGrantResumePrompt(grantedDevice, result.agentText),
                 );
-                trace.promptSettled();
+                result = await settle(result);
                 if (await completeTerminal(result)) return;
               }
               let explained = await ctx.explainEmpty(result);
@@ -677,7 +680,7 @@ import { MonolithCornerTurnLoop, isCornerReviewTurn, DaemonActivity, toolCallKey
                       `${turnFailureReasonWithProvider(explained.reason, silent)}; retrying on ${next}`,
                   );
                   result = await runPrompt();
-                  trace.promptSettled();
+                  result = await settle(result);
                   if (await completeTerminal(result)) return;
                   explained = await ctx.explainEmpty(result);
                 }
@@ -695,7 +698,7 @@ import { MonolithCornerTurnLoop, isCornerReviewTurn, DaemonActivity, toolCallKey
                 await ctx.discardSession();
                 await trace.measure('activation', () => ctx.activate(trace));
                 result = await runPrompt();
-                trace.promptSettled();
+                result = await settle(result);
                 if (await completeTerminal(result)) return;
                 explained = await ctx.explainEmpty(result);
               }
@@ -767,7 +770,7 @@ import { MonolithCornerTurnLoop, isCornerReviewTurn, DaemonActivity, toolCallKey
                       ? CORNER_CHECKS_NUDGE
                       : CORNER_DELIVERY_NUDGE,
                 );
-                trace.promptSettled();
+                result = await settle(result);
                 if (await completeTerminal(result)) return;
                 explained = await ctx.explainEmpty(result);
               }
@@ -851,16 +854,7 @@ import { MonolithCornerTurnLoop, isCornerReviewTurn, DaemonActivity, toolCallKey
               );
             },
           ));
-        },
-        (error) => console.error(`[thin-core] corner ${cornerId} receipt heartbeat failed:`, error),
-        () => {
-          console.warn(
-            `[thin-core] corner ${cornerId} turn ${requestId} dropped: ` +
-              'the server revoked its output authority',
-          );
-          ctx.stopTurn(requestId);
-        },
-      );
+      })();
       startTraceStats();
       await api.execute('postAgentTurnReceipt', {
         agentId: ctx.agent.publicKey,
@@ -882,8 +876,9 @@ import { MonolithCornerTurnLoop, isCornerReviewTurn, DaemonActivity, toolCallKey
       // A stopped turn already has its ending: the server wrote `cancelled` and
       // named who stopped it when it accepted the request. Nothing to post, and
       // nothing the helper is to blame for.
+      // A helper handoff ends only this process's run; the claim stays for the next helper.
       if (error instanceof TurnStoppedError || ctx.stoppedTurns.has(requestId)) {
-        console.log(`[thin-core] corner ${cornerId} turn ${requestId} stopped by the requester`);
+        console.log(`[thin-core] corner ${cornerId} turn ${requestId} ${ctx.forcedStop ? 'interrupted for the helper handoff' : 'stopped by the requester'}`);
         void finishTrace('cancelled').catch(() => undefined);
         return;
       }

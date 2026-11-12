@@ -24,9 +24,10 @@ it('two connections of the same agent land exactly one answer', async () => {
   await claim(command!, 'connection-a');
   await disconnectHelper();
   await helperOwner(A);
-  await claim(command!, 'connection-b');
+  // The second connection resumes the same turn in its generation.
+  await claim(command!, 'connection-a');
   const outcomes = await Promise.allSettled([
-    result(command!, 'Answer A', 'connection-a'), result(command!, 'Answer B', 'connection-b'),
+    result(command!, 'Answer A', 'connection-a'), result(command!, 'Answer B', 'connection-a'),
   ]);
   expect(outcomes.filter(o => o.status === 'fulfilled')).toHaveLength(1);
   expect((await rootFixture.phone.readRoom(R, H))!.messages.filter(m => /^Answer [AB]$/.test(m.text))).toHaveLength(1);
@@ -73,8 +74,8 @@ it.each(['workflow', 'membership', 'cancelled'] as const)(
     const source = await send('@hoots reclaimed reply');
     const [command] = await commands();
     await claim(command!, 'old');
-    await disconnectHelper();
-    await helperOwner(A);
+    // The old generation ends and the command is claimed again in a new one.
+    await rootFixture.db.query("UPDATE agent_commands SET state='pending',generation_id=NULL,claimed_at=NULL WHERE id=$1", [command!.id]);
     await claim(command!, 'new');
     if (boundary === 'workflow')
       await rootFixture.db.query(`UPDATE messages SET card='{"runId":"reclaimed-workflow"}' WHERE id=$1`, [source.messageId]);

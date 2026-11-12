@@ -7,12 +7,11 @@ import { readOwnedModelReceipt } from '@beeline/api-contract/helper-model-receip
 /** Private generation files only. No transport, provider registration, local
  * retry, runtime activation or current-authority assertion lives in this leaf. */
 export const OWNED_MODEL_FILE_MAX_BYTES = 32 * 1024;
+/** One invocation: its agent and generation. No command, socket or epoch
+ * takes part, so a resumed turn reopens the same files after a restart. */
 export interface OwnedModelFileBinding {
   readonly agentId: string;
-  readonly commandId: string;
   readonly generationId: string;
-  readonly connectionId: string;
-  readonly connectionEpoch: number;
   readonly provider: 'beeline';
   readonly model: string;
   readonly baseUrl: string;
@@ -35,17 +34,16 @@ function closed(value: unknown, fields: string): value is Record<string, unknown
   });
 }
 function binding(value: OwnedModelFileBinding): OwnedModelFileBinding {
-  if (!closed(value, 'agentId,baseUrl,commandId,connectionEpoch,connectionId,generationId,model,provider') ||
-      ![value.agentId, value.commandId, value.generationId, value.connectionId, value.model].every(text) || value.provider !== 'beeline' ||
-      !Number.isSafeInteger(value.connectionEpoch) || value.connectionEpoch <= 0 || typeof value.baseUrl !== 'string' || value.baseUrl.length > 2048)
+  if (!closed(value, 'agentId,baseUrl,generationId,model,provider') ||
+      ![value.agentId, value.generationId, value.model].every(text) || value.provider !== 'beeline' ||
+      typeof value.baseUrl !== 'string' || value.baseUrl.length > 2048)
     throw new OwnedModelFileRefusal();
   let url: URL;
   try { url = new URL(value.baseUrl); } catch { throw new OwnedModelFileRefusal(); }
   if (url.username || url.password || url.search || url.hash || url.pathname.replace(/\/$/, '') !== '/v1/free-agents/model' ||
       (url.protocol !== 'https:' && !(url.protocol === 'http:' && ['127.0.0.1', '[::1]', 'localhost'].includes(url.hostname))))
     throw new OwnedModelFileRefusal();
-  return Object.freeze({ agentId: value.agentId, commandId: value.commandId, generationId: value.generationId,
-    connectionId: value.connectionId, connectionEpoch: value.connectionEpoch, provider: 'beeline', model: value.model,
+  return Object.freeze({ agentId: value.agentId, generationId: value.generationId, provider: 'beeline', model: value.model,
     baseUrl: url.origin + '/v1/free-agents/model' });
 }
 function credential(value: OwnedModelFileCredential): OwnedModelFileCredential {
@@ -140,9 +138,9 @@ export class OwnedModelFiles {
       if (!isAbsolute(input.root)) throw new OwnedModelFileRefusal();
       const selected = binding(input.binding), granted = credential(input.credential), root = resolve(input.root);
       mkdirSync(root, { recursive: true, mode: 0o700 }); privateDirectory(root);
-      // Source/model changes cannot create another file for the same claimed
+      // Model changes cannot create another file for the same claimed
       // generation. Origin partitions the same principal at distinct servers.
-      const identity = hash(JSON.stringify([new URL(selected.baseUrl).origin, selected.agentId, selected.commandId, selected.generationId]));
+      const identity = hash(JSON.stringify([new URL(selected.baseUrl).origin, selected.agentId, selected.generationId]));
       const directory = join(root, 'model-' + identity), authPath = join(directory, 'credential.json'), journalPath = join(directory, 'requests.json');
       const contents = JSON.stringify({ v: 1, binding: selected, credential: granted } satisfies CredentialFile);
       const owner: Owner = { directory, authPath, journalPath, binding: selected, digest: hash(contents), bindingHash: hash(JSON.stringify(selected)) };

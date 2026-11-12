@@ -3,7 +3,6 @@ import { authorizeAgentReply, requeueRefusedReply } from '../agent-reply-authori
 import { endAgentTurn } from '../agent-turn-end.js';
 import { recordAgentTurnFailure } from '../agent-turn-failure.js';
 import { parkOwnedModelTerminal, OwnedModelOwnerEndRefusal } from '../owned-model-parking.js';
-import { assertCurrentTurnOwner } from '../turn-ownership.js';
 import type { HelperTurnOwnershipSource } from '@beeline/api-contract/helper-turn-ownership';
 import { cleanVoiceReply } from '../voice-reply.js';
 import { queueDatabaseWork } from '../database-work-queue.js';
@@ -299,7 +298,6 @@ import { daemonExecuteOperation } from './operations.js';
         // lifecycle take it first; ordinary activity retains independent lanes.
         if (ownedIntent && needsLifecycle) await lockCornerLifecycle(db, scopedRoom);
         if (ownedIntent && name !== 'postRoomMessage') await daemonLockOwnedTurnAccess(ctx, db, scopedRoom, authenticatedAgentId);
-        if (turnOwner) await assertCurrentTurnOwner(db, authenticatedAgentId, turnOwner);
         // Result publication keeps lifecycle and command locks in the same order as cancellation.
         if (!ownedIntent && needsLifecycle)
           await lockCornerLifecycle(db, scopedRoom);
@@ -338,12 +336,8 @@ import { daemonExecuteOperation } from './operations.js';
           : await authorizeCommandOutput(
           db, scopedRoom, authenticatedAgentId, requestId, candidate.generationId, allowCompleted,
         );
-        if (name === 'postAgentTurnReceipt' && command.turn_owner_connection_id) {
-          if (!turnOwner || turnOwner.connectionId !== command.turn_owner_connection_id ||
-              turnOwner.epoch !== Number(command.turn_owner_epoch))
-            throw new Error('Turn receipt requires its negotiated machine owner');
-          if (candidate.heartbeat) throw new Error('Owned turns do not accept freshness receipts');
-        }
+        if (name === 'postAgentTurnReceipt' && command.turn_owner_connection_id && candidate.heartbeat)
+          throw new Error('Owned turns do not accept freshness receipts');
         // Helpers cannot impose an order outcome on an informational wake.
         // The stored command and its delivered receipt own that obligation.
         if (name === 'postAgentTurnReceipt' && candidate.status === 'failed' &&

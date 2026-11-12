@@ -82,7 +82,7 @@ it.each(['before', 'after'] as const)('connected helper retains owned-model auth
   expect(claimed.commands.map(command => command.source.id)).toEqual([first.messageId, second.messageId]);
   expect(claimed.modelCredential).toMatchObject({ v: 1 });
   const actor = await fixture.credentials.authenticate(fixture.db, claimed.modelCredential!.token);
-  expect(actor.binding).toMatchObject({ connectionId: source.connectionId, connectionEpoch: source.epoch, generationId });
+  expect(actor.binding).toMatchObject({ connectionId: null, connectionEpoch: null, generationId });
   await daemon.execute('postRoomMessage', {
     roomId: MODEL_ROOM, requestId: claimed.commands[0]!.turnRequestId!, generationId,
     text: 'Both original messages answered.',

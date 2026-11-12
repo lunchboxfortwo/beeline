@@ -61,6 +61,7 @@ const claim = (command: AgentCommand) => daemon.execute('claimAgentCommand', {
 }, command.agentId);
 const authority = (command: AgentCommand) => ({ roomId: command.roomId,
   requestId: command.turnRequestId, generationId: 'proof-generation' });
+const answer = (cornerId: string) => daemon.execute('order', { ...authority(order), address: cornerId, agent: 'worker', text: 'Publish is verified; continue' }, RUBY);
 const commands = (roomId: string, agentId: string) => readAgentCommands(db, roomId, agentId).then(r => r.commands);
 async function open(repositoryWork = true) {
   return daemon.execute('createCorner', { ...authority(order), requestId: order.turnRequestId,
@@ -109,9 +110,9 @@ it.each(['delivery', 'cached claim'])('Reproduction STALE-ANSWERED-REPORT: drops
   await daemon.execute('report', { ...authority(turn), status: 'blocked', text: 'blocked: publish job is running' }, WORKER);
   const report = (await commands(DM, RUBY)).find(command => command.reason === 'report')!;
   expect(report).toBeDefined();
-  // Replay fb_0fd0fc28da34b3f6dd4e0107: the commander posts the
-  // resolved outcome in the return DM before the queued blocker is claimed.
-  await daemon.execute('postRoomMessage', { ...authority(order), text: 'done: publish verified' }, RUBY);
+  // Replay fb_0fd0fc28da34b3f6dd4e0107: the commander answers the
+  // blocker with an order before the queued blocker is claimed.
+  await answer(opened.cornerId);
   expect((await db.query(`SELECT private_payload->>'waitingAnswered' answered
     FROM agent_commands WHERE id=$1`, [report.id])).rows).toEqual([{ answered: 'true' }]);
   if (path === 'cached claim') await expect(claim(report)).rejects.toThrow('command claim conflict');
@@ -124,16 +125,19 @@ it('STALE-ANSWERED-REPORT: preserves a report already being handled', async () =
   await daemon.execute('report', { ...authority(turn), status: 'blocked', text: 'blocked: publish job is running' }, WORKER);
   const report = (await commands(DM, RUBY)).find(command => command.reason === 'report')!;
   await claim(report);
-  await daemon.execute('postRoomMessage', { ...authority(order), text: 'done: publish verified' }, RUBY);
+  await answer(opened.cornerId);
   await claim(report);
   expect((await db.query('SELECT state FROM agent_commands WHERE id=$1', [report.id])).rows)
     .toEqual([{ state: 'claimed' }]);
   await db.query(`UPDATE agent_commands SET lease_expires_at=now()-interval '1 second' WHERE id=$1`, [report.id]);
-  await claim(report); // Only a closed connection releases the live machine's work.
+  await claim(report);
+  // A closed connection keeps the work claimed; its helper resumes it in the same generation.
   const connection = (await db.query<{ connection_id: string }>(
     'SELECT connection_id FROM agent_connections WHERE agent_id=$1', [RUBY])).rows[0]!;
   await releaseAgentConnection(db, new LiveHub(), RUBY, connection.connection_id);
-  await expect(claim(report)).rejects.toThrow('command claim conflict');
+  await claim(report);
+  expect((await db.query('SELECT state FROM agent_commands WHERE id=$1', [report.id])).rows)
+    .toEqual([{ state: 'claimed' }]);
 });
 it.each([
   ['delivery', false], ['cached claim', false], ['delivery', true], ['cached claim', true],
@@ -146,7 +150,7 @@ it.each([
   const queued = await commands(DM, RUBY);
   const blocker = queued.find(command => command.reason === 'report')!;
   expect(queued.find(command => command.id === other!.id)?.source.body).toBe('A separate event still needs handling');
-  await daemon.execute('postRoomMessage', { ...authority(order), text: 'done: publish verified' }, RUBY);
+  await answer(opened.cornerId);
   if (path === 'cached claim') await expect(claim(blocker)).rejects.toThrow('command claim conflict');
   const remaining = await commands(DM, RUBY);
   expect(remaining.map(command => command.id)).toContain(other!.id);

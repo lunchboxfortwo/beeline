@@ -1,4 +1,5 @@
 import { releaseAgentConnection, advanceCorner, randomUUID, randomBytes, expect, it, vi, MemoryObjectStorage, ObjectService, DaemonService, LiveHub, PushDeliveryLoop, createAgentCommand, GITHUB_SUBJECT, systemLine, HUMAN, RUBY, WORKER, WS, ROOM, DM, db, daemon, phone, order, claim, authority, commands, open, worker, rootFixture, type AgentCommand } from './test-support-commander-recovery.integration.test-support.js';
+import { claimAgentConnection } from './connection-presence.js';
 
 it('RUBY-16: a reviewer reads reported files from the existing corner report card', async () => {
   const opened = await open();
@@ -201,14 +202,20 @@ it('keeps approval resume provenance and posts progress only in the corner', asy
   ).toBe(false);
 });
 
-it('hands private work back on connection close without a failure report', async () => {
+it('keeps private work across connection close and a new helper process resumes it without a failure report', async () => {
   const opened=await open(),turn=await worker(opened.cornerId);
   const connection=(await rootFixture.db.query<{connection_id:string}>('SELECT connection_id FROM agent_connections WHERE agent_id=$1',[WORKER])).rows[0]!;
   await releaseAgentConnection(rootFixture.db,new LiveHub(),WORKER,connection.connection_id);
-  expect((await rootFixture.db.query('SELECT state FROM agent_commands WHERE id=$1',[turn.id])).rows[0]).toMatchObject({state:'pending'});
+  const claimed=(await rootFixture.db.query<{state:string;generation_id:string}>('SELECT state,generation_id FROM agent_commands WHERE id=$1',[turn.id])).rows[0]!;
+  expect(claimed.state).toBe('claimed');
+  await claimAgentConnection(rootFixture.db,new LiveHub(),WORKER,{lifecycleId:'restarted-helper'},
+    {connectionId:'restarted-helper',instanceId:'helper-fixture'});
+  expect((await rootFixture.db.query('SELECT state,generation_id FROM agent_commands WHERE id=$1',[turn.id])).rows[0]).toEqual(claimed);
   expect((await commands(DM,RUBY)).some(command=>command.reason==='report'&&command.source.body.startsWith('failed:'))).toBe(false);
-  await rootFixture.daemon.execute('claimAgentCommand',{roomId:opened.cornerId,commandId:turn.id,generationId:'after-reconnect'},WORKER);
-  expect((await rootFixture.db.query('SELECT state FROM agent_commands WHERE id=$1',[turn.id])).rows[0]).toMatchObject({state:'claimed'});
+  const resumable=(await rootFixture.daemon.execute('getAgentCommands',{roomId:opened.cornerId},WORKER)).commands.find(command=>command.id===turn.id);
+  expect(resumable?.generationId).toBe(claimed.generation_id);
+  await rootFixture.daemon.execute('claimAgentCommand',{roomId:opened.cornerId,commandId:turn.id,generationId:resumable!.generationId!},WORKER);
+  expect((await rootFixture.db.query('SELECT state,generation_id FROM agent_commands WHERE id=$1',[turn.id])).rows[0]).toEqual(claimed);
 });
 
 

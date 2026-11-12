@@ -3,8 +3,7 @@ import {PhoneService} from './phone-service.js';
 import {afterEach,beforeEach,expect,it,vi} from 'vitest';
 import {migratedDatabase,type PgliteDatabase} from './test-support.js';
 import {ConnectionPresence,recordAgentEvidence} from './connection-presence.js';
-import {authorizeCommandOutput,createAgentCommand,claimAgentCommand,createClaimedMcpAgentCommand} from './agent-command.js';
-import {randomUUID} from 'node:crypto';
+import {authorizeCommandOutput,createAgentCommand,claimAgentCommand} from './agent-command.js';
 import {LiveHub} from './live.js';
 
 const ROOM='22222222-2222-4222-8222-222222222222',WORKSPACE='11111111-1111-4111-8111-111111111111';
@@ -28,10 +27,10 @@ async function claimed(connectionId='connection'){
   await database.transaction(db=>claimAgentCommand(db,ROOM,AGENT,command.id,'generation',source));
   return {source,command};
 }
-it('hands a closed connection’s commands back to pending without ending their turns',async()=>{
+it('keeps a closed connection’s running turn claimed for the same helper to continue',async()=>{
   const {source,command}=await claimed();await presence.releaseConnection(AGENT,source.connectionId);
-  expect((await database.query('SELECT state,generation_id,turn_owner_connection_id,lease_expires_at FROM agent_commands WHERE id=$1',[command.id])).rows)
-    .toEqual([{state:'pending',generation_id:null,turn_owner_connection_id:null,lease_expires_at:null}]);
+  expect((await database.query('SELECT state,generation_id FROM agent_commands WHERE id=$1',[command.id])).rows)
+    .toEqual([{state:'claimed',generation_id:'generation'}]);
   expect((await database.query('SELECT status FROM agent_turns WHERE request_id=$1',[command.turn_request_id])).rows).toEqual([{status:'working'}]);
   expect(await body()).toMatchObject({status:'offline'});
 });
@@ -42,9 +41,12 @@ it('a late close of an older socket cannot release the current owner',async()=>{
     .toEqual([{state:'claimed',turn_owner_connection_id:source.connectionId}]);
   expect(await body()).toMatchObject({status:'online',held:true,connectionId:'new'});
 });
-it('a new authenticated connection returns the displaced owner’s commands to pending',async()=>{
-  const {command}=await claimed('old');await presence.claimConnection(AGENT,{connectionId:'new'});
-  await vi.waitFor(async()=>expect((await database.query('SELECT state FROM agent_commands WHERE id=$1',[command.id])).rows).toEqual([{state:'pending'}]));
+it('a new authenticated connection, from the same or a new helper process, leaves the running turn claimed',async()=>{
+  const {command}=await claimed('old');
+  await presence.claimConnection(AGENT,{connectionId:'new',lifecycleId:'same-process'});
+  await presence.claimConnection(AGENT,{connectionId:'restarted',lifecycleId:'new-process'});
+  expect((await database.query('SELECT state,generation_id FROM agent_commands WHERE id=$1',[command.id])).rows)
+    .toEqual([{state:'claimed',generation_id:'generation'}]);
   expect((await database.query('SELECT status FROM agent_turns WHERE request_id=$1',[command.turn_request_id])).rows).toEqual([{status:'working'}]);
 });
 it('turn age and incoming messages never arm a presence or stalled-turn watchdog',async()=>{
@@ -77,66 +79,19 @@ it('evidence merges with a concurrent lifecycle announcement',async()=>{
   expect(await body()).toMatchObject({lifecycleId:'boot-2',releaseVersion:'v2.0.0',status:'online'});
 });
 
-it('registration recovers only its agent’s ownerless helper claims once and preserves live MCP claims',async()=>{
-  const legacy=(await createAgentCommand(database,{roomId:ROOM,agentId:AGENT,sourceMessageId:null,reason:'system'}))!;
-  await database.transaction(db=>claimAgentCommand(db,ROOM,AGENT,legacy.id,'pre-upgrade-helper'));
-  const peer='c'.repeat(64);
-  await database.query(`INSERT INTO identities(id,kind,name) VALUES($1,'agent','Other helper')`,[peer]);
-  await database.query('INSERT INTO agents(agent_id,owner_id) VALUES($1,$2)',[peer,HUMAN]);
-  await database.query(`INSERT INTO memberships(workspace_id,room_id,identity_id,role)
-    VALUES($1,$2,$3,'member'),($1,NULL,$3,'member')`,[WORKSPACE,ROOM,peer]);
-  const other=(await createAgentCommand(database,{roomId:ROOM,agentId:peer,sourceMessageId:null,reason:'system'}))!;
-  await database.transaction(db=>claimAgentCommand(db,ROOM,peer,other.id,'other-helper'));
-  const mcpRooms=[randomUUID(),randomUUID()];
-  for(const roomId of mcpRooms){
-    await database.query(`INSERT INTO rooms(id,workspace_id,name) VALUES($1,$2,'MCP')`,[roomId,WORKSPACE]);
-    await database.query(`INSERT INTO memberships(workspace_id,room_id,identity_id,role)
-      VALUES($1,$2,$3,'member')`,[WORKSPACE,roomId,AGENT]);
-  }
-  // Explicit app calls and app-claimed orders identify MCP ownership differently.
-  const mcpCall=await createClaimedMcpAgentCommand(database,{roomId:mcpRooms[0]!,agentId:AGENT,generationId:'older-app-call'});
-  const mcpOrder=(await createAgentCommand(database,{roomId:mcpRooms[1]!,agentId:AGENT,sourceMessageId:null,reason:'order',
-    privatePayload:{kind:'order',text:'Live app order',authorId:HUMAN,fromRoomId:ROOM}}))!;
-  await database.transaction(db=>claimAgentCommand(db,mcpRooms[1]!,AGENT,mcpOrder.id,'mcp:live-order'));
-  const untouched=async()=>(await database.query(`SELECT id,xmin::text version,state,generation_id,claimed_at,lease_expires_at
-    FROM agent_commands WHERE id=ANY($1::text[]) ORDER BY id`,[[other.id,mcpCall,mcpOrder.id]])).rows;
-  const before=await untouched();
-  await presence.claimConnection(AGENT,{connectionId:'upgraded'});
-  expect((await database.query(`SELECT state,generation_id,claimed_at,lease_expires_at,turn_owner_connection_id,turn_owner_epoch
-    FROM agent_commands WHERE id=$1`,[legacy.id])).rows).toEqual([{state:'pending',generation_id:null,claimed_at:null,
-      lease_expires_at:null,turn_owner_connection_id:null,turn_owner_epoch:null}]);
-  expect((await database.query('SELECT status FROM agent_turns WHERE request_id=$1',[legacy.turn_request_id])).rows)
-    .toEqual([{status:'working'}]);
-  expect(await untouched()).toEqual(before);
-  const version=(await database.query('SELECT xmin::text version FROM agent_commands WHERE id=$1',[legacy.id])).rows;
-  const source={connectionId:'again',epoch:await presence.claimConnection(AGENT,{connectionId:'again'})};
-  expect((await database.query('SELECT xmin::text version FROM agent_commands WHERE id=$1',[legacy.id])).rows).toEqual(version);
-  await database.transaction(db=>claimAgentCommand(db,ROOM,AGENT,legacy.id,'upgraded-generation',source));
-  await presence.releaseConnection(AGENT,source.connectionId);
-  expect(await untouched()).toEqual(before);
-});
-
-// Reproduction turn-write-reject: unchanged claimed owner refuses while its server lease is stale.
-it('names a stale server lease and recovers the same claimed turn after renewal',async()=>{
+// Reproduction turn-write-reject: a stale server lease no longer refuses a claimed turn's output.
+it('accepts a claimed turn’s output while its server instance lease is stale',async()=>{
   const {command}=await claimed();
   const daemon=new DaemonService(database,live);
-  const post=()=>daemon.execute('postCornerMessage',{roomId:ROOM,cornerId:ROOM,requestId:command.turn_request_id,generationId:'generation',text:'Recovered live turn write'},AGENT);
   await database.query(`UPDATE live_server_instances SET renewed_at=clock_timestamp()-interval '161 seconds' WHERE instance_id=$1`,[presence.instanceId]);
-  const log=vi.spyOn(console,'error').mockImplementation(()=>{});
-  await expect(post())
-    .rejects.toThrow(/command output authority rejected: server instance lease stale: age=16[1-9]/);
-  expect(log).toHaveBeenCalledWith('command output rejected',expect.objectContaining({reason:expect.stringContaining('server instance lease stale: age=')}));
-  expect((await database.query('SELECT state FROM agent_commands WHERE id=$1',[command.id])).rows).toEqual([{state:'claimed'}]);
-  await presence.renewLease();
-  await post();
+  await daemon.execute('postCornerMessage',{roomId:ROOM,cornerId:ROOM,requestId:command.turn_request_id,generationId:'generation',text:'Live turn write'},AGENT);
   await database.query(`INSERT INTO memberships(workspace_id,room_id,identity_id,role) VALUES($1,NULL,$2,'owner')`,[WORKSPACE,HUMAN]);
   const room=await new PhoneService(database,'http://test').readRoom(ROOM,HUMAN);
-  expect(room?.messages.filter(message=>message.text==='Recovered live turn write')).toHaveLength(1);
+  expect(room?.messages.filter(message=>message.text==='Live turn write')).toHaveLength(1);
 });
 it.each([
   ["DELETE FROM agent_commands",'no command row'],
   ["UPDATE agent_commands SET state='complete'",'state not claimed: complete'],
-  ["UPDATE agent_connections SET epoch=epoch+1",'connection/epoch mismatch'],
   ["UPDATE agent_commands SET generation_id=NULL",'generation ended'],
 ])('explains output refusal after %s',async(sql,reason)=>{
   const {command}=await claimed();vi.spyOn(console,'error').mockImplementation(()=>{});

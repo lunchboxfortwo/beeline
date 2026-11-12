@@ -761,9 +761,9 @@
           "instance_id": "existing before the registry; weekly audit reviews",
           "connected_at": "existing before the registry; weekly audit reviews",
           "released_at": "existing before the registry; weekly audit reviews",
-          "turn_connection_id": "the machine connection that owns the agent's running turn, so a turn survives socket loss",
-          "turn_connection_epoch": "epoch of that turn-owning connection, so a stale socket cannot claim the turn",
-          "turn_transport_id": "transport that owns the running turn, so a reconnect resumes the same turn"
+          "turn_connection_id": { "reason": "retired: a running turn has no owning connection; kept for serving and rollback overlap", "drop": "https://github.com/Beeline-Work/beeline/pull/4267 follow-up, after the rollback window for 4267 closes" },
+          "turn_connection_epoch": { "reason": "retired: a running turn has no owning connection epoch; kept for serving and rollback overlap", "drop": "https://github.com/Beeline-Work/beeline/pull/4267 follow-up, after the rollback window for 4267 closes" },
+          "turn_transport_id": { "reason": "retired: a running turn has no owning transport; kept for serving and rollback overlap", "drop": "https://github.com/Beeline-Work/beeline/pull/4267 follow-up, after the rollback window for 4267 closes" }
         }
       },
       "agent_grant_policy_revocations": {
@@ -3294,20 +3294,18 @@
         "columns": {
           "command_id": "Identifies the command whose execution generation has an immutable owner binding.",
           "generation_id": "Preserves each admitted execution generation after the current command advances or is requeued.",
-          "connection_id": "Records the registration that owned that execution, including explicit NULL markers for historical installed helpers.",
-          "connection_epoch": "Pins the immutable generation binding to a specific registration takeover epoch."
+          "connection_id": "History only: the registration that first claimed the generation; NULL for ingress without a helper registration. Never an owner check.",
+          "connection_epoch": "History only: the epoch of that first claiming registration. Never an owner check."
         }
       },
-      "turn_owned_effect_fences": {
+      "turn_owned_access_checks": {
         "module": "Turn ownership (apps/server/src/turn-ownership.ts)",
-        "reason": "Transaction-local evidence drives a deferred COMMIT-time ownership check and deletes itself after success; no heartbeat or retained effect history.",
+        "reason": "Transaction-local evidence drives a deferred COMMIT-time Room access check and deletes itself after success; no heartbeat or retained effect history.",
         "columns": {
-          "transaction_id": "Identifies the exact database transaction whose actual owned effects must be checked at COMMIT.",
-          "agent_id": "Identifies the effect actor whose current registration must still be authoritative at COMMIT.",
-          "connection_id": "Pins the transaction evidence to the helper registration admitted for that effect.",
-          "connection_epoch": "Rejects transaction completion if a takeover replaced the admitted registration.",
-          "command_id": "Identifies the actual command authorizing the effect and prevents mixing commands in one registration transaction.",
-          "generation_id": "Pins the effect to its immutable execution generation even if that command is requeued before COMMIT."
+          "transaction_id": "Identifies the exact database transaction whose owned effects re-check Room access at COMMIT.",
+          "agent_id": "Identifies the effect actor whose Room membership must still hold at COMMIT.",
+          "command_id": "Identifies the command authorizing the effect and prevents mixing commands in one transaction.",
+          "generation_id": "Pins the effect to its execution generation and prevents mixing generations in one transaction."
         }
       },
       "agent_command_owner_ends": {
@@ -3335,9 +3333,9 @@
           "command_id": "Identifies the durable command whose claim issued this credential.",
           "generation_id": "Distinguishes successive command claims and prevents a credential crossing generations.",
           "request_id": "Binds model authority to the admitted helper turn request.",
-          "connection_id": "Retains the helper connection that owned the claim at issuance.",
-          "connection_epoch": "Distinguishes successive registrations of the same helper connection.",
-          "instance_id": "Binds the credential to the server instance whose live lease admitted it.",
+          "connection_id": { "reason": "Signed history of older credentials only; NULL for new credentials and never compared to a live connection.", "drop": "https://github.com/Beeline-Work/beeline/pull/4267 follow-up, after credentials issued before 4267 expire" },
+          "connection_epoch": { "reason": "Signed history of older credentials only; NULL for new credentials and never compared to a live connection.", "drop": "https://github.com/Beeline-Work/beeline/pull/4267 follow-up, after credentials issued before 4267 expire" },
+          "instance_id": { "reason": "Signed history of older credentials only; NULL for new credentials and never compared to a server lease.", "drop": "https://github.com/Beeline-Work/beeline/pull/4267 follow-up, after credentials issued before 4267 expire" },
           "model": "Pins the selected provider model so configuration changes cannot retarget an issued credential.",
           "agent_model": "Retains the explicit agent model selection used when the credential was issued.",
           "model_token_hash": "Detects model-token rotation after issuance without retaining its secret.",

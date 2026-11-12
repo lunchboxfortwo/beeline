@@ -50,8 +50,9 @@ if (stopProofPostgresUrl && !['127.0.0.1', 'localhost', '[::1]'].includes(new UR
 
 export let db: SqlDatabase, closeDatabase: () => Promise<void>, phone: PhoneService, daemon: DaemonService, live: LiveHub;
 
+/** Waiting work only; a running turn is listed with its generation for its helper to resume. */
 export const commands = (agentId = A, roomId = R) =>
-  daemon.execute('getAgentCommands', { roomId }, agentId).then((r) => r.commands);
+  daemon.execute('getAgentCommands', { roomId }, agentId).then((r) => r.commands.filter(command => !command.generationId));
 
 export const send = (text: string, roomId = R) => phone.execute('sendRoomMessage', { roomId, text }, H);
 

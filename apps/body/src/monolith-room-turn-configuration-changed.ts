@@ -2,7 +2,6 @@ import { activateAgentSession, discardAgentSession, sessionHasCurrentContext, wa
 import { helperUsageBinding, postChangedAgentUsage } from './helper-usage-binding.js';
 import { agentBehavior } from './agent-command.js';
 import { mergeHarnessTurnMetrics } from './harness-turn-tokens.js';
-import type { InterruptedTurn } from './force-update-journal.js';
 import { homedir } from 'node:os';
 import { join } from 'node:path';
 import { workspaceAssetPaths, workspaceCacheEnv } from './workspace-assets.js';
@@ -135,26 +134,14 @@ import { MonolithRoomTurnLoop, WorkspaceRoster, HumanMessage, RoomRepositoryStat
 
 
 
-  export function monolithRoomTurnLoopInterruptedTurn(ctx: MonolithRoomTurnLoop): InterruptedTurn | undefined {
+  export function monolithRoomTurnLoopInterruptForServerMinimum(ctx: MonolithRoomTurnLoop): void {
     const active = ctx.activeTurn;
-    if (!active || active.cancelled) return undefined;
-    return { roomId: ctx.options.roomId, requestId: active.item.id, generationId: ctx.commandContext.generationId };
-  }
-
-
-  export function monolithRoomTurnLoopInterruptForServerMinimum(ctx: MonolithRoomTurnLoop): InterruptedTurn | undefined {
-    const active = ctx.activeTurn;
-    if (!active || active.cancelled) return undefined;
+    if (!active || active.cancelled) return;
     // A long-running prompt is active, not 30 minutes idle. Keep its native
-    // conversation eligible when the successor reclaims this journaled turn.
+    // conversation eligible when the next helper resumes this turn.
     ctx.warmTranscript.complete(ctx.sessionId, []);
     active.cancelled = true;
     if (ctx.client && ctx.sessionId) ctx.client.sessionCancel(ctx.sessionId);
-    return {
-      roomId: ctx.options.roomId,
-      requestId: active.item.id,
-      generationId: ctx.commandContext.generationId,
-    };
   }
 
 

@@ -2,7 +2,6 @@ import type { BodyConfig } from './config.js';
 import { isAgentRemovedError, type DaemonApiClient } from './daemon-api-client.js';
 import type { AgentRuntimeRecord } from './runtime.js';
 import { RoomRuntimeCoordinator } from './room-runtime.js';
-import type { InterruptedTurn } from './force-update-journal.js';
 
 export {
   REMOVAL_CONFIRMATION_READS,
@@ -74,9 +73,8 @@ export class ThinDaemonCore {
   resumeServing(): void {
     this.roomRuntime.resumeServing();
   }
-  interruptedTurns(): InterruptedTurn[] { return this.roomRuntime.interruptedTurns(); }
-  interruptForServerMinimum(): InterruptedTurn[] {
-    return this.roomRuntime.interruptForServerMinimum();
+  interruptForServerMinimum(): void {
+    this.roomRuntime.interruptForServerMinimum();
   }
   async run(
     opts: {

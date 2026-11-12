@@ -5,7 +5,6 @@ import { dependencyFingerprint, dependencyRequest } from './dependency-generatio
 import { existsSync } from 'node:fs';
 import { resolve } from 'node:path';
 import { mergeHarnessTurnMetrics } from './harness-turn-tokens.js';
-import type { InterruptedTurn } from './force-update-journal.js';
 
 import { AcpClient } from './acp.js';
 import { expectedMountedImportedMcpServerNames, writeBackRoomClaudeLogin } from './agent-home.js';
@@ -90,27 +89,15 @@ import { MonolithCornerTurnLoop, WorkspaceRoster } from './monolith-corner-turn.
 
 
 
-  export function monolithCornerTurnLoopInterruptedTurn(ctx: MonolithCornerTurnLoop): InterruptedTurn | undefined {
-    const current = ctx.currentTurn;
-    if (!current || ctx.stoppedTurns.has(current.requestId)) return undefined;
-    return { roomId: ctx.options.cornerId, requestId: current.requestId, generationId: ctx.commandContext.generationId };
-  }
-
-
-  export function monolithCornerTurnLoopInterruptForServerMinimum(ctx: MonolithCornerTurnLoop): InterruptedTurn | undefined {
+  export function monolithCornerTurnLoopInterruptForServerMinimum(ctx: MonolithCornerTurnLoop): void {
     ctx.forcedStop = true;
     ctx.branchSyncController?.abort();
     const current = ctx.currentTurn;
-    if (!current) return undefined;
+    if (!current) return;
     // The idle lease starts after active work, including a handover interruption.
     ctx.warmTranscript.complete(ctx.sessionId, []);
     ctx.stoppedTurns.add(current.requestId);
     if (ctx.client && ctx.sessionId) ctx.client.sessionCancel(ctx.sessionId);
-    return {
-      roomId: ctx.options.cornerId,
-      requestId: current.requestId,
-      generationId: ctx.commandContext.generationId,
-    };
   }
 
 
@@ -333,11 +320,16 @@ import { MonolithCornerTurnLoop, WorkspaceRoster } from './monolith-corner-turn.
   }
 
 
+  /** `corner:prepare -- --mobile` asked for dependencies this sandbox lacks. */
+  export function monolithCornerTurnLoopDependencyMountRequested(ctx: MonolithCornerTurnLoop): boolean {
+    return Boolean(ctx.options.repository && !ctx.options.repository.readOnly &&
+      ctx.options.config.bwrapPath && existsSync(resolve(ctx.options.worktreePath, dependencyRequest)));
+  }
+
+
   export async function monolithCornerTurnLoopActivate(ctx: MonolithCornerTurnLoop, trace?: TurnTrace): Promise<string> {
     if (ctx.options.config.agentProgramError) throw new Error(ctx.options.config.agentProgramError);
     // New read-only mounts require a new namespace, even for a retained session.
-    const mobileRequested = Boolean(ctx.options.repository && !ctx.options.repository.readOnly &&
-      ctx.options.config.bwrapPath && existsSync(resolve(ctx.options.worktreePath, dependencyRequest)));
-    if (mobileRequested && ctx.client) await ctx.discardSession(true, true);
+    if (monolithCornerTurnLoopDependencyMountRequested(ctx) && ctx.client) await ctx.discardSession(true, true);
     return activateAgentSession(ctx, () => ctx.activateCold(trace));
   }

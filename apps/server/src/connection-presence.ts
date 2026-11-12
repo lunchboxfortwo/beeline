@@ -1,4 +1,3 @@
-import { commandOwnerExpiredSql } from './turn-ownership.js';
 import { endAgentTurn } from './agent-turn-end.js';
 import { randomUUID } from 'node:crypto';
 import type { SqlDatabase } from './database.js';
@@ -35,15 +34,10 @@ export class ConnectionPresence {
   readonly instanceId: string;
   private stopped = false;
   private leaseWrite?: Promise<void>;
-  private readonly release: () => void;
   private readonly evidenceWrites = new Map<string, Promise<void>>();
-  private readonly ownerChecks = new Map<string, Promise<void>>();
   constructor(private readonly database: SqlDatabase, private readonly live: LiveHub,
     lease: { instanceId?: string } = {}) {
     this.instanceId = lease.instanceId ?? randomUUID();
-    this.release = live.subscribeAll(event => {
-      if (event.type === 'agent-connection') this.checkOwnedAgent(event.agentId);
-    });
   }
   async start(): Promise<void> { await this.renewLease(); }
   holdServerConnection(): () => void {
@@ -82,16 +76,10 @@ export class ConnectionPresence {
     this.evidenceWrites.set(agentId, work);
     try { await work; } finally { this.evidenceWrites.delete(agentId); }
   }
-  private checkOwnedAgent(agentId: string): void {
-    if (this.stopped || this.ownerChecks.has(agentId)) return;
-    const work = expireOwnedAgentTurns(this.database, this.live, agentId).then(() => {}, this.report)
-      .finally(() => this.ownerChecks.delete(agentId));
-    this.ownerChecks.set(agentId, work);
-  }
   private readonly report = (error: unknown) => console.error('[presence] connection transition failed', error);
   async stop(): Promise<void> {
-    this.stopped = true; this.release();
-    await Promise.all([this.leaseWrite, ...this.evidenceWrites.values(), ...this.ownerChecks.values()]);
+    this.stopped = true;
+    await Promise.all([this.leaseWrite, ...this.evidenceWrites.values()]);
   }
 }
 
@@ -122,25 +110,17 @@ export async function claimAgentConnection(
   connection: HeldConnection,
 ): Promise<number> {
   const claimedConnection = await database.transaction(async (db) => {
+    // A connection carries presence only. Running turns stay claimed through
+    // reconnects and helper restarts; the helper resumes them from their record.
     const claimed = await db.query<{ epoch: string | number }>(
-      `INSERT INTO agent_connections(agent_id,epoch,connection_id,instance_id,connected_at,released_at,turn_connection_id,turn_connection_epoch,turn_transport_id)
-       VALUES($1,1,$2,$3,clock_timestamp(),NULL,$4,CASE WHEN $4::text IS NOT NULL THEN 1 END,$2)
+      `INSERT INTO agent_connections(agent_id,epoch,connection_id,instance_id,connected_at,released_at)
+       VALUES($1,1,$2,$3,clock_timestamp(),NULL)
        ON CONFLICT(agent_id) DO UPDATE SET epoch=agent_connections.epoch+1,
          connection_id=EXCLUDED.connection_id,instance_id=EXCLUDED.instance_id,
-         connected_at=EXCLUDED.connected_at,released_at=NULL,
-         turn_connection_id=EXCLUDED.turn_connection_id,turn_transport_id=EXCLUDED.turn_transport_id,
-         turn_connection_epoch=CASE WHEN EXCLUDED.turn_connection_id IS NULL THEN NULL
-           WHEN agent_connections.turn_connection_id=EXCLUDED.turn_connection_id THEN agent_connections.turn_connection_epoch
-           ELSE agent_connections.epoch+1 END
+         connected_at=EXCLUDED.connected_at,released_at=NULL
        RETURNING epoch`,
-      [agentId, connection.connectionId, connection.instanceId, metadata.turnRuntimeId ?? null],
+      [agentId, connection.connectionId, connection.instanceId],
     );
-    // Pre-upgrade helpers claimed without a connection source. This registration
-    // supersedes those claims once; MCP calls/orders retain their own leases.
-    await db.query(`UPDATE agent_commands SET state='pending',generation_id=NULL,
-      lease_expires_at=NULL,claimed_at=NULL,turn_owner_epoch=NULL
-      WHERE agent_id=$1 AND state='claimed' AND turn_owner_connection_id IS NULL
-        AND reason<>'mcp_call' AND COALESCE(generation_id,'') NOT LIKE 'mcp:%'`,[agentId]);
     const announcement = await writeAgentAnnouncement(db, undefined, agentId, metadata, connection);
     await db.query(`INSERT INTO free_agent_events(agent_id,kind,detail)
       SELECT agent_id,'connected',jsonb_build_object('connectionId',$2::text) FROM free_agents
@@ -170,14 +150,7 @@ export async function releaseAgentConnection(
       [agentId, connectionId],
     );
     if (!current.rowCount) return undefined;
-    await db.query(`UPDATE agent_commands command SET state='pending',generation_id=NULL,
-      lease_expires_at=NULL,claimed_at=NULL,turn_owner_connection_id=NULL,turn_owner_epoch=NULL
-      FROM agent_connections connection WHERE connection.agent_id=$1 AND connection.connection_id=$2
-        AND command.agent_id=$1 AND command.state='claimed'
-        AND (command.turn_owner_connection_id=COALESCE(connection.turn_connection_id,connection.connection_id)
-          OR (command.turn_owner_connection_id IS NULL AND command.reason<>'mcp_call'
-            AND COALESCE(command.generation_id,'') NOT LIKE 'mcp:%'))`,[agentId,connectionId]);
-
+    // A dropped socket leaves running turns claimed.
     await db.query(
       `UPDATE live_outputs SET body=body || ${releasedPresenceSql('$1')} || jsonb_build_object(
          'observedAt',GREATEST($3::bigint,COALESCE((body->>'observedAt')::bigint,0)+1)),
@@ -193,15 +166,6 @@ export async function releaseAgentConnection(
     await broadcastAgentPresence(database, live, agentId);
   }
   return released !== undefined;
-}
-
-/** A lost owner returns commands to pending; it never invents a terminal turn. */
-export async function expireOwnedAgentTurns(database:SqlDatabase,_live:LiveHub,agentId:string):Promise<number>{
-  const result=await database.query(`UPDATE agent_commands command SET state='pending',generation_id=NULL,
-    lease_expires_at=NULL,claimed_at=NULL,turn_owner_connection_id=NULL,turn_owner_epoch=NULL
-    WHERE agent_id=$1 AND state='claimed' AND turn_owner_connection_id IS NOT NULL
-      AND ${commandOwnerExpiredSql('command')}`,[agentId]);
-  return result.rowCount;
 }
 
 /**

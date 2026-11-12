@@ -418,7 +418,7 @@ export class DaemonAgentSession {
         const source = this.turnSource!;
         const result = helperTurnCodecs(operation).result.parse(await this.deps.daemon.execute(operation, input, this.agentId, source, this.#ownedModelCapability));
         const reply = { type: 'turn-result', requestId: item.requestId, result };
-        await this.deps.daemon.fenceOwnedTurnReply(this.agentId, source, input, () => {
+        await this.deps.daemon.fenceOwnedTurnReply(this.agentId, input, () => {
           if (!this.#closed && this.transport.isOpen()) this.transport.send(reply);
         }, operation === 'claimAgentCommand');
       } catch (error) {

@@ -8,14 +8,14 @@ let fixture: Awaited<ReturnType<typeof ownedModelFixture>>;
 const OTHER_ROOM='33333333-3333-4333-8333-333333333333';
 beforeEach(async()=>{fixture=await ownedModelFixture();});
 afterEach(()=>fixture.db.close());
-async function addSibling(scope: 'same'|'room'|'agent'|'generation'|'connection'|'epoch'|'control'='same') {
+async function addSibling(scope: 'same'|'room'|'agent'|'generation'|'control'='same') {
   if(scope==='room')await fixture.db.query("INSERT INTO rooms(id,workspace_id,name) VALUES($1,$2,'Elsewhere')",[OTHER_ROOM,MODEL_WORKSPACE]);
   await fixture.db.query(`INSERT INTO agent_commands(id,room_id,agent_id,turn_request_id,action,reason,
     root_command_id,root_source_message_id,agent_depth,state,generation_id,claimed_at,turn_owner_connection_id,turn_owner_epoch)
     VALUES('sibling',$1,$2,'sibling-request',$3,'human_tag','sibling','sibling-source',0,'claimed',$4,clock_timestamp(),$5,$6)`,
     [scope==='room'?OTHER_ROOM:MODEL_ROOM,scope==='agent'?MODEL_OWNER:MODEL_AGENT,scope==='control'?'stop':'input',
-      scope==='generation'?'other-generation':MODEL_CLAIM.generationId,scope==='connection'?'other-connection':MODEL_SOURCE.connectionId,
-      scope==='epoch'?2:MODEL_SOURCE.epoch]);
+      scope==='generation'?'other-generation':MODEL_CLAIM.generationId,MODEL_SOURCE.connectionId,
+      MODEL_SOURCE.epoch]);
 }
 const end=(id:string)=>fixture.db.transaction(db=>endAgentTurn(db,{id,generation_id:MODEL_CLAIM.generationId},'complete'));
 const prepare=()=>({reservation:{day:'2026-11-02',reserved:16,maxOutput:8,reservedUsd:0.01,credit:0},
@@ -39,6 +39,27 @@ it('the same immutable credential dispatches a continuation after the first answ
     .toEqual([{id:'sibling',state:'complete'},{id:MODEL_CLAIM.commandId,state:'complete'}]);
 });
 
+// Reproduction TURN-1, partial batch: the helper restarts after the anchor
+// answered, and resumes the generation by claiming the remaining sibling.
+it('a resumed batch member recovers the invocation credential, so an UNKNOWN request is never dispatched again',async()=>{
+  await addSibling();
+  const attempts=new OwnedModelAttempts(fixture.db,fixture.credentials);
+  const request='11111111-1111-4111-8111-111111111111',step={step:'answer both requests'};
+  const first=await attempts.reserve(fixture.actor,request,step,async()=>prepare());
+  const start=vi.fn(async()=>'provider response');
+  await attempts.handoff(first.permit!,start);
+  await end(MODEL_CLAIM.commandId);
+  const resumed=await fixture.db.transaction(tx=>fixture.credentials.issueInTransaction(tx,{...MODEL_CLAIM,commandId:'sibling'}));
+  expect(resumed).toEqual(fixture.issued);
+  const actor=await fixture.credentials.authenticate(fixture.db,resumed.token);
+  const replay=await attempts.reserve(actor,request,step,async()=>prepare());
+  expect(replay.permit).toBeUndefined();
+  expect(start).toHaveBeenCalledOnce();
+  expect((await fixture.db.query('SELECT command_id,state FROM owned_model_attempts')).rows)
+    .toEqual([{command_id:MODEL_CLAIM.commandId,state:'unknown'}]);
+  expect((await fixture.db.query('SELECT count(*)::int n FROM owned_model_credentials')).rows).toEqual([{n:1}]);
+});
+
 it('the last answer fences an already reserved provider entry without inventing its outcome',async()=>{
   await addSibling();await end(MODEL_CLAIM.commandId);
   const attempts=new OwnedModelAttempts(fixture.db,fixture.credentials);
@@ -50,7 +71,7 @@ it('the last answer fences an already reserved provider entry without inventing 
   expect((await fixture.db.query('SELECT state FROM owned_model_attempts')).rows).toEqual([{state:'unknown'}]);
 });
 
-it.each(['room','agent','generation','connection','epoch','control'] as const)('a claimed command in another %s scope cannot extend the invocation',async scope=>{
+it.each(['room','agent','generation','control'] as const)('a claimed command in another %s scope cannot extend the invocation',async scope=>{
   await addSibling(scope);await end(MODEL_CLAIM.commandId);
   await expect(fixture.credentials.authenticate(fixture.db,fixture.issued.token)).rejects.toThrow('authority');
 });

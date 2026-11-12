@@ -66,7 +66,8 @@ it('keeps the originating corner waiting for a decision returned to its parent R
   expect(
     (await rootFixture.db.query(`SELECT 1 FROM corner_owed WHERE corner_id=$1`, [opened.cornerId])).rowCount,
   ).toBe(0);
-  expect(await state()).toBe('idle');
+  // An unthreaded parent-Room message does not answer the worker's report.
+  expect(await state()).toBe('waiting');
   await rootFixture.phone.execute(
     'sendRoomMessage',
     { roomId: opened.cornerId, messageId: randomBytes(32).toString('hex'), text: 'Use endpoint v2' },

@@ -62,6 +62,7 @@ describe.skipIf(!url)('running turns survive answered and superseded sources (Po
       status:'blocked',text:'blocked: publish is pending' },worker);
     const report = (await readAgentCommands(db,room,agent)).commands.find(command => command.reason === 'report')!;
     await claimAgentCommand(db,room,agent,report.id,'running',owner);
+    await phone.execute('sendRoomMessage', { roomId:opened.cornerId,text:'Publish is unblocked now' },human);
     await phone.execute('sendRoomMessage', { roomId:room,text:'@ruby The blocker is resolved; check the next step' },human);
     expect((await db.query("SELECT private_payload->>'waitingAnswered' answered,state FROM agent_commands WHERE id=$1",
       [report.id])).rows).toEqual([{ answered:'true',state:'claimed' }]);

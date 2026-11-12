@@ -52,7 +52,8 @@ it('an answered tag stays complete through elapsed time, duplicate receipts and 
 it('a connected claimed turn never becomes reclaimable merely because time passes',async()=>{
   const c=await ask();
   await db.query("UPDATE agent_commands SET claimed_at=now()-interval '8 hours',lease_expires_at=now()-interval '8 hours' WHERE id=$1",[c.id]);
-  expect((await readAgentCommands(db,R,A)).commands).toEqual([]);
+  // Listed only for its own helper to resume in the same generation.
+  expect((await readAgentCommands(db,R,A)).commands.map(item=>[item.id,item.generationId])).toEqual([[c.id,'generation']]);
   await expect(claimAgentCommand(db,R,A,c.id,'other')).rejects.toThrow('claim conflict');
   expect((await notices()).rowCount).toBe(0);
 });
@@ -100,18 +101,21 @@ it('a long claimed invocation ends on its actual answer through the terminal own
   expect((await readAgentCommands(db,R,A)).commands).toEqual([]);
 });
 
-it('disconnect returns the same command once; reconnect answers it without a failure notice',async()=>{
+it('disconnect keeps the running turn; the same helper continues it, and a new helper process resumes it in its generation',async()=>{
   const c=await ask();
-  await db.query("UPDATE agent_turns SET started_at=now()-interval '8 hours' WHERE request_id=$1",[c.turnRequestId]);
   await releaseAgentConnection(db,live,A,owner.connectionId);
-  expect((await readAgentCommands(db,R,A)).commands.map(c=>c.id)).toEqual([c.id]);
-  expect((await phone.readRoom(R,H))?.latestAgentTurns?.some(turn=>turn.status==='working')).toBe(false);
-  await expect(receipt(c.turnRequestId,'failed')).rejects.toThrow();
-  const next={connectionId:'second-connection',epoch:await claimAgentConnection(db,live,A,{},
-    {connectionId:'second-connection',instanceId:'test-server'})};
-  await claimAgentCommand(db,R,A,c.id,'next-generation',next);
-  expect(await releaseAgentConnection(db,live,A,owner.connectionId)).toBe(false);
-  await daemon.execute('postRoomMessage',{roomId:R,requestId:c.turnRequestId,generationId:'next-generation',text:'Recovered answer.'},A);
+  expect((await readAgentCommands(db,R,A)).commands.map(item=>item.generationId)).toEqual(['generation']);
+  expect((await phone.readRoom(R,H))?.latestAgentTurns?.some(turn=>turn.status==='working')).toBe(true);
+  await claimAgentConnection(db,live,A,{lifecycleId:'first-boot'},{connectionId:'second-connection',instanceId:'test-server'});
+  expect((await db.query('SELECT state,generation_id FROM agent_commands WHERE id=$1',[c.id])).rows)
+    .toEqual([{state:'claimed',generation_id:'generation'}]);
+  const next={connectionId:'third-connection',epoch:await claimAgentConnection(db,live,A,{lifecycleId:'second-boot'},
+    {connectionId:'third-connection',instanceId:'test-server'})};
+  expect((await db.query('SELECT state,generation_id FROM agent_commands WHERE id=$1',[c.id])).rows)
+    .toEqual([{state:'claimed',generation_id:'generation'}]);
+  expect((await readAgentCommands(db,R,A)).commands.map(item=>[item.id,item.generationId])).toEqual([[c.id,'generation']]);
+  await claimAgentCommand(db,R,A,c.id,'generation',next);
+  await daemon.execute('postRoomMessage',{roomId:R,requestId:c.turnRequestId,generationId:'generation',text:'Recovered answer.'},A);
   expect((await readAgentCommands(db,R,A)).commands).toEqual([]);
   expect((await notices()).rowCount).toBe(0);
 });
@@ -129,12 +133,12 @@ it('an initially offline mention waits for connection and never posts an offline
   expect((await notices()).rowCount).toBe(0);
 });
 
-it('a claimed restart handed back on close completes on its new lifecycle instead of restarting again',async()=>{
+it('a claimed restart kept across close completes on its new lifecycle instead of restarting again',async()=>{
   await phone.execute('sendRoomMessage',{roomId:R,text:'@candy restart'},H);
   const restart=(await readAgentCommands(db,R,A)).commands.find(c=>c.action==='restart')!;
   await claimAgentCommand(db,R,A,restart.id,'restart-generation',owner);
   await releaseAgentConnection(db,live,A,owner.connectionId);
-  expect((await db.query('SELECT state FROM agent_commands WHERE id=$1',[restart.id])).rows).toEqual([{state:'pending'}]);
+  expect((await db.query('SELECT state FROM agent_commands WHERE id=$1',[restart.id])).rows).toEqual([{state:'claimed'}]);
   await claimAgentConnection(db,live,A,{lifecycleId:'second-boot'},
     {connectionId:'after-restart',instanceId:'test-server'});
   expect((await db.query('SELECT state FROM agent_commands WHERE id=$1',[restart.id])).rows).toEqual([{state:'complete'}]);

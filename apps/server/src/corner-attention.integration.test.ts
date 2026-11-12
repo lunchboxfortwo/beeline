@@ -531,7 +531,7 @@ it.each(['agent', 'human'] as const)('REPORT-WAITING-DERIVED: %s report clears o
     if (event.table === 'corner_state') changes.push(event.roomId);
   }) : undefined;
   try {
-    for (const input of ['return-room-answer', 'commander-order', 'new-head'] as const) {
+    for (const input of ['threaded-reply', 'commander-order', 'new-head'] as const) {
       const automatic = await createAgentCommand(db, { id: `automatic-${input}`, roomId: C, agentId: WORKER,
         sourceMessageId: null, reason: 'corner_lifecycle',
         privatePayload: { kind: 'lifecycle', authorId: SYSTEM_IDENTITY_ID, fromRoomId: C, text: 'Continue automatically' } });
@@ -556,13 +556,21 @@ it.each(['agent', 'human'] as const)('REPORT-WAITING-DERIVED: %s report clears o
       await createAgentCommand(db, { id: `unrelated-order-${input}`, roomId: C, agentId: REVIEWER,
         sourceMessageId: null, reason: 'order', privatePayload: { kind: 'order', authorId: REVIEWER, fromRoomId: ROOM, text: 'Other work' } });
       expect(await cornerReportWaiting(db, C)).toBe(true);
+      // The commander's unrelated chatter in the parent Room cannot answer it either.
+      await db.query(`INSERT INTO messages(id,room_id,author_id,text,presentation)
+        VALUES($1,$2,$3,'Shipping the release now','message')`, [`commander-chatter-${input}`, ROOM, recipient]);
+      expect(await cornerReportWaiting(db, C)).toBe(true);
+      expect(await state()).toBe('waiting');
       await db.query(`UPDATE agent_commands SET state='complete' WHERE id=$1`, [`unrelated-order-${input}`]);
       await db.query(`UPDATE agent_turns SET status='complete' WHERE room_id=$1 AND agent_id=$2`, [C,REVIEWER]);
       changes.length = 0;
-      if (input === 'return-room-answer') {
+      const reportCard = recipientKind === 'agent'
+        ? (await db.query<{ card_id: string }>(`SELECT encode(sha256(convert_to('agent-command-card:'||$1::text,'UTF8')),'hex') card_id`, [report.id])).rows[0]!.card_id
+        : report.id;
+      if (input === 'threaded-reply') {
         // A current human member may answer even when the commander is an agent.
-        await db.query(`INSERT INTO messages(id,room_id,author_id,text,presentation)
-          VALUES('derived-answer',$1,$2,'Proceed','message')`, [ROOM,HUMAN]);
+        await db.query(`INSERT INTO messages(id,room_id,author_id,text,presentation,reply_to_message_id)
+          VALUES('derived-answer',$1,$2,'Proceed','message',$3)`, [recipientKind === 'agent' ? C : ROOM,HUMAN,reportCard]);
       } else if (input === 'commander-order') {
         const next = await createAgentCommand(db, { id: 'derived-order', roomId: C, agentId: WORKER,
           sourceMessageId: null, reason: 'order', privatePayload: { kind: 'order', authorId: recipient, fromRoomId: ROOM, text: 'Proceed' } });
@@ -571,8 +579,8 @@ it.each(['agent', 'human'] as const)('REPORT-WAITING-DERIVED: %s report clears o
       } else {
         await db.query(`UPDATE corner_github_cache SET lifecycle='{"pr":{"headSha":"new-head"},"checks":"failing"}'::jsonb WHERE corner_id=$1`, [C]);
         expect(await cornerReportWaiting(db, C)).toBe(true);
-        await db.query(`INSERT INTO messages(id,room_id,author_id,text,presentation)
-          VALUES('after-push-answer',$1,$2,'Proceed','message')`, [ROOM,HUMAN]);
+        await db.query(`INSERT INTO messages(id,room_id,author_id,text,presentation,reply_to_message_id)
+          VALUES('after-push-answer',$1,$2,'Proceed','message',$3)`, [recipientKind === 'agent' ? C : ROOM,HUMAN,reportCard]);
       }
       expect(await cornerReportWaiting(db, C)).toBe(false);
       if (unlisten) expect(changes).toContain(C);
@@ -607,8 +615,8 @@ it('IDLE-DERIVED: a human-directed report resolves from the message log once ans
   expect(await cornerReportWaiting(db, C)).toBe(true);
   const at = new Date(Date.now()-60_000);
   await db.query('UPDATE messages SET created_at=$2 WHERE id=$1',[report.id,new Date(at.getTime()-60_000)]);
-  await db.query(`INSERT INTO messages(id,room_id,author_id,text,presentation,created_at)
-    VALUES('human-report-answer',$1,$2,'Narrow scope','message',$3)`,[ROOM,HUMAN,at]);
+  await db.query(`INSERT INTO messages(id,room_id,author_id,text,presentation,created_at,reply_to_message_id)
+    VALUES('human-report-answer',$1,$2,'Narrow scope','message',$3,$4)`,[ROOM,HUMAN,at,report.id]);
   expect(await cornerReportWaiting(db, C)).toBe(false);
   const row = (await db.query<{idle_since:string}>(cornerIdleSql('$1'),[C])).rows[0]!;
   expect(Number(row.idle_since)).toBeCloseTo(at.getTime()/1000,3);

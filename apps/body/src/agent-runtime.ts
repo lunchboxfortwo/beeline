@@ -21,7 +21,6 @@ import { ThinDaemonCore } from './thin-core.js';
 import { AgentLifecycle, type AgentExitReason } from './helper-lifecycle.js';
 import { migrateLegacyDaemonTransport } from './legacy-daemon-migration.js';
 import { activateDaemonTransport, DaemonApiError } from './daemon-api-client.js';
-import { reportInterruptedTurns } from './force-update-journal.js';
 import {
   clearDaemonPidRecordIfPid,
   convergeRuntimeRecordFileModes,
@@ -259,8 +258,6 @@ export async function runAgentRuntime(
   };
   let exitReason: AgentExitReason | undefined;
   try {
-    // Credential activation and interruption replay precede every intake.
-    await reportInterruptedTurns(runtimeDir, daemonApi, agentId);
     registryMcpBroker = new RegistryMcpHostBroker(
       config.operatorHome,
       fetch,

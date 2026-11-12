@@ -1,5 +1,5 @@
 import { HelperOverlayChannel } from './helper-overlay-channel.js';
-import { HelperTurnChannel } from './helper-turn-channel.js';
+import type { HelperTurnOwnershipSource } from '@beeline/api-contract/helper-turn-ownership';
 import { randomUUID } from 'node:crypto';
 import type { DaemonOperationMap, PostConnectorVaultInput } from '@beeline/api-contract/daemon';
 import { helperVersion } from './helper-version.js';
@@ -27,7 +27,8 @@ export interface AgentChannelHandlers {
 /** Agent identity and request correlation on the machine connection. Registration
  * metadata is immutable until the next handshake, never a capability lifecycle. */
 export class AgentChannel {
-  readonly turn = new HelperTurnChannel();
+  /** The connection a free agent's model credential is issued to. */
+  turnSource?: HelperTurnOwnershipSource;
   readonly overlay = new HelperOverlayChannel(frame => this.send(frame), () => this.isOpen());
   readonly #waiters = new Set<{resolve:()=>void;reject:(error:Error)=>void}>();
   readonly #requests = new Map<string, {
@@ -118,7 +119,7 @@ export class AgentChannel {
       this.#capabilities = event.capabilities as Record<string,unknown> ?? {};
       const c = this.#capabilities;
       if (typeof c.turnConnectionId === 'string' && typeof c.turnConnectionEpoch === 'number')
-        this.turn.negotiate({connectionId:c.turnConnectionId,epoch:c.turnConnectionEpoch});
+        this.turnSource = {connectionId:c.turnConnectionId,epoch:c.turnConnectionEpoch};
       this.overlay.negotiate(c.overlayV1 === true);
       for (const pending of this.#requests.values()) this.#dispatch(pending);
       for (const waiter of this.#waiters) waiter.resolve();
@@ -157,7 +158,7 @@ export class AgentChannel {
     if (ended) {
       for(const waiter of this.#waiters)waiter.reject(new Error('Agent runtime ended'));
       this.#waiters.clear();
-      this.turn.stop();
+      this.turnSource = undefined;
       for (const pending of this.#requests.values()) pending.reject(new Error('Agent runtime ended'));
       this.#requests.clear();
     }

@@ -132,12 +132,9 @@ describe('server-owned model execution and accounting', () => {
     expect(upstream).toHaveLength(1);
     expect(await freeAgentAllowance(db, OWNER, new Date())).toEqual({ today: 315, lifetime: 315 });
 
-    // The same token cannot use the old claim after its helper is replaced.
+    // A replacement helper registration leaves the turn claimed for that helper to resume.
     await claimAgentConnection(db, live, AGENT, {}, { connectionId: 'replacement-helper', instanceId: 'model-helper' });
-    const stale = await call({ messages: [] });
-    expect(stale.status).toBe(403);
-    expect((await stale.json()).error.message).toBe('free agent model access requires a live turn');
-    expect(upstream).toHaveLength(1);
+    expect((await db.query('SELECT state FROM agent_commands WHERE id=$1', [command.id])).rows).toEqual([{ state: 'claimed' }]);
   });
 
   let turnSequence=0;

@@ -43,7 +43,7 @@ CREATE TRIGGER beeline_preserve_owner_end BEFORE UPDATE OR DELETE ON agent_comma
  FOR EACH ROW EXECUTE FUNCTION beeline_preserve_owner_end();
 `;
 type Identity = { roomId: string; agentId: string; requestId: string; generationId?: string | null };
-type Cause = { kind: 'terminal-receipt'; source: HelperTurnOwnershipSource; modelRequestId: string | null };
+type Cause = { kind: 'terminal-receipt'; modelRequestId: string | null };
 export class OwnedModelOwnerEndRefusal extends Error {
   constructor() { super('Owned model owner end could not be authorized'); }
 }
@@ -59,33 +59,23 @@ async function modelInstalled(database: SqlDatabase): Promise<boolean> {
  * The receipt owner calls endAgentTurn after recording this evidence. */
 export async function parkOwnedModelGeneration(database: SqlDatabase, input: Identity, cause: Cause): Promise<boolean> {
   if (!input.generationId) throw new OwnedModelOwnerEndRefusal();
-  if ((cause.modelRequestId!==null&&!uuid.test(cause.modelRequestId) || !cause.source.connectionId ||
-      !Number.isSafeInteger(cause.source.epoch) || cause.source.epoch <= 0)) throw new OwnedModelOwnerEndRefusal();
-  const command = (await database.query<{ id: string; turn_owner_connection_id: string | null; turn_owner_epoch: string | number | null }>(
-    `SELECT id,turn_owner_connection_id,turn_owner_epoch FROM agent_commands
+  if (cause.modelRequestId!==null&&!uuid.test(cause.modelRequestId)) throw new OwnedModelOwnerEndRefusal();
+  const command = (await database.query<{ id: string }>(
+    `SELECT id FROM agent_commands
      WHERE room_id=$1 AND agent_id=$2 AND turn_request_id=$3 AND generation_id=$4
        AND state IN ('claimed','complete') AND action IN ('input','resume') FOR UPDATE`,
     [input.roomId, input.agentId, input.requestId, input.generationId])).rows[0];
-  if (!command?.turn_owner_connection_id) throw new OwnedModelOwnerEndRefusal();
-  {
-    if (command.turn_owner_connection_id !== cause.source.connectionId || Number(command.turn_owner_epoch) !== cause.source.epoch ||
-        !(await database.query(`SELECT 1 FROM agent_connections connection JOIN live_server_instances server
-          ON server.instance_id=connection.instance_id WHERE connection.agent_id=$1 AND COALESCE(connection.turn_connection_id,connection.connection_id)=$2
-          AND COALESCE(connection.turn_connection_epoch,connection.epoch)=$3 AND connection.released_at IS NULL
-          AND server.renewed_at>clock_timestamp()-interval '90 seconds'`,
-        [input.agentId, cause.source.connectionId, cause.source.epoch])).rowCount) throw new OwnedModelOwnerEndRefusal();
-  }
+  if (!command) throw new OwnedModelOwnerEndRefusal();
   const previous = await database.query(`SELECT 1 FROM agent_command_owner_ends WHERE command_id=$1 AND generation_id=$2`,
     [command.id, input.generationId]);
   if (previous.rowCount) return true;
   let modelRequestId: string | null;
   if(cause.modelRequestId===null){
     // Journal loss supplies no provider outcome or invented request identity.
-    // Only an actually issued credential for this exact current owner can end.
+    // Only an actually issued credential for this exact invocation can end.
     const credential=await database.query(`SELECT 1 FROM owned_model_credentials
-      WHERE command_id=$1 AND generation_id=$2 AND agent_id=$3 AND room_id=$4 AND request_id=$5
-        AND connection_id=$6 AND connection_epoch=$7 LIMIT 1`,
-      [command.id,input.generationId,input.agentId,input.roomId,input.requestId,command.turn_owner_connection_id,command.turn_owner_epoch]);
+      WHERE command_id=$1 AND generation_id=$2 AND agent_id=$3 AND room_id=$4 AND request_id=$5 LIMIT 1`,
+      [command.id,input.generationId,input.agentId,input.roomId,input.requestId]);
     if(!credential.rowCount)throw new OwnedModelOwnerEndRefusal();
     modelRequestId=null;
   }else{
@@ -95,17 +85,13 @@ export async function parkOwnedModelGeneration(database: SqlDatabase, input: Ide
      WHERE attempt.command_id=$1 AND attempt.generation_id=$2 AND attempt.agent_id=$3
        AND credential.command_id=attempt.command_id AND credential.generation_id=attempt.generation_id
        AND credential.agent_id=$3 AND credential.room_id=$4 AND credential.request_id=$5
-       AND credential.connection_id=$6 AND credential.connection_epoch=$7
-       AND attempt.model_request_id=$8
+       AND attempt.model_request_id=$6
      ORDER BY attempt.model_request_id LIMIT 1 FOR SHARE OF attempt`,
-    [command.id, input.generationId, input.agentId, input.roomId, input.requestId,
-      command.turn_owner_connection_id, command.turn_owner_epoch,
-      cause.modelRequestId])).rows[0];
+    [command.id, input.generationId, input.agentId, input.roomId, input.requestId, cause.modelRequestId])).rows[0];
     if (!attempt) throw new OwnedModelOwnerEndRefusal();
     modelRequestId=attempt.model_request_id;
   }
-  await database.query('SELECT beeline_register_owned_effect($1,$2,$3,$4,$5)',
-    [command.id, input.agentId, input.generationId, command.turn_owner_connection_id, command.turn_owner_epoch]);
+  await database.query('SELECT beeline_register_owned_effect($1,$2,$3)', [command.id, input.agentId, input.generationId]);
   await database.query(`INSERT INTO agent_command_owner_ends(command_id,generation_id,model_request_id)
     VALUES($1,$2,$3) ON CONFLICT DO NOTHING`, [command.id, input.generationId, modelRequestId]);
   return true;
@@ -128,17 +114,17 @@ export async function parkOwnedModelTerminal(
     if (explicit) throw new OwnedModelOwnerEndRefusal(); return false;
   }
   if(input.modelOwnerEnd&&'journalUnavailable' in input.modelOwnerEnd)
-    return parkOwnedModelGeneration(database,{...input,agentId},{kind:'terminal-receipt',source,modelRequestId:null});
+    return parkOwnedModelGeneration(database,{...input,agentId},{kind:'terminal-receipt',modelRequestId:null});
   let modelRequestId = input.modelOwnerEnd?.requestId;
   if (!modelRequestId) {
     modelRequestId = (await database.query<{ model_request_id: string }>(`SELECT attempt.model_request_id
       FROM agent_commands command JOIN owned_model_attempts attempt ON attempt.command_id=command.id
         AND attempt.generation_id=command.generation_id AND attempt.agent_id=command.agent_id
       WHERE command.room_id=$1 AND command.agent_id=$2 AND command.turn_request_id=$3 AND command.generation_id=$4
-        AND command.turn_owner_connection_id=$5 AND command.turn_owner_epoch=$6 AND attempt.state='unknown'
+        AND attempt.state='unknown'
       ORDER BY attempt.model_request_id LIMIT 1`,
-    [input.roomId, agentId, input.requestId, input.generationId, source.connectionId, source.epoch])).rows[0]?.model_request_id;
+    [input.roomId, agentId, input.requestId, input.generationId])).rows[0]?.model_request_id;
   }
   if (!modelRequestId) return false;
-  return parkOwnedModelGeneration(database, { ...input, agentId }, { kind: 'terminal-receipt', source, modelRequestId });
+  return parkOwnedModelGeneration(database, { ...input, agentId }, { kind: 'terminal-receipt', modelRequestId });
 }

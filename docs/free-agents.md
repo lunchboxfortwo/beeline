@@ -165,8 +165,9 @@ without a helper-side receipt request or another paid request. No process-wide c
 minute throttle delays a call. Allowance and dollar reservations still happen
 atomically before provider entry.
 
-Helper model calls require a claimed `input`/`resume` command and its current
-connection owner. Every request checks current invocation authority and the shared cost
+Helper model calls require a claimed `input`/`resume` command. The credential
+belongs to that invocation, not to a socket or server instance, so it keeps
+working through a deploy, a reconnect and a helper restart. Every request checks current invocation authority and the shared cost
 budget; a refusal ends that turn through the single terminal owner. The Machine
 then sleeps at its normal idle boundary. Pending and completed commands do not
 permit calls, including copied model tokens used from outside Beeline. The

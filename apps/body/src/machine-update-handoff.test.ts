@@ -109,7 +109,6 @@ it.each(['idle', 'force'] as const)('exits for a verified %s update without wait
       const core = {
         activeTurnCount: () => mode === 'force' ? 1 : 0,
         quiesceForUpdate: quiesce,
-        interruptedTurns: () => [],
         interruptForServerMinimum: interrupt,
       } as unknown as HostedAgent['core'];
       const detach = host.attach({

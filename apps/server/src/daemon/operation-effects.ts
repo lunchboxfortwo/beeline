@@ -1,7 +1,7 @@
 import { lockAgentCommandQueue } from '../agent-command-queue.js';
 import { OwnedModelUnknownGeneration, isOwnedModelUnknownGenerationError } from '../owned-model-errors.js';
 import { endAgentTurn } from '../agent-turn-end.js';
-import { assertCurrentTurnOwner, commandOwnerLiveSql, registerOwnedEffectFence } from '../turn-ownership.js';
+import { registerOwnedAccessCheck } from '../turn-ownership.js';
 import type { HelperTurnOwnershipSource } from '@beeline/api-contract/helper-turn-ownership';
 import { OwnedModelCredentials } from '../owned-model-credential.js';
 import { systemMessage } from '@beeline/api-contract/system-message-catalog';
@@ -139,7 +139,6 @@ if (!ctx.commandTransaction || !ctx.authorizedCommand) {
 
 export async function claimAgentCommandOperation<Name extends keyof DaemonOperationMap>(ctx: DaemonContext, name: Name, input: Input<Name>, authenticatedAgentId: string, turnOwner: HelperTurnOwnershipSource | undefined, modelClaim: OwnedModelClaimCapability | undefined, candidate: Record<string, unknown>, scopedRoom: string | undefined, ownedIntent: boolean): Promise<Output<Name>> {
 
-        if(!turnOwner)throw new Error('helper claim requires its machine connection owner');
         const claimed = await queueDatabaseWork(ctx.database, `turn:${scopedRoom}:${authenticatedAgentId}`, () => ctx.database.transaction(async (db) => {
           if (ownedIntent) await daemonLockOwnedTurnAccess(ctx, db, scopedRoom!, authenticatedAgentId, String(candidate.commandId));
           const row = await claimAgentCommand(db, scopedRoom!, authenticatedAgentId,
@@ -156,7 +155,7 @@ export async function claimAgentCommandOperation<Name extends keyof DaemonOperat
               (await db.query('SELECT 1 FROM free_agents WHERE agent_id=$1', [authenticatedAgentId])).rowCount) {
             const credentials = daemonModelClaimCredentials(ctx, modelClaim, authenticatedAgentId, turnOwner);
             modelCredential = await credentials.issueInTransaction(db, { agentId: authenticatedAgentId, commandId: row.id,
-              generationId: row.generation_id!, source: turnOwner });
+              generationId: row.generation_id! });
           }
           const activity = row.reason === 'computer_activity' ? (await db.query<{
             text: string; system_event: NonNullable<import('@beeline/api-contract/daemon').AgentCommand['source']['systemEvent']>;
@@ -182,20 +181,17 @@ export async function claimAgentCommandOperation<Name extends keyof DaemonOperat
 
 export async function releaseAgentTurnOperation<Name extends keyof DaemonOperationMap>(ctx: DaemonContext, name: Name, input: Input<Name>, authenticatedAgentId: string, turnOwner: HelperTurnOwnershipSource | undefined, modelClaim: OwnedModelClaimCapability | undefined, candidate: Record<string, unknown>, scopedRoom: string | undefined, ownedIntent: boolean): Promise<Output<Name>> {
 
-        if (!turnOwner) throw new Error('turn release requires its machine connection owner');
         const released = await ctx.database.transaction(async db => {
-          await assertCurrentTurnOwner(db, authenticatedAgentId, turnOwner);
           await lockAgentCommandQueue(db, scopedRoom!, authenticatedAgentId);
           // The invocation has seen these wakes. Ending it consumes them;
           // only events admitted after its claim may start another invocation.
-          // A lost connection still releases unfinished work through its owner.
           const consumed = await db.query<CommandRow>(`SELECT (ended).* FROM (
             SELECT beeline_end_agent_turn(id,generation_id,'complete') ended FROM agent_commands
             WHERE room_id=$1 AND agent_id=$2 AND state='claimed' AND generation_id=$3
-              AND action IN ('input','resume') AND turn_owner_connection_id=$4 AND turn_owner_epoch=$5
+              AND action IN ('input','resume')
             ORDER BY created_at,id) consumed`,
-            [scopedRoom,authenticatedAgentId,candidate.generationId,turnOwner.connectionId,turnOwner.epoch]);
-          if (consumed.rows[0]) await registerOwnedEffectFence(db,consumed.rows[0]);
+            [scopedRoom,authenticatedAgentId,candidate.generationId]);
+          if (consumed.rows[0]) await registerOwnedAccessCheck(db,consumed.rows[0]);
           return readAgentCommands(db, scopedRoom!, authenticatedAgentId);
         });
         ctx.live.publish({type:'invalidate',roomId:scopedRoom!,reason:'turn',agentId:authenticatedAgentId});
@@ -207,23 +203,17 @@ export async function acknowledgeAgentCommandOperation<Name extends keyof Daemon
 
         const acknowledged = await ctx.database.transaction(async db => {
           if (ownedIntent) await daemonLockOwnedTurnAccess(ctx, db, scopedRoom!, authenticatedAgentId, String(candidate.commandId));
-          if (turnOwner) await assertCurrentTurnOwner(db, authenticatedAgentId, turnOwner);
-          if (turnOwner) {
-            const previous = await db.query<CommandRow>(`SELECT * FROM agent_commands WHERE id=$1 AND room_id=$2
-              AND agent_id=$3 AND generation_id=$4 AND action IN ('stop','restart') AND state='complete'
-              AND turn_owner_connection_id=$5 AND turn_owner_epoch=$6 FOR UPDATE`,
-              [candidate.commandId, scopedRoom, authenticatedAgentId, candidate.generationId, turnOwner.connectionId, turnOwner.epoch]);
-            if (previous.rowCount) return previous;
-          }
+          const previous = await db.query<CommandRow>(`SELECT * FROM agent_commands WHERE id=$1 AND room_id=$2
+            AND agent_id=$3 AND generation_id=$4 AND action IN ('stop','restart') AND state='complete' FOR UPDATE`,
+            [candidate.commandId, scopedRoom, authenticatedAgentId, candidate.generationId]);
+          if (previous.rowCount) return previous;
           const written = await db.query<CommandRow>(
-          `SELECT (ended).* FROM (SELECT beeline_end_agent_turn(id,generation_id,'complete') ended FROM agent_commands WHERE id=$1 AND room_id=$2 AND agent_id=$3 AND generation_id=$4 AND (state='complete' OR (state='claimed' AND ${commandOwnerLiveSql(undefined)}))
-          AND action IN ('stop','restart') AND ((turn_owner_connection_id IS NULL AND $5::text IS NULL) OR
-            (turn_owner_connection_id=$5::text AND turn_owner_epoch=$6::bigint))) ended_commands`,
-          [candidate.commandId, scopedRoom, authenticatedAgentId, candidate.generationId,
-            turnOwner?.connectionId ?? null, turnOwner?.epoch ?? null]);
+          `SELECT (ended).* FROM (SELECT beeline_end_agent_turn(id,generation_id,'complete') ended FROM agent_commands WHERE id=$1 AND room_id=$2 AND agent_id=$3 AND generation_id=$4 AND state='claimed'
+          AND action IN ('stop','restart')) ended_commands`,
+          [candidate.commandId, scopedRoom, authenticatedAgentId, candidate.generationId]);
           if (written.rows[0]?.action==='restart') await db.query(`UPDATE agent_commands
             SET restart_confirmed_at=COALESCE(restart_confirmed_at,clock_timestamp()) WHERE id=$1`,[written.rows[0].id]);
-          if (written.rows[0]) await registerOwnedEffectFence(db, written.rows[0]);
+          if (written.rows[0]) await registerOwnedAccessCheck(db, written.rows[0]);
           return written;
         });
         if (!acknowledged.rowCount) throw new Error('command acknowledgement conflict');

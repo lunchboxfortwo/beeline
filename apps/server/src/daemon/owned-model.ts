@@ -1,6 +1,6 @@
-import { fenceOwnedTurnReply as enqueueOwnedTurnReply } from '../owned-turn-reply.js';
 import { OwnedModelRefusal } from '../owned-model-errors.js';
-import { assertCurrentTurnOwner, lockOwnedTurnRoomAccess } from '../turn-ownership.js';
+import { lockOwnedTurnRoomAccess } from '../turn-ownership.js';
+import { fenceOwnedTurnReply as enqueueOwnedTurnReply } from '../owned-turn-reply.js';
 import type { HelperTurnOwnershipSource } from '@beeline/api-contract/helper-turn-ownership';
 import { OwnedModelCredentials } from '../owned-model-credential.js';
 import type { CommandActivationInput } from '@beeline/api-contract/helper-activation';
@@ -25,7 +25,6 @@ import { DaemonService } from '../daemon-service.js';
     if (!free) return { freeAgent: false };
     const configuration = ctx.ownedModel;
     if (!installed || !free.eligible || !configuration?.ready()) return { freeAgent: true };
-    await assertCurrentTurnOwner(ctx.database, agentId, source);
     const capability = Object.freeze({}) as OwnedModelClaimCapability;
     ctx.modelClaims.set(capability, { agentId, source: Object.freeze({ ...source }), configuration });
     return { freeAgent: true, capability };
@@ -50,9 +49,9 @@ import { DaemonService } from '../daemon-service.js';
   }
 
 
-  /** Enqueue only the bounded control response under current access/source. */
-  export async function daemonFenceOwnedTurnReply(ctx: DaemonContext, agentId: string, source: HelperTurnOwnershipSource, input: { roomId: string; generationId?: string; commandId?: string; requestId?: string }, enqueue: () => void, requireClaimed = false): Promise<void> {
-    await enqueueOwnedTurnReply(ctx.database,agentId,source,input,enqueue,requireClaimed);
+  /** Enqueue only the bounded control response under current command access. */
+  export async function daemonFenceOwnedTurnReply(ctx: DaemonContext, agentId: string, input: { roomId: string; generationId?: string; commandId?: string; requestId?: string }, enqueue: () => void, requireClaimed = false): Promise<void> {
+    await enqueueOwnedTurnReply(ctx.database,agentId,input,enqueue,requireClaimed);
   }
 
 

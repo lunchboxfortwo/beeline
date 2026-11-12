@@ -2,6 +2,7 @@ import { cornerOwnerSql } from '../corner-worker.js';
 import { agentMemberMetadata } from '../agent-member-metadata.js';
 import { subscriptionPromptBody } from '../agent-subscriptions.js';
 import { commandInbox } from '../agent-command.js';
+import { helperTurnResumableSql } from '../turn-ownership.js';
 import type { DaemonAttachment, SystemEvent } from '@beeline/api-contract/daemon';
 import { boundReplyExcerpt } from '@beeline/api-contract/daemon';
 import { MESSAGE_CURSOR_MS_SQL } from '../database.js';
@@ -43,7 +44,7 @@ import { daemonExpiredMediaIds } from './message-reads.js';
        JOIN rooms r ON r.id=command.room_id AND r.archived_at IS NULL
        JOIN memberships m ON m.room_id=r.id AND m.identity_id=command.agent_id AND m.removed_at IS NULL
        LEFT JOIN corner_facts f ON f.corner_id=r.id
-       WHERE command.agent_id=$1 AND command.state='pending'`,
+       WHERE command.agent_id=$1 AND (command.state='pending' OR ${helperTurnResumableSql('command')})`,
       [agentId],
     );
     return {

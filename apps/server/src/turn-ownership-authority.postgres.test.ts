@@ -63,7 +63,7 @@ describe.skipIf(!url)('native current authority on real PostgreSQL',()=>{
       else await second.query('UPDATE rooms SET archived_at=clock_timestamp() WHERE id=$1',[room]);
       release.resolve();await refused;
       expect((await first.query('SELECT id FROM messages WHERE room_id=$1 AND author_id=$2',[room,agent])).rowCount).toBe(0);
-      expect((await first.query('SELECT * FROM turn_owned_effect_fences')).rowCount).toBe(0);
+      expect((await first.query('SELECT * FROM turn_owned_access_checks')).rowCount).toBe(0);
     }finally{
       release.resolve();await Promise.allSettled([effect,refused]);
       if(kind==='workspace')await second.query('UPDATE memberships SET removed_at=NULL WHERE workspace_id=$1 AND room_id IS NULL AND identity_id=$2',[workspace,agent]);
@@ -77,7 +77,7 @@ describe.skipIf(!url)('native current authority on real PostgreSQL',()=>{
       entered.resolve();await release.promise;if(outcome==='rollback')throw rollback;
     });
     const settled=writer.catch(error=>{if(error!==rollback)throw error;});
-    const enqueue=()=>daemon.fenceOwnedTurnReply(agent,owner,{roomId:room,commandId:queued.id,generationId:'generation'},()=>frames.push('current'),true);
+    const enqueue=()=>daemon.fenceOwnedTurnReply(agent,{roomId:room,commandId:queued.id,generationId:'generation'},()=>frames.push('current'),true);
     try{
       await Promise.race([entered.promise,writer.then(()=>{throw new Error('Revoker did not reach its write');})]);
       const started=performance.now();
@@ -86,7 +86,7 @@ describe.skipIf(!url)('native current authority on real PostgreSQL',()=>{
       expect(performance.now()-started).toBeLessThan(2000);
       release.resolve();await settled;
       if(outcome==='rollback'){await enqueue();expect(frames).toEqual(['current']);}
-      else{await expect(enqueue()).rejects.toThrow('source changed');expect(frames).toEqual([]);}
+      else{await expect(enqueue()).rejects.toThrow('access changed');expect(frames).toEqual([]);}
     }finally{release.resolve();await Promise.allSettled([writer,settled]);}
   },20_000);
   // Reproduction MEMBERSHIP-503: normal queue serialization must not lose an owned reply.
@@ -104,7 +104,7 @@ describe.skipIf(!url)('native current authority on real PostgreSQL',()=>{
       await entered.promise;
       const effect=path==='commit'
         ? daemon.execute('postAgentActivity',{roomId:room,requestId:request,generationId:'generation',activity:[]},agent)
-        : daemon.fenceOwnedTurnReply(agent,owner,{roomId:room,commandId:queued.id,generationId:'generation'},()=>frames.push('reply'),true);
+        : daemon.fenceOwnedTurnReply(agent,{roomId:room,commandId:queued.id,generationId:'generation'},()=>frames.push('reply'),true);
       result=Promise.allSettled([effect]);
       await new Promise(resolve=>setTimeout(resolve,100));
       release.resolve();await writer;
@@ -130,7 +130,7 @@ describe.skipIf(!url)('native current authority on real PostgreSQL',()=>{
       await Promise.race([entered.promise,reading.then(()=>{throw new Error('Read did not reach its lookup');})]);
       await second.query('UPDATE memberships SET removed_at=clock_timestamp() WHERE room_id=$1 AND identity_id=$2',[room,agent]);
       release.resolve();await refused;
-      expect((await first.query('SELECT * FROM turn_owned_effect_fences')).rowCount).toBe(0);
+      expect((await first.query('SELECT * FROM turn_owned_access_checks')).rowCount).toBe(0);
     }finally{
       release.resolve();await Promise.allSettled([reading,refused]);
       if(precedingInstaller)await first.query(TURN_OWNERSHIP_SCHEMA);
@@ -193,11 +193,11 @@ describe.skipIf(!url)('native current authority on real PostgreSQL',()=>{
     await first.query('UPDATE rooms SET archived_at=clock_timestamp() WHERE id=ANY($1::uuid[])',[[room,corner]]);
     await claimAgentCommand(first,corner,agent,childStop.id,'cleanup',owner);
     const frames:string[]=[],daemon=new DaemonService(first,new LiveHub());
-    await daemon.fenceOwnedTurnReply(agent,owner,{roomId:corner,commandId:childStop.id,generationId:'cleanup'},()=>frames.push('cleanup'));
+    await daemon.fenceOwnedTurnReply(agent,{roomId:corner,commandId:childStop.id,generationId:'cleanup'},()=>frames.push('cleanup'));
     await expect(claimAgentCommand(first,room,agent,rootStop.id,'cleanup',owner)).rejects.toThrow('authority expired before commit');
     await second.query('UPDATE memberships SET removed_at=clock_timestamp() WHERE room_id=$1 AND identity_id=$2',[room,agent]);
-    await expect(daemon.fenceOwnedTurnReply(agent,owner,{roomId:corner,commandId:childStop.id,generationId:'cleanup'},()=>frames.push('must not send')))
-      .rejects.toThrow('source changed');
+    await expect(daemon.fenceOwnedTurnReply(agent,{roomId:corner,commandId:childStop.id,generationId:'cleanup'},()=>frames.push('must not send')))
+      .rejects.toThrow('access changed');
     expect(frames).toEqual(['cleanup']);
   });
   it('two managers can stop the same schedule concurrently without transcript membership',async()=>{

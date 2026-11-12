@@ -250,23 +250,13 @@ it.each(['legacy', 'helper'])('R-RELEASE-CARD: built %s MCP tool dispatches thro
     const receiptId = JSON.parse(result.result.content[0].text).auditMessageId;
     expect((await db.query(`SELECT id FROM messages WHERE id=$1 AND text LIKE 'Production release dispatch requested:%'`, [receiptId])).rows).toHaveLength(1);
     expect(dispatch).toHaveBeenCalledOnce();
-    let ownershipRefusals = 0;
-    if (mode === 'helper') {
-      await db.query(`UPDATE agent_connections SET released_at=clock_timestamp() WHERE agent_id=$1`, [agent]);
-      const stale = await run();
-      expect(stale.result.isError).toBe(true);
-      expect(dispatch).toHaveBeenCalledOnce();
-      await db.query(`UPDATE agent_connections SET released_at=NULL WHERE agent_id=$1`, [agent]);
-      ownershipRefusals++;
-      vi.mocked(Sentry.captureException).mockClear();
-    }
     await db.query(`UPDATE agent_commands SET root_source_message_id='missing' WHERE id='command'`);
     const refused = await run();
     expect(refused.result.isError).toBe(true);
     expect(refused.result.content[0].text).toContain('Production release requires a cited human command message from a workspace owner or admin');
     expect(Sentry.captureException).not.toHaveBeenCalled();
     expect(dispatch).toHaveBeenCalledOnce();
-    expect(operations).toHaveLength(2 + ownershipRefusals);
+    expect(operations).toHaveLength(2);
     expect(await grantCount()).toBe(before.grants);
     expect(await messages()).toBe(before.messages + 1);
 
