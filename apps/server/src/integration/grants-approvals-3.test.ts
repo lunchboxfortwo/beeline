@@ -390,7 +390,7 @@ const fixture = monolithFixture();
       const actions = tray.items.flatMap(item => item.approval?.actions ?? [])
         .filter(action => action.grantId === ask.grantId);
       expect(actions.map(action => [action.label, action.decision])).toEqual([
-        ['Approve always', 'always'], ['Deny', 'deny'],
+        ['Always', 'always'], ['Once', 'once'], ['Deny', 'deny'],
       ]);
     }
     expect((await fixture.operation('decideAgentGrant', { grantId: ask.grantId, decision: 'deny' })).status).toBe(200);

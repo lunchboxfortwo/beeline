@@ -37,19 +37,20 @@ function render(props: Partial<React.ComponentProps<typeof GrantRequestCard>> = 
 const button = (tree: any, testID: string) => tree.root.find((node: any) => node.type === 'Button' && node.props.testID === testID);
 
 describe('grant request card', () => {
-    it('is one raised request card with Approve always and Deny for commands', () => {
+    it('is one raised request card with Always, Once and Deny for commands', () => {
         const tree = render();
         expect(tree.root.find((node: any) => node.type === 'Card').props.backgroundColor).toBe('raised');
         const labels = tree.root.findAll((node: any) => node.type === 'Button').map((node: any) => node.props['aria-label']);
-        expect(labels).toEqual(['Approve always', 'Deny']);
+        expect(labels).toEqual(['Always', 'Once', 'Deny']);
     });
 
-    it('sends today’s decisions: Approve always is always and Deny is deny', () => {
+    it('sends today’s decisions: Always is always, Once is once, Deny is deny', () => {
         const onDecision = vi.fn();
         const tree = render({ onDecision });
         act(() => { button(tree, 'grant-grant-1-always').props.onPress(); });
+        act(() => { button(tree, 'grant-grant-1-once').props.onPress(); });
         act(() => { button(tree, 'grant-grant-1-deny').props.onPress(); });
-        expect(onDecision.mock.calls).toEqual([['grant-1', 'always'], ['grant-1', 'deny']]);
+        expect(onDecision.mock.calls).toEqual([['grant-1', 'always'], ['grant-1', 'once'], ['grant-1', 'deny']]);
     });
 
     it('holds every decision while one is sending', () => {

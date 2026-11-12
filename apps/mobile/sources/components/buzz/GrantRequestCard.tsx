@@ -75,14 +75,14 @@ export const GrantRequestCard = React.memo(function GrantRequestCard({
           pendingGrant && canDecide
             ? [
                 {
-                  label: grant.kind === 'command' ? 'Approve always' : 'Approve',
+                  label: grant.kind === 'command' ? 'Always' : 'Approve',
                   primary: true,
                   disabled: actionId !== null,
                   loading: busy,
                   onPress: () => onDecision(grant.grantId, 'always'),
                   testID: `grant-${grant.grantId}-always`,
                 },
-                ...(!sharedAssetRequest && grant.kind !== 'command' ? [{
+                ...(!sharedAssetRequest ? [{
                   label: 'Once',
                   secondary: true,
                   disabled: actionId !== null,

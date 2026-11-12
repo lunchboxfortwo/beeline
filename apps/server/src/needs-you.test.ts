@@ -591,14 +591,15 @@ describe('PhoneService Needs-you tray', () => {
     await phone.execute('decideAgentGrant', { grantId: GRANT, decision: 'once' }, VIEWER);
     expect(await count()).toBe(0);
   });
-  it.each(['always', 'deny'] as const)('the projected grant action %s decides the exact first grant', async decision => {
+  it.each(['always', 'once', 'deny'] as const)('the projected grant action %s decides the exact first grant', async decision => {
     const grantId = '99999999-9999-4999-8999-999999999999';
     await database.query(`INSERT INTO agent_grants(id,agent_id,workspace_id,kind,target,reason,requested_by,room_id,status)
       VALUES($1,$2,$3,'command','npm test','Run checks',$4,$5,'pending')`, [grantId, AGENT, WORKSPACE, VIEWER, ROOM]);
     await card(ROOM, 'grant-request', { agent: hoots, grants: [{ grantId, kind: 'command', target: 'npm test', reason: 'Run checks' }] });
     const [item] = (await read()).items;
     expect(item!.approval!.actions).toEqual([
-      { kind: 'grant', label: 'Approve always', grantId, decision: 'always' },
+      { kind: 'grant', label: 'Always', grantId, decision: 'always' },
+      { kind: 'grant', label: 'Once', grantId, decision: 'once' },
       { kind: 'grant', label: 'Deny', grantId, decision: 'deny' },
     ]);
     const action = item!.approval!.actions!.find(action => action.kind === 'grant' && action.decision === decision)!;
@@ -608,7 +609,7 @@ describe('PhoneService Needs-you tray', () => {
     await phone.execute('decideAgentGrant', { grantId: action.grantId, decision: action.decision }, VIEWER);
     expect((await read()).items).toHaveLength(0);
     expect((await database.query('SELECT status FROM agent_grants WHERE id=$1', [grantId])).rows)
-      .toEqual([{ status: decision === 'always' ? 'approved' : 'denied' }]);
+      .toEqual([{ status: decision === 'always' ? 'approved' : decision === 'once' ? 'once' : 'denied' }]);
   });
 
   it('keeps a complete bound script visible and omits Once for standing-only grants', async () => {

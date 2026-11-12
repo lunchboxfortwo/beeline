@@ -726,10 +726,14 @@ function approvalView(
       return { ...result,
         ...grantPresentation({ ...first, kind: first.kind, target: first.target }),
         ...(isCommandGrantScript(first.script) ? { script: first.script } : {}),
-        actions: [
-          ...((first.kind === 'shared_asset' || first.kind === 'command') ? [] : [{ kind: 'grant' as const, label: 'Once', grantId: first.grantId, decision: 'once' as const }]),
-          { kind: 'grant', label: first.kind === 'command' ? 'Approve always' : 'Always', grantId: first.grantId, decision: 'always' },
-          { kind: 'grant', label: first.kind === 'command' ? 'Deny' : 'No', grantId: first.grantId, decision: 'deny' },
+        actions: first.kind === 'command' ? [
+          { kind: 'grant', label: 'Always', grantId: first.grantId, decision: 'always' },
+          { kind: 'grant', label: 'Once', grantId: first.grantId, decision: 'once' },
+          { kind: 'grant', label: 'Deny', grantId: first.grantId, decision: 'deny' },
+        ] : [
+          ...(first.kind === 'shared_asset' ? [] : [{ kind: 'grant' as const, label: 'Once', grantId: first.grantId, decision: 'once' as const }]),
+          { kind: 'grant', label: 'Always', grantId: first.grantId, decision: 'always' },
+          { kind: 'grant', label: 'No', grantId: first.grantId, decision: 'deny' },
         ],
       };
     }
