@@ -61,7 +61,8 @@ afterEach(() => {
 });
 
 describe('HullModal presentation ownership', () => {
-  it('does not read unmounted Android content, and reads its latest value when opened', () => {
+  it.each(['android', 'ios', 'web'])('does not read unopened %s content, and reads its latest value when opened', (platform) => {
+    Object.assign(Platform, { OS: platform });
     const readTitle = vi.fn(() => 'Room actions');
     const options = {
       get title() {
@@ -145,6 +146,14 @@ describe('HullModal presentation ownership', () => {
     };
     act(() => {
       renderer = create(
+        <HullModal visible onRequestClose={() => undefined}>
+          {React.createElement('Text', { payload })}
+        </HullModal>,
+      );
+    });
+    read.mockClear();
+    act(() => {
+      renderer.update(
         <HullModal visible={false} onRequestClose={() => undefined}>
           {React.createElement('Text', { payload })}
         </HullModal>,

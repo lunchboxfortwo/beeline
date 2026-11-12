@@ -14,6 +14,7 @@ import { router } from 'expo-router';
 import { startTransition, useCallback, useEffect } from 'react';
 import { AppState } from 'react-native';
 import { AGE_TICK_MS } from './channels';
+import { afterFirstFrame } from '@/navigation/initial-landing';
 import type { DeckState } from './useChannelsRouteState';
 
 /** The deck's live watch, covering reads and visit clock; the hook paints nothing itself. */
@@ -162,7 +163,9 @@ export function useChannelsSubscriptions(
         // Saved Rooms are the first usable deck; paint them immediately.
         // Confirmed live reconciliation still yields to Room or push navigation.
         unsubscribeChats = chats.subscribe(() => {
-          if (chats.confirmed() || !deckVisible()) startTransition(paint);
+          // Removed private state must clear even while the list is covered.
+          if (!deckVisible() && chats.current() !== null) return;
+          if (chats.confirmed()) startTransition(paint);
           else paint();
         });
       }
@@ -209,11 +212,16 @@ export function useChannelsSubscriptions(
   useFocusEffect(
     useCallback(() => {
       deckFocusedRef.current = true;
-      refreshMissed();
-      setAgeNow(Date.now());
+      // Back reveals the retained list first; catch-up and age labels must not
+      // rebuild its rows during the navigation commit.
+      const cancelFrame = afterFirstFrame(() => {
+        refreshMissed();
+        setAgeNow(Date.now());
+      });
       const timer = setInterval(() => setAgeNow(Date.now()), AGE_TICK_MS);
       return () => {
         deckFocusedRef.current = false;
+        cancelFrame();
         clearInterval(timer);
       };
     }, [activeCommunityId, refreshMissed]),

@@ -271,32 +271,37 @@ function InlineMarkdown({
   );
   return (
     <>
-      {glossed.map((span, index) => (
-        <ProseRun
-          accessibilityRole={
-            (span.mention && onMention) || (span.channelRef && onChannelReference) || span.url
-              ? 'link'
-              : undefined
-          }
-          key={`${span.text}-${index}`}
-          onPress={
-            span.mention && onMention
-              ? () => onMention(span.text.slice(1).normalize('NFKC').toLocaleLowerCase())
-              : span.channelRef && onChannelReference
-                ? () => onChannelReference(span.channelRef!, span.text)
-                : span.url
-                  ? () => onLink(span.url!)
-                  : undefined
-          }
-          body={base}
-          marks={[...baseMarks, ...spanMarks(span, viewerHandle)]}
-          level={level}
-          // Last, so the arriving tail's tone wins over the settled body's.
-          fade={span.tail ? tail?.style : undefined}
-        >
-          {span.text}
-        </ProseRun>
-      ))}
+      {glossed.map((span, index) => {
+        // Unmarked words inherit their paragraph's type. A second styled Text
+        // adds a Fabric node and repeats token resolution for the same body.
+        if (!span.styles.length && !span.url && !span.mention && !span.channelRef && !span.tail) return span.text;
+        return (
+          <ProseRun
+            accessibilityRole={
+              (span.mention && onMention) || (span.channelRef && onChannelReference) || span.url
+                ? 'link'
+                : undefined
+            }
+            key={`${span.text}-${index}`}
+            onPress={
+              span.mention && onMention
+                ? () => onMention(span.text.slice(1).normalize('NFKC').toLocaleLowerCase())
+                : span.channelRef && onChannelReference
+                  ? () => onChannelReference(span.channelRef!, span.text)
+                  : span.url
+                    ? () => onLink(span.url!)
+                    : undefined
+            }
+            body={base}
+            marks={[...baseMarks, ...spanMarks(span, viewerHandle)]}
+            level={level}
+            // Last, so the arriving tail's tone wins over the settled body's.
+            fade={span.tail ? tail?.style : undefined}
+          >
+            {span.text}
+          </ProseRun>
+        );
+      })}
     </>
   );
 }

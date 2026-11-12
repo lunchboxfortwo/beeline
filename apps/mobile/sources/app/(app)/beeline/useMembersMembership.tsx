@@ -4,6 +4,7 @@ import { router } from 'expo-router';
 import { type AgentDetailView, type Identity, type WorkspaceView } from '@beeline/buzz-client';
 import { agentPairingCommand } from '@/buzz/agent-pairing-command';
 import { navigateToRoom } from '@/buzz/corner-navigation';
+import { prefetchDirectMessageOpen, prefetchRoomOpen } from '@/push/push-room-prefetch';
 import { BuzzRigTransport } from '@/sync/transport';
 import { workspacePage } from '@/buzz/workspace-records';
 import { MembersAction } from './members';
@@ -130,10 +131,12 @@ export function useMembersMembership([
 
   const messagePerson = async (pubkey: string) => {
     if (!identity || !workspaceId || pubkey === identity.publicKey) return;
+    prefetchDirectMessageOpen(workspaceId, pubkey);
     setWorking('message-person');
     setError(null);
     try {
       const room = await new BuzzRigTransport(identity).resolveDirectMessage(workspaceId, pubkey);
+      prefetchRoomOpen(room.channelId);
       navigateToRoom(router, room.channelId);
     } catch (reason) {
       setError(appErrorCopy(reason, `Could not open message.`));

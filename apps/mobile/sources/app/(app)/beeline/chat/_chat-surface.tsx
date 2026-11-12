@@ -159,7 +159,7 @@ export function BuzzChatSurface({
     desktopWorkPaneRef, setDesktopWorkPane, desktopExperience, desktopAvailableWidth, decodedId,
     userPubkey, roomSurface, routeParentChannelId, isDirectMessage, desktopWorkPaneContent,
     roomClient, firstUnreadMessageId, allowOlderHistoryRef, routeChannelTitle, routeCommunityId,
-    participantPickerVisible, setMembershipError, profileKind, profileAgentId,
+    participantPickerVisible, setMembershipError,
   ]);
   const [
     revealTranscriptThrough, transcriptHistoryStatus, transcriptJump, endTranscriptJump,

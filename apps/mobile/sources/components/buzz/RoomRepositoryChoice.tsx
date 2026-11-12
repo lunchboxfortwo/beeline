@@ -227,9 +227,10 @@ export type RoomRepositoryOptions = Omit<Options, 'visible'>;
 
 type RoomActionsSheetProps = Omit<
   React.ComponentProps<typeof HullActionSheetModal>,
-  'visible' | 'footer' | 'sticky' | 'withinScreen'
+  'visible' | 'footer' | 'sticky' | 'withinScreen' | 'children'
 > & {
   ref: React.Ref<RoomActionsSheetHandle>;
+  children?: React.ReactNode | (() => React.ReactNode);
   repository: RoomRepositoryOptions;
   backgroundRef: React.RefObject<View | null>;
 };
@@ -254,6 +255,10 @@ export function RoomActionsSheet({
     }),
     [],
   );
+  // Keep a visible snapshot for native dismissal, without constructing the
+  // unopened actions while the conversation's first frame mounts.
+  const content = React.useRef<React.ReactNode>(null);
+  if (visible) content.current = typeof children === 'function' ? children() : children;
   const choice = useRoomRepositoryChoice({ ...repository, visible });
   React.useLayoutEffect(() => {
     if (Platform.OS !== 'android') return;
@@ -281,7 +286,7 @@ export function RoomActionsSheet({
       ) : (
         <>
           {choice.row}
-          {children}
+          {content.current}
         </>
       )}
     </HullActionSheetModal>

@@ -96,7 +96,7 @@ type Props = {
   sending: boolean;
   replacePendingAttachments: (update: PickedChatAttachment[] | ((current: PickedChatAttachment[]) => PickedChatAttachment[])) => void;
   transport: BuzzRigTransport | null;
-  speechHints: string[];
+  speechHints: () => string[];
   inputText: string;
   composerInputRevision: number;
   composerInputRevisionRef: React.RefObject<number>;

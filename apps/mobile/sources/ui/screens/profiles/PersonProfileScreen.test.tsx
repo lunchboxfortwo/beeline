@@ -10,6 +10,8 @@ const state = vi.hoisted(() => ({
   release: vi.fn(),
   operation: vi.fn(),
   navigate: vi.fn(),
+  prefetch: vi.fn(),
+  known: vi.fn(),
   openPlace: vi.fn(),
   beforeRemove: undefined as undefined | ((event: any) => void),
 }));
@@ -42,6 +44,7 @@ vi.mock('@/sync/transport/room-view-client', () => ({
     }
   },
 }));
+vi.mock('@/push/push-room-prefetch', () => ({ prefetchRoomOpen: state.prefetch, prefetchDirectMessageOpen: state.known }));
 vi.mock('@/buzz/corner-navigation', () => ({ navigateToRoom: state.navigate }));
 vi.mock('@/ui/shell/panel', () => ({ openPlace: state.openPlace }));
 vi.mock('@/buzz/chat-list-store', () => ({
@@ -75,7 +78,7 @@ async function render(close = vi.fn()) {
   return tree;
 }
 
-beforeEach(() => { state.viewerRole = 'member'; state.operation.mockReset(); state.navigate.mockClear(); state.openPlace.mockClear(); });
+beforeEach(() => { state.viewerRole = 'member'; state.operation.mockReset(); state.navigate.mockClear(); state.prefetch.mockClear(); state.openPlace.mockClear(); });
 
 describe('person profile', () => {
   it('shows the 72 mark, @handle and role, Message and Invite to chat, connected agents and no Grants', async () => {
@@ -91,6 +94,16 @@ describe('person profile', () => {
     expect(byId(tree, 'human-profile-message')).toBeDefined();
     expect(byId(tree, 'human-profile-invite')).toBeDefined();
     expect(byId(tree, 'edit-person-role')).toBeUndefined();
+  });
+
+  it('reads a resolved DM before navigation occupies the thread', async () => {
+    state.operation.mockResolvedValue({ id: 'dm' });
+    state.prefetch.mockClear();
+    const tree = await render();
+    await act(async () => { byId(tree, 'human-profile-message').props.onPress(); });
+    expect(state.prefetch).toHaveBeenCalledWith('dm');
+    expect(state.prefetch.mock.invocationCallOrder[0]).toBeLessThan(state.navigate.mock.invocationCallOrder[0]);
+    act(() => tree.unmount());
   });
 
   it('opens a connected agent through the panel helper', async () => {
@@ -144,6 +157,7 @@ describe('Reproduction R1: Profile back while Message waits', () => {
     await act(async () => tree.unmount());
     await act(async () => resolve({ id: 'dm' }));
     expect(state.navigate).not.toHaveBeenCalled();
+    expect(state.prefetch).not.toHaveBeenCalled();
   });
 });
 

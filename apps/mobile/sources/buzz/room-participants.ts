@@ -212,7 +212,21 @@ function typedComposerMentionTokens(text: string): string[] {
 
 /** Whether the composer/sent text addresses the whole Room via a live `@channel` token. */
 export function hasChannelMentionToken(text: string): boolean {
-  return typedComposerMentionTokens(text).some(isChannelMentionHandle);
+  const normalized = text.normalize('NFKC').toLocaleLowerCase();
+  let offset = normalized.indexOf('@channel');
+  while (offset !== -1) {
+    const before = mentionCodePointBefore(normalized, offset);
+    let end = offset + '@channel'.length;
+    const next = mentionCodePointAt(normalized, end);
+    // A dot or dash is trailing punctuation only when no handle follows it.
+    while (normalized[end] === '.' || normalized[end] === '-') end += 1;
+    const after = mentionCodePointAt(normalized, end);
+    if ((!before || !MENTION_HANDLE_CHARACTER.test(before)) &&
+      (!next || !MENTION_HANDLE_CHARACTER.test(next) ||
+        ((next === '.' || next === '-') && (!after || !MENTION_HANDLE_CHARACTER.test(after))))) return true;
+    offset = normalized.indexOf('@channel', offset + 1);
+  }
+  return false;
 }
 
 /**

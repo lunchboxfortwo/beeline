@@ -46,6 +46,7 @@ afterEach(() => {
 });
 it('owns open/close renders and resets the repository draft on reopening', () => {
   const renders = vi.fn();
+  const buildContent = vi.fn();
   const ref = React.createRef<{ setVisible: (v: boolean) => void }>();
   const nativeProps = vi.fn();
   const backgroundRef = { current: { setNativeProps: nativeProps } };
@@ -80,7 +81,7 @@ it('owns open/close renders and resets the repository draft on reopening', () =>
         onClose={() => ref.current?.setVisible(false)}
         title="proof"
       >
-        <TextFixture label={label} />
+        {() => { buildContent(label); return <TextFixture label={label} />; }}
       </RoomActionsSheet>
     );
   }
@@ -91,7 +92,9 @@ it('owns open/close renders and resets the repository draft on reopening', () =>
     renderer = create(<Host label="first" />);
   });
   expect(renders).toHaveBeenCalledOnce();
+  expect(buildContent).not.toHaveBeenCalled();
   act(() => ref.current!.setVisible(true));
+  expect(buildContent).toHaveBeenCalledWith('first');
   expect(renders).toHaveBeenCalledOnce();
   expect(renderer.root.findByType('Text').props.children).toBe('first');
   expect(nativeProps).toHaveBeenCalledWith({ importantForAccessibility: 'no-hide-descendants' });

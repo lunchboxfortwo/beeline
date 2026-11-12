@@ -123,11 +123,11 @@ function recordingSupported(m: SpeechRecognitionInterface): boolean {
  * Hook wrapping platform speech recognition.
  *
  * @param onResult  Called when a final transcript, or the bounded interim fallback, is committed.
- * @param contextualStrings  Words the recogniser should favour, such as Room member names.
+ * @param contextualStrings  Words, or a lazy Room-vocabulary reader, evaluated when a take starts.
  */
 export function useSpeechInput(
   onResult: (transcript: string) => void,
-  contextualStrings: readonly string[] = [],
+  contextualStrings: readonly string[] | (() => readonly string[]) = [],
 ): SpeechInputValue {
   const [state, setState] = React.useState<SpeechInputState>('idle');
   const [partialText, setPartialText] = React.useState('');
@@ -183,16 +183,11 @@ export function useSpeechInput(
     }
   }, [clearSilenceTimer]);
 
-  // A caller rebuilding the same names each render must not restart listeners.
-  const contextualKey = contextualStrings.join('\n');
-  const corrector = React.useMemo(
-    () => createSpeechCorrector(contextualKey ? contextualKey.split('\n') : []),
-    [contextualKey],
-  );
-  const correctorRef = React.useRef(corrector);
-  correctorRef.current = corrector;
+  // Vocabulary belongs to a dictated take, not the conversation's first frame.
+  const contextualSourceRef = React.useRef(contextualStrings);
+  contextualSourceRef.current = contextualStrings;
+  const correctorRef = React.useRef<ReturnType<typeof createSpeechCorrector> | null>(null);
   const lexiconRef = React.useRef<readonly string[]>([]);
-  lexiconRef.current = contextualKey ? contextualKey.split('\n') : [];
   // Android pins Google's server recognizer when it is installed.
   const androidGoogleService = React.useMemo(() => {
     if (Platform.OS !== 'android') return false;
@@ -222,10 +217,8 @@ export function useSpeechInput(
       addsPunctuation: true,
       iosTaskHint: 'dictation' as const,
       volumeChangeEventOptions: { enabled: true, intervalMillis: 160 },
-      // iOS biases toward these; Android does on 13+ (EXTRA_BIASING_STRINGS).
-      ...(contextualKey ? { contextualStrings: contextualKey.split('\n') } : {}),
     };
-  }, [androidGoogleService, contextualKey]);
+  }, [androidGoogleService]);
   // Without Google's service, Android's recognizer is chosen per start from
   // the installed models.
   const nativeStartOptions = React.useCallback(() => {
@@ -234,7 +227,9 @@ export function useSpeechInput(
       Platform.OS === 'android' && !androidGoogleService
         ? { ...startOptions, requiresOnDeviceRecognition: androidOnDeviceRef.current }
         : startOptions;
-    const localized = { ...options, lang: speechLocale() };
+    const localized = { ...options, lang: speechLocale(),
+      ...(lexiconRef.current.length ? { contextualStrings: [...lexiconRef.current] } : {}),
+    };
     return takeRef.current.upload
       ? { ...localized, recordingOptions: DICTATION_RECORDING_OPTIONS }
       : localized;
@@ -290,7 +285,7 @@ export function useSpeechInput(
       speechLocale(),
     );
     if (!transcribed) timing?.mark('fallback');
-    const text = transcribed ? correctorRef.current.correct([transcribed]) : onDevice;
+    const text = transcribed ? correctorRef.current!.correct([transcribed]) : onDevice;
     const captured = finishStopWithCapture(text);
     if (stopSettlementRef.current) {
       settleExplicitStop(captured);
@@ -364,7 +359,7 @@ export function useSpeechInput(
       const alternatives: string[] = event.results.map((result: any) =>
         typeof result?.transcript === 'string' ? result.transcript : '',
       );
-      const transcript = correctorRef.current.correct(alternatives);
+      const transcript = correctorRef.current!.correct(alternatives);
       if (!transcript) return;
 
       // Any result — interim or final — counts as recent speech.
@@ -562,6 +557,9 @@ export function useSpeechInput(
         }
       }
 
+      const source = contextualSourceRef.current;
+      lexiconRef.current = typeof source === 'function' ? source() : source;
+      correctorRef.current = createSpeechCorrector(lexiconRef.current);
       setPartialText('');
       pendingPartialRef.current = '';
       takeIdRef.current += 1;

@@ -222,6 +222,7 @@ export { phoneOperation };
 vi.mock('@/sync/transport/monolith-operation', () => ({ monolithPhoneOperation: phoneOperation }));
 
 
+vi.mock('@/push/push-room-prefetch', () => ({ prefetchRoomOpen: vi.fn(), prefetchDirectMessageOpen: vi.fn() }));
 vi.mock('expo-router', () => ({
   Redirect: () => null,
   router: { back: vi.fn(), push: vi.fn(), replace: vi.fn(), navigate: vi.fn(), canGoBack: () => true },

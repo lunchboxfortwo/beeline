@@ -14,7 +14,7 @@ export const unstable_settings = {
   initialRouteName: 'index',
 };
 
-export default function RootLayout() {
+function SessionRequired() {
   const pathname = usePathname();
   const pathnameRef = React.useRef(pathname);
   pathnameRef.current = pathname;
@@ -24,6 +24,10 @@ export default function RootLayout() {
     () => router.replace('/beeline/onboarding'), undefined,
     () => !pathnameRef.current.startsWith('/review/'),
   ), [pathname]);
+  return null;
+}
+
+export default function RootLayout() {
   const isDesktop = useIsDesktop();
   const t = useTheme();
   const dark = useThemeName().startsWith('dark');
@@ -31,6 +35,7 @@ export default function RootLayout() {
 
   return (
     <YStack flex={1} backgroundColor="canvas">
+      <SessionRequired />
       <ConnectionStatus>
       <Stack
         initialRouteName="index"

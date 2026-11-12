@@ -1,4 +1,4 @@
-import React, { createContext, useCallback, useContext, useState } from 'react';
+import React, { createContext, useCallback, useContext, useMemo, useState } from 'react';
 import * as Haptics from 'expo-haptics';
 import {
   Easing,
@@ -194,10 +194,11 @@ export function BuzzCommunityShell({ children, communities, activeCommunityId, o
   const drawerStyle = useAnimatedStyle(() => ({ transform: [{ translateX: drawerX.value }] }));
   const scrimStyle = useAnimatedStyle(() => ({ opacity: scrimOpacity.value }));
 
+  const drawer = useMemo(() => ({ drawerOpen, openDrawer }), [drawerOpen, openDrawer]);
   return (
-    <CommunityDrawerContext.Provider value={{ drawerOpen, openDrawer }}>
-      <YStack flex={1} backgroundColor="canvas">
-        <YStack flex={1} minWidth={0} backgroundColor="canvas">{children}</YStack>
+    <CommunityDrawerContext.Provider value={drawer}>
+      <YStack flex={1} minWidth={0} backgroundColor="canvas">
+        {children}
         {drawerOpen ? (
           <YStack position="absolute" top={0} right={0} bottom={0} left={0} zIndex={20} testID="community-drawer-overlay">
             <Motion overlay motion={scrimStyle}>

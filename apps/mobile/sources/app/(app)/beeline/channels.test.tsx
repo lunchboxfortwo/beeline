@@ -35,6 +35,22 @@ it('finishes the existing Room load gate and shows the pin error when local pin 
   }
 });
 
+it('keeps the drawn list out of parent navigation redraws', async () => {
+  deck.holdLayouts = true;
+  vi.stubGlobal('requestAnimationFrame', vi.fn(() => 1));
+  vi.stubGlobal('cancelAnimationFrame', vi.fn());
+  fixtureScope1().saveDeck();
+  let renderer!: ReactTestRenderer;
+  try {
+    await act(async () => { renderer = create(<BuzzChannels />); });
+    const renderItem = renderer.root.findByProps({ testID: 'room-list' }).props.renderItem;
+    await act(async () => { renderer.update(<BuzzChannels />); });
+    await act(async () => { deck.workspaceSelectionListener?.(deck.selectedWorkspace); });
+    expect(Object.is(renderer.root.findByProps({ testID: 'room-list' }).props.renderItem, renderItem)).toBe(true);
+    expect(paintedRows(renderer)[0].latestMessage?.text).toBe('saved before effects');
+  } finally { if (renderer) await act(async () => renderer.unmount()); }
+});
+
 describe('Saved deck cold launch', () => {
 const scope1 = fixtureScope1();
 
@@ -141,7 +157,8 @@ const scope1 = fixtureScope1();
       deck.pathname = '/beeline/chat/pushed';
       await act(async () => renderer.update(<Index />));
       await act(async () => restore({ publicKey: scope1.savedViewer, secretKey: new Uint8Array(32) }));
-      expect(renderer.toJSON()).toBeNull();
+      // The navigator covers the retained deck; a late restore must not navigate.
+      expect(paintedRows(renderer)[0].latestMessage?.text).toBe('saved before effects');
       expect(router.replace).not.toHaveBeenCalled();
       deck.pathname = '/';
       await act(async () => renderer.update(<Index />));
@@ -199,8 +216,8 @@ describe('Persisted Workspace bootstrap', () => {
     expect(deck.chatsWorkspaces).toEqual([]);
     expect(mobileSurfaceCache.read).not.toHaveBeenCalled();
     await act(async () => deck.workspaceSelectionListener!('workspace'));
-    await vi.waitFor(() => expect(deck.chatsWorkspaces).toEqual(['workspace']));
-    expect(paintedRows(renderer).map((item) => item.room.id)).toEqual(['room-a']);
+    await vi.waitFor(() => expect(paintedRows(renderer).map((item) => item.room.id)).toEqual(['room-a']));
+    expect(deck.chatsWorkspaces).toEqual(['workspace']);
     expect(router.replace).not.toHaveBeenCalled();
     act(() => renderer.unmount());
   });

@@ -13,6 +13,7 @@ import { RoomViewClient } from '@/sync/transport/room-view-client';
 import { monolithPhoneOperation } from '@/sync/transport/monolith-operation';
 import { Modal } from '@/modal/ModalManager';
 import { navigateToRoom } from '@/buzz/corner-navigation';
+import { prefetchDirectMessageOpen, prefetchRoomOpen } from '@/push/push-room-prefetch';
 import { displayModel } from '@/buzz/model-display';
 import { mobileSurfaceCache, surfaceAddress } from '@/buzz/surface-storage';
 import { useChatList, type ChatListKey } from '@/buzz/chat-list-store';
@@ -155,14 +156,18 @@ function PersonProfile({ workspaceId, memberId, close }: { workspaceId: string; 
         return () => window.removeEventListener('keydown', escape, true);
     }, [dirty, busy, close]);
 
-    const message = () => void perform(async () => {
+    const message = () => {
+      if (!dirty && !mutation.current) prefetchDirectMessageOpen(workspaceId, memberId);
+      void perform(async () => {
         if (!(await confirmDiscard())) return;
         setEditing(false);
         const room = await monolithPhoneOperation('resolveDirectMessage', { workspaceId, participantId: memberId });
         if (!live.current) return;
         allowNavigation.current = true;
+        prefetchRoomOpen(room.id);
         navigateToRoom(router, room.id);
-    });
+      });
+    };
     const saveRole = () => void perform(async () => {
         await monolithPhoneOperation('addWorkspaceMember', { workspaceId, memberId, role });
         if (recordScope) recordWorkspaceRole(recordScope, memberId, role);

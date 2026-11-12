@@ -246,18 +246,9 @@ async function loadFonts() {
 const fontInitialization = loadFonts()
   .catch((error) => console.error('Error initializing:', error));
 
-export default function RootLayout() {
+function NavigationRouteEffects({ onContentLayout }: { onContentLayout: () => void }) {
   const routeSegments = useSegments();
   React.useLayoutEffect(() => { setMobileErrorRoute(routeSegments); }, [routeSegments]);
-  const isDesktop = useIsDesktop();
-  const [drawn, setDrawn] = React.useState(false);
-  const firstLayout = React.useRef<(() => void) | null>(null);
-  const onContentLayout = React.useCallback(() => {
-    if (!firstLayout.current) firstLayout.current = afterFirstFrame(() => { void SplashScreen.hideAsync(); setDrawn(true); });
-  }, []);
-  React.useEffect(() => () => { firstLayout.current?.(); firstLayout.current = null; }, []);
-  useTauriZoom();
-  useTauriDrag();
   const pathname = usePathname();
   React.useEffect(() => {
     if (pathname !== '/' && pathname !== '/beeline/channels') return afterFirstFrame(onContentLayout);
@@ -271,6 +262,19 @@ export default function RootLayout() {
     // so a cold-start replace cannot overwrite the notification navigation.
     if (pathname !== '/') markInitialLandingResolved();
   }, [pathname]);
+  return null;
+}
+
+export default function RootLayout() {
+  const isDesktop = useIsDesktop();
+  const [drawn, setDrawn] = React.useState(false);
+  const firstLayout = React.useRef<(() => void) | null>(null);
+  const onContentLayout = React.useCallback(() => {
+    if (!firstLayout.current) firstLayout.current = afterFirstFrame(() => { void SplashScreen.hideAsync(); setDrawn(true); });
+  }, []);
+  React.useEffect(() => () => { firstLayout.current?.(); firstLayout.current = null; }, []);
+  useTauriZoom();
+  useTauriDrag();
   const mode = useAppMode();
   const navigationTheme = React.useMemo(() => {
     const base = mode === 'dark' ? DarkTheme : DefaultTheme;
@@ -360,6 +364,7 @@ export default function RootLayout() {
 
   let providers = (
     <SafeAreaProvider initialMetrics={initialWindowMetrics}>
+      <NavigationRouteEffects onContentLayout={onContentLayout} />
       <KeyboardProvider preload={false}>
         <AppRoot
           desktop={isDesktop}

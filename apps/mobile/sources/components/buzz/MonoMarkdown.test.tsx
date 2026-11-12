@@ -21,3 +21,12 @@ it('keeps every nested list level 16 deeper than the one above, past depth two',
         .map((node: any) => node.props.paddingLeft);
     expect(indents).toEqual([0, 1, 2, 3].map((depth) => depth * STEP['4']));
 });
+
+it('renders plain prose in its paragraph without a redundant styled text span', () => {
+    let tree: any;
+    act(() => { tree = create(<MonoMarkdown textStyle={{}} markdown="Plain transcript words" />); });
+    const texts = tree.root.findAll((node: any) => node.type === 'Text');
+    expect(texts).toHaveLength(1);
+    expect(texts[0].props.children).toBeDefined();
+    act(() => tree.unmount());
+});

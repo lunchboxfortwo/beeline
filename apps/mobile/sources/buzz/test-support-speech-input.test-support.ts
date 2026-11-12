@@ -90,7 +90,7 @@ function Harness({
   contextualStrings,
 }: {
   onResult: (t: string) => void;
-  contextualStrings?: string[];
+  contextualStrings?: readonly string[] | (() => readonly string[]);
 }) {
   const speech = useSpeechInput(onResult, contextualStrings);
   // Expose state through serializable props so react-test-renderer can find them.
@@ -103,7 +103,7 @@ function Harness({
 }
 
 
-export function renderHook(onResult = vi.fn(), contextualStrings?: string[]) {
+export function renderHook(onResult = vi.fn(), contextualStrings?: readonly string[] | (() => readonly string[])) {
   let renderer: any;
   act(() => {
     renderer = create(React.createElement(Harness, { onResult, contextualStrings }));

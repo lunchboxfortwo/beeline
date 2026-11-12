@@ -81,7 +81,7 @@ Android testing follows the [corner device proof route](docs/agent-body.md#andro
 
 If joining Conversation mode fails, tap Retry in the error dialog to make another attempt.
 
-The phone keeps saved Rooms visible during a network interruption. It reconnects once after a socket request fails; only a failed replacement shows the app’s connection banner.
+The saved home chat list stays mounted beneath an opened Room, preserving its list position on Back without rebuilding the list when the current Workspace is saved again. Each phone screen owns its tab bar so opening a chat does not resize the covered list. Existing direct messages start their scoped read at the Message tap while the server resolves the destination. Dictation builds its conversation vocabulary when the microphone starts. The phone keeps saved Rooms visible during a network interruption. It reconnects once after a socket request fails; only a failed replacement shows the app’s connection banner.
 
 Forwarding marks the selected destination FORWARDED as soon as the send is accepted, before the picker finishes closing.
 

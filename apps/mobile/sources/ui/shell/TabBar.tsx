@@ -19,7 +19,7 @@ const TABS: { value: Tab; label: string; icon: typeof MessagesSquare }[] = [
 const ONE_LINE = Platform.OS === 'web' ? {} : { numberOfLines: 1, adjustsFontSizeToFit: true, minimumFontScale: 0.5 };
 
 /** The phone's four places. Chats leads; Tags carries the live count. */
-export function TabBar({ active, tagsCount = 0 }: { active: Tab; tagsCount?: number }) {
+export const TabBar = React.memo(function TabBar({ active, tagsCount = 0 }: { active: Tab; tagsCount?: number }) {
     // A tab press returns to that place's root, not on top of a pushed page.
     const go = (tab: string) => {
         if (router.canDismiss()) router.dismissAll();
@@ -44,4 +44,4 @@ export function TabBar({ active, tagsCount = 0 }: { active: Tab; tagsCount?: num
             <SafeBottom />
         </>
     );
-}
+});

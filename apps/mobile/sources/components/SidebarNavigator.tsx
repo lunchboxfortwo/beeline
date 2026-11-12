@@ -12,7 +12,7 @@ import { XStack, YStack, useTheme } from 'tamagui';
 import { ChevronLeft, ChevronRight } from 'lucide-react-native';
 import { useLocalSetting, useLocalSettingMutable } from '@/sync/storage';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
-import { usePathname, useRouter } from 'expo-router';
+import { Slot, usePathname, useRouter } from 'expo-router';
 import { Image } from 'expo-image';
 import { Filled, Glyph } from '@/ui/grammar';
 import { PaneResizer } from '@/ui/grammar-root';
@@ -44,7 +44,14 @@ import {
 
 const SETUP_SURFACES = ['/beeline/community', '/beeline/create-workspace'];
 
-export const SidebarNavigator = React.memo(() => {
+export const SidebarNavigator = React.memo(function SidebarNavigator() {
+  const isTablet = useIsTablet();
+  // Compact screens have no drawer. Route straight into their stack instead
+  // of reconciling a second navigator whose surface is always hidden.
+  return isTablet ? <DesktopSidebarNavigator /> : <Slot />;
+});
+
+const DesktopSidebarNavigator = React.memo(() => {
   const drawerGround = useTheme().canvas?.val;
   const isTablet = useIsTablet();
   const inDesktopShell = isTauri();
@@ -161,20 +168,6 @@ export const SidebarNavigator = React.memo(() => {
   );
 
   const drawerNavigationOptions = React.useMemo(() => {
-    if (!isDesktopLayout) {
-      // Non-tablet: use front drawer, hidden
-      return {
-        lazy: false,
-        headerShown: false,
-        drawerType: 'front' as const,
-        swipeEnabled: false,
-        drawerStyle: {
-          width: 0,
-          display: 'none' as const,
-        },
-      };
-    }
-
     // Tablet: always permanent, just collapse width in zen mode.
     //
     // We deliberately do NOT animate `width` on web. A CSS transition on

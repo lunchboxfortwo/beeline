@@ -371,7 +371,7 @@ export function ChatSurfaceOverlays({
         repository={roomRepoOptions}
         backgroundRef={conversationFrameRef}
       >
-        <>
+        {() => <>
             {!isCorner && canRenameTitle && renameEditing && (
               // Hangs between the sheet's rows, on their 24pt inset.
               <YStack paddingHorizontal="6" paddingVertical="2" borderTopWidth={1} borderTopColor="stroke" testID="rename-room-editor">
@@ -483,7 +483,7 @@ export function ChatSurfaceOverlays({
                 <ErrorBanner inline title={renameError ?? membershipError ?? ''} />
               </YStack>
             )}
-        </>
+        </>}
       </RoomActionsSheet>
 
       <HullActionSheetModal

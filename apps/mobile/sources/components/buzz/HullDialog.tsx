@@ -241,11 +241,14 @@ function reconcilePresentationValue(
 
 function useStableFloatingPresentation(props: HullModalProps): HullModalProps {
   const presentation = React.useRef<StablePresentationValue | undefined>(undefined);
-  // Android's Modal renders nothing while hidden. Keep its outer callbacks
-  // stable without walking content; iOS retains content through dismissal.
+  const presented = React.useRef(false);
+  if (props.visible) presented.current = true;
+  // Unopened dialogs have no content to retain. Only iOS can still display
+  // a previously opened Modal during native dismissal.
   presentation.current = reconcilePresentationValue(
     presentation.current,
-    Platform.OS === 'android' && !props.visible ? { ...props, children: null } : props,
+    !props.visible && (Platform.OS !== 'ios' || !presented.current)
+      ? { ...props, children: null } : props,
   );
   return presentation.current.value as HullModalProps;
 }

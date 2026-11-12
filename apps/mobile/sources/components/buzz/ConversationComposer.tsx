@@ -82,7 +82,7 @@ type Props = {
    */
   speechEnabled?: boolean;
   /** Names spoken in this conversation, so dictation spells them as written. */
-  speechHints?: readonly string[];
+  speechHints?: readonly string[] | (() => readonly string[]);
   /**
    * Only supplied for a server-authorized, current working turn. The plain
    * tap-to-send composer takes no stop gesture of its own — the stop control

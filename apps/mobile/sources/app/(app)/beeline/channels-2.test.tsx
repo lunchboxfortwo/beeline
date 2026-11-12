@@ -230,7 +230,7 @@ describe('Room deck live path', () => {
   }, 10_000);
 
 
-  it('reads nothing while hidden under a Room, then catches up on focus', async () => {
+  it('reads nothing while hidden under a Room, then catches up after the returning list frame', async () => {
     const renderer = await mountDeck();
     const readsAtRest = deck.chatsReads;
 
@@ -243,9 +243,16 @@ describe('Room deck live path', () => {
     await quiet();
     expect(deck.chatsReads).toBe(readsAtRest);
 
+    const frames: FrameRequestCallback[] = [];
+    vi.stubGlobal('requestAnimationFrame', (run: FrameRequestCallback) => frames.push(run));
+    vi.stubGlobal('cancelAnimationFrame', vi.fn());
     await act(async () => {
       deck.blur = (deck.focusEffect?.() as (() => void) | undefined) ?? null;
     });
+    expect(deck.chatsReads).toBe(readsAtRest);
+    await act(async () => { frames.shift()!(0); });
+    expect(deck.chatsReads).toBe(readsAtRest);
+    await act(async () => { frames.shift()!(16); });
     await quiet();
     expect(deck.chatsReads).toBe(readsAtRest + 1);
     expect(deck.reconnects).toBe(0);
@@ -253,15 +260,34 @@ describe('Room deck live path', () => {
   });
 
 
-  it('reads nothing when the deck comes back with nothing it skipped', async () => {
+  it('keeps committed deltas out of the hidden deck, then paints them on return without a read', async () => {
     const renderer = await mountDeck();
     const readsAtRest = deck.chatsReads;
     await act(async () => deck.blur?.());
+    await act(async () => roomWatch().emit({ monolithLive: {
+      type: 'message-delta', roomId: 'room-a', message: {
+        id: 'hidden-answer', text: 'arrived under the Room', createdAt: 20,
+        author: agent, presentation: 'message',
+      },
+    } }));
+    await quiet();
+    expect(paintedRows(renderer)[0]!.latestMessage?.text).toBe('earlier');
+    const frames: FrameRequestCallback[] = [];
+    vi.stubGlobal('requestAnimationFrame', (run: FrameRequestCallback) => frames.push(run));
+    vi.stubGlobal('cancelAnimationFrame', vi.fn());
     await act(async () => {
       deck.blur = (deck.focusEffect?.() as (() => void) | undefined) ?? null;
     });
-    await quiet();
+    expect(paintedRows(renderer)[0]!.latestMessage?.text).toBe('earlier');
+    await act(async () => { frames.shift()!(0); frames.shift()!(16); });
+    expect(paintedRows(renderer)[0]!.latestMessage?.text).toBe('arrived under the Room');
     expect(deck.chatsReads).toBe(readsAtRest);
+    await act(async () => {
+      deck.blur?.();
+      const address = [...hotSurfaces.values.keys()].find(key => key.includes('/workspace/:id/chats'))!;
+      await mobileSurfaceCache.remove(address as any);
+    });
+    expect(renderer.root.findAllByProps({ testID: 'room-list' })).toHaveLength(0);
     await act(async () => renderer.unmount());
   });
 

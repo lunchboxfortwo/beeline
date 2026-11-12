@@ -24,7 +24,7 @@ import { MessageMatches } from '@/ui/screens/chats/MessageMatches';
 import { NewChatSheet } from '@/ui/screens/chats/NewChatSheet';
 import { isWorkspaceListView, type ChatListItem, type Identity } from '@beeline/buzz-client';
 import { router, useLocalSearchParams, usePathname, type Href } from 'expo-router';
-import { useContext, useEffect, useRef, useState } from 'react';
+import { memo, useContext, useEffect, useRef, useState } from 'react';
 import { FlatList } from 'react-native';
 import { Swipeable } from 'react-native-gesture-handler';
 import { Separator, XStack, YStack } from 'tamagui';
@@ -109,7 +109,11 @@ export default function SavedRoomDeck() {
       stopWorkspace = watchActiveCommunityId(identity.publicKey, (workspaceId) => {
         if (cancelled) return;
         restoreStoredSurface(surfaceAddress(relayUrl, identity.publicKey, '/workspaces'), isWorkspaceListView);
-        setSession({ identity, relayUrl, workspaceId });
+        // A Room saves its Workspace on arrival. The already drawn deck's
+        // session does not change when that is the Workspace it is showing.
+        setSession(current => current?.identity === identity &&
+          current.relayUrl === relayUrl && current.workspaceId === workspaceId
+          ? current : { identity, relayUrl, workspaceId });
       });
     };
     void restore().catch((reason) => {
@@ -156,7 +160,7 @@ function DeckHeader(props: Omit<React.ComponentProps<typeof ChatListHeader>, 'on
 
 const EMPTY_CHATS: readonly ChatListItem[] = [];
 
-function BuzzChannels({ session }: { session: DeckSession }) {
+const BuzzChannels = memo(function BuzzChannels({ session }: { session: DeckSession }) {
   const state = useChannelsRouteState(session);
   const view = useChannelsPresentation(state);
   const { refreshMissed, refreshNow } = useChannelsRequestedActions(state, view);
@@ -349,4 +353,4 @@ function BuzzChannels({ session }: { session: DeckSession }) {
       ) : null}
     </BuzzCommunityShell>
   );
-}
+});

@@ -26,6 +26,7 @@
       "ShortcutHintsProvider"
     ],
     "components/SidebarNavigator.tsx": [
+      "DesktopSidebarNavigator",
       "PersistentHeader",
       "SidebarNavigator",
       "drawerContent"

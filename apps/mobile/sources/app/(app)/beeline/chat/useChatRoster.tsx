@@ -1,4 +1,4 @@
-import { useMemo } from 'react';
+import { useCallback, useMemo } from 'react';
 import { type ChatDisplayMessage, memberAgent } from '@/buzz/room-view-presentation';
 import { buildSpeechLexicon } from '@/buzz/speech-lexicon';
 import { resolveAgentDisplayIdentity } from '@/buzz/agent-display';
@@ -33,7 +33,7 @@ export function useChatRoster([
   agentProfileModelByPubkey: Map<string, string>,
   speakerRoleByPubkey: Map<string, string>,
   composerTagHandles: Set<string>,
-  speechHints: string[],
+  speechHints: () => string[],
   roomParticipantTotal: number,
 ] {
 
@@ -110,7 +110,7 @@ export function useChatRoster([
     sameElementRefs,
   );
 
-  const speechHints = useMemo(
+  const speechHints = useCallback(
     () =>
       buildSpeechLexicon({
         roomName: resolvedChannelName,
