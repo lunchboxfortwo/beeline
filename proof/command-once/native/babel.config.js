@@ -1,0 +1,1 @@
+module.exports=function(api){api.cache(true);return {presets:[require.resolve('../../../apps/mobile/node_modules/babel-preset-expo')],plugins:[require.resolve('../../../apps/mobile/node_modules/react-native-worklets/plugin')]};};

@@ -593,9 +593,11 @@ describe('PhoneService Needs-you tray', () => {
   });
   it.each(['always', 'once', 'deny'] as const)('the projected grant action %s decides the exact first grant', async decision => {
     const grantId = '99999999-9999-4999-8999-999999999999';
-    await database.query(`INSERT INTO agent_grants(id,agent_id,workspace_id,kind,target,reason,requested_by,room_id,status)
-      VALUES($1,$2,$3,'command','npm test','Run checks',$4,$5,'pending')`, [grantId, AGENT, WORKSPACE, VIEWER, ROOM]);
-    await card(ROOM, 'grant-request', { agent: hoots, grants: [{ grantId, kind: 'command', target: 'npm test', reason: 'Run checks' }] });
+    const target = JSON.stringify({ argv: ['bash'], stdin: 'printf check' });
+    const script = { path: '<stdin>', sha256: 'a'.repeat(64), bytes: 12, contents: 'printf check' };
+    await database.query(`INSERT INTO agent_grants(id,agent_id,workspace_id,kind,target,reason,requested_by,room_id,status,script)
+      VALUES($1,$2,$3,'command',$6,'Run checks',$4,$5,'pending',$7::jsonb)`, [grantId, AGENT, WORKSPACE, VIEWER, ROOM, target, JSON.stringify(script)]);
+    await card(ROOM, 'grant-request', { agent: hoots, grants: [{ grantId, kind: 'command', target, script, reason: 'Run checks' }] });
     const [item] = (await read()).items;
     expect(item!.approval!.actions).toEqual([
       { kind: 'grant', label: 'Always', grantId, decision: 'always' },

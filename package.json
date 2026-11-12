@@ -31,6 +31,7 @@
     "test": "turbo run test",
     "feedback:group": "node scripts/feedback-signals.mjs",
     "test:feedback-signals": "node --test scripts/feedback-signals.test.mjs",
+    "prove:command-once": "node --import tsx scripts/prove-command-once.mjs",
     "prove:room-checkout": "node scripts/prove-room-checkout-tools.mjs",
     "prove:room-github-reads": "node scripts/prove-room-github-reads.mjs",
     "prove:onboarding": "node scripts/onboarding-walkthrough.mjs",

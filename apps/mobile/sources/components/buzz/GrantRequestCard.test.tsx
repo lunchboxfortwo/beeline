@@ -18,7 +18,10 @@ import { canDecideGrantRequest, GrantRequestCard, GrantRequestPill } from './Gra
 const OWNER = 'a'.repeat(64);
 const AGENT = { pubkey: 'b'.repeat(64), kind: 'agent', name: 'Alan', handle: 'alan' } as const;
 const grant = {
-    grantId: 'grant-1', kind: 'command', target: 'npm test', reason: 'Run the tests', status: 'pending',
+    grantId: 'grant-1', kind: 'command',
+    target: JSON.stringify({ argv: ['bash'], stdin: 'printf check' }),
+    script: { path: '<stdin>', sha256: 'a'.repeat(64), bytes: 12, contents: 'printf check' },
+    reason: 'Run the tests', status: 'pending',
     requestedBy: AGENT, roomId: 'room', createdAt: 1, auto: false,
 };
 const message = {
@@ -37,14 +40,14 @@ function render(props: Partial<React.ComponentProps<typeof GrantRequestCard>> = 
 const button = (tree: any, testID: string) => tree.root.find((node: any) => node.type === 'Button' && node.props.testID === testID);
 
 describe('grant request card', () => {
-    it('is one raised request card with Always, Once and Deny for commands', () => {
+    it('is one raised request card with Always, Once and Deny for bash with stdin', () => {
         const tree = render();
         expect(tree.root.find((node: any) => node.type === 'Card').props.backgroundColor).toBe('raised');
         const labels = tree.root.findAll((node: any) => node.type === 'Button').map((node: any) => node.props['aria-label']);
         expect(labels).toEqual(['Always', 'Once', 'Deny']);
     });
 
-    it('sends today’s decisions: Always is always, Once is once, Deny is deny', () => {
+    it('sends distinct Always, Once and Deny decisions', () => {
         const onDecision = vi.fn();
         const tree = render({ onDecision });
         act(() => { button(tree, 'grant-grant-1-always').props.onPress(); });
@@ -85,6 +88,6 @@ describe('grant request card', () => {
         expect(tree.root.findAll((node: any) => node.props.testID === 'grant-grant-1')).toHaveLength(0);
         act(() => pill().props.onPress());
         expect(tree.root.findAll((node: any) => node.type === 'Button' && /^grant-grant-1-(always|once|deny)$/.test(node.props.testID))).toHaveLength(0);
-        expect(tree.root.find((node: any) => node.type === 'Text' && node.props.testID === 'grant-grant-1-ask').props.children).toBe('@Alan wants to run a command');
+        expect(tree.root.find((node: any) => node.type === 'Text' && node.props.testID === 'grant-grant-1-ask').props.children).toBe('@Alan wants to run a script');
     });
 });
