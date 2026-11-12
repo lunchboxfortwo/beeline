@@ -61,6 +61,9 @@ it('names the active count, then lists every thread inside a list capped at 45% 
   const list = tree.root.findAllByType('ScrollView');
   expect(list).toHaveLength(1);
   expect(list[0].props.maxHeight).toBe(Math.round(844 * 0.45));
+  // With the composer's keyboard up, the first tap on a thread opens it
+  // instead of only lowering the keyboard.
+  expect(list[0].props.keyboardShouldPersistTaps).toBe('handled');
   const lines = tree.root.findAllByType('ThreadLine');
   expect(lines.map((line: any) => [line.props.title, line.props.state])).toEqual([['one-row-header', 'waiting'], ['reconnect', 'review']]);
   act(() => lines[1].props.onPress());

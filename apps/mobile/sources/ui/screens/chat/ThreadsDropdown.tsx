@@ -62,7 +62,7 @@ function ThreadsDropdownList({ roomId, chatName, count, fallback, openThread, re
         : fallback.map((corner) => ({ id: corner.id, title: cornerShortTitle(chatName, corner.name, corner.id), state: corner.state }));
     const more = corners.record?.nextOpen ? Math.max(0, count - lines.length) : 0;
     return (
-        <ScrollView maxHeight={Math.round(height * THREADS_DROPDOWN_SHARE)} testID="threads-dropdown-list">
+        <ScrollView maxHeight={Math.round(height * THREADS_DROPDOWN_SHARE)} keyboardShouldPersistTaps="handled" testID="threads-dropdown-list">
             <YStack marginLeft="6" marginRight="4" marginTop="1" paddingLeft="3" borderLeftWidth={1} borderColor="strongStroke">
                 {lines.map((line) => (
                     <ThreadLine avatarUrl={repositoryAvatar} faviconUrl={repositoryFavicon} key={line.id} title={line.title} state={line.state}

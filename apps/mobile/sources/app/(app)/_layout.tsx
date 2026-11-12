@@ -7,7 +7,7 @@ import { statusBarStyleForTheme } from '@/components/StatusBarProvider';
 import { ConnectionStatus } from '@/components/buzz/ConnectionStatus';
 import { CornerOpenToast } from '@/components/buzz/CornerOpenToast';
 import { useIsDesktop } from '@/utils/responsive';
-import { PhoneTabBar } from '@/ui/shell/PhoneTabBar';
+import { PhoneTabScreen } from '@/ui/shell/PhoneTabScreen';
 
 /** @public Expo Router consumes this named export through its filesystem convention. */
 export const unstable_settings = {
@@ -34,6 +34,7 @@ export default function RootLayout() {
       <ConnectionStatus>
       <Stack
         initialRouteName="index"
+        screenLayout={isDesktop ? undefined : PhoneTabScreen}
         screenOptions={{
           // Status bar glyphs follow the app theme: dark icons over Bone,
           // light icons over Obsidian, on every platform the stack runs on.
@@ -201,7 +202,6 @@ export default function RootLayout() {
         <Stack.Screen name="artifact-viewer" options={{ headerShown: false }} />
         <Stack.Screen name="text-selection" options={{ headerShown: false }} />
       </Stack>
-      {isDesktop ? null : <PhoneTabBar />}
       </ConnectionStatus>
       {/* One corner-open notice over every screen: pending, or a failed action with Retry. */}
       <CornerOpenToast />

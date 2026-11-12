@@ -2,7 +2,8 @@ import React from 'react';
 import * as Native from 'react-native';
 import { View, type ViewProps } from 'react-native';
 import { GestureHandlerRootView } from 'react-native-gesture-handler';
-import { KeyboardAvoidingView } from 'react-native-keyboard-controller';
+import { useReanimatedKeyboardAnimation } from 'react-native-keyboard-controller';
+import Reanimated, { useAnimatedStyle } from 'react-native-reanimated';
 import { beelineThemes } from '@/buzz/groknight';
 import { useTheme } from 'tamagui';
 import { typeStyle, useTextScale, type ColorToken, type Variant } from './grammar';
@@ -27,11 +28,17 @@ export function ListCell(props: ViewProps) {
 }
 
 /**
- * A screen's keyboard-avoiding body (react-native-keyboard-controller takes
- * its layout only as a style): fills the space under the header.
+ * A screen's keyboard-avoiding body: fills the space under the header and pads
+ * its bottom by the keyboard, on every platform. It never moves, so nothing in
+ * it draws over the header or takes the header's taps while the keyboard opens.
+ * The padding reads the app-wide keyboard height, which is live even for a
+ * screen that mounts while the keyboard is still closing, so no inset from the
+ * previous screen is left behind.
  */
-export function KeyboardBody(props: Omit<React.ComponentProps<typeof KeyboardAvoidingView>, 'style'>) {
-    return <KeyboardAvoidingView {...props} style={KEYBOARD_BODY} />;
+export function KeyboardBody({ children }: { children?: React.ReactNode }) {
+    const { height } = useReanimatedKeyboardAnimation();
+    const pad = useAnimatedStyle(() => ({ paddingBottom: -height.value }));
+    return <Reanimated.View style={[KEYBOARD_BODY, pad]}>{children}</Reanimated.View>;
 }
 const KEYBOARD_BODY = { flex: 1 } as const;
 

@@ -498,9 +498,7 @@ export function BuzzChatSurface({
             reviewerAgentId={roomSurface?.room.reviewerAgentId}
           />
 
-          <KeyboardBody
-            behavior={Platform.OS === 'ios' ? 'padding' : 'translate-with-padding'}
-          >
+          <KeyboardBody>
             {/* A corner's title, status, PR, objective and brief are the
             transcript's first block (header B, `useChatThreadHeader`). */}
             <ChatSurfaceTranscript
