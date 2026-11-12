@@ -103,3 +103,45 @@ describe.each(['image', 'text'] as const)('%s byte demand', kind => {
     expect(read()).toHaveBeenCalledTimes(1);
   });
 });
+
+// Reproduction MOBILE-17: chat artifact image finishes loading on Android →
+// onLoad throws TypeError, image size never reported. Tamagui's Image calls
+// onLoad with a top-level `target` and no `nativeEvent`, so reading
+// `event.nativeEvent.source` crashed and the card lost its aspect ratio.
+describe('ArtifactImage size reporting', () => {
+  const loadHandler = async (onLoadImageSize?: (width: number, height: number) => void) => {
+    host.image.mockResolvedValue({ uri: 'blob:one' });
+    await act(async () => {
+      tree = create(
+        <ArtifactImage attachment={attachment} fit="cover" testID="loaded" onLoadImageSize={onLoadImageSize} />,
+      );
+    });
+    return tree!.root.findByType('Image').props.onLoad as (event: unknown) => void;
+  };
+
+  it('reports width and height from the Tamagui event that has no nativeEvent', async () => {
+    const onLoadImageSize = vi.fn();
+    const onLoad = await loadHandler(onLoadImageSize);
+    expect(() => onLoad({ target: { naturalWidth: 800, naturalHeight: 600 } })).not.toThrow();
+    expect(onLoadImageSize).toHaveBeenCalledWith(800, 600);
+  });
+
+  it('reports width and height from the native event source', async () => {
+    const onLoadImageSize = vi.fn();
+    const onLoad = await loadHandler(onLoadImageSize);
+    expect(() => onLoad({ nativeEvent: { source: { width: 1024, height: 768 } } })).not.toThrow();
+    expect(onLoadImageSize).toHaveBeenCalledWith(1024, 768);
+  });
+
+  it('falls back to the native event target and stays silent without a positive size', async () => {
+    const onLoadImageSize = vi.fn();
+    const onLoad = await loadHandler(onLoadImageSize);
+    expect(() => onLoad({ nativeEvent: { target: { naturalWidth: 640, naturalHeight: 480 } } })).not.toThrow();
+    expect(onLoadImageSize).toHaveBeenCalledWith(640, 480);
+    onLoadImageSize.mockClear();
+    expect(() => onLoad({})).not.toThrow();
+    expect(() => onLoad(undefined)).not.toThrow();
+    onLoad({ target: { naturalWidth: 0, naturalHeight: 600 } });
+    expect(onLoadImageSize).not.toHaveBeenCalled();
+  });
+});

@@ -105,11 +105,12 @@ export function ArtifactImage({
       accessibilityIgnoresInvertColors
       accessibilityLabel={attachment.title ?? attachment.name}
       onLoad={(event: any) => {
-        const native = event.nativeEvent as typeof event.nativeEvent & {
-          target?: { naturalWidth?: number; naturalHeight?: number };
-        };
-        const width = native.source?.width ?? native.target?.naturalWidth ?? 0;
-        const height = native.source?.height ?? native.target?.naturalHeight ?? 0;
+        // Tamagui's image wrapper calls onLoad with a top-level `target` and no
+        // `nativeEvent`; the native image reports size under `nativeEvent.source`.
+        // Read every shape defensively and never throw a fatal error on load.
+        const native = event?.nativeEvent;
+        const width = native?.source?.width ?? native?.target?.naturalWidth ?? event?.target?.naturalWidth ?? 0;
+        const height = native?.source?.height ?? native?.target?.naturalHeight ?? event?.target?.naturalHeight ?? 0;
         if (width > 0 && height > 0) onLoadImageSize?.(width, height);
       }}
       onError={() => setFailed(true)}
