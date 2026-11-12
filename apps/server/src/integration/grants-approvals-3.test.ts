@@ -104,10 +104,20 @@ const fixture = monolithFixture();
     expect(card.card.requester.pubkey).toBe(memberId);
     expect(card.card.grants.map((grant) => grant.status)).toEqual(['pending', 'pending']);
     expect(card.card.grants[1]!.expiresAt).toEqual(expect.any(Number));
-    // Resource prompts are private. Squire approval instead
-    // reaches its owner through the connector DM's direct-message push path.
+    // The card stays in the Room where the agent asked; it pushes only to
+    // the person who decides it.
     await pushes.runOnce();
-    expect(card.room_id).not.toBe(ROOM);
+    expect(card.room_id).toBe(ROOM);
+    expect(send).toHaveBeenCalledTimes(1);
+    expect(send.mock.calls[0]).toEqual([
+      'grant-owner-device-1234567890123456789012',
+      expect.objectContaining({ roomId: ROOM, recipientIdentityId: HUMAN, permission: true }),
+    ]);
+    // Another Room member reads the same card but cannot act on it.
+    const memberRoom = (await (
+      await fixture.request(`/v1/phone/rooms/${ROOM}`, 'GET', undefined, memberToken)
+    ).json()) as RoomView;
+    expect(memberRoom.messages.find((message) => message.grantRequest)?.grantRequest?.owner.pubkey).toBe(HUMAN);
     // The phone reads the card as a validated grantRequest message.
     const room = (await (await fixture.request(`/v1/phone/rooms/${card.room_id}`)).json()) as RoomView;
     expect(isRoomView(room)).toBe(true);

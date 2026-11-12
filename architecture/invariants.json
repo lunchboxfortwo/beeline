@@ -3744,7 +3744,8 @@
         "fromState": "existing before the registry; weekly audit reviews",
         "commandId": "existing before the registry; weekly audit reviews",
         "trigger": "existing before the registry; weekly audit reviews",
-        "reportToId": "the person a human-directed worker report addresses; written with the report, it scopes the derived wait"
+        "reportToId": "the person a human-directed worker report addresses; written with the report, it scopes the derived wait",
+        "owner": "the person who decides a grant-request card; written with the card, it keeps asks with different deciders on separate cards"
       },
       "legacy_event": {
         "turnGenerationId": "existing before the registry; weekly audit reviews"

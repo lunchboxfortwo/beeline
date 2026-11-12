@@ -34,7 +34,9 @@ type Props = {
   thread?: ThreadHeaderData;
   threadCollapsed: boolean;
   openParentChat: () => void;
-  openBrief?: () => void;
+  /** The full thread header under the bar, while the title block is away. */
+  threadExpanded?: React.ReactNode;
+  expandThread?: () => void;
   openCornerActions?: () => void;
   threadBarRef?: React.Ref<View>;
   onThreadBarLayout?: () => void;
@@ -87,15 +89,16 @@ export const ChatSurfaceHeaderView = React.memo(function ChatSurfaceHeaderView({
   thread,
   threadCollapsed,
   openParentChat,
-  openBrief,
+  threadExpanded,
+  expandThread,
   openCornerActions,
   threadBarRef,
   onThreadBarLayout,
 }: Props) {
   if (isCorner && thread) {
     return (
-      <ThreadBar h={thread} collapsed={threadCollapsed} back={handleBack} openChat={openParentChat}
-        openBrief={openBrief} openActions={openCornerActions} barRef={threadBarRef} onBarLayout={onThreadBarLayout} />
+      <ThreadBar h={thread} collapsed={threadCollapsed} expanded={threadExpanded} back={handleBack} openChat={openParentChat}
+        expand={expandThread} openActions={openCornerActions} barRef={threadBarRef} onBarLayout={onThreadBarLayout} />
     );
   }
   return (

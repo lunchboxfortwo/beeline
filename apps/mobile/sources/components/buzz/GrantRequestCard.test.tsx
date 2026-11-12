@@ -10,8 +10,10 @@ vi.mock('react-native-safe-area-context', () => ({ useSafeAreaInsets: () => ({ t
 vi.mock('./IdentityMark', () => ({ IdentityMark: () => null }));
 vi.mock('./ErrorBanner', () => ({ ErrorBanner: () => null }));
 vi.mock('@/ui/screens/transcript/cards/RequestMedia', () => ({ RequestMedia: () => null }));
+vi.mock('./Ledger', () => ({ ledgerEntryRhythm: () => ({}) }));
+vi.mock('@/components/buzz/IdentityMark', () => ({ IdentityMark: () => null }));
 
-import { GrantRequestCard } from './GrantRequestCard';
+import { canDecideGrantRequest, GrantRequestCard, GrantRequestPill } from './GrantRequestCard';
 
 const OWNER = 'a'.repeat(64);
 const AGENT = { pubkey: 'b'.repeat(64), kind: 'agent', name: 'Alan', handle: 'alan' } as const;
@@ -65,5 +67,24 @@ describe('grant request card', () => {
         const outcome = tree.root.find((node: any) => node.type === 'Text' && node.props.testID === 'grant-grant-1-outcome');
         expect(String(outcome.props.children)).toMatch(/^Always · Allowed by you · /);
         expect(tree.root.findAll((node: any) => node.type === 'Icon.Check')).toHaveLength(1);
+    });
+
+    it('shows another Room member a collapsed pill whose card opens without controls', () => {
+        const other = 'c'.repeat(64);
+        const request = (message as any).grantRequest;
+        expect(canDecideGrantRequest(request, OWNER, false, false)).toBe(true);
+        expect(canDecideGrantRequest(request, other, false, true)).toBe(false);
+        let tree: any;
+        act(() => {
+            tree = create(<GrantRequestPill message={message}
+                resolve={(id, name, kind) => ({ kind, seed: id, name })}
+                card={<GrantRequestCard message={message} viewerIsAgent={false} viewerPubkey={other}
+                    actionId={null} onDecision={() => undefined} />} />);
+        });
+        const pill = () => tree.root.find((node: any) => node.type === 'Button' && node.props.testID === 'system-pill');
+        expect(tree.root.findAll((node: any) => node.props.testID === 'grant-grant-1')).toHaveLength(0);
+        act(() => pill().props.onPress());
+        expect(tree.root.findAll((node: any) => node.type === 'Button' && /^grant-grant-1-(always|once|deny)$/.test(node.props.testID))).toHaveLength(0);
+        expect(tree.root.find((node: any) => node.type === 'Text' && node.props.testID === 'grant-grant-1-ask').props.children).toBe('@Alan wants to run a command');
     });
 });

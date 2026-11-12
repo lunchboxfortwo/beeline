@@ -13,7 +13,8 @@ import { useTitleBlockVisibility } from '@/ui/screens/thread/useTitleBlockVisibi
  * Header B's data for a corner: the server corner state, the running count
  * (this RoomView's working agent turns), the PR row from `cornerLifecycle`,
  * the objective and the brief. Returns the bar data, whether the title block
- * has scrolled away, and the block itself for the transcript's oldest slot.
+ * has scrolled away, the block itself for the transcript's oldest slot, and
+ * the full header the bar shows while that block is away.
  */
 export function useChatThreadHeader({
   isCorner, roomSurface, resolvedChannelName, decodedId, parentChannelId, state, running,
@@ -29,7 +30,7 @@ export function useChatThreadHeader({
   objective: string;
   isArchived: boolean;
   isDesktop: boolean;
-  positions?: { subscribe(listener: () => void): () => void };
+  positions?: Parameters<typeof useTitleBlockVisibility>[1];
 }) {
   const parentName = roomSurface?.parent?.name?.trim() ? roomSurface.parent.name : null;
   const prUrl = roomSurface?.cornerLifecycle?.pr?.url;
@@ -70,13 +71,17 @@ export function useChatThreadHeader({
     <ThreadTitleBlock h={thread} openBrief={openBrief} openPr={openPr}
       blockRef={blockRef} onBlockLayout={onBlockLayout} />
   ) : null), [blockRef, onBlockLayout, openBrief, openPr, thread]);
+  const expandedBlock = useMemo(() => (thread && visibility.expanded ? (
+    <ThreadTitleBlock h={thread} openBrief={openBrief} openPr={openPr} />
+  ) : null), [openBrief, openPr, thread, visibility.expanded]);
 
   return {
     thread,
     collapsed: visibility.collapsed,
+    expandedBlock,
+    expand: visibility.expand,
     barRef: visibility.barRef,
     onBarLayout: visibility.onBarLayout,
-    openBrief,
     openParentChat,
     titleBlock,
   };

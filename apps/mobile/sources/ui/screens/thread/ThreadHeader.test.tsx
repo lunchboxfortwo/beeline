@@ -68,6 +68,18 @@ it('keeps the bar slim, and gives it the title with a status dot once the block 
   act(() => tree.unmount());
 });
 
+it('expands the full header from a tap on the slim bar, and shows it under the bar', () => {
+  const expand = vi.fn();
+  let tree: any;
+  act(() => { tree = create(<ThreadBar h={reconnect} collapsed openChat={vi.fn()} expand={expand} />); });
+  act(() => byTestID(tree, 'thread-bar-title')[0].props.onPress());
+  expect(expand).toHaveBeenCalledTimes(1);
+  act(() => tree.update(<ThreadBar h={reconnect} collapsed openChat={vi.fn()} expand={expand} expanded={<ThreadTitleBlock h={reconnect} />} />));
+  expect(byTestID(tree, 'thread-bar-title')).toHaveLength(0);
+  expect(byTestID(tree, 'thread-title')[0].props.children).toBe('Reconnect keeps place');
+  act(() => tree.unmount());
+});
+
 it('keeps the repository mark beside the parent chat in a thread header', () => {
   let tree: any;
   act(() => { tree = create(<ThreadBar h={{...reconnect,repositoryAvatar:'https://avatars.githubusercontent.com/u/42'}} collapsed={false} openChat={vi.fn()} />); });

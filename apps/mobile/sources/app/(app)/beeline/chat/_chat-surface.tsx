@@ -465,7 +465,8 @@ export function BuzzChatSurface({
   thread={threadHeader.thread}
   threadCollapsed={threadHeader.collapsed}
   openParentChat={threadHeader.openParentChat}
-  openBrief={threadHeader.openBrief}
+  threadExpanded={threadHeader.expandedBlock}
+  expandThread={threadHeader.expand}
   openCornerActions={!viewerIsAgent && !isArchived ? () => setCornerActionsVisible(true) : undefined}
   threadBarRef={threadHeader.barRef}
   onThreadBarLayout={threadHeader.onBarLayout}

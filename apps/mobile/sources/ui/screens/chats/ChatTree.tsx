@@ -1,5 +1,5 @@
 import { RepositoryMark } from '@/components/buzz/RepositoryMark';
-import React, { useEffect, useRef, useState } from 'react';
+import React, { useRef, useState } from 'react';
 import { Collapsible, ListItem, Separator, XStack, YStack } from 'tamagui';
 import { ChevronDown, ChevronUp, CornerDownRight, Pin } from 'lucide-react-native';
 import equal from 'fast-deep-equal';
@@ -30,37 +30,30 @@ export const NEW_THREAD_HOLD_MS = 450;
 /** Holding the row this long toggles its pin (React Native's default long press). */
 const PIN_HOLD_MS = 500;
 
+type PressEvent = { stopPropagation?: () => void; nativeEvent?: { timestamp?: number }; timeStamp?: number };
+/** When the finger touched or lifted: native touch time, or the DOM event time on web. */
+const touchTime = (event?: PressEvent) => event?.nativeEvent?.timestamp ?? event?.timeStamp;
+
 /**
- * A hold recognised from press-in/press-out, so it behaves the same on web
- * (where Tamagui calls onLongPress on every click) and native. `consume`
- * reports, once, that the press now ending was a hold and must not also tap.
+ * A hold measured between the touch's own press-in and release times, so it
+ * behaves the same on web (where Tamagui calls onLongPress on every click) and
+ * native, and a busy JS thread that delivers both events late cannot shorten it.
+ * `press` runs `onHold` for a hold and `onTap` otherwise.
  */
-function useHold(ms: number, onHold: (() => void) | undefined, contain = false) {
-  const timer = useRef<ReturnType<typeof setTimeout> | null>(null);
-  const held = useRef(false);
-  const clear = () => {
-    if (timer.current) clearTimeout(timer.current);
-    timer.current = null;
-  };
-  useEffect(() => clear, []);
+function useHold(ms: number, onHold: (() => void) | undefined, onTap: () => void, contain = false) {
+  const pressedAt = useRef<number | undefined>(undefined);
   return {
-    onPressIn: (event?: { stopPropagation?: () => void }) => {
+    onPressIn: (event?: PressEvent) => {
       // The mark sits inside the row: its hold must not also start the row's.
       if (contain) event?.stopPropagation?.();
-      held.current = false;
-      clear();
-      if (!onHold) return;
-      timer.current = setTimeout(() => {
-        timer.current = null;
-        held.current = true;
-        onHold();
-      }, ms);
+      pressedAt.current = touchTime(event);
     },
-    onPressOut: clear,
-    consume: () => {
-      const was = held.current;
-      held.current = false;
-      return was;
+    onPress: (event?: PressEvent) => {
+      const start = pressedAt.current;
+      const end = touchTime(event);
+      pressedAt.current = undefined;
+      if (onHold && start !== undefined && end !== undefined && end - start >= ms) onHold();
+      else onTap();
     },
   };
 }
@@ -164,8 +157,9 @@ export const ChatRow = React.memo(function ChatRow({ item, viewer, now, first, s
   const age = call
     ? voiceDuration(now / 1000 - call.startedAt)
     : compactRelativeTime(item.latestMessage?.createdAt ?? item.room.updatedAt, now);
-  const pinHold = useHold(PIN_HOLD_MS, () => onPin(item.room.id));
-  const threadHold = useHold(NEW_THREAD_HOLD_MS, onNewThread ? () => onNewThread(item.room.id) : undefined, true);
+  const open = () => onOpen(item.room.id);
+  const pinHold = useHold(PIN_HOLD_MS, () => onPin(item.room.id), open);
+  const threadHold = useHold(NEW_THREAD_HOLD_MS, onNewThread ? () => onNewThread(item.room.id) : undefined, open, true);
   return (
     <YStack paddingHorizontal="4" paddingVertical="3" testID={`chat-${item.room.id}`}>
       {first ? null : <Separator borderColor="stroke" marginBottom="3" />}
@@ -180,8 +174,7 @@ export const ChatRow = React.memo(function ChatRow({ item, viewer, now, first, s
         borderLeftWidth={selected ? 1 : 0}
         borderColor={selected ? 'needsYou' : 'transparent'}
         onPressIn={pinHold.onPressIn}
-        onPressOut={pinHold.onPressOut}
-        onPress={() => { if (!pinHold.consume()) onOpen(item.room.id); }}
+        onPress={pinHold.onPress}
         aria-label={`Open chat ${title}${unread ? ', unread' : ''}${tagged ? ', tagged you' : ''}${pinned ? ', pinned' : ''}`}
         aria-current={selected ? 'page' : undefined}
         accessibilityRole="button"
@@ -191,8 +184,7 @@ export const ChatRow = React.memo(function ChatRow({ item, viewer, now, first, s
         {onNewThread ? (
           <YStack
             onPressIn={threadHold.onPressIn}
-            onPressOut={threadHold.onPressOut}
-            onPress={() => { if (!threadHold.consume()) onOpen(item.room.id); }}
+            onPress={threadHold.onPress}
             aria-label={`Open chat ${title}`}
             accessibilityRole="button"
             accessibilityHint="Long press to open a new thread"

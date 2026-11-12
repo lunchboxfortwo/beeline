@@ -87,6 +87,7 @@ export function MentionSuggestionMenu({
         scrollEventThrottle={16}
         showsVerticalScrollIndicator={false}
         maxHeight={visibleRows * MENTION_ROW_HEIGHT}
+        flexShrink={1}
         testID="mention-suggestion-scroll"
       >
         {matches.map((participant, index) => {
@@ -211,6 +212,7 @@ export function ChannelSuggestionMenu({
         scrollEventThrottle={16}
         showsVerticalScrollIndicator={false}
         maxHeight={visibleRows * MENTION_ROW_HEIGHT}
+        flexShrink={1}
       >
         {matches.map((suggestion, index) => {
           const subtitle = cornerRoom ? undefined : suggestion.subtitle;

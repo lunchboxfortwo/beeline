@@ -632,9 +632,12 @@ const scope2 = fixtureScope2();
     }, HELPER);
     expect(result).toMatchObject({ status: 'pending', auto: false });
     await scope2.database.query('UPDATE agent_grants SET command_id=$2 WHERE id=$1', [result.grantId, COMMAND]);
-    const messages = (await scope2.database.query<{ text: string; card: { owner: { pubkey: string }; grants: { appName: string }[] } }>(
-      `SELECT text,card FROM messages WHERE card_type='grant-request'`)).rows;
-    expect(messages).toHaveLength(1);
+    const messages = (await scope2.database.query<{ room_id: string; text: string; card: { owner: { pubkey: string }; grants: { appName: string }[] } }>(
+      `SELECT room_id,text,card FROM messages WHERE card_type='grant-request' ORDER BY room_id=$1 DESC`, [ROOM])).rows;
+    // The card lives in the Room; the connected person is not a member there,
+    // so the same card also reaches their @system DM.
+    expect(messages.map(message => message.room_id === ROOM)).toEqual([true, false]);
+    expect(messages[1]!.card).toEqual(messages[0]!.card);
     expect(messages[0]!.text).toContain('@bee wants to connect GitHub');
     expect(messages[0]!.text).not.toContain('connection-install:');
     expect(messages[0]!.card.owner.pubkey).toBe(foreign);
@@ -647,6 +650,68 @@ const scope2 = fixtureScope2();
     await migrate(scope2.database);
     expect((await scope2.database.query('SELECT status,decided_by FROM agent_grants WHERE id=$1', [result.grantId])).rows)
       .toEqual([{ status: 'approved', decided_by: foreign }]);
+  });
+
+
+  it.each([['agent owner first', false], ['foreign owner first', true]] as const)(
+    'R1: asks with different deciders keep separate cards, %s; the absent owner mirror holds every ask',
+    async (_order, foreignFirst) => {
+      const foreign = 'd'.repeat(64);
+      const apps = [['github', 'GitHub', '88888888-8888-4888-8888-888888888888'],
+        ['linear', 'Linear', '99999999-9999-4999-8999-999999999999']] as const;
+      await scope2.database.query(`INSERT INTO identities(id,kind,name) VALUES($1,'human','Alex')`, [foreign]);
+      await scope2.database.query(`INSERT INTO memberships(workspace_id,identity_id,role) VALUES($1,$2,'member')`, [WORKSPACE, foreign]);
+      for (const [key, name, appId] of apps)
+        await scope2.database.query(`INSERT INTO workspace_apps(id,workspace_id,owner_identity_id,app_key,display_name,transport,route)
+          VALUES($1,$2,$3,$4,$5,'squire-api','squire-api')`, [appId, WORKSPACE, foreign, key, name]);
+      const daemon = scope2.daemonWith(fakeRegistry([]).client);
+      const askForeign = (key: string, appId: string) => daemon.execute('requestAgentGrant', {
+        ...turn, kind: 'mcp', target: `connection-install:${key}`, appId, purpose: `Connect ${key}`, reason: `Connect ${key}`,
+      }, HELPER);
+      const askOwner = () => daemon.execute('requestAgentGrant', {
+        ...turn, kind: 'host', target: '127.0.0.1:5037', purpose: 'Use the emulator', reason: 'Use the emulator',
+      }, HELPER);
+      const first = foreignFirst ? await askForeign(apps[0][0], apps[0][2]) : await askOwner();
+      const second = foreignFirst ? await askOwner() : await askForeign(apps[0][0], apps[0][2]);
+      const third = await askForeign(apps[1][0], apps[1][2]);
+      const [ownerAsk, githubAsk] = foreignFirst ? [second, first] : [first, second];
+      const cards = (await scope2.database.query<{ room_id: string; card: { owner: { pubkey: string }; grants: { grantId: string }[] } }>(
+        `SELECT room_id,card FROM messages WHERE card_type='grant-request' ORDER BY created_at,id`)).rows;
+      const shape = cards.map(row => [row.room_id === ROOM, row.card.owner.pubkey,
+        row.card.grants.map(grant => grant.grantId).sort()]);
+      const foreignGrants = [githubAsk.grantId, third.grantId].sort();
+      expect(shape).toHaveLength(3);
+      expect(shape).toEqual(expect.arrayContaining([
+        [true, OWNER, [ownerAsk.grantId]],
+        [true, foreign, foreignGrants],
+        [false, foreign, foreignGrants],
+      ]));
+      const phone = new PhoneService(scope2.database, 'http://placeholder');
+      for (const grantId of foreignGrants) {
+        await expect(phone.execute('decideAgentGrant', { grantId, decision: 'once' }, OWNER))
+          .rejects.toThrow('requires the connected person');
+        await phone.execute('decideAgentGrant', { grantId, decision: 'once' }, foreign);
+      }
+      await expect(phone.execute('decideAgentGrant', { grantId: ownerAsk.grantId, decision: 'once' }, foreign))
+        .rejects.toThrow();
+      await phone.execute('decideAgentGrant', { grantId: ownerAsk.grantId, decision: 'once' }, OWNER);
+      expect((await scope2.database.query(`SELECT status FROM agent_grants WHERE status<>'once'`)).rows).toEqual([]);
+    });
+
+
+  it('R1: a retried ask replaces the old one in the absent owner mirror too', async () => {
+    await scope2.database.query(`UPDATE memberships SET removed_at=now() WHERE room_id=$1 AND identity_id=$2`, [ROOM, OWNER]);
+    const daemon = scope2.daemonWith(fakeRegistry([]).client);
+    const ask = () => daemon.execute('requestAgentGrant', {
+      ...turn, kind: 'command', target: 'cat /home/other/.env', purpose: 'Read the preview config', reason: 'Read the preview config',
+    }, HELPER);
+    const first = await ask();
+    const retry = await ask();
+    expect([first.status, retry.status]).toEqual(['pending', 'pending']);
+    const cards = (await scope2.database.query<{ room_id: string; card: { grants: { grantId: string }[] } }>(
+      `SELECT room_id,card FROM messages WHERE card_type='grant-request' ORDER BY room_id=$1 DESC`, [ROOM])).rows;
+    expect(cards.map(row => [row.room_id === ROOM, row.card.grants.map(grant => grant.grantId)]))
+      .toEqual([[true, [retry.grantId]], [false, [retry.grantId]]]);
   });
 
 

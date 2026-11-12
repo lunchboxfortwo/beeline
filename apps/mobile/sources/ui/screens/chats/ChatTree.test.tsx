@@ -1,7 +1,7 @@
 import * as React from 'react';
 // @ts-expect-error react-test-renderer has no declarations in this workspace.
 import { act, create, type ReactTestRenderer } from 'react-test-renderer';
-import { afterEach, beforeEach, expect, it, vi } from 'vitest';
+import { expect, it, vi } from 'vitest';
 
 vi.mock('@/components/buzz/RepositoryMark', () => ({ RepositoryMark: (props: any) => React.createElement('RepositoryMark', props) }));
 vi.mock('tamagui', async () => (await import('./tamagui-hosts.test-support')).tamaguiHosts());
@@ -36,21 +36,17 @@ function row(onNewThread?: (roomId: string) => void) {
   return { tree, ...handlers };
 }
 
-beforeEach(() => vi.useFakeTimers());
-afterEach(() => vi.useRealTimers());
+/** A touch event at `ms` on the native touch clock. */
+const at = (ms: number, extra: object = {}) => ({ nativeEvent: { timestamp: ms }, ...extra });
 
 it('holding the mark for the threshold opens a new thread, and its release does not also open the chat', () => {
   const onNewThread = vi.fn();
   const { tree, onOpen, onPin } = row(onNewThread);
   const mark = byTestID(tree, `room-${ROOM}-new-thread`);
   const stopPropagation = vi.fn();
-  act(() => mark.props.onPressIn({ stopPropagation }));
-  act(() => { vi.advanceTimersByTime(NEW_THREAD_HOLD_MS - 1); });
-  expect(onNewThread).not.toHaveBeenCalled();
-  act(() => { vi.advanceTimersByTime(1); });
+  act(() => mark.props.onPressIn(at(1_000, { stopPropagation })));
+  act(() => mark.props.onPress(at(1_000 + NEW_THREAD_HOLD_MS)));
   expect(onNewThread).toHaveBeenCalledWith(ROOM);
-  act(() => mark.props.onPressOut());
-  act(() => mark.props.onPress());
   expect(onOpen).not.toHaveBeenCalled();
   expect(onPin).not.toHaveBeenCalled();
   // The mark's hold never starts the row's own pin hold.
@@ -62,26 +58,25 @@ it('a tap on the mark or the row opens the chat without pinning', () => {
   const onNewThread = vi.fn();
   const { tree, onOpen, onPin } = row(onNewThread);
   const mark = byTestID(tree, `room-${ROOM}-new-thread`);
-  act(() => mark.props.onPressIn({}));
-  act(() => mark.props.onPressOut());
-  act(() => mark.props.onPress());
+  act(() => mark.props.onPressIn(at(1_000)));
+  act(() => mark.props.onPress(at(1_000 + NEW_THREAD_HOLD_MS - 1)));
   const chat = byTestID(tree, `room-${ROOM}`);
-  act(() => chat.props.onPressIn({}));
-  act(() => chat.props.onPressOut());
-  act(() => chat.props.onPress());
-  act(() => { vi.runAllTimers(); });
+  act(() => chat.props.onPressIn(at(2_000)));
+  act(() => chat.props.onPress(at(2_499)));
   expect(onOpen).toHaveBeenCalledTimes(2);
   expect(onPin).not.toHaveBeenCalled();
   expect(onNewThread).not.toHaveBeenCalled();
 });
 
-it('holding the row toggles its pin instead of opening it', () => {
+// A busy JS thread can deliver press-in and release together, long after the
+// finger lifted; the hold still counts from the touch's own times.
+it('holding the row toggles its pin instead of opening it, even when both touch events arrive at once', () => {
   const { tree, onOpen, onPin } = row();
   const chat = byTestID(tree, `room-${ROOM}`);
-  act(() => chat.props.onPressIn({}));
-  act(() => { vi.advanceTimersByTime(500); });
-  act(() => chat.props.onPressOut());
-  act(() => chat.props.onPress());
+  act(() => {
+    chat.props.onPressIn(at(1_000));
+    chat.props.onPress(at(1_500));
+  });
   expect(onPin).toHaveBeenCalledWith(ROOM);
   expect(onOpen).not.toHaveBeenCalled();
   expect(tree.root.findAll((node: any) => node.props?.testID === `room-${ROOM}-new-thread`)).toHaveLength(0);

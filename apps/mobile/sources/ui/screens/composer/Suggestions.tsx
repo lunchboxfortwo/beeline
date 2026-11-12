@@ -7,6 +7,7 @@ import { Btn, Glyph, HEIGHT, T } from '@/ui/grammar';
  * The composer's suggestion card (build spec → Composer and suggestions): a
  * plain-sentence header over rows of a 28 px mark, a name and one quiet line.
  * It sits above the field; the six-row cap lives in the suggestion hooks.
+ * Above the keyboard the card shrinks first, so the field never drops under it.
  */
 
 /** One row's fixed height, also the unit of a menu's scroll window. */
@@ -19,7 +20,7 @@ export function SuggestionCard({ title, label, testID, onDismiss, dismissTestID,
     overflow?: number; overflowTestID?: string; children: React.ReactNode;
 }) {
     return (
-        <Card backgroundColor="canvas" borderWidth={1} borderColor="strongStroke" borderRadius="md" paddingHorizontal="3" paddingVertical="2" marginBottom="2" overflow="hidden" aria-label={label} testID={testID}>
+        <Card backgroundColor="canvas" borderWidth={1} borderColor="strongStroke" borderRadius="md" paddingHorizontal="3" paddingVertical="2" marginBottom="2" overflow="hidden" flexShrink={1} minHeight={0} aria-label={label} testID={testID}>
             <XStack alignItems="center" gap="2">
                 <YStack flex={1} minWidth={0} paddingVertical="1"><T v="metaStrong" color="secondary" numberOfLines={1}>{title}</T></YStack>
                 {onDismiss ? <Btn kind="icon" label="Dismiss commands" onPress={onDismiss} testID={dismissTestID}><Glyph icon={X} size={16} /></Btn> : null}

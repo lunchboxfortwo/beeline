@@ -1,5 +1,6 @@
-import React from 'react';
+import React, { useMemo } from 'react';
 import { Text, View } from 'react-native';
+import { PillRow, type PillFace, type PillItem } from '@/ui/screens/transcript/PillRow';
 import { RequestMedia } from '@/ui/screens/transcript/cards/RequestMedia';
 import { AGENT_GRANT_VERBS, grantPresentation } from '@beeline/api-contract/agent-grants';
 import type { AgentPresentation, ChatDisplayMessage } from '@/buzz/room-view-presentation';
@@ -7,6 +8,7 @@ import { resolveAgentDisplayIdentity } from '@/buzz/agent-display';
 import { ledgerStamp } from '@/buzz/relative-time';
 import { AgentApprovalCard, approvalAudience, approvalDecisionNote } from './AgentApprovalCard';
 import { type TranscriptCardAction } from './TranscriptCard';
+import { ledgerEntryRhythm } from './Ledger';
 
 export type GrantDecision = 'always' | 'once' | 'deny';
 
@@ -20,6 +22,24 @@ export interface GrantRequestCardProps {
   actionId: string | null;
   onDecision(grantId: string, decision: GrantDecision): void;
   onOpenSource?(roomId: string, messageId: string): void;
+}
+
+/**
+ * Whether this viewer is the request's target: the one person (or, for a
+ * repository, a Workspace manager) who can answer it. The server enforces the
+ * same rule on every decision (`phoneRequireGrantAuthority`).
+ */
+export function canDecideGrantRequest(
+  request: NonNullable<ChatDisplayMessage['grantRequest']>,
+  viewerPubkey: string,
+  viewerIsAgent: boolean,
+  viewerCanManageWorkspace: boolean,
+): boolean {
+  if (viewerIsAgent) return false;
+  if (request.grants.every((grant) => grant.kind === 'repository')) return viewerCanManageWorkspace;
+  if (request.grants.every((grant) => grant.kind === 'shared_asset'))
+    return viewerCanManageWorkspace || viewerPubkey === request.owner.pubkey;
+  return viewerPubkey === request.owner.pubkey;
 }
 
 /** One grant request across DMs, Rooms, System, web and desktop. */
@@ -40,13 +60,7 @@ export const GrantRequestCard = React.memo(function GrantRequestCard({
   const agentName = agent ? display.name : request.agent.name;
   const repositoryRequest = request.grants.every((grant) => grant.kind === 'repository');
   const sharedAssetRequest = request.grants.every((grant) => grant.kind === 'shared_asset');
-  const canDecide =
-    !viewerIsAgent &&
-    (repositoryRequest
-      ? viewerCanManageWorkspace
-      : sharedAssetRequest
-        ? viewerCanManageWorkspace || viewerPubkey === request.owner.pubkey
-      : viewerPubkey === request.owner.pubkey);
+  const canDecide = canDecideGrantRequest(request, viewerPubkey, viewerIsAgent, viewerCanManageWorkspace);
   const anyPending = request.grants.some((grant) => grant.status === 'pending');
   return (
     <View testID={`grant-request-${anyPending ? 'pending' : 'settled'}`}>
@@ -141,3 +155,29 @@ export const GrantRequestCard = React.memo(function GrantRequestCard({
     </View>
   );
 });
+
+/**
+ * A permission request seen by someone who cannot answer it: a collapsed
+ * system pill (asking agent → the person who decides) whose card opens
+ * read-only. Only the request's target sees the card with its controls.
+ */
+export function GrantRequestPill({ message, resolve, card }: {
+  message: ChatDisplayMessage;
+  resolve: (id: string, name: string, kind: 'agent' | 'human') => PillFace;
+  card: React.ReactNode;
+}) {
+  const request = message.grantRequest!;
+  const items = useMemo<PillItem[]>(() => [{
+    id: message.id,
+    system: true,
+    from: resolve(request.agent.pubkey, request.agent.name, 'agent'),
+    to: resolve(request.owner.pubkey, request.owner.name, 'human'),
+    time: ledgerStamp(message.timestamp),
+    body: card,
+  }], [message.id, message.timestamp, request.agent.pubkey, request.agent.name, request.owner.pubkey, request.owner.name, resolve, card]);
+  return (
+    <View style={ledgerEntryRhythm({ hasByline: true })} testID={`chat-message-${message.id}`}>
+      <PillRow items={items} testID={`grant-request-pill-${message.id}`} />
+    </View>
+  );
+}

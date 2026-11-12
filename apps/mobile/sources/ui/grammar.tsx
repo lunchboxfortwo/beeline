@@ -1,4 +1,5 @@
-import React, { useState } from 'react';
+import React, { useEffect, useState } from 'react';
+import { lowerKeyboard } from '@/ui/lower-keyboard';
 import {
     Button as TButton,
     Card,
@@ -172,6 +173,10 @@ export function SheetFrame({ open, close, title, testID, children, back }: {
     open: boolean; close: () => void; title: string; testID?: string; children: React.ReactNode; back?: () => void;
 }) {
     const theme = useThemeName();
+    // The sheet draws in the app window, under the keyboard: opening it from a
+    // focused composer would leave its scrim taking every tap with the sheet
+    // itself hidden. Lower the keyboard as it opens.
+    useEffect(() => { if (open) lowerKeyboard(); }, [open]);
     return (
         <Theme name={theme}>
             <Sheet modal open={open} onOpenChange={(o: boolean) => { if (!o) close(); }} snapPointsMode="fit" dismissOnSnapToBottom>

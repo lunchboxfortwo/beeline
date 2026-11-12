@@ -25,6 +25,7 @@ import { type RoomRosterParticipant } from '@/buzz/room-participants';
 import { rosterAgent, durableFactLine, knownAgentPubkeysFor } from './chat-surface-values';
 import { styles } from './chat-surface-styles';
 import { TranscriptPills, type PillIdentityResolver } from '@/components/buzz/TranscriptPills';
+import { canDecideGrantRequest, GrantRequestPill } from '@/components/buzz/GrantRequestCard';
 import { isAgentToAgentMessage, isPillMessage } from '@/buzz/transcript-pills';
 import { SYSTEM_IDENTITY_PUBKEY } from '@/buzz/system-identity';
 
@@ -269,7 +270,7 @@ export function useChatTranscriptRenderer([
       }
 
       if (item.grantRequest) {
-        return (
+        const card = (
           <GrantRequestCard
             message={item}
             agent={agentFor(item.grantRequest.agent.pubkey)}
@@ -283,6 +284,9 @@ export function useChatTranscriptRenderer([
             }
           />
         );
+        return canDecideGrantRequest(item.grantRequest, cacheViewerPubkey, rowViewer, rowManage)
+          ? card
+          : <GrantRequestPill message={item} resolve={resolvePillIdentity} card={card} />;
       }
       if (item.squireApproval) {
         return (

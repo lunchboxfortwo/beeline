@@ -35,6 +35,10 @@ export function roomBottomChromeStyles(hull: { bgTerminal: string; border: strin
   return {
     stack: {
       position: 'relative',
+      // Over the keyboard, a tall suggestion list gives up height before the
+      // field does: the stack and row may shrink, and only the list inside does.
+      flexShrink: 1,
+      minHeight: 0,
       // Keep the hanging line and every gap around the field above the
       // scrolling transcript, on the same opaque canvas in both themes.
       zIndex: 1,
@@ -64,6 +68,8 @@ export function roomBottomChromeStyles(hull: { bgTerminal: string; border: strin
     composerRow: {
       paddingHorizontal: 16,
       position: 'relative',
+      flexShrink: 1,
+      minHeight: 0,
       paddingTop: COMPOSER_ROW_PADDING_TOP,
       // Keep the Room-open geometry's 1px edge, painted as part of the same
       // opaque canvas so it never separates the status line and composer.

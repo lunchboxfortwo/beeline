@@ -11,7 +11,9 @@ import { threadDotTone, threadStatusText } from './thread-status';
  * Header B (the only thread header). A slim bar keeps Back, the chat (opens
  * it) and ⋯; the title, status, pull request and objective are the first
  * block of the transcript. Once that block scrolls away, the bar takes the
- * title with a status dot. There is no driver line.
+ * title with a status dot. A small scroll up, or a tap on that title, shows
+ * the full header under the bar until the reader reaches the newest message.
+ * There is no driver line.
  */
 export type ThreadHeaderData = {
     /** `#beeline`, or null while the parent's name has not landed. */
@@ -31,40 +33,46 @@ export function StatusDot({ state }: { state: CornerState }) {
     return <YStack width={8} height={8} borderRadius="full" backgroundColor={tone === 'needsYou' ? 'needsYou' : tone === 'added' ? 'added' : 'strongStroke'} testID="thread-status-dot" />;
 }
 
-export function ThreadBar({ h, collapsed, back, openChat, openBrief, openActions, safeTop = true, barRef, onBarLayout }: {
-    h: ThreadHeaderData; collapsed: boolean; back?: () => void; openChat: () => void;
-    openBrief?: () => void; openActions?: () => void; safeTop?: boolean;
+export function ThreadBar({ h, collapsed, expanded, back, openChat, expand, openActions, safeTop = true, barRef, onBarLayout }: {
+    h: ThreadHeaderData; collapsed: boolean;
+    /** The full header, shown under the bar while the title block is away. */
+    expanded?: React.ReactNode;
+    back?: () => void; openChat: () => void;
+    expand?: () => void; openActions?: () => void; safeTop?: boolean;
     barRef?: React.Ref<View>; onBarLayout?: () => void;
 }) {
     return (
-        <YStack ref={barRef as never} onLayout={onBarLayout} backgroundColor="raised" borderBottomWidth={1} borderColor="stroke" testID="corner-session-header">
-            {safeTop ? <SafeTop /> : null}
-            <XStack paddingHorizontal="2" paddingVertical="1" gap="2" alignItems="center" testID="thread-header">
-                {back ? <Btn kind="icon" label="Back" onPress={back} testID="chat-back"><Glyph icon={ArrowLeft} /></Btn> : null}
-                <XStack flex={1} minWidth={0} gap="2" alignItems="center">
-                    {h.repositoryAvatar || h.repositoryFavicon ? <RepositoryMark avatarUrl={h.repositoryAvatar} faviconUrl={h.repositoryFavicon} size={28} /> : null}
-                    {h.chatTag ? (
-                        <ListItem padding="0" minHeight={HEIGHT.control} flexGrow={0} flexShrink={0} width="auto"
-                            backgroundColor="transparent" justifyContent="flex-start" onPress={openChat}
-                            aria-label={`Open chat ${h.chatTag}`} accessibilityRole="button" testID="thread-chat-link">
-                            <T v="metaStrong" color="needsYou">{h.chatTag}</T>
-                        </ListItem>
-                    ) : null}
-                    {collapsed ? (
-                        <ListItem padding="0" minHeight={HEIGHT.control} flex={1} minWidth={0} gap="2"
-                            backgroundColor="transparent" justifyContent="flex-start" onPress={openBrief}
-                            aria-label={h.title} accessibilityRole={openBrief ? 'button' : 'text'} testID="thread-bar-title">
-                            {h.state ? <StatusDot state={h.state} /> : null}
-                            <T v="metaStrong" numberOfLines={1}>{h.title}</T>
-                        </ListItem>
+        <YStack backgroundColor="raised" borderBottomWidth={1} borderColor="stroke" testID="corner-session-header">
+            <YStack ref={barRef as never} onLayout={onBarLayout}>
+                {safeTop ? <SafeTop /> : null}
+                <XStack paddingHorizontal="2" paddingVertical="1" gap="2" alignItems="center" testID="thread-header">
+                    {back ? <Btn kind="icon" label="Back" onPress={back} testID="chat-back"><Glyph icon={ArrowLeft} /></Btn> : null}
+                    <XStack flex={1} minWidth={0} gap="2" alignItems="center">
+                        {h.repositoryAvatar || h.repositoryFavicon ? <RepositoryMark avatarUrl={h.repositoryAvatar} faviconUrl={h.repositoryFavicon} size={28} /> : null}
+                        {h.chatTag ? (
+                            <ListItem padding="0" minHeight={HEIGHT.control} flexGrow={0} flexShrink={0} width="auto"
+                                backgroundColor="transparent" justifyContent="flex-start" onPress={openChat}
+                                aria-label={`Open chat ${h.chatTag}`} accessibilityRole="button" testID="thread-chat-link">
+                                <T v="metaStrong" color="needsYou">{h.chatTag}</T>
+                            </ListItem>
+                        ) : null}
+                        {collapsed && !expanded ? (
+                            <ListItem padding="0" minHeight={HEIGHT.control} flex={1} minWidth={0} gap="2"
+                                backgroundColor="transparent" justifyContent="flex-start" onPress={expand}
+                                aria-label={h.title} accessibilityRole={expand ? 'button' : 'text'} testID="thread-bar-title">
+                                {h.state ? <StatusDot state={h.state} /> : null}
+                                <T v="metaStrong" numberOfLines={1}>{h.title}</T>
+                            </ListItem>
+                        ) : null}
+                    </XStack>
+                    {openActions ? (
+                        <Btn kind="icon" label="Corner actions" onPress={openActions} testID="corner-actions-menu">
+                            <Glyph icon={MoreHorizontal} />
+                        </Btn>
                     ) : null}
                 </XStack>
-                {openActions ? (
-                    <Btn kind="icon" label="Corner actions" onPress={openActions} testID="corner-actions-menu">
-                        <Glyph icon={MoreHorizontal} />
-                    </Btn>
-                ) : null}
-            </XStack>
+            </YStack>
+            {expanded}
         </YStack>
     );
 }

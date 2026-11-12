@@ -253,7 +253,8 @@
       "ForwardMessagePickerSheet"
     ],
     "components/buzz/GrantRequestCard.tsx": [
-      "GrantRequestCard"
+      "GrantRequestCard",
+      "GrantRequestPill"
     ],
     "components/buzz/HullActionSheet.tsx": [
       "HULL_SHEET_INSET",
