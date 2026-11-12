@@ -64,7 +64,7 @@ type Props = {
   forwardToRoom: (target: ForwardTarget) => Promise<boolean>;
   forwardRooms: readonly ForwardTarget[] | null;
   forwardTarget: ChatDisplayMessage | null;
-  roomSurface: NonNullable<import("@beeline/api-contract/phone").RoomView | null>;
+  roomSurface: import("@beeline/api-contract/phone").RoomView | null;
   isDirectMessage: boolean;
   membershipError: string | null;
   setParticipantPickerVisible: React.Dispatch<React.SetStateAction<boolean>>;
@@ -199,6 +199,14 @@ export function ChatSurfaceOverlays({
   handleCreatePoll,
 }: Props) {
   const desktop = useIsDesktop();
+  // Mount each sheet on its first opening, then retain it for native dismissal
+  // and onDismiss cleanup. Closed sheets do no mount/style work on chat open.
+  const messageActionsMounted = useOpenedSheet(Boolean(messageActionsTarget));
+  const forwardCornerMounted = useOpenedSheet(Boolean(forwardCornerPrompt));
+  const forwardMessageMounted = useOpenedSheet(Boolean(forwardTarget));
+  const dmActionsMounted = useOpenedSheet(dmActionsVisible);
+  const renameMounted = useOpenedSheet(isCorner && renameEditing);
+  const pollMounted = useOpenedSheet(createPollVisible);
   return <>
       {attachmentPickerVisible && <AttachmentPickerSheet
         visible={attachmentPickerVisible}
@@ -208,7 +216,7 @@ export function ChatSurfaceOverlays({
         onPickPasted={desktopExperience ? undefined : () => void pasteImage()}
       />}
 
-      <HullActionSheetModal
+      {messageActionsMounted && <HullActionSheetModal
         accessibilityLabel="Close message actions"
         onClose={() => setMessageActionsTarget(null)}
         testID="message-actions-sheet"
@@ -332,15 +340,15 @@ export function ChatSurfaceOverlays({
           onPress={() => setMessageActionsTarget(null)}
           testID="message-actions-close"
         />
-      </HullActionSheetModal>
+      </HullActionSheetModal>}
 
-      <ForwardCornerSheet
+      {forwardCornerMounted && <ForwardCornerSheet
         onClose={() => setForwardCornerPrompt(null)}
         onOpen={() => void confirmForwardToNewCorner()}
         visible={Boolean(forwardCornerPrompt)}
-      />
+      />}
 
-      <ForwardMessagePickerSheet
+      {forwardMessageMounted && <ForwardMessagePickerSheet
         draftContext={decodedId}
         busyRoomId={forwardBusyRoomId}
         error={forwardError}
@@ -355,7 +363,7 @@ export function ChatSurfaceOverlays({
         onForward={forwardToRoom}
         targets={forwardRooms}
         visible={Boolean(forwardTarget)}
-      />
+      />}
 
 
       <RoomActionsSheet
@@ -486,7 +494,7 @@ export function ChatSurfaceOverlays({
         </>}
       </RoomActionsSheet>
 
-      <HullActionSheetModal
+      {dmActionsMounted && <HullActionSheetModal
         accessibilityLabel="Close conversation actions"
         onClose={() => setDmActionsVisible(false)}
         testID="dm-actions-sheet"
@@ -529,7 +537,7 @@ export function ChatSurfaceOverlays({
           onPress={() => setDmActionsVisible(false)}
           testID="dm-actions-close"
         />
-      </HullActionSheetModal>
+      </HullActionSheetModal>}
 
       {cornerActionsVisible && <CornerActionsSheet
         title={headerTitle ?? cornerOwnerDisplay?.name ?? CORNER_TITLE}
@@ -557,7 +565,7 @@ export function ChatSurfaceOverlays({
         }}
       />}
 
-      <HullDialog
+      {renameMounted && <HullDialog
         actions={[
           {
             disabled: renameBusy,
@@ -607,7 +615,7 @@ export function ChatSurfaceOverlays({
         {renameError ? (
           <ErrorBanner inline title={renameError} />
         ) : null}
-      </HullDialog>
+      </HullDialog>}
 
       {memberManagement.pickerVisible ? (
         <ChatAddSheet roomId={decodedId} sheet={participantPickerKind === 'person' ? 'people' : 'agents'}
@@ -616,12 +624,19 @@ export function ChatSurfaceOverlays({
       {agentConnectVisible && activeCommunityId ? (
         <WorkspaceAddAgentSheet workspaceId={activeCommunityId} close={closeAgentConnect} />
       ) : null}
-      <CreatePollSheet
+      {pollMounted && <CreatePollSheet
         draftContext={decodedId}
         visible={createPollVisible}
         busy={createPollBusy}
         onClose={() => setCreatePollVisible(false)}
         onCreate={handleCreatePoll}
-      />
+      />}
 
 </>; }
+
+
+function useOpenedSheet(visible: boolean): boolean {
+  const opened = React.useRef(false);
+  if (visible) opened.current = true;
+  return opened.current;
+}

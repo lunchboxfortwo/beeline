@@ -13,7 +13,6 @@ import { BuzzCommunityShell } from '@/components/buzz/CommunityRail';
 import { RoomActionsBackground } from '@/components/buzz/RoomRepositoryChoice';
 import { RoomReviewerSurfaceNotice } from '@/components/buzz/RoomReviewerActions';
 import { VoiceCallCard } from '@/components/buzz/VoiceCallCard';
-import { ChatOpeningSurface } from '@/components/buzz/ChatOpeningSurface';
 export { ChatOpeningSurface } from '@/components/buzz/ChatOpeningSurface';
 import { useChatRoute } from './useChatRoute';
 import { useChatScrollState } from './useChatScrollState';
@@ -50,7 +49,6 @@ import { ChatSurfaceTranscript } from './ChatSurfaceTranscript';
 import { ChatSurfaceComposer } from './ChatSurfaceComposer';
 import { ChatSurfaceWorkPane } from './ChatSurfaceWorkPane';
 import { ChatSurfaceOverlays } from './ChatSurfaceOverlays';
-
 
 
 
@@ -416,18 +414,15 @@ export function BuzzChatSurface({
     sourceLandingFlashMessageId,
   ]);
 
-  if (!roomSurface) {
-    if (transcriptHydrationFailed) {
-      return (
-        <ChatSurfaceErrorHeader
-          title={displayHeaderTitle ?? routeChannelTitle ?? ROOM_TITLE}
-          showBack={!isDesktop || isCorner}
-          handleBack={handleBack}
-          error={transcriptHydrationError}
-        />
-      );
-    }
-    return <ChatOpeningSurface isCorner={isCorner} />;
+  if (!roomSurface && transcriptHydrationFailed) {
+    return (
+      <ChatSurfaceErrorHeader
+        title={displayHeaderTitle ?? routeChannelTitle ?? ROOM_TITLE}
+        showBack={!isDesktop || isCorner}
+        handleBack={handleBack}
+        error={transcriptHydrationError}
+      />
+    );
   }
 
   return (
@@ -460,7 +455,7 @@ export function BuzzChatSurface({
     setDmActionsVisible(true);
   } : undefined}
   thread={threadHeader.thread}
-  threadCollapsed={threadHeader.collapsed}
+  threadCollapsed={!roomSurface || threadHeader.collapsed}
   openParentChat={threadHeader.openParentChat}
   threadExpanded={threadHeader.expandedBlock}
   expandThread={threadHeader.expand}
@@ -489,7 +484,7 @@ export function BuzzChatSurface({
           <KeyboardBody>
             {/* A corner's title, status, PR, objective and brief are the
             transcript's first block (header B, `useChatThreadHeader`). */}
-            <ChatSurfaceTranscript
+            {roomSurface ? <ChatSurfaceTranscript
   desktopTranscript={desktopTranscript}
   setDesktopScrollNode={setDesktopScrollNode}
   handleDesktopScroll={handleDesktopScroll}
@@ -530,7 +525,7 @@ export function BuzzChatSurface({
   newestJumpDiscShown={newestJumpDiscShown}
   landAtNewestMessage={landAtNewestMessage}
   leadBlock={threadHeader.titleBlock}
-/>
+/> : <YStack flex={1} testID="room-transcript-pending" />}
 
             {/* P2: Archived channels are read-only */}
             {isArchived ? (

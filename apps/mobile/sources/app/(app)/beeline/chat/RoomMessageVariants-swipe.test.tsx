@@ -1,9 +1,10 @@
 import React from 'react';
+import { Text } from 'react-native';
 // @ts-expect-error react-test-renderer has no declarations in this workspace.
 import { act, create, type ReactTestRenderer } from 'react-test-renderer';
 import { afterEach, beforeEach, expect, it, vi } from 'vitest';
 
-vi.mock('react-native', () => ({ Platform: { OS: 'android' }, Pressable: 'Pressable', Text: 'Text', View: 'View' }));
+vi.mock('react-native', () => ({ Platform: { OS: 'android' }, I18nManager: { isRTL: false }, Pressable: 'Pressable', Text: 'Text', View: 'View' }));
 vi.mock('tamagui', async () => (await import('@/ui/screens/transcript/grammar-hosts.test-support')).tamaguiHosts());
 vi.mock('lucide-react-native', async () => (await import('@/ui/screens/transcript/grammar-hosts.test-support')).lucideHosts());
 vi.mock('react-native-safe-area-context', () => ({ useSafeAreaInsets: () => ({ top: 0, bottom: 0, left: 0, right: 0 }) }));
@@ -49,7 +50,7 @@ vi.mock('@/components/buzz/TranscriptSwipeable', async () => {
   return {
     default: (props: any) => {
       swipe.props = props;
-      return createElement('Swipeable', null, props.renderLeftActions?.(), props.children, props.renderRightActions?.());
+      return createElement('Swipeable', null, props.actionsVisible ? props.renderLeftActions?.() : null, props.children, props.actionsVisible ? props.renderRightActions?.() : null);
     },
   };
 });
@@ -69,7 +70,11 @@ it('draws reply and new thread as grammar swipe actions, with no corner wording'
   });
   const panel = (id: string) => renderer.root.find((node: any) => typeof node.type === 'string' && node.props.testID === id);
   const label = (id: string) => panel(id).findAll((node: any) => node.type === 'Text').map((node: any) => node.props.children).flat().join('');
+  expect(renderer.root.findAll((node: any) => typeof node.type === 'string' &&
+    ['thread-swipe-action-m1', 'reply-swipe-action-m1'].includes(node.props.testID))).toHaveLength(0);
+  expect(swipe.props.actionsVisible).toBe(false);
   act(() => swipe.props.onSwipeableOpenStartDrag());
+  expect(swipe.props.actionsVisible).toBe(true);
   expect(panel('thread-swipe-action-m1').props.accessibilityLabel).toBe('Open a new thread from this message');
   expect(label('thread-swipe-action-m1')).toBe('New thread');
   expect(label('reply-swipe-action-m1')).toBe('Reply');
@@ -79,5 +84,37 @@ it('draws reply and new thread as grammar swipe actions, with no corner wording'
     expect(panel(id).props.width).toBeUndefined();
   }
   expect(JSON.stringify(renderer.toJSON())).not.toMatch(/\bcorner\b/i);
+  act(() => swipe.props.onSwipeableClose());
+  expect(swipe.props.actionsVisible).toBe(false);
+  expect(renderer.root.findAll((node: any) => typeof node.type === 'string' &&
+    ['thread-swipe-action-m1', 'reply-swipe-action-m1'].includes(node.props.testID))).toHaveLength(0);
+  act(() => renderer.unmount());
+});
+
+vi.mock('react-native-gesture-handler', () => ({
+  GestureDetector: 'GestureDetector',
+  Gesture: { Pan: () => {
+    const pan: Record<string, unknown> = {};
+    for (const method of ['enabled', 'activeOffsetX', 'onStart', 'onUpdate', 'onEnd', 'onFinalize']) {
+      pan[method] = () => pan;
+    }
+    return pan;
+  } },
+}));
+
+it('leaves native action layers unmounted while the message is at rest', async () => {
+  const { default: NativeSwipeable } = await vi.importActual<typeof import('@/components/buzz/TranscriptSwipeable')>('@/components/buzz/TranscriptSwipeable');
+  const left = vi.fn(() => <Text>New thread</Text>);
+  const right = vi.fn(() => <Text>Reply</Text>);
+  const props = { renderLeftActions: left, renderRightActions: right };
+  let renderer: ReactTestRenderer;
+  act(() => { renderer = create(<NativeSwipeable {...props} actionsVisible={false}><Text>Message</Text></NativeSwipeable>); });
+  expect(left).not.toHaveBeenCalled();
+  expect(right).not.toHaveBeenCalled();
+  act(() => renderer.update(<NativeSwipeable {...props} actionsVisible><Text>Message</Text></NativeSwipeable>));
+  expect(left).toHaveBeenCalledOnce();
+  expect(right).toHaveBeenCalledOnce();
+  act(() => renderer.update(<NativeSwipeable {...props} actionsVisible={false}><Text>Message</Text></NativeSwipeable>));
+  expect(renderer.root.findAll((node: any) => node.type === Text).map((node: any) => node.props.children)).toEqual(['Message']);
   act(() => renderer.unmount());
 });

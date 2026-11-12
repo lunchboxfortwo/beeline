@@ -8,6 +8,7 @@ import { openPlace } from '@/ui/shell/panel';
 import { ThreadTitleBlock, type ThreadHeaderData } from '@/ui/screens/thread/ThreadHeader';
 import { threadPrLine } from '@/ui/screens/thread/thread-status';
 import { useTitleBlockVisibility } from '@/ui/screens/thread/useTitleBlockVisibility';
+import { findRoomCornerRow, useRoomCornerRecord } from '@/buzz/room-corner-store';
 
 /**
  * Header B's data for a corner: the server corner state, the running count
@@ -32,7 +33,12 @@ export function useChatThreadHeader({
   isDesktop: boolean;
   positions?: Parameters<typeof useTitleBlockVisibility>[1];
 }) {
-  const parentName = roomSurface?.parent?.name?.trim() ? roomSurface.parent.name : null;
+  const corners = useRoomCornerRecord(isCorner ? parentChannelId : undefined);
+  const openingRow = corners ? findRoomCornerRow(corners, decodedId) : undefined;
+  const openingSummary = corners?.summary?.openCorners.find((corner) => corner.id === decodedId);
+  const parentName = roomSurface?.parent?.name ?? corners?.header?.room.name ?? null;
+  const title = resolvedChannelName ?? openingRow?.corner.name ?? openingSummary?.name ?? null;
+  const threadState = state ?? openingRow?.state ?? openingSummary?.state;
   const prUrl = roomSurface?.cornerLifecycle?.pr?.url;
   const hasBrief = Boolean(roomSurface?.cornerBrief);
   const visibility = useTitleBlockVisibility(isCorner, positions);
@@ -44,13 +50,13 @@ export function useChatThreadHeader({
       chatTag: parentName ? (roomTitle(parentName) ?? null) : null,
       repositoryAvatar: roomSurface?.room.avatar,
       repositoryFavicon: roomSurface?.room.favicon,
-      title: cornerShortTitle(parentName, resolvedChannelName, decodedId),
-      ...(state ? { state } : isArchived ? { state: 'archived' as const } : {}),
+      title: cornerShortTitle(parentName, title, decodedId),
+      ...(threadState ? { state: threadState } : isArchived ? { state: 'archived' as const } : {}),
       running,
       ...(prLine ? { prLine } : {}),
       ...(objective.trim() ? { objective: objective.trim() } : {}),
     };
-  }, [decodedId, isArchived, isCorner, objective, parentName, resolvedChannelName, roomSurface?.cornerLifecycle, roomSurface?.room.avatar, roomSurface?.room.favicon, running, state]);
+  }, [decodedId, isArchived, isCorner, objective, parentName, title, roomSurface?.cornerLifecycle, roomSurface?.room.avatar, roomSurface?.room.favicon, running, threadState]);
 
   const openBrief = useMemo(
     () => (isCorner && hasBrief ? () => openPlace({ kind: 'brief', roomId: decodedId }, isDesktop) : undefined),

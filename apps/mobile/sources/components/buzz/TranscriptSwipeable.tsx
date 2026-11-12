@@ -8,6 +8,7 @@ import {
   runOnJS,
   useAnimatedStyle,
   useSharedValue,
+  type SharedValue,
   withSpring,
 } from 'react-native-reanimated';
 
@@ -18,6 +19,7 @@ type Props = {
   dragOffsetFromRightEdge?: number;
   friction?: number;
   enabled?: boolean;
+  actionsVisible?: boolean;
   onSwipeableWillOpen?(direction: Direction): void;
   onSwipeableClose?(direction: Direction): void;
   onSwipeableOpenStartDrag?(): void;
@@ -36,6 +38,7 @@ const TranscriptSwipeable = forwardRef<TranscriptSwipeableMethods, Props>(
       dragOffsetFromRightEdge = 18,
       friction = 1.35,
       enabled = true,
+      actionsVisible = true,
       onSwipeableWillOpen,
       onSwipeableClose,
       onSwipeableOpenStartDrag,
@@ -106,26 +109,11 @@ const TranscriptSwipeable = forwardRef<TranscriptSwipeableMethods, Props>(
       ],
     );
     const contentStyle = useAnimatedStyle(() => ({ transform: [{ translateX: offset.value }] }));
-    const leftStyle = useAnimatedStyle(() => ({ opacity: offset.value > 0 ? 1 : 0 }));
-    const rightStyle = useAnimatedStyle(() => ({ opacity: offset.value < 0 ? 1 : 0 }));
     return (
       <YStack testID={testID}>
         <GestureDetector gesture={pan} touchAction="pan-y">
           <YStack overflow="hidden">
-            {left ? (
-              <Motion overlay motion={leftStyle}>
-                <XStack flex={1} overflow="hidden" flexDirection={I18nManager.isRTL ? 'row-reverse' : 'row'}>
-                  {renderLeftActions?.()}
-                </XStack>
-              </Motion>
-            ) : null}
-            {right ? (
-              <Motion overlay motion={rightStyle}>
-                <XStack flex={1} overflow="hidden" flexDirection={I18nManager.isRTL ? 'row' : 'row-reverse'}>
-                  {renderRightActions?.()}
-                </XStack>
-              </Motion>
-            ) : null}
+            {actionsVisible ? <SwipePanels offset={offset} renderLeftActions={renderLeftActions} renderRightActions={renderRightActions} /> : null}
             <Motion motion={contentStyle}>{children}</Motion>
           </YStack>
         </GestureDetector>
@@ -133,6 +121,29 @@ const TranscriptSwipeable = forwardRef<TranscriptSwipeableMethods, Props>(
     );
   },
 );
+
+
+/** The resting row has no action layers to style or animate. */
+function SwipePanels({ offset, renderLeftActions, renderRightActions }: {
+  offset: SharedValue<number>;
+  renderLeftActions?: () => React.ReactNode;
+  renderRightActions?: () => React.ReactNode;
+}) {
+  const leftStyle = useAnimatedStyle(() => ({ opacity: offset.value > 0 ? 1 : 0 }));
+  const rightStyle = useAnimatedStyle(() => ({ opacity: offset.value < 0 ? 1 : 0 }));
+  return <>
+    {renderLeftActions ? <Motion overlay motion={leftStyle}>
+      <XStack flex={1} overflow="hidden" flexDirection={I18nManager.isRTL ? 'row-reverse' : 'row'}>
+        {renderLeftActions()}
+      </XStack>
+    </Motion> : null}
+    {renderRightActions ? <Motion overlay motion={rightStyle}>
+      <XStack flex={1} overflow="hidden" flexDirection={I18nManager.isRTL ? 'row' : 'row-reverse'}>
+        {renderRightActions()}
+      </XStack>
+    </Motion> : null}
+  </>;
+}
 
 const ACTION_WIDTH = 78;
 

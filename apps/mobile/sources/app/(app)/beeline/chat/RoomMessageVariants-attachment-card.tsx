@@ -130,8 +130,8 @@ export function AttachmentCard({
 /**
  * A swipe panel behind a message: the action's glyph beside its name, on the
  * raised surface, edged on the message's side. Glyph and name sit on one line so
- * a one-line message row holds them. Both stay mounted while hidden, so the
- * width the swipeable measures for the open distance does not change.
+ * a one-line message row holds them. The swipeable owns a fixed action distance,
+ * so unopened panels do not need to mount their labels or glyphs.
  */
 function SwipeAction({ side, icon, label, accessibilityLabel, shown, testID }: {
   side: 'left' | 'right'; icon: React.ComponentProps<typeof Glyph>['icon']; label: string; accessibilityLabel: string; shown: boolean; testID: string;
@@ -376,6 +376,7 @@ export function SwipeToReply({
       ref={swipeableRef}
       dragOffsetFromRightEdge={18}
       friction={1.35}
+      actionsVisible={swipeShown}
       onSwipeableWillOpen={commitSwipe}
       onSwipeableClose={hideSwipe}
       onSwipeableOpenStartDrag={showSwipe}

@@ -551,6 +551,7 @@
       "TranscriptScrubber"
     ],
     "components/buzz/TranscriptSwipeable.tsx": [
+      "SwipePanels",
       "TranscriptSwipeable",
       "default"
     ],

@@ -84,7 +84,7 @@ type Props = {
   handleSelectRoomRepoCandidate: (candidate: RepoCandidate) => void;
   desktopDeliveryState: "failed" | "sending" | "delivered" | null;
   isDirectMessage: boolean;
-  roomSurface: NonNullable<import("@beeline/api-contract/phone").RoomView | null>;
+  roomSurface: import("@beeline/api-contract/phone").RoomView | null;
   isCorner: boolean;
   voice: import("@/buzz/use-voice-call").VoiceCallState;
   composerRef: React.RefObject<TextInput | null>;
