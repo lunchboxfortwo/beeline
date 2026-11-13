@@ -45,6 +45,14 @@ its existing App-token path and its `BEELINE_GITHUB_APP_ID` and
 `BEELINE_GITHUB_APP_PRIVATE_KEY` requirements; those credentials are not required
 by the local runner.
 
+If GitHub returns an empty release list during the outage, local release-record
+reads discover the newest 100 version tags in the checkout and look up each
+release directly by tag. Publication timestamps still choose the previous
+successful release, and its actual `release.json` asset supplies component,
+rollback and store state. A git tag alone never counts as a successful release;
+missing history fails closed locally. Keep tags current with a normal full
+`git fetch --tags origin` before recovery; never use a shallow fetch.
+
 | Authority | Used by |
 | --- | --- |
 | `FLY_FREE_AGENT_IMAGE_TOKEN`, `MIGRATION_DATABASE_URL` | Next server image publication and migration |
@@ -81,6 +89,9 @@ does not fail later after passing preflight.
 ```sh
 node scripts/release-local.mjs --dry-run --leg require-tools
 node scripts/release-local.mjs --dry-run --leg pages
+node scripts/release-local.mjs --dry-run --channel next \
+  --release-sha <full-main-commit> --env-file ~/.config/beeline-release.env \
+  --state-dir /private/path/outside-the-checkout
 node scripts/release-local.mjs --execute --channel next \
   --release-sha <full-main-commit> --dispatched-by '<server-recorded attribution JSON>' \
   --state-dir /private/path/outside-the-checkout
@@ -103,6 +114,12 @@ successful production rollback. Those steps remain in real execution. Private
 artifacts, summaries and job results stay outside Git, under `--state-dir`.
 Local release records identify their execution as local and record all carries;
 they do not claim a GitHub Actions run ID.
+
+The full dry run first proves initialization using the committed identity and
+plan steps, with read-only GitHub access from `--env-file`. It neither reserves
+the identity nor creates a draft release, and does not claim a dispatch receipt.
+The resulting version is used by subsequent builds. `--leg initialize` runs
+only that proof; individual build legs can still run without GitHub credentials.
 
 ## Release tests and PR selection
 

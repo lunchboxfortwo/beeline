@@ -28,7 +28,8 @@ export function render(value, context, options) {
   if (Array.isArray(value)) return value.map(v => render(v, context, options));
   if (value && typeof value === 'object') return Object.fromEntries(Object.entries(value).map(([k, v]) => [k, render(v, context, options)]));
   if (typeof value !== 'string') return value;
-  const whole = value.match(/^\$\{\{([\s\S]*?)\}\}$/);
+  const expressions = [...value.matchAll(/\$\{\{([\s\S]*?)\}\}/g)];
+  const whole = expressions.length === 1 && expressions[0][0] === value ? expressions[0] : null;
   if (whole) return evaluate(whole[1], context, options) ?? '';
   return value.replace(/\$\{\{([\s\S]*?)\}\}/g, (_, source) => String(evaluate(source, context, options) ?? ''));
 }

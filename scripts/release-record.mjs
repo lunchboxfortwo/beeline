@@ -172,6 +172,7 @@ export function serverRollbackImage({ record, machineImages, explicitImage = '' 
 function gh(args, { binary = false } = {}) {
   return execFileSync('gh', args, {
     encoding: binary ? 'buffer' : 'utf8', maxBuffer: 64 * 1024 * 1024, timeout: 60_000,
+    stdio: ['ignore', 'pipe', 'pipe'],
   });
 }
 
@@ -193,11 +194,40 @@ export function releaseStartRestCallCount() {
 }
 
 function listReleases(repository) {
-  return JSON.parse(gh(['api', '--paginate', '--slurp', `repos/${repository}/releases?per_page=100`])).flat();
+  return recoverLocalReleases(repository, JSON.parse(gh(['api', '--paginate', '--slurp', `repos/${repository}/releases?per_page=100`])).flat());
 }
 
 function listIdentityReleases(repository) {
-  return listReleasePage(endpoint => JSON.parse(gh(['api', `repos/${repository}/${endpoint}`])));
+  return recoverLocalReleases(repository, listReleasePage(endpoint => JSON.parse(gh(['api', `repos/${repository}/${endpoint}`]))));
+}
+
+/** A tag is only a discovery hint: the API must confirm the actual release. */
+export function recoverTaggedReleases(tags, readRelease) {
+  const releases = [];
+  // Match the normal identity page's bound. Tags arrive in creation order,
+  // never semver order: the older v0.2 line must not outrank current v0.1.
+  for (const tag of [...new Set(tags)].filter(tag => VERSION.test(tag)).slice(0, 100)) {
+    const release = readRelease(tag);
+    if (!release) continue; // A tag alone is not proof of successful publication.
+    if (release.tag_name !== tag) fail(`release lookup for ${tag} returned another identity`);
+    releases.push(release);
+  }
+  if (!latestPublished(releases, 'next')) fail('no published release could be recovered from local git tags');
+  return releases;
+}
+
+function recoverLocalReleases(repository, releases) {
+  if (releases.length || process.env.BEELINE_LOCAL_RELEASE !== 'true') return releases;
+  const tags = execFileSync('git', ['for-each-ref', '--sort=-creatordate', '--format=%(refname:short)', 'refs/tags'], { encoding: 'utf8' }).trim().split('\n');
+  const recovered = recoverTaggedReleases(tags, tag => {
+    try { return JSON.parse(gh(['api', `repos/${repository}/releases/tags/${tag}`])); }
+    catch (error) {
+      if (/HTTP 404/.test(String(error.stderr))) return null;
+      throw error;
+    }
+  });
+  console.error(`Recovered ${recovered.length} releases through git tags and direct release lookups (release listing is empty).`);
+  return recovered;
 }
 
 function downloadAsset(repository, release, name) {

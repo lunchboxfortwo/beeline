@@ -7,7 +7,7 @@ import { join, resolve } from 'node:path';
 import test from 'node:test';
 import { parse } from 'yaml';
 import { LocalActions, matrixRows } from './release-local-actions.mjs';
-import { attribution, loadEnvironment, localHooks, missingReleaseCredentials, parseArguments } from './release-local.mjs';
+import { attribution, dryInitializeJob, dryRun, loadEnvironment, localHooks, missingReleaseCredentials, parseArguments } from './release-local.mjs';
 import { condition, evaluate, readCommandFile, render } from './release-local-expressions.mjs';
 import { Processes } from './release-local-process.mjs';
 import { mergeBeelineBundles } from './merge-beeline-bundles.mjs';
@@ -15,6 +15,7 @@ import { validateBundleDirectory } from './pages-site.mjs';
 import { initializeRelease, planOutputs, restoreReleasePlan } from './unified-release.mjs';
 import { run as bookkeeping } from './release-bookkeeping.mjs';
 import { localGithub } from './release-local-github.mjs';
+import { assignReleaseVersion, latestPublished, recoverTaggedReleases } from './release-record.mjs';
 
 const repository = resolve(import.meta.dirname, '..');
 const temporary = () => mkdtempSync(join(tmpdir(), 'beeline-local-test-'));
@@ -138,6 +139,92 @@ test('workflow expressions preserve hyphenated identifiers, booleans, defaults a
   assert.equal(evaluate('!cancelled()', context, { cancelled: true }), false);
   assert.deepEqual(matrixRows({ shard: [1, 2] }), [{ shard: 1 }, { shard: 2 }]);
   assert.deepEqual(readCommandFile('key<<EOF\nline1\nline2\nEOF\nnext=true\n'), { key: 'line1\nline2', next: 'true' });
+});
+test('adjacent workflow expressions interpolate independently while a single expression retains its type', () => {
+  const context = { steps: { identity: { outputs: { version: 'v0.1.209-rc.1', release_sha: sha } } }, inputs: { enabled: false, count: 3 } };
+  assert.equal(render('${{ steps.identity.outputs.version }}-${{ steps.identity.outputs.release_sha }}', context), `v0.1.209-rc.1-${sha}`);
+  assert.equal(render('${{ inputs.count }}${{ inputs.enabled }}', context), '3false');
+  assert.deepEqual(render({ values: ['prefix ${{ inputs.count }} / ${{ inputs.enabled }} suffix', '${{ inputs.enabled }}', '${{ inputs.count }}'] }, context), { values: ['prefix 3 / false suffix', false, 3] });
+});
+test('git tags discover actual published records without treating tags as successful releases', () => {
+  const current = { tag_name: 'v0.1.208', draft: false, published_at: '2026-11-13T00:31:05Z' };
+  const olderLine = { tag_name: 'v0.2.10', draft: false, published_at: '2026-08-01T00:00:00Z' };
+  const draft = { tag_name: 'v0.1.209-rc.1', draft: true, target_commitish: oldSha };
+  const called = [];
+  const releases = recoverTaggedReleases(['helper-update-channel', 'v0.1.209-rc.1', 'v0.1.208', 'v0.1.208', 'v0.1.207', 'v0.2.10'], tag => {
+    called.push(tag);
+    return [current, olderLine, draft].find(release => release.tag_name === tag) ?? null;
+  });
+  assert.deepEqual(called, ['v0.1.209-rc.1', 'v0.1.208', 'v0.1.207', 'v0.2.10']);
+  assert.equal(latestPublished(releases, 'next'), current);
+  assert.equal(assignReleaseVersion({ releases, previous: { version: current.tag_name, sourceSha: oldSha }, sha }).version, 'v0.1.209-rc.2');
+  assert.throws(() => recoverTaggedReleases(['v0.1.208'], () => null), /no published release/);
+  assert.throws(() => recoverTaggedReleases(['v0.1.208'], () => { throw new Error('HTTP 403'); }), /HTTP 403/);
+  assert.throws(() => recoverTaggedReleases(['v0.1.208'], () => olderLine), /another identity/);
+  const tags = Array.from({ length: 120 }, (_, i) => `v0.1.${300 - i}`);
+  let reads = 0;
+  recoverTaggedReleases(tags, tag => { reads++; return { ...current, tag_name: tag }; });
+  assert.equal(reads, 100);
+});
+test('empty local release listing recovers release.json and the next patch identity via direct tag reads', () => {
+  const directory = temporary(), bin = join(directory, 'bin'), previousPath = join(directory, 'previous.json');
+  try {
+    mkdirSync(bin);
+    const previous = initializeRelease({ version: 'v0.1.208', sourceSha: oldSha });
+    previous.state = 'delivered';
+    const git = join(bin, 'git'), gh = join(bin, 'gh');
+    writeFileSync(git, '#!/bin/sh\necho v0.1.208\n');
+    writeFileSync(gh, `#!/usr/bin/env node
+const args = process.argv.slice(2);
+if (args[0] !== 'api') throw new Error('Mutation is forbidden');
+const endpoint = args.find(arg => arg.startsWith('repos/'));
+if (endpoint.endsWith('releases?per_page=100')) console.log('[]');
+else if (endpoint.endsWith('releases/tags/v0.1.208')) console.log(JSON.stringify({tag_name:'v0.1.208',draft:false,published_at:'2026-11-13T00:31:05Z',assets:[{id:42,name:'release.json'}]}));
+else if (endpoint.endsWith('releases/assets/42')) console.log(${JSON.stringify(JSON.stringify(previous))});
+else throw new Error('Unexpected GitHub call');
+`);
+    chmodSync(git, 0o700); chmodSync(gh, 0o700);
+    const args = ['scripts/release-record.mjs', 'identity', '--repository', 'owner/repo', '--channel', 'next', '--sha', sha, '--previous', previousPath];
+    const env = { ...process.env, PATH: `${bin}:${process.env.PATH}`, BEELINE_LOCAL_RELEASE: 'true' };
+    const output = execFileSync(process.execPath, args, { cwd: repository, env, encoding: 'utf8', stdio: ['ignore', 'pipe', 'pipe'] });
+    assert.match(output, /version=v0\.1\.209-rc\.1/);
+    assert.match(output, /has_release=false/);
+    assert.deepEqual(JSON.parse(readFileSync(previousPath, 'utf8')), previous);
+    // Hosted identity retains its original one-page behavior.
+    const hosted = execFileSync(process.execPath, args, { cwd: repository, env: { ...env, BEELINE_LOCAL_RELEASE: '' }, encoding: 'utf8', stdio: ['ignore', 'pipe', 'pipe'] });
+    assert.match(hosted, /version=v0\.0\.1-rc\.1/);
+  } finally { rmSync(directory, { recursive: true, force: true }); }
+});
+test('dry initialize runs the committed identity and plan without creating a release', async () => {
+  const workflow = parse(readFileSync(join(repository, '.github/workflows/unified-release.yml'), 'utf8'));
+  const original = workflow.jobs.initialize.steps.find(step => step.id === 'identity').run;
+  const job = dryInitializeJob(workflow);
+  assert.match(original, /gh release create/);
+  assert.doesNotMatch(job.steps.find(step => step.id === 'identity').run, /gh release create/);
+  assert.match(job.steps.find(step => step.id === 'identity').run, /release-record.mjs identity/);
+  assert.deepEqual(job.steps.find(step => step.id === 'plan'), workflow.jobs.initialize.steps.find(step => step.id === 'plan'));
+  assert.equal(workflow.jobs.initialize.steps.find(step => step.id === 'identity').run, original);
+  const directory = temporary(), labels = [];
+  try {
+    const engine = {
+      directory, processes: { log: () => {} }, read: () => workflow,
+      job: async (_job, context, label) => {
+        labels.push(label);
+        assert.deepEqual(context.vars, {});
+        assert.deepEqual(context.secrets, {});
+        if (label === 'dry-initialize') return { result: 'success', outputs: { release_version: 'v0.1.209-rc.1' } };
+        assert.equal(context.inputs.release_version, 'v0.1.209-rc.1');
+        return { result: 'success', outputs: {} };
+      },
+    };
+    // Stub only costly build execution; the default ordering and the identity
+    // passed to every build are exercised through the real dry-run driver.
+    engine.read = file => file.endsWith('unified-release.yml') ? workflow : { runs: { steps: [] } };
+    await dryRun({ channel: 'next' }, engine, { github: { sha, token: 'fixture-token' } });
+    assert.deepEqual(labels, ['dry-initialize', 'dry-require-tools', 'dry-eas-cli', 'dry-server', 'dry-helper', 'dry-mobile-ota', 'dry-pages', 'dry-web-app']);
+    engine.job = async () => ({ result: 'failure', outputs: {} });
+    await assert.rejects(dryRun({ channel: 'next', leg: 'initialize' }, engine, { github: { sha, token: 'fixture-token' } }), /initialize failed/);
+  } finally { rmSync(directory, { recursive: true, force: true }); }
 });
 test('workflow hashFiles hashes files in recursive inputs and ignores directory entries', () => {
   const directory = temporary();
