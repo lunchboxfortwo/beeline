@@ -145,7 +145,7 @@ function ModelSection({ p, detail }: { p: AgentProfile; detail: AgentDetailView 
             {p.modelAppliesNote === 'model' ? <Copy small quiet testID="model-applies-model">Applies at the next session</Copy> : null}
             {p.modelAxisError === 'model' ? <T v="meta" color="removed" testID="model-axis-error-model">Could not open these choices. Try again.</T> : null}
             <Row label="Thinking level" value={effortLabel} right={unavailable('effort')} testID="model-axis-effort" last={!p.modelAxes.fast}
-                onPress={editable && !p.busy ? () => void p.toggleModelAxis('effort', open === 'effort', p.modelAxes.effort) : undefined} />
+                onPress={editable && !p.busy && (!effortAxis || effortAxis.options.some((choice) => choice.id !== 'off')) ? () => void p.toggleModelAxis('effort', open === 'effort', p.modelAxes.effort) : undefined} />
             {p.modelAppliesNote === 'effort' ? <Copy small quiet testID="model-applies-effort">Applies at the next session</Copy> : null}
             {p.modelAxisError === 'effort' ? (
                 <T v="meta" color="removed" testID="model-axis-error-effort">
