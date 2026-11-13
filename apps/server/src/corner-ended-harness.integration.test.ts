@@ -104,9 +104,11 @@ it.each([false, true])('claims queued order, human tag and resume after a blocke
     await db.query(`INSERT INTO messages(id,room_id,author_id,text) VALUES($1,$2,$3,'Resume after sign-in')`,[source,corner,HUMAN]);
     const resume = (await createAgentCommand(db,{roomId:corner,agentId:WORKER,sourceMessageId:source,
       reason:'resume',action:'resume',parent:initial,retainDepth:true}))!;
-    const pending = (await daemon.execute('getAgentCommands',{roomId:corner},WORKER)).commands;
+    const offered = (await daemon.execute('getAgentCommands',{roomId:corner},WORKER)).commands;
+    expect(offered.find(command => command.id === initial.id)).toMatchObject({generationId:context.generationId});
+    const pending = offered.filter(command => command.id !== initial.id);
     expect(pending.map(command => command.reason).sort()).toEqual(['human_tag','order','resume']);
-    notify!(pending);
+    notify!(offered);
     await client.request('fixture/end',{reject:rejected});
     await vi.waitFor(() => expect(claimed).toHaveLength(2));
     expect(claimed[1]!.map(command => command.id).sort()).toEqual(pending.map(command => command.id).sort());
