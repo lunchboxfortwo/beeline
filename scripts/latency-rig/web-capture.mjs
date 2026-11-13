@@ -380,6 +380,13 @@ async function main() {
                   );
                 }
                 if (feedback) {
+                  // The frame stamp is already frozen in the page. Wait until
+                  // that stamp exists; do not move it.
+                  await page.waitForFunction(
+                    () => Number.isFinite(window.__latencyTapTiming?.durationMs),
+                    undefined,
+                    { timeout: 2000 },
+                  );
                   const timing = await page.evaluate(readTapTiming);
                   (record.tapTimings ??= []).push({ ...timing, driverObservedMs: duration });
                   duration = timing.durationMs;
