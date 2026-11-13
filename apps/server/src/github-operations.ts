@@ -1,4 +1,5 @@
 import { githubProviderKey } from './providers/index.js';
+import { beginGitHubStarAuthorization, completeGitHubStarAuthorization } from './github-star-authorization.js';
 import { NotificationWork } from './notification-work.js';
 import { setLiveCornerChecksReader } from './corner-live-checks.js';
 import { CommandRefusalError } from './command-refusal.js';
@@ -73,7 +74,11 @@ export class GitHubOperations {
 async beginIdentity(viewerId: string, input: Input<'beginGitHubIdentityBind'>) { return gitHubOperationsBeginIdentity(this, viewerId, input); }
 async completeIdentity(viewerId: string, input: Input<'completeGitHubIdentityBind'>, recover: boolean) { return gitHubOperationsCompleteIdentity(this, viewerId, input, recover); }
 async beginInstallation(viewerId: string, input: Input<'beginGitHubInstallation'>) { return gitHubOperationsBeginInstallation(this, viewerId, input); }
-async completeInstallation(state: string, installationId?: number, code?: string, callbackUri?: string) { return gitHubOperationsCompleteInstallation(this, state, installationId, code, callbackUri); }
+async beginStarAuthorization(viewerId: string, redirectUri: string) { return beginGitHubStarAuthorization(this, viewerId, redirectUri); }
+async completeInstallation(state: string, installationId?: number, code?: string, callbackUri?: string) {
+  if (state.startsWith('github_star_')) return completeGitHubStarAuthorization(this, state, code, callbackUri);
+  return gitHubOperationsCompleteInstallation(this, state, installationId, code, callbackUri);
+}
 async refresh(viewerId: string): Promise<{
     githubReconnectNeeded?: boolean;
 }> { return gitHubOperationsRefresh(this, viewerId); }

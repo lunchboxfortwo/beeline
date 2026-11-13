@@ -18,7 +18,7 @@ import type { SqlDatabase } from './database.js';
  * and nothing is gated on it (GitHub Acceptable Use Policies). "Not now"
  * waits for the next milestone; the close button and a star stop it for good.
  */
-const STAR_PROMPT_REPOSITORY = 'Beeline-Work/beeline';
+export const STAR_PROMPT_REPOSITORY = 'Beeline-Work/beeline';
 const STAR_PROMPT_URL = `https://github.com/${STAR_PROMPT_REPOSITORY}`;
 export const STAR_PROMPT_MILESTONES: readonly number[] = [3, 30, 300];
 const MID_CONVERSATION_SECONDS = 30;
@@ -45,6 +45,7 @@ const starChecks = new Set<string>();
 interface StarPromptGitHub {
   repositoryStarred(viewerId: string, fullName: string): Promise<boolean | 'unknown'>;
   starRepository(viewerId: string, fullName: string): Promise<boolean>;
+  beginStarAuthorization(viewerId: string, redirectUri: string): Promise<{ url: string }>;
 }
 
 /**
@@ -183,6 +184,7 @@ export async function answerStarPrompt(
   viewerId: string,
   input: AnswerStarPromptInput,
   github?: StarPromptGitHub,
+  returnOrigins: readonly string[] = [],
 ): Promise<AnswerStarPromptResult> {
   if (!STAR_PROMPT_MILESTONES.includes(input.milestone)) throw new Error('milestone is invalid');
   if (input.action === 'later') {
@@ -199,6 +201,20 @@ export async function answerStarPrompt(
     input.action === 'star' && github
       ? await github.starRepository(viewerId, STAR_PROMPT_REPOSITORY)
       : false;
+  if (input.action === 'star' && !starred) {
+    if (!github || !input.redirectUri) throw new Error('GitHub authorization is required');
+    const redirect = new URL(input.redirectUri);
+    const native = redirect.protocol === 'beeline:' && redirect.host === 'beeline';
+    const roomId = redirect.pathname.match(native
+      ? /^\/chat\/([0-9a-f-]{36})$/i : /^\/beeline\/chat\/([0-9a-f-]{36})$/i)?.[1];
+    if (!roomId || redirect.username || redirect.password || redirect.search || redirect.hash ||
+        (!native && !returnOrigins.includes(redirect.origin))) throw new Error('Invalid star return URL');
+    const membership = await database.query(`SELECT 1 FROM memberships
+      WHERE room_id=$1 AND identity_id=$2 AND removed_at IS NULL`, [roomId, viewerId]);
+    if (!membership.rowCount) throw new Error('Room access denied');
+    const authorization = await github.beginStarAuthorization(viewerId, redirect.toString());
+    return { outcome: 'open', url: authorization.url };
+  }
   await database.query(
     `INSERT INTO github_star_prompts(identity_id,answered_milestone,closed) VALUES($1,$2,$3)
      ON CONFLICT(identity_id) DO UPDATE SET
@@ -207,5 +223,5 @@ export async function answerStarPrompt(
     [viewerId, input.milestone, input.action === 'star' ? 'starred' : 'dismissed'],
   );
   if (input.action === 'dismiss') return { outcome: 'dismissed' };
-  return starred ? { outcome: 'starred' } : { outcome: 'open', url: STAR_PROMPT_URL };
+  return { outcome: 'starred' };
 }

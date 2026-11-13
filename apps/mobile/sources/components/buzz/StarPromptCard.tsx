@@ -2,7 +2,9 @@ import React, { memo, useCallback, useEffect, useRef, useState } from 'react';
 import type { StarPrompt, StarPromptAction } from '@beeline/api-contract/phone';
 import { monolithPhoneOperation } from '@/sync/transport/monolith-operation';
 import { sharedLiveConnection } from '@/sync/transport/live-connection';
-import { openExternalUrl } from '@/utils/open-external-url';
+import { useLocalSearchParams, useRouter } from 'expo-router';
+import * as WebBrowser from 'expo-web-browser';
+import { authorizeGitHubStar, githubStarRedirectUri } from '@/auth/github-star-session';
 import { TranscriptCard } from './TranscriptCard';
 
 const STAR_PROMPT_TITLE = 'Star Beeline on GitHub';
@@ -20,6 +22,21 @@ let stoppedThisSession = false;
 export function useStarPrompt(roomId: string | undefined, enabled: boolean) {
   const [prompt, setPrompt] = useState<StarPrompt | null>(null);
   const [busy, setBusy] = useState<StarPromptAction | null>(null);
+  const [starred, setStarred] = useState(false);
+  const { githubStar } = useLocalSearchParams<{ githubStar?: string }>();
+  const router = useRouter();
+  useEffect(() => { setStarred(false); }, [roomId]);
+  useEffect(() => {
+    if (!githubStar) return;
+    // This also handles a browser callback that cold-started the app in its chat.
+    if (githubStar === 'starred') {
+      stoppedThisSession = true;
+      setStarred(true);
+      setPrompt(null);
+    }
+    WebBrowser.maybeCompleteAuthSession();
+    router.setParams({ githubStar: undefined });
+  }, [githubStar, router]);
   // An answer outdates every read started before it; later reads still ask,
   // so the next milestone shows in the same open chat after Not now.
   const answers = useRef(0);
@@ -40,7 +57,7 @@ export function useStarPrompt(roomId: string | undefined, enabled: boolean) {
       }
       void monolithPhoneOperation('readStarPrompt', {})
         .then((view) => {
-          if (current && asked === answers.current) setPrompt(view.prompt);
+          if (current && !stoppedThisSession && asked === answers.current) setPrompt(view.prompt);
         })
         .catch(() => undefined);
     };
@@ -72,36 +89,45 @@ export function useStarPrompt(roomId: string | undefined, enabled: boolean) {
       if (!prompt || busy) return;
       setBusy(action);
       try {
+        const redirectUri = roomId ? githubStarRedirectUri(roomId) : undefined;
         const result = await monolithPhoneOperation('answerStarPrompt', {
           action,
           milestone: prompt.milestone,
+          ...(redirectUri ? { redirectUri } : {}),
         });
+        const didStar = result.outcome === 'starred' ||
+          (result.outcome === 'open' && result.url && redirectUri
+            ? await authorizeGitHubStar(result.url, redirectUri) : false);
+        if (action === 'star' && !didStar) return;
         answers.current += 1;
         answeredMilestone.current = Math.max(answeredMilestone.current, prompt.milestone);
         if (action !== 'later') stoppedThisSession = true;
         setPrompt(null);
-        if (result.outcome === 'open' && result.url)
-          await openExternalUrl(result.url).catch(() => undefined);
+        if (didStar) setStarred(true);
       } catch {
         // The card stays; the person can try again.
       } finally {
         setBusy(null);
       }
     },
-    [busy, prompt],
+    [busy, prompt, roomId],
   );
-  return { prompt, busy, answer, accept };
+  return { prompt, busy, answer, accept, starred };
 }
 
 export const StarPromptCard = memo(function StarPromptCard({
   prompt,
   busy,
   onAnswer,
+  starred = false,
 }: {
-  prompt: StarPrompt;
+  prompt: StarPrompt | null;
   busy: StarPromptAction | null;
   onAnswer(action: StarPromptAction): void;
+  starred?: boolean;
 }) {
+  if (starred) return <TranscriptCard tier="record" title="Thanks for starring Beeline!" testID="star-prompt-thanks" />;
+  if (!prompt) return null;
   return (
     <TranscriptCard
       tier="ask"
