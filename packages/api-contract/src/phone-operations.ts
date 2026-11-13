@@ -725,7 +725,10 @@ export type PairingCodeResult = PairingCodeInput & {
   readonly invitationGuide?: AgentInvitationPickerGuide;
 };
 export type UpdateAgentSoulInput = WorkspaceAgentInput & {
-  readonly name: string;
+  /** A new handle in this Workspace; the agent's name follows it. Omit to keep the handle. */
+  readonly handle?: string;
+  /** Ignored: an agent's name follows its handle. Older phones still send it. */
+  readonly name?: string;
   readonly instructions: string;
   readonly avatarSeed: string;
   readonly avatar?: string;

@@ -285,7 +285,7 @@
       "id": "apps/body/src/read-only-mcp.ts::fetch",
       "file": "apps/body/src/read-only-mcp.ts",
       "kind": "fetch",
-      "count": 8,
+      "count": 7,
       "compatibility": "legacy-only",
       "phase": "M5"
     },

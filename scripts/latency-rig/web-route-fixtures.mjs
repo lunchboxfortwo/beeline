@@ -17,7 +17,7 @@ export const routeFixtures = {
     params: { roomId: uuid('route-artifact-room'), messageId: hash('route-code'), blockIndex: '0' },
   }),
   '/beeline/agent-profile': content(id('agent-profile-head'), { params: { agentId: agent } }),
-  '/beeline/brief': text('This corner has no brief yet', {
+  '/beeline/brief': text('This thread has no brief yet', {
     params: { roomId: corners.cornerId },
     state: 'corner-without-brief',
   }),
@@ -79,7 +79,7 @@ export const routeFixtures = {
   '/beeline/settings/workbench/wallet-service': content(id('wallet-connect-row'), {
     state: 'wallet-redirect-local-read-fixture',
   }),
-  '/beeline/settings/workflows': text('No dispatchable workflows in this Room.', {
+  '/beeline/settings/workflows': text('No dispatchable workflows in this chat.', {
     state: 'empty-workflows',
   }),
   '/beeline/settings/workspace': content(id('workspace-name-row'), {
@@ -107,6 +107,19 @@ export const routeFixtures = {
     params: { textId: 'local-expired-selection' },
   }),
 };
+// These routes finish on the default review workspace. Its empty chats say
+// "No messages yet"; the fixture room is not in that workspace.
+for (const path of [
+  '/beeline/github-callback',
+  '/beeline/google-callback',
+  '/beeline/onboarding',
+  '/buzz/github-callback',
+  '/review/[secret]',
+]) {
+  routeFixtures[path] = text('No messages yet', {
+    state: `${routeFixtures[path].state}-default-review-workspace`,
+  });
+}
 export function routeFixture(path, secret) {
   const config = routeFixtures[path];
   if (!config) throw new Error(`No web route fixture: ${path}`);

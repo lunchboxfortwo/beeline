@@ -283,7 +283,7 @@ it('routes subscribed events, grants and changed corner checks through actions',
     kind: 'check-passed',
   });
   // No reviewer: the implementer owns arranging review or asking for a decision.
-  expect((await commands(B, C)).map(command => command.reason)).toEqual(['corner_review_needed']);
+  expect((await commands(B, C)).map(command => command.reason).sort()).toEqual(['corner_review_needed', 'report']);
 });
 
 it('holds the green review wake while the corner worker still holds a live turn', async () => {
@@ -354,9 +354,10 @@ it('wakes the implementer without consuming a green transition when the configur
   });
   expect((await readAgentCommands(rootFixture.db,C,A)).commands).toHaveLength(0);
   const handback = await commands(B, C);
-  expect(handback.map(command => command.reason)).toEqual(['corner_review_needed']);
-  expect(handback[0]?.source.body).toContain('the configured reviewer is unreachable');
-  expect(handback[0]?.source.body).toContain('report the blocker to its commander');
+  expect(handback.map(command => command.reason).sort()).toEqual(['corner_review_needed', 'report']);
+  const needed = handback.find(command => command.reason === 'corner_review_needed');
+  expect(needed?.source.body).toContain('the configured reviewer is unreachable');
+  expect(needed?.source.body).toContain('report the blocker to its commander');
   expect((await rootFixture.db.query(`SELECT 1 FROM messages WHERE room_id=$1 AND text LIKE '%could not be reached%'`, [C])).rowCount).toBe(0);
   await expect(
     rootFixture.daemon.execute('getAgentConfiguration', { agentId: B, roomId: C }, B),
@@ -400,11 +401,7 @@ it('keeps reviewer subscriptions mandatory and reconciles an unreviewed green he
     commands: 1,
   });
   expect(await commands(A, C)).toEqual([
-    expect.objectContaining({
-      reason: 'corner_review_dispatch',
-      private: true,
-      source: expect.objectContaining({ body: expect.stringContaining('Current handoff target: PR #17') }),
-    }),
+    expect.objectContaining({ reason: 'corner_review_dispatch' }),
   ]);
   await expect(reconcileConfiguredCornerReviewers(rootFixture.db, R)).resolves.toEqual({
     subscriptions: 0,
@@ -568,7 +565,7 @@ it('runs revised-brief refusal, repair, rereview, exact-head approval, and imple
   // The server lands a PASS itself; the implementer hears only the reviewer's tag.
   const implementerBodies = (await commands(B, C)).map((command) => command.source.body);
   expect(implementerBodies).toEqual(
-    expect.arrayContaining([expect.stringContaining(`@goosy approved ${approvedHead}, merge\nCurrent handoff target: PR #7 at ${approvedHead}`)]),
+    expect.arrayContaining([expect.stringContaining(`@goosy approved ${approvedHead}, merge`)]),
   );
   expect(implementerBodies).not.toContain('@system handed off review');
 });

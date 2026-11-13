@@ -72,6 +72,7 @@ vi.mock('react-native-reanimated', () => ({
     createAnimatedComponent: (component: unknown) => component,
   },
   Easing: {
+    bezier: () => 'bezier',
     cubic: 'cubic',
     linear: 'linear',
     poly: () => 'poly',

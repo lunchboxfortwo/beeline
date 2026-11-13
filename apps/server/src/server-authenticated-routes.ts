@@ -8,7 +8,6 @@ import { wantsCompactView, COMPACT_VIEW_HEADER, compactRoomView, compactRoomHist
 import type { RoomHistoryView } from "@beeline/api-contract/phone";
 import { TRANSCRIPTION_MAXIMUM_BYTES } from "./speech-transcription.js";
 import { ARTIFACT_MAXIMUM_BYTES, decodeArtifactTitleHeader } from "@beeline/api-contract/daemon";
-import { fullRoomId, owedMentions } from "./owed-mentions.js";
 import { DAEMON_OPERATION_NAMES } from "./daemon-service.js";
 import { ServerOptions, json, bytes, body } from './server.js';
 import { PhoneHttpOperation, phoneIdentity, phoneFamilies, daemonIdentity, refuseDaemon } from './server-create-beeline-server.js';
@@ -417,16 +416,6 @@ export async function routeAuthenticated(request: IncomingMessage, response: Ser
     });
     return;
   }
-  // Error footers need fresh private context even when schema validation never
-  // dispatched an operation. This authenticated read adds no operation log entry.
-  if (method === 'GET' && url.pathname === '/v1/daemon/owed-mentions') {
-    const agentId = await daemonIdentity(request, options);
-    if (!agentId) { await refuseDaemon(request, response, options); return; }
-    const placeHeader = request.headers['x-beeline-place'];
-    const place = fullRoomId(Array.isArray(placeHeader) ? placeHeader[0] : placeHeader);
-    json(response, 200, { owedMentions: await owedMentions(options.database, agentId, place) });
-    return;
-  }
   // Supported installed helpers still use this ingress: HelperVersionGate has
   // no mandatory minimum. Keep wire translation here, sharing DaemonService.
   match = url.pathname.match(/^\/v1\/daemon\/operations\/([A-Za-z][A-Za-z0-9]+)$/);
@@ -458,18 +447,7 @@ export async function routeAuthenticated(request: IncomingMessage, response: Ser
           : undefined;
     void options.connectionPresence?.evidence(evidenceRoom, agentId);
     const result = await options.daemon.execute(name as never, input as never, agentId);
-    let context: { _beelineOwedMentions?: Awaited<ReturnType<typeof owedMentions>> } = {};
-    // Only model tool responses need this private context. It must never turn a
-    // committed operation into a failure, and never adds a daemon operation.
-    if (request.headers['x-beeline-tool-result'] === '1') {
-      try {
-        const placeHeader = request.headers['x-beeline-place'];
-        const mentions = await owedMentions(options.database, agentId, fullRoomId(Array.isArray(placeHeader) ? placeHeader[0] : placeHeader));
-        if (mentions.length) context = { _beelineOwedMentions: mentions };
-      }
-      catch { /* Keep the original tool result when its optional context is unavailable. */ }
-    }
-    json(response, 200, context._beelineOwedMentions ? { _beelineToolResult: result, ...context } : result);
+    json(response, 200, result);
     return;
   }
   json(response, 404, { error: 'not_found' });

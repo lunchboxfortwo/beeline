@@ -717,6 +717,15 @@ describe('Room deck live path', () => {
     await act(async () => renderer.unmount());
   });
 
+  it('draws no line under the list header until a chat scrolls under it', async () => {
+    const renderer = await mountDeck();
+    const edge = () => renderer.root.find((node: any) => typeof node.type === 'string' && node.props.testID === 'tab-header-edge');
+    expect(edge().props.borderColor).toBe('transparent');
+    await act(async () => renderer.root.findByProps({ testID: 'room-list' }).props.onScroll({ nativeEvent: { contentOffset: { y: 30 } } }));
+    expect(edge().props.borderColor).toBe('stroke');
+    await act(async () => renderer.unmount());
+  });
+
 
   it('nests up to three active threads under the chat, expands the rest in place, and opens one', async () => {
     deck.renderRows = true;

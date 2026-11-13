@@ -3,8 +3,8 @@ import { router } from 'expo-router';
 import * as Clipboard from 'expo-clipboard';
 import { Card, Input, ScrollView, Separator, Switch, TextArea, XStack, YStack } from 'tamagui';
 import { MessagesSquare, Pencil, Check } from 'lucide-react-native';
-import { AGENT_NAME_MAX_LENGTH, type AgentDetailView } from '@beeline/buzz-client';
-import { MCP_STARTER_ROUTINE, roomTitle, modelChoiceLabel, modelPickerChoiceLabel, type AgentModelConfigOption } from '@beeline/api-contract/phone';
+import { type AgentDetailView } from '@beeline/buzz-client';
+import { AGENT_HANDLE_MAX_LENGTH, MCP_STARTER_ROUTINE, roomTitle, modelChoiceLabel, modelPickerChoiceLabel, type AgentModelConfigOption } from '@beeline/api-contract/phone';
 import { IdentityMark } from '@/components/buzz/IdentityMark';
 import { SurfaceGlyphLoader } from '@/components/buzz/SurfaceGlyphLoader';
 import { displayModel } from '@/buzz/model-display';
@@ -62,9 +62,14 @@ function AgentProfileBody({ p, detail }: { p: AgentProfile; detail: AgentDetailV
             </XStack>
             {p.editing ? (
                 <YStack gap="2">
-                    <Copy small quiet>Agent name</Copy>
-                    <Input minHeight={HEIGHT.control} value={p.nameDraft} onChangeText={p.setNameDraft} maxLength={AGENT_NAME_MAX_LENGTH}
-                        disabled={p.working === 'save-agent-soul'} aria-label="Agent name" testID="agent-soul-name" />
+                    <Copy small quiet>Handle</Copy>
+                    <XStack alignItems="center" gap="2">
+                        <T v="heading" color="secondary">@</T>
+                        <Input flex={1} minWidth={0} minHeight={HEIGHT.control} value={p.handleDraft} borderColor={p.handleError ? 'removed' : undefined}
+                            onChangeText={(value: string) => p.setHandleDraft(value.toLowerCase())} maxLength={AGENT_HANDLE_MAX_LENGTH}
+                            autoCapitalize="none" autoCorrect={false} disabled={p.working === 'save-agent-soul'} aria-label="Handle" testID="agent-handle" />
+                    </XStack>
+                    {p.handleError ? <T v="meta" color="removed" testID="agent-handle-error">{p.handleError}</T> : null}
                 </YStack>
             ) : null}
             <Section title="Soul">

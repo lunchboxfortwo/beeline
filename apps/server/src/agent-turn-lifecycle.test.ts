@@ -167,14 +167,24 @@ it('a claimed restart kept across close completes on its new lifecycle instead o
   expect((await notices()).rowCount).toBe(0);
 });
 
-it('a delivered terminal report ends its order before connection loss can hand it back',async()=>{
+it('a delivered terminal report keeps its order resumable in the same generation until the turn ends',async()=>{
   const command=(await createAgentCommand(db,{roomId:R,agentId:A,sourceMessageId:null,reason:'order',
     privatePayload:{kind:'order',authorId:H,fromRoomId:R,text:'Finish this assignment'}}))!;
   await claimAgentCommand(db,R,A,command.id,'report-generation',{kind:'helper',owner});
   await daemon.execute('report',{roomId:R,requestId:command.turn_request_id,generationId:'report-generation',
     status:'done',text:'The assignment is finished.'},A);
-  expect((await db.query('SELECT state FROM agent_commands WHERE id=$1',[command.id])).rows).toEqual([{state:'complete'}]);
+  // The turn may still order or file feedback; the command closes at turn end.
+  expect((await db.query('SELECT state FROM agent_commands WHERE id=$1',[command.id])).rows).toEqual([{state:'claimed'}]);
   await releaseAgentConnection(db,live,A,owner.connectionId);
+  expect((await readAgentCommands(db,R,A)).commands).toEqual([
+    expect.objectContaining({id:command.id,generationId:'report-generation'}),
+  ]);
+  const successor={connectionId:'report-successor',epoch:await claimAgentConnection(db,live,A,{lifecycleId:'report-successor-boot'},
+    {connectionId:'report-successor',instanceId:'test-server'})};
+  await claimAgentCommand(db,R,A,command.id,'report-generation',{kind:'helper',owner:successor});
+  await daemon.execute('postAgentTurnReceipt',{roomId:R,requestId:command.turn_request_id,
+    generationId:'report-generation',status:'complete'},A,successor);
+  expect((await db.query('SELECT state FROM agent_commands WHERE id=$1',[command.id])).rows).toEqual([{state:'complete'}]);
   expect((await readAgentCommands(db,R,A)).commands).toEqual([]);
   expect((await notices()).rowCount).toBe(0);
 });

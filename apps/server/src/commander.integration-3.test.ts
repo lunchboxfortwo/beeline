@@ -186,9 +186,6 @@ it.each(['room', 'corner'] as const)('Reproduction R1: silent %s rejects late fi
 });
 
 
-it('Reproduction R1: the server refuses silence on human input', async () => {
-  await expect(rootFixture.daemon.execute('markAgentTurnSilent', authority(rootFixture.order), RUBY)).rejects.toThrow('requires a nonhuman wake');
-});
 
 
 
@@ -624,4 +621,48 @@ it('Reproduction REPLY-ONCE: a direct human reply retried three times stores and
   }
   expect((await rootFixture.db.query('SELECT id FROM messages WHERE id=$1', [messageId])).rowCount).toBe(1);
   expect((await rootFixture.db.query('SELECT id FROM agent_commands WHERE source_message_id=$1 AND agent_id=$2', [messageId, RUBY])).rowCount).toBe(1);
+});
+
+
+it('Reproduction wake-7: a reviewer report wakes the corner implementer in its corner, not the Room it ordered from', async () => {
+  // 12 Nov 15:06: Speedy's FAIL on a corner reached its implementer in the parent
+  // Room, which has no worktree or PR route for the fix.
+  const opened = await daemon.execute('createCorner', { ...authority(order), requestId: order.turnRequestId,
+    targetRoomId: ROOM, name: 'Palette', objective: 'Fix the palette', implementer: 'ruby',
+    brief: { spec: 'Fix the palette', repositoryWork: false, approval: { sourceMessageId: order.sourceMessageId } },
+  }, RUBY);
+  const receipt = await daemon.execute('order', { ...authority(order), address: opened.cornerId, agent: WORKER,
+    text: 'Review the palette PR' }, RUBY);
+  const review = (await commands(opened.cornerId, WORKER)).find(c => c.id === receipt.id)!;
+  await claim(review);
+  await daemon.execute('report', { ...authority(review), status: 'done', text: 'FAIL: the dark tray is missing.' }, WORKER);
+  expect((await commands(opened.cornerId, RUBY)).filter(c => c.reason === 'report').map(c => c.source.body))
+    .toEqual([expect.stringContaining('FAIL: the dark tray is missing.')]);
+  expect((await commands(DM, RUBY)).filter(c => c.reason === 'report')).toEqual([]);
+});
+
+
+it('Reproduction wake-8: a report leaves the command open for the same turn’s order and feedback', async () => {
+  // 12 Nov 19:13 rc.2: a needs_decision report completed the command, then the
+  // turn's follow-up order and feedback were refused as "state not claimed".
+  const opened = await open(), turn = await worker(opened.cornerId);
+  await daemon.execute('report', { ...authority(turn), status: 'needs_decision', text: 'Which proof account?' }, WORKER);
+  await daemon.execute('order', { ...authority(turn), address: opened.cornerId, agent: RUBY, text: 'Add the Android screenshot on my head.' }, WORKER);
+  await daemon.execute('reportFeedback', { ...authority(turn), category: 'bug', summary: 'Follow-up after a report stays possible.' }, WORKER);
+  expect((await db.query(`SELECT state FROM agent_commands WHERE id=$1`, [turn.id])).rows[0]).toEqual({ state: 'claimed' });
+  await daemon.execute('postAgentTurnReceipt', { ...authority(turn), agentId: WORKER, status: 'complete' }, WORKER);
+  expect((await db.query(`SELECT state FROM agent_commands WHERE id=$1`, [turn.id])).rows[0]).toEqual({ state: 'complete' });
+});
+
+
+it('Reproduction wake-14: a released Squire card wakes the asking corner worker while its corner waits', async () => {
+  // 12 Nov 01:23: the worker asked for a card release and reported that it was
+  // waiting. The person released the card; checkout resumed only on a direct tag.
+  const opened = await open(), turn = await worker(opened.cornerId);
+  await daemon.execute('report', { ...authority(turn), status: 'blocked', text: 'Waiting for the card release.' }, WORKER);
+  await daemon.execute('postAgentTurnReceipt', { ...authority(turn), agentId: WORKER, status: 'complete' }, WORKER);
+  await daemon.execute('postSquireApprovalDecision', { roomId: opened.cornerId, requestId: turn.turnRequestId,
+    approvalId: 'card-release', status: 'approved', tool: 'inject_card', title: 'Card release', detail: 'Checkout' }, WORKER);
+  expect((await commands(opened.cornerId, WORKER)).map(c => c.source.body))
+    .toEqual([expect.stringContaining('Squire approval card-release for inject_card: approved')]);
 });

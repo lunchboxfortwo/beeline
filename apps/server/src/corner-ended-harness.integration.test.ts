@@ -86,8 +86,8 @@ it.each([false, true])('claims queued order, human tag and resume after a blocke
       stop:() => {}, onError:error => errors.push(error), run:async command => {
         if (++invocation === 1) {
           await client.sessionPrompt('fixture', 'Work until blocked');
-          // The explicit report ended this command. Later publication is refused,
-          // and that refusal must still unwind intake and release the corner.
+          // The report leaves the command open until the turn ends, so the
+          // same turn may still publish.
           await daemon.execute('postAgentActivity', {roomId:corner,agentId:WORKER,requestId:command.turnRequestId,
             generationId:context.generationId,activity:[{kind:'output',title:'Update',text:'Late activity'}]}, WORKER);
         }
@@ -98,24 +98,24 @@ it.each([false, true])('claims queued order, human tag and resume after a blocke
       privatePayload:{kind:'order',authorId:COMMANDER,fromRoomId:room,text:'Continue the proof'}}))!;
     await daemon.execute('report', {roomId:corner,requestId:initial.turn_request_id,generationId:context.generationId,
       status:'blocked',text:'blocked: The owner must finish sign-in.'}, WORKER);
-    expect((await db.query('SELECT state FROM agent_commands WHERE id=$1',[initial.id])).rows).toEqual([{state:'complete'}]);
-    expect((await db.query("SELECT 1 FROM agent_turns WHERE room_id=$1 AND status='working'",[corner])).rows).toEqual([]);
+    expect((await db.query('SELECT state FROM agent_commands WHERE id=$1',[initial.id])).rows).toEqual([{state:'claimed'}]);
     await phone.execute('sendRoomMessage',{roomId:corner,text:'@worker Help me click the checkbox'},HUMAN);
     const source = randomUUID();
     await db.query(`INSERT INTO messages(id,room_id,author_id,text) VALUES($1,$2,$3,'Resume after sign-in')`,[source,corner,HUMAN]);
     const resume = (await createAgentCommand(db,{roomId:corner,agentId:WORKER,sourceMessageId:source,
       reason:'resume',action:'resume',parent:initial,retainDepth:true}))!;
-    const pending = (await daemon.execute('getAgentCommands',{roomId:corner},WORKER)).commands;
+    const offered = (await daemon.execute('getAgentCommands',{roomId:corner},WORKER)).commands;
+    expect(offered.find(command => command.id === initial.id)).toMatchObject({generationId:context.generationId});
+    const pending = offered.filter(command => command.id !== initial.id);
     expect(pending.map(command => command.reason).sort()).toEqual(['human_tag','order','resume']);
-    notify!(pending);
+    notify!(offered);
     await client.request('fixture/end',{reject:rejected});
     await vi.waitFor(() => expect(claimed).toHaveLength(2));
     expect(claimed[1]!.map(command => command.id).sort()).toEqual(pending.map(command => command.id).sort());
     expect(claimed[1]!.some(command => command.id === order.id)).toBe(true);
     expect(claimed[1]!.some(command => command.id === resume.id)).toBe(true);
     await vi.waitFor(() => expect(releases).toBe(2));
-    expect(errors).toHaveLength(1);
-    expect(String(errors[0])).toContain(rejected ? 'fixture prompt rejected' : 'command output authority rejected');
+    expect(errors.map(String)).toEqual(rejected ? [expect.stringContaining('fixture prompt rejected')] : []);
     expect((await daemon.execute('getAgentCommands',{roomId:corner},WORKER)).commands).toEqual([]);
     expect((await phone.readRoom(corner,HUMAN))!.pendingAgentCommands).toEqual([]);
     expect((await db.query("SELECT 1 FROM agent_turns WHERE room_id=$1 AND status='working'",[corner])).rows).toEqual([]);
