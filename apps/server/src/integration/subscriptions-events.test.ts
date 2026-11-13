@@ -484,7 +484,7 @@ const fixture = monolithFixture();
         workspaceJoined: claim.workspaceJoined,
         eventSubscriptions: ['joined', 'not-a-kind'],
       }),
-    ).resolves.toEqual({ status: 'finished' });
+    ).resolves.toEqual({ status: 'finished', agentHandle: expect.any(String) });
     const memberships = await fixture.database.query<{
       room_id: string | null;
       event_subscriptions: string[];
