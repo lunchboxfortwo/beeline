@@ -1,20 +1,10 @@
-import { desktopColumnWidths } from '@/buzz/desktop-layout-tokens';
-import { useIsDesktop as useDesktopPageLayout } from '@/utils/responsive';
-import { ErrorBanner } from '@/components/buzz/ErrorBanner';
-import { Button } from '@/components/buzz/Button';
-import { RoomListSectionHeader } from '@/components/buzz/RoomListSectionHeader';
-import { HullDialogActions } from '@/components/buzz/HullDialog';
 import { useLatencyRouteFrame } from '@/buzz/latency-route-hook';
-import React, { useCallback, useEffect, useMemo, useState } from 'react';
-import { ScrollView, Text, TouchableOpacity, View } from 'react-native';
-import { StyleSheet } from 'react-native-unistyles';
+import React, { useCallback, useMemo, useState } from 'react';
+import { XStack, YStack } from 'tamagui';
 import { router, useLocalSearchParams } from 'expo-router';
-import { useSafeAreaInsets } from 'react-native-safe-area-context';
-import { Typography } from '@/constants/Typography';
-import { PageHeader } from '@/components/buzz/PageHeader';
-import { SettingsRow } from '@/components/buzz/SettingsRow';
 import { ServiceMark } from '@/components/buzz/ServiceMark';
-import { StateDot } from '@/components/buzz/StateDot';
+import { Btn, Section, T } from '@/ui/grammar';
+import { ConfirmCard, ConnectorFrame, ConnectorLoading, ConnectorNote, ConnectorRow } from '@/ui/screens/settings/connectors/ConnectorParts';
 import { SurfaceGlyphLoader } from '@/components/buzz/SurfaceGlyphLoader';
 import { getWorkbenchSource } from '@/buzz/workbench-source';
 import { publishConnectionDetail, useSharedConnectionDetail } from '@/buzz/workbench-surface';
@@ -29,7 +19,6 @@ import {
   connectionHostsLine,
   connectionRevokeOffered,
   connectionTitle,
-  type ConnectionDetailView,
 } from '@/buzz/workbench';
 
 function singleParam(value: string | string[] | undefined): string | undefined {
@@ -54,9 +43,7 @@ export default function ConnectionDetailScreen() {
   const workspaceId = singleParam(params.workspaceId) ?? '';
   const viewerId = singleParam(params.viewerId) ?? '';
   const connectionId = singleParam(params.connectionId) ?? '';
-  const insets = useSafeAreaInsets();
-  const desktopPageLayout = useDesktopPageLayout();
-  const { value: detail, address: detailAddress, error: loadError, refresh: retry } =
+  const { value: detail, address: detailAddress, error: loadError } =
     useSharedConnectionDetail({ workspaceId, viewerId }, connectionId);
   useLatencyRouteFrame('/beeline/settings/workbench/connection', detail !== null, true);
   const [error, setError] = useState<string | null>(null);
@@ -116,264 +103,81 @@ export default function ConnectionDetailScreen() {
     [grantCount],
   );
 
+  const ledgerMeta = (row: NonNullable<typeof detail>['ledger'][number]) =>
+    [row.grant ? `grant ${row.grant}` : undefined, row.status, row.bytes].filter(Boolean).join(' · ') || undefined;
+
   return (
-    <View
-      style={[styles.container, desktopPageLayout && { width: '100%', maxWidth: desktopColumnWidths.detail, alignSelf: 'center' }, { paddingTop: insets.top, paddingBottom: insets.bottom }]}
-      testID="connection-detail-screen"
-    >
-      <PageHeader
-        backAccessibilityLabel="Back to Connectors"
-        eyebrow="Connectors"
-        prominent
-        onBack={() => router.back()}
-        testID="connection-header"
-        title={headerTitle}
-      />
-      <ScrollView
-        style={styles.content}
-        contentContainerStyle={styles.contentInner}
-        testID="connection-detail-scroll"
-      >
-        {!detail && !error && !loadError ? (
-          <View style={styles.centered} testID="connection-loading">
-            <SurfaceGlyphLoader testID="connection-loader" />
-          </View>
-        ) : null}
-        {detail ? (
-          <View style={styles.identity} testID="connection-detail-identity">
-            <ServiceMark
-              company={company}
-              domain={detail.connection.faviconDomain}
-              testID="connection-service-mark"
-            />
-            <View style={styles.identityCopy}>
-              {label ? (
-                <Text numberOfLines={1} style={styles.identityLabel} testID="connection-key-label">
-                  {label}
-                </Text>
-              ) : null}
-            </View>
-            {state ? (
-              <View style={styles.state} testID="connection-detail-state">
-                <StateDot kind={state.glyph} />
-                <Text
-                  style={[
-                    styles.stateText,
-                    state.tone === 'danger' && styles.stateDanger,
-                    state.tone === 'accent' && styles.stateAccent,
-                  ]}
-                >
-                  {state.label}
-                </Text>
-              </View>
-            ) : null}
-          </View>
-        ) : null}
-        {detail ? (
-          <View testID="connection-detail-metadata">
-            <RoomListSectionHeader title="Vault" inset="content" spacing="flush" />
-            <SettingsRow disabled title="Reference" description={detail.connection.ref} />
-            <SettingsRow
-              disabled
-              title="Hosts"
-              description={connectionHostsLine(detail.connection)}
-            />
-            <SettingsRow
-              description={fieldNames.length ? fieldNames.join(', ') : 'none reported'}
-              disabled
-              testID="connection-detail-fields"
-              title="Fields"
-            />
-            <SettingsRow
-              disabled
-              title="Created"
-              value={connectionFactDate(detail.connection.createdAt)}
-            />
-            <SettingsRow
-              disabled
-              title="Last synced"
-              value={connectionFactDate(detail.connection.lastSyncedAt)}
-            />
-            {detail.createdBy ? (
-              <SettingsRow
-                disabled
-                title="Provisioned by"
-                value={connectionCreatedByLine(detail)}
-              />
-            ) : null}
-          </View>
-        ) : null}
-        {detail ? (
-          <View testID="connection-detail-grants">
-            <RoomListSectionHeader title="Grants" inset="content" spacing="flush" />
-            {detail.grants.length ? (
-              detail.grants.map((grant) => (
-                <SettingsRow
-                  description={
-                    connectionGrantPending(grant)
-                      ? 'Revoking — waiting for the helper'
-                      : `Granted ${connectionFactDate(grant.createdAt)}`
-                  }
-                  disabled
-                  key={grant.grantId}
-                  testID={`connection-grant-${grant.grantId}`}
-                  title={grant.grantId}
-                  value={connectionGrantLimits(grant)}
-                  valueTone={connectionGrantPending(grant) ? 'accent' : undefined}
-                />
-              ))
-            ) : (
-              <SettingsRow disabled testID="connection-grants-empty" title="None" tone="quiet" />
-            )}
-          </View>
-        ) : null}
-        {detail ? (
-          <View testID="connection-detail-ledger">
-            <RoomListSectionHeader title="Activity" inset="content" spacing="flush" />
-            {detail.ledger.length ? (
-              detail.ledger.map((row, index) => (
-                <View
-                  key={`${row.at}-${index}`}
-                  style={styles.ledgerRow}
-                  testID={`connection-ledger-${index}`}
-                >
-                  <View style={styles.ledgerCopy}>
-                    <Text style={styles.ledgerText} numberOfLines={1}>
-                      {[row.actor, row.action].filter(Boolean).join(' ') || 'Key used'}
-                    </Text>
-                    {[row.grant ? `grant ${row.grant}` : undefined, row.status, row.bytes].filter(
-                      Boolean,
-                    ).length ? (
-                      <Text style={styles.ledgerMeta} numberOfLines={1}>
-                        {[row.grant ? `grant ${row.grant}` : undefined, row.status, row.bytes]
-                          .filter(Boolean)
-                          .join(' · ')}
-                      </Text>
-                    ) : null}
-                  </View>
-                  <Text style={styles.ledgerStamp}>{row.at}</Text>
-                </View>
-              ))
-            ) : (
-              <SettingsRow
-                disabled
-                testID="connection-activity-empty"
-                title="No activity yet"
-                tone="quiet"
-              />
-            )}
-          </View>
-        ) : null}
-        {detail && revokeOffered && grantCount > 0 ? (
-          <View testID="connection-management">
-            <RoomListSectionHeader title="Manage" inset="content" spacing="flush" />
-            {!confirmRevoke ? (
-              <SettingsRow
-                disabled={revoking || pendingGrants.length > 0}
-                onPress={() => {
-                  setError(null);
-                  setConfirmRevoke(true);
-                }}
-                testID="connection-revoke-grants"
-                title={grantCount === 1 ? 'Revoke grant' : 'Revoke all grants'}
-                tone="destructive"
-              />
-            ) : null}
-          </View>
-        ) : null}
-        {confirmRevoke ? (
-          <View style={styles.confirm} testID="connection-revoke-confirm">
-            <Text style={styles.confirmText}>{revokeQuestion}</Text>
-            <HullDialogActions
-              actions={[
-                {
-                  label: 'Cancel',
-                  disabled: revoking,
-                  onPress: () => setConfirmRevoke(false),
-                  testID: 'connection-revoke-confirm-no',
-                },
-                {
-                  label: revoking ? 'Revoking…' : 'Revoke',
-                  variant: 'destructive',
-                  disabled: revoking,
-                  busy: revoking,
-                  onPress: () => void revoke(),
-                  testID: 'connection-revoke-confirm-yes',
-                },
-              ]}
-            />
-          </View>
-        ) : null}
-        {revokedLine || pendingLine ? (
-          <Text style={styles.savedMark} testID="connection-revoked-line">
-            {revokedLine ?? pendingLine}
-          </Text>
-        ) : null}
-        {error || loadError ? (
-          <ErrorBanner inline
-            title={error ?? (loadError?.includes('Key not found')
-                ? 'Key not found — it belongs to another member or no longer exists'
-                : 'Key unavailable right now')}
-            titleTestID="connection-error"
-            testID="connection-error-state"
-            retryLabel="Retry"
-            retryTestID="connection-retry"
-            onRetry={detail && error ? () => void revoke() : undefined} />
-        ) : null}
-      </ScrollView>
-    </View>
+    <ConnectorFrame title={headerTitle} back={() => router.back()} backLabel="Back to Connectors"
+      testID="connection-detail-screen" scrollTestID="connection-detail-scroll">
+      {!detail && !error && !loadError ? <ConnectorLoading testID="connection-loading"><SurfaceGlyphLoader testID="connection-loader" /></ConnectorLoading> : null}
+      {detail ? (
+        <XStack gap="3" alignItems="center" testID="connection-detail-identity">
+          <ServiceMark company={company} domain={detail.connection.faviconDomain} testID="connection-service-mark" />
+          <YStack flex={1} minWidth={0}>
+            {label ? <T v="code" color="secondary" numberOfLines={1} testID="connection-key-label">{label}</T> : null}
+          </YStack>
+          {state ? (
+            <XStack gap="2" alignItems="center" testID="connection-detail-state">
+              <YStack width={8} height={8} borderRadius="full"
+                backgroundColor={state.tone === 'danger' ? 'removed' : state.tone === 'accent' ? 'needsYou' : 'added'} />
+              <T v="meta" color={state.tone === 'danger' ? 'removed' : state.tone === 'accent' ? 'needsYou' : 'secondary'}>{state.label}</T>
+            </XStack>
+          ) : null}
+        </XStack>
+      ) : null}
+      {detail ? (
+        <Section title="Vault" testID="connection-detail-metadata">
+          <ConnectorRow title="Reference" value={detail.connection.ref} />
+          <ConnectorRow title="Hosts" value={connectionHostsLine(detail.connection)} />
+          <ConnectorRow title="Fields" value={fieldNames.length ? fieldNames.join(', ') : 'none reported'} testID="connection-detail-fields" />
+          <ConnectorRow title="Created" value={connectionFactDate(detail.connection.createdAt)} />
+          <ConnectorRow title="Last synced" value={connectionFactDate(detail.connection.lastSyncedAt)} last={!detail.createdBy} />
+          {detail.createdBy ? <ConnectorRow title="Provisioned by" value={connectionCreatedByLine(detail)} last /> : null}
+        </Section>
+      ) : null}
+      {detail ? (
+        <Section title="Grants" testID="connection-detail-grants">
+          {detail.grants.length ? detail.grants.map((grant, n) => (
+            <ConnectorRow key={grant.grantId} title={grant.grantId}
+              description={connectionGrantPending(grant) ? 'Revoking — waiting for the helper' : `Granted ${connectionFactDate(grant.createdAt)}`}
+              value={connectionGrantLimits(grant)} valueTone={connectionGrantPending(grant) ? 'accent' : undefined}
+              last={n === detail.grants.length - 1} testID={`connection-grant-${grant.grantId}`} />
+          )) : <ConnectorRow title="None" tone="quiet" last testID="connection-grants-empty" />}
+        </Section>
+      ) : null}
+      {detail ? (
+        <Section title="Activity" testID="connection-detail-ledger">
+          {detail.ledger.length ? detail.ledger.map((row, index) => (
+            <ConnectorRow key={`${row.at}-${index}`} title={[row.actor, row.action].filter(Boolean).join(' ') || 'Key used'}
+              description={ledgerMeta(row)} value={row.at} last={index === detail.ledger.length - 1} testID={`connection-ledger-${index}`} />
+          )) : <ConnectorRow title="No activity yet" tone="quiet" last testID="connection-activity-empty" />}
+        </Section>
+      ) : null}
+      {detail && ((revokeOffered && grantCount > 0) || confirmRevoke) ? (
+        <Section title="Manage" testID="connection-management">
+          {!confirmRevoke ? (
+            <ConnectorRow title={grantCount === 1 ? 'Revoke grant' : 'Revoke all grants'} tone="destructive" last
+              disabled={revoking || pendingGrants.length > 0}
+              onPress={() => { setError(null); setConfirmRevoke(true); }} testID="connection-revoke-grants" />
+          ) : (
+            <YStack paddingVertical="3">
+              <ConfirmCard question={revokeQuestion} confirmLabel={revoking ? 'Revoking…' : 'Revoke'} busy={revoking}
+                onCancel={() => setConfirmRevoke(false)} onConfirm={() => void revoke()} testID="connection-revoke-confirm" />
+            </YStack>
+          )}
+        </Section>
+      ) : null}
+      {revokedLine || pendingLine ? <ConnectorNote testID="connection-revoked-line">{revokedLine ?? pendingLine}</ConnectorNote> : null}
+      {error || loadError ? (
+        <YStack gap="2" testID="connection-error-state">
+          <ConnectorNote tone="danger" testID="connection-error">
+            {error ?? (loadError?.includes('Key not found')
+              ? 'Key not found — it belongs to another member or no longer exists'
+              : 'Key unavailable right now')}
+          </ConnectorNote>
+          {detail && error ? <Btn label="Retry" alignSelf="flex-start" onPress={() => void revoke()} testID="connection-retry">{'Retry'}</Btn> : null}
+        </YStack>
+      ) : null}
+    </ConnectorFrame>
   );
 }
-
-const styles = StyleSheet.create((theme) => {
-  const hull = theme.buzz;
-  return {
-    container: { flex: 1, backgroundColor: hull.bgTerminal },
-    content: { flex: 1 },
-    contentInner: {
-      padding: hull.space.md,
-      gap: hull.layout.sectionGap,
-      paddingBottom: hull.space.xxl,
-    },
-    centered: { minHeight: 180, alignItems: 'center', justifyContent: 'center' },
-    identity: {
-      minHeight: hull.layout.row,
-      flexDirection: 'row',
-      alignItems: 'center',
-      gap: hull.space.sm,
-      paddingBottom: hull.space.sm,
-      borderBottomWidth: StyleSheet.hairlineWidth,
-      borderBottomColor: hull.border,
-    },
-    identityCopy: { flex: 1, minWidth: 0 },
-    identityLabel: { ...Typography.mono(), ...hull.type.meta, color: hull.ledgerQuiet },
-    state: { flexDirection: 'row', alignItems: 'center', gap: hull.space.xs },
-    stateText: { ...Typography.mono(), ...hull.type.meta, color: hull.textSecondary },
-    stateDanger: { color: hull.dialogDanger },
-    stateAccent: { color: hull.accent },
-    ledgerRow: {
-      minHeight: hull.layout.row,
-      paddingHorizontal: hull.space.sm,
-      paddingVertical: hull.space.sm,
-      flexDirection: 'row',
-      alignItems: 'center',
-      gap: hull.space.sm,
-      borderBottomWidth: StyleSheet.hairlineWidth,
-      borderBottomColor: hull.border,
-    },
-    ledgerCopy: { flex: 1, minWidth: 0 },
-    ledgerStamp: { ...Typography.mono(), ...hull.type.meta, color: hull.textMuted },
-    ledgerText: { ...Typography.default(), ...hull.type.body, color: hull.textSecondary },
-    ledgerMeta: { ...Typography.mono(), ...hull.type.meta, color: hull.ledgerQuiet },
-    confirm: {
-      borderWidth: 1,
-      borderColor: hull.borderStrong,
-      padding: hull.space.md,
-      gap: hull.space.sm,
-    },
-    confirmText: { ...Typography.default(), ...hull.type.body, color: hull.textPrimary },
-    savedMark: { ...Typography.default(), ...hull.type.meta, color: hull.textSecondary },
-    error: { gap: hull.space.xs },
-    errorText: { ...Typography.default(), ...hull.type.meta, color: hull.dialogDanger },
-  };
-});

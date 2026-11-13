@@ -265,7 +265,7 @@ export class DaemonAgentSession {
       this.epoch = epoch;
       this.turnSource = {connectionId:this.connectionId,epoch};
       const model = await this.deps.daemon.negotiateOwnedModel(this.agentId,
-        this.turnSource, this.presence.ownedModelV1 === true && this.presence.ownedModelUnboundedV1 === true);
+        this.presence.ownedModelV1 === true && this.presence.ownedModelUnboundedV1 === true);
       this.#ownedModelCapability = model?.capability;
       this.deps.registry.settled(this);
       if(this.presence.usageAccountV1&&helperUsageEnabled())this.usageOwnerId=(await this.deps.database.query<{owner_id:string|null}>(
@@ -418,7 +418,7 @@ export class DaemonAgentSession {
         const source = this.turnSource!;
         const result = helperTurnCodecs(operation).result.parse(await this.deps.daemon.execute(operation, input, this.agentId, source, this.#ownedModelCapability));
         const reply = { type: 'turn-result', requestId: item.requestId, result };
-        await this.deps.daemon.fenceOwnedTurnReply(this.agentId, source, input, () => {
+        await this.deps.daemon.fenceOwnedTurnReply(this.agentId, input, () => {
           if (!this.#closed && this.transport.isOpen()) this.transport.send(reply);
         }, operation === 'claimAgentCommand');
       } catch (error) {

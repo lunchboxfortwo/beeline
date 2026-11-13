@@ -197,7 +197,7 @@ export function failureReason(item: AgentActivityItem): string | undefined {
     text.match(/(?:^|\n)\s*([\w@./-]+):\s*command not found\b/i);
   if (notFound) return `command not found: ${notFound[1]}`;
   if (/Read-only file system|EROFS/i.test(all)) {
-    return 'blocked: that path is read-only outside this corner\u2019s work area';
+    return 'blocked: that path is read-only outside this thread\u2019s work area';
   }
   const missingModule = text.match(/Cannot find (?:package|module) ['"]([^'"]+)['"]/);
   if (missingModule) return `missing dependency: ${missingModule[1]}`;

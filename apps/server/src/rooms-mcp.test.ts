@@ -19,6 +19,7 @@ const scope1 = fixtureScope1();
       const response = await scope1.exchange(grant);
       expect(response.status).toBe(200);
       const tokens = await response.json() as { access_token: string; refresh_token: string };
+      tokens.refresh_token = await scope1.legacyRefresh(tokens.access_token);
       const client = new Client({ name: 'workspace-selection-proof', version: '1.0.0' }); scope1.clients.push(client);
       await client.connect(new StreamableHTTPClientTransport(new URL(scope1.origin + '/mcp'), { requestInit: { headers: { authorization: `Bearer ${tokens.access_token}` } } }));
       const activeWorkspaces = async () => (await scope1.db.query<{ workspace_id: string }>(
@@ -225,7 +226,7 @@ const scope1 = fixtureScope1();
       expect(bearerCalls).toBe(0);
       expect(received).toHaveLength(3);
       expect(received.find(event=>event.data?.messageId===sent.messageId)).toMatchObject({ name: 'mention', cursor: null,
-        data: { roomId: ROOM, messageId: sent.messageId, memberId: member, replyRule: `answer in this Room with replyTo ${sent.messageId} and start with @demo`, idempotencyKey: `mention:${member}:${sent.messageId}`, author: { id: USER }, text: '@' + handle + ' reply here' } });
+        data: { roomId: ROOM, messageId: sent.messageId, memberId: member, replyRule: `Reply (start with @demo): replyTo ${sent.messageId}`, idempotencyKey: `mention:${member}:${sent.messageId}`, author: { id: USER }, text: '@' + handle + ' reply here' } });
       expect(await deliverMcpMemberWebhooks(scope1.db, deliveryTransport)).toBe(0);
       const reply = await client.callTool({ name: 'send_message', arguments: { room: ROOM, text: 'Event received.', replyTo: sent.messageId } });
       expect(reply.isError).not.toBe(true);
@@ -564,9 +565,10 @@ const scope1 = fixtureScope1();
       .toEqual(['provider_returned', 'started', 'ticket_exchanged', 'ticket_issued']);
   });
 
-  it('rotates refresh tokens and revokes their family on reuse', async () => {
+  it('R-MCP-LEGACY-CLOCK: adopts a legacy refresh once and keeps older sessions connected', async () => {
     const grant = await scope1.authorize();
     const initial = await (await scope1.exchange(grant)).json() as { access_token: string; refresh_token: string };
+    initial.refresh_token = await scope1.legacyRefresh(initial.access_token);
     const refresh = (token: string, clientId = grant.clientId) => scope1.post('/mcp/oauth/token', {
       grant_type: 'refresh_token', refresh_token: token, client_id: clientId, resource: scope1.origin + '/mcp',
     });
@@ -574,18 +576,40 @@ const scope1 = fixtureScope1();
     const response = await refresh(initial.refresh_token);
     expect(response.status).toBe(200);
     const next = await response.json() as typeof initial;
-    expect(next.refresh_token).not.toBe(initial.refresh_token);
+    expect(next).not.toHaveProperty('refresh_token');
+    // Model the installed client's pre-4272 accessToken clock and token storage.
+    // Missing expires_in makes this NaN, so its next call refreshes without a credential.
+    const session = { accessToken: next.access_token, refreshToken: next.refresh_token,
+      accessExpiresAt: Date.now() + (next as typeof next & { expires_in: number }).expires_in * 1000 };
+    const legacyRefresh = vi.fn(async () => {
+      const result = await refresh(session.refreshToken);
+      if (result.status === 400) throw new Error('Beeline disconnected this session');
+      return (await result.json() as typeof initial).access_token;
+    });
+    const accessToken = async (now: number) => session.accessToken && session.accessExpiresAt > now + 60_000
+      ? session.accessToken : legacyRefresh();
+    for (const elapsed of [0, 60_000, 86_400_000]) {
+      const token = await accessToken(Date.now() + elapsed);
+      const call = await scope1.post('/mcp', { jsonrpc: '2.0', id: 1, method: 'tools/call',
+        params: { name: 'list_rooms', arguments: {} } },
+        { authorization: `Bearer ${token}`, 'mcp-protocol-version': '2026-07-28', accept: 'application/json' });
+      expect(call.status).toBe(200);
+      expect((await call.json() as { result: { isError?: boolean } }).result.isError).not.toBe(true);
+    }
+    expect(legacyRefresh).not.toHaveBeenCalled();
+    expect(next).toHaveProperty('expires_in', 10 * 365 * 24 * 60 * 60);
+    expect((await scope1.db.query('SELECT expires_at FROM rooms_mcp_tokens WHERE hash=$1', [tokenHash(next.access_token)])).rows[0]?.expires_at).toBeNull();
     expect((await phoneFetch(scope1.origin + '/mcp', { headers: { authorization: `Bearer ${next.access_token}` } })).status).not.toBe(401);
     expect((await refresh(initial.refresh_token)).status).toBe(400);
-    expect((await refresh(next.refresh_token)).status).toBe(400);
     for (const token of [initial.access_token, next.access_token]) {
-      expect((await phoneFetch(scope1.origin + '/mcp', { headers: { authorization: `Bearer ${token}` } })).status).toBe(401);
+      expect((await phoneFetch(scope1.origin + '/mcp', { headers: { authorization: `Bearer ${token}` } })).status).not.toBe(401);
     }
   });
 
   it('lists only the viewer connections and disconnects access and refresh credentials together', async () => {
     const grant = await scope1.authorize();
     const tokens = await (await scope1.exchange(grant)).json() as { access_token: string; refresh_token: string };
+    tokens.refresh_token = await scope1.legacyRefresh(tokens.access_token);
     expect((await scope1.phone.readWorkbench({ workspaceId: WORKSPACE }, OTHER)).aiClients).not.toContainEqual(expect.objectContaining({ clientId: grant.clientId }));
     expect((await scope1.phone.readWorkbench({ workspaceId: WORKSPACE }, USER)).aiClients).toContainEqual(expect.objectContaining({ clientId: grant.clientId }));
     await scope1.phone.execute('disconnectAiClient', { clientId: grant.clientId }, OTHER);
@@ -703,6 +727,7 @@ const scope1 = fixtureScope1();
     const token = await scope1.post('/mcp/oauth/token', { grant_type: 'authorization_code', client_id, code, code_verifier: verifier, redirect_uri: redirectUri, resource: scope1.origin + '/mcp' });
     expect(token.status).toBe(200);
     const issued = await token.json() as { access_token: string; refresh_token: string; scope: string };
+    issued.refresh_token = await scope1.legacyRefresh(issued.access_token);
     expect(issued.scope).toBe('rooms:read rooms:write');
     const client = new Client({ name: 'fake-claude', version: '1.0.0' }); scope1.clients.push(client);
     await client.connect(new StreamableHTTPClientTransport(new URL(scope1.origin + '/mcp'), { requestInit: { headers: { authorization: `Bearer ${issued.access_token}` } } }));
@@ -806,6 +831,7 @@ const scope1 = fixtureScope1();
       const issued = await scope1.post('/mcp/oauth/token', { ...tokenBody, ...auth.body }, auth.headers);
       expect(issued.status).toBe(200);
       const tokens = await issued.json() as { access_token: string; refresh_token: string };
+      tokens.refresh_token = await scope1.legacyRefresh(tokens.access_token);
       const refresh = { grant_type: 'refresh_token', refresh_token: tokens.refresh_token, client_id: client.client_id, resource: scope1.origin + '/mcp' };
       expect((await scope1.post('/mcp/oauth/token', refresh)).status).toBe(401);
       const refreshed = await scope1.post('/mcp/oauth/token', { ...refresh, ...auth.body }, auth.headers);

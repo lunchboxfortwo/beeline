@@ -1,5 +1,4 @@
 import { expireWorkflowRuns, nextWorkflowExpiryDelay } from './workflow-run-expiry.js';
-import { systemMessage } from '@beeline/api-contract/system-message-catalog';
 import { CornerAccessDatabase } from './corner-access-database.js';
 import { createAgentCommand } from './agent-command.js';
 import { randomBytes } from 'node:crypto';
@@ -12,9 +11,8 @@ import {
   SCHEDULE_SCHEDULER_NAME,
 } from '@beeline/api-contract/scheduled-prompts';
 import type { SqlDatabase } from './database.js';
-import { ensureSystemIdentity, systemLine } from './system-line.js';
+import { systemLine } from './system-line.js';
 import { liveWorkflowRun } from './workflow-runs.js';
-import { SYSTEM_IDENTITY_ID } from '@beeline/api-contract/system-identity';
 
 const MINUTE_MS = 60_000;
 const MAX_INTERVAL_MINUTES = 366 * 24 * 60;
@@ -194,25 +192,6 @@ export class AgentScheduleLoop {
             ? await liveWorkflowRun(database, current.room_id, current.workflow_slug)
             : undefined;
           if (live) {
-            // The schedule row lock serializes this durable notice claim with the tick.
-            const notice = await database.query(
-              `UPDATE agent_schedules SET last_reported_blocking_run_id=$2
-               WHERE id=$1 AND last_reported_blocking_run_id IS DISTINCT FROM $2
-               RETURNING id`,
-              [current.id, live.runId],
-            );
-            if (notice.rowCount) {
-              await ensureSystemIdentity(database);
-              const elapsedMinutes = Math.max(0, Math.floor((now.getTime() - live.startedAt.getTime()) / MINUTE_MS));
-              await systemLine(database, {
-                id: messageId,
-                roomId: current.room_id,
-                authorId: SYSTEM_IDENTITY_ID,
-                subject: { kind: 'system', name: systemMessage("agent-schedules.the-schedule", current.workflow_slug) },
-                verb: systemMessage("agent-schedules.skipped-a-run"),
-                consequence: systemMessage("agent-schedules.run-is-active-at-step-in-state-for-min", live.runId, live.state, live.status, elapsedMinutes),
-              });
-            }
             await this.advance(database, current, now, false);
             return current.room_id;
           }

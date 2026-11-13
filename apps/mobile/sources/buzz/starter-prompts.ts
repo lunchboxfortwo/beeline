@@ -40,7 +40,7 @@ function invitePrompt(workspaceName: string | undefined): RoomStarterPrompt {
 export function roomStarterIntro(prompts: readonly RoomStarterPrompt[]): string {
   return prompts[0]?.action.kind === 'connect-agent'
     ? 'Connect an agent, then ask it for something here.'
-    : 'Ask an agent, open a corner for a bounded task, or invite a collaborator into this Room.';
+    : 'Ask an agent, open a thread for a bounded task, or invite a collaborator into this chat.';
 }
 
 export function roomStarterPrompts(input: {
@@ -59,7 +59,7 @@ export function roomStarterPrompts(input: {
       return [
         {
           lead: 'Connect an agent',
-          detail: 'so this Room has someone to ask',
+          detail: 'so this chat has someone to ask',
           testID: 'starter-connect-agent',
           action: { kind: 'connect-agent' },
         },
@@ -69,7 +69,7 @@ export function roomStarterPrompts(input: {
       return [
         {
           lead: 'Add an agent',
-          detail: 'to this Room',
+          detail: 'to this chat',
           testID: 'starter-add-agent',
           action: { kind: 'add-room-agent' },
         },
@@ -90,10 +90,10 @@ export function roomStarterPrompts(input: {
       },
     },
     {
-      lead: 'Open a corner',
+      lead: 'Open a thread',
       detail: 'for focused work with its own branch',
       testID: 'starter-open-corner',
-      action: { kind: 'fill', text: `@${handle} Open a corner to `, mention },
+      action: { kind: 'fill', text: `@${handle} Open a thread to `, mention },
     },
     ...invite,
   ];

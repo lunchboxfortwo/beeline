@@ -75,9 +75,9 @@ CREATE TRIGGER beeline_mcp_stream_source AFTER INSERT OR UPDATE OR DELETE ON age
 DROP TRIGGER IF EXISTS beeline_mcp_stream_source ON memberships;
 CREATE TRIGGER beeline_mcp_stream_source AFTER INSERT OR UPDATE OR DELETE ON memberships FOR EACH ROW EXECUTE FUNCTION beeline_mcp_stream_source();
 DROP TRIGGER IF EXISTS beeline_mcp_authority_lock ON rooms_mcp_tokens;
-CREATE TRIGGER beeline_mcp_authority_lock BEFORE UPDATE OF revoked_at,expires_at,scope OR DELETE ON rooms_mcp_tokens FOR EACH ROW EXECUTE FUNCTION beeline_mcp_authority_lock();
+CREATE TRIGGER beeline_mcp_authority_lock BEFORE UPDATE OF revoked_at,scope OR DELETE ON rooms_mcp_tokens FOR EACH ROW EXECUTE FUNCTION beeline_mcp_authority_lock();
 DROP TRIGGER IF EXISTS beeline_mcp_stream_source ON rooms_mcp_tokens;
-CREATE TRIGGER beeline_mcp_stream_source AFTER UPDATE OF revoked_at,expires_at,scope OR DELETE ON rooms_mcp_tokens FOR EACH ROW EXECUTE FUNCTION beeline_mcp_stream_source();
+CREATE TRIGGER beeline_mcp_stream_source AFTER UPDATE OF revoked_at,scope OR DELETE ON rooms_mcp_tokens FOR EACH ROW EXECUTE FUNCTION beeline_mcp_stream_source();
 DROP TRIGGER IF EXISTS beeline_mcp_authority_lock ON rooms_mcp_connections;
 CREATE TRIGGER beeline_mcp_authority_lock BEFORE UPDATE OF revoked_at,scope OR DELETE ON rooms_mcp_connections FOR EACH ROW EXECUTE FUNCTION beeline_mcp_authority_lock();
 DROP TRIGGER IF EXISTS beeline_mcp_stream_source ON rooms_mcp_connections;
@@ -107,11 +107,10 @@ interface McpStreamPage {
   nextCursor: string; more: boolean;
 }
 const digest = (value: unknown) => createHash('sha256').update(JSON.stringify(value)).digest('hex');
-class McpStreamExpired extends Error {}
 // Refuse a busy credential writer before enqueue rather than forming an
 // inverse wait with that writer's later membership or Room changes.
-async function currentCredential(db: SqlDatabase, principal: McpPrincipal, lock = false): Promise<Date | undefined> {
-  const credential = (await db.query<{expires_at: Date; current: boolean}>(`SELECT t.expires_at,t.expires_at>now() AS current FROM rooms_mcp_tokens t
+async function currentCredential(db: SqlDatabase, principal: McpPrincipal, lock = false): Promise<boolean> {
+  const credential = (await db.query<{hash: string}>(`SELECT t.hash FROM rooms_mcp_tokens t
     LEFT JOIN LATERAL (SELECT f.* FROM rooms_mcp_families f WHERE f.id=t.family_id ${lock ? 'FOR SHARE OF f NOWAIT' : ''}) f ON true
     JOIN rooms_mcp_connections c ON c.client_id=t.client_id AND c.identity_id=t.identity_id AND c.revoked_at IS NULL
     JOIN rooms_mcp_members m ON m.client_id=c.client_id AND m.owner_id=c.identity_id AND m.member_id=$4
@@ -120,10 +119,7 @@ async function currentCredential(db: SqlDatabase, principal: McpPrincipal, lock 
       AND (t.family_id IS NULL OR (f.id IS NOT NULL AND f.revoked_at IS NULL AND f.client_id=t.client_id AND f.identity_id=t.identity_id))
       ${lock ? 'FOR SHARE OF t,c,m NOWAIT' : ''}`,
     [principal.hash,principal.client_id,principal.identity_id,principal.member_id])).rows[0];
-  // Only expiry of an otherwise current grant can be renewed. Revoked tokens,
-  // consent, families and member mappings remain terminal, even after expiry.
-  if (credential && !credential.current) throw new McpStreamExpired();
-  return credential?.expires_at;
+  return Boolean(credential);
 }
 async function scopes(db: SqlDatabase, member: string, rooms: readonly string[]) {
   const expected = await db.query<{scope: string; epoch: string}>(`SELECT scope,epoch::text FROM router_authority WHERE scope='mcp:'||$1 OR scope IN (
@@ -155,7 +151,7 @@ export async function serveMcpMemberStream(database: SqlDatabase, principal: Mcp
     await notifyMcpDeliveryChange(db,member);
   });
   let stopped = false, running = false, dirty = true, initial = true, position = input.cursor, mentionCursor = input.mentionCursor;
-  const close = (reason?: 'expired' | 'unavailable') => {
+  const close = (reason?: 'unavailable') => {
     if (stopped) return; stopped=true; release();
     void database.transaction(async db=>{
       await db.query('UPDATE rooms_mcp_delivery SET stream_id=NULL WHERE member_id=$1 AND stream_id=$2',[member,streamId]);
@@ -173,11 +169,19 @@ export async function serveMcpMemberStream(database: SqlDatabase, principal: Mcp
     try {
       while (dirty && !stopped) {
         dirty=false;
+        // Setup can create a route after this authenticated stream opened.
+        // Bind it before handing its probe to the host, without reconnecting.
+        if (!initial) await database.transaction(async db=>{
+          if (!await currentCredential(db,principal)) throw new Error('member stream credential ended');
+          const bound=await db.query(`UPDATE rooms_mcp_delivery SET stream_id=$2,credential_hash=$3
+            WHERE member_id=$1 AND mechanism='local' AND stream_id IS NULL`,[member,streamId,principal.hash]);
+          if (bound.rowCount) await notifyMcpDeliveryChange(db,member);
+        });
         const prepared = await database.transaction(async db => {
           await db.query('SET TRANSACTION ISOLATION LEVEL REPEATABLE READ READ ONLY');
-          const expiresAt = await currentCredential(db,principal);
+          const credentialValid = await currentCredential(db,principal);
           if(!(await db.query("SELECT 1 WHERE beeline_mcp_delivery_owner($1,'local')",[member])).rowCount)throw new Error('Delivery owner changed');
-          if (!expiresAt) throw new Error('member stream credential ended');
+          if (!credentialValid) throw new Error('member stream credential ended');
           const head = (await db.query<{epoch:string; sequence:string}>('SELECT epoch,sequence::text FROM live_streams WHERE id=$1',[stream])).rows[0];
           if (!head) throw new Error('member stream source missing');
           const to = {epoch:head.epoch,through:Number(head.sequence)};
@@ -215,7 +219,7 @@ export async function serveMcpMemberStream(database: SqlDatabase, principal: Mcp
           if (encoded.some(frame=>Buffer.byteLength(frame)>256*1024) || encoded.reduce((sum,frame)=>sum+Buffer.byteLength(frame),0)>1024*1024)
             throw new Error('member stream batch capacity');
           const rooms=[...roomIds];
-          return {to,after,encoded,rooms,authority:digest(await scopes(db,member,rooms)),expiresAt};
+          return {to,after,encoded,rooms,authority:digest(await scopes(db,member,rooms))};
         });
         if (!prepared || stopped) continue;
         await database.transaction(async db=>{
@@ -230,7 +234,7 @@ export async function serveMcpMemberStream(database: SqlDatabase, principal: Mcp
         });
         position=prepared.to; mentionCursor=prepared.after; initial=false;
       }
-    } catch (error) { close(error instanceof McpStreamExpired ? 'expired' : 'unavailable'); } finally { running=false; }
+    } catch (error) { close('unavailable'); } finally { running=false; }
   };
   await drain();
 }

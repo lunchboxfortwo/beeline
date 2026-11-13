@@ -1,8 +1,8 @@
 import { IndexRow, InlineRow } from './IndexRow';
 import React, { useEffect, useState } from 'react';
-import { Text, View } from 'react-native';
-import { StyleSheet, useUnistyles } from 'react-native-unistyles';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
+import { YStack } from 'tamagui';
+import { STEP, T } from '@/ui/grammar';
 import {
   cornerOpensListed,
   listCornerOpens,
@@ -35,51 +35,33 @@ export function CornerOpenToast() {
   const status = useCornerOpenStatus();
   const seconds = useCornerOpenSeconds(status);
   const insets = useSafeAreaInsets();
-  const { theme } = useUnistyles();
   if (status.status !== 'pending' || cornerOpensListed(status.roomId)) return null;
   return (
-    <View pointerEvents="box-none" style={[styles.dock, { bottom: insets.bottom + theme.buzz.space.md }]}>
+    <YStack pointerEvents="box-none" position="absolute" left={STEP['4']} right={STEP['4']} bottom={insets.bottom + STEP['4']}>
       <InlineRow
         accessibilityLiveRegion="polite"
         accessibilityRole="alert"
-        style={styles.plate}
+        alignItems="center"
+        gap="4"
+        padding="4"
+        borderRadius="sm"
+        borderWidth={1}
+        borderColor="strongStroke"
+        backgroundColor="canvas"
         testID='corner-open-pending'
       >
-        <View style={styles.message}>
-          <Text style={styles.title}>
+        <YStack flex={1}>
+          <T v="body">
             {`Opening ${CORNER_LABEL}…`}
-          </Text>
-          <Text style={styles.detail}>
+          </T>
+          <T v="meta" color="secondary">
             {cornerOpenWaitLine(status, seconds)}
-          </Text>
-        </View>
+          </T>
+        </YStack>
       </InlineRow>
-    </View>
+    </YStack>
   );
 }
-
-const styles = StyleSheet.create((theme) => ({
-  dock: {
-    position: 'absolute',
-    left: theme.buzz.space.md,
-    right: theme.buzz.space.md,
-  },
-  plate: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: theme.buzz.space.md,
-    paddingVertical: theme.buzz.space.md,
-    paddingHorizontal: theme.buzz.space.md,
-    borderRadius: theme.buzz.radius,
-    borderWidth: 1,
-    borderColor: theme.buzz.borderStrong,
-    backgroundColor: theme.buzz.bgTerminal,
-  },
-  message: { flex: 1 },
-  title: { ...theme.buzz.type.body, color: theme.buzz.textPrimary },
-  detail: { ...theme.buzz.type.meta, color: theme.buzz.textMuted },
-
-}));
 
 /** The Corners page shows only its pending create, without a second failure row. */
 export function CornerOpenRow({ roomId }: { roomId: string }) {

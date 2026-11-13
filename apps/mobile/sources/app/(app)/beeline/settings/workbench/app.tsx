@@ -1,22 +1,15 @@
-import { desktopColumnWidths } from '@/buzz/desktop-layout-tokens';
-import { useIsDesktop as useDesktopPageLayout } from '@/utils/responsive';
-import { RoomListSectionHeader } from '@/components/buzz/RoomListSectionHeader';
 import { useLatencyRouteFrame } from '@/buzz/latency-route-hook';
 import React, { useEffect, useState } from 'react';
-import { ScrollView, Text, View } from 'react-native';
-import { StyleSheet } from 'react-native-unistyles';
+import { XStack, YStack } from 'tamagui';
+import { RefreshCw, Unplug } from 'lucide-react-native';
 import { router, useLocalSearchParams } from 'expo-router';
-import { useSafeAreaInsets } from 'react-native-safe-area-context';
-import { Typography } from '@/constants/Typography';
 import { AppMark } from '@/components/buzz/AppMark';
-import { PageHeader } from '@/components/buzz/PageHeader';
-import { SettingsRow } from '@/components/buzz/SettingsRow';
-import { HullActionSheetModal, HullActionSheetRow, HullActionSheetCancel } from '@/components/buzz/HullActionSheet';
+import { Copy, Glyph, Section, SheetFrame, SheetRow } from '@/ui/grammar';
+import { ConnectorCard, ConnectorFrame, ConnectorNote, ConnectorRow } from '@/ui/screens/settings/connectors/ConnectorParts';
 import { getWorkbenchSource } from '@/buzz/workbench-source';
 import { useSharedWorkbench } from '@/buzz/workbench-surface';
 import { appNeedsSquire, reconnectWorkbenchApp } from '@/buzz/app-reconnect';
 import type { WorkbenchApp } from '@/buzz/workbench';
-import { appBoardColors } from '@/buzz/app-board-style';
 import { appErrorCopy } from '@/buzz/app-error-copy';
 import { INSTAGRAM_SIGN_IN_REQUIREMENT } from '@/buzz/app-sign-in-copy';
 
@@ -28,8 +21,6 @@ export default function AppDetailScreen() {
   const workspaceId = first(params.workspaceId) ?? '';
   const viewerId = first(params.viewerId) ?? '';
   const appId = first(params.appId) ?? '';
-  const insets = useSafeAreaInsets();
-  const desktopPageLayout = useDesktopPageLayout();
   const { value: view, error: loadError } = useSharedWorkbench({ workspaceId, viewerId });
   const [appOverride, setAppOverride] = useState<WorkbenchApp | null>(null);
   const app = appOverride ?? view?.apps.find(item => item.id === appId) ?? null;
@@ -81,79 +72,61 @@ export default function AppDetailScreen() {
       ? 'Neon provides serverless Postgres databases for applications.'
       : null;
 
+  const statusLabel = app?.status === 'connected' ? 'Connected' : app?.status === 'connecting' ? 'Connecting' : 'Offline';
+  const failure = error ?? (loadError ? 'App unavailable right now' : null) ?? (app?.status === 'error' && app.errorMessage ? (needsSquire
+    ? `${app.name} connects through Trusty Squire. Connect Trusty Squire, then return here to connect ${app.name}.`
+    : app.transport !== 'composio' && app.errorMessage === 'App sign-in is unavailable for this person'
+      ? `${app.name} connects through your helper. Retry to ask your helper to finish connecting it.`
+      : appErrorCopy(app.errorMessage)) : null);
+
   return (
-    <View style={[styles.screen, desktopPageLayout && { width: '100%', maxWidth: desktopColumnWidths.detail, alignSelf: 'center' }, { paddingTop: insets.top }]} testID="app-detail-screen">
-      <PageHeader eyebrow="Connectors" prominent title={app?.name ?? 'App'} backAccessibilityLabel="Back to Connectors" onBack={() => router.back()} />
-      <ScrollView contentContainerStyle={[styles.content, { paddingBottom: 24 + insets.bottom }]} testID="app-detail-scroll">
+    <>
+      <ConnectorFrame title={app?.name ?? 'App'} back={() => router.back()} backLabel="Back to Connectors" testID="app-detail-screen" scrollTestID="app-detail-scroll">
         {app ? (
           <>
-            <View style={styles.identity}><AppMark name={app.name} domain={app.domain} logo={app.logo} size={36} />
-          <Text style={styles.account}>{app.status === 'connected' ? app.key === 'gmail' ? 'Signed in · Google' : 'Signed in' : app.status === 'connecting' ? 'Connecting' : 'Offline'}</Text>
-        </View>
-            <SettingsRow title="Status" value={app.status === 'connected' ? 'Connected' : app.status === 'connecting' ? 'Connecting' : 'Offline'}
-          statusGlyph={app.status === 'connected' ? 'live' : app.status === 'connecting' ? 'pulse' : 'failed'}
-          valueTone={app.status === 'error' ? 'danger' : undefined}
-          trailingPress={{ accessibilityLabel: 'Change connection', onPress: () => setStatusOpen(true) }} />
-            {app.status === 'error' && app.transport !== 'composio' ? (
-              // The computer that will retry, with the retry one tap away.
-              <SettingsRow title={needsSquire ? 'Trusty Squire' : app.helperName ?? 'Your computer'}
-                description={needsSquire ? 'Connect Trusty Squire first' : `Retries ${app.name} on this computer`}
-                action={working ? undefined : needsSquire ? 'Connect' : 'Reconnect'} disabled={working}
-                onPress={() => void reconnect()} testID="app-detail-reconnect" />
-            ) : null}
-            <View>
-              <RoomListSectionHeader title="WHAT YOUR AGENTS CAN DO" inset="content" spacing="flush" />
-              <Text style={styles.permission}>{app.key === 'gmail' ? 'Let agents work with your mail when you ask them to.' :
-            `Let agents use ${app.name} when you ask them to.`}</Text>
-              {(app.key === 'gmail' ? ['Find the latest invoice', 'Draft a reply to Alex', 'Send the reply I approved'] :
-            [`Use ${app.name} for this task`]).map((example) => (
-                <Text key={example} style={styles.example}>“{example}”</Text>
-              ))}
-            </View>
-            {description ? <Text style={styles.permission}>{description}</Text> : null}
-            {app.key === 'instagram' && app.status !== 'connected' ? (
-              <Text style={styles.permission}>{INSTAGRAM_SIGN_IN_REQUIREMENT}</Text>
-            ) : null}
-            <Text style={styles.lastUsed}>{lastUsed}</Text>
-            {connectionNotice ? (
-              <Text accessibilityLiveRegion="polite" style={styles.permission} testID="app-detail-connection-notice">{connectionNotice}</Text>
-            ) : null}
+            <XStack gap="3" alignItems="center">
+              <AppMark name={app.name} domain={app.domain} logo={app.logo} size={36} />
+              <Copy small quiet>{app.status === 'connected' ? app.key === 'gmail' ? 'Signed in · Google' : 'Signed in' : app.status === 'connecting' ? 'Connecting' : 'Offline'}</Copy>
+            </XStack>
+            <ConnectorCard>
+              <ConnectorRow title="Status" value={statusLabel} valueTone={app.status === 'error' ? 'danger' : undefined}
+                chevron="right" onPress={() => setStatusOpen(true)} last={!(app.status === 'error' && app.transport !== 'composio')} testID="app-detail-status" />
+              {app.status === 'error' && app.transport !== 'composio' ? (
+                // The computer that will retry, with the retry one tap away.
+                <ConnectorRow title={needsSquire ? 'Trusty Squire' : app.helperName ?? 'Your computer'}
+                  description={needsSquire ? 'Connect Trusty Squire first' : `Retries ${app.name} on this computer`}
+                  action={working ? undefined : needsSquire ? 'Connect' : 'Reconnect'} disabled={working}
+                  onPress={() => void reconnect()} last testID="app-detail-reconnect" />
+              ) : null}
+            </ConnectorCard>
+            <Section title="What your agents can do">
+              <YStack paddingVertical="3" gap="3">
+                <Copy small quiet>{app.key === 'gmail' ? 'Let agents work with your mail when you ask them to.' :
+                  `Let agents use ${app.name} when you ask them to.`}</Copy>
+                {(app.key === 'gmail' ? ['Find the latest invoice', 'Draft a reply to Alex', 'Send the reply I approved'] :
+                  [`Use ${app.name} for this task`]).map((example) => (
+                  <YStack key={example} borderLeftWidth={2} borderLeftColor="needsYou" paddingLeft="3" paddingVertical="2">
+                    <Copy>“{example}”</Copy>
+                  </YStack>
+                ))}
+              </YStack>
+            </Section>
+            <YStack gap="2">
+              {description ? <ConnectorNote>{description}</ConnectorNote> : null}
+              {app.key === 'instagram' && app.status !== 'connected' ? <ConnectorNote>{INSTAGRAM_SIGN_IN_REQUIREMENT}</ConnectorNote> : null}
+              <ConnectorNote testID="app-detail-last-used">{lastUsed}</ConnectorNote>
+              {connectionNotice ? <ConnectorNote testID="app-detail-connection-notice">{connectionNotice}</ConnectorNote> : null}
+            </YStack>
           </>
         ) : null}
-        {error || loadError || (app?.status === 'error' && app.errorMessage) ? (
-          <SettingsRow title={error ?? (loadError ? 'App unavailable right now' : null) ?? (app && needsSquire
-        ? `${app.name} connects through Trusty Squire. Connect Trusty Squire, then return here to connect ${app.name}.`
-        : app?.transport !== 'composio' && app?.errorMessage === 'App sign-in is unavailable for this person'
-          ? `${app.name} connects through your helper. Retry to ask your helper to finish connecting it.`
-          : appErrorCopy(app?.errorMessage ?? ''))} />
-        ) : null}
-      </ScrollView>
-      <HullActionSheetModal visible={statusOpen} title={app?.name} onClose={() => setStatusOpen(false)}>
+        {failure ? <ConnectorNote tone="danger" testID="app-detail-error">{failure}</ConnectorNote> : null}
+      </ConnectorFrame>
+      <SheetFrame open={statusOpen} title={app?.name ?? ''} close={() => setStatusOpen(false)} testID="app-detail-status-sheet">
         {app?.status !== 'connected' ? (
-          <HullActionSheetRow label={needsSquire ? 'Reconnect Trusty Squire' : 'Reconnect'} disabled={working} onPress={() => { setStatusOpen(false); void reconnect(); }} />
+          <SheetRow icon={<Glyph icon={RefreshCw} />} label={needsSquire ? 'Reconnect Trusty Squire' : 'Reconnect'} onPress={() => { setStatusOpen(false); void reconnect(); }} />
         ) : null}
-        <HullActionSheetRow label="Disconnect" destructive disabled={working} onPress={() => { setStatusOpen(false); void disconnect(); }} />
-        <HullActionSheetCancel onPress={() => setStatusOpen(false)} />
-      </HullActionSheetModal>
-    </View>
+        <SheetRow icon={<Glyph icon={Unplug} color="removed" />} label="Disconnect" onPress={() => { setStatusOpen(false); void disconnect(); }} />
+      </SheetFrame>
+    </>
   );
 }
-
-const styles = StyleSheet.create(theme => {
-  const hull = theme.buzz;
-  const board = appBoardColors(hull);
-  return {
-  screen: { flex: 1, backgroundColor: board.canvas },
-  content: { paddingHorizontal: hull.space.lg, paddingVertical: 24, gap: hull.space.md },
-  identity: { flexDirection: 'row', alignItems: 'center', gap: hull.space.md },
-  example: { ...Typography.ledger(), ...hull.type.body, color: board.ink, borderLeftWidth: 2, borderLeftColor: board.brass,
-    paddingLeft: hull.space.md, paddingVertical: hull.space.sm },
-  account: { ...Typography.ledger(), ...hull.type.meta, color: board.quiet },
-  permission: { ...Typography.ledger(), ...hull.type.meta, color: board.secondary },
-  lastUsed: { ...Typography.ledger(), ...hull.type.meta, color: board.quiet },
-  error: { ...Typography.default(), color: theme.buzz.dialogDanger },
-  identityCopy: { gap: hull.space.xs },
-status: { ...Typography.ledger(), ...hull.type.body, color: board.ink },
-action: { alignSelf: 'flex-start' },
-};
-});

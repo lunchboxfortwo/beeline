@@ -17,7 +17,7 @@ import { acceptedJsonEncoding, type JsonEncoding, encodeJsonBody } from "./json-
 import { recordOperatorFunctionEvent } from "./operator-dashboard.js";
 import { vaultSaveHttp } from "./vault-save-http.js";
 import { GitHubHttpError } from "@beeline/auth/github";
-import { captureServerError } from "./sentry.js";
+import { captureServerError, withSentryUserScope } from "./sentry.js";
 import { upgradeComputerSession, upgradeBodyComputerSource, upgradeComputerWaiter } from "./computer-session.js";
 import { bearer, type TokenAuth } from "./auth.js";
 import type { RoomsMcp } from "./rooms-mcp.js";
@@ -559,7 +559,7 @@ export function createBeelineServer(options: ServerOptions): Server {
       throw new PhoneOperationError(409, { error: 'phone_socket_required' });
     return dispatchPhoneOperation(name, input, viewerId, undefined, familyId);
   };
-  const server = createServer((request, response) => {
+  const server = createServer((request, response) => withSentryUserScope(() => {
     if (gameOrigin && request.headers.host === new URL(gameOrigin).host) {
       void serveRunnableArtifact(request, response, gameOrigin, options.objectService).catch(() => {
         if (!response.headersSent) response.writeHead(503, { 'content-type': 'text/plain', 'cache-control': 'no-store' });
@@ -639,7 +639,7 @@ export function createBeelineServer(options: ServerOptions): Server {
       );
       json(response, status, error instanceof PhoneOperationError ? error.payload : { error: message });
     });
-  });
+  }));
   // Send a restart close frame; bound peers that never acknowledge it.
   const closeHttp = server.close.bind(server);
   server.close = ((callback?: (error?: Error) => void) => {

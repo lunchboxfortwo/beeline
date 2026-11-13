@@ -17,11 +17,19 @@ import {
 } from './room-message-cell';
 import type { ChatDisplayMessage } from './room-view-presentation';
 import type { MessageSendState } from './message-outbox';
-import { useTranscriptCardMotion } from '@/components/buzz/transcript-card-motion-context';
 
 vi.mock('react-native', () => ({
   Text: (props: Record<string, unknown>) => React.createElement('Text', props),
   View: (props: Record<string, unknown>) => React.createElement('View', props),
+}));
+
+vi.mock('tamagui', async () => (await import('@/ui/screens/transcript/grammar-hosts.test-support')).tamaguiHosts());
+vi.mock('@/ui/grammar', () => ({
+  Motion: (props: Record<string, unknown>) => React.createElement('Motion', props),
+}));
+
+vi.mock('@/ui/screens/transcript/TranscriptMarkers', () => ({
+  NewMessagesRule: () => React.createElement('new-messages-rule', { testID: 'new-messages-divider' }),
 }));
 
 vi.mock('@/components/buzz/Ledger', () => ({
@@ -45,17 +53,13 @@ it('groups only consecutive own failures and puts one summary on each last row',
 });
 
 describe('RoomMessageCell', () => {
-  it('updates card arrival context without rerendering unchanged message bodies', () => {
+  it('renders an arriving row without rerendering unchanged message bodies', () => {
     const first: ChatDisplayMessage = { id: 'first', text: 'First', isUser: false, timestamp: 1 };
     const incoming: ChatDisplayMessage = { id: 'incoming', text: 'Incoming', isUser: false, timestamp: 2 };
-    function CardMotionProbe() {
-      const motion = useTranscriptCardMotion();
-      return React.createElement('card-motion', { cardId: motion.cardId, arriving: motion.arriving });
-    }
-    const render = vi.fn<RoomMessageRenderer>(() => React.createElement(CardMotionProbe));
-    function Harness({ rows, arriving }: { rows: ChatDisplayMessage[]; arriving: Set<string> }) {
+    const render = vi.fn<RoomMessageRenderer>((item) => React.createElement('message-row', { id: item.id }));
+    function Harness({ rows }: { rows: ChatDisplayMessage[] }) {
       const renderItem = useRoomMessageRenderItem({
-        render, arrivingCardIds: arriving, continuedIds: new Set(),
+        render, continuedIds: new Set(),
         precedingMessageById: new Map(), messageById: new Map(),
       });
       return React.createElement(React.Fragment, null,
@@ -63,12 +67,12 @@ describe('RoomMessageCell', () => {
       );
     }
     let renderer!: ReactTestRenderer;
-    act(() => { renderer = create(React.createElement(Harness, { rows: [first], arriving: new Set(['first']) })); });
+    act(() => { renderer = create(React.createElement(Harness, { rows: [first] })); });
     render.mockClear();
-    act(() => { renderer.update(React.createElement(Harness, { rows: [first, incoming], arriving: new Set(['incoming']) })); });
+    act(() => { renderer.update(React.createElement(Harness, { rows: [first, incoming] })); });
     expect(render.mock.calls.map(([item]) => item.id)).toEqual(['incoming']);
-    expect(renderer.root.findAllByType('card-motion').map((node: { props: Record<string, unknown> }) => node.props))
-      .toEqual([{ cardId: 'first', arriving: false }, { cardId: 'incoming', arriving: true }]);
+    expect(renderer.root.findAllByType('message-row').map((node: { props: Record<string, unknown> }) => node.props.id))
+      .toEqual(['first', 'incoming']);
     act(() => renderer.unmount());
   });
 
@@ -299,7 +303,7 @@ describe('RoomMessageCell', () => {
         React.createElement(RoomMessageCell, { item: opener, render, continued: false }),
       );
     });
-    expect(renderer.root.findByType('day-caption-wrap' as any).props.label).toBe('THU 17 SEP');
+    expect(renderer.root.findByType('day-caption-wrap' as any).props.label).toBe('Thu 17 Sep');
     expect(renderer.root.findByType('message-row' as any).props.id).toBe('opener');
 
     act(() => {
@@ -341,7 +345,7 @@ describe('RoomMessageCell', () => {
     expect(
       renderer.root.findAll(
         (node: { type: unknown; props: Record<string, unknown> }) =>
-          node.type === 'View' && node.props.testID === 'new-messages-divider',
+          node.type === 'new-messages-rule' && node.props.testID === 'new-messages-divider',
       ),
     ).toHaveLength(1);
     expect(renderer.root.findByType('message-row' as any).props.id).toBe('host');

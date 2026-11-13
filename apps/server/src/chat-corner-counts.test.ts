@@ -92,6 +92,19 @@ describe('chat corner counts', () => {
       undefined,
     ]);
   });
+  it('stamps every corner with when it last spoke', () => {
+    const at = new Date('2026-09-29T12:00:00Z');
+    const result = chatCornerCounts([
+      { ...row(), blocking: true, waiting_item_id: 'question', waiting_reason: 'question' as const, waiting_kind: 'message' as const, follows_viewer: true, latest_created_at: at },
+      { ...row({}, 'working'), latest_created_at: at },
+      { ...row(), latest_created_at: null },
+    ]);
+    expect(result.get('room')?.openCorners.map((corner) => corner.lastActivityAt)).toEqual([
+      at.getTime() / 1000,
+      at.getTime() / 1000,
+      undefined,
+    ]);
+  });
   it('excludes terminal lifecycle even before archived_at is projected', () => {
     expect(
       chatCornerCounts([

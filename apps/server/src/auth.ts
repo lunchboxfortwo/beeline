@@ -139,6 +139,9 @@ export class TokenAuth {
         if(actual===identity) xSignup=await recordXSignup(database,identity,xAttribution,this.now());
         else await database.query('DELETE FROM identities WHERE id=$1',[identity]);
       }
+      await database.query(`UPDATE identities SET avatar=$2,updated_at=$3
+        WHERE id=$1 AND kind='human' AND NULLIF(avatar,'') IS NULL AND NULLIF($2::text,'') IS NOT NULL
+          AND NOT EXISTS (SELECT 1 FROM person_avatars WHERE identity_id=$1)`, [actual, google.avatar ?? null, this.now()]);
       return actual;
     });
     const tokens = await this.issuePhoneTokens(id, randomUUID());
@@ -195,6 +198,9 @@ export class TokenAuth {
         else await database.query('DELETE FROM identities WHERE id=$1',[id]);
       }
       await database.query('UPDATE identities SET github_subject=$2 WHERE id=$1',[actual,github.subject]);
+      await database.query(`UPDATE identities SET avatar=$2,updated_at=$3
+        WHERE id=$1 AND kind='human' AND NULLIF(avatar,'') IS NULL AND NULLIF($2::text,'') IS NOT NULL
+          AND NOT EXISTS (SELECT 1 FROM person_avatars WHERE identity_id=$1)`, [actual, github.avatar ?? null, this.now()]);
       await this.persistGitHubCredential(database, github);
       return actual;
     });

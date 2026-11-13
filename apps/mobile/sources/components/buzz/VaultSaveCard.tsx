@@ -1,11 +1,12 @@
 import React, { useEffect, useState } from 'react';
-import { AppState, Text, View } from 'react-native';
-import { StyleSheet } from 'react-native-unistyles';
+import { AppState } from 'react-native';
+import { YStack } from 'tamagui';
+import { T } from '@/ui/grammar';
 import { readVaultSaveCard, type VaultSaveCard as Card } from '@beeline/api-contract/phone';
 import { TranscriptCard } from './TranscriptCard';
 import { HullDialogInput } from './HullDialog';
 import { Button } from './Button';
-import { IdentityMark } from './IdentityMark';
+import { AgentCardLine } from './AgentApprovalCard';
 import { monolithSession } from '@/auth/monolith-session';
 import { getBuzzRuntimeConfig } from '@/buzz/runtime-config';
 
@@ -56,13 +57,16 @@ export function VaultSaveCard({
     });
     return () => listener.remove();
   }, []);
+  // The asking agent's transcript line carries the card (build spec, chat-milo-cards).
+  const line = (node: React.ReactNode) => (
+    <AgentCardLine sender={{ name: agentName, stamp: stamp ?? '', mark: { kind: 'agent', seed: card.agentId } }}>{node}</AgentCardLine>
+  );
   if (!isOwner && !settled)
-    return (
+    return line(
       <TranscriptCard
         tier="record"
         title={`${agentName} wants a vault entry`}
         subline={`waiting for @${card.ownerName}`}
-        stamp={stamp}
         testID="vault-save-waiting"
       />
     );
@@ -105,14 +109,12 @@ export function VaultSaveCard({
   const time = card.savedAt
     ? new Date(card.savedAt * 1000).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })
     : null;
-  return (
+  return line(
     <TranscriptCard
       tier={canType ? 'ask' : 'record'}
       title={`${agentName} wants a ${card.service} ${card.authStrategy === 'username_password' ? 'login' : 'entry'}`}
-      stamp={stamp}
       wrapTitle
       decisionNote
-      identity={<IdentityMark kind="agent" seed={card.agentId} size={26} name={agentName} />}
       subline={isOwner ? 'to your vault · for you' : `to @${card.ownerName}'s vault`}
       facts={[
         { label: 'For', value: card.purpose },
@@ -134,21 +136,21 @@ export function VaultSaveCard({
         canType
           ? [
               {
-                label: 'Not now',
-                dismiss: true,
-                onPress: () => {
-                  setValues({});
-                  setShown({});
-                  setDismissed(true);
-                },
-              },
-              {
-                label: 'Save to vault',
+                label: 'Approve',
                 primary: true,
                 loading: busy,
                 disabled: busy || card.fields.some((f) => !values[f.name]?.length),
                 onPress: () => {
                   void submit();
+                },
+              },
+              {
+                label: 'Deny',
+                secondary: true,
+                onPress: () => {
+                  setValues({});
+                  setShown({});
+                  setDismissed(true);
                 },
               },
             ]
@@ -163,10 +165,10 @@ export function VaultSaveCard({
       } : undefined}
     >
       {canType && (
-        <View style={styles.fields}>
+        <YStack gap="4">
           {card.fields.map((field) => (
-            <View key={field.name} style={styles.field}>
-              <Text style={styles.label}>{field.label}</Text>
+            <YStack key={field.name} gap="2">
+              <T v="meta" color="ink">{field.label}</T>
               <HullDialogInput
                 variant="boxed"
                 accessibilityLabel={field.label}
@@ -180,7 +182,7 @@ export function VaultSaveCard({
                 autoComplete="off"
                 importantForAutofill="no"
                 textContentType="none"
-                editable={!busy}
+                readOnly={busy}
                 maxLength={16_384}
                 placeholder={field.label}
                 testID={`vault-save-${field.name}`}
@@ -197,21 +199,14 @@ export function VaultSaveCard({
                   ) : undefined
                 }
               />
-            </View>
+            </YStack>
           ))}
-          <Text style={styles.note}>
+          <T v="meta" color="secondary">
             Goes from this card straight to your Trusty Squire vault. {agentName} and the chat only
             learn that it was saved.
-          </Text>
-        </View>
+          </T>
+        </YStack>
       )}
     </TranscriptCard>
   );
 }
-
-const styles = StyleSheet.create(({ buzz }) => ({
-  fields: { gap: buzz.space.md, paddingHorizontal: buzz.space.md, paddingBottom: buzz.space.md },
-  field: { gap: buzz.space.sm },
-  label: { ...buzz.type.meta, color: buzz.textPrimary },
-  note: { ...buzz.type.meta, color: buzz.textMuted },
-}));

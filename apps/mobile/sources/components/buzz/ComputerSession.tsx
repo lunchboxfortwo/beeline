@@ -1,19 +1,17 @@
-import { IndexRow } from '@/components/buzz/IndexRow';
-import { Button } from './Button';
-import { CloseButton } from './CloseGlyph';
-import { ContentTarget, InlineRow } from './IndexRow';
 import React from 'react';
-import { AppState, BackHandler, Platform, Text, View } from 'react-native';
+import { IndexRow } from '@/components/buzz/IndexRow';
+import { AppState, BackHandler, Platform } from 'react-native';
+import { YStack, useTheme } from 'tamagui';
 import { Image } from 'expo-image';
 import * as Clipboard from 'expo-clipboard';
-import { StyleSheet } from 'react-native-unistyles';
-import { useSafeAreaInsets } from 'react-native-safe-area-context';
+import { FillView } from '@/ui/grammar';
 import { useSandboxWebView } from '@/components/buzz/sandbox-webview';
 import { monolithPhoneOperation } from '@/sync/transport/monolith-operation';
 import { Modal } from '@/modal';
 import { openComputerInDesktopWorkPane } from '@/buzz/desktop-computer-pane';
 import { openExternalUrl } from '@/utils/open-external-url';
 import { ViewerConversationDock } from '@/components/buzz/ViewerConversationDock';
+import { BrowserCard, BrowserStreamNote, BrowserViewerFrame } from '@/ui/screens/viewers/BrowserChrome';
 import { currentViewerConversation, subscribeViewerConversation } from '@/buzz/viewer-conversation';
 import { useArtifactRowVisible } from '@/buzz/artifact-viewport';
 import {
@@ -66,7 +64,12 @@ function ComputerStream({ session, preview = false, onEnded, onFirstFrame, onAcc
     for (const resolve of pendingCaptures.current.values()) resolve(null);
     pendingCaptures.current.clear();
   }, []);
+  const theme = useTheme();
   const streamUrl = new URL(session.url);
+  for (const name of ['canvas', 'ink', 'strongStroke'] as const) {
+    const color = theme[name]?.val;
+    if (typeof color === 'string' && /^#[a-f0-9]{6}$/i.test(color)) streamUrl.searchParams.set(name, color);
+  }
   if (session.access) streamUrl.searchParams.set('access', session.access);
   streamUrl.searchParams.set('embedded', '1');
   if (preview) streamUrl.searchParams.set('preview', '1');
@@ -124,14 +127,8 @@ function ComputerStream({ session, preview = false, onEnded, onFirstFrame, onAcc
       }
     } catch { /* Ignore unrelated page messages. */ }
   };
-  if (session.status === 'ended')
-    return (
-      <View style={styles.ended} testID="computer-session-ended"><Text style={styles.endedText}>Browser session ended</Text></View>
-    );
-  if (!session.access)
-    return (
-      <View style={styles.ended}><Text style={styles.endedText}>Connecting to browser…</Text></View>
-    );
+  if (session.status === 'ended') return <BrowserStreamNote text="Browser session ended" testID="computer-session-ended" />;
+  if (!session.access) return <BrowserStreamNote text="Connecting to browser…" />;
   if (Platform.OS === 'web') return React.createElement('iframe', {
     ref: iframeRef,
     src: url,
@@ -143,18 +140,16 @@ function ComputerStream({ session, preview = false, onEnded, onFirstFrame, onAcc
   });
   if (WebView)
     return (
-      <WebView ref={webViewRef} source={{ uri: url }} javaScriptEnabled domStorageEnabled
+      <FillView view={WebView} backgroundColor="canvas" ref={webViewRef} source={{ uri: url }} javaScriptEnabled domStorageEnabled
     onMessage={onStreamMessage} onLoadEnd={setViewerMode}
     onHttpError={(event: { nativeEvent: { statusCode: number } }) => {
       if (event.nativeEvent.statusCode === 401 || event.nativeEvent.statusCode === 403) onAccessRejected?.();
       if (event.nativeEvent.statusCode === 410) onEnded?.();
     }}
     scrollEnabled={false} setBuiltInZoomControls={false} setDisplayZoomControls={false}
-    automaticallyAdjustContentInsets={false} contentInsetAdjustmentBehavior="never" style={styles.stream} testID={preview ? 'computer-session-preview-webview' : 'computer-session-view-webview'} />
+    automaticallyAdjustContentInsets={false} contentInsetAdjustmentBehavior="never" testID={preview ? 'computer-session-preview-webview' : 'computer-session-view-webview'} />
     );
-  return (
-    <View style={styles.ended}><Text style={styles.endedText}>Opening browser…</Text></View>
-  );
+  return <BrowserStreamNote text="Opening browser…" />;
 }
 
 /** Only actual visible rows stream; opening captures the latest frame once. */
@@ -200,39 +195,21 @@ export function ComputerSessionCard({ session, messageId, roomId, isDesktop, age
     if (!visible || !access || session.status !== 'live') return;
     try {
       const { access: freshAccess } = await monolithPhoneOperation('openComputerSession', { id: session.id });
-      const url = new URL(session.url);
-      url.searchParams.set('access', freshAccess);
+      const url = new URL(session.url); url.searchParams.set('access', freshAccess);
       await openExternalUrl(url.toString());
-    } catch {
-      Modal.alert('Could not open browser', 'The live browser is unavailable. Try again.');
-    }
+    } catch { Modal.alert('Could not open browser', 'The live browser is unavailable. Try again.'); }
   };
+  const live = session.status === 'live' && Boolean(access);
   return (
-    <View style={styles.card} testID={`computer-session-card-${session.status}`}>
-      {session.status === 'live' && access ? (
-        <ContentTarget onPress={() => void open()} accessibilityRole="button" accessibilityLabel={`Open ${session.title} browser`}>
-      <View style={styles.preview} pointerEvents="none">{visible && !fullViewer ? <ComputerStream session={{ ...session, access }} preview captureRef={captureRef} /> : null}</View>
-      <View style={styles.caption}><Text numberOfLines={1} style={styles.title}>{session.title}</Text>
-        <Text style={styles.kind}>Live browser</Text></View>
-    </ContentTarget>
-      ) : (
-        <View style={styles.caption}><Text numberOfLines={1} style={styles.title}>{session.title}</Text>
-      <Text style={styles.kind}>{session.status === 'ended' ? 'Session ended' : 'Live browser'}</Text></View>
-      )}
-      {session.status === 'live' && access ? (
-        <InlineRow style={styles.footer}>
-          <Button label="Open in browser" destination="external" variant="quiet"
-            appearance={{ control: undefined, label: styles.footerQuiet }}
-            accessibilityRole="link" accessibilityLabel="Open in browser"
-            testID="computer-session-card-open-browser" onPress={() => void openInBrowser()} />
-          <View style={styles.footerSpacer} />
-          <Button label="Open" destination="screen" variant="quiet"
-            appearance={{ control: undefined, label: styles.footerPrimary }}
-            accessibilityRole="link" accessibilityLabel="Open live browser"
-            testID="computer-session-open" onPress={() => void open()} />
-        </InlineRow>
-      ) : null}
-    </View>
+    <BrowserCard
+      status={session.status}
+      title={session.title}
+      live={live}
+      frame={live && visible && !fullViewer ? <ComputerStream session={{ ...session, access: access! }} preview captureRef={captureRef} /> : null}
+      onOpenInBrowser={() => void openInBrowser()}
+      onOpen={() => void open()}
+      testID={`computer-session-card-${session.status}`}
+    />
   );
 }
 
@@ -275,14 +252,14 @@ export function WarmComputerSessionHost() {
   }, [warm?.visible, focused]);
   if (Platform.OS === 'web' || !warm?.visible) return null;
   return (
-    <View style={[styles.warmHost, { opacity: focused ? 1 : 0 }]}
+    <YStack position="absolute" top={0} left={0} right={0} bottom={0} zIndex={100} opacity={focused ? 1 : 0}
     pointerEvents={focused ? 'auto' : 'none'}
     accessibilityViewIsModal={focused} accessibilityElementsHidden={!focused}
     importantForAccessibility={focused ? 'auto' : 'no-hide-descendants'}
     testID="computer-session-warm-host">
     <ComputerSessionViewer key={warm.session.id} session={warm.session} active={focused} warm
       roomId={warm.roomId} agentHandle={warm.agentHandle} onClose={closeWarmComputerSession} />
-  </View>
+  </YStack>
   );
 }
 
@@ -294,7 +271,6 @@ export function ComputerSessionViewer({ session, onClose, roomId, agentHandle, a
   const focused = useViewerRoomFocused(roomId);
   const displayed = active && focused && foreground;
   React.useLayoutEffect(() => displayed ? retainFullViewer(session.id) : undefined, [displayed, session.id]);
-  const insets = useSafeAreaInsets();
   const captureRef = React.useRef<(() => Promise<string | null>) | null>(null);
   const [ended, setEnded] = React.useState(session.status === 'ended');
   const [unavailable, setUnavailable] = React.useState(false);
@@ -345,85 +321,36 @@ export function ComputerSessionViewer({ session, onClose, roomId, agentHandle, a
       Modal.alert('Could not open browser', 'The live browser is unavailable. Try again.');
     }
   };
+  const live = !ended && !unavailable && Boolean(session.access);
   return (
-    <View style={[styles.viewer, { paddingTop: insets.top, paddingBottom: insets.bottom }]} testID="computer-session-viewer">
-      <InlineRow style={styles.controls} testID="computer-session-controls">
-        {!ended && !unavailable && session.access ? (
-          <Button
-            label="Open in browser"
-            destination="external"
-            size="inline"
-            style={styles.openBrowser}
-            accessibilityRole="link"
-            variant="secondary"
-            onPress={() => void openInBrowser()}
-            accessibilityLabel="Open in browser"
-            testID="computer-session-open-browser"
-          />
-        ) : null}
-        <CloseButton
-          onPress={onClose}
-          accessibilityLabel="Close browser"
-          testID="computer-session-close"
-        />
-      </InlineRow>
-      <View style={styles.viewerStream}>
-        {unavailable ? (
-          <View style={styles.failureInset} >
-            <IndexRow inset="flush" title="Browser unavailable" description={"Browser is unavailable"} />
-          </View>
-        ) : displayed ? (
-          <ComputerStream session={shownSession} warm={warm} interactive={active} onEnded={() => setEnded(true)}
-          onFirstFrame={() => { firstFrame.current = true; setPreviewFrame(null); }}
-          onAccessRejected={() => {
-            if (accessRejected && refreshedAccess) setUnavailable(true);
-            else setAccessRejected(true);
-          }} captureRef={captureRef} />
-        ) : null}
-        {!ended && !unavailable && previewFrame ? (
-          <View pointerEvents="none" style={styles.previewFrame}>
-        <Image source={{ uri: `data:image/jpeg;base64,${previewFrame}` }} contentFit="cover" contentPosition="top"
-          style={styles.stream} testID="computer-session-opening-frame" />
-      </View>
-        ) : null}
-      </View>
-      {displayed ? (
+    <BrowserViewerFrame
+      safeArea
+      onOpenInBrowser={live ? () => void openInBrowser() : undefined}
+      onClose={onClose}
+      stream={
+        <>
+          {unavailable ? (
+            <YStack paddingHorizontal="5"><IndexRow inset="flush" title="Browser unavailable" description="Browser is unavailable" /></YStack>
+          ) : displayed ? (
+            <ComputerStream session={shownSession} warm={warm} interactive={active} onEnded={() => setEnded(true)}
+              onFirstFrame={() => { firstFrame.current = true; setPreviewFrame(null); }}
+              onAccessRejected={() => {
+                if (accessRejected && refreshedAccess) setUnavailable(true);
+                else setAccessRejected(true);
+              }} captureRef={captureRef} />
+          ) : null}
+          {!ended && !unavailable && previewFrame ? (
+            <YStack pointerEvents="none" position="absolute" top={0} left={0} right={0} bottom={0} width="100%" height="100%">
+              <FillView view={Image} backgroundColor="canvas" source={{ uri: `data:image/jpeg;base64,${previewFrame}` }} contentFit="cover" contentPosition="top"
+                testID="computer-session-opening-frame" />
+            </YStack>
+          ) : null}
+        </>
+      }
+      dock={displayed ? (
         <ViewerConversationDock keyboardAvoidedByParent={!warm} kind="computer" title={session.title} roomId={roomId}
-      agentHandle={agentHandle} captureScreen={() => captureRef.current?.() ?? Promise.resolve(null)} />
+          agentHandle={agentHandle} captureScreen={() => captureRef.current?.() ?? Promise.resolve(null)} />
       ) : null}
-    </View>
+    />
   );
 }
-
-const styles = StyleSheet.create((theme) => ({
-  failureInset: { paddingHorizontal: theme.buzz.roomList.edge },
-  warmHost: { position: 'absolute', top: 0, left: 0, right: 0, bottom: 0, zIndex: 100 },
-  card: { width: '100%', marginTop: theme.buzz.transcriptCard.marginTop, borderWidth: 1, borderColor: theme.buzz.borderStrong, borderRadius: theme.buzz.transcriptCard.cornerRadius, overflow: 'hidden' },
-  preview: { height: 218, backgroundColor: theme.buzz.bgBase },
-  stream: { width: '100%', height: '100%', backgroundColor: theme.buzz.bgBase },
-  caption: { paddingHorizontal: theme.buzz.transcriptCard.side, paddingVertical: theme.buzz.space.sm, gap: theme.buzz.space.xs },
-  title: { ...theme.buzz.type.bodyStrong, color: theme.buzz.textPrimary },
-  kind: { ...theme.buzz.type.machine, color: theme.buzz.ledgerQuiet },
-  footerSpacer: { flex: 1 },
-  footerQuiet: { ...theme.buzz.type.body, color: theme.buzz.ledgerQuiet },
-  footerPrimary: { ...theme.buzz.type.body, color: theme.buzz.accent },
-  footer: { paddingVertical: theme.buzz.transcriptCard.footerVertical, minHeight: theme.buzz.transcriptCard.footerMinHeight, paddingHorizontal: theme.buzz.transcriptCard.side, flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', borderTopWidth: 1, borderTopColor: theme.buzz.border },
-  viewer: { flex: 1, backgroundColor: theme.buzz.bgBase },
-  viewerStream: { flex: 1, minHeight: 0 },
-  previewFrame: { position: 'absolute', inset: 0, width: '100%', height: '100%' },
-  controls: { flexDirection: 'row', alignItems: 'center', justifyContent: 'flex-end', gap: theme.buzz.space.sm,
-    marginTop: theme.buzz.space.md, marginHorizontal: theme.buzz.space.md, marginBottom: theme.buzz.space.sm },
-  openBrowser: { alignSelf: 'center' },
-  control: {
-    width: 44,
-    height: 44,
-    borderRadius: theme.buzz.radius,
-    borderWidth: 1,
-    borderColor: theme.buzz.borderStrong,
-    backgroundColor: theme.buzz.bgBase,
-    alignItems: 'center',
-    justifyContent: 'center',
-  },
-  ended: { width: '100%', height: '100%', alignItems: 'center', justifyContent: 'center', backgroundColor: theme.buzz.bgBase },
-  endedText: { ...theme.buzz.type.body, color: theme.buzz.textPrimary },
-}));

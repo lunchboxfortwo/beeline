@@ -36,7 +36,10 @@ import type { createServer } from 'node:http';
 
 import type { AddressInfo } from 'node:net';
 
-vi.mock('./sentry.js', () => ({ captureServerError: vi.fn() }));
+vi.mock('./sentry.js', async (importOriginal) => ({
+  ...await importOriginal<typeof import('./sentry.js')>(),
+  captureServerError: vi.fn(),
+}));
 
 
 export const HUMAN = 'a'.repeat(64);

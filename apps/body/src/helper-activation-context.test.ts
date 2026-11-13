@@ -13,22 +13,36 @@ describe('command setup admission and reuse',()=>{
     expect(new Set(values).size).toBe(1);expect(read).toHaveBeenCalledTimes(1);
     await context.read({...input,commandId:'next-command'});expect(read).toHaveBeenCalledTimes(2);
   });
-  it('joins refused captures by command and source and keeps machine transport while disconnected',async()=>{
-    let generation=1,available=true;const read=vi.fn(async(value:CommandActivationInput)=>snapshot(value));
+  it('joins a refused capture while it is pending, asks again on the next setup step and keeps machine transport while disconnected',async()=>{
+    let available=true;const read=vi.fn(async(value:CommandActivationInput)=>snapshot(value));
     read.mockRejectedValueOnce(new Error('capture unavailable'));
-    const transport:ActivationTransport={scope:()=>available?{origin:'https://synthetic.invalid',generation,source:{connectionId:'source-'+generation,epoch:generation}}:undefined,machine:()=>true,ready:async()=>{},read};
+    const transport:ActivationTransport={scope:()=>available?{origin:'https://synthetic.invalid',generation:1,source:{connectionId:'source',epoch:1}}:undefined,machine:()=>true,ready:async()=>{},read};
     const context=new CommandActivationContext(transport,()=>100);
-    await expect(context.read(input)).rejects.toThrow('capture unavailable');
-    await expect(context.read(input)).rejects.toThrow('capture unavailable');expect(read).toHaveBeenCalledTimes(1);
-    generation++;await context.read(input);expect(read).toHaveBeenCalledTimes(2);
+    const joined=[context.read(input),context.read(input)];
+    for(const value of joined)await expect(value).rejects.toThrow('capture unavailable');
+    expect(read).toHaveBeenCalledTimes(1);
+    await context.read(input);expect(read).toHaveBeenCalledTimes(2);
     available=false;await expect(context.read(input)).rejects.toThrow('Activation capability unavailable');expect(read).toHaveBeenCalledTimes(2);
   });
-  it('refuses a late old-actor result and an expired held grant without refetching',async()=>{
-    let generation=1,at=100,finish!:(snapshot:CommandActivationSnapshot)=>void;
-    const read=vi.fn((value:CommandActivationInput)=>generation===1?new Promise<CommandActivationSnapshot>(resolve=>{finish=resolve;}):Promise.resolve({...snapshot(value),validUntil:101}));
-    const context=new CommandActivationContext({scope:()=>({origin:'https://synthetic.invalid',generation,source:{connectionId:'source-'+generation,epoch:generation}}),machine:()=>true,ready:async()=>{},read},()=>at);
-    const pending=context.read(input);generation=2;finish(snapshot({...input,source:{connectionId:'source-1',epoch:1}}));
-    await expect(pending).rejects.toThrow('ownership changed');await context.read(input);at=102;
-    await expect(context.read(input)).rejects.toThrow('expired');expect(read).toHaveBeenCalledTimes(2);
+  it('keeps the same command across a reconnect while capture is pending and after it settles, without a second capture',async()=>{
+    let epoch=1,finish!:(value:CommandActivationSnapshot)=>void;
+    const read=vi.fn((_value:CommandActivationInput)=>new Promise<CommandActivationSnapshot>(resolve=>{finish=resolve;}));
+    const context=new CommandActivationContext({scope:()=>({origin:'https://synthetic.invalid',generation:epoch,source:{connectionId:'socket-'+epoch,epoch}}),machine:()=>true,ready:async()=>{},read},()=>100);
+    const pending=context.read(input);epoch=2;
+    const joined=context.read(input);
+    finish(snapshot({...input,source:{connectionId:'socket-1',epoch:1}}));
+    const value=await pending;expect(await joined).toBe(value);
+    epoch=3;expect(await context.read(input)).toBe(value);expect(read).toHaveBeenCalledTimes(1);
+  });
+  it('refuses a late result for a replaced command, a changed origin and an expired held grant without refetching',async()=>{
+    let origin='https://synthetic.invalid',at=100,finish!:(snapshot:CommandActivationSnapshot)=>void;
+    const read=vi.fn((value:CommandActivationInput)=>value.commandId==='command'&&read.mock.calls.length===1?new Promise<CommandActivationSnapshot>(resolve=>{finish=resolve;}):Promise.resolve({...snapshot(value),validUntil:101}));
+    const context=new CommandActivationContext({scope:()=>({origin,generation:1,source:{connectionId:'source',epoch:1}}),machine:()=>true,ready:async()=>{},read},()=>at);
+    const pending=context.read(input);await context.read({...input,commandId:'next-command'});finish(snapshot({...input,source:{connectionId:'source',epoch:1}}));
+    await expect(pending).rejects.toThrow('ownership changed');
+    const settled=context.read({...input,commandId:'next-command'});await settled;
+    origin='https://other.invalid';await expect(context.read({...input,commandId:'next-command'})).resolves.toBeDefined();
+    expect(read).toHaveBeenCalledTimes(3);
+    at=102;await expect(context.read({...input,commandId:'next-command'})).rejects.toThrow('expired');expect(read).toHaveBeenCalledTimes(3);
   });
 });

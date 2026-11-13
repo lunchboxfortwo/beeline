@@ -3,11 +3,14 @@ import type { AttachmentReference } from '@beeline/buzz-client';
 export type DesktopArtifactSelection = {
   attachment: AttachmentReference;
   markdown?: never;
+  /** Every live file of the message, so the pane pages through them. */
+  groupAttachments?: readonly AttachmentReference[];
   authorHandle?: string;
   roomId?: string;
 } | {
   attachment?: never;
   markdown: { title: string; text: string; revision: number };
+  groupAttachments?: never;
   authorHandle?: string;
   roomId?: string;
 };

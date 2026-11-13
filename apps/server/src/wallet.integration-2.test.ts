@@ -51,7 +51,7 @@ const scope1 = fixtureScope1();
   });
 
 
-  it('ignores unknown accounts and testnets and records each insufficient attempt separately', async () => {
+  it('ignores unknown accounts and testnets and keeps insufficient-funds attempts out of chat', async () => {
     const wallet = await scope1.createdWallet();
     const data = { address: `0x${'6'.repeat(40)}`, transaction_hash: `0x${'5'.repeat(64)}`, network: 'base-mainnet' };
     expect((await scope1.deliverWalletEvent('wallet.transaction.confirmed', data)).status).toBe(200);
@@ -62,8 +62,7 @@ const scope1 = fixtureScope1();
     expect((await scope1.daemonOperation('walletPay', pay)).body.outcome).toBe('insufficient');
     expect((await scope1.daemonOperation('walletPay', pay)).body.outcome).toBe('insufficient');
     const rows = await scope1.notices();
-    expect(rows).toHaveLength(2);
-    expect(rows.every(row => row.card.status === 'refused' && row.text.includes(pay.to) && row.text.includes('@bee'))).toBe(true);
+    expect(rows).toEqual([]);
   });
 
 

@@ -1,5 +1,6 @@
 import beelineMark from './beeline-mark.json';
 import brand from './brand.json';
+import { beelineThemes } from './groknight';
 
 /** The square the thinking mark sits in: as tall as the 12px mono label's 18px line. */
 export const MARK_CELL = 18;
@@ -23,10 +24,10 @@ export const RELEASE_REST_MS = 280;
  * ink on cream is the light icon, because brass on cream is weak.
  */
 export const GLYPH_PAINT = {
-  darkGround: '#14091A',
-  lightGround: '#F3EEE4',
+  darkGround: beelineThemes.obsidian.bgBase,
+  lightGround: beelineThemes.bone.bgBase,
   darkInk: brand.mark,
-  lightInk: '#171310',
+  lightInk: beelineThemes.bone.buttonProviderText,
 } as const;
 
 export function glyphPaintInk(dark: boolean): string {

@@ -11,8 +11,8 @@ export const INSTITUTIONAL_MEMORY_BODY_MAX_BYTES = 200;
 /** Every saved item names 1..6 keywords; only a keyword match loads it. */
 export const INSTITUTIONAL_MEMORY_KEYWORDS_MIN = 1;
 export const INSTITUTIONAL_MEMORY_KEYWORDS_MAX = 6;
-/** Lower-case word, 3..32 characters, the same alphabet request words are split on. */
-export const INSTITUTIONAL_MEMORY_KEYWORD_PATTERN = /^[a-z0-9][a-z0-9_./-]{2,31}$/;
+/** Lower-case word, 2..32 characters, the same alphabet request words are split on. */
+export const INSTITUTIONAL_MEMORY_KEYWORD_PATTERN = /^[a-z0-9][a-z0-9_./-]{1,31}$/;
 /** Words too common to mean anything: never a keyword, never a match. */
 export const INSTITUTIONAL_MEMORY_STOPWORDS: ReadonlySet<string> = new Set([
   'the',
@@ -86,6 +86,27 @@ export const INSTITUTIONAL_MEMORY_STOPWORDS: ReadonlySet<string> = new Set([
   'thing',
   'things',
   'way',
+  // Two-letter function words. "ci" and other short distinctive words stay usable.
+  'do',
+  'if',
+  'in',
+  'is',
+  'it',
+  'of',
+  'on',
+  'or',
+  'to',
+  'we',
+  'be',
+  'as',
+  'at',
+  'by',
+  'an',
+  'my',
+  'no',
+  'so',
+  'up',
+  'us',
 ]);
 
 /** The words of a request that a keyword can match: lower-case, no stopwords. */
@@ -98,7 +119,7 @@ export function institutionalMemoryRequestWords(
         .filter((value): value is string => Boolean(value))
         .join(' ')
         .toLocaleLowerCase('en-US')
-        .match(/[a-z0-9][a-z0-9_./-]{2,31}/g) ?? []
+        .match(/[a-z0-9][a-z0-9_./-]{1,31}/g) ?? []
     )
       .filter((word) => !INSTITUTIONAL_MEMORY_STOPWORDS.has(word))
       .slice(0, 200),
@@ -481,7 +502,7 @@ export function institutionalMemoryKeywords(value: unknown): string[] {
     )
   ) {
     throw new Error(
-      'institutional memory keywords are distinctive single lower-case words of 3 to 32 letters, digits, or _./-',
+      'institutional memory keywords are distinctive single lower-case words of 2 to 32 letters, digits, or _./-',
     );
   }
   if (new Set(keywords).size !== keywords.length) {

@@ -143,7 +143,7 @@ it('a pre-claim failure cannot end queued work; its owner can report a plain fai
   await daemon.execute('postAgentTurnReceipt',{roomId:C,requestId:command.turn_request_id,generationId:'workspace-failure',
     status:'failed',reason:'git fetch failed: cannot lock ref'},WORKER);
   expect(await state()).toBe('idle');
-  const failures=(await readAgentCommands(db,ROOM,COMMANDER)).commands.filter(item=>item.reason==='report');
+  const failures=(await readAgentCommands(db,C,COMMANDER)).commands.filter(item=>item.reason==='report'&&item.source.body.startsWith('failed:'));
   expect(failures).toHaveLength(1);
   expect(failures[0]!.source.body).toContain('cannot lock ref');
 });
@@ -390,7 +390,8 @@ it('Reproduction CORNER-REVIEW-ROLE: a dispatched reviewer stays Review after Ro
   await db.query(`UPDATE rooms SET reviewer_agent_id=NULL WHERE id=$1`,[ROOM]);
   expect(await serviceStates()).toEqual(['review','review']);
   await runCornerAttention(db);
-  expect(await commanderFlags()).toHaveLength(0);
+  // The review gap notice now reaches the commander in this corner; no idle alert joins it.
+  expect((await commanderFlags()).filter(c=>c.source.body.includes(' is idle.'))).toHaveLength(0);
   await end(REVIEWER,40);
   // A terminal review without a verdict returns ownership to the implementer.
   expect(await serviceStates()).toEqual(['working','working']);
@@ -531,7 +532,7 @@ it.each(['agent', 'human'] as const)('REPORT-WAITING-DERIVED: %s report clears o
     if (event.table === 'corner_state') changes.push(event.roomId);
   }) : undefined;
   try {
-    for (const input of ['return-room-answer', 'commander-order', 'new-head'] as const) {
+    for (const input of ['threaded-reply', 'commander-order', 'new-head'] as const) {
       const automatic = await createAgentCommand(db, { id: `automatic-${input}`, roomId: C, agentId: WORKER,
         sourceMessageId: null, reason: 'corner_lifecycle',
         privatePayload: { kind: 'lifecycle', authorId: SYSTEM_IDENTITY_ID, fromRoomId: C, text: 'Continue automatically' } });
@@ -556,13 +557,21 @@ it.each(['agent', 'human'] as const)('REPORT-WAITING-DERIVED: %s report clears o
       await createAgentCommand(db, { id: `unrelated-order-${input}`, roomId: C, agentId: REVIEWER,
         sourceMessageId: null, reason: 'order', privatePayload: { kind: 'order', authorId: REVIEWER, fromRoomId: ROOM, text: 'Other work' } });
       expect(await cornerReportWaiting(db, C)).toBe(true);
+      // The commander's unrelated chatter in the parent Room cannot answer it either.
+      await db.query(`INSERT INTO messages(id,room_id,author_id,text,presentation)
+        VALUES($1,$2,$3,'Shipping the release now','message')`, [`commander-chatter-${input}`, ROOM, recipient]);
+      expect(await cornerReportWaiting(db, C)).toBe(true);
+      expect(await state()).toBe('waiting');
       await db.query(`UPDATE agent_commands SET state='complete' WHERE id=$1`, [`unrelated-order-${input}`]);
       await db.query(`UPDATE agent_turns SET status='complete' WHERE room_id=$1 AND agent_id=$2`, [C,REVIEWER]);
       changes.length = 0;
-      if (input === 'return-room-answer') {
+      const reportCard = recipientKind === 'agent'
+        ? (await db.query<{ card_id: string }>(`SELECT encode(sha256(convert_to('agent-command-card:'||$1::text,'UTF8')),'hex') card_id`, [report.id])).rows[0]!.card_id
+        : report.id;
+      if (input === 'threaded-reply') {
         // A current human member may answer even when the commander is an agent.
-        await db.query(`INSERT INTO messages(id,room_id,author_id,text,presentation)
-          VALUES('derived-answer',$1,$2,'Proceed','message')`, [ROOM,HUMAN]);
+        await db.query(`INSERT INTO messages(id,room_id,author_id,text,presentation,reply_to_message_id)
+          VALUES('derived-answer',$1,$2,'Proceed','message',$3)`, [recipientKind === 'agent' ? C : ROOM,HUMAN,reportCard]);
       } else if (input === 'commander-order') {
         const next = await createAgentCommand(db, { id: 'derived-order', roomId: C, agentId: WORKER,
           sourceMessageId: null, reason: 'order', privatePayload: { kind: 'order', authorId: recipient, fromRoomId: ROOM, text: 'Proceed' } });
@@ -571,8 +580,8 @@ it.each(['agent', 'human'] as const)('REPORT-WAITING-DERIVED: %s report clears o
       } else {
         await db.query(`UPDATE corner_github_cache SET lifecycle='{"pr":{"headSha":"new-head"},"checks":"failing"}'::jsonb WHERE corner_id=$1`, [C]);
         expect(await cornerReportWaiting(db, C)).toBe(true);
-        await db.query(`INSERT INTO messages(id,room_id,author_id,text,presentation)
-          VALUES('after-push-answer',$1,$2,'Proceed','message')`, [ROOM,HUMAN]);
+        await db.query(`INSERT INTO messages(id,room_id,author_id,text,presentation,reply_to_message_id)
+          VALUES('after-push-answer',$1,$2,'Proceed','message',$3)`, [recipientKind === 'agent' ? C : ROOM,HUMAN,reportCard]);
       }
       expect(await cornerReportWaiting(db, C)).toBe(false);
       if (unlisten) expect(changes).toContain(C);
@@ -607,8 +616,8 @@ it('IDLE-DERIVED: a human-directed report resolves from the message log once ans
   expect(await cornerReportWaiting(db, C)).toBe(true);
   const at = new Date(Date.now()-60_000);
   await db.query('UPDATE messages SET created_at=$2 WHERE id=$1',[report.id,new Date(at.getTime()-60_000)]);
-  await db.query(`INSERT INTO messages(id,room_id,author_id,text,presentation,created_at)
-    VALUES('human-report-answer',$1,$2,'Narrow scope','message',$3)`,[ROOM,HUMAN,at]);
+  await db.query(`INSERT INTO messages(id,room_id,author_id,text,presentation,created_at,reply_to_message_id)
+    VALUES('human-report-answer',$1,$2,'Narrow scope','message',$3,$4)`,[ROOM,HUMAN,at,report.id]);
   expect(await cornerReportWaiting(db, C)).toBe(false);
   const row = (await db.query<{idle_since:string}>(cornerIdleSql('$1'),[C])).rows[0]!;
   expect(Number(row.idle_since)).toBeCloseTo(at.getTime()/1000,3);
@@ -697,32 +706,60 @@ it.each(['human-order', 'human-member-order', 'human-member-reply', 'worker-push
   else expect(await state()).not.toBe('waiting');
 });
 
-it.each(['55P03', '08006'])('Reproduction SENTRY-4B: refresh retries only a lock timeout (%s)', async code => {
+it.each(['55P03', '08006'])('Reproduction SENTRY-4B: refresh never replays a failed transaction (%s)', async code => {
   const failure = Object.assign(new Error('refresh failed'), { code });
-  const observe = vi.spyOn(db, 'transaction').mockRejectedValueOnce(failure);
-  const live = new LiveHub(), publish = vi.spyOn(live, 'publish');
-  const runtime = new CornerMachineEvents(db, live, () => {});
-  try {
-    if (code === '55P03') {
-      await runtime.refresh(C);
-      expect(observe).toHaveBeenCalledTimes(2);
-      expect(publish).toHaveBeenCalledWith({ type: 'invalidate', roomId: ROOM, reason: 'corner-status' });
-    } else {
-      await expect(runtime.refresh(C)).rejects.toBe(failure);
-      expect(observe).toHaveBeenCalledTimes(1);
-    }
-  } finally { observe.mockRestore(); await runtime.stop(); }
-});
-
-it('Reproduction SENTRY-4B: persistent lock timeout stops after its one retry', async () => {
-  const failure = Object.assign(new Error('lock timeout'), { code: '55P03' });
   const observe = vi.spyOn(db, 'transaction').mockRejectedValue(failure);
   try {
     await expect(refreshCornerAttention(db, C)).rejects.toBe(failure);
-    expect(observe).toHaveBeenCalledTimes(2);
+    expect(observe).toHaveBeenCalledTimes(1);
   } finally { observe.mockRestore(); }
 });
 
+it('Reproduction SENTRY-4B: overlapping events collapse into one committed-event follow-up', async () => {
+  let release!: () => void, entered!: () => void;
+  const held = new Promise<void>(resolve => { entered = resolve; });
+  const gate = new Promise<void>(resolve => { release = resolve; });
+  const transaction = db.transaction.bind(db);
+  const observe = vi.spyOn(db, 'transaction').mockImplementation(async work => {
+    entered(); await gate; return transaction(work);
+  });
+  const live = new LiveHub(), publish = vi.spyOn(live, 'publish');
+  const runtime = new CornerMachineEvents(db, live, () => {});
+  try {
+    const first = runtime.refresh(C); await held;
+    const second = runtime.refresh(C);
+    const duplicate = runtime.refresh(C);
+    release(); await Promise.all([first, second, duplicate]);
+    expect(observe).toHaveBeenCalledTimes(2);
+    expect(publish).toHaveBeenCalledTimes(2);
+    expect((await phone.readCorners(ROOM, HUMAN))!.corners.find(corner => corner.corner.id === C)?.state).toBe('idle');
+  } finally { release(); observe.mockRestore(); await runtime.stop(); }
+});
+
+
+it('Reproduction SENTRY-4B: a committed command during refresh completion reaches the phone badge', async () => {
+  let release!: () => void, entered!: () => void;
+  const held = new Promise<void>(resolve => { entered = resolve; });
+  const gate = new Promise<void>(resolve => { release = resolve; });
+  const transaction = db.transaction.bind(db);
+  let firstTransaction = true;
+  const observe = vi.spyOn(db, 'transaction').mockImplementation(async work => {
+    const result = await transaction(work);
+    if (firstTransaction) {
+      firstTransaction = false;
+      entered(); await gate;
+    }
+    return result;
+  });
+  const runtime = new CornerMachineEvents(db, new LiveHub(), () => {});
+  try {
+    const first = runtime.refresh(C); await held;
+    await wake(WORKER, 'committed-during-refresh-completion');
+    const second = runtime.refresh(C);
+    release(); await Promise.all([first, second]);
+    expect((await phone.readCorners(ROOM, HUMAN))!.corners.find(corner => corner.corner.id === C)?.state).toBe('working');
+  } finally { release(); observe.mockRestore(); await runtime.stop(); }
+});
 
 it('AC-8: reports, an open question and an approval share waiting and commander-reply clearing', async () => {
   const {reportToCommander}=await import('./commander.js');

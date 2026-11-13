@@ -10,7 +10,7 @@ beforeAll(async () => {
   await db.exec(`CREATE TABLE rooms(id uuid,parent_id uuid,created_by text,reviewer_agent_id text);
     CREATE TABLE corner_facts(corner_id uuid,worker_agent_id text,owner_agent_id text,reviewer_agent_id text);
     CREATE TABLE agent_commands(id text,room_id uuid,agent_id text,private_payload jsonb,created_at timestamp,reason text,inbox_sequence bigint);
-    CREATE TABLE messages(id text,card_type text,room_id uuid,author_id text,text text,card jsonb,presentation text,system_event jsonb,deleted_at timestamp,request_id text,created_at timestamp);
+    CREATE TABLE messages(id text,card_type text,room_id uuid,author_id text,text text,card jsonb,presentation text,system_event jsonb,deleted_at timestamp,request_id text,created_at timestamp,reply_to_message_id text);
     CREATE TABLE memberships(room_id uuid,identity_id text,removed_at timestamp);
     CREATE TABLE room_access(room_id uuid,identity_id text,removed_at timestamp);
     CREATE TABLE identities(id text,kind text,name text,handle text);

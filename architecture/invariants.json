@@ -682,6 +682,15 @@
           "generated_at": "existing before the registry; weekly audit reviews"
         }
       },
+      "person_avatars": {
+        "module": "Agent types",
+        "reason": "A person's uploaded profile photo, durable past attachment expiry (owner decision 2026-11-11 lifted photo overrides).",
+        "columns": {
+          "id": "Served id in /v1/person-avatars/<id>; changes on every replacement.",
+          "identity_id": "The one person this photo belongs to.",
+          "bytes": "The normalized image bytes."
+        }
+      },
       "agent_commands": {
         "module": "Work authority",
         "reason": "existing before the registry; weekly audit reviews",
@@ -734,8 +743,9 @@
             "reason": "Retained without runtime use until the previous server drains during this rolling release.",
             "drop": "Next release after turn-lifecycle cleanup: docs/agent-server-surfaces.md#turn-recovery-storage-retirement"
           },
-          "turn_owner_connection_id": "Pins an owned command generation to its actual helper registration; NULL retains the installed-helper adapter.",
-          "turn_owner_epoch": "Fences an owned command against takeover of that helper registration even if other identifiers remain the same.",
+          "execution_kind": "Records how the claimed generation executes (helper protocol, connected app, or legacy installed-helper adapter) so dispatch never reads a socket. NULL only for claims written by images below PR 4294.",
+          "turn_owner_connection_id": { "reason": "retired: claims still write it only so the previous release reads owned turns after a rollback; only the beeline_classify_claim_kind older-writer trigger reads it", "drop": "docs/agent-server-surfaces.md#turn-transport-storage-retirement (rollback floor passes this release; drop the trigger first)" },
+          "turn_owner_epoch": { "reason": "retired: claims still write it only so the previous release reads owned turns after a rollback; nothing reads it", "drop": "docs/agent-server-surfaces.md#turn-transport-storage-retirement (rollback floor passes this release)" },
           "startup_wake_after": {
             "reason": "Retained without runtime use until the previous server drains during this rolling release.",
             "drop": "Next release after turn-lifecycle cleanup: docs/agent-server-surfaces.md#turn-recovery-storage-retirement"
@@ -752,9 +762,9 @@
           "instance_id": "existing before the registry; weekly audit reviews",
           "connected_at": "existing before the registry; weekly audit reviews",
           "released_at": "existing before the registry; weekly audit reviews",
-          "turn_connection_id": "the machine connection that owns the agent's running turn, so a turn survives socket loss",
-          "turn_connection_epoch": "epoch of that turn-owning connection, so a stale socket cannot claim the turn",
-          "turn_transport_id": "transport that owns the running turn, so a reconnect resumes the same turn"
+          "turn_connection_id": { "reason": "retired: a running turn has no owning connection; kept for serving and rollback overlap", "drop": "docs/agent-server-surfaces.md#turn-transport-storage-retirement (no unreleased registration holds a value, and rollback floor passes 4267)" },
+          "turn_connection_epoch": { "reason": "retired: a running turn has no owning connection epoch; kept for serving and rollback overlap", "drop": "docs/agent-server-surfaces.md#turn-transport-storage-retirement (no unreleased registration holds a value, and rollback floor passes 4267)" },
+          "turn_transport_id": { "reason": "retired: a running turn has no owning transport; kept for serving and rollback overlap", "drop": "docs/agent-server-surfaces.md#turn-transport-storage-retirement (no unreleased registration holds a value, and rollback floor passes 4267)" }
         }
       },
       "agent_grant_policy_revocations": {
@@ -875,7 +885,10 @@
           "workflow_slug": "existing before the registry; weekly audit reviews",
           "human_command_message_id": "existing before the registry; weekly audit reviews",
           "title": "existing before the registry; weekly audit reviews",
-          "last_reported_blocking_run_id": "existing before the registry; weekly audit reviews",
+          "last_reported_blocking_run_id": {
+            "reason": "existing before the registry; weekly audit reviews",
+            "drop": "docs/agent-system-events.md#retired-status-storage"
+          },
           "updated_by": "existing before the registry; weekly audit reviews",
           "owner_id": "existing before the registry; weekly audit reviews",
           "failed_due_at": "Records the exact failed scheduled occurrence so the same due work cannot retry on a timer.",
@@ -1074,8 +1087,14 @@
           "bytes": "existing before the registry; weekly audit reviews",
           "grant_info": "existing before the registry; weekly audit reviews",
           "turn_key": "existing before the registry; weekly audit reviews",
-          "message_id": "existing before the registry; weekly audit reviews",
-          "event_class": "existing before the registry; weekly audit reviews",
+          "message_id": {
+            "reason": "existing before the registry; weekly audit reviews",
+            "drop": "docs/agent-system-events.md#retired-status-storage"
+          },
+          "event_class": {
+            "reason": "existing before the registry; weekly audit reviews",
+            "drop": "docs/agent-system-events.md#retired-status-storage"
+          },
           "created_at": "existing before the registry; weekly audit reviews"
         }
       },
@@ -1387,7 +1406,10 @@
           },
           "runtime_operation_id": "Fences provider results against a newer lifecycle operation; only FreeAgentService writes it.",
           "runtime_owner": "Binds the in-flight provider action to its existing server-source owner across instances.",
-          "runtime_phase": {"reason":"Retained inertly through serving and rollback overlap; pending UI is projected from commands.","drop":"Post-drain contract: docs/agent-server-surfaces.md#turn-recovery-storage-retirement"}
+          "runtime_phase": {
+            "reason": "Retained inertly through serving and rollback overlap; pending UI is projected from commands.",
+            "drop": "Post-drain contract: docs/agent-server-surfaces.md#turn-recovery-storage-retirement"
+          }
         }
       },
       "github_auth_flows": {
@@ -1546,7 +1568,10 @@
           "profile_bytes": "existing before the registry; weekly audit reviews",
           "skill_index_bytes": "existing before the registry; weekly audit reviews",
           "wrapper_bytes": "existing before the registry; weekly audit reviews",
-          "total_bytes": "existing before the registry; weekly audit reviews",
+          "total_bytes": {
+            "reason": "existing before the registry; weekly audit reviews",
+            "drop": "docs/agent-system-events.md#retired-status-storage"
+          },
           "estimated_tokens": "existing before the registry; weekly audit reviews",
           "actual_input_tokens": "existing before the registry; weekly audit reviews",
           "prompt_bytes": "existing before the registry; weekly audit reviews",
@@ -1902,10 +1927,19 @@
           "created_at": "existing before the registry; weekly audit reviews"
         }
       },
+      "chat_message_counters": {
+        "module": "Rooms and messages",
+        "reason": "Hands out the next chat_seq per chat under concurrent sends; a row count would reuse numbers after deletes.",
+        "columns": {
+          "root_room_id": "The chat (root Room) whose messages share one number sequence.",
+          "last_seq": "The last chat_seq handed out in that chat."
+        }
+      },
       "messages": {
         "module": "Rooms and messages",
         "reason": "existing before the registry; weekly audit reviews",
         "columns": {
+          "chat_seq": "Stable per-chat number behind ¶author-N links; it must not shift when older messages are deleted, so row order cannot derive it.",
           "id": "existing before the registry; weekly audit reviews",
           "room_id": "existing before the registry; weekly audit reviews",
           "author_id": "existing before the registry; weekly audit reviews",
@@ -2488,8 +2522,14 @@
         "module": "Tools and connectors",
         "reason": "existing before the registry; weekly audit reviews",
         "columns": {
-          "hash": "existing before the registry; weekly audit reviews",
-          "family_id": "existing before the registry; weekly audit reviews",
+          "hash": {
+            "reason": "existing before the registry; weekly audit reviews",
+            "drop": "https://github.com/Beeline-Work/beeline/pull/4272 (refresh issuance retired; retain held credentials for compatibility adoption and revocation until installed expiring-token clients converge and rollback drains; separate contract migration)"
+          },
+          "family_id": {
+            "reason": "existing before the registry; weekly audit reviews",
+            "drop": "https://github.com/Beeline-Work/beeline/pull/4272 (refresh issuance retired; retain family links for compatibility adoption and revocation until installed expiring-token clients converge and rollback drains; separate contract migration)"
+          },
           "consumed_at": "existing before the registry; weekly audit reviews"
         }
       },
@@ -2501,7 +2541,10 @@
           "client_id": "existing before the registry; weekly audit reviews",
           "identity_id": "existing before the registry; weekly audit reviews",
           "scope": "existing before the registry; weekly audit reviews",
-          "expires_at": "existing before the registry; weekly audit reviews",
+          "expires_at": {
+            "reason": "existing before the registry; weekly audit reviews",
+            "drop": "https://github.com/Beeline-Work/beeline/pull/4272 (access-token expiry retired; retain column through serving and rollback overlap, then remove in a separate contract migration)"
+          },
           "revoked_at": "existing before the registry; weekly audit reviews",
           "window_at": "existing before the registry; weekly audit reviews",
           "calls": "existing before the registry; weekly audit reviews",
@@ -3270,20 +3313,18 @@
         "columns": {
           "command_id": "Identifies the command whose execution generation has an immutable owner binding.",
           "generation_id": "Preserves each admitted execution generation after the current command advances or is requeued.",
-          "connection_id": "Records the registration that owned that execution, including explicit NULL markers for historical installed helpers.",
-          "connection_epoch": "Pins the immutable generation binding to a specific registration takeover epoch."
+          "connection_id": { "reason": "retired history: older rows name the registration that first claimed the generation; no longer written and never an owner check", "drop": "docs/agent-server-surfaces.md#turn-transport-storage-retirement (rollback floor passes 4267)" },
+          "connection_epoch": { "reason": "retired history: older rows name the epoch of that first claim; no longer written and never an owner check", "drop": "docs/agent-server-surfaces.md#turn-transport-storage-retirement (rollback floor passes 4267)" }
         }
       },
-      "turn_owned_effect_fences": {
+      "turn_owned_access_checks": {
         "module": "Turn ownership (apps/server/src/turn-ownership.ts)",
-        "reason": "Transaction-local evidence drives a deferred COMMIT-time ownership check and deletes itself after success; no heartbeat or retained effect history.",
+        "reason": "Transaction-local evidence drives a deferred COMMIT-time Room access check and deletes itself after success; no heartbeat or retained effect history.",
         "columns": {
-          "transaction_id": "Identifies the exact database transaction whose actual owned effects must be checked at COMMIT.",
-          "agent_id": "Identifies the effect actor whose current registration must still be authoritative at COMMIT.",
-          "connection_id": "Pins the transaction evidence to the helper registration admitted for that effect.",
-          "connection_epoch": "Rejects transaction completion if a takeover replaced the admitted registration.",
-          "command_id": "Identifies the actual command authorizing the effect and prevents mixing commands in one registration transaction.",
-          "generation_id": "Pins the effect to its immutable execution generation even if that command is requeued before COMMIT."
+          "transaction_id": "Identifies the exact database transaction whose owned effects re-check Room access at COMMIT.",
+          "agent_id": "Identifies the effect actor whose Room membership must still hold at COMMIT.",
+          "command_id": "Identifies the command authorizing the effect and prevents mixing commands in one transaction.",
+          "generation_id": "Pins the effect to its execution generation and prevents mixing generations in one transaction."
         }
       },
       "agent_command_owner_ends": {
@@ -3311,13 +3352,13 @@
           "command_id": "Identifies the durable command whose claim issued this credential.",
           "generation_id": "Distinguishes successive command claims and prevents a credential crossing generations.",
           "request_id": "Binds model authority to the admitted helper turn request.",
-          "connection_id": "Retains the helper connection that owned the claim at issuance.",
-          "connection_epoch": "Distinguishes successive registrations of the same helper connection.",
-          "instance_id": "Binds the credential to the server instance whose live lease admitted it.",
+          "connection_id": { "reason": "Signed history of older credentials only; NULL for new credentials and never compared to a live connection.", "drop": "docs/agent-server-surfaces.md#turn-transport-storage-retirement (LEGACY_CREDENTIAL_BINDINGS_LIVE_SQL in owned-model-credential.ts returns 0)" },
+          "connection_epoch": { "reason": "Signed history of older credentials only; NULL for new credentials and never compared to a live connection.", "drop": "docs/agent-server-surfaces.md#turn-transport-storage-retirement (LEGACY_CREDENTIAL_BINDINGS_LIVE_SQL in owned-model-credential.ts returns 0)" },
+          "instance_id": { "reason": "Signed history of older credentials only; NULL for new credentials and never compared to a server lease.", "drop": "docs/agent-server-surfaces.md#turn-transport-storage-retirement (LEGACY_CREDENTIAL_BINDINGS_LIVE_SQL in owned-model-credential.ts returns 0)" },
           "model": "Pins the selected provider model so configuration changes cannot retarget an issued credential.",
           "agent_model": "Retains the explicit agent model selection used when the credential was issued.",
           "model_token_hash": "Detects model-token rotation after issuance without retaining its secret.",
-          "expires_ms": "Preserves the original admitted deadline so replay cannot extend model authority.",
+          "expires_ms": "Records the deadline signed into older credentials; new credentials store NULL, live invocation membership bounds their authority, and no time expiry is enforced.",
           "created_at": "Records the issuance boundary independently of later command claim changes.",
           "revoked_at": "Preserves the credential schema revocation marker checked by authentication; the existing primitive has no current revocation writer."
         }
@@ -3720,7 +3761,8 @@
         "fromState": "existing before the registry; weekly audit reviews",
         "commandId": "existing before the registry; weekly audit reviews",
         "trigger": "existing before the registry; weekly audit reviews",
-        "reportToId": "the person a human-directed worker report addresses; written with the report, it scopes the derived wait"
+        "reportToId": "the person a human-directed worker report addresses; written with the report, it scopes the derived wait",
+        "owner": "the person who decides a grant-request card; written with the card, it keeps asks with different deciders on separate cards"
       },
       "legacy_event": {
         "turnGenerationId": "existing before the registry; weekly audit reviews"

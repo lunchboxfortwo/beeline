@@ -422,7 +422,7 @@ const scope1 = fixtureScope1();
   });
 
 
-  it('keeps connector receipts in the read-only System DM', async () => {
+  it('does not create a System DM for connector usage', async () => {
     const connectorId = await scope1.pairOwnerConnector('tailscale');
     await scope1.daemonOperation('postConnectionUsage', {
       requestId: createHash('sha256').update('turn-3').digest('hex'),
@@ -442,11 +442,7 @@ const scope1 = fixtureScope1();
        WHERE r.workspace_id=$1 AND m.card_type='connection-receipt' LIMIT 1`,
       [WORKSPACE],
     );
-    const response = await scope1.operation('sendRoomMessage', {
-      roomId: room.rows[0]!.id,
-      text: 'hello?',
-    });
-    expect(response.status).toBe(403);
+    expect(room.rows).toEqual([]);
   });
 
 

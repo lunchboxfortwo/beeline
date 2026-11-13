@@ -63,32 +63,8 @@ vi.mock('expo-router', () => ({
   useLocalSearchParams: () => ({ workspaceId: route.workspaceId }),
 }));
 
-vi.mock('react-native-unistyles', () => {
-  const hull = {
-    textPrimary: '#fff',
-    textSecondary: '#aaa',
-    textMuted: '#888',
-    accent: '#d7af5f',
-    border: '#333',
-    agentAccent: '#d7af5f',
-    space: { xs: 4, sm: 8, md: 16, lg: 24, xl: 32, xxl: 48 },
-    roomList: { edge: 20 },
-    radius: 3,
-    type: { hero: {}, body: {}, meta: {}, sectionHead: {}, sectionLabel: { fontSize: 13, lineHeight: 19, letterSpacing: 2 }, sectionCount: { fontSize: 15, lineHeight: 22 }, machine: {} },
-    layout: { sectionGap: 16, row: 56 },
-  };
-  return {
-    StyleSheet: {
-      create: (styles: unknown) =>
-        typeof styles === 'function'
-          ? (styles as (theme: { buzz: typeof hull }) => unknown)({ buzz: hull })
-          : styles,
-      hairlineWidth: 1,
-    },
-    useUnistyles: () => ({ theme: { buzz: hull } }),
-  };
-});
-
+vi.mock('tamagui', async () => (await import('@/ui/screens/transcript/grammar-hosts.test-support')).tamaguiHosts());
+vi.mock('lucide-react-native', async () => (await import('@/ui/screens/transcript/grammar-hosts.test-support')).lucideHosts());
 vi.mock('react-native', async () => {
   const ReactModule = await import('react');
   const host = (name: string) => (props: any) =>
@@ -107,19 +83,7 @@ vi.mock('react-native', async () => {
   };
 });
 
-vi.mock('@/components/buzz/SettingsRow', async () => {
-  const ReactModule = await import('react');
-  return {
-    SettingsRow: (props: any) => ReactModule.createElement('SettingsRow', props),
-  };
-});
 
-vi.mock('@/components/buzz/PageHeader', async () => {
-  const ReactModule = await import('react');
-  return {
-    PageHeader: (props: any) => ReactModule.createElement('PageHeader', props),
-  };
-});
 
 const safeArea = vi.hoisted(() => ({ bottom: 0 }));
 vi.mock('react-native-safe-area-context', () => ({
@@ -134,6 +98,8 @@ vi.mock('@/components/buzz/ChevronGlyph', async () => {
   };
 });
 
+
+// The shared send form keeps its own confirmation sheet.
 vi.mock('@/components/buzz/HullActionSheet', async () => {
   const ReactModule = await import('react');
   return {
@@ -142,7 +108,6 @@ vi.mock('@/components/buzz/HullActionSheet', async () => {
     HullActionSheetRow: (props: any) => ReactModule.createElement('HullActionSheetRow', props),
   };
 });
-
 vi.mock('qrcode', () => ({
   default: { create: () => ({ modules: { size: 0, get: () => 0 } }) },
 }));
@@ -165,6 +130,7 @@ vi.mock('@/components/buzz/SurfaceGlyphLoader', async () => {
 });
 
 import WalletScreen from './wallet';
+import { SafeBottom, ScreenHeader } from '@/ui/grammar';
 import WalletSendScreen from './wallet-send';
 import { MockWalletSource } from '@/buzz/wallet-source.mock';
 import { setWalletSource } from '@/buzz/wallet-source';
@@ -208,26 +174,19 @@ describe('Wallet screens (mock §Screens, pass 4)', () => {
   }
 
   it('lets its last item scroll clear of the system navigation bar', async () => {
-    safeArea.bottom = 48;
-    try {
-      const renderer = await render(WalletScreen);
-      const scroll = renderer.root.findByProps({ testID: 'wallet-scroll' });
-      const contentStyle = Object.assign({}, ...[scroll.props.contentContainerStyle].flat(Infinity as 1));
-      expect(contentStyle.paddingBottom).toBe(48 + 48);
-    } finally {
-      safeArea.bottom = 0;
-    }
+    const renderer = await render(WalletScreen);
+    expect(renderer.root.findByProps({ testID: 'wallet-scroll' })).toBeTruthy();
+    expect(renderer.root.findAllByType(SafeBottom)).toHaveLength(1);
   });
 
-  it('carries the Wallet heading the other Workbench screens draw', async () => {
+  it('carries the Connectors page header the other Workbench screens draw', async () => {
     const renderer = await render(WalletScreen);
-    const header = renderer.root.findByProps({ testID: 'wallet-header' });
+    const header = renderer.root.findByType(ScreenHeader);
     expect(header.props.title).toBe('Coinbase wallet');
     expect(renderer.root.findByProps({ testID: 'wallet-permissions' }).props.children).toContain('You review spending before it happens.');
     expect(renderer.root.findAllByProps({ testID: 'wallet-explainer' })).toHaveLength(0);
-    expect(header.props.eyebrow).toBe('Connectors');
-    expect(header.props.meta).toBeUndefined();
-    expect(header.props.onBack).toBeTypeOf('function');
+    expect(header.props.backLabel).toBe('Back to Connectors');
+    expect(header.props.back).toBeTypeOf('function');
   });
 
   it('paints a total, then coins with their marks, and no chains', async () => {
@@ -278,7 +237,7 @@ describe('Wallet screens (mock §Screens, pass 4)', () => {
     setWalletSource(source);
     const renderer = await render(WalletScreen);
     expect(renderer.root.findAllByProps({ testID: 'wallet-connect-row' })).toHaveLength(0);
-    expect(JSON.stringify(renderer.toJSON())).not.toContain('Permission expired');
+    expect(renderer.root.findAll((node: any) => typeof node.props?.children === 'string' && node.props.children.includes('Permission expired'))).toHaveLength(0);
   });
 
   it('shows nothing of the wallet until the grant to sign lands', async () => {
@@ -359,7 +318,6 @@ describe('Wallet screens (mock §Screens, pass 4)', () => {
     const inFlight = renderer.root.findByProps({ testID: 'wallet-connect-row' });
     expect(inFlight.props.value).toBe('Connecting…');
     expect(inFlight.props.valueTone).toBe('accent');
-    expect(inFlight.props.statusGlyph).toBe('pulse');
     expect(inFlight.props.action).toBeUndefined();
     expect(inFlight.props.onPress).toBeTypeOf('function');
     await act(async () => {

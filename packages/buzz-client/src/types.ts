@@ -35,6 +35,7 @@ export interface Agent {
 }
 
 export interface AgentPairingCode {
+  invitationGuide?: import("@beeline/api-contract/phone").AgentInvitationPickerGuide;
   code: string;
   tokenHash: string;
   communityId: string;

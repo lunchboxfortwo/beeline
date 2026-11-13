@@ -186,9 +186,9 @@ export function inspectSurfaceReadAuthority(file, text) {
 
   const publicReads = new Set(['ChatListKey', 'ChatListConsumer', 'ChatListHandle', 'acquireChatList',
     'liveChatList', 'chatListSnapshot', 'refreshChatList', 'resetChatListStoresForTest', 'readChatList',
-    'loadNeedsYouList', 'loadSavedList', 'loadTrayList', 'seedNeedsYouList', 'forgetTray',
-    'removeNeedsYou', 'holdNeedsYou', 'subscribeTrayGap', 'useTrayList', 'useNeedsYouCount',
-    'acknowledgePaintedNeedsYou', 'hideSavedItems', 'revealSavedItems']);
+    'loadNeedsYouList', 'loadTrayList', 'seedNeedsYouList', 'forgetTray',
+    'removeNeedsYou', 'subscribeTrayGap', 'useTrayList', 'useNeedsYouCount',
+    'acknowledgePaintedNeedsYou']);
   function visit(node) {
     if ((ts.isFunctionDeclaration(node) || ts.isVariableDeclaration(node)) && node.name &&
         /(?:ChatListView|NeedsYouListResult|MessageBookmarkListResult)/.test((node.type ?? node.initializer?.type)?.getText(source) ?? ''))
@@ -373,7 +373,8 @@ export function judgeInventory(sites, inventory, baseline) {
     const before = new Map(baseline.entries.map(entry => [entry.id, entry]));
     for (const entry of entries.values()) {
       const old = before.get(entry.id);
-      if (!old || entry.count > old.count) errors.push(`migration debt cannot grow: ${entry.id}`);
+      // An entry may grow the inventory only with a recorded reason (owner-decided egress).
+      if ((!old || entry.count > old.count) && !entry.reason?.trim()) errors.push(`migration debt cannot grow: ${entry.id}`);
     }
   }
   return errors;

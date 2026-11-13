@@ -66,12 +66,13 @@ export default {
         // (apps/mobile/patches) moves the other platform's stamp too; both pins
         // move together. OTA automatically targets each pin plus the two highest
         // shipped runtimes below it, excluding explicit retirements.
+        backgroundColor: "#FAFAF9",
         orientation: "default",
         icon: "./sources/assets/images/icon.png",
         scheme,
         userInterfaceStyle: "automatic",
         ios: {
-            runtimeVersion: runtimeVersionOverride || "38",
+            runtimeVersion: runtimeVersionOverride || "40",
             // Keep the launcher identity stable across system appearance modes.
             // iOS masks this full-size source; only Android adaptive layers need
             // the separately inset safe-zone treatment.
@@ -106,7 +107,7 @@ export default {
             }
         },
         android: {
-            runtimeVersion: runtimeVersionOverride || "49",
+            runtimeVersion: runtimeVersionOverride || "52",
             versionCode: 27,
             adaptiveIcon: {
                 foregroundImage: "./sources/assets/images/icon-adaptive.png",
@@ -235,20 +236,20 @@ export default {
                         image: "./sources/assets/images/splash-android-light.png",
                         imageWidth: 125,
                         resizeMode: "contain",
-                        backgroundColor: "#F3EEE4",
+                        backgroundColor: "#FAFAF9",
                         dark: {
                             image: "./sources/assets/images/splash-android-dark.png",
-                            backgroundColor: "#14091A",
+                            backgroundColor: "#171717",
                         }
                     },
                     android: {
                         image: "./sources/assets/images/splash-android-light.png",
                         imageWidth: 125,
                         resizeMode: "contain",
-                        backgroundColor: "#F3EEE4",
+                        backgroundColor: "#FAFAF9",
                         dark: {
                             image: "./sources/assets/images/splash-android-dark.png",
-                            backgroundColor: "#14091A",
+                            backgroundColor: "#171717",
                         }
                     }
                 }

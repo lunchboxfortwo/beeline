@@ -23,7 +23,6 @@ vi.mock('react-native', async () => {
       modalRenders(props.visible);
       return props.visible ? ReactModule.createElement('Modal', props, props.children) : null;
     },
-    StyleSheet: { flatten: (style: unknown) => style },
     Pressable: 'Pressable',
     Text: 'Text',
     TextInput: 'TextInput',
@@ -39,6 +38,10 @@ vi.mock('react-native-reanimated', () => {
     ReduceMotion: { System: 'system' },
   };
 });
+vi.mock('tamagui', async () => (await import('@/ui/screens/transcript/grammar-hosts.test-support')).tamaguiHosts());
+vi.mock('lucide-react-native', async () => (await import('@/ui/screens/transcript/grammar-hosts.test-support')).lucideHosts());
+vi.mock('react-native-safe-area-context', () => ({ useSafeAreaInsets: () => ({ top: 0, bottom: 0, left: 0, right: 0 }) }));
+vi.mock('@/sync/storage', () => ({ useLocalSetting: () => 'medium' }));
 vi.mock('./Button', () => ({ Button: 'Button' }));
 vi.mock('./ButtonRow', () => ({ ButtonRow: 'ButtonRow' }));
 vi.mock('./MonoHull', () => ({ HullSurface: 'HullSurface' }));
@@ -58,7 +61,8 @@ afterEach(() => {
 });
 
 describe('HullModal presentation ownership', () => {
-  it('does not read unmounted Android content, and reads its latest value when opened', () => {
+  it.each(['android', 'ios', 'web'])('does not read unopened %s content, and reads its latest value when opened', (platform) => {
+    Object.assign(Platform, { OS: platform });
     const readTitle = vi.fn(() => 'Room actions');
     const options = {
       get title() {
@@ -142,6 +146,14 @@ describe('HullModal presentation ownership', () => {
     };
     act(() => {
       renderer = create(
+        <HullModal visible onRequestClose={() => undefined}>
+          {React.createElement('Text', { payload })}
+        </HullModal>,
+      );
+    });
+    read.mockClear();
+    act(() => {
+      renderer.update(
         <HullModal visible={false} onRequestClose={() => undefined}>
           {React.createElement('Text', { payload })}
         </HullModal>,

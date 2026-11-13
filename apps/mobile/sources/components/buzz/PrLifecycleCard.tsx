@@ -1,11 +1,11 @@
 import React, { useState } from 'react';
-import { Text, View } from 'react-native';
-import { StyleSheet } from 'react-native-unistyles';
+import { XStack } from 'tamagui';
+import { Inked, T } from '@/ui/grammar';
+import { CornerDownRight, type LucideProps } from 'lucide-react-native';
 import type { ChatDisplayMessage } from '@/buzz/room-view-presentation';
 import { lifecycleSummary, type NotificationLifecycleRun } from '@/buzz/pr-lifecycle';
-import { InlineRow, TranscriptNavigationRow } from './IndexRow';
+import { TranscriptNavigationRow } from './IndexRow';
 import { LedgerDisclosure, LedgerLogGroup } from './LedgerDisclosure';
-import { CornerGlyph, CORNER_META_SIZE } from './CornerGlyph';
 
 interface NotificationLifecycleCardProps {
   message: ChatDisplayMessage;
@@ -43,9 +43,9 @@ export const NotificationLifecycleCard = React.memo(function NotificationLifecyc
       {items.length > 1 ? <LedgerDisclosure expanded={expanded}
         onPress={() => { if (expanded) setShowAll(false); setExpanded(value => !value); }} accessibilityLabel={summary}
         accessibilityState={{ expanded }} rowTestID={`notification-run-expand-${message.id}`}>
-        {summary.split(' · ').map((part, index) => <Text key={index} style={/fail/i.test(part) ? styles.failed : undefined}>
+        {summary.split(' · ').map((part, index) => <T v="meta" key={index} color={/fail/i.test(part) ? 'needsYou' : 'secondary'}>
           {index ? ' · ' : ''}{part}
-        </Text>)}
+        </T>)}
       </LedgerDisclosure> : null}
       {items.length === 1 || expanded ? <>
         {(showAll || items.length <= 3 ? items : items.slice(0, 2)).map((item, index) => (
@@ -96,26 +96,32 @@ export function RepositoryLifecycleRow({
         testID={`notification-run-cell-${item.id}`}
         divider={divider}
         singleDestination
-        leading={item.cornerId ? <CornerGlyph size={CORNER_META_SIZE} /> : undefined}
+        leading={item.cornerId ? <Inked<LucideProps> glyph={CornerDownRight} color="secondary" size={13} strokeWidth={1.7} /> : undefined}
         trailing={
           item.cornerId
             ? {
-                accessibilityLabel: `Open corner ${item.title}`,
+                accessibilityLabel: `Open thread ${item.title}`,
                 onPress: () => onOpenCorner(item.cornerId!),
                 testID: cornerTestID,
               }
             : undefined
         }
       >
-        <InlineRow style={styles.cornerCopy}>
-          <Text style={[styles.repositoryTitle, styles.cornerName]} numberOfLines={1} ellipsizeMode="tail">
-            <Text style={[styles.verb, /fail/i.test(state) && styles.failed]}>{verb} </Text>
+        {/* Centre the body line in the 44 copy target without moving either icon
+            or changing the row's layout and hit target (approved title-alignment mock). */}
+        <XStack alignItems="baseline" y={2.5}>
+          <T color="secondary" minWidth={0} numberOfLines={1} ellipsizeMode="tail">
+            <T v="heading" color={/fail/i.test(state) ? 'needsYou' : 'ink'}>{verb} </T>
             {item.title}
             {state === 'Merged' && number && item.url ? ' ' : null}
-          </Text>
+          </T>
           {state === 'Merged' && number && item.url ? (
-            <Text
-              style={[styles.number, styles.cornerNumber]}
+            <T
+              v="heading"
+              color="needsYou"
+              textDecorationLine="underline"
+              flexShrink={0}
+              marginLeft="1"
               numberOfLines={1}
               accessibilityRole="link"
               accessibilityLabel={`Open PR ${number}`}
@@ -124,18 +130,24 @@ export function RepositoryLifecycleRow({
                 event.stopPropagation();
                 onOpenUrl(item.url!);
               }}
-            >{`PR ${number}`}</Text>
+            >{`PR ${number}`}</T>
           ) : null}
-        </InlineRow>
+        </XStack>
       </TranscriptNavigationRow>
     );
   }
   const copy = (
-    <Text style={[styles.rowTitle, isRepositoryLifecycleItem(item) && styles.repositoryTitle]} numberOfLines={2} ellipsizeMode="tail">
-      <Text style={[styles.verb, !isRepositoryLifecycleItem(item) && styles.nonRepositoryVerb, /fail/i.test(state) && styles.failed]}>{verb} </Text>
-      {number && item.url ? <><Text style={styles.number}>#{number}</Text>{' '}</> : null}
+    <T
+      v={isRepositoryLifecycleItem(item) ? 'body' : 'meta'}
+      color="secondary"
+      marginVertical={isRepositoryLifecycleItem(item) ? 0 : '1'}
+      numberOfLines={2}
+      ellipsizeMode="tail"
+    >
+      <T v={isRepositoryLifecycleItem(item) ? 'heading' : 'metaStrong'} color={/fail/i.test(state) ? 'needsYou' : 'ink'}>{verb} </T>
+      {number && item.url ? <><T v="heading" color="needsYou" textDecorationLine="underline">#{number}</T>{' '}</> : null}
       {item.title}
-    </Text>
+    </T>
   );
   return (
     <TranscriptNavigationRow
@@ -145,7 +157,7 @@ export function RepositoryLifecycleRow({
       primary={
         item.url && (isRepositoryLifecycleItem(item) || item.cornerId)
           ? {
-              accessibilityLabel: item.cornerId ? `Open corner ${item.title}` : `Open ${item.kindLine}`,
+              accessibilityLabel: item.cornerId ? `Open thread ${item.title}` : `Open ${item.kindLine}`,
               onPress: () => item.cornerId ? onOpenCorner(item.cornerId) : onOpenUrl(item.url!),
               testID: `notification-run-cell-url-${item.id}`,
             }
@@ -154,7 +166,7 @@ export function RepositoryLifecycleRow({
       trailing={
         item.cornerId
           ? {
-              accessibilityLabel: `Open corner ${item.title}`,
+              accessibilityLabel: `Open thread ${item.title}`,
               onPress: () => onOpenCorner(item.cornerId!),
               testID: cornerTestID,
             }
@@ -167,30 +179,3 @@ export function RepositoryLifecycleRow({
     </TranscriptNavigationRow>
   );
 }
-
-const styles = StyleSheet.create(({ buzz }) => ({
-  failed: { color: buzz.accent },
-  // Centre the body line in the existing copy target without moving either icon
-  // or changing the row's layout and hit target (approved title-alignment mock).
-  cornerCopy: {
-    flexDirection: 'row',
-    alignItems: 'baseline',
-    transform: [{ translateY: (44 - 2 * buzz.space.sm - buzz.type.body.lineHeight) / 2 }],
-  },
-  cornerName: { flexShrink: 1, minWidth: 0 },
-  cornerNumber: { flexShrink: 0, marginLeft: buzz.space.xs },
-  repositoryTitle: { ...buzz.type.body, color: buzz.textSecondary, marginVertical: 0 },
-  rowTitle: {
-    ...buzz.type.meta,
-    color: buzz.textSecondary,
-    marginVertical: (44 - 2 * buzz.space.sm - buzz.type.meta.lineHeight) / 2,
-  },
-  verb: { ...buzz.type.body, fontFamily: buzz.proseMedium, color: buzz.textPrimary },
-  nonRepositoryVerb: { ...buzz.type.meta, fontFamily: buzz.proseMedium },
-  number: {
-    ...buzz.type.body,
-    fontFamily: buzz.proseMedium,
-    color: buzz.accent,
-    textDecorationLine: 'underline',
-  },
-}));

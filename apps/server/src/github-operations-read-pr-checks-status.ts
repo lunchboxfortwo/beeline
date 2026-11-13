@@ -527,6 +527,17 @@ import { GitHubOperations, reviewerWakeFromFacts, Input, LandCornerOutcome, Corn
   }
 
 
+  /** A dirty verdict is already contained when the merge base is the current base tip. */
+  export function headContainsCurrentMain(mergeability: string | undefined, mergeBase: string | undefined, mainHead: string | undefined): boolean {
+    return mergeability === 'dirty' && Boolean(mergeBase && mainHead && mergeBase === mainHead);
+  }
+
+  function comparedMergeBase(compared: unknown): string | undefined {
+    if (!compared || typeof compared !== 'object') return undefined;
+    const base = (compared as { merge_base_commit?: { sha?: unknown } }).merge_base_commit;
+    return typeof base?.sha === 'string' ? base.sha : undefined;
+  }
+
   /**
    * Retry GitHub's asynchronous mergeability calculation for open corner PRs,
    * and re-read a stored 'dirty' PR so a conflict that GitHub has since
@@ -593,6 +604,15 @@ import { GitHubOperations, reviewerWakeFromFacts, Input, LandCornerOutcome, Corn
         // recorded; any other verdict waits for GitHub to reach that base.
         if (staleBase && pr.mergeability !== 'dirty') continue;
         const baseSha = staleBase ? row.base_sha! : pr.baseSha;
+        let contained = false;
+        if (pr.mergeability === 'dirty') {
+          try {
+            const branch = row.target_branch || 'main';
+            const mainHead = await ctx.app.readBranchHead(token.token, row.repository, branch);
+            const compared = await ctx.app.readRepositoryJson(token.token, row.repository, `compare/${branch}...${pr.headSha}`);
+            contained = headContainsCurrentMain(pr.mergeability, comparedMergeBase(compared), mainHead);
+          } catch { contained = false; }
+        }
         await ctx.database.transaction(async (tx) => {
           // Conflict dispatch advances the lifecycle in this transaction, like
           // check refresh. Take its lock before retaining the cache row.
@@ -616,13 +636,13 @@ import { GitHubOperations, reviewerWakeFromFacts, Input, LandCornerOutcome, Corn
             {
               pr: {
                 ...current.pr,
-                mergeability: pr.mergeability,
+                mergeability: contained ? 'clean' : pr.mergeability,
                 ...(baseSha ? { baseSha } : {}),
               },
             },
             tx,
           );
-          if (pr.mergeability !== 'dirty') return;
+          if (pr.mergeability !== 'dirty' || contained) return;
           const conflictKey = mergeConflictKey(row.number, pr.headSha);
           const note = await systemLine(tx, {
             id: hash(`beeline:${row.corner_id}:github:${conflictKey}`),

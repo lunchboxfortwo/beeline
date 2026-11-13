@@ -13,7 +13,7 @@ import { reserveAllowance, settleAllowance } from './free-agent-accounting.js';
 import { handoff, saveWorkflow, settleWorkflowGate, startWorkflow } from './workflow-runs.js';
 import { applySkillRevision } from './institutional-skills.js';
 import { advanceCorner, confirmCornerMergeAuthority, createCornerFacts } from './corner-lifecycle.js';
-import { sendSystemNotices,systemLine } from './system-line.js';
+import { systemLine } from './system-line.js';
 import { recordFreeAgentGuideStarted, warnFreeAgentOwner } from './free-agent-warning.js';
 import {createHash} from 'node:crypto';
 import {canonicalUsageAccountSnapshot} from '@beeline/api-contract/helper-usage';
@@ -546,15 +546,6 @@ describe.skipIf(!url)('atomic claims replace advisory serialization', () => {
     expect(results[1]).toHaveProperty('error',expect.stringContaining(run));
     expect((await first.query(`SELECT id FROM messages WHERE room_id=$1 AND card->>'workflowSlug'=$2`,[room,slug])).rows).toHaveLength(1);
     expect((await first.query(`SELECT id FROM agent_commands WHERE source_message_id=$1`,[run])).rows).toHaveLength(1);
-  });
-
-  it('two notice batches restore both recipients and insert each notice once', async () => {
-    const recipients=['1'.repeat(64),'2'.repeat(64)].map((identityId,index)=>({identityId,messageId:'batch-notice-'+index}));
-    await first.query(`INSERT INTO identities(id,kind,name) SELECT id,'human','Notice recipient' FROM unnest($1::text[]) id`,[recipients.map(row=>row.identityId)]);
-    await overlap(db=>db.transaction(tx=>sendSystemNotices(tx,workspace,recipients,
-      {subject:{kind:'system',name:'Workflow'},verb:'finished'})),'INSERT INTO identities');
-    expect((await first.query(`SELECT id FROM messages WHERE id=ANY($1::text[])`,[recipients.map(row=>row.messageId)])).rows).toHaveLength(2);
-    expect((await first.query(`SELECT identity_id FROM memberships WHERE identity_id=ANY($1::text[]) AND removed_at IS NULL`,[recipients.map(row=>row.identityId)])).rows).toHaveLength(2);
   });
 
   it('two answers to the same workflow gate settle its choice and successor once', async () => {

@@ -1,3 +1,5 @@
+import { RECLAIMED_REPLY_REFUSAL } from '@beeline/api-contract/helper-turn-ownership';
+import { DaemonApiError } from './daemon-api-client.js';
 import { HelperOverlayOwner } from './helper-overlay.js';
 import type { DaemonOperationMap } from '@beeline/api-contract/daemon';
 import type { DaemonApiClient } from './daemon-api-client.js';
@@ -325,13 +327,22 @@ export class AgentTurnStream {
     this.close();
     const { api, roomId, requestId } = this.options;
     if (reply) {
-      await api.execute('postRoomMessage', {
+      const publish = () => api.execute('postRoomMessage', {
         roomId,
         requestId,
         text: reply,
         presentation: 'message',
         ...fields,
       });
+      try { await publish(); }
+      catch (error) {
+        // Only a reclaimed/requeued execution warrants another publication.
+        // Idempotent server delivery keeps uncertain first success from doubling.
+        if (!(error instanceof DaemonApiError) || error.status !== RECLAIMED_REPLY_REFUSAL.status ||
+            error.message !== RECLAIMED_REPLY_REFUSAL.message) throw error;
+        console.error(`[thin-core] ${this.options.label} reply was not delivered; retrying once:`, error.message);
+        await publish();
+      }
       onReplyPosted?.();
     }
     // The retract stays after the reply: a late draft write must never put an

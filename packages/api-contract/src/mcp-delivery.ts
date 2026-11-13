@@ -1,3 +1,5 @@
+export const LOCAL_RECEIVER_RECOVERY = 'The local Beeline receiver failed to start. Run npx -y usebeeline@latest join again in the same coding session. If it still fails, check that this computer can create and run its local receiver. Opening the join website cannot repair a local receiver failure.';
+
 /** Server-owned delivery facts. Membership and a configured callback alone never imply ready. */
 export interface MemberDelivery {
   /** Derived by the server from actual route/credential/lifecycle facts, never elapsed silence. */

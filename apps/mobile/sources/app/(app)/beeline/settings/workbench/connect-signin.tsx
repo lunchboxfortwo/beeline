@@ -1,24 +1,18 @@
-import { ErrorBanner } from '@/components/buzz/ErrorBanner';
 import { appErrorCopy } from '@/buzz/app-error-copy';
-import { SettingsRow } from '@/components/buzz/SettingsRow';
-import { desktopColumnWidths } from '@/buzz/desktop-layout-tokens';
-import { useIsDesktop as useDesktopPageLayout } from '@/utils/responsive';
 import { useLatencyRouteFrame } from '@/buzz/latency-route-hook';
 import React, { useCallback, useEffect, useRef, useState } from 'react';
-import { ActivityIndicator, AppState, Platform, Text, View } from 'react-native';
-import { StyleSheet, useUnistyles } from 'react-native-unistyles';
+import { AppState, Platform } from 'react-native';
+import { Spinner, YStack } from 'tamagui';
 import * as WebBrowser from 'expo-web-browser';
 import { router, useLocalSearchParams, type Href } from 'expo-router';
-import { useSafeAreaInsets } from 'react-native-safe-area-context';
-import { Button } from '@/components/buzz/Button';
-import { LoadingBar, RingSpinner } from '@/components/buzz/ConnectProgress';
-import { PageHeader } from '@/components/buzz/PageHeader';
 import { useSandboxWebView } from '@/components/buzz/sandbox-webview';
 import { useInstallObserver } from '@/buzz/use-observed-resource';
 import { getWorkbenchSource } from '@/buzz/workbench-source';
 import { connectorOfferCompletionRoute } from '@/buzz/connector-offer-ceremony';
 import { monolithPhoneOperation } from '@/sync/transport/monolith-operation';
 import { takeAppSignInReturn } from '@/buzz/app-sign-in';
+import { Btn, Copy, T } from '@/ui/grammar';
+import { ConnectorFooter, ConnectorFrame, ConnectorNote } from '@/ui/screens/settings/connectors/ConnectorParts';
 
 function first(value: string | string[] | undefined): string | undefined { return Array.isArray(value) ? value[0] : value; }
 
@@ -47,11 +41,10 @@ function AppSignInReturnScreen({ sessionUri }: { sessionUri: string }) {
     return () => { live = false; };
   }, [sessionUri]);
   return (
-    <View style={styles.returnScreen} testID="app-sign-in-return">
-    {error ? (
-        <SettingsRow title={error} /> ) : (
-        <ActivityIndicator accessibilityLabel="Completing app sign-in" />)}
-  </View>);
+    <YStack flex={1} alignItems="center" justifyContent="center" padding="6" backgroundColor="canvas" testID="app-sign-in-return">
+      {error ? <ConnectorNote tone="danger" testID="app-sign-in-error">{error}</ConnectorNote>
+        : <Spinner color="secondary" accessibilityLabel="Completing app sign-in" />}
+    </YStack>);
 }
 
 /** Existing Trusty Squire helper sign-in retains its streamed browser overlay. */
@@ -73,9 +66,6 @@ function ConnectorSignInOverlay() {
   const [pageLoaded, setPageLoaded] = useState(false);
   const [attempt, setAttempt] = useState(0);
   const [fallback, setFallback] = useState(false);
-  const { theme } = useUnistyles();
-  const insets = useSafeAreaInsets();
-  const desktopPageLayout = useDesktopPageLayout();
   const WebView = useSandboxWebView();
 
   const observed = useInstallObserver(workspaceId, connectorId);
@@ -147,77 +137,62 @@ function ConnectorSignInOverlay() {
   const streamed = !external;
   const loading = !failure && !fallback && (!signIn.url || (streamed && !pageLoaded));
   return (
-    <View style={[styles.screen, { paddingTop: insets.top }]} testID="signin-overlay">
-      <View style={[styles.column, desktopPageLayout && { width: '100%', maxWidth: desktopColumnWidths.detail, alignSelf: 'center' }]} testID="signin-card">
-        <PageHeader backAccessibilityLabel="Close sign-in" eyebrow={squire ? 'Step 4 of 4' : 'Connectors'} prominent onBack={() => router.back()} testID="signin-header" title={squire ? 'Sign in to Google' : `Sign in to ${connectorName}`} />
-        {loading ? <LoadingBar testID="signin-loading-bar" /> : null}
-        <View style={styles.body}>
-          {streamed && !failure && !fallback && WebView && signIn.url ? (
-            <View style={[styles.webFrame, !pageLoaded && styles.webHidden]}>
-              {React.createElement(WebView, { key: `${signIn.url}:${attempt}`, onLoad: () => { if (!loadFailed.current) setPageLoaded(true); }, onError: pageFailed, onHttpError: pageFailed, renderError: () => null, source: { uri: signIn.url }, style: styles.webView, javaScriptEnabled: true, domStorageEnabled: true, testID: 'signin-webview' })}
-            </View>
-          ) : null}
-          {!streamed && !failure && signIn.url ? (
-            <View style={styles.center} testID="signin-oauth-browser">
-              <Text style={styles.centerLine}>{connectorName} sign-in opens in your browser. Return here after granting access.</Text>
-              <Button label={`Continue with ${connectorName}`} destination="external" onPress={() => void openBrowser()} testID="signin-open-external" />
-            </View>
-          ) : failure ? (
-            <View style={styles.center} accessibilityLiveRegion="polite" testID="signin-error">
-              <Text style={styles.centerTitle}>{squire ? 'Google sign-in didn’t load' : `${connectorName} sign-in didn’t load`}</Text>
-              <ErrorBanner inline title={errorLine ?? ''}  />
-            </View>
-          ) : fallback ? (
-            <View style={[styles.center, styles.centerBare]} testID="signin-finishing">
-              <RingSpinner size={32} accessibilityLabel="Finishing sign-in" />
-              <Text style={styles.centerTitle}>Finishing sign-in…</Text>
-              <Text style={styles.centerLine}>You signed in on Chrome. {machineName} is saving the session. This page switches to connected by itself.</Text>
-            </View>
-          ) : loading ? (
-            <View style={[styles.center, styles.cover]} testID="signin-webview-loading">
-              <RingSpinner size={32} accessibilityLabel="Loading Google sign-in" />
-              <Text style={styles.centerTitle}>{squire ? 'Loading Google sign-in…' : `Loading ${connectorName} sign-in…`}</Text>
-              <Text style={styles.centerLine}>From {machineName}’s secure browser</Text>
-            </View>
-          ) : null}
-        </View>
-        {failure ? (
-          <View style={[styles.foot, { paddingBottom: theme.buzz.space.lg + insets.bottom }]}>
-            <Button appearance={{ control: styles.primaryButton, label: styles.primaryLabel }} label={observed.installMissing ? 'Go back' : 'Try again'} fullWidth
-              onPress={observed.installMissing ? () => router.back() : () => void retry()} testID="signin-retry" />
-            {!observed.installMissing && signIn.url
-              ? <Button appearance={{ control: styles.secondaryButton, label: styles.secondaryLabel }} label="Open in browser" variant="secondary" fullWidth onPress={() => void openBrowser()} testID="signin-open-external" /> : null}
-          </View>
-        ) : loading && signIn.url ? (
-          <View style={[styles.foot, { paddingBottom: theme.buzz.space.lg + insets.bottom }]}>
-            <Button appearance={{ control: styles.secondaryButton, label: styles.secondaryLabel }} label="Open in browser instead" variant="secondary" fullWidth onPress={() => void openBrowser()} testID="signin-open-external" />
-          </View>
-        ) : <View style={{ height: insets.bottom }} />}
-      </View>
-    </View>
+    <ConnectorFrame title={squire ? 'Sign in to Google' : `Sign in to ${connectorName}`} back={() => router.back()}
+      backLabel="Close sign-in" testID="signin-overlay" scroll={false}
+      footer={failure ? <ConnectorFooter>
+        <Btn kind="primary" label={observed.installMissing ? 'Go back' : 'Try again'}
+          onPress={observed.installMissing ? () => router.back() : () => void retry()} testID="signin-retry">{observed.installMissing ? 'Go back' : 'Try again'}</Btn>
+        {!observed.installMissing && signIn.url
+          ? <Btn label="Open in browser" onPress={() => void openBrowser()} testID="signin-open-external">Open in browser</Btn> : null}
+      </ConnectorFooter> : loading && signIn.url ? <ConnectorFooter>
+        <Btn label="Open in browser instead" onPress={() => void openBrowser()} testID="signin-open-external">Open in browser instead</Btn>
+      </ConnectorFooter> : undefined}>
+      <YStack flex={1} minHeight={0} testID="signin-card">
+        {streamed && !failure && !fallback && WebView && signIn.url ? (
+          <YStack flex={1} opacity={pageLoaded ? 1 : 0}>
+            {React.createElement(WebView, { key: `${signIn.url}:${attempt}`, onLoad: () => { if (!loadFailed.current) setPageLoaded(true); }, onError: pageFailed, onHttpError: pageFailed, renderError: () => null, source: { uri: signIn.url }, style: WEBVIEW_FILL, javaScriptEnabled: true, domStorageEnabled: true, testID: 'signin-webview' })}
+          </YStack>
+        ) : null}
+        {!streamed && !failure && signIn.url ? (
+          <SignInCenter testID="signin-oauth-browser">
+            <Copy small quiet textAlign="center">{connectorName} sign-in opens in your browser. Return here after granting access.</Copy>
+            <Btn kind="primary" label={`Continue with ${connectorName}`} onPress={() => void openBrowser()} testID="signin-open-external">{`Continue with ${connectorName}`}</Btn>
+          </SignInCenter>
+        ) : failure ? (
+          <SignInCenter testID="signin-error">
+            <T v="heading" textAlign="center">{squire ? 'Google sign-in didn’t load' : `${connectorName} sign-in didn’t load`}</T>
+            <ConnectorNote tone="danger" testID="signin-error-line">{errorLine ?? ''}</ConnectorNote>
+          </SignInCenter>
+        ) : fallback ? (
+          <SignInCenter testID="signin-finishing">
+            <Spinner color="needsYou" accessibilityLabel="Finishing sign-in" />
+            <T v="body" textAlign="center">Finishing sign-in…</T>
+            <Copy small quiet textAlign="center">You signed in on Chrome. {machineName} is saving the session. This page switches to connected by itself.</Copy>
+          </SignInCenter>
+        ) : loading ? (
+          <SignInCenter cover testID="signin-webview-loading">
+            <Spinner color="needsYou" accessibilityLabel="Loading Google sign-in" />
+            <T v="body" textAlign="center">{squire ? 'Loading Google sign-in…' : `Loading ${connectorName} sign-in…`}</T>
+            <Copy small quiet textAlign="center">From {machineName}’s secure browser</Copy>
+          </SignInCenter>
+        ) : null}
+      </YStack>
+    </ConnectorFrame>
+  );
+}
+
+/** The streamed page fills the body. */
+const WEBVIEW_FILL = { flex: 1 };
+
+/** One centred state in the body; `cover` lays it over the still-hidden page. */
+function SignInCenter({ children, cover = false, testID }: { children: React.ReactNode; cover?: boolean; testID?: string }) {
+  return (
+    <YStack flex={1} alignItems="center" justifyContent="center" gap="3" paddingHorizontal="6" backgroundColor="canvas" testID={testID}
+      {...(cover ? { position: 'absolute', top: 0, left: 0, right: 0, bottom: 0 } as const : {})}>
+      {children}
+    </YStack>
   );
 }
 
 /** A page that fails while its name is new reloads itself inside the 15 seconds. */
 const PAGE_LOAD_ERROR = 'The sign-in page did not load.';
-
-const styles = StyleSheet.create(theme => ({
-  primaryButton: { minHeight: 48, borderRadius: theme.buzz.radius, alignSelf: 'stretch', alignItems: 'center', justifyContent: 'center', backgroundColor: theme.buzz.appInk, borderWidth: 1, borderColor: theme.buzz.appInk },
-  primaryLabel: { ...theme.buzz.type.body, fontFamily: 'SpaceGrotesk-Medium', color: theme.buzz.appCanvas },
-  secondaryButton: { minHeight: 48, borderRadius: theme.buzz.radius, alignSelf: 'stretch', alignItems: 'center', justifyContent: 'center', borderWidth: 1, borderColor: theme.buzz.borderStrong },
-  secondaryLabel: { ...theme.buzz.type.body, fontFamily: 'SpaceGrotesk-Medium', color: theme.buzz.appInk },
-  returnScreen: { flex: 1, justifyContent: 'center', alignItems: 'center', backgroundColor: theme.buzz.bgTerminal },
-  screen: { flex: 1, backgroundColor: theme.buzz.appCanvas },
-  column: { flex: 1 },
-  body: { flex: 1 },
-  center: { flex: 1, alignItems: 'center', justifyContent: 'center', gap: theme.buzz.squireConnect.contentGap, paddingHorizontal: theme.buzz.squireConnect.centerSide, paddingBottom: theme.buzz.squireConnect.centerBottom },
-  // With no footer below, the same optical centre sits higher in a taller body.
-  centerBare: { paddingBottom: theme.buzz.squireConnect.bareBottom },
-  cover: { ...StyleSheet.absoluteFillObject, backgroundColor: theme.buzz.appCanvas },
-  centerTitle: { ...theme.buzz.squireConnect.titleType, marginTop: theme.buzz.space.sm, color: theme.buzz.appInk, textAlign: 'center' },
-  centerLine: { ...theme.buzz.squireConnect.detailType, color: theme.buzz.appQuiet, maxWidth: 300, textAlign: 'center' },
-  webFrame: { flex: 1 },
-  webHidden: { opacity: 0 },
-  webView: { flex: 1 },
-  foot: { paddingHorizontal: theme.buzz.space.lg, paddingTop: theme.buzz.space.md, gap: theme.buzz.squireConnect.contentGap, borderTopWidth: 1, borderTopColor: theme.buzz.appBorder, backgroundColor: theme.buzz.appCanvas },
-}));

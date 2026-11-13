@@ -1,6 +1,6 @@
 import React from 'react';
-import { Pressable, Text, View } from 'react-native';
-import { StyleSheet } from 'react-native-unistyles';
+import { XStack, YStack } from 'tamagui';
+import { Inked, T } from '@/ui/grammar';
 import { PixelLoader } from './MonoHull';
 import { CHEVRON_ROW_SIZE, ChevronGlyph } from './ChevronGlyph';
 
@@ -39,182 +39,112 @@ export function TranscriptCardChoicePlate({
   choice: TranscriptCardChoice;
   closed: boolean;
 }) {
+  const [pressed, setPressed] = React.useState(false);
   const washWidth = closed ? Math.max(0, Math.min(1, choice.share ?? 0)) : 0;
   const inner = (
     <>
       {washWidth > 0 ? (
-        <View
+        <YStack
           pointerEvents="none"
-          style={[
-            styles.choiceWash,
-            choice.leader ? styles.choiceWashLeader : null,
-            { width: `${Math.round(washWidth * 100)}%` },
-          ]}
+          position="absolute"
+          top={0}
+          bottom={0}
+          left={0}
+          width={`${Math.round(washWidth * 100)}%`}
+          backgroundColor="needsYou"
+          opacity={choice.leader ? 0.28 : 0.18}
           testID={`transcript-card-choice-wash-${choice.id}`}
         />
       ) : null}
-      <View style={styles.choiceInner}>
-        <View
-          style={[
-            styles.choiceLetter,
-            choice.selected ? styles.choiceLetterSelected : null,
-            choice.costly ? styles.choiceLetterCostly : null,
-          ]}
+      <XStack position="relative" alignItems="flex-start" gap="2" paddingVertical="2" paddingHorizontal="4">
+        <YStack
+          minWidth={26}
+          padding="1"
+          borderWidth={1}
+          borderColor={choice.costly ? 'removed' : choice.selected ? 'needsYou' : 'strongStroke'}
+          borderRadius="sm"
+          alignItems="center"
+          justifyContent="center"
+          overflow="hidden"
           testID={`transcript-card-choice-letter-${choice.id}`}
         >
+          {choice.selected ? (
+            <YStack pointerEvents="none" position="absolute" top={0} right={0} bottom={0} left={0} backgroundColor="needsYou" opacity={0.18} />
+          ) : null}
           {choice.mark === 'chevron' ? (
-            <ChevronGlyph
-              color={
-                choice.selected
-                  ? styles.choiceLetterTextSelected.color
-                  : choice.costly
-                    ? styles.choiceLetterTextCostly.color
-                    : styles.choiceLetterText.color
-              }
+            <Inked
+              color={choice.costly ? 'removed' : choice.selected ? 'needsYou' : 'ink'}
+              glyph={ChevronGlyph}
               size={CHEVRON_ROW_SIZE}
             />
-          ) : choice.mark === 'none' ? null : (
-            <Text
-              style={[
-                styles.choiceLetterText,
-                choice.selected ? styles.choiceLetterTextSelected : null,
-                choice.costly ? styles.choiceLetterTextCostly : null,
-              ]}
-            >
+          ) : choice.mark === 'none' ? (
+            <YStack width={16} height={16} />
+          ) : (
+            <T v="heading" color={choice.costly ? 'removed' : choice.selected ? 'needsYou' : 'ink'}>
               {choice.letter}
-            </Text>
+            </T>
           )}
-        </View>
-        <View style={styles.choiceCopy}>
-          <Text
-            style={[
-              styles.choiceLabel,
-              choice.leader ? styles.choiceLabelLeader : null,
-              choice.disabled && !choice.busy ? styles.choiceLabelDisabled : null,
-            ]}
+        </YStack>
+        <YStack flex={1} minWidth={0}>
+          <T
+            v={choice.leader ? 'heading' : 'body'}
+            color={choice.disabled && !choice.busy ? 'secondary' : 'ink'}
           >
             {choice.label}
-          </Text>
+          </T>
           {choice.consequence ? (
-            <Text style={styles.choiceConsequence}>{choice.consequence}</Text>
+            <T v="meta" color="secondary" marginTop="1">{choice.consequence}</T>
           ) : null}
-        </View>
+        </YStack>
         {choice.busy ? (
-          <View style={styles.choiceLoader}>
+          <YStack justifyContent="center" height={26}>
             <PixelLoader compact />
-          </View>
+          </YStack>
         ) : null}
         {closed && choice.votes !== undefined ? (
-          <Text
-            style={[styles.choiceCount, choice.leader ? styles.choiceCountLeader : null]}
+          <T
+            v={choice.leader ? 'metaStrong' : 'code'}
+            color={choice.leader ? 'needsYou' : 'secondary'}
+            fontVariant={['tabular-nums']}
+            paddingTop="1"
+            minWidth={16}
+            textAlign="right"
             testID={`transcript-card-choice-count-${choice.id}`}
           >
             {choice.votes}
-          </Text>
+          </T>
         ) : null}
-      </View>
+      </XStack>
     </>
   );
-  const plateStyle = [
-    styles.choicePlate,
-    closed ? styles.choicePlateClosed : null,
-    choice.selected ? styles.choicePlateSelected : null,
-    choice.disabled && !choice.busy ? styles.choicePlateDisabled : null,
-  ];
   const testID = choice.testID ?? `transcript-card-choice-${choice.id}`;
-  if (choice.onPress) {
-    const disabled = Boolean(choice.disabled || choice.busy);
-    return (
-      <Pressable
-        accessibilityRole="button"
-        accessibilityLabel={`${choice.letter}. ${choice.label}. ${choice.consequence}`}
-        accessibilityState={{ disabled, busy: choice.busy === true }}
-        aria-busy={choice.busy === true}
-        disabled={disabled}
-        onPress={choice.onPress}
-        style={({ pressed }) => [plateStyle, pressed && !disabled && styles.choicePlatePressed]}
-        testID={testID}
-      >
-        {inner}
-      </Pressable>
-    );
-  }
+  const disabled = Boolean(choice.disabled || choice.busy);
+  const pressable = Boolean(choice.onPress);
   return (
-    <View style={plateStyle} testID={testID}>
+    <YStack
+      position="relative"
+      overflow="hidden"
+      minHeight={52}
+      borderWidth={1}
+      borderRadius="sm"
+      borderColor={choice.disabled && !choice.busy ? 'stroke' : choice.selected ? 'needsYou' : closed ? 'stroke' : 'strongStroke'}
+      backgroundColor={closed ? 'transparent' : 'highlight'}
+      opacity={pressable && pressed && !disabled ? 0.85 : 1}
+      testID={testID}
+      {...(pressable
+        ? {
+            accessibilityRole: 'button' as const,
+            accessibilityLabel: `${choice.letter}. ${choice.label}. ${choice.consequence}`,
+            accessibilityState: { disabled, busy: choice.busy === true },
+            'aria-busy': choice.busy === true,
+            cursor: disabled ? 'default' : 'pointer',
+            onPressIn: () => setPressed(true),
+            onPressOut: () => setPressed(false),
+            onPress: disabled ? undefined : choice.onPress,
+          }
+        : null)}
+    >
       {inner}
-    </View>
+    </YStack>
   );
 }
-
-const styles = StyleSheet.create((theme) => {
-  const card = theme.buzz;
-  const metric = card.transcriptCard;
-  return {
-    choicePlate: {
-      position: 'relative',
-      overflow: 'hidden',
-      minHeight: 52,
-      borderWidth: 1,
-      borderColor: card.borderStrong,
-      borderRadius: card.radius,
-      backgroundColor: card.bgHighlight,
-    },
-    choicePlateClosed: {
-      backgroundColor: 'transparent',
-      borderColor: card.border,
-    },
-    choicePlateSelected: { borderColor: card.accent },
-    choicePlatePressed: { backgroundColor: card.bgPressed },
-    choicePlateDisabled: { borderColor: card.border },
-    choiceWash: {
-      position: 'absolute',
-      top: 0,
-      bottom: 0,
-      left: 0,
-      backgroundColor: card.brassWash,
-    },
-    choiceWashLeader: { backgroundColor: card.brassWashStrong },
-    choiceInner: {
-      position: 'relative',
-      flexDirection: 'row',
-      alignItems: 'flex-start',
-      gap: card.space.sm,
-      paddingVertical: card.space.sm,
-      paddingHorizontal: card.space.md,
-    },
-    choiceLetter: {
-      minWidth: metric.identitySize,
-      minHeight: metric.identitySize,
-      paddingHorizontal: card.space.xs,
-      paddingVertical: card.space.xs,
-      borderWidth: 1,
-      borderColor: card.borderStrong,
-      borderRadius: card.radius,
-      alignItems: 'center',
-      justifyContent: 'center',
-    },
-    choiceLetterSelected: {
-      borderColor: card.accent,
-      backgroundColor: card.brassWash,
-    },
-    choiceLetterCostly: { borderColor: card.diffRemoved },
-    choiceLetterText: { ...card.type.bodyStrong, color: card.textPrimary },
-    choiceLetterTextSelected: { color: card.accent },
-    choiceLetterTextCostly: { color: card.diffRemoved },
-    choiceCopy: { flex: 1, minWidth: 0 },
-    choiceLabel: { ...card.type.body, color: card.textPrimary },
-    choiceLabelLeader: { ...card.type.bodyStrong, color: card.textPrimary },
-    choiceLabelDisabled: { color: card.textDisabled },
-    choiceLoader: { justifyContent: 'center', minHeight: metric.identitySize },
-    choiceConsequence: { ...card.type.meta, color: card.ledgerQuiet, marginTop: card.space.xs },
-    choiceCount: {
-      ...card.type.machine,
-      color: card.ledgerQuiet,
-      fontVariant: ['tabular-nums'],
-      paddingTop: 4,
-      minWidth: 16,
-      textAlign: 'right',
-    },
-    choiceCountLeader: { color: card.accent, fontFamily: card.proseMedium },
-  };
-});

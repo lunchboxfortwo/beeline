@@ -132,6 +132,10 @@ describe('institutional memory proposal contract', () => {
       parseInstitutionalMemoryProposal({ ...workspaceFact, keywords: ['Release', ' Marker '] })
         .keywords,
     ).toEqual(['release', 'marker']);
+    expect(
+      parseInstitutionalMemoryProposal({ ...workspaceFact, keywords: ['Deploy', 'ci'] }).keywords,
+    ).toEqual(['deploy', 'ci']);
+    expect([...institutionalMemoryRequestWords('the ci failed')]).toContain('ci');
   });
 
   it('matches request words without stopwords', () => {

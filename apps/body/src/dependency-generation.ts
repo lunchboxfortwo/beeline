@@ -1,8 +1,10 @@
 import { execFile } from 'node:child_process';
-import { mkdir, readFile, readdir, realpath, lstat, rm, writeFile } from 'node:fs/promises';
+import { createHash } from 'node:crypto';
+import { chmod, mkdir, readFile, readdir, realpath, lstat, rm, writeFile } from 'node:fs/promises';
 import { resolve, relative, isAbsolute, delimiter } from 'node:path';
 import { promisify } from 'node:util';
 import { tryWithKernelLock } from './kernel-lock.js';
+import type { DependencyLayer } from './bwrap-sandbox.js';
 import {
   readWarmPlan,
   isPlanRefusal,
@@ -126,6 +128,33 @@ export async function prepareDependencyGeneration(input: {
   }
   await writeFile(resolve(input.root, 'node_modules', marker), JSON.stringify(plan));
   return plan.trees.map((tree) => resolve(input.root, tree));
+}
+
+/** Directory under a private corner repository that holds its dependency layers. */
+export const DEPENDENCY_LAYERS_DIR = 'beeline-dependency-layers';
+
+/** Overlay leaves a layer's work/work directory mode 000; reopen it so `rm` can delete the layer. */
+export async function openDependencyLayer(layer: string): Promise<void> {
+  await chmod(resolve(layer, 'work', 'work'), 0o700).catch(() => undefined);
+}
+
+/**
+ * This checkout's copy-on-write layer over each shared tree, kept under its
+ * private `root`. A new generation (a new tree or marker) starts a clean layer,
+ * so files written over an older generation never shadow its replacement.
+ */
+export async function dependencyLayers(root: string, trees: readonly string[]): Promise<DependencyLayer[]> {
+  const hash = (text: string) => createHash('sha256').update(text).digest('hex').slice(0, 16);
+  const existing = await readdir(root).catch(() => [] as string[]);
+  return Promise.all(trees.map(async (tree) => {
+    const generation = await readFile(resolve(tree, marker), 'utf8').catch(() => '');
+    const prefix = hash(tree), name = `${prefix}-${hash(`${(await lstat(tree)).ino}\0${generation}`)}`;
+    for (const stale of existing.filter(entry => entry.startsWith(`${prefix}-`) && entry !== name)) {
+      await openDependencyLayer(resolve(root, stale));
+      await rm(resolve(root, stale), { recursive: true, force: true });
+    }
+    return { tree, upper: resolve(root, name, 'upper'), work: resolve(root, name, 'work') };
+  }));
 }
 
 /** PATH guard gives npm's normal mutating commands a useful error before EROFS. */

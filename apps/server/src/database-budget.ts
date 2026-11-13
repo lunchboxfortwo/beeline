@@ -36,8 +36,9 @@ export function databaseConnectionBudget(
   const diagnostics = 1;
   const listener = 1;
   const jobs = 2;
-  const enrichment = Math.min(2, Math.max(1, perMachine - diagnostics - listener - jobs - 1));
-  const app = Math.min(requestedAppConnections, perMachine - diagnostics - listener - jobs - enrichment);
+  const app = Math.min(requestedAppConnections, perMachine - diagnostics - listener - jobs - 1);
+  // Side reads use the remaining capacity, including the configured rollout overlap.
+  const enrichment = perMachine - diagnostics - listener - jobs - app;
   return {
     maxConnections,
     reservedConnections,

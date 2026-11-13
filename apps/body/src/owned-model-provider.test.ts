@@ -3,7 +3,7 @@ import { mkdtempSync, writeFileSync, rmSync, mkdirSync, existsSync, readFileSync
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { encodeOwnedModelReceipt } from '@beeline/api-contract/helper-model-receipt';
-import { OwnedModelFiles } from './owned-model-files.js';
+import { OwnedModelFiles, OwnedModelFileRefusal } from './owned-model-files.js';
 import { installOwnedModelProvider } from './owned-model-install.js';
 import { ownedModelStream } from './owned-model-provider.js';
 const roots: string[] = [];
@@ -36,10 +36,7 @@ function fixture() {
     root,
     binding: {
       agentId: 'agent',
-      commandId: 'command',
       generationId: 'generation',
-      connectionId: 'connection',
-      connectionEpoch: 1,
       provider: 'beeline',
       model: 'server-selected',
       baseUrl,
@@ -167,9 +164,8 @@ it('keeps the invocation journal inside the Room’s existing writable harness s
   const {sandboxMountPlan} = await import('./bwrap-sandbox.js');
   const root=mkdtempSync(join(tmpdir(),'owned-room-')); roots.push(root);
   const command={id:'command',agentId:'agent',roomId:'room',turnRequestId:'request'} as import('@beeline/api-contract/daemon').AgentCommand;
-  const source={connectionId:'connection',epoch:1};
-  const context=new CommandExecutionContext(root); context.prepareOwnership(source,command.id);
-  context.bindModel(command,{v:1,token,expiresAt:null},source,baseUrl);
+  const context=new CommandExecutionContext(root); context.prepareTurn(command.id);
+  context.bindModel(command,{v:1,token,expiresAt:null},baseUrl);
   await context.enter(command);
   const active=JSON.parse(readFileSync(context.path,'utf8'));
   const plan=sandboxMountPlan({mode:'readonly',cwd:root,
@@ -179,4 +175,31 @@ it('keeps the invocation journal inside the Room’s existing writable harness s
   expect(owner.prepareHeaders().requestId).toMatch(/^[a-f0-9-]{36}$/);
   await context.leave();
   expect(()=>owner.prepareHeaders()).toThrow();
+});
+
+// A deploy or helper restart interrupts the turn; a replacement helper on the
+// same durable root resumes its generation, through a remaining batch member.
+it('Reproduction TURN-1: a resumed generation reopens its model files and keeps an UNKNOWN request from being sent again', async () => {
+  const {CommandExecutionContext} = await import('./server-command-intake.js');
+  const root=mkdtempSync(join(tmpdir(),'owned-resume-')); roots.push(root);
+  const anchor={id:'anchor',agentId:'agent',roomId:'room',turnRequestId:'request'} as import('@beeline/api-contract/daemon').AgentCommand;
+  const sibling={...anchor,id:'sibling',turnRequestId:'sibling-request'};
+  const first=new CommandExecutionContext(root); first.prepareTurn(anchor.id);
+  first.bindModel(anchor,{v:1,token,expiresAt:null},baseUrl);
+  await first.enter(anchor,[anchor,sibling]);
+  const before=JSON.parse(readFileSync(first.path,'utf8')).ownedModelDirectory as string;
+  const sent=OwnedModelFiles.open(before).prepareHeaders().requestId;
+  await first.leave(true);
+
+  const replacement=new CommandExecutionContext(root); replacement.prepareTurn(sibling.id,first.generationId);
+  replacement.bindModel(sibling,{v:1,token,expiresAt:null},baseUrl);
+  await replacement.enter(sibling,[sibling]);
+  const after=JSON.parse(readFileSync(replacement.path,'utf8')).ownedModelDirectory as string;
+  expect(after).toBe(before);
+  const resumed=OwnedModelFiles.open(after);
+  expect(resumed.snapshot()).toEqual({state:'unknown',requests:[sent]});
+  expect(()=>resumed.prepareHeaders()).toThrow(OwnedModelFileRefusal);
+  await replacement.leave();
+  expect(()=>resumed.prepareHeaders()).toThrow(OwnedModelFileRefusal);
+  expect(()=>OwnedModelFiles.open(after)).toThrow();
 });

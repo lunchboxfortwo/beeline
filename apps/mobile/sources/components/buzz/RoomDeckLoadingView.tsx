@@ -1,40 +1,20 @@
 import React from 'react';
-import { Text, View, type ViewProps, type ViewStyle } from 'react-native';
-import { StyleSheet } from 'react-native-unistyles';
+import { YStack } from 'tamagui';
+import { SURFACE_GLYPH_SIZE } from '@/buzz/beeline-glyph';
+import { T } from '@/ui/grammar';
 import { SurfaceGlyphLoader } from './SurfaceGlyphLoader';
 
 /**
  * The Room-deck page loader. The native launch splash hands directly to the
  * real app, so this treatment appears only when Rooms themselves are loading.
+ * It fills the page and centres the glyph in it.
  */
-export function RoomDeckLoadingView({
-  style, onLayout,
-}: {
-  style?: ViewStyle;
-  onLayout?: ViewProps['onLayout'];
-}) {
+export function RoomDeckLoadingView({ onLayout }: { onLayout?: React.ComponentProps<typeof YStack>['onLayout'] }) {
   return (
-    <View style={[styles.center, style]} testID="rooms-loader-gate" onLayout={onLayout}>
-      <SurfaceGlyphLoader testID="rooms-loader" />
-      <Text style={styles.loading}>LOADING ROOMS</Text>
-    </View>
+    <YStack flex={1} alignSelf="stretch" alignItems="center" justifyContent="center" gap="4" paddingHorizontal="8"
+      backgroundColor="canvas" testID="rooms-loader-gate" onLayout={onLayout}>
+      <SurfaceGlyphLoader compact size={SURFACE_GLYPH_SIZE} testID="rooms-loader" />
+      <T v="meta" color="secondary">Loading chats</T>
+    </YStack>
   );
 }
-
-const styles = StyleSheet.create((theme) => {
-  const hull = theme.buzz;
-  return {
-    center: {
-      flex: 1,
-      alignItems: 'center',
-      justifyContent: 'center',
-      gap: hull.space.md,
-      backgroundColor: hull.bgTerminal,
-      paddingHorizontal: hull.space.xl,
-    },
-    loading: {
-      ...hull.type.sectionHead,
-      color: hull.textMuted,
-    },
-  };
-});

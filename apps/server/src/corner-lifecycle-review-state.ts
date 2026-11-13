@@ -54,6 +54,7 @@ export async function noteReviewDispatchFailure(
     systemMessage('corner-lifecycle.blocked', reason),
     undefined,
     createHash('sha256').update(`review-dispatch:${cornerId}:${headSha}:${reason}`).digest('hex'),
+    { agentOnly: true },
   );
 }
 
@@ -208,6 +209,7 @@ export async function noteUnreachableReviewer(
     ),
     undefined,
     id,
+    { agentOnly: true },
   );
 }
 

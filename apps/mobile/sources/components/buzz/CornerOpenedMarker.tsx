@@ -1,5 +1,5 @@
 import React from 'react';
-import { View } from 'react-native';
+import { YStack } from 'tamagui';
 
 import { RepositoryLifecycleRow } from './PrLifecycleCard';
 import type { ChatDisplayMessage } from '@/buzz/room-view-presentation';
@@ -21,7 +21,7 @@ export function CornerOpenedMarkers({
   });
   if (!items.length) return null;
   return (
-    <View>
+    <YStack>
       {items.map((item) => (
         <RepositoryLifecycleRow
           key={item.id}
@@ -31,6 +31,6 @@ export function CornerOpenedMarkers({
           onOpenUrl={onOpenUrl}
         />
       ))}
-    </View>
+    </YStack>
   );
 }

@@ -23,10 +23,18 @@ const fixture = monolithFixture();
       roomId: ROOM,
       requestId: 'corner-name-too-long',
       name: 'far too many words here',
-      objective: 'Ship the widget',
+      objective: Array.from({ length: 61 }, (_, index) => `word${index}`).join(' '),
     });
-    expect(tooLong.status).toBe(503);
-    expect(await tooLong.json()).toEqual({ error: 'the name must not contain whitespace; use hyphens between words' });
+    expect(tooLong.status).toBe(200);
+    const opened = (await tooLong.json()) as { cornerId: string; warnings?: string[] };
+    expect(opened.warnings?.join(' ')).toContain('far-too-many');
+    expect(opened.warnings?.join(' ')).toContain('61 words');
+    const stored = await fixture.database.query<{ name: string; objective: string }>(
+      `SELECT r.name,${cornerObjectiveSql('r')} objective FROM rooms r JOIN corner_facts cf ON cf.corner_id=r.id WHERE r.id=$1`,
+      [opened.cornerId],
+    );
+    expect(stored.rows[0]?.name).toBe('far-too-many');
+    expect(stored.rows[0]?.objective.split(' ')).toHaveLength(24);
 
     // Untidy is not wrong: line breaks and double spaces are flattened, and
     // the objective that used to be refused outright now opens a corner.

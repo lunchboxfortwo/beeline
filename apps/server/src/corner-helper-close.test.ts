@@ -77,7 +77,7 @@ it.each([['machine', 'working'], ['machine', 'complete'], ['http', 'working'], [
     expect(await archived(cornerId)).toBe(true);
     expect((await db.query(`SELECT state FROM agent_commands WHERE id=$1`, [command.id])).rows[0]!.state)
       .toBe(state === 'working' ? 'cancelled' : 'complete');
-    expect((await db.query(`SELECT 1 FROM turn_owned_effect_fences`)).rowCount).toBe(0);
+    expect((await db.query(`SELECT 1 FROM turn_owned_access_checks`)).rowCount).toBe(0);
   },
 );
 

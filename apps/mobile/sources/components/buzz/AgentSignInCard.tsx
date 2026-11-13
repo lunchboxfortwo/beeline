@@ -1,10 +1,9 @@
 import { appErrorCopy } from '@/buzz/app-error-copy';
 import { ErrorBanner } from './ErrorBanner';
-import { InlineRow } from './IndexRow';
-import { HullDialogInput } from '@/components/buzz/HullDialog';
 import React, { useState } from 'react';
-import { Linking, Text, View } from 'react-native';
-import { StyleSheet, useUnistyles } from 'react-native-unistyles';
+import { Linking } from 'react-native';
+import { Input, XStack, YStack } from 'tamagui';
+import { HEIGHT, T } from '@/ui/grammar';
 import type {
   AgentSignInCardView,
   AgentSignInHarness,
@@ -99,7 +98,6 @@ export function AgentSignInCard({
   onSubmit,
   testID = 'agent-sign-in',
 }: Props) {
-  const { theme } = useUnistyles();
   const [value, setValue] = useState('');
   const [opened, setOpened] = useState(false);
   const [busy, setBusy] = useState(false);
@@ -178,19 +176,22 @@ export function AgentSignInCard({
     button: string,
     last: boolean,
   ) => (
-    <InlineRow style={[styles.step, last && styles.stepLast]}>
+    <Step last={last}>
       <WorkflowStepCircle status={opened ? 'done' : 'current'} />
-      <View style={styles.stepBody}>
-        <Text style={styles.stepTitle}>{opened ? label.done : label.ahead}</Text>
-        <InlineRow style={styles.linkLine}>
-          <Text
+      <StepBody>
+        <T>{opened ? label.done : label.ahead}</T>
+        <XStack alignItems="center" gap="2">
+          <T
+            v="code"
+            color="secondary"
+            flex={1}
+            minWidth={0}
             ellipsizeMode="middle"
             numberOfLines={1}
-            style={styles.url}
             testID={`${testID}-url`}
           >
             {displayUrl(url)}
-          </Text>
+          </T>
           <Button
             label={card.kind === 'device-code' ? 'Open' : button}
             accessibilityLabel={button}
@@ -199,36 +200,43 @@ export function AgentSignInCard({
             size="inline"
             variant="secondary"
           />
-        </InlineRow>
+        </XStack>
         {index === 1 && card.kind === 'paste-code' ? (
-          <Text
-            style={styles.meta}
-          >{`Made by ${agentName}'s machine · holds no password or token`}</Text>
+          <T v="meta" color="secondary">{`Made by ${agentName}'s machine · holds no password or token`}</T>
         ) : null}
-      </View>
-    </InlineRow>
+      </StepBody>
+    </Step>
   );
 
   const waitLine = (text: string) => (
-    <InlineRow style={styles.wait}>
+    <XStack alignItems="center" gap="2">
       <StateDot kind="pulse" />
-      <Text style={[styles.meta, styles.waitText]}>{text}</Text>
-    </InlineRow>
+      <T v="meta" color="secondary" flex={1} minWidth={0}>{text}</T>
+    </XStack>
   );
 
   const field = (placeholder: string, secure: boolean) => (
-    <InlineRow style={styles.field}>
-      <HullDialogInput
+    <XStack flexWrap="wrap" gap="2">
+      <Input
+        flex={1}
+        flexBasis={120}
+        minWidth={0}
+        minHeight={HEIGHT.control}
+        paddingHorizontal="2"
+        borderWidth={1}
+        borderColor="strongStroke"
+        borderRadius="sm"
+        backgroundColor="canvas"
+        color="ink"
         accessibilityLabel={placeholder}
         autoCapitalize="none"
         autoCorrect={false}
-        editable={!sending}
+        disabled={sending}
         onChangeText={setValue}
         onSubmitEditing={() => void submit()}
         placeholder={placeholder}
-        placeholderTextColor={theme.buzz.textMuted}
+        placeholderTextColor="secondary"
         secureTextEntry={secure}
-        style={[styles.input, value ? styles.inputFilled : null]}
         testID={`${testID}-input`}
         value={value}
       />
@@ -239,7 +247,7 @@ export function AgentSignInCard({
         size="inline"
         variant="secondary"
       />
-    </InlineRow>
+    </XStack>
   );
 
   let steps: React.ReactNode = null;
@@ -255,17 +263,17 @@ export function AgentSignInCard({
           `Open ${service.site}`,
           false,
         )}
-        <InlineRow style={[styles.step, styles.stepLast]}>
+        <Step last>
           <WorkflowStepCircle status={opened || value ? 'current' : 'pending'} />
-          <View style={styles.stepBody}>
-            <Text style={[styles.stepTitle, !(opened || value) && styles.stepTitleAhead]}>
+          <StepBody>
+            <T color={opened || value ? 'ink' : 'secondary'}>
               {`Paste the code ${service.site} shows`}
-            </Text>
+            </T>
             {field(`Code from ${service.site}`, false)}
             {value && CLAUDE_CODE_SHAPE.test(value) ? (
-              <Text style={styles.meta} testID={`${testID}-shape`}>
+              <T v="meta" color="secondary" testID={`${testID}-shape`}>
                 {`✓ Looks like a ${service.name} login code · ${maskMiddle(value)}`}
-              </Text>
+              </T>
             ) : null}
             {failureLine}
             <Button
@@ -275,8 +283,8 @@ export function AgentSignInCard({
               onPress={() => void submit()}
               testID={`${testID}-submit`}
             />
-          </View>
-        </InlineRow>
+          </StepBody>
+        </Step>
       </>
     );
   } else if (
@@ -299,14 +307,14 @@ export function AgentSignInCard({
           'Open sign-in page',
           false,
         )}
-        <InlineRow style={[styles.step, styles.stepLast]}>
+        <Step last>
           <WorkflowStepCircle status={opened ? 'current' : 'pending'} />
-          <View style={styles.stepBody}>
-            <Text style={styles.stepTitle}>Enter this code there</Text>
-            <InlineRow style={styles.code}>
-              <Text selectable style={styles.codeText} testID={`${testID}-code`}>
+          <StepBody>
+            <T>Enter this code there</T>
+            <XStack flexWrap="wrap" alignItems="center" gap="2">
+              <T v="code" userSelect="text" flex={1} flexBasis={120} minWidth={0} testID={`${testID}-code`}>
                 {card.userCode}
-              </Text>
+              </T>
               <Button
                 label="Copy code"
                 onPress={() => void copyText(card.userCode!)}
@@ -314,7 +322,7 @@ export function AgentSignInCard({
                 size="inline"
                 variant="secondary"
               />
-            </InlineRow>
+            </XStack>
             {card.status === 'failed'
               ? failureLine
               : waitLine(
@@ -323,12 +331,12 @@ export function AgentSignInCard({
                     : 'Waiting for approval',
                 )}
             {card.harness === 'codex' ? (
-              <Text style={styles.meta}>
+              <T v="meta" color="secondary">
                 Device-code sign-in must be on in ChatGPT → Settings → Security.
-              </Text>
+              </T>
             ) : null}
-          </View>
-        </InlineRow>
+          </StepBody>
+        </Step>
       </>
     );
   } else if (ask && canAct && card.kind === 'approve-wait' && card.authorizeUrl && service) {
@@ -346,14 +354,14 @@ export function AgentSignInCard({
     );
   } else if (ask && canAct && card.kind === 'api-key' && provider) {
     steps = (
-      <InlineRow style={[styles.step, styles.stepLast]}>
+      <Step last>
         <WorkflowStepCircle status="current" />
-        <View style={styles.stepBody}>
-          <Text style={styles.stepTitle}>{`Paste your ${provider} API key`}</Text>
+        <StepBody>
+          <T>{`Paste your ${provider} API key`}</T>
           {field(`${provider} API key`, true)}
-          <Text style={styles.meta}>
+          <T v="meta" color="secondary">
             {`Checked with ${provider}, then saved on ${agentName}'s machine only. Never posted here.`}
-          </Text>
+          </T>
           {failureLine}
           <Button
             disabled={!value.trim()}
@@ -362,8 +370,8 @@ export function AgentSignInCard({
             onPress={() => void submit()}
             testID={`${testID}-submit`}
           />
-        </View>
-      </InlineRow>
+        </StepBody>
+      </Step>
     );
   } else if (ask) {
     steps = failureLine;
@@ -376,7 +384,7 @@ export function AgentSignInCard({
           <AppMark
             domain={logo.domain}
             name={logo.name}
-            size={theme.buzz.transcriptCard.identitySize}
+            size={26}
           />
         ) : undefined
       }
@@ -387,58 +395,23 @@ export function AgentSignInCard({
       title={title}
     >
       {steps ? (
-        <View style={styles.body} testID={`${testID}-body`}>
+        <YStack paddingHorizontal="4" paddingTop="2" paddingBottom="4" minWidth={0} testID={`${testID}-body`}>
           {steps}
-        </View>
+        </YStack>
       ) : null}
     </TranscriptCard>
   );
 }
 
-const styles = StyleSheet.create((theme) => ({
-  body: {
-    paddingHorizontal: theme.buzz.transcriptCard.side,
-    paddingTop: theme.buzz.space.sm,
-    paddingBottom: theme.buzz.space.md,
-    minWidth: 0,
-  },
-  step: {
-    flexDirection: 'row',
-    gap: theme.buzz.space.md,
-    paddingVertical: theme.buzz.space.md,
-    borderBottomWidth: 1,
-    borderBottomColor: theme.buzz.border,
-  },
-  stepLast: { borderBottomWidth: 0, paddingBottom: 0 },
-  linkLine: { flexDirection: 'row', alignItems: 'center', gap: theme.buzz.space.sm },
-  stepBody: { flex: 1, minWidth: 0, gap: theme.buzz.space.sm },
-  stepTitle: { ...theme.buzz.type.body, color: theme.buzz.textPrimary },
-  stepTitleAhead: { color: theme.buzz.textMuted },
-  url: { flex: 1, minWidth: 0, ...theme.buzz.type.machine, color: theme.buzz.textSecondary },
-  meta: { ...theme.buzz.type.meta, color: theme.buzz.ledgerQuiet },
-  field: { flexDirection: 'row', flexWrap: 'wrap', gap: theme.buzz.space.sm },
-  input: {
-    ...theme.buzz.type.body,
-    flex: 1,
-    flexBasis: 120,
-    minWidth: 0,
-    minHeight: 44,
-    paddingHorizontal: theme.buzz.space.sm,
-    borderWidth: 1,
-    borderColor: theme.buzz.borderStrong,
-    borderRadius: theme.buzz.radius,
-    backgroundColor: theme.buzz.bgBase,
-    color: theme.buzz.textPrimary,
-  },
-  inputFilled: { ...theme.buzz.type.machine, color: theme.buzz.textPrimary },
-  code: { flexDirection: 'row', flexWrap: 'wrap', alignItems: 'center', gap: theme.buzz.space.sm },
-  codeText: {
-    ...theme.buzz.type.machine,
-    flex: 1,
-    flexBasis: 120,
-    minWidth: 0,
-    color: theme.buzz.textPrimary,
-  },
-  wait: { flexDirection: 'row', alignItems: 'center', gap: theme.buzz.space.sm },
-  waitText: { flex: 1, minWidth: 0 },
-}));
+/** One numbered step: circle, then its body; a stroke divides it from the next. */
+function Step({ last = false, children }: { last?: boolean; children: React.ReactNode }) {
+  return (
+    <XStack gap="4" paddingTop="4" paddingBottom={last ? 0 : '4'} borderBottomWidth={last ? 0 : 1} borderBottomColor="stroke">
+      {children}
+    </XStack>
+  );
+}
+
+function StepBody({ children }: { children: React.ReactNode }) {
+  return <YStack flex={1} minWidth={0} gap="2">{children}</YStack>;
+}

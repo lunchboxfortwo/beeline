@@ -1,13 +1,9 @@
-import { desktopColumnWidths } from '@/buzz/desktop-layout-tokens';
-import { useIsDesktop as useDesktopPageLayout } from '@/utils/responsive';
 import { useLatencyRouteFrame } from '@/buzz/latency-route-hook';
 import React from 'react';
-import { View } from 'react-native';
-import { StyleSheet } from 'react-native-unistyles';
+import { YStack } from 'tamagui';
 import { router, useLocalSearchParams } from 'expo-router';
-import { useSafeAreaInsets } from 'react-native-safe-area-context';
-import { PageHeader } from '@/components/buzz/PageHeader';
 import { WalletSendForm } from '@/buzz/wallet-send-form';
+import { ConnectorFrame } from '@/ui/screens/settings/connectors/ConnectorParts';
 
 function firstParam(value: string | string[] | undefined): string | undefined {
   return Array.isArray(value) ? value[0] : value;
@@ -21,26 +17,11 @@ export default function WalletSendScreen() {
   useLatencyRouteFrame('/beeline/settings/workbench/wallet-send');
   const params = useLocalSearchParams<{ workspaceId?: string | string[] }>();
   const workspaceId = firstParam(params.workspaceId) ?? '';
-  const insets = useSafeAreaInsets();
-  const desktopPageLayout = useDesktopPageLayout();
   return (
-    <View style={[styles.container, desktopPageLayout && { width: '100%', maxWidth: desktopColumnWidths.detail, alignSelf: 'center' }, { paddingTop: insets.top }]} testID="wallet-send-screen">
-      <PageHeader
-        backAccessibilityLabel="Back to Wallet"
-        eyebrow="Wallet"
-        prominent
-        onBack={() => router.back()}
-        testID="wallet-send-header"
-        title="Send"
-      />
-      <View style={styles.body}>
+    <ConnectorFrame title="Send" back={() => router.back()} backLabel="Back to Wallet" testID="wallet-send-screen" scroll={false}>
+      <YStack flex={1} padding="4" gap="1">
         <WalletSendForm workspaceId={workspaceId} />
-      </View>
-    </View>
+      </YStack>
+    </ConnectorFrame>
   );
 }
-
-const styles = StyleSheet.create((theme) => ({
-  container: { flex: 1, backgroundColor: theme.buzz.bgTerminal },
-  body: { flex: 1, padding: theme.buzz.space.md, gap: theme.buzz.space.xs },
-}));

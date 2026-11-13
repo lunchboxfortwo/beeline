@@ -1,0 +1,10 @@
+// PEOPLE-1 proof build: bundle evidence/people-1/harness.tsx instead of the app
+// entry. The README's sed gives it its own package id, so an emulator's Beeline install stays untouched.
+gradle.projectsEvaluated {
+    def app = gradle.rootProject.findProject(':app')
+    if (app != null) {
+        app.tasks.named('createBundleReleaseJsAndAssets').configure {
+            entryFile.set(app.file(System.getenv('BEELINE_PROOF_ENTRY')))
+        }
+    }
+}

@@ -1,6 +1,9 @@
 // This suite exercises an installed old-server path, with explicit legacy negotiation.
 
 
+vi.mock('tamagui', async () => (await import('@/ui/screens/transcript/grammar-hosts.test-support')).tamaguiHosts());
+vi.mock('lucide-react-native', async () => (await import('@/ui/screens/transcript/grammar-hosts.test-support')).lucideHosts());
+vi.mock('@/sync/storage', () => ({ useLocalSetting: () => 'medium' }));
 vi.mock('@/utils/responsive', () => ({ useIsDesktop: () => false }));
 vi.mock('expo-clipboard', () => ({ setStringAsync: vi.fn(async () => undefined) }));
 vi.mock('expo-haptics', () => ({ ImpactFeedbackStyle: { Light: 'Light' }, impactAsync: async () => undefined }));
@@ -11,7 +14,7 @@ import React from 'react';
 import { act, create } from 'react-test-renderer';
 import { beforeEach, expect, it, vi } from 'vitest';
 const room = vi.hoisted(() => vi.fn(async () => ({ room: { name: 'Room' }, viewer: { permissions: { manage: true } }, members: [{ identity: { kind: 'agent', pubkey: 'agent-1', name: 'Hoots' } }] })));
-const operation = vi.hoisted(() => vi.fn(async (name: string, _input?: unknown) => name === 'readScheduledWork' ? { roomName: 'Room', agentNames: [['agent-1', 'Hoots']], schedules: [
+const operation = vi.hoisted(() => vi.fn(async (name: string, _input?: unknown) => name === 'readScheduledWork' ? { roomName: 'Room', agentNames: [['agent-1', 'Hoots']], recentRuns: [{ routineId: 'daily', roomId: 'room', messageId: 'posted', text: 'Posted morning summary', at: 1790000000 }], schedules: [
   { id: 'daily', roomId: 'room', agentId: 'agent-1', cadence: { kind: 'interval', everyMinutes: 60 }, message: 'Morning summary', nextRunAt: 1790000000, runCount: 14 },
   { id: 'video', title: 'Post youtube video', maxRuns: 1, roomId: 'corner-1', agentId: 'agent-1', cadence: { kind: 'interval', everyMinutes: 1440 }, message: 'Start the workflow', nextRunAt: 1790000000, runCount: 2, workflowSlug: 'post_youtube_video', corner: { id: 'corner-1', name: 'video' } },
 ], subscriptions: [{ id: 'sub', roomId: 'room', agentId: 'agent-1', source: 'repository', event: 'issue.opened', repository: 'owner/widgets', prompt: 'Triage new issues.', firedCount: 3 }] } : {}));
@@ -23,17 +26,14 @@ vi.mock('react-native', async () => {
   const host = (name: string) => (props: any) => createElement(name, props, props.children);
   return { AppState: { currentState: 'active', addEventListener: () => ({ remove() {} }) }, Platform: { OS: 'ios', select: (options: any) => options.ios ?? options.default }, StyleSheet: { flatten: (style: any): any => Array.isArray(style) ? Object.assign({}, ...style.map((part: any) => Array.isArray(part) ? Object.assign({}, ...part) : part)) : style }, Pressable: host('Pressable'), TouchableOpacity: host('TouchableOpacity'), Text: host('Text'), ScrollView: host('ScrollView'), View: host('View') };
 });
-vi.mock('react-native-unistyles', () => ({ StyleSheet: { create: (fn: any) => fn({ buzz: { type: { sectionHead: {}, sectionLabel: { fontSize: 13, lineHeight: 19, letterSpacing: 2 }, sectionCount: { fontSize: 15, lineHeight: 22 } }, space: {}, roomList: { edge: 20 } } }), hairlineWidth: 1 } }));
 vi.mock('react-native-safe-area-context', () => ({ useSafeAreaInsets: () => ({ top: 0, bottom: 0 }) }));
 vi.mock('@expo/vector-icons/Ionicons', () => ({ default: () => null }));
-vi.mock('@/components/buzz/PageHeader', () => ({ PageHeader: () => null }));
+vi.mock('@/components/buzz/PageHeader', () => ({ PageHeader: (props: any) => React.createElement('PageHeader', props) }));
 vi.mock('@/components/buzz/SettingsRow', async () => {
   const { createElement } = await import('react');
   return { SettingsRow: (props: any) => createElement('SettingsRow', props, props.leading) };
 });
-vi.mock('@/components/buzz/WorkflowGlyph', () => ({ WorkflowGlyph: () => null }));
 vi.mock('@/components/buzz/WorkflowRunLine', () => ({ WorkflowRunLine: () => null }));
-vi.mock('@/components/buzz/CornerGlyph', () => ({ CORNER_META_SIZE: 10, CornerGlyph: () => null }));
 vi.mock('@/components/buzz/SurfaceGlyphLoader', () => ({ SurfaceGlyphLoader: () => null }));
 vi.mock('@/auth/buzz-identity-storage', () => ({ loadBuzzIdentity: async () => ({ publicKey: 'viewer' }), getEffectiveRelayUrl: async () => 'http://local' }));
 vi.mock('@/sync/transport/room-view-client', () => ({ RoomViewClient: class { room = room; } }));
@@ -123,12 +123,12 @@ it('lists every entry as one row in the shared grammar, each opening its own pag
     const row = (testID: string) => tree.root.findByProps({ testID });
     // 'daily' arrives with no title, the way a nameless agent schedule does;
     // the row still reads what it runs from the prompt.
-    expect(row('scheduled-work-daily').props).toMatchObject({ title: 'Morning summary', chevron: 'right' });
-    expect(row('scheduled-work-video').props).toMatchObject({ title: 'Post youtube video' });
-    expect(row('scheduled-work-video').props.leading).toBeUndefined();
+    expect(row('scheduled-work-daily').props).toMatchObject({ label: 'Morning summary' });
+    expect(row('scheduled-work-video').props).toMatchObject({ label: 'Post youtube video' });
+    expect(row('scheduled-work-video').props.leading).toBeTruthy();
     expect(row('scheduled-work-daily').props.leading).toBeUndefined();
     expect(row('subscription-sub').props.leading).toBeUndefined();
-    expect(row('subscription-sub').props).toMatchObject({ title: 'Triage new issues', description: 'On new issue in owner/widgets', descriptionDetail: '@Hoots · this Room' });
+    expect(row('subscription-sub').props).toMatchObject({ label: 'Triage new issues', detail: 'On new issue in owner/widgets\n@Hoots · this chat' });
     act(() => row('scheduled-work-daily').props.onPress());
     act(() => row('scheduled-work-video').props.onPress());
     act(() => row('subscription-sub').props.onPress());
@@ -147,7 +147,7 @@ it('stops a prompt schedule from its page only after the confirm step', async ()
   const tree = await render(<PromptSchedule />);
   try {
     expect(tree.root.findByProps({ testID: 'scheduled-work-prompt' }).props.children).toBe('Morning summary');
-    expect(tree.root.findByProps({ testID: 'scheduled-work-facts-when' }).props.title).toBe('When');
+    expect(tree.root.findByProps({ testID: 'scheduled-work-facts-when' }).props.label).toBe('Schedule');
     await act(async () => press(tree, 'stop-schedule'));
     expect(operation.mock.calls.filter(([name]) => name === 'deleteRoomSchedule')).toHaveLength(0);
     await act(async () => press(tree, 'stop-schedule-confirm'));
@@ -160,7 +160,7 @@ it('stops a subscription from its page only after the same confirm step', async 
   params.value = { roomId: 'room', subscriptionId: 'sub' };
   const tree = await render(<Subscription />);
   try {
-    expect(tree.root.findByProps({ testID: 'scheduled-work-facts-when' }).props.description).toBe('On new issue in owner/widgets');
+    expect(tree.root.findByProps({ testID: 'scheduled-work-facts-when' }).props.detail).toBe('On new issue in owner/widgets');
     expect(tree.root.findByProps({ testID: 'scheduled-work-prompt' }).props.children).toBe('Triage new issues.');
     await act(async () => press(tree, 'stop-subscription'));
     expect(operation.mock.calls.filter(([name]) => name === 'deleteRoomSubscription')).toHaveLength(0);
@@ -235,22 +235,33 @@ it.each([
 });
 
 it.each([
-  ['schedule', PromptSchedule, { scheduleId: 'daily' }, 'stop-schedule', 'Stop schedule'],
-  ['subscription', Subscription, { subscriptionId: 'sub' }, 'stop-subscription', 'Stop subscription'],
-] as const)('R1: confirms a %s stop on the same row the first tap hit', async (_kind, Page, ids, stopId, label) => {
+  ['schedule', PromptSchedule, { scheduleId: 'daily' }, 'stop-schedule'],
+  ['subscription', Subscription, { subscriptionId: 'sub' }, 'stop-subscription'],
+] as const)('cancels a %s stop without changing the routine', async (_kind, Page, ids, stopId) => {
   params.value = { roomId: 'room', ...ids };
   const tree = await render(<Page />);
   try {
-    const settingsRow = (testID: string) =>
-      tree.root.find((node: any) => node.type === 'SettingsRow' && node.props.testID === testID);
-    const parent = settingsRow(stopId).parent;
     await act(async () => press(tree, stopId));
-    const confirm = settingsRow(`${stopId}-confirm`);
-    // Same row primitive, same slot, same leading title: the label does not move.
-    expect(confirm.parent).toBe(parent);
-    expect(confirm.props).toMatchObject({ title: label, tone: 'destructive', action: 'Cancel' });
-    await act(async () => confirm.props.trailingPress.onPress());
-    expect(settingsRow(stopId).parent).toBe(parent);
+    await act(async () => press(tree, `${stopId}-cancel`));
+    expect(tree.root.findAll((node: any) => node.props.testID === `${stopId}-confirm`)).toHaveLength(0);
+    expect(operation.mock.calls.some(([name]) => name.startsWith('delete'))).toBe(false);
+  } finally { await act(async () => tree.unmount()); }
+});
+
+it('names the page Routines and opens the agent, destination and posted message', async () => {
+  params.value = { roomId: 'room' };
+  const list = await render(<ScheduledWork />);
+  expect(words(list)).toContain('Routines');
+  await act(async () => list.unmount());
+  params.value = { roomId: 'room', scheduleId: 'daily' };
+  const tree = await render(<PromptSchedule />);
+  try {
+    act(() => press(tree, 'routine-agent'));
+    expect(router.push).toHaveBeenCalledWith('/beeline/agent-profile?agentId=agent-1');
+    act(() => press(tree, 'routine-destination'));
+    expect(router.push).toHaveBeenCalledWith({ pathname: '/beeline/chat/[channelId]', params: { channelId: 'room' } });
+    act(() => press(tree, 'routine-run-posted'));
+    expect(router.push).toHaveBeenCalledWith({ pathname: '/beeline/chat/[channelId]', params: { channelId: 'room', jumpTo: 'posted' } });
   } finally { await act(async () => tree.unmount()); }
 });
 
@@ -267,9 +278,9 @@ it('names empty and legacy corner names through the shared title grammar (J40)',
   try {
     const tree = await render(<ScheduledWork />);
     const row = (testID: string) => tree.root.findByProps({ testID });
-    expect(row('scheduled-work-unnamed').props.descriptionDetail).toContain('corner');
-    expect(row('scheduled-work-legacy').props.descriptionDetail).toContain('corner');
-    expect(row('subscription-sub').props.descriptionDetail).toContain('@Hoots · corner triage');
+    expect(row('scheduled-work-unnamed').props.detail).toContain('@Hoots');
+    expect(row('scheduled-work-legacy').props.detail).toContain('@Hoots');
+    expect(row('subscription-sub').props.detail).toContain('@Hoots · triage');
     tree.unmount();
   } finally {
     operation.mockImplementation(original);
@@ -279,7 +290,7 @@ it('names empty and legacy corner names through the shared title grammar (J40)',
 it('keeps old subscription rows named and dates a one-time wake in local time', () => {
   expect(subscriptionTitle({ prompt: '   ' } as any)).toBe('React to this event');
   expect(subscriptionWhen({ source: 'room', event: 'check-failed' } as any))
-    .toBe('On corner checks failing');
+    .toBe('On thread checks failing');
   const now = new Date(2026, 9, 22, 12);
   const next = new Date(2026, 9, 23, 10);
   expect(scheduleTrigger({ maxRuns: 1, nextRunAt: next.getTime() / 1000 } as any, now))
@@ -290,8 +301,8 @@ it('keeps old subscription rows named and dates a one-time wake in local time', 
 it('uses the server DM flag for location and fallback trigger wording, not a missing Room name', () => {
   expect(scheduleWhere({}, null, true)).toBe('this DM');
   expect(subscriptionWhere({} as any, null, true)).toBe('this DM');
-  expect(scheduleWhere({}, null)).toBe('this Room');
-  expect(scheduleWhere({}, 'Room', false)).toBe('this Room');
+  expect(scheduleWhere({}, null)).toBe('this chat');
+  expect(scheduleWhere({}, 'Room', false)).toBe('this chat');
   expect(subscriptionWhen({ source: 'room', event: 'joined' } as any, true)).toBe('On someone joining this DM');
   expect(subscriptionWhen({ source: 'room', event: 'other' } as any, true)).toBe('On an event in this DM');
 });

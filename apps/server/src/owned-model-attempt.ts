@@ -2,12 +2,10 @@ import { OwnedModelRefusal, OwnedModelUnknownGeneration, OWNED_MODEL_UNKNOWN_GEN
 import type { OwnedModelAttemptReceipt } from '@beeline/api-contract/helper-model';
 export type { OwnedModelAttemptReceipt } from '@beeline/api-contract/helper-model';
 import { createHash } from 'node:crypto';
-import { performance } from 'node:perf_hooks';
 import { CommandRefusalError } from './command-refusal.js';
 import type { SqlDatabase } from './database.js';
 import type { OwnedModelCredentials, AuthenticatedOwnedModel, OwnedModelBinding } from './owned-model-credential.js';
 import { lockRoomAccess } from './room-access-lock.js';
-import { assertCurrentTurnOwner } from './turn-ownership.js';
 import { AllowanceRefusal } from './free-agent-accounting.js';
 
 /** Same body bound as the existing model HTTP endpoint, never a larger escape. */
@@ -46,8 +44,8 @@ CREATE TRIGGER beeline_owned_model_attempt_immutable BEFORE UPDATE OR DELETE ON 
 CREATE OR REPLACE FUNCTION beeline_fence_unknown_model_generation() RETURNS trigger AS $$
 BEGIN
  IF NEW.action IN ('input','resume') AND NEW.state='claimed' AND
-   (TG_OP='INSERT' OR ROW(NEW.state,NEW.generation_id,NEW.turn_owner_connection_id,NEW.turn_owner_epoch,NEW.action)
-     IS DISTINCT FROM ROW(OLD.state,OLD.generation_id,OLD.turn_owner_connection_id,OLD.turn_owner_epoch,OLD.action)) AND
+   (TG_OP='INSERT' OR ROW(NEW.state,NEW.generation_id,NEW.action)
+     IS DISTINCT FROM ROW(OLD.state,OLD.generation_id,OLD.action)) AND
    EXISTS(SELECT 1 FROM owned_model_attempts attempt WHERE attempt.command_id=NEW.id AND attempt.state='unknown'
      AND attempt.generation_id IS DISTINCT FROM NEW.generation_id) THEN
    RAISE EXCEPTION '${OWNED_MODEL_UNKNOWN_GENERATION_MESSAGE}' USING ERRCODE='23514';
@@ -56,7 +54,7 @@ BEGIN
 END; $$ LANGUAGE plpgsql;
 DROP TRIGGER IF EXISTS beeline_fence_unknown_model_generation ON agent_commands;
 CREATE TRIGGER beeline_fence_unknown_model_generation
- BEFORE INSERT OR UPDATE OF state,generation_id,turn_owner_connection_id,turn_owner_epoch,action ON agent_commands
+ BEFORE INSERT OR UPDATE OF state,generation_id,action ON agent_commands
  FOR EACH ROW EXECUTE FUNCTION beeline_fence_unknown_model_generation();
 `;
 
@@ -228,7 +226,6 @@ export class OwnedModelAttempts {
     try {
       await this.database.transaction(async database => {
         if (!await lockRoomAccess(database, [owned.roomId], [owned.agentId])) throw new OwnedModelRefusal();
-        await assertCurrentTurnOwner(database, owned.agentId, { connectionId: owned.connectionId, epoch: owned.connectionEpoch });
         await this.credentials.lockInvocation(database, pending.actor);
         await database.query('SELECT agent_id FROM free_agents WHERE agent_id=$1 FOR SHARE NOWAIT', [owned.agentId]);
         await database.query('SELECT agent_id FROM agents WHERE agent_id=$1 FOR SHARE NOWAIT', [owned.agentId]);
@@ -238,10 +235,7 @@ export class OwnedModelAttempts {
         if (!row || row.state !== 'unknown' || row.evidence || row.payload_digest !== pending.digest) throw new OwnedModelRefusal();
         if ((await database.query(`SELECT 1 FROM owned_model_attempts WHERE command_id=$1 AND generation_id<>$2 AND state='unknown' LIMIT 1`,
           [owned.commandId, owned.generationId])).rowCount) throw new OwnedModelUnknownGeneration();
-        const began = performance.now(), current = await this.credentials.assertCurrent(database, pending.actor);
-        // Subtract the entire DB round trip rather than assuming host/DB clocks
-        // agree or allowing a lease to expire between the query and handoff.
-        if (performance.now() - began >= current.untilMs - current.nowMs) throw new OwnedModelRefusal();
+        await this.credentials.assertCurrent(database, pending.actor);
         pending.entered = true;
         completion = start(pending.body);
         if (!(completion instanceof Promise)) throw new Error('Owned model handoff must return its transport promise');

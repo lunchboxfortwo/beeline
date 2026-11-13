@@ -101,6 +101,43 @@ export function typedMentionHandles(message: string): Set<string> {
   return handles;
 }
 
+/** Remove standalone tags the caller named. Code, quotes, and the forward caption stay. */
+export function stripMentionHandles(message: string, handles: readonly string[]): string {
+  const drop = new Set(handles.map((handle) => handle.toLowerCase()));
+  if (!drop.size) return message;
+  const caption = FORWARD_CAPTION.exec(message);
+  const body = caption ? message.slice(0, caption.index) : message;
+  const scanned = withoutCode(body).replace(DOUBLE_QUOTES, (span) => ' '.repeat(span.length));
+  const cuts: Array<[number, number]> = [];
+  for (const match of scanned.matchAll(new RegExp(MENTION_TOKEN.source, 'gu'))) {
+    const handle = match[1] ?? '';
+    if (!drop.has(handle.toLowerCase())) continue;
+    const offset = match.index ?? 0;
+    const lineStart = scanned.lastIndexOf('\n', offset - 1) + 1;
+    if (/^\s*>/.test(scanned.slice(lineStart, offset))) continue;
+    const before = codePointBefore(scanned, offset);
+    const punctuation = scanned.slice(offset + match[0].length).match(/^[.-]+/u)?.[0];
+    const afterPunctuation = punctuation
+      ? codePointAt(scanned, offset + match[0].length + punctuation.length)
+      : undefined;
+    if (
+      (before && TOKEN_CHARACTER.test(before)) ||
+      (afterPunctuation && TOKEN_CHARACTER.test(afterPunctuation))
+    ) continue;
+    cuts.push([offset, offset + match[0].length]);
+  }
+  if (!cuts.length) return message;
+  let result = '';
+  let cursor = 0;
+  for (const [start, end] of cuts) {
+    result += body.slice(cursor, start);
+    cursor = end;
+  }
+  result += body.slice(cursor);
+  result = result.replace(/[ \t]{2,}/g, ' ').replace(/[ \t]+([.,!?])/g, '$1').trim();
+  return caption ? `${result}${message.slice(caption.index)}` : result;
+}
+
 export interface ResolvedMessageMention {
   readonly id: string;
   readonly kind: 'human' | 'agent';

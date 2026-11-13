@@ -4,7 +4,7 @@ import ts from 'typescript';
 import { mkdtempSync, mkdirSync, writeFileSync, rmSync, readFileSync } from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { inspectSource, scanRouterTree } from './router-boundaries.mjs';
+import { inspectSource, judgeInventory, scanRouterTree } from './router-boundaries.mjs';
 
 test('helper operation capability has one owner, including aliases and extra methods inside owner files', () => {
   for (const source of [
@@ -81,4 +81,15 @@ test('a second ordinary, turn or raw-send caller fails semantic typecheck agains
   const errors = program.getSemanticDiagnostics(source);
   assert.equal(errors.length, 3);
   assert.ok(errors.every(error => error.code === 2339));
+});
+
+test('a new network site grows the inventory only with a recorded reason', () => {
+  const id = 'apps/server/src/x.ts::fetch';
+  const site = { id, file: 'apps/server/src/x.ts', kind: 'fetch', count: 1 };
+  const sites = new Map([[id, site]]);
+  const entry = { ...site, compatibility: 'legacy-only', phase: 'M2' };
+  const baseline = { entries: [] };
+  assert.deepEqual(judgeInventory(sites, { entries: [entry] }, baseline), [`migration debt cannot grow: ${id}`]);
+  assert.deepEqual(judgeInventory(sites, { entries: [{ ...entry, reason: '  ' }] }, baseline), [`migration debt cannot grow: ${id}`]);
+  assert.deepEqual(judgeInventory(sites, { entries: [{ ...entry, reason: 'Owner-decided egress.' }] }, baseline), []);
 });

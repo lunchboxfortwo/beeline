@@ -24,8 +24,9 @@ function sameTranscriptContext(before: ChatListView | null, after: ChatListView 
 export type UseChatListOptions = { readonly visible?: () => boolean; readonly onError?: (reason: unknown) => void;
   readonly transcriptRoomId?: string };
 export function useChatList(key: ChatListKey | null, options: UseChatListOptions = {}): ChatListView | null {
-  const [value, setValue] = useState<ChatListView | null>(null);
-  const painted = useRef<ChatListView | null>(null);
+  const [value, setValue] = useState<ChatListView | null>(() =>
+    options.transcriptRoomId && key ? liveChatList(key) : null);
+  const painted = useRef<ChatListView | null>(value);
   const optionsRef = useRef(options);
   optionsRef.current = options;
   const id = key ? JSON.stringify([key.relayUrl, key.viewerPubkey, key.workspaceId]) : null;

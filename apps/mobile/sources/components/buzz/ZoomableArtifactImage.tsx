@@ -1,12 +1,11 @@
-import { Button } from '@/components/buzz/Button';
 import React, { useEffect, useRef, useState } from 'react';
-import { PanResponder, Platform, Pressable, Text, View } from 'react-native';
-import { StyleSheet } from 'react-native-unistyles';
-import { useSafeAreaInsets } from 'react-native-safe-area-context';
+import { PanResponder, Platform } from 'react-native';
+import { YStack } from 'tamagui';
 import type { AttachmentReference } from '@beeline/buzz-client';
 
 import { ArtifactImage } from '@/components/buzz/ArtifactMedia';
 import { showPictureActions } from '@/buzz/picture-actions';
+import { ZoomBar } from '@/ui/screens/viewers/ViewerChrome';
 import {
   MAX_IMAGE_ZOOM,
   clampImageZoom,
@@ -29,7 +28,6 @@ export function ZoomableArtifactImage({
   onSwipePhoto?: (direction: -1 | 1) => void;
   testIDPrefix?: string;
 }) {
-  const insets = useSafeAreaInsets();
   const [zoom, setZoom] = useState<ImageZoom>({ scale: 1, x: 0, y: 0 });
   const zoomRef = useRef(zoom);
   const frameRef = useRef<ImageFrame>({ width: 0, height: 0 });
@@ -209,31 +207,32 @@ export function ZoomableArtifactImage({
   };
 
   return (
-    <View style={styles.imageViewer}>
-      <View
+    <YStack flex={1}>
+      <YStack
+        flex={1}
+        overflow="hidden"
+        touchAction={Platform.OS === 'web' ? 'none' : undefined}
         onLayout={(event) => {
           frameRef.current = { ...frameRef.current, ...event.nativeEvent.layout };
           setImageZoom(clampImageZoom(zoomRef.current, frameRef.current));
         }}
-        style={[
-          styles.imageViewport,
-          Platform.OS === 'web' && ({ touchAction: 'none' } as object),
-        ]}
         testID={`${testIDPrefix}-image-viewport`}
-        {...gesture.panHandlers}
+        {...(gesture.panHandlers as object)}
         {...(Platform.OS === 'web' ? ({ onWheel: wheel } as object) : {})}
       >
-        <Pressable
+        <YStack
           accessibilityLabel={`Image ${title}`}
-          delayLongPress={450}
+          // Tamagui's press events honour delayLongPress on native; its stack types omit it.
+          {...({ delayLongPress: 450 } as object)}
           onLongPress={() => {
             swipeRef.current = false;
             showPictureActions(attachment);
           }}
-          style={[
-            styles.image,
-            { transform: [{ translateX: zoom.x }, { translateY: zoom.y }, { scale: zoom.scale }] },
-          ]}
+          width="100%"
+          height="100%"
+          x={zoom.x}
+          y={zoom.y}
+          scale={zoom.scale}
           testID={`${testIDPrefix}-image-actions`}
           {...(Platform.OS === 'web'
             ? {
@@ -253,77 +252,18 @@ export function ZoomableArtifactImage({
               frameRef.current = { ...frameRef.current, imageWidth, imageHeight };
               setImageZoom(clampImageZoom(zoomRef.current, frameRef.current));
             }}
-            style={styles.image}
             testID={`${testIDPrefix}-image`}
           />
-        </Pressable>
-      </View>
-      <View style={[styles.zoomControls, { paddingBottom: insets.bottom + 8 }]}>
-        <Button
-          accessibilityRole="button"
-          accessibilityLabel="Zoom out"
-          accessibilityState={{ disabled: zoom.scale <= 1 }}
-          disabled={zoom.scale <= 1}
-          onPress={() => step(1 / 1.5)}
-          testID={`${testIDPrefix}-zoom-out`}
-          label=""
-          icon={<Text style={styles.zoomText}>{'−'}</Text>}
-          variant="quiet"
-          iconOnly
-          appearance={{ control: styles.zoomButton, label: undefined }}
-        />
-        <Text
-          accessibilityLabel={`Image zoom ${Math.round(zoom.scale * 100)} percent`}
-          style={styles.zoomLevel}
-        >
-          {Math.round(zoom.scale * 100)}%
-        </Text>
-        <Button
-          accessibilityRole="button"
-          accessibilityLabel="Zoom in"
-          accessibilityState={{ disabled: zoom.scale >= MAX_IMAGE_ZOOM }}
-          disabled={zoom.scale >= MAX_IMAGE_ZOOM}
-          onPress={() => step(1.5)}
-          testID={`${testIDPrefix}-zoom-in`}
-          label=""
-          icon={<Text style={styles.zoomText}>{'+'}</Text>}
-          variant="quiet"
-          iconOnly
-          appearance={{ control: styles.zoomButton, label: undefined }}
-        />
-          <Button
-            accessibilityRole="button"
-            accessibilityLabel="Reset image zoom"
-            accessibilityState={{ disabled: zoom.scale === 1 }}
-            disabled={zoom.scale === 1}
-            onPress={() => setImageZoom({ scale: 1, x: 0, y: 0 })}
-            testID={`${testIDPrefix}-zoom-reset`}
-            label={'Reset'}
-            variant="quiet"
-            appearance={{ control: styles.zoomButton, label: styles.zoomResetText }}
-          />
-      </View>
-    </View>
+        </YStack>
+      </YStack>
+      <ZoomBar
+        scale={zoom.scale}
+        canZoomIn={zoom.scale < MAX_IMAGE_ZOOM}
+        onZoomOut={() => step(1 / 1.5)}
+        onZoomIn={() => step(1.5)}
+        onReset={() => setImageZoom({ scale: 1, x: 0, y: 0 })}
+        testIDPrefix={testIDPrefix}
+      />
+    </YStack>
   );
 }
-
-const styles = StyleSheet.create((theme) => ({
-  imageViewer: { flex: 1 },
-  imageViewport: { flex: 1, overflow: 'hidden' },
-  image: { height: '100%', width: '100%' },
-  zoomControls: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'center',
-    paddingVertical: theme.buzz.space.sm,
-  },
-  zoomButton: { minWidth: 44, minHeight: 44, alignItems: 'center', justifyContent: 'center' },
-  zoomText: { ...theme.buzz.type.bodyStrong, color: theme.buzz.textPrimary },
-  zoomLevel: {
-    ...theme.buzz.type.meta,
-    color: theme.buzz.ledgerQuiet,
-    minWidth: 52,
-    textAlign: 'center',
-  },
-  zoomResetText: { ...theme.buzz.type.meta, color: theme.buzz.accent },
-}));

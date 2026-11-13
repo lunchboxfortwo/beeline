@@ -1,8 +1,24 @@
 import { queueReviewerCommand } from './corner-lifecycle.js';
-import { cornerReviewWokenSql } from './corner-lifecycle-review-state.js';
+import { commanderReportAddress } from './commander.js';
+import { noteReviewDispatchFailure, noteUnreachableReviewer, cornerReviewWokenSql } from './corner-lifecycle-review-state.js';
 import { describe, expect, it, vi, assignCornerWorker, DaemonService, LiveHub, PushDeliveryLoop, systemLine, createAgentCommand, reconcileConfiguredCornerReviewers, REVIEWER_DISPATCH_REASONS, reviewerDispatchCarriesHead, routeSystemCommand, advanceCorner, H, A, B, R, C, db, phone, daemon, commands, claim, result, greenHead, rootFixture } from './test-support-corner-review-dispatch.test-support.js';
 
 describe('corner message attribution', () => {
+  it('keeps automatic review errors out of a human commander’s conversation', async () => {
+    const opened = await rootFixture.phone.execute('createHumanCorner', { roomId: R, title: 'human-work' }, H);
+    expect(await commanderReportAddress(rootFixture.db, opened.id)).toMatchObject({ recipient: H, returnRoom: R });
+    const before = (await rootFixture.db.query('SELECT id FROM messages')).rowCount;
+    await noteReviewDispatchFailure(rootFixture.db, opened.id, 'a'.repeat(40), 'review queue unavailable');
+    const opening = (await rootFixture.db.query<{id:string}>(
+      "SELECT id FROM messages WHERE room_id=$1 AND card->>'cornerId'=$2", [R, opened.id],
+    )).rows[0]!;
+    await noteUnreachableReviewer(rootFixture.db, {
+      cornerId: opened.id, sourceMessageId: opening.id, reviewerId: B, reviewerKind: 'agent',
+      reviewerName: 'Reviewer', reason: 'offline',
+    });
+    expect((await rootFixture.db.query('SELECT id FROM messages')).rowCount).toBe(before);
+  });
+
 
   it('requests review after a new green event despite a historical verdict or brief change', async () => {
     const head = 'f'.repeat(40);
@@ -294,7 +310,7 @@ describe('corner message attribution', () => {
 
 
   it.each(['FAIL: required evidence is missing.', 'blocked: waiting for required checks.'])(
-    'Reproduction REVIEW-STOP-1: %s yields repair or one pending retry', async verdict => {
+    'Reproduction REVIEW-STOP-1: %s leaves findings or a cause without retrying', async verdict => {
       await rootFixture.phone.execute('updateRoom', { roomId: R, reviewerAgentId: B }, H);
       const head = 'd'.repeat(40);
       await greenHead(95, head);
@@ -314,11 +330,7 @@ describe('corner message attribution', () => {
       await advanceCorner(rootFixture.db, C, { kind: 'checks-pending' });
       await greenHead(95, head);
       await reconcileConfiguredCornerReviewers(rootFixture.db, R);
-      if (verdict.startsWith('blocked:')) {
-        const retries=(await commands(B,C)).filter(command=>command.reason==='corner_review_dispatch');
-        expect(retries).toHaveLength(1);
-        expect(retries[0]!.id).not.toBe(review!.id);
-      } else expect(await commands(B,C)).toEqual([]);
+      expect(await commands(B,C)).toEqual([]);
       await greenHead(95, 'f'.repeat(40));
       expect((await commands(B, C)).length).toBeGreaterThan(0);
     });
@@ -530,7 +542,7 @@ describe('the corner implementer the workflow wakes follows a person hand-over',
 });
 
 
-it.each(['empty','status','failed'])('a %s review result retries once and fails after a second empty turn',async ending=>{
+it.each(['empty','status','failed'])('a %s review result ends silently without retrying',async ending=>{
   await rootFixture.phone.execute('updateRoom',{roomId:R,reviewerAgentId:B},H);
   await greenHead(91,'d'.repeat(40));
   const [review]=await commands(B,C);await claim(review!);
@@ -538,14 +550,9 @@ it.each(['empty','status','failed'])('a %s review result retries once and fails 
   else await rootFixture.daemon.execute('postAgentTurnReceipt',{roomId:C,requestId:review!.turnRequestId,
     generationId:'g1',status:ending==='failed'?'failed':'complete',...(ending==='failed'?{reason:'provider unavailable'}:{})},B);
   for(let event=0;event<3;event++)await reconcileConfiguredCornerReviewers(rootFixture.db,R);
-  const retries=(await commands(B,C)).filter(command=>command.reason==='corner_review_dispatch');
-  expect(retries).toHaveLength(1);
-  await claim(retries[0]!,'g2');
-  await rootFixture.daemon.execute('postAgentTurnReceipt',{roomId:C,requestId:retries[0]!.turnRequestId,
-    generationId:'g2',status:'complete'},B);
-  for(let event=0;event<3;event++)await reconcileConfiguredCornerReviewers(rootFixture.db,R);
   expect(await commands(B,C)).toEqual([]);
-  expect((await commands(A,C)).some(c=>c.source.body.includes('reviewer gave no verdict twice'))).toBe(true);
+  expect((await rootFixture.db.query<{text:string}>(`SELECT text FROM messages WHERE room_id=$1`,[C])).rows
+    .some(line=>line.text.includes('reviewer gave no verdict'))).toBe(false);
   if(ending==='failed')expect((await commands(A,R)).filter(c=>c.reason==='report'&&c.source.body.includes('failed:'))).toHaveLength(1);
 
 });
@@ -893,20 +900,11 @@ it('committed-event recovery: startup green, lost command and reviewer completio
     await claim(review!);
     await rootFixture.daemon.execute('postAgentTurnReceipt', { roomId: C, requestId: review!.turnRequestId,
       generationId: 'g1', status: 'complete' }, B);
-    await vi.waitFor(async () => expect(await commands(B,C)).toHaveLength(1));
-    const [retry]=await commands(B,C);
-    await claim(retry!,'g2');
-    await rootFixture.daemon.execute('postAgentTurnReceipt',{roomId:C,requestId:retry!.turnRequestId,
-      generationId:'g2',status:'complete'},B);
-    await vi.waitFor(async () => {
-      const handbacks = (await commands(A, C)).filter(command => command.reason === 'corner_review_needed');
-      expect(handbacks).toHaveLength(1);
-      expect(handbacks[0]?.source.body).toContain('reviewer gave no verdict twice');
-      expect(handbacks[0]?.source.body).toContain(headSha);
-    });
     for (let replay = 0; replay < 3; replay++) live.publish({ type: 'invalidate', roomId: C, reason: 'postgres:corner_state' });
     await machine.refresh(C);
-    expect((await commands(A, C)).filter(command => command.reason === 'corner_review_needed')).toHaveLength(1);
+    const lines=(await rootFixture.db.query<{text:string}>(`SELECT text FROM messages WHERE room_id=$1`,[C])).rows;
+    expect(lines.some(line=>line.text.includes('reviewer gave no verdict'))).toBe(false);
+    expect((await commands(A, C)).filter(command => command.reason === 'corner_review_needed')).toHaveLength(0);
     expect(await commands(B, C)).toEqual([]);
     expect(errors).toEqual([]);
     await machine.stop();

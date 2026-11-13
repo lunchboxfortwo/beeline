@@ -56,6 +56,7 @@ export async function convergeMachine(
     env?: NodeJS.ProcessEnv;
     layout?: BeelineInstallLayout;
     releaseId?: string;
+    force?: boolean;
     run?: NativeRunner;
     timeoutMs?: number;
     agentIds?: string[];
@@ -119,6 +120,7 @@ export async function convergeMachine(
           operation: 'update' as const,
           releaseId: options.releaseId,
           sourceGeneration: current!.generation,
+          ...(options.force ? { force: true } : {}),
         }
       : { operation: 'converge' as const };
   return requestMachine(

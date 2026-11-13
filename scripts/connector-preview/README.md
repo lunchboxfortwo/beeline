@@ -2,8 +2,9 @@
 
 The two `apps/server/assets/mcp/landing/room-*.png` files are product artwork,
 not QA screenshots. They show a static example conversation rendered from the
-app's `ChannelHeaderTitle`, `LedgerEntry` (including `IdentityMark`) and
-`ConversationComposer`, in the actual Bone and Obsidian themes. No private Room
+app's `LedgerEntry` (including `IdentityMark`) and `ConversationComposer`
+under an inline `#general` title in the theme's hero type, in the actual Bone
+and Obsidian themes. No private Room
 content or service connection is used. Native services and motion are stubbed;
 the UI implementations and theme tokens remain real.
 

@@ -17,13 +17,6 @@ import { sharedLiveConnection } from '@/sync/transport/live-connection';
 import { subscribeClientReset } from '@/sync/client-reset';
 import type { SurfaceCacheAddress } from '@beeline/buzz-client';
 
-const NEXT_RUN = new Intl.DateTimeFormat(undefined, {
-  month: 'short',
-  day: 'numeric',
-  hour: 'numeric',
-  minute: '2-digit',
-});
-
 /** The longest a prompt's first sentence runs on a list row before it ellipsizes. */
 const PROMPT_LEAD = 48;
 
@@ -50,8 +43,8 @@ export function scheduleWhere(
   isDirectMessage = false,
 ): string {
   return work.corner
-    ? `corner ${cornerShortTitle(roomName, work.corner.name, work.corner.id)}`
-    : isDirectMessage ? 'this DM' : 'this Room';
+    ? `thread ${cornerShortTitle(roomName, work.corner.name, work.corner.id)}`
+    : isDirectMessage ? 'this DM' : 'this chat';
 }
 
 /** The longest a derived schedule title runs before it stops at a word boundary. */
@@ -98,14 +91,6 @@ export function scheduleTrigger(schedule: RoomScheduleView, now = new Date()): s
   return `${day} at ${time} ${zone}`.trim();
 }
 
-/** The detail page's Runs row: the cadence and the next firing. */
-export function scheduleRuns(schedule: RoomScheduleView): string {
-  if (schedule.paused) return 'Paused while you were away';
-  return `${scheduleTrigger(schedule)} · next ${NEXT_RUN.format(
-    new Date(schedule.nextRunAt * 1_000),
-  )}`;
-}
-
 export function subscriptionTitle(subscription: RoomSubscriptionView): string {
   if (subscription.title?.trim()) return subscription.title.trim();
   return subscription.workflowSlug
@@ -136,13 +121,13 @@ export function subscriptionWhen(subscription: RoomSubscriptionView, isDirectMes
     };
     return `On ${action[subscription.event] ?? `an event in ${repository}`}`;
   }
-  const place = isDirectMessage ? 'this DM' : 'this Room';
+  const place = isDirectMessage ? 'this DM' : 'this chat';
   const action: Record<string, string> = {
     joined: `someone joining ${place}`,
     'schedule-ran': `a schedule running in ${place}`,
-    'corner-opened': `a corner opening in ${place}`,
-    'check-passed': 'corner checks passing',
-    'check-failed': 'corner checks failing',
+    'corner-opened': `a thread opening in ${place}`,
+    'check-passed': 'thread checks passing',
+    'check-failed': 'thread checks failing',
     'workflow-handoff': 'a workflow moving to its next step',
   };
   return `On ${action[subscription.event] ?? `an event in ${place}`}`;
@@ -156,11 +141,8 @@ export function subscriptionWhere(
   return scheduleWhere(subscription, roomName, isDirectMessage);
 }
 
-export function subscriptionRuns(subscription: RoomSubscriptionView, isDirectMessage = false): string {
-  return subscriptionWhen(subscription, isDirectMessage);
-}
-
 export type ScheduledWork = {
+  recentRuns?: ScheduledWorkResult['recentRuns'];
   isDirectMessage: boolean;
   roomName: string | null;
   agentNames: ReadonlyMap<string, string>;
@@ -174,7 +156,10 @@ const isScheduledWork = (value: unknown): value is ScheduledWorkResult => {
   return (view.roomName === null || typeof view.roomName === 'string') &&
     (view.isDirectMessage === undefined || typeof view.isDirectMessage === 'boolean') &&
     Array.isArray(view.agentNames) && Array.isArray(view.schedules) &&
-    Array.isArray(view.subscriptions);
+    Array.isArray(view.subscriptions) &&
+    (view.recentRuns === undefined || Array.isArray(view.recentRuns) && view.recentRuns.every(run =>
+      run && typeof run.routineId === 'string' && typeof run.roomId === 'string' &&
+      typeof run.messageId === 'string' && typeof run.text === 'string' && typeof run.at === 'number'));
 };
 const scheduledWorkAddress = (relay: string, pubkey: string, roomId: string) =>
   surfaceAddress(relay, pubkey, '/room/:id/scheduled-work', { roomId });
@@ -193,9 +178,9 @@ function holdScheduledWork(roomId: string, address: SurfaceCacheAddress): { firs
     void sharedLiveConnection().register([{ '#h': [roomId] }], (event) => {
       if (watched.get(key) !== entry || !entry.refs || AppState.currentState !== 'active' || !('monolithLive' in event)) return;
       const live = event.monolithLive;
-      if (live.type === 'invalidate' &&
+      if ((live.type === 'message-delta' && live.roomId === roomId) || live.type === 'invalidate' &&
           ((live.roomId === roomId &&
-            ['postgres:agent_schedules', 'postgres:agent_subscriptions', 'postgres:memberships'].includes(live.reason)) ||
+            ['postgres:agent_schedules', 'postgres:agent_subscriptions', 'postgres:memberships', 'message'].includes(live.reason)) ||
            (live.roomId === '' && live.reason === 'reconnect')))
         void mobileSurfaceCache.fetch(address, isScheduledWork,
           () => monolithPhoneOperation('readScheduledWork', { roomId })).catch(() => undefined);
@@ -227,7 +212,7 @@ export function useScheduledWork(roomId: string | undefined) {
     return owner.release;
   }, [address, roomId, focused, refresh]);
   const selected=(value);
-  const work = useMemo<ScheduledWork | null>(() => selected && ({roomName:selected.roomName,isDirectMessage:selected.isDirectMessage===true,
+  const work = useMemo<ScheduledWork | null>(() => selected && ({recentRuns:selected.recentRuns,roomName:selected.roomName,isDirectMessage:selected.isDirectMessage===true,
     agentNames:new Map(selected.agentNames),schedules:selected.schedules,subscriptions:selected.subscriptions}),[selected]);
   return { work,loading:(loading&&!value),
     error:roomId ? error:'Schedules target is missing.',

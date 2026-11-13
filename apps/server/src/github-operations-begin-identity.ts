@@ -602,18 +602,27 @@ import { GitHubOperations, Input, hash, challenge, record, GitHubRecord, text, i
       return;
     }
     if (pr.merged || pr.headSha === stored.head) return;
-    await ctx.database.transaction(async db => {
-      await lockCornerLifecycle(db, cornerId);
-      const changed = await db.query(
-        `UPDATE corner_github_cache SET lifecycle=jsonb_set(
-           jsonb_set(lifecycle-'checksSummary'-'checkRefreshRetry','{pr,headSha}',to_jsonb($4::text)),
-           '{checks}','"pending"')
-         WHERE corner_id=$1 AND lifecycle->'pr'->>'number'=$2
-           AND lifecycle->'pr'->>'headSha'=$3 RETURNING corner_id`,
-        [cornerId, String(stored.number), stored.head, pr.headSha],
-      );
-      if (changed.rowCount) await advanceCorner(db, cornerId,
-        { kind: 'push', headSha: pr.headSha, contents: { headSha: pr.headSha } });
+    const nextHead = pr.headSha;
+    await advanceCorner(ctx.database, cornerId, { kind: 'push', headSha: nextHead, contents: { headSha: nextHead } }, {
+      project(corner) {
+        const current = corner.lifecycle.pr;
+        if (!current || current.number !== stored.number || current.headSha !== stored.head) return undefined;
+        const lifecycle = { ...corner.lifecycle, checks: 'pending' as const, pr: { ...current, headSha: nextHead } };
+        delete (lifecycle as { checksSummary?: unknown }).checksSummary;
+        delete (lifecycle as { checkRefreshRetry?: unknown }).checkRefreshRetry;
+        return { corner: { ...corner, lifecycle } };
+      },
+      async write(db) {
+        const changed = await db.query(
+          `UPDATE corner_github_cache SET lifecycle=jsonb_set(
+             jsonb_set(lifecycle-'checksSummary'-'checkRefreshRetry','{pr,headSha}',to_jsonb($4::text)),
+             '{checks}','"pending"')
+           WHERE corner_id=$1 AND lifecycle->'pr'->>'number'=$2
+             AND lifecycle->'pr'->>'headSha'=$3 RETURNING corner_id`,
+          [cornerId, String(stored.number), stored.head, nextHead],
+        );
+        return Boolean(changed.rowCount);
+      },
     });
   }
 

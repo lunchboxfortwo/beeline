@@ -34,32 +34,20 @@ const controls = vi.hoisted(() => ({
   identity: vi.fn(),
 }));
 
-vi.mock('react-native', async () => {
+vi.mock('tamagui', async () => (await import('@/ui/screens/onboarding/onboarding.test-support')).tamaguiMock());
+vi.mock('lucide-react-native', async () => (await import('@/ui/screens/onboarding/onboarding.test-support')).lucideMock());
+vi.mock('@/ui/screens/onboarding/Rise', async () => (await import('@/ui/screens/onboarding/onboarding.test-support')).riseMock());
+vi.mock('@/ui/screens/onboarding/YouStep', async () => {
   const ReactModule = await import('react');
-  const host = (name: string) => (props: any) =>
-    ReactModule.createElement(name, props, props.children);
-  return {
-    Pressable: host('Pressable'),
-    ScrollView: host('ScrollView'),
-    Text: host('Text'),
-    TouchableOpacity: host('TouchableOpacity'),
-    View: host('View'),
-  };
-});
-vi.mock('react-native-unistyles', async () => {
-  const { beelineThemes } = await import('@/buzz/groknight');
-  const theme = { buzz: beelineThemes.obsidian };
-  return { StyleSheet: {create:(factory:any)=>factory(theme),hairlineWidth:1},
-    useUnistyles:()=>({theme}) };
+  return { YouStep: (props: any) => ReactModule.createElement('YouStep', props) };
 });
 vi.mock('expo-router', () => ({
   router: { back: vi.fn(), push: vi.fn(), replace: controls.replace },
   useLocalSearchParams: () => ({ token: TOKEN }),
 }));
 vi.mock('expo-linking', () => ({ useURL: () => null }));
-const safeArea = vi.hoisted(() => ({ bottom: 0 }));
 vi.mock('react-native-safe-area-context', () => ({
-  useSafeAreaInsets: () => ({ top: 0, bottom: safeArea.bottom }),
+  useSafeAreaInsets: () => ({ top: 0, bottom: 0 }),
 }));
 vi.mock('@/auth/buzz-identity-storage', () => ({
   getEffectiveRelayUrl: vi.fn(async () => 'https://server.example'),
@@ -71,9 +59,9 @@ vi.mock('@/buzz/pending-invite', () => ({
   clearPendingInvite: controls.clearPendingInvite,
 }));
 vi.mock('@/buzz/vocabulary', () => ({ WORKSPACE_LABEL: 'Workspace' }));
-vi.mock('@/components/buzz/Button', async () => {
+vi.mock('@/components/buzz/SurfaceGlyphLoader', async () => {
   const ReactModule = await import('react');
-  return { Button: (props: any) => ReactModule.createElement('Button', props, props.children) };
+  return { SurfaceGlyphLoader: (props: any) => ReactModule.createElement('SurfaceGlyphLoader', props) };
 });
 vi.mock('@/components/buzz/IdentityMark', async () => {
   const ReactModule = await import('react');
@@ -98,23 +86,6 @@ vi.mock('@/sync/transport/room-view-client', () => ({
 }));
 vi.mock('@/sync/transport/monolith-operation', () => ({
   monolithPhoneOperation: controls.redeemInvite,
-}));
-vi.mock('@/buzz/room-view-presentation', () => ({ workspaceRailItem: (value: any) => value }));
-vi.mock('@/components/buzz/CommunityRail', async () => {
-  const ReactModule = await import('react');
-  return {
-    BuzzCommunityShell: (props: any) =>
-      ReactModule.createElement('BuzzCommunityShell', props, props.children),
-  };
-});
-vi.mock('@/components/buzz/SurfaceGlyphLoader', async () => {
-  const ReactModule = await import('react');
-  return {
-    SurfaceGlyphLoader: (props: any) => ReactModule.createElement('SurfaceGlyphLoader', props),
-  };
-});
-vi.mock('@/constants/Typography', () => ({
-  Typography: { default: () => ({}), mono: () => ({}) },
 }));
 vi.mock('@beeline/buzz-client', () => ({ createBuzzClient: controls.createBuzzClient }));
 
@@ -159,6 +130,8 @@ describe('CommunityInviteJoin', () => {
   beforeEach(() => {
     vi.clearAllMocks();
     controls.identity.mockResolvedValue(IDENTITY);
+    // Someone who already has a Workspace: no You step.
+    controls.workspaces.mockResolvedValue({ workspaces: [{ id: 'w0', name: 'Home' }], viewer: {} });
     controls.runtimeConfig.mockReturnValue({});
     controls.invite.mockResolvedValue({
       name: 'Builders',
@@ -175,18 +148,30 @@ describe('CommunityInviteJoin', () => {
     controls.saveActiveCommunityId.mockResolvedValue(undefined);
   });
 
-  it('lets its last item scroll clear of the system navigation bar', async () => {
-    safeArea.bottom = 48;
-    try {
-      const renderer = await render();
-      const scroll = renderer.root.findAll(
-        (node: any) => node.props?.testID === 'invite-join' && typeof node.type === 'string',
-      )[0];
-      const contentStyle = Object.assign({}, ...[scroll.props.contentContainerStyle].flat(Infinity as 1));
-      expect(contentStyle.paddingBottom).toBe(48 + 48);
-    } finally {
-      safeArea.bottom = 0;
-    }
+  it('asks a first entry who they are, then shows the invite with Create as the other way', async () => {
+    controls.workspaces.mockResolvedValue({ workspaces: [], viewer: {} });
+    const renderer = await render();
+    const you = renderer.root.findAllByType('YouStep');
+    expect(you).toHaveLength(1);
+    expect(controls.redeemInvite).not.toHaveBeenCalled();
+    await act(async () => you[0]!.props.onDone());
+    expect(renderer.root.findAllByType('YouStep')).toHaveLength(0);
+    expect(text(renderer)).toContain('Where will you work?');
+    expect(text(renderer)).toContain('You’re invited');
+    const card = renderer.root.findByProps({ testID: 'confirm-community-join' });
+    expect(card.props['aria-label']).toBe('Join Builders');
+    expect(card.props.borderColor).toBe('needsYou');
+    expect(text(renderer)).toContain('Create a workspace');
+  });
+
+  it('joins a public link right after a first entry says who they are', async () => {
+    controls.workspaces.mockResolvedValue({ workspaces: [], viewer: {} });
+    controls.invite.mockResolvedValue({ name: 'Beeline Community', expiresAt: 0 });
+    const renderer = await render();
+    expect(controls.redeemInvite).not.toHaveBeenCalled();
+    await act(async () => renderer.root.findAllByType('YouStep')[0]!.props.onDone());
+    expect(controls.redeemInvite).toHaveBeenCalledWith('redeemInvite', { token: TOKEN });
+    expect(controls.enterWorkspaceRoom).toHaveBeenCalledWith('workspace-1', 'general-1');
   });
 
   it('carries a public link through sign-in and joins directly into the first Room', async () => {
@@ -207,11 +192,11 @@ describe('CommunityInviteJoin', () => {
 
   it('names the Workspace and who invited you, then joins into its first Room', async () => {
     const renderer = await render();
-    expect(text(renderer)).toContain('Join Builders');
+    expect(renderer.root.findAllByType('YouStep')).toHaveLength(0);
+    expect(text(renderer)).toContain('Builders');
     expect(text(renderer)).toContain(
       'Mara Reyes invited you to a workspace with 8 people and 4 agents.',
     );
-    expect(text(renderer)).toContain('@mara · Workspace owner');
     // Resolving the invite spends the copy parked through sign-in.
     expect(controls.clearPendingInvite).toHaveBeenCalled();
 
@@ -272,16 +257,17 @@ describe('CommunityInviteJoin', () => {
     });
     for (let i = 0; i < 3; i += 1) await act(async () => undefined);
     expect(controls.invite).toHaveBeenCalledTimes(2);
-    expect(text(renderer)).toContain('Join Builders');
+    expect(text(renderer)).toContain('Builders');
     expect(controls.clearPendingInvite).toHaveBeenCalled();
   });
 
-  it('sends "This isn’t my invite" to the choice screen without joining', async () => {
+  it('sends Create a workspace to the create step without joining', async () => {
     const renderer = await render();
     await act(async () => {
       await renderer.root.findByProps({ testID: 'invite-not-mine' }).props.onPress();
     });
-    expect(controls.replace).toHaveBeenCalledWith('/beeline/community');
+    expect(controls.clearPendingInvite).toHaveBeenCalled();
+    expect(controls.replace).toHaveBeenCalledWith({ pathname: '/beeline/community', params: { step: 'create' } });
     expect(controls.redeemInvite).not.toHaveBeenCalled();
   });
 

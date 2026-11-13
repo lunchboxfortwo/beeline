@@ -1,5 +1,5 @@
 import React, { useRef } from 'react';
-import { TextInput } from 'react-native';
+import type { TextInput } from 'react-native';
 import { createRoomMessageProjector } from '@/buzz/room-view-presentation';
 
 type Props = [

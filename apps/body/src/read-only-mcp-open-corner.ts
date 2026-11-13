@@ -19,7 +19,7 @@ import { bindBriefFiles, withinRoot } from './read-only-mcp-download-attachment.
 export async function openCorner(args: JsonObject, toolCallId: string): Promise<string> {
   const spec = (args.brief as { spec?: unknown } | undefined)?.spec;
   const words = typeof spec === 'string' ? spec.match(/[a-zA-Z0-9]+/g) ?? [] : [];
-  const { name, objective } = cornerCallText({ ...args,
+  const { name, objective, notes } = cornerCallText({ ...args,
     name: args.name ?? (words.slice(0, 3).join('-') || 'Work'),
     objective: args.objective ?? (words.slice(0, 24).join(' ') || 'Carry out the brief'),
   });
@@ -67,6 +67,7 @@ export async function openCorner(args: JsonObject, toolCallId: string): Promise<
     address: created.cornerId,
     name,
     objective,
+    ...(notes?.length ? { notes } : {}),
     ...(args.brief ? { briefRevision: 1 } : {}),
     ...(created.watch ? { watch: created.watch } : {}),
     ...(Array.isArray(created.warnings) ? { warnings: created.warnings } : {}),

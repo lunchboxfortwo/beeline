@@ -7,6 +7,9 @@ vi.mock('react-native', () => ({
   FlatList: (props: Record<string, unknown>) => React.createElement('flat-list', props),
   View: (props: Record<string, unknown>) => React.createElement('view', props),
 }));
+// The list renders through the grammar's ContainedList; keep the grammar's native imports out of this node test.
+vi.mock('lucide-react-native', async () => (await import('@/ui/screens/transcript/grammar-hosts.test-support')).lucideHosts());
+vi.mock('react-native-safe-area-context', () => ({ useSafeAreaInsets: () => ({ top: 0, bottom: 0, left: 0, right: 0 }) }));
 import { RoomSendList, RoomSendPreview } from './room-send-list';
 
 const message = (id: string): ChatDisplayMessage => ({ id, text: 'Complete first frame', timestamp: 1, isUser: true });

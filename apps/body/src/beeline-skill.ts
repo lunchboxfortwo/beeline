@@ -1,3 +1,4 @@
+import { AGENT_INVITATION_PROMPT, BEELINE_PRODUCT_GUIDE } from '@beeline/api-contract/agent-invitation-guide';
 import { readFileSync } from 'node:fs';
 import { resolve } from 'node:path';
 import { MESSAGE_REACTION_EMOJIS } from '@beeline/api-contract/phone';
@@ -93,7 +94,7 @@ When the mock needs a real product photo, do not draw an SVG stand-in. When scra
 
 ## Message links
 
-Cite Room or corner messages with #beeline/<name>/<message_id> or [label](#beeline/<name>/<message_id>); use the real name and message id.
+Link a thread with ↳thread-name (its exact name, no space). Link a message with ¶author-N, copied from the message's messageLink field in a messages read; N counts messages within that chat, never the message id. Beeline resolves both the same way for every reader: a match in this chat wins, otherwise the one match elsewhere in the Workspace; a token that matches nothing stays plain text. You may also cite with #beeline/<name>/<message_id> or [label](#beeline/<name>/<message_id>); use the real name and message id.
 
 ## Reactions
 
@@ -121,6 +122,7 @@ export function beelineCornersSkillMarkdown(releaseId: string): string {
 
 - A finished non-corner order may report done without a pull request.
 - Agent-to-agent orders and reports stay private.
+- A report, idle or failure notice about a corner wakes you in that corner; answer there. A scheduled run posts in each corner it acts on. Post in a chat only when a person tagged you there or a person must decide, and then in one short message.
 - For friction in Beeline itself, call report_feedback with tool_name and error_excerpt filled in when a tool failed, so triage can group it.
 - After a fix pull request merges, notify_feedback_fixed(item_ids, title, pr_url) resolves the feedback items it lists. The feedback-triage-steps procedure says when to send Fixed notices.
 - For an operator notice explicitly commanded by lunchboxfortwo, use send_operator_system_dm({recipients,text}) through their own agent. recipients is one exact human id/handle, a list, or all. The server enforces owner-command provenance and audits each send. Keep the returned sendId; pending delivery is not a reason to resend. Read completion counts with read_operator_system_dm({sendId}). Delivered means committed to the System thread, not read by the person. Never substitute an ad-hoc production database write.
@@ -197,12 +199,20 @@ export function beelineConnectSkillMarkdown(releaseId: string, freeAgent = false
   if (freeAgent) return skillMarkdown(BEELINE_CONNECT_SKILL_NAME,
     'Browse public websites with Lightpanda or connect supported apps.', releaseId, `Use agent-browser with Lightpanda for browser tasks. Run agent-browser skills get core before first use. A bot check, sign-in or signup means stop, explain the block plainly, and suggest the person opens it themselves or connects their own agent. Never retry or claim success without reading the result.
 
+${BEELINE_PRODUCT_GUIDE}
+
+${AGENT_INVITATION_PROMPT}
+
 Use connect for supported app connections and app_tool for their actual tools. Follow the returned readiness. When an app needs an unavailable browser or account, explain the limitation. For repository work, use the Room repository card and normal corner workflow.`);
   return skillMarkdown(
     BEELINE_CONNECT_SKILL_NAME,
     'Reach an app, API, website, GitHub, Tailscale, wallet or host command: connect, app_tool, Squire, grants and keys.',
     releaseId,
     `# Connecting services
+
+${BEELINE_PRODUCT_GUIDE}
+
+${AGENT_INVITATION_PROMPT}
 
 ## Tools and keys
 
@@ -281,14 +291,14 @@ You keep memory yourself. No background reviewer exists: what you do not keep cu
 /** The Beeline-owned skills a session's harness home installs. */
 export function beelineManagedSkills(
   releaseId: string,
-  options: { isReviewer: boolean },
+  options: { isReviewer: boolean; freeAgent?: boolean },
 ): Array<{ name: string; content: string }> {
   return [
     { name: BEELINE_ONBOARDING_SKILL_NAME, content: beelineOnboardingSkillMarkdown(releaseId) },
     { name: BEELINE_FILES_SKILL_NAME, content: beelineFilesSkillMarkdown(releaseId) },
     { name: BEELINE_CORNERS_SKILL_NAME, content: beelineCornersSkillMarkdown(releaseId) },
     { name: BEELINE_WAKES_SKILL_NAME, content: beelineWakesSkillMarkdown(releaseId) },
-    { name: BEELINE_CONNECT_SKILL_NAME, content: beelineConnectSkillMarkdown(releaseId, Boolean(process.env.BEELINE_FREE_AGENT_ID)) },
+    { name: BEELINE_CONNECT_SKILL_NAME, content: beelineConnectSkillMarkdown(releaseId, options.freeAgent ?? Boolean(process.env.BEELINE_FREE_AGENT_ID)) },
     { name: BEELINE_MEMORY_SKILL_NAME, content: beelineMemorySkillMarkdown(releaseId) },
     { name: BEELINE_TRIAGE_SKILL_NAME, content: beelineTriageSkillMarkdown(releaseId) },
     { name: BEELINE_SPEC_SKILL_NAME, content: beelineSpecSkillMarkdown(releaseId) },

@@ -35,7 +35,7 @@ export function roomBottomChromeStyles(hull: { bgTerminal: string; border: strin
   return {
     stack: {
       position: 'relative',
-      // Keep the hanging line and every gap around the field above the
+      // Keepthe hanging line and every gap around the field above the
       // scrolling transcript, on the same opaque canvas in both themes.
       zIndex: 1,
       backgroundColor: hull.bgTerminal,

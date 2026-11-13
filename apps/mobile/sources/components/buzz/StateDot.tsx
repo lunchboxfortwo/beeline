@@ -1,6 +1,7 @@
-import React, { useEffect, useRef } from 'react';
-import { Animated, View } from 'react-native';
-import { StyleSheet } from 'react-native-unistyles';
+import React, { useEffect } from 'react';
+import { YStack } from 'tamagui';
+import { useAnimatedStyle, useSharedValue, withRepeat, withSequence, withTiming } from 'react-native-reanimated';
+import { Motion } from '@/ui/grammar';
 
 /**
  * StateDot — the ONE instrument dot (board revision 2's `.gind`): an 8px
@@ -16,41 +17,31 @@ import { StyleSheet } from 'react-native-unistyles';
  */
 export type StateDotKind = 'live' | 'pulse' | 'failed';
 
+function Dot({ kind, testID }: { kind: StateDotKind; testID?: string }) {
+  return (
+    <YStack
+      width={8}
+      height={8}
+      borderRadius="full"
+      flexShrink={0}
+      backgroundColor={kind === 'live' ? 'added' : kind === 'pulse' ? 'needsYou' : 'removed'}
+      testID={testID}
+    />
+  );
+}
+
 export function StateDot({ kind, testID }: { kind: StateDotKind; testID?: string }) {
-  if (kind !== 'pulse') {
-    return (
-      <View
-        style={[styles.dot, kind === 'live' ? styles.live : styles.failed]}
-        testID={testID ? `${testID}-${kind}` : undefined}
-      />
-    );
-  }
+  if (kind !== 'pulse') return <Dot kind={kind} testID={testID ? `${testID}-${kind}` : undefined} />;
   return <PulsingDot testID={testID ? `${testID}-pulse` : undefined} />;
 }
 
 function PulsingDot({ testID }: { testID?: string }) {
-  const pulse = useRef(new Animated.Value(1)).current;
+  const pulse = useSharedValue(1);
 
   useEffect(() => {
-    const loop = Animated.loop(
-      Animated.sequence([
-        Animated.timing(pulse, { toValue: 0.35, duration: 700, useNativeDriver: true }),
-        Animated.timing(pulse, { toValue: 1, duration: 700, useNativeDriver: true }),
-      ]),
-    );
-    loop.start();
-    return () => loop.stop();
+    pulse.value = withRepeat(withSequence(withTiming(0.35, { duration: 700 }), withTiming(1, { duration: 700 })), -1);
   }, [pulse]);
 
-  return <Animated.View style={[styles.dot, styles.pulse, { opacity: pulse }]} testID={testID} />;
+  const motion = useAnimatedStyle(() => ({ opacity: pulse.value }));
+  return <Motion motion={motion} testID={testID}><Dot kind="pulse" /></Motion>;
 }
-
-const styles = StyleSheet.create((theme) => {
-  const hull = theme.buzz;
-  return {
-    dot: { width: 8, height: 8, borderRadius: 8 / 2, flexShrink: 0 },
-    live: { backgroundColor: hull.success },
-    pulse: { backgroundColor: hull.accent },
-    failed: { backgroundColor: hull.dialogDanger },
-  };
-});

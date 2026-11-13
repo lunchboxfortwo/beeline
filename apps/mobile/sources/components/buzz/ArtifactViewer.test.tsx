@@ -1,4 +1,3 @@
-import { IndexRow } from './IndexRow';
 vi.mock('@/buzz/use-artifact-recovery', () => ({ useArtifactRecoveryGeneration: () => 0 }));
 import { ViewerConversationDock } from './ViewerConversationDock';
 vi.mock('./Button', () => ({ Button: 'Button' }));
@@ -57,15 +56,10 @@ vi.mock('react-native', async () => {
     View: host('View'),
   };
 });
+vi.mock('tamagui', async () => (await import('@/ui/screens/transcript/grammar-hosts.test-support')).tamaguiHosts());
+vi.mock('lucide-react-native', async () => (await import('@/ui/screens/transcript/grammar-hosts.test-support')).lucideHosts());
 vi.mock('react-native-webview', () => ({
   default: (props: Record<string, unknown>) => React.createElement('WebView', props, null),
-}));
-vi.mock('react-native-unistyles', () => ({
-  StyleSheet: {
-    hairlineWidth: 1,
-    create: (factory: (theme: unknown) => unknown) => factory({ buzz: theme.buzz }),
-  },
-  useUnistyles: () => ({ theme }),
 }));
 vi.mock('react-native-safe-area-context', () => ({
   useSafeAreaInsets: () => ({
@@ -123,6 +117,7 @@ vi.mock('@/components/buzz/ViewerConversationDock', () => ({
 
 import { ARTIFACT_DEFAULT_CANVAS } from '@/buzz/artifact';
 import { ArtifactViewerSandbox, ArtifactViewerScreen } from './ArtifactViewer';
+import { SafeBottom, SafeTop } from '@/ui/grammar';
 
 const originalConsoleError = console.error;
 beforeAll(() => {
@@ -177,6 +172,16 @@ describe('the full-screen artifact viewer (mock 1c)', () => {
     expect(renderer.root.findAllByType('Text' as any).map((node: any) => node.props.children))
       .toContain('Interactive · After midnight');
     act(() => renderer.unmount());
+  });
+
+  it('Reopen restarts an interactive artifact from its first frame', () => {
+    const renderer = render(<ArtifactViewerScreen
+      attachment={attachment({ mimeType: 'application/vnd.beeline.game+html', title: 'Race' })}
+      onClose={mocks.onClose}
+    />);
+    const first = renderer.root.findByType('RunnableArtifact' as any);
+    act(() => renderer.root.findByProps({ testID: 'artifact-viewer-reopen' }).props.onPress());
+    expect(renderer.root.findByType('RunnableArtifact' as any)).not.toBe(first);
   });
 
   it('renders code in the existing viewer shell and copies the complete document', async () => {
@@ -297,8 +302,7 @@ describe('the full-screen artifact viewer (mock 1c)', () => {
     expect(mocks.onClose).toHaveBeenCalled();
   });
 
-  it('the header clears the Android status tray: top inset over its own spacing', async () => {
-    mocks.safeAreaTop.value = 42;
+  it('the header clears the Android status tray: the safe-area spacer sits above the title row', async () => {
     mocks.fetchArtifactBytes.mockResolvedValue(
       new TextEncoder().encode('<html><body></body></html>'),
     );
@@ -306,14 +310,10 @@ describe('the full-screen artifact viewer (mock 1c)', () => {
       <ArtifactViewerScreen attachment={attachment()} onClose={mocks.onClose} />,
     );
     await flush();
-    // The header row is the parent of the ✕ control that closes the viewer.
-    const header = renderer.root.findByProps({ testID: 'artifact-viewer-close' }).parent;
-    const resolved = Object.assign(
-      {},
-      ...[header.props.style].flat(Infinity).filter(Boolean),
-    ) as Record<string, unknown>;
-    expect(resolved.paddingTop).toBe(mocks.safeAreaTop.value + theme.buzz.space.md);
-    mocks.safeAreaTop.value = 0;
+    const screen = renderer.root.findByProps({ testID: 'artifact-viewer' });
+    const order = screen.findAll((node: any) => node.type === SafeTop || node.props.testID === 'artifact-viewer-close');
+    expect(order[0].type).toBe(SafeTop);
+    expect(order.at(-1).props.testID).toBe('artifact-viewer-close');
   });
 
   it('renders an SVG attachment on the browser-default canvas in the sandbox', async () => {
@@ -352,7 +352,7 @@ describe('the full-screen artifact viewer (mock 1c)', () => {
     const plus = renderer.root.findByProps({ testID: 'artifact-viewer-zoom-in' });
     const minus = renderer.root.findByProps({ testID: 'artifact-viewer-zoom-out' });
     const reset = renderer.root.findByProps({ testID: 'artifact-viewer-zoom-reset' });
-    expect(plus.props.accessibilityLabel).toBe('Zoom in');
+    expect(plus.props.label).toBe('Zoom in');
     expect(minus.props.accessibilityState.disabled).toBe(true);
     act(() => plus.props.onPress());
     expect(minus.props.accessibilityState.disabled).toBe(false);
@@ -389,11 +389,7 @@ describe('the full-screen artifact viewer (mock 1c)', () => {
       viewport.props.onPanResponderMove({ nativeEvent: { touches: [point(180, 100)] } });
     });
     const image = renderer.root.findByProps({ testID: 'artifact-viewer-image-actions' });
-    expect(image.props.style[1].transform).toEqual([
-      { translateX: 80 },
-      { translateY: 0 },
-      { scale: 2 },
-    ]);
+    expect({ x: image.props.x, y: image.props.y, scale: image.props.scale }).toEqual({ x: 80, y: 0, scale: 2 });
   });
 
   it('zooms with the desktop wheel and allows reset', () => {
@@ -402,7 +398,7 @@ describe('the full-screen artifact viewer (mock 1c)', () => {
       const photo = attachment({ mimeType: 'image/png', name: 'photo.png' });
       const renderer = render(<ArtifactViewerScreen attachment={photo} onClose={mocks.onClose} />);
       const viewport = renderer.root.findByProps({ testID: 'artifact-viewer-image-viewport' });
-      expect(Object.assign({}, ...viewport.props.style.filter(Boolean)).touchAction).toBe('none');
+      expect(viewport.props.touchAction).toBe('none');
       act(() => viewport.props.onLayout({ nativeEvent: { layout: { width: 400, height: 300 } } }));
       const preventDefault = vi.fn();
       act(() =>
@@ -467,7 +463,7 @@ describe('the full-screen artifact viewer (mock 1c)', () => {
   function gallery(selected = 2) {
     mocks.onClose.mockClear();
     mocks.platformOS.value = 'android';
-    return render(<ArtifactViewerScreen attachment={photos[selected]!} photoAttachments={photos} onClose={mocks.onClose} />);
+    return render(<ArtifactViewerScreen attachment={photos[selected]!} groupAttachments={photos} onClose={mocks.onClose} />);
   }
 
   it('opens a non-first photo and swipes both ways, wrapping within its message group', () => {
@@ -510,7 +506,7 @@ describe('the full-screen artifact viewer (mock 1c)', () => {
     });
     swipe(renderer, 80);
     expect(currentPhoto(renderer)).toBe(photos[2]);
-    expect(renderer.root.findByProps({ testID: 'artifact-viewer-image-actions' }).props.style[1].transform[0]).toEqual({ translateX: 80 });
+    expect(renderer.root.findByProps({ testID: 'artifact-viewer-image-actions' }).props.x).toBe(80);
     act(() => renderer.root.findByProps({ testID: 'artifact-viewer-photo-next' }).props.onPress());
     expect(currentPhoto(renderer)).toBe(photos[0]);
     expect(renderer.root.findByProps({ accessibilityLabel: 'Image zoom 100 percent' })).toBeDefined();
@@ -574,7 +570,7 @@ describe('the full-screen artifact viewer (mock 1c)', () => {
     });
     swipe(renderer, 80);
     act(() => staleSize(100, 1000));
-    expect(renderer.root.findByProps({ testID: 'artifact-viewer-image-actions' }).props.style[1].transform[0]).toEqual({ translateX: 80 });
+    expect(renderer.root.findByProps({ testID: 'artifact-viewer-image-actions' }).props.x).toBe(80);
     expect(currentPhoto(renderer)).toBe(photos[1]);
   });
 
@@ -616,6 +612,24 @@ describe('the full-screen artifact viewer (mock 1c)', () => {
     expect(text.props.crop).toBe(false);
     expect(text.props.testID).toBe('artifact-viewer-text');
     expect(mocks.openArtifactInBrowserOrExplain).not.toHaveBeenCalled();
+  });
+  it('pages a mixed message from a photo to its HTML mock and back, as files', async () => {
+    mocks.platformOS.value = 'android';
+    mocks.fetchArtifactBytes.mockResolvedValue(new TextEncoder().encode('<p>mock</p>'));
+    const html = attachment();
+    const mixed = [photos[0]!, html];
+    const renderer = render(<ArtifactViewerScreen attachment={html} groupAttachments={mixed} onClose={mocks.onClose} />);
+    expect(renderer.root.findByProps({ accessibilityLabel: 'File 2 of 2' })).toBeDefined();
+    await flush();
+    expect(renderer.root.findByType('WebView')).toBeDefined();
+    act(() => renderer.root.findByProps({ testID: 'artifact-viewer-photo-next' }).props.onPress());
+    expect(currentPhoto(renderer)).toBe(photos[0]);
+    expect(renderer.root.findByProps({ accessibilityLabel: 'File 1 of 2' })).toBeDefined();
+    expect(renderer.root.findAllByType('WebView')).toHaveLength(0);
+    swipe(renderer, -120);
+    expect(renderer.root.findByProps({ accessibilityLabel: 'File 2 of 2' })).toBeDefined();
+    await flush();
+    expect(renderer.root.findByType('WebView')).toBeDefined();
   });
 
   it('every navigation after the initial load is denied', async () => {
@@ -663,34 +677,23 @@ describe('the full-screen artifact viewer (mock 1c)', () => {
   });
 
   it('lets the end of a code or markdown document scroll clear of the system navigation bar', async () => {
-    const bottomPadding = (style: unknown) =>
-      Object.assign({}, ...[style].flat(Infinity as 1)).paddingBottom;
-    mocks.safeAreaBottom.value = 48;
-    try {
-      const code = render(
-        <ArtifactViewerScreen
-          document={{ type: 'code', title: 'ts', inscription: 'ts', code: 'x();', language: 'typescript' }}
-          onClose={mocks.onClose}
-        />,
-      );
-      expect(
-        bottomPadding(code.root.findByProps({ testID: 'artifact-viewer-code' }).props.contentContainerStyle),
-      ).toBe(theme.buzz.space.md + 48);
+    const code = render(
+      <ArtifactViewerScreen
+        document={{ type: 'code', title: 'ts', inscription: 'ts', code: 'x();', language: 'typescript' }}
+        onClose={mocks.onClose}
+      />,
+    );
+    expect(code.root.findByProps({ testID: 'artifact-viewer-code' }).findAllByType(SafeBottom)).toHaveLength(1);
 
-      mocks.fetchArtifactText.mockResolvedValue('# Heading');
-      const markdown = render(
-        <ArtifactViewerScreen
-          attachment={attachment({ mimeType: 'text/markdown', name: 'notes.md' })}
-          onClose={mocks.onClose}
-        />,
-      );
-      await flush();
-      expect(
-        bottomPadding(markdown.root.findByProps({ testID: 'artifact-viewer-markdown' }).props.contentContainerStyle),
-      ).toBe(theme.buzz.space.xl + 48);
-    } finally {
-      mocks.safeAreaBottom.value = 0;
-    }
+    mocks.fetchArtifactText.mockResolvedValue('# Heading');
+    const markdown = render(
+      <ArtifactViewerScreen
+        attachment={attachment({ mimeType: 'text/markdown', name: 'notes.md' })}
+        onClose={mocks.onClose}
+      />,
+    );
+    await flush();
+    expect(markdown.root.findByProps({ testID: 'artifact-viewer-markdown' }).findAllByType(SafeBottom)).toHaveLength(1);
   });
 
   // The audit found Android had no PDF viewer: opening one threw the reader
@@ -753,8 +756,10 @@ describe('the full-screen artifact viewer (mock 1c)', () => {
     );
     await flush();
     const failed = renderer.root.findByProps({ testID: 'artifact-viewer-failed' });
-    const text = failed.findByType(IndexRow).props.description;
-    expect(text).toContain('no inline preview');
+    expect(failed.props.title).toBe('Preview unavailable');
+    expect(failed.props.message).toBe('Open the file to view it.');
+    act(() => failed.props.onOpenInBrowser());
+    expect(mocks.openArtifactInBrowserOrExplain).toHaveBeenCalled();
   });
 });
 

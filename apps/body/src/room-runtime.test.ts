@@ -110,7 +110,7 @@ mergedDescribe35("room-runtime.agent-checkout.test.ts", () => {
 const scope4 = fixtureScope4();
 
 
-m35_it('read-only assignments reuse the Room checkout, then select a private copy after a writable brief revision', async () => {
+m35_it('a read-only brief uses the private copy read-only; a writable revision makes the same copy writable', async () => {
   const root = await m35_mkdtemp(m35_resolve(m35_tmpdir(), 'corner-readonly-'));
   const identity = m35_identityFromKey('11'.repeat(32), 'Bee');
   const runtime = { agent: { name: 'Bee', publicKey: identity.publicKey, secretKeyHex: '11'.repeat(32) },
@@ -150,19 +150,17 @@ m35_it('read-only assignments reuse the Room checkout, then select a private cop
       options: { worktreePath: string; repository: { readOnly: boolean } } };
     const own = m35_agentCornerCheckoutPaths(root, 'corner', identity.publicKey);
     await turn.withCheckout(async () => {
-      m35_expect(turn.options.worktreePath).toBe(roomCheckout);
+      m35_expect(turn.options.worktreePath).toBe(own.path);
       m35_expect(turn.options.repository.readOnly).toBe(true);
     });
-    await m35_expect(m35_access(own.path)).rejects.toThrow();
-    m35_expect(await m35_readStorageOwners(root)).toEqual([]);
+    m35_expect(await m35_readStorageOwners(root)).toContainEqual(m35_expect.objectContaining({ roomId: 'corner', agentId: identity.publicKey }));
     writable = true;
     await turn.withCheckout(async () => {
       m35_expect(turn.options.worktreePath).toBe(own.path);
       m35_expect(turn.options.repository.readOnly).toBe(false);
     });
-    m35_expect(await m35_readStorageOwners(root)).toContainEqual(m35_expect.objectContaining({ roomId: 'corner', agentId: identity.publicKey }));
     writable = false;
-    await turn.withCheckout(async () => m35_expect(turn.options.worktreePath).toBe(roomCheckout));
+    await turn.withCheckout(async () => m35_expect(turn.options.repository.readOnly).toBe(true));
     assignedBrief = false;
     await turn.withCheckout(async () => {
       m35_expect(turn.options.worktreePath).toBe(own.path);
@@ -221,27 +219,26 @@ m35_it('membership retirement preserves private copies without archive authority
 
 
 
-m35_it('a commander or tagged agent reads the Room checkout; an order gives it a private copy', async () => {
-  const fixture = await scope4.cornerFixture('corner-commander-', () => 'c'.repeat(64));
-  const { turn, own, roomCheckout } = fixture;
+m35_it('a member that is not the implementer gets its own writable copy, fetched with a current token', async () => {
+  // Reproduction review-fetch-token: on 12 Nov a reviewer's checkout reused
+  // the token looked up when its corner started; it had expired, and GitHub
+  // refused the fetch with "Invalid username or token". Each lookup here mints
+  // a new token; corner start used token-1, so the checkout must ask again.
+  const fixture = await scope4.cornerFixture('corner-member-', () => 'c'.repeat(64));
+  const { turn, own, checkouts } = fixture;
   try {
-    // Activation and an ordinary turn of a non-implementer take no copy.
-    await m35_expect(m35_access(own.path)).rejects.toThrow();
-    await turn.withCheckout(async () => {
-      m35_expect(turn.options.worktreePath).toBe(roomCheckout);
-      m35_expect(turn.options.repository.readOnly).toBe(true);
-    });
-    await m35_expect(m35_access(own.path)).rejects.toThrow();
-    // An order makes it a second writer with its own copy and branch checkout.
-    turn.commandContext.current = { reason: 'order' };
+    m35_expect(checkouts).toHaveBeenCalledOnce();
+    m35_expect(checkouts.mock.calls[0]![0].token).toBe('token-2');
+    turn.commandContext.current = { reason: 'agent_tag' };
     await turn.withCheckout(async () => {
       m35_expect(turn.options.worktreePath).toBe(own.path);
       m35_expect(turn.options.repository.readOnly).toBe(false);
     });
     m35_expect((await scope4.exec('git', ['-C', own.path, 'branch', '--show-current'])).stdout.trim()).toMatch(/^feature\/corner-/);
-    // Its later turns keep that copy, so its edits are never stranded.
-    turn.commandContext.current = { reason: 'agent_tag' };
+    // Later turns keep that copy, so its edits are never stranded.
+    turn.commandContext.current = { reason: 'order' };
     await turn.withCheckout(async () => m35_expect(turn.options.worktreePath).toBe(own.path));
+    m35_expect(checkouts).toHaveBeenCalledOnce();
   } finally { turn.commandContext.current = undefined; await fixture.close(); }
 });
 });

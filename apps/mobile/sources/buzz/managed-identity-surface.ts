@@ -60,16 +60,8 @@ export async function readIdentitySettings(workspaceId?: string) {
   const { relay, pubkey } = await scope();
   const identityAddress = surfaceAddress(relay, pubkey, '/identity/managed');
   const workspacesAddress = surfaceAddress(relay, pubkey, '/workspaces');
-  const [heldIdentity, heldWorkspaces] = await Promise.all([
-    mobileSurfaceCache.read(identityAddress, isManagedIdentity),
-    mobileSurfaceCache.read(workspacesAddress, isWorkspaceListView),
-  ]);
-  const heldSelected = heldWorkspaces?.workspaces.find((item) => item.id === workspaceId) ??
-    heldWorkspaces?.workspaces[0];
-  const heldWorkbench = heldSelected && await mobileSurfaceCache.read(surfaceAddress(relay, pubkey,
-    '/workspace/:id/workbench', { workspaceId: heldSelected.id, viewerId: pubkey }), isWorkbenchView);
-  if (heldIdentity && heldWorkspaces && (!heldSelected || heldWorkbench))
-    return { identity: heldIdentity };
+  // Paint held snapshots through the registry, but reconcile on every Settings visit.
+  // A complete cached envelope can still predate a profile change on another device.
   const key = `${relay}\u0000${pubkey}\u0000${workspaceId ?? ''}`;
   let pending = settingsReads.get(key);
   if (!pending) {
@@ -104,7 +96,9 @@ export async function applyManagedIdentityLive(person: RoomViewIdentity, pushLev
   const address = surfaceAddress(relay, pubkey, '/identity/managed');
   const held = mobileSurfaceCache.peek(address, isManagedIdentity);
   if (!held) return;
-  await mobileSurfaceCache.write(address, { ...held, name: person.name,
+  const { avatar: _avatar, ...rest } = held;
+  await mobileSurfaceCache.write(address, { ...rest, name: person.name,
+    ...(person.avatar !== undefined ? { avatar: person.avatar } : {}),
     ...(person.handle ? { handle: person.handle } : {}),
     ...(person.face ? { face: person.face } : {}),
     ...(pushLevel ? { pushLevel } : {}) }, isManagedIdentity);

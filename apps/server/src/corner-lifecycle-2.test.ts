@@ -238,7 +238,9 @@ describe('each transition wakes the next role exactly once (AC-2)', () => {
     const { loadCornerQuestion } = await import('./corner-lifecycle-read-state.js');
     const unanswered = await loadCornerQuestion(rootFixture.db, cornerId);
     expect(unanswered).toMatchObject({ answered_at: null });
-    await say(R, 'Proceed with the available proof and report the missing review capability.');
+    await say(R, 'Unrelated Room chatter.');
+    expect(await loadCornerQuestion(rootFixture.db, cornerId)).toMatchObject({ answered_at: null });
+    await say(R, 'Proceed with the available proof and report the missing review capability.', unanswered!.id);
     expect(await loadCornerQuestion(rootFixture.db, cornerId))
       .toMatchObject({ id: unanswered!.id, answered_at: expect.any(Date) });
     const before = await cards(cornerId);

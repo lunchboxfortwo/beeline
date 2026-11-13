@@ -1,8 +1,8 @@
 import { ErrorBanner } from '@/components/buzz/ErrorBanner';
 import { appErrorCopy } from '@/buzz/app-error-copy';
 import React, { useCallback, useEffect, useMemo, useState } from 'react';
-import { ScrollView, Text, View } from 'react-native';
-import { StyleSheet } from 'react-native-unistyles';
+import { ScrollView, YStack } from 'tamagui';
+import { T } from '@/ui/grammar';
 import type { RoomViewIdentity } from '@beeline/buzz-client';
 
 import { ROOM_LABEL } from '@/buzz/vocabulary';
@@ -14,7 +14,7 @@ export type RoomReviewerUpdate = {
 };
 
 const AUTO_MERGE_REVIEWER_WARNING =
-  "This repository allows auto-merge. If auto-merge is turned on for a corner's pull request, GitHub merges it as soon as checks pass, before the Beeline reviewer is asked to look. Turn off auto-merge in this repository's GitHub settings to protect reviewer approval.";
+  "This repository allows auto-merge. If auto-merge is turned on for a thread's pull request, GitHub merges it as soon as checks pass, before the Beeline reviewer is asked to look. Turn off auto-merge in this repository's GitHub settings to protect reviewer approval.";
 
 export function RoomReviewerAutoMergeNotice({
   visible,
@@ -27,13 +27,18 @@ export function RoomReviewerAutoMergeNotice({
 }) {
   if (!visible) return null;
   return (
-    <View
+    <YStack
       accessibilityRole="alert"
-      style={surface ? styles.surfaceWarning : styles.error}
+      borderTopWidth={surface ? 0 : 1}
+      borderBottomWidth={surface ? 1 : 0}
+      borderColor="stroke"
+      backgroundColor={surface ? 'highlight' : 'transparent'}
+      paddingHorizontal="4"
+      paddingVertical="2"
       testID={testID}
     >
-      <Text style={styles.errorText}>! {AUTO_MERGE_REVIEWER_WARNING}</Text>
-    </View>
+      <T v="meta" color="removed">! {AUTO_MERGE_REVIEWER_WARNING}</T>
+    </YStack>
   );
 }
 
@@ -155,9 +160,9 @@ export function RoomReviewerActions({
               testID="room-reviewer-auto-merge-picker-warning"
             />
             {error ? (
-              <View accessibilityRole="alert" style={styles.error} testID="room-reviewer-error">
+              <YStack accessibilityRole="alert" borderTopWidth={1} borderColor="stroke" paddingHorizontal="4" paddingVertical="2" testID="room-reviewer-error">
                 <ErrorBanner inline title={error} />
-              </View>
+              </YStack>
             ) : null}
             <HullActionSheetCancel
               label="Done"
@@ -170,7 +175,7 @@ export function RoomReviewerActions({
           if (!busy) setPickerVisible(false);
         }}
         scrollBody={false}
-        subtitle="This agent reviews every pull request opened from the Room."
+        subtitle="This agent reviews every pull request opened from the chat."
         testID="room-reviewer-sheet"
         title={`Reviewer for ${roomName}`}
         visible={pickerVisible}
@@ -178,7 +183,8 @@ export function RoomReviewerActions({
         <ScrollView
           keyboardShouldPersistTaps="handled"
           nestedScrollEnabled
-          style={{ flexGrow: 0, maxHeight: REVIEWER_VISIBLE_ROWS * REVIEWER_ROW_HEIGHT }}
+          flexGrow={0}
+          maxHeight={REVIEWER_VISIBLE_ROWS * REVIEWER_ROW_HEIGHT}
           testID="room-reviewer-list"
         >
           <HullActionSheetRow
@@ -203,24 +209,3 @@ export function RoomReviewerActions({
     </>
   );
 }
-
-const styles = StyleSheet.create((theme) => ({
-  error: {
-    borderTopColor: theme.buzz.border,
-    borderTopWidth: StyleSheet.hairlineWidth,
-    paddingHorizontal: theme.buzz.space.md,
-    paddingVertical: theme.buzz.space.sm,
-  },
-  surfaceWarning: {
-    borderBottomColor: theme.buzz.border,
-    borderBottomWidth: StyleSheet.hairlineWidth,
-    paddingHorizontal: theme.buzz.space.md,
-    paddingVertical: theme.buzz.space.sm,
-    backgroundColor: theme.buzz.bgHighlight,
-  },
-  errorText: {
-    ...theme.buzz.type.meta,
-    color: theme.buzz.danger,
-    fontFamily: theme.buzz.proseRegular,
-  },
-}));

@@ -165,19 +165,6 @@ export async function advanceAuthorReadMark(
 }
 
 
-/**
- * How a system line names a person: their `@handle`, never a display name.
- *
- * A handle is the address a reader can actually use and it is unique; a display
- * name is neither, and two people can wear the same one. A person with no handle
- * is left unnamed by the caller rather than described by one.
- */
-export function personMention(handle: string | null | undefined): string | undefined {
-  const trimmed = handle?.trim().replace(/^@/, '');
-  return trimmed ? systemMessage("phone-service.person-mention", trimmed) : undefined;
-}
-
-
 /** Grant decisions retain the owner-or-Workspace-manager authority axis. */
 export const YOLO_AUTHORITY_MESSAGE = "Only the agent's owner or a workspace admin can change this";
 

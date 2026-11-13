@@ -1,13 +1,15 @@
 import { messageColumns } from '../message-columns.js';
-import { commandOwnerFenceCteSql, commandOwnerFenceMatchesSql, commandOwnerLiveSql } from '../turn-ownership.js';
+import { ownedRoomAccessSql } from '../turn-ownership.js';
 import { cornerRequestSql } from '../corner-opening.js';
 import { mentionReplyKey, mentionReplyId } from '../owed-mentions.js';
 import { visibleMessageSql } from '../read-cursor.js';
 import { sanitizeTurnReplay } from '@beeline/api-contract/daemon';
 import { observeOnboardingMessage } from '../signin-funnel.js';
 import { CornerAccessDatabase } from '../corner-access-database.js';
-import { refuseTagPastCommander, CommandRefusalError } from '../commander.js';
-import { authorizeCommandOutput, turnRootMessageSql } from '../agent-command.js';
+import { mentionHandlesToDrop, CommandRefusalError } from '../commander.js';
+import { repairAgentPost } from '../agent-post-text.js';
+import { stripMentionHandles } from '../message-mentions.js';
+import { authorizeCommandOutput, turnRootMessageSql, type CommandRow } from '../agent-command.js';
 import { randomBytes } from 'node:crypto';
 import { type SqlDatabase } from '../database.js';
 import { type CommittedMessageLiveRow } from '../live.js';
@@ -18,6 +20,38 @@ import { Input, replySteps, id, MAX_REPLY_NOTE_LENGTH, seconds, MEDIA_URL_PATTER
 import { daemonAccess } from './access.js';
 import { daemonWriteResult } from './corner-messages.js';
 
+
+  /** The text a room post stores. Thinking is removed. A tag this turn may not
+   *  send is removed. Callers compare the stored row with this text, so a
+   *  repaired retry still matches and a different answer still conflicts. */
+  export async function roomPostBody(
+    database: SqlDatabase,
+    roomId: string,
+    agentId: string,
+    input: { readonly text: string; readonly presentation?: string },
+    command?: CommandRow,
+  ): Promise<{ text: string; removed: string[] }> {
+    let text = input.text;
+    const removed: string[] = [];
+    if (input.presentation !== 'card') {
+      const repaired = repairAgentPost(text);
+      if (repaired.removed.length) {
+        text = repaired.text.trim();
+        removed.push(...repaired.removed);
+        if (!text) throw new CommandRefusalError('post refused: reasoning block contains no public reply', 400);
+      }
+    }
+    if (command && input.presentation !== 'card') {
+      const dropped = await mentionHandlesToDrop(database, roomId, agentId, text, command);
+      if (dropped.length) {
+        text = stripMentionHandles(text, dropped).trim();
+        removed.push(...dropped.map((handle) => `tag @${handle}`));
+        if (!text) throw new CommandRefusalError(
+          `post refused: nothing left to post after removing ${removed.join(', ')}`, 400);
+      }
+    }
+    return { text, removed };
+  }
 
   export async function daemonCompletion(ctx: DaemonContext, input: Input<'getRequestCompletion'>, agentId: string) {
     await daemonAccess(ctx, input.roomId, agentId);
@@ -52,14 +86,6 @@ import { daemonWriteResult } from './corner-messages.js';
         )).rows
       : [];
     const repeated = Boolean(ctx.commandTransaction && earlier.length);
-    if (repeated) {
-      const notes = Array.from({ length: Math.ceil(input.text.length / MAX_REPLY_NOTE_LENGTH) }, (_, index) => ({
-        kind: 'note' as const, title: 'Turn summary',
-        text: input.text.slice(index * MAX_REPLY_NOTE_LENGTH, (index + 1) * MAX_REPLY_NOTE_LENGTH),
-        ...(index ? { continues: true as const } : {}),
-      }));
-      steps = replySteps([...(input.steps ?? []), ...notes], notes.length);
-    }
     const mentionKey = await mentionReplyKey(ctx.database, agentId, input.roomId, input.replyToMessageId);
     const messageId = mentionKey ? mentionReplyId(mentionKey) : id();
     const parent = input.replyToMessageId
@@ -87,8 +113,17 @@ import { daemonWriteResult } from './corner-messages.js';
           input.requestId,
           input.generationId,
         )));
-    if (command && input.presentation !== 'card')
-      await refuseTagPastCommander(ctx.database, input.roomId, agentId, input.text, command);
+    const published = await roomPostBody(ctx.database, input.roomId, agentId, input, command);
+    const text = published.text;
+    const removed = published.removed;
+    if (repeated) {
+      const notes = Array.from({ length: Math.ceil(text.length / MAX_REPLY_NOTE_LENGTH) }, (_, index) => ({
+        kind: 'note' as const, title: 'Turn summary',
+        text: text.slice(index * MAX_REPLY_NOTE_LENGTH, (index + 1) * MAX_REPLY_NOTE_LENGTH),
+        ...(index ? { continues: true as const } : {}),
+      }));
+      steps = replySteps([...(input.steps ?? []), ...notes], notes.length);
+    }
     // A tag an agent writes reaches the person it names, exactly as a
     // human-authored one does: the same reading of the text, the same push
     // fan-out, the same highlight. There is no per-turn numeric cap, and no
@@ -126,7 +161,7 @@ import { daemonWriteResult } from './corner-messages.js';
         messageId,
         input.roomId,
         agentId,
-        input.text,
+        text,
         // The daemon posts conversation (or a card); a system line is only
         // ever phrased by the server (`system-line.ts`).
         input.presentation === 'card' ? 'card' : 'message',
@@ -220,7 +255,7 @@ import { daemonWriteResult } from './corner-messages.js';
       // statement before query() resolves, so the live row remains authoritative.
       messageWriteStartedAt = Date.now();
       const query = await ctx.database.query<AtomicReplyResult>(
-        `WITH ${commandOwnerFenceCteSql('owned_command.room_id=$2 AND owned_command.agent_id=$3 AND owned_command.turn_request_id=$6 AND owned_command.generation_id=$10')}, candidate AS MATERIALIZED (
+        `WITH reply_access AS MATERIALIZED (${ownedRoomAccessSql('$2','$3','NULL',true)}), candidate AS MATERIALIZED (
              SELECT command.*,
                EXISTS(SELECT 1 FROM agent_turns turn
                  WHERE turn.room_id=command.room_id AND turn.agent_id=command.agent_id
@@ -230,13 +265,16 @@ import { daemonWriteResult } from './corner-messages.js';
                    AND turn.request_id=command.turn_request_id AND turn.completion_kind='no-reply') no_reply
              FROM agent_commands command
              WHERE command.room_id=$2 AND command.agent_id=$3 AND command.turn_request_id=$6
-               AND command.action IN ('input','resume') AND command.generation_id=$10
-               AND ${commandOwnerFenceMatchesSql('command')}
+               AND command.action IN ('input','resume')
+               AND EXISTS(SELECT 1 FROM agent_command_generation_owners binding WHERE binding.command_id=command.id AND binding.generation_id=$10)
+               AND EXISTS(SELECT 1 FROM reply_access)
+               AND (command.generation_id=$10 OR NOT EXISTS(SELECT 1 FROM messages source
+                 WHERE source.id=command.source_message_id AND source.card->>'runId' IS NOT NULL))
              ORDER BY command.created_at DESC,command.id DESC LIMIT 1 FOR UPDATE OF command
            ), writable AS (
              SELECT candidate.* FROM candidate
-             WHERE state='claimed' AND ${commandOwnerLiveSql(undefined, 'clock_timestamp()')} AND NOT turn_cancelled AND NOT no_reply
-               AND (turn_owner_connection_id IS NULL OR beeline_register_owned_effect(id,agent_id,generation_id,turn_owner_connection_id,turn_owner_epoch))
+             WHERE state IN ('pending','claimed') AND NOT turn_cancelled AND NOT no_reply
+               AND NOT EXISTS(SELECT 1 FROM agent_turns turn WHERE turn.room_id=$2 AND turn.agent_id=$3 AND turn.request_id=$6 AND turn.status='failed')
            ), pending AS (
              DELETE FROM agent_pending_attachments attachment USING writable
              WHERE attachment.room_id=$2 AND attachment.agent_id=$3
@@ -281,7 +319,7 @@ import { daemonWriteResult } from './corner-messages.js';
                ${taggedIdentityIdsSql('message')} tagged_ids
              FROM candidate JOIN messages message ON message.id=candidate.result_message_id
              JOIN identities author ON author.id=message.author_id
-             WHERE candidate.state='complete' AND message.text=$4
+             WHERE candidate.state='complete' AND message.text=$4 AND NOT candidate.no_reply AND NOT candidate.turn_cancelled
            ), committed AS (
              SELECT inserted_public.* FROM inserted_public UNION ALL SELECT existing_public.* FROM existing_public
            )
@@ -303,7 +341,7 @@ import { daemonWriteResult } from './corner-messages.js';
           messageId,
           input.roomId,
           agentId,
-          input.text,
+          text,
           input.presentation === 'card' ? 'card' : 'message',
           input.requestId ?? null,
           JSON.stringify(input.tags ?? {}),
@@ -320,7 +358,7 @@ import { daemonWriteResult } from './corner-messages.js';
       if (result.outcome === 'authority_rejected')
         throw new Error('command output authority rejected');
       if (result.outcome === 'turn_cancelled') throw new Error('command turn cancelled');
-      if (result.outcome === 'no_reply') return ctx.writeResult();
+      if (result.outcome === 'no_reply') throw new CommandRefusalError('Reply not delivered: text was dropped because this turn chose no reply.', 409);
       if (result.outcome === 'already_completed') throw new Error('command already completed');
       if (result.outcome === 'result_conflict') throw new Error('command result conflict');
       if (!result.row) throw new Error('command output authority rejected');
@@ -329,6 +367,7 @@ import { daemonWriteResult } from './corner-messages.js';
     } else {
       saved = await ctx.database.transaction(saveCompatibilityReply);
     }
+    if ((input.text || text) && saved.text !== text) throw new CommandRefusalError('Reply not delivered: this tag already has an answer.', 409);
     if (repeated && ctx.commandTransaction && saved.presentation === 'message') {
       // Deliver queued artifacts on the existing public post, so suppressing
       // closing prose never hides the turn's deliverable.
@@ -382,7 +421,7 @@ import { daemonWriteResult } from './corner-messages.js';
         ?? ctx.authorizedCommand?.agent_depth;
       // Observe committed replies without delaying their publication or acknowledgement.
       const observe = async (database: SqlDatabase) => {
-        const work = () => observeOnboardingMessage(database, input.roomId, agentId, depth, input.text)
+        const work = () => observeOnboardingMessage(database, input.roomId, agentId, depth, text)
           .catch(error => console.error('[onboarding]', error));
         const backgroundWork = CornerAccessDatabase.physical(database).backgroundWork;
         if (backgroundWork) backgroundWork.run(work);
@@ -409,6 +448,7 @@ import { daemonWriteResult } from './corner-messages.js';
     return {
       id: saved.id,
       createdAt: seconds(saved.created_at),
+      ...(removed.length ? { receipt: `Removed: ${removed.join(', ')}.` } : {}),
     };
   }
 

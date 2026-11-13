@@ -2,6 +2,52 @@
   "version": 1,
   "fingerprintMode": "layout-shell-v2",
   "components": {
+    "components/DesktopDeepLinkBridge.tsx": [
+      "DesktopDeepLinkBridge"
+    ],
+    "components/DesktopRoomInspector.tsx": [
+      "COMPOSER_MAX_HEIGHT",
+      "COMPOSER_MIN_HEIGHT",
+      "CornerCockpit",
+      "DesktopRoomInspector",
+      "HeaderIconControl",
+      "TranscriptGap",
+      "captioned",
+      "control",
+      "node",
+      "renderMessage",
+      "withHoverTitle"
+    ],
+    "components/KeyboardShortcutsProvider.tsx": [
+      "KeyboardShortcutsProvider"
+    ],
+    "components/ShortcutHints.tsx": [
+      "ShortcutHintsContext",
+      "ShortcutHintsProvider"
+    ],
+    "components/SidebarNavigator.tsx": [
+      "DesktopSidebarNavigator",
+      "PersistentHeader",
+      "SidebarNavigator",
+      "drawerContent"
+    ],
+    "components/SidebarView.tsx": [
+      "SidebarView"
+    ],
+    "components/StatusBarProvider.tsx": [
+      "StatusBarProvider"
+    ],
+    "components/StoreUpdateGate.tsx": [
+      "StoreUpdateGate",
+      "StoreUpdateScreen"
+    ],
+    "components/StyledText.tsx": [
+      "RNText",
+      "Text"
+    ],
+    "components/UpdateReadyPrompt.tsx": [
+      "UpdateReadyPrompt"
+    ],
     "components/buzz/ActivityTimeline.tsx": [
       "ActivityTimeline",
       "ToolLedgerLineRow",
@@ -9,40 +55,38 @@
       "TurnStepsLine"
     ],
     "components/buzz/AgentApprovalCard.tsx": [
-      "AgentApprovalCard"
-    ],
-    "components/buzz/AgentProfileView.tsx": [
-      "AgentProfileView"
+      "AgentApprovalCard",
+      "AgentCardLine"
     ],
     "components/buzz/AgentSignInCard.tsx": [
       "AgentSignInCard",
+      "Step",
+      "StepBody",
       "failureLine",
       "field",
       "linkStep",
       "waitLine"
     ],
-    "components/buzz/AgentUsageSection.tsx": [
-      "AgentUsageSection"
-    ],
-    "components/buzz/AgentVoiceSection.tsx": [
-      "AgentVoiceSection"
-    ],
     "components/buzz/AiClientsSection.tsx": [
       "AiClientsSection"
-    ],
-    "components/buzz/AppearanceSetting.tsx": [
-      "AppearanceSetting"
     ],
     "components/buzz/AppMark.tsx": [
       "AppMark"
     ],
-    "components/buzz/approval-decision-copy.ts": [],
-    "components/buzz/artifact-webview.ts": [],
+    "components/buzz/AppearanceSetting.tsx": [
+      "AppearanceSetting"
+    ],
     "components/buzz/ArtifactCard.tsx": [
       "ArtifactCard",
-      "ArtifactCardShell",
       "ArtifactMarkdownPreview",
-      "ArtifactSandboxPreview"
+      "ArtifactPreviewBody",
+      "ArtifactSandboxPreview",
+      "ArtifactSingleCard",
+      "ArtifactStackCard",
+      "PreviewFade",
+      "PreviewFailed",
+      "PreviewLoading",
+      "PreviewStep"
     ],
     "components/buzz/ArtifactDocumentPreview.tsx": [
       "ArtifactDocumentPreview",
@@ -95,8 +139,17 @@
       "ButtonRow",
       "ButtonRowFrame"
     ],
-    "components/buzz/ChannelHeaderTitle.tsx": [
-      "ChannelHeaderTitle"
+    "components/buzz/ChatLinkProvider.tsx": [
+      "ChatLinkPreviewCard",
+      "ChatLinkProvider",
+      "card"
+    ],
+    "components/buzz/ChatLinks.tsx": [
+      "ChatLinkContext",
+      "ChatLinkRun"
+    ],
+    "components/buzz/ChatOpeningSurface.tsx": [
+      "ChatOpeningSurface"
     ],
     "components/buzz/ChevronGlyph.tsx": [
       "ChevronGlyph"
@@ -111,21 +164,19 @@
     ],
     "components/buzz/CodeBlock.tsx": [
       "CodeBlock",
+      "CopyVerb",
       "PEEK_LINE_COUNT",
-      "body"
+      "body",
+      "copy"
     ],
     "components/buzz/CodeHighlighter.tsx": [
-      "CodeHighlighter"
+      "CodeHighlighter",
+      "Span"
     ],
     "components/buzz/CommunityRail.tsx": [
       "BuzzCommunityShell",
       "CommunityDrawerContext",
-      "CommunityDrawerTrigger",
-      "CommunityHeaderIdentity",
       "CommunityRail",
-      "CommunitySwitcherTrigger",
-      "HEADER_PLATE",
-      "HEADER_PLATE_SEAT",
       "RailButton",
       "RailCommand",
       "RailCommandGlyph",
@@ -142,9 +193,6 @@
       "WarmComputerSessionHost",
       "WebView"
     ],
-    "components/buzz/ConnectionStatus.tsx": [
-      "ConnectionStatus"
-    ],
     "components/buzz/ConnectProgress.tsx": [
       "ConnectStepBar",
       "ConnectStepDot",
@@ -152,54 +200,31 @@
       "RingSpinner",
       "SweepTrack"
     ],
+    "components/buzz/ConnectionStatus.tsx": [
+      "ConnectionStatus"
+    ],
     "components/buzz/ConversationComposer.tsx": [
       "ConversationComposer",
       "ConversationComposerContent"
-    ],
-    "components/buzz/ConversationRow.tsx": [
-      "ConversationRow",
-      "cornerMark"
     ],
     "components/buzz/CopiedToast.tsx": [
       "toast",
       "useCopiedToast"
     ],
-    "components/buzz/corner-brief-viewer.ts": [],
     "components/buzz/CornerActionsSheet.tsx": [
       "CornerActionsSheet"
-    ],
-    "components/buzz/CornerGlyph.tsx": [
-      "CORNER_POINTS",
-      "CornerGlyph"
-    ],
-    "components/buzz/CornerLockAction.tsx": [
-      "CornerLockAction"
-    ],
-    "components/buzz/CornerObjectiveLine.tsx": [
-      "CornerBriefLink",
-      "CornerObjectiveLine",
-      "OtherWorkflowRuns",
-      "WorkflowLine"
-    ],
-    "components/buzz/CornerOpenedMarker.tsx": [
-      "CornerOpenedMarker",
-      "CornerOpenedMarkers"
     ],
     "components/buzz/CornerOpenToast.tsx": [
       "CornerOpenRow",
       "CornerOpenToast"
     ],
-    "components/buzz/CornerStatusLine.tsx": [
-      "CornerStatusLine"
-    ],
-    "components/buzz/CornerWaitingPulse.tsx": [
-      "CornerWaitingPulse"
+    "components/buzz/CornerOpenedMarker.tsx": [
+      "CornerOpenedMarker",
+      "CornerOpenedMarkers"
     ],
     "components/buzz/CreatePollSheet.tsx": [
       "CreatePollSheet"
     ],
-    "components/buzz/decorative-glyph.ts": [],
-    "components/buzz/decorative-glyph.web.ts": [],
     "components/buzz/DesktopArtifactPane.tsx": [
       "DesktopArtifactFrame",
       "DesktopArtifactMarkdown",
@@ -207,12 +232,6 @@
     ],
     "components/buzz/DesktopMessageAction.tsx": [
       "DesktopMessageAction"
-    ],
-    "components/buzz/DesktopRoomCorners.tsx": [
-      "DesktopRoomCorners"
-    ],
-    "components/buzz/DesktopRoomListToggle.tsx": [
-      "DesktopRoomListToggle"
     ],
     "components/buzz/DesktopWorkspacePortal.tsx": [
       "DesktopWorkspacePortal"
@@ -222,13 +241,8 @@
       "TILE",
       "TILE_RADIUS",
       "TILE_SEAT",
-      "TILE_SIZE"
-    ],
-    "components/buzz/DictationWaveform.tsx": [
-      "DictationWaveform"
-    ],
-    "components/buzz/DirectMessageHeaderIdentity.tsx": [
-      "DirectMessageHeaderIdentity"
+      "TILE_SIZE",
+      "TileLabel"
     ],
     "components/buzz/DirectMessagePickerSheet.tsx": [
       "DirectMessagePickerSheet",
@@ -242,10 +256,6 @@
     ],
     "components/buzz/ErrorBanner.tsx": [
       "ErrorBanner"
-    ],
-    "components/buzz/ExistingAgentJoin.tsx": [
-      "CopyLine",
-      "ExistingAgentJoin"
     ],
     "components/buzz/ExitGlyph.tsx": [
       "ExitGlyph"
@@ -266,13 +276,8 @@
       "ForwardMessagePickerSheet"
     ],
     "components/buzz/GrantRequestCard.tsx": [
-      "GrantRequestCard"
-    ],
-    "components/buzz/HeaderLadder.tsx": [
-      "CornerHeaderAgentText",
-      "HeaderIdentitySlot",
-      "HeaderMetaCaps",
-      "HeaderMetaRow"
+      "GrantRequestCard",
+      "GrantRequestPill"
     ],
     "components/buzz/HullActionSheet.tsx": [
       "HULL_SHEET_INSET",
@@ -288,26 +293,29 @@
       "HullDialogInput",
       "HullFloatingSurface",
       "HullModal",
+      "KeyboardFrame",
       "StableHullModal",
-      "body"
+      "body",
+      "box",
+      "field"
     ],
     "components/buzz/HullSwitch.tsx": [
       "HullSwitch"
     ],
     "components/buzz/IdentityMark.tsx": [
       "IdentityMark",
+      "PlateFill",
       "WorkspacePlate"
     ],
     "components/buzz/IndexRow.tsx": [
       "ContentTarget",
       "IndexRow",
       "IndexRowInsetContext",
-      "InlineActionRow",
       "InlineRow",
-      "TranscriptFactRow",
       "TranscriptNavigationRow",
       "body",
       "chevron",
+      "glyph",
       "trailingColumn",
       "trailingMark"
     ],
@@ -328,14 +336,11 @@
     ],
     "components/buzz/Ledger-styles.tsx": [],
     "components/buzz/Ledger.tsx": [
-      "Byline",
-      "Container",
-      "LedgerBylineView",
       "LedgerDayCaption",
       "LedgerEntry",
+      "LedgerEntryFrame",
       "LedgerGhostLine",
       "LedgerHistoryLine",
-      "LedgerMarginalia",
       "LedgerRoomUpdate",
       "LedgerSteer",
       "LedgerSystemLine",
@@ -353,14 +358,8 @@
       "GitHubEventCard",
       "LifecycleRecordCard"
     ],
-    "components/buzz/McpStarterRoutine.tsx": [
-      "McpStarterRoutine"
-    ],
     "components/buzz/MemberGrantRow.tsx": [
       "MemberGrantRow"
-    ],
-    "components/buzz/MemberPickerSheet.tsx": [
-      "MemberPickerSheet"
     ],
     "components/buzz/MemberRosterRow.tsx": [
       "MemberRosterRow"
@@ -374,7 +373,8 @@
     ],
     "components/buzz/MentionSuggestionMenu.tsx": [
       "ChannelSuggestionMenu",
-      "MentionSuggestionMenu"
+      "MentionSuggestionMenu",
+      "row"
     ],
     "components/buzz/MessageReactionRoster.tsx": [
       "MessageReactionRoster",
@@ -388,13 +388,8 @@
       "MessageSearchRow"
     ],
     "components/buzz/MicGlyph.tsx": [
-      "ArrowUpGlyph",
       "ConversationGlyph",
-      "MicGlyph",
-      "PlusGlyph",
-      "StopGlyph",
-      "StrokeGlyph",
-      "WaveformGlyph"
+      "StrokeGlyph"
     ],
     "components/buzz/MonoHull.tsx": [
       "HullLivePulse",
@@ -403,28 +398,18 @@
       "HullSurface",
       "LoaderCell",
       "NewMessageMaterialize",
-      "PixelGateReveal",
       "PixelLoader",
-      "RevealStrip",
-      "StateCircle",
       "mark",
       "rail"
     ],
     "components/buzz/MonoMarkdown.tsx": [
       "InlineMarkdown",
       "MarkdownTable",
-      "MonoMarkdown"
-    ],
-    "components/buzz/NeedsYouCell.tsx": [
-      "NeedsYouCell",
-      "cell",
-      "source"
+      "MonoMarkdown",
+      "ViewerMention"
     ],
     "components/buzz/NewRoomDialog.tsx": [
       "NewRoomDialog"
-    ],
-    "components/buzz/OverflowGlyph.tsx": [
-      "OverflowGlyph"
     ],
     "components/buzz/OwnerGrantNeededCard.tsx": [
       "OwnerGrantNeededCard"
@@ -432,9 +417,6 @@
     "components/buzz/PageHeader.tsx": [
       "PageHeader",
       "PageHeaderTitle"
-    ],
-    "components/buzz/PersonInviteSheet.tsx": [
-      "PersonInviteSheet"
     ],
     "components/buzz/PinGlyph.tsx": [
       "PinGlyph"
@@ -444,18 +426,10 @@
       "RepositoryLifecycleRow",
       "copy"
     ],
-    "components/buzz/ProfileActions.tsx": [
-      "ProfileActions"
-    ],
-    "components/buzz/ProfileIdentity.tsx": [
-      "PROFILE_IDENTITY_PICTURE_SIZE",
-      "ProfileIdentity",
-      "handle",
-      "portrait"
-    ],
     "components/buzz/PushLevelSetting.tsx": [
       "PushLevelSetting"
     ],
+    "components/buzz/SelectedRepositoryPill.tsx": ["SelectedRepositoryPill"],
     "components/buzz/RepoList.tsx": [
       "RepoList"
     ],
@@ -471,16 +445,8 @@
       "loadingRow",
       "ownerMenu"
     ],
-    "components/buzz/RoomCornersHeader.tsx": [
-      "RoomCornersHeader"
-    ],
-    "components/buzz/RoomCornersList.tsx": [
-      "RoomCornersList",
-      "cell",
-      "fold",
-      "ownerMark",
-      "row",
-      "stateWord"
+    "components/buzz/RepositoryMark.tsx": [
+      "RepositoryMark"
     ],
     "components/buzz/RoomDeckComposeMenu.tsx": [
       "ComposeGlyph",
@@ -488,9 +454,6 @@
     ],
     "components/buzz/RoomDeckLoadingView.tsx": [
       "RoomDeckLoadingView"
-    ],
-    "components/buzz/RoomGlyph.tsx": [
-      "RoomGlyph"
     ],
     "components/buzz/RoomListSectionHeader.tsx": [
       "LABEL_LINE",
@@ -504,9 +467,6 @@
       "filters",
       "search"
     ],
-    "components/buzz/RoomMemberPickerActions.tsx": [
-      "RoomMemberPickerActions"
-    ],
     "components/buzz/RoomOpenTraceOverlay.tsx": [
       "RoomOpenTraceOverlay"
     ],
@@ -519,16 +479,10 @@
       "row",
       "useRoomRepositoryChoice"
     ],
-    "components/buzz/RoomRepositorySubtitle.tsx": [
-      "RoomRepositorySubtitle"
-    ],
     "components/buzz/RoomReviewerActions.tsx": [
       "RoomReviewerActions",
       "RoomReviewerAutoMergeNotice",
       "RoomReviewerSurfaceNotice"
-    ],
-    "components/buzz/RoomRosterSheet.tsx": [
-      "RoomRosterSheet"
     ],
     "components/buzz/RoomUnreadControls.tsx": [
       "RoomUnreadControls"
@@ -539,18 +493,15 @@
     ],
     "components/buzz/RuntimeErrorBoundary.tsx": [
       "RuntimeErrorBoundary",
-      "RuntimeErrorView"
+      "RuntimeErrorView",
+      "body"
     ],
-    "components/buzz/sandbox-webview.ts": [],
     "components/buzz/ScheduledWorkDetail.tsx": [
       "DetailRailLine",
       "DetailSection",
       "ScheduledWorkDoes",
       "ScheduledWorkFacts",
       "StopScheduledWork"
-    ],
-    "components/buzz/ScheduledWorkWhere.tsx": [
-      "ScheduledWorkWhere"
     ],
     "components/buzz/ServiceMark.tsx": [
       "ServiceMark"
@@ -565,9 +516,6 @@
     "components/buzz/SlashVerbPicker.tsx": [
       "SlashVerbPicker"
     ],
-    "components/buzz/SoulPortraitControls.tsx": [
-      "SoulPortraitControls"
-    ],
     "components/buzz/SpeakingSpeedSetting.tsx": [
       "SpeakingSpeedSetting"
     ],
@@ -575,6 +523,7 @@
       "StarPromptCard"
     ],
     "components/buzz/StateDot.tsx": [
+      "Dot",
       "PulsingDot",
       "StateDot"
     ],
@@ -589,17 +538,18 @@
       "TOOL_OUTPUT_SHEET_MAX_WIDTH",
       "ToolOutputSheet"
     ],
-    "components/buzz/transcript-card-motion-context.tsx": [
-      "TranscriptCardMotionBoundary",
-      "TranscriptCardMotionContext"
-    ],
     "components/buzz/TranscriptCard.tsx": [
-      "SettlingText",
+      "ActionButton",
+      "CardRow",
       "TranscriptCard",
       "TranscriptCardHandle",
-      "TranscriptCardRowView",
       "content",
-      "rowContent"
+      "head",
+      "titleLine"
+    ],
+    "components/buzz/TranscriptPills.tsx": [
+      "TranscriptPills",
+      "pillItem"
     ],
     "components/buzz/TranscriptReference.tsx": [
       "TranscriptReference",
@@ -609,12 +559,18 @@
       "TranscriptScrubber"
     ],
     "components/buzz/TranscriptSwipeable.tsx": [
+      "SwipePanels",
       "TranscriptSwipeable",
       "default"
     ],
     "components/buzz/TrayGlyph.tsx": [
       "TrayGlyph",
       "glyph"
+    ],
+    "components/buzz/TurnLineFrame.tsx": [
+      "COVERAGE",
+      "TurnBandSlot",
+      "TurnLineBar"
     ],
     "components/buzz/TurnProgressLine.tsx": [
       "TurnBandSlot",
@@ -626,7 +582,8 @@
       "UiSizeSetting"
     ],
     "components/buzz/VaultSaveCard.tsx": [
-      "VaultSaveCard"
+      "VaultSaveCard",
+      "line"
     ],
     "components/buzz/ViewerConversationDock.tsx": [
       "ViewerConversationDock"
@@ -647,9 +604,6 @@
     "components/buzz/WalletQr.tsx": [
       "WalletQr"
     ],
-    "components/buzz/WorkflowGlyph.tsx": [
-      "WorkflowGlyph"
-    ],
     "components/buzz/WorkflowRunLine.tsx": [
       "ASSIGNEE_MARK",
       "Assignee",
@@ -665,61 +619,19 @@
       "WorkspaceSettings",
       "default"
     ],
-    "components/buzz/WritePermissionOutcome.tsx": [
-      "WritePermissionOutcome"
-    ],
     "components/buzz/ZoomableArtifactImage.tsx": [
       "ZoomableArtifactImage"
     ],
+    "components/buzz/approval-decision-copy.ts": [],
+    "components/buzz/artifact-webview.ts": [],
+    "components/buzz/decorative-glyph.ts": [],
+    "components/buzz/decorative-glyph.web.ts": [],
+    "components/buzz/sandbox-webview.ts": [],
     "components/desktop-shell-policy.ts": [],
-    "components/DesktopDeepLinkBridge.tsx": [
-      "DesktopDeepLinkBridge"
-    ],
-    "components/DesktopRoomInspector.tsx": [
-      "COMPOSER_MAX_HEIGHT",
-      "COMPOSER_MIN_HEIGHT",
-      "CornerCockpit",
-      "DesktopRoomInspector",
-      "HeaderIconControl",
-      "captioned",
-      "control",
-      "node",
-      "renderMessage",
-      "withHoverTitle"
-    ],
-    "components/KeyboardShortcutsProvider.tsx": [
-      "KeyboardShortcutsProvider"
-    ],
     "components/layout.ts": [],
     "components/markdown/parseMarkdown.ts": [],
     "components/markdown/parseMarkdownBlock.ts": [],
-    "components/markdown/parseMarkdownSpans.ts": [],
-    "components/ShortcutHints.tsx": [
-      "ShortcutHintsContext",
-      "ShortcutHintsProvider"
-    ],
-    "components/SidebarNavigator.tsx": [
-      "PersistentHeader",
-      "SidebarNavigator",
-      "drawerContent"
-    ],
-    "components/SidebarView.tsx": [
-      "SidebarView"
-    ],
-    "components/StatusBarProvider.tsx": [
-      "StatusBarProvider"
-    ],
-    "components/StoreUpdateGate.tsx": [
-      "StoreUpdateGate",
-      "StoreUpdateScreen"
-    ],
-    "components/StyledText.tsx": [
-      "RNText",
-      "Text"
-    ],
-    "components/UpdateReadyPrompt.tsx": [
-      "UpdateReadyPrompt"
-    ]
+    "components/markdown/parseMarkdownSpans.ts": []
   },
   "legacyControls": {
     "app/(app)/beeline/channels.tsx": {
@@ -819,13 +731,6 @@
     "components/buzz/ActivityTimeline.tsx": {
       "b1f91c762916818f91dd": 1
     },
-    "components/buzz/AgentProfileView.tsx": {
-      "06fbd0f8620950c79081": 1,
-      "616b89b40f752abac8c4": 1
-    },
-    "components/buzz/AgentUsageSection.tsx": {
-      "5102d26e524ed6ec9656": 1
-    },
     "components/buzz/ArtifactCard.tsx": {
       "1d646c4972e669470ee7": 1,
       "22be061d460f72a118d4": 1,
@@ -850,30 +755,10 @@
       "b345a0dfa6ce7e0dbdb9": 1
     },
     "components/buzz/CommunityRail.tsx": {
-      "152f840c40550390b9a8": 1,
       "dfc8789ffc8f1fb6ecd1": 1
-    },
-    "components/buzz/ConversationComposer.tsx": {
-      "22578cf5ca100603d2c1": 1,
-      "27dd4a9cba3de9179f92": 1,
-      "4d84c433bd459151ca42": 1,
-      "53a36e39b36d1345b822": 1,
-      "5967129e1152b3616762": 1,
-      "605af797db5205148f25": 1,
-      "6335377f946977a91207": 1,
-      "7e52f088486d36ea8dc4": 1,
-      "b485455e234f472e209d": 1,
-      "b5cb239bd687b313a43e": 1
     },
     "components/buzz/CopiedToast.tsx": {
       "f7608a1c8b3a9b524cac": 1
-    },
-    "components/buzz/CornerObjectiveLine.tsx": {
-      "0f1b82564c4bea047d3e": 1,
-      "37335f67e64644d1b02a": 1,
-      "6d26f55a5b56731cc4ae": 1,
-      "88faae29b4f975e405c0": 1,
-      "eaeb923b0085276bae85": 1
     },
     "components/buzz/CreatePollSheet.tsx": {
       "807f2bd52d57620bc3cb": 1,
@@ -891,29 +776,11 @@
       "3eabbde592e51f1f9b90": 1,
       "6877bc5cb84635bbd4c0": 1
     },
-    "components/buzz/DictationWaveform.tsx": {
-      "5e0a83836c3666c967fa": 1
-    },
-    "components/buzz/HeaderLadder.tsx": {
-      "3c72f081223ee16ff97d": 1
-    },
     "components/buzz/Ledger-ledger-steer.tsx": {
       "ff65418127215da2b921": 1
     },
     "components/buzz/Ledger.tsx": {
       "ee7b68f74d8e4d0103f4": 1
-    },
-    "components/buzz/MemberPickerSheet.tsx": {
-      "259221524e41e78fcb13": 1,
-      "beace1365246a898cb86": 1
-    },
-    "components/buzz/MentionSuggestionMenu.tsx": {
-      "1159050ddfecb4e275c2": 1,
-      "2772fba5d382deab81fc": 1,
-      "3804df6b10d7dcf9b7ce": 1,
-      "4a227fa149dc23244b0f": 1,
-      "73d4dee58307d4ab107f": 1,
-      "ccf84283571de16f92be": 1
     },
     "components/buzz/MessageReactionRoster.tsx": {
       "a40bf5a9dff7d987e9c4": 1,
@@ -935,33 +802,6 @@
       "e7900b90ba0e8a86dfcb": 1,
       "fc060490b6bf3f2b5f90": 1
     },
-    "components/buzz/NeedsYouCell.tsx": {
-      "275d6b296040d0aac9ed": 1,
-      "c2f35f2b261f6df78b5a": 1
-    },
-    "components/buzz/ProfileActions.tsx": {
-      "c59917b6eb919e5e9ec0": 1
-    },
-    "components/buzz/ProfileIdentity.tsx": {
-      "b188e906092f1f0116ca": 1,
-      "b21e1c3e4f0177611c3b": 1
-    },
-    "components/buzz/RoomCornersHeader.tsx": {
-      "7733822a1572aa7dc88c": 1
-    },
-    "components/buzz/RoomCornersList.tsx": {
-      "1211894e06b9b8d499f1": 1,
-      "281ee082f98b50da3abf": 1,
-      "54e35262107520adef63": 1,
-      "700690e1963b394752a7": 1,
-      "86ffabc4e635f013e2c9": 1,
-      "adfd1f295189ba883bc0": 1,
-      "ce030000cf4387e7c01c": 1,
-      "f75535f3e58a05c6ec32": 1
-    },
-    "components/buzz/RoomRepositorySubtitle.tsx": {
-      "952d7bcf39dccc220db7": 1
-    },
     "components/buzz/RoomUnreadControls.tsx": {
       "1a1f8ba1c7b137d2ea08": 1
     },
@@ -969,16 +809,10 @@
       "07de2e5c25d42e98decd": 1,
       "b19562113bc51653909c": 1
     },
-    "components/buzz/ScheduledWorkWhere.tsx": {
-      "78cfd6ebfcfb461ad2c2": 1
-    },
     "components/buzz/SettingsScopeTabs.tsx": {
       "1fec11345992a82086ee": 1,
       "6a0d44af663df27a80b3": 1,
       "e62022b6dce6f6ed3561": 1
-    },
-    "components/buzz/SlashVerbPicker.tsx": {
-      "03ef32a48dc30509846f": 1
     },
     "components/buzz/TranscriptCard.tsx": {
       "1fa19ec112c867eefefc": 1,
@@ -989,14 +823,6 @@
     "components/buzz/TranscriptReference.tsx": {
       "25b80d7ac400061f4653": 1,
       "e3735b6b9b84181ec0a6": 1
-    },
-    "components/buzz/TurnProgressLine.tsx": {
-      "87fd67731f2e3fe94174": 1
-    },
-    "components/buzz/VoiceBar.tsx": {
-      "42fc40d4b1d08bc6f4e3": 1,
-      "b4df8874a9b5c6eb2c0c": 1,
-      "d440860830fbf5ac1dda": 1
     },
     "components/buzz/VoiceCallCard.tsx": {
       "15f4bfb3260376544362": 1,
@@ -1016,11 +842,6 @@
       "ce4564f488f16c704254": 1,
       "daf80b89e3ca32f89c98": 1,
       "f584b10a339df08f9e2e": 1
-    },
-    "components/buzz/WritePermissionOutcome.tsx": {
-      "496ba06512a75665179a": 1,
-      "6249d446a6831e3cefd1": 1,
-      "f6677e3474641d7bca03": 1
     },
     "components/buzz/ZoomableArtifactImage.tsx": {
       "0986ffe94c724ffc53a4": 1,

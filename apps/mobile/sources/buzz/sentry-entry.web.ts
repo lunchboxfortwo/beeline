@@ -6,6 +6,7 @@ installWebChunkRecovery();
 // Keep its integrations outside healthy launches, retaining early failures until
 // the same SDK and privacy filter have loaded. Native keeps its eager startup.
 let segments: readonly string[] = [];
+let user: string | null = null;
 let loading: Promise<typeof import('./sentry') | undefined> | undefined;
 const enabled = Boolean(process.env.EXPO_PUBLIC_SENTRY_DSN) && !__DEV__;
 
@@ -14,6 +15,7 @@ function load() {
     window.removeEventListener('error', onError);
     window.removeEventListener('unhandledrejection', onRejection);
     sdk.setMobileErrorRoute(segments);
+    sdk.setMobileErrorUser(user);
     return sdk;
   }).catch(() => undefined);
 }
@@ -23,14 +25,22 @@ export function setMobileErrorRoute(next: readonly string[]): void {
   if (loading) void loading.then((sdk) => sdk?.setMobileErrorRoute(segments));
 }
 
+export function setMobileErrorUser(identityId: string | null): void {
+  user = identityId;
+  if (loading) void loading.then((sdk) => sdk?.setMobileErrorUser(user));
+}
+
 export function captureMobileError(scope: string, cause: unknown): void {
   if (!enabled || recoverWebChunk(cause)) return;
-  const route = segments;
+  // Snapshot the route and account now; the SDK may finish loading after a switch or sign-out.
+  const route = segments, account = user;
   void load().then((sdk) => {
     if (!sdk) return;
     sdk.setMobileErrorRoute(route);
+    sdk.setMobileErrorUser(account);
     sdk.captureMobileError(scope, cause);
     sdk.setMobileErrorRoute(segments);
+    sdk.setMobileErrorUser(user);
   });
 }
 

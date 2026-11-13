@@ -13,7 +13,7 @@ import { authorizeCommandOutput } from '../agent-command.js';
 import { randomUUID } from 'node:crypto';
 import { cornerImplementerSql } from '../corner-worker.js';
 import { cornerBriefRevisionHash, currentCornerBrief, resolveCornerBriefApproval, resolveCornerBriefAttachments, resolvePendingCornerBriefAttachments, validateCornerBrief } from '../corner-brief.js';
-import { cornerTextRefusal, normalizeCornerText, type CornerWatchKind } from '@beeline/api-contract/daemon';
+import { fixCornerText, type CornerWatchKind } from '@beeline/api-contract/daemon';
 import { type SqlDatabase } from '../database.js';
 import { closeCornerPullRequestBestEffort, closeCornerState, lockCornerArchivalAuthority } from '../corner-close.js';
 import { advanceCorner, createCornerFacts, lockCornerLifecycle } from '../corner-lifecycle.js';
@@ -32,12 +32,12 @@ import { daemonReach, daemonWriteResult } from './corner-messages.js';
     if (input.hold === true) await resolveCornerBriefApproval(ctx.database, [],
       { spec: 'Merge hold', approval: { sourceMessageId: input.sourceMessageId ?? '' } }, [],
       undefined, undefined, undefined, { agentId });
-    // Objectives are normalized paragraphs; names must already be continuous.
-    const refusal =
-      cornerTextRefusal('name', input.name) ?? cornerTextRefusal('objective', input.objective);
-    if (refusal) throw new Error(refusal);
-    const objective = normalizeCornerText(input.objective ?? '');
-    const name = input.name ?? '';
+    // Spaces in a name become hyphens. A long objective is cut on a word boundary.
+    const fixedName = fixCornerText('name', input.name);
+    const fixedObjective = fixCornerText('objective', input.objective);
+    const name = fixedName.text;
+    const objective = fixedObjective.text;
+    const textNotes = [fixedName.note, fixedObjective.note].filter((note): note is string => Boolean(note));
     if (input.brief) validateCornerBrief(input.brief);
     const idempotencyKey = input.idempotencyKey ?? input.requestId;
     if (!idempotencyKey || idempotencyKey.length > 128) {
@@ -339,7 +339,7 @@ import { daemonReach, daemonWriteResult } from './corner-messages.js';
         [commandRoomId, agentId, cornerId],
       )
     ).rows[0];
-    const warnings = input.brief ? validateCornerBrief(input.brief, repositoryWork) : [];
+    const warnings = [...textNotes, ...(input.brief ? validateCornerBrief(input.brief, repositoryWork) : [])];
     return { cornerId, ...(warnings.length ? { warnings } : {}), ...(watch ? { watch: { roomId: commandRoomId, kinds: watch.kinds } } : {}) };
   }
 

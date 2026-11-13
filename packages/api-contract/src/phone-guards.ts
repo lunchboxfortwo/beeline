@@ -1,9 +1,10 @@
 import { readMemberDelivery } from './mcp-delivery.js';
 import { readAgentUsage } from './agent-usage.js';
 import { isAgentSignInHarness, isAgentSignInKeyProvider } from './agent-sign-in.js';
-import { type AgentGrantView, type ChoiceCardView, type GrantRequestCardView, type RoomViewActivity, type RoomViewHeader, type RoomViewIdentity, type RoomViewMember, type RoomViewMessage, type RoomViewer, type SurfaceWatchFilter, type WorkspaceAgentView, type WorkspaceMemberGrantView } from './phone-types.js';
+import { type AgentGrantView, type ChoiceCardView, type GrantRequestCardView, type RoomViewActivity, type RoomViewIdentity, type RoomViewMessage, type RoomViewer, type SurfaceWatchFilter, type WorkspaceAgentView, type WorkspaceMemberGrantView } from './phone-types.js';
 import { isAgentGrantKind, isAgentGrantStatus, isCommandGrantScript } from './agent-grants.js';
 import { isConnectorOfferIntent, isConnectorOfferStatus, type ConnectorOfferCardView } from './connector-offers.js';
+import { optional, required, view, type Align } from './phone-view.js';
 import { isConnectorKind } from './workbench.js';
 import { CHOICE_LETTERS } from './room-choices.js';
 export { readRoomViewMessage, isRoomViewMessage } from './phone-guards-read-choice-card.js';
@@ -151,28 +152,34 @@ export function readIdentity(value: unknown): RoomViewIdentity | null {
 }
 
 
-export function readHeader(value: unknown): RoomViewHeader | null {
-  const item = record(value);
-  if (!item || !uuid(item.id)) return null;
-  const reviewerAgentId = hex64(item.reviewerAgentId) ? item.reviewerAgentId : undefined;
-  const parentId = uuid(item.parentId) ? item.parentId : undefined;
-  return {
-    id: item.id,
-    name: typeof item.name === 'string' ? item.name : '',
-    ...field('archived', typeof item.archived === 'boolean' ? item.archived : undefined),
-    ...field('createdAt', integer(item.createdAt) ? item.createdAt : undefined),
-    ...field('updatedAt', integer(item.updatedAt) ? item.updatedAt : undefined),
-    ...field('workspaceId', uuid(item.workspaceId) ? item.workspaceId : undefined),
-    ...field('parentId', parentId),
-    ...field('about', typeof item.about === 'string' ? item.about : undefined),
-    ...field('avatar', typeof item.avatar === 'string' ? item.avatar : undefined),
-    ...field('visibility', oneOf(item.visibility, ['public', 'invite-only'])),
-    ...field('reviewerAgentId', reviewerAgentId),
-  };
+export const roomHeaderFields = {
+  id: required((item) => (uuid(item.id) ? item.id : undefined)),
+  name: required((item) => (typeof item.name === 'string' ? item.name : '')),
+  archived: optional((item) => (typeof item.archived === 'boolean' ? item.archived : undefined)),
+  createdAt: optional((item) => (integer(item.createdAt) ? item.createdAt : undefined)),
+  updatedAt: optional((item) => (integer(item.updatedAt) ? item.updatedAt : undefined)),
+  workspaceId: optional((item) => (uuid(item.workspaceId) ? item.workspaceId : undefined)),
+  parentId: optional((item) => (uuid(item.parentId) ? item.parentId : undefined)),
+  about: optional((item) => (typeof item.about === 'string' ? item.about : undefined)),
+  avatar: optional((item) => (typeof item.avatar === 'string' ? item.avatar : undefined)),
+  favicon: optional((item) => (typeof item.favicon === 'string' ? item.favicon : undefined)),
+  visibility: optional((item) => oneOf(item.visibility, ['public', 'invite-only'])),
+  reviewerAgentId: optional((item) => (hex64(item.reviewerAgentId) ? item.reviewerAgentId : undefined)),
+};
+const roomHeader = view(roomHeaderFields);
+
+export function readHeader(value: unknown) {
+  return roomHeader.read(value);
 }
 
 
-export function readPresence(value: unknown): RoomViewMember['presence'] | undefined {
+export function readPresence(value: unknown): {
+  readonly status: 'online' | 'offline';
+  readonly observedAt: number;
+  /** A live helper connection holds this presence; it does not age out. */
+  readonly held?: true;
+  readonly roomId?: string;
+} | undefined {
   const item = record(value);
   if (!item) return undefined;
   if (item.status !== 'online' && item.status !== 'offline') return undefined;
@@ -186,18 +193,20 @@ export function readPresence(value: unknown): RoomViewMember['presence'] | undef
 }
 
 
-export function readMember(value: unknown): RoomViewMember | null {
-  const item = record(value);
-  const identity = readIdentity(item?.identity);
-  if (!item || !identity) return null;
-  const role = typeof item.role === 'string' && item.role.length > 0 ? item.role : 'member';
-  return {
-    identity,
-    role: role as RoomViewMember['role'],
-    ...field('model', identity.kind === 'agent' && typeof item.model === 'string' ? item.model : undefined),
-    ...field('presence', readPresence(item.presence)),
-    ...field('delivery', readMemberDelivery(item.delivery)),
-  };
+export const roomMemberFields = {
+  identity: required((item) => readIdentity(item.identity) ?? undefined),
+  role: required((item): 'owner' | 'admin' | 'member' | 'spectator' =>
+    (typeof item.role === 'string' && item.role.length > 0 ? item.role : 'member') as
+      'owner' | 'admin' | 'member' | 'spectator'),
+  model: optional((item) =>
+    readIdentity(item.identity)?.kind === 'agent' && typeof item.model === 'string' ? item.model : undefined),
+  presence: optional((item) => readPresence(item.presence)),
+  delivery: optional((item) => readMemberDelivery(item.delivery)),
+};
+const roomMember = view(roomMemberFields);
+
+export function readMember(value: unknown) {
+  return roomMember.read(value);
 }
 
 
@@ -611,50 +620,43 @@ export function readComputerSession(value: unknown): NonNullable<RoomViewMessage
 }
 
 
-export function readConnectorOfferCardView(value: unknown): ConnectorOfferCardView | null {
-  const item = record(value);
-  const helper = record(item?.helper);
-  const agent = readIdentity(item?.agent);
-  const addressee = readIdentity(item?.addressee);
-  if (
-    !item ||
-    !uuid(item.offerId) ||
-    !agent ||
-    agent.kind !== 'agent' ||
-    !addressee ||
-    addressee.kind !== 'human' ||
-    !isConnectorKind(item.connectorType) ||
-    !nonempty(item.connectorName) ||
-    typeof item.reason !== 'string' ||
-    !nonempty(item.consequence) ||
-    !helper ||
-    typeof helper.machineId !== 'string' ||
-    typeof helper.name !== 'string' ||
-    !isConnectorOfferStatus(item.status) ||
-    !integer(item.createdAt)
-  ) {
-    return null;
-  }
-  return {
-    offerId: item.offerId,
-    agent,
-    addressee,
-    connectorType: item.connectorType,
-    connectorName: item.connectorName,
-    reason: item.reason,
-    consequence: item.consequence,
-    helper: { machineId: helper.machineId, name: helper.name },
-    status: item.status,
-    createdAt: item.createdAt,
-    ...field('acceptedBy', readIdentityOnly(item.acceptedBy)),
-    ...field('acceptedAt', integer(item.acceptedAt) ? item.acceptedAt : undefined),
-    ...field('connectorId', typeof item.connectorId === 'string' ? item.connectorId : undefined),
-    ...field('replacementMessageId', nonempty(item.replacementMessageId) ? item.replacementMessageId : undefined),
-    ...field('intent', isConnectorOfferIntent(item.intent) ? item.intent : undefined),
-    ...field('provider', typeof item.provider === 'string' ? item.provider : undefined),
-  };
+export const connectorOfferFields = {
+  offerId: required((item) => (uuid(item.offerId) ? item.offerId : undefined)),
+  agent: required((item): RoomViewIdentity | undefined => {
+    const agent = readIdentity(item.agent);
+    return agent?.kind === 'agent' ? agent : undefined;
+  }),
+  addressee: required((item): RoomViewIdentity | undefined => {
+    const addressee = readIdentity(item.addressee);
+    return addressee?.kind === 'human' ? addressee : undefined;
+  }),
+  connectorType: required((item) => (isConnectorKind(item.connectorType) ? item.connectorType : undefined)),
+  connectorName: required((item) => (nonempty(item.connectorName) ? item.connectorName : undefined)),
+  reason: required((item) => (typeof item.reason === 'string' ? item.reason : undefined)),
+  consequence: required((item) => (nonempty(item.consequence) ? item.consequence : undefined)),
+  helper: required((item): { readonly machineId: string; readonly name: string } | undefined => {
+    const helper = record(item.helper);
+    return helper && typeof helper.machineId === 'string' && typeof helper.name === 'string'
+      ? { machineId: helper.machineId, name: helper.name }
+      : undefined;
+  }),
+  status: required((item) => (isConnectorOfferStatus(item.status) ? item.status : undefined)),
+  createdAt: required((item) => (integer(item.createdAt) ? item.createdAt : undefined)),
+  acceptedBy: optional((item) => readIdentityOnly(item.acceptedBy)),
+  acceptedAt: optional((item) => (integer(item.acceptedAt) ? item.acceptedAt : undefined)),
+  connectorId: optional((item) => (typeof item.connectorId === 'string' ? item.connectorId : undefined)),
+  replacementMessageId: optional((item) =>
+    nonempty(item.replacementMessageId) ? item.replacementMessageId : undefined),
+  intent: optional((item) => (isConnectorOfferIntent(item.intent) ? item.intent : undefined)),
+  provider: optional((item) => (typeof item.provider === 'string' ? item.provider : undefined)),
+};
+const connectorOffer = view(connectorOfferFields);
+
+export function readConnectorOfferCardView(value: unknown) {
+  return connectorOffer.read(value);
 }
 
+const _fieldsMatch: [Align<NonNullable<ReturnType<typeof readHeader>>, typeof roomHeaderFields>, Align<NonNullable<ReturnType<typeof readMember>>, typeof roomMemberFields>, Align<NonNullable<ReturnType<typeof readConnectorOfferCardView>>, typeof connectorOfferFields>] extends [typeof roomHeaderFields, typeof roomMemberFields, typeof connectorOfferFields] ? true : never = true;
 
 function isConnectorOfferCardView(value: unknown): value is ConnectorOfferCardView {
   return readConnectorOfferCardView(value) !== null;

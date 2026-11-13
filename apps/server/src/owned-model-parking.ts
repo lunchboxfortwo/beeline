@@ -1,4 +1,3 @@
-import type { HelperTurnOwnershipSource } from '@beeline/api-contract/helper-turn-ownership';
 import type { SqlDatabase } from './database.js';
 import type { PostTurnReceiptInput } from '@beeline/api-contract/daemon';
 
@@ -21,8 +20,8 @@ CREATE OR REPLACE FUNCTION beeline_command_claim_open(command text) RETURNS bool
 CREATE OR REPLACE FUNCTION beeline_fence_ended_command_claim() RETURNS trigger AS $$
 BEGIN
  IF to_jsonb(NEW)->>'action' IN ('input','resume') AND NEW.state='claimed' AND
-   (TG_OP='INSERT' OR ROW(NEW.state,NEW.generation_id,NEW.turn_owner_connection_id,NEW.turn_owner_epoch,to_jsonb(NEW)->>'action')
-     IS DISTINCT FROM ROW(OLD.state,OLD.generation_id,OLD.turn_owner_connection_id,OLD.turn_owner_epoch,to_jsonb(OLD)->>'action'))
+   (TG_OP='INSERT' OR ROW(NEW.state,NEW.generation_id,to_jsonb(NEW)->>'action')
+     IS DISTINCT FROM ROW(OLD.state,OLD.generation_id,to_jsonb(OLD)->>'action'))
    AND NOT beeline_command_claim_open(NEW.id) THEN
    RAISE EXCEPTION 'command model owner has ended' USING ERRCODE='23514';
  END IF;
@@ -43,7 +42,7 @@ CREATE TRIGGER beeline_preserve_owner_end BEFORE UPDATE OR DELETE ON agent_comma
  FOR EACH ROW EXECUTE FUNCTION beeline_preserve_owner_end();
 `;
 type Identity = { roomId: string; agentId: string; requestId: string; generationId?: string | null };
-type Cause = { kind: 'terminal-receipt'; source: HelperTurnOwnershipSource; modelRequestId: string | null };
+type Cause = { modelRequestId: string | null };
 export class OwnedModelOwnerEndRefusal extends Error {
   constructor() { super('Owned model owner end could not be authorized'); }
 }
@@ -53,92 +52,88 @@ async function modelInstalled(database: SqlDatabase): Promise<boolean> {
     JOIN pg_catalog.pg_namespace space ON space.oid=relation.relnamespace
     WHERE space.nspname=current_schema() AND relation.relname='owned_model_attempts' AND relation.relkind='r') installed`)).rows[0]?.installed === true;
 }
+type Member = { id: string; state: string; turn_request_id: string };
+/** The invocation is one agent, Room and generation. Its members are locked in
+ * the same order as credential admission (OwnedModelCredentials.lockInvocation). */
+async function invocationMembers(database: SqlDatabase, input: Identity & { generationId: string }): Promise<Member[]> {
+  return (await database.query<Member>(`SELECT id,state,turn_request_id FROM agent_commands
+    WHERE room_id=$1 AND agent_id=$2 AND generation_id=$3 AND action IN ('input','resume')
+    ORDER BY created_at,id FOR UPDATE`, [input.roomId, input.agentId, input.generationId])).rows;
+}
+/** The invocation's one credential, whichever member's claim issued it. */
+const INVOCATION_CREDENTIAL = `SELECT credential.id FROM owned_model_credentials credential
+  WHERE credential.agent_id=$1 AND credential.generation_id=$2 AND credential.room_id=$3
+  ORDER BY credential.created_at,credential.id LIMIT 1`;
 
-/** Compose inside the existing actual-authority transaction. No provider I/O,
- * new receipt state, release/refund, requeue or notification is invented here.
- * The receipt owner calls endAgentTurn after recording this evidence. */
+/** Compose inside the existing actual-authority transaction. The owner end may
+ * arrive through any member of the invocation. It records evidence for every
+ * claimed or completed member, so no member keeps model authority. No provider
+ * I/O, new receipt state, release/refund, requeue or notification is invented
+ * here; the receipt owner ends the unfinished members after this returns. */
 export async function parkOwnedModelGeneration(database: SqlDatabase, input: Identity, cause: Cause): Promise<boolean> {
-  if (!input.generationId) throw new OwnedModelOwnerEndRefusal();
-  if ((cause.modelRequestId!==null&&!uuid.test(cause.modelRequestId) || !cause.source.connectionId ||
-      !Number.isSafeInteger(cause.source.epoch) || cause.source.epoch <= 0)) throw new OwnedModelOwnerEndRefusal();
-  const command = (await database.query<{ id: string; turn_owner_connection_id: string | null; turn_owner_epoch: string | number | null }>(
-    `SELECT id,turn_owner_connection_id,turn_owner_epoch FROM agent_commands
-     WHERE room_id=$1 AND agent_id=$2 AND turn_request_id=$3 AND generation_id=$4
-       AND state IN ('claimed','complete') AND action IN ('input','resume') FOR UPDATE`,
-    [input.roomId, input.agentId, input.requestId, input.generationId])).rows[0];
-  if (!command?.turn_owner_connection_id) throw new OwnedModelOwnerEndRefusal();
-  {
-    if (command.turn_owner_connection_id !== cause.source.connectionId || Number(command.turn_owner_epoch) !== cause.source.epoch ||
-        !(await database.query(`SELECT 1 FROM agent_connections connection JOIN live_server_instances server
-          ON server.instance_id=connection.instance_id WHERE connection.agent_id=$1 AND COALESCE(connection.turn_connection_id,connection.connection_id)=$2
-          AND COALESCE(connection.turn_connection_epoch,connection.epoch)=$3 AND connection.released_at IS NULL
-          AND server.renewed_at>clock_timestamp()-interval '90 seconds'`,
-        [input.agentId, cause.source.connectionId, cause.source.epoch])).rowCount) throw new OwnedModelOwnerEndRefusal();
-  }
-  const previous = await database.query(`SELECT 1 FROM agent_command_owner_ends WHERE command_id=$1 AND generation_id=$2`,
-    [command.id, input.generationId]);
-  if (previous.rowCount) return true;
-  let modelRequestId: string | null;
-  if(cause.modelRequestId===null){
-    // Journal loss supplies no provider outcome or invented request identity.
-    // Only an actually issued credential for this exact current owner can end.
-    const credential=await database.query(`SELECT 1 FROM owned_model_credentials
-      WHERE command_id=$1 AND generation_id=$2 AND agent_id=$3 AND room_id=$4 AND request_id=$5
-        AND connection_id=$6 AND connection_epoch=$7 LIMIT 1`,
-      [command.id,input.generationId,input.agentId,input.roomId,input.requestId,command.turn_owner_connection_id,command.turn_owner_epoch]);
-    if(!credential.rowCount)throw new OwnedModelOwnerEndRefusal();
-    modelRequestId=null;
-  }else{
+  const generationId = input.generationId;
+  if (!generationId) throw new OwnedModelOwnerEndRefusal();
+  if (cause.modelRequestId!==null&&!uuid.test(cause.modelRequestId)) throw new OwnedModelOwnerEndRefusal();
+  const members = (await invocationMembers(database, { ...input, generationId }))
+    .filter(member => member.state === 'claimed' || member.state === 'complete');
+  const addressed = members.find(member => member.turn_request_id === input.requestId);
+  if (!addressed) throw new OwnedModelOwnerEndRefusal();
+  const ended = await database.query<{ command_id: string }>(`SELECT command_id FROM agent_command_owner_ends
+    WHERE command_id=ANY($1::text[]) AND generation_id=$2`, [members.map(member => member.id), generationId]);
+  const open = members.filter(member => !ended.rows.some(row => row.command_id === member.id));
+  if (!open.length) return true;
+  const credential = (await database.query<{ id: string }>(INVOCATION_CREDENTIAL,
+    [input.agentId, generationId, input.roomId])).rows[0];
+  // Journal loss supplies no provider outcome or invented request identity.
+  // Only an actually issued credential for this invocation can end.
+  if (!credential) throw new OwnedModelOwnerEndRefusal();
+  let modelRequestId: string | null = null;
+  if (cause.modelRequestId !== null) {
     const attempt = (await database.query<{ model_request_id: string }>(
-    `SELECT attempt.model_request_id FROM owned_model_attempts attempt
-     JOIN owned_model_credentials credential ON credential.id=attempt.credential_id
-     WHERE attempt.command_id=$1 AND attempt.generation_id=$2 AND attempt.agent_id=$3
-       AND credential.command_id=attempt.command_id AND credential.generation_id=attempt.generation_id
-       AND credential.agent_id=$3 AND credential.room_id=$4 AND credential.request_id=$5
-       AND credential.connection_id=$6 AND credential.connection_epoch=$7
-       AND attempt.model_request_id=$8
-     ORDER BY attempt.model_request_id LIMIT 1 FOR SHARE OF attempt`,
-    [command.id, input.generationId, input.agentId, input.roomId, input.requestId,
-      command.turn_owner_connection_id, command.turn_owner_epoch,
-      cause.modelRequestId])).rows[0];
+      `SELECT model_request_id FROM owned_model_attempts
+       WHERE credential_id=$1 AND agent_id=$2 AND generation_id=$3 AND model_request_id=$4
+       LIMIT 1 FOR SHARE`,
+      [credential.id, input.agentId, generationId, cause.modelRequestId])).rows[0];
     if (!attempt) throw new OwnedModelOwnerEndRefusal();
-    modelRequestId=attempt.model_request_id;
+    modelRequestId = attempt.model_request_id;
   }
-  await database.query('SELECT beeline_register_owned_effect($1,$2,$3,$4,$5)',
-    [command.id, input.agentId, input.generationId, command.turn_owner_connection_id, command.turn_owner_epoch]);
+  await database.query('SELECT beeline_register_owned_effect($1,$2,$3)', [addressed.id, input.agentId, generationId]);
   await database.query(`INSERT INTO agent_command_owner_ends(command_id,generation_id,model_request_id)
-    VALUES($1,$2,$3) ON CONFLICT DO NOTHING`, [command.id, input.generationId, modelRequestId]);
+    SELECT unnest($1::text[]),$2,$3 ON CONFLICT DO NOTHING`, [open.map(member => member.id), generationId, modelRequestId]);
   return true;
 }
 
-/** Existing current-owner terminal receipt ingress, before all terminal effects.
- * An explicit modelOwnerEnd also covers committed success whose final response
- * was lost. Without that causal field, only actual UNKNOWN is parked. */
+/** Existing terminal receipt ingress, before all terminal effects. An explicit
+ * modelOwnerEnd ends the whole invocation, including committed success whose
+ * final response was lost. Without that causal field, only actual UNKNOWN is
+ * parked, and only when this receipt ends the invocation's last claimed member. */
 export async function parkOwnedModelTerminal(
-  database: SqlDatabase, input: PostTurnReceiptInput, agentId: string, source?: HelperTurnOwnershipSource,
+  database: SqlDatabase, input: PostTurnReceiptInput, agentId: string,
 ): Promise<boolean> {
   const explicit = input.modelOwnerEnd !== undefined;
-  if (explicit && (input.status !== 'failed' || input.heartbeat !== undefined || !source || !input.modelOwnerEnd ||
+  if (explicit && (input.status !== 'failed' || input.heartbeat !== undefined || !input.modelOwnerEnd ||
       typeof input.modelOwnerEnd !== 'object' || Array.isArray(input.modelOwnerEnd) ||
       !(('requestId' in input.modelOwnerEnd && Object.keys(input.modelOwnerEnd).join()==='requestId' &&
         typeof input.modelOwnerEnd.requestId==='string' && uuid.test(input.modelOwnerEnd.requestId)) ||
         ('journalUnavailable' in input.modelOwnerEnd && Object.keys(input.modelOwnerEnd).join()==='journalUnavailable' && input.modelOwnerEnd.journalUnavailable===true)))) throw new OwnedModelOwnerEndRefusal();
-  if (!source || !['failed', 'complete'].includes(input.status) || input.heartbeat) return false;
+  if (!['failed', 'complete'].includes(input.status) || input.heartbeat) return false;
   if (!await modelInstalled(database)) {
     if (explicit) throw new OwnedModelOwnerEndRefusal(); return false;
   }
+  const identity = { ...input, agentId };
   if(input.modelOwnerEnd&&'journalUnavailable' in input.modelOwnerEnd)
-    return parkOwnedModelGeneration(database,{...input,agentId},{kind:'terminal-receipt',source,modelRequestId:null});
+    return parkOwnedModelGeneration(database,identity,{modelRequestId:null});
   let modelRequestId = input.modelOwnerEnd?.requestId;
   if (!modelRequestId) {
+    if (!input.generationId) return false;
+    const claimed = (await invocationMembers(database, { ...identity, generationId: input.generationId }))
+      .filter(member => member.state === 'claimed');
+    if (claimed.some(member => member.turn_request_id !== input.requestId)) return false;
     modelRequestId = (await database.query<{ model_request_id: string }>(`SELECT attempt.model_request_id
-      FROM agent_commands command JOIN owned_model_attempts attempt ON attempt.command_id=command.id
-        AND attempt.generation_id=command.generation_id AND attempt.agent_id=command.agent_id
-      WHERE command.room_id=$1 AND command.agent_id=$2 AND command.turn_request_id=$3 AND command.generation_id=$4
-        AND command.turn_owner_connection_id=$5 AND command.turn_owner_epoch=$6 AND attempt.state='unknown'
+      FROM owned_model_attempts attempt WHERE attempt.state='unknown' AND attempt.credential_id=(${INVOCATION_CREDENTIAL})
       ORDER BY attempt.model_request_id LIMIT 1`,
-    [input.roomId, agentId, input.requestId, input.generationId, source.connectionId, source.epoch])).rows[0]?.model_request_id;
+    [agentId, input.generationId, input.roomId])).rows[0]?.model_request_id;
   }
   if (!modelRequestId) return false;
-  return parkOwnedModelGeneration(database, { ...input, agentId }, { kind: 'terminal-receipt', source, modelRequestId });
+  return parkOwnedModelGeneration(database, identity, { modelRequestId });
 }

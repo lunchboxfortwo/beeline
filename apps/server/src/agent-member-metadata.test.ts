@@ -56,7 +56,7 @@ it('returns owner and host through Room, corner and workspace member operations'
 
 it('returns provider quota, billing and parent reviewer roles only to Room members', async () => {
   const usage = { updatedAt: 1000, windows: [{ rateLimitType: 'weekly', status: 'allowed', utilization: 0.25, updatedAt: 1000, resetsAt: 2000 }], plan: 'pro' };
-  await database.query(`UPDATE agents SET selected_model='test-model',usage_snapshot=$2::jsonb WHERE agent_id=$1`, [JELLYBEAN, JSON.stringify(usage)]);
+  await database.query(`UPDATE agents SET selected_model='next-model',model_catalog='[{"id":"model","category":"model","currentValue":"test-model","options":[]}]'::jsonb,usage_snapshot=$2::jsonb WHERE agent_id=$1`, [JELLYBEAN, JSON.stringify(usage)]);
   await database.query(`UPDATE agents SET usage_snapshot=$2::jsonb WHERE agent_id=$1`, [RUBY, JSON.stringify({ updatedAt: 1000, windows: [], spend: { today: 0, remaining: 12 } })]);
   await database.query(`UPDATE rooms SET reviewer_agent_id=$2 WHERE id=$1`, [ROOM, RUBY]);
   // A stored fallback is retired: it carries no reviewer role.

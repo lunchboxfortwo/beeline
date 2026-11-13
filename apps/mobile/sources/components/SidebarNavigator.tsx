@@ -1,4 +1,3 @@
-import { InlineRow } from '@/components/buzz/IndexRow';
 import { subscribeDesktopArtifact, type DesktopArtifactSelection } from '@/buzz/desktop-artifact-pane';
 import { DesktopArtifactPane } from '@/components/buzz/DesktopArtifactPane';
 import { desktopDocumentPaneWidth, DESKTOP_WORK_PANE_THRESHOLD } from '@/buzz/desktop-workbench-state';
@@ -7,15 +6,17 @@ import * as React from 'react';
 import { Drawer } from 'expo-router/drawer';
 import { useIsDesktop, useIsTablet, useHeaderHeight } from '@/utils/responsive';
 import { SidebarView } from './SidebarView';
-import { useWindowDimensions, View, Pressable, Platform, PanResponder } from 'react-native';
+import { DesktopPanel } from '@/ui/shell/DesktopPanel';
+import { useWindowDimensions, Platform, PanResponder } from 'react-native';
+import { XStack, YStack, useTheme } from 'tamagui';
+import { ChevronLeft, ChevronRight } from 'lucide-react-native';
 import { useLocalSetting, useLocalSettingMutable } from '@/sync/storage';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
-import { usePathname, useRouter } from 'expo-router';
+import { Slot, usePathname, useRouter } from 'expo-router';
 import { Image } from 'expo-image';
-import Ionicons from '@expo/vector-icons/Ionicons';
-import { useUnistyles } from 'react-native-unistyles';
+import { Filled, Glyph } from '@/ui/grammar';
+import { PaneResizer } from '@/ui/grammar-root';
 import { isTauri } from '@/utils/isTauri';
-import { APP_UI_SIZE_SCALE } from '@/ui-size';
 import {
   canRouteForward,
   canUseRouteBack,
@@ -42,8 +43,15 @@ import {
 
 const SETUP_SURFACES = ['/beeline/community', '/beeline/create-workspace'];
 
-export const SidebarNavigator = React.memo(() => {
-  const drawerGround = useUnistyles().theme.buzz.bgBase;
+export const SidebarNavigator = React.memo(function SidebarNavigator() {
+  const isTablet = useIsTablet();
+  // Compact screens have no drawer. Route straight into their stack instead
+  // of reconciling a second navigator whose surface is always hidden.
+  return isTablet ? <DesktopSidebarNavigator /> : <Slot />;
+});
+
+const DesktopSidebarNavigator = React.memo(() => {
+  const drawerGround = useTheme().canvas?.val;
   const isTablet = useIsTablet();
   const inDesktopShell = isTauri();
   const desktopPlatform = isDesktopPlatform();
@@ -159,20 +167,6 @@ export const SidebarNavigator = React.memo(() => {
   );
 
   const drawerNavigationOptions = React.useMemo(() => {
-    if (!isDesktopLayout) {
-      // Non-tablet: use front drawer, hidden
-      return {
-        lazy: false,
-        headerShown: false,
-        drawerType: 'front' as const,
-        swipeEnabled: false,
-        drawerStyle: {
-          width: 0,
-          display: 'none' as const,
-        },
-      };
-    }
-
     // Tablet: always permanent, just collapse width in zen mode.
     //
     // We deliberately do NOT animate `width` on web. A CSS transition on
@@ -201,51 +195,42 @@ export const SidebarNavigator = React.memo(() => {
   const drawerContent = React.useCallback(() => <SidebarView />, []);
 
   return (
-    <View style={{ flex: 1 }}>
+    <YStack flex={1}>
       {/* DOM order follows the desktop's spatial reading order. */}
       {showSessionChrome && <PersistentHeader />}
-      <InlineRow style={{ flex: 1, alignItems: 'stretch' }}>
-        <View style={{ flex: 1, minWidth: 0 }}>
+      <XStack flex={1} alignItems="stretch">
+        <YStack flex={1} minWidth={0}>
         <Drawer
           screenOptions={drawerNavigationOptions}
           drawerContent={showSessionChrome ? drawerContent : undefined}
         />
-        </View>
+        </YStack>
+        {showSessionChrome && <DesktopPanel />}
         {document && desktopLayout.availableWidth >= DESKTOP_WORK_PANE_THRESHOLD && (
-          <View style={{ width: desktopDocumentPaneWidth(desktopLayout.availableWidth) }}>
+          <YStack width={desktopDocumentPaneWidth(desktopLayout.availableWidth)}>
             <DesktopArtifactPane {...document} onClose={() => setDocument(null)} />
-          </View>
+          </YStack>
         )}
-      </InlineRow>
+      </XStack>
       {desktopPlatform && showSidebar && (
-        <View
+        <PaneResizer
           {...resizePan.panHandlers}
           accessibilityLabel="Resize navigation pane"
-          style={
-            {
-              position: 'absolute',
-              top: 0,
-              bottom: 0,
-              left: drawerWidth - 3,
-              width: 7,
-              cursor: 'col-resize',
-              zIndex: 1200,
-            } as any
-          }
+          edge={drawerWidth}
+          zIndex={1200}
           testID="desktop-navigation-resizer"
         />
       )}
-    </View>
+    </YStack>
   );
 });
 
 // Header block that stays in the same position whether zen mode is on or off
 const PersistentHeader = React.memo(() => {
-  const { theme } = useUnistyles();
+  const theme = useTheme();
   const safeArea = useSafeAreaInsets();
   const headerHeight = useHeaderHeight();
   const router = useRouter();
-  const uiSize = useLocalSetting('uiSize');
   const [zenMode, setZenMode] = useLocalSettingMutable('zenMode');
   const inTauri = isTauri();
   const isDesktop = useIsDesktop();
@@ -281,79 +266,80 @@ const PersistentHeader = React.memo(() => {
   }, []);
 
   return (
-    <View
-      style={{
-        position: 'absolute',
-        top: 0,
-        left: 0,
-        right: 0,
-        paddingTop: safeArea.top,
-        paddingLeft: isMacTauri ? Math.ceil(92 / APP_UI_SIZE_SCALE[uiSize]) : 16,
-        paddingRight: 16,
-        height: safeArea.top + headerHeight,
-        flexDirection: 'row',
-        alignItems: 'center',
-        zIndex: 1100,
-      }}
+    // The safe-area band above stays clear; the macOS traffic lights take the
+    // leading inset, which stays part of the drag region.
+    <XStack
+      position="absolute"
+      top={safeArea.top}
+      left={0}
+      right={0}
+      height={headerHeight}
+      paddingRight="4"
+      alignItems="center"
+      zIndex={1100}
       pointerEvents="box-none"
-      {...(inTauri ? { dataSet: { tauriDragRegion: 'true' } } : {})}
+      data-tauri-drag-region={inTauri ? 'true' : undefined}
     >
+      <YStack width={isMacTauri ? 92 : 16} />
       {/* Zen / Back / Forward buttons */}
       {!isDesktop && (
-        <View
-          style={{ flexDirection: 'row', alignItems: 'center', gap: 4 }}
+        <XStack
+          alignItems="center"
+          gap="1"
           pointerEvents="auto"
-          {...(inTauri ? { dataSet: { tauriDragRegion: 'false' } } : {})}
+          data-tauri-drag-region={inTauri ? 'false' : undefined}
         >
-          <Pressable
+          <YStack
             onPress={handleZenToggle}
             hitSlop={10}
-            style={{ width: 28, height: 28, alignItems: 'center', justifyContent: 'center' }}
+            width={28}
+            height={28}
+            alignItems="center"
+            justifyContent="center"
+            accessibilityRole="button"
             accessibilityLabel={"Zen mode"}
           >
-            <Image
-              source={require('@/assets/images/zen-icon.png')}
-              contentFit="contain"
-              style={{ width: 18, height: 18 }}
-              tintColor={zenMode ? theme.colors.textLink : theme.colors.header.tint}
-            />
-          </Pressable>
-          <Pressable
-            focusable={canGoBack}
+            <YStack width={18} height={18}>
+              <Filled
+                view={Image}
+                source={require('@/assets/images/zen-icon.png')}
+                contentFit="contain"
+                tintColor={zenMode ? theme.needsYou?.val : theme.ink?.val}
+              />
+            </YStack>
+          </YStack>
+          <YStack
             tabIndex={canGoBack ? 0 : -1}
-            onPress={handleBack}
-            disabled={!canGoBack}
+            onPress={canGoBack ? handleBack : undefined}
             hitSlop={10}
-            style={{
-              width: 28,
-              height: 28,
-              alignItems: 'center',
-              justifyContent: 'center',
-              opacity: canGoBack ? 1 : 0.3,
-            }}
+            width={28}
+            height={28}
+            alignItems="center"
+            justifyContent="center"
+            opacity={canGoBack ? 1 : 0.3}
+            accessibilityRole="button"
+            accessibilityState={{ disabled: !canGoBack }}
           >
-            <Ionicons name="chevron-back" size={20} color={theme.colors.header.tint} />
-          </Pressable>
+            <Glyph icon={ChevronLeft} size={20} color="ink" />
+          </YStack>
           {Platform.OS === 'web' && (
-            <Pressable
-              focusable={canGoForward}
+            <YStack
               tabIndex={canGoForward ? 0 : -1}
-              onPress={handleForward}
-              disabled={!canGoForward}
+              onPress={canGoForward ? handleForward : undefined}
               hitSlop={10}
-              style={{
-                width: 28,
-                height: 28,
-                alignItems: 'center',
-                justifyContent: 'center',
-                opacity: canGoForward ? 1 : 0.3,
-              }}
+              width={28}
+              height={28}
+              alignItems="center"
+              justifyContent="center"
+              opacity={canGoForward ? 1 : 0.3}
+              accessibilityRole="button"
+              accessibilityState={{ disabled: !canGoForward }}
             >
-              <Ionicons name="chevron-forward" size={20} color={theme.colors.header.tint} />
-            </Pressable>
+              <Glyph icon={ChevronRight} size={20} color="ink" />
+            </YStack>
           )}
-        </View>
+        </XStack>
       )}
-    </View>
+    </XStack>
   );
 });

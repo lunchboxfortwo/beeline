@@ -1,16 +1,7 @@
 import React, { useEffect, useRef, useState } from 'react';
+import { AppState, Platform, type AppStateStatus } from 'react-native';
+import { XStack, YStack, type YStackProps } from 'tamagui';
 import {
-  AppState,
-  Platform,
-  type AppStateStatus,
-  type StyleProp,
-  Text,
-  View,
-  type ViewProps,
-  type ViewStyle,
-} from 'react-native';
-import { StyleSheet } from 'react-native-unistyles';
-import Animated, {
   Easing,
   FadeInDown,
   ReduceMotion,
@@ -23,10 +14,9 @@ import Animated, {
   type SharedValue,
 } from 'react-native-reanimated';
 import { hasMessageRevealed, markMessageRevealed } from '@/buzz/message-reveal';
-import type { CornerVisualState } from '@/buzz/corners';
+import { Motion, T } from '@/ui/grammar';
 
 export const motionTokens = {
-  reveal: 176,
   confirm: 240,
   loaderFrame: 133,
   liveCycle: 1120,
@@ -61,50 +51,48 @@ function getNewMessageEntering() {
   return (newMessageEntering ??= buildNewMessageEntering());
 }
 
-type HullSurfaceProps = Omit<ViewProps, 'children' | 'style'> & {
+type HullSurfaceProps = YStackProps & {
   children?: React.ReactNode;
   strength?: 'quiet' | 'raised' | 'code';
-  style?: StyleProp<ViewStyle>;
   testID?: string;
 };
 
 const SCRATCHES = [7, 15, 24, 31, 40, 48, 57, 66, 74, 83, 91];
+/** A hairline rule: half a point, one device pixel on a 2x screen. */
+const HAIRLINE = 0.5;
 
-export function HullSurface({
-  children,
-  strength = 'quiet',
-  style,
-  testID,
-  ...props
-}: HullSurfaceProps) {
+export function HullSurface({ children, strength = 'quiet', testID, ...props }: HullSurfaceProps) {
   return (
-    <View {...props} style={[styles.hullSurface, style]} testID={testID}>
-      <View pointerEvents="none" style={styles.textureLayer}>
+    <YStack position="relative" overflow="hidden" {...props} testID={testID}>
+      <YStack pointerEvents="none" position="absolute" top={0} right={0} bottom={0} left={0}>
         {SCRATCHES.map((top, index) => (
-          <View
+          <YStack
             key={top}
-            style={[
-              styles.scratch,
-              { left: `${(index * 17) % 31}%`, right: `${(index * 11) % 27}%`, top: `${top}%` },
-            ]}
+            position="absolute"
+            height={HAIRLINE}
+            backgroundColor="strongStroke"
+            opacity={0.03}
+            left={`${(index * 17) % 31}%`}
+            right={`${(index * 11) % 27}%`}
+            top={`${top}%`}
           />
         ))}
         {strength !== 'quiet' && (
           <>
-            <View style={[styles.fleck, { left: '13%', top: '27%' }]} />
-            <View style={[styles.fleck, { right: '19%', top: '64%' }]} />
-            <View style={styles.raisedEdge} />
+            <YStack position="absolute" width={1} height={2} backgroundColor="secondary" opacity={0.025} left="13%" top="27%" />
+            <YStack position="absolute" width={1} height={2} backgroundColor="secondary" opacity={0.025} right="19%" top="64%" />
+            <YStack position="absolute" top={0} right={0} left={0} height={HAIRLINE} backgroundColor="secondary" opacity={0.03} />
           </>
         )}
         {strength === 'code' && (
           <>
-            <View style={[styles.codeNotch, styles.codeNotchTop]} />
-            <View style={[styles.codeNotch, styles.codeNotchBottom]} />
+            <YStack position="absolute" width={8} height={2} backgroundColor="strongStroke" opacity={0.7} top={0} left={0} />
+            <YStack position="absolute" width={8} height={2} backgroundColor="strongStroke" opacity={0.7} right={0} bottom={0} />
           </>
         )}
-      </View>
+      </YStack>
       {children}
-    </View>
+    </YStack>
   );
 }
 
@@ -126,19 +114,22 @@ export function PixelLoader({ compact = false }: { compact?: boolean }) {
   }, [frame, reducedMotion]);
 
   return (
-    <View
+    <XStack
       accessibilityLabel="Loading"
       accessibilityRole="progressbar"
-      style={[styles.pixelLoader, compact && styles.pixelLoaderCompact]}
+      width={compact ? 32 : 42}
+      height={compact ? 10 : 14}
+      alignItems="center"
+      gap="1"
     >
       {reducedMotion ? (
-        <Text style={styles.staticLoader}>◇</Text>
+        <T v="code" color="ink">◇</T>
       ) : (
         [0, 1, 2, 3].map((index) => (
           <LoaderCell key={index} frame={frame} index={index} compact={compact} />
         ))
       )}
-    </View>
+    </XStack>
   );
 }
 
@@ -155,121 +146,10 @@ function LoaderCell({
     const active = Math.floor(frame.value) % 4 === index;
     return { opacity: active ? 1 : 0.28 };
   });
-  return <Animated.View style={[styles.loaderCell, compact && styles.loaderCellCompact, style]} />;
-}
-
-/**
- * #419 unified the Room and corner treatments but accidentally promoted their
- * geometry to 20px/14px. Keep the unified vocabulary at the compact deck scale:
- * the Room mark restores the former 9px attention-dot footprint, and a corner
- * stays subordinate at 7px.
- */
-export const stateCircleDiameter = { room: 9, corner: 7 } as const;
-
-/**
- * The one state glyph used at BOTH hierarchy levels: hollow grey circle when
- * idle, grey ring with a rotating brass top arc while working, and a gently
- * pulsing filled brass circle when it needs you. The word exists only as
- * invisible accessibility metadata.
- */
-export function StateCircle({
-  state,
-  tone,
-  scale = 'corner',
-  style,
-  testID,
-}: {
-  state: CornerVisualState;
-  tone?: 'brass' | 'quiet' | 'ghost';
-  scale?: 'corner' | 'room';
-  style?: StyleProp<ViewStyle>;
-  testID?: string;
-}) {
-  const reducedMotion = useReducedMotion();
-  const rotation = useSharedValue(0);
-  const { progress: pulseProgress, still: pulseStill } = useLiveCycle(state === 'needs-you');
-  const spin = useAnimatedStyle(() => ({
-    transform: [{ rotate: `${rotation.value * 360}deg` }],
-  }));
-  const pulseRing = useAnimatedStyle(() => {
-    if (pulseStill) return { opacity: 0, transform: [{ scale: 1 }] };
-    const phase = Math.sin(pulseProgress.value * Math.PI);
-    return {
-      opacity: 0.28 * (1 - phase),
-      transform: [{ scale: 1 + 0.55 * phase }],
-    };
-  });
-
-  useEffect(() => {
-    if (state !== 'working' || reducedMotion) {
-      rotation.value = 0;
-      return;
-    }
-    rotation.value = withRepeat(
-      withTiming(1, {
-        duration: 900,
-        easing: Easing.linear,
-        reduceMotion: ReduceMotion.System,
-      }),
-      -1,
-      false,
-    );
-  }, [rotation, reducedMotion, state]);
-
-  const diameter = stateCircleDiameter[scale];
-  const geometry = { width: diameter, height: diameter, borderRadius: diameter / 2 };
-  const mark =
-    state === 'waiting' ? (
-      <View style={[{width:diameter,height:diameter}, styles.stateCircleWaiting]} />
-    ) : state === 'working' ? (
-      <Animated.View
-        style={[
-          geometry,
-          styles.stateCircleWorking,
-          reducedMotion && styles.stateCircleWorkingStill,
-          tone === 'brass' && styles.stateCircleWorkingBrass,
-          tone === 'quiet' && styles.stateCircleWorkingQuiet,
-          tone === 'ghost' && styles.stateCircleWorkingGhost,
-          styles.stateCircleWorkingGap,
-          spin,
-        ]}
-      />
-    ) : (
-      <View
-        style={[
-          geometry,
-          state === 'needs-you' ? styles.stateCircleNeedsYou : styles.stateCircleIdle,
-          tone === 'brass' &&
-            (state === 'needs-you' ? styles.stateCircleFillBrass : styles.stateCircleStrokeBrass),
-          tone === 'quiet' &&
-            (state === 'needs-you' ? styles.stateCircleFillQuiet : styles.stateCircleStrokeQuiet),
-          tone === 'ghost' &&
-            (state === 'needs-you' ? styles.stateCircleFillGhost : styles.stateCircleStrokeGhost),
-        ]}
-      />
-    );
   return (
-    <View
-      accessible
-      accessibilityLabel={state}
-      accessibilityRole={state === 'working' ? 'progressbar' : 'image'}
-      style={[styles.stateCircleSlot, geometry, style]}
-      testID={testID}
-    >
-      {state === 'needs-you' && !reducedMotion && (
-        <Animated.View
-          pointerEvents="none"
-          style={[
-            geometry,
-            styles.stateCircleNeedsYouPulse,
-            tone === 'quiet' && styles.stateCirclePulseQuiet,
-            tone === 'ghost' && styles.stateCirclePulseGhost,
-            pulseRing,
-          ]}
-        />
-      )}
-      {mark}
-    </View>
+    <Motion motion={style}>
+      <YStack width={compact ? 5 : 7} height={compact ? 5 : 7} backgroundColor="ink" />
+    </Motion>
   );
 }
 
@@ -326,11 +206,9 @@ const LIVE_PULSE_FLOOR = 0.55;
 export function HullLivePulse({
   active = true,
   children,
-  style,
 }: {
   active?: boolean;
   children: React.ReactNode;
-  style?: StyleProp<ViewStyle>;
 }) {
   const { progress, still } = useLiveCycle(active);
   const pulse = useAnimatedStyle(() => {
@@ -339,29 +217,7 @@ export function HullLivePulse({
       opacity: LIVE_PULSE_FLOOR + (1 - LIVE_PULSE_FLOOR) * Math.sin(progress.value * Math.PI) ** 2,
     };
   });
-  return <Animated.View style={[style, pulse]}>{children}</Animated.View>;
-}
-
-export function PixelGateReveal({ children, style }: HullSurfaceProps) {
-  const reducedMotion = useReducedMotion();
-  const progress = useSharedValue(reducedMotion ? 1 : 0);
-
-  useEffect(() => {
-    progress.value = withTiming(1, {
-      duration: motionTokens.reveal,
-      easing: easeOutQuint,
-      reduceMotion: ReduceMotion.System,
-    });
-  }, [progress]);
-
-  const contentStyle = useAnimatedStyle(() => ({ opacity: progress.value }));
-  return (
-    <Animated.View style={[style, contentStyle]}>
-      {children}
-      {!reducedMotion &&
-        [0, 1, 2, 3].map((index) => <RevealStrip key={index} index={index} progress={progress} />)}
-    </Animated.View>
-  );
+  return <Motion motion={pulse}>{children}</Motion>;
 }
 
 export function NewMessageMaterialize({
@@ -393,137 +249,6 @@ export function NewMessageMaterialize({
   useEffect(() => {
     if (animate && messageId !== undefined) markMessageRevealed(messageId);
   }, [animate, messageId]);
-  if (!animate) return <View>{children}</View>;
-  return <Animated.View entering={getNewMessageEntering()}>{children}</Animated.View>;
+  if (!animate) return <>{children}</>;
+  return <Motion entering={getNewMessageEntering()}>{children}</Motion>;
 }
-
-function RevealStrip({ index, progress }: { index: number; progress: SharedValue<number> }) {
-  const style = useAnimatedStyle(() => ({
-    opacity: 1 - progress.value,
-    transform: [{ translateX: (index % 2 === 0 ? -4 : 4) * progress.value }],
-  }));
-  return (
-    <Animated.View
-      pointerEvents="none"
-      style={[styles.revealStrip, { top: `${index * 25}%`, height: '25%' }, style]}
-    />
-  );
-}
-
-const styles = StyleSheet.create((theme) => {
-  const groknight = theme.buzz;
-  return {
-    hullSurface: { position: 'relative', overflow: 'hidden' },
-    cornerGlyphLive: { color: groknight.accent },
-    textureLayer: { ...StyleSheet.absoluteFillObject, opacity: 1 },
-    scratch: {
-      position: 'absolute',
-      height: StyleSheet.hairlineWidth,
-      backgroundColor: groknight.bgTexturePeak,
-      opacity: 0.03,
-    },
-    fleck: {
-      position: 'absolute',
-      width: 1,
-      height: 2,
-      backgroundColor: groknight.steel,
-      opacity: 0.025,
-    },
-    raisedEdge: {
-      position: 'absolute',
-      top: 0,
-      right: 0,
-      left: 0,
-      height: StyleSheet.hairlineWidth,
-      backgroundColor: groknight.focus,
-      opacity: 0.03,
-    },
-    codeNotch: {
-      position: 'absolute',
-      width: 8,
-      height: 2,
-      backgroundColor: groknight.borderStrong,
-      opacity: 0.7,
-    },
-    codeNotchTop: { top: 0, left: 0 },
-    codeNotchBottom: { right: 0, bottom: 0 },
-    pixelLoader: { width: 42, height: 14, flexDirection: 'row', alignItems: 'center', gap: 4 },
-    pixelLoaderCompact: { width: 32, height: 10, gap: 4 },
-    loaderCell: { width: 7, height: 7, backgroundColor: groknight.signalBright },
-    loaderCellCompact: { width: 5, height: 5 },
-    staticLoader: {
-      ...groknight.type.meta,
-      fontFamily: groknight.monoSemibold,
-      color: groknight.signalBright,
-    },
-    /**
-     * Geometry, not chroma, carries the status: a fixed 2px column at the
-     * mechanism indent, so a reader scans one edge instead of reading every
-     * label. It is `alignSelf: 'stretch'` rather than a fixed height because the
-     * row it marks can wrap.
-     */
-    mechanismRail: {
-      width: 2,
-      alignSelf: 'stretch',
-      minHeight: 14,
-      flexShrink: 0,
-      backgroundColor: groknight.borderQuiet,
-    },
-    mechanismRailLive: { backgroundColor: groknight.accent },
-    /* ── Unified state circle: Room rollup and corner state ──────────── */
-    stateCircleSlot: {
-      alignItems: 'center',
-      justifyContent: 'center',
-    },
-    stateCircleNeedsYou: {
-      backgroundColor: groknight.accent,
-    },
-    stateCircleNeedsYouPulse: {
-      position: 'absolute',
-      borderWidth: 1,
-      borderColor: groknight.accent,
-    },
-    stateCircleWaiting: {
-      borderLeftWidth: 2,
-      borderRightWidth: 2,
-      borderColor: groknight.accent,
-    },
-    stateCircleIdle: {
-      borderWidth: 1,
-      borderColor: groknight.steel,
-      backgroundColor: 'transparent',
-    },
-    stateCircleWorking: {
-      borderWidth: 1,
-      borderColor: groknight.bgTexturePeak,
-      borderTopColor: groknight.accent,
-      backgroundColor: 'transparent',
-    },
-    stateCircleWorkingBrass: {
-      borderColor: groknight.accent,
-      borderTopColor: groknight.accent,
-    },
-    stateCircleWorkingQuiet: {
-      borderColor: groknight.ledgerQuiet,
-      borderTopColor: groknight.ledgerQuiet,
-    },
-    stateCircleWorkingGhost: {
-      borderColor: groknight.ledgerGhost,
-      borderTopColor: groknight.ledgerGhost,
-    },
-    stateCircleFillBrass: { backgroundColor: groknight.accent },
-    stateCircleFillQuiet: { backgroundColor: groknight.ledgerQuiet },
-    stateCircleFillGhost: { backgroundColor: groknight.ledgerGhost },
-    stateCircleStrokeBrass: { borderColor: groknight.accent },
-    stateCircleStrokeQuiet: { borderColor: groknight.ledgerQuiet },
-    stateCircleStrokeGhost: { borderColor: groknight.ledgerGhost },
-    stateCirclePulseQuiet: { borderColor: groknight.ledgerQuiet },
-    stateCirclePulseGhost: { borderColor: groknight.ledgerGhost },
-    stateCircleWorkingGap: { borderRightColor: 'transparent' },
-    stateCircleWorkingStill: {
-      borderColor: groknight.steel,
-      borderTopColor: groknight.steel,
-    },
-    revealStrip: { position: 'absolute', right: 0, left: 0, backgroundColor: groknight.bgRaised },
-  };
-});

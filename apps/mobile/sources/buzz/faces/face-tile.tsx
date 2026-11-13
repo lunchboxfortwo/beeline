@@ -25,12 +25,23 @@ import React from 'react';
 import { G } from 'react-native-svg';
 import { BONE, FACES, INK, type FaceId } from './animals';
 import { recolorEdge } from './edge';
+import { IDENTITY_ART, stonePalette } from '@/buzz/groknight';
 
 export type FaceMode = 'dark' | 'light';
 
 /** The person plate per theme mode — the approved contact sheet's grounds:
  *  a shade under the obsidian canvas, and the light cream. */
-export const PERSON_PLATE: Record<FaceMode, string> = { dark: '#0f0a13', light: '#F5EEE2' };
+export const PERSON_PLATE: Record<FaceMode, string> = { dark: IDENTITY_ART.plateDark, light: IDENTITY_ART.plateLight };
+
+/** The person letter mark's plate and light-mode letter outline. Brass keeps
+ *  the identity inks; Stone puts the letter on Stone raised with a Stone ink
+ *  outline. The letter keeps its own hue in both. */
+export function personMarkInks(mode: FaceMode, palette: 'brass' | 'stone'): { plate: string; outline: string } {
+  if (palette === 'stone') {
+    return { plate: stonePalette[mode].bgRaised!, outline: stonePalette.light.textPrimary! };
+  }
+  return { plate: PERSON_PLATE[mode], outline: INK };
+}
 
 /** The edge layer's colours per mode: (vanishing tone → contrast tone). */
 export const EDGE_COLORS: Record<FaceMode, { target: string; edge: string }> = {
@@ -49,10 +60,6 @@ function faceLayers(figure: React.ReactElement, mode: FaceMode): React.ReactElem
   );
 }
 
-/** A person's creature: hue-for-brass figure over its contrast edge layer. */
-export function personFaceLayers(face: FaceId, hue: string, mode: FaceMode): React.ReactElement {
-  return faceLayers(FACES[face]({ palette: { brass: hue, bone: BONE, ink: INK } }), mode);
-}
 
 /** An agent's creature: the same drawing in bone and ink, edged for the light
  *  plate; the caller paints that plate in the agent's hue. */

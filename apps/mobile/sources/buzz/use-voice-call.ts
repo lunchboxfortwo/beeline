@@ -97,7 +97,7 @@ export function useVoiceCall(roomId: string, enabled: boolean, roomAgents: reado
 
   const join = React.useCallback(async () => {
     if (session.current || pending.current) return;
-    if (!enabled) { setError('You cannot join Conversation mode in this Room.'); return; }
+    if (!enabled) { setError('You cannot join Conversation mode in this chat.'); return; }
     pending.current = true; const version = ++revision.current;
     setConnecting(true); setError(null); transientReplyError.current = false; setQuotaExhausted(false); quotaRef.current = false;
     let transport: Awaited<ReturnType<typeof createVoiceRoom>> | undefined;

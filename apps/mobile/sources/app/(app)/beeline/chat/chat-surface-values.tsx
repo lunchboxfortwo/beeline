@@ -4,7 +4,7 @@ import { buildTurnActivity } from '@/buzz/activity-timeline';
 import { CHANNEL_MENTION_HANDLE, CHANNEL_MENTION_PUBKEY, SYSTEM_MENTION_HANDLE, SYSTEM_MENTION_PUBKEY } from '@/buzz/room-participants';
 import { type MessageReplyTarget } from '@/buzz/message-reply';
 import type { RoomMessagePresentation } from '@/buzz/room-message-cell';
-import { type RoomRosterParticipant } from '@/components/buzz/RoomRosterSheet';
+import { type RoomRosterParticipant } from '@/buzz/room-participants';
 import { COMPOSER_MAX_INPUT_HEIGHT, COMPOSER_SINGLE_LINE_INPUT_HEIGHT } from '@/components/buzz/ConversationComposer';
 
 
@@ -70,26 +70,6 @@ export const INITIAL_MESSAGE_WINDOW = 30;
 // reads this many records; reveal that complete bounded page when its parent
 // relation resolves instead of silently starting a reader 30 rows mid-story.
 export const INITIAL_CORNER_MESSAGE_WINDOW = 200;
-
-/**
- * Every header control draws its mark in a 44 box; the extra 4 all round
- * carries the touch area over Material's 48dp floor without moving a pixel of
- * chrome. One slop for all of them: the trailing pair used to take a 14 slop
- * that grew a 44 box into a 72 one, so two controls parted by a spacing step
- * of bare slab overlapped each other in the hit layer. The Room pair's boxes
- * now touch (same as the Room-list pair); 4 of slop each way overlaps 8 in
- * the hit layer, which a 14 slop would have doubled.
- */
-export const HEADER_EDGE_HIT_SLOP = { top: 4, bottom: 4, left: 4, right: 4 } as const;
-
-/**
- * Every trailing header mark is DRAWN at this size inside its own 44pt box.
- * One size for the pair is what makes the corners door and the overflow
- * control read as siblings, and a shape centred on its own box needs no
- * hand-tuned vertical correction to sit level with the mark beside it.
- * 28 matches the Room-list pair so the two screens share one chrome.
- */
-export const HEADER_MARK_SIZE = 28;
 
 
 /**

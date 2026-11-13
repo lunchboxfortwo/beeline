@@ -2,8 +2,8 @@
    Prevents scroll-chaining from inner scrollable elements to the body. */
 html, body {
     overscroll-behavior: none;
-    /* macOS Safari's default subpixel AA aliases badly under the body zoom
-       below ("chopped" bold, faint regular text); Chrome re-rasterizes and is
+    /* macOS Safari's default subpixel AA aliases badly under a page zoom
+       ("chopped" bold, faint regular text); Chrome re-rasterizes and is
        unaffected. Force grayscale AA, and stop Safari faux-bolding the
        already-bold SpaceGrotesk-SemiBold family. All three inherit. */
     -webkit-font-smoothing: antialiased;
@@ -11,26 +11,15 @@ html, body {
     font-synthesis: none;
 }
 
-html.happy-app-zoomed {
+/* The app fills the window at page zoom 1; Text size sets type and spacing
+   itself, so the page is never zoomed on top of it. */
+html {
     overflow: hidden;
 }
 
-html.happy-app-zoomed body {
-    width: calc(100vw / var(--happy-app-zoom));
-    height: calc(100vh / var(--happy-app-zoom));
-    transform-origin: top left;
-}
-
-@supports (zoom: 1) {
-    html.happy-app-zoomed body {
-        zoom: var(--happy-app-zoom);
-    }
-}
-
-@supports not (zoom: 1) {
-    html.happy-app-zoomed body {
-        transform: scale(var(--happy-app-zoom));
-    }
+body {
+    width: 100vw;
+    height: 100vh;
 }
 
 /* Theme-aware scrollbar styles using Unistyles CSS variables.

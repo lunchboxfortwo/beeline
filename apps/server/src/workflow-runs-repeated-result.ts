@@ -14,9 +14,9 @@ import type { SqlDatabase } from './database.js';
 import { applySkillRevision, assertSkillTextSafe } from './institutional-skills.js';
 import type { AfterCommit } from './institutional-memory-embeddings.js';
 import { answerRoomChoice, skipRoomChoice } from './room-choice.js';
-import { identitySubject, systemIdentityMention } from './system-line.js';
+import { identitySubject } from './system-line.js';
 import { SYSTEM_IDENTITY_ID } from '@beeline/api-contract/system-identity';
-import { RunScope, openRun, loadIdentityRow, noticeRunOwner, loadRun, workflowRequester } from './workflow-runs.js';
+import { RunScope, openRun, loadIdentityRow, loadRun, workflowRequester } from './workflow-runs.js';
 import { HandoffResult, provenanceAttempt, cardByCommand, alreadyAdvanced, isHandoffState, failOver, enterState, closeRun } from './workflow-runs-cancel-run-timers.js';
 
 
@@ -284,7 +284,6 @@ export async function settleWorkflowGate(
       );
   const viewer = await loadIdentityRow(db, input.viewerId,scope.roomId);
   const note = typeof input.note === 'string' && input.note.trim() ? input.note.replace(/\s+/g, ' ').trim() : undefined;
-  const attempt = scope.run.seq;
   await enterState(db, scope, {
     outcome: label,
     contents: input.skip
@@ -304,14 +303,6 @@ export async function settleWorkflowGate(
           : systemMessage("workflow-runs.at-so-run-went-to", scope.stateName, shortRunId(scope.runId), toState),
     }),
   });
-  if (input.skip) {
-    await noticeRunOwner(db, scope, `gate-default:${attempt}`, {
-      subject: { kind: 'system', name: systemMessage("workflow-runs.the-gate-of", scope.stateName, scope.run.workflowSlug) },
-      verb: systemMessage("workflow-runs.took-its-default"),
-      object: label,
-      consequence: systemMessage("workflow-runs.skipped-it-in-run", systemIdentityMention({ ...viewer, handle: viewer.handle ?? null }) || viewer.name, shortRunId(scope.runId)),
-    });
-  }
   return { choiceId: settled.choiceId, status: input.skip ? 'skipped' : 'answered', roomId: settled.roomId };
 }
 

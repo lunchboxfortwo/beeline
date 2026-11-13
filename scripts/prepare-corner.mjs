@@ -32,7 +32,7 @@ if (flags.has('--help')) {
   if (flags.has('--mobile')) {
     if (process.env.BEELINE_READONLY_DEPENDENCIES === '1') {
       writeFileSync('.beeline-dependency-request', 'mobile');
-      console.log('Mobile dependencies requested. Beeline prepares and mounts them automatically at the next turn.');
+      console.log('Mobile dependencies requested. Beeline prepares and mounts them when this reply ends, and this turn continues with them.');
     } else run(['run', 'mobile:install']);
   }
   run(['exec', '--', 'turbo', 'run', 'build', '--filter=@beeline/body^...', '--filter=@beeline/server^...']);

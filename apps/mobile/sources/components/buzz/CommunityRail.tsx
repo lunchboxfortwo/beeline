@@ -1,12 +1,6 @@
-import { Button } from '@/components/buzz/Button';
-import { CloseButton } from '@/components/buzz/CloseGlyph';
-import { useIsDesktop } from '@/utils/responsive';
-import React, { createContext, useCallback, useContext, useState } from 'react';
-import { Pressable, ScrollView, Text, TouchableOpacity, View } from 'react-native';
-import { StyleSheet } from 'react-native-unistyles';
-import { space } from '@/buzz/groknight';
+import React, { createContext, useCallback, useContext, useMemo, useState } from 'react';
 import * as Haptics from 'expo-haptics';
-import Animated, {
+import {
   Easing,
   ReduceMotion,
   runOnJS,
@@ -15,37 +9,16 @@ import Animated, {
   useSharedValue,
   withTiming,
 } from 'react-native-reanimated';
-import { useSafeAreaInsets } from 'react-native-safe-area-context';
+import { ScrollView, Separator, YStack } from 'tamagui';
+import { Plus, X } from 'lucide-react-native';
 import { WORKSPACE_LABEL } from '@/buzz/vocabulary';
-import { Typography } from '@/constants/Typography';
 import { IdentityMark } from '@/components/buzz/IdentityMark';
-import {
-  WORKSPACE_HEADER_PLATE,
-  WORKSPACE_RAIL_TILE,
-  workspacePictureSeat,
-} from '@/buzz/workspace-tile';
-import { CHEVRON_ROW_SIZE, ChevronGlyph } from '@/components/buzz/ChevronGlyph';
-import Svg, { Circle, Path } from 'react-native-svg';
-import { DECORATIVE_GLYPH_PROPS } from '@/components/buzz/decorative-glyph';
-import { ContentTarget, InlineRow } from '@/components/buzz/IndexRow';
-import { chromeStrokeWidth } from '@/buzz/chrome-geometry';
+import { WORKSPACE_RAIL_TILE } from '@/buzz/workspace-tile';
+import { Glyph, Motion, SafeBottom, SafeTop, T } from '@/ui/grammar';
 
 const DRAWER_WIDTH = 72;
 const DRAWER_DURATION_MS = 180;
-
-/**
- * The Workspace tile, and the picture seated in its bezel like a picture in a
- * frame rather than clipped against it (`buzz/workspace-tile`). Same tile as
- * the desktop rail (`DesktopWorkspaceRail`); the room-list header plate below
- * is that tile rescaled, seated by the same rule.
- */
 const TILE = WORKSPACE_RAIL_TILE;
-const TILE_SIZE = TILE.size;
-const TILE_RADIUS = TILE.radius;
-const TILE_BORDER_WIDTH = TILE.borderWidth;
-const TILE_SEAT = workspacePictureSeat(TILE);
-const HEADER_PLATE = WORKSPACE_HEADER_PLATE;
-const HEADER_PLATE_SEAT = workspacePictureSeat(HEADER_PLATE);
 
 export type CommunityRailItem = {
   communityId: string;
@@ -58,283 +31,113 @@ type CommunityRailProps = {
   activeCommunityId: string | null;
   onSelect: (communityId: string | null) => void;
   onAdd: () => void;
-  onSettings: () => void;
   /** Long-press a Workspace tile to arm its exit affordance; confirm from there. */
   onLeaveWorkspace?: (communityId: string) => void;
-  viewerPubkey?: string;
-  viewerAvatarUrl?: string;
-  viewerFace?: string;
-  presentation?: 'rail' | 'column';
-};
-
-type RailButtonProps = {
-  active: boolean;
-  label: string;
-  children: React.ReactNode;
-  onPress: () => void;
-  onLongPress?: () => void;
-  exitArmed?: boolean;
-  onExitPress?: () => void;
-  testID?: string;
-  presentation?: 'rail' | 'column';
 };
 
 /**
- * A Workspace slot. Selection reads three redundant ways and none of them is a
- * box or a fill: a full-height bar on the rail's own edge, the mark's own
- * thicker active frame, and tone — the Workspace you are not in recedes a step
- * rather than the one you are in lighting up. A column of identical marks at
- * identical luminance was the thing that made the rail hard to read.
+ * A Workspace slot: the picture in its tile, a brass bezel and an edge bar on
+ * the current one. Long-press arms one exit control on the tile's corner.
  */
-function RailButton({
-  active,
-  label,
-  children,
-  onPress,
-  onLongPress,
-  exitArmed = false,
-  onExitPress,
-  testID,
-  presentation = 'rail',
-}: RailButtonProps) {
-  const column = presentation === 'column';
+function RailButton({ active, label, children, onPress, onLongPress, exitArmed = false, onExitPress, testID }: {
+  active: boolean; label: string; children: React.ReactNode; onPress: () => void; onLongPress?: () => void;
+  exitArmed?: boolean; onExitPress?: () => void; testID?: string;
+}) {
   return (
-    <View style={[styles.railButtonSlot, column && styles.columnButtonSlot]}>
-      {active && <View style={styles.selectionBar} />}
-      <TouchableOpacity
+    <YStack width={DRAWER_WIDTH} height={58} alignItems="center" justifyContent="center">
+      {active ? <YStack position="absolute" top={9} bottom={9} left={0} width={2} backgroundColor="needsYou" /> : null}
+      <YStack
+        width={TILE.size}
+        height={TILE.size}
+        alignItems="center"
+        justifyContent="center"
+        borderRadius="md"
+        borderWidth={2}
+        borderColor={active ? 'needsYou' : 'transparent'}
         accessibilityRole="button"
-        accessibilityLabel={label}
-        accessibilityState={{ selected: active }}
-        testID={testID}
+        aria-label={label}
+        aria-selected={active}
         onPress={onPress}
         onLongPress={onLongPress}
-        style={[
-          styles.railButton,
-          active && styles.railButtonCurrent,
-          column && styles.columnButton,
-        ]}
+        testID={testID}
       >
         {children}
-      </TouchableOpacity>
-      {exitArmed && (
-        <CloseButton
-          accessibilityLabel={`Exit ${label}`}
-          testID={`workspace-exit-${testID?.replace('community-rail-', '') ?? ''}`}
+      </YStack>
+      {exitArmed ? (
+        <YStack
+          position="absolute"
+          top={2}
+          right={4}
+          width={20}
+          height={20}
+          alignItems="center"
+          justifyContent="center"
+          borderRadius="sm"
+          backgroundColor="highlight"
+          accessibilityRole="button"
+          aria-label={`Exit ${label}`}
           onPress={onExitPress}
-          control={styles.exitAffordance}
-        />
-      )}
-    </View>
+          testID={`workspace-exit-${testID?.replace('community-rail-', '') ?? ''}`}
+        >
+          <Glyph icon={X} size={14} />
+        </YStack>
+      ) : null}
+    </YStack>
   );
 }
 
-type RailCommandProps = {
-  label: string;
-  accessibilityLabel: string;
-  onPress: () => void;
-  glyph?: RailGlyph;
-  children?: React.ReactNode;
-  testID?: string;
-  presentation?: 'rail' | 'column';
-};
-
-type RailGlyph = 'add' | 'settings';
-const RAIL_GLYPH_SIZE = 22;
-
-/** A rail command's drawn mark: a plus to add, three sliders for settings. */
-function RailCommandGlyph({ glyph }: { glyph: RailGlyph }) {
-  return (
-    <View style={styles.railCommandGlyph} testID={`rail-glyph-${glyph}`}>
-      <Svg
-        {...DECORATIVE_GLYPH_PROPS}
-        fill="none"
-        height={RAIL_GLYPH_SIZE}
-        stroke={styles.railCommandGlyphInk.color}
-        strokeLinecap="round"
-        strokeWidth={chromeStrokeWidth(RAIL_GLYPH_SIZE)}
-        viewBox="0 0 24 24"
-        width={RAIL_GLYPH_SIZE}
-      >
-        {glyph === 'add' ? (
-          <Path d="M12 5v14M5 12h14" />
-        ) : (
-          <>
-            <Path d="M4 7h9M17 7h3M4 17h3M11 17h9" />
-            <Circle cx={15} cy={7} r={2} />
-            <Circle cx={9} cy={17} r={2} />
-          </>
-        )}
-      </Svg>
-    </View>
-  );
-}
-
-/**
- * A rail command: glyph (or identity mark) over a mono micro-label. The label
- * is what makes the rail deliberate instead of a column of mystery icons, and
- * it is why these need no border — the affordance is named, not framed.
- */
-function RailCommand({
-  label,
-  accessibilityLabel,
-  onPress,
-  glyph,
-  children,
-  testID,
-  presentation = 'rail',
-}: RailCommandProps) {
-  const column = presentation === 'column';
-  return (
-    <ContentTarget
-      accessibilityRole="button"
-      accessibilityLabel={accessibilityLabel}
-      onPress={onPress}
-      style={({ pressed }) => [
-        styles.railCommand,
-        column && styles.columnCommand,
-        pressed && styles.railCommandPressed,
-      ]}
-      testID={testID}
-    >
-      {glyph ? <RailCommandGlyph glyph={glyph} /> : children}
-      <Text style={styles.railCommandLabel}>{label}</Text>
-    </ContentTarget>
-  );
-}
-
-export function CommunityRail({
-  communities,
-  activeCommunityId,
-  onSelect,
-  onAdd,
-  onSettings,
-  onLeaveWorkspace,
-  viewerPubkey,
-  viewerAvatarUrl,
-  viewerFace,
-  presentation = 'rail',
-}: CommunityRailProps) {
-  const insets = useSafeAreaInsets();
-  const column = presentation === 'column';
+/** The phone's Workspace switcher: one tile per Workspace, then Add. Settings is its own tab. */
+export function CommunityRail({ communities, activeCommunityId, onSelect, onAdd, onLeaveWorkspace }: CommunityRailProps) {
   // Long-press arms ONE tile's exit affordance; any other tap dismisses it.
   const [exitArmedId, setExitArmedId] = useState<string | null>(null);
   return (
-    // No surface of its own: the rail is the same obsidian as the screen it
-    // slides over, held apart by one hairline edge.
-    <View
-      accessibilityLabel={`${WORKSPACE_LABEL} switcher`}
-      style={[
-        styles.rail,
-        column && styles.columnPicker,
-        { paddingTop: column ? 0 : Math.max(insets.top, space.sm) },
-      ]}
-    >
-      <ScrollView
-        style={styles.communityScroll}
-        contentContainerStyle={[
-          styles.communityScrollContent,
-          column && styles.columnScrollContent,
-        ]}
-        showsVerticalScrollIndicator={false}
-      >
-        {communities.map((community) => {
-          const active = activeCommunityId === community.communityId;
-          const exitArmed = exitArmedId === community.communityId;
-          return (
-            <RailButton
-              active={active}
-              key={community.communityId}
-              label={community.name}
-              onPress={() => {
-                if (exitArmedId) {
-                  // A tap anywhere while the X is showing just dismisses it.
-                  setExitArmedId(null);
-                  return;
-                }
-                onSelect(community.communityId);
-              }}
-              onLongPress={
-                onLeaveWorkspace
-                  ? () => {
-                      void Haptics.selectionAsync();
-                      setExitArmedId(community.communityId);
-                    }
-                  : undefined
-              }
-              exitArmed={exitArmed}
-              onExitPress={() => {
-                setExitArmedId(null);
-                onLeaveWorkspace?.(community.communityId);
-              }}
-              testID={`community-rail-${community.communityId}`}
-              presentation={presentation}
-            >
-              {column ? (
-                <View
-                  style={[styles.columnLogoPlate, active && styles.columnLogoPlateSelected]}
-                  testID={`workspace-tile-plate-${community.communityId}`}
-                >
-                  <View style={styles.tilePictureSeat}>
-                    <IdentityMark
-                      kind="workspace"
-                      seed={community?.communityId ?? 'workspace-loading'}
-                      avatarUrl={community?.avatar}
-                      name={community?.name}
-                      size={TILE_SEAT.pictureSize}
-                      selected={active}
-                      testID={`workspace-avatar-${community.communityId}`}
-                    />
-                  </View>
-                </View>
-              ) : (
-                <View style={styles.tilePictureSeat}>
+    // No surface of its own: the rail is the canvas it slides over, held apart by one edge.
+    <YStack flex={1} width={DRAWER_WIDTH} alignItems="center" backgroundColor="canvas" borderRightWidth={1} borderColor="stroke"
+      aria-label={`${WORKSPACE_LABEL} switcher`}>
+      <SafeTop />
+      <ScrollView flex={1} width="100%" showsVerticalScrollIndicator={false}>
+        <YStack paddingVertical="1" alignItems="center">
+          {communities.map((community) => {
+            const active = activeCommunityId === community.communityId;
+            return (
+              <RailButton
+                key={community.communityId}
+                active={active}
+                label={community.name}
+                onPress={() => {
+                  // A tap anywhere while the exit control is showing just dismisses it.
+                  if (exitArmedId) { setExitArmedId(null); return; }
+                  onSelect(community.communityId);
+                }}
+                onLongPress={onLeaveWorkspace ? () => { void Haptics.selectionAsync(); setExitArmedId(community.communityId); } : undefined}
+                exitArmed={exitArmedId === community.communityId}
+                onExitPress={() => { setExitArmedId(null); onLeaveWorkspace?.(community.communityId); }}
+                testID={`community-rail-${community.communityId}`}
+              >
+                <YStack width={TILE.pictureSize} height={TILE.pictureSize} borderRadius="sm" overflow="hidden" alignItems="center" justifyContent="center">
                   <IdentityMark
                     kind="workspace"
-                    seed={community?.communityId ?? 'workspace-loading'}
-                    avatarUrl={community?.avatar}
-                    name={community?.name}
-                    size={TILE_SEAT.pictureSize}
+                    seed={community.communityId}
+                    avatarUrl={community.avatar}
+                    name={community.name}
+                    size={TILE.pictureSize}
                     selected={active}
                     testID={`workspace-avatar-${community.communityId}`}
                   />
-                </View>
-              )}
-              {column && <Text style={styles.columnWorkspaceName}>{community.name}</Text>}
-            </RailButton>
-          );
-        })}
-        <RailCommand
-          accessibilityLabel={`Create or join a ${WORKSPACE_LABEL}`}
-          glyph="add"
-          label={column ? `ADD ${WORKSPACE_LABEL.toUpperCase()}` : 'ADD'}
-          onPress={onAdd}
-          testID="community-rail-add"
-          presentation={presentation}
-        />
+                </YStack>
+              </RailButton>
+            );
+          })}
+          <Separator borderColor="stroke" width={40} marginVertical="2" />
+          <YStack width={DRAWER_WIDTH} minHeight={48} paddingVertical="1" alignItems="center" justifyContent="center" gap="1"
+            accessibilityRole="button" aria-label={`Create or join a ${WORKSPACE_LABEL}`} onPress={onAdd} testID="community-rail-add">
+            <Glyph icon={Plus} />
+            <T v="meta" color="secondary">Add</T>
+          </YStack>
+        </YStack>
       </ScrollView>
-
-      <View style={styles.railDivider} />
-      <RailCommand
-        accessibilityLabel="Settings"
-        glyph={viewerPubkey ? undefined : 'settings'}
-        label="SETTINGS"
-        onPress={onSettings}
-        testID="community-rail-settings"
-        presentation={presentation}
-      >
-        {viewerPubkey ? (
-          <IdentityMark
-            kind="human"
-            seed={viewerPubkey}
-            avatarUrl={viewerAvatarUrl}
-            face={viewerFace}
-            name="You"
-            size={34}
-          />
-        ) : null}
-      </RailCommand>
-      <View style={{ height: Math.max(insets.bottom, 8) }} />
-    </View>
+      <SafeBottom />
+    </YStack>
   );
 }
 
@@ -345,477 +148,77 @@ type CommunityDrawerContextValue = {
 
 const CommunityDrawerContext = createContext<CommunityDrawerContextValue | null>(null);
 
-type CommunityDrawerTriggerProps = {
-  community?: CommunityRailItem | null;
-};
-
-type CommunitySwitcherTriggerProps = CommunityDrawerTriggerProps & {
-  expanded: boolean;
-  /** Omit while the Room list is unavailable to show the same identity without a control. */
-  onPress?: () => void;
-  attention?: boolean;
-  pickerTitle?: string;
-};
-
-/**
- * The Workspace identity *is* the switcher: one press target holding the mark,
- * the name, and a disclosure caret. Two adjacent targets doing the same thing
- * (the previous avatar + chevron pair) read as an accident.
- */
-export function CommunityDrawerTrigger({ community }: CommunityDrawerTriggerProps) {
-  const drawer = useContext(CommunityDrawerContext);
-  if (!drawer) {
-    throw new Error('CommunityDrawerTrigger must be rendered inside the Workspace shell.');
-  }
-  return (
-    <CommunitySwitcherTrigger
-      community={community}
-      expanded={drawer.drawerOpen}
-      onPress={drawer.openDrawer}
-    />
-  );
-}
-
-function CommunityHeaderIdentity({
-  community,
-  pickerTitle,
-  attention,
-  interactive,
-}: CommunityDrawerTriggerProps & { pickerTitle?: string | false; attention: boolean; interactive: boolean }) {
-  const desktop = useIsDesktop();
-  return (
-    <>
-      {!pickerTitle && (
-        <View style={styles.drawerTriggerPlate} testID="workspace-header-plate">
-          <View style={styles.drawerTriggerPictureSeat}>
-            <IdentityMark
-              kind="workspace"
-              seed={community?.communityId ?? 'workspace-loading'}
-              avatarUrl={community?.avatar}
-              name={community?.name}
-              size={HEADER_PLATE_SEAT.pictureSize}
-              testID="workspace-avatar-header"
-            />
-          </View>
-          {attention && <View style={desktop ? desktopAttentionStyles.workspaceAttentionDot : styles.workspaceAttentionMark} testID="workspace-attention" />}
-        </View>
-      )}
-      <Text
-        numberOfLines={1}
-        style={styles.drawerTriggerName}
-        testID={
-          pickerTitle
-            ? 'workspace-picker-title'
-            : community
-              ? `workspace-active-${community.communityId}`
-              : 'workspace-active-loading'
-        }
-      >
-        {pickerTitle || community?.name || WORKSPACE_LABEL}
-      </Text>
-      {interactive && (
-        <ChevronGlyph
-          color={styles.drawerTriggerCaret.color}
-          direction={pickerTitle ? 'up' : 'down'}
-          size={CHEVRON_ROW_SIZE}
-        />
-      )}
-    </>
-  );
-}
-
-export function CommunitySwitcherTrigger({
-  community,
-  expanded,
-  onPress,
-  attention = false,
-  pickerTitle,
-}: CommunitySwitcherTriggerProps) {
-  const showingPickerTitle = expanded && pickerTitle;
-
-  if (!onPress) {
-    return (
-      <InlineRow style={styles.drawerTrigger}>
-        <CommunityHeaderIdentity community={community} pickerTitle={showingPickerTitle} attention={attention} interactive={false} />
-      </InlineRow>
-    );
-  }
-  return (
-    <Button
-      accessibilityLabel={
-        showingPickerTitle
-          ? `Close ${pickerTitle}`
-          : `${community?.name ?? WORKSPACE_LABEL} — switch ${WORKSPACE_LABEL}`
-      }
-      accessibilityRole="button"
-      accessibilityState={{ expanded }}
-      onPress={onPress}
-      label=""
-      variant="quiet"
-      appearance={{ control: styles.drawerTrigger }}
-      icon={<CommunityHeaderIdentity community={community} pickerTitle={showingPickerTitle} attention={attention} interactive />}
-      testID="workspace-avatar-trigger"
-    />
-  );
+/** Today's Workspace switcher, opened from the list header inside the shell. */
+export function useCommunityDrawer(): CommunityDrawerContextValue | null {
+  return useContext(CommunityDrawerContext);
 }
 
 type BuzzCommunityShellProps = CommunityRailProps & {
   children: React.ReactNode;
 };
 
-export function BuzzCommunityShell({
-  children,
-  communities,
-  activeCommunityId,
-  onSelect,
-  onAdd,
-  onSettings,
-  onLeaveWorkspace,
-  viewerPubkey,
-  viewerAvatarUrl,
-  viewerFace,
-}: BuzzCommunityShellProps) {
+export function BuzzCommunityShell({ children, communities, activeCommunityId, onSelect, onAdd, onLeaveWorkspace }: BuzzCommunityShellProps) {
   const [drawerOpen, setDrawerOpen] = useState(false);
-  const drawerWidth = styles.drawer.width;
-  const drawerX = useSharedValue(-drawerWidth);
+  const drawerX = useSharedValue(-DRAWER_WIDTH);
   const scrimOpacity = useSharedValue(0);
   const reducedMotion = useReducedMotion();
 
   const openDrawer = useCallback(() => {
-    drawerX.value = -drawerWidth;
+    drawerX.value = -DRAWER_WIDTH;
     scrimOpacity.value = 0;
     setDrawerOpen(true);
-    drawerX.value = withTiming(0, {
-      duration: DRAWER_DURATION_MS,
-      easing: Easing.bezier(0.22, 1, 0.36, 1),
-      reduceMotion: ReduceMotion.System,
-    });
-    scrimOpacity.value = withTiming(0.78, {
-      duration: 120,
-      reduceMotion: ReduceMotion.System,
-    });
-  }, [drawerWidth, drawerX, scrimOpacity]);
+    drawerX.value = withTiming(0, { duration: DRAWER_DURATION_MS, easing: Easing.bezier(0.22, 1, 0.36, 1), reduceMotion: ReduceMotion.System });
+    scrimOpacity.value = withTiming(0.78, { duration: 120, reduceMotion: ReduceMotion.System });
+  }, [drawerX, scrimOpacity]);
 
   const closeDrawer = useCallback(() => {
-    scrimOpacity.value = withTiming(0, {
-      duration: 90,
-      reduceMotion: ReduceMotion.System,
-    });
+    scrimOpacity.value = withTiming(0, { duration: 90, reduceMotion: ReduceMotion.System });
     drawerX.value = withTiming(
-      -drawerWidth,
-      {
-        duration: reducedMotion ? 0 : 135,
-        easing: Easing.out(Easing.poly(5)),
-        reduceMotion: ReduceMotion.System,
-      },
-      (finished) => {
-        if (finished) runOnJS(setDrawerOpen)(false);
-      },
+      -DRAWER_WIDTH,
+      { duration: reducedMotion ? 0 : 135, easing: Easing.out(Easing.poly(5)), reduceMotion: ReduceMotion.System },
+      (finished) => { if (finished) runOnJS(setDrawerOpen)(false); },
     );
-  }, [drawerWidth, drawerX, reducedMotion, scrimOpacity]);
+  }, [drawerX, reducedMotion, scrimOpacity]);
 
-  const selectAndClose = useCallback(
-    (communityId: string | null) => {
-      closeDrawer();
-      void Haptics.selectionAsync();
-      onSelect(communityId);
-    },
-    [closeDrawer, onSelect],
-  );
+  const selectAndClose = useCallback((communityId: string | null) => {
+    closeDrawer();
+    void Haptics.selectionAsync();
+    onSelect(communityId);
+  }, [closeDrawer, onSelect]);
 
   const addAndClose = useCallback(() => {
     closeDrawer();
     onAdd();
   }, [closeDrawer, onAdd]);
 
-  const settingsAndClose = useCallback(() => {
-    closeDrawer();
-    onSettings();
-  }, [closeDrawer, onSettings]);
-
-  const drawerStyle = useAnimatedStyle(() => ({
-    transform: [{ translateX: drawerX.value }],
-  }));
+  const drawerStyle = useAnimatedStyle(() => ({ transform: [{ translateX: drawerX.value }] }));
   const scrimStyle = useAnimatedStyle(() => ({ opacity: scrimOpacity.value }));
 
+  const drawer = useMemo(() => ({ drawerOpen, openDrawer }), [drawerOpen, openDrawer]);
   return (
-    <CommunityDrawerContext.Provider value={{ drawerOpen, openDrawer }}>
-      <View style={styles.shell}>
-        <View style={styles.content}>{children}</View>
-        {drawerOpen && (
-          <View style={styles.drawerOverlay} testID="community-drawer-overlay">
-            <Animated.View style={[styles.scrim, scrimStyle]}>
-              <Pressable
-                accessibilityLabel={`Close ${WORKSPACE_LABEL} switcher`}
-                accessibilityRole="button"
-                onPress={closeDrawer}
-                style={StyleSheet.absoluteFill}
-                testID="community-drawer-scrim"
-              />
-            </Animated.View>
-            <Animated.View style={[styles.drawer, drawerStyle]} testID="community-drawer">
-              <CommunityRail
-                communities={communities}
-                activeCommunityId={activeCommunityId}
-                onSelect={selectAndClose}
-                onAdd={addAndClose}
-                onSettings={settingsAndClose}
-                onLeaveWorkspace={onLeaveWorkspace}
-                viewerPubkey={viewerPubkey}
-                viewerAvatarUrl={viewerAvatarUrl}
-                viewerFace={viewerFace}
-              />
-            </Animated.View>
-          </View>
-        )}
-      </View>
+    <CommunityDrawerContext.Provider value={drawer}>
+      <YStack flex={1} minWidth={0} backgroundColor="canvas">
+        {children}
+        {drawerOpen ? (
+          <YStack position="absolute" top={0} right={0} bottom={0} left={0} zIndex={20} testID="community-drawer-overlay">
+            <Motion overlay motion={scrimStyle}>
+              <YStack position="absolute" top={0} right={0} bottom={0} left={DRAWER_WIDTH} backgroundColor="canvas" accessibilityRole="button"
+                aria-label={`Close ${WORKSPACE_LABEL} switcher`} onPress={closeDrawer} testID="community-drawer-scrim" />
+            </Motion>
+            <YStack position="absolute" top={0} bottom={0} left={0} width={DRAWER_WIDTH}>
+              <Motion fill motion={drawerStyle} testID="community-drawer">
+                <CommunityRail
+                  communities={communities}
+                  activeCommunityId={activeCommunityId}
+                  onSelect={selectAndClose}
+                  onAdd={addAndClose}
+                  onLeaveWorkspace={onLeaveWorkspace}
+                />
+              </Motion>
+            </YStack>
+          </YStack>
+        ) : null}
+      </YStack>
     </CommunityDrawerContext.Provider>
   );
 }
-
-
-const desktopAttentionStyles = StyleSheet.create((theme) => ({
-    workspaceAttentionDot: {
-      position: 'absolute',
-      top: -4,
-      right: -4,
-      width: 12,
-      height: 12,
-      borderRadius: 12 / 2,
-      borderWidth: 2,
-      borderColor: theme.colors.groupped.background,
-      backgroundColor: theme.buzz.accent,
-    },
-}));
-
-const styles = StyleSheet.create((theme, runtime) => {
-  const groknight = theme.buzz;
-  const drawerWidth = DRAWER_WIDTH * Math.max(1, runtime?.fontScale ?? 1);
-  return {
-    shell: {
-      flex: 1,
-      backgroundColor: groknight.bgTerminal,
-    },
-    content: {
-      flex: 1,
-      minWidth: 0,
-      backgroundColor: groknight.bgTerminal,
-    },
-    rail: {
-      flex: 1,
-      width: drawerWidth,
-      alignItems: 'center',
-      backgroundColor: groknight.bgTerminal,
-      borderRightWidth: StyleSheet.hairlineWidth,
-      borderRightColor: groknight.border,
-    },
-    columnPicker: {
-      width: '100%',
-      alignItems: 'stretch',
-      borderRightWidth: 0,
-    },
-    communityScroll: {
-      flex: 1,
-      width: '100%',
-    },
-    communityScrollContent: {
-      paddingVertical: 4,
-      alignItems: 'center',
-    },
-    columnScrollContent: { alignItems: 'center' },
-    railButtonSlot: {
-      width: drawerWidth,
-      height: 58,
-      alignItems: 'center',
-      justifyContent: 'center',
-    },
-    columnButtonSlot: {
-      width: '100%',
-      height: DRAWER_WIDTH,
-      paddingLeft: groknight.space.md,
-      alignItems: 'flex-start',
-    },
-    railButton: {
-      width: TILE_SIZE,
-      height: TILE_SIZE,
-      alignItems: 'center',
-      justifyContent: 'center',
-      borderRadius: TILE_RADIUS,
-      borderWidth: TILE_BORDER_WIDTH,
-      borderColor: 'transparent',
-    },
-    /* The picture's seat: square, centred, and rounded parallel to the bezel.
-     * It rounds the picture's own corners; the generated Workspace plate fills
-     * this box the same way, with its own frame following the same curve. */
-    tilePictureSeat: {
-      width: TILE_SEAT.pictureSize,
-      height: TILE_SEAT.pictureSize,
-      alignItems: 'center',
-      justifyContent: 'center',
-      borderRadius: TILE_SEAT.pictureRadius,
-      overflow: 'hidden',
-    },
-    columnButton: {
-      width: DRAWER_WIDTH,
-      height: DRAWER_WIDTH,
-      flexDirection: 'column',
-      alignItems: 'flex-start',
-      gap: groknight.space.xs,
-    },
-    columnLogoPlate: {
-      width: groknight.space.xxl,
-      height: groknight.space.xxl,
-      alignItems: 'center',
-      justifyContent: 'center',
-      borderRadius: TILE_RADIUS,
-      borderWidth: TILE_BORDER_WIDTH,
-      borderColor: 'transparent',
-      backgroundColor: groknight.bgTerminal,
-    },
-    columnLogoPlateSelected: {
-      borderColor: groknight.selectedBorder,
-      backgroundColor: groknight.bgHover,
-    },
-    columnWorkspaceName: {
-      ...Typography.default('semiBold'),
-      ...theme.buzz.type.meta,
-      color: groknight.textMuted,
-      width: DRAWER_WIDTH,
-    },
-    /* The desktop tile treatment, scaled to the rail: a rounded tile whose
-     * brass bezel names the current Workspace. No idle fade — the bezel is the
-     * whole story, so every tile sits at full strength. */
-    railButtonCurrent: {
-      borderWidth: 2,
-      borderColor: groknight.selectedBorder,
-    },
-    /* Exit affordance: one close glyph hung at the tile's own top-right corner,
-     * on the same quiet chrome tier as every other rail glyph. It appears only
-     * while a long-press has armed it. */
-    exitAffordance: {
-      position: 'absolute',
-      top: 2,
-      right: 4,
-      width: 20,
-      height: 20,
-      alignItems: 'center',
-      justifyContent: 'center',
-      borderRadius: 3,
-      backgroundColor: groknight.bgHover,
-    },
-    selectionBar: {
-      position: 'absolute',
-      top: 9,
-      bottom: 9,
-      left: 0,
-      width: 2,
-      backgroundColor: groknight.selectedBorder,
-    },
-    railDivider: {
-      width: 40,
-      height: 1,
-      marginVertical: groknight.space.sm,
-      backgroundColor: groknight.border,
-    },
-    railCommand: {
-      width: drawerWidth,
-      minHeight: 48,
-      paddingVertical: 4,
-      alignItems: 'center',
-      justifyContent: 'center',
-      gap: groknight.space.xs,
-    },
-    // The press feedback the rail's touchables have always had.
-    railCommandPressed: { opacity: 0.2 },
-    columnCommand: {
-      width: '100%',
-      minHeight: 48,
-      paddingHorizontal: 16,
-      flexDirection: 'row',
-      justifyContent: 'flex-start',
-      gap: groknight.space.sm,
-    },
-    /* A rail command is named, so its glyph does not also have to shout: the
-     * mono micro-label under it carries the meaning and the glyph sits on the
-     * same quiet tier as the rest of the chrome. */
-    railCommandGlyph: {
-      height: theme.buzz.type.hero.lineHeight,
-      alignItems: 'center',
-      justifyContent: 'center',
-    },
-    railCommandGlyphInk: { color: groknight.textSecondary },
-    /* Tracking is drawn after every letter, the last one included, so a
-     * centred label sits one tracking step left of centre. The left padding
-     * of the same width re-centres the glyphs, keeping SETTINGS' first "S"
-     * clear of the iPhone's rounded bottom-left corner. */
-    railCommandLabel: {
-      ...theme.buzz.type.sectionHead,
-      paddingLeft: theme.buzz.type.sectionHead.letterSpacing,
-      fontFamily: groknight.monoSemibold,
-      color: groknight.textMuted,
-    },
-    drawerOverlay: {
-      ...StyleSheet.absoluteFillObject,
-      zIndex: 20,
-    },
-    drawer: {
-      position: 'absolute',
-      top: 0,
-      bottom: 0,
-      left: 0,
-      width: drawerWidth,
-    },
-    scrim: {
-      ...StyleSheet.absoluteFillObject,
-      left: drawerWidth,
-      backgroundColor: groknight.bgTerminal,
-    },
-    drawerTrigger: {
-      minHeight: 44,
-      flex: 1,
-      minWidth: 0,
-      paddingRight: 8,
-      flexDirection: 'row',
-      alignItems: 'center',
-      gap: 8,
-    },
-    /* The room-list header plate: the desktop tile treatment scaled down —
-     * 26px picture, radius scaled with the tile (14 × 26/48 ≈ 8) and the same
-     * brass bezel. The trigger always shows the current Workspace. */
-    drawerTriggerPlate: {
-      position: 'relative',
-      width: HEADER_PLATE.size,
-      height: HEADER_PLATE.size,
-      alignItems: 'center',
-      justifyContent: 'center',
-      borderRadius: HEADER_PLATE.radius,
-      borderWidth: HEADER_PLATE.borderWidth,
-      borderColor: groknight.selectedBorder,
-    },
-    /* The picture's seat in that plate, rounded by the same rule the rail tile
-     * uses: the plate's inner radius less the slab around the picture, so the
-     * two curves stay concentric at this size too. */
-    drawerTriggerPictureSeat: {
-      width: HEADER_PLATE_SEAT.pictureSize,
-      height: HEADER_PLATE_SEAT.pictureSize,
-      alignItems: 'center',
-      justifyContent: 'center',
-      borderRadius: HEADER_PLATE_SEAT.pictureRadius,
-      overflow: 'hidden',
-    },
-    workspaceAttentionMark: {
-      position: 'absolute',
-      right: 0,
-      bottom: 0,
-      width: 7,
-      height: 7,
-      backgroundColor: groknight.selectedBorder,
-    },
-    drawerTriggerName: {
-      ...theme.buzz.type.bodyStrong,
-      flexShrink: 1,
-      color: groknight.textPrimary,
-    },
-    drawerTriggerCaret: { color: groknight.steel },
-  };
-});

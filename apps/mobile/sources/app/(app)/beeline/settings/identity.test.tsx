@@ -2,18 +2,17 @@ vi.mock('@/components/buzz/Button', async () => {
   const React = await import('react');
   return { Button: (props: any) => React.createElement('Button', props, React.createElement('Text', null, props.label)) };
 });
-vi.mock('@/components/buzz/WorkspaceSettingsPanel', async () => { const React = await import('react'); return { WORKSPACE_VISIBILITY_LABELS: { public: 'Public', 'invite-only': 'Invite-only' }, default: React.forwardRef((props: object, _ref) => React.createElement('WorkspaceSettings', props)) }; });
 vi.mock('@expo/vector-icons/Ionicons', async () => { const R = await import('react'); return { default: (props: any) => R.createElement('Ionicons', props) }; });
 vi.mock('react-native-keyboard-controller', async () => { const R = await import('react'); return { KeyboardAvoidingView: (props: any) => R.createElement('View', props, props.children) }; });
-import { readFileSync } from 'node:fs';
 import * as React from 'react';
+import type { ManagedIdentityResult } from '@beeline/api-contract/phone';
 // @ts-expect-error react-test-renderer has no declarations in this workspace.
 import { act, create, type ReactTestRenderer } from 'react-test-renderer';
 import { afterAll, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest';
 
-// Person/agent photo-override darkflight (owner decision, 2026-08-23): their
-// identity marks remain their only avatars. Workspace pictures are controlled
-// separately and must not revive these surfaces.
+// Personal photos are built (firstmate decision lifting the old photo-override
+// darkflight): Settings → You uploads through the Workspace picture's picker
+// and saves it on the person's profile; Remove returns to the first initial.
 
 const navigation = vi.hoisted(() => ({ back: vi.fn(), push: vi.fn(), replace: vi.fn() }));
 const client = vi.hoisted(() => ({
@@ -138,29 +137,19 @@ vi.mock('@/buzz/runtime-config', () => ({
 vi.mock('@/sync/appConfig', () => ({
   loadAppConfig: () => ({ releaseVersion: 'v0.0.1', releaseSha: null }),
 }));
-vi.mock('@/constants/Typography', () => ({
-  Typography: {
-    default: () => ({}),
-    mono: () => ({}),
-  },
-}));
 vi.mock('@/components/buzz/MonoHull', async () => {
   const ReactModule = await import('react');
   const host = (name: string) => (props: React.Attributes) => ReactModule.createElement(name, props);
   return {
     HullSurface: host('HullSurface'),
-    PixelGateReveal: host('PixelGateReveal'),
     PixelLoader: host('PixelLoader'),
   };
 });
 vi.mock('@/components/buzz/IdentityMark', async () => {
   const ReactModule = await import('react');
-  return { IdentityMark: (props: React.Attributes) => ReactModule.createElement('IdentityMark', props) };
-});
-vi.mock('@/components/buzz/FacePickerSheet', async () => {
-  const ReactModule = await import('react');
   return {
-    FacePickerSheet: (props: React.Attributes) => ReactModule.createElement('FacePickerSheet', props),
+    IdentityMark: (props: React.Attributes) => ReactModule.createElement('IdentityMark', props),
+    isPersonPictureUrl: (url?: string) => Boolean(url?.includes('/v1/person-avatars/')),
   };
 });
 vi.mock('@/components/buzz/BeelineMark', async () => {
@@ -170,38 +159,21 @@ vi.mock('@/components/buzz/BeelineMark', async () => {
 vi.mock('@/utils/open-external-url', () => ({
   openExternalUrl: vi.fn(async () => undefined),
 }));
-vi.mock('@/components/buzz/PushLevelSetting', async () => {
-  const ReactModule = await import('react');
-  return {
-    PushLevelSetting: (props: React.Attributes) => ReactModule.createElement('PushLevelSetting', props),
-  };
-});
-vi.mock('@/components/buzz/AppearanceSetting', async () => {
-  const ReactModule = await import('react');
-  return {
-    AppearanceSetting: (props: React.Attributes) => ReactModule.createElement('AppearanceSetting', props),
-  };
-});
-vi.mock('@/components/buzz/UiSizeSetting', async () => {
-  const ReactModule = await import('react');
-  return { UiSizeSetting: (props: React.Attributes) => ReactModule.createElement('UiSizeSetting', props) };
-});
-vi.mock('@/components/buzz/SpeakingSpeedSetting', async () => {
-  const ReactModule = await import('react');
-  return { SpeakingSpeedSetting: (props: React.Attributes) => ReactModule.createElement('SpeakingSpeedSetting', props) };
-});
-vi.mock('@/components/buzz/SettingsRow', async () => {
-  const ReactModule = await import('react');
-  return {
-    SettingsRow: (props: React.Attributes) => ReactModule.createElement('SettingsRow', props as never),
-  };
-});
-// Real @/unistyles boots Unistyles and MMKV-backed local settings, neither of
-// which this screen's own tests exercise or mock elsewhere.
-vi.mock('@/unistyles', () => ({ applyAppearanceChoice: vi.fn(), setAppDisplay: vi.fn() }));
+// Real @/display boots native system chrome and MMKV-backed local settings,
+// neither of which this screen's own tests exercise or mock elsewhere.
+vi.mock('@/display', () => ({ applyAppearanceChoice: vi.fn(), useAppMode: () => 'dark' }));
 vi.mock('@/sync/storage', () => ({
-  useLocalSettingMutable: (name: string) => [name === 'appearance' ? 'dark' : 'medium', vi.fn()],
+  useLocalSettingMutable: (name: string) => [name === 'appearance' ? 'dark' : name === 'palette' ? 'brass' : name === 'roomOpenTraceOverlay' ? false : 'medium', vi.fn()],
 }));
+vi.mock('tamagui', async () => {
+  const hosts = (await import('@/ui/screens/transcript/grammar-hosts.test-support')).tamaguiHosts() as Record<string, any>;
+  hosts.Switch.Thumb = (props: any) => React.createElement('Switch.Thumb', props);
+  return hosts;
+});
+vi.mock('lucide-react-native', async () => (await import('@/ui/screens/transcript/grammar-hosts.test-support')).lucideHosts());
+vi.mock('@/buzz/needs-you-store', () => ({ useNeedsYouCount: () => 0 }));
+vi.mock('@/utils/responsive', () => ({ useIsDesktop: () => false }));
+vi.mock('@/components/buzz/ServiceMark', () => ({ ServiceMark: (props: any) => React.createElement('ServiceMark', props) }));
 vi.mock('@/sync/transport', () => ({
   BuzzRigTransport: class {
     ensureClient = vi.fn(async () => client);
@@ -249,17 +221,6 @@ vi.mock('@/buzz/surface-storage', () => {
     },
   };
 });
-vi.mock('react-native-unistyles', () => ({
-  StyleSheet: {
-    create: (styles: unknown) =>
-      typeof styles === 'function'
-        ? (styles as (theme: unknown) => unknown)({ buzz: beelineThemes.obsidian })
-        : styles,
-  },
-  useUnistyles: () => ({
-    theme: { buzz: { textPrimary: '#fff', bgRaised: '#111', chrome: '#d7af5f' } },
-  }),
-}));
 vi.mock('react-native', async () => {
   const ReactModule = await import('react');
   const host = (name: string) => (props: React.Attributes) =>
@@ -351,69 +312,112 @@ function renderedText(renderer: ReactTestRenderer): string {
     .join(' ');
 }
 
-describe('photo-override darkflight on the settings surfaces', () => {
-  it('keeps picture-setting actions unreachable on human and agent settings', () => {
-    const root = new URL('../../../../../', import.meta.url).pathname;
-    const surfaces = [
-      'sources/app/(app)/beeline/settings/identity.tsx',
-      'sources/app/(app)/beeline/members.tsx',
-    ];
-    const identitySource = readFileSync(`${root}${surfaces[0]}`, 'utf8');
-    expect(identitySource).not.toContain('pickAndUploadAvatar');
-    expect(identitySource).not.toMatch(/set(?:Agent|Person)(?:Avatar|Photo)/);
-    const membersSource = readFileSync(`${root}${surfaces[1]}`, 'utf8');
-    expect(membersSource).not.toContain('pickAndUploadAvatar');
-    expect(membersSource).not.toMatch(/set(?:Agent|Person)(?:Avatar|Photo)/);
+
+const PHOTO = 'https://beeline.test/v1/person-avatars/11111111-1111-4111-8111-111111111111';
+const byId = (renderer: ReactTestRenderer, id: string): any => renderer.root.findAll((node: any) => node.props.testID === id)[0];
+function managed(avatar?: string): ManagedIdentityResult {
+  return { personId: 'a'.repeat(64), name: 'Dan', handle: 'lunchboxfortwo', pushLevel: 'attention', providers: [], ...(avatar ? { avatar } : {}) };
+}
+function operations(state: { avatar?: string }) {
+  phoneOperation.mockImplementation(async (name: string, input?: { avatar?: string }) => {
+    if (name === 'readIdentitySettings') return { identity: managed(state.avatar), workspaces: { workspaces: [] } };
+    if (name === 'getManagedIdentity') return managed(state.avatar);
+    if (name === 'updatePersonProfile') {
+      state.avatar = input?.avatar ? PHOTO : undefined;
+      return { personId: 'a'.repeat(64), name: 'Dan', ...(state.avatar ? { avatar: state.avatar } : {}) };
+    }
+    throw new Error(`unexpected operation ${name}`);
+  });
+}
+
+describe('Settings → You → Profile picture', () => {
+  it('shows the generated mark with Upload photo and no Remove when there is no photo', async () => {
+    operations({});
+    const renderer = await renderScreen();
+    await vi.waitFor(() => expect(byId(renderer, 'profile-picture-mark').props.handle).toBe('lunchboxfortwo'));
+    expect(byId(renderer, 'profile-picture-mark').props.avatarUrl).toBeUndefined();
+    expect(renderedText(renderer)).toContain('Your generated mark');
+    expect(byId(renderer, 'profile-picture-upload')).toBeDefined();
+    expect(byId(renderer, 'profile-picture-remove')).toBeUndefined();
   });
 
-  it('renders no picture-setting UI even when the profile carries a stored photo', async () => {
+  it('SETTINGS-PICTURE-1: refreshes an older settings identity when the shared viewer already has a photo', async () => {
+    operations({ avatar: PHOTO });
+    const { surfaceAddress } = await import('@/buzz/surface-storage');
+    const { isManagedIdentity } = await import('@/buzz/managed-identity-surface');
+    const { isWorkspaceListView } = await import('@beeline/buzz-client');
+    await mobileSurfaceCache.write(surfaceAddress('https://relay.test', 'a'.repeat(64), '/identity/managed'), managed(), isManagedIdentity);
+    await mobileSurfaceCache.write(surfaceAddress('https://relay.test', 'a'.repeat(64), '/workspaces'), {
+      viewer: { pubkey: 'a'.repeat(64), kind: 'human', name: 'Dan', avatar: PHOTO }, workspaces: [], truncated: false, watchFilters: [],
+    }, isWorkspaceListView);
     const renderer = await renderScreen();
+    await vi.waitFor(() => expect(byId(renderer, 'profile-picture-mark').props.avatarUrl).toBe(PHOTO));
+    expect(renderedText(renderer)).toContain('Your photo');
+    expect(byId(renderer, 'profile-picture-remove')).toBeDefined();
+    expect(phoneOperation.mock.calls.filter(([name]) => name === 'readIdentitySettings')).toHaveLength(1);
+    expect(phoneOperation).not.toHaveBeenCalledWith('getManagedIdentity', {});
+  });
 
-    const text = renderedText(renderer);
-    expect(text).not.toContain('Your picture');
-    expect(text).not.toContain('Set picture');
-    expect(text).not.toContain('Change picture');
-    expect(text).not.toContain('Use generated mark');
-    expect(text).not.toContain('Cosmetic only');
-    // pickAndUploadAvatar is unreachable from this surface.
+  it('uploads a photo with the Workspace picture picker and saves it on the profile', async () => {
+    const state: { avatar?: string } = {};
+    operations(state);
     const { pickAndUploadAvatar } = await import('@/buzz/avatar-upload');
-    expect(pickAndUploadAvatar).not.toHaveBeenCalled();
-  });
-
-  it('shows one GitHub-provisioned identity and no secondary handle controls', async () => {
-    phoneOperation.mockImplementation(async (name: string) => {
-      if (name === 'readIdentitySettings') return identitySettings('octocat', [{ provider: 'github', login: 'octocat' }]);
-      throw new Error(`unexpected operation ${name}`);
-    });
+    vi.mocked(pickAndUploadAvatar).mockResolvedValue('https://beeline.test/v1/media/22222222-2222-4222-8222-222222222222');
     const renderer = await renderScreen();
-
-    expect(renderer.root.findByProps({ testID: 'identity-managed-handle' })).toBeDefined();
-    await vi.waitFor(() => {
-      expect(renderedText(renderer)).toContain('octocat');
-    });
-    expect(renderedText(renderer)).toContain('@');
-    expect(
-      renderer.root.findAllByProps({ testID: 'identity-managed-handle' }).length,
-    ).toBeGreaterThan(0);
-    expect(renderer.root.findAllByProps({ testID: 'identity-person-name-input' })).toHaveLength(0);
-    expect(renderer.root.findAllByProps({ testID: 'identity-person-handle-input' })).toHaveLength(
-      0,
-    );
-    expect(renderer.root.findAllByProps({ testID: 'identity-person-nip05-input' })).toHaveLength(0);
-    expect(renderer.root.findAllByProps({ testID: 'claim-handle-setting' })).toHaveLength(0);
-
-    act(() => renderer.root.findByProps({ testID: 'identity-managed-handle' }).props.onPress());
-    expect(openExternalUrl).toHaveBeenCalledWith('https://github.com/octocat');
+    await vi.waitFor(() => expect(byId(renderer, 'profile-picture-upload').props.disabled).toBe(false));
+    await act(async () => { byId(renderer, 'profile-picture-upload').props.onPress(); for (let pass = 0; pass < 6; pass += 1) await Promise.resolve(); });
+    expect(pickAndUploadAvatar).toHaveBeenCalledWith(client);
+    expect(phoneOperation).toHaveBeenCalledWith('updatePersonProfile', { avatar: 'https://beeline.test/v1/media/22222222-2222-4222-8222-222222222222' });
+    await vi.waitFor(() => expect(byId(renderer, 'profile-picture-mark').props.avatarUrl).toBe(PHOTO));
+    expect(renderedText(renderer)).toContain('Your photo');
+    expect(byId(renderer, 'profile-picture-remove')).toBeDefined();
   });
-  it('does not open a GitHub profile for a Google-only account with an editable handle', async () => {
-    phoneOperation.mockImplementation(async (name: string) => {
-      if (name === 'readIdentitySettings') return identitySettings('octocat', [{ provider: 'google', login: 'octocat@gmail.com' }]);
-      throw new Error(`unexpected operation ${name}`);
-    });
+
+  it('removes the photo back to the first initial', async () => {
+    const state: { avatar?: string } = { avatar: PHOTO };
+    operations(state);
     const renderer = await renderScreen();
-    await vi.waitFor(() => { expect(renderedText(renderer)).toContain('octocat'); });
-    expect(renderer.root.findByProps({ testID: 'identity-managed-handle' }).props.onPress).toBeUndefined();
-    expect(openExternalUrl).not.toHaveBeenCalled();
+    await vi.waitFor(() => expect(byId(renderer, 'profile-picture-remove')).toBeDefined());
+    await act(async () => { byId(renderer, 'profile-picture-remove').props.onPress(); for (let pass = 0; pass < 6; pass += 1) await Promise.resolve(); });
+    expect(phoneOperation).toHaveBeenCalledWith('updatePersonProfile', { avatar: '' });
+    await vi.waitFor(() => expect(byId(renderer, 'profile-picture-mark').props.avatarUrl).toBeUndefined());
+    expect(byId(renderer, 'profile-picture-remove')).toBeUndefined();
+  });
+});
+
+describe('Settings tab', () => {
+  it('titles the tab Settings and captions @handle (the shared layout draws the tab bar)', async () => {
+    operations({});
+    const renderer = await renderScreen();
+    expect(renderedText(renderer)).toContain('Settings');
+    await vi.waitFor(() => expect(byId(renderer, 'settings-caption')?.props.children).toBe('@lunchboxfortwo'));
+    expect(renderer.root.findAll((node: any) => node.type === 'TabBar')).toHaveLength(0);
   });
 
+  it('lists Device, Account and the version check, without Getting started', async () => {
+    operations({});
+    const renderer = await renderScreen();
+    const text = renderedText(renderer);
+    for (const label of ['Profile picture', 'Connectors', 'Your connections', 'Device', 'Appearance', 'Color set', 'Speaking speed', 'Account', 'Privacy Policy', 'Terms of Service', 'Send feedback', 'Sign out', 'Delete account'])
+      expect(text).toContain(label);
+    expect(text).not.toContain('Getting started');
+    expect(byId(renderer, 'ota-update-check')).toBeDefined();
+  });
+
+  it('asks before deleting the account', async () => {
+    operations({});
+    const renderer = await renderScreen();
+    act(() => byId(renderer, 'delete-account-setting').props.onPress());
+    expect(renderedText(renderer)).toContain('deleting your account will delete all your data. this action is irrevocable. confirm?');
+    act(() => byId(renderer, 'delete-account-cancel').props.onPress());
+    expect(byId(renderer, 'confirm-delete-account')).toBeUndefined();
+  });
+
+  it('opens Connectors with the workspace and viewer', async () => {
+    operations({});
+    const renderer = await renderScreen();
+    await vi.waitFor(() => expect(byId(renderer, 'profile-picture-upload').props.disabled).toBe(false));
+    act(() => byId(renderer, 'settings-workbench-row').props.onPress());
+    expect(navigation.push).toHaveBeenCalledWith({ pathname: '/beeline/settings/workbench', params: { workspaceId: '', viewerId: 'a'.repeat(64) } });
+  });
 });

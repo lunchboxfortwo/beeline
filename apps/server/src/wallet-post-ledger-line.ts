@@ -37,24 +37,6 @@ export async function postLedgerLine(
 }
 
 
-/** Each refused attempt is a notice; retries of a provider transaction share its hash. */
-export async function postInsufficientNotice(
-  database: SqlDatabase,
-  identityId: string,
-  workspaceId: string,
-  input: { chain: WalletChainId; asset: string; amount: string; to?: string },
-  detail: { needed: string; available: string; asset: string; agentName: string | null },
-): Promise<void> {
-  await postWalletNotice(database, workspaceId, identityId, {
-    walletNotice: true, status: 'refused', operation: 'send', execution: true,
-    amountText: `${input.amount} ${input.asset.toUpperCase()}`,
-    counterparty: input.to ?? 'wallet operation', chain: input.chain,
-    agentName: detail.agentName,
-    reason: `not enough funds (${detail.available} ${detail.asset} available)`,
-  });
-}
-
-
 export { isWalletChainId };
 
 
@@ -292,18 +274,6 @@ async function agentSend(
   const holding = chainCoins(holdings, input.chain).find((coin) => coin.symbol === symbol);
   const available = holding?.amount ?? '0';
   if (Number(input.amount) > Number(available)) {
-    await postInsufficientNotice(
-      database,
-      ctx.ownerIdentityId,
-      ctx.workspaceId,
-      input,
-      {
-        needed: input.amount,
-        available,
-        asset: symbol,
-        agentName: await agentName(database, agentId,ctx.workspaceId),
-      },
-    );
     return { outcome: 'insufficient', asset: symbol, needed: input.amount, available };
   }
   let sent: { txId: string };
@@ -453,18 +423,6 @@ export async function agentContractCall(
   for (const [symbol, amount] of needed) {
     const available = coins.find((coin) => coin.symbol === symbol)?.amount ?? '0';
     if (amount > Number(available)) {
-      await postInsufficientNotice(
-        database,
-        ctx.ownerIdentityId,
-        ctx.workspaceId,
-        { chain: call.chain, asset: symbol, amount: String(amount), to: call.contract },
-        {
-          needed: String(amount),
-          available,
-          asset: symbol,
-          agentName: await agentName(database, agentId,ctx.workspaceId),
-        },
-      );
       return { outcome: 'insufficient', asset: symbol, needed: String(amount), available };
     }
   }
@@ -528,7 +486,7 @@ export async function handleSendFailure(
 ): Promise<WalletSendOutcome> {
   if (error instanceof WalletTransactionPending) {
     const txUrl = error.txId ? walletExplorerTxUrl(chain, error.txId) : undefined;
-    await postWalletNotice(database, ctx.workspaceId, ctx.ownerIdentityId, {
+    if (txUrl) await postWalletNotice(database, ctx.workspaceId, ctx.ownerIdentityId, {
       walletNotice: true, status: 'pending', execution: true,
       operation: error.approval ? 'approval' : operation,
       amountText: error.approval
@@ -544,7 +502,7 @@ export async function handleSendFailure(
   const reason = error instanceof Error ? error.message.slice(0, 200) : String(error).slice(0, 200);
   // A reverted receipt already has a hash; link the failed on-chain attempt too.
   const hash = reason.match(/transaction (0x[0-9a-fA-F]{64}) (?:reverted|was not mined)/)?.[1];
-  await postWalletNotice(database, ctx.workspaceId, ctx.ownerIdentityId, {
+  if (hash) await postWalletNotice(database, ctx.workspaceId, ctx.ownerIdentityId, {
     walletNotice: true, status: 'failed', operation, execution: true,
     amountText: `${amount} ${asset.toUpperCase()}`, counterparty, chain, reason,
     ...(hash ? { txUrl: walletExplorerTxUrl(chain, hash) } : {}),

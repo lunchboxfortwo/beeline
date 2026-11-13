@@ -1,5 +1,5 @@
 import { githubProviderKey } from './providers/index.js';
-import { restoreRoomMemberships, restoreRoomMembershipsSql } from './membership-join.js';
+import { restoreRoomMemberships } from './membership-join.js';
 import { roomEventSubscriptions } from './agent-subscriptions.js';
 import { systemMessage } from '@beeline/api-contract/system-message-catalog';
 import { CornerAccessDatabase } from './corner-access-database.js';
@@ -24,7 +24,7 @@ import {
 /**
  * The one producer of every system notification in a Room or Workspace.
  *
- * Every membership note, yolo change, grant line, failed turn, GitHub fact,
+ * Every membership note, yolo change, grant line, GitHub fact,
  * corner marker, scheduled prompt and card header is composed here from the
  * System-message catalog, in one
  * grammar (`@beeline/api-contract` `system-events.ts`): `<subject> <verb>
@@ -58,6 +58,7 @@ export interface SystemLineInput {
   /** The schedule a `schedule-ran` line fired, so its run may inherit its sessions. */
   readonly scheduleId?: string;
   readonly payload?: unknown;
+  readonly subscriptionId?: string;
   readonly subscriptionPrompt?: string;
   readonly subscriptionWorkflowSlug?: string;
   readonly object?: string | SystemObject;
@@ -77,6 +78,8 @@ export interface SystemLineInput {
   /** Agent-only browser observations use activity and never paint in the transcript. */
   readonly presentation?: 'system' | 'card' | 'activity';
   readonly cardType?: string;
+  /** False stores the line and does not route it. The caller advances the corner. */
+  readonly routeCommands?: boolean;
   readonly card?: Record<string, unknown>;
   readonly requestId?: string;
   readonly commandId?: string;
@@ -189,7 +192,7 @@ export interface SystemLineResult {
 
 export type SystemPhrase = Pick<
   SystemLineInput,
-  'subject' | 'verb' | 'object' | 'consequence' | 'attribution' | 'kind' | 'scheduleId' | 'payload' | 'subscriptionPrompt' | 'subscriptionWorkflowSlug'
+  'subject' | 'verb' | 'object' | 'consequence' | 'attribution' | 'kind' | 'scheduleId' | 'payload' | 'subscriptionId' | 'subscriptionPrompt' | 'subscriptionWorkflowSlug'
 >;
 
 const CLEAN = /[\s ]+/g;
@@ -222,6 +225,7 @@ export function composeSystemLine(phrase: SystemPhrase): { text: string; event: 
     ...(phrase.kind === 'subscription-fired' || phrase.kind === 'check-failed' ||
       phrase.kind === 'computer-session-activity' ? {
       payload: phrase.payload,
+      ...(phrase.subscriptionId ? { subscriptionId: phrase.subscriptionId } : {}),
       ...(phrase.subscriptionPrompt ? { subscriptionPrompt: phrase.subscriptionPrompt } : {}),
       ...(phrase.subscriptionWorkflowSlug ? { subscriptionWorkflowSlug: phrase.subscriptionWorkflowSlug } : {}),
     } : {}),
@@ -460,7 +464,7 @@ export async function systemLine(
           parent: watch.incoming_command ?? undefined, retainDepth: true,
           action: 'input',
         });
-      await routeSystemCommand(db, {
+      if (input.routeCommands !== false) await routeSystemCommand(db, {
         roomId: input.roomId,
         sourceMessageId: id,
         kind: input.kind,
@@ -480,6 +484,7 @@ export async function systemLine(
             verb: systemMessage("system-line.received"), object: systemMessage("system-line.a-room-event"), consequence: input.kind,
             kind: 'subscription-fired', causeId: id, wakes: [subscription.agent_id],
             payload: { source: 'room', event: input.kind, text },
+            subscriptionId: subscription.id,
             subscriptionPrompt: subscription.prompt!,
             subscriptionWorkflowSlug: subscription.workflow_slug ?? undefined,
           });
@@ -726,36 +731,4 @@ export async function sendSystemDirectMessage(database: SqlDatabase, workspaceId
   const inserted = await database.query(`INSERT INTO messages(id,room_id,author_id,text) VALUES($1,$2,$3,$4)
     ON CONFLICT(id) DO NOTHING`, [id, roomId, SYSTEM_IDENTITY_ID, text]);
   return Boolean(inserted.rowCount);
-}
-
-/** Deliver the same plain system phrase to a recipient set in one statement.
- * Room creation, membership restoration and idempotent notice inserts share
- * one transaction; the statement creates no events or command dispatches. */
-export async function sendSystemNotices(database: SqlDatabase, workspaceId: string,
-  recipients: readonly { identityId: string; messageId: string }[],
-  phrase: Pick<SystemPhrase,'subject'|'verb'|'object'|'consequence'|'attribution'>): Promise<void> {
-  if (!recipients.length) return;
-  await ensureSystemIdentity(database);
-  const { text, event } = composeSystemLine(await canonicalPhrase(database,phrase,undefined,undefined,undefined,workspaceId));
-  const notices = recipients.map(recipient=>{
-    const participants=[SYSTEM_IDENTITY_ID,recipient.identityId].sort() as [string,string];
-    return {id:recipient.messageId,room:directMessageRoomId(workspaceId,participants),participants};
-  });
-  await database.query(`WITH notices AS MATERIALIZED (
-    SELECT notice.* FROM jsonb_to_recordset($1::jsonb) AS notice(id text,room uuid,participants jsonb)
-  ), threads AS (
-    INSERT INTO rooms(id,workspace_id,created_by,name,visibility,direct_participants)
-    SELECT room,$2,$3,'Direct message','invite-only',participants FROM notices
-    ON CONFLICT(id) DO UPDATE SET visibility='invite-only' RETURNING id
-  ), members AS (
-    SELECT $2::uuid workspace_id,thread.id room_id,participant identity_id
-    FROM notices notice JOIN threads thread ON thread.id=notice.room
-      CROSS JOIN LATERAL jsonb_array_elements_text(notice.participants) participant
-    WHERE participant<>$3
-  ), restored AS (
-    ${restoreRoomMembershipsSql('members')}
-  ) INSERT INTO messages(id,room_id,author_id,text,presentation,system_event)
-    SELECT notice.id,thread.id,$3,$4,'system',$5::jsonb FROM notices notice JOIN threads thread ON thread.id=notice.room
-    WHERE EXISTS(SELECT 1 FROM restored WHERE room_id=thread.id) ON CONFLICT(id) DO NOTHING`,
-  [JSON.stringify(notices),workspaceId,SYSTEM_IDENTITY_ID,text,JSON.stringify(event)]);
 }

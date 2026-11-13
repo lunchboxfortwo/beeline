@@ -1,3 +1,4 @@
+import { agentInvitationPickerGuide } from '@beeline/api-contract/agent-invitation-guide';
 import { seedSquireMachine } from './test-fixtures/squire-machines.js';
 import { createHash } from 'node:crypto';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
@@ -65,6 +66,7 @@ describe('PhoneService agent connect pairing claim', () => {
       { workspaceId: WORKSPACE },
       OWNER,
     );
+    expect(pairing.invitationGuide).toEqual(agentInvitationPickerGuide());
     expect(pairing.code).toMatch(/^[0-9A-F]{8}-[0-9A-F]{8}$/);
     expect(pairing.code).not.toContain('BUZZ-');
     expect(pairing.expiresAt).toBeGreaterThanOrEqual(before + 15 * 60);

@@ -1,6 +1,5 @@
 import { transitions, deck, hotSurfaces, viewer, chatList, room, listOf, paintedRows, roomWatch, quiet, mountDeck, fixtureScope1, fixtureScope3, fixtureScope5 } from './test-support-channels.test-support';
 import * as React from 'react';
-import * as Native from 'react-native';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 // @ts-expect-error react-test-renderer has no declarations in this workspace.
 import { act, create, type ReactTestRenderer } from 'react-test-renderer';
@@ -14,59 +13,9 @@ import { markInitialLandingResolved, suppressInitialLandingNavigation } from '@/
 import Index from '../index';
 import { saveActiveCommunityId } from '@/buzz/community-storage';
 import { mobileSurfaceCache } from '@/buzz/surface-storage';
-import { ConversationRow } from '@/components/buzz/ConversationRow';
 import { dispatchRoomOpenTap } from '@/buzz/room-open-prefetch';
-import { applyChatListCorners } from '@/buzz/room-corner-store';
-
-it.each(['cold load', 'return to the list'])('never renders unpinned cached rows on %s', async (scenario) => {
-  deck.holdLayouts = true;
-  const scope = fixtureScope1();
-  scope.saveDeck();
-  const pinKey = `@beeline/room-pins/${scope.savedViewer}/${scope.savedWorkspace}`;
-  const pinnedId = '22222222-2222-4222-8222-222222222222';
-  const originalGet = AsyncStorage.getItem;
-  let releasePins!: (raw: string | null) => void;
-  const pins = new Promise<string | null>(resolve => { releasePins = resolve; });
-  const storage = vi.spyOn(AsyncStorage, 'getItem').mockImplementation(key =>
-    key === pinKey ? pins : originalGet(key));
-  const renders: string[][] = [];
-  const nativeLists = Native as unknown as {
-    SectionList: (props: Native.SectionListProps<ChatListItem>) => React.ReactElement;
-  };
-  const renderList = nativeLists.SectionList;
-  const list = vi.spyOn(nativeLists, 'SectionList').mockImplementation((props) => {
-    renders.push(props.sections.flatMap(section => section.data.map(item => item.room.id)));
-    return React.createElement(renderList, props);
-  });
-  let renderer!: ReactTestRenderer;
-  try {
-    // The synchronous deck cache contains a pinned Room plus an unpinned Room.
-    for (const [key, value] of hotSurfaces.saved) {
-      if (!key.includes('/workspace/:id/chats')) continue;
-      const saved = value as ChatListView;
-      hotSurfaces.saved.set(key, { ...saved, chats: [
-        ...saved.chats,
-        { ...saved.chats[0], room: { ...saved.chats[0].room, id: '33333333-3333-4333-8333-333333333333' } },
-      ] });
-    }
-    if (scenario === 'return to the list') {
-      await act(async () => { renderer = create(<BuzzChannels />); });
-      await act(async () => releasePins(JSON.stringify([pinnedId])));
-      await act(async () => renderer.unmount());
-      renders.length = 0;
-    }
-    await act(async () => { renderer = create(<BuzzChannels />); });
-    expect(renders.flat()).not.toContain('33333333-3333-4333-8333-333333333333');
-    await act(async () => releasePins(JSON.stringify([pinnedId])));
-    expect(renders.length).toBeGreaterThan(0);
-    expect(renders.every(ids => ids.length === 1 && ids[0] === pinnedId)).toBe(true);
-    expect(paintedRows(renderer).map(item => item.room.id)).toEqual([pinnedId]);
-  } finally {
-    if (renderer) await act(async () => renderer.unmount());
-    storage.mockRestore();
-    list.mockRestore();
-  }
-});
+import { ChatListHeader } from '@/ui/screens/chats/ChatListHeader';
+import { NewChatSheet } from '@/ui/screens/chats/NewChatSheet';
 
 it('finishes the existing Room load gate and shows the pin error when local pin storage fails', async () => {
   deck.holdLayouts = true;
@@ -79,11 +28,27 @@ it('finishes the existing Room load gate and shows the pin error when local pin 
     await act(async () => { renderer = create(<BuzzChannels />); });
     expect(paintedRows(renderer)).toHaveLength(1);
     expect(renderer.root.findAllByProps({ testID: 'rooms-loader-gate' })).toHaveLength(0);
-    expect(renderer.root.findAllByProps({ title: 'Could not load pinned conversations.' }).length).toBeGreaterThan(0);
+    expect(renderer.root.findAll((node: any) => node.props.children === 'Could not load pinned conversations.').length).toBeGreaterThan(0);
   } finally {
     if (renderer) await act(async () => renderer.unmount());
     storage.mockRestore();
   }
+});
+
+it('keeps the drawn list out of parent navigation redraws', async () => {
+  deck.holdLayouts = true;
+  vi.stubGlobal('requestAnimationFrame', vi.fn(() => 1));
+  vi.stubGlobal('cancelAnimationFrame', vi.fn());
+  fixtureScope1().saveDeck();
+  let renderer!: ReactTestRenderer;
+  try {
+    await act(async () => { renderer = create(<BuzzChannels />); });
+    const renderItem = renderer.root.findByProps({ testID: 'room-list' }).props.renderItem;
+    await act(async () => { renderer.update(<BuzzChannels />); });
+    await act(async () => { deck.workspaceSelectionListener?.(deck.selectedWorkspace); });
+    expect(Object.is(renderer.root.findByProps({ testID: 'room-list' }).props.renderItem, renderItem)).toBe(true);
+    expect(paintedRows(renderer)[0].latestMessage?.text).toBe('saved before effects');
+  } finally { if (renderer) await act(async () => renderer.unmount()); }
 });
 
 describe('Saved deck cold launch', () => {
@@ -192,7 +157,8 @@ const scope1 = fixtureScope1();
       deck.pathname = '/beeline/chat/pushed';
       await act(async () => renderer.update(<Index />));
       await act(async () => restore({ publicKey: scope1.savedViewer, secretKey: new Uint8Array(32) }));
-      expect(renderer.toJSON()).toBeNull();
+      // The navigator covers the retained deck; a late restore must not navigate.
+      expect(paintedRows(renderer)[0].latestMessage?.text).toBe('saved before effects');
       expect(router.replace).not.toHaveBeenCalled();
       deck.pathname = '/';
       await act(async () => renderer.update(<Index />));
@@ -250,8 +216,8 @@ describe('Persisted Workspace bootstrap', () => {
     expect(deck.chatsWorkspaces).toEqual([]);
     expect(mobileSurfaceCache.read).not.toHaveBeenCalled();
     await act(async () => deck.workspaceSelectionListener!('workspace'));
-    await vi.waitFor(() => expect(deck.chatsWorkspaces).toEqual(['workspace']));
-    expect(paintedRows(renderer).map((item) => item.room.id)).toEqual(['room-a']);
+    await vi.waitFor(() => expect(paintedRows(renderer).map((item) => item.room.id)).toEqual(['room-a']));
+    expect(deck.chatsWorkspaces).toEqual(['workspace']);
     expect(router.replace).not.toHaveBeenCalled();
     act(() => renderer.unmount());
   });
@@ -406,7 +372,7 @@ describe('Deleted workspace removal', () => {
     expect(router.replace).toHaveBeenCalledWith('/beeline/community');
     expect(saveActiveCommunityId).toHaveBeenCalledWith('viewer', null);
     expect(mobileSurfaceCache.remove).toHaveBeenCalled();
-    expect(renderer.root.findAllByType('SectionList')).toHaveLength(0);
+    expect(renderer.root.findAllByType('FlatList')).toHaveLength(0);
     await act(async () => renderer.unmount());
   });
 
@@ -434,7 +400,7 @@ describe('Deleted workspace removal', () => {
     );
     await quiet();
     await act(async () => finish(chatList({ id: 'late', text: 'deleted data', createdAt: 1 })));
-    expect(renderer.root.findAllByType('SectionList')).toHaveLength(0);
+    expect(renderer.root.findAllByType('FlatList')).toHaveLength(0);
     expect(router.replace).toHaveBeenCalledWith('/beeline/community');
     await act(async () => renderer.unmount());
   });
@@ -471,7 +437,7 @@ describe('Deleted workspace removal', () => {
       params: { communityId: 'remaining' },
     });
     expect(vi.mocked(saveActiveCommunityId)).toHaveBeenCalledWith('viewer', 'remaining');
-    expect(renderer.root.findAllByType('SectionList')).toHaveLength(0);
+    expect(renderer.root.findAllByType('FlatList')).toHaveLength(0);
     await act(async () => renderer.unmount());
   });
 
@@ -502,7 +468,7 @@ describe('Deleted workspace removal', () => {
     expect(vi.mocked(router.replace)).toHaveBeenCalledWith('/beeline/community');
     expect(vi.mocked(saveActiveCommunityId)).toHaveBeenCalledWith('viewer', null);
     expect(renderer.root.findAllByType('BuzzCommunityShell')).toHaveLength(0);
-    expect(renderer.root.findAllByType('SectionList')).toHaveLength(0);
+    expect(renderer.root.findAllByType('FlatList')).toHaveLength(0);
     await act(async () => renderer.unmount());
   });
 });
@@ -604,27 +570,23 @@ const scope5 = fixtureScope5();
   });
 
 
-  it('blocks a corner long press and toggle during scrolling', async () => {
+  it('blocks a thread tap during scrolling', async () => {
     deck.renderRows = true;
     deck.chatsResponse = listOf([
       room('room-a', 10, {
         cornerCount: 1,
-        openCorners: [{ id: 'corner-1', name: 'fix', state: 'working', mine: true }],
+        openCorners: [{ id: 'corner-1', name: 'fix', state: 'working', mine: true, lastActivityAt: Math.floor(Date.now() / 1000) }],
       }),
     ]);
     const renderer = await mountDeck();
     const list = scope5.listIn(renderer);
-    const glyph = () =>
-      renderer.root.find(
-        (node: any) => node.type === 'Pressable' && node.props.testID === 'room-room-a-corners',
-      );
-    await act(async () => {
+    const thread = () =>
+      renderer.root.find((node: any) => node.type === 'ListItem' && node.props.testID === 'thread-row-corner-1');
+    act(() => {
       list.props.onScrollBeginDrag();
-      glyph().props.onPress();
-      await glyph().props.onLongPress();
+      thread().props.onPress();
     });
-    expect(deck.createCorner).not.toHaveBeenCalled();
-    expect(glyph().props.accessibilityState.expanded).toBe(false);
+    expect(router.push).not.toHaveBeenCalled();
     act(() => renderer.unmount());
   });
 
@@ -721,110 +683,81 @@ describe('Room deck live path', () => {
   });
 
 
-  it('requests a private repository from the Room creation sheet', async () => {
+  it('creates a chat named after a picked repository and opens it', async () => {
     const renderer = await mountDeck();
-    const sheet = renderer.root.findByType('NewRoomDialog');
+    const sheet = renderer.root.findByType(NewChatSheet);
+    expect(sheet.props.step).toBeNull();
+    await act(async () => renderer.root.findByType(ChatListHeader).props.onNew?.());
+    expect(renderer.root.findByType(NewChatSheet).props.step).toBeNull();
+    // An ordinary member has no New chat; a manager does.
+    deck.chatsResponse = listOf([room('room-a', 10)], { workspace: { id: 'workspace', name: 'Work', role: 'owner', updatedAt: 1 } });
+    await act(async () => roomWatch().emit({ monolithLive: { type: 'invalidate', roomId: 'room-a', reason: 'activity' } }));
+    await quiet();
+    await act(async () => renderer.root.findByType(ChatListHeader).props.onNew());
+    expect(renderer.root.findByType(NewChatSheet).props.step).toBe('menu');
+    await act(async () => renderer.root.findByType(NewChatSheet).props.onPickRepository({
+      key: 'github:42', name: 'owner/Paper_Band', private: true,
+    }));
+    expect(deck.createRoom).toHaveBeenCalledWith('paper-band', expect.objectContaining({
+      communityId: 'workspace',
+      visibility: 'invite-only',
+      repository: expect.objectContaining({ key: 'github:42' }),
+    }));
+    expect(renderer.root.findByType(NewChatSheet).props.step).toBeNull();
+    expect(dispatchRoomOpenTap).toHaveBeenCalledWith('room-new', expect.anything());
+    await act(async () => renderer.unmount());
+  });
 
-    await act(async () => sheet.props.handleCreateRepository(78, 'new-repo'));
 
-    expect(deck.createRepository).toHaveBeenCalledWith({
-      installationId: 78,
-      name: 'new-repo',
-      private: true,
+  it('opens the Workspace drawer from the list header', async () => {
+    const renderer = await mountDeck();
+    act(() => renderer.root.findByType(ChatListHeader).props.onWorkspace());
+    expect(deck.openDrawer).toHaveBeenCalledOnce();
+    expect(renderer.root.findByType(ChatListHeader).props.workspaceName).toBe('Work');
+    await act(async () => renderer.unmount());
+  });
+
+
+  it('nests up to three active threads under the chat, expands the rest in place, and opens one', async () => {
+    deck.renderRows = true;
+    deck.chatsResponse = listOf([
+      room('room-a', 10, {
+        cornerCount: 4,
+        openCorners: [
+          { id: 'corner-1', name: 'one', state: 'working', lastActivityAt: Math.floor(Date.now() / 1000) },
+          { id: 'corner-2', name: 'two', state: 'idle', lastActivityAt: Math.floor(Date.now() / 1000) },
+          { id: 'corner-3', name: 'three', state: 'review', mine: true, lastActivityAt: Math.floor(Date.now() / 1000) },
+          { id: 'corner-4', name: 'four', state: 'waiting', mine: true, lastActivityAt: Math.floor(Date.now() / 1000),
+            blocker: { kind: 'report', personId: 'viewer', personName: 'Captain' } },
+        ],
+      }),
+    ]);
+    const renderer = await mountDeck();
+    const threads = () => renderer.root
+      .findAll((node: any) => node.type === 'ListItem' && node.props.testID?.startsWith('thread-row-'))
+      .map((node: any) => node.props['aria-label']);
+    // Waiting on you first, then the viewer's own, then the rest.
+    expect(threads()).toEqual(['Thread four, waiting on you', 'Thread three, review', 'Thread one, working']);
+    act(() => renderer.root.find((node: any) => node.type === 'ListItem' && node.props.testID === 'more-room-a').props.onPress());
+    expect(threads()).toHaveLength(4);
+    act(() => renderer.root.find((node: any) => node.type === 'ListItem' && node.props.testID === 'thread-row-corner-4').props.onPress());
+    expect(router.push).toHaveBeenCalledWith({
+      pathname: '/beeline/chat/[channelId]',
+      params: { channelId: 'corner-4', parent: 'room-a', title: 'four', returnTo: 'room-list' },
     });
     await act(async () => renderer.unmount());
   });
 
 
-  it('keeps the final lobby card above the bottom safe area', async () => {
-    deck.bottomInset = 34;
+  it('lists public chats to join at the bottom, joins with the viewer id, then opens the chat', async () => {
+    const launch = '44444444-4444-4444-8444-444444444444';
+    deck.chatsResponse = listOf([room('room-a', 10)], { joinable: [{ id: launch, name: 'launch', memberCount: 8 }] });
     const renderer = await mountDeck();
-    const list = renderer.root.find(
-      (node: { type: unknown; props: { testID?: string } }) =>
-        node.type === 'SectionList' && node.props.testID === 'room-list',
-    );
-    const contentStyles = [list.props.contentContainerStyle].flat().filter(Boolean);
-
-    expect(contentStyles.at(-1)).toMatchObject({ paddingBottom: 58 });
-  });
-
-
-  it("toggles the Room's corner dropdown on mobile without a selected conversation state", async () => {
-    const renderer = await mountDeck();
-    const item = paintedRows(renderer)[0]!;
-    // The row and its dropdown read the Room's corners from the corner store.
-    applyChatListCorners(
-      [
-        {
-          room: item.room,
-          cornerCount: 1,
-          openCorners: [
-            { id: 'corner-1', name: 'fix', state: 'working' as const, mine: true as const },
-          ],
-        },
-      ],
-      -1,
-    );
-    const renderRow = () => {
-      const list = renderer.root.find((node: any) => node.type === 'SectionList');
-      return create(list.props.renderItem({ item, index: 0, section: { data: [item] } }));
-    };
-    let row: ReactTestRenderer;
-    await act(async () => {
-      row = renderRow();
-    });
-    const conversation = row!.root.findByType(ConversationRow);
-    expect(conversation.props.selected).toBeUndefined();
-    expect(conversation.props.cornersExpanded).toBe(false);
-    act(() => conversation.props.onToggleCorners(conversation.props.item.room.id));
-    expect(router.push).not.toHaveBeenCalled();
-    let opened: ReactTestRenderer;
-    await act(async () => {
-      opened = renderRow();
-    });
-    expect(opened!.root.findByType(ConversationRow).props.cornersExpanded).toBe(true);
-    expect(
-      opened!.root.findAllByProps({ testID: 'desktop-corner-corner-1' }).length,
-    ).toBeGreaterThan(0);
-    act(() => {
-      row!.unmount();
-      opened!.unmount();
-      renderer.unmount();
-    });
-  });
-
-
-  it('opens a new corner from a long press on the row corner glyph and lands in it', async () => {
-    const renderer = await mountDeck();
-    const list = renderer.root.find((node: any) => node.type === 'SectionList');
-    let row: ReactTestRenderer;
-    await act(async () => {
-      row = create(
-        list.props.renderItem({
-          item: { ...paintedRows(renderer)[0], cornerCount: 1 },
-          index: 0,
-          section: { data: [paintedRows(renderer)[0]] },
-        }),
-      );
-    });
-    const conversation = row!.root.findByType(ConversationRow);
-    vi.mocked(router.push).mockClear();
-    await act(async () => {
-      await conversation.props.onLongPressCorners(conversation.props.item.room.id);
-    });
-
-    expect(deck.createCorner).toHaveBeenCalledOnce();
-    const [roomId, title] = deck.createCorner.mock.calls[0]!;
-    expect(roomId).toBe('room-a');
-    expect(title).toMatch(/-corner$/);
-    expect(router.push).toHaveBeenCalledOnce();
-    expect(router.push).toHaveBeenCalledWith({
-      pathname: '/beeline/chat/[channelId]',
-      params: { channelId: 'corner-new', parent: 'room-a', title, returnTo: 'room-list' },
-    });
-    act(() => {
-      row!.unmount();
-      renderer.unmount();
-    });
+    const join = renderer.root.find((node: any) => node.type === 'Button' && node.props.testID === `join-${launch}`);
+    expect(join.props['aria-label']).toBe('Join #launch');
+    await act(async () => join.props.onPress());
+    expect(deck.operation).toHaveBeenCalledWith('addRoomMember', { roomId: launch, memberId: 'viewer' });
+    expect(dispatchRoomOpenTap).toHaveBeenCalledWith(launch, expect.anything());
+    await act(async () => renderer.unmount());
   });
 });

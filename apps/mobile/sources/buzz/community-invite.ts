@@ -3,10 +3,6 @@ import { isCommunityInviteToken } from '@beeline/api-contract/phone';
 // Keep custom invite parsing aligned with the installed schemes in app.config.js.
 const MOBILE_APP_SCHEMES = ['beeline'] as const;
 
-type CommunityInviteCreator = {
-  createInvite: (communityId: string) => Promise<{ token: string }>;
-};
-
 function firstValue(value: string | string[] | undefined): string {
   return Array.isArray(value) ? (value[0] ?? '') : (value ?? '');
 }
@@ -65,13 +61,4 @@ export function resolveCommunityInviteRelayUrl(
     // Raw tokens and malformed URLs use the configured relay.
   }
   return fallbackRelayUrl;
-}
-
-export async function createCommunityInviteUrl(
-  client: CommunityInviteCreator,
-  communityId: string,
-  relayUrl: string,
-): Promise<string> {
-  const invite = await client.createInvite(communityId);
-  return buildCommunityInviteUrl(invite.token, relayUrl);
 }

@@ -63,30 +63,3 @@ export const WORKSPACE_RAIL_TILE: WorkspaceTile = {
   pictureSize: 36,
 };
 
-/** The room-list header plate: the rail tile scaled to sit beside the
- *  Workspace name in the header (radius 14 × 34/48 ≈ 8). */
-export const WORKSPACE_HEADER_PLATE: WorkspaceTile = {
-  size: 34,
-  radius: 8,
-  borderWidth: 2,
-  pictureSize: 26,
-};
-
-/** The Workspace settings tile: the same treatment at page scale, where the
- *  picture is also the control that changes it. */
-export const WORKSPACE_SETTINGS_TILE: WorkspaceTile = {
-  size: 76,
-  radius: 20,
-  borderWidth: 2,
-  pictureSize: 64,
-};
-
-/** The person's Settings identity tile: the same geometry as the Workspace
- *  settings tile, named for a human mark so it does not read through a
- *  `WORKSPACE_` constant. */
-export const IDENTITY_SETTINGS_TILE: WorkspaceTile = {
-  size: 76,
-  radius: 20,
-  borderWidth: 2,
-  pictureSize: 64,
-};

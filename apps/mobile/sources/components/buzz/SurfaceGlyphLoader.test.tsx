@@ -25,16 +25,14 @@ const LOADING_SURFACES: readonly LoadingSurface[] = [
   { id: 'voice-startup', file: 'components/buzz/VoiceBar.tsx', treatment: 'glyph' },
   { id: 'thinking', file: 'components/buzz/TurnProgressLine.tsx', treatment: 'glyph' },
   { id: 'activity-working', file: 'components/buzz/ActivityTimeline.tsx', treatment: 'glyph' },
-  { id: 'room-corner-entry', file: 'app/(app)/beeline/chat/_chat-surface.tsx', treatment: 'glyph' },
+  { id: 'room-corner-entry', file: 'components/buzz/ChatOpeningSurface.tsx', treatment: 'glyph' },
   { id: 'room-deck', file: 'components/buzz/RoomDeckLoadingView.tsx', treatment: 'glyph' },
   { id: 'changes-list', file: 'app/(app)/beeline/corners/[roomId].tsx', treatment: 'glyph' },
-  { id: 'members', file: 'app/(app)/beeline/members.tsx', treatment: 'glyph' },
-  {
-    id: 'workspace-settings',
-    file: 'components/buzz/WorkspaceSettingsPanel.tsx',
-    treatment: 'glyph',
-  },
-  { id: 'community', file: 'app/(app)/beeline/community.tsx', treatment: 'glyph' },
+  { id: 'people', file: 'ui/screens/people/PeopleTabScreen.tsx', treatment: 'glyph' },
+  { id: 'workspace-settings', file: 'ui/screens/settings/WorkspaceSettings.tsx', treatment: 'glyph' },
+  { id: 'agent-profile', file: 'ui/screens/profiles/AgentProfileScreen.tsx', treatment: 'glyph' },
+  { id: 'person-profile', file: 'ui/screens/profiles/PersonProfileScreen.tsx', treatment: 'glyph' },
+  { id: 'community', file: 'ui/screens/onboarding/WorkspaceSetup.tsx', treatment: 'glyph' },
   { id: 'schedules', file: 'app/(app)/beeline/settings/schedules.tsx', treatment: 'glyph' },
   { id: 'workbench', file: 'app/(app)/beeline/settings/workbench.tsx', treatment: 'glyph' },
   {
@@ -44,7 +42,6 @@ const LOADING_SURFACES: readonly LoadingSurface[] = [
   },
   { id: 'wallet', file: 'app/(app)/beeline/settings/workbench/wallet.tsx', treatment: 'glyph' },
   { id: 'tray', file: 'app/(app)/beeline/tray.tsx', treatment: 'glyph' },
-  { id: 'member-picker', file: 'components/buzz/MemberPickerSheet.tsx', treatment: 'glyph' },
   {
     id: 'forward-picker',
     file: 'components/buzz/ForwardMessagePickerSheet.tsx',
@@ -70,7 +67,7 @@ const LOADING_SURFACES: readonly LoadingSurface[] = [
   },
   {
     id: 'ota-check-busy',
-    file: 'app/(app)/beeline/settings/identity.tsx',
+    file: 'ui/screens/settings/YouSettings.tsx',
     treatment: 'exception',
     reason:
       'Trailing Settings-row busy while a version check returns; same compact-control case as a button, not a page load gate.',
@@ -142,6 +139,11 @@ vi.mock('react-native', async () => {
   };
 });
 
+const safeArea = vi.hoisted(() => ({ bottom: 0 }));
+vi.mock('react-native-safe-area-context', () => ({ useSafeAreaInsets: () => ({ top: 0, bottom: safeArea.bottom, left: 0, right: 0 }) }));
+vi.mock('lucide-react-native', async () => (await import('@/ui/screens/transcript/grammar-hosts.test-support')).lucideHosts());
+vi.mock('tamagui', async () => (await import('@/ui/screens/transcript/grammar-hosts.test-support')).tamaguiHosts());
+
 vi.mock('react-native-svg', async () => {
   const ReactModule = await import('react');
   const host = (name: string) => (props: any) =>
@@ -156,17 +158,6 @@ const motion = vi.hoisted(() => ({
 
 const themeRef = vi.hoisted(() => ({
   current: { buzz: { dark: true } },
-}));
-
-vi.mock('react-native-unistyles', () => ({
-  useUnistyles: () => ({ theme: themeRef.current }),
-  StyleSheet: {
-    hairlineWidth: 1,
-    create: (definition: unknown) =>
-      typeof definition === 'function'
-        ? (definition as (value: typeof themeRef.current) => unknown)(themeRef.current)
-        : definition,
-  },
 }));
 
 vi.mock('react-native-reanimated', async () => {
@@ -222,6 +213,7 @@ beforeEach(() => {
 });
 
 afterEach(() => {
+  safeArea.bottom = 0;
   motion.reducedMotion = false;
   motion.repeats = [];
   themeRef.current = { buzz: beelineThemes.obsidian };
@@ -291,6 +283,25 @@ describe('Room loading boundary', () => {
     expect(deck.root.findByProps({ testID: 'rooms-loader-gate' })).toBeTruthy();
     expect(deck.root.findByProps({ testID: 'rooms-loader' })).toBeTruthy();
     expect(deck.root.findAllByType('Svg')).toHaveLength(1);
+    const label = deck.root.findAllByType('Text').find((node: any) => node.props.children === 'Loading chats');
+    expect(label?.props.fontFamily).toBe('SpaceGrotesk-Regular');
+  });
+});
+
+describe('Room/thread opening safe area', () => {
+  it.each([0, 24, 48])('reserves the composer foot above a bottom inset of %s', async (bottom) => {
+    const { ChatOpeningSurface } = await import('./ChatOpeningSurface');
+    const { composerBottomPadding } = await import('@/buzz/composer-keyboard');
+    safeArea.bottom = bottom;
+    const tree = render(<ChatOpeningSurface isCorner />);
+    const foot = tree.root.findAllByType('AnimatedView').find((node: any) => node.props.testID === 'room-loading-safe-bottom');
+    const style = Array.isArray(foot.props.style) ? Object.assign({}, ...foot.props.style) : foot.props.style;
+    expect(style.height).toBe(composerBottomPadding('android', bottom, 0));
+    const footer = tree.root.findByProps({ testID: 'room-loading-footer' });
+    expect(footer.props.minHeight).toBe(44);
+    const caption = tree.root.findAllByType('Text').find((node: any) => node.props.testID === 'room-loading-caption');
+    expect(caption.props.fontFamily).toBe('SpaceGrotesk-Regular');
+    act(() => tree.unmount());
   });
 });
 

@@ -74,14 +74,9 @@ vi.mock('expo-router', () => ({
   useLocalSearchParams: () => searchParams.params,
 }));
 
-vi.mock('@/components/buzz/Button', async () => {
-  const R = await import('react');
-  // The one Button, as a host press target carrying its label.
-  return {
-    Button: ({ label, ...props }: any) =>
-      R.createElement('TouchableOpacity', { ...props, label }, R.createElement('Text', null, label)),
-  };
-});
+vi.mock('tamagui', async () => (await import('@/ui/screens/transcript/grammar-hosts.test-support')).tamaguiHosts());
+vi.mock('@/components/buzz/SurfaceGlyphLoader', async () => { const R = await import('react'); return { SurfaceGlyphLoader: (props: any) => R.createElement('SurfaceGlyphLoader', props) }; });
+vi.mock('lucide-react-native', async () => (await import('@/ui/screens/transcript/grammar-hosts.test-support')).lucideHosts());
 vi.mock('react-native', async () => {
   const ReactModule = await import('react');
   const host = (name: string) => (props: any) =>
@@ -113,39 +108,13 @@ vi.mock('react-native', async () => {
   };
 });
 
-vi.mock('@/components/buzz/SettingsRow', async () => {
-  const ReactModule = await import('react');
-  return {
-    SettingsRow: (props: any) => ReactModule.createElement('SettingsRow', props),
-  };
-});
-
-vi.mock('@/components/buzz/PageHeader', async () => {
-  const ReactModule = await import('react');
-  return {
-    PageHeader: (props: any) => ReactModule.createElement('PageHeader', props),
-  };
-});
-vi.mock('@/components/buzz/SurfaceGlyphLoader', async () => {
-  const ReactModule = await import('react');
-  return {
-    SurfaceGlyphLoader: (props: any) => ReactModule.createElement('SurfaceGlyphLoader', props),
-  };
-});
-
 const safeArea = vi.hoisted(() => ({ bottom: 0 }));
 vi.mock('react-native-safe-area-context', () => ({
   useSafeAreaInsets: () => ({ top: 0, right: 0, bottom: safeArea.bottom, left: 0 }),
 }));
 
-vi.mock('@/components/buzz/ConnectProgress', async () => {
-  const ReactModule = await import('react');
-  const host = (name: string) => (props: any) => ReactModule.createElement(name, props);
-  return { RingSpinner: host('RingSpinner'), ConnectStepDot: host('ConnectStepDot'),
-    ConnectStepBar: host('ConnectStepBar'), LoadingBar: host('LoadingBar') };
-});
-
 import ConnectTrustySquireScreen from './connect';
+import { SafeBottom, ScreenHeader } from '@/ui/grammar';
 import { getWorkbenchSource, setWorkbenchSource, MonolithWorkbenchSource } from '@/buzz/workbench-source';
 import { MockWorkbenchSource } from '@/buzz/workbench-source.mock';
 import { readSharedWorkbench } from '@/buzz/workbench-surface';
@@ -233,21 +202,15 @@ async function untilSignin(renderer: ReactTestRenderer): Promise<void> {
 
 describe('Connect Trusty Squire flow — ONE connect path', () => {
   it('lets its last item scroll clear of the system navigation bar', async () => {
-    safeArea.bottom = 48;
-    try {
-      const renderer = await render();
-      const scroll = renderer.root.findByProps({ testID: 'connect-scroll' });
-      const contentStyle = Object.assign({}, ...[scroll.props.contentContainerStyle].flat(Infinity as 1));
-      expect(contentStyle.paddingBottom).toBe(24 + 48);
-    } finally {
-      safeArea.bottom = 0;
-    }
+    const renderer = await render();
+    expect(renderer.root.findByProps({ testID: 'connect-scroll' })).toBeDefined();
+    expect(renderer.root.findAllByType(SafeBottom)).toHaveLength(1);
   });
 
-  it('names the tool under a small Workbench eyebrow', async () => {
+  it('names the tool in the page header', async () => {
     const renderer = await render();
-    const header = renderer.root.findByProps({ testID: 'connect-header' });
-    expect(header.props.eyebrow).toBe('Trusty Squire');
+    const header = renderer.root.findByType(ScreenHeader);
+    expect(header.props.backLabel).toBe('Back to Trusty Squire');
     expect(header.props.title).toBe('Trusty Squire');
   });
 
@@ -367,10 +330,8 @@ describe('Connect Trusty Squire flow — ONE connect path', () => {
   it('shows the machine’s step-by-step install progress and then the sign-in button', async () => {
     const renderer = await render();
     await pair(renderer);
-    expect(renderer.root.findByProps({ testID: 'connect-header' }).props.meta).toBeUndefined();
     await advancePolls();
     expect(renderer.root.findByProps({ testID: 'connect-install-progress' })).toBeDefined();
-    expect(renderer.root.findByProps({ testID: 'connect-header' }).props.meta).toBeUndefined();
     const active = renderer.root.findAll(
       (node: any) => node.props?.testID === 'connect-step-1-current',
     );
@@ -435,7 +396,7 @@ describe('Connect Trusty Squire flow — ONE connect path', () => {
     expect(openBrowser).toHaveBeenCalledExactlyOnceWith('https://squire.test/install?token=test');
     expect(navigation.push).not.toHaveBeenCalled();
     expect(navigation.replace).not.toHaveBeenCalled();
-    expect(JSON.stringify(renderer.toJSON())).toContain('Opens sign-in in your browser.');
+    expect(renderer.root.findByProps({ testID: 'connect-foot-note' }).props.children).toBe('Opens sign-in in your browser.');
 
     // The browser has already returned; only the later server commit wakes this read.
     readInstallState.mockClear();

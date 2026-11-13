@@ -3,6 +3,7 @@ import { Pool } from 'pg';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { migrate, migrateData, MIGRATION_LOCK_TIMEOUT_MS, PostgresDatabase } from './database.js';
 import { alreadyNoOp, alreadySatisfied, normalizeDefault, lockedTables, noOpCheck, logLockHolders, normalizeTriggerDefinition, runMigrationStep, satisfiedCheck, splitMigrationStatements, triggerAlreadyCurrent, triggerPair } from './migration-steps.js';
+import { CORNER_ATTENTION_SCHEMA } from './corner-attention.js';
 
 const postgresUrl = process.env.BEELINE_MIGRATION_LOCK_TEST_POSTGRES_URL;
 if (postgresUrl && !['127.0.0.1', 'localhost', '[::1]'].includes(new URL(postgresUrl).hostname))
@@ -395,6 +396,56 @@ describe('already-current trigger pairs', () => {
     const absent = vi.fn(async () => ({ rows: [] }));
     await expect(triggerAlreadyCurrent({ query: absent }, drop, create)).resolves.toBe(false);
     await expect(triggerAlreadyCurrent({ query }, 'UPDATE t SET a=1', create)).resolves.toBe(false);
+  });
+
+  it('R-TRIGGER-EVENT compares event sets while retaining UPDATE column and timing changes', async () => {
+    const statements = splitMigrationStatements(CORNER_ATTENTION_SCHEMA);
+    const index = statements.findIndex(sql => sql.startsWith('DROP TRIGGER IF EXISTS corner_activity_report '));
+    expect(index).toBeGreaterThanOrEqual(0);
+    const drop = statements[index]!, create = statements[index + 1]!;
+    const installed = create.replace(/UPDATE OF (.*?) OR DELETE/, 'DELETE OR UPDATE OF $1');
+    const query = vi.fn(async () => ({ rows: [{ definition: installed }] }));
+    expect(installed).not.toBe(create);
+    await expect(triggerAlreadyCurrent({ query }, drop, create)).resolves.toBe(true);
+    await expect(triggerAlreadyCurrent({ query }, drop, create.replace('AFTER', 'BEFORE'))).resolves.toBe(false);
+    await expect(triggerAlreadyCurrent({ query }, drop, create.replace(',report_outcome', ''))).resolves.toBe(false);
+    await expect(triggerAlreadyCurrent({ query }, drop, create.replace(' OR DELETE', ''))).resolves.toBe(false);
+  });
+
+  it.skipIf(!postgresUrl)('R-TRIGGER-EVENT skips already-installed step 28 without locking a busy table', async () => {
+    const schema = `trigger_event_${randomUUID().replaceAll('-', '')}`;
+    const admin = new Pool({ connectionString: postgresUrl, max: 1 });
+    const holder = await admin.connect();
+    const migration = new Pool({ connectionString: postgresUrl, max: 1,
+      options: `-c search_path=${schema} -c lock_timeout=30ms` });
+    const statements = splitMigrationStatements(CORNER_ATTENTION_SCHEMA);
+    const index = statements.findIndex(sql => sql.startsWith('DROP TRIGGER IF EXISTS corner_activity_report '));
+    const drop = statements[index]!, create = statements[index + 1]!;
+    try {
+      await holder.query(`CREATE SCHEMA ${schema}`);
+      await migration.query(`CREATE TABLE agent_commands(private_payload jsonb,state text,
+        review_context jsonb,result_message_id text,report_outcome text)`);
+      await migration.query(`CREATE FUNCTION notify_corner_activity() RETURNS trigger
+        LANGUAGE plpgsql AS $$ BEGIN RETURN NULL; END $$`);
+      await migration.query(create);
+      await holder.query(`BEGIN; SELECT * FROM ${schema}.agent_commands`);
+      // The old path attempts this DROP and times out even though nothing changed.
+      await expect(migration.query(drop)).rejects.toMatchObject({ code: '55P03' });
+      await migration.query('BEGIN');
+      const current = await triggerAlreadyCurrent(migration, drop, create);
+      if (!current) await migration.query(drop);
+      expect(current).toBe(true);
+      expect((await migration.query(`SELECT mode FROM pg_locks
+        WHERE pid=pg_backend_pid() AND relation='agent_commands'::regclass`)).rows).toEqual([]);
+      await migration.query('COMMIT');
+    } finally {
+      await migration.query('ROLLBACK');
+      await holder.query('ROLLBACK');
+      await migration.end();
+      await holder.query(`DROP SCHEMA IF EXISTS ${schema} CASCADE`);
+      holder.release();
+      await admin.end();
+    }
   });
 });
 

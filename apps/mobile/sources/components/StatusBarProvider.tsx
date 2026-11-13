@@ -1,6 +1,6 @@
 import React from 'react';
 import { StatusBar } from 'expo-status-bar';
-import { useUnistyles } from 'react-native-unistyles';
+import { useThemeName } from 'tamagui';
 
 /** Status bar glyph color follows the app theme: dark icons over Bone,
  *  light icons over Obsidian. One mapping so the global provider and the
@@ -10,8 +10,8 @@ export function statusBarStyleForTheme(theme: { dark: boolean }): 'light' | 'dar
 }
 
 export const StatusBarProvider = React.memo(() => {
-    const { theme } = useUnistyles();
-    return (
-        <StatusBar style={statusBarStyleForTheme(theme)} animated={true} />
-    );
+    const dark = useThemeName().startsWith('dark');
+    return statusBarStyleForTheme({ dark }) === 'light'
+        ? <StatusBar style="light" animated={true} />
+        : <StatusBar style="dark" animated={true} />;
 });

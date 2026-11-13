@@ -244,7 +244,7 @@ export function selectComposerAckPresentation(
       // press does.
       const stoppable = viewerMayStopTurn(input.viewerPubkey, input.viewerCanSend);
       return {
-        label: `${subject} ${verb.gerund}…`,
+        label: `${subject} ${verb.gerund.toLowerCase()}…`,
         turnKey,
         verb,
         ...(input.receivedSteer?.agentPubkey === state.agentPubkey &&

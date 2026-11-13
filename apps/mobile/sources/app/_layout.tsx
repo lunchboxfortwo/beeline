@@ -18,12 +18,11 @@ import { KeyboardProvider } from 'react-native-keyboard-controller';
 import {
   initialWindowMetrics,
   SafeAreaProvider,
-  useSafeAreaInsets,
 } from 'react-native-safe-area-context';
-import { GestureHandlerRootView } from 'react-native-gesture-handler';
 import { SidebarNavigator } from '@/components/SidebarNavigator';
-import { AppState, View, Platform } from 'react-native';
+import { AppState, Platform } from 'react-native';
 import { ModalProvider } from '@/modal';
+import { GrammarProvider } from '@/ui/GrammarProvider';
 import { WarmComputerSessionHost } from '@/components/buzz/ComputerSession';
 import { PostHogProvider } from 'posthog-react-native';
 import { tracking } from '@/track/tracking';
@@ -32,7 +31,11 @@ import { KeyboardShortcutsProvider } from '@/components/KeyboardShortcutsProvide
 import { StatusBarProvider } from '@/components/StatusBarProvider';
 // import * as SystemUI from 'expo-system-ui';
 import { initConsoleLogging } from '@/utils/consoleLogging';
-import { useUnistyles } from 'react-native-unistyles';
+import { setAppPalette, useAppMode } from '@/display';
+import { NOTIFICATION_LIGHT, canvasColor } from '@/buzz/groknight';
+import { useLocalSetting } from '@/sync/storage';
+import { SafeSides } from '@/ui/grammar';
+import { AppRoot } from '@/ui/grammar-root';
 import { AsyncLock } from '@/utils/lock';
 import {
   createConsumedNotificationResponseStore,
@@ -145,24 +148,24 @@ if (Platform.OS === 'android') {
     name: 'Default',
     importance: Notifications.AndroidImportance.MAX,
     vibrationPattern: [0, 250, 250, 250],
-    lightColor: '#FF231F7C',
+    lightColor: NOTIFICATION_LIGHT,
   });
   Notifications.setNotificationChannelAsync('mentions', {
     name: 'Mentions',
     importance: Notifications.AndroidImportance.HIGH,
     vibrationPattern: [0, 250, 250, 250],
-    lightColor: '#FF231F7C',
+    lightColor: NOTIFICATION_LIGHT,
   });
   Notifications.setNotificationChannelAsync('default', {
     name: 'Agent attention',
     importance: Notifications.AndroidImportance.HIGH,
     vibrationPattern: [0, 250, 250, 250],
-    lightColor: '#FF231F7C',
+    lightColor: NOTIFICATION_LIGHT,
   });
   Notifications.setNotificationChannelAsync('activity', {
     name: 'Direct messages',
     importance: Notifications.AndroidImportance.DEFAULT,
-    lightColor: '#FF231F7C',
+    lightColor: NOTIFICATION_LIGHT,
   });
 }
 
@@ -182,27 +185,8 @@ SplashScreen.setOptions({
   duration: 0,
 });
 SplashScreen.preventAutoHideAsync();
-// Set window background color - now handled by Unistyles
-// SystemUI.setBackgroundColorAsync('white');
-
 // Remote logging to local log server (configured via Dev > Log Server setting)
 initConsoleLogging();
-
-// Component to apply horizontal safe area padding
-function HorizontalSafeAreaWrapper({ children }: { children: React.ReactNode }) {
-  const insets = useSafeAreaInsets();
-  return (
-    <View
-      style={{
-        flex: 1,
-        paddingLeft: insets.left,
-        paddingRight: insets.right,
-      }}
-    >
-      {children}
-    </View>
-  );
-}
 
 let lock = new AsyncLock();
 let loaded = false;
@@ -263,18 +247,9 @@ async function loadFonts() {
 const fontInitialization = loadFonts()
   .catch((error) => console.error('Error initializing:', error));
 
-export default function RootLayout() {
+function NavigationRouteEffects({ onContentLayout }: { onContentLayout: () => void }) {
   const routeSegments = useSegments();
   React.useLayoutEffect(() => { setMobileErrorRoute(routeSegments); }, [routeSegments]);
-  const isDesktop = useIsDesktop();
-  const [drawn, setDrawn] = React.useState(false);
-  const firstLayout = React.useRef<(() => void) | null>(null);
-  const onContentLayout = React.useCallback(() => {
-    if (!firstLayout.current) firstLayout.current = afterFirstFrame(() => { void SplashScreen.hideAsync(); setDrawn(true); });
-  }, []);
-  React.useEffect(() => () => { firstLayout.current?.(); firstLayout.current = null; }, []);
-  useTauriZoom();
-  useTauriDrag();
   const pathname = usePathname();
   React.useEffect(() => {
     if (pathname !== '/' && pathname !== '/beeline/channels') return afterFirstFrame(onContentLayout);
@@ -288,25 +263,27 @@ export default function RootLayout() {
     // so a cold-start replace cannot overwrite the notification navigation.
     if (pathname !== '/') markInitialLandingResolved();
   }, [pathname]);
-  const { theme } = useUnistyles();
+  return null;
+}
+
+export default function RootLayout() {
+  const isDesktop = useIsDesktop();
+  const [drawn, setDrawn] = React.useState(false);
+  const firstLayout = React.useRef<(() => void) | null>(null);
+  const onContentLayout = React.useCallback(() => {
+    if (!firstLayout.current) firstLayout.current = afterFirstFrame(() => { void SplashScreen.hideAsync(); setDrawn(true); });
+  }, []);
+  React.useEffect(() => () => { firstLayout.current?.(); firstLayout.current = null; }, []);
+  useTauriZoom();
+  useTauriDrag();
+  const mode = useAppMode();
+  const palette = useLocalSetting('palette');
+  React.useLayoutEffect(() => { setAppPalette(palette); }, [palette]);
   const navigationTheme = React.useMemo(() => {
-    if (theme.dark) {
-      return {
-        ...DarkTheme,
-        colors: {
-          ...DarkTheme.colors,
-          background: theme.colors.groupped.background,
-        },
-      };
-    }
-    return {
-      ...DefaultTheme,
-      colors: {
-        ...DefaultTheme.colors,
-        background: theme.colors.groupped.background,
-      },
-    };
-  }, [theme]);
+    const base = mode === 'dark' ? DarkTheme : DefaultTheme;
+    const background = canvasColor(mode, palette);
+    return { ...base, colors: { ...base.colors, background } };
+  }, [mode, palette]);
 
   //
   // Init sequence
@@ -390,17 +367,17 @@ export default function RootLayout() {
 
   let providers = (
     <SafeAreaProvider initialMetrics={initialWindowMetrics}>
+      <NavigationRouteEffects onContentLayout={onContentLayout} />
       <KeyboardProvider preload={false}>
-        <GestureHandlerRootView
+        <AppRoot
+          desktop={isDesktop}
+          mode={mode}
+          palette={palette}
           {...(latencyFrameTraceEnabled ? { onTouchStartCapture: markLatencyTouch } : {})}
-          style={
-            isDesktop
-              ? { flex: 1 }
-              : { flex: 1, backgroundColor: theme.colors.groupped.background }
-          }
         >
           <UpdateProvider active={drawn}>
             <ThemeProvider value={navigationTheme}>
+            <GrammarProvider>
               <StatusBarProvider />
               {drawn && <BackgroundEffects />}
               <StoreUpdateGate fontsReady={initialized} active={drawn}>
@@ -408,17 +385,18 @@ export default function RootLayout() {
                 <DesktopDeepLinkBridge />
                 <BrowserNavigationShortcuts />
                   <KeyboardShortcutsProvider>
-                    <HorizontalSafeAreaWrapper>
+                    <SafeSides>
                       <SidebarNavigator />
-                    </HorizontalSafeAreaWrapper>
+                    </SafeSides>
                   </KeyboardShortcutsProvider>
                 <WarmComputerSessionHost />
               </ModalProvider>
               <UpdateReadyPrompt />
               </StoreUpdateGate>
+            </GrammarProvider>
             </ThemeProvider>
           </UpdateProvider>
-        </GestureHandlerRootView>
+        </AppRoot>
       </KeyboardProvider>
     </SafeAreaProvider>
   );

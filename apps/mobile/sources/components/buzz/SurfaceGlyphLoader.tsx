@@ -1,13 +1,14 @@
 import React from 'react';
-import { View } from 'react-native';
-import { StyleSheet } from 'react-native-unistyles';
+import { YStack } from 'tamagui';
 import { MARK_CELL, SURFACE_GLYPH_SIZE } from '@/buzz/beeline-glyph';
 import { BeelineGlyphPaint } from './BeelineGlyphPaint';
 
 /**
  * The one in-app load-gate treatment: the same self-painting glyph as splash
  * and the thinking line. Duration is unknown, so this uses the release loop —
- * it never holds a completed stroke as progress toward a finish.
+ * it never holds a completed stroke as progress toward a finish. A page loader
+ * fills the space its page gives it and sits in the middle of it; a compact
+ * loader sits inline.
  */
 export function SurfaceGlyphLoader({
   compact = false,
@@ -19,10 +20,13 @@ export function SurfaceGlyphLoader({
   size?: number;
 }) {
   return (
-    <View
+    <YStack
+      flex={compact ? undefined : 1}
+      alignSelf={compact ? undefined : 'stretch'}
+      alignItems="center"
+      justifyContent="center"
       accessibilityLabel="Loading"
       accessibilityRole="progressbar"
-      style={compact ? styles.compact : styles.surface}
       testID={testID}
     >
       <BeelineGlyphPaint
@@ -32,11 +36,6 @@ export function SurfaceGlyphLoader({
         size={size ?? (compact ? MARK_CELL : SURFACE_GLYPH_SIZE)}
         testID={testID ? `${testID}-glyph` : undefined}
       />
-    </View>
+    </YStack>
   );
 }
-
-const styles = StyleSheet.create({
-  surface: { alignItems: 'center', justifyContent: 'center' },
-  compact: { alignItems: 'center', justifyContent: 'center' },
-});

@@ -1,6 +1,5 @@
 import React, { useEffect, useState } from 'react';
-import { View } from 'react-native';
-import { StyleSheet } from 'react-native-unistyles';
+import { YStack } from 'tamagui';
 import type { WebViewProps } from 'react-native-webview';
 /** Reuse the already-shipped native audio-capable WebView; no new native module. */
 export function VoicePreviewPlayer({
@@ -27,8 +26,11 @@ export function VoicePreviewPlayer({
   }, []);
   const escaped = source.replace(/&/g, '&amp;').replace(/"/g, '&quot;').replace(/</g, '&lt;');
   return (
-    <View
-      style={styles.host}
+    <YStack
+      position="absolute"
+      width={1}
+      height={1}
+      opacity={0}
       pointerEvents="none"
       accessibilityElementsHidden
       importantForAccessibility="no-hide-descendants"
@@ -44,9 +46,6 @@ export function VoicePreviewPlayer({
           onHttpError={onError}
         />
       )}
-    </View>
+    </YStack>
   );
 }
-const styles = StyleSheet.create(() => ({
-  host: { position: 'absolute', width: 1, height: 1, opacity: 0 },
-}));

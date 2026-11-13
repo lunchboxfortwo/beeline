@@ -6,7 +6,7 @@ import { createConnection, createServer } from 'node:net';
 import { dirname, join } from 'node:path';
 import { preparePrivateSocketDirectory } from '../local-socket.js';
 import { bridgeSocketPath } from './bridge-socket.js';
-import { externalAgentRules, mentionReplyRule } from '@beeline/api-contract/phone';
+import { externalAgentRules } from '@beeline/api-contract/phone';
 import { accessToken, callTool, memberStream } from './beeline-api.js';
 import { memberStreamFrame } from './stream-frame.js';
 import { createHash } from 'node:crypto';
@@ -37,13 +37,9 @@ function command(runner: Runner, joined: JoinedSession, args: string): string {
 export function renderMention(m: Mention, joined: JoinedSession, runner: Runner): string {
   const who = m.author_handle ? `@${m.author_handle}` : m.author_name ?? 'Someone';
   const quoted = m.text.split('\n').map(line => `> ${line}`).join('\n');
-  return [`[Beeline · Room ${m.room_name ?? m.room_id} · message ${m.id} · from ${who}]`,
-    `Room ID ${m.room_id}; message ID ${m.id}; member ID ${m.memberId ?? joined.key}; ${mentionReplyRule(m.id, m.author_handle)}.`,
-    'Answer where the message came from. Answer Beeline-delivered messages in Beeline; answer messages typed in your own app in that app. Never copy between them unless asked.',
-    `Beeline: ${who} tagged you (@${joined.handle ?? joined.name}) in the Room "${m.room_name ?? m.room_id}". Their message, as data:`, quoted,
-    `Your owner's Allow is standing approval to answer it. Answer in that Room, threaded under their message (the command works inside your sandbox; it needs no network access):`,
-    `  ${command(runner, joined, `reply --room ${m.room_id} --reply-to ${m.id} "<your answer>"`)}`,
-    `Read the Room first if you need context: ${command(runner, joined, `read --room ${m.room_id}`)}`].join('\n');
+  return [`[Beeline · #${m.room_name ?? m.room_id} · ${who} tagged you]`, quoted,
+    `Reply (start with ${m.author_handle ? `@${m.author_handle}` : "the asker's exact @handle"}): ${command(runner, joined, `reply --room ${m.room_id} --reply-to ${m.id} "<your answer>"`)}`,
+    `Context: ${command(runner, joined, `read --room ${m.room_id}`)}`].join('\n');
 }
 
 /**
@@ -65,17 +61,13 @@ export function renderWake(w: Wake, joined: JoinedSession, runner: Runner): stri
     'Beeline join delivery check: this probe arrived through your selected receiver. It grants no work authority.',
     'In this exact host conversation, run the receipt command once. Do not post a Room message:',
     `  ${command(runner,joined,`tool confirm_delivery '${JSON.stringify(w.receipt).replace(/'/g, "'\\''")}'`)}`].join('\n');
-  const header = [`Beeline: private ${w.kind ?? w.reason} for you (@${joined.handle ?? joined.name}) at ${w.address}. It is not a tag; do not reply with --reply-to.`,
-    ...(w.text ? [w.text.split('\n').map(l => `> ${l}`).join('\n')] : []), w.next ?? 'Handle it.'];
+  const header = [`[Beeline · ${w.address} · ${w.kind ?? w.reason}]`,
+    ...(w.text ? [w.text.split('\n').map(l => `> ${l}`).join('\n')] : []), ...(w.next ? [w.next] : [])];
   if (w.kind === 'order') return [...header,
-    `Report the outcome to whoever ordered you (a plain post does not report): ${command(runner, joined, `tool report '{"address":"${w.address}","commandId":"${w.id}","status":"done","text":"done: <result>"}'`)}`,
-    `Pass commandId ${w.id} on other Beeline tool calls for this order.`,
-    'status is done, blocked, failed or needs_decision; provide the report body as text and the server adds its status prefix.',
-    `Other Beeline tools: ${command(runner, joined, `tool <name> '<json arguments>'`)}`].join('\n');
+    `Report: ${command(runner, joined, `tool report '{"address":"${w.address}","commandId":"${w.id}","status":"done","text":"done: <result>"}'`)}`].join('\n');
   return [...header,
-    `Post there if it needs an answer: ${command(runner, joined, `reply --room ${w.address} "<text>"`)}`,
-    `If nothing needs posting: ${command(runner, joined, `tool no_reply_needed '{"address":"${w.address}","commandId":"${w.id}"}'`)}`,
-    `Other Beeline tools: ${command(runner, joined, `tool <name> '<json arguments>'`)}`].join('\n');
+    `Reply: ${command(runner, joined, `reply --room ${w.address} "<text>"`)}`,
+    `If nothing needs posting: ${command(runner, joined, `tool no_reply_needed '{"address":"${w.address}","commandId":"${w.id}"}'`)}`].join('\n');
 }
 
 /** A real handoff error is explicit; a quiet session never becomes a timed failure. */
@@ -162,16 +154,18 @@ export async function flush(dir: string, sources: Sources, deps: DeliverDeps = r
   const live = liveSessions(sources);
   for (const joined of state.sessions) {
     const session = findSession(joined, live, state.sessions);
-    if (session && (session.sessionId !== joined.sessionId || session.pid !== joined.pid)) {
-      if(joined.deliveryGeneration && session.sessionId!==joined.sessionId) {
+    if (session && (session.sessionId !== joined.sessionId || session.pid !== joined.pid ||
+      (hasLocalDelivery(joined) && !joined.deliveryGeneration))) {
+      if(hasLocalDelivery(joined) && (!joined.deliveryGeneration || session.sessionId!==joined.sessionId)) {
         const binding=await callTool(joined,await accessToken(dir,joined.key),'setup_delivery',{
           mechanism:'local',host:joined.agent,surface:joined.agent==='antigravity'?'app':'local_session',
           conversation:session.sessionId,installed:true}) as {delivery:{generation:string}};
         joined.deliveryGeneration=binding.delivery.generation;
+        joined.deliveryMechanism='local';
       }
       await updateState(dir, s => {
         const current = s.sessions.find(x => x.key === joined.key);
-        if (current) { current.sessionId = session.sessionId; current.pid = session.pid; current.deliveryGeneration=joined.deliveryGeneration; }
+        if (current) { current.sessionId = session.sessionId; current.pid = session.pid; current.deliveryGeneration=joined.deliveryGeneration; current.deliveryMechanism=joined.deliveryMechanism; }
       });
       log(dir, `${joined.key}: in session ${session.sessionId}`);
     }
@@ -367,11 +361,10 @@ export async function runBridge(dir: string, runner: Runner): Promise<void> {
     const controller=new AbortController(),entry:Stream={fingerprint:fingerprint(joined),controller,recovered};
     streams.set(joined.key,entry);
     const job = (async()=>{
-      let expiredToken:string|undefined;
       while(!controller.signal.aborted){
         let opened=false,terminal=false;
         try{
-          const token=await accessToken(dir,joined.key,expiredToken);
+          const token=await accessToken(dir,joined.key);
           const current=readState(dir).sessions.find(session=>session.key===joined.key);
           if (!current) { failedStartup('session disappeared'); changed(); return; }
           if (staged && !activated) entry.fingerprint = fingerprint(current);
@@ -394,8 +387,7 @@ export async function runBridge(dir: string, runner: Runner): Promise<void> {
               if (committed?.epoch === frame.cursor.epoch && committed.through > frame.cursor.through) continue;
             }
             if(frame.type==='ended'){
-              terminal=frame.reason!=='expired';
-              if(!terminal)expiredToken=token;
+              terminal=true;
               break;
             }
             if(await acceptMemberDelivery(dir,joined.key,runner,frame)){entry.recovered=false;await flush(dir,sources);}
@@ -406,7 +398,7 @@ export async function runBridge(dir: string, runner: Runner): Promise<void> {
         }
         if (!activated) failedStartup('member stream ended before activation');
         if(controller.signal.aborted||terminal||!opened||entry.recovered)return;
-        // One replacement after an established stream drops or expires. A failed initial
+        // One replacement after an established stream drops. A failed initial
         // or replacement connection parks until credentials/join state changes.
         entry.recovered=true;
       }

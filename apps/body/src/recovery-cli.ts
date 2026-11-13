@@ -156,7 +156,8 @@ async function main(): Promise<void> {
       console.log('[beeline] verified bundle installed for isolated artifact verification');
       return;
     }
-    const status = await convergeMachine({ layout, releaseId: target.releaseId, deadlineAt });
+    const status = await convergeMachine({ layout, releaseId: target.releaseId, deadlineAt,
+      force: args.includes('--force') });
     await convergeDependencies(layout, deadlineAt);
     console.log(
       `[beeline] executing release ${status.loadedRelease}; helper ${status.pid}; every enabled agent serving`,

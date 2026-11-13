@@ -610,7 +610,7 @@ export class RoomsMcpAgentTools {
         case 'post_starter_welcome': return exec('postStarterWelcome', context);
         case 'post_starter_game': return exec('postStarterGame', context);
         case 'post_room_invite': return exec('postRoomInvite', context);
-        case 'post_repository_card': return exec('postRepositoryOnboarding', { ...context, kind: 'repository' });
+        case 'post_repository_card': return exec('postRepositoryOnboarding', { ...context, kind: 'repository', ...(typeof input.repository === 'string' ? { repository: input.repository } : {}) });
         case 'post_starters_card': return exec('postRepositoryOnboarding', { ...context, kind: 'starters' });
         case 'save_workflow': return exec('saveWorkflow', { ...base, contract: input.contract });
         case 'load_workspace_skill': return exec('loadWorkspaceSkill', { ...base, slug: input.slug });

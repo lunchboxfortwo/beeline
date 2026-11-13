@@ -116,3 +116,15 @@ export function takePrefetchedPushRoom(responseId: string, roomId: string): Prom
 export function prefetchRoomOpen(roomId: string): void {
   prefetchPushRoom(`room-open:${roomId}`, roomId);
 }
+
+/** An existing server-indexed DM can start its read before profile rendering
+ * or the canonical resolution write. Resolution still owns navigation. */
+export function prefetchDirectMessageOpen(workspaceId: string, participantId: string): void {
+  const viewer = peekBuzzViewerContext();
+  if (!viewer || viewer.relayUrl !== getBuzzRuntimeConfig().monolithUrl) return;
+  const list = mobileSurfaceCache.peek(surfaceAddress(
+    viewer.relayUrl, viewer.viewerPubkey, '/workspace/:id/chats', { workspaceId },
+  ), isChatListView);
+  const room = list?.chats.find(chat => chat.directMessage?.peer.pubkey === participantId);
+  if (room) prefetchRoomOpen(room.room.id);
+}

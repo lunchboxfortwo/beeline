@@ -26,10 +26,11 @@
 import React from 'react';
 import { Circle, Ellipse, G, Line, Path, Polygon, Rect } from 'react-native-svg';
 import { FACE_IDS, type FaceId } from './index';
+import { IDENTITY_ART } from '@/buzz/groknight';
 
 export { FACE_IDS, type FaceId } from './index';
-export const BONE = '#F2E9D8';
-export const INK = '#14091A';
+export const BONE: string = IDENTITY_ART.bone;
+export const INK: string = IDENTITY_ART.ink;
 
 export type FacePalette = { brass: string; bone: string; ink: string };
 export type FaceRenderProps = { palette: FacePalette };

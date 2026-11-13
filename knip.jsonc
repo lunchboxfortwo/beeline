@@ -15,8 +15,6 @@
     "web/marketing/demo-source.mjs": ["exports"],
     // CONNECT-RING-1 selects router/transport aliases and the temporary Metro adapter.
     "apps/mobile/scripts/connect-ring-proof/{state.ts,metro.cjs}": ["exports"],
-    // Metro selects the fitted web title implementation through this platform export.
-    "apps/mobile/sources/buzz/use-autofit-text.web.ts": ["exports"],
     // The local GitHub card proof resolves these exports through temporary Metro aliases.
     "apps/mobile/scripts/github-card-proof-{adapters.tsx,metro.cjs}": ["exports"],
     // Metro injects these disposable server/router adapters into the native proof.
@@ -29,6 +27,8 @@
     // The Trusty Squire native proof resolves these through its temporary Metro adapter.
     "apps/mobile/scripts/proof-shims/*.{ts,tsx,cjs}": ["exports", "types"],
     "apps/mobile/scripts/ui-alignment-proof/{proof-env,proof-workbench,svg,unistyles}.{ts,tsx}": ["exports"],
+    // tsc compiles these phone view field checks; nothing imports the file.
+    "packages/api-contract/src/phone-view.typecheck.ts": ["files"],
   },
   "workspaces": {
     ".": {
@@ -53,6 +53,8 @@
         "scripts/connector-preview/room.tsx",
         // TYPECHECK invokes the architecture guard by path.
         "scripts/check-architecture.mjs",
+        // TYPECHECK invokes the design grammar guard by path.
+        "scripts/check-mobile-grammar.mjs",
         // Accepted audit decisions: explicit one-time operator entrypoints.
         "scripts/audit-decisions-cleanup.mjs",
         "scripts/audit-decisions-prod-read.mjs",
@@ -84,6 +86,8 @@
         // The Body guide invokes this isolated agent-tool regression proof by path.
         "scripts/prove-agent-tool-traps.mjs",
         "scripts/prove-owed-tags.mjs",
+        // TAGS-1 invokes the isolated built phone socket proof by path.
+        "scripts/prove-tags-list.mjs",
         // BRIEF-CITATION invokes the isolated built Body/HTTP proof by path.
         "scripts/prove-brief-citation.mjs",
         // The corner membership migration guide invokes the owner-shaped HTTP/socket proof by path.

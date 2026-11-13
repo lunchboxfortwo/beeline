@@ -5,6 +5,16 @@ import { Modal } from '@/modal';
 import type { RepoCandidate } from './room-repo-picker';
 import { CORNER_LABEL, ROOM_LABEL } from './vocabulary';
 
+/** Keep the same warning wherever a Room's repository can be changed. */
+export async function confirmRoomRepoReplacement(repositoryName: string | undefined, openCornerCount: number): Promise<boolean> {
+  if (!repositoryName || openCornerCount === 0) return true;
+  return Modal.confirm(
+    `Change ${ROOM_LABEL} repo?`,
+    `This ${ROOM_LABEL} has ${CORNER_LABEL}s still open on ${repositoryName}. Changing the repo will not move them — they stay bound to the old repo.`,
+    { cancelText: 'Cancel', confirmText: 'Change anyway', destructive: true },
+  );
+}
+
 /**
  * The Room screen's repository-change actions. They read the open-corner
  * count from the Room's corner summary, so a corner that opens while the
@@ -27,15 +37,10 @@ export function useRoomRepoReplacementGuard(
   readonly createRepository: (installationId: number, name: string) => Promise<void>;
 } {
   const openCornerCount = useRoomCornerSummary(roomId)?.cornerCount ?? 0;
-  const confirmReplacement = useCallback(async () => {
-    const hasOpenCorners = openCornerCount > 0;
-    if (!roomRepository || !hasOpenCorners) return true;
-    return Modal.confirm(
-      `Change ${ROOM_LABEL} repo?`,
-      `This ${ROOM_LABEL} has ${CORNER_LABEL}s still open on ${roomRepository.binding.name}. Changing the repo will not move them — they stay bound to the old repo.`,
-      { cancelText: 'Cancel', confirmText: 'Change anyway', destructive: true },
-    );
-  }, [openCornerCount, roomRepository]);
+  const confirmReplacement = useCallback(
+    () => confirmRoomRepoReplacement(roomRepository?.binding.name, openCornerCount),
+    [openCornerCount, roomRepository],
+  );
   const { link, create } = write;
   const selectCandidate = useCallback(
     (candidate: RepoCandidate) => {

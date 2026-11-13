@@ -9,7 +9,7 @@ import { authorizeCommandOutput, type CommandRow } from '../agent-command.js';
 import { createHash } from 'node:crypto';
 import { cornerImplementerSql } from '../corner-worker.js';
 import { currentCornerBrief, resolveCornerBriefApproval, resolveCornerBriefAttachments, resolvePendingCornerBriefAttachments, validateCornerBrief } from '../corner-brief.js';
-import { cornerTextRefusal, normalizeCornerText } from '@beeline/api-contract/daemon';
+import { fixCornerText } from '@beeline/api-contract/daemon';
 import { type SqlDatabase } from '../database.js';
 import { writeCornerTitle } from '../corner-title.js';
 import { lockCornerLifecycle } from '../corner-lifecycle.js';
@@ -175,7 +175,7 @@ import { daemonCheckReviewerAuthors } from './corner-reads.js';
     // The retired plan checklist is not stored; only a missing objective is filled.
     if (input.objective) await ctx.database.transaction(async db => {
       await lockCornerLifecycle(db, input.cornerId);
-      await writeCornerObjective(db, input.cornerId, input.objective!, true);
+      await writeCornerObjective(db, input.cornerId, fixCornerText('objective', input.objective).text, true);
     });
     return daemonWriteResult(ctx);
   }
@@ -207,14 +207,10 @@ import { daemonCheckReviewerAuthors } from './corner-reads.js';
 
   /** Retitles the corner this agent is working in, through the same write a person's rename uses. */
   export async function daemonRenameCorner(ctx: DaemonContext, input: Input<'renameCorner'>, agentId: string) {
-    const refusal = input.name === undefined && input.reviewer !== undefined ? null : cornerTextRefusal('name', input.name);
-    if (refusal) throw new Error(refusal);
-    let name = input.name;
-    const objective = input.objective === undefined ? undefined : normalizeCornerText(input.objective);
-    if (input.objective !== undefined) {
-      const objectiveRefusal = cornerTextRefusal('objective', input.objective);
-      if (objectiveRefusal) throw new Error(objectiveRefusal);
-    }
+    const fixedName = input.name === undefined && input.reviewer !== undefined ? undefined : fixCornerText('name', input.name);
+    const fixedObjective = input.objective === undefined ? undefined : fixCornerText('objective', input.objective);
+    let name = fixedName?.text;
+    const objective = fixedObjective?.text;
     if (input.brief) validateCornerBrief(input.brief);
     await daemonReach(ctx, input.cornerId, agentId);
     await ctx.database.transaction(async (db) => {
@@ -283,7 +279,7 @@ import { daemonCheckReviewerAuthors } from './corner-reads.js';
           );
         }
       }
-      if (input.name !== undefined) await writeCornerTitle(db, input.cornerId, input.name);
+      if (name !== undefined) await writeCornerTitle(db, input.cornerId, name);
     });
     return { cornerId: input.cornerId, name: name! };
   }

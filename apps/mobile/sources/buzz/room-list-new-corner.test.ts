@@ -34,7 +34,7 @@ describe('openRoomListCorner', () => {
     expect(cornerId).toMatch(
       /^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/,
     );
-    expect(title).toMatch(/^\w+-\w+-corner$/);
+    expect(title).toMatch(/^\w+-\w+-thread$/);
     expect(openCorner).toHaveBeenCalledWith('corner-new', title);
     expect(alert).not.toHaveBeenCalled();
   });
@@ -44,7 +44,7 @@ describe('openRoomListCorner', () => {
     await openRoomListCorner({ roomId: 'room-a', createCorner: null, openCorner, retry: vi.fn() });
 
     expect(openCorner).not.toHaveBeenCalled();
-    expect(alert).toHaveBeenCalledWith('Could not open corner', expect.stringContaining('corner'));
+    expect(alert).toHaveBeenCalledWith('Could not open thread', expect.stringContaining('thread'));
   });
 
   it('names a refused create and opens nothing', async () => {
@@ -59,7 +59,7 @@ describe('openRoomListCorner', () => {
     });
 
     expect(openCorner).not.toHaveBeenCalled();
-    expect(alert).toHaveBeenCalledWith('Could not open corner', 'forbidden');
+    expect(alert).toHaveBeenCalledWith('Could not open thread', 'forbidden');
   });
 
   it.each([

@@ -10,6 +10,7 @@ export interface MachineRequest {
   releaseId?: string;
   agentId?: string;
   sourceGeneration?: string;
+  force?: boolean;
 }
 
 export function machineControlPath(stateRoot: string): string {

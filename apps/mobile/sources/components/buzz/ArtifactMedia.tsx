@@ -3,8 +3,8 @@ import React, { useEffect, useRef, useState } from 'react';
 import { useArtifactRecoveryGeneration } from '@/buzz/use-artifact-recovery';
 import { appReadErrorCopy } from '@/buzz/app-error-copy';
 import { ArtifactByteError } from '@/buzz/artifact-byte-error';
-import { Image, ScrollView, Text, View } from 'react-native';
-import { StyleSheet } from 'react-native-unistyles';
+import { Image, ScrollView, YStack } from 'tamagui';
+import { T } from '@/ui/grammar';
 import type { AttachmentReference } from '@beeline/buzz-client';
 
 import { artifactTextPreview } from '@/buzz/artifact';
@@ -35,19 +35,19 @@ function useArtifactRecoveryRead() {
  * appears: cropped to the card as its own thumbnail, and fitted whole in the
  * viewer and the desktop pane. The bytes come through the app's session on
  * every surface, so nothing here leans on the signed browser link; the card's
- * `Open in browser` keeps that path for the reader who wants it.
+ * `Open in browser` keeps that path for the reader who wants it. It fills
+ * its parent; image callers own the frame, including compact transcript
+ * thumbnails.
  */
 export function ArtifactImage({
   attachment,
   fit,
   onLoadImageSize,
-  style,
   testID,
 }: {
   attachment: AttachmentReference;
   fit: 'cover' | 'contain';
   onLoadImageSize?: (width: number, height: number) => void;
-  style?: object;
   testID: string;
 }) {
   const reread = useArtifactRecoveryRead();
@@ -88,34 +88,36 @@ export function ArtifactImage({
   }, [attachment.url, attachment.mimeType, attachment.size, attachment.sha256, attachment.expired, fit]);
   if (failed) {
     return (
-      <View style={[styles.failureInset, style]} testID="artifact-image-failed">
+      <YStack width="100%" height="100%" paddingHorizontal="5" testID="artifact-image-failed">
         <IndexRow inset="flush" title="Image unavailable" />
-      </View>
+      </YStack>
     );
   }
   if (!source) {
     return (
-      <View style={[styles.imagePlaceholder, style]} testID="artifact-image-loading">
-        <Text numberOfLines={1} style={[styles.placeholderText, styles.imagePlaceholderText]}>Loading…</Text>
-      </View>
+      <YStack width="100%" height="100%" alignItems="center" justifyContent="center" overflow="hidden" testID="artifact-image-loading">
+        <T v="meta" color="secondary" textAlign="center" maxWidth="100%" numberOfLines={1}>Loading…</T>
+      </YStack>
     );
   }
   return (
     <Image
       accessibilityIgnoresInvertColors
       accessibilityLabel={attachment.title ?? attachment.name}
-      onLoad={(event) => {
-        const native = event.nativeEvent as typeof event.nativeEvent & {
-          target?: { naturalWidth?: number; naturalHeight?: number };
-        };
-        const width = native.source?.width ?? native.target?.naturalWidth ?? 0;
-        const height = native.source?.height ?? native.target?.naturalHeight ?? 0;
+      onLoad={(event: any) => {
+        // Tamagui's image wrapper calls onLoad with a top-level `target` and no
+        // `nativeEvent`; the native image reports size under `nativeEvent.source`.
+        // Read every shape defensively and never throw a fatal error on load.
+        const native = event?.nativeEvent;
+        const width = native?.source?.width ?? native?.target?.naturalWidth ?? event?.target?.naturalWidth ?? 0;
+        const height = native?.source?.height ?? native?.target?.naturalHeight ?? event?.target?.naturalHeight ?? 0;
         if (width > 0 && height > 0) onLoadImageSize?.(width, height);
       }}
       onError={() => setFailed(true)}
       resizeMode={fit}
       source={source}
-      style={style}
+      width="100%"
+      height="100%"
       testID={testID}
     />
   );
@@ -167,51 +169,32 @@ export function ArtifactText({
   }, [attachment.url, attachment.mimeType, attachment.size, attachment.sha256, attachment.expired, crop]);
   if (failed) {
     return (
-      <View style={styles.failureInset} testID="artifact-text-failed">
+      <YStack paddingHorizontal="5" testID="artifact-text-failed">
         <IndexRow inset="flush" title="File unavailable" />
-      </View>
+      </YStack>
     );
   }
   if (text == null) {
     return (
-      <View style={styles.placeholder} testID="artifact-text-loading">
-        <Text style={styles.placeholderText}>Loading…</Text>
-      </View>
+      <YStack flex={1} alignItems="center" justifyContent="center" padding="4" testID="artifact-text-loading">
+        <T v="meta" color="secondary" textAlign="center">Loading…</T>
+      </YStack>
     );
   }
   if (crop) {
     return (
-      <View pointerEvents="none" style={styles.crop} testID={testID}>
-        <Text style={styles.body}>{artifactTextPreview(text)}</Text>
-      </View>
+      <YStack pointerEvents="none" flex={1} overflow="hidden" padding="2" testID={testID}>
+        <T v="code">{artifactTextPreview(text)}</T>
+      </YStack>
     );
   }
   return (
-    <ScrollView contentContainerStyle={styles.scrollBody} testID={testID}>
-      <Text selectable style={styles.body}>
-        {text}
-      </Text>
+    <ScrollView testID={testID}>
+      <YStack padding="4">
+        <T v="code" userSelect="text">
+          {text}
+        </T>
+      </YStack>
     </ScrollView>
   );
 }
-
-const styles = StyleSheet.create((theme) => ({
-  failureInset: { paddingHorizontal: theme.buzz.roomList.edge },
-  // Image callers own the frame, including compact transcript thumbnails.
-  imagePlaceholder: {
-    alignItems: 'center',
-    justifyContent: 'center',
-    overflow: 'hidden',
-  },
-  imagePlaceholderText: { maxWidth: '100%' },
-  placeholder: {
-    flex: 1,
-    alignItems: 'center',
-    justifyContent: 'center',
-    padding: theme.buzz.space.md,
-  },
-  placeholderText: { ...theme.buzz.type.meta, color: theme.buzz.ledgerQuiet, textAlign: 'center' },
-  crop: { flex: 1, overflow: 'hidden', padding: theme.buzz.space.sm },
-  scrollBody: { padding: theme.buzz.space.md },
-  body: { ...theme.buzz.type.machine, color: theme.buzz.textPrimary },
-}));

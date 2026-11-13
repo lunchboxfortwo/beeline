@@ -77,7 +77,12 @@ export class QueryProfiler {
   readonly #window = new QueryWindow();
   #overflow = 0;
 
-  record(sql: string, durationMs: number, error?: unknown): void {
+  record(
+    sql: string,
+    durationMs: number,
+    error?: unknown,
+    timing = { poolWaitMs: 0, executionMs: durationMs },
+  ): void {
     this.#window.recordQuery(durationMs);
     const normalizedSql = sql.replace(/\s+/g, ' ').trim();
     const fingerprint = queryFingerprint(normalizedSql);
@@ -99,7 +104,8 @@ export class QueryProfiler {
     this.#profiles.set(fingerprint, next);
     if (durationMs >= 500)
       console.warn('[database] slow query', {
-        fingerprint, durationMs, code, sqlPreview: normalizedSql.slice(0, 300),
+        fingerprint, durationMs, poolWaitMs: timing.poolWaitMs, executionMs: timing.executionMs,
+        code, sqlPreview: normalizedSql.slice(0, 300),
       });
   }
 

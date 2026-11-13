@@ -20,15 +20,9 @@ vi.mock('react-native', async () => {
     View: host('View'),
   };
 });
-vi.mock('react-native-unistyles', async () => {
-  const { beelineThemes } = await import('@/buzz/groknight');
-  return {
-    StyleSheet: {
-      create: (factory: (theme: { buzz: typeof beelineThemes.obsidian }) => unknown) =>
-        factory({ buzz: beelineThemes.obsidian }),
-    },
-  };
-});
+vi.mock('tamagui', async () => (await import('@/ui/screens/transcript/grammar-hosts.test-support')).tamaguiHosts());
+vi.mock('lucide-react-native', async () => (await import('@/ui/screens/transcript/grammar-hosts.test-support')).lucideHosts());
+vi.mock('react-native-safe-area-context', () => ({ useSafeAreaInsets: () => ({ top: 0, bottom: 0, left: 0, right: 0 }) }));
 vi.mock('expo-haptics', () => ({
   impactAsync: haptics.impact,
   ImpactFeedbackStyle: { Light: 'light' },
@@ -116,22 +110,22 @@ describe('TranscriptScrubber', () => {
   it('places the bar by the list offset over the loaded rows while the list scrolls', () => {
     const { renderer, store, grab } = render(5_600, 2_500);
     // Halfway through 5000pt of scroll: halfway down the 564pt track.
-    expect(grab().props.style[1].top).toBe(0.5 * (RAIL - 36) - 14);
+    expect(grab().props.top).toBe(0.5 * (RAIL - 36) - 14);
     act(() => store.observeScroll(scroll(5_000, 5_600)));
-    expect(grab().props.style[1].top).toBe(-14);
+    expect(grab().props.top).toBe(-14);
     act(() => vi.advanceTimersByTime(SCRUBBER_LINGER_MS));
     expect(renderer.root.findAllByProps({ testID: 'transcript-scrubber-grab' })).toHaveLength(0);
   });
 
   it('scrubber-idle-1: holds the rendered thumb still through idle row measurements', () => {
     const { renderer, store, grab } = render(5_600, 2_500);
-    const top = grab().props.style[1].top;
+    const top = grab().props.top;
     for (const height of [8_600, 5_600, 9_600, 5_600]) {
       act(() => {
         store.observeContentSize(height);
         store.observeScroll(scroll(2_500.25, height));
       });
-      expect(grab().props.style[1].top).toBe(top);
+      expect(grab().props.top).toBe(top);
       act(() => vi.advanceTimersByTime(SCRUBBER_LINGER_MS / 4));
     }
     expect(renderer.root.findAllByProps({ testID: 'transcript-scrubber-grab' })).toHaveLength(0);
@@ -165,11 +159,11 @@ describe('TranscriptScrubber', () => {
     // A quarter of the track up is a quarter of the way into the loaded rows.
     act(() => grab().props.onPanResponderMove({}, { dy: -(RAIL - 36) / 4 }));
     expect(listToOffset).toHaveBeenLastCalledWith(1_250);
-    expect(grab().props.style[1].top).toBe(0.75 * (RAIL - 36) - 14);
+    expect(grab().props.top).toBe(0.75 * (RAIL - 36) - 14);
     expect(
       renderer.root.findByProps({ testID: 'transcript-scrubber-bubble' }).findByType('Text').props
         .children,
-    ).toBe('TUE 1 SEP');
+    ).toBe('Tue 1 Sep');
     // Past the top: the list goes to its oldest loaded row and no further.
     act(() => grab().props.onPanResponderMove({}, { dy: -RAIL }));
     expect(listToOffset).toHaveBeenLastCalledWith(5_000);
@@ -177,7 +171,7 @@ describe('TranscriptScrubber', () => {
     expect(renderer.root.findAllByProps({ testID: 'transcript-scrubber-bubble' })).toHaveLength(0);
     // The bar stays long enough to grab again.
     act(() => vi.advanceTimersByTime(SCRUBBER_LINGER_MS - 1));
-    expect(grab().props.style[1].top).toBe(-14);
+    expect(grab().props.top).toBe(-14);
   });
 
   it('asks the store for older rows only once the scrub reaches the oldest loaded ones', () => {
@@ -216,9 +210,9 @@ describe('TranscriptScrubber', () => {
       }, false),
     );
     expect(listToOffset).toHaveBeenCalledTimes(1);
-    const heldTop = grab().props.style[1].top;
+    const heldTop = grab().props.top;
     act(() => grab().props.onPanResponderRelease());
-    expect(grab().props.style[1].top).toBe(heldTop);
+    expect(grab().props.top).toBe(heldTop);
   });
 
   it('lands where the finger lifts after a fling, once momentum ends', () => {
@@ -326,7 +320,7 @@ describe('TranscriptScrubber on the Room transcript', () => {
           reportScroll();
           list().props.onScrollEndDrag({ nativeEvent: { contentOffset: { y: native.offset }, velocity: { y: 0 } } });
         });
-        const thumbTop = renderer.root.findByProps({ testID: 'transcript-scrubber-grab' }).props.style[1].top;
+        const thumbTop = renderer.root.findByProps({ testID: 'transcript-scrubber-grab' }).props.top;
         const atTail = initialOffset === 0;
         for (let step = 1; step <= 12; step++) {
           act(() => vi.advanceTimersByTime(234));
@@ -351,7 +345,7 @@ describe('TranscriptScrubber on the Room transcript', () => {
             .filter((node: { type: unknown }) => typeof node.type === 'string');
           if (step * 250 < SCRUBBER_LINGER_MS) {
             expect(thumbs).toHaveLength(1);
-            expect.soft(thumbs[0].props.style[1].top, `step ${step}, tail=${atTail}`).toBe(thumbTop);
+            expect.soft(thumbs[0].props.top, `step ${step}, tail=${atTail}`).toBe(thumbTop);
           } else {
             expect.soft(thumbs, `idle thumb after ${step * 250}ms, tail=${atTail}`).toHaveLength(0);
           }

@@ -10,14 +10,17 @@ export const MCP_FULL_SCOPE = MCP_SCOPES.join(' ');
 interface Grant { client_id: string; identity_id: string; scope: string }
 const opaque = () => randomBytes(32).toString('base64url');
 
-/** The caller holds the connection lock before issuing or rotating a family. */
+/** The caller holds the connection lock before issuing a token for its family. */
 export async function issueMcpTokens(db: SqlDatabase, grant: Grant, familyId: string) {
-  const access = opaque(), refresh = opaque();
-  await db.query(`INSERT INTO rooms_mcp_tokens(hash,identity_id,client_id,scope,family_id,expires_at)
-    VALUES($1,$2,$3,$4,$5,now()+interval '1 hour')`,
+  const access = opaque();
+  await db.query(`INSERT INTO rooms_mcp_tokens(hash,identity_id,client_id,scope,family_id)
+    VALUES($1,$2,$3,$4,$5)`,
     [tokenHash(access), grant.identity_id, grant.client_id, grant.scope, familyId]);
-  await db.query('INSERT INTO rooms_mcp_refresh(hash,family_id) VALUES($1,$2)', [tokenHash(refresh), familyId]);
-  return { access_token: access, refresh_token: refresh, token_type: 'Bearer', expires_in: 3600, scope: grant.scope };
+  // Older installed clients require a finite token clock to avoid refreshing
+  // again without a refresh credential. This is wire compatibility only:
+  // stored access never expires and remains subject to explicit revocation.
+  return { access_token: access, token_type: 'Bearer', scope: grant.scope,
+    expires_in: 10 * 365 * 24 * 60 * 60 };
 }
 
 export async function connectMcp(db: SqlDatabase, grant: Grant) {
@@ -43,6 +46,10 @@ export async function connectMcp(db: SqlDatabase, grant: Grant) {
   return issueMcpTokens(db, grant, familyId);
 }
 
+/** Compatibility only for clients issued expiring tokens before permanent access.
+ * The server deploys before installed clients update their token clocks. Let a
+ * held refresh credential obtain permanent access, without issuing another refresh token.
+ */
 export async function refreshMcp(db: SqlDatabase, raw: string, clientId: string, scope?: string) {
   return db.transaction(async tx => {
     // All refreshes and disconnects serialize on the connection, before the family.
@@ -58,11 +65,7 @@ export async function refreshMcp(db: SqlDatabase, raw: string, clientId: string,
       WHERE r.hash=$1 AND f.client_id=$2 AND c.revoked_at IS NULL FOR UPDATE OF f,r`,
       [tokenHash(raw), clientId])).rows[0];
     if (!row || row.revoked_at) return undefined;
-    if (row.consumed_at) {
-      // Commit the revocation before returning invalid_grant; throwing here would undo it.
-      await tx.query('UPDATE rooms_mcp_families SET revoked_at=now() WHERE id=$1', [row.id]);
-      return undefined;
-    }
+    if (row.consumed_at) return undefined;
     // Older read-only families widen to full rights; a narrower requested scope never narrows them.
     if (scope !== undefined && scope.split(' ').some(s => !MCP_SCOPES.includes(s))) return undefined;
     await tx.query('UPDATE rooms_mcp_refresh SET consumed_at=now() WHERE hash=$1', [tokenHash(raw)]);

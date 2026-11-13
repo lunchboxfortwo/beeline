@@ -9,7 +9,6 @@ import { type RoomMembershipChange } from './daemon-api-client.js';
 import { type RoomRepositoryStateResult } from '@beeline/api-contract/daemon';
 import { type GrantRunnerEndpoint } from './grant-runner.js';
 import { MonolithRoomTurnLoop } from './monolith-room-turn.js';
-import type { InterruptedTurn } from './force-update-journal.js';
 import { openRouterRoutingCacheDir } from './openrouter-routing.js';
 import { turnTraceDirectory } from './turn-trace.js';
 import { type StorageRoomState } from './helper-storage.js';
@@ -117,18 +116,12 @@ import { RoomRuntimeCoordinator, WorkspaceMembershipStatus, REMOVAL_CONFIRMATION
 
 
 
-  export function roomRuntimeCoordinatorInterruptedTurns(ctx: RoomRuntimeCoordinator): InterruptedTurn[] {
-    return [...ctx.running.values()].map((room) => room.body.interruptedTurn()).filter((turn): turn is InterruptedTurn => turn !== undefined);
-  }
-
-
-  export function roomRuntimeCoordinatorInterruptForServerMinimum(ctx: RoomRuntimeCoordinator): InterruptedTurn[] {
+  /** Stop each running turn's local run. Its claim stays; the next helper resumes it. */
+  export function roomRuntimeCoordinatorInterruptForServerMinimum(ctx: RoomRuntimeCoordinator): void {
     ctx.restartRequested = true;
     const rooms = [...ctx.running.values()];
-    const turns = rooms.map((room) => room.body.interruptForServerMinimum())
-      .filter((turn): turn is InterruptedTurn => turn !== undefined);
+    for (const room of rooms) room.body.interruptForServerMinimum();
     for (const room of rooms) room.controller.abort();
-    return turns;
   }
 
 
@@ -603,11 +596,6 @@ import { RoomRuntimeCoordinator, WorkspaceMembershipStatus, REMOVAL_CONFIRMATION
         },
       );
       if (!fetched) {
-        void ctx.options.daemonApi
-          .execute('noteEmptyRoomRepository', { roomId })
-          .catch((error) =>
-            console.warn(`[thin-core] Room ${roomId} empty-repository notice failed:`, error),
-          );
         return ctx.roomRoot(roomId);
       }
       await execFileAsync(

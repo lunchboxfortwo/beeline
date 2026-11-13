@@ -6,7 +6,10 @@ import { PostgresDatabase } from './database.js';
 import { flushOperatorSystemDms } from './operator-system-dm.js';
 import { captureServerError } from './sentry.js';
 
-vi.mock('./sentry.js', () => ({ captureServerError: vi.fn() }));
+vi.mock('./sentry.js', async (importOriginal) => ({
+  ...await importOriginal<typeof import('./sentry.js')>(),
+  captureServerError: vi.fn(),
+}));
 afterEach(() => vi.restoreAllMocks());
 
 function fixture() {

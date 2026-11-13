@@ -15,7 +15,7 @@ describe('query profiler', () => {
       profiler.record(sql, 500, { code: '57014' });
       expect(warn).toHaveBeenCalledTimes(1);
       expect(warn).toHaveBeenCalledWith('[database] slow query', {
-        fingerprint, durationMs: 500, code: '57014', sqlPreview: normalizedSql.slice(0, 300),
+        fingerprint, durationMs: 500, poolWaitMs: 0, executionMs: 500, code: '57014', sqlPreview: normalizedSql.slice(0, 300),
       });
       expect(warn.mock.calls[0]![1].sqlPreview).toHaveLength(300);
       expect(profiler.snapshot().top).toEqual([{

@@ -97,9 +97,7 @@ import { MonolithCornerTurnLoop } from './monolith-corner-turn.js';
       // An unbriefed human corner still bootstraps on its feature branch;
       // repository publication remains gated by its first assigned brief.
       const repositoryWork = !restored.brief || cornerHasRepositoryWork(restored.brief);
-      // An order gives work; a reviewer keeps its own detached copy (#3176).
-      const assigned = ctx.commandContext.current?.reason === 'order' || ctx.reviewerCheckout;
-      const checkout = await ctx.options.prepareCheckout(repositoryWork, restored.implementerAgentId, assigned);
+      const checkout = await ctx.options.prepareCheckout(repositoryWork, restored.implementerAgentId);
       if (checkout.path !== ctx.options.worktreePath) await ctx.discardSession(true);
       ctx.options.worktreePath = checkout.path;
       ctx.options.repository.gitCommonDir = checkout.gitCommonDir;

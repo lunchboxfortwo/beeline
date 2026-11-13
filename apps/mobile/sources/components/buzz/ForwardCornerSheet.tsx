@@ -1,30 +1,30 @@
 import React from 'react';
-import { CORNER_LABEL } from '@/buzz/vocabulary';
 import { HullDialog } from './HullDialog';
 
 type ForwardCornerSheetProps = {
   onClose: () => void;
   onOpen: () => void;
   visible: boolean;
+  fromMessage?: boolean;
 };
 
 /**
- * Mobile swipe-right on a message asks whether to forward it into a new
- * corner. The prompt says the chosen message becomes the starting topic.
+ * Shared new-thread prompt for the header and message swipe.
+ * Message entry keeps the chosen message as the starting topic.
  */
-export function ForwardCornerSheet({ onClose, onOpen, visible }: ForwardCornerSheetProps) {
+export function ForwardCornerSheet({ onClose, onOpen, visible, fromMessage = true }: ForwardCornerSheetProps) {
   return (
     <HullDialog
-      accessibilityLabel={`Close new ${CORNER_LABEL} prompt`}
+      accessibilityLabel={'Close new thread prompt'}
       onRequestClose={onClose}
-      body={`Start a new ${CORNER_LABEL} with the chosen message as the starting topic.`}
+      body={fromMessage ? 'Start a new thread with the chosen message as the starting topic.' : 'Start a new thread in this chat.'}
       testID="forward-corner-sheet"
-      title={`Begin a new ${CORNER_LABEL}`}
+      title={'Begin a new thread'}
       visible={visible}
       actions={[
         { label: 'Cancel', onPress: onClose, testID: 'forward-corner-cancel' },
         {
-          label: `Open ${CORNER_LABEL}`,
+          label: 'Open thread',
           onPress: onOpen,
           variant: 'primary',
           testID: 'forward-corner-open',

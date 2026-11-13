@@ -1,7 +1,6 @@
-import { useSurfaceFocus } from '@/buzz/use-surface-focus';
 import { useDesktopParentRoom } from '@/buzz/use-desktop-parent-room';
 import React, { useEffect, useState, useCallback, useMemo } from 'react';
-import { getEffectiveRelayUrl } from '@/auth/buzz-identity-storage';
+import { getEffectiveRelayUrl, peekBuzzViewerContext } from '@/auth/buzz-identity-storage';
 import { useGitHubAccess } from '@/buzz/github-access-surface';
 import { type GitHubInstallationAccess } from '@beeline/buzz-client';
 import { transitionDesktopWorkPane, type DesktopWorkPaneEvent } from '@/buzz/desktop-workbench-state';
@@ -27,17 +26,14 @@ type Props = [
   routeChannelTitle: string | undefined,
   routeCommunityId: string | undefined,
   participantPickerVisible: boolean,
-  rosterVisible: boolean,
   setMembershipError: React.Dispatch<React.SetStateAction<string | null>>,
-  profileKind: "human" | "agent",
-  profileAgentId: string | null,
 ];
 
 export function useChatDesktopLayout([
   desktopWorkPaneRef, setDesktopWorkPane, desktopExperience, desktopAvailableWidth, decodedId,
   userPubkey, roomSurface, routeParentChannelId, isDirectMessage, desktopWorkPaneContent,
   roomClient, firstUnreadMessageId, allowOlderHistoryRef, routeChannelTitle, routeCommunityId,
-  participantPickerVisible, rosterVisible, setMembershipError, profileKind, profileAgentId,
+  participantPickerVisible, setMembershipError,
 ]: Props): [
   chatListKey: { relayUrl: string; viewerPubkey: string; workspaceId: string; } | null,
   isArchived: boolean,
@@ -75,13 +71,7 @@ export function useChatDesktopLayout([
   }, [commitDesktopWorkPane, desktopExperience, desktopAvailableWidth]);
 
 
-  // The second pane belongs to the view it opened beside: switching rooms
-  // closes it. Declared before the corner subscription so a rail corner that
-  // switched rooms opens after this close, not before it.
-  useEffect(() => {
-    commitDesktopWorkPane({ type: 'close' });
-  }, [commitDesktopWorkPane, decodedId]);
-
+  // RoomVisit is keyed by Room id; its pane state starts closed for each visit.
 
   const cacheViewerPubkey = userPubkey;
 
@@ -133,19 +123,11 @@ export function useChatDesktopLayout([
 
   const readPickerRoster=useCallback((workspaceId:string)=>roomClient!.workspace(workspaceId),[roomClient]);
 
-  const {value:workspaceRoster,open:openWorkspaceRoster}=useRoomRoster(activeCommunityId,userPubkey,participantPickerVisible||rosterVisible,roomClient?readPickerRoster:undefined,setMembershipError);
-
-  const usageProfileFocused = useSurfaceFocus();
-
-  const committedUsageProfileId = desktopExperience && profileKind === 'agent' && activeCommunityId ? profileAgentId : null;
-
-  useEffect(() => {
-    if (!usageProfileFocused) return;
-  }, [committedUsageProfileId, usageProfileFocused]);
+  const {value:workspaceRoster,open:openWorkspaceRoster}=useRoomRoster(activeCommunityId,userPubkey,participantPickerVisible,roomClient?readPickerRoster:undefined,setMembershipError);
 
   // The DM header, the repository-change guard, mentions and forwarding read
   // the app-level Room list, which stays live while this Room is open.
-  const [chatListRelayUrl, setChatListRelayUrl] = useState<string | null>(null);
+  const [chatListRelayUrl, setChatListRelayUrl] = useState<string | null>(() => peekBuzzViewerContext()?.relayUrl ?? null);
 
   useEffect(() => {
     let cancelled = false;

@@ -629,6 +629,7 @@ const fixture = monolithFixture();
           accountLogin: 'owner',
           accountType: 'User',
           accountAvatarUrl: 'https://avatars.test/owner',
+          faviconUrl: 'https://github.githubassets.com/favicons/favicon.png',
           repositorySelection: 'selected',
           status: 'active',
           repositoryCount: 1,

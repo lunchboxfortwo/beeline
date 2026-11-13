@@ -39,7 +39,34 @@ import { roomSchedule } from './read-projection.js';
       subscription.source === 'webhook'
         ? { ...subscription, ...await webhookDetails(ctx.database, roomId, subscription.id, viewerId, ctx.publicOrigin) }
         : subscription));
+    // Resolve posted replies through their command's actual wake, never by time proximity.
+    const routines = [
+      ...schedules.schedules.map(item => ({ id: item.id, roomId: item.roomId, agentId: item.agentId, kind: 'schedule', event: '' })),
+      ...projectedSubscriptions.map(item => ({ id: item.id, roomId: item.roomId, agentId: item.agentId, kind: item.source === 'room' && !item.prompt ? 'legacy-room' : item.source, event: item.event })),
+    ];
+    const history = routines.length ? await ctx.database.query<{
+      routine_id: string; room_id: string; message_id: string; text: string; at: number;
+    }>(`SELECT routine.id routine_id, posted.*
+       FROM jsonb_to_recordset($1::jsonb) AS routine(id text, "roomId" text, "agentId" text, kind text, event text)
+       CROSS JOIN LATERAL (
+         SELECT DISTINCT reply.room_id, reply.id message_id, reply.text,
+           extract(epoch FROM reply.created_at)::double precision at
+         FROM agent_commands command
+         JOIN messages wake ON wake.id=command.source_message_id
+         JOIN messages reply ON reply.room_id=command.room_id AND reply.author_id=command.agent_id
+           AND reply.request_id=command.turn_request_id
+         WHERE command.room_id::text=routine."roomId" AND command.agent_id=routine."agentId"
+           AND reply.deleted_at IS NULL AND reply.presentation='message'
+           AND (CASE WHEN routine.kind='schedule' THEN
+             EXISTS(SELECT 1 FROM agent_schedule_occurrences occurrence
+               WHERE occurrence.schedule_id::text=routine.id AND occurrence.message_id=wake.id)
+             ELSE wake.system_event->>'subscriptionId'=routine.id
+               OR (routine.kind='legacy-room' AND wake.system_event->>'kind'=routine.event) END)
+         ORDER BY at DESC, message_id DESC LIMIT 5
+       ) posted`, [JSON.stringify(routines)]) : { rows: [] };
     return {
+      recentRuns: history.rows.map(row => ({ routineId: row.routine_id, roomId: row.room_id,
+        messageId: row.message_id, text: row.text, at: row.at })),
       roomName: room.rows[0]?.name ?? null,
       isDirectMessage: Boolean(room.rows[0]?.direct_participants),
       agentNames: room.rows.filter((row) => row.agent_id).map((row) => [row.agent_id, row.agent_name]),

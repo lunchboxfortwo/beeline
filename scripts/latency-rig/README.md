@@ -863,18 +863,34 @@ local socket, with no provider or wallet writes. App/key pages read metadata-onl
 rows in the disposable local database. These are rendering fixtures, not proof of
 provider sign-in, usable credentials, wallet balances or spending.
 
-`web-run.sh` captures routes by default in the same browser after interactions.
+`web-run.sh` uses a fresh browser context for every interaction sample and
+route document sample. Only authentication is copied between contexts; surface,
+outbox and session caches are not. A warm document sample first warms its own
+route, while cold samples clear app and HTTP caches. Each sample records Chromium
+heap, DOM/listener counts and cumulative task/script/layout seconds before and
+after the timed path, plus host load and available memory. Resource collection
+runs outside the response clock. Browser contexts close even after capture errors.
+
+Room/DM opens, file sends, leaving, closing and approval answers observe the
+fixture's visible result in the browser and retain the original driver-observed
+duration separately. Tap clocks start on pointerdown. File selection and upload prepare the Send
+tap, and their preparation duration is retained separately. DOM observation ends after the same two result frames, without
+charging selector-driver observation delay as product latency. These measurements
+remain headless Chromium observations, not physical phone scanout.
 Each route variant has two captures of three document loads; route percentiles
 are coverage observations at a 450 ms budget, not the forty-sample performance
 proof required for the slow-path fixes. Cold document loads clear HTTP and app
 surface caches while preserving authentication; warm loads retain those caches.
 Set `LATENCY_RIG_WEB_ROUTES_ONLY=1` for the independent route lane. For setup
 smoke checks, `LATENCY_RIG_ROUTE_SMOKE_SAMPLES=1` runs one incomplete capture;
-its gaps stay explicit and Insights rejects it as a timing series.
+its gaps stay explicit and Insights rejects it as a timing series. For isolated
+slow-path proofs, `LATENCY_RIG_ROUTE_SAMPLES_PER_CAPTURE=20` retains both captures
+and collects forty samples per route variant.
 
-Attachment timing starts at file selection through the real web document picker,
-then includes upload, Send, the rendered message and a committed attachment check.
-It excludes human time in OS picker chrome. `web-run.sh` starts a disposable,
+Attachment setup uses the real web document picker and waits for upload readiness.
+Its preparation duration is retained separately. Tap timing starts on Send and
+requires the rendered attachment; a committed attachment check follows the frame.
+Human time in OS picker chrome is excluded. `web-run.sh` starts a disposable,
 loopback-only object store with synthetic keys (at most 1 MiB per fixture object),
 then shuts it down with the local server. No production object storage is used.
 Mark-read/unread have no current user controls; agent workflow start/handoff have

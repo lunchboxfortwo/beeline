@@ -157,6 +157,18 @@ describe('live Workspace and person changes', () => {
     expect(restored!.workspaces[0]!.name).toBe('Atelier');
   });
 
+  it.each([undefined, 'https://relay.test/v1/person-avatars/11111111-1111-4111-8111-111111111111'])(
+    'keeps Settings on the same live profile picture as the viewer (%s)', async (avatar) => {
+      const { isManagedIdentity } = await import('./managed-identity-surface');
+      const address = surfaceAddress(relay, viewer, '/identity/managed');
+      await mobileSurfaceCache.write(address, {
+        personId: viewer, name: 'Viewer', avatar: 'https://avatars.githubusercontent.com/u/1', pushLevel: 'attention',
+      }, isManagedIdentity);
+      await applyPersonChanged({ ...viewerIdentity, ...(avatar ? { avatar } : {}) });
+      expect(mobileSurfaceCache.peek(address, isManagedIdentity)?.avatar).toBe(avatar);
+      expect(mobileSurfaceCache.peek(listAddress, isWorkspaceListView)!.viewer.avatar).toBe(avatar);
+  });
+
   it('refreshes the viewer\'s own name and push level from another device', async () => {
     const heard: string[] = [];
     const stop = subscribeOwnIdentityChange((person) => heard.push(person.name));

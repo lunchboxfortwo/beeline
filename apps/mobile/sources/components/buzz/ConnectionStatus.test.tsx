@@ -9,7 +9,9 @@ vi.mock('@/sync/transport/live-connection', () => ({
   useConnectionFailure: () => state.failed,
   reconnectNow: state.reconnect,
 }));
-vi.mock('react-native', () => ({ View: 'View', Pressable: 'Pressable', Text: 'Text' }));
+vi.mock('react-native', () => ({ View: 'View', Pressable: 'Pressable', Text: 'Text', PixelRatio: { get: () => 2, roundToNearestPixel: (n: number) => n } }));
+vi.mock('tamagui', async () => (await import('@/ui/screens/transcript/grammar-hosts.test-support')).tamaguiHosts());
+vi.mock('lucide-react-native', async () => (await import('@/ui/screens/transcript/grammar-hosts.test-support')).lucideHosts());
 vi.mock('react-native-safe-area-context', () => {
   const SafeAreaInsetsContext = React.createContext({ top: 24, bottom: 16, left: 0, right: 0 });
   return { SafeAreaInsetsContext, useSafeAreaInsets: () => React.useContext(SafeAreaInsetsContext) };
@@ -41,6 +43,10 @@ it('shows one recovery row only after failure and removes it on the next success
   } finally { if (tree) await act(async () => tree.unmount()); }
 });
 
+/** The banner host and the spacer that takes the status-bar inset inside it. */
+const bannerHost = (tree: any) => tree.root.find((node: any) => node.type === 'YStack' && node.props.testID === 'connection-status-disconnected');
+const insetSpacer = (tree: any) => bannerHost(tree).findAll((node: any) => node.type === 'YStack' && node.props.height !== undefined)[0];
+
 it('consumes the top safe area once and retains the mounted Room when the banner changes', async () => {
   const mounted = vi.fn();
   function Room() {
@@ -53,7 +59,7 @@ it('consumes the top safe area once and retains the mounted Room when the banner
     expect(tree.root.findByType('RoomHeader').props.insets).toMatchObject({ top: 24, bottom: 16 });
     state.failed = true;
     await act(async () => tree.update(<ConnectionStatus><Room /></ConnectionStatus>));
-    expect(tree.root.findByProps({ testID: 'connection-status-disconnected' }).props.style[1].paddingTop).toBe(24);
+    expect(insetSpacer(tree).props.height).toBe(24);
     expect(tree.root.findByType('RoomHeader').props.insets).toMatchObject({ top: 0, bottom: 16 });
     state.failed = false;
     await act(async () => tree.update(<ConnectionStatus><Room /></ConnectionStatus>));
@@ -67,18 +73,15 @@ it('keeps the actual recovery row intrinsic and all of its text wrapping at phon
   let tree: any;
   try {
     await act(async () => { tree = create(<View style={{ width: 390 }}><ConnectionStatus /></View>); });
-    const flatten = (style: any): any => Array.isArray(style)
-      ? Object.assign({}, ...style.filter(Boolean).map(flatten)) : style ?? {};
-    const banner = flatten(tree.root.findByProps({ testID: 'connection-status-disconnected' }).props.style);
-    const row = tree.root.findByType('Pressable');
-    const rowStyle = flatten(row.props.style({ pressed: false }));
+    const banner = bannerHost(tree).props;
+    const row = tree.root.find((node: any) => typeof node.type === 'string' && typeof node.props.onPress === 'function');
     const copy = tree.root.findAllByType('Text').map((node: any) => ({
       text: node.props.children, numberOfLines: node.props.numberOfLines,
     }));
     expect({
       width: 390, bannerHeight: banner.height, bannerFlex: banner.flex,
-      bannerFlexShrink: banner.flexShrink, safeAreaTop: banner.paddingTop,
-      rowHeight: rowStyle.height, rowPadding: rowStyle.paddingVertical, copy,
+      bannerFlexShrink: banner.flexShrink, safeAreaTop: insetSpacer(tree).props.height,
+      rowHeight: row.props.height, rowPadding: row.props.paddingVertical, copy,
     }).toMatchInlineSnapshot(`
       {
         "bannerFlex": undefined,
@@ -99,7 +102,7 @@ it('keeps the actual recovery row intrinsic and all of its text wrapping at phon
           },
         ],
         "rowHeight": undefined,
-        "rowPadding": 14,
+        "rowPadding": "3",
         "safeAreaTop": 24,
         "width": 390,
       }

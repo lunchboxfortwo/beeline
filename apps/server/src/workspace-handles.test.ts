@@ -4,6 +4,7 @@ import { migratedDatabase, type PgliteDatabase } from './test-support.js';
 import { removeWorkspaceMemberships } from './membership-join.js';
 import { WORKSPACE_HANDLE_SCHEMA } from './workspace-handles.js';
 import { resolveCurrentMemberMentions, taggedIdentityIdsSql, tagsKnownIdentitySql } from './message-mentions.js';
+import { PhoneService } from './phone-service.js';
 
 let db: PgliteDatabase;
 const owner = 'a'.repeat(64);
@@ -101,4 +102,38 @@ it('releases a removed member address atomically and lets the next same-name age
   await db.transaction(tx => removeWorkspaceMemberships(tx,[w.id,departed]));
   await agent(next,'x_2'); await join(w,next);
   expect(await handle(w,next)).toBe('x');
+});
+
+it('keeps chat-list author, peer and reaction handles scoped while human handles stay live', async () => {
+  const w = await workspace(), x = 'b'.repeat(64);
+  await agent(x, 'x_9'); await join(w, owner); await join(w, x);
+  await db.query(`UPDATE rooms SET direct_participants=$2::jsonb WHERE id=$1`,
+    [w.room, JSON.stringify([owner, x])]);
+  // A human's global handle wins even if an old reservation remains.
+  await db.query(`INSERT INTO workspace_handles(workspace_id,identity_id,handle) VALUES($1,$2,'old-owner')`, [w.id, owner]);
+  await db.query(`INSERT INTO messages(id,room_id,author_id,text,reactions)
+    VALUES('chat-handle-proof',$1,$2,'@owner',$3::jsonb)`,
+    [w.room, x, JSON.stringify({ '👍': [x] })]);
+  const phone = new PhoneService(db, 'http://local.test');
+  const read = async () => (await phone.readChats(w.id, owner))!.chats[0]!;
+  const chat = await read();
+  expect(chat.memberCount).toBe(2);
+  expect(chat.latestMessage?.author.handle).toBe('x');
+  expect(chat.directMessage?.peer.handle).toBe('x');
+  expect(chat.latestMessage?.reactions?.[0]?.members[0]?.handle).toBe('x');
+  expect(chat.latestMessage?.mentionsViewer).toBe(true);
+
+  await db.query(`DELETE FROM workspace_handles WHERE workspace_id=$1 AND identity_id=$2`, [w.id, x]);
+  const fallback = await read();
+  expect(fallback.latestMessage?.author.handle).toBe('x_9');
+  expect(fallback.directMessage?.peer.handle).toBe('x_9');
+
+  await db.query(`UPDATE identities SET handle='renamed-owner' WHERE id=$1`, [owner]);
+  await db.query(`UPDATE messages SET author_id=$1,text='hello',reactions='{}'::jsonb WHERE id='chat-handle-proof'`, [owner]);
+  const human = await read();
+  expect(human.latestMessage?.author.handle).toBe('renamed-owner');
+  expect(human.latestMessage?.reactions).toBeUndefined();
+  expect(human.latestMessage?.mentionsViewer).toBeUndefined();
+  await db.query(`UPDATE memberships SET removed_at=now() WHERE workspace_id=$1 AND identity_id=$2 AND room_id IS NULL`, [w.id, owner]);
+  expect(await phone.readChats(w.id, owner)).toBeNull();
 });

@@ -9,9 +9,3 @@ export const APP_UI_SIZE_LABELS: Readonly<Record<AppUiSize, string>> = {
   medium: 'Medium',
   large: 'Large',
 };
-
-export const APP_UI_SIZE_SCALE: Readonly<Record<AppUiSize, number>> = {
-  small: 0.86,
-  medium: 1,
-  large: 1.2,
-};

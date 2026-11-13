@@ -43,6 +43,9 @@ vi.mock('@/track', () => ({
 vi.mock('react-native-safe-area-context', () => ({
   useSafeAreaInsets: () => ({ top: 0, right: 0, bottom: 0, left: 0 }),
 }));
+// The prompt renders through Tamagui and the grammar; keep their native imports out of this node test.
+vi.mock('tamagui', async () => (await import('@/ui/screens/transcript/grammar-hosts.test-support')).tamaguiHosts());
+vi.mock('lucide-react-native', async () => (await import('@/ui/screens/transcript/grammar-hosts.test-support')).lucideHosts());
 vi.mock('@expo/vector-icons/Ionicons', async () => {
   const ReactModule = await import('react');
   return { default: (props: any) => ReactModule.createElement('Ionicons', props) };
@@ -50,28 +53,6 @@ vi.mock('@expo/vector-icons/Ionicons', async () => {
 vi.mock('@/components/StyledText', async () => {
   const ReactModule = await import('react');
   return { Text: (props: any) => ReactModule.createElement('Text', props, props.children) };
-});
-vi.mock('@/constants/Typography', () => ({ Typography: { default: () => ({}) } }));
-vi.mock('react-native-unistyles', async () => {
-  const { beelineThemes } = await import('@/buzz/groknight');
-  return {
-    StyleSheet: {
-      hairlineWidth: 1,
-      create: (factory: any) =>
-        factory({
-          buzz: beelineThemes.obsidian,
-          colors: {
-            surface: '#111',
-            text: '#fff',
-            textLink: '#fc0',
-            textSecondary: '#aaa',
-          },
-        }),
-    },
-    useUnistyles: () => ({
-      theme: { buzz: beelineThemes.obsidian, colors: { textLink: '#fc0', textSecondary: '#aaa' } },
-    }),
-  };
 });
 vi.mock('react-native', async () => {
   const ReactModule = await import('react');
@@ -85,6 +66,7 @@ vi.mock('react-native', async () => {
       },
     },
     Platform: { OS: 'ios' },
+    PixelRatio: { get: () => 1 },
     Pressable: host('Pressable'),
     View: host('View'),
   };
@@ -206,7 +188,7 @@ describe('root OTA update coordinator', () => {
     expect(renderer.root.findAllByProps({ testID: 'ota-update-ready-prompt' })).not.toHaveLength(0);
 
     const restart = renderer.root.find(
-      (node: any) => node.type === 'Pressable' && node.props.testID === 'ota-update-restart',
+      (node: any) => typeof node.type === 'string' && node.props.testID === 'ota-update-restart' && typeof node.props.onPress === 'function',
     );
     await act(async () => restart.props.onPress());
     expect(updates.reloadAsync).toHaveBeenCalledTimes(1);
@@ -218,7 +200,7 @@ describe('root OTA update coordinator', () => {
     availableUpdate();
     const renderer = await renderUpdateRoot(React.createElement(UpdateReadyPrompt));
     const dismiss = renderer.root.find(
-      (node: any) => node.type === 'Pressable' && node.props.testID === 'ota-update-dismiss',
+      (node: any) => typeof node.type === 'string' && node.props.testID === 'ota-update-dismiss' && typeof node.props.onPress === 'function',
     );
 
     await act(async () => dismiss.props.onPress({ stopPropagation: vi.fn() }));

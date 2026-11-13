@@ -1,0 +1,263 @@
+{
+  "id": "onboarding-chatgpt-pro-free",
+  "section": "tools",
+  "summary": "Separate documented fresh custom-MCP eligibility from an existing connection with demonstrated reply tools and unverified wakes.",
+  "place": "room",
+  "session": {
+    "agentName": "Beebee",
+    "freeAgent": true,
+    "agentCommand": "pi-acp",
+    "shell": {
+      "available": true
+    }
+  },
+  "turn": {
+    "task": {
+      "body": "I have ChatGPT Pro and an Android phone plus a Mac. Can I create a fresh custom MCP connector? Separately, my already-connected Pidoong integration exposes send_message and just successfully replied in this Room. Can that existing connection reply, and does that prove fresh setup or automatic wakes? Explain both cases; do not send another message.",
+      "fromName": "dana",
+      "commandReason": "human_tag"
+    },
+    "members": "Members (exact tag spellings):\n- @dana \u2014 Dana (person)\nYou are @beebee, a member of this Room."
+  },
+  "pass": {
+    "all": [
+      {
+        "call": "connect",
+        "args": {
+          "mode": "ensure"
+        }
+      },
+      {
+        "text": {
+          "matches": "fresh|creat|setup",
+          "flags": "i"
+        }
+      },
+      {
+        "text": {
+          "matches": "Pro",
+          "flags": "i"
+        }
+      },
+      {
+        "text": {
+          "matches": "read|fetch",
+          "flags": "i"
+        }
+      },
+      {
+        "text": {
+          "matches": "writ|repl",
+          "flags": "i"
+        }
+      },
+      {
+        "text": {
+          "matches": "computer|Mac|free.*agent|starter",
+          "flags": "i"
+        }
+      },
+      {
+        "noCall": "open_corner"
+      },
+      {
+        "noCall": "request_grant"
+      },
+      {
+        "noCall": "order"
+      },
+      {
+        "text": {
+          "matches": "existing|already.connected",
+          "flags": "i"
+        }
+      },
+      {
+        "text": {
+          "matches": "can reply|can still reply|can send|reply.*(work|prov)|repl(y|ies).*capab|capab.*repl|success.*repl",
+          "flags": "i"
+        }
+      },
+      {
+        "text": {
+          "matches": "Business|Enterprise|Edu",
+          "flags": "i"
+        }
+      },
+      {
+        "text": {
+          "matches": "wake|automatic|delivery",
+          "flags": "i"
+        }
+      },
+      {
+        "text": {
+          "not": {
+            "matches": "Pro: read only, cannot reply here|Pro (users |accounts )?(cannot|can.t) (reply|send messages)",
+            "flags": "i"
+          }
+        }
+      },
+      {
+        "text": {
+          "matches": "(not|neither|no|unverified|separate|doesn.t|does not|unknown).{0,100}(wake|automatic|delivery)|(wake|automatic|delivery).{0,100}(not|unverified|separate|unknown)",
+          "flags": "i"
+        }
+      }
+    ]
+  },
+  "scenario": {
+    "history": [
+      "Dana: My ChatGPT account is Pro.",
+      "Pidoong runtime: existing connected integration exposes send_message; tool result returned committed=true for its reply in this Room. No automatic wake or fresh connector installation was tested."
+    ],
+    "files": {},
+    "results": [
+      {
+        "call": "read",
+        "args": {
+          "facet": "procedure"
+        },
+        "result": {
+          "slug": "workspace-core",
+          "markdown": "Machine: forge. Shell and connected services are described by the session tool surface. No additional saved procedures."
+        }
+      },
+      {
+        "call": "read",
+        "args": {
+          "facet": "addresses"
+        },
+        "result": {
+          "places": [
+            {
+              "address": "09c40034-77e4-5fe3-8c40-cc637d013185",
+              "name": "free-agent-cold-email-no-repository",
+              "kind": "room"
+            }
+          ]
+        }
+      },
+      {
+        "call": "read",
+        "args": {
+          "facet": "corners"
+        },
+        "result": {
+          "corners": []
+        }
+      },
+      {
+        "call": "read",
+        "args": {
+          "facet": "members"
+        },
+        "result": {
+          "members": "Members (exact tag spellings):\n- @dana \u2014 Dana (person)\nYou are @beebee, the only agent in this Room."
+        }
+      },
+      {
+        "call": "read",
+        "args": {
+          "facet": "status"
+        },
+        "result": {
+          "address": "09c40034-77e4-5fe3-8c40-cc637d013185",
+          "name": "free-agent-cold-email-no-repository",
+          "members": "Members (exact tag spellings):\n- @dana \u2014 Dana (person)\nYou are @beebee, the only agent in this Room.",
+          "repository": null,
+          "worktree": null,
+          "corners": []
+        }
+      },
+      {
+        "call": "search",
+        "args": {
+          "scope": {
+            "matches": "^(memory|history)$"
+          }
+        },
+        "result": {
+          "matches": [],
+          "next": null
+        }
+      },
+      {
+        "call": "request_grant",
+        "args": {
+          "action": "list"
+        },
+        "result": {
+          "grants": []
+        }
+      },
+      {
+        "call": "report_feedback",
+        "args": {},
+        "result": {
+          "itemId": "simulated-feedback"
+        }
+      },
+      {
+        "call": "post",
+        "args": {},
+        "result": {
+          "id": "simulated-message",
+          "committed": true
+        }
+      },
+      {
+        "call": "read",
+        "args": {
+          "facet": "brief"
+        },
+        "result": {
+          "revisions": []
+        }
+      }
+    ],
+    "connect": {
+      "status": {
+        "apps": [
+          {
+            "id": "existing-pidoong",
+            "name": "Pidoong",
+            "tools": [
+              "send_message"
+            ],
+            "lastReply": {
+              "committed": true
+            },
+            "automaticWakes": "not verified"
+          }
+        ]
+      },
+      "discover": {
+        "apps": []
+      },
+      "ensure": {
+        "status": "ready",
+        "app": "Beeline Rooms",
+        "next": "Beeline is a shared workspace for people and agents from different AI apps and computers. Use Rooms for conversation, corners for focused work with a brief, orders and reports for delegation, memory for reusable knowledge, workflows for saved procedures, and wakes for requested schedules or events. Connect apps once for authorized agents to use; credentials and approvals remain with their owner. Share files and artifacts, research, write, build and review code. Free cloud agents let people start on a phone; connected agents use their own host and provider account. Repository work uses the linked GitHub App, checks, independent review and exact-head approval; merging does not release. Beeline coordinates work across agents while people follow results and make decisions from their phone.\n\nInvitation guide checked 2026-11-11. Ask for missing device, exact app or plan only when it changes eligibility or steps. Give only matching steps. Unverified setup is a documented candidate, never confirmed success; documentation is not a live end-to-end pass.\n\nUse https://join.usebeeline.app/mcp for new connections. Existing connections at https://join.usebeeline.app/ and https://server.usebeeline.app/mcp also work; no migration is required.\n\nChatGPT fresh custom-MCP setup: documented full write support requires Business/Enterprise/Edu plus creation permission. Free/Plus: not available on your plan; documented Pro custom-MCP creation is read/fetch only. This creation rule does not establish the capabilities of an existing integration. Pidoong demonstrated send_message on an owner-reported Pro account: that existing connection can reply. For an already connected agent, inspect its exposed tools and a successful reply; do not deny send_message based on plan alone. Existing reply capability proves neither fresh creation eligibility nor automatic wakes; verify delivery separately. Alternative: use the free agents already in Beeline, or connect an installed agent on a computer you control. Eligible web users: Plugins \u2192 + \u2192 Add custom MCP server; name Beeline, enter https://join.usebeeline.app/mcp, choose OAuth, acknowledge the warning, Create as a plugin, then install/select it in a new chat. Legacy UI: Settings \u2192 Apps \u2192 Create \u2192 Scan Tools \u2192 Create. Native iPhone/Android custom setup: no route on this app today; use eligible ChatGPT web on a computer. Phone browser creation remains unverified, so do not promise it. Official docs list no geographic restriction. Sign in with the same provider as your existing Beeline account and tap Allow. Enable Beeline in the receiving conversation. That agent checks its owner, membership and delivery itself; ask the person only to send a small tagged task in Beeline. If missing from the intended Room, use Room Members sheet > +. Do not call setup complete until a reply arrives; explain on-demand delivery when automatic wakes are unavailable.\n\nCustom connector / MCP app: for an assistant account in a supported phone app or web/desktop host. Needs that host's connector permission and plan, a Beeline sign-in, and OAuth; no local helper needed. Result: a separate connected member, with host-specific delivery. Endpoint: https://join.usebeeline.app/mcp. Sign in with the same provider as your existing Beeline account and tap Allow. Enable Beeline in the receiving conversation. That agent checks its owner, membership and delivery itself; ask the person only to send a small tagged task in Beeline. If missing from the intended Room, use Room Members sheet > +. Do not call setup complete until a reply arrives; explain on-demand delivery when automatic wakes are unavailable.\n\nExisting coding session: for Claude Code, Gemini CLI, Grok CLI, OpenCode, Pi, Antigravity, Hermes or ZCode on Mac/Linux with Node/npm and an installed signed-in harness. Paste into that session: Run npx -y usebeeline@latest join and show me the sign-in link it prints. Open the printed link on any device, sign in and Allow, membership completes after Allow; return to the same session for any delivery check. Result: this existing session joins as a member. Automatic wakes require a proved local receiver for Codex, Claude Code or Antigravity. Pi, OpenCode, Hermes, ZCode, Gemini CLI and Grok CLI reply on demand only; new tags do not wake them. Codex verification is limited to its existing Linux session; use its separate steps. Provider plan/API billing applies. No phone-local or browser-only terminal route; a phone can authorize the computer. Cursor is not in this join command; use the helper path.\n\nHelper code-in-app: for a new managed agent on a Mac/Linux computer you control, with Node 20.11+ and a signed-in supported CLI (Claude Code, Cursor, Grok, Goose, Pi or OpenCode). In Beeline Workspace Members \u2192 Add agent copy its actual npx usebeeline connect <code> command and run it on that computer; follow the harness picker. Never ask for or post the pairing code in a Room. Result: a helper-managed agent; keep its computer available and confirm online with a tagged task. Codex managed helper: not verified; no Codex helper steps are provided. Provider subscription/API billing applies. Phone and web can display the command but need a computer to run it.",
+        "existingIntegration": {
+          "name": "Pidoong",
+          "accountPlan": "owner-reported Pro",
+          "exposedTools": [
+            "send_message"
+          ],
+          "demonstratedReply": true,
+          "automaticWakes": "not verified",
+          "freshCreation": "not tested"
+        }
+      }
+    },
+    "usage": {
+      "remainingTokens": 100000
+    }
+  },
+  "tools": [],
+  "messages": [
+    "Dana: My ChatGPT account is Pro.",
+    "Pidoong runtime: existing connected integration exposes send_message; tool result returned committed=true for its reply in this Room. No automatic wake or fresh connector installation was tested."
+  ]
+}

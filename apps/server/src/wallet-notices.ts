@@ -70,8 +70,6 @@ function walletNoticePhrase(next: WalletNotice) {
   const verb =
     next.status === 'failed' || next.status === 'refused'
       ? systemMessage("wallet-notices.could-not-complete")
-      : next.status === 'pending' && !next.txUrl
-        ? systemMessage("wallet-notices.could-not-confirm")
       : next.status === 'confirmed'
         ? systemMessage("wallet-notices.confirmed")
         : systemMessage("wallet-notices.submitted");
@@ -86,7 +84,7 @@ function walletNoticePhrase(next: WalletNotice) {
     consequence: [
       actor,
       next.status === 'pending'
-        ? next.txUrl ? systemMessage("wallet-notices.confirmation-pending") : systemMessage("wallet-notices.submission-outcome-unknown")
+        ? systemMessage("wallet-notices.confirmation-pending")
         : '',
       next.reason,
       next.balanceAfterUsd ? systemMessage("wallet-notices.left", next.balanceAfterUsd) : '',

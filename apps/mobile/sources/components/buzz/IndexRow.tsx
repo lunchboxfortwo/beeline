@@ -1,53 +1,28 @@
 import React from 'react';
-import {
-  Pressable,
-  Text,
-  View,
-  type ViewProps,
-  type PressableProps,
-  type AccessibilityRole,
-  type AccessibilityState,
-} from 'react-native';
-import { StyleSheet } from 'react-native-unistyles';
-import { Typography } from '@/constants/Typography';
-import { appBoardColors } from '@/buzz/app-board-style';
-import { layout } from '@/buzz/groknight';
-import { HULL_SHEET_INSET, HULL_SHEET_ROW_HEIGHT } from '@/buzz/hull-sheet-layout';
+import { type AccessibilityRole, type AccessibilityState } from 'react-native';
+import { ListItem, XStack, YStack, type XStackProps, type YStackProps } from 'tamagui';
+import { HEIGHT, Inked, T } from '@/ui/grammar';
 import { Button } from './Button';
 import { CHEVRON_ROW_SIZE, ChevronGlyph } from './ChevronGlyph';
 import { HullSwitch } from './HullSwitch';
 import { StateDot } from './StateDot';
 
+/** A hairline rule: half a point, one device pixel on a 2x screen. */
+const HAIRLINE = 0.5;
+
 export type IndexRowInset = 'row' | 'sheet' | 'flush';
 export const IndexRowInsetContext = React.createContext<IndexRowInset>('row');
 
-/** Title edge after the row's leading identity mark. */
-export function indexRowTitleInset(
-  space: { sm: number; md: number },
-  markSize: number,
-  inset: IndexRowInset = 'row',
-): number {
-  return (
-    (inset === 'flush' ? 0 : inset === 'sheet' ? HULL_SHEET_INSET : space.sm) + markSize + space.md
-  );
-}
-
 /** Shared rich-content target: preserves the content surface's layout and nested actions. */
-export function ContentTarget(props: PressableProps) {
-  return <Pressable {...props} />;
+export function ContentTarget(props: YStackProps) {
+  return <YStack {...props} />;
 }
 
 /** A horizontal composition for inline navigation and non-index layout.
  * Unlike an index entry, its children retain their own typography and targets.
  */
-export function InlineRow({ style, onPress, ...props }: ViewProps & { onPress?: () => void }) {
-  if (onPress) return <Pressable {...props} onPress={onPress} style={[inlineStyles.row, style]} />;
-  return <View {...props} style={[inlineStyles.row, style]} />;
-}
-
-/** A contextual action or failure occupying the standard list footer height. */
-export function InlineActionRow(props: Omit<ViewProps, 'style'>) {
-  return <View {...props} style={inlineStyles.actionRow} />;
+export function InlineRow(props: XStackProps) {
+  return <XStack {...props} />;
 }
 
 /** Transcript navigation keeps rich text, an optional hanging glyph, and two
@@ -71,67 +46,62 @@ export function TranscriptNavigationRow({
   testID?: string;
 }) {
   const chevron = (
-    <View
-      style={singleDestination ? navigationStyles.inlineChevron : navigationStyles.cornerTarget}
+    <YStack
+      minHeight={HEIGHT.control}
+      flexShrink={0}
+      justifyContent="center"
+      minWidth={singleDestination ? undefined : 44}
+      alignItems={singleDestination ? undefined : 'center'}
     >
-      <ChevronGlyph
-        color={navigationStyles.chevron.color}
-        direction="right"
-        size={CHEVRON_ROW_SIZE}
-      />
-    </View>
+      <Inked color="needsYou" glyph={ChevronGlyph} direction="right" size={CHEVRON_ROW_SIZE} />
+    </YStack>
   );
+  // Centred on the first line of meta-size copy.
+  const glyph = leading ? <YStack flexShrink={0} height={44} justifyContent="center">{leading}</YStack> : null;
   if (singleDestination && trailing)
     return (
-      <View testID={testID}>
-        <Pressable
+      <YStack testID={testID}>
+        <XStack
           accessibilityRole="link"
           {...trailing}
           hitSlop={{ top: 6, bottom: 6 }}
-          style={({ pressed }) => [
-            navigationStyles.row,
-            divider && navigationStyles.divider,
-            pressed && navigationStyles.pressed,
-          ]}
+          minHeight={HEIGHT.control}
+          alignItems="flex-start"
+          gap="2"
+          borderTopWidth={divider ? HAIRLINE : 0}
+          borderTopColor="stroke"
         >
-          {leading ? <View style={navigationStyles.glyph}>{leading}</View> : null}
-          <View style={navigationStyles.copyTarget}>{children}</View>
+          {glyph}
+          <YStack minHeight={HEIGHT.control} minWidth={44} flex={1} paddingVertical="2">{children}</YStack>
           {chevron}
-        </Pressable>
-      </View>
+        </XStack>
+      </YStack>
     );
   return (
-    <View style={[navigationStyles.row, divider && navigationStyles.divider]} testID={testID}>
-      {leading ? <View style={navigationStyles.glyph}>{leading}</View> : null}
+    <XStack
+      minHeight={HEIGHT.control}
+      alignItems="flex-start"
+      gap="2"
+      borderTopWidth={divider ? HAIRLINE : 0}
+      borderTopColor="stroke"
+      testID={testID}
+    >
+      {glyph}
       {primary ? (
-        <Pressable accessibilityRole="link" {...primary} style={navigationStyles.copyTarget}>
+        <YStack accessibilityRole="link" {...primary} minHeight={HEIGHT.control} minWidth={44} flex={1} paddingVertical="2">
           {children}
-        </Pressable>
+        </YStack>
       ) : (
-        <View style={navigationStyles.copyTarget}>{children}</View>
+        <YStack minHeight={HEIGHT.control} minWidth={44} flex={1} paddingVertical="2">{children}</YStack>
       )}
       {trailing ? (
-        <Pressable accessibilityRole="link" {...trailing} style={navigationStyles.cornerTarget}>
+        <YStack accessibilityRole="link" {...trailing} minHeight={HEIGHT.control} minWidth={44} alignItems="center" justifyContent="center">
           {chevron}
-        </Pressable>
+        </YStack>
       ) : null}
-    </View>
+    </XStack>
   );
 }
-
-const inlineStyles = StyleSheet.create(() => ({ row: { flexDirection: 'row' }, actionRow: { minHeight: 44, justifyContent: 'center' } }));
-const navigationStyles = StyleSheet.create(({ buzz }) => ({
-  row: { minHeight: 44, flexDirection: 'row', alignItems: 'flex-start', gap: buzz.space.sm },
-  divider: { borderTopWidth: StyleSheet.hairlineWidth, borderTopColor: buzz.border },
-  pressed: { opacity: 0.6 },
-  // Centred on the first line of meta-size copy.
-  glyph: { flexShrink: 0, height: 44, justifyContent: 'center' },
-  copyTarget: { minHeight: 44, minWidth: 44, flex: 1, paddingVertical: buzz.space.sm },
-  cornerTarget: { minHeight: 44, minWidth: 44, alignItems: 'center', justifyContent: 'center' },
-  // The whole row owns the tap target; the mark reserves only its own width.
-  inlineChevron: { minHeight: 44, flexShrink: 0, justifyContent: 'center' },
-  chevron: { color: buzz.accent },
-}));
 
 /** Its own 44pt press for a trailing mark the row itself does not own. */
 export type IndexRowTrailingPress = {
@@ -237,11 +207,6 @@ const TRAILING_COLUMN = 72;
 /** The 44 pt tap area a quiet-line action reaches without growing the line. */
 const DESCRIPTION_ACTION_SLOP = 12;
 
-/** A described row's vertical padding and title-to-subtitle gap, from the
- *  approved roomy subtitle rows; both sit between steps of the spacing scale. */
-const DESCRIBED_ROW_PADDING = 14;
-const DESCRIPTION_GAP = 2;
-
 /**
  * The one index row: Settings, sheets and member rosters. One trailing column,
  * one pressed fill, one disabled opacity, on two densities and two insets.
@@ -315,37 +280,48 @@ export function IndexRow({
 
   const trailingMark =
     action !== undefined ? (
-      <Text numberOfLines={wrap ? undefined : 1} style={styles.action}>
+      // The one word that acts. Brass, because acting is what brass marks.
+      <T v="meta" color="needsYou" textAlign="right" numberOfLines={wrap ? undefined : 1}>
         {action}
-      </Text>
+      </T>
     ) : shownValue !== undefined ? (
-      <View style={[styles.valueRow, wholeTitle && styles.yieldingValue]}>
+      <XStack
+        alignItems="center"
+        gap="2"
+        flexShrink={wholeTitle ? 1 : undefined}
+        minWidth={wholeTitle ? 0 : undefined}
+        maxWidth={wholeTitle ? '100%' : undefined}
+      >
         {statusGlyph ? (
           <StateDot kind={statusGlyph} testID={testID ? `${testID}-glyph` : undefined} />
         ) : null}
-        <Text
+        <T
+          v={valueTone === 'accent' ? 'metaStrong' : 'meta'}
           numberOfLines={1}
-          style={[
-            styles.value,
-            appBoard && styles.boardValue,
-            valueTone === 'danger' && styles.valueDanger,
-            valueTone === 'accent' && styles.valueAccent,
-            wholeTitle && styles.yieldingValue,
-          ]}
+          textAlign="right"
+          color={valueTone === 'danger' ? 'removed' : valueTone === 'accent' ? 'needsYou' : 'secondary'}
+          flexShrink={wholeTitle ? 1 : undefined}
+          minWidth={wholeTitle ? 0 : undefined}
+          maxWidth={wholeTitle ? '100%' : undefined}
         >
           {shownValue}
-        </Text>
-      </View>
+        </T>
+      </XStack>
     ) : null;
 
-  // The trailing slot owns the width cap, not the text inside it: a percentage
-  // on the text resolves against a content-sized press target and collapses.
+  // The one trailing column: values read down one edge, and the copy beside
+  // them ends on one edge too. The trailing slot owns the width cap, not the
+  // text inside it: a percentage on the text resolves against a content-sized
+  // press target and collapses.
+  const slot = { flexShrink: 0, minWidth: TRAILING_COLUMN, maxWidth: '50%', alignItems: 'flex-end' } as const;
   const trailingColumn = toggle ? (
-    <View
+    <YStack
       accessibilityElementsHidden={rowIsSwitch}
       importantForAccessibility={rowIsSwitch ? 'no-hide-descendants' : 'auto'}
+      {...slot}
       // A pressable row is the switch's tap target; a bare switch needs its own 44.
-      style={[styles.trailingSlot, !onPress && styles.trailingControl]}
+      minHeight={onPress ? 0 : HEIGHT.control}
+      justifyContent={onPress ? undefined : 'center'}
     >
       <HullSwitch
         accessibilityLabel={toggle.accessibilityLabel ?? title}
@@ -355,9 +331,9 @@ export function IndexRow({
         testID={testID ? `${testID}-toggle` : undefined}
         value={toggle.value}
       />
-    </View>
+    </YStack>
   ) : actionControl !== undefined ? (
-    <View style={styles.trailingSlot}>
+    <YStack {...slot}>
       <Button
         size="inline"
         label={actionControl.label}
@@ -367,111 +343,114 @@ export function IndexRow({
         onPress={actionControl.onPress}
         testID={actionControl.testID}
       />
-    </View>
+    </YStack>
   ) : trailing !== undefined ? (
-    <View style={styles.trailingSlot}>{trailing}</View>
+    <YStack {...slot}>{trailing}</YStack>
   ) : trailingMark === null ? null : trailingPress ? (
-    <Pressable
+    <YStack
       accessibilityLabel={trailingPress.accessibilityLabel}
       accessibilityRole="button"
       accessibilityState={{ disabled: Boolean(trailingPress.disabled) }}
       disabled={trailingPress.disabled}
       onPress={trailingPress.onPress}
-      style={[
-        styles.trailingSlot,
-        styles.trailingControl,
-        trailingPress.disabled && styles.disabled,
-      ]}
+      {...slot}
+      minHeight={HEIGHT.control}
+      justifyContent="center"
+      opacity={trailingPress.disabled ? 0.42 : 1}
       testID={trailingPress.testID}
     >
       {trailingMark}
-    </Pressable>
+    </YStack>
   ) : (
-    <View style={[styles.trailingSlot, wholeTitle && styles.yieldingSlot]}>{trailingMark}</View>
+    <YStack {...slot} flexShrink={wholeTitle ? 1 : 0} minWidth={wholeTitle ? 0 : TRAILING_COLUMN}>
+      {trailingMark}
+    </YStack>
   );
 
   const body = (
     <>
       {leading}
-      <View style={[styles.copy, wholeTitle && styles.wholeCopy]}>
-        <View style={styles.titleLine}>
-          <Text
+      <YStack
+        flex={wholeTitle ? undefined : 1}
+        // A whole title sizes the copy column to itself; the trailing value yields.
+        flexGrow={wholeTitle ? 1 : undefined}
+        flexShrink={wholeTitle ? 0 : undefined}
+        flexBasis={wholeTitle ? 'auto' : undefined}
+        minWidth={0}
+      >
+        <XStack alignItems="baseline" gap="2">
+          <T
+            v="body"
             numberOfLines={wrap ? undefined : 1}
-            style={[
-              styles.title,
-              appBoard && styles.boardTitle,
-              tone === 'quiet' && styles.quiet,
-              tone === 'action' && styles.actionTitle,
-              tone === 'destructive' && styles.destructive,
-            ]}
+            color={tone === 'quiet' ? 'secondary' : tone === 'action' ? 'needsYou' : tone === 'destructive' ? 'removed' : 'ink'}
           >
             {title}
-          </Text>
+          </T>
           {titleAside ? (
-            <Text numberOfLines={1} style={styles.titleAside}>
-              {titleAside}
-            </Text>
+            <>
+              <YStack flex={1} />
+              <T v="meta" color="secondary" numberOfLines={1} flexShrink={0} maxWidth="60%" textAlign="right">
+                {titleAside}
+              </T>
+            </>
           ) : null}
-        </View>
+        </XStack>
         {description || descriptionContent ? (
-          <View style={[styles.descriptionRow, descriptionLead && styles.descriptionLeadRow]}>
+          <XStack alignItems="center" gap={descriptionLead ? '1' : '2'} marginTop="0.5">
             {descriptionLead ? (
-              <Text
+              <T
+                v="meta"
+                color="secondary"
                 numberOfLines={1}
-                style={styles.descriptionLead}
+                flexShrink={0}
                 testID={testID ? `${testID}-description-lead` : undefined}
               >
                 {descriptionLead}
-              </Text>
+              </T>
             ) : null}
             {descriptionContent ?? (
-              <Text
+              // `flex: 1` fills the copy column, so an affordance hanging off its end
+              // lands on one edge down the list instead of chasing each row's text.
+              <T
+                v="meta"
+                color={descriptionTone === 'danger' ? 'removed' : 'secondary'}
+                flex={1}
+                minWidth={0}
                 numberOfLines={wrap ? undefined : descriptionLead || descriptionAction ? 1 : descriptionLines}
-                style={[
-                  descriptionLead ? styles.descriptionTail : styles.description,
-                  descriptionTone === 'danger' && styles.descriptionDanger,
-                ]}
               >
                 {description}
-              </Text>
+              </T>
             )}
             {descriptionAction ? (
-              <Pressable
+              <YStack
                 accessibilityLabel={descriptionAction.accessibilityLabel ?? descriptionAction.label}
                 accessibilityRole="button"
                 hitSlop={DESCRIPTION_ACTION_SLOP}
                 onPress={descriptionAction.onPress}
                 testID={descriptionAction.testID}
               >
-                <Text style={styles.descriptionAction}>{descriptionAction.label}</Text>
-              </Pressable>
+                <T v="meta" color="secondary">{descriptionAction.label}</T>
+              </YStack>
             ) : null}
-          </View>
+          </XStack>
         ) : null}
         {descriptionDetail || descriptionDetailContent ? (
-          <View
-            style={[
-              styles.descriptionRow,
-              Boolean(descriptionDetailContent) && styles.inlineDetail,
-            ]}
-          >
+          <XStack alignItems="center" gap={descriptionDetailContent ? 0 : '2'} marginTop="0.5">
             {descriptionDetailContent ?? (
-              <Text numberOfLines={wrap ? undefined : DESCRIPTION_LINES} style={styles.description}>
+              <T v="meta" color="secondary" flex={1} minWidth={0} numberOfLines={wrap ? undefined : DESCRIPTION_LINES}>
                 {descriptionDetail}
-              </Text>
+              </T>
             )}
-          </View>
+          </XStack>
         ) : null}
-      </View>
+      </YStack>
       {trailingColumn}
       {chevron ? (
-        <View style={styles.chevron}>
-          <ChevronGlyph
-            color={styles.chevronMark.color}
-            direction={chevron}
-            size={CHEVRON_ROW_SIZE}
-          />
-        </View>
+        // Right-aligned in its own column so the glyph's trailing edge lands on
+        // the row's padding edge — the one axis every trailing mark shares.
+        <YStack width={16} alignItems="flex-end" justifyContent="center">
+          <Inked color="secondary" glyph={ChevronGlyph} direction={chevron} size={CHEVRON_ROW_SIZE} />
+        </YStack>
       ) : null}
     </>
   );
@@ -479,32 +458,41 @@ export function IndexRow({
   const described = Boolean(
     description || descriptionContent || descriptionDetail || descriptionDetailContent,
   );
-  const rowStyle = [
-    styles.row,
-    density === 'sheet' ? styles.sheetRow : styles.pageRow,
-    inset === 'flush' ? undefined : inset === 'sheet' ? styles.sheetInset : styles.rowInset,
-    (divider ?? (density === 'sheet' ? 'top' : 'bottom')) === 'top'
-      ? styles.dividerTop
-      : styles.dividerBottom,
-    described && density === 'page' && styles.describedRow,
-    appBoard && styles.boardRow,
-  ];
+  const dividerTop = !appBoard && (divider ?? (density === 'sheet' ? 'top' : 'bottom')) === 'top';
+  // A page row with a subtitle keeps its text clear of both hairlines; one
+  // without stays exactly its density's height. App-board rows are flush with
+  // one full hairline below.
+  const row = (
+    {
+      flexDirection: 'row',
+      alignItems: 'center',
+      borderTopWidth: dividerTop ? HAIRLINE : 0,
+      borderBottomWidth: dividerTop ? 0 : appBoard ? 1 : HAIRLINE,
+      opacity: disabled ? 0.42 : 1,
+      testID,
+    }
+  ) as const;
 
   if (!onPress) {
     return (
-      <View
+      <XStack
         accessibilityLabel={rowLabel}
         accessibilityRole={accessibilityRole}
         accessibilityState={accessibilityState ?? (disabled ? { disabled } : undefined)}
-        style={[rowStyle, disabled && styles.disabled]}
-        testID={testID}
+        {...row}
+        gap="4"
+        minHeight={density === 'sheet' && !appBoard ? HEIGHT.tabBar : HEIGHT.sheetRow}
+        paddingVertical={described && density === 'page' && !appBoard ? '3' : density === 'sheet' && !appBoard ? '2' : 0}
+        paddingHorizontal={appBoard || inset === 'flush' ? 0 : inset === 'sheet' ? '6' : '2'}
+        borderTopColor="stroke"
+        borderBottomColor="stroke"
       >
         {body}
-      </View>
+      </XStack>
     );
   }
   return (
-    <Pressable
+    <ListItem
       accessibilityLabel={rowLabel}
       accessibilityRole={accessibilityRole ?? (rowIsSwitch ? 'switch' : 'button')}
       accessibilityState={
@@ -513,144 +501,17 @@ export function IndexRow({
       }
       disabled={disabled}
       onPress={onPress}
-      style={({ pressed }) => [rowStyle, pressed && styles.pressed, disabled && styles.disabled]}
-      testID={testID}
+      {...row}
+      padding="0"
+      backgroundColor="transparent"
+      gap="4"
+      minHeight={density === 'sheet' && !appBoard ? HEIGHT.tabBar : HEIGHT.sheetRow}
+      paddingVertical={described && density === 'page' && !appBoard ? '3' : density === 'sheet' && !appBoard ? '2' : 0}
+      paddingHorizontal={appBoard || inset === 'flush' ? 0 : inset === 'sheet' ? '6' : '2'}
+      borderTopColor="stroke"
+      borderBottomColor="stroke"
     >
       {body}
-    </Pressable>
+    </ListItem>
   );
 }
-
-const styles = StyleSheet.create((theme) => {
-  const hull = theme.buzz;
-  const board = appBoardColors(hull);
-  return {
-    row: {
-      flexDirection: 'row',
-      alignItems: 'center',
-      gap: hull.space.md,
-    },
-    pageRow: { minHeight: layout.row },
-    sheetRow: { minHeight: HULL_SHEET_ROW_HEIGHT, paddingVertical: hull.space.sm },
-    rowInset: { paddingHorizontal: hull.space.sm },
-    sheetInset: { paddingHorizontal: HULL_SHEET_INSET },
-    dividerTop: { borderTopWidth: StyleSheet.hairlineWidth, borderTopColor: hull.border },
-    dividerBottom: { borderBottomWidth: StyleSheet.hairlineWidth, borderBottomColor: hull.border },
-    // A page row with a subtitle keeps its text clear of both hairlines; one
-    // without stays exactly its density's height.
-    describedRow: { paddingVertical: DESCRIBED_ROW_PADDING },
-    boardRow: {
-      minHeight: layout.row,
-      gap: hull.space.md,
-      paddingHorizontal: 0,
-      borderTopWidth: 0,
-      borderBottomWidth: 1,
-      borderBottomColor: board.border,
-    },
-    pressed: { backgroundColor: hull.bgPressed },
-    disabled: { opacity: 0.42 },
-    copy: { flex: 1, minWidth: 0 },
-    // A whole title sizes the copy column to itself; the trailing value yields.
-    wholeCopy: { flexGrow: 1, flexShrink: 0, flexBasis: 'auto' },
-    yieldingSlot: { flexShrink: 1, minWidth: 0 },
-    yieldingValue: { flexShrink: 1, minWidth: 0, maxWidth: '100%' },
-    titleLine: { flexDirection: 'row', alignItems: 'baseline', gap: hull.space.sm },
-    title: {
-      ...Typography.default(),
-      ...hull.type.body,
-      flexShrink: 1,
-      color: hull.textPrimary,
-    },
-    titleAside: {
-      ...Typography.default(),
-      ...hull.type.meta,
-      flexShrink: 0,
-      marginLeft: 'auto',
-      maxWidth: '60%',
-      textAlign: 'right',
-      color: hull.textMuted,
-    },
-    boardTitle: { ...Typography.default(), ...hull.type.body, color: board.ink },
-    quiet: { color: hull.textMuted },
-    actionTitle: { color: hull.accent },
-    destructive: { color: hull.dialogDanger },
-    descriptionRow: {
-      flexDirection: 'row',
-      alignItems: 'center',
-      gap: hull.space.sm,
-      marginTop: DESCRIPTION_GAP,
-    },
-    inlineDetail: { gap: 0 },
-    descriptionLeadRow: { gap: hull.space.xs },
-    descriptionLead: {
-      ...Typography.default(),
-      ...hull.type.meta,
-      flexShrink: 0,
-      color: hull.textMuted,
-    },
-    descriptionTail: {
-      ...Typography.default(),
-      ...hull.type.meta,
-      flex: 1,
-      minWidth: 0,
-      color: hull.textMuted,
-    },
-    // `flex: 1` fills the copy column, so an affordance hanging off its end
-    // lands on one edge down the list instead of chasing each row's text.
-    description: {
-      ...Typography.default(),
-      ...hull.type.meta,
-      flex: 1,
-      minWidth: 0,
-      color: hull.textMuted,
-    },
-    descriptionDanger: { color: hull.dialogDanger },
-    descriptionAction: { ...Typography.default(), ...hull.type.meta, color: hull.textSecondary },
-    value: {
-      ...Typography.default(),
-      ...hull.type.meta,
-      textAlign: 'right',
-      color: hull.textMuted,
-    },
-    boardValue: { ...Typography.default(), ...hull.type.meta, color: board.quiet },
-    valueDanger: { color: hull.dialogDanger },
-    valueAccent: { ...Typography.default('medium'), ...hull.type.meta, color: hull.accent },
-    valueRow: { flexDirection: 'row', alignItems: 'center', gap: hull.space.sm },
-    // The one word that acts. Brass, because acting is what brass marks.
-    action: { ...Typography.default(), ...hull.type.meta, textAlign: 'right', color: hull.accent },
-    // The one trailing column: values read down one edge, and the copy beside
-    // them ends on one edge too.
-    trailingSlot: {
-      flexShrink: 0,
-      minWidth: TRAILING_COLUMN,
-      maxWidth: '50%',
-      alignItems: 'flex-end',
-    },
-    trailingControl: { minHeight: 44, justifyContent: 'center' },
-    // Right-aligned in its own column so the glyph's trailing edge lands on
-    // the row's padding edge — the one axis every trailing mark shares.
-    chevron: { width: hull.space.md, alignItems: 'flex-end', justifyContent: 'center' },
-    chevronMark: { color: hull.textMuted },
-  };
-});
-
-/** Compact, wrapping facts inside a transcript card. */
-export function TranscriptFactRow({ label, value }: { label: string; value: string }) {
-  return (
-    <View style={factStyles.row}>
-      <Text style={factStyles.label}>{label}</Text>
-      <Text style={factStyles.value}>{value}</Text>
-    </View>
-  );
-}
-const factStyles = StyleSheet.create(({ buzz }) => ({
-  row: {
-    flexDirection: 'row',
-    gap: buzz.space.sm,
-    paddingVertical: buzz.space.sm,
-    borderTopWidth: StyleSheet.hairlineWidth,
-    borderTopColor: buzz.border,
-  },
-  label: { ...buzz.type.meta, color: buzz.ledgerQuiet },
-  value: { ...buzz.type.meta, color: buzz.textPrimary, flex: 1, textAlign: 'right' },
-}));

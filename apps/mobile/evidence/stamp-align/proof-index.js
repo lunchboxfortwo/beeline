@@ -6,6 +6,7 @@ import { SafeAreaProvider } from 'react-native-safe-area-context';
 import { LedgerRoomUpdate, LedgerSystemLine } from '../sources/components/buzz/Ledger';
 import { beelineThemes } from '../sources/buzz/groknight';
 import { proofTheme } from './settings';
+import { GrammarProvider } from '../sources/ui/GrammarProvider';
 const build = process.env.EXPO_PUBLIC_STAMP_BUILD ?? 'pr';
 function Proof() {
   const [loaded] = useFonts({
@@ -44,4 +45,4 @@ function Proof() {
     </SafeAreaProvider>
   );
 }
-registerRootComponent(Proof);
+registerRootComponent(() => <GrammarProvider><Proof /></GrammarProvider>);

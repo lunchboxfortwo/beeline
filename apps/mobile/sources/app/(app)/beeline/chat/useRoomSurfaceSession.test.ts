@@ -7,7 +7,7 @@ import { act, create, type ReactTestRenderer } from 'react-test-renderer';
 import { describe, expect, it, vi } from 'vitest';
 import { SurfaceResponseCache } from '@beeline/buzz-client';
 import * as runtimeConfig from '@/buzz/runtime-config';
-import { prefetchPushRoom } from '@/push/push-room-prefetch';
+import { prefetchDirectMessageOpen, prefetchPushRoom } from '@/push/push-room-prefetch';
 import { mobileSurfaceCache } from '@/buzz/surface-storage';
 import { READ_CURSOR_DEBOUNCE_MS } from '@/buzz/read-cursor-advance';
 import BuzzChat from './[channelId]';
@@ -44,15 +44,21 @@ const scope1 = fixtureScope1();
   });
 });
 describe('useRoomSurfaceSession', () => {
-  it('starts a known-viewer cache miss on the tap stack before route mounting', () => {
-    controls.hotViewer = true;
+  it.each(['push', 'known-dm', 'other-peer', 'signed-out', 'other-server'])('starts only the authorized %s read on the tap stack before route mounting', (entry) => {
+    controls.hotViewer = entry !== 'signed-out';
     controls.cached = null;
     const config = vi.spyOn(runtimeConfig, 'getBuzzRuntimeConfig').mockReturnValue({
-      monolithUrl: 'https://relay.test', relayUrl: 'https://usebeeline.app',
+      monolithUrl: entry === 'other-server' ? 'https://other.test' : 'https://relay.test', relayUrl: 'https://usebeeline.app',
     });
     try {
-      prefetchPushRoom('cold-tap-immediate', 'room-missing');
-      expect(controls.roomReads).toBe(1);
+      if (entry === 'push') prefetchPushRoom('cold-tap-immediate', 'room-missing');
+      else {
+        if (entry === 'known-dm' || entry === 'other-peer') vi.mocked(mobileSurfaceCache.peek).mockReturnValueOnce({ chats: [
+          { room: { id: 'room-missing' }, directMessage: { peer: { pubkey: 'agent' } } },
+        ] } as never);
+        prefetchDirectMessageOpen('workspace', entry === 'other-peer' ? 'someone-else' : 'agent');
+      }
+      expect(controls.roomReads).toBe(entry === 'push' || entry === 'known-dm' ? 1 : 0);
     } finally { config.mockRestore(); }
   });
 

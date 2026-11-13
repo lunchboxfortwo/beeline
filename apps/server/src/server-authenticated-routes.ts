@@ -8,7 +8,7 @@ import { wantsCompactView, COMPACT_VIEW_HEADER, compactRoomView, compactRoomHist
 import type { RoomHistoryView } from "@beeline/api-contract/phone";
 import { TRANSCRIPTION_MAXIMUM_BYTES } from "./speech-transcription.js";
 import { ARTIFACT_MAXIMUM_BYTES, decodeArtifactTitleHeader } from "@beeline/api-contract/daemon";
-import { owedMentions } from "./owed-mentions.js";
+import { fullRoomId, owedMentions } from "./owed-mentions.js";
 import { DAEMON_OPERATION_NAMES } from "./daemon-service.js";
 import { ServerOptions, json, bytes, body } from './server.js';
 import { PhoneHttpOperation, phoneIdentity, phoneFamilies, daemonIdentity, refuseDaemon } from './server-create-beeline-server.js';
@@ -20,18 +20,22 @@ export async function routeAuthenticated(request: IncomingMessage, response: Ser
   const identityId = await phoneIdentity(request, options);
   if (
     method === 'GET' &&
-    (url.pathname.startsWith('/v1/avatars/') || url.pathname.startsWith('/v1/agent-avatars/'))
+    (url.pathname.startsWith('/v1/avatars/') || url.pathname.startsWith('/v1/agent-avatars/') ||
+      url.pathname.startsWith('/v1/person-avatars/'))
   ) {
     const agentAvatar = url.pathname.startsWith('/v1/agent-avatars/');
+    const personAvatar = url.pathname.startsWith('/v1/person-avatars/');
     const id = url.pathname.slice(
-      agentAvatar ? '/v1/agent-avatars/'.length : '/v1/avatars/'.length,
+      agentAvatar ? '/v1/agent-avatars/'.length : personAvatar ? '/v1/person-avatars/'.length : '/v1/avatars/'.length,
     );
     const avatar = isMediaId(id)
       ? (
           await options.database.query<{ bytes: Uint8Array }>(
             agentAvatar
               ? 'SELECT bytes FROM agent_avatars WHERE id=$1'
-              : 'SELECT bytes FROM avatars WHERE id=$1',
+              : personAvatar
+                ? 'SELECT bytes FROM person_avatars WHERE id=$1'
+                : 'SELECT bytes FROM avatars WHERE id=$1',
             [id],
           )
         ).rows[0]
@@ -418,7 +422,9 @@ export async function routeAuthenticated(request: IncomingMessage, response: Ser
   if (method === 'GET' && url.pathname === '/v1/daemon/owed-mentions') {
     const agentId = await daemonIdentity(request, options);
     if (!agentId) { await refuseDaemon(request, response, options); return; }
-    json(response, 200, { owedMentions: await owedMentions(options.database, agentId) });
+    const placeHeader = request.headers['x-beeline-place'];
+    const place = fullRoomId(Array.isArray(placeHeader) ? placeHeader[0] : placeHeader);
+    json(response, 200, { owedMentions: await owedMentions(options.database, agentId, place) });
     return;
   }
   // Supported installed helpers still use this ingress: HelperVersionGate has
@@ -456,7 +462,11 @@ export async function routeAuthenticated(request: IncomingMessage, response: Ser
     // Only model tool responses need this private context. It must never turn a
     // committed operation into a failure, and never adds a daemon operation.
     if (request.headers['x-beeline-tool-result'] === '1') {
-      try { context = { _beelineOwedMentions: await owedMentions(options.database, agentId) }; }
+      try {
+        const placeHeader = request.headers['x-beeline-place'];
+        const mentions = await owedMentions(options.database, agentId, fullRoomId(Array.isArray(placeHeader) ? placeHeader[0] : placeHeader));
+        if (mentions.length) context = { _beelineOwedMentions: mentions };
+      }
       catch { /* Keep the original tool result when its optional context is unavailable. */ }
     }
     json(response, 200, context._beelineOwedMentions ? { _beelineToolResult: result, ...context } : result);

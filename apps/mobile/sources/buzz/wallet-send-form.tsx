@@ -1,9 +1,7 @@
-import { Button } from '@/components/buzz/Button';
-import { HullDialogInput } from '@/components/buzz/HullDialog';
 import { useTextDraft } from '@/buzz/use-text-draft';
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import { Pressable, Text, TextInput, View } from 'react-native';
-import { StyleSheet } from 'react-native-unistyles';
+import { Input, XStack, YStack } from 'tamagui';
+import { Btn, T } from '@/ui/grammar';
 import { SettingsRow } from '@/components/buzz/SettingsRow';
 import { HullActionSheetModal, HullActionSheetRow } from '@/components/buzz/HullActionSheet';
 import { chainFeeLabel, getWalletSource } from '@/buzz/wallet-source';
@@ -68,43 +66,40 @@ export function WalletSendForm({ workspaceId}: { workspaceId: string }) {
     }
   }, [workspaceId, chain, amount, to, defaultAsset, amountDraft, toDraft]);
 
+  const blocked = sending || outcome?.outcome === 'pending' || !amount || !to;
   return (
-    <View testID="wallet-send-form">
-      <Text style={styles.label}>Amount</Text>
-      <View style={styles.amountRow}>
-        <HullDialogInput
+    <YStack testID="wallet-send-form">
+      <T v="meta" color="secondary">Amount</T>
+      <XStack alignItems="baseline" gap="2">
+        <Input
+          flex={1}
           keyboardType="decimal-pad"
           onChangeText={setAmount}
-          style={styles.amountInput}
           testID="wallet-send-amount"
           value={amount}
         />
-        <Text style={styles.amountAsset}>{defaultAsset.toUpperCase()}</Text>
-      </View>
-      <Text style={styles.label}>To</Text>
-      <HullDialogInput
+        <T v="meta" color="secondary">{defaultAsset.toUpperCase()}</T>
+      </XStack>
+      <T v="meta" color="secondary">To</T>
+      <Input
         autoCapitalize="none"
         autoCorrect={false}
         onChangeText={setTo}
         placeholder="0x…"
-        placeholderTextColor={styles.fieldPlaceholder.color}
-        style={styles.field}
+        placeholderTextColor="secondary"
         testID="wallet-send-to"
         value={to}
       />
-      <Text style={[styles.label, styles.labelGap]}>Via</Text>
-      <Pressable onPress={() => setPickerOpen(true)} testID="wallet-send-chain">
+      <T v="meta" color="secondary" marginTop="4">Via</T>
+      <YStack onPress={() => setPickerOpen(true)} accessibilityRole="button" testID="wallet-send-chain">
         <SettingsRow
           description={chain ? chainFeeLabel(chain) : undefined}
           testID="wallet-send-chain-row"
           title={chain?.name ?? 'Chain'}
         />
-      </Pressable>
+      </YStack>
       {outcome ? (
-        <Text
-          style={outcome.outcome === 'sent' ? styles.sent : styles.refused}
-          testID="wallet-send-outcome"
-        >
+        <T v="meta" color={outcome.outcome === 'sent' ? 'ink' : 'secondary'} marginTop="4" testID="wallet-send-outcome">
           {outcome.outcome === 'sent'
             ? `Sent ${outcome.amountText} · ${outcome.balanceAfterUsd} left`
             : outcome.outcome === 'insufficient'
@@ -114,20 +109,19 @@ export function WalletSendForm({ workspaceId}: { workspaceId: string }) {
                 : outcome.outcome === 'pending'
                   ? `Result pending · ${outcome.reason}`
                   : `Could not send · ${outcome.reason}`}
-        </Text>
+        </T>
       ) : null}
-      <Button
+      <Btn
+        kind="quiet"
         accessibilityRole="button"
-        disabled={sending || outcome?.outcome === 'pending' || !amount || !to}
+        disabled={blocked}
         onPress={send}
         testID="wallet-send-confirm"
-        label={'Send'}
-        variant="quiet"
-        appearance={{
-          control: styles.sendPress,
-          label: [styles.sendButton, (sending || outcome?.outcome === 'pending' || !amount || !to) && styles.sendDisabled],
-        }}
-      />
+        label="Send"
+        marginTop="6"
+      >
+        <T v="heading" color="needsYou" textAlign="center">Send</T>
+      </Btn>
       <HullActionSheetModal
         onClose={() => setPickerOpen(false)}
         testID="wallet-chain-picker"
@@ -149,38 +143,6 @@ export function WalletSendForm({ workspaceId}: { workspaceId: string }) {
           />
         ))}
       </HullActionSheetModal>
-    </View>
+    </YStack>
   );
 }
-
-const styles = StyleSheet.create((theme) => {
-  const hull = theme.buzz;
-  return {
-    label: { ...hull.type.meta, color: hull.textSecondary },
-    labelGap: { marginTop: hull.space.md },
-    amountRow: { alignItems: 'baseline', flexDirection: 'row', gap: hull.space.sm },
-    amountInput: {
-      ...hull.type.hero,
-      color: hull.textPrimary,
-      flex: 1,
-    },
-    amountAsset: { ...hull.type.meta, color: hull.textSecondary },
-    field: {
-      ...hull.type.body,
-      borderBottomColor: hull.border,
-      borderBottomWidth: StyleSheet.hairlineWidth,
-      color: hull.textPrimary,
-      paddingVertical: hull.space.sm,
-    },
-    fieldPlaceholder: { color: hull.textMuted },
-    sent: { ...hull.type.meta, color: hull.textPrimary, marginTop: hull.space.md },
-    refused: { ...hull.type.meta, color: hull.textSecondary, marginTop: hull.space.md },
-    sendPress: { minHeight: 44, justifyContent: 'center', marginTop: hull.space.lg },
-    sendButton: {
-      ...hull.type.bodyStrong,
-      color: hull.agentAccent,
-      textAlign: 'center',
-    },
-    sendDisabled: { opacity: 0.42 },
-  };
-});

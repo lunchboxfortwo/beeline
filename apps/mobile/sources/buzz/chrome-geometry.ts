@@ -1,5 +1,5 @@
 /**
- * Header chrome shares a 24 viewBox with RoomGlyph. 1.75 is the FAB chrome
+ * Header chrome shares a 24 viewBox with the other header marks. 1.75 is the FAB chrome
  * stroke in that viewBox; at the 16px size this was tuned for it paints
  * ~1.17px, in the same band as the Ionicons header peers. A 28px header mark
  * keeps that painted weight by scaling the viewBox stroke down — a stroke

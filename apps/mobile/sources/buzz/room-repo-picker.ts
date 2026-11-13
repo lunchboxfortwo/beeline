@@ -12,6 +12,8 @@ export type RepoCandidate = {
   remote?: string;
   githubInstallationId?: number;
   defaultBranch?: string;
+  avatarUrl?: string;
+  faviconUrl?: string;
   /** GitHub visibility; undefined when unknown. */
   private?: boolean;
 };

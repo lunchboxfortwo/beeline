@@ -2,19 +2,19 @@ import { watchSessionRequired } from '@/auth/session-required';
 import { router, Stack, usePathname } from 'expo-router';
 import 'react-native-reanimated';
 import * as React from 'react';
-import { View } from 'react-native';
-import { useUnistyles } from 'react-native-unistyles';
+import { YStack, useTheme, useThemeName } from 'tamagui';
 import { statusBarStyleForTheme } from '@/components/StatusBarProvider';
 import { ConnectionStatus } from '@/components/buzz/ConnectionStatus';
 import { CornerOpenToast } from '@/components/buzz/CornerOpenToast';
 import { useIsDesktop } from '@/utils/responsive';
+import { PhoneTabScreen } from '@/ui/shell/PhoneTabScreen';
 
 /** @public Expo Router consumes this named export through its filesystem convention. */
 export const unstable_settings = {
   initialRouteName: 'index',
 };
 
-export default function RootLayout() {
+function SessionRequired() {
   const pathname = usePathname();
   const pathnameRef = React.useRef(pathname);
   pathnameRef.current = pathname;
@@ -24,30 +24,31 @@ export default function RootLayout() {
     () => router.replace('/beeline/onboarding'), undefined,
     () => !pathnameRef.current.startsWith('/review/'),
   ), [pathname]);
+  return null;
+}
+
+export default function RootLayout() {
   const isDesktop = useIsDesktop();
-  const { theme } = useUnistyles();
+  const t = useTheme();
+  const dark = useThemeName().startsWith('dark');
+  const canvas = t.canvas?.val;
 
   return (
-    <View
-      style={{
-        flex: 1,
-        backgroundColor: isDesktop ? theme.colors.surface : theme.colors.groupped.background,
-      }}
-    >
+    <YStack flex={1} backgroundColor="canvas">
+      <SessionRequired />
       <ConnectionStatus>
       <Stack
         initialRouteName="index"
+        screenLayout={isDesktop ? undefined : PhoneTabScreen}
         screenOptions={{
           // Status bar glyphs follow the app theme: dark icons over Bone,
           // light icons over Obsidian, on every platform the stack runs on.
           // Per-screen overrides were dropped — the theme is the one author.
-          statusBarStyle: statusBarStyleForTheme(theme),
+          statusBarStyle: statusBarStyleForTheme({ dark }),
           // Every screen draws the shared PageHeader itself (DESIGN.md →
           // Components); the stack never renders a header of its own.
           headerShown: false,
-          contentStyle: {
-            backgroundColor: isDesktop ? theme.colors.surface : theme.colors.groupped.background,
-          },
+          contentStyle: { backgroundColor: canvas },
         }}
       >
         <Stack.Screen
@@ -77,14 +78,14 @@ export default function RootLayout() {
             // can expose a blank frame before its loader or Room list appears.
             animation: 'none',
             headerShown: false,
-            contentStyle: { backgroundColor: theme.buzz.bgBase },
+            contentStyle: { backgroundColor: canvas },
           }}
         />
         <Stack.Screen
           name="beeline/tray"
           options={{
             headerShown: false,
-            contentStyle: { backgroundColor: theme.buzz.bgBase },
+            contentStyle: { backgroundColor: canvas },
           }}
         />
         <Stack.Screen
@@ -94,12 +95,6 @@ export default function RootLayout() {
           }}
         />
         <Stack.Screen name="beeline/create-workspace" options={{ headerShown: false }} />
-        <Stack.Screen
-          name="beeline/agents"
-          options={{
-            headerShown: false,
-          }}
-        />
         <Stack.Screen name="beeline/human-profile" options={{ headerShown: false }} />
         <Stack.Screen name="beeline/agent-profile" options={{ headerShown: false }} />
         <Stack.Screen
@@ -126,7 +121,7 @@ export default function RootLayout() {
             headerShown: false,
           }}
         />
-        {/* Schedules and subscriptions draws the shared PageHeader. */}
+        {/* Routines draws the shared PageHeader. */}
         <Stack.Screen
           name="beeline/settings/schedules"
           options={{
@@ -175,7 +170,7 @@ export default function RootLayout() {
           options={{
             headerShown: false,
             animation: 'none',
-            contentStyle: { backgroundColor: theme.buzz.bgBase },
+            contentStyle: { backgroundColor: canvas },
           }}
         />
         <Stack.Screen
@@ -215,6 +210,6 @@ export default function RootLayout() {
       </ConnectionStatus>
       {/* One corner-open notice over every screen: pending, or a failed action with Retry. */}
       <CornerOpenToast />
-    </View>
+    </YStack>
   );
 }

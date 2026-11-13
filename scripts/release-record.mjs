@@ -175,8 +175,29 @@ function gh(args, { binary = false } = {}) {
   });
 }
 
+// Newest releases come first. The next tag is derived from the newest
+// published release, so older pages cannot change it.
+export function releaseIdentityReads() {
+  return ['releases?per_page=100'];
+}
+
+export function listReleasePage(readPage) {
+  const page = readPage(releaseIdentityReads()[0]);
+  if (!Array.isArray(page)) fail('release list was not a page of releases');
+  return page;
+}
+
+/** Workflow-run clock, one release page, release.json, and one draft create. */
+export function releaseStartRestCallCount() {
+  return releaseIdentityReads().length + 3;
+}
+
 function listReleases(repository) {
   return JSON.parse(gh(['api', '--paginate', '--slurp', `repos/${repository}/releases?per_page=100`])).flat();
+}
+
+function listIdentityReleases(repository) {
+  return listReleasePage(endpoint => JSON.parse(gh(['api', `repos/${repository}/${endpoint}`])));
 }
 
 function downloadAsset(repository, release, name) {
@@ -227,9 +248,9 @@ function main(argv) {
   const repository = args.repository ?? process.env.GITHUB_REPOSITORY;
   const command = args._[0];
   if (command === 'identity') {
-    // Reads every release once; writes the previous record and prints the
-    // identity this dispatch uses.
-    const releases = listReleases(repository).map((release) =>
+    // One page of the newest releases. Writes the previous record and prints
+    // the identity this dispatch uses.
+    const releases = listIdentityReleases(repository).map((release) =>
       (!release.draft && release.tag_name === args.requested && VERSION.test(release.tag_name))
         ? { ...release, sourceSha: commitOfTag(repository, release.tag_name) } : release);
     const channel = releaseChannel(args.channel);

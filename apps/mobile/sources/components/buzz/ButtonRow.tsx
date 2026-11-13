@@ -1,10 +1,10 @@
 import React from 'react';
-import { View, type StyleProp, type ViewStyle, type ViewProps } from 'react-native';
-import { StyleSheet } from 'react-native-unistyles';
+import type { View } from 'react-native';
+import { XStack, YStack, type XStackProps, type YStackProps } from 'tamagui';
 import { Button, type ButtonProps } from './Button';
 /** Shared layout frame for existing icon and emoji action targets. */
-export function ButtonRowFrame(props: ViewProps & { ref?: React.Ref<View> }) {
-  return <View {...props} />;
+export function ButtonRowFrame(props: YStackProps & { ref?: React.Ref<View> }) {
+  return <YStack {...(props as YStackProps)} />;
 }
 
 export type ButtonRowAction = Pick<
@@ -23,11 +23,10 @@ export type ButtonRowAction = Pick<
 /** Shared action layout for cards and inline decisions; the Button owns every target. */
 export function ButtonRow({
   actions,
-  style,
+  ...frame
 }: {
   actions: readonly ButtonRowAction[];
-  style?: StyleProp<ViewStyle>;
-}) {
+} & Omit<XStackProps, 'children'>) {
   if (actions.filter((action) => action.variant === 'primary').length > 1) {
     throw new Error('A decision row permits only one primary action');
   }
@@ -35,11 +34,11 @@ export function ButtonRow({
     throw new Error('Links belong outside ButtonRow at the start of the footer');
   }
   return (
-    <View style={[styles.row, style]}>
+    <XStack flexWrap="wrap" alignItems="center" justifyContent="flex-end" gap="2" {...frame}>
       {actions.map((action) => (
-        <View
+        <YStack
           key={`${action.testID ?? action.label}:${action.variant ?? 'quiet'}`}
-          style={styles.slot}
+          flexShrink={1}
         >
           <Button
             {...(action.accessibilityRole ? { accessibilityRole: action.accessibilityRole } : {})}
@@ -55,18 +54,8 @@ export function ButtonRow({
             destination={action.destination}
           />
           {action.description}
-        </View>
+        </YStack>
       ))}
-    </View>
+    </XStack>
   );
 }
-const styles = StyleSheet.create(({ buzz }) => ({
-  row: {
-    flexDirection: 'row',
-    flexWrap: 'wrap',
-    alignItems: 'center',
-    justifyContent: 'flex-end',
-    gap: buzz.space.sm,
-  },
-  slot: { flexShrink: 1 },
-}));

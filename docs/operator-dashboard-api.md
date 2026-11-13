@@ -134,8 +134,11 @@ counts.
   timestamp. A later date with no invites is a measured zero.
   `invitesAccepted`: distinct inviters whose human invitee joined a production
   Workspace that day (`memberships.invited_by`, workspace membership only).
-  That join ledger already has history, so its counts are numbers, including
-  zero.
+  The join counts only when the inviter has an invite that `inviters` would
+  count: same Workspace, a recorded `created_at` on or after the invite epoch,
+  created before the join. Joins from undated or pre-epoch invites count for
+  neither figure, so accepted never shows invitees no counted inviter produced.
+  Dates before the epoch are zero.
 - `onboarding.completedOnboarding`: people created that day whose own or free
   agent has a retained message in a production Room. `returnedNextDay`: of
   those, people who sent a retained message on the next Eastern calendar day.
@@ -143,13 +146,21 @@ counts.
   ended (signup date at least two Eastern dates before the measurement date).
   Someone who returns before that next day has ended is not counted as returned.
   The return message has to be in a production Room.
-- `ownAgents.connectAttempted`: people who created an agent pairing code that
-  day. `agent_pairing_codes.created_at` is new and is not backfilled; dates
-  before `operator_metric_epochs.metric='agent_pairing'` are null.
-  `connectSucceeded`: people whose own agent (not a free agent) received its
-  first unrevoked daemon token that day. A later token does not count again.
-  Revoked tokens do not count. This ledger already has `created_at`, so a quiet
-  day is zero.
+- `ownAgents` counts two connect routes, and `byRoute.code` and
+  `byRoute.connector` carry the same two fields per route on each daily point
+  and on `last7` and `prior7`. The top-level fields cover both routes.
+  `connectAttempted`: people who tried that day. A code try is creating an
+  agent pairing code; `agent_pairing_codes.created_at` is not backfilled, so
+  code and top-level dates before `operator_metric_epochs.metric='agent_pairing'`
+  are null. A connector try is an own agent joining through an app connector
+  (`rooms_mcp_members.created_at`); that ledger has history, so the connector
+  route has no null dates.
+  `connectSucceeded`: people whose own agent (not a free agent) took its first
+  turn that day after joining by that route, while still in a production
+  Workspace. A turn is an `agent_turns` row or a posted message (not a system
+  notice). Joining is the first unrevoked daemon token for code and the
+  connector join for connector. The top-level figure counts each person once,
+  on their first success by any route. A later success does not count again.
 - `repositories.linkAttempted`: people shown a repository onboarding card
   (`messages.card_type='repository-onboarding'` and `card.kind='repository'`,
   the same cards the morning read compares with repositories linked). A starters
@@ -175,7 +186,10 @@ counts.
 
 Internal Workspaces, hidden identities, and the Play Review identity stay out
 through the shared cohort. Fixture success in an internal Workspace does not
-count.
+count. Every core metric also drops the team: any person with a current
+membership in an internal Workspace. Their invites, invitees, signups,
+connects, repository links, and own-agent or free-agent tokens do not count in
+any Workspace.
 
 ## Store downloads and signup comparison
 

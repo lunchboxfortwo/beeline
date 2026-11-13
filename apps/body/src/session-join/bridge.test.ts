@@ -9,7 +9,7 @@ import { join as m40_join } from 'node:path';
 
 import { Agent as m40_Agent } from 'undici';
 
-import { acceptMemberDelivery as m40_acceptMemberDelivery, toolViaOutbox as m40_toolViaOutbox } from "./bridge.js";
+import { renderMention as m40_renderMention, renderWake as m40_renderWake, acceptMemberDelivery as m40_acceptMemberDelivery, toolViaOutbox as m40_toolViaOutbox } from "./bridge.js";
 
 import { memberStream as m40_memberStream } from "./beeline-api.js";
 
@@ -34,6 +34,29 @@ const delivery=(id='mention:one:0',cursor='1')=>({v:1,type:'delivery',deliveryId
 
 m40_afterEach(()=>{m40_vi.useRealTimers();m40_vi.restoreAllMocks();m40_vi.unstubAllGlobals();for(const dir of folders.splice(0))m40_rmSync(dir,{recursive:true,force:true});});
 
+
+m40_describe('compact session deliveries', () => {
+  m40_it('quotes each message line and uses no fabricated handle when the asker has none', () => {
+    m40_expect(m40_renderMention({id:'message',room_id:'room',author_name:'Jane',text:'first\nsecond'}, joined, runner)).toBe([
+      '[Beeline · #room · Jane tagged you]', '> first', '> second',
+      `Reply (start with the asker's exact @handle): /synthetic/node /synthetic/beeline.js session reply --room room --reply-to message "<your answer>" --as codex:/synthetic/project`,
+      'Context: /synthetic/node /synthetic/beeline.js session read --room room --as codex:/synthetic/project',
+    ].join('\n'));
+  });
+  m40_it('keeps order text, server next action and the private report command', () => {
+    m40_expect(m40_renderWake({id:'order',address:'corner',reason:'order',kind:'order',text:'Do this\nthen that',next:'Server action',createdAt:''}, joined, runner)).toBe([
+      '[Beeline · corner · order]', '> Do this', '> then that', 'Server action',
+      `Report: /synthetic/node /synthetic/beeline.js session tool report '{"address":"corner","commandId":"order","status":"done","text":"done: <result>"}' --as codex:/synthetic/project`,
+    ].join('\n'));
+  });
+  m40_it('keeps both the reply and silent-close commands for other wakes', () => {
+    m40_expect(m40_renderWake({id:'wake',address:'room',reason:'system',text:'An update',createdAt:''}, joined, runner)).toBe([
+      '[Beeline · room · system]', '> An update',
+      'Reply: /synthetic/node /synthetic/beeline.js session reply --room room "<text>" --as codex:/synthetic/project',
+      `If nothing needs posting: /synthetic/node /synthetic/beeline.js session tool no_reply_needed '{"address":"room","commandId":"wake"}' --as codex:/synthetic/project`,
+    ].join('\n'));
+  });
+});
 
 m40_describe('durable member delivery ownership',()=>{
   m40_it('recovers a crash between durable inbox and checkpoint without appending twice',async()=>{

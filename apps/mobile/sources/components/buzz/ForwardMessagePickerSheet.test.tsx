@@ -8,11 +8,9 @@ vi.mock('react-native', async () => {
   const host = (name: string) => (props: any) => React.createElement(name, props, props.children);
   return { ScrollView: host('ScrollView'), Text: host('Text'), View: host('View') };
 });
-vi.mock('react-native-unistyles', async () => {
-  const { beelineThemes } = await import('@/buzz/groknight');
-  const theme = { buzz: beelineThemes.obsidian };
-  return { StyleSheet: { create: (factory: any) => factory(theme) }, useUnistyles: () => ({ theme }) };
-});
+vi.mock('tamagui', async () => (await import('@/ui/screens/transcript/grammar-hosts.test-support')).tamaguiHosts());
+vi.mock('lucide-react-native', async () => (await import('@/ui/screens/transcript/grammar-hosts.test-support')).lucideHosts());
+vi.mock('react-native-safe-area-context', () => ({ useSafeAreaInsets: () => ({ top: 0, bottom: 0, left: 0, right: 0 }) }));
 vi.mock('@/buzz/use-text-draft', () => ({ useTextDraft: () => ['', vi.fn()] }));
 vi.mock('./SurfaceGlyphLoader', () => ({ SurfaceGlyphLoader: () => null }));
 vi.mock('@/components/buzz/HullDialog', () => ({ HullDialogInput: () => null }));
@@ -43,7 +41,10 @@ for (const success of [true, false]) it(`accepted=${success} controls feedback b
     targets: [{ kind: 'room' as const, id: 'target', label: '#target', group: 'rooms' as const }], visible: true,
   };
   let tree: any;
-  await act(async () => { tree = create(<ForwardMessagePickerSheet {...props} />); });
+  await act(async () => { tree = create(<ForwardMessagePickerSheet {...props} targets={null} />); });
+  const loading = tree.root.findAllByType('Text').find((node: any) => node.props.children === 'LOADING DESTINATIONS…');
+  expect(loading.props.fontFamily).toBe('SpaceGrotesk-Regular');
+  await act(async () => { tree.update(<ForwardMessagePickerSheet {...props} />); });
   let sending: Promise<void>;
   await act(async () => { sending = tree.root.findByType('Row').props.onPress(); });
   expect(tree.root.findByType('Row').props.metadata).toBeUndefined();

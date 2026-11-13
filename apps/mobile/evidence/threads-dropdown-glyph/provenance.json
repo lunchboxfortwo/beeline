@@ -1,0 +1,18 @@
+{
+  "reproduction": "R1",
+  "beforeCommit": "f095d06bb526c428a902195f85dd72c01f00ae35",
+  "afterProductCommit": "af6b2d9cdae1a24be7438fb6f035a882b841dba8",
+  "sourceSha256": {
+    "sources/ui/screens/chat/ThreadsDropdown.tsx": "1d8ba9ed7a8e4f8723192a08aa1287bba0a5f6b015d88d46fd8d8a95ed4693c7",
+    "sources/ui/screens/thread/ThreadLine.tsx": "eac4e87a76bc090be1963b82beedbe97e54e4e8e98c1ee60113d70d68b61042c",
+    "sources/components/buzz/RepositoryMark.tsx": "bf4784edfdccfccecb8587b5721e191dc1ccd127b30954282b70c4f215ec9e17",
+    "sources/ui/grammar.tsx": "641fcaad95fc269261f2fb977699c5d938b8ca5059a6fd57c22b823cccce193f",
+    "sources/ui/tamagui.config.ts": "1ff759fd7e2f665cd36f68aa25c92b54b609ff5faed995cb74e6a9e6244ccc43"
+  },
+  "platform": "Chrome web render of production components, local Room data hooks",
+  "viewport": {
+    "width": 411,
+    "height": 700,
+    "deviceScaleFactor": 2
+  }
+}

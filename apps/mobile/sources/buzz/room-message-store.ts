@@ -9,6 +9,7 @@ import {
 
 import { anchorCornerMarkers } from '@/buzz/corner-markers';
 import { foldPrLifecycleRuns } from '@/buzz/pr-lifecycle';
+import { foldPillRuns } from '@/buzz/transcript-pills';
 import {
   advanceRoomHistoryCursor,
   displacedTailRows,
@@ -681,8 +682,8 @@ export function useRoomMessageStore({
 
 /**
  * The transcript's folds, applied once: corner markers and relay reports move
- * under their anchors, settled activity runs and lifecycle runs collapse into
- * one row. `hostIds` maps every message id to the id of the row that shows
+ * under their anchors, settled activity runs, lifecycle runs and pill runs
+ * collapse into one row. `hostIds` maps every message id to the id of the row that shows
  * it, including ids a fold removed, so a lookup never misses a folded target.
  */
 export function foldTranscriptRows(
@@ -693,11 +694,11 @@ export function foldTranscriptRows(
   const boundary = boundaryRowIndex(anchored, firstNewMessageId);
   const rows =
     boundary < 0
-      ? foldPrLifecycleRuns(foldSettledActivityRuns(anchored))
+      ? foldPillRuns(foldPrLifecycleRuns(foldSettledActivityRuns(anchored)))
       : // Keep stacks separate only while their unread divider is visible.
         [
-          ...foldPrLifecycleRuns(foldSettledActivityRuns(anchored.slice(0, boundary))),
-          ...foldPrLifecycleRuns(foldSettledActivityRuns(anchored.slice(boundary))),
+          ...foldPillRuns(foldPrLifecycleRuns(foldSettledActivityRuns(anchored.slice(0, boundary)))),
+          ...foldPillRuns(foldPrLifecycleRuns(foldSettledActivityRuns(anchored.slice(boundary)))),
         ];
   const hostIds = new Map<string, string>();
   for (const row of rows) {

@@ -1,6 +1,6 @@
 import { appErrorCopy } from '@/buzz/app-error-copy';
 import React, { useRef, useCallback } from 'react';
-import { TextInput, AccessibilityInfo } from 'react-native';
+import { type TextInput, AccessibilityInfo } from 'react-native';
 import * as Haptics from 'expo-haptics';
 import { Modal } from '@/modal';
 import { BuzzRigTransport } from '@/sync/transport';
@@ -284,7 +284,7 @@ export function useChatMessageActions([
       }
       const confirmed = await Modal.confirm(
         'Delete message?',
-        'The message text and attachments will be removed. A deleted-message record will remain in this Room.',
+        'The message text and attachments will be removed. A deleted-message record will remain in this chat.',
         { cancelText: 'Cancel', confirmText: 'Delete', destructive: true },
       );
       if (!confirmed) return;
@@ -343,7 +343,7 @@ export function useChatMessageActions([
         // The live Room list is current; only a list not yet loaded reads one.
         const held = workspaceChatListRef.current;
         const [chats, workspace] = await Promise.all([
-          held ? held.chats : chatListKey ? readChatList(chatListKey).then(list => list.chats) : Promise.reject(new Error('No Room list is held yet.')),
+          held ? held.chats : chatListKey ? readChatList(chatListKey).then(list => list.chats) : Promise.reject(new Error('No chat list is held yet.')),
           roomClient.workspace(activeCommunityId),
         ]);
         setForwardRooms(forwardTargets(chats, workspace, decodedId));

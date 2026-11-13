@@ -87,6 +87,11 @@ export function formatPlan(plan: unknown): string {
   return JSON.stringify(plan, null, 2);
 }
 
+/** Saved CI plans keep the same JSON value in one line. */
+export function savedCorpusPlan(result: unknown): string {
+  return `${JSON.stringify(result)}\n`;
+}
+
 export function assertHotRead(result: HotReadResult): void {
   const violations = new Set<string>();
   if (result.p95Ms > result.budgetMs)

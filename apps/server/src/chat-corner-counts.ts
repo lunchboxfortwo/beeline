@@ -323,11 +323,11 @@ export function chatCornerCounts(
     if (state === 'waiting') count.waitingCornerCount += 1;
     const mine = cornerRowMine(row);
     if (mine) count.mineCornerCount += 1;
+    const lastActivityAt = row.latest_created_at
+      ? Math.floor(row.latest_created_at.getTime() / 1000)
+      : undefined;
     // The viewer's corner handing back is activity in its Room.
-    const waitingSince =
-      mine && state === 'waiting' && row.latest_created_at
-        ? Math.floor(row.latest_created_at.getTime() / 1000)
-        : undefined;
+    const waitingSince = mine && state === 'waiting' ? lastActivityAt : undefined;
     count.openCorners.push({
       id: row.id,
       name: row.name,
@@ -337,6 +337,7 @@ export function chatCornerCounts(
       ...(itemId ? { itemId } : {}),
       ...(mine ? { mine: true } : {}),
       ...(waitingSince !== undefined ? { waitingSince } : {}),
+      ...(lastActivityAt !== undefined ? { lastActivityAt } : {}),
       // Owed to the viewer and not seen since: only this opens their dropdown.
       ...(row.attention && state === 'waiting' ? { attention: true as const } : {}),
     });

@@ -90,24 +90,6 @@
     "reason": "The failure uses the shared IndexRow preset; the following quiet button chooses another invitation path."
   },
   {
-    "file": "components/buzz/AgentProfileView.tsx",
-    "line": 241,
-    "rule": "6c",
-    "detail": "dialog action row",
-    "id": "6a413a96aee0ecc2ff94",
-    "control": "<HullDialogActions actions={[ { label: 'Cancel', variant: 'quiet', disabled: saving, onPress: onCancel, testID: 'cancel-agent-edit', }, { label: saving ? 'Saving…' : 'Save', variant: 'primary', loading: saving, disabled: saving, onPress: onSave, testID: 'save-agent-soul', }, ]} />",
-    "reason": "Real dialog or inline editor: cancel/confirm or cancel/save actions remain together."
-  },
-  {
-    "file": "components/buzz/AgentVoiceSection.tsx",
-    "line": 188,
-    "rule": "6c",
-    "detail": "dialog action row",
-    "id": "909ea0fad8a5328d0fe4",
-    "control": "<HullDialogActions actions={[ { label: 'Cancel', variant: 'quiet', disabled: saving, onPress: () => { stop(); setOpen(false); }, testID: 'cancel-agent-voice', }, { label: saving ? 'Saving…' : 'Save', variant: 'primary', loading: saving, disabled: saving, onPress: () => void save(), testID: 'save-agent-voice', }, ]} />",
-    "reason": "Real dialog or inline editor: cancel/confirm or cancel/save actions remain together."
-  },
-  {
     "file": "components/buzz/Button.tsx",
     "line": 86,
     "rule": "6a",
@@ -169,24 +151,6 @@
     "id": "291e01e1d985c9135a8f",
     "control": "<TouchableOpacity accessibilityLabel={statusLine} accessibilityLiveRegion=\"polite\" accessibilityRole={speech.state === 'permission-denied' && Platform.OS !== 'web' ? 'button' : 'text'} activeOpacity={speech.state === 'permission-denied' && Platform.OS !== 'web' ? 0.7 : 1} disabled={speech.state !== 'permission-denied' || Platform.OS === 'web'} onPress={ speech.state === 'permission-denied' && Plat",
     "reason": "Live speech status with a contextual permission target; not a standalone action label."
-  },
-  {
-    "file": "components/buzz/ConversationRow.tsx",
-    "line": 122,
-    "rule": "6a",
-    "detail": "raw text target",
-    "id": "bdf26b385831b6677384",
-    "control": "<Pressable onPress={() => onPress(item.room.id)} onLongPress={() => onPin(item.room.id)} accessibilityRole=\"button\" accessibilityHint=\"Long press to toggle this conversation's pin\" accessibilityLabel={`${name.sigil}${name.name}${status ? `, ${status}` : ''}${pinned ? ', pinned' : ''}`} accessibilityState={selected ? { selected: true } : undefined} accessibilityActions={[ { name: 'pin', label: pinn",
-    "reason": "Shared conversation content row with long-press pin interaction."
-  },
-  {
-    "file": "components/buzz/CornerObjectiveLine.tsx",
-    "line": 145,
-    "rule": "6a",
-    "detail": "raw text target",
-    "id": "28897d198c8d4c444f68",
-    "control": "<Pressable accessibilityLabel={`Open workflow, ${label}`} accessibilityRole=\"link\" onPress={onPress} style={({ pressed }) => [styles.workflow, pressed && styles.briefLinkPressed]} testID={testID} > <WorkflowGlyph size={CORNER_META_SIZE} /> <Text numberOfLines={1} style={styles.workflowCopy} testID={`${testID}-copy`}> {label} </Text> </Pressable>",
-    "reason": "Workflow identity/status line opens workflow details."
   },
   {
     "file": "components/buzz/CreatePollSheet.tsx",
@@ -252,24 +216,6 @@
     "reason": "Shared expandable row primitive owns the existing disclosure target and the system line whose text ends in its own more/less word."
   },
   {
-    "file": "components/buzz/MemberPickerSheet.tsx",
-    "line": 120,
-    "rule": "6b",
-    "detail": "custom failure/reconnect notice with an action",
-    "id": "67fb853716e1227c8f48",
-    "control": "<View style={styles.footer}> {error && ( <ErrorBanner inline title={error} titleTestID=\"member-picker-error\" /> )} {!agentConnectOnly && ( <View style={styles.addInset}> <Button disabled={chosen.length === 0} label={chosen.length > 0 ? `Add ${chosen.length}` : 'Add'} loading={busy} onPress={() => onAdd(chosen.map((candidate) => candidate.pubkey))} testID=\"member-picker-add\" /> </View> )} </View>",
-    "reason": "Approved unified error-surface mock: shared inline feedback uses the existing caller content inset; no new control or retry action is introduced."
-  },
-  {
-    "file": "components/buzz/MemberPickerSheet.tsx",
-    "line": 190,
-    "rule": "6a",
-    "detail": "raw text target",
-    "id": "bcc382fb7326b4f1d0f2",
-    "control": "<TouchableOpacity accessibilityLabel=\"Copy connect command\" onPress={() => onCopyPairCommand?.(pairCommand)} style={styles.commandRow} > <Text selectable style={styles.command} testID=\"pair-agent-command\"> {pairCommand} </Text> <Text style={styles.copyLabel}>Copy</Text> </TouchableOpacity>",
-    "reason": "Selectable machine command row supports copying its displayed command."
-  },
-  {
     "file": "components/buzz/MentionSuggestionMenu.tsx",
     "line": 110,
     "rule": "6a",
@@ -324,15 +270,6 @@
     "reason": "Real dialog or inline editor: cancel/confirm or cancel/save actions remain together."
   },
   {
-    "file": "components/buzz/ProfileActions.tsx",
-    "line": 43,
-    "rule": "6c",
-    "detail": "dialog action row",
-    "id": "aad98cbcf71386957d96",
-    "control": "<HullDialogActions actions={actions .filter((action) => action.label !== 'Message') .map((action) => ({ ...action, variant: action.label === 'Cancel' ? 'quiet' : 'primary', }))} />",
-    "reason": "Real dialog or inline editor: cancel/confirm or cancel/save actions remain together."
-  },
-  {
     "file": "components/buzz/RepoPicker.tsx",
     "line": 263,
     "rule": "6c",
@@ -358,33 +295,6 @@
     "id": "fd7d406775ce98920673",
     "control": "<Pressable accessibilityLabel={ expanded ? 'Collapse the Room discussion this corner came from' : `${count} earlier ${count === 1 ? 'message' : 'messages'} from the Room. Expand` } accessibilityRole=\"button\" onPress={() => setExpanded((open) => !open)} style={styles.disclosureRow} testID={`${testID}-disclosure`} > {/* Two Texts, one line, exactly as `LedgerGhostLine` does it: a single truncating T",
     "reason": "Context transcript preview disclosure; preserves existing reader layout."
-  },
-  {
-    "file": "components/buzz/RoomCornersList.tsx",
-    "line": 221,
-    "rule": "6a",
-    "detail": "raw text target",
-    "id": "bacab502deef0d4d764d",
-    "control": "<Pressable accessibilityLabel={`${label}. ${display.word}${objective ? `. ${objective}` : ''}`} accessibilityRole=\"button\" onPress={() => openCorner(item)} style={({ pressed }) => [styles.cell, pressed && styles.cellPressed]} testID={`room-corner-${item.corner.id}`} > <View style={styles.cellRail} testID={`room-corner-rail-${item.corner.id}`} /> <View style={styles.cellTitle}> {ownerMark(item)} <T",
-    "reason": "Corner content navigation or archived-section disclosure; standalone More now uses Button."
-  },
-  {
-    "file": "components/buzz/RoomCornersList.tsx",
-    "line": 259,
-    "rule": "6a",
-    "detail": "raw text target",
-    "id": "a4c71d54f99d0f346d3a",
-    "control": "<Pressable accessibilityLabel={`${label}. ${display.word}. ${line}`} accessibilityRole=\"button\" onPress={() => openCorner(item)} style={styles.row} testID={`room-corner-${item.corner.id}`} > {ownerMark(item)} <View style={styles.rowCopy}> {/* Captain 2026-09-20: a corner's name is never truncated. It wraps to as many lines as it needs and the row grows with it; uneven row heights are the accepted ",
-    "reason": "Corner content navigation or archived-section disclosure; standalone More now uses Button."
-  },
-  {
-    "file": "components/buzz/RoomCornersList.tsx",
-    "line": 296,
-    "rule": "6a",
-    "detail": "raw text target",
-    "id": "1f24bb8a70060de28d07",
-    "control": "<Pressable accessibilityLabel={label} accessibilityRole=\"button\" accessibilityState={{ expanded: open, busy }} disabled={busy} onPress={onPress} style={styles.more} testID={`room-corners-${key}`} > <Text style={styles.moreLabel}>{label}</Text> {busy ? ( <SurfaceGlyphLoader compact testID={`room-corners-${key}-loading`} /> ) : ( <ChevronGlyph color={styles.chevron.color} direction={open ? 'up' : 'd",
-    "reason": "Corner content navigation or archived-section disclosure; standalone More now uses Button."
   },
   {
     "file": "components/buzz/RoomCornerSummary.tsx",
@@ -466,15 +376,6 @@
     "id": "e49d5cd143f112826bbb",
     "control": "<HullDialogActions style={styles.inlineEditorControls} actions={[{ disabled: workingKey === 'name', label: \"Cancel\", onPress: () => setRenamingWorkspace(false), variant: \"quiet\" }, { disabled: !workspaceName.trim() || workspaceName.trim() === workspace?.name || workingKey === 'name', label: workingKey === 'name' ? 'Saving…' : 'Save', loading: workingKey === 'name', onPress: () => void saveWorkspac",
     "reason": "Real dialog or inline editor: cancel/confirm or cancel/save actions remain together."
-  },
-  {
-    "file": "components/buzz/WritePermissionOutcome.tsx",
-    "line": 53,
-    "rule": "6a",
-    "detail": "raw text target",
-    "id": "26fce8016e75e7403440",
-    "control": "<Pressable accessibilityRole=\"link\" accessibilityLabel=\"Corner approved. View corner\" testID=\"write-permission-open-corner\" onPress={props.onOpen} style={({ pressed }) => [styles.outcome, styles.link, pressed && styles.linkPressed]} > <CornerGlyph size={CORNER_STATUS_SIZE} /> <Text style={styles.linkLead}>Corner approved ·</Text> <Text style={styles.linkAction}>View corner</Text> </Pressable>",
-    "reason": "Permission outcome content link opens the approved corner."
   },
   {
     "file": "components/SidebarView.tsx",

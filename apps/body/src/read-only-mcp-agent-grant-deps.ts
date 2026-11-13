@@ -1,9 +1,10 @@
 import { type SecretResolver, operatorSecretResolver, storeOperatorSecret } from "./grant-runner.js";
 import { pathGrantAllowsWrite } from '@beeline/api-contract/agent-grants';
-import { type CommandGrantRule, type CommandGrantScript, GRANT_SCRIPT_MAX_BYTES, GRANT_SCRIPT_MAX_LINES, grantScriptTooLongMessage, isRequestableAgentGrantKind, REQUESTABLE_AGENT_GRANT_KINDS, AGENT_GRANT_TARGET_MAX_LENGTH, parseCommandGrantTarget, AGENT_GRANT_REASON_MAX_LENGTH, HOST_EMULATOR_TARGET, AGENT_GRANT_VERBS, type AgentGrantEscalation, formatGrantEscalationReason, isSharedAssetCategory, SHARED_ASSET_CATEGORIES, COMMAND_SECRET_NAME } from "@beeline/api-contract/agent-grants";
-import { grantScriptArgument, resolveGrantCommand, resolveGrantScriptExecutable, isNativeGrantExecutable, installedGrantExecutable } from "./grant-script.js";
+import { type CommandGrantRule, type CommandGrantScript, interpreterScriptArgument, isRequestableAgentGrantKind, REQUESTABLE_AGENT_GRANT_KINDS, AGENT_GRANT_TARGET_MAX_LENGTH, parseCommandGrantTarget, AGENT_GRANT_REASON_MAX_LENGTH, HOST_EMULATOR_TARGET, AGENT_GRANT_VERBS, type AgentGrantEscalation, formatGrantEscalationReason, isSharedAssetCategory, SHARED_ASSET_CATEGORIES, COMMAND_SECRET_NAME } from "@beeline/api-contract/agent-grants";
+import { resolveGrantCommand, isNativeGrantExecutable, installedGrantExecutable } from "./grant-script.js";
 import { readFileSync } from "node:fs";
 import { createHash } from "node:crypto";
+import { resolve } from "node:path";
 import { hostEmulatorSerials } from "./machine-control.js";
 import { sandboxDevicePath } from "./bwrap-sandbox.js";
 import { findChromiumPage } from "./browser-share.js";
@@ -60,15 +61,12 @@ export function agentGrantDepsFromEnv(): AgentGrantDeps {
 
 
 /**
- * The script an interpreter command will run, read so the approval card can
- * SHOW it (C94).
+ * The script a command will run, read so the approval card can SHOW it (C94).
  *
  * `python3 fix.py` tells the person deciding nothing about what runs, so the
- * bytes travel with the ask and the approval is bound to their hash. A file too
- * long to read on a card is REFUSED, never truncated — an honest card is the
- * whole point, and a body that size belongs in a corner as a branch and a pull
- * request. A line with no script argument (`python3 -V`) has nothing to bind;
- * it still asks a human, because the interpreter class is never covered by yolo.
+ * whole file travels with the ask and the approval is bound to its hash. The
+ * program itself (`python3`, `node`) is never the script. A line with no
+ * script argument (`python3 -V`) has nothing to bind.
  */
 export function readGrantScript(
   rule: CommandGrantRule,
@@ -77,49 +75,35 @@ export function readGrantScript(
   const roots = deps.scriptRoots ?? [];
   if (!roots.length) return undefined;
   const context = resolveGrantCommand(rule.argv, roots[0]!, deps.scriptEnv ?? process.env);
-  const argument = grantScriptArgument(context);
+  const argument = interpreterScriptArgument(context.argv);
   if (!argument) return undefined;
   if (rule.stdin !== undefined && !argument.stdin) throw new Error('stdin is only supported when the interpreter reads its approved code from stdin.');
   if (argument.stdin && rule.stdin === undefined) throw new Error('Interpreter stdin needs exact bytes: use a JSON target with argv and stdin, or save the input as a script file.');
-  if (installedGrantExecutable(argument, context.cwd, context.env)) return undefined;
-  const candidatePath = resolveGrantScriptExecutable(argument, context.cwd, context.env);
-  const executable = argument.direct ? candidatePath : undefined;
-  if (argument.direct && !executable) throw new Error('Command executable cannot be resolved for script approval.');
-  if (argument.direct && argument.path.includes('/')) {
-    // Native executable paths do not need a script card, including binaries
-    // outside the attachment roots. Script paths still meet the root check below.
-    let candidate: Buffer;
-    try {
-      candidate = (deps.readScript ?? readFileSync)(executable!);
-    } catch { return undefined; }
-    if (isNativeGrantExecutable(candidate)) return undefined;
-  }
-  let resolved: string = '';
-  if (argument.inline === undefined && !argument.stdin) {
-    try {
-      resolved = argument.direct && !argument.path.includes('/') ? candidatePath! : resolveAttachPath(roots, candidatePath ?? argument.path);
-    } catch (error) {
-      // A script that exists but sits outside the checkout and the scratch cannot
-      // be put in front of a human, so it is not approvable from here.
-      const message = error instanceof Error ? error.message : String(error);
-      if (message.includes('outside')) {
-        throw new Error(
-          `${argument.path} is outside your checkout and scratch directory, so its contents ` +
-            'cannot be shown on the approval card. Move the script into your checkout or scratch, ' +
-            'or open a corner with open_corner and make the change there.',
-        );
-      }
-      return undefined;
+  let bytes: Buffer;
+  if (argument.stdin) bytes = Buffer.from(rule.stdin!);
+  else if (argument.inline !== undefined) bytes = Buffer.from(argument.inline);
+  else {
+    const read = deps.readScript ?? readFileSync;
+    const path = resolve(context.cwd, argument.path);
+    // A native executable path is a program, not a script to show.
+    if (argument.direct) {
+      try { if (isNativeGrantExecutable(read(path))) return undefined; }
+      catch { return undefined; }
     }
+    let resolved: string;
+    try { resolved = resolveAttachPath(roots, path); }
+    catch (error) {
+      // A script outside the checkout and the scratch cannot be put in front of a human.
+      if (!String(error instanceof Error ? error.message : error).includes('outside')) return undefined;
+      throw new Error(
+        `${argument.path} is outside your checkout and scratch directory, so its contents ` +
+          'cannot be shown on the approval card. Move the script into your checkout or scratch, ' +
+          'or open a corner with open_corner and make the change there.',
+      );
+    }
+    bytes = read(resolved);
   }
-  const bytes = argument.stdin ? Buffer.from(rule.stdin!) : argument.inline === undefined ? (deps.readScript ?? readFileSync)(resolved) : Buffer.from(argument.inline);
-  // Direct native executables retain ordinary command grant behavior.
-  if (argument.direct && argument.path.includes('/') && isNativeGrantExecutable(bytes)) return undefined;
   const contents = bytes.toString('utf8');
-  const lines = contents.split('\n').length;
-  if (bytes.byteLength > GRANT_SCRIPT_MAX_BYTES || lines > GRANT_SCRIPT_MAX_LINES) {
-    throw new Error(grantScriptTooLongMessage(argument.path, bytes.byteLength, lines));
-  }
   if (!Buffer.from(contents, 'utf8').equals(bytes)) {
     throw new Error(
       `${argument.path} is not text, so nobody can read what it does on an approval card. ` +
@@ -159,9 +143,8 @@ export async function requestGrant(
   const rule = kind === 'command' ? parseCommandGrantTarget(target) : undefined;
   const script = rule ? readGrantScript(rule, deps) : undefined;
   const commandContext = rule ? resolveGrantCommand(rule.argv, deps.scriptRoots?.[0] ?? '.', deps.scriptEnv ?? process.env) : undefined;
-  const commandArgument = commandContext ? grantScriptArgument(commandContext) : undefined;
-  const installedPath = commandArgument && commandContext
-    ? installedGrantExecutable(commandArgument, commandContext.cwd, commandContext.env) : undefined;
+  const installedPath = commandContext && !script
+    ? installedGrantExecutable(commandContext.argv[0], commandContext.cwd, commandContext.env) : undefined;
   const reason = stringArg(args, 'reason')?.trim();
   if (!reason) throw new Error('reason must be a non-empty string');
   if (reason.length > AGENT_GRANT_REASON_MAX_LENGTH) throw new Error('reason is too long');
@@ -266,7 +249,7 @@ export async function requestGrant(
     (script
       ? `The card shows ${script.path} in full, and the approval is bound to those bytes. `
       : '') +
-    `${authority} must answer ALWAYS, ONCE, or NO ${destination}; ` +
+    `${authority} must answer ${kind === 'command' ? 'Always, Once, or Deny' : 'ALWAYS, ONCE, or NO'} ${destination}; ` +
     'your turn is paused on this grant. Tell the human what you are waiting for and end your turn now; ' +
     (kind === 'mcp'
       ? 'the approval wake starts the fresh session with that route mounted, so use it immediately without restarting or scheduling another turn.'

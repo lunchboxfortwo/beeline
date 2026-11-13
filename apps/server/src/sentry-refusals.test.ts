@@ -29,7 +29,7 @@ it('retains the original pool cleanup failure on repeated close', async () => {
   expect(end).toHaveBeenCalledOnce();
 });
 
-it('Reproduction SENTRY-3: missing installation posts the install prompt and refuses with 409', async () => {
+it('Reproduction SENTRY-3: missing installation refuses with 409 without posting an install notice', async () => {
   const db = new PgliteDatabase();
   const agent = 'a'.repeat(64), owner = 'b'.repeat(64);
   const workspace = '11111111-1111-4111-8111-111111111111';
@@ -48,7 +48,7 @@ it('Reproduction SENTRY-3: missing installation posts the install prompt and ref
     expect(failure).toBeInstanceOf(CommandRefusalError);
     expect(failure).toMatchObject({ status: 409, message: 'Room repository access needs the Beeline GitHub App' });
     const messages = await db.query<{ text: string }>('SELECT text FROM messages WHERE room_id=$1', [room]);
-    expect(messages.rows.map(row => row.text).join('\n')).toContain('Install or grant the Beeline GitHub App');
+    expect(messages.rows).toEqual([]);
   } finally { await db.close(); }
 }, 30_000);
 

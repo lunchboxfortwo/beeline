@@ -37,10 +37,6 @@ export const CALM_LETTER_SPACINGS: ReadonlySet<number> = new Set(
 export const CALM_DECORATIVE_ALLOWLIST: Readonly<Record<string, string>> = {
   'components/buzz/ConversationComposer.tsx':
     'The Android/web composer input’s lineHeight is pinned BELOW Space Grotesk’s real glyph bounds on purpose (`chat.composer-layout.test.ts`), so native font padding centers text without cropping descenders — the body role’s calmer lineHeight sits above that bound and fails the invariant.',
-  'components/buzz/TurnProgressLine.tsx':
-    'TURN_LABEL_LINE_HEIGHT (`buzz/room-bottom-chrome.ts`) is the captain-authored exact-pixel budget for the turn line’s row (24px row, 18px label ink, equal air above/below — captain 2026-09-22): the label text’s lineHeight must equal that same 18, not the machine role’s 19, or the hand-derived geometry (TURN_LINE_INK_AIR, TURN_LINE_BAR_MARGIN_BOTTOM) drifts off its own stated arithmetic.',
-  'app/(app)/beeline/onboarding.tsx':
-    'The `beeline.` sign-in wordmark: a brand surface at its own size (28/32), not a reading-text role.',
 };
 
 /**
@@ -58,7 +54,9 @@ export const CALM_PENDING_HEADER_UNIFY: Readonly<Record<string, string>> = {};
  */
 export const CALM_TOKEN_SOURCES: ReadonlySet<string> = new Set([
   'buzz/groknight.ts',
-  'theme.ts',
+  // The design grammar's type scale (scaled by Text size) and its app-root views.
+  'ui/grammar.tsx',
+  'ui/grammar-root.tsx',
   'buzz/calm-lint.ts',
   'buzz/design-lint.ts',
 ]);
