@@ -160,6 +160,38 @@ describe('corner_owed', () => {
     await insertCornerFacts(database, { cornerId: CORNER, ownerAgentId: AGENT, commissionedBy: OWNER });
   });
 
+  it.each(['approved', 'denied', 'expired'])('removes a %s Squire card from owed items without a separate decision message', async status => {
+    await post('squire-ask', AGENT, 'Approval', { presentation: 'card', cardType: 'squire-approval', card: {
+      agent: { pubkey: AGENT }, owner: { pubkey: OWNER }, approvalId: 'shared-approval', expiresAt: Date.now() + 60_000,
+    } });
+    expect((await database.query(`SELECT person_id FROM corner_owed WHERE message_id='squire-ask'`)).rows)
+      .toEqual([{ person_id: OWNER }]);
+    await database.query(`UPDATE messages SET card=card||jsonb_build_object('status',$1::text) WHERE id='squire-ask'`, [status]);
+    expect((await database.query(`SELECT 1 FROM corner_owed WHERE message_id='squire-ask'`)).rowCount).toBe(0);
+    await expectTableMatchesMessages();
+  });
+
+  it('correlates cross-Room Squire decisions by Workspace, agent and approval ID', async () => {
+    await post('squire-ask', AGENT, 'Approval', { presentation: 'card', cardType: 'squire-approval', card: {
+      agent: { pubkey: AGENT }, owner: { pubkey: OWNER }, approvalId: 'shared-approval', expiresAt: Date.now() + 60_000,
+    } });
+    const decision = async (id: string, room: string, agent: string) => database.query(
+      `INSERT INTO messages(id,room_id,author_id,text,presentation,card_type,card)
+       VALUES($1,$2,$3,'Approved','card','squire-approval-decision',$4::jsonb)`,
+      [id, room, AGENT, JSON.stringify({ approvalId: 'shared-approval', agentId: agent, status: 'approved' })]);
+    const owed = async () => (await database.query(`SELECT 1 FROM corner_owed WHERE message_id='squire-ask'`)).rowCount;
+    await decision('another-agent', CORNER, 'e'.repeat(64));
+    expect(await owed()).toBe(1);
+    const elsewhere = '44444444-4444-4444-8444-444444444444', otherRoom = '55555555-5555-4555-8555-555555555555';
+    await database.query(`INSERT INTO workspaces(id,name) VALUES($1,'Elsewhere')`, [elsewhere]);
+    await database.query(`INSERT INTO rooms(id,workspace_id,name) VALUES($1,$2,'Elsewhere')`, [otherRoom, elsewhere]);
+    await decision('another-workspace', otherRoom, AGENT);
+    expect(await owed()).toBe(1);
+    await decision('same-workspace', ROOM, AGENT);
+    expect(await owed()).toBe(0);
+    await expectTableMatchesMessages();
+  });
+
   it('refreshes existing deliverables when the opening order records their commissioner', async () => {
     await database.query(`DELETE FROM agent_commands WHERE room_id=$1 AND reason='corner_objective'`, [CORNER]);
     await post('deliverable', AGENT, 'Here it is.', {
