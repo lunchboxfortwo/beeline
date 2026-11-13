@@ -7,7 +7,7 @@ import * as ImagePicker from 'expo-image-picker';
 import * as DocumentPicker from 'expo-document-picker';
 import { Modal } from '@/modal';
 import { scheduleAnimationFrame } from '@/buzz/host-scheduler';
-import { replaceActiveChannel, type ChannelSuggestion } from '@/buzz/channel-suggestions';
+import { channelSuggestionText, replaceActiveChannel, type ChannelSuggestion } from '@/buzz/channel-suggestions';
 import { activeMentionAtCursor, recordMentionPick, replaceActiveMention } from '@/buzz/room-participants';
 import { MAX_MESSAGE_ATTACHMENTS, pastedImageAttachment, pickedPhotoAttachments, type PickedChatAttachment } from '@/buzz/chat-attachment';
 import { RoomMemberOption } from './chat-surface-values';
@@ -163,7 +163,7 @@ export function useChatComposerAttachments([
   const selectChannel = useCallback(
     (suggestion: ChannelSuggestion) => {
       if (!activeChannel) return;
-      const inserted = replaceActiveChannel(inputTextRef.current, activeChannel, suggestion.token);
+      const inserted = replaceActiveChannel(inputTextRef.current, activeChannel, channelSuggestionText(suggestion));
       const nextSelection = { start: inserted.cursor, end: inserted.cursor };
       inputTextRef.current = inserted.text;
       setInputText(inserted.text);

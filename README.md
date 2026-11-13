@@ -42,6 +42,8 @@ App tools return pending sign-in guidance and provider tool failures as ordinary
 
 Production raw logs on squire are captured by the [live collectors](scripts/log-walk/README.md); the daily report walk is retired. [Database lock-timeout diagnostics](docs/database-contention-diagnostics.md) capture the observed blocking query with literal values removed; connection-wait timeouts log pool occupancy and waiting requests. Missing blocker observations are explicit.
 
+Quote replies keep their parent reference while sending, and resolve loaded originals outside the visible transcript window. The quote and reply render together; quote text wraps.
+
 The transcript scroll thumb stays still while idle rows remeasure or native anchoring adjusts the offset to hold the reading row. Those callbacks do not bring it back after it hides. Dragging it continues to use the latest loaded history size and holds the finger's destination on release.
 
 Unread and Pinned chat-list filters stay selected on this device across navigation and app restarts. Chat info lets authorized members rename a chat and change its repository. Consecutive repository events show their count directly in the transcript; expand the group to read every merge and open its PR.

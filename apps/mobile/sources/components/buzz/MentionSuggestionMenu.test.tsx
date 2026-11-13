@@ -42,8 +42,8 @@ it('heads @ suggestions with the chat in a plain sentence and reads like the ros
   expect(onSelect).toHaveBeenCalledWith(alan);
 });
 
-it('names the chat when # narrows to its threads, and says chats and threads otherwise', () => {
-  const corner = { kind: 'corner' as const, id: 'c1', token: 'beeline/one-row-header' };
+it('names the chat above its threads, then lists the other rooms', () => {
+  const corner = { kind: 'corner' as const, id: 'c1', token: 'beeline/one-row-header', name: 'one-row-header', activityAt: 1_000 };
   act(() => {
     tree = create(<ChannelSuggestionMenu query="beeline/" matches={[corner]} overflow={0} highlightedIndex={0}
       keyboardOpen onSelect={() => undefined} />);
@@ -54,5 +54,11 @@ it('names the chat when # narrows to its threads, and says chats and threads oth
     tree = create(<ChannelSuggestionMenu query="be" overflow={3} highlightedIndex={0} keyboardOpen onSelect={() => undefined}
       matches={[{ kind: 'room', id: 'r1', token: 'beeline', subtitle: 'Beeline-Work/beeline' }, corner]} />);
   });
-  expect(texts()).toEqual(expect.arrayContaining(['Chats and threads', '#beeline', 'Beeline-Work/beeline', 'and 3 others']));
+  expect(texts()).toEqual(expect.arrayContaining(['Chats', '#beeline', 'Beeline-Work/beeline', 'and 3 others']));
+  act(() => tree.unmount());
+  act(() => {
+    tree = create(<ChannelSuggestionMenu query="" overflow={0} highlightedIndex={0} keyboardOpen onSelect={() => undefined}
+      nowMs={(1_000_000 + 120) * 1000} matches={[{ ...corner, activityAt: 1_000_000 }, { kind: 'room', id: 'r2', token: 'issues-triage' }]} />);
+  });
+  expect(texts()).toEqual(['Threads in #beeline', 'one-row-header', '2m', 'Other rooms', '#issues-triage']);
 });

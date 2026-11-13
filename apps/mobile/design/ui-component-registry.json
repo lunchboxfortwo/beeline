@@ -139,6 +139,15 @@
       "ButtonRow",
       "ButtonRowFrame"
     ],
+    "components/buzz/ChatLinkProvider.tsx": [
+      "ChatLinkPreviewCard",
+      "ChatLinkProvider",
+      "card"
+    ],
+    "components/buzz/ChatLinks.tsx": [
+      "ChatLinkContext",
+      "ChatLinkRun"
+    ],
     "components/buzz/ChatOpeningSurface.tsx": [
       "ChatOpeningSurface"
     ],
@@ -364,7 +373,8 @@
     ],
     "components/buzz/MentionSuggestionMenu.tsx": [
       "ChannelSuggestionMenu",
-      "MentionSuggestionMenu"
+      "MentionSuggestionMenu",
+      "row"
     ],
     "components/buzz/MessageReactionRoster.tsx": [
       "MessageReactionRoster",

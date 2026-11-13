@@ -67,6 +67,8 @@ export interface MessageRow {
   turn_id: string | null;
   source_client?: { id: string; name: string } | null;
   agent_model: string | null;
+  /** The message's number in its chat (`chat-seq.ts`); null for non-message rows. */
+  chat_seq?: number | null;
   activity: unknown[] | null;
   durable_fact: RoomViewMessage['durableFact'] | null;
   card_type: string | null;

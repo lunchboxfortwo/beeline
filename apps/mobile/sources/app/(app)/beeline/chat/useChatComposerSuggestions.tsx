@@ -167,6 +167,7 @@ export function useChatComposerSuggestions([
       corners: roomOpenCornerRows(channelCornerRecord.record).map((item) => ({
         id: item.corner.id,
         name: item.corner.name,
+        activityAt: item.latestMessage?.createdAt ?? item.stateAt,
       })),
     };
   }, [channelCornerRecord.record, channelCornerRecord.view]);

@@ -1,7 +1,8 @@
 import React, { useEffect, useRef } from 'react';
-import { ScrollView } from 'tamagui';
+import { ScrollView, YStack } from 'tamagui';
 import { AlertTriangle, AtSign, Check, CornerDownRight, Hash } from 'lucide-react-native';
-import { Glyph } from '@/ui/grammar';
+import { Glyph, T } from '@/ui/grammar';
+import { compactRelativeTime } from '@/buzz/relative-time';
 import { resolveAgentDisplayIdentity } from '@/buzz/agent-display';
 import {
   CHANNEL_MENTION_PUBKEY,
@@ -171,9 +172,10 @@ export function MentionSuggestionMenu({
 }
 
 /**
- * The composer's `#` menu: chats and this chat's threads ("Chats and
- * threads"), or one chat's threads after `#chat/` ("Threads in #chat"). Same
- * card, scroll cap and row height as the @-mention menu.
+ * The composer's `#` menu, the same card, scroll cap and row height as the
+ * @-mention menu. This chat's threads lead ("Threads in #chat"), newest
+ * activity on top, each with how long ago it last spoke; the other Rooms
+ * follow under "Other rooms". After `#chat/` only that chat's threads remain.
  */
 export function ChannelSuggestionMenu({
   query,
@@ -182,6 +184,7 @@ export function ChannelSuggestionMenu({
   highlightedIndex,
   keyboardOpen,
   onSelect,
+  nowMs = Date.now(),
 }: {
   query: string;
   matches: readonly ChannelSuggestion[];
@@ -189,16 +192,19 @@ export function ChannelSuggestionMenu({
   highlightedIndex: number;
   keyboardOpen: boolean;
   onSelect: (suggestion: ChannelSuggestion) => void;
+  nowMs?: number;
 }) {
   const { visibleRows, scrollRef, scrollOffset } = useHighlightedRowScroll(
     highlightedIndex,
     keyboardOpen,
   );
-  const cornerRoom = channelCornerRoom(query, matches);
+  const cornerRoom = channelCornerRoom(query, matches)
+    ?? (matches[0]?.kind === 'corner' ? matches[0].token.slice(0, matches[0].token.indexOf('/')) : null);
+  const firstRoom = matches.findIndex((item) => item.kind === 'room');
   return (
     <SuggestionCard
-      title={cornerRoom ? `Threads in #${cornerRoom}` : 'Chats and threads'}
-      label="Reference a chat or thread"
+      title={cornerRoom ? `Threads in #${cornerRoom}` : 'Chats'}
+      label="Link a thread or chat"
       testID="channel-suggestions"
       overflow={overflow}
       overflowTestID="channel-suggestion-overflow"
@@ -215,23 +221,32 @@ export function ChannelSuggestionMenu({
         flexShrink={1}
       >
         {matches.map((suggestion, index) => {
-          const subtitle = cornerRoom ? undefined : suggestion.subtitle;
-          return (
+          const thread = suggestion.kind === 'corner';
+          const name = thread ? suggestion.name ?? suggestion.token : `#${suggestion.token}`;
+          const age = thread ? compactRelativeTime(suggestion.activityAt, nowMs) : '';
+          const row = (
             <SuggestionRow
               key={suggestion.id}
-              first={index === 0}
+              first={index === 0 || index === firstRoom}
               selected={index === highlightedIndex}
-              label={[`#${suggestion.token}`, subtitle, suggestion.kind === 'room' ? 'chat' : 'thread']
-                .filter(Boolean)
-                .join(', ')}
+              label={[name, suggestion.subtitle, thread ? 'thread' : 'chat'].filter(Boolean).join(', ')}
               state={{ selected: index === highlightedIndex }}
               onPress={() => onSelect(suggestion)}
               testID={`channel-suggestion-${suggestion.token}`}
-              name={`#${suggestion.token}`}
-              detail={subtitle}
-              mark={<SuggestionGlyph icon={suggestion.kind === 'room' ? Hash : CornerDownRight} />}
+              name={name}
+              detail={suggestion.subtitle}
+              trailing={age ? <T v="meta" color="secondary">{age}</T> : undefined}
+              mark={<SuggestionGlyph icon={thread ? CornerDownRight : Hash} />}
             />
           );
+          return index === firstRoom && firstRoom > 0 ? (
+            <React.Fragment key={suggestion.id}>
+              <YStack paddingTop="2" paddingBottom="1" paddingHorizontal="1" testID="channel-suggestion-other-rooms">
+                <T v="metaStrong" color="secondary">Other rooms</T>
+              </YStack>
+              {row}
+            </React.Fragment>
+          ) : row;
         })}
       </ScrollView>
     </SuggestionCard>

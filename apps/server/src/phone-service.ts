@@ -27,6 +27,7 @@ import { messageId, ArchivedCornerCursor, MemberGrantRow } from './phone/values.
 import { phoneReadWorkspaces, phoneReadWorkspace, phoneReadWorkspaceMembers } from './phone/workspaces.js';
 import { phoneReadChats, phoneDirectMessagePresence } from './phone/chat-list.js';
 import { phoneReadRoom, phoneResolveMessageLink } from './phone/room-read.js';
+import { phoneResolveChatLinks } from './phone/chat-links.js';
 import { phoneSearchMessages, phoneReadHistoryAround, phoneReadHistoryAfter, phoneReadHistory, phoneReadHistoryOutline, phoneCountHistoryOutline } from './phone/history-search.js';
 import { phoneReadCorners, phoneLoadCorners, phoneRoomRows, phoneCornerRoomEnrichment, phoneProjectRoomEnrichment, phoneCornerRowsSql, phoneProjectCorners } from './phone/corner-reads.js';
 import { phoneReadAgent, phoneProjectAgentGrants, phoneProjectMemberGrantRows } from './phone/agent-reads.js';
@@ -192,6 +193,7 @@ export class PhoneService {
 } | undefined { return phoneDirectMessagePresence(this, row); }
   async readRoom(roomId: string, viewerId: string): Promise<RoomView | null> { return phoneReadRoom(this, roomId, viewerId); }
   async resolveMessageLink(messageId: string, viewerId: string) { return phoneResolveMessageLink(this, messageId, viewerId); }
+  async resolveChatLinks(roomId: string, tokens: readonly string[], viewerId: string) { return phoneResolveChatLinks(this, roomId, tokens, viewerId); }
   async searchMessages(workspaceId: string, viewerId: string, query: string, before?: string): Promise<MessageSearchView | null> { return phoneSearchMessages(this, workspaceId, viewerId, query, before); }
   async readHistoryAround(roomId: string, viewerId: string, targetId: string): Promise<RoomHistoryView | null> { return phoneReadHistoryAround(this, roomId, viewerId, targetId); }
   async readHistoryAfter(roomId: string, viewerId: string, afterId: string): Promise<RoomHistoryView | null> { return phoneReadHistoryAfter(this, roomId, viewerId, afterId); }

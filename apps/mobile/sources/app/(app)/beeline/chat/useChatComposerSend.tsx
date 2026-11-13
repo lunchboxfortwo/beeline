@@ -320,6 +320,7 @@ export function useChatComposerSend([
             name: fallbackMemberName(userPubkey),
           },
           presentation: 'message',
+          ...(preparedReply?.reference ? { reply: preparedReply.reference } : {}),
           ...(mentionedPubkeys.length ? { mentionPubkeys: mentionedPubkeys } : {}),
           ...(attachments.length ? { attachments } : {}),
         });

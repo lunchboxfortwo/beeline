@@ -224,6 +224,8 @@ export type ChatDisplayMessage = {
   durableFact?: { kind: 'failure' | 'merge' | 'action' };
   attachments?: AttachmentReference[];
   mentionPubkeys?: string[];
+  /** Server number of this message in its chat; Copy link writes `¶author-N` from it. */
+  chatSeq?: number;
   /** The model stamped on the message at generation time (server-side); the
    *  agent byline renders it verbatim and falls back to no model. */
   sourceClient?: RoomViewMessage['sourceClient'];
@@ -387,6 +389,7 @@ export function displayRoomMessage(
     ...(message.mentionPubkeys ? { mentionPubkeys: [...message.mentionPubkeys] } : {}),
     ...(message.sourceClient ? { sourceClient: message.sourceClient } : {}),
     ...(message.agentModel ? { agentModel: message.agentModel } : {}),
+    ...(message.chatSeq ? { chatSeq: message.chatSeq } : {}),
     ...(message.reactions
       ? { reactions: message.reactions.map((reaction) => ({ ...reaction })) }
       : {}),

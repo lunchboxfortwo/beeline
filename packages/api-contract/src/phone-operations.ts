@@ -96,6 +96,8 @@ export type CornerMergeHold = {
 export type PhoneOperationMap = PhoneRouteOperationMap & {
   readRoomTools: { input: import('./phone-types.js').RoomToolReference & { before?: string; messageId?: string }; output: import('./phone-types.js').RoomToolPage };
   readMediaMetadata: { input: { objectId: string }; output: MediaMetadata };
+  /** Resolve `↳thread` and `¶author-N` tokens written in one Room or thread. */
+  resolveChatLinks: { input: { roomId: string; tokens: string[] }; output: import('./chat-links.js').ChatLinksView };
   readMediaLink: { input: { objectId: string }; output: MediaLink };
   readMediaPlayback: { input: { objectId: string }; output: MediaLink };
   /** A short-lived browser viewer token, issued only to people who may steer its agent. */
@@ -305,6 +307,7 @@ export type PhoneOperationMap = PhoneRouteOperationMap & {
 export const PHONE_READ_OPERATIONS = [
   ...PHONE_ROUTE_READ_OPERATIONS,
   'readRoomTools',
+  'resolveChatLinks',
   'readMediaMetadata',
   'readMediaLink',
   'readMediaPlayback',

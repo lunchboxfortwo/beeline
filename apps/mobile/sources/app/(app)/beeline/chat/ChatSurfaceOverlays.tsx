@@ -31,6 +31,8 @@ import { openPlace } from '@/ui/shell/panel';
 import { useIsDesktop } from '@/utils/responsive';
 import { CreatePollSheet, type PollDraft } from '@/components/buzz/CreatePollSheet';
 import { T } from '@/ui/grammar';
+import * as Clipboard from 'expo-clipboard';
+import { chatMessageLinkToken, copyChatMessageLink } from '@/buzz/message-link';
 
 type Props = {
   attachmentPickerVisible: boolean;
@@ -47,6 +49,8 @@ type Props = {
   handleBookmarkMessage: (message: ChatDisplayMessage) => Promise<void>;
   handleReportMessage: (message: ChatDisplayMessage) => Promise<void>;
   handleCopyLedgerMessage: (text: string) => void;
+  /** Confirms a copy in the transcript's toast. */
+  showCopyToast: (message: string) => void;
   handleSelectLedgerMessage: (text: string) => void;
   decodedId: string;
   beginReply: (message: ChatDisplayMessage) => void;
@@ -130,6 +134,7 @@ export function ChatSurfaceOverlays({
   handleBookmarkMessage,
   handleReportMessage,
   handleCopyLedgerMessage,
+  showCopyToast,
   handleSelectLedgerMessage,
   decodedId,
   beginReply,
@@ -207,6 +212,7 @@ export function ChatSurfaceOverlays({
   const dmActionsMounted = useOpenedSheet(dmActionsVisible);
   const renameMounted = useOpenedSheet(isCorner && renameEditing);
   const pollMounted = useOpenedSheet(createPollVisible);
+  const messageLinkToken = messageActionsTarget ? chatMessageLinkToken(messageActionsTarget) : null;
   return <>
       {attachmentPickerVisible && <AttachmentPickerSheet
         visible={attachmentPickerVisible}
@@ -281,6 +287,19 @@ export function ChatSurfaceOverlays({
               setMessageActionsTarget(null);
             }}
             testID="message-copy-action"
+          />
+        ) : null}
+        {messageLinkToken ? (
+          <HullActionSheetRow
+            accessibilityLabel={`Copy link ${messageLinkToken}`}
+            label="Copy link"
+            metadata={messageLinkToken}
+            onPress={() => {
+              setMessageActionsTarget(null);
+              void copyChatMessageLink(messageLinkToken, Clipboard.setStringAsync,
+                { showCopied: showCopyToast, showCopyFailed: showCopyToast });
+            }}
+            testID="message-copy-link-action"
           />
         ) : null}
         {messageActionsTarget ? (

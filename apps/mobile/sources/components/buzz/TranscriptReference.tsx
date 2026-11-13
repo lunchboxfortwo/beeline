@@ -11,8 +11,8 @@ export function TranscriptReference({ children, viewer = false, onPress, accessi
 }) {
   const contents = viewer ? <XStack alignItems="center" gap="1" minWidth={0}>
     <Inked color="needsYou" glyph={ConversationGlyph} size={14} />
-    <T v="code" color="secondary" numberOfLines={1} flexShrink={1} minWidth={0}>{children}</T>
-  </XStack> : <T v="code" color="secondary" numberOfLines={2}>{children}</T>;
+    <T v="code" color="secondary" flexShrink={1} minWidth={0}>{children}</T>
+  </XStack> : <T v="code" color="secondary">{children}</T>;
   return onPress ? <YStack accessibilityRole="button" accessibilityLabel={accessibilityLabel}
     onPress={onPress} cursor="pointer" minWidth={0} marginBottom="1" testID={testID}>{contents}</YStack>
     : <YStack minWidth={0} marginBottom="1" testID={testID}>{contents}</YStack>;

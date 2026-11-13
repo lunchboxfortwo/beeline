@@ -41,13 +41,14 @@ type Props = [
   agentPresences: Record<string, import("@/buzz/agent-presence").RoomAgentPresence>,
   setPresenceNow: (now: number) => void,
   presenceNow: number,
+  residentMessages: readonly ChatDisplayMessage[],
 ];
 
 export function useChatTurnPresentation([
   visibleMessages, pendingAck, agentTurnMarkers, setPendingAck, receivedSteer, activeAgentTurn,
   setReceivedSteer, isCorner, roomSurface, viewerPubkey, conversationIdentities, agentByPubkey,
   insets, composerHeight, scrollController, decodedId, readRoom, desktopExperience,
-  setDesktopDeliveryState, agentPresences, setPresenceNow, presenceNow,
+  setDesktopDeliveryState, agentPresences, setPresenceNow, presenceNow, residentMessages,
 ]: Props): [
   bylineOpeners: Set<string>,
   answerByMessageId: Map<string, { decision: "open" | "cancel" | null; handle: string; }>,
@@ -63,15 +64,16 @@ export function useChatTurnPresentation([
 
   // A reconciled draft/final bubble keeps a stable display `id` across the
   // turn, so it also needs to resolve by its real relay event id — the id
-  // any NIP-10 reply on another client actually references.
+  // any NIP-10 reply on another client actually references. Quote parents
+  // come from the same resident records even outside the rendered window.
   const rawVisibleMessageById = useMemo(() => {
     const map = new Map<string, ChatDisplayMessage>();
-    for (const message of visibleMessages) {
+    for (const message of [...residentMessages, ...visibleMessages]) {
       map.set(message.id, message);
       if (message.relayId) map.set(message.relayId, message);
     }
     return map;
-  }, [visibleMessages]);
+  }, [residentMessages, visibleMessages]);
 
   const visibleMessageById = useStable(rawVisibleMessageById, sameMessageRefMap);
 

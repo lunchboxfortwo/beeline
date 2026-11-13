@@ -19,6 +19,11 @@
       "import": "./dist/phone.js",
       "default": "./dist/phone.js"
     },
+    "./chat-links": {
+      "types": "./dist/chat-links.d.ts",
+      "import": "./dist/chat-links.js",
+      "default": "./dist/chat-links.js"
+    },
     "./daemon": {
       "types": "./dist/daemon.d.ts",
       "import": "./dist/daemon.js",

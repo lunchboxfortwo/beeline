@@ -5,6 +5,7 @@ import { readRoomTools } from './room-tool-projection.js';
 import { dispatchTrayDecisionCommand, isTrayDecisionCommand } from './tray-decision-command.js';
 
 import { readMediaMetadata } from './phone-media.js';
+import { CHAT_LINK_TOKEN_LIMIT, CHAT_LINK_TOKEN_MAX_LENGTH } from '@beeline/api-contract/chat-links';
 import { runnableOrigin } from './runnable-artifact.js';
 import { parseRouterCommandIdentity, type RouterCommandIdentity } from '@beeline/api-contract/router-command';
 import { RouterCommandLedger, CommandDigestConflict, InvalidCommandArguments } from './router-command-ledger.js';
@@ -132,6 +133,12 @@ export function createPhoneOperationDispatcher(
           if (error instanceof MessageSearchTooBroadError) refuse(422, 'query_too_broad');
           throw error;
         }
+      }
+      case 'resolveChatLinks': {
+        const tokens = input.tokens;
+        if (!Array.isArray(tokens) || tokens.length > CHAT_LINK_TOKEN_LIMIT
+          || tokens.some((token) => typeof token !== 'string' || token.length > CHAT_LINK_TOKEN_MAX_LENGTH)) refuse(400, 'invalid_tokens');
+        return found(await phone.resolveChatLinks(uuid(input, 'roomId'), tokens as string[], viewerId));
       }
       case 'readRoomTools': {
         const anchor=required(input,'anchor'),before=optional(input,'before'),target=optional(input,'messageId');
