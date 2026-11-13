@@ -3,12 +3,11 @@ import { withoutImageData, deliverAttachments, attachmentId } from "./attachment
 import { join } from "node:path";
 import { createHash, randomUUID } from "node:crypto";
 import { beelineManagedSkills, runningBeelineReleaseId } from "./beeline-skill.js";
-import { nonhumanSilentWake } from "./silent-wake.js";
 import { writeFileSync } from "node:fs";
 import { scratchBudgetMessage, allocatedDirectoryBytes } from "./scratch-lifecycle.js";
 import { normalizeAppContinuation } from "@beeline/api-contract/app-connections";
 import { squireSessionSignedIn } from "./squire-sign-in.js";
-import { JsonObject, readTurnContextFile, daemonExecute, requiredEnv, downloadAttachment, memorySources, activeCommandContext, commandRequest, fetchImage, asObject, stringArg, connectorOfferDepsFromEnv } from './read-only-mcp.js';
+import { JsonObject, readTurnContextFile, daemonExecute, requiredEnv, downloadAttachment, memorySources, activeCommandContext, fetchImage, asObject, stringArg, connectorOfferDepsFromEnv } from './read-only-mcp.js';
 import { agentScheduleRoomId, reactToMessage, postArtifact, bindBriefFiles, agentScheduleDepsFromEnv } from './read-only-mcp-download-attachment.js';
 import { reportFeedback, openCorner, reviseCornerBrief, readCornerBrief, closeCorner, prChecksStatus, approveMerge, targetCornerId, writeScratchFile } from './read-only-mcp-open-corner.js';
 import { shareBrowser, requestGrant, listGrants, workbenchStatus, storeSecret } from './read-only-mcp-agent-grant-deps.js';
@@ -384,9 +383,6 @@ export async function executeAgentOperation(
     case 'no_reply_needed': {
       await activeCommandContext();
       const context = await readTurnContextFile();
-      const selected = (context.commands as {requestId:string;commandReason:string}[] | undefined)?.find(command => command.requestId === commandRequest.getStore());
-      const commandReason = selected?.commandReason ?? context.commandReason;
-      if (!args.messageId && !nonhumanSilentWake(commandReason)) throw new Error('no_reply_needed requires a nonhuman report, order, lifecycle, scheduler or system wake. Call post({text: <your reply>}), then end the turn.');
       await daemonExecute('markAgentTurnSilent', { ...(args.messageId ? { messageId: args.messageId } : {}) });
       // The server ends only this request. End the invocation after delivering
       // its tool result; intake consumes the other wakes seen by this turn.

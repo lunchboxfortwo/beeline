@@ -1,5 +1,5 @@
 import { boundToolResult } from "./tool-output-budget.js";
-import { JsonObject, JsonRpcRequest, asObject, agentSurface, TOOLS, readTurnContextFile, callTool, withToolOwedContext } from './read-only-mcp.js';
+import { JsonObject, JsonRpcRequest, asObject, agentSurface, TOOLS, readTurnContextFile, callTool, withToolResult } from './read-only-mcp.js';
 import { validateAdvertisedToolInput, callAgentTool } from './read-only-mcp-open-poll.js';
 
 
@@ -90,12 +90,7 @@ export async function handleLine(line: string): Promise<void> {
           ? callAgentTool(params.name as string, asObject(params.arguments), toolCallId(params, request.id))
           : callTool(params.name as string, asObject(params.arguments));
       };
-      let result: Awaited<ReturnType<typeof withToolOwedContext>>;
-      if (agentSurface) result = await withToolOwedContext(work);
-      else {
-        try { result = { content: [{ type: 'text', text: await work() }] }; }
-        catch (error) { result = { isError: true, content: [{ type: 'text', text: error instanceof Error ? error.message : String(error) }] }; }
-      }
+      const result = await withToolResult(work);
       success(request.id, await boundToolResult(result));
       return;
     }

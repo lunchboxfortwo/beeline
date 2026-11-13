@@ -59,13 +59,8 @@ Without inventory progress, the watchdog records a stalled loop. With progress,
 the scan finishes and the watchdog continues to be fed. The existing frozen
 reconciliation regression still verifies watchdog expiry when no progress occurs.
 
-`reported-stall`: the service proof opens a disposable corner, claims its worker,
-delivers done through the daemon report operation, omits the terminal receipt,
-and expires its receipt freshness. ConnectionPresence's actual timer settles
-it complete and the commander's inbox retains only done. Run the built-service
-path with `npm run build --workspace=@beeline/server` followed by
-`node scripts/prove-corner-stall.mjs`. It uses an in-memory PostgreSQL stand-in;
-it does not boot a production helper or make provider requests.
+`reported-stall` (retired): a report no longer closes its command; the turn
+closes at its end, so a same-turn order or feedback still lands (wake-8).
 
 `explained-stall`: service regressions exercise unclaimed, disconnected and
 connected-but-silent workers through the same timer, then read the corner or

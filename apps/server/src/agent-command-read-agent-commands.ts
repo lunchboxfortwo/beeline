@@ -69,7 +69,10 @@ export async function readAgentCommands(
  LEFT JOIN workspace_skill_versions workflow_version ON workflow_version.skill_id=workflow_skill.id
    AND workflow_version.version=(workflow_latest.card->>'workflowVersion')::int
  WHERE c.room_id=$1 AND c.agent_id=$2
-   AND CASE WHEN $3::text IS NULL THEN c.state='pending' OR ${helperTurnResumableSql('c')}
+   AND CASE WHEN $3::text IS NULL THEN c.state='pending' OR (${helperTurnResumableSql('c')}
+       -- A reported turn stays open for its own follow-ups, never as new work.
+       AND (c.private_payload->>'reportedOutcome' IS NULL
+         OR c.private_payload->>'reportedGenerationId' IS DISTINCT FROM c.generation_id))
      ELSE c.state='claimed' AND c.generation_id=$3 END
    AND NOT EXISTS(SELECT 1 FROM cancelled_wakes cancelled WHERE cancelled.id=c.id)
    AND (${ordinaryWakeSql('c')} OR NOT EXISTS (

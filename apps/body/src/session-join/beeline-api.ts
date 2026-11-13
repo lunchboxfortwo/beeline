@@ -159,8 +159,7 @@ export async function callTool(session: Pick<JoinedSession, 'server'>, token: st
   const result = value.result as { isError?: boolean; content?: { text?: string }[] } | undefined;
   const text = result?.content?.[0]?.text ?? '';
   if (!result || result.isError) throw new Error(result?.content?.map(item => item.text ?? '').join('\n') || 'Beeline refused the call');
-  const parsed = JSON.parse(text) as { data: Record<string, unknown>; owedMentions?: unknown[] };
-  return parsed.owedMentions === undefined ? parsed.data : { ...parsed.data, owedMentions: parsed.owedMentions };
+  return (JSON.parse(text) as { data: Record<string, unknown> }).data;
 }
 
 /** One negotiated check per admitted stream connection, at the existing

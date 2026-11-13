@@ -1,4 +1,3 @@
-import { endAgentTurn } from '../agent-turn-end.js';
 import { systemMessage } from '@beeline/api-contract/system-message-catalog';
 import { cornerObjectiveSql, writeCornerObjective } from '../corner-objective.js';
 import { cornerKindSql } from '../corner-opening.js';
@@ -86,8 +85,6 @@ import { daemonCheckReviewerAuthors } from './corner-reads.js';
       `UPDATE agent_commands SET private_payload=private_payload ||
         jsonb_build_object('reportedGenerationId',$2::text,'reportedOutcome',$3::text) WHERE id=$1`,
       [command.id, command.generation_id, prefix ?? null]);
-    if (prefix && ['done','failed','blocked','needs-decision'].includes(prefix))
-      await endAgentTurn(database,command,prefix==='failed'?'failed':'complete');
     return result;
   }
 

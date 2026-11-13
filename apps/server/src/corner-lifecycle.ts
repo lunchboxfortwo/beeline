@@ -748,7 +748,8 @@ export async function noteReviewBlocked(
       systemMessage('corner-lifecycle.blocked', reason),
       undefined,
       createHash('sha256').update(`review-gap:${episode}`).digest('hex'),
-      { agentOnly: true },
+      // The review gate is corner work: wake the implementer where its PR lives.
+      { agentOnly: true, wakeInCorner: true },
     );
   const command = corner.worker_agent_id
     ? await createAgentCommand(db, {
@@ -780,8 +781,6 @@ export async function queueReviewerCommand(
   db: SqlDatabase,
   input: Parameters<typeof createAgentCommand>[1],
 ): Promise<{ command?: CommandRow; error?: string; blocked?: boolean }> {
-  // The wake names the brief revision current at dispatch, so a reviewer
-  // never reviews against a superseded one.
   const brief = (
     await db.query<{ revision: number }>(
       `SELECT revision FROM corner_brief_revisions WHERE corner_id=$1 ORDER BY revision DESC LIMIT 1`,
@@ -837,17 +836,8 @@ export async function queueReviewerCommand(
   try {
     const command = await createAgentCommand(db, {
       ...input,
-      wakeNote: [
-        context
-          ? `Current handoff target: PR #${context.pullRequest} at ${context.headSha}. Older heads in the conversation are historical.`
-          : '',
-        brief
-          ? `Review against brief revision ${brief.revision}, the corner's current brief at this dispatch.`
-          : '',
-        prior ? `Prior reviewer verdict and evidence (historical context):\n${prior}` : '',
-      ]
-        .filter(Boolean)
-        .join('\n'),
+      // The helper builds the head and newest brief revision at delivery.
+      ...(prior ? { wakeNote: `Prior reviewer verdict and evidence (historical context):\n${prior}` } : {}),
     });
     if (command)
       await db.query('UPDATE agent_commands SET review_context=$2::jsonb WHERE id=$1', [

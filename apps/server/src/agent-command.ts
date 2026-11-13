@@ -291,9 +291,7 @@ export function commandValidityCtes(roomSql: string, agentSql: string, claimFenc
               (SELECT max(revision)::text FROM corner_brief_revisions WHERE corner_id=command.room_id)))
       OR (command.wake_context IS NULL AND EXISTS (SELECT 1 FROM corner_brief_revisions brief
           WHERE brief.corner_id=command.room_id AND brief.created_at>command.created_at)
-        AND (command.reason='corner_brief_revision'
-          OR (command.reason IN ('corner_review_dispatch','subscribed_event')
-            AND command.private_payload->>'text' LIKE '%Review against brief revision%')))
+        AND command.reason='corner_brief_revision')
   ), cancelled_wakes AS (
     SELECT ended.* FROM command_scope scoped
     LEFT JOIN stale_wakes stale ON stale.id=scoped.id
@@ -393,7 +391,7 @@ export function waitingReportSql(command: string): string {
         AND ${command}.agent_id=${cornerImplementerSql('fact', 'corner')}) THEN true
     WHEN ${command}.reason='subscribed_event' AND EXISTS (
       SELECT 1 FROM messages review_source WHERE review_source.id=${command}.source_message_id
-        AND review_source.system_event->>'kind'='check-passed') THEN true
+        AND review_source.system_event->>'kind' IN ('check-passed','squire-approval-decided')) THEN true
     WHEN EXISTS (
       SELECT 1 FROM messages source JOIN identities author ON author.id=source.author_id
       WHERE source.id=${command}.source_message_id AND author.kind='human' AND source.system_event IS NULL
@@ -559,7 +557,9 @@ export async function insertAgentCommand(db: SqlDatabase, input: AgentCommandInp
        )) self_authored,
        COALESCE((SELECT author.kind='human' AND source.presentation='message' AND source.system_event IS NULL
          FROM messages source JOIN identities author ON author.id=source.author_id WHERE source.id=$3),false)
-         AND $4::boolean OR COALESCE((SELECT kind='human' FROM identities WHERE id=$5),false) AND $6::boolean human_input,
+         AND $4::boolean OR COALESCE((SELECT kind='human' FROM identities WHERE id=$5),false) AND $6::boolean
+         -- A Squire decision is a person's answer to the asker's wait.
+         OR COALESCE((SELECT system_event->>'kind'='squire-approval-decided' FROM messages WHERE id=$3),false) human_input,
        COALESCE((SELECT true FROM corner_facts fact
          JOIN rooms corner ON corner.id=fact.corner_id
          WHERE fact.corner_id=r.id
@@ -633,8 +633,6 @@ export async function insertAgentCommand(db: SqlDatabase, input: AgentCommandInp
     if (headSha && await hasPendingCornerReview(db, input.roomId, input.agentId, headSha, pullRequest))
       return undefined;
   }
-  if (reviewContext) input = { ...input, wakeNote: [input.wakeNote,
-    `Current handoff target: PR #${reviewContext.pullRequest} at ${reviewContext.headSha}. Older heads in the conversation are historical.`].filter(Boolean).join('\n') };
   const sourceText = member.rows[0]!.source_text;
   const note = input.wakeNote ? `\n${input.wakeNote}` : '';
   const privatePayload = input.privatePayload ? { ...input.privatePayload, text: input.privatePayload.text + note }

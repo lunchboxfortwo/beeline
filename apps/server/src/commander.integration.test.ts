@@ -375,27 +375,6 @@ it('Reproduction quiet-final: private order prose keeps its return route without
 });
 
 
-it('Reproduction reported-stall: delivered done survives loss of terminal receipt', async () => {
-  const opened = await open(), turn = await worker(opened.cornerId);
-  await rootFixture.daemon.execute('report', { ...authority(turn), status: 'done', text: 'done: widget complete' }, WORKER);
-  const { ConnectionPresence } = await import('./connection-presence.js');
-  await rootFixture.db.query(`UPDATE agent_turns SET created_at=now()-interval '2 minutes' WHERE room_id=$1 AND request_id=$2`,
-    [opened.cornerId, turn.turnRequestId]);
-  const presence = new ConnectionPresence(rootFixture.db, new LiveHub());
-  try {
-    await presence.start();
-    await vi.waitFor(async () => expect((await rootFixture.db.query(`SELECT status FROM agent_turns WHERE room_id=$1 AND request_id=$2`,
-      [opened.cornerId, turn.turnRequestId])).rows[0]?.status).toBe('complete'));
-  } finally { await presence.stop(); }
-  expect((await rootFixture.db.query(`SELECT status,failure_reason FROM agent_turns WHERE room_id=$1 AND request_id=$2`,
-    [opened.cornerId, turn.turnRequestId])).rows).toEqual([{ status: 'complete', failure_reason: null }]);
-  expect((await commands(opened.cornerId, RUBY)).filter(c => c.reason === 'report').map(c => c.source.body))
-    .toEqual(['done: widget complete']);
-  expect((await rootFixture.db.query(`SELECT state FROM agent_commands WHERE id=$1`, [turn.id])).rows)
-    .toEqual([{ state: 'complete' }]);
-  console.info('Demonstrated reported-stall: commander retains done; worker complete; no failure or retry');
-});
-
 
 it('Reproduction R1: elapsed time keeps work queued behind a claimed turn', async () => {
   const opened = await open();

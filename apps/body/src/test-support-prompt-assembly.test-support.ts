@@ -38,10 +38,8 @@ import { afterEach as m23_afterEach, describe as m23_describe, expect as m23_exp
 import { assembleTurnPrompt as m23_assembleTurnPrompt } from "./prompt-assembly.js";
 
 
-import { callTool as m23_callTool } from "./session-join/beeline-api.js";
 
 
-import { callAgentTool as m23_callAgentTool, withToolOwedContext as m23_withToolOwedContext } from "./read-only-mcp.js";
 
 
 import { renderMention as m23_renderMention } from "./session-join/bridge.js";
@@ -338,21 +336,12 @@ return {
 routing,
 };
 }
-export function fixtureScope17() {
-
-  m23_afterEach(() => { m23_vi.unstubAllGlobals(); m23_vi.unstubAllEnvs(); });
-return {
-
-};
-}
 
 export { ACP_SESSION_MEMORY_MAX_BYTES } from './acp-resource-scope.js';
 export { describe, expect, it, afterEach as m23_afterEach, describe as m23_describe, expect as m23_expect, it as m23_it, vi as m23_vi, describe as mergedDescribe23 } from 'vitest';
 export { PROMPT_SURFACES, SESSION_SECTIONS, SESSION_BUDGET_BYTES, TURN_SECTIONS, assembleSessionPrompt, assembleTurnPrompt, sessionSections, CORNER_REVIEWER_SESSION_INSTRUCTION, CORNER_CHECKS_NUDGE, cornerMergeInstruction, cornerReviewerInstruction, cornerHasRepositoryWork, CORNER_REVIEWER_AUTHOR_MERGE, renderAssignedCornerBrief, renderReplyContext, assembleTurnPrompt as m23_assembleTurnPrompt } from './prompt-assembly.js';
 export { HOST_EMULATOR_RULE } from './host-emulator.js';
 export { beelineConnectSkillMarkdown, beelineManagedSkills, beelineReviewSkillMarkdown } from './beeline-skill.js';
-export { callTool as m23_callTool } from './session-join/beeline-api.js';
-export { callAgentTool as m23_callAgentTool, withToolOwedContext as m23_withToolOwedContext } from './read-only-mcp.js';
 export { renderMention as m23_renderMention } from './session-join/bridge.js';
 export type { CornerBrief } from '@beeline/api-contract/daemon';
 export type { PromptSurface, SessionPromptContext, TurnPromptContext } from './prompt-assembly.js';
