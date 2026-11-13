@@ -279,11 +279,13 @@ export function useMembersRouteState([
                   candidate.options.length > 0,
               ),
             );
-            if (effort) {
-              waitingForEffortCatalogRef.current = false;
-              setWorking(null);
-              setOpenModelAxis('effort');
-            }
+            const model = detail.catalog.find((axis) => axis.category === 'model')?.currentValue;
+            const selected = detail.selected?.model ?? detail.runtimeSelection?.model;
+            if (model && selected && model !== selected) return;
+            if (!model) return;
+            waitingForEffortCatalogRef.current = false;
+            setWorking(null);
+            if (effort) setOpenModelAxis('effort');
           })
           .catch((reason) => {
             if (!cancelled) setError(appReadErrorCopy(reason));
