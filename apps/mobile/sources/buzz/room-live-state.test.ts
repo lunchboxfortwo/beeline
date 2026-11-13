@@ -266,6 +266,9 @@ it.each(['complete', 'cancelled'] as const)('publishes %s to an open Room and de
   stops.push(cache.subscribe(address, paint));
   publishPhoneLiveEvent(terminal);
   expect(paint).toHaveReturnedWith(status);
+  // Completion before a later Stop leaves no active turn or queued acknowledgement.
+  expect(cache.peek(address, isRoomView)?.latestAgentTurns.some(turn => turn.status === 'working')).toBe(false);
+  expect(cache.peek(address, isRoomView)?.pendingAgentCommands).toEqual([]);
   expect(cache.peek(listAddress, isChatListView)?.chats[0]?.latestAgentTurns).toEqual([terminal.turn]);
   cache.publish(listAddress, applyChatListDelta(cache.peek(listAddress, isChatListView)!, terminal), isChatListView);
   expect(cache.peek(address, isRoomView)?.latestAgentTurns).toEqual([terminal.turn]);
