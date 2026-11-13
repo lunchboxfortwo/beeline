@@ -151,6 +151,7 @@ export function localHooks(directory, processes) {
   return {
     job: async args => {
       const { context, engine } = args;
+      if (['helper_linux', 'helper_macos', 'server'].includes(context.github.job)) context.env.CARGO_BUILD_JOBS = '2';
       if (context.github.job === 'helper_macos') {
         if (context.matrix.platform === 'darwin-arm64') return carryArm64(engine, context);
         return macJob(args);
@@ -249,7 +250,11 @@ async function dryRun(args, engine, context) {
     engine.processes.log(`Dry-run build: ${leg}; no publication, migration, channel move or rollout`);
     let steps;
     if (leg === 'server') steps = [{ run: `docker build --file apps/server/Dockerfile --tag beeline-release-dry-${createHash('sha256').update(engine.directory).digest('hex').slice(0, 12)} --build-arg "BEELINE_RELEASE_SHA=$GITHUB_SHA" --build-arg BEELINE_RELEASE_VERSION=v0.0.0-rc.1 .` }];
-    else if (leg === 'helper') steps = [{ run: 'npm run bundle:beeline -- --platform linux-x64', env: { BEELINE_BUNDLE_COMMIT: sha, BEELINE_BUNDLE_VERSION: 'v0.0.0-rc.1' } }];
+    else if (leg === 'helper') steps = [
+      { uses: 'dtolnay/rust-toolchain@1.95.0' },
+      { uses: './.github/actions/buzz-agent-cache', with: { platform: 'linux-x64' } },
+      { run: 'npm run bundle:beeline -- --platform linux-x64', env: { BEELINE_BUNDLE_COMMIT: sha, BEELINE_BUNDLE_VERSION: 'v0.0.0-rc.1', CARGO_BUILD_JOBS: '2' } },
+    ];
     else if (leg === 'mobile-ota') steps = [...engine.read('.github/actions/mobile-ota-leg/action.yml').runs.steps.slice(0, 1), { run: 'npx --no-install expo export --platform all --output-dir "$RUNNER_TEMP/ota-export"', 'working-directory': 'apps/mobile', env: { EXPO_PUBLIC_BUZZY_MONOLITH_URL: 'https://server.usebeeline.app' } }];
     else if (leg === 'pages') steps = engine.read('.github/actions/pages-leg/action.yml').runs.steps.slice(0, 1);
     else if (leg === 'web-app') steps = engine.read('.github/actions/web-app-leg/action.yml').runs.steps.filter(step => ['Install mobile dependencies', 'Export the production web bundle', 'Verify the push worker is in the export', 'Stamp the immutable release identity'].includes(step.name));
@@ -273,7 +278,7 @@ async function main(argv) {
   mkdirSync(directory, { recursive: true, mode: 0o700 });
   if (!outside(root, realpathSync(directory))) throw new Error('Release state symlink points inside the repository');
   const envFile = resolve(args['env-file'] || join(homedir(), '.config/beeline-release.env'));
-  const secrets = args.mode === 'execute' ? loadEnvironment(envFile) : {};
+  const secrets = args.mode === 'execute' || (args.mode === 'dry-run' && args['env-file']) ? loadEnvironment(envFile) : {};
   const processes = new Processes(secrets);
   const variables = { BEELINE_HELPER_SENTRY_DSN: secrets.BEELINE_HELPER_SENTRY_DSN || '', BEELINE_MOBILE_SENTRY_DSN: secrets.BEELINE_MOBILE_SENTRY_DSN || '' };
   const engine = new LocalActions({ root, directory, secrets, variables, processes, github: localGithub, hooks: localHooks(directory, processes) });
