@@ -205,6 +205,7 @@ import { daemonExecuteOperation } from './operations.js';
     // An owned claim must not remove existing tools. Operations without a
     // dedicated adapter keep their established provider/permission path while
     // retaining the command's generation and final commit fences below.
+    let cornerPrRegistrationUnavailable = false;
     // Provider reads happen before the command transaction. Reports may be
     // delivered in the commander's Room, so refresh their origin corners too.
     if (!ctx.commandTransaction && scopedRoom && ctx.github) {
@@ -216,10 +217,21 @@ import { daemonExecuteOperation } from './operations.js';
           [scopedRoom, authenticatedAgentId]);
         for (const origin of origins.rows) await ctx.github.refreshCornerReviewHead?.(origin.corner_id);
       } else if (isCorner && !cornerReviewer && name === 'report' && candidate.status === 'done') {
-        await ctx.github.resolveUnregisteredCornerPullRequest(scopedRoom, authenticatedAgentId);
+        try {
+          await ctx.github.resolveUnregisteredCornerPullRequest(scopedRoom, authenticatedAgentId);
+        } catch (error) {
+          cornerPrRegistrationUnavailable = true;
+          console.warn('[corner-message] PR registration unavailable; delivering report', { cornerId: scopedRoom, operation: name, error });
+        }
       } else if (isCorner && (['order', 'report', 'postCornerMessage'].includes(name) ||
         name === 'postRoomMessage' && candidate.relay === undefined)) {
-        await ctx.github.refreshCornerReviewHead?.(scopedRoom);
+        // Communication must survive provider outages. Merge decisions still
+        // obtain their own live GitHub evidence through the gate.
+        try {
+          await ctx.github.refreshCornerReviewHead?.(scopedRoom);
+        } catch (error) {
+          console.warn('[corner-message] PR state unknown; delivering message', { cornerId: scopedRoom, operation: name, error });
+        }
       }
     }
     if (voiceAgentName && typeof candidate.text === 'string')
@@ -437,6 +449,7 @@ import { daemonExecuteOperation } from './operations.js';
           starterOnboarding: ctx.starterOnboarding, memoryEmbed,
           afterCommit: (task) => { committedTasks.push(task); },
         });
+        scoped.cornerPrRegistrationUnavailable = cornerPrRegistrationUnavailable;
         let result: Output<Name> = await scoped.execute(name, input, authenticatedAgentId, turnOwner);
         if (name === 'requestAgentGrant') {
           await db.query(
