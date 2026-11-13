@@ -174,12 +174,12 @@ class MonolithClientAdapter {
   setAgentSoul(
     workspaceId: string,
     agentId: string,
-    soul: { name: string; soul: string; avatarSeed: string; avatar?: string },
+    soul: { handle?: string; soul: string; avatarSeed: string; avatar?: string },
   ) {
     return this.transport.operation('updateAgentSoul', {
       workspaceId,
       agentId,
-      name: soul.name,
+      ...(soul.handle !== undefined ? { handle: soul.handle } : {}),
       instructions: soul.soul,
       avatarSeed: soul.avatarSeed,
       ...(soul.avatar ? { avatar: soul.avatar } : {}),

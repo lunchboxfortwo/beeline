@@ -1372,7 +1372,7 @@ export const wireShapes: readonly WireShape[] = [
   shape({"kind":"object","properties":{"model":{"node":5,"optional":true}}}),
   shape({"kind":"object","properties":{"effort":{"node":457,"optional":true},"fastMode":{"node":20,"optional":true}}}),
   shape({"kind":"intersection","choices":[36,702,1370]}),
-  shape({"kind":"object","properties":{"name":{"node":1,"optional":false},"instructions":{"node":1,"optional":false},"avatarSeed":{"node":1,"optional":false},"avatar":{"node":5,"optional":true}}}),
+  shape({"kind":"object","properties":{"handle":{"node":5,"optional":true},"name":{"node":5,"optional":true},"instructions":{"node":1,"optional":false},"avatarSeed":{"node":1,"optional":false},"avatar":{"node":5,"optional":true}}}),
   shape({"kind":"intersection","choices":[36,702,1372]}),
   shape({"kind":"object","properties":{"url":{"node":1,"optional":false},"key":{"node":5,"optional":true}}}),
   shape({"kind":"intersection","choices":[36,702,1374]}),

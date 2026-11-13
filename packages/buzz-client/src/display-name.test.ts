@@ -50,6 +50,7 @@ describe('agent presentation names', () => {
     expect(isReasonableAgentName('')).toBe(false);
     expect(isReasonableAgentName('x'.repeat(33))).toBe(false);
     expect(isReasonableAgentName('h4x0r')).toBe(false);
+    expect(isReasonableAgentName('Firstmate 2')).toBe(true);
   });
 
   it('uses a neutral fallback for every system marker', () => {
