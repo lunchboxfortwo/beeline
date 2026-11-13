@@ -4,6 +4,7 @@ import React, { useState } from 'react';
 import { createRoot } from 'react-dom/client';
 import { View } from 'react-native';
 import { ConversationComposer } from '../sources/components/buzz/ConversationComposer';
+import { GrammarProvider } from '../sources/ui/GrammarProvider';
 const handles = new Set(['ruby']);
 const proof = { set: (_: { value: string; viewer: boolean; scale: number; focused: boolean }) => {} };
 function Proof() {
@@ -20,5 +21,5 @@ function Proof() {
     </View>
   </View>;
 }
-createRoot(document.getElementById('root')!).render(<Proof />);
+createRoot(document.getElementById('root')!).render(<GrammarProvider><Proof /></GrammarProvider>);
 (globalThis as { hintProof?: unknown }).hintProof = proof;

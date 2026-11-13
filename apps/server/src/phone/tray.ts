@@ -24,6 +24,8 @@ import { messageId } from './values.js';
       viewerId,
       (row) => identity(row, ctx.publicOrigin),
       input.markSeen !== false,
+      undefined,
+      ctx.publicOrigin,
     );
   }
 

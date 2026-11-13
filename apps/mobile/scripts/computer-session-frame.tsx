@@ -14,6 +14,7 @@ import medium from '../sources/assets/fonts/SpaceGrotesk-Medium.ttf';
 import semibold from '../sources/assets/fonts/SpaceGrotesk-SemiBold.ttf';
 // @ts-expect-error esbuild embeds the font as a data URL.
 import mono from '../sources/assets/fonts/IBMPlexMono-Regular.ttf';
+import { GrammarProvider } from '../sources/ui/GrammarProvider';
 
 const query = new URLSearchParams(location.search);
 const frame = query.get('frame') ?? 'card-live';
@@ -81,7 +82,7 @@ function Desktop() {
 async function main() {
   await Promise.all(['SpaceGrotesk-Regular', 'SpaceGrotesk-Medium', 'SpaceGrotesk-SemiBold', 'IBMPlexMono-Regular']
     .map((family) => document.fonts.load(`16px ${family}`)));
-  createRoot(document.getElementById('root')!).render(desktop ? <Desktop /> : frame.startsWith('viewer') ? <PhoneViewer /> : <CardRoom />);
+  createRoot(document.getElementById('root')!).render(<GrammarProvider>{desktop ? <Desktop /> : frame.startsWith('viewer') ? <PhoneViewer /> : <CardRoom />}</GrammarProvider>);
   setTimeout(() => {
     const title = document.querySelector('[data-testid^="computer-session-card"] div[dir="auto"]') as HTMLElement | null;
     (globalThis as { __computerFrameFont?: string }).__computerFrameFont = title ? getComputedStyle(title).fontFamily : 'missing';

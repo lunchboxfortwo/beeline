@@ -24,8 +24,11 @@ const easChunks = new WeakMap();
 /** @type {import('@expo/fingerprint').Config} */
 /** @public Expo fingerprint loads this configuration by filename. */
 module.exports = {
-  // These patches only change web JavaScript. Keep native patches counted.
+  // JavaScript-only patches do not change native compatibility. Keep native patches counted.
   ignorePaths: [
+    // Router path parsing and its Node test contain no native source or configuration.
+    'patches/expo-router+55.0.17.patch',
+    'patches/expo-router.test.cjs',
     'patches/@expo+vector-icons+15.1.1.patch',
     'patches/react-native-unistyles+3.1.1.patch',
     // Autolinking hashes the installed package too. These are the exact web-only

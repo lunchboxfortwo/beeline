@@ -200,7 +200,7 @@ export function useMembersConfiguration([
     const name = selectedAgent.agent.identity.name;
     await Modal.confirm(
       `Remove ${name}?`,
-      'This removes the agent from every Room and the Workspace. The paired host then confirms that removal, drains active sessions, stops the daemon, and deletes its runtime configuration. Re-pairing is required to restore it.',
+      'This removes the agent from every chat and the Workspace. The paired host then confirms that removal, drains active sessions, stops the daemon, and deletes its runtime configuration. Re-pairing is required to restore it.',
       {
         cancelText: 'Cancel', confirmText: 'Remove agent', destructive: true, pendingText: 'Removing…',
         onConfirm: async () => {

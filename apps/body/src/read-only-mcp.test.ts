@@ -15,19 +15,24 @@ describe('corner text', () => {
   });
 
 
-  it('refuses only what is genuinely too long, in a sentence naming the count', () => {
-    expect(() =>
+  it('fixes a spaced name and a long objective, and still requires both', () => {
+    expect(
       cornerCallText({
         name: 'far too many words here',
         objective: 'Ship the widget',
       }),
-    ).toThrow('the name must not contain whitespace; use hyphens between words');
-    expect(() =>
-      cornerCallText({
-        name: 'widget-ledger',
-        objective: Array.from({ length: 61 }, (_, index) => `word${index}`).join(' '),
-      }),
-    ).toThrow('the objective is 61 words; the limit is 24');
+    ).toEqual({
+      name: 'far-too-many',
+      objective: 'Ship the widget',
+      notes: ['the name had spaces and was 5 words; saved as far-too-many (first 3 words)'],
+    });
+    const long = cornerCallText({
+      name: 'widget-ledger',
+      objective: Array.from({ length: 61 }, (_, index) => `word${index}`).join(' '),
+    });
+    expect(long.name).toBe('widget-ledger');
+    expect(long.objective.split(' ')).toHaveLength(24);
+    expect(long.notes?.[0]).toContain('61 words');
     expect(() => cornerCallText({ objective: 'Ship the widget' })).toThrow(
       'the name is required; give a title of at most 3 words',
     );
@@ -512,9 +517,9 @@ m9_describe('beeline-agent request_grant', () => {
       /^pending, card posted: run fly deploy -a beeline-preview --with FLY_TOKEN \[grant g-1\]/,
     );
     m9_expect(reply).toContain('paused');
-    m9_expect(reply).toContain('ALWAYS, ONCE, or NO');
+    m9_expect(reply).toContain('Always, Once, or Deny');
     m9_expect(reply).toContain(
-      "The resource owner must answer ALWAYS, ONCE, or NO in the resource owner's private @system DM",
+      "The resource owner must answer Always, Once, or Deny in the resource owner's private @system DM",
     );
     m9_expect(reply).not.toContain('in this Room');
   });

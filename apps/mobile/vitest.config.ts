@@ -25,7 +25,6 @@ export default defineConfig({
       '@expo/vector-icons': resolve('node_modules/@expo/vector-icons'),
       'react-native-svg': resolve('node_modules/react-native-svg'),
       'react-native-reanimated': resolve('node_modules/react-native-reanimated'),
-      'react-native-unistyles': resolve('node_modules/react-native-unistyles'),
       '@react-native-async-storage/async-storage': resolve('node_modules/@react-native-async-storage/async-storage'),
       react: resolve('node_modules/react'),
       vitest: resolve('node_modules/vitest'),

@@ -1,0 +1,10 @@
+{
+  "reproduction": "COMMAND-APPROVAL-1",
+  "positiveControlCreatedMarker": true,
+  "refusal": "Error: no approved command grant matches. Closest grant denied-command: status (denied) does not match. Check the named mismatch before asking again with request_grant kind=command for this argv.",
+  "executionSideEffect": false,
+  "operations": [
+    "listTurnAgentGrants",
+    "listAgentGrantRequests"
+  ]
+}

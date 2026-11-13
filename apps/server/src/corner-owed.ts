@@ -1,7 +1,7 @@
 import { cornerCommanderInputSql, cornerWaitingSql } from './corner-waiting.js';
 import { cornerImplementerSql, cornerOwnerSql } from './corner-worker.js';
 import { cornerCommissionerSql } from './corner-opening.js';
-import { cornerWaitingReportSql, humanReportCornerSql, cornerHumanReportsSql, reportAnswerMessageSql } from './corner-waiting-report.js';
+import { cornerWaitingReportSql, cornerReportItemsSql, humanReportCornerSql, reportAnswerMessageSql } from './corner-waiting-report.js';
 import { CHOICE_CARD_TYPE } from '@beeline/api-contract/phone';
 import {
   CORNER_AGENT_UNREACHABLE_CARD_TYPE,
@@ -251,26 +251,11 @@ export function cornerReportAnswerTimesSql(corner: string): string {
       FROM rooms history_corner JOIN corner_facts history_fact ON history_fact.corner_id=history_corner.id
       WHERE history_corner.id=${corner} AND history_corner.archived_at IS NULL
     ), reports AS (
-    SELECT scope.id corner_id,scope.worker_id,report.room_id return_room_id,
-      COALESCE((SELECT created_at FROM messages WHERE id=encode(sha256(convert_to('agent-command-card:'||report.id,'UTF8')),'hex')),report.created_at) created_at
-    FROM report_corner scope JOIN agent_commands report
-      ON report.private_payload->>'fromRoomId'=scope.id::text AND report.private_payload->>'kind'='report'
-    WHERE report.private_payload->>'authorId'=scope.worker_id
-      AND report.private_payload->>'text' ~ '^(needs-decision|blocked):'
-      AND report.private_payload->>'waitingAnswered'='true'
-    UNION ALL
-    SELECT scope.id,scope.worker_id,item.room_id,item.created_at
-    FROM report_corner scope CROSS JOIN LATERAL (
-      SELECT item.* FROM (${cornerHumanReportsSql('scope.id', 'scope.worker_id')}) item
-      WHERE item.author_id=scope.worker_id AND item.card->>'reportToId' IS NOT NULL
-        AND ${humanReportCornerSql('item')}=scope.id::text
-        AND item.presentation='message' AND item.system_event IS NULL AND item.deleted_at IS NULL
-        AND item.text ~ '^(needs-decision|blocked):'
-        AND item.card->>'waitingAnswered'='true'
-      OFFSET 0
-    ) item
+    SELECT scope.id corner_id,scope.worker_id,item.asked_items,item.asked_at created_at
+    FROM report_corner scope CROSS JOIN LATERAL (${cornerReportItemsSql('scope.id', 'scope.worker_id')}) item
+    WHERE item.answered='true'
   ) SELECT resolution.answered_at ended_at FROM reports report JOIN rooms answer_corner ON answer_corner.id=report.corner_id
-    CROSS JOIN LATERAL (${cornerCommanderInputSql('answer_corner','report.worker_id','report.created_at','report.return_room_id')}) resolution
+    CROSS JOIN LATERAL (${cornerCommanderInputSql('answer_corner','report.worker_id','report.created_at','report.asked_items')}) resolution
     WHERE resolution.answered_at IS NOT NULL`;
 
 }
@@ -368,7 +353,7 @@ BEGIN
     FROM report_corners report_corner CROSS JOIN LATERAL (${cornerWaitingReportSql('report_corner')}) waiting
     CROSS JOIN LATERAL (${cornerCommanderInputSql('report_corner',
       "(SELECT "+cornerImplementerSql('answer_fact','report_corner')+" FROM corner_facts answer_fact WHERE answer_fact.corner_id=report_corner.id)",
-      'waiting.asked_at','waiting.return_room_id')}) resolution
+      'waiting.asked_at','ARRAY[waiting.message_id,waiting.card_id]')}) resolution
     WHERE resolution.answered_at IS NOT NULL
   ), commands AS (
     UPDATE agent_commands SET private_payload=jsonb_set(private_payload,'{waitingAnswered}','true')

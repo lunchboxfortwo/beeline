@@ -58,7 +58,7 @@ describe('owed Room tags', () => {
     const payloads: any[] = [];
     await deliverMcpMemberWebhooks(db, async (_url, init) => { payloads.push(JSON.parse(init.body)); return new Response('', { status: 200 }); });
     const payload = payloads.find(p => p.messageId === message);
-    const expected = { roomId: room, messageId: message, memberId: member, replyRule: `answer in this Room with replyTo ${message} and start with @owner` };
+    const expected = { roomId: room, messageId: message, memberId: member, replyRule: `Reply (start with @owner): replyTo ${message}` };
     expect(payload).toMatchObject(expected);
     const cut = { ...payload, instruction: payload.instruction.slice(0, 200) };
     expect(cut).toMatchObject(expected);
@@ -157,13 +157,70 @@ describe('owed Room tags', () => {
     expect((await call('list_mentions')).mentions.map((m: any) => m.id)).not.toContain(a);
     expect(BigInt(page.nextCursor)).toBeGreaterThan(BigInt(seq));
   });
-  it('C7 every tool result includes the caller’s remaining owed tags, including failures', async () => {
-    const message = await tag();
-    const tool = (mcp as unknown as { toolResult(p: McpPrincipal,n: string,a: Record<string, unknown>): Promise<any> }).toolResult.bind(mcp);
-    for (const [name, args] of [['list_rooms', {}], ['send_message', { room, text: '' }]] as const) {
-      const result = await tool(principal(), name, args);
-      expect(JSON.parse(result.content.at(-1).text).owedMentions.some((m: any) => m.messageId === message)).toBe(true);
+  it('C7 owed mentions are listed once per claimed turn and only for that place', async () => {
+    const elsewhereRoom = '44444444-4444-4444-8444-444444444444';
+    await db.query(`INSERT INTO rooms(id,workspace_id,name) VALUES($1,$2,'Elsewhere')`, [elsewhereRoom, workspace]);
+    for (const who of [owner, helper]) await db.query(
+      `INSERT INTO memberships(workspace_id,room_id,identity_id,role) VALUES($1,$2,$3,'member')`, [workspace, elsewhereRoom, who]);
+    const elsewhere = id();
+    await db.query('INSERT INTO messages(id,room_id,author_id,text) VALUES($1,$2,$3,$4)', [elsewhere, elsewhereRoom, owner, 'elsewhere']);
+    await recordMcpMention(db, helper, elsewhereRoom, elsewhere);
+    const here = await tag(helper);
+    const caller = principal(helper);
+    const tool = (mcp as unknown as { toolResult(p: McpPrincipal, n: string, a: Record<string, unknown>): Promise<{ content: { text: string }[] }> }).toolResult.bind(mcp);
+    const mentions = (result: { content: { text: string }[] }) => {
+      const block = [...result.content].reverse().find(item => item.text.includes('"owedMentions"'));
+      return block ? JSON.parse(block.text).owedMentions as { messageId: string; roomId: string }[] : undefined;
+    };
+    const claim = async (generation: string, place = room) => {
+      await db.query("UPDATE agent_commands SET state='complete' WHERE agent_id=$1 AND state='pending'", [helper]);
+      const source = id();
+      await db.query('INSERT INTO messages(id,room_id,author_id,text) VALUES($1,$2,$3,$4)', [source, place, owner, `@helper ${generation}`]);
+      await routeHumanMessage(db, source);
+      const command = (await daemon.execute('getAgentCommands', { roomId: place }, helper)).commands.find(item => item.sourceMessageId === source);
+      expect(command?.id).toBeTruthy();
+      await daemon.execute('claimAgentCommand', { roomId: place, commandId: command!.id, generationId: generation }, helper);
+      return command!.id;
+    };
+    const claimed: string[] = [];
+    try {
+      expect(mentions(await tool(caller, 'list_rooms', {}))).toBeUndefined();
+      expect(mentions(await tool(caller, 'read_messages', { room }))).toBeUndefined();
+      expect(mentions(await tool(caller, 'send_message', { room, text: '' }))).toBeUndefined();
+      claimed.push(await claim('owed-turn-1'));
+      expect(mentions(await tool(caller, 'read_messages', { room: elsewhereRoom }))).toBeUndefined();
+      const first = mentions(await tool(caller, 'read_messages', { room }));
+      expect(first?.some(item => item.messageId === here)).toBe(true);
+      expect(first?.some(item => item.roomId === elsewhereRoom)).toBe(false);
+      expect(mentions(await tool(caller, 'read_messages', { room }))).toBeUndefined();
+      expect(mentions(await tool(caller, 'list_rooms', {}))).toBeUndefined();
+      claimed.push(await claim('owed-turn-b', elsewhereRoom));
+      const otherPlace = mentions(await tool(caller, 'read_messages', { room: elsewhereRoom }));
+      expect(otherPlace?.some(item => item.messageId === elsewhere)).toBe(true);
+      expect(otherPlace?.some(item => item.roomId === room)).toBe(false);
+      expect(mentions(await tool(caller, 'read_messages', { room }))).toBeUndefined();
+      await db.query(`UPDATE agent_commands SET state='complete' WHERE id=ANY($1::text[])`, [claimed]);
+      claimed.push(await claim('owed-turn-2'));
+      const reset = mentions(await tool(caller, 'list_rooms', {}));
+      expect(reset?.some(item => item.messageId === here)).toBe(true);
+      expect(reset?.some(item => item.roomId === elsewhereRoom)).toBe(false);
+    } finally {
+      if (claimed.length) await db.query(`UPDATE agent_commands SET state='complete' WHERE id=ANY($1::text[])`, [claimed]);
+      await db.query('DELETE FROM memberships WHERE room_id=$1', [elsewhereRoom]);
+      await db.query('DELETE FROM rooms WHERE id=$1', [elsewhereRoom]);
     }
+  });
+  it('C7 owed mentions for one place leave the other place out', async () => {
+    const other = '33333333-3333-4333-8333-333333333333';
+    await db.query(`INSERT INTO rooms(id,workspace_id,name) VALUES($1,$2,'Other')`, [other, workspace]);
+    for (const who of [owner, member]) await db.query(`INSERT INTO memberships(workspace_id,room_id,identity_id,role) VALUES($1,$2,$3,'member')`, [workspace, other, who]);
+    const elsewhere = id();
+    await db.query('INSERT INTO messages(id,room_id,author_id,text) VALUES($1,$2,$3,$4)', [elsewhere, other, owner, 'elsewhere']);
+    await recordMcpMention(db, member, other, elsewhere);
+    const here = await tag();
+    expect((await owedMentions(db, member, room)).some(m => m.messageId === here)).toBe(true);
+    expect((await owedMentions(db, member, room)).some(m => m.roomId === other)).toBe(false);
+    expect((await owedMentions(db, member, 'short')).some(m => m.messageId === elsewhere)).toBe(true);
   });
   it('C7 helper tool context returns only its authenticated member’s owed tags', async () => {
     const message = await tag(helper);
@@ -262,7 +319,7 @@ describe('owed Room tags', () => {
     await db.query(`UPDATE agent_commands SET state='pending',generation_id=NULL,lease_expires_at=NULL,turn_request_id=$2 WHERE id=$1`, [command.id, id()]);
     const retry = (await daemon.execute('getAgentCommands', { roomId: room }, helper)).commands.find(c => c.id === command.id)!;
     await daemon.execute('claimAgentCommand', { roomId: room, commandId: command.id, generationId: 'retry' }, helper);
-    await daemon.execute('postRoomMessage', { roomId: room, requestId: retry.turnRequestId, generationId: 'retry', text: 'retry answer', replyToMessageId: source }, helper);
+    await expect(daemon.execute('postRoomMessage', { roomId: room, requestId: retry.turnRequestId, generationId: 'retry', text: 'retry answer', replyToMessageId: source }, helper)).rejects.toThrow('not delivered');
     expect((await db.query('SELECT id FROM messages WHERE author_id=$1 AND reply_to_message_id=$2', [helper, source])).rows).toEqual([{ id: first.id }]);
     expect((await owedMentions(db, helper)).some(m => m.messageId === source)).toBe(false);
   });

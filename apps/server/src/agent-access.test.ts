@@ -117,114 +117,32 @@ describe('who may address an agent', () => {
     }
   });
 
-  it('answers everyone under the default, and inscribes one refusal under creator', async () => {
+  it('enforces creator-only routing without posting an access refusal', async () => {
     const database = await fixture();
     try {
       const phone = new PhoneService(database, 'http://local.test');
-      await reportPresence(database, 'online');
-
-      // Default policy: nothing to explain, so nothing is written.
-      await send(phone, OUTSIDER, '1', '@greeter yo');
+      await setPolicy(database, 'creator');
+      for (const seed of ['1', '2', '3']) await send(phone, OUTSIDER, seed, '@greeter hello');
       expect(await lines(database)).toEqual([]);
-
-      await setPolicy(database, 'creator');
-      await send(phone, OUTSIDER, '2', '@greeter yo again');
-      expect(await lines(database)).toEqual([
-        {
-          author_id: AGENT,
-          presentation: 'system',
-          // The handles in this sentence are grammar, not an address: the line
-          // wakes no daemon and pushes to nobody.
-          tagged_ids: [],
-          text:
-            '@greeter did not answer @bananaman614305 · only @lunchboxfortwo may address @greeter. ' +
-            'Ask the user for permission to access the agent in the members page',
-        },
-      ]);
-
-      // One explanation per window, not one per message: a second ask inside the
-      // window collides on the line's derived id and writes nothing.
-      await send(phone, OUTSIDER, '3', '@greeter please');
-      await send(phone, OUTSIDER, '4', '@greeter hello?');
-      expect(await lines(database)).toHaveLength(1);
-
-      // The owner is permitted, so their mention is never explained away.
-      await reportPresence(database, 'online');
-      await send(phone, OWNER, '5', '@greeter hello owner');
-      expect(await lines(database)).toEqual([
-        expect.objectContaining({
-          text:
-            '@greeter did not answer @bananaman614305 · only @lunchboxfortwo may address @greeter. ' +
-            'Ask the user for permission to access the agent in the members page',
-        }),
-      ]);
-    } finally {
-      await database.close();
-    }
+      expect((await database.query('SELECT 1 FROM agent_commands WHERE agent_id=$1', [AGENT])).rowCount).toBe(0);
+      const sent = await send(phone, OWNER, '4', '@greeter hello');
+      expect((await database.query('SELECT 1 FROM agent_commands WHERE source_message_id=$1', [sent.messageId])).rowCount).toBe(1);
+      expect(await lines(database)).toEqual([]);
+    } finally { await database.close(); }
   });
 
-  it('leaves a person with no handle unnamed rather than naming them by display name', async () => {
-    const database = await fixture();
-    try {
-      const phone = new PhoneService(database, 'http://local.test');
-      // Every sign-in path stamps a handle; a row without one is legacy or
-      // imported. A display name is not an address and is not unique, so it must
-      // never stand in for one — the line drops the name instead.
-      await database.query(`UPDATE identities SET handle=NULL WHERE id IN ($1,$2)`, [
-        OWNER,
-        OUTSIDER,
-      ]);
-      await setPolicy(database, 'creator');
-      await send(phone, OUTSIDER, '1', '@greeter yo');
-
-      const [refusal] = await lines(database);
-      expect(refusal?.text).toBe(
-        '@greeter did not answer · only the owner may address @greeter. ' +
-          'Ask the user for permission to access the agent in the members page',
-      );
-      expect(refusal?.text).not.toContain('Bananaman');
-      expect(refusal?.text).not.toContain('Charles');
-
-      await phone.execute(
-        'updateAgentAccessPolicy',
-        { workspaceId: WORKSPACE, agentId: AGENT, policy: 'everyone' },
-        OWNER,
-      );
-      expect(await accessPolicyLines(database)).toEqual([]);
-    } finally {
-      await database.close();
-    }
-  });
-
-  it('sorts the refusal after its cause, and reading the Room clears the unread mark', async () => {
+  it('keeps the human message last when its mention is refused, and reading clears unread', async () => {
     const database = await fixture();
     try {
       const phone = new PhoneService(database, 'http://local.test');
       await setPolicy(database, 'creator');
-      const sent = await send(phone, OUTSIDER, '1', '@greeter sup');
-
-      // The phone reads the Room and marks its LAST row read. The refusal is
-      // the cause's consequence, so it must be that last row even though both
-      // stamps share a second — a tie a whole-second transcript would
-      // otherwise break on the random row id, pinning the read mark below the
-      // line forever and leaving the Room list dot lit no matter how often the
-      // Room is read.
+      const sent = await send(phone, OUTSIDER, '1', '@greeter hello');
       const view = await phone.readRoom(ROOM, OUTSIDER);
-      expect(view).not.toBeNull();
-      const last = view!.messages.at(-1)!;
-      expect(last.id).not.toBe(sent.messageId);
-      expect(last.text).toContain('@greeter did not answer @bananaman614305');
-      expect(view!.messages.at(-2)!.id).toBe(sent.messageId);
-      await phone.markRead(ROOM, last.id, OUTSIDER);
-
-      // The room-list layer that actually computes unread: readChats counts a
-      // system line the mark covers as read, whatever the newest row is.
-      const chats = await phone.readChats(WORKSPACE, OUTSIDER);
-      const row = chats!.chats.find((chat) => chat.room.id === ROOM);
-      expect(row?.unread).toBe(false);
-    } finally {
-      await database.close();
-    }
+      expect(view!.messages.at(-1)!.id).toBe(sent.messageId);
+      expect(await lines(database)).toEqual([]);
+      await phone.markRead(ROOM, sent.messageId, OUTSIDER);
+      expect((await phone.readChats(WORKSPACE, OUTSIDER))?.chats.find(chat => chat.room.id === ROOM)?.unread).toBe(false);
+    } finally { await database.close(); }
   });
 
   it('hands a running helper the server policy, changed or not, on every candidate message', async () => {

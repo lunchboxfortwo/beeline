@@ -2,54 +2,31 @@ import { appReadErrorCopy } from '@/buzz/app-error-copy';
 import { invalidatesWorkspaceList } from '@/buzz/workspace-list-invalidation';
 import { takePendingBrowserShare } from '@/buzz/pending-browser-share';
 import { RoomViewHttpError } from '@beeline/buzz-client';
-import { acquireChatList, type ChatListHandle } from '@/buzz/chat-list-store';
+import { acquireChatList } from '@/buzz/chat-list-store';
 import { saveActiveCommunityId } from '@/buzz/community-storage';
 import { loadPendingInvite } from '@/buzz/pending-invite';
 import { mobileSurfaceCache, surfaceAddress } from '@/buzz/surface-storage';
 import { clientResetGeneration } from '@/sync/client-reset';
-import { BuzzRigTransport } from '@/sync/transport';
 import { RoomViewClient } from '@/sync/transport/room-view-client';
-import { isWorkspaceListView, isWorkspaceView, type ChatListView, type Identity } from '@beeline/buzz-client';
+import { isWorkspaceListView } from '@beeline/buzz-client';
 import { useFocusEffect } from '@react-navigation/native';
 import { router } from 'expo-router';
 import { startTransition, useCallback, useEffect } from 'react';
 import { AppState } from 'react-native';
 import { AGE_TICK_MS } from './channels';
+import { afterFirstFrame } from '@/navigation/initial-landing';
+import type { DeckState } from './useChannelsRouteState';
 
-type Props = [
-  drawn: boolean,
-  setConfirmedWorkspaceCount: import("react/index").Dispatch<import("react/index").SetStateAction<number | null>>,
-  deckMissedRef: import("react/index").RefObject<{ workspaces: boolean; }>,
-  deckVisible: () => boolean,
+/** The deck's live watch, covering reads and visit clock; the hook paints nothing itself. */
+export function useChannelsSubscriptions(
+  {
+    drawn, setConfirmedWorkspaceCount, deckMissedRef, deckVisible, setError, identity, relayUrl,
+    deckFocusedRef, transport, setDeletedWorkspaceNotice, selectedId, chatStore, setChatList,
+    setRefreshing, readWorkspaceRef, setNeedsYouSignal, retryGeneration, setAgeNow,
+  }: DeckState,
+  activeCommunityId: string | null,
   refreshMissed: () => void,
-  setError: import("react/index").Dispatch<import("react/index").SetStateAction<string | null>>,
-  identity: Identity,
-  relayUrl: string,
-  deckFocusedRef: import("react/index").RefObject<boolean>,
-  transport: BuzzRigTransport,
-  setDeletedWorkspaceNotice: import("react/index").Dispatch<import("react/index").SetStateAction<string | null>>,
-  selectedId: string | undefined,
-  chatStore: import("react/index").RefObject<ChatListHandle | null>,
-  setChatList: import("react/index").Dispatch<import("react/index").SetStateAction<ChatListView | null>>,
-  setMemberPickerVisible: import("react/index").Dispatch<import("react/index").SetStateAction<boolean>>,
-  setRefreshing: import("react/index").Dispatch<import("react/index").SetStateAction<boolean>>,
-  readWorkspaceRef: import("react/index").RefObject<(() => Promise<void>) | null>,
-  setNeedsYouSignal: import("react/index").Dispatch<import("react/index").SetStateAction<number>>,
-  retryGeneration: number,
-  setAgeNow: import("react/index").Dispatch<import("react/index").SetStateAction<number>>,
-  activeCommunityId: string,
-  memberPickerVisible: boolean,
-];
-export function useChannelsSubscriptions([
-  drawn, setConfirmedWorkspaceCount, deckMissedRef, deckVisible, refreshMissed, setError, identity,
-  relayUrl, deckFocusedRef, transport, setDeletedWorkspaceNotice, selectedId, chatStore,
-  setChatList, setMemberPickerVisible, setRefreshing, readWorkspaceRef, setNeedsYouSignal,
-  retryGeneration, setAgeNow, activeCommunityId, memberPickerVisible,
-]: Props): [
-
-] {
-
-
+): void {
   useEffect(() => {
     if (!drawn) return;
     setConfirmedWorkspaceCount(null);
@@ -123,7 +100,6 @@ export function useChannelsSubscriptions([
             chatStore.current = null;
             if (chats) void chats.remove();
             setChatList(null);
-            setMemberPickerVisible(false);
             setRefreshing(false);
             setError(null);
             const nextId = value.workspaces[0]?.id ?? null;
@@ -187,7 +163,9 @@ export function useChannelsSubscriptions([
         // Saved Rooms are the first usable deck; paint them immediately.
         // Confirmed live reconciliation still yields to Room or push navigation.
         unsubscribeChats = chats.subscribe(() => {
-          if (chats.confirmed() || !deckVisible()) startTransition(paint);
+          // Removed private state must clear even while the list is covered.
+          if (!deckVisible() && chats.current() !== null) return;
+          if (chats.confirmed()) startTransition(paint);
           else paint();
         });
       }
@@ -234,40 +212,18 @@ export function useChannelsSubscriptions([
   useFocusEffect(
     useCallback(() => {
       deckFocusedRef.current = true;
-      refreshMissed();
-      setAgeNow(Date.now());
+      // Back reveals the retained list first; catch-up and age labels must not
+      // rebuild its rows during the navigation commit.
+      const cancelFrame = afterFirstFrame(() => {
+        refreshMissed();
+        setAgeNow(Date.now());
+      });
       const timer = setInterval(() => setAgeNow(Date.now()), AGE_TICK_MS);
       return () => {
         deckFocusedRef.current = false;
+        cancelFrame();
         clearInterval(timer);
       };
     }, [activeCommunityId, refreshMissed]),
   );
-
-  useEffect(() => {
-    if (!memberPickerVisible || !identity || !relayUrl || !activeCommunityId) return;
-    let cancelled = false;
-    const http = new RoomViewClient({ baseUrl: relayUrl, identity });
-    const address = surfaceAddress(relayUrl, identity.publicKey, '/workspace/:id', {
-      workspaceId: activeCommunityId,
-    });
-    void mobileSurfaceCache
-      .read(address, isWorkspaceView)
-      .then(
-        (cached) =>
-          cached ??
-          mobileSurfaceCache.fetch(address, isWorkspaceView, () =>
-            http.workspace(activeCommunityId),
-          ),
-      )
-      .catch((reason) => {
-        if (!cancelled) setError(appReadErrorCopy(reason));
-      });
-    return () => {
-      cancelled = true;
-    };
-  }, [activeCommunityId, identity, memberPickerVisible, relayUrl]);
-return [
-
-  ];
 }

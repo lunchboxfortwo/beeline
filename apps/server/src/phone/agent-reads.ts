@@ -1,3 +1,4 @@
+import { memberPresenceSql } from '../member-presence.js';
 import { phoneIdentity as identity } from '../phone-identity.js';
 import { cornerOwnerSql } from '../corner-worker.js';
 import { mcpClientName } from '../rooms-mcp-logos.js';
@@ -8,11 +9,11 @@ import { FACE_SOULS, resolveFace } from '@beeline/api-contract/phone';
 import { isCommandGrantScript } from '@beeline/api-contract/agent-grants';
 import { parseAgentAccessPolicy } from '@beeline/api-contract/agent-access';
 import type { PhoneContext } from './context.js';
-import { MemberRow, AgentGrantRow, McpClientIdentity, mcpClientIdentitySql } from './types.js';
+import { MemberRow, AgentGrantRow, McpClientIdentity, mcpClientIdentitySql, type RoomScheduleRow } from './types.js';
 import { PROFILE_GRANT_LIMIT, unix, MemberGrantRow } from './values.js';
 import { phoneOptionalEnrichment } from './optional-enrichment.js';
 import { phoneProjectMembers } from './roster.js';
-import { reviveDates } from './read-projection.js';
+import { reviveDates, roomSchedule } from './read-projection.js';
 
 
 
@@ -52,6 +53,8 @@ import { reviveDates } from './read-projection.js';
       recent_work: Array<{ title: string; url: string; merged_at: string }>;
       grants: AgentGrantRow[];
       mcp_client: McpClientIdentity | null;
+      schedule_rows: RoomScheduleRow[];
+      room_rows: Array<{ id: string; name: string | null; visibility: 'public' | 'invite-only' }>;
     } & AgentUsageRow>(`SELECT agent_identity.id member_id,
         ${mcpClientIdentitySql('a.agent_id')} mcp_client,agent_identity.name member_name,
         beeline_workspace_handle(agent_identity.id,$2) member_handle,agent_identity.avatar member_avatar,
@@ -94,7 +97,32 @@ import { reviveDates } from './read-projection.js';
           WHERE g.agent_id=$1 AND g.workspace_id=$2 AND g.status<>'pending'
             AND (g.kind IN ('repository','shared_asset') OR a.owner_id=$3)
           ORDER BY g.created_at DESC,g.id LIMIT $6
-        ) grant_row),'[]'::jsonb) grants
+        ) grant_row),'[]'::jsonb) grants,
+        -- The profile's Schedules and Chats: only surfaces the viewer is a member of.
+        COALESCE((SELECT jsonb_agg(to_jsonb(schedule_row) ORDER BY schedule_row.next_run_at,schedule_row.id) FROM (
+          SELECT schedule.id,schedule.workspace_id,schedule.room_id,schedule.agent_id,
+            schedule.creator_id,schedule.cadence,schedule.message,schedule.next_run_at,
+            schedule.created_at,schedule.workflow_slug,schedule.run_count,schedule.title,schedule.max_runs,schedule.paused_at,
+            surface.parent_id surface_parent_id,surface.name surface_name
+          FROM agent_schedules schedule
+          JOIN rooms surface ON surface.id=schedule.room_id AND surface.archived_at IS NULL
+          JOIN rooms room ON room.id=COALESCE(surface.parent_id,surface.id) AND room.archived_at IS NULL
+          WHERE schedule.agent_id=$1 AND schedule.workspace_id=$2
+            AND EXISTS (SELECT 1 FROM memberships viewer WHERE viewer.room_id=room.id
+              AND viewer.identity_id=$3 AND viewer.removed_at IS NULL)
+          ORDER BY schedule.next_run_at,schedule.id LIMIT 200
+        ) schedule_row),'[]'::jsonb) schedule_rows,
+        COALESCE((SELECT jsonb_agg(jsonb_build_object('id',chat.id,'name',chat.name,'visibility',chat.visibility)
+            ORDER BY chat.name,chat.id) FROM (
+          SELECT room.id,room.name,room.visibility FROM rooms room
+          WHERE room.workspace_id=$2 AND room.parent_id IS NULL AND room.archived_at IS NULL
+            AND room.direct_participants IS NULL
+            AND EXISTS (SELECT 1 FROM memberships agent WHERE agent.room_id=room.id
+              AND agent.identity_id=$1 AND agent.removed_at IS NULL)
+            AND EXISTS (SELECT 1 FROM memberships viewer WHERE viewer.room_id=room.id
+              AND viewer.identity_id=$3 AND viewer.removed_at IS NULL)
+          ORDER BY room.name,room.id LIMIT 200
+        ) chat),'[]'::jsonb) room_rows
       FROM memberships agent_membership
       JOIN identities agent_identity ON agent_identity.id=agent_membership.identity_id
         AND agent_identity.kind='agent' AND agent_identity.hidden_from_roster=false
@@ -115,9 +143,7 @@ import { reviveDates } from './read-projection.js';
     const presence = (await phoneOptionalEnrichment(ctx, 'member-presence',
       ctx.enrichmentDatabase.query<{
         presence_body: MemberRow['presence_body']; presence_updated_at: Date | null;
-      }>(`SELECT live.body presence_body,live.updated_at presence_updated_at
-        FROM live_outputs live WHERE live.agent_id=$1 AND live.kind='presence'
-        ORDER BY live.updated_at DESC LIMIT 1`, [agentId])));
+      }>(`SELECT live.body presence_body,live.updated_at presence_updated_at FROM (${memberPresenceSql('$1')}) live`, [agentId])));
     const presenceRow = presence?.rows[0];
     // An AI-client member's instructions live in its own app, so its profile
     // names that app instead of a made-up animal soul.
@@ -137,6 +163,8 @@ import { reviveDates } from './read-projection.js';
       presence_body: presenceRow?.presence_body ?? null,
       presence_updated_at: presenceRow?.presence_updated_at ?? null,
     }], null)[0]!;
+    const runtimeModel = config.model_catalog?.find(axis => axis.category === 'model')?.currentValue;
+    const runtimeEffort = config.model_catalog?.find(axis => ['thought_level', 'effort', 'reasoning_effort'].includes(axis.category))?.currentValue;
     const recentWork = config.recent_work;
     const grants = phoneProjectAgentGrants(ctx, config.grants);
     const workPage = recentWork.slice(0, 5);
@@ -150,6 +178,9 @@ import { reviveDates } from './read-projection.js';
       ...(config?.avatar_generation_id ? { avatarGenerationId: config.avatar_generation_id } : {}),
       avatarGenerationPending: config?.avatar_generation_pending ?? false,
       recentWork: workPage.map(({ title, url }) => ({ title, url })),
+      schedules: config.schedule_rows.map((row) =>
+        roomSchedule(reviveDates(row, ['next_run_at', 'created_at', 'paused_at']))),
+      rooms: config.room_rows.map((room) => ({ id: room.id, name: room.name ?? '', visibility: room.visibility })),
       ...(recentWork.length > 5 && lastWork
         ? { recentWorkCursor: JSON.stringify([lastWork.merged_at, lastWork.url]) }
         : {}),
@@ -180,6 +211,10 @@ import { reviveDates } from './read-projection.js';
           }
         : {}),
       catalog: config?.model_catalog ?? [],
+      ...(runtimeModel || runtimeEffort ? { runtimeSelection: {
+        ...(runtimeModel ? { model: runtimeModel } : {}),
+        ...(runtimeEffort ? { effort: runtimeEffort } : {}),
+      } } : {}),
       fastMode: Boolean(
         config?.fast_mode &&
         (!config.selected_model ||

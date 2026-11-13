@@ -32,6 +32,12 @@ export function captureHelperError(error: unknown): void {
   catch { /* Existing logging/retry/exit behavior remains authoritative. */ }
 }
 
+/** One helper process serves one owner; reports name only that opaque account id. */
+export function setHelperErrorUser(ownerId: string): void {
+  try { Sentry.setUser({ id: ownerId }); }
+  catch { /* Reporting must never change registration. */ }
+}
+
 export async function flushHelperErrors(): Promise<void> {
   try { await Sentry.flush(2000); } catch { /* Never block exit indefinitely. */ }
 }

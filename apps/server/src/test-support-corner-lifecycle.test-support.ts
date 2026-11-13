@@ -396,8 +396,9 @@ export async function resumeWorker(cornerId: string): Promise<AgentCommand> {
 }
 
 
+/** Waiting work only; a running turn is listed with its generation for its helper to resume. */
 export const commands = (agentId: string, roomId: string) =>
-  daemon.execute('getAgentCommands', { roomId }, agentId).then((r) => r.commands);
+  daemon.execute('getAgentCommands', { roomId }, agentId).then((r) => r.commands.filter(command => !command.generationId));
 
 
 export const result = (c: AgentCommand, text: string, generationId = 'g1') =>
@@ -502,8 +503,10 @@ export async function mergedWebhook(cornerId: string, number: number, headSha: s
 }
 
 
-export async function say(roomId: string, text: string) {
-  await phone.execute('sendRoomMessage', { roomId, messageId: randomBytes(32).toString('hex'), text }, H);
+export async function say(roomId: string, text: string, parentMessageId?: string) {
+  const messageId = randomBytes(32).toString('hex');
+  if (parentMessageId) await phone.execute('sendRoomReply', { roomId, messageId, parentMessageId, text }, H);
+  else await phone.execute('sendRoomMessage', { roomId, messageId, text }, H);
 }
 
 

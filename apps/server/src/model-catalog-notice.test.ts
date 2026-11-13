@@ -60,103 +60,23 @@ async function ownerDmText(database: PgliteDatabase) {
   return rows.map((row) => row.text);
 }
 
-describe('postAgentModelCatalog: automatic fallback notice', () => {
+describe('postAgentModelCatalog stays silent', () => {
   let database: PgliteDatabase;
-  beforeEach(async () => {
-    database = await fixture();
-  });
-  afterEach(async () => {
-    await database.close();
-  });
+  beforeEach(async () => { database = await fixture(); });
+  afterEach(async () => { await database.close(); });
 
-  it('names the old and new model once when the daemon substitutes a same-family fallback', async () => {
-    const daemon = new DaemonService(database, new LiveHub());
-    await daemon.execute(
-      'postAgentModelCatalog',
-      {
-        agentId: AGENT,
-        workspaceId: WORKSPACE,
-        options: MODEL_OPTIONS,
-        selection: { model: 'opus' },
-      },
-      AGENT,
-    );
-    expect(await agentRow(database)).toEqual({ selected_model: 'opus', model_unavailable: null });
-    const texts = await ownerDmText(database);
-    expect(texts).toHaveLength(1);
-    expect(texts[0]).toContain('opus[1m]');
-    expect(texts[0]).toContain('Opus 5.5');
-    expect(texts[0]).toBe('@niglet switched models · opus[1m] is no longer offered; now using Opus 5.5.');
-  });
-
-  it('uses both display names when the old catalog retained a name', async () => {
-    await database.query(`UPDATE agents SET model_catalog=$2::jsonb WHERE agent_id=$1`, [AGENT, JSON.stringify([
-      { id: 'model', category: 'model', currentValue: 'opus[1m]', options: [{ id: 'opus[1m]', name: 'Old Opus' }] },
-    ])]);
-    const daemon = new DaemonService(database, new LiveHub());
-    await daemon.execute('postAgentModelCatalog', { agentId: AGENT, workspaceId: WORKSPACE, options: MODEL_OPTIONS, selection: { model: 'opus' } }, AGENT);
-    expect(await ownerDmText(database)).toEqual(['@niglet switched models · Old Opus is no longer offered; now using Opus 5.5.']);
-  });
-
-  it('names the model an alias runs, never the alias menu text, on either side', async () => {
-    const aliasOptions = (description?: string) => [{
-      id: 'model', category: 'model', currentValue: 'default',
-      options: [
-        { id: 'default', name: 'Default (recommended)', ...(description ? { description } : {}) },
-        { id: 'opus', name: 'Opus 5.5', description: 'Opus 5.5 · Best for everyday, complex tasks' },
-      ],
-    }];
-    const daemon = new DaemonService(database, new LiveHub());
-    await daemon.execute('postAgentModelCatalog', { agentId: AGENT, workspaceId: WORKSPACE, options: aliasOptions('Opus'), selection: { model: 'default' } }, AGENT);
-    // A catalog stored before helpers kept descriptions cannot name the alias's model.
-    await database.query(`UPDATE agents SET selected_model='default',model_catalog=$2::jsonb WHERE agent_id=$1`, [AGENT, JSON.stringify(aliasOptions())]);
-    await daemon.execute('postAgentModelCatalog', { agentId: AGENT, workspaceId: WORKSPACE, options: MODEL_OPTIONS, selection: { model: 'sonnet' } }, AGENT);
-    const texts = await ownerDmText(database);
-    expect(texts).toEqual([
-      '@niglet switched models · opus[1m] is no longer offered; now using Opus 5.5.',
-      '@niglet switched models · The previous model is no longer offered; now using Sonnet 5.5.',
-    ]);
-    expect(texts.join(' ')).not.toMatch(/default/i);
-  });
-
-  it('does not re-notify on the next routine catalog mirror once the correction has landed', async () => {
-    const daemon = new DaemonService(database, new LiveHub());
-    await daemon.execute(
-      'postAgentModelCatalog',
-      { agentId: AGENT, workspaceId: WORKSPACE, options: MODEL_OPTIONS, selection: { model: 'opus' } },
-      AGENT,
-    );
-    // The next activation's routine mirror posts the SAME (now-current)
-    // selection back — this must not read as a second fallback.
-    await daemon.execute(
-      'postAgentModelCatalog',
-      {
-        agentId: AGENT,
-        workspaceId: WORKSPACE,
-        options: MODEL_OPTIONS,
-        selection: { model: 'opus' },
-        force: true,
-      } as never,
-      AGENT,
-    );
-    expect(await ownerDmText(database)).toHaveLength(1);
-  });
-
-  it('does not notify a going-unavailable post even if selection differs (that path owns its own notice)', async () => {
-    const daemon = new DaemonService(database, new LiveHub());
-    await daemon.execute(
-      'postAgentModelCatalog',
-      {
-        agentId: AGENT,
-        workspaceId: WORKSPACE,
-        options: MODEL_OPTIONS,
-        selection: { model: 'opus' },
-        unavailable: 'model',
-      },
-      AGENT,
-    );
-    const texts = await ownerDmText(database);
-    expect(texts).toHaveLength(1);
-    expect(texts[0]).toContain('needs a different model');
-  });
+  it.each([undefined, 'model', 'effort', 'selection'] as const)(
+    'persists catalog and selection without a DM when unavailable=%s', async unavailable => {
+      const daemon = new DaemonService(database, new LiveHub());
+      for (let mirror = 0; mirror < 2; mirror++) {
+        await daemon.execute('postAgentModelCatalog', {
+          agentId: AGENT, workspaceId: WORKSPACE, options: MODEL_OPTIONS,
+          selection: { model: 'opus' }, ...(unavailable ? { unavailable } : {}),
+        }, AGENT);
+      }
+      expect(await agentRow(database)).toEqual({ selected_model: 'opus', model_unavailable: unavailable ?? null });
+      expect(await ownerDmText(database)).toEqual([]);
+      expect((await database.query('SELECT 1 FROM rooms')).rowCount).toBe(0);
+    },
+  );
 });

@@ -1,5 +1,5 @@
 import { cornerObjectiveSql } from './corner-objective.js';
-import { commandOwnerLiveSql } from './turn-ownership.js';
+import { commandOwnerLiveSql, helperTurnResumableSql } from './turn-ownership.js';
 import { voiceDateContext } from './voice-reply.js';
 import { subscriptionPromptBody } from './agent-subscriptions.js';
 import { boundReplyExcerpt, REPLY_EXCERPT_MAX_LENGTH } from '@beeline/api-contract/daemon';
@@ -69,7 +69,8 @@ export async function readAgentCommands(
  LEFT JOIN workspace_skill_versions workflow_version ON workflow_version.skill_id=workflow_skill.id
    AND workflow_version.version=(workflow_latest.card->>'workflowVersion')::int
  WHERE c.room_id=$1 AND c.agent_id=$2
-   AND CASE WHEN $3::text IS NULL THEN c.state='pending' ELSE c.state='claimed' AND c.generation_id=$3 END
+   AND CASE WHEN $3::text IS NULL THEN c.state='pending' OR ${helperTurnResumableSql('c')}
+     ELSE c.state='claimed' AND c.generation_id=$3 END
    AND NOT EXISTS(SELECT 1 FROM cancelled_wakes cancelled WHERE cancelled.id=c.id)
    AND (${ordinaryWakeSql('c')} OR NOT EXISTS (
      SELECT 1 FROM agent_commands requested WHERE requested.room_id=c.room_id
@@ -97,6 +98,7 @@ export async function readAgentCommands(
       action: r.action,
       reason: r.reason,
       ...(r.private_payload ? { private: true } : {}),
+      ...(r.state === 'claimed' && !generation ? { generationId: r.generation_id! } : {}),
       ...(r.delivered_context ? { recoveryContext: r.delivered_context } : {}),
       ...(r.system_event?.scheduleId ? { scheduleId: r.system_event.scheduleId } : {}),
       rootCommandId: r.root_command_id,
@@ -130,7 +132,7 @@ export async function commandInbox(
   const { commands } = await readAgentCommands(db, roomId, agentId);
   return {
     dispatchVersion: 1,
-    items: commands.map((c) => ({
+    items: commands.filter(c => !c.generationId).map((c) => ({
       ...c.source,
       id: c.sourceMessageId,
       ...(c.action === 'stop'

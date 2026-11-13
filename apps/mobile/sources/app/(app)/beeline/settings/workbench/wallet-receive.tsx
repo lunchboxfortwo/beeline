@@ -1,15 +1,11 @@
-import { desktopColumnWidths } from '@/buzz/desktop-layout-tokens';
-import { useIsDesktop as useDesktopPageLayout } from '@/utils/responsive';
 import { useLatencyRouteFrame } from '@/buzz/latency-route-hook';
 import React from 'react';
+import { YStack } from 'tamagui';
 import { router, useLocalSearchParams } from 'expo-router';
-import { Text, View } from 'react-native';
-import { StyleSheet } from 'react-native-unistyles';
-import { useSafeAreaInsets } from 'react-native-safe-area-context';
-import { PageHeader } from '@/components/buzz/PageHeader';
-import { SettingsRow } from '@/components/buzz/SettingsRow';
 import { WalletQr } from '@/components/buzz/WalletQr';
 import { useSharedWallet } from '@/buzz/wallet-surface';
+import { Copy, T } from '@/ui/grammar';
+import { ConnectorCard, ConnectorFrame, ConnectorRow } from '@/ui/screens/settings/connectors/ConnectorParts';
 
 function firstParam(value: string | string[] | undefined): string | undefined {
   return Array.isArray(value) ? value[0] : value;
@@ -25,50 +21,23 @@ export default function WalletReceiveScreen() {
   useLatencyRouteFrame('/beeline/settings/workbench/wallet-receive');
   const params = useLocalSearchParams<{ workspaceId?: string | string[] }>();
   const workspaceId = firstParam(params.workspaceId) ?? '';
-  const insets = useSafeAreaInsets();
-  const desktopPageLayout = useDesktopPageLayout();
   const { value: wallet } = useSharedWallet(workspaceId);
   const address = wallet?.address ?? '';
   const solanaAddress = wallet?.solanaAddress ?? null;
 
   return (
-    <View style={[styles.container, desktopPageLayout && { width: '100%', maxWidth: desktopColumnWidths.detail, alignSelf: 'center' }, { paddingTop: insets.top }]} testID="wallet-receive-screen">
-      <PageHeader
-        backAccessibilityLabel="Back to Wallet"
-        eyebrow="Wallet"
-        prominent
-        onBack={() => router.back()}
-        testID="wallet-receive-header"
-        title="Receive"
-      />
-      <View style={styles.body}>
+    <ConnectorFrame title="Receive" back={() => router.back()} backLabel="Back to Wallet" testID="wallet-receive-screen">
+      <YStack alignItems="center" gap="2">
         <WalletQr payload={address} />
-        <Text selectable style={styles.address} testID="wallet-receive-address">
-          {address}
-        </Text>
-        <Text style={styles.sub}>Same address on every EVM chain.</Text>
-        <SettingsRow
-          disabled
-          description={solanaAddress ?? 'different address'}
-          testID="wallet-receive-solana"
-          title="Solana"
-        />
-      </View>
-    </View>
+        <T v="code" {...SELECTABLE} testID="wallet-receive-address">{address}</T>
+        <Copy small quiet>Same address on every EVM chain.</Copy>
+      </YStack>
+      <ConnectorCard>
+        <ConnectorRow title="Solana" description={solanaAddress ?? 'different address'} last testID="wallet-receive-solana" />
+      </ConnectorCard>
+    </ConnectorFrame>
   );
 }
 
-const styles = StyleSheet.create((theme) => {
-  const hull = theme.buzz;
-  return {
-    container: { flex: 1, backgroundColor: hull.bgTerminal },
-    body: {
-      alignItems: 'center',
-      flex: 1,
-      gap: hull.space.sm,
-      padding: hull.space.md,
-    },
-    address: { ...hull.type.machine, color: hull.textPrimary },
-    sub: { ...hull.type.meta, color: hull.textMuted },
-  };
-});
+/** React Native's selectable text; Tamagui's Text types omit it but pass it through. */
+const SELECTABLE = { selectable: true } as object;

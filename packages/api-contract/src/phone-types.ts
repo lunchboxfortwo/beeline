@@ -1,4 +1,3 @@
-import type { MemberDelivery } from './mcp-delivery.js';
 import type { SquireApprovalDetails } from './approval-copy.js';
 import type { RepositoryOnboardingCard } from './repository-onboarding.js';
 import type { AgentUsage } from './agent-usage.js';
@@ -6,6 +5,7 @@ import type { SystemEvent } from './system-events.js';
 import type { AgentGrantKind, AgentGrantStatus, CommandGrantScript } from './agent-grants.js';
 import type { ChoiceMode, ChoiceOptionView, ChoiceStatus } from './room-choices.js';
 import type { ConnectorOfferCardView } from './connector-offers.js';
+import type { readHeader, readMember } from './phone-guards.js';
 import type { AgentSignInCardView } from './agent-sign-in.js';
 export { type RoomLiveDelta, type RoomView, type RoomHistoryView, MESSAGE_SEARCH_QUERY_MAX_BYTES, type MessageSearchView, type MessageSearchResult, type MessageSearchSnippetPart, type RoomHistoryOutline, type RoomHistoryOutlineDay, type ChatListCorner, type RoomCornerSummary, type ChatListItem, type ChatListWorkspace, type ChatListView, type ChatListUnavailable, type WorkspaceListView, type WorkspaceManagedRoomView, type WorkspaceView, type WorkspaceMemberListView, type WorkspaceMemberListQuery, type AgentComposerCommand, type AgentDetailView, type AgentAccessView, type AgentYoloView, type InviteView, type InviteInviterView, type AgentPairingClaimView, type AgentPairingClaimWireView, type AgentPairingAbandonView, type CornerListItem, type CornerListView, type RoomRepositoryView, type RoomRepositoryResolution } from './phone-types-room-live-delta.js';
 
@@ -157,20 +157,8 @@ export type RoomViewIdentity = {
 };
 
 
-export type RoomViewMember = {
-  readonly delivery?: MemberDelivery;
-  readonly identity: RoomViewIdentity;
-  readonly role: 'owner' | 'admin' | 'member' | 'spectator';
-  /** Selected model label for agent bylines, available on the Room read itself. */
-  readonly model?: string;
-  readonly presence?: {
-    readonly status: 'online' | 'offline';
-    readonly observedAt: number;
-    /** A live helper connection holds this presence; it does not age out. */
-    readonly held?: true;
-    readonly roomId?: string;
-  };
-};
+/** `model` is the selected label for agent bylines. `presence.held` is a live helper that does not age out. */
+export type RoomViewMember = NonNullable<ReturnType<typeof readMember>>;
 
 
 /** Paint-ready agent metadata for the Workspace Members row. */
@@ -182,25 +170,10 @@ export type WorkspaceAgentView = RoomViewMember & {
 };
 
 
-export type RoomViewHeader = {
-  readonly id: string;
-  /** Absent when this bundle could not read it; callers fall back to their own workspace context. */
-  readonly workspaceId?: string;
-  readonly parentId?: string;
-  readonly name: string;
-  readonly about?: string;
-  readonly avatar?: string;
-  readonly visibility?: 'public' | 'invite-only';
-  /** Agent configured to review repository corners opened from this Room. */
-  readonly reviewerAgentId?: string;
-  /** Absent when this bundle could not read it. Only `true` paints a Room as
-   *  archived. */
-  readonly archived?: boolean;
-  readonly createdAt?: number;
-  /** Absent when this bundle could not read it; a surface omits the age rather
-   *  than dating the Room from the epoch. */
-  readonly updatedAt?: number;
-};
+/** Absent fields were unreadable. Only `archived: true` paints a Room as archived.
+ *  `reviewerAgentId` reviews repository corners opened here. Callers fall back when
+ *  `workspaceId` is absent, and omit `updatedAt` rather than dating the Room from the epoch. */
+export type RoomViewHeader = NonNullable<ReturnType<typeof readHeader>>;
 
 
 export type RoomToolReference = { readonly roomId: string; readonly anchor: string };
@@ -284,6 +257,8 @@ export type RoomViewMessage = {
   readonly requestId?: string;
   readonly attachments?: readonly AttachmentReference[];
   readonly mentionPubkeys?: readonly string[];
+  /** This message's place in its chat (a Room with its threads); `¶author-N` names it. */
+  readonly chatSeq?: number;
   /** The model that produced this agent reply, stamped at generation time on
    *  the server. Absent on rows before the stamp existed and on non-agent
    *  rows; the byline falls back to no model, never a roster lookup. */
@@ -381,7 +356,7 @@ export type RoomViewMessage = {
   /** An agent's order into, or report from, a corner. The author is the sender. */
   readonly agentCommand?: {
     readonly kind: 'order' | 'report';
-    readonly recipient: { readonly id: string; readonly name: string; readonly handle?: string };
+    readonly recipient: { readonly id: string; readonly name: string; readonly handle?: string; readonly kind?: 'agent' | 'human' };
     readonly status?: 'done' | 'blocked' | 'needs-decision' | 'failed';
     readonly text: string;
   };
@@ -469,6 +444,8 @@ export type NeedsYouItemView = {
   readonly roomId: string;
   /** Room or corner name; for a DM, the other participant's name. */
   readonly roomName: string;
+  readonly roomAvatar?: string;
+  readonly roomFavicon?: string;
   readonly roomKind: 'room' | 'corner' | 'direct';
   /** For a corner, its parent Room's name. */
   readonly parentRoomName?: string;
@@ -485,6 +462,8 @@ export type NeedsYouItemView = {
    */
   readonly expiresAt?: number;
   readonly author?: RoomViewIdentity;
+  /** An untagged report addressed to this viewer as commander, rather than a text tag. */
+  readonly addressedReport?: true;
   /** Present when the cell is a pending approval card the viewer can decide. */
   readonly approval?: NeedsYouApprovalView;
 };
@@ -496,7 +475,14 @@ export type NeedsYouApprovalKind =
   | 'squire'
   | 'choice'
   | 'connector'
-  | 'sign-in';
+  | 'sign-in'
+  /**
+   * A corner's question asking the viewer, a Workspace owner or admin, to
+   * approve merging that corner's open pull request. Approve is the phone's
+   * `approveCornerMerge` on the cell's `roomId`; it carries no action, so an
+   * older phone shows it as a question it can open.
+   */
+  | 'merge';
 
 
 /** An existing decision operation, projected only after its server authority check. */
@@ -532,9 +518,26 @@ export type NeedsYouApprovalView = {
   readonly actions?: readonly NeedsYouActionView[];
   /** Shared grant details, shown before its folded script disclosure. */
   readonly purpose?: string;
+  /** A shared grant's details, or a Trusty Squire card's own facts (card, merchant, amount). */
   readonly facts?: readonly { readonly label: string; readonly value: string }[];
   /** Full script bytes bound to the first grant, available on request. */
   readonly script?: { readonly path: string; readonly contents: string };
+  /** A merge ask's pull request, from the corner's recorded lifecycle; counts only when recorded. */
+  readonly pullRequest?: {
+    readonly number: number;
+    readonly title: string;
+    readonly url: string;
+    readonly additions?: number;
+    readonly deletions?: number;
+    readonly files?: number;
+    readonly checks?: {
+      readonly status: 'pending' | 'passing' | 'failing' | 'unknown';
+      readonly total?: number;
+      readonly failing?: number;
+    };
+  };
+  /** The asking message's first image attachment, shown full width on the card. */
+  readonly image?: AttachmentReference;
 };
 
 

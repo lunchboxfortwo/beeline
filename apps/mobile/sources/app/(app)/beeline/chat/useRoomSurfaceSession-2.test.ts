@@ -402,17 +402,18 @@ describe('useRoomSurfaceSession', () => {
   });
 
 
-  it('keeps the loading surface until a cold Room response is available', async () => {
+  it('OPEN-SHELL-1: keeps the conversation mounted before and after a cold Room response', async () => {
     controls.hotViewer = true;
     controls.cached = null;
     controls.roomResponse = null;
     let renderer!: ReactTestRenderer;
     await act(async () => { renderer = create(React.createElement(BuzzChat)); });
     await flushEffects();
-    expect(controls.surfaceRenders).toBe(0);
-    expect(renderer.root.findAllByType('room-opening')).toHaveLength(1);
-    await act(async () => controls.responses[0]!.apply(roomView('room-a')));
     expect(controls.surfaceRenders).toBeGreaterThan(0);
+    const conversation = renderer.root.findByType('room-root');
+    expect(renderer.root.findAllByType('room-opening')).toHaveLength(0);
+    await act(async () => controls.responses[0]!.apply(roomView('room-a')));
+    expect(renderer.root.findByType('room-root')).toBe(conversation);
     expect(renderer.root.findAllByType('room-opening')).toHaveLength(0);
     await act(async () => renderer.unmount());
   });

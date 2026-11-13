@@ -24,6 +24,9 @@ export { profileLane };
 
 
 
+vi.mock('tamagui', async () => (await import('@/ui/screens/transcript/grammar-hosts.test-support')).tamaguiHosts());
+vi.mock('lucide-react-native', async () => (await import('@/ui/screens/transcript/grammar-hosts.test-support')).lucideHosts());
+
 vi.mock('@/utils/responsive', async (importOriginal) => ({ ...(await importOriginal<typeof import('@/utils/responsive')>()), useIsDesktop: () => false }));
 
 vi.mock('@expo/vector-icons/Ionicons', async () => { const R = await import('react'); return { default: (props: any) => R.createElement('Ionicons', props) }; });
@@ -191,6 +194,8 @@ export { client };
 const phoneOperation = vi.hoisted(() =>
   vi.fn(async (name: string, input: any): Promise<any> => {
     if (['addWorkspaceMember', 'removeWorkspaceMember'].includes(name)) return;
+    // A direct profile open reads authority and detail in one answer.
+    if (name === 'readAgentProfile') return { workspace: state.workspace, agent: state.agent };
     if (name === 'updateAgentWake') {
       state.agent = { ...state.agent, wake: { url: input.url || null, keySet: Boolean(input.key) } };
       return state.agent;
@@ -217,8 +222,10 @@ export { phoneOperation };
 vi.mock('@/sync/transport/monolith-operation', () => ({ monolithPhoneOperation: phoneOperation }));
 
 
+vi.mock('@/push/push-room-prefetch', () => ({ prefetchRoomOpen: vi.fn(), prefetchDirectMessageOpen: vi.fn() }));
 vi.mock('expo-router', () => ({
-  router: { back: vi.fn(), push: vi.fn(), replace: vi.fn(), navigate: vi.fn() },
+  Redirect: () => null,
+  router: { back: vi.fn(), push: vi.fn(), replace: vi.fn(), navigate: vi.fn(), canGoBack: () => true },
   useLocalSearchParams: () => routeParams,
   useNavigation: () => ({
     addListener: (_event: string, callback: (event: any) => void) => {
@@ -274,47 +281,6 @@ vi.mock('react-native', async () => {
     View: host('View'),
   };
 });
-
-const unistylesTheme = vi.hoisted(() => ({
-  buzz: {
-    type: {
-      hero: { fontSize: 22 },
-      body: { fontSize: 16 },
-      meta: { fontSize: 13 },
-      sectionHead: { fontSize: 10 }, sectionLabel: { fontSize: 13, lineHeight: 19, letterSpacing: 2 }, sectionCount: { fontSize: 15, lineHeight: 22 },
-      machine: { fontSize: 13 },
-    },
-    agentProfileTypography: { name: { fontSize: 28, lineHeight: 36 } },
-    space: { xs: 4, sm: 8, md: 16, lg: 24, xl: 32, xxl: 48 },
-    transcriptCard: { identitySize: 26 },
-    roomList: { edge: 20 },
-    layout: { row: 64, sectionGap: 24 },
-    radius: 3,
-    dialogDanger: '#c4544d',
-    bgTerminal: '#000',
-    bgRaised: '#111',
-    bgPressed: '#222',
-    textMuted: '#888',
-    textPrimary: '#fff',
-    border: '#333',
-    chrome: '#aaa',
-    accent: '#d7af5f',
-    danger: '#f00',
-  },
-}));
-export { unistylesTheme };
-
-vi.mock('react-native-unistyles', () => ({
-  StyleSheet: {
-    hairlineWidth: 1,
-    create: (factory: any) => factory(unistylesTheme),
-  },
-  useUnistyles: () => ({ theme: unistylesTheme }),
-}));
-
-vi.mock('@/constants/Typography', () => ({
-  Typography: { mono: () => ({}), default: () => ({}), ledger: () => ({}) },
-}));
 
 vi.mock('@/auth/buzz-identity-storage', () => ({
   getEffectiveRelayUrl: vi.fn(async () => 'https://relay.test'),
@@ -403,13 +369,6 @@ vi.mock('@/components/buzz/SurfaceGlyphLoader', async () => {
   const ReactModule = await import('react');
   return {
     SurfaceGlyphLoader: (props: any) => ReactModule.createElement('SurfaceGlyphLoader', props),
-  };
-});
-
-vi.mock('@/components/buzz/MemberPickerSheet', async () => {
-  const ReactModule = await import('react');
-  return {
-    MemberPickerSheet: (props: any) => ReactModule.createElement('MemberPickerSheet', props),
   };
 });
 
@@ -698,9 +657,6 @@ beforeEach(() => {
 });
 
 
-export function sheet(renderer: ReactTestRenderer) {
-  return renderer.root.findByType('MemberPickerSheet' as any);
-}
 export function fixtureScope1() {
 
 

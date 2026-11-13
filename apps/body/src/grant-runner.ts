@@ -1,11 +1,11 @@
 import { waitForPathRemoval } from './filesystem-change.js';
-import { grantScriptArgument, resolveGrantCommand, isNativeGrantExecutable, resolveGrantScriptExecutable, installedGrantExecutable } from './grant-script.js';
+import { resolveGrantCommand, isNativeGrantExecutable, installedGrantExecutable } from './grant-script.js';
 import { pathGrantAllowsWrite } from '@beeline/api-contract/agent-grants';
 /**
  * The command-kind grant runner (Agent Grants, slice 2).
  *
- * An approved `command` grant is a rule: the exact approved line is an argv
- * prefix the agent may say. `run_granted_command` reaches this runner from the
+ * An approved `command` grant is a rule: the exact approved line is the one
+ * argv the agent may say. `run_granted_command` reaches this runner from the
  * beeline-agent MCP server, which lives INSIDE the session sandbox; the runner
  * itself is the daemon, so it spawns the command as its own child, with cwd =
  * the agent's Room checkout or corner worktree, an environment of PATH and HOME
@@ -32,10 +32,9 @@ import { pathGrantAllowsWrite } from '@beeline/api-contract/agent-grants';
  * agent is told to open a corner. That is the opposite of the harness spawn
  * path, which fails open so a host without bwrap can still hold a conversation.
  *
- * Two hard stops survive yolo on both surfaces and are re-checked here as well
- * as at request time: a credential or environment file named by words the
- * approved prefix never showed a human, and a script nobody has read. An
- * interpreter grant is bound to the script bytes the approval card showed: the
+ * Two hard stops survive yolo on both surfaces: a credential or environment
+ * file, and a script nobody has read. A run must say exactly the approved argv,
+ * so it can never add words the card did not show. An interpreter grant is bound to the script bytes the approval card showed: the
  * file is re-hashed before every run, and a script that changed, or one that
  * appeared where the card had none, is refused.
  *
@@ -50,16 +49,16 @@ import { pathGrantAllowsWrite } from '@beeline/api-contract/agent-grants';
  * last-resort fallback. Values are injected into the child's env and scrubbed
  * from its output; they never reach the transcript, the ledger, or the model.
  */
-import { execFile } from 'node:child_process';
+import { execFile, spawnSync } from 'node:child_process';
 import { createHash, randomBytes, randomUUID } from 'node:crypto';
 import { chmod, mkdir, readFile, readdir, rename, rm, rmdir, stat, writeFile } from 'node:fs/promises';
 import { createServer, type Server } from 'node:http';
 import type { AddressInfo } from 'node:net';
-import { dirname, resolve } from 'node:path';
+import { dirname, isAbsolute, resolve } from 'node:path';
 import {
-  commandGrantEscalationsBeyondRule,
   commandGrantMatches,
-  formatGrantEscalationReason,
+  grantScriptKey,
+  interpreterScriptArgument,
   parseCommandGrantTarget,
   type CommandGrantRule,
 } from '@beeline/api-contract/agent-grants';
@@ -364,7 +363,7 @@ export function validateGrantArgv(value: unknown): string[] {
   });
 }
 
-/** Pick the rule that matches: the approved argv is a word-for-word prefix of the request. */
+/** Pick the rule that matches: the approved argv equals the request, word for word. */
 export function matchCommandGrant(
   grants: readonly LiveGrant[],
   workspaceId: string,
@@ -396,15 +395,20 @@ function capOutput(value: string, cap: number): string {
 function closestCommandGrant(grants: readonly Pick<LiveGrant, 'kind' | 'target' | 'grantId' | 'workspaceId' | 'expiresAt' | 'status'>[], workspaceId: string, argv: readonly string[]): string {
   let nearest: { id: string; score: number; fields: string[] } | undefined;
   for (const grant of grants) {
-    if (grant.kind !== 'command') continue;
+    if (grant.kind !== 'command') {
+      if (grant.workspaceId === workspaceId && (grant.status === 'approved' || grant.status === 'once') && !nearest)
+        nearest = { id: grant.grantId, score: -1, fields: [`kind ${grant.kind}`] };
+      continue;
+    }
     let rule: CommandGrantRule;
     try { rule = parseCommandGrantTarget(grant.target); } catch { continue; }
     const fields: string[] = [];
     let score = 0;
     rule.argv.forEach((word, index) => {
       if (word === argv[index]) score += 1;
-      else fields.push(`prefix word (${index + 1})`);
+      else fields.push(`word (${index + 1})`);
     });
+    if (rule.argv.length !== argv.length) fields.push('word count');
     if (grant.workspaceId !== workspaceId) fields.push('workspace');
     if (grant.expiresAt && grant.expiresAt <= Date.now() / 1000) fields.push('expiry');
     if (grant.status !== 'approved' && grant.status !== 'once') fields.push(`status (${grant.status})`);
@@ -471,12 +475,13 @@ export class GrantCommandRunner {
     for (const candidate of live.grants) {
       const possible = matchCommandGrant([candidate], room.workspaceId, argv);
       if (!possible) continue;
-      if (commandGrantEscalationsBeyondRule(possible.rule, argv).length) {
-        bindingFailure ??= new Error(`Closest grant ${candidate.grantId}: extra prefix words name a credential or environment file; this run needs its own approval.`);
-        continue;
-      }
       try { await this.checkScriptBinding(candidate, room.cwd, checkEnv, argv, stdin); }
       catch (error) { bindingFailure ??= error as Error; continue; }
+      // The probe runs only an installed git: a writable one on PATH could create files before the refusal.
+      if (gitShowPrintsFileContents(room.cwd, checkEnv, argv, installedGrantExecutable(argv[0], room.cwd, checkEnv))) {
+        bindingFailure ??= new Error(`Closest grant ${candidate.grantId}: this command can print file contents or a full patch; it needs its own approval.`);
+        continue;
+      }
       match = possible;
       break;
     }
@@ -489,16 +494,6 @@ export class GrantCommandRunner {
       );
     }
     const { grant, rule } = match;
-    // The rule is an argv PREFIX, so a run can always add words the human who
-    // answered the card never read. Anything those words escalate into is a
-    // fresh ask (C94).
-    const beyond = commandGrantEscalationsBeyondRule(rule, argv);
-    if (beyond.length) {
-      throw new Error(
-        `this run needs its own approval: ${formatGrantEscalationReason(beyond)}. ` +
-          'Ask with request_grant kind=command for the exact line so a human can read it.',
-      );
-    }
     // Use the same surface policy for the entire run.
     await this.checkScriptBinding(grant, room.cwd, checkEnv, argv, stdin);
     const secrets = new Map<string, string>();
@@ -660,30 +655,25 @@ export class GrantCommandRunner {
     stdin?: string,
   ): Promise<void> {
     const context = resolveGrantCommand(argv, cwd, env);
-    const argument = grantScriptArgument(context);
+    const argument = interpreterScriptArgument(context.argv);
     if (!argument) return;
     const note = ` Closest grant ${grant.grantId}:`;
     if (stdin !== undefined && !argument.stdin) throw new Error(`${note} stdin is only supported when the interpreter reads its approved code from stdin.`);
     if (argument.stdin && stdin === undefined) throw new Error(`${note} stdin bytes are unavailable; save them as a script file or approve exact stdin code.`);
-    if (installedGrantExecutable(argument, context.cwd, context.env) && !grant.script) return;
-    const candidates = scriptCandidates(cwd, argv, env);
-    let bytes: Buffer | undefined = argument.stdin ? Buffer.from(stdin!) : argument.inline === undefined ? undefined : Buffer.from(argument.inline);
-    for (const candidate of candidates) {
-      bytes = await readFile(candidate).catch(() => undefined);
-      if (bytes) break;
-    }
-    const script = grant.script;
+    const bytes = argument.stdin ? Buffer.from(stdin!) : argument.inline !== undefined ? Buffer.from(argument.inline)
+      : await readFile(resolve(context.cwd, argument.path)).catch(() => undefined);
     if (!bytes) {
       throw new Error(`${note} script cannot be read at execution cwd ${context.cwd}; check cwd and script path. Ask with request_grant kind=command again.`);
     }
-    if (!script && argument.direct && argument.path.includes('/') && isNativeGrantExecutable(bytes)) return;
-    if (!script || script.path !== argument.path) {
+    if (!grant.script && argument.direct && isNativeGrantExecutable(bytes)) return;
+    if (!grant.script || grant.script.path !== argument.path) {
       throw new Error(
         `${note} script path or binding does not match; ${argument.path} is a script no human has read under this grant. ` +
           'Ask with request_grant kind=command so the card carries what the command runs.',
       );
     }
-    if (createHash('sha256').update(bytes).digest('hex') !== script.sha256) {
+    const sha256 = createHash('sha256').update(bytes).digest('hex');
+    if (grantScriptKey({ path: argument.path, sha256 }) !== grantScriptKey(grant.script)) {
       throw new Error(
         `${note} script hash does not match for ${argument.path} at execution cwd ${context.cwd}; it changed after approval or cwd resolves a different file. ` +
           'Ask with request_grant kind=command again so a human reads what runs now.',
@@ -692,20 +682,27 @@ export class GrantCommandRunner {
   }
 }
 
-/** Resolve exactly as exec does: relative script paths are relative to cwd.
- * Scratch fallback could hash a different file than the interpreter executes.
+/**
+ * `git show --stat` of a blob, tree, or `rev:path` prints the file. A commit
+ * object stays a summary. `executable` is the installed git, if any. The probe
+ * runs that file only, never a PATH lookup of `git`,
+ * and its output is never returned to the agent.
  */
-function scriptCandidates(
+function gitShowPrintsFileContents(
   cwd: string,
-  argv: readonly string[],
   env: NodeJS.ProcessEnv,
-): string[] {
-  const context = resolveGrantCommand(argv, cwd, env);
-  const argument = grantScriptArgument(context);
-  if (!argument) return [];
-  if (argument.inline !== undefined || argument.stdin) return [];
-  const path = resolveGrantScriptExecutable(argument, context.cwd, context.env);
-  return path ? [path] : [];
+  argv: readonly string[],
+  executable: string | undefined,
+): boolean {
+  if (argv[0] !== 'git' || argv[1] !== 'show' || !argv.includes('--stat')) return false;
+  const objects = argv.slice(2).filter((word) => word !== '--stat' && !word.startsWith('-'));
+  if (objects.length === 0) return false;
+  if (!executable || !isAbsolute(executable)) return true;
+  for (const word of objects) {
+    const probe = spawnSync(executable, ['cat-file', '-t', '--', word], { cwd, env, encoding: 'utf8' });
+    if ((probe.stdout ?? '').trim() !== 'commit') return true;
+  }
+  return false;
 }
 
 /** The bwrap-wrapped argv for a Room run, or a refusal when the host cannot wrap. */

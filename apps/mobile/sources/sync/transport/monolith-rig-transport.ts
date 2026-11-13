@@ -490,6 +490,7 @@ export class MonolithRigTransport {
         accountLogin: string;
         accountType: 'User' | 'Organization';
         accountAvatarUrl?: string;
+        faviconUrl?: string;
         repositorySelection: 'all' | 'selected';
         status: 'active' | 'revoked' | 'suspended';
         repositoryCount: number;
@@ -514,6 +515,8 @@ export class MonolithRigTransport {
         remote: `git://github.com/${repo.fullName}`,
         githubInstallationId: repo.installationId,
         defaultBranch: repo.defaultBranch,
+        avatarUrl: value.installations.find(owner => owner.installationId === repo.installationId)?.accountAvatarUrl,
+        faviconUrl: value.installations.find(owner => owner.installationId === repo.installationId)?.faviconUrl,
         private: repo.private,
       })),
     };

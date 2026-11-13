@@ -1,12 +1,9 @@
 import React, { useState } from 'react';
-import { Image, Text, View } from 'react-native';
-import { StyleSheet } from 'react-native-unistyles';
+import { Image, YStack, useTheme, useThemeName } from 'tamagui';
 import Svg, { Circle, Ellipse, Path } from 'react-native-svg';
 import type { CompanyLogo } from '@beeline/api-contract/workbench';
-import { beelineThemes } from '@/buzz/groknight';
 import { DECORATIVE_GLYPH_PROPS } from './decorative-glyph';
-import { Typography } from '@/constants/Typography';
-import { appBoardColors } from '@/buzz/app-board-style';
+import { T } from '@/ui/grammar';
 import linearMark from '../../../assets/app-logos/linear.png';
 import gmailMark from '../../../assets/app-logos/gmail.png';
 import calendarMark from '../../../assets/app-logos/calendar.png';
@@ -71,32 +68,35 @@ export function AppMark({
       ? logo
       : undefined;
   const showImage = uri && !failedUris.includes(uri);
+  const dark = useThemeName().startsWith('dark');
+  const ink = (useTheme() as Record<string, { val: string } | undefined>).ink?.val;
+  const plate = showImage && mark?.kind === 'image' ? mark.plate : undefined;
+  // A light plate stays light and a dark plate stays dark in either mode.
+  const lightPlate = white || plate === 'light';
   return (
-    <View
+    <YStack
       testID={testID}
-      style={[
-        styles.tile,
-        {
-          width: size,
-          height: size,
-          borderRadius: Math.round(size * 0.22),
-          ...(showImage && mark?.kind === 'image' && mark.plate === 'dark' ? styles.darkPlate : {}),
-          ...(white || (showImage && mark?.kind === 'image' && mark.plate === 'light') ? { backgroundColor: '#FFFFFF' } : {}),
-        },
-      ]}
+      width={size}
+      height={size}
+      borderRadius={size <= 28 ? 'sm' : 'md'}
+      alignItems="center"
+      justifyContent="center"
+      overflow="hidden"
+      backgroundColor={lightPlate ? (dark ? 'ink' : 'canvas') : plate === 'dark' ? (dark ? 'canvas' : 'ink') : 'raised'}
     >
       {!showImage && !bundled ? (
         domain || (mark && mark.kind !== 'monogram') ? (
-          <Svg width={imageSize} height={imageSize} viewBox="0 0 24 24" fill="none" stroke={styles.fallback.color} strokeWidth={1.4} {...DECORATIVE_GLYPH_PROPS}>
+          <Svg width={imageSize} height={imageSize} viewBox="0 0 24 24" fill="none" stroke={ink} strokeWidth={1.4} {...DECORATIVE_GLYPH_PROPS}>
             <Circle cx={12} cy={12} r={9} /><Ellipse cx={12} cy={12} rx={4} ry={9} /><Path d="M3 12h18M5 7h14M5 17h14" />
           </Svg>
-        ) : <Text style={styles.fallback}>{name.slice(0, 1).toUpperCase()}</Text>
+        ) : <T v="heading">{name.slice(0, 1).toUpperCase()}</T>
       ) : null}
       {bundled ? (
         <Image
           accessibilityIgnoresInvertColors
           source={bundled}
-          style={{ width: imageSize, height: imageSize }}
+          width={imageSize}
+          height={imageSize}
         />
       ) : null}
       {showImage ? (
@@ -105,23 +105,10 @@ export function AppMark({
           accessibilityIgnoresInvertColors
           source={{ uri }}
           onError={() => setFailedUris((current) => [...current, uri])}
-          style={{ width: imageSize, height: imageSize }}
+          width={imageSize}
+          height={imageSize}
         />
       ) : null}
-    </View>
+    </YStack>
   );
 }
-
-const styles = StyleSheet.create((theme) => {
-  const board = appBoardColors(theme.buzz);
-  return {
-    darkPlate: { backgroundColor: beelineThemes.obsidian.appTile },
-    tile: {
-      alignItems: 'center',
-      justifyContent: 'center',
-      backgroundColor: board.tile,
-      overflow: 'hidden',
-    },
-    fallback: { ...Typography.default('semiBold'), fontSize: 16, color: board.ink },
-  };
-});

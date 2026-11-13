@@ -78,3 +78,10 @@ test('server shutdown sinks follow only an unchanged mechanical owner move',()=>
   assert.deepEqual(judgeMachineSites(new Map([[id,1]]),inventory,baseline,true),[]);
   assert.ok(judgeMachineSites(new Map([[id,2]]),{[id]:{count:2,reason:'shutdown'}},baseline,true).length);
 });
+
+test('only the invocation owner may bound a model turn with one deadline',()=>{
+  const file='apps/body/src/agent-turn-deadline.ts';
+  assert.deepEqual(inspectMachineConnectionSource(file,'class AgentTurnDeadline { run(){setTimeout(stop,21600000)} }'),[]);
+  assert.ok(inspectMachineConnectionSource(file,'class AgentTurnDeadline { run(){setTimeout(stop,21600000);setTimeout(retry,1)} }').length);
+  assert.ok(inspectMachineConnectionSource(file,'class AgentTurnDeadline { retry(){setTimeout(stop,1)} }').length);
+});

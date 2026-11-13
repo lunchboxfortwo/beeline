@@ -11,7 +11,6 @@ import { GrantCommandRunner, GrantRunnerServer, type GrantRunnerEndpoint } from 
 import { ConnectorUsageRecorder } from './connector-runner.js';
 import { MonolithCornerTurnLoop } from './monolith-corner-turn.js';
 import { MonolithRoomTurnLoop } from './monolith-room-turn.js';
-import type { InterruptedTurn } from './force-update-journal.js';
 import { agentGitIdentity } from './agent-git-identity.js';
 import { removeStoragePath, storageTree, isSquirePath, ordinaryDirectory, type StorageRoomState } from './helper-storage.js';
 import { SurfaceHealth, type SurfaceHealthState } from './surface-health.js';
@@ -21,7 +20,7 @@ import { runtimeIdentity } from './runtime.js';
 import { agentCornerCheckoutPaths, materializeAgentCornerCheckout } from './agent-corner-checkout.js';
 import { CRASH_SAFE_CLONE_ARGS, fetchRepositoryCache } from './repository-cache-repair.js';
 import { resolveSessionIdleMs, AgentProcesses, type AgentProcessSnapshot } from './agent-process.js';
-import { roomRuntimeCoordinatorActiveRoomIds, roomRuntimeCoordinatorSetDiscoveryWakeListener, roomRuntimeCoordinatorYieldReconciliation, roomRuntimeCoordinatorSetInteractiveIdleListener, roomRuntimeCoordinatorWakeDiscovery, roomRuntimeCoordinatorActiveRoomCount, roomRuntimeCoordinatorSurfaceHealthSnapshot, roomRuntimeCoordinatorSurfaceHealthSummary, roomRuntimeCoordinatorHasDegradedSurfaces, roomRuntimeCoordinatorSchedulerSnapshot, roomRuntimeCoordinatorIsWorkspaceIdle, roomRuntimeCoordinatorActiveTurnCount, roomRuntimeCoordinatorStopAgentProcesses, roomRuntimeCoordinatorQuiesceForUpdate, roomRuntimeCoordinatorResumeServing, roomRuntimeCoordinatorInterruptedTurns, roomRuntimeCoordinatorInterruptForServerMinimum, roomRuntimeCoordinatorReconcile, roomRuntimeCoordinatorScheduleStorageMaintenance, roomRuntimeCoordinatorQueueMembershipEvent, roomRuntimeCoordinatorDrainMembershipEvents, roomRuntimeCoordinatorApplyMembershipEvent, roomRuntimeCoordinatorApplyCornerComplete, roomRuntimeCoordinatorStopRunning, roomRuntimeCoordinatorRoomRecord, roomRuntimeCoordinatorRoomRoot, roomRuntimeCoordinatorRoomConfig, roomRuntimeCoordinatorGrantRunnerEndpoint, roomRuntimeCoordinatorStartRoom, roomRuntimeCoordinatorStartRoomOnce, roomRuntimeCoordinatorMaterializeRoomCheckout } from './room-runtime-reconciliation-diagnostics.js';
+import { roomRuntimeCoordinatorActiveRoomIds, roomRuntimeCoordinatorSetDiscoveryWakeListener, roomRuntimeCoordinatorYieldReconciliation, roomRuntimeCoordinatorSetInteractiveIdleListener, roomRuntimeCoordinatorWakeDiscovery, roomRuntimeCoordinatorActiveRoomCount, roomRuntimeCoordinatorSurfaceHealthSnapshot, roomRuntimeCoordinatorSurfaceHealthSummary, roomRuntimeCoordinatorHasDegradedSurfaces, roomRuntimeCoordinatorSchedulerSnapshot, roomRuntimeCoordinatorIsWorkspaceIdle, roomRuntimeCoordinatorActiveTurnCount, roomRuntimeCoordinatorStopAgentProcesses, roomRuntimeCoordinatorQuiesceForUpdate, roomRuntimeCoordinatorResumeServing, roomRuntimeCoordinatorInterruptForServerMinimum, roomRuntimeCoordinatorReconcile, roomRuntimeCoordinatorScheduleStorageMaintenance, roomRuntimeCoordinatorQueueMembershipEvent, roomRuntimeCoordinatorDrainMembershipEvents, roomRuntimeCoordinatorApplyMembershipEvent, roomRuntimeCoordinatorApplyCornerComplete, roomRuntimeCoordinatorStopRunning, roomRuntimeCoordinatorRoomRecord, roomRuntimeCoordinatorRoomRoot, roomRuntimeCoordinatorRoomConfig, roomRuntimeCoordinatorGrantRunnerEndpoint, roomRuntimeCoordinatorStartRoom, roomRuntimeCoordinatorStartRoomOnce, roomRuntimeCoordinatorMaterializeRoomCheckout } from './room-runtime-reconciliation-diagnostics.js';
 import { roomRuntimeCoordinatorRefreshRoomCheckout, roomRuntimeCoordinatorStartCorner, roomRuntimeCoordinatorWatchCorner, roomRuntimeCoordinatorUnwatchCorner, roomRuntimeCoordinatorActivateWatchedCorner, roomRuntimeCoordinatorCornerRepositoryToken, roomRuntimeCoordinatorInvalidateParentRepository, roomRuntimeCoordinatorRefreshRoomCorners, roomRuntimeCoordinatorRestartRunningRoomForRepositoryChange, roomRuntimeCoordinatorParentRepositoryState, roomRuntimeCoordinatorParentRepositoryToken, roomRuntimeCoordinatorReportCornerStartFailure, roomRuntimeCoordinatorMaterializeCornerWorktree, roomRuntimeCoordinatorGetLocalWorktreeIds, roomRuntimeCoordinatorArchiveCleanupRefusalPath, roomRuntimeCoordinatorCleanupWasRefused, roomRuntimeCoordinatorRefuseArchiveCleanup } from './room-runtime-refresh-room-checkout.js';
 import { roomRuntimeCoordinatorSweepArchivedCornerWorktrees, roomRuntimeCoordinatorReapCornerWorktree, roomRuntimeCoordinatorReapCornerScratch, roomRuntimeCoordinatorCleanupArchivedCornerLocalState, roomRuntimeCoordinatorReclaimPrivateStorage, roomRuntimeCoordinatorSweepRoomPrivateStorage, roomRuntimeCoordinatorCollectDependencyStores, roomRuntimeCoordinatorNotePoll, roomRuntimeCoordinatorBeginShutdown, roomRuntimeCoordinatorShutdown } from './room-runtime-sweep-archived-corner-worktrees.js';
 
@@ -230,8 +229,7 @@ async stopAgentProcesses(): Promise<void> { return roomRuntimeCoordinatorStopAge
 quiesceForUpdate(): void { return roomRuntimeCoordinatorQuiesceForUpdate(this); }
 /** Resume intake after a failed update handoff. */
 resumeServing(): void { return roomRuntimeCoordinatorResumeServing(this); }
-interruptedTurns(): InterruptedTurn[] { return roomRuntimeCoordinatorInterruptedTurns(this); }
-interruptForServerMinimum(): InterruptedTurn[] { return roomRuntimeCoordinatorInterruptForServerMinimum(this); }
+interruptForServerMinimum(): void { roomRuntimeCoordinatorInterruptForServerMinimum(this); }
 async reconcile(onServing?: () => void | Promise<void>): Promise<WorkspaceMembershipStatus> { return roomRuntimeCoordinatorReconcile(this, onServing); }
 /** Retention cannot hold discovery or its watchdog acknowledgement hostage.
  * One sweep runs at a time; discovery coalesces its latest facts for the next
@@ -545,7 +543,6 @@ export type RoomLeaf = Pick<
   MonolithRoomTurnLoop | MonolithCornerTurnLoop,
   | 'isBusy'
   | 'interruptForServerMinimum'
-  | 'interruptedTurn'
   | 'requestReconciliation'
   | 'configurationChanged'
   | 'refreshPersonaForSoulUpdate'

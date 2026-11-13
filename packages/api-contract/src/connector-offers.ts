@@ -16,7 +16,7 @@ import { systemMessage } from './system-message-catalog.js';
  * only after the helper reports connected. Every later credential use still
  * goes through the connector's own receipts and approvals.
  */
-import type { RoomViewIdentity } from './phone-types.js';
+import type { readConnectorOfferCardView } from './phone-guards.js';
 import { CONNECTABLE_CONNECTOR_KINDS, type ConnectorKind } from './workbench.js';
 
 const CONNECTOR_OFFER_INTENTS = ['add', 'reconnect', 'switch'] as const;
@@ -169,8 +169,9 @@ function connectorOfferActionLabel(connectorName: string): string {
 
 /**
  * The `connector-offer` card payload the server writes and the phone renders
- * verbatim. `addressee` is the person the agent addressed — whose keys the
- * tool will hold — and the one who may accept besides a Workspace manager.
+ * verbatim. `consequence` is the server-owned line. `addressee` is the person
+ * the agent addressed — whose keys the tool will hold — and the one who may
+ * accept besides a Workspace manager.
  * `helper` names the machine the connector installs on (the offering agent's
  * own), so a reader knows where the tool will live before tapping.
  *
@@ -189,29 +190,7 @@ function connectorOfferActionLabel(connectorName: string): string {
  * `--force-relogin=<provider>`, so the sign-in opens even while the current
  * session is still valid.
  */
-export type ConnectorOfferCardView = {
-  readonly offerId: string;
-  readonly agent: RoomViewIdentity;
-  readonly addressee: RoomViewIdentity;
-  readonly connectorType: ConnectorKind;
-  readonly connectorName: string;
-  readonly reason: string;
-  /** Server-owned: consequence + boundary in one line. */
-  readonly consequence: string;
-  readonly helper: { readonly machineId: string; readonly name: string };
-  readonly status: ConnectorOfferStatus;
-  readonly createdAt: number;
-  readonly acceptedBy?: RoomViewIdentity;
-  readonly acceptedAt?: number;
-  /** The Workbench connector row the acceptance created, for the settled card's link. */
-  readonly connectorId?: string;
-  /** A failed card's current replacement in the same Room. */
-  readonly replacementMessageId?: string;
-  /** `'add'` when omitted — every offer before this field existed. */
-  readonly intent?: ConnectorOfferIntent;
-  /** The provider a `'reconnect'` or `'switch'` offer signs in again, e.g. `'google'`. */
-  readonly provider?: string;
-};
+export type ConnectorOfferCardView = NonNullable<ReturnType<typeof readConnectorOfferCardView>>;
 
 /**
  * The hidden system line the server posts once the offered connector is connected.

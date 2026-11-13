@@ -57,7 +57,8 @@ export function scanConnectionUi(source, file) {
       ['action', 'label', 'title', 'accessibilityLabel'].some(name => retryCopy.test(value(name).replace(/^['"]|['"]$/g, '')) || /retryLabel/.test(value(name)));
     // Shared controls forward callbacks; they cannot introduce failure copy.
     const forwarding = file === 'components/buzz/ErrorBanner.tsx';
-    const domain = Boolean(attr('emergencyTheme')) || /RoomMessageCell|OrdinaryLedgerMessage|SendFailure|Voice/.test(tag) ||
+    // The root error screen retries a render crash, not a connection.
+    const domain = value('testID') === 'runtime-error-retry' || /RoomMessageCell|OrdinaryLedgerMessage|SendFailure|Voice/.test(tag) ||
       domainFailure.test(node.getText(ast)) || /Secure storage unavailable|Could not stop this/.test(node.getText(ast));
     if (hasRetry && !forwarding && !domain && !mutation.test(callback) &&
       (attr('onRetry') || failureCondition.test(conditions(node)) || /retry|read|load|refresh/i.test(callback)))

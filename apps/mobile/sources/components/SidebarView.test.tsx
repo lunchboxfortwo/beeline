@@ -1,4 +1,3 @@
-import { sidebarAgeTests } from './SidebarView.age.test-support';
 vi.mock('react-native-keyboard-controller', async () => { const R = await import('react'); return { KeyboardAvoidingView: (props: any) => R.createElement('View', props, props.children) }; });
 import * as React from 'react';
 // @ts-expect-error react-test-renderer has no declarations in this workspace.
@@ -52,9 +51,10 @@ const chats = vi.hoisted(() =>
                   name: 'Fix fixture',
                   state: openCornerState.current,
                   mine: true,
+                  lastActivityAt: Math.floor(Date.now() / 1000),
                   ...(openCornerState.current === 'waiting' ? { attention: true } : {}),
                 },
-                { id: 'corner-theirs', name: 'Their fix', state: 'waiting' },
+                { id: 'corner-theirs', name: 'Their fix', state: 'waiting', lastActivityAt: Math.floor(Date.now() / 1000) },
               ],
             },
             {
@@ -64,6 +64,7 @@ const chats = vi.hoisted(() =>
           ]
         : [],
     watchFilters: workspaceId === 'workspace-a' ? [{ '#h': ['room-a', 'dm-a'] }] : [],
+    joinable: workspaceId === 'workspace-a' ? [{ id: 'launch-room', name: 'launch', memberCount: 8 }] : [],
   })),
 );
 const workspaceSummary = vi.hoisted(() => ({ attention: true, roomCount: 3 }));
@@ -183,16 +184,6 @@ const theme = vi.hoisted(() => ({
     type: { body: {}, bodyStrong: {}, hero: {}, machine: {}, meta: { fontSize: 13, lineHeight: 19, fontFamily: 'SpaceGrotesk-Regular' }, sectionHead: {} },
   },
 }));
-vi.mock('react-native-unistyles', async () => {
-  const { completeTestTheme } = await import('../../../../tests/helpers/phone');
-  const fullTheme = completeTestTheme(theme);
-  return ({
-  StyleSheet: {
-    hairlineWidth: 1,
-    create: (factory: any) => (typeof factory === 'function' ? factory(fullTheme) : factory),
-  },
-  useUnistyles: () => ({ theme: fullTheme }),
-}); });
 vi.mock('@expo/vector-icons/Ionicons', async () => {
   const ReactModule = await import('react');
   return { default: (props: any) => ReactModule.createElement('Ionicons', props) };
@@ -248,12 +239,9 @@ vi.mock('expo-haptics', () => ({
   notificationAsync: vi.fn(),
   NotificationFeedbackType: { Success: 'success', Error: 'error' },
 }));
-vi.mock('@/buzz/room-list-row', async (importOriginal) => {
-  const actual = await importOriginal<typeof import('@/buzz/room-list-row')>();
+vi.mock('@/buzz/room-list-row', async () => {
   return {
-  roomRowShowsCornerMark: (item: any, summary: any) => !item.directMessage && (summary?.cornerCount ?? 0) > 0,
   NO_ACTIVITY_PREVIEW: 'No activity',
-  roomListSections: actual.roomListSections,
   roomRowName: vi.fn((item) => ({
     name: item.directMessage?.peer.name ?? item.room.name,
     sigil: item.directMessage ? '@' : '#',
@@ -269,67 +257,23 @@ vi.mock('@/buzz/room-view-presentation', () => ({
     name: workspace.name,
   }),
 }));
-vi.mock('@/components/buzz/RoomListSectionHeader', async () => {
-  const ReactModule = await import('react');
-  return {
-    // Render the header type with its action as a real Pressable so tests can
-    // reach the section-head creation controls by testID.
-    RoomListSectionHeader: (props: any) =>
-      ReactModule.createElement(
-        'RoomListSectionHeader',
-        props,
-        props.onAction
-          ? ReactModule.createElement('Pressable', {
-              testID: props.actionTestID,
-              accessibilityLabel: props.actionAccessibilityLabel,
-              accessibilityRole: 'button',
-              onPress: props.onAction,
-            })
-          : null,
-      ),
-  };
-});
-vi.mock('@/components/buzz/CommunityRail', async () => {
-  const ReactModule = await import('react');
-  return {
-    CommunitySwitcherTrigger: (props: any) =>
-      ReactModule.createElement('CommunitySwitcherTrigger', props),
-  };
-});
+vi.mock('tamagui', async () => (await import('@/ui/screens/chats/tamagui-hosts.test-support')).tamaguiHosts());
+vi.mock('lucide-react-native', async () => (await import('@/ui/screens/chats/tamagui-hosts.test-support')).lucideHosts());
+vi.mock('react-native-svg', async () => (await import('@/ui/screens/chats/tamagui-hosts.test-support')).svgHosts());
+const operation = vi.hoisted(() => vi.fn(async (_name: string, _input: unknown) => ({ joined: true })));
+vi.mock('@/sync/transport/monolith-operation', () => ({ monolithPhoneOperation: operation, readServerSurface: vi.fn() }));
 vi.mock('@/components/buzz/DesktopWorkspaceRail', async () => {
   const ReactModule = await import('react');
   return {
     DesktopWorkspaceRail: (props: any) => ReactModule.createElement('DesktopWorkspaceRail', props),
   };
 });
-vi.mock('@/components/buzz/CornerGlyph', async () => {
-  const ReactModule = await import('react');
-  return {
-    CORNER_META_SIZE: 13,
-    CornerGlyph: (props: any) => ReactModule.createElement('CornerGlyph', props),
-  };
-});
 vi.mock('@/components/buzz/IdentityMark', () => ({
   IdentityMark: (props: any) => React.createElement('IdentityMark', props),
 }));
-vi.mock('@/components/buzz/SurfaceGlyphLoader', async () => {
-  const ReactModule = await import('react');
-  return {
-    SurfaceGlyphLoader: (props: any) => ReactModule.createElement('SurfaceGlyphLoader', props),
-  };
-});
-
-vi.mock('@/components/buzz/HullActionSheet', () => ({
-  HullActionSheetModal: ({ visible, children }: any) => (visible ? children : null),
-  HullActionSheetRow: (props: any) => React.createElement('Pressable', props),
-  HullActionSheetCancel: (props: any) => React.createElement('Pressable', props),
-}));
-
 import { SidebarView } from './SidebarView';
-import { ConversationRow } from './buzz/ConversationRow';
 import { liveChatList, refreshChatList, resetChatListStoresForTest } from '@/buzz/chat-list-store';
-import { TrayGlyph } from '@/components/buzz/TrayGlyph';
-import { RoomListToolbar } from '@/components/buzz/RoomListToolbar';
+import { ChatListHeader } from '@/ui/screens/chats/ChatListHeader';
 let tree: ReactTestRenderer;
 function control(id: string) {
   const nodes = tree.root.findAll(
@@ -340,6 +284,9 @@ function control(id: string) {
 }
 
 
+const header = () => tree.root.findByType(ChatListHeader);
+const rail = () => tree.root.findByType('DesktopWorkspaceRail');
+
 async function settle() {
   await act(async () => {
     await Promise.resolve();
@@ -349,9 +296,9 @@ async function settle() {
 async function expectEmptyRoomList() {
   await vi.waitFor(async () => {
     await settle();
-    expect(control('desktop-new-direct-message')).toBeDefined();
-    expect(tree.root.findAllByProps({ testID: 'desktop-room-room-a' })).toHaveLength(0);
-    expect(tree.root.findAllByProps({ testID: 'desktop-room-dm-a' })).toHaveLength(0);
+    expect(header().props.workspaceName).toBe('Empty Workspace');
+    expect(tree.root.findAllByProps({ testID: 'room-room-a' })).toHaveLength(0);
+    expect(tree.root.findAllByProps({ testID: 'room-dm-a' })).toHaveLength(0);
   }, { timeout: 5_000 });
 }
 
@@ -438,19 +385,59 @@ describe('desktop Workspace navigation', () => {
     expect(chats).toHaveBeenCalledTimes(chatReads + 1);
   });
 
-  sidebarAgeTests({
-    get tree() { return tree; },
-    set tree(value) { tree = value; },
-    settle, control, surfaceRows, surfaceListeners, route, pathnameListeners,
+  it('R1: mounting the sidebar schedules no age refresh timer', async () => {
+    await act(async () => tree.unmount());
+    vi.useFakeTimers();
+    try {
+      await act(async () => { tree = create(<SidebarView />); });
+      await settle();
+      expect(vi.getTimerCount()).toBe(0);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it('refreshes rendered ages on list activity while keeping quiet lists and route hops stable', async () => {
+    vi.useFakeTimers();
+    try {
+      const now = Date.UTC(2026, 10, 7, 12);
+      vi.setSystemTime(now);
+      const key = '/workspace/:id/chats:workspace-a';
+      const previous = surfaceRows.get(key) as any;
+      const publish = async (updatedAt: number) => {
+        await act(async () => {
+          surfaceRows.set(key, {
+            ...previous,
+            chats: previous.chats.map((item: any) => item.room.id === 'room-a'
+              ? { ...item, room: { ...item.room, updatedAt } } : item),
+          });
+          for (const listener of surfaceListeners.get(key) ?? []) listener();
+        });
+        await settle();
+      };
+      const age = () => control('room-room-a-age').props.children;
+      await publish(now / 1000 - 60);
+      expect(age()).toBe('1m');
+      await act(async () => { vi.advanceTimersByTime(120_000); });
+      expect(age()).toBe('1m');
+      act(() => {
+        route.pathname = '/beeline/chat/dm-a';
+        for (const listener of pathnameListeners) listener();
+      });
+      expect(age()).toBe('1m');
+      // The new activity is two minutes old at the new wall-clock time.
+      await publish(now / 1000);
+      expect(age()).toBe('2m');
+    } finally {
+      vi.useRealTimers();
+    }
   });
 
   it.each(['committed workspace update', 'shared covering read'])('restores Room rows after outage recovery through %s', async recovery => {
     workspaces.mockRejectedValueOnce(new Error('isolated outage'));
     await act(async () => { for (const listener of [...workspaceLive.listeners]) listener(workspaceChange); });
     await settle();
-    const failed = tree.root.findAll((node: any) => node.props.action === 'Retry' && node.props.title === 'Could not load workspaces.');
-    expect(failed).toHaveLength(0);
-    expect(tree.root.findAllByProps({ testID: 'desktop-room-room-a' }).length).toBeGreaterThan(0);
+    expect(tree.root.findAllByProps({ testID: 'room-room-a' }).length).toBeGreaterThan(0);
     const reads = workspaces.mock.calls.length;
     await act(async () => {
       if (recovery === 'shared covering read') {
@@ -460,8 +447,7 @@ describe('desktop Workspace navigation', () => {
     });
     await settle();
     expect(workspaces).toHaveBeenCalledTimes(reads + (recovery === 'shared covering read' ? 0 : 1));
-    expect(tree.root.findAll((node: any) => node.props.title === 'Could not load workspaces.')).toHaveLength(0);
-    expect(tree.root.findAllByProps({ testID: 'desktop-room-room-a' }).length).toBeGreaterThan(0);
+    expect(tree.root.findAllByProps({ testID: 'room-room-a' }).length).toBeGreaterThan(0);
   });
 
   it('removes the deleted workspace from the permanent rail while a Room is open', async () => {
@@ -469,31 +455,24 @@ describe('desktop Workspace navigation', () => {
     workspaceLive.deleted = true;
     await act(async () => { for (const listener of [...workspaceLive.listeners]) listener(workspaceChange); });
     await settle();
-    expect(tree.root.findByType('DesktopWorkspaceRail').props.workspaces.map((workspace: { id: string }) => workspace.id)).toEqual(['workspace-empty']);
+    expect(rail().props.workspaces.map((workspace: { id: string }) => workspace.id)).toEqual(['workspace-empty']);
     expect(saveActiveCommunityId).toHaveBeenCalledWith('viewer', 'workspace-empty');
     expect(routerReplace).toHaveBeenCalledWith({ pathname: '/beeline/channels', params: { communityId: 'workspace-empty' } });
     expect(chats).toHaveBeenLastCalledWith('workspace-empty');
-    console.log('Reproduction workspace-removal: permanent desktop rail removed Alpha Workspace and opened remaining workspace without a room retry');
   });
 
   it('clears the permanent rail when its final workspace is deleted', async () => {
     workspaceLive.empty = true;
     await act(async () => { for (const listener of [...workspaceLive.listeners]) listener(workspaceChange); });
     await settle();
-    expect(tree.root.findByType('DesktopWorkspaceRail').props.workspaces).toEqual([]);
+    expect(rail().props.workspaces).toEqual([]);
     expect(saveActiveCommunityId).toHaveBeenCalledWith('viewer', null);
     expect(routerReplace).toHaveBeenCalledWith('/beeline/community');
   });
 
-  it('counts the Rooms of the shared Room list in the desktop toolbar', () => {
-    // workspace-a lists one Room and one DM; neither is unread or pinned.
-    expect(tree.root.findByType(RoomListToolbar).props.counts).toEqual({ all: 2, unread: 0, pinned: 0 });
-  });
-
   it('keeps one shared projection across route hops without another GET', async () => {
     expect(chats.mock.calls.every(([id]) => id === 'workspace-a')).toBe(true);
-    const rail = tree.root.findByType('DesktopWorkspaceRail');
-    expect(rail.props.workspaces.find((item: any) => item.id === 'workspace-empty')).toMatchObject({ needsAttention: true, roomCount: 3 });
+    expect(rail().props.workspaces.find((item: any) => item.id === 'workspace-empty')).toMatchObject({ needsAttention: true, roomCount: 3 });
     const initialReads = workspaces.mock.calls.length;
     const initialChatReads = chats.mock.calls.length;
     workspaceSummary.attention = false;
@@ -505,238 +484,135 @@ describe('desktop Workspace navigation', () => {
     });
     await settle();
     expect(workspaces).toHaveBeenCalledTimes(initialReads);
-    expect(tree.root.findByType('DesktopWorkspaceRail').props.workspaces.find((item: any) => item.id === 'workspace-empty')).toMatchObject({ needsAttention: true, roomCount: 3 });
-
-    workspaceSummary.attention = true;
-    workspaceSummary.roomCount = 4;
-    route.pathname = '/beeline/members';
-    await act(async () => {
-      pathnameListeners.forEach((listener) => listener());
-      tree.update(<SidebarView />);
-    });
-    await settle();
-    expect(workspaces).toHaveBeenCalledTimes(initialReads);
-    expect(tree.root.findByType('DesktopWorkspaceRail').props.workspaces.find((item: any) => item.id === 'workspace-empty')).toMatchObject({ needsAttention: true, roomCount: 3 });
-    expect(chats).toHaveBeenCalledTimes(initialChatReads);
-    expect(chats.mock.calls.every(([id]) => id === 'workspace-a')).toBe(true);
-    expect(tree.root.findByType('CommunitySwitcherTrigger').props.community.name).toBe('Alpha Workspace');
-    const unchangedRow = () => tree.root.findAllByType(ConversationRow).find((row: any) => row.props.item.room.id === 'dm-a')!;
-    const unchangedProps = { ...unchangedRow().props };
-    const hopStarted = performance.now();
+    expect(header().props.workspaceName).toBe('Alpha Workspace');
+    // An unchanged row keeps its handlers across hops: the memoized row did not render again.
+    const press = control('room-dm-a').props.onPress;
     for (let hop = 0; hop < 10; hop += 1) {
       route.pathname = hop % 2 ? '/beeline/chat/room-a' : '/beeline/tray';
       await act(async () => {
         pathnameListeners.forEach((listener) => listener());
         tree.update(<SidebarView />);
       });
-      expect(control('desktop-room-room-a')).toBeDefined();
-      for (const key of Object.keys(unchangedProps)) {
-        expect(unchangedRow().props[key], key).toBe(unchangedProps[key]);
-      }
+      expect(control('room-room-a')).toBeDefined();
+      expect(control('room-dm-a').props.onPress).toBe(press);
     }
     expect(workspaces).toHaveBeenCalledTimes(initialReads);
     expect(chats).toHaveBeenCalledTimes(initialChatReads);
     expect(saveActiveCommunityId).not.toHaveBeenCalled();
-    console.log(`Shared Sidebar projection: 10 route hops kept first row with zero extra GETs in ${Math.round(performance.now() - hopStarted)} ms (test renderer).`);
   });
 
-  it('keeps both Mac workspace headers below the overlay title bar', async () => {
+  it('keeps the Mac workspace header below the overlay title bar, and the Windows one at the top', async () => {
+    const titlebar = () => tree.root.findAll((node: any) => node.type === 'YStack' && node.props.height === 56);
     desktopShell.current = true;
     vi.stubGlobal('navigator', { platform: 'MacIntel' });
     try {
-      await act(async () => tree.update(<SidebarView key="mac-compact" />));
-      expect(tree.root.findAllByType('View')[0]!.props.style.paddingTop).toBe(56);
-      expect(tree.root.findAllByProps({ testID: 'desktop-workspace-strip' })).toHaveLength(0);
-
-      viewport.width = 1440;
-      await act(async () => tree.update(<SidebarView key="mac-wide" />));
-      expect(tree.root.findAllByType('View')[0]!.props.style.paddingTop).toBe(56);
-      expect(tree.root.findAllByProps({ testID: 'desktop-workspace-strip' })).toHaveLength(0);
-    } finally {
-      vi.unstubAllGlobals();
-    }
-  });
-
-  it('keeps the Windows workspace header below its native window frame', async () => {
-    desktopShell.current = true;
-    vi.stubGlobal('navigator', { platform: 'Win32' });
-    try {
+      await act(async () => tree.update(<SidebarView key="mac" />));
+      expect(titlebar()).toHaveLength(1);
+      vi.stubGlobal('navigator', { platform: 'Win32' });
       await act(async () => tree.update(<SidebarView key="windows" />));
-      expect(tree.root.findAllByType('View')[0]!.props.style.paddingTop).toBe(0);
-      expect(tree.root.findByType('CommunitySwitcherTrigger')).toBeTruthy();
+      expect(titlebar()).toHaveLength(0);
+      expect(header()).toBeTruthy();
     } finally {
       vi.unstubAllGlobals();
     }
   });
 
-  it('opens from Command-or-Control Shift S', () => {
+  it('opens the switcher from Command-or-Control Shift S', () => {
     const preventDefault = vi.fn();
     act(() =>
-      windowListeners.get('keydown')?.({
-        ctrlKey: true,
-        metaKey: false,
-        shiftKey: true,
-        key: 's',
-        target: null,
-        preventDefault,
-      }),
+      windowListeners.get('keydown')?.({ ctrlKey: true, metaKey: false, shiftKey: true, key: 's', target: null, preventDefault }),
     );
-
     expect(preventDefault).toHaveBeenCalledOnce();
-    expect(tree.root.findByType('DesktopWorkspaceRail').props.open).toBe(true);
+    expect(rail().props.open).toBe(true);
   });
 
-  it.each([1024, 1280, 1360, 1440, 1600, 1920])('keeps the rail behind the avatar at %i px', async (width) => {
+  it.each([1024, 1440, 1920])('opens and closes the Workspace rail from the list header at %i px', async (width) => {
     viewport.width = width;
     await act(async () => tree.update(<SidebarView key={`width-${width}`} />));
     await settle();
-    expect(tree.root.findAllByProps({ testID: 'desktop-workspace-strip' })).toHaveLength(0);
-    expect(control('profile-settings-navigation')).toBeTruthy();
-    const trigger = tree.root.findByType('CommunitySwitcherTrigger');
-    expect(trigger.props.attention).toBe(true);
-    expect(tree.root.findByType('DesktopWorkspaceRail').props.open).toBe(false);
-    act(() => trigger.props.onPress());
-    expect(tree.root.findByType('DesktopWorkspaceRail').props.open).toBe(true);
-    act(() => tree.root.findByType('DesktopWorkspaceRail').props.onClose());
-    expect(tree.root.findByType('DesktopWorkspaceRail').props.open).toBe(false);
-    act(() => control('profile-settings-navigation').props.onPress());
-    expect(routerPush).toHaveBeenCalledWith('/beeline/settings');
+    expect(rail().props.open).toBe(false);
+    act(() => header().props.onWorkspace());
+    expect(rail().props.open).toBe(true);
+    act(() => rail().props.onClose());
+    expect(rail().props.open).toBe(false);
   });
 
   it('switches header, list, URL, and closes the switcher for an empty Workspace', async () => {
-    expect(tree.root.findByType('CommunitySwitcherTrigger').props.community.name).toBe(
-      'Alpha Workspace',
-    );
-
-    act(() => tree.root.findByType('CommunitySwitcherTrigger').props.onPress());
-    expect(tree.root.findByType('DesktopWorkspaceRail').props.open).toBe(true);
-
+    expect(header().props.workspaceName).toBe('Alpha Workspace');
+    act(() => header().props.onWorkspace());
+    expect(rail().props.open).toBe(true);
     await act(async () => {
-      tree.root.findByType('DesktopWorkspaceRail').props.onSelect('workspace-empty');
-      expect(routerPush).toHaveBeenCalledWith({
-        pathname: '/beeline/channels',
-        params: { communityId: 'workspace-empty' },
-      });
+      rail().props.onSelect('workspace-empty');
+      expect(routerPush).toHaveBeenCalledWith({ pathname: '/beeline/channels', params: { communityId: 'workspace-empty' } });
       expect(chats.mock.calls.some(([id]) => id === 'workspace-empty')).toBe(false);
       await Promise.resolve();
       await Promise.resolve();
     });
     await expectEmptyRoomList();
-
-    expect(tree.root.findByType('CommunitySwitcherTrigger').props.community.name).toBe(
-      'Empty Workspace',
-    );
-    expect(tree.root.findByType('DesktopWorkspaceRail').props.open).toBe(false);
+    expect(rail().props.open).toBe(false);
     expect(chats).toHaveBeenCalledWith('workspace-empty');
-    expect(routerPush).toHaveBeenCalledWith({
-      pathname: '/beeline/channels',
-      params: { communityId: 'workspace-empty' },
-    });
     expect(saveActiveCommunityId).toHaveBeenCalledWith('viewer', 'workspace-empty');
   });
 
-  it('opens and closes the overlay rail without replacing the Room list', () => {
-    const rail = tree.root.findByType('DesktopWorkspaceRail');
-    expect(rail.props.open).toBe(false);
-    expect(tree.root.findAllByProps({ testID: 'desktop-room-search' })).toHaveLength(0);
-
-    act(() => control('room-search-toggle').props.onPress());
-    expect(control('desktop-room-search')).toBeDefined();
-
-    act(() => tree.root.findByType('CommunitySwitcherTrigger').props.onPress());
-    expect(tree.root.findByType('DesktopWorkspaceRail').props.open).toBe(true);
-    expect(control('desktop-room-search')).toBeDefined();
-
-    act(() => tree.root.findByType('DesktopWorkspaceRail').props.onClose());
-    expect(tree.root.findByType('DesktopWorkspaceRail').props.open).toBe(false);
+  it('keeps the search open while the Workspace rail opens and closes', () => {
+    expect(tree.root.findAllByProps({ testID: 'room-search-input' })).toHaveLength(0);
+    act(() => control('room-search-open').props.onPress());
+    expect(control('room-search-input')).toBeDefined();
+    act(() => header().props.onWorkspace());
+    expect(rail().props.open).toBe(true);
+    expect(control('room-search-input')).toBeDefined();
+    act(() => rail().props.onClose());
+    expect(rail().props.open).toBe(false);
   });
 
   it('opens desktop search from Command-or-Control K', () => {
     const preventDefault = vi.fn();
-    expect(tree.root.findAllByProps({ testID: 'desktop-room-search' })).toHaveLength(0);
-
+    expect(tree.root.findAllByProps({ testID: 'room-search-input' })).toHaveLength(0);
     act(() =>
-      windowListeners.get('keydown')?.({
-        ctrlKey: true,
-        metaKey: false,
-        shiftKey: false,
-        key: 'k',
-        target: null,
-        preventDefault,
-      }),
+      windowListeners.get('keydown')?.({ ctrlKey: true, metaKey: false, shiftKey: false, key: 'k', target: null, preventDefault }),
     );
-
     expect(preventDefault).toHaveBeenCalledOnce();
-    expect(control('desktop-room-search')).toBeDefined();
+    expect(control('room-search-input')).toBeDefined();
   });
 
-  it("keeps profile settings reachable from the persistent desktop navigation as the viewer's own face", () => {
-    const profileSettings = control('profile-settings-navigation');
-
-    expect(profileSettings.props.accessibilityLabel).toBe('Ada Lovelace — Settings');
-    expect(profileSettings.findByType('IdentityMark').props).toMatchObject({
-      seed: 'viewer',
-      kind: 'human',
-    });
-    expect(
-      profileSettings
-        .findAllByType('Text')
-        .map((node: { props: { children?: unknown } }) => node.props.children),
-    ).toEqual(['Ada Lovelace']);
-
-    act(() => profileSettings.props.onPress());
-
-    expect(routerPush).toHaveBeenCalledWith('/beeline/settings');
-  });
-
-  it('gives search a visible focus state', () => {
-    act(() => control('room-search-toggle').props.onPress());
-    const search = control('desktop-room-search');
-    expect(search.props.accessibilityLabel).toBe('Search Rooms and direct messages');
-    act(() => search.props.onFocus());
-    expect(tree.root.findAllByType('View').some((node: any) => Array.isArray(node.props.style) && node.props.style.some((part: any) => part?.borderBottomColor === '#b08a4a' && !part?.minHeight))).toBe(true);
-  });
-
-  it('draws the heading agents, tray and search icons in one quiet grey', () => {
-    const members = tree.root.findAll((node: any) => node.props.testID === 'workspace-members' && node.props.icon)[0]!;
-    const search = control('room-search-toggle').findByType('Ionicons' as never);
-    expect(members.props.icon.props.color).toBe('#777');
-    expect(tree.root.findByType(TrayGlyph).props.color).toBe('#777');
-    expect(search.props.color).toBe('#777');
-  });
-
-  it('routes the heading glyphs to Members and Tray, with no Workbench sidebar entry', () => {
+  it('routes Tags, People and Settings, with no Workbench or Workspace menu entry', () => {
     expect(tree.root.findAllByProps({ testID: 'desktop-workbench' })).toHaveLength(0);
-
-    const members = control('workspace-members');
-    act(() => members.props.onPress());
-    expect(routerPush).toHaveBeenCalledWith({
-      pathname: '/beeline/members',
-      params: { communityId: 'workspace-a' },
-    });
-
-    act(() => tree.root.findByType(TrayGlyph).props.onPress());
+    expect(tree.root.findAllByProps({ testID: 'workspace-menu' })).toHaveLength(0);
+    act(() => control('side-tray').props.onPress());
     expect(routerPush).toHaveBeenCalledWith({
       pathname: '/beeline/tray',
       params: { communityId: 'workspace-a', workspaceName: 'Alpha Workspace' },
     });
+    act(() => control('side-people').props.onPress());
+    expect(routerPush).toHaveBeenCalledWith('/beeline/people');
+    act(() => control('side-settings').props.onPress());
+    expect(routerPush).toHaveBeenCalledWith('/beeline/settings');
   });
 
-  it.each(['owner', 'admin', 'member'] as const)('removes the old Workspace menu for %s', async (role) => {
-    workspaceRole.current = role;
-    await refreshWorkspaceViewer();
-    await act(async () => { tree.update(<SidebarView key={role} />); });
+  it.each([
+    ['/beeline/tray', 'side-tray'],
+    ['/beeline/people', 'side-people'],
+    ['/beeline/settings/vault', 'side-settings'],
+  ])('selects exactly one place on %s', async (pathname, selected) => {
+    route.pathname = pathname;
+    await act(async () => { tree.update(<SidebarView key={pathname} />); });
     await settle();
-    expect(tree.root.findAllByProps({ testID: 'workspace-menu' })).toHaveLength(0);
-    expect(control('workspace-members')).toBeDefined();
-    expect(control('profile-settings-navigation')).toBeDefined();
+    for (const place of ['side-tray', 'side-people', 'side-settings'])
+      expect(control(place).props.accessibilityState).toEqual({ selected: place === selected });
+  });
+
+  it('selects no place on the Members route', async () => {
+    route.pathname = '/beeline/members';
+    await act(async () => { tree.update(<SidebarView key="members-route" />); });
+    await settle();
+    expect(control('side-tray').props.accessibilityState).toEqual({ selected: false });
   });
 
   it('returns from a searched Room to the full list with search closed and empty', async () => {
-    act(() => control('room-search-toggle').props.onPress());
-    await act(async () => control('desktop-room-search').props.onChangeText('Alpha'));
-    expect(tree.root.findAllByProps({ testID: 'desktop-room-dm-a' })).toHaveLength(0);
-    act(() => control('desktop-room-room-a').props.onPress());
+    act(() => control('room-search-open').props.onPress());
+    await act(async () => header().props.onSearch({ ...header().props.search, query: 'Alpha' }));
+    expect(tree.root.findAllByProps({ testID: 'room-dm-a' })).toHaveLength(0);
+    act(() => control('room-room-a').props.onPress());
     await act(async () => {
       route.pathname = '/beeline/chat/room-a';
       pathnameListeners.forEach((listener) => listener());
@@ -745,138 +621,60 @@ describe('desktop Workspace navigation', () => {
       route.pathname = '/beeline/channels';
       pathnameListeners.forEach((listener) => listener());
     });
-    expect(tree.root.findAllByProps({ testID: 'desktop-room-search' })).toHaveLength(0);
-    expect(control('desktop-room-dm-a')).toBeDefined();
-    act(() => control('room-search-toggle').props.onPress());
-    expect(control('desktop-room-search').props.value).toBe('');
+    expect(tree.root.findAllByProps({ testID: 'room-search-input' })).toHaveLength(0);
+    expect(control('room-dm-a')).toBeDefined();
+    act(() => control('room-search-open').props.onPress());
+    expect(control('room-search-input').props.value).toBe('');
   });
 
-  it('lists search matches without section heads', async () => {
-    act(() => control('room-search-toggle').props.onPress());
-    await act(async () => control('desktop-room-search').props.onChangeText('a'));
-    expect(tree.root.findAllByType('RoomListSectionHeader')).toHaveLength(0);
-    expect(control('desktop-room-room-a')).toBeDefined();
-    expect(control('desktop-room-dm-a')).toBeDefined();
+  it('narrows search by thread title and the Unread chip', async () => {
+    act(() => control('room-search-open').props.onPress());
+    await act(async () => header().props.onSearch({ open: true, query: 'fixture', chips: [] }));
+    expect(control('room-room-a')).toBeDefined();
+    expect(tree.root.findAllByProps({ testID: 'room-dm-a' })).toHaveLength(0);
+    await act(async () => header().props.onSearch({ open: true, query: '', chips: ['unread'] }));
+    expect(tree.root.findAllByProps({ testID: 'room-room-a' })).toHaveLength(0);
   });
 
-  it('carries the section creation controls in the section heads', () => {
-    expect(
-      tree.root
-        .findAllByType('RoomListSectionHeader')
-        .map((header: { props: { title: string } }) => header.props.title),
-    ).toEqual(['Rooms', 'Direct messages']);
-    // The rows sit right below; a count beside the + only repeated them.
-    expect(
-      tree.root
-        .findAllByType('RoomListSectionHeader')
-        .map((header: { props: { count?: number } }) => header.props.count),
-    ).toEqual([undefined, undefined]);
-    expect(
-      tree.root
-        .findAllByProps({ testID: 'desktop-new-room' })
-        .map((row: { props: { accessibilityLabel: string } }) => row.props.accessibilityLabel),
-    ).toEqual(['Create a new Room']);
-    expect(control('desktop-new-direct-message').props.accessibilityLabel).toBe(
-      'Start a direct message',
-    );
-    expect(
-      tree.root
-        .findAllByType('Text')
-        .some((node: { props: { children?: unknown } }) => node.props.children === 'New section'),
-    ).toBe(false);
-  });
-
-  it('routes the section-head pluses to the existing Room dialog and direct-message picker', () => {
-    const push = (testID: string) => {
-      routerPush.mockClear();
-      act(() => tree.root.findByProps({ testID }).props.onPress());
-      return routerPush.mock.calls[0][0];
-    };
-
-    expect(push('desktop-new-room')).toEqual({
+  it('routes New chat to the deck sheet for a manager', () => {
+    act(() => header().props.onNew());
+    expect(routerPush).toHaveBeenCalledWith({
       pathname: '/beeline/channels',
       params: { communityId: 'workspace-a', newRoom: expect.any(String) },
     });
-    expect(push('desktop-new-direct-message')).toEqual({
-      pathname: '/beeline/channels',
-      params: { communityId: 'workspace-a', newDirectMessage: expect.any(String) },
-    });
   });
 
-  it('hides the Rooms plus and the settings glyph from an ordinary member and takes nothing else away', async () => {
-    workspaceRole.current = 'member';
+  it.each([['member', 'human'], ['owner', 'agent']] as const)('offers no New chat to a %s %s and takes nothing else away', async (role, kind) => {
+    workspaceRole.current = role;
+    viewer.kind = kind;
     await refreshWorkspaceViewer();
-    await act(async () => {
-      tree.update(<SidebarView key="member-viewer" />);
-    });
+    await act(async () => { tree.update(<SidebarView key={`${role}-${kind}`} />); });
     await settle();
-
-    expect(tree.root.findAllByProps({ testID: 'desktop-new-room' })).toHaveLength(0);
-    expect(tree.root.findAllByProps({ testID: 'workspace-menu-settings' })).toHaveLength(0);
-    expect(control('desktop-new-direct-message')).toBeDefined();
-    expect(tree.root.findByType(TrayGlyph).props.onPress).toBeDefined();
-    expect(control('workspace-members')).toBeDefined();
-    expect(control('profile-settings-navigation')).toBeDefined();
+    expect(header().props.onNew).toBeUndefined();
+    expect(control('side-tray')).toBeDefined();
+    expect(control('side-settings')).toBeDefined();
   });
 
-  it('does not offer New Room to an agent even with an elevated Workspace role', async () => {
-    viewer.kind = 'agent';
-    await refreshWorkspaceViewer();
-    await act(async () => {
-      tree.update(<SidebarView key="agent-viewer" />);
-    });
-    await settle();
-
-    expect(tree.root.findAllByProps({ testID: 'desktop-new-room' })).toHaveLength(0);
-    expect(tree.root.findAllByProps({ testID: 'workspace-menu-settings' })).toHaveLength(0);
-  });
-
-  it('keeps Tray and profile settings from appearing selected together', async () => {
-    route.pathname = '/beeline/tray';
-    await act(async () => {
-      tree.update(<SidebarView key="tray-route" />);
-    });
-    await settle();
-
-    expect(tree.root.findByType(TrayGlyph).props.filled).toBe(true);
-    expect(control('profile-settings-navigation').props.accessibilityState).toEqual({
-      selected: false,
-    });
-  });
-
-  it('keeps Tray unselected on the Members route', async () => {
-    route.pathname = '/beeline/members';
-    await act(async () => {
-      tree.update(<SidebarView key="members-route" />);
-    });
-    await settle();
-    expect(tree.root.findByType(TrayGlyph).props.filled).toBe(false);
-  });
-
-  it('exposes the active conversation to assistive technology', async () => {
+  it('highlights the open chat for assistive technology', async () => {
     route.pathname = '/beeline/chat/room-a';
-    await act(async () => {
-      tree.update(<SidebarView key="active-room-route" />);
-    });
+    await act(async () => { tree.update(<SidebarView key="active-room-route" />); });
     await settle();
-
-    expect(control('desktop-room-room-a').props.accessibilityState).toEqual({ selected: true });
+    expect(control('room-room-a').props['aria-current']).toBe('page');
+    expect(control('room-dm-a').props['aria-current']).toBeUndefined();
   });
 
-  it('opens the Room corner list from a tap on the corner glyph', () => {
-    act(() => control('desktop-room-room-a-corners').props.onPress({ stopPropagation: vi.fn() }));
+  it('nests the chat threads and opens one in the main pane', () => {
+    expect(control('thread-row-corner-a').props['aria-label']).toBe('Thread Fix fixture, working');
+    expect(control('thread-row-corner-theirs').props['aria-label']).toBe('Thread Their fix, waiting on a reply');
+    act(() => control('thread-row-corner-a').props.onPress());
     expect(routerPush).toHaveBeenCalledWith({
-      pathname: '/beeline/corners/[roomId]',
-      params: { roomId: 'room-a' },
+      pathname: '/beeline/chat/[channelId]',
+      params: { channelId: 'corner-a', parent: 'room-a', title: 'Fix fixture' },
     });
-    expect(createHumanCorner).not.toHaveBeenCalled();
-    expect(
-      tree.root.findAll((node: any) => node.props.testID === 'desktop-corner-corner-a'),
-    ).toHaveLength(0);
   });
 
-  it('opens a Room on a row click without opening its corner list', async () => {
-    act(() => control('desktop-room-room-a').props.onPress());
+  it('opens a Room on a row click', () => {
+    act(() => control('room-room-a').props.onPress());
     expect(routerNavigate).toHaveBeenCalledWith(
       { pathname: '/beeline/chat/[channelId]', params: { channelId: 'room-a' } },
       { dangerouslySingular: true },
@@ -884,94 +682,34 @@ describe('desktop Workspace navigation', () => {
     expect(routerPush).not.toHaveBeenCalled();
   });
 
-  it('opens a new corner from a long press on the Room corner glyph in the main pane', async () => {
-    await act(async () => {
-      await control('desktop-room-room-a-corners').props.onLongPress();
-    });
-
-    expect(createHumanCorner).toHaveBeenCalledOnce();
-    const [roomId, title] = createHumanCorner.mock.calls[0]!;
-    expect(roomId).toBe('room-a');
-    expect(title).toMatch(/-corner$/);
-    expect(routerPush).toHaveBeenCalledOnce();
-    expect(routerPush).toHaveBeenCalledWith({
-      pathname: '/beeline/chat/[channelId]',
-      params: { channelId: 'corner-new', parent: 'room-a', title },
-    });
-  });
-
-  it('offers an agent viewer no corner long press', async () => {
-    viewer.kind = 'agent';
-    await refreshWorkspaceViewer();
-    await act(async () => {
-      tree.update(<SidebarView key="agent-viewer" />);
-    });
-    await settle();
-    expect(control('desktop-room-room-a-corners').props.onLongPress).toBeUndefined();
+  it('joins a public chat with the viewer id and opens it', async () => {
+    const join = control('join-launch-room');
+    expect(join.props['aria-label']).toBe('Join #launch');
+    await act(async () => join.props.onPress());
+    expect(operation).toHaveBeenCalledWith('addRoomMember', { roomId: 'launch-room', memberId: 'viewer' });
+    expect(routerNavigate).toHaveBeenCalledWith(
+      { pathname: '/beeline/chat/[channelId]', params: { channelId: 'launch-room' } },
+      { dangerouslySingular: true },
+    );
   });
 
   it('closes without routing when the current Workspace is picked', () => {
-    act(() => tree.root.findByType('CommunitySwitcherTrigger').props.onPress());
-    act(() => tree.root.findByType('DesktopWorkspaceRail').props.onSelect('workspace-a'));
-
-    expect(tree.root.findByType('DesktopWorkspaceRail').props.open).toBe(false);
+    act(() => header().props.onWorkspace());
+    act(() => rail().props.onSelect('workspace-a'));
+    expect(rail().props.open).toBe(false);
     expect(routerPush).not.toHaveBeenCalled();
     expect(saveActiveCommunityId).not.toHaveBeenCalled();
   });
 
   it('uses a deep-linked Workspace URL as the persistent desktop sidebar authority', async () => {
     route.communityId = 'workspace-empty';
-    await act(async () => {
-      tree.update(<SidebarView key="deep-linked-workspace" />);
-    });
+    await act(async () => { tree.update(<SidebarView key="deep-linked-workspace" />); });
     await expectEmptyRoomList();
-
-    expect(tree.root.findByType('CommunitySwitcherTrigger').props.community.name).toBe(
-      'Empty Workspace',
-    );
     expect(chats).toHaveBeenCalledWith('workspace-empty');
     expect(saveActiveCommunityId).toHaveBeenCalledWith('viewer', 'workspace-empty');
   });
 });
 
-vi.mock('@/components/buzz/HullActionSheet', () => ({
-  HullActionSheetModal: (props: any) =>
-    props.visible ? React.createElement('Sheet', props, props.children) : null,
-  HullActionSheetRow: (props: any) => React.createElement('SheetRow', props),
-  HullActionSheetCancel: (props: any) => React.createElement('SheetCancel', props),
-}));
 vi.mock('@react-native-async-storage/async-storage', () => ({
   default: { getItem: async () => null, setItem: async () => undefined },
 }));
-
-
-describe('Room list search geometry', () => {
-  it.each([false, true])('matches the filter row height, type and inset (desktop=%s)', async (desktop) => {
-    const { RoomListToolbar } = await import('./buzz/RoomListToolbar');
-    const { StyleSheet } = await import('react-native');
-    const { completeTestTheme } = await import('../../../../tests/helpers/phone');
-    const hull = completeTestTheme(theme).buzz;
-    const tokens = hull.roomList;
-    const onQuery = vi.fn();
-    let toolbar: ReactTestRenderer;
-    act(() => { toolbar = create(<RoomListToolbar desktop={desktop} filter="all" onFilter={() => {}} query="" onQuery={onQuery} />); });
-    act(() => toolbar.root.findAllByProps({ testID: 'room-search-toggle' })[0].props.onPress());
-    const input = toolbar!.root.findAllByType('TextInput')[0];
-    expect(input.props.testID).toBe(desktop ? 'desktop-room-search' : 'room-search');
-    const style = StyleSheet.flatten(input.props.style);
-    let wrapper = input.parent!;
-    while (wrapper.type !== 'View') wrapper = wrapper.parent!;
-    const rule = StyleSheet.flatten(wrapper.props.style);
-    expect(rule.minHeight).toBe(44);
-    expect(rule.borderBottomWidth).toBe(1);
-    expect(style.flexGrow).toBe(1);
-    expect(style.fontSize).toBe(hull.type.meta.fontSize);
-    expect(style.lineHeight).toBe(hull.type.meta.lineHeight);
-    expect(style.fontFamily).toBe(hull.type.meta.fontFamily);
-    expect(style.paddingLeft ?? style.paddingHorizontal ?? style.padding ?? 0).toBe(tokens.edge);
-    expect(style.paddingRight ?? style.paddingHorizontal ?? style.padding ?? 0).toBe(tokens.searchEnd);
-    act(() => input.props.onChangeText('general'));
-    expect(onQuery).toHaveBeenCalledWith('general');
-    act(() => toolbar!.unmount());
-  });
-});

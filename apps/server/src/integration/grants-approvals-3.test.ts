@@ -104,10 +104,20 @@ const fixture = monolithFixture();
     expect(card.card.requester.pubkey).toBe(memberId);
     expect(card.card.grants.map((grant) => grant.status)).toEqual(['pending', 'pending']);
     expect(card.card.grants[1]!.expiresAt).toEqual(expect.any(Number));
-    // Resource prompts are private. Squire approval instead
-    // reaches its owner through the connector DM's direct-message push path.
+    // The card stays in the Room where the agent asked; it pushes only to
+    // the person who decides it.
     await pushes.runOnce();
-    expect(card.room_id).not.toBe(ROOM);
+    expect(card.room_id).toBe(ROOM);
+    expect(send).toHaveBeenCalledTimes(1);
+    expect(send.mock.calls[0]).toEqual([
+      'grant-owner-device-1234567890123456789012',
+      expect.objectContaining({ roomId: ROOM, recipientIdentityId: HUMAN, permission: true }),
+    ]);
+    // Another Room member reads the same card but cannot act on it.
+    const memberRoom = (await (
+      await fixture.request(`/v1/phone/rooms/${ROOM}`, 'GET', undefined, memberToken)
+    ).json()) as RoomView;
+    expect(memberRoom.messages.find((message) => message.grantRequest)?.grantRequest?.owner.pubkey).toBe(HUMAN);
     // The phone reads the card as a validated grantRequest message.
     const room = (await (await fixture.request(`/v1/phone/rooms/${card.room_id}`)).json()) as RoomView;
     expect(isRoomView(room)).toBe(true);
@@ -365,11 +375,24 @@ const fixture = monolithFixture();
   );
 
 
-  it('host emulator refusal stays visible to the agent without granting access', async () => {
+  it.each(['host', 'command'] as const)('%s refusal stays visible to the agent without granting access', async kind => {
+    await fixture.database.query(`UPDATE agents SET yolo_mode=false WHERE agent_id=$1`, [AGENT]);
     const ask = (await (await fixture.daemonOperation('requestAgentGrant', {
-      roomId: ROOM, kind: 'host', target: '127.0.0.1:5037',
-      reason: 'Test the Android app', purpose: 'Use an existing host emulator',
+      roomId: ROOM, kind, target: kind === 'host' ? '127.0.0.1:5037' : 'python3 checks.py',
+      ...(kind === 'command' ? { script: { path: 'checks.py', contents: 'print(1)\n',
+        sha256: createHash('sha256').update('print(1)\n').digest('hex'), bytes: 9 } } : {}),
+      reason: 'Test the app', purpose: 'Run the checks',
     })).json()) as { grantId: string };
+    if (kind === 'command') {
+      const tray = await (await fixture.operation('readNeedsYou', { workspaceId: WORKSPACE })).json() as {
+        items: Array<{ approval?: { actions?: Array<{ grantId?: string; label: string; decision?: string }> } }>;
+      };
+      const actions = tray.items.flatMap(item => item.approval?.actions ?? [])
+        .filter(action => action.grantId === ask.grantId);
+      expect(actions.map(action => [action.label, action.decision])).toEqual([
+        ['Always', 'always'], ['Once', 'once'], ['Deny', 'deny'],
+      ]);
+    }
     expect((await fixture.operation('decideAgentGrant', { grantId: ask.grantId, decision: 'deny' })).status).toBe(200);
     const live = await (await fixture.daemonOperation('listAgentGrants', { roomId: ROOM })).json();
     expect(live).toEqual({ grants: [] });
@@ -561,6 +584,9 @@ const fixture = monolithFixture();
     const repeated = await ask('python3 fix.py', { script: binding });
     expect(repeated).toMatchObject({ grantId: interpreter.grantId, status: 'approved', auto: true });
     expect(repeated.messageId).toBeUndefined();
+    // Added arguments are a different command and need their own approval.
+    expect(await ask('python3 fix.py --extra', { script: binding }))
+      .toMatchObject({ status: 'pending', auto: false });
     const changed = script + '# changed\n';
     expect(await ask('python3 fix.py', { script: { ...binding, contents: changed,
       bytes: Buffer.byteLength(changed), sha256: createHash('sha256').update(changed).digest('hex') } }))
@@ -584,9 +610,9 @@ const fixture = monolithFixture();
       'hash does not match its contents',
     );
 
-    // A script too long to read honestly is refused, never truncated.
+    // A long script is shown in full; no length limit refuses it.
     const long = Array.from({ length: 400 }, (_, index) => `line ${index}`).join('\n');
-    const refused = await fixture.daemonOperation('requestAgentGrant', {
+    const accepted = await fixture.daemonOperation('requestAgentGrant', {
       roomId: ROOM,
       kind: 'command',
       target: 'python3 huge.py',
@@ -598,8 +624,7 @@ const fixture = monolithFixture();
         contents: long,
       },
     });
-    expect(refused.status).toBe(400);
-    expect(((await refused.json()) as { error: string }).error).toContain('will not be truncated');
+    expect(accepted.status).toBe(200);
 
     // Corner automatic grants also remain silent.
     const cornerId = '44444444-4444-4444-8444-444444444444';

@@ -257,7 +257,7 @@ export async function ingestSubscriptionWebhook(db: SqlDatabase, id: string, raw
       subject: { kind: 'system', id: SYSTEM_IDENTITY_ID, name: systemMessage("subscription-webhooks.beeline") }, verb: systemMessage("subscription-webhooks.received"), object: systemMessage("subscription-webhooks.a-webhook-call"),
       kind: 'subscription-fired', wakes: [row.agent_id],
       payload: { source: 'webhook', event: 'webhook.called', body: payload },
-      subscriptionPrompt: row.prompt, subscriptionWorkflowSlug: row.workflow_slug ?? undefined });
+      subscriptionId: id, subscriptionPrompt: row.prompt, subscriptionWorkflowSlug: row.workflow_slug ?? undefined });
     await tx.query(`INSERT INTO subscription_webhook_deliveries(subscription_id,delivery_hash) VALUES($1,$2)`, [id, hash]);
     if (line.inserted) await tx.query(`UPDATE agent_subscriptions SET fired_count=fired_count+1,last_fired_at=now() WHERE id=$1`, [id]);
     return record('woke', 200, undefined, hash, line.id);

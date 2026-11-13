@@ -10,6 +10,7 @@ export interface MachineRequest {
   releaseId?: string;
   agentId?: string;
   sourceGeneration?: string;
+  force?: boolean;
 }
 
 export function machineControlPath(stateRoot: string): string {
@@ -152,7 +153,9 @@ export async function requestMachine(
         }
       });
       peer.once('error', (error: NodeJS.ErrnoException) => {
-        if (!['ENOENT', 'ECONNREFUSED', 'ECONNRESET'].includes(error.code ?? '')) finish(error);
+        // A status read probes the current helper. It must return absence so
+        // connect can start a new install before waiting for convergence.
+        if (request.operation === 'status' || !['ENOENT', 'ECONNREFUSED', 'ECONNRESET'].includes(error.code ?? '')) finish(error);
       });
       peer.once('close', () => {
         if (socket === peer) socket = undefined;

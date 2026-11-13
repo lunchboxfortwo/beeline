@@ -18,6 +18,7 @@ export const REVIEW_LOCKED_OPERATIONS = new Set<keyof PhoneOperationMap>([
 
 export const PHONE_OPERATION_NAMES = new Set<keyof PhoneOperationMap>([
   'readRoomTools',
+  'resolveChatLinks',
   'readMediaMetadata',
   'readMediaLink',
   'readMediaPlayback',
@@ -87,6 +88,7 @@ export const PHONE_OPERATION_NAMES = new Set<keyof PhoneOperationMap>([
   'removeRoomMember',
   'resolveDirectMessage',
   'createInvite',
+  'inviteByEmail',
   'resolveInvite',
   'redeemInvite',
   'createAgentPairingCode',

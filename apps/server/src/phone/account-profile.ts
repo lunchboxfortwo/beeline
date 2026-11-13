@@ -1,4 +1,5 @@
-import { type PhoneIdentityRow as IdentityRow } from '../phone-identity.js';
+import { assetUrl, type PhoneIdentityRow as IdentityRow } from '../phone-identity.js';
+import { storePersonAvatar } from '../durable-avatar.js';
 import { withdrawMergeApprovalsBy } from '../corner-merge-approval.js';
 import { cornerOwnerSql } from '../corner-worker.js';
 import { collapseTombstonedCornerHolds } from '../corner-holds.js';
@@ -334,6 +335,18 @@ import { phoneManagedIdentity } from './repositories.js';
         if (['channel', 'system', 'play-review', 'review', 'scheduler'].includes(input.handle))
           throw new Error('invalid reserved handle');
       }
+      const avatar =
+        input.avatar === undefined
+          ? null
+          : await storePersonAvatar(
+              database,
+              viewerId,
+              input.avatar,
+              ctx.publicOrigin,
+              ctx.objects
+                ? (id, ownerId) => ctx.objects!.readOwnedBytes(ownerId, id, database)
+                : undefined,
+            );
       const updated = await database.query<IdentityRow>(
         `WITH target AS MATERIALIZED (SELECT id FROM identities WHERE id=$1 FOR UPDATE),
          claimed AS MATERIALIZED (
@@ -345,7 +358,7 @@ import { phoneManagedIdentity } from './repositories.js';
              updated_at=now()
          FROM claimed WHERE id=$1 AND ($3::text IS NULL OR claimed.handle=$3)
          RETURNING id,kind,name,identities.handle,avatar`,
-        [viewerId, input.name ?? null, input.handle ?? null, input.avatar ?? null],
+        [viewerId, input.name ?? null, input.handle ?? null, avatar],
       );
       const profile = updated.rows[0];
       if (!profile) throw new Error(input.handle===undefined?'identity not found':'managed handle is already claimed');
@@ -353,7 +366,13 @@ import { phoneManagedIdentity } from './repositories.js';
         personId: profile.id,
         name: profile.name,
         ...(profile.handle ? { handle: profile.handle } : {}),
-        ...(profile.avatar ? { avatar: profile.avatar } : {}),
+        ...(profile.avatar
+          ? {
+              avatar: profile.avatar.startsWith('/v1/person-avatars/')
+                ? assetUrl(profile.avatar, ctx.publicOrigin)
+                : profile.avatar,
+            }
+          : {}),
       };
     });
   }

@@ -34,7 +34,7 @@ The inventory below includes every production query call site referencing physic
 | [feedback.ts](../apps/server/src/feedback.ts) | `reportMessageIssue`, `sendFixedMessage` | — |
 | [first-room.ts](../apps/server/src/first-room.ts) | `firstAccessibleRoomId` | — |
 | [free-agent-model-proxy.ts](../apps/server/src/free-agent-model-proxy.ts) | `completeStarterBanter` | — |
-| [free-agent-warning.ts](../apps/server/src/free-agent-warning.ts) | `warnFreeAgentOwner` | — |
+| [free-agent-warning.ts](../apps/server/src/free-agent-warning.ts) | `recordAgentConnectedAfterNudge`, `recordFreeAgentGuideStarted` | — |
 | [free-agents.ts](../apps/server/src/free-agents.ts) | `addFreeAgentToWorkspace`, `createFreeAgentInWorkspace`, `wakeFreeAgentsForLeaves` | `createFreeAgentInWorkspace`, `createInWorkspace` |
 | [github-operations.ts](../apps/server/src/github-operations.ts) | `processCornerEvent`, `processRepositoryEvent`, `readPrChecksStatus` | — |
 | [github-star-prompt.ts](../apps/server/src/github-star-prompt.ts) | `readStarPrompt` | — |

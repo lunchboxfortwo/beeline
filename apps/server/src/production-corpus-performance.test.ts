@@ -1,8 +1,17 @@
 import type { QueryResultRow } from 'pg';
 import { expect, it } from 'vitest';
 import type { QueryResult, SqlDatabase } from './database.js';
-import { explainHotRead } from './production-corpus-performance.js';
+import { explainHotRead, savedCorpusPlan } from './production-corpus-performance.js';
 import { PgliteDatabase } from './test-support.js';
+
+it('writes a corpus plan compactly without changing the parsed content', () => {
+  const result = { name: 'room-list', samples: [{ plan: { Plan: { 'Node Type': 'Index Scan' } }, wallMs: 1.25 }] };
+  const compact = savedCorpusPlan(result);
+  const pretty = `${JSON.stringify(result, null, 2)}\n`;
+  expect(JSON.parse(compact)).toEqual(result);
+  expect(compact).toBe(`${JSON.stringify(result)}\n`);
+  expect(Buffer.byteLength(compact)).toBeLessThan(Buffer.byteLength(pretty));
+});
 
 it('times cached prepared plans after PostgreSQL finishes its automatic plan selection', async () => {
   const database = new PgliteDatabase();

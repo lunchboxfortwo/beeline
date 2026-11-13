@@ -50,8 +50,9 @@ export const W = '11111111-1111-4111-8111-111111111111',
 
 export let db: PgliteDatabase, phone: PhoneService, daemon: DaemonService;
 
+/** Waiting work only; a running turn is listed with its generation for its helper to resume. */
 export const commands = (agentId = A, roomId = R) =>
-  daemon.execute('getAgentCommands', { roomId }, agentId).then((r) => r.commands);
+  daemon.execute('getAgentCommands', { roomId }, agentId).then((r) => r.commands.filter(command => !command.generationId));
 
 export async function claim(c: AgentCommand, generationId = 'g1') {
   await daemon.execute(

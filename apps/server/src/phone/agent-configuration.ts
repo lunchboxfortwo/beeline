@@ -1,3 +1,4 @@
+import { agentInvitationPickerGuide } from '@beeline/api-contract/agent-invitation-guide';
 import { systemMessage } from '@beeline/api-contract/system-message-catalog';
 import { recordFreeAgentGuideStarted } from '../free-agent-warning.js';
 import { beginAgentSignInCards, AGENT_SIGN_IN_NO_ANSWER_MESSAGE, completeAgentSignInCard } from '../agent-sign-in.js';
@@ -26,7 +27,7 @@ import { effortCatalogAxis } from './read-projection.js';
       [hash(code), input.workspaceId, viewerId, new Date(expiresAt)],
     );
     await recordFreeAgentGuideStarted(ctx.database, viewerId, input.workspaceId);
-    return { code, expiresAt: Math.floor(expiresAt / 1000) };
+    return { code, expiresAt: Math.floor(expiresAt / 1000), invitationGuide: agentInvitationPickerGuide() };
   }
 
   export async function phoneUpdateAgentSoul(ctx: PhoneContext, input: Input<'updateAgentSoul'>, viewerId: string) {

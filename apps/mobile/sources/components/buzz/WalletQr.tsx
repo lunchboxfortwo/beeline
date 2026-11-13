@@ -1,7 +1,6 @@
 import React, { useEffect, useState } from 'react';
-import { View } from 'react-native';
-import { StyleSheet } from 'react-native-unistyles';
 import QRCode from 'qrcode';
+import { QrTiles } from '@/ui/grammar';
 
 /** One QR module, in points. The quiet zone around the code is one module. */
 const QR_MODULE = 6;
@@ -28,42 +27,14 @@ export function WalletQr({ payload, size = 180 }: { payload: string; size?: numb
   }, [payload]);
 
   if (!modules) {
-    return (
-      <View
-        style={[
-          styles.placeholder,
-          { backgroundColor: '#ffffff', height: size, width: size },
-        ]}
-        testID="wallet-qr-placeholder"
-      />
-    );
+    return <QrTiles count={0} module={QR_MODULE} size={size} testID="wallet-qr-placeholder" />;
   }
   return (
-    <View style={[styles.qr, { backgroundColor: '#ffffff', padding: QR_MODULE }]} testID="wallet-qr">
-      {Array.from({ length: modules.size }, (_, row) => (
-        <View key={row} style={styles.qrRow}>
-          {Array.from({ length: modules.size }, (_, col) => (
-            <View
-              key={col}
-              style={[
-                styles.tile,
-                { backgroundColor: modules.get(row, col) ? '#171310' : '#ffffff' },
-              ]}
-            />
-          ))}
-        </View>
-      ))}
-    </View>
+    <QrTiles
+      count={modules.size}
+      dark={(row, col) => Boolean(modules.get(row, col))}
+      module={QR_MODULE}
+      testID="wallet-qr"
+    />
   );
 }
-
-const styles = StyleSheet.create((theme) => ({
-  qr: { borderRadius: 3 },
-  qrRow: { flexDirection: 'row' },
-  tile: { height: QR_MODULE, width: QR_MODULE },
-    placeholder: {
-      borderColor: theme.buzz.textMuted,
-      borderRadius: 3,
-      borderWidth: StyleSheet.hairlineWidth,
-    },
-}));

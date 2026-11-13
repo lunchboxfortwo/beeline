@@ -11,7 +11,9 @@ export const UNREAD_COUNT_CAP = 99;
 export function visibleMessageSql(alias: string): string {
   // Keep the source-free Room record only when no other conversation has the
   // call site. Legacy servers may already have settled either opening card.
+  // A schedule's run is kept in the routine's history, not the chat.
   return `${hiddenWakeCardSql(alias)}
+      AND ${alias}.system_event->>'kind' IS DISTINCT FROM 'schedule-ran'
       AND NOT ((${alias}.card_type IS NOT DISTINCT FROM 'github-event'
           OR (${alias}.card_type IS NOT DISTINCT FROM 'daemon-fact'
             AND COALESCE(${alias}.card->>'type','') IN ('corner-open','corner-complete')))

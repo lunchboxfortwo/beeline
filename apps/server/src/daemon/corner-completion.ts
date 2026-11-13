@@ -1,8 +1,6 @@
-import { systemMessage } from '@beeline/api-contract/system-message-catalog';
 import { cornerReviewerSql } from '../corner-reviewer.js';
 import { cornerImplementerSql } from '../corner-worker.js';
-import { lockCornerLifecycle } from '../corner-lifecycle.js';
-import { systemLine, GITHUB_SUBJECT } from '../system-line.js';
+import { advanceCorner, lockCornerLifecycle } from '../corner-lifecycle.js';
 import { cornerLifecycleSql, writeCornerGithubCache } from '../corner-github-cache.js';
 import type { DaemonContext } from './context.js';
 import { Output } from './values.js';
@@ -104,7 +102,6 @@ import { Output } from './values.js';
         },
       };
       await writeCornerGithubCache(db, cornerId, lifecycle);
-      await systemLine(db, { roomId: cornerId, authorId: workerAgentId,
-        subject: GITHUB_SUBJECT, verb: systemMessage("daemon-service.passed-checks-on"), object: systemMessage("daemon-service.this-zero-check-pull-request"), kind: 'check-passed' });
+      await advanceCorner(db, cornerId, { kind: 'reconcile' });
     });
   }

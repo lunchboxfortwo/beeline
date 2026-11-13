@@ -11,7 +11,8 @@ import Animated, {
   withTiming,
 } from 'react-native-reanimated';
 import beelineMark from '@/buzz/beeline-mark.json';
-import { useUnistyles } from 'react-native-unistyles';
+import { useThemeName } from 'tamagui';
+import { beelineThemes } from '@/buzz/groknight';
 
 const AnimatedPath = Animated.createAnimatedComponent(Path);
 
@@ -23,7 +24,7 @@ const MARK_TRANSFORM = beelineMark.transform;
 const MARK_FILL_RULE = beelineMark.fillRule as 'evenodd' | 'nonzero';
 
 export function BeelineMark({ size = 112, shimmer = false }: { size?: number; shimmer?: boolean }) {
-  const { theme } = useUnistyles();
+  const tokens = beelineThemes[useThemeName().startsWith('light') ? 'bone' : 'obsidian'];
   const reducedMotion = useReducedMotion();
   const highlight = useSharedValue(0);
 
@@ -62,12 +63,12 @@ export function BeelineMark({ size = 112, shimmer = false }: { size?: number; sh
         <Path
           d={MARK_PATH}
           fillRule={MARK_FILL_RULE}
-          fill={theme.buzz.brandMark}
+          fill={tokens.brandMark}
         />
         <AnimatedPath
           d={MARK_PATH}
           fillRule={MARK_FILL_RULE}
-          fill={theme.buzz.textPrimary}
+          fill={tokens.textPrimary}
           animatedProps={highlightProps}
         />
       </G>

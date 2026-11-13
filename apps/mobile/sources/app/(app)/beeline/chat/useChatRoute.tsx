@@ -1,7 +1,6 @@
 import { useDesktopLayout } from '@/buzz/desktop-layout-state';
 import React, { useEffect, useState, useRef, useMemo } from 'react';
 import { Platform } from 'react-native';
-import { useUnistyles } from 'react-native-unistyles';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { useLocalSearchParams, useNavigation } from 'expo-router';
 import { RoomSendPreview } from '@/buzz/room-send-list';
@@ -37,8 +36,6 @@ export function useChatRoute([
   isDesktop: boolean,
   readOnlyFooterInset: { marginBottom: number; paddingBottom?: undefined; } | { paddingBottom: number; marginBottom?: undefined; },
 ] {
-
-  const { theme } = useUnistyles();
 
   const isDesktop = useIsDesktop();
 
@@ -112,10 +109,10 @@ export function useChatRoute([
 
   const insets = useSafeAreaInsets();
 
-  const readOnlyFooterInset =
+  const readOnlyFooterInset = useMemo(() =>
     Platform.OS === 'android'
       ? { marginBottom: insets.bottom }
-      : { paddingBottom: Math.max(insets.bottom, 8) };
+      : { paddingBottom: Math.max(insets.bottom, 8) }, [insets.bottom]);
 
   const navigation = useNavigation();
   return [

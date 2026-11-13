@@ -4,38 +4,23 @@ import {
 } from './test-support-corner-review-dispatch.test-support.js';
 
 describe('revision 4 simple corner review model', () => {
-  it('AC-2: retries one no-verdict review then fails to the implementer without a third request', async () => {
+  it('Reproduction REVIEW-EMPTY: ends an empty green review once silently without retry', async () => {
     await rootFixture.phone.execute('updateRoom', {roomId:R,reviewerAgentId:B},H);
     await greenHead(104,'4'.repeat(40));
     const [first] = await commands(B,C);
-    expect(first?.reason).toBe('corner_review_dispatch');
     await claim(first!);
     await rootFixture.daemon.execute('postAgentTurnReceipt', {
       roomId:C,requestId:first!.turnRequestId,generationId:'g1',status:'complete',
     },B);
-    await reconcileConfiguredCornerReviewers(rootFixture.db,R);
-    const [second] = await commands(B,C);
-    expect(second?.reason).toBe('corner_review_dispatch');
-    expect(second?.id).not.toBe(first!.id);
-    expect(await commands(A,C)).toEqual([]);
-    await claim(second!,'g2');
-    await rootFixture.daemon.execute('postAgentTurnReceipt', {
-      roomId:C,requestId:second!.turnRequestId,generationId:'g2',status:'complete',
-    },B);
-    await reconcileConfiguredCornerReviewers(rootFixture.db,R);
-    const fail = (await commands(A,C)).filter(command => command.reason === 'corner_review_needed');
-    expect(fail).toHaveLength(1);
-    expect(fail[0]!.source.body).toContain('reviewer gave no verdict twice');
     for(let replay=0;replay<3;replay++) await reconcileConfiguredCornerReviewers(rootFixture.db,R);
     expect(await commands(B,C)).toEqual([]);
-    expect((await commands(A,C)).filter(command => command.reason === 'corner_review_needed')).toHaveLength(1);
-    await claim(fail[0]!);
-    await greenHead(104,'4'.repeat(40));
-    await result(fail[0]!,'The failed review handoff is complete; the head is unchanged.');
-    for(let event=0;event<3;event++) await reconcileConfiguredCornerReviewers(rootFixture.db,R);
-    expect(await commands(B,C)).toEqual([]);
+    const lines = (await rootFixture.db.query<{text:string}>(
+      `SELECT text FROM messages WHERE room_id=$1`,[C])).rows;
+    expect(lines.some(line=>line.text.includes('reviewer gave no verdict'))).toBe(false);
+    expect((await rootFixture.db.query('SELECT status FROM agent_turns WHERE request_id=$1',[first!.turnRequestId])).rows)
+      .toEqual([{status:'complete'}]);
     expect((await rootFixture.db.query(`SELECT id FROM agent_commands WHERE room_id=$1 AND agent_id=$2
-      AND reason='corner_review_dispatch'`,[C,B])).rowCount).toBe(2);
+      AND reason='corner_review_dispatch'`,[C,B])).rowCount).toBe(1);
   });
 
   it('C-2: a completed FAIL cannot veto a new green event on the same head', async () => {
@@ -99,4 +84,37 @@ describe('revision 4 simple corner review model', () => {
     expect((await commands(B,C)).map(command=>command.id)).toEqual(next.map(command=>command.id));
   });
 
+});
+
+it('Reproduction REVIEW-TARGET: a new head wake uses the newest brief and reported verdict', async () => {
+  await rootFixture.phone.execute('updateRoom',{roomId:R,reviewerAgentId:B},H);
+  await greenHead(104,'1'.repeat(40));
+  const [review]=await commands(B,C);
+  await claim(review!);
+  await rootFixture.daemon.execute('report',{roomId:C,requestId:review!.turnRequestId,generationId:'g1',
+    status:'failed',text:'FAIL: newest reported evidence'},B);
+  await rootFixture.daemon.execute('postAgentTurnReceipt',{roomId:C,requestId:review!.turnRequestId,generationId:'g1',status:'complete'},B);
+  await rootFixture.db.query(`INSERT INTO corner_brief_revisions(corner_id,revision,content,spec,author_id,source_room_id)
+    VALUES($1,2,'New brief','New brief',$2,$3)`,[C,A,R]);
+  await greenHead(104,'2'.repeat(40));
+  const [next]=await commands(B,C);
+  expect(next?.source.body).toContain('Review against brief revision 2');
+  expect(next?.source.body).toContain('2'.repeat(40));
+  expect(next?.source.body).toContain('FAIL: newest reported evidence');
+});
+
+it('Reproduction REVIEW-ORDER: ordering the listed reviewer works and an archived corner says archived', async () => {
+  await rootFixture.phone.execute('updateRoom',{roomId:R,reviewerAgentId:B},H);
+  const current=await createAgentCommand(rootFixture.db,{roomId:C,agentId:A,sourceMessageId:null,reason:'order',
+    privatePayload:{kind:'order',authorId:H,fromRoomId:R,text:'Implement the fix'}});
+  const worker=(await commands(A,C)).find(c=>c.id===current!.id)!;
+  await claim(worker);
+  const args={roomId:C,requestId:worker.turnRequestId,generationId:'g1',address:C,agent:'goosy',text:'Review this fix'};
+  await rootFixture.daemon.execute('order',args,A);
+  expect((await commands(B,C)).some(c=>c.reason==='order')).toBe(true);
+  // Use a reachable archived sibling; the source turn remains live.
+  const archived='44444444-4444-4444-8444-444444444444';
+  await rootFixture.db.query(`INSERT INTO rooms(id,workspace_id,parent_id,name,archived_at)
+    VALUES($1,$2,$3,'Archived corner',now())`,[archived,W,R]);
+  await expect(rootFixture.daemon.execute('order',{...args,address:archived},A)).rejects.toThrow('archived');
 });

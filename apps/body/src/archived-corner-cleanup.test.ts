@@ -1,7 +1,10 @@
 import { chmod, lstat, mkdir, mkdtemp, readdir, rm, writeFile } from 'node:fs/promises';
+import { spawnSync } from 'node:child_process';
 import { resolve } from 'node:path';
 import { afterEach, expect, it, vi } from 'vitest';
 import { removeArchivedCornerData } from './archived-corner-cleanup.js';
+import { wrapAgentCommand } from './bwrap-sandbox.js';
+import { DEPENDENCY_LAYERS_DIR, dependencyLayers } from './dependency-generation.js';
 import { pruneArchivedCheckoutStorage, rememberStorageOwner } from './storage-owners.js';
 
 vi.mock('node:fs/promises', async importOriginal => {
@@ -74,4 +77,31 @@ it('continues the archived checkout sweep after an unreadable leftover', async (
   expect(warn.mock.calls[0]?.[1]).toMatchObject({ code: 'EACCES' });
   await expect(lstat(healthy)).rejects.toMatchObject({ code: 'ENOENT' });
   expect((await lstat(blocked)).isDirectory()).toBe(true);
+});
+
+it('deletes a private repository whose dependency layer was really mounted', async ({ skip }) => {
+  const root = await mkdtemp(resolve(process.env.XDG_STATE_HOME!, 'archive-layer-'));
+  roots.push(root);
+  const itemId = 'a'.repeat(64);
+  const checkout = resolve(root, 'beeline/corners', itemId);
+  const repository = resolve(root, 'beeline/repositories', `agent-corner-${itemId}.git`);
+  const tree = resolve(checkout, 'node_modules');
+  await mkdir(resolve(tree, 'plugin/build'), { recursive: true });
+  await writeFile(resolve(tree, 'plugin/build/old'), 'shared');
+  const wrapped = wrapAgentCommand({
+    bwrapPath: '/usr/bin/bwrap',
+    spec: { mode: 'edit', cwd: checkout, worktreePath: checkout, protectedPaths: [],
+      dependencyLayers: await dependencyLayers(resolve(repository, DEPENDENCY_LAYERS_DIR), [tree]) },
+    command: 'sh', // Deleting a shared folder (as a Gradle clean does) leaves a whiteout under work/work.
+    args: ['-c', 'rm -r node_modules/plugin/build && echo private > node_modules/plugin/new'],
+  });
+  const run = spawnSync(wrapped.command, wrapped.args, { encoding: 'utf8' });
+  // ubuntu-26.04 CI runners refuse the unprivileged overlay mount.
+  if (run.status !== 0 && /permission denied|No such file/.test(run.stderr)) skip();
+  expect(run.status, run.stderr).toBe(0);
+  const warn = vi.spyOn(console, 'warn');
+
+  expect(await removeArchivedCornerData(root, itemId, checkout)).toHaveLength(2);
+  expect(warn).not.toHaveBeenCalled();
+  await expect(lstat(repository)).rejects.toMatchObject({ code: 'ENOENT' });
 });

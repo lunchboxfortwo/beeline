@@ -49,9 +49,22 @@ describe('command-owned coherent activation context',()=>{
     expect(await fenceCommandActivationEnqueue(db,fresh,delivered)).toBe(false);expect(delivered).toHaveBeenCalledTimes(1);
     await db.query(`UPDATE memberships SET removed_at=NULL WHERE room_id=$1 AND identity_id=$2`,[room,agent]);
   });
-  it('refuses stale command/connection identity, expiry, and setup writes in the read-only cut',async()=>{
+  it('activates the claimed command after a reconnect, with no connection row to read or lock',async()=>{
+    // A reconnect replaced the socket; then the row vanished entirely. Neither
+    // the read nor the enqueue fence touches agent_connections.
+    await db.query(`UPDATE agent_connections SET connection_id='reconnected',epoch=epoch+1 WHERE agent_id=$1`,[agent]);
+    const reconnected=await daemon.readCommandActivation({...input,source:{connectionId:'reconnected',epoch:2}},agent);
+    await db.query(`DELETE FROM agent_connections WHERE agent_id=$1`,[agent]);
+    try{
+      const delivered=vi.fn();
+      expect(await fenceCommandActivationEnqueue(db,reconnected,delivered)).toBe(true);
+      expect(await daemon.readCommandActivation(input,agent)).toMatchObject({commandId:input.commandId});
+    }finally{
+      await db.query(`INSERT INTO agent_connections(agent_id,epoch,connection_id,instance_id) VALUES($1,1,'activation-source','proof')`,[agent]);
+    }
+  });
+  it('refuses a stale command generation, expiry, and setup writes in the read-only cut',async()=>{
     await expect(daemon.readCommandActivation({...input,generationId:'stale'},agent)).rejects.toThrow('command ownership');
-    await expect(daemon.readCommandActivation({...input,source:{connectionId:'stale',epoch:1}},agent)).rejects.toThrow('source ownership');
     const snapshot=await daemon.readCommandActivation(input,agent),delivered=vi.fn();
     expect(await fenceCommandActivationEnqueue(db,{...snapshot,validUntil:snapshot.capturedAt-1},delivered)).toBe(false);
     await db.query(`UPDATE agent_commands SET root_source_message_id='changed-source' WHERE id=$1`,[input.commandId]);

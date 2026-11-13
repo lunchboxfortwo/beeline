@@ -640,9 +640,7 @@ const scope1 = fixtureScope1();
     });
     expect(source).toHaveBeenCalledTimes(2); // Two explicit independent actions; neither is redispatched.
     const pending = (await scope1.notices()).filter(row => row.card.status === 'pending');
-    expect(pending).toHaveLength(2);
-    expect(pending.every(row => !row.card.txUrl && row.card.reason?.includes('UNKNOWN'))).toBe(true);
-    expect(pending.every(row => row.direct_participants.includes(HUMAN))).toBe(true);
+    expect(pending).toEqual([]);
     expect((await scope1.database.query(`SELECT id FROM wallet_transactions WHERE identity_id=$1 AND direction='out'`, [HUMAN])).rows).toHaveLength(0);
   });
 
@@ -706,7 +704,7 @@ const scope1 = fixtureScope1();
   });
 
 
-  it('failed phone sends, agent sends and swaps, delegation and venue refusals all reach @System', async () => {
+  it('keeps real reverted transactions and posts no notices for failed or refused unsubmitted sends', async () => {
     const wallet = await scope1.createdWallet();
     scope1.fundChain(wallet.address, 'base', 'usdc', 500);
     const pay = { chain: 'base', asset: 'usdc', amount: '2', to: `0x${'7'.repeat(40)}` };
@@ -722,10 +720,10 @@ const scope1 = fixtureScope1();
     })).body.outcome).toBe('failed');
     expect((await scope1.daemonOperation('walletPay', { ...pay, chain: 'arbitrum', to: BRIDGE2, agentId: HELPER })).body.outcome).toBe('failed');
     const rows = (await scope1.notices()).filter(row => row.card.status === 'failed');
-    expect(rows).toHaveLength(5);
+    expect(rows).toHaveLength(1);
     expect(rows.every(row => row.author_id === SYSTEM_IDENTITY_ID && row.card.reason)).toBe(true);
     expect(rows.find(row => row.card.operation === 'swap')!.card.txUrl).toContain(hash);
-    expect(rows.find(row => row.card.counterparty === BRIDGE2)!.text).toContain(BRIDGE2);
+    expect(rows.find(row => row.card.counterparty === BRIDGE2)).toBeUndefined();
   });
 
 

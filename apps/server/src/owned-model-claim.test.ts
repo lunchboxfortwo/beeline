@@ -21,7 +21,7 @@ describe('actual owned-model claim transaction and secret boundary', () => {
   });
   afterEach(async () => { vi.unstubAllEnvs(); await f.db.close(); });
   const input = () => ({ roomId: MODEL_ROOM, commandId, generationId });
-  const capability = async () => (await daemon.negotiateOwnedModel(MODEL_AGENT, MODEL_SOURCE, true)).capability!;
+  const capability = async () => (await daemon.negotiateOwnedModel(MODEL_AGENT, true)).capability!;
 
   it('atomically issues the current claimed generation credential and keeps it out of activation, journal and live events', async () => {
     vi.stubEnv('BEELINE_NETWORK_ROUTER_V1', '1');
@@ -29,7 +29,7 @@ describe('actual owned-model claim transaction and secret boundary', () => {
     const selected = await capability(), result = await daemon.execute('claimAgentCommand', input(), MODEL_AGENT, MODEL_SOURCE, selected);
     expect(result.modelCredential).toMatchObject({ v: 1 }); expect(result.modelCredential?.expiresAt).toBeNull();
     const bearer = result.modelCredential!.token, actor = await f.credentials.authenticate(f.db, bearer);
-    expect(actor.binding).toMatchObject({ commandId, generationId, agentId: MODEL_AGENT, connectionId: MODEL_SOURCE.connectionId, connectionEpoch: MODEL_SOURCE.epoch });
+    expect(actor.binding).toMatchObject({ commandId, generationId, agentId: MODEL_AGENT, connectionId: null, connectionEpoch: null, instanceId: null });
     expect((await f.db.query('SELECT command_id FROM owned_model_credentials WHERE command_id=$1', [commandId])).rows).toEqual([{ command_id: commandId }]);
     const before = (await f.db.query('SELECT xmin::text version,* FROM owned_model_credentials WHERE command_id=$1', [commandId])).rows;
     expect((await daemon.execute('claimAgentCommand', input(), MODEL_AGENT, MODEL_SOURCE, selected)).modelCredential).toEqual(result.modelCredential);
@@ -41,12 +41,11 @@ describe('actual owned-model claim transaction and secret boundary', () => {
     publish.mockRestore();
   });
 
-  it('refuses ownerless helper claims even with client-supplied model metadata', async () => {
-    await expect(daemon.execute('claimAgentCommand', { ...input(), ownedModelV1: true,
-      modelCredential: { token: 'forged' } } as never, MODEL_AGENT)).rejects.toThrow('helper claim requires its machine connection owner');
+  it('never mints a model credential from client-supplied model metadata', async () => {
+    const claimed = await daemon.execute('claimAgentCommand', { ...input(), ownedModelV1: true,
+      modelCredential: { token: 'forged' } } as never, MODEL_AGENT);
+    expect(claimed).not.toHaveProperty('modelCredential');
     expect((await f.db.query('SELECT * FROM owned_model_credentials WHERE command_id=$1', [commandId])).rowCount).toBe(0);
-    expect((await f.db.query('SELECT state,turn_owner_connection_id FROM agent_commands WHERE id=$1', [commandId])).rows)
-      .toEqual([{ state:'pending',turn_owner_connection_id:null }]);
   });
 
   it('refuses source-only or forged capability claims and rolls the real claim/working-turn creation back without events', async () => {

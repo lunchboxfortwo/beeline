@@ -239,11 +239,13 @@ async function cornerFixture(prefix: string, implementerAgentId: (self: string) 
     transport: { kind: 'monolith', baseUrl: 'https://server.example', daemonToken: 'fixture' } } as m35_AgentRuntimeRecord;
   const remote = m35_resolve(root, 'remote.git'), roomCheckout = m35_resolve(root, 'room');
   const posted: string[] = [];
+  let minted = 0;
   const execute = m35_vi.fn(async (name: string, input: { text?: string }) => {
     if (name === 'getCornerRestoreState') return { cornerId: 'corner', objective: 'Fix it', closeRequested: false,
       implementerAgentId: implementerAgentId(identity.publicKey), brief: { repositoryWork: true } };
     if (name === 'getRoomRepositoryState') return { resolution: 'repository', key: 'owner/repo', remote: `file://${remote}` };
-    if (name === 'getRoomGitHubToken') return { token: 'fixture', expiresAt: Date.now() + 60_000 };
+    // Installation tokens are short-lived: each lookup mints the next one.
+    if (name === 'getRoomGitHubToken') return { token: `token-${++minted}`, expiresAt: Date.now() + 5_000 };
     if (name === 'postRoomMessage') posted.push(input.text!);
     return {};
   });
@@ -256,8 +258,10 @@ async function cornerFixture(prefix: string, implementerAgentId: (self: string) 
     return new Promise<void>(done => signal.addEventListener('abort', () => done(), { once: true }));
   });
   const internal = coordinator as unknown as { startCorner(input: { cornerId: string; parentRoomId: string }): Promise<void>;
-    materializeRoomCheckout(): Promise<string>; grantRunnerEndpoint(): Promise<undefined> };
+    materializeRoomCheckout(): Promise<string>; materializeCornerWorktree(input: { token: string }): Promise<unknown>;
+    grantRunnerEndpoint(): Promise<undefined> };
   m35_vi.spyOn(internal, 'materializeRoomCheckout').mockResolvedValue(roomCheckout);
+  const checkouts = m35_vi.spyOn(internal, 'materializeCornerWorktree');
   m35_vi.spyOn(internal, 'grantRunnerEndpoint').mockResolvedValue(undefined);
   await exec('git', ['init', '-b', 'main', roomCheckout]);
   await m35_writeFile(m35_resolve(roomCheckout, 'file'), 'source');
@@ -272,7 +276,7 @@ async function cornerFixture(prefix: string, implementerAgentId: (self: string) 
     options: { worktreePath: string; repository: { readOnly: boolean } };
   };
   return {
-    root, remote, roomCheckout, identity, turn, posted,
+    root, remote, roomCheckout, identity, turn, posted, checkouts,
     own: m35_agentCornerCheckoutPaths(root, 'corner', identity.publicKey),
     close: async () => { run.mockRestore(); await coordinator.shutdown(); await m35_rm(root, { recursive: true, force: true }); },
   };

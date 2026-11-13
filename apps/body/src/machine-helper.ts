@@ -18,7 +18,6 @@ import {
 } from './agent-runtime.js';
 import { daemonFailurePath, settleDaemonStartFailure } from './daemon-failure.js';
 import { helperStatusPath, type AgentSlotState, type HelperStatusFile } from './helper-status.js';
-import { journalInterruptedTurns } from './force-update-journal.js';
 import {
   HelperLifecycle,
   type AgentExitReason,
@@ -308,7 +307,7 @@ async function serveMachineHelper(
     // Close the machine socket before agent teardown can unregister the last agent.
     if (reason === 'update') for (const link of links.values()) link.stop(true);
     lifecycle.stop(reason);
-    // Intake is already quiesced and interrupted turns are journaled. Once
+    // Intake is already quiesced; interrupted turns stay claimed for the next helper. Once
     // the machine link closes, exit in this same turn: local broker clients,
     // harness cleanup, or pending discovery must never gate the native restart.
     // The service manager owns the exiting process and its remaining children.
@@ -328,11 +327,7 @@ async function serveMachineHelper(
         if (signal.aborted || controller.signal.aborted) return;
         if (!quiesceHostedAgents([...hosted.values()], interrupted))
           throw new Error('helper could not close intake for release handoff');
-        if (interrupted) {
-          for (const agent of hosted.values())
-            journalInterruptedTurns(agent.runtimeDir, agent.core.interruptedTurns());
-          for (const agent of hosted.values()) agent.core.interruptForServerMinimum();
-        }
+        if (interrupted) for (const agent of hosted.values()) agent.core.interruptForServerMinimum();
         stoppingStatus = `loaded_release=${loadedRelease}; desired_release=${desiredRelease}; handoff ${interrupted ? 'interrupted' : 'idle'}`;
         restartHelper('update');
       },
@@ -662,7 +657,7 @@ async function serveMachineHelper(
       layout &&
       (!request.sourceGeneration || request.sourceGeneration === generation)
     ) {
-      void update?.prepared(request.releaseId)
+      void update?.prepared(request.releaseId, request.force === true)
         .catch(error => console.error('[helper] update handoff failed:', error));
     }
     writeStatus();

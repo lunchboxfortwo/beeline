@@ -1,7 +1,6 @@
 import type { SqlDatabase } from './database.js';
 import type { CommandRow } from './agent-command.js';
 import { commanderReportAddress, reportToCommander } from './commander.js';
-import { systemLine } from './system-line.js';
 
 /** Called only after the terminal owner accepted an explicit failed result.
  * A lost connection never creates a notice or a second assignment.
@@ -40,22 +39,16 @@ export async function recordAgentTurnFailure(db: SqlDatabase, command: CommandRo
     streak.count = invocations.size;
     if (streak.count > 2) break;
   }
-  if (streak.sibling) return false;
+  if (streak.sibling || !route.recipient) return false;
+  const recipient = (await db.query<{kind:string}>('SELECT kind FROM identities WHERE id=$1', [route.recipient])).rows[0];
+  if (recipient?.kind !== 'agent') return false;
   let delivered = false;
   if (streak.count <= 2 && (command.private_payload?.kind === 'order' || command.review_context || room?.parent_id)) {
     const report = await reportToCommander(db, command.room_id, command.agent_id,
       `failed: @${agent?.handle ?? agent?.name ?? command.agent_id} in ${room?.name ?? 'Room'} (${command.room_id}): ${reason || 'I could not finish this request.'}` +
-        (streak.count === 2 ? ' (repeated failures; further failures stay visible in the place until a turn succeeds)' : ''),
+        (streak.count === 2 ? ' (repeated failures)' : ''),
       command, `failure:${command.id}`, {automatic:true,orderIssuer:true});
     delivered = report.delivered !== false;
   }
-  await systemLine(db, {
-    roomId: command.room_id,
-    subject: { kind: 'agent', id: command.agent_id, name: agent?.name ?? 'Agent' },
-    verb: 'could not finish this request',
-    ...(reason ? {consequence:reason} : {}),
-    cardType: 'turn-failed', card: { requestId: command.turn_request_id, agentId: command.agent_id, state: 'failed' },
-    afterMessageId: command.source_message_id ?? undefined,
-  });
   return delivered;
 }

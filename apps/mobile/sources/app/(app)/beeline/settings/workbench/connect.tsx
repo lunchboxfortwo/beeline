@@ -1,21 +1,9 @@
-import { ErrorBanner } from '@/components/buzz/ErrorBanner';
 import { appErrorCopy } from '@/buzz/app-error-copy';
-import { desktopColumnWidths } from '@/buzz/desktop-layout-tokens';
-import { useIsDesktop as useDesktopPageLayout } from '@/utils/responsive';
-import { RoomListSectionHeader } from '@/components/buzz/RoomListSectionHeader';
 import { useLatencyRouteFrame } from '@/buzz/latency-route-hook';
 import React, { useCallback, useEffect, useRef, useState } from 'react';
-import { ScrollView, Text, View } from 'react-native';
-import { StyleSheet, useUnistyles } from 'react-native-unistyles';
+import { Card, XStack, YStack } from 'tamagui';
 import * as WebBrowser from 'expo-web-browser';
 import { router, useLocalSearchParams, type Href } from 'expo-router';
-import { Typography } from '@/constants/Typography';
-import { useSafeAreaInsets } from 'react-native-safe-area-context';
-import { Button } from '@/components/buzz/Button';
-import { PageHeader } from '@/components/buzz/PageHeader';
-import { SurfaceGlyphLoader } from '@/components/buzz/SurfaceGlyphLoader';
-import { InlineRow } from '@/components/buzz/IndexRow';
-import { SettingsRow } from '@/components/buzz/SettingsRow';
 import { useInstallObserver } from '@/buzz/use-observed-resource';
 import { getWorkbenchSource } from '@/buzz/workbench-source';
 import { useSharedWorkbench } from '@/buzz/workbench-surface';
@@ -27,12 +15,10 @@ import {
   type ConnectorInstallState,
   type ConnectorInstallStep,
 } from '@/buzz/workbench';
-import {
-  ConnectStepBar,
-  ConnectStepDot,
-  type ConnectBarPart,
-  type ConnectStepState,
-} from '@/components/buzz/ConnectProgress';
+import { Btn, Copy, Section, T } from '@/ui/grammar';
+import { ConnectorFooter, ConnectorFrame, ConnectorLoading, ConnectorNote, ConnectorRow } from '@/ui/screens/settings/connectors/ConnectorParts';
+import { SurfaceGlyphLoader } from '@/components/buzz/SurfaceGlyphLoader';
+import { StepBar, StepDot, type ConnectBarPart, type ConnectStepState } from '@/ui/screens/settings/connectors/ConnectSteps';
 
 function firstParam(value: string | string[] | undefined): string | undefined {
   return Array.isArray(value) ? value[0] : value;
@@ -155,9 +141,6 @@ function ConnectToolFlow() {
   const [selectedHelperName, setSelectedHelperName] = useState<string | null>(null);
   const [errorCause, setError] = useState<string | null>(null);
   const error = errorCause ? connectorSetupErrorCopy(errorCause) : null;
-  const { theme } = useUnistyles();
-  const insets = useSafeAreaInsets();
-  const desktopPageLayout = useDesktopPageLayout();
   const [observedId, setObservedId] = useState(pairedConnectorId);
   const observed = useInstallObserver(workspaceId, observedId);
   useEffect(() => { if (pairedConnectorId) setObservedId(pairedConnectorId); }, [pairedConnectorId]);
@@ -290,150 +273,87 @@ function ConnectToolFlow() {
   const signInLabel = squire ? 'Sign in to Google' : `Sign in to ${connectorName}`;
 
   return (
-    <View style={[styles.container, desktopPageLayout && { width: '100%', maxWidth: desktopColumnWidths.detail, alignSelf: 'center' }, { paddingTop: insets.top }]}>
-      <PageHeader
-        backAccessibilityLabel={`Back to ${connectorName}`}
-        eyebrow={connectorName}
-        prominent
-        onBack={() => router.back()}
-        testID="connect-header"
-        title={showSteps && squire ? `Connect ${machineName}` : connectorName}
-      />
-      <ScrollView style={styles.content} testID="connect-scroll"
-        contentContainerStyle={[styles.contentInner, !showSteps && { paddingBottom: theme.buzz.space.lg + insets.bottom }]}>
-        {helpers === null && !helperLoadError && !offerCeremony && !showSteps ? (
-          <View style={styles.loading} testID="connect-loading">
-            <SurfaceGlyphLoader testID="connect-loader" />
-            <Text style={styles.note}>Looking for your machine…</Text>
-          </View>
-        ) : null}
-        {noHelpers && !offerCeremony ? (
-          <View testID="connect-no-helper">
-            <Text style={styles.note}>
-              Squire runs on a helper. Every agent on that helper can use its connections, within the grants you set.
-            </Text>
-            <Text style={styles.empty} testID="connect-no-helper-empty">No online helpers found</Text>
-            <View style={styles.commandBlock} testID="connect-no-helper-command">
-              <Text style={styles.command}>npx usebeeline connect</Text>
-              <Text style={styles.note}>
-                Run this on the machine you want to hold your keys. When it appears here, come back
-                and pair it.
-              </Text>
-            </View>
-          </View>
-        ) : null}
-        {choosing ? (
-          <View testID="connect-machine-picker">
-            <RoomListSectionHeader title="Helpers" inset="content" />
-            {onlineHelpers.map((helper) => (
-              <SettingsRow appBoard key={helper.id} description="online" onPress={() => void pair(helper.id)}
-                testID={`connect-machine-${helper.id}`} title={helper.name} action="pair" />
-            ))}
-            <Text style={styles.note}>Choose the machine that will hold your keys.</Text>
-          </View>
-        ) : null}
-        {showSteps ? (
-          <View testID="connect-install-progress">
-            <View style={styles.progress}>
-              <InlineRow style={styles.progressLine}>
-                <Text style={styles.progressCount} testID="connect-progress-count">Step {stepNumber} of {shown.length}</Text>
-                {squire && activeIndex >= 0 ? (
-                  <Text style={styles.progressPhase}>
-                    {shown[activeIndex]!.key === 'reach' ? `Reaching ${machineName}` : SQUIRE_PHASE[shown[activeIndex]!.key]}
-                  </Text>
-                ) : null}
-              </InlineRow>
-              <ConnectStepBar parts={parts} testID="connect-step-bar" />
-            </View>
-            {shown.map((step, index) => (
-              <InlineRow key={step.key} style={styles.step} testID={`connect-step-${index}-${step.state}`}>
-                {index < shown.length - 1 ? <View style={[styles.rail, step.state === 'done' && styles.railDone]} /> : null}
-                <ConnectStepDot number={index + 1} state={step.state} testID={`connect-step-${index}-dot`} />
-                <View style={styles.stepCopy}>
-                  <Text style={[styles.stepTitle, step.state === 'todo' && styles.stepTitleTodo]}>{step.title}</Text>
-                  {step.detail ? (
-                    <Text style={[styles.stepDetail, step.state === 'current' && styles.stepDetailCurrent,
-                      step.state === 'failed' && styles.stepDetailFailed]} testID={step.error ? 'connect-error' : `connect-step-${index}-detail`}>
-                      {step.detail}
-                    </Text>
-                  ) : null}
-                </View>
-              </InlineRow>
-            ))}
-          </View>
-        ) : null}
-        {errorUnplaced ? <ErrorBanner inline title={error ?? ''} titleTestID="connect-error" /> : null}
-      </ScrollView>
-      {showSteps ? (
-        <View style={[styles.foot, { paddingBottom: theme.buzz.space.lg + insets.bottom }]}>
-          {failed ? (
-            <>
-              <Button appearance={{ control: styles.primaryButton, label: styles.primaryLabel }} label="Try again" fullWidth onPress={retryPairing} testID="connect-retry" />
-              <Text style={styles.footNote}>
-                {failedIndex <= 0 ? `Sign in unlocks once ${machineName} answers.` : 'Sign in unlocks when pairing finishes.'}
-              </Text>
-            </>
-          ) : (
-            <>
-              {/* Composite fill and border together before fading on Android (mock v3). */}
-              <View needsOffscreenAlphaCompositing={!signInReady} pointerEvents={signInReady ? 'auto' : 'none'} style={!signInReady && styles.locked}>
-                <Button appearance={{ control: styles.primaryButton, label: styles.primaryLabel }} label={signInLabel} fullWidth disabled={!signInReady} accessibilityState={{ disabled: !signInReady }}
-                  onPress={signInReady ? openSignIn : () => undefined} testID="connect-sign-in" />
-              </View>
-              <Text style={styles.footNote}>
-                {signInReady ? install?.signIn?.method === 'oauth'
-                  ? 'Opens sign-in in your browser.'
-                  : `Opens ${machineName}’s secure browser. About a minute.` : 'Unlocks when pairing finishes.'}
-              </Text>
-            </>
-          )}
-        </View>
+    <ConnectorFrame title={showSteps && squire ? `Connect ${machineName}` : connectorName} back={() => router.back()}
+      backLabel={`Back to ${connectorName}`} scrollTestID="connect-scroll"
+      footer={showSteps ? <ConnectorFooter>
+        {failed ? (
+          <>
+            <Btn kind="primary" label="Try again" onPress={retryPairing} testID="connect-retry">{'Try again'}</Btn>
+            <ConnectorNote testID="connect-foot-note">
+              {failedIndex <= 0 ? `Sign in unlocks once ${machineName} answers.` : 'Sign in unlocks when pairing finishes.'}
+            </ConnectorNote>
+          </>
+        ) : (
+          <>
+            <Btn kind="primary" label={signInLabel} disabled={!signInReady} accessibilityState={{ disabled: !signInReady }}
+              onPress={signInReady ? openSignIn : () => undefined} testID="connect-sign-in">{signInLabel}</Btn>
+            <ConnectorNote testID="connect-foot-note">
+              {signInReady ? install?.signIn?.method === 'oauth'
+                ? 'Opens sign-in in your browser.'
+                : `Opens ${machineName}’s secure browser. About a minute.` : 'Unlocks when pairing finishes.'}
+            </ConnectorNote>
+          </>
+        )}
+      </ConnectorFooter> : undefined}>
+      {helpers === null && !helperLoadError && !offerCeremony && !showSteps ? (
+        <ConnectorLoading testID="connect-loading" label="Looking for your machine…"><SurfaceGlyphLoader testID="connect-loader" /></ConnectorLoading>
       ) : null}
-    </View>
+      {noHelpers && !offerCeremony ? (
+        <YStack gap="3" testID="connect-no-helper">
+          <ConnectorNote>
+            Squire runs on a helper. Every agent on that helper can use its connections, within the grants you set.
+          </ConnectorNote>
+          <YStack alignItems="center" paddingVertical="4"><Copy testID="connect-no-helper-empty">No online helpers found</Copy></YStack>
+          <Card backgroundColor="raised" borderWidth={1} borderColor="stroke" padding="4" gap="2" testID="connect-no-helper-command">
+            <T v="code">npx usebeeline connect</T>
+            <ConnectorNote>
+              Run this on the machine you want to hold your keys. When it appears here, come back
+              and pair it.
+            </ConnectorNote>
+          </Card>
+        </YStack>
+      ) : null}
+      {choosing ? (
+        <YStack gap="2" testID="connect-machine-picker">
+          <Section title="Helpers">
+            {onlineHelpers.map((helper, n) => (
+              <ConnectorRow key={helper.id} title={helper.name} description="online" action="pair" onPress={() => void pair(helper.id)}
+                last={n === onlineHelpers.length - 1} testID={`connect-machine-${helper.id}`} />
+            ))}
+          </Section>
+          <ConnectorNote>Choose the machine that will hold your keys.</ConnectorNote>
+        </YStack>
+      ) : null}
+      {showSteps ? (
+        <YStack gap="4" testID="connect-install-progress">
+          <YStack gap="2">
+            <XStack justifyContent="space-between" gap="2">
+              <T v="metaStrong" testID="connect-progress-count">Step {stepNumber} of {shown.length}</T>
+              {squire && activeIndex >= 0 ? (
+                <T v="meta" color="secondary">
+                  {shown[activeIndex]!.key === 'reach' ? `Reaching ${machineName}` : SQUIRE_PHASE[shown[activeIndex]!.key]}
+                </T>
+              ) : null}
+            </XStack>
+            <StepBar parts={parts} testID="connect-step-bar" />
+          </YStack>
+          {shown.map((step, index) => (
+            <XStack key={step.key} gap="3" testID={`connect-step-${index}-${step.state}`}>
+              <StepDot number={index + 1} state={step.state} testID={`connect-step-${index}-dot`} />
+              <YStack flex={1} minWidth={0} gap="1" paddingTop="0.5">
+                <Copy quiet={step.state === 'todo'}>{step.title}</Copy>
+                {step.detail ? (
+                  <T v="meta" color={step.state === 'failed' ? 'removed' : step.state === 'current' ? 'needsYou' : 'secondary'}
+                    testID={step.error ? 'connect-error' : `connect-step-${index}-detail`}>
+                    {step.detail}
+                  </T>
+                ) : null}
+              </YStack>
+            </XStack>
+          ))}
+        </YStack>
+      ) : null}
+      {errorUnplaced ? <ConnectorNote tone="danger" testID="connect-error">{error ?? ''}</ConnectorNote> : null}
+    </ConnectorFrame>
   );
 }
-
-const DOT = 28;
-
-const styles = StyleSheet.create((theme) => {
-  const hull = theme.buzz;
-  return {
-    container: { flex: 1, backgroundColor: hull.appCanvas },
-    content: { flex: 1 },
-    contentInner: { paddingHorizontal: hull.space.lg, paddingTop: hull.layout.screenTop, paddingBottom: hull.space.lg },
-    loading: { alignItems: 'center', gap: hull.space.sm, paddingVertical: hull.space.xl },
-    note: { ...Typography.default(), ...hull.type.meta, color: hull.appQuiet },
-    failure: { ...Typography.default(), ...hull.type.meta, color: hull.dialogDanger, marginTop: hull.space.md },
-    // The empty state's one centered fact (board: `emp`).
-    empty: { ...Typography.default(), ...hull.type.body, color: hull.textPrimary, textAlign: 'center', paddingVertical: hull.space.md },
-    // The one raised block: the CLI command the user must run, boxed because
-    // it is the one thing the page asks them to act on.
-    commandBlock: {
-      borderWidth: StyleSheet.hairlineWidth, borderColor: hull.border, borderRadius: hull.radius,
-      padding: hull.space.md, gap: hull.space.sm,
-    },
-    command: { ...Typography.mono(), ...hull.type.body, color: hull.textPrimary },
-    progress: { marginBottom: hull.squireConnect.progressBottom },
-    progressLine: { flexDirection: 'row', justifyContent: 'space-between', marginBottom: hull.squireConnect.contentGap },
-    progressCount: { ...hull.type.meta, fontFamily: 'SpaceGrotesk-Medium', color: hull.appInk },
-    progressPhase: { ...hull.type.meta, color: hull.textMuted },
-    step: { flexDirection: 'row', gap: hull.space.md, paddingBottom: hull.squireConnect.stepBottom },
-    // The 2 pt line from one step mark down to the next.
-    rail: { position: 'absolute', left: DOT / 2 - 1, top: 30, bottom: 2, width: 2, borderRadius: hull.squireConnect.railRadius, backgroundColor: hull.appBorder },
-    railDone: { backgroundColor: hull.accent },
-    stepCopy: { flex: 1, minWidth: 0, paddingTop: hull.squireConnect.copyTop },
-    stepTitle: { ...hull.type.body, color: hull.appInk },
-    stepTitleTodo: { color: hull.textMuted },
-    stepDetail: { ...hull.type.meta, color: hull.appQuiet },
-    stepDetailCurrent: { color: hull.accent },
-    stepDetailFailed: { color: hull.dialogDanger },
-    foot: {
-      paddingHorizontal: hull.space.lg, paddingTop: hull.space.md, gap: hull.squireConnect.contentGap,
-      borderTopWidth: 1, borderTopColor: hull.appBorder, backgroundColor: hull.appCanvas,
-    },
-    primaryButton: { minHeight: 48, borderRadius: hull.radius, alignSelf: 'stretch', alignItems: 'center', justifyContent: 'center', backgroundColor: hull.appInk, borderWidth: 1, borderColor: hull.appInk },
-    primaryLabel: { ...hull.type.body, fontFamily: 'SpaceGrotesk-Medium', color: hull.appCanvas },
-    locked: { opacity: 0.32 },
-    footNote: { ...hull.type.meta, color: hull.textMuted, textAlign: 'center' },
-  };
-});

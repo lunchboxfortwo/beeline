@@ -220,9 +220,9 @@ export async function route(
     response.end(`<!doctype html>
 <html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1">
 <title>Return to Beeline</title><style nonce="${nonce}">
-body { margin: 0; padding: 32px 24px; font: 18px/1.5 system-ui, sans-serif; background: #14091a; color: #f7f3f8; }
+body { margin: 0; padding: 32px 24px; font: 18px/1.5 system-ui, sans-serif; background: #171717; color: #fafaf9; }
 main { max-width: 420px; margin: 12vh auto; } h1 { font-size: 28px; line-height: 1.2; }
-p { color: #d3c8d7; } a { display: inline-block; padding: 14px 24px; border-radius: 10px; background: #f7f3f8; color: #14091a; font-weight: 600; text-decoration: none; }
+p { color: #d6d3d1; } a { display: inline-block; padding: 14px 24px; border-radius: 10px; background: #fafaf9; color: #171717; font-weight: 600; text-decoration: none; }
 a:focus-visible { outline: 3px solid #c8a8e8; outline-offset: 4px; }
 </style></head><body><main><h1>Return to Beeline</h1>
 <p>Return to Beeline to finish connecting your app. If it doesn't open automatically, tap below.</p>

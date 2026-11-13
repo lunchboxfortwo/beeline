@@ -13,7 +13,7 @@ export function githubConnectionErrorNotice(error: string): { title: string; des
   };
   return {
     title: error === 'github_connection_canceled' ? 'GitHub did not finish connecting' : 'GitHub could not connect',
-    description: 'Return to your Room, then try Connect GitHub again.',
+    description: 'Return to your chat, then try Connect GitHub again.',
   };
 }
 

@@ -4,6 +4,9 @@
 vi.mock('@/utils/responsive', () => ({ useIsDesktop: () => false }));
 vi.mock('@/sync/transport/live-connection', () => ({ sharedLiveConnection: () => ({ register: async () => () => undefined }) }));
 vi.mock('@expo/vector-icons/Ionicons', async () => { const R = await import('react'); return { default: (props: any) => R.createElement('Ionicons', props) }; });
+vi.mock('tamagui', async () => (await import('@/ui/screens/transcript/grammar-hosts.test-support')).tamaguiHosts());
+vi.mock('@/components/buzz/SurfaceGlyphLoader', async () => { const R = await import('react'); return { SurfaceGlyphLoader: (props: any) => R.createElement('SurfaceGlyphLoader', props) }; });
+vi.mock('lucide-react-native', async () => (await import('@/ui/screens/transcript/grammar-hosts.test-support')).lucideHosts());
 vi.mock('expo-haptics', () => ({ ImpactFeedbackStyle: { Light: 'Light' }, impactAsync: async () => undefined }));
 vi.mock('react-native-keyboard-controller', async () => { const R = await import('react'); return { KeyboardAvoidingView: (props: any) => R.createElement('View', props, props.children) }; });
 import * as React from 'react';
@@ -85,38 +88,13 @@ vi.mock('react-native', async () => {
   };
 });
 
-vi.mock('@/components/buzz/SettingsRow', async () => {
-  const ReactModule = await import('react');
-  return {
-    SettingsRow: (props: any) => ReactModule.createElement('SettingsRow', props),
-  };
-});
-
 vi.mock('@/components/buzz/ServiceMark', async () => {
   const ReactModule = await import('react');
   return { ServiceMark: (props: any) => ReactModule.createElement('ServiceMark', props) };
 });
 
-vi.mock('@/components/buzz/StateDot', async () => {
-  const ReactModule = await import('react');
-  return { StateDot: (props: any) => ReactModule.createElement('StateDot', props) };
-});
-
-vi.mock('@/components/buzz/SurfaceGlyphLoader', async () => {
-  const ReactModule = await import('react');
-  return {
-    SurfaceGlyphLoader: (props: any) => ReactModule.createElement('SurfaceGlyphLoader', props),
-  };
-});
-
-vi.mock('@/components/buzz/PageHeader', async () => {
-  const ReactModule = await import('react');
-  return {
-    PageHeader: (props: any) => ReactModule.createElement('PageHeader', props),
-  };
-});
-
 import ConnectionDetailScreen from './connection';
+import { SafeBottom, SafeTop, ScreenHeader } from '@/ui/grammar';
 import { setWorkbenchSource } from '@/buzz/workbench-source';
 import { MockWorkbenchSource, VERCEL_CONNECTION } from '@/buzz/workbench-source.mock';
 
@@ -166,30 +144,29 @@ async function flush(times = 4): Promise<void> {
 }
 
 describe('Connection detail screen', () => {
-  it('draws the shared page header: small Workbench over the key name', async () => {
+  it('draws the grammar page header: Back and the key name', async () => {
     const renderer = await render();
-    const header = renderer.root.findByProps({ testID: 'connection-header' });
-    expect(header.props.eyebrow).toBe('Connectors');
+    const header = renderer.root.findByType(ScreenHeader);
+    expect(header.props.backLabel).toBe('Back to Connectors');
     expect(header.props.title).toBe('vercel');
-    expect(header.props.onBack).toBeTypeOf('function');
+    expect(header.props.back).toBeTypeOf('function');
   });
 
-  it('keeps the scroll content above the Android navigation inset', async () => {
+  it('keeps the page between the phone safe areas', async () => {
     const renderer = await render();
-    const screen = renderer.root.findByProps({ testID: 'connection-detail-screen' });
-    const screenStyle = Object.assign({}, ...screen.props.style.filter(Boolean));
-    expect(screenStyle).toMatchObject({ flex: 1, paddingTop: 0, paddingBottom: 34 });
-    expect(screenStyle).not.toHaveProperty('maxWidth');
+    expect(renderer.root.findByProps({ testID: 'connection-detail-screen' })).toBeDefined();
+    expect(renderer.root.findAllByType(SafeTop)).toHaveLength(1);
+    expect(renderer.root.findAllByType(SafeBottom)).toHaveLength(1);
   });
 
   it('renders service identity and the complete vault facts', async () => {
     const renderer = await render();
-    expect(renderer.root.findByProps({ testID: 'connection-header' }).props.title).toBe('vercel');
+    expect(renderer.root.findByType(ScreenHeader).props.title).toBe('vercel');
     expect(renderer.root.findAllByProps({ testID: 'connection-key-label' })).toHaveLength(0);
     expect(renderer.root.findByProps({ testID: 'connection-detail-metadata' })).toBeDefined();
-    expect(renderer.root.findByProps({ title: 'Reference' }).props.description).toBe('cred_vercel');
-    expect(renderer.root.findByProps({ title: 'Hosts' }).props.description).toBe('api.vercel.com');
-    expect(renderer.root.findByProps({ title: 'Fields' }).props.description).toBe('token');
+    expect(renderer.root.findByProps({ title: 'Reference' }).props.value).toBe('cred_vercel');
+    expect(renderer.root.findByProps({ title: 'Hosts' }).props.value).toBe('api.vercel.com');
+    expect(renderer.root.findByProps({ title: 'Fields' }).props.value).toBe('token');
     expect(renderer.root.findByProps({ title: 'Created' }).props.value).not.toBe('not reported');
     expect(renderer.root.findByProps({ title: 'Last synced' }).props.value).not.toBe(
       'not reported',
@@ -250,8 +227,8 @@ describe('Connection detail screen', () => {
     setWorkbenchSource(source);
     const renderer = await render();
     const state = renderer.root.findByProps({ testID: 'connection-detail-state' });
-    expect(state.findByType('StateDot').props.kind).toBe('pulse');
-    expect(state.findByType('Text').props.children).toBe('refreshing');
+    expect(state.findAll((node: any) => node.props.backgroundColor === 'needsYou').length).toBeGreaterThan(0);
+    expect(state.findAll((node: any) => node.props.children === 'refreshing').length).toBeGreaterThan(0);
   });
 
   it('states empty grants and activity without offering a destructive action', async () => {

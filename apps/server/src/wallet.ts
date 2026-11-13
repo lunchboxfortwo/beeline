@@ -8,8 +8,8 @@ import { systemLine } from './system-line.js';
 import { fakeCdpWalletSource } from './cdp-fake.js';
 import { realCdpWalletSource, type CdpWalletSource } from './cdp-client.js';
 import { formatUnits, parseUnits } from './evm-chain.js';
-import { reconcileBalancesSafely, delegationRefusal, postInsufficientNotice, handleSendFailure, postLedgerLine } from './wallet-post-ledger-line.js';
-export { postLedgerLine, postInsufficientNotice, type WalletAgentContext, walletAgentContext, agentWalletTool, contractCallSpends, agentContractCall, agentSignTypedData } from './wallet-post-ledger-line.js';
+import { reconcileBalancesSafely, delegationRefusal, handleSendFailure, postLedgerLine } from './wallet-post-ledger-line.js';
+export { postLedgerLine, type WalletAgentContext, walletAgentContext, agentWalletTool, contractCallSpends, agentContractCall, agentSignTypedData } from './wallet-post-ledger-line.js';
 
 
 
@@ -454,12 +454,6 @@ export async function sendFromWallet(
   const available = Number(holding?.amount ?? '0');
   if (!holding || Number.isNaN(needed) || needed <= 0 || needed > available) {
     const symbol = (holding?.symbol ?? input.asset).toUpperCase();
-    await postInsufficientNotice(database, identityId, workspaceId, input, {
-      needed: input.amount,
-      available: holding?.amount ?? '0',
-      asset: symbol,
-      agentName: agentId ? await agentName(database, agentId,workspaceId) : null,
-    });
     return {
       outcome: 'insufficient',
       asset: symbol,

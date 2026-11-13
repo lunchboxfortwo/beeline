@@ -187,16 +187,6 @@ export function createRoomMessageProjector(): RoomMessageProjector {
   };
 }
 
-export type WorkspaceMemberDisplayItem = {
-  peerPubkey: string;
-  peerName: string;
-  peerKind: 'person' | 'agent';
-  avatarUrl?: string;
-  /** The chosen face id; absent → derived from the pubkey. */
-  face?: string;
-  role?: 'owner' | 'admin' | 'member' | 'spectator';
-};
-
 /** Presentation-only row. It is recomputed from server DTO partitions and is never persisted. */
 export type ChatDisplayMessage = {
   id: string;
@@ -204,6 +194,8 @@ export type ChatDisplayMessage = {
   isUser: boolean;
   /** Local outbox/optimistic row, not yet a committed read boundary. */
   isPendingSend?: boolean;
+  /** Local picked files waiting for upload; render the existing loading frame. */
+  attachmentUploadPending?: boolean;
   timestamp: number;
   /** High-resolution causal ordering; `timestamp` remains the display clock. */
   orderAtMs?: number;
@@ -234,6 +226,8 @@ export type ChatDisplayMessage = {
   durableFact?: { kind: 'failure' | 'merge' | 'action' };
   attachments?: AttachmentReference[];
   mentionPubkeys?: string[];
+  /** Server number of this message in its chat; Copy link writes `¶author-N` from it. */
+  chatSeq?: number;
   /** The model stamped on the message at generation time (server-side); the
    *  agent byline renders it verbatim and falls back to no model. */
   sourceClient?: RoomViewMessage['sourceClient'];
@@ -276,6 +270,8 @@ export type ChatDisplayMessage = {
   /** Original server ordering for each durable message in a folded row. */
   foldedReadBoundaries?: { id: string; orderAtMs: number }[];
   notificationLifecycleRun?: import('./pr-lifecycle').NotificationLifecycleRun;
+  /** A run of consecutive pills folded into this row (`buzz/transcript-pills.ts`). */
+  pillRun?: ChatDisplayMessage[];
   githubEvent?: NonNullable<RoomViewMessage['githubEvent']>;
   /** Daemon lifecycle facts are server-projected cards, never prose rows. */
   daemonFact?: NonNullable<RoomViewMessage['daemonFact']>;
@@ -395,6 +391,7 @@ export function displayRoomMessage(
     ...(message.mentionPubkeys ? { mentionPubkeys: [...message.mentionPubkeys] } : {}),
     ...(message.sourceClient ? { sourceClient: message.sourceClient } : {}),
     ...(message.agentModel ? { agentModel: message.agentModel } : {}),
+    ...(message.chatSeq ? { chatSeq: message.chatSeq } : {}),
     ...(message.reactions
       ? { reactions: message.reactions.map((reaction) => ({ ...reaction })) }
       : {}),

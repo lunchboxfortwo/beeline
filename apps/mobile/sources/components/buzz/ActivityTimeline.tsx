@@ -3,8 +3,8 @@ import { displayRoomMessage } from '@/buzz/room-view-presentation';
 import { readRoomViewMessage, type PhoneOperationMap } from '@beeline/api-contract/phone';
 import { monolithPhoneOperation } from '@/sync/transport/monolith-operation';
 import React, { useEffect, useMemo, useState } from 'react';
-import { Text, View } from 'react-native';
-import { StyleSheet } from 'react-native-unistyles';
+import { XStack, YStack } from 'tamagui';
+import { T, TypedView } from '@/ui/grammar';
 import type { AgentActivityItem } from '@/sync/transport/rig-transport';
 import { buildTurnActivity } from '@/buzz/activity-timeline';
 import { formatToolCallDuration } from '@/buzz/tool-call-row';
@@ -17,24 +17,17 @@ import {
 } from '@/buzz/tool-ledger';
 import { BeelineMarkSpinner } from './BeelineMarkSpinner';
 import { ToolOutputSheet } from './ToolOutputSheet';
-import {
-  LedgerBylineView,
-  ledgerEntryRhythm,
-  provisionalProseStyle,
-  settledAgentProseStyle,
-  type LedgerBylineMark,
-} from './Ledger';
+import { TranscriptLine } from '@/ui/screens/transcript/TranscriptLine';
+import { type LedgerBylineMark } from './Ledger';
 import { MonoMarkdown } from './MonoMarkdown';
 import { StreamingProse } from './StreamingProse';
 import { LedgerDisclosure, LedgerLogGroup } from './LedgerDisclosure';
-import { InlineRow, TranscriptNavigationRow } from './IndexRow';
+import { TranscriptNavigationRow } from './IndexRow';
 
 type ActivityTimelineProps = {
   active?: boolean;
   items: readonly AgentActivityItem[];
   handle?: string;
-  /** Model text shown in the agent byline; defaults to the legacy role label. */
-  role?: string;
   stamp?: string;
   /** Desktop transcripts flow chronologically; phone transcripts are inverted. */
   chronological?: boolean;
@@ -42,7 +35,7 @@ type ActivityTimelineProps = {
   messageDraft?: string;
   messageDraftKey?: string;
   /** The streaming speaker's identity mark — the SAME mark the settled row's
-   *  byline renders (`Ledger.LedgerBylineView`), so the draft lane carries the
+   *  sender line renders (`TranscriptLine`), so the draft lane carries the
    *  agent tile and the byline never moves when the draft settles. The words
    *  below it DO change: a draft is written in the provisional face and tone
    *  and cross-fades into the settled reply (C98). */
@@ -86,14 +79,14 @@ function ToolLedgerLineRow({
     // it is the agent's own words, so it is shown whole — never cut to a line.
     return (
       <TranscriptNavigationRow divider={divider} testID={testID}>
-      <InlineRow style={styles.noteCopy}>
-        <Text accessibilityElementsHidden style={styles.callGlyph}>
+      <XStack alignItems="flex-start" gap="2">
+        <T v="code" accessibilityElementsHidden width={24} flexShrink={0} color="secondary">
           {line.glyph}
-        </Text>
-        <View style={styles.noteBody}>
-          <MonoMarkdown markdown={line.label} textStyle={styles.noteText} />
-        </View>
-      </InlineRow>
+        </T>
+        <YStack flex={1} minWidth={0}>
+          <TypedView view={MonoMarkdown} v="meta" markdown={line.label} />
+        </YStack>
+      </XStack>
       </TranscriptNavigationRow>
     );
   }
@@ -105,14 +98,14 @@ function ToolLedgerLineRow({
       trailing={onPress ? { onPress, accessibilityLabel, accessibilityRole: 'button',
         accessibilityState: { busy: line.outcome === 'running' },
         accessibilityHint: 'Opens this call’s output' } : undefined}>
-      <InlineRow style={styles.toolCopy}>
-        {!hasNamedAction || line.outcome === 'failure' ? <Text style={[styles.toolVerb, line.outcome === 'failure' && styles.groupFailed]}>{verb}</Text> : null}
-        <Text ellipsizeMode="middle" numberOfLines={1} style={styles.callObject}>{line.label}</Text>
-        {line.reason ? <Text numberOfLines={1} style={styles.callReason}>{line.reason}</Text> : null}
-        {duration ? <Text style={styles.callDuration}>{duration}</Text> : null}
-        {showVerdict && hasNamedAction && line.outcome === 'failure' ? <Text accessibilityElementsHidden style={[styles.callVerdictText, styles.groupFailed]} testID={`activity-verdict-${line.id}`}>✗</Text> : null}
-        {showVerdict && line.outcome === 'running' ? <View testID={`activity-verdict-${line.id}`}><BeelineMarkSpinner live /></View> : null}
-      </InlineRow>
+      <XStack alignItems="center" gap="2">
+        {!hasNamedAction || line.outcome === 'failure' ? <T v="meta" color={line.outcome === 'failure' ? 'needsYou' : 'ink'}>{verb}</T> : null}
+        <T v="code" ellipsizeMode="middle" numberOfLines={1} flex={1} minWidth={48}>{line.label}</T>
+        {line.reason ? <T v="meta" color="secondary" numberOfLines={1} minWidth={0}>{line.reason}</T> : null}
+        {duration ? <T v="code" color="secondary" flexShrink={0} fontVariant={['tabular-nums']}>{duration}</T> : null}
+        {showVerdict && hasNamedAction && line.outcome === 'failure' ? <T v="code" color="needsYou" accessibilityElementsHidden width={18} flexShrink={0} textAlign="right" testID={`activity-verdict-${line.id}`}>✗</T> : null}
+        {showVerdict && line.outcome === 'running' ? <YStack testID={`activity-verdict-${line.id}`}><BeelineMarkSpinner live /></YStack> : null}
+      </XStack>
     </TranscriptNavigationRow>
   );
 }
@@ -188,7 +181,7 @@ function ToolRunGroupRow({
       <LedgerDisclosure expanded={expanded} onPress={() => { if (expanded) setShowAll(false); else if(remote.length&&!loaded.length)load(); setExpanded(value => !value); }}
         accessibilityLabel={`${summary}, expandable`} accessibilityState={{ expanded }} rowTestID={`tool-run-group-${run.id}`}>
         {steps ? `${run.count} ${run.count === 1 ? 'step' : 'steps'}` : null}
-        {run.failed ? <Text style={styles.groupFailed}>{` · ${run.failed} failed`}</Text> : null}
+        {run.failed ? <T v="meta" color="needsYou">{` · ${run.failed} failed`}</T> : null}
         {run.notes ? `${steps ? ' · ' : ''}${run.notes} ${run.notes === 1 ? 'note' : 'notes'}` : null}
         {duration ? ` · ${duration}` : null}
       </LedgerDisclosure>
@@ -232,7 +225,7 @@ export const TurnStepsLine = React.memo(function TurnStepsLine({
   const {line:sheetLine,error:sheetError,open:openLine,close:closeLine}=useToolOutput();
   if (!runs.length) return null;
   return (
-    <View testID={testID}>
+    <YStack testID={testID}>
       {runs.map((run) => (
         <ToolRunGroupRow key={run.id} onPressLine={openLine} run={run} />
       ))}
@@ -245,7 +238,7 @@ export const TurnStepsLine = React.memo(function TurnStepsLine({
         title={sheetLine?.label ?? 'Output'}
         visible={Boolean(sheetLine)}
       />
-    </View>
+    </YStack>
   );
 });
 
@@ -257,10 +250,8 @@ export const TurnStepsLine = React.memo(function TurnStepsLine({
 export const ActivityTimeline = React.memo(function ActivityTimeline({
   active = false,
   handle,
-  role = 'agent',
   items,
   stamp,
-  chronological = false,
   testID,
   messageDraft,
   messageDraftKey,
@@ -272,12 +263,6 @@ export const ActivityTimeline = React.memo(function ActivityTimeline({
     [turn, active],
   );
   const {line:sheetLine,error:sheetError,open:openLine,close:closeLine}=useToolOutput();
-  // The provisional face and tone, plus this lane's own spacing. One object,
-  // memoised, so the markdown renderer's identity check still bails out.
-  const draftTextStyle = useMemo(
-    () => ({ ...provisionalProseStyle(), ...styles.messageDraft }),
-    [],
-  );
   // A lane with nothing in it at all renders nothing.
   //
   // A RETRACTED draft is deliberately included (C98). When a turn fails the
@@ -287,15 +272,17 @@ export const ActivityTimeline = React.memo(function ActivityTimeline({
   if (!turn.narration.length && !runs.length && !messageDraft && !messageDraftKey) return null;
 
   return (
-    <View style={ledgerEntryRhythm({ hasByline: Boolean(handle), chronological })} testID={testID}>
-      {handle ? (
-        <LedgerBylineView byline={{ name: handle, role, stamp: stamp ?? '', mark }} />
-      ) : null}
+    // The ledger rhythm: 4 above and 8 below make a 12 gap between one
+    // speaker's rows; a byline's 16 above makes the speaker change 24. The air
+    // sits on the incoming top edge in both list directions.
+    <YStack width="100%" minWidth={0} paddingTop={handle ? '4' : '1'} paddingBottom="2" testID={testID}>
+      <TranscriptLine sender={handle ? { name: handle, stamp: stamp ?? '', mark } : undefined}>
       {turn.narration.map((narration, index) => (
-        <MonoMarkdown
+        <TypedView
+          view={MonoMarkdown}
+          v="body"
           key={`${index}:${narration}`}
           markdown={narration}
-          textStyle={settledAgentProseStyle()}
           testID={`activity-narration-${index}`}
         />
       ))}
@@ -303,12 +290,18 @@ export const ActivityTimeline = React.memo(function ActivityTimeline({
         <ToolRunGroupRow key={run.id} onPressLine={openLine} run={run} />
       ))}
       {messageDraft || messageDraftKey ? (
-        <StreamingProse
-          {...(messageDraftKey ? { streamKey: messageDraftKey } : { markdown: messageDraft! })}
-          textStyle={draftTextStyle}
-          testID="activity-message-draft"
-        />
+        // The draft writes in the quiet tone and settles into the reply's ink.
+        <YStack marginTop="1">
+          <TypedView
+            view={StreamingProse}
+            v="body"
+            color="secondary"
+            {...(messageDraftKey ? { streamKey: messageDraftKey } : { markdown: messageDraft! })}
+            testID="activity-message-draft"
+          />
+        </YStack>
       ) : null}
+      </TranscriptLine>
       <ToolOutputSheet
         detail={sheetLine?.detail}
         outputHidden={sheetLine?.outputHidden}
@@ -318,53 +311,6 @@ export const ActivityTimeline = React.memo(function ActivityTimeline({
         title={sheetLine?.label ?? 'Output'}
         visible={Boolean(sheetLine)}
       />
-    </View>
+    </YStack>
   );
-});
-
-const styles = StyleSheet.create((theme) => {
-  const groknight = theme.buzz;
-  return {
-    // Spacing only. The face and the tone are the ledger's one provisional
-    // definition (`Ledger.provisionalProseStyle`), so a draft and the reply
-    // that settles it are the same words in the same column (C98).
-    toolCopy: { flexDirection: 'row', alignItems: 'center', gap: groknight.space.sm },
-    toolVerb: { ...groknight.type.meta, color: groknight.textPrimary },
-    callVerdictText: { ...groknight.type.machine, width: 18, flexShrink: 0, textAlign: 'right' },
-    messageDraft: { marginTop: groknight.space.xs },
-    // A fixed glyph column, so every label starts on one line even though
-    // `>_` is two characters wide and the rest are one.
-    callGlyph: {
-      ...groknight.type.machine,
-      width: 24,
-      flexShrink: 0,
-      color: groknight.ledgerGhost,
-    },
-    callObject: {
-      ...groknight.type.machine,
-      flex: 1,
-      minWidth: 48,
-      color: groknight.ledgerBody,
-    },
-    // The distilled failure reason, dimmer than the label — a quiet inline
-    // sentence, never a chip.
-    callReason: {
-      ...groknight.type.meta,
-      flexShrink: 1,
-      minWidth: 0,
-      color: groknight.ledgerQuiet,
-    },
-    callDuration: {
-      ...groknight.type.machine,
-      flexShrink: 0,
-      color: groknight.ledgerGhost,
-      fontVariant: ['tabular-nums'],
-    },
-    // A note wraps to its full length, so it keeps the ledger line's hairline
-    // and gutter but not its fixed one-line height.
-    noteCopy: { flexDirection: 'row', alignItems: 'flex-start', gap: groknight.space.sm },
-    noteBody: { flex: 1, minWidth: 0 },
-    noteText: { ...groknight.type.meta, color: groknight.ledgerBody },
-    groupFailed: { color: groknight.accent },
-  };
 });

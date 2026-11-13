@@ -180,7 +180,7 @@ export function transitionCorner(
   // Explicit waits remain visible even while CI or a receipt is running. Red
   // and green facts still retain their existing admission through that wait.
   const review = f.reviewEnded;
-  const exhausted = (review?.emptyCount ?? 0) >= 2;
+  const exhausted = (review?.emptyCount ?? 0) >= 1;
   if (
     headSha &&
     checks === 'passing' &&
@@ -221,10 +221,10 @@ export function transitionCorner(
       !(f.reviewRequestActive ?? f.reviewerActive) &&
       !exhausted &&
       !wakes.some((effect) => effect.kind === 'review-findings') &&
-      (base.reviewDue || !f.reviewRequests || review?.emptyCount === 1)
+      (base.reviewDue || !f.reviewRequests)
     ) {
       if (f.reviewerConfigured)
-        wake('review', review?.emptyCount === 1 ? `review-retry:${headSha}:${review.id}` : undefined);
+        wake('review');
       else if (!f.blocker) wake('review-gap');
     }
   }

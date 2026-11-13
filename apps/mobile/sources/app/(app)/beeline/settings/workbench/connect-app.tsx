@@ -1,23 +1,18 @@
-import { desktopColumnWidths } from '@/buzz/desktop-layout-tokens';
-import { useIsDesktop as useDesktopPageLayout } from '@/utils/responsive';
 import React, { useEffect, useState } from 'react';
-import { ScrollView, Text, View } from 'react-native';
-import { StyleSheet } from 'react-native-unistyles';
+import { useWindowDimensions } from 'react-native';
+import { Input, ScrollView, XStack, YStack } from 'tamagui';
+import { Search } from 'lucide-react-native';
 import { router, useLocalSearchParams, type Href } from 'expo-router';
-import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import type { WorkbenchAppSearchResult } from '@beeline/api-contract/workbench';
-import { HullActionSheetModal, HullActionSheetCancel } from '@/components/buzz/HullActionSheet';
-import { HullDialogInput } from '@/components/buzz/HullDialog';
-import { PageHeader } from '@/components/buzz/PageHeader';
-import { SettingsRow } from '@/components/buzz/SettingsRow';
 import { ServiceMark } from '@/components/buzz/ServiceMark';
-import { RoomListSectionHeader } from '@/components/buzz/RoomListSectionHeader';
 import { getWorkbenchSource } from '@/buzz/workbench-source';
 import { useSharedWorkbench, type WorkbenchScope } from '@/buzz/workbench-surface';
 import { useConnectCompanyApp } from '@/buzz/company-connection-actions';
 import type { WorkbenchView } from '@/buzz/workbench';
 import { INSTAGRAM_SIGN_IN_REQUIREMENT } from '@/buzz/app-sign-in-copy';
 import { useLatencyRouteFrame } from '@/buzz/latency-route-hook';
+import { Glyph, Section, SheetFrame } from '@/ui/grammar';
+import { ConnectorFrame, ConnectorNote, ConnectorRow } from '@/ui/screens/settings/connectors/ConnectorParts';
 
 function SearchContent({ scope, view, initialQuery = '', onNavigate }: {
   scope: WorkbenchScope; view: WorkbenchView | null; initialQuery?: string; onNavigate?: () => void;
@@ -40,37 +35,44 @@ function SearchContent({ scope, view, initialQuery = '', onNavigate }: {
   const results: WorkbenchAppSearchResult = input ? response.query === input ? response.rows : []
     : (view?.companies?.suggestions ?? []).map(company => ({ appKey: company.appKey, name: company.name,
       domain: company.domain, description: company.purpose, company, mark: company.logo }));
-  return <View style={styles.content}>
-    <HullDialogInput accessibilityLabel="Search connections" testID="connect-app-input" autoCapitalize="none" autoCorrect={false}
-      placeholder="Search apps, keys, and websites" value={query} onChangeText={setQuery} variant="search" />
-    <RoomListSectionHeader title={input ? 'Search results' : 'Suggested'} inset="content" spacing="flush" />
-    {results.some(item => item.company?.appKey === 'instagram') ? <Text style={styles.note}>{INSTAGRAM_SIGN_IN_REQUIREMENT}</Text> : null}
-    {results.map(item => <SettingsRow appBoard key={item.companyId ?? item.company?.providerId ?? item.appKey}
-      title={item.name} description={item.description} leading={<ServiceMark company={item.name} domain={item.domain} mark={item.mark} />}
-      chevron="right" disabled={Boolean(actions.busy)} testID={`connect-app-${item.appKey}`} onPress={() => {
-        const row = item.companyId ? view?.companies?.rows.find(company => company.id === item.companyId) : undefined;
-        if (row) { onNavigate?.(); void actions.open(row, view?.apps); }
-        else if (item.companyId) {
-          onNavigate?.(); router.push({ pathname: '/beeline/settings/workbench/service', params: { ...scope, service: item.companyId } } as Href);
-        } else if (item.company) void actions.connect(item.company);
-      }} />)}
-    {input && results.length === 1 && results[0]?.company?.flow === 'app' && results[0].company.alternativeRoutes?.length ? <View>
-      <SettingsRow title="Other sign-in or Trusty Squire" chevron={showOther ? 'up' : 'down'} onPress={() => setShowOther(open => !open)} testID="connectors-other-ways" />
-      {showOther ? results[0].company.alternativeRoutes.map(route => <SettingsRow key={route} title={route === 'composio' ? 'Sign in another way' : 'Use Trusty Squire'} chevron="right"
-        disabled={Boolean(actions.busy)} onPress={() => void actions.connect({ ...results[0]!.company!, preferredRoute: route })} />) : null}
-    </View> : null}
-    {input && response.query === input && !results.length && !error ? <Text style={styles.note}>No connections found. Trusty Squire can connect to a website for you.</Text> : null}
-    {error || actions.error ? <SettingsRow title={(error ?? actions.error)!} /> : null}
-  </View>;
+  const other = input && results.length === 1 && results[0]?.company?.flow === 'app' && results[0].company.alternativeRoutes?.length ? results[0].company : null;
+  return <YStack gap="4">
+    <XStack gap="2" alignItems="center">
+      <Glyph icon={Search} />
+      <Input flex={1} minWidth={0} size="md" borderColor="strongStroke" aria-label="Search connections" accessibilityLabel="Search connections"
+        testID="connect-app-input" autoCapitalize="none" autoCorrect={false} placeholder="Search apps, keys, and logins"
+        value={query} onChangeText={setQuery} />
+    </XStack>
+    {results.some(item => item.company?.appKey === 'instagram') ? <ConnectorNote>{INSTAGRAM_SIGN_IN_REQUIREMENT}</ConnectorNote> : null}
+    {results.length ? <Section title={input ? 'Search results' : 'Suggested'}>
+      {results.map((item, n) => <ConnectorRow key={item.companyId ?? item.company?.providerId ?? item.appKey}
+        title={item.name} description={item.description} leading={<ServiceMark company={item.name} domain={item.domain} mark={item.mark} />}
+        chevron="right" disabled={Boolean(actions.busy)} last={!other && n === results.length - 1} testID={`connect-app-${item.appKey}`} onPress={() => {
+          const row = item.companyId ? view?.companies?.rows.find(company => company.id === item.companyId) : undefined;
+          if (row) { onNavigate?.(); void actions.open(row, view?.apps); }
+          else if (item.companyId) {
+            onNavigate?.(); router.push({ pathname: '/beeline/settings/workbench/service', params: { ...scope, service: item.companyId } } as Href);
+          } else if (item.company) void actions.connect(item.company);
+        }} />)}
+      {other ? <ConnectorRow title="Other sign-in or Trusty Squire" chevron={showOther ? 'up' : 'down'} onPress={() => setShowOther(open => !open)}
+        last={!showOther} testID="connectors-other-ways" /> : null}
+      {other && showOther ? other.alternativeRoutes!.map((route, n) => <ConnectorRow key={route} title={route === 'composio' ? 'Sign in another way' : 'Use Trusty Squire'} chevron="right"
+        disabled={Boolean(actions.busy)} last={n === other.alternativeRoutes!.length - 1} onPress={() => void actions.connect({ ...other, preferredRoute: route })} />) : null}
+    </Section> : null}
+    {input && response.query === input && !results.length && !error ? <ConnectorNote testID="connect-app-empty">No connections found. Trusty Squire can connect to a website for you.</ConnectorNote> : null}
+    {error || actions.error ? <ConnectorNote tone="danger">{(error ?? actions.error)!}</ConnectorNote> : null}
+  </YStack>;
 }
 
 export function ConnectorsSearchSheet({ visible, onClose, scope, view }: {
   visible: boolean; onClose: () => void; scope: WorkbenchScope; view: WorkbenchView | null;
 }) {
-  return <HullActionSheetModal visible={visible} onClose={onClose} title="Search" testID="connectors-search-sheet"
-    footer={<HullActionSheetCancel onPress={onClose} />}>
-    {visible ? <SearchContent scope={scope} view={view} onNavigate={onClose} /> : null}
-  </HullActionSheetModal>;
+  const { height } = useWindowDimensions();
+  return <SheetFrame open={visible} close={onClose} title="Search" testID="connectors-search-sheet">
+    {visible ? <ScrollView maxHeight={Math.round(height * 0.7)} keyboardShouldPersistTaps="handled">
+      <SearchContent scope={scope} view={view} onNavigate={onClose} />
+    </ScrollView> : null}
+  </SheetFrame>;
 }
 /** Existing deep-link/search flow stays available; the list itself opens the shared search sheet. */
 export default function ConnectAppScreen() {
@@ -78,18 +80,8 @@ export default function ConnectAppScreen() {
   const params = useLocalSearchParams<{ workspaceId?: string; viewerId?: string; query?: string }>();
   const scope = { workspaceId: params.workspaceId ?? '', viewerId: params.viewerId ?? '' };
   const { value: view, error } = useSharedWorkbench(scope.viewerId ? scope : null);
-  const insets = useSafeAreaInsets();
-  const desktopPageLayout = useDesktopPageLayout();
-  return <View style={[styles.screen, desktopPageLayout && { width: '100%', maxWidth: desktopColumnWidths.detail, alignSelf: 'center' }, { paddingTop: insets.top }]}>
-    <PageHeader eyebrow="Connectors" prominent title="Search" onBack={() => router.back()} backAccessibilityLabel="Back to Connectors" testID="connect-app-header" />
-    <ScrollView contentContainerStyle={{ paddingBottom: insets.bottom }} keyboardShouldPersistTaps="handled" testID="connect-app-scroll">
-      {error ? <SettingsRow title="Connections are unavailable right now" /> : null}
-      <SearchContent scope={scope} view={view} initialQuery={params.query} />
-    </ScrollView>
-  </View>;
+  return <ConnectorFrame title="Search" back={() => router.back()} backLabel="Back to Connectors" scrollTestID="connect-app-scroll">
+    {error ? <ConnectorNote tone="danger">Connections are unavailable right now</ConnectorNote> : null}
+    <SearchContent scope={scope} view={view} initialQuery={params.query} />
+  </ConnectorFrame>;
 }
-const styles = StyleSheet.create(theme => ({
-  screen: { flex: 1, backgroundColor: theme.buzz.appCanvas },
-  content: { paddingHorizontal: theme.buzz.space.lg, paddingTop: theme.buzz.space.md, paddingBottom: theme.buzz.space.lg, gap: theme.buzz.space.sm },
-  note: { ...theme.buzz.type.meta, color: theme.buzz.appQuiet }, error: { ...theme.buzz.type.meta, color: theme.buzz.dialogDanger },
-}));

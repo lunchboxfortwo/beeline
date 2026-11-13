@@ -56,6 +56,17 @@ it('shows installation missing for an account without an installation', async ()
   await expect(phone.execute('actOnRepositoryCard', { roomId:R, cardId:card.id, action:'link', repositoryId:42 }, OTHER)).rejects.toThrow();
 });
 
+it('pre-selects an installation repo the agent named and ignores a name that is not installed', async () => {
+  const card = await postRepositoryOnboarding(db, github, { roomId:R, agentId:A, requesterId:H, kind:'repository', repository:'Tester/Other' });
+  expect(card.selected).toBe('tester/other');
+  expect(card.repositories.find(repo => repo.fullName === 'tester/other')).toBeTruthy();
+  const bare = await postRepositoryOnboarding(db, github, { roomId:R, agentId:A, requesterId:H, kind:'repository', repository:'project' });
+  expect(bare.selected).toBe('tester/project');
+  const missed = await postRepositoryOnboarding(db, github, { roomId:R, agentId:A, requesterId:H, kind:'repository', repository:'nope/missing' });
+  expect(missed.selected).toBeUndefined();
+  expect(missed.repositories.map(repo => repo.fullName)).not.toContain('nope/missing');
+});
+
 it('links from the card, displays starters, starts the selected task once and switches without touching open work', async () => {
   const card = await postRepositoryOnboarding(db, github, { roomId:R, agentId:A, requesterId:H, kind:'repository' });
   expect(card.state).toBe('no_repo_linked');

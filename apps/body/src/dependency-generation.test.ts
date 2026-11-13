@@ -1,5 +1,6 @@
 import { execFileSync, spawnSync } from 'node:child_process';
-import { mkdtemp, mkdir, writeFile, readFile, stat, rm } from 'node:fs/promises';
+import { chmodSync, existsSync, mkdtempSync, mkdirSync, rmSync } from 'node:fs';
+import { mkdtemp, mkdir, writeFile, readFile, readdir, stat, rm } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { resolve } from 'node:path';
 import { it, expect, vi } from 'vitest';
@@ -11,6 +12,8 @@ import {
   collectUnusedGenerations,
   collectDependencyStore,
   dependencyFingerprint,
+  dependencyLayers,
+  openDependencyLayer,
 } from './dependency-generation.js';
 
 it('serves warm and cold copies immediately while another owner holds the dependency store', async () => {
@@ -50,8 +53,28 @@ it('serves warm and cold copies immediately while another owner holds the depend
   }
 });
 
-it.skipIf(spawnSync('bwrap', ['--ro-bind', '/', '/', 'true']).status !== 0)(
-  'shares generations, seals writes, and builds independently after a lockfile change',
+function overlayMountDenied(): boolean {
+  const root = mkdtempSync(resolve(tmpdir(), 'overlay-probe-'));
+  const lower = resolve(root, 'lower'), upper = resolve(root, 'upper'), work = resolve(root, 'work');
+  try {
+    mkdirSync(lower); mkdirSync(upper); mkdirSync(work);
+    return spawnSync('bwrap', [
+      '--unshare-user', '--uid', '0', '--gid', '0',
+      '--cap-add', 'CAP_SYS_ADMIN', '--cap-add', 'CAP_DAC_OVERRIDE', '--cap-add', 'CAP_SETPCAP',
+      '--ro-bind', '/', '/', '--bind', root, root, '--',
+      'mount', '-t', 'overlay', 'overlay',
+      '-o', `lowerdir=${lower},upperdir=${upper},workdir=${work},userxattr`, lower,
+    ]).status !== 0;
+  } finally {
+    // Overlay leaves its work directory mode 000.
+    try { chmodSync(resolve(work, 'work'), 0o700); } catch { /* the mount never created it */ }
+    rmSync(root, { recursive: true, force: true });
+  }
+}
+
+// ubuntu-26.04's unpriv_bwrap profile denies CAP_SYS_ADMIN, so this overlay mount is permission denied.
+it.skipIf(spawnSync('bwrap', ['--ro-bind', '/', '/', 'true']).status !== 0 || overlayMountDenied())(
+  'shares generations, keeps each copy\'s writes private, and builds independently after a lockfile change',
   async () => {
     const root = await mkdtemp(resolve(tmpdir(), 'generation-proof-'));
     const npm = execFileSync('which', ['npm'], { encoding: 'utf8' }).trim();
@@ -95,7 +118,7 @@ it.skipIf(spawnSync('bwrap', ['--ro-bind', '/', '/', 'true']).status !== 0)(
       }
       const dep = 'node_modules/generation-proof/index.js';
       expect((await stat(resolve(a, dep))).ino).toBe((await stat(resolve(b, dep))).ino);
-      const seal = (cwd: string, command: string, args: string[]) => {
+      const seal = async (cwd: string, command: string, args: string[]) => {
         const wrapped = wrapAgentCommand({
           bwrapPath: '/usr/bin/bwrap',
           spec: {
@@ -103,16 +126,20 @@ it.skipIf(spawnSync('bwrap', ['--ro-bind', '/', '/', 'true']).status !== 0)(
             cwd,
             worktreePath: cwd,
             protectedPaths: [root],
-            dependencyPaths: [resolve(cwd, 'node_modules')],
+            dependencyLayers: await dependencyLayers(resolve(cwd, '.layers'), [resolve(cwd, 'node_modules')]),
           },
           command,
           args,
         });
         return spawnSync(wrapped.command, wrapped.args, { encoding: 'utf8' });
       };
-      const write = seal(a, 'sh', ['-c', `chmod u+w ${dep} && echo corrupted > ${dep}`]);
-      expect(write.status, write.stderr).not.toBe(0);
-      expect(await readFile(resolve(b, dep), 'utf8')).toContain('1.0.0');
+      // A build may write anywhere in its own dependencies (Gradle writes in
+      // React Native plugin folders); the shared bytes stay unchanged.
+      const write = await seal(a, 'sh', ['-c', `chmod u+w ${dep} && echo changed > ${dep} && mkdir node_modules/generation-proof/build && cat ${dep}`]);
+      expect(write.status, write.stderr).toBe(0);
+      expect(write.stdout).toBe('changed\n');
+      for (const cwd of [a, b]) expect(await readFile(resolve(cwd, dep), 'utf8')).toContain('1.0.0');
+      expect(existsSync(resolve(a, 'node_modules/generation-proof/build'))).toBe(false);
       const path = await installDependencyNpmGuard(resolve(root, 'home'), npm, process.env.PATH!);
       const refusal = spawnSync('npm', ['install'], {
         cwd: a,
@@ -122,7 +149,7 @@ it.skipIf(spawnSync('bwrap', ['--ro-bind', '/', '/', 'true']).status !== 0)(
       expect(refusal.status).toBe(1);
       expect(refusal.stderr).toContain('--package-lock-only');
       const before = await dependencyFingerprint(a);
-      const update = seal(a, resolve(root, 'home/dependency-bin/npm'), [
+      const update = await seal(a, resolve(root, 'home/dependency-bin/npm'), [
         'install',
         '--package-lock-only',
         `file:${tarballs[1]}`,
@@ -136,7 +163,7 @@ it.skipIf(spawnSync('bwrap', ['--ro-bind', '/', '/', 'true']).status !== 0)(
         [a, '2.0.0'],
         [b, '1.0.0'],
       ]) {
-        const build = seal(cwd!, npm, ['run', 'build']);
+        const build = await seal(cwd!, npm, ['run', 'build']);
         expect(build.status, build.stderr).toBe(0);
         expect(await readFile(resolve(cwd!, 'built'), 'utf8')).toBe(version);
       }
@@ -147,6 +174,9 @@ it.skipIf(spawnSync('bwrap', ['--ro-bind', '/', '/', 'true']).status !== 0)(
       await rm(resolve(a, 'node_modules'), { recursive: true });
       expect(await collectUnusedGenerations(store)).toHaveLength(1);
     } finally {
+      for (const cwd of [a, b])
+        for (const layer of await readdir(resolve(cwd, '.layers')).catch(() => [] as string[]))
+          await openDependencyLayer(resolve(cwd, '.layers', layer));
       await rm(root, { recursive: true, force: true });
     }
   },

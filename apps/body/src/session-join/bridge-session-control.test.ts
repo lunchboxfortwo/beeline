@@ -49,7 +49,7 @@ it.each(['short', 'long', 'unicode'])('opens successive joins through a %s state
     key: `codex:${join(home, id)}`, agent: 'codex', cwd: join(home, id), name: id,
     server: 'https://synthetic.invalid', clientId: id, refreshToken: 'synthetic',
     accessToken: id, accessExpiresAt: Date.now() + 3_600_000,
-    cursor: '0', deliveredWakes: [], joinedAt: '', sessionId: id, agentBin: cli,
+    cursor: '0', deliveredWakes: [], joinedAt: '', sessionId: id, agentBin: cli, deliveryGeneration:'bound-control',deliveryMechanism:'local',
     deliveryMechanism: 'local',
   });
   // Seed host records before startup: only the explicit socket notification

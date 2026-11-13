@@ -1,5 +1,5 @@
 # Release proof: a corner opens from the room-list deck and renders its
-# inscribed objective line (the one durable corner surface).
+# thread bar (header B, the one durable corner surface).
 #
 # ROOM_ID and CORNER_ID are substituted by scripts/release-proof.mjs
 # (RELEASE_PROOF_ROOM / RELEASE_PROOF_CORNER override the automatic picks).
@@ -15,4 +15,4 @@ name: corner-opens
 - tapOn:
     id: room-corner-${CORNER_ID}
 - assertVisible:
-    id: corner-objective-line
+    id: thread-header

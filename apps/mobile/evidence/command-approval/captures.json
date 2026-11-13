@@ -1,0 +1,86 @@
+[
+  {
+    "stage": "before",
+    "theme": "bone",
+    "target": "web",
+    "labels": [
+      "Approve",
+      "Once",
+      "Deny"
+    ],
+    "denial": "deny"
+  },
+  {
+    "stage": "before",
+    "theme": "bone",
+    "target": "phone-web",
+    "labels": [
+      "Approve",
+      "Once",
+      "Deny"
+    ],
+    "denial": "deny"
+  },
+  {
+    "stage": "before",
+    "theme": "obsidian",
+    "target": "web",
+    "labels": [
+      "Approve",
+      "Once",
+      "Deny"
+    ],
+    "denial": "deny"
+  },
+  {
+    "stage": "before",
+    "theme": "obsidian",
+    "target": "phone-web",
+    "labels": [
+      "Approve",
+      "Once",
+      "Deny"
+    ],
+    "denial": "deny"
+  },
+  {
+    "stage": "after",
+    "theme": "bone",
+    "target": "web",
+    "labels": [
+      "Approve always",
+      "Deny"
+    ],
+    "denial": "deny"
+  },
+  {
+    "stage": "after",
+    "theme": "bone",
+    "target": "phone-web",
+    "labels": [
+      "Approve always",
+      "Deny"
+    ],
+    "denial": "deny"
+  },
+  {
+    "stage": "after",
+    "theme": "obsidian",
+    "target": "web",
+    "labels": [
+      "Approve always",
+      "Deny"
+    ],
+    "denial": "deny"
+  },
+  {
+    "stage": "after",
+    "theme": "obsidian",
+    "target": "phone-web",
+    "labels": [
+      "Approve always",
+      "Deny"
+    ],
+    "denial": "deny"
+  }
+]

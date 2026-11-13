@@ -67,5 +67,5 @@ test('managed preparation preserves mounted trees and requests mobile for the ne
   assert.equal(await exists(join(cwd, 'mobile-ran')), false);
   assert.equal(await exists(join(cwd, '.beeline-dependency-request')), true);
   assert.equal(await exists(join(cwd, 'build-ran')), true);
-  assert.match(result.stdout, /automatically at the next turn/);
+  assert.match(result.stdout, /this turn continues with them/);
 }));

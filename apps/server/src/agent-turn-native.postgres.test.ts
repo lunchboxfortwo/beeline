@@ -32,16 +32,16 @@ describe.skipIf(!url)('native terminal receipt serialization',()=>{
       {connectionId:'turn-connection',instanceId:'turn-proof'})};
     await first.query(`INSERT INTO messages(id,room_id,author_id,text) VALUES($1,$2,$3,'@helper Please work')`,[request,room,person]);
     commandId=(await createAgentCommand(first,{roomId:room,agentId:agent,sourceMessageId:request,reason:'human_tag'}))!.id;
-    await claimAgentCommand(first,room,agent,commandId,'generation',owner);
+    await claimAgentCommand(first,room,agent,commandId,'generation',{kind:'helper',owner});
   },60_000);
   afterAll(async()=>{await first.close();await second.close();await admin.query(`DROP DATABASE IF EXISTS ${name} WITH(FORCE)`);await admin.end();});
-  it('concurrent failed receipts retain one terminal result, one notice and no replay work',async()=>{
+  it('concurrent failed receipts retain one terminal result without a notice or replay work',async()=>{
     await concurrentWriters(first,second,db=>new DaemonService(db,new LiveHub()).execute('postAgentTurnReceipt',
       {roomId:room,requestId:request,generationId:'generation',status:'failed',reason:'provider unavailable',reasonKind:'hiccup'},agent,owner),
     'FOR UPDATE OF command');
     expect((await first.query('SELECT state FROM agent_commands WHERE id=$1',[commandId])).rows).toEqual([{state:'complete'}]);
     expect((await first.query('SELECT status FROM agent_turns WHERE request_id=$1',[request])).rows).toEqual([{status:'failed'}]);
-    expect((await first.query(`SELECT id FROM messages WHERE card_type='turn-failed' AND card->>'requestId'=$1`,[request])).rowCount).toBe(1);
+    expect((await first.query(`SELECT id FROM messages WHERE card_type='turn-failed' AND card->>'requestId'=$1`,[request])).rowCount).toBe(0);
     expect((await first.query(`SELECT id FROM agent_commands WHERE state IN ('pending','claimed')`)).rowCount).toBe(0);
   });
   it('two Rooms requesting a helper restart concurrently create one active restart',async()=>{
@@ -74,7 +74,7 @@ describe.skipIf(!url)('native terminal receipt serialization',()=>{
       VALUES($1,$3,$4,'First task'),($2,$3,$4,'Second task')`,[aSource,bSource,queueRoom,person]);
     const payload={kind:'order' as const,text:'Do the work',authorId:commander,fromRoomId:queueRoom};
     const running=(await createAgentCommand(first,{roomId:queueRoom,agentId:agent,sourceMessageId:aSource,privatePayload:payload,reason:'order'}))!;
-    await claimAgentCommand(first,queueRoom,agent,running.id,'queue-generation',owner);
+    await claimAgentCommand(first,queueRoom,agent,running.id,'queue-generation',{kind:'helper',owner});
     const deferred=()=>{let resolve!:()=>void;const promise=new Promise<void>(done=>resolve=done);return {promise,resolve};};
     const inserting=deferred(),release=deferred(),stopping=deferred();
     const observe=(db:SqlDatabase,side:'dispatch'|'stop'):SqlDatabase=>({

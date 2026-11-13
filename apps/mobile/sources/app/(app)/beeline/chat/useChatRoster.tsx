@@ -1,14 +1,12 @@
-import { useMemo } from 'react';
+import { useCallback, useMemo } from 'react';
 import { type ChatDisplayMessage, memberAgent } from '@/buzz/room-view-presentation';
 import { buildSpeechLexicon } from '@/buzz/speech-lexicon';
-import { orderRoomRoster } from '@/buzz/room-participants';
 import { resolveAgentDisplayIdentity } from '@/buzz/agent-display';
 import { fallbackMemberHandle, fallbackMemberName } from '@/buzz/member-display';
-import { type MemberPickerCandidate } from '@/components/buzz/MemberPickerSheet';
 import { normalizedRoomRole } from '@/buzz/room-management';
 import { roomComposerTagHandles } from '@/buzz/composer-tags';
 import { sameElementRefs, sameMessageRefMap, sameSelectedMembers, shallowEqualRecord, useStable } from '@/buzz/use-stable';
-import { type RoomRosterParticipant } from '@/components/buzz/RoomRosterSheet';
+import { type RoomRosterParticipant } from '@/buzz/room-participants';
 import { RoomMemberOption } from './chat-surface-values';
 
 type Props = [
@@ -18,13 +16,12 @@ type Props = [
   resolvedChannelName: string | null,
   userPubkey: string,
   workspaceRoster: { members: import("@beeline/api-contract/phone").RoomViewMember[]; agents: import("@beeline/api-contract/phone").WorkspaceAgentView[]; workspace: import("@beeline/api-contract/phone").ChatListWorkspace & { readonly about?: string; readonly createdAt: number; }; managerSettings?: { readonly allowFixSweep?: boolean; readonly visibility: "public" | "invite-only"; readonly rooms?: readonly import("@beeline/api-contract/phone").WorkspaceManagedRoomView[]; readonly roomsTruncated?: boolean; }; peopleTotal?: number; agentTotal?: number; membersTruncated: boolean; agentsTruncated: boolean; viewer: import("@beeline/api-contract/phone").RoomViewer; watchFilters: readonly import("@beeline/api-contract/phone").SurfaceWatchFilter[]; } | null,
-  participantPickerKind: "agent" | "person" | null,
   heartbeatPresences: Record<string, import("@/buzz/agent-presence").RoomAgentPresence>,
 ];
 
 export function useChatRoster([
   roomSurface, conversationIdentities, durableMessages, resolvedChannelName, userPubkey,
-  workspaceRoster, participantPickerKind, heartbeatPresences,
+  workspaceRoster, heartbeatPresences,
 ]: Props): [
   roomParticipants: RoomRosterParticipant[],
   agentPresences: Record<string, import("@/buzz/agent-presence").RoomAgentPresence>,
@@ -33,16 +30,11 @@ export function useChatRoster([
   personProfileByPubkey: Map<string, { face?: string | undefined; avatar?: string | undefined; handle?: string | undefined; pubkey: string; name: string; }>,
   agentByPubkey: Map<string, import("@/buzz/agent-display").DisplayableAgent>,
   roomAgents: RoomRosterParticipant[],
-  participantPickerCandidates: MemberPickerCandidate[] | null,
-  roomMemberPubkeys: Set<string>,
   agentProfileModelByPubkey: Map<string, string>,
   speakerRoleByPubkey: Map<string, string>,
   composerTagHandles: Set<string>,
-  speechHints: string[],
-  roomMemberByPubkey: Map<string, { pubkey: string; role: "owner" | "admin" | "member" | "spectator"; }>,
-  visibleRosterMembers: RoomRosterParticipant[],
+  speechHints: () => string[],
   roomParticipantTotal: number,
-  participantPickerWorkspacePeers: number,
 ] {
 
   const rawAvailableAgents = useMemo(
@@ -109,11 +101,6 @@ export function useChatRoster([
     [selectedMembers],
   );
 
-  const roomMemberPubkeys = useMemo(
-    () => new Set<string>(roomMembers.map((member) => member.pubkey)),
-    [roomMembers],
-  );
-
   // Only message text shapes the lexicon, so a presence tick that rebuilds the
   // message array does not re-prime the recogniser.
   const speechMessageText = useStable(
@@ -123,7 +110,7 @@ export function useChatRoster([
     sameElementRefs,
   );
 
-  const speechHints = useMemo(
+  const speechHints = useCallback(
     () =>
       buildSpeechLexicon({
         roomName: resolvedChannelName,
@@ -262,61 +249,6 @@ export function useChatRoster([
     [agentByPubkey, memberOptions, selectedMembers, userPubkey],
   );
 
-  // The picker's candidates are the WORKSPACE roster minus this Room's
-  // members. The old picker filtered this Room's own member list, so its
-  // "add" section was always empty and the only visible path led to the
-  // pairing command (captain report C74). The transcript paints the shared
-  // `/workspace/:id` entry, so Members, profile receipts and settings reach
-  // every byline at once. A closed picker observes the canonical held answer;
-  // only opening the roster sheet or member picker reads its missing/fresh
-  // candidates. Room entry alone never reads data for a future picker.
-  const participantPickerCandidates = useMemo<MemberPickerCandidate[] | null>(() => {
-    if (!workspaceRoster) return null;
-    return [...workspaceRoster.members, ...workspaceRoster.agents]
-      .filter((member) => !roomMemberPubkeys.has(member.identity.pubkey))
-      .map((member) => {
-        const identity = member.identity;
-        if (identity.kind === 'agent') {
-          const display = resolveAgentDisplayIdentity(
-            identity.pubkey,
-            memberAgent(member, workspaceRoster.workspace.id),
-          );
-          return {
-            pubkey: identity.pubkey,
-            name: display.name,
-            handle: display.handle,
-            kind: 'agent' as const,
-            ...('model' in member && typeof member.model === 'string' ? { model: member.model } : {}),
-            ...(display.avatarUrl ? { avatarUrl: display.avatarUrl } : {}),
-            ...(display.face ? { face: display.face } : {}),
-          };
-        }
-        return {
-          pubkey: identity.pubkey,
-          name: identity.name,
-          handle: identity.handle ?? fallbackMemberHandle(identity.pubkey),
-          kind: 'person' as const,
-          ...(identity.face ? { face: identity.face } : {}),
-          ...(identity.avatar ? { avatarUrl: identity.avatar } : {}),
-        };
-      });
-  }, [roomMemberPubkeys, workspaceRoster]);
-
-  // Everyone of the listed kind in the Workspace besides the viewer, whether
-  // or not they are already in this Room. An empty candidate list means two
-  // different things — a Room that already holds them all, or a Workspace
-  // with nobody else in it — and this count is what tells the sheet which
-  // one to say (captain report C83).
-  const participantPickerWorkspacePeers = useMemo(() => {
-    if (!workspaceRoster) return 0;
-    return [...workspaceRoster.members, ...workspaceRoster.agents].filter((member) => {
-      if (member.identity.pubkey === userPubkey) return false;
-      if (!participantPickerKind) return true;
-      const kind = member.identity.kind === 'agent' ? 'agent' : 'person';
-      return kind === participantPickerKind;
-    }).length;
-  }, [participantPickerKind, userPubkey, workspaceRoster]);
-
   // Agents carry their model and owner, people their Room role, for the
   // roster sheet and @-mention menu.
   /** Room reads carry current labels even before the optional Workspace picker
@@ -351,11 +283,6 @@ export function useChatRoster([
     });
   }, [roomMembers, roomParticipants, workspaceRoster]);
 
-  const visibleRosterMembers = useMemo(
-    () => orderRoomRoster(describedRoomParticipants),
-    [describedRoomParticipants],
-  );
-
   const roomParticipantTotal = roomParticipants.length;
 
   const roomAgents = useMemo(
@@ -374,14 +301,6 @@ export function useChatRoster([
   // events can describe work, but they never mint or renew availability.
   const agentPresences = heartbeatPresences;
 
-  const roomMemberByPubkey = useMemo(
-    () =>
-      new Map<string, (typeof roomMembers)[number]>(
-        roomMembers.map((member) => [member.pubkey, member]),
-      ),
-    [roomMembers],
-  );
-
   const speakerRoleByPubkey = useMemo(() => {
     const roles = new Map<string, string>();
     for (const member of roomMembers) {
@@ -392,9 +311,7 @@ export function useChatRoster([
   }, [roomMembers]);
   return [
     roomParticipants, agentPresences, describedRoomParticipants, participantsHydrated,
-    personProfileByPubkey, agentByPubkey, roomAgents, participantPickerCandidates,
-    roomMemberPubkeys, agentProfileModelByPubkey, speakerRoleByPubkey, composerTagHandles,
-    speechHints, roomMemberByPubkey, visibleRosterMembers, roomParticipantTotal,
-    participantPickerWorkspacePeers,
-  ];
+    personProfileByPubkey, agentByPubkey, roomAgents, agentProfileModelByPubkey, speakerRoleByPubkey, composerTagHandles,
+    speechHints, roomParticipantTotal,
+    ];
 }

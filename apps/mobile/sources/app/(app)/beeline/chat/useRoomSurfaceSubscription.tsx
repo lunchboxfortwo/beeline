@@ -607,25 +607,17 @@ export function useRoomSurfaceSubscription([
           },
         });
         transportForEffect = nextTransport;
-        setTransport(nextTransport);
-        setRoomClient(nextRoomClient);
 
         const outbox = createRoomOutbox(relayUrl, identity, channelId);
         outboxRef.current = outbox;
         await outbox.restore();
         if (cancelled) return;
+        setTransport(nextTransport);
+        setRoomClient(nextRoomClient);
         const restored = outbox
           .list()
           .map((record) => displayRoomMessages([record.row], identity.publicKey)[0]!);
         if (restored.length) bindingsRef.current.restoreOutboxMessages(restored);
-        setFailedIds(
-          new Set(
-            outbox
-              .list()
-              .filter((record) => record.status === 'failed')
-              .map((record) => record.event.id),
-          ),
-        );
         const updateOutbox = () => {
           if (cancelled) return;
           if (isFocusedRef.current && AppState.currentState === 'active') void outbox.acknowledgeFailures();

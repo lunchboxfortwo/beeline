@@ -4,7 +4,7 @@ import { trackDictatedMessage } from '@/buzz/dictation-timing';
 import { appErrorCopy } from '@/buzz/app-error-copy';
 import React, { useRef, useCallback } from 'react';
 import { Buffer } from 'buffer';
-import { TextInput, Platform } from 'react-native';
+import { type TextInput, Platform } from 'react-native';
 import { useFocusEffect } from 'expo-router';
 import { loadBuzzIdentity } from '@/auth/buzz-identity-storage';
 import { readGitHubAccess } from '@/buzz/github-access-surface';
@@ -20,7 +20,7 @@ import { fallbackMemberName } from '@/buzz/member-display';
 import { looksLikeCornerOpenIntent, type RepoCandidate } from '@/buzz/room-repo-picker';
 import { type PickedChatAttachment } from '@/buzz/chat-attachment';
 import { prepareMessageReply, type MessageReplyDisplayTarget, type MessageReplyTarget } from '@/buzz/message-reply';
-import { type RoomRosterParticipant } from '@/components/buzz/RoomRosterSheet';
+import { type RoomRosterParticipant } from '@/buzz/room-participants';
 import { type DictatedSend } from '@/components/buzz/ConversationComposer';
 import { MessageShortcut, NO_SELECTED_MENTIONS, COMPOSER_MIN_HEIGHT } from './chat-surface-values';
 
@@ -171,12 +171,14 @@ export function useChatComposerSend([
       // transport startup and outbox persistence can all take longer than a
       // frame on a cold Android device.
       // Each viewport paints its provisional row before preparation.
-      const provisionalId = activePendingAttachments.length === 0
-        ? `pending:${Date.now()}:${Math.random()}`
-        : null;
+      const provisionalId = `pending:${Date.now()}:${Math.random()}`;
       if (provisionalId) {
         const provisional = {
           id: provisionalId,
+          ...(activePendingAttachments.length ? {
+            attachmentUploadPending: true,
+            attachments: activePendingAttachments.map(({ uri, name, mimeType, size }) => ({ url: uri, name, mimeType, size })),
+          } : {}),
           text,
           isUser: true,
           timestamp: Math.floor(Date.now() / 1_000),
@@ -320,11 +322,12 @@ export function useChatComposerSend([
             name: fallbackMemberName(userPubkey),
           },
           presentation: 'message',
+          ...(preparedReply?.reference ? { reply: preparedReply.reference } : {}),
           ...(mentionedPubkeys.length ? { mentionPubkeys: mentionedPubkeys } : {}),
           ...(attachments.length ? { attachments } : {}),
         });
         landAtOwnSend(optimistic.id);
-        if (!provisionalId) addMessages([optimistic]);
+        if (activePendingAttachments.length) addMessages([optimistic]);
         if (!sendShortcut) {
           const draftCleared = clearSubmittedDraft();
           if (activeComposerDraftRef.current === composerDraft) {

@@ -17,9 +17,6 @@ export function setDesktopAvailableWidth(availableWidth: number) {
 export function setDesktopPaneOpen(paneOpen: boolean) {
   update({ paneOpen, showRoomList: !paneOpen });
 }
-export function toggleDesktopRoomList() {
-  update({ showRoomList: !snapshot.showRoomList });
-}
 export function useDesktopLayout() {
   return useSyncExternalStore(
     (listener) => {

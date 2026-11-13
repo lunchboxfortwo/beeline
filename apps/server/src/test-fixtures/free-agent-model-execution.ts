@@ -53,7 +53,6 @@ export async function handleModelExecutionFixture(
     });
     return true;
   }
-  const now = options.now?.() ?? new Date();
   const turn = (
     await options.database.query<{
       id: string;
@@ -66,9 +65,9 @@ export async function handleModelExecutionFixture(
        ON turn.agent_id=command.agent_id AND turn.room_id=command.room_id
          AND turn.request_id=command.turn_request_id
        WHERE command.agent_id=$1 AND command.state='claimed'
-         AND command.action IN ('input','resume') AND ${commandOwnerLiveSql('command', '$2')}
+         AND command.action IN ('input','resume') AND ${commandOwnerLiveSql('command')}
        ORDER BY started DESC LIMIT 1`,
-      [agent.agent_id, now],
+      [agent.agent_id],
     )
   ).rows[0];
   if (!turn) {

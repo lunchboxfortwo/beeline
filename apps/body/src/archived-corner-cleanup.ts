@@ -5,6 +5,7 @@ import { lstat, readdir, rm } from 'node:fs/promises';
 import { basename, resolve } from 'node:path';
 import { ordinaryDirectory, storageTree, hasMount, type WholeStorageOptions, type StorageReclaimEntry } from './helper-storage.js';
 import { canonicalStoragePath } from './storage-filesystem.js';
+import { DEPENDENCY_LAYERS_DIR, openDependencyLayer } from './dependency-generation.js';
 const exec = promisify(execFile);
 
 // pidfds fence PID reuse. No environment values, arbitrary shell commands or
@@ -205,7 +206,11 @@ export async function removeArchivedCornerData(supervisorRoot: string, cornerId:
         inode.count++; seen.set(key, inode);
       }
       for (const item of seen.values()) { allocatedBytes += item.bytes; if (item.directory || item.count >= item.links) freedBytes += item.bytes; }
-      if (!options.dryRun) await rm(path, { recursive: true, force: true });
+      if (!options.dryRun) {
+        const layers = resolve(path, DEPENDENCY_LAYERS_DIR);
+        for (const layer of await readdir(layers).catch(() => [])) await openDependencyLayer(resolve(layers, layer));
+        await rm(path, { recursive: true, force: true });
+      }
       const entry: StorageReclaimEntry = { roomId: cornerId, path, kind: 'archived', allocatedBytes, freedBytes };
       entries.push(entry); options.log?.(entry);
     }

@@ -631,8 +631,8 @@ describe('GitHub refusing the merge (AC-6)', () => {
         cornerId,
       ])
     ).rows;
-    expect(lines).toHaveLength(1);
-    expect(lines[0]!.text).toContain(`HTTP ${status}`);
+    expect(lines).toEqual([]);
+    expect((await rootFixture.db.query(`SELECT private_payload->>'text' text FROM agent_commands WHERE room_id=$1 AND reason='corner_merge_refused'`, [cornerId])).rows).toEqual([{ text: reason }]);
     // Nothing records the attempt: a fresh merge_corner retries the head live,
     // and the same refusal is neither repeated in the corner nor re-woken.
     await implementersMerge();
@@ -640,7 +640,7 @@ describe('GitHub refusing the merge (AC-6)', () => {
     expect(await currentState(cornerId)).toBe('working');
     expect((await reasons(cornerId, A)).filter((r) => r === 'corner_merge_refused')).toHaveLength(1);
     expect((await rootFixture.db.query(`SELECT 1 FROM messages WHERE room_id=$1 AND text LIKE '%refused to merge%'`, [cornerId])).rowCount)
-      .toBe(1);
+      .toBe(0);
     // The queued recovery command keeps the badge working even before claim.
     const listed = (await rootFixture.phone.readCorners(R, H))!.corners.find((row) => row.corner.id === cornerId);
     expect(listed).toMatchObject({ state: 'working' });

@@ -3,44 +3,10 @@ import {
   isConnectorIdentity,
   roomTitle,
 } from '@beeline/api-contract/phone';
-import type { RoomCornerSummary } from '@/buzz/room-corner-store';
 import {
   type ChatListItem,
   type RoomViewIdentity,
 } from '@beeline/buzz-client';
-
-export type RoomListSection = {
-  kind: 'rooms' | 'messages';
-  title: 'Rooms' | 'Direct messages';
-  data: ChatListItem[];
-};
-
-/** A Room row carries the corner mark only when the viewer's dropdown has corners. */
-export function roomRowShowsCornerMark(
-  item: Pick<ChatListItem, 'directMessage'>,
-  summary: RoomCornerSummary | undefined,
-): boolean {
-  return !item.directMessage && Boolean(summary?.openCorners.some((corner) => corner.mine));
-}
-
-/** Rooms lead the index; direct messages follow in their own newest-first section. */
-export function roomListSections(chats: readonly ChatListItem[], includeEmpty = false): RoomListSection[] {
-  const visibleChats = chats.filter((item) => !item.closed);
-  const rooms = visibleChats.filter((item) => !item.directMessage);
-  const messages = visibleChats
-    .filter((item) => Boolean(item.directMessage))
-    .sort(
-      (left, right) =>
-        (right.latestMessage?.createdAt ?? right.room.updatedAt ?? 0) -
-        (left.latestMessage?.createdAt ?? left.room.updatedAt ?? 0),
-    );
-  return [
-    ...(rooms.length || includeEmpty ? [{ kind: 'rooms' as const, title: 'Rooms' as const, data: rooms }] : []),
-    ...(messages.length || includeEmpty
-      ? [{ kind: 'messages' as const, title: 'Direct messages' as const, data: messages }]
-      : []),
-  ];
-}
 
 export const NO_ACTIVITY_PREVIEW = 'No messages yet';
 

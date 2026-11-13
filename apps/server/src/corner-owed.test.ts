@@ -488,7 +488,8 @@ describe('corner_owed', () => {
     // by message id. The waiting reason reads the indexed blocker message by
     // its primary key too; owed facts still come from corner_owed.
     const messageScans = scans.filter((scan) => scan.relation === 'messages');
-    expect(corners!.sql).toContain('message.room_id IN (c.id,waiting.return_room_id)');
+    expect(corners!.sql).toContain('message.room_id=c.id AND message.author_id=commander.id');
+    expect(corners!.sql).toContain('reply.reply_to_message_id=ANY(waiting.asked_items)');
     expect(corners!.sql).toContain('message.author_id=commander.id');
     expect(corners!.sql).toContain('message.created_at>waiting.asked_at');
     // Activity resolves three dispatched sources. The common waiting rule
@@ -507,8 +508,9 @@ describe('corner_owed', () => {
     const isTargetSource = (alias: string) => /^target_source(?:_\d+)?$/.test(alias);
     expect(messageScans.filter((scan) => isTargetSource(scan.alias))).toHaveLength(2);
     expect(messageScans.filter((scan) => scan.alias === 'visible')).toHaveLength(1);
-    // The common clearing rule adds the report publication boundary and
-    // commander reply probes, bounded above by Room, author and ask time.
+    // The common clearing rule adds commander probes in the corner and
+    // threaded to the report. The report projection reads its publication
+    // boundary from the visible card it already joins.
     expect(messageScans.filter((scan) => scan.alias !== 'item' && scan.alias !== 'visible' &&
       !isDispatchSource(scan.alias) && !isTargetSource(scan.alias) && !scan.alias.startsWith('callsite') &&
       !scan.alias.startsWith('run_card'))).toHaveLength(8);

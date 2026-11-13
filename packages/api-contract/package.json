@@ -9,10 +9,20 @@
       "import": "./dist/mobile-minimum.js",
       "default": "./dist/mobile-minimum.js"
     },
+    "./agent-invitation-guide": {
+      "types": "./dist/agent-invitation-guide.d.ts",
+      "import": "./dist/agent-invitation-guide.js",
+      "default": "./dist/agent-invitation-guide.js"
+    },
     "./phone": {
       "types": "./dist/phone.d.ts",
       "import": "./dist/phone.js",
       "default": "./dist/phone.js"
+    },
+    "./chat-links": {
+      "types": "./dist/chat-links.d.ts",
+      "import": "./dist/chat-links.js",
+      "default": "./dist/chat-links.js"
     },
     "./daemon": {
       "types": "./dist/daemon.d.ts",

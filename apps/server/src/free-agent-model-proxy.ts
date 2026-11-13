@@ -7,7 +7,6 @@ import { Writable } from 'node:stream';
 import type { IncomingMessage, ServerResponse } from 'node:http';
 import { DEFAULT_FREE_AGENT_LIMITS, FREE_AGENT_BUDGET_MESSAGE, freeAgentTokenCapAt, type FreeAgentLimits } from './free-agent-limits.js';
 import type { SqlDatabase } from './database.js';
-import { warnFreeAgentOwner } from './free-agent-warning.js';
 import { recordFreeAgentEvent, type FreeAgentConfig } from './free-agents.js';
 import { FreeAgentPromptCache, promptTextBytes } from './free-agent-prompt-budget.js';
 import { OwnedModelAttempts, OwnedModelUnknownPayload, type OwnedModelAttemptReceipt, type OwnedModelEvidence, type OwnedModelReservation } from './owned-model-attempt.js';
@@ -479,9 +478,7 @@ export async function executeFreeAgentModel(response: ServerResponse, body: Reco
     options.database.transaction(async db => {
       await settleAllowance(db,agent.owner_id,agent.agent_id,day,spent-reservation.reserved,
         -reservation.credit,usd-reservation.reservedUsd,{ day,tokens:spent,usd });
-    }).then(async () => {
-      if (spent > 0) await warnFreeAgentOwner(options.database, agent.agent_id, agent.owner_id, day, config.dailyTokenCap, turn.room_id);
-    }).catch(error => console.error('[free-agents] usage charge or warning failed', error));
+    }).catch(error => console.error('[free-agents] usage charge failed', error));
   const upstreamBase = (options.upstreamBaseUrl ?? 'https://openrouter.ai/api/v1').replace(/\/$/, '');
   const openRouter = new URL(upstreamBase).hostname.endsWith('openrouter.ai');
   const upstreamBody = modelPayload(body, options.config.model, reservation.maxOutput, openRouter);

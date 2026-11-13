@@ -533,7 +533,7 @@ const scope1 = fixtureScope1();
     await scope1.db.query("UPDATE agents SET selected_model='agent' WHERE agent_id=$1", [member]);
     await scope1.db.query("UPDATE identities SET name='My reviewer' WHERE id=$1", [member]);
     const roster = await scope1.phone.readWorkspaceMembers(WORKSPACE, USER, { q: 'My reviewer' });
-    expect(roster?.agents.find(agent => agent.identity.pubkey === member)?.model).toBe(label);
+    expect(roster?.agents.find(agent => agent.identity.pubkey === member)?.model).toBeUndefined();
     const profile = await scope1.phone.readAgent(WORKSPACE, member, USER);
     expect(profile?.selected?.model).toBe(label);
     expect(profile?.seededSoul).toContain(`Connected through ${label}.`);
@@ -750,6 +750,7 @@ const scope1 = fixtureScope1();
   it('Reproduction R1: lets a stored read-only connection post and refresh without reconnecting', async () => {
     const grant = await scope1.authorize();
     const tokens = await (await scope1.exchange(grant)).json() as { access_token: string; refresh_token: string };
+    tokens.refresh_token = await scope1.legacyRefresh(tokens.access_token);
     // Seed the pre-fix state: every stored row for this connection holds read only.
     for (const table of ['rooms_mcp_tokens', 'rooms_mcp_families', 'rooms_mcp_connections']) {
       await scope1.db.query(`UPDATE ${table} SET scope='rooms:read' WHERE client_id=$1`, [grant.clientId]);
@@ -769,20 +770,18 @@ const scope1 = fixtureScope1();
     const next = await refreshed.json() as { access_token: string; refresh_token: string; scope: string };
     expect(next.scope).toBe('rooms:read rooms:write');
     expect((await call(next.access_token, 'send_message', { room: ROOM, text: 'posted after refresh' })).isError).toBeFalsy();
-    const narrowed = await scope1.post('/mcp/oauth/token', { grant_type: 'refresh_token', refresh_token: next.refresh_token,
-      client_id: grant.clientId, resource: scope1.origin + '/mcp', scope: 'rooms:read' });
-    expect(narrowed.status).toBe(200);
-    const last = await narrowed.json() as { access_token: string };
-    expect((await call(last.access_token, 'send_message', { room: ROOM, text: 'posted after narrow refresh' })).isError).toBeFalsy();
+    expect(next).not.toHaveProperty('refresh_token');
     expect((await scope1.phone.readWorkbench({ workspaceId: WORKSPACE }, USER)).aiClients)
       .toContainEqual(expect.objectContaining({ clientId: grant.clientId, scopes: ['rooms:read', 'rooms:write'] }));
   });
 
-  it('rejects expired grants and never accepts an MCP grant as a phone session', async () => {
+  it('keeps old access tokens valid, rejects revoked tokens and expired codes, and isolates phone sessions', async () => {
     const { token } = await scope1.connected();
     expect((await phoneFetch(scope1.origin + '/mcp', { headers: { authorization: `Bearer ${token}`, origin: 'https://unregistered.example' } })).status).toBe(403);
     expect((await phoneFetch(scope1.origin + '/v1/phone/workspaces', { headers: { authorization: `Bearer ${token}` } })).status).toBe(401);
-    await scope1.db.query("UPDATE rooms_mcp_tokens SET expires_at=now()-interval '1 second' WHERE hash=$1", [tokenHash(token)]);
+    await scope1.db.query("UPDATE rooms_mcp_tokens SET expires_at=now()-interval '2 hours' WHERE hash=$1", [tokenHash(token)]);
+    expect((await phoneFetch(scope1.origin + '/mcp', { headers: { authorization: `Bearer ${token}` } })).status).not.toBe(401);
+    await scope1.db.query("UPDATE rooms_mcp_tokens SET revoked_at=now() WHERE hash=$1", [tokenHash(token)]);
     expect((await phoneFetch(scope1.origin + '/mcp', { headers: { authorization: `Bearer ${token}` } })).status).toBe(401);
     const grant = await scope1.authorize();
     await scope1.db.query("UPDATE rooms_mcp_codes SET expires_at=now()-interval '1 second' WHERE hash=$1", [tokenHash(grant.code!)]);

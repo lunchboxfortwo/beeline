@@ -25,7 +25,6 @@ const COMPONENT_RULES = new Set(['raw-button', 'custom-row', 'custom-header']);
 export const SHARED_CONTROL_OWNERS = new Set([
   'components/buzz/Button.tsx',
   'components/buzz/ButtonRow.tsx',
-  'components/buzz/ConversationRow.tsx',
   'components/buzz/EmptyState.tsx',
   'components/buzz/ErrorBanner.tsx',
   'components/buzz/HullActionSheet.tsx',
@@ -251,17 +250,21 @@ function controlContext(node, context) {
 
 // Alignment-specific rules join this list. A rule returns one diagnostic message
 // or null; the common scanner, grandfather registry and required CI gate own enforcement.
+// The shared text fields that own a native TextInput.
+const TEXT_FIELD_OWNERS = [
+  ['components/buzz/HullDialog.tsx', 'HullDialogInput'],
+  // The composer's field, drawn in one grammar type style.
+  ['ui/grammar-root.tsx', 'NativeTypeInput'],
+  ['components/CommandPalette/CommandPaletteInput.tsx', 'CommandPaletteInput'],
+];
+const ownsTextField = (c) => TEXT_FIELD_OWNERS.some(([file, owner]) => c.file === file && c.owner(c.node) === owner);
+
 export const UI_CONTROL_RULES = [
   {
     id: 'aligned-text-field',
     strict: true,
     check: (c) =>
-      c.primitive === 'TextInput' &&
-      ![
-        ['components/buzz/HullDialog.tsx', 'HullDialogInput'],
-        ['components/buzz/ConversationComposer.tsx', 'ConversationComposerContent'],
-        ['components/CommandPalette/CommandPaletteInput.tsx', 'CommandPaletteInput'],
-      ].some(([file, owner]) => c.file === file && c.owner(c.node) === owner)
+      c.primitive === 'TextInput' && !ownsTextField(c)
         ? 'Use HullDialogInput; only the composer and command palette own specialized native fields.'
         : null,
   },
@@ -280,7 +283,7 @@ export const UI_CONTROL_RULES = [
   {
     id: 'raw-text-input',
     check: (c) =>
-      c.primitive === 'TextInput'
+      c.primitive === 'TextInput' && !ownsTextField(c)
         ? 'Use a registered shared text field instead of raw TextInput.'
         : null,
   },

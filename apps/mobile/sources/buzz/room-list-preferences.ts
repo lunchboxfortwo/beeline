@@ -1,78 +1,12 @@
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { useCallback, useEffect, useRef, useState } from 'react';
-import type { ChatListItem } from '@beeline/buzz-client';
-import { roomRowName } from './room-list-row';
 
-export type RoomListFilter = 'all' | 'unread' | 'messages' | 'pinned';
-export function useRoomListFilter(
-  workspace: string | null,
-  ready: boolean,
-  hasPinnedRoom: boolean,
-) {
-  const [selection, setSelection] = useState<{
-    workspace: string | null;
-    filter: RoomListFilter;
-    chosen: boolean;
-  }>({ workspace, filter: 'all', chosen: false });
-  // Choose the default on the same render that receives pins and Rooms.
-  // The effect only remembers that choice so later updates cannot replace it.
-  const filter = selection.workspace === workspace && selection.chosen
-    ? selection.filter
-    : ready && hasPinnedRoom ? 'pinned' : 'all';
-  useEffect(() => {
-    if (!workspace) return;
-    setSelection((current) => {
-      if (current.workspace === workspace && current.chosen) return current;
-      if (!ready) {
-        return current.workspace === workspace
-          ? current
-          : { workspace, filter: 'all', chosen: false };
-      }
-      return { workspace, filter: hasPinnedRoom ? 'pinned' : 'all', chosen: true };
-    });
-  }, [workspace, ready, hasPinnedRoom]);
-  const chooseFilter = useCallback(
-    (next: RoomListFilter) => setSelection({ workspace, filter: next, chosen: true }),
-    [workspace],
-  );
-  return [filter, chooseFilter] as const;
-}
 const writes = new Map<string, Promise<void>>();
 const decodePins = (raw: string | null): string[] => {
   const value: unknown = raw ? JSON.parse(raw) : [];
   return Array.isArray(value) ? value.filter((id): id is string => typeof id === 'string') : [];
 };
 const listeners = new Map<string, Set<(ids: readonly string[]) => void>>();
-
-export function filterConversations(
-  chats: readonly ChatListItem[],
-  query: string,
-  filter: RoomListFilter,
-  pinned: readonly string[],
-): ChatListItem[] {
-  const needle = query.trim().toLocaleLowerCase();
-  return chats.filter(
-    (item) =>
-      !item.closed &&
-      (filter !== 'unread' || item.unread) &&
-      (filter !== 'messages' || Boolean(item.directMessage)) &&
-      (filter !== 'pinned' || pinned.includes(item.room.id)) &&
-      (!needle ||
-        `${roomRowName(item).name} ${item.latestMessage?.text ?? ''}`
-          .toLocaleLowerCase()
-          .includes(needle)),
-  );
-}
-
-export function roomListCounts(chats: readonly ChatListItem[], pinned: readonly string[]) {
-  const visible = chats.filter((item) => !item.closed);
-  const pinnedIds = new Set(pinned);
-  return {
-    all: visible.length,
-    unread: visible.filter((item) => item.unread).length,
-    pinned: visible.filter((item) => pinnedIds.has(item.room.id)).length,
-  };
-}
 
 /** Device-local navigation preferences, scoped to the signed-in viewer and Workspace. */
 export function useRoomPins(
@@ -152,4 +86,44 @@ export function useRoomPins(
     togglePin: toggle,
     pinError: error,
   };
+}
+
+type ChatFilter = 'unread' | 'pinned';
+
+/** Search chips are a per-device preference, not a transient search draft. */
+export function useChatFilters(
+  viewer: string | null | undefined,
+  workspace: string | null | undefined,
+) {
+  const key = viewer && workspace ? `@beeline/chat-filters/${viewer}/${workspace}` : null;
+  const [state, setState] = useState<{ key: string | null; chips: ChatFilter[] }>({ key: null, chips: [] });
+  const changed = useRef(false);
+  useEffect(() => {
+    let cancelled = false;
+    changed.current = false;
+    if (key) void (writes.get(key) ?? Promise.resolve())
+      .catch(() => undefined)
+      .then(() => AsyncStorage.getItem(key))
+      .then(raw => {
+        if (cancelled || changed.current) return;
+        const values: unknown = raw ? JSON.parse(raw) : [];
+        const chips = Array.isArray(values)
+          ? values.filter((value): value is ChatFilter => value === 'unread' || value === 'pinned')
+          : [];
+        setState({ key, chips });
+      }).catch(() => undefined);
+    return () => { cancelled = true; };
+  }, [key]);
+  const setFilters = useCallback((chips: ChatFilter[]) => {
+    changed.current = true;
+    setState({ key, chips });
+    if (!key) return;
+    const write = (writes.get(key) ?? Promise.resolve()).catch(() => undefined)
+      .then(() => AsyncStorage.setItem(key, JSON.stringify(chips)));
+    writes.set(key, write);
+    void write.catch(() => undefined).finally(() => {
+      if (writes.get(key) === write) writes.delete(key);
+    });
+  }, [key]);
+  return [state.key === key ? state.chips : [], setFilters] as const;
 }

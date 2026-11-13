@@ -42,6 +42,7 @@
   "dependencies": {
     "@beeline/api-contract": "file:../../packages/api-contract",
     "@beeline/buzz-client": "file:../../packages/buzz-client",
+    "@beeline/net": "file:../../packages/net",
     "@beeline/nostr": "file:../../packages/nostr",
     "@codemirror/lang-cpp": "^6.0.3",
     "@codemirror/lang-css": "^6.3.1",
@@ -82,6 +83,7 @@
     "@sentry/react-native": "^8.31.0",
     "@shopify/flash-list": "~2.3.0",
     "@shopify/react-native-skia": "~2.5.3",
+    "@tamagui/config": "3.3.1",
     "@tauri-apps/api": "2.9.1",
     "@tauri-apps/cli": "^2.8.1",
     "@tauri-apps/plugin-deep-link": "~2.4.10",
@@ -155,6 +157,7 @@
     "fuse.js": "^7.1.0",
     "livekit-client": "^2.22.4",
     "lottie-react-native": "~7.3.1",
+    "lucide-react-native": "1.70.0",
     "mermaid": "^11.12.1",
     "nostr-tools": "^2.24.1",
     "posthog-react-native": "~4.37.5",
@@ -189,13 +192,13 @@
     "react-syntax-highlighter": "^15.6.1",
     "react-textarea-autosize": "^8.5.9",
     "resolve-path": "^1.4.0",
+    "tamagui": "3.3.1",
     "thumbhash": "^0.1.1",
     "twrnc": "^4.9.1",
     "uuid": "^11.1.0",
     "vitest": "^3.2.4",
     "zod": "^4.0.0",
-    "zustand": "^5.0.6",
-    "@beeline/net": "file:../../packages/net"
+    "zustand": "^5.0.6"
   },
   "devDependencies": {
     "@babel/core": "^7.25.2",

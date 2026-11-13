@@ -168,4 +168,64 @@ describe('durable workspace avatars through the installed phone contract', () =>
     expect((await phoneFetch(saved)).status).toBe(200);
     expect((await phoneFetch(`${origin}/v1/avatars/not-a-uuid`)).status).toBe(404);
   });
+
+  const profile = (body: object, accessToken = token) =>
+    phoneFetch(`${origin}/v1/phone/operations/updatePersonProfile`, {
+      method: 'POST',
+      headers: { authorization: `Bearer ${accessToken}`, 'content-type': 'application/json' },
+      body: JSON.stringify(body),
+    });
+  const managed = async () =>
+    (
+      await (
+        await phoneFetch(`${origin}/v1/phone/operations/getManagedIdentity`, {
+          method: 'POST',
+          headers: { authorization: `Bearer ${token}`, 'content-type': 'application/json' },
+          body: '{}',
+        })
+      ).json()
+    ).avatar as string | undefined;
+
+  it('promotes a personal photo upload into a durable person avatar and clears it', async () => {
+    const media = await upload(await picture());
+    const saved = await profile({ avatar: new URL(media).pathname });
+    expect(saved.status).toBe(200);
+    const avatar = (await saved.json()).avatar as string;
+    expect(avatar).toMatch(new RegExp(`^${origin}/v1/person-avatars/[0-9a-f-]{36}$`));
+    expect(await managed()).toBe(avatar);
+    const stored = (
+      await database.query<{ id: string; bytes: Uint8Array }>(
+        'SELECT id,bytes FROM person_avatars WHERE identity_id=$1',
+        [OWNER],
+      )
+    ).rows;
+    expect(stored).toHaveLength(1);
+    expect(avatar.endsWith(`/v1/person-avatars/${stored[0]!.id}`)).toBe(true);
+    expect((await database.query('SELECT avatar FROM identities WHERE id=$1', [OWNER])).rows[0])
+      .toEqual({ avatar: `/v1/person-avatars/${stored[0]!.id}` });
+    const served = await phoneFetch(avatar);
+    expect(served.status).toBe(200);
+    expect(served.headers.get('content-type')).toBe('image/webp');
+    expect(Buffer.from(await served.arrayBuffer()).equals(Buffer.from(stored[0]!.bytes))).toBe(true);
+    // Re-saving the durable URL keeps it; another person's upload is refused.
+    expect((await (await profile({ avatar })).json()).avatar).toBe(avatar);
+    const outsider = (await auth.exchangeGitHubOidc('outsider')).accessToken;
+    expect((await profile({ avatar: await upload(await picture(), outsider) })).ok).toBe(false);
+    expect(await managed()).toBe(avatar);
+
+    const cleared = await profile({ avatar: '' });
+    expect((await cleared.json()).avatar).toBeUndefined();
+    expect((await database.query('SELECT 1 FROM person_avatars')).rowCount).toBe(0);
+    expect((await phoneFetch(avatar)).status).toBe(404);
+  });
+
+  it('stores an external personal avatar URL unchanged and stops serving a replaced upload', async () => {
+    const uploaded = (await (await profile({ avatar: new URL(await upload(await picture())).pathname })).json()).avatar as string;
+    expect((await phoneFetch(uploaded)).status).toBe(200);
+    const external = 'https://images.example/captain.png';
+    expect((await (await profile({ avatar: external })).json()).avatar).toBe(external);
+    expect((await phoneFetch(uploaded)).status).toBe(404);
+    expect(await managed()).toBe(external);
+    expect((await database.query('SELECT 1 FROM person_avatars')).rowCount).toBe(0);
+  });
 });

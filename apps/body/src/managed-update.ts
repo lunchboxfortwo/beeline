@@ -6,6 +6,7 @@ import {
   prepareLatestRelease,
   readInstalledBundleIdentity,
   readUpdateState,
+  writeUpdateState,
   type BeelineInstallLayout,
 } from './self-update.js';
 
@@ -20,22 +21,26 @@ export function withInstallLock<T>(
 }
 
 export function versionAtLeast(actual: string, minimum: string): boolean {
-  const parse = (value: string) => /^v?(\d+)\.(\d+)\.(\d+)$/.exec(value)?.slice(1).map(Number);
+  const parse = (value: string) => {
+    const match = /^v?(\d+)\.(\d+)\.(\d+)(?:-rc\.(\d+))?$/.exec(value);
+    return match ? [...match.slice(1, 4).map(Number), match[4] === undefined ? Infinity : Number(match[4])] : undefined;
+  };
   const left = parse(actual),
     right = parse(minimum);
   if (!left || !right) return false;
-  for (let index = 0; index < 3; index++)
+  for (let index = 0; index < 4; index++)
     if (left[index] !== right[index]) return left[index]! > right[index]!;
   return true;
 }
 
 /** One cancellable update attempt; no agent or control request awaits it. */
 export class ReleaseTransaction {
-  #attempt?: { controller: AbortController; timer: NodeJS.Timeout };
+  #attempt?: { controller: AbortController; timer?: NodeJS.Timeout };
   #preparing?: Promise<void>;
   #handingOff?: Promise<void>;
   #prepared?: string;
   #minimum?: string;
+  #force = false;
   #completed = false;
   #pendingCheck = false;
   constructor(
@@ -54,21 +59,36 @@ export class ReleaseTransaction {
   get pending(): Promise<void> | undefined { return this.#preparing ?? this.#handingOff; }
 
   private begin() {
-    if (this.#attempt) return this.#attempt;
-    const controller = new AbortController();
+    if (this.#attempt?.timer) return this.#attempt;
+    const controller = this.#attempt?.controller ?? new AbortController();
     const timer = setTimeout(() => this.fail(controller.signal,
       new Error('update handoff timed out; keeping current release')), UPDATE_HANDOFF_TIMEOUT_MS);
     timer.unref();
     return this.#attempt = { controller, timer };
   }
 
-  private fail(signal: AbortSignal, error: unknown): void {
+  private fail(signal: AbortSignal, error: unknown, releaseId = this.#prepared): void {
     if (this.#attempt?.controller.signal !== signal) return;
     this.dispose();
     this.#prepared = undefined;
     this.#preparing = this.#handingOff = undefined;
     this.options.changed(undefined);
     this.options.failed(error, this.#minimum);
+    if (releaseId) {
+      // A failed/rolled-back handoff must not remain a boot selection. Only
+      // discard this attempt's target: a newer worker may already have staged.
+      const cleanup = withInstallLock(this.options.layout, async () => {
+        const state = await readUpdateState(this.options.layout);
+        if (state.stagedReleaseId === releaseId)
+          await writeUpdateState(this.options.layout, { ...state, stagedReleaseId: undefined,
+            lastCheckResult: 'failed', lastCheckError: String(error) });
+      }).catch(cleanupError => this.options.failed(cleanupError, this.#minimum)).finally(() => {
+        if (this.#preparing !== cleanup) return;
+        this.#preparing = undefined;
+        if (this.#pendingCheck) this.notify();
+      });
+      this.#preparing = cleanup;
+    }
   }
 
   notify(_releaseKey?: string, minimum?: string): void {
@@ -96,15 +116,21 @@ export class ReleaseTransaction {
     this.#preparing = operation;
   }
 
-  async prepared(releaseId: string): Promise<void> {
+  async prepared(releaseId: string, force = false): Promise<void> {
     if (this.#completed) return;
+    this.#force ||= force;
     const { signal } = this.begin().controller;
     try {
+      const targetLayout = { ...this.options.layout,
+        libDir: resolve(this.options.layout.releasesRoot, releaseId) };
+      const identity = await readInstalledBundleIdentity(targetLayout);
+      const loaded = this.options.loadedRelease ? await readInstalledBundleIdentity({
+        ...this.options.layout, libDir: resolve(this.options.layout.releasesRoot, this.options.loadedRelease),
+      }) : undefined;
+      if (identity?.version && loaded?.version && identity.version !== loaded.version &&
+          versionAtLeast(loaded.version, identity.version) && !versionAtLeast(identity.version, loaded.version))
+        throw new Error(`requested helper ${identity.version} is older than running ${loaded.version}`);
       if (this.#minimum) {
-        const identity = await readInstalledBundleIdentity({
-          ...this.options.layout,
-          libDir: resolve(this.options.layout.releasesRoot, releaseId),
-        });
         if (!identity?.version || !versionAtLeast(identity.version, this.#minimum))
           throw new Error(`published helper ${identity?.version ?? 'unknown'} is below required ${this.#minimum}`);
       }
@@ -118,16 +144,20 @@ export class ReleaseTransaction {
       this.#prepared = releaseId;
       this.options.changed(releaseId);
       this.idleChanged();
-    } catch (error) { this.fail(signal, error); }
+    } catch (error) { this.fail(signal, error, releaseId); }
   }
 
   idleChanged(): void {
     if (this.#completed || !this.#prepared || this.#preparing || this.#handingOff) return;
+    // Preparation is complete. Waiting for idle has no deadline; keep the
+    // verified boot selection until an idle event or the next native restart.
+    clearTimeout(this.#attempt?.timer);
+    if (this.#attempt) this.#attempt.timer = undefined;
+    const interrupted = this.#force || Boolean(this.#minimum);
+    if (!interrupted && !this.options.idle()) return;
     const { signal } = this.begin().controller;
     const operation = Promise.resolve().then(async () => {
       if (signal.aborted) return;
-      const interrupted = Boolean(this.#minimum);
-      if (!interrupted && !this.options.idle()) return;
       await this.options.handoff(this.#prepared!, interrupted, signal);
       if (!signal.aborted) {
         this.#completed = true;
@@ -143,6 +173,7 @@ export class ReleaseTransaction {
 
   dispose(): void {
     this.#pendingCheck = false;
+    this.#force = false;
     if (!this.#attempt) return;
     clearTimeout(this.#attempt.timer);
     this.#attempt.controller.abort();

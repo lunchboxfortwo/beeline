@@ -379,8 +379,11 @@ describe('held presence for a live connection', () => {
       if (recovery === 'resync') live.resync();
       else live.publish({ type: 'invalidate', roomId: ROOM, reason: 'postgres:messages', messageId: 'source' });
       const recovered = await client.next(frame => delivered(frame, missed.id));
-      expect(recovered.commands).toEqual([expect.objectContaining({ id: missed.id })]);
-      expect(client.frames.some(frame => delivered(frame, claimed.id))).toBe(false);
+      expect(recovered.commands).toEqual([expect.objectContaining({ id: claimed.id, generationId: 'first' }),
+        expect.objectContaining({ id: missed.id })]);
+      // The running turn is listed only with its generation, for its helper to resume.
+      expect(client.frames.flatMap(frame => frame.type === 'commands' && Array.isArray(frame.commands) ? frame.commands as { id: string; generationId?: string }[] : [])
+        .filter(command => command.id === claimed.id).every(command => command.generationId === 'first')).toBe(true);
       expect(client.frames.filter(frame => delivered(frame, sibling.id))).toHaveLength(1);
       expect(client.frames.some(frame => frame.type === 'unregistered')).toBe(false);
       expect(client.socket.readyState).toBe(WebSocket.OPEN);

@@ -71,8 +71,6 @@ export function useChatComposerDraft([
   pendingAttachments: PickedChatAttachment[],
   setAttachmentPickerVisible: React.Dispatch<React.SetStateAction<boolean>>,
   setHighlightedMentionIndex: React.Dispatch<React.SetStateAction<number>>,
-  addingMembers: boolean,
-  setAddingMembers: React.Dispatch<React.SetStateAction<boolean>>,
   setRoomRepoListLoading: React.Dispatch<React.SetStateAction<boolean>>,
   setRoomRepoError: React.Dispatch<React.SetStateAction<string | null>>,
   setShowRoomRepoPicker: React.Dispatch<React.SetStateAction<boolean>>,
@@ -243,7 +241,6 @@ export function useChatComposerDraft([
   // What this corner inherited from the Room it was opened out of: the task
   // the daemon recorded on its create event, and the bounded window of Room
   // conversation that preceded it. Corner-only; a Room never reads it.
-  const [addingMembers, setAddingMembers] = useState(false);
 
   // The repo this Room owns, or `null` for a chat-only Room. Corners never
   // read this — a corner has no room-repository binding of its own; the
@@ -268,8 +265,7 @@ export function useChatComposerDraft([
     setForwardError, forwardTarget, forwardBusyRoomId, setForwardBusyRoomId, composerDraft,
     replyTarget, pendingAttachmentsRef, setSending, attachmentUploader, activeComposerDraftRef,
     setComposerInputRevision, setComposerHeight, replacePendingAttachments, setCornerProposalAction,
-    pendingAttachments, setAttachmentPickerVisible, setHighlightedMentionIndex, addingMembers,
-    setAddingMembers, setRoomRepoListLoading, setRoomRepoError, setShowRoomRepoPicker,
+    pendingAttachments, setAttachmentPickerVisible, setHighlightedMentionIndex, setRoomRepoListLoading, setRoomRepoError, setShowRoomRepoPicker,
     setRoomRepoNotice, roomRepoBusy, setRoomRepoBusy, roomRepoListLoading, roomRepoError,
     roomRepoNotice, showRoomRepoPicker, sending, setDismissedSlashText, highlightedSlashVerbIndex,
     failedOutboxIds, cornerProposalAction, turnChromeTopInset, setTurnChromeTopInset,

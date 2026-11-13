@@ -1,4 +1,4 @@
-import { type DaemonAttachment, readAgentUsage, usageSummary, usageIsOld, type RoomConversationResult, type CornerRestoreResult, cornerTextRefusal, type ConnectResult } from "@beeline/api-contract/daemon";
+import { type DaemonAttachment, readAgentUsage, usageSummary, usageIsOld, type RoomConversationResult, type CornerRestoreResult, fixCornerText, type ConnectResult } from "@beeline/api-contract/daemon";
 import { withoutImageData, deliverAttachments, attachmentId } from "./attachment-delivery.js";
 import { join } from "node:path";
 import { createHash, randomUUID } from "node:crypto";
@@ -470,6 +470,7 @@ export async function executeAgentOperation(
             createdAt: item.createdAt,
             type: item.type,
             ...(item.attachments.length ? { attachmentCount: item.attachments.length } : {}),
+            ...(item.messageLink ? { messageLink: item.messageLink } : {}),
           };
           while (body && JSON.stringify([...items, { ...row, body }]).length > 11000)
             body = body.slice(0, Math.floor(body.length / 2));
@@ -508,6 +509,7 @@ export async function executeAgentOperation(
             type: item.type,
             ...(offset ? { bodyOffset: offset } : {}),
             ...(item.attachments.length ? { attachmentCount: item.attachments.length } : {}),
+            ...(item.messageLink ? { messageLink: item.messageLink } : {}),
           };
           // Escaped control characters can occupy six JSON characters each.
           while (body && JSON.stringify([...items, { ...row, body }]).length > 11000)
@@ -673,16 +675,17 @@ export async function executeAgentOperation(
     }
     case 'rename_corner': {
       const cornerId = targetCornerId(args);
-      const refusal = args.name === undefined && args.reviewer !== undefined ? null : cornerTextRefusal('name', args.name);
-      if (refusal) throw new Error(refusal);
+      const fixedName = args.name === undefined && args.reviewer !== undefined ? undefined : fixCornerText('name', args.name);
+      const fixedObjective = args.objective === undefined ? undefined : fixCornerText('objective', args.objective);
       const result = await daemonExecute('renameCorner', {
         cornerId,
-        ...(args.name !== undefined ? { name: String(args.name) } : {}),
+        ...(fixedName ? { name: fixedName.text } : {}),
         ...(args.reviewer !== undefined ? { reviewer: args.reviewer as string } : {}),
-        ...(args.objective !== undefined ? { objective: args.objective } : {}),
+        ...(fixedObjective ? { objective: fixedObjective.text } : {}),
         ...(args.brief !== undefined ? { brief: await bindBriefFiles(asObject(args.brief)) } : {}),
       });
-      return args.name === undefined ? 'updated the corner reviewer' : `renamed the corner to ${String(result.name)}`;
+      const notes = [fixedName?.note, fixedObjective?.note].filter(Boolean).join('; ');
+      return args.name === undefined ? 'updated the corner reviewer' : `renamed the corner to ${String(result.name)}${notes ? `. ${notes}` : ''}`;
     }
     case 'create_subscription': {
       const source = stringArg(args, 'source');
@@ -826,6 +829,7 @@ export async function executeAgentOperation(
     case 'post_starters_card':
       return JSON.stringify(await daemonExecute('postRepositoryOnboarding', {
         ...await activeCommandContext(), kind: name === 'post_repository_card' ? 'repository' : 'starters',
+        ...(typeof args.repository === 'string' && args.repository.trim() ? { repository: args.repository.trim() } : {}),
       }));
     case 'store_secret':
       return storeSecret(args);

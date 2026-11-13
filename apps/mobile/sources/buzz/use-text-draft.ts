@@ -1,5 +1,5 @@
 import { NavigationContext } from '@react-navigation/core';
-import { useCallback, useContext, useEffect, useMemo, useRef, useState } from 'react';
+import { useCallback, useContext, useEffect, useMemo, useRef, useSyncExternalStore } from 'react';
 import { AppState } from 'react-native';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { useDraftIdentity } from './draft-identity';
@@ -40,10 +40,8 @@ export function useTextDraft<T extends string | string[]>(
   const setValue = useCallback((update: Value | ((previous: Value) => Value)) => {
     currentDraft.current.set(update);
   }, []);
-  const [state, setState] = useState({ draft, value: draft.value });
+  const value = useSyncExternalStore(draft.subscribe, () => draft.value, () => draft.value);
   useEffect(() => {
-    const unsubscribe = draft.subscribe(() => setState({ draft, value: draft.value }));
-    setState({ draft, value: draft.value });
     void draft.hydrate();
     const subscription = AppState.addEventListener('change', (status) => {
       if (status !== 'active') void draft.flush();
@@ -54,7 +52,6 @@ export function useTextDraft<T extends string | string[]>(
     if (typeof window !== 'undefined' && typeof window.addEventListener === 'function')
       window.addEventListener('pagehide', flush);
     return () => {
-      unsubscribe();
       subscription.remove();
       if (typeof window !== 'undefined' && typeof window.removeEventListener === 'function')
         window.removeEventListener('pagehide', flush);
@@ -68,5 +65,5 @@ export function useTextDraft<T extends string | string[]>(
       }),
     [navigation, draft],
   );
-  return [state.draft === draft ? state.value : draft.value, setValue, draft] as const;
+  return [value, setValue, draft] as const;
 }

@@ -1,6 +1,6 @@
 import { useTextDraft } from '@/buzz/use-text-draft';
 import React, { useEffect, useRef} from 'react';
-import { Platform, TextInput, type KeyboardTypeOptions } from 'react-native';
+import { Platform, type TextInput, type KeyboardTypeOptions } from 'react-native';
 import { HullDialog, HullDialogInput } from '@/components/buzz/HullDialog';
 import { PromptModalConfig } from '../types';
 

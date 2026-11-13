@@ -1,8 +1,10 @@
+import { backfillProviderPhotos } from './migrations/provider-photos.js';
 import { DIAGNOSTIC_COMMAND_SCHEMA } from './diagnostics-schema.js';
 import { SQUIRE_MACHINE_SCHEMA } from './squire-machine.js';
 import { backfillSquireMachines } from './squire-machine.js';
 import { IDENTITY_HANDLE_SCHEMA } from './identity-handles.js';
 import { WORKSPACE_HANDLE_SCHEMA } from './workspace-handles.js';
+import { CHAT_SEQ_INDEX, CHAT_SEQ_SCHEMA, backfillChatSeq } from './chat-seq.js';
 import { OWNED_MODEL_CREDENTIAL_SCHEMA } from './owned-model-credential.js';
 import { OWNED_MODEL_ATTEMPT_SCHEMA } from './owned-model-attempt.js';
 import { SENTRY_WAKE_SOURCE_SCHEMA } from './sentry-wake-source.js';
@@ -164,6 +166,9 @@ export async function migrate(
   await ddlScript('retired membership alias', 'DROP VIEW IF EXISTS effective_memberships;');
   await ddlScript('machine Squire source', SQUIRE_MACHINE_SCHEMA);
   await ddlScript('workspace handles', WORKSPACE_HANDLE_SCHEMA);
+  await ddlScript('chat message numbers', CHAT_SEQ_SCHEMA);
+  await runMigrationStep('chat message number lookup', () => createIndexConcurrently(database,
+    'messages_author_chat_seq_idx', CHAT_SEQ_INDEX));
   await ddlScript('stable identity handles', IDENTITY_HANDLE_SCHEMA);
   await runMigrationStep('one pending app sign-in card',()=>createIndexConcurrently(database,
     'messages_pending_app_sign_in_unique',`CREATE UNIQUE INDEX CONCURRENTLY messages_pending_app_sign_in_unique
@@ -582,6 +587,10 @@ export async function migrateData(database: SqlDatabase): Promise<void> {
     });
     return result;
   };
+  await dataStep('chat message numbers', () => workflowBackfillOnce(
+    database, 'chat-seq-v1', async db => { await backfillChatSeq(db); }));
+  await dataStep('provider photos', () => workflowBackfillOnce(
+    database, 'provider-photos-v1', async db => { await backfillProviderPhotos(db); }));
   await dataStep('departed reviewers', () => workflowBackfillOnce(
     database, 'departed-reviewers-v1', clearDepartedReviewers));
   await dataStep('archived corner holds', () => releaseArchivedCornerHolds(database));

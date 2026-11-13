@@ -27,7 +27,9 @@ describe('Squire decision after the asking turn ended', () => {
       const duplicate = await fixture.daemonOperation('postSquireApprovalDecision', decision);
       expect(duplicate.status).toBe(200);
       expect(await duplicate.json()).toMatchObject({ id: posted.id });
-      const { commands } = await readAgentCommands(fixture.database, ROOM, AGENT);
+      // A still-running asking turn is listed only with its generation, for its helper to resume.
+      const waiting = async () => (await readAgentCommands(fixture.database, ROOM, AGENT)).commands.filter(command => !command.generationId);
+      const commands = await waiting();
       expect(commands).toHaveLength(1);
       expect(commands[0]).toMatchObject({ roomId: ROOM, agentId: AGENT,
         action: ended ? 'input' : 'resume', sourceMessageId: posted.id });
@@ -51,7 +53,7 @@ describe('Squire decision after the asking turn ended', () => {
       });
       expect(silent.status).toBe(200);
       await fixture.daemonOperation('postSquireApprovalDecision', decision);
-      expect((await readAgentCommands(fixture.database, ROOM, AGENT)).commands).toEqual([]);
+      expect(await waiting()).toEqual([]);
     },
   );
 });

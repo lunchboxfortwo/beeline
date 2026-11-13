@@ -13,7 +13,7 @@ import { createHash, randomBytes } from 'node:crypto';
 import { endComputerSession, refreshComputerSession } from '../computer-session.js';
 import type { DaemonAttachment, DaemonOperationMap } from '@beeline/api-contract/daemon';
 import { REPLY_EXCERPT_MAX_LENGTH } from '@beeline/api-contract/daemon';
-import { GRANT_SCRIPT_MAX_BYTES, GRANT_SCRIPT_MAX_LINES, grantScriptTooLongMessage, interpreterScriptArgument, connectionInstallName, isCommandGrantScript, type AgentGrantKind, type CommandGrantRule, type CommandGrantScript } from '@beeline/api-contract/agent-grants';
+import { interpreterScriptArgument, connectionInstallName, isCommandGrantScript, type AgentGrantKind, type CommandGrantRule, type CommandGrantScript } from '@beeline/api-contract/agent-grants';
 import { MESSAGE_CURSOR_MS_SQL } from '../database.js';
 import { type SystemPhrase } from '../system-line.js';
 import { mediaIdFromUrl } from '../media-ttl.js';
@@ -173,11 +173,7 @@ export function validateGrantScript(
   rule: CommandGrantRule,
   script: unknown,
 ): CommandGrantScript | undefined {
-  // Only the helper can resolve PATH. A shadowed interpreter or wrapper is
-  // itself the script, rather than the operand its name would normally imply.
-  const argument = isCommandGrantScript(script) && script.path === rule.argv[0]
-    ? { path: script.path, inline: undefined, stdin: undefined }
-    : interpreterScriptArgument(rule.argv, true);
+  const argument = interpreterScriptArgument(rule.argv);
   if (rule.stdin !== undefined && !argument?.stdin) throw new Error('grant stdin is invalid: only interpreter stdin code is supported');
   if (script === undefined || script === null) {
     if (argument?.inline !== undefined || argument?.stdin)
@@ -196,22 +192,13 @@ export function validateGrantScript(
   // The hash is the binding, so the server re-derives it rather than trusting
   // the number it was handed: the bytes on the card and the bytes the runner
   // will check must be the same bytes.
-  const bytes = Buffer.byteLength(script.contents);
   if (
-    script.bytes !== bytes ||
+    script.bytes !== Buffer.byteLength(script.contents) ||
     createHash('sha256').update(script.contents).digest('hex') !== script.sha256
   ) {
     throw new Error('grant script is invalid: its hash does not match its contents');
   }
-  const lines = script.contents.split('\n').length;
-  if (bytes > GRANT_SCRIPT_MAX_BYTES || lines > GRANT_SCRIPT_MAX_LINES) {
-    // 'invalid' keeps this a 400 in `server.ts`'s status mapper, and the whole
-    // refusal still reaches the agent as its tool error.
-    throw new Error(
-      `grant script is invalid: ${grantScriptTooLongMessage(script.path, bytes, lines)}`,
-    );
-  }
-  return script;
+  return { path: script.path, sha256: script.sha256, bytes: script.bytes, contents: script.contents };
 }
 
 
@@ -261,6 +248,7 @@ export const conversationColumns = `SELECT id,author_id,created_at,presentation,
         root_message_id,request_id,
         (SELECT request.author_id FROM messages request WHERE request.id=messages.request_id) request_author_id,
         agent_hop_count,attachments,system_event,
+        CASE WHEN chat_seq IS NOT NULL THEN '¶'||beeline_room_handle(author_id,room_id)||'-'||chat_seq END message_link,
         ${MESSAGE_CURSOR_MS_SQL} cursor_ms,
         floor(extract(epoch FROM now())*1000)::bigint now_ms`;
 
@@ -352,7 +340,6 @@ export const DAEMON_OPERATION_ROUTES: Record<keyof DaemonOperationMap, true> = {
   getCornerCloseRequests: true,
   listUntrackedCorners: true,
   getRoomRepositoryState: true,
-  noteEmptyRoomRepository: true,
   getRoomGitHubToken: true,
   dispatchRoomWorkflow: true,
   getRoomTargetBranch: true,

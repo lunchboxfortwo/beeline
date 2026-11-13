@@ -1,7 +1,7 @@
 import React, { useState } from 'react';
-import { Pressable, Text, View } from 'react-native';
 import Svg, { Circle, Path, Rect } from 'react-native-svg';
-import { StyleSheet, useUnistyles } from 'react-native-unistyles';
+import { YStack, useTheme } from 'tamagui';
+import { T } from '@/ui/grammar';
 
 type Action = 'copy' | 'reply' | 'react' | 'bookmark' | 'report' | 'forward';
 
@@ -26,10 +26,11 @@ export function DesktopMessageAction({
   testID: string;
 }) {
   const [named, setNamed] = useState(false);
-  const { theme } = useUnistyles();
-  const ink = selected ? theme.buzz.accent : theme.buzz.ledgerQuiet;
+  const [pressed, setPressed] = useState(false);
+  const theme = useTheme();
+  const ink = (selected ? theme.needsYou?.val : theme.secondary?.val) as string;
   return (
-    <Pressable
+    <YStack
       accessibilityLabel={label}
       accessibilityRole="button"
       accessibilityState={action === 'bookmark' ? { selected } : undefined}
@@ -42,9 +43,18 @@ export function DesktopMessageAction({
         setNamed(false);
         onBlur();
       }}
-      onHoverIn={() => setNamed(true)}
-      onHoverOut={() => setNamed(false)}
-      style={({ pressed }) => [styles.button, named && styles.hover, pressed && styles.pressed]}
+      onMouseEnter={() => setNamed(true)}
+      onMouseLeave={() => setNamed(false)}
+      onPressIn={() => setPressed(true)}
+      onPressOut={() => setPressed(false)}
+      tabIndex={0}
+      cursor="pointer"
+      width={44}
+      height={44}
+      alignItems="center"
+      justifyContent="center"
+      borderRadius="sm"
+      backgroundColor={pressed || named ? 'highlight' : 'transparent'}
       testID={testID}
     >
       <Svg
@@ -78,35 +88,23 @@ export function DesktopMessageAction({
         {action === 'forward' ? <Path d="m15 5 6 6-6 6M21 11H11a7 7 0 0 0-7 7" /> : null}
       </Svg>
       {named ? (
-        <View pointerEvents="none" style={styles.tip} testID={`${testID}-tooltip`}>
-          <Text style={styles.tipText}>{tooltip}</Text>
-        </View>
+        <YStack
+          pointerEvents="none"
+          position="absolute"
+          bottom="100%"
+          right={0}
+          marginBottom="2"
+          padding="2"
+          backgroundColor="raised"
+          borderWidth={1}
+          borderColor="strongStroke"
+          borderRadius="sm"
+          zIndex={2}
+          testID={`${testID}-tooltip`}
+        >
+          <T v="meta" whiteSpace="nowrap">{tooltip}</T>
+        </YStack>
       ) : null}
-    </Pressable>
+    </YStack>
   );
 }
-
-const styles = StyleSheet.create((theme) => ({
-  button: {
-    width: 44,
-    height: 44,
-    alignItems: 'center',
-    justifyContent: 'center',
-    borderRadius: theme.buzz.radius,
-  },
-  hover: { backgroundColor: theme.buzz.bgHover },
-  pressed: { backgroundColor: theme.buzz.bgPressed },
-  tip: {
-    position: 'absolute',
-    bottom: '100%',
-    right: 0,
-    marginBottom: theme.buzz.space.sm,
-    padding: theme.buzz.space.sm,
-    backgroundColor: theme.buzz.bgRaised,
-    borderWidth: StyleSheet.hairlineWidth,
-    borderColor: theme.buzz.borderStrong,
-    borderRadius: theme.buzz.radius,
-    zIndex: 2,
-  },
-  tipText: { ...theme.buzz.type.meta, color: theme.buzz.textPrimary, whiteSpace: 'nowrap' } as any,
-}));

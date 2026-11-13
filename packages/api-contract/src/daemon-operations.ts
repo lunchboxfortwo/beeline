@@ -114,6 +114,8 @@ export type AgentCommand = {
   readonly rootSourceMessageId: string;
   readonly agentDepth: number;
   readonly private?: boolean;
+  /** Set on a claimed turn its helper did not finish; the helper resumes it in this generation. */
+  readonly generationId?: string;
   readonly source: RoomInboxResult['items'][number];
   /** Superseded wakes, quoted as history; only source authorizes this turn. */
   readonly recoveryContext?: string;

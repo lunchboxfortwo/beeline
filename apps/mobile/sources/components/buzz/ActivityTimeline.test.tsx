@@ -13,6 +13,7 @@ vi.mock('react-native', async () => {
   const host = (name: string) => (props: any) =>
     ReactModule.createElement(name, props, props.children);
   return {
+    PixelRatio: { get: () => 1 },
     Platform: { OS: 'android', select: (choices: Record<string, unknown>) => choices.default },
     Pressable: host('Pressable'),
     ScrollView: host('ScrollView'),
@@ -23,6 +24,8 @@ vi.mock('react-native', async () => {
   };
 });
 
+vi.mock('tamagui', async () => (await import('@/ui/screens/transcript/grammar-hosts.test-support')).tamaguiHosts());
+vi.mock('lucide-react-native', async () => (await import('@/ui/screens/transcript/grammar-hosts.test-support')).lucideHosts());
 vi.mock('react-native-safe-area-context', () => ({
   useSafeAreaInsets: () => ({ top: 0, right: 0, bottom: 0, left: 0 }),
 }));
@@ -129,8 +132,8 @@ describe('one-line tool ledger', () => {
   it('keeps the steps disclosure borderless with a full-height tap target', () => {
     const renderer = render(<TurnStepsLine items={TOOLS} />);
     const [row] = hostNodes(renderer, /^tool-run-group-read$/);
-    expect(row.props.style.minHeight).toBeGreaterThanOrEqual(44);
-    expect(row.props.style.borderTopWidth ?? 0).toBe(0);
+    expect(row.props.minHeight).toBeGreaterThanOrEqual(44);
+    expect(row.props.borderTopWidth ?? 0).toBe(0);
     expandRun(renderer, 'read');
     expect(hostNodes(renderer, /^tool-ledger-line-/)).toHaveLength(2);
     expandRun(renderer, 'read');
@@ -189,7 +192,7 @@ describe('one-line tool ledger', () => {
     expect(renderedText(renderer)).not.toContain('✗');
     expect(renderedText(renderer)).not.toContain('✓');
     const failed = renderer.root.findAllByType('Text').find((node: any) => node.props.children === 'Failed');
-    expect(failed.props.style).toContainEqual(expect.objectContaining({ color: groknight.accent }));
+    expect(failed.props.color).toBe('needsYou');
   });
 
   it('the live turn’s last step carries the spinner, not a verdict glyph', () => {
@@ -227,9 +230,9 @@ describe('one-line tool ledger', () => {
     expandRun(renderer, 'read');
     for (const id of ['read', 'bare']) {
       const [row] = hostNodes(renderer, new RegExp(`^tool-ledger-line-${id}$`));
-      expect(row.findAllByType('View').some((node: any) => JSON.stringify(node.props.style)?.includes('44'))).toBe(true);
+      expect(row.findAll((node: any) => typeof node.type === 'string' && node.props.minHeight >= 44).length > 0).toBe(true);
     }
-    expect(renderer.root.findByProps({ testID: 'tool-ledger-line-read' }).findByType('Pressable').props.accessibilityRole).toBe('button');
+    expect(renderer.root.findByProps({ testID: 'tool-ledger-line-read' }).findAll((node: any) => node.type === 'XStack' && typeof node.props.onPress === 'function')[0].props.accessibilityRole).toBe('button');
     expect(
       renderer.root.findByProps({ testID: 'tool-ledger-line-bare' }).props.onPress,
     ).toBeTypeOf('function');
@@ -463,7 +466,7 @@ describe('the output sheet', () => {
     expect(sheet.props.visible).toBe(true);
     expect(sheet.props.title).toBe('npm test');
     const scroll = renderer.root.findByProps({ testID: 'tool-output-scroll' });
-    expect(scroll.props.style[1].maxHeight).toBeLessThan(844);
+    expect(scroll.props.maxHeight).toBeLessThan(844);
     expect(scroll.props.nestedScrollEnabled).toBe(true);
     // The WHOLE output, not a six-line slice with a more-tap.
     const text = renderedText(renderer);
@@ -492,9 +495,7 @@ describe('the output sheet', () => {
     expandRun(renderer, 'out');
     act(() => renderer.root.findByProps({ testID: 'tool-ledger-line-out' }).props.onPress());
     const body = renderer.root.findByProps({ testID: 'tool-output-text' });
-    expect(body.props.selectable).toBe(true);
-    expect(renderer.root.findByProps({ testID: 'tool-output-copy' }).props.appearance.label.fontSize)
-      .toBe(body.props.style.fontSize);
+    expect(body.props.userSelect).toBe('text');
     expect(body.props.children).toContain('tests passed');
     expect(Clipboard.setStringAsync).not.toHaveBeenCalled();
     await act(async () => {
@@ -530,13 +531,12 @@ describe('the output sheet', () => {
     expect(hostNodes(renderer, /thought/)).toHaveLength(0);
     const draft = hostNodes(renderer, /^activity-message-draft$/)[0]!;
     expect(draft.props.children).toBe('The reply is taking shape.');
-    // The one plain Text carries the provisional tone the settle cross-fade
-    // fades out of; the style reaches the host as `style`, the composite as
-    // `textStyle`.
-    const draftStyle = renderer.root.findByProps({ testID: 'activity-message-draft' }).props
-      .textStyle;
-    expect(draftStyle.fontFamily).toBe(groknight.proseRegular);
-    expect(draftStyle.color).toBe(groknight.ledgerQuiet);
+    // The one plain Text carries the quiet tone the settle cross-fade fades
+    // out of: the grammar's body style in secondary.
+    const draftStyle = renderer.root.find((node: any) =>
+      node.props.testID === 'activity-message-draft' && node.props.textStyle).props.textStyle;
+    expect(draftStyle.fontFamily).toBe('SpaceGrotesk-Regular');
+    expect(draftStyle.color).toBe('secondary');
   });
 
   it('prints who asked, in the sheet, not the transcript', () => {
@@ -568,15 +568,10 @@ describe('agent prose and drafts', () => {
     const continuation = render(
       <ActivityTimeline items={[]} messageDraft="The answer keeps arriving." testID="activity" />,
     );
-    const continuingStyle = Object.assign(
-      {},
-      ...hostNodes(continuation, /^activity$/)[0].props.style.filter(Boolean),
-    );
-    expect(continuingStyle).toMatchObject({
-      paddingTop: groknight.messagePaddingVertical,
-      paddingBottom: groknight.messagePaddingVertical,
-      marginBottom: groknight.messageGap,
-    });
+    const continuing = hostNodes(continuation, /^activity$/)[0].props;
+    // 4 above, 8 below: a 12 gap between one speaker's rows.
+    expect(continuing).toMatchObject({ paddingTop: '1', paddingBottom: '2' });
+    expect(continuing).not.toHaveProperty('marginBottom');
 
     const speaker = render(
       <ActivityTimeline
@@ -586,17 +581,13 @@ describe('agent prose and drafts', () => {
         testID="activity"
       />,
     );
-    const speakerStyle = Object.assign(
-      {},
-      ...hostNodes(speaker, /^activity$/)[0].props.style.filter(Boolean),
-    );
+    const speakerProps = hostNodes(speaker, /^activity$/)[0].props;
     // The speaker-change air sits on the incoming visual top edge on BOTH
     // lists: a phone activity row is upright inside its cell, so the extra
-    // 12px belongs on `paddingTop` here too, never on the tail edge (which
-    // would leave a 30px gap under the newest row and 12px above the next).
-    expect(speakerStyle.paddingTop).toBe(groknight.messagePaddingVertical * 3);
-    expect(speakerStyle.paddingBottom).toBe(groknight.messagePaddingVertical);
-    expect(speakerStyle).not.toHaveProperty('marginTop');
+    // air belongs on `paddingTop` here too, never on the tail edge.
+    expect(speakerProps.paddingTop).toBe('4');
+    expect(speakerProps.paddingBottom).toBe('2');
+    expect(speakerProps).not.toHaveProperty('marginTop');
   });
 
   it('puts chronological speaker space on the incoming top edge', () => {
@@ -609,12 +600,9 @@ describe('agent prose and drafts', () => {
         testID="activity"
       />,
     );
-    const style = Object.assign(
-      {},
-      ...hostNodes(renderer, /^activity$/)[0].props.style.filter(Boolean),
-    );
-    expect(style.paddingTop).toBe(groknight.messagePaddingVertical * 3);
-    expect(style.paddingBottom).toBe(groknight.messagePaddingVertical);
+    const props = hostNodes(renderer, /^activity$/)[0].props;
+    expect(props.paddingTop).toBe('4');
+    expect(props.paddingBottom).toBe('2');
   });
 
   it('renders durable corner narration after the live draft is gone', () => {
@@ -653,9 +641,10 @@ describe('agent prose and drafts', () => {
       <ActivityTimeline active items={[TOOLS[0]!]} messageDraft="The result follows the call." />,
     );
 
+    // One step (4) above the draft.
     expect(
-      renderer.root.findByProps({ testID: 'activity-message-draft' }).props.textStyle.marginTop,
-    ).toBeLessThanOrEqual(4);
+      renderer.root.findByProps({ testID: 'activity-message-draft' }).parent.props.marginTop,
+    ).toBe('1');
   });
 
   it('prints streamed prose literally, never through the Markdown renderer or the thought lane', () => {
@@ -681,16 +670,14 @@ describe('agent prose and drafts', () => {
     expect(renderedText(renderer)).toContain('**The reply is ready**');
   });
 
-  it("renders the settled row's byline — IdentityMark + name + model + stamp — on the live draft", () => {
-    // Captain report C42: the streamed draft lane's byline must be exactly
-    // the settled message byline (`Ledger.LedgerBylineView`), so the agent
-    // triangle is present and nothing changes visually when the draft
-    // settles in place.
+  it("renders the settled row's sender line — face, name and time — on the live draft", () => {
+    // Captain report C42: the streamed draft lane's sender line is exactly
+    // the settled message's (`TranscriptLine`), so nothing changes visually
+    // when the draft settles in place.
     const renderer = render(
       <ActivityTimeline
         active
         handle="Codex"
-        role="openrouter/deepseek-deepseek-v.4.1-flash"
         stamp="14:02"
         items={[{ kind: 'tool', id: 'edit', title: 'Edit files', toolKind: 'edit' }]}
         messageDraft="Working on it now."
@@ -699,39 +686,10 @@ describe('agent prose and drafts', () => {
     );
     const mark = renderer.root.findByProps({ testID: 'chat-byline-mark' });
     expect(mark.props).toEqual(
-      expect.objectContaining({
-        seed: 'agent-pubkey',
-        kind: 'agent',
-        alive: true,
-        size: 26,
-      }),
+      expect.objectContaining({ seed: 'agent-pubkey', kind: 'agent', alive: true, size: 28 }),
     );
-    const byline = mark.parent.parent;
-    const textStrings: string[] = [];
-    const collect = (node: any) => {
-      if (typeof node === 'string') textStrings.push(node);
-      if (Array.isArray(node)) node.forEach(collect);
-      else if (node && typeof node === 'object' && node.props)
-        React.Children.forEach(node.props.children, collect);
-    };
-    byline.findAll((node: any) => node.type === 'Text').forEach(collect);
-    const bylineText = textStrings.join('');
-    expect(bylineText).toContain('Codex');
-    expect(bylineText).toContain('openrouter/deepseek-deepseek-v.4.1-flash');
-    expect(bylineText).not.toContain('effort');
-    expect(bylineText).toContain('14:02');
-    const role = renderer.root.findByProps({ testID: 'chat-byline-role' });
-    expect(role.props.numberOfLines).toBe(1);
-    expect(role.props.ellipsizeMode).toBe('tail');
-  });
-
-  it('keeps a streaming author readable while its real font loads', () => {
-    vi.mocked(useFonts).mockReturnValue([false, null]);
-    const renderer = render(<ActivityTimeline active handle="Ruby" role="Opus 5.5" stamp="22:45" items={[]} messageDraft="Working" />);
-    const name = renderer.root.findByProps({ testID: 'chat-byline-name' });
-    expect(Object.assign({}, ...name.props.style.filter(Boolean)).fontFamily).toBe('sans-serif');
-    expect(name.props.children).toBe('Ruby');
-    vi.mocked(useFonts).mockReturnValue([true, null]);
+    expect(renderer.root.findByProps({ testID: 'chat-byline-name' }).props.children).toBe('Codex');
+    expect(renderer.root.findByProps({ testID: 'chat-byline-stamp' }).props.children).toBe('14:02');
   });
 
   it('renders no identity mark when no byline handle is present', () => {
@@ -803,7 +761,7 @@ describe('folded historical transcripts', () => {
     act(() => renderer.root.findByProps({ testID: 'tool-run-more-tool-1' }).props.onPress());
     expect(hostNodes(renderer, /^tool-ledger-line-/)).toHaveLength(6);
     expect(
-      renderer.root.findByProps({ testID: 'tool-ledger-line-tool-8' }).findByType('Pressable').props.onPress,
+      renderer.root.findByProps({ testID: 'tool-ledger-line-tool-8' }).findAll((node: any) => node.type === 'XStack' && typeof node.props.onPress === 'function')[0]?.props.onPress,
     ).toBeTypeOf('function');
   });
 
@@ -917,9 +875,9 @@ it('retains Failed and a brass cross for a failed named MCP tool', () => {
   const failed = texts.find((node: any) => node.props.children === 'Failed');
   const cross = texts.find((node: any) => node.props.testID === 'activity-verdict-mcp-failure');
   expect(failed).toBeDefined();
-  expect(failed.props.style).toContainEqual({ color: groknight.accent });
+  expect(failed.props.color).toBe('needsYou');
   expect(cross.props.children).toBe('✗');
-  expect(cross.props.style).toContainEqual({ color: groknight.accent });
+  expect(cross.props.color).toBe('needsYou');
   expect(texts.map((node: any) => node.props.children)).not.toContain('Read_file');
 });
 

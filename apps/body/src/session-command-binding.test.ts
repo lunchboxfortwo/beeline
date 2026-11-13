@@ -86,9 +86,8 @@ it.each(['room', 'corner'] as const)('%s sessions replace the MCP context captur
       squireRelay: { listen: (path: string) => Promise<{ contextFile: string }>; close: () => void };
     };
   const context = loop.commandContext;
-  const source = { connectionId: 'source', epoch: 1 };
   const command = (id: string) => ({ id, roomId: 'room', turnRequestId: id, rootCommandId: id, reason: 'human_message' }) as AgentCommand;
-  context.prepareOwnership(source, 'first');
+  context.prepareTurn('first');
   await context.enter(command('first'));
   const captured = context.path;
   const stopped = vi.fn(async () => undefined);
@@ -101,7 +100,7 @@ it.each(['room', 'corner'] as const)('%s sessions replace the MCP context captur
   loop.currentSessionFingerprint = async () => 'same-configuration';
   expect(await loop.sessionIsCurrent()).toBe(true);
   await context.leave();
-  context.prepareOwnership(source, 'second');
+  context.prepareTurn('second');
   await context.enter(command('second'));
   expect(JSON.parse(await readFile(captured, 'utf8'))).toEqual({});
   expect(JSON.parse(await readFile(context.path, 'utf8')).requestId).toBe('second');

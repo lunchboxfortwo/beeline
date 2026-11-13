@@ -96,6 +96,8 @@ export type CornerMergeHold = {
 export type PhoneOperationMap = PhoneRouteOperationMap & {
   readRoomTools: { input: import('./phone-types.js').RoomToolReference & { before?: string; messageId?: string }; output: import('./phone-types.js').RoomToolPage };
   readMediaMetadata: { input: { objectId: string }; output: MediaMetadata };
+  /** Resolve `↳thread` and `¶author-N` tokens written in one Room or thread. */
+  resolveChatLinks: { input: { roomId: string; tokens: string[] }; output: import('./chat-links.js').ChatLinksView };
   readMediaLink: { input: { objectId: string }; output: MediaLink };
   readMediaPlayback: { input: { objectId: string }; output: MediaLink };
   /** A short-lived browser viewer token, issued only to people who may steer its agent. */
@@ -193,6 +195,8 @@ export type PhoneOperationMap = PhoneRouteOperationMap & {
   removeRoomMember: { input: RoomMemberInput; output: void };
   resolveDirectMessage: { input: ResolveDirectMessageInput; output: DirectMessageResult };
   createInvite: { input: WorkspaceInput; output: InviteTokenResult };
+  /** Same authority as createInvite: mints an invite link and emails it once (Resend). */
+  inviteByEmail: { input: InviteByEmailInput; output: void };
   resolveInvite: { input: InviteTokenInput; output: InviteView };
   redeemInvite: { input: InviteTokenInput; output: InviteMembershipResult };
   createAgentPairingCode: { input: WorkspaceInput; output: PairingCodeResult };
@@ -303,6 +307,7 @@ export type PhoneOperationMap = PhoneRouteOperationMap & {
 export const PHONE_READ_OPERATIONS = [
   ...PHONE_ROUTE_READ_OPERATIONS,
   'readRoomTools',
+  'resolveChatLinks',
   'readMediaMetadata',
   'readMediaLink',
   'readMediaPlayback',
@@ -446,7 +451,15 @@ export type RoomScheduleView = {
   readonly runCount: number;
 };
 export type RoomScheduleListResult = { readonly schedules: readonly RoomScheduleView[] };
+type RoutineRunView = {
+  readonly routineId: string;
+  readonly roomId: string;
+  readonly messageId: string;
+  readonly text: string;
+  readonly at: number;
+};
 export type ScheduledWorkResult = RoomScheduleListResult & RoomSubscriptionListResult & {
+  readonly recentRuns?: readonly RoutineRunView[];
   /** Absent on older servers; named Rooms and unnamed Rooms remain Rooms. */
   readonly isDirectMessage?: boolean;
   readonly roomName: string | null;
@@ -696,8 +709,21 @@ export type InviteTokenResult = InviteTokenInput & {
   /** Absolute Unix timestamp in seconds; zero for a permanent public link. */
   readonly expiresAt: number;
 };
+/** `roomId` only names the chat in the email; the invite itself is to the Workspace. */
+export type InviteByEmailInput = WorkspaceInput & { readonly roomId?: string; readonly email: string };
 export type PairingCodeInput = { readonly code: string };
-export type PairingCodeResult = PairingCodeInput & { readonly expiresAt: number };
+export interface AgentInvitationPickerGuide {
+  readonly lines: Readonly<Record<string, string>>;
+  readonly other: string;
+  /** The one copyable prompt on Invite an external agent. */
+  readonly prompt?: string;
+  /** The full list of agents that accept the prompt. */
+  readonly listUrl?: string;
+}
+export type PairingCodeResult = PairingCodeInput & {
+  readonly expiresAt: number;
+  readonly invitationGuide?: AgentInvitationPickerGuide;
+};
 export type UpdateAgentSoulInput = WorkspaceAgentInput & {
   readonly name: string;
   readonly instructions: string;
@@ -797,6 +823,7 @@ export type GitHubInstallation = {
   readonly accountLogin: string;
   readonly accountType: 'User' | 'Organization';
   readonly accountAvatarUrl?: string;
+  readonly faviconUrl?: string;
   readonly repositorySelection: 'all' | 'selected';
   readonly status: 'active' | 'revoked' | 'suspended';
   readonly repositoryCount: number;

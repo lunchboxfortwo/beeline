@@ -1,3 +1,5 @@
+import { repositoryMarkColumnsSql } from '../repository-mark.js';
+import { memberPresenceSql } from '../member-presence.js';
 import { messageColumns } from '../message-columns.js';
 import { assetUrl, phoneIdentity as identity, type PhoneIdentityRow as IdentityRow } from '../phone-identity.js';
 import { roomMessageTagsSql } from '../room-router-read.js';
@@ -80,8 +82,9 @@ import { phoneOptionalEnrichment } from './optional-enrichment.js';
       corner_rows: CornerRow[];
       viewer_row: IdentityRow;
       deck: DeckCornerFacts | null;
+      archived_count: number;
     }>(`WITH authorized AS (
-        SELECT r.*,workspace_member.role workspace_role
+        SELECT r.*,${repositoryMarkColumnsSql('r')},workspace_member.role workspace_role
         FROM rooms r JOIN memberships m ON m.room_id=r.id
         JOIN memberships workspace_member ON workspace_member.workspace_id=r.workspace_id
           AND workspace_member.room_id IS NULL AND workspace_member.identity_id=$2
@@ -89,6 +92,7 @@ import { phoneOptionalEnrichment } from './optional-enrichment.js';
         WHERE r.id=$1 AND m.identity_id=$2 AND m.removed_at IS NULL
       ), selected_corners AS (${cornerQuery})
       SELECT to_jsonb(authorized) room_row,
+        (SELECT count(*)::integer FROM rooms closed WHERE closed.parent_id=authorized.id AND closed.archived_at IS NOT NULL) archived_count,
         COALESCE((SELECT jsonb_agg(to_jsonb(c) ORDER BY ${archived
           ? 'c.archived_at DESC,c.id DESC' : 'c.created_at DESC,c.id DESC'})
           FROM selected_corners c),'[]'::jsonb) corner_rows,
@@ -123,6 +127,7 @@ import { phoneOptionalEnrichment } from './optional-enrichment.js';
     const view: CornerListView = {
       room: roomHeader(room, ctx.publicOrigin),
       corners: phoneProjectCorners(ctx, rows),
+      archivedCount: loaded.archived_count,
       ...(archived && more && last?.archived_us ? { nextArchived: `${last.archived_us},${last.id}` } : {}),
       ...(!archived && more && last?.created_us ? { nextOpen: `${last.created_us},${last.id}` } : {}),
       viewer: {
@@ -147,7 +152,7 @@ import { phoneOptionalEnrichment } from './optional-enrichment.js';
     const row = (
       await ctx.database.query<RoomReadRow>(
         `WITH authorized_room AS (
-           SELECT room.*,
+           SELECT room.*,${repositoryMarkColumnsSql('room')},
              CASE WHEN room.parent_id IS NULL THEN membership.push_muted ELSE COALESCE(
                (SELECT state.push_muted FROM corner_person_state state
                 WHERE state.corner_id=room.id AND state.identity_id=$2),false) END viewer_push_muted,
@@ -366,9 +371,7 @@ import { phoneOptionalEnrichment } from './optional-enrichment.js';
              presence.updated_at presence_updated_at
            FROM memberships member
            LEFT JOIN LATERAL(
-             SELECT body,updated_at FROM live_outputs
-             WHERE agent_id=member.identity_id AND kind='presence'
-             ORDER BY updated_at DESC LIMIT 1
+             ${memberPresenceSql('member.identity_id')}
            ) presence ON true
            WHERE member.room_id=$1 AND member.removed_at IS NULL`,
           [roomId], 'phone-room-2',
@@ -474,9 +477,7 @@ import { phoneOptionalEnrichment } from './optional-enrichment.js';
            COALESCE((SELECT jsonb_agg(jsonb_build_object('id',member.identity_id,
              'presence_body',presence.body,'presence_updated_at',presence.updated_at))
              FROM memberships member LEFT JOIN LATERAL(
-               SELECT body,updated_at FROM live_outputs
-               WHERE agent_id=member.identity_id AND kind='presence'
-               ORDER BY updated_at DESC LIMIT 1) presence ON true
+               ${memberPresenceSql('member.identity_id')}) presence ON true
              WHERE member.room_id=(SELECT COALESCE(parent_id,id) FROM rooms WHERE id=$1)
                AND member.removed_at IS NULL
                AND member.identity_id=ANY($3::text[])),'[]'::jsonb) presence,

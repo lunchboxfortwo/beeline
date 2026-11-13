@@ -3,12 +3,13 @@
 // @noble/hashes, @noble/curves, and nostr-tools require at import time).
 import 'react-native-get-random-values';
 import './sources/polyfills/arrayFindLast';
+import './sources/polyfills/usePressability';
 import './sources/buzz/sentry-entry';
 
 import './sources/polyfills/screenOrientation';
 import './sources/polyfills/webViewport';
 import './sources/push/early-room-prefetch-bootstrap';
-import './sources/unistyles';
+import './sources/display';
 import 'expo-router/entry';
 import { installNotificationActions } from './sources/push/notification-action-runtime';
 import { installReadClearTask } from './sources/push/read-clear-runtime';

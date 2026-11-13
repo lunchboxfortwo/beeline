@@ -165,7 +165,7 @@ export async function queueMcpMentionEvents(db: SqlDatabase, member: string, roo
     JOIN identities i ON i.id=m.author_id
     WHERE s.member_id=$1 AND beeline_mcp_delivery_owner(s.member_id,'events',s.id) AND (s.expires_at IS NULL OR s.expires_at>now()) AND s.event_name='mention'
     ON CONFLICT(subscription_id,message_id) WHERE message_id IS NOT NULL DO NOTHING
-    RETURNING subscription_id`, [member, room, message, mentionReplyRule('%s', '%s'), mentionReplyRule('%s', null)]);
+    RETURNING subscription_id`, [member, room, message, mentionReplyRule('%1$s', '%2$s'), mentionReplyRule('%s', null)]);
   if (queued.rowCount) await notifyMcpWebhook(db, room);
 }
 

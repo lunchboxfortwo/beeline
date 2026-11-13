@@ -4,7 +4,7 @@ import {
   type HelperOverlayDemand, type HelperOverlayFrame,
 } from '@beeline/api-contract/helper-overlay';
 import { authorizeCommandOutput, type CommandRow } from './agent-command.js';
-import { assertCurrentTurnOwner, registerOwnedEffectFence } from './turn-ownership.js';
+import { registerOwnedAccessCheck } from './turn-ownership.js';
 import { subscribeCommandCompletion } from './command-completion.js';
 import type { SqlDatabase } from './database.js';
 import type { LiveEvent } from './live.js';
@@ -143,7 +143,7 @@ export async function applyHelperOverlay(db:SqlDatabase,authenticatedAgentId:str
     const body={text,overlayV1:metadata};
     const event=helperOverlayEvent(body);
     if(!event||Buffer.byteLength(JSON.stringify(event))+256>HELPER_OVERLAY_MAX_FRAME_BYTES)return {ack:{accepted:false,reason:'unavailable'}};
-    await registerOwnedEffectFence(tx,command);
+    await registerOwnedAccessCheck(tx,command);
     await tx.query(`INSERT INTO live_outputs(room_id,agent_id,turn_id,kind,body) VALUES($1,$2,$3,$4,$5::jsonb)
       ON CONFLICT(room_id,agent_id,turn_id,kind) DO UPDATE SET body=EXCLUDED.body,updated_at=now()`,
       [frame.roomId,frame.agentId,frame.turnId,frame.kind,JSON.stringify(body)]);
@@ -172,7 +172,6 @@ export async function fenceHelperOverlayEnqueue(db:SqlDatabase,event:LiveEvent,e
     const current=helperOverlayMetadata(latest?.overlayV1);
     if(!current||current.runGeneration!==metadata.runGeneration||current.revision<metadata.revision||
       ((current.type==='end'||current.type==='retract')&&metadata.type!=='end'&&metadata.type!=='retract'))return;
-    await assertCurrentTurnOwner(tx,metadata.agentId,{connectionId:metadata.connectionId,epoch:metadata.connectionEpoch});
     enqueue();
   });}catch{/* A stale/unavailable overlay stays hidden. */}
 }

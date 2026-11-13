@@ -6,10 +6,8 @@ import { RoomListSectionHeader } from '@/components/buzz/RoomListSectionHeader';
 import { useLatencyRouteFrame } from '@/buzz/latency-route-hook';
 import { workflowRunHref } from '@/buzz/workflow-run-copy';
 import React, { useCallback, useState } from 'react';
-import { Pressable, ScrollView, Text, View } from 'react-native';
+import { ScrollView, YStack } from 'tamagui';
 import { router, useFocusEffect, useLocalSearchParams } from 'expo-router';
-import { useSafeAreaInsets } from 'react-native-safe-area-context';
-import { StyleSheet } from 'react-native-unistyles';
 import type { PhoneOperationMap } from '@beeline/api-contract/phone';
 import { workflowDisplayName } from '@/buzz/workflow-graph';
 import { workflowStarterLine } from '@/buzz/workflow-run-copy';
@@ -18,6 +16,7 @@ import { DetailSection } from '@/components/buzz/ScheduledWorkDetail';
 import { SurfaceGlyphLoader } from '@/components/buzz/SurfaceGlyphLoader';
 import { WorkflowRunLine } from '@/components/buzz/WorkflowRunLine';
 import { monolithPhoneOperation } from '@/sync/transport/monolith-operation';
+import { SafeBottom, SafeTop, T } from '@/ui/grammar';
 
 /**
  * One workflow: its steps on the run page's rail (every step pending, as no
@@ -32,7 +31,6 @@ export default function Workflow() {
   }>();
   const roomId = Array.isArray(params.roomId) ? params.roomId[0] : params.roomId;
   const name = Array.isArray(params.name) ? params.name[0] : params.name;
-  const insets = useSafeAreaInsets();
   const desktopPageLayout = useDesktopPageLayout();
   const [detail, setDetail] = useState<
     PhoneOperationMap['readWorkflowDefinition']['output'] | null
@@ -53,7 +51,14 @@ export default function Workflow() {
     }, [reload]),
   );
   return (
-    <View style={[styles.screen, desktopPageLayout && { width: '100%', maxWidth: desktopColumnWidths.detail, alignSelf: 'center' }, { paddingTop: insets.top }]}>
+    <YStack
+      flex={1}
+      backgroundColor="canvas"
+      width={desktopPageLayout ? '100%' : undefined}
+      maxWidth={desktopPageLayout ? desktopColumnWidths.detail : undefined}
+      alignSelf={desktopPageLayout ? 'center' : undefined}
+    >
+      <SafeTop />
       <PageHeader
         title={workflowDisplayName(name)}
         onBack={() => router.back()}
@@ -65,10 +70,10 @@ export default function Workflow() {
       ) : null}
       {!detail && !error ? <SurfaceGlyphLoader /> : null}
       {detail ? (
-        <ScrollView contentContainerStyle={{ paddingBottom: 24 + insets.bottom }}>
-          <Text style={styles.description}>
+        <ScrollView flex={1}>
+          <T v="body" color="secondary" padding="4">
             {detail.contract.summary ?? detail.contract.description}
-          </Text>
+          </T>
           <DetailSection testID="workflow-steps-header" title="Steps" />
           <WorkflowRunLine
             detail={{ contract: detail.contract, roleHolders: {} }}
@@ -78,44 +83,31 @@ export default function Workflow() {
           />
           <RoomListSectionHeader title="History" />
           {detail.runs.map((run) => (
-            <Pressable
+            <YStack
               key={run.runId}
               accessibilityRole="button"
-              style={styles.run}
+              padding="4"
+              gap="1"
+              borderTopWidth={1}
+              borderTopColor="stroke"
               onPress={() =>
                 router.push(workflowRunHref(run))
               }
             >
-              <Text style={styles.title}>
+              <T v="heading">
                 {run.status === 'live' ? 'Running' : run.status === 'done' ? 'Completed' : run.status === 'abandoned' ? 'Abandoned' : 'Failed'}
-              </Text>
-              <Text style={styles.meta}>{workflowStarterLine(run)}</Text>
-              <Text selectable style={styles.id}>
+              </T>
+              <T v="meta" color="secondary">{workflowStarterLine(run)}</T>
+              <T v="code" color="secondary" userSelect="text">
                 {run.runId}
-              </Text>
-            </Pressable>
+              </T>
+            </YStack>
           ))}
-          {!detail.runs.length ? <Text style={styles.description}>No runs yet.</Text> : null}
+          {!detail.runs.length ? <T v="body" color="secondary" padding="4">No runs yet.</T> : null}
+          <YStack paddingBottom="6" />
+          <SafeBottom />
         </ScrollView>
       ) : null}
-    </View>
+    </YStack>
   );
 }
-const styles = StyleSheet.create((theme) => ({
-  screen: { flex: 1, backgroundColor: theme.buzz.bgBase },
-  description: {
-    ...theme.buzz.type.body,
-    color: theme.buzz.textSecondary,
-    padding: theme.buzz.space.md,
-  },
-  run: {
-    padding: theme.buzz.space.md,
-    gap: theme.buzz.space.xs,
-    borderTopWidth: StyleSheet.hairlineWidth,
-    borderTopColor: theme.buzz.border,
-  },
-  title: { ...theme.buzz.type.bodyStrong, color: theme.buzz.textPrimary },
-  meta: { ...theme.buzz.type.meta, color: theme.buzz.textSecondary },
-  id: { ...theme.buzz.type.machine, color: theme.buzz.textSecondary },
-  error: { ...theme.buzz.type.meta, color: theme.buzz.danger, padding: theme.buzz.space.md },
-}));

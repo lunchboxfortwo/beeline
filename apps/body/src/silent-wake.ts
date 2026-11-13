@@ -6,5 +6,6 @@ export function nonhumanSilentWake(reason: unknown): boolean {
     'schedule', 'subscribed_event', 'system', 'agent_tag', 'corner_objective',
     'corner_land', 'corner_merge_refused', 'corner_merge_unconfirmed',
     'corner_background_tool', 'corner_brief_revision',
+    'joined', 'join_probe', 'tagged_lifecycle_retry', 'tagged_lifecycle_restart', 'corner_lifecycle',
   ].includes(reason);
 }

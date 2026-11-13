@@ -9,6 +9,7 @@ const host = vi.hoisted(() => ({
 }));
 vi.mock('react-native', () => ({
   View: 'View', Text: 'Text', Pressable: 'Pressable', NativeModules: {},
+  PixelRatio: { get: () => 2, roundToNearestPixel: (n: number) => n },
   Platform: { get OS() { return host.platform; } },
   AppState: {
     get currentState() { return host.state; },
@@ -27,6 +28,8 @@ vi.mock('react-native-safe-area-context', () => {
   const SafeAreaInsetsContext = React.createContext({ top: 24, bottom: 0, left: 0, right: 0 });
   return { SafeAreaInsetsContext, useSafeAreaInsets: () => React.useContext(SafeAreaInsetsContext) };
 });
+vi.mock('tamagui', async () => (await import('@/ui/screens/transcript/grammar-hosts.test-support')).tamaguiHosts());
+vi.mock('lucide-react-native', async () => (await import('@/ui/screens/transcript/grammar-hosts.test-support')).lucideHosts());
 vi.mock('./Button', () => ({ Button: 'Button' }));
 vi.mock('./ChevronGlyph', () => ({ ChevronGlyph: 'ChevronGlyph', CHEVRON_ROW_SIZE: 16 }));
 vi.mock('./HullSwitch', () => ({ HullSwitch: 'HullSwitch' }));
@@ -54,7 +57,7 @@ class Socket {
   reply(index = 0) { this.onmessage?.({ data: JSON.stringify({ t: 'res', id: this.requests[index].id, ok: true, result: {} }) }); }
 }
 let tree: any;
-const banners = () => tree.root.findAllByProps({ testID: 'connection-status-disconnected' });
+const banners = () => tree.root.findAll((node: any) => typeof node.type === 'string' && node.props.testID === 'connection-status-disconnected');
 async function open() {
   await act(async () => { await vi.advanceTimersByTimeAsync(0); });
   const socket = Socket.instances.at(-1)!;

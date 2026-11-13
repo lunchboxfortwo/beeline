@@ -1,6 +1,6 @@
 import React from 'react';
-import { Pressable, Text, View, type PressableProps, type ViewProps } from 'react-native';
-import { StyleSheet, useUnistyles } from 'react-native-unistyles';
+import { XStack, YStack, type YStackProps } from 'tamagui';
+import { HEIGHT, Inked, T } from '@/ui/grammar';
 import { CHEVRON_ROW_SIZE, ChevronGlyph } from './ChevronGlyph';
 
 /** Shared steps, repository-event and system-line disclosure row. */
@@ -16,55 +16,56 @@ export function LedgerDisclosure({
   /** Rich system text that ends in its own more/less word, so no chevron. */
   textToggle?: boolean;
   expanded: boolean;
-  onPress: NonNullable<PressableProps['onPress']>;
+  onPress: NonNullable<YStackProps['onPress']>;
   children: React.ReactNode;
   rowTestID?: string;
   accessibilityLabel: string;
   accessibilityState: { expanded: boolean };
 }) {
-  const { theme } = useUnistyles();
+  if (textToggle)
+    return (
+      <YStack
+        accessibilityRole="button"
+        accessibilityLabel={accessibilityLabel}
+        accessibilityState={accessibilityState}
+        aria-expanded={expanded}
+        onPress={onPress}
+        minHeight={HEIGHT.control}
+        minWidth={44}
+        testID={rowTestID}
+      >
+        {children}
+      </YStack>
+    );
   return (
-    <Pressable
+    <XStack
       accessibilityRole="button"
       accessibilityLabel={accessibilityLabel}
       accessibilityState={accessibilityState}
       aria-expanded={expanded}
       onPress={onPress}
-      style={textToggle ? styles.textToggleRow : styles.row}
+      minHeight={HEIGHT.control}
+      minWidth={44}
+      justifyContent="center"
+      alignItems="center"
+      gap="2"
       testID={rowTestID}
     >
-      {textToggle ? (
-        children
-      ) : (
-        <>
-          <View style={styles.chevron}>
-            <ChevronGlyph
-              color={theme.buzz.textMuted}
-              direction={expanded ? 'down' : 'right'}
-              size={CHEVRON_ROW_SIZE}
-            />
-          </View>
-          <Text style={styles.label}>{children}</Text>
-        </>
-      )}
-    </Pressable>
+      <YStack width={CHEVRON_ROW_SIZE} flexShrink={0} justifyContent="center">
+        <Inked
+          color="secondary"
+          glyph={ChevronGlyph}
+          direction={expanded ? 'down' : 'right'}
+          size={CHEVRON_ROW_SIZE}
+        />
+      </YStack>
+      <T v="meta" color="secondary" flex={1} minWidth={0}>
+        {children}
+      </T>
+    </XStack>
   );
 }
 /** Shared container without additional transcript spacing. */
-export function LedgerLogGroup({ style, ...props }: ViewProps) {
-  return <View {...props} style={style} />;
+export function LedgerLogGroup(props: YStackProps) {
+  return <YStack {...props} />;
 }
-
-const styles = StyleSheet.create(({ buzz }) => ({
-  row: {
-    minHeight: 44,
-    minWidth: 44,
-    justifyContent: 'center',
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: buzz.space.sm,
-  },
-  textToggleRow: { minHeight: 44, minWidth: 44 },
-  chevron: { width: CHEVRON_ROW_SIZE, flexShrink: 0, justifyContent: 'center' },
-  label: { ...buzz.type.meta, flex: 1, minWidth: 0, color: buzz.textSecondary },
-}));

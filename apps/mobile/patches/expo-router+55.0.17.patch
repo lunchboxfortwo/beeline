@@ -1,0 +1,41 @@
+diff --git a/node_modules/expo-router/build/fork/getStateFromPath.js b/node_modules/expo-router/build/fork/getStateFromPath.js
+--- a/node_modules/expo-router/build/fork/getStateFromPath.js
++++ b/node_modules/expo-router/build/fork/getStateFromPath.js
+@@ -149,21 +149,22 @@
+ /**
+  * Reference to the last used config resources. This is used to avoid recomputing the config resources when the options are the same.
+  */
+-let cachedConfigResources = [
+-    undefined,
+-    prepareConfigResources(),
+-];
+-function getConfigResources(options, 
+-// START FORK
+-previousSegments
+-// END FORK
+-) {
+-    // START FORK - We need to disable this caching as our configs can change based upon the current state
+-    // if (cachedConfigResources[0] !== options) {
+-    cachedConfigResources = [options, prepareConfigResources(options, previousSegments)];
+-    // }
+-    // END FORK FORK
+-    return cachedConfigResources[1];
++// Route definitions are immutable for a linking-options object. Only sorting
++// depends on the active route; never retain path-specific params or states.
++const configResourcesByOptions = new WeakMap();
++const defaultConfigResources = prepareConfigResources();
++function getConfigResources(options, previousSegments) {
++    let resources = options ? configResourcesByOptions.get(options) : defaultConfigResources;
++    if (!resources) {
++        resources = prepareConfigResources(options);
++        configResourcesByOptions.set(options, resources);
++    }
++    const sorter = expo.getRouteConfigSorter(previousSegments);
++    return {
++        initialRoutes: resources.initialRoutes,
++        configs: resources.configs.slice().sort(sorter),
++        configWithRegexes: resources.configWithRegexes.slice().sort(sorter),
++    };
+ }
+ function prepareConfigResources(options, previousSegments) {
+     if (options) {

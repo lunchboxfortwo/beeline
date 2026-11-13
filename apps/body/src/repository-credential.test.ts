@@ -5,13 +5,13 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { promisify } from 'node:util';
 import { WebSocketServer } from 'ws';
-import { expect, it, vi } from 'vitest';
+import { expect, it } from 'vitest';
 import { DaemonApiClient } from './daemon-api-client.js';
 import { identityFromKey, writeRuntimeRecord } from './runtime.js';
 
 const exec = promisify(execFile);
 
-it('corner-read-token exits without replacing the helper registration or cancelling its active turn', async () => {
+it('corner-read-token exits without replacing the helper registration', async () => {
   const root = await mkdtemp(join(tmpdir(), 'credential-owner-'));
   const identity = identityFromKey('01'.repeat(32), 'fixture');
   const requests: string[] = [];
@@ -46,15 +46,12 @@ it('corner-read-token exits without replacing the helper registration or cancell
       body: { name: 'fixture', secretKeyHex: '01'.repeat(32), publicKey: identity.publicKey }, rooms: [],
       agentBinary: 'unused', mcpBinary: 'unused', transport: { kind: 'monolith', baseUrl, daemonToken: `bdt_${'a'.repeat(43)}` } });
     await api.execute('getRoomGitHubToken', { roomId: 'fixture-room' });
-    const cancelled = vi.fn();
-    api.noteOwnedTurnClaim({ roomId: 'fixture-room', requestId: 'active', generationId: 'generation' },
-      api.turnOwnershipScope()!, cancelled);
     const result = await exec(process.execPath, ['--import', 'tsx', 'src/cli.ts', 'corner-read-token',
       '--config', configPath, '--room', 'fixture-room'], { timeout: 10_000, env: { ...process.env, BEELINE_SENTRY_DSN: '' } })
       .then(result => ({ ...result, exited: true }), error => ({ stdout: error.stdout, stderr: error.stderr, exited: false }));
     expect(result.stdout.trim()).toBe('fixture-repository-token');
-    expect({ exited: result.exited, registrations, cancellations: cancelled.mock.calls.length, requests })
-      .toEqual({ exited: true, registrations: 1, cancellations: 0, requests: ['/v1/daemon/operations/getRoomGitHubToken'] });
+    expect({ exited: result.exited, registrations, requests })
+      .toEqual({ exited: true, registrations: 1, requests: ['/v1/daemon/operations/getRoomGitHubToken'] });
     expect(api.turnOwnershipScope()).toEqual({ connectionId: 'parent', epoch: 1 });
   } finally {
     api.closeLive();

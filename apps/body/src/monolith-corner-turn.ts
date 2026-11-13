@@ -4,7 +4,6 @@ import { FreeAgentContinuation } from './free-agent-continuation.js';
 import { type TurnTokenFigure } from './harness-turn-tokens.js';
 import { TurnUsageAccumulator } from './turn-usage.js';
 import { CommandExecutionContext } from './server-command-intake.js';
-import type { InterruptedTurn } from './force-update-journal.js';
 import { SquireTaskRelay } from './squire-task-relay.js';
 import { resourceCallFacts } from './resource-mcp-facade.js';
 import { execFile } from 'node:child_process';
@@ -32,7 +31,7 @@ import type { RoomSupervisor } from './room-supervisor.js';
 import { TurnTrace, type TurnTraceSink } from './turn-trace.js';
 import { type CornerGitHubCli } from './corner-github-auth.js';
 
-import { monolithCornerTurnLoopRetainBackgroundClient, monolithCornerTurnLoopConfigurationChanged, monolithCornerTurnLoopRequestReconciliation, monolithCornerTurnLoopIsBusy, monolithCornerTurnLoopRequestClose, monolithCornerTurnLoopRefreshPersonaForSoulUpdate, monolithCornerTurnLoopInterruptedTurn, monolithCornerTurnLoopInterruptForServerMinimum, monolithCornerTurnLoopForceRecoverRoom, monolithCornerTurnLoopStopTurn, monolithCornerTurnLoopCommandActivation, monolithCornerTurnLoopConfiguration, monolithCornerTurnLoopRestoredState, monolithCornerTurnLoopRepositoryState, monolithCornerTurnLoopRoster, monolithCornerTurnLoopWriteBackClaudeLogin, monolithCornerTurnLoopPublishOpenRouterSpend, monolithCornerTurnLoopPublishHarnessQuota, monolithCornerTurnLoopCaptureTurnMetrics, monolithCornerTurnLoopWatchClaudeLogin, monolithCornerTurnLoopStopClaudeLoginWatch, monolithCornerTurnLoopDiscardSession, monolithCornerTurnLoopSessionIsCurrent, monolithCornerTurnLoopCurrentSessionFingerprint, monolithCornerTurnLoopGrantedResources, monolithCornerTurnLoopActivate } from './monolith-corner-turn-retain-background-client.js';
+import { monolithCornerTurnLoopRetainBackgroundClient, monolithCornerTurnLoopConfigurationChanged, monolithCornerTurnLoopRequestReconciliation, monolithCornerTurnLoopIsBusy, monolithCornerTurnLoopRequestClose, monolithCornerTurnLoopRefreshPersonaForSoulUpdate, monolithCornerTurnLoopInterruptForServerMinimum, monolithCornerTurnLoopForceRecoverRoom, monolithCornerTurnLoopStopTurn, monolithCornerTurnLoopCommandActivation, monolithCornerTurnLoopConfiguration, monolithCornerTurnLoopRestoredState, monolithCornerTurnLoopRepositoryState, monolithCornerTurnLoopRoster, monolithCornerTurnLoopWriteBackClaudeLogin, monolithCornerTurnLoopPublishOpenRouterSpend, monolithCornerTurnLoopPublishHarnessQuota, monolithCornerTurnLoopCaptureTurnMetrics, monolithCornerTurnLoopWatchClaudeLogin, monolithCornerTurnLoopStopClaudeLoginWatch, monolithCornerTurnLoopDiscardSession, monolithCornerTurnLoopSessionIsCurrent, monolithCornerTurnLoopCurrentSessionFingerprint, monolithCornerTurnLoopGrantedResources, monolithCornerTurnLoopActivate, monolithCornerTurnLoopDependencyMountRequested } from './monolith-corner-turn-retain-background-client.js';
 import { monolithCornerTurnLoopActivateCold, monolithCornerTurnLoopActiveReviewerInstruction, monolithCornerTurnLoopLifecycle } from './monolith-corner-turn-activate-cold.js';
 import { monolithCornerTurnLoopAcceptsImages, monolithCornerTurnLoopServingProviders, monolithCornerTurnLoopExplainEmpty, monolithCornerTurnLoopRepinNextProvider, monolithCornerTurnLoopBeginTurnTrace, monolithCornerTurnLoopWithCheckout } from './monolith-corner-turn-accepts-images.js';
 import { monolithCornerTurnLoopPrompt } from './monolith-corner-turn-prompt.js';
@@ -273,8 +272,7 @@ isBusy(): boolean { return monolithCornerTurnLoopIsBusy(this); }
 /** corner-complete on the wire: wake intake so `closed()` reaps now. */
 requestClose(): void { return monolithCornerTurnLoopRequestClose(this); }
 refreshPersonaForSoulUpdate(): Promise<void> { return monolithCornerTurnLoopRefreshPersonaForSoulUpdate(this); }
-interruptedTurn(): InterruptedTurn | undefined { return monolithCornerTurnLoopInterruptedTurn(this); }
-interruptForServerMinimum(): InterruptedTurn | undefined { return monolithCornerTurnLoopInterruptForServerMinimum(this); }
+interruptForServerMinimum(): void { monolithCornerTurnLoopInterruptForServerMinimum(this); }
 async forceRecoverRoom(): Promise<void> { return monolithCornerTurnLoopForceRecoverRoom(this); }
 /**
  * Obey a stop the requester already made a fact.
@@ -340,6 +338,7 @@ async sessionIsCurrent(): Promise<boolean> { return monolithCornerTurnLoopSessio
 async currentSessionFingerprint(): Promise<string> { return monolithCornerTurnLoopCurrentSessionFingerprint(this); }
 async grantedResources() { return monolithCornerTurnLoopGrantedResources(this); }
 async activate(trace?: TurnTrace): Promise<string> { return monolithCornerTurnLoopActivate(this, trace); }
+dependencyMountRequested(): boolean { return monolithCornerTurnLoopDependencyMountRequested(this); }
 async activateCold(trace?: TurnTrace): Promise<string> { return monolithCornerTurnLoopActivateCold(this, trace); }
 /**
  * Resolve the review target at prompt time, not session activation time.
@@ -707,8 +706,8 @@ export interface MonolithCornerTurnOptions {
     githubToken: string;
     readOnly?: boolean;
   };
-  /** Gives a writer its private copy; every other turn gets the Room's read-only checkout. */
-  prepareCheckout?: (repositoryWork: boolean, implementerAgentId?: string, assigned?: boolean) =>
+  /** This agent's private copy of the corner; read-only when the brief has no repository work. */
+  prepareCheckout?: (repositoryWork: boolean, implementerAgentId?: string) =>
     Promise<{ path: string; gitCommonDir: string; writable: boolean }>;
   runtime: AgentRuntimeRecord;
   config: BodyConfig;

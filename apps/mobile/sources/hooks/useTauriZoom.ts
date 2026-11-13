@@ -1,12 +1,14 @@
 import { useEffect } from 'react';
 import { Platform } from 'react-native';
 import { isTauri } from '@/utils/isTauri';
-import { useLocalSetting } from '@/sync/storage';
-import { APP_UI_SIZE_SCALE } from '@/ui-size';
 
 const MIN_APP_ZOOM = 0.5;
 const MAX_APP_ZOOM = 2.5;
-const WEB_ZOOM_CLASS = 'happy-app-zoomed';
+/**
+ * The page zoom at every Text size. Text size picks its own type and spacing
+ * presets (GrammarProvider), so zooming the page too would apply it twice.
+ */
+export const APP_ZOOM = 1;
 
 const clampZoom = (zoom: number) => Math.max(MIN_APP_ZOOM, Math.min(MAX_APP_ZOOM, zoom));
 
@@ -15,29 +17,11 @@ const clampZoom = (zoom: number) => Math.max(MIN_APP_ZOOM, Math.min(MAX_APP_ZOOM
 // layout viewport so matchMedia / window.innerWidth change and responsive
 // breakpoints (unistyles etc.) react correctly.
 export function useTauriZoom() {
-    const uiSize = useLocalSetting('uiSize');
-
     useEffect(() => {
-        if (Platform.OS !== 'web' || typeof window === 'undefined' || typeof document === 'undefined') return;
-
-        const inTauri = isTauri();
-        const root = document.documentElement;
-        const preferredZoom = APP_UI_SIZE_SCALE[uiSize];
-
-        if (!inTauri) {
-            root.style.setProperty('--happy-app-zoom', String(preferredZoom));
-            root.classList.add(WEB_ZOOM_CLASS);
-            return () => {
-                root.classList.remove(WEB_ZOOM_CLASS);
-                root.style.removeProperty('--happy-app-zoom');
-            };
-        }
-
-        root.classList.remove(WEB_ZOOM_CLASS);
-        root.style.removeProperty('--happy-app-zoom');
+        if (Platform.OS !== 'web' || typeof window === 'undefined' || !isTauri()) return;
 
         let active = true;
-        let zoom = preferredZoom;
+        let zoom = APP_ZOOM;
         let webview: { setZoom: (z: number) => Promise<void> } | null = null;
 
         const apply = (z: number) => {
@@ -62,7 +46,7 @@ export function useTauriZoom() {
                 apply(zoom - 0.1);
             } else if (e.key === '0') {
                 e.preventDefault();
-                apply(preferredZoom);
+                apply(APP_ZOOM);
             }
         };
 
@@ -71,5 +55,5 @@ export function useTauriZoom() {
             active = false;
             window.removeEventListener('keydown', onKey);
         };
-    }, [uiSize]);
+    }, []);
 }

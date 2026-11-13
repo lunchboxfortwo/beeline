@@ -1,8 +1,9 @@
 import React from 'react';
-import type { Insets, PressableProps, StyleProp, ViewStyle } from 'react-native';
+import type { Insets, PressableProps } from 'react-native';
 import Svg, { Line } from 'react-native-svg';
-import { StyleSheet } from 'react-native-unistyles';
-import { Button } from './Button';
+import { useTheme } from 'tamagui';
+import type { ColorToken } from '@/ui/grammar';
+import { Button, type ButtonLayout } from './Button';
 import { DECORATIVE_GLYPH_PROPS } from './decorative-glyph';
 import { chromeStrokeWidth } from '@/buzz/chrome-geometry';
 
@@ -20,11 +21,11 @@ export function CloseGlyph({
   size = CLOSE_GLYPH_SIZE,
   testID,
 }: {
-  color?: string;
+  color?: ColorToken;
   size?: number;
   testID?: string;
 }) {
-  const stroke = color ?? styles.ink.color;
+  const stroke = (useTheme() as Record<string, { val: string } | undefined>)[color ?? 'secondary']?.val;
   const strokeWidth = chromeStrokeWidth(size);
   return (
     <Svg {...DECORATIVE_GLYPH_PROPS} height={size} testID={testID} viewBox="0 0 24 24" width={size}>
@@ -36,46 +37,36 @@ export function CloseGlyph({
 
 /**
  * The one close control: a quiet 44 pt icon button around `CloseGlyph`.
- * `control` keeps an existing approved box (a chip's corner, a composer
- * row's remove target) around the same cross; it never changes the cross.
+ * Layout props place it (a chip's corner, a composer row's remove target);
+ * they never change the cross.
  */
 export function CloseButton({
   accessibilityLabel,
   onPress,
   testID,
   disabled,
-  style,
-  color,
-  control,
   hitSlop,
-}: {
+  ...layout
+}: ButtonLayout & {
   accessibilityLabel: string;
   onPress: PressableProps['onPress'];
   testID?: string;
   disabled?: boolean;
-  style?: StyleProp<ViewStyle>;
-  color?: string;
-  control?: PressableProps['style'];
   hitSlop?: number | Insets;
 }) {
   return (
     <Button
       accessibilityLabel={accessibilityLabel}
       accessibilityRole="button"
-      appearance={control ? { control, label: undefined } : undefined}
       disabled={disabled}
       hitSlop={hitSlop}
-      icon={<CloseGlyph color={color} />}
+      icon={<CloseGlyph />}
       iconOnly
       label=""
       onPress={onPress}
-      style={style}
+      {...layout}
       testID={testID}
       variant="quiet"
     />
   );
 }
-
-const styles = StyleSheet.create((theme) => ({
-  ink: { color: theme.buzz.steel },
-}));

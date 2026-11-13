@@ -3,7 +3,6 @@ import { router } from 'expo-router';
 import { type WorkflowRunSummaryView } from '@beeline/api-contract/phone';
 import { conversationIdentityByPubkey, displayRoomMessages, mergeDisplayPages, type ChatDisplayMessage } from '@/buzz/room-view-presentation';
 import { cornerObjectiveItems } from '@/buzz/corner-context';
-import { ROOM_LABEL } from '@/buzz/vocabulary';
 import { useRoomSendFrame } from '@/buzz/room-send-frame';
 import { liveDraftMessages } from '@/buzz/live-turn-stream';
 import { createTranscriptRowFolder, foldTranscriptRows } from '@/buzz/room-message-store';
@@ -13,11 +12,13 @@ import { visibleTranscriptWindow } from '@/buzz/transcript-presentation';
 import { EMPTY_TRANSCRIPT_ARRIVAL_STATE, observeTranscriptArrivals } from '@/buzz/transcript-motion';
 import { messageBoundaryIds } from '@/buzz/room-new-message-boundary';
 import { useUnreadLineControl } from '@/buzz/use-new-message-control';
-import { createTranscriptCardMotionStore } from '@/components/buzz/transcript-card-motion-context';
-import { sameRecordValueMap, sameStringSet, useStable } from '@/buzz/use-stable';
+import { sameRecordValueMap, useStable } from '@/buzz/use-stable';
 import { useRoomWorkflowRun } from '@/buzz/use-room-workflow-run';
 import { workflowRunHref } from '@/buzz/workflow-run-copy';
-import { openCornerBriefViewer } from '@/components/buzz/corner-brief-viewer';
+import { TranscriptLine } from '@/ui/screens/transcript/TranscriptLine';
+import { WorkflowRunCard } from '@/ui/screens/transcript/cards/WorkflowRunCard';
+import { openPlace } from '@/ui/shell/panel';
+import { useIsDesktop } from '@/utils/responsive';
 import { LedgerHistoryLine } from '@/components/buzz/Ledger';
 
 type Props = [
@@ -76,8 +77,6 @@ export function useChatTranscriptHistory([
   removeOptimistic: (optimisticId: string) => void,
   reconcileOptimistic: (optimisticId: string, eventId: string) => void,
   openCurrentBrief: (() => void) | undefined,
-  arrivingCardIds: ReadonlySet<string>,
-  transcriptCardMotionStore: import("@/components/buzz/transcript-card-motion-context").TranscriptCardMotionStore,
   firstNewMessageId: string | null,
   cornerObjectiveText: string,
   openRoomWorkflowRun: (run: WorkflowRunSummaryView) => void,
@@ -221,8 +220,6 @@ export function useChatTranscriptHistory([
 
   const transcriptArrivalStateRef = useRef(EMPTY_TRANSCRIPT_ARRIVAL_STATE);
 
-  const transcriptCardMotionStore = useMemo(createTranscriptCardMotionStore, [decodedId]);
-
   const transcriptArrivalObservation = useMemo(() => {
     return observeTranscriptArrivals(transcriptArrivalStateRef.current, {
       surfaceId: decodedId,
@@ -232,8 +229,6 @@ export function useChatTranscriptHistory([
       ids: arrivalMessages.flatMap(messageBoundaryIds),
     });
   }, [arrivalMessages, decodedId, roomSurface]);
-
-  const arrivingCardIds = useStable(transcriptArrivalObservation.arrivingIds, sameStringSet);
 
   useEffect(() => {
     // Keep the comparison anchored to the last committed transcript. Mutating
@@ -262,14 +257,15 @@ export function useChatTranscriptHistory([
   // for the empty state's steering copy — derived once so the two never drift.
   const cornerObjectiveText = useMemo(() => cornerObjective.join(' '), [cornerObjective]);
 
-  // The brief's latest revision opens full-screen in the artifact viewer, from
-  // the objective line and from a "revised the corner brief" system line. No
-  // brief, no link.
-  const cornerBrief = roomSurface?.cornerBrief;
+  // The brief's latest revision opens in the brief screen (the right panel on
+  // desktop), from the title block and from a "revised the corner brief"
+  // system line. No brief, no link.
+  const hasCornerBrief = Boolean(roomSurface?.cornerBrief);
+  const isDesktop = useIsDesktop();
 
   const openCurrentBrief = useMemo(
-    () => (cornerBrief ? () => openCornerBriefViewer(cornerBrief) : undefined),
-    [cornerBrief],
+    () => (hasCornerBrief ? () => openPlace({ kind: 'brief', roomId: decodedId }, isDesktop) : undefined),
+    [decodedId, hasCornerBrief, isDesktop],
   );
 
   // A live workflow run in this corner: one line under the objective, → its run page.
@@ -295,24 +291,31 @@ export function useChatTranscriptHistory([
 
   // Lines at the newest end of the transcript, beside the composer, where the
   // reader of a notification is looking. A jump never covers the room.
-  const transcriptForwardLine =
+  const forwardStatusLine =
     transcriptJump?.status === 'missing' ? (
       <LedgerHistoryLine text="That message is no longer available" />
     ) : transcriptNewerStatus === 'loading' ? (
       <LedgerHistoryLine text="Loading later messages…" />
     ) : null;
+  // A thread's live workflow run is a card on one rail at the newest end
+  // (build spec decision 20); it draws nothing when no run is live.
+  const transcriptForwardLine = isCorner ? (
+    <>
+      <TranscriptLine><WorkflowRunCard roomId={decodedId} /></TranscriptLine>
+      {forwardStatusLine}
+    </>
+  ) : forwardStatusLine;
 
+  // The top of the history needs no marker: the day caption opens it (build spec).
   const transcriptHistoryLine =
     transcriptHistoryStatus === 'loading' ? (
       <LedgerHistoryLine text="Loading earlier messages…" />
-    ) : transcriptHistoryStatus === 'complete' ? (
-      <LedgerHistoryLine text={isCorner ? 'Beginning of corner' : `Beginning of ${ROOM_LABEL}`} />
     ) : null;
   return [
     transcriptHostIdsRef, foldedMessages, loadOlderTranscriptMessages, anchoredSegmentActive,
     conversationIdentities, durableMessages, unprojectedMessages, combinedMessages, arrivalMessages,
     unreadLine, transcriptArrivalObservation, addMessages, removeOptimistic, reconcileOptimistic,
-    openCurrentBrief, arrivingCardIds, transcriptCardMotionStore, firstNewMessageId,
+    openCurrentBrief, firstNewMessageId,
     cornerObjectiveText, openRoomWorkflowRun, roomWorkflowRun, roomOtherLiveRuns,
     transcriptHistoryLine, transcriptForwardLine, loadOlderTranscriptIfReaderAsked,
   ];

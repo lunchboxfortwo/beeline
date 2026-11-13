@@ -2,20 +2,21 @@ vi.mock('@/utils/responsive', () => ({ useIsDesktop: () => false }));
 vi.mock('@expo/vector-icons/Ionicons', async () => { const R = await import('react'); return { default: (props: any) => R.createElement('Ionicons', props) }; });
 vi.mock('expo-haptics', () => ({ ImpactFeedbackStyle: { Light: 'Light' }, impactAsync: async () => undefined }));
 vi.mock('react-native-keyboard-controller', async () => { const R = await import('react'); return { KeyboardAvoidingView: (props: any) => R.createElement('View', props, props.children) }; });
+vi.mock('tamagui', async () => (await import('@/ui/screens/onboarding/onboarding.test-support')).tamaguiMock());
+vi.mock('lucide-react-native', async () => (await import('@/ui/screens/onboarding/onboarding.test-support')).lucideMock());
+vi.mock('@/ui/screens/onboarding/Rise', async () => (await import('@/ui/screens/onboarding/onboarding.test-support')).riseMock());
 import * as React from 'react';
 // @ts-expect-error react-test-renderer has no declarations in this workspace.
 import { act, create, type ReactTestRenderer } from 'react-test-renderer';
 import { readFileSync } from 'node:fs';
 import { resolve } from 'node:path';
 import { describe, expect, it, vi } from 'vitest';
-import { beelineThemes } from '@/buzz/groknight';
 
 /**
- * Canonical brand treatment on the login/onboarding surface (owner spec,
- * 2026-08-23): the wordmark reads exactly `beeline.` with the trailing period
- * in the theme accent (brass), and the login title/tagline/buttons plus the
- * auth notice surfaces use the app's canonical brand family (the theme's
- * Space Grotesk prose tokens) — no logo-font exception, no new fonts.
+ * Canonical brand treatment on the welcome step (owner spec, 2026-08-23;
+ * build spec decision 29): the wordmark reads exactly `beeline.` with the
+ * trailing period in brass, and every type style comes from the grammar's
+ * six styles — no logo-font exception, no new fonts.
  */
 
 const SOURCE_PATH = resolve(__dirname, 'onboarding.tsx');
@@ -81,20 +82,6 @@ vi.mock('@/components/buzz/IdentityMark', async () => {
   const ReactModule = await import('react');
   return { IdentityMark: (props: any) => ReactModule.createElement('IdentityMark', props) };
 });
-vi.mock('@/components/buzz/MonoHull', async () => {
-  const ReactModule = await import('react');
-  const host = (name: string) => (props: any) =>
-    ReactModule.createElement(name, props, props.children);
-  return {
-    hairlineDivider: { borderBottomWidth: 1, borderBottomColor: '#4e4e4e' },
-    HullSurface: host('HullSurface'),
-    PixelGateReveal: host('PixelGateReveal'),
-  };
-});
-vi.mock('@/components/buzz/Button', async () => {
-  const ReactModule = await import('react');
-  return { Button: (props: any) => ReactModule.createElement('Button', props, props.children) };
-});
 vi.mock('react-native', async () => {
   const ReactModule = await import('react');
   const host = (name: string) => (props: any) =>
@@ -138,14 +125,15 @@ describe('onboarding — canonical brand treatment', () => {
     expect(Array.isArray(children)).toBe(true);
     // The word itself…
     expect(children[0]).toBe('beeline');
-    // …and its trailing period, styled with the theme accent (brass).
+    // …and its trailing period, in the title style and brass.
     const period = children[1];
     expect(period.props.children).toBe('.');
-    expect(period.props.style.color).toBe(beelineThemes.obsidian.accent);
-    expect(period.props.style.fontFamily).toBe('SpaceGrotesk-SemiBold');
+    expect(period.props.color).toBe('needsYou');
+    expect(period.props.v).toBe('title');
+    expect(marks[0].props.fontFamily).toBe('SpaceGrotesk-SemiBold');
   });
 
-  it('renders the original sign-in tagline and full GitHub action', async () => {
+  it('renders the original tagline and both providers as 52 px actions, GitHub first', async () => {
     let tree!: ReactTestRenderer;
     await act(async () => {
       tree = create(React.createElement(BuzzOnboarding));
@@ -157,47 +145,20 @@ describe('onboarding — canonical brand treatment', () => {
         { deep: true },
       );
 
-    const canonical = 'SpaceGrotesk-SemiBold';
-
-    const title = byTestID('onboarding-wordmark');
-    expect(title).toHaveLength(1);
-    expect(title[0].props.style.fontFamily).toBe(canonical);
-    // Android can paint bundled glyphs wider than its intrinsic Text measure.
-    // Both lines must reserve the brand surface's width, including on error renders.
-    expect(title[0].props.style.width).toBe('100%');
-
     const tagline = byTestID('onboarding-tagline');
     expect(tagline).toHaveLength(1);
     expect(tagline[0].props.children).toBe('workspace for all intelligence');
-    expect(tagline[0].props.style.fontFamily).toBe(beelineThemes.obsidian.proseRegular);
-    expect(tagline[0].props.style.fontSize).toBe(beelineThemes.obsidian.type.body.fontSize);
-    expect(tagline[0].props.style.lineHeight).toBe(beelineThemes.obsidian.type.body.lineHeight);
-    expect(tagline[0].props.style.width).toBe('100%');
+    expect(tagline[0].props.fontFamily).toBe('SpaceGrotesk-Regular');
 
-    // A rendered login action must keep its complete label and original button treatment.
-    const signIn = tree.root.findAll(
-      (node: any) => node.props?.testID === 'onboarding-github-sign-in',
-    );
-    expect(signIn.map((node: any) => node.type)).toContain('Button');
-    expect(signIn.find((node: any) => node.type === 'Button')?.props.label).toBe(
-      'Continue with GitHub',
-    );
-
-    const signInButton = signIn.find((node: any) => node.type === 'Button');
-    expect(signInButton?.props.labelStyle).toMatchObject({ flexGrow: 1, textAlign: 'center' });
-
-    // Every login-screen button is the shared Button, whose label face is
-    // fixed by the component (DESIGN.md → Buttons): no per-call override.
-    const buttons = tree.root.findAll(
-      (node: any) => typeof node.type === 'string' && node.type === 'Button',
-      { deep: true },
-    );
-    expect(buttons.length).toBeGreaterThan(0);
-    for (const button of buttons) {
-      if (button.props.testID !== 'onboarding-github-sign-in') {
-        expect(button.props.labelStyle).toBeUndefined();
-      }
-    }
+    const github = byTestID('onboarding-github-sign-in').find((node: any) => node.type === 'Button');
+    expect(github?.props['aria-label']).toBe('Continue with GitHub');
+    expect(github?.props.theme).toBe('button');
+    expect(github?.props.minHeight).toBe(52);
+    const google = byTestID('onboarding-google-sign-in').find((node: any) => node.type === 'Button');
+    expect(google?.props['aria-label']).toBe('Continue with Google');
+    expect(google?.props.minHeight).toBe(52);
+    const words = tree.root.findAll((node: any) => node.type === 'Text').map((node: any) => node.props.children);
+    expect(words).toContain('GitHub is recommended.');
   });
 });
 
@@ -230,29 +191,17 @@ describe('onboarding — a pending sign-in leaves the buttons usable', () => {
   });
 });
 
-describe('onboarding — canonical brand source assertions', () => {
-  it('keeps the wordmark period a separate accent-styled Text inside the title', () => {
-    const src = source();
-    expect(src).toContain('beeline<Text style={styles.titlePeriod}>.</Text>');
-    expect(src).toMatch(/titlePeriod: \{[\s\S]*?color: groknight\.accent/);
+describe('onboarding — grammar source assertions', () => {
+  it('keeps the wordmark period a separate brass title inside the title', () => {
+    expect(source()).toContain('beeline<T v="title" color="needsYou">.</T>');
   });
 
-  it('never restores the logo font on the login title', () => {
+  it('builds the welcome on the grammar, with no hand-built styles left', () => {
     const src = source();
-    const titleBlock = src.slice(src.indexOf('  title: {'), src.indexOf('titlePeriod:'));
-    expect(titleBlock).toContain('groknight.proseSemibold');
-    expect(titleBlock).not.toContain('Typography.logo()');
-    // The tagline and the auth notice body keep the original canonical prose
-    // family, now read through the shared body role (DESIGN.md → Type) rather
-    // than a bare fontFamily line — body's family is still proseRegular.
-    expect(src).toMatch(/subtitle: \{\s*\.\.\.theme\.buzz\.type\.body/);
-
-  });
-
-  it('renders every onboarding action through the one shared Button', () => {
-    const src = source();
-    expect(src.match(/<Button\n/g)?.length ?? 0).toBeGreaterThan(0);
-    expect(src).not.toMatch(/<(MonoButton|BrassButton|OnboardingButton|RoundButton)\b/);
-    expect(src.match(/labelStyle=/g)).toHaveLength(1);
+    expect(src).toContain('<OnboardingFrame');
+    expect(src).not.toContain('react-native-unistyles');
+    expect(src).not.toMatch(/\bstyle=/);
+    expect(src).not.toContain('Typography.logo()');
+    expect(src.match(/minHeight=\{HEIGHT\.tabBar\}/g)).toHaveLength(2);
   });
 });

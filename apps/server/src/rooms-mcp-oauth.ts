@@ -24,8 +24,8 @@ const escape = (text: string) => text.replace(/[&<>"']/g, ch => ({ '&': '&amp;',
 const BEELINE_ICON = `data:image/svg+xml;base64,${readFileSync(new URL('../assets/mcp/beeline.svg', import.meta.url)).toString('base64')}`;
 /** DESIGN.md Bone, and Obsidian when the device is dark; type, spacing and buttons follow the app. */
 const PAGE_STYLE = `@font-face{font-family:SG;src:url('/mcp/oauth/SpaceGrotesk-Regular.ttf')}@font-face{font-family:SG;src:url('/mcp/oauth/SpaceGrotesk-Medium.ttf');font-weight:500}@font-face{font-family:SG;src:url('/mcp/oauth/SpaceGrotesk-SemiBold.ttf');font-weight:600}
-:root{--canvas:#F3EEE4;--raised:#ECE4D5;--border:#DED2BC;--strong:#C9BBA0;--t1:#171310;--t2:#4A4038;--quiet:#6F6455;--muted:#8B7F6E;--brass:#8a6323;--fill:#1C1712;--fillText:#F3EDE3}
-@media (prefers-color-scheme:dark){:root{--canvas:#14091A;--raised:#190e21;--border:#291e33;--strong:#3b3048;--t1:#f0f0f3;--t2:#c9c9d1;--quiet:#90909B;--muted:#83838d;--brass:#b08a4a;--fill:#F3EDE3;--fillText:#1C1712}}
+:root{--canvas:#fafaf9;--raised:#f5f5f4;--border:#e7e5e4;--strong:#d6d3d1;--t1:#1c1917;--t2:#44403c;--quiet:#78716c;--muted:#78716c;--brass:#57534e;--fill:#1c1917;--fillText:#fafaf9}
+@media (prefers-color-scheme:dark){:root{--canvas:#171717;--raised:#222222;--border:#353535;--strong:#57534e;--t1:#f0f0f3;--t2:#c9c9d1;--quiet:#90909B;--muted:#83838d;--brass:#d6d3d1;--fill:#fafaf9;--fillText:#1c1917}}
 *{box-sizing:border-box}html{background:var(--canvas);overflow-wrap:anywhere}body{margin:0;background:var(--canvas);color:var(--t1);font:16px/23px SG,system-ui,sans-serif}
 main{display:flex;flex-direction:column;min-height:100vh;max-width:440px;margin:0 auto;padding:48px 24px 32px}
 a{color:var(--brass);text-decoration:none}a:focus-visible,button:focus-visible,input:focus-visible{outline:2px solid var(--brass);outline-offset:3px}
@@ -264,15 +264,15 @@ export class RoomsMcpOAuth {
       JOIN identities i ON i.id=t.identity_id AND i.kind='human'
       LEFT JOIN rooms_mcp_members m ON m.client_id=t.client_id AND m.owner_id=t.identity_id
       LEFT JOIN rooms_mcp_families f ON f.id=t.family_id
-      LEFT JOIN rooms_mcp_connections c ON c.client_id=f.client_id AND c.identity_id=f.identity_id
-      WHERE t.hash=$1 AND t.revoked_at IS NULL AND t.expires_at>now()
-      AND (t.family_id IS NULL OR (f.revoked_at IS NULL AND c.revoked_at IS NULL))`, [tokenHash(raw)])).rows[0];
+      JOIN rooms_mcp_connections c ON c.client_id=t.client_id AND c.identity_id=t.identity_id AND c.revoked_at IS NULL
+      WHERE t.hash=$1 AND t.revoked_at IS NULL
+      AND (t.family_id IS NULL OR (f.id IS NOT NULL AND f.revoked_at IS NULL))`, [tokenHash(raw)])).rows[0];
   }
   async take(principal: McpPrincipal): Promise<boolean> {
     const result = await this.database.query(`UPDATE rooms_mcp_tokens SET
       calls=CASE WHEN window_at<=now()-interval '1 minute' THEN 1 ELSE calls+1 END,
       window_at=CASE WHEN window_at<=now()-interval '1 minute' THEN now() ELSE window_at END
-      WHERE hash=$1 AND revoked_at IS NULL AND expires_at>now()
+      WHERE hash=$1 AND revoked_at IS NULL
         AND (window_at<=now()-interval '1 minute' OR calls<60) RETURNING hash`, [principal.hash]);
     if (result.rowCount) await this.database.query('UPDATE rooms_mcp_connections SET last_used_at=now() WHERE client_id=$1 AND identity_id=$2 AND revoked_at IS NULL', [principal.client_id, principal.identity_id]);
     return result.rowCount > 0;

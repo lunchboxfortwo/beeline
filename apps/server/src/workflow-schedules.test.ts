@@ -215,7 +215,7 @@ it('Reproduction schedules-12: resolves Start the daily workflow with… and ski
   expect(listed).toEqual([expect.objectContaining({ scheduleId, workflowName: 'daily' })]);
   expect(
     (await db.query(`SELECT 1 FROM messages WHERE text LIKE '%skipped a run%'`)).rowCount,
-  ).toBe(1);
+  ).toBe(0);
   expect((await db.query(`SELECT 1 FROM agent_commands WHERE reason='schedule'`)).rowCount).toBe(0);
   console.log(
     'Demonstrated schedules-12: prompt resolved daily at creation; live run caused one skip and no schedule wake before any restart',

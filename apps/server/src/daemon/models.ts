@@ -1,10 +1,5 @@
-import { restoreRoomMemberships } from '../membership-join.js';
-import { systemMessage } from '@beeline/api-contract/system-message-catalog';
-import { modelChoiceLabel } from '@beeline/api-contract/phone';
 import { renderAgentAvatar } from '../agent-avatar.js';
-import { createHash, randomUUID } from 'node:crypto';
-import { SYSTEM_IDENTITY_ID } from '@beeline/api-contract/system-identity';
-import { directMessageRoomId, ensureSystemDirectMessageRoom, systemLine } from '../system-line.js';
+import { randomUUID } from 'node:crypto';
 import type { DaemonContext } from './context.js';
 import { Input, id } from './values.js';
 import { daemonWriteResult } from './corner-messages.js';
@@ -49,33 +44,6 @@ import { daemonWriteResult } from './corner-messages.js';
       `UPDATE agents SET soul=CASE WHEN soul IS NULL THEN NULL ELSE soul - 'avatar' END,updated_at=now() WHERE agent_id=$1`,
       [agentId],
     );
-    const request = (
-      await ctx.database.query<{ workspace_id: string; author_id: string }>(
-        `SELECT r.workspace_id,m.author_id FROM messages m JOIN rooms r ON r.id=m.room_id
-       JOIN identities i ON i.id=m.author_id AND i.kind='human'
-       JOIN memberships wm ON wm.workspace_id=r.workspace_id AND wm.identity_id=m.author_id
-         AND wm.room_id IS NULL AND wm.removed_at IS NULL
-       WHERE m.id=$1`,
-        [command.source_message_id],
-      )
-    ).rows[0];
-    if (request) {
-      const participants = [agentId, request.author_id].sort() as [string, string];
-      const roomId = directMessageRoomId(request.workspace_id, participants);
-      await ctx.database.query(
-        `INSERT INTO rooms(id,workspace_id,created_by,name,visibility,direct_participants)
-        VALUES($1,$2,$3,'Direct message','invite-only',$4::jsonb) ON CONFLICT DO NOTHING`,
-        [roomId, request.workspace_id, request.author_id, JSON.stringify(participants)],
-      );
-      await restoreRoomMemberships(ctx.database, request.workspace_id, roomId, participants);
-      await systemLine(ctx.database, {
-        roomId,
-        subject: { kind: 'agent', id: agentId, name: systemMessage("daemon-service.your-agent") },
-        verb: systemMessage("daemon-service.saved-its-avatar"),
-        consequence: systemMessage("daemon-service.your-avatar-is-ready"),
-      });
-      ctx.live.publish({ type: 'invalidate', roomId, reason: 'message', agentId });
-    }
     ctx.live.publish({ type: 'invalidate', roomId: input.roomId, reason: 'message', agentId });
     return { id, createdAt: Math.floor(Date.now() / 1000) };
   }
@@ -90,21 +58,6 @@ import { daemonWriteResult } from './corner-messages.js';
 
   export async function daemonModelCatalog(ctx: DaemonContext, input: Input<'postAgentModelCatalog'>, agentId: string) {
     return ctx.database.transaction(async (database) => {
-    const prior = (await database.query<{
-      model_unavailable: string | null; selected_model: string | null; owner_id: string; name: string; updated_at: Date;
-      model_catalog: Input<'postAgentModelCatalog'>['options'];
-    }>(
-      `SELECT a.model_unavailable,a.selected_model,a.owner_id,i.name,a.updated_at,a.model_catalog FROM agents a
-       JOIN identities i ON i.id=a.agent_id
-       JOIN memberships agent_member ON agent_member.identity_id=a.agent_id
-         AND agent_member.workspace_id=$2 AND agent_member.room_id IS NULL
-         AND agent_member.removed_at IS NULL
-       JOIN memberships owner_member ON owner_member.identity_id=a.owner_id
-         AND owner_member.workspace_id=$2 AND owner_member.room_id IS NULL
-         AND owner_member.removed_at IS NULL
-       WHERE a.agent_id=$1`,
-      [agentId, input.workspaceId],
-    )).rows[0];
     await database.query(
       `UPDATE agents SET model_catalog=$2::jsonb,selected_model=COALESCE($3,selected_model),
          selected_effort=COALESCE($4,selected_effort),model_unavailable=$5,
@@ -127,65 +80,6 @@ import { daemonWriteResult } from './corner-messages.js';
         input.harness ?? null,
       ],
     );
-    // A model/effort choice the owner must replace is the only update-related
-    // app notice. Routine release checks and successful probes stay silent.
-    if (prior && !prior.model_unavailable &&
-        (input.unavailable === 'model' || input.unavailable === 'effort')) {
-      const roomId = await ensureSystemDirectMessageRoom(
-        database, input.workspaceId, prior.owner_id,
-      );
-      await systemLine(database, {
-        roomId,
-        authorId: SYSTEM_IDENTITY_ID,
-        id: createHash('sha256')
-          .update(`agent-model-unavailable:v1:${agentId}:${input.unavailable}:${prior.updated_at.toISOString()}`)
-          .digest('hex'),
-        subject: { kind: 'agent', id: agentId, name: prior.name },
-        verb: systemMessage("daemon-service.needs-a-different-model"),
-        consequence: systemMessage("daemon-service.open-this-agent-s-settings-and-choose-an-available-model-or-effor"),
-      });
-    }
-    // The daemon substitutes a same-family replacement automatically when a
-    // persisted model id vanishes from the live catalog (`resolveModelFamilyFallback`
-    // in `model-config.ts`, e.g. Claude dropping the `opus[1m]` alias) rather
-    // than bricking the agent's turns. That is the only way this operation's
-    // `selection.model` ever differs from the prior value (a human settings
-    // change goes through a separate phone-only path), so this always names
-    // a real automatic correction, never a routine catalog mirror.
-    if (
-      prior?.selected_model &&
-      input.selection?.model &&
-      input.selection.model !== prior.selected_model &&
-      input.unavailable !== 'model' &&
-      input.unavailable !== 'selection'
-    ) {
-      const roomId = await ensureSystemDirectMessageRoom(
-        database, input.workspaceId, prior.owner_id,
-      );
-      // An alias (`default`) names the model it runs, never its menu text.
-      const oldModelName =
-        modelChoiceLabel(
-          prior.model_catalog.find((axis) => axis.category === 'model'),
-          prior.selected_model,
-        ) ?? systemMessage("daemon-service.the-previous-model");
-      const newModelName =
-        modelChoiceLabel(
-          input.options.find((axis) => axis.category === 'model'),
-          input.selection.model,
-        ) ?? systemMessage("daemon-service.the-default-model");
-      await systemLine(database, {
-        roomId,
-        authorId: SYSTEM_IDENTITY_ID,
-        id: createHash('sha256')
-          .update(
-            `agent-model-fallback:v1:${agentId}:${prior.selected_model}:${input.selection.model}:${prior.updated_at.toISOString()}`,
-          )
-          .digest('hex'),
-        subject: { kind: 'agent', id: agentId, name: prior.name },
-        verb: systemMessage("daemon-service.switched-models"),
-        consequence: systemMessage("daemon-service.is-no-longer-offered-now-using", oldModelName, newModelName),
-      });
-    }
     return daemonWriteResult(ctx);
     });
   }

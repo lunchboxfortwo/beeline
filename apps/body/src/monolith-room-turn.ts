@@ -5,7 +5,6 @@ import { subscriptionActionPrompt } from '@beeline/api-contract/daemon';
 import { type TurnTokenFigure } from './harness-turn-tokens.js';
 import { TurnUsageAccumulator } from './turn-usage.js';
 import { CommandExecutionContext } from './server-command-intake.js';
-import type { InterruptedTurn } from './force-update-journal.js';
 import { SquireTaskRelay } from './squire-task-relay.js';
 import { execFile } from 'node:child_process';
 import { promisify } from 'node:util';
@@ -38,7 +37,7 @@ import { AgentProcesses, type AgentProcessLifecycle } from './agent-process.js';
 import { WarmTranscript } from './warm-transcript.js';
 import { PromptSectionBaseline } from './prompt-section-baseline.js';
 import type { RoomSupervisor } from './room-supervisor.js';
-import { monolithRoomTurnLoopConfigurationChanged, monolithRoomTurnLoopRequestReconciliation, monolithRoomTurnLoopIsBusy, monolithRoomTurnLoopPausedGrantRequestId, monolithRoomTurnLoopGrantWritePolicy, monolithRoomTurnLoopBeginTurnTrace, monolithRoomTurnLoopCurrentTurnForRunner, monolithRoomTurnLoopRequesterOf, monolithRoomTurnLoopRefreshPersonaForSoulUpdate, monolithRoomTurnLoopInterruptedTurn, monolithRoomTurnLoopInterruptForServerMinimum, monolithRoomTurnLoopForceRecoverRoom, monolithRoomTurnLoopCommandActivation, monolithRoomTurnLoopConfiguration, monolithRoomTurnLoopRoster, monolithRoomTurnLoopAcceptsImages, monolithRoomTurnLoopDeliver, monolithRoomTurnLoopRepositoryState, monolithRoomTurnLoopWriteBackClaudeLogin, monolithRoomTurnLoopPublishOpenRouterSpend, monolithRoomTurnLoopPublishHarnessQuota, monolithRoomTurnLoopCaptureTurnMetrics, monolithRoomTurnLoopWatchClaudeLogin, monolithRoomTurnLoopStopClaudeLoginWatch, monolithRoomTurnLoopDiscardSession, monolithRoomTurnLoopSessionIsCurrent, monolithRoomTurnLoopRefreshTurnCheckout, monolithRoomTurnLoopCurrentSessionFingerprint, monolithRoomTurnLoopGrantedResources, monolithRoomTurnLoopMountedMcpServers, monolithRoomTurnLoopActivate } from './monolith-room-turn-configuration-changed.js';
+import { monolithRoomTurnLoopConfigurationChanged, monolithRoomTurnLoopRequestReconciliation, monolithRoomTurnLoopIsBusy, monolithRoomTurnLoopPausedGrantRequestId, monolithRoomTurnLoopGrantWritePolicy, monolithRoomTurnLoopBeginTurnTrace, monolithRoomTurnLoopCurrentTurnForRunner, monolithRoomTurnLoopRequesterOf, monolithRoomTurnLoopRefreshPersonaForSoulUpdate, monolithRoomTurnLoopInterruptForServerMinimum, monolithRoomTurnLoopForceRecoverRoom, monolithRoomTurnLoopCommandActivation, monolithRoomTurnLoopConfiguration, monolithRoomTurnLoopRoster, monolithRoomTurnLoopAcceptsImages, monolithRoomTurnLoopDeliver, monolithRoomTurnLoopRepositoryState, monolithRoomTurnLoopWriteBackClaudeLogin, monolithRoomTurnLoopPublishOpenRouterSpend, monolithRoomTurnLoopPublishHarnessQuota, monolithRoomTurnLoopCaptureTurnMetrics, monolithRoomTurnLoopWatchClaudeLogin, monolithRoomTurnLoopStopClaudeLoginWatch, monolithRoomTurnLoopDiscardSession, monolithRoomTurnLoopSessionIsCurrent, monolithRoomTurnLoopRefreshTurnCheckout, monolithRoomTurnLoopCurrentSessionFingerprint, monolithRoomTurnLoopGrantedResources, monolithRoomTurnLoopMountedMcpServers, monolithRoomTurnLoopActivate } from './monolith-room-turn-configuration-changed.js';
 import { monolithRoomTurnLoopActivateCold, monolithRoomTurnLoopLifecycle, monolithRoomTurnLoopServingProviders, monolithRoomTurnLoopExplainEmpty, monolithRoomTurnLoopRepinNextProvider, monolithRoomTurnLoopStartPrompt, monolithRoomTurnLoopStopTurn } from './monolith-room-turn-activate-cold.js';
 import { monolithRoomTurnLoopPrompt } from './monolith-room-turn-prompt.js';
 import { monolithRoomTurnLoopRun } from './monolith-room-turn-run.js';
@@ -274,8 +273,7 @@ requesterOf(authorId: string): {
     name?: string;
 } { return monolithRoomTurnLoopRequesterOf(this, authorId); }
 async refreshPersonaForSoulUpdate(): Promise<void> { return monolithRoomTurnLoopRefreshPersonaForSoulUpdate(this); }
-interruptedTurn(): InterruptedTurn | undefined { return monolithRoomTurnLoopInterruptedTurn(this); }
-interruptForServerMinimum(): InterruptedTurn | undefined { return monolithRoomTurnLoopInterruptForServerMinimum(this); }
+interruptForServerMinimum(): void { monolithRoomTurnLoopInterruptForServerMinimum(this); }
 async forceRecoverRoom(): Promise<void> { return monolithRoomTurnLoopForceRecoverRoom(this); }
 commandActivation() { return monolithRoomTurnLoopCommandActivation(this); }
 async configuration() { return monolithRoomTurnLoopConfiguration(this); }
@@ -706,6 +704,16 @@ export function approvedDeviceGrant(
   return undefined;
 }
 
+
+/** The prompt that continues a turn once its requested dependencies are mounted. */
+export function dependencyMountResumePrompt(earlierReply: string): string {
+  const earlier = earlierReply.trim();
+  return [
+    'The dependencies you requested are mounted in this session now; this is the same turn continuing.',
+    ...(earlier ? [`Your reply just before this was: ${earlier}`] : []),
+    'Continue the work that needed them. Do not request them again or ask anyone to start another turn.',
+  ].join(' ');
+}
 
 /** The prompt that continues a turn after an instantly approved device grant. */
 export function deviceGrantResumePrompt(device: string, earlierReply: string): string {

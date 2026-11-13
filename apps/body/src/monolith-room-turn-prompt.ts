@@ -13,8 +13,7 @@ import { TurnStoppedError } from './turn-stop.js';
 import { AgentTurnStream, durableReplyText } from './turn-stream.js';
 import { roomReplySteps } from './room-turn-steps.js';
 import { toolCallFailureLine } from './tool-call-failure.js';
-import { distillTurnFailureReason } from './turn-failure-reason.js';
-import { withTurnReceiptHeartbeat } from './turn-receipt-heartbeat.js';
+import { distillTurnFailureReason, redactToolDetail } from './turn-failure-reason.js';
 import { isAgentProcessExit } from './agent-process.js';
 import { MonolithRoomTurnLoop, ActiveTurn, inboxItemPromptBody, transcriptMessagePrompt, resumePrompt, inboxItemAuthorName, roomMessagePrompt, approvedDeviceGrant, deviceGrantResumePrompt, openCornerToolCall, openedACorner, pendingCardKind } from './monolith-room-turn.js';
 
@@ -79,15 +78,7 @@ import { MonolithRoomTurnLoop, ActiveTurn, inboxItemPromptBody, transcriptMessag
       if (freeAgent) await ctx.freeContinuation.begin(inboxItemPromptBody(item));
       // The first row of the turn names who asked; learn the name once per session.
       if (!ctx.memberNames.has(item.authorId)) await ctx.roster().catch(() => undefined);
-      await withTurnReceiptHeartbeat(
-        api,
-        {
-          agentId: ctx.agent.publicKey,
-          roomId: ctx.options.roomId,
-          requestId: item.id,
-          generationId: ctx.commandContext.generationId,
-        },
-        async () => {
+      await (async () => {
           trace.noteScheduler('queue', ctx.options.scheduler.snapshot());
           trace.start('queue-wait');
           ctx.turnCheckout = undefined;
@@ -507,20 +498,7 @@ import { MonolithRoomTurnLoop, ActiveTurn, inboxItemPromptBody, transcriptMessag
               );
             },
           );
-        },
-        (error) =>
-          console.error(
-            `[thin-core] monolith Room ${ctx.options.roomId} receipt heartbeat failed:`,
-            error,
-          ),
-        () => {
-          console.warn(
-            `[thin-core] monolith Room ${ctx.options.roomId} turn ${item.id} dropped: ` +
-              'the server revoked its output authority',
-          );
-          ctx.stopTurn(item.id);
-        },
-      );
+      })();
       await Promise.all(ctx.approvalDecisionWrites);
       const decisionFailure = ctx.approvalDecisionFailures.get(item.id);
       if (decisionFailure) throw new Error(`Squire approval decision was not published: ${distillTurnFailureReason(decisionFailure).text}`);
@@ -597,7 +575,7 @@ import { MonolithRoomTurnLoop, ActiveTurn, inboxItemPromptBody, transcriptMessag
         requestId: item.id,
         status: 'failed',
         generationId: ctx.commandContext.generationId,
-        reason: reason.text,
+        reason: redactToolDetail(reason.text),
         ...(reason.kind ? { reasonKind: reason.kind } : {}),
         toolCalls: trace.toolCallsTotal,
         trace: trace.replay(),

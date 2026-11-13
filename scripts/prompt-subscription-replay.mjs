@@ -89,7 +89,7 @@ export async function executeSample({ source, testCase, variant, model, director
   const cwd = mkdtempSync(join(tmpdir(), 'beeline-codex-replay-'));
   const fixture = join(directory, 'fixture.json'), tracePath = join(directory, 'trace.json');
   const tools = toolsFor(source, testCase);
-  const skills = Object.fromEntries(source.skills.beelineManagedSkills('source', { isReviewer: testCase.session?.reviewer === true })
+  const skills = Object.fromEntries(source.skills.beelineManagedSkills('source', { isReviewer: testCase.session?.reviewer === true, freeAgent: testCase.session?.freeAgent === true })
     .map(s => [skillPath(s.name), s.content]));
   writeFileSync(fixture, JSON.stringify({ testCase, tools, skills, variant }));
   const prompt = nativePrompt(source, testCase, variant, tools, seed);

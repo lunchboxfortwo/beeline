@@ -1,5 +1,5 @@
 import { afterEach, expect, it, vi } from 'vitest';
-const sdk = vi.hoisted(() => ({ init: vi.fn(), captureException: vi.fn(), setTag: vi.fn() }));
+const sdk = vi.hoisted(() => ({ init: vi.fn(), captureException: vi.fn(), setTag: vi.fn(), setUser: vi.fn() }));
 const device = vi.hoisted(() => ({ isDevice: true }));
 vi.mock('@sentry/react-native', () => sdk);
 vi.mock('expo-device', () => device);
@@ -89,4 +89,17 @@ it('R-SENTRY-REPEAT: applies the shared cap to SDK events while preserving priva
   expect(beforeSend(event(695))).toMatchObject({ exception: { values: [{ value: 'owner 695 failed' }] } });
   expect(beforeSend(event(696))).toBeNull();
   expect(beforeSend({ message: 'a different error' })).not.toBeNull();
+});
+
+it('names only the signed-in identity id on phone events and clears it on sign-out', async () => {
+  vi.stubGlobal('__DEV__', false); vi.stubEnv('EXPO_PUBLIC_SENTRY_DSN', 'https://public@fixture.ingest.sentry.io/1');
+  const { setMobileErrorUser } = await import('./sentry');
+  const { beforeSend } = sdk.init.mock.calls[0]![0];
+  const id = 'a'.repeat(64);
+  setMobileErrorUser(id);
+  expect(sdk.setUser).toHaveBeenLastCalledWith({ id });
+  expect(beforeSend({ message: 'signed in failure', user: { id, email: 'private@example.com', ip_address: '127.0.0.1' } }).user)
+    .toEqual({ id });
+  setMobileErrorUser(null);
+  expect(sdk.setUser).toHaveBeenLastCalledWith(null);
 });

@@ -1,13 +1,13 @@
 import { useLatencyRouteFrame } from '@/buzz/latency-route-hook';
 import React, { useEffect } from 'react';
-import { Text, View } from 'react-native';
-import { StyleSheet } from 'react-native-unistyles';
+import { YStack } from 'tamagui';
 import { router, useLocalSearchParams } from 'expo-router';
 import { useURL } from 'expo-linking';
 import { Button } from '@/components/buzz/Button';
 import { SurfaceGlyphLoader } from '@/components/buzz/SurfaceGlyphLoader';
 import { signInWithReviewSecret } from '@/auth/review-sign-in';
 import { parseReviewSecret } from '@/buzz/review-link';
+import { T } from '@/ui/grammar';
 
 /**
  * The store-reviewer landing route. Both `https://usebeeline.app/review/<secret>`
@@ -46,45 +46,23 @@ export default function ReviewSignIn() {
   }, [secret]);
 
   return (
-    <View style={styles.container}>
+    <YStack flex={1} alignItems="center" justifyContent="center" backgroundColor="canvas">
       {failure ? (
-        <View accessibilityRole="alert" style={styles.failure} testID="review-sign-in-error">
-          <Text style={styles.failureTitle}>Review sign-in failed</Text>
-          <Text style={styles.failureText}>{failure}</Text>
+        <YStack accessibilityRole="alert" width="100%" maxWidth={440} paddingHorizontal="6" testID="review-sign-in-error">
+          <T v="title" textAlign="center">Review sign-in failed</T>
+          <T v="body" color="secondary" marginVertical="6" textAlign="center">{failure}</T>
           <Button
             label="Return to sign in"
             onPress={() => router.replace('/beeline/onboarding')}
             variant="secondary"
           />
-        </View>
+        </YStack>
       ) : (
         <>
           <SurfaceGlyphLoader compact testID="review-signin-loader" />
-          <Text style={styles.status}>signing in…</Text>
+          <T v="meta" color="secondary" marginTop="4">signing in…</T>
         </>
       )}
-    </View>
+    </YStack>
   );
 }
-
-const styles = StyleSheet.create((theme) => ({
-  container: {
-    flex: 1,
-    alignItems: 'center',
-    justifyContent: 'center',
-    backgroundColor: theme.buzz.bgTerminal,
-  },
-  status: { ...theme.buzz.type.meta, marginTop: theme.buzz.space.md, color: theme.buzz.muted },
-  failure: { width: '100%', maxWidth: 440, paddingHorizontal: 24 },
-  failureTitle: {
-    ...theme.buzz.type.hero,
-    color: theme.buzz.textPrimary,
-    textAlign: 'center',
-  },
-  failureText: {
-    ...theme.buzz.type.body,
-    color: theme.buzz.textSecondary,
-    marginVertical: theme.buzz.space.lg,
-    textAlign: 'center',
-  },
-}));

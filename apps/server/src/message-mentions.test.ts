@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { hasChannelMention, hasSystemReportMention, isChannelMentionToken, typedMentionHandles } from './message-mentions.js';
+import { hasChannelMention, hasSystemReportMention, isChannelMentionToken, stripMentionHandles, typedMentionHandles } from './message-mentions.js';
 
 describe('typedMentionHandles', () => {
   it('does not turn forwarded quote text into a fresh mention', () => {
@@ -80,4 +80,11 @@ it('ignores paired double quotes on one line but preserves unmatched quotes and 
   expect(hasChannelMention('"@channel"')).toBe(false);
   expect(hasSystemReportMention('“@system”')).toBe(false);
   expect(hasSystemReportMention('“quoted” @system')).toBe(true);
+});
+
+it('drops the active tag and keeps the same handle inside straight or curly quotes', () => {
+  expect(stripMentionHandles('@captain Here is the exact quote: "@captain approved it".', ['captain']))
+    .toBe('Here is the exact quote: "@captain approved it".');
+  expect(stripMentionHandles('@captain Here is the exact quote: “@captain approved it”.', ['captain']))
+    .toBe('Here is the exact quote: “@captain approved it”.');
 });

@@ -1,7 +1,6 @@
 import { reconnectNow, useConnectionFailure } from '@/sync/transport/live-connection';
-import { View } from 'react-native';
-import { StyleSheet } from 'react-native-unistyles';
 import React from 'react';
+import { YStack } from 'tamagui';
 import { SafeAreaInsetsContext, useSafeAreaInsets } from 'react-native-safe-area-context';
 import { IndexRow } from './IndexRow';
 
@@ -12,10 +11,11 @@ export function ConnectionStatus({ children }: { children?: React.ReactNode }) {
   return (
     <>
       {failed && (
-        <View accessibilityLiveRegion="polite" style={[styles.banner, { paddingTop: insets.top }]} testID="connection-status-disconnected">
+        <YStack accessibilityLiveRegion="polite" flexShrink={0} paddingHorizontal="5" backgroundColor="raised" testID="connection-status-disconnected">
+          <YStack height={insets.top} />
           <IndexRow wrap inset="flush" title="Beeline isn’t connected" description="Try your request again."
             action="Reconnect" onPress={reconnectNow} testID="connection-status-reconnect" />
-        </View>
+        </YStack>
       )}
       {/* The banner has consumed the status-bar inset. Keep the provider mounted
           while toggling it so the navigator and open Room retain their state. */}
@@ -26,6 +26,3 @@ export function ConnectionStatus({ children }: { children?: React.ReactNode }) {
   );
 }
 
-const styles = StyleSheet.create((theme) => ({
-  banner: { flexShrink: 0, paddingHorizontal: theme.buzz.roomList.edge, backgroundColor: theme.buzz.bgRaised },
-}));

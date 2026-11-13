@@ -1,10 +1,9 @@
 import { useTextDraft } from '@/buzz/use-text-draft';
 import React, { useEffect, useState } from 'react';
-import { Pressable, ScrollView, Text, View } from 'react-native';
-import { StyleSheet } from 'react-native-unistyles';
+import { ScrollView, XStack, YStack } from 'tamagui';
+import { T } from '@/ui/grammar';
 import { HullDialogActions, HullDialogInput } from './HullDialog';
-import { HULL_SHEET_INSET, HullActionSheetCancel, HullActionSheetModal } from './HullActionSheet';
-import { Button } from './Button';
+import { HullActionSheetModal } from './HullActionSheet';
 
 const CLOSING_TIMES = [
   { label: '5 min', seconds: 300 },
@@ -56,7 +55,9 @@ export function CreatePollSheet({
       testID="create-poll-sheet"
       footer={
         <HullDialogActions
-          style={styles.submitInset}
+          paddingHorizontal="6"
+          paddingTop="4"
+          paddingBottom="2"
           actions={[
             { label: 'Cancel', disabled: busy, onPress: onClose },
             {
@@ -86,8 +87,8 @@ export function CreatePollSheet({
         />
       }
     >
-      <ScrollView keyboardShouldPersistTaps="handled" style={styles.content}>
-        <Text style={styles.label}>Question</Text>
+      <ScrollView keyboardShouldPersistTaps="handled" maxHeight={470} paddingHorizontal="6">
+        <T v="metaStrong" marginTop="4" marginBottom="2">Question</T>
         <HullDialogInput
           value={prompt}
           onChangeText={setPrompt}
@@ -95,11 +96,11 @@ export function CreatePollSheet({
           maxLength={120}
           testID="create-poll-question"
         />
-        <Text style={styles.label}>Options</Text>
+        <T v="metaStrong" marginTop="4" marginBottom="2">Options</T>
         {options.map((option, index) => (
-          <View key={index} style={styles.optionRow}>
-            <Text style={styles.optionLetter}>{String.fromCharCode(65 + index)}</Text>
-            <View style={styles.optionInput}>
+          <XStack key={index} alignItems="center" gap="2">
+            <T v="body" width={18}>{String.fromCharCode(65 + index)}</T>
+            <YStack flex={1}>
               <HullDialogInput
                 value={option}
                 onChangeText={(value) =>
@@ -109,74 +110,58 @@ export function CreatePollSheet({
                 maxLength={32}
                 testID={`create-poll-option-${index}`}
               />
-            </View>
+            </YStack>
             {options.length > 2 ? (
-              <Button
+              <YStack
                 accessibilityRole="button"
                 accessibilityLabel={`Remove option ${index + 1}`}
                 onPress={() => setOptions((current) => current.filter((_, i) => i !== index))}
-                label={'Remove'}
-                variant="quiet"
-                appearance={{ control: styles.remove, label: styles.actionText }}
-              />
+                minHeight={44}
+                justifyContent="center"
+                cursor="pointer"
+              >
+                <T v="meta">Remove</T>
+              </YStack>
             ) : null}
-          </View>
+          </XStack>
         ))}
         {options.length < 4 ? (
-          <Button
+          <YStack
             accessibilityRole="button"
+            accessibilityLabel="Add option"
             onPress={() => setOptions((current) => [...current, ''])}
             testID="create-poll-add-option"
-            label={'Add option'}
-            variant="quiet"
-            appearance={{ control: styles.add, label: styles.actionText }}
-          />
+            minHeight={44}
+            justifyContent="center"
+            alignSelf="flex-start"
+            cursor="pointer"
+          >
+            <T v="meta">Add option</T>
+          </YStack>
         ) : null}
-        <Text style={styles.label}>Closes after</Text>
-        <View style={styles.times}>
+        <T v="metaStrong" marginTop="4" marginBottom="2">Closes after</T>
+        <XStack flexWrap="wrap" gap="2" marginBottom="2">
           {CLOSING_TIMES.map((time) => (
-            <Pressable
+            <YStack
               key={time.seconds}
               accessibilityRole="radio"
               accessibilityState={{ selected: ttlSeconds === time.seconds }}
               onPress={() => setTtlSeconds(time.seconds)}
-              style={[styles.time, ttlSeconds === time.seconds && styles.timeSelected]}
+              minHeight={44}
+              minWidth={70}
+              paddingHorizontal="2"
+              justifyContent="center"
+              alignItems="center"
+              borderWidth={1}
+              borderColor={ttlSeconds === time.seconds ? 'needsYou' : 'strongStroke'}
+              borderRadius="sm"
+              cursor="pointer"
             >
-              <Text style={styles.actionText}>{time.label}</Text>
-            </Pressable>
+              <T v="meta">{time.label}</T>
+            </YStack>
           ))}
-        </View>
+        </XStack>
       </ScrollView>
     </HullActionSheetModal>
   );
 }
-
-const styles = StyleSheet.create((theme) => ({
-  content: { maxHeight: 470, paddingHorizontal: HULL_SHEET_INSET },
-  submitInset: { paddingHorizontal: HULL_SHEET_INSET, paddingTop: 16, paddingBottom: 8 },
-  label: {
-    ...theme.buzz.type.meta,
-    color: theme.buzz.textPrimary,
-    fontWeight: '600',
-    marginTop: 16,
-    marginBottom: 8,
-  },
-  optionRow: { flexDirection: 'row', alignItems: 'center', gap: 8 },
-  optionLetter: { color: theme.buzz.textPrimary, width: 18 },
-  optionInput: { flex: 1 },
-  remove: { minHeight: 44, justifyContent: 'center' },
-  add: { minHeight: 44, justifyContent: 'center' },
-  actionText: { ...theme.buzz.type.meta, color: theme.buzz.textPrimary },
-  times: { flexDirection: 'row', flexWrap: 'wrap', gap: 8, marginBottom: 8 },
-  time: {
-    minHeight: 44,
-    minWidth: 70,
-    paddingHorizontal: 8,
-    justifyContent: 'center',
-    alignItems: 'center',
-    borderWidth: StyleSheet.hairlineWidth,
-    borderColor: theme.buzz.borderStrong,
-    borderRadius: theme.buzz.radius,
-  },
-  timeSelected: { borderColor: theme.buzz.accent },
-}));

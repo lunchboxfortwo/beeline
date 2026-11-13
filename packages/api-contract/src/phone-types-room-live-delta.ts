@@ -1,5 +1,6 @@
 import type { AgentUsage } from './agent-usage.js';
 import type { AgentAccessPolicy } from './agent-access.js';
+import type { RoomScheduleView } from './phone-operations.js';
 import { RoomViewMessage, RoomViewAgentTurn, RoomViewHeader, RoomViewMember, RoomViewPendingAgentCommand, RoomViewer, RoomDirectMessageView, RoomViewActivity, CornerLifecycleView, SurfaceWatchFilter, CornerState, CornerStateReason, CornerBlocker, RoomViewIdentity, AttachmentReference, WorkspaceAgentView, WorkspaceMemberGrantView, AgentModelConfigOption, AgentModelSelection, AgentGrantView } from './phone-types.js';
 
 
@@ -167,6 +168,9 @@ export type ChatListCorner = {
   /** On the viewer's waiting corners: when the corner last spoke (unix
    * seconds), the moment it handed back. It counts as Room activity. */
   readonly waitingSince?: number;
+  /** When the corner last spoke (unix seconds), on every corner. The chat
+   * list shows a thread line only while this is recent. */
+  readonly lastActivityAt?: number;
   /** The corner owes the viewer something they have not opened it to see
    * since. Only these open the Room's corner dropdown on their own. */
   readonly attention?: true;
@@ -283,6 +287,16 @@ export type ChatListView = {
    */
   readonly unavailable?: readonly ChatListUnavailable[];
   readonly watchFilters: readonly SurfaceWatchFilter[];
+  /**
+   * Live, top-level public chats in this Workspace the viewer has not joined
+   * (no live `memberships` row). Any Workspace member may join one with
+   * `addRoomMember` and their own id. Absent from older servers.
+   */
+  readonly joinable?: readonly {
+    readonly id: string;
+    readonly name: string;
+    readonly memberCount: number;
+  }[];
 };
 
 
@@ -397,6 +411,14 @@ export type AgentDetailView = {
   /** Merged PRs opened by this agent in corners the viewer may read. */
   readonly recentWork?: readonly { readonly title: string; readonly url: string }[];
   readonly recentWorkCursor?: string;
+  /** This agent's unarchived schedules in Rooms (and their threads) the viewer is a member of, by next run. */
+  readonly schedules?: readonly RoomScheduleView[];
+  /** Top-level, unarchived, non-DM Rooms this agent is a member of that the viewer is also a member of. */
+  readonly rooms?: readonly {
+    readonly id: string;
+    readonly name: string;
+    readonly visibility?: 'public' | 'invite-only';
+  }[];
   readonly workspaceId: string;
   readonly agent: RoomViewMember;
   /** The person who connected and owns this agent's configuration. */
@@ -554,6 +576,8 @@ export type CornerListView = {
   readonly corners: readonly CornerListItem[];
   /** On an archived page: the cursor that reads the next page. Absent on the last one. */
   readonly nextArchived?: string;
+  /** Total finished corners, independent of the archived page size. */
+  readonly archivedCount?: number;
   /** Cursor for the next page of open corners. */
   readonly nextOpen?: string;
   /** On the first open page of a top-level Room: the Room list row's corner

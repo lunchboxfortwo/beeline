@@ -214,6 +214,11 @@ export function normalizeTriggerDefinition(sql: string): string {
   return stripStatement(sql)
     .replace(/\b[A-Za-z_][A-Za-z0-9_]*\.([A-Za-z_][A-Za-z0-9_]*)/g, '$1')
     .replace(/\bEXECUTE\s+PROCEDURE\b/gi, 'EXECUTE FUNCTION')
+    // pg_get_triggerdef orders events INSERT, DELETE, UPDATE, TRUNCATE,
+    // independently of their order in CREATE TRIGGER. Compare the same set.
+    .replace(/\b(BEFORE|AFTER|INSTEAD\s+OF)\s+((?:INSERT|DELETE|UPDATE|TRUNCATE)\b[\s\S]*?)\s+ON\b/i,
+      (_, timing: string, events: string) => `${timing} ${events.split(/\s+OR\s+/i)
+        .map(event => event.trim().toLowerCase()).sort().join(' OR ')} ON`)
     .replace(/\bWHEN\s+([\s\S]*?)\s+EXECUTE\b/i, (_, condition: string) => `WHEN ${unwrapTriggerCondition(condition)} EXECUTE`)
     .replace(/\s+/g, ' ')
     .replace(/\s*([(),])\s*/g, '$1')

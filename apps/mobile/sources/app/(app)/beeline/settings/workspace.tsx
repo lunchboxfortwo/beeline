@@ -11,7 +11,7 @@ export default function WorkspaceSettingsRedirect() {
   return (
     <Redirect
       href={{
-        pathname: '/beeline/settings/identity',
+        pathname: '/beeline/settings',
         params: { tab: 'workspace', ...(workspaceId ? { workspaceId } : {}) },
       } as unknown as Href}
     />

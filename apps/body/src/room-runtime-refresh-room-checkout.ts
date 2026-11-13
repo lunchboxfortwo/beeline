@@ -6,11 +6,10 @@ import { DaemonApiError } from './daemon-api-client.js';
 import { redactReplayError, type RoomGitHubTokenResult, type RoomRepositoryStateResult } from '@beeline/api-contract/daemon';
 import { MonolithCornerTurnLoop } from './monolith-corner-turn.js';
 import { cornerHasRepositoryWork } from './prompt-assembly.js';
-import { distillTurnFailureReason } from './turn-failure-reason.js';
+import { distillTurnFailureReason, redactToolDetail } from './turn-failure-reason.js';
 import { writePrivateFileAtomically } from './atomic-private-file.js';
 import { rememberStorageOwner, readStorageOwners } from './storage-owners.js';
 import { isStandingRuntimeFault } from './runtime-start-fault.js';
-import { agentCornerCheckoutPaths } from './agent-corner-checkout.js';
 import { AgentProcesses } from './agent-process.js';
 import { RoomRuntimeCoordinator, roomCheckoutRemote, execFileAsync, DesiredCorner, cornerStartConfigKey, materializeCornerWorktree, shouldPostInitialCornerWorkingState, CornerCredentialLookupError, isStandingCornerStartFault, localCornerWorktreeIds } from './room-runtime.js';
 
@@ -90,28 +89,15 @@ import { RoomRuntimeCoordinator, roomCheckoutRemote, execFileAsync, DesiredCorne
         ? await ctx.cornerRepositoryToken(corner.parentRoomId)
         : undefined;
       let worktree: { path: string; gitCommonDir: string } | undefined;
-      let readCheckout: { path: string; gitCommonDir: string } | undefined;
-      const ownCheckout = repositoryBacked
-        ? agentCornerCheckoutPaths(ctx.runtime.supervisorRoot, corner.cornerId, ctx.agent.publicKey)
-        : undefined;
-      // Only a writer gets a private copy: the implementer, an agent given
-      // work here, or one that already holds a copy with its own edits. Other
-      // turns read the Room's checkout and never clone.
-      const prepareCheckout = async (repositoryWork: boolean, implementerAgentId = restore.implementerAgentId, assigned = false) => {
-        const writable = repositoryWork && (assigned || !implementerAgentId ||
-          implementerAgentId === ctx.agent.publicKey || existsSync(resolve(ownCheckout!.path, '.git')));
-        if (!writable) {
-          if (!readCheckout) {
-            const path = await ctx.materializeRoomCheckout(corner.parentRoomId, repository);
-            const common = (await execFileAsync('git', ['-C', path, 'rev-parse', '--path-format=absolute', '--git-common-dir'])).stdout.trim();
-            readCheckout = { path, gitCommonDir: common };
-          }
-          return { ...readCheckout, writable };
-        }
+      // Every member works in its own private copy, reviewers included. Only
+      // a brief without repository work makes that copy read-only.
+      const prepareCheckout = async (repositoryWork: boolean, implementerAgentId = restore.implementerAgentId) => {
         if (!worktree || !existsSync(resolve(worktree.path, '.git'))) {
+          // A turn may come long after the corner started; its token may have expired.
+          const { token } = await ctx.cornerRepositoryToken(corner.parentRoomId);
           worktree = await ctx.materializeCornerWorktree({
             cornerId: corner.cornerId, remote: repository.remote!, targetBranch: targetBranch!,
-            featureBranch: featureBranch!, token: granted!.token,
+            featureBranch: featureBranch!, token,
             migrateLegacy: implementerAgentId === ctx.agent.publicKey,
           });
           await rememberStorageOwner(ctx.runtime.supervisorRoot, { workspaceId: ctx.runtime.communityId,
@@ -120,7 +106,7 @@ import { RoomRuntimeCoordinator, roomCheckoutRemote, execFileAsync, DesiredCorne
           if (running) running.worktree = { ...worktree, cornerId: corner.cornerId,
             branch: featureBranch!, parentRoomId: corner.parentRoomId, token: '' };
         }
-        return { ...worktree, writable };
+        return { ...worktree, writable: repositoryWork };
       };
       const repositoryReadOnly = Boolean(restore.brief) && !cornerHasRepositoryWork(restore.brief);
       const checkout = repositoryBacked ? await prepareCheckout(!repositoryReadOnly) : undefined;
@@ -428,12 +414,10 @@ import { RoomRuntimeCoordinator, roomCheckoutRemote, execFileAsync, DesiredCorne
         roomId:cornerId,commandId:pending.id,generationId,
       });
       claimed = true;
-      const diagnostic = error && typeof error === 'object' && 'stderr' in error &&
-        typeof error.stderr === 'string' && error.stderr.trim() ? error.stderr : error;
-      const reason = distillTurnFailureReason(diagnostic);
+      const reason = distillTurnFailureReason(error);
       for (const command of result.commands) await api.execute('postAgentTurnReceipt', {
         agentId:ctx.agent.publicKey,roomId:cornerId,requestId:command.turnRequestId,generationId,
-        status:'failed',reason:reason.text,reasonKind:'workspace-failure',
+        status:'failed',reason:redactToolDetail(reason.text),reasonKind:'workspace-failure',
         trace:{totalMs:0,attempts:[],reason:redactReplayError(reason.text),reasonKind:'workspace-failure'},
       });
       return true;
