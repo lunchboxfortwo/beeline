@@ -37,11 +37,6 @@ function themeValues(mode: Mode, palette: Palette): Record<string, string> & { n
         ink: c.textPrimary, secondary: c.textSecondary,
         needsYou: c.accent, added: c.diffAdded, removed: c.diffRemoved,
         primaryFill: c.buttonPrimaryFill, primaryInk: c.buttonPrimaryText,
-        // The tab bar's selected and other tabs. Stone's accent is its
-        // secondary ink, so there the selected tab is primary ink and the
-        // others are muted.
-        tabOn: palette === 'stone' ? c.textPrimary : c.accent,
-        tabOff: palette === 'stone' ? c.textMuted : c.textSecondary,
     };
     return theme;
 }
