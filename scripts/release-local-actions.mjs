@@ -6,6 +6,7 @@ import { dirname, isAbsolute, join, relative, resolve } from 'node:path';
 import { parse } from 'yaml';
 import { condition, readCommandFile, render } from './release-local-expressions.mjs';
 import { appendSummary, privateWrite, readOptional } from './release-local-process.mjs';
+import { setupJava } from './release-local-java.mjs';
 
 const SUPPORTED = /^(actions\/(checkout|setup-node|setup-java|github-script|upload-artifact|download-artifact|cache)(\/restore|\/save)?@v\d+|docker\/login-action@v3|dtolnay\/rust-toolchain@[^\s]+)$/;
 
@@ -256,7 +257,7 @@ export class LocalActions {
       context.env.PATH = selected.PATH;
       if (selected.FNM_DIR) context.env.FNM_DIR = selected.FNM_DIR;
     } else if (name.startsWith('actions/setup-java@')) {
-      await this.processes.run('bash', ['-c', 'java -version 2>&1 | head -1 | grep -F "\\\"$1"', 'java-version', inputs['java-version']], { env, quiet: true });
+      await setupJava({ action: name, inputs, env, directory: this.directory, processes: this.processes, token: context.github.token, timeout });
     } else if (name.startsWith('dtolnay/rust-toolchain@')) {
       const version = name.split('@')[1];
       await this.processes.run('rustup', ['run', version, 'rustc', '--version'], { env, quiet: true });

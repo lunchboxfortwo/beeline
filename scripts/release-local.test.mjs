@@ -7,7 +7,8 @@ import { join, resolve } from 'node:path';
 import test from 'node:test';
 import { parse } from 'yaml';
 import { LocalActions, matrixRows } from './release-local-actions.mjs';
-import { attribution, dryInitializeJob, dryRun, loadEnvironment, localHooks, missingReleaseCredentials, parseArguments } from './release-local.mjs';
+import { attribution, dryInitializeJob, dryRun, loadEnvironment, localHooks, missingReleaseCredentials, parseArguments, releaseChecks } from './release-local.mjs';
+import { setupJava } from './release-local-java.mjs';
 import { condition, evaluate, readCommandFile, render } from './release-local-expressions.mjs';
 import { Processes } from './release-local-process.mjs';
 import { mergeBeelineBundles } from './merge-beeline-bundles.mjs';
@@ -127,6 +128,104 @@ test('secret input is private data outside the checkout, never shell execution',
     assert.throws(() => loadEnvironment(env, directory), /outside/);
     chmodSync(env, 0o644);
     assert.throws(() => loadEnvironment(env), /mode 600/);
+  } finally { rmSync(directory, { recursive: true, force: true }); }
+});
+test('setup-java selects a matching JDK outside PATH despite a JAVA_TOOL_OPTIONS notice', async () => {
+  const directory = temporary(), home = join(directory, 'temurin');
+  try {
+    mkdirSync(join(home, 'bin'), { recursive: true });
+    writeFileSync(join(home, 'release'), 'JAVA_VERSION="17.0.21"\nIMPLEMENTOR="Eclipse Adoptium"\n');
+    for (const command of ['java', 'javac']) {
+      writeFileSync(join(home, 'bin', command), '#!/bin/sh\necho "Picked up JAVA_TOOL_OPTIONS: $JAVA_TOOL_OPTIONS" >&2\necho "openjdk 17.0.21"\n', { mode: 0o700 });
+    }
+    writeFileSync(join(directory, 'workflow.yml'), JSON.stringify({ jobs: { java: { env: { JAVA_TOOL_OPTIONS: '-XX:ActiveProcessorCount=2' }, steps: [
+      { uses: 'actions/setup-java@v4', id: 'jdk', with: { distribution: 'temurin', 'java-version': '17' } },
+      { run: 'test "$(command -v java)" = "$JAVA_HOME/bin/java"\ntest "$(command -v javac)" = "$JAVA_HOME/bin/javac"\njava -version' },
+    ], outputs: { version: '${{ steps.jdk.outputs.version }}', path: '${{ steps.jdk.outputs.path }}' } } } }));
+    const engine = new LocalActions({ root: directory, directory: join(directory, 'state'), secrets: {}, processes: new Processes({}, () => {}), baseEnv: { PATH: '/usr/bin:/bin', JAVA_HOME: home } });
+    const results = await engine.workflow('workflow.yml', {}, { github: { sha, repository: 'owner/repo' } });
+    assert.equal(results.java.result, 'success');
+    assert.deepEqual(results.java.outputs, { version: '17.0.21', path: home });
+  } finally { rmSync(directory, { recursive: true, force: true }); }
+});
+test('setup-java uses the requested CI action for missing, wrong-version and wrong-distribution JDKs', async () => {
+  const directory = temporary(), home = join(directory, 'jdk'), downloads = [], calls = [];
+  try {
+    mkdirSync(join(home, 'bin'), { recursive: true });
+    for (const command of ['java', 'javac']) writeFileSync(join(home, 'bin', command), '#!/bin/sh\nexit 99\n', { mode: 0o700 });
+    const env = { PATH: process.env.PATH, HOME: directory, JAVA_HOME: home, GITHUB_ENV: join(directory, 'env'), GITHUB_PATH: join(directory, 'path'), GITHUB_OUTPUT: join(directory, 'output') };
+    const processes = new Processes({}, () => {}), originalRun = processes.run.bind(processes);
+    processes.run = async (command, args, options) => {
+      calls.push({ command, args, env: options.env });
+      if (command === 'tar') {
+        const target = args[args.indexOf('-C') + 1];
+        writeFileSync(join(target, 'action.yml'), JSON.stringify({ inputs: { 'java-package': { default: 'jdk' }, 'check-latest': { default: false } }, runs: { main: 'setup.cjs' } }));
+        writeFileSync(join(target, 'setup.cjs'), `const fs=require('node:fs');
+fs.writeFileSync(process.env.GITHUB_ENV, 'JAVA_HOME=/installed/temurin\\n');
+fs.writeFileSync(process.env.GITHUB_PATH, '/installed/temurin/bin\\n');
+fs.writeFileSync(process.env.GITHUB_OUTPUT, 'version=21.0.1\\n');`);
+        return '';
+      }
+      return originalRun(command, args, options);
+    };
+    const fetchImpl = async (url, options) => { downloads.push({ url, options }); return { ok: true, arrayBuffer: async () => new ArrayBuffer(0) }; };
+    for (const release of ['', 'JAVA_VERSION="17.0.21"\nIMPLEMENTOR="Eclipse Adoptium"\n', 'JAVA_VERSION="21.0.1"\nIMPLEMENTOR="Ubuntu"\n', 'JAVA_VERSION="21.0.1"\nIMPLEMENTOR="AdoptOpenJDK"\n']) {
+      writeFileSync(join(home, 'release'), release);
+      await setupJava({ action: 'actions/setup-java@v4', inputs: { distribution: 'temurin', 'java-version': '21' }, env, directory, processes, token: 'fixture-token', timeout: 2000, fetchImpl });
+      assert.equal(readFileSync(env.GITHUB_ENV, 'utf8'), 'JAVA_HOME=/installed/temurin\n');
+      assert.equal(readFileSync(env.GITHUB_PATH, 'utf8'), '/installed/temurin/bin\n');
+    }
+    assert.equal(downloads.length, 1);
+    assert.match(downloads[0].url, /actions\/setup-java\/tarball\/v4$/);
+    assert.equal(downloads[0].options.headers.Authorization, 'Bearer fixture-token');
+    const setups = calls.filter(call => call.command === process.execPath);
+    assert.equal(setups.length, 4);
+    for (const call of setups) {
+      assert.equal(call.env['INPUT_JAVA-VERSION'], '21');
+      assert.equal(call.env.INPUT_DISTRIBUTION, 'temurin');
+      assert.equal(call.env['INPUT_JAVA-PACKAGE'], 'jdk');
+      assert.equal(call.env.RUNNER_TOOL_CACHE, join(directory, 'tool-cache'));
+    }
+  } finally { rmSync(directory, { recursive: true, force: true }); }
+});
+test('nightly dispatch is unavailable locally without a network attempt or failing dependent jobs', async () => {
+  const directory = temporary(), messages = [];
+  try {
+    const original = parse(readFileSync(join(repository, '.github/workflows/unified-release.yml'), 'utf8')).jobs.nightly_checks;
+    writeFileSync(join(directory, 'workflow.yml'), JSON.stringify({ jobs: {
+      nightly_checks: { ...original, needs: [], if: true },
+      following: { needs: 'nightly_checks', steps: [{ run: 'true' }] },
+    } }));
+    const processes = new Processes({}, line => messages.push(line));
+    const engine = new LocalActions({ root: directory, directory: join(directory, 'state'), secrets: {}, processes, hooks: localHooks(directory, processes) });
+    const results = await engine.workflow('workflow.yml', { channel: 'next' }, { github: { sha, repository: 'owner/repo' } });
+    assert.equal(results.nightly_checks.result, 'success');
+    assert.equal(results.following.result, 'success');
+    assert.match(messages.join('\n'), /dispatch is not available/);
+    assert.match(readFileSync(join(directory, 'state/jobs/nightly_checks-local/summary.md'), 'utf8'), /GitHub Actions unavailable/);
+    const hosted = new LocalActions({ root: directory, directory, secrets: {}, processes });
+    let intercepted = false;
+    processes.run = async () => { intercepted = true; throw new Error('hosted dispatch still runs'); };
+    const hostedResults = await hosted.workflow('workflow.yml', {}, { github: { sha } });
+    assert.equal(intercepted, true);
+    assert.equal(hostedResults.nightly_checks.result, 'failure');
+  } finally { rmSync(directory, { recursive: true, force: true }); }
+});
+test('checks-only execution uses the complete reusable release gate without initialization or delivery', async () => {
+  const directory = temporary(), calls = [];
+  try {
+    assert.equal(parseArguments(['--execute', '--leg', 'release_checks']).leg, 'release_checks');
+    assert.throws(() => parseArguments(['--execute', '--leg', 'server']), /--leg requires/);
+    const workflow = parse(readFileSync(join(repository, '.github/workflows/unified-release.yml'), 'utf8'));
+    const engine = {
+      directory, read: () => workflow, value: render, processes: new Processes({}, () => {}),
+      workflow: async (...args) => { calls.push(args); return { mobile: { result: 'success' }, optional: { result: 'skipped' } }; },
+    };
+    await releaseChecks(engine, { github: { sha } });
+    assert.deepEqual(calls[0], [workflow.jobs.release_checks.uses, { suite: 'all', release_sha: sha }, { github: { sha } }, 'release_checks/']);
+    assert.equal(JSON.parse(readFileSync(join(directory, 'release-checks.json'), 'utf8')).mobile.result, 'success');
+    engine.workflow = async () => ({ mobile: { result: 'failure' } });
+    await assert.rejects(releaseChecks(engine, { github: { sha } }), /Release checks failed/);
   } finally { rmSync(directory, { recursive: true, force: true }); }
 });
 test('workflow expressions preserve hyphenated identifiers, booleans, defaults and failure semantics', () => {
