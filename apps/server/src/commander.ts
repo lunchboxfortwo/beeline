@@ -365,7 +365,8 @@ export async function reportToCommander(
     console.error(`[commander] ${roomId}: cannot route report without recorded opening provenance`);
     return { id: reportId, createdAt: Math.floor(Date.now() / 1000), delivered: false };
   }
-  const orderedHere = incoming?.room_id === origin && incoming?.agent_id !== recipient;
+  const orderedHere = incoming?.room_id === origin && incoming?.agent_id !== recipient &&
+    incoming?.private_payload?.kind !== 'report';
   const recipientKind=(await db.query<{kind:string}>('SELECT kind FROM identities WHERE id=$1',[recipient])).rows[0]?.kind;
   // A report from a thread wakes its agent commander inside that thread, so
   // the reaction stays with the thread instead of the chat it was opened from.
