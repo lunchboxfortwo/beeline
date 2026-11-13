@@ -242,3 +242,34 @@ it('keeps the list preview visible when active tool rows fill the bounded Room w
   publishPhoneLiveEvent({ type: 'turn-delta', roomId: ROOM, turn: { ...working, status: 'complete' } });
   expect(cache.peek(address, isRoomView)!.messages).toEqual([human]);
 });
+
+it.each(['complete', 'cancelled'] as const)('publishes %s to an open Room and deck when stored values have Metro spread semantics', async status => {
+  const { isChatListView } = await import('@beeline/buzz-client');
+  const cache = new SurfaceRegistry(new SurfaceResponseCache({ get: async () => null, set: async () => {}, remove: async () => {} }),
+    undefined, undefined, undefined, { ...roomSurfaceRecords,
+      store(address, value, stamp) {
+        const stored = roomSurfaceRecords.store(address, value, stamp);
+        // Metro's Object.assign lowering materializes object-literal getters.
+        return address.endpoint === '/workspace/:id/chats'
+          ? { ...(stored as ChatListView), chats: (stored as ChatListView).chats.map(item => Object.assign({}, item)) }
+          : Object.assign({}, stored);
+      },
+    });
+  const listAddress = { ...address, endpoint: '/workspace/:id/chats', params: { workspaceId: ROOM } };
+  const list = { workspace: { id: ROOM, name: 'Review', role: 'owner', updatedAt: 1 }, viewer: initial().viewer.identity,
+    chats: [{ room: initial().room, latestAgentTurns: [working] }], watchFilters: [], truncated: false } as ChatListView;
+  cache.publish(address, initial(), isRoomView);
+  cache.publish(listAddress, list, isChatListView);
+  stops.push(observeRoomLiveState(cache, () => viewer));
+  const terminal = { type: 'turn-delta' as const, roomId: ROOM, turn: { ...working, status }, agentState: null };
+  const paint = vi.fn(() => cache.peek(address, isRoomView)?.latestAgentTurns[0]?.status);
+  stops.push(cache.subscribe(address, paint));
+  publishPhoneLiveEvent(terminal);
+  expect(paint).toHaveReturnedWith(status);
+  // Completion before a later Stop leaves no active turn or queued acknowledgement.
+  expect(cache.peek(address, isRoomView)?.latestAgentTurns.some(turn => turn.status === 'working')).toBe(false);
+  expect(cache.peek(address, isRoomView)?.pendingAgentCommands).toEqual([]);
+  expect(cache.peek(listAddress, isChatListView)?.chats[0]?.latestAgentTurns).toEqual([terminal.turn]);
+  cache.publish(listAddress, applyChatListDelta(cache.peek(listAddress, isChatListView)!, terminal), isChatListView);
+  expect(cache.peek(address, isRoomView)?.latestAgentTurns).toEqual([terminal.turn]);
+});

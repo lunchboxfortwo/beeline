@@ -1,6 +1,6 @@
 import { useCallback, useLayoutEffect, useMemo, useRef, useState, useSyncExternalStore } from 'react';
 import equal from 'fast-deep-equal';
-import type { ChatListItem, ChatListView, RoomView, RoomViewAgentTurn, RoomViewMessage, SurfaceCacheAddress } from '@beeline/buzz-client';
+import type { ChatListView, RoomView, RoomViewAgentTurn, RoomViewMessage, SurfaceCacheAddress } from '@beeline/buzz-client';
 import { ROOM_VIEW_AGENT_LIMIT, ROOM_VIEW_MESSAGE_LIMIT, ROOM_VIEW_TOOL_ROW_LIMIT } from '@beeline/api-contract/phone';
 import { clientResetGeneration, subscribeClientReset } from '@/sync/client-reset';
 import { IdentitySelection, identityScope, useIdentityRecords } from './identity-records';
@@ -236,11 +236,22 @@ export function selectRoomViewRecords(scope: string | null, view: RoomView): Roo
  * transcript select the same id-keyed records, also when a covering read is held. */
 export const roomSurfaceRecords = {
   snapshot(address: SurfaceCacheAddress, value: unknown): unknown {
+    const scope = identityScope(address.relayOrigin, address.viewerPubkey);
+    // Select records here, never through stored object-literal getters: Metro
+    // lowers spreads to Object.assign, which evaluates those getters once.
     if (address.endpoint === '/workspace/:id/chats') {
       const view = value as ChatListView;
-      return { ...view, chats: view.chats.map(item => ({ ...item })) };
+      return { ...view, chats: view.chats.map(item => {
+        const room = records(keyOf(scope, item.room.id));
+        const message = room.latestId ? room.messages.get(room.latestId) : undefined;
+        return { ...item,
+          latestMessage: message ? { ...message, ...(room.mentionsViewer ? { mentionsViewer: true as const } : {}) } : undefined,
+          latestAgentTurns: roomTurns(scope, item.room.id),
+        };
+      }) };
     }
-    return /^\/room\/[^/]+$/.test(address.endpoint) ? { ...(value as object) } : value;
+    return /^\/room\/[^/]+$/.test(address.endpoint) && value && typeof value === 'object' && 'room' in value && 'viewer' in value
+      ? selectRoomViewRecords(scope, value as RoomView) : value;
   },
   subscribe(listener: (scope: string, roomId: string) => void) {
     surfaceListeners.add(listener);
@@ -257,16 +268,8 @@ export const roomSurfaceRecords = {
       const view = value as RoomView;
       offerRoomView(scope, view, stamp);
       const { messages, toolRows, latestAgentTurns: _turns, ...metadata } = view;
-      const roomId = metadata.room.id;
-      const corner = Boolean(metadata.parent?.id ?? metadata.room.parentId);
-      // No second mutable message array in the response cache.
-      return { ...metadata,
-        get pendingAgentCommands() { return metadata.pendingAgentCommands?.filter(command => !roomTurns(scope, roomId)
-          .some(turn => turn.status !== 'working' && turn.agentPubkey === command.agentPubkey && turn.requestId === command.requestId)); },
-        get messages() { return selectRoomViewRecords(scope, { ...metadata, messages: [], latestAgentTurns: [] }).messages; },
-        get toolRows() { return corner ? selectRoomViewRecords(scope, { ...metadata, messages: [], latestAgentTurns: [] }).toolRows : undefined; },
-        get latestAgentTurns() { return roomTurns(scope, roomId); },
-      };
+      // Keep response metadata only; snapshot selects the shared rows/turns.
+      return { ...metadata, messages: [], latestAgentTurns: [] };
     }
     if (address.endpoint !== '/workspace/:id/chats') return value;
     const view = value as ChatListView;
@@ -300,14 +303,7 @@ export const roomSurfaceRecords = {
       if (item.latestAgentTurns) offerRoomTurns(scope, item.room.id, item.latestAgentTurns, stamp);
       if (changed) { prune(room); notify(room); }
       const { latestMessage: _latest, latestAgentTurns: _turns, ...metadata } = item;
-      return { ...metadata,
-        [indexedPreviewId]: latest?.id,
-        get latestMessage(): ChatListItem['latestMessage'] {
-          const message = room.latestId ? room.messages.get(room.latestId) : undefined;
-          return message ? { ...message, ...(room.mentionsViewer ? { mentionsViewer: true as const } : {}) } : undefined;
-        },
-        get latestAgentTurns() { return roomTurns(scope, item.room.id); },
-      };
+      return { ...metadata, [indexedPreviewId]: latest?.id };
     }) };
   },
 };
