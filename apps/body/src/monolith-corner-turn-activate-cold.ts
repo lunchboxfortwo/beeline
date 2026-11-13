@@ -2,12 +2,13 @@ import {installOwnedModelProvider} from './owned-model-install.js';
 import { postChangedAgentUsage } from './helper-usage-binding.js';
 import { agentBehavior } from './agent-command.js';
 import type { SandboxSessionSpec } from './bwrap-sandbox.js';
-import { extraDependencyRoots, dependencyFingerprint, prepareDependencyGeneration, installDependencyNpmGuard, dependencyRequest } from './dependency-generation.js';
+import { extraDependencyRoots, dependencyFingerprint, prepareDependencyGeneration, installDependencyNpmGuard, dependencyRequest, dependencyLayers, DEPENDENCY_LAYERS_DIR } from './dependency-generation.js';
+import type { DependencyLayer } from './bwrap-sandbox.js';
 import { CODE_OWNED_HOST_MCP_NAMES } from './mcp-route-class.js';
-import { roomPermissionDecision } from './monolith-room-turn.js';
+import { createRoomPermissionHandler } from './monolith-room-turn.js';
 import { modelContextWindowTokens } from './model-context-window.js';
 import { existsSync } from 'node:fs';
-import { mkdir } from 'node:fs/promises';
+import { mkdir, rm } from 'node:fs/promises';
 import { homedir } from 'node:os';
 import { dirname, join, resolve } from 'node:path';
 import { machineHost } from './machine-host.js';
@@ -25,7 +26,7 @@ import { registryMcpHostBindPaths, registryMcpHostDeclarations } from './registr
 import { installPiMcpBridge } from './pi-mcp-bridge.js';
 import { beelineAgentMcpServer, readOnlyMcpServer, writeSessionResourceAuth, recordSessionModelFallback, tracedAgentProcessLifecycle } from './room-session.js';
 import { codegraphFingerprintServers, codegraphMcpServer, prepareCodegraphIndex } from './codegraph.js';
-import { credentialMaskPaths, harnessHomeStateDirs, siblingAgentMaskPaths, wrapAgentCommand } from './bwrap-sandbox.js';
+import { sandboxMountPlan, credentialMaskPaths, harnessHomeStateDirs, siblingAgentMaskPaths, wrapAgentCommand } from './bwrap-sandbox.js';
 import { harnessIdentityLabel, sessionNewMcpServers } from './cursor-acp-bridge.js';
 import { bodyAgentCommand } from './config.js';
 import { agentArgsWithModelSelection, applyAgentModelSelection, filterAllowedModelConfigOptions, parseAdvertisedConfigOptions } from './model-config.js';
@@ -255,13 +256,19 @@ import { MonolithCornerTurnLoop, execFileAsync } from './monolith-corner-turn.js
     const attachScratchRoot = ctx.options.config.agentHomeRoot ?? tmpDir;
     if (attachScratchRoot) await mkdir(attachScratchRoot, { recursive: true });
     const dependencyPaths: string[] = [];
+    // Every tree prepared below is mounted copy-on-write, also for the later
+    // installs that share this spec.
+    const layers: DependencyLayer[] = [];
     const sandboxSpec: SandboxSessionSpec = {
+        operatorHome,
+        userRuntimeDir: `/run/user/${process.getuid?.() ?? 0}`,
+        grantedPaths: grants.paths,
         mode: ctx.options.repository?.readOnly ? 'readonly' : 'edit',
         cwd: ctx.options.worktreePath,
         worktreePath: ctx.options.worktreePath,
         ...(repository ? { gitCommonDir: repository.gitCommonDir } : {}),
         protectedPaths: [ctx.options.runtime.supervisorRoot],
-        dependencyPaths,
+        dependencyLayers: layers,
         harnessStateDirs: stateDirs,
         harnessHomeStateDirs: homeStateDirs,
         ...(tmpDir ? { tmpDir } : {}),
@@ -304,8 +311,17 @@ import { MonolithCornerTurnLoop, execFileAsync } from './monolith-corner-turn.js
       existsSync(resolve(ctx.options.worktreePath, part, 'node_modules/.beeline-generation')))) {
       throw new Error('Beeline shared dependencies require a working bubblewrap sandbox. Restore sandbox support before resuming this checkout.');
     }
-    if (repository && !repository.readOnly && ctx.options.config.bwrapPath && (ctx.repositoryWork || existsSync(resolve(ctx.options.worktreePath, 'node_modules')))) {
+    const mobile = resolve(ctx.options.worktreePath, 'apps/mobile');
+    const prepareRoot = ctx.repositoryWork || existsSync(resolve(ctx.options.worktreePath, 'node_modules'));
+    const needsMobile = () => existsSync(resolve(mobile, 'node_modules')) || existsSync(resolve(ctx.options.worktreePath, dependencyRequest));
+    if (repository && !repository.readOnly && ctx.options.config.bwrapPath && (prepareRoot || needsMobile())) {
       const npm = (await execFileAsync('which', ['npm'])).stdout.trim();
+      // The layers live in this agent's private corner repository, so a write
+      // never reaches another corner and archive cleanup removes them.
+      const share = async (trees: string[]) => {
+        dependencyPaths.push(...trees);
+        layers.push(...await dependencyLayers(resolve(repository.gitCommonDir, DEPENDENCY_LAYERS_DIR), trees));
+      };
       const install = (cwd: string) => async () => {
         const command = wrapAgentCommand({ bwrapPath: ctx.options.config.bwrapPath,
           spec: { ...sandboxSpec, cwd }, command: npm, args: ['ci', '--no-audit', '--no-fund'] });
@@ -313,24 +329,28 @@ import { MonolithCornerTurnLoop, execFileAsync } from './monolith-corner-turn.js
           cwd, env: { ...process.env, ...agentEnv }, maxBuffer: 16 * 1024 * 1024,
         });
       };
-      dependencyPaths.push(...await prepareDependencyGeneration({
-        root: ctx.options.worktreePath, store: warmNodeModulesStoreDir(ctx.options.runtime.supervisorRoot), npm, cache: npmCacheDir, install: install(ctx.options.worktreePath),
-      }));
-      if (cornerPrepareScript) {
-        const command = wrapAgentCommand({ bwrapPath: ctx.options.config.bwrapPath,
-          spec: sandboxSpec, command: npm, args: ['run', 'corner:prepare'] });
-        await execFileAsync(command.command, command.args, {
-          cwd: ctx.options.worktreePath,
-          env: { ...process.env, ...agentEnv, BEELINE_READONLY_DEPENDENCIES: '1' },
-          maxBuffer: 16 * 1024 * 1024,
-        });
+      if (prepareRoot) {
+        await share(await prepareDependencyGeneration({
+          root: ctx.options.worktreePath, store: warmNodeModulesStoreDir(ctx.options.runtime.supervisorRoot), npm, cache: npmCacheDir, install: install(ctx.options.worktreePath),
+        }));
+        if (cornerPrepareScript) {
+          const command = wrapAgentCommand({ bwrapPath: ctx.options.config.bwrapPath,
+            spec: sandboxSpec, command: npm, args: ['run', 'corner:prepare'] });
+          await execFileAsync(command.command, command.args, {
+            cwd: ctx.options.worktreePath,
+            env: { ...process.env, ...agentEnv, BEELINE_READONLY_DEPENDENCIES: '1' },
+            maxBuffer: 16 * 1024 * 1024,
+          });
+        }
       }
-      const mobile = resolve(ctx.options.worktreePath, 'apps/mobile');
-      if (existsSync(resolve(mobile, 'node_modules')) || existsSync(resolve(ctx.options.worktreePath, dependencyRequest))) dependencyPaths.push(...await prepareDependencyGeneration({
-        root: mobile, store: mobileNodeModulesStoreDir(ctx.options.runtime.supervisorRoot), npm, cache: npmCacheDir, install: install(mobile),
-      }));
-      for (const extra of await extraDependencyRoots(ctx.options.worktreePath, ctx.options.config.agentHomeRoot)) {
-        dependencyPaths.push(...await prepareDependencyGeneration({
+      if (needsMobile()) {
+        await share(await prepareDependencyGeneration({
+          root: mobile, store: mobileNodeModulesStoreDir(ctx.options.runtime.supervisorRoot), npm, cache: npmCacheDir, install: install(mobile),
+        }));
+        await rm(resolve(ctx.options.worktreePath, dependencyRequest), { force: true });
+      }
+      if (prepareRoot) for (const extra of await extraDependencyRoots(ctx.options.worktreePath, ctx.options.config.agentHomeRoot)) {
+        await share(await prepareDependencyGeneration({
           root: extra, store: warmNodeModulesStoreDir(ctx.options.runtime.supervisorRoot),
           npm, cache: npmCacheDir, install: install(extra),
         }));
@@ -366,9 +386,9 @@ import { MonolithCornerTurnLoop, execFileAsync } from './monolith-corner-turn.js
       backgroundTasks: true,
       autoApprovePermissions: !repository?.readOnly,
       ...(repository?.readOnly ? { osSandbox: Boolean(ctx.options.config.bwrapPath) } : {}),
-      permissionHandler: async request => repository?.readOnly
-        ? roomPermissionDecision(request, { mountedServers, hostServers, shellSandboxed: Boolean(ctx.options.config.bwrapPath), sandboxHome: homeOverlay.HOME })
-        : 'allow',
+      permissionHandler: repository?.readOnly
+        ? createRoomPermissionHandler({ mountedServers, hostServers, shellSandboxed: Boolean(ctx.options.config.bwrapPath), sandboxPlan: sandboxMountPlan(sandboxSpec), sandboxHome: homeOverlay.HOME })
+        : async () => 'allow',
       onUsage: (usage) => {
         void postChangedAgentUsage(ctx.options.api,ctx.agent.publicKey,usage)
           .catch(error => console.error('[agent-usage] publish failed', error));

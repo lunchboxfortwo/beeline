@@ -462,6 +462,7 @@ export async function createSchedule(
     roomId: deps.roomId,
     prompt,
     cadence,
+    ...(args.maxRuns !== undefined ? { maxRuns: args.maxRuns } : {}),
     ...(args.title !== undefined ? { title: args.title } : {}),
     ...(stringArg(args, 'workflowName') ? { workflowName: stringArg(args, 'workflowName')! } : {}),
   });
@@ -631,7 +632,7 @@ export async function updateSchedule(
   if (args.prompt !== undefined && !prompt) throw new Error('prompt must be a non-empty string');
   if (prompt && prompt.length > 2000) throw new Error('prompt exceeds 2000 characters');
   const parsed = args.cadence === undefined ? undefined : parseScheduleCadence(args);
-  if (prompt === undefined && parsed === undefined && args.title === undefined && !stringArg(args, 'workflowName'))
+  if (prompt === undefined && parsed === undefined && args.maxRuns === undefined && args.title === undefined && !stringArg(args, 'workflowName'))
     throw new Error('give a prompt, cadence, title, or workflowName to change');
   const updated = await deps.execute('updateAgentSchedule', {
     roomId: deps.roomId,
@@ -641,6 +642,7 @@ export async function updateSchedule(
     ...(stringArg(args, 'workflowName') ? { workflowName: stringArg(args, 'workflowName')! } : {}),
     ...(prompt !== undefined ? { prompt } : {}),
     ...(parsed ? { cadence: parsed.cadence } : {}),
+    ...(args.maxRuns !== undefined ? { maxRuns: args.maxRuns } : {}),
   });
   const nextRunAt =
     typeof updated.nextRunAt === 'number'

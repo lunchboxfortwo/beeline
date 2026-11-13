@@ -32,7 +32,7 @@ export async function productionReleaseDispatch(
   const auditMessageId = randomUUID();
   const dispatchedBy = await database.transaction(async db => {
     const agent = (await db.query<{ id: string; handle: string }>(
-      `SELECT id,handle FROM identities WHERE id=$1 AND kind='agent' AND handle IS NOT NULL`, [agentId],
+      `SELECT id,beeline_room_handle(id,$2) handle FROM identities WHERE id=$1 AND kind='agent' AND handle IS NOT NULL`, [agentId,input.roomId],
     )).rows[0];
     if (!agent?.handle) throw new Error('Production release requires an agent identity');
     if (!await lockOwnedTurnRoomAccess(db, input.roomId, agentId))

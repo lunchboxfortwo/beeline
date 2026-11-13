@@ -1,6 +1,7 @@
 import { createWorkspace } from '../workspace-creation.js';
 import { storeWorkspaceAvatar } from '../durable-avatar.js';
 import { revokeDaemonCredentials } from '../daemon-credential-lifetime.js';
+import { retireFreeAgentRuntime } from '../agent-retirement.js';
 import { removeWorkspaceMemberships } from '../membership-join.js';
 import type { PhoneContext } from './context.js';
 import { Input } from './types.js';
@@ -126,7 +127,10 @@ import { phoneRequireWorkspaceManager, phoneRequireIdentity } from './access.js'
          ORDER BY m.identity_id`,
         [input.workspaceId],
       );
-      for (const agent of retiring.rows) await revokeDaemonCredentials(database, agent.identity_id);
+      for (const agent of retiring.rows) {
+        await revokeDaemonCredentials(database, agent.identity_id);
+        await retireFreeAgentRuntime(database, agent.identity_id);
+      }
       const outcome = await database.query<{ existed: boolean; deleted: boolean }>(
         `WITH existing AS MATERIALIZED (
          SELECT id,name FROM workspaces WHERE id=$1 FOR UPDATE

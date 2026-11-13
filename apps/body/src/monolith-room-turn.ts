@@ -1,10 +1,10 @@
+import { sandboxAllowsWrite, type SandboxMountPlan } from './bwrap-sandbox.js';
 import { CommandActivationContext } from './helper-activation-context.js';
 import { FreeAgentContinuation } from './free-agent-continuation.js';
 import { subscriptionActionPrompt } from '@beeline/api-contract/daemon';
 import { type TurnTokenFigure } from './harness-turn-tokens.js';
 import { TurnUsageAccumulator } from './turn-usage.js';
 import { CommandExecutionContext } from './server-command-intake.js';
-import type { InterruptedTurn } from './force-update-journal.js';
 import { SquireTaskRelay } from './squire-task-relay.js';
 import { execFile } from 'node:child_process';
 import { promisify } from 'node:util';
@@ -37,7 +37,7 @@ import { AgentProcesses, type AgentProcessLifecycle } from './agent-process.js';
 import { WarmTranscript } from './warm-transcript.js';
 import { PromptSectionBaseline } from './prompt-section-baseline.js';
 import type { RoomSupervisor } from './room-supervisor.js';
-import { monolithRoomTurnLoopConfigurationChanged, monolithRoomTurnLoopRequestReconciliation, monolithRoomTurnLoopIsBusy, monolithRoomTurnLoopPausedGrantRequestId, monolithRoomTurnLoopGrantWritePolicy, monolithRoomTurnLoopBeginTurnTrace, monolithRoomTurnLoopCurrentTurnForRunner, monolithRoomTurnLoopRequesterOf, monolithRoomTurnLoopRefreshPersonaForSoulUpdate, monolithRoomTurnLoopPrepareForForcedUpdateRestart, monolithRoomTurnLoopInterruptedTurn, monolithRoomTurnLoopInterruptForServerMinimum, monolithRoomTurnLoopForceRecoverRoom, monolithRoomTurnLoopCommandActivation, monolithRoomTurnLoopConfiguration, monolithRoomTurnLoopRoster, monolithRoomTurnLoopAcceptsImages, monolithRoomTurnLoopDeliver, monolithRoomTurnLoopRepositoryState, monolithRoomTurnLoopWriteBackClaudeLogin, monolithRoomTurnLoopPublishOpenRouterSpend, monolithRoomTurnLoopPublishHarnessQuota, monolithRoomTurnLoopCaptureTurnMetrics, monolithRoomTurnLoopWatchClaudeLogin, monolithRoomTurnLoopStopClaudeLoginWatch, monolithRoomTurnLoopDiscardSession, monolithRoomTurnLoopSessionIsCurrent, monolithRoomTurnLoopRefreshTurnCheckout, monolithRoomTurnLoopCurrentSessionFingerprint, monolithRoomTurnLoopGrantedResources, monolithRoomTurnLoopMountedMcpServers, monolithRoomTurnLoopActivate } from './monolith-room-turn-configuration-changed.js';
+import { monolithRoomTurnLoopConfigurationChanged, monolithRoomTurnLoopRequestReconciliation, monolithRoomTurnLoopIsBusy, monolithRoomTurnLoopPausedGrantRequestId, monolithRoomTurnLoopGrantWritePolicy, monolithRoomTurnLoopBeginTurnTrace, monolithRoomTurnLoopCurrentTurnForRunner, monolithRoomTurnLoopRequesterOf, monolithRoomTurnLoopRefreshPersonaForSoulUpdate, monolithRoomTurnLoopInterruptForServerMinimum, monolithRoomTurnLoopForceRecoverRoom, monolithRoomTurnLoopCommandActivation, monolithRoomTurnLoopConfiguration, monolithRoomTurnLoopRoster, monolithRoomTurnLoopAcceptsImages, monolithRoomTurnLoopDeliver, monolithRoomTurnLoopRepositoryState, monolithRoomTurnLoopWriteBackClaudeLogin, monolithRoomTurnLoopPublishOpenRouterSpend, monolithRoomTurnLoopPublishHarnessQuota, monolithRoomTurnLoopCaptureTurnMetrics, monolithRoomTurnLoopWatchClaudeLogin, monolithRoomTurnLoopStopClaudeLoginWatch, monolithRoomTurnLoopDiscardSession, monolithRoomTurnLoopSessionIsCurrent, monolithRoomTurnLoopRefreshTurnCheckout, monolithRoomTurnLoopCurrentSessionFingerprint, monolithRoomTurnLoopGrantedResources, monolithRoomTurnLoopMountedMcpServers, monolithRoomTurnLoopActivate } from './monolith-room-turn-configuration-changed.js';
 import { monolithRoomTurnLoopActivateCold, monolithRoomTurnLoopLifecycle, monolithRoomTurnLoopServingProviders, monolithRoomTurnLoopExplainEmpty, monolithRoomTurnLoopRepinNextProvider, monolithRoomTurnLoopStartPrompt, monolithRoomTurnLoopStopTurn } from './monolith-room-turn-activate-cold.js';
 import { monolithRoomTurnLoopPrompt } from './monolith-room-turn-prompt.js';
 import { monolithRoomTurnLoopRun } from './monolith-room-turn-run.js';
@@ -273,9 +273,7 @@ requesterOf(authorId: string): {
     name?: string;
 } { return monolithRoomTurnLoopRequesterOf(this, authorId); }
 async refreshPersonaForSoulUpdate(): Promise<void> { return monolithRoomTurnLoopRefreshPersonaForSoulUpdate(this); }
-async prepareForForcedUpdateRestart(): Promise<void> { return monolithRoomTurnLoopPrepareForForcedUpdateRestart(this); }
-interruptedTurn(): InterruptedTurn | undefined { return monolithRoomTurnLoopInterruptedTurn(this); }
-interruptForServerMinimum(): InterruptedTurn | undefined { return monolithRoomTurnLoopInterruptForServerMinimum(this); }
+interruptForServerMinimum(): void { monolithRoomTurnLoopInterruptForServerMinimum(this); }
 async forceRecoverRoom(): Promise<void> { return monolithRoomTurnLoopForceRecoverRoom(this); }
 commandActivation() { return monolithRoomTurnLoopCommandActivation(this); }
 async configuration() { return monolithRoomTurnLoopConfiguration(this); }
@@ -527,9 +525,9 @@ export function isSandboxHomeEdit(request: AcpPermissionRequest, sandboxHome?: s
  * The Room ACP client applies this host-owned decision fail-closed: a mounted
  * MCP tool call is approved; shell commands and native read/search requests
  * are approved while the OS sandbox wraps this session, as are native
- * writes/edits whose every path resolves inside the sandbox home (`$HOME`, the
- * `agent-home/user` directory the sandbox already binds writable for the
- * shell). Without the sandbox, only native reads confined to downloaded
+ * writes/edits whose every path resolves to a writable mount in the effective
+ * sandbox plan, including operator HOME and explicit grants. Credential and
+ * sibling masks and protected read-only mounts still reject edits. Without the sandbox, only native reads confined to downloaded
  * attachments are approved. Other native writes/edits, deletes, moves and
  * unstructured requests remain refused.
  *
@@ -555,6 +553,7 @@ export function roomPermissionDecision(
     attachmentsDir?: string;
     /** The wrapped session's `$HOME` (`agent-home/user`), writable in the sandbox. */
     sandboxHome?: string;
+    sandboxPlan?: SandboxMountPlan;
   } = {},
 ): AcpPermissionDecision {
   const hostServers = options.hostServers ?? CODE_OWNED_HOST_MCP_NAMES;
@@ -563,11 +562,24 @@ export function roomPermissionDecision(
   if (!isMcpShapedPermissionRequest(request, hostServers)) {
     if (options.shellSandboxed) {
       if (request.toolCall?.kind === 'read' || request.toolCall?.kind === 'search') return 'allow';
-      if (isSandboxHomeEdit(request, options.sandboxHome)) return 'allow';
+      if (options.sandboxPlan && request.toolCall?.kind === 'edit') {
+        const paths = nativeRequestPaths(request.toolCall);
+        try {
+          if (paths?.length && paths.every(path => isAbsolute(path) && path === resolve(path) &&
+            sandboxAllowsWrite(options.sandboxPlan!, path) &&
+            sandboxAllowsWrite(options.sandboxPlan!, realWriteTarget(path)))) return 'allow';
+        } catch { return 'reject'; }
+      } else if (isSandboxHomeEdit(request, options.sandboxHome)) return 'allow';
     } else if (isAttachmentRead(request, options.attachmentsDir)) return 'allow';
   }
   if (!options.shellSandboxed) return 'reject';
   return isRoomShellPermissionRequest(request, hostServers) ? 'allow' : 'reject';
+}
+
+
+/** The callback installed for native tools in a non-edit session. */
+export function createRoomPermissionHandler(options: Parameters<typeof roomPermissionDecision>[1]) {
+  return async (request: AcpPermissionRequest): Promise<AcpPermissionDecision> => roomPermissionDecision(request, options);
 }
 
 
@@ -692,6 +704,16 @@ export function approvedDeviceGrant(
   return undefined;
 }
 
+
+/** The prompt that continues a turn once its requested dependencies are mounted. */
+export function dependencyMountResumePrompt(earlierReply: string): string {
+  const earlier = earlierReply.trim();
+  return [
+    'The dependencies you requested are mounted in this session now; this is the same turn continuing.',
+    ...(earlier ? [`Your reply just before this was: ${earlier}`] : []),
+    'Continue the work that needed them. Do not request them again or ask anyone to start another turn.',
+  ].join(' ');
+}
 
 /** The prompt that continues a turn after an instantly approved device grant. */
 export function deviceGrantResumePrompt(device: string, earlierReply: string): string {

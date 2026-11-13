@@ -88,14 +88,27 @@ const scope27 = fixtureScope27();
 
 
   for (const skill of m28_beelineManagedSkills('source', { isReviewer: true })) {
-    m28_it(`returns shipped text for ${skill.name}`, async () => {
-      const result = JSON.parse(await m28_callAgentTool('read', { facet: 'procedure', slug: skill.name }));
+    m28_it.each(['slug', 'name'])(`returns shipped text for ${skill.name} by %s`, async field => {
+      const result = JSON.parse(await m28_callAgentTool('read', { facet: 'procedure', [field]: skill.name }));
       m28_expect(result).toEqual({ slug: skill.name, markdown: skill.content, source: 'built-in' });
       m28_expect(fetch).toHaveBeenCalledWith(new URL('http://daemon.test/v1/daemon/operations/loadWorkspaceSkill'),
         m28_expect.objectContaining({ body: JSON.stringify({ agentId: 'agent', roomId: 'room', slug: skill.name }) }));
     });
   }
 
+
+  m28_it.each([undefined, 'oldest'])("reads messages with direction %s", async from => {
+    const fetcher = m28_vi.fn(async (_url, init) => {
+      const input = JSON.parse(init.body);
+      const ids = input.window === 'recent' ? ['newer', 'newest'] : ['oldest', 'older'];
+      return Response.json({ items: ids.map((id, i) => ({ id, cursor: id, body: id,
+        authorId: 'agent', createdAt: i, type: 'chat', attachments: [] })) });
+    });
+    m28_vi.stubGlobal('fetch', fetcher);
+    const result = JSON.parse(await m28_callAgentTool('read', { facet: 'messages', ...(from ? { from } : {}) }));
+    m28_expect(result.items.map(item => item.id)).toEqual(from ? ['oldest', 'older'] : ['newest', 'newer']);
+    m28_expect(JSON.parse(fetcher.mock.calls[0][1].body).window).toBe(from ? 'earliest' : 'recent');
+  });
 
   m28_it('keeps a workspace procedure ahead of a built-in with the same slug', async () => {
     const procedure = { slug: 'beeline-memory', markdown: 'Workspace guidance', version: 2 };
@@ -262,18 +275,34 @@ m31_it('calls watchCorner in the current corner and returns readable state and k
 
 
 
-m31_it('rejects schedule run limits on create and update before calling the daemon', async () => {
+m31_it('passes a one-time schedule run limit through the wake schema to the daemon', async () => {
+  await m31_callAgentTool('wake', {
+    action: 'create', trigger: 'schedule', title: 'One-time scan',
+    prompt: 'Scan.', cadence: { kind: 'interval', everyMinutes: 60 }, maxRuns: 1,
+  }, 'limited-create');
   for (const dm of [false, true]) {
     const tool = m31_agentToolsFor(true, dm).find(t => t.name === 'wake')!;
-    m31_expect(tool.inputSchema.properties).not.toHaveProperty('maxRuns');
+    m31_expect(tool.inputSchema.properties).toHaveProperty('maxRuns', {
+      type: 'integer', minimum: 1,
+      description: 'Run this many times, then the schedule deletes itself. Use 1 for a one-time check.',
+    });
   }
-  for (const action of ['create', 'update']) {
-    await m31_expect(m31_callAgentTool('wake', {
-      action, trigger: 'schedule', title: 'Daily scan', scheduleId: 'sched-1',
-      prompt: 'Scan.', cadence: { kind: 'interval', everyMinutes: 60 }, maxRuns: 14,
-    }, `limited-${action}`)).rejects.toThrow(/invalid arguments/);
-  }
-  m31_expect(scope34.calls).toEqual([]);
+  m31_expect(scope34.calls).toEqual([{
+    name: 'createAgentSchedule', input: {
+      roomId: 'watcher', title: 'One-time scan', prompt: 'Scan.',
+      cadence: { kind: 'interval', everyMinutes: 60 }, maxRuns: 1,
+    },
+  }]);
+});
+
+m31_it('passes a run-limit-only schedule update through wake to the daemon', async () => {
+  await m31_callAgentTool('wake', {
+    action: 'update', trigger: 'schedule', scheduleId: 'sched-1', maxRuns: 1,
+  }, 'limited-update');
+  m31_expect(scope34.calls).toEqual([{
+    name: 'updateAgentSchedule',
+    input: { roomId: 'watcher', scheduleId: 'sched-1', selfOnly: true, maxRuns: 1 },
+  }]);
 });
 
 

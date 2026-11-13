@@ -1,3 +1,4 @@
+import { withSentryUser } from "./sentry.js";
 import type { WebSocket } from "ws";
 import type { DaemonLiveDependencies } from "./daemon-live.js";
 import type { LiveEvent, LiveTrace } from "./live.js";
@@ -133,6 +134,12 @@ export function handleLiveConnection(ctx: LiveConnectionContext, client: WebSock
           const read = ctx.readPersonChange(event, event.personId);
           identityDelivery = identityDelivery.then(() => read.then((change) => {
             if (!change?.viewers.has(principal.identityId)) return;
+            // An agent has a different address in each Workspace. A global
+            // identity delta would overwrite those addresses on every surface.
+            if (change.person.kind === 'agent') {
+              sendLive(JSON.stringify({ type: 'invalidate', roomId: '', reason: event.reason }));
+              return;
+            }
             // The push level is the owner's own setting; no other viewer hears it.
             sendLive(JSON.stringify({ type: 'person-changed', roomId: '', person: change.person,
               ...(change.person.pubkey === principal.identityId && change.pushLevel
@@ -240,7 +247,7 @@ export function handleLiveConnection(ctx: LiveConnectionContext, client: WebSock
       const handlePhoneRequest = phoneSocketRequests(client, principal.identityId,
         ctx.dispatchPhoneOperation, sendLive, requestErrorStatus, principal.familyId,
         (_name, _args, result, enqueue) => fenceCommandReceiptEnqueue(ctx.options.database, principal.identityId, result, enqueue));
-      client.on('message', (raw) => {
+      client.on('message', (raw) => withSentryUser(principal.identityId, () => {
         const frameBytes = Array.isArray(raw)
           ? raw.reduce((total, part) => total + part.length, 0)
           : raw.byteLength;
@@ -618,7 +625,7 @@ export function handleLiveConnection(ctx: LiveConnectionContext, client: WebSock
                 : { type: 'invalidate', roomId: '', reason: 'reconnect' }));
             }
           });
-      });
+      }));
       const releasePhoneView = () => {
         if (phoneViewClosed) return;
         phoneViewClosed = true;

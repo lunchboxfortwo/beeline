@@ -1,3 +1,4 @@
+import { defaultCatalogKeys } from '../providers/index.js';
 import { MCP_SCOPES } from '../rooms-mcp-connections.js';
 import { mcpClientLogo } from '../rooms-mcp-logos.js';
 import { assetUrl } from '../phone-identity.js';
@@ -207,18 +208,7 @@ import { seconds } from './values.js';
     const apps = (await readOwnerApps(ctx.database, viewerId, ctx.composio))
       .filter((app) => app.transport !== 'squire-api' && app.hasConnected);
     const catalogKeys = new Set([
-      'gmail',
-      'googlecalendar',
-      'slack',
-      'googledrive',
-      'googlesheets',
-      'notion',
-      'linear',
-      'hubspot',
-      'airtable',
-      'asana',
-      'jira',
-      'supabase',
+      ...defaultCatalogKeys,
       ...apps
         .filter((app) => app.transport === 'composio')
         .map((app) => composioToolkitForApp(app.appKey)),
@@ -241,7 +231,7 @@ import { seconds } from './values.js';
       client_id: string; name: string; redirects: string[]; logo: string | null; connected_at: Date; last_used_at: Date | null;
       agent_id: string | null; agent_name: string | null; agent_handle: string | null; agent_avatar: string | null;
     }>(`SELECT c.client_id,app.name,app.redirects,app.logo,c.connected_at,c.last_used_at,
-        agent.id agent_id,agent.name agent_name,agent.handle agent_handle,agent.avatar agent_avatar
+        agent.id agent_id,agent.name agent_name,beeline_workspace_handle(agent.id,NULL) agent_handle,agent.avatar agent_avatar
       FROM rooms_mcp_connections c
       JOIN rooms_mcp_clients app ON app.id=c.client_id
       LEFT JOIN rooms_mcp_members member ON member.client_id=c.client_id AND member.owner_id=c.identity_id

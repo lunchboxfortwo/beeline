@@ -2,7 +2,6 @@ import type { BodyConfig } from './config.js';
 import { isAgentRemovedError, type DaemonApiClient } from './daemon-api-client.js';
 import type { AgentRuntimeRecord } from './runtime.js';
 import { RoomRuntimeCoordinator } from './room-runtime.js';
-import type { InterruptedTurn } from './force-update-journal.js';
 
 export {
   REMOVAL_CONFIRMATION_READS,
@@ -17,7 +16,6 @@ export class ThinDaemonCore {
   private pendingDiscovery = false;
   private discoveryWaiter?: () => void;
   private discoveryStatus = 'starting';
-  private readonly progressWaiters = new Set<() => void>();
 
   constructor(
     runtime: AgentRuntimeRecord,
@@ -38,7 +36,7 @@ export class ThinDaemonCore {
   }
 
   private async waitForDiscovery(signal?: AbortSignal): Promise<void> {
-    if (this.pendingDiscovery || this.progressWaiters.size || signal?.aborted) return;
+    if (this.pendingDiscovery || signal?.aborted) return;
     await new Promise<void>((resolveWait) => {
       const done = () => {
         signal?.removeEventListener('abort', done);
@@ -47,20 +45,8 @@ export class ThinDaemonCore {
       };
       this.discoveryWaiter = done;
       signal?.addEventListener('abort', done, { once: true });
-      if (this.pendingDiscovery || this.progressWaiters.size) done();
+      if (this.pendingDiscovery) done();
     });
-  }
-
-  /** The existing machine watchdog tick wakes this loop without discovering Rooms. */
-  requestWorkLoopProgress(): Promise<void> {
-    return new Promise<void>((resolveProgress) => {
-      this.progressWaiters.add(resolveProgress);
-      this.discoveryWaiter?.();
-    });
-  }
-
-  workLoopDiagnostics() {
-    return this.roomRuntime.reconciliationDiagnostics();
   }
 
   activeRoomIds(): string[] {
@@ -77,14 +63,8 @@ export class ThinDaemonCore {
   setInteractiveIdleListener(listener: () => void): void {
     this.roomRuntime.setInteractiveIdleListener(listener);
   }
-  isWorkspaceIdle(): boolean {
-    return this.roomRuntime.isWorkspaceIdle();
-  }
   activeTurnCount(): number {
     return this.roomRuntime.activeTurnCount();
-  }
-  quiesceForUpdateIfIdle(): boolean {
-    return this.roomRuntime.quiesceForUpdateIfIdle();
   }
   quiesceForUpdate(): void {
     this.roomRuntime.quiesceForUpdate();
@@ -93,12 +73,8 @@ export class ThinDaemonCore {
   resumeServing(): void {
     this.roomRuntime.resumeServing();
   }
-  async prepareForForcedUpdateRestart(): Promise<void> {
-    await this.roomRuntime.prepareForForcedUpdateRestart();
-  }
-  interruptedTurns(): InterruptedTurn[] { return this.roomRuntime.interruptedTurns(); }
-  interruptForServerMinimum(): InterruptedTurn[] {
-    return this.roomRuntime.interruptForServerMinimum();
+  interruptForServerMinimum(): void {
+    this.roomRuntime.interruptForServerMinimum();
   }
   async run(
     opts: {
@@ -112,17 +88,7 @@ export class ThinDaemonCore {
     };
     opts.signal?.addEventListener('abort', stop, { once: true });
     if (opts.signal?.aborted) stop();
-    const acknowledgeProgress = async () => {
-      await opts.onProgress?.(this.healthStatus(), lastFault);
-      for (const done of this.progressWaiters) {
-        this.progressWaiters.delete(done);
-        done();
-      }
-    };
     let lastFault: unknown;
-    this.roomRuntime.setReconciliationProgressListener(() => {
-      if (this.progressWaiters.size) return acknowledgeProgress();
-    });
     try {
       let discover = true;
       let established = false;
@@ -149,17 +115,12 @@ export class ThinDaemonCore {
           this.discoveryStatus = `monolith discovery degraded: ${error instanceof Error ? error.message : String(error)}`;
         }
         if (opts.signal?.aborted) break;
-        await acknowledgeProgress();
-        // Discovery and recovery share the same interruptible idle wait. A
-        // watchdog wake proves local progress without authorizing a read;
-        // a new socket or discovery event supplies the next read boundary.
+        await opts.onProgress?.(this.healthStatus(), lastFault);
         await this.waitForDiscovery(opts.signal);
         discover = this.pendingDiscovery;
       }
       return 'aborted';
     } finally {
-      for (const done of this.progressWaiters) done();
-      this.progressWaiters.clear();
       opts.signal?.removeEventListener('abort', stop);
       await this.roomRuntime.shutdown();
     }

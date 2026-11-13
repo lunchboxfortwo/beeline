@@ -1,21 +1,9 @@
+import { isPillMessage } from './transcript-pills';
 import type { ChatDisplayMessage } from './room-view-presentation';
 import { ledgerStamp } from './relative-time';
 
-const WEEKDAYS = ['SUN', 'MON', 'TUE', 'WED', 'THU', 'FRI', 'SAT'] as const;
-const MONTHS = [
-  'JAN',
-  'FEB',
-  'MAR',
-  'APR',
-  'MAY',
-  'JUN',
-  'JUL',
-  'AUG',
-  'SEP',
-  'OCT',
-  'NOV',
-  'DEC',
-] as const;
+const WEEKDAYS = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'] as const;
+const MONTHS = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'] as const;
 
 function atDate(seconds: number | undefined): Date | null {
   if (!seconds || seconds <= 0) return null;
@@ -44,14 +32,22 @@ export function ledgerDate(seconds: number | undefined): string {
   return `${at.getDate()} ${MONTHS[at.getMonth()]}`;
 }
 
-/** Absolute weekday+date caption, or null when this row is not a day opener. */
+/**
+ * The day caption in sentence case: "Today", "Yesterday", else "Wed 11 Nov".
+ * Null when this row is not a day opener.
+ */
 export function ledgerDayCaption(
   timestamp: number | undefined,
   previousTimestamp?: number | undefined,
+  nowMs: number = Date.now(),
 ): string | null {
   if (!isLedgerDayOpener(timestamp, previousTimestamp)) return null;
   const at = atDate(timestamp);
   if (!at) return null;
+  const now = new Date(nowMs);
+  if (localDayKey(at) === localDayKey(now)) return 'Today';
+  const yesterday = new Date(now.getFullYear(), now.getMonth(), now.getDate() - 1);
+  if (localDayKey(at) === localDayKey(yesterday)) return 'Yesterday';
   return `${WEEKDAYS[at.getDay()]} ${at.getDate()} ${MONTHS[at.getMonth()]}`;
 }
 
@@ -95,7 +91,9 @@ function hasTranscriptByline(message: ChatDisplayMessage): boolean {
     message.isArchivedNotice ||
     message.isSystemNotice ||
     message.durableFact ||
-    message.isAgentActivity
+    message.isAgentActivity ||
+    message.pillRun ||
+    isPillMessage(message)
   );
 }
 

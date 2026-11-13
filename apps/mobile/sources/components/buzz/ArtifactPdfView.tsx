@@ -1,8 +1,9 @@
 import { IndexRow } from '@/components/buzz/IndexRow';
 import { useArtifactRecoveryGeneration } from '@/buzz/use-artifact-recovery';
 import React, { useEffect, useRef, useState } from 'react';
-import { Platform, Text, View } from 'react-native';
-import { StyleSheet } from 'react-native-unistyles';
+import { Platform } from 'react-native';
+import { YStack } from 'tamagui';
+import { DocumentFrame, FillView, T } from '@/ui/grammar';
 import type { AttachmentReference } from '@beeline/buzz-client';
 
 import { createInitialLoadGuard } from '@/buzz/artifact';
@@ -67,9 +68,9 @@ export function ArtifactPdfView({
   }, [attachment, mode, recovery]);
   if (failed) {
     return (
-      <View style={styles.failureInset} testID="artifact-pdf-failed">
+      <YStack paddingHorizontal="5" testID="artifact-pdf-failed">
         <IndexRow inset="flush" title="PDF unavailable" description={(ARTIFACT_PDF_FAILURE_TEXT)} />
-      </View>
+      </YStack>
     );
   }
   if (Platform.OS === 'web') {
@@ -112,12 +113,7 @@ function ArtifactPdfFrame({
     return () => URL.revokeObjectURL(url);
   }, [documentHtml]);
   if (!frameUrl) return <ArtifactPdfLoading />;
-  return React.createElement('iframe', {
-    src: frameUrl,
-    style: pdfFrameStyle,
-    title: name,
-    'data-testid': testID,
-  });
+  return <DocumentFrame src={frameUrl} title={name} testID={testID} paper />;
 }
 
 /** Android: the same document, with the origin supplied by the base URL. */
@@ -138,14 +134,15 @@ function ArtifactPdfWebView({
   const status = useSandboxWebViewStatus();
   if (documentHtml != null && !WebView && status === 'unavailable') {
     return (
-      <View style={styles.failureInset} testID="artifact-pdf-failed">
+      <YStack paddingHorizontal="5" testID="artifact-pdf-failed">
         <IndexRow inset="flush" title="PDF unavailable" description={(ARTIFACT_PDF_FAILURE_TEXT)} />
-      </View>
+      </YStack>
     );
   }
   if (documentHtml == null || !WebView) return <ArtifactPdfLoading />;
   return (
-    <WebView
+    <FillView
+      view={WebView}
       {...artifactWebViewProps({
         source: { html: documentHtml, baseUrl: ARTIFACT_PDF_BASE_URL },
         guard,
@@ -155,7 +152,6 @@ function ArtifactPdfWebView({
         javaScript: true,
       })}
       onLoadEnd={onLoadEnd}
-      style={styles.webview}
       testID={testID}
     />
   );
@@ -163,22 +159,8 @@ function ArtifactPdfWebView({
 
 function ArtifactPdfLoading() {
   return (
-    <View style={styles.placeholder} testID="artifact-pdf-loading">
-      <Text style={styles.placeholderText}>Loading…</Text>
-    </View>
+    <YStack flex={1} alignItems="center" justifyContent="center" padding="4" testID="artifact-pdf-loading">
+      <T v="meta" color="secondary" textAlign="center">Loading…</T>
+    </YStack>
   );
 }
-
-const pdfFrameStyle: React.CSSProperties = {
-  border: 'none',
-  width: '100%',
-  height: '100%',
-  backgroundColor: '#ffffff',
-};
-
-const styles = StyleSheet.create((theme) => ({
-  failureInset: { paddingHorizontal: theme.buzz.roomList.edge },
-  webview: { flex: 1, backgroundColor: '#ffffff' },
-  placeholder: { flex: 1, alignItems: 'center', justifyContent: 'center', padding: theme.buzz.space.md },
-  placeholderText: { ...theme.buzz.type.meta, color: theme.buzz.ledgerQuiet, textAlign: 'center' },
-}));

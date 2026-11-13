@@ -1,3 +1,4 @@
+import { githubProviderKey } from './providers/index.js';
 import { systemMessage } from '@beeline/api-contract/system-message-catalog';
 import { cornerObjectiveSql } from './corner-objective.js';
 import { cornerOwnerSql } from './corner-worker.js';
@@ -248,7 +249,7 @@ import { GitHubOperations, CornerWebhookTarget, GitHubRecord, repositoryName, br
         id: hash(`beeline:${room.room_id}:github-event:${event}:${card.action}:${dedupeKey}`),
         roomId: room.room_id,
         authorId: room.author_id,
-        subject: { kind: 'github', name: card.actor },
+        subject: { kind: githubProviderKey, name: card.actor },
         verb: card.action,
         object: { text: card.title, url: card.url },
         presentation: 'card',
@@ -314,7 +315,7 @@ import { GitHubOperations, CornerWebhookTarget, GitHubRecord, repositoryName, br
     const targets = matches.rows;
     const actorLogin = text(record(body.sender)?.login);
     const actor = (login?: string) =>
-      login ? { kind: 'github' as const, name: login } : GITHUB_SUBJECT;
+      login ? { kind: githubProviderKey, name: login } : GITHUB_SUBJECT;
     for (const target of targets) {
       if (!target.author_id) continue;
       if (event === 'pull_request') {

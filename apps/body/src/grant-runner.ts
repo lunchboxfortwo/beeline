@@ -1,10 +1,11 @@
 import { waitForPathRemoval } from './filesystem-change.js';
-import { resolveGrantCommand, isNativeGrantExecutable, resolveGrantScriptExecutable } from './grant-script.js';
+import { resolveGrantCommand, isNativeGrantExecutable, installedGrantExecutable } from './grant-script.js';
+import { pathGrantAllowsWrite } from '@beeline/api-contract/agent-grants';
 /**
  * The command-kind grant runner (Agent Grants, slice 2).
  *
- * An approved `command` grant is a rule: the exact approved line is an argv
- * prefix the agent may say. `run_granted_command` reaches this runner from the
+ * An approved `command` grant is a rule: the exact approved line is the one
+ * argv the agent may say. `run_granted_command` reaches this runner from the
  * beeline-agent MCP server, which lives INSIDE the session sandbox; the runner
  * itself is the daemon, so it spawns the command as its own child, with cwd =
  * the agent's Room checkout or corner worktree, an environment of PATH and HOME
@@ -31,10 +32,9 @@ import { resolveGrantCommand, isNativeGrantExecutable, resolveGrantScriptExecuta
  * agent is told to open a corner. That is the opposite of the harness spawn
  * path, which fails open so a host without bwrap can still hold a conversation.
  *
- * Two hard stops survive yolo on both surfaces and are re-checked here as well
- * as at request time: a credential or environment file named by words the
- * approved prefix never showed a human, and a script nobody has read. An
- * interpreter grant is bound to the script bytes the approval card showed: the
+ * Two hard stops survive yolo on both surfaces: a credential or environment
+ * file, and a script nobody has read. A run must say exactly the approved argv,
+ * so it can never add words the card did not show. An interpreter grant is bound to the script bytes the approval card showed: the
  * file is re-hashed before every run, and a script that changed, or one that
  * appeared where the card had none, is refused.
  *
@@ -49,16 +49,15 @@ import { resolveGrantCommand, isNativeGrantExecutable, resolveGrantScriptExecuta
  * last-resort fallback. Values are injected into the child's env and scrubbed
  * from its output; they never reach the transcript, the ledger, or the model.
  */
-import { execFile } from 'node:child_process';
+import { execFile, spawnSync } from 'node:child_process';
 import { createHash, randomBytes, randomUUID } from 'node:crypto';
 import { chmod, mkdir, readFile, readdir, rename, rm, rmdir, stat, writeFile } from 'node:fs/promises';
 import { createServer, type Server } from 'node:http';
 import type { AddressInfo } from 'node:net';
-import { dirname, resolve } from 'node:path';
+import { dirname, isAbsolute, resolve } from 'node:path';
 import {
-  commandGrantEscalationsBeyondRule,
   commandGrantMatches,
-  formatGrantEscalationReason,
+  grantScriptKey,
   interpreterScriptArgument,
   parseCommandGrantTarget,
   type CommandGrantRule,
@@ -89,6 +88,7 @@ export type GrantRunRequester = { pubkey: string; name?: string };
  * spawned plainly or into the Room's read-only mount table.
  */
 export interface GrantWritePolicy {
+  operatorHome?: string;
   surface: AgentSurface;
   /** The self-tested bwrap; absent on a Room means its promise cannot be kept. */
   bwrapPath?: string;
@@ -136,8 +136,7 @@ export const ROOM_SANDBOX_UNAVAILABLE =
   'open_corner and run it there, where writes belong.';
 
 export const ROOM_WRITE_REFUSED_NOTE =
-  '[beeline] the Room filesystem is read-only outside your scratch directory, so this write ' +
-  'was refused by the kernel. Open a corner with open_corner to change files.';
+  '[beeline] a remaining read-only mount refused this write; request the specific path capability before retrying.';
 
 export type SecretResolver = (name: string) => Promise<string | undefined>;
 
@@ -357,14 +356,14 @@ export function validateGrantArgv(value: unknown): string[] {
   if (value.length > ARGV_MAX_WORDS) throw new Error(`argv exceeds ${ARGV_MAX_WORDS} words`);
   return value.map((word) => {
     if (typeof word !== 'string' || !word) throw new Error('argv words must be non-empty strings');
-    if (word.length > ARGV_WORD_MAX_LENGTH || /[\0\r\n]/.test(word)) {
+    if (word.length > ARGV_WORD_MAX_LENGTH || /[\0\r]/.test(word)) {
       throw new Error('argv words must be single-line and bounded');
     }
     return word;
   });
 }
 
-/** Pick the rule that matches: the approved argv is a word-for-word prefix of the request. */
+/** Pick the rule that matches: the approved argv equals the request, word for word. */
 export function matchCommandGrant(
   grants: readonly LiveGrant[],
   workspaceId: string,
@@ -390,6 +389,32 @@ function capOutput(value: string, cap: number): string {
   return `${bytes.subarray(0, half).toString('utf8')}\n…[${bytes.length - cap} bytes omitted]…\n${bytes
     .subarray(bytes.length - half)
     .toString('utf8')}`;
+}
+
+/** Name a rule and mismatch positions without echoing argument or secret values. */
+function closestCommandGrant(grants: readonly Pick<LiveGrant, 'kind' | 'target' | 'grantId' | 'workspaceId' | 'expiresAt' | 'status'>[], workspaceId: string, argv: readonly string[]): string {
+  let nearest: { id: string; score: number; fields: string[] } | undefined;
+  for (const grant of grants) {
+    if (grant.kind !== 'command') {
+      if (grant.workspaceId === workspaceId && (grant.status === 'approved' || grant.status === 'once') && !nearest)
+        nearest = { id: grant.grantId, score: -1, fields: [`kind ${grant.kind}`] };
+      continue;
+    }
+    let rule: CommandGrantRule;
+    try { rule = parseCommandGrantTarget(grant.target); } catch { continue; }
+    const fields: string[] = [];
+    let score = 0;
+    rule.argv.forEach((word, index) => {
+      if (word === argv[index]) score += 1;
+      else fields.push(`word (${index + 1})`);
+    });
+    if (rule.argv.length !== argv.length) fields.push('word count');
+    if (grant.workspaceId !== workspaceId) fields.push('workspace');
+    if (grant.expiresAt && grant.expiresAt <= Date.now() / 1000) fields.push('expiry');
+    if (grant.status !== 'approved' && grant.status !== 'once') fields.push(`status (${grant.status})`);
+    if (!nearest || score > nearest.score) nearest = { id: grant.grantId, score, fields };
+  }
+  return nearest ? ` Closest grant ${nearest.id}: ${nearest.fields.join(', ') || 'not live'} does not match.` : ' No live command grants are available on this host; check expiry or revocation with request_grant action=list.';
 }
 
 function scrubSecrets(value: string, secrets: ReadonlyMap<string, string>): string {
@@ -427,11 +452,14 @@ export class GrantCommandRunner {
     this.rooms.delete(roomId);
   }
 
-  async run(input: { roomId: unknown; argv: unknown }): Promise<GrantRunResult> {
+  async run(input: { roomId: unknown; argv: unknown; stdin?: unknown }): Promise<GrantRunResult> {
     if (typeof input.roomId !== 'string' || !input.roomId) throw new Error('roomId is required');
     const room = this.rooms.get(input.roomId);
     if (!room) throw new Error('this daemon is not serving that Room');
     const argv = validateGrantArgv(input.argv);
+    if (input.stdin !== undefined && (typeof input.stdin !== 'string' || Buffer.byteLength(input.stdin) > 4096 || input.stdin.includes('\0')))
+      throw new Error('stdin must be bounded text');
+    const stdin = input.stdin as string | undefined;
     const turn = room.turn();
     if (!turn?.requestId || !turn.generationId) throw new Error('command requires an active turn');
     const live = await this.options.api.execute('listTurnAgentGrants', {
@@ -439,26 +467,35 @@ export class GrantCommandRunner {
       requestId: turn.requestId,
       generationId: turn.generationId,
     });
-    const match = matchCommandGrant(live.grants, room.workspaceId, argv);
+    const policy = room.writePolicy();
+    const checkEnv = { ...(this.options.env ?? process.env), ...policy.toolEnv };
+    let match: ReturnType<typeof matchCommandGrant>;
+    let bindingFailure: Error | undefined;
+    // A newer legacy or broad grant must not shadow an approval whose bytes match.
+    for (const candidate of live.grants) {
+      const possible = matchCommandGrant([candidate], room.workspaceId, argv);
+      if (!possible) continue;
+      try { await this.checkScriptBinding(candidate, room.cwd, checkEnv, argv, stdin); }
+      catch (error) { bindingFailure ??= error as Error; continue; }
+      // The probe runs only an installed git: a writable one on PATH could create files before the refusal.
+      if (gitShowPrintsFileContents(room.cwd, checkEnv, argv, installedGrantExecutable(argv[0], room.cwd, checkEnv))) {
+        bindingFailure ??= new Error(`Closest grant ${candidate.grantId}: this command can print file contents or a full patch; it needs its own approval.`);
+        continue;
+      }
+      match = possible;
+      break;
+    }
     if (!match) {
+      if (bindingFailure) throw bindingFailure;
+      const history = await this.options.api.execute('listAgentGrantRequests', { agentId: this.options.agentId, roomId: input.roomId });
+      const nearest = closestCommandGrant(history.grants ?? live.grants, room.workspaceId, argv);
       throw new Error(
-        `no approved command grant matches: ${argv.join(' ')}. Ask with request_grant kind=command first.`,
+        `no approved command grant matches.${nearest} Check the named mismatch before asking again with request_grant kind=command for this argv.`,
       );
     }
     const { grant, rule } = match;
-    // The rule is an argv PREFIX, so a run can always add words the human who
-    // answered the card never read. Anything those words escalate into is a
-    // fresh ask (C94).
-    const beyond = commandGrantEscalationsBeyondRule(rule, argv);
-    if (beyond.length) {
-      throw new Error(
-        `this run needs its own approval: ${formatGrantEscalationReason(beyond)}. ` +
-          'Ask with request_grant kind=command for the exact line so a human can read it.',
-      );
-    }
     // Use the same surface policy for the entire run.
-    const policy = room.writePolicy();
-    await this.checkScriptBinding(grant, scriptCandidates(room.cwd, argv, { ...(this.options.env ?? process.env), ...policy.toolEnv }), argv);
+    await this.checkScriptBinding(grant, room.cwd, checkEnv, argv, stdin);
     const secrets = new Map<string, string>();
     for (const name of rule.secrets) {
       const value = await this.resolveSecret(name);
@@ -474,6 +511,8 @@ export class GrantCommandRunner {
     const env: Record<string, string> = {
       ...(source.PATH ? { PATH: source.PATH } : {}),
       ...(source.HOME ? { HOME: source.HOME } : {}),
+      XDG_RUNTIME_DIR: source.XDG_RUNTIME_DIR ?? `/run/user/${process.getuid?.() ?? 0}`,
+      DBUS_SESSION_BUS_ADDRESS: source.DBUS_SESSION_BUS_ADDRESS ?? `unix:path=/run/user/${process.getuid?.() ?? 0}/bus`,
       ...(policy.toolEnv ?? {}),
       ...Object.fromEntries(secrets),
     };
@@ -488,9 +527,11 @@ export class GrantCommandRunner {
       : `[beeline-sandbox-started:${randomBytes(16).toString('hex')}]`;
     const spawn = runsOnHost
       ? { command: argv[0]!, args: argv.slice(1) }
-      : roomSandboxCommand(policy, room.cwd, argv, sandboxMarker!);
+      : roomSandboxCommand(policy, room.cwd, argv, sandboxMarker!, env.XDG_RUNTIME_DIR!,
+          live.grants.filter(entry => entry.kind === 'path' && entry.status === 'approved' && entry.target.startsWith('/'))
+            .map(entry => ({ path: entry.target, writable: pathGrantAllowsWrite(entry.capabilities) })));
     // Re-check after secret resolution and Once consumption, immediately before exec.
-    await this.checkScriptBinding(grant, scriptCandidates(room.cwd, argv, env), argv);
+    await this.checkScriptBinding(grant, room.cwd, env, argv, stdin);
     const outcome = await new Promise<{
       exitCode: number | null;
       signal?: string;
@@ -525,12 +566,25 @@ export class GrantCommandRunner {
           });
         },
       );
+      child.stdin?.end(stdin);
     });
     // The record says what happened: a refused write is the Room boundary doing
     // its job, and the agent is told where the work belongs instead.
     const sandboxStarted = sandboxMarker ? outcome.output.includes(sandboxMarker) : true;
     if (sandboxMarker && sandboxStarted) {
       outcome.output = outcome.output.replace(`${sandboxMarker}\n`, '').replace(sandboxMarker, '');
+    }
+    const deniedPath = outcome.output.match(/['‘“`]([^'’”`\n]+)['’”`][^\n]*(?:Read-only file system|EROFS)/)?.[1]
+      ?? outcome.output.match(/(?:Read-only file system|EROFS)[^\n]*[, :]\s*['‘“`]([^'’”`\n]+)['’”`]/)?.[1];
+    let deniedTarget = deniedPath ? resolve(room.cwd, deniedPath) : undefined;
+    if (deniedTarget) {
+      // New files cannot be bind-mounted. Grant the existing parent needed to
+      // create them, so the suggested call is sufficient on its own.
+      while (!await stat(deniedTarget).catch(() => undefined)) {
+        const parent = dirname(deniedTarget);
+        if (parent === deniedTarget) break;
+        deniedTarget = parent;
+      }
     }
     const writeRefused = !runsOnHost && WRITE_REFUSED.test(outcome.output);
     // The marker is emitted only after bubblewrap has built the namespace and
@@ -539,7 +593,7 @@ export class GrantCommandRunner {
     const sandboxFailure = !runsOnHost && !sandboxStarted;
     const output = capOutput(
       scrubSecrets(
-        writeRefused ? `${outcome.output.trimEnd()}\n${ROOM_WRITE_REFUSED_NOTE}` : outcome.output,
+        writeRefused ? `${outcome.output.trimEnd()}\n${ROOM_WRITE_REFUSED_NOTE} Call request_grant(${JSON.stringify({ action: 'request', kind: 'path', target: deniedTarget ?? room.cwd, capabilities: 'write', reason: deniedTarget ? 'Write the denied path' : 'Write the command working directory', purpose: 'Complete the blocked host operation' })}).` : outcome.output,
         secrets,
       ),
       cap,
@@ -595,51 +649,60 @@ export class GrantCommandRunner {
    */
   private async checkScriptBinding(
     grant: LiveGrant,
-    candidates: readonly string[],
+    cwd: string,
+    env: NodeJS.ProcessEnv,
     argv: readonly string[],
+    stdin?: string,
   ): Promise<void> {
-    argv = resolveGrantCommand(argv, '.', {}).argv;
-    const argument = interpreterScriptArgument(argv, true);
+    const context = resolveGrantCommand(argv, cwd, env);
+    const argument = interpreterScriptArgument(context.argv);
     if (!argument) return;
-    let bytes: Buffer | undefined;
-    for (const candidate of candidates) {
-      bytes = await readFile(candidate).catch(() => undefined);
-      if (bytes) break;
-    }
-    const script = grant.script;
+    const note = ` Closest grant ${grant.grantId}:`;
+    if (stdin !== undefined && !argument.stdin) throw new Error(`${note} stdin is only supported when the interpreter reads its approved code from stdin.`);
+    if (argument.stdin && stdin === undefined) throw new Error(`${note} stdin bytes are unavailable; save them as a script file or approve exact stdin code.`);
+    const bytes = argument.stdin ? Buffer.from(stdin!) : argument.inline !== undefined ? Buffer.from(argument.inline)
+      : await readFile(resolve(context.cwd, argument.path)).catch(() => undefined);
     if (!bytes) {
-      if (script) throw new Error(`${argument.path} cannot be read. Ask with request_grant kind=command again.`);
-      return;
+      throw new Error(`${note} script cannot be read at execution cwd ${context.cwd}; check cwd and script path. Ask with request_grant kind=command again.`);
     }
-    if (!script && argument.direct && isNativeGrantExecutable(bytes)) return;
-    if (!script || script.path !== argument.path) {
+    if (!grant.script && argument.direct && isNativeGrantExecutable(bytes)) return;
+    if (!grant.script || grant.script.path !== argument.path) {
       throw new Error(
-        `${argument.path} is a script no human has read: this grant was approved without it. ` +
+        `${note} script path or binding does not match; ${argument.path} is a script no human has read under this grant. ` +
           'Ask with request_grant kind=command so the card carries what the command runs.',
       );
     }
-    if (createHash('sha256').update(bytes).digest('hex') !== script.sha256) {
+    const sha256 = createHash('sha256').update(bytes).digest('hex');
+    if (grantScriptKey({ path: argument.path, sha256 }) !== grantScriptKey(grant.script)) {
       throw new Error(
-        `${argument.path} changed after it was approved, so the approval no longer covers it. ` +
+        `${note} script hash does not match for ${argument.path} at execution cwd ${context.cwd}; it changed after approval or cwd resolves a different file. ` +
           'Ask with request_grant kind=command again so a human reads what runs now.',
       );
     }
   }
 }
 
-/** Resolve exactly as exec does: relative script paths are relative to cwd.
- * Scratch fallback could hash a different file than the interpreter executes.
+/**
+ * `git show --stat` of a blob, tree, or `rev:path` prints the file. A commit
+ * object stays a summary. `executable` is the installed git, if any. The probe
+ * runs that file only, never a PATH lookup of `git`,
+ * and its output is never returned to the agent.
  */
-function scriptCandidates(
+function gitShowPrintsFileContents(
   cwd: string,
-  argv: readonly string[],
   env: NodeJS.ProcessEnv,
-): string[] {
-  const context = resolveGrantCommand(argv, cwd, env);
-  const argument = interpreterScriptArgument(context.argv, true);
-  if (!argument) return [];
-  const path = resolveGrantScriptExecutable(argument, context.cwd, context.env);
-  return path ? [path] : [];
+  argv: readonly string[],
+  executable: string | undefined,
+): boolean {
+  if (argv[0] !== 'git' || argv[1] !== 'show' || !argv.includes('--stat')) return false;
+  const objects = argv.slice(2).filter((word) => word !== '--stat' && !word.startsWith('-'));
+  if (objects.length === 0) return false;
+  if (!executable || !isAbsolute(executable)) return true;
+  for (const word of objects) {
+    const probe = spawnSync(executable, ['cat-file', '-t', '--', word], { cwd, env, encoding: 'utf8' });
+    if ((probe.stdout ?? '').trim() !== 'commit') return true;
+  }
+  return false;
 }
 
 /** The bwrap-wrapped argv for a Room run, or a refusal when the host cannot wrap. */
@@ -648,12 +711,17 @@ function roomSandboxCommand(
   cwd: string,
   argv: readonly string[],
   sandboxMarker: string,
+  runtimeDir: string,
+  grantedPaths: NonNullable<SandboxSessionSpec['grantedPaths']>,
 ): { command: string; args: string[] } {
   if (!policy.bwrapPath) throw new Error(ROOM_SANDBOX_UNAVAILABLE);
   return wrapAgentCommand({
     bwrapPath: policy.bwrapPath,
     spec: {
       mode: 'readonly',
+      operatorHome: policy.operatorHome,
+      userRuntimeDir: runtimeDir,
+      grantedPaths,
       cwd,
       // The Room keeps every writable surface its session already had: the
       // scratch and the agent-home overlay. Only the repository copy and the
@@ -732,8 +800,9 @@ export class GrantRunnerServer {
       const body = JSON.parse(Buffer.concat(chunks).toString('utf8')) as {
         roomId?: unknown;
         argv?: unknown;
+        stdin?: unknown;
       };
-      send(200, await this.runner.run({ roomId: body.roomId, argv: body.argv }));
+      send(200, await this.runner.run({ roomId: body.roomId, argv: body.argv, stdin: body.stdin }));
     } catch (error) {
       send(400, { error: error instanceof Error ? error.message : String(error) });
     }

@@ -1,4 +1,5 @@
-import { ensureRoomMembership } from '../membership-join.js';
+import { cornerCommanderIdSql } from '../corner-commander.js';
+import { joinRooms } from '../membership-join.js';
 import { systemMessage } from '@beeline/api-contract/system-message-catalog';
 import { cornerObjectiveSql, readCornerObjective } from '../corner-objective.js';
 import { deleteCornerBranchBestEffort } from '../corner-branch-cleanup.js';
@@ -12,7 +13,7 @@ import { authorizeCommandOutput } from '../agent-command.js';
 import { randomUUID } from 'node:crypto';
 import { cornerImplementerSql } from '../corner-worker.js';
 import { cornerBriefRevisionHash, currentCornerBrief, resolveCornerBriefApproval, resolveCornerBriefAttachments, resolvePendingCornerBriefAttachments, validateCornerBrief } from '../corner-brief.js';
-import { cornerTextRefusal, normalizeCornerText, type CornerWatchKind } from '@beeline/api-contract/daemon';
+import { fixCornerText, type CornerWatchKind } from '@beeline/api-contract/daemon';
 import { type SqlDatabase } from '../database.js';
 import { closeCornerPullRequestBestEffort, closeCornerState, lockCornerArchivalAuthority } from '../corner-close.js';
 import { advanceCorner, createCornerFacts, lockCornerLifecycle } from '../corner-lifecycle.js';
@@ -31,12 +32,12 @@ import { daemonReach, daemonWriteResult } from './corner-messages.js';
     if (input.hold === true) await resolveCornerBriefApproval(ctx.database, [],
       { spec: 'Merge hold', approval: { sourceMessageId: input.sourceMessageId ?? '' } }, [],
       undefined, undefined, undefined, { agentId });
-    // Objectives are normalized paragraphs; names must already be continuous.
-    const refusal =
-      cornerTextRefusal('name', input.name) ?? cornerTextRefusal('objective', input.objective);
-    if (refusal) throw new Error(refusal);
-    const objective = normalizeCornerText(input.objective ?? '');
-    const name = input.name ?? '';
+    // Spaces in a name become hyphens. A long objective is cut on a word boundary.
+    const fixedName = fixCornerText('name', input.name);
+    const fixedObjective = fixCornerText('objective', input.objective);
+    const name = fixedName.text;
+    const objective = fixedObjective.text;
+    const textNotes = [fixedName.note, fixedObjective.note].filter((note): note is string => Boolean(note));
     if (input.brief) validateCornerBrief(input.brief);
     const idempotencyKey = input.idempotencyKey ?? input.requestId;
     if (!idempotencyKey || idempotencyKey.length > 128) {
@@ -114,7 +115,7 @@ import { daemonReach, daemonWriteResult } from './corner-messages.js';
         }>(
           `SELECT child.id::text corner_id,child.name,${cornerObjectiveSql('child')} objective,${cornerOwnerSql('child.id')} owner_agent_id,child.created_by,
                   ${cornerRequestSql('child.id')} request_id,child.repository_key,child.repository_target_branch,
-                  (SELECT handle FROM identities WHERE id=fact.reviewer_agent_id) reviewer_handle,
+                  beeline_room_handle(fact.reviewer_agent_id,child.id) reviewer_handle,
                   initial.revision brief_revision,
                   initial.revision_hash brief_revision_hash,initial.change brief_change,
                   initial.attachments brief_attachments
@@ -133,8 +134,12 @@ import { daemonReach, daemonWriteResult } from './corner-messages.js';
       ).rows[0];
       let implementerAgentId = agentId;
       if (existing && input.implementer !== undefined) {
+        // A retry validates the original assignee, even after departure; it never
+        // searches other identities that happen to share the requested handle.
         const named = (await db.query<{ id: string }>(
-          `SELECT id FROM identities WHERE handle=$1 AND kind='agent'`, [input.implementer],
+          `SELECT id FROM identities
+           WHERE id=$3 AND kind='agent' AND beeline_room_handle(id,$1)=$2`,
+          [roomId,input.implementer,existing.owner_agent_id],
         )).rows[0];
         implementerAgentId = named?.id ?? '';
       }
@@ -188,7 +193,7 @@ import { daemonReach, daemonWriteResult } from './corner-messages.js';
           await db.query<{ id: string; kind: string }>(
             `SELECT identity.id,identity.kind FROM memberships member
              JOIN identities identity ON identity.id=member.identity_id
-             WHERE member.room_id=$1 AND member.removed_at IS NULL AND identity.handle=$2
+             WHERE member.room_id=$1 AND member.removed_at IS NULL AND beeline_workspace_handle(identity.id,member.workspace_id)=$2
              FOR SHARE OF member,identity`,
             [roomId, input.implementer],
           )
@@ -334,7 +339,7 @@ import { daemonReach, daemonWriteResult } from './corner-messages.js';
         [commandRoomId, agentId, cornerId],
       )
     ).rows[0];
-    const warnings = input.brief ? validateCornerBrief(input.brief, repositoryWork) : [];
+    const warnings = [...textNotes, ...(input.brief ? validateCornerBrief(input.brief, repositoryWork) : [])];
     return { cornerId, ...(warnings.length ? { warnings } : {}), ...(watch ? { watch: { roomId: commandRoomId, kinds: watch.kinds } } : {}) };
   }
 
@@ -354,7 +359,7 @@ import { daemonReach, daemonWriteResult } from './corner-messages.js';
           created_by: string;
         }>(
           `SELECT room.parent_id,${cornerOwnerSql('room.id')} owner_agent_id,${cornerImplementerSql('fact', 'room')} implementer_agent_id,
-             ${cornerKindSql('room.id')} kind,room.created_by,EXISTS(SELECT 1 FROM rooms parent WHERE parent.id=room.parent_id
+             ${cornerKindSql('room.id')} kind,${cornerCommanderIdSql('room')} created_by,EXISTS(SELECT 1 FROM rooms parent WHERE parent.id=room.parent_id
                AND (parent.repository_resolution='repository' OR parent.repository_key IS NOT NULL)) repository_backed FROM rooms room
          JOIN corner_facts fact ON fact.corner_id=room.id
          WHERE room.id=$1 AND room.archived_at IS NULL FOR UPDATE OF room`,
@@ -440,7 +445,7 @@ import { daemonReach, daemonWriteResult } from './corner-messages.js';
           input.cornerId,
           revision,
           draft.spec.trim(),
-          JSON.stringify(authority.approvalBasis),
+          JSON.stringify({ ...authority.approvalBasis, commanderReturnRoomId: commandRoomId, commanderCommandId: command.id }),
           authority.revisionHash,
           draft.change?.trim() ?? null,
           agentId,
@@ -498,13 +503,13 @@ import { daemonReach, daemonWriteResult } from './corner-messages.js';
 
   export async function daemonEnsureMembership(ctx: DaemonContext, input: Input<'ensureAgentMembership'>, agentId: string) {
     const room = (
-      await ctx.database.query<{ workspace_id: string; parent_id: string | null }>(
-        `SELECT workspace_id,parent_id FROM rooms WHERE id=$1`,
+      await ctx.database.query<{ workspace_id: string; parent_id: string | null; visibility: string; direct_participants: unknown; archived_at: Date | null }>(
+        `SELECT workspace_id,parent_id,visibility,direct_participants,archived_at FROM rooms WHERE id=$1`,
         [input.roomId],
       )
     ).rows[0];
     if (!room) throw new Error('room not found');
-    if (room.parent_id) {
+    if (room.parent_id || room.visibility !== 'public' || room.direct_participants || room.archived_at) {
       await daemonAccess(ctx, input.roomId, agentId);
       return daemonWriteResult(ctx);
     }
@@ -513,6 +518,8 @@ import { daemonReach, daemonWriteResult } from './corner-messages.js';
       [room.workspace_id, agentId],
     );
     if (!workspaceMember.rowCount) throw new Error('daemon workspace access denied');
-    await ensureRoomMembership(ctx.database, [room.workspace_id, input.roomId, agentId]);
+    await joinRooms(ctx.database, { workspaceId: room.workspace_id, identityId: agentId,
+      invitedById: agentId, rooms: { type: 'rooms', roomIds: [input.roomId], publicOnly: true } });
+    await daemonAccess(ctx, input.roomId, agentId);
     return daemonWriteResult(ctx);
   }

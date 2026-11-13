@@ -11,6 +11,7 @@ import {noticeForAuthError} from '../../sources/auth/onboarding-state';
 import {githubConnectionErrorNotice} from '../../sources/auth/github-connection-error';
 import {OidcBindError} from '@beeline/buzz-client';
 import {RepositoryOnboardingCard} from '../../sources/app/(app)/beeline/chat/RepositoryOnboardingCard';
+import { GrammarProvider } from '../../sources/ui/GrammarProvider';
 StyleSheet.configure({themes:{obsidian:{buzz:beelineThemes.obsidian,dark:true},bone:{buzz:beelineThemes.bone,dark:false}},settings:{initialTheme:'bone'}});
 const card={id:'b'.repeat(64),roomId:'11111111-1111-4111-8111-111111111111',agentId:'c'.repeat(64),requesterId:'a'.repeat(64),kind:'repository',canLink:true,state:'install_missing',status:'open',defaultName:'new-project',githubLinked:true,repositories:[{id:43,fullName:'proof-org/onboarding-proof',installationId:174210678,defaultBranch:'main',current:false}],starters:[]};
 function Root(){
@@ -29,4 +30,4 @@ function Scene({query}){
  {state==='picker'?<RepositoryOnboardingCard card={card} viewerId={'a'.repeat(64)}/>:<ErrorBanner title={notice.title} description={notice.description||notice.message} retryLabel={label} retryVariant="primary" onRetry={()=>{}}/>}
  </View>;
 }
-registerRootComponent(Root);
+registerRootComponent(() => <GrammarProvider><Root /></GrammarProvider>);

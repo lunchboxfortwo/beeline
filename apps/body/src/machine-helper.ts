@@ -6,19 +6,18 @@ import { withKernelLock } from './kernel-lock.js';
 import { DaemonApiError, isAgentRemovedError } from './daemon-api-client.js';
 import { retireRemovedAgent } from './agent-retirement.js';
 import { existsSync, watch, type FSWatcher } from 'node:fs';
-import type { EventEmitter } from 'node:events';
+import { EventEmitter } from 'node:events';
+import { watchFreeAgentResume } from './free-agent-resume.js';
 import { mkdir, readFile, rename, stat, writeFile } from 'node:fs/promises';
 import { homedir } from 'node:os';
 import { dirname, resolve } from 'node:path';
 import {
-  interruptHostedAgent,
   runAgentRuntime,
   type AgentRuntimeHost,
   type HostedAgent,
 } from './agent-runtime.js';
 import { daemonFailurePath, settleDaemonStartFailure } from './daemon-failure.js';
 import { helperStatusPath, type AgentSlotState, type HelperStatusFile } from './helper-status.js';
-import { journalInterruptedTurns } from './force-update-journal.js';
 import {
   HelperLifecycle,
   type AgentExitReason,
@@ -42,7 +41,6 @@ import {
   pruneHelperReleases,
   beelineInstallLayout,
   readInstalledBundleIdentity,
-  readUpdateState,
   runningReleaseId,
 } from './self-update.js';
 import type { InstalledBundleIdentity } from './self-update-manifest.js';
@@ -102,7 +100,7 @@ async function serveMachineHelper(
     /** Image-owned helpers have no self-update transaction. */
     freeAgent?: boolean;
   } = {},
-): Promise<{ reason: HelperExitReason; lifecycle: HelperLifecycle }> {
+): Promise<{ reason: HelperExitReason; lifecycle: HelperLifecycle; settled: Promise<void> }> {
   const runAgent = options.runAgent ?? runAgentRuntime;
   const env = options.env ?? process.env;
   const supervisorRoot = defaultSupervisorRoot(env);
@@ -127,6 +125,8 @@ async function serveMachineHelper(
   const slots = new Map<string, AgentSlot>();
   const hosted = new Map<string, HostedAgent>();
   const links = new Map<string, MachineLink>();
+  const resumes = options.freeAgent && env.FLY_MACHINE_ID && process.platform === 'linux' ? new EventEmitter() : undefined;
+  let disposeResume: (() => void) | undefined;
   const archiveStoragePending = new Map<string, import('./helper-storage.js').StorageRoomState>();
   let archiveStorageRunning = false;
   const stopStorageFacts = watchStorageFacts(supervisorRoot, states => {
@@ -188,30 +188,17 @@ async function serveMachineHelper(
   const generation = randomUUID();
   let control: MachineControl | undefined;
   let stoppingStatus = 'helper stopped';
+  let helperError: string | undefined;
+  let settled = Promise.resolve();
 
-  const hostedRuntimes = async (): Promise<string[]> => {
-    const paths = options.configPaths ?? (await findAgentRuntimeConfigPaths(env));
-    const live: string[] = [];
-    for (const path of paths) {
-      if (
-        !(await stat(path).then(
-          () => true,
-          () => false,
-        ))
-      )
-        continue;
-      if (await isAgentStopped(path)) continue;
-      live.push(path);
-    }
-    return live;
-  };
+  const hostedRuntimes = async () => options.configPaths ?? await findAgentRuntimeConfigPaths(env);
 
   const finish = async (reason: HelperExitReason) => {
     disposeSignals();
     usage?.stop();
     await notifier.stopping(stoppingStatus).catch(() => undefined);
     if (!options.configPaths) await clearHelperPidRecordIfPid(supervisorRoot, process.pid);
-    return { reason, lifecycle };
+    return { reason, lifecycle, settled };
   };
 
   if (layout) {
@@ -266,6 +253,7 @@ async function serveMachineHelper(
     generation,
     processState: lifecycle.state.kind,
     ...(update?.desiredRelease ? { desiredRelease: update.desiredRelease } : {}),
+    ...(helperError ? { lastError: helperError } : {}),
     ...(loadedRelease ? { loadedRelease, loadedIdentity: loadedReleaseIdentity } : {}),
     updatedAt: new Date().toISOString(),
     agents: Object.fromEntries(
@@ -281,19 +269,28 @@ async function serveMachineHelper(
       ]),
     ),
   });
-  let statusWrite: Promise<void> = Promise.resolve();
+  let pendingStatus: HelperStatusFile | undefined;
+  let statusWriting = false;
+  let statusWrite = Promise.resolve();
   const writeStatus = () => {
-    const body = snapshot();
-    control?.publish(body);
-    statusWrite = statusWrite
-      .then(async () => {
-        const path = helperStatusPath(supervisorRoot);
-        await mkdir(dirname(path), { recursive: true, mode: 0o700 });
-        const staged = `${path}.${process.pid}.tmp`;
-        await writeFile(staged, `${JSON.stringify(body, null, 2)}\n`, { mode: 0o600 });
-        await rename(staged, path);
-      })
-      .catch((error) => console.error('[helper] status not written:', error));
+    pendingStatus = snapshot();
+    control?.publish(pendingStatus);
+    if (statusWriting) return;
+    statusWriting = true;
+    statusWrite = (async () => {
+      try {
+        while (pendingStatus) {
+          const body = pendingStatus;
+          pendingStatus = undefined;
+          const path = helperStatusPath(supervisorRoot);
+          await mkdir(dirname(path), { recursive: true, mode: 0o700 });
+          const staged = `${path}.${generation}.tmp`;
+          await writeFile(staged, `${JSON.stringify(body, null, 2)}\n`, { mode: 0o600 });
+          await rename(staged, path);
+        }
+      } catch (error) { console.error('[helper] status not written:', error); }
+      finally { statusWriting = false; }
+    })();
   };
   const setState = (slot: AgentSlot, state: AgentSlotState, status = slot.status) => {
     if (slot.state !== state) slot.since = Date.now();
@@ -310,7 +307,7 @@ async function serveMachineHelper(
     // Close the machine socket before agent teardown can unregister the last agent.
     if (reason === 'update') for (const link of links.values()) link.stop(true);
     lifecycle.stop(reason);
-    // Intake is already quiesced and interrupted turns are journaled. Once
+    // Intake is already quiesced; interrupted turns stay claimed for the next helper. Once
     // the machine link closes, exit in this same turn: local broker clients,
     // harness cleanup, or pending discovery must never gate the native restart.
     // The service manager owns the exiting process and its remaining children.
@@ -324,38 +321,26 @@ async function serveMachineHelper(
       env,
       ...(options.runUpdateWorker ? { prepare: options.runUpdateWorker } : {}),
       idle: () => [...hosted.values()].every((agent) => agent.core.activeTurnCount() === 0),
-      drain: () => {
-        if (!quiesceHostedAgents([...hosted.values()], true))
-          throw new Error('helper could not close intake for release drain');
-      },
       changed: () => writeStatus(),
-      interrupt: () => {
-        quiesceHostedAgents([...hosted.values()], true);
-        for (const agent of hosted.values())
-          journalInterruptedTurns(agent.runtimeDir, agent.core.interruptedTurns());
-        for (const agent of hosted.values()) interruptHostedAgent(agent);
-      },
-      handoff: async (desiredRelease, interrupted) => {
+      handoff: async (desiredRelease, interrupted, signal) => {
         await nativeConfiguration;
+        if (signal.aborted || controller.signal.aborted) return;
         if (!quiesceHostedAgents([...hosted.values()], interrupted))
           throw new Error('helper could not close intake for release handoff');
-        if (interrupted) {
-          for (const agent of hosted.values())
-            journalInterruptedTurns(agent.runtimeDir, agent.core.interruptedTurns());
-          for (const agent of hosted.values()) agent.core.interruptForServerMinimum();
-        }
+        if (interrupted) for (const agent of hosted.values()) agent.core.interruptForServerMinimum();
         stoppingStatus = `loaded_release=${loadedRelease}; desired_release=${desiredRelease}; handoff ${interrupted ? 'interrupted' : 'idle'}`;
         restartHelper('update');
       },
-      failed: (error, minimum) => {
+      failed: (error) => {
         console.error('[helper] release transaction failed:', error);
+        helperError = String(error).slice(0, 500);
+        writeStatus();
         for (const agent of hosted.values())
           agent.lifecycle.resumeAfterFailedUpdate(() => agent.core.resumeServing());
-        if (minimum) restartHelper('failed');
       },
     });
-  const tickUpdate = async () => {
-    await update?.idleChanged();
+  const tickUpdate = () => {
+    update?.idleChanged();
     void sweepHostDisk();
   };
   const requestForceUpdate = (minimum: string) => {
@@ -375,6 +360,10 @@ async function serveMachineHelper(
         const home = env.HOME?.trim() || homedir();
         link = new MachineLink({
           baseUrl,
+          ...(resumes ? { subscribeResume: (listener: () => void) => {
+            resumes.on('resume', listener);
+            return () => { resumes.off('resume', listener); };
+          } } : {}),
           readVault: async agentId => {
             if (!existsSync(squireBrokerInstallEntry(home)) && !existsSync(squireHostPaths(home).mcpSocket))
               return { connections: [], notAdded: true };
@@ -518,7 +507,8 @@ async function serveMachineHelper(
       } catch (error) {
         if (reportError) captureHelperError(error);
         console.error(`[helper] agent ${slot.agentId} failed:`, error);
-        await settleDaemonStartFailure(dirname(slot.configPath), error).catch(() => undefined);
+        void settleDaemonStartFailure(dirname(slot.configPath), error)
+          .catch(fault => console.error(`[helper] agent ${slot.agentId} failure not recorded:`, fault));
         slot.established = false;
         slot.status =
           error instanceof Error ? error.message.slice(0, 500) : String(error).slice(0, 500);
@@ -570,21 +560,17 @@ async function serveMachineHelper(
       setState(slot, 'stopped');
   };
 
-  const startingSlots = new Map<string, Promise<void>>();
-  const startSlot = (configPath: string): Promise<void> => {
-    const pending = startingSlots.get(configPath);
-    if (pending) return pending;
-    const operation = startSlotOnce(configPath).finally(() => startingSlots.delete(configPath));
-    startingSlots.set(configPath, operation);
-    return operation;
-  };
-  const startSlotOnce = async (configPath: string) => {
+  const startSlot = (configPath: string) => {
     const existing = slots.get(configPath);
-    if (existing?.running) return;
-    const runtime = await readRuntimeRecord(configPath).catch(() => undefined);
+    if (existing?.running) {
+      void isAgentStopped(configPath).then(stopped => {
+        if (stopped) existing.controller.abort();
+      }).catch(error => console.error(`[helper] agent ${existing.agentId} desired state failed:`, error));
+      return;
+    }
     const slot: AgentSlot = existing ?? {
       configPath,
-      agentId: runtime?.agent.publicKey ?? dirname(configPath).split('/').at(-1)!,
+      agentId: dirname(configPath).split('/').at(-1)!,
       controller: new AbortController(),
       state: 'starting',
       status: '',
@@ -595,37 +581,47 @@ async function serveMachineHelper(
       revision: 0,
       attemptRevision: 0,
     };
-    slot.lastError ??= await readFile(daemonFailurePath(dirname(configPath)), 'utf8')
-      .then((raw) => {
-        const error = JSON.parse(raw).lastError;
-        return typeof error === 'string' ? error.slice(0, 500) : undefined;
-      })
-      .catch(() => undefined);
-    if (slot.controller.signal.aborted) slot.controller = new AbortController();
-    slot.configDigest = await readFile(configPath)
-      .then((raw) => createHash('sha256').update(raw).digest('hex'))
-      .catch(() => undefined);
     slots.set(configPath, slot);
-    if (!slot.watcher)
-      slot.watcher = watch(dirname(configPath), (_event, filename) => {
-        if (filename !== 'runtime.json') return;
-        void readFile(configPath)
-          .then((raw) => createHash('sha256').update(raw).digest('hex'))
-          .catch(() => undefined)
-          .then((digest) => {
-            if (digest === slot.configDigest) return;
-            slot.configDigest = digest;
-            slot.revision += 1;
-            if (slot.state === 'needs-auth' || slot.state === 'needs-config') {
-              if (slot.running) slot.controller.abort();
-              else void startSlot(configPath);
-            }
-          });
-      });
+    if (slot.controller.signal.aborted) slot.controller = new AbortController();
     slot.enabled = true;
     slot.established = false;
     setState(slot, 'starting', '');
-    slot.running = supervise(slot).finally(() => {
+    slot.running = Promise.resolve().then(async () => {
+      if (await isAgentStopped(configPath)) {
+        slot.enabled = false;
+        setState(slot, 'stopped');
+        return;
+      }
+      slot.configDigest = createHash('sha256').update(await readFile(configPath)).digest('hex');
+      if (controller.signal.aborted || slot.controller.signal.aborted) return;
+      if (!slot.watcher)
+        slot.watcher = watch(dirname(configPath), (_event, filename) => {
+          if (filename !== 'runtime.json') return;
+          void readFile(configPath)
+            .then(raw => createHash('sha256').update(raw).digest('hex'))
+            .then(digest => {
+              if (controller.signal.aborted || digest === slot.configDigest) return;
+              slot.configDigest = digest;
+              slot.revision += 1;
+              if (slot.state === 'needs-auth' || slot.state === 'needs-config') {
+                if (slot.running) slot.controller.abort();
+                else startSlot(configPath);
+              }
+            }).catch(error => console.error(`[helper] agent ${slot.agentId} configuration read failed:`, error));
+        });
+      const runtime = await readRuntimeRecord(configPath);
+      slot.agentId = runtime.agent.publicKey;
+      // Diagnostics are optional; their filesystem cannot gate intake.
+      void readFile(daemonFailurePath(dirname(configPath)), 'utf8')
+        .then(raw => { slot.lastError ??= JSON.parse(raw).lastError?.slice(0, 500); })
+        .catch(() => undefined);
+      if (!controller.signal.aborted && !slot.controller.signal.aborted) await supervise(slot);
+    }).catch(error => {
+      captureHelperError(error);
+      slot.lastError = error instanceof Error ? error.message.slice(0, 500) : String(error).slice(0, 500);
+      setState(slot, 'needs-config', slot.lastError);
+      console.error(`[helper] agent ${slot.agentId} startup failed:`, error);
+    }).finally(() => {
       slot.running = undefined;
       // A start racing an in-flight scoped stop is remembered in the durable desired set.
       if (!controller.signal.aborted && slot.controller.signal.aborted)
@@ -647,35 +643,32 @@ async function serveMachineHelper(
       }
       slot.controller.abort();
     }
-    for (const configPath of wanted) await startSlot(configPath);
+    for (const configPath of wanted) startSlot(configPath);
   };
   const onHangup = () => {
     console.log('[helper] rescanning paired agents');
     void rescan().catch((error) => console.error('[helper] rescan failed:', error));
   };
   control = new MachineControl(machineControlPath(supervisorRoot), async (request) => {
-    if (request.operation === 'converge' || request.operation === 'stop') await rescan();
+    if (request.operation === 'converge' || request.operation === 'stop') onHangup();
     if (
       request.operation === 'update' &&
       request.releaseId &&
       layout &&
       (!request.sourceGeneration || request.sourceGeneration === generation)
     ) {
-      const target = await withInstallLock(
-        layout,
-        async () => (await readUpdateState(layout)).stagedReleaseId ?? request.releaseId!,
-      );
-      await update?.prepared(target);
+      void update?.prepared(request.releaseId, request.force === true)
+        .catch(error => console.error('[helper] update handoff failed:', error));
     }
     writeStatus();
-    await statusWrite;
   });
   await control.start();
   signals.on('SIGHUP', onHangup);
 
   try {
+    if (resumes) disposeResume = watchFreeAgentResume(() => { resumes.emit('resume'); });
     console.log(`[helper] hosting ${initial.length} agent(s) on one machine socket per server`);
-    for (const configPath of initial) await startSlot(configPath);
+    for (const configPath of initial) startSlot(configPath);
     lifecycle.beginServing();
     writeStatus();
     if (!controller.signal.aborted) void sweepHostDisk();
@@ -694,13 +687,16 @@ async function serveMachineHelper(
       slot.watcher?.close();
       slot.controller.abort();
     }
-    await Promise.all([...slots.values()].map((slot) => slot.running));
+    // Native process exit never waits for this. Embedders can observe cleanup
+    // before reclaiming their isolated state directory.
+    settled = Promise.all([...slots.values()].map(slot => slot.running))
+      .then(() => statusWrite);
   } finally {
+    disposeResume?.();
     signals.off('SIGHUP', onHangup);
     update?.dispose();
     await control.stop();
     for (const link of links.values()) link.stop();
-    await statusWrite;
   }
   return finish(lifecycle.stopReason ?? 'stopped');
 }

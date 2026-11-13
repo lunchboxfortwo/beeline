@@ -120,7 +120,7 @@ export class VoiceService {
         chosen_voices: Record<string, string>;
       }
     >(
-      `SELECT i.id,i.kind,i.name,i.handle,i.avatar,i.face_id,a.soul,a.owner_id,a.access_policy,a.chosen_voices FROM memberships m
+      `SELECT i.id,i.kind,i.name,beeline_workspace_handle(i.id,m.workspace_id) handle,i.avatar,i.face_id,a.soul,a.owner_id,a.access_policy,a.chosen_voices FROM memberships m
        JOIN identities i ON i.id=m.identity_id AND i.kind='agent' JOIN agents a ON a.agent_id=i.id
        JOIN rooms r ON r.id=m.room_id JOIN workspaces w ON w.id=r.workspace_id
        WHERE m.room_id=$1 AND m.removed_at IS NULL ORDER BY i.id`,
@@ -152,7 +152,7 @@ export class VoiceService {
   /** Handle-to-display-name pairs for every current Room member, for spoken names. */
   async memberNames(roomId: string): Promise<SpeechMember[]> {
     const rows = await this.db.query<IdentityRow>(
-      `SELECT i.id,i.kind,i.name,i.handle,i.avatar,i.face_id FROM memberships m
+      `SELECT i.id,i.kind,i.name,beeline_workspace_handle(i.id,m.workspace_id) handle,i.avatar,i.face_id FROM memberships m
        JOIN identities i ON i.id=m.identity_id WHERE m.room_id=$1 AND m.removed_at IS NULL`,
       [roomId],
     );
@@ -458,7 +458,7 @@ export class VoiceService {
       const reference = request.query.trim();
       const messageId = /^#beeline\/[^\s/()<>]+\/([0-9a-f]{64})$/.exec(reference)?.[1] ?? reference;
       const row = (await this.db.query<VoiceContextRow>(
-        `SELECT m.id,left(m.text,6000) text,m.author_id,i.name,i.handle,m.attachments,m.card_type,m.card
+        `SELECT m.id,left(m.text,6000) text,m.author_id,i.name,beeline_room_handle(i.id,m.room_id) handle,m.attachments,m.card_type,m.card
          FROM messages m JOIN identities i ON i.id=m.author_id
          WHERE m.room_id=$1 AND m.deleted_at IS NULL AND m.presentation IN ('message','card')
            AND (m.id=$2 OR EXISTS (SELECT 1 FROM jsonb_array_elements(m.attachments) a WHERE a->>'url'=$3))
@@ -493,7 +493,7 @@ export class VoiceService {
         WHERE m.id=$1 FOR UPDATE OF m FOR SHARE OF c,p`, [sourceId, callId])).rows[0];
       if (!row) throw new Error('Voice request is no longer available');
       await this.access(row.room_id, row.author_id, db);
-      const target = (await db.query<{ handle: string }>(`SELECT handle FROM identities WHERE id=$1 FOR SHARE`, [agentId])).rows[0];
+      const target = (await db.query<{ handle: string }>(`SELECT beeline_room_handle(id,$2) handle FROM identities WHERE id=$1 FOR SHARE`, [agentId,row.room_id])).rows[0];
       if (!target?.handle || !row.text.startsWith(`@${target.handle} `))
         throw new Error('The agent handle changed; please repeat the order');
       const inserted = await db.query(`INSERT INTO voice_orders(source_message_id,call_id,agent_id) VALUES($1,$2,$3) ON CONFLICT DO NOTHING`,

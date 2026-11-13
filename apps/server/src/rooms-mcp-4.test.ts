@@ -64,7 +64,7 @@ const scope3 = fixtureScope3(scope1);
       expect(hold.error).toBe(true);
       expect(hold.text).toContain('close the PR to stop it');
       // A person's tag makes that person the requester, as it does for an agent turn.
-      const handle0 = (await scope1.db.query<{ handle: string }>('SELECT handle FROM identities WHERE id=$1', [member])).rows[0]!.handle;
+      const handle0 = (await scope1.db.query<{ handle: string }>('SELECT beeline_room_handle(id,$2) handle FROM identities WHERE id=$1', [member,ROOM])).rows[0]!.handle;
       const request = await scope1.phone.execute('sendRoomMessage', { roomId: ROOM, text: `@${handle0} hold the demo corner` }, USER);
       const held = await scope3.ok(client, 'set_corner_hold', { address: PUBLIC_CORNER, sourceMessageId: request.messageId });
       expect(held.holdId).toMatch(/^[0-9a-f-]{36}$/);
@@ -74,7 +74,7 @@ const scope3 = fixtureScope3(scope1);
       await scope1.db.query(`INSERT INTO rooms(id,workspace_id,name,visibility,repository_key,repository_remote,repository_resolution)
         VALUES($1,$2,'Repo','public','acme/repo','https://github.com/acme/repo.git','repository')`, [repoRoom, WORKSPACE]);
       await scope1.db.query(`INSERT INTO memberships(workspace_id,room_id,identity_id,role) VALUES($1,$2,$3,'member'),($1,$2,$4,'member')`, [WORKSPACE, repoRoom, member, AGENT]);
-      const handle = (await scope1.db.query<{ handle: string }>('SELECT handle FROM identities WHERE id=$1', [member])).rows[0]!.handle;
+      const handle = (await scope1.db.query<{ handle: string }>('SELECT beeline_room_handle(id,$2) handle FROM identities WHERE id=$1', [member,ROOM])).rows[0]!.handle;
       const self = await scope3.call(client, 'open_corner', { room: repoRoom, implementer: handle, brief: { spec: 'Fix the login copy.' } });
       expect(self.error).toBe(true);
       expect(self.text).toContain('cannot implement repository work; name another agent as implementer');
@@ -83,7 +83,7 @@ const scope3 = fixtureScope3(scope1);
 
     it('opening commander escalation returns to the joined MCP session instead of the corner', async () => {
       const { client, member } = await scope1.connected();
-      const handle = (await scope1.db.query<{ handle: string }>('SELECT handle FROM identities WHERE id=$1', [member])).rows[0]!.handle;
+      const handle = (await scope1.db.query<{ handle: string }>('SELECT beeline_room_handle(id,$2) handle FROM identities WHERE id=$1', [member,ROOM])).rows[0]!.handle;
       const request = await scope1.phone.execute('sendRoomMessage', { roomId: ROOM,
         text: `@${handle} Check the nebula numbers` }, USER);
       const opened = await scope3.ok(client, 'open_corner', { room: ROOM, name: 'nebula-check', objective: 'Check the nebula numbers',

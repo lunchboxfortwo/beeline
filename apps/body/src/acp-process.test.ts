@@ -1,5 +1,5 @@
 import { once } from 'node:events';
-import { expect, it } from 'vitest';
+import { expect, it, vi } from 'vitest';
 import { AcpClient, AcpRuntimeExitedError } from './acp.js';
 import { startAgentProcess, stopAgentProcess } from './agent-process.js';
 
@@ -72,7 +72,7 @@ it('cleans up an unspawnable program without waiting for an exit event it cannot
 });
 
 
-it.each(['tool', 'async'] as const)('keeps a background %s completion in the original invocation without another prompt', async kind => {
+it.each(['tool', 'async'] as const)('ends the invocation on end_turn with unfinished %s metadata', async kind => {
   const source=fixture.replace("if (request.method === 'session/prompt') process.stderr.write('prompt-ready');", `
     if(request.method==='session/prompt') {
       process.stdout.write(JSON.stringify({jsonrpc:'2.0',method:'session/update',params:{sessionId:'fixture',update:{sessionUpdate:'tool_call',toolCallId:'build',title:'Build',status:'in_progress'}}})+'\\n');
@@ -93,11 +93,25 @@ it.each(['tool', 'async'] as const)('keeps a background %s completion in the ori
     await startAgentProcess(client);await client.sessionNew({cwd:process.cwd()});
     const ready=once(client,'stderr');
     const prompt=client.sessionPrompt('fixture','build',undefined,undefined,undefined,()=>{bookkeeping++;}).then(result=>{settled=true;return result;});
+    void prompt.catch(()=>undefined);
     await ready;await new Promise<void>(resolve=>setImmediate(resolve));
-    expect(settled).toBe(false);
-    await client.request('fixture/complete',{});
+    await vi.waitFor(()=>expect(settled).toBe(true));
     const result=await prompt;
-    expect(result.toolCalls).toContainEqual(expect.objectContaining(kind === 'async' ? {id:'async:build',status:'completed'} : {id:'build',status:'completed',rawOutput:'original-result'}));
+    expect(result.stopReason).toBe('end_turn');
+    expect(result.toolCalls).toContainEqual(expect.objectContaining({id:kind === 'async'?'async:build':'build',status:'in_progress'}));
+    expect(client.activePromptSessions.size).toBe(0);
+    await client.request('fixture/complete',{});
     expect(bookkeeping).toBe(0);
+  } finally { await stopAgentProcess(client); }
+});
+
+it('surfaces a missing Codex platform package from the actual adapter startup', async () => {
+  const client = new AcpClient({
+    agentCommand: process.execPath,
+    agentArgs: ['-e', `process.stdin.once('data', () => { process.stderr.write('Missing optional dependency @openai/codex-linux-x64\\n'); process.exit(1); });`],
+    agentEnv: {}, resourceScope: 'none',
+  });
+  try {
+    await expect(startAgentProcess(client)).rejects.toThrow('missing platform package @openai/codex-linux-x64');
   } finally { await stopAgentProcess(client); }
 });

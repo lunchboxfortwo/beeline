@@ -7,7 +7,7 @@ import { fileURLToPath, pathToFileURL } from 'node:url';
 import { execFileSync } from 'node:child_process';
 import ts from 'typescript';
 import { check, loadCases, loadSource, replayPrompt, toolsFor } from './prompt-cases.ts';
-import { evaluateRule, skillPath, shellCommand } from './prompt-case-rules.ts';
+import { evaluateCase, evaluateRule, skillPath, shellCommand } from './prompt-case-rules.ts';
 
 const ROOT = resolve(dirname(fileURLToPath(import.meta.url)), '..');
 const SOURCE = 'apps/body/src/prompt-assembly.ts';
@@ -400,7 +400,7 @@ export async function replaySample({ prompt, skills, rule, model, request, ledge
     }
     let verdict = { pass: null, reason };
     if (status === 'behavior') verdict = unsafe || terminal === 'invalid-call'
-      ? { pass: false, reason: unsafe ?? reason } : evaluateRule(rule, transcript);
+      ? { pass: false, reason: unsafe ?? reason } : evaluateCase({ ...testCase, pass: rule }, transcript);
     return { ...verdict, status, terminal, transcript, attemptedCalls, invalidCalls, recovered, tokens, cost, requests, rounds, seed,
       truthfulness: testCase.truthfulness ? evaluateRule(testCase.truthfulness, transcript) : undefined };
   };

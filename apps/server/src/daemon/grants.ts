@@ -1,4 +1,4 @@
-import { HOST_EMULATOR_TARGET } from '@beeline/api-contract/agent-grants';
+import { agentGrantAutoApproves, HOST_EMULATOR_TARGET, commandGrantMatches, grantScriptKey } from '@beeline/api-contract/agent-grants';
 import { resourceRequester } from '../resource-requester.js';
 import { cornerReviewerSql } from '../corner-reviewer.js';
 import { normalizeAgentAsk } from '../tray-approval-ask.js';
@@ -26,8 +26,9 @@ import { daemonWriteResult } from './corner-messages.js';
     if (typeof input.purpose !== 'string' || !input.purpose.trim() || input.purpose.trim().length > 240)
       throw new Error('grant purpose is required: explain what you want to do and why in 1–240 characters');
     for (const field of ['touches', 'capabilities'] as const) {
-      if (input[field] !== undefined && (typeof input[field] !== 'string' || !input[field]!.trim() || input[field]!.trim().length > 240))
-        throw new Error(`grant ${field} must be 1–240 characters`);
+      const maximum = field === 'touches' && input.kind === 'command' ? 4096 : 240;
+      if (input[field] !== undefined && (typeof input[field] !== 'string' || !input[field]!.trim() || input[field]!.trim().length > maximum))
+        throw new Error(`grant ${field} must be 1–${maximum} characters`);
     }
     if (!isRequestableAgentGrantKind(input.kind)) throw new Error('grant kind is invalid');
     if (typeof input.target !== 'string' || !input.target.trim())
@@ -90,8 +91,8 @@ import { daemonWriteResult } from './corner-messages.js';
       }>(
         `SELECT room.workspace_id,room.parent_id,a.owner_id,a.machine_name,
                 CASE WHEN workspace.visibility='public' THEN false ELSE a.yolo_mode END yolo_mode,
-                agent.name agent_name,agent.handle agent_handle,agent.avatar agent_avatar,
-                owner.name owner_name,owner.handle owner_handle,owner.avatar owner_avatar
+                agent.name agent_name,beeline_workspace_handle(agent.id,room.workspace_id) agent_handle,agent.avatar agent_avatar,
+                owner.name owner_name,beeline_workspace_handle(owner.id,room.workspace_id) owner_handle,owner.avatar owner_avatar
          FROM rooms room
          JOIN workspaces workspace ON workspace.id=room.workspace_id
          JOIN agents a ON a.agent_id=$2
@@ -104,6 +105,22 @@ import { daemonWriteResult } from './corner-messages.js';
     if (!context) throw new Error('agent not found');
     const source = await daemonApprovalSource(ctx, 'grant-request');
     const requesterRow = await daemonGrantRequester(ctx);
+    // Re-requesting a standing command permission must not create another card.
+    // Use the live authorization query so expiry, revocation and owner changes
+    // retain precisely the same authority as execution.
+    if (rule && !requireOwnerApproval) {
+      const live = await daemonListAgentGrants(ctx, agentId, input.roomId);
+      for (const grant of live.grants) {
+        if (grant.kind !== 'command' || grant.status !== 'approved') continue;
+        let approved: CommandGrantRule;
+        try { approved = parseCommandGrantTarget(grant.target); } catch { continue; }
+        if (!commandGrantMatches(approved, rule.argv) || approved.stdin !== rule.stdin ||
+            approved.secrets.length !== rule.secrets.length ||
+            approved.secrets.some(name => !rule!.secrets.includes(name))) continue;
+        if (grantScriptKey(script) !== grantScriptKey(grant.script)) continue;
+        return { grantId: grant.grantId, status: 'approved' as const, auto: true, messageId: undefined };
+      }
+    }
     const connectionInstall = kind === 'mcp' && target.startsWith('connection-install:');
     const appOwner = (target.startsWith('app:') || connectionInstall) && input.appId
       ? (await ctx.database.query<{ id: string; name: string; handle: string | null;
@@ -149,16 +166,9 @@ import { daemonWriteResult } from './corner-messages.js';
     // These grants describe resources on the executing agent's owner machine.
     // The person who started the turn is provenance, not the resource owner.
     // Wallet consent and the two command hard stops keep their existing gates.
-    const auto =
-      !requireOwnerApproval &&
-      kind !== 'shared_asset' &&
-      !(kind === 'host' && target === HOST_EMULATOR_TARGET) &&
-      escalations.length === 0 &&
-      (kind === 'mcp' && (target.startsWith('app:') || connectionInstall)
-        ? context.owner_id === resourceOwnerId
-        : kind === 'mcp' && target === 'wallet'
-        ? context.yolo_mode && requesterRow.id === context.owner_id
-        : true);
+    const auto = agentGrantAutoApproves({ kind, target, escalations, requireOwnerApproval,
+      ownApp: context.owner_id === resourceOwnerId, yolo: context.yolo_mode,
+      requesterIsOwner: requesterRow.id === context.owner_id });
     const status = auto ? 'approved' : 'pending';
     const result = await ctx.database.transaction(async (database) => {
       // A retry replaces only an undecided ask for this exact command and
@@ -225,13 +235,31 @@ import { daemonWriteResult } from './corner-messages.js';
         [context.workspace_id, resourceOwnerId],
       );
       if (!member.rowCount) throw new Error('resource owner access denied');
-      const resourceRoomId = kind === 'shared_asset'
-        ? input.roomId
-        : await ensureSystemDirectMessageRoom(database, context.workspace_id, resourceOwnerId);
+      // The card lives in the Room where the agent asked. Every member reads
+      // it there; only the decider can act on it (`phoneRequireGrantAuthority`).
+      const cardRoomId = input.roomId;
       if (auto) {
-        return { messageId: undefined, cardRoomId: resourceRoomId };
+        return { messageId: undefined, additionalCardRoomIds: [] };
       }
-      const dmRoomId = resourceRoomId;
+      // A decider who cannot read this Room gets the same card in their
+      // @system DM, so Room membership stays the read boundary.
+      const absentDeciders = kind === 'shared_asset'
+        ? await database.query<{ identity_id: string }>(
+          `SELECT member.identity_id FROM memberships member
+           WHERE member.workspace_id=$1 AND member.room_id IS NULL
+             AND member.removed_at IS NULL
+             AND (member.role IN ('owner','admin') OR member.identity_id=$2)
+             AND NOT EXISTS (SELECT 1 FROM room_access room_member
+               WHERE room_member.room_id=$3 AND room_member.identity_id=member.identity_id
+                 AND room_member.removed_at IS NULL)`,
+          [context.workspace_id, context.owner_id, input.roomId],
+        )
+        : await database.query<{ identity_id: string }>(
+          `SELECT $1::text identity_id WHERE NOT EXISTS (SELECT 1 FROM room_access room_member
+             WHERE room_member.room_id=$2 AND room_member.identity_id=$1
+               AND room_member.removed_at IS NULL)`,
+          [resourceOwnerId, input.roomId],
+        );
       const supersededIds = superseded.rows.map(row => row.id);
       let replacementCards: { id: string; card: { grants: (typeof grantView)[] } }[] = [];
       if (supersededIds.length) {
@@ -239,87 +267,80 @@ import { daemonWriteResult } from './corner-messages.js';
           `SELECT id,card FROM messages WHERE room_id=$1 AND card_type='grant-request'
            AND EXISTS (SELECT 1 FROM jsonb_array_elements(card->'grants') entry
              WHERE entry->>'grantId'=ANY($2::text[]))
-           ORDER BY created_at DESC,id DESC FOR UPDATE`, [dmRoomId, supersededIds],
+           ORDER BY created_at DESC,id DESC FOR UPDATE`, [cardRoomId, supersededIds],
         );
         replacementCards = cards.rows;
       }
+      // One card holds only grants with one decider, so its controls always
+      // match the authority the server checks.
       const open = replacementCards.length || kind === 'shared_asset' ? undefined : (
         await database.query<{ id: string; card: { grants: (typeof grantView)[] } }>(
           `SELECT id,card FROM messages WHERE room_id=$1 AND card_type='grant-request'
            AND card->'agent'->>'pubkey'=$2 AND card->>'sourceRoomId'=$3
-           AND card->'requester'->>'pubkey'=$4 AND created_at>now()-interval '2 minutes'
+           AND card->'requester'->>'pubkey'=$4 AND card->'owner'->>'pubkey'=$5
+           AND created_at>now()-interval '2 minutes'
            AND NOT EXISTS (SELECT 1 FROM jsonb_array_elements(card->'grants') entry
              JOIN agent_grants g ON g.id=(entry->>'grantId')::uuid WHERE g.status<>'pending')
            AND NOT EXISTS (SELECT 1 FROM jsonb_array_elements(card->'grants') entry
              WHERE entry->>'kind'='shared_asset')
            ORDER BY created_at DESC,id DESC LIMIT 1 FOR UPDATE`,
-          [dmRoomId, agentId, input.roomId, requester.pubkey],
+          [cardRoomId, agentId, input.roomId, requester.pubkey, owner.pubkey],
         )
       ).rows[0];
-      const cardsToUpdate = replacementCards.length ? replacementCards : open ? [open] : [];
-      for (const open of cardsToUpdate) {
-        const grants = [...open.card.grants.filter(entry => !supersededIds.includes(entry.grantId)), grantView];
-        await restateSystemLine(database, open.id, grantCardPhrase(requester, agent, grants), {
-          agent,
-          owner,
-          requester,
-          grants,
-          ...source,
+      const roomCards = (replacementCards.length ? replacementCards : open ? [open] : []).map(card => ({
+        id: card.id,
+        previousGrantIds: card.card.grants.map(entry => entry.grantId),
+        grants: [...card.card.grants.filter(entry => !supersededIds.includes(entry.grantId)), grantView],
+      }));
+      for (const card of roomCards) {
+        await restateSystemLine(database, card.id, grantCardPhrase(requester, agent, card.grants), {
+          agent, owner, requester, grants: card.grants, ...source,
         });
       }
-      if (cardsToUpdate.length) return { messageId: cardsToUpdate[0]!.id, cardRoomId: dmRoomId };
-      const messageId = id();
-      await systemLine(database, {
-        id: messageId,
-        roomId: dmRoomId,
-        authorId: squireRoute ? SYSTEM_IDENTITY_ID : agentId,
-        ...grantCardPhrase(requester, agent, [grantView]),
-        presentation: 'card',
-        cardType: 'grant-request',
-        card: {
-          agent,
-          owner,
-          requester,
-          grants: [grantView],
-          ...source,
-        },
-      });
-      // A manager sees the Room card only if they are a member of this Room.
-      // Mirror it to each other authorized person's @system DM, preserving
-      // Room membership as the read boundary while giving every decider a card.
+      const messageId = roomCards[0]?.id ?? id();
+      if (!roomCards.length) {
+        await systemLine(database, {
+          id: messageId,
+          roomId: cardRoomId,
+          authorId: squireRoute ? SYSTEM_IDENTITY_ID : agentId,
+          ...grantCardPhrase(requester, agent, [grantView]),
+          presentation: 'card',
+          cardType: 'grant-request',
+          card: { agent, owner, requester, grants: [grantView], ...source },
+        });
+        roomCards.push({ id: messageId, previousGrantIds: [], grants: [grantView] });
+      }
       const additionalCardRoomIds: string[] = [];
-      if (kind === 'shared_asset') {
-        const absentDeciders = await database.query<{ identity_id: string }>(
-          `SELECT member.identity_id FROM memberships member
-           WHERE member.workspace_id=$1 AND member.room_id IS NULL
-             AND member.removed_at IS NULL
-             AND (member.role IN ('owner','admin') OR member.identity_id=$2)
-             AND NOT EXISTS (SELECT 1 FROM memberships room_member
-               WHERE room_member.room_id=$3 AND room_member.identity_id=member.identity_id
-                 AND room_member.removed_at IS NULL)`,
-          [context.workspace_id, context.owner_id, input.roomId],
-        );
-        for (const decider of absentDeciders.rows) {
-          const cardRoomId = await ensureSystemDirectMessageRoom(database, context.workspace_id, decider.identity_id);
-          additionalCardRoomIds.push(cardRoomId);
-          await systemLine(database, {
-            roomId: cardRoomId,
-            authorId: agentId,
-            ...grantCardPhrase(requester, agent, [grantView]),
-            presentation: 'card',
-            cardType: 'grant-request',
-            card: { agent, owner, requester, grants: [grantView], ...source },
-          });
+      for (const decider of absentDeciders.rows) {
+        const deciderRoomId = await ensureSystemDirectMessageRoom(database, context.workspace_id, decider.identity_id);
+        additionalCardRoomIds.push(deciderRoomId);
+        for (const card of roomCards) {
+          const mirrors = card.previousGrantIds.length ? (await database.query<{ id: string }>(
+            `SELECT id FROM messages WHERE room_id=$1 AND card_type='grant-request'
+             AND EXISTS (SELECT 1 FROM jsonb_array_elements(card->'grants') entry
+               WHERE entry->>'grantId'=ANY($2::text[]))
+             FOR UPDATE`, [deciderRoomId, card.previousGrantIds],
+          )).rows : [];
+          const mirrorCard = { agent, owner, requester, grants: card.grants, ...source };
+          for (const mirror of mirrors)
+            await restateSystemLine(database, mirror.id, grantCardPhrase(requester, agent, card.grants), mirrorCard);
+          if (!mirrors.length) {
+            await systemLine(database, {
+              roomId: deciderRoomId,
+              authorId: squireRoute ? SYSTEM_IDENTITY_ID : agentId,
+              ...grantCardPhrase(requester, agent, card.grants),
+              presentation: 'card',
+              cardType: 'grant-request',
+              card: mirrorCard,
+            });
+          }
         }
       }
-      return { messageId, cardRoomId: dmRoomId, additionalCardRoomIds };
+      return { messageId, additionalCardRoomIds };
     });
     ctx.live.publish({ type: 'invalidate', roomId: input.roomId, reason: 'grant', agentId });
-    if (result.cardRoomId)
-      ctx.live.publish({ type: 'invalidate', roomId: result.cardRoomId, reason: 'grant' });
-    if ('additionalCardRoomIds' in result && result.additionalCardRoomIds)
-      for (const roomId of result.additionalCardRoomIds)
-        ctx.live.publish({ type: 'invalidate', roomId, reason: 'grant' });
+    for (const roomId of result.additionalCardRoomIds)
+      ctx.live.publish({ type: 'invalidate', roomId, reason: 'grant' });
     return {
       grantId,
       status,
@@ -328,13 +349,7 @@ import { daemonWriteResult } from './corner-messages.js';
       ...(!auto
         ? {
             approval: {
-              destination: squireRoute
-                ? ('trusty-squire-dm' as const)
-                : kind === 'shared_asset'
-                  ? ('room' as const)
-                : kind === 'mcp' && target === 'wallet'
-                  ? ('wallet-dm' as const)
-                  : ('system-dm' as const),
+              destination: 'room' as const,
               authority: kind === 'shared_asset'
                 ? ('workspace-manager-or-agent-owner' as const)
                 : ('resource-owner' as const),
@@ -399,9 +414,10 @@ import { daemonWriteResult } from './corner-messages.js';
       requester_name: string | null;
       expires_at: Date | null;
       script: CommandGrantScript | null;
+      capabilities: string | null;
     }>(
       `SELECT g.id,g.workspace_id,g.room_id,g.kind,g.target,g.status,g.requested_by,
-              requester.name requester_name,g.expires_at,g.script
+              requester.name requester_name,g.expires_at,g.script,g.capabilities
        FROM agent_grants g LEFT JOIN identities requester ON requester.id=g.requested_by
        WHERE g.agent_id=$1 AND g.status IN ('approved','once')
          AND (g.expires_at IS NULL OR g.expires_at>now())
@@ -428,6 +444,7 @@ import { daemonWriteResult } from './corner-messages.js';
         roomId: row.room_id,
         kind: row.kind,
         target: row.target,
+        ...(row.capabilities ? { capabilities: row.capabilities } : {}),
         status: row.status,
         requestedBy: row.requested_by,
         ...(row.requester_name ? { requestedByName: row.requester_name } : {}),
@@ -484,6 +501,7 @@ import { daemonWriteResult } from './corner-messages.js';
            AND ${cornerReviewerSql()}=$1
        )) AND g.superseded_at IS NULL
          AND ((g.status IN ('pending','approved','once') AND (g.expires_at IS NULL OR g.expires_at>now()))
+           OR (g.kind='command' AND g.agent_id=$1 AND g.status IN ('approved','once','revoked','denied'))
            OR (g.kind='host' AND g.target=$3 AND g.status IN ('denied','revoked')))
          AND ($2::uuid IS NULL OR g.workspace_id=(SELECT workspace_id FROM rooms WHERE id=$2))
        ORDER BY g.created_at DESC,g.id`,
@@ -560,8 +578,8 @@ import { daemonWriteResult } from './corner-messages.js';
           handle: string | null;
           avatar: string | null;
         }>(
-          `SELECT id,kind,name,handle,avatar FROM identities WHERE id=$1`,
-          [workflow.id],
+          `SELECT id,kind,name,beeline_room_handle(id,$2) handle,avatar FROM identities WHERE id=$1`,
+          [workflow.id,command.room_id],
         )
       ).rows[0];
       if (resolved) return resolved;

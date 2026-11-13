@@ -62,7 +62,11 @@ it('handles script load rejection, concurrent failures, unrelated errors and blo
 it('installs capture listeners that recover caught chunk parse errors without hiding app errors', async () => {
   window.sessionStorage.clear();
   const recovery = await import('./web-chunk-recovery.web');
+  const listen = vi.spyOn(window, 'addEventListener');
   recovery.installWebChunkRecovery();
+  recovery.installWebChunkRecovery();
+  expect(listen).toHaveBeenCalledTimes(2);
+  listen.mockRestore();
   const ordinary = new ErrorEvent('error', { filename: chunk, message: 'render failed', error: new TypeError('render failed'), cancelable: true });
   window.dispatchEvent(ordinary);
   expect(ordinary.defaultPrevented).toBe(false);

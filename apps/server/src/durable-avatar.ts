@@ -77,3 +77,47 @@ export async function storeWorkspaceAvatar(
   );
   return `/v1/avatars/${avatarId}`;
 }
+
+/** Runs in the person-profile transaction. A same-origin `/v1/media/<id>`
+ * upload the viewer owns is re-encoded into one durable row per person and
+ * served from `/v1/person-avatars/<id>`; `''` clears it. Every other value
+ * (a provider URL, an existing person-avatar URL) is returned unchanged.
+ */
+export async function storePersonAvatar(
+  database: SqlDatabase,
+  viewerId: string,
+  source: string,
+  publicOrigin: string,
+  readOwnedBytes?: (id: string, ownerId: string) => Promise<Uint8Array | undefined>,
+): Promise<string> {
+  if (!source) {
+    await database.query('DELETE FROM person_avatars WHERE identity_id=$1', [viewerId]);
+    return '';
+  }
+  let url: URL | undefined;
+  try {
+    url = new URL(source, publicOrigin);
+  } catch {
+    url = undefined;
+  }
+  const sameOrigin = url?.origin === new URL(publicOrigin).origin;
+  const id = sameOrigin ? url?.pathname.match(/^\/v1\/media\/([^/]+)$/)?.[1] : undefined;
+  if (!id || !isMediaId(id)) {
+    // Any other picture replaces the uploaded one, so its bytes stop being served.
+    if (!(sameOrigin && url?.pathname.startsWith('/v1/person-avatars/')))
+      await database.query('DELETE FROM person_avatars WHERE identity_id=$1', [viewerId]);
+    return source;
+  }
+  const uploaded = readOwnedBytes ? await readOwnedBytes(id, viewerId) : undefined;
+  if (!uploaded) throw new Error('avatar upload not found; choose the picture again');
+  const bytes = await normalizeAvatar(uploaded);
+  const avatarId = randomUUID();
+  // A replacement changes the URL so a device/CDN cache cannot keep showing
+  // the previous picture.
+  await database.query(
+    `INSERT INTO person_avatars(id,identity_id,bytes) VALUES($1,$2,$3)
+     ON CONFLICT(identity_id) DO UPDATE SET id=EXCLUDED.id,bytes=EXCLUDED.bytes`,
+    [avatarId, viewerId, bytes],
+  );
+  return `/v1/person-avatars/${avatarId}`;
+}

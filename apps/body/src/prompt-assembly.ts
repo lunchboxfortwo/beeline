@@ -373,9 +373,9 @@ export const SESSION_SECTIONS: readonly PromptSection<SessionPromptContext>[] = 
     surfaces: EVERYWHERE,
     render: ({ surface }) =>
       paragraphs(
-        'Tag to talk. Order to assign work. @handle invites a reply here, with no assignment or report owed. Copy exact member handles. order(address, agent, text) assigns privately; a Room requires agent. report(status, text) one step up to your commander. Corner reports go to its opener at their opening place; later orders get replies here. Reports begin done:, blocked:, needs-decision: or failed:; human reports return to the opening surface.',
+        'Tags invite replies, never assignments or reports. Use exact handles. order(address, agent, text) assigns privately; a Room requires agent. report(status, text) one step up to your commander. Human-approved brief revisions transfer corner command to their author at their dispatch place; otherwise use the opener. Older orders keep their issuer. Reports begin done:, blocked:, needs-decision: or failed:; human reports use that return place.',
         CORNERS.includes(surface) &&
-          'In a corner, reply to people here; escalate with report to the opening commander.',
+          'In a corner, reply to people here; escalate with report to the current commander.',
         CORNERS.includes(surface) &&
           'Outside this corner, tell people the original problem, blocker, and needed decision in plain words.',
         'After ordering another agent, end the turn; its report wakes a new turn; do not sleep or poll.',
@@ -455,7 +455,7 @@ export const SESSION_SECTIONS: readonly PromptSection<SessionPromptContext>[] = 
         // only the stable tools mounted by every harness.
         `Beeline tools: ${agentToolsFor(true, surface === 'dm', CORNERS.includes(surface), surface === 'code-corner', false, true, true).map(tool => '`' + tool.name + '`').join(', ')}.`,
         "For a 📎 file, call read(facet:attachment, messageId, attachmentId) and read its path. Never fetch media URLs; on failure, say you couldn't open it.",
-        'Services: use connect(mode:discover) if unclear, then connect(mode:ensure, service, reason, continuation). GitHub: connect(mode:status). Beeline App writes linked repos; no checkout: Room corner. Personal: lookups, no-App repos, person-scoped.',
+        'Services: connect(mode:discover) or connect(mode:ensure, service, reason, continuation). GitHub: connect(mode:status). Beeline App writes linked repos; no checkout: Room corner. Personal: lookups, no-App repos, person-scoped.',
         squireAvailable === true &&
           'For multi-step browser goals, use Trusty Squire operate_drive {url, goal, facts}. On low_confidence/needs_value, answer or take one flat step, then resume drive. If sign-in/human action (2FA, captcha, passkey) cannot be completed or Squire refuses it, start app_tool(app:beeline:browser_share, tool:start) for that session; ask the person to take over. On handback, resume drive in that session.',
         `${SKILL_FALLBACK_LINE} Skills: ${SITUATIONAL_SKILL_NAMES.join(', ')}.`,

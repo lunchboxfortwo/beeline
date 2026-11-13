@@ -12,7 +12,7 @@ import type { SqlDatabase } from './database.js';
 import { closeRunChoices } from './room-choice.js';
 import { identitySubject, systemLine } from './system-line.js';
 import { liveWorkflowRun, scheduleTriggerPeriod, validateWorkflowBindings, roleAgentList } from './workflow-runs-repeated-result.js';
-import { loadIdentityRow, resolveRoleBinding, WORKFLOW_HANDOFF_CARD_TYPE, workflowRequester, resolveRunOwner, openRun, mentionsFor, workflowRunRequester, loadRun, loadPinnedContract } from './workflow-runs.js';
+import { loadIdentityRow, resolveRoleBinding, WORKFLOW_HANDOFF_CARD_TYPE, workflowRequester, resolveRunOwner, openRun, mentionsFor, workflowRunRequester, loadRun, loadPinnedContract, saveRunStatus, claimRun } from './workflow-runs.js';
 import { dispatchState, authorizeRunControl, moveRole } from './workflow-runs-cancel-run-timers.js';
 
 
@@ -98,7 +98,7 @@ export async function startWorkflow(
         throw new CommandRefusalError(`${notAgent} is not a current agent member of this Room`, 400);
       }
     }
-    const starter = await loadIdentityRow(db, command.agent_id);
+    const starter = await loadIdentityRow(db, command.agent_id,command.room_id);
     const runId = randomBytes(32).toString('hex');
     const startState = contract.handoffs[contract.start]!;
     const isGate = startState.kind === 'gate';
@@ -122,7 +122,7 @@ export async function startWorkflow(
       consequence: systemMessage("workflow-runs.run", shortRunId(runId)),
       kind: 'workflow-handoff',
       ...(!exhausted && !isGate ? { wakes: [(resolution as { agentId: string }).agentId] } : {}),
-      presentation: 'system',
+      presentation: 'card',
       cardType: WORKFLOW_HANDOFF_CARD_TYPE,
       card: {
         runId,
@@ -190,7 +190,7 @@ export async function roomMemberIdForHandle(
   const row = (
     await db.query<{ identity_id: string }>(
       `SELECT m.identity_id FROM memberships m JOIN identities i ON i.id=m.identity_id
-       WHERE m.room_id=$1 AND m.removed_at IS NULL AND lower(i.handle)=lower($2)`,
+       WHERE m.room_id=$1 AND m.removed_at IS NULL AND lower(beeline_workspace_handle(i.id,m.workspace_id))=lower($2)`,
       [roomId, handle],
     )
   ).rows[0];
@@ -234,8 +234,19 @@ export async function assignWorkflowRole(
     const targetAgentId = isAgentIdentityReference(input.targetAgentId)
       ? input.targetAgentId
       : await memberIdForHandle(db, command.room_id, input.targetAgentId);
-    const { run, state } = scope;
-    if (scope.ended || !state) throw new ExpectedRefusalError('this workflow run has already ended');
+    const { run } = scope;
+    const resuming = scope.status === 'failed';
+    if (resuming) {
+      // Retry only the visit that failed, never the successful prefix.
+      const failedState = scope.state?.kind === 'terminal' ? run.fromState : run.toState;
+      const retry = failedState && scope.contract.handoffs[failedState];
+      if (!retry || retry.kind === 'terminal') throw new ExpectedRefusalError('this run has no failed step to resume');
+      if (await liveWorkflowRun(db, command.room_id, run.workflowSlug))
+        throw new ExpectedRefusalError('another run of this workflow is live; cancel it before resuming');
+      scope.stateName = failedState!;
+      scope.state = retry;
+    } else if (scope.ended || !scope.state) throw new ExpectedRefusalError('this workflow run has already ended');
+    const state = scope.state!;
     const currentRole = (state as WorkflowHandoffState | WorkflowGateState).role;
     if (!scope.contract.roles.includes(input.role)) {
       throw new ExpectedRefusalError(`unknown workflow role: ${input.role}`);
@@ -252,14 +263,18 @@ export async function assignWorkflowRole(
     if (!member.rowCount) {
       throw new ExpectedRefusalError(`${targetAgentId} is not a current agent member of this Room`);
     }
-    const caller = await mentionsFor(db, [command.agent_id]);
+    if (resuming && !await claimRun(db, scope))
+      throw new CommandRefusalError('workflow already advanced; no resume was applied', 409);
+    const caller = await mentionsFor(db, [command.agent_id],command.room_id);
     await moveRole(db, scope, {
       role: input.role,
       picked: targetAgentId,
       tried: (run.tried ?? []).filter((entry) => entry.agentId !== targetAgentId),
       why: `${caller.get(command.agent_id)} assigned it`,
+      ...(resuming ? { resume: true } : {}),
     });
-    return { runId: run.runId, state: run.toState };
+    if (resuming) await saveRunStatus(db, scope, scope.stateName, 'live');
+    return { runId: run.runId, state: scope.stateName };
   });
 }
 

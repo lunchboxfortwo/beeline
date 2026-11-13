@@ -6,187 +6,178 @@ import {
   prepareLatestRelease,
   readInstalledBundleIdentity,
   readUpdateState,
+  writeUpdateState,
   type BeelineInstallLayout,
 } from './self-update.js';
 
-// Preparation, the active-turn allowance, and successor startup headroom.
-export const UPDATE_CONVERGENCE_SLO_MS = 20 * 60_000;
-export const UPDATE_DRAIN_DEADLINE_MS = 5 * 60_000;
-const UPDATE_INTERRUPT_DEADLINE_MS = 15 * 60_000;
-const UPDATE_PREPARE_DEADLINE_MS = 3 * 60_000;
+const UPDATE_HANDOFF_TIMEOUT_MS = 3 * 60_000;
 
 export function withInstallLock<T>(
   layout: BeelineInstallLayout,
   work: () => Promise<T>,
-  options: { waitMs?: number; now?: () => number } = {},
+  options: { waitMs?: number } = {},
 ): Promise<T> {
   return withKernelLock(`beeline-install:${resolve(layout.libDir)}`, work, options.waitMs);
 }
 
 export function versionAtLeast(actual: string, minimum: string): boolean {
-  const parse = (value: string) => /^v?(\d+)\.(\d+)\.(\d+)$/.exec(value)?.slice(1).map(Number);
+  const parse = (value: string) => {
+    const match = /^v?(\d+)\.(\d+)\.(\d+)(?:-rc\.(\d+))?$/.exec(value);
+    return match ? [...match.slice(1, 4).map(Number), match[4] === undefined ? Infinity : Number(match[4])] : undefined;
+  };
   const left = parse(actual),
     right = parse(minimum);
   if (!left || !right) return false;
-  for (let index = 0; index < 3; index++)
+  for (let index = 0; index < 4; index++)
     if (left[index] !== right[index]) return left[index]! > right[index]!;
   return true;
 }
 
-/** One machine-owned transaction: prepare, drain intake, bounded handoff and acknowledgment. */
+/** One cancellable update attempt; no agent or control request awaits it. */
 export class ReleaseTransaction {
-  #pendingCheck = false;
-  #preparing: Promise<void> | undefined;
-  #prepared: string | undefined;
-  #minimum: string | undefined;
-  #handoffAt: number | undefined;
-  #interruptAt: number | undefined;
-  #deadlineAt: number | undefined;
-  #handingOff: Promise<void> | undefined;
+  #attempt?: { controller: AbortController; timer?: NodeJS.Timeout };
+  #preparing?: Promise<void>;
+  #handingOff?: Promise<void>;
+  #prepared?: string;
+  #minimum?: string;
+  #force = false;
   #completed = false;
-  #draining = false;
+  #pendingCheck = false;
   constructor(
     readonly options: {
       layout: BeelineInstallLayout;
       loadedRelease?: string;
       env: NodeJS.ProcessEnv;
-      prepare?: () => Promise<void>;
+      prepare?: (signal: AbortSignal) => Promise<void>;
       idle: () => boolean;
-      drain: () => void;
-      interrupt: () => void;
-      handoff: (releaseId: string, interrupted: boolean) => Promise<void>;
+      handoff: (releaseId: string, interrupted: boolean, signal: AbortSignal) => Promise<void>;
       changed: (desiredRelease?: string) => void;
       failed: (error: unknown, minimum?: string) => void;
-      now?: () => number;
-      drainMs?: number;
     },
   ) {}
-  get desiredRelease(): string | undefined {
-    return this.#prepared;
+  get desiredRelease(): string | undefined { return this.#prepared; }
+  get pending(): Promise<void> | undefined { return this.#preparing ?? this.#handingOff; }
+
+  private begin() {
+    if (this.#attempt?.timer) return this.#attempt;
+    const controller = this.#attempt?.controller ?? new AbortController();
+    const timer = setTimeout(() => this.fail(controller.signal,
+      new Error('update handoff timed out; keeping current release')), UPDATE_HANDOFF_TIMEOUT_MS);
+    timer.unref();
+    return this.#attempt = { controller, timer };
   }
-  get pending(): Promise<void> | undefined {
-    return this.#preparing ?? this.#handingOff;
+
+  private fail(signal: AbortSignal, error: unknown, releaseId = this.#prepared): void {
+    if (this.#attempt?.controller.signal !== signal) return;
+    this.dispose();
+    this.#prepared = undefined;
+    this.#preparing = this.#handingOff = undefined;
+    this.options.changed(undefined);
+    this.options.failed(error, this.#minimum);
+    if (releaseId) {
+      // A failed/rolled-back handoff must not remain a boot selection. Only
+      // discard this attempt's target: a newer worker may already have staged.
+      const cleanup = withInstallLock(this.options.layout, async () => {
+        const state = await readUpdateState(this.options.layout);
+        if (state.stagedReleaseId === releaseId)
+          await writeUpdateState(this.options.layout, { ...state, stagedReleaseId: undefined,
+            lastCheckResult: 'failed', lastCheckError: String(error) });
+      }).catch(cleanupError => this.options.failed(cleanupError, this.#minimum)).finally(() => {
+        if (this.#preparing !== cleanup) return;
+        this.#preparing = undefined;
+        if (this.#pendingCheck) this.notify();
+      });
+      this.#preparing = cleanup;
+    }
   }
+
   notify(_releaseKey?: string, minimum?: string): void {
-    // The same build can be announced once for next and again for latest.
-    // Re-read this helper's manifest; preparation coalesces in-flight notices.
-    if (minimum && (!this.#minimum || !versionAtLeast(this.#minimum, minimum))) {
+    if (minimum && (!this.#minimum || !versionAtLeast(this.#minimum, minimum)))
       this.#minimum = minimum;
-      this.#handoffAt = this.now();
-      try {
-        this.options.interrupt();
-      } catch (error) {
-        this.options.failed(error, minimum);
+    if (this.#completed) return;
+    if (this.#preparing || this.#handingOff) { this.#pendingCheck = true; return; }
+    this.#pendingCheck = false;
+    const { controller } = this.begin();
+    const { signal } = controller;
+    const operation = Promise.resolve().then(async () => {
+      if (this.options.prepare) await this.options.prepare(signal);
+      else await prepareReleaseInWorker(this.options.env, Date.now() + UPDATE_HANDOFF_TIMEOUT_MS, undefined, signal);
+      if (signal.aborted) return;
+      const target = (await readUpdateState(this.options.layout)).stagedReleaseId;
+      if (!signal.aborted && target) await this.prepared(target);
+      else if (!signal.aborted && !this.#pendingCheck) this.dispose();
+    }).catch(error => this.fail(signal, error)).finally(() => {
+      if (this.#preparing !== operation) return;
+      this.#preparing = undefined;
+      if (signal.aborted) return;
+      if (this.#pendingCheck) this.notify();
+      else this.idleChanged();
+    });
+    this.#preparing = operation;
+  }
+
+  async prepared(releaseId: string, force = false): Promise<void> {
+    if (this.#completed) return;
+    this.#force ||= force;
+    const { signal } = this.begin().controller;
+    try {
+      const targetLayout = { ...this.options.layout,
+        libDir: resolve(this.options.layout.releasesRoot, releaseId) };
+      const identity = await readInstalledBundleIdentity(targetLayout);
+      const loaded = this.options.loadedRelease ? await readInstalledBundleIdentity({
+        ...this.options.layout, libDir: resolve(this.options.layout.releasesRoot, this.options.loadedRelease),
+      }) : undefined;
+      if (identity?.version && loaded?.version && identity.version !== loaded.version &&
+          versionAtLeast(loaded.version, identity.version) && !versionAtLeast(identity.version, loaded.version))
+        throw new Error(`requested helper ${identity.version} is older than running ${loaded.version}`);
+      if (this.#minimum) {
+        if (!identity?.version || !versionAtLeast(identity.version, this.#minimum))
+          throw new Error(`published helper ${identity?.version ?? 'unknown'} is below required ${this.#minimum}`);
+      }
+      if (signal.aborted) return;
+      if (releaseId === this.options.loadedRelease) {
+        this.#prepared = undefined;
+        if (!this.#pendingCheck) this.dispose();
+        this.options.changed(undefined);
         return;
       }
-    }
-    this.#deadlineAt ??= this.now() + UPDATE_CONVERGENCE_SLO_MS;
-    this.#pendingCheck = true;
-    this.prepare();
+      this.#prepared = releaseId;
+      this.options.changed(releaseId);
+      this.idleChanged();
+    } catch (error) { this.fail(signal, error, releaseId); }
   }
-  async prepared(releaseId: string): Promise<void> {
-    if (this.#minimum) {
-      const identity = await readInstalledBundleIdentity({
-        ...this.options.layout,
-        libDir: resolve(this.options.layout.releasesRoot, releaseId),
-      });
-      if (!identity?.version || !versionAtLeast(identity.version, this.#minimum)) {
-        this.#prepared = undefined;
-        throw new Error(
-          `published helper ${identity?.version ?? 'unknown'} is below required ${this.#minimum}`,
-        );
-      }
-    }
-    if (releaseId === this.options.loadedRelease && !this.#draining) {
-      this.#prepared = undefined;
-      this.#deadlineAt = undefined;
-      this.#handoffAt = undefined;
-      this.#interruptAt = undefined;
-      this.#draining = false;
-      this.options.changed(undefined);
-      return;
-    }
-    this.#prepared = releaseId;
-    this.#deadlineAt ??= this.now() + UPDATE_CONVERGENCE_SLO_MS;
-    this.#handoffAt ??= Math.min(
-      this.now() + (this.options.drainMs ?? UPDATE_DRAIN_DEADLINE_MS),
-      this.#deadlineAt - 120_000,
-    );
-    this.#interruptAt ??= this.now() + UPDATE_INTERRUPT_DEADLINE_MS;
-    this.options.changed(releaseId);
-    await this.idleChanged();
-  }
-  async idleChanged(): Promise<void> {
-    if (
-      this.#completed ||
-      !this.#prepared ||
-      this.#preparing ||
-      this.#pendingCheck ||
-      this.#handingOff
-    )
-      return;
-    const idle = this.options.idle();
-    const interrupted = Boolean(this.#minimum) || (!idle && this.now() >= this.#interruptAt!);
-    if (!interrupted && !idle) {
-      // Close admission first, then give active work the remaining allowance
-      // before using the journaled interruption handoff.
-      if (!this.#draining && this.now() >= this.#handoffAt!) {
-        try {
-          this.options.drain();
-          this.#draining = true;
-        } catch (error) {
-          this.options.failed(error, this.#minimum);
-        }
-      }
-      return;
-    }
-    const target = this.#prepared;
-    this.#handingOff = this.options
-      .handoff(target, interrupted)
-      .then(() => {
+
+  idleChanged(): void {
+    if (this.#completed || !this.#prepared || this.#preparing || this.#handingOff) return;
+    // Preparation is complete. Waiting for idle has no deadline; keep the
+    // verified boot selection until an idle event or the next native restart.
+    clearTimeout(this.#attempt?.timer);
+    if (this.#attempt) this.#attempt.timer = undefined;
+    const interrupted = this.#force || Boolean(this.#minimum);
+    if (!interrupted && !this.options.idle()) return;
+    const { signal } = this.begin().controller;
+    const operation = Promise.resolve().then(async () => {
+      if (signal.aborted) return;
+      await this.options.handoff(this.#prepared!, interrupted, signal);
+      if (!signal.aborted) {
         this.#completed = true;
-      })
-      .catch((error) => {
-        this.options.failed(error, this.#minimum);
-        this.#draining = false;
-        // No second drain allowance. A later explicit event retries this same operation.
-      })
-      .finally(() => {
-        this.#handingOff = undefined;
-      });
-    await this.#handingOff;
+        this.dispose();
+      }
+    }).catch(error => this.fail(signal, error)).finally(() => {
+      if (this.#handingOff !== operation) return;
+      this.#handingOff = undefined;
+      if (!signal.aborted && this.#pendingCheck) this.notify();
+    });
+    this.#handingOff = operation;
   }
+
   dispose(): void {
-  }
-  private now(): number {
-    return (this.options.now ?? Date.now)();
-  }
-  private prepare(): void {
-    if (this.#preparing) return;
-    this.#preparing = Promise.resolve()
-      .then(async () => {
-        while (this.#pendingCheck) {
-          this.#pendingCheck = false;
-          if (this.options.prepare) await this.options.prepare();
-          else
-            await prepareReleaseInWorker(
-              this.options.env,
-              Math.min(this.#deadlineAt!, this.now() + UPDATE_PREPARE_DEADLINE_MS),
-            );
-          // One read at worker completion; idle/progress events never inspect disk state.
-          const target = (await readUpdateState(this.options.layout)).stagedReleaseId;
-          if (!this.#pendingCheck && target) await this.prepared(target);
-        }
-      })
-      .catch((error) => {
-        this.options.failed(error, this.#minimum);
-        if (!this.#prepared) this.#deadlineAt = undefined;
-      })
-      .finally(() => {
-        this.#preparing = undefined;
-        if (this.#pendingCheck) this.prepare();
-        else void this.idleChanged();
-      });
+    this.#pendingCheck = false;
+    this.#force = false;
+    if (!this.#attempt) return;
+    clearTimeout(this.#attempt.timer);
+    this.#attempt.controller.abort();
+    this.#attempt = undefined;
   }
 }
 
@@ -211,6 +202,7 @@ export async function prepareReleaseInWorker(
   env: NodeJS.ProcessEnv,
   deadlineAt: number,
   entrypoint?: string,
+  signal?: AbortSignal,
 ): Promise<{ releaseId: string; identity: { version?: string; commit?: string } }> {
   const layout = beelineInstallLayout(env)!;
   const bootstrap = entrypoint ?? resolve(layout.libDir, '../beeline-bootstrap.mjs');
@@ -225,6 +217,17 @@ export async function prepareReleaseInWorker(
       },
       stdio: ['ignore', 'pipe', 'pipe', 'ipc'],
     });
+    const abort = () => {
+      try {
+        if (child.pid && child.exitCode === null && child.signalCode === null)
+          process.kill(-child.pid, 'SIGKILL');
+      }
+      catch (error) { if ((error as NodeJS.ErrnoException).code !== 'ESRCH') reject(error); }
+      reject(signal?.reason ?? new Error('update handoff abandoned'));
+    };
+    signal?.addEventListener('abort', abort, { once: true });
+    if (signal?.aborted) abort();
+    child.once('close', () => signal?.removeEventListener('abort', abort));
     let stdout = '',
       stderr = '';
     child.stdout!.setEncoding('utf8');

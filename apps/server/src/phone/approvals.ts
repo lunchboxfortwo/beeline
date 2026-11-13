@@ -76,13 +76,10 @@ import { messageId, SPENDING_OWNER_AUTHORITY_MESSAGE } from './values.js';
       // ending any member, without admitting unclaimed follow-up work.
       const invocation = command.state === 'claimed' && command.generation_id !== null
         ? (await database.query<CommandRow>(
-          `SELECT * FROM agent_commands WHERE room_id=$1 AND agent_id=$2
-           AND generation_id=$3 AND turn_owner_connection_id IS NOT DISTINCT FROM $4::text
-           AND turn_owner_epoch IS NOT DISTINCT FROM $5::bigint
+          `SELECT * FROM agent_commands WHERE room_id=$1 AND agent_id=$2 AND generation_id=$3
            AND action IN ('input','resume') AND state IN ('pending','claimed')
            ORDER BY created_at,id FOR UPDATE`,
-          [input.roomId,input.agentId,command.generation_id,
-            command.turn_owner_connection_id ?? null,command.turn_owner_epoch ?? null],
+          [input.roomId,input.agentId,command.generation_id],
         )).rows : [command];
       for (const member of invocation) await endAgentTurn(database, member, 'cancelled', 'stop');
       const dropped = invocation.length === 1 ? await dropQueuedOrdersForStop(database, command) : 0;

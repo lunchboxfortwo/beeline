@@ -409,18 +409,54 @@ export const beelineThemes = {
   },
 } as const;
 
-/**
- * A theme colour at a given opacity, for washes and glows that fade a token
- * (`withAlpha(theme.buzz.accent, 0.14)`). Takes a `#rrggbb` token.
- */
-export function withAlpha(color: string, alpha: number): string {
-  const hex = color.replace('#', '');
-  const channel = (offset: number) => parseInt(hex.slice(offset, offset + 2), 16);
-  return `rgba(${channel(0)},${channel(2)},${channel(4)},${alpha})`;
-}
-
 export type BeelineThemeName = keyof typeof beelineThemes;
 export type BeelineThemeTokens = (typeof beelineThemes)[BeelineThemeName];
 
 /** Backward-compatible name for the new default token set. */
 export const groknight = beelineThemes.obsidian;
+
+/**
+ * The grammar's second colour set (Settings → Device → Color set): neutral
+ * Stone on the same components. Overrides the neutral ladder and brass only.
+ */
+export const stonePalette: Record<'dark' | 'light', Partial<Record<keyof BeelineThemeTokens, string>>> = {
+    dark: {
+        bgBase: '#171717', bgRaised: '#222222', bgHighlight: '#2c2c2c', bgUnread: '#242424',
+        textPrimary: '#fafaf9', textSecondary: '#d6d3d1', textMuted: '#a8a29e',
+        border: '#353535', borderStrong: '#57534e', accent: '#d6d3d1',
+        buttonPrimaryFill: '#f5f5f4', buttonPrimaryText: '#1c1917',
+    },
+    light: {
+        bgBase: '#fafaf9', bgRaised: '#f5f5f4', bgHighlight: '#e7e5e4', bgUnread: '#f0efed',
+        textPrimary: '#1c1917', textSecondary: '#44403c', textMuted: '#78716c',
+        border: '#e7e5e4', borderStrong: '#d6d3d1', accent: '#57534e',
+        buttonPrimaryFill: '#1c1917', buttonPrimaryText: '#fafaf9',
+    },
+};
+
+/**
+ * The window canvas under the grammar's theme, for the layers mounted above it
+ * (native root, system bars, navigation container, web body): the colour set's
+ * own canvas in the current mode.
+ */
+export function canvasColor(mode: 'dark' | 'light', palette: 'brass' | 'stone'): string {
+    return (palette === 'stone' ? stonePalette[mode].bgBase : undefined)
+        ?? beelineThemes[mode === 'dark' ? 'obsidian' : 'bone'].bgBase;
+}
+
+/** The one scrim behind every sheet. */
+export const SCRIM = 'rgba(0,0,0,0.8)';
+
+/** Android notification channel light (ARGB). */
+export const NOTIFICATION_LIGHT = '#FF231F7C';
+
+/**
+ * Identity art (the face tiles): fixed inks that are the identity, not chrome,
+ * so they do not follow the theme. `bone`/`ink` draw the creature;
+ * `plateDark`/`plateLight` are the person plate per mode.
+ */
+export const IDENTITY_ART = { bone: '#F2E9D8', ink: '#14091A', plateDark: '#0f0a13', plateLight: '#F5EEE2' } as const;
+
+/** Paper and ink that scanners read in every theme (wallet QR, embedded documents). */
+export const QR_PAPER = '#ffffff';
+export const QR_INK = '#171310';

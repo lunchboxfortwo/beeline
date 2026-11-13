@@ -1,6 +1,7 @@
+import { ensureSystemDirectMessageRoom } from './system-line.js';
 import { ensureSquireMachine } from './squire-machine.js';
 import { systemMessage } from '@beeline/api-contract/system-message-catalog';
-import { createHash, randomUUID } from 'node:crypto';
+import { randomUUID } from 'node:crypto';
 import { readFileSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
 import {
@@ -16,16 +17,9 @@ import {
   type WorkbenchCatalogEntry,
 } from '@beeline/api-contract/workbench';
 import type { ConnectionGrant } from '@beeline/api-contract/daemon';
-import { SYSTEM_IDENTITY_ID } from '@beeline/api-contract/system-identity';
 import { SQUIRE_MCP_TARGET } from '@beeline/api-contract/phone';
 import type { SqlDatabase } from './database.js';
 import { notifyAgentConfigChange, notifyAgentConfigChanges } from './postgres-live.js';
-import {
-  ensureSystemDirectMessageRoom,
-  restateSystemLine,
-  systemLine,
-  type SystemPhrase,
-} from './system-line.js';
 
 /**
  * The server authority for Workbench connector provisioning.
@@ -90,25 +84,7 @@ export function connectorLogo(type: string): string | undefined {
   }
 }
 
-function formatBytes(bytes: number): string {
-  if (bytes < 1024) return systemMessage("workbench.b", bytes);
-  if (bytes < 1024 * 1024) return systemMessage("workbench.kb", (bytes / 1024).toFixed(1));
-  return systemMessage("workbench.mb", (bytes / (1024 * 1024)).toFixed(1));
-}
-
-/**
- * One batched helper usage report (one per agent turn): a ledger row per
- * record ALWAYS, and one receipt card DM per connection from the connector
- * identity to the connection's human - but only for records the helper
- * classed as needing the human (`eventClass`: an approval request or a vault
- * change made on the owner's behalf; captain ruling 2026-09-15). Ordinary
- * use stays on the key's own Workbench record and never arrives as a DM.
- * The turn's request id is the batch key, so a turn that used a connection
- * five times reads as one line.
- *
- * Sovereignty boundary: the receipt goes to the connection's owner only, and
- * only while that person remains a current member of the Workspace.
- */
+/** Record helper usage in the connection ledger. */
 export async function receiveConnectionUsage(
   database: SqlDatabase,
   input: PostConnectionUsageInput,
@@ -128,8 +104,8 @@ export async function receiveConnectionUsage(
     await database.query(
       `INSERT INTO connection_receipts(
          id,connection_id,workspace_id,owner_identity_id,agent_id,
-         operation,status_code,bytes,grant_info,turn_key,event_class
-       ) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11)`,
+         operation,status_code,bytes,grant_info,turn_key
+       ) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10)`,
       [
         randomUUID(),
         connection.id,
@@ -141,19 +117,11 @@ export async function receiveConnectionUsage(
         Math.max(0, Math.round(record.bytes ?? 0)),
         record.grantId ?? null,
         input.requestId,
-        record.eventClass ?? null,
       ],
     );
   }
-  for (const [reference, { connection, connector }] of byRef) {
-    const records = input.usage.filter((record) => record.ref === reference);
-    // Only events the human must see become a receipt DM; the ledger rows
-    // above already carry the full record of the turn.
-    const receiptRecords = records.filter((record) => record.eventClass !== undefined);
-    const messageId = receiptRecords.length
-      ? await postUsageReceiptCard(database, input, connection, connector, receiptRecords)
-      : null;
-    results.push({ connectionId: connection.id, messageId });
+  for (const { connection } of byRef.values()) {
+    results.push({ connectionId: connection.id, messageId: null });
   }
   return results;
 }
@@ -207,119 +175,6 @@ async function resolveUsageConnection(
       );
   }
   return picked ? { connection: picked, connector: picked.connector } : undefined;
-}
-
-async function postUsageReceiptCard(
-  database: SqlDatabase,
-  input: PostConnectionUsageInput,
-  connection: ConnectionRow,
-  connector: ConnectorRow,
-  records: readonly ConnectionUsageRecord[],
-): Promise<string | null> {
-  const agentId = input.agentId;
-  // Receipts reach a person only while they remain a current Workspace member.
-  const membership = await database.query(
-    `SELECT 1 FROM memberships
-     WHERE workspace_id=$1 AND room_id IS NULL AND identity_id=$2 AND removed_at IS NULL`,
-    [connector.workspace_id, connection.owner_identity_id],
-  );
-  if (!membership.rowCount) return null;
-
-  const agent = (
-    await database.query<{ name: string; handle: string | null }>(
-      `SELECT name,handle FROM identities WHERE id=$1`,
-      [agentId],
-    )
-  ).rows[0];
-  const connectionName = connection.label ?? connection.service ?? connection.reference;
-  const totalBytes = records.reduce((sum, record) => sum + Math.max(0, record.bytes ?? 0), 0);
-  const consequence =
-    records.length > 1
-      ? systemMessage("workbench.calls", records.length, formatBytes(totalBytes))
-      : [
-          records[0]!.operation,
-          records[0]!.statusCode !== undefined ? String(records[0]!.statusCode) : undefined,
-          records[0]!.bytes ? formatBytes(records[0]!.bytes) : undefined,
-          (records[0]!.grantLabel ?? records[0]!.grantId)
-            ? systemMessage("workbench.grant", records[0]!.grantLabel ?? records[0]!.grantId)
-            : undefined,
-        ]
-          .filter(Boolean)
-          .join(systemMessage("workbench.separator"));
-
-  const phrase: SystemPhrase = {
-    subject: { id: agentId, kind: 'agent', name: agent?.name ?? systemMessage("workbench.agent") },
-    verb: systemMessage("workbench.used"),
-    object: { id: undefined, text: connectionName },
-    consequence,
-  };
-  const messageId = createHash('sha256')
-    .update(`connection-receipt:${connection.id}:${agentId}:${input.requestId}`)
-    .digest('hex');
-  const card = receiptCard(connector, connection, agent);
-
-  // One card per agent turn: restate the existing card in place, aggregating
-  // every receipt-worthy ledger row this turn has already written.
-  const existing = (
-    await database.query<{ message_id: string }>(
-      `SELECT message_id FROM connection_receipts
-       WHERE connection_id=$1 AND turn_key=$2 AND message_id IS NOT NULL
-         AND event_class IS NOT NULL
-       ORDER BY created_at DESC LIMIT 1`,
-      [connection.id, input.requestId],
-    )
-  ).rows[0];
-  if (existing) {
-    const totals = (
-      await database.query<{ calls: string; total_bytes: string }>(
-        `SELECT count(*)::text calls, COALESCE(SUM(bytes),0)::text total_bytes
-         FROM connection_receipts
-         WHERE connection_id=$1 AND turn_key=$2 AND event_class IS NOT NULL`,
-        [connection.id, input.requestId],
-      )
-    ).rows[0]!;
-    await restateSystemLine(
-      database,
-      existing.message_id,
-      {
-        ...phrase,
-        consequence: systemMessage("workbench.calls", totals.calls, formatBytes(Number(totals.total_bytes))),
-      },
-      card,
-    );
-    return existing.message_id;
-  }
-
-  const roomId = await ensureSystemDirectMessageRoom(database, connector.workspace_id, connection.owner_identity_id);
-  const line = await systemLine(database, {
-    roomId,
-    authorId: SYSTEM_IDENTITY_ID,
-    id: messageId,
-    ...phrase,
-    presentation: 'card',
-    cardType: 'connection-receipt',
-    card,
-  });
-  await database.query(
-    `UPDATE connection_receipts SET message_id=$3
-     WHERE connection_id=$1 AND turn_key=$2`,
-    [connection.id, input.requestId, line.id],
-  );
-  return line.id;
-}
-
-function receiptCard(
-  connector: { workspace_id: string; connector_type: ConnectorKind },
-  connection: { id: string; label: string | null; service: string | null },
-  agent: { name: string; handle: string | null } | undefined,
-): Record<string, unknown> {
-  return {
-    connectionId: connection.id,
-    connectionName: connection.label ?? connection.service,
-    connectorType: connector.connector_type,
-    agentId: agent?.handle ? `@${agent.handle}` : agent?.name,
-    ledgerWorkspaceId: connector.workspace_id,
-  };
 }
 
 export function isMetadataStale(lastSyncedAt: Date | null): boolean {

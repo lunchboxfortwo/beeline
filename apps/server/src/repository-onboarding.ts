@@ -1,3 +1,4 @@
+import { githubProviderKey } from './providers/index.js';
 import { systemMessage } from '@beeline/api-contract/system-message-catalog';
 import { createHash } from 'node:crypto';
 import { CommandRefusalError } from './command-refusal.js';
@@ -47,14 +48,23 @@ export function repositoryStarters(signals: RepositorySignals): RepositoryStarte
   return starters.slice(0, 4);
 }
 
+function installedRepositoryName(repositories: readonly { full_name: string }[], requested: string): string | undefined {
+  const needle = requested.trim().toLowerCase();
+  if (!needle) return undefined;
+  const full = repositories.filter((repo) => repo.full_name.toLowerCase() === needle);
+  if (full.length === 1) return full[0]!.full_name;
+  const bare = repositories.filter((repo) => repo.full_name.split('/').pop()!.toLowerCase() === needle);
+  return bare.length === 1 ? bare[0]!.full_name : undefined;
+}
+
 export async function postRepositoryOnboarding(database: SqlDatabase, github: GitHubOperations | undefined,
-  input: { roomId: string; agentId: string; requesterId: string; kind: 'repository' | 'starters' }): Promise<RepositoryOnboardingCard> {
+  input: { roomId: string; agentId: string; requesterId: string; kind: 'repository' | 'starters'; repository?: string }): Promise<RepositoryOnboardingCard> {
   const room = (await database.query<{ repository_name: string | null; name: string; can_link: boolean; owner_handle: string | null; github_linked: boolean }>(
     `SELECT r.repository_name,i.name,(w.role IN ('owner','admin')) can_link,
      (SELECT owner.handle FROM memberships membership JOIN identities owner ON owner.id=membership.identity_id
       WHERE membership.workspace_id=r.workspace_id AND membership.room_id IS NULL AND membership.role='owner'
       AND membership.removed_at IS NULL ORDER BY owner.id LIMIT 1) owner_handle,
-     EXISTS(SELECT 1 FROM identity_external_links link WHERE link.identity_id=$3 AND link.provider='github') github_linked FROM rooms r
+     EXISTS(SELECT 1 FROM identity_external_links link WHERE link.identity_id=$3 AND link.provider='${githubProviderKey}') github_linked FROM rooms r
      JOIN memberships m ON m.room_id=r.id AND m.identity_id=$2 AND m.removed_at IS NULL
      JOIN memberships w ON w.workspace_id=r.workspace_id AND w.room_id IS NULL AND w.identity_id=$3 AND w.removed_at IS NULL
      JOIN identities i ON i.id=$2
@@ -80,8 +90,11 @@ export async function postRepositoryOnboarding(database: SqlDatabase, github: Gi
     // A competing author cannot overwrite that winner or reopen a settled card.
     const id = reuse ? previous.id : createHash('sha256').update(JSON.stringify([
       'repository-onboarding',input.roomId,input.requesterId,kind,previous?.id ?? null])).digest('hex');
+    const { repository: requestedRepository, ...posted } = input;
+    const selected = requestedRepository ? installedRepositoryName(repositories, requestedRepository) : undefined;
     const card: RepositoryOnboardingCard = {
-      id, ...input, ...(room.owner_handle ? { ownerHandle: room.owner_handle } : {}), githubLinked: room.github_linked, kind, status: 'open', canLink: room.can_link,
+      id, ...posted, ...(room.owner_handle ? { ownerHandle: room.owner_handle } : {}), githubLinked: room.github_linked, kind, status: 'open', canLink: room.can_link,
+      ...(selected ? { selected } : {}),
       state: room.repository_name ? 'repo_linked' : installation ? 'no_repo_linked' : 'install_missing',
       ...(room.repository_name ? { repository: room.repository_name } : {}),
       defaultName: reuse ? previous.card.defaultName : `new-project-${id.slice(0, 6)}`,

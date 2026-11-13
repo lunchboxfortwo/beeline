@@ -1,0 +1,151 @@
+
+> @beeline/mobile@0.2.22 test
+> vitest --run sources/app/(app)/beeline/chat/useRoomSurfaceSession.test.ts sources/app/(app)/beeline/chat/useRoomSurfaceSession-2.test.ts sources/components/buzz/ForwardMessagePickerSheet.test.tsx --maxWorkers=1 -t starts a known-viewer|cache=false|known viewer on a cold|accepted=true
+
+
+ RUN  v3.2.7 /home/lunchbox/.local/state/beeline/corners/3b155900f9007458ed563c679b1178522acdafb9eba3ee16d05ad311d9f0d0a8/apps/mobile
+
+ ❯ sources/app/(app)/beeline/chat/useRoomSurfaceSession.test.ts (25 tests | 2 failed | 23 skipped) 19ms
+   ↓ reopening a dismissed Room > reopens a Room the live Room list shows dismissed
+   ↓ reopening a dismissed Room > lets the server decide when no live Room list is held
+   ↓ reopening a dismissed Room > skips the reopen call for a Room the live list shows open
+   × useRoomSurfaceSession > starts a known-viewer cache miss on the tap stack before route mounting 8ms
+     → expected +0 to be 1 // Object.is equality
+   ↓ useRoomSurfaceSession > paints a tap-owned cached Room and completes setup without a visible-row handshake
+   ↓ useRoomSurfaceSession > publishes the Room immediately and saves after the actual route transition ends
+   ↓ useRoomSurfaceSession > does not render the Room surface boundary when pushing and popping a corner
+   ↓ useRoomSurfaceSession > reuses the Room state and transcript when a corner is pushed and popped
+   ↓ useRoomSurfaceSession > persists committed deltas independently of the Room visit on background
+   ↓ useRoomSurfaceSession > persists committed deltas independently of the Room visit on inactive
+   ↓ useRoomSurfaceSession > does not save the Room during a corner push or pop
+   ↓ useRoomSurfaceSession > re-arms viewport advancement on a fresh visit to the same Room
+   ↓ useRoomSurfaceSession > keeps the first unread boundary from the opening read for the whole visit
+   ↓ useRoomSurfaceSession > does not capture or advance unread state for a corner
+   ↓ useRoomSurfaceSession > routes presence snapshots outside transcript overlays
+   ↓ useRoomSurfaceSession > lets a fresh pushed fact replace an older Room presence in seconds
+   ↓ useRoomSurfaceSession > paints a canonical send receipt without a timer or follow-up Room read
+   ↓ useRoomSurfaceSession > paints a committed turn delta without a follow-up Room read
+   ↓ useRoomSurfaceSession > keeps a retry turn delta that lands while a same-second Room read is in flight
+   ↓ useRoomSurfaceSession > paints one committed reply exactly once without a follow-up Room read
+   ↓ useRoomSurfaceSession > schedules no Room read from the socket while the app is backgrounded
+   ↓ useRoomSurfaceSession > paints a covering read with a previously missed message while retaining the socket
+   ↓ useRoomSurfaceSession > keeps the socket when it delivered frames since the previous read
+   ↓ useRoomSurfaceSession > yields only for cached content before the live watch (cache=true)
+   × useRoomSurfaceSession > yields only for cached content before the live watch (cache=false) 10ms
+     → expected +0 to be 1 // Object.is equality
+ ❯ sources/app/(app)/beeline/chat/useRoomSurfaceSession-2.test.ts (24 tests | 1 failed | 23 skipped) 17ms
+   × useRoomSurfaceSession > keeps the known viewer on a cold visit before asynchronous identity setup 16ms
+     → expected '' to be 'viewer' // Object.is equality
+   ↓ useRoomSurfaceSession > renders the hot target before the asynchronous session has even read its identity
+   ↓ useRoomSurfaceSession > paints an opening reply while cached-frame callbacks and identity setup are still pending
+   ↓ useRoomSurfaceSession > paints a missing-row publish after disk read while identity and then outbox remain pending
+   ↓ useRoomSurfaceSession > paints 1 received messages on the first frame before any network read
+   ↓ useRoomSurfaceSession > paints 5 received messages on the first frame before any network read
+   ↓ useRoomSurfaceSession > paints cached newest row before authorization occupies the session
+   ↓ useRoomSurfaceSession > acknowledges every burst delta after its committed render without a follow-up read
+   ↓ useRoomSurfaceSession > acknowledges an idempotent delta immediately because its row is already painted
+   ↓ useRoomSurfaceSession > records the same-server pre-write-to-paint upper bound returned by the server
+   ↓ useRoomSurfaceSession > opens a cached corner and applies its fresh response without a draw handshake
+   ↓ useRoomSurfaceSession > Send: pending state reaches the Room once, unchanged bookkeeping stays quiet, and failures remain visible
+   ↓ useRoomSurfaceSession > Send: pushed queued commands paint without a follow-up Room read
+   ↓ useRoomSurfaceSession > signals a targetless phone-write so an open Room can paint without remounting
+   ↓ useRoomSurfaceSession > still waits for the committed-row delta when a phone-write names its message
+   ↓ useRoomSurfaceSession > reads nothing for the SYNC-01 hint whose delta follows
+   ↓ useRoomSurfaceSession > reads nothing for the STOP-01 hint whose delta follows
+   ↓ useRoomSurfaceSession > STOP-01 clears the working turn from its turn delta, with no Room read
+   ↓ useRoomSurfaceSession > paints a paired delta and reads no Room for it
+   ↓ useRoomSurfaceSession > reconciles immediately when a committed delta cannot be delivered
+   ↓ useRoomSurfaceSession > reads the Room once for the fallback of a delivery the server could not read
+   ↓ useRoomSurfaceSession > starts the single opening Room read after its subscribe
+   ↓ useRoomSurfaceSession > reads once on its first handshake and never starts reads from resubscribe
+   ↓ useRoomSurfaceSession > uses the push read already started before route mount without a subscription reread
+stderr | sources/components/buzz/ForwardMessagePickerSheet.test.tsx > accepted=true controls feedback before the closing sheet unmounts
+react-test-renderer is deprecated. See https://react.dev/warnings/react-test-renderer
+
+ ❯ sources/components/buzz/ForwardMessagePickerSheet.test.tsx (2 tests | 1 failed | 1 skipped) 17ms
+   × accepted=true controls feedback before the closing sheet unmounts 17ms
+     → expected [ [Function] ] to have a length of +0 but got 1
+   ↓ accepted=false controls feedback before the closing sheet unmounts
+
+⎯⎯⎯⎯⎯⎯⎯ Failed Tests 4 ⎯⎯⎯⎯⎯⎯⎯
+
+ FAIL  sources/components/buzz/ForwardMessagePickerSheet.test.tsx > accepted=true controls feedback before the closing sheet unmounts
+AssertionError: expected [ [Function] ] to have a length of +0 but got 1
+
+- Expected
++ Received
+
+- 0
++ 1
+
+ ❯ sources/components/buzz/ForwardMessagePickerSheet.test.tsx:62:18
+     60|   }
+     61|   expect(tree.root.findByType('Row').props.metadata).toBe('FORWARDED');
+     62|   expect(frames).toHaveLength(0);
+       |                  ^
+     63|   expect(tree.root.findByType('Row').props.disabled).toBe(false);
+     64|   expect(tree.root.findByType('Row').props.onPress).toBeUndefined();
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[1/4]⎯
+
+ FAIL  sources/app/(app)/beeline/chat/useRoomSurfaceSession-2.test.ts > useRoomSurfaceSession > keeps the known viewer on a cold visit before asynchronous identity setup
+AssertionError: expected '' to be 'viewer' // Object.is equality
+
+- Expected
++ Received
+
+- viewer
+
+ ❯ sources/app/(app)/beeline/chat/useRoomSurfaceSession-2.test.ts:23:32
+     21|       channelId: 'cold-room', capture: (value: UseRoomSurfaceSessionRe…
+     22|     })); });
+     23|     expect(current.userPubkey).toBe('viewer');
+       |                                ^
+     24|     expect(current.messageRecordScope).not.toBeNull();
+     25|     expect(current.roomSurface).toBeNull();
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[2/4]⎯
+
+ FAIL  sources/app/(app)/beeline/chat/useRoomSurfaceSession.test.ts > useRoomSurfaceSession > starts a known-viewer cache miss on the tap stack before route mounting
+AssertionError: expected +0 to be 1 // Object.is equality
+
+- Expected
++ Received
+
+- 1
++ 0
+
+ ❯ sources/app/(app)/beeline/chat/useRoomSurfaceSession.test.ts:55:34
+     53|     try {
+     54|       prefetchPushRoom('cold-tap-immediate', 'room-missing');
+     55|       expect(controls.roomReads).toBe(1);
+       |                                  ^
+     56|     } finally { config.mockRestore(); }
+     57|   });
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[3/4]⎯
+
+ FAIL  sources/app/(app)/beeline/chat/useRoomSurfaceSession.test.ts > useRoomSurfaceSession > yields only for cached content before the live watch (cache=false)
+AssertionError: expected +0 to be 1 // Object.is equality
+
+- Expected
++ Received
+
+- 1
++ 0
+
+ ❯ sources/app/(app)/beeline/chat/useRoomSurfaceSession.test.ts:782:39
+    780|     await flushMicrotasks();
+    781|     if (!hasCache) {
+    782|       expect(controls.transportCount).toBe(1);
+       |                                       ^
+    783|       expect(controls.subscriptions).toHaveLength(1);
+    784|       await act(async () => renderer.unmount());
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[4/4]⎯
+
+
+ Test Files  3 failed (3)
+      Tests  4 failed | 47 skipped (51)
+   Start at  11:46:20
+   Duration  1.23s (transform 389ms, setup 91ms, collect 677ms, tests 54ms, environment 0ms, prepare 126ms)

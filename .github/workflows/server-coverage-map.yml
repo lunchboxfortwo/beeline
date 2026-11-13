@@ -48,6 +48,9 @@ jobs:
     needs: shard
     runs-on: ubuntu-latest
     timeout-minutes: 10
+    permissions:
+      contents: read
+      actions: write
     steps:
       - uses: actions/checkout@v4
       - uses: ./.github/actions/ci-workspace
@@ -57,10 +60,10 @@ jobs:
           merge-multiple: true
           path: ${{ runner.temp }}/coverage-records
       - name: Build the coverage map
-        run: >-
-          node apps/server/scripts/test-selection.mjs build-map
-          --records "$RUNNER_TEMP/coverage-records" --commit "$GITHUB_SHA"
-          --out "$RUNNER_TEMP/server-coverage-map.json"
+        run: |
+          node apps/server/scripts/test-selection.mjs build-map --records "$RUNNER_TEMP/coverage-records" --commit "$GITHUB_SHA" --out "$RUNNER_TEMP/server-coverage-map.json"
+          mkdir -p "$RUNNER_TEMP/map"
+          cp "$RUNNER_TEMP/server-coverage-map.json" "$RUNNER_TEMP/map/server-coverage-map.json"
       # Fails when a test read source code as text in the full run but the static scan
       # that keeps such tests in every PR's selection did not find it.
       - name: Check every test that reads source code is always run
@@ -71,3 +74,8 @@ jobs:
           path: ${{ runner.temp }}/server-coverage-map.json
           retention-days: 14
           if-no-files-found: error
+      - uses: actions/cache/save@v4
+        continue-on-error: true
+        with:
+          path: ${{ runner.temp }}/map/server-coverage-map.json
+          key: server-coverage-map-${{ github.sha }}

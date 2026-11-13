@@ -43,7 +43,7 @@ export async function readMemberDeliveries(
       WHEN 'webhook' THEN NULLIF(COALESCE(m.callback_url,client.callback_url),'') IS NOT NULL
       WHEN 'local' THEN d.stream_id IS NOT NULL AND EXISTS(
         SELECT 1 FROM rooms_mcp_tokens t LEFT JOIN rooms_mcp_families f ON f.id=t.family_id
-        WHERE t.hash=d.credential_hash AND t.revoked_at IS NULL AND t.expires_at>now()
+        WHERE t.hash=d.credential_hash AND t.revoked_at IS NULL
           AND (t.family_id IS NULL OR f.revoked_at IS NULL))
       ELSE true END END) credentials_valid
     FROM rooms_mcp_members m
@@ -161,8 +161,12 @@ export async function setupMemberDelivery(
       VALUES($1,$2,$3,$4,$5,$6,$7,$8::jsonb,$9,$10)
       ON CONFLICT(member_id) DO UPDATE SET generation=EXCLUDED.generation,mechanism=EXCLUDED.mechanism,
         host=EXCLUDED.host,surface=EXCLUDED.surface,conversation=EXCLUDED.conversation,nonce_hash=EXCLUDED.nonce_hash,
-        probe=EXCLUDED.probe,subscription_id=EXCLUDED.subscription_id,credential_hash=EXCLUDED.credential_hash,
-        receipt_at=NULL,failure=NULL,stream_id=NULL,created_at=now()`,
+        probe=EXCLUDED.probe,subscription_id=EXCLUDED.subscription_id,
+        credential_hash=CASE WHEN rooms_mcp_delivery.mechanism='local' AND EXCLUDED.mechanism='local'
+          AND rooms_mcp_delivery.stream_id IS NOT NULL THEN rooms_mcp_delivery.credential_hash ELSE EXCLUDED.credential_hash END,
+        stream_id=CASE WHEN rooms_mcp_delivery.mechanism='local' AND EXCLUDED.mechanism='local'
+          THEN rooms_mcp_delivery.stream_id ELSE NULL END,
+        receipt_at=NULL,failure=NULL,created_at=now()`,
       [
         principal.member_id,
         generation,
@@ -255,7 +259,7 @@ export async function confirmMemberDelivery(
         SELECT 1 FROM rooms_mcp_event_subscriptions s WHERE s.id=d.subscription_id AND (s.expires_at IS NULL OR s.expires_at>now()))
         OR mechanism='local' AND stream_id IS NOT NULL AND EXISTS(
           SELECT 1 FROM rooms_mcp_tokens t LEFT JOIN rooms_mcp_families f ON f.id=t.family_id
-          WHERE t.hash=d.credential_hash AND t.revoked_at IS NULL AND t.expires_at>now()
+          WHERE t.hash=d.credential_hash AND t.revoked_at IS NULL
             AND (t.family_id IS NULL OR f.revoked_at IS NULL))) AND EXISTS(SELECT 1 FROM rooms_mcp_members m JOIN rooms_mcp_connections c
         ON c.client_id=m.client_id AND c.identity_id=m.owner_id WHERE m.member_id=d.member_id AND c.revoked_at IS NULL)
     RETURNING generation`,

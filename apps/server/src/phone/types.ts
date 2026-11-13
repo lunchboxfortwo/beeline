@@ -16,6 +16,8 @@ export type Output<Name extends keyof PhoneOperationMap> = PhoneOperationMap[Nam
 
 
 export interface RoomRow {
+  repository_avatar?: string | null;
+  repository_favicon?: string | null;
   id: string;
   workspace_id: string;
   parent_id: string | null;
@@ -65,6 +67,8 @@ export interface MessageRow {
   turn_id: string | null;
   source_client?: { id: string; name: string } | null;
   agent_model: string | null;
+  /** The message's number in its chat (`chat-seq.ts`); null for non-message rows. */
+  chat_seq?: number | null;
   activity: unknown[] | null;
   durable_fact: RoomViewMessage['durableFact'] | null;
   card_type: string | null;
@@ -126,7 +130,7 @@ export interface AgentGrantRow {
   requester: IdentityRow; decider: IdentityRow | null; script: unknown;
 }
 
-export type RoomHeaderRow = Pick<RoomRow, 'id' | 'workspace_id' | (typeof CORNER_ROW_ROOM_COLUMNS)[number]>;
+export type RoomHeaderRow = Pick<RoomRow, 'repository_avatar' | 'repository_favicon' | 'id' | 'workspace_id' | (typeof CORNER_ROW_ROOM_COLUMNS)[number]>;
 
 export type CornerRow = RoomHeaderRow & OpenCornerFactsRow & {
   objective: string | null;

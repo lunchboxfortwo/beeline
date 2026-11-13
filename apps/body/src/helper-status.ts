@@ -18,6 +18,7 @@ export interface HelperStatusFile {
   readonly generation: string;
   readonly processState: 'starting' | 'serving' | 'stopping';
   readonly desiredRelease?: string;
+  readonly lastError?: string;
   readonly loadedRelease?: string;
   readonly loadedIdentity?: { version?: string; commit?: string };
   readonly updatedAt: string;

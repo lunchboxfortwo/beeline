@@ -381,7 +381,7 @@ const scope1 = fixtureScope1();
       'replyTo does not wake anyone',
       'When you finish, are blocked, fail, or need a decision on a chat request, tag the agent or person who asked you with the result.',
       'For orders under wakes, pass their id as commandId on tool calls; finish with report at that address, not a plain message.',
-      'Corner reports go one step up to the opener at the opening surface; later chat requests do not change the commander.',
+      'Corner reports go one step up to the current commander at its recorded return surface. A human-approved revised brief makes its author commander; later chat requests do not.',
       'Choose the terminal status',
       'server adds its status prefix',
       'A plain post or send_message without a tag wakes nobody',
@@ -396,7 +396,7 @@ const scope1 = fixtureScope1();
     const reportTool = tools.find(tool => tool.name === 'report')!;
     expect(reportTool.inputSchema.properties?.commandId).toMatchObject({ type: 'string', pattern: '^[0-9a-f]{64}$' });
     const report = reportTool.description;
-    expect(report).toContain('Report a corner outcome to its opening commander at the opening surface.');
+    expect(report).toContain('Report a corner outcome to its current commander at the recorded return surface. Human-approved revised briefs transfer command to their author; earlier explicit orders retain their issuer.');
     expect(report).toContain('commandId binds the exact order');
     expect(report).toContain('a single pending order elsewhere');
     expect(report).toContain('refuses an ambiguous fallback and lists waiting orders');
@@ -459,7 +459,7 @@ const scope1 = fixtureScope1();
   it.each([['send_message', 'recent'], ['post', 'recent'], ['send_message', 'old-reply'], ['post', 'old-reply'], ['send_message', 'old-fresh'], ['post', 'old-fresh']])('R1: MCP chain via %s (%s) wakes fresh requests and limits replies', async (replyTool, mode) => {
     const { client, grant, member } = await scope1.connected();
     await scope1.db.query(`UPDATE rooms_mcp_clients SET callback_url='https://hooks.example/loop' WHERE id=$1`, [grant.clientId]);
-    const handle = (await scope1.db.query<{ handle: string }>('SELECT handle FROM identities WHERE id=$1', [member])).rows[0]!.handle;
+    const handle = (await scope1.db.query<{ handle: string }>('SELECT beeline_room_handle(id,$2) handle FROM identities WHERE id=$1', [member,ROOM])).rows[0]!.handle;
     const latestMemberCommand = async () => (await scope1.db.query<{ agent_depth: number }>(
       'SELECT agent_depth FROM agent_commands WHERE room_id=$1 AND agent_id=$2 ORDER BY created_at DESC,id DESC LIMIT 1',
       [ROOM, member])).rows[0];
@@ -533,7 +533,7 @@ const scope1 = fixtureScope1();
     await scope1.db.query("UPDATE agents SET selected_model='agent' WHERE agent_id=$1", [member]);
     await scope1.db.query("UPDATE identities SET name='My reviewer' WHERE id=$1", [member]);
     const roster = await scope1.phone.readWorkspaceMembers(WORKSPACE, USER, { q: 'My reviewer' });
-    expect(roster?.agents.find(agent => agent.identity.pubkey === member)?.model).toBe(label);
+    expect(roster?.agents.find(agent => agent.identity.pubkey === member)?.model).toBeUndefined();
     const profile = await scope1.phone.readAgent(WORKSPACE, member, USER);
     expect(profile?.selected?.model).toBe(label);
     expect(profile?.seededSoul).toContain(`Connected through ${label}.`);
@@ -573,7 +573,7 @@ const scope1 = fixtureScope1();
     if (callback === 'client')
       await scope1.db.query('UPDATE rooms_mcp_clients SET callback_url=$2 WHERE id=$1', [grant.clientId, url]);
     expect((await scope1.db.query('SELECT 1 FROM rooms_mcp_event_subscriptions WHERE member_id=$1', [member])).rowCount).toBe(0);
-    const handle = (await scope1.db.query<{ handle: string }>('SELECT handle FROM identities WHERE id=$1', [member])).rows[0]!.handle;
+    const handle = (await scope1.db.query<{ handle: string }>('SELECT beeline_room_handle(id,$2) handle FROM identities WHERE id=$1', [member,ROOM])).rows[0]!.handle;
     const source = await scope1.phone.execute('sendRoomMessage', { roomId: ROOM, text: '@demo-agent report back' }, USER);
     const command = (await scope1.db.query<{ id: string; turn_request_id: string }>(
       "UPDATE agent_commands SET agent_depth=3,reason='report' WHERE source_message_id=$1 AND agent_id=$2 RETURNING id,turn_request_id",
@@ -600,7 +600,7 @@ const scope1 = fixtureScope1();
     const sender = await scope1.connected();
     const target = await scope1.connected();
     await scope1.db.query(`UPDATE rooms_mcp_clients SET callback_url='https://hooks.example/member' WHERE id=$1`, [target.grant.clientId]);
-    const handle = (await scope1.db.query<{ handle: string }>('SELECT handle FROM identities WHERE id=$1', [target.member])).rows[0]!.handle;
+    const handle = (await scope1.db.query<{ handle: string }>('SELECT beeline_room_handle(id,$2) handle FROM identities WHERE id=$1', [target.member,ROOM])).rows[0]!.handle;
     const result = await sender.client.callTool({ name: 'send_message', arguments: { room: ROOM, text: `@${handle} hello`, idempotencyKey: 'webhook-wake' } });
     const data = JSON.parse((result.content as { text: string }[])[0]!.text).data;
     expect(data.woken).toEqual([handle]);
@@ -614,7 +614,7 @@ const scope1 = fixtureScope1();
     await deliverMcpMemberWebhooks(scope1.db, async () => new Response('', { status: 200 }));
     const { client, grant, member } = await scope1.connected();
     await scope1.db.query(`UPDATE rooms_mcp_clients SET callback_url='https://hooks.example/firstmate' WHERE id=$1`, [grant.clientId]);
-    const handle = (await scope1.db.query<{ handle: string }>('SELECT handle FROM identities WHERE id=$1', [member])).rows[0]!.handle;
+    const handle = (await scope1.db.query<{ handle: string }>('SELECT beeline_room_handle(id,$2) handle FROM identities WHERE id=$1', [member,ROOM])).rows[0]!.handle;
     const sent = await scope1.phone.execute('sendRoomMessage', { roomId: ROOM, text: `@${handle} ship the webhook` }, USER);
     const calls = async () => (await scope1.db.query('SELECT id FROM subscription_webhook_calls WHERE member_id=$1 AND wake_message_id=$2', [member, sent.messageId])).rowCount;
     expect(await calls()).toBe(1);
@@ -638,7 +638,7 @@ const scope1 = fixtureScope1();
     await scope1.db.query(`UPDATE rooms_mcp_clients SET callback_url='https://hooks.example/removed' WHERE id=$1`, [grant.clientId]);
     // Drain earlier tests' backlog so only this delivery is pending.
     await deliverMcpMemberWebhooks(scope1.db, async () => new Response('', { status: 200 }));
-    const handle = (await scope1.db.query<{ handle: string }>('SELECT handle FROM identities WHERE id=$1', [member])).rows[0]!.handle;
+    const handle = (await scope1.db.query<{ handle: string }>('SELECT beeline_room_handle(id,$2) handle FROM identities WHERE id=$1', [member,ROOM])).rows[0]!.handle;
     const sent = await scope1.phone.execute('sendRoomMessage', { roomId: ROOM, text: `@${handle} queued before removal` }, USER);
     // The wake is already queued, then the owner removes the member from the Room.
     await scope1.phone.execute('removeRoomMember', { roomId: ROOM, memberId: member }, USER);
@@ -656,7 +656,7 @@ const scope1 = fixtureScope1();
     await scope1.db.query(`UPDATE rooms_mcp_clients SET callback_url='https://hooks.example/concurrent' WHERE id=$1`, [grant.clientId]);
     // Drain earlier tests' backlog so only this delivery is pending.
     await deliverMcpMemberWebhooks(scope1.db, async () => new Response('', { status: 200 }));
-    const handle = (await scope1.db.query<{ handle: string }>('SELECT handle FROM identities WHERE id=$1', [member])).rows[0]!.handle;
+    const handle = (await scope1.db.query<{ handle: string }>('SELECT beeline_room_handle(id,$2) handle FROM identities WHERE id=$1', [member,ROOM])).rows[0]!.handle;
     const sent = await scope1.phone.execute('sendRoomMessage', { roomId: ROOM, text: `@${handle} deliver once` }, USER);
     let calls = 0;
     let started!: () => void;
@@ -689,7 +689,7 @@ const scope1 = fixtureScope1();
     await scope1.db.query(`UPDATE rooms_mcp_clients SET callback_url='https://hooks.example/slow-batch' WHERE id=$1`, [grant.clientId]);
     // Drain earlier tests' backlog so only this batch is pending.
     await deliverMcpMemberWebhooks(scope1.db, async () => new Response('', { status: 200 }));
-    const handle = (await scope1.db.query<{ handle: string }>('SELECT handle FROM identities WHERE id=$1', [member])).rows[0]!.handle;
+    const handle = (await scope1.db.query<{ handle: string }>('SELECT beeline_room_handle(id,$2) handle FROM identities WHERE id=$1', [member,ROOM])).rows[0]!.handle;
     const texts = ['batch one', 'batch two', 'batch three'];
     for (const text of texts) await scope1.phone.execute('sendRoomMessage', { roomId: ROOM, text: `@${handle} ${text}` }, USER);
     const received: string[] = [];
@@ -750,6 +750,7 @@ const scope1 = fixtureScope1();
   it('Reproduction R1: lets a stored read-only connection post and refresh without reconnecting', async () => {
     const grant = await scope1.authorize();
     const tokens = await (await scope1.exchange(grant)).json() as { access_token: string; refresh_token: string };
+    tokens.refresh_token = await scope1.legacyRefresh(tokens.access_token);
     // Seed the pre-fix state: every stored row for this connection holds read only.
     for (const table of ['rooms_mcp_tokens', 'rooms_mcp_families', 'rooms_mcp_connections']) {
       await scope1.db.query(`UPDATE ${table} SET scope='rooms:read' WHERE client_id=$1`, [grant.clientId]);
@@ -769,20 +770,18 @@ const scope1 = fixtureScope1();
     const next = await refreshed.json() as { access_token: string; refresh_token: string; scope: string };
     expect(next.scope).toBe('rooms:read rooms:write');
     expect((await call(next.access_token, 'send_message', { room: ROOM, text: 'posted after refresh' })).isError).toBeFalsy();
-    const narrowed = await scope1.post('/mcp/oauth/token', { grant_type: 'refresh_token', refresh_token: next.refresh_token,
-      client_id: grant.clientId, resource: scope1.origin + '/mcp', scope: 'rooms:read' });
-    expect(narrowed.status).toBe(200);
-    const last = await narrowed.json() as { access_token: string };
-    expect((await call(last.access_token, 'send_message', { room: ROOM, text: 'posted after narrow refresh' })).isError).toBeFalsy();
+    expect(next).not.toHaveProperty('refresh_token');
     expect((await scope1.phone.readWorkbench({ workspaceId: WORKSPACE }, USER)).aiClients)
       .toContainEqual(expect.objectContaining({ clientId: grant.clientId, scopes: ['rooms:read', 'rooms:write'] }));
   });
 
-  it('rejects expired grants and never accepts an MCP grant as a phone session', async () => {
+  it('keeps old access tokens valid, rejects revoked tokens and expired codes, and isolates phone sessions', async () => {
     const { token } = await scope1.connected();
     expect((await phoneFetch(scope1.origin + '/mcp', { headers: { authorization: `Bearer ${token}`, origin: 'https://unregistered.example' } })).status).toBe(403);
     expect((await phoneFetch(scope1.origin + '/v1/phone/workspaces', { headers: { authorization: `Bearer ${token}` } })).status).toBe(401);
-    await scope1.db.query("UPDATE rooms_mcp_tokens SET expires_at=now()-interval '1 second' WHERE hash=$1", [tokenHash(token)]);
+    await scope1.db.query("UPDATE rooms_mcp_tokens SET expires_at=now()-interval '2 hours' WHERE hash=$1", [tokenHash(token)]);
+    expect((await phoneFetch(scope1.origin + '/mcp', { headers: { authorization: `Bearer ${token}` } })).status).not.toBe(401);
+    await scope1.db.query("UPDATE rooms_mcp_tokens SET revoked_at=now() WHERE hash=$1", [tokenHash(token)]);
     expect((await phoneFetch(scope1.origin + '/mcp', { headers: { authorization: `Bearer ${token}` } })).status).toBe(401);
     const grant = await scope1.authorize();
     await scope1.db.query("UPDATE rooms_mcp_codes SET expires_at=now()-interval '1 second' WHERE hash=$1", [tokenHash(grant.code!)]);

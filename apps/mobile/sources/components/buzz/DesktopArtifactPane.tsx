@@ -1,11 +1,8 @@
 import { appReadErrorCopy } from '@/buzz/app-error-copy';
-import { IndexRow } from '@/components/buzz/IndexRow';
 import { useArtifactRecoveryGeneration } from '@/buzz/use-artifact-recovery';
-import { Button } from '@/components/buzz/Button';
-import { CloseButton } from '@/components/buzz/CloseGlyph';
 import React, { useEffect, useState } from 'react';
-import { Platform, Pressable, ScrollView, Text, View } from 'react-native';
-import { StyleSheet } from 'react-native-unistyles';
+import { Platform } from 'react-native';
+import { Copy as CopyIcon, ExternalLink, RefreshCw, Share2 } from 'lucide-react-native';
 import type { AttachmentReference } from '@beeline/buzz-client';
 import type { DesktopArtifactSelection } from '@/buzz/desktop-artifact-pane';
 
@@ -25,6 +22,11 @@ import { ArtifactPdfView } from '@/components/buzz/ArtifactPdfView';
 import { MonoMarkdown } from '@/components/buzz/MonoMarkdown';
 import { ViewerConversationDock } from '@/components/buzz/ViewerConversationDock';
 import { RunnableArtifact } from './RunnableArtifact';
+import { DocumentFrame, TypedView } from '@/ui/grammar';
+import {
+  useFilePaging, ViewerAction, ViewerBody, ViewerHeader, ViewerNotice, ViewerPager, ViewerPlaceholder,
+  ViewerPosition, ViewerScreen, ViewerScroll,
+} from '@/ui/screens/viewers/ViewerChrome';
 
 /**
  * The desktop work pane's artifact view (mock 1c, desktop): markup rendered in
@@ -40,7 +42,8 @@ import { RunnableArtifact } from './RunnableArtifact';
  * for a reader who wants the file in a tab of their own.
  */
 export function DesktopArtifactPane({
-  attachment,
+  attachment: selectedAttachment,
+  groupAttachments,
   markdown,
   authorHandle,
   roomId,
@@ -48,94 +51,88 @@ export function DesktopArtifactPane({
 }: {
   onClose(): void;
 } & DesktopArtifactSelection) {
+  // A stacked card hands over its whole message; the pane pages through it.
+  const paging = useFilePaging(selectedAttachment, groupAttachments);
+  const attachment = paging.file;
+  const noun = groupAttachments?.every((file) => artifactFormat(file.mimeType) === 'image') ? 'photo' : 'file';
   const format = markdown ? 'markdown' : artifactFormat(attachment!.mimeType);
   const title = markdown?.title ?? attachment!.title ?? attachment!.name;
   const { showCopied, showCopyFailed, toast } = useCopiedToast('desktop-artifact-copied');
   const kindLine = `${authorHandle ? `@${authorHandle.replace(/^@/, '')} · ` : ''}${markdown ? `brief · revision ${markdown.revision}` : `${format === 'game' ? 'Interactive' : format} · ${formatAttachmentSize(attachment!.size)}`}`;
+  const [runKey, setRunKey] = useState(0);
   return (
-    <View style={styles.screen} testID="desktop-artifact-pane">
-      <View style={styles.header}>
-        <View style={styles.caption}>
-          <Text numberOfLines={1} style={styles.title} testID="desktop-artifact-title">
-            {format === 'game' ? `Interactive · ${title}` : title}
-          </Text>
-          <Text numberOfLines={1} style={styles.kindLine} testID="desktop-artifact-kind-line">
-            {kindLine}
-          </Text>
-        </View>
+    <ViewerScreen testID="desktop-artifact-pane">
+      <ViewerHeader
+        title={format === 'game' ? `Interactive · ${title}` : title}
+        detail={kindLine}
+        titleTestID="desktop-artifact-title"
+        detailTestID="desktop-artifact-kind-line"
+        onClose={onClose}
+        closeLabel="Close artifact pane"
+        closeTestID="desktop-artifact-close"
+      >
+        {paging.paged ? <ViewerPosition index={paging.index} count={paging.count} noun={noun} /> : null}
+        {attachment && format === 'game' ? (
+          <ViewerAction label="Reopen" title="Reopen" icon={RefreshCw}
+            onPress={() => setRunKey((key) => key + 1)} testID="desktop-artifact-reopen" />
+        ) : null}
         {attachment && format === 'image' ? (
           <>
-            <Button
-              accessibilityLabel="Copy image"
-              accessibilityRole="button"
+            <ViewerAction
+              label="Copy image"
+              title="Copy"
+              icon={CopyIcon}
               onPress={() =>
                 void copyPicture(attachment).then((copied) =>
                   copied ? showCopied('Image copied to clipboard') : showCopyFailed("Couldn't copy image"),
                 )
               }
               testID="desktop-artifact-copy"
-              label={'Copy'}
-              variant="quiet"
-              appearance={{ control: styles.headerAction, label: styles.actionText }}
             />
-              <Button
-                accessibilityLabel="Share image"
-                accessibilityRole="button"
-                onPress={() => void sharePicture(attachment)}
-                testID="desktop-artifact-share"
-                label={'Share'}
-                variant="quiet"
-                appearance={{ control: styles.headerAction, label: styles.actionText }}
-              />
+            <ViewerAction label="Share image" title="Share" icon={Share2}
+              onPress={() => void sharePicture(attachment)} testID="desktop-artifact-share" />
           </>
         ) : null}
-        {attachment && <Button
-          accessibilityLabel="Open in browser"
-          accessibilityRole="link"
-          onPress={() => void openArtifactInBrowserOrExplain(attachment)}
-          testID="desktop-artifact-open-browser"
-          label="Open in browser"
-          destination="external"
-          variant="quiet"
-          appearance={{ control: styles.headerAction, label: styles.openLink }}
-        />}
-          <CloseButton
-            accessibilityLabel="Close artifact pane"
-            onPress={onClose}
-            testID="desktop-artifact-close"
+        {attachment ? (
+          <ViewerAction label="Open in browser" title="Open in browser" icon={ExternalLink}
+            onPress={() => void openArtifactInBrowserOrExplain(attachment)} testID="desktop-artifact-open-browser" />
+        ) : null}
+      </ViewerHeader>
+      <ViewerBody key={attachment?.url}>
+        {markdown ? (
+          <ViewerScroll testID="desktop-artifact-markdown">
+            <TypedView view={MonoMarkdown} markdown={markdown.text} document />
+          </ViewerScroll>
+        ) : !attachment ? null : format === 'game' ? (
+          <RunnableArtifact key={runKey} attachment={attachment} />
+        ) : format === 'markdown' ? (
+          <DesktopArtifactMarkdown attachment={attachment} />
+        ) : format === 'html' || format === 'svg' ? (
+          <DesktopArtifactFrame attachment={attachment} format={format} />
+        ) : format === 'image' ? (
+          <ZoomableArtifactImage
+            attachment={attachment}
+            title={title}
+            testIDPrefix="desktop-artifact"
+            {...(paging.paged ? { onSwipePhoto: paging.step } : {})}
           />
-      </View>
-      {markdown ? (
-        <ScrollView contentContainerStyle={styles.markdownBody} testID="desktop-artifact-markdown">
-          <MonoMarkdown markdown={markdown.text} textStyle={styles.markdownText} document />
-        </ScrollView>
-      ) : !attachment ? null : format === 'game' ? (
-        <RunnableArtifact attachment={attachment} />
-      ) : format === 'markdown' ? (
-        <DesktopArtifactMarkdown attachment={attachment} />
-      ) : format === 'html' || format === 'svg' ? (
-        <DesktopArtifactFrame attachment={attachment} format={format} />
-      ) : format === 'image' ? (
-        <ZoomableArtifactImage
-          attachment={attachment}
-          title={title}
-          testIDPrefix="desktop-artifact"
-        />
-      ) : format === 'text' ? (
-        <ArtifactText attachment={attachment} crop={false} testID="desktop-artifact-text" />
-      ) : format === 'pdf' ? (
-        <ArtifactPdfView attachment={attachment} mode="viewer" testID="desktop-artifact-pdf" />
-      ) : (
-        <View style={styles.placeholder} testID="desktop-artifact-handoff">
-          <Text style={styles.placeholderText}>
-            This format opens in your browser — the pane cannot render it.
-          </Text>
-        </View>
-      )}
+        ) : format === 'text' ? (
+          <ArtifactText attachment={attachment} crop={false} testID="desktop-artifact-text" />
+        ) : format === 'pdf' ? (
+          <ArtifactPdfView attachment={attachment} mode="viewer" testID="desktop-artifact-pdf" />
+        ) : (
+          <ViewerNotice title="Preview unavailable" message="Open the file to view it."
+            onOpenInBrowser={() => void openArtifactInBrowserOrExplain(attachment)} testID="desktop-artifact-handoff" />
+        )}
+      </ViewerBody>
+      {paging.paged ? (
+        <ViewerPager index={paging.index} count={paging.count} noun={noun}
+          onPrevious={() => paging.step(-1)} onNext={() => paging.step(1)} />
+      ) : null}
       {attachment && <ViewerConversationDock kind="artifact" title={attachment.name} roomId={roomId} agentHandle={authorHandle}
         artifact={attachment} />}
       {toast}
-    </View>
+    </ViewerScreen>
   );
 }
 
@@ -166,34 +163,12 @@ export function DesktopArtifactFrame({
       live = false; controller.abort(); stopPurge();
     };
   }, [attachment, format, recovery]);
-  if (failed) {
-    return (
-      <View style={styles.failureInset} testID="desktop-artifact-failed">
-        <IndexRow inset="flush" title="Page unavailable" />
-      </View>
-    );
-  }
-  if (html == null) {
-    return (
-      <View style={styles.placeholder} testID="desktop-artifact-loading">
-        <Text style={styles.placeholderText}>Loading…</Text>
-      </View>
-    );
-  }
+  if (failed) return <ViewerNotice title="Page unavailable" testID="desktop-artifact-failed" />;
+  if (html == null) return <ViewerPlaceholder text="Loading…" testID="desktop-artifact-loading" />;
   if (Platform.OS === 'web') {
-    return React.createElement('iframe', {
-      srcDoc: html,
-      sandbox: '',
-      style: sandboxedFrameStyle,
-      title: attachment.name,
-      'data-testid': 'desktop-artifact-frame',
-    });
+    return <DocumentFrame srcDoc={html} sandbox="" title={attachment.name} testID="desktop-artifact-frame" paper />;
   }
-  return (
-    <View style={styles.placeholder} testID="desktop-artifact-loading">
-      <Text style={styles.placeholderText}>Loading…</Text>
-    </View>
-  );
+  return <ViewerPlaceholder text="Loading…" testID="desktop-artifact-loading" />;
 }
 
 function DesktopArtifactMarkdown({ attachment }: { attachment: AttachmentReference }) {
@@ -216,64 +191,11 @@ function DesktopArtifactMarkdown({ attachment }: { attachment: AttachmentReferen
       live = false; controller.abort(); stopPurge();
     };
   }, [attachment, recovery]);
-  if (failed) {
-    return (
-      <View style={styles.failureInset} testID="desktop-artifact-failed">
-        <IndexRow inset="flush" title="Page unavailable" />
-      </View>
-    );
-  }
-  if (markdown == null) {
-    return (
-      <View style={styles.placeholder} testID="desktop-artifact-loading">
-        <Text style={styles.placeholderText}>Loading…</Text>
-      </View>
-    );
-  }
+  if (failed) return <ViewerNotice title="Page unavailable" testID="desktop-artifact-failed" />;
+  if (markdown == null) return <ViewerPlaceholder text="Loading…" testID="desktop-artifact-loading" />;
   return (
-    <ScrollView contentContainerStyle={styles.markdownBody} testID="desktop-artifact-markdown">
-      <MonoMarkdown markdown={markdown} textStyle={styles.markdownText} document />
-    </ScrollView>
+    <ViewerScroll testID="desktop-artifact-markdown">
+      <TypedView view={MonoMarkdown} markdown={markdown} document />
+    </ViewerScroll>
   );
 }
-
-const sandboxedFrameStyle: React.CSSProperties = {
-  border: 'none',
-  width: '100%',
-  height: '100%',
-  backgroundColor: '#ffffff',
-};
-
-const styles = StyleSheet.create((theme) => ({
-  failureInset: { paddingHorizontal: theme.buzz.roomList.edge },
-  screen: { flex: 1, backgroundColor: theme.buzz.bgBase },
-  header: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: theme.buzz.space.sm,
-    paddingHorizontal: theme.buzz.space.md,
-    paddingVertical: theme.buzz.space.sm,
-    borderBottomWidth: 1,
-    borderBottomColor: theme.buzz.border,
-  },
-  caption: { flex: 1, minWidth: 0 },
-  title: { ...theme.buzz.type.bodyStrong, color: theme.buzz.textPrimary },
-  kindLine: { ...theme.buzz.type.machine, color: theme.buzz.ledgerQuiet },
-  openLink: { ...theme.buzz.type.body, color: theme.buzz.accent },
-  headerAction: {
-    minWidth: 44,
-    minHeight: 44,
-    alignItems: 'center',
-    justifyContent: 'center',
-  },
-  actionText: { ...theme.buzz.type.meta, color: theme.buzz.accent },
-  markdownBody: { width: '100%', maxWidth: 760, alignSelf: 'center', padding: theme.buzz.space.lg, paddingBottom: theme.buzz.space.xl },
-  markdownText: { ...theme.buzz.type.body, color: theme.buzz.textPrimary },
-  placeholder: {
-    flex: 1,
-    alignItems: 'center',
-    justifyContent: 'center',
-    padding: theme.buzz.space.md,
-  },
-  placeholderText: { ...theme.buzz.type.meta, color: theme.buzz.ledgerQuiet, textAlign: 'center' },
-}));

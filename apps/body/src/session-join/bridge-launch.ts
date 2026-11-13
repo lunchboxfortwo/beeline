@@ -6,6 +6,8 @@ import { withKernelLock } from '../kernel-lock.js';
 import { waitForProcessExit } from '../process-exit.js';
 import { pidAlive, readState, hasLocalDelivery, stateDir } from './store.js';
 import type { Runner } from './bridge.js';
+import { notifyBridgeSessions } from './bridge.js';
+import { bridgeSocketPath } from './bridge-socket.js';
 
 export function bridgeRunning(dir: string): boolean {
   try { const pid = Number(readFileSync(join(dir, 'bridge.pid'), 'utf8')); return pid > 0 && pidAlive(pid); } catch { return false; }
@@ -58,7 +60,10 @@ export async function ensureBridge(dir: string, runner: Runner, env: NodeJS.Proc
       old = Number(readFileSync(pidFile, 'utf8'));
       if (!isBridgeProcess(old)) throw new Error('Beeline bridge PID belongs to an unrecognized process; refusing takeover');
       const owner = bridgeOwner(dir);
-      if (owner?.pid === old && owner.digest === digest) return;
+      if (owner?.pid === old && owner.digest === digest) {
+        await notifyBridgeSessions(dir);
+        return;
+      }
     }
     mkdirSync(dir, { recursive: true, mode: 0o700 });
     const stable = join(dir, 'usebeeline.mjs');
@@ -101,7 +106,7 @@ export async function ensureBridge(dir: string, runner: Runner, env: NodeJS.Proc
       }
       throw error;
     } finally {
-      if (child.pid) rmSync(join(dir, `bridge-${child.pid}.sock`), { force: true });
+      if (child.pid) rmSync(bridgeSocketPath(dir, child.pid), { force: true });
       rmSync(staging, { recursive: true, force: true });
     }
   });

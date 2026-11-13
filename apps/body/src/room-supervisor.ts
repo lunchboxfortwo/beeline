@@ -1,8 +1,8 @@
 import type { DaemonApiClient } from './daemon-api-client.js';
 
-/** A failed intake waits for registration, then reads once on that socket. */
+/** A failed intake closes the live link, then reads once after registration. */
 export class RoomSupervisor {
-  constructor(private readonly api: Pick<DaemonApiClient, 'onLiveOpen'>) {}
+  constructor(private readonly api: Pick<DaemonApiClient, 'onLiveOpen' | 'reconnectLive'>) {}
 
   async supervise(label: string, signal: AbortSignal | undefined, run: (progress: () => void) => Promise<void>): Promise<void> {
     while (!signal?.aborted) {
@@ -21,6 +21,7 @@ export class RoomSupervisor {
           const off = this.api.onLiveOpen(done);
           signal?.addEventListener('abort', done, { once: true });
           if (signal?.aborted) done();
+          else this.api.reconnectLive();
         });
       }
     }

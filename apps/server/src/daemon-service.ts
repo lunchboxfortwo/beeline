@@ -1,22 +1,13 @@
-import type { HelperTurnOwnershipSource } from '@beeline/api-contract/helper-turn-ownership';
-import { OwnedModelCredentials } from './owned-model-credential.js';
-import type { CommandActivationInput } from '@beeline/api-contract/helper-activation';
+import { githubProviderKey } from './providers/index.js';
+import type { CommandArguments, DaemonDependencies, DaemonContext } from './daemon/context.js';
 import type { StarterOnboardingService } from './starter-onboarding-run.js';
 import { CornerAccessDatabase } from './corner-access-database.js';
 import { type CommandRow } from './agent-command.js';
-import type { DaemonAttachment, DaemonOperationMap } from '@beeline/api-contract/daemon';
-import { type SqlDatabase } from './database.js';
-import type { GitHubOperations, LandCornerOutcome } from './github-operations.js';
-import { LiveHub } from './live.js';
-import { postRoomChoice } from './room-choice.js';
-import { McpRegistryClient, DEFAULT_MCP_REGISTRY_CLIENT } from './mcp-registry.js';
-import type { RegistryMcpOAuth } from './registry-mcp-oauth.js';
-import type { ComposioApps } from './composio-apps.js';
-import type { ObjectService } from './object-service.js';
-import { type InstitutionalMemoryShadowConfig } from './institutional-memory-shadow.js';
-import { feedbackConfigFromEnv, type FeedbackLoop } from './feedback.js';
+import type { DaemonOperationMap } from '@beeline/api-contract/daemon';
+import { DEFAULT_MCP_REGISTRY_CLIENT } from './mcp-registry.js';
+import { feedbackConfigFromEnv } from './feedback.js';
 import type { AfterCommit, EmbedFn } from './institutional-memory-embeddings.js';
-import { OwnedModelConfiguration, OwnedModelNegotiation, OwnedModelClaimCapability, DEFAULT_MEDIA_MAXIMUM_BYTES, Input, Output, id } from './daemon/values.js';
+import { OwnedModelConfiguration, DEFAULT_MEDIA_MAXIMUM_BYTES } from './daemon/values.js';
 import { daemonSetOwnedModel, daemonOwnedModelReady, daemonNegotiateOwnedModel, daemonModelClaimCredentials, daemonSetStarterOnboarding, daemonLockOwnedTurnAccess, daemonFenceOwnedTurnReply, daemonReadCommandActivation } from './daemon/owned-model.js';
 import { daemonExecute } from './daemon/execute.js';
 import { daemonReconcileZeroCheckWorkerCompletion } from './daemon/corner-completion.js';
@@ -45,221 +36,211 @@ export type { OwnedModelNegotiation } from './daemon/values.js';
 export { DAEMON_OPERATION_NAMES } from './daemon/operation-names.js';
 
 export class DaemonService {
+  get dependencies(): DaemonDependencies {
+    const {
+      database, live, roomGitHubToken, mediaMaximumBytes,
+      commandTransaction, authorizedCommand, livePaintDiagnostics, liveDiagnosticServerInstance,
+      prChecksStatus, institutionalMemoryShadow, mcpRegistry, registryMcpOAuth,
+      composio, feedback, objects, linkWallet,
+      refreshMergeability, landCorner, closePullRequest, readPullRequest,
+      subscriptionReceiverUrl, github,
+    } = this;
+    return {
+      database, live, roomGitHubToken, mediaMaximumBytes,
+      commandTransaction, authorizedCommand, livePaintDiagnostics, liveDiagnosticServerInstance,
+      prChecksStatus, institutionalMemoryShadow, mcpRegistry, registryMcpOAuth,
+      composio, feedback, objects, linkWallet,
+      refreshMergeability, landCorner, closePullRequest, readPullRequest,
+      subscriptionReceiverUrl, github,
+    };
+  }
+
+  /** Construct from named dependencies without another positional forwarding list. */
+  static fromDependencies(dependencies: DaemonDependencies): DaemonService {
+    const service = new DaemonService(dependencies.database, dependencies.live);
+    Object.assign(service, dependencies, { database: service.database });
+    return service;
+  }
 
    ownedModel?: OwnedModelConfiguration;
 
-   readonly modelClaims = new WeakMap<object, { agentId: string; source: HelperTurnOwnershipSource; configuration: OwnedModelConfiguration }>();
-  setOwnedModel(configuration: OwnedModelConfiguration | undefined): void { return daemonSetOwnedModel(this, configuration); }
-  ownedModelReady(): boolean { return daemonOwnedModelReady(this); }
-  async negotiateOwnedModel(agentId: string, source: HelperTurnOwnershipSource, installed: boolean): Promise<OwnedModelNegotiation> { return daemonNegotiateOwnedModel(this, agentId, source, installed); }
-  modelClaimCredentials(capability: OwnedModelClaimCapability | undefined, agentId: string, source: HelperTurnOwnershipSource): OwnedModelCredentials { return daemonModelClaimCredentials(this, capability, agentId, source); }
+   readonly modelClaims = new WeakMap<object, { agentId: string; configuration: OwnedModelConfiguration }>();
+  setOwnedModel(...args: CommandArguments<typeof daemonSetOwnedModel>): ReturnType<typeof daemonSetOwnedModel> { return daemonSetOwnedModel(this, ...args); }
+  ownedModelReady(...args: CommandArguments<typeof daemonOwnedModelReady>): ReturnType<typeof daemonOwnedModelReady> { return daemonOwnedModelReady(this, ...args); }
+  async negotiateOwnedModel(...args: CommandArguments<typeof daemonNegotiateOwnedModel>): ReturnType<typeof daemonNegotiateOwnedModel> { return daemonNegotiateOwnedModel(this, ...args); }
+  modelClaimCredentials(...args: CommandArguments<typeof daemonModelClaimCredentials>): ReturnType<typeof daemonModelClaimCredentials> { return daemonModelClaimCredentials(this, ...args); }
 
    starterOnboarding?: StarterOnboardingService;
-  setStarterOnboarding(service: StarterOnboardingService): void { return daemonSetStarterOnboarding(this, service); }
-  async lockOwnedTurnAccess(database: SqlDatabase, roomId: string, agentId: string, controlId?: string): Promise<void> { return daemonLockOwnedTurnAccess(this, database, roomId, agentId, controlId); }
-  async fenceOwnedTurnReply(agentId: string, source: HelperTurnOwnershipSource, input: {
-    roomId: string;
-    generationId?: string;
-    commandId?: string;
-    requestId?: string;
-}, enqueue: () => void, requireClaimed = false): Promise<void> { return daemonFenceOwnedTurnReply(this, agentId, source, input, enqueue, requireClaimed); }
-  async readCommandActivation(input: CommandActivationInput, authenticatedAgentId: string) { return daemonReadCommandActivation(this, input, authenticatedAgentId); }
-
+  setStarterOnboarding(...args: CommandArguments<typeof daemonSetStarterOnboarding>): ReturnType<typeof daemonSetStarterOnboarding> { return daemonSetStarterOnboarding(this, ...args); }
+  async lockOwnedTurnAccess(...args: CommandArguments<typeof daemonLockOwnedTurnAccess>): ReturnType<typeof daemonLockOwnedTurnAccess> { return daemonLockOwnedTurnAccess(this, ...args); }
+  async fenceOwnedTurnReply(...args: CommandArguments<typeof daemonFenceOwnedTurnReply>): ReturnType<typeof daemonFenceOwnedTurnReply> { return daemonFenceOwnedTurnReply(this, ...args); }
+  async readCommandActivation(...args: CommandArguments<typeof daemonReadCommandActivation>): ReturnType<typeof daemonReadCommandActivation> { return daemonReadCommandActivation(this, ...args); }
 
   constructor(
-     readonly database: SqlDatabase,
-     readonly live: LiveHub,
-     readonly roomGitHubToken?: (
-      roomId: string,
-    ) => Promise<{ token: string; expiresAt: number }>,
-     readonly mediaMaximumBytes: number = DEFAULT_MEDIA_MAXIMUM_BYTES,
+     readonly database: DaemonDependencies['database'],
+     readonly live: DaemonDependencies['live'],
+     readonly roomGitHubToken?: DaemonDependencies['roomGitHubToken'],
+     readonly mediaMaximumBytes: DaemonDependencies['mediaMaximumBytes'] = DEFAULT_MEDIA_MAXIMUM_BYTES,
      readonly commandTransaction = false,
-     readonly authorizedCommand?: CommandRow,
+     readonly authorizedCommand?: DaemonDependencies['authorizedCommand'],
      readonly livePaintDiagnostics = false,
-     readonly liveDiagnosticServerInstance?: string,
-     readonly prChecksStatus?: (
-      input: Input<'getPrChecksStatus'>,
-      confirmZeroChecks?: boolean,
-    ) => Promise<Output<'getPrChecksStatus'> & { zeroChecksConfirmed?: boolean }>,
+     readonly liveDiagnosticServerInstance?: DaemonDependencies['liveDiagnosticServerInstance'],
+     readonly prChecksStatus?: DaemonDependencies['prChecksStatus'],
     _legacyProviderSlot?: unknown,
-     readonly institutionalMemoryShadow: InstitutionalMemoryShadowConfig = {
+     readonly institutionalMemoryShadow: DaemonDependencies['institutionalMemoryShadow'] = {
       enabled: false,
     },
-     readonly mcpRegistry: McpRegistryClient = DEFAULT_MCP_REGISTRY_CLIENT,
-     readonly registryMcpOAuth?: RegistryMcpOAuth,
-     readonly composio?: ComposioApps,
-     readonly feedback: FeedbackLoop = { config: feedbackConfigFromEnv() },
-     readonly objects?: ObjectService,
-     readonly linkWallet?: import('./link-agent-wallet.js').LinkAgentWallet,
-     readonly refreshMergeability?: (cornerId: string) => Promise<void>,
+     readonly mcpRegistry: DaemonDependencies['mcpRegistry'] = DEFAULT_MCP_REGISTRY_CLIENT,
+     readonly registryMcpOAuth?: DaemonDependencies['registryMcpOAuth'],
+     readonly composio?: DaemonDependencies['composio'],
+     readonly feedback: DaemonDependencies['feedback'] = { config: feedbackConfigFromEnv() },
+     readonly objects?: DaemonDependencies['objects'],
+     readonly linkWallet?: DaemonDependencies['linkWallet'],
+     readonly refreshMergeability?: DaemonDependencies['refreshMergeability'],
     /** The merge attempt behind `merge_corner` and `order_corner_merge`. */
-     readonly landCorner?: (cornerId: string, onBlocked?: (reason: string) => void) => Promise<LandCornerOutcome>,
+     readonly landCorner?: DaemonDependencies['landCorner'],
     /** The GitHub close behind `close_pull_request`. */
-     readonly closePullRequest?: (
-      cornerId: string,
-    ) => Promise<
-      | { status: 'closed'; number: number; url: string; title: string }
-      | { status: 'blocked'; blocker: string }
-    >,
+     readonly closePullRequest?: DaemonDependencies['closePullRequest'],
     /** The GitHub read behind `read_pull_request`. */
-     readonly readPullRequest?: (
-      cornerId: string,
-    ) => Promise<Output<'readCornerPullRequest'>>,
-     readonly subscriptionReceiverUrl?: string,
-     readonly github?: GitHubOperations,
+     readonly readPullRequest?: DaemonDependencies['readPullRequest'],
+     readonly subscriptionReceiverUrl?: DaemonDependencies['subscriptionReceiverUrl'],
+     readonly github?: DaemonDependencies[typeof githubProviderKey],
   ) {
-    this.database = new CornerAccessDatabase(database);}
-
+    this.database = new CornerAccessDatabase(database);
+  }
 
   /** A turn's memory query, embedded before its command transaction opened. */
    memoryEmbed: EmbedFn | undefined;
 
   /** Collects network work that must wait for the command transaction to commit. */
    afterCommit: AfterCommit | undefined;
-  async execute<Name extends keyof DaemonOperationMap>(name: Name, input: Input<Name>, authenticatedAgentId: string, turnOwner?: HelperTurnOwnershipSource, modelClaim?: OwnedModelClaimCapability): Promise<Output<Name>> { return daemonExecute<Name>(this, name, input, authenticatedAgentId, turnOwner, modelClaim); }
-  async reconcileZeroCheckWorkerCompletion(cornerId: string, workerAgentId: string): Promise<void> { return daemonReconcileZeroCheckWorkerCompletion(this, cornerId, workerAgentId); }
-  async connectorAssignments(agentId: string): Promise<Output<'getConnectorAssignments'>> { return daemonConnectorAssignments(this, agentId); }
-  async connectorInstall(input: Input<'installConnector'>, agentId: string): Promise<Output<'installConnector'>> { return daemonConnectorInstall(this, input, agentId); }
-  async connectorStatusReport(input: Input<'postConnectorStatus'>, agentId: string): Promise<Output<'postConnectorStatus'>> { return daemonConnectorStatusReport(this, input, agentId); }
-  async resumeRegistrySignIn(row: {
-    id: string;
-    registry_server_name: string | null;
-}, signIn: NonNullable<Input<'postConnectorStatus'>['signIn']>): Promise<void> { return daemonResumeRegistrySignIn(this, row, signIn); }
-  async notifyTailscaleSignIn(connectorId: string, url: string, agentId: string): Promise<void> { return daemonNotifyTailscaleSignIn(this, connectorId, url, agentId); }
-  async connectorVaultReport(input: Input<'postConnectorVault'>, agentId: string): Promise<Output<'postConnectorVault'>> { return daemonConnectorVaultReport(this, input, agentId); }
-  async connectorStatusView(agentId: string, connectorId?: string): Promise<Output<'getConnectorStatus'>> { return daemonConnectorStatusView(this, agentId, connectorId); }
-  async connectorVaultList(agentId: string): Promise<Output<'getConnectorVaultList'>> { return daemonConnectorVaultList(this, agentId); }
-  async connectionDetail(input: Input<'getConnectionDetail'>, agentId: string): Promise<Output<'getConnectionDetail'>> { return daemonConnectionDetail(this, input, agentId); }
-  async connectionGrantRevoke(input: Input<'revokeConnectionGrants'>, agentId: string): Promise<Output<'revokeConnectionGrants'>> { return daemonConnectionGrantRevoke(this, input, agentId); }
-  async connectionUsage(input: Input<'postConnectionUsage'>, agentId: string): Promise<Output<'postConnectionUsage'>> { return daemonConnectionUsage(this, input, agentId); }
-  async bootstrap(agentId: string) { return daemonBootstrap(this, agentId); }
-  async workspaceRoster(input: Input<'getWorkspaceRoster'>, agentId: string) { return daemonWorkspaceRoster(this, input, agentId); }
-  async inbox(name: string, input: Input<'getRoomConversation'>, agentId: string) { return daemonInbox(this, name, input, agentId); }
-  async roomMessage(input: Input<'getRoomMessage'>, agentId: string): Promise<{
-    messageId: string;
-    body: string;
-    attachments: DaemonAttachment[];
-    nextOffset?: number;
-}> { return daemonRoomMessage(this, input, agentId); }
-  async roomAttachment(input: Input<'getRoomMessage'>, agentId: string): Promise<{
-    messageId: string;
-    body: string;
-    attachments: DaemonAttachment[];
-}> { return daemonRoomAttachment(this, input, agentId); }
-  async withStoredDigests(attachments: readonly DaemonAttachment[]): Promise<DaemonAttachment[]> { return daemonWithStoredDigests(this, attachments); }
-  async expiredMediaIds(attachments: readonly DaemonAttachment[]): Promise<ReadonlySet<string>> { return daemonExpiredMediaIds(this, attachments); }
-  async roomAuthority(input: Input<'getRoomAuthority'>, agentId: string) { return daemonRoomAuthority(this, input, agentId); }
-  async permissionAuthority(input: Input<'getPermissionAuthority'>) { return daemonPermissionAuthority(this, input); }
-  async missionAuthority() { return daemonMissionAuthority(this); }
-  async scheduleAuthority(input: Input<'getWorkScheduleAuthority'>, agentId: string) { return daemonScheduleAuthority(this, input, agentId); }
-  async mandate(input: Input<'getAgentToolMandate'>, agentId: string) { return daemonMandate(this, input, agentId); }
-  async targetAuthority(input: Input<'getTargetAgentAuthority'>, agentId: string) { return daemonTargetAuthority(this, input, agentId); }
-  async corners(roomId: string, agentId: string, activeOnly = false, reachable = false) { return daemonCorners(this, roomId, agentId, activeOnly, reachable); }
-  async cornerRestore(cornerId: string, agentId: string) { return daemonCornerRestore(this, cornerId, agentId); }
-  async listCornerBriefRevisions(input: Input<'listCornerBriefRevisions'>, agentId: string) { return daemonListCornerBriefRevisions(this, input, agentId); }
-  async mergeCorner(input: Input<'mergeCorner'>, agentId: string): Promise<Output<'mergeCorner'>> { return daemonMergeCorner(this, input, agentId); }
-  async closeCornerPullRequest(input: Input<'closeCornerPullRequest'>, agentId: string): Promise<Output<'closeCornerPullRequest'>> { return daemonCloseCornerPullRequest(this, input, agentId); }
-  async checkReviewerAuthors(db: SqlDatabase, cornerId: string, agentId: string) { return daemonCheckReviewerAuthors(this, db, cornerId, agentId); }
-  async approveCornerMerge(input: Input<'approveCornerMerge'>, agentId: string) { return daemonApproveCornerMerge(this, input, agentId); }
-  async repository(roomId: string, agentId: string) { return daemonRepository(this, roomId, agentId); }
-  async targetBranch(roomId: string, agentId: string) { return daemonTargetBranch(this, roomId, agentId); }
-  async identitySuccession(identityId: string) { return daemonIdentitySuccession(this, identityId); }
-  async configuration(agentId: string, roomId?: string, context?: Record<string, unknown>) { return daemonConfiguration(this, agentId, roomId, context); }
-  async presence(input: Input<'getAgentPresence'>, agentId: string) { return daemonPresence(this, input, agentId); }
-  async releaseReadiness() { return daemonReleaseReadiness(this); }
-  async completion(input: Input<'getRequestCompletion'>, agentId: string) { return daemonCompletion(this, input, agentId); }
-  async postRoomMessage(input: Input<'postRoomMessage'>, agentId: string, atomicCommandWrite = false) { return daemonPostRoomMessage(this, input, agentId, atomicCommandWrite); }
-  async postAgentAttachment(input: Input<'postAgentAttachment'>, agentId: string) { return daemonPostAgentAttachment(this, input, agentId); }
-  async liveOutput(kind: 'draft' | 'thought', input: Input<'postAgentDraft'>, agentId: string) { return daemonLiveOutput(this, kind, input, agentId); }
-  async retract(input: Input<'retractAgentLiveOutput'>, agentId: string) { return daemonRetract(this, input, agentId); }
-  async persistTurnTrace(database: SqlDatabase, input: Input<'postAgentTurnReceipt'>, agentId: string): Promise<void> { return daemonPersistTurnTrace(this, database, input, agentId); }
-  async turnReceipt(input: Input<'postAgentTurnReceipt'>, agentId: string) { return daemonTurnReceipt(this, input, agentId); }
-  async activity(input: Input<'postAgentActivity'>, agentId: string) { return daemonActivity(this, input, agentId); }
-  async approvalSource(cardKind: 'grant-request' | 'squire-approval', database = this.database): Promise<{
-    sourceRoomId?: string;
-    sourceMessageId?: string;
-}> { return daemonApprovalSource(this, cardKind, database); }
-  async linkSpendApproval(input: Input<'createLinkSpendRequest'>, agentId: string, ownerId: string, requestId: string, approvalUrl: string): Promise<void> { return daemonLinkSpendApproval(this, input, agentId, ownerId, requestId, approvalUrl); }
-  async squireApproval(input: Input<'postSquireApproval'>, agentId: string, database = this.database) { return daemonSquireApproval(this, input, agentId, database); }
-  async squireApprovalDecision(input: Input<'postSquireApprovalDecision'>, agentId: string): Promise<Output<'postSquireApprovalDecision'>> { return daemonSquireApprovalDecision(this, input, agentId); }
-  async squireLoginWall(input: Input<'postSquireLoginWall'>, agentId: string): Promise<Output<'postSquireLoginWall'>> { return daemonSquireLoginWall(this, input, agentId); }
-  async permissionRequest(input: Input<'postPermissionRequest'>, agentId: string) { return daemonPermissionRequest(this, input, agentId); }
-  async permissionExecution(input: Input<'postPermissionExecution'>, agentId: string) { return daemonPermissionExecution(this, input, agentId); }
-  async createAgentSchedule(input: Input<'createAgentSchedule'>, agentId: string, transaction?: SqlDatabase): Promise<Output<'createAgentSchedule'>> { return daemonCreateAgentSchedule(this, input, agentId, transaction); }
-  async recordScheduleAuthorization(db: SqlDatabase, scheduleId: string, roomId: string, agentId: string, requestId: unknown, generationId: unknown): Promise<void> { return daemonRecordScheduleAuthorization(this, db, scheduleId, roomId, agentId, requestId, generationId); }
-  async setEventSubscriptions(input: Input<'setEventSubscriptions'>, agentId: string) { return daemonSetEventSubscriptions(this, input, agentId); }
-  async listEventSubscriptions(input: Input<'listEventSubscriptions'>, agentId: string) { return daemonListEventSubscriptions(this, input, agentId); }
-  async postRoomEvent(input: Input<'postRoomEvent'>, agentId: string) { return daemonPostRoomEvent(this, input, agentId); }
-  async listAgentSchedules(input: Input<'listAgentSchedules'>, agentId: string) { return daemonListAgentSchedules(this, input, agentId); }
-  async requireScheduleAdmin(db: SqlDatabase, scheduleRoomId: string, input: {
-    roomId: string;
-    requestId?: unknown;
-    generationId?: unknown;
-}, agentId: string) { return daemonRequireScheduleAdmin(this, db, scheduleRoomId, input, agentId); }
-  async deleteAgentSchedule(input: Input<'deleteAgentSchedule'>, agentId: string) { return daemonDeleteAgentSchedule(this, input, agentId); }
-  async updateAgentSchedule(input: Input<'updateAgentSchedule'>, agentId: string, transaction?: SqlDatabase): Promise<Output<'updateAgentSchedule'>> { return daemonUpdateAgentSchedule(this, input, agentId, transaction); }
-  async postMandate(input: Input<'postAgentToolMandate'>, agentId: string) { return daemonPostMandate(this, input, agentId); }
-  async agentAvatar(input: Input<'postAgentAvatar'>, agentId: string) { return daemonAgentAvatar(this, input, agentId); }
-  async commands(input: Input<'postAgentCommands'>, agentId: string) { return daemonCommands(this, input, agentId); }
-  async modelCatalog(input: Input<'postAgentModelCatalog'>, agentId: string) { return daemonModelCatalog(this, input, agentId); }
-  async machineReport(input: Input<'postAgentMachineReport'>, agentId: string) { return daemonMachineReport(this, input, agentId); }
-  async report(text: string, agentId: string, command = this.authorizedCommand!, database = this.database, automatic = false, status?: unknown, ask?: string) { return daemonReport(this, text, agentId, command, database, automatic, status, ask); }
-  async watchCorner(input: Input<'watchCorner'>, agentId: string): Promise<Output<'watchCorner'>> { return daemonWatchCorner(this, input, agentId); }
-  async cornerRemote(input: Input<'postCornerRemoteState'>, agentId: string) { return daemonCornerRemote(this, input, agentId); }
-  async cornerPlan(input: Input<'postCornerPlan'>, agentId: string) { return daemonCornerPlan(this, input, agentId); }
-  async briefAttachmentRooms(db: SqlDatabase, sourceRoomIds: readonly string[], cornerId: string, agentId: string, command: CommandRow): Promise<string[]> { return daemonBriefAttachmentRooms(this, db, sourceRoomIds, cornerId, agentId, command); }
-  async renameCorner(input: Input<'renameCorner'>, agentId: string) { return daemonRenameCorner(this, input, agentId); }
-  async targetProposal(input: Input<'postTargetBranchProposal'>, agentId: string) { return daemonTargetProposal(this, input, agentId); }
-  async requestAgentGrant(input: Input<'requestAgentGrant'>, agentId: string, requireOwnerApproval = false) { return daemonRequestAgentGrant(this, input, agentId, requireOwnerApproval); }
-  async askRoomChoice(input: Input<'askRoomChoice'>, agentId: string) { return daemonAskRoomChoice(this, input, agentId); }
-  async openRoomPoll(input: Input<'openRoomPoll'>, agentId: string) { return daemonOpenRoomPoll(this, input, agentId); }
-  async writeRoomChoice(input: Parameters<typeof postRoomChoice>[1]): Promise<Awaited<ReturnType<typeof postRoomChoice>>> { return daemonWriteRoomChoice(this, input); }
-  async listAgentGrants(agentId: string, roomId?: string) { return daemonListAgentGrants(this, agentId, roomId); }
-  async consumeAgentGrant(input: Input<'consumeAgentGrant'>, agentId: string) { return daemonConsumeAgentGrant(this, input, agentId); }
-  async listAgentGrantRequests(agentId: string, roomId?: string) { return daemonListAgentGrantRequests(this, agentId, roomId); }
-  async repositoryOnboardingRequester(agentId: string, roomId?: string, context?: Record<string, unknown>) { return daemonRepositoryOnboardingRequester(this, agentId, roomId, context); }
-  async grantRequester(command = this.authorizedCommand) { return daemonGrantRequester(this, command); }
-  async findGrantRequester(command = this.authorizedCommand) { return daemonFindGrantRequester(this, command); }
-  async authorizeSquireCall(input: Input<'authorizeSquireCall'>, agentId: string) { return daemonAuthorizeSquireCall(this, input, agentId); }
-  async authorizeScopedGrant(input: Input<'authorizeSquireCall'> & {
-    readonly consume?: boolean;
-}, agentId: string, kind: 'mcp', target: string) { return daemonAuthorizeScopedGrant(this, input, agentId, kind, target); }
-  async appCardMark(appKey: string, domain?: string): Promise<{
-    logo?: string;
-    domain?: string;
-}> { return daemonAppCardMark(this, appKey, domain); }
-  async offerContext(roomId: string, agentId: string) { return daemonOfferContext(this, roomId, agentId); }
-  async agentWorkbench(input: Input<'readAgentWorkbench'>, agentId: string): Promise<Output<'readAgentWorkbench'>> { return daemonAgentWorkbench(this, input, agentId); }
-  async searchMcpRegistry(input: Input<'searchMcpRegistry'>): Promise<Output<'searchMcpRegistry'>> { return daemonSearchMcpRegistry(this, input); }
-  warmConnectorIndex(): Promise<void> { return daemonWarmConnectorIndex(this); }
-  async connectService(input: Input<'connect'>, agentId: string): Promise<Output<'connect'>> { return daemonConnectService(this, input, agentId); }
-  async connectAppFrontDoor(input: Input<'connectApp'>, agentId: string): Promise<Output<'connectApp'>> { return daemonConnectAppFrontDoor(this, input, agentId); }
-  async connectedAppForTool(appId: string, roomId: string, agentId: string, discovery = false) { return daemonConnectedAppForTool(this, appId, roomId, agentId, discovery); }
-  async listAppTools(input: Input<'listAppTools'>, agentId: string) { return daemonListAppTools(this, input, agentId); }
+  async execute<Name extends keyof DaemonOperationMap>(...args: CommandArguments<typeof daemonExecute<Name>>): ReturnType<typeof daemonExecute<Name>> { return daemonExecute<Name>(this, ...args); }
+  async reconcileZeroCheckWorkerCompletion(...args: CommandArguments<typeof daemonReconcileZeroCheckWorkerCompletion>): ReturnType<typeof daemonReconcileZeroCheckWorkerCompletion> { return daemonReconcileZeroCheckWorkerCompletion(this, ...args); }
+  async connectorAssignments(...args: CommandArguments<typeof daemonConnectorAssignments>): ReturnType<typeof daemonConnectorAssignments> { return daemonConnectorAssignments(this, ...args); }
+  async connectorInstall(...args: CommandArguments<typeof daemonConnectorInstall>): ReturnType<typeof daemonConnectorInstall> { return daemonConnectorInstall(this, ...args); }
+  async connectorStatusReport(...args: CommandArguments<typeof daemonConnectorStatusReport>): ReturnType<typeof daemonConnectorStatusReport> { return daemonConnectorStatusReport(this, ...args); }
+  async resumeRegistrySignIn(...args: CommandArguments<typeof daemonResumeRegistrySignIn>): ReturnType<typeof daemonResumeRegistrySignIn> { return daemonResumeRegistrySignIn(this, ...args); }
+  async notifyTailscaleSignIn(...args: CommandArguments<typeof daemonNotifyTailscaleSignIn>): ReturnType<typeof daemonNotifyTailscaleSignIn> { return daemonNotifyTailscaleSignIn(this, ...args); }
+  async connectorVaultReport(...args: CommandArguments<typeof daemonConnectorVaultReport>): ReturnType<typeof daemonConnectorVaultReport> { return daemonConnectorVaultReport(this, ...args); }
+  async connectorStatusView(...args: CommandArguments<typeof daemonConnectorStatusView>): ReturnType<typeof daemonConnectorStatusView> { return daemonConnectorStatusView(this, ...args); }
+  async connectorVaultList(...args: CommandArguments<typeof daemonConnectorVaultList>): ReturnType<typeof daemonConnectorVaultList> { return daemonConnectorVaultList(this, ...args); }
+  async connectionDetail(...args: CommandArguments<typeof daemonConnectionDetail>): ReturnType<typeof daemonConnectionDetail> { return daemonConnectionDetail(this, ...args); }
+  async connectionGrantRevoke(...args: CommandArguments<typeof daemonConnectionGrantRevoke>): ReturnType<typeof daemonConnectionGrantRevoke> { return daemonConnectionGrantRevoke(this, ...args); }
+  async connectionUsage(...args: CommandArguments<typeof daemonConnectionUsage>): ReturnType<typeof daemonConnectionUsage> { return daemonConnectionUsage(this, ...args); }
+  async bootstrap(...args: CommandArguments<typeof daemonBootstrap>): ReturnType<typeof daemonBootstrap> { return daemonBootstrap(this, ...args); }
+  async workspaceRoster(...args: CommandArguments<typeof daemonWorkspaceRoster>): ReturnType<typeof daemonWorkspaceRoster> { return daemonWorkspaceRoster(this, ...args); }
+  async inbox(...args: CommandArguments<typeof daemonInbox>): ReturnType<typeof daemonInbox> { return daemonInbox(this, ...args); }
+  async roomMessage(...args: CommandArguments<typeof daemonRoomMessage>): ReturnType<typeof daemonRoomMessage> { return daemonRoomMessage(this, ...args); }
+  async roomAttachment(...args: CommandArguments<typeof daemonRoomAttachment>): ReturnType<typeof daemonRoomAttachment> { return daemonRoomAttachment(this, ...args); }
+  async withStoredDigests(...args: CommandArguments<typeof daemonWithStoredDigests>): ReturnType<typeof daemonWithStoredDigests> { return daemonWithStoredDigests(this, ...args); }
+  async expiredMediaIds(...args: CommandArguments<typeof daemonExpiredMediaIds>): ReturnType<typeof daemonExpiredMediaIds> { return daemonExpiredMediaIds(this, ...args); }
+  async roomAuthority(...args: CommandArguments<typeof daemonRoomAuthority>): ReturnType<typeof daemonRoomAuthority> { return daemonRoomAuthority(this, ...args); }
+  async permissionAuthority(...args: CommandArguments<typeof daemonPermissionAuthority>): ReturnType<typeof daemonPermissionAuthority> { return daemonPermissionAuthority(this, ...args); }
+  async missionAuthority(...args: CommandArguments<typeof daemonMissionAuthority>): ReturnType<typeof daemonMissionAuthority> { return daemonMissionAuthority(this, ...args); }
+  async scheduleAuthority(...args: CommandArguments<typeof daemonScheduleAuthority>): ReturnType<typeof daemonScheduleAuthority> { return daemonScheduleAuthority(this, ...args); }
+  async mandate(...args: CommandArguments<typeof daemonMandate>): ReturnType<typeof daemonMandate> { return daemonMandate(this, ...args); }
+  async targetAuthority(...args: CommandArguments<typeof daemonTargetAuthority>): ReturnType<typeof daemonTargetAuthority> { return daemonTargetAuthority(this, ...args); }
+  async corners(...args: CommandArguments<typeof daemonCorners>): ReturnType<typeof daemonCorners> { return daemonCorners(this, ...args); }
+  async cornerRestore(...args: CommandArguments<typeof daemonCornerRestore>): ReturnType<typeof daemonCornerRestore> { return daemonCornerRestore(this, ...args); }
+  async listCornerBriefRevisions(...args: CommandArguments<typeof daemonListCornerBriefRevisions>): ReturnType<typeof daemonListCornerBriefRevisions> { return daemonListCornerBriefRevisions(this, ...args); }
+  async mergeCorner(...args: CommandArguments<typeof daemonMergeCorner>): ReturnType<typeof daemonMergeCorner> { return daemonMergeCorner(this, ...args); }
+  async closeCornerPullRequest(...args: CommandArguments<typeof daemonCloseCornerPullRequest>): ReturnType<typeof daemonCloseCornerPullRequest> { return daemonCloseCornerPullRequest(this, ...args); }
+  async checkReviewerAuthors(...args: CommandArguments<typeof daemonCheckReviewerAuthors>): ReturnType<typeof daemonCheckReviewerAuthors> { return daemonCheckReviewerAuthors(this, ...args); }
+  async approveCornerMerge(...args: CommandArguments<typeof daemonApproveCornerMerge>): ReturnType<typeof daemonApproveCornerMerge> { return daemonApproveCornerMerge(this, ...args); }
+  async repository(...args: CommandArguments<typeof daemonRepository>): ReturnType<typeof daemonRepository> { return daemonRepository(this, ...args); }
+  async targetBranch(...args: CommandArguments<typeof daemonTargetBranch>): ReturnType<typeof daemonTargetBranch> { return daemonTargetBranch(this, ...args); }
+  async identitySuccession(...args: CommandArguments<typeof daemonIdentitySuccession>): ReturnType<typeof daemonIdentitySuccession> { return daemonIdentitySuccession(this, ...args); }
+  async configuration(...args: CommandArguments<typeof daemonConfiguration>): ReturnType<typeof daemonConfiguration> { return daemonConfiguration(this, ...args); }
+  async presence(...args: CommandArguments<typeof daemonPresence>): ReturnType<typeof daemonPresence> { return daemonPresence(this, ...args); }
+  async releaseReadiness(...args: CommandArguments<typeof daemonReleaseReadiness>): ReturnType<typeof daemonReleaseReadiness> { return daemonReleaseReadiness(this, ...args); }
+  async completion(...args: CommandArguments<typeof daemonCompletion>): ReturnType<typeof daemonCompletion> { return daemonCompletion(this, ...args); }
+  async postRoomMessage(...args: CommandArguments<typeof daemonPostRoomMessage>): ReturnType<typeof daemonPostRoomMessage> { return daemonPostRoomMessage(this, ...args); }
+  async postAgentAttachment(...args: CommandArguments<typeof daemonPostAgentAttachment>): ReturnType<typeof daemonPostAgentAttachment> { return daemonPostAgentAttachment(this, ...args); }
+  async liveOutput(...args: CommandArguments<typeof daemonLiveOutput>): ReturnType<typeof daemonLiveOutput> { return daemonLiveOutput(this, ...args); }
+  async retract(...args: CommandArguments<typeof daemonRetract>): ReturnType<typeof daemonRetract> { return daemonRetract(this, ...args); }
+  async persistTurnTrace(...args: CommandArguments<typeof daemonPersistTurnTrace>): ReturnType<typeof daemonPersistTurnTrace> { return daemonPersistTurnTrace(this, ...args); }
+  async turnReceipt(...args: CommandArguments<typeof daemonTurnReceipt>): ReturnType<typeof daemonTurnReceipt> { return daemonTurnReceipt(this, ...args); }
+  async activity(...args: CommandArguments<typeof daemonActivity>): ReturnType<typeof daemonActivity> { return daemonActivity(this, ...args); }
+  async approvalSource(...args: CommandArguments<typeof daemonApprovalSource>): ReturnType<typeof daemonApprovalSource> { return daemonApprovalSource(this, ...args); }
+  async linkSpendApproval(...args: CommandArguments<typeof daemonLinkSpendApproval>): ReturnType<typeof daemonLinkSpendApproval> { return daemonLinkSpendApproval(this, ...args); }
+  async squireApproval(...args: CommandArguments<typeof daemonSquireApproval>): ReturnType<typeof daemonSquireApproval> { return daemonSquireApproval(this, ...args); }
+  async squireApprovalDecision(...args: CommandArguments<typeof daemonSquireApprovalDecision>): ReturnType<typeof daemonSquireApprovalDecision> { return daemonSquireApprovalDecision(this, ...args); }
+  async squireLoginWall(...args: CommandArguments<typeof daemonSquireLoginWall>): ReturnType<typeof daemonSquireLoginWall> { return daemonSquireLoginWall(this, ...args); }
+  async permissionRequest(...args: CommandArguments<typeof daemonPermissionRequest>): ReturnType<typeof daemonPermissionRequest> { return daemonPermissionRequest(this, ...args); }
+  async permissionExecution(...args: CommandArguments<typeof daemonPermissionExecution>): ReturnType<typeof daemonPermissionExecution> { return daemonPermissionExecution(this, ...args); }
+  async createAgentSchedule(...args: CommandArguments<typeof daemonCreateAgentSchedule>): ReturnType<typeof daemonCreateAgentSchedule> { return daemonCreateAgentSchedule(this, ...args); }
+  async recordScheduleAuthorization(...args: CommandArguments<typeof daemonRecordScheduleAuthorization>): ReturnType<typeof daemonRecordScheduleAuthorization> { return daemonRecordScheduleAuthorization(this, ...args); }
+  async setEventSubscriptions(...args: CommandArguments<typeof daemonSetEventSubscriptions>): ReturnType<typeof daemonSetEventSubscriptions> { return daemonSetEventSubscriptions(this, ...args); }
+  async listEventSubscriptions(...args: CommandArguments<typeof daemonListEventSubscriptions>): ReturnType<typeof daemonListEventSubscriptions> { return daemonListEventSubscriptions(this, ...args); }
+  async postRoomEvent(...args: CommandArguments<typeof daemonPostRoomEvent>): ReturnType<typeof daemonPostRoomEvent> { return daemonPostRoomEvent(this, ...args); }
+  async listAgentSchedules(...args: CommandArguments<typeof daemonListAgentSchedules>): ReturnType<typeof daemonListAgentSchedules> { return daemonListAgentSchedules(this, ...args); }
+  async requireScheduleAdmin(...args: CommandArguments<typeof daemonRequireScheduleAdmin>): ReturnType<typeof daemonRequireScheduleAdmin> { return daemonRequireScheduleAdmin(this, ...args); }
+  async deleteAgentSchedule(...args: CommandArguments<typeof daemonDeleteAgentSchedule>): ReturnType<typeof daemonDeleteAgentSchedule> { return daemonDeleteAgentSchedule(this, ...args); }
+  async updateAgentSchedule(...args: CommandArguments<typeof daemonUpdateAgentSchedule>): ReturnType<typeof daemonUpdateAgentSchedule> { return daemonUpdateAgentSchedule(this, ...args); }
+  async postMandate(...args: CommandArguments<typeof daemonPostMandate>): ReturnType<typeof daemonPostMandate> { return daemonPostMandate(this, ...args); }
+  async agentAvatar(...args: CommandArguments<typeof daemonAgentAvatar>): ReturnType<typeof daemonAgentAvatar> { return daemonAgentAvatar(this, ...args); }
+  async commands(...args: CommandArguments<typeof daemonCommands>): ReturnType<typeof daemonCommands> { return daemonCommands(this, ...args); }
+  async modelCatalog(...args: CommandArguments<typeof daemonModelCatalog>): ReturnType<typeof daemonModelCatalog> { return daemonModelCatalog(this, ...args); }
+  async machineReport(...args: CommandArguments<typeof daemonMachineReport>): ReturnType<typeof daemonMachineReport> { return daemonMachineReport(this, ...args); }
+  async report(...args: CommandArguments<typeof daemonReport>): ReturnType<typeof daemonReport> { return daemonReport(this, ...args); }
+  async watchCorner(...args: CommandArguments<typeof daemonWatchCorner>): ReturnType<typeof daemonWatchCorner> { return daemonWatchCorner(this, ...args); }
+  async cornerRemote(...args: CommandArguments<typeof daemonCornerRemote>): ReturnType<typeof daemonCornerRemote> { return daemonCornerRemote(this, ...args); }
+  async cornerPlan(...args: CommandArguments<typeof daemonCornerPlan>): ReturnType<typeof daemonCornerPlan> { return daemonCornerPlan(this, ...args); }
+  async briefAttachmentRooms(...args: CommandArguments<typeof daemonBriefAttachmentRooms>): ReturnType<typeof daemonBriefAttachmentRooms> { return daemonBriefAttachmentRooms(this, ...args); }
+  async renameCorner(...args: CommandArguments<typeof daemonRenameCorner>): ReturnType<typeof daemonRenameCorner> { return daemonRenameCorner(this, ...args); }
+  async targetProposal(...args: CommandArguments<typeof daemonTargetProposal>): ReturnType<typeof daemonTargetProposal> { return daemonTargetProposal(this, ...args); }
+  async requestAgentGrant(...args: CommandArguments<typeof daemonRequestAgentGrant>): ReturnType<typeof daemonRequestAgentGrant> { return daemonRequestAgentGrant(this, ...args); }
+  async askRoomChoice(...args: CommandArguments<typeof daemonAskRoomChoice>): ReturnType<typeof daemonAskRoomChoice> { return daemonAskRoomChoice(this, ...args); }
+  async openRoomPoll(...args: CommandArguments<typeof daemonOpenRoomPoll>): ReturnType<typeof daemonOpenRoomPoll> { return daemonOpenRoomPoll(this, ...args); }
+  async writeRoomChoice(...args: CommandArguments<typeof daemonWriteRoomChoice>): ReturnType<typeof daemonWriteRoomChoice> { return daemonWriteRoomChoice(this, ...args); }
+  async listAgentGrants(...args: CommandArguments<typeof daemonListAgentGrants>): ReturnType<typeof daemonListAgentGrants> { return daemonListAgentGrants(this, ...args); }
+  async consumeAgentGrant(...args: CommandArguments<typeof daemonConsumeAgentGrant>): ReturnType<typeof daemonConsumeAgentGrant> { return daemonConsumeAgentGrant(this, ...args); }
+  async listAgentGrantRequests(...args: CommandArguments<typeof daemonListAgentGrantRequests>): ReturnType<typeof daemonListAgentGrantRequests> { return daemonListAgentGrantRequests(this, ...args); }
+  async repositoryOnboardingRequester(...args: CommandArguments<typeof daemonRepositoryOnboardingRequester>): ReturnType<typeof daemonRepositoryOnboardingRequester> { return daemonRepositoryOnboardingRequester(this, ...args); }
+  async grantRequester(...args: CommandArguments<typeof daemonGrantRequester>): ReturnType<typeof daemonGrantRequester> { return daemonGrantRequester(this, ...args); }
+  async findGrantRequester(...args: CommandArguments<typeof daemonFindGrantRequester>): ReturnType<typeof daemonFindGrantRequester> { return daemonFindGrantRequester(this, ...args); }
+  async authorizeSquireCall(...args: CommandArguments<typeof daemonAuthorizeSquireCall>): ReturnType<typeof daemonAuthorizeSquireCall> { return daemonAuthorizeSquireCall(this, ...args); }
+  async authorizeScopedGrant(...args: CommandArguments<typeof daemonAuthorizeScopedGrant>): ReturnType<typeof daemonAuthorizeScopedGrant> { return daemonAuthorizeScopedGrant(this, ...args); }
+  async appCardMark(...args: CommandArguments<typeof daemonAppCardMark>): ReturnType<typeof daemonAppCardMark> { return daemonAppCardMark(this, ...args); }
+  async offerContext(...args: CommandArguments<typeof daemonOfferContext>): ReturnType<typeof daemonOfferContext> { return daemonOfferContext(this, ...args); }
+  async agentWorkbench(...args: CommandArguments<typeof daemonAgentWorkbench>): ReturnType<typeof daemonAgentWorkbench> { return daemonAgentWorkbench(this, ...args); }
+  async searchMcpRegistry(...args: CommandArguments<typeof daemonSearchMcpRegistry>): ReturnType<typeof daemonSearchMcpRegistry> { return daemonSearchMcpRegistry(this, ...args); }
+  warmConnectorIndex(...args: CommandArguments<typeof daemonWarmConnectorIndex>): ReturnType<typeof daemonWarmConnectorIndex> { return daemonWarmConnectorIndex(this, ...args); }
+  async connectService(...args: CommandArguments<typeof daemonConnectService>): ReturnType<typeof daemonConnectService> { return daemonConnectService(this, ...args); }
+  async connectAppFrontDoor(...args: CommandArguments<typeof daemonConnectAppFrontDoor>): ReturnType<typeof daemonConnectAppFrontDoor> { return daemonConnectAppFrontDoor(this, ...args); }
+  async connectedAppForTool(...args: CommandArguments<typeof daemonConnectedAppForTool>): ReturnType<typeof daemonConnectedAppForTool> { return daemonConnectedAppForTool(this, ...args); }
+  async listAppTools(...args: CommandArguments<typeof daemonListAppTools>): ReturnType<typeof daemonListAppTools> { return daemonListAppTools(this, ...args); }
 
+  async executeAppTool(...args: CommandArguments<typeof daemonExecuteAppTool>): ReturnType<typeof daemonExecuteAppTool> { return daemonExecuteAppTool(this, ...args); }
+  async authorizeResource(...args: CommandArguments<typeof daemonAuthorizeResource>): ReturnType<typeof daemonAuthorizeResource> { return daemonAuthorizeResource(this, ...args); }
+  async connectMcpServer(...args: CommandArguments<typeof daemonConnectMcpServer>): ReturnType<typeof daemonConnectMcpServer> { return daemonConnectMcpServer(this, ...args); }
+  async offerConnector(...args: CommandArguments<typeof daemonOfferConnector>): ReturnType<typeof daemonOfferConnector> { return daemonOfferConnector(this, ...args); }
+  async createCorner(...args: CommandArguments<typeof daemonCreateCorner>): ReturnType<typeof daemonCreateCorner> { return daemonCreateCorner(this, ...args); }
+  async reviseCornerBrief(...args: CommandArguments<typeof daemonReviseCornerBrief>): ReturnType<typeof daemonReviseCornerBrief> { return daemonReviseCornerBrief(this, ...args); }
+  async archiveCorner(...args: CommandArguments<typeof daemonArchiveCorner>): ReturnType<typeof daemonArchiveCorner> { return daemonArchiveCorner(this, ...args); }
+  async ensureMembership(...args: CommandArguments<typeof daemonEnsureMembership>): ReturnType<typeof daemonEnsureMembership> { return daemonEnsureMembership(this, ...args); }
+  async identity(...args: CommandArguments<typeof daemonIdentity>): ReturnType<typeof daemonIdentity> { return daemonIdentity(this, ...args); }
+  async reviewSourceAccess(...args: CommandArguments<typeof daemonReviewSourceAccess>): ReturnType<typeof daemonReviewSourceAccess> { return daemonReviewSourceAccess(this, ...args); }
+  async access(...args: CommandArguments<typeof daemonAccess>): ReturnType<typeof daemonAccess> { return daemonAccess(this, ...args); }
+  async roomMembers(...args: CommandArguments<typeof daemonRoomMembers>): ReturnType<typeof daemonRoomMembers> { return daemonRoomMembers(this, ...args); }
+  async postCornerMessage(...args: CommandArguments<typeof daemonPostCornerMessage>): ReturnType<typeof daemonPostCornerMessage> { return daemonPostCornerMessage(this, ...args); }
+  async postAddressAccess(...args: CommandArguments<typeof daemonPostAddressAccess>): ReturnType<typeof daemonPostAddressAccess> { return daemonPostAddressAccess(this, ...args); }
+  async reach(...args: CommandArguments<typeof daemonReach>): ReturnType<typeof daemonReach> { return daemonReach(this, ...args); }
+  async reactToRoomMessage(...args: CommandArguments<typeof daemonReactToRoomMessage>): ReturnType<typeof daemonReactToRoomMessage> { return daemonReactToRoomMessage(this, ...args); }
+  writeResult(...args: CommandArguments<typeof daemonWriteResult>): ReturnType<typeof daemonWriteResult> { return daemonWriteResult(this, ...args); }
+}
 
-  async executeAppTool(input: Input<'executeAppTool'>, agentId: string) { return daemonExecuteAppTool(this, input, agentId); }
-  async authorizeResource(input: Input<'authorizeResourceCall'>, agentId: string) { return daemonAuthorizeResource(this, input, agentId); }
-  async connectMcpServer(input: Input<'connectMcpServer'>, agentId: string): Promise<Output<'connectMcpServer'>> { return daemonConnectMcpServer(this, input, agentId); }
-  async offerConnector(input: Input<'offerConnector'>, agentId: string, unified = false): Promise<Output<'offerConnector'>> { return daemonOfferConnector(this, input, agentId, unified); }
-  async createCorner(input: Input<'createCorner'>, agentId: string) { return daemonCreateCorner(this, input, agentId); }
-  async reviseCornerBrief(input: Input<'reviseCornerBrief'>, agentId: string) { return daemonReviseCornerBrief(this, input, agentId); }
-  async archiveCorner(input: Input<'archiveCorner'>, agentId: string) { return daemonArchiveCorner(this, input, agentId); }
-  async ensureMembership(input: Input<'ensureAgentMembership'>, agentId: string) { return daemonEnsureMembership(this, input, agentId); }
-  async identity(agentId: string) { return daemonIdentity(this, agentId); }
-  async reviewSourceAccess(roomId: string, agentId: string): Promise<void> { return daemonReviewSourceAccess(this, roomId, agentId); }
-  async access(roomId: string, agentId: string, requestId?: unknown): Promise<{
-    cornerReviewer: boolean;
-    isCorner: boolean;
-    privateCommand: boolean;
-    voiceAgentName?: string | null;
-}> { return daemonAccess(this, roomId, agentId, requestId); }
-  async roomMembers(roomId: string) { return daemonRoomMembers(this, roomId); }
-  async postCornerMessage(input: Input<'postCornerMessage'>, agentId: string) { return daemonPostCornerMessage(this, input, agentId); }
-  async postAddressAccess(address: string, agentId: string) { return daemonPostAddressAccess(this, address, agentId); }
-  async reach(cornerId: string, agentId: string, database: SqlDatabase = this.database) { return daemonReach(this, cornerId, agentId, database); }
-  async reactToRoomMessage(input: Input<'reactToRoomMessage'>, agentId: string): Promise<Output<'reactToRoomMessage'>> { return daemonReactToRoomMessage(this, input, agentId); }
-  writeResult(extra?: {
-    failureReportDelivered?: boolean;
-}) { return daemonWriteResult(this, extra); }
+/** Command-local state is installed together before any handler runs. */
+export function createDaemonCommandService(
+  dependencies: DaemonDependencies,
+  scope: Pick<DaemonContext, 'database' | 'live' | 'starterOnboarding' | 'memoryEmbed' | 'afterCommit'> & { authorizedCommand: CommandRow },
+): DaemonService {
+  const service = DaemonService.fromDependencies({
+    ...dependencies, database: scope.database, live: scope.live,
+    commandTransaction: true, authorizedCommand: scope.authorizedCommand,
+  });
+  service.starterOnboarding = scope.starterOnboarding;
+  service.memoryEmbed = scope.memoryEmbed;
+  service.afterCommit = scope.afterCommit;
+  return service;
 }

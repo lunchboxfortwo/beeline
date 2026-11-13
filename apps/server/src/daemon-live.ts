@@ -265,7 +265,7 @@ export class DaemonAgentSession {
       this.epoch = epoch;
       this.turnSource = {connectionId:this.connectionId,epoch};
       const model = await this.deps.daemon.negotiateOwnedModel(this.agentId,
-        this.turnSource, this.presence.ownedModelV1 === true && this.presence.ownedModelUnboundedV1 === true);
+        this.presence.ownedModelV1 === true && this.presence.ownedModelUnboundedV1 === true);
       this.#ownedModelCapability = model?.capability;
       this.deps.registry.settled(this);
       if(this.presence.usageAccountV1&&helperUsageEnabled())this.usageOwnerId=(await this.deps.database.query<{owner_id:string|null}>(
@@ -418,7 +418,7 @@ export class DaemonAgentSession {
         const source = this.turnSource!;
         const result = helperTurnCodecs(operation).result.parse(await this.deps.daemon.execute(operation, input, this.agentId, source, this.#ownedModelCapability));
         const reply = { type: 'turn-result', requestId: item.requestId, result };
-        await this.deps.daemon.fenceOwnedTurnReply(this.agentId, source, input, () => {
+        await this.deps.daemon.fenceOwnedTurnReply(this.agentId, input, () => {
           if (!this.#closed && this.transport.isOpen()) this.transport.send(reply);
         }, operation === 'claimAgentCommand');
       } catch (error) {
@@ -600,11 +600,17 @@ export class DaemonAgentSession {
         }
       } catch (error) {
         if (!active || this.#closed) return;
+        // This subscription still owes a command snapshot at its next live boundary.
+        commandsRequested = true;
         console.error(
           '[live] daemon command push failed',
           error instanceof Error ? error.message : String(error),
         );
-
+        if (transport.isOpen()) transport.send({
+          type: 'commands', roomId, ...correlation,
+          error: error instanceof Error ? error.message : 'daemon_operation_refused',
+          status: this.deps.operationErrorStatus?.(error) ?? 503,
+        });
       } finally {
         commandsPushing = false;
       }
@@ -641,6 +647,9 @@ export class DaemonAgentSession {
             void this.#projection(() => pushCommands(trigger));
           return;
         }
+        if (commandsRequested && !commandsPushing &&
+            (!event.targetAgentId || event.targetAgentId === agentId))
+          void this.#projection(() => pushCommands(trigger));
         if (event.reason === 'postgres:rooms' && event.repositoryChanged) {
           if (transport.isOpen())
             transport.send({ type: 'rooms-changed', roomId, repositoryChanged: true });

@@ -76,7 +76,13 @@ export function attachWebInventory(verdict, summary, inventory, failure) {
   const measured = summary?.coverage?.measured ?? 0;
   verdict.text += `\nWeb inventory: ${measured}/${inventory.length}; full-inventory score: ${verdict.fullInventoryScore ?? 'unavailable'}`;
   for (const row of summary?.rows ?? []) verdict.text += `\nWeb ${row.name}: n=${row.samples} p50=${row.p50Ms} ms p95=${row.p95Ms} ms`;
-  for (const gap of verdict.unmeasured) verdict.text += `\nWeb ${gap.name}: unmeasured — ${gap.reason}`;
+  for (const gap of verdict.unmeasured) verdict.text += `\nWeb ${gap.name}: ${gap.availability ?? 'unmeasured'} — ${gap.reason}`;
+  if (summary?.routeInventory) {
+    const routes = summary.routeInventory;
+    verdict.text += `\nWeb routes: ${routes.coverage.measured}/${routes.coverage.total}`;
+    for (const row of routes.rows) verdict.text += `\nWeb route ${row.name}: n=${row.samples} p50=${row.p50Ms} ms p95=${row.p95Ms} ms`;
+    for (const gap of routes.unmeasured) verdict.text += `\nWeb route ${gap.name}: unmeasured — ${gap.reason}`;
+  }
   return verdict;
 }
 

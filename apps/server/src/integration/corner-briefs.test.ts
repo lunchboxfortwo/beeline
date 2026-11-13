@@ -1,4 +1,5 @@
 import { phoneFetch } from '../../../../tests/helpers/phone-operation.js';
+import { cornerObjectiveSql } from '.././corner-objective.js';
 import { cornerRequestSql } from '.././corner-opening.js';
 import { cornerRunStateSql } from '.././corner-run.js';
 import { advanceCorner } from '.././corner-lifecycle.js';
@@ -844,23 +845,25 @@ const fixture = monolithFixture();
   });
 
 
-  it('rejects an open-corner objective longer than 24 words, naming the count', async () => {
+  it('opens a corner when the objective is longer than 24 words and names the cut', async () => {
+    const objective = Array.from({ length: 25 }, (_, index) => `word${index + 1}`).join(' ');
     const response = await fixture.daemonOperation('createCorner', {
       roomId: ROOM,
       requestId: 'corner-objective-too-long',
       name: 'Too-long',
-      objective: Array.from({ length: 25 }, (_, index) => `word${index + 1}`).join(' '),
+      objective,
     });
-    expect(response.status).toBe(503);
-    // The refusal names the limit AND what arrived: nobody could see why the
-    // old catch-all sentence fired, and the same turn failed twice (C90).
-    expect(await response.json()).toEqual({
-      error: 'the objective is 25 words; the limit is 24',
-    });
-    const corners = await fixture.database.query(
-      `SELECT id FROM rooms WHERE parent_id=$1 AND name LIKE 'word1 %'`,
-      [ROOM],
+    expect(response.status).toBe(200);
+    const opened = (await response.json()) as { cornerId: string; warnings?: string[] };
+    expect(opened.warnings?.join(' ')).toContain('25 words');
+    expect(opened.warnings?.join(' ')).toContain('cut to 24');
+    const stored = await fixture.database.query<{ name: string; objective: string }>(
+      `SELECT r.name,${cornerObjectiveSql('r')} objective FROM rooms r WHERE r.id=$1`,
+      [opened.cornerId],
     );
-    expect(corners.rows).toEqual([]);
+    expect(stored.rows[0]).toEqual({
+      name: 'Too-long',
+      objective: objective.split(' ').slice(0, 24).join(' '),
+    });
   });
 });

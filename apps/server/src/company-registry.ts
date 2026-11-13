@@ -1,3 +1,4 @@
+import { githubProviderKey, stripeProviderKey, slackProviderKey, linearProviderKey, tiktokProviderKey, gmailProviderKey, googlesheetsProviderKey, youtubeProviderKey } from './providers/index.js';
 import { getDomain } from 'tldts';
 
 export type CompanyProvider = { id: string; name: string; domain?: string; hosts: readonly string[] };
@@ -8,14 +9,14 @@ export const COMPANY_REGISTRY: readonly CompanyProvider[] = [
   {"id": "cloudflare", "name": "Cloudflare", "domain": "cloudflare.com", "hosts": ["cloudflare.com"]},
   {"id": "fish", "name": "Fish Audio", "domain": "fish.audio", "hosts": ["fish.audio"]},
   {"id": "beeline", "name": "Beeline", "domain": "usebeeline.app", "hosts": ["usebeeline.app"]},
-  {"id": "github", "name": "GitHub", "domain": "github.com", "hosts": ["github.com", "githubusercontent.com"]},
-  {"id": "stripe", "name": "Stripe", "domain": "stripe.com", "hosts": ["stripe.com"]},
-  {"id": "slack", "name": "Slack", "domain": "slack.com", "hosts": ["slack.com"]},
-  {"id": "linear", "name": "Linear", "domain": "linear.app", "hosts": ["linear.app"]},
+  {"id": githubProviderKey, "name": "GitHub", "domain": "github.com", "hosts": ["github.com", "githubusercontent.com"]},
+  {"id": stripeProviderKey, "name": "Stripe", "domain": "stripe.com", "hosts": ["stripe.com"]},
+  {"id": slackProviderKey, "name": "Slack", "domain": "slack.com", "hosts": ["slack.com"]},
+  {"id": linearProviderKey, "name": "Linear", "domain": "linear.app", "hosts": ["linear.app"]},
   {"id": "squire", "name": "Trusty Squire", "domain": "trustysquire.ai", "hosts": ["trustysquire.ai"]},
   {"id": "notion", "name": "Notion", "domain": "notion.so", "hosts": ["notion.so", "notion.com"]},
   {"id": "meta", "name": "Meta", "domain": "instagram.com", "hosts": ["instagram.com", "facebook.com"]},
-  {"id": "tiktok", "name": "TikTok", "domain": "tiktok.com", "hosts": ["tiktok.com", "tiktokapis.com"]},
+  {"id": tiktokProviderKey, "name": "TikTok", "domain": "tiktok.com", "hosts": ["tiktok.com", "tiktokapis.com"]},
   {"id": "fal", "name": "fal", "domain": "fal.ai", "hosts": ["fal.ai", "fal.run"]},
   {"id": "apple", "name": "Apple", "domain": "apple.com", "hosts": ["apple.com"]},
   {"id": "expo", "name": "Expo", "domain": "expo.dev", "hosts": ["expo.dev"]},
@@ -48,15 +49,15 @@ export const COMPANY_REGISTRY: readonly CompanyProvider[] = [
 /** One catalog for search, empty accounts and Also available. Never a client fallback list. */
 export const COMPANY_APPS = [
   {"appKey": "trusty-squire", "name": "Trusty Squire", "domain": "trustysquire.ai", "purpose": "Signs up and signs in for your agents."},
-  {"appKey": "gmail", "name": "Gmail", "domain": "mail.google.com", "purpose": "Read and send email."},
+  {"appKey": gmailProviderKey, "name": "Gmail", "domain": "mail.google.com", "purpose": "Read and send email."},
   {"appKey": "googlecalendar", "name": "Google Calendar", "domain": "calendar.google.com", "purpose": "Plan meetings and manage your calendar."},
   {"appKey": "googledrive", "name": "Google Drive", "domain": "drive.google.com", "purpose": "Find and organize your files."},
-  {"appKey": "googlesheets", "name": "Google Sheets", "domain": "sheets.google.com", "purpose": "Read and update spreadsheets."},
+  {"appKey": googlesheetsProviderKey, "name": "Google Sheets", "domain": "sheets.google.com", "purpose": "Read and update spreadsheets."},
   {"appKey": "googledocs", "name": "Google Docs", "domain": "docs.google.com", "purpose": "Write and edit documents."},
-  {"appKey": "youtube", "name": "YouTube", "domain": "youtube.com", "purpose": "Manage YouTube videos and your channel."},
+  {"appKey": youtubeProviderKey, "name": "YouTube", "domain": "youtube.com", "purpose": "Manage YouTube videos and your channel."},
   {"appKey": "instagram", "name": "Instagram", "domain": "instagram.com", "purpose": "Publish and manage Instagram posts."},
-  {"appKey": "slack", "name": "Slack", "domain": "slack.com", "purpose": "Work with your team’s conversations."},
-  {"appKey": "linear", "name": "Linear", "domain": "linear.app", "purpose": "Track issues and project work."},
+  {"appKey": slackProviderKey, "name": "Slack", "domain": "slack.com", "purpose": "Work with your team’s conversations."},
+  {"appKey": linearProviderKey, "name": "Linear", "domain": "linear.app", "purpose": "Track issues and project work."},
   {"appKey": "notion", "name": "Notion", "domain": "notion.so", "purpose": "Read and update workspace pages."},
   {"appKey": "hubspot", "name": "HubSpot", "domain": "hubspot.com", "purpose": "Manage customer relationships."},
   {"appKey": "airtable", "name": "Airtable", "domain": "airtable.com", "purpose": "Work with your team’s records."},
@@ -64,14 +65,14 @@ export const COMPANY_APPS = [
   {"appKey": "jira", "name": "Jira", "domain": "atlassian.com", "purpose": "Manage issues and delivery."},
   {"appKey": "supabase", "name": "Supabase", "domain": "supabase.com", "purpose": "Manage your project’s database."},
   {"appKey": "link", "name": "Link", "domain": "link.com", "purpose": "Approve purchases for your agents."},
-  {"appKey": "tiktok", "name": "TikTok", "domain": "tiktok.com", "purpose": "Manage videos and your account."},
+  {"appKey": tiktokProviderKey, "name": "TikTok", "domain": "tiktok.com", "purpose": "Manage videos and your account."},
   {"appKey": "tailscale", "name": "Tailscale", "domain": "tailscale.com", "purpose": "Reach devices on your private network."},
   {"appKey": "wallet", "name": "Coinbase wallet", "domain": "coinbase.com", "purpose": "Manage your agent wallet."},
-  {"appKey": "github", "name": "GitHub", "domain": "github.com", "purpose": "Work with repositories and issues."},
+  {"appKey": githubProviderKey, "name": "GitHub", "domain": "github.com", "purpose": "Work with repositories and issues."},
   {"appKey": "sentry", "name": "Sentry", "domain": "sentry.io", "purpose": "Investigate errors in your apps."},
 ] as const;
 
-export const COMPANY_MARK_IDS = new Set(["fly","sentry","google","cloudflare","fish","beeline","github","stripe","linear","squire","notion","meta","tiktok","apple","expo","neon","openrouter","coinbase","resend","x","shopify","railway","elevenlabs","convex","hetzner","tailscale","hubspot","airtable","asana","atlassian","supabase"]);
+export const COMPANY_MARK_IDS = new Set(["fly","sentry","google","cloudflare","fish","beeline",githubProviderKey,stripeProviderKey,linearProviderKey,"squire","notion","meta",tiktokProviderKey,"apple","expo","neon","openrouter","coinbase","resend","x","shopify","railway","elevenlabs","convex","hetzner","tailscale","hubspot","airtable","asana","atlassian","supabase"]);
 
 export function companyHost(value: string | undefined): string | undefined {
   if (!value) return undefined;
@@ -92,7 +93,7 @@ const aliases: readonly [string, RegExp][] = [
   ['browserstack', /^browserstack(?:$|[- _])/], ['railway', /^railway$/],
   ['elevenlabs', /^elevenlabs(?:\.com|\.io)?$/], ['convex', /^convex$/],
   ['metamask', /^metamask$/], ['shopify', /^shopify$/], ['muji', /^muji$/],
-  ['stripe', /^stripe(?:$|[- _])/], ['github', /^github(?:$|[- _])/],
+  [stripeProviderKey, /^stripe(?:$|[- _])/], [githubProviderKey, /^github(?:$|[- _])/],
 ];
 const OTHER: CompanyProvider = { id: 'other', name: 'Other', hosts: [] };
 function providerForHost(host: string): CompanyProvider {

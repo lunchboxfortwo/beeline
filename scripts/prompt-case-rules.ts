@@ -276,6 +276,14 @@ export function skillPath(name: string): string {
   return `/replay/skills/${name}/SKILL.md`;
 }
 
+/** Task completion never passes a reply that fails its truthfulness rule. */
+export function evaluateCase(testCase: Pick<PromptCase, 'pass' | 'truthfulness'>, transcript: Transcript): Verdict & { truthfulness?: Verdict } {
+  const behavior = evaluateRule(testCase.pass, transcript);
+  const truthfulness = testCase.truthfulness ? evaluateRule(testCase.truthfulness, transcript) : undefined;
+  return { ...(truthfulness && !truthfulness.pass
+    ? { pass: false, reason: `Truthfulness: ${truthfulness.reason}` } : behavior), truthfulness };
+}
+
 export function evaluateRule(rule: Rule, transcript: Transcript): Verdict {
   if ('atMostOnce' in rule) {
     const indices = transcript.calls.flatMap((call, index) => callMatches(call, rule.atMostOnce, rule.args) ? [index] : []);

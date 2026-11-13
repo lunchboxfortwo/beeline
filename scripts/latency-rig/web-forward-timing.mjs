@@ -1,4 +1,4 @@
-/** Runs in the page before the unchanged action start. Never drives the app. */
+/** Observe accepted visible feedback and dismissal independently; never drive the app. */
 export function armForwardTiming({ messageText } = {}) {
   const picker = document.querySelector('[data-testid="forward-room-picker"]');
   if (!picker?.isConnected) throw new Error('Forward picker is not mounted');
@@ -46,7 +46,31 @@ export function armForwardTiming({ messageText } = {}) {
   document.addEventListener('click', click, { capture: true, passive: true });
   document.addEventListener('animationstart', animation, true);
   document.addEventListener('animationend', animation, true);
+  let feedbackPending = false;
+  const acceptedFeedback = () => {
+    if (timing.events.reply === undefined || !picker.isConnected) return false;
+    const walker = document.createTreeWalker(picker, NodeFilter.SHOW_TEXT);
+    let node;
+    while ((node = walker.nextNode())) {
+      if (node.textContent !== 'FORWARDED') continue;
+      const element = node.parentElement;
+      const rect = element.getBoundingClientRect();
+      const style = getComputedStyle(element);
+      if (rect.width && rect.height && style.visibility !== 'hidden' && style.display !== 'none')
+        return true;
+    }
+    return false;
+  };
   const observer = new MutationObserver(() => {
+    if (!feedbackPending && acceptedFeedback()) {
+      feedbackPending = true;
+      requestAnimationFrame(() => {
+        if (!acceptedFeedback()) return;
+        requestAnimationFrame(() => {
+          if (acceptedFeedback()) mark('acceptedResultFrame');
+        });
+      });
+    }
     if (picker.isConnected || document.querySelector('[data-testid="forward-room-picker"]')) return;
     mark('removed');
     observer.disconnect();
@@ -75,7 +99,7 @@ export function armForwardTiming({ messageText } = {}) {
       });
     });
   });
-  observer.observe(document.body, { childList: true, subtree: true });
+  observer.observe(document.body, { childList: true, characterData: true, subtree: true });
   timing.cleanup = () => {
     observer.disconnect();
     if (WebSocket.prototype.send === observeSend) WebSocket.prototype.send = send;
@@ -104,7 +128,9 @@ export function readForwardTiming() {
   if (!Number.isFinite(start) || required.some((name) => !Number.isFinite(e[name])))
     throw new Error('Forward profile is incomplete');
   return {
-    durationMs: e.resultFrame - start,
+    durationMs: (e.acceptedResultFrame ?? e.resultFrame) - start,
+    acceptedResultMs: e.acceptedResultFrame === undefined ? null : e.acceptedResultFrame - start,
+    dismissalResultMs: e.resultFrame - start,
     removalMs: e.removed - start,
     dispatchMs: e.click - start,
     clickToSendMs: e.send - e.click,

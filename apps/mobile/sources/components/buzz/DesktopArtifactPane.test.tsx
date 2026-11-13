@@ -38,6 +38,8 @@ vi.mock('react-native', async () => {
     View: host('View'),
   };
 });
+vi.mock('tamagui', async () => (await import('@/ui/screens/transcript/grammar-hosts.test-support')).tamaguiHosts());
+vi.mock('lucide-react-native', async () => (await import('@/ui/screens/transcript/grammar-hosts.test-support')).lucideHosts());
 vi.mock('react-native-reanimated', () => ({
   default: {
     View: (props: Record<string, unknown>) =>
@@ -60,13 +62,6 @@ const theme = vi.hoisted(() => ({
     layout: { row: 64 },
     type: { body: {}, bodyStrong: {}, machine: {}, meta: {} },
   },
-}));
-vi.mock('react-native-unistyles', () => ({
-  StyleSheet: {
-    hairlineWidth: 1,
-    create: (factory: (theme: unknown) => unknown) => factory(theme),
-  },
-  useUnistyles: () => ({ theme }),
 }));
 vi.mock('@/buzz/artifact-link', () => ({
   subscribeArtifactBytesPurge: () => () => {},
@@ -197,6 +192,28 @@ describe('the desktop work pane artifact view', () => {
     expect(pdf.props.attachment.name).toBe('spec.pdf');
   });
 
+  it('pages through every file of a stacked message, wrapping at both ends', async () => {
+    mocks.fetchArtifactBytes.mockResolvedValue(new TextEncoder().encode('<p>mock</p>'));
+    const page = attachment();
+    const pdf = attachment({ url: 'https://usebeeline.app/v1/media/9f0f6a50-2222-4222-8333-444455556666', mimeType: 'application/pdf', name: 'spec.pdf', title: 'Spec' });
+    const renderer = render(<DesktopArtifactPane attachment={pdf} groupAttachments={[page, pdf]} onClose={mocks.onClose} />);
+    await flush();
+    const byId = (testID: string) => renderer.root.find((node: any) => typeof node.type === 'string' && node.props.testID === testID);
+    expect(byId('desktop-artifact-title').props.children).toBe('Spec');
+    expect(byId('artifact-viewer-photo-position').props.accessibilityLabel).toBe('File 2 of 2');
+    act(() => byId('artifact-viewer-photo-next').props.onPress());
+    await flush();
+    expect(byId('desktop-artifact-title').props.children).toBe('Login mock');
+    expect(byId('artifact-viewer-photo-position').props.children).toBe('1 of 2');
+    act(() => byId('artifact-viewer-photo-previous').props.onPress());
+    expect(renderer.root.findByType('ArtifactPdfView' as any).props.attachment.name).toBe('spec.pdf');
+  });
+
+  it('a lone file shows no pager', () => {
+    const renderer = render(<DesktopArtifactPane attachment={attachment()} onClose={mocks.onClose} />);
+    expect(renderer.root.findAll((node: any) => node.props.testID === 'artifact-viewer-pager')).toHaveLength(0);
+  });
+
   it('paints a raster in the pane, fitted rather than cropped', async () => {
     const photo = attachment({ mimeType: 'image/png', name: 'chart.png', title: 'Chart' });
     const renderer = render(<DesktopArtifactPane attachment={photo} onClose={mocks.onClose} />);
@@ -271,11 +288,10 @@ describe('the desktop work pane artifact view', () => {
       viewport.props.onPanResponderMove({ nativeEvent: { pageX: 140, pageY: 100 } });
     });
     expect(
-      renderer.root.findByProps({ testID: 'desktop-artifact-image-actions' }).props.style[1]
-        .transform[0],
-    ).toEqual({ translateX: 40 });
+      renderer.root.findByProps({ testID: 'desktop-artifact-image-actions' }).props.x,
+    ).toBe(40);
     const reset = renderer.root.findByProps({ testID: 'desktop-artifact-zoom-reset' });
-    expect(reset.props.accessibilityLabel).toBe('Reset image zoom');
+    expect(reset.props.label).toBe('Reset image zoom');
     expect(reset.props.disabled).toBe(false);
     act(() => reset.props.onPress());
     expect(

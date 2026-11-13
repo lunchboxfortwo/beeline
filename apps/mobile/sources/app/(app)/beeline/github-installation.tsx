@@ -4,11 +4,12 @@ import { desktopColumnWidths } from '@/buzz/desktop-layout-tokens';
 import { useIsDesktop as useDesktopPageLayout } from '@/utils/responsive';
 import { useLatencyRouteFrame } from '@/buzz/latency-route-hook';
 import React, { useEffect, useState } from 'react';
-import { Platform, Text, View } from 'react-native';
+import { Platform } from 'react-native';
+import { YStack } from 'tamagui';
 import * as WebBrowser from 'expo-web-browser';
-import { StyleSheet } from 'react-native-unistyles';
 import { Redirect, type Href, useLocalSearchParams } from 'expo-router';
 import { PageHeader } from '@/components/buzz/PageHeader';
+import { Copy } from '@/ui/grammar';
 import { clearPendingGitHubInstallation, completeGitHubInstallationRoute, githubInstallationReturnPath } from '@/auth/github-auth-session';
 import { monolithPhoneOperation } from '@/sync/transport/monolith-operation';
 
@@ -34,7 +35,7 @@ export default function GitHubInstallation() {
         const savedPath = await githubInstallationReturnPath();
         const path = savedPath ?? '/beeline/channels';
         if (alive) setRecoveryPath(path);
-        if (Platform.OS !== 'web' && !savedPath) throw new Error('This installation was not started on this device. Return to your Room and install Beeline again.');
+        if (Platform.OS !== 'web' && !savedPath) throw new Error('This installation was not started on this device. Return to your chat and install Beeline again.');
         if (Platform.OS !== 'web' && installed === '0' && connectionError) {
           if (alive) setReturnPath(`${path}${path.includes('?') ? '&' : '?'}githubConnectionError=${encodeURIComponent(connectionError)}`);
           return;
@@ -50,16 +51,14 @@ export default function GitHubInstallation() {
     return () => { alive = false; };
   }, [installed, connectionError]);
   if (returnPath) return <InstallationReturn path={returnPath} />;
-  return <View style={[styles.page, desktopPageLayout && { width: '100%', maxWidth: desktopColumnWidths.detail, alignSelf: 'center' }]} testID="github-installation-return">
+  return <YStack flex={1} justifyContent="center" padding="6" gap="4" backgroundColor="canvas"
+    width={desktopPageLayout ? '100%' : undefined} maxWidth={desktopPageLayout ? desktopColumnWidths.detail : undefined}
+    alignSelf={desktopPageLayout ? 'center' : undefined} testID="github-installation-return">
     <PageHeader title={error ? 'GitHub needs another try' : 'Connecting GitHub'} />
     {error ? <SettingsRow title="Continue connecting GitHub"
-      description="Return to your Room to refresh repositories and finish setup."
-      action="Back to Room" onPress={() => setReturnPath(recoveryPath)} /> : <Text style={styles.copy}>
+      description="Return to your chat to refresh repositories and finish setup."
+      action="Back to chat" onPress={() => setReturnPath(recoveryPath)} /> : <Copy quiet>
       Checking your installation and loading the repositories Beeline can work in.
-    </Text>}
-  </View>;
+    </Copy>}
+  </YStack>;
 }
-const styles = StyleSheet.create(theme => ({
-  page: { flex: 1, justifyContent: 'center', padding: theme.buzz.space.lg, gap: theme.buzz.space.md, backgroundColor: theme.buzz.bgTerminal },
-  copy: { ...theme.buzz.type.body, color: theme.buzz.textSecondary },
-}));

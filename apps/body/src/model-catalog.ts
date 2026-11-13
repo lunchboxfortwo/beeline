@@ -39,7 +39,7 @@ type ModelCatalogAgent = Pick<AgentCommand, 'command' | 'args'> &
  * With no provider handed over, the operator's own config IS the thing under
  * test — connect's discovery probe asks exactly whether Goose already holds a
  * provider of its own, and a disposable profile would answer "no" every time.
- * That read is bounded by a timeout instead (see `withAgentModelCatalog`).
+ * That read inspects the existing profile (see `withAgentModelCatalog`).
  */
 export function modelCatalogProbeEnvironment(
   agent: ModelCatalogAgent,
@@ -75,13 +75,7 @@ export function filterAgentModelCatalog(
     : filterModelOptionsByCredentials(allowed, agentEnv);
 }
 
-/**
- * Whole-read deadline for a catalog probe. Connect's discovery probe sets one
- * so a harness that cannot answer costs the wizard seconds rather than the
- * session; the deadline is spent across the ACP handshake and `session/new`,
- * and the client is still stopped and the scratch directory still removed
- * when it expires. Omitted, both requests keep their own 60s defaults.
- */
+/** A disposable catalog session; helper readiness never waits for it. */
 async function withAgentModelCatalog<T>(
   agent: ModelCatalogAgent,
   agentEnv: Record<string, string>,

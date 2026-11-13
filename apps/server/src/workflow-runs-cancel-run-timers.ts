@@ -199,7 +199,7 @@ export async function enterState(
     ...input.line(toState),
     kind: 'workflow-handoff',
     ...(!isTerminal && !isGate && nextAgentId ? { wakes: [nextAgentId] } : {}),
-    presentation: 'system',
+    presentation: 'card',
     cardType: WORKFLOW_HANDOFF_CARD_TYPE,
     card: {
       runId,
@@ -244,13 +244,13 @@ export async function enterState(
 export async function moveRole(
   db: SqlDatabase,
   scope: RunScope,
-  input: { role: string; picked: string; tried: TriedAgent[]; why: string; line?: Partial<CardLine> },
+  input: { role: string; picked: string; tried: TriedAgent[]; why: string; line?: Partial<CardLine>; resume?: boolean },
 ): Promise<{ state: string; attempt: number }> {
   const { run, roomId, runId, stateName } = scope;
   const state = scope.state as WorkflowHandoffState | WorkflowGateState;
   const roleBindings = { ...run.roleBindings, [input.role]: input.picked };
   const from = run.roleBindings[input.role];
-  const names = await mentionsFor(db, [input.picked, ...(from ? [from] : [])]);
+  const names = await mentionsFor(db, [input.picked, ...(from ? [from] : [])],roomId);
   if (!await claimRun(db, scope)) return { state: scope.stateName, attempt: scope.run.seq };
   await cancelRunWakes(db, roomId, runId);
   if (state.kind === 'gate') await closeRunChoices(db, roomId, runId);
@@ -269,7 +269,7 @@ export async function moveRole(
     ...input.line,
     kind: 'workflow-handoff',
     ...(state.kind === 'gate' ? {} : { wakes: [input.picked] }),
-    presentation: 'system',
+    presentation: 'card',
     cardType: WORKFLOW_HANDOFF_CARD_TYPE,
     card: {
       runId,
@@ -278,7 +278,7 @@ export async function moveRole(
       workflowVersion: run.workflowVersion,
       roleBindings,
       toState: stateName,
-      reassigned: true,
+      ...(input.resume ? { fromState: run.toState, outcome: 'resumed' } : { reassigned: true }),
       answers: run.seq,
       ...(input.tried.length ? { tried: input.tried } : {}),
       ...(state.hint ? { receiptHint: state.hint } : {}),

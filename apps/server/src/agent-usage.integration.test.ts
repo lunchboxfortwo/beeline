@@ -161,7 +161,7 @@ it('keeps a provider stop without inventing utilization and rejects another agen
 
 it('reports the owner-wide free allowance with its UTC reset and keeps it private', async () => {
   await db.query(
-    `INSERT INTO free_agents(agent_id,workspace_id,owner_id,sealed_keys) VALUES($1,$2,$3,'fixture')`,
+    `WITH workspace AS (SELECT $2::uuid) INSERT INTO free_agents(agent_id,owner_id,sealed_keys) VALUES($1,$3,'fixture')`,
     [agent, workspace, owner],
   );
   // A model call far in the past makes this a steady-state owner, not a first-day one,

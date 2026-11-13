@@ -1,3 +1,4 @@
+import { indexedPreviewId } from './room-message-records';
 import {
   chatActivityAt,
   type SidebarPreview,
@@ -87,23 +88,14 @@ function applyMessage(
 ): ChatListView {
   const item = view.chats[index]!;
   const latest = item.latestMessage;
-  if (message.deleted || !PREVIEW_PRESENTATIONS.has(message.presentation)) return view;
+  if (message.deleted) return { ...view, chats: placed(view.chats.filter((_, position) => position !== index), item, context) };
+  if (!PREVIEW_PRESENTATIONS.has(message.presentation)) return view;
   if (latest && (latest.createdAt > message.createdAt ||
     (latest.createdAt === message.createdAt && latest.id > message.id))) return view;
-  const preview: NonNullable<ChatListItem['latestMessage']> = {
-    id: message.id,
-    text: message.text,
-    createdAt: message.createdAt,
-    author: message.author,
-    ...(message.attachments?.length ? { attachments: message.attachments } : {}),
-    ...('mentionsViewer' in message && message.mentionsViewer ? { mentionsViewer: true as const } : {}),
-  };
-  if (latest?.id === message.id) {
-    // The same row edited or reacted to: its read state is unchanged.
-    const chats = [...view.chats];
-    chats[index] = { ...item, latestMessage: preview };
-    return { ...view, chats };
-  }
+  const indexedId = indexedPreviewId in item
+    ? (item as ChatListItem & { [indexedPreviewId]?: string })[indexedPreviewId] : latest?.id;
+  // Message bodies are already in Room records. Edits change no list facts.
+  if (indexedId === message.id) return view;
   const incoming = message.author.pubkey !== view.viewer.pubkey;
   const { closed: _closed, ...open } = item;
   // Unread is the server's read cursor. Newer incoming activity reopens a
@@ -113,9 +105,9 @@ function applyMessage(
   // held value, and the read-mark frame's read decides.
   const next: ChatListItem = incoming
     ? context.viewing?.(item.room.id)
-      ? { ...open, latestMessage: preview }
-      : { ...open, latestMessage: preview, unread: true }
-    : { ...item, latestMessage: preview };
+      ? open
+      : { ...open, unread: true }
+    : item;
   const rest = view.chats.filter((_, position) => position !== index);
   return { ...view, chats: placed(rest, next, context) };
 }
@@ -139,11 +131,6 @@ export function applyChatListDelta(
     return { ...view, chats };
   }
   if (delta.type === 'sidebar-preview') {
-    if (delta.preview.deleted && 'deckPreview' in delta && item.latestMessage?.id === delta.preview.id) {
-      const { latestMessage: _old, ...rest } = item;
-      return { ...view, chats: placed(view.chats.filter((_, position) => position !== index),
-        { ...rest, ...(delta.deckPreview ? { latestMessage: delta.deckPreview } : {}) }, context) };
-    }
     return applyMessage(view, index, delta.preview, context);
   }
   if (delta.type === 'message-delta') {
@@ -160,13 +147,6 @@ export function applyChatListDelta(
         chats[index] = { ...rest, ...(!call.endedAt ? { voiceCall: call } : {}) };
         view = { ...view, chats };
       }
-    }
-    if (delta.message.deleted && 'deckPreview' in delta &&
-        item.latestMessage?.id === delta.message.id) {
-      const { latestMessage: _old, ...rest } = item;
-      const next = { ...rest, ...(delta.deckPreview ? { latestMessage: delta.deckPreview } : {}) };
-      const chats = view.chats.filter((_, position) => position !== index);
-      return { ...view, chats: placed(chats, next, context) };
     }
     return applyMessage(view, index, delta.message, context);
   }

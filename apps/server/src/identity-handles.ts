@@ -39,7 +39,8 @@ RETURNS text LANGUAGE sql VOLATILE AS $$
     INSERT INTO identity_handle_counters AS counter(name,n)
     SELECT name,CASE WHEN explicit_choice THEN n ELSE beeline_next_handle_number(name) END
     FROM naming WHERE NOT EXISTS(SELECT 1 FROM known)
-      AND (NOT explicit_choice OR NOT EXISTS(SELECT 1 FROM identities WHERE id<>who AND lower(handle)=lower(base)))
+      AND (NOT explicit_choice OR NOT EXISTS(SELECT 1 FROM identities WHERE id<>who AND lower(handle)=lower(base))
+        AND NOT EXISTS(SELECT 1 FROM workspace_handles WHERE identity_id<>who AND handle=lower(base)))
     ON CONFLICT(name) DO UPDATE SET n=CASE WHEN explicit_choice THEN excluded.n ELSE counter.n+1 END
       WHERE NOT explicit_choice OR counter.n<excluded.n
     RETURNING CASE WHEN explicit_choice THEN lower(base) WHEN n=1 THEN name ELSE name||'_'||n::text END handle

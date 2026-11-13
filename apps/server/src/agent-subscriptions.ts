@@ -1,3 +1,4 @@
+import { webhookProviders, type ProviderService, connectedSlackApp, slackEventAvailable, slackDeliveries } from './providers/index.js';
 import { routeSystemCommand } from './agent-command.js';
 import { retireMembershipSubscriptionLists } from './membership-join.js';
 import { systemMessage } from '@beeline/api-contract/system-message-catalog';
@@ -245,14 +246,7 @@ async function createAgentSubscriptionInDb(
     if (!service) throw new Error('Connected service events are unavailable');
     if (input.event === 'new_message') {
       if (!service.composio) throw new Error('Slack events are unavailable');
-      const slackApp = (await db.query<{ id: string; composio_account_id: string }>(
-        `SELECT app.id,app.composio_account_id FROM workspace_apps app
-         JOIN memberships owner ON owner.workspace_id=$1 AND owner.room_id IS NULL
-           AND owner.identity_id=app.owner_identity_id AND owner.removed_at IS NULL
-         WHERE app.workspace_id=$1 AND app.app_key='slack' AND app.transport='composio'
-           AND app.state='active' AND app.composio_account_id IS NOT NULL
-         ORDER BY app.updated_at DESC LIMIT 1`, [room.rows[0]!.workspace_id],
-      )).rows[0];
+      const slackApp = await connectedSlackApp(db, room.rows[0]!.workspace_id);
       if (!slackApp) throw new Error('Slack is not connected in this Workspace');
       app = slackApp;
       await service.composio.ensureTriggerReceiver(service.receiverUrl);
@@ -378,27 +372,14 @@ export async function deleteRoomSubscription(db: SqlDatabase, roomId: string, id
 /** The per-Room catalog reflects actual active connected accounts. */
 export async function listServiceSubscriptionEvents(db: SqlDatabase, roomId: string, agentId: string,
   includeSlack = true) {
-  const rows = includeSlack ? await db.query(
-    `SELECT 1 FROM rooms room
-     JOIN room_access agent ON agent.room_id=room.id AND agent.identity_id=$2 AND agent.removed_at IS NULL
-     JOIN workspace_apps app ON app.workspace_id=room.workspace_id AND app.app_key='slack'
-       AND app.transport='composio' AND app.state='active' AND app.composio_account_id IS NOT NULL
-     JOIN memberships owner ON owner.workspace_id=room.workspace_id AND owner.room_id IS NULL
-       AND owner.identity_id=app.owner_identity_id AND owner.removed_at IS NULL
-     WHERE room.id=$1 AND room.archived_at IS NULL LIMIT 1`, [roomId, agentId],
-  ) : { rowCount: 0 };
-  const linearApp = await connectedProviderApp(db, roomId, agentId, 'linear');
-  const stripeApp = await connectedProviderApp(db, roomId, agentId, 'stripe');
-  const linear = linearApp && await providerEventIsAvailable(db, linearApp.id, 'issue.created');
-  const stripe = stripeApp && await providerEventIsAvailable(db, stripeApp.id, 'payment_intent.succeeded');
-  return { events: [
-    ...(rows.rowCount ? [{ service: 'Slack' as const, event: 'new_message' as const,
-      label: 'new message in a Slack channel' as const }] : []),
-    ...(linear ? [{ service: 'Linear' as const, event: 'issue.created' as const,
-      label: 'new issue in Linear' as const }] : []),
-    ...(stripe ? [{ service: 'Stripe' as const, event: 'payment_intent.succeeded' as const,
-      label: 'payment succeeded in Stripe' as const }] : []),
-  ] };
+  const rows = includeSlack ? await slackEventAvailable(db, roomId, agentId) : { rowCount: 0 };
+  const events: { service: string; event: string; label: string }[] = rows.rowCount
+    ? [{ service: 'Slack', event: 'new_message', label: 'new message in a Slack channel' }] : [];
+  for (const adapter of webhookProviders) {
+    const app = await connectedProviderApp(db, roomId, agentId, adapter.key as ProviderService);
+    if (app && await providerEventIsAvailable(db, app.id, adapter.webhook!.event)) events.push(adapter.webhook!.catalog);
+  }
+  return { events };
 }
 
 /** A signed provider delivery is routed by its account and trigger, never by payload claims alone. */
@@ -409,20 +390,7 @@ export async function fireServiceSubscriptions(db: SqlDatabase, body: Record<str
   const { trigger_id: triggerId, connected_account_id: accountId, trigger_slug: slug } =
     meta as Record<string, unknown>;
   if (typeof triggerId !== 'string' || typeof accountId !== 'string' || slug !== 'SLACK_NEW_MESSAGE') return [];
-  const rows = await db.query<Row>(
-    `SELECT subscription.* FROM agent_subscriptions subscription
-     JOIN rooms room ON room.id=subscription.room_id AND room.archived_at IS NULL
-     JOIN room_access agent ON agent.room_id=room.id AND agent.identity_id=subscription.agent_id
-       AND agent.removed_at IS NULL
-     JOIN workspace_apps app ON app.id=subscription.service_app_id AND app.workspace_id=room.workspace_id
-       AND app.state='active' AND app.transport='composio' AND app.app_key='slack'
-       AND app.composio_account_id=subscription.service_account_id
-     JOIN memberships owner ON owner.workspace_id=room.workspace_id AND owner.room_id IS NULL
-       AND owner.identity_id=app.owner_identity_id AND owner.removed_at IS NULL
-     WHERE subscription.paused_at IS NULL AND subscription.source='service' AND subscription.event='new_message'
-       AND subscription.trigger_id=$1 AND subscription.service_account_id=$2`,
-    [triggerId, accountId],
-  );
+  const rows = await slackDeliveries<Row>(db, triggerId, accountId);
   if (!rows.rowCount) return [];
   await ensureSystemIdentity(db);
   const data = body.data && typeof body.data === 'object' && !Array.isArray(body.data)
@@ -448,7 +416,7 @@ export async function fireServiceSubscriptions(db: SqlDatabase, body: Record<str
             ? { name: typeof (data.sender as Record<string, unknown>).name === 'string'
               ? ((data.sender as Record<string, unknown>).name as string).slice(0, 100) : undefined }
             : undefined },
-        subscriptionPrompt: current.prompt ?? undefined, subscriptionWorkflowSlug: current.workflow_slug ?? undefined,
+        subscriptionId: row.id, subscriptionPrompt: current.prompt ?? undefined, subscriptionWorkflowSlug: current.workflow_slug ?? undefined,
       });
       if (line.inserted) await tx.query(`UPDATE agent_subscriptions
         SET last_fired_at=now(),fired_count=fired_count+1 WHERE id=$1`, [row.id]);
@@ -512,7 +480,7 @@ export async function fireRepositorySubscriptions(
         id, roomId: row.room_id, authorId: SYSTEM_IDENTITY_ID,
         ...repositorySubscriptionLine(eventName, repository, details),
         kind: 'subscription-fired', payload, wakes: [row.agent_id],
-        subscriptionPrompt: current.prompt ?? undefined, subscriptionWorkflowSlug: current.workflow_slug ?? undefined,
+        subscriptionId: row.id, subscriptionPrompt: current.prompt ?? undefined, subscriptionWorkflowSlug: current.workflow_slug ?? undefined,
       });
       if (line.inserted) await tx.query(`UPDATE agent_subscriptions
         SET last_fired_at=now(),fired_count=fired_count+1 WHERE id=$1`, [row.id]);

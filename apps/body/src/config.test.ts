@@ -1,4 +1,5 @@
 import { chmodSync, mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
+import { execFileSync } from 'node:child_process';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { describe, expect, it } from 'vitest';
@@ -21,6 +22,19 @@ const binaryEnv = {
 };
 
 describe('buildAgentEnv passthrough boundary', () => {
+  it('makes the installed adb client available before a mid-session host approval', () => {
+    const home = mkdtempSync(join(tmpdir(), 'beeline-sdk-path-'));
+    try {
+      const tools = join(home, 'android-sdk/platform-tools');
+      mkdirSync(tools, { recursive: true });
+      writeFileSync(join(tools, 'adb'), '#!/bin/sh\necho emulator-5554\n', { mode: 0o755 });
+      const env = buildAgentEnv({ HOME: home, PATH: '/usr/bin' });
+      expect(env.PATH.split(':')).toContain(tools);
+      expect(execFileSync('adb', ['devices'], { env, encoding: 'utf8' })).toContain('emulator-5554');
+      expect(buildAgentEnv({ HOME: '/private', ANDROID_HOME: join(home, 'android-sdk'), PATH: '/usr/bin' }).PATH.split(':')).toContain(tools);
+    } finally { rmSync(home, { recursive: true, force: true }); }
+  });
+
   // AcpClient.start() used to spread the daemon's whole process.env underneath
   // this map, so the allowlist described nothing. It is the child's entire
   // environment now, which only works if it actually carries what a harness

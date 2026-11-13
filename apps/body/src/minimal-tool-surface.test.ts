@@ -2,7 +2,9 @@ import { describe, expect, it } from 'vitest';
 import { spawn } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
 import { Check } from 'typebox/value';
+import { institutionalMemoryKeywords } from '@beeline/api-contract/daemon';
 import { agentToolsFor, callAgentTool } from './read-only-mcp.js';
+import { advertisedAgentTool, normalizeAgentToolArgs, validateAdvertisedToolInput } from './read-only-mcp-open-poll.js';
 import { toolValidationSchema, type ToolDefinition } from './minimal-tool-surface.js';
 import { assembleSessionPrompt, PROMPT_SURFACES } from './prompt-assembly.js';
 
@@ -27,7 +29,7 @@ describe('Beeline tool surface across harnesses', () => {
       // accepts the same schema: this was Ruby's exact 28 -> 22 discrepancy.
       const accepted = tools.filter(tool => rootCombinators.every(key => !(key in tool.inputSchema)));
       expect(accepted.map(tool => tool.name)).toEqual(tools.map(tool => tool.name));
-      expect(accepted).toHaveLength(28);
+      expect(accepted).toHaveLength(29);
       expect(accepted.map(tool => tool.name)).toEqual(expect.arrayContaining(missingOnClaude));
       const prompt = assembleSessionPrompt({ surface, agentName: 'Bee', agentCommand }).systemPrompt;
       const inventory = prompt.match(/^Beeline tools: (.+)\.$/m)?.[1]?.replaceAll('`', '').split(', ');
@@ -39,6 +41,64 @@ describe('Beeline tool surface across harnesses', () => {
 
   it.each(invalidInputs)('still rejects invalid %s arguments before any server call', async (name, args) => {
     await expect(callAgentTool(name, args, 'invalid-combination')).rejects.toThrow(/invalid arguments/);
+  });
+
+  it('names the field and the limit when a value is too long', async () => {
+    await expect(callAgentTool('remember', {
+      kind: 'fact', action: 'save', subject_is_requester: false, canonical_key: 'deploy',
+      body: 'x'.repeat(201), keywords: ['deploy'], source_message_ids: ['m1'], person_asked: false, confidence: 0.9,
+    }, 'too-long-body')).rejects.toThrow(/body: 201 characters; the limit is 200/);
+    await expect(callAgentTool('wake', {
+      action: 'create', trigger: 'schedule', title: 'Reminder', prompt: 'x'.repeat(2001),
+    }, 'too-long-prompt')).rejects.toThrow(/prompt: 2001 characters; the limit is 2000/);
+  });
+
+  it('normalizes an oversized corner name and objective before schema validation', async () => {
+    const objective = 'word '.repeat(401);
+    expect(objective).toHaveLength(2005);
+    const args = {
+      room: '11111111-1111-4111-8111-111111111111',
+      implementer: 'worker',
+      name: 'n'.repeat(121),
+      objective,
+      brief: { spec: 'Build the widget' },
+    };
+    const savedUrl = process.env.BEELINE_DAEMON_BASE_URL;
+    const savedTurn = process.env.BEELINE_TURN_CONTEXT_FILE;
+    delete process.env.BEELINE_DAEMON_BASE_URL;
+    delete process.env.BEELINE_TURN_CONTEXT_FILE;
+    try {
+      await callAgentTool('open_corner', args, 'oversized-corner');
+      throw new Error('expected the call to stop before a daemon');
+    } catch (error) {
+      const message = error instanceof Error ? error.message : String(error);
+      expect(message).toMatch(/agent tool is missing host context: BEELINE_DAEMON_BASE_URL/);
+      expect(message).not.toMatch(/2005 characters/);
+      expect(message).not.toMatch(/121 characters; the limit is 120/);
+      expect(message).toMatch(/Removed:/);
+      expect(message).toMatch(/name was 121 characters; cut to 120/);
+      expect(message).toMatch(/objective was 401 words; cut to 24/);
+    } finally {
+      if (savedUrl === undefined) delete process.env.BEELINE_DAEMON_BASE_URL;
+      else process.env.BEELINE_DAEMON_BASE_URL = savedUrl;
+      if (savedTurn === undefined) delete process.env.BEELINE_TURN_CONTEXT_FILE;
+      else process.env.BEELINE_TURN_CONTEXT_FILE = savedTurn;
+    }
+  });
+
+  it('saves capital letters and a short word such as ci after fixing them', () => {
+    const args = {
+      kind: 'fact', action: 'save', subject_is_requester: false, canonical_key: 'deploy',
+      body: 'Deploys use ci.', keywords: ['Deploy', 'ci'], source_message_ids: ['m1'], person_asked: false, confidence: 0.9,
+    };
+    expect(normalizeAgentToolArgs('remember', args).join(' ')).toContain('deploy, ci');
+    expect(args.keywords).toEqual(['deploy', 'ci']);
+    expect(() => validateAdvertisedToolInput(advertisedAgentTool('remember'), args)).not.toThrow();
+    expect(institutionalMemoryKeywords(args.keywords)).toEqual(['deploy', 'ci']);
+    const reply = { text: 'Still here.', replyTo: 'not-a-message' };
+    expect(normalizeAgentToolArgs('post', reply)).toEqual(['reply link']);
+    expect(reply).toEqual({ text: 'Still here.' });
+    expect(() => validateAdvertisedToolInput(advertisedAgentTool('post'), reply)).not.toThrow();
   });
 
   it('retains every field, nested schema and branch rule for Claude without changing the canonical contract', () => {
@@ -91,7 +151,7 @@ describe('Beeline tool surface across harnesses', () => {
       }>;
       const tools = responses.find(response => response.id === 1)!.result.tools;
       expect(tools).toEqual(agentToolsFor(true, false, false, false, true, true, true));
-      expect(tools.filter(tool => rootCombinators.every(key => !(key in tool.inputSchema)))).toHaveLength(28);
+      expect(tools.filter(tool => rootCombinators.every(key => !(key in tool.inputSchema)))).toHaveLength(29);
       for (let index = 0; index < invalidInputs.length; index++) {
         const response = responses.find(response => response.id === index + 2)!;
         expect(response.result.isError).toBe(true);

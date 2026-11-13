@@ -1,3 +1,4 @@
+import { finishLiveClose } from './shutdown.js';
 import { type Server, createServer, type IncomingMessage, type ServerResponse } from "node:http";
 import { runnableOrigin, serveRunnableArtifact } from "./runnable-artifact.js";
 import type { LiveEvent, LiveHub } from "./live.js";
@@ -16,7 +17,7 @@ import { acceptedJsonEncoding, type JsonEncoding, encodeJsonBody } from "./json-
 import { recordOperatorFunctionEvent } from "./operator-dashboard.js";
 import { vaultSaveHttp } from "./vault-save-http.js";
 import { GitHubHttpError } from "@beeline/auth/github";
-import { captureServerError } from "./sentry.js";
+import { captureServerError, withSentryUserScope } from "./sentry.js";
 import { upgradeComputerSession, upgradeBodyComputerSource, upgradeComputerWaiter } from "./computer-session.js";
 import { bearer, type TokenAuth } from "./auth.js";
 import type { RoomsMcp } from "./rooms-mcp.js";
@@ -558,7 +559,7 @@ export function createBeelineServer(options: ServerOptions): Server {
       throw new PhoneOperationError(409, { error: 'phone_socket_required' });
     return dispatchPhoneOperation(name, input, viewerId, undefined, familyId);
   };
-  const server = createServer((request, response) => {
+  const server = createServer((request, response) => withSentryUserScope(() => {
     if (gameOrigin && request.headers.host === new URL(gameOrigin).host) {
       void serveRunnableArtifact(request, response, gameOrigin, options.objectService).catch(() => {
         if (!response.headersSent) response.writeHead(503, { 'content-type': 'text/plain', 'cache-control': 'no-store' });
@@ -638,19 +639,24 @@ export function createBeelineServer(options: ServerOptions): Server {
       );
       json(response, status, error instanceof PhoneOperationError ? error.payload : { error: message });
     });
-  });
-  // HTTP `close` waits for upgraded sockets. Terminate them before starting
-  // that wait, otherwise an idle daemon subscription can hold shutdown open.
+  }));
+  // Send a restart close frame; bound peers that never acknowledge it.
   const closeHttp = server.close.bind(server);
   server.close = ((callback?: (error?: Error) => void) => {
     // Connections stay held across a restart: helpers reconnect to a running
     // instance, and this instance's lease releases whatever never returns.
     shuttingDown = true;
     releaseConnectionEpochs?.();
-    for (const client of webSockets.clients) client.terminate();
-    webSockets.close();
+    // noServer owns no listener; waiting for its clients is sufficient.
+    const clientsClosed = Promise.all([...webSockets.clients].map(client => new Promise<void>(resolve => {
+      client.once('close', () => resolve());
+      client.close(1012, 'Server restarting');
+    })));
+    const liveClosed = finishLiveClose(clientsClosed, () => {
+      for (const client of webSockets.clients) client.terminate();
+    });
     return closeHttp((error) => {
-      void phoneViewing.endAll().then(
+      void liveClosed.then(() => phoneViewing.endAll()).then(
         () => callback?.(error),
         (releaseError: unknown) => {
           console.error('[live] viewing shutdown release failed', releaseError);
@@ -660,6 +666,7 @@ export function createBeelineServer(options: ServerOptions): Server {
     });
   }) as Server['close'];
   server.on('upgrade', (request, socket, head) => {
+    if (shuttingDown) { socket.destroy(); return; }
     if (gameOrigin && request.headers.host === new URL(gameOrigin).host) {
       socket.destroy();
       return;
@@ -727,6 +734,7 @@ export function createBeelineServer(options: ServerOptions): Server {
           if (remaining <= 0) machineSocketCounts.delete(key);
           else machineSocketCounts.set(key, remaining);
         });
+        if (shuttingDown) { socket.destroy(); return; }
         webSockets.handleUpgrade(request, socket, head, (client) =>
           webSockets.emit('connection', client, request, {
             identityId: '',
@@ -788,6 +796,7 @@ export function createBeelineServer(options: ServerOptions): Server {
         daemonSockets.set(daemonId, agentSockets);
       }
       socket.once('close', admitted.release);
+      if (shuttingDown) { socket.destroy(); return; }
       webSockets.handleUpgrade(request, socket, head, (client) =>
         webSockets.emit('connection', client, request, {
           identityId,

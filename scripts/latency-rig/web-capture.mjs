@@ -8,6 +8,9 @@ import { pathToFileURL } from 'node:url';
 import { execFileSync } from 'node:child_process';
 import { fixture, scenarios, resetWebFixture, verifyWebEffect } from './web-fixtures.mjs';
 import { steps, exclusions } from './web-steps.mjs';
+import { captureRoutes } from './web-route-capture.mjs';
+import { readWebResources } from './web-resources.mjs';
+import { tapFeedback, armTapTiming, readTapTiming } from './web-tap-timing.mjs';
 import { measureLongPress } from './web-long-press.mjs';
 import { armForwardTiming, readForwardTiming } from './web-forward-timing.mjs';
 async function bounded(work, milliseconds, label) {
@@ -35,7 +38,7 @@ export function validateInventory(inventory, fixtures = scenarios, drivers = ste
       throw new Error(`Missing driver step: ${name}`);
   }
 }
-export function summarize(inventory, captures) {
+export function summarize(inventory, captures, { samplesPerCapture = 20, budgetMs = 150 } = {}) {
   const rows = [],
     unmeasured = [];
   for (const name of inventory) {
@@ -46,18 +49,26 @@ export function summarize(inventory, captures) {
       !paired.every((c) => [1, 2].includes(c.capture)) ||
       paired.some(
         (c) =>
-          c.samples.length !== 20 ||
+          c.samples.length !== samplesPerCapture ||
           c.reason ||
           c.samples.some((n) => !Number.isFinite(n) || n <= 0),
       )
     ) {
       unmeasured.push({
         name,
+        availability: ['switch-workspace', 'create-room'].includes(name)
+          ? 'out-of-scope'
+          : exclusions[name]
+            ? ['approve-merge', 'connect-app'].includes(name)
+              ? 'external'
+              : 'unavailable'
+            : 'incomplete',
         reason:
           paired
             .filter((c) => c.reason)
             .map((c) => `Capture ${c.capture}: ${c.reason}`)
-            .join('; ') || 'Requires two complete captures of twenty positive finite samples',
+            .join('; ') ||
+          `Requires two complete captures of ${samplesPerCapture} positive finite samples`,
         captures: paired.map((c) => ({ capture: c.capture, samples: c.samples.length })),
       });
       continue;
@@ -67,14 +78,41 @@ export function summarize(inventory, captures) {
     const values = paired.flatMap((c) => c.samples);
     const longPress = paired.flatMap((c) => c.longPressTimings ?? []);
     const forward = paired.flatMap((c) => c.forwardTimings ?? []);
+    const tap = paired.flatMap((c) => c.tapTimings ?? []);
+    const uploads = paired.flatMap((c) => c.uploadPreparationMs ?? []);
     rows.push({
       name,
-      samples: 40,
+      samples: samplesPerCapture * 2,
+      ...(uploads.length === samplesPerCapture * 2
+        ? {
+            uploadPreparation: {
+              p50Ms: percentile(uploads, 0.5),
+              p95Ms: percentile(uploads, 0.95),
+            },
+          }
+        : {}),
+      ...(tap.length === samplesPerCapture * 2
+        ? {
+            timingContract:
+              'browser pointerdown to the driver fixture result DOM plus two frames; excludes driver actionability and observation delay',
+            driverObserved: {
+              p50Ms: percentile(
+                tap.map((t) => t.driverObservedMs),
+                0.5,
+              ),
+              p95Ms: percentile(
+                tap.map((t) => t.driverObservedMs),
+                0.95,
+              ),
+            },
+          }
+        : {}),
       p50Ms: percentile(values, 0.5),
       p95Ms: percentile(values, 0.95),
       ...(forward.length === 40
         ? {
-            timingContract: 'action start to in-page picker removal plus two animation frames',
+            timingContract:
+              'action start to accepted visible feedback plus two frames, or picker removal plus two frames on clients without feedback',
             driverObserved: {
               p50Ms: percentile(
                 forward.map((t) => t.driverObservedMs),
@@ -127,7 +165,7 @@ export function summarize(inventory, captures) {
         : {}),
       captures: paired.map((c) => ({
         capture: c.capture,
-        samples: 20,
+        samples: samplesPerCapture,
         p50Ms: percentile(c.samples, 0.5),
         p95Ms: percentile(c.samples, 0.95),
       })),
@@ -136,11 +174,11 @@ export function summarize(inventory, captures) {
   // A percentage of interactions meeting the existing 150ms tap p50 budget.
   // Incomplete inventories have no score, not a misleading partial average.
   return {
-    fullInventoryScore: unmeasured.length
-      ? null
-      : (100 * rows.filter((r) => r.p50Ms < 150).length) / inventory.length,
-    scoreDefinition:
-      'Percentage of the complete interaction inventory with paired pooled p50 below 150 ms; null if any item is unmeasured',
+    fullInventoryScore:
+      unmeasured.length || !inventory.length
+        ? null
+        : (100 * rows.filter((r) => r.p50Ms < budgetMs).length) / inventory.length,
+    scoreDefinition: `Percentage of the complete inventory with paired pooled p50 below ${budgetMs} ms; null if any item is unmeasured`,
     coverage: { measured: rows.length, total: inventory.length },
     rows,
     unmeasured,
@@ -177,7 +215,8 @@ async function main() {
   const selected = process.env.LATENCY_RIG_WEB_INTERACTION;
   if (selected && !inventory.includes(selected))
     throw new Error(`Unknown interaction: ${selected}`);
-  const captureInventory = selected ? [selected] : inventory;
+  const captureInventory =
+    process.env.LATENCY_RIG_WEB_ROUTES_ONLY === '1' ? [] : selected ? [selected] : inventory;
   const routes = JSON.parse(await readFile(new URL('./routes.json', import.meta.url), 'utf8'));
   for (const name of inventory)
     if (!routes.some((route) => route.path === fixture(name).route))
@@ -194,8 +233,14 @@ async function main() {
         'web-fixtures.mjs',
         'web-steps.mjs',
         'web-capture.mjs',
+        'web-route-capture.mjs',
+        'web-route-fixtures.mjs',
+        'local-object-store.mjs',
+        'check-routes.mjs',
         'web-forward-timing.mjs',
         'web-long-press.mjs',
+        'web-resources.mjs',
+        'web-tap-timing.mjs',
         'interactions.json',
         'routes.json',
       ].map(async (name) => [
@@ -209,179 +254,197 @@ async function main() {
   let browser;
   try {
     browser = await chromium.launch({ headless: true, args: ['--no-sandbox'] });
+    let storageState;
     for (let capture = 1; capture <= 2; capture++) {
-      for (const name of inventory) await resetWebFixture(db, fixture(name), false);
-      const context = await browser.newContext({
-        viewport: { width: 390, height: 844 },
-        baseURL: origin.origin,
-        serviceWorkers: 'block',
-      });
-      // Only this known local API gets CORS headers. No production host, asset,
-      // analytics endpoint or OAuth page may escape the isolated fixture.
-      await context.route('**/*', async (route) => {
-        const request = route.request(),
-          url = new URL(request.url());
-        if (url.origin === origin.origin) return route.continue();
-        if (url.origin === backend.origin) {
-          if (request.method() === 'OPTIONS')
-            return route.fulfill({
-              status: 204,
-              headers: {
-                'access-control-allow-origin': origin.origin,
-                'access-control-allow-headers': '*',
-                'access-control-allow-methods': '*',
-              },
-            });
-          const response = await route.fetch();
-          return route.fulfill({
-            response,
-            headers: { ...response.headers(), 'access-control-allow-origin': origin.origin },
-          });
-        }
-        blockedRequests.push({ capture, origin: url.origin });
-        await route.abort();
-      });
-      await context.routeWebSocket('**/*', (socket) => {
-        const url = new URL(socket.url());
-        if (url.hostname === backend.hostname && url.port === backend.port)
-          socket.connectToServer();
-        else {
-          blockedRequests.push({ capture, origin: url.origin });
-          socket.close();
-        }
-      });
-      let page = await context.newPage();
-      page.setDefaultTimeout(4000);
-      page.setDefaultNavigationTimeout(6000);
-      await page.goto(`/review/${secret}`);
-      await page.waitForURL('**/beeline/channels**', { timeout: 15000 });
+      for (const name of inventory)
+        if (!exclusions[name]) await resetWebFixture(db, fixture(name), false);
       for (const name of captureInventory) {
-        const record = { name, capture, samples: [] };
+        const record = { name, capture, samples: [], resources: [] };
         captures.push(record);
         const f = fixture(name);
-        for (let sample = 0; sample < 20; sample++) {
-          if (exclusions[name]) {
-            record.reason = exclusions[name];
-            break;
-          }
-          try {
-            await page.goto('/__latency_blank.html');
-            await bounded(
-              () =>
-                page.evaluate(async () => {
-                  for (const key of Object.keys(localStorage)) {
-                    if (key.startsWith('beeline.surface.') || key.startsWith('beeline.outbox.'))
-                      localStorage.removeItem(key);
-                  }
-                  sessionStorage.clear();
-                  for (const database of await indexedDB.databases()) {
-                    await new Promise((resolve, reject) => {
-                      const request = indexedDB.deleteDatabase(database.name);
-                      request.onsuccess = resolve;
-                      request.onerror = () => reject(new Error('Fixture cache deletion failed'));
-                      request.onblocked = () => reject(new Error('Fixture cache is still open'));
-                    });
-                  }
-                }),
-              5000,
-              'Fixture cache reset',
-            );
+        if (exclusions[name]) record.reason = exclusions[name];
+        else
+          for (let sample = 0; sample < 20; sample++) {
             await resetWebFixture(db, f);
-            const prepared = await bounded(
-              () => steps[name](page, f, `rig-${name}-${capture}-${sample}`),
-              12000,
-              'Fixture setup',
-            );
-            if (prepared.unmeasured) {
-              record.reason = prepared.unmeasured;
-              break;
-            }
-            if (name === 'forward-message')
-              await page.evaluate(armForwardTiming, { messageText: f.text });
-            await bounded(
-              () =>
-                page.evaluate(() => {
-                  window.__latencyStart = performance.now();
-                }),
-              2000,
-              'Action start',
-            );
-            let duration;
-            if (prepared.longPressThresholdMs !== undefined) {
-              const timing = await bounded(
-                () => measureLongPress(page, prepared),
-                10000,
-                'Long press and visible result',
-              );
-              (record.longPressTimings ??= []).push(timing);
-              duration = timing.postRecognitionMs;
-            } else {
-              await bounded(
-                async () => {
-                  await prepared.act();
-                  await prepared.done();
-                },
-                10000,
-                'Action and visible result',
-              );
-              duration = await bounded(
-                () =>
-                  page.evaluate(
+            const context = await browser.newContext({
+              viewport: { width: 390, height: 844 },
+              baseURL: origin.origin,
+              serviceWorkers: 'block',
+              storageState,
+            });
+            // Only this known local API gets CORS headers. No production host, asset,
+            // analytics endpoint or OAuth page may escape the isolated fixture.
+            await context.route('**/*', async (route) => {
+              const request = route.request(),
+                url = new URL(request.url());
+              if (url.origin === origin.origin) return route.continue();
+              if (url.origin === backend.origin) {
+                if (request.method() === 'OPTIONS')
+                  return route.fulfill({
+                    status: 204,
+                    headers: {
+                      'access-control-allow-origin': origin.origin,
+                      'access-control-allow-headers': '*',
+                      'access-control-allow-methods': '*',
+                    },
+                  });
+                const response = await route.fetch();
+                return route.fulfill({
+                  response,
+                  headers: { ...response.headers(), 'access-control-allow-origin': origin.origin },
+                });
+              }
+              blockedRequests.push({ capture, origin: url.origin });
+              await route.abort();
+            });
+            await context.routeWebSocket('**/*', (socket) => {
+              const url = new URL(socket.url());
+              if (url.hostname === backend.hostname && url.port === backend.port)
+                socket.connectToServer();
+              else {
+                blockedRequests.push({ capture, origin: url.origin });
+                socket.close();
+              }
+            });
+            try {
+              const page = await context.newPage();
+              page.setDefaultTimeout(4000);
+              page.setDefaultNavigationTimeout(6000);
+              if (!storageState) {
+                await page.goto(`/review/${secret}`);
+                await page.waitForURL('**/beeline/channels**', { timeout: 15000 });
+                storageState = await context.storageState();
+                for (const origin of storageState.origins)
+                  origin.localStorage = origin.localStorage.filter(
+                    ({ name }) =>
+                      !name.startsWith('beeline.surface.') && !name.startsWith('beeline.outbox.'),
+                  );
+              }
+              try {
+                const prepared = await bounded(
+                  () => steps[name](page, f, `rig-${name}-${capture}-${sample}`),
+                  12000,
+                  'Fixture setup',
+                );
+                if (prepared.unmeasured) {
+                  record.reason = prepared.unmeasured;
+                  break;
+                }
+                if (prepared.uploadMs !== undefined)
+                  (record.uploadPreparationMs ??= []).push(prepared.uploadMs);
+                const before = await readWebResources(context, page);
+                const feedback = tapFeedback(name, f);
+                if (feedback) await page.evaluate(armTapTiming, feedback);
+                if (name === 'forward-message')
+                  await page.evaluate(armForwardTiming, { messageText: f.text });
+                await bounded(
+                  () =>
+                    page.evaluate(() => {
+                      window.__latencyStart = performance.now();
+                    }),
+                  2000,
+                  'Action start',
+                );
+                let duration;
+                if (prepared.longPressThresholdMs !== undefined) {
+                  const timing = await bounded(
+                    () => measureLongPress(page, prepared),
+                    10000,
+                    'Long press and visible result',
+                  );
+                  (record.longPressTimings ??= []).push(timing);
+                  duration = timing.postRecognitionMs;
+                } else {
+                  await bounded(
+                    async () => {
+                      await prepared.act();
+                      await prepared.done();
+                    },
+                    10000,
+                    'Action and visible result',
+                  );
+                  duration = await bounded(
                     () =>
-                      new Promise((resolve) =>
-                        requestAnimationFrame(() =>
-                          requestAnimationFrame(() =>
-                            resolve(performance.now() - window.__latencyStart),
+                      page.evaluate(
+                        () =>
+                          new Promise((resolve) =>
+                            requestAnimationFrame(() =>
+                              requestAnimationFrame(() =>
+                                resolve(performance.now() - window.__latencyStart),
+                              ),
+                            ),
                           ),
-                        ),
                       ),
-                  ),
-                2000,
-                'Result frame',
-              );
+                    2000,
+                    'Result frame',
+                  );
+                }
+                if (feedback) {
+                  const timing = await page.evaluate(readTapTiming);
+                  (record.tapTimings ??= []).push({ ...timing, driverObservedMs: duration });
+                  duration = timing.durationMs;
+                }
+                if (name === 'forward-message') {
+                  const timing = await page.evaluate(readForwardTiming);
+                  (record.forwardTimings ??= []).push({
+                    ...timing,
+                    driverObservedMs: duration,
+                    driverObservationLagMs: duration - timing.durationMs,
+                  });
+                  duration = timing.durationMs;
+                }
+                await bounded(
+                  () => verifyWebEffect(db, f, `rig-${name}-${capture}-${sample}`),
+                  3000,
+                  'Committed effect',
+                );
+                record.samples.push(duration);
+                record.resources.push({ before, after: await readWebResources(context, page) });
+              } catch (error) {
+                record.reason = `Sample ${sample + 1}: ${stripVTControlCharacters(error.message)}`;
+                await page
+                  .screenshot({
+                    path: resolve(out, `${name}-${capture}-failure.png`),
+                    timeout: 1500,
+                  })
+                  .catch(() => {});
+                await writeFile(
+                  resolve(out, `${name}-${capture}-failure.txt`),
+                  await page
+                    .locator('body')
+                    .innerText({ timeout: 1500 })
+                    .catch(() => ''),
+                );
+                break;
+              }
+            } finally {
+              await context.close();
             }
-            if (name === 'forward-message') {
-              const timing = await page.evaluate(readForwardTiming);
-              (record.forwardTimings ??= []).push({
-                ...timing,
-                driverObservedMs: duration,
-                driverObservationLagMs: duration - timing.durationMs,
-              });
-              duration = timing.durationMs;
-            }
-            await bounded(
-              () => verifyWebEffect(db, f, `rig-${name}-${capture}-${sample}`),
-              3000,
-              'Committed effect',
-            );
-            record.samples.push(duration);
-          } catch (error) {
-            record.reason = `Sample ${sample + 1}: ${stripVTControlCharacters(error.message)}`;
-            await page
-              .screenshot({ path: resolve(out, `${name}-${capture}-failure.png`), timeout: 1500 })
-              .catch(() => {});
-            await writeFile(
-              resolve(out, `${name}-${capture}-failure.txt`),
-              await page
-                .locator('body')
-                .innerText({ timeout: 1500 })
-                .catch(() => ''),
-            );
-            await page.close();
-            page = await context.newPage();
-            page.setDefaultTimeout(4000);
-            page.setDefaultNavigationTimeout(6000);
-            break;
           }
-        }
         console.log(
           `${name} capture=${capture} samples=${record.samples.length}${record.reason ? ` unmeasured: ${record.reason.split('\n')[0]}` : ''}`,
         );
         await writeFile(resolve(out, 'captures.json'), JSON.stringify(captures, null, 2) + '\n');
       }
-      await context.close();
     }
+    const selectedRoute = process.env.LATENCY_RIG_WEB_ROUTE;
+    if (selectedRoute && !routes.some((route) => route.path === selectedRoute))
+      throw new Error(`Unknown web route: ${selectedRoute}`);
+    const routeInventory =
+      process.env.LATENCY_RIG_WEB_ROUTES === '1' || process.env.LATENCY_RIG_WEB_ROUTES_ONLY === '1'
+        ? await captureRoutes({
+            browser,
+            routes: selectedRoute ? routes.filter((route) => route.path === selectedRoute) : routes,
+            origin,
+            backend,
+            secret,
+            out,
+            blockedRequests,
+            storageState,
+          })
+        : undefined;
     const summary = {
+      routeInventory,
       schemaVersion: 1,
       longPressContract:
         'pointerdown + threshold from source to existing result plus two frames; observed during hold; gesture-inclusive timings retained separately',
@@ -390,7 +453,7 @@ async function main() {
       browser: browser.version(),
       sourceHashes,
       method:
-        'User action to observed destination/result DOM plus two animation frames, including driver overhead; upper bound, not physical scanout. Setup, reset and sign-in excluded. Forward completion uses in-page removal plus two frames; driver-observed durations are retained separately. Local server only; no injected network delay.',
+        'Fresh context per sample, authentication only restored. Browser-observed tap cases retain driver totals separately; other cases include driver overhead. All results require the fixture DOM plus two frames; not physical scanout. Setup, reset and sign-in excluded. Forward completion uses accepted visible feedback plus two frames when present, otherwise in-page removal plus two frames; driver-observed durations are retained separately. Local server only; no injected network delay.',
       ...summarize(inventory, captures),
       blockedRequests,
     };

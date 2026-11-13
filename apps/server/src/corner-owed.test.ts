@@ -170,6 +170,33 @@ describe('corner_owed', () => {
     await step(owedToViewer);
   });
 
+  it.each(['opening order', 'first human tag'])('does not rebuild owed history after the %s establishes the owner', async source => {
+    if (source === 'first human tag') {
+      await database.query(`DELETE FROM agent_commands WHERE room_id=$1 AND reason='corner_objective'`, [CORNER]);
+      await phone.execute('sendRoomMessage', { roomId: CORNER, text: '@bee first assignment' }, OTHER);
+    }
+    await post('existing-tag', AGENT, '@owner matte or gloss?');
+    await database.query(`CREATE FUNCTION reject_owed_history_rebuild() RETURNS trigger
+      LANGUAGE plpgsql AS $$ BEGIN RAISE EXCEPTION 'tag rebuilt existing owed history'; END $$;
+      CREATE TRIGGER reject_owed_history_rebuild BEFORE DELETE ON corner_owed
+      FOR EACH ROW WHEN (OLD.message_id='existing-tag') EXECUTE FUNCTION reject_owed_history_rebuild()`);
+    await phone.execute('sendRoomMessage', { roomId: CORNER, text: '@bee continue' }, OTHER);
+    expect((await database.query(`SELECT message_id FROM corner_owed WHERE person_id=$1`, [OWNER])).rows)
+      .toContainEqual({ message_id: 'existing-tag' });
+  });
+
+  it('refreshes existing deliverables when the first human tag establishes the owner', async () => {
+    await database.query(`DELETE FROM agent_commands WHERE room_id=$1 AND reason='corner_objective'`, [CORNER]);
+    await database.query(`UPDATE rooms SET created_by=$2 WHERE id=$1`, [CORNER, OWNER]);
+    await post('deliverable', AGENT, 'Here it is.', {
+      attachments: [{ name: 'finish.png', url: '/files/finish.png', mimeType: 'image/png' }],
+    });
+    await step(idle);
+    await phone.execute('sendRoomMessage', { roomId: CORNER, text: '@bee continue' }, OTHER);
+    expect((await facts()).header).toBe(true);
+    await expectTableMatchesMessages();
+  });
+
   it('keeps push commissioner probes on the opening-order index', async () => {
     await database.transaction(async db => {
       await db.query(`SET LOCAL enable_seqscan=off`);
@@ -222,7 +249,7 @@ describe('corner_owed', () => {
     await step(idle);
   });
 
-  it('keeps a question card owed until it is answered or closed, whatever the person posts', async () => {
+  it('keeps a question card owed after a commander reply clears Waiting', async () => {
     const question = (status: string) => ({
       mode: 'question',
       status,
@@ -235,7 +262,9 @@ describe('corner_owed', () => {
     });
     await step(blockingToViewer);
     await post('chatter', OWNER, 'Let me think.');
-    await step(blockingToViewer);
+    await step(owedToViewer);
+    expect((await database.query(`SELECT card->>'status' status FROM messages WHERE id='question'`)).rows)
+      .toEqual([{status:'open'}]);
     await database.query(
       `UPDATE messages SET card=jsonb_set(card,'{status}','"answered"') WHERE id='question'`,
     );
@@ -253,7 +282,7 @@ describe('corner_owed', () => {
     await step(idle);
   });
 
-  it('keeps a grant card owed to whoever can decide it until it is decided', async () => {
+  it('keeps a grant pending and owed after a commander reply clears Waiting', async () => {
     const grantId = '99999999-9999-4999-8999-999999999999';
     await database.query(
       `INSERT INTO agent_grants(id,agent_id,workspace_id,kind,target,reason,requested_by,room_id,status)
@@ -268,7 +297,9 @@ describe('corner_owed', () => {
     });
     await step(blockingToViewer);
     await post('chatter', OWNER, 'Looking.');
-    await step(blockingToViewer);
+    await step(owedToViewer);
+    expect((await database.query(`SELECT status FROM agent_grants WHERE id=$1`,[grantId])).rows)
+      .toEqual([{status:'pending'}]);
     await database.query(`UPDATE agent_grants SET status='approved' WHERE id=$1`, [grantId]);
     await step(idle);
   });
@@ -423,7 +454,7 @@ describe('corner_owed', () => {
     await step(owedToViewer);
   });
 
-  it('reads chat-list owed facts from corner_owed with only an item-id lookup for the reason', async () => {
+  it('reads owed facts from corner_owed and bounds commander reply probes', async () => {
     const queries: { sql: string; values: unknown[] }[] = [];
     const spy = new PhoneService(
       {
@@ -457,10 +488,14 @@ describe('corner_owed', () => {
     // by message id. The waiting reason reads the indexed blocker message by
     // its primary key too; owed facts still come from corner_owed.
     const messageScans = scans.filter((scan) => scan.relation === 'messages');
-    // Running, pending and held activity each resolve their dispatched check
-    // source by id; these do not recover owed facts.
+    expect(corners!.sql).toContain('message.room_id=c.id AND message.author_id=commander.id');
+    expect(corners!.sql).toContain('reply.reply_to_message_id=ANY(waiting.asked_items)');
+    expect(corners!.sql).toContain('message.author_id=commander.id');
+    expect(corners!.sql).toContain('message.created_at>waiting.asked_at');
+    // Activity resolves three dispatched sources. The common waiting rule
+    // resolves three commander/order source ids; neither recovers owed facts.
     const isDispatchSource = (alias: string) => /^source(?:_\d+)?$/.test(alias);
-    expect(messageScans.filter((scan) => isDispatchSource(scan.alias))).toHaveLength(3);
+    expect(messageScans.filter((scan) => isDispatchSource(scan.alias))).toHaveLength(6);
     expect(messageScans.filter((scan) => scan.alias === 'item')).toHaveLength(1);
     expect(corners!.sql).toContain('JOIN messages item ON item.id=owed.message_id');
     // Each unread-cursor branch checks legacy corner visibility against the
@@ -473,8 +508,11 @@ describe('corner_owed', () => {
     const isTargetSource = (alias: string) => /^target_source(?:_\d+)?$/.test(alias);
     expect(messageScans.filter((scan) => isTargetSource(scan.alias))).toHaveLength(2);
     expect(messageScans.filter((scan) => scan.alias === 'visible')).toHaveLength(1);
+    // The common clearing rule adds commander probes in the corner and
+    // threaded to the report. The report projection reads its publication
+    // boundary from the visible card it already joins.
     expect(messageScans.filter((scan) => scan.alias !== 'item' && scan.alias !== 'visible' &&
       !isDispatchSource(scan.alias) && !isTargetSource(scan.alias) && !scan.alias.startsWith('callsite') &&
-      !scan.alias.startsWith('run_card'))).toHaveLength(6);
+      !scan.alias.startsWith('run_card'))).toHaveLength(8);
   });
 });

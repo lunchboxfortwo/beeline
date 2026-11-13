@@ -1,9 +1,10 @@
 import { HelperOverlayChannel } from './helper-overlay-channel.js';
-import { HelperTurnChannel } from './helper-turn-channel.js';
+import type { HelperTurnOwnershipSource } from '@beeline/api-contract/helper-turn-ownership';
 import { randomUUID } from 'node:crypto';
 import type { DaemonOperationMap, PostConnectorVaultInput } from '@beeline/api-contract/daemon';
 import { helperVersion } from './helper-version.js';
 import { unknownServerEventLogger } from './unknown-server-event.js';
+import { setHelperErrorUser } from './sentry.js';
 import { LiveLink, type LiveLinkTiming, type LiveSocketFactory } from './live-link.js';
 
 /** Subprotocol of the one socket a helper machine holds for all of its agents. */
@@ -27,7 +28,8 @@ export interface AgentChannelHandlers {
 /** Agent identity and request correlation on the machine connection. Registration
  * metadata is immutable until the next handshake, never a capability lifecycle. */
 export class AgentChannel {
-  readonly turn = new HelperTurnChannel();
+  /** The connection a free agent's model credential is issued to. */
+  turnSource?: HelperTurnOwnershipSource;
   readonly overlay = new HelperOverlayChannel(frame => this.send(frame), () => this.isOpen());
   readonly #waiters = new Set<{resolve:()=>void;reject:(error:Error)=>void}>();
   readonly #requests = new Map<string, {
@@ -86,6 +88,7 @@ export class AgentChannel {
     if (!this.send(pending.frame)) pending.sent = false;
   }
   onOpen(listener: () => void): () => void { this.#openListeners.add(listener); return () => this.#openListeners.delete(listener); }
+  reconnect(): void { this.machine.link.reconnect(); }
   start(): void {
     if (this.#wanted) return;
     this.#wanted = true;
@@ -116,8 +119,9 @@ export class AgentChannel {
       this.#registered = true;
       this.#capabilities = event.capabilities as Record<string,unknown> ?? {};
       const c = this.#capabilities;
+      if (typeof c.ownerId === 'string') setHelperErrorUser(c.ownerId);
       if (typeof c.turnConnectionId === 'string' && typeof c.turnConnectionEpoch === 'number')
-        this.turn.negotiate({connectionId:c.turnConnectionId,epoch:c.turnConnectionEpoch});
+        this.turnSource = {connectionId:c.turnConnectionId,epoch:c.turnConnectionEpoch};
       this.overlay.negotiate(c.overlayV1 === true);
       for (const pending of this.#requests.values()) this.#dispatch(pending);
       for (const waiter of this.#waiters) waiter.resolve();
@@ -156,7 +160,7 @@ export class AgentChannel {
     if (ended) {
       for(const waiter of this.#waiters)waiter.reject(new Error('Agent runtime ended'));
       this.#waiters.clear();
-      this.turn.stop();
+      this.turnSource = undefined;
       for (const pending of this.#requests.values()) pending.reject(new Error('Agent runtime ended'));
       this.#requests.clear();
     }
@@ -189,6 +193,7 @@ export class MachineLink {
       timing?: Partial<LiveLinkTiming>;
       random?: () => number;
       onRegistered?: () => void;
+      subscribeResume?: (listener: () => void) => () => void;
       readVault?: (agentId: string) => Promise<Omit<PostConnectorVaultInput, 'agentId'>>;
       log?: (message: string) => void;
     },
@@ -198,6 +203,7 @@ export class MachineLink {
       url: () => this.#url(),
       protocols: () => [MACHINE_SOCKET_PROTOCOL],
       ...(options.factory ? {factory:options.factory} : {}),
+      ...(options.subscribeResume ? { subscribeResume: options.subscribeResume } : {}),
       onOpen: () => {
         this.#reconciledOnSocket = false;
         this.#pendingRelease = undefined;

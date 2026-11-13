@@ -256,7 +256,7 @@ describe('PhoneService Needs-you tray', () => {
     expect(items[0]!.approval).toBeUndefined();
   });
 
-  it('holds an untagged blocked or needs-decision report addressed to the reader as commander', async () => {
+  it('TAGS-1: distinguishes addressed reports from tags without inheriting a reply chain', async () => {
     const report = async (text: string, reportToId: string, ageMinutes: number) => {
       const id = await post(ROOM, AGENT, text, ageMinutes);
       await database.query(`UPDATE messages SET card=$2::jsonb WHERE id=$1`, [id, JSON.stringify({ reportToId })]);
@@ -264,13 +264,22 @@ describe('PhoneService Needs-you tray', () => {
     };
     const decision = await report('needs-decision: Approve the reviewer-link fetch?', VIEWER, 30);
     const blocked = await report('blocked: The emulator needs a production sign-in.', VIEWER, 20);
+    const parent = await post(ROOM, PEER, '@hoots please check with Juniper', 19);
+    const reply = await post(ROOM, AGENT, '@juniper I asked Hoots to check. This still needs you.', 18);
+    await database.query(`UPDATE messages SET reply_to_message_id=$2,root_message_id=$3 WHERE id=$1`, [parent, decision, decision]);
+    await database.query(`UPDATE messages SET reply_to_message_id=$2,root_message_id=$3 WHERE id=$1`, [reply, parent, decision]);
+    const tagged = await report('needs-decision: @ada please choose the endpoint', VIEWER, 17);
+    const channel = await report('blocked: @channel please check the endpoint', VIEWER, 16);
     await report('needs-decision: Pick an endpoint for Juniper?', PEER, 10);
     await post(ROOM, AGENT, 'needs-decision: No commander recorded on this one?', 5);
 
     const { items } = await read();
-    expect(items.map((item) => item.messageId)).toEqual([decision, blocked]);
-    expect(items[0]).toMatchObject({ text: 'Approve the reviewer-link fetch?', author: { name: 'Hoots' } });
-    expect(await count()).toBe(2);
+    expect(items.map((item) => item.messageId)).toEqual([decision, blocked, tagged, channel]);
+    expect(items[0]).toMatchObject({ text: 'Approve the reviewer-link fetch?', author: { name: 'Hoots' }, addressedReport: true });
+    expect(items[1]).toHaveProperty('addressedReport', true);
+    expect(items[2]).not.toHaveProperty('addressedReport');
+    expect(items[3]).not.toHaveProperty('addressedReport');
+    expect(await count()).toBe(4);
   });
 
   it('F04: an empty live snapshot skips cell projection and a later ask is still delivered', async () => {
@@ -582,12 +591,19 @@ describe('PhoneService Needs-you tray', () => {
     await phone.execute('decideAgentGrant', { grantId: GRANT, decision: 'once' }, VIEWER);
     expect(await count()).toBe(0);
   });
-  it.each(['once', 'deny'] as const)('the projected grant action %s decides the exact first grant', async decision => {
+  it.each(['always', 'once', 'deny'] as const)('the projected grant action %s decides the exact first grant', async decision => {
     const grantId = '99999999-9999-4999-8999-999999999999';
-    await database.query(`INSERT INTO agent_grants(id,agent_id,workspace_id,kind,target,reason,requested_by,room_id,status)
-      VALUES($1,$2,$3,'command','npm test','Run checks',$4,$5,'pending')`, [grantId, AGENT, WORKSPACE, VIEWER, ROOM]);
-    await card(ROOM, 'grant-request', { agent: hoots, grants: [{ grantId, kind: 'command', target: 'npm test', reason: 'Run checks' }] });
+    const target = JSON.stringify({ argv: ['bash'], stdin: 'printf check' });
+    const script = { path: '<stdin>', sha256: 'a'.repeat(64), bytes: 12, contents: 'printf check' };
+    await database.query(`INSERT INTO agent_grants(id,agent_id,workspace_id,kind,target,reason,requested_by,room_id,status,script)
+      VALUES($1,$2,$3,'command',$6,'Run checks',$4,$5,'pending',$7::jsonb)`, [grantId, AGENT, WORKSPACE, VIEWER, ROOM, target, JSON.stringify(script)]);
+    await card(ROOM, 'grant-request', { agent: hoots, grants: [{ grantId, kind: 'command', target, script, reason: 'Run checks' }] });
     const [item] = (await read()).items;
+    expect(item!.approval!.actions).toEqual([
+      { kind: 'grant', label: 'Always', grantId, decision: 'always' },
+      { kind: 'grant', label: 'Once', grantId, decision: 'once' },
+      { kind: 'grant', label: 'Deny', grantId, decision: 'deny' },
+    ]);
     const action = item!.approval!.actions!.find(action => action.kind === 'grant' && action.decision === decision)!;
     expect(action.kind).toBe('grant');
     if (action.kind !== 'grant') throw new Error('missing action');
@@ -595,7 +611,7 @@ describe('PhoneService Needs-you tray', () => {
     await phone.execute('decideAgentGrant', { grantId: action.grantId, decision: action.decision }, VIEWER);
     expect((await read()).items).toHaveLength(0);
     expect((await database.query('SELECT status FROM agent_grants WHERE id=$1', [grantId])).rows)
-      .toEqual([{ status: decision === 'once' ? 'once' : 'denied' }]);
+      .toEqual([{ status: decision === 'always' ? 'approved' : decision === 'once' ? 'once' : 'denied' }]);
   });
 
   it('keeps a complete bound script visible and omits Once for standing-only grants', async () => {

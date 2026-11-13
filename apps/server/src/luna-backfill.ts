@@ -25,9 +25,11 @@ export const LUNA_BACKFILL_TARGET_SQL = `SELECT DISTINCT ON (w.id)
   w.id workspace_id,w.name workspace_name,f.owner_id,person.handle owner_handle,
   CASE WHEN room.id=$2 THEN 'explicit Room' ELSE 'free-Beebee sweep' END target_kind,
   room.id room_id,f.agent_id beebee_id,
-  (SELECT luna.agent_id FROM free_agents luna WHERE luna.workspace_id=w.id
+  (SELECT luna.agent_id FROM free_agents luna JOIN memberships member ON member.identity_id=luna.agent_id
+    WHERE member.workspace_id=w.id AND member.room_id IS NULL
     AND luna.starter_role='luna' ORDER BY luna.created_at LIMIT 1) luna_id
-FROM workspaces w JOIN free_agents f ON f.workspace_id=w.id AND f.removed_at IS NULL
+FROM workspaces w JOIN memberships member ON member.workspace_id=w.id AND member.room_id IS NULL AND member.removed_at IS NULL
+JOIN free_agents f ON f.agent_id=member.identity_id AND f.removed_at IS NULL
   AND (f.starter_role='beebee' OR f.starter_role IS NULL)
 JOIN identities person ON person.id=f.owner_id AND person.kind='human' AND person.handle IS NOT NULL
 JOIN memberships owner ON owner.workspace_id=w.id AND owner.room_id IS NULL
@@ -74,7 +76,8 @@ export async function backfillLuna(database: SqlDatabase, config: FreeAgentConfi
         ...config, model: config.lunaModel ?? 'openai/gpt-6-luna',
       }, { workspaceId: current.workspace_id, creatorId: current.owner_id, roomId: current.room_id,
         name: 'Luna', silent: true, team: true });
-      if (!luna) return (await db.query(`SELECT 1 FROM free_agents WHERE workspace_id=$1 AND starter_role='luna'`,
+      if (!luna) return (await db.query(`SELECT 1 FROM memberships member JOIN free_agents free ON free.agent_id=member.identity_id
+        WHERE member.workspace_id=$1 AND member.room_id IS NULL AND free.starter_role='luna'`,
         [current.workspace_id])).rowCount ? 'already present' : 'owner at agent limit';
       for (const agent of [current.beebee_id, luna]) await setRoomEventSubscriptions(db, current.room_id, agent, FREE_AGENT_EVENT_SUBSCRIPTIONS);
       await db.query(`UPDATE free_agents SET starter_role='beebee' WHERE agent_id=$1 AND starter_role IS NULL`, [current.beebee_id]);

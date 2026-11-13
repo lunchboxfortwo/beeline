@@ -30,28 +30,31 @@ ${ROOM_EVENT_SUBSCRIPTIONS_SCHEMA}
 -- This view is read-only. Corner access projections have no stored roster row and cannot
 -- authorize themselves: even a saved preference needs a live parent member.
 CREATE OR REPLACE VIEW room_access AS
-SELECT member.id,member.workspace_id,member.room_id,member.identity_id,member.role,
+SELECT member.id,member.workspace_id,member.room_id,member.identity_id,
+  CASE WHEN room.direct_participants IS NULL THEN COALESCE(workspace.role,member.role) ELSE member.role END role,
   1::bigint generation,NULL::jsonb identity_profile,member.invited_by,member.joined_at,
   member.removed_at,member.push_muted,
   (SELECT COALESCE(jsonb_agg(event),'[]'::jsonb) FROM room_event_subscriptions subscription
    WHERE subscription.room_id=member.room_id AND subscription.agent_id=member.identity_id) event_subscriptions
 FROM memberships member
-WHERE member.room_id IS NULL OR EXISTS (
-  SELECT 1 FROM rooms room WHERE room.id=member.room_id AND room.parent_id IS NULL
-)
+LEFT JOIN rooms room ON room.id=member.room_id
+LEFT JOIN memberships workspace ON workspace.workspace_id=member.workspace_id
+  AND workspace.identity_id=member.identity_id AND workspace.room_id IS NULL AND workspace.removed_at IS NULL
+WHERE member.room_id IS NULL OR room.parent_id IS NULL
 UNION ALL
 SELECT NULL::bigint id,corner.workspace_id,corner.id room_id,parent.identity_id,
-  parent.role,COALESCE(state.generation,1) generation,state.identity_profile,
+  CASE WHEN parent_room.direct_participants IS NULL THEN COALESCE(workspace.role,parent.role) ELSE parent.role END role,
+  COALESCE(state.generation,1) generation,state.identity_profile,
   parent.invited_by,COALESCE(state.created_at,parent.joined_at) joined_at,parent.removed_at,COALESCE(state.push_muted,false) push_muted,
   (SELECT COALESCE(jsonb_agg(event),'[]'::jsonb) FROM room_event_subscriptions subscription
    WHERE subscription.room_id=corner.id AND subscription.agent_id=parent.identity_id) event_subscriptions
 FROM rooms corner
 JOIN memberships parent ON parent.room_id=corner.parent_id AND parent.removed_at IS NULL
+JOIN rooms parent_room ON parent_room.id=corner.parent_id
+LEFT JOIN memberships workspace ON workspace.workspace_id=corner.workspace_id
+  AND workspace.identity_id=parent.identity_id AND workspace.room_id IS NULL AND workspace.removed_at IS NULL
 LEFT JOIN corner_person_state state ON state.corner_id=corner.id AND state.identity_id=parent.identity_id
 WHERE corner.parent_id IS NOT NULL AND corner.archived_at IS NULL;
-
--- Read-only alias for the preceding image during the rolling deployment.
-CREATE OR REPLACE VIEW effective_memberships AS SELECT * FROM room_access;
 
 `;
 

@@ -1,6 +1,6 @@
 import { appErrorCopy } from '@/buzz/app-error-copy';
 import React, { useRef, useCallback } from 'react';
-import { TextInput, AccessibilityInfo } from 'react-native';
+import { type TextInput, AccessibilityInfo } from 'react-native';
 import * as Haptics from 'expo-haptics';
 import { Modal } from '@/modal';
 import { BuzzRigTransport } from '@/sync/transport';
@@ -74,7 +74,7 @@ export function useChatMessageActions([
   messageIsBookmarked: (message: ChatDisplayMessage) => boolean,
   canDeleteMessage: (message: ChatDisplayMessage) => boolean,
   handleDeleteMessage: (message: ChatDisplayMessage) => Promise<void>,
-  forwardToRoom: (target: ForwardTarget) => Promise<void>,
+  forwardToRoom: (target: ForwardTarget) => Promise<boolean>,
 ] {
 
 
@@ -141,19 +141,15 @@ export function useChatMessageActions([
         }
         setDismissedMentionKey(null);
         void Haptics.selectionAsync();
-        // A reply started from a message the reader scrolled up to read keeps
-        // that same scroll offset by default while the keyboard/reply banner
-        // shrink the viewport, which reads as the transcript jumping to
-        // center the replied-to message. The reply reference in the composer
-        // is enough context, so land back on the end of the log instead.
-        scrollController.request({ kind: 'newest' });
+        // Keep the reader's position and tail-follow state while the reply
+        // banner and keyboard open. Beginning a reply is not a transcript jump.
         scheduleAnimationFrame(() => composerRef.current?.focus());
       };
       install();
     },
     // Read through the ref: a transcript dependency here would hand every
     // row a new renderer on each live message.
-    [applyComposerPrefill, decodedId, replyTargetForMessage, scrollController],
+    [applyComposerPrefill, decodedId, replyTargetForMessage],
   );
 
 
@@ -288,7 +284,7 @@ export function useChatMessageActions([
       }
       const confirmed = await Modal.confirm(
         'Delete message?',
-        'The message text and attachments will be removed. A deleted-message record will remain in this Room.',
+        'The message text and attachments will be removed. A deleted-message record will remain in this chat.',
         { cancelText: 'Cancel', confirmText: 'Delete', destructive: true },
       );
       if (!confirmed) return;
@@ -347,7 +343,7 @@ export function useChatMessageActions([
         // The live Room list is current; only a list not yet loaded reads one.
         const held = workspaceChatListRef.current;
         const [chats, workspace] = await Promise.all([
-          held ? held.chats : chatListKey ? readChatList(chatListKey).then(list => list.chats) : Promise.reject(new Error('No Room list is held yet.')),
+          held ? held.chats : chatListKey ? readChatList(chatListKey).then(list => list.chats) : Promise.reject(new Error('No chat list is held yet.')),
           roomClient.workspace(activeCommunityId),
         ]);
         setForwardRooms(forwardTargets(chats, workspace, decodedId));
@@ -362,7 +358,7 @@ export function useChatMessageActions([
 
   const forwardToRoom = useCallback(
     async (target: ForwardTarget) => {
-      if (!forwardTarget || forwardBusyRoomId) return;
+      if (!forwardTarget || forwardBusyRoomId) return false;
       setForwardBusyRoomId(target.id);
       setForwardError(null);
       try {
@@ -394,11 +390,12 @@ export function useChatMessageActions([
           },
           displayRoomName,
         );
-        setForwardTarget(null);
-        setForwardRooms(null);
+        // Retain the destination rows while the sheet exits so its result paints.
         void Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
+        return true;
       } catch (error) {
         setForwardError(appErrorCopy(error));
+        return false;
       } finally {
         setForwardBusyRoomId(null);
       }

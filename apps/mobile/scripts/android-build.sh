@@ -37,6 +37,10 @@ export CCACHE_NOHASHDIR=true
 
 cleanup() {
   local status=$?
+  trap - EXIT INT TERM
+  if [[ "$status" != 0 ]]; then
+    echo "Android release build failed (exit $status). See the command output above; retain it with scripts/corner-job.mjs for cross-turn builds." >&2
+  fi
   rm -f "$ANDROID_SIDELOAD_KEYSTORE_PATH"
   local teardown_args=("$MOBILE_DIR/android")
   if [[ "${BEELINE_ANDROID_KEEP_DEVICE:-0}" == "1" ]]; then
@@ -45,7 +49,9 @@ cleanup() {
   "$MOBILE_DIR/scripts/android-teardown.sh" "${teardown_args[@]}" || true
   exit "$status"
 }
-trap cleanup EXIT INT TERM
+trap cleanup EXIT
+trap 'exit 130' INT
+trap 'exit 143' TERM
 
 if ! command -v ccache >/dev/null 2>&1; then
   cat >&2 <<'EOF'

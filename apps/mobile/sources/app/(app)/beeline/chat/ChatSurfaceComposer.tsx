@@ -1,8 +1,8 @@
 import { IndexRow } from '@/components/buzz/IndexRow';
 import { ErrorBanner } from '@/components/buzz/ErrorBanner';
 import React from 'react';
-import { View, Text, TextInput, Platform } from 'react-native';
-import Animated from 'react-native-reanimated';
+import { Platform, type TextInput } from 'react-native';
+import { XStack, YStack } from 'tamagui';
 import { BuzzRigTransport } from '@/sync/transport';
 import { type GitHubInstallationAccess } from '@beeline/buzz-client';
 import { type ChannelSuggestion } from '@/buzz/channel-suggestions';
@@ -20,13 +20,14 @@ import { splitComposerTags } from '@/buzz/composer-tags';
 import { mentionKeyboardAction } from '@/buzz/composer-keyboard';
 import { TurnProgressLine } from '@/components/buzz/TurnProgressLine';
 import { ChannelSuggestionMenu, MentionSuggestionMenu } from '@/components/buzz/MentionSuggestionMenu';
-import { type RoomRosterParticipant } from '@/components/buzz/RoomRosterSheet';
+import { type RoomRosterParticipant } from '@/buzz/room-participants';
 import { RepoPicker } from '@/components/buzz/RepoPicker';
 import { SlashVerbPicker } from '@/components/buzz/SlashVerbPicker';
 import { Button } from '@/components/buzz/Button';
 import { ConversationComposer, type DictatedSend } from '@/components/buzz/ConversationComposer';
 import { RoomMemberOption, MessageShortcut, COMPOSER_MAX_HEIGHT, COMPOSER_MIN_HEIGHT } from './chat-surface-values';
-import { styles } from './chat-surface-styles';
+import { TURN_LINE_BOX_HEIGHT } from '@/buzz/room-bottom-chrome';
+import { Motion, T, type MotionStyle } from '@/ui/grammar';
 
 type Props = {
   desktopExperience: boolean;
@@ -40,7 +41,8 @@ type Props = {
   retryHydration: () => void;
   isReadOnlyDirectMessage: boolean;
   readOnlyFooterInset: { marginBottom: number; paddingBottom?: undefined; } | { paddingBottom: number; marginBottom?: undefined; };
-  composerBottomInsetStyle: import("react-native-reanimated/lib/typescript/hook/commonTypes").AnimatedStyleHandle<{ paddingBottom: number; }>;
+  /** The composer's animated foot (keyboard or safe-area inset), as a height under the row. */
+  composerBottomInset: MotionStyle;
   slashMenuVisible: boolean;
   mentionSlashAgentPubkey: string | null;
   agentByPubkey: Map<string, import("@/buzz/agent-display").DisplayableAgent>;
@@ -82,7 +84,7 @@ type Props = {
   handleSelectRoomRepoCandidate: (candidate: RepoCandidate) => void;
   desktopDeliveryState: "failed" | "sending" | "delivered" | null;
   isDirectMessage: boolean;
-  roomSurface: NonNullable<import("@beeline/api-contract/phone").RoomView | null>;
+  roomSurface: import("@beeline/api-contract/phone").RoomView | null;
   isCorner: boolean;
   voice: import("@/buzz/use-voice-call").VoiceCallState;
   composerRef: React.RefObject<TextInput | null>;
@@ -94,7 +96,7 @@ type Props = {
   sending: boolean;
   replacePendingAttachments: (update: PickedChatAttachment[] | ((current: PickedChatAttachment[]) => PickedChatAttachment[])) => void;
   transport: BuzzRigTransport | null;
-  speechHints: string[];
+  speechHints: () => string[];
   inputText: string;
   composerInputRevision: number;
   composerInputRevisionRef: React.RefObject<number>;
@@ -119,7 +121,7 @@ type Props = {
   setInputSelection: React.Dispatch<React.SetStateAction<{ start: number; end: number; }>>;
 };
 
-export function ChatSurfaceComposer({
+export const ChatSurfaceComposer = React.memo(function ChatSurfaceComposer({
   desktopExperience,
   setTurnChromeTopInset,
   composerAck,
@@ -131,7 +133,7 @@ export function ChatSurfaceComposer({
   retryHydration,
   isReadOnlyDirectMessage,
   readOnlyFooterInset,
-  composerBottomInsetStyle,
+  composerBottomInset,
   slashMenuVisible,
   mentionSlashAgentPubkey,
   agentByPubkey,
@@ -209,7 +211,37 @@ export function ChatSurfaceComposer({
   channelMenuKey,
   setInputSelection,
 }: Props) {
-  return (<View style={[styles.bottomChromeStack, desktopExperience && styles.desktopReadingColumn]} testID="room-bottom-chrome">
+  // RN-web measures content when its input ref attaches. Keep this callback
+  // stable so a height update cannot reattach the ref and measure in a loop.
+  const handleContentSizeChange = React.useCallback<
+    React.ComponentProps<typeof ConversationComposer>['onContentSizeChange']
+  >((event) => {
+    const contentHeight = Math.ceil(event.nativeEvent.contentSize.height);
+    setComposerHeight(Math.min(COMPOSER_MAX_HEIGHT, Math.max(COMPOSER_MIN_HEIGHT, contentHeight)));
+  }, [setComposerHeight]);
+  // "Message #beeline" in a chat, "Reply in thread" in a corner; a DM keeps its own hint.
+  const roomName = roomSurface?.room?.name?.trim();
+  const composerPlaceholder = isCorner
+    ? 'Reply in thread'
+    : !isDirectMessage && roomName ? `Message #${roomName}` : undefined;
+  const mentionPlace = isCorner ? 'this thread' : !isDirectMessage && roomName ? `#${roomName}` : undefined;
+  // Keep the hanging line and every gap around the field above the scrolling
+  // transcript, on the same opaque canvas (`buzz/room-bottom-chrome.ts`).
+  // On the phone, a tall @, # or / list can need more height than the keyboard
+  // leaves. The chrome and the composer row may shrink (React Native items do
+  // not by default); only the list's scroll inside them gives up height, so the
+  // field, attachments and keyboard spacer keep theirs.
+  const phoneShrink = desktopExperience ? undefined : { flexShrink: 1, minHeight: 0 };
+  return (<YStack
+                position="relative"
+                zIndex={1}
+                {...phoneShrink}
+                backgroundColor="canvas"
+                width={desktopExperience ? '100%' : undefined}
+                maxWidth={desktopExperience ? 720 : undefined}
+                alignSelf={desktopExperience ? 'center' : undefined}
+                testID="room-bottom-chrome"
+              >
                 {/* Phone turn chrome overlays the fixed transcript tail.
                 Its canvas fits below the whole newest row, including reactions;
                 the label balances against the composer's field border rather
@@ -243,13 +275,34 @@ export function ChatSurfaceComposer({
                 and on the Room-list row. */}
                   {transcriptHydrationFailed && !!transcriptHydrationError && <IndexRow title={transcriptHydrationError} testID="room-read-error" />}
                 {isReadOnlyDirectMessage ? (
-                  <View style={[styles.archivedInputBar, readOnlyFooterInset]}>
-                    <Text style={styles.archivedInputText}>
-                      Announcements only · you can't reply here
-                    </Text>
-                  </View>
+                  <>
+                    <YStack
+                      paddingHorizontal="4"
+                      paddingTop="4"
+                      paddingBottom={readOnlyFooterInset.paddingBottom === undefined ? '2' : 0}
+                      borderTopWidth={1}
+                      borderTopColor="stroke"
+                      backgroundColor="canvas"
+                      alignItems="center"
+                    >
+                      <T v="meta" color="secondary">
+                        Announcements only · you can't reply here
+                      </T>
+                      {readOnlyFooterInset.paddingBottom === undefined ? null : <YStack height={readOnlyFooterInset.paddingBottom} />}
+                    </YStack>
+                    {readOnlyFooterInset.marginBottom === undefined ? null : <YStack height={readOnlyFooterInset.marginBottom} />}
+                  </>
                 ) : (
-                  <Animated.View style={[styles.inputBar, composerBottomInsetStyle]}>
+                  <YStack
+                    position="relative"
+                    {...phoneShrink}
+                    paddingHorizontal="4"
+                    paddingTop="2"
+                    // The Room-open geometry's 1px edge, painted as the same opaque canvas.
+                    borderTopWidth={1}
+                    borderTopColor="canvas"
+                    backgroundColor="canvas"
+                  >
                     {slashMenuVisible &&
                       (() => {
                         const mentionAgent = mentionSlashAgentPubkey
@@ -280,6 +333,7 @@ export function ChatSurfaceComposer({
                         onSelect={selectMention}
                         overflow={mentionSuggestions.overflow}
                         personAvatar={(pubkey) => personProfileByPubkey.get(pubkey)?.avatar}
+                        place={mentionPlace}
                       />
                     )}
                     {channelMenuVisible && (
@@ -303,13 +357,22 @@ export function ChatSurfaceComposer({
                         onRetry={() => void handleReconnectRoomRepository()} retryTestID="corner-open-repo-connect"
                         secondaryAction={{ label: 'Dismiss', onPress: () => setCornerOpenRepoPrompt(false), testID: 'corner-open-repo-prompt-dismiss' }} testID="corner-open-repo-prompt" />
                     ) : (
-                      <View style={styles.repoPromptBanner} testID="corner-open-repo-prompt">
-                        <Text style={styles.repoPromptTitle}>
+                      <YStack
+                        minWidth={0}
+                        marginBottom="2"
+                        padding="2"
+                        borderWidth={1}
+                        borderLeftWidth={3}
+                        borderColor="strongStroke"
+                        backgroundColor="highlight"
+                        testID="corner-open-repo-prompt"
+                      >
+                        <T v="metaStrong" textTransform="uppercase">
                           {`THIS ${ROOM_LABEL.toUpperCase()} ISN’T LINKED TO A REPO`}
-                        </Text>
-                        <Text style={styles.repoPromptHint}>
+                        </T>
+                        <T v="meta" color="secondary" marginTop="1">
                           {`Pick one to open a ${CORNER_LABEL}.`}
-                        </Text>
+                        </T>
                         {canManageWorkspace ? (
                           <RepoPicker
                             draftContext={decodedId}
@@ -330,9 +393,9 @@ export function ChatSurfaceComposer({
                             testIDPrefix="corner-open-repo-picker"
                           />
                         ) : (
-                          <Text style={styles.repoPromptHint}>
+                          <T v="meta" color="secondary" marginTop="1">
                             Ask a {ROOM_LABEL} admin to link one.
-                          </Text>
+                          </T>
                         )}
                         <Button
                           label="Dismiss"
@@ -341,16 +404,19 @@ export function ChatSurfaceComposer({
                           onPress={() => setCornerOpenRepoPrompt(false)}
                           testID="corner-open-repo-prompt-dismiss"
                         />
-                      </View>
+                      </YStack>
                     ))}
                     {desktopExperience ? (
-                      <View
-                        style={styles.desktopStatusSlot}
+                      <XStack
+                        alignItems="center"
                         accessibilityLiveRegion="polite"
                         testID="desktop-message-status"
                       >
+                        {/* The shared thinking line's full box, held while idle so the desktop composer stays still. */}
+                        <YStack height={TURN_LINE_BOX_HEIGHT} />
+                        <YStack flex={1} minWidth={0} justifyContent="center">
                         {desktopDeliveryState === 'sending' ? (
-                          <Text style={styles.desktopStatusText}>SENDING…</Text>
+                          <T v="code" color="secondary" paddingHorizontal="4">SENDING…</T>
                         ) : null}
                         {composerAck ? (
                           <TurnProgressLine
@@ -368,23 +434,20 @@ export function ChatSurfaceComposer({
                             testID="turn-progress-line"
                           />
                         ) : desktopDeliveryState && desktopDeliveryState !== 'sending' ? (
-                          <Text
-                            style={[
-                              styles.desktopStatusText,
-                              desktopDeliveryState === 'failed' && styles.desktopStatusFailed,
-                            ]}
-                          >
+                          <T v="code" color={desktopDeliveryState === 'failed' ? 'removed' : 'secondary'} paddingHorizontal="4">
                             {desktopDeliveryState === 'delivered'
                               ? 'DELIVERED'
                               : 'Message failed · retry from the message'}
-                          </Text>
+                          </T>
                         ) : settledTurn ? (
                           <TurnSettledLine line={settledTurn.line} testID="turn-settled-line" />
                         ) : null}
-                      </View>
+                        </YStack>
+                      </XStack>
                     ) : null}
                     <ConversationComposer
                       isDirectMessage={isDirectMessage}
+                      placeholder={composerPlaceholder}
                       hasAgentMembers={Boolean(roomSurface?.members.some(member => member.identity.kind === 'agent'))}
                       voice={!isCorner && roomSurface?.members.some(member => member.identity.kind === 'agent') ? voice : undefined}
                       onStop={
@@ -401,7 +464,7 @@ export function ChatSurfaceComposer({
                       }
                       onCancelReply={() => setReplyTarget(null)}
                       tagHandles={composerTagHandles}
-                      attachments={pendingAttachments.map((attachment) => ({
+                      attachments={(sending ? [] : pendingAttachments).map((attachment) => ({
                         uri: attachment.uri,
                         name: attachment.name,
                         mimeType: attachment.mimeType,
@@ -456,15 +519,7 @@ export function ChatSurfaceComposer({
                         inputTextRef.current = value;
                         setInputText(value);
                       }}
-                      onContentSizeChange={(event) => {
-                        const contentHeight = Math.ceil(event.nativeEvent.contentSize.height);
-                        setComposerHeight(
-                          Math.min(
-                            COMPOSER_MAX_HEIGHT,
-                            Math.max(COMPOSER_MIN_HEIGHT, contentHeight),
-                          ),
-                        );
-                      }}
+                      onContentSizeChange={handleContentSizeChange}
                       onFocus={() => setComposerFocused(true)}
                       onBlur={() => setComposerFocused(false)}
                       onKeyPress={(event) => {
@@ -550,7 +605,8 @@ export function ChatSurfaceComposer({
                           : (dictated?: DictatedSend) => handleSend(undefined, dictated)
                       }
                     />
-                  </Animated.View>
+                    <Motion motion={composerBottomInset} />
+                  </YStack>
                 )}
-              </View>);
-}
+              </YStack>);
+});

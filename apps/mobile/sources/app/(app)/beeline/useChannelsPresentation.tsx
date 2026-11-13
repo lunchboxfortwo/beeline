@@ -1,66 +1,23 @@
 import { useTextDraft } from '@/buzz/use-text-draft';
 import { useRoomSearch } from '@/buzz/use-room-search';
-import { filterConversations, roomListCounts, useRoomPins, useRoomListFilter } from '@/buzz/room-list-preferences';
-import { roomListSections } from '@/buzz/room-list-row';
+import { useRoomPins, useChatFilters } from '@/buzz/room-list-preferences';
+import { useRoomCornerSummaries } from '@/buzz/room-corner-store';
 import { workspaceRailItem } from '@/buzz/room-view-presentation';
-import { surfaceAddress } from '@/buzz/surface-storage';
 import { useMessageSearch } from '@/buzz/use-message-search';
-import { useSurfaceSnapshot } from '@/buzz/use-shared-surface';
 import { RoomViewClient } from '@/sync/transport/room-view-client';
-import { isWorkspaceView, type ChatListView, type Identity, type WorkspaceListView, type WorkspaceView } from '@beeline/buzz-client';
-import { useMemo } from 'react';
+import { filterChats } from '@/ui/screens/chats/chat-tree-model';
+import type { ChatSearch } from '@/ui/screens/chats/ChatListHeader';
+import { useCallback, useMemo } from 'react';
+import type { DeckState } from './useChannelsRouteState';
 
-type Props = [
-  workspaceList: WorkspaceListView | null,
-  requestedWorkspaceId: string | undefined,
-  chatList: ChatListView | null,
-  identity: Identity,
-  relayUrl: string,
-];
-export function useChannelsPresentation([
-  workspaceList, requestedWorkspaceId, chatList, identity, relayUrl,
-]: Props): [
-  viewerIsAgent: boolean,
-  canManageWorkspace: boolean,
-  activeCommunityId: string,
-  togglePin: (id: string) => Promise<void>,
-  roomName: string,
-  roomNameDraft: import("@/buzz/text-draft-store").TextDraft<string>,
-  activeCommunity: { avatar?: string | undefined; communityId: string; name: string; } | null,
-  communities: { avatar?: string | undefined; communityId: string; name: string; }[],
-  filter: import("@/buzz/room-list-preferences").RoomListFilter,
-  setFilter: (next: import("@/buzz/room-list-preferences").RoomListFilter) => void,
-  searchOpen: boolean,
-  setSearchOpen: import("react/index").Dispatch<import("react/index").SetStateAction<boolean>>,
-  query: string,
-  setQuery: import("react/index").Dispatch<import("react/index").SetStateAction<string>>,
-  counts: { all: number; unread: number; pinned: number; },
-  pinError: string | null,
-  setRoomName: (update: string | ((previous: string) => string)) => void,
-  chatSections: import("@/buzz/room-list-row").RoomListSection[],
-  messageSearch: import("@/buzz/use-message-search").MessageSearchState,
-  pinned: readonly string[],
-  workspaceDetail: WorkspaceView | null,
-  pinsLoaded: boolean,
-] {
-
-
+/** What the deck paints: the Workspace, the filtered chats, search and the New chat draft. */
+export function useChannelsPresentation({ workspaceList, requestedWorkspaceId, chatList, identity, relayUrl }: DeckState) {
   const communities = useMemo(
     () => workspaceList?.workspaces.map(workspaceRailItem) ?? [],
     [workspaceList],
   );
   const activeCommunityId =
     requestedWorkspaceId ?? chatList?.workspace.id ?? communities[0]?.communityId ?? null;
-  const workspaceDetailAddress = useMemo(
-    () =>
-      identity && relayUrl && activeCommunityId
-        ? surfaceAddress(relayUrl, identity.publicKey, '/workspace/:id', {
-            workspaceId: activeCommunityId,
-          })
-        : null,
-    [identity?.publicKey, relayUrl, activeCommunityId],
-  );
-  const workspaceDetail = useSurfaceSnapshot(workspaceDetailAddress, isWorkspaceView);
   const activeCommunity =
     communities.find((entry) => entry.communityId === activeCommunityId) ?? null;
   const viewerIsAgent = chatList?.viewer.kind === 'agent';
@@ -75,30 +32,25 @@ export function useChannelsPresentation([
     activeCommunityId ?? null,
     identity?.publicKey ?? null,
   );
-  const { pinned, pinsLoaded, togglePin, pinError } = useRoomPins(
+  const [chips, setChips] = useChatFilters(identity?.publicKey, activeCommunityId);
+  const search: ChatSearch = useMemo(
+    () => ({ open: searchOpen, query, chips }),
+    [chips, query, searchOpen],
+  );
+  const setSearch = useCallback((next: ChatSearch) => {
+    setSearchOpen(next.open);
+    setQuery(next.open ? next.query : '');
+    if (next.open) setChips(next.chips);
+  }, [setQuery, setSearchOpen, setChips]);
+  const { pinned, togglePin, pinError } = useRoomPins(
     identity?.publicKey,
     activeCommunityId,
   );
-  const counts = useMemo(
-    () => roomListCounts(chatList?.chats ?? [], pinned),
-    [chatList?.chats, pinned],
-  );
-  const [filter, setFilter] = useRoomListFilter(
-    activeCommunityId,
-    pinsLoaded && Boolean(chatList),
-    Boolean(
-      chatList?.chats.some(
-        (item) => !item.closed && !item.directMessage && pinned.includes(item.room.id),
-      ),
-    ),
-  );
-  const chatSections = useMemo(
-    () =>
-      roomListSections(
-        filterConversations(chatList?.chats ?? [], query, filter, pinned),
-        !query.trim() && filter === 'all',
-      ),
-    [chatList?.chats, query, filter, pinned],
+  const cornerSummaries = useRoomCornerSummaries();
+  const rows = useMemo(
+    () => filterChats(chatList?.chats ?? [], search.query, search.chips, pinned,
+      (roomId) => cornerSummaries.get(roomId)?.openCorners),
+    [chatList?.chats, search, pinned, cornerSummaries],
   );
   const searchClient = useMemo(
     () => (identity && relayUrl ? new RoomViewClient({ baseUrl: relayUrl, identity }) : null),
@@ -112,9 +64,11 @@ export function useChannelsPresentation([
     activeCommunityId,
     query,
   );
-return [
+  return {
     viewerIsAgent, canManageWorkspace, activeCommunityId, togglePin, roomName, roomNameDraft,
-    activeCommunity, communities, filter, setFilter, searchOpen, setSearchOpen, query, setQuery,
-    counts, pinError, setRoomName, chatSections, messageSearch, pinned, workspaceDetail, pinsLoaded,
-  ];
+    activeCommunity, communities, search, setSearch, pinError, setRoomName, rows, messageSearch,
+    pinned,
+  };
 }
+
+export type DeckPresentation = ReturnType<typeof useChannelsPresentation>;

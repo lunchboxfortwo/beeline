@@ -228,9 +228,10 @@ export async function dashboardOverview(
   );
   const fleet = await read(
     `WITH ${COHORT_SQL} SELECT f.state,count(*) count FROM free_agents f
-    JOIN production_workspaces w ON w.id=f.workspace_id
     JOIN production_identities pi ON pi.id=f.owner_id
-    WHERE f.removed_at IS NULL GROUP BY f.state`,
+    WHERE f.removed_at IS NULL AND EXISTS(SELECT 1 FROM memberships member
+      JOIN production_workspaces w ON w.id=member.workspace_id
+      WHERE member.identity_id=f.agent_id AND member.room_id IS NULL) GROUP BY f.state`,
     [],
     (rows) => rows.map((r) => ({ state: String(r.state), count: Number(r.count) })),
   );

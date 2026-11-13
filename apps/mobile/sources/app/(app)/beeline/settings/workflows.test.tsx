@@ -9,6 +9,9 @@ vi.mock('react-native', () => {
   const host = (name: string) => (props: any) => React.createElement(name, props, props.children);
   return { View:host('View'), Text:host('Text'), ScrollView:host('ScrollView'), TouchableOpacity:host('TouchableOpacity') };
 });
+vi.mock('tamagui', async () => (await import('@/ui/screens/transcript/grammar-hosts.test-support')).tamaguiHosts());
+vi.mock('lucide-react-native', async () => (await import('@/ui/screens/transcript/grammar-hosts.test-support')).lucideHosts());
+vi.mock('@/sync/storage', () => ({ useLocalSetting: () => 'medium' }));
 vi.mock('expo-router', () => ({
   router: { replace:vi.fn(), back:vi.fn() },
   useLocalSearchParams: () => ({roomId:'room-1'}),
@@ -20,7 +23,6 @@ vi.mock('@/buzz/latency-route-hook', () => ({useLatencyRouteFrame:()=>undefined}
 vi.mock('@/auth/buzz-identity-storage', () => ({loadBuzzIdentity:async()=>({publicKey:'viewer'}),getEffectiveRelayUrl:async()=>'https://relay.test'}));
 vi.mock('@/sync/transport/room-view-client', () => ({RoomViewClient:class { room=controls.room; }}));
 vi.mock('@/sync/transport/monolith-operation', () => ({monolithPhoneOperation:controls.operation}));
-vi.mock('@/constants/Typography', () => ({Typography:{default:()=>({})}}));
 vi.mock('@/components/buzz/PageHeader', () => ({PageHeader:()=>null}));
 vi.mock('@/components/buzz/SurfaceGlyphLoader', () => ({SurfaceGlyphLoader:()=>null}));
 vi.mock('@/components/buzz/ChevronGlyph', () => ({ChevronGlyph:()=>null,CHEVRON_ROW_SIZE:16}));

@@ -209,8 +209,11 @@ const scope35 = fixtureScope35();
     await rootFixture.github.reconcileQueuedCorners();
     expect(await currentState(cornerId)).toBe('working');
     expect((await reasons(cornerId, A)).filter(reason => reason === 'corner_merge_refused')).toHaveLength(1);
+    expect((await rootFixture.db.query<{private_payload:{text:string}}>(
+      "SELECT private_payload FROM agent_commands WHERE room_id=$1 AND reason='corner_merge_refused'", [cornerId],
+    )).rows[0]!.private_payload.text).toContain('TYPECHECK');
     expect((await rootFixture.db.query(`SELECT text FROM messages WHERE room_id=$1 AND text LIKE '%Removed from the merge queue%'`, [cornerId])).rows)
-      .toEqual([expect.objectContaining({ text: expect.stringContaining('TYPECHECK') })]);
+      .toEqual([]);
     expect((await rootFixture.db.query(`SELECT archived_at FROM rooms WHERE id=$1`, [cornerId])).rows[0]!.archived_at).toBeNull();
     expect(rootFixture.githubApp.mergePullRequest).toHaveBeenCalledTimes(1);
     console.info('Reproduction R1: advanced main + failed combined TYPECHECK -> returned to implement, no merge, one wake');

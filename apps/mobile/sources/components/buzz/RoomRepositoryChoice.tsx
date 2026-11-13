@@ -1,12 +1,10 @@
 import { HullDialogActions } from '@/components/buzz/HullDialog';
 import React, { useEffect, useState } from 'react';
-import { Text, TouchableOpacity, View, Platform, Keyboard, type ViewProps } from 'react-native';
-import { StyleSheet } from 'react-native-unistyles';
+import { Platform, Keyboard, type View } from 'react-native';
+import { YStack } from 'tamagui';
 import type { GitHubInstallationAccess } from '@beeline/buzz-client';
 import type { RepoCandidate } from '@/buzz/room-repo-picker';
-import { Typography } from '@/constants/Typography';
-import { Button } from './Button';
-import { HULL_SHEET_INSET, HullActionSheetRow, HullActionSheetModal } from './HullActionSheet';
+import { HullActionSheetRow, HullActionSheetModal } from './HullActionSheet';
 import { RepoList } from './RepoList';
 import {
   RepositoryChoice,
@@ -59,8 +57,8 @@ export function useRoomRepositoryChoice({
   busy,
   error,
   notice,
-  listOpen,
-  setListOpen,
+  listOpen: requestedListOpen,
+  setListOpen: setRequestedListOpen,
   onLoad,
   onConnect,
   onLink,
@@ -69,6 +67,19 @@ export function useRoomRepositoryChoice({
   onCancel,
   draftContext,
 }: Options) {
+  // List navigation belongs to this sheet, so a tap never rerenders the chat.
+  // The route flag is only needed for a cold return from GitHub installation.
+  const [listOpen, setLocalListOpen] = useState(requestedListOpen);
+  const setListOpen = (open: boolean) => {
+    setLocalListOpen(open);
+    if (!open && requestedListOpen) setRequestedListOpen(false);
+  };
+  useEffect(() => {
+    setLocalListOpen(requestedListOpen);
+  }, [requestedListOpen]);
+  useEffect(() => {
+    if (!visible) setLocalListOpen(false);
+  }, [visible]);
   const [revealed, setRevealed] = useState(false);
   const [mode, setMode] = useState<RepoMode>('none');
   const [draft, setDraft] = useState<RepoCandidate | null>(null);
@@ -107,7 +118,8 @@ export function useRoomRepositoryChoice({
 
   const reveal = () => {
     setRevealed(true);
-    onLoad();
+    // Repository presentation is urgent; refreshing the chat-owned access state is not.
+    React.startTransition(onLoad);
   };
 
   const chooseMode = (next: RepoMode) => {
@@ -188,7 +200,7 @@ export function useRoomRepositoryChoice({
     ) : null;
 
   const list = (
-    <View style={styles.inset}>
+    <YStack paddingHorizontal="6" paddingTop="1">
       <RepoList
         candidates={candidates}
         currentKey={draft?.key ?? null}
@@ -201,43 +213,28 @@ export function useRoomRepositoryChoice({
         }}
         testIDPrefix="room-repo-list"
       />
-    </View>
+    </YStack>
   );
 
   const footer =
     control || listOpen ? (
-      <HullDialogActions style={styles.actions} actions={[{ label: listOpen ? 'Back' : 'Cancel', variant: "quiet", disabled: busy && !listOpen, onPress: () => (listOpen ? setListOpen(false) : onCancel()), testID: "room-actions-close" }, ...(canManage && !listOpen ? [{ disabled: !canSave, label: busy ? 'Saving…' : 'Save', loading: busy, onPress: save, testID: "room-repo-save", variant: 'primary' as const }] : [])]} />
+      <YStack paddingHorizontal="6" paddingTop="2"><HullDialogActions actions={[{ label: listOpen ? 'Back' : 'Cancel', variant: "quiet", disabled: busy && !listOpen, onPress: () => (listOpen ? setListOpen(false) : onCancel()), testID: "room-actions-close" }, ...(canManage && !listOpen ? [{ disabled: !canSave, label: busy ? 'Saving…' : 'Save', loading: busy, onPress: save, testID: "room-repo-save", variant: 'primary' as const }] : [])]} /></YStack>
     ) : null;
 
   return {
     listOpen,
+    closeList: () => setListOpen(false),
     row,
-    control: control ? <View style={styles.controlInset}>{control}</View> : null,
+    // The open control is the Repository row itself, on the rows' own inset.
+    control: control ? <YStack paddingHorizontal="6">{control}</YStack> : null,
     list,
     footer,
   };
 }
 
-const styles = StyleSheet.create((theme) => {
-  const hull = theme.buzz;
-  return {
-    inset: { paddingHorizontal: HULL_SHEET_INSET, paddingTop: hull.space.xs },
-    // The open control is the Repository row itself, on the rows' own inset.
-    controlInset: { paddingHorizontal: HULL_SHEET_INSET },
-    actions: {
-      flexDirection: 'row',
-      justifyContent: 'flex-end',
-      alignItems: 'center',
-      gap: hull.space.sm,
-      paddingHorizontal: HULL_SHEET_INSET,
-      paddingTop: hull.space.sm,
-    },
-  };
-});
-
 /** Existing conversation layout, also the accessibility boundary behind its sheet. */
-export function RoomActionsBackground(props: ViewProps & { ref?: React.Ref<View> }) {
-  return <View {...props} />;
+export function RoomActionsBackground(props: React.ComponentProps<typeof YStack>) {
+  return <YStack {...props} />;
 }
 
 export type RoomActionsSheetHandle = { setVisible: (visible: boolean) => void };
@@ -245,9 +242,10 @@ export type RoomRepositoryOptions = Omit<Options, 'visible'>;
 
 type RoomActionsSheetProps = Omit<
   React.ComponentProps<typeof HullActionSheetModal>,
-  'visible' | 'footer' | 'sticky' | 'withinScreen'
+  'visible' | 'footer' | 'sticky' | 'withinScreen' | 'children'
 > & {
   ref: React.Ref<RoomActionsSheetHandle>;
+  children?: React.ReactNode | (() => React.ReactNode);
   repository: RoomRepositoryOptions;
   backgroundRef: React.RefObject<View | null>;
 };
@@ -272,6 +270,10 @@ export function RoomActionsSheet({
     }),
     [],
   );
+  // Keep a visible snapshot for native dismissal, without constructing the
+  // unopened actions while the conversation's first frame mounts.
+  const content = React.useRef<React.ReactNode>(null);
+  if (visible) content.current = typeof children === 'function' ? children() : children;
   const choice = useRoomRepositoryChoice({ ...repository, visible });
   React.useLayoutEffect(() => {
     if (Platform.OS !== 'android') return;
@@ -288,8 +290,9 @@ export function RoomActionsSheet({
       withinScreen={Platform.OS === 'android'}
       visible={visible}
       footer={choice.footer}
+      scrollBody={!choice.listOpen}
       sticky={choice.listOpen ? undefined : choice.control}
-      onClose={() => (choice.listOpen ? repository.setListOpen(false) : props.onClose())}
+      onClose={() => (choice.listOpen ? choice.closeList() : props.onClose())}
       onTitlePress={choice.listOpen ? undefined : props.onTitlePress}
       title={choice.listOpen ? 'Choose a repo' : props.title}
       titleAccessibilityLabel={choice.listOpen ? undefined : props.titleAccessibilityLabel}
@@ -299,7 +302,7 @@ export function RoomActionsSheet({
       ) : (
         <>
           {choice.row}
-          {children}
+          {content.current}
         </>
       )}
     </HullActionSheetModal>

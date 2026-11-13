@@ -1,22 +1,20 @@
 import { migrate } from './database.js';
-import { phoneFetch, describe, expect, it, vi, MCP_ORDER_WAKE_HINT, MCP_REVIEW_WAKE_HINT, backfillMcpMemberRoomsAndAvatars, ensureMcpMember, randomBytes, createHash, randomUUID, Client, StreamableHTTPClientTransport, tokenHash, MCP_AGENT_EXCLUSIONS, MCP_APP_ROUTE_OPERATIONS, createAgentCommand, routeHumanMessage, routeAgentResult, openSecrets, deliverMcpMemberWebhooks, PREREGISTERED_MCP_CLIENTS, readFileSync, sharp, FACE_SOULS, USER, OTHER, AGENT, WORKSPACE, ROOM, PRIVATE, CORNER, opaque, fixtureScope1, fixtureScope2, fixtureScope3 } from './test-support-rooms-mcp.test-support.js';
+import { phoneFetch, describe, expect, it, vi, MCP_ORDER_WAKE_HINT, MCP_REVIEW_WAKE_HINT, backfillMcpMemberAvatars, ensureMcpMember, randomBytes, createHash, randomUUID, Client, StreamableHTTPClientTransport, tokenHash, MCP_AGENT_EXCLUSIONS, MCP_APP_ROUTE_OPERATIONS, createAgentCommand, routeHumanMessage, routeAgentResult, openSecrets, deliverMcpMemberWebhooks, PREREGISTERED_MCP_CLIENTS, readFileSync, sharp, FACE_SOULS, USER, OTHER, AGENT, WORKSPACE, ROOM, PRIVATE, CORNER, opaque, fixtureScope1, fixtureScope2, fixtureScope3 } from './test-support-rooms-mcp.test-support.js';
 import { bundledMcpLogo } from './rooms-mcp-logos.js';
 
 describe('Rooms connector HTTP OAuth and MCP', () => {
 const scope1 = fixtureScope1();
 
-  it('MCP-WORKSPACE-1: legacy connections retain all-Workspace behavior until explicit re-consent', async () => {
+  it('MCP-WORKSPACE-1: ordinary membership never follows the owner into another Workspace automatically', async () => {
     const grant = await scope1.authorize();
-    await scope1.db.query('UPDATE rooms_mcp_members SET workspace_ids=NULL WHERE client_id=$1', [grant.clientId]);
     const laterWorkspace = randomUUID(), laterRoom = randomUUID();
     await scope1.db.query(`INSERT INTO workspaces(id,name) VALUES($1,'New legacy Workspace')`, [laterWorkspace]);
     await scope1.db.query(`INSERT INTO memberships(workspace_id,identity_id,role) VALUES($1,$2,'owner')`, [laterWorkspace, USER]);
     await scope1.db.query(`INSERT INTO rooms(id,workspace_id,name,visibility) VALUES($1,$2,'Legacy public Room','public')`, [laterRoom, laterWorkspace]);
     try {
       const member = await ensureMcpMember(scope1.db, { clientId: grant.clientId, ownerId: USER, modelLabel: 'Local MCP reviewer' });
-      expect((await scope1.db.query('SELECT 1 FROM memberships WHERE identity_id=$1 AND room_id=$2 AND removed_at IS NULL', [member, laterRoom])).rowCount).toBe(1);
-      expect((await scope1.db.query<{ workspace_ids: string[] | null }>('SELECT workspace_ids FROM rooms_mcp_members WHERE client_id=$1', [grant.clientId])).rows[0]!.workspace_ids).toBeNull();
-      await scope1.authorize(undefined, 'allow', grant.clientId);
+      expect((await scope1.db.query('SELECT 1 FROM memberships WHERE identity_id=$1 AND room_id=$2 AND removed_at IS NULL', [member, laterRoom])).rowCount).toBe(0);
+      await scope1.authorize(undefined, 'allow', grant.clientId, undefined, { workspace_ids: [WORKSPACE,laterWorkspace] });
       await ensureMcpMember(scope1.db, { clientId: grant.clientId, ownerId: USER, modelLabel: 'Local MCP reviewer' });
       expect((await scope1.db.query('SELECT 1 FROM memberships WHERE identity_id=$1 AND workspace_id=$2 AND removed_at IS NULL', [member, laterWorkspace])).rowCount).toBe(2);
     } finally { await scope1.db.query('DELETE FROM workspaces WHERE id=$1', [laterWorkspace]); }
@@ -140,8 +138,8 @@ const scope1 = fixtureScope1();
       const duplicateFlow = new URLSearchParams(body); duplicateFlow.append('flow', flow);
       expect((await submit(duplicateFlow)).status).toBe(400);
       expect((await submit(body)).status).toBe(302);
-      const saved = (await scope1.db.query<{ workspace_ids: string[] }>('SELECT workspace_ids FROM rooms_mcp_members WHERE client_id=$1', [clientId])).rows[0]!;
-      expect([...saved.workspace_ids].sort()).toEqual([WORKSPACE, secondWorkspace].sort());
+      const saved = (await scope1.db.query<{ workspace_id: string }>(`SELECT joined.workspace_id FROM memberships joined JOIN rooms_mcp_members member ON member.member_id=joined.identity_id WHERE member.client_id=$1 AND joined.room_id IS NULL AND joined.removed_at IS NULL`, [clientId])).rows;
+      expect(saved.map(row => row.workspace_id).sort()).toEqual([WORKSPACE, secondWorkspace].sort());
     } finally { await scope1.db.query('DELETE FROM workspaces WHERE id=$1', [secondWorkspace]); }
   });
 
@@ -188,14 +186,14 @@ const scope1 = fixtureScope1();
     // A default from the old bundled mark is upgraded; custom provenance wins,
     // including legacy request ids that predate drawing.source.
     await scope1.db.query("UPDATE agent_avatars SET bytes=$2 WHERE agent_id=$1", [member.member_id, Buffer.from('old default')]);
-    await backfillMcpMemberRoomsAndAvatars(scope1.db);
+    await backfillMcpMemberAvatars(scope1.db);
     const updated = (await scope1.db.query<{ bytes: Buffer; id: string }>('SELECT bytes,id FROM agent_avatars WHERE agent_id=$1', [member.member_id])).rows[0]!;
     expect(Buffer.from(updated.bytes).toString()).not.toBe('old default');
-    await backfillMcpMemberRoomsAndAvatars(scope1.db);
+    await backfillMcpMemberAvatars(scope1.db);
     expect((await scope1.db.query<{ id: string }>('SELECT id FROM agent_avatars WHERE agent_id=$1', [member.member_id])).rows[0]!.id).toBe(updated.id);
     for (const [request, drawing] of [['rooms-mcp-set_profile', { source: 'set_profile' }], ['mcp-set-profile-hotfix', []], ['rooms-mcp-client-logo', { source: 'set_profile' }]]) {
       await scope1.db.query("UPDATE agent_avatars SET request_id=$2,drawing=$3::jsonb WHERE agent_id=$1", [member.member_id, request, JSON.stringify(drawing)]);
-      await backfillMcpMemberRoomsAndAvatars(scope1.db);
+      await backfillMcpMemberAvatars(scope1.db);
       expect((await scope1.db.query<{ id: string }>('SELECT id FROM agent_avatars WHERE agent_id=$1', [member.member_id])).rows[0]!.id).toBe(updated.id);
     }
   });
@@ -277,7 +275,7 @@ const scope1 = fixtureScope1();
       expect(JSON.stringify(set)).not.toContain('tag-secret');
       const stored = (await scope1.db.query<{ callback_url: string; callback_secret: string }>('SELECT callback_url,callback_secret FROM rooms_mcp_members WHERE member_id=$1', [member])).rows[0]!;
       expect(stored.callback_url).toBe('https://hooks.example/muse'); expect(stored.callback_secret).not.toContain('tag-secret');
-      const handle = (await scope1.db.query<{ handle: string }>('SELECT handle FROM identities WHERE id=$1', [member])).rows[0]!.handle;
+      const handle = (await scope1.db.query<{ handle: string }>('SELECT beeline_room_handle(id,$2) handle FROM identities WHERE id=$1', [member,ROOM])).rows[0]!.handle;
       const sent = await scope1.phone.execute('sendRoomMessage', { roomId: ROOM, text: `@${handle} please answer` }, AGENT);
       await routeAgentResult(scope1.db, undefined, sent.messageId, { roomId: ROOM, agentId: AGENT });
       const posts: { url: string; authorization: string | null; body: Record<string, unknown> }[] = [];
@@ -289,7 +287,7 @@ const scope1 = fixtureScope1();
       expect(posts[0]).toMatchObject({ url: 'https://hooks.example/muse', authorization: 'Bearer tag-secret',
         body: { memberId: member, roomId: ROOM, messageId: sent.messageId, text: `@${handle} please answer` } });
       expect(String(posts[0]!.body.instruction)).toContain('send_message');
-      expect(String(posts[0]!.body.instruction)).toContain('and start with @demo-agent');
+      expect(String(posts[0]!.body.instruction)).toContain(`Reply (start with @demo-agent): replyTo ${sent.messageId}`);
       expect(String(posts[0]!.body.instruction)).toContain('A reply without the tag does not wake them');
       // Removing the webhook stops the push.
       await client.callTool({ name: 'set_webhook', arguments: { url: '' } });
@@ -321,7 +319,7 @@ const scope1 = fixtureScope1();
 
   it('WEBHOOK-CLEAR-1: clearing a member webhook disables fallback and cancels queued tags', async () => {
     const { client, member, grant } = await scope1.connected();
-    const handle = (await scope1.db.query<{ handle: string }>('SELECT handle FROM identities WHERE id=$1', [member])).rows[0]!.handle;
+    const handle = (await scope1.db.query<{ handle: string }>('SELECT beeline_room_handle(id,$2) handle FROM identities WHERE id=$1', [member,ROOM])).rows[0]!.handle;
     await scope1.db.query("UPDATE rooms_mcp_clients SET callback_url='https://hooks.example/registration' WHERE id=$1", [grant.clientId]);
     const posts: string[] = [];
     const deliver = () => deliverMcpMemberWebhooks(scope1.db, async url => { posts.push(url); return new Response('', { status: 200 }); });
@@ -400,7 +398,7 @@ const scope1 = fixtureScope1();
 
   it('lists the tags owed a reply across Rooms, oldest first, after a cursor', async () => {
     const { client, member } = await scope1.connected();
-    const handle = (await scope1.db.query<{ handle: string }>('SELECT handle FROM identities WHERE id=$1', [member])).rows[0]!.handle;
+    const handle = (await scope1.db.query<{ handle: string }>('SELECT beeline_room_handle(id,$2) handle FROM identities WHERE id=$1', [member,ROOM])).rows[0]!.handle;
     const second = (await scope1.phone.execute('createRoom', { workspaceId: WORKSPACE, name: `mentions-${member.slice(0, 6)}` }, USER)).id;
     const first = await scope1.phone.execute('sendRoomMessage', { roomId: ROOM, text: `@${handle} first question` }, USER);
     const next = await scope1.phone.execute('sendRoomMessage', { roomId: second, text: `@${handle} second question` }, USER);
@@ -629,7 +627,7 @@ const scope3 = fixtureScope3(scope1);
     // Reproduction (R-MCP-LIMITS): search advertised limit 20 while the server refuses anything above 10.
     it('R-MCP-LIMITS: every advertised search limit is accepted', async () => {
       const { client, member } = await scope1.connected();
-      const handle = (await scope1.db.query<{ handle: string }>('SELECT handle FROM identities WHERE id=$1', [member])).rows[0]!.handle;
+      const handle = (await scope1.db.query<{ handle: string }>('SELECT beeline_room_handle(id,$2) handle FROM identities WHERE id=$1', [member,ROOM])).rows[0]!.handle;
       // A person's tag gives the app's turn a requester, as it does for an agent.
       await scope1.phone.execute('sendRoomMessage', { roomId: ROOM, text: `@${handle} what did the release migration change?` }, USER);
       const search = (await client.listTools()).tools.find(tool => tool.name === 'search')!;
@@ -666,10 +664,10 @@ const scope3 = fixtureScope3(scope1);
     it('R-MCP-EXCLUDED: refuses wallet spending and host grants with a plain reason', async () => {
       const { client } = await scope1.connected();
       for (const name of ['wallet_pay', 'wallet_swap', 'wallet_contract_call', 'wallet_sign_typed_data',
-        'create_link_spend_request', 'wait_link_spend_request', 'request_grant', 'run_granted_command']) {
+        'create_link_spend_request', 'wait_link_spend_request', 'request_grant', 'run_granted_command', 'store_secret']) {
         const refused = await scope3.call(client, name, {});
         expect(refused.error, name).toBe(true);
-        expect(refused.text).toMatch(name.includes('grant') ? /host grants are kept out of connected apps/ : /wallet spending is kept out of connected apps/);
+        expect(refused.text).toMatch((name.includes('grant') || name === 'store_secret') ? /host grants are kept out of connected apps/ : /wallet spending is kept out of connected apps/);
       }
       for (const tool of ['pay', 'swap', 'contract_call', 'sign_typed_data', 'link_request', 'link_wait']) {
         const refused = await scope3.call(client, 'app_tool', { address: ROOM, app: 'beeline:wallet', tool, args: { amount: '1', to: '0x0' } });
@@ -702,7 +700,7 @@ const scope3 = fixtureScope3(scope1);
     it('R-MCP-REPORT: reports an order back to the agent that sent it', async () => {
       const { client, member, grant } = await scope1.connected();
       await scope1.db.query(`UPDATE rooms_mcp_clients SET callback_url='https://hooks.example/orders' WHERE id=$1`, [grant.clientId]);
-      const handle = (await scope1.db.query<{ handle: string }>('SELECT handle FROM identities WHERE id=$1', [member])).rows[0]!.handle;
+      const handle = (await scope1.db.query<{ handle: string }>('SELECT beeline_room_handle(id,$2) handle FROM identities WHERE id=$1', [member,ROOM])).rows[0]!.handle;
       expect((await scope3.call(client, 'report', { address: ROOM, status: 'done', text: 'done: nothing was ordered' })).text)
         .toContain('no order is waiting for your report');
       const turn = await scope3.agentTurn('@demo-agent hand the audit to the app');

@@ -1,4 +1,7 @@
 import { IndexRow } from './IndexRow';
+// The row has its own suite; this one only needs to find it.
+vi.mock('./IndexRow', () => ({ IndexRow: 'IndexRow' }));
+vi.mock('@/components/buzz/IndexRow', () => ({ IndexRow: 'IndexRow' }));
 vi.mock('@/buzz/use-artifact-recovery', () => ({ useArtifactRecoveryGeneration: () => 0 }));
 import * as React from 'react';
 // @ts-expect-error react-test-renderer has no declarations in this workspace.
@@ -28,14 +31,9 @@ vi.mock('react-native', async () => {
     View: host('View'),
   };
 });
-vi.mock('react-native-unistyles', () => ({
-  StyleSheet: {
-    create: (factory: (theme: unknown) => unknown) =>
-      factory({
-        buzz: { roomList: { edge: 20 }, ledgerQuiet: '#777', space: { md: 12 }, type: { meta: {} } },
-      }),
-  },
-}));
+vi.mock('tamagui', async () => (await import('@/ui/screens/transcript/grammar-hosts.test-support')).tamaguiHosts());
+vi.mock('lucide-react-native', async () => (await import('@/ui/screens/transcript/grammar-hosts.test-support')).lucideHosts());
+vi.mock('react-native-safe-area-context', () => ({ useSafeAreaInsets: () => ({ top: 0, bottom: 0, left: 0, right: 0 }) }));
 vi.mock('@/buzz/artifact-link', () => ({ artifactBase64: mocks.artifactBase64, subscribeArtifactBytesPurge: () => () => {} }));
 // The generated document has its own suite; stubbing the loader keeps the
 // megabyte of vendored pdf.js source out of a component render.

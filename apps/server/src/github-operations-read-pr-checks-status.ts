@@ -12,7 +12,7 @@ import type { SqlDatabase } from './database.js';
 import { GITHUB_SUBJECT, systemLine } from './system-line.js';
 import { recordPersonMergeYes, withdrawPullRequestMergeApprovals } from './corner-merge-approval.js';
 import { assertCornerBriefAllowsMerge } from './corner-brief.js';
-import { advanceCorner, cornerReviewWokenSql, blockingReview, confirmCornerMergeAuthority, lockCornerLifecycle, cornerMergeGate, cornerMergeability } from './corner-lifecycle.js';
+import { advanceCorner, cornerReviewWokenSql, confirmCornerMergeAuthority, lockCornerLifecycle, cornerMergeGate, cornerMergeability } from './corner-lifecycle.js';
 import { queueCornerMergeConflict, reconcileCornerMergeBlockers } from './agent-command.js';
 import { GitHubOperations, reviewerWakeFromFacts, Input, LandCornerOutcome, CornerWebhookTarget, record, mergeConflictKey, hash, text } from './github-operations.js';
 
@@ -42,7 +42,7 @@ import { GitHubOperations, reviewerWakeFromFacts, Input, LandCornerOutcome, Corn
                 reviewer_identity.id reviewer_identity_id,
                 parent_member.identity_id parent_reviewer_id,
                 corner_member.identity_id corner_reviewer_id,
-                reviewer_identity.handle reviewer_handle
+                beeline_room_handle(reviewer_identity.id,$1) reviewer_handle
          FROM rooms r
          JOIN corner_github_cache f ON f.corner_id=r.id
          JOIN rooms parent ON parent.id=r.parent_id
@@ -155,17 +155,6 @@ import { GitHubOperations, reviewerWakeFromFacts, Input, LandCornerOutcome, Corn
       checks,
       reviewWoken: corner.review_woken,
     });
-    if (reviewerWake.status === 'dispatched' && !gate.approved) {
-      const delivery = (await ctx.database.query<{ ended: boolean; live: boolean }>(
-        `SELECT bool_or(command.state='complete') ended,
-           bool_or(command.state='pending' OR (command.state='claimed' AND ${commandOwnerLiveSql('command')})) live
-         FROM agent_commands command WHERE command.room_id=$1
-           AND command.review_context->>'headSha'=$2 AND command.review_context->'pullRequest'=$3::jsonb
-           AND command.review_context->>'purpose' IS NULL`,
-        [input.cornerId,pr.headSha,JSON.stringify(number)])).rows[0];
-      if (delivery?.ended && !delivery.live && !await blockingReview(ctx.database,input.cornerId,pr.headSha))
-        reviewerWake = {status:'waiting',detail:'The reviewer ended without a verdict; ownership returns to the implementer or commander once.'};
-    }
     const mergeDecision = cornerMergeability({
       checks,
       approved: gate.approved,
@@ -538,6 +527,17 @@ import { GitHubOperations, reviewerWakeFromFacts, Input, LandCornerOutcome, Corn
   }
 
 
+  /** A dirty verdict is already contained when the merge base is the current base tip. */
+  export function headContainsCurrentMain(mergeability: string | undefined, mergeBase: string | undefined, mainHead: string | undefined): boolean {
+    return mergeability === 'dirty' && Boolean(mergeBase && mainHead && mergeBase === mainHead);
+  }
+
+  function comparedMergeBase(compared: unknown): string | undefined {
+    if (!compared || typeof compared !== 'object') return undefined;
+    const base = (compared as { merge_base_commit?: { sha?: unknown } }).merge_base_commit;
+    return typeof base?.sha === 'string' ? base.sha : undefined;
+  }
+
   /**
    * Retry GitHub's asynchronous mergeability calculation for open corner PRs,
    * and re-read a stored 'dirty' PR so a conflict that GitHub has since
@@ -604,6 +604,15 @@ import { GitHubOperations, reviewerWakeFromFacts, Input, LandCornerOutcome, Corn
         // recorded; any other verdict waits for GitHub to reach that base.
         if (staleBase && pr.mergeability !== 'dirty') continue;
         const baseSha = staleBase ? row.base_sha! : pr.baseSha;
+        let contained = false;
+        if (pr.mergeability === 'dirty') {
+          try {
+            const branch = row.target_branch || 'main';
+            const mainHead = await ctx.app.readBranchHead(token.token, row.repository, branch);
+            const compared = await ctx.app.readRepositoryJson(token.token, row.repository, `compare/${branch}...${pr.headSha}`);
+            contained = headContainsCurrentMain(pr.mergeability, comparedMergeBase(compared), mainHead);
+          } catch { contained = false; }
+        }
         await ctx.database.transaction(async (tx) => {
           // Conflict dispatch advances the lifecycle in this transaction, like
           // check refresh. Take its lock before retaining the cache row.
@@ -627,13 +636,13 @@ import { GitHubOperations, reviewerWakeFromFacts, Input, LandCornerOutcome, Corn
             {
               pr: {
                 ...current.pr,
-                mergeability: pr.mergeability,
+                mergeability: contained ? 'clean' : pr.mergeability,
                 ...(baseSha ? { baseSha } : {}),
               },
             },
             tx,
           );
-          if (pr.mergeability !== 'dirty') return;
+          if (pr.mergeability !== 'dirty' || contained) return;
           const conflictKey = mergeConflictKey(row.number, pr.headSha);
           const note = await systemLine(tx, {
             id: hash(`beeline:${row.corner_id}:github:${conflictKey}`),

@@ -2,9 +2,6 @@ import { execFileSync } from 'node:child_process';
 import { appendFileSync, readFileSync, writeFileSync } from 'node:fs';
 import { pathToFileURL } from 'node:url';
 
-export function easternSlot(date) {
-  return new Intl.DateTimeFormat('en-US', { timeZone: 'America/New_York', hour: '2-digit', hourCycle: 'h23' }).format(date) === '03';
-}
 const bad = (job) => !['success', 'skipped', 'neutral'].includes(job.conclusion);
 export function classify(attempts) {
   if (!attempts.length || attempts.some(a => a.sha !== attempts[0].sha)) throw new Error('Attempts must share one SHA');
@@ -27,33 +24,37 @@ export function classify(attempts) {
     runnerMinutes: jobs.reduce((n, j) => n + Math.max(0, (Date.parse(j.completed_at) - Date.parse(j.started_at)) / 60000 || 0), 0) };
 }
 
-export async function runNightly({ api, save, now = () => new Date(), manual = false, schedule, requestId = String(Date.now()) }) {
-  if (!manual) {
-    const started = now();
-    const hour = { '7 7 * * *': 7, '7 8 * * *': 8 }[schedule];
-    if (hour === undefined) throw new Error(`Unknown Nightly Checks schedule: ${schedule}`);
-    const intended = new Date(started);
-    intended.setUTCHours(hour, 7, 0, 0);
-    // The date selects the DST trigger. GitHub may start either twin hours late;
-    // the runner's start hour says nothing about which trigger owns this date.
-    if (!easternSlot(intended)) return;
-  }
+export async function runNightly({ api, save, requestId = String(Date.now()), releaseRunId = '', releaseSha = '' }) {
   if (!/^\d+$/.test(requestId)) throw new Error('Invalid nightly request identity');
+  const pinned = String(releaseSha ?? '').trim();
+  if (pinned === 'main' || /[\s/]/.test(pinned)) throw new Error('Release SHA is not a commit');
   const releases = await api('GET', 'actions/workflows/unified-release.yml/runs?branch=main&per_page=100');
-  if (releases.workflow_runs.some(r => r.status !== 'completed')) {
-    const result = { schemaVersion: 1, skipped: true, reason: 'A unified-release run on main is active', releases: releases.workflow_runs.filter(r => r.status !== 'completed').map(r => r.html_url) };
+  // The release that starts this run stays in progress until its last job ends.
+  // That caller is not a release the nightly check still has to wait for.
+  const caller = String(releaseRunId ?? '').trim();
+  const active = releases.workflow_runs.filter(run => run.status !== 'completed' && !(caller && String(run.id) === caller));
+  if (active.length) {
+    const result = { schemaVersion: 1, skipped: true, reason: 'A unified-release run on main is active', releases: active.map(run => run.html_url) };
     save(result); return result;
   }
-  const sha = (await api('GET', 'commits/main')).sha;
-  await api('POST', 'actions/workflows/checks.yml/dispatches', { ref: 'main', inputs: { suite: 'all', nightly_id: requestId } });
+  // A release pins its commit. Reading main here would follow commits that landed after initialize.
+  const sha = pinned || (await api('GET', 'commits/main')).sha;
+  const inputs = { suite: 'all', nightly_id: requestId };
+  if (pinned) inputs.pinned_sha = pinned;
+  // ref stays the main branch: GitHub rejects a commit SHA as a dispatch ref, and the
+  // completion workflow only hears Checks runs whose branch is main. pinned_sha is the checkout.
+  await api('POST', 'actions/workflows/checks.yml/dispatches', { ref: 'main', inputs });
   // Completion is a workflow_run event. No run-discovery or status polling.
   const result = { schemaVersion: 1, dispatched: true, requestedSha: sha, requestId };
   save(result); return result;
 }
 
 export async function finishNightly({ api, run, save }) {
+  const titled = /^Nightly Checks \d+(?: (\S+))?$/.exec(run?.display_title ?? '');
   if (run?.event !== 'workflow_dispatch' || run.head_branch !== 'main' || run.path !== '.github/workflows/checks.yml' ||
-      !/^Nightly Checks \d+$/.test(run.display_title ?? '') || run.status !== 'completed') return;
+      !titled || run.status !== 'completed') return;
+  // The run's head stays main's tip. The title carries the commit that was checked out.
+  const pinnedSha = titled[1] || '';
   // One final observation also rejects a duplicate old completion after its
   // rerun has started. The workflow serializes handlers for this run identity.
   const state = await api('GET', `actions/runs/${run.id}`);
@@ -75,7 +76,7 @@ export async function finishNightly({ api, run, save }) {
         job.failingTests = [...new Set(log.split('\n').filter(l => /(?:not ok \d+|FAIL\s|✕|×)/.test(l)).map(l => l.replace(/\u001b\[[0-9;]*m/g, '').slice(0, 1000)))].slice(0, 100);
       } catch (error) { job.logError = error.message; }
     }
-    attempts.push({ attempt, sha: state.head_sha, url: `${run.html_url}/attempts/${attempt}`, conclusion: completed.conclusion, jobs: jobs.jobs });
+    attempts.push({ attempt, sha: pinnedSha || state.head_sha, url: `${run.html_url}/attempts/${attempt}`, conclusion: completed.conclusion, jobs: jobs.jobs });
   }
   const result = classify(attempts);
   if (attempts.at(-1).conclusion !== 'success' && result.failures.length === 0)
@@ -160,7 +161,7 @@ if (process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href) 
   try {
     const result = process.env.EVENT_NAME === 'workflow_run'
       ? await finishNightly({ api, save, run: JSON.parse(readFileSync(process.env.GITHUB_EVENT_PATH, 'utf8')).workflow_run })
-      : await runNightly({ api, save, manual: process.env.EVENT_NAME === 'workflow_dispatch', requestId: process.env.GITHUB_RUN_ID, schedule: process.env.SCHEDULE });
+      : await runNightly({ api, save, requestId: process.env.GITHUB_RUN_ID, releaseRunId: process.env.RELEASE_RUN_ID ?? '', releaseSha: process.env.RELEASE_SHA ?? '' });
     if (result && process.env.GITHUB_STEP_SUMMARY) appendFileSync(process.env.GITHUB_STEP_SUMMARY, result.skipped ? `${result.reason}\n` : result.dispatched ? `Nightly Checks dispatched for ${result.requestedSha}; completion follows its workflow event.\n` : `## Nightly Checks\nCommit: ${result.sha}\n\nFailures: ${result.failures.length}; flaky jobs: ${result.flakyJobs.length}\n\nWall clock: ${result.wallClockMinutes.toFixed(2)} minutes; runner time: ${result.runnerMinutes.toFixed(2)} minutes\n\n${result.attempts.map(a => `[Attempt ${a.attempt}](${a.url})`).join(' · ')}\n\n${[...result.failures, ...result.flakyJobs].map(j => `- ${j.name}: ${j.attempts.map(a => `[${a.conclusion}](${a.html_url || a.url})`).join(' → ')}`).join('\n')}\n`);
     await publishIssues({ api, result, runUrl: runLink });
     if (result?.failures?.length) process.exitCode = 1;

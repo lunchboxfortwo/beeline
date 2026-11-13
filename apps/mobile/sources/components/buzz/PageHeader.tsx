@@ -1,11 +1,11 @@
 import React from 'react';
-import { Text, TouchableOpacity, View } from 'react-native';
-import { StyleSheet } from 'react-native-unistyles';
+import { Separator, XStack, YStack } from 'tamagui';
+import { Btn, HEIGHT, Inked, T } from '@/ui/grammar';
 import { CHEVRON_BACK_SIZE, ChevronGlyph } from './ChevronGlyph';
 
 /** Shared title text for headers whose surrounding controls own the layout. */
-export function PageHeaderTitle(props: React.ComponentProps<typeof Text>) {
-  return <Text {...props} />;
+export function PageHeaderTitle(props: React.ComponentProps<typeof T>) {
+  return <T v="heading" {...props} />;
 }
 
 export interface PageHeaderProps {
@@ -52,70 +52,30 @@ export function PageHeader({
   testID,
 }: PageHeaderProps) {
   return (
-    <View style={[styles.header, eyebrow && styles.headerWithEyebrow]} testID={testID}>
-      {onBack ? (
-        <TouchableOpacity
-          accessibilityLabel={backAccessibilityLabel}
-          accessibilityRole="button"
-          onPress={onBack}
-          style={styles.back}
-          testID={backTestID}
-        >
-          <ChevronGlyph
-            color={styles.headerTitle.color}
-            direction="left"
-            size={CHEVRON_BACK_SIZE}
-          />
-        </TouchableOpacity>
-      ) : null}
-      <View style={styles.headerCopy}>
-        {eyebrow ? (
-          <Text numberOfLines={1} style={styles.headerEyebrow}>
-            {eyebrow}
-          </Text>
+    <YStack testID={testID}>
+      {/* The Corners page's inset, which every section page now shares. */}
+      <XStack minHeight={HEIGHT.sheetRow} paddingVertical="1" paddingHorizontal="2" alignItems="center">
+        {onBack ? (
+          <Btn kind="icon" label={backAccessibilityLabel} accessibilityRole="button" onPress={onBack} testID={backTestID}>
+            <Inked color="ink" glyph={ChevronGlyph} direction="left" size={CHEVRON_BACK_SIZE} />
+          </Btn>
         ) : null}
-        <PageHeaderTitle
-          accessibilityRole="header"
-          style={[styles.headerTitle, prominent && styles.headerHero]}
-          testID={titleTestID}
-        >
-          {title}
-        </PageHeaderTitle>
-        {meta ? <Text style={styles.headerMeta}>{meta}</Text> : null}
-      </View>
-      {trailing ? (
-        <Text accessibilityLabel={trailingAccessibilityLabel} style={styles.headerTrailing}>
-          {trailing}
-        </Text>
-      ) : null}
-      {action}
-    </View>
+        <YStack flex={1} minWidth={0}>
+          {eyebrow ? <T v="meta" color="secondary" numberOfLines={1}>{eyebrow}</T> : null}
+          <PageHeaderTitle v={prominent ? 'title' : 'heading'} accessibilityRole="header" testID={titleTestID}>
+            {title}
+          </PageHeaderTitle>
+          {meta ? <T v="meta" color="secondary" marginTop="1">{meta}</T> : null}
+        </YStack>
+        {/* Reserved and right-aligned so a count ends at the same x for 9 and for 10. */}
+        {trailing ? (
+          <T v="meta" color="secondary" minWidth={24} paddingHorizontal="2" textAlign="right" accessibilityLabel={trailingAccessibilityLabel}>
+            {trailing}
+          </T>
+        ) : null}
+        {action}
+      </XStack>
+      <Separator borderColor="stroke" />
+    </YStack>
   );
 }
-
-const styles = StyleSheet.create((theme) => ({
-  header: {
-    minHeight: 66,
-    flexDirection: 'row',
-    alignItems: 'center',
-    borderBottomWidth: StyleSheet.hairlineWidth,
-    borderBottomColor: theme.buzz.border,
-    // The Corners page's inset, which every section page now shares.
-    paddingHorizontal: theme.buzz.space.sm,
-  },
-  headerWithEyebrow: {},
-  back: { width: 44, height: 44, alignItems: 'center', justifyContent: 'center' },
-  headerCopy: { flex: 1, minWidth: 0 },
-  headerEyebrow: { ...theme.buzz.type.meta, color: theme.buzz.textMuted },
-  headerTitle: { ...theme.buzz.type.bodyStrong, color: theme.buzz.textPrimary },
-  headerHero: { ...theme.buzz.type.hero },
-  headerMeta: { ...theme.buzz.type.meta, color: theme.buzz.ledgerQuiet, marginTop: theme.buzz.space.xs },
-  // Reserved and right-aligned so a count ends at the same x for 9 and for 10.
-  headerTrailing: {
-    ...theme.buzz.type.meta,
-    color: theme.buzz.textMuted,
-    minWidth: theme.buzz.space.lg,
-    paddingHorizontal: theme.buzz.space.sm,
-    textAlign: 'right',
-  },
-}));

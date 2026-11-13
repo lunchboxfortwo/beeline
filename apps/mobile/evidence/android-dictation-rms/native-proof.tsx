@@ -10,6 +10,7 @@ import { View, Text } from 'react-native';
 import { UnistylesRuntime } from 'react-native-unistyles';
 import { ConversationComposer } from '@/components/buzz/ConversationComposer';
 import { getRecognitionModule } from '@/buzz/speech-recognition-adapter';
+import { GrammarProvider } from '../../sources/ui/GrammarProvider';
 UnistylesRuntime.setTheme('bone');
 const mod = getRecognitionModule();
 if (mod) {
@@ -37,4 +38,4 @@ function Proof() {
    onKeyPress={() => {}} onSend={() => {}} tagHandles={new Set(['ruby'])} /></View>
  </View>;
 }
-registerRootComponent(Proof);
+registerRootComponent(() => <GrammarProvider><Proof /></GrammarProvider>);

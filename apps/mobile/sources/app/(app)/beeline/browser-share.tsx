@@ -1,12 +1,12 @@
 import React from 'react';
-import { Text, View } from 'react-native';
-import { StyleSheet } from 'react-native-unistyles';
+import { YStack } from 'tamagui';
 import { router, useLocalSearchParams } from 'expo-router';
 import { loadBuzzIdentity } from '@/auth/buzz-identity-storage';
 import { savePendingBrowserShare, validBrowserShareId } from '@/buzz/pending-browser-share';
 import { getBuzzRuntimeConfig } from '@/buzz/runtime-config';
 import { ComputerSessionViewer, type ComputerSessionView } from '@/components/buzz/ComputerSession';
 import { monolithPhoneOperation } from '@/sync/transport/monolith-operation';
+import { T } from '@/ui/grammar';
 
 /** Public share links enter through phone authentication before opening the viewer. */
 export default function BrowserShare() {
@@ -29,14 +29,9 @@ export default function BrowserShare() {
       const { access } = await monolithPhoneOperation('openComputerSession', { id });
       if (active) setSession({ id, access, url: `${getBuzzRuntimeConfig().monolithUrl}/s/${id}/`, title: 'Shared browser', status: 'live' });
     })().catch(() => {
-      if (active) setMessage('You do not have access to this shared browser, or the session has ended. Open the card in its Room to check.');
+      if (active) setMessage('You do not have access to this shared browser, or the session has ended. Open the card in its chat to check.');
     });
     return () => { active = false; };
   }, [id]);
-  return session ? <ComputerSessionViewer session={session} onClose={() => router.replace('/beeline/channels')} /> : <View style={styles.status}><Text style={styles.message} accessibilityRole="alert">{message}</Text></View>;
+  return session ? <ComputerSessionViewer session={session} onClose={() => router.replace('/beeline/channels')} /> : <YStack flex={1} justifyContent="center" padding="3" backgroundColor="canvas"><T accessibilityRole="alert">{message}</T></YStack>;
 }
-
-const styles = StyleSheet.create((theme) => ({
-  status: { flex: 1, justifyContent: 'center', padding: theme.buzz.space.md, backgroundColor: theme.buzz.bgBase },
-  message: { ...theme.buzz.type.body, color: theme.buzz.textPrimary },
-}));

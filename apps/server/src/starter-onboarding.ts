@@ -1,3 +1,4 @@
+import { localizedStarterHello, readStarterLanguage } from './starter-language.js';
 import type { ObjectService } from './object-service.js';
 import { randomBytes, randomUUID } from 'node:crypto';
 import type { SqlDatabase } from './database.js';
@@ -6,7 +7,7 @@ import { identityFaceDataUri } from './identity-face.js';
 import { recordOnboardingEvent } from './signin-funnel.js';
 
 export function starterHello(name: string) {
-  return `Hi ${name.trim().split(/\s+/u)[0] || 'there'}, I'm Beebee and that's Luna. We're your free agents. We run on different AI models, so one of us does the work and the other checks it.\n\nWhat should we work on?`;
+  return localizedStarterHello(name, 'en');
 }
 
 export async function postStarterWelcome(database: SqlDatabase, input: {
@@ -20,7 +21,7 @@ export async function postStarterWelcome(database: SqlDatabase, input: {
     onboardingManual: true, onboardingUserId: input.manualUserId, onboardingRunId: input.runId ?? randomUUID(),
   } : {}) };
   await database.query(`INSERT INTO messages(id,room_id,author_id,text,card,created_at) VALUES($1,$2,$3,$4,$5::jsonb,clock_timestamp())`, [
-    messageId, input.roomId, input.agentId, starterHello(person?.name ?? 'there'), JSON.stringify(card),
+    messageId, input.roomId, input.agentId, localizedStarterHello(person?.name ?? '', await readStarterLanguage(database, input.roomId, userId)), JSON.stringify(card),
   ]);
   if (userId) await recordOnboardingEvent(database, userId, 'welcome_shown', { roomId: input.roomId });
   return { messageId };

@@ -1,56 +1,24 @@
 import { appErrorCopy } from '@/buzz/app-error-copy';
 import { githubInstallationRedirectUri } from '@/auth/github-auth-session';
 import { useGitHubInstallationSession } from '@/auth/github-installation-host';
-import { type ChatListHandle } from '@/buzz/chat-list-store';
 import { validRoomSlug } from '@/buzz/room-name';
 import { inviteOnlyForRepository, type RepoCandidate } from '@/buzz/room-repo-picker';
-import { ROOM_LABEL } from '@/buzz/vocabulary';
-import { readGitHubAccess, updateGitHubAccess } from '@/buzz/github-access-surface';
-import { BuzzRigTransport } from '@/sync/transport';
-import { type Identity } from '@beeline/buzz-client';
+import { ROOM_LABEL, ROOM_TITLE } from '@/buzz/vocabulary';
+import { readGitHubAccess } from '@/buzz/github-access-surface';
+import { chatNameForRepository } from '@/ui/screens/chats/chat-tree-model';
 import { useCallback } from 'react';
-import { Keyboard } from 'react-native';
+import type { DeckPresentation } from './useChannelsPresentation';
+import type { DeckState } from './useChannelsRouteState';
 
-type Props = [
-  transport: BuzzRigTransport,
-  activeCommunityId: string,
-  githubScope: { relay: string; viewer: string; } | null,
-  setRepoPickerError: import("react/index").Dispatch<import("react/index").SetStateAction<string | null>>,
-  relayUrl: string,
-  identity: Identity,
-  setRepoAccessLoading: import("react/index").Dispatch<import("react/index").SetStateAction<boolean>>,
-  setShowRepoPicker: import("react/index").Dispatch<import("react/index").SetStateAction<boolean>>,
-  setPendingRepo: import("react/index").Dispatch<import("react/index").SetStateAction<RepoCandidate | null>>,
-  setInviteOnly: import("react/index").Dispatch<import("react/index").SetStateAction<boolean>>,
-  setShowCreateRoom: import("react/index").Dispatch<import("react/index").SetStateAction<boolean>>,
-  setRepoPickerNotice: import("react/index").Dispatch<import("react/index").SetStateAction<string | null>>,
-  setCreatingRepository: import("react/index").Dispatch<import("react/index").SetStateAction<boolean>>,
-  roomName: string,
-  creatingRoom: boolean,
-  creatingRepository: boolean,
-  canManageWorkspace: boolean,
-  setCreatingRoom: import("react/index").Dispatch<import("react/index").SetStateAction<boolean>>,
-  setError: import("react/index").Dispatch<import("react/index").SetStateAction<string | null>>,
-  roomNameDraft: import("@/buzz/text-draft-store").TextDraft<string>,
-  inviteOnly: boolean,
-  chatStore: import("react/index").RefObject<ChatListHandle | null>,
-];
-export function useChannelsRepositories([
-  transport, activeCommunityId, githubScope, setRepoPickerError, relayUrl, identity,
-  setRepoAccessLoading, setShowRepoPicker, setPendingRepo, setInviteOnly, setShowCreateRoom,
-  setRepoPickerNotice, setCreatingRepository, roomName, creatingRoom, creatingRepository,
-  canManageWorkspace, setCreatingRoom, setError, roomNameDraft, inviteOnly, chatStore,
-]: Props): [
-  createRoom: (repository: RepoCandidate | null) => Promise<void>,
-  handleToggleRepoPicker: () => void,
-  handleLoadRepositories: () => Promise<void>,
-  handleSelectNoRepository: () => void,
-  handleSelectRepoCandidate: (candidate: RepoCandidate) => void,
-  handleAddGitHubAccount: () => Promise<void>,
-  handleCreateRepository: (installationId: number, name: string) => Promise<RepoCandidate>,
-] {
-
-
+/** The New chat sheet's writes: Start empty, or a chat attached to a GitHub repository. */
+export function useChannelsRepositories(
+  {
+    transport, githubScope, setRepoPickerError, relayUrl, identity, setRepoAccessLoading,
+    setNewChatStep, setRepoPickerNotice, creatingRoom, setCreatingRoom, setError, chatStore,
+  }: DeckState,
+  { activeCommunityId, canManageWorkspace, roomNameDraft }: DeckPresentation,
+  openRoom: (roomId: string) => void,
+) {
   const loadRepoPicker = useCallback(
     async (refresh = false) => {
       if (!transport || !activeCommunityId || !githubScope) return;
@@ -64,30 +32,18 @@ export function useChannelsRepositories([
     [activeCommunityId, transport, relayUrl, identity?.publicKey],
   );
 
-  const handleLoadRepositories = useCallback(async () => {
+  const loadRepositories = useCallback(async () => {
     if (!transport || !activeCommunityId) return;
     setRepoPickerError(null);
     setRepoAccessLoading(true);
     try {
       await loadRepoPicker(true);
-    } catch (reason) {
+    } catch {
       setRepoPickerError('Could not load repos. Try again.');
     } finally {
       setRepoAccessLoading(false);
     }
   }, [activeCommunityId, loadRepoPicker, transport]);
-
-  const handleToggleRepoPicker = useCallback(() => {
-    Keyboard.dismiss();
-    setShowRepoPicker((value) => !value);
-  }, []);
-
-  const handleSelectRepoCandidate = useCallback((candidate: RepoCandidate) => {
-    setPendingRepo(candidate);
-    setInviteOnly(inviteOnlyForRepository(candidate));
-    setShowRepoPicker(false);
-    setRepoPickerError(null);
-  }, []);
 
   const startGitHubInstallation = useCallback(
     async (installationId?: number) => {
@@ -97,10 +53,8 @@ export function useChannelsRepositories([
     [transport],
   );
   const refreshGitHubRepositories = useCallback(() => loadRepoPicker(true), [loadRepoPicker]);
-  const resumeRepoPicker = useCallback(async () => {
-    setShowCreateRoom(true);
-    setShowRepoPicker(true);
-  }, []);
+  // A cold resume from the GitHub install lands back on the repository list.
+  const resumeRepoPicker = useCallback(async () => setNewChatStep('github'), []);
   const { handleAddGitHubAccount } = useGitHubInstallationSession({
     ready: Boolean(transport && activeCommunityId),
     returnPath: '/beeline/channels',
@@ -111,103 +65,50 @@ export function useChannelsRepositories([
     onColdResume: resumeRepoPicker,
   });
 
-  const handleSelectNoRepository = useCallback(() => {
-    setPendingRepo(null);
-    setInviteOnly(inviteOnlyForRepository(null));
-    setShowRepoPicker(false);
-    setRepoPickerError(null);
-  }, []);
-
-  const handleCreateRepository = useCallback(
-    async (installationId: number, name: string) => {
-      if (!transport) throw new Error('Connection is still starting. Try again.');
-      setRepoPickerError(null);
-      setCreatingRepository(true);
-      try {
-        const repository = await transport.githubRepositoryCreate({
-          installationId,
-          name,
-          private: true,
-        });
-        if (githubScope)
-          await updateGitHubAccess(githubScope, (current) => ({
-            ...current,
-            candidates: [...current.candidates, repository],
-          }));
-        setPendingRepo(repository);
-        return repository;
-      } catch (reason) {
-        setRepoPickerError(appErrorCopy(reason, `Could not create repository.`));
-        throw reason;
-      } finally {
-        setCreatingRepository(false);
-      }
-    },
-    [transport],
-  );
-
-  const createRoom = useCallback(
-    async (repository: RepoCandidate | null) => {
-      const name = roomName.trim();
-      if (
-        !validRoomSlug(name) ||
-        !transport ||
-        !activeCommunityId ||
-        creatingRoom ||
-        creatingRepository ||
-        !canManageWorkspace
-      )
-        return;
+  /** Creates the chat, closes the sheet, reads the list again and opens the new chat. */
+  const createChat = useCallback(
+    async (name: string, repository: RepoCandidate | null, inviteOnly: boolean) => {
+      if (!validRoomSlug(name) || !transport || !activeCommunityId || creatingRoom || !canManageWorkspace) return;
       setCreatingRoom(true);
       setError(null);
-      const clearSubmittedRoom = roomNameDraft.capture();
+      const clearSubmittedRoom = repository ? () => undefined : roomNameDraft.capture();
       let publishAcknowledged = false;
       try {
-        await transport.createRoom(name, {
+        const roomId = await transport.createRoom(name, {
           communityId: activeCommunityId,
           visibility: inviteOnly ? 'invite-only' : 'public',
           repository: repository ?? undefined,
           onPublished: () => {
             publishAcknowledged = true;
             clearSubmittedRoom();
-            setInviteOnly(false);
-            setPendingRepo(null);
-            setShowRepoPicker(false);
-            setShowCreateRoom(false);
+            setNewChatStep(null);
             chatStore.current?.force();
           },
         });
         if (!publishAcknowledged) {
           clearSubmittedRoom();
-          setInviteOnly(false);
-          setPendingRepo(null);
-          setShowRepoPicker(false);
-          setShowCreateRoom(false);
+          setNewChatStep(null);
         }
         chatStore.current?.force();
+        if (roomId) openRoom(roomId);
       } catch (reason) {
         setError(
           publishAcknowledged
-            ? appErrorCopy(reason, `${ROOM_LABEL} created, but membership is still syncing.`)
+            ? appErrorCopy(reason, `${ROOM_TITLE} created, but membership is still syncing.`)
             : appErrorCopy(reason, `Could not create ${ROOM_LABEL}.`),
         );
       } finally {
         setCreatingRoom(false);
       }
     },
-    [
-      activeCommunityId,
-      canManageWorkspace,
-      creatingRoom,
-      creatingRepository,
-      inviteOnly,
-      roomName,
-      roomNameDraft,
-      transport,
-    ],
+    [activeCommunityId, canManageWorkspace, creatingRoom, openRoom, roomNameDraft, transport],
   );
-return [
-    createRoom, handleToggleRepoPicker, handleLoadRepositories, handleSelectNoRepository,
-    handleSelectRepoCandidate, handleAddGitHubAccount, handleCreateRepository,
-  ];
+
+  /** Picking a repository names the chat after it; a private repository starts invite-only. */
+  const createRepositoryChat = useCallback(
+    (candidate: RepoCandidate) =>
+      createChat(chatNameForRepository(candidate), candidate, inviteOnlyForRepository(candidate)),
+    [createChat],
+  );
+  return { loadRepositories, handleAddGitHubAccount, createChat, createRepositoryChat };
 }

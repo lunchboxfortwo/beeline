@@ -543,6 +543,10 @@ describe('agent schedule background posting', () => {
         },
       });
       for (const message of messages.rows) expect(message).toEqual(messages.rows[0]);
+      // Reproduction quiet-chat-schedule: the run stays in the routine's
+      // history; the chat shows no `@scheduler ran a schedule` line.
+      const view = await new PhoneService(database, 'http://local.test').readRoom(ROOM, OWNER);
+      expect(view?.messages.some((row) => row.text.includes('ran a schedule'))).toBe(false);
       // The scheduler identity is hidden from rosters.
       expect(
         (
@@ -657,7 +661,7 @@ describe('agent tool schedule daemon operations', () => {
       expect((await daemon.execute('listAgentSchedules', {
         agentId: AGENT, roomId: elsewhere, selfOnly: true,
       }, AGENT)).schedules).toContainEqual(expect.objectContaining({
-        scheduleId: own.scheduleId, roomId: ROOM, prompt: 'Evening audit.', cadence,
+        scheduleId: own.scheduleId, roomId: ROOM, prompt: 'Evening audit.', cadence, title: 'Scheduled check',
       }));
       for (const operation of ['updateAgentSchedule', 'deleteAgentSchedule'] as const) {
         await expect(daemon.execute(operation, {
@@ -805,7 +809,7 @@ describe('agent tool schedule daemon operations', () => {
           .schedules,
       ).toEqual([
         {
-          title: 'Summarize the Room',
+          title: 'Scheduled check',
           scheduleId: created.scheduleId,
           agentId: AGENT,
           prompt: 'Summarize the Room.',

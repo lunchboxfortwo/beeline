@@ -1,4 +1,4 @@
-import { type DaemonAttachment, readAgentUsage, usageSummary, usageIsOld, type RoomConversationResult, type CornerRestoreResult, cornerTextRefusal, type ConnectResult } from "@beeline/api-contract/daemon";
+import { type DaemonAttachment, readAgentUsage, usageSummary, usageIsOld, type RoomConversationResult, type CornerRestoreResult, fixCornerText, type ConnectResult } from "@beeline/api-contract/daemon";
 import { withoutImageData, deliverAttachments, attachmentId } from "./attachment-delivery.js";
 import { join } from "node:path";
 import { createHash, randomUUID } from "node:crypto";
@@ -11,7 +11,7 @@ import { squireSessionSignedIn } from "./squire-sign-in.js";
 import { JsonObject, readTurnContextFile, daemonExecute, requiredEnv, downloadAttachment, memorySources, activeCommandContext, commandRequest, fetchImage, asObject, stringArg, connectorOfferDepsFromEnv } from './read-only-mcp.js';
 import { agentScheduleRoomId, reactToMessage, postArtifact, bindBriefFiles, agentScheduleDepsFromEnv } from './read-only-mcp-download-attachment.js';
 import { reportFeedback, openCorner, reviseCornerBrief, readCornerBrief, closeCorner, prChecksStatus, approveMerge, targetCornerId, writeScratchFile } from './read-only-mcp-open-corner.js';
-import { shareBrowser, requestGrant, listGrants, workbenchStatus } from './read-only-mcp-agent-grant-deps.js';
+import { shareBrowser, requestGrant, listGrants, workbenchStatus, storeSecret } from './read-only-mcp-agent-grant-deps.js';
 import { runGrantedCommand } from './read-only-mcp-open-poll.js';
 
 
@@ -459,7 +459,7 @@ export async function executeAgentOperation(
       };
       if (args.mode === 'transcript' && args.from === 'newest') {
         const page = await readMessagePage(true);
-        // Walk back from the newest message; return the kept rows in transcript order.
+        // Assemble the bounded page in transcript order, then return newest first.
         const items: Record<string, unknown>[] = [];
         for (const item of page.items.slice(-itemLimit).reverse()) {
           let body = item.body.slice(0, 1000);
@@ -470,6 +470,7 @@ export async function executeAgentOperation(
             createdAt: item.createdAt,
             type: item.type,
             ...(item.attachments.length ? { attachmentCount: item.attachments.length } : {}),
+            ...(item.messageLink ? { messageLink: item.messageLink } : {}),
           };
           while (body && JSON.stringify([...items, { ...row, body }]).length > 11000)
             body = body.slice(0, Math.floor(body.length / 2));
@@ -481,6 +482,7 @@ export async function executeAgentOperation(
           });
         }
         const oldest = items[0]?.cursor as string | undefined;
+        items.reverse();
         return JSON.stringify({
           cornerId: args.cornerId,
           items,
@@ -507,6 +509,7 @@ export async function executeAgentOperation(
             type: item.type,
             ...(offset ? { bodyOffset: offset } : {}),
             ...(item.attachments.length ? { attachmentCount: item.attachments.length } : {}),
+            ...(item.messageLink ? { messageLink: item.messageLink } : {}),
           };
           // Escaped control characters can occupy six JSON characters each.
           while (body && JSON.stringify([...items, { ...row, body }]).length > 11000)
@@ -672,16 +675,17 @@ export async function executeAgentOperation(
     }
     case 'rename_corner': {
       const cornerId = targetCornerId(args);
-      const refusal = args.name === undefined && args.reviewer !== undefined ? null : cornerTextRefusal('name', args.name);
-      if (refusal) throw new Error(refusal);
+      const fixedName = args.name === undefined && args.reviewer !== undefined ? undefined : fixCornerText('name', args.name);
+      const fixedObjective = args.objective === undefined ? undefined : fixCornerText('objective', args.objective);
       const result = await daemonExecute('renameCorner', {
         cornerId,
-        ...(args.name !== undefined ? { name: String(args.name) } : {}),
+        ...(fixedName ? { name: fixedName.text } : {}),
         ...(args.reviewer !== undefined ? { reviewer: args.reviewer as string } : {}),
-        ...(args.objective !== undefined ? { objective: args.objective } : {}),
+        ...(fixedObjective ? { objective: fixedObjective.text } : {}),
         ...(args.brief !== undefined ? { brief: await bindBriefFiles(asObject(args.brief)) } : {}),
       });
-      return args.name === undefined ? 'updated the corner reviewer' : `renamed the corner to ${String(result.name)}`;
+      const notes = [fixedName?.note, fixedObjective?.note].filter(Boolean).join('; ');
+      return args.name === undefined ? 'updated the corner reviewer' : `renamed the corner to ${String(result.name)}${notes ? `. ${notes}` : ''}`;
     }
     case 'create_subscription': {
       const source = stringArg(args, 'source');
@@ -825,7 +829,10 @@ export async function executeAgentOperation(
     case 'post_starters_card':
       return JSON.stringify(await daemonExecute('postRepositoryOnboarding', {
         ...await activeCommandContext(), kind: name === 'post_repository_card' ? 'repository' : 'starters',
+        ...(typeof args.repository === 'string' && args.repository.trim() ? { repository: args.repository.trim() } : {}),
       }));
+    case 'store_secret':
+      return storeSecret(args);
     case 'run_granted_command':
       return runGrantedCommand(args);
     default:

@@ -8,7 +8,7 @@ import { machineSquireReport } from '../squire-machine.js';
 import type { AgentPairingClaimView, InviteView } from '@beeline/api-contract/phone';
 import { assignSeededAgentIdentity, uniqueAgentHandle, isCommunityInviteToken, resolveFace } from '@beeline/api-contract/phone';
 import { type SqlDatabase } from '../database.js';
-import { ensureInvitedWorkspaceMembership, restorePairedWorkspaceMembership, joinRooms } from '../membership-join.js';
+import { ensureInvitedWorkspaceMembership, restoreInvitedWorkspaceMembership, joinRooms } from '../membership-join.js';
 import { grantSquireToOwnerMachineAgents } from '../workbench.js';
 import type { PhoneContext } from './context.js';
 import { hash, unix, normalizeAgentName, CONNECT_RENAME_WINDOW_MS } from './values.js';
@@ -34,7 +34,7 @@ import { hash, unix, normalizeAgentName, CONNECT_RENAME_WINDOW_MS } from './valu
          EXISTS(SELECT 1 FROM memberships joined
            WHERE joined.workspace_id=i.workspace_id AND joined.room_id IS NULL
              AND joined.identity_id=$2 AND joined.removed_at IS NULL) already_joined,
-         inviter.name inviter_name,inviter.handle inviter_handle,inviter.face_id inviter_face,
+         inviter.name inviter_name,beeline_workspace_handle(inviter.id,i.workspace_id) inviter_handle,inviter.face_id inviter_face,
          creator.role inviter_role,
          (SELECT count(*)::int FROM memberships m JOIN identities member ON member.id=m.identity_id
           WHERE m.workspace_id=i.workspace_id AND m.room_id IS NULL AND m.removed_at IS NULL
@@ -231,7 +231,7 @@ import { hash, unix, normalizeAgentName, CONNECT_RENAME_WINDOW_MS } from './valu
       // freshly-paired value. A key that belongs to a person is never
       // overwritten into an agent.
       const identityRow = await database.query(
-        `INSERT INTO identities(id,kind,name,handle,face_id) VALUES($1,'agent',$2,beeline_identity_handle($1,$3),$4)
+        `INSERT INTO identities(id,kind,name,handle,face_id,workspace_handle_base) VALUES($1,'agent',$2,beeline_identity_handle($1,$3),$4,$3)
          ON CONFLICT(id) DO UPDATE SET name=EXCLUDED.name,face_id=EXCLUDED.face_id,
            avatar=NULL,hidden_from_roster=false,updated_at=now()
          WHERE identities.kind='agent'
@@ -266,7 +266,7 @@ import { hash, unix, normalizeAgentName, CONNECT_RENAME_WINDOW_MS } from './valu
         `UPDATE agent_pairing_codes SET claimed_by=$2,claimed_at=now() WHERE code_hash=$1`,
         [hash(input.code), input.agentPubkey],
       );
-      const workspaceMembership = await restorePairedWorkspaceMembership(database, [pairing.workspace_id, input.agentPubkey, pairing.created_by]);
+      const workspaceMembership = await restoreInvitedWorkspaceMembership(database, [pairing.workspace_id, input.agentPubkey, pairing.created_by]);
       // A deferring CLI joins Rooms itself through `finishAgentConnectPairing`
       // once its rename decision settles — a system line is a fact written
       // once, never rewritten by a later rename, so it must not be written

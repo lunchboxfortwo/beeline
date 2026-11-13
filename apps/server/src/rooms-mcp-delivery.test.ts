@@ -1,3 +1,4 @@
+import { LOCAL_RECEIVER_RECOVERY } from '@beeline/api-contract/phone';
 import {
   describe,
   expect,
@@ -15,8 +16,8 @@ import {
 describe('JOIN-DELIVERY: OAuth is membership, host receipts prove delivery', () => {
   const scope = fixtureScope1();
   const value = (result: any) => JSON.parse(result.content[0].text).data;
-  it('1: Jane-shaped Codex and Antigravity empty-webhook joins remain honestly unfinished after naming', async () => {
-    for (const host of ['Codex', 'Antigravity']) {
+  it('muse-wake-1: tags and DMs post only the allowed offline notice for a member with no inbound route', async () => {
+    for (const host of ['Codex', 'Antigravity', 'Unattached local', 'Failed local']) {
       const { client, member } = await scope.connected();
       await scope.db.query('UPDATE rooms_mcp_members SET model_label=$2 WHERE member_id=$1', [
         member,
@@ -27,6 +28,31 @@ describe('JOIN-DELIVERY: OAuth is membership, host receipts prove delivery', () 
       expect(rooms.you.id).toBe(member);
       expect(rooms.delivery.state).toBe('setup_unfinished');
       expect(rooms.setup).toContain('setup_delivery');
+      if (host.endsWith('local')) {
+        await client.callTool({ name: 'setup_delivery', arguments: {
+          mechanism: 'local', host, surface: 'CLI', conversation: 'unattached-thread', installed: true,
+        } });
+      }
+      if (host === 'Failed local') {
+        const binding = value(await client.callTool({ name: 'list_rooms', arguments: {} }));
+        const failed = value(await client.callTool({ name: 'delivery_failed', arguments: {
+          generation: binding.delivery.generation, reason: 'local_receiver_setup_failed',
+        } }));
+        expect(failed.next).toBe('The local Beeline receiver failed to start. Run npx -y usebeeline@latest join again in the same coding session. If it still fails, check that this computer can create and run its local receiver. Opening the join website cannot repair a local receiver failure.');
+        expect(value(await client.callTool({ name: 'list_rooms', arguments: {} })).setup).toContain(LOCAL_RECEIVER_RECOVERY);
+      }
+      const tagged = await scope.phone.execute(
+        'sendRoomMessage',
+        { roomId: ROOM, text: `@${rooms.you.handle} are you there?` },
+        USER,
+      );
+      expect(JSON.stringify(await scope.phone.readRoom(ROOM, USER))).toContain(
+        'is offline · connect again',
+      );
+      expect((await scope.db.query("SELECT text FROM messages WHERE room_id=$1 AND presentation='system' AND author_id=$2", [ROOM, member])).rows)
+        .toEqual([{ text: `@${rooms.you.handle} is offline · connect again` }]);
+      expect((await scope.db.query('SELECT machine_id FROM agents WHERE agent_id=$1', [member])).rows[0]!.machine_id).toBeNull();
+      expect((await scope.db.query('SELECT 1 FROM rooms_mcp_mentions WHERE member_id=$1 AND message_id=$2', [member, tagged.messageId])).rowCount).toBe(1);
       const dm = await scope.phone.execute(
         'resolveDirectMessage',
         { workspaceId: WORKSPACE, participantId: member },
@@ -38,8 +64,11 @@ describe('JOIN-DELIVERY: OAuth is membership, host receipts prove delivery', () 
         USER,
       );
       expect(sent.externalAgentDelivery).toEqual([
-        expect.objectContaining({ memberId: member, state: 'setup_unfinished' }),
+        expect.objectContaining({ memberId: member, state: host === 'Failed local' ? 'failed' : 'setup_unfinished' }),
       ]);
+      expect(JSON.stringify(await scope.phone.readRoom(dm.id, USER))).toContain(
+        'is offline · connect again',
+      );
       expect(
         (
           await scope.db.query(
@@ -281,7 +310,7 @@ import type { ServerResponse } from 'node:http';
 
 describe('JOIN-DELIVERY local selected-path proof', () => {
   const scope = fixtureScope1();
-  it('1,4,6: local probe reaches its bound host stream; HTTP/stream acceptance alone stays unfinished', async () => {
+  it.each(['before', 'after'])('legacy-offline: setup %s stream open proves delivery without reconnecting', async (setupOrder) => {
     const { client, token, member, grant } = await scope.connected();
     const data = (result: any) => JSON.parse(result.content[0].text).data;
     const principal = {
@@ -298,10 +327,9 @@ describe('JOIN-DELIVERY local selected-path proof', () => {
       conversation: 'exact-host-thread',
       installed: true,
     };
-    const binding = data(
+    let binding = setupOrder === 'before' ? data(
       await client.callTool({ name: 'setup_delivery', arguments: args }),
-    ).delivery;
-    expect(binding.state).toBe('setup_unfinished');
+    ).delivery : undefined;
     expect(data(await client.callTool({ name: 'list_mentions', arguments: {} })).wakes).toEqual([]);
     class Reply extends EventEmitter {
       destroyed = false;
@@ -347,11 +375,31 @@ describe('JOIN-DELIVERY local selected-path proof', () => {
           };
         },
       );
-      expect(reply.frames[0]).toMatchObject({ type: 'delivery', wakes: [{ kind: 'join_probe' }] });
+      const waitFor = (id: string) =>
+        new Promise<void>((resolve) => {
+          const inspect = () => {
+            if (reply.frames.some((frame) => frame.deliveryId === id)) {
+              reply.off('frame', inspect);
+              resolve();
+            }
+          };
+          reply.on('frame', inspect);
+          inspect();
+        });
+      if (setupOrder === 'after') {
+        expect(reply.frames.some(frame => frame.wakes?.length)).toBe(false);
+        binding = data(await client.callTool({ name: 'setup_delivery', arguments: args })).delivery;
+        await waitFor(`wake:${binding.generation}`);
+      }
+      expect(binding.state).toBe('setup_unfinished');
+      const probeFrame = reply.frames.find(frame => frame.wakes?.[0]?.kind === 'join_probe');
+      expect(probeFrame).toBeDefined();
       expect(
         data(await client.callTool({ name: 'list_rooms', arguments: {} })).delivery.state,
       ).toBe('setup_unfinished');
-      const receipt = reply.frames[0].wakes[0].receipt;
+      // Legacy timestamps must no longer expire authentication or delivery proof.
+      await scope.db.query("UPDATE rooms_mcp_tokens SET expires_at=now()-interval '2 hours',window_at=now()-interval '3 hours' WHERE hash=$1", [principal.hash]);
+      const receipt = probeFrame.wakes[0].receipt;
       expect(receipt).toMatchObject({
         generation: binding.generation,
         conversation: 'exact-host-thread',
@@ -365,17 +413,6 @@ describe('JOIN-DELIVERY local selected-path proof', () => {
         'proved_ready',
       );
 
-      const waitFor = (id: string) =>
-        new Promise<void>((resolve) => {
-          const inspect = () => {
-            if (reply.frames.some((frame) => frame.deliveryId === id)) {
-              reply.off('frame', inspect);
-              resolve();
-            }
-          };
-          reply.on('frame', inspect);
-          inspect();
-        });
       const handle = data(await client.callTool({ name: 'list_rooms', arguments: {} })).you.handle;
       const tagged = await scope.phone.execute(
         'sendRoomMessage',
@@ -383,6 +420,13 @@ describe('JOIN-DELIVERY local selected-path proof', () => {
         USER,
       );
       await waitFor(`mention:${tagged.messageId}:0`);
+      expect((await scope.phone.readRoom(ROOM, USER))?.messages.filter(m => m.author.pubkey === member && m.presentation === 'system')).toEqual([]);
+      // A replacement conversation on the same live stream must also be confirmable.
+      const replacement = data(await client.callTool({ name: 'setup_delivery', arguments: { ...args, conversation: 'next-host-thread' } })).delivery;
+      await waitFor(`wake:${replacement.generation}`);
+      const nextReceipt = reply.frames.find(frame => frame.deliveryId === `wake:${replacement.generation}`).wakes[0].receipt;
+      expect(data(await client.callTool({ name: 'confirm_delivery', arguments: nextReceipt })).delivery.state).toBe('proved_ready');
+
       const dm = await scope.phone.execute(
         'resolveDirectMessage',
         { workspaceId: WORKSPACE, participantId: member },
@@ -407,17 +451,13 @@ describe('JOIN-DELIVERY local selected-path proof', () => {
           throw new Error('parallel transport must stay quiet');
         }),
       ).toBe(0);
-      await scope.db.query(
-        "UPDATE rooms_mcp_tokens SET expires_at=now()-interval '1 second' WHERE hash=$1",
-        [principal.hash],
-      );
-      const projection = await import('./rooms-mcp-delivery.js');
-      expect((await projection.readMemberDelivery(scope.db, member)).state).toBe(
-        'setup_unfinished',
-      );
     } finally {
       reply.end();
     }
+    // Closing the actual stream retains the ordinary offline notice.
+    const handle = (await scope.db.query<{handle:string}>('SELECT handle FROM identities WHERE id=$1', [member])).rows[0]!.handle;
+    await scope.phone.execute('sendRoomMessage', { roomId: ROOM, text: `@${handle} genuinely offline` }, USER);
+    expect((await scope.phone.readRoom(ROOM, USER))?.messages.filter(m => m.author.pubkey === member && m.presentation === 'system').map(m => m.text)).toEqual([`@${handle} is offline · connect again`]);
   });
 });
 
@@ -463,7 +503,7 @@ describe('JOIN-DELIVERY persistent Events lifecycle', () => {
     expect(
       data(await client.callTool({ name: 'confirm_delivery', arguments: firstReceipt })).delivery,
     ).toMatchObject({ state: 'proved_ready', offline: false });
-    const handle = data(await client.callTool({ name: 'list_rooms', arguments: {} })).you.handle;
+    const handle = (await scope.db.query<{handle:string}>('SELECT handle FROM identities WHERE id=$1', [member])).rows[0]!.handle;
     await scope.phone.execute(
       'sendRoomMessage',
       { roomId: ROOM, text: `@${handle} host has gone` },

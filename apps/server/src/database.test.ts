@@ -283,6 +283,81 @@ describe('pool checkout telemetry', () => {
   });
 
 
+  it.each(['success', 'statement failure', 'checkout failure', 'transaction'] as const)(
+    'DB-TIMING-SPLIT: logs pool wait separately for %s', async outcome => {
+      let now = 0;
+      const clock = vi.spyOn(performance, 'now').mockImplementation(() => now);
+      const wallClock = vi.spyOn(Date, 'now').mockImplementation(() => now);
+      const warn = vi.spyOn(console, 'warn').mockImplementation(() => {});
+      const failure = Object.assign(new Error('controlled failure'), { code: '57014' });
+      const client = stubClient();
+      client.query.mockImplementation(async (sql: string) => {
+        if (sql === 'BEGIN' || sql === 'COMMIT') return result([]);
+        now += outcome === 'transaction' ? 600 : 120;
+        if (outcome === 'statement failure') throw failure;
+        return result([]);
+      });
+      const pool = {
+        connect: vi.fn(async () => {
+          now += 600;
+          if (outcome === 'checkout failure') throw failure;
+          return client;
+        }),
+        waitingCount: 0, on: vi.fn(), end: vi.fn(),
+      } as unknown as Pool;
+      const database = new PostgresDatabase('', 1, { pool });
+      try {
+        const work = outcome === 'transaction'
+          ? database.transaction(tx => tx.query('SELECT $1::text', ['private-parameter']))
+          : database.query('SELECT $1::text', ['private-parameter']);
+        if (outcome.includes('failure')) await expect(work).rejects.toBe(failure);
+        else await work;
+        const poolWaitMs = outcome === 'transaction' ? 0 : 600;
+        const executionMs = outcome === 'checkout failure' ? 0 : outcome === 'transaction' ? 600 : 120;
+        expect(warn).toHaveBeenCalledWith('[database] slow query', expect.objectContaining({
+          durationMs: poolWaitMs + executionMs, poolWaitMs, executionMs,
+          code: outcome.includes('failure') ? '57014' : undefined,
+        }));
+        expect(JSON.stringify(warn.mock.calls)).not.toContain('private-parameter');
+        expect(database.queryProfiles().top[0]).toMatchObject({
+          calls: 1, totalMs: poolWaitMs + executionMs,
+        });
+      } finally {
+        clock.mockRestore(); wallClock.mockRestore(); warn.mockRestore(); await database.close();
+      }
+    },
+  );
+
+  it('keeps timing local when identical queries overlap', async () => {
+    let now = 0;
+    const clock = vi.spyOn(performance, 'now').mockImplementation(() => now);
+    const wallClock = vi.spyOn(Date, 'now').mockImplementation(() => now);
+    const warn = vi.spyOn(console, 'warn').mockImplementation(() => {});
+    const client = stubClient();
+    let grant!: (client: unknown) => void;
+    const pool = {
+      connect: vi.fn().mockImplementationOnce(() => new Promise(resolve => { grant = resolve; }))
+        .mockResolvedValue(client),
+      waitingCount: 0, on: vi.fn(), end: vi.fn(),
+    } as unknown as Pool;
+    const database = new PostgresDatabase('', 2, { pool });
+    client.query.mockImplementation(async () => { now += 600; return result([]); });
+    try {
+      const queued = database.query('SELECT 1');
+      now = 100;
+      await database.query('SELECT 1');
+      now = 800;
+      grant(client);
+      await queued;
+      expect(warn.mock.calls.map(([, timing]) => timing)).toMatchObject([
+        { durationMs: 600, poolWaitMs: 0, executionMs: 600 },
+        { durationMs: 1400, poolWaitMs: 800, executionMs: 600 },
+      ]);
+    } finally {
+      clock.mockRestore(); wallClock.mockRestore(); warn.mockRestore(); await database.close();
+    }
+  });
+
   it('counts failed checkout attempts independently of successful checkouts', async () => {
     const pool = {
       connect: vi.fn().mockRejectedValue(new Error('pool exhausted')),
@@ -291,6 +366,26 @@ describe('pool checkout telemetry', () => {
     const database = new PostgresDatabase('', 1, { pool });
     await expect(database.query('SELECT 1')).rejects.toThrow('pool exhausted');
     expect(database.poolTelemetry()).toMatchObject({ checkouts: 0, checkoutFailures: 1 });
+  });
+});
+describe('connection wait timeout diagnostics', () => {
+  it.each(['query', 'transaction', 'dedicated'] as const)('logs pool occupancy for %s checkout timeouts', async path => {
+    const failure = new Error('timeout exceeded when trying to connect');
+    const pool = {
+      connect: vi.fn().mockRejectedValue(failure), on: vi.fn(), end: vi.fn(),
+      totalCount: 5, idleCount: 1, waitingCount: 3,
+    } as unknown as Pool;
+    const database = new PostgresDatabase('', 5, { pool, mode: 'enrichment' });
+    const warn = vi.spyOn(console, 'warn').mockImplementation(() => {});
+    try {
+      const work = path === 'query' ? database.query('SELECT 1')
+        : path === 'transaction' ? database.transaction(async () => {}) : database.connectDedicated();
+      await expect(work).rejects.toThrow(failure.message);
+      expect(warn).toHaveBeenCalledWith('[database] connection wait timeout', {
+        pool: 'enrichment', total: 5, idle: 1, inUse: 4, waiting: 3, waitingAtCheckout: 3,
+      });
+      expect(pool.connect).toHaveBeenCalledOnce();
+    } finally { warn.mockRestore(); await database.close(); }
   });
 });
 describe('a terminated checked-out connection never wedges the pool', () => {

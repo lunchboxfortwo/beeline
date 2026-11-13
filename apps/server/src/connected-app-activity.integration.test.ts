@@ -4,7 +4,7 @@ import { claimAgentCommand, createAgentCommand } from './agent-command.js';
 import { clearConnectedAppPlaceholders } from './migrations/connected-app-turns.js';
 import { PhoneService } from './phone-service.js';
 import { HelperDaemonService as DaemonService } from './test-fixtures/helper-daemon.js';
-import { releaseAgentConnection } from './connection-presence.js';
+import { claimAgentConnection, releaseAgentConnection } from './connection-presence.js';
 import { RoomsMcpAgentTools, pendingMcpWakes } from './rooms-mcp-agent.js';
 import { LiveHub } from './live.js';
 
@@ -114,7 +114,7 @@ it('R1: release cleanup preserves stored real and machine turns without inventin
   expect(await working(MACHINE)).toEqual([]);
 });
 
-it('R1: only connection close releases a live report for supersession; handled reports and machine queues keep their history', async () => {
+it('R1: a claimed report survives a dropped socket and a helper restart, unsuperseded; handled reports and machine queues keep their history', async () => {
   const expired = await report('needs-decision: old context');
   await daemon.execute('claimAgentCommand',{roomId:R,commandId:expired!.id,generationId:'owned-report'},APP);
   await db.query(`UPDATE agent_commands SET lease_expires_at=now()-interval '1 second' WHERE id=$1`, [expired!.id]);
@@ -122,9 +122,14 @@ it('R1: only connection close releases a live report for supersession; handled r
   expect((await db.query('SELECT state FROM agent_commands WHERE id=$1',[expired!.id])).rows).toEqual([{state:'claimed'}]);
   const source=(await db.query<{connection_id:string}>('SELECT connection_id FROM agent_connections WHERE agent_id=$1',[APP])).rows[0]!;
   await releaseAgentConnection(db,new LiveHub(),APP,source.connection_id);
-  const current=await report('needs-decision: new context after connection close');
+  // A dropped socket keeps the running turn; the same helper continues it.
+  expect((await db.query('SELECT state FROM agent_commands WHERE id=$1',[expired!.id])).rows).toEqual([{state:'claimed'}]);
+  await claimAgentConnection(db,new LiveHub(),APP,{lifecycleId:'restarted-helper'},
+    {connectionId:'restarted-helper',instanceId:'helper-fixture'});
+  // The restarted helper resumes the claimed report; a newer report does not supersede it.
+  const current=await report('needs-decision: new context after a helper restart');
   expect((await db.query(`SELECT status FROM agent_turns WHERE request_id=$1`, [expired!.turn_request_id])).rows)
-    .toEqual([{ status: 'cancelled' }]);
+    .toEqual([{ status: 'working' }]);
   await db.query(`UPDATE agent_commands SET state='complete',completed_at=now() WHERE id=$1`, [current!.id]);
   await report('needs-decision: a later decision after handling');
   expect((await db.query(`SELECT state FROM agent_commands WHERE id=$1`, [current!.id])).rows).toEqual([{ state: 'complete' }]);

@@ -19,15 +19,13 @@ vi.mock('react-native', () => ({
       return state.os;
     },
   },
+  PixelRatio: { get: () => 2 },
   Text: 'Text',
   View: 'View',
 }));
-vi.mock('react-native-unistyles', () => ({
-  StyleSheet: {
-    create: (fn: (theme: unknown) => unknown) =>
-      fn({ buzz: { roomList: { edge: 20 }, space: { md: 16 }, type: { body: {}, meta: {} }, textSecondary: 'text', ledgerQuiet: 'quiet', bgBase: 'base' } }),
-  },
-}));
+vi.mock('tamagui', async () => (await import('@/ui/screens/transcript/grammar-hosts.test-support')).tamaguiHosts());
+vi.mock('lucide-react-native', async () => (await import('@/ui/screens/transcript/grammar-hosts.test-support')).lucideHosts());
+vi.mock('react-native-safe-area-context', () => ({ useSafeAreaInsets: () => ({ top: 0, bottom: 0, left: 0, right: 0 }) }));
 
 vi.mock('@/buzz/media-cache-connection', () => ({ mediaRecoveryRevision: () => 0, subscribeMediaRecovery: () => () => {}, retainMediaObjectDisplay: () => () => {}, mediaMetadataAvailable: () => true, subscribeMediaCacheBoundary: (listener: (event: unknown) => void) => { state.authorityListeners.add(listener); return () => { state.authorityListeners.delete(listener); }; } }));
 vi.mock('@/buzz/artifact-link', () => ({

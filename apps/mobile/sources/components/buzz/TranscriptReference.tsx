@@ -1,6 +1,6 @@
 import React from 'react';
-import { Pressable, Text, View } from 'react-native';
-import { StyleSheet, useUnistyles } from 'react-native-unistyles';
+import { XStack, YStack } from 'tamagui';
+import { Inked, T } from '@/ui/grammar';
 
 import { ConversationGlyph } from './MicGlyph';
 
@@ -9,19 +9,11 @@ export function TranscriptReference({ children, viewer = false, onPress, accessi
   children: React.ReactNode; viewer?: boolean; onPress?: () => void;
   accessibilityLabel?: string; testID?: string;
 }) {
-  const { theme } = useUnistyles();
-  const contents = viewer ? <View style={styles.viewerLine}>
-    <ConversationGlyph size={14} color={theme.buzz.accent} />
-    <Text numberOfLines={1} style={[styles.text, styles.viewerText]}>{children}</Text>
-  </View> : <Text numberOfLines={2} style={styles.text}>{children}</Text>;
-  return onPress ? <Pressable accessibilityRole="button" accessibilityLabel={accessibilityLabel}
-    onPress={onPress} style={styles.reference} testID={testID}>{contents}</Pressable>
-    : <View style={styles.reference} testID={testID}>{contents}</View>;
+  const contents = viewer ? <XStack alignItems="center" gap="1" minWidth={0}>
+    <Inked color="needsYou" glyph={ConversationGlyph} size={14} />
+    <T v="code" color="secondary" flexShrink={1} minWidth={0}>{children}</T>
+  </XStack> : <T v="code" color="secondary">{children}</T>;
+  return onPress ? <YStack accessibilityRole="button" accessibilityLabel={accessibilityLabel}
+    onPress={onPress} cursor="pointer" minWidth={0} marginBottom="1" testID={testID}>{contents}</YStack>
+    : <YStack minWidth={0} marginBottom="1" testID={testID}>{contents}</YStack>;
 }
-
-const styles = StyleSheet.create((theme) => ({
-  reference: { minWidth: 0, marginBottom: theme.buzz.space.xs },
-  text: { ...theme.buzz.type.machine, color: theme.buzz.ledgerQuiet },
-  viewerLine: { flexDirection: 'row', alignItems: 'center', gap: theme.buzz.space.xs, minWidth: 0 },
-  viewerText: { flexShrink: 1, minWidth: 0 },
-}));

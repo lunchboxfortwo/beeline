@@ -1,11 +1,14 @@
 import React, { forwardRef, useCallback, useImperativeHandle, useMemo } from 'react';
-import { I18nManager, StyleSheet, View, type StyleProp, type ViewStyle } from 'react-native';
+import { I18nManager } from 'react-native';
+import { XStack, YStack } from 'tamagui';
 import { Gesture, GestureDetector } from 'react-native-gesture-handler';
-import Animated, {
+import { Motion } from '@/ui/grammar';
+import {
   ReduceMotion,
   runOnJS,
   useAnimatedStyle,
   useSharedValue,
+  type SharedValue,
   withSpring,
 } from 'react-native-reanimated';
 
@@ -13,11 +16,10 @@ export type TranscriptSwipeableMethods = { close(): void };
 type Direction = 'left' | 'right';
 type Props = {
   children: React.ReactNode;
-  containerStyle?: StyleProp<ViewStyle>;
-  childrenContainerStyle?: StyleProp<ViewStyle>;
   dragOffsetFromRightEdge?: number;
   friction?: number;
   enabled?: boolean;
+  actionsVisible?: boolean;
   onSwipeableWillOpen?(direction: Direction): void;
   onSwipeableClose?(direction: Direction): void;
   onSwipeableOpenStartDrag?(): void;
@@ -33,11 +35,10 @@ const TranscriptSwipeable = forwardRef<TranscriptSwipeableMethods, Props>(
   function TranscriptSwipeable(
     {
       children,
-      containerStyle,
-      childrenContainerStyle,
       dragOffsetFromRightEdge = 18,
       friction = 1.35,
       enabled = true,
+      actionsVisible = true,
       onSwipeableWillOpen,
       onSwipeableClose,
       onSwipeableOpenStartDrag,
@@ -108,43 +109,42 @@ const TranscriptSwipeable = forwardRef<TranscriptSwipeableMethods, Props>(
       ],
     );
     const contentStyle = useAnimatedStyle(() => ({ transform: [{ translateX: offset.value }] }));
-    const leftStyle = useAnimatedStyle(() => ({ opacity: offset.value > 0 ? 1 : 0 }));
-    const rightStyle = useAnimatedStyle(() => ({ opacity: offset.value < 0 ? 1 : 0 }));
     return (
-      <View testID={testID}>
+      <YStack testID={testID}>
         <GestureDetector gesture={pan} touchAction="pan-y">
-          <View style={[styles.container, containerStyle]}>
-            {left ? (
-              <Animated.View style={[styles.leftActions, leftStyle]}>
-                {renderLeftActions?.()}
-              </Animated.View>
-            ) : null}
-            {right ? (
-              <Animated.View style={[styles.rightActions, rightStyle]}>
-                {renderRightActions?.()}
-              </Animated.View>
-            ) : null}
-            <Animated.View style={[contentStyle, childrenContainerStyle]}>{children}</Animated.View>
-          </View>
+          <YStack overflow="hidden">
+            {actionsVisible ? <SwipePanels offset={offset} renderLeftActions={renderLeftActions} renderRightActions={renderRightActions} /> : null}
+            <Motion motion={contentStyle}>{children}</Motion>
+          </YStack>
         </GestureDetector>
-      </View>
+      </YStack>
     );
   },
 );
 
+
+/** The resting row has no action layers to style or animate. */
+function SwipePanels({ offset, renderLeftActions, renderRightActions }: {
+  offset: SharedValue<number>;
+  renderLeftActions?: () => React.ReactNode;
+  renderRightActions?: () => React.ReactNode;
+}) {
+  const leftStyle = useAnimatedStyle(() => ({ opacity: offset.value > 0 ? 1 : 0 }));
+  const rightStyle = useAnimatedStyle(() => ({ opacity: offset.value < 0 ? 1 : 0 }));
+  return <>
+    {renderLeftActions ? <Motion overlay motion={leftStyle}>
+      <XStack flex={1} overflow="hidden" flexDirection={I18nManager.isRTL ? 'row-reverse' : 'row'}>
+        {renderLeftActions()}
+      </XStack>
+    </Motion> : null}
+    {renderRightActions ? <Motion overlay motion={rightStyle}>
+      <XStack flex={1} overflow="hidden" flexDirection={I18nManager.isRTL ? 'row' : 'row-reverse'}>
+        {renderRightActions()}
+      </XStack>
+    </Motion> : null}
+  </>;
+}
+
 const ACTION_WIDTH = 78;
-const styles = StyleSheet.create({
-  container: { overflow: 'hidden' },
-  leftActions: {
-    ...StyleSheet.absoluteFillObject,
-    flexDirection: I18nManager.isRTL ? 'row-reverse' : 'row',
-    overflow: 'hidden',
-  },
-  rightActions: {
-    ...StyleSheet.absoluteFillObject,
-    flexDirection: I18nManager.isRTL ? 'row' : 'row-reverse',
-    overflow: 'hidden',
-  },
-});
 
 export default TranscriptSwipeable;

@@ -178,8 +178,11 @@ describe('permissions: agent owner, Workspace admin, or anyone in the Room', () 
         await send(roomId, ROOM_ADMIN, '@bee retry');
         expect((await lifecycleLine(roomId))?.verb).toBe('queued a retry for its last failed turn');
         // Sign-in still belongs to the owner alone, and the owner keeps it.
+        const prior = await lifecycleLine(roomId);
+        const priorCards = (await database.query("SELECT 1 FROM messages WHERE room_id=$1 AND card_type='agent-sign-in'",[roomId])).rowCount;
         await send(roomId, ROOM_ADMIN, '@bee login');
-        expect((await lifecycleLine(roomId))?.consequence).toBe('only its owner may sign it in');
+        expect(await lifecycleLine(roomId)).toEqual(prior);
+        expect((await database.query("SELECT 1 FROM messages WHERE room_id=$1 AND card_type='agent-sign-in'",[roomId])).rowCount).toBe(priorCards);
       }
       for (const [, roomId] of placesFor(AGENT_OWNER)) {
         await send(roomId, AGENT_OWNER, '@bee login');
@@ -192,10 +195,8 @@ describe('permissions: agent owner, Workspace admin, or anyone in the Room', () 
     for (const person of [WS_OWNER, WS_ADMIN, ROOM_ADMIN])
       for (const [, roomId] of placesFor(person)) {
         await send(roomId, person, '@bee login');
-        expect(await lifecycleLine(roomId)).toEqual({
-          verb: 'did not sign in to Claude',
-          consequence: 'only its owner may sign it in',
-        });
+        expect(await lifecycleLine(roomId)).toBeUndefined();
+        expect((await database.query("SELECT 1 FROM messages WHERE room_id=$1 AND card_type='agent-sign-in'",[roomId])).rowCount).toBe(0);
       }
     for (const [, roomId] of placesFor(AGENT_OWNER)) {
       await send(roomId, AGENT_OWNER, '@bee login');

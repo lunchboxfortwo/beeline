@@ -1,3 +1,4 @@
+import type { FastifyReply, FastifyRequest } from 'fastify';
 import { registerOidcIdentityLinkRoutes } from './server-oidc-identity-link-routes.js';
 import { waitForAuthTicket } from './completion-wait.js';
 import { parseSigninFunnelEvent } from '@beeline/api-contract/signin-funnel';
@@ -43,6 +44,12 @@ export function registerServerOidcIdentityRoutes(context: AuthRouteContext): voi
     verifyNip98Header,
     completeAgentConnectApproval,
   } = context;
+  // Never recover a browser session from state alone after a stale or
+  // cross-browser callback; return to the configured sign-in surface.
+  const restartSignIn = (request: FastifyRequest, reply: FastifyReply) => {
+    noStore(reply);
+    return reply.redirect(new URL('/beeline/onboarding', options.webAppOrigins?.[0] ?? tenantFor(request).origin).toString(), 302);
+  };
   // Telemetry never changes the OAuth result. Only validated, state-bound flows
   // reach callback observations; no codes, tokens or account details are passed.
   const observe = async (input: Parameters<NonNullable<typeof options.onFunnelAuth>>[0]) => {
@@ -490,15 +497,17 @@ export function registerServerOidcIdentityRoutes(context: AuthRouteContext): voi
       return completeGitHubInstallation(request, reply);
     }
     const tenant = tenantFor(request);
-    const state = requiredQueryString(query.state, 'state');
-    const browserSession = flowCookie(request, flowCookieName);
+    let state: string;
+    let browserSession: string;
+    try {
+      state = requiredQueryString(query.state, 'state');
+      browserSession = flowCookie(request, flowCookieName);
+    } catch (error) {
+      if (error instanceof ProtocolError) return restartSignIn(request, reply);
+      throw error;
+    }
     const flow = await options.store.consumeFlow(sha256(state), sha256(browserSession), now());
-    if (!flow)
-      throw new ProtocolError(
-        400,
-        'invalid_oauth_flow',
-        'GitHub flow is missing, expired, or already used',
-      );
+    if (!flow) return restartSignIn(request, reply);
     reply.header(
       'set-cookie',
       `${flowCookieName}=; Path=/; Max-Age=0;${cookieSecurity} HttpOnly; SameSite=Lax`,
@@ -641,24 +650,17 @@ export function registerServerOidcIdentityRoutes(context: AuthRouteContext): voi
   app.get('/auth/oidc/callback', async (request, reply) => {
     const tenant = tenantFor(request);
     const query = request.query as Record<string, unknown>;
-    // A provider may return after this browser's cookie expired, the app
-    // canceled, or the callback moved to another browser. Never recover a
-    // session from state alone; restart at the configured sign-in surface.
-    const restartSignIn = () => {
-      noStore(reply);
-      return reply.redirect(new URL('/beeline/onboarding', options.webAppOrigins?.[0] ?? tenant.origin).toString(), 302);
-    };
     let state: string;
     let browserSession: string;
     try {
       state = requiredQueryString(query.state, 'state');
       browserSession = flowCookie(request, flowCookieName);
     } catch (error) {
-      if (error instanceof ProtocolError) return restartSignIn();
+      if (error instanceof ProtocolError) return restartSignIn(request, reply);
       throw error;
     }
     const flow = await options.store.consumeFlow(sha256(state), sha256(browserSession), now());
-    if (!flow) return restartSignIn();
+    if (!flow) return restartSignIn(request, reply);
     reply.header(
       'set-cookie',
       `${flowCookieName}=; Path=/; Max-Age=0;${cookieSecurity} HttpOnly; SameSite=Lax`,
@@ -669,7 +671,7 @@ export function registerServerOidcIdentityRoutes(context: AuthRouteContext): voi
       flow.audience !== options.oidc.config.clientId ||
       flow.redirectUri !== `${tenant.origin}/auth/oidc/callback`
     ) {
-      return restartSignIn();
+      return restartSignIn(request, reply);
     }
     await observeSigninAttempt({ stage: 'provider_returned', flowHash: sha256(state), at: now(),
       ...(typeof query.error === 'string' ? { errorCode: query.error } : {}) });
@@ -680,11 +682,11 @@ export function registerServerOidcIdentityRoutes(context: AuthRouteContext): voi
         message: 'Google authorization was canceled or denied',
       });
       if (completion) return deliverNativeCompletion(reply, completion);
-      return restartSignIn();
+      return restartSignIn(request, reply);
     }
     if (typeof query.code !== 'string' || !query.code || query.code.length > 4_096) {
       await callbackObservation(state,'google','error','missing_provider_code');
-      return restartSignIn();
+      return restartSignIn(request, reply);
     }
     const code = query.code;
 
@@ -699,7 +701,7 @@ export function registerServerOidcIdentityRoutes(context: AuthRouteContext): voi
         message: 'Google authorization expired or could not be verified',
       });
       if (completion) return deliverNativeCompletion(reply, completion);
-      return restartSignIn();
+      return restartSignIn(request, reply);
     }
 
     await callbackObservation(state,'google','success');

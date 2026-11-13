@@ -1,7 +1,6 @@
 import React from 'react';
-import { Text, View } from 'react-native';
-import { StyleSheet } from 'react-native-unistyles';
-import { Typography } from '@/constants/Typography';
+import { YStack } from 'tamagui';
+import { T } from '@/ui/grammar';
 import { Button } from './Button';
 
 /**
@@ -20,39 +19,19 @@ export function EmptyState({
   title: string;
 }) {
   return (
-    <View accessibilityLiveRegion="polite" style={styles.empty} testID={testID}>
-      <Text style={styles.title}>{title}</Text>
-      {description ? <Text style={styles.description}>{description}</Text> : null}
+    <YStack accessibilityLiveRegion="polite" alignItems="center" paddingHorizontal="6" paddingVertical="8" gap="1" testID={testID}>
+      <T v="body" textAlign="center">{title}</T>
+      {description ? <T v="meta" color="secondary" textAlign="center">{description}</T> : null}
       {action ? (
         <Button
           accessibilityLabel={action.accessibilityLabel ?? action.label}
           label={action.label}
           onPress={action.onPress}
-          style={styles.action}
+          marginTop="4"
           testID={action.testID}
           variant="secondary"
         />
       ) : null}
-    </View>
+    </YStack>
   );
 }
-
-const styles = StyleSheet.create((theme) => {
-  const hull = theme.buzz;
-  return {
-    empty: {
-      alignItems: 'center',
-      paddingHorizontal: hull.space.lg,
-      paddingVertical: hull.space.xl,
-      gap: hull.space.xs,
-    },
-    title: { ...Typography.default(), ...hull.type.body, color: hull.textPrimary, textAlign: 'center' },
-    description: {
-      ...Typography.default(),
-      ...hull.type.meta,
-      color: hull.textMuted,
-      textAlign: 'center',
-    },
-    action: { marginTop: hull.space.md },
-  };
-});

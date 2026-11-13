@@ -605,7 +605,16 @@ export function readChatListView(value: unknown): ChatListView | null {
         : undefined,
     ),
     watchFilters: readWatchFilters(item.watchFilters),
+    ...field('joinable', readList(item.joinable, readJoinableChat, ROOM_VIEW_CHAT_LIMIT)),
   };
+}
+
+
+/** A public chat the viewer may join; an unreadable row is dropped, never invented. */
+function readJoinableChat(value: unknown): NonNullable<ChatListView['joinable']>[number] | null {
+  const item = record(value);
+  if (!item || !uuid(item.id) || typeof item.name !== 'string' || !integer(item.memberCount)) return null;
+  return { id: item.id, name: item.name, memberCount: item.memberCount };
 }
 
 
@@ -630,6 +639,7 @@ export function readCornerListView(value: unknown): CornerListView | null {
         ? item.nextArchived
         : undefined,
     ),
+    ...field('archivedCount', typeof item.archivedCount === 'number' && Number.isSafeInteger(item.archivedCount) && item.archivedCount >= 0 ? item.archivedCount : undefined),
     ...field('nextOpen', typeof item.nextOpen === 'string' && item.nextOpen.length <= 128
       ? item.nextOpen : undefined),
     ...field('summary', readCornerSummary(item.summary)),

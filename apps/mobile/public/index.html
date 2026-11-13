@@ -1,0 +1,31 @@
+<!DOCTYPE html>
+<html lang="%LANG_ISO_CODE%">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width,initial-scale=1,shrink-to-fit=no" />
+<title>%WEB_TITLE%</title>
+<style>
+html,body,#root{height:100%;margin:0}body{overflow:hidden}#root{display:flex;flex:1}
+/* Native and web launch shells stay Stone until the saved theme mounts. */
+html,body{background:#fafaf9}
+@media(prefers-color-scheme:dark){html,body{background:#171717}}
+</style>
+<script>
+(function () {
+  try {
+    var raw = window.localStorage.getItem('beeline.settings.local-settings');
+    window.__beelineLaunchSettings = { raw: raw };
+    var parsed = raw ? JSON.parse(raw) : null;
+    var migrated = window.localStorage.getItem('beeline.settings.appearance-system-v1') === 'done';
+    var choice = migrated && parsed ? parsed.appearance : 'system';
+    if (choice === 'light' || choice === 'dark') {
+      var style = document.createElement('style');
+      style.textContent = 'html,body{background:' + (choice === 'dark' ? '#171717' : '#fafaf9') + '}';
+      document.head.appendChild(style);
+    }
+  } catch (e) {}
+})();
+</script>
+</head>
+<body><noscript>You need to enable JavaScript to run this app.</noscript><div id="root"></div></body>
+</html>

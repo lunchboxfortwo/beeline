@@ -26,7 +26,7 @@ import { deleteSkill, saveSkill } from '../institutional-skills.js';
 import { archiveWorkflow, assignWorkflowRole, handoff, getWorkflowRun, cancelWorkflowRun, saveWorkflow, startWorkflow } from '../workflow-runs.js';
 import type { DaemonContext } from './context.js';
 import { Input, OwnedModelClaimCapability, Output, id } from './values.js';
-import { getInstitutionalContextOperation, saveInstitutionalMemoryOperation, searchInstitutionalMemoryOperation, searchInstitutionalHistoryOperation, loadWorkspaceSkillOperation, claimAgentCommandOperation, releaseAgentTurnOperation, acknowledgeAgentCommandOperation, noteEmptyRoomRepositoryOperation, getRoomGitHubTokenOperation, markAgentTurnSilentOperation, postBackgroundToolCompletionOperation, endComputerSessionOperation, createLinkSpendRequestOperation, retrieveLinkSpendRequestOperation, postStarterWelcomeOperation, postRepositoryOnboardingOperation, findConnectorsOperation, postVaultSaveCardOperation, setCornerHoldOperation, orderCornerMergeOperation } from './operation-effects.js';
+import { getInstitutionalContextOperation, saveInstitutionalMemoryOperation, searchInstitutionalMemoryOperation, searchInstitutionalHistoryOperation, loadWorkspaceSkillOperation, claimAgentCommandOperation, releaseAgentTurnOperation, acknowledgeAgentCommandOperation, getRoomGitHubTokenOperation, markAgentTurnSilentOperation, postBackgroundToolCompletionOperation, endComputerSessionOperation, createLinkSpendRequestOperation, retrieveLinkSpendRequestOperation, postStarterWelcomeOperation, postRepositoryOnboardingOperation, findConnectorsOperation, postVaultSaveCardOperation, setCornerHoldOperation, orderCornerMergeOperation } from './operation-effects.js';
 import { daemonAccess, daemonRoomMembers } from './access.js';
 import { daemonBootstrap, daemonWorkspaceRoster, daemonInbox } from './inbox-roster.js';
 import { daemonRoomMessage } from './message-reads.js';
@@ -370,8 +370,6 @@ export async function daemonExecuteOperation<Name extends keyof DaemonOperationM
           authenticatedAgentId,
         )), ...(owner ? { repositoryOnboarding: true } : {}) } as Output<Name>;
       }
-      case 'noteEmptyRoomRepository':
-        return noteEmptyRoomRepositoryOperation(ctx, name, input, authenticatedAgentId, turnOwner, modelClaim, candidate, scopedRoom, ownedIntent);
       case 'dispatchRoomWorkflow': {
         if (!ctx.github) throw new Error('GitHub workflow service unavailable');
         const release = input as Input<'dispatchRoomWorkflow'>;

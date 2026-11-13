@@ -109,7 +109,7 @@ export async function monolithPhoneOperation<Name extends keyof PhoneOperationMa
 ): Promise<PhoneOperationMap[Name]['output']> {
   try {
     const args =
-      name === 'createWorkspace' ? { ...input, timeZone: Intl.DateTimeFormat().resolvedOptions().timeZone } : input,
+      name === 'createWorkspace' ? { ...input, locale: Intl.DateTimeFormat().resolvedOptions().locale, timeZone: Intl.DateTimeFormat().resolvedOptions().timeZone } : input,
       requestOptions = { ...phoneOperationRequestOptions(name, input, options),
         ...(options?.reconnectOwnedByOutbox ? { reconnectOwnedByOutbox: true as const } : {}),
       };

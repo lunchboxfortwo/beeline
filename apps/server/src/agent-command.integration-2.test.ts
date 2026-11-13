@@ -515,7 +515,7 @@ it('runs revised-brief refusal, repair, rereview, exact-head approval, and imple
       kind: 'check-passed',
     });
   const [firstReview] = await commands(A, C);
-  expect(firstReview?.reason).toBe('subscribed_event');
+  expect(firstReview?.reason).toBe('corner_review_dispatch');
   expect(await commands(A, C)).toHaveLength(1);
   await claim(firstReview!);
   await result(

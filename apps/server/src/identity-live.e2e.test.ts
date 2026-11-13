@@ -132,6 +132,22 @@ describe('live Workspace and identity changes across sessions', () => {
     expect(outsiderFrames).toEqual([]);
   });
 
+  it('invalidates agent renames instead of overwriting workspace handles with a global identity delta', async () => {
+    await database.query(`UPDATE identities SET handle='luna_10',workspace_handle_base='luna' WHERE id=$1`,[REVIEW_AGENT]);
+    await database.query(`INSERT INTO memberships(workspace_id,room_id,identity_id,role) VALUES($1,NULL,$2,'member')`,[WORKSPACE,REVIEW_AGENT]);
+    const viewer = await open('viewer'), outsider = await open('outsider');
+    const globalIdentities = frames(viewer,'person-changed');
+    const invalidations = frames(viewer,'invalidate');
+    const outside = frames(outsider,'invalidate');
+    await database.query(`UPDATE identities SET name='Renamed Luna' WHERE id=$1`,[REVIEW_AGENT]);
+    await until(() => invalidations.some(frame => frame.reason==='postgres:identities'));
+    expect(invalidations).toContainEqual({type:'invalidate',roomId:'',reason:'postgres:identities'});
+    expect(globalIdentities).toEqual([]);
+    expect(outside).toEqual([]);
+    const roster = await new PhoneService(database,'http://local.test').readWorkspaceMembers(WORKSPACE,VIEWER);
+    expect(roster!.agents[0]!.identity).toMatchObject({name:'Renamed Luna',handle:'luna'});
+  });
+
   it('sends a Workspace rename to its members only', async () => {
     const viewer = await open('viewer');
     const outsider = await open('outsider');

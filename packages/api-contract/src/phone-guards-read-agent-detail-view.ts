@@ -1,4 +1,5 @@
 import { readAgentUsage } from './agent-usage.js';
+import type { RoomScheduleView } from './phone-operations.js';
 import { type AgentDetailView, type AgentPairingAbandonView, type AgentPairingClaimView, type AgentPairingClaimWireView, type InviteView } from './phone-types.js';
 import { record, readMember, uuid, readList, nonempty, field, httpUrl, readIdentity, readWatchFilters, oneOf, readAgentGrantView, integer, hex64 } from './phone-guards.js';
 import { readModelOption, readComposerCommand, readModelSelection, readAgentYolo, readAgentAccess } from './phone-guards-read-corner-lifecycle.js';
@@ -52,6 +53,22 @@ export function readAgentDetailView(value: unknown): AgentDetailView | null {
         },
         20,
       ) ?? [],
+    // Server-projected rows are rendered as-is; a malformed entry is skipped.
+    ...field('schedules', readList(item.schedules, (value) => {
+      const schedule = record(value);
+      return schedule && nonempty(schedule.id) && nonempty(schedule.roomId)
+        ? (schedule as unknown as RoomScheduleView) : null;
+    })),
+    ...field('rooms', readList(item.rooms, (value) => {
+      const room = record(value);
+      return room && nonempty(room.id) && typeof room.name === 'string'
+        ? {
+            id: room.id,
+            name: room.name,
+            ...field('visibility', oneOf(room.visibility, ['public', 'invite-only'])),
+          }
+        : null;
+    })),
     catalog,
     commands,
     watchFilters: readWatchFilters(item.watchFilters),

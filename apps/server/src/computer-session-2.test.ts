@@ -258,6 +258,14 @@ const scope1 = fixtureScope1();
         catch (error) { lastError = error; return undefined; }
       }, 30_000).catch((error: Error) => { throw lastError ? new Error(`${error.message}: ${String(lastError)}`) : error; });
       expect(start.left).toBeCloseTo((start.view - start.width) / 2, 0);
+      // Headless Chrome reports pointer:none and ignores pointer emulation, so
+      // desktop hiding is asserted from the served rule. A fine pointer still
+      // matches @media(pointer:fine) and hides the bar; the keyboard rule does not.
+      const keyboardRules = await evaluate<string>(`[...document.styleSheets].flatMap((sheet) => [...sheet.cssRules].map((rule) => rule.cssText)).join('\\n')`);
+      expect(keyboardRules).toContain('@media (pointer: fine)');
+      expect(keyboardRules).toContain('display: none !important');
+      const keyboardBarRule = keyboardRules.split('\n').find((rule) => rule.includes('beeline-keyboard') && rule.includes('#bar'));
+      expect(keyboardBarRule ?? '').not.toContain('display');
       // Trackpad pinch zooms in and back out to the whole page, centred, and
       // never reaches the remote page as a wheel.
       for (let index = 0; index < 4; index++) await mouse('mouseWheel', 450, 350, { deltaX: 0, deltaY: -60, modifiers: 2, button: 'none' });
@@ -297,13 +305,120 @@ const scope1 = fixtureScope1();
       expect(forwarded.some((message) => message.type === 'key' && message.key === 'v')).toBe(false);
       // Focus returns to the page view, so other shortcuts still reach the remote.
       expect(await evaluate<string>('document.activeElement.id')).toBe('canvas');
-      // UI-AUDIT-1: only the remote sign-in window owns a keyboard control.
-      // The existing structured navigation message selects that mode.
+      // Reproduction R1: a phone in control keeps the keyboard button on a
+      // remote sign-in window. That window's own keyboard does not open the
+      // phone keyboard. Reproduction R2: focusing the keyboard does not scroll
+      // the page off the screen.
       await command('Emulation.setDeviceMetricsOverride', { width: 390, height: 750, deviceScaleFactor: 1, mobile: true });
       await command('Emulation.setTouchEmulationEnabled', { enabled: true });
       expect(await evaluate<boolean>(`document.getElementById('beeline-paste') === null`)).toBe(true);
       await evaluate(`socket.dispatchEvent(new MessageEvent('message', {data:JSON.stringify({type:'navigation',url:'https://login.example/vnc.html'})}))`);
-      expect(await evaluate<string>(`getComputedStyle(document.getElementById('bar')).display`)).toBe('none');
+      expect(await evaluate<string>(`getComputedStyle(document.getElementById('bar')).display`)).not.toBe('none');
+      const beforeFocus = await evaluate<{ x: number; y: number; top: number; bottom: number; view: number }>(`(() => { const box = document.getElementById('canvas').getBoundingClientRect(); return { x: scrollX, y: scrollY, top: box.top, bottom: box.bottom, view: innerHeight }; })()`);
+      await evaluate(`document.getElementById('focus').click()`);
+      const afterFocus = await evaluate<{ x: number; y: number; top: number; bottom: number; view: number; position: string; left: number }>(`(() => { const box = document.getElementById('canvas').getBoundingClientRect(); const key = getComputedStyle(document.getElementById('keyboard')); return { x: scrollX, y: scrollY, top: box.top, bottom: box.bottom, view: innerHeight, position: key.position, left: Number.parseFloat(key.left) }; })()`);
+      expect(afterFocus.position).toBe('fixed');
+      expect(afterFocus.left).toBe(0);
+      expect(afterFocus.x).toBe(0);
+      expect(afterFocus.y).toBe(0);
+      expect(afterFocus.bottom).toBeGreaterThan(0);
+      expect(afterFocus.top).toBeLessThan(afterFocus.view);
+      expect(Math.abs(afterFocus.top - beforeFocus.top)).toBeLessThan(2);
+      // The phone keyboard shrinks the visual viewport and leaves the layout
+      // viewport tall. Squire's #screen{flex:1} then ignores a plain height.
+      // Reproduce that split here and require the page and the button to fit.
+      const installed = await evaluate<{ ok: boolean; reason?: string }>(`(() => {
+        if (window.__beelineSetViewport) return { ok: true };
+        const real = window.visualViewport;
+        if (!real) return { ok: false, reason: 'missing visualViewport' };
+        let next = null;
+        const fake = {
+          get height() { return next ? next.height : real.height; },
+          get width() { return real.width; },
+          get offsetTop() { return next ? next.offsetTop : real.offsetTop; },
+          get offsetLeft() { return 0; },
+          get pageTop() { return next ? next.offsetTop : real.pageTop; },
+          get pageLeft() { return 0; },
+          get scale() { return real.scale; },
+          addEventListener: (...args) => real.addEventListener(...args),
+          removeEventListener: (...args) => real.removeEventListener(...args),
+          dispatchEvent: (event) => real.dispatchEvent(event),
+        };
+        try { Object.defineProperty(window, 'visualViewport', { configurable: true, get: () => fake }); }
+        catch (error) { return { ok: false, reason: String(error) }; }
+        window.__beelineSetViewport = (height, offsetTop = 0) => {
+          next = height == null ? null : { height, offsetTop };
+          real.dispatchEvent(new Event('resize'));
+        };
+        return { ok: true };
+      })()`);
+      if (!installed.ok) throw new Error(`visualViewport stand-in unavailable: ${installed.reason}`);
+      type KeyboardFit = {
+        vvHeight: number; vvTop: number; innerHeight: number; innerWidth: number;
+        screenHeight: number; flexGrow: string; flexInline: string;
+        canvasTop: number; canvasBottom: number; canvasLeft: number; canvasRight: number;
+        buttonTop: number; buttonBottom: number; buttonDisplay: string;
+      };
+      const keyboardFit = () => evaluate<KeyboardFit>(`(() => {
+        const vv = window.visualViewport, screen = document.getElementById('screen');
+        const canvas = document.getElementById('canvas').getBoundingClientRect();
+        const button = document.getElementById('focus').getBoundingClientRect();
+        return {
+          vvHeight: vv.height, vvTop: vv.offsetTop, innerHeight, innerWidth,
+          screenHeight: screen.getBoundingClientRect().height,
+          flexGrow: getComputedStyle(screen).flexGrow, flexInline: screen.style.flex,
+          canvasTop: canvas.top, canvasBottom: canvas.bottom, canvasLeft: canvas.left, canvasRight: canvas.right,
+          buttonTop: button.top, buttonBottom: button.bottom,
+          buttonDisplay: getComputedStyle(document.getElementById('bar')).display,
+        };
+      })()`);
+      const openKeyboard = (inset: number) => evaluate(`window.__beelineSetViewport(Math.round(innerHeight - ${inset}), 0)`);
+      const closeKeyboard = () => evaluate(`window.__beelineSetViewport(null)`);
+      const expectPageInside = (box: KeyboardFit, label: string) => {
+        const top = box.vvTop, bottom = box.vvTop + box.vvHeight;
+        const field = box.canvasTop + (box.canvasBottom - box.canvasTop) * 0.92;
+        expect(box.innerHeight - box.vvHeight, label).toBeGreaterThanOrEqual(80);
+        expect(box.flexGrow, label).toBe('0');
+        expect(Math.abs(box.screenHeight - box.vvHeight), label).toBeLessThanOrEqual(1);
+        expect(box.canvasTop, label).toBeGreaterThanOrEqual(top - 1);
+        expect(box.canvasBottom, label).toBeLessThanOrEqual(bottom + 1);
+        expect(box.canvasLeft, label).toBeGreaterThanOrEqual(-1);
+        expect(box.canvasRight, label).toBeLessThanOrEqual(box.innerWidth + 1);
+        expect(box.buttonDisplay, label).not.toBe('none');
+        expect(box.buttonTop, label).toBeGreaterThanOrEqual(top - 1);
+        expect(box.buttonBottom, label).toBeLessThanOrEqual(bottom + 1);
+        expect(field, label).toBeGreaterThanOrEqual(top - 1);
+        expect(field, label).toBeLessThanOrEqual(bottom + 1);
+      };
+      await openKeyboard(327);
+      const normalKeyboard = await keyboardFit();
+      expectPageInside(normalKeyboard, 'normal remote page');
+      await evaluate(`(() => { const canvas = document.getElementById('canvas'); canvas.width = 1280; canvas.height = 1600; })()`);
+      await openKeyboard(327);
+      const tallKeyboard = await keyboardFit();
+      expectPageInside(tallKeyboard, 'taller remote page');
+      await evaluate(`document.getElementById('bar').style.display = 'none'`);
+      const watchOnly = await keyboardFit();
+      expect(watchOnly.buttonDisplay).toBe('none');
+      expect(Math.abs(watchOnly.screenHeight - watchOnly.vvHeight)).toBeLessThanOrEqual(1);
+      await evaluate(`document.getElementById('bar').style.display = ''`);
+      await closeKeyboard();
+      const restored = await keyboardFit();
+      expect(restored.flexGrow).toBe('1');
+      expect(restored.flexInline).toBe('');
+      expect(restored.innerHeight - restored.vvHeight).toBeLessThan(2);
+      expect(restored.screenHeight).toBeGreaterThan(tallKeyboard.screenHeight + 100);
+      expect(restored.buttonDisplay).not.toBe('none');
+      expect(Math.abs(restored.buttonBottom - (restored.innerHeight - 12))).toBeLessThanOrEqual(2);
+      await command('Emulation.setDeviceMetricsOverride', { width: 800, height: 390, deviceScaleFactor: 1, mobile: true });
+      await new Promise((resolve) => setTimeout(resolve, 200));
+      await evaluate(`(() => { const canvas = document.getElementById('canvas'); canvas.width = 1279; canvas.height = 936; })()`);
+      await openKeyboard(160);
+      expectPageInside(await keyboardFit(), 'landscape phone');
+      await closeKeyboard();
+      const landscapeClosed = await keyboardFit();
+      expect(landscapeClosed.flexGrow).toBe('1');
+      expect(landscapeClosed.screenHeight).toBeGreaterThan(landscapeClosed.vvHeight * 0.8);
       await evaluate(`socket.dispatchEvent(new MessageEvent('message', {data:JSON.stringify({type:'navigation',url:'https://example.com/'})}))`);
       expect(await evaluate<string>(`getComputedStyle(document.getElementById('bar')).display`)).not.toBe('none');
       socket.close();
@@ -354,14 +469,16 @@ const scope1 = fixtureScope1();
   }, 120_000);
 
 
-  it.skipIf(!existsSync(scope1.chromeBinary))('pinches, pans and maps a tap in the Squire bridge viewer without forwarding the gesture', async () => {
+  it.skipIf(!existsSync(scope1.chromeBinary))('pinches and pans locally, then dispatches a phone tap through the Squire mouse path', async () => {
     const squire = createServer((_request, response) => {
       response.writeHead(200, { 'content-type': 'text/html' });
       response.end(`<!doctype html><head><meta name="viewport" content="width=device-width,initial-scale=1"><style>
         html,body{margin:0;width:100%;height:100%}#screen{width:100vw;height:100vh}</style></head><body>
         <div id="bar"><button id="focus"></button></div>
-        <div id="screen"><canvas id="canvas" width="800" height="600"></canvas></div>
-        <script>const socket = new WebSocket(new URL("stream", location.href));
+        <div id="screen"><canvas id="canvas" width="0" height="0"></canvas></div>
+        <script>// Reproduction viewer-flake-1: remote dimensions arrive after the old 1.5s sleep.
+        setTimeout(() => {const c=document.getElementById('canvas');c.width=800;c.height=600;}, 3_000);
+        const socket = new WebSocket(new URL("stream", location.href));
         function send(message){if(socket.readyState===WebSocket.OPEN)socket.send(JSON.stringify(message));}
         function point(event){const canvas=document.getElementById('canvas');const r=canvas.getBoundingClientRect();
           const scale=r.width/canvas.width;return {x:(event.clientX-r.left)/scale,y:(event.clientY-r.top)/scale};}</script></body>`);
@@ -383,6 +500,13 @@ const scope1 = fixtureScope1();
         onPhase: (name) => { inputCounts[name] = forwarded.filter(scope1.isForwardedInput).length; },
       });
       scope1.expectViewerGesture(gesture, forwarded, inputCounts);
+      // Squire's touch path offsets input twice inside a cross-origin iframe.
+      // A deliberate tap must use the same trusted mouse path as a desktop click.
+      const input = forwarded.filter(scope1.isForwardedInput).map((raw) => JSON.parse(raw));
+      expect(input).toEqual([
+        { type: 'pointer', phase: 'down', button: 'left', x: expect.any(Number), y: expect.any(Number) },
+        { type: 'pointer', phase: 'up', button: 'left', x: input[0]?.x, y: input[0]?.y },
+      ]);
     } finally {
       for (const client of streams.clients) client.close();
       await new Promise<void>((resolve) => streams.close(() => resolve()));

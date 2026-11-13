@@ -210,7 +210,9 @@ export function selectComposerAckState(input: ComposerAckInput): ComposerAckStat
 export function selectComposerAckPresentation(
   input: ComposerAckPresentationInput,
 ): ComposerAckPresentation | null {
-  const pending = !input.activeTurnPubkey ? input.pendingAgentCommands?.[0] : undefined;
+  const pending = !input.activeTurnPubkey
+    ? input.pendingAgentCommands?.find(command => command.runtimePhase?.phase === 'starting')
+    : undefined;
   if (pending) {
     const agent = agentFromConversationIdentity(input.conversationIdentities?.get(pending.agentPubkey)) ??
       input.agentsByPubkey?.get(pending.agentPubkey);
@@ -242,7 +244,7 @@ export function selectComposerAckPresentation(
       // press does.
       const stoppable = viewerMayStopTurn(input.viewerPubkey, input.viewerCanSend);
       return {
-        label: `${subject} ${verb.gerund}…`,
+        label: `${subject} ${verb.gerund.toLowerCase()}…`,
         turnKey,
         verb,
         ...(input.receivedSteer?.agentPubkey === state.agentPubkey &&

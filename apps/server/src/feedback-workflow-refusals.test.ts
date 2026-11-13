@@ -39,6 +39,8 @@ it('Reproduction R1/R2: distinct feedback and workflow lookup produce no Sentry 
     await db.query(`INSERT INTO identities(id,kind,name) VALUES($1,'human','Owner'),($2,'agent','Agent')`, [owner, agent]);
     await db.query(`INSERT INTO agents(agent_id,owner_id) VALUES($1,$2)`, [agent, owner]);
     await db.query(`INSERT INTO workspaces(id,name) VALUES($1,'Isolated proof')`, [workspace]);
+    await db.query(`INSERT INTO memberships(workspace_id,identity_id,role)
+      VALUES($1,$2,'owner'),($1,$3,'member')`, [workspace,owner,agent]);
     await db.query(`INSERT INTO rooms(id,workspace_id,name) VALUES($1,$2,'Room')`, [room, workspace]);
     await db.query(`INSERT INTO memberships(workspace_id,room_id,identity_id,role) VALUES($1,$2,$3,'member')`, [workspace, room, agent]);
     await db.query(`INSERT INTO daemon_tokens(token_hash,agent_id) VALUES($1,$2)`, [tokenHash('bdt_refusal_fixture_123456789'), agent]);

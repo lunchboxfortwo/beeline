@@ -1,7 +1,10 @@
 /**
- * The composer's `#room` / `#room/corner` suggestions. A pick inserts the
- * exact token `findChannelReferences` links once the message is sent.
+ * The composer's `#` picker. This chat's threads come first, newest activity
+ * on top, then the other Rooms. Picking a thread inserts `↳name` (a thread
+ * link the server resolves); picking a Room inserts `#room`, the token
+ * `findChannelReferences` links once the message is sent.
  */
+import { threadLinkToken } from '@beeline/api-contract/phone';
 
 export type ActiveChannel = {
   start: number;
@@ -14,8 +17,12 @@ export type ChannelSuggestion = {
   readonly id: string;
   /** `room` or `room/corner`, without the `#` mark. */
   readonly token: string;
-  /** Second row line: a Room's repository, or `in #room` for a corner. */
+  /** Second row line: a Room's repository. */
   readonly subtitle?: string;
+  /** A thread's own name, without its Room. */
+  readonly name?: string;
+  /** When a thread last spoke, in unix seconds. */
+  readonly activityAt?: number;
 };
 
 const CHANNEL_QUERY_PATTERN = /(?:^|[\s([{])#([\p{L}\p{M}\p{N}_\-/]*)$/u;
@@ -41,7 +48,7 @@ export function channelSuggestionCandidates(
     readonly repositoryName?: string;
   }[],
   cornerRoom: { readonly name: string } | null,
-  corners: readonly { readonly id: string; readonly name: string }[],
+  corners: readonly { readonly id: string; readonly name: string; readonly activityAt?: number }[],
 ): ChannelSuggestion[] {
   const seen = new Set<string>();
   const candidates: ChannelSuggestion[] = [];
@@ -50,6 +57,22 @@ export function channelSuggestionCandidates(
     seen.add(candidate.id);
     candidates.push(candidate);
   };
+  if (cornerRoom?.name) {
+    const newestFirst = corners
+      .map((corner, index) => ({ corner, index }))
+      .sort((a, b) => (b.corner.activityAt ?? 0) - (a.corner.activityAt ?? 0) || a.index - b.index);
+    for (const { corner } of newestFirst) {
+      if (corner.name) {
+        add({
+          kind: 'corner',
+          id: corner.id,
+          token: `${cornerRoom.name}/${corner.name}`,
+          name: corner.name,
+          ...(corner.activityAt ? { activityAt: corner.activityAt } : {}),
+        });
+      }
+    }
+  }
   for (const room of rooms) {
     if (room.name) {
       add({
@@ -58,18 +81,6 @@ export function channelSuggestionCandidates(
         token: room.name,
         ...(room.repositoryName ? { subtitle: room.repositoryName } : {}),
       });
-    }
-  }
-  if (cornerRoom?.name) {
-    for (const corner of corners) {
-      if (corner.name) {
-        add({
-          kind: 'corner',
-          id: corner.id,
-          token: `${cornerRoom.name}/${corner.name}`,
-          subtitle: `in #${cornerRoom.name}`,
-        });
-      }
     }
   }
   return candidates;
@@ -93,7 +104,9 @@ export function filterChannelSuggestions(
       return { candidate, index, prefix: token.startsWith(folded) || name.startsWith(folded) };
     })
     .filter((item): item is NonNullable<typeof item> => item !== null)
-    .sort((a, b) => Number(b.prefix) - Number(a.prefix) || a.index - b.index);
+    // This chat's threads stay above Rooms; within each, prefix matches lead.
+    .sort((a, b) => Number(b.candidate.kind === 'corner') - Number(a.candidate.kind === 'corner')
+      || Number(b.prefix) - Number(a.prefix) || a.index - b.index);
   return {
     matches: matching.slice(0, limit).map((item) => item.candidate),
     overflow: Math.max(0, matching.length - limit),
@@ -117,14 +130,19 @@ export function channelCornerRoom(
   return inRoom ? matches[0]!.token.slice(0, matches[0]!.token.indexOf('/')) : null;
 }
 
+/** What a pick writes: `↳name` for a thread, `#room` for a Room. */
+export function channelSuggestionText(suggestion: ChannelSuggestion): string {
+  return suggestion.kind === 'corner' && suggestion.name ? threadLinkToken(suggestion.name) : `#${suggestion.token}`;
+}
+
 /** Replace only the active `#` fragment; add one space unless whitespace already follows. */
 export function replaceActiveChannel(
   text: string,
   channel: ActiveChannel,
-  token: string,
+  written: string,
 ): { text: string; cursor: number } {
   const after = text.slice(channel.end);
-  const inserted = /^\s/.test(after) ? `#${token}` : `#${token} `;
+  const inserted = /^\s/.test(after) ? written : `${written} `;
   return {
     text: `${text.slice(0, channel.start)}${inserted}${after}`,
     cursor: channel.start + inserted.length,

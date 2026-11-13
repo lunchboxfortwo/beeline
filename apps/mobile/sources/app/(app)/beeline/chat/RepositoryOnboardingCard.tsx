@@ -19,7 +19,8 @@ export function RepositoryOnboardingCard(props: Props) {
 function EnabledRepositoryOnboardingCard({ card, viewerId, author }: Props) {
   const { repositoryPicker, githubConnectionError } = useLocalSearchParams<{ repositoryPicker?: string; githubConnectionError?: string }>();
   const connectionError = repositoryPicker === card.id && card.requesterId === viewerId ? githubConnectionError : undefined;
-  const [picker, setPicker] = useState(repositoryPicker === card.id);
+  const named = card.selected?.trim().toLowerCase();
+  const [picker, setPicker] = useState(repositoryPicker === card.id || Boolean(named && card.kind === 'repository'));
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(connectionError ? githubConnectionErrorNotice(connectionError).description : null);
   useEffect(() => {
@@ -77,7 +78,7 @@ function EnabledRepositoryOnboardingCard({ card, viewerId, author }: Props) {
       consequence: starter.evidence, ...(canAct ? { onPress: () => void act('starter', { starterId: starter.id }) } : {}) }))
     : picker ? card.repositories.map((repository, index) => ({ id: String(repository.id), letter: String(index + 1), mark: repository.current ? 'none' as const : 'chevron' as const,
       label: repository.fullName, consequence: repository.current ? 'Current · open PRs stay open' : 'Use this repository',
-      selected: repository.current, ...(canAct && !repository.current ? { onPress: () => void act('link', { repositoryId: repository.id }) } : {}) })) : [];
+      selected: repository.current || repository.fullName.toLowerCase() === named, ...(canAct && !repository.current ? { onPress: () => void act('link', { repositoryId: repository.id }) } : {}) })) : [];
   const actions: TranscriptCardAction[] = card.kind === 'repository' && card.canLink && card.status === 'open' && card.requesterId === viewerId ? [
     ...(card.githubLinked === false && !card.installationId ? [] : [
       { label: 'Link existing', disabled: !canAct, onPress: () => setPicker(!picker), testID: 'repo-card-link' },
@@ -106,7 +107,7 @@ function EnabledRepositoryOnboardingCard({ card, viewerId, author }: Props) {
     body={linked || error ? undefined : card.kind === 'repository' ? card.canLink ? needsConnection
       ? 'Connect GitHub to link one you own or create a new private repo. You approve once on github.com, then come back here.'
       : `New repo: ${card.defaultName}`
-      : card.ownerHandle ? `Ask @${card.ownerHandle} to link a repository for this Room` : 'Ask a Workspace owner or admin to choose a repository for this Room.' : undefined}
+      : card.ownerHandle ? `Ask @${card.ownerHandle} to link a repository for this chat` : 'Ask a Workspace owner or admin to choose a repository for this chat.' : undefined}
     choices={linked || error ? [] : choices} actions={shownActions}
     footerNote={!linked && busy ? 'Working…' : undefined}>
     {!linked && !error && picker && !card.repositories.length ?

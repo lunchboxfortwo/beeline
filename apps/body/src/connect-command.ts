@@ -1,7 +1,8 @@
-import { defaultBeelineInstallLayout, hostPlatformKey } from "./self-update.js";
+import { activateRelease, defaultBeelineInstallLayout, hostPlatformKey, readInstalledBundleIdentity, resolveBundleEntrypoint } from "./self-update.js";
 import { resolve } from "node:path";
 import { resolveManifestUrl, parseUpdateManifest } from "./self-update-manifest.js";
-import { prepareMachineRelease, convergeMachine } from "./recovery.js";
+import { prepareMachineRelease } from "./recovery.js";
+import { withInstallLock } from './managed-update.js';
 import type { AgentAccessPolicy } from "./access-policy.js";
 import { AUTO_DETECT_AGENT_KINDS, type AgentKind, type AgentCommand, installLatestAgentAdapter, requireInstalledAgentProgram, resolveAgentCommand, installedAgentProgramEnvironment, agentBehavior, type DetectedAgentCommand, detectInstalledAgentCommands } from "./agent-command.js";
 import { stdin, stdout } from "node:process";
@@ -556,10 +557,9 @@ export async function collectConnectWizard(
   /**
    * Reasoning effort, asked whenever the harness advertises the axis. Ladders
    * can be model-specific, so a model other than the one the catalog was read
-   * under earns one more bounded read: the ladder offered is then the chosen
+   * under earns one more read: the ladder offered is then the chosen
    * model's own, and the value cannot be refused later by the session that
-   * validates it. A re-read that fails or runs long keeps the ladder already
-   * in hand rather than dropping the question.
+   * validates it. Without that model's own axis, skip the question.
    */
   const askEffort = async (
     catalog: ConnectModelCatalog,
@@ -576,7 +576,7 @@ export async function collectConnectWizard(
         ...(forProvider ? { provider: forProvider } : {}),
         ...(forKey ? { apiKey: forKey } : {}),
       }).catch(() => undefined);
-      axis = reread?.effort ?? axis;
+      axis = reread?.effort;
     }
     if (!axis?.options.length) return undefined;
     const picked = await prompts.select<string>({
@@ -755,16 +755,20 @@ export async function installCurrentRelease(
   fetchImpl: typeof fetch,
 ): Promise<{ binary: string; version: string }> {
   const layout = defaultBeelineInstallLayout(process.env);
-  if (process.env.BEELINE_RECOVERY_SELECTED_RELEASE) return { binary: resolve(layout.binDir, 'beeline'), version: process.env.BEELINE_RECOVERY_SELECTED_RELEASE };
+  const binary = resolve(layout.binDir, 'beeline');
+  // Connecting only needs the installed CLI. The serving helper owns its own
+  // release channel and update lifecycle, independently of this npm bundle.
+  if (await resolveBundleEntrypoint(layout.libDir))
+    return { binary, version: (await readInstalledBundleIdentity(layout))?.version ?? 'unknown' };
   const manifestUrl = resolveManifestUrl(process.env);
   const response = await fetchImpl(manifestUrl, { signal: undefined });
   if (!response.ok)
     throw new Error(`fetching the Beeline release manifest failed: HTTP ${response.status}`);
   const published = parseUpdateManifest(await response.text(), hostPlatformKey()).bundle;
   const { releaseId } = await prepareMachineRelease(layout, { manifest: { url: manifestUrl, bundle: published }, fetchImpl, logger: () => {} });
-  await convergeMachine({ layout, releaseId });
+  await withInstallLock(layout, () => activateRelease(layout, releaseId));
   return {
-    binary: resolve(layout.binDir, 'beeline'),
+    binary,
     version: published.version ?? releaseId,
   };
 }

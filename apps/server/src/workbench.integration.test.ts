@@ -160,7 +160,7 @@ const scope1 = fixtureScope1();
     const freeAgent = 'e'.repeat(64);
     await scope1.database.query("INSERT INTO identities(id,kind,name) VALUES($1,'agent','Free server')", [freeAgent]);
     await scope1.database.query('INSERT INTO agents(agent_id,owner_id) VALUES($1,$2)', [freeAgent, HUMAN]);
-    await scope1.database.query("INSERT INTO free_agents(agent_id,workspace_id,owner_id,sealed_keys,state) VALUES($1,$2,$3,'sealed','running')", [freeAgent, WORKSPACE, HUMAN]);
+    await scope1.database.query("WITH workspace AS (SELECT $2::uuid) INSERT INTO free_agents(agent_id,owner_id,sealed_keys,state) VALUES($1,$3,'sealed','running')", [freeAgent, WORKSPACE, HUMAN]);
     await scope1.database.query("INSERT INTO memberships(workspace_id,identity_id,role) VALUES($1,$2,'member')", [WORKSPACE, freeAgent]);
     await scope1.daemonOperation('postConnectorVault', { connections: [{ reference: 'synthetic-login', service: 'x-y-z', label: 'production-login',
       allowedHosts: [], loginHosts: ['login.example.co.uk'], faviconDomain: 'example.co.uk', keyName: 'EXAMPLE_LOGIN', credentialKind: 'login', expiresAt: 1,
@@ -609,7 +609,7 @@ const scope1 = fixtureScope1();
   });
 
 
-  it('uses the same System DM for connector receipts', async () => {
+  it('keeps the System identity and logos without posting connector usage receipts', async () => {
     const roomId = await ensureSystemDirectMessageRoom(scope1.database, WORKSPACE, HUMAN);
     expect(
       (await scope1.phone.readChats(WORKSPACE, HUMAN))?.chats.some((chat) => chat.room.id === roomId),
@@ -642,7 +642,7 @@ const scope1 = fixtureScope1();
     const chat = (await scope1.phone.readChats(WORKSPACE, HUMAN))?.chats.find(
       (candidate) => candidate.room.id === roomId,
     );
-    expect(chat?.latestMessage?.text).toContain('@bee used Acme tooling');
+    expect(chat?.latestMessage).toBeUndefined();
     expect(chat?.directMessage?.peer).toMatchObject({
       name: 'System',
       handle: 'system',
@@ -662,7 +662,7 @@ const scope1 = fixtureScope1();
   });
 
 
-  it('DMs exactly one receipt card for an approval-class event', async () => {
+  it('records approval-class usage without a receipt DM', async () => {
     const connectorId = await scope1.pairOwnerConnector();
     const requestId = createHash('sha256').update('turn-approval').digest('hex');
     await scope1.daemonOperation('postConnectionUsage', {
@@ -687,15 +687,12 @@ const scope1 = fixtureScope1();
       ],
     });
     const cards = await scope1.connectionReceiptCards();
-    expect(cards).toHaveLength(1);
-    expect(cards[0]!.author_id).toBe(SYSTEM_IDENTITY_ID);
-    expect(cards[0]!.text).toContain('@bee used Acme tooling');
-    // The card is about the approval-class event, not the ordinary use.
-    expect(cards[0]!.text).toContain('fetch_credential');
+    expect(cards).toEqual([]);
+    expect((await scope1.database.query('SELECT 1 FROM connection_receipts WHERE turn_key=$1', [requestId])).rowCount).toBe(2);
   });
 
 
-  it("aggregates a second approval-class report into the turn's existing card", async () => {
+  it("keeps repeated approval-class reports in the ledger without chat cards", async () => {
     const connectorId = await scope1.pairOwnerConnector();
     const requestId = createHash('sha256').update('turn-batched').digest('hex');
     const approval = {
@@ -727,7 +724,7 @@ const scope1 = fixtureScope1();
       ],
     });
     const cards = await scope1.connectionReceiptCards();
-    expect(cards).toHaveLength(1);
-    expect(cards[0]!.text).toContain('2 calls');
+    expect(cards).toEqual([]);
+    expect((await scope1.database.query('SELECT 1 FROM connection_receipts WHERE turn_key=$1', [requestId])).rowCount).toBe(3);
   });
 });

@@ -371,7 +371,8 @@ describe('PR-scoped check gate', () => {
       checks: 'passed',
       approved: false,
       mergeAllowed: false,
-      reviewer: '@reviewer',
+      // The assigned workspace address survives a later global handle edit.
+      reviewer: '@author',
       reviewerExists: true,
       reviewerWake: { status: 'waiting' },
     });
@@ -741,7 +742,7 @@ const scope2 = fixtureScope2();
       checksSummary: { status: 'passing', total: 0 },
       pr: { mergeability: 'clean' },
     });
-    expect(after.reviewer).toEqual(['subscribed_event']);
+    expect(after.reviewer).toEqual(['corner_review_dispatch']);
     expect(after.worker).toEqual([]);
   });
 
@@ -754,7 +755,7 @@ const scope2 = fixtureScope2();
     rootFixture.pullBaseSha = rootFixture.mainHead;
     const after = await scope2.finishPrTurn(rootFixture.mainHead);
     expect(after.lifecycle).toMatchObject({ checks: 'passing', checksSummary: { total: 0 } });
-    expect(after.reviewer).toEqual(['subscribed_event']);
+    expect(after.reviewer).toEqual(['corner_review_dispatch']);
     await rootFixture.daemon.execute('approveCornerMerge', { cornerId: C, headSha: SHA }, REVIEWER);
     expect(await gate()).toMatchObject({ checkCount: 0, approved: true, mergeAllowed: true });
     rootFixture.rollupState = 'SUCCESS';

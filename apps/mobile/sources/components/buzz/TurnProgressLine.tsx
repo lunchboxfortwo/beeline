@@ -1,61 +1,26 @@
 import React, { useEffect, useState } from 'react';
-import { Text, View } from 'react-native';
-import { StyleSheet } from 'react-native-unistyles';
-import { BeelineMarkSpinner, MARK_CELL } from './BeelineMarkSpinner';
-import { ribbon } from '@/buzz/beeline-glyph';
-import { HullLivePulse } from './MonoHull';
-import { Button } from './Button';
-import { InlineRow } from './IndexRow';
+import { Spinner, XStack, YStack } from 'tamagui';
+import { T } from '@/ui/grammar';
+import { BeelineMarkSpinner } from './BeelineMarkSpinner';
+import { TURN_LINE_ROW_MIN_HEIGHT } from '@/buzz/room-bottom-chrome';
 import { SPINNER_STEP_MS, elapsedSeconds, formatWorkingCounter } from '@/buzz/turn-clock';
-import {
-  TURN_LINE_BAR_MARGIN_BOTTOM,
-  TURN_LINE_ROW_MIN_HEIGHT,
-  TURN_LABEL_LINE_HEIGHT,
-  roomBottomChromeStyles,
-  TURN_CHROME_COMPOSER_OVERLAP,
-} from '@/buzz/room-bottom-chrome';
+import { TurnBandSlot, TurnLineBar } from './TurnLineFrame';
 
-/** The stop label sits in the row's own height; hit slop makes up the 44pt target. */
+export { TurnBandSlot };
+
+/** The stop word sits in the row's own height; hit slop makes up the 44pt target. */
 export const STOP_HIT_SLOP = (44 - TURN_LINE_ROW_MIN_HEIGHT) / 2;
+const SLOP = { top: STOP_HIT_SLOP, bottom: STOP_HIT_SLOP, left: 8, right: 8 };
 
 /**
- * The ordinary per-turn indicator: the agent has taken this Room's question
- * and has not answered yet. One transient line pinned above the composer,
- * gone the moment the reply lands.
- *
- * It reports a turn and nothing else. A turn is
- * a thing the reader is *waiting* for, so this names nobody's corner, carries
- * no `view →`, and cannot be pressed — there is nowhere to go. The retired
- * pinned corner line used to sit beneath it; conflating the two is what once
- * lit that gold line — pointed at a corner long since archived — for a plain
- * "who is Alan?" question. Corner state is read in the corners list now.
- *
- * Gold and the shared live breath are still correct here: `DESIGN.md` assigns
- * that pair to exactly one meaning, an agent is alive and working, which is
- * precisely what a turn in progress is.
- *
- * The mark leads the line at the transcript text edge, followed by the verb
- * and elapsed counter. The mark is the Beeline
- * icon (`BeelineMarkSpinner`) painting itself and releasing — never a cycling
- * text glyph or a row of dots. A glyph whose advance width changes per frame
- * walks the label's left edge back and forth, so the mark sits in one fixed
- * `MARK_CELL` square and the label's x never depends on it. The counter starts from the server receipt's own
- * `createdAt` (unix seconds), so it reads correctly even when the app opened
- * mid-turn. The ticking interval lives entirely inside the memoized body and
- * updates state only when the displayed second changes; without a receipt
- * time it schedules no interval. It never recreates the transcript.
- *
- * The same live treatment also covers the short local "sending…" bridge. It
- * expires at its deadline. Accepted but unclaimed commands stay silent.
- *
- * The LINE still goes nowhere — it has no `onPress` and no destination, which
- * is what keeps it from stranding a reader in a dead channel. `onStop` is a
- * different thing in the trailing slot: not navigation but the one action a
- * turn in progress admits, withdrawing the question. It is passed only to the
- * person who may act in the Room (`viewerMayStopTurn`), so for everyone else this component
- * renders exactly what it rendered before. A press is acknowledged here —
- * the control dims and the counter says `stopping` — before the cancelled
- * receipt lands; a failed stop enables it again.
+ * The status line (decision 16): one small line above the composer while an
+ * agent works — a spinner, "Jimmy thinking…" in brass, and a plain Stop for
+ * the person who may withdraw the question. "Name · starting…" is the
+ * explicit helper startup phase; nothing shows when idle. It reports a turn
+ * and goes nowhere; Stop is the one action a turn in progress admits. A press
+ * is acknowledged here (Stop dims) before the cancelled receipt lands; a
+ * failed stop enables it again. The elapsed counter ticks from the server
+ * receipt's own time; without a receipt time no interval is scheduled.
  */
 export function TurnProgressLine(props: React.ComponentProps<typeof TurnProgressLineBody> & {
   /** Accepted external sends use the same line without live motion. */
@@ -100,226 +65,95 @@ const TurnProgressLineBody = React.memo(function TurnProgressLineBody({
   testID?: string;
 }) {
   const [now, setNow] = useState(() => Date.now());
-
   useEffect(() => {
     if (startedAt == null) return;
     const tick = () => {
       const next = Date.now();
       setNow((previous) =>
-        elapsedSeconds(startedAt * 1_000, previous) === elapsedSeconds(startedAt * 1_000, next)
-          ? previous
-          : next,
+        elapsedSeconds(startedAt * 1_000, previous) === elapsedSeconds(startedAt * 1_000, next) ? previous : next,
       );
     };
     tick();
     const timer = setInterval(tick, SPINNER_STEP_MS);
     return () => clearInterval(timer);
   }, [startedAt]);
-
-  const phase = stopping ? 'stopping' : 'thinking';
-  const counter =
-    startedAt != null ? formatWorkingCounter(startedAt * 1_000, now, phase) : undefined;
+  const counter = startedAt != null ? formatWorkingCounter(startedAt * 1_000, now, stopping ? 'stopping' : 'thinking') : undefined;
   const stateLabel = [counter, received ? 'received' : undefined].filter(Boolean).join(' · ');
-
   return (
-    <View
+    <TurnLineBar
+      inset={inset}
       accessibilityLabel={stateLabel ? `${label} (${stateLabel})` : label}
       accessibilityLiveRegion="polite"
-      accessibilityRole={live ? "progressbar" : "text"}
-      style={inset ? styles.bar : [styles.bar, styles.insetBar]}
+      accessibilityRole={live ? 'progressbar' : 'text'}
       testID={testID}
     >
-      <HullLivePulse active={live} style={styles.row}>
-        <View
-          style={[styles.glyphCell, styles.leadingGlyph]}
-          testID={testID ? `${testID}-glyph` : undefined}
-        >
-          <BeelineMarkSpinner live={live} />
-        </View>
-        <Text numberOfLines={1} ellipsizeMode="tail" style={styles.label}>
-          {label}
-        </Text>
-        {counter != null && (
-          <Text style={styles.counter} testID={testID ? `${testID}-elapsed` : undefined}>
-            {counter}
-          </Text>
-        )}
-        {received && (
-          <Text style={styles.counter} testID={testID ? `${testID}-received` : undefined}>
-            · received
-          </Text>
-        )}
-        {onStop && (
-          <Button
-            accessibilityLabel={stopping ? 'Stopping this turn' : 'Stop this turn'}
+      <XStack height={TURN_LINE_ROW_MIN_HEIGHT} minWidth={0} gap="2" alignItems="center">
+        <YStack testID={testID ? `${testID}-glyph` : undefined}>
+          {live ? <Spinner size="small" color="needsYou" scale={0.7} /> : <BeelineMarkSpinner />}
+        </YStack>
+        <XStack flex={1} minWidth={0} alignItems="center">
+          <T v="meta" color="needsYou" numberOfLines={1} testID={testID ? `${testID}-label` : undefined}>{label}</T>
+          {counter != null ? <T v="meta" color="needsYou" marginLeft="1" testID={testID ? `${testID}-elapsed` : undefined}>{counter}</T> : null}
+          {received ? <T v="meta" color="needsYou" testID={testID ? `${testID}-received` : undefined}> · received</T> : null}
+        </XStack>
+        {onStop ? (
+          <T
+            v="meta"
+            color="secondary"
+            opacity={stopping ? 0.5 : 1}
+            accessibilityRole="button"
+            aria-label={stopping ? 'Stopping this turn' : 'Stop this turn'}
             accessibilityState={{ busy: stopping, disabled: stopping }}
-            disabled={stopping}
-            hitSlop={STOP_HIT_SLOP}
-            label="STOP"
-            variant="quiet"
+            hitSlop={SLOP}
             onPress={stopping ? undefined : onStop}
-            appearance={{
-              control: ({ pressed }) => [
-                styles.stop,
-                pressed && !stopping && styles.stopPressed,
-                stopping && styles.stopStopping,
-              ],
-              label: styles.stopLabel,
-            }}
             testID={testID ? `${testID}-stop` : undefined}
-          />
-        )}
-      </HullLivePulse>
-    </View>
+          >
+            Stop
+          </T>
+        ) : null}
+      </XStack>
+    </TurnLineBar>
   );
 });
 
 /**
  * The one-line summary a finished turn leaves behind, briefly: the past-tense
- * verb, total seconds from the working receipt's server time, and the local
- * wall-clock "done" stamp. Static — no breath, no counter, the completed mark
- * — because the turn is over; the screen clears it after a few seconds.
+ * verb, total seconds and the "done" stamp. Static, with the completed mark;
+ * the screen clears it after a few seconds. A failed send uses it with Retry.
  */
 export function TurnSettledLine({ line, testID, inset = true, leading = false, leadingGlyph = true, action }: {
   line: string;
   testID?: string;
   inset?: boolean;
-  /** The external-send variant shares the thinking mark's optical alignment. */
+  /** The external-send variant shares the thinking line's live region. */
   leading?: boolean;
   leadingGlyph?: boolean;
   action?: { label: string; onPress(): void };
 }) {
   return (
-    <View accessibilityLabel={line} accessibilityLiveRegion={leading ? 'polite' : undefined} style={inset ? styles.bar : [styles.bar, styles.insetBar]} testID={testID}>
-      <InlineRow style={[styles.row, action && !leadingGlyph && styles.actionRow]}>
-        {leadingGlyph ? <View style={leading ? [styles.glyphCell, styles.leadingGlyph] : styles.glyphCell} testID={testID ? `${testID}-glyph` : undefined}>
-          <BeelineMarkSpinner />
-        </View> : null}
-        <Text numberOfLines={1} ellipsizeMode="tail" style={styles.label}>
-          {line}
-        </Text>
-        {action ? <>
-          <Text style={styles.counter}> · </Text>
-          <Button size="inline" variant="quiet" label={action.label}
-            appearance={{ control: styles.statusAction, label: styles.counter }}
-            onTouchEnd={event => event.stopPropagation()}
-            onPress={event => { event.stopPropagation(); action.onPress(); }}
-            testID={testID ? `${testID}-retry` : undefined} />
-        </> : null}
-      </InlineRow>
-    </View>
+    <TurnLineBar inset={inset} accessibilityLabel={line} accessibilityLiveRegion={leading ? 'polite' : undefined} testID={testID}>
+      <XStack height={TURN_LINE_ROW_MIN_HEIGHT} minWidth={0} gap={action && !leadingGlyph ? '0' : '2'} alignItems="center">
+        {leadingGlyph ? (
+          <YStack testID={testID ? `${testID}-glyph` : undefined}><BeelineMarkSpinner /></YStack>
+        ) : null}
+        <T v="meta" color="needsYou" numberOfLines={1} testID={testID ? `${testID}-line` : undefined}>{line}</T>
+        {action ? (
+          <>
+            <T v="meta" color="needsYou"> · </T>
+            <T
+              v="meta"
+              color="needsYou"
+              accessibilityRole="button"
+              hitSlop={SLOP}
+              onPressIn={(event: { stopPropagation(): void }) => event.stopPropagation()}
+              onPress={(event: { stopPropagation(): void }) => { event.stopPropagation(); action.onPress(); }}
+              testID={testID ? `${testID}-retry` : undefined}
+            >
+              {action.label}
+            </T>
+          </>
+        ) : null}
+      </XStack>
+    </TurnLineBar>
   );
 }
-
-/** The phone line overlays the fixed transcript tail. Its canvas and label
- * are lowered toward the field so the newest row (including reactions) stays
- * above the paint and the visible air to the field border is balanced. */
-export function TurnBandSlot({
-  children,
-  onTopInset,
-  testID,
-}: {
-  onTopInset?: (height: number) => void;
-  children?: React.ReactNode;
-  testID?: string;
-}) {
-  const hasLine = React.Children.toArray(children).length > 0;
-  // The slot is absolute (`room-bottom-chrome`), anchored on the composer.
-  // Any mounted line, thinking or settled, paints the air above its ink and
-  // overlaps the composer padding below it, so scrolled transcript text never
-  // shows under the line. With no line there is no paint and no height. It
-  // takes no room in the column, so the list's height is identical whether
-  // or not the line is showing.
-  return (
-    <View
-      pointerEvents="box-none"
-      style={[styles.slot, hasLine && styles.coverage]}
-      testID={testID}
-      onLayout={(event) =>
-        onTopInset?.(
-          // Layout excludes the paint translation into the composer.
-          hasLine ? Math.max(0, event.nativeEvent.layout.height - TURN_CHROME_COMPOSER_OVERLAP) : 0,
-        )
-      }
-    >
-      {children}
-    </View>
-  );
-}
-
-const styles = StyleSheet.create((theme) => {
-  const groknight = theme.buzz;
-  const bottomChrome = roomBottomChromeStyles(groknight);
-  return {
-    // The line's surface is the transcript's own; see `room-bottom-chrome`.
-    slot: bottomChrome.hangingTurnChrome,
-    coverage: bottomChrome.turnChromeCoverage,
-    // The line sits inside the margin the transcript already leaves below its
-    // newest message, so it adds no height and must stay one row.
-    bar: {
-      width: '100%',
-      minWidth: 0,
-      marginBottom: TURN_LINE_BAR_MARGIN_BOTTOM,
-      paddingHorizontal: groknight.space.md,
-    },
-    insetBar: { paddingHorizontal: 0 },
-    actionRow: { gap: 0 },
-    statusAction: { minHeight: TURN_LINE_ROW_MIN_HEIGHT, justifyContent: 'center' },
-    row: {
-      minHeight: TURN_LINE_ROW_MIN_HEIGHT,
-      minWidth: 0,
-      flexDirection: 'row',
-      alignItems: 'center',
-      gap: 8,
-    },
-    // A fixed square, whatever the mark inside is doing: the label's left edge
-    // must never move with the glyph.
-    glyphCell: {
-      width: MARK_CELL,
-      height: MARK_CELL,
-      flexShrink: 0,
-      alignItems: 'center',
-      justifyContent: 'center',
-    },
-    // Remove the SVG's transparent leading inset from layout, keeping the
-    // original gap after its fixed cell and aligning the visible mark to text.
-    leadingGlyph: {
-      width: MARK_CELL - ribbon.cellInkInset,
-      alignItems: 'flex-end',
-    },
-    label: {
-      ...groknight.type.machine,
-      flexShrink: 1,
-      minWidth: 0,
-      color: groknight.accent,
-      lineHeight: TURN_LABEL_LINE_HEIGHT,
-    },
-    counter: {
-      ...groknight.type.machine,
-      flexShrink: 0,
-      color: groknight.accent,
-      lineHeight: TURN_LABEL_LINE_HEIGHT,
-    },
-    // One discoverable stop action, shared by Room and corner working lines.
-    // Its height is the row's own: `minHeight: 26` used to make the line 26px
-    // and push it past the 24px speaker-change portion of its box.
-    stop: {
-      minHeight: TURN_LINE_ROW_MIN_HEIGHT,
-      justifyContent: 'center',
-      marginLeft: 'auto',
-      flexShrink: 0,
-    },
-    stopLabel: {
-      ...groknight.type.sectionHead,
-      color: groknight.accent,
-      // Trailing tracking belongs between letters, outside the visible edge.
-      transform: [{ translateX: groknight.type.sectionHead.letterSpacing }],
-    },
-    stopPressed: {
-      opacity: 0.6,
-    },
-    stopStopping: {
-      opacity: 0.45,
-    },
-  };
-});

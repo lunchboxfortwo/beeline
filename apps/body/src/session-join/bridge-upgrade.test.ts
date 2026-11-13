@@ -4,10 +4,11 @@ import { once } from 'node:events';
 import { createServer } from 'node:net';
 import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, watch, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
-import { join, resolve } from 'node:path';
+import { dirname, join, resolve } from 'node:path';
 import { createRequire } from 'node:module';
 import { acceptMemberDelivery, deliver, ensureBridge, refreshJoinedSessionBridge } from './bridge.js';
 import { readState, updateState, type JoinedSession } from './store.js';
+import { bridgeSocketPath } from './bridge-socket.js';
 
 const children: ChildProcess[] = [];
 const folders: string[] = [];
@@ -27,7 +28,7 @@ function changedFile(path: string, ready: () => boolean): Promise<void> {
   });
 }
 
-it('parks after an expired replacement without resetting the recovery allowance when tokens rotate', async () => {
+it('parks on a terminal stream response without rotating its permanent access token', async () => {
   const dir = mkdtempSync(join(tmpdir(), 'bridge-expiry-budget-')); folders.push(dir);
   const env = { ...process.env, HOME: dir, XDG_CONFIG_HOME: dir, XDG_STATE_HOME: dir,
     CLAUDE_CONFIG_DIR: join(dir, '.claude'), CODEX_HOME: join(dir, '.codex') };
@@ -52,21 +53,23 @@ it('parks after an expired replacement without resetting the recovery allowance 
     };
     await runBridge(${JSON.stringify(stateDir)}, { node: process.execPath, bundle: ${JSON.stringify(bridge)} });`;
   const child = spawn(process.execPath, ['--import', 'tsx', '--input-type=module', '-e', script], { env, stdio: 'ignore' }); children.push(child);
-  await changedFile(dir, () => existsSync(requests) && readFileSync(requests, 'utf8').split('stream\n').length >= 3);
+  await changedFile(dir, () => existsSync(requests));
   // The replacement has ended synchronously; allow the credential/state file
   // events to settle and prove they cannot admit a third connection.
   await new Promise(resolve => setTimeout(resolve, 100));
-  expect(readFileSync(requests, 'utf8')).toBe('stream\nrefresh\nstream\n');
+  expect(readFileSync(requests, 'utf8')).toBe('stream\n');
 });
 
-it('replaces a living legacy bridge and catches up the saved cursor before delivering live Claude tags', async () => {
+it.each(['short', 'long'])('replaces a living legacy bridge at a %s state path and catches up before delivering live Claude tags', async length => {
   const dir = mkdtempSync(join(tmpdir(), 'bridge-upgrade-')); folders.push(dir);
-  const env = { ...process.env, HOME: dir, XDG_STATE_HOME: dir, CLAUDE_CONFIG_DIR: join(dir, '.claude') };
-  const stateDir = join(dir, 'beeline-sessions'); mkdirSync(stateDir);
+  const stateRoot = length === 'long' ? join(dir, 'state-'.repeat(30)) : dir;
+  const env = { ...process.env, HOME: dir, XDG_STATE_HOME: stateRoot, CLAUDE_CONFIG_DIR: join(dir, '.claude') };
+  const stateDir = join(stateRoot, 'beeline-sessions'); mkdirSync(stateDir, { recursive: true });
+  if (dirname(bridgeSocketPath(stateDir)) !== stateDir) folders.push(dirname(bridgeSocketPath(stateDir)));
   const joined: JoinedSession = { key: `claude-code:${dir}`, agent: 'claude-code', cwd: dir,
     name: 'Claude', server: 'https://synthetic.invalid', clientId: 'client', refreshToken: 'synthetic',
     accessToken: 'synthetic', accessExpiresAt: Date.now() + 3_600_000, cursor: '437', deliveredWakes: [],
-    sessionId: 'synthetic-session', pid: process.pid, joinedAt: '' };
+    sessionId: 'synthetic-session', pid: process.pid, joinedAt: '', deliveryGeneration:'bound-upgrade',deliveryMechanism:'local' };
   await updateState(stateDir, state => { state.sessions = [joined]; });
   const oldBundle = join(dir, 'usebeeline.mjs');
   writeFileSync(oldBundle, `import { createServer } from 'node:net';
@@ -145,7 +148,7 @@ it('wakes Claude’s authenticated in-session receiver on a committed durable de
   const socket = join(dir, 'claude.sock');
   const joined: JoinedSession = { key: `claude-code:${dir}`, agent: 'claude-code', cwd: dir, name: 'Claude',
     server: 'https://synthetic.invalid', clientId: 'client', refreshToken: 'synthetic', cursor: '437',
-    deliveredWakes: [], sessionId: 'claude-commit', pid: process.pid, joinedAt: '' };
+    deliveredWakes: [], sessionId: 'claude-commit', pid: process.pid, joinedAt: '', deliveryGeneration:'bound-commit',deliveryMechanism:'local' };
   await updateState(dir, state => { state.sessions = [joined]; });
   mkdirSync(join(env.CLAUDE_CONFIG_DIR, 'sessions'), { recursive: true });
   writeFileSync(join(env.CLAUDE_CONFIG_DIR, 'sessions', `${process.pid}.json`), JSON.stringify({

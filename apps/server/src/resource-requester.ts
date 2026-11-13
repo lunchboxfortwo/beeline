@@ -55,15 +55,15 @@ export async function resourceRequester(
   // unowned MCP identities cannot supply authority for a command-only order.
   const requester = (await db.query<Requester>(
     `WITH RECURSIVE owners AS (
-       SELECT identity.id,identity.kind,identity.name,identity.handle,identity.avatar,ARRAY[identity.id] path
+       SELECT identity.id,identity.kind,identity.name,beeline_workspace_handle(identity.id,$3) handle,identity.avatar,ARRAY[identity.id] path
        FROM identities identity WHERE identity.id=$1
        UNION ALL
-       SELECT owner.id,owner.kind,owner.name,owner.handle,owner.avatar,chain.path||owner.id FROM owners chain
+       SELECT owner.id,owner.kind,owner.name,beeline_workspace_handle(owner.id,$3) handle,owner.avatar,chain.path||owner.id FROM owners chain
        JOIN agents agent ON agent.agent_id=chain.id AND chain.kind='agent'
        JOIN identities owner ON owner.id=agent.owner_id
        WHERE $2::boolean AND NOT owner.id=ANY(chain.path)
      ) SELECT id,kind,name,handle,avatar FROM owners ORDER BY cardinality(path) DESC LIMIT 1`,
-    [source.author_id, source.agent_order],
+    [source.author_id, source.agent_order,source.workspace_id],
   )).rows[0];
   if (source.agent_order && !source.message_backed && requester?.kind !== 'human') return undefined;
   return requester ? { requester, source } : undefined;

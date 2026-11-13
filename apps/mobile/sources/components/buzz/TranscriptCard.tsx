@@ -1,47 +1,12 @@
+import React, { useState, type ReactNode } from 'react';
+import { Card, Input, ListItem, Separator, Spinner, XStack, YStack } from 'tamagui';
+import { Check, ChevronDown, ChevronRight, ExternalLink, X } from 'lucide-react-native';
+import { Btn, Copy, Glyph, HEIGHT, T } from '@/ui/grammar';
+import { SettledLine } from '@/ui/screens/transcript/cards/RequestCard';
+import { ChoiceOption } from '@/ui/screens/transcript/cards/ChoiceOption';
 import { ErrorBanner } from './ErrorBanner';
-import { ContentTarget } from '@/components/buzz/IndexRow';
-import { Button, type ButtonDestination } from '@/components/buzz/Button';
-import { CloseButton } from '@/components/buzz/CloseGlyph';
-import { Ionicons } from '@expo/vector-icons';
-import { InlineRow, TranscriptFactRow } from './IndexRow';
-import { LedgerDisclosure } from './LedgerDisclosure';
-import { HullDialogInput } from '@/components/buzz/HullDialog';
-import { ButtonRow } from './ButtonRow';
-import React, {
-  useEffect,
-  useLayoutEffect,
-  useRef,
-  useState,
-  type ComponentProps,
-  type ReactNode,
-} from 'react';
-import { Pressable, Text, TextInput, View } from 'react-native';
-import Animated, {
-  Easing,
-  FadeOut,
-  ReduceMotion,
-  interpolateColor,
-  useAnimatedStyle,
-  useReducedMotion,
-  useSharedValue,
-  withDelay,
-  withTiming,
-  type EntryAnimationsValues,
-  type EntryExitAnimationFunction,
-} from 'react-native-reanimated';
-import { StyleSheet, useUnistyles } from 'react-native-unistyles';
-
-import { withAlpha } from '@/buzz/groknight';
-import { TranscriptCardChoicePlate, type TranscriptCardChoice } from './ChoicePlate';
-import {
-  TRANSCRIPT_SETTLE_MS,
-  transcriptSettleDecision,
-  transcriptSteadyColors,
-} from '@/buzz/transcript-motion';
-import {
-  useTranscriptCardMotion,
-  type TranscriptCardMotionSnapshot,
-} from './transcript-card-motion-context';
+import type { ButtonDestination } from './Button';
+import type { TranscriptCardChoice } from './ChoicePlate';
 
 export type { TranscriptCardChoice };
 export type TranscriptCardTier = 'record' | 'ask';
@@ -67,11 +32,11 @@ export type TranscriptCardAction = {
   loading?: boolean;
   testID?: string;
   accessibilityRole?: 'button' | 'link';
-  /** Where the action goes, drawn after its label (`Button.destination`). */
+  /** Where the action goes, drawn after its label. */
   destination?: ButtonDestination;
 };
 
-/** An optional one-line text field above the choice plates (a workflow gate's note). */
+/** An optional one-line text field above the choices (a workflow gate's note). */
 type TranscriptCardNoteInput = {
   value: string;
   onChangeText(text: string): void;
@@ -95,9 +60,11 @@ export type TranscriptCardProps = {
   quietBody?: boolean;
   compactBody?: boolean;
   primaryBody?: boolean;
-  inlineError?: { title: string; description: string };
+  /** The asking message's attached image, full width under the ask. */
+  media?: ReactNode;
+  inlineError?: { title: string; description?: string };
+  /** Retained for callers; the grammar card has no footer rule. */
   footerDivider?: boolean;
-  /** Match the bottom inset to the card's side inset for an enclosed action. */
   balancedFooterInset?: boolean;
   /** Controls an ask needs beyond rows and choices (a field, a step list). */
   children?: ReactNode;
@@ -119,123 +86,17 @@ export type TranscriptCardProps = {
   onHeaderPress?(): void;
   headerExpanded?: boolean;
   headerTestID?: string;
-  /** A ✕ at the end of the title line that closes the card for good. */
+  /** An X at the end of the title line that closes the card for good. */
   onDismiss?(): void;
   dismissLabel?: string;
   testID?: string;
 };
 
-const settleEasing = Easing.out(Easing.cubic);
-
-function SettlingText({
-  active,
-  steadyColor,
-  durationMs,
-  fadeMs = 0,
-  delayMs = 0,
-  style,
-  ...props
-}: ComponentProps<typeof Animated.Text> & {
-  active: boolean;
-  steadyColor: string;
-  durationMs: number;
-  fadeMs?: number;
-  delayMs?: number;
-}) {
-  const brass = useUnistyles().theme.buzz.accent;
-  const progress = useSharedValue(active ? 0 : 1);
-  const opacity = useSharedValue(active && fadeMs ? 0 : 1);
-  useEffect(() => {
-    if (!active) return;
-    progress.value = withDelay(
-      delayMs,
-      withTiming(1, {
-        duration: durationMs,
-        easing: settleEasing,
-        reduceMotion: ReduceMotion.System,
-      }),
-    );
-    if (fadeMs) {
-      opacity.value = withDelay(
-        delayMs,
-        withTiming(1, {
-          duration: fadeMs,
-          easing: settleEasing,
-          reduceMotion: ReduceMotion.System,
-        }),
-      );
-    }
-  }, [active, delayMs, durationMs, fadeMs, opacity, progress]);
-  const animatedStyle = useAnimatedStyle(() => ({
-    color: interpolateColor(progress.value, [0, 1], [brass, steadyColor]),
-    opacity: opacity.value,
-  }));
-  return <Animated.Text {...props} style={[style, animatedStyle]} />;
-}
-
-const rowGrowEntering: EntryExitAnimationFunction = (values: EntryAnimationsValues) => {
-  'worklet';
-  return {
-    initialValues: { height: 0 },
-    animations: {
-      height: withTiming(values.targetHeight, {
-        duration: 260,
-        easing: settleEasing,
-        reduceMotion: ReduceMotion.System,
-      }),
-    },
-  };
-};
-
-function rowWashEntering(durationMs: number, brass: string): EntryExitAnimationFunction {
-  const brassWash = withAlpha(brass, 0.14);
-  const transparentBrass = withAlpha(brass, 0);
-  return () => {
-    'worklet';
-    return {
-      initialValues: { backgroundColor: brassWash },
-      animations: {
-        backgroundColor: withTiming(transparentBrass, {
-          duration: durationMs,
-          easing: settleEasing,
-          reduceMotion: ReduceMotion.System,
-        }),
-      },
-    };
-  };
-}
-
-function rowRuleEntering(durationMs: number): EntryExitAnimationFunction {
-  return () => {
-    'worklet';
-    return {
-      initialValues: { opacity: 1 },
-      animations: {
-        opacity: withTiming(0, {
-          duration: durationMs,
-          easing: settleEasing,
-          reduceMotion: ReduceMotion.System,
-        }),
-      },
-    };
-  };
-}
-
-type CardLiveMotion = {
-  title: boolean;
-  appendedRowIds: ReadonlySet<string>;
-  changedRowIds: ReadonlySet<string>;
-  durationMs: number;
-};
-
-const EMPTY_CARD_LIVE_MOTION: CardLiveMotion = {
-  title: false,
-  appendedRowIds: new Set(),
-  changedRowIds: new Set(),
-  durationMs: TRANSCRIPT_SETTLE_MS,
-};
-
-/** The single frame and anatomy for every structured card in a transcript. */
+/**
+ * The one transcript card (build spec → Card, chat-milo-cards): a raised card
+ * with a strong title and a quiet line under it. Facts, code, rows and choices
+ * stack under it; Approve / Deny (primary first) close a request waiting on you.
+ */
 export function TranscriptCard({
   tier,
   title,
@@ -250,9 +111,8 @@ export function TranscriptCard({
   quietBody = false,
   compactBody = false,
   primaryBody = false,
+  media,
   inlineError,
-  footerDivider = true,
-  balancedFooterInset = false,
   rows = [],
   choices = [],
   noteInput,
@@ -276,618 +136,188 @@ export function TranscriptCard({
   testID,
 }: TranscriptCardProps) {
   const [codeOpen, setCodeOpen] = useState(false);
-  const { theme } = useUnistyles();
-  const reducedMotion = useReducedMotion();
-  const cardMotion = useTranscriptCardMotion();
-  const arrivalRequested = cardMotion.arriving;
-  const animateArrivalRef = useRef<boolean | null>(null);
-  if (animateArrivalRef.current === null) {
-    animateArrivalRef.current = arrivalRequested && !reducedMotion;
-  }
-  const animateArrival = animateArrivalRef.current;
-  const arrivalProgress = useSharedValue(animateArrival ? 0 : 1);
-  const arrivalOpacity = useSharedValue(animateArrival ? 0 : 1);
-  useEffect(() => {
-    if (!animateArrival) return;
-    arrivalProgress.value = withTiming(1, {
-      duration: TRANSCRIPT_SETTLE_MS,
-      easing: settleEasing,
-      reduceMotion: ReduceMotion.System,
-    });
-    arrivalOpacity.value = withTiming(1, {
-      duration: 240,
-      easing: settleEasing,
-      reduceMotion: ReduceMotion.System,
-    });
-  }, [animateArrival, arrivalOpacity, arrivalProgress]);
-  const arrivalContentStyle = useAnimatedStyle(() => ({ opacity: arrivalOpacity.value }));
-  const arrivalHaloStyle = useAnimatedStyle(() => ({
-    opacity: 1 - arrivalProgress.value,
-  }));
-
-  const steady = transcriptSteadyColors({
-    textPrimary: theme.buzz.textPrimary,
-    textSecondary: theme.buzz.textSecondary,
-    quiet: theme.buzz.ledgerQuiet,
-    ghost: theme.buzz.ledgerGhost,
-    waiting: theme.buzz.accent,
-    failed: theme.buzz.diffRemoved,
-  });
-  const currentSnapshot: TranscriptCardMotionSnapshot = {
-    title: typeof title === 'string' ? title : null,
-    rows: new Map(rows.map((row) => [row.id, row.state])),
-  };
-  const previousSnapshot = useRef<TranscriptCardMotionSnapshot | null>(null);
-  const lastSettleStartedAt = useRef<number | null>(null);
-  const storedSnapshot =
-    cardMotion.store && cardMotion.cardId
-      ? (cardMotion.store.snapshots.get(cardMotion.cardId) ?? null)
-      : previousSnapshot.current;
-  const appendedRowIds = new Set<string>();
-  const changedRowIds = new Set<string>();
-  const titleChanged =
-    storedSnapshot !== null &&
-    currentSnapshot.title !== null &&
-    storedSnapshot.title !== currentSnapshot.title;
-  if (storedSnapshot) {
-    for (const [id, state] of currentSnapshot.rows) {
-      if (!storedSnapshot.rows.has(id)) appendedRowIds.add(id);
-      else if (storedSnapshot.rows.get(id) !== state) changedRowIds.add(id);
-    }
-  }
-  const hasMutation = titleChanged || appendedRowIds.size > 0 || changedRowIds.size > 0;
-  const now = Date.now();
-  const storedSettleStartedAt =
-    cardMotion.store && cardMotion.cardId
-      ? (cardMotion.store.settleStartedAt.get(cardMotion.cardId) ?? null)
-      : lastSettleStartedAt.current;
-  const settle = hasMutation
-    ? transcriptSettleDecision(storedSettleStartedAt, now, reducedMotion)
-    : { animate: false, startsNewSettle: false, durationMs: 0 };
-  const nextLiveMotion: CardLiveMotion = settle.animate
-    ? {
-        title: titleChanged,
-        appendedRowIds,
-        changedRowIds,
-        durationMs: settle.durationMs,
-      }
-    : EMPTY_CARD_LIVE_MOTION;
-  const committedLiveMotion = useRef<CardLiveMotion>(EMPTY_CARD_LIVE_MOTION);
-  const liveMotion = hasMutation ? nextLiveMotion : committedLiveMotion.current;
-  useLayoutEffect(() => {
-    // Compare against committed card content. React can render the same update
-    // more than once before committing it; consuming the snapshot in render
-    // would turn that live mutation into a settled no-op on the second pass.
-    if (hasMutation) committedLiveMotion.current = nextLiveMotion;
-    if (cardMotion.store && cardMotion.cardId) {
-      cardMotion.store.snapshots.set(cardMotion.cardId, currentSnapshot);
-      if (settle.startsNewSettle) cardMotion.store.settleStartedAt.set(cardMotion.cardId, now);
-    } else if (settle.startsNewSettle) {
-      lastSettleStartedAt.current = now;
-    }
-    previousSnapshot.current = currentSnapshot;
-  });
-
   const links = actions.filter((action) => action.accessibilityRole === 'link');
-  const decisions = actions.filter((action) => action.accessibilityRole !== 'link');
-  const hasFooter = footerNote !== undefined || actions.length > 0;
-  // A card that is only its head closes with the same inset it opens with.
-  const headOnly = !body && code === undefined && !rows.length && !choices.length && !hasFooter;
-  return (
-    <View style={styles.frameShell}>
-      {animateArrival ? (
-        <Animated.View
-          collapsable={false}
-          pointerEvents="none"
-          style={[styles.haloLayer, arrivalHaloStyle]}
-          testID="transcript-card-arrival-halo"
-        >
-          <View style={styles.haloFar} />
-          <View style={styles.haloMid} />
-          <View style={styles.haloNear} />
-          <View style={styles.haloRing} />
-        </Animated.View>
+  // Approve leads, as in the mock's ApproveDeny; the rest keep their order.
+  const decisions = actions
+    .filter((action) => action.accessibilityRole !== 'link')
+    .sort((a, b) => Number(Boolean(b.primary)) - Number(Boolean(a.primary)));
+  const titleTestID = testID ? `${testID}-title` : undefined;
+  const titleLine = (
+    <XStack gap="2" alignItems="flex-start">
+      {identity ? <YStack>{identity}</YStack> : null}
+      <YStack flex={1} minWidth={0}>
+        <T v="heading" numberOfLines={wrapTitle ? undefined : 1} testID={titleTestID}>{title}</T>
+      </YStack>
+    </XStack>
+  );
+  const head = (
+    <XStack gap="2" alignItems="flex-start" flex={1} minWidth={0}>
+      <YStack flex={1} minWidth={0} gap="1">
+        {titleLine}
+        {subline ? (
+          <T v="meta" color="secondary" numberOfLines={sublineLines} testID={sublineTestID}>{subline}</T>
+        ) : null}
+      </YStack>
+      {stamp ? <T v="meta" color="secondary">{stamp}</T> : null}
+      {onHeaderPress ? <Glyph icon={headerExpanded ? ChevronDown : ChevronRight} size={16} /> : null}
+      {onDismiss ? (
+        <Btn kind="icon" label={dismissLabel} onPress={onDismiss} testID={testID ? `${testID}-dismiss` : undefined}>
+          <Glyph icon={X} size={16} />
+        </Btn>
       ) : null}
-      <Animated.View style={arrivalContentStyle}>
-        <View style={[styles.frame, tier === 'ask' && styles.ask]} testID={testID}>
-          <ContentTarget
-            accessibilityHint={
-              onHeaderPress
-                ? headerExpanded
-                  ? rows.length
-                    ? 'Hides individual rows'
-                    : 'Hides the full text'
-                  : rows.length
-                    ? 'Shows individual rows'
-                    : 'Shows the full text'
-                : undefined
-            }
-            accessibilityRole={onHeaderPress ? 'button' : undefined}
-            accessibilityState={onHeaderPress ? { expanded: headerExpanded } : undefined}
-            disabled={!onHeaderPress}
-            onPress={onHeaderPress}
-            style={[styles.head, headOnly && styles.headOnly]}
-            testID={headerTestID}
-          >
-            {identity ? <View style={styles.identity}>{identity}</View> : null}
-            <View style={styles.headCopy}>
-              <View style={styles.titleLine}>
-                <SettlingText
-                  key={currentSnapshot.title ?? 'title'}
-                  active={animateArrival || liveMotion.title}
-                  durationMs={animateArrival ? TRANSCRIPT_SETTLE_MS : liveMotion.durationMs}
-                  ellipsizeMode="tail"
-                  numberOfLines={wrapTitle ? undefined : 1}
-                  steadyColor={steady.title}
-                  style={styles.title}
-                  testID={testID ? `${testID}-title` : undefined}
-                >
-                  {title}
-                </SettlingText>
-                {stamp ? <Text style={styles.stamp}>{stamp}</Text> : null}
-                {onDismiss ? (
-                  <CloseButton
-                    accessibilityLabel={dismissLabel}
-                    hitSlop={12}
-                    onPress={onDismiss}
-                    testID={testID ? `${testID}-dismiss` : undefined}
-                    control={styles.dismiss}
-                  />
-                ) : null}
-              </View>
-              {subline ? (
-                <SettlingText
-                  active={animateArrival}
-                  durationMs={TRANSCRIPT_SETTLE_MS}
-                  ellipsizeMode="tail"
-                  numberOfLines={sublineLines}
-                  steadyColor={steady.quiet}
-                  style={styles.subline}
-                  testID={sublineTestID}
-                >
-                  {subline}
-                </SettlingText>
-              ) : null}
-            </View>
-          </ContentTarget>
-          {body ? (
-            <SettlingText
-              active={animateArrival}
-              durationMs={TRANSCRIPT_SETTLE_MS}
-              steadyColor={primaryBody ? theme.buzz.textPrimary : quietBody ? steady.quiet : steady.body}
-              style={[styles.body, compactBody && styles.bodyCompact, primaryBody && styles.bodyPrimary, quietBody && styles.bodyQuiet]}
-            >
-              {body}
-            </SettlingText>
+    </XStack>
+  );
+  const note = footerNote === undefined ? null
+    : decisionScope && typeof footerNote === 'string' ? `${decisionScope} · ${footerNote}` : footerNote;
+  return (
+    <Card
+      backgroundColor="raised"
+      borderWidth={1}
+      borderColor="stroke"
+      borderRadius="md"
+      padding="3"
+      gap="3"
+      testID={testID}
+    >
+      {onHeaderPress ? (
+        <ListItem padding="0" minHeight={HEIGHT.control} backgroundColor="transparent" onPress={onHeaderPress}
+          accessibilityRole="button" aria-expanded={headerExpanded} testID={headerTestID}>
+          {head}
+        </ListItem>
+      ) : (
+        <XStack testID={headerTestID}>{head}</XStack>
+      )}
+      {body ? (
+        <T v={compactBody ? 'meta' : 'body'} color={quietBody && !primaryBody ? 'secondary' : 'ink'}>{body}</T>
+      ) : null}
+      {media}
+      {inlineError ? <ErrorBanner inline title={inlineError.title} description={inlineError.description} /> : null}
+      {facts.length ? (
+        <YStack gap="2">
+          {facts.map((fact) => (
+            <XStack key={fact.label} gap="3" alignItems="flex-start">
+              <YStack width={92}><Copy small quiet>{fact.label}</Copy></YStack>
+              <YStack flex={1} minWidth={0}><Copy small>{fact.value}</Copy></YStack>
+            </XStack>
+          ))}
+        </YStack>
+      ) : null}
+      {children}
+      {foldCode && code !== undefined ? (
+        <ListItem padding="0" gap="2" minHeight={HEIGHT.control} backgroundColor="transparent"
+          onPress={() => setCodeOpen((open) => !open)} accessibilityRole="button"
+          aria-label={codeLabel ?? 'Script'} aria-expanded={codeOpen}
+          testID={codeTestID ? `${codeTestID}-toggle` : undefined}>
+          <Glyph icon={codeOpen ? ChevronDown : ChevronRight} size={16} />
+          <YStack flex={1} minWidth={0}>
+            <Copy small quiet>{`${codeLabel ?? 'Script'} · ${String(code).replace(/\r?\n$/, '').split('\n').length} lines`}</Copy>
+          </YStack>
+        </ListItem>
+      ) : null}
+      {code !== undefined && (!foldCode || codeOpen) ? (
+        <YStack padding="3" gap="1" borderRadius="md" borderWidth={1} borderColor="stroke" backgroundColor="canvas" testID={codeTestID}>
+          {codePath ? <T v="code" color="secondary">{codePath}</T> : null}
+          <T v="code" userSelect="text">{code}</T>
+        </YStack>
+      ) : null}
+      {rows.length ? (
+        <YStack>
+          {rows.map((row, index) => (
+            <React.Fragment key={row.id}>
+              {index > 0 ? <Separator borderColor="stroke" /> : null}
+              <CardRow row={row} wrapTitle={wrapTitle} />
+            </React.Fragment>
+          ))}
+        </YStack>
+      ) : null}
+      {choices.length ? (
+        <YStack gap="2" testID={testID ? `${testID}-choices` : undefined}>
+          {noteInput ? (
+            <Input
+              size="md"
+              minHeight={HEIGHT.control}
+              aria-label={noteInput.placeholder}
+              disabled={noteInput.editable === false}
+              maxLength={noteInput.maxLength}
+              onChangeText={noteInput.onChangeText}
+              placeholder={noteInput.placeholder}
+              testID={noteInput.testID}
+              value={noteInput.value}
+            />
           ) : null}
-          {inlineError ? <View style={styles.inlineError}><ErrorBanner inline
-            title={inlineError.title} description={inlineError.description} /></View> : null}
-          {facts.length ? <View style={[styles.detailInset, styles.facts]}>{facts.map((fact) => (
-            <TranscriptFactRow key={fact.label} label={fact.label} value={fact.value} />
-          ))}</View> : null}
-          {children}
-          {foldCode && code !== undefined ? (
-            <View style={styles.detailInset}><LedgerDisclosure
-              expanded={codeOpen}
-              rowTestID={codeTestID ? `${codeTestID}-toggle` : undefined}
-              accessibilityLabel={codeLabel ?? 'Script'}
-              accessibilityState={{ expanded: codeOpen }}
-              onPress={() => setCodeOpen((open) => !open)}
-            >{`${codeLabel ?? 'Script'} · ${String(code).replace(/\r?\n$/, '').split('\n').length} lines`}</LedgerDisclosure></View>
-          ) : null}
-          {code !== undefined && (!foldCode || codeOpen) ? (
-            <View style={[styles.code, tier === 'ask' && styles.askCode]} testID={codeTestID}>
-              {codePath ? <Text style={styles.codePath}>{codePath}</Text> : null}
-              <Text selectable style={styles.codeText}>
-                {code}
-              </Text>
-            </View>
-          ) : null}
-          {rows.length ? (
-            <View style={styles.rows}>
-              {rows.map((row) => (
-                <TranscriptCardRowView
-                  key={row.id}
-                  row={row}
-                  wrapTitle={wrapTitle}
-                  animateCardArrival={animateArrival}
-                  animateEntry={liveMotion.appendedRowIds.has(row.id)}
-                  animateState={liveMotion.changedRowIds.has(row.id)}
-                  settleDurationMs={liveMotion.durationMs}
-                  steady={steady}
-                />
-              ))}
-            </View>
-          ) : null}
-          {choices.length ? (
-            <View style={styles.choices} testID={testID ? `${testID}-choices` : undefined}>
-              {noteInput ? (
-                <HullDialogInput
-                  accessibilityLabel={noteInput.placeholder}
-                  editable={noteInput.editable ?? true}
-                  maxLength={noteInput.maxLength}
-                  onChangeText={noteInput.onChangeText}
-                  placeholder={noteInput.placeholder}
-                  placeholderTextColor={theme.buzz.ledgerGhost}
-                  style={styles.noteInput}
-                  testID={noteInput.testID}
-                  value={noteInput.value}
-                />
-              ) : null}
-              {choices.map((choice) => (
-                <TranscriptCardChoicePlate
-                  key={choice.id}
-                  choice={choice}
-                  closed={tier === 'record'}
-                />
-              ))}
-            </View>
-          ) : null}
-          {hasFooter ? (
-            <InlineRow style={[styles.footer, !footerDivider && styles.footerWithoutDivider, balancedFooterInset && styles.balancedFooterInset]}>
-              {links.map((action) => (
-                <Button key={action.testID ?? action.label} label={action.label}
-                  accessibilityRole="link" destination={action.destination} onPress={action.onPress} testID={action.testID}
-                  disabled={action.disabled} loading={action.loading} size="inline" variant="secondary" />
-              ))}
-              {footerNote !== undefined ? (
-                <Text
-                  testID={footerNoteTestID}
-                  style={[
-                    styles.footerNote,
-                    decisionNote && styles.decisionNote,
-                    footerNoteTone === 'failed' && styles.footerNoteFailed,
-                  ]}
-                >
-                  {decisionScope && typeof footerNote === 'string' ? `${decisionScope} · ${footerNote}` : footerNote}
-                </Text>
-              ) : decisions.length ? null : (
-                <View style={styles.footerSpacer} />
-              )}
-              {decisions.length ? <ButtonRow
-                style={styles.actions}
-                actions={decisions.map((action) => ({
-                  label: action.label,
-                  loading: action.loading,
-                  accessibilityLabel: action.label,
-                  accessibilityRole: action.accessibilityRole ?? 'button',
-                  destination: action.destination,
-                  variant: action.primary ? 'primary' : action.dismiss ? 'quiet' : 'secondary',
-                  busy: action.loading,
-                  labelTone: action.labelTone,
-                  disabled: action.disabled,
-                  onPress: action.onPress,
-                  testID: action.testID,
-                }))}
-              /> : null}
-            </InlineRow>
-          ) : null}
-        </View>
-      </Animated.View>
-    </View>
+          {choices.map((choice) => (
+            <ChoiceOption key={choice.id} choice={choice} closed={tier === 'record'} />
+          ))}
+        </YStack>
+      ) : null}
+      {note !== null ? (
+        decisionNote ? (
+          <SettledLine failed={footerNoteTone === 'failed'} testID={footerNoteTestID}>{note}</SettledLine>
+        ) : (
+          <T v="meta" color={footerNoteTone === 'failed' ? 'removed' : 'secondary'} testID={footerNoteTestID}>{note}</T>
+        )
+      ) : null}
+      {decisions.length || links.length ? (
+        <XStack gap="2" flexWrap="wrap" alignItems="center">
+          {decisions.map((action) => <ActionButton key={action.testID ?? action.label} action={action} />)}
+          {links.map((action) => <ActionButton key={action.testID ?? action.label} action={action} />)}
+        </XStack>
+      ) : null}
+    </Card>
   );
 }
 
-function TranscriptCardRowView({
-  row,
-  wrapTitle,
-  animateCardArrival,
-  animateEntry,
-  animateState,
-  settleDurationMs,
-  steady,
-}: {
-  row: TranscriptCardRow;
-  wrapTitle: boolean;
-  animateCardArrival: boolean;
-  animateEntry: boolean;
-  animateState: boolean;
-  settleDurationMs: number;
-  steady: ReturnType<typeof transcriptSteadyColors>;
-}) {
-  const brass = useUnistyles().theme.buzz.accent;
-  const stateColor = steady.rowState[row.tone ?? 'settled'];
-  const animateRowText = animateCardArrival || animateEntry;
-  const content = (
-    <>
-      <View style={styles.rowStateSlot}>
-        <SettlingText
-          key={row.state}
-          active={animateState || animateRowText}
-          delayMs={animateEntry ? 100 : 0}
-          durationMs={animateCardArrival ? TRANSCRIPT_SETTLE_MS : settleDurationMs}
-          exiting={
-            animateState ? FadeOut.duration(220).reduceMotion(ReduceMotion.System) : undefined
-          }
-          fadeMs={animateState ? 220 : animateEntry ? 300 : 0}
-          steadyColor={stateColor}
-          style={[
-            styles.rowState,
-            row.tone === 'waiting' && styles.rowStateWaiting,
-            row.tone === 'failed' && styles.rowStateFailed,
-          ]}
-        >
-          {row.state}
-        </SettlingText>
-      </View>
-      <View style={styles.rowCopy}>
-        <SettlingText
-          active={animateRowText}
-          delayMs={animateEntry ? 100 : 0}
-          durationMs={animateCardArrival ? TRANSCRIPT_SETTLE_MS : settleDurationMs}
-          ellipsizeMode="tail"
-          fadeMs={animateEntry ? 300 : 0}
-          numberOfLines={wrapTitle ? undefined : 1}
-          steadyColor={steady.rowTitle}
-          style={styles.rowTitle}
-        >
-          {row.title}
-        </SettlingText>
-        <SettlingText
-          active={animateRowText}
-          delayMs={animateEntry ? 100 : 0}
-          durationMs={animateCardArrival ? TRANSCRIPT_SETTLE_MS : settleDurationMs}
-          fadeMs={animateEntry ? 300 : 0}
-          numberOfLines={wrapTitle ? undefined : 1}
-          steadyColor={steady.rowKind}
-          style={styles.rowKind}
-        >
-          {row.kindLine}
-        </SettlingText>
-      </View>
-    </>
-  );
-  const rowContent = row.onPress ? (
-    <Pressable
-      accessibilityRole="link"
-      accessibilityLabel={`${row.state}: ${row.title}. ${row.kindLine}`}
-      onPress={row.onPress}
-      style={styles.row}
-      testID={`transcript-card-row-${row.id}`}
-    >
-      {content}
-    </Pressable>
-  ) : (
-    <View style={styles.row} testID={`transcript-card-row-${row.id}`}>
-      {content}
-    </View>
-  );
+/** One card action on the grammar's buttons: primary, secondary, or quiet. */
+function ActionButton({ action }: { action: TranscriptCardAction }) {
+  const link = action.accessibilityRole === 'link';
+  const kind = action.primary ? 'primary' : action.dismiss || (link && !action.secondary) ? 'quiet' : 'secondary';
+  const quiet = action.labelTone === 'quiet' || kind === 'quiet';
   return (
-    <Animated.View entering={animateEntry ? rowGrowEntering : undefined} style={styles.rowSlot}>
-      {rowContent}
-      {animateEntry ? (
-        <>
-          <Animated.View
-            entering={rowWashEntering(settleDurationMs, brass)}
-            pointerEvents="none"
-            style={styles.rowWash}
-          />
-          <Animated.View
-            entering={rowRuleEntering(settleDurationMs)}
-            pointerEvents="none"
-            style={styles.rowRule}
-          />
-        </>
-      ) : null}
-    </Animated.View>
+    <Btn
+      kind={kind}
+      label={action.label}
+      disabled={action.disabled || action.loading}
+      aria-busy={action.loading === true}
+      accessibilityRole={link ? 'link' : 'button'}
+      onPress={action.onPress}
+      testID={action.testID}
+    >
+      <XStack gap="2" alignItems="center">
+        {action.loading ? <Spinner size="small" color={kind === 'primary' ? 'primaryInk' : 'secondary'} />
+          : kind === 'primary' && action.label === 'Approve' ? <Glyph icon={Check} size={16} color="primaryInk" /> : null}
+        <T v="heading" color={kind === 'primary' ? 'primaryInk' : quiet ? 'secondary' : 'ink'}>{action.label}</T>
+        {action.destination === 'external' ? <Glyph icon={ExternalLink} size={16} />
+          : action.destination === 'screen' ? <Glyph icon={ChevronRight} size={16} /> : null}
+      </XStack>
+    </Btn>
+  );
+}
+
+function CardRow({ row, wrapTitle }: { row: TranscriptCardRow; wrapTitle: boolean }) {
+  const content = (
+    <XStack gap="3" alignItems="flex-start" paddingVertical="2" flex={1} minWidth={0}>
+      <YStack width={80}>
+        <T v="meta" color={row.tone === 'waiting' ? 'needsYou' : row.tone === 'failed' ? 'removed' : 'secondary'}>{row.state}</T>
+      </YStack>
+      <YStack flex={1} minWidth={0} gap="1">
+        <T v="body" numberOfLines={wrapTitle ? undefined : 1}>{row.title}</T>
+        <T v="meta" color="secondary" numberOfLines={wrapTitle ? undefined : 1}>{row.kindLine}</T>
+      </YStack>
+      {row.onPress ? <YStack paddingTop="0.5"><Glyph icon={ChevronRight} size={16} /></YStack> : null}
+    </XStack>
+  );
+  return row.onPress ? (
+    <ListItem padding="0" minHeight={HEIGHT.control} backgroundColor="transparent" onPress={row.onPress}
+      accessibilityRole="link" aria-label={`${row.state}: ${row.title}. ${row.kindLine}`}
+      testID={`transcript-card-row-${row.id}`}>
+      {content}
+    </ListItem>
+  ) : (
+    <XStack testID={`transcript-card-row-${row.id}`}>{content}</XStack>
   );
 }
 
 /** Brass inline text for handles embedded in a card title or subline. */
-export function TranscriptCardHandle({
-  children,
-  meta = false,
-}: {
-  children: ReactNode;
-  meta?: boolean;
-}) {
-  return <Text style={meta ? styles.handleMeta : styles.handle}>{children}</Text>;
+export function TranscriptCardHandle({ children, meta = false }: { children: ReactNode; meta?: boolean }) {
+  return <T v={meta ? 'metaStrong' : 'heading'} color="needsYou">{children}</T>;
 }
-
-/** How far the arrival halo's outer ring reaches past the card. The shell
- *  bleeds out by the same amount (negative margin, equal padding) so the halo
- *  has room to draw without moving the card. */
-const HALO_REACH = 24;
-
-const styles = StyleSheet.create((theme) => {
-  const card = theme.buzz;
-  const metric = card.transcriptCard;
-  return {
-    frameShell: {
-      minWidth: 0,
-      marginTop: metric.marginTop - HALO_REACH,
-      marginRight: -HALO_REACH,
-      marginBottom: metric.marginBottom - HALO_REACH,
-      marginLeft: -HALO_REACH,
-      padding: HALO_REACH,
-      position: 'relative',
-      borderRadius: metric.cornerRadius,
-      overflow: 'visible',
-    },
-    haloLayer: {
-      position: 'absolute',
-      top: HALO_REACH,
-      right: HALO_REACH,
-      bottom: HALO_REACH,
-      left: HALO_REACH,
-      overflow: 'visible',
-    },
-    haloRing: {
-      ...StyleSheet.absoluteFillObject,
-      borderWidth: 1,
-      borderColor: withAlpha(card.accent, 0.95),
-      borderRadius: metric.cornerRadius,
-    },
-    haloNear: {
-      position: 'absolute',
-      top: -4,
-      right: -4,
-      bottom: -4,
-      left: -4,
-      borderWidth: 4,
-      borderColor: withAlpha(card.accent, 0.3),
-      backgroundColor: withAlpha(card.accent, 0.1),
-      borderRadius: metric.cornerRadius + 4,
-    },
-    haloMid: {
-      position: 'absolute',
-      top: -16,
-      right: -16,
-      bottom: -16,
-      left: -16,
-      borderWidth: 7,
-      borderColor: withAlpha(card.accent, 0.16),
-      backgroundColor: withAlpha(card.accent, 0.06),
-      borderRadius: metric.cornerRadius + 16,
-    },
-    haloFar: {
-      position: 'absolute',
-      top: -HALO_REACH,
-      right: -HALO_REACH,
-      bottom: -HALO_REACH,
-      left: -HALO_REACH,
-      borderWidth: 8,
-      borderColor: withAlpha(card.accent, 0.08),
-      backgroundColor: withAlpha(card.accent, 0.03),
-      borderRadius: metric.cornerRadius + HALO_REACH,
-    },
-    frame: {
-      minWidth: 0,
-      borderWidth: 1,
-      borderColor: card.border,
-      borderRadius: metric.cornerRadius,
-      overflow: 'hidden',
-    },
-    ask: { backgroundColor: card.bgRaised, borderColor: card.borderStrong },
-    head: {
-      flexDirection: 'row',
-      alignItems: 'flex-start',
-      gap: card.space.sm,
-      paddingTop: metric.headTop,
-      paddingHorizontal: metric.side,
-    },
-    headOnly: { paddingBottom: metric.headTop },
-    identity: { width: metric.identitySize },
-    headCopy: { flex: 1, minWidth: 0 },
-    titleLine: {
-      minWidth: 0,
-      flexDirection: 'row',
-      alignItems: 'baseline',
-      gap: card.space.sm,
-    },
-    title: { ...card.type.bodyStrong, color: card.textPrimary, flex: 1, minWidth: 0 },
-    handle: { ...card.type.body, fontFamily: card.proseMedium, color: card.accent },
-    handleMeta: { ...card.type.meta, fontFamily: card.proseMedium, color: card.accent },
-    stamp: {
-      ...card.type.machine,
-      color: card.ledgerQuiet,
-      fontVariant: ['tabular-nums'],
-    },
-    dismiss: { alignItems: 'center', justifyContent: 'center' },
-    subline: { ...card.type.meta, color: card.ledgerQuiet, marginTop: card.space.xs },
-    body: {
-      ...card.type.body,
-      color: card.textSecondary,
-      fontSize: metric.bodySize,
-      lineHeight: metric.bodyLineHeight,
-      paddingTop: card.space.sm,
-      paddingHorizontal: metric.side,
-    },
-    detailInset: { marginHorizontal: metric.side },
-    facts: { marginTop: card.space.sm },
-    inlineError: { paddingHorizontal: metric.side, paddingTop: card.space.sm },
-    bodyPrimary: { color: card.textPrimary },
-    bodyCompact: { ...card.type.meta },
-    footerWithoutDivider: { borderTopWidth: 0 },
-    balancedFooterInset: { paddingBottom: metric.side },
-    bodyQuiet: { color: card.ledgerQuiet },
-    code: {
-      marginTop: metric.codeTop,
-      marginHorizontal: metric.side,
-      paddingVertical: metric.codeVertical,
-      paddingHorizontal: metric.codeHorizontal,
-      gap: card.space.xs,
-      borderRadius: metric.codeRadius,
-      backgroundColor: card.bgHighlight,
-    },
-    askCode: { backgroundColor: card.bgPressed },
-    codePath: { ...card.type.machine, fontSize: metric.codePathSize, color: card.ledgerQuiet },
-    codeText: { ...card.type.machine, color: card.textSecondary },
-    rows: { marginTop: metric.rowVertical },
-    row: {
-      minWidth: 0,
-      flexDirection: 'row',
-      paddingVertical: metric.rowVertical,
-      paddingHorizontal: metric.side,
-      borderTopWidth: 1,
-      borderTopColor: card.border,
-    },
-    rowSlot: { minWidth: 0, overflow: 'hidden' },
-    rowWash: {
-      ...StyleSheet.absoluteFillObject,
-      backgroundColor: 'transparent',
-    },
-    rowRule: {
-      position: 'absolute',
-      top: 0,
-      bottom: 0,
-      left: 0,
-      width: 3,
-      backgroundColor: card.accent,
-    },
-    rowStateSlot: { width: metric.rowStateWidth },
-    rowState: {
-      ...card.type.sectionHead,
-      fontFamily: card.monoRegular,
-      color: card.ledgerQuiet,
-    },
-    rowStateWaiting: { color: card.accent },
-    rowStateFailed: { color: card.diffRemoved },
-    rowCopy: { flex: 1, minWidth: 0 },
-    rowTitle: {
-      ...card.type.body,
-      minWidth: 0,
-      fontSize: metric.rowTitleSize,
-      color: card.textPrimary,
-    },
-    rowKind: { ...card.type.machine, fontSize: metric.rowKindSize, color: card.ledgerGhost },
-    choices: {
-      gap: card.space.sm,
-      paddingTop: metric.rowVertical,
-      paddingBottom: metric.rowVertical,
-      paddingHorizontal: metric.side,
-    },
-    noteInput: {
-      ...card.type.body,
-      minHeight: 40,
-      borderWidth: 1,
-      borderColor: card.border,
-      borderRadius: card.radius,
-      paddingHorizontal: card.space.md,
-      paddingVertical: card.space.sm,
-      color: card.textPrimary,
-    },
-    footer: {
-      minHeight: metric.footerMinHeight,
-      marginTop: metric.footerTop,
-      paddingVertical: metric.footerVertical,
-      paddingHorizontal: metric.side,
-      borderTopWidth: StyleSheet.hairlineWidth,
-      borderTopColor: card.border,
-      flexDirection: 'row',
-      flexWrap: 'wrap',
-      alignItems: 'center',
-      gap: card.space.sm,
-    },
-    footerSpacer: { flex: 1 },
-    footerNote: {
-      ...card.type.sectionHead,
-      fontFamily: card.monoRegular,
-      color: card.ledgerQuiet,
-      flex: 1,
-    },
-    decisionNote: { ...card.type.meta, fontFamily: card.proseRegular, textTransform: 'none', textAlign: 'right', flexBasis: 'auto', flexShrink: 0, flexGrow: 1 },
-    footerNoteFailed: { color: card.diffRemoved },
-    actions: { flexShrink: 1, flexGrow: 1 },
-  };
-});

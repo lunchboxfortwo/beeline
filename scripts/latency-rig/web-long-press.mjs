@@ -1,18 +1,16 @@
 import { readFile } from 'node:fs/promises';
 
+export const CHAT_ROW_SOURCE = new URL(
+  '../../apps/mobile/sources/ui/screens/chats/ChatTree.tsx',
+  import.meta.url,
+);
+
+/** The hold on a chat row's mark that opens a new thread (corner) in that chat. */
 export async function cornerLongPressThreshold() {
-  const source = await readFile(
-    new URL(
-      '../../apps/mobile/sources/app/(app)/beeline/chat/ChatSurfaceHeader.tsx',
-      import.meta.url,
-    ),
-    'utf8',
-  );
-  const control = source
-    .split('<TouchableOpacity')
-    .find((part) => part.includes('testID="room-corners-menu"'));
-  const match = control?.match(/delayLongPress=\{(\d+)\}/);
-  if (!match) throw new Error('Cannot read corner long-press threshold from source');
+  const source = await readFile(CHAT_ROW_SOURCE, 'utf8');
+  const match = source.match(/export const NEW_THREAD_HOLD_MS = (\d+);/);
+  if (!match || !source.includes('testID={`room-${item.room.id}-new-thread`}'))
+    throw new Error('Cannot read corner long-press threshold from source');
   return Number(match[1]);
 }
 
@@ -38,6 +36,8 @@ export async function measureLongPress(page, prepared) {
               const end = performance.now();
               const holdStart = window.__latencyHoldStart;
               if (!Number.isFinite(holdStart)) return resolve(null);
+              performance.mark('rig:long-press-recognized', { startTime: holdStart + threshold });
+              performance.mark('rig:visible-result', { startTime: end });
               resolve({
                 holdStartMs: holdStart,
                 recognitionStartMs: holdStart + threshold,

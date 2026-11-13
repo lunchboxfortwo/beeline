@@ -876,7 +876,7 @@ it.each([200, 403, 404])('Reproduction gh-personal-502: forwards personal GitHub
     body: JSON.stringify(status === 200 ? [{ name: 'personal-github-proxy-502.json' }] : { message: 'Not accessible' }) });
 });
 
-it.each(['https://evil.test/repos/a/b', '//evil.test/repos/a/b', '/user', '/repos/a/b/../../user'])('rejects non-repository GitHub proxy paths: %s', async path => {
+it.each(['https://evil.test/repos/a/b', '//evil.test/repos/a/b', '/user', '/repos/a/b/../../user', 'https://api.github.com.evil.test/repos/a/b', 'http://api.github.com/repos/a/b', 'https://user@api.github.com/repos/a/b'])('rejects non-repository GitHub proxy paths: %s', async path => {
   const transport = vi.fn(async () => json({ id: ACCOUNT, user_id: PERSON, status: 'ACTIVE', toolkit: { slug: 'github' } }));
   const provider = new ComposioApps('fixture-only', transport as typeof fetch);
   await expect(provider.execute({ accountId: ACCOUNT, userId: PERSON, toolkit: 'github',
@@ -895,7 +895,7 @@ it.each([
   });
   expect(await new ComposioApps('fixture-only', transport as typeof fetch).execute({ accountId: ACCOUNT, userId: PERSON, toolkit: 'github', tool: tool as string, arguments: args as Record<string, unknown> })).toMatchObject({ status: 200, body: '{"ok":true}' });
 });
-it.each(['mutation { deleteIssue(input:{id:"x"}){clientMutationId} }', 'query {viewer{login}} mutation {x}', '# comment\nmutation {x}', 'subscription {x}'])('refuses write operations in read GraphQL: %s', async query => {
+it.each(['mutation { deleteIssue(input:{id:"x"}){clientMutationId} }', 'query {viewer{login}} mutation {x}', '# comment\nmutation {x}', 'subscription {x}', 'fragment pr on PullRequest {id} mutation {deleteIssue(input:{id:"x"}){clientMutationId}}'])('refuses write operations in read GraphQL: %s', async query => {
   const transport = vi.fn(async () => json({ id: ACCOUNT, user_id: PERSON, status: 'ACTIVE', toolkit: { slug: 'github' } }));
   await expect(new ComposioApps('fixture-only', transport as typeof fetch).execute({ accountId: ACCOUNT, userId: PERSON, toolkit: 'github', tool: 'BEELINE_GITHUB_GRAPHQL_READ', arguments: { query } })).rejects.toThrow('read queries only');
   expect(transport).toHaveBeenCalledTimes(1);
@@ -904,4 +904,31 @@ it.each(['/repos/a/b/issues/1', '/repos/a/b/contents/../../issues/1', '//evil.te
   const transport = vi.fn(async () => json({ id: ACCOUNT, user_id: PERSON, status: 'ACTIVE', toolkit: { slug: 'github' } }));
   await expect(new ComposioApps('fixture-only', transport as typeof fetch).execute({ accountId: ACCOUNT, userId: PERSON, toolkit: 'github', tool: 'BEELINE_GITHUB_CONTENTS_PUT', arguments: { path, body: {} } })).rejects.toThrow();
   expect(transport).toHaveBeenCalledTimes(1);
+});
+
+// Provider envelopes can contain decoded JSON or a raw JSON response string.
+it.each(['page', 'download', 'artifacts', 'graphql'])('Reproduction ROOM-GITHUB-READS: %s request reaches GitHub and preserves its response', async kind => {
+  const artifactJson = '{ "total_count": 1, "artifacts": [{"id":42,"name":"log-walk","expired":false}] }';
+  const body = kind === 'download' ? '{"version":"v1"}\n' : kind === 'artifacts' ? artifactJson : '[]';
+  const path = kind === 'page' ? 'https://api.github.com/repos/a/b/actions/runs?per_page=100&page=2'
+    : kind === 'download' ? '/repos/a/b/releases/assets/42' : '/repos/a/b/actions/runs/42/artifacts';
+  const query = 'fragment pr on PullRequest {number,title} query PullRequestSearch($q:String!){search(query:$q,type:ISSUE,first:30){nodes{...pr}}}';
+  const transport = vi.fn(async (url: URL | string, init?: RequestInit) => {
+    if (String(url).includes('/connected_accounts/')) return json({ id: ACCOUNT, user_id: PERSON, status: 'ACTIVE', toolkit: { slug: 'github' } });
+    expect(JSON.parse(String(init?.body))).toEqual({ connected_account_id: ACCOUNT,
+      endpoint: 'https://api.github.com' + (kind === 'graphql' ? '/graphql' : new URL(path, 'https://api.github.com').pathname),
+      method: kind === 'graphql' ? 'POST' : 'GET',
+      ...(kind === 'graphql' ? { body: { query, variables: { q: 'token cache' } } } : {}),
+      parameters: kind === 'page' ? [{name:'per_page',value:'100',type:'query'}, {name:'page',value:'2',type:'query'}]
+        : kind === 'download' ? [{name:'Accept',value:'application/octet-stream',type:'header'}] : [],
+    });
+    return json({ status: 200, headers: { 'content-type': kind === 'download' ? 'application/octet-stream' : 'application/json' }, data: body });
+  });
+  const result = await new ComposioApps('fixture-only', transport as typeof fetch).execute({ accountId: ACCOUNT, userId: PERSON, toolkit: 'github',
+    tool: kind === 'graphql' ? 'BEELINE_GITHUB_GRAPHQL_READ' : 'BEELINE_GITHUB_REST_READ',
+    arguments: kind === 'graphql' ? { query, variables: { q: 'token cache' } } : { path, ...(kind === 'download' ? { accept: 'application/octet-stream' } : {}) },
+  }) as { body: string; headers: Record<string, string> };
+  expect(result.body).toBe(body);
+  expect(result.headers['content-type']).toBe(kind === 'download' ? 'application/octet-stream' : 'application/json');
+  if (kind === 'artifacts') expect(JSON.parse(result.body).artifacts[0].name).toBe('log-walk');
 });

@@ -1,4 +1,5 @@
-import { restoreRoomMemberships, restoreRoomMembershipsSql } from './membership-join.js';
+import { githubProviderKey } from './providers/index.js';
+import { restoreRoomMemberships } from './membership-join.js';
 import { roomEventSubscriptions } from './agent-subscriptions.js';
 import { systemMessage } from '@beeline/api-contract/system-message-catalog';
 import { CornerAccessDatabase } from './corner-access-database.js';
@@ -23,7 +24,7 @@ import {
 /**
  * The one producer of every system notification in a Room or Workspace.
  *
- * Every membership note, yolo change, grant line, failed turn, GitHub fact,
+ * Every membership note, yolo change, grant line, GitHub fact,
  * corner marker, scheduled prompt and card header is composed here from the
  * System-message catalog, in one
  * grammar (`@beeline/api-contract` `system-events.ts`): `<subject> <verb>
@@ -57,6 +58,7 @@ export interface SystemLineInput {
   /** The schedule a `schedule-ran` line fired, so its run may inherit its sessions. */
   readonly scheduleId?: string;
   readonly payload?: unknown;
+  readonly subscriptionId?: string;
   readonly subscriptionPrompt?: string;
   readonly subscriptionWorkflowSlug?: string;
   readonly object?: string | SystemObject;
@@ -76,6 +78,8 @@ export interface SystemLineInput {
   /** Agent-only browser observations use activity and never paint in the transcript. */
   readonly presentation?: 'system' | 'card' | 'activity';
   readonly cardType?: string;
+  /** False stores the line and does not route it. The caller advances the corner. */
+  readonly routeCommands?: boolean;
   readonly card?: Record<string, unknown>;
   readonly requestId?: string;
   readonly commandId?: string;
@@ -166,7 +170,7 @@ export async function ensureSystemDirectMessageRoomResult(
   if (!inserted.rowCount) {
     await database.query(`UPDATE rooms SET visibility='invite-only' WHERE id=$1`, [roomId]);
   }
-  await restoreRoomMemberships(database,workspaceId,roomId,participants);
+  await restoreRoomMemberships(database,workspaceId,roomId,[personId]);
   return { id: roomId, created: Boolean(inserted.rowCount) };
 }
 
@@ -188,7 +192,7 @@ export interface SystemLineResult {
 
 export type SystemPhrase = Pick<
   SystemLineInput,
-  'subject' | 'verb' | 'object' | 'consequence' | 'attribution' | 'kind' | 'scheduleId' | 'payload' | 'subscriptionPrompt' | 'subscriptionWorkflowSlug'
+  'subject' | 'verb' | 'object' | 'consequence' | 'attribution' | 'kind' | 'scheduleId' | 'payload' | 'subscriptionId' | 'subscriptionPrompt' | 'subscriptionWorkflowSlug'
 >;
 
 const CLEAN = /[\s ]+/g;
@@ -221,6 +225,7 @@ export function composeSystemLine(phrase: SystemPhrase): { text: string; event: 
     ...(phrase.kind === 'subscription-fired' || phrase.kind === 'check-failed' ||
       phrase.kind === 'computer-session-activity' ? {
       payload: phrase.payload,
+      ...(phrase.subscriptionId ? { subscriptionId: phrase.subscriptionId } : {}),
       ...(phrase.subscriptionPrompt ? { subscriptionPrompt: phrase.subscriptionPrompt } : {}),
       ...(phrase.subscriptionWorkflowSlug ? { subscriptionWorkflowSlug: phrase.subscriptionWorkflowSlug } : {}),
     } : {}),
@@ -260,6 +265,9 @@ async function canonicalPhrase(
   database: SqlDatabase,
   phrase: SystemPhrase,
   plainSubjectId?: string,
+  roomId?: string,
+  messageId?: string,
+  workspaceId?: string,
 ): Promise<SystemPhrase> {
   const ids = [
     phrase.subject.id,
@@ -268,8 +276,8 @@ async function canonicalPhrase(
   ].filter((id): id is string => Boolean(id));
   const rows = ids.length
     ? await database.query<IdentityLabelRow>(
-        `SELECT id,kind,name,handle FROM identities WHERE id=ANY($1::text[])`,
-        [[...new Set(ids)]],
+        `SELECT id,kind,name,beeline_workspace_handle(id,COALESCE($4::uuid,(SELECT workspace_id FROM rooms WHERE id=COALESCE($2::uuid,(SELECT room_id FROM messages WHERE id=$3))))) handle FROM identities WHERE id=ANY($1::text[])`,
+        [[...new Set(ids)],roomId ?? null,messageId ?? null,workspaceId ?? null],
       )
     : { rows: [] };
   const identities = new Map(rows.rows.map((row) => [row.id, row]));
@@ -286,7 +294,7 @@ function labeledPhrase(phrase: SystemPhrase, identities: ReadonlyMap<string, Ide
   const fallbackSubjectName =
     phrase.subject.kind === 'agent'
       ? systemMessage("system-line.identity-mention", agentHandle(phrase.subject.name))
-      : phrase.subject.kind === 'github'
+      : phrase.subject.kind === githubProviderKey
         ? phrase.kind === 'subscription-fired' && phrase.subject.name === 'GitHub'
           ? systemMessage("system-line.github")
           : systemMessage("system-line.identity-mention", clause(phrase.subject.name).replace(/^@/, ''))
@@ -388,6 +396,7 @@ export async function systemLine(
       database,
       input,
       input.cardType === 'workflow-handoff' ? authorId : undefined,
+      input.roomId,
     ),
   );
   const id = input.id ?? randomBytes(32).toString('hex');
@@ -455,7 +464,7 @@ export async function systemLine(
           parent: watch.incoming_command ?? undefined, retainDepth: true,
           action: 'input',
         });
-      await routeSystemCommand(db, {
+      if (input.routeCommands !== false) await routeSystemCommand(db, {
         roomId: input.roomId,
         sourceMessageId: id,
         kind: input.kind,
@@ -464,8 +473,6 @@ export async function systemLine(
         requestId: input.requestId,
         causeId: input.causeId,
         commandId: input.commandId,
-        followup: input.kind === 'check-failed' &&
-          Boolean((input.payload as { followup?: unknown } | undefined)?.followup),
       });
       if (input.kind && isSubscribableEventKind(input.kind) && subscriptions.some(row => row.prompt !== null)) {
         for (const subscription of subscriptions.filter(row => row.prompt !== null)) {
@@ -477,6 +484,7 @@ export async function systemLine(
             verb: systemMessage("system-line.received"), object: systemMessage("system-line.a-room-event"), consequence: input.kind,
             kind: 'subscription-fired', causeId: id, wakes: [subscription.agent_id],
             payload: { source: 'room', event: input.kind, text },
+            subscriptionId: subscription.id,
             subscriptionPrompt: subscription.prompt!,
             subscriptionWorkflowSlug: subscription.workflow_slug ?? undefined,
           });
@@ -529,10 +537,12 @@ export async function connectorOfferDecisionLines(database: SqlDatabase,
   const ids = [...new Set(inputs.flatMap(input => [input.subject.id,
     typeof input.object === 'string' ? undefined : input.object?.id, input.attribution?.actor.id])
     .filter((id): id is string => Boolean(id)))];
-  const labels = (await database.query<IdentityLabelRow>(
-    'SELECT id,kind,name,handle FROM identities WHERE id=ANY($1::text[])', [ids])).rows;
-  const identities = new Map(labels.map(row => [row.id,row]));
+  const labels = (await database.query<IdentityLabelRow & {room_id:string}>(
+    `SELECT identity.id,kind,name,beeline_room_handle(identity.id,place.room_id) handle,place.room_id
+     FROM identities identity CROSS JOIN unnest($2::uuid[]) place(room_id) WHERE identity.id=ANY($1::text[])`,
+    [ids,[...new Set(inputs.map(input => input.roomId))]])).rows;
   const lines = inputs.map(input => {
+    const identities = new Map(labels.filter(row => row.room_id===input.roomId).map(row => [row.id,row]));
     const id = input.id ?? randomBytes(32).toString('hex');
     const composed = composeSystemLine(labeledPhrase(input,identities));
     return { id,roomId:input.roomId,authorId:input.authorId ?? input.subject.id,
@@ -607,7 +617,7 @@ export async function restateSystemLine(
   phrase: SystemPhrase,
   card?: Record<string, unknown>,
 ): Promise<{ text: string; event: SystemEvent; updated: boolean }> {
-  const { text, event } = composeSystemLine(await canonicalPhrase(database, phrase));
+  const { text, event } = composeSystemLine(await canonicalPhrase(database, phrase,undefined,undefined,messageId));
   const result = await database.query(
     `UPDATE messages SET text=$2,system_event=$3::jsonb,card=COALESCE($4::jsonb,card) WHERE id=$1`,
     [messageId, text, JSON.stringify(event), card ? JSON.stringify(card) : null],
@@ -624,9 +634,12 @@ export async function restateSystemLines(database: SqlDatabase, lines: readonly 
   const ids = [...new Set(lines.flatMap(({phrase}) => [phrase.subject.id,
     typeof phrase.object === 'string' ? undefined : phrase.object?.id, phrase.attribution?.actor.id]
     .filter((id): id is string => Boolean(id))))];
-  const identities = new Map((ids.length ? (await database.query<IdentityLabelRow>(
-    'SELECT id,kind,name,handle FROM identities WHERE id=ANY($1::text[])', [ids])).rows : []).map(row => [row.id,row]));
-  const rows = lines.map(line => ({id:line.id,...composeSystemLine(labeledPhrase(line.phrase,identities)),
+  const labels = ids.length ? (await database.query<IdentityLabelRow & {message_id:string}>(
+    `SELECT identity.id,kind,name,beeline_room_handle(identity.id,message.room_id) handle,message.id message_id
+     FROM messages message CROSS JOIN identities identity
+     WHERE identity.id=ANY($1::text[]) AND message.id=ANY($2::text[])`,[ids,lines.map(line => line.id)])).rows : [];
+  const rows = lines.map(line => ({id:line.id,...composeSystemLine(labeledPhrase(line.phrase,
+    new Map(labels.filter(row => row.message_id===line.id).map(row => [row.id,row])))),
     card:line.card,presentation:line.presentation,created_at:line.createdAt}));
   await database.query(`UPDATE messages message SET text=line.text,system_event=line.event,
     card=COALESCE(line.card,message.card),presentation=COALESCE(line.presentation,message.presentation),
@@ -659,10 +672,11 @@ export async function deletedMessageEvent(
   database: SqlDatabase,
   deleterId: string,
   authorId: string,
+  roomId?: string,
 ): Promise<SystemEvent> {
   const rows = await database.query<IdentityLabelRow>(
-    `SELECT id,kind,name,handle FROM identities WHERE id=ANY($1::text[])`,
-    [[...new Set([deleterId, authorId])]],
+    `SELECT id,kind,name,beeline_room_handle(id,$2) handle FROM identities WHERE id=ANY($1::text[])`,
+    [[...new Set([deleterId, authorId])],roomId ?? null],
   );
   const identities = new Map(rows.rows.map((row) => [row.id, row]));
   const deleter = identities.get(deleterId);
@@ -676,7 +690,7 @@ export async function deletedMessageEvent(
       ...(authorId === deleterId
         ? {}
         : { attribution: { verb: 'sent by', actor: identitySubject(author) } }),
-    }),
+    },undefined,roomId),
   ).event;
 }
 
@@ -689,7 +703,7 @@ export function identitySubject(row: {
   return { kind: row.kind === 'agent' ? 'agent' : 'person', id: row.id, name: row.name };
 }
 
-export const GITHUB_SUBJECT: SystemSubject = { kind: 'github', name: systemMessage("system-line.github") };
+export const GITHUB_SUBJECT: SystemSubject = { kind: githubProviderKey, name: systemMessage("system-line.github") };
 
 /** Retire historical human-facing browser observations without losing agent context. */
 export async function backfillComputerObservations(database: SqlDatabase): Promise<void> {
@@ -717,35 +731,4 @@ export async function sendSystemDirectMessage(database: SqlDatabase, workspaceId
   const inserted = await database.query(`INSERT INTO messages(id,room_id,author_id,text) VALUES($1,$2,$3,$4)
     ON CONFLICT(id) DO NOTHING`, [id, roomId, SYSTEM_IDENTITY_ID, text]);
   return Boolean(inserted.rowCount);
-}
-
-/** Deliver the same plain system phrase to a recipient set in one statement.
- * Room creation, membership restoration and idempotent notice inserts share
- * one transaction; the statement creates no events or command dispatches. */
-export async function sendSystemNotices(database: SqlDatabase, workspaceId: string,
-  recipients: readonly { identityId: string; messageId: string }[],
-  phrase: Pick<SystemPhrase,'subject'|'verb'|'object'|'consequence'|'attribution'>): Promise<void> {
-  if (!recipients.length) return;
-  await ensureSystemIdentity(database);
-  const { text, event } = composeSystemLine(await canonicalPhrase(database,phrase));
-  const notices = recipients.map(recipient=>{
-    const participants=[SYSTEM_IDENTITY_ID,recipient.identityId].sort() as [string,string];
-    return {id:recipient.messageId,room:directMessageRoomId(workspaceId,participants),participants};
-  });
-  await database.query(`WITH notices AS MATERIALIZED (
-    SELECT notice.* FROM jsonb_to_recordset($1::jsonb) AS notice(id text,room uuid,participants jsonb)
-  ), threads AS (
-    INSERT INTO rooms(id,workspace_id,created_by,name,visibility,direct_participants)
-    SELECT room,$2,$3,'Direct message','invite-only',participants FROM notices
-    ON CONFLICT(id) DO UPDATE SET visibility='invite-only' RETURNING id
-  ), members AS (
-    SELECT $2::uuid workspace_id,thread.id room_id,participant identity_id
-    FROM notices notice JOIN threads thread ON thread.id=notice.room
-      CROSS JOIN LATERAL jsonb_array_elements_text(notice.participants) participant
-  ), restored AS (
-    ${restoreRoomMembershipsSql('members')}
-  ) INSERT INTO messages(id,room_id,author_id,text,presentation,system_event)
-    SELECT notice.id,thread.id,$3,$4,'system',$5::jsonb FROM notices notice JOIN threads thread ON thread.id=notice.room
-    WHERE EXISTS(SELECT 1 FROM restored WHERE room_id=thread.id) ON CONFLICT(id) DO NOTHING`,
-  [JSON.stringify(notices),workspaceId,SYSTEM_IDENTITY_ID,text,JSON.stringify(event)]);
 }

@@ -1,25 +1,21 @@
 import type { MessageSendState } from './message-outbox';
 import React from 'react';
-import { Text, View } from 'react-native';
-import Animated, {
+import { YStack } from 'tamagui';
+import {
   useAnimatedStyle,
   useReducedMotion,
   useSharedValue,
   withDelay,
   withTiming,
 } from 'react-native-reanimated';
-import { StyleSheet } from 'react-native-unistyles';
+import { Motion } from '@/ui/grammar';
 import { parseCornerProposal } from './corner-proposal';
 import type { ChatDisplayMessage } from './room-view-presentation';
 import { messageContainsBoundary } from './room-new-message-boundary';
 import { arrivalFlashTiming } from './room-arrival-flash';
 import { ledgerDayCaption } from './message-dates';
 import { withLedgerDayCaption } from '@/components/buzz/Ledger';
-import {
-  createTranscriptCardMotionStore,
-  TranscriptCardMotionBoundary,
-  type TranscriptCardMotionStore,
-} from '@/components/buzz/transcript-card-motion-context';
+import { NewMessagesRule } from '@/ui/screens/transcript/TranscriptMarkers';
 
 export type RoomMessagePresentation = {
   /** Width-class changes must cross the memo boundary to repaint row controls. */
@@ -355,15 +351,12 @@ export type RoomMessageRenderer = (
   context: RoomMessageRenderContext,
 ) => React.ReactNode;
 
-const NO_ARRIVING_CARDS: ReadonlySet<string> = new Set();
 
 export function useRoomMessageRenderItem({
   render,
   continuedIds,
   precedingMessageById,
   messageById,
-  arrivingCardIds = NO_ARRIVING_CARDS,
-  cardMotionStore,
   firstNewMessageId,
   arrivalFlashMessageId = null,
   sourceLandingFlashMessageId = null,
@@ -377,8 +370,6 @@ export function useRoomMessageRenderItem({
   continuedIds: ReadonlySet<string>;
   precedingMessageById: ReadonlyMap<string, ChatDisplayMessage>;
   messageById: ReadonlyMap<string, ChatDisplayMessage>;
-  arrivingCardIds?: ReadonlySet<string>;
-  cardMotionStore?: TranscriptCardMotionStore;
   firstNewMessageId?: string | null;
   /** The row a completed notification landing just put on screen, or null. */
   arrivalFlashMessageId?: string | null;
@@ -386,8 +377,6 @@ export function useRoomMessageRenderItem({
   sourceLandingFlashMessageId?: string | null;
   presentationForMessage?: (item: ChatDisplayMessage) => RoomMessagePresentation;
 }) {
-  const [fallbackMotionStore] = React.useState(createTranscriptCardMotionStore);
-  const resolvedCardMotionStore = cardMotionStore ?? fallbackMotionStore;
   // The row body closes over Room handlers. A fresh payload recreates that
   // function even when a cached row's text did not change. Keep the latest
   // function in a ref so the cell's memo can skip unchanged rows.
@@ -401,40 +390,32 @@ export function useRoomMessageRenderItem({
     ({ item }: { item: ChatDisplayMessage }) => {
       const pending = !messageById.has(item.id) ? pendingContext?.(item) : undefined;
       return (
-        <TranscriptCardMotionBoundary
-          arriving={arrivingCardIds.has(item.id)}
-          cardId={item.id}
-          store={resolvedCardMotionStore}
-        >
-          <RoomMessageCell
-            {...presentationForMessage?.(item)}
-            item={item}
-            render={stableRender}
-            startsNewMessages={messageContainsBoundary(item, firstNewMessageId)}
-            continued={
-              !messageContainsBoundary(item, firstNewMessageId) &&
-              (continuedIds.has(item.id) || Boolean(pending?.continued))
-            }
-            immediatelyPrecedingMessage={
-              precedingMessageById.get(item.id) ?? pending?.immediatelyPrecedingMessage
-            }
-            referencedMessage={item.replyToId ? messageById.get(item.replyToId) : undefined}
-            arrivalFlashing={messageContainsBoundary(item, arrivalFlashMessageId)}
-            sourceLandingFlashing={messageContainsBoundary(item, sourceLandingFlashMessageId)}
-          />
-        </TranscriptCardMotionBoundary>
+        <RoomMessageCell
+          {...presentationForMessage?.(item)}
+          item={item}
+          render={stableRender}
+          startsNewMessages={messageContainsBoundary(item, firstNewMessageId)}
+          continued={
+            !messageContainsBoundary(item, firstNewMessageId) &&
+            (continuedIds.has(item.id) || Boolean(pending?.continued))
+          }
+          immediatelyPrecedingMessage={
+            precedingMessageById.get(item.id) ?? pending?.immediatelyPrecedingMessage
+          }
+          referencedMessage={item.replyToId ? messageById.get(item.replyToId) : undefined}
+          arrivalFlashing={messageContainsBoundary(item, arrivalFlashMessageId)}
+          sourceLandingFlashing={messageContainsBoundary(item, sourceLandingFlashMessageId)}
+        />
       );
     },
     [
       arrivalFlashMessageId,
-      arrivingCardIds,
       continuedIds,
       firstNewMessageId,
       messageById,
       precedingMessageById,
       presentationForMessage,
       pendingContext,
-      resolvedCardMotionStore,
       stableRender,
       sourceLandingFlashMessageId,
     ],
@@ -473,7 +454,7 @@ export const RoomMessageCell = React.memo(function RoomMessageCell({
       flashing={arrivalFlashing || sourceLandingFlashing}
       tint={sourceLandingFlashing ? 'brass' : 'pointer'}
     >
-      {startsNewMessages && <NewMessagesDivider />}
+      {startsNewMessages && <NewMessagesRule />}
       {render(item, {
         continued,
         immediatelyPrecedingMessage,
@@ -511,10 +492,10 @@ function ArrivalFlashGround({
   tint?: FlashTint;
 }) {
   return (
-    <View>
+    <YStack>
       {flashing ? <ArrivalFlashFill tint={tint} /> : null}
       {children}
-    </View>
+    </YStack>
   );
 }
 
@@ -543,60 +524,20 @@ function ArrivalFlashFill({ tint }: { tint: FlashTint }) {
 
   const groundStyle = useAnimatedStyle(() => ({ opacity: fill.value }));
   return (
-    <Animated.View
-      accessibilityElementsHidden
-      importantForAccessibility="no-hide-descendants"
-      pointerEvents="none"
-      style={[
-        tint === 'brass' ? styles.sourceLandingFlashGround : styles.arrivalFlashGround,
-        groundStyle,
-      ]}
-      testID="arrival-flash-ground"
-    />
+    <Motion overlay pointerEvents="none" motion={groundStyle}>
+      {/* Area, not stroke: the fill is the signal, and it sits behind the row's
+          own content so the transcript's layout is untouched while it plays.
+          A reader-initiated jump to one exact message reads as a brass wash,
+          not the passive highlight arrival pointer. */}
+      <YStack
+        flex={1}
+        accessibilityElementsHidden
+        importantForAccessibility="no-hide-descendants"
+        pointerEvents="none"
+        backgroundColor={tint === 'brass' ? 'needsYou' : 'highlight'}
+        opacity={tint === 'brass' ? 0.28 : 1}
+        testID="arrival-flash-ground"
+      />
+    </Motion>
   );
 }
-
-/** Marks the beginning of the unread run without an action. */
-export function NewMessagesDivider() {
-  return (
-    <View
-      accessibilityLabel="Unread messages begin here"
-      accessibilityRole="text"
-      style={styles.newMessages}
-      testID="new-messages-divider"
-    >
-      <View style={styles.newMessagesRule} />
-      <Text style={styles.newMessagesLabel}>NEW</Text>
-      <View style={styles.newMessagesRule} />
-    </View>
-  );
-}
-
-const styles = StyleSheet.create((theme) => ({
-  // Area, not stroke: the fill is the signal, and it sits behind the row's
-  // own content so the transcript's layout is untouched while it plays.
-  arrivalFlashGround: {
-    ...StyleSheet.absoluteFillObject,
-    backgroundColor: theme.buzz.bgHighlight,
-  },
-  // A reader-initiated jump to one exact message (a quote reference, a
-  // forward source, a notification target) reads as brass, not the passive
-  // bgHighlight arrival pointer above — the existing token, never a new one.
-  sourceLandingFlashGround: {
-    ...StyleSheet.absoluteFillObject,
-    backgroundColor: theme.buzz.brassWashStrong,
-  },
-  newMessages: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: theme.buzz.space.sm,
-    marginTop: theme.buzz.space.md,
-    marginBottom: theme.buzz.space.md,
-  },
-  newMessagesRule: {
-    flex: 1,
-    height: StyleSheet.hairlineWidth,
-    backgroundColor: theme.buzz.border,
-  },
-  newMessagesLabel: { ...theme.buzz.type.sectionHead, color: theme.buzz.accent },
-}));

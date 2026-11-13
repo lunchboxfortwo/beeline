@@ -11,6 +11,23 @@ import BuzzChat from './[channelId]';
 import { type MonolithSurfaceEvent } from '@/sync/transport/monolith-rig-transport';
 
 describe('useRoomSurfaceSession', () => {
+  it('keeps the known viewer on a cold visit before asynchronous identity setup', async () => {
+    controls.hotViewer = true;
+    controls.cached = null;
+    controls.viewerRead = new Promise(() => undefined);
+    const reset = vi.fn();
+    let current!: UseRoomSurfaceSessionResult;
+    let renderer!: ReactTestRenderer;
+    await act(async () => { renderer = create(React.createElement(Harness, {
+      channelId: 'cold-room', onResetTranscript: reset, capture: (value: UseRoomSurfaceSessionResult) => { current = value; },
+    })); });
+    expect(current.userPubkey).toBe('viewer');
+    expect(current.messageRecordScope).not.toBeNull();
+    expect(current.roomSurface).toBeNull();
+    expect(reset).not.toHaveBeenCalled();
+    await act(async () => renderer.unmount());
+  });
+
 
   it('renders the hot target before the asynchronous session has even read its identity', async () => {
     controls.hotViewer = true;
@@ -384,6 +401,22 @@ describe('useRoomSurfaceSession', () => {
     await act(async () => renderer.unmount());
   });
 
+
+  it('OPEN-SHELL-1: keeps the conversation mounted before and after a cold Room response', async () => {
+    controls.hotViewer = true;
+    controls.cached = null;
+    controls.roomResponse = null;
+    let renderer!: ReactTestRenderer;
+    await act(async () => { renderer = create(React.createElement(BuzzChat)); });
+    await flushEffects();
+    expect(controls.surfaceRenders).toBeGreaterThan(0);
+    const conversation = renderer.root.findByType('room-root');
+    expect(renderer.root.findAllByType('room-opening')).toHaveLength(0);
+    await act(async () => controls.responses[0]!.apply(roomView('room-a')));
+    expect(renderer.root.findByType('room-root')).toBe(conversation);
+    expect(renderer.root.findAllByType('room-opening')).toHaveLength(0);
+    await act(async () => renderer.unmount());
+  });
 
   it('Send: pending state reaches the Room once, unchanged bookkeeping stays quiet, and failures remain visible', async () => {
     controls.cached = roomView('room-a');

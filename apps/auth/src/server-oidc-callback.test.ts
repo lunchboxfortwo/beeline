@@ -16,7 +16,7 @@ async function start() {
   });
   const response = await app.inject({ method: 'GET', url: `/auth/oidc/start?${query}`, headers: { host: alphaTenant.host } });
   expect(response.statusCode).toBe(302);
-  expect(String(response.headers['set-cookie'])).toContain('Max-Age=300; Secure; HttpOnly; SameSite=Lax');
+  expect(String(response.headers['set-cookie'])).toContain('Max-Age=900; Secure; HttpOnly; SameSite=Lax');
   const authorization = await fetch(response.headers.location!, { redirect: 'manual' });
   const callback = new URL(authorization.headers.get('location')!);
   return { url: callback.pathname + callback.search, cookie: startCookie(response.headers['set-cookie']) };
@@ -40,7 +40,7 @@ describe('Google browser callback recovery', () => {
     const cancel = await app.inject({ method: 'POST', url: '/auth/oidc/completion/cancel', headers: { host: alphaTenant.host }, payload: { recoveryToken } });
     expect(cancel.statusCode).toBe(204);
     expect(cancel.headers['set-cookie']).toBeUndefined();
-    // Expire the stored flow as well as omitting the cookie a browser drops at five minutes.
+    // Expire the stored flow as well as omitting the cookie a browser drops at fifteen minutes.
     await database.query("UPDATE beeline_oidc_flows SET created_at = created_at - interval '29 minutes', expires_at = expires_at - interval '29 minutes'");
     expectRestart(await callback(flow.url));
     expect(provider.tokenRequests).toBe(0);

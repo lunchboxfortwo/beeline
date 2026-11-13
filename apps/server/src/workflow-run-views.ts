@@ -136,7 +136,7 @@ const RUN_HEADS_SQL = `WITH scope AS (
          AND pinned.version=COALESCE((latest.card->>'workflowVersion')::int,1)
        LEFT JOIN LATERAL (
          SELECT COALESCE(jsonb_agg(jsonb_build_object('id',actor.id,'name',actor.name,
-           'kind',actor.kind,'handle',actor.handle,'avatar',actor.avatar,
+           'kind',actor.kind,'handle',beeline_workspace_handle(actor.id,scope.workspace_id),'avatar',actor.avatar,
            'face_id',actor.face_id)),'[]'::jsonb) actor_rows
          FROM identities actor
          WHERE actor.id IN (
@@ -517,7 +517,7 @@ SELECT message.id,(message.card->>'seq')::int seq,output.output_turns,output.liv
               message.card->'receipt' receipt,message.card->'roleBindings' role_bindings,
               message.created_at,${MICROS('message.created_at')} created_us,
               author.id author_id,author.name author_name,
-              author.kind author_kind,author.handle author_handle,author.avatar author_avatar,
+              author.kind author_kind,beeline_room_handle(author.id,message.room_id) author_handle,author.avatar author_avatar,
               author.face_id author_face_id,message.card->>'workflowSlug' workflow_slug,
               message.card_type
        FROM messages message

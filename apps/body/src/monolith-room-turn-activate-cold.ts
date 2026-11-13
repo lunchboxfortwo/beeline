@@ -21,7 +21,7 @@ import { modelContextWindowTokens } from './model-context-window.js';
 import { codegraphFingerprintServers, codegraphIndexDirectory, codegraphMcpServer, prepareCodegraphIndex } from './codegraph.js';
 import { sessionConfigFingerprint } from './session-config-fingerprint.js';
 import { registryMcpHostBindPaths, registryMcpHostDeclarations } from './registry-mcp.js';
-import { credentialMaskPaths, harnessHomeStateDirs, siblingAgentMaskPaths, wrapAgentCommand, type SandboxSessionSpec } from './bwrap-sandbox.js';
+import { sandboxMountPlan, credentialMaskPaths, harnessHomeStateDirs, siblingAgentMaskPaths, wrapAgentCommand, type SandboxSessionSpec } from './bwrap-sandbox.js';
 import { harnessIdentityLabel, sessionNewMcpServers } from './cursor-acp-bridge.js';
 import { bodyAgentCommand } from './config.js';
 import { explainEmptyAgentTurn, isSilentCompletion, nextPinnedProvider, type EmptyTurnExplanation } from './empty-turn.js';
@@ -31,10 +31,10 @@ import { runtimeDirectory } from './runtime.js';
 import { assembleSessionPrompt } from './prompt-assembly.js';
 import { durableReplyText } from './turn-stream.js';
 import { TurnTrace } from './turn-trace.js';
-import { isPrivateWorkToolCall } from './tool-call-failure.js';
+import { isAnswerDeliveryToolCall } from './tool-call-failure.js';
 import { turnErrorDetail } from './turn-failure-reason.js';
 import { startAgentProcess, stopAgentProcess, type AgentProcessLifecycle } from './agent-process.js';
-import { MonolithRoomTurnLoop, execFileAsync, roomPermissionDecision, HumanMessage, ActiveTurn } from './monolith-room-turn.js';
+import { MonolithRoomTurnLoop, execFileAsync, createRoomPermissionHandler, HumanMessage, ActiveTurn } from './monolith-room-turn.js';
 
 
 
@@ -226,6 +226,9 @@ import { MonolithRoomTurnLoop, execFileAsync, roomPermissionDecision, HumanMessa
       ),
     });
     const sandboxSpec: SandboxSessionSpec = {
+      operatorHome,
+      userRuntimeDir: `/run/user/${process.getuid?.() ?? 0}`,
+      grantedPaths: grants.paths,
       mode: 'readonly',
       cwd: ctx.options.cwd,
       harnessStateDirs: stateDirs,
@@ -367,14 +370,14 @@ import { MonolithRoomTurnLoop, execFileAsync, roomPermissionDecision, HumanMessa
       // (`config.ts`), which is exactly when `wrapAgentCommand` above wraps.
       osSandbox: Boolean(ctx.options.config.bwrapPath),
       autoApprovePermissions: false,
-      permissionHandler: async (request) =>
-        roomPermissionDecision(request, {
-          mountedServers,
-          hostServers,
-          shellSandboxed: Boolean(ctx.options.config.bwrapPath),
-          attachmentsDir: attachScratchRoot ? join(attachScratchRoot, 'attachments') : undefined,
-          sandboxHome: homeOverlay.HOME,
-        }),
+      permissionHandler: createRoomPermissionHandler({
+        mountedServers,
+        hostServers,
+        shellSandboxed: Boolean(ctx.options.config.bwrapPath),
+        attachmentsDir: attachScratchRoot ? join(attachScratchRoot, 'attachments') : undefined,
+        sandboxPlan: sandboxMountPlan(sandboxSpec),
+        sandboxHome: homeOverlay.HOME,
+      }),
       onUsage: (usage) => {
         void postChangedAgentUsage(ctx.options.api,ctx.agent.publicKey,usage)
           .catch(error => console.error('[agent-usage] publish failed', error));
@@ -511,6 +514,7 @@ import { MonolithRoomTurnLoop, execFileAsync, roomPermissionDecision, HumanMessa
   export async function monolithRoomTurnLoopExplainEmpty(ctx: MonolithRoomTurnLoop, result: PromptResult): Promise<EmptyTurnExplanation | undefined> {
     if (['no-reply', 'repeated-tool-call'].includes(result.stopReason)) return undefined;
     if (durableReplyText(result.agentText)) return undefined;
+    if (result.toolCalls.some(isAnswerDeliveryToolCall)) return undefined;
     // Passive browser updates owe no answer and must not start provider
     // retries. Their receipt acknowledges delivery, even for a textless turn.
     if (ctx.commandContext.current?.source.systemEvent?.kind === 'computer-session-activity') return undefined;
@@ -527,10 +531,6 @@ import { MonolithRoomTurnLoop, execFileAsync, roomPermissionDecision, HumanMessa
     if (explanation.record?.kind === 'error' && explanation.record.status === 402)
       ctx.publishOpenRouterSpend(true);
     if (isSilentCompletion(result, explanation)) return undefined;
-    // Private delivery answers the command without a chat reply. Only an
-    // affirmative completed status counts; failed or unfinished calls still
-    // owe an answer. Keep any durable text recovered from pi's turn record.
-    if (result.toolCalls.some(isPrivateWorkToolCall) && !durableReplyText(explanation.recoveredText ?? '')) return undefined;
     return explanation;
   }
 

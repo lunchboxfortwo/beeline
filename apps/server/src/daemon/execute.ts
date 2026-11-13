@@ -1,7 +1,8 @@
+import { typedMentionHandles } from '../message-mentions.js';
+import { authorizeAgentReply, requeueRefusedReply } from '../agent-reply-authority.js';
 import { endAgentTurn } from '../agent-turn-end.js';
 import { recordAgentTurnFailure } from '../agent-turn-failure.js';
 import { parkOwnedModelTerminal, OwnedModelOwnerEndRefusal } from '../owned-model-parking.js';
-import { assertCurrentTurnOwner } from '../turn-ownership.js';
 import type { HelperTurnOwnershipSource } from '@beeline/api-contract/helper-turn-ownership';
 import { cleanVoiceReply } from '../voice-reply.js';
 import { queueDatabaseWork } from '../database-work-queue.js';
@@ -11,16 +12,15 @@ import { randomBytes } from 'node:crypto';
 import type { DaemonOperationMap } from '@beeline/api-contract/daemon';
 import { lockCornerLifecycle } from '../corner-lifecycle.js';
 import { LiveHub, type LiveEvent } from '../live.js';
-import { typedMentionHandles } from '../message-mentions.js';
 import { precomputeInstitutionalQueryEmbedding } from '../institutional-memory-shadow.js';
 import type { AfterCommit } from '../institutional-memory-embeddings.js';
 import type { DaemonContext } from './context.js';
 import { Input, OwnedModelClaimCapability, Output, CORNER_REACH_OPERATIONS, AccessDeniedError, CORNER_CLEANUP_OPERATIONS, id, seconds } from './values.js';
 import { daemonAccess, daemonReviewSourceAccess } from './access.js';
 import { daemonReach, daemonWriteResult } from './corner-messages.js';
-import { daemonPostRoomMessage, daemonPersistTurnTrace } from './messages.js';
+import { daemonPostRoomMessage, daemonPersistTurnTrace, roomPostBody } from './messages.js';
 import { daemonReconcileZeroCheckWorkerCompletion } from './corner-completion.js';
-import { DaemonService } from '../daemon-service.js';
+import { createDaemonCommandService } from '../daemon-service.js';
 import { daemonLockOwnedTurnAccess } from './owned-model.js';
 import { daemonReport } from './corner-reports.js';
 import { daemonAuthorizeScopedGrant } from './grants.js';
@@ -29,6 +29,25 @@ import { daemonExecuteOperation } from './operations.js';
 
 
   export async function daemonExecute<Name extends keyof DaemonOperationMap>(ctx: DaemonContext,
+    name: Name, input: Input<Name>, authenticatedAgentId: string,
+    turnOwner?: HelperTurnOwnershipSource, modelClaim?: OwnedModelClaimCapability,
+  ): Promise<Output<Name>> {
+    try { return await daemonExecuteInternal(ctx, name, input, authenticatedAgentId, turnOwner, modelClaim); }
+    catch (error) {
+      // A policy/argument refusal leaves the current turn available for a
+      // corrected tool call. Transport, authority loss and storage failures
+      // return the matching reply claim to the queue.
+      if (!ctx.commandTransaction && name === 'postRoomMessage' &&
+          (!(error instanceof CommandRefusalError) || error.message.startsWith('command output authority rejected'))) {
+        const reply = input as Input<'postRoomMessage'>;
+        if (await requeueRefusedReply(ctx.database, reply.roomId, authenticatedAgentId, reply.requestId, reply.generationId))
+          ctx.live.publish({type:'invalidate',roomId:reply.roomId,reason:'postgres:agent_commands',targetAgentId:authenticatedAgentId,commandReleased:true});
+      }
+      throw error;
+    }
+  }
+
+  async function daemonExecuteInternal<Name extends keyof DaemonOperationMap>(ctx: DaemonContext,
     name: Name,
     input: Input<Name>,
     authenticatedAgentId: string,
@@ -174,14 +193,14 @@ import { daemonExecuteOperation } from './operations.js';
           throw error;
         },
       ));
-    let ownedIntent = Boolean(turnOwner || ctx.authorizedCommand?.turn_owner_connection_id);
-    if (!ctx.commandTransaction && scopedRoom && typeof candidate.generationId === 'string' &&
+    // Owned dispatch follows the claim's recorded execution kind, never a socket.
+    let ownedIntent = Boolean(turnOwner || ctx.authorizedCommand?.execution_kind === 'helper');
+    if (!ownedIntent && !ctx.commandTransaction && scopedRoom && typeof candidate.generationId === 'string' &&
         typeof (candidate.requestId ?? candidate.turnId) === 'string') {
-      ownedIntent ||= Boolean((await ctx.database.query(`SELECT 1 FROM agent_commands command
-        JOIN agent_command_generation_owners binding ON binding.command_id=command.id
-          AND binding.generation_id=$4 AND binding.connection_id IS NOT NULL
-        WHERE command.room_id=$1 AND command.agent_id=$2 AND command.turn_request_id=$3 LIMIT 1`,
-        [scopedRoom, authenticatedAgentId, candidate.requestId ?? candidate.turnId, candidate.generationId])).rowCount);
+      ownedIntent = Boolean((await ctx.database.query(`SELECT 1 FROM agent_commands command
+        WHERE command.room_id=$1 AND command.agent_id=$2 AND command.turn_request_id=$3
+          AND command.execution_kind='helper' LIMIT 1`,
+        [scopedRoom, authenticatedAgentId, candidate.requestId ?? candidate.turnId])).rowCount);
     }
     // An owned claim must not remove existing tools. Operations without a
     // dedicated adapter keep their established provider/permission path while
@@ -278,8 +297,7 @@ import { daemonExecuteOperation } from './operations.js';
         // before authority/command rows. Only owned paths that actually need
         // lifecycle take it first; ordinary activity retains independent lanes.
         if (ownedIntent && needsLifecycle) await lockCornerLifecycle(db, scopedRoom);
-        if (ownedIntent) await daemonLockOwnedTurnAccess(ctx, db, scopedRoom, authenticatedAgentId);
-        if (turnOwner) await assertCurrentTurnOwner(db, authenticatedAgentId, turnOwner);
+        if (ownedIntent && name !== 'postRoomMessage') await daemonLockOwnedTurnAccess(ctx, db, scopedRoom, authenticatedAgentId);
         // Result publication keeps lifecycle and command locks in the same order as cancellation.
         if (!ownedIntent && needsLifecycle)
           await lockCornerLifecycle(db, scopedRoom);
@@ -288,12 +306,16 @@ import { daemonExecuteOperation } from './operations.js';
             (candidate.status !== 'failed' || candidate.heartbeat !== undefined)) throw new OwnedModelOwnerEndRefusal();
         if (name === 'postAgentTurnReceipt' && !candidate.diagnosticsOnly && ['failed', 'complete'].includes(String(candidate.status))) {
           // Preserve causal provider evidence before the single terminal write.
-          if (await parkOwnedModelTerminal(db, input as Input<'postAgentTurnReceipt'>, authenticatedAgentId, turnOwner)) {
-            const ended = (await db.query<CommandRow>(`SELECT * FROM agent_commands
-              WHERE room_id=$1 AND agent_id=$2 AND turn_request_id=$3 AND generation_id=$4 FOR UPDATE`,
-              [scopedRoom,authenticatedAgentId,requestId,candidate.generationId])).rows[0];
-            if (ended && await endAgentTurn(db,ended,'failed','The model result could not be confirmed.'))
-              await recordAgentTurnFailure(db,ended,'The model result could not be confirmed.');
+          if (await parkOwnedModelTerminal(db, input as Input<'postAgentTurnReceipt'>, authenticatedAgentId)) {
+            // The model owner ended for the whole invocation. Its unfinished
+            // members end with it; completed members keep their results.
+            const unfinished = (await db.query<CommandRow>(`SELECT * FROM agent_commands
+              WHERE room_id=$1 AND agent_id=$2 AND generation_id=$3 AND state='claimed'
+                AND action IN ('input','resume') ORDER BY created_at,id FOR UPDATE`,
+              [scopedRoom,authenticatedAgentId,candidate.generationId])).rows;
+            for (const ended of unfinished)
+              if (await endAgentTurn(db,ended,'failed','The model result could not be confirmed.'))
+                await recordAgentTurnFailure(db,ended,'The model result could not be confirmed.');
             return daemonWriteResult(ctx) as Output<Name>;
           }
 
@@ -313,15 +335,13 @@ import { daemonExecuteOperation } from './operations.js';
           (name === 'postRoomMessage' && candidate.relay === undefined) ||
           name === 'retractAgentLiveOutput' ||
           (name === 'postAgentTurnReceipt' && ['complete','failed'].includes(String(candidate.status)));
-        const command = await authorizeCommandOutput(
+        const command = name === 'postRoomMessage'
+          ? await authorizeAgentReply(db, scopedRoom, authenticatedAgentId, requestId, candidate.generationId)
+          : await authorizeCommandOutput(
           db, scopedRoom, authenticatedAgentId, requestId, candidate.generationId, allowCompleted,
         );
-        if (name === 'postAgentTurnReceipt' && command.turn_owner_connection_id) {
-          if (!turnOwner || turnOwner.connectionId !== command.turn_owner_connection_id ||
-              turnOwner.epoch !== Number(command.turn_owner_epoch))
-            throw new Error('Turn receipt requires its negotiated machine owner');
-          if (candidate.heartbeat) throw new Error('Owned turns do not accept freshness receipts');
-        }
+        if (name === 'postAgentTurnReceipt' && command.execution_kind === 'helper' && candidate.heartbeat)
+          throw new Error('Owned turns do not accept freshness receipts');
         // Helpers cannot impose an order outcome on an informational wake.
         // The stored command and its delivered receipt own that obligation.
         if (name === 'postAgentTurnReceipt' && candidate.status === 'failed' &&
@@ -340,7 +360,7 @@ import { daemonExecuteOperation } from './operations.js';
              AND completion_kind='no-reply'`,
           [scopedRoom, authenticatedAgentId, requestId],
         )).rowCount)
-          return daemonWriteResult(ctx) as Output<Name>;
+          throw new CommandRefusalError('Reply not delivered: text was dropped because this turn chose no reply.', 409);
         // A corner is the ordered work's own address: its viewers watch the
         // turn's live work and progress there. Urgent terminal prose still
         // reports privately; done uses the explicit guarded report tool.
@@ -354,8 +374,22 @@ import { daemonExecuteOperation } from './operations.js';
             const text = String(candidate.text ?? '').trim();
             if (text) {
               const report = await daemonReport(ctx, text, authenticatedAgentId, command, db, true);
-              if ('delivered' in report && report.delivered === false)
-                throw new CommandRefusalError('Report was not delivered; restore commander membership at the recorded return address, then report again.', 409);
+              if ('delivered' in report && report.delivered === false) {
+                // An explicit public post may already have committed before
+                // this final-text private copy. Its success must survive a
+                // missing commander; a private-only report still refuses.
+                const posted = (await db.query<{ id: string; created_at: Date }>(
+                  `SELECT posted.id,posted.created_at FROM agent_commands current
+                   JOIN messages posted ON posted.id=current.private_payload->>'publicPostId'
+                   WHERE current.id=$1 AND current.private_payload->>'publicPostGenerationId'=$3
+                     AND posted.author_id=$2 AND posted.presentation='message' AND posted.deleted_at IS NULL`,
+                  [command.id, authenticatedAgentId, command.generation_id],
+                )).rows[0];
+                if (!posted) throw new CommandRefusalError('Report was not delivered; restore commander membership at the recorded return address, then report again.', 409);
+                const warning = 'Warning: Your public reply was posted, but its private report copy was not delivered. Restore commander membership at the recorded return address before reporting again.';
+                await endAgentTurn(db, command, 'complete', null, posted.id);
+                return { id: posted.id, createdAt: seconds(posted.created_at), receipt: warning } as Output<Name>;
+              }
             } else throw new CommandRefusalError('An assignment outcome requires nonempty report text.', 400);
             await endAgentTurn(db, command, 'complete');
           }
@@ -369,7 +403,21 @@ import { daemonExecuteOperation } from './operations.js';
                 [command.result_message_id],
               )
             ).rows[0]!;
-            if (saved.text !== candidate.text) throw new Error('command result conflict');
+            if (saved.text !== candidate.text) {
+              const submitted = typeof candidate.text === 'string' ? candidate.text : undefined;
+              let intended: string | undefined;
+              if (submitted !== undefined) {
+                try {
+                  intended = (await roomPostBody(db, scopedRoom, authenticatedAgentId, {
+                    text: submitted,
+                    presentation: candidate.presentation === 'card' ? 'card' : 'message',
+                  }, command)).text;
+                } catch (error) {
+                  if (!(error instanceof CommandRefusalError)) throw error;
+                }
+              }
+              if (saved.text !== intended) throw new CommandRefusalError('Reply not delivered: command result conflict; this job already has an answer.', 409);
+            }
             return {
               id: saved.id,
               createdAt: seconds(saved.created_at),
@@ -384,32 +432,11 @@ import { daemonExecuteOperation } from './operations.js';
           if (name !== 'postAgentTurnReceipt')
             return daemonWriteResult(ctx) as Output<Name>;
         }
-        const scoped = new DaemonService(
-          db,
-          buffered,
-          ctx.roomGitHubToken,
-          ctx.mediaMaximumBytes,
-          true,
-          command,
-          ctx.livePaintDiagnostics,
-          ctx.liveDiagnosticServerInstance,
-          ctx.prChecksStatus,
-          undefined,
-          ctx.institutionalMemoryShadow,
-          ctx.mcpRegistry,
-          ctx.registryMcpOAuth,
-          ctx.composio,
-          ctx.feedback,
-          ctx.objects,
-          ctx.linkWallet,
-          ctx.refreshMergeability,
-          ctx.landCorner, ctx.closePullRequest, ctx.readPullRequest, ctx.subscriptionReceiverUrl, ctx.github,
-        );
-        scoped.starterOnboarding = ctx.starterOnboarding;
-        scoped.memoryEmbed = memoryEmbed;
-        scoped.afterCommit = (task) => {
-          committedTasks.push(task);
-        };
+        const scoped = createDaemonCommandService(ctx.dependencies, {
+          database: db, live: buffered, authorizedCommand: command,
+          starterOnboarding: ctx.starterOnboarding, memoryEmbed,
+          afterCommit: (task) => { committedTasks.push(task); },
+        });
         let result: Output<Name> = await scoped.execute(name, input, authenticatedAgentId, turnOwner);
         if (name === 'requestAgentGrant') {
           await db.query(

@@ -83,6 +83,7 @@ function readAgentCommand(value: unknown): NonNullable<RoomViewMessage['agentCom
     recipient: {
       id: recipient.id,
       name: recipient.name,
+      ...field('kind', oneOf(recipient.kind, ['agent', 'human'])),
       ...field('handle', typeof recipient.handle === 'string' ? recipient.handle : undefined),
     },
     ...field('status', oneOf(item.status, ['done', 'blocked', 'needs-decision', 'failed'])),
@@ -404,6 +405,7 @@ export function readRoomViewMessage(value: unknown): RoomViewMessage | null {
     ...field('requestId', typeof item.requestId === 'string' ? item.requestId : undefined),
     ...field('sourceClient', sourceClient && typeof sourceClient.id === 'string' && typeof sourceClient.name === 'string' && sourceClient.name.length <= 120 ? { id: sourceClient.id, name: sourceClient.name } : undefined),
     ...field('agentModel', typeof item.agentModel === 'string' ? item.agentModel : undefined),
+    ...field('chatSeq', Number.isSafeInteger(item.chatSeq) && (item.chatSeq as number) > 0 ? item.chatSeq as number : undefined),
     ...field('attachments', readList(item.attachments, readAttachment)),
     ...field(
       'mentionPubkeys',
@@ -559,7 +561,9 @@ export function readLatest(value: unknown): NonNullable<ChatListItem['latestMess
   ) {
     return null;
   }
+  const message = item.presentation === undefined ? null : readRoomViewMessage(item);
   return {
+    ...message,
     id: item.id,
     text: item.text,
     createdAt: item.createdAt,
@@ -594,6 +598,7 @@ function readChatCorner(value: unknown): ChatListCorner | null {
     ...field('blocker', readCornerBlocker(item.blocker)),
     ...field('itemId', nonempty(item.itemId) ? item.itemId : undefined),
     ...field('waitingSince', integer(item.waitingSince) ? item.waitingSince : undefined),
+    ...field('lastActivityAt', integer(item.lastActivityAt) ? item.lastActivityAt : undefined),
     ...field('attention', item.attention === true ? (true as const) : undefined),
   };
 }
@@ -670,6 +675,7 @@ export function readChat(value: unknown): ChatListItem | null {
     ...field('closed', typeof item.closed === 'boolean' ? item.closed : undefined),
     ...field('voiceCall', readVoiceCall(item.voiceCall)),
     ...field('latestMessage', readLatest(item.latestMessage)),
+    ...field('latestAgentTurns', readList(item.latestAgentTurns, readAgentTurn)),
     ...field(
       'repositoryName',
       typeof item.repositoryName === 'string' ? item.repositoryName : undefined,

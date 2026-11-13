@@ -18,7 +18,10 @@ describe.skipIf(!url)('Persisted schedule clock admission', () => {
       await pool.query(`SET search_path TO ${schema}`);
       // Minimal physical-plan fixture; full migrated schema behavior is covered
       // by agent-schedules/postgres-live tests, not claimed by this fixture.
-      await pool.query(`CREATE TABLE rooms(id uuid PRIMARY KEY,archived_at timestamptz);
+      await pool.query(`CREATE TABLE rooms(id uuid PRIMARY KEY,workspace_id uuid,archived_at timestamptz);
+        CREATE TABLE messages(id text PRIMARY KEY,room_id uuid,card_type text,card jsonb,created_at timestamptz);
+        CREATE TABLE workspace_skills(id uuid,workspace_id uuid,slug text,kind text);
+        CREATE TABLE workspace_skill_versions(skill_id uuid,version int,markdown text);
         CREATE TABLE identities(id text PRIMARY KEY,kind text,hidden_from_roster boolean DEFAULT false,
           created_at timestamptz DEFAULT now());
         CREATE TABLE agents(agent_id text PRIMARY KEY,owner_id text);

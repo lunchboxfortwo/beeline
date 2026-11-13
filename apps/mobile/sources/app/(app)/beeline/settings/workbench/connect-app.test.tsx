@@ -1,7 +1,9 @@
 // This suite exercises an installed old-server path, with explicit legacy negotiation.
 
 
-vi.mock('@expo/vector-icons', async () => { const R = await import('react'); return { Ionicons: (props: any) => R.createElement('Ionicons', props) }; });
+vi.mock('@expo/vector-icons/Ionicons', async () => { const R = await import('react'); return { default: (props: any) => R.createElement('Ionicons', props) }; });
+vi.mock('tamagui', async () => (await import('@/ui/screens/transcript/grammar-hosts.test-support')).tamaguiHosts());
+vi.mock('lucide-react-native', async () => (await import('@/ui/screens/transcript/grammar-hosts.test-support')).lucideHosts());
 vi.mock('expo-haptics', () => ({ ImpactFeedbackStyle: { Light: 'Light' }, impactAsync: async () => undefined }));
 vi.mock('react-native-keyboard-controller', async () => { const R = await import('react'); return { KeyboardAvoidingView: (props: any) => R.createElement('View', props, props.children) }; });
 import * as React from 'react';
@@ -85,6 +87,7 @@ vi.mock('react-native', async () => {
     TextInput: host('TextInput'),
     TouchableOpacity: host('TouchableOpacity'),
     View: host('View'),
+    useWindowDimensions: () => ({ width: 390, height: 844 }),
     ActivityIndicator: host('ActivityIndicator'),
     Animated: {
       View: host('Animated.View'),
@@ -105,25 +108,7 @@ vi.mock('react-native', async () => {
   };
 });
 
-vi.mock('@/components/buzz/SettingsRow', async () => {
-  const ReactModule = await import('react');
-  return {
-    SettingsRow: (props: any) => ReactModule.createElement('SettingsRow', props),
-  };
-});
 
-vi.mock('@/components/buzz/PageHeader', async () => {
-  const ReactModule = await import('react');
-  return {
-    PageHeader: (props: any) => ReactModule.createElement('PageHeader', props),
-  };
-});
-vi.mock('@/components/buzz/SurfaceGlyphLoader', async () => {
-  const ReactModule = await import('react');
-  return {
-    SurfaceGlyphLoader: (props: any) => ReactModule.createElement('SurfaceGlyphLoader', props),
-  };
-});
 
 const signIn = vi.hoisted(() => ({ open: vi.fn() }));
 vi.mock('@/buzz/app-sign-in', () => ({ openAppSignIn: signIn.open }));
@@ -157,6 +142,8 @@ vi.mock('@/buzz/use-active-community', () => ({ useActiveCommunityId: () => 'wor
 const discoveryLive = vi.hoisted(() => ({ listener: undefined as undefined | ((event: any) => void) }));
 vi.mock('@/sync/transport/live-connection', () => ({ sharedLiveConnection: () => ({ register: async (_filter: unknown, listener: (event: any) => void) => { discoveryLive.listener = listener; return () => {}; } }) }));
 import ConnectAppScreen from './connect-app';
+import { ConnectorRow } from '@/ui/screens/settings/connectors/ConnectorParts';
+import { SafeBottom } from '@/ui/grammar';
 import { setWorkbenchSource } from '@/buzz/workbench-source';
 import { MockWorkbenchSource } from '@/buzz/workbench-source.mock';
 import { mobileSurfaceCache } from '@/buzz/surface-storage';
@@ -203,12 +190,12 @@ async function search(renderer: ReactTestRenderer, query: string): Promise<void>
 
 describe('server-owned connector search', () => {
   it('uses the server suggestions only while the query is empty', async () => {
-    const renderer = await render(); expect(renderer.root.findByType('SettingsRow').props.title).toBe('Resend');
-    await search(renderer, 'unknown'); expect(renderer.root.findAllByType('SettingsRow')).toHaveLength(0); expect(JSON.stringify(renderer.toJSON())).toContain('No connections found');
+    const renderer = await render(); expect(renderer.root.findByType(ConnectorRow).props.title).toBe('Resend');
+    await search(renderer, 'unknown'); expect(renderer.root.findAllByType(ConnectorRow)).toHaveLength(0); expect(renderer.root.findByProps({ testID: 'connect-app-empty' }).props.children).toContain('No connections found');
   });
   it('navigates an existing company instead of offering a second install', async () => {
     const renderer = await render(); await search(renderer, 'vercel');
-    await act(async () => renderer.root.findByType('SettingsRow').props.onPress());
+    await act(async () => renderer.root.findByType(ConnectorRow).props.onPress());
     expect(navigation.push).toHaveBeenCalledWith(expect.objectContaining({ params: expect.objectContaining({ service: 'vercel' }) })); expect(source.appRequests).toHaveLength(0);
   });
   it('opens an existing company by the same one-tap rule as its Connectors row', async () => {
@@ -216,18 +203,18 @@ describe('server-owned connector search', () => {
       items: [{ id: 'builtin:wallet', title: 'Coinbase wallet', subtitle: 'built in', kind: 'connection', target: { kind: 'wallet' } }] }]);
     source.searchApps = async () => [{ appKey: 'coinbase', name: 'Coinbase', companyId: 'coinbase' }];
     const renderer = await render(); await search(renderer, 'coin');
-    await act(async () => renderer.root.findByType('SettingsRow').props.onPress());
+    await act(async () => renderer.root.findByType(ConnectorRow).props.onPress());
     expect(navigation.push).toHaveBeenCalledWith({ pathname: '/beeline/settings/workbench/wallet', params: { workspaceId: 'workspace-1', viewerId: 'human-dani' } });
   });
   it('preserves selected registry coordinates and the existing sign-in ceremony', async () => {
     const connect = vi.spyOn(source, 'connectApp').mockResolvedValue({ appId: 'new-app', authorizationUrl: 'https://signin.example/auth' });
     const renderer = await render(); await search(renderer, 'resend');
-    await act(async () => { await renderer.root.findByType('SettingsRow').props.onPress(); });
+    await act(async () => { await renderer.root.findByType(ConnectorRow).props.onPress(); });
     await vi.waitFor(() => expect(connect).toHaveBeenCalledWith(expect.objectContaining({ app: 'Resend', helperId: 'helper-squire-box', registryServerName: 'com.resend/mcp', registryVersion: '1.2' })));
     expect(signIn.open).toHaveBeenCalledWith('https://signin.example/auth', { workspaceId: 'workspace-1', viewerId: 'human-dani', appId: 'new-app' });
   });
-  it('keeps the bottom safe area on the scroll content', async () => {
-    safeArea.bottom = 48; const renderer = await render(); expect(renderer.root.findByProps({ testID: 'connect-app-scroll' }).props.contentContainerStyle.paddingBottom).toBe(48);
+  it('keeps the bottom safe area under the page', async () => {
+    safeArea.bottom = 48; const renderer = await render(); expect(renderer.root.findByProps({ testID: 'connect-app-scroll' })).toBeTruthy(); expect(renderer.root.findAllByType(SafeBottom)).toHaveLength(1);
   });
 });
 
@@ -241,11 +228,11 @@ it('MCP-DISCOVERY-1: a committed discovery refreshes the current query without c
   source.searchApps = calls;
   const renderer = await render();
   await search(renderer, 'fly');
-  expect(renderer.root.findAllByType('SettingsRow').map((row: any) => row.props.title)).toEqual(['Vercel']);
+  expect(renderer.root.findAllByType(ConnectorRow).map((row: any) => row.props.title)).toEqual(['Vercel']);
   discovered = true;
   await act(async () => { discoveryLive.listener?.({ monolithLive: { type: 'resource-change', roomId: '', resource: 'workbench' } }); await Promise.resolve(); });
   await act(async () => { await new Promise(resolve => setTimeout(resolve, 30)); });
-  expect(renderer.root.findAllByType('SettingsRow').map((row: any) => row.props.title)).toEqual(['Vercel', 'Fly.io']);
+  expect(renderer.root.findAllByType(ConnectorRow).map((row: any) => row.props.title)).toEqual(['Vercel', 'Fly.io']);
   const count = calls.mock.calls.length;
   await act(async () => { await new Promise(resolve => setTimeout(resolve, 260)); });
   expect(calls).toHaveBeenCalledTimes(count);

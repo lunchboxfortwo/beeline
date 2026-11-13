@@ -87,7 +87,7 @@ const scope4 = fixtureScope4();
 describe('corner wake reporting (Reproduction schedule-silence-4)', () => {
 const scope5 = fixtureScope5();
 
-  it.each(['report', 'order', 'watched_corner', 'corner_check', 'schedule', 'subscribed_event', 'system', 'corner_background_tool', 'corner_brief_revision'])('makes a %s wake quiet without a progress nudge', (commandReason) => {
+  it.each(['report', 'order', 'resume', 'watched_corner', 'corner_check', 'schedule', 'subscribed_event', 'system', 'corner_background_tool', 'corner_brief_revision'])('makes a %s wake quiet without a progress nudge', (commandReason) => {
     const text = assembleTurnPrompt({ surface: 'room', task: { body: 'Handle this wake', commandReason } }).text;
     expect(text).toContain('Do not post an update merely because time has passed');
     expect(text).toContain('call the no_reply_needed tool');
@@ -512,12 +512,21 @@ describe('prompt assembly guards', () => {
   it('keeps decisions on the chain of command', () => {
     for (const [name, context] of Object.entries(SESSION_VARIANTS)) {
       const text = assembleSessionPrompt(context).systemPrompt;
-      expect(text, name).toContain('Corner reports go to its opener at their opening place; later orders get replies here.');
+      expect(text, name).toContain('Human-approved brief revisions transfer corner command to their author at their dispatch place; otherwise use the opener. Older orders keep their issuer.');
       expect(text, name).not.toContain('If human, tag them');
       expect(text, name).toContain('report(status, text) one step up to your commander.');
       const corner = ['code-corner', 'repo-less-corner'].includes(context.surface);
-      expect(text.includes('In a corner, reply to people here; escalate with report to the opening commander.'), name).toBe(corner);
+      expect(text.includes('In a corner, reply to people here; escalate with report to the current commander.'), name).toBe(corner);
     }
+  });
+
+  it('replays free and CLI agents with their actual connection capabilities', () => {
+    const content = (freeAgent: boolean) => beelineManagedSkills('test', { isReviewer: false, freeAgent })
+      .find(skill => skill.name === 'beeline-connecting-services')!.content;
+    expect(content(true)).toContain('Lightpanda');
+    expect(content(true)).not.toContain('operate_drive');
+    expect(content(false)).toContain('operate_drive');
+    for (const free of [true, false]) expect(content(free)).toContain('For adding agents, call connect');
   });
 
 
@@ -541,9 +550,8 @@ describe('prompt assembly guards', () => {
   it('documents Connectors discovery and connection in every agent turn', () => {
     for (const [name, context] of Object.entries(SESSION_VARIANTS)) {
       const text = assembleSessionPrompt(context).systemPrompt;
-      expect(text, name).toContain('use connect(mode:discover) if unclear, then connect(mode:ensure, service, reason, continuation).');
-      if (context.surface.includes('corner'))
-        expect(text, name).toContain('use connect(mode:discover) if unclear, then connect(mode:ensure, service, reason, continuation).');
+      expect(text, name).toContain('connect(mode:discover)');
+      expect(text, name).toContain('connect(mode:ensure, service, reason, continuation)');
     }
   });
 

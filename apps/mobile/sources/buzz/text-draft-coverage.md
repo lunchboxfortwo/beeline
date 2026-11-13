@@ -24,7 +24,6 @@ The inventory searches production TS/TSX for `TextInput`, `HullDialogInput`, `on
 | `ForwardMessagePickerSheet.tsx`: destination search           | Identity + source channel + picker; retains when dismissed.                                                                                                                                                                                                            |
 | `members.tsx`: agent name/soul edits, model and member search | Identity + Workspace + agent + field where applicable; edited profile fields clear after the profile write succeeds; searches retain until emptied.                                                                                                                    |
 | Workspace settings: rename and delete-confirmation text       | Identity + Workspace + field; clear after successful rename/delete; closing confirmation retains text.                                                                                                                                                                 |
-| `create-workspace.tsx`: Workspace name                        | Identity + creation screen + field; clear after create/required rename succeeds. The creation request's idempotent Workspace id is unchanged.                                                                                                                          |
 | `onboarding.tsx`: public handle/name                          | Naming identity + onboarding field; clear after managed handle claim succeeds; sign-in and secret handling unchanged.                                                                                                                                                  |
 | `connect-app.tsx`: app catalog search                         | Viewer identity + Workspace + app search; retain until emptied.                                                                                                                                                                                                        |
 | `wallet-send-form.tsx`: amount and recipient                  | Identity + Workspace + wallet field; clear only for `sent`; insufficient funds, expired delegation and failures retain edits. Chain selection, consent and execution remain unchanged.                                                                                 |
@@ -37,7 +36,7 @@ The inventory searches production TS/TSX for `TextInput`, `HullDialogInput`, `on
 ## Sensitive exclusions
 
 - Onboarding private-key import, generated/revealed private keys, passwords, credentials and one-time authentication codes are never drafts.
-- `community.tsx` invite input carries an access token; it remains ephemeral.
+- `community.tsx` invite input carries an access token; it remains ephemeral. The setup flow's Workspace name (`ui/screens/onboarding/WorkspaceSetup.tsx`) is prefilled and ephemeral; its idempotent Workspace id is chosen once per mount.
 - `WebPromptModal` secure-text content cannot enable storage, even if a draft context is supplied. Unknown generic prompts are not implicitly persisted; the sole production plain-text caller (report issue) explicitly supplies its stable context and success callback.
 - External provider/webview authentication fields are provider-owned, not app-owned text state.
 

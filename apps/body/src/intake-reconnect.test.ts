@@ -96,7 +96,7 @@ it.each([0, 2])('restores all 12 Rooms and 12 corners after startup read loss an
   expect(fetcher).not.toHaveBeenCalled();
 });
 
-it('waits after a failed intake read until an actual close opens its successor', async () => {
+it('closes an open socket after failed intake reads and resumes on its registered successor', async () => {
   const { sockets, connected, fetcher } = fixture();
   const first = sockets[0]!;
   first.holdReads = true;
@@ -104,11 +104,16 @@ it('waits after a failed intake read until an actual close opens its successor',
   await setImmediate();
   const requests = first.frames.filter(frame => frame.operation === 'getAgentCommands');
   for (const frame of requests)
-    first.receive({ type: 'daemon-operation-result', requestId: frame.requestId, error: 'unavailable', status: 503 });
+    first.receive({ type: 'daemon-operation-result', requestId: frame.requestId,
+      error: 'canceling statement due to lock timeout', status: 503 });
   await setImmediate();
-  expect(sockets).toHaveLength(1);
-  first.close();await setImmediate();
-  sockets[1]!.open(); sockets[1]!.register();
+  expect(first.readyState).toBe(3);
+  expect(sockets).toHaveLength(2);
+  sockets[1]!.open();
+  await setImmediate();
+  expect(connected.size).toBe(0);
+  expect(sockets[1]!.frames.every(frame => frame.type === 'register-machine')).toBe(true);
+  sockets[1]!.register();
   await setImmediate();
   expect(connected.size).toBe(24);
   expect(sockets).toHaveLength(2);
@@ -134,4 +139,23 @@ it('awaits re-registration before dispatching a previously selected ordinary ope
   expect(successor.frames.every(frame => frame.type === 'register-machine')).toBe(true);
   successor.register();
   await expect(read).resolves.toEqual({ commandProtocol: 1, commands: [] });
+});
+
+it('ignores a command snapshot failure from a retired subscription', async () => {
+  const { api, sockets } = fixture();
+  const first = sockets[0]!;
+  first.open(); first.register();
+  await setImmediate();
+  const retired = first.frames.find(frame => frame.type === 'subscribe')!;
+  first.close();
+  await setImmediate();
+  const successor = sockets[1]!;
+  successor.open(); successor.register();
+  await setImmediate();
+  successor.receive({ type: 'commands', roomId: retired.roomId, requestId: retired.requestId,
+    error: 'canceling statement due to lock timeout', status: 503 });
+  await setImmediate();
+  expect(successor.readyState).toBe(1);
+  expect(api.metrics().reconnects).toBe(1);
+  expect(sockets).toHaveLength(2);
 });

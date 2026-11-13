@@ -77,9 +77,9 @@ export function prefetchPushRoom(responseId: string, roomId: string, messageId?:
   const hotAddress = hotViewer ? surfaceAddress(config.monolithUrl, hotViewer, `/room/${roomId}`) : null;
   const hotCache = hotAddress ? restoreStoredSurface(hotAddress, isRoomView) : null;
   // A known viewer can restore an authorized stored response on the tap's
-  // stack, before navigation renders. A cache miss or unresolved viewer
-  // retains the asynchronous path.
-  const view = hotViewer && hotCache
+  // stack, before navigation renders. A synchronous miss is also final for
+  // this tap: start the read before mounting the route can occupy the thread.
+  const view = hotViewer
     ? openCached(hotViewer, hotCache)
     : viewer.then(async (pubkey) => {
       const address = pubkey ? surfaceAddress(config.monolithUrl, pubkey, `/room/${roomId}`) : null;
@@ -115,4 +115,16 @@ export function takePrefetchedPushRoom(responseId: string, roomId: string): Prom
 /** Room-list taps share the scoped opening read without changing navigation. */
 export function prefetchRoomOpen(roomId: string): void {
   prefetchPushRoom(`room-open:${roomId}`, roomId);
+}
+
+/** An existing server-indexed DM can start its read before profile rendering
+ * or the canonical resolution write. Resolution still owns navigation. */
+export function prefetchDirectMessageOpen(workspaceId: string, participantId: string): void {
+  const viewer = peekBuzzViewerContext();
+  if (!viewer || viewer.relayUrl !== getBuzzRuntimeConfig().monolithUrl) return;
+  const list = mobileSurfaceCache.peek(surfaceAddress(
+    viewer.relayUrl, viewer.viewerPubkey, '/workspace/:id/chats', { workspaceId },
+  ), isChatListView);
+  const room = list?.chats.find(chat => chat.directMessage?.peer.pubkey === participantId);
+  if (room) prefetchRoomOpen(room.room.id);
 }

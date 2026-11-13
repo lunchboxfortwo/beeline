@@ -11,6 +11,21 @@ describe('opaque token ceremony', () => {
     db = await migratedDatabase();
   });
   afterEach(() => db.close());
+  it.each(['google', 'github'] as const)('repairs a missing %s provider photo on verified sign-in without replacing a chosen picture', async provider => {
+    let avatar: string | undefined;
+    const auth = new TokenAuth(db,
+      async () => ({ subject:'photo-github',login:'photo',name:'Photo',avatar }),
+      () => new Date(),
+      async () => ({ subject:'photo-google',name:'Photo',audience:'client',avatar }));
+    const exchange = () => provider === 'google' ? auth.exchangeGoogleOidc('ticket') : auth.exchangeGitHubOidc('ticket');
+    const identity = (await exchange()).identityId;
+    avatar = provider === 'google' ? 'https://lh3.googleusercontent.com/a/photo' : 'https://avatars.githubusercontent.com/u/42';
+    await exchange();
+    expect((await db.query('SELECT avatar FROM identities WHERE id=$1',[identity])).rows[0]?.avatar).toBe(avatar);
+    await db.query('UPDATE identities SET avatar=$2 WHERE id=$1',[identity,'/v1/person-avatars/11111111-1111-4111-8111-111111111111']);
+    await exchange();
+    expect((await db.query('SELECT avatar FROM identities WHERE id=$1',[identity])).rows[0]?.avatar).toBe('/v1/person-avatars/11111111-1111-4111-8111-111111111111');
+  });
   it.each(['google', 'github'] as const)('R-MCP-SIGNIN-LEDGER: %s exchange outside the phone route cannot expire after issuing a session', async provider => {
     const auth = new TokenAuth(db,
       async () => ({ subject: 'ledger-github', login: 'ledger', name: 'Ledger' }),

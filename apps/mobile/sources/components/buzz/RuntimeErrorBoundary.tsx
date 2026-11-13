@@ -1,42 +1,51 @@
-import { Button } from './Button';
 import * as React from 'react';
-import * as Native from 'react-native';
-// Destructure outside the import so the Unistyles Babel rewrite cannot wrap
-// the emergency view in the same styling runtime that may have failed.
-const { ScrollView, Text, View } = Native;
-import { beelineThemes } from '@/buzz/groknight';
+import { Platform, Appearance } from 'react-native';
+import { ScrollView, TamaguiProvider, YStack } from 'tamagui';
+import { Btn, T } from '@/ui/grammar';
+import { tamaguiConfig, themeName } from '@/ui/tamagui.config';
 import { reportClientError, type ClientErrorScope } from '@/buzz/client-error-report';
+import { storage } from '@/sync/storage';
+import { resolveAppAppearance } from '@/buzz/app-appearance-seed';
+import { checkNativeUpdate, reloadNativeUpdate } from '@/hooks/useUpdates';
 
-/** Uses plain token styles, with no theme, navigation, modal or safe-area hooks. */
+/**
+ * No navigation, modal or safe-area hooks. The root screen draws outside the
+ * app's GrammarProvider, so it mounts the grammar theme itself from Appearance.
+ */
 export function RuntimeErrorView({ error, retry, scope }: {
   error: unknown; retry(): void; scope: ClientErrorScope;
 }) {
   React.useEffect(() => { void reportClientError(scope, error); }, [scope, error]);
-  const theme = Native.Appearance.getColorScheme() === 'dark' ? beelineThemes.obsidian : beelineThemes.bone;
+  React.useEffect(() => {
+    if (scope !== 'app' || Platform.OS === 'web') return;
+    // The root boundary replaces UpdateProvider, so recovery owns one check here.
+    void checkNativeUpdate().then(async (update) => {
+      if (update.available) await reloadNativeUpdate();
+    }).catch(() => { /* Keep the original error and Retry available. */ });
+  }, [scope]);
   const explanation = scope === 'app' ? 'Beeline could not display this screen' : 'Conversation mode could not start';
+  const body = (
+    <YStack backgroundColor="canvas" padding="4" gap="2" testID="runtime-error">
+      <T v="heading" accessibilityRole="alert">
+        {scope === 'app' ? 'Beeline could not display this screen' : 'Conversation mode could not start'}
+      </T>
+      <ScrollView maxHeight={256}>
+        <T userSelect="text" testID="runtime-error-message">{explanation}</T>
+      </ScrollView>
+      <YStack alignSelf="flex-start">
+        <Btn kind="quiet" label="Retry" onPress={retry} testID="runtime-error-retry">
+          <T v="heading" color="needsYou">Retry</T>
+        </Btn>
+      </YStack>
+    </YStack>
+  );
+  if (scope !== 'app') return body;
+  const settings = storage.getState().localSettings;
+  const mode = resolveAppAppearance(settings.appearance, Appearance.getColorScheme());
   return (
-    <View style={{ backgroundColor: theme.bgBase, padding: 16, gap: 8,
-    ...(scope === 'app' ? { flex: 1, paddingTop: 48 } : {}) }} testID="runtime-error">
-    <Text accessibilityRole="alert" style={{ ...theme.type.bodyStrong, color: theme.textPrimary }}>
-      {scope === 'app' ? 'Beeline could not display this screen' : 'Conversation mode could not start'}
-    </Text>
-    <ScrollView style={{ maxHeight: 256 }}>
-      <Text selectable style={{ ...theme.type.body, color: theme.textPrimary }} testID="runtime-error-message">{explanation}</Text>
-
-    </ScrollView>
-    <Button size="inline"
-      label="Retry"
-      accessibilityLabel="Retry"
-      onPress={retry}
-      emergencyTheme={theme}
-      variant="quiet"
-      testID="runtime-error-retry"
-      appearance={{
-        control: { minHeight: 44, justifyContent: 'center' },
-        label: { ...theme.type.bodyStrong, color: theme.accent },
-      }}
-    />
-  </View>
+    <TamaguiProvider config={tamaguiConfig} defaultTheme={themeName(mode, settings.palette)}>
+      <YStack flex={1} backgroundColor="canvas" paddingTop="8">{body}</YStack>
+    </TamaguiProvider>
   );
 }
 

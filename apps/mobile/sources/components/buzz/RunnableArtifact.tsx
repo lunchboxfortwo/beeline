@@ -2,8 +2,9 @@ import { IndexRow } from '@/components/buzz/IndexRow';
 import { useArtifactRecoveryGeneration } from '@/buzz/use-artifact-recovery';
 import { funnelOnboarding } from '@/auth/signin-funnel';
 import React, { useEffect, useRef, useState } from 'react';
-import { Platform, Text, View } from 'react-native';
-import { StyleSheet } from 'react-native-unistyles';
+import { Platform } from 'react-native';
+import { YStack } from 'tamagui';
+import { T } from '@/ui/grammar';
 import type { AttachmentReference } from '@beeline/buzz-client';
 import { runnableArtifactUrl } from '@/buzz/artifact-link';
 import { mediaIdFromUrl } from '@/buzz/artifact';
@@ -64,8 +65,8 @@ export function RunnableArtifact({ attachment }: { attachment: AttachmentReferen
   }, [attachment.url, attempt, recovery]);
   if (navigationStopped) {
     return (
-      <View style={styles.placeholder} testID="runnable-artifact-navigation-stopped">
-        <Text style={styles.text}>This page tried to open another page and was closed.</Text>
+      <YStack flex={1} justifyContent="center" alignItems="center" padding="4" testID="runnable-artifact-navigation-stopped">
+        <T v="body" color="secondary">This page tried to open another page and was closed.</T>
         <Button
           label="Reopen"
           onPress={() => {
@@ -74,25 +75,25 @@ export function RunnableArtifact({ attachment }: { attachment: AttachmentReferen
           }}
           testID="runnable-artifact-reopen"
         />
-      </View>
+      </YStack>
     );
   }
   if (failed || (Platform.OS !== 'web' && status === 'unavailable')) {
     return (
-      <View style={styles.failureInset}>
+      <YStack paddingHorizontal="5">
         <IndexRow
           inset="flush"
           title="Artifact stopped"
           description={'Stopped. Close and reopen it to try again.'}
         />
-      </View>
+      </YStack>
     );
   }
   if (!url || (Platform.OS !== 'web' && !WebView)) {
     return (
-      <View style={styles.placeholder} testID="runnable-artifact-loading">
-        <Text style={styles.loadingText}>Loading…</Text>
-      </View>
+      <YStack flex={1} justifyContent="center" alignItems="center" padding="4" testID="runnable-artifact-loading">
+        <T v="meta" color="secondary">Loading…</T>
+      </YStack>
     );
   }
   if (Platform.OS === 'web') {
@@ -100,7 +101,7 @@ export function RunnableArtifact({ attachment }: { attachment: AttachmentReferen
     embeddedUrl.searchParams.set('embed', '1');
     // The frame stays mounted under the status so its load event can fire.
     return (
-      <View style={styles.stage}>
+      <YStack flex={1}>
         {React.createElement('iframe', {
           src: embeddedUrl.href,
           sandbox: 'allow-scripts',
@@ -123,16 +124,16 @@ export function RunnableArtifact({ attachment }: { attachment: AttachmentReferen
           },
         })}
         {pageLoaded ? null : (
-          <View style={styles.loadingOverlay} testID="runnable-artifact-loading">
-            <Text style={styles.loadingText}>Loading…</Text>
-          </View>
+          <YStack position="absolute" top={0} right={0} bottom={0} left={0} alignItems="center" justifyContent="center" backgroundColor="canvas" testID="runnable-artifact-loading">
+            <T v="meta" color="secondary">Loading…</T>
+          </YStack>
         )}
-      </View>
+      </YStack>
     );
   }
   const NativeWebView = WebView!;
   return (
-    <View style={styles.stage}>
+    <YStack flex={1}>
       <NativeWebView
         source={{ uri: url }}
         javaScriptEnabled
@@ -164,39 +165,13 @@ export function RunnableArtifact({ attachment }: { attachment: AttachmentReferen
         onError={() => setFailed(true)}
         onHttpError={() => setFailed(true)}
         onLoadEnd={() => setPageLoaded(true)}
-        style={styles.frame}
         testID="runnable-artifact"
       />
       {pageLoaded ? null : (
-        <View style={styles.loadingOverlay} testID="runnable-artifact-loading">
-          <Text style={styles.loadingText}>Loading…</Text>
-        </View>
+        <YStack position="absolute" top={0} right={0} bottom={0} left={0} alignItems="center" justifyContent="center" backgroundColor="canvas" testID="runnable-artifact-loading">
+          <T v="meta" color="secondary">Loading…</T>
+        </YStack>
       )}
-    </View>
+    </YStack>
   );
 }
-
-const styles = StyleSheet.create((theme) => ({
-  failureInset: { paddingHorizontal: theme.buzz.roomList.edge },
-  frame: { flex: 1 },
-  stage: { flex: 1 },
-  loadingOverlay: {
-    position: 'absolute',
-    top: 0,
-    right: 0,
-    bottom: 0,
-    left: 0,
-    alignItems: 'center',
-    justifyContent: 'center',
-    backgroundColor: theme.buzz.bgBase,
-  },
-  // Same placeholder text style as the plain artifact viewer's "Loading…".
-  loadingText: { ...theme.buzz.type.meta, color: theme.buzz.ledgerQuiet },
-  placeholder: {
-    flex: 1,
-    justifyContent: 'center',
-    alignItems: 'center',
-    padding: theme.buzz.space.md,
-  },
-  text: { ...theme.buzz.type.body, color: theme.buzz.textSecondary },
-}));

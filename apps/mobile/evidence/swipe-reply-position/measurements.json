@@ -1,0 +1,41 @@
+{
+  "reproduction": "swipe-reply-1",
+  "beforeSwipe": {
+    "startOffsetPx": 3150,
+    "endOffsetPx": 0,
+    "offsetChangePx": -3150,
+    "anchorFromComposerChangePx": -3150.0002403259277,
+    "anchorChangeRoundedPx": -3150
+  },
+  "afterSwipe": {
+    "startOffsetPx": 3150,
+    "endOffsetPx": 3150,
+    "offsetChangePx": 0,
+    "anchorFromComposerChangePx": 0.000240325927734375,
+    "anchorChangeRoundedPx": 0
+  },
+  "afterTap": {
+    "startOffsetPx": 3150,
+    "endOffsetPx": 3150,
+    "offsetChangePx": 0,
+    "anchorFromComposerChangePx": 0.000240325927734375,
+    "anchorChangeRoundedPx": 0
+  },
+  "afterCorner": {
+    "startOffsetPx": 3150,
+    "endOffsetPx": 3150,
+    "offsetChangePx": 0,
+    "anchorFromComposerChangePx": 0.0,
+    "anchorChangeRoundedPx": 0
+  },
+  "afterTail": {
+    "startOffsetPx": 0,
+    "endOffsetPx": 0,
+    "offsetChangePx": 0,
+    "anchorFromComposerChangePx": -8.0108642578125e-05,
+    "anchorChangeRoundedPx": 0
+  },
+  "duringAfterSwipeAndTapOffsetsPx": [
+    3150
+  ]
+}

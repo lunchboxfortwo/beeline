@@ -7,7 +7,7 @@
  * `OPENAI_COMPAT_*` names.
  */
 import { accessSync, constants, existsSync, readFileSync } from 'node:fs';
-import { basename, dirname, resolve } from 'node:path';
+import { basename, delimiter, dirname, resolve } from 'node:path';
 import {
   executableOnPath,
   resolveAgentCommand, installedAgentProgramEnvironment,
@@ -16,7 +16,6 @@ import {
 } from './agent-command.js';
 import { activeAdapterCommand } from './adapter-store.js';
 import type { AgentAccessPolicy } from './access-policy.js';
-import type { ModelUnavailableState } from './model-availability.js';
 import type { ExternalMcpCapability } from './external-mcp-capabilities.js';
 import type { McpServerWire } from './acp.js';
 
@@ -139,8 +138,6 @@ export interface BodyConfig {
    * explicit in-app selection (#223) for this agent.
    */
   modelSelection?: { model?: string; effort?: string };
-  /** Startup catalog validation failed; serve Rooms but never start an ACP turn. */
-  modelUnavailable?: ModelUnavailableState;
   /**
    * Absolute path to a `bwrap` that passed `detectBwrapSandbox`'s self-test at
    * daemon start. Present means every ACP child is spawned inside the mount
@@ -499,6 +496,14 @@ export function buildAgentEnv(
   // Values the child always needs a defined answer for.
   agentEnv.PATH = merged.PATH ?? process.env.PATH ?? '';
   agentEnv.HOME = merged.HOME ?? process.env.HOME ?? '';
+  // Discover tools before HOME becomes the private harness overlay. Installing
+  // a client on PATH grants no emulator authority; request_grant still owns use.
+  const sdkRoots = [merged.ANDROID_HOME, merged.ANDROID_SDK_ROOT,
+    resolve(agentEnv.HOME, 'android-sdk'), resolve(agentEnv.HOME, 'Android/Sdk')];
+  const toolDirs = sdkRoots.filter((root): root is string => Boolean(root))
+    .map(root => resolve(root, 'platform-tools'))
+    .filter(dir => { try { accessSync(resolve(dir, 'adb'), constants.X_OK); return true; } catch { return false; } });
+  agentEnv.PATH = [...new Set([...agentEnv.PATH.split(delimiter), ...toolDirs])].join(delimiter);
   agentEnv.TMPDIR = merged.TMPDIR ?? process.env.TMPDIR ?? '/tmp';
   agentEnv.RUST_LOG = merged.RUST_LOG ?? 'warn';
 

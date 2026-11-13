@@ -1,5 +1,6 @@
 import React from 'react';
-import { View, FlatList, Platform, type ViewProps, type ViewToken } from 'react-native';
+import { Platform, type FlatList, type ViewProps, type ViewToken } from 'react-native';
+import { YStack } from 'tamagui';
 import { type ChatDisplayMessage } from '@/buzz/room-view-presentation';
 import { type ComposerAckPresentation } from '@/buzz/room-indicators';
 import { RoomSendList, RoomSendPreview } from '@/buzz/room-send-list';
@@ -8,7 +9,7 @@ import { phoneTranscriptTailPadding } from '@/buzz/room-scroll-follow';
 import { transcriptKeyboardDismissMode } from '@/buzz/composer-keyboard';
 import { RoomUnreadControls } from '@/components/buzz/RoomUnreadControls';
 import { TranscriptScrubber } from '@/components/buzz/TranscriptScrubber';
-import { styles } from './chat-surface-styles';
+import { DesktopScroll, ListPad } from '@/ui/grammar';
 import { PHONE_FIRST_RENDER_ROWS, TAIL_PIN_THRESHOLD } from './chat-surface-values';
 
 type Props = {
@@ -33,7 +34,7 @@ type Props = {
   anchoredSegmentActive: boolean;
   phoneScrollOffsetRef: React.RefObject<number>;
   observePhoneTailOffset: (offsetY: number) => void;
-  transcriptPositions: { getSnapshot: () => import("@/buzz/use-transcript-scrubber").TranscriptScrubberSnapshot; subscribe(listener: () => void): () => void; reveal: () => void; observeScroll(event: { contentOffset: { y: number; }; contentSize: { height: number; }; layoutMeasurement: { height: number; }; }): void; observeContentSize(contentHeight: number): void; observeVisibleRows(rows: readonly ChatDisplayMessage[]): void; reset(): void; dispose(): void; };
+  transcriptPositions: { getSnapshot: () => import("@/buzz/use-transcript-scrubber").TranscriptScrubberSnapshot; subscribe(listener: () => void): () => void; reveal: (position?: number) => void; observeScroll(event: { contentOffset: { y: number; }; contentSize: { height: number; }; layoutMeasurement: { height: number; }; }, readerScrolling?: boolean): void; observeContentSize(contentHeight: number): void; observeVisibleRows(rows: readonly ChatDisplayMessage[]): void; reset(): void; dispose(): void; };
   loadNewerTranscriptMessages: () => void;
   observeVisibleTranscriptMessages: ({ viewableItems }: { viewableItems: ViewToken<ChatDisplayMessage>[]; }) => void;
   allowOlderHistoryRef: React.RefObject<boolean>;
@@ -51,9 +52,11 @@ type Props = {
   newMessageBadgeCount: number;
   newestJumpDiscShown: boolean;
   landAtNewestMessage: () => void;
+  /** The transcript's first (oldest) block: a thread's title block (header B). */
+  leadBlock?: React.ReactNode;
 };
 
-export function ChatSurfaceTranscript({
+export const ChatSurfaceTranscript = React.memo(function ChatSurfaceTranscript({
   desktopTranscript,
   setDesktopScrollNode,
   handleDesktopScroll,
@@ -93,53 +96,65 @@ export function ChatSurfaceTranscript({
   newMessageBadgeCount,
   newestJumpDiscShown,
   landAtNewestMessage,
+  leadBlock,
 }: Props) {
-  return (<View style={styles.transcriptViewport}>
+  return (<YStack flex={1} position="relative">
               {desktopTranscript ? (
                 // A plain scrollable View over real DOM — no FlatList/
                 // VirtualizedList. See `shouldFollowDesktopTail` in
                 // `buzz/room-scroll-follow.ts` and proof/desktop-append-overlap/
                 // NOTES.md for why RN Web's own list machinery raced the browser's
                 // real layout on this surface.
-                <View
+                <DesktopScroll
                   testID="chat-messages"
-                  ref={setDesktopScrollNode as unknown as React.Ref<View>}
+                  ref={setDesktopScrollNode as unknown as React.Ref<never>}
                   {...{
                     onScroll: handleDesktopScroll,
                     // A wheel or touch scroll is the reader taking the list.
                     onWheel: scrollController.userScrolled,
                     onTouchMove: scrollController.userScrolled,
                   }}
-                  style={[styles.messageList, styles.desktopScroll]}
                 >
-                  <View
-                    ref={setDesktopContentNode as unknown as React.Ref<View>}
-                    style={[
-                      styles.messageListContent,
-                      styles.messageListContentDesktop,
-                      transcriptMessages.length === 0 && styles.messageListContentEmpty,
-                    ]}
+                  <YStack
+                    ref={setDesktopContentNode as unknown as React.Ref<never>}
+                    padding="4"
+                    width="100%"
+                    maxWidth={720}
+                    alignSelf="center"
+                    flexGrow={1}
+                    justifyContent="flex-end"
                   >
+                    {leadBlock}
                     {emptyLedger}
                     {transcriptMessages.length > 0 && (
                       <>
                         {transcriptHistoryLine}
                         {transcriptMessages.map((item) => (
-                          <View
+                          <YStack
                             key={item.id}
-                            {...{ dataSet: { rowId: item.id } }}
-                            ref={getDesktopRowRefCallback(item.id) as unknown as React.Ref<View>}
+                            data-row-id={item.id}
+                            ref={getDesktopRowRefCallback(item.id) as unknown as React.Ref<never>}
                           >
                             {renderItem({ item })}
-                          </View>
+                          </YStack>
                         ))}
                         {transcriptForwardLine}
                       </>
                     )}
-                  </View>
-                </View>
+                  </YStack>
+                </DesktopScroll>
               ) : (
-                <RoomSendList
+                <ListPad
+                  list={RoomSendList}
+                  x="4"
+                  y="4"
+                  // Inverted list: the top pad is the visual tail, measured
+                  // from the whole newest row (including reaction chips).
+                  // The absolute turn canvas fits inside this fixed inset.
+                  top={isArchived ? undefined : phoneTranscriptTailPadding({
+                    turnChromeVisible: Boolean(composerAck || settledTurn),
+                  })}
+                  emptyGrow
                   preview={sendPreview}
                   testID="chat-messages"
                   ref={flatListRef}
@@ -152,19 +167,6 @@ export function ChatSurfaceTranscript({
                   data={transcriptMessages}
                   keyExtractor={(item: ChatDisplayMessage) => phoneRowKey(item.id)}
                   CellRendererComponent={PhoneTranscriptCell}
-                  style={styles.messageList}
-                  emptyContentContainerStyle={styles.messageListContentEmpty}
-                  contentContainerStyle={[
-                    styles.messageListContent,
-                    // Inverted list: paddingTop is the visual tail, measured
-                    // from the whole newest row (including reaction chips).
-                    // The absolute turn canvas fits inside this fixed inset.
-                    !isArchived && {
-                      paddingTop: phoneTranscriptTailPadding({
-                        turnChromeVisible: Boolean(composerAck || settledTurn),
-                      }),
-                    },
-                  ]}
                   maintainVisibleContentPosition={{
                     // Native records the first eligible visible child's real
                     // frame and compensates by its measured movement. That
@@ -186,11 +188,17 @@ export function ChatSurfaceTranscript({
                   onScroll={(event) => {
                     phoneScrollOffsetRef.current = event.nativeEvent.contentOffset.y;
                     observePhoneTailOffset(event.nativeEvent.contentOffset.y);
-                    transcriptPositions.observeScroll(event.nativeEvent);
+                    transcriptPositions.observeScroll(
+                      event.nativeEvent,
+                      Platform.OS === 'web' || scrollController.isUserDragging() || scrollController.isLanding(),
+                    );
                     if (
                       anchoredSegmentActive &&
                       event.nativeEvent.contentOffset.y <= TAIL_PIN_THRESHOLD &&
-                      !scrollController.isLanding()
+                      !scrollController.isLanding() &&
+                      // Native can deliver a queued tail offset after landing.
+                      // Keep the target until a reader gesture releases it.
+                      !scrollController.isHoldingLanding()
                     )
                       loadNewerTranscriptMessages();
                   }}
@@ -230,8 +238,14 @@ export function ChatSurfaceTranscript({
                   // scroll is the same signal there.
                   {...(Platform.OS === 'web'
                     ? {
-                        onTouchMove: scrollController.userScrolled,
-                        onWheel: scrollController.userScrolled,
+                        onTouchMove: () => {
+                          allowOlderHistoryRef.current = true;
+                          scrollController.userScrolled();
+                        },
+                        onWheel: () => {
+                          allowOlderHistoryRef.current = true;
+                          scrollController.userScrolled();
+                        },
                       }
                     : {})}
                   onLayout={(event) => {
@@ -249,27 +263,28 @@ export function ChatSurfaceTranscript({
                   onScrollToIndexFailed={phoneScrollList.scrollToIndexFailed}
                   onEndReached={loadOlderTranscriptIfReaderAsked}
                   onEndReachedThreshold={0.5}
-                  ListEmptyComponent={emptyLedger}
+                  ListEmptyComponent={leadBlock ? <>{leadBlock}{emptyLedger}</> : emptyLedger}
                   // Inverted native list: the header is the newest end of the transcript.
                   ListHeaderComponent={
                     starPrompt.prompt || transcriptForwardLine ? (
-                      <View>
+                      <YStack>
                         {transcriptForwardLine}
                         {starPrompt.prompt ? (
-                          <View style={styles.starPrompt}>
+                          <YStack paddingTop="4">
                             <StarPromptCard
                               prompt={starPrompt.prompt}
                               busy={starPrompt.busy}
                               onAnswer={(action) => void starPrompt.answer(action)}
                             />
-                          </View>
+                          </YStack>
                         ) : null}
-                      </View>
+                      </YStack>
                     ) : null
                   }
                   // Inverted native list: the footer is the visual top.
                   ListFooterComponent={
                     <>
+                      {transcriptMessages.length > 0 && leadBlock}
                       {transcriptHistoryLine}
                       {transcriptMessages.length > 0 && emptyLedger}
                     </>
@@ -290,5 +305,5 @@ export function ChatSurfaceTranscript({
                 discVisible={newestJumpDiscShown}
                 onJumpToNewest={landAtNewestMessage}
               />
-            </View>);
-}
+            </YStack>);
+});

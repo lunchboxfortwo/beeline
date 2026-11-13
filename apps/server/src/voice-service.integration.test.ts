@@ -646,28 +646,26 @@ it('Reproduction VOICE-TAG-1: final call reply wakes another agent once and sees
   const room = '31313131-3131-4131-8131-313131313131';
   await db.query(`INSERT INTO rooms(id,workspace_id,name) VALUES($1,$2,'Voice tag proof')`, [room,W]);
   for (const id of [H,A,B]) await db.query(`INSERT INTO memberships(workspace_id,room_id,identity_id,role) VALUES($1,$2,$3,'member')`, [W,room,id]);
-  await db.query(`UPDATE identities SET name='Baby',handle='baby' WHERE id=$1`,[B]);
   try {
-    await service.recordAnswer(room,A,'@baby let me look.', {routeMentions:false});
+    await service.recordAnswer(room,A,'@sol let me look.', {routeMentions:false});
     await service.recordAnswer(room,A,'@ruby @missing hello.', {replyId:'self-and-missing'});
     expect((await db.query(`SELECT * FROM agent_commands WHERE room_id=$1`,[room])).rows).toHaveLength(0);
-    await service.recordAnswer(room,A,'@baby what are you up to?',{replyId:'final-answer'});
-    await service.recordAnswer(room,A,'@baby what are you up to?',{replyId:'final-answer'});
+    await service.recordAnswer(room,A,'@sol what are you up to?',{replyId:'final-answer'});
+    await service.recordAnswer(room,A,'@sol what are you up to?',{replyId:'final-answer'});
     const commands = (await db.query<CommandRow>(`SELECT * FROM agent_commands WHERE room_id=$1`,[room])).rows;
     expect(commands).toHaveLength(1);
     expect(commands[0]).toMatchObject({agent_id:B,reason:'agent_tag',agent_depth:0,private_payload:null});
     expect((await db.query(`SELECT text,author_id FROM messages WHERE id=$1`,[commands[0]!.source_message_id])).rows[0])
-      .toEqual({text:'@baby what are you up to?',author_id:A});
+      .toEqual({text:'@sol what are you up to?',author_id:A});
     await db.transaction(tx=>routeAgentResult(tx,undefined,commands[0]!.source_message_id!,{roomId:room,agentId:A}));
     expect((await db.query(`SELECT * FROM agent_commands WHERE room_id=$1`,[room])).rows).toHaveLength(1);
     await service.recordAnswer(room,B,'I am checking the call history.');
     expect(JSON.stringify(await readVoiceContext(db,room,'next-turn',A))).toContain('I am checking the call history.');
     await db.query(`UPDATE memberships SET removed_at=now() WHERE room_id=$1 AND identity_id=$2`,[room,B]);
-    await service.recordAnswer(room,A,'@baby are you still here?',{replyId:'removed-member'});
+    await service.recordAnswer(room,A,'@sol are you still here?',{replyId:'removed-member'});
     expect((await db.query(`SELECT * FROM agent_commands WHERE room_id=$1`,[room])).rows).toHaveLength(1);
     console.log('VOICE-TAG-1: final post -> one agent_tag -> reply in next voice history; replay, acknowledgements, self and nonmembers bounded. Pglite service stand-in; RTC and model not live.');
   } finally {
-    await db.query(`UPDATE identities SET name='Sol',handle='sol' WHERE id=$1`,[B]);
     await db.query(`DELETE FROM rooms WHERE id=$1`,[room]);
   }
 });

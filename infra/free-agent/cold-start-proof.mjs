@@ -212,7 +212,7 @@ try {
   const workspace = await operation('createWorkspace', { name: 'Disposable cold-start proof' });
   const agent = (
     await db.query(
-      `SELECT f.agent_id,i.handle FROM free_agents f JOIN identities i ON i.id=f.agent_id WHERE f.workspace_id=$1`,
+      `SELECT f.agent_id,i.handle FROM free_agents f JOIN memberships workspace_member ON workspace_member.identity_id=f.agent_id AND workspace_member.room_id IS NULL JOIN identities i ON i.id=f.agent_id WHERE workspace_member.workspace_id=$1`,
       [workspace.id],
     )
   ).rows[0];

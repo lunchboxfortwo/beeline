@@ -1,7 +1,10 @@
+import { backfillProviderPhotos } from './migrations/provider-photos.js';
 import { DIAGNOSTIC_COMMAND_SCHEMA } from './diagnostics-schema.js';
 import { SQUIRE_MACHINE_SCHEMA } from './squire-machine.js';
 import { backfillSquireMachines } from './squire-machine.js';
 import { IDENTITY_HANDLE_SCHEMA } from './identity-handles.js';
+import { WORKSPACE_HANDLE_SCHEMA } from './workspace-handles.js';
+import { CHAT_SEQ_INDEX, CHAT_SEQ_SCHEMA, backfillChatSeq } from './chat-seq.js';
 import { OWNED_MODEL_CREDENTIAL_SCHEMA } from './owned-model-credential.js';
 import { OWNED_MODEL_ATTEMPT_SCHEMA } from './owned-model-attempt.js';
 import { SENTRY_WAKE_SOURCE_SCHEMA } from './sentry-wake-source.js';
@@ -24,7 +27,7 @@ import { MOBILE_MINIMUM_SCHEMA } from './mobile-minimum.js';
 import { STARTER_ONBOARDING_SCHEMA } from './starter-onboarding-run.js';
 import { NEXT_DAY_CHECKIN_SCHEMA } from './next-day-checkin.js';
 import { ROOMS_MCP_SCHEMA } from './rooms-mcp-schema.js';
-import { backfillMcpMemberRoomsAndAvatars, backfillMcpMembers } from './rooms-mcp-members.js';
+import { backfillMcpMemberAvatars, backfillMcpMembers } from './rooms-mcp-members.js';
 import { seedPreregisteredMcpClients } from './rooms-mcp-preregistered.js';
 import { backfillCornerHoldMessages, releaseArchivedCornerHolds } from './corner-holds.js';
 import { OPERATOR_SYSTEM_DM_SCHEMA } from './operator-system-dm.js';
@@ -53,8 +56,8 @@ import { backfillFeedbackTriageWorkflow, backfillFeedbackSignalWalk, backfillWor
 import { backfillWorkflowSkillDescriptions, closeStaleWorkflowGateChoices } from './workflow-runs.js';
 import { withdrawSupersededGrantAsks } from './grant-policy-upgrade.js';
 import { restoreOwnerApprovedGrants } from './migrations/owner-approved-grants.js';
+import { clearDepartedReviewers } from './migrations/departed-reviewers.js';
 import { backfillRegistryApps } from './app-connections.js';
-import { syncTopLevelSharedRoomRoles } from './membership-join.js';
 import { postgresLiveSchema } from './postgres-live.js';
 import { TURN_OWNERSHIP_SCHEMA } from './turn-ownership.js';
 import { COMPUTER_EXPIRY_SCHEMA } from './computer-expiry-schema.js';
@@ -62,11 +65,12 @@ import { CHOICE_EXPIRY_SCHEMA } from './choice-expiry-schema.js';
 import { askingMessageSql, cardExpiresAtSql, EXPIRING_CARD_TYPES } from './needs-you.js';
 import { cancelArchivedCornerAssignments } from './corner-close.js';
 import { cornerOwedSchemaSql } from './corner-owed.js';
-import { cornerWaitingFunctionSql } from './corner-waiting-report.js';
+import { cornerWaitingFunctionSql } from './corner-waiting.js';
 import { CORNER_ATTENTION_SCHEMA } from './corner-attention.js';
 import { backfillCornerFollows, cornerFollowsSchemaSql } from './corner-follow.js';
 import { alreadyNoOp, alreadySatisfied, triggerAlreadyCurrent, runMigrationStep, splitMigrationStatements } from './migration-steps.js';
 import { SqlDatabase, SCHEMA, MESSAGE_CURSOR_MS_SQL } from './database.js';
+import { retireOrphanRoomMemberships } from './membership-join.js';
 import { createIndexConcurrently, backfillMessageSearchDocuments, backfillSquireApprovalExpiry, compactWebhookDeliveries, compactPushClaims, backfillCornerOwed, backfillSystemEventKinds, backfillPerItemEventSubscriptions, backfillInstitutionalMemoryRollout, retireStandingPreferences, backfillConnectorMachineId } from './database-backfill-squire-approval-expiry.js';
 
 
@@ -75,7 +79,7 @@ export async function migrate(
   database: SqlDatabase,
   options: { deferData?: boolean } = {},
 ): Promise<void> {
-  const ddl = async (name: string, sql: string) => runMigrationStep(name, async () => {
+  const ddl = async (name: string, sql: string, db: SqlDatabase = database) => runMigrationStep(name, async () => {
     const statement = sql.replace(/^(?:\s*--[^\n]*\n)*/, '').trim();
     const index = /^CREATE\s+(UNIQUE\s+)?INDEX\s+(?:IF\s+NOT\s+EXISTS\s+)?(\w+)\s+ON\b/i.exec(statement);
     if (index) {
@@ -86,21 +90,32 @@ export async function migrate(
     // ALTER lock. Validation uses PostgreSQL's weaker online lock separately.
     const constraint = /^ALTER\s+TABLE\s+(\w+)\s+ADD\s+CONSTRAINT\s+(\w+)\s+(?:CHECK|FOREIGN\s+KEY)\b/i.exec(statement);
     if (constraint && !/\bNOT\s+VALID\b/i.test(statement)) {
-      await database.query(statement.replace(/;?\s*$/, ' NOT VALID;'));
-      await database.query(`ALTER TABLE ${constraint[1]} VALIDATE CONSTRAINT ${constraint[2]}`);
+      await db.query(statement.replace(/;?\s*$/, ' NOT VALID;'));
+      await db.query(`ALTER TABLE ${constraint[1]} VALIDATE CONSTRAINT ${constraint[2]}`);
       return;
     }
-    await database.query(sql);
+    await db.query(sql);
   });
-  const ddlScript = async (name: string, sql: string) => {
+  const ddlScript = async (name: string, sql: string, atomic = false) => {
     const statements = splitMigrationStatements(sql);
-    for (let index = 0; index < statements.length; index++) {
-      const statement = statements[index]!;
-      if (await alreadySatisfied(database, statement) || await alreadyNoOp(database, statement)) continue;
-      const next = statements[index + 1];
-      if (next && await triggerAlreadyCurrent(database, statement, next)) { index++; continue; }
-      await ddl(`${name} ${index + 1}/${statements.length}`, statement);
+    const isIndex = (statement: string) => /^CREATE\s+(?:UNIQUE\s+)?INDEX\b/i.test(statement.replace(/^(?:\s*--[^\n]*\n)*/, '').trim());
+    // Concurrent indexes must finish outside the function/trigger transaction.
+    // A failed replacement must leave every serving source installed.
+    if (atomic) for (const statement of statements.filter(isIndex)) {
+      if (!await alreadySatisfied(database, statement)) await ddl(`${name} index`, statement);
     }
+    const install = async (db: SqlDatabase) => {
+      for (let index = 0; index < statements.length; index++) {
+        const statement = statements[index]!;
+        if (atomic && isIndex(statement)) continue;
+        if (await alreadySatisfied(db, statement) || await alreadyNoOp(db, statement)) continue;
+        const next = statements[index + 1];
+        if (next && await triggerAlreadyCurrent(db, statement, next)) { index++; continue; }
+        await ddl(`${name} ${index + 1}/${statements.length}`, statement, db);
+      }
+    };
+    if (atomic) await database.transaction(install);
+    else await install(database);
   };
   await ddlScript('server schema', SCHEMA);
   await ddlScript('Rooms MCP OAuth', ROOMS_MCP_SCHEMA);
@@ -143,15 +158,21 @@ export async function migrate(
     DROP FUNCTION IF EXISTS defer_startup_wake();
   `);
   await ddlScript('free agents schema', FREE_AGENTS_SCHEMA);
+  await runMigrationStep('Workspace member cleanup', async () => {
+    await workflowBackfillOnce(database, 'workspace-members-cleanup-v1', db => db.transaction(async tx => {
+      await retireOrphanRoomMemberships(tx);
+    }));
+  });
   await ddlScript('machine Squire source', SQUIRE_MACHINE_SCHEMA);
+  await ddlScript('workspace handles', WORKSPACE_HANDLE_SCHEMA);
+  await ddlScript('chat message numbers', CHAT_SEQ_SCHEMA);
+  await runMigrationStep('chat message number lookup', () => createIndexConcurrently(database,
+    'messages_author_chat_seq_idx', CHAT_SEQ_INDEX));
   await ddlScript('stable identity handles', IDENTITY_HANDLE_SCHEMA);
   await runMigrationStep('one pending app sign-in card',()=>createIndexConcurrently(database,
     'messages_pending_app_sign_in_unique',`CREATE UNIQUE INDEX CONCURRENTLY messages_pending_app_sign_in_unique
       ON messages(room_id,(card->>'appId'),(card->>'ownerId')) NULLS NOT DISTINCT
       WHERE card_type='app-sign-in' AND card->>'status'='pending'`));
-  await runMigrationStep('one Luna per workspace',()=>createIndexConcurrently(database,
-    'free_agents_workspace_luna_unique',`CREATE UNIQUE INDEX CONCURRENTLY free_agents_workspace_luna_unique
-      ON free_agents(workspace_id) WHERE starter_role='luna'`));
   await runMigrationStep('one presence per agent', async()=>{
     await database.query(`DELETE FROM live_outputs presence USING (
       SELECT room_id,agent_id,turn_id,row_number() OVER(PARTITION BY agent_id ORDER BY updated_at DESC,room_id,turn_id) position
@@ -543,7 +564,7 @@ export async function migrate(
   await ddlScript('X signup delivery deadlines', X_SIGNUP_DELIVERY_SCHEMA);
   await ddlScript('command completion notifications', commandCompletionSchema());
   await runMigrationStep('normalize machine Squire state', () => backfillSquireMachines(database));
-  await ddlScript('MCP member stream', MCP_MEMBER_STREAM_SCHEMA);
+  await ddlScript('MCP member stream', MCP_MEMBER_STREAM_SCHEMA, true);
   await ddlScript('Helper overlay demand', HELPER_OVERLAY_SCHEMA);
   await ddlScript('Helper usage ownership', HELPER_USAGE_SCHEMA);
   await ddlScript('Helper command activation', HELPER_ACTIVATION_SCHEMA);
@@ -565,6 +586,12 @@ export async function migrateData(database: SqlDatabase): Promise<void> {
     });
     return result;
   };
+  await dataStep('chat message numbers', () => workflowBackfillOnce(
+    database, 'chat-seq-v1', async db => { await backfillChatSeq(db); }));
+  await dataStep('provider photos', () => workflowBackfillOnce(
+    database, 'provider-photos-v1', async db => { await backfillProviderPhotos(db); }));
+  await dataStep('departed reviewers', () => workflowBackfillOnce(
+    database, 'departed-reviewers-v1', clearDepartedReviewers));
   await dataStep('archived corner holds', () => releaseArchivedCornerHolds(database));
   await dataStep('corner hold messages', () => backfillCornerHoldMessages(database));
   await dataStep('push outbox cutover', () => workflowBackfillOnce(
@@ -610,13 +637,9 @@ export async function migrateData(database: SqlDatabase): Promise<void> {
   await dataStep('rooms MCP preregistered clients', () => seedPreregisteredMcpClients(database));
   const mcpMembers = await dataStep('rooms MCP members', () => backfillMcpMembers(database));
   if (mcpMembers) console.log(`backfillMcpMembers: created ${mcpMembers} member(s)`);
-  await dataStep('rooms MCP member public Rooms and logos', () =>
-    workflowBackfillOnce(database, 'rooms-mcp-member-public-rooms-v1', backfillMcpMemberRoomsAndAvatars));
-  await dataStep('rooms MCP app default pictures', () =>
-    workflowBackfillOnce(database, 'rooms-mcp-app-default-pictures-v2', backfillMcpMemberRoomsAndAvatars));
   // ChatGPT moves from Dots to the OpenAI mark; Cursor and apps without a logo get the bot face.
   await dataStep('rooms MCP app logo pictures', () =>
-    workflowBackfillOnce(database, 'rooms-mcp-app-default-pictures-v3', backfillMcpMemberRoomsAndAvatars));
+    workflowBackfillOnce(database, 'rooms-mcp-app-default-pictures-v3', backfillMcpMemberAvatars));
   await dataStep('stored corner workflows', () => deleteStoredCornerWorkflows(database));
   await dataStep('corner lifecycle runs', () => backfillCornerLifecycleRuns(database));
   await dataStep('feedback triage workflow', () =>
@@ -638,10 +661,7 @@ export async function migrateData(database: SqlDatabase): Promise<void> {
   await dataStep('workflow run status', () => saveUnsavedWorkflowRunStatus(database));
   await dataStep('abandoned workflow endings', () =>
     workflowBackfillOnce(database, 'abandoned-workflow-endings-v1', reportAbandonedWorkflowEndings));
-  // A timer lost after any release stalls its run; re-arm missing ones every boot.
-  const syncedRoomRoles = await dataStep('top-level Room roles', () =>
-    syncTopLevelSharedRoomRoles(database));
-  console.log(`syncTopLevelSharedRoomRoles: updated ${syncedRoomRoles} stale Room role(s)`);
+
   await dataStep('system event kinds', () => backfillSystemEventKinds(database));
   const strippedSubscriptions = await dataStep('per-item event subscriptions', () =>
     backfillPerItemEventSubscriptions(database));

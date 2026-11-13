@@ -1,5 +1,8 @@
 app = "beeline-server"
 primary_region = "iad"
+kill_signal = "SIGTERM"
+# Allow the bounded request drain and cleanup to finish before Fly intervenes.
+kill_timeout = "20s"
 
 [build]
   dockerfile = "apps/server/Dockerfile"
@@ -11,6 +14,8 @@ primary_region = "iad"
   # Nine helpers can reconnect together; keep one leader slot plus their
   # evidence writes without starving phone/auth requests.
   DATABASE_POOL_MAX = "10"
+  # Budget for both serving Machines and one overlapping restart.
+  BEELINE_SERVER_MACHINES = "3"
   MEDIA_MAX_BYTES = "26214400"
   PUBLIC_ORIGIN = "https://server.usebeeline.app"
   BEELINE_WEB_APP_ORIGINS = "https://web.usebeeline.app"

@@ -32,7 +32,7 @@ describe('listAgentGrantRequests', () => {
       WORKSPACE,
     ]);
     await db.query(
-      `INSERT INTO memberships(workspace_id,room_id,identity_id,role) VALUES($1,$2,$3,'member')`,
+      `INSERT INTO memberships(workspace_id,room_id,identity_id,role) VALUES($1,NULL,$3,'member'),($1,$2,$3,'member')`,
       [WORKSPACE, ROOM, AGENT],
     );
     await db.query(
@@ -86,7 +86,7 @@ describe('listAgentGrantRequests', () => {
     );
     await db.query(`INSERT INTO agents(agent_id,owner_id) VALUES($1,$2)`, [stranger, OWNER]);
     await db.query(
-      `INSERT INTO memberships(workspace_id,room_id,identity_id,role) VALUES($1,$2,$3,'member')`,
+      `INSERT INTO memberships(workspace_id,room_id,identity_id,role) VALUES($1,NULL,$3,'member'),($1,$2,$3,'member')`,
       [WORKSPACE, ROOM, stranger],
     );
     const listed = await daemon.execute(
@@ -95,6 +95,18 @@ describe('listAgentGrantRequests', () => {
       stranger,
     );
     expect(listed.grants).toEqual([]);
+  });
+
+  it('keeps expired command grants inspectable for refusal diagnostics without authorizing them', async () => {
+    const grantId = '10000000-0000-4000-8000-000000000099';
+    await db.query(`INSERT INTO agent_grants(id,agent_id,workspace_id,kind,target,reason,requested_by,room_id,status,expires_at)
+      VALUES($1,$2,$3,'command','echo expired','diagnostic proof',$4,$5,'approved',now()-interval '1 second')`,
+      [grantId, AGENT, WORKSPACE, OWNER, ROOM]);
+    const history = await daemon.execute('listAgentGrantRequests', { roomId: ROOM }, AGENT);
+    expect(history.grants.find(grant => grant.grantId === grantId)?.expiresAt).toBeLessThan(Date.now() / 1000);
+    const live = await daemon.execute('listAgentGrants', { roomId: ROOM }, AGENT);
+    expect(live.grants.some(grant => grant.grantId === grantId)).toBe(false);
+    await db.query('DELETE FROM agent_grants WHERE id=$1', [grantId]);
   });
 
   it('keeps pending decisions separate across agents in different Rooms of one Workspace', async () => {
@@ -118,7 +130,7 @@ describe('listAgentGrantRequests', () => {
     const corner = '44444444-4444-4444-8444-444444444444';
     const grantId = '10000000-0000-4000-8000-000000000005';
     await db.query(`INSERT INTO memberships(workspace_id,room_id,identity_id,role)
-      VALUES($1,NULL,$2,'member')`, [WORKSPACE, OTHER_AGENT]);
+      VALUES($1,NULL,$2,'member') ON CONFLICT DO NOTHING`, [WORKSPACE, OTHER_AGENT]);
     await db.query(`INSERT INTO memberships(workspace_id,room_id,identity_id,role)
       VALUES($1,$2,$3,'member') ON CONFLICT DO NOTHING`, [WORKSPACE, ROOM, OTHER_AGENT]);
     await db.query(`INSERT INTO rooms(id,workspace_id,parent_id,name,created_by)

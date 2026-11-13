@@ -1,3 +1,4 @@
+import { githubProviderKey } from './providers/index.js';
 import { storeGitHubInstallations } from './github-installation-store.js';
 import type { InstallationSnapshot } from './github-installation-store.js';
 import { cornerLifecycleSql } from './corner-github-cache.js';
@@ -73,11 +74,11 @@ import { GitHubOperations, Input, hash, challenge, record, GitHubRecord, text, i
     return ctx.database.transaction(async (database) => {
       const existing = (
         await database.query<{ identity_id: string }>(
-          `SELECT identity_id FROM identity_external_links WHERE provider='github' AND subject=$1`,
+          `SELECT identity_id FROM identity_external_links WHERE provider='${githubProviderKey}' AND subject=$1`,
           [github!.subject],
         )
       ).rows[0];
-      const current = (await database.query<{ subject: string }>(`SELECT subject FROM identity_external_links WHERE provider='github' AND identity_id=$1`, [viewerId])).rows[0];
+      const current = (await database.query<{ subject: string }>(`SELECT subject FROM identity_external_links WHERE provider='${githubProviderKey}' AND identity_id=$1`, [viewerId])).rows[0];
       if (current && current.subject !== github!.subject) throw new Error('github_account_mismatch');
       if (existing && existing.identity_id !== viewerId && !recover)
         throw new Error('GitHub identity is already linked');
@@ -86,13 +87,13 @@ import { GitHubOperations, Input, hash, challenge, record, GitHubRecord, text, i
           existing.identity_id,
         ]);
         await database.query(
-          `INSERT INTO identity_successions(old_identity_id,new_identity_id,provider,subject) VALUES($1,$2,'github',$3) ON CONFLICT(old_identity_id) DO UPDATE SET new_identity_id=EXCLUDED.new_identity_id,subject=EXCLUDED.subject`,
+          `INSERT INTO identity_successions(old_identity_id,new_identity_id,provider,subject) VALUES($1,$2,'${githubProviderKey}',$3) ON CONFLICT(old_identity_id) DO UPDATE SET new_identity_id=EXCLUDED.new_identity_id,subject=EXCLUDED.subject`,
           [existing.identity_id, viewerId, github!.subject],
         );
       }
       await database.query(
         `INSERT INTO identity_external_links(provider,subject,identity_id,issuer,audience,provider_login)
-         VALUES('github',$1,$2,$3,$4,$5)
+         VALUES('${githubProviderKey}',$1,$2,$3,$4,$5)
          ON CONFLICT(provider,subject) DO UPDATE SET
            identity_id=EXCLUDED.identity_id,
            issuer=EXCLUDED.issuer,
@@ -145,7 +146,7 @@ import { GitHubOperations, Input, hash, challenge, record, GitHubRecord, text, i
     const flow=(await ctx.database.query<{identity_id:string;redirect_uri:string;github_subject:string|null}>(
       `UPDATE github_auth_flows SET consumed_at=now() WHERE state_hash=$1 AND purpose='installation'
         AND consumed_at IS NULL AND expires_at>now() RETURNING identity_id,redirect_uri,
-        (SELECT link.subject FROM identity_external_links link WHERE link.provider='github'
+        (SELECT link.subject FROM identity_external_links link WHERE link.provider='${githubProviderKey}'
           AND link.identity_id=github_auth_flows.identity_id) github_subject`,[hash(state)])).rows[0];
     if (!flow) throw new Error('GitHub installation flow not found or expired');
     try {
@@ -185,7 +186,7 @@ import { GitHubOperations, Input, hash, challenge, record, GitHubRecord, text, i
         if (identity) {
           const bound=await database.query(`WITH linked AS (
             INSERT INTO identity_external_links(provider,subject,identity_id,issuer,audience,provider_login)
-            VALUES('github',$1,$2,$3,$4,$5) ON CONFLICT(provider,subject) DO UPDATE SET provider_login=EXCLUDED.provider_login
+            VALUES('${githubProviderKey}',$1,$2,$3,$4,$5) ON CONFLICT(provider,subject) DO UPDATE SET provider_login=EXCLUDED.provider_login
               WHERE identity_external_links.identity_id=EXCLUDED.identity_id RETURNING subject
           ), bound AS (
             UPDATE identities SET github_subject=linked.subject,updated_at=now() FROM linked
@@ -601,18 +602,27 @@ import { GitHubOperations, Input, hash, challenge, record, GitHubRecord, text, i
       return;
     }
     if (pr.merged || pr.headSha === stored.head) return;
-    await ctx.database.transaction(async db => {
-      await lockCornerLifecycle(db, cornerId);
-      const changed = await db.query(
-        `UPDATE corner_github_cache SET lifecycle=jsonb_set(
-           jsonb_set(lifecycle-'checksSummary'-'checkRefreshRetry','{pr,headSha}',to_jsonb($4::text)),
-           '{checks}','"pending"')
-         WHERE corner_id=$1 AND lifecycle->'pr'->>'number'=$2
-           AND lifecycle->'pr'->>'headSha'=$3 RETURNING corner_id`,
-        [cornerId, String(stored.number), stored.head, pr.headSha],
-      );
-      if (changed.rowCount) await advanceCorner(db, cornerId,
-        { kind: 'push', headSha: pr.headSha, contents: { headSha: pr.headSha } });
+    const nextHead = pr.headSha;
+    await advanceCorner(ctx.database, cornerId, { kind: 'push', headSha: nextHead, contents: { headSha: nextHead } }, {
+      project(corner) {
+        const current = corner.lifecycle.pr;
+        if (!current || current.number !== stored.number || current.headSha !== stored.head) return undefined;
+        const lifecycle = { ...corner.lifecycle, checks: 'pending' as const, pr: { ...current, headSha: nextHead } };
+        delete (lifecycle as { checksSummary?: unknown }).checksSummary;
+        delete (lifecycle as { checkRefreshRetry?: unknown }).checkRefreshRetry;
+        return { corner: { ...corner, lifecycle } };
+      },
+      async write(db) {
+        const changed = await db.query(
+          `UPDATE corner_github_cache SET lifecycle=jsonb_set(
+             jsonb_set(lifecycle-'checksSummary'-'checkRefreshRetry','{pr,headSha}',to_jsonb($4::text)),
+             '{checks}','"pending"')
+           WHERE corner_id=$1 AND lifecycle->'pr'->>'number'=$2
+             AND lifecycle->'pr'->>'headSha'=$3 RETURNING corner_id`,
+          [cornerId, String(stored.number), stored.head, nextHead],
+        );
+        return Boolean(changed.rowCount);
+      },
     });
   }
 

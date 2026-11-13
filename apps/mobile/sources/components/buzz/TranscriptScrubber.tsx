@@ -7,14 +7,14 @@ import React, {
   useState,
   useSyncExternalStore,
 } from 'react';
-import { PanResponder, Text, View } from 'react-native';
-import { StyleSheet } from 'react-native-unistyles';
+import { PanResponder } from 'react-native';
+import { YStack } from 'tamagui';
+import { T } from '@/ui/grammar';
 import type {
   TranscriptScrollController,
   TranscriptScrollRow,
 } from '@/buzz/transcript-scroll-controller';
 import {
-  scrollBarPosition,
   scrubOffset,
   scrubReachesOldest,
   type TranscriptScrollMetrics,
@@ -49,14 +49,14 @@ export function TranscriptScrubber({
   loadOlder: () => void;
   scrollController: Pick<TranscriptScrollController<TranscriptScrollRow>, 'request'>;
 }) {
-  const { metrics, date, visible } = useSyncExternalStore(
+  const { metrics, position: listPosition, date, visible } = useSyncExternalStore(
     positions.subscribe,
     positions.getSnapshot,
   );
   const [railHeight, setRailHeight] = useState(0);
   // The thumb follows the finger while dragging, not the list's echo.
   const [dragPosition, setDragPosition] = useState<number | null>(null);
-  const position = dragPosition ?? (metrics ? scrollBarPosition(metrics) : null);
+  const position = dragPosition ?? listPosition;
   const live = useRef({ position, dragPosition, railHeight, scrollController, loadOlder });
   live.current = { position, dragPosition, railHeight, scrollController, loadOlder };
   const grabbedAt = useRef(0);
@@ -82,8 +82,11 @@ export function TranscriptScrubber({
 
   const pan = useMemo(() => {
     const finish = () => {
+      const held = live.current.dragPosition;
       setDragPosition(null);
-      positions.reveal();
+      // Native echoes can arrive after release. Keep the finger's destination
+      // while idle anchor corrections continue updating the scroll metrics.
+      positions.reveal(held ?? undefined);
     };
     return PanResponder.create({
       onStartShouldSetPanResponder: () => true,
@@ -112,84 +115,58 @@ export function TranscriptScrubber({
   const top = position === null ? 0 : (1 - position) * Math.max(0, railHeight - BAR_HEIGHT);
 
   return (
-    <View
+    <YStack
       onLayout={(event) => setRailHeight(event.nativeEvent.layout.height)}
       pointerEvents="box-none"
-      style={styles.strip}
+      // The date bubble needs the transcript's width to size to its text.
+      position="absolute"
+      top={0}
+      right={0}
+      bottom={0}
+      left={0}
       testID="transcript-scrubber"
     >
       {shown && (
-        <View
-          style={[styles.grab, { top: top - (GRAB_HEIGHT - BAR_HEIGHT) / 2 }]}
+        <YStack
+          position="absolute"
+          right={0}
+          top={top - (GRAB_HEIGHT - BAR_HEIGHT) / 2}
+          width={SCRUBBER_STRIP_WIDTH}
+          height={GRAB_HEIGHT}
+          justifyContent="center"
+          alignItems="flex-end"
           testID="transcript-scrubber-grab"
-          {...pan.panHandlers}
+          {...(pan.panHandlers as object)}
         >
-          <View
-            pointerEvents="none"
-            style={[styles.bar, dragging && styles.handle]}
-            testID="transcript-scrubber-bar"
-          />
-        </View>
+          {/* The bar keeps the centre line of the wider handle it becomes. */}
+          <YStack pointerEvents="none" width={HANDLE_WIDTH} marginRight="1" alignItems="center">
+            <YStack
+              pointerEvents="none"
+              width={dragging ? HANDLE_WIDTH : BAR_WIDTH}
+              height={BAR_HEIGHT}
+              borderRadius="full"
+              backgroundColor={dragging ? 'needsYou' : 'secondary'}
+              testID="transcript-scrubber-bar"
+            />
+          </YStack>
+        </YStack>
       )}
       {shown && dragging && date && (
-        <View
+        <YStack
           pointerEvents="none"
-          style={[styles.bubble, { top }]}
+          position="absolute"
+          top={top}
+          right={SCRUBBER_STRIP_WIDTH}
+          padding="2"
+          borderWidth={1}
+          borderColor="strongStroke"
+          borderRadius="sm"
+          backgroundColor="canvas"
           testID="transcript-scrubber-bubble"
         >
-          <Text style={styles.bubbleDate}>{date}</Text>
-        </View>
+          <T v="metaStrong" color="needsYou">{date}</T>
+        </YStack>
       )}
-    </View>
+    </YStack>
   );
 }
-
-const styles = StyleSheet.create((theme) => {
-  const groknight = theme.buzz;
-  return {
-    strip: {
-      position: 'absolute',
-      top: 0,
-      right: 0,
-      bottom: 0,
-      // The date bubble needs the transcript's width to size to its text.
-      left: 0,
-    },
-    grab: {
-      position: 'absolute',
-      right: 0,
-      width: SCRUBBER_STRIP_WIDTH,
-      height: GRAB_HEIGHT,
-      justifyContent: 'center',
-      alignItems: 'flex-end',
-    },
-    bar: {
-      marginRight: groknight.space.xs + (HANDLE_WIDTH - BAR_WIDTH) / 2,
-      width: BAR_WIDTH,
-      height: BAR_HEIGHT,
-      borderRadius: BAR_WIDTH / 2,
-      backgroundColor: groknight.textMuted,
-    },
-    handle: {
-      marginRight: groknight.space.xs,
-      width: HANDLE_WIDTH,
-      borderRadius: 3,
-      backgroundColor: groknight.accent,
-    },
-    bubble: {
-      position: 'absolute',
-      right: SCRUBBER_STRIP_WIDTH,
-      paddingHorizontal: groknight.space.sm,
-      paddingVertical: groknight.space.sm,
-      borderWidth: 1,
-      borderColor: groknight.borderStrong,
-      borderRadius: groknight.radius,
-      backgroundColor: groknight.bgBase,
-    },
-    bubbleDate: {
-      ...groknight.type.sectionHead,
-      fontFamily: groknight.monoSemibold,
-      color: groknight.accent,
-    },
-  };
-});

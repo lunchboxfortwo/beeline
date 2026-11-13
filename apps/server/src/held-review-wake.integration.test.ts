@@ -87,7 +87,7 @@ async function source(text: string): Promise<string> {
 describe('Reproduction S-07 end to end: a held review wake reaches the reviewer helper', () => {
   it('delivers the review command when the worker finishes, with no viewer and no helper reconnect', async () => {
     // The worker is mid-turn: its command holds a live lease.
-    const work = await createAgentCommand(db, { roomId: CORNER, agentId: WORKER, sourceMessageId: await source('@worker fix it'), reason: 'human_message' });
+    const work = await createAgentCommand(db, { roomId: CORNER, agentId: WORKER, sourceMessageId: await source('@worker fix it'), reason: 'human_tag' });
     const generationId = randomUUID();
     await call(WORKER, 'claimAgentCommand', { roomId: CORNER, commandId: work!.id, generationId });
     const turn = { roomId: CORNER, requestId: work!.turn_request_id, generationId, agentId: WORKER };

@@ -1,21 +1,13 @@
-import { IndexRow } from '@/components/buzz/IndexRow';
-import { desktopColumnWidths } from '@/buzz/desktop-layout-tokens';
-import { useIsDesktop as useDesktopPageLayout } from '@/utils/responsive';
 import React, { useState } from 'react';
-import { ScrollView, Text, View } from 'react-native';
-import { InlineRow } from '@/components/buzz/IndexRow';
-import { StyleSheet, useUnistyles } from 'react-native-unistyles';
+import { XStack, YStack } from 'tamagui';
+import { Plug, Unplug } from 'lucide-react-native';
 import { router, useLocalSearchParams, type Href } from 'expo-router';
 import * as WebBrowser from 'expo-web-browser';
-import { useSafeAreaInsets } from 'react-native-safe-area-context';
-import { RoomListSectionHeader } from '@/components/buzz/RoomListSectionHeader';
-import { PageHeader } from '@/components/buzz/PageHeader';
 import { ServiceMark } from '@/components/buzz/ServiceMark';
-import { SettingsRow } from '@/components/buzz/SettingsRow';
-import { Button } from '@/components/buzz/Button';
-import { SurfaceGlyphLoader } from '@/components/buzz/SurfaceGlyphLoader';
-import { HullActionSheetModal, HullActionSheetRow, HullActionSheetCancel } from '@/components/buzz/HullActionSheet';
 import { IdentityMark } from '@/components/buzz/IdentityMark';
+import { Btn, Glyph, Section, SheetFrame, SheetRow, T } from '@/ui/grammar';
+import { ConnectorCard, ConnectorFrame, ConnectorLoading, ConnectorNote, ConnectorRow } from '@/ui/screens/settings/connectors/ConnectorParts';
+import { SurfaceGlyphLoader } from '@/components/buzz/SurfaceGlyphLoader';
 import { getWorkbenchSource } from '@/buzz/workbench-source';
 import { useSharedWorkbench } from '@/buzz/workbench-surface';
 import { connectionViewState, openCompanyItem, useConnectCompanyApp } from '@/buzz/company-connection-actions';
@@ -38,8 +30,8 @@ export function aiClientDay(seconds: number, now = new Date()): string {
 const aiClientDates = (client: AiClientConnection) =>
   `Connected ${aiClientDay(client.connectedAt)} · last used ${client.lastUsedAt ? aiClientDay(client.lastUsedAt) : 'not yet'}.`;
 const aiClientNote = (client: AiClientConnection) => client.agent
-  ? `${client.agent.name} uses ${client.name} to read your Rooms and post. It posts as ${client.agent.name}, not as you.`
-  : `${client.name} reads your Rooms and posts as its own agent, not as you.`;
+  ? `${client.agent.name} uses ${client.name} to read your chats and post. It posts as ${client.agent.name}, not as you.`
+  : `${client.name} reads your chats and posts as its own agent, not as you.`;
 /** Signed in means a settled Google session; anything else needs sign-in (mock v3). */
 const signedIn = (m: Machine) => m.status === 'connected' && !m.reconnecting && !m.error;
 const signedInLine = (m: Machine) => m.signedInAs ? `Signed in as ${m.signedInAs}` : 'Signed in';
@@ -49,9 +41,6 @@ export default function ConnectorServiceScreen() {
   const service = param(params.service) ?? '';
   const { value: view, error: loadError, refresh } = useSharedWorkbench(scope);
   const row = view?.companies?.rows.find(item => item.id === service || (service === 'trusty-squire' && item.kind === 'sign-in-service'));
-  const insets = useSafeAreaInsets();
-  const desktopPageLayout = useDesktopPageLayout();
-  const { theme } = useUnistyles();
   const actions = useConnectCompanyApp(scope);
   const [machine, setMachine] = useState<Machine | null>(null);
   const [linkOpen, setLinkOpen] = useState(false);
@@ -91,23 +80,23 @@ export default function ConnectorServiceScreen() {
     catch (cause) { setError(appErrorCopy(cause, 'Could not disconnect app')); }
     finally { setAppBusy(null); }
   };
-  const appRow = (item: WorkbenchCompany['items'][number], app: WorkbenchApp) => {
+  const appRow = (item: WorkbenchCompany['items'][number], app: WorkbenchApp, last: boolean) => {
     const state = connectionViewState(item);
     const computer = app.transport === 'composio' ? null : appNeedsSquire(app) ? 'Trusty Squire' : app.helperName ?? 'Your computer';
     const busy = appBusy === app.id || app.status === 'connecting';
     const reason = item.status ?? (app.errorMessage ? appErrorCopy(app.errorMessage) : undefined);
     if (state === 'connected') {
-      return <SettingsRow appBoard key={item.id} title={item.title} description={item.subtitle} chevron="right"
-        disabled={busy} onPress={() => setAppOpen(app)} testID={`company-item-${item.id}`} />;
+      return <ConnectorRow key={item.id} title={item.title} description={item.subtitle} chevron="right"
+        disabled={busy} onPress={() => setAppOpen(app)} last={last} testID={`company-item-${item.id}`} />;
     }
     if (state === 'error') {
-      return <SettingsRow appBoard key={item.id} title={item.title} description={item.subtitle}
+      return <ConnectorRow key={item.id} title={item.title} description={item.subtitle}
         value={busy ? 'Connecting…' : reason} valueTone="danger" disabled={busy}
-        action="Reconnect" onPress={() => void reconnectApp(app)} testID={`company-item-${item.id}`} />;
+        action="Reconnect" onPress={() => void reconnectApp(app)} last={last} testID={`company-item-${item.id}`} />;
     }
-    return <SettingsRow appBoard key={item.id} title={item.title} description={[computer, item.subtitle].filter(Boolean).join(' · ')}
+    return <ConnectorRow key={item.id} title={item.title} description={[computer, item.subtitle].filter(Boolean).join(' · ')}
       action={busy ? undefined : 'Connect'} value={busy ? 'Connecting…' : undefined} disabled={busy}
-      onPress={() => void reconnectApp(app)} testID={`company-item-${item.id}`} />;
+      onPress={() => void reconnectApp(app)} last={last} testID={`company-item-${item.id}`} />;
   };
   // Connect reuses each item's existing path: app reconnect, or its connector/wallet page.
   const connectItem = (item: WorkbenchCompany['items'][number]) => {
@@ -144,108 +133,100 @@ export default function ConnectorServiceScreen() {
     finally { setAppBusy(null); }
   };
   const agent = aiClient?.agent;
-  return <View style={[styles.screen, desktopPageLayout && { width: '100%', maxWidth: desktopColumnWidths.detail, alignSelf: 'center' }, { paddingTop: insets.top }]} testID="connector-service-screen">
-    <PageHeader eyebrow="Connectors" prominent title={row?.name ?? 'Connectors'} backAccessibilityLabel="Back to Connectors" onBack={() => router.back()} />
-    {loadError && !row ? <View style={styles.failureInset}><IndexRow inset="flush" title={loadError} /></View> : !view ? <SurfaceGlyphLoader /> : !row ?
-      <Text style={styles.note}>This company is no longer connected.</Text> :
-      <ScrollView contentContainerStyle={[styles.content, { paddingBottom: insets.bottom + theme.buzz.space.xl }]}>
-        {row.roomsClientId ? <>
-          <SettingsRow appBoard title={row.name} description={row.domain} leading={<ServiceMark company={row.name} domain={row.domain} mark={row.logo} />}
-            value="Connected" statusGlyph="live" chevron="right" disabled={Boolean(appBusy)} onPress={() => setAiOpen(true)} testID="connector-info-status" />
-          {aiClient ? <Text style={styles.note} testID="connector-info-agents">{aiClientNote(aiClient)}</Text> : null}
-          {agent ? <View>
-            <RoomListSectionHeader title="Agent" inset="content" spacing="flush" />
-            <SettingsRow appBoard title={agent.name} description={agent.handle ? `@${agent.handle}` : undefined}
+  const closeSheets = () => { setMachine(null); setLinkOpen(false); };
+  const closeAppSheet = () => { setAppOpen(null); setAiOpen(false); };
+  return <>
+    <ConnectorFrame title={row?.name ?? 'Connectors'} back={() => router.back()} backLabel="Back to Connectors" testID="connector-service-screen">
+      {loadError && !row ? <ConnectorNote tone="danger">{loadError}</ConnectorNote> : !view ? <ConnectorLoading><SurfaceGlyphLoader /></ConnectorLoading> : !row ?
+        <ConnectorNote>This company is no longer connected.</ConnectorNote> : row.roomsClientId ? <>
+          <YStack gap="2">
+            <ConnectorCard>
+              <ConnectorRow title={row.name} description={row.domain} leading={<ServiceMark company={row.name} domain={row.domain} mark={row.logo} />}
+                value="Connected" chevron="right" disabled={Boolean(appBusy)} onPress={() => setAiOpen(true)} last testID="connector-info-status" />
+            </ConnectorCard>
+            {aiClient ? <ConnectorNote testID="connector-info-agents">{aiClientNote(aiClient)}</ConnectorNote> : null}
+          </YStack>
+          {agent ? <Section title="Agent">
+            <ConnectorRow title={agent.name} description={agent.handle ? `@${agent.handle}` : undefined}
               leading={<IdentityMark kind="agent" seed={agent.id} avatarUrl={agent.avatar} name={agent.name} size={36} />} chevron="right"
               onPress={() => router.push({ pathname: '/beeline/agent-profile', params: { communityId: scope.workspaceId, agentId: agent.id } } as Href)}
-              testID="ai-client-agent" />
-          </View> : null}
-          {aiClient ? <View>
-            <RoomListSectionHeader title="What it can do" inset="content" spacing="flush" />
-            {aiClient.scopes.includes('rooms:read') ? <SettingsRow appBoard title="Read messages in your Rooms" testID="ai-client-can-read" /> : null}
-            {aiClient.scopes.includes('rooms:write') ? <SettingsRow appBoard title={`Post and reply as ${agent?.name ?? 'its agent'}`} testID="ai-client-can-post" /> : null}
-          </View> : null}
-          {aiClient ? <Text style={styles.note} testID="ai-client-dates">{aiClientDates(aiClient)}</Text> : null}
-          {error ? <SettingsRow title={error} /> : null}
-        </> : <>{row.kind === 'sign-in-service' ? <SettingsRow appBoard title={row.name} description={row.domain}
-          leading={<ServiceMark company={row.name} domain={row.domain} mark={row.logo} />}
-          value={needSignIn ? `${needSignIn} need sign-in` : 'Signed in'} valueTone={needSignIn ? 'danger' : undefined}
-          statusGlyph={needSignIn ? 'failed' : 'live'} testID="connector-info-status" />
-          : <SettingsRow appBoard title={row.name} description={[row.domain, row.subtitle].filter(Boolean).join(' · ')} leading={<ServiceMark company={row.name} domain={row.domain} mark={row.logo} />}
-          value={topState === 'error' ? row.status ?? 'Needs attention' : topState === 'connect' ? undefined : 'Connected'}
-          action={topState === 'connect' ? 'Connect' : undefined} onPress={topState === 'connect' ? connectTop : undefined}
-          valueTone={topState === 'error' ? 'danger' : undefined}
-          statusGlyph={topState === 'error' ? 'failed' : topState === 'connected' ? 'live' : undefined} testID="connector-info-status" />}
-        <Text style={styles.note} testID="connector-info-agents">{agents}</Text>
-        {row.attention && row.kind !== 'sign-in-service' ? <SettingsRow title={row.attention} /> : null}
-        {row.kind === 'sign-in-service' ? <View>
-          <InlineRow style={styles.sectionLine} testID="squire-computers-head">
-            <Text accessibilityRole="header" style={styles.section}>YOUR COMPUTERS</Text>
-            <Text style={[styles.section, styles.sectionCount]}>{row.machines.length}</Text>
-          </InlineRow>
-          {row.machines.map(item => signedIn(item)
-            // A signed-in computer opens its own sheet; every other one connects in one tap.
-            ? <SettingsRow appBoard key={item.id} title={item.name} description={item.statusText ?? signedInLine(item)}
-              descriptionContent={<InlineRow style={styles.signedIn}><View style={styles.signedInDot} testID={`squire-computer-${item.id}-dot`} />
-                <Text numberOfLines={1} style={styles.signedInText}>{item.statusText && item.statusText !== 'Google signed in' && !item.signedInAs ? item.statusText : signedInLine(item)}</Text></InlineRow>}
-              chevron="right" onPress={() => setMachine(item)} testID={`squire-computer-${item.id}`} />
-            : <SettingsRow appBoard key={item.id} title={item.name} description="Google sign-in needed"
-              action="Connect" onPress={() => reconnectMachine(item.id)} testID={`squire-computer-${item.id}`} />)}
-        </View> : (['connection', 'login', 'key'] as const).map(kind => {
-          const items = row.items.filter(item => item.kind === kind);
-          return items.length || kind === 'connection' && row.mcp ? <View key={kind}>
-            <RoomListSectionHeader title={kind === 'connection' ? 'Connections' : kind === 'login' ? 'Logins' : 'Keys'} inset="content" spacing="flush" />
-            {kind === 'connection' && row.mcp ? <SettingsRow appBoard title={row.mcp.name} description={`Sign in with ${row.name.replace(/\.[a-z]+$/i, '')} MCP`}
-              chevron="right" disabled={Boolean(actions.busy)} onPress={() => void actions.connect(row.mcp!)} testID="company-mcp-connect" /> : null}
-            {items.map(item => {
-              const target = item.target;
-              const app = target.kind === 'app' ? view.apps.find(entry => entry.id === target.appId) : undefined;
-              return app ? appRow(item, app) : item.target.kind === 'key'
-              ? <SettingsRow appBoard key={item.id} title={item.title} description={item.subtitle}
-                value={item.status} valueTone={item.attention ? 'danger' : undefined} testID={`company-item-${item.id}`} />
-              : connectionViewState(item) === 'connect'
-              ? <SettingsRow appBoard key={item.id} title={item.title} description={item.subtitle}
-                action="Connect" onPress={() => connectItem(item)} testID={`company-item-${item.id}`} />
-              : <SettingsRow appBoard key={item.id} title={item.title} description={item.subtitle}
-                value={item.status} valueTone={item.attention ? 'danger' : undefined} chevron="right"
-                onPress={() => item.target.kind === 'link' ? setLinkOpen(true) : openCompanyItem(item.target, scope)} testID={`company-item-${item.id}`} />;
-            })}
-          </View> : null;
-        })}
-        {keyed ? <Button label="Manage in Trusty Squire" variant="secondary" fullWidth
-          onPress={() => void WebBrowser.openBrowserAsync(SQUIRE_VAULT_URL)} testID="connector-squire-vault" /> : null}
-        {row.alsoAvailable.length ? <View><RoomListSectionHeader title="Also available" inset="content" spacing="flush" />
-          {row.alsoAvailable.map(app => <SettingsRow appBoard key={app.appKey} title={app.name} description={app.purpose}
-            leading={<ServiceMark company={app.providerName} domain={app.domain} mark={app.logo} />} chevron="right"
-            disabled={Boolean(actions.busy)} onPress={() => void actions.connect(app)} testID={`company-available-${app.appKey}`} />)}
-        </View> : null}
-
-        {notice ? <Text accessibilityLiveRegion="polite" style={styles.note} testID="connector-info-notice">{notice}</Text> : null}
-        {error || actions.error ? <SettingsRow title={(error ?? actions.error)!} /> : null}
+              last testID="ai-client-agent" />
+          </Section> : null}
+          {aiClient ? <YStack gap="2">
+            <Section title="What it can do">
+              {aiClient.scopes.includes('rooms:read') ? <ConnectorRow title="Read messages in your chats" last={!aiClient.scopes.includes('rooms:write')} testID="ai-client-can-read" /> : null}
+              {aiClient.scopes.includes('rooms:write') ? <ConnectorRow title={`Post and reply as ${agent?.name ?? 'its agent'}`} last testID="ai-client-can-post" /> : null}
+            </Section>
+            <ConnectorNote testID="ai-client-dates">{aiClientDates(aiClient)}</ConnectorNote>
+          </YStack> : null}
+          {error ? <ConnectorNote tone="danger">{error}</ConnectorNote> : null}
+        </> : <>
+          <YStack gap="2">
+            <ConnectorCard>
+              {row.kind === 'sign-in-service' ? <ConnectorRow title={row.name} description={row.domain}
+                leading={<ServiceMark company={row.name} domain={row.domain} mark={row.logo} />}
+                value={needSignIn ? `${needSignIn} need sign-in` : 'Signed in'} valueTone={needSignIn ? 'danger' : undefined}
+                last testID="connector-info-status" />
+                : <ConnectorRow title={row.name} description={[row.domain, row.subtitle].filter(Boolean).join(' · ')} leading={<ServiceMark company={row.name} domain={row.domain} mark={row.logo} />}
+                  value={topState === 'error' ? row.status ?? 'Needs attention' : topState === 'connect' ? undefined : 'Connected'}
+                  action={topState === 'connect' ? 'Connect' : undefined} onPress={topState === 'connect' ? connectTop : undefined}
+                  valueTone={topState === 'error' ? 'danger' : undefined} last testID="connector-info-status" />}
+            </ConnectorCard>
+            <ConnectorNote testID="connector-info-agents">{agents}</ConnectorNote>
+            {row.attention && row.kind !== 'sign-in-service' ? <ConnectorNote tone="danger">{row.attention}</ConnectorNote> : null}
+          </YStack>
+          {row.kind === 'sign-in-service' ? <Section title="Your computers" note={`${row.machines.length}`} testID="squire-computers-head">
+            {row.machines.map((item, n) => signedIn(item)
+              // A signed-in computer opens its own sheet; every other one connects in one tap.
+              ? <ConnectorRow key={item.id} title={item.name} description={item.statusText ?? signedInLine(item)}
+                descriptionContent={<XStack gap="2" alignItems="center">
+                  <YStack width={8} height={8} borderRadius="full" backgroundColor="added" testID={`squire-computer-${item.id}-dot`} />
+                  <T v="meta" color="secondary" numberOfLines={1}>{item.statusText && item.statusText !== 'Google signed in' && !item.signedInAs ? item.statusText : signedInLine(item)}</T>
+                </XStack>}
+                chevron="right" onPress={() => setMachine(item)} last={n === row.machines.length - 1} testID={`squire-computer-${item.id}`} />
+              : <ConnectorRow key={item.id} title={item.name} description="Google sign-in needed"
+                action="Connect" onPress={() => reconnectMachine(item.id)} last={n === row.machines.length - 1} testID={`squire-computer-${item.id}`} />)}
+          </Section> : (['connection', 'login', 'key'] as const).map(kind => {
+            const items = row.items.filter(item => item.kind === kind);
+            const mcp = kind === 'connection' ? row.mcp : undefined;
+            return items.length || mcp ? <Section key={kind} title={kind === 'connection' ? 'Connections' : kind === 'login' ? 'Logins' : 'Keys'}>
+              {mcp ? <ConnectorRow title={mcp.name} description={`Sign in with ${row.name.replace(/\.[a-z]+$/i, '')} MCP`}
+                chevron="right" disabled={Boolean(actions.busy)} onPress={() => void actions.connect(mcp)} last={!items.length} testID="company-mcp-connect" /> : null}
+              {items.map((item, n) => {
+                const target = item.target;
+                const last = n === items.length - 1;
+                const app = target.kind === 'app' ? view.apps.find(entry => entry.id === target.appId) : undefined;
+                return app ? appRow(item, app, last) : item.target.kind === 'key'
+                  ? <ConnectorRow key={item.id} title={item.title} description={item.subtitle}
+                    value={item.status} valueTone={item.attention ? 'danger' : undefined} last={last} testID={`company-item-${item.id}`} />
+                  : connectionViewState(item) === 'connect'
+                    ? <ConnectorRow key={item.id} title={item.title} description={item.subtitle}
+                      action="Connect" onPress={() => connectItem(item)} last={last} testID={`company-item-${item.id}`} />
+                    : <ConnectorRow key={item.id} title={item.title} description={item.subtitle}
+                      value={item.status} valueTone={item.attention ? 'danger' : undefined} chevron="right"
+                      onPress={() => item.target.kind === 'link' ? setLinkOpen(true) : openCompanyItem(item.target, scope)} last={last} testID={`company-item-${item.id}`} />;
+              })}
+            </Section> : null;
+          })}
+          {keyed ? <Btn label="Manage in Trusty Squire" onPress={() => void WebBrowser.openBrowserAsync(SQUIRE_VAULT_URL)} testID="connector-squire-vault">Manage in Trusty Squire</Btn> : null}
+          {row.alsoAvailable.length ? <Section title="Also available">
+            {row.alsoAvailable.map((app, n) => <ConnectorRow key={app.appKey} title={app.name} description={app.purpose}
+              leading={<ServiceMark company={app.providerName} domain={app.domain} mark={app.logo} />} chevron="right"
+              disabled={Boolean(actions.busy)} onPress={() => void actions.connect(app)} last={n === row.alsoAvailable.length - 1} testID={`company-available-${app.appKey}`} />)}
+          </Section> : null}
+          {notice ? <ConnectorNote testID="connector-info-notice">{notice}</ConnectorNote> : null}
+          {error || actions.error ? <ConnectorNote tone="danger">{(error ?? actions.error)!}</ConnectorNote> : null}
         </>}
-      </ScrollView>}
-    <HullActionSheetModal visible={Boolean(machine) || linkOpen} title={machine?.name ?? 'Link'} onClose={() => { setMachine(null); setLinkOpen(false); }}>
-      {machine && manageMachine && !signedIn(manageMachine) ? <HullActionSheetRow label="Connect" onPress={() => reconnectMachine(machine.id)} />
-        : <HullActionSheetRow label="Disconnect" destructive onPress={() => void disconnect()} />}
-      <HullActionSheetCancel onPress={() => { setMachine(null); setLinkOpen(false); }} />
-    </HullActionSheetModal>
+    </ConnectorFrame>
+    <SheetFrame open={Boolean(machine) || linkOpen} title={machine?.name ?? 'Link'} close={closeSheets}>
+      {machine && manageMachine && !signedIn(manageMachine)
+        ? <SheetRow icon={<Glyph icon={Plug} />} label="Connect" onPress={() => reconnectMachine(machine.id)} />
+        : <SheetRow icon={<Glyph icon={Unplug} color="removed" />} label="Disconnect" onPress={() => void disconnect()} />}
+    </SheetFrame>
     {/* One connection sheet: an app connection's row and an AI app's Status row open it alike. */}
-    <HullActionSheetModal visible={Boolean(appOpen) || aiOpen} title={appOpen?.name ?? row?.name} onClose={() => { setAppOpen(null); setAiOpen(false); }}>
-      {appOpen ? <HullActionSheetRow label="Disconnect" destructive onPress={() => void disconnectApp(appOpen)} />
-        : aiOpen ? <HullActionSheetRow label="Disconnect" destructive disabled={Boolean(appBusy)} onPress={() => void disconnectAiClient()} testID="ai-client-disconnect" /> : null}
-      <HullActionSheetCancel onPress={() => { setAppOpen(null); setAiOpen(false); }} />
-    </HullActionSheetModal>
-  </View>;
+    <SheetFrame open={Boolean(appOpen) || aiOpen} title={appOpen?.name ?? row?.name ?? ''} close={closeAppSheet}>
+      {appOpen ? <SheetRow icon={<Glyph icon={Unplug} color="removed" />} label="Disconnect" onPress={() => void disconnectApp(appOpen)} />
+        : aiOpen ? <SheetRow icon={<Glyph icon={Unplug} color="removed" />} label="Disconnect" onPress={() => void disconnectAiClient()} testID="ai-client-disconnect" /> : null}
+    </SheetFrame>
+  </>;
 }
-const styles = StyleSheet.create(theme => ({
-    failureInset: { paddingHorizontal: theme.buzz.roomList.edge },
-  screen: { flex: 1, backgroundColor: theme.buzz.appCanvas },
-  content: { paddingHorizontal: theme.buzz.space.lg, paddingTop: theme.buzz.layout.screenTop, gap: theme.buzz.layout.sectionGap },
-  note: { ...theme.buzz.type.meta, color: theme.buzz.appQuiet },
-  section: { ...theme.buzz.squireConnect.sectionType, textTransform: 'uppercase', color: theme.buzz.textMuted, marginBottom: theme.buzz.space.xs },
-  sectionCount: { color: theme.buzz.textDisabled },
-  sectionLine: { gap: theme.buzz.squireConnect.dotGap },
-  signedIn: { flexDirection: 'row', alignItems: 'center', gap: theme.buzz.squireConnect.dotGap },
-  signedInDot: { width: 7, height: 7, borderRadius: 7 / 2, backgroundColor: theme.buzz.diffAdded },
-  signedInText: { ...theme.buzz.type.meta, color: theme.buzz.appQuiet, flexShrink: 1 },
-}));

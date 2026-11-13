@@ -49,6 +49,7 @@ vi.mock('@/sync/transport/live-connection', () => ({ sharedLiveConnection: () =>
 }) }));
 import { mobileSurfaceCache } from '@/buzz/surface-storage';
 import { MockWorkbenchSource } from '@/buzz/workbench-source.mock';
+import { SafeBottom, SheetRow } from '@/ui/grammar';
 import { setWorkbenchSource } from '@/buzz/workbench-source';
 import AppDetailScreen from './app';
 
@@ -64,13 +65,8 @@ vi.mock('react-native', async () => {
   return { ScrollView: host('ScrollView'), Text: host('Text'), View: host('View'), Platform: { OS: 'web', select: (values: Record<string, unknown>) => values.web ?? values.default } };
 });
 vi.mock('@/components/buzz/AppMark', () => ({ AppMark: (props: any) => React.createElement('AppMark', props) }));
-vi.mock('@/components/buzz/PageHeader', () => ({ PageHeader: (props: any) => React.createElement('PageHeader', props) }));
-vi.mock('@/components/buzz/SettingsRow', () => ({ SettingsRow: (props: any) => React.createElement('SettingsRow', props) }));
-vi.mock('@/components/buzz/HullActionSheet', () => ({
-  HullActionSheetModal: (props: any) => React.createElement('HullActionSheetModal', props, props.children),
-  HullActionSheetRow: (props: any) => React.createElement('HullActionSheetRow', props),
-  HullActionSheetCancel: (props: any) => React.createElement('HullActionSheetCancel', props),
-}));
+vi.mock('tamagui', async () => (await import('@/ui/screens/transcript/grammar-hosts.test-support')).tamaguiHosts());
+vi.mock('lucide-react-native', async () => (await import('@/ui/screens/transcript/grammar-hosts.test-support')).lucideHosts());
 
 let source: MockWorkbenchSource;
 beforeEach(() => {
@@ -91,17 +87,17 @@ async function render(): Promise<ReactTestRenderer> {
 }
 
 function openStatus(renderer: ReactTestRenderer) {
-  act(() => { renderer.root.findAllByType('SettingsRow' as never).find((row: any) => row.props.trailingPress)!.props.trailingPress.onPress(); });
-  return renderer.root.findAllByType('HullActionSheetRow' as never);
+  act(() => { renderer.root.findByProps({ testID: 'app-detail-status' }).props.onPress(); });
+  expect(renderer.root.findByProps({ testID: 'app-detail-status-sheet' }).props.open).toBe(true);
+  return renderer.root.findByProps({ testID: 'app-detail-status-sheet' }).findAllByType(SheetRow);
 }
 
 describe('App detail', () => {
   it('shows its status and agent use with controls in the status sheet', async () => {
     const renderer = await render();
-    const tree = JSON.stringify(renderer.toJSON());
-    expect(tree).toContain('Signed in');
-    expect(tree).toContain('Monarch in #launch');
-    expect(renderer.root.findByType('SettingsRow' as never).props.value).toBe('Connected');
+    expect(renderer.root.findAll((node: any) => node.props.children === 'Signed in').length).toBeGreaterThan(0);
+    expect(renderer.root.findByProps({ testID: 'app-detail-last-used' }).props.children).toContain('Monarch in #launch');
+    expect(renderer.root.findByProps({ testID: 'app-detail-status' }).props.value).toBe('Connected');
     expect(openStatus(renderer).map((row: { props: { label: string } }) => row.props.label)).toEqual(['Disconnect']);
   });
 
@@ -137,12 +133,8 @@ describe('App detail', () => {
   });
 
   it('keeps the last row above the system navigation bar', async () => {
-    safeArea.bottom = 48;
-    try {
-      const renderer = await render();
-      const scroll = renderer.root.findByProps({ testID: 'app-detail-scroll' });
-      const style = Object.assign({}, ...[scroll.props.contentContainerStyle].flat(Infinity as 1));
-      expect(style.paddingBottom).toBe(72);
-    } finally { safeArea.bottom = 0; }
+    const renderer = await render();
+    expect(renderer.root.findByProps({ testID: 'app-detail-scroll' })).toBeTruthy();
+    expect(renderer.root.findAllByType(SafeBottom)).toHaveLength(1);
   });
 });

@@ -11,8 +11,9 @@ import { runMachineHelper } from './machine-helper.js';
 import { RegistryMcpHostBroker } from './registry-mcp.js';
 import { identityFromKey } from './runtime.js';
 import { writeUpdateState } from './self-update.js';
+import { requestMachine } from './machine-control.js';
 
-it('exits for a verified idle update without waiting for retained local clients', async () => {
+it.each(['idle', 'force'] as const)('exits for a verified %s update without waiting for retained local clients', async mode => {
   const root = await mkdtemp(join(tmpdir(), 'beeline-handoff-'));
   const layout = {
     libDir: join(root, 'lib/beeline'),
@@ -27,7 +28,11 @@ it('exits for a verified idle update without waiting for retained local clients'
   };
   const config = join(root, 'agent/runtime.json');
   const signals = new EventEmitter();
-  const exit = vi.fn();
+  let exited!: () => void;
+  const exitObserved = new Promise<void>(done => { exited = done; });
+  const exit = vi.fn(() => exited());
+  let registered!: () => void;
+  const registration = new Promise<void>(done => { registered = done; });
   const sockets = new Set<WebSocket>();
   const server = new WebSocketServer({ port: 0, host: '127.0.0.1' });
   await once(server, 'listening');
@@ -77,6 +82,10 @@ it('exits for a verified idle update without waiting for retained local clients'
   let connected = false;
   let cleanupFinished = false;
   let stageNew = false;
+  let finishPrepare!: () => void;
+  const forcePreparation = new Promise<void>(done => { finishPrepare = done; });
+  const interrupt = vi.fn();
+  const quiesce = vi.fn();
   const helper = runMachineHelper({
     configPaths: [config],
     signals,
@@ -88,6 +97,7 @@ it('exits for a verified idle update without waiting for retained local clients'
       BEELINE_LIB_DIR: layout.libDir,
     },
     runUpdateWorker: async () => {
+      if (mode === 'force') { await forcePreparation; return; }
       await writeUpdateState(layout, {
         lastCheckResult: 'verified',
         stagedReleaseId: stageNew ? 'new' : 'old',
@@ -97,8 +107,9 @@ it('exits for a verified idle update without waiting for retained local clients'
       const controller = new AbortController();
       const lifecycle = new AgentLifecycle({ controller });
       const core = {
-        activeTurnCount: () => 0,
-        quiesceForUpdate: vi.fn(),
+        activeTurnCount: () => mode === 'force' ? 1 : 0,
+        quiesceForUpdate: quiesce,
+        interruptForServerMinimum: interrupt,
       } as unknown as HostedAgent['core'];
       const detach = host.attach({
         agentId: identity.publicKey,
@@ -115,6 +126,7 @@ it('exits for a verified idle update without waiting for retained local clients'
           onOpen: () => {
             connected = true;
             host.established(identity.publicKey);
+            registered();
           },
           onClose: () => {
             connected = false;
@@ -136,19 +148,30 @@ it('exits for a verified idle update without waiting for retained local clients'
     },
   });
   try {
-    await vi.waitFor(() => expect(connected).toBe(true));
-    stageNew = true;
-    releaseAvailable!();
-    await vi.waitFor(() => expect(exit).toHaveBeenCalledWith(0));
+    await registration;
+    if (mode === 'force') {
+      // Exercise the CLI's private control protocol against the real helper.
+      await writeUpdateState(layout, { stagedReleaseId: 'new', lastCheckResult: 'verified' });
+      await requestMachine(join(root, 'state'), { operation: 'update', releaseId: 'new', force: true }, () => true);
+      finishPrepare();
+    } else {
+      stageNew = true;
+      releaseAvailable!();
+    }
+    await exitObserved;
+    expect(exit).toHaveBeenCalledWith(0);
     expect(connected).toBe(false);
     expect(cleanupFinished).toBe(false);
     expect(retained.destroyed).toBe(false);
+    expect(quiesce).toHaveBeenCalledTimes(1);
+    expect(interrupt).toHaveBeenCalledTimes(mode === 'force' ? 1 : 0);
   } finally {
+    finishPrepare();
     retained.resume();
     retained.end('{}');
     await once(retained, 'close');
     signals.emit('SIGTERM');
-    await helper;
+    await (await helper).settled;
     for (const socket of sockets) socket.terminate();
     await new Promise<void>((done) => server.close(() => done()));
     await rm(root, { recursive: true, force: true });

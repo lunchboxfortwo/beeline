@@ -5,17 +5,15 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { beelineThemes } from './groknight';
 import { selectComposerAckPresentation, type PendingComposerAck } from './room-indicators';
 import { useComposerAckExpiry } from './use-composer-ack-expiry';
+import { isAgentTurnActive } from './agent-presence';
+import type { RoomViewAgentTurn } from '@beeline/buzz-client';
 
 vi.mock('react-native', () => ({ Text: 'Text', View: 'View' }));
-vi.mock('@/components/buzz/MonoHull', () => ({ HullLivePulse: 'HullLivePulse' }));
-vi.mock('@/components/buzz/Button', () => ({ Button: 'Button' }));
+vi.mock('tamagui', () => ({ XStack: 'XStack', YStack: 'YStack', Spinner: 'Spinner' }));
+vi.mock('@/ui/grammar', () => ({ T: 'Text' }));
+vi.mock('@/components/buzz/TurnLineFrame', () => ({ TurnLineBar: 'Bar', TurnBandSlot: 'Slot' }));
 vi.mock('@/components/buzz/BeelineMarkSpinner', () => ({ BeelineMarkSpinner: 'BeelineMarkSpinner', MARK_CELL: 18 }));
 const current = vi.hoisted(() => ({ theme: 'obsidian' as 'obsidian' | 'bone' }));
-vi.mock('react-native-unistyles', () => ({
-  StyleSheet: { create: (definition: any) => new Proxy({}, {
-    get: (_, key) => definition({ buzz: beelineThemes[current.theme] })[key],
-  }) },
-}));
 import { TurnProgressLine } from '@/components/buzz/TurnProgressLine';
 
 let tree: ReturnType<typeof create>;
@@ -46,9 +44,9 @@ function Harness({ initial }: { initial: PendingComposerAck | null }) {
 it('shows the accepted recipients immediately and removes the line at exactly three seconds', () => {
   act(() => { tree = create(<Harness initial={accepted()} />); });
   expect(tree.root.findByType('Text').props.children).toBe('Sent to @atlas, @nova');
-  expect(tree.root.findAllByType('HullLivePulse')).toHaveLength(0);
+  expect(tree.root.findAllByType('Spinner')).toHaveLength(0);
   expect(tree.root.findByType('BeelineMarkSpinner').props.live).toBeFalsy();
-  expect(tree.root.findAllByType('Button')).toHaveLength(0);
+  expect(tree.root.findAll((node: { props: { children?: unknown } }) => node.props.children === 'Stop')).toHaveLength(0);
   act(() => vi.advanceTimersByTime(2_999));
   expect(tree.root.findAllByType('Text')).toHaveLength(1);
   act(() => vi.advanceTimersByTime(1));
@@ -68,7 +66,7 @@ it('expires an acknowledgement from its acceptance time, without extending it on
 it('does not show Sent before acceptance or for a native send', () => {
   act(() => { tree = create(<Harness initial={{ sentAt: Date.now() }} />); });
   expect(tree.root.findByType('Text').props.children).toBe('sending…');
-  expect(tree.root.findAllByType('HullLivePulse')).toHaveLength(1);
+  expect(tree.root.findAllByType('Spinner')).toHaveLength(1);
   expect(selectComposerAckPresentation({ isCorner: false, now: Date.now() })).toBeNull();
 });
 
@@ -78,11 +76,9 @@ describe.each(['bone', 'obsidian'] as const)('%s approved one-line style', (them
     act(() => { tree = create(<Harness initial={accepted(['long-handle-'.repeat(20), 'nova'])} />); });
     const text = tree.root.findByType('Text');
     expect(text.props.numberOfLines).toBe(1);
-    expect(text.props.ellipsizeMode).toBe('tail');
-    expect(text.props.style).toMatchObject({
-      ...beelineThemes[theme].type.machine, lineHeight: 18, color: beelineThemes[theme].accent,
-      flexShrink: 1, minWidth: 0,
-    });
+    expect(text.props.v).toBe('meta');
+    expect(text.props.color).toBe('needsYou');
+    expect(beelineThemes[theme].accent).toBeTruthy();
     expect(tree.root.findByType('BeelineMarkSpinner').props.live).toBeFalsy();
   });
 });
@@ -94,10 +90,29 @@ it('keeps a native working receipt, its counter and Stop ahead of an external ac
   expect(selectComposerAckPresentation({ ...input, pendingAckSentAt: Date.now(), externalHandles: ['atlas'] }))
     .toEqual(native);
   act(() => { tree = create(<TurnProgressLine {...native!} onStop={() => undefined} />); });
-  expect(tree.root.findAllByType('HullLivePulse')).toHaveLength(1);
-  expect(tree.root.findByType('BeelineMarkSpinner').props.live).toBe(true);
-  expect(tree.root.findAllByType('Button')).toHaveLength(1);
+  expect(tree.root.findAllByType('Spinner')).toHaveLength(1);
+  expect(tree.root.findAllByType('BeelineMarkSpinner')).toHaveLength(0);
+  expect(tree.root.findAll((node: { props: { children?: unknown } }) => node.props.children === 'Stop')).toHaveLength(1);
   expect(native?.stop).toEqual({ agentPubkey: 'native', requestId: 'turn' });
+});
+
+it('shows Monarch working from claim at 0s with no transcript, thoughts, tools or drafts', () => {
+  const turn: RoomViewAgentTurn = { agentPubkey: 'monarch', requestId: 'turn', generationId: 'generation',
+    status: 'working', startedAt: Date.now() / 1_000, createdAt: Date.now() / 1_000 };
+  const room = { messages: [], latestAgentTurns: [turn] };
+  const active = room.latestAgentTurns.filter(isAgentTurnActive)[0]!;
+  const presentation = selectComposerAckPresentation({ isCorner: false, now: Date.now(),
+    activeTurnPubkey: active.agentPubkey, activeTurnRequestId: active.requestId,
+    activeTurnStartedAt: active.startedAt ?? active.createdAt,
+    conversationIdentities: new Map([['monarch', { pubkey: 'monarch', kind: 'agent', name: 'Monarch' }]]),
+  });
+  expect(room.messages).toEqual([]);
+  expect(presentation?.label).toBe(`Monarch ${presentation!.verb!.gerund.toLowerCase()}…`);
+  act(() => { tree = create(<TurnProgressLine {...presentation!} testID="claim-progress" />); });
+  expect(tree.root.findAllByType('Text').map((node: { props: { children: unknown } }) => node.props.children)).toEqual([presentation!.label, '0s']);
+  expect(tree.root.findByType('Spinner').props.color).toBe('needsYou');
+  act(() => vi.advanceTimersByTime(3_000));
+  expect(tree.root.findAllByType('Text').map((node: { props: { children: unknown } }) => node.props.children)).toEqual([presentation!.label, '3s']);
 });
 
 it('a newer accepted send receives its own full three seconds and releases its deadline on unmount', () => {

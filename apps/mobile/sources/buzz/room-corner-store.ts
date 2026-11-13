@@ -36,7 +36,7 @@ export type RoomCorners = {
   readonly openMore: readonly CornerListItem[];
   readonly nextOpen?: string;
   readonly summary?: RoomCornerSummary;
-  readonly archived?: { readonly corners: readonly CornerListItem[]; readonly next?: string };
+  readonly archived?: { readonly corners: readonly CornerListItem[]; readonly next?: string; readonly total?: number };
   /** False after a lost lane or an unproven saved copy. */
   readonly current: boolean;
   readonly wantsRead: boolean;
@@ -348,6 +348,7 @@ export function applyArchivedCorners(
   next: string | undefined,
   append: boolean,
   mark: CornerReadMark,
+  total?: number,
 ): void {
   if (!records.accepts(mark)) return;
   const current = entry(roomId);
@@ -355,6 +356,7 @@ export function applyArchivedCorners(
   write(roomId, {
     ...current,
     archived: {
+      ...(total === undefined ? {} : { total }),
       corners: withoutRows([...(append ? current.archived?.corners ?? [] : []), ...rows], []),
       ...(next ? { next } : {}),
     },

@@ -15,8 +15,6 @@
     "web/marketing/demo-source.mjs": ["exports"],
     // CONNECT-RING-1 selects router/transport aliases and the temporary Metro adapter.
     "apps/mobile/scripts/connect-ring-proof/{state.ts,metro.cjs}": ["exports"],
-    // Metro selects the fitted web title implementation through this platform export.
-    "apps/mobile/sources/buzz/use-autofit-text.web.ts": ["exports"],
     // The local GitHub card proof resolves these exports through temporary Metro aliases.
     "apps/mobile/scripts/github-card-proof-{adapters.tsx,metro.cjs}": ["exports"],
     // Metro injects these disposable server/router adapters into the native proof.
@@ -29,6 +27,8 @@
     // The Trusty Squire native proof resolves these through its temporary Metro adapter.
     "apps/mobile/scripts/proof-shims/*.{ts,tsx,cjs}": ["exports", "types"],
     "apps/mobile/scripts/ui-alignment-proof/{proof-env,proof-workbench,svg,unistyles}.{ts,tsx}": ["exports"],
+    // tsc compiles these phone view field checks; nothing imports the file.
+    "packages/api-contract/src/phone-view.typecheck.ts": ["files"],
   },
   "workspaces": {
     ".": {
@@ -53,12 +53,22 @@
         "scripts/connector-preview/room.tsx",
         // TYPECHECK invokes the architecture guard by path.
         "scripts/check-architecture.mjs",
+        // TYPECHECK invokes the design grammar guard by path.
+        "scripts/check-mobile-grammar.mjs",
         // Accepted audit decisions: explicit one-time operator entrypoints.
         "scripts/audit-decisions-cleanup.mjs",
         "scripts/audit-decisions-prod-read.mjs",
         "scripts/audit-decisions-schedules.mjs",
         // Rollout replay and the post-drain release action invoke these CLIs by path.
         "scripts/prove-rollout-overlap.mjs",
+        // Isolated built-service reproduction invoked by path in PR #4162.
+        "scripts/prove-commander-handover.mjs",
+        // Reproduction handle-1 invokes this isolated built-service proof by path.
+        "scripts/prove-workspace-handles.mjs",
+        // Reproduction muse-wake-1 invokes this isolated built-service proof by path.
+        "scripts/prove-machineless-wake.mjs",
+        // Reproductions 8 and 13 invoke this isolated built-service proof by path.
+        "scripts/prove-workflow-recovery.mjs",
         "scripts/run-contract-migrations.mjs",
         // The CI baseline runbook invokes this read-only GitHub measurement CLI by path.
         "scripts/ci-baseline.mjs",
@@ -73,6 +83,11 @@
         "scripts/prove-report-post-delivery.mjs",
         // The workflow guide invokes this isolated scheduler/report proof by path.
         "scripts/prove-schedule-report-owner.mjs",
+        // The Body guide invokes this isolated agent-tool regression proof by path.
+        "scripts/prove-agent-tool-traps.mjs",
+        "scripts/prove-owed-tags.mjs",
+        // TAGS-1 invokes the isolated built phone socket proof by path.
+        "scripts/prove-tags-list.mjs",
         // BRIEF-CITATION invokes the isolated built Body/HTTP proof by path.
         "scripts/prove-brief-citation.mjs",
         // The corner membership migration guide invokes the owner-shaped HTTP/socket proof by path.
@@ -92,9 +107,21 @@
         "scripts/prove-webhook-burst.mjs",
         // Reproduction CHECK-DEADLOCK-1 invokes the isolated PostgreSQL HTTP proof by path.
         "scripts/prove-check-rollup-deadlock.mjs",
+        // Sentry contention and destroyed-activity proofs run directly by path.
+        "scripts/prove-sentry-contention.mjs",
+        "scripts/prove-database-timeouts.mjs",
+        "scripts/prove-system-background.mjs",
         "scripts/cleanup-legacy-daemon-chat.ts",
         "scripts/prove-harness-node-path.mjs",
         "scripts/prove-corner-startup.mjs",
+        // Documented host command-grant build runner and isolated corner-host proof.
+        "scripts/corner-job.mjs",
+        "scripts/prove-corner-host.mjs",
+        // Reproductions R1–R3 invoke these built sandbox and grant-runner proofs by path.
+        "scripts/prove-owner-machine-access.mjs",
+        "scripts/prove-owner-machine-grants.mjs",
+        // R-ALWAYS-1 and R-SCRIPT-1 invoke this isolated built grant proof by path.
+        "scripts/prove-always-script-grants.mjs",
         // Reproduction CONNECTORS-1 invokes the built local PhoneService proof by path.
         "scripts/prove-connectors-cleanup.mjs",
         // Reproduction R-SQUIRE-SLEEP invokes the built HTTP pairing proof by path.
@@ -130,6 +157,8 @@
         "scripts/prove-helper-migration-update.mjs",
         // CI and the local Android runner invoke these tools by path.
         "scripts/latency-rig/*.{mjs,cjs}",
+        // Reproductions 25 and 26 replay this capture CLI by path (evidence README).
+        "scripts/latency-rig/evidence/room-forward-2026-11-09/capture.mjs",
         // store-shipped.test.mjs runs the release scripts with this fake App Store Connect preloaded.
         "scripts/fixtures/fake-app-store-connect.mjs",
         // The transcript benchmark README invokes these measurement CLIs by path.

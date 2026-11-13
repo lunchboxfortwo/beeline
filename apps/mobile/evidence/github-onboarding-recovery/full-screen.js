@@ -10,6 +10,7 @@ import { boneTheme, obsidianTheme } from '../../sources/theme';
 import { LAYOUT_BREAKPOINTS } from '../../sources/utils/layoutClass';
 import { clearOnboardingNotice, noticeForAuthError, publishOnboardingNotice } from '../../sources/auth/onboarding-state';
 import { OidcBindError } from '@beeline/buzz-client';
+import { GrammarProvider } from '../../sources/ui/GrammarProvider';
 StyleSheet.configure({ themes: {
   bone: boneTheme,
   obsidian: obsidianTheme,
@@ -43,4 +44,4 @@ function Root() {
   }, []);
   return ready ? <SafeAreaProvider><StatusBar barStyle={new URLSearchParams(query).get('theme') === 'obsidian' ? 'light-content' : 'dark-content'} /><BuzzOnboarding key={query} /></SafeAreaProvider> : null;
 }
-registerRootComponent(Root);
+registerRootComponent(() => <GrammarProvider><Root /></GrammarProvider>);

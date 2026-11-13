@@ -1,91 +1,29 @@
-# The caller installs Node 22, runs the root `npm ci`, and builds
-# @beeline/nostr, @beeline/api-contract and @beeline/buzz-client first: the
-# Pages update proof esbuild-bundles apps/body/src/self-update.ts, whose
-# import graph reaches those packages' built dist/.
-name: Publish the current helper channel on Pages
-description: Preserve exact release bytes outside Git and deploy the complete static site
-inputs:
-  channel:
-    default: latest
-  bundle_dir:
-    description: Verified daemon artifact directory; empty reuses the durable channel
-    default: ''
-  release_sha:
-    default: ''
-  release_version:
-    default: ''
-  manifest_url:
-    description: Direct Pages manifest URL (no redirects to the dev origin)
-    default: https://beeline-work.github.io/beeline/dl/manifest.json
+# Static marketing site only. Helper downloads are served by the Cloudflare
+# /dl/* route from public Release assets; never upload archives to Pages.
+name: Publish the static website on Pages
+description: Deploy the static website without helper download bytes
 runs:
   using: composite
   steps:
-    - name: Persist the selected helper channel outside Actions retention
-      if: inputs.bundle_dir != ''
-      uses: actions/github-script@v7
-      env:
-        BUNDLE_DIR: ${{ inputs.bundle_dir }}
-        RELEASE_SHA: ${{ inputs.release_sha }}
-        RELEASE_VERSION: ${{ inputs.release_version }}
-        CHANNEL: ${{ inputs.channel }}
-      with:
-        script: |
-          const { publishPagesChannel } = await import(`${process.env.GITHUB_WORKSPACE}/scripts/pages-channel.mjs`);
-          await publishPagesChannel({ github, repo: context.repo, directory: process.env.BUNDLE_DIR,
-            channel: process.env.CHANNEL, expectedSha: process.env.RELEASE_SHA, expectedVersion: process.env.RELEASE_VERSION });
-    - name: Load both helper channels so a Pages deploy preserves the other one
-      uses: actions/github-script@v7
-      with:
-        script: |
-          const { downloadPagesChannel } = await import(`${process.env.GITHUB_WORKSPACE}/scripts/pages-channel.mjs`);
-          await downloadPagesChannel({ github, repo: context.repo, directory: `${process.env.RUNNER_TEMP}/pages-latest` });
-          // Only a missing release tag is allowed before the first next release;
-          // missing/corrupt assets in an existing channel still fail closed.
-          await downloadPagesChannel({ github, repo: context.repo, channel: 'next', allowMissing: true,
-            directory: `${process.env.RUNNER_TEMP}/pages-next` });
-    - name: Preserve the last latest website during a next helper deployment
-      if: inputs.channel == 'next'
+    - name: Assemble the static website without helper downloads
       shell: bash
-      env:
-        GH_TOKEN: ${{ github.token }}
-      run: |
-        set -euo pipefail
-        node scripts/release-record.mjs previous --output "$RUNNER_TEMP/pages-stable-release.json"
-        website_sha=$(node -p 'require(process.argv[1]).components.website.sourceSha' "$RUNNER_TEMP/pages-stable-release.json")
-        git fetch --no-tags origin "$website_sha"
-        mkdir -p "$RUNNER_TEMP/pages-stable-source"
-        git archive "$website_sha" web | tar -x -C "$RUNNER_TEMP/pages-stable-source"
-    - name: Assemble Pages with both exact helper artifacts
-      shell: bash
-      env:
-        CHANNEL: ${{ inputs.channel }}
-      run: |
-        set -euo pipefail
-        args=(build --bundle-dir "$RUNNER_TEMP/pages-latest" --output-dir "$RUNNER_TEMP/usebeeline-pages")
-        if [ -f "$RUNNER_TEMP/pages-next/manifest.json" ]; then args+=(--next-bundle-dir "$RUNNER_TEMP/pages-next"); fi
-        if [ "$CHANNEL" = next ]; then args+=(--source-dir "$RUNNER_TEMP/pages-stable-source/web"); fi
-        node scripts/pages-site.mjs "${args[@]}"
+      run: node scripts/pages-site.mjs build --static-only --output-dir "$RUNNER_TEMP/usebeeline-pages"
     - uses: actions/configure-pages@v5
-    # One release run can deploy Pages from both the website and helper legs,
-    # so each leg uploads under its own artifact name.
+    # Keep rerun artifacts distinct.
     - uses: actions/upload-pages-artifact@v5
+      id: pages-artifact
       with:
         name: github-pages-${{ github.job }}-${{ github.run_attempt }}
         path: ${{ runner.temp }}/usebeeline-pages
         include-hidden-files: true
-    - uses: actions/deploy-pages@v4
-      with:
-        artifact_name: github-pages-${{ github.job }}-${{ github.run_attempt }}
-    # Only a new helper needs the update proof; a website-only deploy
-    # republishes the durable channel unchanged.
-    - name: Prove a real helper update from the deployed Pages host
-      if: inputs.bundle_dir != ''
-      shell: bash
+    - name: Deploy Pages with one immediate retry for an empty status
+      uses: actions/github-script@v7
       env:
-        MANIFEST_URL: ${{ inputs.manifest_url }}
-      run: >-
-        node scripts/verify-pages-update.mjs
-        --manifest-url "$MANIFEST_URL"
-        --expected-manifest "${{ inputs.bundle_dir }}/manifest.json"
-        --work-dir "$RUNNER_TEMP/pages-update-proof"
-        --attempts 20
+        PAGES_ARTIFACT_ID: ${{ steps.pages-artifact.outputs.artifact_id }}
+      with:
+        script: |
+          const { deployPages } = await import(`${process.env.GITHUB_WORKSPACE}/scripts/deploy-pages.mjs`);
+          const artifactId = Number(process.env.PAGES_ARTIFACT_ID);
+          if (!Number.isSafeInteger(artifactId) || artifactId <= 0) throw new Error('Expected an uploaded Pages artifact ID');
+          await deployPages({ github, repo: context.repo, artifactId,
+            sha: context.sha, idToken: await core.getIDToken() });

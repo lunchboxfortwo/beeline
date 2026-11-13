@@ -1,4 +1,5 @@
 import { ROUTER_COMMAND_SCHEMA } from './router-command-ledger.js';
+import { createAgentCommand } from './agent-command.js';
 import type { AddressInfo } from 'node:net';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import WebSocket from 'ws';
@@ -323,6 +324,77 @@ describe('held presence for a live connection', () => {
     ).rows[0]?.body;
   }
 
+  it.each(['room event', 'resync'])('delivers a committed tag after one failed push on the next %s', async recovery => {
+    const database = await seeded();
+    requestDatabases.push(database);
+    await database.query(`INSERT INTO identities(id,kind,name) VALUES($1,'agent','Sibling')`, [AGENT_B]);
+    await database.query(`INSERT INTO agents(agent_id,owner_id) VALUES($1,$2)`, [AGENT_B, HUMAN]);
+    await database.query(`INSERT INTO memberships(workspace_id,room_id,identity_id,role)
+      VALUES($1,$2,$3,'member'),($1,NULL,$3,'member')`, [WORKSPACE, ROOM, AGENT_B]);
+    const live = new LiveHub(), daemon = new DaemonService(database, live);
+    const presence = new ConnectionPresence(database, live);
+    const execute = daemon.execute.bind(daemon);
+    let failNextPush = false;
+    const calls = vi.spyOn(daemon, 'execute').mockImplementation(async (...args) => {
+      if (args[0] === 'getAgentCommands' && args[2] === AGENT_A && failNextPush) {
+        failNextPush = false;
+        throw new Error('transient read failure');
+      }
+      return execute(...args);
+    });
+    const error = vi.spyOn(console, 'error').mockImplementation(() => undefined);
+    try {
+      const { port } = await start({ database, live, daemon, connectionPresence: presence });
+      const client = await machine(port);
+      for (const [agentId, token] of [[AGENT_A, 'bdt_a'], [AGENT_B, 'bdt_b']]) {
+        await register(client, agentId, token);
+        client.send({ type: 'subscribe', agentId, roomId: ROOM, inbox: false });
+        await client.next(frame => frame.type === 'subscribed' && frame.agentId === agentId);
+      }
+      const command = (agentId: string) => createAgentCommand(database, {
+        roomId: ROOM, agentId, sourceMessageId: null, reason: 'human_tag',
+      });
+      const claimed = (await command(AGENT_A))!;
+      const owner = (await database.query<{ connectionId: string; epoch: number }>(
+        `SELECT connection_id "connectionId",epoch::integer epoch FROM agent_connections WHERE agent_id=$1`, [AGENT_A],
+      )).rows[0]!;
+      await daemon.execute('claimAgentCommand', { roomId: ROOM, commandId: claimed.id, generationId: 'first' }, AGENT_A, owner);
+      const missed = (await command(AGENT_A))!, sibling = (await command(AGENT_B))!;
+      // Both inserts have committed. No more commands are inserted to recover delivery.
+      const change = (agentId: string) => live.publish({
+        type: 'invalidate', roomId: ROOM, reason: 'postgres:agent_commands', targetAgentId: agentId,
+      });
+      failNextPush = true;
+      change(AGENT_A);
+      await vi.waitFor(() => expect(error).toHaveBeenCalledWith('[live] daemon command push failed', 'transient read failure'));
+      await client.next(frame => frame.type === 'commands' && frame.error === 'transient read failure');
+      const reads = () => calls.mock.calls.filter(([name, , agent]) => name === 'getAgentCommands' && agent === AGENT_A).length;
+      const failedReads = reads();
+      const delivered = (frame: Frame, id: string) => frame.type === 'commands' && Array.isArray(frame.commands) &&
+        (frame.commands as { id: string }[]).some(command => command.id === id);
+      change(AGENT_B);
+      await client.next(frame => delivered(frame, sibling.id));
+      expect(reads()).toBe(failedReads);
+      expect(client.frames.some(frame => delivered(frame, missed.id))).toBe(false);
+      if (recovery === 'resync') live.resync();
+      else live.publish({ type: 'invalidate', roomId: ROOM, reason: 'postgres:messages', messageId: 'source' });
+      const recovered = await client.next(frame => delivered(frame, missed.id));
+      expect(recovered.commands).toEqual([expect.objectContaining({ id: claimed.id, generationId: 'first' }),
+        expect.objectContaining({ id: missed.id })]);
+      // The running turn is listed only with its generation, for its helper to resume.
+      expect(client.frames.flatMap(frame => frame.type === 'commands' && Array.isArray(frame.commands) ? frame.commands as { id: string; generationId?: string }[] : [])
+        .filter(command => command.id === claimed.id).every(command => command.generationId === 'first')).toBe(true);
+      expect(client.frames.filter(frame => delivered(frame, sibling.id))).toHaveLength(1);
+      expect(client.frames.some(frame => frame.type === 'unregistered')).toBe(false);
+      expect(client.socket.readyState).toBe(WebSocket.OPEN);
+      expect((await database.query('SELECT state FROM agent_commands WHERE id=$1', [missed.id])).rows)
+        .toEqual([{ state: 'pending' }]);
+    } finally {
+      error.mockRestore();
+      await presence.stop();
+    }
+  });
+
   it.each(['update', 'crash', 'ordinary-close'] as const)('releases a %s socket silently and retains offline presence', async (kind) => {
     const database = await seeded();
     const live = new LiveHub();
@@ -625,6 +697,62 @@ it('completes a large Claude final reply before claiming the wake queued during 
     abort.abort();api.closeLive();await running;await rm(root,{recursive:true,force:true});
   }
 });
+
+it.each(['after turn completion', 'on reconnect'])(
+  'recovers an idle pending tag when the command snapshot fails %s without another Room event', async boundary => {
+    const {mkdtemp,rm} = await import('node:fs/promises');
+    const {tmpdir} = await import('node:os');
+    const {join} = await import('node:path');
+    const {DaemonApiClient} = await import('../../body/src/daemon-api-client.js');
+    const {CommandExecutionContext,runServerCommandIntake} = await import('../../body/src/server-command-intake.js');
+    const command = (id:string) => ({id,roomId:'room',agentId:AGENT_A,turnRequestId:id,
+      sourceMessageId:id,action:'input' as const,reason:'human_tag' as const,rootCommandId:id,
+      rootSourceMessageId:id,agentDepth:0,source:{id,authorId:'human',body:id,createdAt:1,attachments:[]}});
+    const queue = [command('original')], completed:string[] = [];
+    const live = new LiveHub(), daemon = daemonStub();
+    let failNextPush = false, releases = 0, subscribed = false;
+    vi.mocked(daemon.execute).mockImplementation(async (name:string) => {
+      if (name === 'getAgentCommands') {
+        if (failNextPush) { failNextPush = false; throw new Error('canceling statement due to lock timeout'); }
+        return {commandProtocol:1,commands:[...queue]};
+      }
+      if (name === 'claimAgentTurn') return {commands:[queue.shift()!]};
+      if (name === 'releaseAgentTurn') { releases++; return {commands:[...queue]}; }
+      throw new Error(`Unexpected operation ${name}`);
+    });
+    const error = vi.spyOn(console,'error').mockImplementation(() => undefined);
+    const {port} = await start({daemon,live});
+    const http = vi.fn<typeof fetch>();
+    const api = new DaemonApiClient(`http://127.0.0.1:${port}`,'bdt_a',AGENT_A,http);
+    const root = await mkdtemp(join(tmpdir(),'beeline-idle-push-'));
+    const context = new CommandExecutionContext(root), abort = new AbortController();
+    const running = runServerCommandIntake({api,roomId:'room',agentId:AGENT_A,context,
+      signal:abort.signal,stop:()=>{},onSubscriptionState:connected=>{subscribed=connected;},
+      run:async item=>{completed.push(item.id);}});
+    try {
+      await vi.waitFor(() => {
+        expect(completed).toEqual(['original']);
+        expect(releases).toBe(1);
+        expect(context.current).toBeUndefined();
+        expect(subscribed).toBe(true);
+      });
+      queue.push(command('idle-tag'));
+      failNextPush = true;
+      if (boundary === 'on reconnect') api.reconnectLive();
+      else live.publish({type:'invalidate',roomId:'room',reason:'postgres:agent_commands',targetAgentId:AGENT_A});
+      await vi.waitFor(() => expect(error).toHaveBeenCalledWith(
+        '[live] daemon command push failed','canceling statement due to lock timeout'));
+      // The tag has committed. No second tag, Room invalidation or timer recovers it.
+      await vi.waitFor(() => expect(completed).toEqual(['original','idle-tag']),{timeout:3000});
+      expect(api.metrics().reconnects).toBe(boundary === 'on reconnect' ? 2 : 1);
+      expect(vi.mocked(daemon.execute).mock.calls.filter(([name]) => name === 'claimAgentTurn')).toHaveLength(2);
+      expect(http).not.toHaveBeenCalled();
+    } finally {
+      abort.abort();api.closeLive();await running;
+      await rm(root,{recursive:true,force:true});error.mockRestore();
+    }
+  },
+);
 
 it('answers a request admission failure instead of leaving the helper waiting', async () => {
   const database = new PgliteDatabase();

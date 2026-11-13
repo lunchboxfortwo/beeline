@@ -1,11 +1,13 @@
 import type { ChatDisplayMessage } from './room-view-presentation';
-import { scrubDate, type TranscriptScrollMetrics } from './transcript-scrubber';
+import { scrollBarPosition, scrubDate, type TranscriptScrollMetrics } from './transcript-scrubber';
 
 /** How long the bar stays after the list stops, long enough to grab it. */
 export const SCRUBBER_LINGER_MS = 2_000;
 
 export type TranscriptScrubberSnapshot = {
   metrics: TranscriptScrollMetrics | null;
+  /** Last position established by meaningful list movement, not row layout. */
+  position: number | null;
   /** The day of the oldest message on screen, for the drag bubble. */
   date: string | null;
   /** The list is scrolling or just stopped. */
@@ -27,14 +29,16 @@ export type TranscriptScrubberStore = ReturnType<typeof createTranscriptScrubber
  * message store owns one per Room as its `positions`.
  */
 export function createTranscriptScrubberStore() {
-  let snapshot: TranscriptScrubberSnapshot = { metrics: null, date: null, visible: false };
+  let snapshot: TranscriptScrubberSnapshot = { metrics: null, position: null, date: null, visible: false };
   let linger: ReturnType<typeof setTimeout> | null = null;
+  let positionedOffset: number | null = null;
   const listeners = new Set<() => void>();
   const update = (next: Partial<TranscriptScrubberSnapshot>) => {
     snapshot = { ...snapshot, ...next };
     listeners.forEach((listener) => listener());
   };
-  const reveal = () => {
+  const reveal = (position?: number) => {
+    if (position !== undefined) update({ position });
     if (!snapshot.visible) update({ visible: true });
     if (linger) clearTimeout(linger);
     linger = setTimeout(() => update({ visible: false }), SCRUBBER_LINGER_MS);
@@ -49,15 +53,24 @@ export function createTranscriptScrubberStore() {
     },
     /** Shows the bar and restarts its fade. */
     reveal,
-    observeScroll(event: ScrollEventShape) {
+    observeScroll(event: ScrollEventShape, readerScrolling = true) {
+      const metrics = {
+        offset: event.contentOffset.y,
+        contentHeight: event.contentSize.height,
+        viewportHeight: event.layoutMeasurement.height,
+      };
+      // Native anchoring can change the offset by hundreds of points while
+      // keeping the reading row still. Only the controller's reader scroll
+      // lifecycle may position or reveal the thumb; every event still refreshes
+      // the metrics used when the reader grabs it. Within a gesture, accumulate
+      // movement beyond the one-point rounding tolerance.
+      const moved = readerScrolling && (positionedOffset === null || Math.abs(metrics.offset - positionedOffset) > 1);
+      if (moved || !readerScrolling) positionedOffset = metrics.offset;
       update({
-        metrics: {
-          offset: event.contentOffset.y,
-          contentHeight: event.contentSize.height,
-          viewportHeight: event.layoutMeasurement.height,
-        },
+        metrics,
+        position: moved ? scrollBarPosition(metrics) : snapshot.position,
       });
-      reveal();
+      if (moved) reveal();
     },
     /**
      * The list's content grew or shrank without scrolling, as when an older
@@ -77,7 +90,8 @@ export function createTranscriptScrubberStore() {
     reset() {
       if (linger) clearTimeout(linger);
       linger = null;
-      update({ metrics: null, date: null, visible: false });
+      positionedOffset = null;
+      update({ metrics: null, position: null, date: null, visible: false });
     },
     dispose() {
       if (linger) clearTimeout(linger);

@@ -7,7 +7,7 @@ import {
   type BuzzNotificationTarget,
 } from '@/utils/notificationRouting';
 
-/** Resolve server truth and persist Workspace selection before navigation. */
+/** Resolve server truth and persist Workspace selection. */
 export async function resolveBuzzNotificationDestination(
   target: BuzzNotificationTarget,
 ): Promise<BuzzNotificationTarget> {

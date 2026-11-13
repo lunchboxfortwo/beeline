@@ -1,23 +1,12 @@
+import { providerAdapter, providerToolkit, checkProviderRequestFailure } from './providers/index.js';
+import { YouTubeUploadRefusal } from './providers/youtube.js';
+export { YouTubeUploadRefusal, YOUTUBE_ANALYTICS_TOOL } from './providers/youtube.js';
 /** Server-only Composio v3 boundary. Credentials and provider tokens never leave Composio. */
 import { createHash } from 'node:crypto';
 import { CommandRefusalError, ExpectedRefusalError } from './command-refusal.js';
 
 type Json = Record<string, unknown>;
 const API = 'https://backend.composio.dev/api';
-
-/** Explicit YouTube rejection before a video exists; timeouts and generic 5xx stay ambiguous. */
-export class YouTubeUploadRefusal extends Error {}
-
-function clearYouTubeUploadRefusal(value: unknown): boolean {
-  const hasVideoId = (node: unknown): boolean => {
-    if (!node || typeof node !== 'object') return false;
-    return Object.entries(node).some(([key, item]) =>
-      (['id', 'videoId', 'video_id'].includes(key) && item !== null && item !== '') || hasVideoId(item));
-  };
-  if (hasVideoId(value)) return false;
-  const text = JSON.stringify(value);
-  return Boolean(text && /youtubeSignupRequired|channel is not properly configured|quotaExceeded|uploadLimitExceeded|dailyLimitExceeded|insufficientPermissions|unverified|invalidTitle|invalidDescription|invalidCategoryId/i.test(text));
-}
 
 function object(value: unknown): Json {
   if (!value || typeof value !== 'object' || Array.isArray(value))
@@ -43,22 +32,11 @@ export function isAppSignInLink(url: string): boolean {
 }
 
 export function composioToolkitForApp(key: string): string {
-  const known: Record<string, string> = {
-    calendar: 'googlecalendar', drive: 'googledrive', docs: 'googledocs',
-    sheets: 'googlesheets', googlecalendar: 'googlecalendar',
-    googledrive: 'googledrive', googledocs: 'googledocs', googlesheets: 'googlesheets',
-  };
-  return known[key] ?? key;
+  return providerToolkit(key);
 }
 
-/**
- * Toolkits that sign in only through an operator-created custom OAuth2 config. Composio's
- * shared app for these is blocked by the provider, so they never fall back to it.
- */
-const CUSTOM_AUTH_ONLY: ReadonlySet<string> = new Set(['youtube', 'tiktok']);
-
 export function requiresCustomAuth(toolkit: string): boolean {
-  return CUSTOM_AUTH_ONLY.has(toolkit);
+  return providerAdapter(toolkit)?.customAuthOnly ?? false;
 }
 
 function safeToolSlug(slug: string): boolean {
@@ -146,84 +124,6 @@ function stripSecrets(value: unknown, depth = 0): unknown {
  * reads YouTube Analytics reports through Composio's authenticated proxy. The Google token
  * stays in Composio.
  */
-export const YOUTUBE_ANALYTICS_TOOL = 'BEELINE_YOUTUBE_ANALYTICS_REPORT';
-/**
- * Composio's YOUTUBE_UPLOAD_VIDEO returns a video id but never delivers the file, so the video
- * stays in processing forever. It is hidden and refused; the multipart tool works.
- */
-const YOUTUBE_BROKEN_UPLOAD_TOOL = 'YOUTUBE_UPLOAD_VIDEO';
-const YOUTUBE_UPLOAD_TOOL = 'YOUTUBE_MULTIPART_UPLOAD_VIDEO';
-const YOUTUBE_ANALYTICS_REPORTS = 'https://youtubeanalytics.googleapis.com/v2/reports';
-const REPORT_DATE = /^\d{4}-\d{2}-\d{2}$/;
-
-const githubRestReadTool = {
-  slug: 'BEELINE_GITHUB_REST_READ', name: 'GitHub repository REST read',
-  description: 'Read repository data through the connected GitHub account, including contents and pull requests.',
-  inputParameters: { type: 'object', additionalProperties: false, required: ['path'],
-    properties: { path: { type: 'string', description: 'Repository API path, including query parameters.' } } },
-};
-
-const githubGraphqlReadTool = {
-  slug: 'BEELINE_GITHUB_GRAPHQL_READ', name: 'GitHub GraphQL read',
-  description: 'Run read-only GitHub GraphQL queries. Mutations and subscriptions are refused.',
-  inputParameters: { type: 'object', required: ['query'], additionalProperties: false,
-    properties: { query: { type: 'string' }, variables: { type: 'object' }, operationName: { type: 'string' } } },
-};
-const githubContentsPutTool = {
-  slug: 'BEELINE_GITHUB_CONTENTS_PUT', name: 'GitHub repository contents write',
-  description: 'Create or update one repository file through the connected personal account.',
-  inputParameters: { type: 'object', required: ['path', 'body'], additionalProperties: false,
-    properties: { path: { type: 'string' }, body: { type: 'object' } } },
-};
-
-const youtubeAnalyticsTool = {
-  slug: YOUTUBE_ANALYTICS_TOOL,
-  name: 'YouTube Analytics report',
-  description: 'Query a YouTube Analytics report for the connected channel (ids=channel==MINE). ' +
-    'Returns columnHeaders and rows. Example: metrics "views,estimatedMinutesWatched", ' +
-    'dimensions "day", sort "day".',
-  inputParameters: {
-    type: 'object',
-    properties: {
-      startDate: { type: 'string', description: 'First day of the report, YYYY-MM-DD.' },
-      endDate: { type: 'string', description: 'Last day of the report, YYYY-MM-DD.' },
-      metrics: { type: 'string', description: 'Comma-separated metrics, e.g. "views,likes,subscribersGained".' },
-      dimensions: { type: 'string', description: 'Optional comma-separated dimensions, e.g. "day" or "video".' },
-      filters: { type: 'string', description: 'Optional filters, e.g. "video==VIDEO_ID" or "country==US".' },
-      sort: { type: 'string', description: 'Optional sort, e.g. "-views".' },
-      maxResults: { type: 'integer', description: 'Optional maximum number of rows.' },
-    },
-    required: ['startDate', 'endDate', 'metrics'],
-  },
-};
-
-function youtubeAnalyticsQuery(args: Json): { name: string; value: string; type: 'query' }[] {
-  const text = (key: string, required: boolean): string | undefined => {
-    const value = args[key];
-    if (value === undefined && !required) return undefined;
-    if (typeof value !== 'string' || !value.trim() || value.length > 1000)
-      throw new Error(`YouTube Analytics ${key} must be a non-empty string`);
-    return value.trim();
-  };
-  const query: { name: string; value: string; type: 'query' }[] = [
-    { name: 'ids', value: 'channel==MINE', type: 'query' }];
-  for (const key of ['startDate', 'endDate'] as const) {
-    const value = text(key, true)!;
-    if (!REPORT_DATE.test(value)) throw new Error(`YouTube Analytics ${key} must be YYYY-MM-DD`);
-    query.push({ name: key, value, type: 'query' });
-  }
-  for (const key of ['metrics', 'dimensions', 'filters', 'sort'] as const) {
-    const value = text(key, key === 'metrics');
-    if (value !== undefined) query.push({ name: key, value, type: 'query' });
-  }
-  if (args.maxResults !== undefined) {
-    if (!Number.isInteger(args.maxResults) || (args.maxResults as number) < 1)
-      throw new Error('YouTube Analytics maxResults must be a positive integer');
-    query.push({ name: 'maxResults', value: String(args.maxResults), type: 'query' });
-  }
-  return query;
-}
-
 /** The largest Room file the server stages for an app tool; it is held in memory while it uploads. */
 export const APP_FILE_MAXIMUM_BYTES = 128 * 1024 * 1024;
 /** The presigned PUT carries up to the cap, so it gets far longer than a JSON request. */
@@ -467,8 +367,7 @@ export class ComposioApps {
       const error = new Error(detail
         ? `App provider request failed (${response.status}): ${detail}`
         : `App provider request failed (${response.status})`);
-      if (path === '/tools/execute/YOUTUBE_MULTIPART_UPLOAD_VIDEO' && clearYouTubeUploadRefusal(payload))
-        throw new YouTubeUploadRefusal(error.message);
+      checkProviderRequestFailure(path, payload, error.message);
       Object.assign(error, { status: response.status });
       throw error;
     }
@@ -675,14 +574,14 @@ export class ComposioApps {
     if (!Array.isArray(result.items)) throw new Error('App provider returned an invalid response');
     const tools = result.items.map(object).filter((row) =>
       safeToolSlug(String(row.slug ?? '')) && object(row.toolkit).slug === toolkit &&
-      !(toolkit === 'youtube' && row.slug === YOUTUBE_BROKEN_UPLOAD_TOOL),
+      !providerAdapter(toolkit)?.hiddenTools?.includes(String(row.slug)),
     ).map((row) => ({
       slug: requiredString(row.slug), name: requiredString(row.name),
       description: typeof row.description === 'string' ? row.description : '',
       inputParameters: stripSecrets(row.input_parameters ?? {}),
     }));
-    const catalog = toolkit === 'youtube' && !page.cursor ? [youtubeAnalyticsTool, ...tools]
-      : toolkit === 'github' && !page.cursor ? [...tools, githubRestReadTool, githubGraphqlReadTool, githubContentsPutTool] : tools;
+    const adapter = providerAdapter(toolkit);
+    const catalog = !page.cursor ? [...(adapter?.prependTools ?? []), ...tools, ...(adapter?.appendTools ?? [])] : tools;
     if (query?.trim()) {
       const search = query.trim().toLowerCase();
       const exact = catalog.filter(tool => tool.slug.toLowerCase() === search || tool.name.toLowerCase() === search);
@@ -764,55 +663,16 @@ export class ComposioApps {
 
   private async executeStaged(input: { accountId: string; userId: string; toolkit: string;
     tool: string; arguments: Json; files?: AppFiles }, hidden: string[]): Promise<unknown> {
-    if (input.toolkit === 'youtube' && input.tool === YOUTUBE_BROKEN_UPLOAD_TOOL)
-      throw new CommandRefusalError(`${YOUTUBE_BROKEN_UPLOAD_TOOL} does not deliver the video file; ` +
-        `use ${YOUTUBE_UPLOAD_TOOL} instead`, 400);
+    const adapter = providerAdapter(input.toolkit);
+    adapter?.validateTool?.(input.tool);
     const files = input.files ?? new Map<unknown, never>();
     if (fileReferences(input.arguments).some((reference) => !files.has(reference)))
       throw new CommandRefusalError('Room files are unavailable for app tools', 400);
     if (!(await this.account(input.accountId, input.userId, input.toolkit)))
       throw new CommandRefusalError('App connection is unavailable', 409);
-    if ([githubRestReadTool.slug, githubGraphqlReadTool.slug, githubContentsPutTool.slug].includes(input.tool) && input.toolkit === 'github') {
-      const graphql = input.tool === githubGraphqlReadTool.slug;
-      const write = input.tool === githubContentsPutTool.slug;
-      const path = graphql ? '/graphql' : input.arguments.path;
-      const url = typeof path === 'string' ? new URL(path, 'https://api.github.com') : undefined;
-      if (!graphql && (!url || !path || typeof path !== 'string' || !path.startsWith('/repos/') ||
-        url.origin !== 'https://api.github.com' || !/^\/repos\/[^/]+\/[^/]+(?:\/|$)/.test(url.pathname) ||
-        url.hash || Object.keys(input.arguments).some(key => !['path', ...(write ? ['body'] : [])].includes(key))))
-        throw new CommandRefusalError('GitHub read requires a repository API path', 400);
-      // Fail closed across every operation in a document, including an unselected
-      // mutation. Keyword checks are conservative even inside strings/comments.
-      if (graphql && (typeof input.arguments.query !== 'string' ||
-        !/^(?:\s|,|#[^\r\n]*(?:\r?\n|$))*(?:query\b|\{)/.test(input.arguments.query) ||
-        /\b(?:mutation|subscription)\b/.test(input.arguments.query) ||
-        Object.keys(input.arguments).some(key => !['query', 'variables', 'operationName'].includes(key))))
-        throw new CommandRefusalError('GitHub GraphQL accepts read queries only', 400);
-      if (write && (!url || !/^\/repos\/[^/]+\/[^/]+\/contents\/.+/.test(url.pathname) || url.search ||
-        url.pathname.split('/').some(part => {
-          const decoded = decodeURIComponent(part);
-          return decoded === '..' || decoded === '.' || /[/\\%]/.test(decoded);
-        }) ||
-        !input.arguments.body || typeof input.arguments.body !== 'object' || Array.isArray(input.arguments.body)))
-        throw new CommandRefusalError('GitHub write requires a repository contents path and body', 400);
-      if (files.size) throw new CommandRefusalError('GitHub requests do not take files', 400);
-      const result = await this.request('/tools/execute/proxy', 'POST', {
-        connected_account_id: input.accountId, endpoint: url!.origin + url!.pathname, method: graphql ? 'POST' : write ? 'PUT' : 'GET',
-        ...(graphql ? { body: input.arguments } : write ? { body: input.arguments.body } : {}),
-        parameters: [...url!.searchParams].map(([name, value]) => ({ name, value, type: 'query' })),
-      }, 'v3.1');
-      if (!Number.isInteger(result.status) || Number(result.status) < 100 || Number(result.status) > 599)
-        throw new Error('GitHub returned an invalid response status');
-      const headers = object(result.headers);
-      return stripSecrets({ status: result.status,
-        headers: { 'content-type': 'application/json',
-          ...(typeof headers.link === 'string' ? { link: headers.link } : {}) },
-        body: JSON.stringify(stripSecrets(result.data)) });
-    }
-    if (input.tool === YOUTUBE_ANALYTICS_TOOL && input.toolkit === 'youtube') {
-      if (files.size) throw new CommandRefusalError('A Room file was passed for a parameter that does not take a file', 400);
-      return this.youtubeAnalyticsReport(input.accountId, input.arguments);
-    }
+    if (adapter?.handlesTool?.(input.tool)) return adapter.executeTool!({
+      request: this.request.bind(this), object, stripSecrets, providerErrorDetail,
+    }, input, files.size);
     const definition = await this.request(
       `/tools/${encodeURIComponent(input.tool)}?toolkit_versions=latest`, 'GET');
     if (object(definition.toolkit).slug !== input.toolkit)
@@ -827,29 +687,12 @@ export class ComposioApps {
     if (result.error || result.successfull === false || result.successful === false) {
       const detail = providerErrorDetail(result.error);
       const message = detail ? `App tool execution failed: ${detail}` : 'App tool execution failed';
-      if (input.tool === YOUTUBE_UPLOAD_TOOL && input.toolkit === 'youtube' && clearYouTubeUploadRefusal(result))
-        throw new YouTubeUploadRefusal(message);
+      adapter?.checkFailure?.(input.tool, result, message);
       const refusalStatus = appRefusalStatus(result);
       if (refusalStatus) throw new CommandRefusalError(message, refusalStatus);
       return { successful: false, error: message };
     }
     return stripSecrets(result.data);
-  }
-
-  private async youtubeAnalyticsReport(accountId: string, args: Json): Promise<unknown> {
-    const result = await this.request('/tools/execute/proxy', 'POST', {
-      connected_account_id: accountId, endpoint: YOUTUBE_ANALYTICS_REPORTS, method: 'GET',
-      parameters: youtubeAnalyticsQuery(args),
-    }, 'v3.1');
-    const status = typeof result.status === 'number' ? result.status : 0;
-    if (status < 200 || status > 299) {
-      const detail = providerErrorDetail(result.data);
-      throw new Error(detail ? `YouTube Analytics request failed (${status}): ${detail}`
-        : `YouTube Analytics request failed (${status})`);
-    }
-    const data = object(result.data);
-    return stripSecrets({ columnHeaders: Array.isArray(data.columnHeaders) ? data.columnHeaders : [],
-      rows: Array.isArray(data.rows) ? data.rows : [] });
   }
 
   /** Swaps each Room file reference at a `file_uploadable` parameter for its staged descriptor. */

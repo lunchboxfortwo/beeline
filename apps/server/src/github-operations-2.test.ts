@@ -260,7 +260,7 @@ const scope1 = fixtureScope1();
   });
 
 
-  it('Reproduction REVIEW-LOOP: checks expose an ended review without claiming a verdict', async () => {
+  it('Reproduction REVIEW-LOOP: checks dispatch one retry for an ended review without claiming approval', async () => {
     const {corners,app}=await scope1.checksFixture();
     const operations=new GitHubOperations(scope1.database,{} as GitHubOAuthClient,app as unknown as GitHubAppClient,'secret');
     await setCornerOwner(scope1.database, corners[0]!, null);
@@ -269,7 +269,7 @@ const scope1 = fixtureScope1();
     await scope1.database.query(`UPDATE agent_commands SET state='complete',completed_at=now() WHERE room_id=$1`,[corners[0]]);
     await scope1.database.query(`UPDATE agent_turns SET status='complete' WHERE room_id=$1`,[corners[0]]);
     expect((await operations.prChecksStatus({cornerId:corners[0]!})).reviewerWake).toMatchObject({
-      status:'waiting',detail:expect.stringContaining('without a verdict'),
+      status:'dispatched',
     });
   });
 

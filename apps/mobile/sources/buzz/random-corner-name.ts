@@ -27,12 +27,12 @@ const NOUNS = [
 ] as const;
 
 /**
- * A three-word corner title whose last word is always `corner`.
+ * A three-word thread title whose last word is always `thread`.
  * The Room header long-press uses this so a new human corner can open
  * without the title dialog.
  */
 export function randomCornerName(random: () => number = Math.random): string {
   const adjective = ADJECTIVES[Math.floor(random() * ADJECTIVES.length)] ?? ADJECTIVES[0];
   const noun = NOUNS[Math.floor(random() * NOUNS.length)] ?? NOUNS[0];
-  return `${adjective}-${noun}-corner`;
+  return `${adjective}-${noun}-thread`;
 }

@@ -1,16 +1,12 @@
 import { createUsageRefresh } from './agent-usage-refresh.js';
 import { storeVaultSubmission, type VaultSaveSubmission } from './vault-save.js';
 import { StdioSquireMcpClient } from './squire-mcp-client.js';
-import { agentBehavior, requireInstalledAgentProgram } from './agent-command.js';
+import { requireInstalledAgentProgram } from './agent-command.js';
 import { homedir } from 'node:os';
 import { dirname, resolve } from 'node:path';
 import { loadBodyConfig } from './config.js';
 import { formatAgentCommand } from './agent-command.js';
 import { LEGACY_ACCESS_POLICY } from './access-policy.js';
-import {
-  applyRuntimeModelPreflight,
-  resolvePreflightModelSelection,
-} from './runtime-model-validation.js';
 import { syncAgentModelCatalog } from './model-catalog-sync.js';
 import {
   AgentSignIn,
@@ -25,15 +21,12 @@ import { ThinDaemonCore } from './thin-core.js';
 import { AgentLifecycle, type AgentExitReason } from './helper-lifecycle.js';
 import { migrateLegacyDaemonTransport } from './legacy-daemon-migration.js';
 import { activateDaemonTransport, DaemonApiError } from './daemon-api-client.js';
-import { reportInterruptedTurns } from './force-update-journal.js';
-import type { InterruptedTurn } from './force-update-journal.js';
 import {
   clearDaemonPidRecordIfPid,
   convergeRuntimeRecordFileModes,
   migrateRuntimeRecordAccessPolicy,
   runtimeAgentCommand,
   writeDaemonPidRecord,
-  writeRuntimeRecord,
 } from './runtime.js';
 import { retireRemovedAgent } from './agent-retirement.js';
 import { readMachineId } from './connect-command.js';
@@ -63,11 +56,11 @@ export interface AgentRuntimeHost {
   readonly freeAgent?: boolean;
   /** Join the machine's update drain and forced-update handoff; returns leave. */
   attach(agent: HostedAgent): () => void;
-  /** A status line for the watchdog and `beeline update --status`. */
+  /** A status line for `beeline update --status`. */
   progress(agentId: string, status: string, fault?: unknown): void;
   /** This agent finished starting (or gave up on it). */
   established(agentId: string): void;
-  tickUpdate(): Promise<void>;
+  tickUpdate(): void;
   notifyReleaseAvailable(releaseKey: string): void;
   requestForceUpdate(minVersion: string): void;
 }
@@ -148,30 +141,10 @@ export async function runAgentRuntime(
     config.externalMcpCapabilities = [...runtime.externalMcpCapabilities];
   }
   if (runtime.sharedSkills) config.sharedSkills = [...runtime.sharedSkills];
-  // The server's current selection is authoritative for this preflight: a
-  // stale local runtime.json cache (an id already corrected server-side, or
-  // a retired alias) must not re-poison config.modelUnavailable on this
-  // restart just because it never received the correction.
-  const preflightModelSelection = await resolvePreflightModelSelection(
-    runtime.modelSelection,
-    () => daemonApi.execute('getAgentConfiguration', { agentId }),
-  );
-  if (preflightModelSelection) {
-    runtime.modelSelection = preflightModelSelection;
-    await writeRuntimeRecord(runtime);
-  }
-  if (preflightModelSelection && !agentProgramError) {
-    const validation = host.freeAgent && agentBehavior(runtime.agentKind).validateHostedModelInSession &&
-      preflightModelSelection.model?.startsWith('beeline/') ? 'session' : 'startup';
-    await applyRuntimeModelPreflight(config, agent, preflightModelSelection, undefined, undefined, validation);
-    if (validation === 'session') {
-      console.log('[body] pinned free-agent model will be validated in its live Room session');
-    } else if (!config.modelUnavailable) {
-      console.log('[body] persisted model/effort selection passed live startup validation');
-    } else {
-      console.error(`[body] ${config.modelUnavailable.detail}`);
-    }
-  }
+  // Room/corner activation reads the server selection and exercises the live
+  // setter in the session that will use it. A throwaway ACP probe here could
+  // wait forever before command intake (including stop/login) even exists.
+  config.modelSelection = runtime.modelSelection;
   // Pinned so corner-session git credential helpers (`corner-read-token.ts`)
   // can exec this bundle's CLI against the exact runtime record — no state-home
   // discovery inside the sandbox, where XDG dirs are deliberately relocated.
@@ -285,8 +258,6 @@ export async function runAgentRuntime(
   };
   let exitReason: AgentExitReason | undefined;
   try {
-    // Credential activation and interruption replay precede every intake.
-    await reportInterruptedTurns(runtimeDir, daemonApi, agentId);
     registryMcpBroker = new RegistryMcpHostBroker(
       config.operatorHome,
       fetch,
@@ -322,18 +293,19 @@ export async function runAgentRuntime(
     daemonApi.setForceUpdateListener((minVersion) => host.requestForceUpdate(minVersion));
     daemonApi.setHelperReleaseListener(({ version, sha }) => {
       host.notifyReleaseAvailable(`${version}:${sha}`);
-      void host.tickUpdate();
+      host.tickUpdate();
     });
     core.setInteractiveIdleListener(() => {
-      void host.tickUpdate();
+      host.tickUpdate();
     });
     const result = await core.run({
       signal: controller.signal,
-      onEstablished: async () => {
-        await clearDaemonStartFailures(runtimeDir);
+      onEstablished: () => {
         discoveryReady = true;
         markEstablished();
-        // One bounded harness probe per activation keeps the phone's MODEL /
+        void clearDaemonStartFailures(runtimeDir)
+          .catch(error => console.warn('[body] startup diagnostics not cleared:', error));
+        // One independent harness probe per activation keeps the phone's MODEL /
         // EFFORT rows current; it never blocks readiness or the Room loop.
         void syncAgentModelCatalog({
           api: daemonApi,
@@ -343,12 +315,6 @@ export async function runAgentRuntime(
           workspaceId: runtime.communityId,
           runtimeDir,
           ...(runtime.modelSelection ? { runtimeSelection: runtime.modelSelection } : {}),
-          ...(config.modelUnavailable
-            ? {
-                startupUnavailable: config.modelUnavailable.unavailable.label,
-                startupSelection: config.modelUnavailable.selection,
-              }
-            : {}),
         });
         // Report the machine identity once per activation so the server can
         // collapse multiple agents on one physical host into one machine row
@@ -391,14 +357,14 @@ export async function runAgentRuntime(
           });
         }
       },
-      onProgress: async (status, fault) => {
+      onProgress: (status, fault) => {
         if (!controller.signal.aborted)
           host.progress(
             agentId,
             daemonApi.channel.isOpen() ? status : 'degraded: machine link reconnecting',
             fault,
           );
-        await host.tickUpdate();
+        host.tickUpdate();
       },
     });
     if (result === 'agent-removed') {
@@ -422,10 +388,4 @@ export async function runAgentRuntime(
     console.log(`[beeline] agent ${agentId} removed; private storage reclaimed or deferred while in use`);
   }
   return exitReason ?? lifecycle.stopReason ?? 'stopped';
-}
-
-/** The force-update journal entries for one hosted agent. */
-export function interruptHostedAgent(agent: HostedAgent): InterruptedTurn[] {
-  agent.lifecycle.quiesce('force-update');
-  return agent.core.interruptForServerMinimum();
 }

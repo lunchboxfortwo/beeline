@@ -59,7 +59,7 @@ it.each(['before', 'after'] as const)('connected helper retains owned-model auth
     id: 'm1', state: 'started', instance_id: 'current', config: { image },
   }));
   const service = new FreeAgentService(fixture.db, config(), provider, async () => ({ exchangeToken: 'synthetic' }));
-  const negotiate = () => daemon.negotiateOwnedModel(MODEL_AGENT, source, true);
+  const negotiate = () => daemon.negotiateOwnedModel(MODEL_AGENT, true);
   const selectedBefore = timing === 'before' ? await negotiate() : undefined;
   // Registration and listener catch-up both admit this acquisition while the
   // original messages are still pending. A serving helper must remain ready.
@@ -70,10 +70,19 @@ it.each(['before', 'after'] as const)('connected helper retains owned-model auth
   const claimed = await daemon.execute('claimAgentTurn', {
     roomId: MODEL_ROOM, commandId: pending.commands[0]!.id, generationId,
   }, MODEL_AGENT, source, selected.capability);
+  const workingRoom = (await phone.readRoom(MODEL_ROOM, MODEL_OWNER))!;
+  const working = workingRoom.latestAgentTurns.find(turn => turn.status === 'working')!;
+  expect(workingRoom.pendingAgentCommands).toEqual([]);
+  const workingAck = selectComposerAckPresentation({ isCorner: false, now: Date.now(),
+    activeTurnPubkey: working.agentPubkey, activeTurnRequestId: working.requestId,
+    pendingAgentCommands: first.pendingAgentCommands,
+    conversationIdentities: new Map([[MODEL_AGENT, { pubkey: MODEL_AGENT, kind: 'agent', name: 'Beebee' }]]) });
+  expect(workingAck?.label).not.toContain('starting');
+  expect(workingAck).not.toBeNull();
   expect(claimed.commands.map(command => command.source.id)).toEqual([first.messageId, second.messageId]);
   expect(claimed.modelCredential).toMatchObject({ v: 1 });
   const actor = await fixture.credentials.authenticate(fixture.db, claimed.modelCredential!.token);
-  expect(actor.binding).toMatchObject({ connectionId: source.connectionId, connectionEpoch: source.epoch, generationId });
+  expect(actor.binding).toMatchObject({ connectionId: null, connectionEpoch: null, generationId });
   await daemon.execute('postRoomMessage', {
     roomId: MODEL_ROOM, requestId: claimed.commands[0]!.turnRequestId!, generationId,
     text: 'Both original messages answered.',
@@ -168,7 +177,8 @@ it('full read and send receipt show the accepted pending command without a synth
   const pending=room.pendingAgentCommands![0]!;
   const ack=selectComposerAckPresentation({isCorner:false,now:Date.now(),viewerPubkey:MODEL_OWNER,viewerCanSend:true,
     pendingAgentCommands:room.pendingAgentCommands,conversationIdentities:new Map([[MODEL_AGENT,{pubkey:MODEL_AGENT,kind:'agent',name:'Beebee'}]])});
-  expect(ack).toEqual({label:'Beebee · starting…',stop:{agentPubkey:MODEL_AGENT,requestId:pending.requestId}});
+  expect(pending.runtimePhase).toBeUndefined();
+  expect(ack).toBeNull();
 });
 
 it('adopts a lost create result using the original bootstrap without replaying create',async()=>{

@@ -1,3 +1,6 @@
+import { DatabaseLockDiagnostics } from './database-lock-diagnostics.js';
+import { githubProviderKey } from './providers/index.js';
+import { installShutdown } from './shutdown.js';
 import { notifyLive } from './postgres-live.js';
 import { OwnedModelCredentials } from './owned-model-credential.js';
 import { requiredServerSetting as required } from './server-configuration.js';
@@ -119,9 +122,11 @@ async function main() {
     await healthDatabase.close();
     throw error;
   }
+  const lockDiagnostics = new DatabaseLockDiagnostics(healthDatabase);
   const database = new PostgresDatabase(
     connectionString,
     budget.app,
+    { lockDiagnostics },
   );
   try {
     await assertSchemaCurrent(database);
@@ -130,8 +135,8 @@ async function main() {
     await healthDatabase.close();
     throw error;
   }
-  const enrichmentDatabase = new PostgresDatabase(connectionString, budget.enrichment, { mode: 'enrichment' });
-  const jobsDatabase = new PostgresDatabase(connectionString, budget.jobs, { mode: 'long-running' });
+  const enrichmentDatabase = new PostgresDatabase(connectionString, budget.enrichment, { mode: 'enrichment', lockDiagnostics });
+  const jobsDatabase = new PostgresDatabase(connectionString, budget.jobs, { mode: 'long-running', lockDiagnostics });
   warnIfEmbeddingKeyMissing();
   console.log(`[database] connection budget ${JSON.stringify(budget)}`);
   const publicOrigin =
@@ -210,7 +215,7 @@ async function main() {
         githubClients.app,
         process.env.GITHUB_CLIENT_SECRET!,
         mountedAuth.sealedGitHubUserToken,
-        (roomId) => live.publish({ type: 'invalidate', roomId, reason: 'github' }),
+        (roomId) => live.publish({ type: 'invalidate', roomId, reason: githubProviderKey }),
       )
     : undefined;
   const githubJobs = githubClients
@@ -220,7 +225,7 @@ async function main() {
         githubClients.app,
         process.env.GITHUB_CLIENT_SECRET!,
         mountedAuth.sealedGitHubUserToken,
-        (roomId) => live.publish({ type: 'invalidate', roomId, reason: 'github' }),
+        (roomId) => live.publish({ type: 'invalidate', roomId, reason: githubProviderKey }),
       )
     : undefined;
   // Generated procedures are anchored to real code, so the curator's staleness
@@ -473,7 +478,7 @@ async function main() {
   schedulesJob.wake();
   const stopOperationOutcomes = startOperationOutcomeFlush(jobsDatabase, operationOutcomes, backgroundJobs);
   console.log(`[server] listening on ${host}:${port}; store=postgres; background=events`);
-  const stop = async () => {
+  installShutdown(server, async () => {
     mcpStop.abort();
     liveListener.setMcpWebhookWake(() => {});
     for (const stop of stops) stop();
@@ -485,7 +490,6 @@ async function main() {
     await voice?.close();
     await connectionPresence.stop();
     await liveListener.stop();
-    await new Promise<void>((resolve) => server.close(() => resolve()));
     await stopOperationOutcomes();
     await mountedAuth.close();
     await Promise.all([github?.stopCheckRefreshes(), githubJobs?.stopCheckRefreshes()]);
@@ -495,9 +499,7 @@ async function main() {
       healthDatabase.close(),
       jobsDatabase.close(),
     ]);
-  };
-  process.once('SIGINT', () => void stop());
-  process.once('SIGTERM', () => void stop());
+  });
 }
 
 /** Operator creation or release-time warming, using the normal free-agent service. */

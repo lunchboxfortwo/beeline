@@ -392,7 +392,7 @@ describe('system-line producers', () => {
     }
   });
 
-  it('shows one plain failure and ignores conflicting terminal replays', async () => {
+  it('keeps terminal failure and conflicting replays out of chat', async () => {
     const database = await fixture();
     try {
       const requestId = 'f'.repeat(64);
@@ -438,20 +438,7 @@ describe('system-line producers', () => {
         ),
       ).resolves.toBeDefined();
       const failed = await lines(database);
-      expect(failed).toEqual([
-        {
-          author_id: AGENT,
-          text: "@bee could not finish this request · model selection unavailable",
-          presentation: 'system',
-          woke: [],
-          card_type: 'turn-failed',
-          system_event: {
-            subject: { kind: 'agent', id: AGENT, name: '@bee' },
-            verb: 'could not finish this request',
-            consequence: 'model selection unavailable',
-          },
-        },
-      ]);
+      expect(failed).toEqual([]);
       await expect(
         daemon.execute(
           'postAgentTurnReceipt',
@@ -460,6 +447,10 @@ describe('system-line producers', () => {
         ),
       ).resolves.toBeDefined();
       expect(await lines(database)).toEqual(failed);
+      expect((await database.query('SELECT status FROM agent_turns WHERE request_id=$1',[requestId])).rows)
+        .toEqual([{status:'failed'}]);
+      expect((await database.query('SELECT state FROM agent_commands WHERE id=$1',[command!.id])).rows)
+        .toEqual([{state:'complete'}]);
     } finally {
       await database.close();
     }

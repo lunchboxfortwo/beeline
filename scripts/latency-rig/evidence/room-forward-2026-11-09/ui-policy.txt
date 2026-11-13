@@ -1,0 +1,5 @@
+
+> buzzy@0.0.0 lint:ui-components
+> node scripts/check-mobile-ui-components.mjs
+
+UI component policy passed (649 source modules; 170 registered shared files).

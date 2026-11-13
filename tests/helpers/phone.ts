@@ -1,23 +1,3 @@
-import { beelineThemes } from '@/buzz/groknight';
-import { obsidianTheme } from '@/theme';
-
-/** Keep isolated screen mocks complete when they override only a few tokens. */
-export function completeTestTheme(theme: { buzz?: Record<string, any>; [key: string]: any } = {}) {
-  const buzz = theme.buzz ?? {};
-  const base = beelineThemes.obsidian;
-  return {
-    ...obsidianTheme,
-    ...theme,
-    buzz: {
-      ...base,
-      ...buzz,
-      type: { ...base.type, ...buzz.type },
-      space: { ...base.space, ...buzz.space },
-      layout: { ...base.layout, ...buzz.layout },
-    },
-  };
-}
-
 vi.mock('react-native-keyboard-controller', () => ({ KeyboardAvoidingView: (props: any) => React.createElement('View', props, props.children) }));
 import React from 'react';
 import { beforeEach, vi } from 'vitest';
@@ -54,6 +34,8 @@ vi.mock('@expo/vector-icons', () => ({
   FontAwesome: 'FontAwesome',
   Ionicons: 'Ionicons',
 }));
+// Screens import the Ionicons subpath so web does not load every icon font.
+vi.mock('@expo/vector-icons/Ionicons', () => ({ default: 'Ionicons' }));
 
 // Glyph primitives (chevrons, the corner sigil, the members mark) are drawn
 // shapes now, so any component tree can contain one. Node tests never load
@@ -112,28 +94,6 @@ vi.mock('react-native-reanimated', () => ({
   withRepeat: (value: unknown) => value,
   withSequence: (...steps: unknown[]) => steps[0],
   withTiming: (value: unknown) => value,
-}));
-
-const theme = completeTestTheme();
-
-// Production configures Unistyles before rendering. Unit tests run in Node and
-// intentionally do not load React Native's Flow entrypoint, so give style-only
-// modules the deterministic default theme they would receive in the app.
-vi.mock('react-native-unistyles', () => ({
-  StyleSheet: {
-    hairlineWidth: 1,
-    configure: vi.fn(),
-    create: (definition: unknown) =>
-      typeof definition === 'function'
-        ? (definition as (value: typeof theme) => unknown)(theme)
-        : definition,
-  },
-  UnistylesRuntime: {
-    setTheme: vi.fn(),
-    setAdaptiveThemes: vi.fn(),
-    setRootViewBackgroundColor: vi.fn(),
-  },
-  useUnistyles: () => ({ theme }),
 }));
 
 // Draft component tests use public test addressing; identity-storage/session

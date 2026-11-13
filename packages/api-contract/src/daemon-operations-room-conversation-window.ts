@@ -127,6 +127,8 @@ export type RoomInboxResult = {
     readonly requestAuthorId?: string;
     /** Server-owned agent-to-agent chain depth. */
     readonly agentHopCount?: number;
+    /** `¶author-N`: write this in a message to link to this one. */
+    readonly messageLink?: string;
     readonly attachments: readonly DaemonAttachment[];
     /** Present on a server-phrased system line; the daemon reads the structured event, never the text. */
     readonly systemEvent?: SystemEvent;
@@ -413,7 +415,10 @@ export type WriteResult = {
   readonly failureReportDelivered?: boolean;
 };
 
-export type PostRoomMessageResult = WriteResult;
+export type PostRoomMessageResult = WriteResult & {
+  /** Non-fatal delivery warnings after a public reply has already posted. */
+  readonly receipt?: string;
+};
 
 export type ReactToRoomMessageInput = RoomInput & {
   readonly messageId: string;
@@ -481,7 +486,7 @@ export type PostTurnReceiptInput = AgentRoomInput & {
   readonly generationId?: string;
   /** Refreshes an existing working receipt; never starts or resurrects a turn. */
   readonly heartbeat?: boolean;
-  /** One distilled line (≤200 chars, no stack, secrets scrubbed) sent only with `failed`. */
+  /** Complete failure diagnostic, including child stderr (no stack, secrets scrubbed), sent only with `failed`. */
   readonly reason?: string;
   /**
    * The turn's REAL prompt token cost as the harness itself reported it (pi's

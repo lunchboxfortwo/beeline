@@ -1,12 +1,10 @@
 import React, { useMemo } from 'react';
-import { Text, type TextStyle } from 'react-native';
-import { StyleSheet } from 'react-native-unistyles';
+import { T } from '@/ui/grammar';
 import { tokenizeCode, type HighlightToken } from '@/buzz/syntax-highlight';
 
 type CodeHighlighterProps = {
   code: string;
   language: string | null;
-  style?: TextStyle;
 };
 
 // React Native pays native-view and layout cost for every nested Text span.
@@ -14,16 +12,17 @@ type CodeHighlighterProps = {
 // selectable, full-fidelity text node instead of building thousands of spans.
 const MAX_HIGHLIGHTED_CODE_CHARS = 20_000;
 
-function tokenStyle(token: HighlightToken) {
+/** Two Inks on the grammar: structure recedes, names take brass, values read in ink. */
+function Span({ token, children }: { token: HighlightToken; children: string }) {
   switch (token) {
     case 'structure':
-      return styles.structure;
+      return <T v="code" color="secondary">{children}</T>;
     case 'name':
-      return styles.name;
+      return <T v="code" color="needsYou">{children}</T>;
     case 'value':
-      return styles.value;
+      return <T v="code" color="ink">{children}</T>;
     default:
-      return undefined;
+      return <T v="code" color="secondary">{children}</T>;
   }
 }
 
@@ -32,7 +31,7 @@ function tokenStyle(token: HighlightToken) {
  * bound width (no horizontal ScrollView). Very large blocks fall back to one
  * full-fidelity Text node so native layout stays bounded.
  */
-export function CodeHighlighter({ code, language, style }: CodeHighlighterProps) {
+export function CodeHighlighter({ code, language }: CodeHighlighterProps) {
   const lines = useMemo(
     () => (code.length <= MAX_HIGHLIGHTED_CODE_CHARS ? tokenizeCode(code, language) : null),
     [code, language],
@@ -42,37 +41,22 @@ export function CodeHighlighter({ code, language, style }: CodeHighlighterProps)
 
   if (!lines) {
     return (
-      <Text selectable style={[styles.codeText, style]} testID="code-highlighter">
+      <T v="code" color="secondary" userSelect="text" width="100%" minWidth={0} testID="code-highlighter">
         {code}
-      </Text>
+      </T>
     );
   }
 
   return (
-    <Text selectable style={[styles.codeText, style]} testID="code-highlighter">
+    <T v="code" color="secondary" userSelect="text" width="100%" minWidth={0} testID="code-highlighter">
       {lines.map((line, li) => (
         <React.Fragment key={li}>
           {li > 0 ? '\n' : null}
           {line.map((span, si) => (
-            <Text key={si} style={tokenStyle(span.token)}>
-              {span.text}
-            </Text>
+            <Span key={si} token={span.token}>{span.text}</Span>
           ))}
         </React.Fragment>
       ))}
-    </Text>
+    </T>
   );
 }
-
-const styles = StyleSheet.create((theme) => ({
-  codeText: {
-    ...theme.buzz.type.machine,
-    width: '100%',
-    minWidth: 0,
-    flexShrink: 1,
-    color: theme.buzz.syntaxStructure,
-  },
-  structure: { color: theme.buzz.syntaxStructure },
-  name: { color: theme.buzz.syntaxName },
-  value: { color: theme.buzz.syntaxValue },
-}));

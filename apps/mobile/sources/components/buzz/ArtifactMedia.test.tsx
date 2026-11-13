@@ -9,10 +9,10 @@ const host = vi.hoisted(() => ({
   purge: undefined as (() => void) | undefined,
 }));
 vi.mock('react-native', () => ({ Image: 'Image', ScrollView: 'ScrollView', Text: 'Text', View: 'View' }));
-vi.mock('react-native-unistyles', async () => {
-  const { groknight } = await import('@/buzz/groknight');
-  return { StyleSheet: { create: (factory: any) => factory({ buzz: groknight }) } };
-});
+vi.mock('tamagui', async () => (await import('@/ui/screens/transcript/grammar-hosts.test-support')).tamaguiHosts());
+vi.mock('lucide-react-native', async () => (await import('@/ui/screens/transcript/grammar-hosts.test-support')).lucideHosts());
+vi.mock('react-native-reanimated', () => ({ default: { View: 'AnimatedView' } }));
+vi.mock('react-native-safe-area-context', () => ({ useSafeAreaInsets: () => ({ top: 0, bottom: 0, left: 0, right: 0 }) }));
 vi.mock('./IndexRow', () => ({ IndexRow: 'IndexRow' }));
 vi.mock('@/buzz/use-artifact-recovery', () => ({ useArtifactRecoveryGeneration: () => host.recovery }));
 vi.mock('@/buzz/artifact-link', () => ({
@@ -39,6 +39,14 @@ describe.each(['image', 'text'] as const)('%s byte demand', kind => {
     let complete!: (value: any) => void;
     read().mockImplementation(() => new Promise(resolve => { complete = resolve; }));
     await act(async () => { tree = create(render()); });
+    if (kind === 'image') {
+      const placeholder = tree!.root.findByProps({ testID: 'artifact-image-loading' });
+      // A growing/padded View consumes the filename column in a compact row:
+      // the placeholder fills the caller's frame and nothing more.
+      expect(placeholder.props).toMatchObject({ width: '100%', height: '100%' });
+      expect(placeholder.props.flex).toBeUndefined();
+      expect(placeholder.props.padding).toBeUndefined();
+    }
     const signal = read().mock.calls[0][1].signal as AbortSignal;
     for (let n = 0; n < 6; n++) {
       host.recovery++;
@@ -93,5 +101,47 @@ describe.each(['image', 'text'] as const)('%s byte demand', kind => {
     host.recovery++;
     await act(async () => tree!.update(render({ ...attachment })));
     expect(read()).toHaveBeenCalledTimes(1);
+  });
+});
+
+// Reproduction MOBILE-17: chat artifact image finishes loading on Android →
+// onLoad throws TypeError, image size never reported. Tamagui's Image calls
+// onLoad with a top-level `target` and no `nativeEvent`, so reading
+// `event.nativeEvent.source` crashed and the card lost its aspect ratio.
+describe('ArtifactImage size reporting', () => {
+  const loadHandler = async (onLoadImageSize?: (width: number, height: number) => void) => {
+    host.image.mockResolvedValue({ uri: 'blob:one' });
+    await act(async () => {
+      tree = create(
+        <ArtifactImage attachment={attachment} fit="cover" testID="loaded" onLoadImageSize={onLoadImageSize} />,
+      );
+    });
+    return tree!.root.findByType('Image').props.onLoad as (event: unknown) => void;
+  };
+
+  it('reports width and height from the Tamagui event that has no nativeEvent', async () => {
+    const onLoadImageSize = vi.fn();
+    const onLoad = await loadHandler(onLoadImageSize);
+    expect(() => onLoad({ target: { naturalWidth: 800, naturalHeight: 600 } })).not.toThrow();
+    expect(onLoadImageSize).toHaveBeenCalledWith(800, 600);
+  });
+
+  it('reports width and height from the native event source', async () => {
+    const onLoadImageSize = vi.fn();
+    const onLoad = await loadHandler(onLoadImageSize);
+    expect(() => onLoad({ nativeEvent: { source: { width: 1024, height: 768 } } })).not.toThrow();
+    expect(onLoadImageSize).toHaveBeenCalledWith(1024, 768);
+  });
+
+  it('falls back to the native event target and stays silent without a positive size', async () => {
+    const onLoadImageSize = vi.fn();
+    const onLoad = await loadHandler(onLoadImageSize);
+    expect(() => onLoad({ nativeEvent: { target: { naturalWidth: 640, naturalHeight: 480 } } })).not.toThrow();
+    expect(onLoadImageSize).toHaveBeenCalledWith(640, 480);
+    onLoadImageSize.mockClear();
+    expect(() => onLoad({})).not.toThrow();
+    expect(() => onLoad(undefined)).not.toThrow();
+    onLoad({ target: { naturalWidth: 0, naturalHeight: 600 } });
+    expect(onLoadImageSize).not.toHaveBeenCalled();
   });
 });

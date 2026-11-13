@@ -13,7 +13,7 @@ import { reserveAllowance, settleAllowance } from './free-agent-accounting.js';
 import { handoff, saveWorkflow, settleWorkflowGate, startWorkflow } from './workflow-runs.js';
 import { applySkillRevision } from './institutional-skills.js';
 import { advanceCorner, confirmCornerMergeAuthority, createCornerFacts } from './corner-lifecycle.js';
-import { sendSystemNotices,systemLine } from './system-line.js';
+import { systemLine } from './system-line.js';
 import { recordFreeAgentGuideStarted, warnFreeAgentOwner } from './free-agent-warning.js';
 import {createHash} from 'node:crypto';
 import {canonicalUsageAccountSnapshot} from '@beeline/api-contract/helper-usage';
@@ -128,7 +128,7 @@ describe.skipIf(!url)('atomic claims replace advisory serialization', () => {
         {workspaceId:workspaces[index]!,creatorId:owner,roomId:rooms[index]!,team:true}));
     },'INSERT INTO free_agent_creation_budget(');
     expect(results.filter(Boolean)).toHaveLength(1);
-    expect((await first.query('SELECT workspace_id,starter_role FROM free_agents WHERE owner_id=$1 ORDER BY starter_role',[owner])).rows)
+    expect((await first.query('SELECT workspace_member.workspace_id,starter_role FROM free_agents JOIN memberships workspace_member ON workspace_member.identity_id=free_agents.agent_id AND workspace_member.room_id IS NULL WHERE owner_id=$1 ORDER BY starter_role',[owner])).rows)
       .toEqual([{workspace_id:workspaces[0],starter_role:'beebee'},{workspace_id:workspaces[0],starter_role:'luna'}]);
     expect((await first.query('SELECT agents::int FROM free_agent_creation_budget WHERE owner_id=$1',[owner])).rows).toEqual([{agents:2}]);
   });
@@ -174,9 +174,9 @@ describe.skipIf(!url)('atomic claims replace advisory serialization', () => {
     const before=Number((await first.query('SELECT count(*) count FROM identities')).rows[0]!.count);
     const results=await overlap(db=>db.transaction(tx=>createFreeAgentInWorkspace(tx,config,
       {workspaceId:target,creatorId:owner,roomId:general,name:'Luna',team:true})),
-      'INSERT INTO free_agent_creation_budget(');
+      'SELECT id FROM workspaces WHERE id=$1 FOR UPDATE');
     expect(results.filter(Boolean)).toHaveLength(1);
-    expect((await first.query(`SELECT agent_id FROM free_agents WHERE workspace_id=$1 AND starter_role='luna'`,[target])).rows)
+    expect((await first.query(`SELECT agent_id FROM free_agents JOIN memberships workspace_member ON workspace_member.identity_id=free_agents.agent_id AND workspace_member.room_id IS NULL WHERE workspace_member.workspace_id=$1 AND starter_role='luna'`,[target])).rows)
       .toEqual([{agent_id:results.find(Boolean)}]);
     expect(Number((await first.query('SELECT count(*) count FROM identities')).rows[0]!.count)).toBe(before+1);
     expect((await first.query(`SELECT id FROM messages WHERE room_id=$1 AND author_id=$2 AND system_event IS NULL`,[general,results.find(Boolean)])).rowCount).toBe(1);
@@ -548,15 +548,6 @@ describe.skipIf(!url)('atomic claims replace advisory serialization', () => {
     expect((await first.query(`SELECT id FROM agent_commands WHERE source_message_id=$1`,[run])).rows).toHaveLength(1);
   });
 
-  it('two notice batches restore both recipients and insert each notice once', async () => {
-    const recipients=['1'.repeat(64),'2'.repeat(64)].map((identityId,index)=>({identityId,messageId:'batch-notice-'+index}));
-    await first.query(`INSERT INTO identities(id,kind,name) SELECT id,'human','Notice recipient' FROM unnest($1::text[]) id`,[recipients.map(row=>row.identityId)]);
-    await overlap(db=>db.transaction(tx=>sendSystemNotices(tx,workspace,recipients,
-      {subject:{kind:'system',name:'Workflow'},verb:'finished'})),'INSERT INTO identities');
-    expect((await first.query(`SELECT id FROM messages WHERE id=ANY($1::text[])`,[recipients.map(row=>row.messageId)])).rows).toHaveLength(2);
-    expect((await first.query(`SELECT identity_id FROM memberships WHERE identity_id=ANY($1::text[]) AND removed_at IS NULL`,[recipients.map(row=>row.identityId)])).rows).toHaveLength(2);
-  });
-
   it('two answers to the same workflow gate settle its choice and successor once', async () => {
     const agent='a'.repeat(64),owner='9'.repeat(64),source='atomic-gate-source',slug='atomic-gate';
     await first.query(`INSERT INTO memberships(workspace_id,room_id,identity_id,role)
@@ -623,7 +614,7 @@ describe.skipIf(!url)('atomic claims replace advisory serialization', () => {
 
   it('two allowance-warning writers deliver one message and one event pair', async () => {
     const agent='a'.repeat(64),owner='9'.repeat(64),day=new Date().toISOString().slice(0,10);
-    await first.query(`INSERT INTO free_agents(agent_id,workspace_id,owner_id,sealed_keys) VALUES($1,$2,$3,'fixture')`,[agent,workspace,owner]);
+    await first.query(`WITH workspace AS (SELECT $2::uuid) INSERT INTO free_agents(agent_id,owner_id,sealed_keys) VALUES($1,$3,'fixture')`,[agent,workspace,owner]);
     await first.query(`INSERT INTO memberships(workspace_id,room_id,identity_id,role) VALUES($1,$2,$3,'owner') ON CONFLICT DO NOTHING`,[workspace,room,owner]);
     await first.query(`INSERT INTO free_agent_events(agent_id,kind,detail) VALUES($1,'model_usage',$2::jsonb)`,[agent,JSON.stringify({day,tokens:800})]);
     await overlap(db=>db.transaction(tx=>warnFreeAgentOwner(tx,agent,owner,day,1000,room)),'WITH candidate AS');

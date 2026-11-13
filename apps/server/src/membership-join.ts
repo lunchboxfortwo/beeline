@@ -1,4 +1,5 @@
 import { subscriptionRooms } from './agent-subscriptions.js';
+import { clearCornerReviewersForMembershipsSql } from './corner-lifecycle.js';
 import type { QueryResultRow } from 'pg';
 import { systemMessage } from '@beeline/api-contract/system-message-catalog';
 import { randomUUID } from 'node:crypto';
@@ -7,7 +8,7 @@ import type { SqlDatabase } from './database.js';
 import { systemIdentityMention, systemLine } from './system-line.js';
 
 type RoomSelection =
-  { type: 'none' } | { type: 'rooms'; roomIds: readonly string[] } | { type: 'all-live-top-level' };
+  { type: 'none' } | { type: 'rooms'; roomIds: readonly string[]; publicOnly?: boolean } | { type: 'all-live-top-level' };
 
 export interface JoinRoomsInput {
   workspaceId: string;
@@ -16,38 +17,12 @@ export interface JoinRoomsInput {
   invitedById?: string;
   rooms: RoomSelection;
   workspaceJoined?: boolean;
+  restoreRemoved?: boolean;
 }
 
 export interface JoinRoomsResult {
   roomIds: string[];
   notificationId?: string;
-}
-
-/**
- * Top-level shared Room roles are projections of the active Workspace role.
- * DM roles stay independent; corners derive their roles from these Room rows.
- */
-export async function syncTopLevelSharedRoomRoles(
-  database: SqlDatabase,
-  workspaceId?: string,
-  identityId?: string,
-): Promise<number> {
-  const result = await database.query(
-    `UPDATE memberships room_member SET role=workspace_member.role
-     FROM rooms room,memberships workspace_member
-     WHERE room_member.room_id=room.id
-       AND workspace_member.workspace_id=room.workspace_id
-       AND workspace_member.room_id IS NULL
-       AND workspace_member.identity_id=room_member.identity_id
-       AND workspace_member.removed_at IS NULL
-       AND room_member.removed_at IS NULL
-       AND room.parent_id IS NULL AND room.direct_participants IS NULL
-       AND room_member.role<>workspace_member.role
-       AND ($1::uuid IS NULL OR room.workspace_id=$1)
-       AND ($2::text IS NULL OR room_member.identity_id=$2)`,
-    [workspaceId ?? null, identityId ?? null],
-  );
-  return result.rowCount;
 }
 
 /**
@@ -119,13 +94,13 @@ export async function joinRooms(
     ]);
     let roomIds: string[] = [];
     if (input.rooms.type !== 'none') {
-      const values: unknown[] = [input.workspaceId, input.identityId];
+      const values: unknown[] = [input.workspaceId, input.identityId, input.restoreRemoved !== false];
       let roomPredicate: string | undefined;
       switch (input.rooms.type) {
         case 'rooms':
           if (!input.rooms.roomIds.length) break;
           values.push(input.rooms.roomIds);
-          roomPredicate = `room.id=ANY($3::uuid[])`;
+          roomPredicate = `room.id=ANY($4::uuid[])${input.rooms.publicOnly ? " AND room.visibility='public'" : ''}`;
           break;
         case 'all-live-top-level':
           roomPredicate = `room.visibility='public'`;
@@ -144,7 +119,7 @@ export async function joinRooms(
              AND ${roomPredicate}
            ON CONFLICT (room_id,identity_id) WHERE room_id IS NOT NULL
            DO UPDATE SET role=EXCLUDED.role,removed_at=NULL
-             WHERE memberships.removed_at IS NOT NULL
+             WHERE memberships.removed_at IS NOT NULL AND $3::boolean
            RETURNING room_id`,
           values,
         );
@@ -172,7 +147,7 @@ export async function joinRooms(
         inviter_name: string | null;
         inviter_handle: string | null;
       }>(
-        `SELECT identity.name identity_name,identity.handle identity_handle,identity.kind,
+        `SELECT identity.name identity_name,beeline_workspace_handle(identity.id,workspace.id) identity_handle,identity.kind,
                 workspace.name workspace_name,
                 (SELECT name FROM rooms WHERE id=$3) room_name,
                 inviter.id inviter_id,inviter.kind inviter_kind,inviter.name inviter_name,
@@ -275,20 +250,23 @@ export async function joinRooms(
 
 // Membership write primitives. Callers retain their transaction and access checks.
 // Keep each conflict policy explicit: initial joins and restorations differ.
+/** One statement makes departure and reviewer cleanup atomic, including retirement. */
+function removeMembershipsSql(predicate: string): string {
+  return `WITH departing AS MATERIALIZED (
+      SELECT room_id,identity_id FROM memberships WHERE ${predicate}
+    ), cleared_room_reviewers AS (
+      UPDATE rooms room SET reviewer_agent_id=NULL FROM departing member
+      WHERE room.id=member.room_id AND room.reviewer_agent_id=member.identity_id
+    ), cleared_corner_reviewers AS (
+      ${clearCornerReviewersForMembershipsSql('departing')}
+    ) UPDATE memberships SET removed_at=now() WHERE ${predicate}`;
+}
+
 export function removeWorkspaceMemberships<Row extends QueryResultRow = QueryResultRow>(
   database: Pick<SqlDatabase, 'query'>, values: [workspaceId: string, identityId: string],
 ) {
   return database.query<Row>(
-    `UPDATE memberships SET removed_at=now() WHERE workspace_id=$1 AND identity_id=$2`, values,
-  );
-}
-
-export function restoreRoomMembership<Row extends QueryResultRow = QueryResultRow>(
-  database: Pick<SqlDatabase, 'query'>, values: [workspaceId: string, roomId: string, identityId: string],
-) {
-  return database.query<Row>(
-    `INSERT INTO memberships(workspace_id,room_id,identity_id,role) VALUES($1,$2,$3,'member')
-         ON CONFLICT(room_id,identity_id) WHERE room_id IS NOT NULL DO UPDATE SET removed_at=NULL`, values,
+    removeMembershipsSql('workspace_id=$1 AND identity_id=$2'), values,
   );
 }
 
@@ -304,14 +282,6 @@ export function restoreRoomMemberships(database: Pick<SqlDatabase,'query'>,
   workspaceId: string, roomId: string, identityIds: readonly string[]) {
   return database.query(restoreRoomMembershipsSql('(SELECT $1::uuid workspace_id,$2::uuid room_id,unnest($3::text[]) identity_id) members'),
     [workspaceId,roomId,identityIds]);
-}
-
-export function ensureRoomMembership<Row extends QueryResultRow = QueryResultRow>(
-  database: Pick<SqlDatabase, 'query'>, values: [workspaceId: string, roomId: string, identityId: string],
-) {
-  return database.query<Row>(
-    `INSERT INTO memberships(workspace_id,room_id,identity_id,role) VALUES($1,$2,$3,'member') ON CONFLICT DO NOTHING`, values,
-  );
 }
 
 /** Bounded backfill SQL; the migration runner supplies its batch limit. */
@@ -353,7 +323,7 @@ export function ensureInvitedWorkspaceMembership<Row extends QueryResultRow = Qu
   );
 }
 
-export function restorePairedWorkspaceMembership<Row extends QueryResultRow = QueryResultRow>(
+export function restoreInvitedWorkspaceMembership<Row extends QueryResultRow = QueryResultRow>(
   database: Pick<SqlDatabase, 'query'>, values: [workspaceId: string, identityId: string, invitedBy: string],
 ) {
   return database.query<Row>(
@@ -388,7 +358,7 @@ export function removeRoomMembership<Row extends QueryResultRow = QueryResultRow
   database: Pick<SqlDatabase, 'query'>, values: [roomId: string, identityId: string],
 ) {
   return database.query<Row>(
-    `UPDATE memberships SET removed_at=now() WHERE room_id=$1 AND identity_id=$2`, values,
+    removeMembershipsSql('room_id=$1 AND identity_id=$2'), values,
   );
 }
 
@@ -410,14 +380,6 @@ export function ensureWorkspaceMembershipRole<Row extends QueryResultRow = Query
   );
 }
 
-export function createDirectMessageMembership<Row extends QueryResultRow = QueryResultRow>(
-  database: Pick<SqlDatabase, 'query'>, values: [workspaceId: string, roomId: string, identityId: string],
-) {
-  return database.query<Row>(
-    `INSERT INTO memberships(workspace_id,room_id,identity_id,role) VALUES($1,$2,$3,'member')`, values,
-  );
-}
-
 export function redeemWorkspaceMembership<Row extends QueryResultRow = QueryResultRow>(
   database: Pick<SqlDatabase, 'query'>, values: [workspaceId: string, identityId: string, invitedBy: string],
 ) {
@@ -433,8 +395,7 @@ export function removeIdentityMemberships<Row extends QueryResultRow = QueryResu
   database: Pick<SqlDatabase, 'query'>, values: [identityId: string],
 ) {
   return database.query<Row>(
-    `UPDATE memberships SET removed_at=now()
-       WHERE identity_id=$1 AND removed_at IS NULL`, values,
+    removeMembershipsSql('identity_id=$1 AND removed_at IS NULL'), values,
   );
 }
 
@@ -460,31 +421,7 @@ export function transferWorkspaceOwnership<Row extends QueryResultRow = QueryRes
            ORDER BY l.workspace_id,h.role,h.joined_at,h.identity_id
          )
          UPDATE memberships m SET role='owner' FROM heir
-         WHERE m.workspace_id=heir.workspace_id AND m.identity_id=heir.identity_id`, values,
-  );
-}
-
-export function transferRoomOwnership<Row extends QueryResultRow = QueryResultRow>(
-  database: Pick<SqlDatabase, 'query'>, values: [identityIds: string[]],
-) {
-  return database.query<Row>(
-    `WITH lone AS (
-           SELECT m.room_id FROM memberships m JOIN rooms r ON r.id=m.room_id
-           WHERE m.room_id IS NOT NULL AND r.parent_id IS NULL AND r.archived_at IS NULL
-             AND m.role='owner' AND m.removed_at IS NULL AND m.identity_id=ANY($1)
-             AND NOT EXISTS (SELECT 1 FROM memberships o
-                             WHERE o.room_id=m.room_id AND o.role='owner'
-                               AND o.removed_at IS NULL AND o.identity_id <> ALL($1))
-         ), heir AS (
-           SELECT DISTINCT ON (l.room_id) l.room_id,h.identity_id
-           FROM lone l
-           JOIN memberships h ON h.room_id=l.room_id AND h.role IN ('admin','member')
-             AND h.removed_at IS NULL AND h.identity_id <> ALL($1)
-           JOIN identities hi ON hi.id=h.identity_id AND hi.kind='human'
-           ORDER BY l.room_id,h.role,h.joined_at,h.identity_id
-         )
-         UPDATE memberships m SET role='owner' FROM heir
-         WHERE m.room_id=heir.room_id AND m.identity_id=heir.identity_id`, values,
+         WHERE m.workspace_id=heir.workspace_id AND m.room_id IS NULL AND m.identity_id=heir.identity_id`, values,
   );
 }
 
@@ -539,36 +476,20 @@ export function ensureReviewProofMembership<Row extends QueryResultRow = QueryRe
   );
 }
 
-/**
- * Joins public top-level Rooms in the Room's own Workspace. A fresh member (a
- * first connection, or a reconnect after Disconnect) rejoins every public
- * Room; an existing member keeps the Rooms a person removed it from.
- */
-export function joinMcpPublicRooms<Row extends QueryResultRow = QueryResultRow>(
-  database: Pick<SqlDatabase, 'query'>, values: [identityId: string, workspaceIds: string[], restoreRemoved: boolean],
-) {
-  return database.query<Row>(
-    `INSERT INTO memberships(workspace_id,room_id,identity_id,role)
-  SELECT room.workspace_id,room.id,$1,'member' FROM rooms room
-  WHERE room.workspace_id=ANY($2::uuid[]) AND room.parent_id IS NULL
-    AND room.direct_participants IS NULL AND room.archived_at IS NULL AND room.visibility='public'
-  ON CONFLICT (room_id,identity_id) WHERE room_id IS NOT NULL
-  DO UPDATE SET removed_at=NULL WHERE memberships.removed_at IS NOT NULL AND $3::boolean`, values,
-  );
-}
-
-export function restoreMcpWorkspaceMemberships<Row extends QueryResultRow = QueryResultRow>(
-  database: Pick<SqlDatabase, 'query'>, values: [identityId: string, workspaceIds: string[]],
-) {
-  return database.query<Row>(
-    `INSERT INTO memberships(workspace_id,room_id,identity_id,role)
-         SELECT workspace_id,NULL,$1,'member' FROM unnest($2::uuid[]) workspace_id
-         ON CONFLICT(workspace_id,identity_id) WHERE room_id IS NULL
-         DO UPDATE SET removed_at=NULL`, values,
-  );
-}
-
 /** Upgrade-only: old membership JSON cannot remain an actionable subscription store. */
 export async function retireMembershipSubscriptionLists(database: SqlDatabase): Promise<void> {
   await database.query(`UPDATE memberships SET event_subscriptions='[]'::jsonb WHERE event_subscriptions<>'[]'::jsonb`);
+}
+
+/** End joins recreated by preceding images without deleting their history. */
+export async function retireOrphanRoomMemberships(db: SqlDatabase): Promise<void> {
+  const orphans = await db.query<{ room_id: string; identity_id: string }>(
+    `SELECT member.room_id,member.identity_id FROM memberships member
+     WHERE member.room_id IS NOT NULL AND member.removed_at IS NULL
+       AND NOT EXISTS(SELECT 1 FROM memberships workspace
+         WHERE workspace.workspace_id=member.workspace_id AND workspace.room_id IS NULL
+           AND workspace.identity_id=member.identity_id AND workspace.removed_at IS NULL)
+     FOR UPDATE OF member`,
+  );
+  for (const row of orphans.rows) await removeRoomMembership(db, [row.room_id, row.identity_id]);
 }

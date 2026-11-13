@@ -8,13 +8,106 @@ import { createServer } from 'node:http';
 import { parse } from 'yaml';
 import { releaseChannel, channelComponents, promotionSource } from './release-channel.mjs';
 import { initializeRelease, planOutputs, restoreReleasePlan, applyJobFacts, applyComponentCheckpoints, checkpointsFromJobs } from './unified-release.mjs';
-import { latestPublished, assignReleaseVersion, compareVersions, versionedReleases, staleDrafts } from './release-record.mjs';
+import { latestPublished, assignReleaseVersion, compareVersions, versionedReleases, staleDrafts, listReleasePage, releaseIdentityReads, releaseStartRestCallCount } from './release-record.mjs';
 import { pagesChannelTag, publishPagesChannel, downloadPagesChannel } from './pages-channel.mjs';
 import { buildPagesSite } from './pages-site.mjs';
+import { deployPages } from './deploy-pages.mjs';
 import { knownBuilds, readStores } from './read-store-runtimes.mjs';
 import { androidReleaseProfile } from './android-release-channel.mjs';
 import { computeTargets } from '../apps/mobile/scripts/ota-release.mjs';
 import { playLiveBuilds } from '../apps/mobile/scripts/store-runtime-targets.mjs';
+
+test('Reproduction 24: empty Pages status retries once immediately, then fails and cancels', async () => {
+  for (const recovered of [false, true]) {
+    const calls = [];
+    let reads = 0;
+    const proof = deployPages({
+      github: { request: async (route, args) => {
+        calls.push(route);
+        assert.equal(args.request.timeout, 30000);
+        if (route.endsWith('/cancel')) return {};
+        if (route.startsWith('POST')) return { data: { id: '123' } };
+        reads++;
+        return { data: recovered && reads === 2 ? { status: 'succeed' } : {} };
+      } }, repo: { owner: 'test', repo: 'test' }, artifactId: 1, sha: 'head', idToken: 'test',
+      wait: async () => assert.fail('Empty status must retry without waiting'),
+    });
+    if (recovered) await proof;
+    else await assert.rejects(proof, /empty status after one retry/);
+    assert.equal(reads, 2);
+    assert.equal(calls.filter(route => route.endsWith('/cancel')).length, recovered ? 0 : 1);
+  }
+});
+
+test('Reproduction publish-wait-1 diagnostic stand-in: timeout records deployment and last status before cancel', async () => {
+  // Preserve the timeout diagnostic independently of the stalled-host replay below.
+  const events = [];
+  let elapsed = 0;
+  let reads = 0;
+  await assert.rejects(deployPages({
+    github: { request: async (route) => {
+      if (route.endsWith('/cancel')) { events.push('cancel'); return {}; }
+      if (route.startsWith('POST')) return { data: { id: 'publish-wait-fixture' } };
+      reads++;
+      if (reads === 1) return { data: { status: 'deploying' } };
+      throw new Error('temporary upstream error');
+    } },
+    repo: { owner: 'test', repo: 'test' }, artifactId: 1, sha: 'head', idToken: 'test',
+    now: () => elapsed,
+    wait: async () => { elapsed += 300000; },
+    log: message => events.push(message),
+  }), /Pages deployment timed out.*publish-wait-fixture.*deploying/);
+  assert.match(events[0], /publish-wait-fixture/);
+  assert.match(events.at(-2), /publish-wait-fixture.*deploying/);
+  assert.equal(events.at(-1), 'cancel');
+});
+
+// GitHub deployment history uses in_progress/success; Pages reports deploying/succeed.
+// Replay the preserved timing with both vocabularies at the actual wait boundary.
+for (const activeStatus of ['in_progress', 'deploying']) {
+  for (const outcome of ['healthy', 'retry succeeds', 'retry stalls']) {
+    test(`Reproduction publish-wait-1: ${activeStatus}, ${outcome}`, async () => {
+      let elapsed = 0;
+      let createdAt = 0;
+      let deployments = 0;
+      const cancelled = [];
+      const cancelTimes = [];
+      const logs = [];
+      const payloads = [];
+      const ids = outcome === 'healthy' ? ['7671253449'] : ['7670937024', '7671253449'];
+      const proof = deployPages({
+        github: { request: async (route, args) => {
+          if (route.endsWith('/cancel')) { cancelled.push(route); cancelTimes.push(elapsed - createdAt); return {}; }
+          if (route.startsWith('POST')) {
+            payloads.push([args.artifact_id, args.pages_build_version, args.oidc_token]);
+            createdAt = elapsed;
+            return { data: { id: ids[deployments++] } };
+          }
+          assert.ok(route.endsWith(`/${ids[deployments - 1]}`));
+          const age = elapsed - createdAt;
+          const healthy = outcome === 'healthy' || (deployments === 2 && outcome === 'retry succeeds');
+          const status = age === 0 ? 'waiting' : age === 5000 ? 'queued'
+            : healthy && age >= 215000 ? 'succeed' : activeStatus;
+          return { data: { status } };
+        } },
+        repo: { owner: 'test', repo: 'test' }, artifactId: 42, sha: 'same-head', idToken: 'test',
+        now: () => elapsed, wait: async ms => { elapsed += ms; }, log: line => logs.push(line),
+      });
+      if (outcome === 'retry stalls') {
+        await assert.rejects(proof, /stalled.*7671253449.*last status=/);
+        assert.ok(logs.some(line => line.includes('7671253449') && line.includes(`last status="${activeStatus}"`)));
+      } else {
+        assert.equal((await proof).id, ids[outcome === 'healthy' ? 0 : 1]);
+      }
+      assert.ok(cancelTimes.every(ms => ms === 490000));
+      assert.equal(deployments, outcome === 'healthy' ? 1 : 2);
+      assert.deepEqual(payloads, Array(deployments).fill([42, 'same-head', 'test']));
+      assert.deepEqual(cancelled, ids.slice(0, outcome === 'healthy' ? 0 : outcome === 'retry succeeds' ? 1 : 2)
+        .map(id => `POST /repos/{owner}/{repo}/pages/deployments/${id}/cancel`));
+      if (outcome !== 'healthy') assert.match(logs.join('\n'), /7670937024.*last status=/);
+    });
+  }
+}
 
 const sha = execFileSync('git', ['rev-parse', 'HEAD'], { encoding: 'utf8' }).trim();
 // Unit fixture identities must work in CI's single-commit checkout.
@@ -221,9 +314,9 @@ test('workflow rebuilds both channels and preserves native beta selection', () =
 
 test('next helper checks and publication verify the public manifest without a Pages redirect', () => {
   const manifests = Object.values(workflow.jobs).flatMap(job => job.steps ?? [])
-    .map(step => step.env?.MANIFEST_URL ?? step.with?.pages_manifest_url ?? step.with?.manifest_url)
+    .map(step => step.env?.MANIFEST_URL ?? step.with?.manifest_url)
     .filter(value => value?.includes("channel == 'next'"));
-  assert.equal(manifests.length, 5); // Linux/Mac reuse, helper/website publication, release notification.
+  assert.equal(manifests.length, 4); // Linux/Mac reuse, helper publication, release notification.
   for (const manifest of manifests) {
     assert.match(manifest, /channel == 'next' && 'https:\/\/usebeeline\.app\/dl\/next\/manifest\.json'/);
     assert.doesNotMatch(manifest, /github\.io\/beeline\/dl\/next/);
@@ -630,3 +723,15 @@ test('Android channel injection is temporary and leaves production config bytes 
   assert.deepEqual(temporary, JSON.parse(productionBytes));
   assert.equal(JSON.parse(productionBytes).build['next-ci'], undefined);
 }));
+
+test('release identity reads one page even when that page is full', () => {
+  let calls = 0;
+  const page = listReleasePage(endpoint => {
+    calls += 1;
+    assert.equal(endpoint, releaseIdentityReads()[0]);
+    return Array.from({ length: 100 }, () => ({ tag_name: 'v0.1.203-rc.2', draft: false }));
+  });
+  assert.equal(calls, 1);
+  assert.equal(page.length, 100);
+  assert.equal(releaseStartRestCallCount(), 4);
+});

@@ -12,7 +12,7 @@ import { Webhook } from 'standardwebhooks';
 
 import { MCP_ORDER_WAKE_HINT, MCP_REVIEW_WAKE_HINT, MCP_WAKE_HINT, RoomsMcpEvents } from './rooms-mcp-events.js';
 
-import { backfillMcpMemberRoomsAndAvatars, ensureMcpMember, MCP_TAG_INSTRUCTION, postMcpWebhook } from './rooms-mcp-members.js';
+import { backfillMcpMemberAvatars, ensureMcpMember, MCP_TAG_INSTRUCTION, postMcpWebhook } from './rooms-mcp-members.js';
 
 import { randomBytes, createHash, randomUUID } from 'node:crypto';
 
@@ -180,6 +180,9 @@ export function fixtureScope1() {
     const response = await exchange(grant);
     expect(response.status).toBe(200);
     const tokens = await response.json() as { access_token: string };
+    expect(tokens).toHaveProperty('expires_in', 10 * 365 * 24 * 60 * 60);
+    expect(tokens).not.toHaveProperty('refresh_token');
+    expect((await db.query('SELECT expires_at FROM rooms_mcp_tokens WHERE hash=$1', [tokenHash(tokens.access_token)])).rows[0]?.expires_at).toBeNull();
     // The connection acts through a member owned by the approving person; a
     // person adds it to a Room before it can read or post there.
     const member = (await db.query<{ member_id: string }>(
@@ -190,6 +193,14 @@ export function fixtureScope1() {
     clients.push(client);
     await client.connect(new StreamableHTTPClientTransport(new URL(origin + '/mcp'), { requestInit: { headers: { authorization: `Bearer ${tokens.access_token}` } } }));
     return { client, token: tokens.access_token, grant, member };
+  }
+
+  // Seed an installed pre-permanent-token client, never a newly issued refresh credential.
+  async function legacyRefresh(access: string) {
+    const raw = 'legacy-' + randomUUID();
+    await db.query(`INSERT INTO rooms_mcp_refresh(hash,family_id)
+      SELECT $1,family_id FROM rooms_mcp_tokens WHERE hash=$2`, [tokenHash(raw),tokenHash(access)]);
+    return raw;
   }
 
   async function eventCall(token: string, method: string, params: Record<string, unknown> = {}) {
@@ -233,6 +244,7 @@ post,
 prepareAuthorization,
 authorize,
 exchange,
+legacyRefresh,
 connected,
 eventCall,
 eventFixture,
@@ -328,7 +340,7 @@ export { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it, vi } 
 export { createServer } from 'node:http';
 export { Webhook } from 'standardwebhooks';
 export { MCP_ORDER_WAKE_HINT, MCP_REVIEW_WAKE_HINT, MCP_WAKE_HINT, RoomsMcpEvents } from './rooms-mcp-events.js';
-export { backfillMcpMemberRoomsAndAvatars, ensureMcpMember, MCP_TAG_INSTRUCTION, postMcpWebhook, deliverMcpMemberWebhooks, runMcpWebhookDelivery } from './rooms-mcp-members.js';
+export { backfillMcpMemberAvatars, ensureMcpMember, MCP_TAG_INSTRUCTION, postMcpWebhook, deliverMcpMemberWebhooks, runMcpWebhookDelivery } from './rooms-mcp-members.js';
 export { randomBytes, createHash, randomUUID } from 'node:crypto';
 export { Client } from '@modelcontextprotocol/sdk/client/index.js';
 export { StreamableHTTPClientTransport } from '@modelcontextprotocol/sdk/client/streamableHttp.js';

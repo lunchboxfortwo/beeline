@@ -26,7 +26,7 @@ export class AgentVoiceService {
   ): Promise<Context> {
     const row = (
       await this.db.query<Context>(
-        `SELECT a.owner_id,a.chosen_voices,a.soul,i.name,i.handle,vm.role viewer_role
+        `SELECT a.owner_id,a.chosen_voices,a.soul,i.name,beeline_workspace_handle(i.id,$1) handle,vm.role viewer_role
       FROM workspaces w JOIN memberships am ON am.workspace_id=w.id AND am.room_id IS NULL
         AND am.identity_id=$2 AND am.removed_at IS NULL
       JOIN agents a ON a.agent_id=am.identity_id JOIN identities i ON i.id=a.agent_id AND i.hidden_from_roster=false
@@ -68,7 +68,7 @@ export class AgentVoiceService {
             soul: { instructions?: string } | null;
             chosen_voices: Context['chosen_voices'];
           }>(
-            `SELECT i.id,i.name,i.handle,a.soul,a.chosen_voices FROM room_access m
+            `SELECT i.id,i.name,beeline_workspace_handle(i.id,m.workspace_id) handle,a.soul,a.chosen_voices FROM room_access m
        JOIN identities i ON i.id=m.identity_id AND i.kind='agent' JOIN agents a ON a.agent_id=i.id
        JOIN rooms r ON r.id=m.room_id AND r.workspace_id=$2 AND r.archived_at IS NULL
        WHERE m.room_id=$1 AND m.removed_at IS NULL AND EXISTS (

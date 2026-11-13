@@ -4,6 +4,7 @@ import {
   CORNER_OBJECTIVE_MAX_WORDS,
   cornerDisplayName,
   cornerTextRefusal,
+  fixCornerText,
   normalizeCornerText,
 } from './corner-text.js';
 
@@ -25,19 +26,28 @@ describe('corner text normalisation', () => {
   });
 });
 
-describe('corner text refusals', () => {
-  it.each([' ', '\t', '\n', '\r', '\u00a0', '\u2003', '\u2028', '\ufeff'])('rejects whitespace %j in names', (separator) => {
-    expect(cornerTextRefusal('name', `continuous${separator}amber-corner`)).toBe('the name must not contain whitespace; use hyphens between words');
+describe('corner text fixes', () => {
+  it.each([' ', '\t', '\n', '\r', '\u00a0', '\u2003', '\u2028', '\ufeff'])('joins whitespace %j in names', (separator) => {
+    expect(fixCornerText('name', `continuous${separator}amber-corner`)).toEqual({
+      text: 'continuous-amber-corner',
+      note: 'the name had spaces; saved as continuous-amber-corner',
+    });
   });
 
-  it('names the limit and the actual count', () => {
+  it('cuts a long name and a long objective on a word boundary', () => {
     const objective = Array.from({ length: 61 }, (_, index) => `word${index}`).join(' ');
-    expect(cornerTextRefusal('objective', objective)).toBe(
-      'the objective is 61 words; the limit is 24',
-    );
-    expect(cornerTextRefusal('name', 'far too many words here')).toBe(
-      'the name must not contain whitespace; use hyphens between words',
-    );
+    const fixedObjective = fixCornerText('objective', objective);
+    expect(fixedObjective.text.split(' ')).toHaveLength(24);
+    expect(fixedObjective.text.startsWith('word0 ')).toBe(true);
+    expect(fixedObjective.note).toContain('61 words');
+    expect(fixedObjective.note).toContain('word boundary');
+    expect(fixCornerText('name', 'far too many words here')).toEqual({
+      text: 'far-too-many',
+      note: 'the name had spaces and was 5 words; saved as far-too-many (first 3 words)',
+    });
+    const long = fixCornerText('name', 'a'.repeat(200));
+    expect(long.text).toHaveLength(120);
+    expect(long.note).toContain('200 characters');
   });
 
   it('names a missing text rather than staying silent', () => {

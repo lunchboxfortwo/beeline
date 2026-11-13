@@ -124,8 +124,14 @@ it.each(['queued', 'running'] as const)('batches five voice chunks behind a %s D
   let finishFirst!: () => void;
   const first = new Promise<void>(resolve => { finishFirst = resolve; });
   let push: ((commands: readonly AgentCommand[]) => void) | undefined;
+  // Intake stops after the answering turn is released; an interrupted turn would stay claimed.
+  let answered = false;
   const api = {
-    execute: (name: string, input: Record<string, unknown>) => daemon.execute(name as never, input as never, agent),
+    execute: async (name: string, input: Record<string, unknown>) => {
+      const result = await daemon.execute(name as never, input as never, agent);
+      if (name === 'releaseAgentTurn' && answered) abort.abort();
+      return result;
+    },
     liveSubscribe: (_room: unknown, _cursor: unknown, _items: unknown, _state: unknown, _presence: unknown, onCommands: typeof push) => {
       push = onCommands; return () => {};
     },
@@ -137,7 +143,7 @@ it.each(['queued', 'running'] as const)('batches five voice chunks behind a %s D
       else {
         await daemon.execute('postRoomMessage', { roomId, requestId: command.turnRequestId,
           generationId: context.generationId, text: 'Answer to the latest question, with earlier context.' }, agent);
-        abort.abort();
+        answered = true;
       }
     } });
   let roomId = '', callId: string | undefined, running: Promise<void> | undefined;

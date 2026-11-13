@@ -58,7 +58,7 @@ describe('owed Room tags', () => {
     const payloads: any[] = [];
     await deliverMcpMemberWebhooks(db, async (_url, init) => { payloads.push(JSON.parse(init.body)); return new Response('', { status: 200 }); });
     const payload = payloads.find(p => p.messageId === message);
-    const expected = { roomId: room, messageId: message, memberId: member, replyRule: `answer in this Room with replyTo ${message} and start with @owner` };
+    const expected = { roomId: room, messageId: message, memberId: member, replyRule: `Reply (start with @owner): replyTo ${message}` };
     expect(payload).toMatchObject(expected);
     const cut = { ...payload, instruction: payload.instruction.slice(0, 200) };
     expect(cut).toMatchObject(expected);
@@ -90,6 +90,64 @@ describe('owed Room tags', () => {
     await call('no_reply_needed', { address: room, messageId: keep });
     expect((await owedMentions(db, member)).some(m => m.messageId === keep)).toBe(false);
   });
+  it('Reproduction 7: a committed reply and lost Room access disappear from the next tool result', async () => {
+    const answered = await tag(helper), pending = await tag(helper);
+    await db.query(`INSERT INTO messages(id,room_id,author_id,text,reply_to_message_id)
+      VALUES($1,$2,$3,'ordinary reply',$4)`, [id(), room, helper, answered]);
+    // Recreate an old/late ledger entry after the reply trigger already ran.
+    await db.query('DELETE FROM rooms_mcp_mentions WHERE member_id=$1 AND message_id=$2', [helper, answered]);
+    await recordMcpMention(db, helper, room, answered);
+    const read = () => daemon.execute('getOwedMentions', {}, helper);
+    expect((await read()).owedMentions.map(m => m.messageId)).not.toContain(answered);
+    expect((await read()).owedMentions.map(m => m.messageId)).toContain(pending);
+    await db.query('UPDATE memberships SET removed_at=now() WHERE room_id=$1 AND identity_id=$2', [room, helper]);
+    try { expect((await read()).owedMentions).toEqual([]); }
+    finally { await db.query('UPDATE memberships SET removed_at=NULL WHERE room_id=$1 AND identity_id=$2', [room, helper]); }
+  });
+
+  it('Reproduction owed-tags-1: real-list helper answers and closed commands leave tool replies without hiding unanswered tags', async () => {
+    // 10 Nov production: proof169 had a visible answer with request_id but no
+    // reply_to_message_id. The old fix only tested explicitly threaded replies.
+    const answered = '841917f5eabd7bfb481b2037ae1920d723c2aed4069bbf075938ee12fd69ee72';
+    await db.query(`INSERT INTO messages(id,room_id,author_id,text) VALUES($1,$2,$3,
+      '@helper For proof169, consider three different ways to arrange books in a small library.')`, [answered, room, owner]);
+    await recordMcpMention(db, helper, room, answered);
+    await db.query(`INSERT INTO messages(id,room_id,author_id,text,request_id)
+      VALUES($1,$2,$3,'Three ways to arrange books',$4)`, [id(), room, helper, answered]);
+    const closed = id();
+    await db.query(`INSERT INTO messages(id,room_id,author_id,text) VALUES($1,$2,$3,'@helper closed conversation')`, [closed, room, owner]);
+    await routeHumanMessage(db, closed);
+    await db.query(`UPDATE agent_commands SET state='cancelled',completed_at=now()
+      WHERE agent_id=$1 AND source_message_id=$2`, [helper, closed]);
+    const pending = await tag(helper), unrelated = await tag(other, '@pidoong please answer');
+    const activityOnly = await tag(helper);
+    await db.query(`INSERT INTO messages(id,room_id,author_id,text,presentation,request_id)
+      VALUES($1,$2,$3,'','activity',$4)`, [id(), room, helper, activityOnly]);
+    const retried = id();
+    await db.query(`INSERT INTO messages(id,room_id,author_id,text) VALUES($1,$2,$3,'@helper retry answer')`, [retried, room, owner]);
+    await routeHumanMessage(db, retried);
+    const request = id();
+    await db.query(`UPDATE agent_commands SET turn_request_id=$3 WHERE agent_id=$1 AND source_message_id=$2`, [helper, retried, request]);
+    await db.query(`INSERT INTO messages(id,room_id,author_id,text,request_id)
+      VALUES($1,$2,$3,'Answer after a renewed turn',$4)`, [id(), room, helper, request]);
+    const read = () => daemon.execute('getOwedMentions', {}, helper);
+    const remaining = (await read()).owedMentions.map(m => m.messageId);
+    expect(remaining).not.toContain(answered);
+    expect(remaining).not.toContain(closed);
+    expect(remaining).not.toContain(unrelated);
+    expect(remaining).not.toContain(retried);
+    expect(remaining).toEqual(expect.arrayContaining([pending, activityOnly]));
+    const page = (await call('list_mentions', {}, helper)).mentions.map((m: any) => m.id);
+    for (const source of [answered, closed, retried]) expect(page).not.toContain(source);
+    expect(page).toEqual(expect.arrayContaining([pending, activityOnly]));
+    // A completed activation with no answer still owes its human a reply.
+    await db.query(`UPDATE agent_commands SET state='complete' WHERE agent_id=$1 AND source_message_id=$2`, [helper, closed]);
+    expect((await read()).owedMentions.map(m => m.messageId)).toContain(closed);
+    await db.query(`UPDATE rooms SET archived_at=now() WHERE id=$1`, [room]);
+    try { expect((await read()).owedMentions).toEqual([]); }
+    finally { await db.query(`UPDATE rooms SET archived_at=NULL WHERE id=$1`, [room]); }
+  });
+
   it('C6 owed-only list and legacy cursor paging', async () => {
     const a = await tag(), b = await tag();
     const seq = (await db.query<{seq: string}>('SELECT seq::text seq FROM rooms_mcp_mentions WHERE member_id=$1 AND message_id=$2', [member, a])).rows[0]!.seq;
@@ -99,13 +157,70 @@ describe('owed Room tags', () => {
     expect((await call('list_mentions')).mentions.map((m: any) => m.id)).not.toContain(a);
     expect(BigInt(page.nextCursor)).toBeGreaterThan(BigInt(seq));
   });
-  it('C7 every tool result includes the caller’s remaining owed tags, including failures', async () => {
-    const message = await tag();
-    const tool = (mcp as unknown as { toolResult(p: McpPrincipal,n: string,a: Record<string, unknown>): Promise<any> }).toolResult.bind(mcp);
-    for (const [name, args] of [['list_rooms', {}], ['send_message', { room, text: '' }]] as const) {
-      const result = await tool(principal(), name, args);
-      expect(JSON.parse(result.content.at(-1).text).owedMentions.some((m: any) => m.messageId === message)).toBe(true);
+  it('C7 owed mentions are listed once per claimed turn and only for that place', async () => {
+    const elsewhereRoom = '44444444-4444-4444-8444-444444444444';
+    await db.query(`INSERT INTO rooms(id,workspace_id,name) VALUES($1,$2,'Elsewhere')`, [elsewhereRoom, workspace]);
+    for (const who of [owner, helper]) await db.query(
+      `INSERT INTO memberships(workspace_id,room_id,identity_id,role) VALUES($1,$2,$3,'member')`, [workspace, elsewhereRoom, who]);
+    const elsewhere = id();
+    await db.query('INSERT INTO messages(id,room_id,author_id,text) VALUES($1,$2,$3,$4)', [elsewhere, elsewhereRoom, owner, 'elsewhere']);
+    await recordMcpMention(db, helper, elsewhereRoom, elsewhere);
+    const here = await tag(helper);
+    const caller = principal(helper);
+    const tool = (mcp as unknown as { toolResult(p: McpPrincipal, n: string, a: Record<string, unknown>): Promise<{ content: { text: string }[] }> }).toolResult.bind(mcp);
+    const mentions = (result: { content: { text: string }[] }) => {
+      const block = [...result.content].reverse().find(item => item.text.includes('"owedMentions"'));
+      return block ? JSON.parse(block.text).owedMentions as { messageId: string; roomId: string }[] : undefined;
+    };
+    const claim = async (generation: string, place = room) => {
+      await db.query("UPDATE agent_commands SET state='complete' WHERE agent_id=$1 AND state='pending'", [helper]);
+      const source = id();
+      await db.query('INSERT INTO messages(id,room_id,author_id,text) VALUES($1,$2,$3,$4)', [source, place, owner, `@helper ${generation}`]);
+      await routeHumanMessage(db, source);
+      const command = (await daemon.execute('getAgentCommands', { roomId: place }, helper)).commands.find(item => item.sourceMessageId === source);
+      expect(command?.id).toBeTruthy();
+      await daemon.execute('claimAgentCommand', { roomId: place, commandId: command!.id, generationId: generation }, helper);
+      return command!.id;
+    };
+    const claimed: string[] = [];
+    try {
+      expect(mentions(await tool(caller, 'list_rooms', {}))).toBeUndefined();
+      expect(mentions(await tool(caller, 'read_messages', { room }))).toBeUndefined();
+      expect(mentions(await tool(caller, 'send_message', { room, text: '' }))).toBeUndefined();
+      claimed.push(await claim('owed-turn-1'));
+      expect(mentions(await tool(caller, 'read_messages', { room: elsewhereRoom }))).toBeUndefined();
+      const first = mentions(await tool(caller, 'read_messages', { room }));
+      expect(first?.some(item => item.messageId === here)).toBe(true);
+      expect(first?.some(item => item.roomId === elsewhereRoom)).toBe(false);
+      expect(mentions(await tool(caller, 'read_messages', { room }))).toBeUndefined();
+      expect(mentions(await tool(caller, 'list_rooms', {}))).toBeUndefined();
+      claimed.push(await claim('owed-turn-b', elsewhereRoom));
+      const otherPlace = mentions(await tool(caller, 'read_messages', { room: elsewhereRoom }));
+      expect(otherPlace?.some(item => item.messageId === elsewhere)).toBe(true);
+      expect(otherPlace?.some(item => item.roomId === room)).toBe(false);
+      expect(mentions(await tool(caller, 'read_messages', { room }))).toBeUndefined();
+      await db.query(`UPDATE agent_commands SET state='complete' WHERE id=ANY($1::text[])`, [claimed]);
+      claimed.push(await claim('owed-turn-2'));
+      const reset = mentions(await tool(caller, 'list_rooms', {}));
+      expect(reset?.some(item => item.messageId === here)).toBe(true);
+      expect(reset?.some(item => item.roomId === elsewhereRoom)).toBe(false);
+    } finally {
+      if (claimed.length) await db.query(`UPDATE agent_commands SET state='complete' WHERE id=ANY($1::text[])`, [claimed]);
+      await db.query('DELETE FROM memberships WHERE room_id=$1', [elsewhereRoom]);
+      await db.query('DELETE FROM rooms WHERE id=$1', [elsewhereRoom]);
     }
+  });
+  it('C7 owed mentions for one place leave the other place out', async () => {
+    const other = '33333333-3333-4333-8333-333333333333';
+    await db.query(`INSERT INTO rooms(id,workspace_id,name) VALUES($1,$2,'Other')`, [other, workspace]);
+    for (const who of [owner, member]) await db.query(`INSERT INTO memberships(workspace_id,room_id,identity_id,role) VALUES($1,$2,$3,'member')`, [workspace, other, who]);
+    const elsewhere = id();
+    await db.query('INSERT INTO messages(id,room_id,author_id,text) VALUES($1,$2,$3,$4)', [elsewhere, other, owner, 'elsewhere']);
+    await recordMcpMention(db, member, other, elsewhere);
+    const here = await tag();
+    expect((await owedMentions(db, member, room)).some(m => m.messageId === here)).toBe(true);
+    expect((await owedMentions(db, member, room)).some(m => m.roomId === other)).toBe(false);
+    expect((await owedMentions(db, member, 'short')).some(m => m.messageId === elsewhere)).toBe(true);
   });
   it('C7 helper tool context returns only its authenticated member’s owed tags', async () => {
     const message = await tag(helper);
@@ -158,11 +273,24 @@ describe('owed Room tags', () => {
     const message = await tag(); await recordMcpMention(db, other, room, message);
     for (const who of [member, other]) {
       const first = await call('send_message', { room, text: 'first', replyTo: message, idempotencyKey: 'custom-key' }, who);
-      const retry = await call('send_message', { room, text: 'retry', replyTo: message, idempotencyKey: 'different-key' }, who);
-      expect(retry.messageId).toBe(first.messageId);
-      expect((await db.query('SELECT 1 FROM rooms_mcp_idempotency WHERE member_id=$1 AND idempotency_key=$2', [who, `mention:${who}:${message}`])).rowCount).toBe(1);
+      const retry = await call('send_message', { room, text: 'first', replyTo: message, idempotencyKey: 'different-key' }, who);
+      expect(retry).toEqual(first);
+      expect((await db.query(`SELECT 1 FROM rooms_mcp_idempotency WHERE member_id=$1 AND idempotency_key LIKE $2`, [who, `mention:${who}:${message}:%`])).rowCount).toBe(1);
     }
     expect((await db.query('SELECT 1 FROM messages WHERE reply_to_message_id=$1', [message])).rowCount).toBe(2);
+  });
+  it('R1 a second, different reply to the same tag is stored, readable, searchable and wakes its own tags', async () => {
+    const message = await tag(member, 'desktop audit request');
+    const first = await call('send_message', { room, text: '@owner blocked for now', replyTo: message });
+    const second = await call('send_message', { room, text: '@owner @pidoong unblocked zebracorn', replyTo: message });
+    expect(second.messageId).not.toBe(first.messageId);
+    const replies = (await db.query<{ id: string; text: string }>('SELECT id,text FROM messages WHERE reply_to_message_id=$1 ORDER BY created_at,id', [message])).rows;
+    expect(replies.map(r => r.id).sort()).toEqual([first.messageId, second.messageId].sort());
+    expect((await call('read_messages', { room })).messages.map((m: any) => m.id)).toEqual(expect.arrayContaining([first.messageId, second.messageId]));
+    expect((await call('search_messages', { query: 'zebracorn' })).messages.map((m: any) => m.id)).toEqual([second.messageId]);
+    const reached = [...second.woken.map((w: any) => w.handle ?? w), ...second.notWoken.map((w: any) => w.handle)];
+    expect(reached).toContain('pidoong');
+    expect(first.notWoken.map((w: any) => w.handle)).not.toContain('pidoong');
   });
   it('C5 helper silence requires an explicit tag message ID and clears only that tag', async () => {
     await db.query("UPDATE agent_commands SET state='complete' WHERE agent_id=$1 AND state='pending'", [helper]);
@@ -191,7 +319,7 @@ describe('owed Room tags', () => {
     await db.query(`UPDATE agent_commands SET state='pending',generation_id=NULL,lease_expires_at=NULL,turn_request_id=$2 WHERE id=$1`, [command.id, id()]);
     const retry = (await daemon.execute('getAgentCommands', { roomId: room }, helper)).commands.find(c => c.id === command.id)!;
     await daemon.execute('claimAgentCommand', { roomId: room, commandId: command.id, generationId: 'retry' }, helper);
-    await daemon.execute('postRoomMessage', { roomId: room, requestId: retry.turnRequestId, generationId: 'retry', text: 'retry answer', replyToMessageId: source }, helper);
+    await expect(daemon.execute('postRoomMessage', { roomId: room, requestId: retry.turnRequestId, generationId: 'retry', text: 'retry answer', replyToMessageId: source }, helper)).rejects.toThrow('not delivered');
     expect((await db.query('SELECT id FROM messages WHERE author_id=$1 AND reply_to_message_id=$2', [helper, source])).rows).toEqual([{ id: first.id }]);
     expect((await owedMentions(db, helper)).some(m => m.messageId === source)).toBe(false);
   });

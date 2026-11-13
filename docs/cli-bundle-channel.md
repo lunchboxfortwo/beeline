@@ -1,15 +1,16 @@
 # Beeline helper update channel
 
-> **Current topology (2026-09-09):** the cutover below is complete.
-> `usebeeline.app` is backed by GitHub Pages and `server.usebeeline.app` is the
-> Fly monolith. The unified release has no legacy host mirror. The runbook is
-> retained only as cutover history; do not execute its mirror-enable steps.
+> **Download routing:** `infra/helper-downloads/` owns the Cloudflare `/dl/*`
+> route. It streams public GitHub Release assets at the existing URLs. Activate
+> that route using its [rollout instructions](../infra/helper-downloads/README.md)
+> before the first release using this workflow. The marketing site stays on
+> GitHub Pages; helper publication does not deploy Pages.
 
-Helpers boot a verified staged release or the verified active release from local disk, then check for the newest release on a pushed release notice and once after socket registration from `https://usebeeline.app/dl/manifest.json`. That URL and
-its relative platform archive and `.sha256` paths remain unchanged.
+Helpers boot a verified staged release or the verified active release from local disk, then check for the newest release on a pushed release notice and once after socket registration from `https://usebeeline.app/dl/manifest.json`.
+The manifest, relative platform archives and `.sha256` paths remain unchanged,
+including `/dl/next/manifest.json`. The installer at `/install` and `/install.sh`
+still fetches `/dl/beeline-bootstrap.mjs` and its checksum through the same route.
 The recovery bootstrap migrates old installations forward to one native supervised helper.
-Cloudflare remains the public TLS endpoint; GitHub Pages becomes the origin
-for the entire website, including `/dl` and `.well-known`.
 
 ## Following next
 
@@ -33,9 +34,9 @@ settings returns to latest on the next ordinary update reconciliation.
 
 The rolling prereleases `helper-update-channel` (latest) and
 `helper-update-channel-next` retain independently validated helper bytes.
-Every Pages deployment includes both directories. A `next` helper deployment
-uses the last latest website component's source commit for the static website;
-it cannot publish website changes from `next`. Next bundles carry an rc version,
+The route selects the channel from the path, independently of the static
+website deployment. A next release never republishes the stable website.
+Next bundles carry an rc version,
 for example `v0.1.184-rc.3`. Latest promotion
 rebuilds/stamps bundles from that rc commit with `v0.1.184` and publishes them
 to `/dl/manifest.json`; the next manifest keeps serving the rc. Ordinary helper
@@ -59,38 +60,34 @@ version and source SHA. Linux builds on the standard hosted `ubuntu-22.04` runne
 Apple-silicon and Intel builds on the existing `macos-15` and `macos-15-intel`
 runner types. The Linux job also compiles the CLI. The final helper job waits
 for all three, combines their verified outputs and publishes once; it performs
-no native compilation. A retry whose exact identity already serves on Pages
+no native compilation. A retry whose exact identity already serves at the download URL
 skips bundle rebuilding and promotion (see [the release pipeline](./release-pipeline.md)).
 Input-keyed native binaries may be restored from Actions cache; a miss builds
 them from the pinned upstream. Full-bundle install proof still runs. Native
 cache entries are never published on the public Releases page.
 Channel policy selects helper rebuilding even when helper source inputs are
 unchanged, so every new identity gets its own version stamp.
-Its promote phase passes `daemon-artifact-<version>-<sha>` to
-`.github/actions/pages-leg/action.yml`. The Pages leg:
+Its promote phase validates and publishes the exact bundle directory through
+`scripts/pages-channel.mjs`, then runs `scripts/verify-pages-update.mjs` against
+the public download URL. The legacy script names are retained. The helper job
+has no Pages permission, environment, artifact upload or deployment wait.
 
-1. Verifies the artifact identity, every archive's digest and size, and sidecars.
-2. Assembles the static website with those exact bytes, ignoring checkout `dl/`.
-3. Saves the same files as GitHub Release assets on `helper-update-channel`.
-4. Deploys the complete Pages artifact, including hidden association files.
-5. Runs `scripts/verify-pages-update.mjs` against the deployed host.
+The rolling `helper-update-channel` and `helper-update-channel-next` releases
+are public prereleases, excluded from GitHub's latest stable selection. They
+hold the archives, checksums, manifest, recovery bootstrap and Mac build inputs.
+The Worker streams their assets without credentials or exposing GitHub's
+redirects to installed clients. It bypasses caches for these mutable channel
+URLs. Helpers retain their existing checksum verification and leave the
+installed version untouched if publication is interrupted; rerunning the
+helper leg repairs a partial upload. The manifest is uploaded last.
 
-The rolling `helper-update-channel` release is a prerelease, excluded from
-GitHub's latest stable release selection. It supplies durable inputs for
-website-only deployments after Actions artifacts expire. It is not the URL
-helpers read on startup and release/reconnect events. `scripts/pages-channel.mjs` owns its upload/download contract.
-Every caller holds the same `usebeeline-pages` concurrency group through
-publication and deployment. An interrupted backup upload fails validation;
-the next release retry replaces and repairs it. The previous Pages deployment
-continues serving until a complete replacement is deployed.
+The helper job serializes channel publication. The website job separately
+holds `usebeeline-pages` while deploying only static marketing files,
+associations and installers. It ignores checkout `web/dl/` and never downloads
+or republishes helper archives. Website deployment runs when selected even
+when the helper is also selected, since the helper no longer deploys the site.
 
-Website changes are selected and deployed only by `unified-release.yml`; a
-merge to main does not deploy Pages. Website-only releases reuse the durable
-helper channel and never build or assign a second helper version. A missing or
-corrupt channel fails closed, preserving the existing Pages site; it never
-falls back to checkout helper bytes or the dev machine.
-
-No new binaries are committed to Git (#647). The served Pages site and Release
+No new binaries are committed to Git (#647). The static website and Release
 assets are independent of the dev machine and Actions artifact retention.
 Build runners still run the existing release jobs; moving those runners is a
 separate task from retiring the retired development services.
@@ -161,11 +158,10 @@ is no non-launchd fallback. The `gui/` domain is deliberate, not incidental:
 Trusty Squire drives a real Chrome in that session, and Linux's
 `systemctl --user` carries the analogous `loginctl enable-linger` requirement.
 
-Redirects are refused in the hosting proof: a github.io redirect back to the
-old dev origin must not count as a successful Pages verification. Use the
-direct github.io URL before custom-domain setup and the public Cloudflare URL
-after cutover. Pages propagation is retried for up to 20 attempts, 15 seconds
-apart; stale manifests and checksum mismatches never count as success.
+Redirects are refused in the update proof: the canonical download URL must
+serve the bytes directly. The Worker follows GitHub's asset redirect internally.
+The helper proof verifies the exact manifest, sidecars and production updater
+without a Pages propagation loop.
 
 ## Recovery and the first update from an old release
 
@@ -186,6 +182,13 @@ agent is named with its reason. `update` preserves stopped agents; `start --all`
 or `start --agent <key>` explicitly re-enables them. `update --status` is a local,
 read-only observation; `--check` checks only the published artifact.
 
+`connect` reuses the installed CLI and never prepares or requests a helper
+release when one is already installed. It writes the paired agent's runtime,
+asks the running helper to converge, and waits for that agent alone. A new
+machine installs the helper first and starts it after the runtime is written.
+The helper rejects a requested version older than its loaded release,
+including comparisons between final and rc releases.
+
 Legacy helper records sign the one-time authenticated
 `/v1/auth/daemon/migrate-legacy` server route with their existing identity. The
 server requires current owner and Workspace membership, and denies revoked or expired daemon credentials and repeat completed migrations. The exchange preserves agent identity,
@@ -193,13 +196,20 @@ policy, homes and sessions. Revoked or unrecognized identities show `needs
 reconnect`; other agents continue serving.
 
 One release transaction prepares in a private worker while intake stays open.
-It hands over at a quiet gap. After at most five minutes it pauses admission
-of new turns, then lets active turns and their child processes finish before
-restarting. Pending wakes stay on the server for the successor to claim.
-Newer releases replace the prepared target without renewing the admission
-deadline. A long active turn can therefore delay routine update activation.
-Forced server minimums still interrupt immediately, journal active commands
-for replay without spending retries, and enforce a minimum-version check.
+It hands over at a quiet gap. Preparation and handoff each use the same
+three-minute timeout, disarmed while waiting for idle. A prepared release stays
+staged throughout busy periods and boots on the next restart if no quiet gap
+arrives. `beeline update --force` hands off while busy, journaling interrupted
+commands through the same path as a server minimum. If an operation cannot finish, Beeline cancels it,
+records the failure in local helper status and keeps the current release
+serving; it does not schedule a retry. A later explicit release notification
+or update request can start a new attempt. Pending wakes stay on the server
+for the successor to claim. Server minimums validate the prepared version and
+journal interrupted commands immediately before handing over.
+
+Failed handoffs clear their matching staged selection under the install lock.
+Bootstrap consumes a staged selection before activation, so a failed activation
+that returns to the previous anchor cannot select the failed stage again.
 
 A stable `<prefix>/lib/beeline-bootstrap.mjs` and recorded Node path select the
 body before importing it. Verified local startup never waits for publication or
@@ -211,7 +221,7 @@ it never disables the native restart owner. There is no rollback coordinator
 or detached production fallback.
 
 The manifest's `recovery` entry pins the small bootstrap's file, checksum and
-size. Bundle merging, Pages assembly and the durable helper channel preserve
+size. Bundle merging and the public helper channel preserve
 and validate those exact bytes alongside the platform archives.
 
 ## Isolated acceptance
@@ -241,7 +251,7 @@ Paths and commands below are relative to the repository root. Read these invaria
 - **`<prefix>/lib/beeline` is the active bundle anchor**, a symlink into `lib/beeline-releases/<id>` swung by rename(2) (`self-update.ts`). Never suggest `npx beeline` (an unrelated package); recovery is `npx usebeeline update`.
 - **Update restarts are silent and exit directly.** `runMachineHelper` closes the machine link with `HELPER_UPDATE_CLOSE_CODE`/`HELPER_UPDATE_CLOSE_REASON`, then exits synchronously without awaiting agent teardown; `DaemonAgentSession` releases presence without an offline notice only for that signal. Unexpected loss still notices the owner (`machine-offline.test.ts`, `daemon-live.test.ts`, `machine-update-handoff.test.ts`). Release delivery pushes helpers only (`release-notify.ts`).
 - **Linux handovers use a fixed one-second native restart delay.** `native-helper.ts` renders no escalating restart steps. The running helper refreshes the installed unit with `daemon-reload`, without restarting the service. `recovery.startup.test.ts` proves verified staged/active boot makes no publication request; `systemd.test.ts` covers unit convergence.
-- **Routine release notices preserve active turns.** `ReleaseNotifier` (`apps/server/src/release-notify.ts`) pushes published helper releases; `MachineLink` (`apps/body/src/machine-link.ts`) reconciles the manifest once after first registration, with no periodic update check. `ReleaseTransaction` (`managed-update.ts`) and `quiesceHostedAgents` (`machine-helper.ts`) keep intake open until idle or the five-minute admission deadline. At the deadline new turns pause while active turns finish; only an idle helper hands over. Pending wakes reach the successor. `machine-helper.test.ts` proves push, reconnect, child survival during drain and queued delivery over isolated HTTP/WebSocket (WAKE-UPDATE-1). Installation remains checksum verification plus atomic activation. Server minimums (426 / `force-update`) still interrupt immediately, using `force-update-journal.ts` to replay interrupted commands.
+- **Routine release notices preserve active turns.** `ReleaseNotifier` pushes published helper releases; `MachineLink` reconciles the manifest once after first registration, with no periodic check. `ReleaseTransaction` dispatches preparation and waits for an idle event without pausing admission or discarding the staged boot selection. Its single three-minute timeout bounds preparation and handoff separately, never idle waiting. Server minimums and explicit forced updates journal and interrupt immediately before the verified handoff. Late asynchronous completions cannot restart the helper after cancellation (`managed-update.startup.test.ts`, `machine-update-handoff.test.ts`, `agent-runtime.startup.test.ts`). Installation remains checksum verification plus atomic activation.
 - `unified-release.yml` builds Linux and Mac bundles in parallel; `.github/actions/daemon-leg/` collects and promotes their verified outputs; `launchd.ts` supervises macOS (no bwrap). `https://usebeeline.app/dl/manifest.json` stays pinned; runbook `docs/cli-bundle-channel.md`.
 
 ### Installed bundle retention

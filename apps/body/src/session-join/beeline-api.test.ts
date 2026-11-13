@@ -9,7 +9,7 @@ movedDescribe5("oauth-completion.test.ts", () => {
 
 const signIn=():move5_SignIn=>({url:'https://synthetic.invalid/mcp/oauth/authorize',state:'s'.repeat(43),verifier:'v'.repeat(43)});
 
-const tokens={access_token:'synthetic-access',refresh_token:'synthetic-refresh',expires_in:3600};
+const tokens={access_token:'synthetic-access'};
 
 move5_afterEach(()=>{move5_vi.useRealTimers();move5_vi.restoreAllMocks();move5_vi.unstubAllGlobals();});
 
@@ -59,7 +59,7 @@ import { mkdtempSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { acceptMemberDelivery } from './bridge.js';
-import { memberStream } from './beeline-api.js';
+import { memberStream, accessToken, attachLocalDelivery } from './beeline-api.js';
 import { takeInbox, updateState, type JoinedSession } from './store.js';
 
 const folders:string[]=[];
@@ -70,6 +70,18 @@ const joined:JoinedSession={key:'codex:/synthetic/project',agent:'codex',cwd:'/s
 const delivery=(id='mention:one:0',cursor='1')=>({v:1,type:'delivery',deliveryId:id,
   mentions:[{id:'one',room_id:'room',text:'synthetic committed message'}],wakes:[],mentionCursor:cursor});
 afterEach(()=>{vi.useRealTimers();vi.restoreAllMocks();vi.unstubAllGlobals();for(const dir of folders.splice(0))rmSync(dir,{recursive:true,force:true});});
+
+describe('permanent MCP tokens',()=>{
+  it('uses an existing access token past the old local expiry without refreshing',async()=>{
+    const dir=scratch();await updateState(dir,state=>state.sessions.push({...joined,accessToken:'permanent-access',accessExpiresAt:Date.now()-7_200_000}));
+    const fetcher=vi.fn();vi.stubGlobal('fetch',fetcher);
+    expect(await accessToken(dir,joined.key)).toBe('permanent-access');expect(fetcher).not.toHaveBeenCalled();
+  });
+  it('adopts an access-only local handoff without expiry metadata',async()=>{
+    vi.stubGlobal('fetch',vi.fn(async()=>Response.json({clientId:'same-client',access_token:'permanent-access'})));
+    expect(await attachLocalDelivery('https://synthetic.invalid','handoff')).toEqual({clientId:'same-client',access_token:'permanent-access'});
+  });
+});
 
 describe('large member delivery',()=>{
   it('accepts a large valid delivery through the NDJSON parser and durable inbox owner',async()=>{

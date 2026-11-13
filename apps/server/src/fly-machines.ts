@@ -24,6 +24,15 @@ export function sameMachineImage(actual: string, desired: string): boolean {
   return actual === desired || (desired.includes('@sha256:') && actual.split('@')[1] === desired.split('@')[1]);
 }
 
+/** Fly defaults to acpi=off, hiding the VMGenID device from its x86 guest. */
+function resumeAwareInit(config: Record<string, unknown> = {}): Record<string, unknown> {
+  const init = config.init && typeof config.init === 'object' && !Array.isArray(config.init)
+    ? config.init as Record<string, unknown> : {};
+  const args = Array.isArray(init.kernel_args)
+    ? init.kernel_args.filter(arg => typeof arg !== 'string' || !arg.startsWith('acpi=')) : [];
+  return { ...init, kernel_args: [...args, 'acpi=force'] };
+}
+
 export interface FreeAgentMachines {
   /** Create and boot one Machine; returns its Fly id. */
   create(spec: FreeAgentMachineSpec): Promise<{ id: string }>;
@@ -72,6 +81,7 @@ export class FlyMachines implements FreeAgentMachines {
       config: {
         image: spec.image,
         env: spec.env,
+        init: resumeAwareInit(),
         guest: { cpu_kind: 'shared', cpus: spec.cpus, memory_mb: spec.memoryMb },
         // The agent's files and the helper's state live on the root
         // filesystem; keeping it across stop/start removes the need for a volume.
@@ -104,7 +114,8 @@ export class FlyMachines implements FreeAgentMachines {
 
   async update(machine: FreeAgentMachine, image: string): Promise<FreeAgentMachine> {
     return this.#request<FreeAgentMachine>('update image', `/${machine.id}`, 'POST', {
-      current_version: machine.instance_id, skip_launch: false, config: { ...machine.config, image },
+      current_version: machine.instance_id, skip_launch: false,
+      config: { ...machine.config, image, init: resumeAwareInit(machine.config) },
     });
   }
 

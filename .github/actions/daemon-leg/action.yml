@@ -1,7 +1,7 @@
 # Daemon leg of the unified release (was .github/workflows/beeline-bundle.yml).
 # unified-release.yml calls it twice from the self-hosted production host:
 # phase=collect combines the install-verified Linux and macOS native bundles,
-# phase=promote publishes it to Pages and smoke-tests the exact manifest. Fleet
+# phase=promote publishes public Release assets and smoke-tests the exact manifest. Fleet
 # uptake is asynchronous observability and never holds a release open. The
 # caller installs Node 22 and root dependencies; each native builder owns
 # its Rust toolchain.
@@ -18,8 +18,8 @@ inputs:
     required: true
   release_version:
     required: true
-  pages_manifest_url:
-    default: https://beeline-work.github.io/beeline/dl/manifest.json
+  manifest_url:
+    default: https://usebeeline.app/dl/manifest.json
   linux_bundle_dir:
     description: Downloaded install-verified Linux artifact directory
     default: ''
@@ -57,15 +57,29 @@ runs:
           cp "$x64_dir/mac-helper-inputs.json" "$RUNNER_TEMP/daemon-release/mac-helper-inputs-darwin-x64.json"
         fi
     # ---- promote -----------------------------------------------------------
-    - name: Publish the daemon artifact to durable Pages hosting
+    - name: Publish the selected public helper channel
       if: inputs.phase == 'promote'
-      uses: ./.github/actions/pages-leg
+      uses: actions/github-script@v7
+      env:
+        BUNDLE_DIR: ${{ runner.temp }}/daemon-release
+        RELEASE_SHA: ${{ inputs.release_sha }}
+        RELEASE_VERSION: ${{ inputs.release_version }}
+        CHANNEL: ${{ inputs.channel }}
       with:
-        channel: ${{ inputs.channel }}
-        bundle_dir: ${{ runner.temp }}/daemon-release
-        release_sha: ${{ inputs.release_sha }}
-        release_version: ${{ inputs.release_version }}
-        manifest_url: ${{ inputs.pages_manifest_url }}
+        script: |
+          const { publishPagesChannel } = await import(`${process.env.GITHUB_WORKSPACE}/scripts/pages-channel.mjs`);
+          await publishPagesChannel({ github, repo: context.repo, directory: process.env.BUNDLE_DIR,
+            channel: process.env.CHANNEL, expectedSha: process.env.RELEASE_SHA, expectedVersion: process.env.RELEASE_VERSION });
+    - name: Prove a real helper update through the download route
+      if: inputs.phase == 'promote'
+      shell: bash
+      env:
+        MANIFEST_URL: ${{ inputs.manifest_url }}
+      run: >-
+        node scripts/verify-pages-update.mjs
+        --manifest-url "$MANIFEST_URL"
+        --expected-manifest "${{ runner.temp }}/daemon-release/manifest.json"
+        --work-dir "$RUNNER_TEMP/helper-update-proof"
     - name: Record asynchronous fleet uptake without blocking the release
       if: inputs.phase == 'promote'
       shell: bash

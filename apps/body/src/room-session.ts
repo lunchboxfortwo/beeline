@@ -4,6 +4,8 @@ import { mkdir, writeFile } from 'node:fs/promises';
 import type { AgentModelConfigOption } from './model-types.js';
 import { grantedSquireHostRoute, claimGrantedHostRoutes } from './host-mcp-route.js';
 import { grantedSandboxDevices } from './bwrap-sandbox.js';
+import { pathGrantAllowsWrite } from '@beeline/api-contract/agent-grants';
+import { isAbsolute } from 'node:path';
 import { isolatedSharedAssetCategories } from './workspace-assets.js';
 import { dirname, resolve } from 'node:path';
 import { homedir } from 'node:os';
@@ -167,10 +169,13 @@ export async function sessionGrantedResources(
         ]),
       ].filter(route => !freeAgent || !grantedSquireHostRoute([route], declarations)),
       devices: grantedSandboxDevices(grants),
+      paths: grants.grants.filter(grant => grant.kind === 'path' &&
+        grant.status === 'approved' && isAbsolute(grant.target))
+        .map(grant => ({ path: grant.target, writable: pathGrantAllowsWrite(grant.capabilities) })),
       isolatedCategories: isolatedSharedAssetCategories(grants),
     };
   } catch {
-    return { hostRoutes: [], devices: [], isolatedCategories: [] };
+    return { hostRoutes: [], devices: [], paths: [], isolatedCategories: [] };
   }
 }
 

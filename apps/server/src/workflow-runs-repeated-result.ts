@@ -14,9 +14,9 @@ import type { SqlDatabase } from './database.js';
 import { applySkillRevision, assertSkillTextSafe } from './institutional-skills.js';
 import type { AfterCommit } from './institutional-memory-embeddings.js';
 import { answerRoomChoice, skipRoomChoice } from './room-choice.js';
-import { identitySubject, systemIdentityMention } from './system-line.js';
+import { identitySubject } from './system-line.js';
 import { SYSTEM_IDENTITY_ID } from '@beeline/api-contract/system-identity';
-import { RunScope, openRun, loadIdentityRow, noticeRunOwner, loadRun, workflowRequester } from './workflow-runs.js';
+import { RunScope, openRun, loadIdentityRow, loadRun, workflowRequester } from './workflow-runs.js';
 import { HandoffResult, provenanceAttempt, cardByCommand, alreadyAdvanced, isHandoffState, failOver, enterState, closeRun } from './workflow-runs-cancel-run-timers.js';
 
 
@@ -46,10 +46,20 @@ export async function handoff(
   if (typeof input.runId !== 'string' || !input.runId) throw new Error('runId is required');
   if (input.attempt !== undefined && (!Number.isSafeInteger(input.attempt) || input.attempt < 0))
     throw new Error('attempt must be a whole number from the run wake');
+  database = new CornerAccessDatabase(database);
   return database.transaction(async (db) => {
     // Resolve prefixes before locking, then serialize the run's state reads
     // and writes against every other writer on the canonical ID.
+    // A parent Room answer may name an exact run in one of its corners.
+    // Never search other Rooms or infer which gate the person meant.
+    const child = input.runId.length === 64 ? (await db.query<{ room_id: string }>(
+      `SELECT message.room_id FROM messages message JOIN rooms room ON room.id=message.room_id
+       WHERE message.id=$1 AND message.card_type='workflow-handoff' AND room.parent_id=$2
+         AND room.archived_at IS NULL`, [input.runId, command.room_id],
+    )).rows[0] : undefined;
+    if (child) command = { ...command, room_id: child.room_id };
     const scope = await openRun(db, command.room_id, input.runId);
+    if (child && scope.state?.kind !== 'gate') throw new ExpectedRefusalError('parent Room answers require a current gate');
     input = { ...input, runId: scope.runId };
     const { run, stateName } = scope;
     const current = run.seq;
@@ -159,7 +169,7 @@ export async function handoff(
       await completeServiceReview(db,command.agent_id,input.runId,(input.contents as Record<string, unknown>).receipts);
     }
     await bindWorkflowStepOutput(db, command, input.runId);
-    const actor = await loadIdentityRow(db, command.agent_id);
+    const actor = await loadIdentityRow(db, command.agent_id,command.room_id);
     const result = await enterState(db, scope, {
       outcome: input.outcome,
       contents: input.contents,
@@ -199,7 +209,8 @@ export async function gateMessageAnswer(
     await db.query<{ id: string; kind: string }>(
       `SELECT identity.id,identity.kind FROM messages message
        JOIN identities identity ON identity.id=message.author_id
-       WHERE message.id=$1 AND message.room_id=$2`,
+       WHERE message.id=$1 AND message.deleted_at IS NULL
+         AND (message.room_id=$2 OR EXISTS(SELECT 1 FROM rooms WHERE id=$2 AND parent_id=message.room_id))`,
       [command.source_message_id, command.room_id],
     )
   ).rows[0];
@@ -210,8 +221,9 @@ export async function gateMessageAnswer(
        JOIN messages message ON message.id=choice.message_id
        WHERE choice.room_id=$1 AND choice.workflow_run_id=$2 AND choice.status='open'
          AND COALESCE((message.card->>'attempt')::int,-1)=$3
+         AND EXISTS(SELECT 1 FROM messages source WHERE source.id=$4 AND source.created_at>=message.created_at)
        ORDER BY choice.created_at DESC,choice.id DESC LIMIT 1`,
-      [command.room_id, runId, attempt],
+      [command.room_id, runId, attempt, command.source_message_id],
     )
   ).rows[0];
   if (!choice) return undefined;
@@ -270,9 +282,8 @@ export async function settleWorkflowGate(
         { choiceId: input.choiceId, optionId: input.optionId!, viewerId: input.viewerId, note: input.note },
         { wake: false },
       );
-  const viewer = await loadIdentityRow(db, input.viewerId);
+  const viewer = await loadIdentityRow(db, input.viewerId,scope.roomId);
   const note = typeof input.note === 'string' && input.note.trim() ? input.note.replace(/\s+/g, ' ').trim() : undefined;
-  const attempt = scope.run.seq;
   await enterState(db, scope, {
     outcome: label,
     contents: input.skip
@@ -292,14 +303,6 @@ export async function settleWorkflowGate(
           : systemMessage("workflow-runs.at-so-run-went-to", scope.stateName, shortRunId(scope.runId), toState),
     }),
   });
-  if (input.skip) {
-    await noticeRunOwner(db, scope, `gate-default:${attempt}`, {
-      subject: { kind: 'system', name: systemMessage("workflow-runs.the-gate-of", scope.stateName, scope.run.workflowSlug) },
-      verb: systemMessage("workflow-runs.took-its-default"),
-      object: label,
-      consequence: systemMessage("workflow-runs.skipped-it-in-run", systemIdentityMention({ ...viewer, handle: viewer.handle ?? null }) || viewer.name, shortRunId(scope.runId)),
-    });
-  }
   return { choiceId: settled.choiceId, status: input.skip ? 'skipped' : 'answered', roomId: settled.roomId };
 }
 
@@ -483,7 +486,7 @@ export async function validateWorkflowBindings(
   input: { roleBindings: Readonly<Record<string, WorkflowRoleBinding>> },
 ): Promise<void> {
   const members = (await db.query<{ identity_id: string; handle: string | null; kind: string }>(
-    `SELECT member.identity_id,identity.handle,identity.kind FROM effective_memberships member
+    `SELECT member.identity_id,beeline_workspace_handle(identity.id,member.workspace_id) handle,identity.kind FROM room_access member
      JOIN identities identity ON identity.id=member.identity_id
      WHERE member.room_id=$1 AND member.removed_at IS NULL`, [roomId],
   )).rows;

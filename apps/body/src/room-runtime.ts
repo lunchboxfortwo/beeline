@@ -11,7 +11,6 @@ import { GrantCommandRunner, GrantRunnerServer, type GrantRunnerEndpoint } from 
 import { ConnectorUsageRecorder } from './connector-runner.js';
 import { MonolithCornerTurnLoop } from './monolith-corner-turn.js';
 import { MonolithRoomTurnLoop } from './monolith-room-turn.js';
-import type { InterruptedTurn } from './force-update-journal.js';
 import { agentGitIdentity } from './agent-git-identity.js';
 import { removeStoragePath, storageTree, isSquirePath, ordinaryDirectory, type StorageRoomState } from './helper-storage.js';
 import { SurfaceHealth, type SurfaceHealthState } from './surface-health.js';
@@ -21,7 +20,7 @@ import { runtimeIdentity } from './runtime.js';
 import { agentCornerCheckoutPaths, materializeAgentCornerCheckout } from './agent-corner-checkout.js';
 import { CRASH_SAFE_CLONE_ARGS, fetchRepositoryCache } from './repository-cache-repair.js';
 import { resolveSessionIdleMs, AgentProcesses, type AgentProcessSnapshot } from './agent-process.js';
-import { roomRuntimeCoordinatorReconciliationDiagnostics, roomRuntimeCoordinatorNoteReconciliationStage, roomRuntimeCoordinatorActiveRoomIds, roomRuntimeCoordinatorSetDiscoveryWakeListener, roomRuntimeCoordinatorSetReconciliationProgressListener, roomRuntimeCoordinatorYieldReconciliation, roomRuntimeCoordinatorSetInteractiveIdleListener, roomRuntimeCoordinatorWakeDiscovery, roomRuntimeCoordinatorActiveRoomCount, roomRuntimeCoordinatorSurfaceHealthSnapshot, roomRuntimeCoordinatorSurfaceHealthSummary, roomRuntimeCoordinatorHasDegradedSurfaces, roomRuntimeCoordinatorSchedulerSnapshot, roomRuntimeCoordinatorIsWorkspaceIdle, roomRuntimeCoordinatorActiveTurnCount, roomRuntimeCoordinatorStopAgentProcesses, roomRuntimeCoordinatorQuiesceForUpdateIfIdle, roomRuntimeCoordinatorQuiesceForUpdate, roomRuntimeCoordinatorResumeServing, roomRuntimeCoordinatorPrepareForForcedUpdateRestart, roomRuntimeCoordinatorInterruptedTurns, roomRuntimeCoordinatorInterruptForServerMinimum, roomRuntimeCoordinatorReconcile, roomRuntimeCoordinatorReconcileRooms, roomRuntimeCoordinatorScheduleStorageMaintenance, roomRuntimeCoordinatorQueueMembershipEvent, roomRuntimeCoordinatorDrainMembershipEvents, roomRuntimeCoordinatorApplyMembershipEvent, roomRuntimeCoordinatorApplyCornerComplete, roomRuntimeCoordinatorStopRunning, roomRuntimeCoordinatorRoomRecord, roomRuntimeCoordinatorRoomRoot, roomRuntimeCoordinatorRoomConfig, roomRuntimeCoordinatorGrantRunnerEndpoint, roomRuntimeCoordinatorStartRoom, roomRuntimeCoordinatorStartRoomOnce, roomRuntimeCoordinatorMaterializeRoomCheckout } from './room-runtime-reconciliation-diagnostics.js';
+import { roomRuntimeCoordinatorActiveRoomIds, roomRuntimeCoordinatorSetDiscoveryWakeListener, roomRuntimeCoordinatorYieldReconciliation, roomRuntimeCoordinatorSetInteractiveIdleListener, roomRuntimeCoordinatorWakeDiscovery, roomRuntimeCoordinatorActiveRoomCount, roomRuntimeCoordinatorSurfaceHealthSnapshot, roomRuntimeCoordinatorSurfaceHealthSummary, roomRuntimeCoordinatorHasDegradedSurfaces, roomRuntimeCoordinatorSchedulerSnapshot, roomRuntimeCoordinatorIsWorkspaceIdle, roomRuntimeCoordinatorActiveTurnCount, roomRuntimeCoordinatorStopAgentProcesses, roomRuntimeCoordinatorQuiesceForUpdate, roomRuntimeCoordinatorResumeServing, roomRuntimeCoordinatorInterruptForServerMinimum, roomRuntimeCoordinatorReconcile, roomRuntimeCoordinatorScheduleStorageMaintenance, roomRuntimeCoordinatorQueueMembershipEvent, roomRuntimeCoordinatorDrainMembershipEvents, roomRuntimeCoordinatorApplyMembershipEvent, roomRuntimeCoordinatorApplyCornerComplete, roomRuntimeCoordinatorStopRunning, roomRuntimeCoordinatorRoomRecord, roomRuntimeCoordinatorRoomRoot, roomRuntimeCoordinatorRoomConfig, roomRuntimeCoordinatorGrantRunnerEndpoint, roomRuntimeCoordinatorStartRoom, roomRuntimeCoordinatorStartRoomOnce, roomRuntimeCoordinatorMaterializeRoomCheckout } from './room-runtime-reconciliation-diagnostics.js';
 import { roomRuntimeCoordinatorRefreshRoomCheckout, roomRuntimeCoordinatorStartCorner, roomRuntimeCoordinatorWatchCorner, roomRuntimeCoordinatorUnwatchCorner, roomRuntimeCoordinatorActivateWatchedCorner, roomRuntimeCoordinatorCornerRepositoryToken, roomRuntimeCoordinatorInvalidateParentRepository, roomRuntimeCoordinatorRefreshRoomCorners, roomRuntimeCoordinatorRestartRunningRoomForRepositoryChange, roomRuntimeCoordinatorParentRepositoryState, roomRuntimeCoordinatorParentRepositoryToken, roomRuntimeCoordinatorReportCornerStartFailure, roomRuntimeCoordinatorMaterializeCornerWorktree, roomRuntimeCoordinatorGetLocalWorktreeIds, roomRuntimeCoordinatorArchiveCleanupRefusalPath, roomRuntimeCoordinatorCleanupWasRefused, roomRuntimeCoordinatorRefuseArchiveCleanup } from './room-runtime-refresh-room-checkout.js';
 import { roomRuntimeCoordinatorSweepArchivedCornerWorktrees, roomRuntimeCoordinatorReapCornerWorktree, roomRuntimeCoordinatorReapCornerScratch, roomRuntimeCoordinatorCleanupArchivedCornerLocalState, roomRuntimeCoordinatorReclaimPrivateStorage, roomRuntimeCoordinatorSweepRoomPrivateStorage, roomRuntimeCoordinatorCollectDependencyStores, roomRuntimeCoordinatorNotePoll, roomRuntimeCoordinatorBeginShutdown, roomRuntimeCoordinatorShutdown } from './room-runtime-sweep-archived-corner-worktrees.js';
 
@@ -53,13 +52,6 @@ export class RoomRuntimeCoordinator {
 
    readonly desiredChannels = new Set<string>();
 
-   reconciliationProgressListener?: () => void | Promise<void>;
-
-   reconciliationStage = 'idle';
-
-   reconciliationStageAt = Date.now();
-reconciliationDiagnostics() { return roomRuntimeCoordinatorReconciliationDiagnostics(this); }
-noteReconciliationStage(stage: string): void { return roomRuntimeCoordinatorNoteReconciliationStage(this, stage); }
 
    readonly storageMaintenanceRooms = new Set<string>();
 
@@ -219,7 +211,6 @@ noteReconciliationStage(stage: string): void { return roomRuntimeCoordinatorNote
   }
 activeRoomIds(): string[] { return roomRuntimeCoordinatorActiveRoomIds(this); }
 setDiscoveryWakeListener(listener: () => void): void { return roomRuntimeCoordinatorSetDiscoveryWakeListener(this, listener); }
-setReconciliationProgressListener(listener: () => void | Promise<void>): void { return roomRuntimeCoordinatorSetReconciliationProgressListener(this, listener); }
 async yieldReconciliation(): Promise<void> { return roomRuntimeCoordinatorYieldReconciliation(this); }
 setInteractiveIdleListener(listener: () => void): void { return roomRuntimeCoordinatorSetInteractiveIdleListener(this, listener); }
 wakeDiscovery(): void { return roomRuntimeCoordinatorWakeDiscovery(this); }
@@ -234,19 +225,12 @@ isWorkspaceIdle(): boolean { return roomRuntimeCoordinatorIsWorkspaceIdle(this);
 activeTurnCount(): number { return roomRuntimeCoordinatorActiveTurnCount(this); }
 /** A restart command retires harnesses; subscriptions stay available for new work. */
 async stopAgentProcesses(): Promise<void> { return roomRuntimeCoordinatorStopAgentProcesses(this); }
-quiesceForUpdateIfIdle(): boolean { return roomRuntimeCoordinatorQuiesceForUpdateIfIdle(this); }
 /** Stop claiming new turns while existing turns drain for a managed update. */
 quiesceForUpdate(): void { return roomRuntimeCoordinatorQuiesceForUpdate(this); }
-/**
- * Undo `quiesceForUpdateIfIdle` after a managed restart failed: clear the
- * latch and let reconciliation start the Room loops the quiesce stopped.
- */
+/** Resume intake after a failed update handoff. */
 resumeServing(): void { return roomRuntimeCoordinatorResumeServing(this); }
-async prepareForForcedUpdateRestart(): Promise<void> { return roomRuntimeCoordinatorPrepareForForcedUpdateRestart(this); }
-interruptedTurns(): InterruptedTurn[] { return roomRuntimeCoordinatorInterruptedTurns(this); }
-interruptForServerMinimum(): InterruptedTurn[] { return roomRuntimeCoordinatorInterruptForServerMinimum(this); }
+interruptForServerMinimum(): void { roomRuntimeCoordinatorInterruptForServerMinimum(this); }
 async reconcile(onServing?: () => void | Promise<void>): Promise<WorkspaceMembershipStatus> { return roomRuntimeCoordinatorReconcile(this, onServing); }
-async reconcileRooms(onServing?: () => void | Promise<void>): Promise<WorkspaceMembershipStatus> { return roomRuntimeCoordinatorReconcileRooms(this, onServing); }
 /** Retention cannot hold discovery or its watchdog acknowledgement hostage.
  * One sweep runs at a time; discovery coalesces its latest facts for the next
  * pass and updates the active set immediately, including during a slow reap.
@@ -558,9 +542,7 @@ export async function mapWithConcurrency<T>(
 export type RoomLeaf = Pick<
   MonolithRoomTurnLoop | MonolithCornerTurnLoop,
   | 'isBusy'
-  | 'prepareForForcedUpdateRestart'
   | 'interruptForServerMinimum'
-  | 'interruptedTurn'
   | 'requestReconciliation'
   | 'configurationChanged'
   | 'refreshPersonaForSoulUpdate'

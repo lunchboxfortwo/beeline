@@ -1,3 +1,4 @@
+import { memberPresenceSql } from '../member-presence.js';
 import { assetUrl, phoneIdentity as identity, type PhoneIdentityRow as IdentityRow } from '../phone-identity.js';
 import { ROOM_VIEW_CHAT_LIMIT, WORKSPACE_MEMBER_PAGE_SIZE } from '@beeline/api-contract/phone';
 import type { WorkspaceListView, WorkspaceMemberListQuery, WorkspaceMemberListView, WorkspaceView } from '@beeline/api-contract/phone';
@@ -148,17 +149,17 @@ import { phoneProjectMemberGrantRows } from './agent-reads.js';
         SELECT role FROM memberships WHERE workspace_id=$1 AND room_id IS NULL
           AND identity_id=$2 AND removed_at IS NULL
       ), member_row AS (
-        SELECT i.id,i.kind,i.name,i.handle,i.avatar,i.face_id,m.role,
+        SELECT i.id,i.kind,i.name,beeline_workspace_handle(i.id,m.workspace_id) handle,i.avatar,i.face_id,m.role,
           NULL::jsonb presence_body,NULL::timestamptz presence_updated_at
         FROM memberships m JOIN identities i ON i.id=m.identity_id
         WHERE m.workspace_id=$1 AND m.room_id IS NULL AND m.identity_id=$3
           AND m.removed_at IS NULL AND i.kind='human' AND i.hidden_from_roster=false
       ), owned AS (
-        SELECT i.id,i.kind,i.name,i.handle,i.avatar,i.face_id,m.role,
+        SELECT i.id,i.kind,i.name,beeline_workspace_handle(i.id,m.workspace_id) handle,i.avatar,i.face_id,m.role,
           NULL::jsonb presence_body,NULL::timestamptz presence_updated_at,
           agent.selected_model,agent.model_catalog,
           ${mcpClientIdentitySql('agent.agent_id')} mcp_client,
-          owner.id owner_id,owner.name owner_name,owner.handle owner_handle
+          owner.id owner_id,owner.name owner_name,beeline_workspace_handle(owner.id,m.workspace_id) owner_handle
         FROM agents agent JOIN identities i ON i.id=agent.agent_id
         JOIN memberships m ON m.identity_id=i.id
         JOIN identities owner ON owner.id=agent.owner_id
@@ -200,10 +201,8 @@ import { phoneProjectMemberGrantRows } from './agent-reads.js';
     if (presenceRows.length) {
       const presence = await ctx.optionalEnrichment('member-presence',
         ctx.enrichmentDatabase.query<{ id: string; presence_body: MemberRow['presence_body'];
-          presence_updated_at: Date }>(`SELECT DISTINCT ON (agent_id) agent_id id,body presence_body,
-            updated_at presence_updated_at
-          FROM live_outputs WHERE agent_id=ANY($1::text[]) AND kind='presence'
-          ORDER BY agent_id,updated_at DESC`, [presenceRows.map((entry) => entry.id)]));
+          presence_updated_at: Date }>(`SELECT member.id, presence.body presence_body,presence.updated_at presence_updated_at
+          FROM unnest($1::text[]) member(id) JOIN LATERAL (${memberPresenceSql('member.id')}) presence ON true`, [presenceRows.map((entry) => entry.id)]));
       const byId = new Map(presence?.rows.map((entry) => [entry.id, entry]) ?? []);
       for (const entry of presenceRows) {
         entry.presence_body = byId.get(entry.id)?.presence_body ?? null;

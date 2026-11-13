@@ -98,8 +98,9 @@ describe('corner lifecycle recorded event sequences', () => {
         reason: 'Use the owner emulator for the approved visual proof.',
       }, A);
       expect(ask).toMatchObject({ status: 'pending', auto: false });
+      // The card sits in the corner where the agent asked.
       expect((await rootFixture.db.query('SELECT room_id FROM messages WHERE id=$1', [ask.messageId])).rows[0]!.room_id)
-        .not.toBe(cornerId);
+        .toBe(cornerId);
       await advanceCorner(rootFixture.db, cornerId, { kind: 'reconcile' });
       expect(await machine(cornerId)).toMatchObject({ state: 'waiting', reason: 'user_action' });
       await terminalResult(repair!, 'Awaiting the owner emulator approval to capture phone screenshots.');

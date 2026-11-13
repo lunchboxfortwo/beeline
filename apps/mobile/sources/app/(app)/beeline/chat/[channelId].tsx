@@ -14,7 +14,9 @@ import {
   type RoomSurfaceSessionBindings,
 } from './useRoomSurfaceSession';
 
-const RoomSurface = memo(BuzzChatSurface, (previous, next) =>
+const RoomSurface = memo(function RoomSurface(props: React.ComponentProps<typeof BuzzChatSurface>) {
+  return <BuzzChatSurface {...props} />;
+}, (previous, next) =>
   previous.bindingsRef === next.bindingsRef &&
   (Object.keys(previous.session) as Array<keyof typeof previous.session>).every(
     (key) => Object.is(previous.session[key], next.session[key]),

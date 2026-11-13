@@ -29,6 +29,7 @@ export const MCP_AGENT_EXCLUSIONS: Readonly<Record<string, string>> = {
   wait_link_spend_request: WALLET_SPENDING,
   request_grant: HOST_GRANTS,
   run_granted_command: HOST_GRANTS,
+  store_secret: HOST_GRANTS,
   repository_io: MACHINE,
   list_files: MACHINE,
   read_file: MACHINE,
@@ -70,7 +71,7 @@ const APP_ROUTES: Record<string, Record<string, Route | string>> = {
     advance: { op: 'handoff', required: ['runId', 'outcome', 'contents'], description: 'Advance a run you hold, with an outcome its state declares.' },
     cancel: { op: 'cancel_workflow_run', required: ['runId', 'reason'], description: 'End an active run with a recorded reason.' },
     archive: { op: 'archive_workflow', required: ['name'], description: 'Retire a saved workflow by name.' },
-    rebind: { op: 'assign_workflow_role', required: ['runId', 'role', 'agent'], description: 'Bind one agent to a list-bound role of a run.' },
+    rebind: { op: 'assign_workflow_role', required: ['runId', 'role', 'agent'], description: 'Bind an agent to a role; resumes a failed run at its failed step.' },
   },
   wallet: {
     address: { op: 'wallet_address', required: [], description: 'Read the wallet address.' },
@@ -141,13 +142,13 @@ export const MCP_AGENT_TOOLS: Tool[] = [
     address: address('Corner id.'), action: { type: 'string', enum: ['metadata', 'brief', 'install_brief'] }, reviewer: { type: 'string' },
     name: { type: 'string' }, objective: { type: 'string' }, brief, expectedRevision: { type: 'integer', minimum: 0 }, change: { type: 'string', maxLength: 1000 },
   }, ['address', 'action']),
-  tool('order', 'Privately assign one agent besides yourself. A Room address needs agent; a corner defaults to its implementer. Corner reports return to the opening commander; read yours with list_mentions.', {
+  tool('order', 'Privately assign one agent besides yourself. A Room address needs agent; a corner defaults to its implementer. Corner reports return to the current commander; human-approved revised briefs transfer command to their author; read yours with list_mentions.', {
     address: address(), agent: { type: 'string', maxLength: 120 }, text: { type: 'string', minLength: 1, maxLength: 16000 },
   }, ['address', 'text']),
   tool('stop', 'Stop the running turn of an agent you ordered, or one working in a corner you opened.', {
     address: address(), agent: { type: 'string', maxLength: 120 },
   }, ['address']),
-  tool('report', 'Report a corner outcome to its opening commander at the opening surface. Later chat requests get ordinary replies here. Room and DM order outcomes return to their sender. commandId binds the exact order. Without it, prefers an order at address, then a single pending order elsewhere; refuses an ambiguous fallback and lists waiting orders. Without an order, a corner address reports to its commander. Status and text prefix agree: done:, blocked:, failed:, needs-decision:.', {
+  tool('report', 'Report a corner outcome to its current commander at the recorded return surface. Human-approved revised briefs transfer command to their author; earlier explicit orders retain their issuer. Later chat requests get ordinary replies here. Room and DM order outcomes return to their sender. commandId binds the exact order. Without it, prefers an order at address, then a single pending order elsewhere; refuses an ambiguous fallback and lists waiting orders. Without an order, a corner address reports to its commander. Status and text prefix agree: done:, blocked:, failed:, needs-decision:.', {
     address: address(), status: { type: 'string', enum: ['done', 'blocked', 'failed', 'needs_decision'] },
     text: { type: 'string', minLength: 1, maxLength: 16000 }, ask: { type: 'string', maxLength: 140 },
   }, ['address', 'status', 'text']),
@@ -511,7 +512,7 @@ export class RoomsMcpAgentTools {
   private async openCorner(member: string, args: Args, exec: (op: string, input: Args) => Promise<unknown>) {
     const room = addressArg(args.room, 'room');
     const implementer = String(args.implementer ?? '').trim().replace(/^@/, '').toLowerCase();
-    const self = (await this.db.query<{ handle: string | null }>('SELECT handle FROM identities WHERE id=$1', [member])).rows[0];
+    const self = (await this.db.query<{ handle: string | null }>('SELECT beeline_room_handle(id,$2) handle FROM identities WHERE id=$1', [member,room])).rows[0];
     const repository = await exec('getRoomRepositoryState', { roomId: await this.place(member, room) }) as {
       resolution?: string; key?: string; remote?: string; targetBranch?: string };
     // An app runs no Beeline machine, so it has no checkout to change files in.
@@ -609,7 +610,7 @@ export class RoomsMcpAgentTools {
         case 'post_starter_welcome': return exec('postStarterWelcome', context);
         case 'post_starter_game': return exec('postStarterGame', context);
         case 'post_room_invite': return exec('postRoomInvite', context);
-        case 'post_repository_card': return exec('postRepositoryOnboarding', { ...context, kind: 'repository' });
+        case 'post_repository_card': return exec('postRepositoryOnboarding', { ...context, kind: 'repository', ...(typeof input.repository === 'string' ? { repository: input.repository } : {}) });
         case 'post_starters_card': return exec('postRepositoryOnboarding', { ...context, kind: 'starters' });
         case 'save_workflow': return exec('saveWorkflow', { ...base, contract: input.contract });
         case 'load_workspace_skill': return exec('loadWorkspaceSkill', { ...base, slug: input.slug });

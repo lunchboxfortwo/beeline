@@ -29,23 +29,13 @@ import { saveActiveCommunityId } from '@/buzz/community-storage';
 
 import { mobileSurfaceCache } from '@/buzz/surface-storage';
 
-import { ConversationRow } from '@/components/buzz/ConversationRow';
-
-import { RoomListSectionHeader } from '@/components/buzz/RoomListSectionHeader';
-
-import { CornerOpenToast } from '@/components/buzz/CornerOpenToast';
-
 import { cornerOpenEnded } from '@/buzz/corner-open-status';
 
 import { dispatchRoomOpenTap } from '@/buzz/room-open-prefetch';
 
 import { resetChatListStoresForTest } from '@/buzz/chat-list-store';
 
-import {
-  applyChatListCorners,
-  getRoomCornerSummary,
-  resetRoomCornerStore,
-} from '@/buzz/room-corner-store';
+import { resetRoomCornerStore } from '@/buzz/room-corner-store';
 const transitions = vi.hoisted(() => ({ held: false, pending: [] as Array<() => void> }));
 export { transitions };
 
@@ -57,9 +47,9 @@ vi.mock('react', async (importOriginal) => {
   } };
 });
 
-vi.mock('@expo/vector-icons', async () => {
+vi.mock('@expo/vector-icons/Ionicons', async () => {
   const R = await import('react');
-  return { Ionicons: (props: any) => R.createElement('Ionicons', props) };
+  return { default: (props: any) => R.createElement('Ionicons', props) };
 });
 
 vi.mock('react-native-keyboard-controller', async () => {
@@ -107,6 +97,9 @@ const deck = vi.hoisted(() => ({
     }),
   ),
   createCorner: vi.fn(async (_roomId: string, _title: string, _cornerId?: string) => 'corner-new'),
+  createRoom: vi.fn(async (_name: string, _options: unknown) => 'room-new'),
+  operation: vi.fn(async (_name: string, _input: unknown) => ({ joined: true })),
+  openDrawer: vi.fn(),
   subscriptions: [] as Array<{
     filters: readonly { readonly '#h'?: readonly string[] }[];
     emit(event: MonolithSurfaceEvent): void;
@@ -163,21 +156,20 @@ vi.mock('react-native', async () => {
       select: (choices: Record<string, unknown>) => choices.ios ?? choices.default,
     },
     Pressable: host('Pressable'),
-    SectionList: (props: any) =>
+    FlatList: (props: any) =>
       ReactModule.createElement(
-        'SectionList',
+        'FlatList',
         props,
         deck.renderRows
-          ? props.sections.flatMap((section: any) =>
-              section.data.map((item: any, index: number) =>
-                ReactModule.createElement(
-                  ReactModule.Fragment,
-                  { key: item.room.id },
-                  props.renderItem({ item, index, section }),
-                ),
+          ? props.data.map((item: any, index: number) =>
+              ReactModule.createElement(
+                ReactModule.Fragment,
+                { key: item.room.id },
+                props.renderItem({ item, index }),
               ),
             )
-          : props.children,
+          : null,
+        props.ListFooterComponent ?? null,
       ),
     Text: host('Text'),
     TextInput: host('TextInput'),
@@ -196,38 +188,36 @@ function hostModule(...names: string[]) {
   );
 }
 
-vi.mock('@/components/buzz/TrayGlyph', () => hostModule('TrayGlyph'));
+
 
 vi.mock('@/components/buzz/ChevronGlyph', () => ({
   CHEVRON_ROW_SIZE: 16,
   ChevronGlyph: () => null,
 }));
 
-vi.mock('@/components/buzz/CommunityRail', () =>
-  hostModule('BuzzCommunityShell', 'CommunityDrawerTrigger', 'CommunitySwitcherTrigger'),
-);
+vi.mock('@/components/buzz/CommunityRail', () => ({
+  ...hostModule('BuzzCommunityShell'),
+  useCommunityDrawer: () => ({ drawerOpen: false, openDrawer: deck.openDrawer }),
+}));
 
-vi.mock('@/components/buzz/CornerGlyph', () => ({ CORNER_META_SIZE: 12, CornerGlyph: () => null }));
+vi.mock('tamagui', async () => (await import('@/ui/screens/chats/tamagui-hosts.test-support')).tamaguiHosts(() => !deck.holdLayouts));
+
+vi.mock('lucide-react-native', async () => (await import('@/ui/screens/chats/tamagui-hosts.test-support')).lucideHosts());
+
+vi.mock('react-native-svg', async () => (await import('@/ui/screens/chats/tamagui-hosts.test-support')).svgHosts());
+
+vi.mock('@/components/buzz/IdentityMark', () => hostModule('IdentityMark'));
+
 
 vi.mock('@/components/buzz/CornerWorkingPulse', () => hostModule('CornerWorkingPulse'));
 
-vi.mock('@/components/buzz/DirectMessagePickerSheet', () => hostModule('DirectMessagePickerSheet'));
-
-vi.mock('@/components/buzz/ExitGlyph', () => hostModule('ExitGlyph'));
-
 vi.mock('@/components/buzz/MemberRosterRow', () => hostModule('MemberRosterRow'));
 
-vi.mock('@/components/buzz/MemberPickerSheet', () => hostModule('MemberPickerSheet'));
+vi.mock('@/ui/screens/members/ChatAddSheets', () => hostModule('WorkspaceAddAgentSheet', 'ChatAddSheet'));
 
 vi.mock('@/components/buzz/Button', () => hostModule('Button'));
 
-vi.mock('@/components/buzz/NewRoomDialog', () => hostModule('NewRoomDialog'));
-
-vi.mock('@/components/buzz/RoomDeckComposeMenu', () => hostModule('RoomDeckComposeMenu'));
-
 vi.mock('@/components/buzz/RoomDeckLoadingView', () => hostModule('RoomDeckLoadingView'));
-
-vi.mock('@/components/buzz/RoomListSectionHeader', () => hostModule('RoomListSectionHeader'));
 
 vi.mock('@/components/buzz/SurfaceGlyphLoader', () => hostModule('SurfaceGlyphLoader'));
 
@@ -294,6 +284,7 @@ vi.mock('@/auth/github-installation-host', () => ({
 vi.mock('@/auth/buzz-identity-storage', () => ({
   getEffectiveRelayUrl: vi.fn(async () => 'https://relay.test'),
   loadBuzzIdentity: vi.fn(async () => ({ publicKey: 'viewer', secretKey: new Uint8Array(32) })),
+  peekBuzzViewerContext: () => ({ relayUrl: 'https://relay.test', viewerPubkey: 'viewer' }),
 }));
 
 vi.mock('@/buzz/community-storage', () => ({
@@ -306,16 +297,34 @@ vi.mock('@/buzz/community-storage', () => ({
   }),
 }));
 
-vi.mock('@/buzz/surface-storage', () => {
+vi.mock('@/buzz/surface-storage', async () => {
+  const { roomSurfaceRecords } = await import('@/buzz/room-message-records');
+  const { nextSurfaceStamp } = await import('@/buzz/surface-clock');
+  const selected = new Map<string, { value: unknown; projection: unknown }>();
+  const parsed = (address: string) => {
+    const [relayOrigin, viewerPubkey, endpoint, params] = JSON.parse(address);
+    return { relayOrigin, viewerPubkey, endpoint, params };
+  };
   const notify = (address: string) => {
     for (const listener of hotSurfaces.listeners.get(address) ?? []) listener();
   };
+  roomSurfaceRecords.subscribe((scope, roomId) => {
+    for (const address of hotSurfaces.values.keys()) if (roomSurfaceRecords.matches(parsed(address), scope, roomId)) {
+      selected.delete(address);
+      notify(address);
+    }
+  });
   const cache = {
-    peek: vi.fn((address: string) =>
-      deck.withholdWorkspaceSnapshot && address.includes('/workspaces')
-        ? null
-        : (hotSurfaces.values.get(address) ?? null),
-    ),
+    peek: vi.fn((address: string) => {
+      if (deck.withholdWorkspaceSnapshot && address.includes('/workspaces')) return null;
+      const value = hotSurfaces.values.get(address);
+      if (!value) return null;
+      const memo = selected.get(address);
+      if (memo?.value === value) return memo.projection;
+      const projection = roomSurfaceRecords.snapshot(parsed(address), value);
+      selected.set(address, { value, projection });
+      return projection;
+    }),
     read: vi.fn(async () => null),
     write: vi.fn(async (address: string, value: unknown, _guard: unknown) => {
       cache.publish(address, value);
@@ -328,8 +337,9 @@ vi.mock('@/buzz/surface-storage', () => {
     clear: vi.fn(() => {
       hotSurfaces.values.clear();
     }),
-    publish: vi.fn((address: string, value: unknown) => {
-      hotSurfaces.values.set(address, value);
+    publish: vi.fn((address: string, value: unknown, _guard?: unknown, stamp = nextSurfaceStamp()) => {
+      hotSurfaces.values.set(address, roomSurfaceRecords.store(parsed(address), value, stamp));
+      selected.delete(address);
       notify(address);
       return value;
     }),
@@ -361,11 +371,11 @@ vi.mock('@/buzz/surface-storage', () => {
   };
 });
 
-vi.mock('@/buzz/room-open-prefetch', () => ({ dispatchRoomOpenTap: vi.fn() }));
+vi.mock('@/buzz/room-open-prefetch', () => ({ dispatchRoomOpenTap: vi.fn(), warmRoomRouteCode: vi.fn() }));
 
 vi.mock('@/utils/responsive', () => ({ useIsDesktop: () => false }));
 
-vi.mock('@/sync/transport/monolith-operation', () => ({ monolithPhoneOperation: vi.fn(), readServerSurface: vi.fn() }));
+vi.mock('@/sync/transport/monolith-operation', () => ({ monolithPhoneOperation: deck.operation, readServerSurface: vi.fn() }));
 
 vi.mock('@/sync/transport', () => ({
   BuzzRigTransport: class {
@@ -389,11 +399,18 @@ vi.mock('@/sync/transport', () => ({
     createHumanCorner(roomId: string, title: string, ...rest: unknown[]) {
       return deck.createCorner(roomId, title, rest[2] as string | undefined);
     }
+    async createRoom(name: string, options: { onPublished?: () => void }) {
+      const id = await deck.createRoom(name, options);
+      options.onPublished?.();
+      return id;
+    }
   },
 }));
 
 // The app-level Room list store watches through the shared live connection.
-vi.mock('@/sync/transport/live-connection', () => ({
+vi.mock('@/sync/transport/live-connection', async () => {
+  const { publishPhoneLiveEvent } = await import('@/sync/transport/phone-live-events');
+  return {
   useConnectionState: () => deck.connectionState,
   reconnectNow: () => {
     deck.reconnects += 1;
@@ -409,7 +426,12 @@ vi.mock('@/sync/transport/live-connection', () => ({
       filters: readonly { readonly '#h'?: readonly string[] }[],
       listener: (event: MonolithSurfaceEvent) => void,
     ) => {
-      deck.subscriptions.push({ filters, emit: listener });
+      // The badge's identity-wide watch is outside this deck fixture.
+      if (!filters.length) return () => undefined;
+      deck.subscriptions.push({ filters, emit: event => {
+        if ('monolithLive' in event) publishPhoneLiveEvent(event.monolithLive);
+        listener(event);
+      } });
       return () => undefined;
     },
     whenSubscribed: async () => undefined,
@@ -418,7 +440,8 @@ vi.mock('@/sync/transport/live-connection', () => ({
       deck.reconnects += 1;
     },
   }),
-}));
+  };
+});
 
 vi.mock('@/sync/transport/room-view-client', async () => ({
   isRoomViewTimeoutError: (
@@ -523,9 +546,9 @@ export function listOf(chats: ChatListItem[], extra: Partial<ChatListView> = {})
 export function paintedRows(renderer: ReactTestRenderer): ChatListItem[] {
   const list = renderer.root.find(
     (node: { type: unknown; props: { testID?: string } }) =>
-      node.type === 'SectionList' && node.props.testID === 'room-list',
+      node.type === 'FlatList' && node.props.testID === 'room-list',
   );
-  return (list.props.sections as { data: ChatListItem[] }[]).flatMap((section) => section.data);
+  return list.props.data as ChatListItem[];
 }
 
 
@@ -542,10 +565,13 @@ export function roomWatch() {
 export const quiet = () => act(() => new Promise((resolve) => setTimeout(resolve, 1_100)));
 
 
+const mountedDecks = new Set<ReactTestRenderer>();
+
 export async function mountDeck(): Promise<ReactTestRenderer> {
   let renderer!: ReactTestRenderer;
   await act(async () => {
     renderer = create(React.createElement(BuzzChannels));
+    mountedDecks.add(renderer);
   });
   await vi.waitFor(() => expect(() => roomWatch()).not.toThrow());
   await quiet();
@@ -553,7 +579,11 @@ export async function mountDeck(): Promise<ReactTestRenderer> {
 }
 
 
-beforeEach(() => {
+beforeEach(async () => {
+  await act(async () => {
+    resetChatListStoresForTest();
+    resetClientState();
+  });
   resetInitialLandingForTests();
   deck.pathname = '/beeline/channels';
   deck.initialUrl = null;
@@ -567,8 +597,6 @@ beforeEach(() => {
   vi.mocked(loadPendingInvite).mockClear();
   transitions.held = false;
   transitions.pending = [];
-  // A case that never unmounts its deck must not hand its live list to the next.
-  resetChatListStoresForTest();
   vi.mocked(mobileSurfaceCache.read).mockReset().mockResolvedValue(null);
   resetRoomCornerStore();
   deck.appState = 'active';
@@ -595,13 +623,20 @@ beforeEach(() => {
   vi.mocked(dispatchRoomOpenTap).mockClear();
   deck.createRepository.mockClear();
   deck.createCorner.mockClear();
+  deck.createRoom.mockClear();
+  deck.operation.mockClear();
+  deck.openDrawer.mockClear();
   cornerOpenEnded();
   deck.subscriptions.length = 0;
   deck.chatsResponse = chatList({ id: 'm1', text: 'earlier', createdAt: 10 });
 });
 
 
-afterEach(() => {
+afterEach(async () => {
+  await act(async () => {
+    for (const renderer of mountedDecks) renderer.unmount();
+    mountedDecks.clear();
+  });
   vi.unstubAllGlobals();
   deck.focusEffect = null;
   deck.focusEffects.clear();
@@ -611,9 +646,6 @@ afterEach(() => {
 
 vi.mock('@/components/buzz/WorkspaceActionsMenu', () => hostModule('WorkspaceActionsMenu'));
 
-vi.mock('@/components/buzz/RoomListToolbar', () =>
-  hostModule('RoomListToolbar', 'RoomListTrayAction'),
-);
 
 vi.mock('@react-native-async-storage/async-storage', () => ({
   default: {
@@ -667,16 +699,16 @@ return {
 }
 export function fixtureScope5() {
 
-  const listIn = (renderer: ReactTestRenderer) => renderer.root.findByType('SectionList');
+  const listIn = (renderer: ReactTestRenderer) => renderer.root.findByType('FlatList');
 
   const touchIn = (renderer: ReactTestRenderer) =>
     renderer.root.find(
-      (node: any) => node.type === 'View' && node.props.testID === 'room-list-gestures',
+      (node: any) => node.type === 'YStack' && node.props.testID === 'room-list-gestures',
     );
 
   const pressIn = (renderer: ReactTestRenderer) =>
     renderer.root.find(
-      (node: any) => node.type === 'Pressable' && node.props.testID === 'room-room-a',
+      (node: any) => node.type === 'ListItem' && node.props.testID === 'room-room-a',
     );
 
   const swipeIn = (renderer: ReactTestRenderer) => renderer.root.findByType('Swipeable');

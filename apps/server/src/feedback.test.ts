@@ -567,7 +567,7 @@ const scope5 = fixtureScope5();
     await ensureSystemIdentity(rootFixture.database);
     const turn = await openTurn(await message('scheduled feedback sweep', SYSTEM_IDENTITY_ID, TRIAGE_CORNER), TRIAGE_CORNER, TRIAGE);
     const input = { ...turn, itemIds: [actionItem], title: 'Slow tools', prUrl: FIX_URL };
-    await expect(daemon().execute('notifyFeedbackFixed', input as never, TRIAGE)).resolves.toEqual({ resolved: 1, notified: 0 });
+    await expect(daemon({ repository: REPOSITORY, systemSenders: [] }).execute('notifyFeedbackFixed', input as never, TRIAGE)).resolves.toEqual({ resolved: 1, notified: 0 });
     expect(await scope5.fixedDms()).toEqual([]);
     await expect(daemon().execute('notifyFeedbackFixed', { ...input, notify: true } as never, TRIAGE)).rejects.toThrow('explicit order');
   });
@@ -626,6 +626,7 @@ const scope5 = fixtureScope5();
         'notifyFeedbackFixed',
         {
           ...(await openTurn(await message('@sweeper notify', PERSON, TRIAGE_CORNER), TRIAGE_CORNER, TRIAGE)),
+          notify: true,
           itemIds: [actionItem],
           title: 'Slow tools',
           prUrl: FIX_URL,

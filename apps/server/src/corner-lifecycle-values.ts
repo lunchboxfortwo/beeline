@@ -1,4 +1,4 @@
-import { Applied } from './corner-lifecycle-review-state.js';
+import type { AgentCommandInput, CommandRow } from './agent-command.js';
 
 
 
@@ -22,3 +22,46 @@ export const reviewChecksSql = `jsonb_build_object('status',lifecycle->>'checks'
 export const REVIEWER_NOT_PARENT_MEMBER = 'not a current member of the parent Room';
 
 export const REVIEWER_NOT_CORNER_MEMBER = 'not a current member of this corner';
+
+export function greenReviewRequestSql(command: string): string {
+  return `${command}.action='input' AND ${command}.reason IN ('corner_review_dispatch','agent_tag','order')
+    AND ${command}.review_context->>'purpose' IS NULL
+    AND ${command}.review_context->'checks'->>'status'='passing'`;
+}
+
+export type RevisionWake = { queued: boolean; agentId?: string; reason?: string };
+
+export type CornerAdvance = {
+  archived?: boolean;
+  state: string | undefined;
+  accepted: boolean;
+  wake?: RevisionWake;
+  command?: CommandRow;
+};
+
+export type Applied = { ok: true; wake?: RevisionWake };
+
+export type CornerEvent =
+  | {
+      kind: 'open';
+      command?: AgentCommandInput;
+    }
+  | { kind: 'push'; headSha: string; contents: Record<string, unknown> }
+  | { kind: 'checks'; result: 'passing' | 'failing'; sourceMessageId: string }
+  | {
+      kind: 'brief-revised';
+      revision: number;
+      sourceMessageId: string;
+      command: CommandRow;
+    }
+  /** Checks started again on the same head (a re-run); the verdict that follows is reported as `checks`. */
+  | { kind: 'checks-pending' }
+  /** A yes on this head: a reviewer's PASS or a person's order, landed by the caller. */
+  | { kind: 'approval'; headSha: string; by: 'reviewer' | 'person' }
+  | { kind: 'merge-refused'; headSha: string; reason: string; confirmedUnmerged?: boolean }
+  | { kind: 'merged'; contents: Record<string, unknown> }
+  | { kind: 'pull-request-closed'; number: number }
+  | { kind: 'closed' }
+  | { kind: 'merge-conflict'; sourceMessageId: string }
+  | { kind: 'reconcile' }
+  | { kind: 'command'; command: AgentCommandInput };

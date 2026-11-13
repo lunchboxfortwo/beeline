@@ -1,5 +1,5 @@
 import { cornerObjectiveSql } from './corner-objective.js';
-import { commandOwnerLiveSql } from './turn-ownership.js';
+import { commandOwnerLiveSql, helperTurnResumableSql } from './turn-ownership.js';
 import { voiceDateContext } from './voice-reply.js';
 import { subscriptionPromptBody } from './agent-subscriptions.js';
 import { boundReplyExcerpt, REPLY_EXCERPT_MAX_LENGTH } from '@beeline/api-contract/daemon';
@@ -69,7 +69,8 @@ export async function readAgentCommands(
  LEFT JOIN workspace_skill_versions workflow_version ON workflow_version.skill_id=workflow_skill.id
    AND workflow_version.version=(workflow_latest.card->>'workflowVersion')::int
  WHERE c.room_id=$1 AND c.agent_id=$2
-   AND CASE WHEN $3::text IS NULL THEN c.state='pending' ELSE c.state='claimed' AND c.generation_id=$3 END
+   AND CASE WHEN $3::text IS NULL THEN c.state='pending' OR ${helperTurnResumableSql('c')}
+     ELSE c.state='claimed' AND c.generation_id=$3 END
    AND NOT EXISTS(SELECT 1 FROM cancelled_wakes cancelled WHERE cancelled.id=c.id)
    AND (${ordinaryWakeSql('c')} OR NOT EXISTS (
      SELECT 1 FROM agent_commands requested WHERE requested.room_id=c.room_id
@@ -97,6 +98,7 @@ export async function readAgentCommands(
       action: r.action,
       reason: r.reason,
       ...(r.private_payload ? { private: true } : {}),
+      ...(r.state === 'claimed' && !generation ? { generationId: r.generation_id! } : {}),
       ...(r.delivered_context ? { recoveryContext: r.delivered_context } : {}),
       ...(r.system_event?.scheduleId ? { scheduleId: r.system_event.scheduleId } : {}),
       rootCommandId: r.root_command_id,
@@ -130,7 +132,7 @@ export async function commandInbox(
   const { commands } = await readAgentCommands(db, roomId, agentId);
   return {
     dispatchVersion: 1,
-    items: commands.map((c) => ({
+    items: commands.filter(c => !c.generationId).map((c) => ({
       ...c.source,
       id: c.sourceMessageId,
       ...(c.action === 'stop'
@@ -160,7 +162,6 @@ export async function routeSystemCommand(
     requestId?: string;
     causeId?: string;
     commandId?: string;
-    followup?: boolean;
   },
 ): Promise<void> {
   if (!input.kind) return;
@@ -173,7 +174,6 @@ export async function routeSystemCommand(
         kind: 'checks',
         result: input.kind === 'check-passed' ? 'passing' : 'failing',
         sourceMessageId: input.sourceMessageId,
-        ...(input.followup ? { followup: true } : {}),
       });
       return;
     }
@@ -216,10 +216,9 @@ export async function routeSystemCommand(
   // A Squire decision answers a turn that never paused: the agent posted the
   // approval link and either kept working or ended its turn. A live turn must
   // keep running (completing its command revokes its output authority and
-  // drops it), so the resume waits behind it. Once that turn has ended, only
-  // an approval starts the follow-up turn; a denial or expiry wakes nobody,
-  // because the person who decided already knows and the agent has nothing
-  // it can do with the answer.
+  // drops it), so the resume waits behind it. After the asking turn ends,
+  // an approved or denied push starts one new turn with that answer and its
+  // provenance. Expiry keeps its existing routing.
   const squireDecision = input.kind === 'squire-approval-decided';
   const squireStatus = squireDecision
     ? (await db.query<{ status: string | null }>(
@@ -227,7 +226,7 @@ export async function routeSystemCommand(
       )).rows[0]?.status
     : undefined;
   for (const agentId of new Set(input.targets)) {
-    const action =
+    let action: 'input' | 'resume' | 'stop' =
       input.kind === 'turn-cancelled' ? 'stop' : isResumeKind(input.kind) ? 'resume' : 'input';
     let parent: CommandRow | undefined;
     if (action !== 'input') {
@@ -239,10 +238,10 @@ export async function routeSystemCommand(
         )
       ).rows[0];
       if (!parent) continue;
-      if (squireDecision && squireStatus !== 'approved' &&
-          (parent.state === 'complete' || parent.state === 'cancelled'))
-        continue;
-      await db.query(
+      if (squireDecision && (parent.state === 'complete' || parent.state === 'cancelled')) {
+        if (squireStatus !== 'approved' && squireStatus !== 'denied') continue;
+        action = 'input';
+      } else await db.query(
         `SELECT (terminal.ended).* FROM (SELECT beeline_end_agent_turn(agent_commands.id,agent_commands.generation_id,$4,NULL,NULL) ended FROM agent_commands WHERE room_id=$1 AND agent_id=$2 AND turn_request_id=$3
            AND (state='pending' OR (state='claimed' AND NOT $5::boolean))) terminal`,
         [
@@ -277,7 +276,7 @@ export async function routeSystemCommand(
       ...(parent
         ? {
             parent,
-            retainDepth: action !== 'input',
+            retainDepth: action !== 'input' || squireDecision,
             turnRequestId: action !== 'input' ? parent.turn_request_id : undefined,
           }
         : {}),

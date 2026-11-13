@@ -34,9 +34,14 @@ describe('corner transition table', () => {
     ['push after handoff', { ...green, lifecycle: { ...green.lifecycle!, checks: 'pending' } }, { kind: 'push', headSha: head, contents: {} }, 'review', undefined],
     ['first failing job', { ...green, lifecycle: { ...green.lifecycle!, checks: 'failing' }, checkSourceId: 'red' }, { kind: 'checks', result: 'failing', sourceMessageId: 'red' }, 'working', 'checks-failed'],
     ['all green', green, observe, 'review', 'review'],
+    ['peer activity retains Working but permits review', { ...green, turnRunning: true, implementerActive: false }, observe, 'working', 'review'],
+    ['implementer activity holds review', { ...green, turnRunning: true, implementerActive: true }, observe, 'working', undefined],
     ['corner/Room reviewer already running', { ...green, reviewerActive: true }, observe, 'review', undefined],
+    ['reviewer processing only a check notice', { ...green, reviewerActive: true, reviewRequestActive: false }, observe, 'review', 'review'],
+    ['reviewer has an actual review request', { ...green, reviewerActive: true, reviewRequestActive: true }, observe, 'review', undefined],
     ['review requests changes', { ...green, reviewEnded: { id: 'review', findings: 'FAIL: missing test' } }, observe, 'working', 'review-findings'],
-    ['review ends without verdict', { ...green, reviewEnded: { id: 'review' } }, observe, 'working', 'review-no-verdict'],
+    ['first review ends without verdict', { ...green, reviewRequests: 1, reviewEnded: { id: 'review', emptyCount: 1 } }, observe, 'working', 'review-findings'],
+    ['second review ends without verdict', { ...green, reviewRequests: 2, reviewEnded: { id: 'review', emptyCount: 2 } }, observe, 'working', 'review-findings'],
     ['no reviewer', { ...green, reviewerConfigured: false }, observe, 'review', 'review-gap'],
     ['yes before green continues landing', { ...green, approved: true }, observe, 'working', 'land'],
     ['landing refusal', green, { kind: 'merge-refused', headSha: head, reason: 'base moved' }, 'working', 'merge-refused'],
@@ -102,9 +107,9 @@ describe('corner transition table', () => {
       [],
     );
   });
-  it('hands back findings and missing verdicts once per exact review', () => {
+  it('hands back findings and a second missing verdict once per exact review', () => {
     for (const findings of [undefined, 'FAIL: attach evidence']) {
-      const f = { ...green, reviewEnded: { id: 'review', findings } };
+      const f = { ...green, reviewRequests: 1, reviewEnded: { id: 'review', findings, emptyCount: findings ? 0 : 2 } };
       const first = run(f);
       expect(first.wakes).toHaveLength(1);
       expect(run(f, observe, { ...first.state, effects: [first.wakes[0]!.key] }).wakes).toEqual([]);
@@ -140,4 +145,37 @@ describe('corner transition table', () => {
       'review-gap',
     );
   });
+  it('retains a green handoff through implementer activity until a real pending request fulfills it', () => {
+    const repaired = { ...green, reviewRequests: 1, reviewEnded: { id: 'old', findings: 'FAIL: evidence' } };
+    const receipt = `review-failed:${head}:old`;
+    const busy = run({ ...repaired, turnRunning: true, implementerActive: true },
+      { kind: 'checks', result: 'passing', sourceMessageId: 'green' },
+      { state: 'working', headSha: head, pullRequest: 7, effects: [receipt] });
+    expect(busy.wakes).toEqual([]);
+    expect(busy.state.reviewDue).toBe(true);
+    const released = run({ ...repaired, implementerActive: false }, observe, busy.state);
+    expect(released.wakes.map(wake => wake.kind)).toEqual(['review']);
+    expect(released.state.reviewDue).toBe(true);
+    const delivered = run({ ...repaired, reviewRequestActive: true, reviewerActive: true }, observe, released.state);
+    expect(delivered.wakes).toEqual([]);
+    expect(delivered.state.reviewDue).toBeUndefined();
+  });
+
+  it('discards an owed green handoff when the head or pull request changes', () => {
+    const owed: CornerMachine = { state: 'working', headSha: head, pullRequest: 7, reviewDue: true };
+    for (const target of [{ ...pr, headSha: 'b'.repeat(40) }, { ...pr, number: 8 }]) {
+      const next = run({ ...green, headSha: target.headSha, lifecycle: { ...green.lifecycle!, pr: target },
+        reviewRequests: 1, reviewEnded: { id: 'prior', findings: 'FAIL: already handed back', delivered: true } }, observe, owed);
+      expect(next.state.reviewDue).toBeUndefined();
+      expect(next.wakes).toEqual([]);
+    }
+  });
+
+  it('an owed green handoff cannot exceed the two-empty-turn cap', () => {
+    const ended = run({ ...green, reviewRequests: 2, reviewEnded: { id: 'second', emptyCount: 2 } }, observe,
+      { state: 'working', headSha: head, pullRequest: 7, reviewDue: true });
+    expect(ended.state.reviewDue).toBeUndefined();
+    expect(ended.wakes.map(wake => wake.kind)).toEqual(['review-findings']);
+  });
+
 });

@@ -1,10 +1,10 @@
 const fs = require('node:fs');
 const path = require('node:path');
-const { withAndroidManifest, withDangerousMod } = require('@expo/config-plugins');
+const { withAndroidManifest, withDangerousMod, withAppBuildGradle } = require('@expo/config-plugins');
 
 const PUSH_ACTIVITY = '.PushNotificationActivity';
 const PUSH_LIFECYCLE_PROVIDER = '.PushRoutingLifecycleProvider';
-const PUSH_ACTIVITY_THEME = '@android:style/Theme.Translucent.NoTitleBar';
+const PUSH_ACTIVITY_THEME = '@style/Theme.App.SplashScreen';
 
 /**
  * FCM's default notification intent targets the package launcher. MainActivity
@@ -29,10 +29,14 @@ const pushActivitySource = (packageName) => `package ${packageName}
 import android.app.Activity
 import android.content.Intent
 import android.os.Bundle
+import androidx.core.splashscreen.SplashScreen.Companion.installSplashScreen
 
 class PushNotificationActivity : Activity() {
   override fun onCreate(savedInstanceState: Bundle?) {
+    val splashScreen = installSplashScreen()
     super.onCreate(savedInstanceState)
+    // Transfer the Stone splash to MainActivity without drawing this router.
+    splashScreen.setKeepOnScreenCondition { true }
     val destination = Intent(this, MainActivity::class.java)
     destination.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
     // FCM notification-block taps carry google.message_id. Expo's data-only
@@ -206,6 +210,14 @@ function withPushActivitySource(config) {
 }
 
 function withAndroidPushRouting(config) {
+  config = withAppBuildGradle(config, (mod) => {
+    // Match expo-splash-screen's version; this activity calls AndroidX directly.
+    const dependency = 'implementation("androidx.core:core-splashscreen:1.2.0")';
+    if (!mod.modResults.contents.includes(dependency)) {
+      mod.modResults.contents += `\ndependencies {\n    ${dependency}\n}\n`;
+    }
+    return mod;
+  });
   return withPushActivitySource(withPushActivityManifest(config));
 }
 

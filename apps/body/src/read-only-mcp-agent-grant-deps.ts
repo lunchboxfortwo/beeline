@@ -1,8 +1,10 @@
 import { type SecretResolver, operatorSecretResolver, storeOperatorSecret } from "./grant-runner.js";
-import { type CommandGrantRule, type CommandGrantScript, interpreterScriptArgument, GRANT_SCRIPT_MAX_BYTES, GRANT_SCRIPT_MAX_LINES, grantScriptTooLongMessage, isRequestableAgentGrantKind, REQUESTABLE_AGENT_GRANT_KINDS, AGENT_GRANT_TARGET_MAX_LENGTH, parseCommandGrantTarget, AGENT_GRANT_REASON_MAX_LENGTH, HOST_EMULATOR_TARGET, AGENT_GRANT_VERBS, type AgentGrantEscalation, formatGrantEscalationReason, isSharedAssetCategory, SHARED_ASSET_CATEGORIES, COMMAND_SECRET_NAME } from "@beeline/api-contract/agent-grants";
-import { resolveGrantCommand, resolveGrantScriptExecutable, isNativeGrantExecutable } from "./grant-script.js";
+import { pathGrantAllowsWrite } from '@beeline/api-contract/agent-grants';
+import { type CommandGrantRule, type CommandGrantScript, interpreterScriptArgument, isRequestableAgentGrantKind, REQUESTABLE_AGENT_GRANT_KINDS, AGENT_GRANT_TARGET_MAX_LENGTH, parseCommandGrantTarget, AGENT_GRANT_REASON_MAX_LENGTH, HOST_EMULATOR_TARGET, AGENT_GRANT_VERBS, type AgentGrantEscalation, formatGrantEscalationReason, isSharedAssetCategory, SHARED_ASSET_CATEGORIES, COMMAND_SECRET_NAME } from "@beeline/api-contract/agent-grants";
+import { resolveGrantCommand, isNativeGrantExecutable, installedGrantExecutable } from "./grant-script.js";
 import { readFileSync } from "node:fs";
 import { createHash } from "node:crypto";
+import { resolve } from "node:path";
 import { hostEmulatorSerials } from "./machine-control.js";
 import { sandboxDevicePath } from "./bwrap-sandbox.js";
 import { findChromiumPage } from "./browser-share.js";
@@ -59,15 +61,12 @@ export function agentGrantDepsFromEnv(): AgentGrantDeps {
 
 
 /**
- * The script an interpreter command will run, read so the approval card can
- * SHOW it (C94).
+ * The script a command will run, read so the approval card can SHOW it (C94).
  *
  * `python3 fix.py` tells the person deciding nothing about what runs, so the
- * bytes travel with the ask and the approval is bound to their hash. A file too
- * long to read on a card is REFUSED, never truncated — an honest card is the
- * whole point, and a body that size belongs in a corner as a branch and a pull
- * request. A line with no script argument (`python3 -V`) has nothing to bind;
- * it still asks a human, because the interpreter class is never covered by yolo.
+ * whole file travels with the ask and the approval is bound to its hash. The
+ * program itself (`python3`, `node`) is never the script. A line with no
+ * script argument (`python3 -V`) has nothing to bind.
  */
 export function readGrantScript(
   rule: CommandGrantRule,
@@ -76,44 +75,35 @@ export function readGrantScript(
   const roots = deps.scriptRoots ?? [];
   if (!roots.length) return undefined;
   const context = resolveGrantCommand(rule.argv, roots[0]!, deps.scriptEnv ?? process.env);
-  const argument = interpreterScriptArgument(context.argv, true);
+  const argument = interpreterScriptArgument(context.argv);
   if (!argument) return undefined;
-  const candidatePath = resolveGrantScriptExecutable(argument, context.cwd, context.env);
-  const executable = argument.direct ? candidatePath : undefined;
-  if (argument.direct && !executable) return undefined;
-  if (argument.direct) {
-    // Native executable paths do not need a script card, including binaries
-    // outside the attachment roots. Script paths still meet the root check below.
-    let candidate: Buffer;
-    try {
-      candidate = (deps.readScript ?? readFileSync)(executable!);
-    } catch { return undefined; }
-    if (isNativeGrantExecutable(candidate)) return undefined;
-  }
-  let resolved: string;
-  try {
-    resolved = resolveAttachPath(roots, candidatePath ?? argument.path);
-  } catch (error) {
-    // A script that exists but sits outside the checkout and the scratch cannot
-    // be put in front of a human, so it is not approvable from here.
-    const message = error instanceof Error ? error.message : String(error);
-    if (message.includes('outside')) {
+  if (rule.stdin !== undefined && !argument.stdin) throw new Error('stdin is only supported when the interpreter reads its approved code from stdin.');
+  if (argument.stdin && rule.stdin === undefined) throw new Error('Interpreter stdin needs exact bytes: use a JSON target with argv and stdin, or save the input as a script file.');
+  let bytes: Buffer;
+  if (argument.stdin) bytes = Buffer.from(rule.stdin!);
+  else if (argument.inline !== undefined) bytes = Buffer.from(argument.inline);
+  else {
+    const read = deps.readScript ?? readFileSync;
+    const path = resolve(context.cwd, argument.path);
+    // A native executable path is a program, not a script to show.
+    if (argument.direct) {
+      try { if (isNativeGrantExecutable(read(path))) return undefined; }
+      catch { return undefined; }
+    }
+    let resolved: string;
+    try { resolved = resolveAttachPath(roots, path); }
+    catch (error) {
+      // A script outside the checkout and the scratch cannot be put in front of a human.
+      if (!String(error instanceof Error ? error.message : error).includes('outside')) return undefined;
       throw new Error(
         `${argument.path} is outside your checkout and scratch directory, so its contents ` +
           'cannot be shown on the approval card. Move the script into your checkout or scratch, ' +
           'or open a corner with open_corner and make the change there.',
       );
     }
-    return undefined;
+    bytes = read(resolved);
   }
-  const bytes = (deps.readScript ?? readFileSync)(resolved);
-  // Direct native executables retain ordinary command grant behavior.
-  if (argument.direct && isNativeGrantExecutable(bytes)) return undefined;
   const contents = bytes.toString('utf8');
-  const lines = contents.split('\n').length;
-  if (bytes.byteLength > GRANT_SCRIPT_MAX_BYTES || lines > GRANT_SCRIPT_MAX_LINES) {
-    throw new Error(grantScriptTooLongMessage(argument.path, bytes.byteLength, lines));
-  }
   if (!Buffer.from(contents, 'utf8').equals(bytes)) {
     throw new Error(
       `${argument.path} is not text, so nobody can read what it does on an approval card. ` +
@@ -152,6 +142,9 @@ export async function requestGrant(
   if (target.length > AGENT_GRANT_TARGET_MAX_LENGTH) throw new Error('target is too long');
   const rule = kind === 'command' ? parseCommandGrantTarget(target) : undefined;
   const script = rule ? readGrantScript(rule, deps) : undefined;
+  const commandContext = rule ? resolveGrantCommand(rule.argv, deps.scriptRoots?.[0] ?? '.', deps.scriptEnv ?? process.env) : undefined;
+  const installedPath = commandContext && !script
+    ? installedGrantExecutable(commandContext.argv[0], commandContext.cwd, commandContext.env) : undefined;
   const reason = stringArg(args, 'reason')?.trim();
   if (!reason) throw new Error('reason must be a non-empty string');
   if (reason.length > AGENT_GRANT_REASON_MAX_LENGTH) throw new Error('reason is too long');
@@ -172,7 +165,7 @@ export async function requestGrant(
     if (missing.length) {
       throw new Error(
         `secret ${missing.join(', ')} is not in the operator key store or the daemon environment, so this command grant could never run. ` +
-          'Have the operator initialize the named secret securely, or drop the --with suffix.',
+          'Store it first with store_secret (the value is written into the daemon key store and never echoed), or drop the --with suffix.',
       );
     }
   }
@@ -186,16 +179,16 @@ export async function requestGrant(
       try { serials = await (deps.hostEmulators ?? hostEmulatorSerials)(); }
       catch { serials = []; }
       if (!serials.length)
-        return 'Host emulator unavailable: no running host emulator is available; nothing was started. Do not use an emulator and say so in your reply.';
+        return 'Host emulator unavailable: no running host emulator is available; nothing was started. Ask the host owner to make a running emulator available, then call request_grant again. Do not use an emulator and say so in your reply.';
       if (grant.status === 'once')
         await deps.execute('consumeAgentGrant', { grantId: grant.grantId });
-      return `Host emulator allowed at ${target}: ${serials.map((serial) => `adb -H 127.0.0.1 -P 5037 -s ${serial}`).join('; ')}. Use this existing emulator only; the helper never starts or manages it.`;
+      return `Host emulator allowed at ${target}: ${serials.map((serial) => `adb -H 127.0.0.1 -P 5037 -s ${serial} get-state`).join('; ')}. Run one returned get-state command and expect device before proof; keep its -H, -P and -s options on every adb command. If the device disappears, call request_grant again for the current address instead of reusing an old serial. Use this existing emulator only; the helper never starts or manages it.`;
     }
     const history = await deps.execute('listAgentGrantRequests', { roomId: deps.roomId });
     const requests = Array.isArray(history.grants) ? history.grants.map(asObject) : [];
     const previous = requests.find((entry) => !entry.agentId && entry.kind === kind && entry.target === target);
     if (previous?.status === 'denied' || previous?.status === 'revoked')
-      return 'Host emulator permission refused: do not use an emulator and say so in your reply.';
+      return 'Host emulator permission refused: ask the host owner to reconsider access before retrying. Do not use an emulator and say so in your reply.';
     if (previous?.status === 'pending')
       return 'Host emulator permission pending: wait for the host to Allow, then call request_grant again for the existing emulator address; end your turn now without using an emulator.';
   }
@@ -205,14 +198,17 @@ export async function requestGrant(
     target,
     reason,
     purpose,
-    ...(args.touches !== undefined ? { touches: stringArg(args, 'touches') } : {}),
+    ...(args.touches !== undefined ? { touches: stringArg(args, 'touches') }
+      : installedPath ? { touches: installedPath } : {}),
     ...(args.capabilities !== undefined ? { capabilities: stringArg(args, 'capabilities') } : {}),
     ...(ttl !== undefined ? { ttlSeconds: ttl } : {}),
     ...(script ? { script } : {}),
   });
   const grantId = typeof result.grantId === 'string' ? result.grantId : 'unknown';
-  const ask = `${AGENT_GRANT_VERBS[kind]} ${target}`;
+  const ask = `${kind === 'path' && pathGrantAllowsWrite(stringArg(args, 'capabilities')) ? 'read and write' : AGENT_GRANT_VERBS[kind]} ${target}`;
   if (result.auto === true) {
+    if (kind === 'host' && target === HOST_EMULATOR_TARGET)
+      return 'Host emulator permission approved. Call request_grant again now to read live authority and the existing emulator address; no new session is needed.';
     if (kind === 'command')
       return `approved: ${ask} [grant ${grantId}]. Run it now with run_granted_command and the argv.`;
     if (kind === 'device') {
@@ -253,7 +249,7 @@ export async function requestGrant(
     (script
       ? `The card shows ${script.path} in full, and the approval is bound to those bytes. `
       : '') +
-    `${authority} must answer ALWAYS, ONCE, or NO ${destination}; ` +
+    `${authority} must answer ${kind === 'command' ? 'Always, Once, or Deny' : 'ALWAYS, ONCE, or NO'} ${destination}; ` +
     'your turn is paused on this grant. Tell the human what you are waiting for and end your turn now; ' +
     (kind === 'mcp'
       ? 'the approval wake starts the fresh session with that route mounted, so use it immediately without restarting or scheduling another turn.'
@@ -324,7 +320,7 @@ export async function listGrants(
             )
           ).filter((name): name is string => name !== null);
           secretsNote = missing.length
-            ? ` · secrets ${missing.join(', ')} NOT resolvable (operator secret setup is required before asking again)`
+            ? ` · secrets ${missing.join(', ')} NOT resolvable (store them with store_secret, then ask again)`
             : ` · secrets present`;
         }
       } catch {

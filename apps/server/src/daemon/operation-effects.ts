@@ -1,7 +1,7 @@
 import { lockAgentCommandQueue } from '../agent-command-queue.js';
 import { OwnedModelUnknownGeneration, isOwnedModelUnknownGenerationError } from '../owned-model-errors.js';
 import { endAgentTurn } from '../agent-turn-end.js';
-import { assertCurrentTurnOwner, commandOwnerLiveSql, registerOwnedEffectFence } from '../turn-ownership.js';
+import { registerOwnedAccessCheck } from '../turn-ownership.js';
 import type { HelperTurnOwnershipSource } from '@beeline/api-contract/helper-turn-ownership';
 import { OwnedModelCredentials } from '../owned-model-credential.js';
 import { systemMessage } from '@beeline/api-contract/system-message-catalog';
@@ -13,13 +13,11 @@ import { vaultSaveRequest, type VaultSaveCard } from '@beeline/api-contract/daem
 import { FIRST_PARTY_INTEGRATIONS } from '../first-party-integrations.js';
 import { setCornerHold } from '../corner-holds.js';
 import { authorizeCommandOutput, claimAgentCommand, StaleWakeClaimRefused, readAgentCommands, type CommandRow } from '../agent-command.js';
-import { createHash } from 'node:crypto';
 import { endComputerSession, getComputerSession } from '../computer-session.js';
 import type { DaemonOperationMap } from '@beeline/api-contract/daemon';
 import { recordPersonMergeYes } from '../corner-merge-approval.js';
 import { advanceCorner, lockCornerLifecycle } from '../corner-lifecycle.js';
-import { SYSTEM_IDENTITY_ID } from '@beeline/api-contract/system-identity';
-import { ensureSystemIdentity, systemLine } from '../system-line.js';
+import { systemLine } from '../system-line.js';
 import { appIdentity } from '@beeline/api-contract/workbench';
 import { connectorIntentIndex } from '../connector-intent-index.js';
 import { composioToolkitForApp } from '../composio-apps.js';
@@ -30,7 +28,6 @@ import type { DaemonContext } from './context.js';
 import { Input, OwnedModelClaimCapability, Output, id, seconds } from './values.js';
 import { daemonLockOwnedTurnAccess, daemonOwnedModelReady, daemonModelClaimCredentials } from './owned-model.js';
 import { daemonWriteResult } from './corner-messages.js';
-import { daemonRepository } from './corner-reads.js';
 import { daemonPostRoomMessage } from './messages.js';
 import { daemonAccess } from './access.js';
 import { daemonLinkSpendApproval } from './approvals.js';
@@ -142,11 +139,12 @@ if (!ctx.commandTransaction || !ctx.authorizedCommand) {
 
 export async function claimAgentCommandOperation<Name extends keyof DaemonOperationMap>(ctx: DaemonContext, name: Name, input: Input<Name>, authenticatedAgentId: string, turnOwner: HelperTurnOwnershipSource | undefined, modelClaim: OwnedModelClaimCapability | undefined, candidate: Record<string, unknown>, scopedRoom: string | undefined, ownedIntent: boolean): Promise<Output<Name>> {
 
-        if(!turnOwner)throw new Error('helper claim requires its machine connection owner');
         const claimed = await queueDatabaseWork(ctx.database, `turn:${scopedRoom}:${authenticatedAgentId}`, () => ctx.database.transaction(async (db) => {
           if (ownedIntent) await daemonLockOwnedTurnAccess(ctx, db, scopedRoom!, authenticatedAgentId, String(candidate.commandId));
           const row = await claimAgentCommand(db, scopedRoom!, authenticatedAgentId,
-            String(candidate.commandId), typeof candidate.generationId === 'string' ? candidate.generationId : '', turnOwner, name === 'claimAgentTurn')
+            String(candidate.commandId), typeof candidate.generationId === 'string' ? candidate.generationId : '',
+            turnOwner ? { kind: 'helper', owner: turnOwner, allPending: name === 'claimAgentTurn' }
+              : { kind: 'legacy', allPending: name === 'claimAgentTurn' })
             .catch((error: unknown) => {
               if (isOwnedModelUnknownGenerationError(error)) throw new OwnedModelUnknownGeneration();
               // Commit stale cancellations before refusing a cached helper claim.
@@ -157,9 +155,9 @@ export async function claimAgentCommandOperation<Name extends keyof DaemonOperat
           let modelCredential: Awaited<ReturnType<OwnedModelCredentials['issueInTransaction']>> | undefined;
           if (turnOwner && daemonOwnedModelReady(ctx) && (row.action === 'input' || row.action === 'resume') &&
               (await db.query('SELECT 1 FROM free_agents WHERE agent_id=$1', [authenticatedAgentId])).rowCount) {
-            const credentials = daemonModelClaimCredentials(ctx, modelClaim, authenticatedAgentId, turnOwner);
+            const credentials = daemonModelClaimCredentials(ctx, modelClaim, authenticatedAgentId);
             modelCredential = await credentials.issueInTransaction(db, { agentId: authenticatedAgentId, commandId: row.id,
-              generationId: row.generation_id!, source: turnOwner });
+              generationId: row.generation_id! });
           }
           const activity = row.reason === 'computer_activity' ? (await db.query<{
             text: string; system_event: NonNullable<import('@beeline/api-contract/daemon').AgentCommand['source']['systemEvent']>;
@@ -185,20 +183,17 @@ export async function claimAgentCommandOperation<Name extends keyof DaemonOperat
 
 export async function releaseAgentTurnOperation<Name extends keyof DaemonOperationMap>(ctx: DaemonContext, name: Name, input: Input<Name>, authenticatedAgentId: string, turnOwner: HelperTurnOwnershipSource | undefined, modelClaim: OwnedModelClaimCapability | undefined, candidate: Record<string, unknown>, scopedRoom: string | undefined, ownedIntent: boolean): Promise<Output<Name>> {
 
-        if (!turnOwner) throw new Error('turn release requires its machine connection owner');
         const released = await ctx.database.transaction(async db => {
-          await assertCurrentTurnOwner(db, authenticatedAgentId, turnOwner);
           await lockAgentCommandQueue(db, scopedRoom!, authenticatedAgentId);
           // The invocation has seen these wakes. Ending it consumes them;
           // only events admitted after its claim may start another invocation.
-          // A lost connection still releases unfinished work through its owner.
           const consumed = await db.query<CommandRow>(`SELECT (ended).* FROM (
             SELECT beeline_end_agent_turn(id,generation_id,'complete') ended FROM agent_commands
             WHERE room_id=$1 AND agent_id=$2 AND state='claimed' AND generation_id=$3
-              AND action IN ('input','resume') AND turn_owner_connection_id=$4 AND turn_owner_epoch=$5
+              AND action IN ('input','resume')
             ORDER BY created_at,id) consumed`,
-            [scopedRoom,authenticatedAgentId,candidate.generationId,turnOwner.connectionId,turnOwner.epoch]);
-          if (consumed.rows[0]) await registerOwnedEffectFence(db,consumed.rows[0]);
+            [scopedRoom,authenticatedAgentId,candidate.generationId]);
+          if (consumed.rows[0]) await registerOwnedAccessCheck(db,consumed.rows[0]);
           return readAgentCommands(db, scopedRoom!, authenticatedAgentId);
         });
         ctx.live.publish({type:'invalidate',roomId:scopedRoom!,reason:'turn',agentId:authenticatedAgentId});
@@ -210,45 +205,21 @@ export async function acknowledgeAgentCommandOperation<Name extends keyof Daemon
 
         const acknowledged = await ctx.database.transaction(async db => {
           if (ownedIntent) await daemonLockOwnedTurnAccess(ctx, db, scopedRoom!, authenticatedAgentId, String(candidate.commandId));
-          if (turnOwner) await assertCurrentTurnOwner(db, authenticatedAgentId, turnOwner);
-          if (turnOwner) {
-            const previous = await db.query<CommandRow>(`SELECT * FROM agent_commands WHERE id=$1 AND room_id=$2
-              AND agent_id=$3 AND generation_id=$4 AND action IN ('stop','restart') AND state='complete'
-              AND turn_owner_connection_id=$5 AND turn_owner_epoch=$6 FOR UPDATE`,
-              [candidate.commandId, scopedRoom, authenticatedAgentId, candidate.generationId, turnOwner.connectionId, turnOwner.epoch]);
-            if (previous.rowCount) return previous;
-          }
+          const previous = await db.query<CommandRow>(`SELECT * FROM agent_commands WHERE id=$1 AND room_id=$2
+            AND agent_id=$3 AND generation_id=$4 AND action IN ('stop','restart') AND state='complete' FOR UPDATE`,
+            [candidate.commandId, scopedRoom, authenticatedAgentId, candidate.generationId]);
+          if (previous.rowCount) return previous;
           const written = await db.query<CommandRow>(
-          `SELECT (ended).* FROM (SELECT beeline_end_agent_turn(id,generation_id,'complete') ended FROM agent_commands WHERE id=$1 AND room_id=$2 AND agent_id=$3 AND generation_id=$4 AND (state='complete' OR (state='claimed' AND ${commandOwnerLiveSql(undefined)}))
-          AND action IN ('stop','restart') AND ((turn_owner_connection_id IS NULL AND $5::text IS NULL) OR
-            (turn_owner_connection_id=$5::text AND turn_owner_epoch=$6::bigint))) ended_commands`,
-          [candidate.commandId, scopedRoom, authenticatedAgentId, candidate.generationId,
-            turnOwner?.connectionId ?? null, turnOwner?.epoch ?? null]);
+          `SELECT (ended).* FROM (SELECT beeline_end_agent_turn(id,generation_id,'complete') ended FROM agent_commands WHERE id=$1 AND room_id=$2 AND agent_id=$3 AND generation_id=$4 AND state='claimed'
+          AND action IN ('stop','restart')) ended_commands`,
+          [candidate.commandId, scopedRoom, authenticatedAgentId, candidate.generationId]);
           if (written.rows[0]?.action==='restart') await db.query(`UPDATE agent_commands
             SET restart_confirmed_at=COALESCE(restart_confirmed_at,clock_timestamp()) WHERE id=$1`,[written.rows[0].id]);
-          if (written.rows[0]) await registerOwnedEffectFence(db, written.rows[0]);
+          if (written.rows[0]) await registerOwnedAccessCheck(db, written.rows[0]);
           return written;
         });
         if (!acknowledged.rowCount) throw new Error('command acknowledgement conflict');
         return daemonWriteResult(ctx) as Output<Name>;
-
-}
-
-export async function noteEmptyRoomRepositoryOperation<Name extends keyof DaemonOperationMap>(ctx: DaemonContext, name: Name, input: Input<Name>, authenticatedAgentId: string, turnOwner: HelperTurnOwnershipSource | undefined, modelClaim: OwnedModelClaimCapability | undefined, candidate: Record<string, unknown>, scopedRoom: string | undefined, ownedIntent: boolean): Promise<Output<Name>> {
-
-        const roomId = (input as Input<'noteEmptyRoomRepository'>).roomId;
-        const repository = await daemonRepository(ctx, roomId, authenticatedAgentId);
-        if (repository.resolution !== 'repository')
-          throw new Error('Room is not repository-backed');
-        await ensureSystemIdentity(ctx.database);
-        const line = await systemLine(ctx.database, {
-          id: createHash('sha256').update(`room-empty-repository:v1:${roomId}`).digest('hex'),
-          roomId,
-          authorId: SYSTEM_IDENTITY_ID,
-          subject: { kind: 'system', name: systemMessage("daemon-service.this-repository") },
-          verb: systemMessage("daemon-service.has-no-commits-yet-push-a-first-commit-and-i-ll-pick-it-up"),
-        });
-        return { id: line.id, createdAt: seconds(new Date()) } as Output<Name>;
 
 }
 
@@ -265,16 +236,6 @@ export async function getRoomGitHubTokenOperation<Name extends keyof DaemonOpera
             error instanceof Error &&
             error.message === 'GitHub repository installation not found'
           ) {
-            await ensureSystemIdentity(ctx.database);
-            await systemLine(ctx.database, {
-              id: createHash('sha256')
-                .update(`room-github-installation-unavailable:v1:${roomId}`)
-                .digest('hex'),
-              roomId,
-              authorId: SYSTEM_IDENTITY_ID,
-              subject: { kind: 'system', name: systemMessage("daemon-service.install-or-grant-the-beeline-github-app") },
-              verb: systemMessage("daemon-service.to-access-this-repository"),
-            });
             throw new CommandRefusalError('Room repository access needs the Beeline GitHub App', 409);
           }
           throw error;
@@ -290,11 +251,12 @@ export async function markAgentTurnSilentOperation<Name extends keyof DaemonOper
           if (!command) throw new CommandRefusalError('silence requires an active turn', 409);
           if (declinedMessage && !await mentionReplyKey(ctx.database, authenticatedAgentId, command.room_id, declinedMessage))
             throw new CommandRefusalError('messageId must be a tagged message in this Room', 400);
-          if (!declinedMessage && !['report', 'order', 'watched_corner', 'corner_check', 'corner_review_needed',
+          if (!declinedMessage && !['report', 'order', 'resume', 'watched_corner', 'corner_check', 'corner_review_needed',
             'corner_review_dispatch', 'corner_merge_conflict', 'computer_activity',
             'schedule', 'subscribed_event', 'system', 'agent_tag', 'corner_objective',
             'corner_land', 'corner_merge_refused', 'corner_merge_unconfirmed',
-            'corner_background_tool', 'corner_brief_revision'].includes(command.reason))
+            'corner_background_tool', 'corner_brief_revision',
+            'joined', 'join_probe', 'tagged_lifecycle_retry', 'tagged_lifecycle_restart', 'corner_lifecycle'].includes(command.reason))
             throw new CommandRefusalError('no_reply_needed requires a nonhuman wake. Call post({text: <your reply>}), then end the turn.', 400);
           if (!(await ctx.database.query(`SELECT 1 FROM agent_pending_attachments
             WHERE room_id=$1 AND agent_id=$2 AND request_id=$3 AND generation_id=$4 LIMIT 1`,
@@ -451,6 +413,7 @@ export async function postRepositoryOnboardingOperation<Name extends keyof Daemo
         if (request.kind === 'repository') await ctx.github?.refresh(owner);
         const card = await ctx.database.transaction(database => postRepositoryOnboarding(database, ctx.github, {
           roomId: request.roomId, agentId: authenticatedAgentId, requesterId: owner, kind: request.kind,
+          ...(request.repository ? { repository: request.repository } : {}),
         }));
         ctx.live.publish({ type: 'invalidate', roomId: request.roomId, reason: 'message', agentId: authenticatedAgentId });
         return card as Output<Name>;

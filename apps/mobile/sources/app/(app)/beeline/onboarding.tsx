@@ -1,20 +1,17 @@
 import { authPhase, observeAuth, authFailureCode } from '@/auth/auth-diagnostics';
 import { appErrorCopy } from '@/buzz/app-error-copy';
-import { desktopColumnWidths } from '@/buzz/desktop-layout-tokens';
-import { useIsDesktop as useDesktopPageLayout } from '@/utils/responsive';
-import { ErrorBanner } from '@/components/buzz/ErrorBanner';
 import { beginFunnelAttempt, pendingFunnelAttempt, funnelScreen, funnelCallback } from '@/auth/signin-funnel';
 import { useRepositoryOnboarding } from '@/buzz/onboarding-rollout';
 import { clearPendingGoogleSignIn, resumeGoogleSignIn, runGoogleSignIn } from '@/auth/google-auth-session';
-import { RoomListSectionHeader } from '@/components/buzz/RoomListSectionHeader';
-import { HullDialogInput } from '@/components/buzz/HullDialog';
 import { useLatencyRouteFrame } from '@/buzz/latency-route-hook';
 import { useTextDraft } from '@/buzz/use-text-draft';
 /** Native GitHub-first onboarding. OAuth proves lookup only; the Nostr key remains device-held. */
 import React, { useEffect, useRef, useState } from 'react';
-import { Platform, Text, View } from 'react-native';
-import { StyleSheet, useUnistyles } from 'react-native-unistyles';
-import { useSafeAreaInsets } from 'react-native-safe-area-context';
+import { Platform } from 'react-native';
+import { Input, Spinner, XStack, YStack } from 'tamagui';
+import { Btn, HEIGHT, T } from '@/ui/grammar';
+import { Heading, OnboardingFrame, Primary, Problem } from '@/ui/screens/onboarding/OnboardingFrame';
+import { Rise } from '@/ui/screens/onboarding/Rise';
 import { router } from 'expo-router';
 import * as Linking from 'expo-linking';
 import * as WebBrowser from 'expo-web-browser';
@@ -68,11 +65,8 @@ import {
 } from '@/buzz/person-name';
 import { getBuzzRuntimeConfig } from '@/buzz/runtime-config';
 import { BeelineMark } from '@/components/buzz/BeelineMark';
-import { Button } from '@/components/buzz/Button';
-import { PixelGateReveal } from '@/components/buzz/MonoHull';
 import { registerBuzzPushNotifications } from '@/push/buzz-push-registration';
 import { BuzzRigTransport } from '@/sync/transport';
-import { Typography } from '@/constants/Typography';
 import { GitHubAccountMismatchError, monolithSession } from '@/auth/monolith-session';
 import { IdentityMark } from '@/components/buzz/IdentityMark';
 import { monolithPhoneOperation } from '@/sync/transport/monolith-operation';
@@ -119,19 +113,11 @@ const WEB_NOTICE: OnboardingNotice = {
     'Account sign-in is available in the Android and iOS app. Web key storage is not hardened for this flow.',
   retryable: false,
 };
-const DESKTOP_WORDMARK_SCALE = 34 / 28;
-/** The key input's resting and focused borders. The focused state trims its
- *  padding by the extra border so the text never shifts. */
-const INPUT_BORDER_WIDTH = 1;
-const INPUT_FOCUSED_BORDER_WIDTH = 2;
 
 export default function BuzzOnboarding() {
   const repositoryOnboarding = useRepositoryOnboarding();
   useEffect(() => { void funnelScreen().catch(()=>undefined); }, []);
   useLatencyRouteFrame('/beeline/onboarding', true, true);
-  const { theme } = useUnistyles();
-  const insets = useSafeAreaInsets();
-  const desktopPageLayout = useDesktopPageLayout();
   const pendingBind = useRef<PendingBind | null>(null);
   const existingIdentity = useRef<Identity | null>(null);
   const canSignIn = accountSignInAvailable(Platform.OS, isTauri());
@@ -140,7 +126,6 @@ export default function BuzzOnboarding() {
   const [loadingAction, setLoadingAction] = useState<
     'google' | 'github' | 'bind' | 'recover' | 'name' | null
   >(null);
-  const [nameFocused, setNameFocused] = useState(false);
   const [namingIdentity, setNamingIdentity] = useState<Identity | null>(null);
   const [namingClient, setNamingClient] = useState<BuzzClient | null>(null);
   const [nameInput, setNameInput, onboardingNameDraft] = useTextDraft('onboarding:name',
@@ -183,12 +168,13 @@ export default function BuzzOnboarding() {
                   'The replacement proof is no longer available. Sign in again.',
                   410,
                 ),
+                'github',
               );
               setStatus(expired.status);
               setNotice(expired);
             })
             .catch((error: unknown) => {
-              const failed = noticeForAuthError(error);
+              const failed = noticeForAuthError(error, 'github');
               setStatus(failed.status);
               setNotice(failed);
             });
@@ -302,7 +288,7 @@ export default function BuzzOnboarding() {
               appErrorCopy(error),
               500,
             );
-      const next = noticeForAuthError(normalized);
+      const next = noticeForAuthError(normalized, 'github');
       if (!next.retryable && normalized.code !== 'identity_conflict') pendingBind.current = null;
       setStatus(next.status);
       setNotice(next);
@@ -318,6 +304,7 @@ export default function BuzzOnboarding() {
       return;
     }
     let alive = true;
+    let recoveryProvider: 'google' | 'github' = 'google';
     void (async () => {
       const initialUrl = await initialAuthUrl().catch(() => null);
       // A press already running in this process owns its own callback. This
@@ -340,6 +327,7 @@ export default function BuzzOnboarding() {
         if (alive) await enterAfterMonolithSignIn(identityId);
         return;
       }
+      recoveryProvider = 'github';
       const challenge =
         (await resumeInitialGitHubSignIn(() => Promise.resolve(initialUrl), undefined, {
           signedIn: savedIdentityId !== null,
@@ -376,7 +364,7 @@ export default function BuzzOnboarding() {
       .catch((error: unknown) => {
         observeAuth({ name: 'auth_failed', phase: 'recovery_started', code: authFailureCode(error,'recovery_started'), outcome: 'failed' });
         if (!alive) return;
-        const next = noticeForAuthError(error);
+        const next = noticeForAuthError(error, recoveryProvider);
         setNotice(next);
         setStatus(next.status);
       })
@@ -389,7 +377,7 @@ export default function BuzzOnboarding() {
   }, [canSignIn]);
 
   const handleGoogleSignIn = async () => {
-    if (!canSignIn || loading) return;
+    if (!canSignIn) return;
     setLoadingAction('google');
     setStatus('opening_browser');
     clearOnboardingNotice();
@@ -423,11 +411,16 @@ export default function BuzzOnboarding() {
       if (attempt.signal.aborted) return;
       const cancelled = error instanceof OidcBindError && ['browser_canceled', 'oidc_denied'].includes(error.code);
       void funnelCallback(cancelled ? 'cancelled' : 'error', cancelled ? undefined : 'exchange_failed');
+      if (cancelled) {
+        setStatus('idle');
+        return;
+      }
       observeAuth({ name: 'notice_shown', code: authFailureCode(error,'callback_validated'), outcome: 'failed' });
       const next = noticeForAuthError(
         error instanceof OidcBindError
           ? error
           : new OidcBindError('exchange_failed', 'Google sign-in could not finish. Try again.'),
+        'google',
       );
       setStatus(next.status);
       setNotice(next);
@@ -492,7 +485,7 @@ export default function BuzzOnboarding() {
         return;
       }
       await cancelPendingGitHubSignIn(undefined, undefined, startedState).catch(() => undefined);
-      const next = noticeForAuthError(error);
+      const next = noticeForAuthError(error, 'github');
       observeAuth({name:'notice_shown',code:authFailureCode(error,'callback_validated'),outcome:'failed'});
       setStatus(next.status);
       setNotice(next);
@@ -525,7 +518,7 @@ export default function BuzzOnboarding() {
       pending.bound = true;
       await finishPendingBind(pending);
     } catch (error) {
-      const next = noticeForAuthError(error);
+      const next = noticeForAuthError(error, 'github');
       observeAuth({name:'notice_shown',code:authFailureCode(error,'callback_validated'),outcome:'failed'});
       setStatus(next.status);
       setNotice(next);
@@ -590,235 +583,131 @@ export default function BuzzOnboarding() {
   const canRetryBind = notice?.retryable === true && pendingBind.current !== null;
   // Offline, the one action is the person's own retry; nothing retries for them.
   const signInLabel = notice?.status === 'offline' ? 'Try again' : 'Continue with GitHub';
-  const desktopAuthSurface = isTauri();
+  const entryBusy = status === 'checking_device' || status === 'binding';
+  const noticeLine = notice ? <Problem title={notice.title} message={notice.message} testID="onboarding-notice" /> : null;
 
   if (namingIdentity) {
     const normalized = normalizeManagedHandle(nameInput);
     return (
-      <View
-        style={[styles.container, { paddingTop: insets.top, paddingBottom: insets.bottom }]}
+      <OnboardingFrame
+        stage={1}
         testID="onboarding-handle-ceremony"
-      >
-        <PixelGateReveal style={styles.namePanel}>
-          <RoomListSectionHeader title={'IDENTITY · HANDLE CEREMONY'} inset="content" />
-          <View style={styles.nameAvatar}>
-            <IdentityMark
-              kind="human"
-              seed={namingIdentity.publicKey}
-              name={(normalized ?? nameInput) || 'new identity'}
-              size={82}
-            />
-          </View>
-          <Text style={styles.nameTitle}>{"Choose your handle"}</Text>
-          <Text style={styles.nameBody}>{"This name is bound to your key. It becomes your verified Beeline identity everywhere."}</Text>
-          <HullDialogInput
-            accessibilityLabel={"Choose your Beeline handle"}
-            autoCapitalize="none"
-            autoCorrect={false}
-            autoFocus
-            editable={!loading}
-            maxLength={30}
-            onBlur={() => setNameFocused(false)}
-            onChangeText={(value) => setNameInput(value.toLowerCase())}
-            onFocus={() => setNameFocused(true)}
-            onSubmitEditing={() => void handleNameContinue()}
-            placeholder={"ada-labs"}
-            placeholderTextColor={theme.buzz.textDisabled}
-            returnKeyType="done"
-            style={[styles.nameInput, nameFocused && styles.inputFocused]}
-            testID="onboarding-handle-input"
-            value={nameInput}
-          />
-          <Text style={styles.nameHandle}>
-            {normalized ? `@${normalized}` : "3–30 · a–z · 0–9 · dash"}
-          </Text>
-          {notice && (
-        <ErrorBanner inline title={notice.title} description={notice.message} />
-      )}
-          <Button
+        footer={
+          <Primary
             disabled={!normalized || loading}
-            label={"Claim handle"}
-            loading={loadingAction === 'name'}
+            label="Claim handle"
+            busy={loadingAction === 'name'}
             onPress={() => void handleNameContinue()}
             testID="onboarding-claim-handle"
           />
-        </PixelGateReveal>
-      </View>
+        }
+      >
+        <Heading title="Choose your handle" line="This name is bound to your key. It becomes your verified Beeline identity everywhere." />
+        <Rise order={1}>
+          <YStack alignItems="center">
+            <IdentityMark kind="human" seed={namingIdentity.publicKey} name={(normalized ?? nameInput) || 'new identity'} size={104} />
+          </YStack>
+        </Rise>
+        <Rise order={2}>
+          <YStack gap="2">
+            <XStack alignItems="center" gap="2">
+              <T v="title" color="secondary">@</T>
+              <Input
+                flex={1}
+                minWidth={0}
+                borderColor="strongStroke"
+                aria-label="Choose your Beeline handle"
+                accessibilityLabel="Choose your Beeline handle"
+                autoCapitalize="none"
+                autoCorrect={false}
+                autoFocus
+                disabled={loading}
+                maxLength={30}
+                onChangeText={(value: string) => setNameInput(value.toLowerCase())}
+                onSubmitEditing={() => void handleNameContinue()}
+                placeholder="ada-labs"
+                returnKeyType="done"
+                testID="onboarding-handle-input"
+                value={nameInput}
+              />
+            </XStack>
+            <T v="meta" color="secondary">{normalized ? `@${normalized}` : '3–30 · a–z · 0–9 · dash'}</T>
+            {noticeLine}
+          </YStack>
+        </Rise>
+      </OnboardingFrame>
     );
   }
 
   return (
-    <View style={[styles.container, desktopPageLayout && { width: '100%', maxWidth: desktopColumnWidths.detail, alignSelf: 'center' }, { paddingTop: insets.top, paddingBottom: insets.bottom }]}>
-      <View style={[styles.brandSurface, desktopAuthSurface && styles.desktopBrandSurface]}>
-        <BeelineMark size={desktopAuthSurface ? 156 : 112} shimmer />
-        <Text
-          style={desktopAuthSurface ? [styles.title, styles.desktopTitle] : styles.title}
-          testID="onboarding-wordmark"
-        >
-          beeline<Text style={styles.titlePeriod}>.</Text>
-        </Text>
-        <Text style={styles.subtitle} testID="onboarding-tagline">
-          workspace for all intelligence
-        </Text>
-      </View>
-
-      {notice && (
-        <ErrorBanner inline title={notice.title} description={notice.message} />
-      )}
-
-      <View style={styles.actions}>
-        {notice?.status === 'link_conflict' && pendingBind.current ? (
-          <View style={styles.recoveryActions}>
-            <Text style={styles.recoveryWarning}>
-              Replacing the device key moves this GitHub link to your new key. Your Workspaces,
-              Rooms, and repository approvals follow this account — agents and people you work with
-              keep working with you, no re-invites.
-            </Text>
-            <Button
+    <OnboardingFrame
+      center
+      testID="onboarding-welcome"
+      footer={
+        <>
+          {noticeLine}
+          {notice?.status === 'link_conflict' && pendingBind.current ? (
+            <>
+              <T v="meta" color="secondary">
+                Replacing the device key moves this GitHub link to your new key. Your Workspaces,
+                chats, and repository approvals follow this account — agents and people you work with
+                keep working with you, no re-invites.
+              </T>
+              <Primary
                 label="Replace device key"
-              loading={loadingAction === 'recover'}
-              onPress={() => void handleReplaceDeviceKey()}
-              disabled={loading}
-              testID="onboarding-replace-device-key"
-            />
-          </View>
-        ) : canRetryBind ? (
-          <Button
-            label="Retry device bind"
-            loading={loadingAction === 'bind'}
-            onPress={() => pendingBind.current && void finishPendingBind(pendingBind.current)}
-            disabled={loading}
-          />
-        ) : canSignIn ? (
-          <>
-            <View>
-              <Button
-                label={signInLabel}
-                labelStyle={Platform.OS === 'android' ? styles.signInLabel : undefined}
-                variant="primary"
-                testID="onboarding-github-sign-in"
-                loading={loadingAction === 'github' || loadingAction === 'bind' || status === 'checking_device'}
-                onPress={() => void handleSignIn()}
-                disabled={loading || status === 'checking_device' || status === 'binding'}
+                busy={loadingAction === 'recover'}
+                onPress={() => void handleReplaceDeviceKey()}
+                disabled={loading}
+                testID="onboarding-replace-device-key"
               />
-              {!notice && <Text style={styles.recommended}>Recommended</Text>}
-            </View>
-            <Button
-              label="Continue with Google"
-              variant="provider"
-              testID="onboarding-google-sign-in"
-              loading={loadingAction === 'google'}
-              disabled={loading || status === 'checking_device' || status === 'binding'}
-              onPress={() => void handleGoogleSignIn()}
+            </>
+          ) : canRetryBind ? (
+            <Primary
+              label="Retry device bind"
+              busy={loadingAction === 'bind'}
+              onPress={() => pendingBind.current && void finishPendingBind(pendingBind.current)}
+              disabled={loading}
             />
-          </>
-        ) : null}
-      </View>
-    </View>
+          ) : canSignIn ? (
+            <>
+              {/* A press in flight never disables either provider: a fresh
+                  press starts a fresh attempt (onboarding-state.ts). */}
+              <Btn
+                kind="primary"
+                label={signInLabel}
+                minHeight={HEIGHT.tabBar}
+                borderRadius="lg"
+                testID="onboarding-github-sign-in"
+                disabled={entryBusy}
+                onPress={() => void handleSignIn()}
+              >
+                {loadingAction === 'github' || loadingAction === 'bind' || status === 'checking_device'
+                  ? <Spinner color="primaryInk" />
+                  : signInLabel}
+              </Btn>
+              <Btn
+                label="Continue with Google"
+                minHeight={HEIGHT.tabBar}
+                borderRadius="lg"
+                testID="onboarding-google-sign-in"
+                disabled={entryBusy}
+                onPress={() => void handleGoogleSignIn()}
+              >
+                {loadingAction === 'google' ? <Spinner color="ink" /> : 'Continue with Google'}
+              </Btn>
+              {notice ? null : <T v="meta" color="secondary" textAlign="center">GitHub is recommended.</T>}
+            </>
+          ) : null}
+        </>
+      }
+    >
+      <BeelineMark size={120} shimmer />
+      <Rise>
+        <YStack alignItems="center" gap="2">
+          <T v="title" testID="onboarding-wordmark">beeline<T v="title" color="needsYou">.</T></T>
+          <T v="body" color="secondary" textAlign="center" testID="onboarding-tagline">workspace for all intelligence</T>
+        </YStack>
+      </Rise>
+    </OnboardingFrame>
   );
 }
-
-const styles = StyleSheet.create((theme) => {
-  const groknight = theme.buzz;
-  return {
-    recommended: {
-      ...theme.buzz.type.sectionHead,
-      color: theme.buzz.bgBase,
-      backgroundColor: theme.buzz.accent,
-      position: 'absolute',
-      top: -theme.buzz.space.sm,
-      right: theme.buzz.space.sm,
-      paddingHorizontal: theme.buzz.space.xs,
-      borderRadius: theme.buzz.radius,
-    },
-    container: {
-      flex: 1,
-      paddingHorizontal: 24,
-      justifyContent: 'center',
-      backgroundColor: groknight.bgVoid,
-    },
-    brandSurface: { alignItems: 'center', marginBottom: groknight.space.xl },
-    desktopBrandSurface: { marginBottom: groknight.space.xl },
-    title: {
-      // Canonical brand family (theme prose voice, Space Grotesk) — the login
-      // wordmark is a brand surface, not a logo-font exception.
-      ...Typography.default('semiBold'),
-      fontFamily: groknight.proseSemibold,
-      fontSize: 28,
-      lineHeight: 32,
-      color: groknight.textPrimary,
-      textAlign: 'center',
-      // Android can undermeasure the bundled face's intrinsic Text width.
-      width: Platform.OS === 'android' ? '100%' : undefined,
-      marginTop: groknight.space.xs,
-      marginBottom: 8,
-    },
-    desktopTitle: { transform: [{ scale: DESKTOP_WORDMARK_SCALE }], marginTop: groknight.space.sm },
-    // The trailing period of the `beeline.` wordmark is the one brass glyph.
-    // Same canonical family as the title it nests inside, per the typography
-    // governor (every Text style names an app font).
-    titlePeriod: {
-      ...Typography.default('semiBold'),
-      fontFamily: groknight.proseSemibold,
-      color: groknight.accent,
-    },
-    // Canonical brand family on the login buttons' labels (theme prose voice).
-    subtitle: {
-      ...theme.buzz.type.body,
-      maxWidth: 320,
-      // Reserve the line's width so a notice-triggered layout cannot crop it.
-      width: '100%',
-      alignSelf: 'center',
-      color: groknight.textSecondary,
-      textAlign: 'center',
-    },
-    inputFocused: {
-      borderWidth: INPUT_FOCUSED_BORDER_WIDTH,
-      borderColor: groknight.focus,
-      paddingHorizontal: groknight.space.md - (INPUT_FOCUSED_BORDER_WIDTH - INPUT_BORDER_WIDTH),
-    },
-    // Android undermeasures the bundled face; reserve only this sign-in label's width.
-    signInLabel: { flexGrow: 1, textAlign: 'center' },
-    actions: { width: '100%', maxWidth: 440, alignSelf: 'center', gap: groknight.space.sm },
-    recoveryActions: { gap: groknight.space.sm },
-    recoveryWarning: {
-      ...theme.buzz.type.meta,
-      color: groknight.textSecondary,
-    },
-    namePanel: { width: '100%', maxWidth: 420, alignSelf: 'center' },
-    nameAvatar: { alignItems: 'center', marginTop: groknight.space.md, marginBottom: groknight.space.md },
-    nameTitle: {
-      ...theme.buzz.type.hero,
-      fontFamily: groknight.proseSemibold,
-      color: groknight.textPrimary,
-      textAlign: 'center',
-    },
-    nameBody: {
-      ...theme.buzz.type.body,
-      marginTop: groknight.space.sm,
-      marginBottom: groknight.space.md,
-      color: groknight.textSecondary,
-      textAlign: 'center',
-    },
-    nameInput: {
-      ...theme.buzz.type.bodyStrong,
-      fontFamily: groknight.proseSemibold,
-      minHeight: 52,
-      borderWidth: 1,
-      borderColor: groknight.border,
-      borderRadius: 3,
-      paddingHorizontal: groknight.space.md,
-      color: groknight.textPrimary,
-      backgroundColor: groknight.bgBase,
-      textAlign: 'center',
-    },
-    nameHandle: {
-      ...theme.buzz.type.machine,
-      fontFamily: groknight.monoSemibold,
-      marginTop: 8,
-      marginBottom: groknight.space.md,
-      color: groknight.textMuted,
-      textAlign: 'center',
-    },
-};
-});

@@ -7,12 +7,12 @@ const visible = (locator) => locator.waitFor({ state: 'visible' });
 const hidden = (locator) => locator.waitFor({ state: 'hidden' });
 const click = (locator) => locator.click();
 export const exclusions = {
+  'switch-workspace': 'Cancelled by the owner; outside this latency assignment.',
+  'create-room': 'Cancelled by the owner; outside this latency assignment.',
   'mark-read':
     'The current phone UI advances read marks automatically from the visible message viewport; it has no standalone Mark as read control. Room opening is measured separately.',
   'mark-unread':
     'The current phone UI has no Mark as unread control; only the internal room session method remains. The rig does not invoke an internal method as a user interaction.',
-  'send-attachment':
-    'OS file-picker completion is outside headless page rendering; this web capture does not claim native picker or upload timing.',
   'approve-merge':
     'A valid merge gate needs live GitHub checks and exact-head approval; the deterministic offline fixture has no repository or GitHub connection. No merge request is sent.',
   'start-workflow':
@@ -29,7 +29,11 @@ async function room(p, f, corner = false) {
 }
 async function list(p) {
   await p.goto(`/beeline/channels?communityId=${workspace}`);
-  await visible(id(p, `workspace-active-${workspace}`));
+  await visible(id(p, 'chat-list-header').filter({ hasText: 'Web Latency Rig' }));
+}
+async function agentProfile(p) {
+  await p.goto(`/beeline/agent-profile?communityId=${workspace}&agentId=${agent}`);
+  await visible(id(p, 'agent-profile-head'));
 }
 async function hold(p, target) {
   await target.hover();
@@ -50,17 +54,18 @@ async function messageMenu(p, f) {
 export const steps = {
   'open-room': async (p, f) => {
     await list(p);
+    const target = id(p, `room-${f.roomId}`);
+    await visible(target);
     return {
-      act: () => click(id(p, `room-${f.roomId}`)),
+      act: () => click(target),
       done: () => visible(p.getByText(f.text, { exact: true }).first()),
     };
   },
   'open-corner': async (p, f) => {
-    await room(p, f);
-    await click(id(p, 'room-corners-menu'));
-    await visible(id(p, `room-corner-${f.cornerId}`));
+    await p.goto(`/beeline/corners/${f.roomId}?communityId=${workspace}`);
+    await visible(id(p, `thread-row-${f.cornerId}`));
     return {
-      act: () => click(id(p, `room-corner-${f.cornerId}`)),
+      act: () => click(id(p, `thread-row-${f.cornerId}`)),
       done: async () => {
         await p.waitForURL(`**/beeline/chat/${f.cornerId}**`);
         await visible(p.getByText(f.text, { exact: true }).filter({ visible: true }).first());
@@ -87,17 +92,18 @@ export const steps = {
     };
   },
   'create-dm': async (p) => {
-    await list(p);
-    await click(button(p, 'Start a direct message'));
-    const target = id(p, `message-workspace-member-${agent}`);
-    await visible(target);
+    await agentProfile(p);
+    const target = id(p, 'agent-profile-message');
     return { act: () => click(target), done: () => visible(id(p, 'chat-input')) };
   },
   'create-corner': async (p, f) => {
-    await room(p, f);
+    // Holding a chat row's mark on the list opens a new thread in that chat.
+    await list(p);
+    const target = id(p, `room-${f.roomId}-new-thread`);
+    await visible(target);
     return {
       longPressThresholdMs: await cornerLongPressThreshold(),
-      act: () => hold(p, id(p, 'room-corners-menu')),
+      act: () => hold(p, target),
       done: async () => {
         await p.waitForFunction(
           (roomId) => {
@@ -122,6 +128,34 @@ export const steps = {
     return {
       act: () => id(p, 'chat-input').press('Enter'),
       done: () => visible(p.getByText(token, { exact: true }).first()),
+    };
+  },
+  'send-attachment': async (p, f, token) => {
+    await room(p, f);
+    await click(id(p, 'chat-attach-button'));
+    const chosen = p.waitForEvent('filechooser');
+    await click(id(p, 'attachment-picker-document'));
+    const chooser = await chosen;
+    // File selection and upload prepare the Send tap. Preserve their duration
+    // separately rather than charging two user actions to one tap budget.
+    const uploadStarted = performance.now();
+    await chooser.setFiles({
+      name: `${token}.txt`,
+      mimeType: 'text/plain',
+      buffer: Buffer.from('Local Beeline latency attachment\n'),
+    });
+    await p
+      .getByTestId('pending-chat-attachment-state-0')
+      .getByText('Ready', { exact: true })
+      .waitFor();
+    const uploadMs = performance.now() - uploadStarted;
+    return {
+      uploadMs,
+      act: () => click(id(p, 'chat-send')),
+      done: async () => {
+        await hidden(id(p, 'pending-chat-attachment-0'));
+        await visible(p.getByText('Local Beeline latency attachment', { exact: true }).first());
+      },
     };
   },
   'forward-message': async (p, f) => {
@@ -163,20 +197,21 @@ export const steps = {
   },
   'rename-room': async (p, f, token) => {
     await room(p, f);
-    await click(id(p, 'room-actions-menu'));
-    await click(id(p, 'room-actions-title'));
+    // `/rename` is the chat's rename control; it opens the rename editor.
+    await id(p, 'chat-input').fill('/rename');
+    await click(id(p, 'slash-verb-rename'));
     await visible(id(p, 'rename-room-input'));
     await id(p, 'rename-room-input').fill(token);
     return {
       act: () => click(id(p, 'apply-room-rename')),
-      done: () => visible(button(p, `Open ${token} settings`)),
+      done: () => visible(id(p, 'chat-title').filter({ hasText: token })),
     };
   },
   'leave-room': async (p, f) => {
-    await room(p, f);
-    await click(id(p, 'room-actions-menu'));
-    await click(id(p, 'leave-room-action'));
-    return { act: () => click(button(p, 'Leave')), done: () => hidden(id(p, 'chat-input')) };
+    await p.goto(`/beeline/chat-info?communityId=${workspace}&roomId=${f.roomId}`);
+    await visible(id(p, 'chat-kind'));
+    await click(id(p, 'leave-chat'));
+    return { act: () => click(button(p, 'Leave')), done: () => hidden(id(p, 'leave-chat')) };
   },
   'close-corner': async (p, f) => {
     await room(p, f, true);
@@ -191,13 +226,12 @@ export const steps = {
   },
   'answer-approval': async (p, f) => {
     await p.goto(`/beeline/tray?communityId=${workspace}`);
-    const target = p.getByRole('button', { name: 'Once', exact: true }).first();
+    const target = p.getByRole('button', { name: /^Approve: / }).first();
     await visible(target);
     return { act: () => click(target), done: () => hidden(target) };
   },
-  'choose-model': async (p, f) => {
-    await p.goto(`/beeline/members?communityId=${workspace}&roomId=${f.roomId}`);
-    await click(id(p, `agent-${agent}-identity`));
+  'choose-model': async (p) => {
+    await agentProfile(p);
     await click(id(p, 'edit-agent-soul'));
     await click(id(p, 'model-axis-model'));
     const target = id(p, 'model-option-model-rig-b');
@@ -207,9 +241,8 @@ export const steps = {
       done: () => visible(p.getByText('Rig B', { exact: true }).first()),
     };
   },
-  'change-yolo': async (p, f) => {
-    await p.goto(`/beeline/members?communityId=${workspace}&roomId=${f.roomId}`);
-    await click(id(p, `agent-${agent}-identity`));
+  'change-yolo': async (p) => {
+    await agentProfile(p);
     await click(id(p, 'edit-agent-soul'));
     const target = id(p, 'agent-yolo-switch');
     await visible(target);

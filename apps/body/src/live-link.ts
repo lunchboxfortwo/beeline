@@ -19,6 +19,7 @@ export function retryAfterMs(value: string | null | undefined): number | undefin
  * successor; TCP keepalive detects dead links without application timers. */
 export class LiveLink {
   #socket?: WebSocket;
+  #endAttempt?: () => void;
   #wanted = false;
   #updateAnnounced = false;
   #reconnects = 0;
@@ -28,6 +29,7 @@ export class LiveLink {
     url: () => string; protocols: () => string[]; factory?: LiveSocketFactory;
     onOpen: () => void; onMessage: (data: string) => void; onClose: () => void;
     onUpdateRequired: (minVersion: string) => void; timing?: Partial<LiveLinkTiming>;
+    subscribeResume?: (listener: () => void) => () => void;
   }) {}
   get state(): LiveLinkState { return this.#state; }
   get reconnects(): number { return this.#reconnects; }
@@ -38,10 +40,15 @@ export class LiveLink {
     this.#wanted = true;
     this.#connect();
   }
+  /** Actual close still owns recovery; concurrent failures share that close. */
+  reconnect(): void {
+    if (this.#socket?.readyState === WebSocket.OPEN) this.#endAttempt?.();
+  }
   stop(forUpdate = false): void {
     this.#wanted = false;
     const socket = this.#socket;
     this.#socket = undefined;
+    this.#endAttempt = undefined;
     this.#state = 'disconnected';
     socket?.close(forUpdate ? HELPER_UPDATE_CLOSE_CODE : undefined, forUpdate ? HELPER_UPDATE_CLOSE_REASON : undefined);
   }
@@ -59,6 +66,9 @@ export class LiveLink {
   #connect(): void {
     const socket=(this.options.factory??((url,protocols,options)=>new WebSocket(url,protocols,options)))(this.options.url(),this.options.protocols(),{});
     this.#socket = socket;
+    const endAttempt = () => socket.terminate();
+    this.#endAttempt = endAttempt;
+    const disposeResume = this.options.subscribeResume?.(endAttempt);
     socket.on?.('upgrade', (response: IncomingMessage) => {
       response.socket?.setKeepAlive?.(true, this.options.timing?.keepAliveDelayMs ?? LIVE_LINK_TIMING.keepAliveDelayMs);
     });
@@ -76,7 +86,7 @@ export class LiveLink {
             if (value.error === 'update_required' && typeof value.minVersion === 'string') this.requireUpdate(value.minVersion);
           } catch { /* A malformed refusal cannot authorize an install. */ }
         }
-        socket.terminate();
+        endAttempt();
       });
     });
     socket.onopen = () => {
@@ -88,8 +98,10 @@ export class LiveLink {
     socket.onmessage = message => { if (this.#socket === socket) this.options.onMessage(String(message.data)); };
     socket.onerror = () => undefined;
     socket.onclose = event => {
+      disposeResume?.();
       if (this.#socket !== socket) return;
       this.#socket = undefined;
+      this.#endAttempt = undefined;
       this.#state = 'disconnected';
       this.options.onClose();
       if (this.#wanted) {

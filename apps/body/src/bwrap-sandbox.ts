@@ -1,166 +1,25 @@
 /**
- * OS-level sandbox for ACP harness child processes (bubblewrap).
+ * OS sandbox for agent commands on the executing owner's machine.
+ * Startup uses the same auto-approval decision as request_grant. Owner HOME
+ * binds read-write before credential and sibling masks; per-Room harness state
+ * is restored afterwards. Repository and dependency overlays retain their own
+ * read-only mounts. Docker sockets remain masked without an explicit grant.
  *
- * ## What this boundary IS
+ * Sessions receiving the user bus preserve the host PID namespace: sd_bus
+ * cannot authenticate peers hidden behind --unshare-pid. Other sessions retain
+ * PID isolation. Bus access already permits starting host processes as this
+ * user. This is a hygiene boundary, not confinement against that authority.
  *
- * `session-sandbox.ts` is the ACP callback boundary: a Room denies every
- * mutating request, while a corner immediately approves ordinary actions and
- * rejects only writes aimed at the hygiene denylist. That callback binds only
- * a harness that actually calls `session/request_permission`; one shipped
- * adapter (`pi-acp`) never does, and corner autonomy modes intentionally stop
- * the other shipped adapters from asking in edit sessions.
- *
- * This module adds the layer underneath: when `bwrap` is available, Rooms run
- * on a read-only filesystem while corners run on a writable filesystem with a
- * small hygiene denylist overlaid read-only.
- *
- * **What it separates is product hygiene, not privilege.** A Room is the
- * conversational, project-management, ideation channel and is meant to stay
- * pristine; a corner is where edits happen. The read-only mount keeps an agent's
- * incidental file activity out of the surfaces that are not its edit target,
- * including the canonical checkout a Room reads from and the operator's own
- * working tree. It is the same trust level as the agent itself: Beeline agents
- * run on the operator's own account, on the operator's own host, with no more
- * and no less standing than any other coding assistant that account runs.
- *
- * ## What this boundary is NOT
- *
- * **It is not a security perimeter against a determined or compromised agent,
- * and it must not be described as one.** A read-only bind constrains filesystem
- * writes through the mount namespace; it does not constrain anything else the
- * operator's account can reach. Proven on a real host (bubblewrap 0.9.0): from
- * inside an intact sandbox —
- *
- * ```
- *   $ bwrap --ro-bind / / --dev /dev --proc /proc --tmpfs /tmp \
- *       sh -c 'echo x > /home/<op>/.probe'
- *   sh: 1: cannot create /home/<op>/.probe: Read-only file system   # works
- *
- *   $ bwrap --ro-bind / / --dev /dev --proc /proc --tmpfs /tmp \
- *       sh -c 'docker run --rm -v /home/<op>:/h <image> \
- *              sh -c "echo escaped > /h/.probe"'
- *   $ cat /home/<op>/.probe                                          # escaped
- * ```
- *
- * Talking to `/var/run/docker.sock` is a socket connection, not a filesystem
- * write, so the ro-bind does not block it — and membership in the host's
- * `docker` group is root-equivalent, so a container can bind-mount any host
- * path read-write. The session bus (`/run/user/<uid>/bus`) is the same class:
- * `systemd-run --user` starts units outside the namespace. On such hosts this
- * sandbox shapes where an ordinary session's file edits land; it does not fence
- * a session off from the machine, and nothing downstream should assume it does.
- * (Multi-user isolation between different people sharing a host is a separate,
- * known-open design question — deliberately out of scope here.)
- *
- * ## Mount table
- *
- * A Room starts from this base:
- *
- * ```
- *   --ro-bind / /        the whole host filesystem, read-only. This is what
- *                        makes the canonical checkout, the operator's own
- *                        checkout, and $HOME read-only without having to
- *                        enumerate any of them.
- *   --dev /dev           a minimal private /dev (the ro-bind above would
- *                        otherwise hand the child a read-only /dev/null).
- *                        Approved `device` grants are
- *                        bound into it with `--dev-bind-try`, so an absent node is
- *                        skipped. A device carries only the access this
- *                        account already has on the host.
- *   --proc /proc         a private /proc for the new namespace.
- *   --tmpfs /tmp         a private, writable, discarded-at-exit /tmp.
- * ```
- *
- * A corner instead starts with `--bind / /`: ordinary host locations such as
- * package caches, toolchain directories and build scratch space are writable
- * without being enumerated. It then overlays the canonical checkout, the pool
- * containing every corner worktree, and Body's daemon-owned Room state
- * read-only. The current worktree and its git common directory are rebound
- * writable after those overlays. This is deliberately a denylist, not an
- * allowlist: corner autonomy means normal development tools can install and
- * build wherever they normally do, while sibling work and daemon state stay
- * pristine.
- *
- * **Both modes** get read-write binds for the harness's own state
- * directories: the `CLAUDE_CONFIG_DIR`/`CODEX_HOME`/`XDG_*`/`TMPDIR` overlay
- * from `agent-home.ts`, plus {@link harnessHomeStateDirs} for the state roots no
- * env var relocates. **A Room having writable harness state is a deliberate,
- * measured departure from "a Room writes nothing but /tmp", and it is not
- * optional**: with those directories read-only, `codex-acp` cannot start a Room
- * session at all (`failed to initialize sqlite state runtime under …/codex`) and
- * `pi-acp` cannot start one in either mode (`EROFS … open
- * '~/.pi/pi-acp/session-map.json'`). A sandbox that bricks two of the three
- * shipped harnesses is strictly worse than the gap it closes. Harness state is
- * neither the repository nor the operator's tree, so the ordinary-session
- * property is intact: a Room's own file writes stay out of every checkout and
- * out of the operator's tree. That is a statement about where a session's file
- * edits land by default — not about what a determined session can reach through
- * non-filesystem channels (see "What this boundary is NOT" above).
- *
- * **Corner (`edit`)** rebinds the two protected paths an edit session owns:
- * its own worktree inside the protected corners pool, and the repository's
- * **git common directory** inside the protected canonical checkout. That second
- * one is required, not incidental — a corner worktree is a *linked* `git
- * worktree`, so its refs, index and newly written objects all live under the
- * canonical checkout's `.git`. Without it a corner could edit files but never
- * commit. The canonical checkout's *working tree* stays read-only in both modes.
- *
- * ## Credential masks
-
- * The whole-home ro-bind makes the filesystem READ-ONLY, not PRIVATE: the
- * operator's `~/.config/gh`, `~/.ssh`, `~/.netrc` and `~/.git-credentials`
- * are all readable from inside an intact sandbox, and a session that can
- * READ a credential can use it out-of-band. Read-only therefore is not enough
- * for ambient credential stores: corners receive their own repository-scoped
- * GitHub App token instead.
- *
- * Every session (Room and corner) gets MASKS on top of its root bind: an empty
- * tmpfs replaces each masked directory and `/dev/null` each masked file, so
- * their contents are absent, not merely unwritable. The built-in list covers
- * the known credential homes ({@link KNOWN_CREDENTIAL_MASK_PATHS}); an owner
- * whose machine keeps secrets elsewhere extends it via the runtime record's
- * `sandboxMaskPaths` or the `BEELINE_BODY_SANDBOX_MASK` environment variable
- * (comma-separated absolute paths). MCP server configuration and session
- * directories are not on that list — a sandboxed agent can read the host
- * Trusty Squire session.
- *
- * **Residual, stated honestly**: no mask list can enumerate every secret on a
- * shared operator machine — env files, dotfiles, and tool state live
- * everywhere. Beeline hides the stores it knows about and gives repository
- * corners a GitHub App token scoped to the linked repository. Ambient secrets
- * beyond the mask list remain the operator's own exposure on their account.
- *
- * For the shared Workspace layout, stable `workspaces/` and `agents/` parents
- * are masked, then the selected Workspace's assets and Room's private harness
- * home are rebound. This keeps transcripts, harness state and daemon control
- * records private while allowing the same Workspace assets in every session.
- * {@link siblingAgentMaskPaths} remains only for legacy private-layout turns.
- *
- * Capabilities that pierce the namespace entirely (a reachable
- * `/var/run/docker.sock`, the systemd user bus) override ALL of the above by
- * owner choice; see "What this boundary is NOT".
- *
- * Network is deliberately untouched (no `--unshare-net`): every harness needs to
- * reach its model API.
- *
- * ## Fail-open, loudly
- *
- * `bwrap` missing, or present but unable to create a namespace on this host (a
- * container without the right capabilities, unprivileged user namespaces
- * disabled, a hardened kernel), must not stop the daemon from serving Rooms —
- * that would turn a hardening feature into an outage. `detectBwrapSandbox`
- * self-tests once at daemon start and the caller logs exactly one advisory line;
- * every spawn afterwards is unwrapped. Room callbacks remain fail-closed;
- * corner callbacks can enforce the denylist only for harnesses that still ask.
+ * Missing or unusable bubblewrap remains a loudly reported fail-open path.
  */
 import { spawnSync } from 'node:child_process';
-import { lstatSync, readdirSync } from 'node:fs';
+import { lstatSync, mkdirSync, readdirSync, realpathSync } from 'node:fs';
 import { homedir } from 'node:os';
 import { basename, dirname, isAbsolute, relative, resolve, sep } from 'node:path';
 import { executableOnPath } from './agent-command.js';
 import type { SessionMode } from './config.js';
 import { CURSOR_HARNESS_COMMAND } from './cursor-acp-bridge.js';
-import type { SharedAssetCategory } from '@beeline/api-contract/agent-grants';
+import { agentGrantAutoApproves, namesCredentialFile, type SharedAssetCategory } from '@beeline/api-contract/agent-grants';
 import { PACKAGE_CACHE_DIRS } from './workspace-assets.js';
 
 
@@ -256,6 +115,9 @@ export const KNOWN_CREDENTIAL_MASK_PATHS = [
   '.git-credentials',
   '.secrets.env',
   '.beeline/registry-mcp',
+  '.gnupg', '.aws', '.azure', '.kube', '.gcloud', '.docker',
+  '.config/gcloud', '.config/beeline', '.config/trusty-squire',
+  '.local/share/keyrings',
 ] as const;
 
 
@@ -292,6 +154,12 @@ export function credentialMaskPaths(
   const candidates = [
     ...KNOWN_CREDENTIAL_MASK_PATHS.map((entry) => resolve(home, entry)),
     ...(extraPaths ?? []).map((entry) => resolve(entry)),
+    // Include credential-named dotfiles without opening their contents.
+    ...[home, resolve(home, '.config')].flatMap(root => {
+      try { return readdirSync(root).filter(name => namesCredentialFile(['read', resolve(root, name)]) ||
+        namesCredentialFile(['read', resolve(root, name, 'entry')]))
+        .map(name => resolve(root, name)); } catch { return []; }
+    }),
   ];
   const seen = new Set<string>();
   const masks: MaskedPath[] = [];
@@ -369,6 +237,11 @@ export interface BwrapAvailability {
 
 /** What one session may reach, before it is turned into bwrap argv. */
 export interface SandboxMountPlan {
+  /** Broad owner capabilities precede every credential and sibling mask. */
+  ownerPaths?: Array<{ path: string; writable: boolean }>;
+  userBus?: string;
+  /** Reapply protected roots after owner grants; private harness mounts follow. */
+  protectedReadOnly?: string[];
   /** Edit sessions start writable-by-default; Rooms keep the read-only root. */
   rootWritable?: boolean;
   /**
@@ -383,11 +256,8 @@ export interface SandboxMountPlan {
   readOnly: string[];
   /** Paths bind-mounted read-write, deduplicated and sorted. */
   writable: string[];
-  /**
-   * Hard-limited scratch filesystems whose mount lives only for this physical
-   * sandbox session.
-   */
-  quotaTmpfs: Array<{ target: string; maxBytes: number; maxInodes: number; blockGit?: boolean }>;
+  /** Copy-on-write layers mounted over shared dependency trees; see {@link DependencyLayer}. */
+  overlays?: DependencyLayer[];
   /**
    * Credential stores replaced by emptiness (empty tmpfs for directories,
    * `/dev/null` for files). Emitted AFTER the whole-home ro-bind — which
@@ -402,7 +272,19 @@ export interface SandboxMountPlan {
 }
 
 
+/**
+ * A shared dependency tree seen through an overlay: reads come from `tree`
+ * (hard links into the Workspace store), writes land in `upper`. `upper` and
+ * `work` belong to one checkout, so a write never reaches another corner.
+ */
+export interface DependencyLayer { tree: string; upper: string; work: string }
+
+
 export interface SandboxSessionSpec {
+  /** Supplied only for an active agent command on its owner's machine. */
+  operatorHome?: string;
+  userRuntimeDir?: string;
+  grantedPaths?: Array<{ path: string; writable: boolean }>;
   mode: SessionMode;
   /** The child's working directory; also the ACP session cwd. */
   cwd: string;
@@ -427,12 +309,10 @@ export interface SandboxSessionSpec {
   roomGitDirectory?: string;
   /** Hygiene denylist overlaid read-only in an edit session. */
   protectedPaths?: string[];
-  /** Dependency trees are sealed after every writable parent mount. */
-  dependencyPaths?: string[];
+  /** Shared dependency trees, each writable through this checkout's own layer. */
+  dependencyLayers?: DependencyLayer[];
   /** Explicit capabilities restored writable after protected parent mounts. */
   additionalWritablePaths?: string[];
-  /** Per-session quota workbench mounted at this stable path. */
-  workbench?: { dir: string; maxBytes: number; maxInodes: number };
   /** Credential stores hidden from this session ({@link credentialMaskPaths}).
    * Both modes get them: a Room reading the operator's gh token is the same
    * out-of-band-push hole a corner would be. */
@@ -503,10 +383,27 @@ function normalize(paths: Array<string | undefined>): string[] {
 
 
 /**
- * The exact mount table for one session. Pure — no filesystem access — so the
- * room-vs-corner difference is a unit-testable value, not spawn-time behaviour.
+ * The exact mount table for one session. Resolve optional capabilities here;
+ * required private boundaries retain their fail-closed validation below.
  */
 export function sandboxMountPlan(spec: SandboxSessionSpec): SandboxMountPlan {
+  const ownerPaths: NonNullable<SandboxMountPlan['ownerPaths']> = [];
+  for (const grant of spec.grantedPaths ?? []) {
+    try {
+      // Bind the actual destination, never a symlink mountpoint. A saved grant
+      // may outlive its source, or point through a broken/unreachable link.
+      const path = realpathSync(grant.path);
+      // Read access already comes from the root mount. Only /tmp needs
+      // restoring through its private tmpfs; old grants must not pin artifacts.
+      if (grant.writable || isUnderTmp(path)) ownerPaths.push({ path, writable: grant.writable });
+    } catch { /* An unavailable optional capability mounts nothing. */ }
+  }
+  if (spec.operatorHome && agentGrantAutoApproves({ kind: 'path', target: spec.operatorHome }))
+    ownerPaths.unshift({ path: resolve(spec.operatorHome), writable: true });
+  const userBus = spec.operatorHome && spec.userRuntimeDir &&
+    lstatSync(spec.userRuntimeDir, { throwIfNoEntry: false })?.isDirectory() &&
+    agentGrantAutoApproves({ kind: 'command', target: 'systemctl --user' })
+    ? resolve(spec.userRuntimeDir) : undefined;
   // Harness bookkeeping, both modes — see the module comment for why a Room
   // cannot have this read-only. No part of any repository is in here.
   const harnessState = [
@@ -604,30 +501,19 @@ export function sandboxMountPlan(spec: SandboxSessionSpec): SandboxMountPlan {
       target: resolve(spec.roomGitDirectory, 'beeline-seed-objects'), mode: 'ro-bind' });
     requiredMounts.push({ source: resolve(spec.roomGitDirectory), target: resolve(spec.cwd, '.git'), mode: 'bind' });
   }
-  for (const tree of spec.dependencyPaths ?? []) {
-    // npm --package-lock-only unlinks its private hidden lockfile. Keep that
-    // metadata and tool caches writable, sealing the shared package bytes.
-    for (const entry of readdirSync(tree, { withFileTypes: true })) {
-      if (!entry.isDirectory() || entry.name === '.cache') continue;
-      const path = resolve(tree, entry.name);
-      requiredMounts.push({ source: path, target: path, mode: 'ro-bind' });
-    }
-  }
   return {
+    ownerPaths,
+    protectedReadOnly: normalize(spec.protectedPaths ?? []),
+    ...(userBus ? { userBus } : {}),
     ...(spec.mode === 'edit' ? { rootWritable: true } : {}),
     readOnly,
     writable,
-    quotaTmpfs: spec.workbench
-      ? [
-          {
-            target: resolve(spec.workbench.dir),
-            maxBytes: spec.workbench.maxBytes,
-            maxInodes: spec.workbench.maxInodes,
-            blockGit: true,
-          },
-        ]
-      : [],
-    masks: [...(spec.maskPaths ?? []), ...boundaryMasks],
+    ...(spec.dependencyLayers?.length ? { overlays: spec.dependencyLayers } : {}),
+    masks: [...(spec.maskPaths ?? []), ...boundaryMasks,
+      ...[...new Set(['/run/docker.sock', '/var/run/docker.sock', ...(spec.userRuntimeDir ? [resolve(spec.userRuntimeDir, 'docker.sock')] : [])]
+        .filter(path => lstatSync(path, { throwIfNoEntry: false }) &&
+          !spec.grantedPaths?.some(grant => resolve(grant.path) === path)).map(path => realpathSync(path)))]
+        .map(path => ({ path, kind: 'file' as const }))],
     ...(requiredMounts.length ? { requiredMounts } : {}),
     ...(spec.devices?.length ? { devices: normalize(spec.devices) } : {}),
   };
@@ -640,12 +526,32 @@ export interface WrappedCommand {
 }
 
 
-const QUOTA_TMPFS_BOOTSTRAP = [
+/** Mounts each `tree upper work` triple, then drops every capability before the command. */
+const OVERLAY_BOOTSTRAP = [
   'set -eu',
-  'mount -t tmpfs -o "remount,size=$2,nr_inodes=$3" tmpfs "$1"',
-  'shift 3',
+  'while [ "$1" != -- ]; do',
+  '  mount -t overlay overlay -o "lowerdir=$1,upperdir=$2,workdir=$3,userxattr" "$1"',
+  '  shift 3',
+  'done',
+  'shift',
   'exec setpriv --bounding-set=-all --inh-caps=-all --ambient-caps=-all --no-new-privs "$@"',
 ].join('\n');
+
+
+/** Whether a native edit reaches a writable host mount in this exact plan. */
+export function sandboxAllowsWrite(plan: SandboxMountPlan, path: string): boolean {
+  const covers = (root: string) => path === resolve(root) || path.startsWith(resolve(root) === '/' ? '/' : `${resolve(root)}/`);
+  let allowed = Boolean(plan.rootWritable);
+  for (const root of plan.readOnly) if (covers(root)) allowed = false;
+  for (const binding of plan.ownerPaths ?? []) if (covers(binding.path)) allowed = binding.writable;
+  if (plan.userBus && covers(plan.userBus)) allowed = true;
+  for (const root of plan.protectedReadOnly ?? []) if (covers(root)) allowed = false;
+  for (const mask of plan.masks) if (covers(mask.path)) allowed = false;
+  for (const root of plan.writable) if (covers(root)) allowed = true;
+  for (const mount of plan.requiredMounts ?? []) if (covers(mount.target)) allowed = mount.mode === 'bind';
+  for (const layer of plan.overlays ?? []) if (covers(layer.tree)) allowed = true;
+  return allowed;
+}
 
 
 /**
@@ -662,21 +568,16 @@ export function buildBwrapArgv(input: {
   command: string;
   args?: string[];
 }): WrappedCommand {
-  const quotaTmpfs = input.plan.quotaTmpfs ?? [];
+  const overlays = input.plan.overlays ?? [];
   const args = [
-    '--unshare-pid',
-    ...(quotaTmpfs.length
-      ? [
-          '--unshare-user',
-          '--uid',
-          '0',
-          '--gid',
-          '0',
-          '--cap-add',
-          'CAP_SYS_ADMIN',
-          '--cap-add',
-          'CAP_SETPCAP',
-        ]
+    // sd_bus rejects peers whose PID cannot be resolved in its namespace.
+    ...(input.plan.userBus ? [] : ['--unshare-pid']),
+    // An unprivileged overlay mount needs namespace root; the bootstrap drops
+    // every capability before the command. IS_SANDBOX tells harnesses that
+    // refuse to run as root that this root is a namespace one.
+    ...(overlays.length
+      ? ['--unshare-user', '--uid', '0', '--gid', '0', '--setenv', 'IS_SANDBOX', '1',
+          ...['CAP_SYS_ADMIN', 'CAP_DAC_OVERRIDE', 'CAP_SETPCAP'].flatMap(cap => ['--cap-add', cap])]
       : []),
     input.plan.rootWritable ? '--bind' : '--ro-bind',
     '/',
@@ -690,6 +591,14 @@ export function buildBwrapArgv(input: {
   }
   args.push('--proc', '/proc', '--tmpfs', '/tmp');
   for (const path of input.plan.readOnly) args.push('--ro-bind', path, path);
+  for (const binding of input.plan.ownerPaths ?? [])
+    args.push(binding.writable ? '--bind-try' : '--ro-bind-try', binding.path, binding.path);
+  if (input.plan.userBus) {
+    args.push('--bind', input.plan.userBus, input.plan.userBus,
+      '--setenv', 'XDG_RUNTIME_DIR', input.plan.userBus,
+      '--setenv', 'DBUS_SESSION_BUS_ADDRESS', `unix:path=${input.plan.userBus}/bus`);
+  }
+  for (const path of input.plan.protectedReadOnly ?? []) args.push('--ro-bind', path, path);
   // Credential masks: applied after the ro-bind they override and before the
   // writable binds a deliberate harness-state bind would win with. A masked
   // DIRECTORY becomes an empty writable tmpfs (tools may write into nothing);
@@ -710,38 +619,13 @@ export function buildBwrapArgv(input: {
       throw new Error(`required sandbox mount is missing or a symlink: ${mount.source} -> ${mount.target}`);
     args.push(`--${mount.mode}`, mount.source, mount.target);
   }
-  for (const binding of quotaTmpfs) {
-    args.push(
-      '--dir',
-      binding.target,
-      '--size',
-      String(binding.maxBytes),
-      '--tmpfs',
-      binding.target,
-    );
-    // The sandbox reserves this leaf. Mounting /dev/null over it makes `.git`
-    // neither a directory nor removable, so `git init`, worktree `.git` files,
-    // and `cp -r repo/. …` all fail inside the kernel mount table.
-    if (binding.blockGit) args.push('--ro-bind', '/dev/null', resolve(binding.target, '.git'));
-  }
   args.push('--chdir', input.cwd);
   // The sandbox must not outlive the daemon that owns the session.
   args.push('--die-with-parent');
-  if (quotaTmpfs.length) {
-    if (quotaTmpfs.length !== 1) throw new Error('only one quota tmpfs is supported per session');
-    const quota = quotaTmpfs[0]!;
-    args.push(
-      '--',
-      'sh',
-      '-c',
-      QUOTA_TMPFS_BOOTSTRAP,
-      'beeline-quota-tmpfs',
-      quota.target,
-      String(quota.maxBytes),
-      String(quota.maxInodes),
-      input.command,
-      ...(input.args ?? []),
-    );
+  if (overlays.length) {
+    for (const layer of overlays) for (const dir of [layer.upper, layer.work]) mkdirSync(dir, { recursive: true, mode: 0o700 });
+    args.push('--', 'sh', '-c', OVERLAY_BOOTSTRAP, 'beeline-dependency-layers',
+      ...overlays.flatMap(layer => [layer.tree, layer.upper, layer.work]), '--', input.command, ...(input.args ?? []));
   } else {
     args.push('--', input.command, ...(input.args ?? []));
   }
@@ -812,7 +696,7 @@ export function detectBwrapSandbox(
     });
   const probe = buildBwrapArgv({
     bwrapPath,
-    plan: { readOnly: [], writable: [], quotaTmpfs: [], masks: [] },
+    plan: { readOnly: [], writable: [], masks: [] },
     cwd: '/',
     command: '/bin/true',
   });

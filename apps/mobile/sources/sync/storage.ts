@@ -5,6 +5,7 @@ import { applyLocalSettings, type LocalSettings } from './localSettings';
 import { applySettings, type Settings } from './settings';
 import {
     loadLocalSettings,
+    loadInitialLocalSettings,
     loadSettings,
     saveLocalSettings,
     saveSettings,
@@ -22,7 +23,7 @@ const initialSettings = loadSettings();
 
 export const storage = create<StorageState>()((set) => ({
     settings: initialSettings.settings,
-    localSettings: loadLocalSettings(),
+    localSettings: loadInitialLocalSettings(),
     applySettingsLocal: (delta) => set((state) => {
         const settings = applySettings(state.settings, delta);
         saveSettings(settings, initialSettings.version ?? 0);

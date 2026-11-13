@@ -1,3 +1,5 @@
+import { offerRoomView, selectRoomViewRecords, writeRoomMessage } from './room-message-records';
+import { currentSurfaceStamp } from './surface-clock';
 import { describe, expect, it } from 'vitest';
 import type { RoomView, RoomViewMessage } from '@beeline/buzz-client';
 import { buildTurnActivity } from './activity-timeline';
@@ -164,16 +166,20 @@ describe('Room view presentation', () => {
       author: { pubkey: 'human', kind: 'human', name: 'Captain' },
       presentation: 'message',
     };
-    const openRoom = reconcileRoomMessageDelta({ ...emptyRoom(), messages: [older] }, newest);
+    const scope = JSON.stringify(['https://stale-read.test', 'viewer']);
     const staleRead = { ...emptyRoom(), messages: [older] };
+    offerRoomView(scope, staleRead, currentSurfaceStamp());
+    const readStarted = currentSurfaceStamp();
+    writeRoomMessage(scope, staleRead.room.id, newest);
+    offerRoomView(scope, staleRead, readStarted);
 
-    expect(reconcileRoomView(openRoom, staleRead).messages.map((message) => message.id)).toEqual([
+    expect(selectRoomViewRecords(scope, staleRead).messages.map((message) => message.id)).toEqual([
       'older',
       'newest',
     ]);
   });
 
-  it('keeps an indexed system row visible as a system notice', () => {
+  it.each(['system', 'card'] as const)('keeps an indexed workflow %s row in the compact system renderer', presentation => {
     const message: RoomViewMessage = {
       id: 'system-notice',
       text: 'A scheduled run is paused.',
@@ -183,7 +189,8 @@ describe('Room view presentation', () => {
         kind: 'agent',
         name: 'Pi agent',
       },
-      presentation: 'system',
+      presentation,
+      systemEvent: { kind: 'workflow-handoff', subject: { kind: 'system', name: 'Workflow' }, verb: 'advanced' },
     };
 
     expect(displayRoomMessage(message, 'a'.repeat(64))).toMatchObject({

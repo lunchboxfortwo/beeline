@@ -2,11 +2,10 @@ import { type AgentUsage, usageDollars, usageTokens } from '@beeline/api-contrac
 import { usageTime } from '@/buzz/agent-usage';
 import React, { type ReactNode } from 'react';
 import equal from 'fast-deep-equal';
-import { Text, type AccessibilityRole, type AccessibilityState } from 'react-native';
-import { StyleSheet } from 'react-native-unistyles';
+import { type AccessibilityRole, type AccessibilityState } from 'react-native';
 import { fallbackMemberHandle } from '@/buzz/member-display';
 import { displayModel } from '@/buzz/model-display';
-import { Typography } from '@/constants/Typography';
+import { T } from '@/ui/grammar';
 import { IdentityMark } from './IdentityMark';
 import { IndexRow, type IndexRowProps } from './IndexRow';
 
@@ -136,12 +135,12 @@ export const MemberRosterRow = React.memo(
         description={subtitle}
         descriptionContent={
           subtitle !== undefined && usage ? (
-            <Text numberOfLines={1} style={styles.subtitle}>
+            <T v="meta" color="secondary" numberOfLines={1} flex={1} minWidth={0}>
               {subtitle}
-              <Text style={usage.tone === 'danger' ? styles.danger : styles.warning}>
+              <T v="meta" color={usage.tone === 'danger' ? 'removed' : 'needsYou'}>
                 {` · ${usage.text}`}
-              </Text>
-            </Text>
+              </T>
+            </T>
           ) : undefined
         }
         disabled={props.disabled}
@@ -175,12 +174,3 @@ export const MemberRosterRow = React.memo(
     return beforeTrailing === afterTrailing && equal(before, after);
   },
 );
-
-const styles = StyleSheet.create((theme) => {
-  const { buzz: hull } = theme;
-  return {
-    warning: { color: hull.accent },
-    danger: { color: hull.dialogDanger },
-    subtitle: { ...Typography.default(), ...hull.type.meta, flex: 1, minWidth: 0, color: hull.textMuted },
-  };
-});

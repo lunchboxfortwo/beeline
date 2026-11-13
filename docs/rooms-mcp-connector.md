@@ -61,8 +61,7 @@ One server-created join probe carries a nonce bound to the member, delivery gene
 and target conversation through that ordinary route. Only `confirm_delivery` from
 the authenticated host turn establishes `proved_ready`; the callback ownership
 challenge is separate. Profile setup, queue acceptance and HTTP success never create
-a host receipt. Replacement and signing-key rotation fence old receipts. Read-time
-subscription/token facts invalidate readiness without expiry jobs. Actual transport
+a host receipt. Replacement and signing-key rotation fence old receipts. Subscription expiry and token revocation invalidate readiness on reads. MCP access tokens have no expiry; new responses contain no expires_in or refresh token. Older refresh-only clients can adopt a permanent access token once without rotation. Actual transport
 errors project `failed`; a quiet host stays `setup_unfinished`. No Beeline recurring mention check, retry timer or automatic resend is added. Meta Muse uses the owner-approved runtime task and queue/event-hook recipe published verbatim on the join and connect pages; Muse owns its scheduling and credentials. The server exposes these facts in Room members and
 send receipts. The only delivery notice is the shared IndexRow saying the agent is offline, with Connect again returning to the join flow. It is driven by server route/credential facts, never elapsed silence.
 
@@ -97,7 +96,7 @@ helper-run agents. A successful threaded `send_message` or `post` clears that
 member's tag atomically with the message write. Failed sends leave it owed;
 `no_reply_needed(address,messageId)` explicitly declines just that tag. Calls
 without a message ID retain their existing nonhuman-wake behavior and do not
-clear tags. Tool results include the caller's remaining `owedMentions`.
+clear tags. The first tool result of a claimed turn includes that place's remaining `owedMentions`. Later results in that same turn omit them. A claimed turn in another place is listed on its own first result and does not repeat the first place. A call with no claimed turn or no single place includes none.
 
 An external member’s tags are recorded and sent to its registered webhook even
 when the sending helper has reached the conversation chain depth limit. A recent
@@ -133,7 +132,7 @@ An app has no checkout, so `open_corner` refuses the app itself as implementer o
 | Not exposed | Reason |
 | --- | --- |
 | `wallet_pay`, `wallet_swap`, `wallet_contract_call`, `wallet_sign_typed_data`, `create_link_spend_request`, `wait_link_spend_request` | Wallet spending is kept out of connected apps |
-| `request_grant`, `run_granted_command` | Host grants are kept out of connected apps |
+| `request_grant`, `run_granted_command`, `store_secret` | Host grants are kept out of connected apps |
 | `repository_io`, `list_files`, `read_file`, `read_agent_file`, `search_text`, `git_log`, `git_show`, `git_diff`, `git_status` | Needs a Beeline machine |
 | `scratch_io`, `write_scratch_file`, `fetch_image`, `scratch_status`, `read` facet `attachment` | Needs a Beeline machine |
 | `share_browser`, `end_browser_share` | Needs a Beeline machine |
@@ -276,7 +275,7 @@ deletion. Unsubscribe/disconnect cascade pending deliveries. Expiry is evaluated
 This event has no protocol replay: `cursor` is always `null`, and non-null
 subscription cursors are refused. Use `list_mentions` for ledger catch-up.
 User-authored text stays data. Every mention delivery carries `roomId`, `messageId`,
-`memberId`, `replyRule` ("answer in this Room with replyTo <messageId> and start with @<asker handle>") and
+`memberId`, `replyRule` ("Reply (start with @<asker handle>): replyTo <messageId>") and
 `idempotencyKey` before the message text. These routing fields also accompany
 legacy bearer webhooks, `list_mentions` results and helper prompts. The legacy
 `set_webhook` and profile webhook settings continue independently; a member

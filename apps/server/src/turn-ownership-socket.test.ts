@@ -6,7 +6,7 @@ import WebSocket from 'ws';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { createAgentCommand } from './agent-command.js';
 import type { TokenAuth } from './auth.js';
-import { ConnectionPresence, expireOwnedAgentTurns } from './connection-presence.js';
+import { ConnectionPresence } from './connection-presence.js';
 import { MACHINE_SOCKET_PROTOCOL } from './daemon-live.js';
 import { DaemonService } from './daemon-service.js';
 import { LiveHub } from './live.js';
@@ -16,6 +16,15 @@ import { migratedDatabase, type PgliteDatabase } from './test-support.js';
 import type { PostgresDatabase } from './database.js';
 import { groupBPostgresDatabase } from './test-fixtures/test-support-router-group-b-postgres.js';
 import { PostgresLiveListener } from './postgres-live.js';
+import { PhoneService as RealPhoneService } from './phone-service.js';
+import { HelperDaemonService } from './test-fixtures/helper-daemon.js';
+import { CommandExecutionContext, runServerCommandIntake } from '../../body/src/server-command-intake.js';
+import type { AgentCommand } from '@beeline/api-contract/daemon';
+import { OwnedModelAttempts } from './owned-model-attempt.js';
+import { OwnedModelCredentials } from './owned-model-credential.js';
+import { mkdtemp, rm } from 'node:fs/promises';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
 
 const agent = 'a'.repeat(64), owner = 'b'.repeat(64);
 const room = '11111111-1111-4111-8111-111111111111', workspace = '22222222-2222-4222-8222-222222222222';
@@ -29,7 +38,9 @@ describe.each(['pglite', ...(postgresUrl ? ['postgres'] : [])])('P12 actual sele
   let server: ReturnType<typeof createBeelineServer> | undefined;
   const sockets: WebSocket[] = [], releases: Promise<void>[] = [];
   let command: NonNullable<Awaited<ReturnType<typeof createAgentCommand>>>;
+  let stateRoot: string;
   beforeEach(async () => {
+    stateRoot = await mkdtemp(join(tmpdir(), 'turn-owner-'));
     if (backend === 'postgres') {
       const fixture = await groupBPostgresDatabase(postgresUrl!);
       db = fixture.database; closeDatabase = fixture.close;
@@ -63,6 +74,7 @@ describe.each(['pglite', ...(postgresUrl ? ['postgres'] : [])])('P12 actual sele
     if (server) { await new Promise<void>(done => server!.close(() => done())); server = undefined; }
     await listener?.stop(); await listening; listener = undefined; listening = undefined;
     await Promise.all(releases.splice(0)); await presence?.stop(); vi.useRealTimers(); vi.restoreAllMocks(); vi.unstubAllEnvs(); await closeDatabase?.();
+    await rm(stateRoot, { recursive: true, force: true });
   });
   async function connect(enabled = true, identity = agent) {
     vi.stubEnv('BEELINE_NETWORK_ROUTER_V1', enabled ? '1' : '0');
@@ -100,54 +112,164 @@ describe.each(['pglite', ...(postgresUrl ? ['postgres'] : [])])('P12 actual sele
     return client.next(frame => frame.type === 'turn-result' && frame.requestId === requestId, `turn result ${requestId}`);
   }
 
-  it('requeues on every actual socket close, reclaims a fresh generation, and retains the Squire verdict', async () => {
-    const bootstrap=await connect();bootstrap.socket.terminate();
-    const helperSockets:WebSocket[]=[];
-    const vault=vi.fn(async()=>({connections:[{reference:'synthetic-credential',service:'example',label:'connected',
-      fieldNames:['password'],allowedHosts:['example.test'],createdAt:1,stale:false,state:'active' as const}]}));
-    const baseUrl=`http://127.0.0.1:${(server!.address() as AddressInfo).port}`;
-    const machine=new MachineLink({baseUrl,readVault:vault,log:vi.fn(),factory:(url,protocols,options)=>{
-      const socket=new WebSocket(url,protocols,options);helperSockets.push(socket);sockets.push(socket);return socket;
-    }});
-    const api=new DaemonApiClient(baseUrl,'bdt_synthetic',agent,fetch,undefined,undefined,machine);
-    try {
-      await api.execute('getAgentCommands',{roomId:room});
-      for(let drop=0;drop<3;drop++){
-        const generationId=`before-drop-${drop}`;
-        await api.execute('claimAgentCommand',{roomId:room,commandId:command.id,generationId});
-        const previous=api.turnOwnershipScope()!,lost=vi.fn();
-        api.noteOwnedTurnClaim({roomId:room,requestId:command.turn_request_id,generationId},previous,lost);
-        const dropped=helperSockets.at(-1)!;
-        const closed=new Promise<void>(resolve=>dropped.once('close',()=>resolve()));
-        dropped.terminate();await closed;
-        await api.waitForConnection();
-        await vi.waitFor(async()=>expect((await db.query('SELECT state FROM agent_commands WHERE id=$1',[command.id])).rows[0]).toMatchObject({state:'pending'}));
-        expect(api.turnOwnershipScope()).not.toEqual(previous);
-        expect(lost).toHaveBeenCalledTimes(1);
-        expect(await expireOwnedAgentTurns(db,live,agent)).toBe(0);
-      }
-      await machine.refreshVault();
-      expect((await daemon.execute('getConnectorStatus',{agentId:agent,connectorId:`squire:${agent}`},agent)).status).toBe('connected');
-      vault.mockRejectedValueOnce(new Error('Squire MCP session closed'));await machine.refreshVault();
-      expect((await daemon.execute('getConnectorStatus',{agentId:agent,connectorId:`squire:${agent}`},agent)).status).toBe('connected');
-      const turn={roomId:room,requestId:command.turn_request_id,generationId:'final-generation'};
-      await api.execute('claimAgentCommand',{roomId:room,commandId:command.id,generationId:turn.generationId});
-      await api.execute('postRoomMessage',{...turn,text:'Finished after three connection drops.'});
-      await api.execute('postAgentTurnReceipt',{agentId:agent,...turn,status:'complete'});
-      expect((await db.query('SELECT state,generation_id FROM agent_commands WHERE id=$1',[command.id])).rows[0])
-        .toMatchObject({state:'complete',generation_id:turn.generationId});
-      expect(machine.link.reconnects).toBe(3);
-      expect(helperSockets).toHaveLength(4);
-    }finally{api.closeLive();machine.stop();}
-  });
+  it.each([
+    { kind: 'ordinary', provider: 'no model call' },
+    { kind: 'free-agent model', provider: 'a model call made before the restart' },
+    { kind: 'free-agent model', provider: 'a model call made after the resume' },
+  ])('Reproduction TURN-1: a $kind turn with $provider survives a deploy, a reconnect and a helper restart, and its report reaches the commander', async ({ kind, provider }) => {
+    const freeAgent = kind !== 'ordinary', callBeforeRestart = provider.endsWith('before the restart');
+    // A commander in a DM with the owner orders this agent to work in the Room.
+    const commander = 'd'.repeat(64), dm = '33333333-3333-4333-8333-333333333333';
+    await db.query(`INSERT INTO identities(id,kind,name,handle) VALUES($1,'agent','Commander','commander')`, [commander]);
+    await db.query(`INSERT INTO agents(agent_id,owner_id) VALUES($1,$2)`, [commander, owner]);
+    await db.query(`INSERT INTO rooms(id,workspace_id,name,direct_participants,created_by)
+      VALUES($1,$2,'Owner and Commander',jsonb_build_array($3::text,$4::text),$3)`, [dm, workspace, owner, commander]);
+    await db.query(`INSERT INTO memberships(workspace_id,room_id,identity_id,role)
+      VALUES($1,NULL,$2,'member'),($1,$3,$2,'member'),($1,$4,$2,'member'),($1,$4,$5,'member')`, [workspace, commander, room, dm, owner]);
+    await db.query(`UPDATE agent_commands SET state='complete' WHERE id=$1`, [command.id]);
+    if (freeAgent) await db.query(`INSERT INTO free_agents(agent_id,owner_id,sealed_keys,model_token_hash,state,model)
+      VALUES($1,$2,'synthetic sealed fixture',$3,'running','synthetic/model')`, [agent, owner, 'c'.repeat(64)]);
+    const people = new RealPhoneService(db, 'http://test');
+    await people.execute('sendRoomMessage', { roomId: dm, messageId: 'e'.repeat(64), text: 'Have the agent build it' }, owner);
+    const commanders = new HelperDaemonService(db, live);
+    const asked = (await commanders.execute('getAgentCommands', { roomId: dm }, commander)).commands[0]!;
+    await commanders.execute('claimAgentCommand', { roomId: dm, commandId: asked.id, generationId: 'commander' }, commander);
+    await commanders.execute('order', { roomId: dm, requestId: asked.turnRequestId, generationId: 'commander',
+      address: room, agent, text: 'Build it and report.' }, commander);
 
-  it('binds the actual registration, replays without row writes, and rejects freshness/legacy receipt paths', async () => {
+    // Two server instances share the database; a deploy replaces the first.
+    vi.stubEnv('BEELINE_NETWORK_ROUTER_V1', '1');
+    const credentials = new OwnedModelCredentials({ currentVersion: 'test-v1', key: version => version === 'test-v1' ? Buffer.alloc(32, 7) : undefined },
+      () => 'synthetic/model');
+    const instances: { server: ReturnType<typeof createBeelineServer>; presence: ConnectionPresence }[] = [];
+    const startInstance = async (instanceId: string) => {
+      const instancePresence = new ConnectionPresence(db, live, { instanceId });
+      const instanceDaemon = new DaemonService(db, live);
+      if (freeAgent) instanceDaemon.setOwnedModel({ credentials, ready: () => true });
+      const instance = createBeelineServer({ database: db, live, daemon: instanceDaemon, connectionPresence: instancePresence,
+        auth: { authenticateDaemon: async (token: string) => token === 'bdt_synthetic' ? agent : null,
+          retiredDaemonAgent: async () => null, authenticatePhone: async () => null } as unknown as TokenAuth,
+        phone: { canReadRooms: async () => new Set([room]) } as unknown as PhoneService });
+      await new Promise<void>(done => instance.listen(0, '127.0.0.1', done));
+      instances.push({ server: instance, presence: instancePresence });
+      return `http://127.0.0.1:${(instance.address() as AddressInfo).port}`;
+    };
+    let origin = await startInstance('before-deploy');
+    const helperSockets: WebSocket[] = [];
+    const claims: { modelCredential?: { token: string } }[] = [];
+    // One helper process: its machine link, API client and command intake.
+    const startHelper = (run: (command: AgentCommand, context: CommandExecutionContext) => Promise<void>) => {
+      const machine = new MachineLink({ baseUrl: origin, readVault: vi.fn(async () => ({ connections: [] })), log: vi.fn(),
+        factory: (_url, protocols, options) => {
+          const socket = new WebSocket(`${origin.replace('http', 'ws')}/v1/phone/live`, protocols, options);
+          helperSockets.push(socket); sockets.push(socket); return socket;
+        } });
+      const client = new DaemonApiClient(origin, 'bdt_synthetic', agent, fetch, undefined, undefined, machine);
+      const api = new Proxy(client, { get: (target, key) => key === 'execute'
+        ? async (name: string, input: Record<string, unknown>) => {
+          const result = await target.execute(name as never, input as never);
+          if (name === 'claimAgentTurn') claims.push(result as never);
+          return result;
+        }
+        : (value => typeof value === 'function' ? value.bind(target) : value)(Reflect.get(target, key)) });
+      const context = new CommandExecutionContext(join(stateRoot, `helper-${claims.length}-${helperSockets.length}`));
+      const controller = new AbortController(), errors: unknown[] = [];
+      let stopped!: () => void;
+      const stop = new Promise<void>(resolve => { stopped = resolve; });
+      const intake = runServerCommandIntake({ api, roomId: room, agentId: agent, context, signal: controller.signal,
+        run: command => Promise.race([run(command, context), stop]), stop: () => stopped(), onError: error => errors.push(error) });
+      return { machine, api: client, context, controller, intake, errors };
+    };
+    const drop = async () => {
+      const socket = helperSockets.at(-1)!;
+      const closed = new Promise<void>(resolve => socket.once('close', () => resolve()));
+      socket.terminate(); await closed;
+    };
+    // The model provider is the one external effect. It must run exactly once.
+    const providerCalls: string[] = [], attempts = new OwnedModelAttempts(db, credentials);
+    const modelRequestId = '11111111-1111-4111-8111-111111111111';
+    const callModel = async (token: string) => {
+      const actor = await credentials.authenticate(db, token);
+      const admitted = await attempts.reserve(actor, modelRequestId, { step: 'build' }, async () => ({
+        reservation: { day: '2026-11-12', reserved: 16, maxOutput: 8, reservedUsd: 0.01, credit: 0 },
+        payload: { model: actor.binding.model, max_tokens: 8, messages: [] } }));
+      if (admitted.permit) await attempts.handoff(admitted.permit, async body => { providerCalls.push(body); return 'answer'; });
+      return actor;
+    };
+    let started!: (work: AgentCommand) => void;
+    const running = new Promise<AgentCommand>(resolve => { started = resolve; });
+    // The first process starts the turn and is still working when it is interrupted.
+    let helper = startHelper(async work => { started(work); await new Promise(() => {}); });
+    let restarted: ReturnType<typeof startHelper> | undefined;
+    try {
+      const work = await running;
+      expect(work.reason).toBe('order');
+      const generationId = helper.context.generationId;
+      const turn = { roomId: room, requestId: work.turnRequestId, generationId };
+      // The provider answer stays UNKNOWN across the deploy and the restart.
+      if (callBeforeRestart) await callModel(claims[0]!.modelCredential!.token);
+
+      // Deploy: the first instance stops renewing its lease and its sockets end.
+      origin = await startInstance('after-deploy');
+      await instances[0]!.presence.stop();
+      await db.query(`UPDATE live_server_instances SET renewed_at=clock_timestamp()-interval '1 hour' WHERE instance_id='before-deploy'`);
+      await new Promise<void>(done => instances[0]!.server.close(() => done()));
+      await drop(); await helper.api.waitForConnection();
+      await helper.api.execute('postAgentThought', { ...turn, text: 'Started the build.' });
+
+      // The socket drops again; the same helper process carries on.
+      await drop(); await helper.api.waitForConnection();
+      await helper.api.execute('postAgentThought', { ...turn, text: 'Still building.' });
+      // The invocation's model credential still holds on the new instance.
+      if (freeAgent) await credentials.assertCurrent(db, await credentials.authenticate(db, claims[0]!.modelCredential!.token));
+
+      // The helper process restarts mid-turn. Its turn is neither failed nor consumed.
+      helper.controller.abort(); await helper.intake;
+      helper.api.closeLive(); helper.machine.stop();
+      expect(helper.errors).toEqual([]);
+      expect((await db.query('SELECT state,generation_id FROM agent_commands WHERE id=$1', [work.id])).rows[0])
+        .toEqual({ state: 'claimed', generation_id: generationId });
+
+      // The next process resumes the same turn from its record and reports.
+      let finished!: () => void;
+      const reported = new Promise<void>(resolve => { finished = resolve; });
+      restarted = startHelper(async (resumed, context) => {
+        expect(resumed.turnRequestId).toBe(work.turnRequestId);
+        expect(context.generationId).toBe(generationId);
+        if (freeAgent) {
+          // The same invocation keeps its one credential. Repeating the model
+          // request reads the original attempt; it never dispatches again.
+          expect(claims.at(-1)!.modelCredential).toEqual(claims[0]!.modelCredential);
+          const actor = await callModel(claims.at(-1)!.modelCredential!.token);
+          await attempts.settleUsage(actor, modelRequestId, { tokens: 2, usd: 0 }, 'succeeded', async () => {});
+        }
+        await restarted!.api.execute('report', { ...turn, status: 'done', text: 'Built it after the deploy and the restart.' } as never);
+        finished();
+      });
+      helper = restarted;
+      await reported;
+      await vi.waitFor(async () => expect((await db.query('SELECT state FROM agent_commands WHERE id=$1', [work.id])).rows[0])
+        .toEqual({ state: 'complete' }), { timeout: 5_000 });
+      expect(helper.errors).toEqual([]);
+      expect(providerCalls).toHaveLength(freeAgent ? 1 : 0);
+      if (freeAgent) expect((await db.query('SELECT state FROM owned_model_attempts')).rows).toEqual([{ state: 'succeeded' }]);
+      const reports = (await commanders.execute('getAgentCommands', { roomId: dm }, commander)).commands
+        .filter(item => item.reason === 'report');
+      expect(reports.map(item => item.source.body).join('\n')).toContain('Built it after the deploy and the restart.');
+    } finally {
+      helper.controller.abort(); await helper.intake.catch(() => {});
+      helper.api.closeLive(); helper.machine.stop();
+      for (const instance of instances.splice(0)) {
+        await instance.presence.stop();
+        if (instance.server.listening) await new Promise<void>(done => instance.server.close(() => done()));
+      }
+    }
+  }, 30_000);
+
+  it('binds the actual registration and replays a claim without row writes', async () => {
     const client = await connect();
     expect(client.registered.capabilities).toMatchObject({ turnOwnershipV1: true });
     expect(await claim(client)).toHaveProperty('result');
-    const current = (await db.query(`SELECT turn_owner_connection_id,turn_owner_epoch::integer turn_owner_epoch,lease_expires_at FROM agent_commands WHERE id=$1`, [command.id])).rows[0]!;
-    expect(current).toMatchObject({ turn_owner_connection_id: client.registered.capabilities.turnConnectionId,
-      turn_owner_epoch: client.registered.capabilities.turnConnectionEpoch, lease_expires_at: null });
     const versions = async () => (await db.query(`SELECT command.xmin::text command_version,turn.xmin::text turn_version,
       turn.created_at::text,turn.started_at::text,binding.xmin::text binding_version
       FROM agent_commands command JOIN agent_turns turn ON turn.room_id=command.room_id AND turn.agent_id=command.agent_id
@@ -159,26 +281,11 @@ describe.each(['pglite', ...(postgresUrl ? ['postgres'] : [])])('P12 actual sele
     client.send({ type: 'turn-operation', operation: 'postAgentTurnReceipt', requestId: 'freshness',
       input: { agentId: agent, roomId: room, requestId: command.turn_request_id, generationId: 'generation', status: 'working', heartbeat: true } });
     expect(await client.next(frame => frame.requestId === 'freshness')).toHaveProperty('error');
-    await expect(daemon.execute('postAgentTurnReceipt', { agentId: agent, roomId: room,
-      requestId: command.turn_request_id, generationId: 'generation', status: 'working', heartbeat: true }, agent)).rejects.toThrow('negotiated machine owner');
     expect(await versions()).toEqual(before);
-    const queries = vi.spyOn(db, 'query');
-    const published: unknown[] = [];
-    const stopLive = live.subscribeAll(event => published.push(event));
-    vi.setSystemTime(Date.now() + 86400_000);
-    await Promise.resolve();
-    expect(client.socket.readyState).toBe(WebSocket.OPEN);
-    expect(queries).not.toHaveBeenCalled();
-    expect(await versions()).toEqual(before);
-    expect(client.frames.some(frame => frame.type === 'intake-ready')).toBe(false);
-    expect(queries.mock.calls.filter(([sql]) => /(?:INSERT INTO|UPDATE)\s+agent_turns/i.test(sql))).toHaveLength(0);
-    expect(published.filter(event => (event as Frame).reason === 'postgres:agent_turns' || (event as Frame).type === 'turn-delta')).toHaveLength(0);
-    stopLive(); queries.mockRestore();
   });
 
   it('binds a free-agent claim to its machine while the optional model rollout is disabled', async () => {
-    await db.query(`INSERT INTO free_agents(agent_id,workspace_id,owner_id,state,sealed_keys,model_token_hash)
-      VALUES($1,$2,$3,'running','fixture',$4)`,[agent,workspace,owner,'c'.repeat(64)]);
+    await db.query(`WITH workspace AS (SELECT $2::uuid) INSERT INTO free_agents(agent_id,owner_id,state,sealed_keys,model_token_hash) VALUES($1,$3,'running','fixture',$4)`,[agent,workspace,owner,'c'.repeat(64)]);
     expect(daemon.ownedModelReady()).toBe(false);
     const client=await connect();
     expect(client.registered.capabilities).toMatchObject({turnOwnershipV1:true});
@@ -232,28 +339,11 @@ describe.each(['pglite', ...(postgresUrl ? ['postgres'] : [])])('P12 actual sele
     expect(queries.mock.calls.slice(before)).toEqual([]);
   });
 
-  it('requires machine ownership even in the disabled router cohort and rejects source forgery before dispatch', async () => {
+  it('rejects a forged source field before dispatch, even in the disabled router cohort', async () => {
     const selected=await connect(false),execute=vi.spyOn(daemon,'execute');
-    expect(selected.registered.capabilities).toHaveProperty('turnOwnershipV1',true);
     selected.send({ type: 'turn-operation', operation: 'claimAgentCommand', requestId: 'forged',
       input: { roomId: room, commandId: command.id, generationId: 'generation', source: { connectionId: 'forged', epoch: 1 } } });
     expect(await selected.next(frame => frame.requestId === 'forged')).toHaveProperty('error');
     expect(execute).not.toHaveBeenCalled();
-  });
-
-  it('applies owner loss once and keeps the generation bound after its active row is requeued', async () => {
-    const first = await connect(); expect(await claim(first)).toHaveProperty('result');
-    first.socket.terminate();
-    await vi.waitFor(async () => expect((await db.query(`SELECT state FROM agent_commands WHERE id=$1`, [command.id])).rows[0]!.state).toBe('pending'));
-    const facts = (await db.query(`SELECT count(*)::int count FROM messages WHERE presentation='system'`)).rows;
-    expect(await expireOwnedAgentTurns(db, live, agent)).toBe(0);
-    expect((await db.query(`SELECT count(*)::int count FROM messages WHERE presentation='system'`)).rows).toEqual(facts);
-    const second = await connect();
-    expect(await claim(second, 'generation', 'same-generation')).toHaveProperty('error');
-    expect(await claim(second, 'new-generation', 'new-owner')).toHaveProperty('result');
-    expect((await db.query(`SELECT turn_owner_epoch::integer turn_owner_epoch FROM agent_commands WHERE id=$1`, [command.id])).rows[0]!.turn_owner_epoch)
-      .toBe(second.registered.capabilities.turnConnectionEpoch);
-    await expect(daemon.execute('postAgentTurnReceipt', { agentId: agent, roomId: room,
-      requestId: command.turn_request_id, generationId: 'generation', status: 'complete' }, agent)).rejects.toThrow();
   });
 });

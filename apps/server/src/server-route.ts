@@ -1,3 +1,4 @@
+import { githubProviderKey, isProviderService } from './providers/index.js';
 import { readPersonDiagnostics, renderPersonDiagnostics } from './operator-diagnostics.js';
 import { ingestDiagnostics } from './diagnostics.js';
 import type { IncomingMessage, ServerResponse } from "node:http";
@@ -219,9 +220,9 @@ export async function route(
     response.end(`<!doctype html>
 <html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1">
 <title>Return to Beeline</title><style nonce="${nonce}">
-body { margin: 0; padding: 32px 24px; font: 18px/1.5 system-ui, sans-serif; background: #14091a; color: #f7f3f8; }
+body { margin: 0; padding: 32px 24px; font: 18px/1.5 system-ui, sans-serif; background: #171717; color: #fafaf9; }
 main { max-width: 420px; margin: 12vh auto; } h1 { font-size: 28px; line-height: 1.2; }
-p { color: #d3c8d7; } a { display: inline-block; padding: 14px 24px; border-radius: 10px; background: #f7f3f8; color: #14091a; font-weight: 600; text-decoration: none; }
+p { color: #d6d3d1; } a { display: inline-block; padding: 14px 24px; border-radius: 10px; background: #fafaf9; color: #171717; font-weight: 600; text-decoration: none; }
 a:focus-visible { outline: 3px solid #c8a8e8; outline-offset: 4px; }
 </style></head><body><main><h1>Return to Beeline</h1>
 <p>Return to Beeline to finish connecting your app. If it doesn't open automatically, tap below.</p>
@@ -627,7 +628,7 @@ a:focus-visible { outline: 3px solid #c8a8e8; outline-offset: 4px; }
     if (typeof input.oidcToken !== 'string') throw new Error('oidcToken is required');
     const tokens=await options.auth.exchangeGitHubOidc(input.oidcToken, input.xAttribution);
     const funnel=parseSigninFunnelEvent(input.funnel);
-    if(funnel && funnel.event==='provider_tapped' && funnel.provider==='github') {
+    if(funnel && funnel.event==='provider_tapped' && funnel.provider===githubProviderKey) {
       await recordSigninFunnelEvent(options.database,{...funnel,event:'signed_in'},'server',tokens.identityId).catch(()=>undefined);
     }
     json(response,200,tokens);
@@ -728,11 +729,11 @@ a:focus-visible { outline: 3px solid #c8a8e8; outline-offset: 4px; }
     return;
   }
 
-  const providerWebhookPath = /^\/v1\/connectors\/events\/(linear|stripe)\/([0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12})$/.exec(url.pathname);
-  if (method === 'POST' && providerWebhookPath) {
+  const providerWebhookPath = /^\/v1\/connectors\/events\/([^/]+)\/([0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12})$/.exec(url.pathname);
+  if (method === 'POST' && providerWebhookPath && isProviderService(providerWebhookPath[1]!)) {
     const raw = await bytes(request, MAX_JSON_BYTES);
     const accepted = await ingestProviderWebhook(options.database,
-      providerWebhookPath[1] as 'linear' | 'stripe', providerWebhookPath[2]!, raw, request.headers);
+      providerWebhookPath[1], providerWebhookPath[2]!, raw, request.headers);
     if (!accepted) {
       json(response, 401, { error: 'invalid_webhook_signature' });
       return;

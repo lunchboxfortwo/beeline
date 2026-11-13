@@ -1,6 +1,6 @@
 import { COMMAND_WRAPPERS } from '@beeline/api-contract/agent-grants';
-import { accessSync, constants, statSync } from 'node:fs';
-import { resolve } from 'node:path';
+import { accessSync, constants, statSync, realpathSync } from 'node:fs';
+import { resolve, dirname } from 'node:path';
 
 /** Resolve GNU env options without changing the argv sent to the child. */
 export function resolveGrantCommand(input: readonly string[], cwd: string, env: NodeJS.ProcessEnv): {
@@ -100,6 +100,27 @@ function resolveGrantExecutable(path: string, cwd: string, env: NodeJS.ProcessEn
   return undefined;
 }
 
+/** A bare program name on PATH that is root-owned in an unmodifiable root-owned tree. */
+export function installedGrantExecutable(path: string | undefined, cwd: string, env: NodeJS.ProcessEnv): string | undefined {
+  if (!path || path.includes('/')) return undefined;
+  const candidate = resolveGrantExecutable(path, cwd, env);
+  if (!candidate) return undefined;
+  const trustedTree = (path: string): boolean => {
+    for (;;) {
+      const info = statSync(path);
+      // A sandbox user namespace may present host root as the overflow UID.
+      // In either view the agent must neither own nor be able to modify it.
+      if (info.uid === process.getuid?.() || (info.mode & 0o022)) return false;
+      try { accessSync(path, constants.W_OK); return false; } catch { /* Not writable. */ }
+      if (path === dirname(path)) return true;
+      path = dirname(path);
+    }
+  };
+  try {
+    return trustedTree(candidate) && trustedTree(realpathSync(candidate)) ? candidate : undefined;
+  } catch { return undefined; }
+}
+
 /** Native executable headers; other direct files may use the ENOEXEC shell fallback. */
 export function isNativeGrantExecutable(bytes: Buffer): boolean {
   if (bytes.length < 4) return false;
@@ -110,13 +131,4 @@ export function isNativeGrantExecutable(bytes: Buffer): boolean {
     magic === 0xcafebabe || magic === 0xbebafeca || // Universal Mach-O
     magic === 0xcafebabf || magic === 0xbfbafeca ||
     (bytes[0] === 0x4d && bytes[1] === 0x5a); // Windows PE
-}
-
-/** Resolve the file using the parsed execution environment and directory. */
-export function resolveGrantScriptExecutable(
-  argument: { path: string; direct?: true },
-  cwd: string,
-  env: NodeJS.ProcessEnv,
-): string | undefined {
-  return argument.direct ? resolveGrantExecutable(argument.path, cwd, env) : resolve(cwd, argument.path);
 }

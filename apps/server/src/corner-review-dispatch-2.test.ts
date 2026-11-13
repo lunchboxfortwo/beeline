@@ -1,8 +1,26 @@
+import { queueReviewerCommand } from './corner-lifecycle.js';
+import { commanderReportAddress } from './commander.js';
+import { noteReviewDispatchFailure, noteUnreachableReviewer, cornerReviewWokenSql } from './corner-lifecycle-review-state.js';
 import { describe, expect, it, vi, assignCornerWorker, DaemonService, LiveHub, PushDeliveryLoop, systemLine, createAgentCommand, reconcileConfiguredCornerReviewers, REVIEWER_DISPATCH_REASONS, reviewerDispatchCarriesHead, routeSystemCommand, advanceCorner, H, A, B, R, C, db, phone, daemon, commands, claim, result, greenHead, rootFixture } from './test-support-corner-review-dispatch.test-support.js';
 
 describe('corner message attribution', () => {
+  it('keeps automatic review errors out of a human commander’s conversation', async () => {
+    const opened = await rootFixture.phone.execute('createHumanCorner', { roomId: R, title: 'human-work' }, H);
+    expect(await commanderReportAddress(rootFixture.db, opened.id)).toMatchObject({ recipient: H, returnRoom: R });
+    const before = (await rootFixture.db.query('SELECT id FROM messages')).rowCount;
+    await noteReviewDispatchFailure(rootFixture.db, opened.id, 'a'.repeat(40), 'review queue unavailable');
+    const opening = (await rootFixture.db.query<{id:string}>(
+      "SELECT id FROM messages WHERE room_id=$1 AND card->>'cornerId'=$2", [R, opened.id],
+    )).rows[0]!;
+    await noteUnreachableReviewer(rootFixture.db, {
+      cornerId: opened.id, sourceMessageId: opening.id, reviewerId: B, reviewerKind: 'agent',
+      reviewerName: 'Reviewer', reason: 'offline',
+    });
+    expect((await rootFixture.db.query('SELECT id FROM messages')).rowCount).toBe(before);
+  });
 
-  it('does not wake the reviewer again for a verdicted head after the brief changes', async () => {
+
+  it('requests review after a new green event despite a historical verdict or brief change', async () => {
     const head = 'f'.repeat(40);
     /** A check verdict on `head`, as the GitHub webhook writes it. */
     const verdict = async (kind: 'check-passed' | 'rerun') => {
@@ -25,13 +43,18 @@ describe('corner message attribution', () => {
     const [review] = await commands(B, C);
     await claim(review!);
     await result(review!, 'FAIL: the waiver is not in the brief.');
+    await reconcileConfiguredCornerReviewers(rootFixture.db, R);
+    const [repair] = await commands(A, C);
+    await claim(repair!);
+    await result(repair!, 'The waiver evidence is ready.');
     // A CI re-run on the same head and the same brief revision.
     await verdict('rerun');
     const repeated = (await commands(B, C)).length;
-    console.info(`Reproduction REVIEW-DUP-1: wrong=1 repeat review wake; right=0; observed=${repeated}`);
-    expect(repeated).toBe(0);
-    expect((await commands(A, C)).map((command) => command.reason)).toContain('corner_review_needed');
-    // A revised brief leaves the head unchanged. The verdict still stands.
+    console.info(`Reproduction REVIEW-DUP-1: new green review requests=${repeated}`);
+    expect(repeated).toBe(1);
+    const [pending] = await commands(B, C);
+    expect(pending?.id).not.toBe(review!.id);
+    // A revised brief leaves the head unchanged; stale queued targets still cancel.
     await rootFixture.db.query(`INSERT INTO corner_brief_revisions(corner_id,revision,content,spec,author_id,source_room_id)
       VALUES($1,2,'Brief','Brief with the waiver',$2,$3)`, [C, A, R]);
     await verdict('rerun');
@@ -43,8 +66,13 @@ describe('corner message attribution', () => {
     console.info(
       `Reproduction review-redeliver: brief revision on verdicted head; wrong=1 repeat review wake; right=0; observed=${afterBrief.length}`,
     );
+    // Delivery still cancels a target whose brief revision changed.
     expect(await commands(B, C)).toEqual([]);
     expect(afterBrief).toEqual([]);
+    await verdict('rerun');
+    const [current]=await commands(B,C);
+    expect(current?.reason).toBe('corner_review_dispatch');
+    expect(current?.source.body).toContain('Review against brief revision 2');
   });
 
 
@@ -276,13 +304,13 @@ describe('corner message attribution', () => {
     await rootFixture.phone.execute('updateRoom', { roomId: R, reviewerAgentId: B }, H);
     expect((await rootFixture.db.query('SELECT 1 FROM memberships WHERE room_id=$1',[C])).rowCount).toBe(0);
     await greenHead(10,'4'.repeat(40));
-    expect((await commands(B,C)).map(command => command.reason)).toEqual(['subscribed_event']);
+    expect((await commands(B,C)).map(command => command.reason)).toEqual(['corner_review_dispatch']);
     expect((await rootFixture.db.query('SELECT 1 FROM memberships WHERE room_id=$1',[C])).rowCount).toBe(0);
   });
 
 
   it.each(['FAIL: required evidence is missing.', 'blocked: waiting for required checks.'])(
-    'Reproduction REVIEW-STOP-1: %s suppresses every automatic wake until a new head', async verdict => {
+    'Reproduction REVIEW-STOP-1: %s leaves findings or a cause without retrying', async verdict => {
       await rootFixture.phone.execute('updateRoom', { roomId: R, reviewerAgentId: B }, H);
       const head = 'd'.repeat(40);
       await greenHead(95, head);
@@ -302,13 +330,13 @@ describe('corner message attribution', () => {
       await advanceCorner(rootFixture.db, C, { kind: 'checks-pending' });
       await greenHead(95, head);
       await reconcileConfiguredCornerReviewers(rootFixture.db, R);
-      expect(await commands(B, C)).toEqual([]);
+      expect(await commands(B,C)).toEqual([]);
       await greenHead(95, 'f'.repeat(40));
       expect((await commands(B, C)).length).toBeGreaterThan(0);
     });
 
 
-  it('Reproduction review-redeliver: a verdict on a head is not delivered again by any review path', async () => {
+  it('Reproduction review-redeliver: self-output stays inert; ordinary reports arrive and pending requests dedupe review', async () => {
     await rootFixture.phone.execute('updateRoom', { roomId: R, reviewerAgentId: B }, H);
     const head = 'e'.repeat(40);
     // The reviewer already ordered a repair. Their next report walks up to that
@@ -320,7 +348,7 @@ describe('corner message attribution', () => {
     await rootFixture.db.query(`UPDATE agent_commands SET state='complete',completed_at=now() WHERE room_id=$1 AND reason='order'`, [C]);
     await greenHead(91, head);
     const [review] = await commands(B, C);
-    expect(review?.reason).toBe('subscribed_event');
+    expect(review?.reason).toBe('corner_review_dispatch');
     await claim(review!);
     const beforeEcho = (await rootFixture.db.query<{ id: string }>(
       `SELECT id FROM agent_commands WHERE room_id=$1 AND agent_id=$2`, [C, B],
@@ -343,7 +371,7 @@ describe('corner message attribution', () => {
        ORDER BY created_at DESC LIMIT 1`, [C],
     )).rows[0]!.id;
     const parent = (await rootFixture.db.query(`SELECT * FROM agent_commands WHERE id=$1`, [review!.id])).rows[0];
-    // A brief revision changes no code. The verdict on this head still stands.
+    // A brief revision still requires every new delivery to target that revision.
     await rootFixture.db.query(`INSERT INTO corner_brief_revisions(corner_id,revision,content,spec,author_id,source_room_id)
       VALUES($1,1,'Revised brief','Revised brief',$2,$3)`, [C, A, R]);
     await advanceCorner(rootFixture.db, C, { kind: 'brief-revised', revision: 1, sourceMessageId: sourceId, command: parent });
@@ -402,10 +430,19 @@ describe('corner message attribution', () => {
       [C, B, [...verdicted]],
     )).rows;
     console.info(
-      `Reproduction review-redeliver: head ${head}; wrong=a reviewer wake after the verdict; right=0; direct=${delivered.length}; later=${afterPaths.length}`,
+      `Reproduction review-redeliver: head ${head}; ordinary reports=${delivered.length}; new deliveries=${afterPaths.length}`,
     );
-    expect(delivered).toEqual([]);
-    expect(afterPaths).toEqual([]);
+    expect(delivered).toEqual([expect.stringMatching(/^report:/)]);
+    expect(afterPaths.map(command=>command.reason)).toEqual(['report']);
+    await rootFixture.db.query(`UPDATE agent_commands SET state='complete',completed_at=now() WHERE room_id=$1 AND agent_id=$2`,[C,A]);
+    await rootFixture.db.query(`UPDATE agent_turns SET status='complete' WHERE room_id=$1 AND agent_id=$2`,[C,A]);
+    await greenHead(91,head);
+    const pending=await commands(B,C);
+    expect(pending.filter(command=>command.reason==='corner_review_dispatch')).toEqual([]);
+    expect(pending.filter(command=>command.reason==='order')).toHaveLength(2);
+    expect((await rootFixture.db.query(`SELECT id FROM agent_commands WHERE room_id=$1 AND agent_id=$2
+      AND state='pending' AND reason IN ('order','agent_tag') AND review_context->>'purpose' IS NULL
+      AND review_context->'checks'->>'status'='passing'`,[C,B])).rowCount).toBeGreaterThan(0);
   });
 
 
@@ -420,7 +457,7 @@ describe('corner message attribution', () => {
       VALUES($1,1,'Brief','Brief changed, code unchanged',$2,$3)`, [C, A, R]);
     await greenHead(92, '1'.repeat(40));
     const [nextHead] = await commands(B, C);
-    expect(nextHead?.reason).toBe('subscribed_event');
+    expect(nextHead?.reason).toBe('corner_review_dispatch');
     expect(nextHead?.source.body).toContain('1'.repeat(40));
     // A repair handback is an order whose purpose is repair. It is not a repeat review.
     expect(reviewerDispatchCarriesHead('order', undefined, { purpose: 'repair', headSha: '1'.repeat(40) })).toBe(false);
@@ -432,7 +469,7 @@ describe('corner message attribution', () => {
     });
     expect(handback?.reason).toBe('order');
     expect(handback?.review_context).toMatchObject({ purpose: 'repair' });
-    console.info('Reproduction review-redeliver: new head subscribed_event and repair handback both woke the reviewer');
+    console.info('Reproduction review-redeliver: new head review dispatch and repair handback both woke the reviewer');
   });
 });
 describe('the corner implementer the workflow wakes follows a person hand-over', () => {
@@ -505,7 +542,7 @@ describe('the corner implementer the workflow wakes follows a person hand-over',
 });
 
 
-it.each(['empty','status','failed'])('a %s review result never retries the same head',async ending=>{
+it.each(['empty','status','failed'])('a %s review result ends silently without retrying',async ending=>{
   await rootFixture.phone.execute('updateRoom',{roomId:R,reviewerAgentId:B},H);
   await greenHead(91,'d'.repeat(40));
   const [review]=await commands(B,C);await claim(review!);
@@ -514,8 +551,10 @@ it.each(['empty','status','failed'])('a %s review result never retries the same 
     generationId:'g1',status:ending==='failed'?'failed':'complete',...(ending==='failed'?{reason:'provider unavailable'}:{})},B);
   for(let event=0;event<3;event++)await reconcileConfiguredCornerReviewers(rootFixture.db,R);
   expect(await commands(B,C)).toEqual([]);
+  expect((await rootFixture.db.query<{text:string}>(`SELECT text FROM messages WHERE room_id=$1`,[C])).rows
+    .some(line=>line.text.includes('reviewer gave no verdict'))).toBe(false);
   if(ending==='failed')expect((await commands(A,R)).filter(c=>c.reason==='report'&&c.source.body.includes('failed:'))).toHaveLength(1);
-  else expect((await commands(A,C)).some(c=>c.source.body.includes('without a verdict'))).toBe(true);
+
 });
 
 
@@ -618,6 +657,222 @@ it.each(['complete','failed'] as const)('Reproduction review-1: a delivered repa
 });
 
 
+it.each(['pending', 'claimed'] as const)(
+  'REVIEW-CHECK-WAKE: a %s check notice cannot stand in for a review request',
+  async (state) => {
+    const head = '6'.repeat(40);
+    await rootFixture.db.query('UPDATE rooms SET reviewer_agent_id=$2 WHERE id=$1', [R, B]);
+    await rootFixture.db.query(
+      `UPDATE agent_commands SET state='complete',completed_at=now() WHERE room_id=$1`,
+      [C],
+    );
+    await rootFixture.db.query(
+      `UPDATE corner_github_cache SET lifecycle=$2::jsonb WHERE corner_id=$1`,
+      [C, JSON.stringify({ checks: 'pending', pr: { number: 96, headSha: head } })],
+    );
+    const source = `check-notice-${state}`;
+    await rootFixture.db.query(
+      `INSERT INTO messages(id,room_id,author_id,presentation,text,system_event)
+      VALUES($1,$2,$3,'system','A check passed',$4::jsonb)`,
+      [source, C, H, JSON.stringify({ kind: 'check-passed', object: { headSha: head } })],
+    );
+    const notice = await createAgentCommand(rootFixture.db, {
+      roomId: C,
+      agentId: B,
+      sourceMessageId: source,
+      reason: 'subscribed_event',
+    });
+    expect(notice).toBeDefined();
+    if (state === 'claimed') await claim((await commands(B, C))[0]!);
+    await rootFixture.db.query(
+      `UPDATE corner_github_cache SET lifecycle=jsonb_set(lifecycle,'{checks}','"passing"') WHERE corner_id=$1`,
+      [C],
+    );
+    await advanceCorner(rootFixture.db, C, {
+      kind: 'checks',
+      result: 'passing',
+      sourceMessageId: source,
+    });
+    const reviews = (
+      await rootFixture.db.query<{ id: string; turn_request_id: string; review_context: unknown }>(
+        `SELECT id,turn_request_id,review_context FROM agent_commands
+       WHERE room_id=$1 AND agent_id=$2 AND reason='corner_review_dispatch'`,
+        [C, B],
+      )
+    ).rows;
+    expect(reviews).toHaveLength(1);
+    expect(reviews[0]?.review_context).toMatchObject({
+      headSha: head,
+      pullRequest: 96,
+      checks: expect.any(Object),
+    });
+    expect(reviews[0]?.turn_request_id).not.toBe(notice!.turn_request_id);
+    if (state === 'pending') {
+      const worker = await createAgentCommand(rootFixture.db, {
+        roomId: C,
+        agentId: A,
+        sourceMessageId: null,
+        reason: 'human_tag',
+      });
+      await claim((await commands(A, C)).find((command) => command.id === worker!.id)!);
+      expect((await commands(B, C)).some((command) => command.id === reviews[0]!.id)).toBe(false);
+      await rootFixture.daemon.execute(
+        'postAgentTurnReceipt',
+        {
+          roomId: C,
+          requestId: worker!.turn_request_id,
+          generationId: 'g1',
+          status: 'complete',
+        },
+        A,
+      );
+      expect((await commands(B, C)).some((command) => command.id === reviews[0]!.id)).toBe(true);
+    }
+    expect(
+      (await rootFixture.db.query(`SELECT ${cornerReviewWokenSql('$1')} woken`, [C])).rows[0]
+        ?.woken,
+    ).toBe(true);
+    await advanceCorner(rootFixture.db, C, {
+      kind: 'checks',
+      result: 'passing',
+      sourceMessageId: source,
+    });
+    await reconcileConfiguredCornerReviewers(rootFixture.db, R);
+    expect(
+      (
+        await rootFixture.db.query(
+          `SELECT id FROM agent_commands WHERE room_id=$1
+      AND agent_id=$2 AND reason='corner_review_dispatch'`,
+          [C, B],
+        )
+      ).rows,
+    ).toHaveLength(1);
+  },
+);
+
+it.each(
+  ['corner_review_dispatch', 'order', 'agent_tag'].flatMap((reason) =>
+    (['pending', 'claimed', 'complete'] as const).map((state) => ({ reason, state })),
+  ),
+)(
+  'REVIEW-PENDING-AC6: $state $reason before green cannot suppress the first green-head review',
+  async ({ reason, state }) => {
+    const head = '8'.repeat(40);
+    await rootFixture.db.query('UPDATE rooms SET reviewer_agent_id=$2 WHERE id=$1', [R, B]);
+    await rootFixture.db.query(
+      `UPDATE agent_commands SET state='complete',completed_at=now() WHERE room_id=$1`,
+      [C],
+    );
+    await rootFixture.db.query(
+      `UPDATE corner_github_cache SET lifecycle=$2::jsonb WHERE corner_id=$1`,
+      [C, JSON.stringify({ checks: 'pending', pr: { number: 98, headSha: head } })],
+    );
+    const source = `pending-review-${reason}-${state}`;
+    await rootFixture.db.query(
+      `INSERT INTO messages(id,room_id,author_id,presentation,text,system_event)
+      VALUES($1,$2,$3,'system','A check passed',$4::jsonb)`,
+      [source, C, H, JSON.stringify({ kind: 'check-passed', object: { headSha: head } })],
+    );
+    const earlier = await rootFixture.db.transaction((tx) =>
+      queueReviewerCommand(tx, {
+        roomId: C,
+        agentId: B,
+        sourceMessageId: source,
+        reason,
+      }),
+    );
+    expect(earlier.command?.review_context).toMatchObject({
+      headSha: head,
+      checks: { status: 'pending' },
+    });
+    const wokenBeforeGreen = (
+      await rootFixture.db.query(`SELECT ${cornerReviewWokenSql('$1')} woken`, [C])
+    ).rows[0]?.woken;
+    if (state !== 'pending') {
+      await claim((await commands(B, C)).find((command) => command.id === earlier.command!.id)!);
+      if (state === 'complete')
+        await rootFixture.daemon.execute(
+          'postAgentTurnReceipt',
+          {
+            roomId: C,
+            requestId: earlier.command!.turn_request_id,
+            generationId: 'g1',
+            status: 'complete',
+          },
+          B,
+        );
+    }
+    await rootFixture.db.query(
+      `UPDATE corner_github_cache SET lifecycle=jsonb_set(lifecycle,'{checks}','"passing"') WHERE corner_id=$1`,
+      [C],
+    );
+    await advanceCorner(rootFixture.db, C, {
+      kind: 'checks',
+      result: 'passing',
+      sourceMessageId: source,
+    });
+    const greenRequests = async () =>
+      (
+        await rootFixture.db.query(
+          `SELECT id,review_context FROM agent_commands WHERE room_id=$1 AND agent_id=$2
+       AND reason='corner_review_dispatch' AND review_context->'checks'->>'status'='passing'`,
+          [C, B],
+        )
+      ).rows;
+    expect(await greenRequests()).toEqual([
+      expect.objectContaining({
+        id: expect.not.stringMatching(`^${earlier.command!.id}$`),
+        review_context: expect.objectContaining({
+          headSha: head,
+          pullRequest: 98,
+          checks: expect.objectContaining({ status: 'passing' }),
+        }),
+      }),
+    ]);
+    expect(
+      (
+        await rootFixture.db.query('SELECT state,review_context FROM agent_commands WHERE id=$1', [
+          earlier.command!.id,
+        ])
+      ).rows[0],
+    ).toMatchObject({ state, review_context: { checks: { status: 'pending' } } });
+    expect(wokenBeforeGreen).toBe(false);
+    expect(
+      (await rootFixture.db.query(`SELECT ${cornerReviewWokenSql('$1')} woken`, [C])).rows[0]
+        ?.woken,
+    ).toBe(true);
+    await reconcileConfiguredCornerReviewers(rootFixture.db, R);
+    expect(await greenRequests()).toHaveLength(1);
+  },
+);
+
+it.each(['pending', 'claimed', 'complete'] as const)(
+  'REVIEW-CHECK-WOKEN: a %s check notice with head context never proves review delivery',
+  async (state) => {
+    const head = '7'.repeat(40);
+    await rootFixture.db.query('UPDATE rooms SET reviewer_agent_id=$2 WHERE id=$1', [R, B]);
+    await rootFixture.db.query(
+      `UPDATE corner_github_cache SET lifecycle=$2::jsonb WHERE corner_id=$1`,
+      [C, JSON.stringify({ checks: 'pending', pr: { number: 97, headSha: head } })],
+    );
+    await rootFixture.db.query(
+      `INSERT INTO messages(id,room_id,author_id,presentation,text,system_event)
+    VALUES('check-only',$1,$2,'system','A check passed',$3::jsonb)`,
+      [C, H, JSON.stringify({ kind: 'check-passed', object: { headSha: head } })],
+    );
+    await rootFixture.db.query(
+      `INSERT INTO agent_commands(id,room_id,agent_id,turn_request_id,action,reason,
+    root_command_id,root_source_message_id,source_message_id,agent_depth,review_context,state) VALUES
+    ('check-only',$1,$2,'check-only','input','subscribed_event','check-only','check-only','check-only',0,$3::jsonb,$4)`,
+      [C, B, JSON.stringify({ headSha: head, pullRequest: 97, briefRevision: 0 }), state],
+    );
+    expect(
+      (await rootFixture.db.query(`SELECT ${cornerReviewWokenSql('$1')} woken`, [C])).rows[0]
+        ?.woken,
+    ).toBe(false);
+  },
+);
+
 it('committed-event recovery: startup green, lost command and reviewer completion share one timer-free runtime', async () => {
   const { CornerMachineEvents } = await import('./corner-attention.js');
   const { POSTGRES_LIVE_CHANNEL } = await import('./postgres-live.js');
@@ -645,15 +900,11 @@ it('committed-event recovery: startup green, lost command and reviewer completio
     await claim(review!);
     await rootFixture.daemon.execute('postAgentTurnReceipt', { roomId: C, requestId: review!.turnRequestId,
       generationId: 'g1', status: 'complete' }, B);
-    await vi.waitFor(async () => {
-      const handbacks = (await commands(A, C)).filter(command => command.reason === 'corner_review_needed');
-      expect(handbacks).toHaveLength(1);
-      expect(handbacks[0]?.source.body).toContain('without a verdict');
-      expect(handbacks[0]?.source.body).toContain(headSha);
-    });
     for (let replay = 0; replay < 3; replay++) live.publish({ type: 'invalidate', roomId: C, reason: 'postgres:corner_state' });
     await machine.refresh(C);
-    expect((await commands(A, C)).filter(command => command.reason === 'corner_review_needed')).toHaveLength(1);
+    const lines=(await rootFixture.db.query<{text:string}>(`SELECT text FROM messages WHERE room_id=$1`,[C])).rows;
+    expect(lines.some(line=>line.text.includes('reviewer gave no verdict'))).toBe(false);
+    expect((await commands(A, C)).filter(command => command.reason === 'corner_review_needed')).toHaveLength(0);
     expect(await commands(B, C)).toEqual([]);
     expect(errors).toEqual([]);
     await machine.stop();

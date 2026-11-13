@@ -7,7 +7,7 @@ import { COMMITTED_JOURNAL_SCHEMA } from './committed-journal-schema.js';
 import { MEMBERSHIP_AUTHORITY_SCHEMA } from './membership-authority-schema.js';
 import { OwnedModelAttempts } from './owned-model-attempt.js';
 import { parkOwnedModelTerminal } from './owned-model-parking.js';
-import { MODEL, MODEL_AGENT, MODEL_CLAIM, MODEL_ROOM, MODEL_SOURCE, seedOwnedModelFixture } from './test-fixtures/owned-model.js';
+import { MODEL, MODEL_AGENT, MODEL_CLAIM, MODEL_ROOM, seedOwnedModelFixture } from './test-fixtures/owned-model.js';
 
 const url = process.env.BEELINE_COMMAND_TEST_POSTGRES_URL;
 if (url && !['127.0.0.1', 'localhost', '[::1]'].includes(new URL(url).hostname)) throw new Error('Model parking proof requires isolated loopback PostgreSQL');
@@ -23,8 +23,8 @@ async function fixture() {
       CREATE TABLE agents(agent_id text PRIMARY KEY,owner_id text);
       CREATE TABLE workspaces(id uuid PRIMARY KEY,name text);
       CREATE TABLE rooms(id uuid PRIMARY KEY,workspace_id uuid,name text,parent_id uuid,archived_at timestamptz);
-      CREATE TABLE memberships(workspace_id uuid,room_id uuid,identity_id text,role text,removed_at timestamptz);
-      CREATE TABLE free_agents(agent_id text PRIMARY KEY,workspace_id uuid,owner_id text,sealed_keys text,
+      CREATE TABLE memberships(id bigserial,joined_at timestamptz DEFAULT now(),workspace_id uuid,room_id uuid,identity_id text,role text,removed_at timestamptz);
+      CREATE TABLE free_agents(agent_id text PRIMARY KEY,owner_id text,sealed_keys text,
         model_token_hash text,state text,model text,removed_at timestamptz);
       CREATE TABLE live_server_instances(instance_id text PRIMARY KEY,renewed_at timestamptz);
       CREATE TABLE agent_connections(agent_id text PRIMARY KEY,connection_id text,epoch bigint,instance_id text,released_at timestamptz);
@@ -50,7 +50,7 @@ describe.skipIf(!url)('real PostgreSQL causal model owner end', () => {
       await f.left.query(`INSERT INTO agent_turns(room_id,request_id,agent_id,status,generation_id) VALUES($1,'synthetic-request',$2,'working',$3)`, [MODEL_ROOM, MODEL_AGENT, MODEL_CLAIM.generationId]);
       park = f.left.transaction(async tx => {
         await parkOwnedModelTerminal(tx, { roomId: MODEL_ROOM, agentId: MODEL_AGENT, requestId: 'synthetic-request', generationId: MODEL_CLAIM.generationId,
-          status: 'failed', modelOwnerEnd: { requestId: ONE } }, MODEL_AGENT, MODEL_SOURCE);
+          status: 'failed', modelOwnerEnd: { requestId: ONE } }, MODEL_AGENT);
         admitted.resolve(); await release.promise;
       });
       await admitted.promise;

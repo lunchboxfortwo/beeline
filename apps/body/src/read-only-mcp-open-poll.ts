@@ -1,5 +1,5 @@
 import { agentToolsFor, toolValidationSchema, CAPABILITY_ROUTES, CAPABILITY_TOOLS, SCRATCH_ROUTES, placeBeelineApps } from "./minimal-tool-surface.js";
-import { INSTITUTIONAL_SEARCH_QUERY_MAX_CHARACTERS, REPOSITORY_SUBSCRIPTION_EVENTS } from "@beeline/api-contract/daemon";
+import { fixCornerText, INSTITUTIONAL_SEARCH_QUERY_MAX_CHARACTERS, REPOSITORY_SUBSCRIPTION_EVENTS } from "@beeline/api-contract/daemon";
 import { Check, Errors } from "typebox/value";
 import { basename } from "node:path";
 import { builtinBeelineApp } from "@beeline/api-contract/workbench";
@@ -48,7 +48,7 @@ export async function openPoll(
 
 export interface GrantRunDeps {
   roomId: string;
-  run: (input: { roomId: string; argv: string[] }) => Promise<JsonObject>;
+  run: (input: { roomId: string; argv: string[]; stdin?: string }) => Promise<JsonObject>;
 }
 
 
@@ -67,7 +67,8 @@ export async function runGrantedCommand(
   ) {
     throw new Error('argv must be a non-empty array of words');
   }
-  const result = await deps.run({ roomId: deps.roomId, argv: argv as string[] });
+  if (args.stdin !== undefined && typeof args.stdin !== 'string') throw new Error('stdin must be text');
+  const result = await deps.run({ roomId: deps.roomId, argv: argv as string[], ...(typeof args.stdin === 'string' ? { stdin: args.stdin } : {}) });
   const grantId = typeof result.grantId === 'string' ? result.grantId : 'unknown';
   const verdict =
     result.sandboxFailure === true
@@ -107,6 +108,77 @@ export function validateAdvertisedToolInput(tool: ToolDefinition, args: JsonObje
 }
 
 
+
+/** Name a string that misses its advertised length, including a matching allOf branch. */
+function fieldLimitDetails(schema: JsonObject, value: unknown, path = ''): string[] {
+  const details: string[] = [];
+  if (typeof value === 'string') {
+    const length = value.length;
+    const label = path || 'input';
+    if (typeof schema.maxLength === 'number' && length > schema.maxLength)
+      details.push(`${label}: ${length} characters; the limit is ${schema.maxLength}`);
+    if (typeof schema.minLength === 'number' && length < schema.minLength)
+      details.push(`${label}: ${length} characters; the minimum is ${schema.minLength}`);
+  }
+  if (value && typeof value === 'object' && !Array.isArray(value)) {
+    const properties = asObject(schema.properties);
+    for (const [field, raw] of Object.entries(properties)) {
+      const child = (value as JsonObject)[field];
+      if (child !== undefined) details.push(...fieldLimitDetails(asObject(raw), child, path ? `${path}.${field}` : field));
+    }
+  }
+  const branches = schema.allOf;
+  if (Array.isArray(branches)) {
+    for (const branch of branches) {
+      const rule = asObject(branch);
+      if (rule.if && !Check(asObject(rule.if), value)) continue;
+      details.push(...fieldLimitDetails(asObject(rule.then ?? rule), value, path));
+    }
+  }
+  return details;
+}
+
+/** Fix tool input that should succeed: drop a broken reply link and lowercase memory keywords. */
+export function normalizeAgentToolArgs(name: string, args: JsonObject): string[] {
+  const removed: string[] = [];
+  if (name === 'post' && 'replyTo' in args && (typeof args.replyTo !== 'string' || !/^[0-9a-f]{64}$/.test(args.replyTo))) {
+    delete args.replyTo;
+    removed.push('reply link');
+  }
+  if (name === 'open_corner') {
+    for (const field of ['name', 'objective'] as const) {
+      if (args[field] === undefined) continue;
+      const fixed = fixCornerText(field, args[field]);
+      args[field] = fixed.text;
+      if (fixed.note) removed.push(fixed.note);
+    }
+  }
+  if (name === 'remember' && Array.isArray(args.keywords)) {
+    let changed = false;
+    const keywords = args.keywords.map((word) => {
+      if (typeof word !== 'string') return word;
+      const next = word.trim().toLocaleLowerCase('en-US');
+      if (next !== word) changed = true;
+      return next;
+    });
+    args.keywords = keywords;
+    if (changed) removed.push(`keywords saved as ${keywords.filter((word) => typeof word === 'string').join(', ')}`);
+  }
+  return removed;
+}
+
+function withAdjustments(result: string, removed: string[]): string {
+  if (!removed.length) return result;
+  const note = `Removed: ${removed.join(', ')}.`;
+  try {
+    const parsed = JSON.parse(result) as JsonObject;
+    if (parsed && typeof parsed === 'object' && !Array.isArray(parsed)) {
+      parsed.receipt = typeof parsed.receipt === 'string' && parsed.receipt ? `${parsed.receipt}\n${note}` : note;
+      return JSON.stringify(parsed);
+    }
+  } catch { /* The tool result is plain text. */ }
+  return `${result}\n${note}`;
+}
 
 export function validateToolInput(tool: ToolDefinition, args: JsonObject): void {
   const requestedAction = args.action;
@@ -172,7 +244,8 @@ export function validateToolInput(tool: ToolDefinition, args: JsonObject): void 
       ? Errors(diagnosticSchema, args).filter(error => error.keyword !== 'anyOf')
         .map(error => `${error.instancePath || 'input'}: ${error.message}`).join('; ')
       : '';
-    throw new Error(`${tool.name}: invalid arguments${details ? `; ${details}` : ''}${missing?.length ? `; required: ${missing.join(', ')}` : ''}${extra.length ? `; unknown fields: ${extra.join(', ')}` : ''}; follow the advertised schema`);
+    const limits = fieldLimitDetails(tool.inputSchema, args);
+    throw new Error(`${tool.name}: invalid arguments${details ? `; ${details}` : ''}${limits.length ? `; ${limits.join('; ')}` : ''}${missing?.length ? `; required: ${missing.join(', ')}` : ''}${extra.length ? `; unknown fields: ${extra.join(', ')}` : ''}; follow the advertised schema`);
   }
 }
 
@@ -200,6 +273,7 @@ export async function executeAgentTool(name: string, args: JsonObject, toolCallI
   if (name === 'read' && args.cursor !== undefined &&
       (!args.cursor || typeof args.cursor !== 'object' || Array.isArray(args.cursor)))
     throw new Error('read: pass the returned next object unchanged as cursor');
+  const removed = normalizeAgentToolArgs(name, args);
   validateAdvertisedToolInput(advertisedAgentTool(name), args);
   let deliveryWarning = '';
   if (name === 'order' || name === 'report' || name === 'post') {
@@ -212,11 +286,12 @@ export async function executeAgentTool(name: string, args: JsonObject, toolCallI
   const addressed = { ...args, ...(typeof args.address === 'string' ? { cornerId: args.address } : {}) };
   const execute = async (operation: string, input = args) => {
     const result = await executeAgentOperation(operation, input, toolCallId);
-    return deliveryWarning ? `${result}\n\n${deliveryWarning}` : result;
+    return withAdjustments(deliveryWarning ? `${result}\n\n${deliveryWarning}` : result, removed);
   };
   switch (name) {
     case 'read': {
       const facet = args.facet;
+      if (facet === 'procedure' && args.slug === undefined) args.slug = args.name;
       const requiredField = facet === 'message' ? 'messageId' : facet === 'attachment' ? 'attachmentId' : facet === 'procedure' ? 'slug' : undefined;
       if (requiredField && !args[requiredField]) throw new Error(`read: ${requiredField} is required for facet ${facet}`);
       const address = args.address ?? (process.env.BEELINE_DAEMON_CORNER_ID?.trim() || process.env.BEELINE_DAEMON_ROOM_ID);
@@ -227,7 +302,7 @@ export async function executeAgentTool(name: string, args: JsonObject, toolCallI
         case 'members': return execute('list_room_members', input);
         case 'messages':
           // Every message read uses the same bounded cursor contract.
-          return execute('inspect_corner', { ...input, from: args.from ?? (asObject(args.cursor).before ? 'newest' : undefined), mode: 'transcript' });
+          return execute('inspect_corner', { ...input, from: args.from ?? (asObject(args.cursor).after || asObject(args.cursor).offset !== undefined ? 'oldest' : 'newest'), mode: 'transcript' });
         case 'message': return execute('get_room_message', { ...input, messageId: args.messageId });
         case 'attachment': return execute('download_attachment', input);
         case 'brief': return execute('read_corner_brief', input);
@@ -341,7 +416,7 @@ export async function executeAgentTool(name: string, args: JsonObject, toolCallI
       if (args.action === 'delete' && args.trigger === undefined && args.scheduleId !== undefined)
         args = { ...args, trigger: 'schedule' };
       // Explicit allowlist: no payload can select an arbitrary daemon operation or recipient.
-      const allowed = new Set(['action', 'trigger', 'address', 'scheduleId', 'subscriptionId', 'prompt', 'cadence', 'title', 'when', 'workflowName', 'source', 'event', 'repository', 'channelId', 'channelName', 'kinds']);
+      const allowed = new Set(['action', 'trigger', 'address', 'scheduleId', 'subscriptionId', 'prompt', 'cadence', 'maxRuns', 'title', 'when', 'workflowName', 'source', 'event', 'repository', 'channelId', 'channelName', 'kinds']);
       if (Object.keys(args).some(key => !allowed.has(key))) throw new Error('wake only manages this agent’s own wake sources');
       if (args.trigger !== 'lifecycle' && args.address !== undefined) throw new Error('address is only supported for lifecycle wakes; schedules and events belong to this place');
       if (args.trigger === 'lifecycle' && !args.address) throw new Error('lifecycle wake requires address');
@@ -381,12 +456,22 @@ export async function executeAgentTool(name: string, args: JsonObject, toolCallI
       }
       throw new Error('unknown wake action/trigger');
     }
+    case 'open_corner': {
+      try {
+        return await execute(name);
+      } catch (error) {
+        if (!removed.length) throw error;
+        const message = error instanceof Error ? error.message : String(error);
+        if (message.includes('Removed:')) throw error;
+        throw new Error(`${message}\nRemoved: ${removed.join(', ')}.`);
+      }
+    }
     case 'order':
     case 'stop':
-    case 'open_corner':
     case 'post_artifact':
     case 'react_to_message':
     case 'run_granted_command':
+    case 'store_secret':
     case 'no_reply_needed': return execute(name);
     default: throw new Error(`unknown tool: ${name}; use only tools/list names`);
   }

@@ -3,7 +3,9 @@ import { OwnedModelFiles } from './owned-model-files.js';
 
 const owners = new WeakMap<object, OwnedModelFiles>();
 export function bindOwnedModelTurn(context:object,owner:OwnedModelFiles):void{owners.set(context,owner);}
-export function releaseOwnedModelTurn(context:object):void{const owner=owners.get(context);owners.delete(context);owner?.revoke();}
+/** An interrupted turn keeps its files and journal for the resumed claim of
+ * the same generation; only a turn that ended revokes them. */
+export function releaseOwnedModelTurn(context:object,ended:boolean):void{const owner=owners.get(context);owners.delete(context);if(ended)owner?.revoke();}
 export class OwnedModelOutcomeUnknown extends Error {
   constructor(readonly modelRequestId?: string) { super('Owned model outcome UNKNOWN; dependent work ended without resubmission.'); }
 }

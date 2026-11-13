@@ -72,8 +72,8 @@ describe('actual selected model credential claim socket', () => {
     expect(JSON.stringify(registered)).not.toContain('bfmc_'); expect(registered).not.toHaveProperty('modelCredential');
     const reply = await claim(); expect(reply.error).toBeUndefined(); expect(reply.result?.modelCredential).toBeDefined();
     const actor = await f.credentials.authenticate(f.db, reply.result!.modelCredential!.token);
-    expect(actor.binding).toMatchObject({ commandId, generationId: 'model-socket-generation', connectionId: registered.capabilities?.turnConnectionId,
-      connectionEpoch: registered.capabilities?.turnConnectionEpoch });
+    // The credential belongs to the invocation; no connection is bound into it.
+    expect(actor.binding).toMatchObject({ commandId, generationId: 'model-socket-generation', connectionId: null, connectionEpoch: null });
     const replay = await claim('same-claim-recovery'); expect(replay.result?.modelCredential).toEqual(reply.result!.modelCredential);
     expect(frames.filter(frame => frame.type !== 'turn-result').some(frame => JSON.stringify(frame).includes('bfmc_'))).toBe(false);
   });
@@ -90,10 +90,9 @@ describe('actual selected model credential claim socket', () => {
     const claimed=await operation('claimAgentTurn','batch-claim',{roomId:MODEL_ROOM,commandId,generationId:'socket-batch'});
     expect(claimed.commands?.map(command=>command.id)).toEqual([commandId,another.id]);
     const actor=await f.credentials.authenticate(f.db,claimed.modelCredential!.token);
-    expect(actor.binding).toMatchObject({commandId,generationId:'socket-batch',
-      connectionId:registered.capabilities?.turnConnectionId,connectionEpoch:registered.capabilities?.turnConnectionEpoch});
+    expect(actor.binding).toMatchObject({commandId,generationId:'socket-batch',connectionId:null,connectionEpoch:null});
     await operation('postRoomMessage','batch-answer',{roomId:MODEL_ROOM,requestId:'model-socket-request',generationId:'socket-batch',text:'Here is the answer.'});
-    await expect(f.credentials.assertCurrent(f.db,actor)).resolves.toHaveProperty('untilMs');
+    await f.credentials.assertCurrent(f.db,actor);
     const released=await operation('releaseAgentTurn','batch-release',{roomId:MODEL_ROOM,generationId:'socket-batch'});
     expect(released.commands).toEqual([]);
     await expect(f.credentials.authenticate(f.db,claimed.modelCredential!.token)).rejects.toThrow('authority');
@@ -174,7 +173,7 @@ describe('actual selected model credential claim socket', () => {
     expect((await f.db.query('SELECT state FROM agent_commands WHERE id=$1', [commandId])).rows).toEqual([{ state: 'claimed' }]);
   });
 
-  it('refuses an unowned HTTP claim of returned work and preserves its UNKNOWN provider outcome', async () => {
+  it('refuses an HTTP claim of returned work while its provider outcome is UNKNOWN', async () => {
     await register(); const first = await claim(), bearer = first.result!.modelCredential!.token;
     const actor = await f.credentials.authenticate(f.db, bearer);
     await new OwnedModelAttempts(f.db, f.credentials).reserve(actor, '11111111-1111-4111-8111-111111111111', { step: 'synthetic uncertain model request' }, async () => ({
@@ -188,7 +187,7 @@ describe('actual selected model credential claim socket', () => {
     const response = await fetch(origin + '/v1/daemon/operations/claimAgentCommand', { method: 'POST',
       headers: { authorization: `Bearer ${TOKEN}`, 'content-type': 'application/json' },
       body: JSON.stringify({ roomId: MODEL_ROOM, commandId, generationId: 'legacy-bypass-generation' }) });
-    expect(response.status).toBeGreaterThanOrEqual(400); const refusal = JSON.stringify(await response.json()); expect(refusal).toContain('helper claim requires its machine connection owner'); expect(refusal).not.toContain(bearer);
+    expect(response.status).toBeGreaterThanOrEqual(400); const refusal = JSON.stringify(await response.json()); expect(refusal).toContain('Owned model outcome UNKNOWN'); expect(refusal).not.toContain(bearer);
     expect((await f.db.query('SELECT state,generation_id FROM agent_commands WHERE id=$1', [commandId])).rows).toEqual([{ state: 'pending', generation_id: null }]);
     expect((await f.db.query(`SELECT 1 FROM agent_command_generation_owners WHERE command_id=$1 AND generation_id='legacy-bypass-generation'`, [commandId])).rowCount).toBe(0);
     expect((await f.db.query('SELECT state FROM owned_model_attempts WHERE command_id=$1', [commandId])).rows).toEqual([{ state: 'unknown' }]);

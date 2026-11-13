@@ -6,7 +6,8 @@ import { roomTransitionWork } from '@/buzz/room-transition-work';
 import { act, create, type ReactTestRenderer } from 'react-test-renderer';
 import { describe, expect, it, vi } from 'vitest';
 import { SurfaceResponseCache } from '@beeline/buzz-client';
-import { prefetchPushRoom } from '@/push/push-room-prefetch';
+import * as runtimeConfig from '@/buzz/runtime-config';
+import { prefetchDirectMessageOpen, prefetchPushRoom } from '@/push/push-room-prefetch';
 import { mobileSurfaceCache } from '@/buzz/surface-storage';
 import { READ_CURSOR_DEBOUNCE_MS } from '@/buzz/read-cursor-advance';
 import BuzzChat from './[channelId]';
@@ -43,6 +44,24 @@ const scope1 = fixtureScope1();
   });
 });
 describe('useRoomSurfaceSession', () => {
+  it.each(['push', 'known-dm', 'other-peer', 'signed-out', 'other-server'])('starts only the authorized %s read on the tap stack before route mounting', (entry) => {
+    controls.hotViewer = entry !== 'signed-out';
+    controls.cached = null;
+    const config = vi.spyOn(runtimeConfig, 'getBuzzRuntimeConfig').mockReturnValue({
+      monolithUrl: entry === 'other-server' ? 'https://other.test' : 'https://relay.test', relayUrl: 'https://usebeeline.app',
+    });
+    try {
+      if (entry === 'push') prefetchPushRoom('cold-tap-immediate', 'room-missing');
+      else {
+        if (entry === 'known-dm' || entry === 'other-peer') vi.mocked(mobileSurfaceCache.peek).mockReturnValueOnce({ chats: [
+          { room: { id: 'room-missing' }, directMessage: { peer: { pubkey: 'agent' } } },
+        ] } as never);
+        prefetchDirectMessageOpen('workspace', entry === 'other-peer' ? 'someone-else' : 'agent');
+      }
+      expect(controls.roomReads).toBe(entry === 'push' || entry === 'known-dm' ? 1 : 0);
+    } finally { config.mockRestore(); }
+  });
+
   it('paints a tap-owned cached Room and completes setup without a visible-row handshake', async () => {
     controls.hotViewer = true;
     controls.cached = { ...roomView('room-a'), messages: [{ id: 'target', text: 'Already received', createdAt: 10,
@@ -750,9 +769,9 @@ describe('useRoomSurfaceSession', () => {
   });
 
 
-  it('yields a paint turn after cache apply before installing the live watch', async () => {
+  for (const hasCache of [true, false]) it(`yields only for cached content before the live watch (cache=${hasCache})`, async () => {
     const { queued, receivers } = stubFrameScheduler();
-    controls.cached = roomView('room-a');
+    controls.cached = hasCache ? roomView('room-a') : null;
     controls.roomResponse = null;
     let current!: UseRoomSurfaceSessionResult;
     let renderer!: ReactTestRenderer;
@@ -765,6 +784,12 @@ describe('useRoomSurfaceSession', () => {
       );
     });
     await flushMicrotasks();
+    if (!hasCache) {
+      expect(controls.transportCount).toBe(1);
+      expect(controls.subscriptions).toHaveLength(1);
+      await act(async () => renderer.unmount());
+      return;
+    }
     expect(current.roomSurface?.room.id).toBe('room-a');
     expect(controls.subscriptions).toHaveLength(0);
     expect(controls.transportCount).toBe(0);

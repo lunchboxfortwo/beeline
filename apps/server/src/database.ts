@@ -1,3 +1,4 @@
+import type { DatabaseLockDiagnostics } from './database-lock-diagnostics.js';
 import { DIAGNOSTICS_SCHEMA } from './diagnostics-schema.js';
 import { recordPostgresStatementError } from './postgres-error.js';
 export { messageSearchDocumentSql, MESSAGE_SEARCH_DOCUMENT_MAX_BYTES } from './message-search-document-sql.js';
@@ -142,6 +143,7 @@ export class DatabaseTransactionStartError extends Error {
 
 export interface PostgresDatabaseOptions {
   pool?: Pool;
+  lockDiagnostics?: DatabaseLockDiagnostics;
   /** Deterministic test override; production uses the pool class limit. */
 }
 
@@ -207,7 +209,7 @@ export const MESSAGE_CURSOR_MS_SQL =
 
 // Bump only after every server and auth migration required by that image has
 // completed. Machine boot reads this marker; it never mutates the schema.
-export const REQUIRED_SCHEMA_VERSION = 49;
+export const REQUIRED_SCHEMA_VERSION = 50;
 
 
 export async function markSchemaCurrent(database: SqlDatabase): Promise<void> {
@@ -260,6 +262,9 @@ export function preparedQuery(name: string, text: string, values: unknown[]) {
 export class PostgresDatabase implements ClosableDatabase {
   readonly backgroundWork = new DatabaseBackgroundWork();
   readonly #pool: Pool;
+  readonly #lockDiagnostics?: DatabaseLockDiagnostics;
+  readonly #poolMode: string;
+  readonly #backendPids = new WeakMap<PoolClient, Promise<number | undefined>>();
   #closePromise?: Promise<void>;
   readonly #profiler = new QueryProfiler();
   readonly #transactions = new Map<number, number>();
@@ -318,20 +323,31 @@ export class PostgresDatabase implements ClosableDatabase {
     }
   }
 
-  async #timed<T>(sql: string, work: () => Promise<T>): Promise<T> {
+  async #timed<T>(
+    sql: string,
+    work: (acquired: () => void) => Promise<T>,
+    waitsForConnection = false,
+  ): Promise<T> {
     const ticket = this.#nextTicket++;
-    const startedAt = Date.now();
-    this.#inFlight.set(ticket, startedAt);
+    const startedAt = performance.now();
+    // Transaction statements already own a client; ordinary queries include checkout.
+    // After acquisition, execution includes diagnostics and client release overhead.
+    let acquiredAt = waitsForConnection ? undefined : startedAt;
+    this.#inFlight.set(ticket, Date.now());
     let error: unknown;
     try {
-      return await work();
+      return await work(() => { acquiredAt = performance.now(); });
     } catch (caught) {
       recordPostgresStatementError(caught,sql);
       error = caught;
       throw caught;
     } finally {
       this.#inFlight.delete(ticket);
-      this.#profiler.record(sql, Date.now() - startedAt, error);
+      const finishedAt = performance.now();
+      this.#profiler.record(sql, finishedAt - startedAt, error, {
+        poolWaitMs: (acquiredAt ?? finishedAt) - startedAt,
+        executionMs: acquiredAt === undefined ? 0 : finishedAt - acquiredAt,
+      });
     }
   }
 
@@ -350,6 +366,8 @@ export class PostgresDatabase implements ClosableDatabase {
       mode?: 'app' | 'enrichment' | 'long-running' | 'diagnostics' | 'migration';
     } = {},
   ) {
+    this.#lockDiagnostics = options.lockDiagnostics;
+    this.#poolMode = options.mode ?? 'app';
     this.#pool =
       options.pool ??
       new Pool(postgresPoolConfig(connectionString, maximumConnections, options.mode));
@@ -364,6 +382,30 @@ export class PostgresDatabase implements ClosableDatabase {
       idle: this.#pool.idleCount,
       waiting: this.#pool.waitingCount,
     };
+  }
+
+  #checkoutFailed(error: unknown, waiters: number): void {
+    this.#telemetry.checkoutFailures++;
+    if (error instanceof Error && /timeout exceeded when trying to connect|Connection terminated due to connection timeout/i.test(error.message)) {
+      const { total, idle, waiting } = this.poolCounts();
+      console.warn('[database] connection wait timeout', {
+        pool: this.#poolMode, total, idle, inUse: total - idle,
+        waiting, waitingAtCheckout: waiters,
+      });
+    }
+  }
+
+  async #statement<T>(client: PoolClient, sql: string, work: () => Promise<T>): Promise<T> {
+    if (!this.#lockDiagnostics) return work();
+    // Neon supplies a proxy cancellation PID in BackendKeyData, even on its
+    // direct endpoint. Only pg_backend_pid() names the pg_stat_activity row.
+    let identity = this.#backendPids.get(client);
+    if (!identity) {
+      identity = client.query<{ pid: number }>('SELECT pg_backend_pid() AS pid')
+        .then(result => result.rows[0]?.pid, () => undefined);
+      this.#backendPids.set(client, identity);
+    }
+    return this.#lockDiagnostics.statement(await identity, sql, work);
   }
 
   async oldestActiveQueryAgeMs(): Promise<number | null> {
@@ -386,19 +428,20 @@ export class PostgresDatabase implements ClosableDatabase {
     preparedName?: string,
   ): Promise<QueryResult<Row>> {
     try {
-      const raw = await this.#timed(sql, async () => {
+      const raw = await this.#timed(sql, async acquired => {
         const { client, release } = await this.#connectCheckedOut();
+        acquired();
         try {
-          const result = preparedName
-            ? await client.query<Row>(preparedQuery(preparedName, sql, values))
-            : values.length ? await client.query<Row>(sql, values) : await client.query<Row>(sql);
+          const result = await this.#statement(client, sql, () => preparedName
+            ? client.query<Row>(preparedQuery(preparedName, sql, values))
+            : values.length ? client.query<Row>(sql, values) : client.query<Row>(sql));
           release();
           return result;
         } catch (error) {
           release(error instanceof Error ? error : new Error('query failed'));
           throw error;
         }
-      });
+      }, true);
       this.#noteSuccess();
       const result = Array.isArray(raw) ? raw.at(-1) : raw;
       return { rows: result?.rows ?? [], rowCount: result?.rowCount ?? result?.rows.length ?? 0 };
@@ -425,7 +468,7 @@ export class PostgresDatabase implements ClosableDatabase {
       waiters = this.#pool.waitingCount;
       client = await checkout;
     } catch (error) {
-      this.#telemetry.checkoutFailures++;
+      this.#checkoutFailed(error, waiters);
       throw error;
     }
     this.#recordWait(performance.now() - startedAt, waiters);
@@ -466,9 +509,9 @@ export class PostgresDatabase implements ClosableDatabase {
           values: unknown[] = [],
           preparedName?: string,
         ) => {
-          const raw = await this.#timed(sql, () =>
+          const raw = await this.#timed(sql, () => this.#statement(client, sql, () =>
             preparedName ? client.query<Row>(preparedQuery(preparedName, sql, values))
-              : values.length ? client.query<Row>(sql, values) : client.query<Row>(sql));
+              : values.length ? client.query<Row>(sql, values) : client.query<Row>(sql)));
           const result = Array.isArray(raw) ? raw.at(-1) : raw;
           return {
             rows: result?.rows ?? [],
@@ -479,7 +522,7 @@ export class PostgresDatabase implements ClosableDatabase {
           nested(database),
       };
       const result = await work(database);
-      await client.query('COMMIT');
+      await this.#statement(client, 'COMMIT', () => client.query('COMMIT'));
       this.#noteSuccess();
       return result;
     } catch (error) {
@@ -511,7 +554,7 @@ export class PostgresDatabase implements ClosableDatabase {
       waiters = this.#pool.waitingCount;
       client = await checkout;
     } catch (error) {
-      this.#telemetry.checkoutFailures++;
+      this.#checkoutFailed(error, waiters);
       this.#noteFailure(error);
       throw error;
     }
@@ -546,7 +589,7 @@ export class PostgresDatabase implements ClosableDatabase {
   }> {
     const checkedOut = await this.#connectCheckedOut();
     try {
-      await checkedOut.client.query('BEGIN');
+      await this.#statement(checkedOut.client, 'BEGIN', () => checkedOut.client.query('BEGIN'));
       return checkedOut;
     } catch (error) {
       checkedOut.release(error instanceof Error ? error : new Error('transaction begin failed'));

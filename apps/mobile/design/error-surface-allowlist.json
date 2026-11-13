@@ -268,32 +268,6 @@
     "reason": "Approved unified error-surface mock: shared inline feedback uses the existing caller content inset; no new control or retry action is introduced."
   },
   {
-    "layoutHash": "f64aafc50f9efe01b182ef520865c14b8047c9206d0251043a714f98354d1516",
-    "file": "components/buzz/AgentProfileView.tsx",
-    "line": 404,
-    "tag": "ErrorBanner",
-    "source": "<ErrorBanner inline title=\"Could not load older work. Your current list is still available.\" onRetry={() => void moreWork()} retrying={workLoading} retryTestID=\"load-more-agent-work\" />",
-    "ancestors": [
-      "<View style={styles.section}>",
-      "<KeyboardAwareScrollView\n        contentContainerStyle={[\n          styles.content,\n          { paddingBottom: theme.buzz.space.xxl + insets.bottom },\n        ]}\n        testID=\"agent-profile-scroll\"\n      >",
-      "<View style={[styles.container, { paddingTop: insets.top }]} testID=\"agent-profile\">"
-    ],
-    "reason": "kept, already inset: profile section owns its content inset; retry uses inline sizing."
-  },
-  {
-    "layoutHash": "f64aafc50f9efe01b182ef520865c14b8047c9206d0251043a714f98354d1516",
-    "file": "components/buzz/AgentProfileView.tsx",
-    "line": 406,
-    "tag": "ErrorBanner",
-    "source": "<ErrorBanner inline title={\"Could not open this pull request. Select it to retry.\"}  />",
-    "ancestors": [
-      "<View style={styles.section}>",
-      "<KeyboardAwareScrollView\n        contentContainerStyle={[\n          styles.content,\n          { paddingBottom: theme.buzz.space.xxl + insets.bottom },\n        ]}\n        testID=\"agent-profile-scroll\"\n      >",
-      "<View style={[styles.container, { paddingTop: insets.top }]} testID=\"agent-profile\">"
-    ],
-    "reason": "Approved unified error-surface mock: shared inline feedback uses the existing caller content inset; no new control or retry action is introduced."
-  },
-  {
     "layoutHash": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
     "file": "components/buzz/AgentSignInCard.tsx",
     "line": 171,
@@ -301,17 +275,6 @@
     "source": "<ErrorBanner inline title={failure} testID={`${testID}-error`} />",
     "ancestors": [],
     "reason": "kept, already inset: agent sign-in card owns its content inset."
-  },
-  {
-    "layoutHash": "f8e44777691ba534f0b24c4a8ab658d452de86514bb2d68b40986b537e8e5faf",
-    "file": "components/buzz/AgentVoiceSection.tsx",
-    "line": 153,
-    "tag": "ErrorBanner",
-    "source": "<ErrorBanner inline title={error} titleTestID=\"voice-error\" />",
-    "ancestors": [
-      "<View style={styles.section} testID=\"voice-section\">"
-    ],
-    "reason": "Approved unified error-surface mock: shared inline feedback uses the existing caller content inset; no new control or retry action is introduced."
   },
   {
     "layoutHash": "d750c77874cb2df27518bc659f8750d006cc5c8bf9bc4d0a55a12571c202b32d",
@@ -345,18 +308,6 @@
     "source": "<ErrorBanner inline title={error} titleTestID=\"face-picker-error\" />",
     "ancestors": [
       "<HullActionSheetModal\n      accessibilityLabel=\"Close face picker\"\n      onClose={onClose}\n      scrimTestID=\"face-picker-scrim\"\n      subtitle=\"Animals only. You can change it anytime.\"\n      testID=\"face-picker\"\n      title=\"Face\"\n      visible={visible}\n    >"
-    ],
-    "reason": "Approved unified error-surface mock: shared inline feedback uses the existing caller content inset; no new control or retry action is introduced."
-  },
-  {
-    "layoutHash": "9b0933c0961f4c57f57c44a056c25cd827a5cf99d03c951dfd06ed1593a44682",
-    "file": "components/buzz/MemberPickerSheet.tsx",
-    "line": 122,
-    "tag": "ErrorBanner",
-    "source": "<ErrorBanner inline title={error} titleTestID=\"member-picker-error\" />",
-    "ancestors": [
-      "<View style={styles.footer}>",
-      "<HullActionSheetModal\n      accessibilityLabel=\"Close member picker\"\n      contentStyle={styles.modalContent}\n      onClose={busy ? () => undefined : onClose}\n      dismissOnBackdrop={!busy}\n      visible={visible}\n      testID={testID}\n      title={agentConnectOnly ? undefined : MEMBER_PICKER_TITLE}\n      footer={\n        !agentConnectOnly || error ? (\n          <View style={styles.footer}>\n            {error && (\n              <ErrorBanner inline title={error} titleTestID=\"member-picker-error\" />\n            )}\n            {!agentConnectOnly && (\n              <View style={styles.addInset}>\n                <Button\n                  disabled={chosen.length === 0}\n                  label={chosen.length > 0 ? `Add ${chosen.length}` : 'Add'}\n                  loading={busy}\n                  onPress={() => onAdd(chosen.map((candidate) => candidate.pubkey))}\n                  testID=\"member-picker-add\"\n                />\n              </View>\n            )}\n          </View>\n        ) : undefined\n      }\n    >"
     ],
     "reason": "Approved unified error-surface mock: shared inline feedback uses the existing caller content inset; no new control or retry action is introduced."
   },
@@ -396,18 +347,6 @@
     "reason": "kept, already inset: corner dialog owns its content inset."
   },
   {
-    "layoutHash": "584542c48749ca3e1890928666bd03e0b5b7bbeccc497d06c1d0cc2bc4c05bf1",
-    "file": "components/buzz/PersonInviteSheet.tsx",
-    "line": 18,
-    "tag": "ErrorBanner",
-    "source": "<ErrorBanner inline title={error} />",
-    "ancestors": [
-      "<View style={styles.content}>",
-      "<HullActionSheet title=\"Invite a person\" footer={<HullActionSheetCancel onPress={onClose} />}>"
-    ],
-    "reason": "kept, already inset: clipboard failure belongs to the invite sheet content inset beside the link and Copy action."
-  },
-  {
     "layoutHash": "0fff3a9740ca9581361026b30c8575eb8ae38d90885566feecf22b1515ed6e56",
     "file": "components/buzz/PushLevelSetting.tsx",
     "line": 87,
@@ -443,18 +382,6 @@
     "reason": "kept, already inset: repository choice form owns its content inset."
   },
   {
-    "layoutHash": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
-    "file": "components/buzz/RoomCornersList.tsx",
-    "line": 401,
-    "tag": "ErrorBanner",
-    "source": "<ErrorBanner inline\n                title={more.reason}\n                retryLabel=\"Retry\"\n                onRetry={onMoreArchived}\n                retryTestID=\"room-corners-archived-more\" />",
-    "ancestors": [
-      "<InlineActionRow>",
-      "<View>"
-    ],
-    "reason": "kept, already inset: archived pagination failure occupies InlineActionRow."
-  },
-  {
     "layoutHash": "263f7a804d8dc71d66d6770d052c585303593256ada6f0804b4e102ace572710",
     "file": "components/buzz/RoomReviewerActions.tsx",
     "line": 34,
@@ -479,19 +406,6 @@
     "reason": "Approved unified error-surface mock: shared inline feedback uses the existing caller content inset; no new control or retry action is introduced."
   },
   {
-    "layoutHash": "b2a09d46c1ae0d59a3dc3c5c35a06844a5c07c3c293e22c835bedc1eabeb579d",
-    "file": "components/buzz/RoomRosterSheet.tsx",
-    "line": 272,
-    "tag": "ErrorBanner",
-    "source": "<ErrorBanner inline title={membershipError} />",
-    "ancestors": [
-      "<View accessibilityRole=\"alert\" style={styles.membershipError}>",
-      "<View style={styles.rosterModal}>",
-      "<HullActionSheetModal\n      accessibilityLabel={`Close ${ROOM_LABEL} roster`}\n      contentStyle={{ maxHeight: '82%', paddingBottom: Math.max(bottomInset, space.md) }}\n      onClose={onClose}\n      visible={visible}\n      testID=\"room-roster-sheet\"\n      scrollBody={false}\n    >"
-    ],
-    "reason": "Approved unified error-surface mock: shared inline feedback uses the existing caller content inset; no new control or retry action is introduced."
-  },
-  {
     "layoutHash": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
     "file": "components/buzz/RuntimeErrorBoundary.tsx",
     "line": 24,
@@ -503,17 +417,6 @@
       "<View style={{ backgroundColor: theme.bgBase, padding: 16, gap: 8,\n    ...(scope === 'app' ? { flex: 1, paddingTop: 48 } : {}) }} testID=\"runtime-error\">"
     ],
     "reason": "kept, already inset: provider-free emergency recovery owns its padding; diagnostics are reported privately."
-  },
-  {
-    "layoutHash": "20b980611188f622217cdec1c66e3c2ce5809a64020a59803124e49a9e26f005",
-    "file": "components/buzz/SoulPortraitControls.tsx",
-    "line": 107,
-    "tag": "ErrorBanner",
-    "source": "<ErrorBanner inline title={error} titleTestID=\"avatar-generation-error\" />",
-    "ancestors": [
-      "<View style={styles.container} testID=\"soul-avatar-generator\">"
-    ],
-    "reason": "Approved unified error-surface mock: shared inline feedback uses the existing caller content inset; no new control or retry action is introduced."
   },
   {
     "layoutHash": "c55795a22c6b504543e2cbbaa0a4a67f49af1c7c8049277f1fded59120d234e3",

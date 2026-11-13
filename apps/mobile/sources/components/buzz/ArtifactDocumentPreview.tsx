@@ -1,6 +1,7 @@
 import React, { useEffect, useRef, useState } from 'react';
-import { Platform, Text, View } from 'react-native';
-import { StyleSheet } from 'react-native-unistyles';
+import { Platform } from 'react-native';
+import { YStack } from 'tamagui';
+import { FillView, T } from '@/ui/grammar';
 import type { AttachmentReference } from '@beeline/buzz-client';
 import { useArtifactRecoveryGeneration } from '@/buzz/use-artifact-recovery';
 import { ARTIFACT_MAX_PREVIEW_HEIGHT, createInitialLoadGuard, wrapArtifactMarkup } from '@/buzz/artifact';
@@ -50,13 +51,13 @@ export function ArtifactDocumentPreview({ attachment, format }: {
   }, [attachment, format, recovery, pdfRenderer]);
   if (failed || source && Platform.OS !== 'web' && status === 'unavailable') {
     return (
-      <View style={styles.failureInset} testID="artifact-preview-failed">
+      <YStack paddingHorizontal="5" testID="artifact-preview-failed">
         <IndexRow inset="flush" title="Preview unavailable" description="Open the file to view it." />
-      </View>
+      </YStack>
     );
   }
   return (
-    <View pointerEvents="none" style={[styles.preview, styles.documentCrop]} testID="artifact-preview-render">
+    <YStack pointerEvents="none" height={ARTIFACT_MAX_PREVIEW_HEIGHT} backgroundColor="highlight" overflow="hidden" testID="artifact-preview-render">
       {pdfRenderer ? <ArtifactPdfView attachment={attachment} mode="preview" /> :
         source && Platform.OS === 'web' && 'html' in source ? React.createElement('iframe', {
           srcDoc: source.html,
@@ -66,27 +67,17 @@ export function ArtifactDocumentPreview({ attachment, format }: {
           'data-testid': 'artifact-preview-frame',
           style: { border: 'none', width: '100%', height: '100%', pointerEvents: 'none' },
         }) : source && WebView ? (
-          <WebView
+          <FillView
+            view={WebView}
             {...artifactWebViewProps({ source, guard: guardRef.current })}
             pointerEvents="none"
-            style={styles.previewWeb}
             testID="artifact-preview-webview"
           />
-        ) : <View style={styles.previewPlaceholder} testID="artifact-preview-loading"><Text style={styles.docGlyph}>▧</Text></View>}
-    </View>
+        ) : (
+          <YStack height={ARTIFACT_MAX_PREVIEW_HEIGHT} alignItems="center" justifyContent="center" backgroundColor="highlight" testID="artifact-preview-loading">
+            <T color="secondary">▧</T>
+          </YStack>
+        )}
+    </YStack>
   );
 }
-
-const styles = StyleSheet.create((theme) => ({
-  failureInset: { paddingHorizontal: theme.buzz.roomList.edge },
-  preview: { height: ARTIFACT_MAX_PREVIEW_HEIGHT, backgroundColor: theme.buzz.bgHighlight },
-  documentCrop: { overflow: 'hidden' },
-  previewWeb: { width: '100%', height: '100%', backgroundColor: 'transparent' },
-  previewPlaceholder: {
-    height: ARTIFACT_MAX_PREVIEW_HEIGHT,
-    alignItems: 'center',
-    justifyContent: 'center',
-    backgroundColor: theme.buzz.bgHighlight,
-  },
-  docGlyph: { ...theme.buzz.type.body, color: theme.buzz.steel },
-}));

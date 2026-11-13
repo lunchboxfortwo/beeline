@@ -1,66 +1,39 @@
-vi.mock('@/utils/responsive', () => ({ useIsDesktop: () => false }));
-vi.mock('expo-crypto', () => ({ randomUUID: () => '11111111-2222-4333-8444-555555555555' }));
-vi.mock('@/sync/transport/monolith-operation', () => ({ monolithPhoneOperation: controls.operation }));
-vi.mock('@/buzz/community-storage', () => ({ saveActiveCommunityId: vi.fn(async () => undefined) }));
-vi.mock('@/buzz/enter-workspace', () => ({ enterWorkspaceRoom: controls.enter }));
-vi.mock('@expo/vector-icons', async () => { const R = await import('react'); return { Ionicons: (props: any) => R.createElement('Ionicons', props) }; });
-vi.mock('expo-haptics', () => ({ ImpactFeedbackStyle: { Light: 'Light' }, impactAsync: async () => undefined }));
-vi.mock('react-native-keyboard-controller', async () => { const R = await import('react'); return { KeyboardAvoidingView: (props: any) => R.createElement('View', props, props.children) }; });
 import * as React from 'react';
 // @ts-expect-error react-test-renderer has no declarations in this workspace.
 import { act, create, type ReactTestRenderer } from 'react-test-renderer';
 import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest';
 
 const TOKEN = `inv_${'b'.repeat(64)}`;
+const WORKSPACE = '11111111-2222-4333-8444-555555555555';
 const controls = vi.hoisted(() => ({
-  enabled: true,
-  operation: vi.fn(async (..._args: any[]) => ({ repositoryOnboarding: controls.enabled, id: '11111111-2222-4333-8444-555555555555', roomId: 'general' })),
+  operation: vi.fn(),
   enter: vi.fn(),
   push: vi.fn(),
   replace: vi.fn(),
+  back: vi.fn(),
   workspaces: vi.fn(),
   params: {} as Record<string, string>,
 }));
 
-vi.mock('react-native', async () => {
+vi.mock('tamagui', async () => (await import('@/ui/screens/onboarding/onboarding.test-support')).tamaguiMock());
+vi.mock('lucide-react-native', async () => (await import('@/ui/screens/onboarding/onboarding.test-support')).lucideMock());
+vi.mock('@/ui/screens/onboarding/Rise', async () => (await import('@/ui/screens/onboarding/onboarding.test-support')).riseMock());
+vi.mock('@/ui/screens/onboarding/YouStep', async () => {
   const ReactModule = await import('react');
-  const host = (name: string) => (props: any) =>
-    ReactModule.createElement(name, props, props.children);
-  return { Platform: { OS: 'ios', select: (options: any) => options.ios ?? options.default }, StyleSheet: { flatten: (style: any): any => Array.isArray(style) ? Object.assign({}, ...style.map((part: any) => Array.isArray(part) ? Object.assign({}, ...part) : part)) : style },
-    Pressable: host('Pressable'),
-    ScrollView: host('ScrollView'),
-    Text: host('Text'),
-    TextInput: host('TextInput'),
-    TouchableOpacity: host('TouchableOpacity'),
-    View: host('View'),
-  };
+  return { YouStep: (props: any) => ReactModule.createElement('YouStep', props) };
 });
-vi.mock('react-native-unistyles', () => ({
-  StyleSheet: {
-    create: (factory: any) =>
-      factory({
-        buzz: new Proxy(
-          {
-            space: { xs: 4, sm: 8, md: 16, lg: 24, xl: 32, xxl: 48 },
-            type: new Proxy({}, { get: () => ({}) }),
-          },
-          { get: (target: any, key) => (key in target ? target[key] : '#000') },
-        ),
-      }),
-  },
-  useUnistyles: () => ({
-    theme: {
-      buzz: { accent: '#b08a4a', chrome: '#888', textDisabled: '#666', space: { lg: 24, xxl: 48 } },
-    },
-  }),
-}));
+vi.mock('expo-crypto', () => ({ randomUUID: () => '11111111-2222-4333-8444-555555555555' }));
+vi.mock('expo-clipboard', () => ({ setStringAsync: vi.fn(async () => true) }));
+vi.mock('@/sync/transport/monolith-operation', () => ({ monolithPhoneOperation: controls.operation }));
+vi.mock('@/buzz/community-storage', () => ({ saveActiveCommunityId: vi.fn(async () => undefined) }));
+vi.mock('@/buzz/enter-workspace', () => ({ enterWorkspaceRoom: controls.enter }));
+vi.mock('@/buzz/runtime-config', () => ({ getBuzzRuntimeConfig: () => ({ relayUrl: 'https://server.example' }) }));
 vi.mock('expo-router', () => ({
-  router: { push: controls.push, replace: controls.replace, back: vi.fn(), canGoBack: () => true },
+  router: { push: controls.push, replace: controls.replace, back: controls.back, canGoBack: () => true },
   useLocalSearchParams: () => controls.params,
 }));
-const safeArea = vi.hoisted(() => ({ bottom: 0 }));
 vi.mock('react-native-safe-area-context', () => ({
-  useSafeAreaInsets: () => ({ top: 0, bottom: safeArea.bottom }),
+  useSafeAreaInsets: () => ({ top: 0, bottom: 0 }),
 }));
 vi.mock('@beeline/buzz-client', () => ({ isWorkspaceListView: () => true }));
 vi.mock('@/sync/transport/room-view-client', () => ({
@@ -76,33 +49,17 @@ vi.mock('@/buzz/surface-storage', () => ({
   mobileSurfaceCache: { read: vi.fn(async () => null), write: vi.fn(async () => undefined) },
   surfaceAddress: () => 'address',
 }));
-vi.mock('@/buzz/room-view-presentation', () => ({
-  workspaceRailItem: (value: any) => ({ communityId: value.id, name: value.name }),
-}));
-vi.mock('@/buzz/vocabulary', () => ({ WORKSPACE_LABEL: 'Workspace' }));
-vi.mock('@/constants/Typography', () => ({
-  Typography: { default: () => ({}), mono: () => ({}) },
-}));
-vi.mock('@/components/buzz/CommunityRail', async () => {
+vi.mock('@/components/buzz/SurfaceGlyphLoader', async () => {
   const ReactModule = await import('react');
-  return {
-    BuzzCommunityShell: (props: any) => ReactModule.createElement('Shell', props, props.children),
-  };
+  return { SurfaceGlyphLoader: (props: any) => ReactModule.createElement('SurfaceGlyphLoader', props) };
 });
-vi.mock('@/components/buzz/Button', async () => {
+vi.mock('@/components/buzz/IdentityMark', async () => {
   const ReactModule = await import('react');
-  return { Button: (props: any) => ReactModule.createElement('Button', props, props.children) };
+  return { IdentityMark: (props: any) => ReactModule.createElement('IdentityMark', props) };
 });
-vi.mock('@/components/buzz/SurfaceGlyphLoader', () => ({ SurfaceGlyphLoader: () => null }));
-vi.mock('@/components/buzz/ChevronGlyph', () => ({
-  CHEVRON_BACK_SIZE: 18,
-  CHEVRON_ROW_SIZE: 14,
-  ChevronGlyph: () => null,
-}));
-vi.mock('@/components/buzz/RoomGlyph', () => ({ RoomGlyph: () => null }));
-vi.mock('@/components/buzz/MembersAgentsGlyph', () => ({ MembersAgentsGlyph: () => null }));
 
 import WorkspaceChoice from './community';
+import { texts } from '@/ui/screens/onboarding/onboarding.test-support';
 
 const originalConsoleError = console.error;
 beforeAll(() => {
@@ -131,109 +88,105 @@ const find = (renderer: ReactTestRenderer, testID: string) =>
   renderer.root.findAll(
     (node: any) => node.props?.testID === testID && typeof node.type === 'string',
   );
+async function press(renderer: ReactTestRenderer, testID: string) {
+  await act(async () => { await find(renderer, testID)[0]!.props.onPress(); });
+}
 
-describe('the create-or-join choice', () => {
+describe('the setup flow after sign-in', () => {
   beforeEach(() => {
     vi.clearAllMocks();
-    controls.enabled = true;
     controls.params = {};
-    controls.workspaces.mockResolvedValue({ workspaces: [], viewer: {} });
-  });
-
-  it('lets its last item scroll clear of the system navigation bar', async () => {
-    safeArea.bottom = 48;
-    try {
-      const renderer = await render();
-      const scroll = find(renderer, 'workspace-choice')[0];
-      const contentStyle = Object.assign({}, ...[scroll.props.contentContainerStyle].flat(Infinity as 1));
-      expect(contentStyle.paddingBottom).toBe(48 + 48);
-    } finally {
-      safeArea.bottom = 0;
-    }
-  });
-
-  it('gives Create and Join the same weight: one card shape, one style, side by side', async () => {
-    const renderer = await render();
-    const [create] = find(renderer, 'choice-create');
-    const [join] = find(renderer, 'choice-join');
-    expect(create!.type).toBe(join!.type);
-    expect(create!.props.style({ pressed: false })).toEqual(join!.props.style({ pressed: false }));
-    // A person with no Workspace has nowhere to go back to.
-    expect(
-      renderer.root.findAll((node: any) => node.props?.accessibilityLabel === 'Back'),
-    ).toHaveLength(0);
-  });
-
-  it('welcomes the person by name and says what each path does', async () => {
     controls.workspaces.mockResolvedValue({ workspaces: [], viewer: { name: 'Ada' } });
-    const renderer = await render();
-    expect(find(renderer, 'choice-title')[0]!.props.children).toBe('Welcome,\nAda');
-    const texts = renderer.root
-      .findAll((node: any) => node.type === 'Text')
-      .map((node: any) => node.props.children);
-    expect(texts).toEqual(
-      expect.arrayContaining([
-        'Start a Workspace, or join one you were invited to.',
-        'Create Workspace',
-        'Join with an invite link',
-        'Paste the link someone sent you',
-      ]),
-    );
-    expect(texts).not.toContain("Ada's team");
-    expect(find(renderer, 'choice-workspace-name')[0]!.props.value).toBe("Ada's team");
-    expect(texts).not.toContain('Welcome to Beeline');
-    expect(texts.join(' ')).not.toContain('Already use Beeline?');
-    expect(texts).not.toContain('Account settings');
-    expect(find(renderer, 'choice-settings')).toHaveLength(0);
+    controls.operation.mockImplementation(async (name: string) => {
+      if (name === 'createWorkspace') return { id: WORKSPACE, roomId: 'general' };
+      if (name === 'createInvite') return { token: TOKEN, expiresAt: 1 };
+      if (name === 'createAgentPairingCode') return { code: 'K7Q-4MZ', expiresAt: 1 };
+      return undefined;
+    });
   });
 
-  it('creates with the prefilled name in one tap and enters its first Room', async () => {
-    controls.workspaces.mockResolvedValue({ workspaces: [], viewer: { name: 'Ada' } });
+  it('walks a first entry from You to #general, where the free agents are waiting', async () => {
     const renderer = await render();
-    expect(find(renderer, 'choice-workspace-name')[0]!.props.value).toBe("Ada's team");
-    expect(controls.operation.mock.calls.every(call => call[0] === 'getAuthCapabilities')).toBe(true);
-    await act(async () => find(renderer, 'choice-create')[0]!.props.onPress());
-    expect(controls.operation).toHaveBeenCalledWith('createWorkspace', { workspaceId: '11111111-2222-4333-8444-555555555555', name: "Ada's team", creationSource:'onboarding' });
-    expect(controls.enter).toHaveBeenCalledWith('11111111-2222-4333-8444-555555555555', 'general');
-  });
+    // A person with no Workspace starts on You and has nowhere to go back to.
+    const you = renderer.root.findAllByType('YouStep');
+    expect(you).toHaveLength(1);
+    expect(you[0]!.props.back).toBeUndefined();
+    await act(async () => you[0]!.props.onDone());
 
-  it('keeps the existing create page and copy when the server leaves rollout OFF', async () => {
-    controls.enabled = false;
-    const renderer = await render();
-    expect(find(renderer, 'choice-workspace-name')).toHaveLength(0);
-    await act(async () => find(renderer, 'choice-create')[0]!.props.onPress());
-    expect(controls.push).toHaveBeenCalledWith('/beeline/create-workspace');
-    expect(controls.enter).not.toHaveBeenCalled();
+    expect(find(renderer, 'onboarding-workspace')).toHaveLength(1);
+    expect(texts(renderer.root)).toEqual(expect.arrayContaining(['Where will you work?', 'Create a workspace', 'Join with an invite link']));
+    // Brass marks only the recommended path.
+    expect(find(renderer, 'choice-create')[0]!.props.borderColor).toBe('needsYou');
+    expect(find(renderer, 'choice-join')[0]!.props.borderColor).toBe('strongStroke');
+
+    await press(renderer, 'choice-create');
+    expect(find(renderer, 'create-workspace-name')[0]!.props.value).toBe("Ada's team");
+    expect(controls.operation).not.toHaveBeenCalled();
+    await press(renderer, 'create-continue');
+    expect(controls.operation).toHaveBeenCalledWith('createWorkspace', { workspaceId: WORKSPACE, name: "Ada's team", creationSource: 'onboarding' });
+    expect(texts(renderer.root)).toContain("Beebee and Luna, two free agents, already live in Ada's team.");
+
+    await press(renderer, 'invite-teammates');
+    expect(controls.operation).toHaveBeenCalledWith('createInvite', { workspaceId: WORKSPACE });
+    expect(renderer.root.findAll((node: any) => node.props?.['aria-label'] === 'Copy invite link' && node.type === 'ListItem')).toHaveLength(1);
+    expect(texts(renderer.root)).toContain(`https://server.example/join/${TOKEN}`);
+    expect(find(renderer, 'teammate-send')[0]!.props.disabled).toBe(true);
+    await act(async () => find(renderer, 'teammate-email')[0]!.props.onChangeText('mara@example.com'));
+    await press(renderer, 'teammate-send');
+    expect(controls.operation).toHaveBeenCalledWith('inviteByEmail', { workspaceId: WORKSPACE, email: 'mara@example.com' });
+    expect(find(renderer, 'teammate-invited')).toHaveLength(1);
+    expect(find(renderer, 'teammate-email')[0]!.props.value).toBe('');
+    await press(renderer, 'teammates-done');
+    expect(texts(renderer.root)).toContain('1 invite sent');
+
+    await press(renderer, 'invite-agents');
+    await press(renderer, 'agent-connect');
+    expect(controls.operation).toHaveBeenCalledWith('createAgentPairingCode', { workspaceId: WORKSPACE });
+    expect(texts(renderer.root)).toContain('npx usebeeline connect K7Q-4MZ');
+    await press(renderer, 'connect-continue');
+
+    expect(find(renderer, 'onboarding-invite')).toHaveLength(1);
+    await press(renderer, 'go-general');
+    expect(controls.enter).toHaveBeenCalledWith(WORKSPACE, 'general');
   });
 
   it('previews a pasted invite link, and refuses something that is not one', async () => {
+    controls.workspaces.mockResolvedValue({ workspaces: [{ id: 'w1', name: 'Crew' }], viewer: {} });
     const renderer = await render();
     expect(find(renderer, 'choice-join-form')).toHaveLength(0);
-    await act(async () => find(renderer, 'choice-join')[0]!.props.onPress());
+    await press(renderer, 'choice-join');
     await act(async () => find(renderer, 'choice-join-input')[0]!.props.onChangeText('hello'));
-    await act(async () => find(renderer, 'choice-join-preview')[0]!.props.onPress());
+    await press(renderer, 'choice-join-preview');
     expect(find(renderer, 'choice-error')).toHaveLength(1);
     expect(controls.push).not.toHaveBeenCalled();
 
     await act(async () =>
-      find(renderer, 'choice-join-input')[0]!.props.onChangeText(
-        `https://usebeeline.app/join/${TOKEN}`,
-      ),
+      find(renderer, 'choice-join-input')[0]!.props.onChangeText(`https://usebeeline.app/join/${TOKEN}`),
     );
-    await act(async () => find(renderer, 'choice-join-preview')[0]!.props.onPress());
-    expect(controls.push).toHaveBeenCalledWith({
-      pathname: '/join/[token]',
-      params: { token: TOKEN },
-    });
+    await press(renderer, 'choice-join-preview');
+    expect(controls.push).toHaveBeenCalledWith({ pathname: '/join/[token]', params: { token: TOKEN } });
   });
 
-  it('opens straight on the invite field from the deck’s Join action, with a way back', async () => {
+  it('opens a person who already has Workspaces on the choice, with a way back', async () => {
+    controls.workspaces.mockResolvedValue({ workspaces: [{ id: 'w1', name: 'Crew' }], viewer: {} });
+    const renderer = await render();
+    expect(renderer.root.findAllByType('YouStep')).toHaveLength(0);
+    expect(find(renderer, 'onboarding-workspace')).toHaveLength(1);
+    await press(renderer, 'onboarding-back');
+    expect(controls.back).toHaveBeenCalled();
+  });
+
+  it('opens straight on the invite field from the deck’s Join action', async () => {
     controls.params = { mode: 'join' };
     controls.workspaces.mockResolvedValue({ workspaces: [{ id: 'w1', name: 'Crew' }], viewer: {} });
     const renderer = await render();
     expect(find(renderer, 'choice-join-form')).toHaveLength(1);
-    expect(
-      renderer.root.findAll((node: any) => node.props?.accessibilityLabel === 'Back').length,
-    ).toBeGreaterThan(0);
+  });
+
+  it('opens on Create when the join path hands a first entry over', async () => {
+    controls.params = { step: 'create' };
+    const renderer = await render();
+    expect(renderer.root.findAllByType('YouStep')).toHaveLength(0);
+    expect(find(renderer, 'onboarding-create')).toHaveLength(1);
   });
 });

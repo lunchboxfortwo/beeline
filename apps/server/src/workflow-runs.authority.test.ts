@@ -109,7 +109,7 @@ describe('list roles', () => {
     expect((await listRunCard(runId)).roleBindings.worker).toBe(WORKER_A);
   });
 
-  it('asks a human when nobody on the list is healthy, leaving the run parked with no agent dispatched', async () => {
+  it('parks an exhausted role without posting a health notice', async () => {
     await reportPresence(WORKER_A, 'offline');
     await reportPresence(WORKER_B, 'offline');
     const { runId } = await startedListRun();
@@ -120,8 +120,13 @@ describe('list roles', () => {
       `SELECT text FROM messages WHERE room_id=$1 AND text LIKE '%worker role''s list%'`,
       [ROOM],
     );
-    expect(notice.rows).toHaveLength(1);
-    expect(notice.rows[0]!.text).not.toMatch(/class|tag|tier/i);
+    expect(notice.rows).toEqual([]);
+    const recovery = (await database.query<{ private_payload: {text:string} }>(
+      "SELECT private_payload FROM agent_commands WHERE room_id=$1 AND agent_id=$2 AND reason='system'", [ROOM, IMPLEMENTER],
+    )).rows;
+    expect(recovery).toHaveLength(1);
+    expect(recovery[0]!.private_payload.text).toContain(runId);
+    expect(recovery[0]!.private_payload.text).toContain('no eligible agent for role worker');
   });
 
   it('assign_workflow_role binds any agent in the Room to a parked list role, on the list or not', async () => {
@@ -283,7 +288,6 @@ describe('agent workflow run reads and cancellation', () => {
 
   it('allows a human Workspace admin and records that human as the actor', async () => {
     await database.query(`UPDATE identities SET handle='owner' WHERE id=$1`, [OWNER]);
-    await database.query(`INSERT INTO memberships(workspace_id,room_id,identity_id,role) VALUES($1,NULL,$2,'owner')`, [WORKSPACE, OWNER]);
     const { runId } = await startedRun();
     const command = await commandFor(IMPLEMENTER, await rootMessage(OWNER));
     await cancelWorkflowRun(database, command, { runId, reason: 'Admin stopped' });
@@ -334,7 +338,6 @@ describe('run owner', () => {
     const parent = '20000000-0000-4000-8000-000000000099';
     await database.query(`INSERT INTO rooms(id,workspace_id,name,created_by) VALUES($1,$2,'Parent',$3)`, [parent, WORKSPACE, OWNER]);
     await database.query(`UPDATE memberships SET room_id=$1 WHERE room_id=$2`, [parent, ROOM]);
-    await database.query(`INSERT INTO memberships(workspace_id,identity_id,role) VALUES($1,$2,'owner')`, [WORKSPACE, OWNER]);
     await database.query(`UPDATE rooms SET parent_id=$1 WHERE id=$2`, [parent, ROOM]);
     await insertCornerFacts(database, { cornerId: ROOM, ownerAgentId: WORKER_A, workerAgentId: WORKER_A });
     const asked = await rootMessage(OWNER, '@wa run gated every day');
@@ -411,7 +414,7 @@ describe('one live run per workflow per Room', () => {
       .resolves.toMatchObject({ state: 'work' });
   });
 
-  it('reports a blocking run once across three slots without changing its cards or timers', async () => {
+  it('skips three blocked slots silently without changing cards or timers', async () => {
     const runId = await startedGatedRun({ room_id: ROOM, agent_id: OWNER });
     await reachGate(runId);
     const scheduleId = '30000000-0000-4000-8000-000000000005';
@@ -436,18 +439,16 @@ describe('one live run per workflow per Room', () => {
     const skips = async () => (await database.query<{text:string}>(`SELECT text FROM messages WHERE room_id=$1 AND text LIKE '%skipped a run%' ORDER BY created_at,id`, [ROOM])).rows;
     expect(await snapshot()).toEqual(before);
     expect(await pendingCommandsFor(WORKER_B)).toBe(commands);
-    expect(await skips()).toEqual([{text: `The gated schedule skipped a run · run ${runId} is active at step sign_off in state live for 30 min`}]);
+    expect(await skips()).toEqual([]);
     await cancelWorkflowRun(database, {room_id: ROOM, agent_id: OWNER} as CommandRow, {runId, reason:'next blocking run'});
     const next = await startedGatedRun({ room_id: ROOM, agent_id: OWNER });
     await database.query(`UPDATE messages SET created_at=$2 WHERE id=$1`, [next, now]);
     await database.query(`UPDATE agent_schedules SET next_run_at=$2 WHERE id=$1`, [scheduleId, new Date(now.getTime()+3*60_000)]);
     await new AgentScheduleLoop(database).runOnce(new Date(now.getTime()+3*60_000));
-    expect(await skips()).toHaveLength(2);
-    expect((await skips())[1]!.text).toContain(`run ${next} is active at step work in state live for 3 min`);
-    console.log('Reproduction blocking-run-notice: three blocked slots produced one full-ID/step/state/elapsed notice; different run produced a new notice; cards and timers unchanged');
+    expect(await skips()).toEqual([]);
   });
 
-  it('posts one skip line on a schedule tick that finds a live run, and wakes no one', async () => {
+  it('skips a schedule tick silently when a run is live, and wakes no one', async () => {
     const runId = await startedGatedRun({ room_id: ROOM, agent_id: OWNER });
     await database.query(
       `INSERT INTO agent_schedules(id,workspace_id,room_id,agent_id,creator_id,cadence,message,next_run_at,workflow_slug)
@@ -460,6 +461,6 @@ describe('one live run per workflow per Room', () => {
     const skips = (await database.query<{ text: string }>(
       `SELECT text FROM messages WHERE room_id=$1 AND text LIKE '%skipped a run%'`, [ROOM],
     )).rows;
-    expect(skips).toEqual([{ text: `The gated schedule skipped a run · run ${runId} is active at step work in state live for 0 min` }]);
+    expect(skips).toEqual([]);
   });
 });

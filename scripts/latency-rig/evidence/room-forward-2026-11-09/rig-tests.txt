@@ -1,0 +1,23 @@
+✔ corner clock follows the source threshold and observes completion before release (4.890091ms)
+✔ a failed gesture cannot become a successful long-press sample (0.512157ms)
+✔ every inventory entry has a seeded scenario and an executable driver decision (1.625324ms)
+✔ a newly added inventory entry cannot silently inherit another fixture (0.178913ms)
+✔ only two complete captures contribute percentiles and a full score (1.807564ms)
+✔ recognition summaries retain separately labelled gesture-inclusive percentiles (0.363319ms)
+✔ missing, partial, failed and nonfinite captures keep score unavailable and retain the exact reason (0.325364ms)
+✔ nightly verdict carries web coverage, timings and every exact gap to the morning card (0.295073ms)
+✔ duplicate capture identity cannot masquerade as a paired capture (0.182188ms)
+✔ Insights publishes valid paired web cases and gaps independently of native capture (1.942533ms)
+✔ paired summary retains corrected completion and the original driver timing separately (0.327117ms)
+✔ unobserved source visibility stays unavailable instead of becoming zero milliseconds (0.205084ms)
+✔ Room-open setup waits for the actual destination row before the action clock (3.689471ms)
+✔ forward feedback=false is recorded before the driver reads it (170.432903ms)
+✔ forward feedback=true is recorded before the driver reads it (379.506909ms)
+ℹ tests 15
+ℹ suites 0
+ℹ pass 15
+ℹ fail 0
+ℹ cancelled 0
+ℹ skipped 0
+ℹ todo 0
+ℹ duration_ms 832.76129

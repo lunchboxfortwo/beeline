@@ -1,0 +1,39 @@
+[
+  {
+    "phase": "offset",
+    "offset": 1200,
+    "offsetPx": 3150
+  },
+  {
+    "phase": "reset",
+    "offset": 1200,
+    "offsetPx": 3150,
+    "startOffset": 0,
+    "bodyY": -508.57098388671875,
+    "composerY": 745.90478515625,
+    "anchorFromComposerPx": -118.99898529052734
+  },
+  {
+    "phase": "offset",
+    "offset": 0,
+    "offsetPx": 0
+  },
+  {
+    "phase": "before-reply",
+    "offset": 0,
+    "offsetPx": 0,
+    "startOffset": 0,
+    "bodyY": -1708.571044921875,
+    "composerY": 745.90478515625,
+    "anchorFromComposerPx": -3268.9991455078125
+  },
+  {
+    "phase": "keyboard-open",
+    "offset": 0,
+    "offsetPx": 0,
+    "startOffset": 0,
+    "bodyY": -2048.380615234375,
+    "composerY": 406.0952453613281,
+    "anchorFromComposerPx": -3268.999225616455
+  }
+]

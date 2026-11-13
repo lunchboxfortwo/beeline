@@ -40,20 +40,20 @@ const BUILT_IN_SLASH_VERBS: readonly (BuiltInSlashVerb & {
     id: 'build',
     command: 'build',
     label: 'Build something',
-    description: 'Start a new corner in this Room',
+    description: 'Start a new thread in this chat',
     available: 'canBuild',
   },
   {
     id: 'poll',
     command: 'poll',
     label: 'Create poll',
-    description: 'Ask this Room a question with a closing time',
+    description: 'Ask this chat a question with a closing time',
     available: 'canCreatePoll',
   },
   {
     id: 'schedule',
     command: 'schedule',
-    label: 'Schedules and subscriptions',
+    label: 'Routines',
     description: 'View or stop what wakes Agents',
     available: 'canManageSchedules',
   },
@@ -67,15 +67,15 @@ const BUILT_IN_SLASH_VERBS: readonly (BuiltInSlashVerb & {
   {
     id: 'open-corner',
     command: 'open-corner',
-    label: 'Open edit corner',
+    label: 'Open edit thread',
     description: 'Allow the pending repository edit request',
     available: 'canOpenCorner',
   },
   {
     id: 'rename',
     command: 'rename',
-    label: 'Rename Room',
-    description: "Change this Room's display name",
+    label: 'Rename chat',
+    description: "Change this chat's display name",
     available: 'canRename',
   },
   {
@@ -102,8 +102,8 @@ const BUILT_IN_SLASH_VERBS: readonly (BuiltInSlashVerb & {
   {
     id: 'close-corner',
     command: 'close-corner',
-    label: 'Close corner',
-    description: 'End this edit session and archive the corner',
+    label: 'Close thread',
+    description: 'End this edit session and archive the thread',
     available: 'canCloseCorner',
   },
 ];

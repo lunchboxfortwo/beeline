@@ -1,21 +1,19 @@
-import { IndexRow } from '@/components/buzz/IndexRow';
-import { type MutableRefObject } from 'react';
-import { View, Text, TouchableOpacity, Platform } from 'react-native';
-import { KeyboardAvoidingView } from 'react-native-keyboard-controller';
+import { useCallback, type MutableRefObject, type Ref } from 'react';
+import { Platform } from 'react-native';
+import { useReanimatedKeyboardAnimation } from 'react-native-keyboard-controller';
+import { useAnimatedStyle } from 'react-native-reanimated';
+import { YStack } from 'tamagui';
+import { composerBottomPadding } from '@/buzz/composer-keyboard';
+import { T } from '@/ui/grammar';
+import { KeyboardBody } from '@/ui/grammar-root';
 import { router, type Href } from 'expo-router';
-import { Modal } from '@/modal';
-import { CORNER_LABEL, ROOM_LABEL } from '@/buzz/vocabulary';
-import { openExternalUrl } from '@/utils/open-external-url';
+import { CORNER_TITLE, ROOM_TITLE } from '@/buzz/vocabulary';
 import { type RoomSurfaceSessionBindings, type UseRoomSurfaceSessionResult } from './useRoomSurfaceSession';
 import { BuzzCommunityShell } from '@/components/buzz/CommunityRail';
-import { CornerObjectiveLine } from '@/components/buzz/CornerObjectiveLine';
-import { CornerStatusLine } from '@/components/buzz/CornerStatusLine';
 import { RoomActionsBackground } from '@/components/buzz/RoomRepositoryChoice';
-import { CHEVRON_BACK_SIZE, ChevronGlyph } from '@/components/buzz/ChevronGlyph';
 import { RoomReviewerSurfaceNotice } from '@/components/buzz/RoomReviewerActions';
-import { ChannelHeaderTitle } from '@/components/buzz/ChannelHeaderTitle';
 import { VoiceCallCard } from '@/components/buzz/VoiceCallCard';
-import { SurfaceGlyphLoader } from '@/components/buzz/SurfaceGlyphLoader';
+export { ChatOpeningSurface } from '@/components/buzz/ChatOpeningSurface';
 import { useChatRoute } from './useChatRoute';
 import { useChatScrollState } from './useChatScrollState';
 import { useChatComposerRefs } from './useChatComposerRefs';
@@ -43,12 +41,17 @@ import { useChatRepositories } from './useChatRepositories';
 import { useChatNavigation } from './useChatNavigation';
 import { useChatComposerCommands } from './useChatComposerCommands';
 import { useChatTranscriptRenderer } from './useChatTranscriptRenderer';
-import { styles } from './chat-surface-styles';
-import { ChatSurfaceHeaderView as ChatSurfaceHeader } from './ChatSurfaceHeader';
+import { ChatSurfaceErrorHeader, ChatSurfaceHeaderView as ChatSurfaceHeader } from './ChatSurfaceHeader';
+import { useChatThreadHeader } from './useChatThreadHeader';
+import { ThreadsDropdown, ThreadsDropdownScope } from '@/ui/screens/chat/ThreadsDropdown';
+import { openPlace } from '@/ui/shell/panel';
 import { ChatSurfaceTranscript } from './ChatSurfaceTranscript';
 import { ChatSurfaceComposer } from './ChatSurfaceComposer';
 import { ChatSurfaceWorkPane } from './ChatSurfaceWorkPane';
 import { ChatSurfaceOverlays } from './ChatSurfaceOverlays';
+import { ChatLinkProvider } from '@/components/buzz/ChatLinkProvider';
+import { sharedChatLinkStore } from '@/buzz/chat-link-store';
+import { openChatMessageLink } from '@/buzz/message-link';
 
 
 
@@ -108,8 +111,7 @@ export function BuzzChatSurface({
     setForwardError, forwardTarget, forwardBusyRoomId, setForwardBusyRoomId, composerDraft,
     replyTarget, pendingAttachmentsRef, setSending, attachmentUploader, activeComposerDraftRef,
     setComposerInputRevision, setComposerHeight, replacePendingAttachments, setCornerProposalAction,
-    pendingAttachments, setAttachmentPickerVisible, setHighlightedMentionIndex, addingMembers,
-    setAddingMembers, setRoomRepoListLoading, setRoomRepoError, setShowRoomRepoPicker,
+    pendingAttachments, setAttachmentPickerVisible, setHighlightedMentionIndex, setRoomRepoListLoading, setRoomRepoError, setShowRoomRepoPicker,
     setRoomRepoNotice, roomRepoBusy, setRoomRepoBusy, roomRepoListLoading, roomRepoError,
     roomRepoNotice, showRoomRepoPicker, sending, setDismissedSlashText, highlightedSlashVerbIndex,
     failedOutboxIds, cornerProposalAction, turnChromeTopInset, setTurnChromeTopInset,
@@ -119,23 +121,19 @@ export function BuzzChatSurface({
     decodedId, userPubkey, desktopExperience, desktopAvailableWidth, outbox, transport,
   ]);
   const [
-    setMembershipError, isDirectMessage, participantPickerVisible, rosterVisible,
-    roomRepoAccessIssue, setCornerOpenRepoPrompt, participantPickerKind, composerFocused,
-    directMessage, agentPairBusy, setAgentConnectVisible, setAgentPairCommand, setAgentPairError,
-    setAgentPairBusy, setParticipantPickerKind, setParticipantPickerVisible, targetBranchActionId,
+    setMembershipError, isDirectMessage, participantPickerVisible, roomRepoAccessIssue, setCornerOpenRepoPrompt, participantPickerKind, composerFocused,
+    directMessage, setAgentConnectVisible, setParticipantPickerKind, setParticipantPickerVisible, targetBranchActionId,
     pendingAck, setPendingAck, receivedSteer, setReceivedSteer, setPermissionActionId,
     grantActionId, setGrantActionId, choiceActionId, setChoiceActionId, createPollBusy,
     setCreatePollBusy, setCreatePollVisible, connectorOfferActionId, setConnectorOfferActionId,
-    setTargetBranchNotice, setTargetBranchActionId, setMembershipActionPubkey, memberInviteBusy,
-    setMemberInviteBusy, setRosterVisible, setRoomActionsVisible, roomLifecycleBusy,
+    setTargetBranchNotice, setTargetBranchActionId, setRoomActionsVisible, roomLifecycleBusy,
     setRoomLifecycleBusy, renameBusy, setRenameEditing, setRenameError, renameDraft, setRenameBusy,
     renameTextDraft, openingRandomCorner, setOpeningRandomCorner, setForwardCornerPrompt,
     forwardCornerPrompt, uncoveredOwnersRef, setOwnerGrant, setRoomRepoAccessIssue,
     permissionActionId, appSignInActionId, setAppSignInActionId, targetBranchNotice,
     conversationFrameRef, setCornerActionsVisible, setDmActionsVisible, cornerOpenRepoPrompt,
-    ownerGrant, setComposerFocused, membershipActionPubkey, membershipError, closeRoster,
-    roomActionsRef, renameEditing, setRenameDraft, renameError, dmActionsVisible,
-    cornerActionsVisible, agentConnectVisible, agentPairError, agentPairCommand, createPollVisible,
+    ownerGrant, setComposerFocused, membershipError, roomActionsRef, renameEditing, setRenameDraft, renameError, dmActionsVisible,
+    cornerActionsVisible, agentConnectVisible, createPollVisible,
   ] = useChatActionState([
     decodedId, userPubkey, roomSurface, inputTextRef, inputText, setDesktopDeliveryState,
     setInputText, setInputSelection, setDismissedMentionKey, composerRef,
@@ -149,7 +147,7 @@ export function BuzzChatSurface({
     desktopWorkPaneRef, setDesktopWorkPane, desktopExperience, desktopAvailableWidth, decodedId,
     userPubkey, roomSurface, routeParentChannelId, isDirectMessage, desktopWorkPaneContent,
     roomClient, firstUnreadMessageId, allowOlderHistoryRef, routeChannelTitle, routeCommunityId,
-    participantPickerVisible, rosterVisible, setMembershipError, profileKind, profileAgentId,
+    participantPickerVisible, setMembershipError,
   ]);
   const [
     revealTranscriptThrough, transcriptHistoryStatus, transcriptJump, endTranscriptJump,
@@ -172,7 +170,7 @@ export function BuzzChatSurface({
     transcriptHostIdsRef, foldedMessages, loadOlderTranscriptMessages, anchoredSegmentActive,
     conversationIdentities, durableMessages, unprojectedMessages, combinedMessages, arrivalMessages,
     unreadLine, transcriptArrivalObservation, addMessages, removeOptimistic, reconcileOptimistic,
-    openCurrentBrief, arrivingCardIds, transcriptCardMotionStore, firstNewMessageId,
+    openCurrentBrief, firstNewMessageId,
     cornerObjectiveText, openRoomWorkflowRun, roomWorkflowRun, roomOtherLiveRuns,
     transcriptHistoryLine, transcriptForwardLine, loadOlderTranscriptIfReaderAsked,
   ] = useChatTranscriptHistory([
@@ -186,13 +184,11 @@ export function BuzzChatSurface({
   ]);
   const [
     roomParticipants, agentPresences, describedRoomParticipants, participantsHydrated,
-    personProfileByPubkey, agentByPubkey, roomAgents, participantPickerCandidates,
-    roomMemberPubkeys, agentProfileModelByPubkey, speakerRoleByPubkey, composerTagHandles,
-    speechHints, roomMemberByPubkey, visibleRosterMembers, roomParticipantTotal,
-    participantPickerWorkspacePeers,
-  ] = useChatRoster([
+    personProfileByPubkey, agentByPubkey, roomAgents, agentProfileModelByPubkey, speakerRoleByPubkey, composerTagHandles,
+    speechHints, roomParticipantTotal,
+    ] = useChatRoster([
     roomSurface, conversationIdentities, durableMessages, resolvedChannelName, userPubkey,
-    workspaceRoster, participantPickerKind, heartbeatPresences,
+    workspaceRoster, heartbeatPresences,
   ]);
   const [
     directMessageListItem, isReadOnlyDirectMessage, messages, activeAgentTurns,
@@ -205,7 +201,7 @@ export function BuzzChatSurface({
     roomParticipants, agentPresences, presenceNow, inputSelection, inputText,
     describedRoomParticipants, composerFocused, dismissedMentionKey, isDirectMessage,
     parentChannelId, decodedId, roomClient, workspaceChats, roomSurface, presenceReconnectGrace,
-    unprojectedMessages, participantsHydrated, rosterVisible, participantPickerVisible,
+    unprojectedMessages, participantsHydrated, participantPickerVisible,
     viewerPubkey, agentCommandsByScope, agentFastModeByScope, agentCanLoginByScope,
     combinedMessages, roomRepository, activeCommunityId, setAgentCommandsByScope,
     setAgentCanLoginByScope, setAgentFastModeByScope,
@@ -214,14 +210,13 @@ export function BuzzChatSurface({
     emptyLedgerVariant, displayRoomName, roomName, firstRoomAgent, startCornerMessage,
     focusComposer, starterPrompts, starterIntro, storedRoomName, headerTitleKind,
     displayHeaderTitle, dmPeerPubkey, dmPeerIdentity, dmPeerAgentDisplay, dmPeerProfile,
-    dmHeaderPresence, headerTitle, closeAgentConnect, connectAgent, copyPairCommand,
+    dmHeaderPresence, headerTitle, closeAgentConnect, connectAgent, dmPeerMark,
   ] = useChatHeader([
     parentChannelId, roomSurface, resolvedChannelName, isCorner, channelKind, decodedId,
     isDirectMessage, userPubkey, directMessage, personProfileByPubkey, directMessageListItem,
     agentByPubkey, presenceNow, workspaceRoster, isReadOnlyDirectMessage, composerRef, inputTextRef,
     selectedAgentMentionsRef, selectedMentionsRef, setInputText, setInputSelection,
-    activeCommunityId, agentPairBusy, viewerIsAgent, setAgentConnectVisible, setAgentPairCommand,
-    setAgentPairError, setAgentPairBusy, transport, setSessionTransport, canManageWorkspace,
+    activeCommunityId, viewerIsAgent, setAgentConnectVisible, canManageWorkspace,
     setMembershipError, setParticipantPickerKind, openWorkspaceRoster, setParticipantPickerVisible,
   ]);
   const [
@@ -235,6 +230,11 @@ export function BuzzChatSurface({
     desktopExperience, viewerIsAgent, emptyLedgerVariant, isDirectMessage, displayRoomName,
     roomName, firstRoomAgent, startCornerMessage, focusComposer, starterPrompts, starterIntro,
   ]);
+  const threadHeader = useChatThreadHeader({
+    isCorner, roomSurface, resolvedChannelName, decodedId, parentChannelId,
+    state: cornerHeaderDisplay?.status, running: activeAgentTurns.length,
+    objective: cornerObjectiveText, isArchived, isDesktop, positions: transcriptPositions,
+  });
   const [
     desktopScrollNodeRef, heldLandingFromOldestRef, phoneContentHeightRef, phoneScrollOffsetRef,
     heldLandingShortRef, phoneListHeightRef, observeVisibleMessages, chronologicalMessagesRef,
@@ -277,14 +277,21 @@ export function BuzzChatSurface({
   ]);
   const [
     bylineOpeners, answerByMessageId, visibleMessageById, immediatelyPrecedingVisibleMessageById,
-    composerAck, settledTurn, stoppingThisTurn, handleStopTurn, composerBottomInsetStyle,
+    composerAck, settledTurn, stoppingThisTurn, handleStopTurn, ,
     keyboardHeight,
   ] = useChatTurnPresentation([
     visibleMessages, pendingAck, agentTurnMarkers, setPendingAck, receivedSteer, activeAgentTurn,
     setReceivedSteer, isCorner, roomSurface, viewerPubkey, conversationIdentities, agentByPubkey,
     insets, composerHeight, scrollController, decodedId, readRoom, desktopExperience,
-    setDesktopDeliveryState, agentPresences, setPresenceNow, presenceNow,
+    setDesktopDeliveryState, agentPresences, setPresenceNow, presenceNow, combinedMessages,
   ]);
+  // The composer's foot follows the keyboard on the UI thread: the same inset
+  // as the turn presentation's padding, drawn as the height under the row.
+  const { progress: keyboardProgress } = useReanimatedKeyboardAnimation();
+  const composerBottomInset = useAnimatedStyle(
+    () => ({ height: composerBottomPadding(Platform.OS, insets.bottom, keyboardProgress.value) }),
+    [insets.bottom],
+  );
   const [
     replyTargetForMessage, beginForward, beginReply, openMessageActions, handleReactToMessage,
     handleBookmarkMessage, handleReportMessage, dismissOutboxMessage, messageIsBookmarked,
@@ -334,13 +341,10 @@ export function BuzzChatSurface({
     setTargetBranchNotice, setTargetBranchActionId, applyRoomRepositoryResult,
   ]);
   const [
-    closeRoomActions, handleConnectAgent, handleRemoveRoomMember, handleRenameRoom,
-    handleRoomLifecycle, handleAddRoomMembers, handleInvitePerson,
-  ] = useChatMembershipActions([
-    transport, activeCommunityId, canManageWorkspace, addingMembers, participantPickerCandidates,
-    roomMemberPubkeys, setAddingMembers, setMembershipError, decodedId, setParticipantPickerVisible,
-    userPubkey, setMembershipActionPubkey, memberInviteBusy, setMemberInviteBusy,
-    setSessionTransport, setRosterVisible, setRoomActionsVisible, roomLifecycleBusy,
+    closeRoomActions, handleConnectAgent, handleRenameRoom,
+    handleRoomLifecycle, ] = useChatMembershipActions([
+    transport, activeCommunityId, canManageWorkspace, setMembershipError, decodedId, setParticipantPickerVisible,
+    setRoomActionsVisible, roomLifecycleBusy,
     setRoomLifecycleBusy, displayRoomName, roomSurface, readRoom, renameBusy, setRenameEditing,
     setRenameError, renameDraft, isCorner, canRenameTitle, setRenameBusy, renameTextDraft,
     applyRoomName,
@@ -409,110 +413,74 @@ export function BuzzChatSurface({
     bylineOpeners, hintMessageIds, failedOutboxIds, outbox, speakerWorking, answerByMessageId,
     cornerProposalAction, speakerRoleByPubkey, visibleMessageById, channelReferenceKey,
     visibleMessages, continuedAttributionIds, immediatelyPrecedingVisibleMessageById,
-    arrivingCardIds, transcriptCardMotionStore, firstNewMessageId, arrivalFlashMessageId,
+    firstNewMessageId, arrivalFlashMessageId,
     sourceLandingFlashMessageId,
   ]);
 
-  if (!roomSurface) {
-    if (transcriptHydrationFailed) {
-      return (
-        <View style={[styles.container, { paddingTop: insets.top }]} testID="room-hydration-error">
-          <View style={styles.hydrationErrorHeader}>
-            {(!isDesktop || isCorner) && (
-              <TouchableOpacity
-                accessibilityLabel="Back to Rooms"
-                onPress={handleBack}
-                style={styles.backButton}
-                testID="chat-back"
-              >
-                <ChevronGlyph
-                  color={styles.backText.color}
-                  direction="left"
-                  size={CHEVRON_BACK_SIZE}
-                  testID="chat-back-glyph"
-                />
-              </TouchableOpacity>
-            )}
-            <View style={styles.headerCenter}>
-              <ChannelHeaderTitle
-                kind={headerTitleKind}
-                title={displayHeaderTitle ?? routeChannelTitle ?? ROOM_LABEL}
-              />
-            </View>
-          </View>
-          <View style={styles.hydrationFailureInset}>
-            {transcriptHydrationError && <IndexRow inset="flush" title={transcriptHydrationError} testID="room-read-error" />}
-          </View>
-        </View>
-      );
-    }
+  const openChatInfo = useCallback(() => openPlace({ kind: 'chat-info', roomId: decodedId }, isDesktop), [decodedId, isDesktop]);
+  const openMembers = useCallback(() => openPlace({ kind: 'members', roomId: decodedId }, isDesktop), [decodedId, isDesktop]);
+  const openDmActions = useCallback(() => {
+    setMembershipError(null);
+    setDmActionsVisible(true);
+  }, [setMembershipError, setDmActionsVisible]);
+  const openCornerActions = useCallback(() => setCornerActionsVisible(true), [setCornerActionsVisible]);
+  const openLinkedThread = (link: { roomId: string; parentRoomId: string }) =>
+    void handleOpenChannelReference({ kind: 'corner', channelId: link.roomId, parentChannelId: link.parentRoomId });
+  const openLinkedMessage = (link: { roomId: string; messageId: string; workspaceId: string }) =>
+    openChatMessageLink(link, (href) => router.navigate(href as Href));
+
+  if (!roomSurface && transcriptHydrationFailed) {
     return (
-      <View style={[styles.container, styles.center, { paddingTop: insets.top }]}>
-        <SurfaceGlyphLoader testID="room-surface-loader" />
-        <Text style={styles.loadingText}>
-          LOADING {(isCorner ? CORNER_LABEL : ROOM_LABEL).toUpperCase()}
-        </Text>
-      </View>
+      <ChatSurfaceErrorHeader
+        title={displayHeaderTitle ?? routeChannelTitle ?? ROOM_TITLE}
+        showBack={!isDesktop || isCorner}
+        handleBack={handleBack}
+        error={transcriptHydrationError}
+      />
     );
   }
 
   return (
+    <ThreadsDropdownScope>
     <BuzzCommunityShell
       communities={communities}
       activeCommunityId={activeCommunityId}
       onSelect={handleCommunitySelect}
       onAdd={() => router.push('/beeline/community' as Href)}
-      onSettings={() => router.push('/beeline/settings' as Href)}
-      viewerPubkey={userPubkey || undefined}
-      viewerAvatarUrl={personProfileByPubkey.get(userPubkey)?.avatar}
     >
-      <RoomActionsBackground style={styles.desktopConversationFrame} ref={conversationFrameRef}>
-        <View style={styles.container}>
+      <ConversationFrame flex={1} minWidth={0} flexDirection="row" position="relative" ref={conversationFrameRef as unknown as Ref<never>}>
+        <YStack flex={1} backgroundColor="canvas">
           {/* Header. No surface of its own — the chrome sits on the same
             obsidian as the transcript, parted only by a hairline. */}
           <ChatSurfaceHeader
-  insets={insets}
   isCorner={isCorner}
-  desktopExperience={desktopExperience}
-  isDesktop={isDesktop}
-  cornerReturnTarget={cornerReturnTarget}
-  handleBack={handleBack}
-  cornerOwnerPubkey={cornerOwnerPubkey}
-  cornerOwnerDisplay={cornerOwnerDisplay}
-  cornerOwnerWorking={cornerOwnerWorking}
   isDirectMessage={isDirectMessage}
-  isReadOnlyDirectMessage={isReadOnlyDirectMessage}
-  dmPeerPubkey={dmPeerPubkey}
-  dmPeerIdentity={dmPeerIdentity}
-  directMessageListItem={directMessageListItem}
-  dmPeerAgentDisplay={dmPeerAgentDisplay}
-  dmPeerProfile={dmPeerProfile}
-  displayRoomName={displayRoomName}
-  displayHeaderTitle={displayHeaderTitle}
-  headerTitleKind={headerTitleKind}
-  canRenameTitle={canRenameTitle}
-  startRenameFromTitle={startRenameFromTitle}
-  setRoomActionsVisible={setRoomActionsVisible}
-  handleOpenGitHubEvent={handleOpenGitHubEvent}
-  roomRepository={roomRepository}
-  cornerHeaderWord={cornerHeaderWord}
-  cornerHeaderDisplay={cornerHeaderDisplay}
-  cornerHeaderSource={cornerHeaderSource}
-  viewerPubkey={viewerPubkey}
-  scrollController={scrollController}
-  jumpToTranscriptMessage={jumpToTranscriptMessage}
+  showBack={!isDesktop || isCorner}
+  handleBack={handleBack}
+  title={displayHeaderTitle}
+  memberCount={roomParticipantTotal}
+  repositoryAvatar={roomSurface?.room.avatar}
+  repositoryFavicon={roomSurface?.room.favicon}
+  openChatInfo={openChatInfo}
+  openMembers={openMembers}
+  dmPeer={dmPeerMark}
   dmHeaderPresence={dmHeaderPresence}
-  parentChannelId={parentChannelId}
-  handleOpenRandomCorner={handleOpenRandomCorner}
-  decodedId={decodedId}
-  viewerIsAgent={viewerIsAgent}
-  isArchived={isArchived}
-  setCornerActionsVisible={setCornerActionsVisible}
-  setMembershipError={setMembershipError}
-  setDmActionsVisible={setDmActionsVisible}
-  setRenameEditing={setRenameEditing}
-  setRenameError={setRenameError}
+  openDmActions={!viewerIsAgent && !isArchived ? openDmActions : undefined}
+  thread={threadHeader.thread}
+  threadCollapsed={!roomSurface || threadHeader.collapsed}
+  openParentChat={threadHeader.openParentChat}
+  threadExpanded={threadHeader.expandedBlock}
+  expandThread={threadHeader.expand}
+  openCornerActions={!viewerIsAgent && !isArchived ? openCornerActions : undefined}
+  threadBarRef={threadHeader.barRef}
+  onThreadBarLayout={threadHeader.onBarLayout}
 />
+
+          {!isCorner && !isDirectMessage && (
+            <ThreadsDropdown roomId={decodedId} chatName={resolvedChannelName} viewer={viewerPubkey ?? undefined} openThread={openCorner}
+              onNewThread={() => void handleOpenRandomCorner()}
+              newThreadDisabled={viewerIsAgent || isArchived} />
+          )}
 
           {!isCorner && !isDirectMessage && (() => {
             const call = workspaceChats.find(chat => chat.room.id === decodedId)?.voiceCall;
@@ -527,41 +495,16 @@ export function BuzzChatSurface({
             reviewerAgentId={roomSurface?.room.reviewerAgentId}
           />
 
-          <KeyboardAvoidingView
-            style={styles.keyboardBody}
-            behavior={Platform.OS === 'ios' ? 'padding' : 'translate-with-padding'}
+          <ChatLinkProvider
+            roomId={decodedId}
+            store={sharedChatLinkStore()}
+            onOpenThread={openLinkedThread}
+            onOpenMessage={openLinkedMessage}
           >
-            {/* What the corner is for, held under the header for its whole life:
-            the human's own request, inscribed rather than framed. The header
-            carries a short corner name, so without this the objective survives
-            only until the first message lands. */}
-            {isCorner && (
-              <CornerObjectiveLine
-                objective={cornerObjectiveText}
-                onOpenBrief={openCurrentBrief}
-                onOpenWorkflow={openRoomWorkflowRun}
-                workflow={roomWorkflowRun}
-                otherLiveRuns={roomOtherLiveRuns}
-              />
-            )}
-
-            {/* The corner's PR state, inscribed above the transcript: one line
-            that links to GitHub, where review and merge happen. */}
-            {isCorner && (
-              <View style={styles.cornerStatusInset}>
-                <CornerStatusLine
-                  lifecycle={roomSurface?.cornerLifecycle}
-                  archived={isArchived}
-                  onOpenPullRequest={(url) => {
-                    void openExternalUrl(url).catch(() => {
-                      Modal.alert('Could not open pull request', 'Open the PR from GitHub instead.');
-                    });
-                  }}
-                />
-              </View>
-            )}
-
-            <ChatSurfaceTranscript
+          <KeyboardBody>
+            {/* A corner's title, status, PR, objective and brief are the
+            transcript's first block (header B, `useChatThreadHeader`). */}
+            {roomSurface ? <ChatSurfaceTranscript
   desktopTranscript={desktopTranscript}
   setDesktopScrollNode={setDesktopScrollNode}
   handleDesktopScroll={handleDesktopScroll}
@@ -601,17 +544,28 @@ export function BuzzChatSurface({
   newMessageBadgeCount={newMessageBadgeCount}
   newestJumpDiscShown={newestJumpDiscShown}
   landAtNewestMessage={landAtNewestMessage}
-/>
+  leadBlock={threadHeader.titleBlock}
+/> : <YStack flex={1} testID="room-transcript-pending" />}
 
             {/* P2: Archived channels are read-only */}
             {isArchived ? (
-              <View style={[styles.archivedInputBar, readOnlyFooterInset]}>
-                <Text
-                  style={[styles.archivedInputText, isCorner && styles.cornerArchivedInputText]}
+              <>
+                <YStack
+                  paddingHorizontal="4"
+                  paddingTop="4"
+                  paddingBottom={readOnlyFooterInset.paddingBottom === undefined ? '2' : 0}
+                  borderTopWidth={1}
+                  borderTopColor="stroke"
+                  backgroundColor="canvas"
+                  alignItems="center"
                 >
-                  {parentChannelId ? 'Corner' : ROOM_LABEL} archived (read-only)
-                </Text>
-              </View>
+                  <T v={isCorner ? 'code' : 'meta'} color="secondary">
+                    {parentChannelId ? CORNER_TITLE : ROOM_TITLE} archived (read-only)
+                  </T>
+                  {readOnlyFooterInset.paddingBottom === undefined ? null : <YStack height={readOnlyFooterInset.paddingBottom} />}
+                </YStack>
+                {readOnlyFooterInset.marginBottom === undefined ? null : <YStack height={readOnlyFooterInset.marginBottom} />}
+              </>
             ) : (
               <ChatSurfaceComposer
   desktopExperience={desktopExperience}
@@ -625,7 +579,7 @@ export function BuzzChatSurface({
   retryHydration={retryHydration}
   isReadOnlyDirectMessage={isReadOnlyDirectMessage}
   readOnlyFooterInset={readOnlyFooterInset}
-  composerBottomInsetStyle={composerBottomInsetStyle}
+  composerBottomInset={composerBottomInset}
   slashMenuVisible={slashMenuVisible}
   mentionSlashAgentPubkey={mentionSlashAgentPubkey}
   agentByPubkey={agentByPubkey}
@@ -704,9 +658,10 @@ export function BuzzChatSurface({
   setInputSelection={setInputSelection}
 />
             )}
-          </KeyboardAvoidingView>
+          </KeyboardBody>
+          </ChatLinkProvider>
           {reportToast}
-        </View>
+        </YStack>
 <ChatSurfaceWorkPane
   profileAgentId={profileAgentId}
   desktopExperience={desktopExperience}
@@ -725,7 +680,7 @@ export function BuzzChatSurface({
   expandDesktopCorner={expandDesktopCorner}
   closeDesktopWorkPane={closeDesktopWorkPane}
 />
-      </RoomActionsBackground>
+      </ConversationFrame>
 
 <ChatSurfaceOverlays
   attachmentPickerVisible={attachmentPickerVisible}
@@ -742,6 +697,7 @@ export function BuzzChatSurface({
   handleBookmarkMessage={handleBookmarkMessage}
   handleReportMessage={handleReportMessage}
   handleCopyLedgerMessage={handleCopyLedgerMessage}
+  showCopyToast={showReportToast}
   handleSelectLedgerMessage={handleSelectLedgerMessage}
   decodedId={decodedId}
   beginReply={beginReply}
@@ -759,24 +715,10 @@ export function BuzzChatSurface({
   forwardToRoom={forwardToRoom}
   forwardRooms={forwardRooms}
   forwardTarget={forwardTarget}
-  insets={insets}
   roomSurface={roomSurface}
   isDirectMessage={isDirectMessage}
-  roomMemberByPubkey={roomMemberByPubkey}
-  membershipActionPubkey={membershipActionPubkey}
   membershipError={membershipError}
-  visibleRosterMembers={visibleRosterMembers}
-  setMembershipError={setMembershipError}
-  setParticipantPickerKind={setParticipantPickerKind}
-  openWorkspaceRoster={openWorkspaceRoster}
   setParticipantPickerVisible={setParticipantPickerVisible}
-  closeRoster={closeRoster}
-  handleRemoveRoomMember={handleRemoveRoomMember}
-  handleOpenProfile={handleOpenProfile}
-  speakerWorking={speakerWorking}
-  parentChannelId={parentChannelId}
-  personProfileByPubkey={personProfileByPubkey}
-  userPubkey={userPubkey}
   memberManagement={memberManagement}
   renameBusy={renameBusy}
   closeRoomActions={closeRoomActions}
@@ -802,7 +744,6 @@ export function BuzzChatSurface({
   roomParticipantTotal={roomParticipantTotal}
   participantsHydrated={participantsHydrated}
   setRoomActionsVisible={setRoomActionsVisible}
-  setRosterVisible={setRosterVisible}
   activeCommunityId={activeCommunityId}
   roomLifecycleBusy={roomLifecycleBusy}
   handleRoomLifecycle={handleRoomLifecycle}
@@ -817,26 +758,18 @@ export function BuzzChatSurface({
   setCornerActionsVisible={setCornerActionsVisible}
   handleBack={handleBack}
   readRoom={readRoom}
-  addingMembers={addingMembers}
-  memberInviteBusy={memberInviteBusy}
-  participantPickerCandidates={participantPickerCandidates}
   participantPickerKind={participantPickerKind}
-  participantPickerWorkspacePeers={participantPickerWorkspacePeers}
-  handleAddRoomMembers={handleAddRoomMembers}
-  handleConnectAgent={handleConnectAgent}
-  handleInvitePerson={handleInvitePerson}
-  agentPairBusy={agentPairBusy}
   agentConnectVisible={agentConnectVisible}
-  agentPairError={agentPairError}
   closeAgentConnect={closeAgentConnect}
-  connectAgent={connectAgent}
-  copyPairCommand={copyPairCommand}
-  agentPairCommand={agentPairCommand}
   createPollVisible={createPollVisible}
   createPollBusy={createPollBusy}
   setCreatePollVisible={setCreatePollVisible}
   handleCreatePoll={handleCreatePoll}
 />
     </BuzzCommunityShell>
+    </ThreadsDropdownScope>
   );
 }
+
+/** The frosted-behind frame of the conversation and its desktop work pane, laid out across. */
+const ConversationFrame = RoomActionsBackground;

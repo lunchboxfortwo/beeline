@@ -9,7 +9,6 @@ import { type RoomMembershipChange } from './daemon-api-client.js';
 import { type RoomRepositoryStateResult } from '@beeline/api-contract/daemon';
 import { type GrantRunnerEndpoint } from './grant-runner.js';
 import { MonolithRoomTurnLoop } from './monolith-room-turn.js';
-import type { InterruptedTurn } from './force-update-journal.js';
 import { openRouterRoutingCacheDir } from './openrouter-routing.js';
 import { turnTraceDirectory } from './turn-trace.js';
 import { type StorageRoomState } from './helper-storage.js';
@@ -23,15 +22,8 @@ import { RoomRuntimeCoordinator, WorkspaceMembershipStatus, REMOVAL_CONFIRMATION
 
 
 
-  export function roomRuntimeCoordinatorReconciliationDiagnostics(ctx: RoomRuntimeCoordinator) {
-    return { stage: ctx.reconciliationStage, elapsedMs: Date.now() - ctx.reconciliationStageAt };
-  }
 
 
-  export function roomRuntimeCoordinatorNoteReconciliationStage(ctx: RoomRuntimeCoordinator, stage: string): void {
-    ctx.reconciliationStage = stage;
-    ctx.reconciliationStageAt = Date.now();
-  }
 
 
   export function roomRuntimeCoordinatorActiveRoomIds(ctx: RoomRuntimeCoordinator): string[] {
@@ -41,11 +33,6 @@ import { RoomRuntimeCoordinator, WorkspaceMembershipStatus, REMOVAL_CONFIRMATION
 
   export function roomRuntimeCoordinatorSetDiscoveryWakeListener(ctx: RoomRuntimeCoordinator, listener: () => void): void {
     ctx.discoveryWakeListener = listener;
-  }
-
-
-  export function roomRuntimeCoordinatorSetReconciliationProgressListener(ctx: RoomRuntimeCoordinator, listener: () => void | Promise<void>): void {
-    ctx.reconciliationProgressListener = listener;
   }
 
 
@@ -111,14 +98,6 @@ import { RoomRuntimeCoordinator, WorkspaceMembershipStatus, REMOVAL_CONFIRMATION
   }
 
 
-  export function roomRuntimeCoordinatorQuiesceForUpdateIfIdle(ctx: RoomRuntimeCoordinator): boolean {
-    if (!ctx.isWorkspaceIdle()) return false;
-    // A host restart may be staggered after this idle proof. Keep new
-    // commands from starting while the old runtime waits for its update.
-    ctx.restartRequested = true;
-    for (const room of ctx.running.values()) room.controller.abort();
-    return true;
-  }
 
 
   /** Stop claiming new turns while existing turns drain for a managed update. */
@@ -127,10 +106,7 @@ import { RoomRuntimeCoordinator, WorkspaceMembershipStatus, REMOVAL_CONFIRMATION
   }
 
 
-  /**
-   * Undo `quiesceForUpdateIfIdle` after a managed restart failed: clear the
-   * latch and let reconciliation start the Room loops the quiesce stopped.
-   */
+  /** Resume intake after a failed update handoff. */
   export function roomRuntimeCoordinatorResumeServing(ctx: RoomRuntimeCoordinator): void {
     if (ctx.stopped) return;
     ctx.restartRequested = false;
@@ -138,42 +114,22 @@ import { RoomRuntimeCoordinator, WorkspaceMembershipStatus, REMOVAL_CONFIRMATION
   }
 
 
-  export async function roomRuntimeCoordinatorPrepareForForcedUpdateRestart(ctx: RoomRuntimeCoordinator): Promise<void> {
-    const rooms = [...ctx.running.values()];
-    await Promise.allSettled(rooms.filter((room) => room.body.isBusy())
-      .map((room) => room.body.prepareForForcedUpdateRestart()));
-    for (const room of rooms) room.controller.abort();
-  }
 
 
-  export function roomRuntimeCoordinatorInterruptedTurns(ctx: RoomRuntimeCoordinator): InterruptedTurn[] {
-    return [...ctx.running.values()].map((room) => room.body.interruptedTurn()).filter((turn): turn is InterruptedTurn => turn !== undefined);
-  }
-
-
-  export function roomRuntimeCoordinatorInterruptForServerMinimum(ctx: RoomRuntimeCoordinator): InterruptedTurn[] {
+  /** Stop each running turn's local run. Its claim stays; the next helper resumes it. */
+  export function roomRuntimeCoordinatorInterruptForServerMinimum(ctx: RoomRuntimeCoordinator): void {
     ctx.restartRequested = true;
     const rooms = [...ctx.running.values()];
-    const turns = rooms.map((room) => room.body.interruptForServerMinimum())
-      .filter((turn): turn is InterruptedTurn => turn !== undefined);
+    for (const room of rooms) room.body.interruptForServerMinimum();
     for (const room of rooms) room.controller.abort();
-    return turns;
   }
+
+
 
 
   export async function roomRuntimeCoordinatorReconcile(ctx: RoomRuntimeCoordinator, onServing?: () => void | Promise<void>): Promise<WorkspaceMembershipStatus> {
-    try {
-      return await ctx.reconcileRooms(onServing);
-    } finally {
-      ctx.noteReconciliationStage('idle');
-    }
-  }
-
-
-  export async function roomRuntimeCoordinatorReconcileRooms(ctx: RoomRuntimeCoordinator, onServing?: () => void | Promise<void>): Promise<WorkspaceMembershipStatus> {
     if (ctx.stopped) return 'member';
     const existingRooms = new Set(ctx.running.keys());
-    ctx.noteReconciliationStage('bootstrap');
     const bootstrap = await ctx.options.daemonApi.execute('getDaemonBootstrap', {
       agentId: ctx.agent.publicKey,
     });
@@ -191,13 +147,11 @@ import { RoomRuntimeCoordinator, WorkspaceMembershipStatus, REMOVAL_CONFIRMATION
     // Repository repair is scoped to the first fetch of each active cache;
     // archived object stores never delay command intake on helper restart.
     await ctx.yieldReconciliation();
-    if (!ctx.stopped) await ctx.reconciliationProgressListener?.();
     const topLevelRooms = bootstrap.rooms.filter((room) => !room.archived);
     // Bind waiting surfaces before any fan-out, cleanup or corner listing.
     // Their intake runs independently while the rest of this sweep continues.
     const pendingRooms = [...(bootstrap.pendingRooms ?? [])].sort((left, right) =>
       Number(Boolean(left.parentRoomId)) - Number(Boolean(right.parentRoomId)));
-    ctx.noteReconciliationStage('pending-room-intake');
     await mapWithConcurrency(pendingRooms, ROOM_JOIN_CONCURRENCY, async (room) => {
       if (ctx.stopped) return;
       // A bootstrap can cover several Workspaces; this core serves only its own.
@@ -215,7 +169,6 @@ import { RoomRuntimeCoordinator, WorkspaceMembershipStatus, REMOVAL_CONFIRMATION
         console.error(`[thin-core] pending Room ${room.roomId} start failed:`, error);
       }
     });
-    ctx.noteReconciliationStage('repository-revisions');
     for (const room of topLevelRooms) {
       const revision = room.repositoryRevision;
       if (revision === undefined) continue;
@@ -236,7 +189,6 @@ import { RoomRuntimeCoordinator, WorkspaceMembershipStatus, REMOVAL_CONFIRMATION
     }
     const desiredTopRooms = topLevelRooms.map((room) => room.roomId);
     const desired = new Set(desiredTopRooms);
-    ctx.noteReconciliationStage('room-intake');
     await mapWithConcurrency(desiredTopRooms, ROOM_JOIN_CONCURRENCY, async (roomId) => {
       if (ctx.stopped) return;
       if (ctx.running.has(roomId)) return;
@@ -253,7 +205,6 @@ import { RoomRuntimeCoordinator, WorkspaceMembershipStatus, REMOVAL_CONFIRMATION
     });
     const desiredCorners = new Map<string, DesiredCorner>();
     const archivedCorners = new Map<string, { cornerId: string; parentRoomId: string }>();
-    ctx.noteReconciliationStage('corner-listing');
     await mapWithConcurrency(topLevelRooms, ROOM_JOIN_CONCURRENCY, async (room) => {
       if (ctx.stopped) return;
       try {
@@ -299,7 +250,6 @@ import { RoomRuntimeCoordinator, WorkspaceMembershipStatus, REMOVAL_CONFIRMATION
     for (const roomId of desiredTopRooms) ctx.surfaceHealth.discover(roomId, 'room');
     for (const cornerId of desiredCorners.keys()) ctx.surfaceHealth.discover(cornerId, 'corner');
     for (const channelId of desired) ctx.roomRemovalConfirmations.delete(channelId);
-    ctx.noteReconciliationStage('corner-intake');
     await mapWithConcurrency(
       [...desiredCorners.values()],
       ROOM_JOIN_CONCURRENCY,
@@ -316,7 +266,6 @@ import { RoomRuntimeCoordinator, WorkspaceMembershipStatus, REMOVAL_CONFIRMATION
       if (desired.has(cornerId)) continue;
       ctx.unwatchCorner(cornerId);
     }
-    ctx.noteReconciliationStage('departed-room-shutdown');
     for (const [channelId, running] of [...ctx.running]) {
       if (desired.has(channelId)) continue;
       const confirmations = (ctx.roomRemovalConfirmations.get(channelId) ?? 0) + 1;
@@ -647,11 +596,6 @@ import { RoomRuntimeCoordinator, WorkspaceMembershipStatus, REMOVAL_CONFIRMATION
         },
       );
       if (!fetched) {
-        void ctx.options.daemonApi
-          .execute('noteEmptyRoomRepository', { roomId })
-          .catch((error) =>
-            console.warn(`[thin-core] Room ${roomId} empty-repository notice failed:`, error),
-          );
         return ctx.roomRoot(roomId);
       }
       await execFileAsync(

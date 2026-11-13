@@ -6,7 +6,7 @@
  * actually use — the server's human selection when one exists, otherwise the
  * runtime record's. The phone's MODEL / EFFORT rows read that row verbatim.
  *
- * Bounded by design: one probe per activation, a persisted
+ * One probe per activation, independent of command intake, and a persisted
  * hash so an unchanged catalog is never re-posted, and every failure is one
  * logged line — never a thrown error into the Room loop.
  */
@@ -39,13 +39,9 @@ export interface ModelCatalogSyncInput {
   workspaceId: string;
   runtimeDir: string;
   runtimeSelection?: Selection;
-  startupUnavailable?: 'model' | 'effort' | 'selection';
-  /** Exact selection that produced the startup verdict. */
-  startupSelection?: Selection;
   /** Re-post even when the local snapshot hash matches (a phone refresh clears the server copy first). */
   force?: boolean;
   fetchCatalog?: CatalogFetcher;
-  timeoutMs?: number;
   log?: (line: string) => void;
 }
 
@@ -54,14 +50,12 @@ export type ModelCatalogSyncResult = 'posted' | 'unchanged' | 'failed';
 export function modelCatalogHash(
   options: readonly AgentModelConfigOption[],
   selection: Selection | undefined,
-  startupUnavailable?: 'model' | 'effort' | 'selection',
 ): string {
   return createHash('sha256')
     .update(
       JSON.stringify({
         options,
         selection: selection ?? null,
-        startupUnavailable: startupUnavailable ?? null,
       }),
     )
     .digest('hex');
@@ -87,20 +81,9 @@ export async function syncAgentModelCatalog(
             ...(configuration.effort ? { effort: configuration.effort } : {}),
           }
         : input.runtimeSelection;
-    const startupUnavailable = input.startupSelection &&
-      input.startupSelection.model === selection?.model &&
-      input.startupSelection.effort === selection?.effort
-      ? input.startupUnavailable : undefined;
-    const {catalog} = await fetchCatalog(input.agent,input.agentEnv,startupUnavailable ? undefined : selection);
-    // session/new reports the harness defaults before Beeline applies the
-    // persisted selection. Publish the effective values so the phone does not
-    // mistake every activation for an unfinished model switch and hide the
-    // harness's live effort choices. An unavailable startup selection is the
-    // exception: that probe deliberately describes the harness default.
-    const effectiveCatalog = startupUnavailable
-      ? catalog
-      : withEffectiveCurrentValues(catalog, selection);
-    const hash = modelCatalogHash(effectiveCatalog, selection, startupUnavailable);
+    const { catalog } = await fetchCatalog(input.agent, input.agentEnv, selection);
+    const effectiveCatalog = withEffectiveCurrentValues(catalog, selection);
+    const hash = modelCatalogHash(effectiveCatalog, selection);
     const previous = await readFile(hashPath, 'utf8').catch(() => '');
     if (!input.force && previous.trim() === hash) return 'unchanged';
     await input.api.execute('postAgentModelCatalog', {
@@ -109,7 +92,6 @@ export async function syncAgentModelCatalog(
       // `fetchAgentModelCatalog` already applied the category allow-list.
       options: effectiveCatalog as Input<'postAgentModelCatalog'>['options'],
       ...(selection ? { selection } : {}),
-      ...(startupUnavailable ? { unavailable: startupUnavailable } : {}),
       ...(input.agent.kind ? { harness: input.agent.kind } : {}),
     });
     await writeFile(hashPath, `${hash}\n`, { mode: 0o600 });

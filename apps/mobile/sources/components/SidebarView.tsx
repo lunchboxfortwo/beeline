@@ -1,66 +1,44 @@
 import { appErrorCopy, appReadErrorCopy } from '@/buzz/app-error-copy';
-import { EmptyState } from '@/components/buzz/EmptyState';
-import { SettingsRow } from '@/components/buzz/SettingsRow';
 import { useDesktopLayout } from '@/buzz/desktop-layout-state';
-import { TrayGlyph } from '@/components/buzz/TrayGlyph';
-import { Button } from '@/components/buzz/Button';
-import { HullDialogInput } from '@/components/buzz/HullDialog';
-import { InlineRow, ContentTarget } from '@/components/buzz/IndexRow';
 import { removeRoomSearchDrafts } from '@/buzz/room-search-drafts';
 import { useNeedsYouCount } from '@/buzz/needs-you-store';
 import { invalidatesWorkspaceList } from '@/buzz/workspace-list-invalidation';
 import { getEffectiveRelayUrl, loadBuzzIdentity } from '@/auth/buzz-identity-storage';
 import { saveActiveCommunityId, subscribeActiveCommunityId } from '@/buzz/community-storage';
-import { cornerHref, navigateToRoom, roomCornersHref } from '@/buzz/corner-navigation';
+import { cornerHref, navigateToRoom } from '@/buzz/corner-navigation';
 import { desktopWorkspaceRoute } from '@/buzz/desktop-workbench-state';
-import {
-  filterConversations,
-  roomListCounts,
-  useRoomPins,
-  useRoomListFilter,
-} from '@/buzz/room-list-preferences';
-import { openRoomListCorner } from '@/buzz/room-list-new-corner';
-import { cornerOpenTappedAgain } from '@/buzz/corner-open-status';
-import type { CornerOpenAttempt } from '@/buzz/open-random-corner';
-import { roomListSections } from '@/buzz/room-list-row';
-import { dispatchRoomOpenTap } from '@/buzz/room-open-prefetch';
-import { workspaceRailItem } from '@/buzz/room-view-presentation';
+import { useRoomPins } from '@/buzz/room-list-preferences';
+import { useRoomCornerSummaries } from '@/buzz/room-corner-store';
+import { dispatchRoomOpenTap, warmRoomRouteCode } from '@/buzz/room-open-prefetch';
 import { mobileSurfaceCache, surfaceAddress } from '@/buzz/surface-storage';
 import { chatListSnapshot, refreshChatList, useChatList } from '@/buzz/chat-list-store';
 import { useActiveCommunityId } from '@/buzz/use-active-community';
-import { ROOMS_LABEL, WORKSPACES_LABEL } from '@/buzz/vocabulary';
+import { ROOMS_LABEL, WORKSPACE_LABEL } from '@/buzz/vocabulary';
 import { isWorkspaceManagerRole } from '@/buzz/workspace-role';
-import { CommunitySwitcherTrigger } from '@/components/buzz/CommunityRail';
-import { ConversationRow } from '@/components/buzz/ConversationRow';
 import { DesktopWorkspaceRail } from '@/components/buzz/DesktopWorkspaceRail';
-import { IdentityMark } from '@/components/buzz/IdentityMark';
-import { RoomListSectionHeader } from '@/components/buzz/RoomListSectionHeader';
-import { RoomListToolbar } from '@/components/buzz/RoomListToolbar';
-import { MessageSearchResults } from '@/components/buzz/MessageSearchResults';
 import { messageSearchHref, useMessageSearch } from '@/buzz/use-message-search';
-import { SurfaceGlyphLoader } from '@/components/buzz/SurfaceGlyphLoader';
-import { MembersAgentsGlyph } from '@/components/buzz/MembersAgentsGlyph';
 import { BuzzRigTransport } from '@/sync/transport';
 import { RoomViewClient } from '@/sync/transport/room-view-client';
 import { useHeaderHeight, useIsDesktop } from '@/utils/responsive';
 import { isTauri } from '@/utils/isTauri';
+import { Copy, SafeTop, T } from '@/ui/grammar';
+import { SIDE_PLACES, SidePlaceRow, type SidePlace } from '@/ui/screens/chats/SidePlaces';
+import { ChatListHeader, CLOSED_SEARCH, type ChatSearch } from '@/ui/screens/chats/ChatListHeader';
+import { ChatRow, JoinableChats } from '@/ui/screens/chats/ChatTree';
+import { SurfaceGlyphLoader } from '@/components/buzz/SurfaceGlyphLoader';
+import { filterChats } from '@/ui/screens/chats/chat-tree-model';
+import { MessageMatches } from '@/ui/screens/chats/MessageMatches';
+import { useJoinChat } from '@/ui/screens/chats/use-join-chat';
+import { useNewThread } from '@/ui/screens/chats/use-new-thread';
 import {
   type RoomViewIdentity,
   type WorkspaceListView,
   isWorkspaceListView,
 } from '@beeline/buzz-client';
-import { Ionicons } from '@expo/vector-icons';
 import { useGlobalSearchParams, usePathname, useRouter, type Href } from 'expo-router';
 import * as React from 'react';
-import {
-  Platform,
-  ScrollView,
-  Text,
-  TextInput,
-  View,
-} from 'react-native';
-import { useSafeAreaInsets } from 'react-native-safe-area-context';
-import { StyleSheet } from 'react-native-unistyles';
+import { Platform } from 'react-native';
+import { ScrollView, Separator, XStack, YStack } from 'tamagui';
 
 function selectedRoomId(pathname: string): string | null {
   const prefix = '/beeline/chat/';
@@ -76,96 +54,12 @@ function firstParam(value: string | string[] | undefined): string | null {
   return (Array.isArray(value) ? value[0] : value)?.trim() || null;
 }
 
-/** The viewer's face in the settings row. */
-const SETTINGS_FACE_SIZE = 22;
-
-const stylesheet = StyleSheet.create((theme) => ({
-  container: {
-    flex: 1,
-    borderRightWidth: StyleSheet.hairlineWidth,
-    borderRightColor: theme.colors.divider,
-    backgroundColor: theme.colors.groupped.background,
-  },
-  desktopWorkspaceHeader: {
-    paddingLeft: theme.buzz.roomList.edge,
-    // The tray's centre, not its target, sits on the Room list icon line.
-    paddingRight: theme.buzz.roomList.trayEnd,
-    paddingTop: 8,
-    paddingBottom: 8,
-    alignItems: 'center',
-    gap: 4,
-    borderBottomWidth: StyleSheet.hairlineWidth,
-    borderBottomColor: theme.colors.divider,
-  },
-  workspaceBlock: {
-    paddingHorizontal: theme.buzz.space.md,
-    paddingBottom: theme.buzz.space.sm,
-    borderBottomWidth: StyleSheet.hairlineWidth,
-    borderBottomColor: theme.colors.divider,
-  },
-  workspaceRow: { flexDirection: 'row', gap: theme.buzz.space.sm },
-  workspaceButton: {
-    minWidth: 34,
-    maxWidth: 150,
-    paddingHorizontal: theme.buzz.space.sm,
-    paddingVertical: theme.buzz.space.sm,
-    borderRadius: theme.buzz.radius,
-    borderWidth: StyleSheet.hairlineWidth,
-    borderColor: theme.colors.divider,
-  },
-  workspaceSelected: { backgroundColor: theme.colors.surfaceSelected },
-  workspaceText: { ...theme.buzz.type.meta, color: theme.colors.textSecondary },
-  workspaceTextSelected: { ...theme.buzz.type.bodyStrong, color: theme.colors.text },
-  list: { flex: 1 },
-  listContent: { paddingBottom: 8 },
-  conversationCell: {
-    borderBottomWidth: StyleSheet.hairlineWidth,
-    borderBottomColor: theme.buzz.border,
-  },
-  roomRowSelected: { backgroundColor: theme.colors.surfaceSelected },
-  empty: {
-    ...theme.buzz.type.meta,
-    paddingHorizontal: theme.buzz.space.md,
-    paddingVertical: 24,
-    color: theme.colors.textSecondary,
-  },
-  loading: {
-    alignItems: 'center',
-    paddingHorizontal: theme.buzz.space.md,
-    paddingVertical: 24,
-    gap: 8,
-  },
-  settingsRow: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: theme.buzz.space.sm,
-    minHeight: 48,
-    paddingHorizontal: 16,
-    paddingVertical: theme.buzz.space.sm,
-    borderTopWidth: StyleSheet.hairlineWidth,
-    borderTopColor: theme.colors.divider,
-  },
-  settingsText: { ...theme.buzz.type.sectionHead, color: theme.colors.text },
-  membersGlyph: { color: theme.buzz.ledgerQuiet },
-  trayGlyph: { color: theme.buzz.ledgerQuiet, backgroundColor: theme.buzz.bgBase },
-  desktopWorkspaceHeaderActions: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: theme.buzz.space.xs,
-  },
-  settingsFaceSlot: { width: SETTINGS_FACE_SIZE, height: SETTINGS_FACE_SIZE, borderRadius: SETTINGS_FACE_SIZE / 2 },
-  settingsViewerName: {
-    ...theme.buzz.type.meta,
-    color: theme.colors.textSecondary,
-    flexShrink: 1,
-  },
-}));
-
 /** One server-backed desktop pane for Workspace and Room movement. */
 export const SidebarView = React.memo(function SidebarView() {
+  React.useEffect(() => {
+    if (Platform.OS === 'web') warmRoomRouteCode();
+  }, []);
   const { showRoomList } = useDesktopLayout();
-  const styles = stylesheet;
-  const safeArea = useSafeAreaInsets();
   const headerHeight = useHeaderHeight();
   const macTitlebarInset =
     isTauri() && typeof navigator !== 'undefined' && /Mac/.test(navigator.platform)
@@ -184,7 +78,6 @@ export const SidebarView = React.memo(function SidebarView() {
   // but it is enough to keep that already-loaded navigation family expanded.
   const promotedCornerParentId = firstParam(routeParams.parent);
   const activeRoomId = promotedCornerParentId ?? selectedRoomId(pathname);
-  const searchRef = React.useRef<TextInput>(null);
   const workspaceIdRef = React.useRef<string | null>(null);
   const [client, setClient] = React.useState<RoomViewClient | null>(null);
   const [relayUrl, setRelayUrl] = React.useState<string | null>(null);
@@ -192,12 +85,11 @@ export const SidebarView = React.memo(function SidebarView() {
   const [viewerIdentity, setViewerIdentity] = React.useState<RoomViewIdentity | null>(null);
   const [workspaces, setWorkspaces] = React.useState<WorkspaceListView['workspaces']>([]);
   const [workspaceId, setWorkspaceId] = React.useState<string | null>(null);
-  const [query, setQuery] = React.useState('');
-  const [desktopSearchOpen, setDesktopSearchOpen] = React.useState(false);
+  const [search, setSearch] = React.useState<ChatSearch>(CLOSED_SEARCH);
+  const query = search.open ? search.query : '';
   React.useEffect(() => { void removeRoomSearchDrafts(); }, []);
   React.useEffect(() => {
-    setQuery('');
-    setDesktopSearchOpen(false);
+    setSearch(CLOSED_SEARCH);
   }, [pathname, workspaceId, identityPubkey]);
   const [navigationError, setNavigationError] = React.useState<string | null>(null);
   const [refreshNonce, setRefreshNonce] = React.useState(0);
@@ -344,32 +236,17 @@ export const SidebarView = React.memo(function SidebarView() {
     if (identityPubkey) void saveActiveCommunityId(identityPubkey, routeWorkspaceId);
   }, [identityPubkey, routeWorkspaceId, workspaces, relayUrl]);
 
-  const { pinned, pinsLoaded, togglePin, pinError } = useRoomPins(identityPubkey, workspaceId);
-  const counts = React.useMemo(
-    () => roomListCounts(surface?.chats ?? [], pinned),
-    [surface?.chats, pinned],
-  );
-  const [filter, setFilter] = useRoomListFilter(
-    workspaceId,
-    pinsLoaded && Boolean(surface),
-    Boolean(
-      surface?.chats.some(
-        (item) => !item.closed && !item.directMessage && pinned.includes(item.room.id),
-      ),
-    ),
-  );
+  const { pinned, togglePin, pinError } = useRoomPins(identityPubkey, workspaceId);
+  const cornerSummaries = useRoomCornerSummaries();
   const filteredChats = React.useMemo(
-    () => filterConversations(surface?.chats ?? [], query, filter, pinned),
-    [query, filter, pinned, surface?.chats],
+    () => filterChats(surface?.chats ?? [], query, search.open ? search.chips : [], pinned,
+      (roomId) => cornerSummaries.get(roomId)?.openCorners),
+    [query, search, pinned, surface?.chats, cornerSummaries],
   );
   const messageSearch = useMessageSearch(
     client ? (id, text, before, signal) => client.searchMessages(id, text, before, signal) : null,
     workspaceId,
     query,
-  );
-  const filteredChatSections = React.useMemo(
-    () => roomListSections(filteredChats, !query.trim() && filter === 'all'),
-    [filteredChats, query, filter],
   );
   const activeWorkspace = workspaces.find((workspace) => workspace.id === workspaceId) ?? null;
   // ChatListView carries workspace.role; the server's viewer.permissions.manage
@@ -377,56 +254,37 @@ export const SidebarView = React.memo(function SidebarView() {
   const canManageWorkspace = isWorkspaceManagerRole(surface?.workspace.role);
   const viewerIsAgent = surface?.viewer.kind === 'agent';
   const canCreateRoom = !viewerIsAgent && canManageWorkspace;
-  const workbenchSelected = pathname.startsWith('/beeline/settings/workbench');
-  const traySelected = pathname.startsWith('/beeline/tray');
   const needsYouCount = useNeedsYouCount(workspaceId, surface);
-  const profileSettingsSelected =
-    pathname.startsWith('/beeline/settings') && !workbenchSelected;
-  const otherWorkspaceNeedsAttention = [...attentionWorkspaceIds].some((id) => id !== workspaceId);
+  const placeSelected = (place: SidePlace['key']) => pathname.startsWith(`/beeline/${place}`);
   const openRoom = React.useCallback(
     (roomId: string) => {
       dispatchRoomOpenTap(roomId, {
         navigate: (id) => {
-          setQuery('');
-          setDesktopSearchOpen(false);
+          setSearch(CLOSED_SEARCH);
           navigateToRoom(router, id);
         },
       });
     },
     [router],
   );
-  // The sidebar reads through RoomViewClient only, so the one write it makes
-  // builds the monolith transport on demand, as the Room composer does.
   // Quiet lists keep their ages until real list activity. Route changes retain
   // the same timestamp so unrelated conversation rows can stay memoized.
   const ageNow = React.useMemo(() => Date.now(), [surface?.chats]);
-  const openCorners = React.useCallback((roomId: string) => {
-    router.push(roomCornersHref(roomId));
+  const openThread = React.useCallback((roomId: string, cornerId: string, name: string) => {
+    router.push(cornerHref(cornerId, roomId, name));
   }, [router]);
-  const openingCornerRef = React.useRef(false);
-  const openNewCorner = React.useCallback(
-    async (roomId: string, attempt?: CornerOpenAttempt) => {
-      if (openingCornerRef.current) return cornerOpenTappedAgain();
-      openingCornerRef.current = true;
-      try {
-        const identity = await loadBuzzIdentity();
-        const transport = identity ? new BuzzRigTransport(identity) : null;
-        await openRoomListCorner({
-          roomId,
-          attempt,
-          createCorner: transport
-            ? (id, title, cornerId) =>
-                transport.createHumanCorner(id, title, undefined, true, cornerId)
-            : null,
-          openCorner: (cornerId, title) => router.push(cornerHref(cornerId, roomId, title)),
-          retry: (failed) => void openNewCorner(roomId, failed),
-        });
-      } finally {
-        openingCornerRef.current = false;
-      }
-    },
-    [router],
-  );
+  const openNewThread = useNewThread(async () => {
+    const identity = await loadBuzzIdentity();
+    return identity ? new BuzzRigTransport(identity) : null;
+  });
+  const newThread = React.useCallback((roomId: string) => void openNewThread(roomId), [openNewThread]);
+  const refreshList = React.useCallback(() => { if (chatListKey) refreshChatList(chatListKey); }, [chatListKey]);
+  const { joining, join } = useJoinChat(identityPubkey, refreshList, openRoom, setNavigationError);
+  const openPlace = React.useCallback((place: SidePlace['key']) => {
+    if (place === 'tray')
+      router.push({ pathname: '/beeline/tray', params: { communityId: workspaceId ?? '', workspaceName: activeWorkspace?.name ?? '' } } as never);
+    else router.push(`/beeline/${place}` as Href);
+  }, [activeWorkspace?.name, router, workspaceId]);
 
   React.useEffect(() => {
     if (Platform.OS !== 'web' || typeof window === 'undefined') return;
@@ -450,7 +308,7 @@ export const SidebarView = React.memo(function SidebarView() {
       }
       if ((event.metaKey || event.ctrlKey) && event.key.toLowerCase() === 'k') {
         event.preventDefault();
-        setDesktopSearchOpen(true);
+        setSearch((current) => (current.open ? current : { ...CLOSED_SEARCH, open: true }));
         return;
       }
       if (!editing && event.altKey && (event.key === 'ArrowDown' || event.key === 'ArrowUp')) {
@@ -483,250 +341,107 @@ export const SidebarView = React.memo(function SidebarView() {
     [identityPubkey, relayUrl, router],
   );
 
+  const canStartChat = Boolean(workspaceId) && canCreateRoom;
   return (
-    <View style={{ flex: 1, flexDirection: 'row', paddingTop: macTitlebarInset }}>
-      {(!isDesktop || showRoomList) && <View
-        style={[styles.container, { paddingTop: safeArea.top + (isDesktop ? 0 : headerHeight) }]}
-        testID="desktop-navigation-pane"
-      >
-        {isDesktop ? (
-          <InlineRow style={styles.desktopWorkspaceHeader}>
-            <CommunitySwitcherTrigger
-              community={activeWorkspace ? workspaceRailItem(activeWorkspace) : null}
-              expanded={workspaceSwitcherOpen}
-              onPress={() => setWorkspaceSwitcherOpen((open) => !open)}
-              attention={otherWorkspaceNeedsAttention}
-              pickerTitle={WORKSPACES_LABEL}
-            />
-            <View style={styles.desktopWorkspaceHeaderActions}>
-              {workspaceId && (
-                <>
-                <Button label="" iconOnly variant="quiet" accessibilityLabel="Members" testID="workspace-members"
-                  icon={<MembersAgentsGlyph size={22} color={styles.membersGlyph.color} />}
-                  onPress={() => router.push({ pathname: '/beeline/members', params: { communityId: workspaceId } } as Href)} />
-              <TrayGlyph size={22} color={styles.trayGlyph.color} cutColor={styles.trayGlyph.backgroundColor}
-                testID="desktop-tray" needsYouCount={needsYouCount} filled={traySelected}
-                onPress={() => router.push({ pathname: '/beeline/tray', params: { communityId: workspaceId, workspaceName: activeWorkspace?.name ?? '' } } as never)} />
-                </>
-              )}
-            </View>
-          </InlineRow>
-        ) : (
-          <View style={styles.workspaceBlock}>
-            <ScrollView
-              horizontal
-              showsHorizontalScrollIndicator={false}
-              contentContainerStyle={styles.workspaceRow}
-            >
-              {workspaces.map((workspace) => {
-                const selected = workspace.id === workspaceId;
-                return (
-                  <ContentTarget
-                    key={workspace.id}
-                    accessibilityRole="button"
-                    accessibilityState={{ selected }}
-                    onPress={() => selectWorkspace(workspace.id)}
-                    style={[styles.workspaceButton, selected && styles.workspaceSelected]}
-                    testID={`desktop-workspace-${workspace.id}`}
-                  >
-                    <Text
-                      numberOfLines={1}
-                      style={[styles.workspaceText, selected && styles.workspaceTextSelected]}
-                    >
-                      {workspace.name}
-                    </Text>
-                  </ContentTarget>
-                );
-              })}
-            </ScrollView>
-          </View>
-        )}
-        <>
-          <RoomListToolbar
-            desktop
-            searchRef={searchRef}
-            searchOpen={desktopSearchOpen}
-            onSearchOpenChange={setDesktopSearchOpen}
-            filter={filter}
-            onFilter={setFilter}
-            query={query}
-            onQuery={setQuery}
-            counts={counts}
-
+    <YStack flex={1} minHeight={0}>
+      {macTitlebarInset ? <YStack height={macTitlebarInset} /> : null}
+      {(!isDesktop || showRoomList) && (
+        <YStack flex={1} minHeight={0} borderRightWidth={1} borderColor="stroke" backgroundColor="canvas" testID="desktop-navigation-pane">
+          {isDesktop ? null : <SafeTop />}
+          <ChatListHeader
+            workspaceName={activeWorkspace?.name ?? WORKSPACE_LABEL}
+            onWorkspace={() => setWorkspaceSwitcherOpen((open) => !open)}
+            onNew={canStartChat
+              ? () => router.push({ pathname: '/beeline/channels', params: { communityId: workspaceId!, newRoom: String(Date.now()) } } as Href)
+              : undefined}
+            search={search}
+            onSearch={setSearch}
           />
-          {pinError && (
-            <SettingsRow title={pinError} />
-          )}
-          <ScrollView style={styles.list} contentContainerStyle={styles.listContent}>
+          <YStack paddingHorizontal="2" paddingVertical="2" gap="1">
+            {SIDE_PLACES.map((place) => (
+              <SidePlaceRow
+                key={place.key}
+                place={place}
+                selected={placeSelected(place.key)}
+                count={place.key === 'tray' ? needsYouCount : undefined}
+                onPress={() => openPlace(place.key)}
+              />
+            ))}
+          </YStack>
+          <Separator borderColor="stroke" />
+          <XStack paddingHorizontal="4" paddingTop="3"><T v="metaStrong" color="secondary">Chats</T></XStack>
+          {pinError ? <YStack paddingHorizontal="4" paddingTop="2"><Copy small color="removed">{pinError}</Copy></YStack> : null}
+          <ScrollView flex={1} minHeight={0} testID="desktop-chat-tree">
             {navigationError ? (
-              <SettingsRow title={navigationError} />
-            ) : surface && !pinsLoaded ? null : !filteredChats.length && (!surface || query.trim() || filter !== 'all') ? (
-              surface ? (
-                filter === 'pinned' && !query.trim() ? (
-                  <EmptyState title="No pinned conversations yet" description="Long press a Room to pin it here." testID="desktop-pinned-empty" action={{label:'Show all conversations',onPress:() => setFilter('all'),testID:'desktop-show-all-conversations'}} />
-                ) : (
-                  <Text style={styles.empty}>
-                    {query.trim() || filter !== 'all'
-                      ? `No ${ROOMS_LABEL.toLowerCase()} or direct messages match this search.`
-                      : `No ${ROOMS_LABEL.toLowerCase()} or direct messages yet.`}
-                  </Text>
-                )
-              ) : (
-                <View style={styles.loading} testID="desktop-rooms-loader">
-                  <SurfaceGlyphLoader compact />
-                  <Text style={styles.empty}>
-                    Loading {ROOMS_LABEL.toLowerCase()} and direct messages…
-                  </Text>
-                </View>
-              )
+              <YStack padding="4"><Copy small color="removed">{navigationError}</Copy></YStack>
+            ) : !surface ? (
+              <YStack padding="4" testID="desktop-rooms-loader">
+                <SurfaceGlyphLoader compact />
+              </YStack>
+            ) : !filteredChats.length ? (
+              <YStack padding="4">
+                <Copy quiet>{search.open ? 'No chats match.' : `No ${ROOMS_LABEL.toLowerCase()} or direct messages yet.`}</Copy>
+              </YStack>
             ) : (
-              filteredChatSections.map((section) => (
-                <React.Fragment key={section.kind}>
-                  {!query.trim() && (
-                    <RoomListSectionHeader
-                      title={section.kind === 'rooms' ? ROOMS_LABEL : 'Direct messages'}
-                      inset="roomList"
-                      tapLineHeight
-                      actionTestID={
-                        section.kind === 'rooms' ? 'desktop-new-room' : 'desktop-new-direct-message'
-                      }
-                      actionAccessibilityLabel={
-                        section.kind === 'rooms' ? 'Create a new Room' : 'Start a direct message'
-                      }
-                      onAction={
-                        !workspaceId || viewerIsAgent
-                          ? undefined
-                          : section.kind === 'rooms' && !canCreateRoom
-                            ? undefined
-                            : () =>
-                                router.push({
-                                  pathname: '/beeline/channels',
-                                  params:
-                                    section.kind === 'rooms'
-                                      ? { communityId: workspaceId, newRoom: String(Date.now()) }
-                                      : {
-                                          communityId: workspaceId,
-                                          newDirectMessage: String(Date.now()),
-                                        },
-                                } as Href)
-                      }
-                    />
-                  )}
-                  {section.data.map((item) => {
-                    const active = activeRoomId === item.room.id;
-                    return (
-                      <View key={item.room.id} style={styles.conversationCell}>
-                        <ConversationRow
-                          item={item}
-                          viewer={identityPubkey ?? undefined}
-                          now={ageNow}
-                          selected={isDesktop && active}
-                          desktop
-                          onOpenCorners={openCorners}
-                          pinned={pinned.includes(item.room.id)}
-                          onPin={togglePin}
-                          onLongPressCorners={
-                            viewerIsAgent ? undefined : openNewCorner
-                          }
-                          onPress={openRoom}
-                          testID={`desktop-room-${item.room.id}`}
-                        />
-                      </View>
-                    );
-                  })}
-                </React.Fragment>
+              filteredChats.map((item, index) => (
+                <ChatRow
+                  key={item.room.id}
+                  item={item}
+                  viewer={identityPubkey ?? undefined}
+                  now={ageNow}
+                  first={index === 0}
+                  selected={isDesktop && activeRoomId === item.room.id}
+                  pinned={pinned.includes(item.room.id)}
+                  onOpen={openRoom}
+                  onPin={togglePin}
+                  onOpenThread={openThread}
+                  onNewThread={viewerIsAgent ? undefined : newThread}
+                />
               ))
             )}
-            <MessageSearchResults
+            <MessageMatches
               search={messageSearch}
               now={ageNow}
               onOpen={(result) => {
                 if (workspaceId) {
-                  setQuery('');
-                  setDesktopSearchOpen(false);
+                  setSearch(CLOSED_SEARCH);
                   router.push(messageSearchHref(result, workspaceId) as Href);
                 }
               }}
             />
+            {search.open || !surface ? null : (
+              <JoinableChats chats={surface.joinable ?? []} joining={joining} onJoin={(id, name) => void join(id, name)} />
+            )}
           </ScrollView>
-            <ContentTarget
-              accessibilityLabel={
-                viewerIdentity?.name ? `${viewerIdentity.name} — Settings` : 'Settings'
-              }
-              accessibilityRole="button"
-              accessibilityState={{ selected: profileSettingsSelected }}
-              onPress={() => router.push('/beeline/settings' as Href)}
-              style={({ pressed }) => [
-                styles.settingsRow,
-                (profileSettingsSelected || pressed) && styles.roomRowSelected,
-              ]}
-              testID="profile-settings-navigation"
-            >
-              {isDesktop ? (
-                identityPubkey ? (
-                  <>
-                    <IdentityMark
-                      seed={identityPubkey}
-                      kind="human"
-                      size={22}
-                      name={viewerIdentity?.name}
-                      avatarUrl={viewerIdentity?.avatar}
-                      face={viewerIdentity?.face}
-                    />
-                    {viewerIdentity?.name ? (
-                      <Text
-                        numberOfLines={1}
-                        style={styles.settingsViewerName}
-                        testID="profile-settings-name"
-                      >
-                        {viewerIdentity.name}
-                      </Text>
-                    ) : null}
-                  </>
-                ) : (
-                  <View style={styles.settingsFaceSlot} />
-                )
-              ) : (
-                <>
-                  <Ionicons
-                    name="person-outline"
-                    size={18}
-                    color={stylesheet.settingsText.color}
-                    {...(Platform.OS === 'web' ? { 'aria-hidden': true } : {})}
-                  />
-                  <Text style={styles.settingsText}>SETTINGS</Text>
-                </>
-              )}
-            </ContentTarget>
-        </>
-        {isDesktop && (
-          <DesktopWorkspaceRail
-            activeWorkspaceId={workspaceId}
-            onAdd={() => {
-              setWorkspaceSwitcherOpen(false);
-              router.push('/beeline/community' as Href);
-            }}
-            onClose={() => setWorkspaceSwitcherOpen(false)}
-            onOpenAccount={() => {
-              setWorkspaceSwitcherOpen(false);
-              router.push('/beeline/settings' as Href);
-            }}
-            onSelect={selectWorkspace}
-            open={workspaceSwitcherOpen}
-            viewerAvatarUrl={viewerIdentity?.avatar}
-            viewerFace={viewerIdentity?.face}
-            viewerName={viewerIdentity?.name}
-            viewerPubkey={identityPubkey ?? undefined}
-            workspaces={workspaces.map((workspace) => ({
-              id: workspace.id,
-              name: workspace.name,
-              avatar: workspace.avatar,
-              roomCount: workspace.roomCount ?? 0,
-              needsAttention: attentionWorkspaceIds.has(workspace.id),
-            }))}
-          />
-        )}
-      </View>}
-    </View>
+          {isDesktop && (
+            <DesktopWorkspaceRail
+              activeWorkspaceId={workspaceId}
+              onAdd={() => {
+                setWorkspaceSwitcherOpen(false);
+                router.push('/beeline/community' as Href);
+              }}
+              onClose={() => setWorkspaceSwitcherOpen(false)}
+              onOpenAccount={() => {
+                setWorkspaceSwitcherOpen(false);
+                router.push('/beeline/settings' as Href);
+              }}
+              onSelect={selectWorkspace}
+              open={workspaceSwitcherOpen}
+              viewerAvatarUrl={viewerIdentity?.avatar}
+              viewerFace={viewerIdentity?.face}
+              viewerName={viewerIdentity?.name}
+              viewerPubkey={identityPubkey ?? undefined}
+              workspaces={workspaces.map((workspace) => ({
+                id: workspace.id,
+                name: workspace.name,
+                avatar: workspace.avatar,
+                roomCount: workspace.roomCount ?? 0,
+                needsAttention: attentionWorkspaceIds.has(workspace.id),
+              }))}
+            />
+          )}
+        </YStack>
+      )}
+    </YStack>
   );
 });

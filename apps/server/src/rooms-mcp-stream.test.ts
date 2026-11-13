@@ -5,6 +5,7 @@ import { mkdirSync, mkdtempSync, rmSync, watch, writeFileSync } from 'node:fs';
 import { createServer } from 'node:http';
 import { createServer as createSocketServer } from 'node:net';
 import { join } from 'node:path';
+import { tmpdir } from 'node:os';
 import { fileURLToPath } from 'node:url';
 import type { ServerResponse } from 'node:http';
 import { afterAll, afterEach, beforeAll, describe, expect, it, vi } from 'vitest';
@@ -92,7 +93,7 @@ describe.each(['pglite',...(postgresUrl?['postgres']:[])])('P12 MCP committed me
     expect(output.frames[1]).toMatchObject({type:'delivery',deliveryId:'mention:first:0',mentionCursor:'1'});
     expect(output.frames[2]).toMatchObject({type:'checkpoint',cursor:{through:1}});
     expect(read).toHaveBeenCalledTimes(2);
-    const proofRoot=fileURLToPath(new URL('../../../.beeline-proof/',import.meta.url));mkdirSync(proofRoot,{recursive:true});
+    const proofRoot=tmpdir();
     const dir=mkdtempSync(join(proofRoot,'mcp-durability-')),key='codex:/synthetic/project';
     const runner={node:'/synthetic/node',bundle:'/synthetic/beeline.js'};
     try{
@@ -110,11 +111,11 @@ describe.each(['pglite',...(postgresUrl?['postgres']:[])])('P12 MCP committed me
       expect(readState(dir).sessions[0]?.streamCursor).toEqual(output.frames[2]!.cursor);
     }finally{rmSync(dir,{recursive:true,force:true});}
   });
-  it('resumes an unchanged committed cursor without requerying the application inbox',async()=>{
+  it('checks the durable inbox once when resuming an unchanged committed cursor',async()=>{
     const head=(await db.query<{epoch:string;through:number}>(`SELECT epoch,sequence::integer through FROM live_streams WHERE id='mcp:member'`)).rows[0]!;
     const output=reply(),read=page();
     await serveMcpMemberStream(db,principal,output as unknown as ServerResponse,{cursor:head,mentionCursor:'1'},read as never);
-    expect(read).not.toHaveBeenCalled();expect(output.frames).toEqual([{v:1,type:'checkpoint',cursor:head,mentionCursor:'1'}]);
+    expect(read).toHaveBeenCalledTimes(1);expect(output.frames).toEqual([{v:1,type:'checkpoint',cursor:head,mentionCursor:'1'}]);
   });
   it('does not publish a rolled-back source or unrelated token-use metrics',async()=>{
     const output=reply(),read=page();
@@ -127,8 +128,8 @@ describe.each(['pglite',...(postgresUrl?['postgres']:[])])('P12 MCP committed me
     expect((await db.query(`SELECT sequence FROM live_streams WHERE id='mcp:member'`)).rows).toEqual(before);
     expect(output.frames).toHaveLength(1);expect(read).toHaveBeenCalledTimes(1);
   });
-  it('refreshes the joined Claude bridge once after database-clock expiry, replays the missed tag once, and parks on revocation',async()=>{
-    const proofRoot=fileURLToPath(new URL('../../../.beeline-proof/',import.meta.url));mkdirSync(proofRoot,{recursive:true});
+  it('keeps the joined Claude bridge connected past its former token lifetime and parks on revocation',async()=>{
+    const proofRoot=tmpdir();
     const dir=mkdtempSync(join(proofRoot,'mcp-expiry-')),stateDir=join(dir,'state'),socket=join(dir,'claude.sock');
     const key=`claude-code:${dir}`,connections:{output:Reply;url:URL;token:string}[]=[],messages:string[]=[],refreshes:unknown[]=[];
     const events=new EventEmitter(),deadline=AbortSignal.timeout(10_000);
@@ -138,21 +139,12 @@ describe.each(['pglite',...(postgresUrl?['postgres']:[])])('P12 MCP committed me
       if(deadline.aborted){stop();return;}
       deadline.addEventListener('abort',stop,{once:true});events.on('change',inspect);inspect();
     });
-    let releaseRefresh!:()=>void;
-    const refreshGate=new Promise<void>(resolve=>{releaseRefresh=resolve;});
     const read=page();
     const http=createServer((request,response)=>{void(async()=>{
       const url=new URL(request.url!,'http://127.0.0.1');
-      if(url.pathname==='/mcp/oauth/token'){
-        let body='';for await(const chunk of request)body+=chunk;
-        refreshes.push(JSON.parse(body));events.emit('change');await refreshGate;
-        await db.query(`INSERT INTO rooms_mcp_tokens(hash,client_id,identity_id,scope,expires_at)
-          VALUES('fresh-token','client','owner','rooms:read',now()+interval '1 hour')`);
-        response.setHeader('content-type','application/json');
-        response.end(JSON.stringify({access_token:'fresh-token',refresh_token:'fresh-refresh',expires_in:3600}));return;
-      }
+      if(url.pathname==='/mcp/oauth/token'){refreshes.push('unexpected');throw new Error('Permanent access must not refresh');}
       const token=request.headers.authorization?.replace('Bearer ','')??'';
-      const allowed=await db.query(`SELECT hash FROM rooms_mcp_tokens WHERE hash=$1 AND revoked_at IS NULL AND expires_at>now()`,[token]);
+      const allowed=await db.query(`SELECT hash FROM rooms_mcp_tokens WHERE hash=$1 AND revoked_at IS NULL`,[token]);
       if(!allowed.rowCount){response.writeHead(401);response.end();return;}
       if(url.pathname==='/mcp'){
         response.setHeader('content-type','application/json');
@@ -176,7 +168,7 @@ describe.each(['pglite',...(postgresUrl?['postgres']:[])])('P12 MCP committed me
     writeFileSync(join(env.CLAUDE_CONFIG_DIR,'sessions',`${process.pid}.json`),JSON.stringify({pid:process.pid,sessionId:'expiry-proof',cwd:dir,messagingSocketPath:socket}));
     await updateState(stateDir,state=>state.sessions.push({key,agent:'claude-code',cwd:dir,name:'Claude',server,clientId:'client',
       refreshToken:'synthetic-refresh',accessToken:principal.hash,accessExpiresAt:Date.now()+3_600_000,
-      cursor:'1',deliveredWakes:[],joinedAt:'',sessionId:'expiry-proof',pid:process.pid}));
+      cursor:'1',deliveredWakes:[],joinedAt:'',sessionId:'expiry-proof',pid:process.pid,deliveryGeneration:'bound-expiry',deliveryMechanism:'local'}));
     const stateWatch=watch(stateDir,()=>events.emit('change'));
     const bridge=fileURLToPath(new URL('../../body/src/session-join/bridge.ts',import.meta.url));
     const child=spawn(process.execPath,['--import','tsx','--input-type=module','-e',
@@ -186,40 +178,21 @@ describe.each(['pglite',...(postgresUrl?['postgres']:[])])('P12 MCP committed me
       await until(()=>!!readState(stateDir).sessions[0]?.streamCursor);
       await db.query(`INSERT INTO rooms_mcp_mentions(member_id,room_id,message_id) VALUES('member',$1,'before-expiry')`,[room]);
       await until(()=>messages.length===1&&readState(stateDir).sessions[0]?.cursor!=='1');
-      expect(messages[0]).toContain('message before-expiry');
-      // Use PostgreSQL's actual clock. The local token deliberately still looks
-      // valid for an hour, so recovery must invalidate the rejected token.
-      const expiry=(await db.query<{expires_at:Date}>(`UPDATE rooms_mcp_tokens SET expires_at=clock_timestamp()+interval '200 milliseconds'
-        WHERE hash='synthetic-token' RETURNING expires_at`)).rows[0]!.expires_at;
-      const head=(await db.query<{through:number}>(`SELECT sequence::integer through FROM live_streams WHERE id='mcp:member'`)).rows[0]!.through;
-      await until(()=>readState(stateDir).sessions[0]?.streamCursor?.through===head);
-      const saved=readState(stateDir).sessions[0]!;
-      await new Promise(resolve=>setTimeout(resolve,Math.max(0,expiry.getTime()-Date.now())+25));
-      expect((await db.query<{expired:boolean}>(`SELECT expires_at<=clock_timestamp() expired FROM rooms_mcp_tokens WHERE hash='synthetic-token'`)).rows[0]?.expired).toBe(true);
-      const ended=once(connections[0]!.output,'close');
+      expect(messages[0]).toContain('--reply-to before-expiry');
+      await db.query(`UPDATE rooms_mcp_tokens SET expires_at=now()-interval '2 hours' WHERE hash='synthetic-token'`);
       await db.query(`INSERT INTO rooms_mcp_mentions(member_id,room_id,message_id) VALUES('member',$1,'during-expiry')`,[room]);
-      await ended;
-      expect(connections[0]!.output.frames.at(-1)).toEqual({v:1,type:'ended',reason:'expired'});
-      await until(()=>refreshes.length===1);
-      expect(messages).toHaveLength(1);expect(connections).toHaveLength(1);
-      expect(refreshes[0]).toMatchObject({grant_type:'refresh_token',refresh_token:'synthetic-refresh',client_id:'client'});
-      releaseRefresh();
-      await until(()=>messages.length===2&&connections.length===2&&!!readState(stateDir).sessions[0]?.streamCursor&&
-        readState(stateDir).sessions[0]!.streamCursor!.through>saved.streamCursor!.through);
-      expect(connections[1]!.token).toBe('fresh-token');
-      expect(connections[1]!.url.searchParams.get('mentions')).toBe(saved.cursor);
-      expect(JSON.parse(connections[1]!.url.searchParams.get('cursor')!)).toEqual(saved.streamCursor);
-      expect(messages[1]).toContain('message during-expiry');
-      expect(messages.filter(text=>text.includes('message during-expiry'))).toHaveLength(1);
-      expect(readState(stateDir).sessions[0]).toMatchObject({accessToken:'fresh-token',refreshToken:'fresh-refresh'});
-      const revoked=once(connections[1]!.output,'close');
+      await until(()=>messages.length===2);
+      expect(messages[1]).toContain('--reply-to during-expiry');
+      expect(connections).toHaveLength(1);expect(refreshes).toHaveLength(0);
+      expect(readState(stateDir).sessions[0]?.accessToken).toBe(principal.hash);
+      const revoked=once(connections[0]!.output,'close');
       await db.query(`UPDATE rooms_mcp_connections SET revoked_at=now()`);await revoked;
-      expect(connections[1]!.output.frames.at(-1)).toEqual({v:1,type:'ended',reason:'unavailable'});
+      expect(connections[0]!.output.frames.at(-1)).toEqual({v:1,type:'ended',reason:'unavailable'});
       await db.query(`INSERT INTO rooms_mcp_mentions(member_id,room_id,message_id) VALUES('member',$1,'after-revocation')`,[room]);
       await new Promise(resolve=>setTimeout(resolve,100));
-      expect(refreshes).toHaveLength(1);expect(connections).toHaveLength(2);expect(messages).toHaveLength(2);
+      expect(refreshes).toHaveLength(0);expect(connections).toHaveLength(1);expect(messages).toHaveLength(2);
     }finally{
-      releaseRefresh();stateWatch.close();
+      stateWatch.close();
       if(child.exitCode===null&&child.signalCode===null){const exited=once(child,'exit');child.kill();await exited;}
       http.closeAllConnections();await Promise.all([new Promise<void>(resolve=>http.close(()=>resolve())),new Promise<void>(resolve=>claude.close(()=>resolve()))]);
       await db.query(`UPDATE rooms_mcp_tokens SET expires_at=now()+interval '2 days' WHERE hash='synthetic-token';
@@ -256,17 +229,17 @@ describe.each(['pglite',...(postgresUrl?['postgres']:[])])('P12 MCP committed me
       if(authority==='member')await db.query(`INSERT INTO rooms_mcp_members VALUES('client','owner','member')`);
     }
   });
-  it('reports expiry at the final credential fence without releasing prepared content',async()=>{
+  it('honors revocation at the final credential fence without releasing prepared content',async()=>{
     const output=reply(),read=page();let transactions=0;
     const observed:SqlDatabase={query:(sql,values)=>db.query(sql,values),transaction:async work=>{
       const result=await db.transaction(work);
-      if(++transactions===2)await db.query(`UPDATE rooms_mcp_tokens SET expires_at=clock_timestamp()-interval '1 second'`);
+      if(++transactions===2)await db.query(`UPDATE rooms_mcp_tokens SET revoked_at=now()`);
       return result;
     }};
     try{
       await serveMcpMemberStream(observed,principal,output as unknown as ServerResponse,{mentionCursor:'0'},read);
       expect(read).toHaveBeenCalledTimes(1);expect(transactions).toBe(2);
-      expect(output.frames).toEqual([{v:1,type:'ended',reason:'expired'}]);
-    }finally{await db.query(`UPDATE rooms_mcp_tokens SET expires_at=now()+interval '2 days'`);}
+      expect(output.frames).toEqual([{v:1,type:'ended',reason:'unavailable'}]);
+    }finally{await db.query(`UPDATE rooms_mcp_tokens SET revoked_at=NULL`);}
   });
 });

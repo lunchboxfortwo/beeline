@@ -14,7 +14,8 @@ import Animated, {
   withSequence,
   withTiming,
 } from 'react-native-reanimated';
-import { useUnistyles } from 'react-native-unistyles';
+import { useThemeName } from 'tamagui';
+import { beelineThemes } from '@/buzz/groknight';
 import {
   GLYPH_STROKE,
   RELEASE_PAINT_MS,
@@ -61,7 +62,7 @@ export function BeelineGlyphPaint({
   ink?: string;
   testID?: string;
 }) {
-  const { theme } = useUnistyles();
+  const tokens = beelineThemes[useThemeName().startsWith('light') ? 'bone' : 'obsidian'];
   const reducedMotion = useReducedMotion();
   const [appActive, setAppActive] = useState(AppState.currentState === 'active');
   const progress = useSharedValue(loop === 'once' ? 0 : 1);
@@ -136,7 +137,7 @@ export function BeelineGlyphPaint({
   const strokeProps = useAnimatedProps(() => ({
     strokeDashoffset: ribbon.length * (1 - progress.value),
   }));
-  const ink = inkOverride ?? glyphPaintInk(theme.buzz.dark);
+  const ink = inkOverride ?? glyphPaintInk(tokens.dark);
   const content = showFill ? (
     <Path d={ribbon.path} fill={ink} fillRule={ribbon.fillRule as 'evenodd' | 'nonzero'} />
   ) : (

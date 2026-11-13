@@ -1,8 +1,8 @@
 import { mentionReplyRule } from '@beeline/api-contract/phone';
 import { recordDiagnostic } from './diagnostics.js';
 import {
-  joinMcpPublicRooms,
-  restoreMcpWorkspaceMemberships,
+  joinRooms,
+  restoreInvitedWorkspaceMembership,
   removeIdentityMemberships,
 } from './membership-join.js';
 import { notifyMcpWebhook, notifyMcpDeliveryChange } from './postgres-live.js';
@@ -122,22 +122,20 @@ export async function ensureMcpMember(
       `SELECT workspace_id FROM memberships WHERE identity_id=$1 AND room_id IS NULL
        AND removed_at IS NULL AND workspace_id=ANY($2::uuid[]) FOR SHARE`, [input.ownerId, owner.workspaces]);
     const eligible = current.rows.map(row => row.workspace_id);
-    const previous = (await tx.query<{ workspace_ids: string[] | null }>(
-      `SELECT workspace_ids FROM rooms_mcp_members WHERE client_id=$1 AND owner_id=$2 FOR UPDATE`,
+    const previous = (await tx.query(
+      `SELECT member_id FROM rooms_mcp_members WHERE client_id=$1 AND owner_id=$2 FOR UPDATE`,
       [input.clientId, input.ownerId])).rows[0];
     if (input.workspaceIds !== undefined && (!input.workspaceIds.length
       || new Set(input.workspaceIds).size !== input.workspaceIds.length
       || input.workspaceIds.some(id => !eligible.includes(id)))) {
       throw new McpToolError('Choose at least one of your current Workspaces');
     }
-    const selection = input.workspaceIds ?? previous?.workspace_ids ?? null;
-    const workspaces = selection === null ? eligible : selection.filter(id => eligible.includes(id));
     const previousMemberships = await tx.query<{ workspace_id: string }>(
       `SELECT workspace_id FROM memberships WHERE identity_id=$1 AND room_id IS NULL AND removed_at IS NULL`, [memberId]);
-    const addedWorkspaces = input.workspaceIds === undefined ? [] : workspaces.filter(
-      id => !previousMemberships.rows.some(row => row.workspace_id === id));
+    const workspaces = (input.workspaceIds ?? (previous
+      ? previousMemberships.rows.map(row => row.workspace_id) : eligible)).filter(id => eligible.includes(id));
     const created = await tx.query(
-      `INSERT INTO identities(id,kind,name,handle,hidden_from_roster) VALUES($1,'agent',$2,beeline_identity_handle($1,$3),false)
+      `INSERT INTO identities(id,kind,name,handle,hidden_from_roster,workspace_handle_base) VALUES($1,'agent',$2,beeline_identity_handle($1,$3),false,$3)
        ON CONFLICT(id) DO UPDATE SET hidden_from_roster=false,updated_at=now()
        RETURNING id`,
       [memberId, input.initialName??modelLabel, agentHandleFromName(input.initialName??modelLabel)],
@@ -149,15 +147,16 @@ export async function ensureMcpMember(
       [memberId, input.ownerId, modelLabel],
     );
     const fresh = (await tx.query<{ fresh: boolean }>(
-      `INSERT INTO rooms_mcp_members(client_id,owner_id,member_id,model_label,workspace_ids) VALUES($1,$2,$3,$4,$5)
-       ON CONFLICT(client_id,owner_id) DO UPDATE SET model_label=EXCLUDED.model_label,workspace_ids=EXCLUDED.workspace_ids
+      `INSERT INTO rooms_mcp_members(client_id,owner_id,member_id,model_label) VALUES($1,$2,$3,$4)
+       ON CONFLICT(client_id,owner_id) DO UPDATE SET model_label=EXCLUDED.model_label
        RETURNING (xmax=0) fresh`,
-      [input.clientId, input.ownerId, memberId, modelLabel, selection],
+      [input.clientId, input.ownerId, memberId, modelLabel],
     )).rows[0]?.fresh ?? false;
-    if (workspaces.length) {
-      await restoreMcpWorkspaceMemberships(tx, [memberId, workspaces]);
-      await joinMcpPublicRooms(tx, [memberId, workspaces, fresh]);
-      if (!fresh && addedWorkspaces.length) await joinMcpPublicRooms(tx, [memberId, addedWorkspaces, true]);
+    for (const workspaceId of workspaces) {
+      const joined = await restoreInvitedWorkspaceMembership(tx, [workspaceId, memberId, input.ownerId]);
+      await joinRooms(tx, { workspaceId, identityId: memberId, invitedById: input.ownerId,
+        rooms: { type: 'all-live-top-level' }, workspaceJoined: true,
+        restoreRemoved: fresh || joined.rowCount > 0 });
     }
     if (avatar) await defaultMcpMemberAvatar(tx, memberId, avatar);
     return memberId;
@@ -335,7 +334,7 @@ export async function deliverMcpMemberWebhooks(
        SELECT claimed.call_id,claimed.member_id,claimed.room_id,claimed.message_id,claimed.body,member.owner_id,
          COALESCE(member.callback_url,client.callback_url) callback_url,
          CASE WHEN member.callback_url IS NOT NULL THEN member.callback_secret END callback_secret,
-         message.author_id,author.handle author_handle,author.name author_name,author.kind author_kind,mention.seq::text cursor,mention.cleared_at IS NOT NULL answered,
+         message.author_id,beeline_room_handle(author.id,message.room_id) author_handle,author.name author_name,author.kind author_kind,mention.seq::text cursor,mention.cleared_at IS NOT NULL answered,
          delivery.generation delivery_generation,probe.probe,command.id command_id,command.reason command_reason,command.private_payload->>'kind' command_kind,
          left(COALESCE(command.private_payload->>'text',source.text),16000) command_text,(
            room.id IS NOT NULL AND room.archived_at IS NULL AND mention.cleared_at IS NULL
@@ -432,22 +431,15 @@ export async function backfillMcpMembers(db: SqlDatabase): Promise<number> {
   return created;
 }
 
-/**
- * Members made before public Rooms and logos applied: join the public Rooms
- * they never had a row in (a Room a person removed them from stays removed),
- * and show the client logo where no picture is set.
- */
-export async function backfillMcpMemberRoomsAndAvatars(db: SqlDatabase): Promise<number> {
-  const members = await db.query<{ member_id: string; name: string; redirects: string[]; logo: string | null; avatar: string | null; workspaces: string[] }>(
-    `SELECT member.member_id,client.name,client.redirects,client.logo,identity.avatar,
-       COALESCE((SELECT array_agg(workspace_id) FROM memberships
-         WHERE identity_id=member.member_id AND room_id IS NULL AND removed_at IS NULL),'{}') workspaces
+/** Upgrade client logos without changing membership. */
+export async function backfillMcpMemberAvatars(db: SqlDatabase): Promise<number> {
+  const members = await db.query<{ member_id: string; name: string; redirects: string[]; logo: string | null; avatar: string | null }>(
+    `SELECT member.member_id,client.name,client.redirects,client.logo,identity.avatar
      FROM rooms_mcp_members member
      JOIN rooms_mcp_clients client ON client.id=member.client_id
      JOIN identities identity ON identity.id=member.member_id`,
   );
   for (const member of members.rows) {
-    if (member.workspaces.length) await joinMcpPublicRooms(db, [member.member_id, member.workspaces, false]);
     await db.transaction(async tx => {
       // Serialize with set_profile, whose identity update precedes its avatar write.
       const current = (await tx.query<{ avatar: string | null }>(

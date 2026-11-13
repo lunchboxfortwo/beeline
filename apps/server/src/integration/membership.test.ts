@@ -109,7 +109,7 @@ const fixture = monolithFixture();
   });
 
 
-  it('propagates Workspace role changes to existing top-level shared Room memberships', async () => {
+  it('projects Workspace role changes for existing top-level shared Room members', async () => {
     const memberId = createHash('sha256').update('github:role-projection-member').digest('hex');
     await fixture.phoneToken('role-projection-member');
     await fixture.operation('addWorkspaceMember', { workspaceId: WORKSPACE, memberId, role: 'admin' });
@@ -117,7 +117,7 @@ const fixture = monolithFixture();
     await fixture.operation('addWorkspaceMember', { workspaceId: WORKSPACE, memberId, role: 'member' });
 
     const roles = await fixture.database.query<{ room_id: string | null; role: string }>(
-      `SELECT room_id,role FROM memberships
+      `SELECT room_id,role FROM room_access
        WHERE workspace_id=$1 AND identity_id=$2 AND (room_id IS NULL OR room_id=$3)
        ORDER BY room_id NULLS FIRST`,
       [WORKSPACE, memberId, ROOM],

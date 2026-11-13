@@ -26,7 +26,7 @@ import {
   caseOutcome,
   skillPath,
   validateRuleSkills,
-  evaluateRule,
+  evaluateCase,
   parsePromptCase,
   type PromptCase,
   type ToolCall,
@@ -57,6 +57,7 @@ interface PromptSource {
   readonly tools: typeof ToolSurface;
   readonly skills: typeof Skills;
   readonly freeAgentRepositoryGuide: string;
+  readonly freeAgentOnboardingGuide: string;
 }
 
 export async function loadSource(root: string): Promise<PromptSource> {
@@ -70,7 +71,9 @@ export async function loadSource(root: string): Promise<PromptSource> {
   const guide = declaration?.initializer;
   if (!guide || !(ts.isNoSubstitutionTemplateLiteral(guide) || ts.isStringLiteral(guide)))
     throw new Error('FREE_AGENT_REPOSITORY_GUIDE must be a literal for prompt replay');
-  return { assembly: await load('prompt-assembly.ts'), tools: await load('minimal-tool-surface.ts'), skills: await load('beeline-skill.ts'), freeAgentRepositoryGuide: guide.text };
+  const invitations = await import(pathToFileURL(join(root, 'packages/api-contract/src/agent-invitation-guide.ts')).href);
+  return { assembly: await load('prompt-assembly.ts'), tools: await load('minimal-tool-surface.ts'), skills: await load('beeline-skill.ts'), freeAgentRepositoryGuide: guide.text,
+    freeAgentOnboardingGuide: `${invitations.BEELINE_PRODUCT_GUIDE}\n\n${invitations.AGENT_INVITATION_PROMPT}` };
 }
 
 const NATIVE_TOOLS: Record<(typeof NATIVE_TOOL_NAMES)[number], ToolDefinition> = {
@@ -138,7 +141,7 @@ function assemble(source: PromptSource, testCase: PromptCase, withMemory = true)
     ...testCase.session,
     ...(testCase.session?.freeAgent === true ? {
       agentName: 'Beebee',
-      soul: { name: 'Beebee', instructions: source.freeAgentRepositoryGuide },
+      soul: { name: 'Beebee', instructions: `${source.freeAgentRepositoryGuide}\n\n${source.freeAgentOnboardingGuide}` },
     } : {}),
     brief,
     surface: testCase.place,
@@ -198,7 +201,7 @@ export function check(source: PromptSource, cases: readonly PromptCase[]): strin
 }
 
 function skillsFor(source: PromptSource, testCase: PromptCase) {
-  return source.skills.beelineManagedSkills('source', { isReviewer: testCase.session?.reviewer === true });
+  return source.skills.beelineManagedSkills('source', { isReviewer: testCase.session?.reviewer === true, freeAgent: testCase.session?.freeAgent === true });
 }
 
 /**
@@ -287,7 +290,7 @@ function grade(dir: string, cases: readonly PromptCase[]): CaseResult[] {
         const calls: ToolCall[] = Array.isArray(answer.calls)
           ? answer.calls.map((call) => ({ name: String(call?.name ?? ''), args: (call?.args ?? {}) as Record<string, unknown> }))
           : [];
-        return evaluateRule(testCase.pass, { calls, text: typeof answer.text === 'string' ? answer.text : '' });
+        return evaluateCase(testCase, { calls, text: typeof answer.text === 'string' ? answer.text : '' });
       } catch (error) {
         return { pass: false, reason: `${file}: ${(error as Error).message}` };
       }

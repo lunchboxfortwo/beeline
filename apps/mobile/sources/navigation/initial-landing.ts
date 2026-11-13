@@ -1,9 +1,9 @@
 import { createContext } from 'react';
 
 /**
- * A tapped push waits for the local account/launch-URL decision, so a late
- * onboarding or invite redirect cannot overwrite its destination. The saved
- * deck itself is already the initial route and never replaces itself.
+ * A tapped push claims navigation before local account/launch-URL restoration
+ * can redirect. Other startup consumers can wait for that destination to
+ * commit. The saved deck is the ordinary initial route and never replaces itself.
  * Resolution is once per process; later taps and Back do not wait again.
  */
 

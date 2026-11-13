@@ -240,7 +240,7 @@ describe('feedback-triage workflow', () => {
     expect((await database.query('SELECT occurrence_count FROM feedback_items WHERE id=$1', ['canonical'])).rows[0]).toEqual({occurrence_count:5});
     await handoff(database, turn, {runId, attempt:3, outcome:'checked', contents:{adapterFindings:[],adapterResults:[],skipReason:'none'}});
     await expect(handoff(database, turn, {runId, attempt:4, outcome,
-      contents:{rankedProblems:[],walkRunId:'completed-morning-walk'}})).resolves.toMatchObject({state:'done',status:'done'});
+      contents:{rankedProblems:[]}})).resolves.toMatchObject({state:'done',status:'done'});
     expect((await database.query(`SELECT id FROM room_choices WHERE room_id=$1`, [TRIAGE_CORNER])).rows).toEqual([]);
     const start = (await database.query<{card:{runStatus:string}}>(`SELECT card FROM messages WHERE id=$1`, [runId])).rows[0]!;
     expect(start.card.runStatus).toBe('done');
@@ -431,7 +431,7 @@ describe('feedback-triage workflow', () => {
     expect((await skills()).find((skill) => skill.slug === 'feedback-triage-steps')!.current_version).toBe(2);
     expect(procedure.markdown).toContain('occurrence_count');
     expect(procedure.markdown).not.toContain('notice period');
-    expect(procedure.markdown).toContain('effective date');
+    expect(procedure.markdown).not.toContain('workspace-browse-sweep');
     expect(procedure.markdown).toContain('app_tool(app:beeline:workflow)');
     expect(procedure.markdown).toContain('report(kind:fixed)');
     expect(procedure.markdown).not.toMatch(/start_workflow|notify_feedback_fixed|load_workspace_skill/);
@@ -532,6 +532,8 @@ describe('feedback-triage workflow', () => {
   it('matches the readable copies under docs/workflows and passes the workflow validator', () => {
     const docs = (name: string) =>
       readFileSync(new URL(`../../../docs/workflows/${name}`, import.meta.url), 'utf8');
+    expect(JSON.stringify(FEEDBACK_TRIAGE_CONTRACT)).not.toMatch(/walk/i);
+    expect(FEEDBACK_TRIAGE_STEPS).not.toMatch(/walk/i);
     expect(JSON.parse(docs('feedback-triage.json'))).toEqual(FEEDBACK_TRIAGE_CONTRACT);
     expect(docs('feedback-triage-steps.md')).toBe(FEEDBACK_TRIAGE_STEPS);
     expect(readWorkflowContract(FEEDBACK_TRIAGE_CONTRACT)).toEqual(FEEDBACK_TRIAGE_CONTRACT);

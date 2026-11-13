@@ -1,0 +1,10 @@
+ ✓ sources/components/SidebarView.test.tsx (45 tests) 690ms
+ ✓ sources/app/(app)/beeline/channels.test.tsx (37 tests) 31988ms
+ ✓ sources/app/(app)/beeline/chat/useRoomSurfaceSession.test.ts (25 tests) 986ms
+ ✓ sources/app/(app)/beeline/chat/useRoomSurfaceSession-2.test.ts (25 tests) 96ms
+ ✓ sources/components/buzz/ForwardMessagePickerSheet.test.tsx (2 tests) 16ms
+ ✓ sources/buzz/message-forward.test.ts (2 tests) 4ms
+ ✓ sources/buzz/unistyles-batching.test.ts (2 tests) 4ms
+ Test Files  7 passed (7)
+      Tests  138 passed (138)
+   Duration  36.86s (transform 860ms, setup 150ms, collect 1.99s, tests 33.78s, environment 1ms, prepare 303ms)

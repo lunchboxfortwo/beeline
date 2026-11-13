@@ -140,7 +140,8 @@ export class CornerMachineEvents {
   private resync: () => void;
   private stopped = false;
   private recovery?: Promise<void>;
-  private readonly refreshing = new Map<string, { again: boolean; done: Promise<void> }>();
+  private readonly refreshing = new Map<string, Promise<void>>();
+  private readonly pending = new Set<string>();
   constructor(
     private db: SqlDatabase,
     private live: LiveHub,
@@ -166,26 +167,30 @@ export class CornerMachineEvents {
   async refresh(id: string): Promise<void> {
     if (this.stopped) return;
     const running = this.refreshing.get(id);
-    if (running) { running.again = true; return running.done; }
-    // Presence and committed source events can arrive together. Share the
-    // snapshot in flight and re-read once for changes committed during it.
-    const state = { again: false, done: Promise.resolve() };
-    this.refreshing.set(id, state);
-    state.done = (async () => {
-      do {
-        state.again = false;
-        const next = await refreshCornerAttention(this.db, id);
-        if (next && !this.stopped)
-          this.live.publish({ type: 'invalidate', roomId: next.parentId, reason: 'corner-status' });
-      } while (state.again && !this.stopped);
+    if (running) {
+      this.pending.add(id);
+      return running;
+    }
+    // A committed event may arrive after this pass read its facts. Keep one
+    // follow-up for those events; failures never request another pass.
+    const done = (async () => {
+      try {
+        do {
+          this.pending.delete(id);
+          const next = await refreshCornerAttention(this.db, id);
+          if (next && !this.stopped)
+            this.live.publish({ type: 'invalidate', roomId: next.parentId, reason: 'corner-status' });
+        } while (!this.stopped && this.pending.has(id));
+      } finally { this.refreshing.delete(id); this.pending.delete(id); }
     })();
-    try { await state.done; } finally { this.refreshing.delete(id); }
+    this.refreshing.set(id, done);
+    await done;
   }
 
   async stop(): Promise<void> {
     this.stopped = true;
     this.release();
     this.resync();
-    await Promise.allSettled([this.recovery, ...[...this.refreshing.values()].map(state => state.done)]);
+    await Promise.allSettled([this.recovery, ...this.refreshing.values()]);
   }
 }

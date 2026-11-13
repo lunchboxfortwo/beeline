@@ -3,17 +3,17 @@ import { ErrorBanner } from '@/components/buzz/ErrorBanner';
 import { CornerActionsSheet } from '@/components/buzz/CornerActionsSheet';
 import { HullDialogActions } from '@/components/buzz/HullDialog';
 import React from 'react';
-import { View, Text } from 'react-native';
+import type { View } from 'react-native';
+import { YStack } from 'tamagui';
 import * as Haptics from 'expo-haptics';
 import { router, type Href } from 'expo-router';
 import { Modal } from '@/modal';
 import { BuzzRigTransport } from '@/sync/transport';
 import { type RoomRepository, type MessageReactionEmoji } from '@beeline/buzz-client';
 import { type ChatDisplayMessage } from '@/buzz/room-view-presentation';
-import { CORNER_LABEL, ROOM_LABEL } from '@/buzz/vocabulary';
+import { CORNER_LABEL, CORNER_TITLE, ROOM_LABEL } from '@/buzz/vocabulary';
 import { ROOM_SLUG_HINT, roomNameEntry, validRoomSlug } from '@/buzz/room-name';
 import { formatRoomParticipantTotal } from '@/buzz/room-participants';
-import { MemberPickerSheet, type MemberPickerCandidate } from '@/components/buzz/MemberPickerSheet';
 import { agentActivityReplyExcerpt, canBeginReply } from '@/buzz/message-reply';
 import { monolithPhoneOperation } from '@/sync/transport/monolith-operation';
 import { type ForwardTarget } from '@/buzz/message-forward';
@@ -26,10 +26,13 @@ import { RoomActionsSheet, type RoomActionsSheetHandle, type RoomRepositoryOptio
 import { RoomReviewerActions } from '@/components/buzz/RoomReviewerActions';
 import { HullDialog, HullDialogInput } from '@/components/buzz/HullDialog';
 import { type CornerOpenAttempt } from '@/buzz/open-random-corner';
-import { RoomRosterSheet, type RoomRosterParticipant } from '@/components/buzz/RoomRosterSheet';
+import { ChatAddSheet, WorkspaceAddAgentSheet } from '@/ui/screens/members/ChatAddSheets';
+import { openPlace } from '@/ui/shell/panel';
+import { useIsDesktop } from '@/utils/responsive';
 import { CreatePollSheet, type PollDraft } from '@/components/buzz/CreatePollSheet';
-import { RoomMemberOption } from './chat-surface-values';
-import { styles } from './chat-surface-styles';
+import { T } from '@/ui/grammar';
+import * as Clipboard from 'expo-clipboard';
+import { chatMessageLinkToken, copyChatMessageLink } from '@/buzz/message-link';
 
 type Props = {
   attachmentPickerVisible: boolean;
@@ -46,6 +49,8 @@ type Props = {
   handleBookmarkMessage: (message: ChatDisplayMessage) => Promise<void>;
   handleReportMessage: (message: ChatDisplayMessage) => Promise<void>;
   handleCopyLedgerMessage: (text: string) => void;
+  /** Confirms a copy in the transcript's toast. */
+  showCopyToast: (message: string) => void;
   handleSelectLedgerMessage: (text: string) => void;
   decodedId: string;
   beginReply: (message: ChatDisplayMessage) => void;
@@ -60,28 +65,14 @@ type Props = {
   setForwardTarget: React.Dispatch<React.SetStateAction<ChatDisplayMessage | null>>;
   setForwardRooms: React.Dispatch<React.SetStateAction<readonly ForwardTarget[] | null>>;
   setForwardError: React.Dispatch<React.SetStateAction<string | null>>;
-  forwardToRoom: (target: ForwardTarget) => Promise<void>;
+  forwardToRoom: (target: ForwardTarget) => Promise<boolean>;
   forwardRooms: readonly ForwardTarget[] | null;
   forwardTarget: ChatDisplayMessage | null;
-  insets: import("react-native-safe-area-context/lib/typescript/src/SafeArea.types").EdgeInsets;
-  roomSurface: NonNullable<import("@beeline/api-contract/phone").RoomView | null>;
+  roomSurface: import("@beeline/api-contract/phone").RoomView | null;
   isDirectMessage: boolean;
-  roomMemberByPubkey: Map<string, { pubkey: string; role: "owner" | "admin" | "member" | "spectator"; }>;
-  membershipActionPubkey: string | null;
   membershipError: string | null;
-  visibleRosterMembers: RoomRosterParticipant[];
-  setMembershipError: React.Dispatch<React.SetStateAction<string | null>>;
-  setParticipantPickerKind: React.Dispatch<React.SetStateAction<"agent" | "person" | null>>;
-  openWorkspaceRoster: () => void;
   setParticipantPickerVisible: React.Dispatch<React.SetStateAction<boolean>>;
-  closeRoster: () => void;
-  handleRemoveRoomMember: (participant: RoomMemberOption) => Promise<void>;
-  handleOpenProfile: (agentId: string, kind?: "human" | "agent") => void;
-  speakerWorking: Readonly<Record<string, true>>;
-  parentChannelId: string | undefined;
-  personProfileByPubkey: Map<string, { face?: string | undefined; avatar?: string | undefined; handle?: string | undefined; pubkey: string; name: string; }>;
-  userPubkey: string;
-  memberManagement: { canOpenRoster: boolean; rosterVisible: boolean; pickerVisible: boolean; };
+  memberManagement: { canOpenRoster: boolean; pickerVisible: boolean; };
   renameBusy: boolean;
   closeRoomActions: () => void;
   canRenameTitle: boolean;
@@ -106,7 +97,6 @@ type Props = {
   roomParticipantTotal: number;
   participantsHydrated: boolean;
   setRoomActionsVisible: (visible: boolean) => void | undefined;
-  setRosterVisible: React.Dispatch<React.SetStateAction<boolean>>;
   activeCommunityId: string | null;
   roomLifecycleBusy: boolean;
   handleRoomLifecycle: (action: "delete" | "leave") => Promise<void>;
@@ -121,21 +111,9 @@ type Props = {
   setCornerActionsVisible: React.Dispatch<React.SetStateAction<boolean>>;
   handleBack: () => void;
   readRoom: () => void;
-  addingMembers: boolean;
-  memberInviteBusy: boolean;
-  participantPickerCandidates: MemberPickerCandidate[] | null;
   participantPickerKind: "agent" | "person" | null;
-  participantPickerWorkspacePeers: number;
-  handleAddRoomMembers: (pubkeys: string[]) => Promise<void>;
-  handleConnectAgent: () => void;
-  handleInvitePerson: () => Promise<void>;
-  agentPairBusy: boolean;
   agentConnectVisible: boolean;
-  agentPairError: string | null;
   closeAgentConnect: () => void;
-  connectAgent: () => Promise<void>;
-  copyPairCommand: (command: string) => Promise<void>;
-  agentPairCommand: string | null;
   createPollVisible: boolean;
   createPollBusy: boolean;
   setCreatePollVisible: React.Dispatch<React.SetStateAction<boolean>>;
@@ -156,6 +134,7 @@ export function ChatSurfaceOverlays({
   handleBookmarkMessage,
   handleReportMessage,
   handleCopyLedgerMessage,
+  showCopyToast,
   handleSelectLedgerMessage,
   decodedId,
   beginReply,
@@ -173,24 +152,10 @@ export function ChatSurfaceOverlays({
   forwardToRoom,
   forwardRooms,
   forwardTarget,
-  insets,
   roomSurface,
   isDirectMessage,
-  roomMemberByPubkey,
-  membershipActionPubkey,
   membershipError,
-  visibleRosterMembers,
-  setMembershipError,
-  setParticipantPickerKind,
-  openWorkspaceRoster,
   setParticipantPickerVisible,
-  closeRoster,
-  handleRemoveRoomMember,
-  handleOpenProfile,
-  speakerWorking,
-  parentChannelId,
-  personProfileByPubkey,
-  userPubkey,
   memberManagement,
   renameBusy,
   closeRoomActions,
@@ -216,7 +181,6 @@ export function ChatSurfaceOverlays({
   roomParticipantTotal,
   participantsHydrated,
   setRoomActionsVisible,
-  setRosterVisible,
   activeCommunityId,
   roomLifecycleBusy,
   handleRoomLifecycle,
@@ -231,35 +195,34 @@ export function ChatSurfaceOverlays({
   setCornerActionsVisible,
   handleBack,
   readRoom,
-  addingMembers,
-  memberInviteBusy,
-  participantPickerCandidates,
   participantPickerKind,
-  participantPickerWorkspacePeers,
-  handleAddRoomMembers,
-  handleConnectAgent,
-  handleInvitePerson,
-  agentPairBusy,
   agentConnectVisible,
-  agentPairError,
   closeAgentConnect,
-  connectAgent,
-  copyPairCommand,
-  agentPairCommand,
   createPollVisible,
   createPollBusy,
   setCreatePollVisible,
   handleCreatePoll,
-}: Props) { return <>
-      <AttachmentPickerSheet
+}: Props) {
+  const desktop = useIsDesktop();
+  // Mount each sheet on its first opening, then retain it for native dismissal
+  // and onDismiss cleanup. Closed sheets do no mount/style work on chat open.
+  const messageActionsMounted = useOpenedSheet(Boolean(messageActionsTarget));
+  const forwardCornerMounted = useOpenedSheet(Boolean(forwardCornerPrompt));
+  const forwardMessageMounted = useOpenedSheet(Boolean(forwardTarget));
+  const dmActionsMounted = useOpenedSheet(dmActionsVisible);
+  const renameMounted = useOpenedSheet(isCorner && renameEditing);
+  const pollMounted = useOpenedSheet(createPollVisible);
+  const messageLinkToken = messageActionsTarget ? chatMessageLinkToken(messageActionsTarget) : null;
+  return <>
+      {attachmentPickerVisible && <AttachmentPickerSheet
         visible={attachmentPickerVisible}
         onClose={() => setAttachmentPickerVisible(false)}
         onPickDocument={() => void pickDocument()}
         onPickPhoto={() => void pickPhoto()}
         onPickPasted={desktopExperience ? undefined : () => void pasteImage()}
-      />
+      />}
 
-      <HullActionSheetModal
+      {messageActionsMounted && <HullActionSheetModal
         accessibilityLabel="Close message actions"
         onClose={() => setMessageActionsTarget(null)}
         testID="message-actions-sheet"
@@ -326,6 +289,19 @@ export function ChatSurfaceOverlays({
             testID="message-copy-action"
           />
         ) : null}
+        {messageLinkToken ? (
+          <HullActionSheetRow
+            accessibilityLabel={`Copy link ${messageLinkToken}`}
+            label="Copy link"
+            metadata={messageLinkToken}
+            onPress={() => {
+              setMessageActionsTarget(null);
+              void copyChatMessageLink(messageLinkToken, Clipboard.setStringAsync,
+                { showCopied: showCopyToast, showCopyFailed: showCopyToast });
+            }}
+            testID="message-copy-link-action"
+          />
+        ) : null}
         {messageActionsTarget ? (
           <HullActionSheetRow
             accessibilityLabel="Select message text"
@@ -383,56 +359,31 @@ export function ChatSurfaceOverlays({
           onPress={() => setMessageActionsTarget(null)}
           testID="message-actions-close"
         />
-      </HullActionSheetModal>
+      </HullActionSheetModal>}
 
-      <ForwardCornerSheet
+      {forwardCornerMounted && <ForwardCornerSheet
         onClose={() => setForwardCornerPrompt(null)}
         onOpen={() => void confirmForwardToNewCorner()}
         visible={Boolean(forwardCornerPrompt)}
-      />
+      />}
 
-      <ForwardMessagePickerSheet
+      {forwardMessageMounted && <ForwardMessagePickerSheet
         draftContext={decodedId}
         busyRoomId={forwardBusyRoomId}
         error={forwardError}
         onClose={() => {
           if (forwardBusyRoomId) return;
           setForwardTarget(null);
+        }}
+        onDismiss={() => {
           setForwardRooms(null);
           setForwardError(null);
         }}
-        onForward={(target) => void forwardToRoom(target)}
+        onForward={forwardToRoom}
         targets={forwardRooms}
         visible={Boolean(forwardTarget)}
-      />
+      />}
 
-      <RoomRosterSheet
-        bottomInset={insets.bottom}
-        canManage={roomSurface?.viewer.permissions.manage ?? false}
-        isDirectMessage={isDirectMessage}
-        memberByPubkey={roomMemberByPubkey}
-        membershipActionPubkey={membershipActionPubkey}
-        membershipError={membershipError}
-        members={visibleRosterMembers}
-        onAddMembers={() => {
-          setMembershipError(null);
-          // One counted Members section owns one add control, so the picker it
-          // opens lists both kinds and carries its own invite-a-person and
-          // connect-an-agent rows.
-          setParticipantPickerKind(null);
-          openWorkspaceRoster();setParticipantPickerVisible(true);
-        }}
-        onClose={closeRoster}
-        onRemove={handleRemoveRoomMember}
-        onOpenProfile={(participant) =>
-          handleOpenProfile(participant.pubkey, participant.kind === 'agent' ? 'agent' : 'human')
-        }
-        workingByPubkey={speakerWorking}
-        parentChannelId={parentChannelId ?? null}
-        personProfileByPubkey={personProfileByPubkey}
-        userPubkey={userPubkey}
-        visible={memberManagement.rosterVisible}
-      />
 
       <RoomActionsSheet
         accessibilityLabel={`Close ${ROOM_LABEL} actions`}
@@ -447,15 +398,18 @@ export function ChatSurfaceOverlays({
         repository={roomRepoOptions}
         backgroundRef={conversationFrameRef}
       >
-        <>
+        {() => <>
             {!isCorner && canRenameTitle && renameEditing && (
-              <View style={styles.roomRenameEditor} testID="rename-room-editor">
-                <Text style={styles.roomRenameLabel}>New {ROOM_LABEL.toLowerCase()} name</Text>
+              // Hangs between the sheet's rows, on their 24pt inset.
+              <YStack paddingHorizontal="6" paddingVertical="2" borderTopWidth={1} borderTopColor="stroke" testID="rename-room-editor">
+                <T v="meta" color="secondary">New {ROOM_LABEL.toLowerCase()} name</T>
+                <YStack marginTop="1">
                 <HullDialogInput
                   accessibilityLabel={`New ${ROOM_LABEL} name`}
                   autoCapitalize="none"
                   autoCorrect={false}
-                  editable={!renameBusy}
+                  // The native field's own prop; the Tamagui field type does not name it.
+                  {...{ editable: !renameBusy }}
                   onChangeText={(value) => {
                     setRenameDraft(roomNameEntry(value));
                     if (value.trim()) setRenameError(null);
@@ -463,18 +417,20 @@ export function ChatSurfaceOverlays({
                   onSubmitEditing={() => void handleRenameRoom()}
                   returnKeyType="done"
                   selectTextOnFocus
-                  style={styles.roomRenameInput}
                   testID="rename-room-input"
                   value={renameDraft}
                 />
+                </YStack>
                 {!validRoomSlug(renameDraft.trim()) && (
-                  <Text style={styles.roomRenameLabel}>{ROOM_SLUG_HINT}</Text>
+                  <T v="meta" color="secondary">{ROOM_SLUG_HINT}</T>
                 )}
-                <HullDialogActions style={styles.roomRenameControls} actions={[{ disabled: renameBusy, label: "Cancel", onPress: () => {
+                <YStack marginTop="2">
+                <HullDialogActions actions={[{ disabled: renameBusy, label: "Cancel", onPress: () => {
                       setRenameEditing(false);
                       setRenameError(null);
                     }, variant: "quiet" }, { disabled: renameBusy || !validRoomSlug(renameDraft.trim()), label: renameBusy ? 'Renaming…' : 'Save', loading: renameBusy, onPress: () => void handleRenameRoom(), testID: "apply-room-rename", variant: 'primary' }]} />
-              </View>
+                </YStack>
+              </YStack>
             )}
             <RoomReviewerActions
               agents={(roomSurface?.members ?? [])
@@ -512,15 +468,15 @@ export function ChatSurfaceOverlays({
               }
               onPress={() => {
                 setRoomActionsVisible(false);
-                openWorkspaceRoster();setRosterVisible(true);
+                openPlace({ kind: 'members', roomId: decodedId }, desktop);
               }}
               testID="room-participant-roster-trigger"
             />
             {canManageWorkspace && (
               <HullActionSheetRow
-                accessibilityLabel={`View ${ROOM_LABEL} schedules and subscriptions`}
+                accessibilityLabel={`View ${ROOM_LABEL} routines`}
                 chevron="right"
-                label="Schedules and subscriptions"
+                label="Routines"
                 onPress={() => {
                   setRoomActionsVisible(false);
                   router.push({
@@ -550,14 +506,14 @@ export function ChatSurfaceOverlays({
               testID="leave-room-action"
             />
             {(renameError || membershipError) && (
-              <View accessibilityRole="alert" style={styles.membershipError}>
+              <YStack accessibilityRole="alert" marginHorizontal="6" marginTop="2" padding="2" borderWidth={1} borderColor="strongStroke" backgroundColor="highlight">
                 <ErrorBanner inline title={renameError ?? membershipError ?? ''} />
-              </View>
+              </YStack>
             )}
-        </>
+        </>}
       </RoomActionsSheet>
 
-      <HullActionSheetModal
+      {dmActionsMounted && <HullActionSheetModal
         accessibilityLabel="Close conversation actions"
         onClose={() => setDmActionsVisible(false)}
         testID="dm-actions-sheet"
@@ -578,9 +534,9 @@ export function ChatSurfaceOverlays({
         />
         {!viewerIsAgent && roomSurface?.viewer.permissions.send && (
           <HullActionSheetRow
-            accessibilityLabel="View conversation schedules and subscriptions"
+            accessibilityLabel="View conversation routines"
             chevron="right"
-            label="Schedules and subscriptions"
+            label="Routines"
             onPress={() => {
               setDmActionsVisible(false);
               router.push({
@@ -592,18 +548,18 @@ export function ChatSurfaceOverlays({
           />
         )}
         {membershipError && (
-          <View accessibilityRole="alert" style={styles.membershipError}>
+          <YStack accessibilityRole="alert" marginHorizontal="6" marginTop="2" padding="2" borderWidth={1} borderColor="strongStroke" backgroundColor="highlight">
             <ErrorBanner inline title={membershipError} />
-          </View>
+          </YStack>
         )}
         <HullActionSheetCancel
           onPress={() => setDmActionsVisible(false)}
           testID="dm-actions-close"
         />
-      </HullActionSheetModal>
+      </HullActionSheetModal>}
 
-      <CornerActionsSheet
-        title={headerTitle ?? cornerOwnerDisplay?.name ?? CORNER_LABEL}
+      {cornerActionsVisible && <CornerActionsSheet
+        title={headerTitle ?? cornerOwnerDisplay?.name ?? CORNER_TITLE}
         visible={cornerActionsVisible}
         locked={roomSurface?.cornerLocked === true}
         connected={Boolean(transport)}
@@ -626,9 +582,9 @@ export function ChatSurfaceOverlays({
           void Haptics.notificationAsync(Haptics.NotificationFeedbackType.Error);
           Modal.alert('Could not complete request', appErrorCopy(error));
         }}
-      />
+      />}
 
-      <HullDialog
+      {renameMounted && <HullDialog
         actions={[
           {
             disabled: renameBusy,
@@ -662,7 +618,8 @@ export function ChatSurfaceOverlays({
           autoCapitalize="none"
           autoCorrect={false}
           autoFocus
-          editable={!renameBusy}
+          // The native field's own prop; the Tamagui field type does not name it.
+          {...{ editable: !renameBusy }}
           maxLength={120}
           onChangeText={(value) => {
             setRenameDraft(roomNameEntry(value));
@@ -677,44 +634,28 @@ export function ChatSurfaceOverlays({
         {renameError ? (
           <ErrorBanner inline title={renameError} />
         ) : null}
-      </HullDialog>
+      </HullDialog>}
 
-      <MemberPickerSheet
-        busy={addingMembers || memberInviteBusy}
-        canManage={roomSurface?.viewer.permissions.manage ?? false}
-        canConnectAgent
-        candidates={participantPickerCandidates}
-        error={membershipError}
-        kind={participantPickerKind}
-        workspacePeerCount={participantPickerWorkspacePeers}
-        onAdd={(pubkeys) => void handleAddRoomMembers(pubkeys)}
-        onClose={() => setParticipantPickerVisible(false)}
-        onConnectAgent={handleConnectAgent}
-        onInvitePerson={() => void handleInvitePerson()}
-        visible={memberManagement.pickerVisible}
-      />
-      <MemberPickerSheet
-        agentConnectOnly
-        busy={agentPairBusy}
-        canManage={canManageWorkspace}
-        canConnectAgent={!viewerIsAgent}
-        candidates={undefined}
-        error={agentConnectVisible ? agentPairError : null}
-        onAdd={() => undefined}
-        onClose={closeAgentConnect}
-        onConnectAgent={() => void connectAgent()}
-        onCopyPairCommand={(command) => void copyPairCommand(command)}
-        onInvitePerson={() => undefined}
-        pairCommand={agentPairCommand}
-        testID="room-agent-connect-sheet"
-        visible={agentConnectVisible}
-      />
-      <CreatePollSheet
+      {memberManagement.pickerVisible ? (
+        <ChatAddSheet roomId={decodedId} sheet={participantPickerKind === 'person' ? 'people' : 'agents'}
+          close={() => setParticipantPickerVisible(false)} />
+      ) : null}
+      {agentConnectVisible && activeCommunityId ? (
+        <WorkspaceAddAgentSheet workspaceId={activeCommunityId} close={closeAgentConnect} />
+      ) : null}
+      {pollMounted && <CreatePollSheet
         draftContext={decodedId}
         visible={createPollVisible}
         busy={createPollBusy}
         onClose={() => setCreatePollVisible(false)}
         onCreate={handleCreatePoll}
-      />
+      />}
 
 </>; }
+
+
+function useOpenedSheet(visible: boolean): boolean {
+  const opened = React.useRef(false);
+  if (visible) opened.current = true;
+  return opened.current;
+}

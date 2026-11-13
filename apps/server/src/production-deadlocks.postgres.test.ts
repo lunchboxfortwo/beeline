@@ -1,7 +1,10 @@
+import { DatabaseLockDiagnostics } from './database-lock-diagnostics.js';
+import { loadCorner } from './corner-lifecycle-read-state.js';
+import { seedCornerOpening } from './test-fixtures/corner-commands.js';
 import { subscribeConfiguredReviewers } from './agent-subscriptions.js';
 import { seedSquireMachine } from './test-fixtures/squire-machines.js';
 import { randomUUID } from 'node:crypto';
-import { Pool, type PoolClient } from 'pg';
+import { Client, Pool, type PoolClient } from 'pg';
 import { afterAll, beforeAll, describe, expect, it, vi } from 'vitest';
 import { migrate, PostgresDatabase } from './database.js';
 import { DaemonService } from './daemon-service.js';
@@ -13,7 +16,8 @@ import {reconcileConfiguredCornerReviewers} from './agent-command.js';
 import {postgresErrorContext} from './postgres-error.js';
 import {announceAgentLifecycle,claimAgentConnection,releaseAgentConnection} from './connection-presence.js';
 import { PhoneService } from './phone-service.js';
-import { refreshCornerAttention } from './corner-attention.js';
+import { CornerMachineEvents, refreshCornerAttention } from './corner-attention.js';
+import { PostgresLiveListener } from './postgres-live.js';
 import { ensureSystemIdentity } from './system-line.js';
 import { SYSTEM_IDENTITY_ID } from '@beeline/api-contract/system-identity';
 import { HelperDaemonService } from './test-fixtures/helper-daemon.js';
@@ -76,6 +80,57 @@ describe.skipIf(!url)('production transaction lock ordering', () => {
     observer?.release(); await observerPool.end();
     await admin.query(`DROP DATABASE IF EXISTS ${databaseName}`);
     await admin.end();
+  });
+
+  it('db-lock-1: a corner lookup timeout logs the observed blocking query without values', async () => {
+    const id = randomUUID();
+    await first.query(`INSERT INTO rooms(id,workspace_id,parent_id,created_by,name) VALUES($1,$2,$3,$4,'Diagnostic corner')`, [id, workspace, room, agent]);
+    await first.query('INSERT INTO corner_facts(corner_id) VALUES($1)', [id]);
+    const diagnosticsPool = new PostgresDatabase('', 1, { pool: new Pool(config) });
+    const monitoredPool = new Pool({ ...config, max: 2 });
+    // Production Neon returns a cancellation PID different from pg_backend_pid().
+    monitoredPool.on('connect', client => {
+      (client as unknown as { processID: number }).processID = -99;
+    });
+    const monitored = new PostgresDatabase('', 1, {
+      pool: monitoredPool, lockDiagnostics: new DatabaseLockDiagnostics(diagnosticsPool),
+    });
+    const warn = vi.spyOn(console, 'warn').mockImplementation(() => {});
+    try {
+      const waiterPid = (await monitored.query<{ pid: number }>('SELECT pg_backend_pid() pid')).rows[0]!.pid;
+      await observer.query('BEGIN');
+      const holderSql = "SELECT corner_id FROM corner_facts WHERE corner_id=$1 AND 'private-message-secret' <> '' FOR UPDATE";
+      await observer.query(holderSql, [id]);
+      const lookup = monitored.transaction(async db => {
+        await db.query("SET LOCAL lock_timeout='500ms'");
+        await loadCorner(db, id);
+      });
+      const failed = expect(lookup).rejects.toMatchObject({ code: '55P03' });
+      await waiting(observer, waiterPid, observerPid);
+      // A concurrent request admits the passive observation while the wait is live.
+      await observer.query('SELECT pg_sleep(0.12)');
+      // The blocker exposes its latest statement; restore the planted locking query.
+      await observer.query(holderSql, [id]);
+      await monitored.query('SELECT 1');
+      await failed;
+      const diagnostic = warn.mock.calls.find(call => call[0] === '[database] lock timeout')?.[1];
+      expect(diagnostic).toMatchObject({
+        code: '55P03', observation: 'captured',
+        statement: expect.stringContaining('SELECT fact.machine,corner.parent_id'),
+        blockers: [expect.objectContaining({
+          blocking_pid: observerPid, blocking_state: 'idle in transaction',
+          query: 'SELECT corner_id FROM corner_facts WHERE corner_id=? AND ? <> ? FOR UPDATE',
+          transaction_age_ms: expect.any(Number),
+        })],
+      });
+      expect(JSON.stringify(diagnostic)).not.toContain('private-message-secret');
+      await observer.query('ROLLBACK');
+      expect(await loadCorner(monitored, id)).toMatchObject({ parent_id: room });
+    } finally {
+      await observer.query('ROLLBACK');
+      warn.mockRestore();
+      await monitored.close(); await diagnosticsPool.close();
+    }
   });
 
   it('concurrent connections keep monotonic epochs and stale releases cannot erase the latest presence',async()=>{
@@ -185,6 +240,55 @@ describe.skipIf(!url)('production transaction lock ordering', () => {
     expect(results).toEqual([expect.anything(),expect.objectContaining({status:'connecting'})]);
     expect((await first.query<{ status: string }>(`SELECT squire_report->>'status' status FROM squire_machines WHERE (owner_id,machine_id)=(SELECT owner_id,COALESCE(machine_id,agent_id) FROM agents WHERE agent_id=$1)`, [agent])).rows[0]?.status).toBe(mode === 'reconnect' ? 'error' : 'connected');
     expect((await first.query<{ install: string }>(`SELECT squire_work->>'install' install FROM squire_machines WHERE (owner_id,machine_id)=(SELECT owner_id,COALESCE(machine_id,agent_id) FROM agents WHERE agent_id=$1)`, [agent])).rows[0]?.install).toBe('true');
+  });
+
+  it('Reproduction SENTRY-4B: committed events cover a skipped locked row and deliver the working badge', async () => {
+    const id = randomUUID();
+    await first.query(`INSERT INTO rooms(id,workspace_id,parent_id,created_by,name) VALUES($1,$2,$3,$4,'Busy corner')`, [id, workspace, room, agent]);
+    await first.query('INSERT INTO corner_facts(corner_id) VALUES($1)', [id]);
+    await seedCornerOpening(first, { cornerId: id, agentId: agent, commissionedBy: owner });
+    await first.query("UPDATE agent_commands SET state='complete' WHERE room_id=$1", [id]);
+    const live = new LiveHub(), errors: unknown[] = [];
+    const client = new Client(config);
+    let ready!: () => void;
+    const connected = new Promise<void>(resolve => { ready = resolve; });
+    const unready = live.subscribeResync(ready);
+    const listener = new PostgresLiveListener(second, live, () => client);
+    void listener.run(); await connected; unready();
+    const runtime = new CornerMachineEvents(second, live, error => errors.push(error));
+    let release!: () => void, entered!: () => void, notified!: () => void;
+    const gate = new Promise<void>(resolve => { release = resolve; });
+    const held = new Promise<void>(resolve => { entered = resolve; });
+    const delivered = new Promise<void>(resolve => { notified = resolve; });
+    const unlisten = live.subscribeAll(event => {
+      if (event.type === 'invalidate' && event.roomId === id && event.reason === 'postgres:corner_state') notified();
+    });
+    const transaction = second.transaction.bind(second);
+    let attempts = 0;
+    const observe = vi.spyOn(second, 'transaction').mockImplementation(async work => {
+      const result = await transaction(work);
+      if (++attempts === 1) { entered(); await gate; }
+      return result;
+    });
+    await observer.query('BEGIN');
+    await observer.query('SELECT corner_id FROM corner_facts WHERE corner_id=$1 FOR UPDATE', [id]);
+    await second.query("SET lock_timeout='100ms'");
+    try {
+      const initial = runtime.refresh(id); await held;
+      expect(attempts).toBe(1);
+      await observer.query("UPDATE agent_commands SET state='pending' WHERE room_id=$1 AND reason='corner_objective'", [id]);
+      await observer.query('COMMIT');
+      await delivered; // Real LISTEN -> live hub -> runtime, without a manual second refresh.
+      release(); await initial;
+      const result = await new PhoneService(second, 'https://beeline.invalid').readCorners(room, owner);
+      expect(result!.corners.find(corner => corner.corner.id === id)?.state).toBe('working');
+      expect((await second.query("SELECT state FROM agent_commands WHERE room_id=$1 AND reason='corner_objective'", [id])).rows).toEqual([{ state: 'pending' }]);
+      expect(errors).toEqual([]);
+    } finally {
+      release(); await observer.query('ROLLBACK'); unlisten();
+      await listener.stop(); await runtime.stop(); observe.mockRestore();
+      await second.query('RESET lock_timeout');
+    }
   });
 
   it.each(['refresh', 'open'] as const)('SERVER-49/4A/45: %s does not update the shared System identity', async path => {

@@ -6,7 +6,8 @@ it('replaces the full config at the observed version without inventing launch co
   const request=vi.fn<typeof fetch>().mockResolvedValue(Response.json({...machine,state:'replacing',instance_id:'new'}));
   await new FlyMachines('fixture','lab',request).update(machine,'new-image');
   expect(request).toHaveBeenCalledOnce();
-  expect(JSON.parse(String(request.mock.calls[0]![1]!.body))).toEqual({current_version:'old',skip_launch:false,config:{...machine.config,image:'new-image'}});
+  expect(JSON.parse(String(request.mock.calls[0]![1]!.body))).toEqual({current_version:'old',skip_launch:false,
+    config:{...machine.config,image:'new-image',init:{kernel_args:['acpi=force']}}});
 });
 it('binds the provider completion observation to the replacement instance',async()=>{
   const request=vi.fn<typeof fetch>().mockResolvedValue(Response.json({}));
@@ -26,4 +27,15 @@ it('keeps transport loss unknown without retry',async()=>{
 it('treats identical digests under different tags as the same image',()=>{
   expect(sameMachineImage('image:old@sha256:same','image:new@sha256:same')).toBe(true);
   expect(sameMachineImage('image:old@sha256:other','image:new@sha256:same')).toBe(false);
+});
+it('exposes the native VMGenID resume event on new free-agent machines',async()=>{
+  const request=vi.fn<typeof fetch>().mockResolvedValue(Response.json({id:'new-machine'}));
+  await new FlyMachines('fixture','lab',request).create({agentId:'agent',image:'image',region:'iad',env:{},cpus:1,memoryMb:2048});
+  expect(JSON.parse(String(request.mock.calls[0]![1]!.body)).config.init.kernel_args).toContain('acpi=force');
+});
+it('enables resume events when replacing an existing image without dropping its boot configuration',async()=>{
+  const machine={id:'m1',state:'suspended',instance_id:'old',config:{image:'old',init:{exec:['/entrypoint'],kernel_args:['quiet','acpi=off']}}};
+  const request=vi.fn<typeof fetch>().mockResolvedValue(Response.json({...machine,instance_id:'new'}));
+  await new FlyMachines('fixture','lab',request).update(machine,'new-image');
+  expect(JSON.parse(String(request.mock.calls[0]![1]!.body)).config.init).toEqual({exec:['/entrypoint'],kernel_args:['quiet','acpi=force']});
 });

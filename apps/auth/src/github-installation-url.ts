@@ -1,6 +1,6 @@
 import { ExternalServiceTimeoutError } from './external-fetch.js';
 import { importPKCS8, SignJWT } from 'jose';
-import { GitHubAppClient, GitHubAppConfig, jsonObject, githubHeaders, GitHubInstallationToken, GitHubDispatchableWorkflow, repositoryPath, isMissingGitHubResource, hasWorkflowDispatch, GitHubHttpError, githubMergeability, jsonArray, responseRetryAfter, GitHubCheckRollup, checkRunAppId, suiteHasUnfinishedRuns, registrationStillOpen, requiredChecks } from './github.js';
+import { GitHubAppClient, GitHubAppConfig, jsonObject, githubHeaders, GitHubInstallationToken, GitHubDispatchableWorkflow, repositoryPath, isMissingGitHubResource, hasWorkflowDispatch, GitHubHttpError, ProductionReleaseBusyError, githubMergeability, jsonArray, responseRetryAfter, GitHubCheckRollup, checkRunAppId, suiteHasUnfinishedRuns, registrationStillOpen, requiredChecks } from './github.js';
 
 
 
@@ -243,7 +243,7 @@ import { GitHubAppClient, GitHubAppConfig, jsonObject, githubHeaders, GitHubInst
       if (!Array.isArray(result.workflow_runs)) throw new Error('Invalid production release run listing');
       if (result.workflow_runs.length) {
         const run = result.workflow_runs[0] as { id?: unknown };
-        throw new Error(`Production release ${run.id} is already ${status}. Wait for it to finish or cancel it in GitHub Actions.`);
+        throw new ProductionReleaseBusyError();
       }
     }
     const response = await ctx.service.request(

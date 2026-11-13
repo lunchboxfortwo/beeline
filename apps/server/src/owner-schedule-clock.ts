@@ -1,4 +1,4 @@
-/** The server's sole time source: an owner-created schedule reaching its time. */
+/** The server's deadline clock for owner schedules and pinned workflow step expiry. */
 export class OwnerScheduleClock {
   private timer?: ReturnType<typeof setTimeout>;
   private dueAt = Infinity;

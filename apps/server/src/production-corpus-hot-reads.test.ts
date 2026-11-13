@@ -13,6 +13,7 @@ import type { CommandRow } from './agent-command.js';
 import {
   assertHotRead,
   explainHotRead,
+  savedCorpusPlan,
   HOT_READ_BUDGETS_MS,
   PRODUCTION_CORPUS_MESSAGE_COUNT,
   PRODUCTION_CORPUS_SIGNATURE,
@@ -262,7 +263,7 @@ describe('PRODUCTION-CORPUS REPLAY hot-read gate', () => {
       await mkdir(planDirectory, { recursive: true });
       await Promise.all(
         results.map((result) =>
-          writeFile(`${planDirectory}/${result.name}.json`, `${JSON.stringify(result, null, 2)}\n`),
+          writeFile(`${planDirectory}/${result.name}.json`, savedCorpusPlan(result)),
         ),
       );
     }

@@ -13,6 +13,7 @@ export async function createWorkspace(
   freeAgents?: Pick<FreeAgentService, 'createInWorkspace'>,
   source: 'manual_ui'|'onboarding'|'mcp_consent'|'recovery' = input.creationSource ?? 'manual_ui',
 ): Promise<{ id: string; roomId: string }> {
+  if (input.locale !== undefined && (typeof input.locale !== 'string' || input.locale.length > 100)) throw new Error('Invalid locale');
   if (input.timeZone !== undefined) {
     if (typeof input.timeZone !== 'string' || input.timeZone.length > 100) throw new Error('Invalid time zone');
     try { new Intl.DateTimeFormat('en', { timeZone: input.timeZone }); } catch { throw new Error('Invalid time zone'); }
@@ -53,6 +54,7 @@ export async function createWorkspace(
       roomId: generalId,
       team: true,
       timeZone: input.timeZone,
+      locale: input.locale,
     });
   return { id, roomId: generalId };
 }

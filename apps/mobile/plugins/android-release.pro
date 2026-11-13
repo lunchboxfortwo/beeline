@@ -22,6 +22,12 @@
 -keep class expo.modules.adapters.react.apploader.RNHeadlessAppLoader { *; }
 # TaskManager constructs registered consumers through reflection.
 -keep class * implements expo.modules.interfaces.taskManager.TaskConsumerInterface { <init>(...); }
+# Expo's handling delegate holds this singleton only through weak references.
+# R8 otherwise removes INSTANCE and staticizes its methods, allowing GC to
+# collect the registered tap listener even while the app's JS emitter is live.
+-keepclassmembers class expo.modules.notifications.notifications.NotificationManager {
+    public static final expo.modules.notifications.notifications.NotificationManager INSTANCE;
+}
 # Install-referrer consumers invoke the builder and response methods by name.
 -keep class com.android.installreferrer.api.** { *; }
 # Sentry is excluded from native autolinking; PostHog is JavaScript-only.

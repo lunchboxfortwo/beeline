@@ -1,3 +1,4 @@
+import { githubProviderKey } from './providers/index.js';
 import { compactDiagnostics } from './diagnostics.js';
 import {
   FUNNEL_FIRST_SESSION_MS,
@@ -60,7 +61,7 @@ export async function recordOnboardingEvent(database: SqlDatabase, identityId: s
 
 export async function observeOnboardingMessage(database: SqlDatabase, roomId: string, identityId: string, depth?: number, text = '') {
   const team = (await database.query<{ owner_id: string; agent_id: string; handle: string | null }>(
-    `SELECT f.owner_id,f.agent_id,i.handle FROM free_agents f JOIN identities i ON i.id=f.agent_id
+    `SELECT f.owner_id,f.agent_id,beeline_workspace_handle(i.id,m.workspace_id) handle FROM free_agents f JOIN identities i ON i.id=f.agent_id
      JOIN memberships m ON m.identity_id=f.agent_id AND m.room_id=$1 AND m.removed_at IS NULL
      WHERE f.starter_role IS NOT NULL AND f.removed_at IS NULL
        AND (f.owner_id=$2 OR EXISTS(SELECT 1 FROM free_agents self WHERE self.agent_id=$2 AND self.owner_id=f.owner_id))`,
@@ -82,7 +83,7 @@ export async function observeOnboardingMessage(database: SqlDatabase, roomId: st
     const mentionsPeer = peerHandles.length > 0 && (await database.query(
       `SELECT 1 FROM identities i JOIN memberships m ON m.identity_id=i.id AND m.room_id=$1
        AND m.removed_at IS NULL WHERE i.kind='agent' AND i.id<>$2 AND i.handle IS NOT NULL
-       AND lower(btrim(i.handle,'@'))=ANY($3::text[]) LIMIT 1`, [roomId, identityId, peerHandles],
+       AND lower(btrim(beeline_workspace_handle(i.id,m.workspace_id),'@'))=ANY($3::text[]) LIMIT 1`, [roomId, identityId, peerHandles],
     )).rowCount > 0;
     if (depth === 0) {
       await recordOnboardingEvent(database, owner, 'task_first_answer', { roomId });
@@ -426,7 +427,7 @@ export async function dashboardSigninFunnel(
       stage.dropOffRate = previous ? (previous - stage.count) / previous : null;
       previous = stage.count;
     }
-    const providers = ['github', 'google'].map((provider) => {
+    const providers = [githubProviderKey, 'google'].map((provider) => {
       const started = rows.find(
         (r) =>
           r.platform === platform &&

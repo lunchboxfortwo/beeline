@@ -1,0 +1,6 @@
+before-request {"body":"lunchbox wants Jellybean to use node scripts/live-a.mjs"}
+before-decided {"identifier":"permission-r1","title":"Beeline","body":"lunchbox wants Jellybean to use node scripts/live-a.mjs","subtitle":"Always allowed","data":{"grantId":"r1","agentName":"Jellybean","grantKind":"command","grantTarget":"node scripts/live-a.mjs","actionOutcome":"true"},"quiet":true}
+after-request {"body":"Jellybean wants to run node scripts/live-a.mjs"}
+after-always {"identifier":"permission-r1","title":"Beeline","body":"Accepted","data":{"grantId":"r1","agentName":"Jellybean","grantKind":"command","grantTarget":"node scripts/live-a.mjs","actionOutcome":"true"},"quiet":true}
+after-once {"identifier":"permission-r1","title":"Beeline","body":"Accepted","data":{"grantId":"r1","agentName":"Jellybean","grantKind":"command","grantTarget":"node scripts/live-a.mjs","actionOutcome":"true"},"quiet":true}
+after-deny {"identifier":"permission-r1","title":"Beeline","body":"Denied","data":{"grantId":"r1","agentName":"Jellybean","grantKind":"command","grantTarget":"node scripts/live-a.mjs","actionOutcome":"true"},"quiet":true}

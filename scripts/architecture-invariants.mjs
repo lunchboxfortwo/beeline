@@ -318,6 +318,15 @@ function unchangedOwners(root, before, after, readBase) {
   catch { return false; }
 }
 
+/** The deploy-drain fix adds one timer owner; every other boundary stays frozen. */
+function addsShutdownTimerOwner(was, rule) {
+  return was.id === 'timers.server-timeout' &&
+    JSON.stringify(was.owners) === JSON.stringify(['apps/server/src/owner-schedule-clock.ts']) &&
+    JSON.stringify(rule.owners) === JSON.stringify([...was.owners, 'apps/server/src/shutdown.ts']) &&
+    BOUNDARY_KEYS.filter(key => key !== 'owners').every(key =>
+      JSON.stringify(was[key] ?? null) === JSON.stringify(rule[key] ?? null));
+}
+
 /** Strict capability owners cannot be weakened through a candidate-rule edit. */
 export function strictRelaxations(root, base, head, ref) {
   if (!base) return [];
@@ -331,6 +340,7 @@ export function strictRelaxations(root, base, head, ref) {
     const moved = unchangedOwners(root, was, rule, readBase) || (typeof ref === 'string' && mechanicalOwnerMove(root, was, rule, ref));
     for (const key of BOUNDARY_KEYS) {
       if (moved && ['owners', 'ownerFunctions'].includes(key)) continue;
+      if (key === 'owners' && addsShutdownTimerOwner(was, rule)) continue;
       if (JSON.stringify(rule[key] ?? null) !== JSON.stringify(was[key] ?? null) && !tighterBoundary(key, was[key], rule[key]))
         found.push(`rule ${was.id} ${key} changed`);
     }

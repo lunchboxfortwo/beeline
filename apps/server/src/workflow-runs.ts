@@ -1,16 +1,14 @@
 import { claimWorkflowTransition } from './workflow-transition.js';
-import { sendSystemNotices } from './system-line.js';
 import { systemMessage } from '@beeline/api-contract/system-message-catalog';
 import { CommandRefusalError, ExpectedRefusalError } from './command-refusal.js';
-import { CornerAccessDatabase } from './corner-access-database.js';
 import { createHash } from 'node:crypto';
 import { shortRunId, type WorkflowReadContract, type WorkflowReadState, type WorkflowRunReadResult, type WorkflowReceipt } from '@beeline/api-contract/daemon';
 import { workflowRunStatus } from '@beeline/api-contract/phone';
-import type { SystemSubject, WorkflowRunStatus } from '@beeline/api-contract/phone';
-import type { CommandRow } from './agent-command.js';
+import type { WorkflowRunStatus } from '@beeline/api-contract/phone';
+import { createAgentCommand, type CommandRow } from './agent-command.js';
 import type { SqlDatabase } from './database.js';
 import { firstHealthyAgent, roomAgentHealth, type AgentHealthReason } from './agent-health.js';
-import { ensureSystemDirectMessageRoom, ensureSystemIdentity, systemIdentityMention, systemLine } from './system-line.js';
+import { systemIdentityMention } from './system-line.js';
 import { SYSTEM_IDENTITY_ID } from '@beeline/api-contract/system-identity';
 import { workflowGatePrompt, cancelWorkflowRun } from './workflow-runs-cancel-run-timers.js';
 import { handoff, settleWorkflowGate, abandonCornerWorkflowRuns, liveWorkflowRun, saveWorkflow, activeRunIdsForSchedule } from './workflow-runs-repeated-result.js';
@@ -83,9 +81,9 @@ export type WorkflowRunCard = {
 export type IdentityRow = { id: string; kind: 'human' | 'agent'; name: string; handle?: string | null };
 
 
-export async function loadIdentityRow(db: SqlDatabase, id: string): Promise<IdentityRow> {
+export async function loadIdentityRow(db: SqlDatabase, id: string, roomId?: string): Promise<IdentityRow> {
   const row = (
-    await db.query<IdentityRow>(`SELECT id,kind,name,handle FROM identities WHERE id=$1`, [id])
+    await db.query<IdentityRow>(`SELECT id,kind,name,beeline_room_handle(id,$2) handle FROM identities WHERE id=$1`, [id,roomId ?? null])
   ).rows[0];
   if (!row) throw new Error('identity not found');
   return row;
@@ -93,12 +91,12 @@ export async function loadIdentityRow(db: SqlDatabase, id: string): Promise<Iden
 
 
 /** How a system line names each id: `@handle`, falling back to the raw id for an unknown one. */
-export async function mentionsFor(db: SqlDatabase, ids: readonly string[]): Promise<Map<string, string>> {
+export async function mentionsFor(db: SqlDatabase, ids: readonly string[], roomId?: string): Promise<Map<string, string>> {
   const rows = ids.length
     ? (
         await db.query<IdentityRow & { handle: string | null }>(
-          `SELECT id,kind,name,handle FROM identities WHERE id=ANY($1::text[])`,
-          [[...new Set(ids)]],
+          `SELECT id,kind,name,beeline_room_handle(id,$2) handle FROM identities WHERE id=ANY($1::text[])`,
+          [[...new Set(ids)],roomId ?? null],
         )
       ).rows
     : [];
@@ -115,7 +113,7 @@ export async function mentionsFor(db: SqlDatabase, ids: readonly string[]): Prom
  */
 export async function loadRunStarter(db: SqlDatabase, roomId: string, runId: string): Promise<IdentityRow> {
   const start = await loadRunStart(db, roomId, runId);
-  return loadIdentityRow(db, start.card.requesterId ?? start.authorId);
+  return loadIdentityRow(db, start.card.requesterId ?? start.authorId,roomId);
 }
 
 
@@ -206,7 +204,7 @@ export async function roleReasons(
   input: { roomId: string; list: readonly string[]; tried: readonly TriedAgent[]; cursor?: string },
 ): Promise<string> {
   const health = await roomAgentHealth(db, input.roomId, input.list);
-  const names = await mentionsFor(db, input.list);
+  const names = await mentionsFor(db, input.list,input.roomId);
   const cursorIndex = input.cursor ? input.list.indexOf(input.cursor) : -1;
   return input.list
     .map((id, index) => {
@@ -227,49 +225,20 @@ export async function roleReasons(
 }
 
 
-/**
- * A role with nobody eligible is named in the run, with each listed agent's
- * reason, rather than silently stalling. The run stays parked at this state:
- * a human can address any Room member and ask it to call
- * `assign_workflow_role`, which binds a specific agent and re-wakes it with no
- * health filter. For an agent-started run, this also wakes the starter. One
- * line per dispatch card: a repeat for the same card is a no-op.
- */
+/** Preserve workflow recovery as private work for the starter. */
 export async function noteWorkflowRoleExhausted(
   db: SqlDatabase,
-  input: {
-    roomId: string;
-    runId: string;
-    workflowSlug: string;
-    role: string;
-    afterMessageId: string;
-    list: readonly string[];
-    tried: readonly TriedAgent[];
-    cursor?: string;
-  },
+  input: { roomId: string; runId: string; workflowSlug: string; role: string;
+    afterMessageId: string; list: readonly string[]; tried: readonly TriedAgent[]; cursor?: string },
 ): Promise<void> {
-  const id = createHash('sha256')
-    .update(`beeline:workflow-role-exhausted:v1:${input.runId}:${input.role}:${input.afterMessageId}`)
-    .digest('hex');
   const starter = await loadRunStarter(db, input.roomId, input.runId);
-  const reasons = input.list.length ? await roleReasons(db, input) : '';
-  await ensureSystemIdentity(db);
-  await systemLine(db, {
-    id,
-    roomId: input.roomId,
-    authorId: SYSTEM_IDENTITY_ID,
-    subject: { kind: 'system', name: systemMessage("workflow-runs.no-agent-on-the-role-s-list", input.role) },
-    verb: systemMessage("workflow-runs.is-healthy"),
-    consequence: systemMessage("workflow-runs.ask-an-agent-to-call-assign-workflow-role-to-bind-another-agent-i", reasons ? systemMessage("workflow-runs.in-run", reasons, shortRunId(input.runId)) : systemMessage("workflow-runs.in-run-2", shortRunId(input.runId))).slice(0, 600),
-    ...(starter.kind === 'agent'
-      ? {
-          kind: 'workflow-handoff' as const,
-          wakes: [starter.id],
-          // The wake names the full run id for the starter to act on.
-          card: { runId: input.runId, workflowSlug: input.workflowSlug },
-        }
-      : {}),
-    afterMessageId: input.afterMessageId,
+  if (starter.kind !== 'agent') return;
+  await createAgentCommand(db, {
+    id: createHash('sha256').update(`beeline:workflow-role-exhausted:v1:${input.runId}:${input.role}:${input.afterMessageId}`).digest('hex'),
+    roomId: input.roomId, agentId: starter.id, sourceMessageId: input.afterMessageId,
+    reason: 'system',
+    privatePayload: { kind: 'lifecycle', authorId: SYSTEM_IDENTITY_ID, fromRoomId: input.roomId,
+      text: `Workflow ${input.workflowSlug} (${input.runId}) has no eligible agent for role ${input.role}. Assign another workflow role agent to continue.` },
   });
 }
 
@@ -460,8 +429,7 @@ export async function workflowRunRequester(
  * is that person; an agent's start answers the person whose message it
  * served; a scheduled start carries the owner the schedule recorded when it
  * was created (`agent_schedules.owner_id`, or its human creator). Never the
- * hidden scheduler or system identities. `null` when no person is on record,
- * and notices then go to the Room's admins (`runNoticeRecipients`).
+ * hidden scheduler or system identities. `null` when no person is on record.
  */
 export async function resolveRunOwner(
   db: SqlDatabase,
@@ -483,45 +451,6 @@ export async function resolveRunOwner(
   if (!root) return null;
   if (root.scheduled && root.owner_id) return root.owner_id;
   return root.person ? root.author_id : null;
-}
-
-
-/** The run owner while they are still in the Room, otherwise the Workspace's human admins. */
-export async function runNoticeRecipients(db: SqlDatabase, roomId: string, ownerId: string | null): Promise<string[]> {
-    db = new CornerAccessDatabase(db);
-  if (ownerId) {
-    const member = await db.query(
-      `SELECT 1 FROM memberships WHERE room_id=$1 AND identity_id=$2 AND removed_at IS NULL`,
-      [roomId, ownerId],
-    );
-    if (member.rowCount) return [ownerId];
-  }
-  const admins = await db.query<{ id: string }>(
-    `SELECT DISTINCT identity.id FROM rooms room
-     JOIN memberships member ON member.workspace_id=room.workspace_id
-       AND member.room_id IS NULL
-       AND member.removed_at IS NULL AND member.role IN ('owner','admin')
-     JOIN identities identity ON identity.id=member.identity_id AND identity.kind='human'
-       AND NOT COALESCE(identity.hidden_from_roster,false)
-     WHERE room.id=$1 ORDER BY identity.id`,
-    [roomId],
-  );
-  return admins.rows.map((row) => row.id);
-}
-
-
-/** One `@system` DM line to the run's owner (or the Room's admins); a repeat for the same key is a no-op. */
-export async function noticeRunOwner(
-  db: SqlDatabase,
-  scope: RunScope,
-  key: string,
-  line: { subject: SystemSubject; verb: string; object?: string; consequence?: string },
-): Promise<void> {
-  const owner = (await loadRunStart(db, scope.roomId, scope.runId)).card.ownerId;
-  const recipients = await runNoticeRecipients(db, scope.roomId, owner ?? null);
-  await sendSystemNotices(db,scope.workspaceId,recipients.map(identityId=>({ identityId,
-    messageId:createHash('sha256').update(`beeline:workflow-owner-notice:v1:${scope.runId}:${key}:${identityId}`).digest('hex'),
-  })),line);
 }
 
 
@@ -620,6 +549,6 @@ export { closeStaleWorkflowGateChoices } from './workflow-runs-start-workflow.js
 
 export async function claimRun(db: SqlDatabase, scope: RunScope): Promise<boolean> {
   if (scope.claimed) return true;
-  scope.claimed = await claimWorkflowTransition(db, { ...scope.head, state: scope.stateName });
+  scope.claimed = await claimWorkflowTransition(db, { ...scope.head, state: scope.head.card.toState });
   return scope.claimed;
 }

@@ -3,7 +3,7 @@ import { realpathSync, lstatSync, existsSync, statSync, readFileSync, writeFileS
 import { resolve, isAbsolute, relative, sep, join, basename } from "node:path";
 import { AsyncLocalStorage } from "node:async_hooks";
 import { isNetworkFailure } from "./network-failure.js";
-import { cornerTextRefusal, normalizeCornerText, encodeArtifactTitleHeader } from "@beeline/api-contract/daemon";
+import { fixCornerText, encodeArtifactTitleHeader } from "@beeline/api-contract/daemon";
 import { fetchBoundedBytes, BoundedSizeError, MAX_ATTACHMENT_BYTES, FETCH_TIMEOUT_MS, EXPIRED_REASON } from "./attachment-delivery.js";
 import { assertScratchWriteBudget } from "./scratch-lifecycle.js";
 import { createHash } from "node:crypto";
@@ -18,6 +18,7 @@ import { ConnectorOfferDeps, squireShareFailure } from './read-only-mcp-agent-gr
 import { agentScheduleRoomId, DaemonArtifactUploadResult } from './read-only-mcp-download-attachment.js';
 import { GrantRunDeps, executeAgentTool, turnArtifacts } from './read-only-mcp-open-poll.js';
 import { handleLine } from './read-only-mcp-tool-call-id.js';
+import { claimToolOwedListing, filterOwedMentions } from './tool-owed-once.js';
 
 
 
@@ -472,7 +473,7 @@ export function isDaemonNetworkFailure(error: unknown): boolean {
 
 
 
-export const toolOwedStorage = new AsyncLocalStorage<{ owedMentions?: unknown[] }>();
+export const toolOwedStorage = new AsyncLocalStorage<{ owedMentions?: unknown[]; includeOwed?: boolean; roomId?: string }>();
 
 
 
@@ -496,7 +497,7 @@ export async function daemonExecute(name: string, input: JsonObject): Promise<Js
           authorization: `Bearer ${requiredEnv('BEELINE_DAEMON_TOKEN')}`,
           'content-type': 'application/json',
           'x-beeline-helper-version': process.env.BEELINE_HELPER_VERSION || 'v0.0.0',
-          ...(toolOwedStorage.getStore() ? { 'x-beeline-tool-result': '1' } : {}),
+          ...(toolOwedStorage.getStore()?.includeOwed ? { 'x-beeline-tool-result': '1', ...(toolOwedStorage.getStore()?.roomId ? { 'x-beeline-place': toolOwedStorage.getStore()!.roomId } : {}) } : {}),
         },
         body,
       });
@@ -513,7 +514,7 @@ export async function daemonExecute(name: string, input: JsonObject): Promise<Js
       const result = await response.json() as JsonObject | null;
       const toolContext = toolOwedStorage.getStore();
       if (toolContext) {
-        toolContext.owedMentions = Array.isArray(result?._beelineOwedMentions) ? result._beelineOwedMentions : undefined;
+        if (toolContext.includeOwed) toolContext.owedMentions = Array.isArray(result?._beelineOwedMentions) ? result._beelineOwedMentions : undefined;
         if (result && typeof result === 'object' && '_beelineToolResult' in result) return result._beelineToolResult as JsonObject;
       }
       return result as JsonObject;
@@ -526,16 +527,16 @@ export async function daemonExecute(name: string, input: JsonObject): Promise<Js
 
 
 
-/** The corner's two texts, flattened and judged. Anything that reads as a
- *  refusal is one plain sentence naming the limit and the actual count: a
- *  refused call the model cannot understand is a silent one (C90). */
-export function cornerCallText(args: JsonObject): { name: string; objective: string } {
-  const refusal =
-    cornerTextRefusal('name', args.name) ?? cornerTextRefusal('objective', args.objective);
-  if (refusal) throw new Error(refusal);
+/** The corner's two texts, flattened. Spaces in a name become hyphens. A long
+ *  objective is cut on a word boundary. Empty text still throws. */
+export function cornerCallText(args: JsonObject): { name: string; objective: string; notes?: string[] } {
+  const name = fixCornerText('name', args.name);
+  const objective = fixCornerText('objective', args.objective);
+  const notes = [name.note, objective.note].filter((note): note is string => Boolean(note));
   return {
-    name: String(args.name),
-    objective: normalizeCornerText(String(args.objective)),
+    name: name.text,
+    objective: objective.text,
+    ...(notes.length ? { notes } : {}),
   };
 }
 
@@ -869,7 +870,8 @@ export async function callCommandTool(name: string, args: JsonObject, toolCallId
 
 /** Keep concurrent calls isolated; footer metadata rides on their existing operation responses. */
 export async function withToolOwedContext(work: () => Promise<string>) {
-  return toolOwedStorage.run({}, async () => {
+  const listing = claimToolOwedListing();
+  return toolOwedStorage.run({ includeOwed: listing.include, roomId: listing.roomId }, async () => {
     let output: string;
     let isError = false;
     try { output = await work(); }
@@ -878,11 +880,11 @@ export async function withToolOwedContext(work: () => Promise<string>) {
       output = error instanceof Error ? error.message : String(error);
       // Validation may refuse before dispatch. Read fresh authenticated context
       // without adding an operation to the command/operation log.
-      if (!toolOwedStorage.getStore()?.owedMentions) {
+      if (listing.include && !toolOwedStorage.getStore()?.owedMentions) {
         try {
           const response = await fetch(new URL('/v1/daemon/owed-mentions', requiredEnv('BEELINE_DAEMON_BASE_URL')), {
             signal: undefined,
-            headers: { authorization: `Bearer ${requiredEnv('BEELINE_DAEMON_TOKEN')}` },
+            headers: { authorization: `Bearer ${requiredEnv('BEELINE_DAEMON_TOKEN')}`, ...(listing.roomId ? { 'x-beeline-place': listing.roomId } : {}) },
           });
           if (response.ok) {
             const context = await response.json() as { owedMentions?: unknown[] };
@@ -891,7 +893,7 @@ export async function withToolOwedContext(work: () => Promise<string>) {
         } catch { /* Optional context must never mask the original refusal. */ }
       }
     }
-    const owedMentions = toolOwedStorage.getStore()?.owedMentions;
+    const owedMentions = filterOwedMentions(toolOwedStorage.getStore()?.owedMentions, listing.roomId);
     return { ...(isError ? { isError: true } : {}), content: [{ type: 'text' as const, text: output },
       ...(owedMentions ? [{ type: 'text' as const, text: JSON.stringify({ owedMentions }) }] : [])] };
   });

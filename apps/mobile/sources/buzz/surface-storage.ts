@@ -10,6 +10,7 @@ import { clearMessageOutboxStorage } from './message-outbox-storage';
 export { configureMessageOutboxDelivery, getMessageOutbox, createRoomOutbox, resetMessageOutboxes } from './message-outbox-storage';
 import { SurfaceRegistry } from './surface-registry';
 import { deferRoomWrite } from './room-transition-work';
+import { roomSurfaceRecords } from './room-message-records';
 import { webRuntimeStorage } from '@/utils/web-storage';
 
 const web = webRuntimeStorage();
@@ -45,7 +46,7 @@ const durableSurfaceCache = new SurfaceResponseCache(
 export const mobileSurfaceCache = new SurfaceRegistry(
   durableSurfaceCache, stripRetiredAgentNotices, selectIdentities,
   (key, work) => /^\/room\/[^/]+$/.test(String((JSON.parse(key) as unknown[])[3]))
-    ? deferRoomWrite(key, work) : work());
+    ? deferRoomWrite(key, work) : work(), roomSurfaceRecords);
 
 function storedValue(encoded: string | null): unknown {
   if (encoded === null) return undefined;

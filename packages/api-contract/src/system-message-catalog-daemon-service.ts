@@ -65,28 +65,43 @@ export const SYSTEM_MESSAGE_DAEMON_SERVICE = {
     variables: [],
   },
 
-  'daemon-service.wants': {
-    parts: ['wants'],
+  'daemon-service.wants-to': {
+    parts: ["wants to"],
     variables: [],
   },
 
-  'daemon-service.to-connect': {
-    parts: ['', ' to connect ', ''],
-    variables: ['agent_name', 'connectionInstallName_grant'],
+  'daemon-service.run': {
+    parts: ["run"],
+    variables: [],
   },
 
-  'daemon-service.to': {
-    parts: ['', ' to ', ' ', ''],
-    variables: ['agent_name', 'grant_kind_path_read_grant', 'grant_target'],
+  'daemon-service.edit': {
+    parts: ["edit"],
+    variables: [],
+  },
+
+  'daemon-service.reach': {
+    parts: ["reach"],
+    variables: [],
+  },
+
+  'daemon-service.spend': {
+    parts: ["spend"],
+    variables: [],
+  },
+
+  'daemon-service.connect-app': {
+    parts: ["connect ", ""],
+    variables: ["app"],
+  },
+
+  'daemon-service.grant-action': {
+    parts: ["", " ", ""],
+    variables: ["verb", "target"],
   },
 
   'daemon-service.read': {
     parts: ['read'],
-    variables: [],
-  },
-
-  'daemon-service.write': {
-    parts: ['write'],
     variables: [],
   },
 
@@ -122,71 +137,6 @@ export const SYSTEM_MESSAGE_DAEMON_SERVICE = {
 
   'first-party-integrations.the-request-can-continue': {
     parts: ['The request can continue.'],
-    variables: [],
-  },
-
-  'free-agent-turn-close.ran-out-of-free-allowance-mid-task': {
-    parts: ['ran out of free allowance mid-task'],
-    variables: [],
-  },
-
-  'free-agent-turn-close.hit-the-15-minute-limit': {
-    parts: ['hit the 15-minute limit'],
-    variables: [],
-  },
-
-  'free-agent-turn-close.ended-without-a-reply': {
-    parts: ['ended without a reply'],
-    variables: [],
-  },
-
-  'free-agent-turn-close.stopped-after-a-runtime-failure': {
-    parts: ['stopped after a runtime failure'],
-    variables: [],
-  },
-
-  'free-agent-turn-close.stopped-before-replying': {
-    parts: ['stopped before replying'],
-    variables: [],
-  },
-
-  'free-agent-turn-close.connect-your-own-agent-from-members-to-continue': {
-    parts: ['connect your own agent from Members to continue'],
-    variables: [],
-  },
-
-  'free-agent-turn-close.it-resets-at-midnight-utc-ask-to-continue-then': {
-    parts: ['it resets at midnight UTC; ask to continue then'],
-    variables: [],
-  },
-
-  'free-agent-turn-close.say-continue-to-pick-up-where-work-stopped': {
-    parts: ['say "continue" to pick up where work stopped'],
-    variables: [],
-  },
-
-  'free-agents.could-not-start': {
-    parts: ['could not start'],
-    variables: [],
-  },
-
-  'free-agents.for': {
-    parts: ['for @', ''],
-    variables: ['target_person_handle'],
-  },
-
-  'free-agents.the-beeline-team-has-been-told-send-a-new-message-to-try-again': {
-    parts: ['the Beeline team has been told. Send a new message to try again'],
-    variables: [],
-  },
-
-  'github-operations.pull-request': {
-    parts: ['pull_request'],
-    variables: [],
-  },
-
-  'github-operations.check-run': {
-    parts: ['check_run'],
     variables: [],
   },
 
@@ -310,42 +260,12 @@ export const SYSTEM_MESSAGE_DAEMON_SERVICE = {
     variables: [],
   },
 
+  'phone-service.is-offline': { parts: ['is offline'], variables: [] },
+
+  'phone-service.connect-again': { parts: ['connect again'], variables: [] },
+
   'phone-service.message-deleted': {
     parts: ['Message deleted'],
-    variables: [],
-  },
-
-  'phone-service.could-not-be-reached': {
-    parts: ['could not be reached'],
-    variables: [],
-  },
-
-  'phone-service.not-a-member-of-this-corner': {
-    parts: ['not a member of this corner'],
-    variables: [],
-  },
-
-  'phone-service.did-not-answer': {
-    parts: ['did not answer'],
-    variables: [],
-  },
-
-  'phone-service.only-may-address-ask-the-user-for-permission-to-access-the-agent': {
-    parts: [
-      'only ',
-      ' may address ',
-      '. Ask the user for permission to access the agent in the members page',
-    ],
-    variables: ['personMention_agent_owner_handle_the', 'agentMention'],
-  },
-
-  'phone-service.the-owner': {
-    parts: ['the owner'],
-    variables: [],
-  },
-
-  'phone-service.its-helper-is-offline': {
-    parts: ['its helper is offline'],
     variables: [],
   },
 
@@ -469,10 +389,7 @@ export const SYSTEM_MESSAGE_DAEMON_SERVICE = {
     variables: [],
   },
 
-  'phone-service.person-mention': {
-    parts: ['@', ''],
-    variables: ['trimmed'],
-  },
+
 
   'provider-webhooks.beeline': {
     parts: ['Beeline'],
@@ -619,24 +536,6 @@ export const SYSTEM_MESSAGE_DAEMON_SERVICE = {
     variables: [],
   },
 
-
-
-
-
-
-
-
-
-
-
-
-
-
-  'startup-wake-backoff.keeps-failing-to-start-automatic-wakes-are-paused-for-5-minutes': {
-    parts: ['', ' keeps failing to start. Automatic wakes are paused for 5 minutes.'],
-    variables: ['owner_name'],
-  },
-
   'subscription-webhooks.beeline': {
     parts: ['Beeline'],
     variables: [],
@@ -689,21 +588,6 @@ export const SYSTEM_MESSAGE_DAEMON_SERVICE = {
 
   'system-line.a-room-event': {
     parts: ['a Room event'],
-    variables: [],
-  },
-
-  'turn-silence-notice.space': {
-    parts: [' '],
-    variables: [],
-  },
-
-  'turn-silence-notice.failed': {
-    parts: ['failed: ', ' (', '): ', ''],
-    variables: ['place_name', 'input_roomId', 'reason_classified_fault_agent_turn'],
-  },
-
-  'turn-silence-notice.agent-turn-failed': {
-    parts: ['agent turn failed'],
     variables: [],
   },
 

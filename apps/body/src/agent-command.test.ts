@@ -8,6 +8,7 @@ import {
   executableOnPath,
   parseAgentCommand,
   resolveAgentCommand,
+  runAdapterInstall,
 } from './agent-command.js';
 import { runtimeAgentCommand, type AgentRuntimeRecord } from './runtime.js';
 
@@ -34,6 +35,14 @@ async function hermeticHome(): Promise<string> {
 }
 
 describe('agent command selection', () => {
+  it.skipIf(process.platform !== 'linux')('installs the Linux Codex platform dependency during adapter setup', async () => {
+    const npm = await executable('npm');
+    await writeFile(npm.path, '#!/bin/sh\nfor arg do\n  if [ "$arg" = "--include=optional" ]; then exit 0; fi\ndone\nexit 1\n');
+    await expect(runAdapterInstall({
+      command: npm.path,
+      args: ['install', '--prefix', npm.directory, '@agentclientprotocol/codex-acp@2.5.0'],
+    }, { env: { PATH: npm.directory }, stdio: 'ignore' })).resolves.toBeUndefined();
+  });
   it('distinguishes ready, missing-adapter, and absent auto-detect presets', async () => {
     const codex = await executable('codex');
     const codexAdapter = await executable('codex-acp');

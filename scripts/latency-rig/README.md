@@ -525,7 +525,10 @@ the standing corner rather than creating a duplicate. Its execution contract is:
 
 > Run the nightly squire emulator latency rig under scripts/latency-rig/README.md
 > Nightly setup and execution. Fetch origin/main into the private detached
-> latency-rig-speedy checkout; read the current scripts, install dependencies
+> checkout inside this corner's writable worktree or its private scratch directory.
+> If the supplied latency-rig-speedy checkout is read-only, make a detached copy
+> with git clone --shared --no-hardlinks <source> "$TMPDIR/latency-rig" and run there.
+> Verify write access with mktemp in that copy before installing dependencies; read the current scripts, install dependencies
 > if needed, and use an owned Beeline-leased se_api35 emulator (2560 MiB, 4 cores).
 > Bind-test an unused local port pair. Run nightly-run.sh and monitor it in the
 > same turn until exit, retaining its log and exit status. It compares reports,
@@ -792,6 +795,8 @@ silently force every unrelated memoized conversation row to render again.
 
 ## Forward-message completion timing
 
+The picker now renders FORWARDED after the matching send reply. The passive observer records that visible result across two frames separately from dismissal. Completion uses this accepted-result frame when present; clients without feedback retain the removal-frame fallback. `acceptedResultMs` and `dismissalResultMs` preserve both boundaries, and the original animation and removal segments remain available. Compare the new accepted-result metric with the old dismissal metric explicitly; neither is a physical scanout measurement.
+
 The forward-message row preserves its original start, fixture, click, accepted
 server write, hidden-picker completion, and two result frames. Before the start,
 `web-forward-timing.mjs` installs a passive DOM-removal observer. It records the
@@ -804,9 +809,9 @@ percentiles under `profile`. These timestamps observe the real app; they neither
 close the picker nor change its exit animation. Missing profile events fail the
 sample. Socket instrumentation retains timing only, without message contents.
 
-This is a measurement-contract correction, not an app speedup against earlier
-web-inventory numbers. The existing web modal's exit animation remains a design
-floor. To select this interaction without changing its two batches of twenty
+The removal audit corrects driver observation delay; it does not make dismissal
+faster. The existing animation remains a floor on dismissal, while accepted
+feedback can appear sooner. To select this interaction without changing its two batches of twenty
 samples, use `LATENCY_RIG_WEB_INTERACTION=forward-message` with `web-run.sh`;
 uncaptured inventory entries remain explicitly unmeasured and the full score
 remains unavailable. This selection matches the create-corner capture lane.
@@ -842,6 +847,53 @@ elapsed-time value) from `animationMs` (the observed start/end event interval).
 `closeStartMs`, `animationEndMs`, `removalMs`, `tapToGoneMs`, and
 `sourceMessageVisibleMs` expose the actual marks. The last observes the existing
 source message after removal, not a forwarded message in a destination Room that
-this route never opens. Missing visibility stays null. The primary two-frame
-completion metric is unchanged; the direct tap-to-gone value excludes those
+this route never opens. Missing visibility stays null. The dismissal audit retains its two-frame
+completion boundary alongside accepted-result timing; the direct tap-to-gone value excludes those
 frames and the pre-click driver dispatch.
+
+### Web route coverage
+
+Route discovery excludes extracted hook/support modules and includes browser-share
+and Google callback screens. The current inventory contains 44 routes (88 cold/warm
+variants), rather than the historical 38 missing page loads. Each has an explicit
+content predicate in `web-route-fixtures.mjs`; redirects and terminal unavailable
+states are labelled in `route-summary.json`. Headers and spinners alone do not
+settle a page load. The wallet read uses a deterministic zero-balance DTO over the
+local socket, with no provider or wallet writes. App/key pages read metadata-only
+rows in the disposable local database. These are rendering fixtures, not proof of
+provider sign-in, usable credentials, wallet balances or spending.
+
+`web-run.sh` uses a fresh browser context for every interaction sample and
+route document sample. Only authentication is copied between contexts; surface,
+outbox and session caches are not. A warm document sample first warms its own
+route, while cold samples clear app and HTTP caches. Each sample records Chromium
+heap, DOM/listener counts and cumulative task/script/layout seconds before and
+after the timed path, plus host load and available memory. Resource collection
+runs outside the response clock. Browser contexts close even after capture errors.
+
+Room/DM opens, file sends, leaving, closing and approval answers observe the
+fixture's visible result in the browser and retain the original driver-observed
+duration separately. Tap clocks start on pointerdown. File selection and upload prepare the Send
+tap, and their preparation duration is retained separately. DOM observation ends after the same two result frames, without
+charging selector-driver observation delay as product latency. These measurements
+remain headless Chromium observations, not physical phone scanout.
+Each route variant has two captures of three document loads; route percentiles
+are coverage observations at a 450 ms budget, not the forty-sample performance
+proof required for the slow-path fixes. Cold document loads clear HTTP and app
+surface caches while preserving authentication; warm loads retain those caches.
+Set `LATENCY_RIG_WEB_ROUTES_ONLY=1` for the independent route lane. For setup
+smoke checks, `LATENCY_RIG_ROUTE_SMOKE_SAMPLES=1` runs one incomplete capture;
+its gaps stay explicit and Insights rejects it as a timing series. For isolated
+slow-path proofs, `LATENCY_RIG_ROUTE_SAMPLES_PER_CAPTURE=20` retains both captures
+and collects forty samples per route variant.
+
+Attachment setup uses the real web document picker and waits for upload readiness.
+Its preparation duration is retained separately. Tap timing starts on Send and
+requires the rendered attachment; a committed attachment check follows the frame.
+Human time in OS picker chrome is excluded. `web-run.sh` starts a disposable,
+loopback-only object store with synthetic keys (at most 1 MiB per fixture object),
+then shuts it down with the local server. No production object storage is used.
+Mark-read/unread have no current user controls; agent workflow start/handoff have
+no web tap controls; exact-head merge approval and provider consent remain explicit
+unavailable/external rows. Opening a workflow or connection page is never counted
+as completing those actions.

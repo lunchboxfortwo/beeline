@@ -1,5 +1,3 @@
-export const TRANSCRIPT_SETTLE_MS = 1_800;
-export const TRANSCRIPT_BURST_MS = 1_000;
 
 export type TranscriptArrivalState = {
   surfaceId: string | null;
@@ -62,48 +60,3 @@ export function observeTranscriptArrivals(
   };
 }
 
-export type TranscriptSettleDecision = {
-  animate: boolean;
-  startsNewSettle: boolean;
-  durationMs: number;
-};
-
-/** Events inside one second share the settle already in flight instead of restarting it. */
-export function transcriptSettleDecision(
-  lastStartedAt: number | null,
-  now: number,
-  reducedMotion: boolean,
-): TranscriptSettleDecision {
-  if (reducedMotion) return { animate: false, startsNewSettle: false, durationMs: 0 };
-  if (lastStartedAt === null || now - lastStartedAt >= TRANSCRIPT_BURST_MS) {
-    return { animate: true, startsNewSettle: true, durationMs: TRANSCRIPT_SETTLE_MS };
-  }
-  return {
-    animate: true,
-    startsNewSettle: false,
-    durationMs: Math.max(1, TRANSCRIPT_SETTLE_MS - (now - lastStartedAt)),
-  };
-}
-
-/** Named steady endpoints keep the animation tied to the existing theme roles. */
-export function transcriptSteadyColors(palette: {
-  textPrimary: string;
-  textSecondary: string;
-  quiet: string;
-  ghost: string;
-  waiting: string;
-  failed: string;
-}) {
-  return {
-    title: palette.textPrimary,
-    body: palette.textSecondary,
-    quiet: palette.quiet,
-    rowTitle: palette.textPrimary,
-    rowKind: palette.ghost,
-    rowState: {
-      settled: palette.quiet,
-      waiting: palette.waiting,
-      failed: palette.failed,
-    },
-  } as const;
-}

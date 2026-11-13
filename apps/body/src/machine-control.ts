@@ -10,6 +10,7 @@ export interface MachineRequest {
   releaseId?: string;
   agentId?: string;
   sourceGeneration?: string;
+  force?: boolean;
 }
 
 export function machineControlPath(stateRoot: string): string {
@@ -152,7 +153,9 @@ export async function requestMachine(
         }
       });
       peer.once('error', (error: NodeJS.ErrnoException) => {
-        if (!['ENOENT', 'ECONNREFUSED', 'ECONNRESET'].includes(error.code ?? '')) finish(error);
+        // A status read probes the current helper. It must return absence so
+        // connect can start a new install before waiting for convergence.
+        if (request.operation === 'status' || !['ENOENT', 'ECONNREFUSED', 'ECONNRESET'].includes(error.code ?? '')) finish(error);
       });
       peer.once('close', () => {
         if (socket === peer) socket = undefined;
@@ -165,12 +168,25 @@ export async function requestMachine(
 }
 
 /** Read the existing host adb server directly: invoking adb could start a server. */
-export function hostEmulatorSerials(connect = () => createConnection({ host: '127.0.0.1', port: 5037 })): Promise<string[]> {
+export async function hostEmulatorSerials(connect = () => createConnection({ host: '127.0.0.1', port: 5037 })): Promise<string[]> {
+  const devices = await hostAdbQuery('host:devices', connect);
+  const serials = devices.split('\n').flatMap((line) => {
+    const [serial, state] = line.trim().split(/\s+/);
+    return serial && /^emulator-\d+$/.test(serial) && state === 'device' ? [serial] : [];
+  });
+  // A transport can disappear after enumeration. Confirm each serial before offering it.
+  const ready = await Promise.all(serials.map(async serial => {
+    try { return await hostAdbQuery(`host-serial:${serial}:get-state`, connect) === 'device'; }
+    catch { return false; }
+  }));
+  return serials.filter((_, index) => ready[index]);
+}
+
+function hostAdbQuery(query: string, connect: () => ReturnType<typeof createConnection>): Promise<string> {
   return new Promise((resolve, reject) => {
     const socket = connect();
     let bytes = Buffer.alloc(0);
     socket.once('connect', () => {
-      const query = 'host:devices';
       socket.write(query.length.toString(16).padStart(4, '0') + query);
     });
     socket.on('data', (chunk: Buffer) => {
@@ -184,12 +200,8 @@ export function hostEmulatorSerials(connect = () => createConnection({ host: '12
       }
       const length = Number.parseInt(header, 16);
       if (bytes.length < 8 + length) return;
-      const devices = bytes.subarray(8, 8 + length).toString().split('\n');
       socket.destroy();
-      resolve(devices.flatMap((line) => {
-        const [serial, state] = line.trim().split(/\s+/);
-        return serial && /^emulator-\d+$/.test(serial) && state === 'device' ? [serial] : [];
-      }));
+      resolve(bytes.subarray(8, 8 + length).toString());
     });
     socket.once('error', reject);
     socket.once('close', () => reject(new Error('host adb server closed')));

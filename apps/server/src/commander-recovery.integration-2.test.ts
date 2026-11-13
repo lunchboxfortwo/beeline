@@ -31,7 +31,7 @@ it('keeps the originating corner waiting for a decision returned to its parent R
     { status: 'needs_decision', ...authority(turn), ask: 'Which endpoint should we use?', text: 'needs-decision: choose endpoint' },
     WORKER,
   );
-  const returned = (await commands(ROOM, RUBY)).find((c) => c.reason === 'report')!;
+  const returned = (await commands(opened.cornerId, RUBY)).find((c) => c.reason === 'report')!;
   await claim(returned);
   await rootFixture.daemon.execute(
     'report',
@@ -66,7 +66,8 @@ it('keeps the originating corner waiting for a decision returned to its parent R
   expect(
     (await rootFixture.db.query(`SELECT 1 FROM corner_owed WHERE corner_id=$1`, [opened.cornerId])).rowCount,
   ).toBe(0);
-  expect(await state()).toBe('idle');
+  // An unthreaded parent-Room message does not answer the worker's report.
+  expect(await state()).toBe('waiting');
   await rootFixture.phone.execute(
     'sendRoomMessage',
     { roomId: opened.cornerId, messageId: randomBytes(32).toString('hex'), text: 'Use endpoint v2' },
@@ -96,7 +97,7 @@ it('keeps DM-returned decisions indexed until answered or source membership ends
     { ...authority(turn), text: 'Reported the decision' },
     WORKER,
   );
-  const returned = (await commands(DM, RUBY)).find((c) => c.reason === 'report')!;
+  const returned = (await commands(opened.cornerId, RUBY)).find((c) => c.reason === 'report')!;
   await claim(returned);
   await rootFixture.daemon.execute(
     'report',
@@ -169,7 +170,8 @@ it('R1 carries a closed corner artifact into a successor brief and refuses priva
   await rootFixture.db.query(`UPDATE memberships SET removed_at=NULL WHERE room_id=$1 AND identity_id=$2`, [privateRoom, HUMAN]);
   const outsider = 'f'.repeat(64);
   await rootFixture.db.query(`INSERT INTO identities(id,kind,name,handle) VALUES($1,'human','Reader','reader')`, [outsider]);
-  await rootFixture.db.query(`INSERT INTO memberships(workspace_id,room_id,identity_id,role) VALUES($1,$2,$3,'member')`, [WS, ROOM, outsider]);
+  await rootFixture.db.query(`INSERT INTO memberships(workspace_id,room_id,identity_id,role)
+    VALUES($1,NULL,$3,'member'),($1,$2,$3,'member')`, [WS, ROOM, outsider]);
   await expect(tryPrivate()).rejects.toThrow('missing or unavailable in this Room');
   await rootFixture.db.query(`DELETE FROM memberships WHERE identity_id=$1`, [outsider]);
   const remoteSuccessor = await tryPrivate();
@@ -355,7 +357,7 @@ for (const delivery of ['report', 'postRoomMessage'] as const) {
     await rootFixture.daemon.execute('report', {
       ...authority(turn), status: 'done', text: 'done: design ready',
     }, WORKER);
-    const report = (await commands(DM, RUBY)).find(c => c.reason === 'report')!;
+    const report = (await commands(opened.cornerId, RUBY)).find(c => c.reason === 'report')!;
     await claim(report);
     await rootFixture.daemon.execute('postAgentAttachment', {
       ...authority(report), attachment: attachment(copy, 'design for approval'),
@@ -370,10 +372,18 @@ for (const delivery of ['report', 'postRoomMessage'] as const) {
       }, RUBY);
     }
     const visible = (await rootFixture.phone.readRoom(DM, HUMAN))!.messages.filter(m => m.attachments?.length);
-    expect(visible).toHaveLength(1);
-    expect(visible[0]!.attachments).toEqual([expect.objectContaining({
-      url: 'http://test/v1/media/' + original, name: 'owner approval',
-    })]);
+    if (delivery === 'postRoomMessage') {
+      // Closing prose of a corner report wake is the commander's reply in the corner.
+      expect(visible).toEqual([]);
+      const reply = (await rootFixture.phone.readRoom(opened.cornerId, HUMAN))!.messages
+        .filter(m => m.text === 'Here is the design');
+      expect(reply).toEqual([expect.objectContaining({ attachments: [expect.objectContaining({ url: 'http://test/v1/media/' + copy })] })]);
+    } else {
+      expect(visible).toHaveLength(1);
+      expect(visible[0]!.attachments).toEqual([expect.objectContaining({
+        url: 'http://test/v1/media/' + original, name: 'owner approval',
+      })]);
+    }
     expect((await rootFixture.db.query(`SELECT 1 FROM agent_pending_attachments WHERE request_id=$1`,
       [report.turnRequestId])).rowCount).toBe(0);
   });
@@ -392,19 +402,20 @@ it('Reproduction R-ID: supplied private report and order ids reopen their payloa
   const attachment = { url: uploaded.url, name: 'handoff.txt', mimeType: 'text/plain', size: Buffer.byteLength('Synthetic handoff') };
   await rootFixture.daemon.execute('postAgentAttachment', { ...authority(turn), attachment }, WORKER);
   const report = await rootFixture.daemon.execute('report', { ...authority(turn), status: 'done', text: 'done: evidence ready' }, WORKER);
-  expect(await read(report.id, RUBY, DM)).toMatchObject({ body: 'done: evidence ready', attachments: [expect.objectContaining({ name: 'handoff.txt' })] });
+  expect(await read(report.id, RUBY)).toMatchObject({ body: 'done: evidence ready', attachments: [expect.objectContaining({ name: 'handoff.txt' })] });
   expect(await read(report.id)).toMatchObject({ body: 'done: evidence ready' });
   // Continuations retain private payloads and expose their own command ids.
   await rootFixture.db.query(`UPDATE agent_commands SET private_payload=jsonb_set(private_payload,'{kind}','\"lifecycle\"'::jsonb) WHERE id=$1`, [report.id]);
-  expect(await read(report.id, RUBY, DM)).toMatchObject({ body: 'done: evidence ready' });
+  expect(await read(report.id, RUBY)).toMatchObject({ body: 'done: evidence ready' });
   // A current Room member who is neither sender nor recipient cannot see it.
   const outsider = 'e'.repeat(64);
   await rootFixture.db.query(`INSERT INTO identities(id,kind,name) VALUES($1,'agent','Observer') ON CONFLICT DO NOTHING`, [outsider]);
-  await rootFixture.db.query(`INSERT INTO memberships(workspace_id,room_id,identity_id,role) VALUES($1,$2,$3,'member')`, [WS, ROOM, outsider]);
+  await rootFixture.db.query(`INSERT INTO memberships(workspace_id,room_id,identity_id,role)
+    VALUES($1,NULL,$3,'member'),($1,$2,$3,'member')`, [WS, ROOM, outsider]);
   await expect(read(report.id, outsider, ROOM)).rejects.toThrow('message access denied');
   await expect(read(turn.id, outsider, ROOM)).rejects.toThrow('message access denied');
-  await rootFixture.db.query(`UPDATE memberships SET removed_at=now() WHERE room_id=$1 AND identity_id=$2`, [DM, RUBY]);
-  await expect(read(report.id, RUBY, ROOM)).rejects.toThrow('message access denied');
+  await rootFixture.db.query(`UPDATE memberships SET removed_at=now() WHERE room_id=$1 AND identity_id=$2`, [ROOM, RUBY]);
+  await expect(read(report.id, RUBY)).rejects.toThrow('access denied');
 });
 
 
@@ -746,12 +757,12 @@ it('Reproduction files-2: explicit post binds uploaded media before the turn fin
      VALUES($1,$2,'artifact',$3,'text/plain','evidence.txt',2,$4,'ready',now()+interval '24 hours')`,
     [media, RUBY, 'artifact/' + media, randomBytes(32).toString('hex')],
   );
+  // A post before the upload has no files to deliver.
+  const elsewhere = await rootFixture.daemon.execute('postCornerMessage', { ...authority(rootFixture.order), cornerId: ROOM, text: 'Work started' }, RUBY);
+  expect((await rootFixture.daemon.execute('getRoomMessage', { roomId: ROOM, messageId: elsewhere.id }, WORKER)).attachments).toHaveLength(0);
   await rootFixture.daemon.execute('postAgentAttachment', { ...authority(rootFixture.order), attachment: {
     url: 'http://test/v1/media/' + media, name: 'evidence.txt', mimeType: 'text/plain', size: 2,
   } }, RUBY);
-  // Posting elsewhere must not drain files scoped to the private current place.
-  const elsewhere = await rootFixture.daemon.execute('postCornerMessage', { ...authority(rootFixture.order), cornerId: ROOM, text: 'Work started' }, RUBY);
-  expect((await rootFixture.daemon.execute('getRoomMessage', { roomId: ROOM, messageId: elsewhere.id }, WORKER)).attachments).toHaveLength(0);
   const posted = await rootFixture.daemon.execute('postCornerMessage', { ...authority(rootFixture.order), cornerId: DM, text: 'evidence.txt attached' }, RUBY);
   const read = await rootFixture.daemon.execute('getRoomMessage', { roomId: DM, messageId: posted.id }, RUBY);
   expect(read.attachments).toEqual([expect.objectContaining({ name: 'evidence.txt', url: 'http://test/v1/media/' + media })]);

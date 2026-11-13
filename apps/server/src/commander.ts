@@ -1,6 +1,7 @@
 import { dropQueuedOrdersForStop } from './agent-command-queue.js';
 import { lockAgentCommandQueue } from './agent-command-queue.js';
 import { cornerOpeningSql, cornerOpenedFromSql } from './corner-opening.js';
+import { cornerCommanderBriefSql, cornerCommanderIdSql } from './corner-commander.js';
 import { cornerWaitingReportSql } from './corner-waiting-report.js';
 import { systemMessage } from '@beeline/api-contract/system-message-catalog';
 import { commandOwnerLiveSql } from './turn-ownership.js';
@@ -8,8 +9,8 @@ import { SYSTEM_IDENTITY_ID } from '@beeline/api-contract/system-identity';
 import { normalizeAgentAsk } from './tray-approval-ask.js';
 import { createHash, randomBytes } from 'node:crypto';
 import type { SqlDatabase } from './database.js';
-import { createAgentCommand, refuseVerdictedReviewerWake, repairReviewerCornerMembership, nextAgentDepth, type CommandRow, type PrivateCommandPayload } from './agent-command.js';
-import { resolveCurrentMemberMentions } from './message-mentions.js';
+import { createAgentCommand, hasPendingCornerReview, repairReviewerCornerMembership, nextAgentDepth, type CommandRow, type PrivateCommandPayload } from './agent-command.js';
+import { isChannelMentionToken, resolveCurrentMemberMentions, typedMentionHandles } from './message-mentions.js';
 import { cornerImplementerSql } from './corner-worker.js';
 import { CommandRefusalError } from './command-refusal.js';
 import { systemIdentityMention, systemLine } from './system-line.js';
@@ -47,17 +48,18 @@ export async function commandAddress(
   if (!/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(address))
     throw new CommandRefusalError('address requires current membership', 403);
   const row = (
-    await db.query<{ id: string; worker: string | null; parent_id: string | null }>(
-      `SELECT room.id,room.parent_id,${cornerImplementerSql('fact', 'room')} worker
+    await db.query<{ id: string; worker: string | null; parent_id: string | null; archived: boolean }>(
+      `SELECT room.id,room.parent_id,room.archived_at IS NOT NULL archived,${cornerImplementerSql('fact', 'room')} worker
      FROM rooms room LEFT JOIN corner_facts fact ON fact.corner_id=room.id
      JOIN memberships member ON member.room_id=COALESCE(room.parent_id,room.id)
        AND member.identity_id=$2 AND member.removed_at IS NULL
-     WHERE room.id=$1 AND ($3::boolean OR room.archived_at IS NULL)
+     WHERE room.id=$1
      LIMIT 1 FOR SHARE OF room`,
-      [address, agentId, allowArchived],
+      [address, agentId],
     )
   ).rows[0];
   if (!row) throw new CommandRefusalError('address requires current membership', 403);
+  if (row.archived && !allowArchived) throw new CommandRefusalError('address is archived', 409);
   return row;
 }
 
@@ -69,7 +71,7 @@ export async function assertCornerCommandTarget(
     `SELECT 1 FROM rooms source WHERE source.id=$1 AND source.parent_id IS NOT NULL
        AND (EXISTS (SELECT 1 FROM rooms target WHERE target.id::text=lower($2) AND target.direct_participants IS NOT NULL)
          OR EXISTS (SELECT 1 FROM identities agent WHERE agent.kind='agent'
-           AND (agent.id=$2 OR lower(agent.handle)=lower(ltrim($2,'@'))))) LIMIT 1`,
+           AND (agent.id=$2 OR lower(beeline_workspace_handle(agent.id,source.workspace_id))=lower(ltrim($2,'@'))))) LIMIT 1`,
     [sourceRoomId, targetRoomId],
   );
   if (dm.rowCount)
@@ -125,7 +127,7 @@ export async function sendOrder(
         `SELECT identity.id FROM room_access member JOIN identities identity
            ON identity.id=member.identity_id AND identity.kind='agent'
          WHERE member.room_id=$1 AND member.removed_at IS NULL
-           AND (identity.id=$2 OR lower(identity.handle)=$3)`, [address, named, named.toLowerCase()],
+           AND (identity.id=$2 OR lower(beeline_workspace_handle(identity.id,member.workspace_id))=$3)`, [address, named, named.toLowerCase()],
       )).rows[0];
       if (!member || !await repairReviewerCornerMembership(db, address, member.id))
         throw new CommandRefusalError('order agent must be an agent member of this corner or its parent Room', 403);
@@ -137,7 +139,7 @@ export async function sendOrder(
     ).rows[0]?.direct;
     const agents = (
       await db.query<{ id: string; handle: string | null }>(
-        `SELECT identity.id,lower(identity.handle) handle FROM room_access member JOIN identities identity
+        `SELECT identity.id,lower(beeline_workspace_handle(identity.id,member.workspace_id)) handle FROM room_access member JOIN identities identity
          ON identity.id=member.identity_id AND identity.kind='agent'
        WHERE member.room_id=$1 AND member.removed_at IS NULL AND (identity.id<>$2 OR $3::boolean)`,
         [address, agentId, Boolean(named)],
@@ -206,7 +208,7 @@ export async function stopCommandedTurn(
   if (agent !== undefined && !named) throw new CommandRefusalError('stop agent must name one agent', 400);
   const target = await commandAddress(db, address, agentId);
   const candidates = (await db.query<{ id: string; handle: string | null; name: string }>(
-    `SELECT identity.id,identity.handle,identity.name FROM room_access member JOIN identities identity
+    `SELECT identity.id,beeline_workspace_handle(identity.id,member.workspace_id) handle,identity.name FROM room_access member JOIN identities identity
        ON identity.id=member.identity_id AND identity.kind='agent'
      WHERE member.room_id=$1 AND member.removed_at IS NULL AND identity.id<>$2`,
     [address, agentId])).rows;
@@ -235,7 +237,7 @@ export async function stopCommandedTurn(
   const order=await commandOrder(db,running);
   const ordered=order.private_payload?.kind==='order'&&order.private_payload.authorId===agentId;
   const commandsCorner = !ordered && Boolean(target.parent_id) && Boolean((await db.query(
-    'SELECT 1 FROM rooms WHERE id=$1 AND created_by=$2', [address, agentId])).rowCount);
+    `SELECT 1 FROM rooms corner WHERE id=$1 AND ${cornerCommanderIdSql('corner')}=$2`, [address, agentId])).rowCount);
   if (!ordered && !commandsCorner)
     throw new CommandRefusalError(
       'stop refused: you did not order this turn and you do not command this corner; nothing was stopped', 403);
@@ -263,17 +265,17 @@ export async function stopCommandedTurn(
 }
 
 /**
- * One collapsed record card per order or report in a corner transcript. The
- * line names only sender, receiver and status; the full text stays in the
- * card for people to expand. It has no event kind, so it wakes nobody, and
- * its card type keeps it out of pushes and unread counts.
+ * One record card per order or report in a corner transcript. Recipient kind
+ * lets clients show person-facing text immediately and collapse agent traffic.
+ * It has no event kind, so it wakes nobody, and its card type keeps it out of
+ * pushes and unread counts.
  */
 async function recordAgentCommandCard(db: SqlDatabase, input: {
   id: string; cornerId: string; kind: 'order' | 'report'; authorId: string; recipientId: string;
   text: string; status?: string; attachments?: PrivateCommandPayload['attachments'];
 }) {
-  const recipient = (await db.query<{ name: string; handle: string | null }>(
-    'SELECT name,handle FROM identities WHERE id=$1', [input.recipientId])).rows[0];
+  const recipient = (await db.query<{ name: string; handle: string | null; kind: 'agent' | 'human' }>(
+    'SELECT name,kind,beeline_room_handle(id,$2) handle FROM identities WHERE id=$1', [input.recipientId,input.cornerId])).rows[0];
   const card = await systemLine(db, {
     id: createHash('sha256').update(`agent-command-card:${input.id}`).digest('hex'),
     roomId: input.cornerId,
@@ -286,7 +288,7 @@ async function recordAgentCommandCard(db: SqlDatabase, input: {
     cardType: AGENT_COMMAND_CARD_TYPE,
     card: {
       kind: input.kind,
-      recipient: { id: input.recipientId, name: recipient?.name ?? '', ...(recipient?.handle ? { handle: recipient.handle } : {}) },
+      recipient: { id: input.recipientId, name: recipient?.name ?? '', ...(recipient ? { kind: recipient.kind } : {}), ...(recipient?.handle ? { handle: recipient.handle } : {}) },
       ...(input.status ? { status: input.status } : {}),
       text: input.text,
     },
@@ -302,19 +304,23 @@ export const AGENT_COMMAND_CARD_TYPE = 'agent-command';
  * Expressions refer to the caller's question row, not to later replacement orders.
  */
 export function commanderChainSql(corner: string, asker: string, askedAt: string): string {
-  return `WITH RECURSIVE assignment_chain AS (
+  return `WITH RECURSIVE approved_brief AS (${cornerCommanderBriefSql(`${corner}.id`, askedAt)}), assignment_chain AS (
     SELECT seed.* FROM agent_commands seed WHERE seed.id IN (
       (SELECT assigned.id FROM agent_commands assigned
         WHERE assigned.room_id=${corner}.id AND assigned.agent_id=${asker}
           AND assigned.created_at<=${askedAt}
+          AND (NOT EXISTS(SELECT 1 FROM approved_brief) OR assigned.created_at>=(SELECT created_at FROM approved_brief))
           AND (assigned.private_payload->>'kind'='order' OR assigned.reason='human_tag')
         ORDER BY assigned.created_at DESC,assigned.id DESC LIMIT 1),
-      (SELECT opened.id FROM agent_commands opened WHERE opened.room_id=${corner}.id
-        AND opened.reason='corner_objective' ORDER BY opened.created_at,opened.id LIMIT 1))
+      COALESCE((SELECT approval_basis->>'commanderCommandId' FROM approved_brief),
+        (SELECT opened.id FROM agent_commands opened WHERE opened.room_id=${corner}.id
+          AND opened.reason='corner_objective' AND NOT EXISTS(SELECT 1 FROM approved_brief)
+          ORDER BY opened.created_at,opened.id LIMIT 1)))
     UNION
     SELECT parent.* FROM agent_commands parent JOIN assignment_chain child ON parent.id=child.parent_command_id
   ), commanders AS (
-    SELECT ${corner}.created_by id
+    SELECT COALESCE((SELECT author_id FROM approved_brief),${corner}.created_by) id
+    UNION SELECT approval_basis->>'approvedBy' FROM approved_brief
     UNION SELECT assigned.private_payload->>'authorId' FROM assignment_chain assigned
       WHERE assigned.private_payload->>'kind'='order'
     UNION SELECT source.author_id FROM assignment_chain assigned
@@ -337,30 +343,42 @@ export async function reportToCommander(
   text: string,
   command?: CommandRow,
   reportId = randomBytes(32).toString('hex'),
-  options: { automatic?: boolean; agentOnly?: boolean; ask?: string; attachments?: PrivateCommandPayload['attachments']; wakeInCorner?: boolean; idleSince?: string } = {},
+  options: { orderIssuer?: boolean; automatic?: boolean; agentOnly?: boolean; ask?: string; attachments?: PrivateCommandPayload['attachments']; idleSince?: string } = {},
 ): Promise<{ id: string; createdAt: number; delivered?: boolean; receipt?: string; skipped?: boolean }> {
-  if ((!options.automatic && !/^(done|blocked|needs-decision|failed):\s*\S/.test(text)) || !text.trim() || text.length > 16_000)
+  // Server-generated failure diagnostics may include long child argv/stderr.
+  // The manual report limit must not roll back their terminal receipt.
+  if ((!options.automatic && (!/^(done|blocked|needs-decision|failed):\s*\S/.test(text) || text.length > 16_000)) || !text.trim())
     throw new CommandRefusalError(
       'report must begin done:, blocked:, needs-decision: or failed:',
       400,
     );
   const ask = options.ask === undefined ? undefined : normalizeAgentAsk(options.ask);
   const strict = Boolean(command) && !options.automatic;
-  const { recipient, returnRoom, parent, origin, incoming } = await commanderReportAddress(db, roomId, command);
+  const { recipient, returnRoom, parent, origin, incoming } = await commanderReportAddress(db, roomId, command, options.orderIssuer);
   // Closed work has no outstanding request. Do not move its stale reports to
   // an ancestor Room merely because that Room still exists.
   if (origin && (await db.query(`SELECT 1 FROM rooms corner
     WHERE corner.id=$1 AND corner.archived_at IS NOT NULL`, [origin])).rowCount)
-    return { id: reportId, createdAt: Math.floor(Date.now() / 1000), delivered: true, skipped: true };
+    return { id: reportId, createdAt: Math.floor(Date.now() / 1000), delivered: false, skipped: true, receipt: 'Report not delivered: the source corner is closed.' };
   if (!recipient || !returnRoom) {
     if (strict) throw new CommandRefusalError('this order has no commander return address', 409);
     console.error(`[commander] ${roomId}: cannot route report without recorded opening provenance`);
     return { id: reportId, createdAt: Math.floor(Date.now() / 1000), delivered: false };
   }
-  const wakeRoom = options.automatic && options.agentOnly && options.wakeInCorner && origin &&
-    (await db.query('SELECT 1 FROM room_access WHERE room_id=$1 AND identity_id=$2 AND removed_at IS NULL',
-      [origin,recipient])).rowCount ? origin : returnRoom;
   const recipientKind=(await db.query<{kind:string}>('SELECT kind FROM identities WHERE id=$1',[recipient])).rows[0]?.kind;
+  // A report from a thread wakes its agent commander inside that thread, so
+  // the reaction stays with the thread instead of the chat it was opened from.
+  // Effective access counts inherited parent-roster membership; callers on the
+  // raw database need the named view rather than query rewriting. A connected
+  // app has no helper turn in the thread; it keeps the session it joined. A
+  // relay from a thread the commander itself implements keeps the return route.
+  const wakeRoom = recipientKind === 'agent' && origin &&
+    (await db.query(`SELECT 1 FROM room_access access JOIN rooms corner ON corner.id=access.room_id
+      LEFT JOIN corner_facts fact ON fact.corner_id=corner.id
+      WHERE access.room_id=$1 AND access.identity_id=$2 AND access.removed_at IS NULL
+      AND NOT EXISTS(SELECT 1 FROM rooms_mcp_members app WHERE app.member_id=$2)
+      AND ${cornerImplementerSql('fact', 'corner')} IS DISTINCT FROM $2`,
+      [origin,recipient])).rowCount ? origin : returnRoom;
   if(recipientKind==='agent')
     await lockAgentCommandQueue(db,[{roomId:returnRoom,agentId:recipient},{roomId:wakeRoom,agentId:recipient}]);
   const member = (
@@ -407,13 +425,6 @@ export async function reportToCommander(
     : [];
   if (member.kind === 'agent') {
     const delivery = await db.transaction(async (db) => {
-      // Automatic agent-only system status is private coordination. Only the
-      // idle alert opts into waking the commander inside its corner, so its
-      // reply stays with the corner's members instead of a parent Room
-      // strangers read; every other report keeps the caller's return route.
-      // effective corner access: inherited parent-roster membership counts, and
-      // this caller (refreshCornerAttention) runs on the raw database, so name
-      // the effective view instead of relying on query rewriting.
       // System attention reports describe the worker's own work. Preserve that
       // source separately from the visible System author so shared admission
       // cannot wake a worker that is also its own commander.
@@ -422,6 +433,10 @@ export async function reportToCommander(
             FROM rooms corner JOIN corner_facts fact ON fact.corner_id=corner.id WHERE corner.id=$1`,
           [origin])).rows[0]?.agent_id
         : undefined;
+      // An approved brief can make the implementer its own commander. Its
+      // automatic idle notice must not dispatch work back to itself.
+      if (sourceAgentId === recipient)
+        return { id: reportId, createdAt: Math.floor(Date.now() / 1000), delivered: true, skipped: true };
       const queued = await createAgentCommand(db, {
         id: reportId,
         roomId: wakeRoom,
@@ -446,9 +461,9 @@ export async function reportToCommander(
       });
       if (!queued) {
         const head = typeof command?.review_context?.headSha === 'string' ? command.review_context.headSha : undefined;
-        // The verdict was routed back to the reviewer who already has this head.
+        // The report was routed back to a reviewer with a pending request.
         // Skip the wake instead of failing the report.
-        if (head && await refuseVerdictedReviewerWake(db, wakeRoom, recipient, head))
+        if (head && await hasPendingCornerReview(db, wakeRoom, recipient, head))
           return { id: reportId, createdAt: Math.floor(Date.now() / 1000), delivered: true, skipped: true };
         throw new CommandRefusalError('commander could not receive report', 409);
       }
@@ -456,6 +471,15 @@ export async function reportToCommander(
     });
     if (delivery) return delivery;
   } else {
+    // Closing prose after an explicit post to this same chat is turn activity.
+    // Delivering it as a report would post the same answer to the person twice.
+    const posted = options.automatic && command?.private_payload?.publicPostId &&
+      command.private_payload.publicPostGenerationId === command.generation_id
+      ? (await db.query<{ id: string }>(`SELECT id FROM messages WHERE id=$1 AND room_id=$2 AND deleted_at IS NULL`,
+        [command.private_payload.publicPostId, returnRoom])).rows[0]
+      : undefined;
+    if (posted)
+      return { id: posted.id, createdAt: Math.floor(Date.now() / 1000), delivered: true, skipped: true };
     // The existing attention index follows this transport provenance; no public relay is created.
     if (origin && incoming?.private_payload)
       await db.query(
@@ -500,41 +524,61 @@ export async function reportToCommander(
     receipt: member.kind === 'agent' ? 'Report queued privately; not confirmation of execution.' : 'Report stored and visible.' };
 }
 
-/** Human conversation replies stay here; escalations use the opening return place. */
-export async function refuseTagPastCommander(
+/**
+ * Tags that used to refuse the whole post. A typed person above the commander
+ * comes out, and @channel comes out when it would reach such a person, so the
+ * rest can land. The commander and the person who asked this turn stay.
+ * Unknown handles and @system stay: a system tag files feedback.
+ */
+export async function mentionHandlesToDrop(
   db: SqlDatabase, roomId: string, agentId: string, text: string, command?: CommandRow,
-): Promise<void> {
-  if (!(await db.query('SELECT 1 FROM rooms WHERE id=$1 AND parent_id IS NOT NULL', [roomId])).rowCount) return;
-  const people = (await resolveCurrentMemberMentions(db, roomId, text, agentId)).filter(m => m.kind === 'human');
-  if (!people.length) return;
+): Promise<string[]> {
+  const typed = [...typedMentionHandles(text)];
+  if (!typed.length) return [];
+  if (!(await db.query('SELECT 1 FROM rooms WHERE id=$1 AND parent_id IS NOT NULL', [roomId])).rowCount)
+    return [];
+  const resolved = await resolveCurrentMemberMentions(db, roomId, text, agentId);
+  const people = resolved.filter((member) => member.kind === 'human');
   const { recipient, returnRoom } = await commanderReportAddress(db, roomId, command);
-  // A later person's question permits a normal reply to that person here.
-  // It never selects the recipient of report().
   const reply = command?.room_id === roomId && command.source_message_id
     ? (await db.query<{ author_id: string }>(`SELECT author_id FROM messages
         WHERE id=$1 AND room_id=$2 AND presentation='message' AND system_event IS NULL AND deleted_at IS NULL`,
       [command.source_message_id, roomId])).rows[0]?.author_id : undefined;
-  const skipped = people.filter(person => person.id !== reply && !(person.id === recipient && returnRoom === roomId));
-  if (!skipped.length) return;
-  const commander = recipient && returnRoom ? (await db.query<{ handle: string | null; name: string; place: string }>(
-    `SELECT identity.handle,identity.name,room.name place FROM identities identity, rooms room
-     WHERE identity.id=$1 AND room.id=$2`, [recipient, returnRoom])).rows[0] : undefined;
-  const who = commander ? `@${(commander.handle ?? commander.name).replace(/^@/, '')} in ${commander.place}` : 'whoever opened this corner';
-  throw new CommandRefusalError(
-    `post refused: ${skipped.map(person => `@${person.handle}`).join(', ')} is not your direct commander at this place. ` +
-    `Your commander is ${who}. Use report(needs-decision:) and they decide whether to ask further up.`, 403);
+  const skipped = people.filter((person) => person.id !== reply && !(person.id === recipient && returnRoom === roomId));
+  if (!skipped.length) return [];
+  const typedLower = new Set(typed.map((handle) => handle.toLowerCase()));
+  const dropped = new Set<string>();
+  for (const person of skipped) {
+    if (typedLower.has(person.handle.toLowerCase())) dropped.add(person.handle);
+  }
+  if (typed.some((handle) => isChannelMentionToken(handle))) dropped.add('channel');
+  return [...dropped];
 }
 
-/** The opening order fixes a corner's commander and return place for its lifetime. */
+/** Approved revisions replace the opening route without changing its provenance. */
 async function cornerReportOpening(db: SqlDatabase, roomId: string) {
-  return (await db.query<{ created_by: string; parent_id: string; opening: CommandRow | null }>(
-    `SELECT room.created_by,room.parent_id,row_to_json(opening) opening FROM rooms room
+  const corner = (await db.query<{ created_by: string; parent_id: string; opening: CommandRow | null;
+    handover: { revision: number; author_id: string; source_room_id: string; approval_basis: {
+      sourceMessageId: string; commanderReturnRoomId?: string; commanderCommandId?: string;
+    } } | null }>(
+    `SELECT room.created_by,room.parent_id,row_to_json(opening) opening,row_to_json(handover) handover FROM rooms room
      LEFT JOIN LATERAL (${cornerOpeningSql('room.id')}) opening ON true
+     LEFT JOIN LATERAL (${cornerCommanderBriefSql('room.id')}) handover ON true
      WHERE room.id=$1 AND room.parent_id IS NOT NULL`, [roomId])).rows[0];
+  if (corner?.handover) {
+    const revision = corner.handover;
+    corner.opening = { ...corner.opening, room_id: roomId, reason: 'corner_objective',
+      parent_command_id: revision.approval_basis.commanderCommandId ?? null,
+      root_source_message_id: revision.approval_basis.sourceMessageId,
+      private_payload: { kind: 'order', text: '', authorId: revision.author_id,
+        fromRoomId: revision.approval_basis.commanderReturnRoomId ?? revision.source_room_id },
+    } as CommandRow;
+  }
+  return corner;
 }
 
 /** The recorded return route shared by lifecycle reports and commander approvals. */
-export async function commanderReportAddress(db: SqlDatabase, roomId: string, command?: CommandRow) {
+export async function commanderReportAddress(db: SqlDatabase, roomId: string, command?: CommandRow, orderIssuer = false) {
   const reporter = command?.agent_id;
   const corner = await cornerReportOpening(db, roomId);
   const incoming = command ?? corner?.opening ?? undefined;
@@ -553,8 +597,15 @@ export async function commanderReportAddress(db: SqlDatabase, roomId: string, co
   ).rows[0]?.id;
   let humanOpening = corner && !corner.opening ? corner : undefined;
   let openingRoot: string | undefined;
-  if (corner) {
-    command = corner.opening ?? undefined;
+  if (corner && !(orderIssuer && command?.private_payload?.kind === 'order')) {
+    // Orders accepted before the handover keep their original issuer and return address. New
+    // lifecycle reports and assignments use the approved commander instead.
+    const beforeHandover = corner.handover && command?.private_payload?.kind === 'order' &&
+      (await db.query(`SELECT 1 FROM corner_brief_revisions revision JOIN agent_commands assigned ON assigned.id=$2
+        WHERE revision.corner_id=$1 AND revision.revision=$3 AND revision.created_at>assigned.created_at
+          AND revision.revision>1 ORDER BY revision.revision DESC LIMIT 1`,
+      [roomId, command.id, corner.handover.revision])).rowCount;
+    command = beforeHandover ? await commandOrder(db, command!) : corner.opening ?? undefined;
     // The opener inspecting its own corner escalates through the order from
     // which it opened it. A nested worker still reports only one step up.
     if (command && reporter && command.private_payload?.authorId === reporter) {
@@ -564,7 +615,7 @@ export async function commanderReportAddress(db: SqlDatabase, roomId: string, co
         : undefined;
       const openedFrom = opening.private_payload!.fromRoomId ?? command?.room_id;
       const sourceCorner = openedFrom ? await cornerReportOpening(db, openedFrom) : undefined;
-      if (sourceCorner) {
+      if (sourceCorner && openedFrom !== roomId) {
         humanOpening = !sourceCorner.opening ? sourceCorner : undefined;
         command = sourceCorner.opening ?? undefined;
       } else {

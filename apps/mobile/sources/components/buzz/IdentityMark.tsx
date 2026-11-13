@@ -1,6 +1,7 @@
 import React, { useEffect, useState } from 'react';
-import { Image, Platform, StyleSheet, View } from 'react-native';
-import Svg, { G, Path, Rect, SvgUri } from 'react-native-svg';
+import { Image, Platform } from 'react-native';
+import { YStack, useTheme, useThemeName } from 'tamagui';
+import Svg, { G, Path, Rect, SvgUri, Text as SvgText } from 'react-native-svg';
 import { isConnectorLogoUrl } from '@beeline/api-contract/phone';
 import {
   ALIVE_RING_PAD,
@@ -14,11 +15,12 @@ import {
   type IdentityPalette,
 } from '@/buzz/identity-mark';
 import { resolveFace } from '@/buzz/faces';
-import { PERSON_PLATE, agentFaceLayers, personFaceLayers } from '@/buzz/faces/face-tile';
+import { agentFaceLayers, personMarkInks } from '@/buzz/faces/face-tile';
 import { SYSTEM_IDENTITY_PUBKEY } from '@/buzz/system-identity';
 import beelineMark from '@/buzz/beeline-mark.json';
+import brand from '@/buzz/brand.json';
+import { DrawnType, Filled } from '@/ui/grammar';
 import { HullLivePulse } from './MonoHull';
-import { useUnistyles } from 'react-native-unistyles';
 
 type IdentityMarkBaseProps = {
   /** The identity's stable seed: a pubkey for an agent or a person, the
@@ -29,6 +31,8 @@ type IdentityMarkBaseProps = {
    *  "Index rows" — selection reads three redundant ways, none a box). */
   selected?: boolean;
   name?: string;
+  /** A person's handle: the initial's source when there is no display name. */
+  handle?: string;
   avatarUrl?: string;
   testID?: string;
 };
@@ -62,10 +66,10 @@ export type IdentityMarkProps = AgentIdentityMarkProps | NonAgentIdentityMarkPro
 
 // ── The face tile ────────────────────────────────────────────────────────────
 //
-// People and agents are Speakeasy's twelve creatures (`buzz/faces`). The tile
-// is a square plate at the house radius; the plate's polarity is the class:
-// a coloured creature on ink is a person, an ink creature on colour is an
-// agent. The gold alive ring is drawn around the plate.
+// Agents are Speakeasy's twelve creatures (`buzz/faces`) on a plate in their
+// hue. A person is their first initial in their hue on the person plate the
+// animals use, framed the same way (build spec → Identity marks). The gold
+// alive ring is drawn around the plate.
 
 /** The one box radius in the product (`groknight.radius`). */
 const FACE_PLATE_RADIUS = 3;
@@ -125,6 +129,23 @@ function leftHalfPath(): string {
     `M${right} ${top}H${left + r}A${r} ${r} 0 0 0 ${left} ${top + r}` +
     `V${bottom - r}A${r} ${r} 0 0 0 ${left + r} ${bottom}H${right}Z`
   );
+}
+
+/** A person's generated mark: the first letter of the display name, else the handle. */
+export function personInitial(name?: string, handle?: string): string {
+  const source = (name?.trim() || handle?.trim() || '').replace(/^[@#]+/, '').trim();
+  return (Array.from(source)[0] ?? '?').toUpperCase();
+}
+
+/** An uploaded photo or the sign-in provider photo stored on this identity. */
+export function isPersonPictureUrl(avatarUrl?: string): boolean {
+  if (!avatarUrl) return false;
+  if (/\/v1\/person-avatars\/[0-9a-f-]{36}$/i.test(avatarUrl)) return true;
+  try {
+    const url = new URL(avatarUrl);
+    return url.protocol === 'https:' && (url.hostname === 'avatars.githubusercontent.com' ||
+      url.hostname.endsWith('.googleusercontent.com'));
+  } catch { return false; }
 }
 
 function cellFill(cell: CypherCell, palette: IdentityPalette): string {
@@ -211,23 +232,25 @@ function WorkspacePlate({
  * correctly.
  */
 export const IdentityMark = React.memo(function IdentityMark(props: IdentityMarkProps) {
-  const { seed, kind, size = 40, selected = false, name, avatarUrl, testID } = props;
+  const { seed, kind, size = 40, selected = false, name, handle, avatarUrl, testID } = props;
   // Defensive, not just typed: even a value smuggled past the union at runtime
   // (an untyped caller, a stale bundle) can only ever light gold on an agent.
   const alive = props.kind === 'agent' ? Boolean(props.alive) : false;
   const live = kind === 'agent' && alive;
-  const { theme } = useUnistyles();
-  const groknight = theme.buzz;
+  const theme = useTheme();
+  const themeName = useThemeName();
+  const dark = themeName.startsWith('dark');
+  const stone = /^(dark|light)_stone(_|$)/.test(themeName);
   const [failedAvatar, setFailedAvatar] = useState<string | null>(null);
-  // Connector identities are fixed server-owned speakers, not people opting
-  // into profile photos. Their logo URL is the identity mark itself, so this
-  // narrow lane does not weaken the product-wide no-photo rule for humans.
+  // Connector speakers use their server-owned SVG marks rather than a person's photo.
   const showConnectorLogo =
     kind === 'human' && isConnectorLogoUrl(avatarUrl) && failedAvatar !== avatarUrl;
-  // Workspace pictures are the sole photo exception. Human and agent relay
-  // photos stay inert even when an untyped/stale caller supplies avatarUrl.
+  // The server keeps uploaded photos ahead of stored sign-in provider photos.
+  // Both fill the same identity tile; a missing or failed image uses the initial.
   const showGeneratedAvatar =
     kind === 'agent' && Boolean(isGeneratedAgentAvatarUrl(avatarUrl) && failedAvatar !== avatarUrl);
+  const showPersonPicture =
+    kind === 'human' && isPersonPictureUrl(avatarUrl) && failedAvatar !== avatarUrl;
   const showRelayAvatar = kind === 'workspace' && Boolean(avatarUrl && failedAvatar !== avatarUrl);
 
   useEffect(() => setFailedAvatar(null), [avatarUrl]);
@@ -236,9 +259,12 @@ export const IdentityMark = React.memo(function IdentityMark(props: IdentityMark
 
   if (kind === 'human' && seed === SYSTEM_IDENTITY_PUBKEY) {
     return (
-      <View
+      <YStack
         accessibilityLabel="System, Beeline logo"
-        style={[styles.frame, { width: size, height: size }]}
+        alignItems="center"
+        justifyContent="center"
+        width={size}
+        height={size}
         testID={testID ?? 'identity-system-logo'}
       >
         <Svg
@@ -258,40 +284,41 @@ export const IdentityMark = React.memo(function IdentityMark(props: IdentityMark
             <Path
               d={beelineMark.path}
               fillRule={beelineMark.fillRule as 'evenodd' | 'nonzero'}
-              fill={groknight.brandMark}
+              fill={brand.mark}
             />
           </G>
         </Svg>
-      </View>
+      </YStack>
     );
   }
 
   if (kind === 'workspace') {
     return (
-      <View
-        accessibilityLabel={label}
-        style={[styles.frame, { width: size, height: size }]}
-        testID={testID}
-      >
+      <YStack accessibilityLabel={label} alignItems="center" justifyContent="center" width={size} height={size} testID={testID}>
         {showRelayAvatar ? (
-          <Image
+          <Filled
+            view={Image}
             onError={() => setFailedAvatar(avatarUrl ?? null)}
             resizeMode="cover"
             source={{ uri: avatarUrl! }}
-            style={styles.image}
           />
         ) : (
           <WorkspacePlate seed={seed} size={size} selected={selected} />
         )}
-      </View>
+      </YStack>
     );
   }
 
   if (showConnectorLogo) {
     return (
-      <View
+      <YStack
         accessibilityLabel={label}
-        style={[styles.frame, styles.plate, { width: size, height: size }]}
+        alignItems="center"
+        justifyContent="center"
+        borderRadius="sm"
+        overflow="hidden"
+        width={size}
+        height={size}
         testID={testID}
       >
         <SvgUri
@@ -301,42 +328,85 @@ export const IdentityMark = React.memo(function IdentityMark(props: IdentityMark
           height={size}
           testID="identity-connector-logo"
         />
-      </View>
+      </YStack>
     );
   }
 
   const face = resolveFace(props.face, seed);
   const palette = identityPalette(seed, kind);
-  const mode = groknight.dark ? 'dark' : 'light';
+  const mode = dark ? 'dark' : 'light';
   // Plate polarity IS the class read: ink plate under a coloured person, hue
   // plate under an ink agent.
-  const plate = kind === 'agent' ? palette.mid : PERSON_PLATE[mode];
+  const personInks = personMarkInks(mode, stone ? 'stone' : 'brass');
+  const plate = kind === 'agent' ? palette.mid : personInks.plate;
   const ringSide = size + ALIVE_RING_PAD * 2;
 
-  return (
-    <View
-      accessibilityLabel={label}
-      style={[styles.frame, { width: size, height: size }]}
-      testID={testID}
-    >
-      <View
-        style={[styles.plate, { width: size, height: size, backgroundColor: plate }]}
-        testID="identity-face-plate"
+  if (kind === 'human') {
+    // One image named once: the letter is SVG text, so the tile is the image
+    // and its label is what a screen reader hears.
+    return (
+      <YStack
+        accessibilityLabel={label}
+        accessibilityRole="image"
+        accessible
+        alignItems="center"
+        justifyContent="center"
+        width={size}
+        height={size}
+        testID={testID}
       >
+        <YStack borderRadius="sm" overflow="hidden" width={size} height={size} testID="identity-face-plate">
+          {showPersonPicture ? (
+            <>
+              <PlateFill size={size} fill={plate} />
+              <Filled
+                view={Image}
+                source={{ uri: avatarUrl! }}
+                resizeMode="cover"
+                onError={() => setFailedAvatar(avatarUrl ?? null)}
+                testID="identity-person-picture"
+              />
+            </>
+          ) : (
+            // The initial in the person's hue; on the cream plate it carries
+            // the animals' Ink contrast edge, because the hue alone is too faint.
+            <Svg width={size} height={size} viewBox="0 0 100 100" testID="identity-person-initial">
+              <Rect width={100} height={100} fill={personInks.plate} />
+              {mode === 'light' ? (
+                <DrawnType view={SvgText} v="heading" size={56} x={50} y={69} textAnchor="middle"
+                  fill={personInks.outline} stroke={personInks.outline} strokeWidth={5} strokeLinejoin="round">
+                  {personInitial(name, handle)}
+                </DrawnType>
+              ) : null}
+              <DrawnType view={SvgText} v="heading" size={56} x={50} y={69} textAnchor="middle" fill={palette.mid}>
+                {personInitial(name, handle)}
+              </DrawnType>
+            </Svg>
+          )}
+        </YStack>
+      </YStack>
+    );
+  }
+
+  return (
+    <YStack accessibilityLabel={label} alignItems="center" justifyContent="center" width={size} height={size} testID={testID}>
+      <YStack borderRadius="sm" overflow="hidden" width={size} height={size} testID="identity-face-plate">
+        {/* The plate in the agent's hue, under its portrait or creature. */}
+        <PlateFill size={size} fill={plate} />
         {showGeneratedAvatar ? (
-          <Image
+          <Filled
+            view={Image}
             source={{ uri: avatarUrl! }}
             resizeMode="cover"
-            style={styles.image}
             onError={() => setFailedAvatar(avatarUrl ?? null)}
             testID="generated-agent-avatar"
           />
         ) : (
           <Svg width={size} height={size} viewBox="0 0 100 100">
-            {kind === 'agent' ? agentFaceLayers(face) : personFaceLayers(face, palette.mid, mode)}
+            {agentFaceLayers(face)}
           </Svg>
         )}
-      </View>
+      </YStack>
 
       {/*
         Gold means one thing product-wide: an agent is working. It is drawn
@@ -347,7 +417,14 @@ export const IdentityMark = React.memo(function IdentityMark(props: IdentityMark
         quiet row pays for no animation at all.
       */}
       {live && (
-        <HullLivePulse style={styles.aliveRing}>
+        <YStack
+          position="absolute"
+          left={-ALIVE_RING_PAD}
+          top={-ALIVE_RING_PAD}
+          right={-ALIVE_RING_PAD}
+          bottom={-ALIVE_RING_PAD}
+        >
+        <HullLivePulse>
           <Svg width={ringSide} height={ringSide} viewBox={`0 0 ${ringSide} ${ringSide}`}>
             <Rect
               x={2}
@@ -356,7 +433,7 @@ export const IdentityMark = React.memo(function IdentityMark(props: IdentityMark
               height={ringSide - 4}
               rx={FACE_PLATE_RADIUS + 2}
               fill="none"
-              stroke={groknight.accent}
+              stroke={theme.needsYou?.val}
               strokeWidth={4}
               opacity={0.14}
             />
@@ -367,28 +444,24 @@ export const IdentityMark = React.memo(function IdentityMark(props: IdentityMark
               height={ringSide - 4}
               rx={FACE_PLATE_RADIUS + 2}
               fill="none"
-              stroke={groknight.accent}
+              stroke={theme.needsYou?.val}
               strokeWidth={1.5}
             />
           </Svg>
         </HullLivePulse>
+        </YStack>
       )}
-    </View>
+    </YStack>
   );
 });
 
-const styles = StyleSheet.create({
-  // No border, no fill, no radius on the frame itself: for a Workspace the
-  // plate's own silhouette is the shape; for a face the tile plate below is
-  // the one box, at the house radius.
-  frame: { alignItems: 'center', justifyContent: 'center' },
-  plate: { borderRadius: FACE_PLATE_RADIUS, overflow: 'hidden' },
-  image: { width: '100%', height: '100%' },
-  aliveRing: {
-    position: 'absolute',
-    left: -ALIVE_RING_PAD,
-    top: -ALIVE_RING_PAD,
-    right: -ALIVE_RING_PAD,
-    bottom: -ALIVE_RING_PAD,
-  },
-});
+/** The tile's plate colour, drawn as the layer under its picture or creature. */
+function PlateFill({ size, fill }: { size: number; fill: string }) {
+  return (
+    <YStack position="absolute" top={0} left={0}>
+      <Svg width={size} height={size} viewBox="0 0 100 100">
+        <Rect width={100} height={100} fill={fill} />
+      </Svg>
+    </YStack>
+  );
+}

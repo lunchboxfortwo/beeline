@@ -1,3 +1,4 @@
+import { COMMAND_SECRET_NAME } from '@beeline/api-contract/agent-grants';
 import { HOST_EMULATOR_RULE } from './host-emulator.js';
 import { ARTIFACT_MIME_TYPES, INSTITUTIONAL_HISTORY_QUERY_SCHEMA, INSTITUTIONAL_SEARCH_QUERY_MAX_CHARACTERS, INSTITUTIONAL_HISTORY_RESULT_MIN, INSTITUTIONAL_HISTORY_RESULT_MAX } from '@beeline/api-contract/daemon';
 import { ToolDefinition } from './minimal-tool-surface.js';
@@ -6,7 +7,7 @@ import { ToolDefinition } from './minimal-tool-surface.js';
 export const ORDINARY_TOOLS: ToolDefinition[] = [
   {
     "name": "read",
-    "description": "Discover with facet addresses; read bounded messages with facet messages, address and cursor. Other facets use messageId, attachmentId or slug. attachmentId alone works for a file the caller can see. Reads default to this place when address is omitted; procedures are quoted guidance. Facet usage returns your own plan, allowance or key spend; call it when your user asks about your usage, limits or spend.",
+    "description": "Discover with facet addresses; read bounded messages with facet messages, address and cursor. Other facets use messageId, attachmentId or slug. attachmentId alone works for a file the caller can see. Message reads default to newest first. Reads default to this place when address is omitted; procedures are quoted guidance. Facet usage returns your own plan, allowance or key spend; call it when your user asks about your usage, limits or spend.",
     "inputSchema": {
       "type": "object",
       "properties": {
@@ -46,6 +47,7 @@ export const ORDINARY_TOOLS: ToolDefinition[] = [
         "messageId": {"type": "string"},
         "attachmentId": {"type": "string"},
         "slug": {"type": "string"},
+        "name": {"type": "string", "description": "Alias for procedure slug."},
         "limit": {"type": "integer", "minimum": 1, "maximum": 100, "description": "Requested count, 1–100. messages returns at most 8, fewer when limit is smaller."},
         "from": {"type": "string", "enum": ["oldest", "newest"]},
         "activeOnly": {"type": "boolean"},
@@ -93,10 +95,10 @@ export const ORDINARY_TOOLS: ToolDefinition[] = [
           "maxItems": 6,
           "items": {
             "type": "string",
-            "minLength": 3,
+            "minLength": 2,
             "maxLength": 32,
-            "pattern": "^[a-z0-9][a-z0-9_./-]{2,31}$",
-            "description": "One distinctive single lower-case word of 3 to 32 characters (letters, digits, or _./-). A multi-word phrase, an upper-case or stopword keyword is refused."
+            "pattern": "^[a-z0-9][a-z0-9_./-]{1,31}$",
+            "description": "One distinctive word of 2 to 32 characters (letters, digits, or _./-). Upper case is saved in lower case. A short word such as ci is kept. A stopword is refused."
           }
         },
         "source_message_ids": {"type": "array", "minItems": 1, "maxItems": 16, "items": {"type": "string", "minLength": 1}},
@@ -153,7 +155,7 @@ export const ORDINARY_TOOLS: ToolDefinition[] = [
   },
   {
     "name": "open_corner",
-    "description": "Create one unit of work in a member Room; the complete brief bounds its scope. Human approval is not required to open. Use a name of at most 3 hyphenated words and an objective of at most 24 words. Objective is navigation. Opening wakes its worker and watches automatically. Keep the Room's designated reviewer out of implementation unless necessary, then set reviewer to an independent agent handle. A reviewer cannot be the implementer or a commit author. hold:true requires sourceMessageId citing a readable person’s request to hold.",
+    "description": "Create one unit of work in a member Room; the complete brief bounds its scope. Human approval is not required to open. A name of at most 3 words is saved with hyphens, and an objective past 24 words or 2000 characters is cut at a word boundary. The result names that change. Objective is navigation. Opening wakes its worker and watches automatically. Keep the Room's designated reviewer out of implementation unless necessary, then set reviewer to an independent agent handle. A reviewer cannot be the implementer or a commit author. hold:true requires sourceMessageId citing a readable person’s request to hold.",
     "inputSchema": {
       "type": "object",
       "required": ["room", "brief", "implementer"],
@@ -167,7 +169,7 @@ export const ORDINARY_TOOLS: ToolDefinition[] = [
           "type": "string",
           "minLength": 1,
           "maxLength": 120,
-          "description": "The corner's title: at most 3 words joined by hyphens, no whitespace."
+          "description": "The corner's title. Spaces become hyphens, and only the first 3 words are kept."
         },
         "objective": {
           "type": "string",
@@ -365,7 +367,7 @@ export const ORDINARY_TOOLS: ToolDefinition[] = [
   },
   {
     "name": "report",
-    "description": "Report the assigned outcome one step up. In a corner, the opening order fixes the commander and return place. Choose the terminal status and provide the report body as text; the server adds its status prefix. No address. Feedback is separate from assignment completion. Local proof paths are refused. First upload each proof with post_artifact, then cite its attachment filename instead of a local path.",
+    "description": "Report the assigned outcome one step up. In a corner, a human-approved revised brief transfers command to its author at its dispatch place; otherwise the opening route applies. Earlier explicit orders retain their issuer. Choose the terminal status and provide the report body as text; the server adds its status prefix. No address. Feedback is separate from assignment completion. Local proof paths are refused. First upload each proof with post_artifact, then cite its attachment filename instead of a local path.",
     "inputSchema": {
       "type": "object",
       "required": ["status", "text"],
@@ -562,6 +564,19 @@ export const ORDINARY_TOOLS: ToolDefinition[] = [
     }
   },
   {
+    name: 'store_secret',
+    description: "Save a credential in the local operator key store for command grants. After fetch_credential returns a value a granted command needs, call store_secret right away, then run it under a command grant with --with NAME in its target (pass only executable argv to run_granted_command). The value is never echoed, sent to the server, or shown on a ledger row.",
+    inputSchema: {
+      type: 'object',
+      properties: {
+        name: { type: 'string', pattern: COMMAND_SECRET_NAME.source, description: 'The UPPER_CASE name used by --with NAME.' },
+        value: { type: 'string', minLength: 1, maxLength: 8192 },
+      },
+      required: ['name', 'value'],
+      additionalProperties: false,
+    },
+  },
+  {
     "name": "request_grant",
     "description": "Request or list scoped grants. Shared-asset isolation uses kind shared_asset and a cache-category target. Existing human approvals and exact command/secret safeguards apply; listing reveals no secrets. " + HOST_EMULATOR_RULE,
     "inputSchema": {
@@ -573,7 +588,7 @@ export const ORDINARY_TOOLS: ToolDefinition[] = [
           "type": "string",
           "minLength": 1,
           "maxLength": 512,
-          "description": "What you need: a repository, a path, a host, a secret name, a device, the exact command line (with optional `--with SECRET_NAME` suffixes), or — for kind mcp — the exact name of a host MCP server as spelled in the operator harness config."
+          "description": "What you need: a path, host, secret name, device, or command line (optional --with SECRET_NAME suffixes). For inline code use a JSON argv array; for interpreter stdin use a JSON object with argv and stdin. MCP targets name the host server."
         },
         "touches": { "type": "string", "minLength": 1, "maxLength": 240, "description": "Files or resources this command touches, in plain language. Omit when unknown." },
         "capabilities": { "type": "string", "minLength": 1, "maxLength": 240, "description": "What this command can do, for example Delete files. Omit when unknown; never invent a scope." },
@@ -603,7 +618,7 @@ export const ORDINARY_TOOLS: ToolDefinition[] = [
   },
   {
     "name": "connect",
-    "description": "mode discover searches integrations; status silently reads readiness; ensure connects/reconnects through the approved route. Setup never grants use authority. Never show secrets/sign-in links. Linked-repository writes use the Beeline GitHub App; personal GitHub serves lookups and person-scoped actions. Report exact denials; never fall back from App to personal for linked-repository writes or retry person-scoped actions as App. Also advertises optional first-party app_tool capabilities.",
+    "description": "mode discover searches integrations; status silently reads readiness; ensure connects/reconnects through the approved route. For Beeline product or agent invitations, ensure with service=assistant name or Beeline connector and reason=device, app and plan returns current guidance. Setup never grants use authority. Never show secrets/sign-in links. Linked-repository writes use the Beeline GitHub App; personal GitHub serves lookups and person-scoped actions. Report exact denials; never fall back from App to personal for linked-repository writes or retry person-scoped actions as App. Also advertises optional first-party app_tool capabilities.",
     "inputSchema": {
       "type": "object",
       "properties": {
@@ -701,6 +716,7 @@ export const ORDINARY_TOOLS: ToolDefinition[] = [
           },
           "additionalProperties": false
         },
+        "maxRuns": {"type": "integer", "minimum": 1, "description": "Run this many times, then the schedule deletes itself. Use 1 for a one-time check."},
         "scheduleId": {"type": "string", "description": "The scheduleId from wake(action:list)."},
         "source": {"type": "string", "enum": ["room", "repository", "service", "webhook"]},
         "event": {"type": "string"},

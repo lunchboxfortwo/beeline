@@ -1,6 +1,24 @@
+import type { AgentPresentation } from './room-view-presentation';
+
+/** One member of a Room as the chat and its @ menu name them. */
+export type RoomRosterParticipant = {
+  pubkey: string;
+  name: string;
+  handle: string;
+  kind: 'person' | 'agent';
+  agent?: AgentPresentation;
+  /** Agents only: paint-ready metadata from the Workspace roster. */
+  model?: string;
+  /** The owner's raw handle; the shared subtitle formatter owns the "by @" copy. */
+  ownerHandle?: string;
+  /** People only: the Workspace role the @-mention menu shows. */
+  role?: string;
+  /** People only: the chosen face on record. An agent's assigned face rides
+   *  on `agent` and is read through `resolveAgentDisplayIdentity`. */
+  face?: string;
+};
+
 export type MentionableAgent = { pubkey: string; name: string; handle?: string };
-type RoomRosterMember = { pubkey: string };
-type RoomParticipant = RoomRosterMember & { kind: 'person' | 'agent' };
 
 export function shouldReadWorkspaceRoster({
   activeWorkspaceId,
@@ -91,43 +109,6 @@ export function replaceActiveMention(
     text: `${text.slice(0, mention.start)}${inserted}${text.slice(mention.end)}`,
     cursor: mention.start + inserted.length,
   };
-}
-
-/**
- * The authoritative Room roster as ONE list: people in membership order, agents
- * after. The sheet heads and counts that single list — the viewer among them,
- * since the viewer is a member of the Room they are reading — so no member
- * falls between two sections and no count disagrees with another.
- */
-export function orderRoomRoster<T extends RoomParticipant>(participants: readonly T[]): T[] {
-  return [
-    ...participants.filter((participant) => participant.kind !== 'agent'),
-    ...participants.filter((participant) => participant.kind === 'agent'),
-  ];
-}
-
-/**
- * Collapsed roster length. Ten rows fill the sheet on a phone and still leave
- * the overflow row on screen; the head keeps the true total beside the word,
- * so a Room with more members says so before anyone scrolls.
- */
-export const ROOM_ROSTER_VISIBLE_ROWS = 10;
-
-export type RoomRosterWindow<T> = {
-  readonly visible: readonly T[];
-  readonly hidden: number;
-  readonly overflowLabel: string | null;
-};
-
-export function roomRosterWindow<T>(
-  members: readonly T[],
-  expanded: boolean,
-  cap = ROOM_ROSTER_VISIBLE_ROWS,
-): RoomRosterWindow<T> {
-  if (expanded) return { visible: members, hidden: 0, overflowLabel: null };
-  const visible = members.slice(0, Math.max(0, cap));
-  const hidden = Math.max(0, members.length - visible.length);
-  return { visible, hidden, overflowLabel: hidden > 0 ? `${hidden} more` : null };
 }
 
 /** Compact header member count; the unified roster sheet carries the actual names. */
@@ -231,7 +212,21 @@ function typedComposerMentionTokens(text: string): string[] {
 
 /** Whether the composer/sent text addresses the whole Room via a live `@channel` token. */
 export function hasChannelMentionToken(text: string): boolean {
-  return typedComposerMentionTokens(text).some(isChannelMentionHandle);
+  const normalized = text.normalize('NFKC').toLocaleLowerCase();
+  let offset = normalized.indexOf('@channel');
+  while (offset !== -1) {
+    const before = mentionCodePointBefore(normalized, offset);
+    let end = offset + '@channel'.length;
+    const next = mentionCodePointAt(normalized, end);
+    // A dot or dash is trailing punctuation only when no handle follows it.
+    while (normalized[end] === '.' || normalized[end] === '-') end += 1;
+    const after = mentionCodePointAt(normalized, end);
+    if ((!before || !MENTION_HANDLE_CHARACTER.test(before)) &&
+      (!next || !MENTION_HANDLE_CHARACTER.test(next) ||
+        ((next === '.' || next === '-') && (!after || !MENTION_HANDLE_CHARACTER.test(after))))) return true;
+    offset = normalized.indexOf('@channel', offset + 1);
+  }
+  return false;
 }
 
 /**

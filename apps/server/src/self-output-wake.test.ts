@@ -154,7 +154,7 @@ it('SELF-OUTPUT: a different commander still receives explicit and System report
   expect(opening.state).toBe('pending');
   await reportToCommander(db, cornerId, AGENT, 'done: mock ready', opening, 'other-report-proof');
   expect(
-    (await daemon.execute('getAgentCommands', { roomId: ROOM }, OTHER)).commands.map((c) => c.id),
+    (await daemon.execute('getAgentCommands', { roomId: cornerId }, OTHER)).commands.map((c) => c.id),
   ).toContain('other-report-proof');
   const systemReport = await reportToCommander(
     db,
@@ -163,7 +163,7 @@ it('SELF-OUTPUT: a different commander still receives explicit and System report
     'blocked: worker needs attention',
     undefined,
     'other-system-report-proof',
-    { automatic: true, agentOnly: true, wakeInCorner: true },
+    { automatic: true, agentOnly: true },
   );
   expect(systemReport.delivered).toBe(true);
   expect(

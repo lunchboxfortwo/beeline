@@ -7,6 +7,7 @@ import {
 } from '@beeline/api-contract/daemon';
 import type { SqlDatabase } from './database.js';
 import type { CommandRow } from './agent-command.js';
+import { cornerCommanderIdSql } from './corner-commander.js';
 import { commandOrder } from './commander.js';
 import { CommandRefusalError, ExpectedRefusalError } from './command-refusal.js';
 
@@ -285,7 +286,7 @@ async function laterBriefApproval(
       `SELECT command.* FROM agent_commands command JOIN rooms corner ON corner.id=command.room_id
        WHERE command.room_id=$2 AND command.agent_id=$3 AND command.state IN ('pending','claimed')
          AND command.private_payload->>'kind'='order'
-         AND command.private_payload->>'authorId'=corner.created_by
+         AND command.private_payload->>'authorId'=${cornerCommanderIdSql('corner')}
          AND (command.id=$1 OR EXISTS (
            SELECT 1 FROM messages card WHERE card.id=$1 AND card.room_id=command.room_id
              AND card.card_type='agent-command' AND card.card->>'kind'='order'
@@ -324,7 +325,7 @@ export async function resolveCornerBriefApproval(
 }> {
   if (revision && !draft.approval) {
     const commander = (await db.query<{ parent_id: string }>(
-      `SELECT parent_id FROM rooms WHERE id=$1 AND created_by=$2`,
+      `SELECT parent_id FROM rooms corner WHERE id=$1 AND ${cornerCommanderIdSql('corner')}=$2`,
       [revision.cornerId, revision.agentId],
     )).rows[0];
     if (commander) {
@@ -383,7 +384,7 @@ export async function resolveCornerBriefApproval(
       ['pending', 'claimed'].includes(delivery.state)) {
     const order = await commandOrder(db, delivery);
     const commander = (await db.query(
-      `SELECT 1 FROM rooms WHERE id=$1 AND created_by=$2`,
+      `SELECT 1 FROM rooms corner WHERE id=$1 AND ${cornerCommanderIdSql('corner')}=$2`,
       [revision.cornerId, order.private_payload?.authorId ?? null],
     )).rowCount > 0;
     if (commander && order.private_payload?.kind === 'order' && sourceRoomIds.includes(order.room_id)) {
@@ -408,7 +409,11 @@ export async function resolveCornerBriefApproval(
   if (!message && initiating && !revision) {
     const active = (await db.query<CommandRow>(`SELECT * FROM agent_commands WHERE id=$1`, [sourceMessageId])).rows[0];
     const order = active ? await commandOrder(db, active) : undefined;
-    if (order?.private_payload?.kind === 'order' && sourceRoomIds.includes(order.room_id)) {
+    // A report wake reaches its commander inside the corner it concerns, so the
+    // delivered command's recorded order room is a source alongside the turn's.
+    const orderRooms = active && order && active.private_payload?.kind === 'report'
+      ? [...sourceRoomIds, order.room_id] : sourceRoomIds;
+    if (order?.private_payload?.kind === 'order' && orderRooms.includes(order.room_id)) {
       sourceMessageId = order.id;
       message = { text: order.private_payload.text, author_id: order.private_payload.authorId, room_id: order.room_id, kind: 'agent' };
       commanderOrder = true;
@@ -417,7 +422,7 @@ export async function resolveCornerBriefApproval(
       message = (await db.query<{ text: string; author_id: string; kind: string; room_id: string }>(
         `SELECT message.text,message.author_id,identity.kind,message.room_id FROM messages message
          JOIN identities identity ON identity.id=message.author_id
-         WHERE message.id=$1 AND message.room_id=ANY($2::uuid[])`, [sourceMessageId, sourceRoomIds],
+         WHERE message.id=$1 AND message.room_id=ANY($2::uuid[])`, [sourceMessageId, orderRooms],
       )).rows[0];
     }
   }

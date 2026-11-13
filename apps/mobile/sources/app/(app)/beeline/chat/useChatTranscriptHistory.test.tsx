@@ -16,8 +16,11 @@ vi.mock('@/buzz/room-message-store', () => ({
 }));
 vi.mock('@/buzz/use-new-message-control', () => ({ useUnreadLineControl: () => ({ dividerMessageId: null, retire: fixture.noop }) }));
 vi.mock('@/buzz/use-room-workflow-run', () => ({ useRoomWorkflowRun: () => ({}) }));
-vi.mock('@/components/buzz/corner-brief-viewer', () => ({ openCornerBriefViewer: fixture.noop }));
+vi.mock('@/ui/shell/panel', () => ({ openPlace: fixture.noop }));
+vi.mock('@/utils/responsive', () => ({ useIsDesktop: () => false }));
 vi.mock('@/components/buzz/Ledger', () => ({ LedgerHistoryLine: (props: any) => React.createElement('HistoryLine', props) }));
+vi.mock('@/ui/screens/transcript/TranscriptLine', () => ({ TranscriptLine: (props: any) => React.createElement('TranscriptLine', props, props.children) }));
+vi.mock('@/ui/screens/transcript/cards/WorkflowRunCard', () => ({ WorkflowRunCard: (props: any) => React.createElement('WorkflowRunCard', props) }));
 import { useChatTranscriptHistory } from './useChatTranscriptHistory';
 
 beforeEach(() => { (globalThis as any).IS_REACT_ACT_ENVIRONMENT = true; });
@@ -29,7 +32,7 @@ async function renderHistory(history: string, newer: string, jump?: string) {
       null, 50, undefined, 'design', fixture.noop, { current: true }, retry,
       jump ? { messageId: 'older', status: jump } : null, {}, retry, newer, retry, history] as unknown as Parameters<typeof useChatTranscriptHistory>[0];
     const result = useChatTranscriptHistory(args);
-    return <>{result[22]}{result[23]}</>;
+    return <>{result[20]}{result[21]}</>;
   }
   let tree: any;
   await act(async () => { tree = create(<Transcript />); });
@@ -43,8 +46,8 @@ it.each([
   const { lines, retry } = await renderHistory(history!, newer!, jump);
   expect(lines).toEqual([]); expect(retry).not.toHaveBeenCalled();
 });
-it('retains loading, beginning and confirmed missing-message explanations', async () => {
+it('retains loading and confirmed missing-message explanations, with no beginning marker', async () => {
   expect((await renderHistory('loading', 'idle')).lines.map((line: any) => line.text)).toEqual(['Loading earlier messages…']);
-  expect((await renderHistory('complete', 'loading')).lines.map((line: any) => line.text)).toEqual(['Beginning of Room', 'Loading later messages…']);
+  expect((await renderHistory('complete', 'loading')).lines.map((line: any) => line.text)).toEqual(['Loading later messages…']);
   expect((await renderHistory('idle', 'idle', 'missing')).lines.map((line: any) => line.text)).toEqual(['That message is no longer available']);
 });

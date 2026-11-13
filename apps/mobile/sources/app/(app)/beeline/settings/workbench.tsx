@@ -1,26 +1,24 @@
-import { IndexRow } from '@/components/buzz/IndexRow';
-import { desktopColumnWidths } from '@/buzz/desktop-layout-tokens';
 import React, { useState } from 'react';
-import { ScrollView, Text, View } from 'react-native';
-import { StyleSheet, useUnistyles } from 'react-native-unistyles';
+import { YStack } from 'tamagui';
 import { router, useLocalSearchParams } from 'expo-router';
-import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { useLatencyRouteFrame } from '@/buzz/latency-route-hook';
-import { useIsDesktop } from '@/utils/responsive';
 import { useActiveCommunityId } from '@/buzz/use-active-community';
 import { useSharedWorkbench } from '@/buzz/workbench-surface';
 import { connectionViewState, useConnectCompanyApp } from '@/buzz/company-connection-actions';
-import { HullDialogInput } from '@/components/buzz/HullDialog';
-import { PageHeader } from '@/components/buzz/PageHeader';
-import { SettingsRow } from '@/components/buzz/SettingsRow';
 import { ServiceMark } from '@/components/buzz/ServiceMark';
-import { RoomListSectionHeader } from '@/components/buzz/RoomListSectionHeader';
+import { Section, T } from '@/ui/grammar';
+import { ConnectorFrame, ConnectorLoading, ConnectorNote, ConnectorRow, ConnectorSearchField } from '@/ui/screens/settings/connectors/ConnectorParts';
 import { SurfaceGlyphLoader } from '@/components/buzz/SurfaceGlyphLoader';
-import { Typography } from '@/constants/Typography';
+import type { WorkbenchCompany } from '@beeline/api-contract/workbench';
 import { ConnectorsSearchSheet } from './workbench/connect-app';
 
 function first(value: string | string[] | undefined) { return Array.isArray(value) ? value[0] : value; }
-const SECTIONS = [ ['attention', 'Needs attention'], ['signin', 'Sign-in'], ['apps', 'Connected apps'], ['keys', 'Keys'] ] as const;
+/** Connectors lists apps; logins and keys are Vault entries (build spec decision 24). */
+const SECTIONS: readonly (readonly [string, string, readonly WorkbenchCompany['section'][]])[] = [
+  ['attention', 'Needs attention', ['attention']],
+  ['apps', 'Connected apps', ['apps']],
+  ['vault', 'Vault', ['signin', 'keys']],
+];
 
 /** Owner-scoped server projection: the phone never groups or guesses provider identity. */
 export default function WorkbenchScreen() {
@@ -28,64 +26,47 @@ export default function WorkbenchScreen() {
   const params = useLocalSearchParams<{ workspaceId?: string | string[]; viewerId?: string | string[] }>();
   const activeWorkspaceId = useActiveCommunityId();
   const scope = { workspaceId: first(params.workspaceId) || activeWorkspaceId || '', viewerId: first(params.viewerId) ?? '' };
-  const desktop = useIsDesktop();
-  const insets = useSafeAreaInsets();
-  const { theme } = useUnistyles();
-  const { value: view, error, refresh } = useSharedWorkbench(scope.viewerId ? scope : null);
+  const { value: view, error } = useSharedWorkbench(scope.viewerId ? scope : null);
   const index = view?.companies;
   const [searchOpen, setSearchOpen] = useState(false);
   const actions = useConnectCompanyApp(scope);
-  const header = <PageHeader prominent backAccessibilityLabel="Back to Settings" eyebrow="Settings" title="Connectors" testID="workbench-header" onBack={() => router.back()} />;
-  return <View style={[styles.container, { paddingTop: desktop ? 0 : insets.top }]}>
-    {header}
-    {!index && error ? <View style={styles.failureInset}><IndexRow inset="flush" title={error} /></View> : !index ?
-      <View style={styles.centered}><SurfaceGlyphLoader testID="workbench-loader" /></View> :
-      <ScrollView style={styles.content} contentContainerStyle={[styles.contentInner, desktop && styles.desktopColumn, { paddingBottom: insets.bottom + theme.buzz.space.xxl }]} testID="workbench-scroll">
-        <HullDialogInput accessibilityLabel="Search apps, keys, and websites" placeholder="Search apps, keys, and websites"
-          value="" editable={false} variant="search" placeholderTextColor={theme.buzz.textDisabled}
-          testID="connectors-search" onPress={() => setSearchOpen(true)} />
-        {!index.hasConnections ? <View>
-          <Text style={styles.note}>No connections yet. Choose a service to get started.</Text>
-          <RoomListSectionHeader title="Suggested" inset="content" spacing="flush" />
-          {index.suggestions.map(app => <SettingsRow appBoard key={app.providerId} title={app.name} description={app.purpose}
-            leading={<ServiceMark company={app.providerName} domain={app.domain} mark={app.logo} />} value="Connect" chevron="right"
-            disabled={Boolean(actions.busy)} onPress={() => void actions.connect(app)} testID={`connectors-suggest-${app.providerId}`} />)}
-        </View> : SECTIONS.map(([section, title]) => {
-          const rows = index.rows.filter(row => row.section === section);
-          return rows.length ? <View key={section} testID={`connectors-${section}`}>
-            <RoomListSectionHeader title={title} inset="content" spacing="flush" />
-            {rows.map(row => {
-              const state = connectionViewState(row);
-              return <SettingsRow appBoard key={row.id} title={row.name}
-                description={state === 'error' && row.status ? `${row.status} · ${row.subtitle}` : row.subtitle}
-                descriptionContent={row.roomsClientId ? <AiClientSubtitle agent={view?.aiClients?.find(client => client.clientId === row.roomsClientId)?.agent?.name} /> : undefined}
-                leading={<ServiceMark company={row.name} domain={row.domain} mark={row.logo} />}
-                action={section === 'attention' ? 'Reconnect' : state === 'connect' ? 'Connect' : undefined}
-                value={state === 'error' ? row.status : state === 'connected' && row.kind === 'sign-in-service' ? row.status : undefined}
-                valueTone={state === 'error' ? 'danger' : undefined}
-                statusGlyph={state === 'error' ? 'failed' : row.kind === 'sign-in-service' && row.status === 'Ready' ? 'live' : undefined}
-                chevron="right" disabled={actions.busy === row.id} onPress={() => void actions.open(row, view?.apps)} testID={`connectors-company-${row.id}`} />;
-            })}
-          </View> : null;
-        })}
-
-        {actions.error ? <SettingsRow title={actions.error} /> : null}
-      </ScrollView>}
+  return <>
+    <ConnectorFrame title="Connectors" back={() => router.back()} backLabel="Back to Settings" scroll={Boolean(index)} scrollTestID="workbench-scroll">
+      {!index && error ? <YStack padding="4"><ConnectorNote tone="danger">{error}</ConnectorNote></YStack> : !index ?
+        <ConnectorLoading><SurfaceGlyphLoader testID="workbench-loader" /></ConnectorLoading> : <>
+          <ConnectorSearchField label="Search apps, keys, and logins" testID="connectors-search" onPress={() => setSearchOpen(true)} />
+          {!index.hasConnections ? <YStack gap="3">
+            <ConnectorNote>No connections yet. Choose a service to get started.</ConnectorNote>
+            <Section title="Suggested">
+              {index.suggestions.map((app, n) => <ConnectorRow key={app.providerId} title={app.name} description={app.purpose}
+                leading={<ServiceMark company={app.providerName} domain={app.domain} mark={app.logo} />} value="Connect" chevron="right"
+                disabled={Boolean(actions.busy)} onPress={() => void actions.connect(app)} last={n === index.suggestions.length - 1}
+                testID={`connectors-suggest-${app.providerId}`} />)}
+            </Section>
+          </YStack> : SECTIONS.map(([key, title, sections]) => {
+            const rows = index.rows.filter(row => sections.includes(row.section));
+            return rows.length ? <Section key={key} title={title} testID={`connectors-${key}`}>
+              {rows.map((row, n) => {
+                const state = connectionViewState(row);
+                return <ConnectorRow key={row.id} title={row.name}
+                  description={state === 'error' && row.status ? `${row.status} · ${row.subtitle}` : row.subtitle}
+                  descriptionContent={row.roomsClientId ? <AiClientSubtitle agent={view?.aiClients?.find(client => client.clientId === row.roomsClientId)?.agent?.name} /> : undefined}
+                  leading={<ServiceMark company={row.name} domain={row.domain} mark={row.logo} />}
+                  action={row.section === 'attention' ? 'Reconnect' : state === 'connect' ? 'Connect' : undefined}
+                  value={state === 'error' ? row.status : state === 'connected' && row.kind === 'sign-in-service' ? row.status : undefined}
+                  valueTone={state === 'error' ? 'danger' : undefined}
+                  chevron="right" disabled={actions.busy === row.id} onPress={() => void actions.open(row, view?.apps)}
+                  last={n === rows.length - 1} testID={`connectors-company-${row.id}`} />;
+              })}
+            </Section> : null;
+          })}
+          {actions.error ? <ConnectorNote tone="danger">{actions.error}</ConnectorNote> : null}
+        </>}
+    </ConnectorFrame>
     <ConnectorsSearchSheet visible={searchOpen} onClose={() => setSearchOpen(false)} scope={scope} view={view} />
-  </View>;
+  </>;
 }
 /** "Connected as <agent>", the agent name a step darker than the line. */
 function AiClientSubtitle({ agent }: { agent?: string }) {
-  return <Text numberOfLines={1} style={styles.aiSubtitle}>{agent ? <>Connected as <Text style={styles.aiAgent}>{agent}</Text></> : 'Connected'}</Text>;
+  return <T v="meta" color="secondary" numberOfLines={1}>{agent ? <>Connected as <T v="meta" color="ink">{agent}</T></> : 'Connected'}</T>;
 }
-const styles = StyleSheet.create(theme => ({
-  aiSubtitle: { ...Typography.default(), ...theme.buzz.type.meta, flex: 1, minWidth: 0, color: theme.buzz.textMuted },
-  aiAgent: { color: theme.buzz.textSecondary },
-    failureInset: { paddingHorizontal: theme.buzz.roomList.edge },
-  container: { flex: 1, backgroundColor: theme.buzz.appCanvas }, content: { flex: 1 },
-  centered: { flex: 1, alignItems: 'center', justifyContent: 'center' },
-  desktopColumn: { width: '100%', maxWidth: desktopColumnWidths.detail, alignSelf: 'center' },
-    contentInner: {
- paddingHorizontal: theme.buzz.space.lg, paddingTop: theme.buzz.layout.screenTop, gap: theme.buzz.layout.sectionGap },
-  note: { ...theme.buzz.type.meta, color: theme.buzz.appQuiet, marginBottom: theme.buzz.space.lg },
-}));

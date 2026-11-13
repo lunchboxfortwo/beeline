@@ -41,7 +41,7 @@ import { daemonRepositoryOnboardingRequester } from './grants.js';
                 CASE WHEN workspace.visibility='public' THEN false ELSE a.yolo_mode END yolo_mode,
                 CASE WHEN room.parent_id IS NULL THEN NULL
                      WHEN reviewer.id<>COALESCE(${cornerOwnerSql('room.id')},room.created_by)
-                     THEN reviewer.handle END reviewer_handle
+                     THEN beeline_workspace_handle(reviewer.id,room.workspace_id) END reviewer_handle
          FROM agents a
          JOIN identities self ON self.id=a.agent_id
          LEFT JOIN rooms room ON room.id=$2

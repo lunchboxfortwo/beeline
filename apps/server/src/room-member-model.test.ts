@@ -26,24 +26,24 @@ beforeAll(async () => {
       ($1,NULL,$2,'owner'),($1,$3,$2,'member')`, [WORKSPACE, id, ROOM]);
   }
   for (const id of [BEEBEE, LUNA]) await database.query(
-    `INSERT INTO free_agents(agent_id,workspace_id,owner_id,sealed_keys) VALUES($1,$2,$3,'fixture')`, [id, WORKSPACE, OWNER]);
+    `WITH workspace AS (SELECT $2::uuid) INSERT INTO free_agents(agent_id,owner_id,sealed_keys) VALUES($1,$3,'fixture')`, [id, WORKSPACE, OWNER]);
   phone = new PhoneService(database, 'http://local.test');
 }, 30000);
 afterAll(async () => database.close());
 
-it('delivers free-agent model labels on Room entry before a helper catalog or Workspace read', async () => {
+it('omits unreported free-agent models and delivers runtime labels on Room entry', async () => {
   for (const roomId of [ROOM, CORNER]) {
     const response = await phone.readRoom(roomId, OWNER);
     // Exercise the phone decoder too: optional member metadata must survive the wire.
     const view = readRoomView(JSON.parse(JSON.stringify(response)))!;
-    expect(view.members.find(member => member.identity.pubkey === BEEBEE)).toHaveProperty('model', 'beeline/deepseek/deepseek-v4.1-flash-1017');
-    expect(view.members.find(member => member.identity.pubkey === LUNA)).toHaveProperty('model', 'beeline/openai/gpt-6-luna');
+    expect(view.members.find(member => member.identity.pubkey === BEEBEE)).not.toHaveProperty('model');
+    expect(view.members.find(member => member.identity.pubkey === LUNA)).not.toHaveProperty('model');
     expect(view.members.find(member => member.identity.pubkey === BBC)).toHaveProperty('model', '6.1 Sol');
     expect(view.members.find(member => member.identity.pubkey === OWNER)).not.toHaveProperty('model');
   }
 });
 
-it('keeps model labels after cold-wake catalogs arrive and reflects selected-model changes', async () => {
+it('uses reported runtime changes and ignores saved next-session selections', async () => {
   for (const [id, model] of [[BEEBEE, 'beeline/deepseek/deepseek-v4.1-flash-1017'], [LUNA, 'beeline/openai/gpt-6-luna']]) {
     await database.query(`UPDATE agents SET model_catalog=$2::jsonb WHERE agent_id=$1`, [id, JSON.stringify([
       { id: 'model', category: 'model', currentValue: model, options: [{ id: model, name: model }] },
@@ -53,6 +53,11 @@ it('keeps model labels after cold-wake catalogs arrive and reflects selected-mod
   expect(awake.members.find(member => member.identity.pubkey === LUNA)).toHaveProperty('model', 'beeline/openai/gpt-6-luna');
   await database.query(`UPDATE agents SET selected_model='gpt-6-luna' WHERE agent_id=$1`, [BBC]);
   const changed = readRoomView(await phone.readRoom(ROOM, OWNER))!;
-  expect(changed.members.find(member => member.identity.pubkey === BBC)).toHaveProperty('model', 'gpt-6-luna');
+  expect(changed.members.find(member => member.identity.pubkey === BBC)).toHaveProperty('model', '6.1 Sol');
+  await database.query(`UPDATE agents SET model_catalog=$2::jsonb WHERE agent_id=$1`, [BBC, JSON.stringify([
+    { id: 'model', category: 'model', currentValue: 'gpt-6-luna', options: [{ id: 'gpt-6-luna', name: 'Luna' }] },
+  ])]);
+  const running = readRoomView(await phone.readRoom(ROOM, OWNER))!;
+  expect(running.members.find(member => member.identity.pubkey === BBC)).toHaveProperty('model', 'Luna');
   expect(await phone.readRoom(ROOM, 'e'.repeat(64))).toBeNull();
 });

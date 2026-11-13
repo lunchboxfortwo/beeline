@@ -32,8 +32,7 @@ export async function seedOwnedModelFixture<T extends SqlDatabase>(db: T,
   await db.query(`INSERT INTO rooms(id,workspace_id,name) VALUES($1,$2,'Synthetic Room')`, [MODEL_ROOM, MODEL_WORKSPACE]);
   await db.query(`INSERT INTO memberships(workspace_id,room_id,identity_id,role)
     VALUES($1,NULL,$3,'member'),($1,$2,$3,'member')`, [MODEL_WORKSPACE, MODEL_ROOM, MODEL_AGENT]);
-  await db.query(`INSERT INTO free_agents(agent_id,workspace_id,owner_id,sealed_keys,model_token_hash,state,model)
-    VALUES($1,$2,$3,'synthetic sealed fixture',$4,'running',$5)`, [MODEL_AGENT, MODEL_WORKSPACE, MODEL_OWNER, MODEL_TOKEN_HASH, MODEL]);
+  await db.query(`WITH workspace AS (SELECT $2::uuid) INSERT INTO free_agents(agent_id,owner_id,sealed_keys,model_token_hash,state,model) VALUES($1,$3,'synthetic sealed fixture',$4,'running',$5)`, [MODEL_AGENT, MODEL_WORKSPACE, MODEL_OWNER, MODEL_TOKEN_HASH, MODEL]);
   await db.query(`INSERT INTO live_server_instances(instance_id,renewed_at) VALUES('synthetic-server',clock_timestamp())`);
   await db.query(`INSERT INTO agent_connections(agent_id,connection_id,epoch,instance_id)
     VALUES($1,$2,$3,'synthetic-server')`, [MODEL_AGENT, MODEL_SOURCE.connectionId, MODEL_SOURCE.epoch]);

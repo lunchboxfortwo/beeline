@@ -72,41 +72,11 @@ function shareResponseArrayByKey<T>(
     : shared;
 }
 
-function messageTimeMs(message: RoomViewMessage): number {
-  return message.createdAtMs ?? message.createdAt * 1_000;
-}
-
-/** Keep a committed live delta that a slightly stale full snapshot has not
- * caught yet. The next window remains the authority for everything else. */
-function mergeNewerCommittedMessages(
-  previous: readonly RoomViewMessage[],
-  next: readonly RoomViewMessage[],
-): readonly RoomViewMessage[] {
-  if (previous.length === 0) return next;
-  const heldById = new Map(previous.map((message) => [message.id, message]));
-  next = next.map((message) => {
-    const held = heldById.get(message.id);
-    return held && (held.version ?? 0) > (message.version ?? 0) ? held : message;
-  });
-  const nextIds = new Set(next.map((message) => message.id));
-  const nextNewest = next.reduce((newest, message) => Math.max(newest, messageTimeMs(message)), 0);
-  const extras = previous.filter(
-    (message) => !nextIds.has(message.id) && messageTimeMs(message) >= nextNewest,
-  );
-  if (extras.length === 0) return next;
-  return [...next, ...extras]
-    .sort(
-      (left, right) =>
-        messageTimeMs(left) - messageTimeMs(right) || left.id.localeCompare(right.id),
-    )
-    .slice(-ROOM_VIEW_MESSAGE_LIMIT);
-}
-
 export function reconcileRoomView(previous: RoomView | null, next: RoomView): RoomView {
   if (!previous) return next;
   const messages = shareResponseArrayByKey(
     previous.messages,
-    mergeNewerCommittedMessages(previous.messages, next.messages),
+    next.messages,
     (message) => message.id,
   );
   const members = shareResponseArrayByKey(
@@ -217,16 +187,6 @@ export function createRoomMessageProjector(): RoomMessageProjector {
   };
 }
 
-export type WorkspaceMemberDisplayItem = {
-  peerPubkey: string;
-  peerName: string;
-  peerKind: 'person' | 'agent';
-  avatarUrl?: string;
-  /** The chosen face id; absent → derived from the pubkey. */
-  face?: string;
-  role?: 'owner' | 'admin' | 'member' | 'spectator';
-};
-
 /** Presentation-only row. It is recomputed from server DTO partitions and is never persisted. */
 export type ChatDisplayMessage = {
   id: string;
@@ -234,6 +194,8 @@ export type ChatDisplayMessage = {
   isUser: boolean;
   /** Local outbox/optimistic row, not yet a committed read boundary. */
   isPendingSend?: boolean;
+  /** Local picked files waiting for upload; render the existing loading frame. */
+  attachmentUploadPending?: boolean;
   timestamp: number;
   /** High-resolution causal ordering; `timestamp` remains the display clock. */
   orderAtMs?: number;
@@ -264,6 +226,8 @@ export type ChatDisplayMessage = {
   durableFact?: { kind: 'failure' | 'merge' | 'action' };
   attachments?: AttachmentReference[];
   mentionPubkeys?: string[];
+  /** Server number of this message in its chat; Copy link writes `¶author-N` from it. */
+  chatSeq?: number;
   /** The model stamped on the message at generation time (server-side); the
    *  agent byline renders it verbatim and falls back to no model. */
   sourceClient?: RoomViewMessage['sourceClient'];
@@ -306,6 +270,8 @@ export type ChatDisplayMessage = {
   /** Original server ordering for each durable message in a folded row. */
   foldedReadBoundaries?: { id: string; orderAtMs: number }[];
   notificationLifecycleRun?: import('./pr-lifecycle').NotificationLifecycleRun;
+  /** A run of consecutive pills folded into this row (`buzz/transcript-pills.ts`). */
+  pillRun?: ChatDisplayMessage[];
   githubEvent?: NonNullable<RoomViewMessage['githubEvent']>;
   /** Daemon lifecycle facts are server-projected cards, never prose rows. */
   daemonFact?: NonNullable<RoomViewMessage['daemonFact']>;
@@ -413,7 +379,9 @@ export function displayRoomMessage(
     ...(!githubEvent && !daemonFact && message.author.kind === 'agent'
       ? { isAgentAuthor: true }
       : {}),
-    ...(message.presentation === 'system' ? { isSystemNotice: true } : {}),
+    ...((message.presentation === 'system' ||
+      (message.presentation === 'card' && message.systemEvent?.kind === 'workflow-handoff'))
+      ? { isSystemNotice: true } : {}),
     ...(message.deleted ? { deleted: true } : {}),
     ...(message.awayWarning ? { awayWarning: true } : {}),
     ...(message.systemEvent ? { systemEvent: message.systemEvent } : {}),
@@ -423,6 +391,7 @@ export function displayRoomMessage(
     ...(message.mentionPubkeys ? { mentionPubkeys: [...message.mentionPubkeys] } : {}),
     ...(message.sourceClient ? { sourceClient: message.sourceClient } : {}),
     ...(message.agentModel ? { agentModel: message.agentModel } : {}),
+    ...(message.chatSeq ? { chatSeq: message.chatSeq } : {}),
     ...(message.reactions
       ? { reactions: message.reactions.map((reaction) => ({ ...reaction })) }
       : {}),

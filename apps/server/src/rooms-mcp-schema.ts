@@ -32,8 +32,6 @@ CREATE TABLE IF NOT EXISTS rooms_mcp_members (
   created_at timestamptz NOT NULL DEFAULT now(),
   PRIMARY KEY (client_id, owner_id)
 );
--- NULL preserves legacy all-Workspace consent; new approvals save the exact selection.
-ALTER TABLE rooms_mcp_members ADD COLUMN IF NOT EXISTS workspace_ids uuid[];
 CREATE INDEX IF NOT EXISTS rooms_mcp_members_member ON rooms_mcp_members(member_id);
 -- Each member sets its own inbound webhook, so a shared published client id
 -- never routes one person's Room text to another person's receiver.
@@ -67,7 +65,8 @@ DO $$ BEGIN
         AND reply.presentation='message');
   END IF;
 END $$;
-DROP FUNCTION IF EXISTS beeline_mcp_stream_source() CASCADE;
+-- The serving member stream owns this source function and its triggers.
+-- Preserve them until its atomic installer commits their replacement.
 -- Retire the index used only by the deleted timed mention re-delivery.
 DROP INDEX IF EXISTS rooms_mcp_mentions_owed;
 -- A reply settles its own author's tag only after the message write succeeds,
@@ -157,9 +156,10 @@ CREATE TRIGGER beeline_mcp_handoff_completion AFTER INSERT OR UPDATE ON rooms_mc
 CREATE TABLE IF NOT EXISTS rooms_mcp_tokens (
   hash text PRIMARY KEY, client_id text NOT NULL REFERENCES rooms_mcp_clients(id) ON DELETE CASCADE,
   identity_id text NOT NULL REFERENCES identities(id) ON DELETE CASCADE,
-  scope text NOT NULL, expires_at timestamptz NOT NULL,
+  scope text NOT NULL, expires_at timestamptz,
   revoked_at timestamptz, window_at timestamptz NOT NULL DEFAULT now(), calls integer NOT NULL DEFAULT 0
 );
+ALTER TABLE rooms_mcp_tokens ALTER COLUMN expires_at DROP NOT NULL;
 ALTER TABLE rooms_mcp_tokens ADD COLUMN IF NOT EXISTS family_id text REFERENCES rooms_mcp_families(id) ON DELETE CASCADE;
 CREATE INDEX IF NOT EXISTS rooms_mcp_tokens_family ON rooms_mcp_tokens(family_id);
 CREATE INDEX IF NOT EXISTS rooms_mcp_tokens_identity ON rooms_mcp_tokens(identity_id);

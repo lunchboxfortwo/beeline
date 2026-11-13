@@ -80,14 +80,16 @@ async function rereadPages(roomId: string, reader: Reader, archived: boolean): P
     const target = archived ? Math.max(1, held.archived?.corners.length ?? 0) : held.openMore.length;
     let next = archived ? undefined : held.firstPageNext;
     const rows: CornerListItem[] = [];
+    let archivedCount: number | undefined;
     do {
       if (!archived && !next) break;
       const page = await reader.client.corners(roomId,
         archived ? { archived: true, ...(next ? { before: next } : {}) } : { openBefore: next! });
       rows.push(...page.corners);
+      archivedCount = page.archivedCount;
       next = archived ? page.nextArchived : page.nextOpen;
     } while (next && rows.length < target);
-    if (archived) applyArchivedCorners(roomId, rows, next, false, mark);
+    if (archived) applyArchivedCorners(roomId, rows, next, false, mark, archivedCount);
     else applyOpenCornerPage(roomId, rows, next, mark, true);
   } while (!archived && getRoomCorners(roomId).openMoreStale && getRoomCorners(roomId).openMore.length > 0);
 }
@@ -217,7 +219,7 @@ export function useRoomCorners(
       archived: true,
       ...(before ? { before } : {}),
     });
-    applyArchivedCorners(roomId, page.corners, page.nextArchived, more, mark);
+    applyArchivedCorners(roomId, page.corners, page.nextArchived, more, mark, page.archivedCount);
   }, [reader, roomId]);
 
   const view = useMemo(() => (record ? roomCornerListView(record) : undefined), [record]);

@@ -44,7 +44,9 @@ export function saveSettings(settings: Settings, version: number): void {
 }
 
 export function loadLocalSettings(): LocalSettings {
-  const raw = mmkv.getString('local-settings');
+  const boot = typeof window === 'undefined' ? undefined : window.__beelineLaunchSettings;
+  const raw = boot ? boot.raw : mmkv.getString('local-settings');
+  if (boot) delete window.__beelineLaunchSettings;
   if (!raw) return { ...localSettingsDefaults };
   try {
     return localSettingsParse(JSON.parse(raw));
@@ -56,19 +58,6 @@ export function loadLocalSettings(): LocalSettings {
 
 export function saveLocalSettings(settings: LocalSettings): void {
   mmkv.set('local-settings', JSON.stringify(settings));
-}
-
-/** Launch preference mirrored for Android's native splash. Keep the legacy
- * key so existing installations can migrate without losing their settings. */
-const APPEARANCE_CHOICE_KEY = 'appearance-launch';
-
-export function loadAppearanceChoice(): 'system' | 'light' | 'dark' | null {
-  const raw = mmkv.getString(APPEARANCE_CHOICE_KEY);
-  return raw === 'system' || raw === 'light' || raw === 'dark' ? raw : null;
-}
-
-export function saveAppearanceChoice(mode: 'system' | 'light' | 'dark'): void {
-  mmkv.set(APPEARANCE_CHOICE_KEY, mode);
 }
 
 export function storeTempText(content: string): string {
@@ -84,10 +73,26 @@ export function retrieveTempText(id: string): string | null {
   return content;
 }
 
-/** Move existing installations to System once, preserving later choices. */
-export function migrateSystemAppearance(): void {
-  if (mmkv.getString('appearance-system-v1') === 'done') return;
-  saveLocalSettings({ ...loadLocalSettings(), appearance: 'system' });
-  saveAppearanceChoice('system');
-  mmkv.set('appearance-system-v1', 'done');
+/** Move existing installations to the Stone colour set once. A Brass choice
+ * made after this runs is kept, because the marker stops a second move. */
+export function migrateStonePalette(): void {
+  if (mmkv.getString('palette-stone-v1') === 'done') return;
+  saveLocalSettings({ ...loadLocalSettings(), palette: 'stone' });
+  mmkv.set('palette-stone-v1', 'done');
+}
+
+let initialLocalSettings: LocalSettings | undefined;
+/** One launch read, shared by display initialization and the settings store. */
+export function loadInitialLocalSettings(): LocalSettings {
+  if (initialLocalSettings) return initialLocalSettings;
+  let settings = loadLocalSettings();
+  const appearancePending = mmkv.getString('appearance-system-v1') !== 'done';
+  const palettePending = mmkv.getString('palette-stone-v1') !== 'done';
+  if (appearancePending) settings = { ...settings, appearance: 'system' };
+  if (palettePending) settings = { ...settings, palette: 'stone' };
+  if (appearancePending || palettePending) saveLocalSettings(settings);
+  if (appearancePending) mmkv.set('appearance-system-v1', 'done');
+  if (palettePending) mmkv.set('palette-stone-v1', 'done');
+  initialLocalSettings = settings;
+  return settings;
 }

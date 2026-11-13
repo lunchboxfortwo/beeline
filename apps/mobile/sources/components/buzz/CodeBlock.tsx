@@ -1,8 +1,7 @@
-import { Button } from '@/components/buzz/Button';
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import { Pressable, Text, View } from 'react-native';
 import type { Href } from 'expo-router';
-import { StyleSheet } from 'react-native-unistyles';
+import { XStack, YStack } from 'tamagui';
+import { Inked, T } from '@/ui/grammar';
 import { CodeHighlighter } from '@/components/buzz/CodeHighlighter';
 import { CHEVRON_ROW_SIZE, ChevronGlyph } from '@/components/buzz/ChevronGlyph';
 import {
@@ -98,133 +97,80 @@ export function CodeBlock({
     router.push(codeArtifactHref({ roomId, messageId, blockIndex }));
   }, [blockIndex, messageId, onOpen, roomId]);
 
+  const [peekPressed, setPeekPressed] = useState(false);
   const body = plainText ? (
-    <Text selectable style={styles.plainText} testID="plain-text-fence">
+    <T v="code" userSelect="text" width="100%" minWidth={0} testID="plain-text-fence">
       {peek}
-    </Text>
+    </T>
   ) : (
     <CodeHighlighter code={peek} language={language} />
   );
+  const copy = (
+    <CopyVerb
+      accessibilityLabel={plainText ? 'Copy all text' : 'Copy all code'}
+      label={copyLabel}
+      onPress={copyAll}
+    />
+  );
 
   return (
-    <View style={styles.frame}>
+    <YStack maxWidth="100%" minWidth={0} paddingLeft="2" paddingRight="2" paddingVertical="1" borderLeftWidth={2} borderLeftColor="secondary">
       {long && routed ? (
-        <View style={styles.inscription}>
-          <Text numberOfLines={1} style={styles.inscriptionText} testID="code-inscription">
+        <XStack alignItems="center" justifyContent="space-between" gap="2" marginBottom="2">
+          <T v="code" color="secondary" numberOfLines={1} flexShrink={1} testID="code-inscription">
             {inscription}
-          </Text>
-          <Button
-            accessibilityLiveRegion="polite"
-            accessibilityLabel={plainText ? 'Copy all text' : 'Copy all code'}
-            accessibilityRole="button"
-            hitSlop={8}
-            onPress={copyAll}
-            label={copyLabel}
-            variant="quiet"
-            appearance={{
-              control: ({ pressed }) => [styles.verb, pressed && styles.verbPressed],
-              label: styles.verbText,
-            }}
-          />
-        </View>
+          </T>
+          {copy}
+        </XStack>
       ) : (
-        <View style={styles.copySlot} pointerEvents="box-none">
-          <Button
-            accessibilityLiveRegion="polite"
-            accessibilityLabel={plainText ? 'Copy all text' : 'Copy all code'}
-            accessibilityRole="button"
-            hitSlop={8}
-            onPress={copyAll}
-            label={copyLabel}
-            variant="quiet"
-            appearance={{
-              control: ({ pressed }) => [styles.verb, pressed && styles.verbPressed],
-              label: styles.verbText,
-            }}
-          />
-        </View>
+        <YStack height={0} alignItems="flex-end" zIndex={1} pointerEvents="box-none">
+          {copy}
+        </YStack>
       )}
       {long && routed ? (
-        <Pressable
+        <YStack
           accessibilityLabel={`Open ${sheetTitle}, ${hidden}`}
           accessibilityRole="button"
           onPress={openReader}
-          style={({ pressed }) => [styles.peek, pressed && styles.peekPressed]}
+          onPressIn={() => setPeekPressed(true)}
+          onPressOut={() => setPeekPressed(false)}
+          cursor="pointer"
+          minWidth={0}
+          opacity={peekPressed ? 0.58 : 1}
           testID="code-open"
         >
           {body}
-          <View style={styles.moreRow}>
-            <ChevronGlyph
-              color={styles.openVerb.color}
-              direction="down"
-              size={CHEVRON_ROW_SIZE}
-            />
-            <Text style={styles.openVerb}>open</Text>
-            <Text style={styles.moreCount}>{hidden}</Text>
-          </View>
-        </Pressable>
+          <XStack alignItems="center" gap="2" marginTop="1" paddingVertical="0.5">
+            <Inked color="needsYou" glyph={ChevronGlyph} direction="down" size={CHEVRON_ROW_SIZE} />
+            <T v="metaStrong" color="needsYou" textTransform="uppercase">open</T>
+            <T v="code" color="secondary">{hidden}</T>
+          </XStack>
+        </YStack>
       ) : (
         body
       )}
-    </View>
+    </YStack>
   );
 }
 
-const styles = StyleSheet.create((theme) => ({
-  frame: {
-    maxWidth: '100%',
-    minWidth: 0,
-    paddingLeft: theme.buzz.space.sm,
-    paddingRight: theme.buzz.space.sm,
-    paddingVertical: theme.buzz.space.xs,
-    borderLeftWidth: 2,
-    borderLeftColor: theme.buzz.syntaxStructure,
-  },
-  inscription: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'space-between',
-    gap: theme.buzz.space.sm,
-    marginBottom: theme.buzz.space.sm,
-  },
-  inscriptionText: {
-    ...theme.buzz.type.machine,
-    flexShrink: 1,
-    color: theme.buzz.ledgerBody,
-  },
-  copySlot: {
-    height: 0,
-    alignItems: 'flex-end',
-    zIndex: 1,
-  },
-  verb: { justifyContent: 'center', paddingLeft: theme.buzz.space.sm },
-  verbPressed: { opacity: 0.58 },
-  verbText: {
-    ...theme.buzz.type.sectionHead,
-    color: theme.buzz.accent,
-  },
-  peek: { minWidth: 0 },
-  peekPressed: { opacity: 0.58 },
-  moreRow: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: theme.buzz.space.sm,
-    marginTop: theme.buzz.space.xs,
-    minHeight: theme.buzz.space.lg,
-  },
-  openVerb: {
-    ...theme.buzz.type.sectionHead,
-    color: theme.buzz.accent,
-  },
-  moreCount: {
-    ...theme.buzz.type.machine,
-    color: theme.buzz.syntaxStructure,
-  },
-  plainText: {
-    ...theme.buzz.type.machine,
-    width: '100%',
-    minWidth: 0,
-    flexShrink: 1,
-    color: theme.buzz.textPrimary,
-  },
-}));
+/** The brass copy verb over a fence: the label is the copy state, read politely. */
+function CopyVerb({ accessibilityLabel, label, onPress }: { accessibilityLabel: string; label: string; onPress: () => void }) {
+  const [pressed, setPressed] = useState(false);
+  return (
+    <YStack
+      accessibilityLiveRegion="polite"
+      accessibilityLabel={accessibilityLabel}
+      accessibilityRole="button"
+      hitSlop={8}
+      onPress={onPress}
+      onPressIn={() => setPressed(true)}
+      onPressOut={() => setPressed(false)}
+      cursor="pointer"
+      justifyContent="center"
+      paddingLeft="2"
+      opacity={pressed ? 0.58 : 1}
+    >
+      <T v="metaStrong" color="needsYou" textTransform="uppercase">{label}</T>
+    </YStack>
+  );
+}

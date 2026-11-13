@@ -1,8 +1,9 @@
+import { LOCAL_RECEIVER_RECOVERY } from '@beeline/api-contract/phone';
 import { readMemberDelivery, setupMemberDelivery, confirmMemberDelivery, prepareLocalDelivery, localDeliveryProbe, failMemberDelivery, recoverMemberDelivery } from './rooms-mcp-delivery.js';
 import { memberStreamEnabled, serveMcpMemberStream, type McpStreamCursor } from './rooms-mcp-stream.js';
 import type { SqlDatabase } from './database.js';
 import { waitForConnection } from './connection-wait.js';
-import { mentionRouting, mentionReplyKey, mentionReplyId, owedMentions } from './owed-mentions.js';
+import { mentionRouting, mentionReplyKey, mentionReplyId, mentionAnswerKey, owedMentions, fullRoomId, OWED_MENTION_OPEN_SQL } from './owed-mentions.js';
 import { RoomsMcpEvents, McpEventError } from './rooms-mcp-events.js';
 import type { IncomingMessage, ServerResponse } from 'node:http';
 import { createHash } from 'node:crypto';
@@ -38,7 +39,7 @@ Webhook and profile:
 
 Agent tools:
 - You have the tools Beeline agents have, with the same server checks. Each one takes the address (Room, corner or DM id) it acts in.
-- order assigns one agent privately; corner reports return to the opening commander under wakes in list_mentions. Agents reply in the Room. Read the reply there; do not ask for a private channel.
+- order assigns one agent privately; corner reports return to the current commander (a human-approved revised brief transfers command to its author) under wakes in list_mentions. Agents reply in the Room. Read the reply there; do not ask for a private channel.
 - open_corner opens work with another agent as implementer. The implementer pushes the corner branch with the Beeline GitHub App and opens the PR; the reviewer approves, then merge_corner lands it. revise_corner changes the brief. Do not order the implementer again after opening.
 - A corner lands only through the one merge path: the configured reviewer's approve_merge on the exact head lands it at once when checks are green and no hold stands; merge_corner retries the same gate. You cannot review work you implement or authored. Holds and merge yeses need a person's request.
 - read, search, remember, wake, react_to_message, post, post_artifact, connect and app_tool work as they do for agents. Vault reads need the owner's passkey.
@@ -81,6 +82,26 @@ const READABLE = `SELECT r.id,r.name,r.parent_id,r.workspace_id FROM rooms r
   JOIN room_access rm ON rm.room_id=r.id AND rm.identity_id=$1 AND rm.removed_at IS NULL
   JOIN memberships wm ON wm.workspace_id=r.workspace_id AND wm.room_id IS NULL AND wm.identity_id=$1 AND wm.removed_at IS NULL`;
 const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+/** Generation already listed for one member in one place. Another place keeps its own turn. */
+const listedOwedTurn = new Map<string, string>();
+/** The first result of a claimed generation lists that place. Anything else lists none. */
+async function connectorOwedMentions(db: SqlDatabase, member: string | null, args: Record<string, unknown>) {
+  if (!member) return undefined;
+  const named = ['roomId', 'room', 'address', 'cornerId'].map(key => fullRoomId(args[key])).find(room => room !== undefined);
+  const claimed = (await db.query<{ room_id: string; generation_id: string }>(
+    `SELECT room_id,generation_id FROM agent_commands
+     WHERE agent_id=$1 AND state='claimed' AND generation_id IS NOT NULL
+       AND ($2::uuid IS NULL OR room_id=$2::uuid)
+     ORDER BY claimed_at DESC NULLS LAST, id DESC`, [member, named ?? null])).rows;
+  if (!claimed.length) return undefined;
+  const place = named ?? (new Set(claimed.map(row => row.room_id)).size === 1 ? claimed[0]!.room_id : undefined);
+  const generation = claimed[0]!.generation_id;
+  const listed = place ? `${member}:${place}` : '';
+  if (!place || listedOwedTurn.get(listed) === generation) return undefined;
+  listedOwedTurn.set(listed, generation);
+  const mentions = await owedMentions(db, member, place);
+  return mentions.length ? mentions : undefined;
+}
 function textArg(value: unknown, max: number): string {
   if (typeof value !== 'string' || !value.trim() || value.length > max) throw new Error('Invalid arguments');
   return value;
@@ -223,17 +244,21 @@ export class RoomsMcp {
     return true;
   }
   private async toolResult(principal: McpPrincipal, name: string, args: Record<string, unknown>) {
+    const mentions = () => connectorOwedMentions(this.oauth.database, principal.member_id, args);
     try {
       const result = await this.call(principal, name, args);
       await this.oauth.audit(principal, name, 'succeeded');
-      return { content: [{ type: 'text' as const, text: JSON.stringify({ data: result, owedMentions: principal.member_id ? await owedMentions(this.oauth.database, principal.member_id) : [] }) }] };
+      const owedMentions = await mentions();
+      return { content: [{ type: 'text' as const, text: JSON.stringify(owedMentions ? { data: result, owedMentions } : { data: result }) }] };
     } catch (error) {
       await this.oauth.audit(principal, name, 'refused');
       const reason = mcpRefusal(error);
       if (!reason) console.error('[rooms-mcp] tool call failed', name, error);
       const text = reason ? `Request refused: ${reason}.`
         : 'Request refused. Check the tool arguments, consent scopes, and current Room membership.';
-      return { isError: true, content: [{ type: 'text' as const, text }, { type: 'text' as const, text: JSON.stringify({ owedMentions: principal.member_id ? await owedMentions(this.oauth.database, principal.member_id) : [] }) }] };
+      const owedMentions = await mentions();
+      return { isError: true, content: [{ type: 'text' as const, text },
+        ...(owedMentions ? [{ type: 'text' as const, text: JSON.stringify({ owedMentions }) }] : [])] };
     }
   }
   private async setupNote(member: string) {
@@ -242,7 +267,7 @@ export class RoomsMcp {
        JOIN identities owner ON owner.id=member.owner_id WHERE member.member_id=$1`, [member])).rows[0];
     const delivery=await readMemberDelivery(this.oauth.database,member);
     return row ? { owner: { name: row.name, handle: row.handle }, delivery,
-      ...(!['proved_ready','host_without_live_delivery'].includes(delivery.state) ? { setup: SETUP_NOTE+(/muse/i.test(row.model_label)?'\n'+MUSE_SETUP_RECIPE:'') } : {}) } : {delivery};
+      ...(!['proved_ready','host_without_live_delivery'].includes(delivery.state) ? { setup: SETUP_NOTE+(/muse/i.test(row.model_label)?'\n'+MUSE_SETUP_RECIPE:'')+(delivery.mechanism==='local'&&delivery.failure==='local_receiver_setup_failed'?'\n'+LOCAL_RECEIVER_RECOVERY:'') } : {}) } : {delivery};
   }
   /** Complete a saved post, including a retry after the HTTP request was interrupted. */
   private async finishPost(member: string, roomId: string, messageId: string, key: string | null) {
@@ -271,13 +296,14 @@ export class RoomsMcp {
   private async mentionsPage(member: string, cursor: string, limit: number, db: SqlDatabase = this.oauth.database, stream = false) {
     const rows = (await db.query<{ seq: string; id: string; room_id: string; room_name: string; author_id: string; author_handle: string | null; author_name: string | null; created_at: Date; text: string; truncated: boolean }>(
       `WITH readable AS (${READABLE})
-       SELECT mention.seq::text seq,m.id,m.room_id,r.name room_name,m.author_id,i.handle author_handle,i.name author_name,
+       SELECT mention.seq::text seq,m.id,m.room_id,r.name room_name,m.author_id,beeline_room_handle(i.id,m.room_id) author_handle,i.name author_name,
          m.created_at,left(m.text,16000) text,length(m.text)>16000 truncated
        FROM rooms_mcp_mentions mention
        JOIN readable r ON r.id=mention.room_id
        JOIN messages m ON m.id=mention.message_id AND m.deleted_at IS NULL
        LEFT JOIN identities i ON i.id=m.author_id
        WHERE mention.member_id=$1 AND mention.cleared_at IS NULL AND mention.seq>$2::bigint
+         AND ${OWED_MENTION_OPEN_SQL}
          AND EXISTS(SELECT 1 FROM rooms active WHERE active.id=mention.room_id AND active.archived_at IS NULL)
        ORDER BY mention.seq LIMIT $3`, [member, cursor, limit + 1])).rows;
     const page = rows.slice(0, limit);
@@ -305,13 +331,13 @@ export class RoomsMcp {
       if(args.mechanism==='local' && args.installed!==true) return prepareLocalDelivery(db,principal,this.oauth.origin,args);
       return setupMemberDelivery(db,principal,args);
     }
-    if(name==='delivery_failed') { await failMemberDelivery(db,member,textArg(args.generation,100),textArg(args.reason,300));return {delivery:await readMemberDelivery(db,member)}; }
+    if(name==='delivery_failed') { await failMemberDelivery(db,member,textArg(args.generation,100),textArg(args.reason,300));const delivery=await readMemberDelivery(db,member);return {delivery,...(delivery.mechanism==='local'&&delivery.failure==='local_receiver_setup_failed'?{next:LOCAL_RECEIVER_RECOVERY}:{})}; }
     if(name==='confirm_delivery') return confirmMemberDelivery(db,principal,args);
     if (name === 'list_rooms') {
       const rooms = (await db.query(`WITH readable AS (${READABLE}) SELECT id,name,workspace_id FROM readable WHERE parent_id IS NULL ORDER BY id LIMIT 100`, [viewer])).rows;
       const setup = await this.setupNote(member);
       // Who this member is, so a client can address it by the name and handle its owner allowed.
-      const you = (await db.query<{ id: string; name: string; handle: string | null }>('SELECT id,name,handle FROM identities WHERE id=$1', [member])).rows[0];
+      const you = (await db.query<{ id: string; name: string; handle: string | null }>('SELECT id,name,beeline_workspace_handle(id,NULL) handle FROM identities WHERE id=$1', [member])).rows[0];
       return rooms.length ? { rooms, you, ...setup } : { rooms, you, ...setup, note: 'You are in no Rooms yet. You join public Rooms in the Workspaces selected on Allow; for any other Room, your owner adds you under Members in the Beeline app.' };
     }
     if (name === 'list_mentions') {
@@ -337,7 +363,7 @@ export class RoomsMcp {
         await tx.query("SET LOCAL statement_timeout='2s'");
         return (await tx.query(`WITH readable AS (${READABLE}), cursor AS (
             SELECT m.created_at,m.id FROM messages m JOIN readable r ON r.id=m.room_id WHERE m.id=$3 AND m.room_id=$2
-          ) SELECT m.id,m.room_id,m.author_id,i.handle author_handle,m.created_at,left(m.text,16000) text,
+          ) SELECT m.id,m.room_id,m.author_id,beeline_room_handle(i.id,m.room_id) author_handle,m.created_at,left(m.text,16000) text,
             length(m.text)>16000 truncated
           FROM messages m JOIN readable r ON r.id=m.room_id LEFT JOIN identities i ON i.id=m.author_id
           WHERE ($2::uuid IS NULL OR m.room_id=$2) AND ${visibleChatMessageSql('m')}
@@ -353,7 +379,8 @@ export class RoomsMcp {
       const text = textArg(args.text, 16000);
       const replyTo = args.replyTo === undefined ? undefined : textArg(args.replyTo, 64);
       if (replyTo !== undefined && !/^[0-9a-f]{64}$/.test(replyTo)) throw new Error('Invalid replyTo');
-      const mentionKey = await mentionReplyKey(db, member, roomId, replyTo);
+      const mentionTag = await mentionReplyKey(db, member, roomId, replyTo);
+      const mentionKey = mentionTag && mentionAnswerKey(mentionTag, text);
       const key = mentionKey ?? (args.idempotencyKey === undefined ? null : textArg(args.idempotencyKey, 100));
       const messageId = key ? (mentionKey ? mentionReplyId(mentionKey) : createHash('sha256').update(`rooms-mcp-message:${member}:${key}`).digest('hex')) : undefined;
       if (key) {

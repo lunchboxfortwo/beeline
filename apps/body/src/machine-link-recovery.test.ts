@@ -14,9 +14,10 @@ class Socket extends EventEmitter{
 }
 const cleanups:(()=>void)[]=[];
 afterEach(()=>{for(const cleanup of cleanups.splice(0))cleanup();vi.useRealTimers();});
-function fixture(count=1){
+function fixture(count=1,resumes?:EventEmitter){
   const sockets:Socket[]=[],opened=vi.fn(),closed=vi.fn(),updated=vi.fn();
-  const machine=new MachineLink({baseUrl:'http://synthetic.invalid',factory:()=>{const socket=new Socket();sockets.push(socket);return socket as unknown as WebSocket;}});
+  const machine=new MachineLink({baseUrl:'http://synthetic.invalid',factory:()=>{const socket=new Socket();sockets.push(socket);return socket as unknown as WebSocket;},
+    ...(resumes?{subscribeResume:(listener:()=>void)=>{resumes.on('resume',listener);return()=>{resumes.off('resume',listener);};}}:{})});
   const agents=Array.from({length:count},(_,index)=>machine.attach(`agent-${index}`,{
     registration:()=>({token:`bdt_${index}`}),onOpen:opened,onClose:closed,onMessage:()=>{},onUpdateRequired:updated}));
   for(const agent of agents)agent.start();cleanups.push(()=>machine.stop());
@@ -30,6 +31,17 @@ it('uses one handshake for all machine agents and reconnects once per actual clo
     sockets.at(-1)!.close();await Promise.resolve();expect(sockets).toHaveLength(drop+1);register(sockets.at(-1)!);
     expect(machine.link.reconnects).toBe(drop);expect(closed).toHaveBeenCalledTimes(24*drop);
   }
+});
+it('closes the socket restored by a VM resume and immediately registers on one successor',async()=>{
+  const resumes=new EventEmitter();const {machine,sockets,opened,closed,register}=fixture(1,resumes);
+  register(sockets[0]!);
+  resumes.emit('resume');await Promise.resolve();
+  expect(sockets[0]!.readyState).toBe(3);
+  expect(sockets).toHaveLength(2);expect(machine.link.reconnects).toBe(1);
+  expect(closed).toHaveBeenCalledOnce();register(sockets[1]!);
+  expect(opened).toHaveBeenCalledTimes(2);
+  machine.stop();resumes.emit('resume');await Promise.resolve();
+  expect(sockets).toHaveLength(2);expect(resumes.listenerCount('resume')).toBe(0);
 });
 it.each(['registration','initial snapshots','intake heartbeat'])('does not close a living socket while %s is quiet',async()=>{
   vi.useFakeTimers();const {sockets,machine}=fixture();sockets[0]!.open();

@@ -305,6 +305,11 @@ export class DaemonApiClient {
     return this.#channel.onOpen(listener);
   }
 
+  /** End an open connection so intake resumes through authenticated live open. */
+  reconnectLive(): void {
+    this.#channel.reconnect();
+  }
+
   /** Add one Room to this agent's shared live socket. */
   liveSubscribe(
     roomId: string,
@@ -422,18 +427,8 @@ export class DaemonApiClient {
   }
 
   turnOwnershipScope(): import('@beeline/api-contract/helper-turn-ownership').HelperTurnOwnershipSource | undefined {
-    return this.#channel.turn.scope();
+    return this.#channel.turnSource;
   }
-  noteOwnedTurnClaim(
-    turn: { roomId: string; requestId: string; generationId?: string },
-    source: import('@beeline/api-contract/helper-turn-ownership').HelperTurnOwnershipSource,
-    onLost: () => void,
-  ): void { this.#channel.turn.claimed(turn, source, onLost); }
-  releaseOwnedTurn(turn: { roomId: string; requestId: string; generationId?: string }): void { this.#channel.turn.release(turn); }
-  noteLegacyTurnClaim(turn: { roomId: string; requestId: string; generationId?: string }): void { this.#channel.turn.claimedLegacy(turn); }
-  runWithTurnOwnership<T>(
-    turn: { roomId: string; requestId: string; generationId?: string }, task: () => Promise<T>, onLost?: () => void,
-  ): Promise<T> | undefined { return this.#channel.turn.runOwned(turn, task, onLost); }
 
   async execute<Name extends keyof DaemonOperationMap>(
     name: Name,
@@ -615,6 +610,10 @@ export class DaemonApiClient {
         connectionPresence: capabilities?.connectionPresence === true,
       };
       this.completeLiveSubscription(event.roomId);
+      return;
+    }
+    if (event.type === 'commands' && typeof event.error === 'string') {
+      if (this.currentLiveSubscription(event)) this.reconnectLive();
       return;
     }
     if (

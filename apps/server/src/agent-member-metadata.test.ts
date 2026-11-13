@@ -56,7 +56,7 @@ it('returns owner and host through Room, corner and workspace member operations'
 
 it('returns provider quota, billing and parent reviewer roles only to Room members', async () => {
   const usage = { updatedAt: 1000, windows: [{ rateLimitType: 'weekly', status: 'allowed', utilization: 0.25, updatedAt: 1000, resetsAt: 2000 }], plan: 'pro' };
-  await database.query(`UPDATE agents SET selected_model='test-model',usage_snapshot=$2::jsonb WHERE agent_id=$1`, [JELLYBEAN, JSON.stringify(usage)]);
+  await database.query(`UPDATE agents SET selected_model='next-model',model_catalog='[{"id":"model","category":"model","currentValue":"test-model","options":[]}]'::jsonb,usage_snapshot=$2::jsonb WHERE agent_id=$1`, [JELLYBEAN, JSON.stringify(usage)]);
   await database.query(`UPDATE agents SET usage_snapshot=$2::jsonb WHERE agent_id=$1`, [RUBY, JSON.stringify({ updatedAt: 1000, windows: [], spend: { today: 0, remaining: 12 } })]);
   await database.query(`UPDATE rooms SET reviewer_agent_id=$2 WHERE id=$1`, [ROOM, RUBY]);
   // A stored fallback is retired: it carries no reviewer role.
@@ -79,7 +79,7 @@ it('returns provider quota, billing and parent reviewer roles only to Room membe
 });
 
 it('includes a known free token allowance without inventing billing', async () => {
-  await database.query(`INSERT INTO free_agents(agent_id,workspace_id,owner_id,sealed_keys) VALUES($1,$2,$3,'fixture')`, [NEW, WORKSPACE, OWNER]);
+  await database.query(`WITH workspace AS (SELECT $2::uuid) INSERT INTO free_agents(agent_id,owner_id,sealed_keys) VALUES($1,$3,'fixture')`, [NEW, WORKSPACE, OWNER]);
   await database.query(`INSERT INTO free_agent_usage(owner_id,day,tokens) VALUES($1,(now() AT TIME ZONE 'UTC')::date,123000)`, [OWNER]);
   const result = await service.execute('listRoomMembers', { roomId: ROOM }, JELLYBEAN);
   // A free agent with no settled model call yet is in its owner's first-day allowance.

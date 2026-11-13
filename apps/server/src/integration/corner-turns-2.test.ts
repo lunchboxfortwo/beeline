@@ -447,8 +447,7 @@ const fixture = monolithFixture();
         [ROOM],
       );
     const first = (await lines()).rows;
-    expect(first).toHaveLength(1);
-    expect(first[0]!.text).toBe('@bee could not finish this request · provider error 429 concurrency_limit');
+    expect(first).toEqual([]);
     expect(
       (
         await fixture.database.query<{ state: string }>(
@@ -459,18 +458,18 @@ const fixture = monolithFixture();
     ).toEqual({ state: 'complete' });
     const replay=await fixture.daemonOperation('postAgentTurnReceipt',{roomId:ROOM,requestId,status:'failed',reason:'provider error 429 concurrency_limit',reasonKind:'hiccup'});
     expect(replay.status).toBe(200);
-    expect((await lines()).rows).toHaveLength(1);
+    expect((await lines()).rows).toEqual([]);
     const commands=await (await fixture.daemonOperation('getAgentCommands',{roomId:ROOM})).json() as {commands:{turnRequestId:string}[]};
     expect(commands.commands.some(command=>command.turnRequestId===requestId)).toBe(false);
     const room = (await new PhoneService(fixture.database, fixture.origin).readRoom(ROOM, HUMAN))!;
-    expect(room.messages.filter(message=>message.id===first[0]!.id).map(message=>message.text)).toEqual([first[0]!.text]);
+    expect(room.messages.filter(message => message.cardType === 'turn-failed')).toEqual([]);
     await fixture.daemonOperation('postAgentTurnReceipt', {
       roomId: ROOM,
       requestId: '9'.repeat(64),
       status: 'failed',
       reason: 'ACP agent exited (code 1)',
     });
-    expect((await lines()).rows).toHaveLength(2);
+    expect((await lines()).rows).toEqual([]);
   });
 
 

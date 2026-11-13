@@ -1,10 +1,9 @@
 import { HumanProfile } from '../human-profile';
 import BuzzMembers from '../members';
 import React from 'react';
-import { View } from 'react-native';
+import { YStack } from 'tamagui';
 import { type ChannelReferenceIndex, type ChannelReferenceTarget } from '@/buzz/channel-reference';
 import { DesktopRoomInspector } from '@/components/DesktopRoomInspector';
-import { styles } from './chat-surface-styles';
 
 type Props = {
   profileAgentId: string | null;
@@ -43,7 +42,7 @@ export function ChatSurfaceWorkPane({
   closeDesktopWorkPane,
 }: Props) { return <>
         {profileAgentId && desktopExperience && activeCommunityId && (
-          <View style={styles.agentProfilePane} testID="desktop-agent-profile-pane">
+          <YStack width={380} maxWidth="50%" borderLeftWidth={1} borderLeftColor="stroke" testID="desktop-agent-profile-pane">
             {profileKind === 'human' ? (
               <HumanProfile
                 key={profileAgentId}
@@ -60,7 +59,7 @@ export function ChatSurfaceWorkPane({
                 onClose={() => setProfileAgentId(null)}
               />
             )}
-          </View>
+          </YStack>
         )}
         {!profileAgentId && desktopWorkPaneMounted && desktopWorkPaneContent && (
           <DesktopRoomInspector

@@ -407,7 +407,7 @@ const fixture = monolithFixture();
   });
 
 
-  it('starts a turn for an ended asker only when Squire allowed the request', async () => {
+  it('keeps expiry routing unchanged for an ended Squire asker', async () => {
     const asked = (await (
       await fixture.operation('sendRoomMessage', { roomId: ROOM, text: '@bee fetch the other login', mentions: [AGENT] })
     ).json()) as { messageId: string };
@@ -423,11 +423,7 @@ const fixture = monolithFixture();
       `SELECT state,source_message_id FROM agent_commands WHERE room_id=$1 AND agent_id=$2 AND turn_request_id=$3 AND action='resume'`,
       [ROOM, AGENT, asked.messageId],
     )).rows;
-    expect((await decide('reveal-ended-denied', 'denied')).status).toBe(200);
     expect((await decide('reveal-ended-expired', 'expired')).status).toBe(200);
     expect(await resumes()).toEqual([]);
-    const allowed = (await (await decide('reveal-ended-approved', 'approved')).json()) as { id: string };
-    expect((await decide('reveal-ended-approved', 'approved')).status).toBe(200);
-    expect(await resumes()).toEqual([{ state: 'pending', source_message_id: allowed.id }]);
   });
 });

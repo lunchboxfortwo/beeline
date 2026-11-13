@@ -158,6 +158,8 @@ beforeEach(async () => {
   ]);
   await database.query(
     `INSERT INTO memberships(workspace_id,room_id,identity_id,role) VALUES
+       ($1,NULL,$3,'owner'),($1,NULL,$4,'member'),($1,NULL,$5,'member'),($1,NULL,$6,'member'),
+       ($1,NULL,$7,'member'),($1,NULL,$8,'member'),
        ($1,$2,$3,'owner'),($1,$2,$4,'member'),($1,$2,$5,'member'),($1,$2,$6,'member'),
        ($1,$2,$7,'member'),($1,$2,$8,'member')`,
     [WORKSPACE, ROOM, OWNER, IMPLEMENTER, REVIEWER, APPROVER, WORKER_A, WORKER_B],

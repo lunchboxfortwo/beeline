@@ -49,9 +49,10 @@ async function fixture() {
     await left.query(`CREATE TABLE identities(id text PRIMARY KEY,kind text,name text);
       CREATE TABLE agents(agent_id text PRIMARY KEY,owner_id text);
       CREATE TABLE workspaces(id uuid PRIMARY KEY,name text);
-      CREATE TABLE rooms(id uuid PRIMARY KEY,workspace_id uuid,name text,parent_id uuid,archived_at timestamptz);
-      CREATE TABLE memberships(workspace_id uuid,room_id uuid,identity_id text,role text,removed_at timestamptz);
-      CREATE TABLE free_agents(agent_id text PRIMARY KEY,workspace_id uuid,owner_id text,sealed_keys text,
+      CREATE TABLE rooms(id uuid PRIMARY KEY,workspace_id uuid,name text,parent_id uuid,archived_at timestamptz,reviewer_agent_id text);
+      CREATE TABLE corner_facts(corner_id uuid PRIMARY KEY,reviewer_agent_id text);
+      CREATE TABLE memberships(id bigserial,joined_at timestamptz DEFAULT now(),workspace_id uuid,room_id uuid,identity_id text,role text,removed_at timestamptz);
+      CREATE TABLE free_agents(agent_id text PRIMARY KEY,owner_id text,sealed_keys text,
         model_token_hash text,state text,model text,removed_at timestamptz);
       CREATE TABLE live_server_instances(instance_id text PRIMARY KEY,renewed_at timestamptz);
       CREATE TABLE agent_connections(agent_id text PRIMARY KEY,connection_id text,epoch bigint,instance_id text,released_at timestamptz);
@@ -169,7 +170,7 @@ describe.skipIf(!url)('real PostgreSQL owned model primitive contention', () => 
       }else{
         expect(other).toEqual({value:{receipt:admitted.receipt}});
         expect((await f.left.query('SELECT tokens::int FROM free_agent_usage')).rows).toEqual([{tokens:266}]);
-        expect((await f.left.query('SELECT calls FROM free_agent_call_rate')).rows).toEqual([{calls:1}]);
+        expect((await f.left.query('SELECT lifetime_tokens::int tokens FROM free_agent_call_rate')).rows).toEqual([{tokens:266}]);
       }
       expect((await f.left.query('SELECT * FROM owned_model_attempts')).rowCount).toBe(1);
     } finally {

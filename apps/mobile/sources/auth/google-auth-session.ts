@@ -6,6 +6,7 @@ import { sha256 } from '@noble/hashes/sha2.js';
 import { bytesToHex, utf8ToBytes } from '@noble/hashes/utils.js';
 import { OidcBindError, parseOidcBindCallback } from '@beeline/buzz-client';
 import { getBuzzRuntimeConfig } from '@/buzz/runtime-config';
+import { accountAuthFetch } from './github-auth-session';
 import { desktopAuthRedirectUri } from './desktop-auth-redirect';
 import { googleAccountPicker } from './google-account-picker';
 
@@ -60,7 +61,7 @@ async function googleAuthFetch(url: string, init: RequestInit, timeoutMs = 5_000
   init.signal?.addEventListener('abort', abort, { once: true });
   if (init.signal?.aborted) abort();
   try {
-    return await fetch(url, { ...init, signal: controller.signal });
+    return await accountAuthFetch(url, { ...init, signal: controller.signal });
   } finally { clearTimeout(timer); init.signal?.removeEventListener('abort', abort); }
 }
 
@@ -211,8 +212,6 @@ export async function runGoogleSignIn(input: {
   url.searchParams.set('app_state', input.state);
   url.searchParams.set('app_recovery_challenge', bytesToHex(sha256(utf8ToBytes(input.recoveryToken))));
   const controller = new AbortController();
-  let terminal: ReturnType<typeof setTimeout> | undefined;
-  let completionFailure: unknown;
   const never = () => new Promise<never>(() => {});
   let observed!: (url: string) => void;
   const callback = new Promise<string>(resolve => { observed = resolve; });
@@ -233,7 +232,11 @@ export async function runGoogleSignIn(input: {
   input.signal?.addEventListener('abort', abort, { once: true });
   if (input.signal?.aborted) abort();
   const held = completion(pending, Math.min(waitMs, 120_000), controller.signal);
-  const completed = held.then(ticket => ticket ?? never(), error => { completionFailure = error; return never(); });
+  const completed = held.then(ticket => ticket ?? never(), error => {
+    // Browser close/replacement owns its intentional abort and completion check.
+    if (controller.signal.aborted) return never();
+    throw error;
+  });
   const callbackResult = callback.then(async value => {
     if (controller.signal.aborted) return never();
     if ((await pendingGoogle())?.state !== input.state)
@@ -248,6 +251,8 @@ export async function runGoogleSignIn(input: {
   const browser = input.openAuthSession(url.toString(), redirect).then(async result => {
     if (controller.signal.aborted) return never();
     if (result.url) { observed(result.url); return never(); }
+    // The page is open. Free the buttons and keep waiting for the callback.
+    if (result.type === 'opened') { input.onBrowserClosed?.(); return never(); }
     if (result.type !== 'cancel' && result.type !== 'dismiss') return never();
     if (input.platform === 'android') {
       input.onBrowserClosed?.();
@@ -259,11 +264,7 @@ export async function runGoogleSignIn(input: {
     if (ticket) return ticket;
     throw new OidcBindError('browser_canceled', 'Google sign-in was canceled');
   }, error => { browserFailed = true; throw error; });
-  const deadline = new Promise<never>((_resolve, reject) => {
-    terminal = setTimeout(() => reject(completionFailure ??
-      new OidcBindError('token_expired', 'Google sign-in expired. Try again.')), waitMs);
-  });
-  try { return await Promise.race([completed, callbackResult, browser, deadline, replaced]); }
+  try { return await Promise.race([completed, callbackResult, browser, replaced]); }
   catch (error) {
     // Preserve correlation after uncertain transport loss so a cold callback
     // gets one recovery inspection. Explicit close/invalid proof revokes it.
@@ -275,7 +276,7 @@ export async function runGoogleSignIn(input: {
       await clearPendingGoogleSignIn(input.state);
     }
     throw error;
-  } finally { if (terminal) clearTimeout(terminal); input.signal?.removeEventListener('abort', abort); controller.abort(); subscription.remove(); }
+  } finally { input.signal?.removeEventListener('abort', abort); controller.abort(); subscription.remove(); }
 
 }
 

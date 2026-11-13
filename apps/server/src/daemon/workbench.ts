@@ -60,8 +60,8 @@ import { id, Input, Output } from './values.js';
         owner_avatar: string | null;
       }>(
         `SELECT room.workspace_id,room.parent_id,a.owner_id,a.machine_id,a.machine_name,
-                agent.name agent_name,agent.handle agent_handle,agent.avatar agent_avatar,
-                owner.name owner_name,owner.handle owner_handle,owner.avatar owner_avatar
+                agent.name agent_name,beeline_workspace_handle(agent.id,room.workspace_id) agent_handle,agent.avatar agent_avatar,
+                owner.name owner_name,beeline_workspace_handle(owner.id,room.workspace_id) owner_handle,owner.avatar owner_avatar
          FROM rooms room
          JOIN agents a ON a.agent_id=$2
          JOIN identities agent ON agent.id=a.agent_id

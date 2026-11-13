@@ -2,8 +2,8 @@ import { isCredentialFetchToolName } from '@beeline/api-contract/daemon';
 import type { ToolCallEntry } from './acp.js';
 
 /** Tool identity, including MCP names and harness argument envelopes; never output text. */
-function isCredentialFetch(call: ToolCallEntry): boolean {
-  if (isCredentialFetchToolName(call.name) || isCredentialFetchToolName(call.title)) return true;
+function matchesTool(call: ToolCallEntry, matches: (value: unknown) => boolean): boolean {
+  if (matches(call.name) || matches(call.title)) return true;
   let input = call.rawInput;
   for (let depth = 0; depth < 4; depth++) {
     if (typeof input === 'string') {
@@ -11,17 +11,20 @@ function isCredentialFetch(call: ToolCallEntry): boolean {
     }
     if (!input || typeof input !== 'object' || Array.isArray(input)) return false;
     const record = input as Record<string, unknown>;
-    if (isCredentialFetchToolName(record.name) || isCredentialFetchToolName(record.tool) || isCredentialFetchToolName(record.tool_name)) return true;
+    if (matches(record.name) || matches(record.tool) || matches(record.tool_name)) return true;
     input = record.arguments ?? record.tool_input ?? record.toolInput;
   }
   return false;
 }
 
-/** The harness receives the real result. Every Body record gets only this placeholder. */
+/** The harness receives real credentials. Body records mask fetched results and stored inputs. */
 export function maskCredentialResult<T extends ToolCallEntry>(call: T, identity: ToolCallEntry = call): T {
-  if (!isCredentialFetch(identity)) return call;
+  const storesSecret = matchesTool(identity, value =>
+    typeof value === 'string' && /(?:^|[._:/-])store_secret$/.test(value));
+  if (!storesSecret && !matchesTool(identity, isCredentialFetchToolName)) return call;
   return {
     ...call,
+    ...(storesSecret ? { name: 'store_secret', title: 'store_secret', rawInput: '[REDACTED]' } : {}),
     ...('content' in call ? { content: '[REDACTED]' } : {}),
     ...('rawOutput' in call ? { rawOutput: '[REDACTED]' } : {}),
     ...('locations' in call ? { locations: undefined } : {}),

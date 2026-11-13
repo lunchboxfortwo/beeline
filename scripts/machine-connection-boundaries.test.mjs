@@ -57,6 +57,13 @@ test('the sole warm countdown is pinned to AgentProcesses.workChanged',()=>{
   assert.ok(inspectMachineConnectionSource(file,'class AgentProcesses { extra(){setTimeout(stop,60000)} }').length);
 });
 
+test('the sole update timeout is pinned to ReleaseTransaction.begin',()=>{
+  const file='apps/body/src/managed-update.ts';
+  assert.deepEqual(inspectMachineConnectionSource(file,'class ReleaseTransaction { begin(){setTimeout(abandon,180000)} }'),[]);
+  assert.ok(inspectMachineConnectionSource(file,'class ReleaseTransaction { begin(){setTimeout(abandon,180000);setTimeout(retry,10)} }').length);
+  assert.ok(inspectMachineConnectionSource(file,'class ReleaseTransaction { idleChanged(){setTimeout(retry,180000)} }').length);
+});
+
 
 test('server shutdown sinks follow only an unchanged mechanical owner move',()=>{
   const before='export function createBeelineServer(){ for(const client of webSockets.clients) client.terminate(); webSockets.close(); }';
@@ -70,4 +77,11 @@ test('server shutdown sinks follow only an unchanged mechanical owner move',()=>
   assert.ok(judgeMachineSites(new Map([[id,1]]),inventory,baseline).length);
   assert.deepEqual(judgeMachineSites(new Map([[id,1]]),inventory,baseline,true),[]);
   assert.ok(judgeMachineSites(new Map([[id,2]]),{[id]:{count:2,reason:'shutdown'}},baseline,true).length);
+});
+
+test('only the invocation owner may bound a model turn with one deadline',()=>{
+  const file='apps/body/src/agent-turn-deadline.ts';
+  assert.deepEqual(inspectMachineConnectionSource(file,'class AgentTurnDeadline { run(){setTimeout(stop,21600000)} }'),[]);
+  assert.ok(inspectMachineConnectionSource(file,'class AgentTurnDeadline { run(){setTimeout(stop,21600000);setTimeout(retry,1)} }').length);
+  assert.ok(inspectMachineConnectionSource(file,'class AgentTurnDeadline { retry(){setTimeout(stop,1)} }').length);
 });

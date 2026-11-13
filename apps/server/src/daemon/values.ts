@@ -13,7 +13,7 @@ import { createHash, randomBytes } from 'node:crypto';
 import { endComputerSession, refreshComputerSession } from '../computer-session.js';
 import type { DaemonAttachment, DaemonOperationMap } from '@beeline/api-contract/daemon';
 import { REPLY_EXCERPT_MAX_LENGTH } from '@beeline/api-contract/daemon';
-import { GRANT_SCRIPT_MAX_BYTES, GRANT_SCRIPT_MAX_LINES, grantScriptTooLongMessage, interpreterScriptArgument, connectionInstallName, isCommandGrantScript, type AgentGrantKind, type CommandGrantRule, type CommandGrantScript } from '@beeline/api-contract/agent-grants';
+import { interpreterScriptArgument, connectionInstallName, isCommandGrantScript, type AgentGrantKind, type CommandGrantRule, type CommandGrantScript } from '@beeline/api-contract/agent-grants';
 import { MESSAGE_CURSOR_MS_SQL } from '../database.js';
 import { type SystemPhrase } from '../system-line.js';
 import { mediaIdFromUrl } from '../media-ttl.js';
@@ -174,37 +174,37 @@ export function validateGrantScript(
   script: unknown,
 ): CommandGrantScript | undefined {
   const argument = interpreterScriptArgument(rule.argv);
-  if (script === undefined || script === null) return undefined;
+  if (rule.stdin !== undefined && !argument?.stdin) throw new Error('grant stdin is invalid: only interpreter stdin code is supported');
+  if (script === undefined || script === null) {
+    if (argument?.inline !== undefined || argument?.stdin)
+      throw new Error('grant script is required: show the exact inline or stdin code');
+    return undefined;
+  }
   if (!argument) throw new Error('grant script is only for an interpreter command');
   if (!isCommandGrantScript(script)) throw new Error('grant script is invalid');
   if (script.path !== argument.path) {
     throw new Error(`grant script must be the command's script argument (${argument.path})`);
   }
+  if (argument.inline !== undefined && script.contents !== argument.inline)
+    throw new Error('grant script is invalid: inline code does not match the command');
+  if (argument.stdin && script.contents !== rule.stdin)
+    throw new Error('grant script is invalid: stdin code does not match the command');
   // The hash is the binding, so the server re-derives it rather than trusting
   // the number it was handed: the bytes on the card and the bytes the runner
   // will check must be the same bytes.
-  const bytes = Buffer.byteLength(script.contents);
   if (
-    script.bytes !== bytes ||
+    script.bytes !== Buffer.byteLength(script.contents) ||
     createHash('sha256').update(script.contents).digest('hex') !== script.sha256
   ) {
     throw new Error('grant script is invalid: its hash does not match its contents');
   }
-  const lines = script.contents.split('\n').length;
-  if (bytes > GRANT_SCRIPT_MAX_BYTES || lines > GRANT_SCRIPT_MAX_LINES) {
-    // 'invalid' keeps this a 400 in `server.ts`'s status mapper, and the whole
-    // refusal still reaches the agent as its tool error.
-    throw new Error(
-      `grant script is invalid: ${grantScriptTooLongMessage(script.path, bytes, lines)}`,
-    );
-  }
-  return script;
+  return { path: script.path, sha256: script.sha256, bytes: script.bytes, contents: script.contents };
 }
 
 
 /** One action line for each remaining permission ask. */
 export function grantCardPhrase(
-  requester: { pubkey: string; kind: 'human' | 'agent'; name: string },
+  _requester: { pubkey: string; kind: 'human' | 'agent'; name: string },
   agent: { pubkey: string; name: string },
   grants: readonly { kind: AgentGrantKind; target: string; appName?: string }[],
 ): SystemPhrase {
@@ -212,20 +212,25 @@ export function grantCardPhrase(
     return { subject: { kind: 'agent', id: agent.pubkey, name: agent.name },
       verb: systemMessage("daemon-service.wants-to-connect"), object: grants.map(grant => connectionInstallName(grant)).join(systemMessage("daemon-service.and")) };
   }
+  const verbs: Record<AgentGrantKind, string> = {
+    command: systemMessage("daemon-service.run"),
+    path: systemMessage("daemon-service.read"),
+    repository: systemMessage("daemon-service.edit"),
+    secret: systemMessage("daemon-service.use"),
+    device: systemMessage("daemon-service.use"),
+    mcp: systemMessage("daemon-service.use"),
+    host: systemMessage("daemon-service.reach"),
+    budget: systemMessage("daemon-service.spend"),
+    shared_asset: systemMessage("daemon-service.isolate"),
+  };
   return {
-    subject: {
-      kind: requester.kind === 'human' ? 'person' : 'agent',
-      id: requester.pubkey,
-      name: requester.name,
-    },
-    verb: systemMessage("daemon-service.wants"),
-    object: grants
-      .map(
-        (grant) =>
-          connectionInstallName(grant) ? systemMessage("daemon-service.to-connect", agent.name, connectionInstallName(grant))
-            : systemMessage("daemon-service.to", agent.name, grant.kind === 'path' ? systemMessage("daemon-service.read") : grant.kind === 'repository' ? systemMessage("daemon-service.write") : grant.kind === 'shared_asset' ? systemMessage("daemon-service.isolate") : systemMessage("daemon-service.use"), grant.target),
-      )
-      .join(systemMessage("daemon-service.and")),
+    subject: { kind: 'agent', id: agent.pubkey, name: agent.name },
+    verb: systemMessage("daemon-service.wants-to"),
+    object: grants.map(grant => {
+      const app = connectionInstallName(grant);
+      return app ? systemMessage("daemon-service.connect-app", app)
+        : systemMessage("daemon-service.grant-action", verbs[grant.kind], grant.target);
+    }).join(systemMessage("daemon-service.and")),
   };
 }
 
@@ -243,6 +248,7 @@ export const conversationColumns = `SELECT id,author_id,created_at,presentation,
         root_message_id,request_id,
         (SELECT request.author_id FROM messages request WHERE request.id=messages.request_id) request_author_id,
         agent_hop_count,attachments,system_event,
+        CASE WHEN chat_seq IS NOT NULL THEN '¶'||beeline_room_handle(author_id,room_id)||'-'||chat_seq END message_link,
         ${MESSAGE_CURSOR_MS_SQL} cursor_ms,
         floor(extract(epoch FROM now())*1000)::bigint now_ms`;
 
@@ -334,7 +340,6 @@ export const DAEMON_OPERATION_ROUTES: Record<keyof DaemonOperationMap, true> = {
   getCornerCloseRequests: true,
   listUntrackedCorners: true,
   getRoomRepositoryState: true,
-  noteEmptyRoomRepository: true,
   getRoomGitHubToken: true,
   dispatchRoomWorkflow: true,
   getRoomTargetBranch: true,

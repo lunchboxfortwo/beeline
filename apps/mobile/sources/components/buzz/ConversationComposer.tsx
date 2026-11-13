@@ -1,14 +1,8 @@
 import { ErrorBanner } from '@/components/buzz/ErrorBanner';
 import type { DictationTiming } from '@/buzz/dictation-timing';
-import { InlineRow } from './IndexRow';
-import { Button } from '@/components/buzz/Button';
-import { CloseButton } from '@/components/buzz/CloseGlyph';
 import * as React from 'react';
 import {
-  Text,
-  TextInput,
-  TouchableOpacity,
-  View,
+  type TextInput,
   Keyboard,
   Linking,
   Platform,
@@ -18,19 +12,33 @@ import {
   type TextInputSelectionChangeEventData,
   type TextLayoutEvent,
 } from 'react-native';
-import { StyleSheet, useUnistyles } from 'react-native-unistyles';
+import { YStack, useTheme } from 'tamagui';
+import { useTextSize } from '@/ui/grammar';
+import { NativeTypeInput, NativeTypeMeasure } from '@/ui/grammar-root';
 import { groknight } from '@/buzz/groknight';
 import { HullDialog } from './HullDialog';
-import { ArrowUpGlyph, COMPOSER_GLYPH_SIZE, MicGlyph, PlusGlyph, StopGlyph, WaveformGlyph } from './MicGlyph';
+import { COMPOSER_GLYPH_SIZE } from './MicGlyph';
 import { VoiceAgentStrip, VoiceBar } from './VoiceBar';
 import { RuntimeErrorBoundary } from './RuntimeErrorBoundary';
 import type { VoiceCallState } from '@/buzz/use-voice-call';
-import { VOICE_LONG_PRESS_MS } from '@beeline/api-contract/phone';
 import { BeelineMarkSpinner } from './BeelineMarkSpinner';
 import { SurfaceGlyphLoader } from './SurfaceGlyphLoader';
-import { DictationWaveform } from './DictationWaveform';
 import { useSpeechInput } from '@/buzz/speech-input';
 import { composerBackspaceCursor, deleteComposerTagBackward, splitComposerTags } from '@/buzz/composer-tags';
+import { ArrowUp, AudioLines, Mic, Plus, Square } from 'lucide-react-native';
+import {
+  ComposerAdjuncts,
+  ComposerAttachment,
+  ComposerButton,
+  ComposerGlyph,
+  ComposerControls,
+  ComposerFrame,
+  ComposerListening,
+  ComposerMoreAttachments,
+  ComposerNote,
+  ComposerReply,
+  ComposerStatus,
+} from '@/ui/screens/composer/ComposerChrome';
 
 /**
  * A dictated message on its way out. Stop sets `cancelled` until the parent sets
@@ -74,7 +82,7 @@ type Props = {
    */
   speechEnabled?: boolean;
   /** Names spoken in this conversation, so dictation spells them as written. */
-  speechHints?: readonly string[];
+  speechHints?: readonly string[] | (() => readonly string[]);
   /**
    * Only supplied for a server-authorized, current working turn. The plain
    * tap-to-send composer takes no stop gesture of its own — the stop control
@@ -114,6 +122,8 @@ type Props = {
   attachmentsUploading?: boolean;
   onRemoveAttachment?(index: number): void;
   onRetryAttachment?(index: number): void;
+  /** The field's hint: "Message #chat" in a chat, "Reply in thread" in a corner. */
+  placeholder?: string;
 };
 
 export const COMPOSER_SINGLE_LINE_INPUT_HEIGHT = 26;
@@ -163,24 +173,36 @@ function ConversationComposerContent({
   attachmentsUploading = false,
   onRemoveAttachment,
   onRetryAttachment,
+  placeholder,
 }: Props) {
-  const { theme } = useUnistyles();
-  const voiceHeld = React.useRef(false);
+  const brass = useTheme().needsYou?.val as string;
+  const textSize = useTextSize();
   const containerRef = React.useRef<HTMLElement | null>(null);
   const ownInputRef = React.useRef<TextInput | null>(null);
   const [textOffset, setTextOffset] = React.useState(0);
   const [nativeLineHeight, setNativeLineHeight] = React.useState(COMPOSER_SINGLE_LINE_INPUT_HEIGHT);
-  // A scaled single line is still one line. Bottom-align only a paragraph
-  // taller than the measured line, so the viewer's spare space stays balanced.
-  const multiline = height > Math.max(COMPOSER_SINGLE_LINE_INPUT_HEIGHT, Math.ceil(nativeLineHeight));
+  // An empty field shows its hint. At a large Text size the hint can wrap, and
+  // the field must grow to show every line (the content size counts only text).
+  const placeholderText = placeholder ?? (!isDirectMessage && hasAgentMembers ? 'Tag an agent with @' : 'Message');
+  const [placeholderHeight, setPlaceholderHeight] = React.useState(0);
+  const emptyHeight = value ? 0 : Math.min(maxHeight, placeholderHeight);
   // A caller can keep an empty field at 26dp (the viewer does). A scaled
   // natural line must still fit before Android can center its baseline.
-  const inputHeight = Platform.OS === 'android' ? Math.max(height, Math.ceil(nativeLineHeight)) : height;
+  const inputHeight = Platform.OS === 'android'
+    ? Math.max(height, Math.ceil(nativeLineHeight), emptyHeight)
+    : Math.max(height, emptyHeight);
+  // A scaled single line is still one line. Bottom-align only a paragraph
+  // taller than the measured line, so the viewer's spare space stays balanced.
+  const multiline = Math.max(height, emptyHeight) > Math.max(COMPOSER_SINGLE_LINE_INPUT_HEIGHT, Math.ceil(nativeLineHeight));
   // iOS top-aligns its intrinsic text. Its 26dp minimum leaves extra space
   // only for a short single line; a grown paragraph has no such extra inset.
   const drawingOffset = textOffset + (Platform.OS === 'ios' && !multiline
     ? Math.max(0, COMPOSER_SINGLE_LINE_INPUT_HEIGHT - nativeLineHeight) / 2
     : 0);
+  const measurePlaceholder = React.useCallback((event: TextLayoutEvent) => {
+    const lines = event.nativeEvent.lines;
+    setPlaceholderHeight(Math.ceil(lines.reduce((sum, line) => sum + line.height, 0)));
+  }, []);
   const measureTextBody = React.useCallback((event: TextLayoutEvent) => {
     const line = event.nativeEvent.lines[0];
     if (!line) return;
@@ -204,6 +226,41 @@ function ConversationComposerContent({
     },
     [inputRef],
   );
+  // Web growth loop (typing reached the wrap point, then "Maximum update depth
+  // exceeded" and the composer's error boundary). With the changing height in
+  // the Unistyles style array, each height change made the textarea render
+  // without its stylesheet rule, in the browser's default font. Where Space
+  // Grotesk wraps the text and the default font does not, RN-web's
+  // content-size reading flipped between two lines and one (40px, 32px), and
+  // every reading resized the composer again. RN-web also measures inside its
+  // ref callback, which re-attaches on every render here, so nothing settled.
+  // On web the height is therefore set on the element, outside Unistyles, and
+  // the content size is read after commit, once that height is in place, and
+  // reported only when it changes.
+  React.useLayoutEffect(() => {
+    if (Platform.OS !== 'web') return;
+    const growingTextarea = ownInputRef.current as unknown as HTMLTextAreaElement | null;
+    if (!growingTextarea?.style) return;
+    growingTextarea.style.height = `${inputHeight}px`;
+    growingTextarea.style.maxHeight = `${maxHeight}px`;
+  });
+  const reportedContentSize = React.useRef<{ height: number; width: number; revision: number } | null>(null);
+  const contentSizeHandler = React.useRef(onContentSizeChange);
+  contentSizeHandler.current = onContentSizeChange;
+  React.useLayoutEffect(() => {
+    if (Platform.OS !== 'web') return;
+    const measuredTextarea = ownInputRef.current as unknown as HTMLTextAreaElement | null;
+    if (!measuredTextarea || typeof measuredTextarea.scrollHeight !== 'number') return;
+    const contentHeight = measuredTextarea.scrollHeight;
+    const contentWidth = measuredTextarea.scrollWidth;
+    const reported = reportedContentSize.current;
+    // A replaced input (a new revision) reports once, as RN-web did on attach.
+    if (reported && reported.revision === inputRevision && reported.height === contentHeight && reported.width === contentWidth) return;
+    reportedContentSize.current = { height: contentHeight, width: contentWidth, revision: inputRevision };
+    contentSizeHandler.current({
+      nativeEvent: { contentSize: { height: contentHeight, width: contentWidth } },
+    } as NativeSyntheticEvent<TextInputContentSizeChangeEventData>);
+  });
   const commitInputChange = (nextValue: string) => {
     if (isInputRevisionCurrent?.(inputRevision) === false) return;
     onChangeText(nextValue);
@@ -277,7 +334,7 @@ function ConversationComposerContent({
       window.removeEventListener('resize', measure);
       observer?.disconnect();
     };
-  }, [height, inputRevision, theme.buzz.type.body]);
+  }, [height, inputRevision, textSize]);
 
   // Speech recognition — internal hook, scoped to the composer.
   // What the current take added to the text, so Stop can take exactly that out.
@@ -372,156 +429,103 @@ function ConversationComposerContent({
   };
   const visibleAttachments = attachments.slice(0, 3);
   const hiddenAttachmentCount = Math.max(0, attachments.length - visibleAttachments.length);
+  const permissionDeniedNative = speech.state === 'permission-denied' && Platform.OS !== 'web';
   return (
     <>
     {(conversationActive || voice?.connecting) && voice && <VoiceAgentStrip voice={voice} />}
-    <View
-      ref={containerRef as React.Ref<View>}
-      {...containerProps}
-      style={[styles.composer, focused && styles.composerFocused,
-        ...(viewerPill ? [styles.viewerPill] : [])]}
-    >
+    <YStack ref={containerRef as never} {...containerProps}>
       {(reply || attachments.length > 0) && (
-        <View style={styles.adjuncts} testID={`${testIDPrefix}-composer-adjuncts`}>
-          {reply && (
-            <View style={styles.reply} testID="reply-composer-banner">
-              <View style={styles.replyCopy}>
-                <Text numberOfLines={1} style={styles.replyLabel}>
-                  <Text style={styles.replyGlyph}>↩</Text> Replying to{' '}
-                  <Text style={styles.replyHandle}>@{reply.handle}</Text>
-                </Text>
-                <Text numberOfLines={1} ellipsizeMode="tail" style={styles.replyPreview}>
-                  {reply.preview}
-                </Text>
-              </View>
-              <CloseButton
-                accessibilityLabel="Cancel reply"
-                onPress={onCancelReply}
-                testID="reply-composer-cancel"
-                control={styles.removeButton}
-              />
-            </View>
-          )}
+        <ComposerAdjuncts testID={`${testIDPrefix}-composer-adjuncts`}>
+          {reply && <ComposerReply handle={reply.handle} preview={reply.preview} onCancel={onCancelReply} />}
           {visibleAttachments.map((attachment, index) => (
-            <View
+            <ComposerAttachment
               key={`${attachment.uri}:${index}`}
-              style={[styles.attachment, (reply || index > 0) && styles.adjunctDivider]}
-              testID={`pending-chat-attachment-${index}`}
-            >
-              <View style={styles.attachmentCopy}>
-                  <Text numberOfLines={1} ellipsizeMode="tail" style={styles.attachmentName}>
-                    {attachment.name}
-                  </Text>
-                  <InlineRow style={styles.attachmentInfo}>
-                    <Text
-                      numberOfLines={1}
-                      style={styles.attachmentMeta}
-                      testID={`pending-chat-attachment-meta-${index}`}
-                    >
-                      <Text
-                        style={attachment.uploadState === 'failed' && styles.attachmentFailed}
-                        testID={`pending-chat-attachment-state-${index}`}
-                      >
-                        {attachment.uploadState === 'uploaded'
-                          ? 'Ready'
-                          : attachment.uploadState === 'failed'
-                            ? 'Upload failed'
-                            : 'Uploading…'}
-                      </Text>{' '}
-                      · {attachment.sizeLabel} · {attachment.mimeType.toUpperCase()}
-                    </Text>
-                    {attachment.uploadState === 'failed' && (
-                      <Button
-                        label="Retry"
-                        size="inline"
-                        variant="secondary"
-                        accessibilityLabel={`Retry uploading ${attachment.name}`}
-                        disabled={attachmentsUploading}
-                        onPress={() => onRetryAttachment?.(index)}
-                        style={styles.attachmentRetry}
-                        testID={`pending-chat-attachment-retry-${index}`}
-                      />
-                    )}
-                  </InlineRow>
-                </View>
-
-                <CloseButton
-                accessibilityLabel={`Remove ${attachment.name}`}
-                disabled={attachmentsUploading}
-                onPress={() => onRemoveAttachment?.(index)}
-                testID={`pending-chat-attachment-remove-${index}`}
-                control={styles.removeButton}
-              />
-            </View>
+              index={index}
+              name={attachment.name}
+              sizeLabel={attachment.sizeLabel}
+              mimeType={attachment.mimeType}
+              uploadState={attachment.uploadState}
+              busy={attachmentsUploading}
+              onRetry={() => onRetryAttachment?.(index)}
+              onRemove={() => onRemoveAttachment?.(index)}
+            />
           ))}
-          {hiddenAttachmentCount > 0 && (
-            <View
-              style={[styles.moreAttachments, styles.adjunctDivider]}
-              testID="pending-chat-attachments-more"
-            >
-              <Text style={styles.moreAttachmentsText}>{hiddenAttachmentCount} more</Text>
-            </View>
-          )}
-        </View>
+          {hiddenAttachmentCount > 0 && <ComposerMoreAttachments count={hiddenAttachmentCount} />}
+        </ComposerAdjuncts>
       )}
+      <ComposerFrame focused={focused} pill={viewerPill}>
       {conversationActive && voice ? (
         <VoiceBar voice={voice} testIDPrefix={testIDPrefix} />
       ) : (
-        <View
-        style={[styles.inputRow, viewerPill && styles.viewerPillRow, multiline && styles.composerMultiline]}
-        testID={`${testIDPrefix}-composer-input-row`}
-      >
+        <ComposerControls multiline={multiline} testID={`${testIDPrefix}-composer-input-row`}>
         {/* Room attachments remain available while dictating. */}
         {!viewerPill && (
-        <TouchableOpacity
-          accessibilityLabel="Attach photo or document"
-          accessibilityRole="button"
-          disabled={attachDisabled || !onAttach}
-          hitSlop={9}
-          onPress={onAttach}
-          style={styles.attachButton}
-          testID={`${testIDPrefix}-attach-button`}
-        >
-          <PlusGlyph
-            color={attachDisabled || !onAttach ? theme.buzz.textMuted : theme.buzz.textPrimary}
-            testID={`${testIDPrefix}-attach-glyph`}
-          />
-        </TouchableOpacity>
+          <ComposerButton
+            label="Attach photo or document"
+            disabled={attachDisabled || !onAttach}
+            onPress={onAttach}
+            testID={`${testIDPrefix}-attach-button`}
+          >
+            <ComposerGlyph icon={Plus} />
+          </ComposerButton>
         )}
-        <View style={styles.inputWrapper}>
+        <YStack flex={1} position="relative" minWidth={0} justifyContent="center" minHeight={44} paddingVertical="1" paddingLeft={viewerPill ? '2' : undefined}>
           {Platform.OS !== 'web' ? (
-            <Text
+            <NativeTypeMeasure
+              line={Platform.OS === 'android' ? 'unset' : 'type'}
+              centered={Platform.OS === 'android'}
               accessible={false}
               accessibilityElementsHidden
               importantForAccessibility="no-hide-descendants"
               pointerEvents="none"
               numberOfLines={1}
               onTextLayout={measureTextBody}
-              style={[styles.textMeasurement, Platform.OS === 'android' && styles.inputAndroid]}
               testID={`${testIDPrefix}-text-measurement`}
             >
               Message
-            </Text>
+            </NativeTypeMeasure>
           ) : null}
-          <TextInput
+          {Platform.OS !== 'web' && !value ? (
+            <NativeTypeMeasure
+              line={Platform.OS === 'android' ? 'unset' : 'type'}
+              centered={Platform.OS === 'android'}
+              fill
+              accessible={false}
+              accessibilityElementsHidden
+              importantForAccessibility="no-hide-descendants"
+              pointerEvents="none"
+              onTextLayout={measurePlaceholder}
+              testID={`${testIDPrefix}-placeholder-measurement`}
+            >
+              {placeholderText}
+            </NativeTypeMeasure>
+          ) : null}
+          <NativeTypeInput
             key={inputRevision}
             ref={setInputRef}
             // A successful send replaces this native input to fence off stale
             // text events. If the consumed input was focused, transfer focus
             // to its empty replacement so consecutive messages need no tap.
             autoFocus={focused}
-            style={[
-              styles.input,
-              Platform.OS === 'ios' ? undefined : { height: inputHeight, maxHeight },
-              Platform.OS === 'android' && styles.inputAndroid,
-              { transform: [{ translateY: drawingOffset }] },
-              // The input stays mounted under the waveform; its typed text
-              // returns when dictation ends.
-              dictationBusy ? styles.inputHidden : undefined,
-            ]}
+            // Not the body line height on web: kept below Space Grotesk's real
+            // glyph bounds so centering never crops accents or descenders
+            // (`chat.composer-layout.test.ts`). Android unsets it: an inline tag
+            // starts the text span mid-line and Android's partial relayout then
+            // drops the tag's line from the measured height on alternate keystrokes.
+            line={Platform.OS === 'ios' ? 'type' : Platform.OS === 'android' ? 'unset' : 20}
+            centered={Platform.OS === 'android'}
+            // Web sets the changing height on the element (growth loop note above).
+            box={Platform.OS === 'ios' || Platform.OS === 'web'
+              ? { minHeight: COMPOSER_SINGLE_LINE_INPUT_HEIGHT, maxHeight: COMPOSER_MAX_INPUT_HEIGHT }
+              : { minHeight: COMPOSER_SINGLE_LINE_INPUT_HEIGHT, height: inputHeight, maxHeight }}
+            translateY={drawingOffset}
+            // The input stays mounted under the listening line; its typed text
+            // returns when dictation ends.
+            hidden={dictationBusy}
             value={value}
             onChangeText={Platform.OS === 'web' ? commitInputChange : commitNativeChange}
-            onContentSizeChange={onContentSizeChange}
+            // Web reads its content size after commit (growth loop note above).
+            onContentSizeChange={Platform.OS === 'web' ? undefined : onContentSizeChange}
             onFocus={onFocus}
             onBlur={onBlur}
             onKeyPress={(event) => {
@@ -555,8 +559,7 @@ function ConversationComposerContent({
               selectionRef.current = event.nativeEvent.selection;
               onSelectionChange?.(event);
             }}
-            placeholder={!isDirectMessage && hasAgentMembers ? 'Tag an agent with @' : 'Message'}
-            placeholderTextColor={theme.buzz.dim}
+            placeholder={placeholderText}
             multiline
             // Android keyboards otherwise take the whole screen in landscape and
             // type into the OS extract editor instead of this composer. The prop
@@ -569,57 +572,39 @@ function ConversationComposerContent({
             accessibilityLabel="Message"
           />
           {dictationBusy ? (
-            <View style={styles.waveformOverlay}>
-              {/* The leading tags stay in view, as text, while the take is recorded. */}
-              {tagSplit.tags.length > 0 ? (
-                <Text numberOfLines={1} style={styles.dictationTags} testID={`${testIDPrefix}-dictation-tags`}>
-                  {tagSplit.prefix.trimEnd()}
-                </Text>
-              ) : null}
-              <DictationWaveform
-                level={speech.volumeLevel}
-                live={isListening}
-                testID={`${testIDPrefix}-speech-waveform`}
-              />
-            </View>
+            <ComposerListening
+              tags={tagSplit.tags.length > 0 ? tagSplit.prefix.trimEnd() : undefined}
+              level={speech.volumeLevel}
+              live={isListening}
+              testID={`${testIDPrefix}-speech-waveform`}
+              tagsTestID={`${testIDPrefix}-dictation-tags`}
+            />
           ) : null}
-        </View>
+        </YStack>
         {speechAvailable && dictationBusy ? (
           // Keyed apart from the mic, so a press in flight on one never lands on the other.
-          <TouchableOpacity
+          <ComposerButton
             key="stop"
-            accessibilityLabel="Stop recording"
-            accessibilityHint="Discards this take; typed text stays"
-            accessibilityRole="button"
+            label="Stop recording"
+            hint="Discards this take; typed text stays"
             disabled={sendingTake?.committed}
-            hitSlop={9}
             onPress={discardTake}
-            style={styles.controlSlot}
             testID={`${testIDPrefix}-speech-discard`}
           >
-            <StopGlyph color={theme.buzz.textPrimary} testID={`${testIDPrefix}-stop-glyph`} />
-          </TouchableOpacity>
+            <ComposerGlyph icon={Square} />
+          </ComposerButton>
         ) : speechAvailable ? (
-          <TouchableOpacity
+          <ComposerButton
             key="mic"
-            accessibilityLabel={
-              speech.state === 'permission-denied' && Platform.OS !== 'web'
-                ? 'Open microphone settings'
-                : 'Start speech input'
-            }
-            accessibilityRole="button"
-            accessibilityHint="Dictates into the message field"
-            hitSlop={9}
-            delayLongPress={VOICE_LONG_PRESS_MS}
-            onPressIn={() => { voiceHeld.current = false; }}
-            onLongPress={voice && !disabled ? () => {
-              voiceHeld.current = true;
+            label={permissionDeniedNative ? 'Open microphone settings' : 'Start speech input'}
+            hint="Dictates into the message field"
+            dimmed={speech.state === 'permission-denied'}
+            onHold={voice && !disabled ? () => {
               Keyboard.dismiss();
               void voice.join();
             } : undefined}
             onPress={() => {
-              if (voiceHeld.current) return;
-              if (speech.state === 'permission-denied' && Platform.OS !== 'web') {
+              if (permissionDeniedNative) {
                 void Linking.openSettings();
                 return;
               }
@@ -628,94 +613,65 @@ function ConversationComposerContent({
               Keyboard.dismiss();
               speech.start();
             }}
-            style={[
-              styles.controlSlot,
-              speech.state === 'permission-denied' && styles.micButtonDimmed,
-            ]}
             testID={`${testIDPrefix}-mic`}
           >
-            <MicGlyph
-              color={theme.buzz.textPrimary}
-              size={COMPOSER_GLYPH_SIZE}
-              testID={`${testIDPrefix}-mic-glyph`}
-            />
-          </TouchableOpacity>
+            <ComposerGlyph icon={Mic} />
+          </ComposerButton>
         ) : null}
         {showConversation ? (
-          <TouchableOpacity
-            accessibilityLabel={voice?.connecting ? 'Connecting conversation mode' : 'Conversation mode'}
-            accessibilityRole="button"
+          <ComposerButton
+            label={voice?.connecting ? 'Connecting conversation mode' : 'Conversation mode'}
             disabled={disabled || voice?.connecting}
-            accessibilityState={{ disabled: disabled || voice?.connecting, busy: voice?.connecting }}
-            aria-busy={Boolean(voice?.connecting)}
-            hitSlop={9}
+            busy={voice?.connecting}
             onPress={() => {
               Keyboard.dismiss();
               void voice?.join();
             }}
-            style={styles.controlSlot}
             testID={`${testIDPrefix}-conversation`}
           >
             {voice?.connecting ? <SurfaceGlyphLoader compact size={COMPOSER_GLYPH_SIZE} testID="voice-startup-loader" />
-              : <WaveformGlyph color={disabled ? theme.buzz.textMuted : theme.buzz.textPrimary} />}
-          </TouchableOpacity>
+              : <ComposerGlyph icon={AudioLines} />}
+          </ComposerButton>
         ) : (
-          <TouchableOpacity
-            accessibilityLabel={sendingSpeech ? 'Finishing speech input' : 'Send message'}
-            accessibilityHint={
+          <ComposerButton
+            primary
+            label={sendingSpeech ? 'Finishing speech input' : 'Send message'}
+            hint={
               sendingSpeech
                 ? 'Waits for the final transcription before sending'
                 : isListening
                   ? 'Stops dictation and sends'
                   : undefined
             }
-            accessibilityRole="button"
-            accessibilityState={{ disabled: sendDisabled, busy: sendingSpeech }}
             disabled={sendDisabled}
-            hitSlop={9}
+            busy={sendingSpeech}
             // Never pass the responder event itself: the Room's handleSend
             // reads its first argument as a MessageShortcut, and a PressEvent
             // (truthy, no `.text`) made it skip the composer-clear block so
             // the field kept its text after every send.
             onPress={() => (isListening ? sendTake() : onSend?.())}
-            style={styles.controlSlot}
             testID={`${testIDPrefix}-send`}
           >
             {sendingSpeech ? (
-              <BeelineMarkSpinner
-                ink={theme.buzz.accent}
-                live
-                testID={`${testIDPrefix}-speech-finalizing`}
-              />
+              <BeelineMarkSpinner ink={brass} live testID={`${testIDPrefix}-speech-finalizing`} />
             ) : (
-              <ArrowUpGlyph
-                color={sendDisabled ? theme.buzz.textMuted : theme.buzz.accent}
-                testID={`${testIDPrefix}-send-glyph`}
-              />
+              <ComposerGlyph icon={ArrowUp} primary />
             )}
-          </TouchableOpacity>
+          </ComposerButton>
         )}
-      </View>
+        </ComposerControls>
       )}
-      {dailyLimitError && <View style={styles.statusLine}>
+      {dailyLimitError && <ComposerNote>
         <ErrorBanner inline title={dailyLimitError} titleTestID="voice-connection-error" />
-      </View>}
+      </ComposerNote>}
       {statusLine ? (
-        <TouchableOpacity
-          accessibilityLabel={statusLine}
-          accessibilityLiveRegion="polite"
-          accessibilityRole={speech.state === 'permission-denied' && Platform.OS !== 'web' ? 'button' : 'text'}
-          activeOpacity={speech.state === 'permission-denied' && Platform.OS !== 'web' ? 0.7 : 1}
-          disabled={speech.state !== 'permission-denied' || Platform.OS === 'web'}
-          onPress={
-            speech.state === 'permission-denied' && Platform.OS !== 'web' ? () => void Linking.openSettings() : undefined
-          }
-          style={styles.statusLine}
+        <ComposerStatus
+          text={statusLine}
+          onPress={permissionDeniedNative ? () => void Linking.openSettings() : undefined}
           testID={`${testIDPrefix}-speech-status`}
-        >
-          <Text style={styles.statusText}>{statusLine}</Text>
-        </TouchableOpacity>
+        />
       ) : null}
+      </ComposerFrame>
       <HullDialog
         visible={speech.modelDownloadOffered}
         title="Download the voice model?"
@@ -736,176 +692,7 @@ function ConversationComposerContent({
         ]}
         testID={`${testIDPrefix}-speech-model-dialog`}
       />
-    </View>
+    </YStack>
     </>
   );
 }
-
-const CONTROL_SIZE = 26;
-
-const styles = StyleSheet.create((theme) => ({
-  // The voice spot and the go action: one 26pt slot each, reached by a 44pt
-  // target, so no swap ever moves a control or the input's width.
-  controlSlot: {
-    width: CONTROL_SIZE,
-    height: CONTROL_SIZE,
-    marginLeft: 8,
-    alignItems: 'center',
-    justifyContent: 'center',
-  },
-  micButtonDimmed: {
-    opacity: 0.4,
-  },
-  inputWrapper: {
-    flex: 1,
-    position: 'relative',
-    minWidth: 0,
-  },
-  inputHidden: {
-    position: 'absolute',
-    left: 0,
-    right: 0,
-    top: 0,
-    opacity: 0,
-  },
-  waveformOverlay: {
-    minHeight: COMPOSER_SINGLE_LINE_INPUT_HEIGHT,
-    flexDirection: 'row',
-    alignItems: 'center',
-  },
-  statusLine: {
-    paddingHorizontal: theme.buzz.space.md,
-    paddingTop: theme.buzz.space.xs,
-    paddingBottom: theme.buzz.space.sm,
-  },
-  statusText: {
-    ...(theme.buzz.type.machine as any),
-    color: theme.buzz.ledgerQuiet,
-    textTransform: 'uppercase',
-  },
-  // End speech recognition styles
-  composer: {
-    minHeight: 44,
-    borderRadius: 10,
-    borderWidth: 1,
-    borderColor: theme.buzz.border,
-    backgroundColor: theme.buzz.bgRaised,
-    overflow: 'hidden',
-  },
-  inputRow: {
-    minHeight: 42,
-    maxHeight: COMPOSER_MAX_INPUT_HEIGHT + 18,
-    flexDirection: 'row',
-    alignItems: 'center',
-    paddingVertical: 8,
-    paddingHorizontal: theme.buzz.space.sm,
-  },
-  composerMultiline: { alignItems: 'flex-end' },
-  composerFocused: {
-    borderColor: theme.buzz.accent,
-  },
-  viewerPill: { borderWidth: 0, borderRadius: 0, backgroundColor: 'transparent' },
-  // Without the Room's two border insets, the row itself fills the 44dp field.
-  viewerPillRow: { minHeight: 44 },
-  adjuncts: { borderBottomWidth: 1, borderBottomColor: theme.buzz.border },
-  adjunctDivider: { borderTopWidth: 1, borderTopColor: theme.buzz.border },
-  reply: {
-    minHeight: 62,
-    flexDirection: 'row',
-    alignItems: 'center',
-    paddingLeft: 16,
-  },
-  replyCopy: { flex: 1, minWidth: 0, paddingVertical: theme.buzz.space.sm },
-  replyLabel: { ...theme.buzz.type.meta, color: theme.buzz.ledgerQuiet },
-  replyGlyph: { color: theme.buzz.accent },
-  replyHandle: { color: theme.buzz.accent },
-  replyPreview: {
-    ...theme.buzz.type.meta,
-    marginTop: theme.buzz.space.xs,
-    color: theme.buzz.textSecondary,
-  },
-  attachment: {
-    minHeight: 56,
-    flexDirection: 'row',
-    alignItems: 'center',
-    paddingLeft: 16,
-  },
-  attachmentCopy: { flex: 1, minWidth: 0 },
-  attachmentName: {
-    ...theme.buzz.type.body,
-    fontSize: theme.buzz.transcriptCard.rowTitleSize,
-    color: theme.buzz.textPrimary,
-  },
-  attachmentInfo: { flexDirection: 'row', alignItems: 'center', gap: theme.buzz.space.sm },
-  attachmentMeta: {
-    flexShrink: 1,
-    ...theme.buzz.type.machine,
-    fontSize: theme.buzz.transcriptCard.rowKindSize,
-    color: theme.buzz.ledgerGhost,
-  },
-  attachmentFailed: { color: theme.buzz.textPrimary },
-  // The file details truncate. Retry keeps the width of its label.
-  attachmentRetry: { flexShrink: 0 },
-  removeButton: {
-    width: 44,
-    minHeight: 44,
-    alignSelf: 'stretch',
-    alignItems: 'center',
-    justifyContent: 'center',
-  },
-  moreAttachments: { minHeight: 36, justifyContent: 'center', paddingHorizontal: 16 },
-  moreAttachmentsText: { ...theme.buzz.type.meta, color: theme.buzz.accent },
-  attachButton: {
-    width: CONTROL_SIZE,
-    height: CONTROL_SIZE,
-    marginRight: 4,
-    alignItems: 'center',
-    justifyContent: 'center',
-  },
-  dictationTags: {
-    ...theme.buzz.type.body,
-    ...Platform.select({ android: { lineHeight: undefined }, default: {} }),
-    flexShrink: 1,
-    marginRight: theme.buzz.space.xs,
-    color: theme.buzz.textSecondary,
-  } as any,
-  input: {
-    ...theme.buzz.type.body,
-    // The wrapper owns the row's flexible width. Its children sit in Yoga's
-    // default column axis, where flex growth would become a height constraint
-    // and suppress iOS TextInput's intrinsic multiline growth. Android gets
-    // its controlled height above; iOS remains intrinsic.
-    minWidth: 0,
-    // Not the body role's lineHeight: kept below Space Grotesk's real glyph
-    // bounds at this size on web so centering never removes native font
-    // padding in a way that could crop accents or descenders
-    // (`chat.composer-layout.test.ts`). Android unsets the body role's line
-    // height: React Native marks each styled span with its own line height,
-    // and an inline tag starts the text span mid-line. Android's partial
-    // relayout then drops the tag's line from the measured height on
-    // alternate keystrokes, so the transcript above the composer jitters.
-    ...Platform.select({
-      ios: {},
-      android: { lineHeight: undefined },
-      default: { lineHeight: 20 },
-    }),
-    color: theme.buzz.textSecondary,
-    minHeight: COMPOSER_SINGLE_LINE_INPUT_HEIGHT,
-    maxHeight: COMPOSER_MAX_INPUT_HEIGHT,
-    paddingVertical: 0,
-    textAlignVertical: 'top',
-    outlineStyle: 'none',
-  } as any,
-  textMeasurement: {
-    ...theme.buzz.type.body,
-    ...Platform.select({ android: { lineHeight: undefined }, default: {} }),
-    position: 'absolute',
-    opacity: 0,
-  },
-  // Keep lineHeight unset so leading tags cannot jitter the measurement.
-  // The measured drawing offset above balances the actual cap-height body.
-  inputAndroid: {
-    includeFontPadding: false,
-    textAlignVertical: 'center',
-  },
-}));

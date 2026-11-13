@@ -224,7 +224,7 @@ export function createAuthRouteContext(options: AuthServerOptions) {
       log.warn({ err: error, community, pubkey }, 'GitHub installation reconciliation failed');
     }
   };
-  if (flowTtlMs < 30_000 || flowTtlMs > 10 * 60_000)
+  if (flowTtlMs < 30_000 || flowTtlMs > 15 * 60_000)
     throw new Error('flow TTL is outside safe bounds');
   if (ticketTtlMs < 30_000 || ticketTtlMs > 5 * 60_000)
     throw new Error('ticket TTL is outside safe bounds');

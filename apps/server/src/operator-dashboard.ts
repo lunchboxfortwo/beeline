@@ -147,7 +147,8 @@ const ACTIVATION_SQL = `WITH ${COHORT_SQL}, eligible AS (
 ), conversations AS (
   SELECT DISTINCT f.owner_id, c.result_message_id, c.state
   FROM free_agents f JOIN production_identities ai ON ai.id=f.agent_id
-  JOIN production_workspaces fw ON fw.id=f.workspace_id
+  JOIN memberships member ON member.identity_id=f.agent_id AND member.room_id IS NULL
+  JOIN production_workspaces fw ON fw.id=member.workspace_id
   JOIN eligible e ON e.id=f.owner_id
   JOIN agent_commands c ON c.agent_id=f.agent_id AND c.action='input'
   JOIN messages m ON m.id=c.source_message_id AND m.author_id=f.owner_id

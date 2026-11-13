@@ -1,3 +1,4 @@
+import { githubProviderKey } from './providers/index.js';
 import { recordXSignup } from './x-ads.js';
 import { recordSigninAttempt } from './signin-attempts.js';
 import {
@@ -138,6 +139,9 @@ export class TokenAuth {
         if(actual===identity) xSignup=await recordXSignup(database,identity,xAttribution,this.now());
         else await database.query('DELETE FROM identities WHERE id=$1',[identity]);
       }
+      await database.query(`UPDATE identities SET avatar=$2,updated_at=$3
+        WHERE id=$1 AND kind='human' AND NULLIF(avatar,'') IS NULL AND NULLIF($2::text,'') IS NOT NULL
+          AND NOT EXISTS (SELECT 1 FROM person_avatars WHERE identity_id=$1)`, [actual, google.avatar ?? null, this.now()]);
       return actual;
     });
     const tokens = await this.issuePhoneTokens(id, randomUUID());
@@ -170,7 +174,7 @@ export class TokenAuth {
     let xSignup: PhoneTokens['xSignup'];
     const id = await this.database.transaction(async (database) => {
       const linked = await database.query<{ identity_id: string }>(
-        `SELECT identity_id FROM identity_external_links WHERE provider='github' AND subject=$1`,
+        `SELECT identity_id FROM identity_external_links WHERE provider='${githubProviderKey}' AND subject=$1`,
       [github.subject],
     );
     const id = linked.rows[0]?.identity_id ?? identityId(github.subject);
@@ -182,7 +186,7 @@ export class TokenAuth {
       );
       const actual=(await database.query<{identity_id:string}>(
         `INSERT INTO identity_external_links(provider,subject,identity_id,issuer,audience,provider_login)
-         VALUES('github',$1,$2,'https://github.com',$3,$4)
+         VALUES('${githubProviderKey}',$1,$2,'https://github.com',$3,$4)
          ON CONFLICT(provider,subject) DO UPDATE SET
            issuer=EXCLUDED.issuer,
            audience=EXCLUDED.audience,
@@ -194,6 +198,9 @@ export class TokenAuth {
         else await database.query('DELETE FROM identities WHERE id=$1',[id]);
       }
       await database.query('UPDATE identities SET github_subject=$2 WHERE id=$1',[actual,github.subject]);
+      await database.query(`UPDATE identities SET avatar=$2,updated_at=$3
+        WHERE id=$1 AND kind='human' AND NULLIF(avatar,'') IS NULL AND NULLIF($2::text,'') IS NOT NULL
+          AND NOT EXISTS (SELECT 1 FROM person_avatars WHERE identity_id=$1)`, [actual, github.avatar ?? null, this.now()]);
       await this.persistGitHubCredential(database, github);
       return actual;
     });
@@ -210,7 +217,7 @@ export class TokenAuth {
     const github = await this.verifyGitHubOidc(ticket);
     return this.database.transaction(async (database) => {
       const linked = await database.query(
-        `SELECT 1 FROM identity_external_links WHERE provider='github' AND identity_id=$1 AND subject=$2 FOR UPDATE`,
+        `SELECT 1 FROM identity_external_links WHERE provider='${githubProviderKey}' AND identity_id=$1 AND subject=$2 FOR UPDATE`,
         [viewerId, github.subject],
       );
       if (!linked.rowCount) return false;

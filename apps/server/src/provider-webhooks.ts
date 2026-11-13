@@ -1,17 +1,12 @@
+import { providerWebhook, type ProviderService } from './providers/index.js';
 import { systemMessage } from '@beeline/api-contract/system-message-catalog';
-import { createHash, createHmac, randomBytes, randomUUID, timingSafeEqual } from 'node:crypto';
+import { createHash, randomUUID } from 'node:crypto';
 import type { SqlDatabase } from './database.js';
 import { notifyConnectorHelper } from './postgres-live.js';
 import { ensureSystemIdentity, systemLine } from './system-line.js';
 import { SYSTEM_IDENTITY_ID } from '@beeline/api-contract/system-identity';
 
-export type ProviderService = 'linear' | 'stripe';
-export function providerForEvent(event: string): ProviderService | undefined {
-  if (event === 'issue.created') return 'linear';
-  if (event === 'payment_intent.succeeded') return 'stripe';
-  return undefined;
-}
-
+export { providerForEvent, type ProviderService } from './providers/index.js';
 export const PROVIDER_WEBHOOKS_SCHEMA = `
 CREATE TABLE IF NOT EXISTS provider_webhooks (
  id uuid PRIMARY KEY,
@@ -67,14 +62,14 @@ export async function queueProviderWebhook(db: SqlDatabase, app: App, service: P
   const id = randomUUID();
   const receiverUrl = composioReceiverUrl.replace(/\/composio$/, `/${service}/${id}`);
   if (receiverUrl === composioReceiverUrl) throw new Error('Service receiver is unavailable');
+  const initial = providerWebhook(service).initial(id);
   const row = (await db.query<{ id: string; connector_id: string; status: string }>(
     `INSERT INTO provider_webhooks(id,app_id,connector_id,service,event,receiver_url,signing_secret,provider_id,status)
      VALUES($1,$2,$3,$4,$5,$6,$7,$8,'registering')
      ON CONFLICT(app_id,event) DO UPDATE SET id=provider_webhooks.id
      RETURNING id,connector_id,status`,
     [id, app.id, app.connector_id, service, event, receiverUrl,
-      service === 'linear' ? randomBytes(32).toString('hex') : null,
-      service === 'linear' ? id : null],
+      initial.signingSecret, initial.providerId],
   )).rows[0]!;
   if (row.status === 'retiring') throw new Error('Service webhook removal is in progress; retry shortly');
   if (row.status === 'error') throw new Error('Service webhook registration failed; reconnect the app');
@@ -171,12 +166,6 @@ export async function completeProviderWebhookAssignment(db: SqlDatabase, helperI
   });
 }
 
-function sameHexSignature(expected: Buffer, value: unknown): boolean {
-  if (typeof value !== 'string' || !/^[0-9a-f]{64}$/i.test(value)) return false;
-  const received = Buffer.from(value, 'hex');
-  return received.length === expected.length && timingSafeEqual(received, expected);
-}
-
 /** The route calls this on raw bytes. A signed retry is idempotent per subscription. */
 export async function ingestProviderWebhook(db: SqlDatabase, service: ProviderService, id: string,
   raw: Buffer, headers: Record<string, string | string[] | undefined>, now = Date.now()): Promise<boolean> {
@@ -189,31 +178,9 @@ export async function ingestProviderWebhook(db: SqlDatabase, service: ProviderSe
   try { value = JSON.parse(raw.toString('utf8')) as unknown; } catch { return false; }
   if (!value || typeof value !== 'object' || Array.isArray(value)) return false;
   const body = value as Record<string, unknown>;
-  let deliveryId: string;
-  if (service === 'linear') {
-    const signature = createHmac('sha256', hook.signing_secret).update(raw).digest();
-    if (!sameHexSignature(signature, headers['linear-signature']) ||
-      typeof body.webhookTimestamp !== 'number' ||
-      Math.abs(now - body.webhookTimestamp) > 60_000 ||
-      body.webhookId !== hook.provider_id || body.type !== 'Issue' || body.action !== 'create' ||
-      headers['linear-event'] !== 'Issue') return false;
-    const delivery = headers['linear-delivery'];
-    if (typeof delivery !== 'string' || !delivery) return false;
-    deliveryId = delivery;
-  } else {
-    const header = headers['stripe-signature'];
-    if (typeof header !== 'string' || body.type !== hook.event) return false;
-    const parts = new Map(header.split(',').map((part) => part.trim().split('=', 2) as [string,string]));
-    const timestamp = parts.get('t');
-    if (!timestamp || !/^\d{10}$/.test(timestamp) || Math.abs(now / 1000 - Number(timestamp)) > 300)
-      return false;
-    const signature = createHmac('sha256', hook.signing_secret)
-      .update(`${timestamp}.`).update(raw).digest();
-    if (!header.split(',').some((part) => sameHexSignature(signature,
-      part.trim().startsWith('v1=') ? part.trim().slice(3) : undefined))) return false;
-    if (typeof body.id !== 'string' || !body.id) return false;
-    deliveryId = body.id;
-  }
+  const adapter = providerWebhook(service);
+  const deliveryId = adapter.verify(raw, headers, body, hook, now);
+  if (deliveryId === undefined) return false;
   const rows = await db.query<{ id: string; room_id: string; agent_id: string; prompt: string;
     workflow_slug: string | null }>(
     `SELECT subscription.id,subscription.room_id,subscription.agent_id,
@@ -238,23 +205,13 @@ export async function ingestProviderWebhook(db: SqlDatabase, service: ProviderSe
         `SELECT prompt,workflow_slug FROM agent_subscriptions WHERE id=$1 AND paused_at IS NULL FOR UPDATE`, [row.id],
       )).rows[0];
       if (!current) return;
-      const data = body.data && typeof body.data === 'object' && !Array.isArray(body.data)
-        ? body.data as Record<string, unknown> : {};
-      const subject = service === 'linear' ? data :
-        data.object && typeof data.object === 'object' && !Array.isArray(data.object)
-          ? data.object as Record<string, unknown> : {};
+      const summary = adapter.summary(body);
       const line = await systemLine(tx, {
         id: messageId, roomId: row.room_id, authorId: SYSTEM_IDENTITY_ID,
         subject: { kind: 'system', id: SYSTEM_IDENTITY_ID, name: systemMessage("provider-webhooks.beeline") },
-        verb: systemMessage("provider-webhooks.received"), object: service === 'linear' ? systemMessage("provider-webhooks.a-linear-issue") : systemMessage("provider-webhooks.a-stripe-payment"),
+        verb: systemMessage("provider-webhooks.received"), object: summary.object,
         kind: 'subscription-fired', wakes: [row.agent_id],
-        payload: { source: 'service', service: service === 'linear' ? 'Linear' : 'Stripe',
-          event: hook.event, id: typeof subject.id === 'string' ? subject.id : undefined,
-          title: service === 'linear' && typeof subject.title === 'string'
-            ? subject.title.slice(0, 500) : undefined,
-          amount: service === 'stripe' && typeof subject.amount === 'number' ? subject.amount : undefined,
-          currency: service === 'stripe' && typeof subject.currency === 'string'
-            ? subject.currency.slice(0, 10) : undefined },
+        payload: { ...summary.payload, event: hook.event },
         subscriptionPrompt: current.prompt,
         subscriptionWorkflowSlug: current.workflow_slug ?? undefined,
       });

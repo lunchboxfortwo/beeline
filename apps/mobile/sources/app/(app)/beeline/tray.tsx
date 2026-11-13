@@ -1,57 +1,40 @@
-import { EmptyState } from '@/components/buzz/EmptyState';
-import { SettingsRow } from '@/components/buzz/SettingsRow';
-import { appErrorCopy, appReadErrorCopy } from '@/buzz/app-error-copy';
-import { desktopColumnWidths } from '@/buzz/desktop-layout-tokens';
-import { ContentTarget, InlineRow } from '@/components/buzz/IndexRow';
-import { Button } from '@/components/buzz/Button';
-import { useLatencyRouteFrame } from '@/buzz/latency-route-hook';
-import { messageJumpHref, roomHref } from '@/buzz/corner-navigation';
-import { useIsDesktop } from '@/utils/responsive';
-import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
-import { AccessibilityInfo, AppState, FlatList, Text, View } from 'react-native';
-import { Ionicons } from '@expo/vector-icons';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { AccessibilityInfo, AppState, FlatList } from 'react-native';
 import { useFocusEffect, useLocalSearchParams, useRouter } from 'expo-router';
-import { useSafeAreaInsets } from 'react-native-safe-area-context';
-import { StyleSheet } from 'react-native-unistyles';
-import type { MessageBookmarkView, NeedsYouItemView, NeedsYouActionView } from '@beeline/api-contract/phone';
-import { isWorkspaceListView, isWorkspaceView, type RoomView } from '@beeline/buzz-client';
+import { YStack } from 'tamagui';
+import type { NeedsYouItemView } from '@beeline/api-contract/phone';
+import type { AttachmentReference } from '@beeline/buzz-client';
+import { isWorkspaceListView, isWorkspaceView } from '@beeline/buzz-client';
+import { appErrorCopy, appReadErrorCopy } from '@/buzz/app-error-copy';
+import { useLatencyRouteFrame } from '@/buzz/latency-route-hook';
+import { messageJumpHref } from '@/buzz/corner-navigation';
+import { useIsDesktop } from '@/utils/responsive';
 import { getEffectiveRelayUrl, loadBuzzIdentity } from '@/auth/buzz-identity-storage';
 import { useActiveCommunityId } from '@/buzz/use-active-community';
 import { mobileSurfaceCache, surfaceAddress } from '@/buzz/surface-storage';
 import { clientResetGeneration, subscribeClientReset } from '@/sync/client-reset';
-import { cornerHref } from '@/buzz/corner-navigation';
 import {
   useTrayList,
   forgetTray,
   acknowledgePaintedNeedsYou,
-  holdNeedsYou,
   loadNeedsYouList,
-  loadSavedList,
   loadTrayList,
   removeNeedsYou,
   subscribeTrayGap,
-  revealSavedItems,
-  hideSavedItems,
 } from '@/buzz/needs-you-store';
-import { compactRelativeTime } from '@/buzz/relative-time';
-import { CORNER_META_SIZE, CornerGlyph } from '@/components/buzz/CornerGlyph';
-import { NeedsYouCell } from '@/components/buzz/NeedsYouCell';
-import { PageHeader } from '@/components/buzz/PageHeader';
 import { SurfaceGlyphLoader } from '@/components/buzz/SurfaceGlyphLoader';
-import { DesktopRoomInspector } from '@/components/DesktopRoomInspector';
+import { RoomListSectionHeader } from '@/components/buzz/RoomListSectionHeader';
+import { openArtifactViewer } from '@/components/buzz/ArtifactCard';
 import { prefetchPushRoom } from '@/push/push-room-prefetch';
 import { monolithPhoneOperation } from '@/sync/transport/monolith-operation';
-import { RoomViewClient } from '@/sync/transport/room-view-client';
-import brand from '@/buzz/brand.json';
 import { openExternalUrl } from '@/utils/open-external-url';
+import { Btn, Copy, SafeTop, T } from '@/ui/grammar';
+import { TAB_ROUTES } from '@/ui/shell/tab-routes';
+import { CLOSED_SEARCH, ChatListHeader } from '@/ui/screens/chats/ChatListHeader';
+import { TagCard, type TagCardActions } from '@/ui/screens/tags/TagCard';
+import type { TagDecision } from '@/ui/screens/tags/tag-card-model';
 
 const EMPTY_NEEDS: readonly NeedsYouItemView[] = [];
-
-/** How long a removal or a section clear can be undone. */
-const UNDO_MS = 6_000;
-
-/** How far a section clear's Undo bar sits above a bookmark removal's bar. */
-const UNDO_STACK = 56;
 
 /** The server's refusal once the person has left, or been removed from, the Workspace. */
 function lostWorkspace(reason: unknown): boolean {
@@ -62,76 +45,32 @@ function first(value: string | string[] | undefined): string {
   return (Array.isArray(value) ? value[0] : value)?.trim() ?? '';
 }
 
-function sourceTitle(bookmark: MessageBookmarkView): string {
-  return bookmark.roomName.replace(/^#/, '').trim();
-}
-
-/** A saved preview draws `**bold**` as bold and drops any unpaired `**`. */
-function boldRuns(text: string): { text: string; bold: boolean }[] {
-  return text.split(/\*\*(?=\S)([^\n]*?\S)\*\*/).flatMap((part, index) => {
-    const run = index % 2 ? part : part.replace(/\*\*/g, '');
-    return run ? [{ text: run, bold: index % 2 === 1 }] : [];
-  });
-}
-
-function clearedLabel(clear: PendingClear): string {
-  if (clear.kind === 'saved' && clear.more) return 'Cleared saved bookmarks';
-  const count = clear.items.length;
-  const noun = clear.kind === 'needs' ? 'item' : 'bookmark';
-  return `Cleared ${count} ${noun}${count === 1 ? '' : 's'}`;
-}
-
-/** The message a tray row points at: what the desktop pane opens. */
-type Target = {
-  readonly messageId: string;
-  readonly roomId: string;
-  readonly workspaceId: string;
-};
-
-/** A section clear held back until its own Undo window closes. */
-type PendingClear = { readonly expiresAt: number; readonly workspaceId: string } & (
-  | { readonly kind: 'needs'; readonly items: readonly NeedsYouItemView[] }
-  | { readonly kind: 'saved'; readonly items: readonly MessageBookmarkView[]; readonly more: boolean }
-);
-
-type Row =
-  | { readonly key: string; readonly type: 'head'; readonly title: string;
-      readonly count: number; readonly clear?: PendingClear['kind'] }
-  | { readonly key: string; readonly type: 'needs'; readonly item: NeedsYouItemView }
-  | { readonly key: string; readonly type: 'needs-empty' }
-  | { readonly key: string; readonly type: 'saved'; readonly bookmark: MessageBookmarkView }
-  | { readonly key: string; readonly type: 'saved-empty' }
-  | { readonly key: string; readonly type: 'saved-more' };
-
-function emptySection(
-  title: string,
-  detail: string,
-  icon: 'checkmark-circle-outline' | 'bookmark-outline',
-  testID: string,
-) {
+/** "Nothing needs you", one line, and the way back to Chats. */
+function TagsEmpty({ onChats }: { onChats: () => void }) {
   return (
-    <View style={styles.emptyBlock} testID={testID}>
-    <Ionicons color={styles.emptyIcon.color} name={icon} size={22} />
-    <Text style={styles.emptyTitle}>{title}</Text>
-    <Text style={styles.empty}>{detail}</Text>
-  </View>
+    <YStack paddingTop="8" paddingHorizontal="4" gap="3" alignItems="center" testID="needs-you-empty">
+      <T v="heading" textAlign="center">Nothing needs you</T>
+      <T v="meta" color="secondary" textAlign="center">
+        Approvals, decisions and messages that tag you appear here as they arrive.
+      </T>
+      <Btn kind="secondary" label="Go to Chats" marginTop="2" onPress={onChats}>Go to Chats</Btn>
+    </YStack>
   );
 }
 
 /**
- * The tray: exactly two sections, Needs you then Saved. Needs you is the
- * server's per-person projection (`readNeedsYou`); Saved is every bookmark,
- * newest first. Opening a Needs-you cell counts as handling it — someone who
- * wants to come back to it bookmarks it.
+ * Tags: the server's live Needs-you projection for this Workspace as cards.
+ * Approving, deciding or reading a tag re-reads that projection; a live
+ * `needs-you-delta` moves the cards and the count together. Opening an
+ * approval never decides or dismisses it.
  */
 export default function TrayScreen() {
   useLatencyRouteFrame('/beeline/tray');
   const router = useRouter();
-  const insets = useSafeAreaInsets();
   const desktop = useIsDesktop();
   const params = useLocalSearchParams<{ communityId?: string | string[]; workspaceName?: string | string[] }>();
   const routeWorkspaceId = first(params.communityId);
-  // A link without a Workspace id opens the Workspace the Rooms list treats
+  // A link without a Workspace id opens the Workspace the Chats list treats
   // as active. `undefined` while resolving; `null` when there is none.
   const [activeWorkspaceId, setActiveWorkspaceId] = useState<string | null | undefined>(undefined);
   const currentWorkspaceId = useActiveCommunityId();
@@ -141,33 +80,20 @@ export default function TrayScreen() {
   const lostWorkspaceRef = useRef<string | null>(null);
   const workspaceLost = Boolean(workspaceId) && lostWorkspaceId === workspaceId;
   const noWorkspace = (!routeWorkspaceId && activeWorkspaceId === null) || workspaceLost;
-  const [trayFocused, setTrayFocused] = useState(false);
-  const { needs, bookmarks, next: savedNext } = useTrayList(workspaceId);
-  const loadingSaved = useRef(false);
-  const savedScroll = useRef(false);
-  const [selectedTarget, setSelected] = useState<Target | null>(null);
-  const selected = (selectedTarget?.workspaceId === workspaceId) ? selectedTarget : null;
-  const [loadingState, setLoading] = useState(true);
-  const loading = (loadingState);
+  const { needs } = useTrayList(workspaceId);
+  const [loading, setLoading] = useState(true);
   const loadedWorkspaceRef = useRef<string | null>(null);
   const loadGenerationRef = useRef(0);
   useLatencyRouteFrame('/beeline/tray', !loading, true);
   const [error, setError] = useState<string | null>(null);
-  const [removed, setRemoved] = useState<MessageBookmarkView | null>(null);
-  // Oldest first; the Undo bar offers the newest.
-  const [pending, setPending] = useState<readonly PendingClear[]>([]);
-  const pendingRef = useRef<readonly PendingClear[]>([]);
-  const [client, setClient] = useState<RoomViewClient | null>(null);
   const [workspaceName, setWorkspaceName] = useState<string | null>(first(params.workspaceName) || null);
-  const [inspectRoom, setInspectRoom] = useState<RoomView | null>(null);
-  const [paneCornerId, setPaneCornerId] = useState<string | null>(null);
-  const [inspectError, setInspectError] = useState<string | null>(null);
-  const [now, setNow] = useState(() => Date.now());
   const focused = useRef(false);
   const paintContext = useRef({ workspaceId, ready: false });
   paintContext.current = { workspaceId, ready: !loading && !noWorkspace };
   const viewableQuestions = useRef<readonly string[]>([]);
   const paintFrame = useRef<number | null>(null);
+
+  // markSeen: only questions this focused screen actually painted start their clock.
   const acknowledgePaint = useCallback(() => {
     if (paintFrame.current !== null) cancelAnimationFrame(paintFrame.current);
     const context = paintContext.current;
@@ -175,114 +101,69 @@ export default function TrayScreen() {
       paintFrame.current = null;
       if (!focused.current || AppState.currentState !== 'active' || !context.ready || !paintContext.current.ready ||
         context.workspaceId !== paintContext.current.workspaceId) return;
-      void acknowledgePaintedNeedsYou(context.workspaceId, viewableQuestions.current)
-        .catch(() => undefined);
+      void acknowledgePaintedNeedsYou(context.workspaceId, viewableQuestions.current).catch(() => undefined);
     });
   }, []);
   useFocusEffect(useCallback(() => {
     focused.current = true;
-    setTrayFocused(true);
     acknowledgePaint();
     return () => {
       focused.current = false;
-      setTrayFocused(false);
       viewableQuestions.current = [];
       if (paintFrame.current !== null) cancelAnimationFrame(paintFrame.current);
     };
   }, [acknowledgePaint]));
   const onViewableItemsChanged = useRef(({ viewableItems }: {
-    viewableItems: readonly { item: Row; isViewable?: boolean }[];
+    viewableItems: readonly { item: NeedsYouItemView; isViewable?: boolean }[];
   }) => {
     viewableQuestions.current = viewableItems.flatMap(({ item, isViewable }) =>
-      isViewable !== false && item.type === 'needs' && !item.item.approval && item.item.expiresAt === undefined
-        ? [item.item.messageId] : []);
+      isViewable !== false && !item.approval && item.expiresAt === undefined ? [item.messageId] : []);
     acknowledgePaint();
   }).current;
   const viewabilityConfig = useRef({ itemVisiblePercentThreshold: 1 }).current;
 
   const load = useCallback(async (force = false) => {
-    if ((!workspaceId)) return;
+    if (!workspaceId) return;
     const generation = ++loadGenerationRef.current;
-    savedScroll.current = false;
     setError(null);
-    setNow(Date.now());
     const result = await Promise.allSettled([loadTrayList(workspaceId, force)]).then(([answer]) => answer);
     if (generation !== loadGenerationRef.current) return;
-    if (
-      result.status === 'rejected' &&
-      (lostWorkspace(result.reason) || lostWorkspaceRef.current === workspaceId)
-    ) {
+    if (result.status === 'rejected' && (lostWorkspace(result.reason) || lostWorkspaceRef.current === workspaceId)) {
       lostWorkspaceRef.current = workspaceId;
       setLostWorkspaceId(workspaceId);
       forgetTray(workspaceId);
-      pendingRef.current = pendingRef.current.filter((clear) => clear.workspaceId !== workspaceId);
-      setPending(pendingRef.current);
-      setSelected(null);
       setLoading(false);
       loadedWorkspaceRef.current = null;
       return;
     }
     lostWorkspaceRef.current = null;
     setLostWorkspaceId(null);
-    if (result.status === 'rejected')
-      setError(appReadErrorCopy(result.reason));
-    else if (result.value.needsError || result.value.savedError)
-      setError(result.value.needsError ?? result.value.savedError ?? null);
-    if (result.status === 'fulfilled')
-      loadedWorkspaceRef.current = workspaceId;
+    if (result.status === 'rejected') setError(appReadErrorCopy(result.reason));
+    else if (result.value.needsError) setError(result.value.needsError);
+    if (result.status === 'fulfilled') loadedWorkspaceRef.current = workspaceId;
     setLoading(false);
   }, [workspaceId]);
 
-  useEffect(() => {
-    loadGenerationRef.current += 1;
-    loadedWorkspaceRef.current = null;
-    setError(null);
-
-  }, []);
-
-  // The previous account's sections and lost Workspace do not carry over.
+  // The previous account's cards and lost Workspace do not carry over.
   useEffect(() => subscribeClientReset(() => {
     loadGenerationRef.current += 1;
     loadedWorkspaceRef.current = null;
     lostWorkspaceRef.current = null;
-    pendingRef.current = [];
-    setPending([]);
-    setRemoved(null);
-    setSelected(null);
     setLostWorkspaceId(null);
     void load();
   }), [load]);
 
-  useEffect(() => (workspaceId) ? subscribeTrayGap(workspaceId, (reason) => {
+  // A socket gap asks for one covering read; nothing polls.
+  useEffect(() => (workspaceId ? subscribeTrayGap(workspaceId, (reason) => {
     if (reason === 'needs-you-gap') void loadNeedsYouList(workspaceId).catch(() => load(true));
-    else if (reason === 'bookmark-gap') void loadSavedList(workspaceId).catch(() => load(true));
-    else void load(true);
-  }) : undefined,
-    [workspaceId, load]);
+    else if (reason !== 'bookmark-gap') void load(true);
+  }) : undefined), [workspaceId, load]);
 
-  const loadMoreSaved = useCallback(async () => {
-
-    if (!workspaceId || !savedNext || loadingSaved.current) return;
-    const generation = loadGenerationRef.current;
-    loadingSaved.current = true;
-    try {
-      await loadSavedList(workspaceId, savedNext);
-    } catch (cause) {
-      if (generation === loadGenerationRef.current)
-        setError(appReadErrorCopy(cause));
-    } finally {
-      loadingSaved.current = false;
-    }
-  }, [workspaceId, savedNext]);
-
-  // A held tray paints its last projection immediately. Socket gaps signal
-  // one covering read through the roomless registration above.
-  useFocusEffect(
-    useCallback(() => {
-      if ((loadedWorkspaceRef.current !== workspaceId)) void load();
-      return undefined;
-    }, [load]),
-  );
+  // A held projection paints immediately; a new Workspace reads once.
+  useFocusEffect(useCallback(() => {
+    if (loadedWorkspaceRef.current !== workspaceId) void load();
+    return undefined;
+  }, [load, workspaceId]));
 
   useEffect(() => {
     if (routeWorkspaceId || currentWorkspaceId === undefined) return;
@@ -311,105 +192,25 @@ export default function TrayScreen() {
   }, [currentWorkspaceId, routeWorkspaceId]);
 
   useEffect(() => {
-    if (!removed) return;
-    const timer = setTimeout(() => setRemoved(null), UNDO_MS);
-    return () => clearTimeout(timer);
-  }, [removed]);
-
-  useEffect(() => {
+    if (!workspaceId) return;
     let cancelled = false;
     void (async () => {
       const [identity, relayUrl] = await Promise.all([loadBuzzIdentity(), getEffectiveRelayUrl()]);
       if (!identity || cancelled) return;
-      const http = new RoomViewClient({
-        baseUrl: relayUrl,
-        identity,
-      });
-      if (cancelled) return;
-      if (desktop) setClient(http);
-      if (!workspaceId) return;
       const [list, workspace] = await Promise.all([
         mobileSurfaceCache.read(surfaceAddress(relayUrl, identity.publicKey, '/workspaces'), isWorkspaceListView),
         mobileSurfaceCache.read(surfaceAddress(relayUrl, identity.publicKey, '/workspace/:id', { workspaceId }), isWorkspaceView),
       ]);
       if (!cancelled) setWorkspaceName(first(params.workspaceName) ||
         (list?.workspaces.find((item) => item.id === workspaceId)?.name ?? workspace?.workspace.name ?? null));
-    })();
+    })().catch(() => undefined);
     return () => {
       cancelled = true;
     };
-  }, [desktop, workspaceId, params.workspaceName]);
+  }, [workspaceId, params.workspaceName]);
 
-  const selectedUnavailable = selected
-    ? bookmarks.some((bookmark) => bookmark.messageId === selected.messageId && !bookmark.available)
-    : false;
-  useEffect(() => {
-
-    if (!desktop || !client || !selected || selectedUnavailable) {
-      setInspectRoom(null);
-      setPaneCornerId(null);
-      setInspectError(null);
-      return;
-    }
-    let cancelled = false;
-    setInspectError(null);
-    setPaneCornerId(selected.roomId);
-    void (async () => {
-      try {
-        const source = await client.room(selected.roomId);
-        if (cancelled) return;
-        const workRoom =
-          source.parent?.id && source.parent.id !== source.room.id
-            ? await client.room(source.parent.id)
-            : source;
-        if (cancelled) return;
-        setInspectRoom(workRoom);
-        setPaneCornerId(source.room.id);
-      } catch (cause) {
-        if (cancelled) return;
-        setInspectRoom(null);
-        setInspectError(appErrorCopy(cause));
-      }
-    })();
-    return () => {
-      cancelled = true;
-    };
-  }, [client, desktop, selected, selectedUnavailable]);
-
-  const open = useCallback(
-    (target: Target, via: 'bookmark' | 'needs-you') => {
-      const responseId = `${via}:${target.messageId}`;
-      // Start the Room read now, as a push tap does; the Room takes it by this id.
-      prefetchPushRoom(responseId, target.roomId);
-      router.push(messageJumpHref(target.roomId, target.messageId, responseId, target.workspaceId));
-    },
-    [router],
-  );
-
-  const openInMain = useCallback(
-    (cornerId: string) => {
-      if (inspectRoom && cornerId !== inspectRoom.room.id) {
-        router.push(cornerHref(cornerId, inspectRoom.room.id));
-        return;
-      }
-      if (selected && cornerId === selected.roomId) {
-        open(
-          selected,
-          bookmarks.some((bookmark) => bookmark.messageId === selected.messageId)
-            ? 'bookmark'
-            : 'needs-you',
-        );
-        return;
-      }
-      router.push(roomHref(cornerId, selected?.workspaceId));
-    },
-    [bookmarks, inspectRoom, open, router, selected],
-  );
-
-  /** Tapped or dismissed: the cell leaves this tray, and every other device's. */
+  /** Reading a tag (or dismissing a merge ask) leaves this Tags, and every other device's. */
   const clear = useCallback(async (item: NeedsYouItemView, dismissReminder = false) => {
-    const generation = clientResetGeneration();
-
     const removal = removeNeedsYou(item.workspaceId, [item.messageId]);
     try {
       const input = { workspaceId: item.workspaceId, messageId: item.messageId, ...(dismissReminder ? { dismissReminder: true } : {}) };
@@ -421,539 +222,127 @@ export default function TrayScreen() {
     }
   }, []);
 
-  const openNeed = useCallback(
-    (item: NeedsYouItemView) => {
-      // Opening an approval does not dismiss or decide it.
+  const actions = useMemo((): TagCardActions => ({
+    open: (item) => {
+      // Opening an approval does not dismiss or decide it; opening a tag reads it.
       if (!item.approval) void clear(item);
-      if (desktop) setSelected(item);
-      else open(item, 'needs-you');
+      const responseId = `needs-you:${item.messageId}`;
+      // Start the read now, as a push tap does; the chat takes it by this id.
+      prefetchPushRoom(responseId, item.roomId);
+      router.push(messageJumpHref(item.roomId, item.messageId, responseId, item.workspaceId));
     },
-    [clear, desktop, open],
-  );
-
-  const decideNeed = useCallback(async (item: NeedsYouItemView, action: NeedsYouActionView) => {
-    const generation = clientResetGeneration();
-    setError(null);
-    try {
-      switch (action.kind) {
-        case 'grant':
-          await monolithPhoneOperation('decideAgentGrant', { grantId: action.grantId, decision: action.decision });
-          break;
-        case 'write-access':
-          await monolithPhoneOperation('decideWritePermission', { roomId: item.roomId,
-            permissionId: action.permissionId, requestId: action.requestId, agentId: action.agentId,
-            repository: action.repository, decision: action.decision });
-          break;
-        case 'choice':
-          await monolithPhoneOperation('answerChoice', { choiceId: action.choiceId, optionId: action.optionId });
-          break;
-        case 'skip-choice':
-          await monolithPhoneOperation('skipChoice', { choiceId: action.choiceId });
-          break;
-        case 'external':
-          // Squire owns its mandate and sign-in ceremony. No thread navigation.
-          await openExternalUrl(action.url);
-          return;
-      }
-      if ((generation !== clientResetGeneration())) return;
-      // Re-read on completion only: a multi-grant card may still need another decision.
-      await loadNeedsYouList(item.workspaceId);
-      AccessibilityInfo.announceForAccessibility('Decision sent');
-    } catch (cause) {
-      if (generation === clientResetGeneration())
-        setError(appErrorCopy(cause));
-    }
-  }, []);
-
-  const dismissNeed = useCallback(
-    (item: NeedsYouItemView) => {
-      AccessibilityInfo.announceForAccessibility('Dismissed from Needs you');
-      void clear(item, true);
-    },
-    [clear],
-  );
-
-  /** Send one Workspace-scoped operation after Undo expires. */
-  const commitClear = useCallback(async (clear: PendingClear) => {
-    const generation = clientResetGeneration();
-    const ids = new Set(clear.items.map((item) => item.messageId));
-    if (clear.kind === 'needs') {
-      const removal = removeNeedsYou(clear.workspaceId, ids);
+    openImage: (item: NeedsYouItemView, image: AttachmentReference) => openArtifactViewer(image, desktop, item.roomId),
+    decide: async (item: NeedsYouItemView, decision: TagDecision) => {
+      const generation = clientResetGeneration();
+      setError(null);
       try {
-        await monolithPhoneOperation('clearNeedsYouSection', { workspaceId: clear.workspaceId });
-        removal.settle();
+        if (decision.kind === 'dismiss') {
+          AccessibilityInfo.announceForAccessibility('Dismissed from Tags');
+          await clear(item, true);
+          return;
+        }
+        if (decision.kind === 'merge') {
+          await monolithPhoneOperation('approveCornerMerge', { cornerId: item.roomId });
+        } else {
+          const action = decision.action;
+          switch (action.kind) {
+            case 'grant':
+              await monolithPhoneOperation('decideAgentGrant', { grantId: action.grantId, decision: action.decision });
+              break;
+            case 'write-access':
+              await monolithPhoneOperation('decideWritePermission', { roomId: item.roomId,
+                permissionId: action.permissionId, requestId: action.requestId, agentId: action.agentId,
+                repository: action.repository, decision: action.decision });
+              break;
+            case 'choice':
+              await monolithPhoneOperation('answerChoice', { choiceId: action.choiceId, optionId: action.optionId });
+              break;
+            case 'skip-choice':
+              await monolithPhoneOperation('skipChoice', { choiceId: action.choiceId });
+              break;
+            case 'external':
+              // Trusty Squire decides on its own passkey page; the card stays until it does.
+              await openExternalUrl(action.url);
+              return;
+          }
+        }
+        if (generation !== clientResetGeneration()) return;
+        // The server's projection removes a decided card; there is no local removal.
+        await loadNeedsYouList(item.workspaceId);
+        AccessibilityInfo.announceForAccessibility('Decision sent');
       } catch (cause) {
-        if (removal.restore()) setError(appErrorCopy(cause));
+        if (generation === clientResetGeneration()) setError(appErrorCopy(cause));
       }
-      return;
-    }
-    const edit = hideSavedItems(clear.workspaceId, ids);
-    try {
-      await monolithPhoneOperation('clearMessageBookmarks', { workspaceId: clear.workspaceId });
-      if (generation !== clientResetGeneration()) return;
-      edit.settle();
-    } catch (cause) {
-      if (generation !== clientResetGeneration() || lostWorkspaceRef.current === clear.workspaceId) return;
-      edit.cancel();
-      setError(appErrorCopy(cause));
-    }
-  }, []);
-
-  /** Send the held clears `which` picks, and stop holding them. */
-  const flushClears = useCallback(
-    (which: (clear: PendingClear) => boolean) => {
-      const due = pendingRef.current.filter(which);
-      if (!due.length) return;
-      pendingRef.current = pendingRef.current.filter((clear) => !which(clear));
-      setPending(pendingRef.current);
-      for (const clear of due) void commitClear(clear);
     },
-    [commitClear],
-  );
+  }), [clear, desktop, router]);
 
-  // Each held clear goes out when its own Undo window closes; all of them go
-  // out when the Tray loses focus.
-  useEffect(() => {
-    const timers = pending.map((clear) =>
-      setTimeout(
-        () => flushClears((held) => held === clear),
-        Math.max(0, clear.expiresAt - Date.now()),
-      ),
-    );
-    return () => timers.forEach(clearTimeout);
-  }, [flushClears, pending]);
-  useFocusEffect(useCallback(() => () => flushClears(() => true), [flushClears]));
-
-  // Held section clears hide their cells in the store, so the badge drops too.
-  // A layout effect, so the cells never paint once more after the clear.
-  useLayoutEffect(() => {
-
-    const held = new Map<string, string[]>();
-    for (const clear of pending) {
-      if (clear.kind !== 'needs') continue;
-      held.set(clear.workspaceId, [
-        ...(held.get(clear.workspaceId) ?? []),
-        ...clear.items.map((item) => item.messageId),
-      ]);
-    }
-    for (const [id, ids] of held) holdNeedsYou(id, ids);
-    return () => {
-      for (const id of held.keys()) holdNeedsYou(id, []);
-    };
-  }, [pending]);
-  const visibleNeeds = needs ?? EMPTY_NEEDS;
-  const visibleBookmarks = useMemo(() => {
-    const held = new Set(
-      pending.flatMap((clear) =>
-        clear.kind === 'saved' ? clear.items.map((item) => item.messageId) : [],
-      ),
-    );
-    return (held.size) ? bookmarks.filter((item) => !held.has(item.messageId)) : bookmarks;
-  }, [bookmarks, pending]);
-  const newestClear = pending.at(-1);
-
-  /** Clear a section now, with Undo. This only dismisses approval cards from the tray. */
-  const clearSection = useCallback(
-    (kind: PendingClear['kind']) => {
-      setRemoved(null);
-      const held = { expiresAt: Date.now() + UNDO_MS, workspaceId };
-      const clear: PendingClear =
-        kind === 'needs'
-          ? { ...held, kind, items: visibleNeeds }
-          : { ...held, kind, items: visibleBookmarks, more: !!savedNext };
-      if (!clear.items.length) return;
-      pendingRef.current = [...pendingRef.current, clear];
-      setPending(pendingRef.current);
-      AccessibilityInfo.announceForAccessibility(`${clearedLabel(clear)}. Undo available.`);
-    },
-    [visibleBookmarks, visibleNeeds, workspaceId, savedNext],
-  );
-
-  /** Undo the newest held clear; an older one still in its window shows next. */
-  const undoClear = useCallback(() => {
-    pendingRef.current = pendingRef.current.slice(0, -1);
-    setPending(pendingRef.current);
-    AccessibilityInfo.announceForAccessibility('Restored');
-  }, []);
-
-  const remove = useCallback(async (bookmark: MessageBookmarkView) => {
-    const generation = clientResetGeneration();
-
-    const edit = hideSavedItems(bookmark.workspaceId, [bookmark.messageId]);
-    setRemoved(bookmark);
-    AccessibilityInfo.announceForAccessibility('Bookmark removed. Undo available.');
-    try {
-      const input = {roomId:bookmark.roomId,messageId:bookmark.messageId,bookmarked:false};
-      await monolithPhoneOperation('setMessageBookmark', input);
-      edit.settle();
-    } catch (cause) {
-      if (generation !== clientResetGeneration()) return;
-      edit.cancel();
-      setRemoved(null);
-      setError(appErrorCopy(cause));
-    }
-  }, []);
-
-  const undo = useCallback(async () => {
-    if (!removed?.available) return;
-    const bookmark = removed;
-    const generation = clientResetGeneration();
-
-    setRemoved(null);
-    AccessibilityInfo.announceForAccessibility('Bookmark restored');
-    try {
-      const input = {roomId:bookmark.roomId,messageId:bookmark.messageId,bookmarked:true};
-      await monolithPhoneOperation('setMessageBookmark', input);
-      if (generation !== clientResetGeneration()) return;
-      revealSavedItems(bookmark.workspaceId, [bookmark.messageId]);
-      await loadSavedList(bookmark.workspaceId);
-    } catch (cause) {
-      if (generation !== clientResetGeneration()) return;
-      setError(appErrorCopy(cause));
-    }
-  }, [removed]);
-
-  const rows = useMemo((): Row[] => {
-    if (loading || workspaceLost) return [];
-    const cells = (items: NeedsYouItemView[]) =>
-      items.map((item): Row => ({ key: `needs-${item.messageId}`, type: 'needs', item }));
-    const approvals = visibleNeeds.filter((item) => item.approval);
-    const questions = visibleNeeds.filter((item) => !item.approval);
-    return [
-      {
-        key: 'head-needs',
-        type: 'head',
-        title: 'Needs you',
-        count: visibleNeeds.length,
-        ...(visibleNeeds.length ? { clear: 'needs' as const } : {}),
-      },
-      // Approvals before questions, each in the server's order.
-      ...(visibleNeeds.length
-        ? [...cells(approvals), ...cells(questions)]
-        : [{ key: 'needs-empty', type: 'needs-empty' } as const]),
-      {
-        key: 'head-saved',
-        type: 'head',
-        title: 'Saved',
-        count: visibleBookmarks.length,
-        ...(visibleBookmarks.length ? { clear: 'saved' as const } : {}),
-      },
-      ...(visibleBookmarks.length
-        ? visibleBookmarks.map((bookmark): Row => ({
-            key: `saved-${bookmark.messageId}`,
-            type: 'saved',
-            bookmark,
-          }))
-        : [{ key: 'saved-empty', type: 'saved-empty' } as const]),
-      ...(savedNext ? [{ key: 'saved-more', type: 'saved-more' } as const] : []),
-    ];
-  }, [loading, visibleBookmarks, visibleNeeds, workspaceLost, savedNext]);
-
-  const renderSaved = (bookmark: MessageBookmarkView) => {
-    const source = `${bookmark.roomKind === 'corner' ? 'corner ' : '#'}${sourceTitle(bookmark)}`;
-    return (
-      <ContentTarget
-        accessibilityLabel={`${source}, ${bookmark.author?.name ?? 'Unavailable message'}`}
-        accessibilityRole={bookmark.available || desktop ? 'button' : undefined}
-        accessibilityState={desktop ? { selected: selected?.messageId === bookmark.messageId } : undefined}
-        // A desktop pane explains an unavailable source; a phone has nowhere to go.
-        onPress={desktop ? () => setSelected(bookmark)
-          : bookmark.available ? () => open(bookmark, 'bookmark') : undefined}
-        style={({ pressed }) => [
-          styles.row,
-          desktop && selected?.messageId === bookmark.messageId && styles.rowSelected,
-          pressed && styles.rowSelected,
-          !bookmark.available && styles.rowUnavailable,
-        ]}
-        testID={`bookmark-${bookmark.messageId}`}
-      >
-        <View style={styles.originLine} testID={`bookmark-save-line-${bookmark.messageId}`}>
-          <Text numberOfLines={1} style={styles.author}>
-            {bookmark.available ? bookmark.author?.name : 'Source unavailable'}
-          </Text>
-          <Text numberOfLines={1} style={styles.time}>{compactRelativeTime(bookmark.bookmarkedAt, now)}</Text>
-        </View>
-        {bookmark.available ? (
-          <Text numberOfLines={desktop ? 2 : 3} style={[styles.excerpt, styles.quote]}
-            testID={`bookmark-text-${bookmark.messageId}`}>
-            {boldRuns(bookmark.text ?? '').map((run, index) => run.bold
-              ? <Text key={index} style={styles.excerptBold}>{run.text}</Text>
-              : run.text)}
-          </Text>
-        ) : (
-          <Text style={styles.unavailable}>Deleted or no longer accessible</Text>
-        )}
-        {sourceTitle(bookmark) ? (
-          <InlineRow style={styles.source} testID={`bookmark-source-${bookmark.messageId}`}>
-            {bookmark.roomKind === 'corner'
-              ? <CornerGlyph size={CORNER_META_SIZE} testID={`bookmark-corner-mark-${bookmark.messageId}`} />
-              : <Text style={styles.originSigil}>#</Text>}
-            <Text numberOfLines={1} style={styles.origin}>{sourceTitle(bookmark)}</Text>
-          </InlineRow>
-        ) : null}
-        {desktop && bookmark.available ? (
-          <View style={styles.rowFooter}>
-            <Button
-              accessibilityLabel="Remove bookmark"
-              accessibilityRole="button"
-              onPress={(event) => {
-                event.stopPropagation();
-                void remove(bookmark);
-              }}
-              label={'REMOVE'}
-              variant="quiet"
-              appearance={{ control: styles.remove, label: styles.removeText }}
-            />
-          </View>
-        ) : null}
-        {!bookmark.available ? (
-          <Button
-            accessibilityLabel="Remove unavailable bookmark"
-            accessibilityRole="button"
-            onPress={() => void remove(bookmark)}
-            label={'REMOVE'}
-            variant="quiet"
-            appearance={{ control: styles.remove, label: styles.removeText }}
-          />
-        ) : null}
-      </ContentTarget>
-    );
-  };
+  const items = loading || workspaceLost ? EMPTY_NEEDS : (needs ?? EMPTY_NEEDS);
+  const decisions = useMemo(() => items.filter(item => item.approval || item.addressedReport), [items]);
+  const tags = useMemo(() => items.filter(item => !item.approval && !item.addressedReport), [items]);
+  const groupedItems = useMemo(() => [...decisions, ...tags], [decisions, tags]);
+  // Ages are read when the projection changes, so unchanged cards do not re-render.
+  const now = useMemo(() => Date.now(), [items]);
+  const goToChats = useCallback(() => router.replace(TAB_ROUTES.chats as never), [router]);
 
   const list = (
     <FlatList
+      data={groupedItems}
+      keyExtractor={(item) => item.messageId}
       onViewableItemsChanged={onViewableItemsChanged}
       viewabilityConfig={viewabilityConfig}
-      onScroll={(event) => { if (event.nativeEvent.contentOffset.y > 20) savedScroll.current = true; }}
-      onEndReached={() => { if ((savedScroll.current)) void loadMoreSaved(); }}
-      onEndReachedThreshold={0.5}
-      contentContainerStyle={{ paddingBottom: 24 + insets.bottom }}
-      data={rows}
-      keyExtractor={(row) => row.key}
+      renderItem={({ item, index }) => (
+        <YStack paddingHorizontal="3" paddingTop="3">
+          {index === 0 && decisions.length > 0 ? (
+            <RoomListSectionHeader title="Decisions" count={decisions.length} inset="content" spacing="flush" testID="tray-decisions-heading" />
+          ) : index === decisions.length ? (
+            <RoomListSectionHeader title="Tags" count={tags.length} inset="content" spacing="flush" testID="tray-tags-heading" />
+          ) : null}
+          <TagCard item={item} now={now} actions={actions} />
+        </YStack>
+      )}
+      ListFooterComponent={<YStack height={12} />}
       ListEmptyComponent={
         noWorkspace ? (
-          <View style={styles.emptyBlock} testID="tray-no-workspace">
-            <Text style={styles.emptyTitle}>No Workspace to show</Text>
-            <Text style={styles.empty}>
+          <YStack padding="6" gap="2" alignItems="center" testID="tray-no-workspace">
+            <T v="heading" textAlign="center">No Workspace to show</T>
+            <T v="meta" color="secondary" textAlign="center">
               {workspaceLost
                 ? 'You are no longer a member of this Workspace.'
                 : 'This link did not name a Workspace, and none is open.'}
-            </Text>
-            <Button
-              accessibilityRole="button"
-              onPress={() => router.replace('/beeline/channels')}
-              label={'BACK TO ROOMS'}
-              variant="quiet"
-              appearance={{ control: styles.remove, label: styles.removeText }}
-            />
-          </View>
+            </T>
+            <Btn kind="secondary" label="Go to Chats" onPress={goToChats}>Go to Chats</Btn>
+          </YStack>
         ) : loading ? (
-          <View style={styles.loadingBlock} testID="tray-loader">
+          <YStack padding="6" alignItems="center" testID="tray-loader">
             <SurfaceGlyphLoader />
-          </View>
-        ) : null
+          </YStack>
+        ) : (
+          <TagsEmpty onChats={goToChats} />
+        )
       }
-      renderItem={({ item: row }) => {
-        switch (row.type) {
-          case 'head':
-            return (
-              <View style={styles.sectionHead} testID={`tray-section-${row.key.slice(5)}`}>
-                <Text style={styles.sectionTitle}>{row.title}</Text>
-                <View style={styles.sectionEnd}>
-                  <Text style={styles.sectionCount}>{row.count}</Text>
-                  {row.clear ? (
-                    <Button
-                      accessibilityLabel={`Clear ${row.title}`}
-                      accessibilityRole="button"
-                      hitSlop={8}
-                      onPress={() => clearSection(row.clear!)}
-                      testID={`tray-clear-${row.clear}`}
-                      label={'CLEAR'}
-                      variant="quiet"
-                      appearance={{
-                        control: ({ pressed }) => [styles.sectionClear, pressed && { opacity: 0.7 }],
-                        label: styles.removeText,
-                      }}
-                    />
-                  ) : null}
-                </View>
-              </View>
-            );
-          case 'needs':
-            return (
-              <View style={styles.cellDivider}>
-                <NeedsYouCell desktop={desktop} item={row.item} now={now}
-                  onDismiss={dismissNeed} onOpen={openNeed} onAction={decideNeed} />
-              </View>
-            );
-          case 'needs-empty':
-            return emptySection('Nothing needs you',
-              'Nobody has tagged you with a question or a request.', 'checkmark-circle-outline', 'needs-you-empty');
-          case 'saved':
-            return renderSaved(row.bookmark);
-          case 'saved-more':
-            return (
-              <Button
-                accessibilityRole="button"
-                onPress={() => void loadMoreSaved()}
-                testID="bookmarks-more"
-                label={'LOAD MORE SAVED'}
-                variant="quiet"
-                appearance={{ control: styles.emptyBlock, label: styles.removeText }}
-              />
-            );
-          case 'saved-empty':
-            return emptySection('No bookmarks yet', desktop
-              ? 'Hover a message and press its bookmark mark.'
-              : 'Long press a message and pick Bookmark.', 'bookmark-outline', 'bookmarks-empty');
-        }
-      }}
-      style={[styles.list, desktop && styles.desktopList]}
       testID="tray-list"
     />
   );
 
-  const selectedBookmark = selected
-    ? bookmarks.find((bookmark) => bookmark.messageId === selected.messageId)
-    : undefined;
-  const pane =
-    desktop && selected && inspectRoom && client && paneCornerId ? (
-      <DesktopRoomInspector
-        room={inspectRoom}
-        client={client}
-        content={{ kind: 'corner', cornerId: paneCornerId }}
-        focusMessageId={paneCornerId === selected.roomId ? selected.messageId : null}
-        onOpenCorner={setPaneCornerId}
-        onOpenInMain={openInMain}
-        onClose={() => setSelected(null)}
-      />
-    ) : desktop ? (
-      <View style={styles.paneFallback} testID="tray-pane">
-        {selectedBookmark && !selectedBookmark.available ? (
-          <EmptyState title="Source unavailable" description="This bookmark no longer exposes message content."
-            action={{label:'Remove', accessibilityLabel:'Remove unavailable bookmark', onPress:() => void remove(selectedBookmark)}} />
-        ) : selected && inspectError ? (
-          <SettingsRow title="Could not open this corner" description={inspectError} />
-        ) : selected ? (
-          <View style={styles.loadingBlock} testID="tray-corner-loader">
-            <SurfaceGlyphLoader />
-          </View>
-        ) : null}
-      </View>
-    ) : null;
-
   return (
-    <View style={[styles.screen, { paddingTop: desktop ? 0 : insets.top }]}>
-      <PageHeader backAccessibilityLabel="Back to Rooms" eyebrow={workspaceName ?? 'Workspace'}
-        onBack={desktop ? undefined : () => router.back()} prominent testID="tray-header" title="Tray" />
-      {error ? (
-        <SettingsRow title={error}
+    <YStack flex={1} minHeight={0} backgroundColor="canvas" testID="tags-screen">
+      {desktop ? null : (
+        <>
+          <SafeTop />
+          {/* The list header shared with Chats. Search and + take the Chats list,
+              where they act; the Workspace switcher stays on Chats. */}
+          <ChatListHeader
+            workspaceName={workspaceName ?? 'Workspace'}
+            search={CLOSED_SEARCH}
+            onSearch={(next) => { if (next.open) goToChats(); }}
+            onNew={() => router.replace({ pathname: TAB_ROUTES.chats, params: { ...(workspaceId ? { communityId: workspaceId } : {}), newRoom: String(Date.now()) } } as never)}
           />
-      ) : null}
-      <View style={styles.body}>
+        </>
+      )}
+      {error ? <YStack paddingHorizontal="4" paddingTop="2"><Copy small quiet testID="tray-error">{error}</Copy></YStack> : null}
+      <YStack flex={1} minHeight={0} width="100%" maxWidth={desktop ? 760 : undefined} alignSelf="center">
         {list}
-        {pane}
-      </View>
-      {removed ? (
-        <View accessibilityLiveRegion="polite" style={[styles.undo, { bottom: 16 + insets.bottom }]}
-          testID="bookmark-undo">
-          <Text style={styles.undoText}>Bookmark removed</Text>
-          {removed.available ? (
-            <Button
-              accessibilityRole="button"
-              onPress={() => void undo()}
-              label={'UNDO'}
-              variant="quiet"
-              appearance={{ control: styles.undoAction, label: styles.undoActionText }}
-            />
-          ) : null}
-        </View>
-      ) : null}
-      {/* A held clear keeps its UNDO in reach above a bookmark removal's bar. */}
-      {newestClear ? (
-        <View accessibilityLiveRegion="polite" testID="tray-clear-undo"
-          style={[styles.undo, desktop && styles.desktopUndo,
-            { bottom: 16 + insets.bottom + (removed ? UNDO_STACK : 0) }]}>
-          <Text style={styles.undoText}>{clearedLabel(newestClear)}</Text>
-          <Button
-            accessibilityRole="button"
-            onPress={undoClear}
-            label={'UNDO'}
-            variant="quiet"
-            appearance={{ control: styles.undoAction, label: styles.undoActionText }}
-          />
-        </View>
-      ) : null}
-    </View>
+      </YStack>
+    </YStack>
   );
 }
-
-const styles = StyleSheet.create((theme) => ({
-  screen: { flex: 1, backgroundColor: theme.buzz.bgBase },
-  body: { flex: 1, flexDirection: 'row' },
-  list: { flex: 1 },
-  desktopList: {
-    maxWidth: desktopColumnWidths.list, borderRightWidth: StyleSheet.hairlineWidth, borderRightColor: theme.buzz.border,
-  },
-  sectionHead: {
-    minHeight: 44, marginTop: theme.buzz.space.lg, paddingHorizontal: 16,
-    flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between',
-    borderBottomWidth: StyleSheet.hairlineWidth, borderBottomColor: theme.buzz.border,
-  },
-  sectionTitle: { ...theme.buzz.type.sectionHead, color: theme.buzz.ledgerQuiet },
-  sectionCount: { ...theme.buzz.type.meta, color: theme.buzz.accent },
-  sectionEnd: { flexDirection: 'row', alignItems: 'center', gap: theme.buzz.space.md },
-  sectionClear: { minHeight: 44, minWidth: 44, alignItems: 'center', justifyContent: 'center' },
-  cellDivider: {
-    borderBottomWidth: StyleSheet.hairlineWidth, borderBottomColor: theme.buzz.border,
-  },
-  row: {
-    minHeight: 78, padding: theme.buzz.space.md,
-    borderBottomWidth: StyleSheet.hairlineWidth, borderBottomColor: theme.buzz.border,
-  },
-  rowSelected: { backgroundColor: theme.buzz.bgHighlight },
-  rowUnavailable: { opacity: 0.68 },
-  // A saved row reads like a Needs you cell: who and age, the quoted words, then where.
-  originLine: { flexDirection: 'row', alignItems: 'baseline', gap: theme.buzz.space.sm },
-  source: { minWidth: 0, alignItems: 'center', gap: theme.buzz.space.sm, marginTop: theme.buzz.space.xs },
-  originSigil: { ...theme.buzz.type.meta, color: brand.mark },
-  origin: { ...theme.buzz.type.meta, flexShrink: 1, color: theme.buzz.ledgerQuiet },
-  time: { ...theme.buzz.type.meta, flexShrink: 0, color: theme.buzz.ledgerQuiet },
-  author: { ...theme.buzz.type.bodyStrong, flex: 1, color: theme.buzz.textPrimary },
-  excerpt: {
-    ...theme.buzz.type.body, color: theme.buzz.textPrimary, marginTop: theme.buzz.space.xs,
-  },
-  excerptBold: { ...theme.buzz.type.bodyStrong },
-  quote: {
-    paddingLeft: theme.buzz.space.sm, borderLeftWidth: 2, borderLeftColor: theme.buzz.borderStrong,
-  },
-  unavailable: {
-    ...theme.buzz.type.meta, color: theme.buzz.ledgerQuiet, marginTop: theme.buzz.space.xs,
-  },
-  rowFooter: { flexDirection: 'row', justifyContent: 'space-between', marginTop: theme.buzz.space.sm },
-  remove: { minHeight: 44, alignSelf: 'flex-start', justifyContent: 'center' },
-  removeText: { ...theme.buzz.type.sectionHead, color: theme.buzz.textSecondary },
-  paneFallback: { flex: 1, justifyContent: 'center' },
-  loadingBlock: { padding: theme.buzz.space.xl, alignItems: 'center', justifyContent: 'center' },
-  emptyBlock: { padding: theme.buzz.space.xl, alignItems: 'flex-start', justifyContent: 'center' },
-  emptyIcon: { color: theme.buzz.accent },
-  emptyTitle: {
-    ...theme.buzz.type.bodyStrong, color: theme.buzz.textPrimary, marginTop: theme.buzz.space.sm,
-  },
-  empty: {
-    ...theme.buzz.type.meta, color: theme.buzz.textSecondary, marginTop: theme.buzz.space.sm,
-  },
-  undo: {
-    position: 'absolute', left: 16, right: 16, bottom: 16, minHeight: 48,
-    flexDirection: 'row', alignItems: 'center', paddingHorizontal: theme.buzz.space.md,
-    backgroundColor: theme.buzz.bgTerminal, borderWidth: 1,
-    borderColor: theme.buzz.borderStrong, borderRadius: theme.buzz.radius,
-  },
-  // The bulk Undo bar sits at the foot of the desktop list column.
-  desktopUndo: { maxWidth: 390 - 32 },
-  undoText: {
-    ...theme.buzz.type.meta, flex: 1, color: theme.buzz.textPrimary,
-  },
-  undoAction: { minWidth: 64, minHeight: 44, alignItems: 'center', justifyContent: 'center' },
-  undoActionText: { ...theme.buzz.type.sectionHead, color: theme.buzz.accent },
-}));

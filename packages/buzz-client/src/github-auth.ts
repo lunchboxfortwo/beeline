@@ -5,6 +5,7 @@ export interface GitHubInstallationAccess {
   accountLogin: string;
   accountType: 'User' | 'Organization';
   accountAvatarUrl?: string;
+  faviconUrl?: string;
   repositorySelection: 'all' | 'selected';
   status: 'active' | 'revoked' | 'suspended';
   repositoryCount: number;

@@ -8,14 +8,14 @@ import { RoomViewClient, RoomViewHttpError } from '@/sync/transport/room-view-cl
 import { loadBuzzIdentity, loadBuzzViewerPubkey, peekBuzzViewerContext, getEffectiveRelayUrl } from '@/auth/buzz-identity-storage';
 import { markRoomOpen, markRoomOpenWeight } from '@/buzz/room-open-trace';
 import { displayRoomMessages, reconcileRoomView, reconcileRoomMessageDelta } from '@/buzz/room-view-presentation';
-import { offerRoomTurns, roomTurns } from '@/buzz/room-message-records';
+import { offerRoomView, selectRoomViewRecords } from '@/buzz/room-message-records';
 import { saveActiveCommunityId, saveLastViewedChannel } from '@/buzz/community-storage';
 import { ReadCursorAdvancer } from '@/buzz/read-cursor-advance';
 import { liveDraftRowId } from '@/buzz/draft-settle';
 import { applyLiveOverlayStructure, liveDraftDrainKey, type LiveDraftDrainStore } from '@/buzz/live-draft-drain';
 import { createRoomOutbox, mobileSurfaceCache, surfaceAddress } from '@/buzz/surface-storage';
 import { identityScope } from '@/buzz/identity-records';
-import { currentSurfaceStamp } from '@/buzz/surface-clock';
+import { nextSurfaceStamp } from '@/buzz/surface-clock';
 import { BuzzRigTransport } from '@/sync/transport';
 import type { MonolithSurfaceEvent } from '@/sync/transport/monolith-rig-transport';
 import { mergeAgentPresenceBatch, type RoomAgentPresence } from '@/buzz/agent-presence';
@@ -102,8 +102,7 @@ export function useRoomSurfaceSubscription([
     // Turn deltas heard while a Room read is in flight. Turn times are whole
     // seconds, so the read cannot tell a same-second retry from a stale turn;
     // replaying these in order on top of the read keeps what the socket said.
-    let readStamp = 0;
-    let messageDeltasDuringRead: RoomViewMessage[] | undefined;
+    let reading = false;
     let commandsDuringRead: RoomView['pendingAgentCommands'];
     let cursorDuringRead: RoomView['viewer']['readCursor'];
     let decoder: LiveOverlayDecoder | undefined;
@@ -116,15 +115,16 @@ export function useRoomSurfaceSubscription([
     let cacheAddress: ReturnType<typeof surfaceAddress> | undefined;
     let cacheWriteTimer: ReturnType<typeof setTimeout> | undefined;
 
+    const firstSession = !sessionStartedRef.current;
     const openingViewer = peekBuzzViewerContext();
     const openingFrame = !sessionStartedRef.current && openingCache &&
       openingCache.view.room.id === channelId &&
       openingCache.viewerPubkey === openingViewer?.viewerPubkey &&
       openingCache.relayUrl === openingViewer?.relayUrl;
     sessionStartedRef.current = true;
-    // Initial state already describes this cached response. Resetting it here
-    // commits another Room render before its first frame can be submitted.
-    if (!openingFrame) {
+    // Initial state already describes this visit, including a cold empty one.
+    // Reset only when an existing session changes, not before its first frame.
+    if (!firstSession) {
       agentPresencesRef.current = {};
       reconnectGraceRef.current = {};
       setAgentPresences({});
@@ -138,7 +138,7 @@ export function useRoomSurfaceSubscription([
     }
     setHydrationFailed(false);
     setHydrationError(null);
-    if (!openingFrame) bindingsRef.current.resetTranscript();
+    if (!firstSession) bindingsRef.current.resetTranscript();
 
     // Seconds, but not WHOLE seconds. A draft's first snapshot is the anchor
     // its row keeps for the rest of the turn (C107), and two turns starting a
@@ -166,14 +166,12 @@ export function useRoomSurfaceSubscription([
       setLiveOverlays(next);
     };
 
-    const paintView = (view: RoomView, fresh: boolean): RoomView | null => {
+    const paintView = (view: RoomView, fresh: boolean, readStamp = 0): RoomView | null => {
       if (cancelled) return null;
       isCornerRef.current = Boolean(view.parent?.id ?? view.room.parentId);
       if (isCornerRef.current) readCursorRef.current?.cancel();
-      offerRoomTurns(messageRecordScopeRef.current, channelId, view.latestAgentTurns, fresh ? readStamp : 0);
-      const selectedTurns = roomTurns(messageRecordScopeRef.current, channelId);
-      const selectedView = selectedTurns.length === 0 && view.latestAgentTurns.length === 0
-        ? view : { ...view, latestAgentTurns: selectedTurns };
+      offerRoomView(messageRecordScopeRef.current, view, fresh ? readStamp : 0);
+      const selectedView = selectRoomViewRecords(messageRecordScopeRef.current, view);
       const stableView = (reconcileRoomView(reconciledViewRef.current, selectedView));
       for (const message of stableView.messages) {
         if (message.requestId) {
@@ -223,6 +221,7 @@ export function useRoomSurfaceSubscription([
       identityPubkey: string,
       relayUrl: string,
       fresh: boolean,
+      readStamp = 0,
     ) => {
       if (cancelled) return;
       const viewWorkspaceId = stableView.room.workspaceId;
@@ -310,14 +309,10 @@ export function useRoomSurfaceSubscription([
       identityPubkey: string,
       relayUrl: string,
       fresh: boolean,
+      readStamp = 0,
     ) => {
-      const parent = view.parent?.id ?? view.room.parentId;
-      if (notificationResponseId && parent && (view.room.archived || view.cornerLifecycle?.lifecycle === 'done')) {
-        router.replace({ pathname: '/beeline/chat/[channelId]', params: { channelId: parent } });
-        return;
-      }
-      const stableView = paintView(view, fresh);
-      if (stableView) enrichView(stableView, identityPubkey, relayUrl, fresh);
+      const stableView = paintView(view, fresh, readStamp);
+      if (stableView) enrichView(stableView, identityPubkey, relayUrl, fresh, readStamp);
     };
 
     const installWatch = async (): Promise<void> => {
@@ -353,7 +348,7 @@ export function useRoomSurfaceSubscription([
             }
             if (live.type === 'read-state' || live.type === 'room-commands') {
               if (live.roomId !== channelId) return;
-              if (messageDeltasDuringRead) {
+              if (reading) {
                 if (live.type === 'read-state') cursorDuringRead = live.readCursor;
                 else commandsDuringRead = live.commands;
               }
@@ -366,8 +361,6 @@ export function useRoomSurfaceSubscription([
               // The shared committed-frame owner has already published this
               // response. This listener owns only visit effects and read replay.
               if (live.type === 'message-delta') {
-                messageDeltasDuringRead?.push(live.version === undefined
-                  ? live.message : { ...live.message, version: live.version });
                 if (live.message.author.pubkey === readCursorViewerRef.current)
                   readCursorRef.current?.acknowledge(live.message.id);
               }
@@ -592,7 +585,7 @@ export function useRoomSurfaceSubscription([
           queueNewestFrameMark(cachedNewest, channelId);
         }
         markRoomOpen('occupancy-yield-start');
-        if (!openingFrame || cached !== openingCache.view) await yieldToPaint();
+        if (cached && (!openingFrame || cached !== openingCache.view)) await yieldToPaint();
         markRoomOpen('occupancy-yield-end');
         if (cancelled) return;
 
@@ -614,25 +607,17 @@ export function useRoomSurfaceSubscription([
           },
         });
         transportForEffect = nextTransport;
-        setTransport(nextTransport);
-        setRoomClient(nextRoomClient);
 
         const outbox = createRoomOutbox(relayUrl, identity, channelId);
         outboxRef.current = outbox;
         await outbox.restore();
         if (cancelled) return;
+        setTransport(nextTransport);
+        setRoomClient(nextRoomClient);
         const restored = outbox
           .list()
           .map((record) => displayRoomMessages([record.row], identity.publicKey)[0]!);
         if (restored.length) bindingsRef.current.restoreOutboxMessages(restored);
-        setFailedIds(
-          new Set(
-            outbox
-              .list()
-              .filter((record) => record.status === 'failed')
-              .map((record) => record.event.id),
-          ),
-        );
         const updateOutbox = () => {
           if (cancelled) return;
           if (isFocusedRef.current && AppState.currentState === 'active') void outbox.acknowledgeFailures();
@@ -662,13 +647,13 @@ export function useRoomSurfaceSubscription([
           pendingReadTraces = [];
           logLiveTrace('room-read-start', traces);
           markRoomOpen('room-read-start');
-          messageDeltasDuringRead = [];
+          reading = true;
           commandsDuringRead = undefined;
           cursorDuringRead = undefined;
           try {
             const prefetched = openingPrefetch;
             openingPrefetch = null;
-            readStamp = prefetched ? 0 : currentSurfaceStamp();
+            const readStamp = prefetched ? 0 : nextSurfaceStamp();
             const view = await (prefetched ? prefetched : nextRoomClient.room(channelId));
             logLiveTrace('room-read-end', traces);
             markRoomOpen('room-read-end', view.messages.at(-1)?.id);
@@ -677,17 +662,17 @@ export function useRoomSurfaceSubscription([
 
             if (cancelled) return;
             roomReadStampRef.current = readStamp;
-            const replayedMessages = messageDeltasDuringRead ?? [];
-            messageDeltasDuringRead = undefined;
+            reading = false;
             applyView(
-              replayedMessages.reduce(reconcileRoomMessageDelta, {
+              {
                 ...view,
                 ...(commandsDuringRead ? { pendingAgentCommands: commandsDuringRead } : {}),
                 ...(cursorDuringRead ? { viewer: { ...view.viewer, readCursor: cursorDuringRead } } : {}),
-              }),
+              },
               identity.publicKey,
               relayUrl,
               true,
+              readStamp,
             );
             if (!view.parent && !reopenedChat) {
               reopenedChat = true;
@@ -704,7 +689,7 @@ export function useRoomSurfaceSubscription([
           } catch (error) {
             logLiveTrace('room-read-error', traces);
             markRoomOpen('room-read-error');
-            messageDeltasDuringRead = undefined;
+            reading = false;
 
             if (cancelled) return;
             setPresenceResolved(false);

@@ -34,27 +34,21 @@ describe('owned terminal receipts and archived cleanup controls',()=>{
       binding:(await db.query(`SELECT xmin::text version,connection_id,connection_epoch FROM agent_command_generation_owners WHERE command_id=$1`,[commandId])).rows,
     });
     const before=await versions(),frames:string[]=[];
-    await daemon.fenceOwnedTurnReply(agent,source,input,()=>frames.push('terminal-requeued'));
-    await daemon.fenceOwnedTurnReply(agent,source,input,()=>frames.push('same-terminal-replayed'));
+    await daemon.fenceOwnedTurnReply(agent,input,()=>frames.push('terminal-requeued'));
+    await daemon.fenceOwnedTurnReply(agent,input,()=>frames.push('same-terminal-replayed'));
     expect(frames).toEqual(['terminal-requeued','same-terminal-replayed']);expect(await versions()).toEqual(before);
-    await expect(daemon.fenceOwnedTurnReply(agent,source,{...input,commandId},()=>frames.push('must-not-confirm-claim'),true)).rejects.toThrow();
-    expect((await db.query('SELECT * FROM turn_owned_effect_fences')).rowCount).toBe(0);
-    await db.query(`UPDATE live_server_instances SET renewed_at=clock_timestamp()-interval '91 seconds' WHERE instance_id='receipt-server'`);
-    await expect(daemon.fenceOwnedTurnReply(agent,source,input,()=>frames.push('must-not-confirm-expired'))).rejects.toThrow('source changed');
-    await db.query(`UPDATE live_server_instances SET renewed_at=clock_timestamp() WHERE instance_id='receipt-server'`);
+    await expect(daemon.fenceOwnedTurnReply(agent,{...input,commandId},()=>frames.push('must-not-confirm-claim'),true)).rejects.toThrow();
+    expect((await db.query('SELECT * FROM turn_owned_access_checks')).rowCount).toBe(0);
     await expect(daemon.execute('claimAgentCommand',{roomId:room,commandId,generationId:'next-generation'},agent,source)).rejects.toThrow();
-    await expect(daemon.fenceOwnedTurnReply(agent,source,{...input,generationId:'next-generation'},()=>frames.push('must-not-confirm-new-generation'))).rejects.toThrow();
+    await expect(daemon.fenceOwnedTurnReply(agent,{...input,generationId:'next-generation'},()=>frames.push('must-not-confirm-new-generation'))).rejects.toThrow();
     expect(frames).toHaveLength(2);
   });
 
-  it('refuses a handed-back command or a foreign connection instead of confirming a retired recovery result',async()=>{
+  it('refuses a handed-back command instead of confirming a retired recovery result',async()=>{
     const frames:string[]=[];
     await db.query(`UPDATE agent_commands SET state='pending',generation_id=NULL,
       turn_owner_connection_id=NULL,turn_owner_epoch=NULL,lease_expires_at=NULL WHERE id=$1`,[commandId]);
-    await expect(daemon.fenceOwnedTurnReply(agent,source,input,()=>frames.push('must-not-confirm-requeue'))).rejects.toThrow();
-    await db.query(`UPDATE agent_connections SET connection_id='foreign-current-source',epoch=2 WHERE agent_id=$1`,[agent]);
-    await expect(daemon.fenceOwnedTurnReply(agent,{connectionId:'foreign-current-source',epoch:2},input,
-      ()=>frames.push('must-not-confirm-foreign-binding'))).rejects.toThrow();
+    await expect(daemon.fenceOwnedTurnReply(agent,input,()=>frames.push('must-not-confirm-requeue'))).rejects.toThrow();
     expect(frames).toEqual([]);
   });
 
@@ -69,14 +63,14 @@ describe('owned terminal receipts and archived cleanup controls',()=>{
     const control = { roomId:corner, commandId:stop.id, generationId:'cleanup-generation' };
     await daemon.execute('claimAgentCommand', control, agent, source);
     const frames:string[] = [];
-    await daemon.fenceOwnedTurnReply(agent, source, control, () => frames.push('claimed'), true);
+    await daemon.fenceOwnedTurnReply(agent, control, () => frames.push('claimed'), true);
     await daemon.execute('acknowledgeAgentCommand', control, agent, source);
-    await daemon.fenceOwnedTurnReply(agent, source, control, () => frames.push('acknowledged'));
+    await daemon.fenceOwnedTurnReply(agent, control, () => frames.push('acknowledged'));
     expect(frames).toEqual(['claimed','acknowledged']);
     await expect(daemon.execute('claimAgentCommand', { ...control, commandId:work.id }, agent, source)).rejects.toThrow();
     await db.query('UPDATE memberships SET removed_at=now() WHERE identity_id=$1 AND room_id IS NULL', [agent]);
     await expect(daemon.execute('acknowledgeAgentCommand', control, agent, source)).rejects.toThrow('access denied');
-    await expect(daemon.fenceOwnedTurnReply(agent, source, control, () => frames.push('revoked-workspace'))).rejects.toThrow();
+    await expect(daemon.fenceOwnedTurnReply(agent, control, () => frames.push('revoked-workspace'))).rejects.toThrow();
     await db.query('UPDATE memberships SET removed_at=NULL WHERE identity_id=$1 AND room_id IS NULL', [agent]);
     await db.query('UPDATE memberships SET removed_at=now() WHERE identity_id=$1 AND room_id=$2', [agent,room]);
     await expect(daemon.execute('acknowledgeAgentCommand', control, agent, source)).rejects.toThrow('access denied');

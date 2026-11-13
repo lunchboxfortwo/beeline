@@ -182,7 +182,7 @@ describe('corner message attribution', () => {
     await result(worker!, 'https://github.com/acme/repo/pull/7');
 
     expect(checkGate).toHaveBeenCalledOnce();
-    expect((await commands(B, C)).map((command) => command.reason)).toEqual(['subscribed_event']);
+    expect((await commands(B, C)).map((command) => command.reason)).toEqual(['corner_review_dispatch']);
     expect(
       (
         await rootFixture.db.query<{ lifecycle: { checks: string; checksSummary: { total: number } } }>(
@@ -322,7 +322,7 @@ describe('corner message attribution', () => {
       kind: 'check-passed',
     });
     const [review] = await commands(B, C);
-    expect(review?.reason).toBe('subscribed_event');
+    expect(review?.reason).toBe('corner_review_dispatch');
     await claim(review!);
     await result(review!, 'Review complete: the race is fixed, approved.');
     const rows = (
@@ -344,9 +344,12 @@ describe('corner message attribution', () => {
     const [review] = await commands(B, C);
     await claim(review!);
     // A check event is not a human assignment, even when its fixture author is human.
-    await expect(result(review!, '@human the reproduction is missing. Fix that and push.'))
-      .rejects.toThrow('not your direct commander');
-    await result(review!, 'The reproduction is missing. Fix that and push.');
+    // The tag comes off and the rest lands as an ordinary review note.
+    const dropped = await result(review!, '@human the reproduction is missing. Fix that and push.');
+    expect(dropped.receipt).toContain('tag @human');
+    expect((await rootFixture.db.query<{ text: string }>(
+      `SELECT text FROM messages WHERE id=$1`, [dropped.id],
+    )).rows[0]?.text).toBe('the reproduction is missing. Fix that and push.');
     expect(await commands(A, C)).toEqual([]);
     expect((await rootFixture.db.query<{ workflow_state: string }>(
       `SELECT ${cornerRunStateSql('$1::uuid')} workflow_state`, [C],
@@ -367,7 +370,7 @@ describe('corner message attribution', () => {
   });
 
 
-  it('hands a missing verdict back instead of repeating the same-head review after checks return', async () => {
+  it('does not retry an empty review when checks return', async () => {
     // A reviewer that ends its turn to WAIT for CI has not finished reviewing.
     // Pushing the worker here would send it at a pull request still mid-run.
     await rootFixture.phone.execute('updateRoom', { roomId: R, reviewerAgentId: B }, H);
@@ -382,12 +385,10 @@ describe('corner message attribution', () => {
     await advanceCorner(rootFixture.db, C, { kind: 'checks-pending' });
     await result(review!, 'Checks are still running on this head; I will look when they land.');
     expect(await commands(A, C)).toEqual([]);
-    // Completion without a verdict returns ownership; it never retries that head.
     await greenHead(14, '1'.repeat(40));
+    await reconcileConfiguredCornerReviewers(rootFixture.db, R);
     expect(await commands(B, C)).toEqual([]);
-    expect((await commands(A, C)).some(command => command.source.body.includes('without a verdict'))).toBe(true);
   });
-
 
   it('Reproduction C3-1: a green re-report on the same head does not re-wake a reviewer that already reviewed it', async () => {
     await rootFixture.phone.execute('updateRoom', { roomId: R, reviewerAgentId: B }, H);
@@ -400,7 +401,7 @@ describe('corner message attribution', () => {
     // The same head's green verdict is re-reported (a CI re-run or a redelivery).
     await greenHead(21, '7'.repeat(40));
     const reviewerWakes = (await commands(B, C)).filter(
-      (command) => command.reason === 'subscribed_event',
+      (command) => command.reason === 'corner_review_dispatch',
     );
     console.info(
       `Reproduction C3-1: wrong=1 re-wake of a reviewed head; right=0; observed=${reviewerWakes.length}`,
@@ -411,26 +412,33 @@ describe('corner message attribution', () => {
 
   it.each(['FAIL: fix the demonstration.', '**FAIL**: A1 is unmet.', 'Verdict: FAIL: A1 is unmet.', 'PASS: reviewed all changed files.',
     'FAIL: the diff is empty; there is nothing to review.'])(
-    'Reproduction REVIEW-QUIET-1: duplicate green deliveries retain %s', async verdict => {
+    'Reproduction REVIEW-QUIET-1: pending reviews dedupe and retain historical %s', async verdict => {
       await rootFixture.phone.execute('updateRoom', { roomId: R, reviewerAgentId: B }, H);
       const head = '9'.repeat(40);
       await greenHead(71, head);
       const [review] = await commands(B, C);
       await claim(review!);
       await result(review!, verdict);
+      await reconcileConfiguredCornerReviewers(rootFixture.db, R);
+      const handback = (await commands(A, C)).find(command => command.reason === 'corner_review_needed');
+      if (!verdict.startsWith('PASS:')) {
+        expect(handback?.source.body).toContain(verdict);
+        await claim(handback!);
+        await result(handback!, 'The requested evidence is ready.');
+      } else expect(handback).toBeUndefined();
       // A pending/green cycle writes new lifecycle cards, losing the old
       // outstanding-command window. The source event has no head field.
       await rootFixture.db.query(`UPDATE corner_github_cache SET lifecycle=jsonb_set(lifecycle,'{checks}','"pending"') WHERE corner_id=$1`, [C]);
       await advanceCorner(rootFixture.db, C, { kind: 'checks-pending' });
       await greenHead(71, head);
       for (let cycle = 0; cycle < 3; cycle++) await reconcileConfiguredCornerReviewers(rootFixture.db, R);
-      expect(await commands(B, C)).toEqual([]);
-      const handback = (await commands(A, C)).find(command => command.reason === 'corner_review_needed');
-      expect(handback?.source.body).toContain(verdict);
-      expect(handback?.source.body).not.toContain('ended without a PASS');
-      // Finishing the handback permits the next review after a new push.
-      await claim(handback!);
-      await result(handback!, 'The next push contains the requested evidence.');
+      const pending = await commands(B, C);
+      if (verdict.startsWith('PASS:')) expect(pending).toEqual([]);
+      else {
+        expect(pending).toHaveLength(1);
+        expect(pending[0]?.id).not.toBe(review!.id);
+        expect(pending[0]?.source.body).toContain(verdict);
+      }
       await greenHead(71, '8'.repeat(40));
       const [continuation] = await commands(B, C);
       expect(continuation?.source.body).toContain('Prior reviewer verdict and evidence');
@@ -586,11 +594,11 @@ describe('corner message attribution', () => {
     expect(await commands(B, C)).toEqual([]);
     expect((await rootFixture.db.query<{ workflow_state: string }>(
       `SELECT ${cornerRunStateSql('corner_id')} workflow_state FROM corner_facts WHERE corner_id=$1`, [C],
-    )).rows[0]).toEqual({ workflow_state: 'working' });
+    )).rows[0]).toEqual({ workflow_state: 'review' });
   });
 
 
-  it('returns a completed review without PASS to the implementer without re-waking the reviewer on that head', async () => {
+  it('returns explicit review findings once and does not replay the repair on reconciliation', async () => {
     await rootFixture.phone.execute('updateRoom', { roomId: R, reviewerAgentId: B }, H);
     await greenHead(28, 'c'.repeat(40));
     const [review] = await commands(B, C);
@@ -599,8 +607,8 @@ describe('corner message attribution', () => {
     expect((await reconcileConfiguredCornerReviewers(rootFixture.db, R)).commands).toBe(1);
     const handback = await commands(A, C);
     expect(handback.map(command => command.reason)).toEqual(['corner_review_needed']);
-    expect(handback[0]?.source.body).toContain('the reviewer completed its review of the current head');
-    expect(handback[0]?.source.body).toContain('report the blocker to its commander');
+    expect(handback[0]?.source.body).toContain('FAIL: demonstration is missing.');
+    expect(handback[0]?.source.body).toContain('c'.repeat(40));
     for (let sweep = 2; sweep <= 3; sweep += 1)
       expect((await reconcileConfiguredCornerReviewers(rootFixture.db, R)).commands).toBe(0);
     expect((await commands(A, C)).map(command => command.id)).toEqual(handback.map(command => command.id));
@@ -615,7 +623,7 @@ describe('corner message attribution', () => {
     }
     // A new head is a new review.
     await greenHead(28, 'd'.repeat(40));
-    expect((await commands(B, C)).map((command) => command.reason)).toEqual(['subscribed_event']);
+    expect((await commands(B, C)).map((command) => command.reason)).toEqual(['corner_review_dispatch']);
   });
 
 
@@ -773,7 +781,7 @@ describe('corner message attribution', () => {
     };
     await green(43, headA);
     const [queued] = await commands(B, C);
-    expect(queued?.reason).toBe('subscribed_event');
+    expect(queued?.reason).toBe('corner_review_dispatch');
     expect(queued?.source.body).toContain(headA);
     // A newer head lands before the reviewer's turn starts.
     await green(43, headB);

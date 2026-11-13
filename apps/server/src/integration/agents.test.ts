@@ -63,7 +63,7 @@ const fixture = monolithFixture();
     expect(saved.status).toBe(200);
     const first = await fixture.phone.readAgent(WORKSPACE, AGENT, HUMAN);
     expect(first?.avatarGenerationId).toBeTruthy();
-    expect((await completionMessages()).rowCount).toBe(1);
+    expect((await completionMessages()).rowCount).toBe(0);
     expect(isAgentDetailView(first)).toBe(true);
     const url = first!.agent.identity.avatar!;
     expect(url).toContain('/v1/agent-avatars/');
@@ -80,7 +80,7 @@ const fixture = monolithFixture();
     expect((await fixture.phone.readAgent(WORKSPACE, AGENT, HUMAN))?.avatarGenerationId).toBe(
       first?.avatarGenerationId,
     );
-    expect((await completionMessages()).rowCount).toBe(1);
+    expect((await completionMessages()).rowCount).toBe(0);
     const soulSave = await fixture.operation('updateAgentSoul', {
       workspaceId: WORKSPACE,
       agentId: AGENT,
@@ -618,7 +618,7 @@ const fixture = monolithFixture();
   });
 
 
-  it('projects every agent message with the current author name, handle, and face', async () => {
+  it('projects every agent message with the current name and face and its stable workspace handle', async () => {
     await fixture.database.query(
       `UPDATE identities SET name='Lumen',handle='lumen',face_id='owl' WHERE id=$1`,
       [AGENT],
@@ -635,7 +635,7 @@ const fixture = monolithFixture();
       pubkey: AGENT,
       kind: 'agent',
       name: 'Lumen',
-      handle: 'lumen',
+      handle: 'bee',
       face: 'owl',
     });
   });

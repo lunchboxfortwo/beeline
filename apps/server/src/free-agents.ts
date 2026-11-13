@@ -1,9 +1,9 @@
+import { AGENT_INVITATION_PROMPT, BEELINE_PRODUCT_GUIDE } from '@beeline/api-contract/agent-invitation-guide';
 import { notifyLive } from './postgres-live.js';
 import {FREE_AGENT_CREATION_SCHEMA,reserveStarterAgents,refundStarterAgent} from './free-agent-creation.js';
 import { FREE_AGENT_ACCOUNTING_SCHEMA } from './free-agent-accounting.js';
 import { setRoomEventSubscriptions } from './agent-subscriptions.js';
 import { SYSTEM_IDENTITY_ID } from '@beeline/api-contract/system-identity';
-import { systemMessage } from '@beeline/api-contract/system-message-catalog';
 import { createCipheriv, createDecipheriv, createECDH, createHash, randomBytes, randomUUID } from 'node:crypto';
 import { assignSeededAgentIdentity, resolveFace, agentHandleFromName } from '@beeline/api-contract/phone';
 import { createAgentCommand } from './agent-command.js';
@@ -13,7 +13,6 @@ import { FlyApiError, sameMachineImage } from './fly-machines.js';
 import type { LiveHub } from './live.js';
 import { freeAgentDailyTokenCapFromEnv, freeAgentFirstDayTokenCapFromEnv, freeAgentLimitsFromEnv, type FreeAgentLimits } from './free-agent-limits.js';
 import { createInvitedWorkspaceMembership, joinRooms } from './membership-join.js';
-import { ensureSystemIdentity, systemLine } from './system-line.js';
 import { createStarterOnboardingRun } from './starter-onboarding-run.js';
 
 /**
@@ -27,7 +26,6 @@ import { createStarterOnboardingRun } from './starter-onboarding-run.js';
 export const FREE_AGENTS_SCHEMA = `
 CREATE TABLE IF NOT EXISTS free_agents (
   agent_id text PRIMARY KEY REFERENCES identities(id) ON DELETE CASCADE,
-  workspace_id uuid NOT NULL REFERENCES workspaces(id) ON DELETE CASCADE,
   owner_id text NOT NULL REFERENCES identities(id),
   state text NOT NULL DEFAULT 'provisioning'
     CHECK (state IN ('provisioning','waking','running','sleeping','stopped','failed','destroyed')),
@@ -60,7 +58,6 @@ CREATE UNIQUE INDEX IF NOT EXISTS free_agents_bootstrap_hash ON free_agents(boot
 CREATE UNIQUE INDEX IF NOT EXISTS free_agents_model_token_hash ON free_agents(model_token_hash)
   WHERE model_token_hash IS NOT NULL;
 CREATE INDEX IF NOT EXISTS free_agents_owner ON free_agents(owner_id);
-CREATE INDEX IF NOT EXISTS free_agents_workspace ON free_agents(workspace_id);
 CREATE TABLE IF NOT EXISTS free_agent_usage (
   owner_id text NOT NULL REFERENCES identities(id) ON DELETE CASCADE,
   day date NOT NULL,
@@ -224,11 +221,9 @@ export const FREE_AGENT_EXIT_NOTE =
 /** Membership events every free agent hears in #general from creation. */
 export const FREE_AGENT_EVENT_SUBSCRIPTIONS = ['joined', 'left'] as const;
 
-export const FREE_AGENT_CONNECT_GUIDE = `Offer help bringing their own agent only on real triggers: someone requests their own files, apps, logins or local repository that you cannot access, or the server's 80% allowance warning has fired. Explain the limitation and offer to guide them. At most one unsolicited nudge per UTC day; the 80% warning counts as that day's nudge. Check the conversation before nudging; if unsure whether you already nudged today, do not nudge. Normal conversation is not a trigger. When explicitly asked, help without this daily restriction.
+export const FREE_AGENT_CONNECT_GUIDE = `When asked to add an agent, help one step at a time and wait for each result. Ask which device, assistant and plan they have when needed to select the supported steps. Do not require a computer for a supported chat-app connector. Never create, retrieve, request, repeat or post a pairing code in a Room; use redacted errors. Confirm a tagged reply before claiming setup complete.`;
 
-When they accept, guide them one step at a time, waiting for the result of each step. Help them choose their own computer or an always-on machine they control. Install Node.js and an agent CLI (Claude Code, Codex or OpenCode), and help them sign in to that CLI. Send them to Members -> Add agent in their Workspace to copy the command. The command format is npx usebeeline connect <code>; they must run the actual command copied from Add agent on their chosen machine. Never create, retrieve, request, repeat or post a pairing code in a Room. Troubleshoot using redacted errors, never secrets. Keep helping until Members shows their new agent online, then have them tag it with a small task. Do not claim it is online without confirmation.`;
-
-export const FREE_AGENT_APP_CONNECT_GUIDE = `For Grok/xAI, Muse/Meta AI, ChatGPT, Claude or Cursor, use connect for Beeline Rooms steps: in that assistant add https://join.usebeeline.app as a custom connector, sign in to Beeline, tap Allow, then Room Members > + to add the new member. Muse can connect now through a custom connector at https://join.usebeeline.app; only its directory listing is pending. TikTok sign-in awaits TikTok's approval of Beeline; never claim it works or offer sign-in. For apps requiring a browser sign-in or signup, explain that they need to open the site themselves or connect their own agent.`;
+export const FREE_AGENT_APP_CONNECT_GUIDE = AGENT_INVITATION_PROMPT;
 
 export const FREE_AGENT_REPOSITORY_GUIDE = `Post the repository card only when the person asks for coding work on a codebase (writing, fixing or reviewing code in a repo), or asks to connect GitHub or a repository. For non-coding requests, never suggest linking a repository; do the requested research, writing, drafting or other work directly. For example, "help me write a cold email" needs no repository card; "fix the login bug in my app" needs the repository card if this Room has no repository. On those coding or connection requests, call app_tool(app:"beeline:onboarding", tool:"repository", args:{}). For other repository work, discover the repository and starters tools with app_tool(app:"beeline:onboarding"). If the card fails, explain the actual reason and the concrete next step to connect the repository. For coding work when a Room has no repository, post its repository card instead of sending anyone to Settings or a CLI. When a person wants to switch repositories, post the same card. After linking, offer the starters card, grounded in recent commits, CI and open issues. A tapped starter is an instruction to start that task now: open a repository corner with a complete brief using their selection as approval, do the work, and use the normal checks, independent review and merge path.`;
 
@@ -241,8 +236,9 @@ export const FREE_AGENT_BROWSER_GUIDE = `Use agent-browser with the installed Li
 /** Retain the agent's persona while replacing release-owned hosted policy on every read. */
 export function currentFreeAgentInstructions(instructions: string): string {
   const retained = instructions.split(/\n\n/u).filter(paragraph =>
-    paragraph !== FREE_AGENT_TEAM_GUIDE && !/^(?:For Grok\/xAI|When the person picks "Make a welcome video|You are on a team with another free starter agent|Use agent-browser with)/u.test(paragraph));
-  return [...retained, FREE_AGENT_APP_CONNECT_GUIDE, FREE_AGENT_BROWSER_GUIDE, FREE_AGENT_TEAM_GUIDE].join('\n\n');
+    paragraph !== FREE_AGENT_TEAM_GUIDE && paragraph !== AGENT_INVITATION_PROMPT && paragraph !== BEELINE_PRODUCT_GUIDE &&
+    !/^(?:For Grok\/xAI|Offer help bringing their own agent|When they accept, guide them|When asked to add an agent|When the person picks "Make a welcome video|You are on a team with another free starter agent|Use agent-browser with)/u.test(paragraph));
+  return [...retained, BEELINE_PRODUCT_GUIDE, FREE_AGENT_CONNECT_GUIDE, FREE_AGENT_APP_CONNECT_GUIDE, FREE_AGENT_BROWSER_GUIDE, FREE_AGENT_TEAM_GUIDE].join('\n\n');
 }
 
 export function freeAgentInstructions(seededSoul: string, name: string, config: FreeAgentConfig): string {
@@ -267,6 +263,8 @@ Leaving the Workspace itself is silent in Beeline; you only hear about leaves an
 
 You have a free daily allowance of model tokens. If it runs out, say so plainly and tell them they can connect their own agent from the Members page to keep going.
 
+${BEELINE_PRODUCT_GUIDE}
+
 ${FREE_AGENT_TURN_GUIDE}
 
 ${FREE_AGENT_CONNECT_GUIDE}
@@ -288,6 +286,7 @@ type FreeAgentCreationInput={workspaceId:string;creatorId:string;roomId:string;n
 
 export async function createFreeAgentInWorkspace(database:SqlDatabase,config:FreeAgentConfig,
   input:FreeAgentCreationInput):Promise<string|undefined>{
+  await database.query('SELECT id FROM workspaces WHERE id=$1 FOR UPDATE', [input.workspaceId]);
   if (!await reserveStarterAgents(database,input.creatorId,1,config.maxPerOwner)) return undefined;
   return createReservedFreeAgent(database,config,input);
 }
@@ -295,6 +294,13 @@ export async function createFreeAgentInWorkspace(database:SqlDatabase,config:Fre
 async function createReservedFreeAgent(database:SqlDatabase,config:FreeAgentConfig,
   input:FreeAgentCreationInput):Promise<string|undefined>{
   const name = input.name ?? 'Beebee';
+  if (name === 'Luna' && (await database.query(`SELECT 1 FROM memberships member
+    JOIN free_agents free ON free.agent_id=member.identity_id
+    WHERE member.workspace_id=$1 AND member.room_id IS NULL AND free.starter_role='luna'`,
+    [input.workspaceId])).rowCount) {
+    await refundStarterAgent(database,input.creatorId);
+    return undefined;
+  }
   const agent = generateAgentKeypair();
   const body = generateAgentKeypair();
   const roster = await database.query<{ id: string; name: string; face_id: string | null; handle: string | null }>(
@@ -308,10 +314,10 @@ async function createReservedFreeAgent(database:SqlDatabase,config:FreeAgentConf
     takenFaces: roster.rows.map((row) => resolveFace(row.face_id, row.id)),
     takenNames: roster.rows.map((row) => row.name),
   });
-  const handle=(await database.query<{handle:string}>(
-    `INSERT INTO identities(id,kind,name,handle,face_id) VALUES($1,'agent',$2,beeline_identity_handle($1,$3),$4) RETURNING handle`,
+  await database.query<{handle:string}>(
+    `INSERT INTO identities(id,kind,name,handle,face_id,workspace_handle_base) VALUES($1,'agent',$2,beeline_identity_handle($1,$3),$4,$3) RETURNING handle`,
     [agent.publicKey, name, agentHandleFromName(name), seeded.face],
-  )).rows[0]!.handle;
+  );
   await database.query(
     `INSERT INTO agents(agent_id,owner_id,soul,selected_model,machine_id,machine_name,harness)
      VALUES($1,$2,$3::jsonb,$4,$5,'Beeline cloud',$6)`,
@@ -328,25 +334,17 @@ async function createReservedFreeAgent(database:SqlDatabase,config:FreeAgentConf
       FREE_AGENT_HARNESS,
     ],
   );
-  const claimed = await database.query(
-    `INSERT INTO free_agents(agent_id,workspace_id,owner_id,sealed_keys,model,starter_role)
-     VALUES($1,$2,$3,$4,$5,$6) ON CONFLICT(workspace_id) WHERE starter_role='luna' DO NOTHING RETURNING agent_id`,
+  await database.query(
+    `INSERT INTO free_agents(agent_id,owner_id,sealed_keys,model,starter_role)
+     VALUES($1,$2,$3,$4,$5)`,
     [
       agent.publicKey,
-      input.workspaceId,
       input.creatorId,
       sealSecrets(config.sealSecret, { agent: agent.secretKey, body: body.secretKey }),
       config.model,
       input.team ? name.toLowerCase() : null,
     ],
   );
-  if (!claimed.rowCount) {
-    await refundStarterAgent(database,input.creatorId);
-    // No membership, hello, key exchange or provisioning can observe a loser.
-    await database.query('DELETE FROM agents WHERE agent_id=$1', [agent.publicKey]);
-    await database.query('DELETE FROM identities WHERE id=$1', [agent.publicKey]);
-    return undefined;
-  }
   await createInvitedWorkspaceMembership(database, [input.workspaceId, agent.publicKey, input.creatorId]);
   await joinRooms(database, {
     workspaceId: input.workspaceId,
@@ -377,6 +375,9 @@ async function createReservedFreeAgent(database:SqlDatabase,config:FreeAgentConf
   const owner = (await database.query<{ handle: string }>(
     `SELECT COALESCE(handle,id) handle FROM identities WHERE id=$1`, [input.creatorId],
   )).rows[0]!;
+  const handle = (await database.query<{handle:string}>(
+    `SELECT beeline_workspace_handle($1,$2) handle`, [agent.publicKey,input.workspaceId],
+  )).rows[0]!.handle;
   const hello = FREE_AGENT_HELLO.replace('<owner>', owner.handle).replace('<handle>', handle);
   const helloId = createHash('sha256').update(`free-agent-hello:${agent.publicKey}`).digest('hex');
   // An ordinary agent-authored message: the existing mention/push path notifies the owner.
@@ -404,7 +405,9 @@ export async function addFreeAgentToWorkspace(
   const agentId = await database.transaction(async (db) => {
     // Serialize operator retries so two additions cannot post two first hellos.
     await db.query(`SELECT id FROM workspaces WHERE id=$1 FOR UPDATE`, [workspaceId]);
-    const existing = await db.query(`SELECT 1 FROM free_agents WHERE workspace_id=$1`, [workspaceId]);
+    const existing = await db.query(`SELECT 1 FROM memberships member
+      JOIN free_agents free ON free.agent_id=member.identity_id
+      WHERE member.workspace_id=$1 AND member.room_id IS NULL`, [workspaceId]);
     if (existing.rowCount) return undefined;
     const target = (
       await db.query<{ owner_id: string; room_id: string }>(
@@ -507,23 +510,11 @@ export class FreeAgentService {
 
   async createInWorkspace(
     database: SqlDatabase,
-    input: { workspaceId: string; creatorId: string; roomId: string; team?: boolean; timeZone?: string },
+    input: { workspaceId: string; creatorId: string; roomId: string; team?: boolean; timeZone?: string; locale?: string },
   ): Promise<string | undefined> {
     if (!input.team) return createFreeAgentInWorkspace(database,this.config,input);
+    await database.query('SELECT id FROM workspaces WHERE id=$1 FOR UPDATE', [input.workspaceId]);
     if (!await reserveStarterAgents(database,input.creatorId,2,this.config.maxPerOwner)) {
-      const existing = (await database.query<{ name: string; workspace_name: string }>(
-        `SELECT identity.name,workspace.name workspace_name FROM free_agents free
-         JOIN identities identity ON identity.id=free.agent_id
-         JOIN workspaces workspace ON workspace.id=free.workspace_id
-         WHERE free.owner_id=$1 AND free.removed_at IS NULL ORDER BY free.created_at,free.agent_id`,
-        [input.creatorId],
-      )).rows;
-      await ensureSystemIdentity(database);
-      await systemLine(database, { roomId: input.roomId, authorId: SYSTEM_IDENTITY_ID,
-        subject: { kind: 'system', name: systemMessage("free-agents.your-starter-agents") },
-        verb: existing.length ? systemMessage("free-agents.are-already-in") : systemMessage("free-agents.could-not-be-added"),
-        ...(existing.length ? { object: existing.map(agent => systemMessage("free-agents.starter-location", agent.name, agent.workspace_name)).join(systemMessage("free-agents.list-separator")) } : {}),
-        consequence: systemMessage("free-agents.your-account-has-reached-its-free-agent-limit") });
       return undefined;
     }
     const beebee = await createReservedFreeAgent(database, this.config, { ...input, silent: true, team: true });
@@ -532,7 +523,7 @@ export class FreeAgentService {
     }, { ...input, name: 'Luna', silent: true, team: true });
     if (!beebee || !luna) throw new Error('starter team provisioning failed');
     for (const agent of [beebee, luna]) await setRoomEventSubscriptions(database, input.roomId, agent, FREE_AGENT_EVENT_SUBSCRIPTIONS);
-    await createStarterOnboardingRun(database, { roomId: input.roomId, userId: input.creatorId, beebeeId: beebee, lunaId: luna, timeZone: input.timeZone });
+    await createStarterOnboardingRun(database, { roomId: input.roomId, userId: input.creatorId, beebeeId: beebee, lunaId: luna, timeZone: input.timeZone, locale: input.locale });
     return beebee;
   }
 
@@ -696,9 +687,13 @@ export class FreeAgentService {
           soul: { instructions?: string } | null;
           model: string | null;
         }>(
-          `SELECT f.agent_id,f.owner_id,f.workspace_id,w.name workspace_name,f.sealed_keys,
+          `SELECT f.agent_id,f.owner_id,member.workspace_id,w.name workspace_name,f.sealed_keys,
                   i.name,a.soul,f.model
-           FROM free_agents f JOIN workspaces w ON w.id=f.workspace_id
+           FROM free_agents f
+           JOIN LATERAL (SELECT workspace.workspace_id FROM memberships workspace
+             WHERE workspace.identity_id=f.agent_id AND workspace.room_id IS NULL AND workspace.removed_at IS NULL
+             ORDER BY workspace.joined_at,workspace.id LIMIT 1) member ON true
+           JOIN workspaces w ON w.id=member.workspace_id
            JOIN identities i ON i.id=f.agent_id JOIN agents a ON a.agent_id=f.agent_id
            WHERE f.bootstrap_hash=$1 AND f.removed_at IS NULL
            FOR UPDATE OF f`,

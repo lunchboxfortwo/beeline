@@ -238,7 +238,9 @@ describe('each transition wakes the next role exactly once (AC-2)', () => {
     const { loadCornerQuestion } = await import('./corner-lifecycle-read-state.js');
     const unanswered = await loadCornerQuestion(rootFixture.db, cornerId);
     expect(unanswered).toMatchObject({ answered_at: null });
-    await say(R, 'Proceed with the available proof and report the missing review capability.');
+    await say(R, 'Unrelated Room chatter.');
+    expect(await loadCornerQuestion(rootFixture.db, cornerId)).toMatchObject({ answered_at: null });
+    await say(R, 'Proceed with the available proof and report the missing review capability.', unanswered!.id);
     expect(await loadCornerQuestion(rootFixture.db, cornerId))
       .toMatchObject({ id: unanswered!.id, answered_at: expect.any(Date) });
     const before = await cards(cornerId);
@@ -246,11 +248,11 @@ describe('each transition wakes the next role exactly once (AC-2)', () => {
       await advanceCorner(rootFixture.db, cornerId, { kind: 'checks', result: 'passing', sourceMessageId: review!.sourceMessageId });
     expect(await reasons(cornerId, A)).toContain('corner_review_needed');
     expect((await reasons(cornerId, A)).filter(reason => reason === 'corner_review_needed')).toHaveLength(1);
-    expect(await reasons(cornerId, B)).toEqual(['subscribed_event']);
+    expect(await reasons(cornerId, B)).toEqual(['corner_review_dispatch']);
 
     expect(await cornerMergeGate(rootFixture.db, cornerId, { number: 7, headSha: SHA })).toMatchObject({ approved: false, open: false });
     expect((await commands(A, cornerId)).find(command => command.reason === 'corner_review_needed')?.source.body)
-      .toContain('report the blocker');
+      .toContain('@hoots attach the production proof before I can PASS.');
   });
 
 
@@ -308,7 +310,7 @@ describe('each transition wakes the next role exactly once (AC-2)', () => {
   it('a redelivered green check wakes the reviewer once', async () => {
     const cornerId = await inReview();
     await systemLine(rootFixture.db, { roomId: cornerId, authorId: H, subject: { kind: 'github', name: 'GitHub' }, verb: 'passed a check', kind: 'check-passed' });
-    expect(await reasons(cornerId, B)).toEqual(['subscribed_event']);
+    expect(await reasons(cornerId, B)).toEqual(['corner_review_dispatch']);
 
   });
 
@@ -361,20 +363,20 @@ describe('each transition wakes the next role exactly once (AC-2)', () => {
 
   });
 });
-describe('Reproduction CI-1: a red head wakes the implementer before checks finish', () => {
+describe('Reproduction CI-1: a red head wakes the implementer once after checks finish', () => {
 const scope18 = fixtureScope18();
 
 
-  it('shows the head red and wakes while a check still runs', async () => {
+  it('shows the head red without waking while a check still runs', async () => {
     const cornerId = await scope18.redWhileRunning();
     expect(await scope18.checksOf(cornerId)).toBe('failing');
-    expect((await reasons(cornerId, A)).filter(reason => reason === 'corner_check')).toHaveLength(1);
+    expect((await reasons(cornerId, A)).filter(reason => reason === 'corner_check')).toHaveLength(0);
     await reconcileCornerMergeBlockers(rootFixture.db, cornerId);
-    expect((await reasons(cornerId, A)).filter(reason => reason === 'corner_check')).toHaveLength(1);
+    expect((await reasons(cornerId, A)).filter(reason => reason === 'corner_check')).toHaveLength(0);
   });
 
 
-  it('Reproduction RED-STALL-PARTIAL: a later failed job wakes the implementer while other checks are still pending', async () => {
+  it('Reproduction RED-STALL-PARTIAL: later failed jobs wait until all checks settle and share one wake', async () => {
     const cornerId = await scope18.redWhileRunning();
     await rootFixture.db.query(
       `UPDATE agent_commands SET state='complete',completed_at=now()
@@ -398,41 +400,35 @@ const scope18 = fixtureScope18();
     };
     rootFixture.githubApp.readCommitCheckRollup.mockResolvedValueOnce(stillRunning);
     await scope18.checkRun(cornerId, 'FRAME-BUDGET', 'failure');
-    const repair = (await commands(A, cornerId)).filter((command) => command.reason === 'corner_check');
-    expect(repair).toHaveLength(1);
-    expect(repair[0]!.source.body).toContain('FRAME-BUDGET');
-    expect(repair[0]!.source.body).toContain('STATE-UPGRADE');
-    expect(repair[0]!.source.body).toContain('MOBILE SUITE');
-    expect(repair[0]!.source.body).toContain('Fix them and push now');
-    expect(repair[0]!.source.body).toContain('still running');
-    expect((await reasons(cornerId, A)).filter((reason) => reason === 'corner_check')).toHaveLength(2);
-    rootFixture.githubApp.readCommitCheckRollup.mockResolvedValueOnce(stillRunning);
+    expect((await commands(A, cornerId)).filter(command=>command.reason==='corner_check')).toEqual([]);
+    rootFixture.githubApp.readCommitCheckRollup.mockResolvedValueOnce({...stillRunning,state:'failed',
+      checks:stillRunning.checks.map(check=>({...check,status:check.status==='pending'?'passed':check.status}))});
     await scope18.checkRun(cornerId, 'STATE-UPGRADE', 'failure');
-    expect((await reasons(cornerId, A)).filter((reason) => reason === 'corner_check')).toHaveLength(2);
+    const repair=(await commands(A,cornerId)).filter(command=>command.reason==='corner_check');
+    expect(repair).toHaveLength(1);
+    for(const name of stillRunning.failing)expect(repair[0]!.source.body).toContain(name);
     expect((await reasons(cornerId, B)).filter((reason) =>
       reason === 'corner_review_dispatch' || reason === 'subscribed_event')).toHaveLength(0);
   });
 
 
-  it('wakes again when the run finishes, deduplicates replay and recovers a lost followup', async () => {
+  it('wakes once when the run finishes, deduplicates replay and recovers a lost command', async () => {
     const cornerId = await scope18.redWhileRunning();
     rootFixture.githubApp.readCommitCheckRollup.mockResolvedValueOnce(scope18.finished);
     await scope18.checkRun(cornerId, 'Server suite', 'success');
-    expect((await reasons(cornerId, A)).filter((reason) => reason === 'corner_check')).toHaveLength(2);
+    expect((await reasons(cornerId, A)).filter((reason) => reason === 'corner_check')).toHaveLength(1);
     rootFixture.githubApp.readCommitCheckRollup.mockResolvedValueOnce(scope18.finished);
     await scope18.checkRun(cornerId, 'Server suite', 'success');
     await reconcileCornerMergeBlockers(rootFixture.db, cornerId);
-    expect((await reasons(cornerId, A)).filter((reason) => reason === 'corner_check')).toHaveLength(2);
+    expect((await reasons(cornerId, A)).filter((reason) => reason === 'corner_check')).toHaveLength(1);
     expect(await currentState(cornerId)).toBe('working');
-    // A retained first-failure command cannot mask a deleted followup wake.
+    // The settled failure fact recovers a deleted command.
     await rootFixture.db.query(`UPDATE agent_commands SET state='complete' WHERE room_id=$1`, [cornerId]);
     await rootFixture.db.query(`UPDATE agent_turns SET status='complete' WHERE room_id=$1`, [cornerId]);
-    await rootFixture.db.query(`DELETE FROM agent_commands command USING messages source WHERE command.room_id=$1
-      AND command.reason='corner_check' AND source.id=command.source_message_id
-      AND (source.system_event->'payload'->>'followup')::boolean`, [cornerId]);
+    await rootFixture.db.query(`DELETE FROM agent_commands WHERE room_id=$1 AND reason='corner_check'`,[cornerId]);
     await expect(reconcileCornerMergeBlockers(rootFixture.db, cornerId)).resolves.toBe(1);
     await expect(reconcileCornerMergeBlockers(rootFixture.db, cornerId)).resolves.toBe(0);
-    expect((await reasons(cornerId, A)).filter(reason => reason === 'corner_check')).toHaveLength(2);
+    expect((await reasons(cornerId, A)).filter(reason => reason === 'corner_check')).toHaveLength(1);
   });
 
 
@@ -456,14 +452,14 @@ const scope18 = fixtureScope18();
     });
     await scope18.checkRun(cornerId, 'Body suite', 'success', repaired);
     expect(await currentState(cornerId)).toBe('review');
-    expect(await reasons(cornerId, B)).toEqual(['subscribed_event']);
+    expect(await reasons(cornerId, B)).toEqual(['corner_review_dispatch']);
     const people = await rootFixture.db.query(
       `SELECT 1 FROM messages WHERE room_id=$1 AND author_id=$2 AND presentation<>'system'`, [cornerId, H]);
     expect(people.rowCount).toBe(0);
   });
 
 
-  it('recognizes a completed rerun by its new job URL when the start webhook was missed', async () => {
+  it('recognizes a completed rerun without another failed-check wake on the same head', async () => {
     const cornerId = await scope18.redWhileRunning();
     const withJob = (job: number) => ({ ...scope18.finished, checks: [
       { name: 'Body suite', status: 'failed', url: `https://github.com/owner/widgets/actions/runs/10/job/${job}` },
@@ -473,10 +469,10 @@ const scope18 = fixtureScope18();
     await scope18.checkRun(cornerId, 'Server suite', 'success');
     rootFixture.githubApp.readCommitCheckRollup.mockResolvedValueOnce(withJob(102));
     await scope18.checkRun(cornerId, 'Body suite', 'failure');
-    expect((await reasons(cornerId, A)).filter(reason => reason === 'corner_check')).toHaveLength(3);
+    expect((await reasons(cornerId, A)).filter(reason => reason === 'corner_check')).toHaveLength(1);
     rootFixture.githubApp.readCommitCheckRollup.mockResolvedValueOnce(withJob(102));
     await scope18.checkRun(cornerId, 'Body suite', 'failure');
-    expect((await reasons(cornerId, A)).filter(reason => reason === 'corner_check')).toHaveLength(3);
+    expect((await reasons(cornerId, A)).filter(reason => reason === 'corner_check')).toHaveLength(1);
   });
 
 
@@ -540,7 +536,7 @@ const scope19 = fixtureScope19();
   });
 
 
-  it('R1running: a failed job while the run is still going names the still-running run', async () => {
+  it('R1running: a failed job waits for the running job before sending a repair', async () => {
     const cornerId = await scope19.cornerAtHead();
     rootFixture.githubApp.readCommitCheckRollup.mockResolvedValueOnce({
       state: 'failed',
@@ -552,10 +548,13 @@ const scope19 = fixtureScope19();
       ],
     });
     await scope19.checkRunWebhook(cornerId, 'Body suite', 'failure');
-    const [wake] = await scope19.cornerCheckWakes(cornerId);
-    expect(wake).toBeTruthy();
-    expect(wake!.source.body).toContain('still running');
-    expect(wake!.source.body).toContain('Fix them and push now');
+    expect(await scope19.cornerCheckWakes(cornerId)).toEqual([]);
+    rootFixture.githubApp.readCommitCheckRollup.mockResolvedValueOnce({state:'failed',total:2,failing:['Body suite'],
+      checks:[{name:'Body suite',status:'failed'},{name:'Server suite',status:'passed'}]});
+    await scope19.checkRunWebhook(cornerId,'Server suite','success');
+    const [wake]=await scope19.cornerCheckWakes(cornerId);
+    expect(wake!.source.body).toContain('Body suite');
+    expect(wake!.source.body).not.toContain('still running');
   });
 
 

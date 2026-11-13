@@ -1,5 +1,6 @@
 import { type PromptResult } from './acp.js';
 import { durableReplyText } from './turn-stream.js';
+import { isAnswerDeliveryToolCall } from './tool-call-failure.js';
 import { harnessIdentityLabel } from './cursor-acp-bridge.js';
 import { explainEmptyAgentTurn, isSilentCompletion, nextPinnedProvider, type EmptyTurnExplanation } from './empty-turn.js';
 import { cornerHasRepositoryWork } from './prompt-assembly.js';
@@ -26,6 +27,7 @@ import { MonolithCornerTurnLoop } from './monolith-corner-turn.js';
   export async function monolithCornerTurnLoopExplainEmpty(ctx: MonolithCornerTurnLoop, result: PromptResult): Promise<EmptyTurnExplanation | undefined> {
     if (['no-reply', 'repeated-tool-call'].includes(result.stopReason)) return undefined;
     if (durableReplyText(result.agentText)) return undefined;
+    if (result.toolCalls.some(isAnswerDeliveryToolCall)) return undefined;
     // Passive browser updates owe no answer and must not start provider
     // retries. Their receipt acknowledges delivery, even for a textless turn.
     if (ctx.commandContext.current?.source.systemEvent?.kind === 'computer-session-activity') return undefined;
@@ -95,9 +97,7 @@ import { MonolithCornerTurnLoop } from './monolith-corner-turn.js';
       // An unbriefed human corner still bootstraps on its feature branch;
       // repository publication remains gated by its first assigned brief.
       const repositoryWork = !restored.brief || cornerHasRepositoryWork(restored.brief);
-      // An order gives work; a reviewer keeps its own detached copy (#3176).
-      const assigned = ctx.commandContext.current?.reason === 'order' || ctx.reviewerCheckout;
-      const checkout = await ctx.options.prepareCheckout(repositoryWork, restored.implementerAgentId, assigned);
+      const checkout = await ctx.options.prepareCheckout(repositoryWork, restored.implementerAgentId);
       if (checkout.path !== ctx.options.worktreePath) await ctx.discardSession(true);
       ctx.options.worktreePath = checkout.path;
       ctx.options.repository.gitCommonDir = checkout.gitCommonDir;

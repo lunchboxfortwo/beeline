@@ -1,7 +1,8 @@
 import { mentionReplyKey, mentionReplyId } from '../owed-mentions.js';
-import { agentPostText } from '../agent-post-text.js';
+import { repairAgentPost } from '../agent-post-text.js';
 import { CornerAccessDatabase } from '../corner-access-database.js';
-import { refuseTagPastCommander, CommandRefusalError } from '../commander.js';
+import { mentionHandlesToDrop, CommandRefusalError } from '../commander.js';
+import { stripMentionHandles } from '../message-mentions.js';
 import { authorizeCommandOutput, routeAgentResult } from '../agent-command.js';
 import { MESSAGE_REACTION_EMOJIS } from '@beeline/api-contract/phone';
 import { type SqlDatabase } from '../database.js';
@@ -14,29 +15,40 @@ import { Input, id, seconds, AccessDeniedError, Output } from './values.js';
   export async function daemonPostCornerMessage(ctx: DaemonContext, input: Input<'postCornerMessage'>, agentId: string) {
     const rawText = typeof input.text === 'string' ? input.text.trim() : '';
     if (!rawText || rawText.length > 16000) throw new Error('message text must be 1 to 16000 characters');
-    const text = agentPostText(rawText);
+    const repaired = repairAgentPost(rawText);
+    let text = repaired.text;
+    const removed = [...repaired.removed];
     if (!text) throw new CommandRefusalError('post refused: reasoning block contains no public reply', 400);
     await daemonPostAddressAccess(ctx, input.cornerId, agentId);
     const command = ctx.authorizedCommand ?? await authorizeCommandOutput(
       ctx.database, input.roomId, agentId, input.requestId, input.generationId,
     );
-    await refuseTagPastCommander(ctx.database, input.cornerId, agentId, text,
+    const dropped = await mentionHandlesToDrop(ctx.database, input.cornerId, agentId, text,
       command.room_id === input.cornerId.toLowerCase() ? command : undefined);
-    let root: string | null = null;
-    if (input.replyTo !== undefined) {
-      if (!/^[0-9a-f]{64}$/.test(input.replyTo)) throw new CommandRefusalError('Invalid replyTo', 400);
-      const parent = (await ctx.database.query<{root: string}>(
-        'SELECT COALESCE(root_message_id,id) root FROM messages WHERE id=$1 AND room_id=$2 AND deleted_at IS NULL', [input.replyTo, input.cornerId])).rows[0];
-      if (!parent) throw new CommandRefusalError('reply parent is not in this Room', 400);
-      root = parent.root;
+    if (dropped.length) {
+      text = stripMentionHandles(text, dropped);
+      removed.push(...dropped.map((handle) => `tag @${handle}`));
     }
-    const key = await mentionReplyKey(ctx.database, agentId, input.cornerId, input.replyTo);
+    text = text.trim();
+    if (!text) throw new CommandRefusalError(`post refused: nothing left to post after removing ${removed.join(', ')}`, 400);
+    let root: string | null = null;
+    let replyTo = input.replyTo;
+    if (replyTo !== undefined) {
+      const parent = /^[0-9a-f]{64}$/.test(replyTo)
+        ? (await ctx.database.query<{root: string}>(
+          'SELECT COALESCE(root_message_id,id) root FROM messages WHERE id=$1 AND room_id=$2 AND deleted_at IS NULL', [replyTo, input.cornerId])).rows[0]
+        : undefined;
+      if (!parent) {
+        replyTo = undefined;
+        removed.push('reply link');
+      } else root = parent.root;
+    }
+    const key = await mentionReplyKey(ctx.database, agentId, input.cornerId, replyTo);
     const saved = (
       await ctx.database.query<{ id: string; created_at: Date }>(
         `WITH pending AS (
            DELETE FROM agent_pending_attachments
            WHERE room_id=$5 AND agent_id=$3 AND request_id=$6 AND generation_id=$7
-             AND room_id=$2
            RETURNING url,name,mime_type,size,created_at,id
          )
          INSERT INTO messages(id,room_id,author_id,text,presentation,agent_model,request_id,legacy_event,attachments,reply_to_message_id,root_message_id)
@@ -57,15 +69,20 @@ import { Input, id, seconds, AccessDeniedError, Output } from './values.js';
         // retry of that text keeps its id, while a new post gets its own row.
         // Keep the first post on the shared mention id so an automatic final
         // reply or a retry in another turn cannot deliver the answer again.
-        [key ? mentionReplyId(`${key}:${text}`) : id(), input.cornerId, agentId, text, input.roomId, input.requestId, input.generationId, input.replyTo ?? null, root, key ? mentionReplyId(key) : null],
+        [key ? mentionReplyId(`${key}:${text}`) : id(), input.cornerId, agentId, text, input.roomId, input.requestId, input.generationId, replyTo ?? null, root, key ? mentionReplyId(key) : null],
       )
     ).rows[0];
     if (!saved) throw new CommandRefusalError('post refused: address is archived', 409);
+    if (command.private_payload) await ctx.database.query(
+      `UPDATE agent_commands SET private_payload=private_payload ||
+        jsonb_build_object('publicPostId',$2::text,'publicPostGenerationId',$3::text) WHERE id=$1`,
+      [command.id, saved.id, command.generation_id]);
     const delivery = await routeAgentResult(ctx.database, command, saved.id, { roomId: input.cornerId, agentId });
     ctx.live.publish({ type: 'invalidate', roomId: input.cornerId, reason: 'message', agentId });
     return { id: saved.id, createdAt: seconds(saved.created_at), effect: 'conversation',
       address: input.cornerId, visibility: 'public', reportsAssignment: false, ...delivery,
       stored: true, visible: true, receipt: 'Message stored and visible.' +
+        (removed.length ? `\nRemoved: ${removed.join(', ')}.` : '') +
         (input.cornerId === command.room_id
           ? '\nPosted to your current place. Queued files are attached to this post. Closing text is kept in turn activity.'
           : '') };

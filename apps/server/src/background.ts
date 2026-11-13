@@ -390,7 +390,7 @@ export class PushDeliveryLoop {
           -- A DM is titled by its peer, who is this message's author.
           CASE WHEN room.direct_participants IS NOT NULL THEN jsonb_build_object(
             'name',COALESCE(NULLIF(author.name,''),'Someone'),
-            'handle',author.handle,'avatar',author.avatar) END dm_peer
+            'handle',beeline_room_handle(author.id,m.room_id),'avatar',author.avatar) END dm_peer
         FROM queued_messages m
         JOIN rooms room ON room.id=m.room_id
         LEFT JOIN rooms parent ON parent.id=room.parent_id

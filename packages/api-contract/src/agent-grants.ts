@@ -85,7 +85,7 @@ export function isSharedAssetCategory(value: unknown): value is SharedAssetCateg
 /**
  * A command grant is one exact line the agent may say. Shell metacharacters are
  * refused at request time so a rule can never smuggle a second command, a
- * redirect, or an expansion past the prefix match. Secrets ride as a
+ * redirect, or an expansion past the exact match. Secrets ride as a
  * `--with NAME` suffix, one name per `--with`, and are stripped from the argv.
  */
 const SHELL_METACHARACTERS = /[;&|<>$`\\'"(){}\n\r\t*?[\]~#!]/;
@@ -94,7 +94,8 @@ const SHELL_METACHARACTERS = /[;&|<>$`\\'"(){}\n\r\t*?[\]~#!]/;
 export const COMMAND_SECRET_NAME = /^[A-Z][A-Z0-9_]{0,63}$/;
 
 export type CommandGrantRule = {
-  /** The approved argv prefix, shell-word split on single spaces. */
+  readonly stdin?: string;
+  /** The approved argv, shell-word split on single spaces. */
   readonly argv: readonly string[];
   /** Secret names the rule names with `--with NAME`. */
   readonly secrets: readonly string[];
@@ -108,6 +109,20 @@ export type CommandGrantRule = {
 export function parseCommandGrantTarget(target: string): CommandGrantRule {
   if (typeof target !== 'string' || !target.trim()) {
     throw new Error('command target is required');
+  }
+  // A JSON argv preserves inline code as one literal argument. It is never
+  // evaluated by a shell; the legacy single-space grammar remains unchanged.
+  if (target.startsWith('[') || target.startsWith('{')) {
+    const parsed = JSON.parse(target);
+    const argv: unknown = Array.isArray(parsed) ? parsed : parsed.argv;
+    if (!Array.isArray(argv) || !argv.length || argv.length > 256 ||
+        argv.some(word => typeof word !== 'string' || !word || word.length > 4096 || /[\0\r]/.test(word))) {
+      throw new Error('command target must be a bounded JSON argv array');
+    }
+    const stdin = Array.isArray(parsed) ? undefined : parsed.stdin;
+    if (stdin !== undefined && (typeof stdin !== 'string' || stdin.length > 4096 || /\0/.test(stdin)))
+      throw new Error('command stdin must be bounded text');
+    return { argv, secrets: [], ...(stdin !== undefined ? { stdin } : {}) };
   }
   if (target !== target.trim() || /\s{2,}/.test(target)) {
     throw new Error('command target must be one line with single spaces');
@@ -136,10 +151,9 @@ export function parseCommandGrantTarget(target: string): CommandGrantRule {
   return { argv, secrets };
 }
 
-/** The approved argv must be a prefix of the requested argv, word for word. */
+/** The approved argv must equal the requested argv, word for word. */
 export function commandGrantMatches(rule: CommandGrantRule, requested: readonly string[]): boolean {
-  if (requested.length < rule.argv.length) return false;
-  return rule.argv.every((word, index) => requested[index] === word);
+  return requested.length === rule.argv.length && rule.argv.every((word, index) => requested[index] === word);
 }
 
 /**
@@ -410,8 +424,85 @@ export function commandGrantEscalations(
 ): AgentGrantEscalation[] {
   const found = new Set<AgentGrantEscalation>();
   if (options.hasScript) found.add('unseen-script');
-  if (namesCredentialFile(argv)) found.add('credential');
+  if (namesCredentialFile(argv) || namesEnvSecret(argv)) found.add('credential');
   return AGENT_GRANT_ESCALATIONS.filter((entry) => found.has(entry));
+}
+
+/**
+ * Read-only commands that skip the approval card. A full diff, a patch, or
+ * `git show` of a blob can print a file, so only status, log, and summary
+ * forms are listed. `gh pr diff` asks. Anything that names a credential file
+ * or an env secret still asks. Inline eval and every other writable script
+ * still ask.
+ */
+export const PREAPPROVED_READ_ONLY_COMMANDS = [
+  'gh pr view',
+  'gh pr checks',
+  'gh pr list',
+  'git status',
+  'git log',
+  'git diff --stat',
+  'git show --stat',
+] as const;
+
+/** A raw git object id, including a short hash. `git show --stat` still prints a blob. */
+function gitObjectId(word: string): boolean {
+  return /^[0-9a-f]{1,64}$/i.test(word);
+}
+
+function namesEnvSecret(argv: readonly string[]): boolean {
+  return argv.slice(1).some((word) =>
+    /^(?:--with|--env)(?:=|$)/.test(word) ||
+    /^(?:printenv|env)$/i.test(word) ||
+    /^[A-Za-z_][A-Za-z0-9_]*(?:TOKEN|SECRET|KEY|PASSWORD|CREDENTIAL)=/i.test(word));
+}
+
+function readOnlyTail(words: readonly string[], allow: (word: string, next: () => string | undefined) => boolean): boolean {
+  for (let index = 0; index < words.length; index += 1) {
+    const word = words[index]!;
+    const next = () => words[++index];
+    if (!allow(word, next)) return false;
+  }
+  return true;
+}
+
+/** A bare `gh` or `git` with one of the named read-only subcommands and a tight tail. */
+export function isPreapprovedReadOnlyCommand(argv: readonly string[]): boolean {
+  if (argv[0] !== 'gh' && argv[0] !== 'git') return false;
+  if (namesCredentialFile(argv) || namesEnvSecret(argv)) return false;
+  if (argv[0] === 'gh') {
+    if (argv[1] !== 'pr' || !['view', 'checks', 'list'].includes(argv[2] ?? '')) return false;
+    return readOnlyTail(argv.slice(3), (word, next) => {
+      if (word === '--comments') return true;
+      if (word === '--json') return /^[A-Za-z0-9,]{1,200}$/.test(next() ?? '');
+      if (word === '--state') return /^(?:open|closed|merged|all)$/.test(next() ?? '');
+      if (word === '--limit') return /^[0-9]{1,4}$/.test(next() ?? '');
+      return !word.startsWith('-') && /^[A-Za-z0-9._/#-]{1,200}$/.test(word);
+    });
+  }
+  if (argv[1] === 'diff') {
+    const summary = ['--stat', '--name-only', '--shortstat'];
+    return argv.length > 2 && argv.slice(2).every((word) => summary.includes(word));
+  }
+  if (argv[1] === 'show') {
+    if (!argv.includes('--stat')) return false;
+    return readOnlyTail(argv.slice(2), (word) =>
+      word === '--stat' || (revisionWord(word) && !gitObjectId(word)));
+  }
+  if (!['status', 'log'].includes(argv[1] ?? '')) return false;
+  return readOnlyTail(argv.slice(2), (word, next) => {
+    if (argv[1] === 'status') return word === '--short' || word === '--branch';
+    if (['--oneline', '--shortstat', '-s'].includes(word)) return true;
+    if (word === '--max-count' || word === '-n') return /^[0-9]{1,6}$/.test(next() ?? '');
+    if (/^-[0-9]{1,6}$/.test(word)) return true;
+    return revisionWord(word);
+  });
+}
+
+/** A git revision, not a path. A dot or slash can name a file, so it asks. */
+function revisionWord(word: string): boolean {
+  return !word.startsWith('-') && !word.includes('.') && !word.includes('/')
+    && /^[A-Za-z0-9_@^{}~-]{1,200}$/.test(word);
 }
 
 /**
@@ -423,49 +514,40 @@ export function commandRuleEscalations(
   rule: CommandGrantRule,
   script?: CommandGrantScript,
 ): AgentGrantEscalation[] {
-  return commandGrantEscalations(rule.argv, { hasScript: Boolean(script) });
+  // A read-only argv is not an exemption from the script card. An immutable
+  // installed executable never arrives with script bytes. A writable launcher
+  // still carries those bytes and stays unseen until a person reads them.
+  return commandGrantEscalations(rule.argv, {
+    hasScript: Boolean(script),
+  });
 }
 
 /**
- * What a requested argv escalates into that the approved rule never did.
- *
- * The rule is an argv PREFIX, so a run can always add words the human who
- * answered the card never read. A credential file named by those extra words is
- * a fresh ask, not something the standing approval covers.
+ * `git show --stat` can still print a blob, a tree, or `HEAD:path`. A symbolic
+ * revision such as `HEAD` is a summary. Object ids are checked against the
+ * repository at execution, because a commit hash is safe and a blob hash is not.
  */
-export function commandGrantEscalationsBeyondRule(
-  rule: CommandGrantRule,
-  argv: readonly string[],
-): AgentGrantEscalation[] {
-  if (!namesCredentialFile(argv)) return [];
-  return namesCredentialFile(rule.argv) ? [] : ['credential'];
+export function gitShowStatNamesFile(argv: readonly string[]): boolean {
+  if (argv[0] !== 'git' || argv[1] !== 'show' || !argv.includes('--stat')) return false;
+  return argv.slice(2).some((word) => word !== '--stat' && (
+    gitObjectId(word) || word.includes(':') || word.includes('.') || word.includes('/')
+  ));
 }
 
 /**
  * An interpreter grant is bound to the SCRIPT, not just to the command line.
  *
- * `python3 fix.py` tells a reader nothing about what will run, and the premise
- * of the whole grant loop is that a person can read a command and judge it. So
- * the daemon reads the script when it raises the ask, the card shows those
- * bytes in the machine role, and the runner refuses at execution unless the
- * file still hashes to what the human saw. An agent that rewrites its script
- * after the card is answered gets a refusal, not a run.
- *
- * The cap is a card a person can actually read on a phone: past
- * {@link GRANT_SCRIPT_MAX_BYTES} / {@link GRANT_SCRIPT_MAX_LINES} the ask is
- * REFUSED rather than truncated — a body that long is a change, and a change
- * belongs in a corner where it is a branch and a pull request.
+ * `python3 fix.py` tells a reader nothing about what will run, so the card
+ * shows the whole file and the approval binds to its hash. The runner refuses
+ * unless the file still hashes to what the human saw.
  */
-export const GRANT_SCRIPT_MAX_BYTES = 4_096;
-export const GRANT_SCRIPT_MAX_LINES = 120;
-
 export type CommandGrantScript = {
   /** The script argument exactly as it appears in the command line. */
   readonly path: string;
-  /** SHA-256 of the bytes the card showed; the runner re-checks it. */
+  /** SHA-256 of the approved file bytes; the runner re-checks it. */
   readonly sha256: string;
   readonly bytes: number;
-  /** The whole file. Never truncated — an oversized script is refused instead. */
+  /** The whole file, shown on the card. */
   readonly contents: string;
 };
 
@@ -481,20 +563,17 @@ export function isCommandGrantScript(value: unknown): value is CommandGrantScrip
   );
 }
 
-/** The refusal an oversized script gets, in both the tool and the server. */
-export function grantScriptTooLongMessage(path: string, bytes: number, lines: number): string {
-  return (
-    `${path} is ${bytes} bytes over ${lines} lines: too long to put on an approval card ` +
-    `(the cap is ${GRANT_SCRIPT_MAX_BYTES} bytes and ${GRANT_SCRIPT_MAX_LINES} lines). ` +
-    'A human must be able to read what they approve, and this will not be truncated. ' +
-    'Open a corner with open_corner and make the change there, where it is a branch and a ' +
-    'pull request someone can read.'
-  );
+/**
+ * The one approval key for a script: its path in the command and the SHA-256
+ * of its bytes. Equal keys mean the human approved exactly these bytes.
+ */
+export function grantScriptKey(script: Pick<CommandGrantScript, 'path' | 'sha256'> | undefined): string {
+  return script ? `${script.path}\0${script.sha256}` : '';
 }
 
 /**
  * The file an interpreter command will run, or an explicit executable path.
- * With includePathCommands, bare executable names are candidates for PATH lookup.
+ * A bare program name (`node`, `gh`) is the program, never a script to review.
  * Readers distinguish native executables from scripts, including ENOEXEC shell text.
  * Undefined when the command has neither candidate, or when the line carries
  * no such argument (`python3 -V`) — that still asks a human, it just has no
@@ -502,8 +581,7 @@ export function grantScriptTooLongMessage(path: string, bytes: number, lines: nu
  */
 export function interpreterScriptArgument(
   argv: readonly string[],
-  includePathCommands = false,
-): { index: number; path: string; direct?: true } | undefined {
+): { index: number; path: string; direct?: true; inline?: string; stdin?: true } | undefined {
   // Step over `env FOO=1 …`, `sudo …`, `timeout 30 …`: the interpreter is what
   // matters, and a wrapper must not be a way around the binding.
   const skippable = (word: string) =>
@@ -517,6 +595,14 @@ export function interpreterScriptArgument(
       while (head < argv.length - 1) {
         const word = argv[head]!;
         if (word === '--') { head += 1; break; }
+        if (word === '-S' || word === '--split-string' || word.startsWith('--split-string=') || word.startsWith('-S')) {
+          const split = word === '-S' || word === '--split-string' ? argv[head + 1]
+            : word.startsWith('--split-string=') ? word.slice('--split-string='.length) : word.slice(2);
+          if (split === undefined || /[^a-zA-Z0-9_./:=,+% @-]/.test(split))
+            throw new Error('Cannot safely resolve env wrapper options: unsupported split string.');
+          const remaining = argv.slice(head + (word === '-S' || word === '--split-string' ? 2 : 1));
+          return interpreterScriptArgument([...split.trim().split(/ +/).filter(Boolean), ...remaining]);
+        }
         if (['-u', '--unset', '-C', '--chdir', '-a', '--argv0'].includes(word)) {
           head += 2;
         } else if (word.startsWith('-') || /^[A-Za-z_][A-Za-z0-9_]*=/.test(word)) {
@@ -528,22 +614,76 @@ export function interpreterScriptArgument(
       while (head < argv.length - 1 && skippable(argv[head]!)) head += 1;
     }
   }
-  if (!INTERPRETER_COMMANDS.has(commandBasename(argv[head] ?? ''))) {
+  const executableName = commandBasename(argv[head] ?? '');
+  if (!INTERPRETER_COMMANDS.has(executableName) && !/^(?:python|pypy|ruby|perl|php|lua|node)(?:\d+(?:\.\d+)*)$/.test(executableName)) {
     // Explicit executable paths may be scripts too. Callers inspect the bytes
     // to distinguish native executables from scripts and ENOEXEC shell text.
     const path = argv[head];
-    return path && (includePathCommands || path.includes('/')) ? { index: head, path, direct: true } : undefined;
+    return path?.includes('/') ? { index: head, path, direct: true } : undefined;
   }
+  // Code-loading options can execute before or after the visible eval body.
+  // Refuse them anywhere, including after the first body or script operand.
+  if (/^node(?:\d+(?:\.\d+)*)?$/.test(executableName) &&
+      argv.slice(head + 1).some(word => /^(?:-r.*|--(?:require|import|loader|experimental-loader|experimental-import|experimental-policy|policy-integrity|env-file|env-file-if-exists)(?:=.*)?)$/.test(word))) {
+    throw new Error('Interpreter code-loading options need an explicit script file showing all code.');
+  }
+  let readsStdin = false;
+  const inlineArgument = (index: number, inline: string) => {
+    // Some runtimes concatenate repeated evals; others execute the last one.
+    // An approval of the first body must never license a later body.
+    if (argv.slice(index + 1).some(word => /^(?:-[cep](?:.*)?|--(?:eval|print)(?:=.*)?|-Command|-command)$/.test(word)))
+      throw new Error('Multiple interpreter eval options need an explicit script file showing all code.');
+    return { index, path: '<inline>', inline };
+  };
   for (let index = head + 1; index < argv.length; index += 1) {
     const word = argv[index]!;
+    if (word === '--') {
+      const path = argv[index + 1];
+      return path && !readsStdin ? { index: index + 1, path } : { index, path: '<stdin>', stdin: true };
+    }
+    if (word === '-') return { index, path: '<stdin>', stdin: true };
+    if (word === '-s') { readsStdin = true; continue; }
+    if (['-c', '-e', '-p', '--eval', '--print', '-Command', '-command'].includes(word) ||
+        (word === '-r' && /^php(?:\d+(?:\.\d+)*)?$/.test(executableName)) ||
+        (/^-[a-zA-Z]*c$/.test(word) && /^(?:ba|da|z|k|a)?sh$/.test(commandBasename(argv[head]!)))) {
+      const inline = argv[index + 1];
+      return inline === undefined ? { index, path: '<stdin>', stdin: true }
+        : inlineArgument(index + 1, inline);
+    }
+    const attached = word.match(/^(?:--(?:eval|print)=|-[ce])(.+)$/);
+    if (attached) return inlineArgument(index, attached[1]!);
+    // Runtime options with operands must not mistake the operand for a script.
+    if (['-r', '--require', '--import', '--loader', '--experimental-loader', '-W', '-X'].includes(word)) { index += 1; continue; }
+    if (word === '-m') throw new Error('Interpreter module execution needs an explicit script file for approval.');
     if (word.startsWith('-')) continue;
+    if (readsStdin) return { index, path: '<stdin>', stdin: true };
     return { index, path: word };
   }
-  return undefined;
+  if (argv.slice(head + 1).some(word => ['-V', '--version', '-h', '--help'].includes(word))) return undefined;
+  return { index: head, path: '<stdin>', stdin: true };
 }
 
 /** Existing Android emulator access on the host adb server requires human consent. */
 export const HOST_EMULATOR_TARGET = '127.0.0.1:5037';
+
+/** Shared by grant requests and owner-machine session startup. */
+export function agentGrantAutoApproves(input: {
+  kind: AgentGrantKind; target: string; escalations?: readonly AgentGrantEscalation[];
+  requireOwnerApproval?: boolean; ownApp?: boolean; yolo?: boolean; requesterIsOwner?: boolean;
+}): boolean {
+  return !input.requireOwnerApproval && input.kind !== 'shared_asset' &&
+    !(input.kind === 'host' && input.target === HOST_EMULATOR_TARGET) &&
+    !input.escalations?.length &&
+    (input.kind === 'mcp' && (input.target.startsWith('app:') || input.target.startsWith('connection-install:'))
+      ? input.ownApp === true
+      : input.kind === 'mcp' && input.target === 'wallet'
+        ? input.yolo === true && input.requesterIsOwner === true : true);
+}
+
+/** Path requests retain their explicit write capability through activation. */
+export function pathGrantAllowsWrite(capabilities?: string): boolean {
+  return /\b(write|writable|modify|edit)\b/i.test(capabilities ?? '');
+}
 
 /** The mcp grant target that mounts Trusty Squire. */
 export const SQUIRE_MCP_TARGET = 'squire';
@@ -558,7 +698,8 @@ export function grantPresentation(grant: {
   if (grant.kind === 'command') {
     try {
       const rule = parseCommandGrantTarget(grant.target);
-      runs = rule.argv.map((value) => value.split(/[\\/]/).pop() || value).join(' ');
+      const approved = grant.target.trimStart();
+      runs = approved.startsWith('[') || approved.startsWith('{') ? grant.target : rule.argv.join(' ');
       uses = rule.secrets.join(', ') || undefined;
     } catch { /* Legacy command targets may predate the command grammar. */ }
   }

@@ -1,8 +1,9 @@
 import { ErrorBanner } from './ErrorBanner';
 import React, { useCallback, useEffect, useRef, useState } from 'react';
-import { ScrollView, Text, useWindowDimensions } from 'react-native';
+import { useWindowDimensions } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
-import { StyleSheet } from 'react-native-unistyles';
+import { ScrollView, YStack } from 'tamagui';
+import { T } from '@/ui/grammar';
 import { typeRoles } from '@/buzz/groknight';
 import { HULL_SHEET_INSET, HullActionSheetModal } from './HullActionSheet';
 import { Button } from './Button';
@@ -78,7 +79,7 @@ export function ToolOutputSheet({
   const highlight = language !== undefined;
   return (
     <HullActionSheetModal
-      contentStyle={styles.sheetModal}
+      contentMaxWidth={TOOL_OUTPUT_SHEET_MAX_WIDTH}
       onClose={onClose}
       subtitle={subtitle}
       testID={testID}
@@ -86,48 +87,30 @@ export function ToolOutputSheet({
       visible={visible}
     >
       <ScrollView
-        contentContainerStyle={styles.sheetContent}
         nestedScrollEnabled
-        style={[
-          styles.sheetScroll,
-          { maxHeight: Math.max(0, Math.round(windowHeight * 0.82) - 130 - insets.bottom) },
-        ]}
+        flexGrow={0}
+        flexShrink={1}
+        maxHeight={Math.max(0, Math.round(windowHeight * 0.82) - 130 - insets.bottom)}
         testID="tool-output-scroll"
       >
+        <YStack paddingHorizontal="6">
         {error ? <ErrorBanner inline title={error} /> : highlight ? (
           <CodeHighlighter code={detail ?? ''} language={language} />
         ) : (
-          <Text selectable style={styles.sheetOutput} testID="tool-output-text">
+          <T v="code" color="ink" userSelect="text" width="100%" minWidth={0} flexShrink={1} testID="tool-output-text">
             {detail || 'No output saved'}
-          </Text>
+          </T>
         )}
+        </YStack>
       </ScrollView>
       {canCopy ? <Button
         size="inline"
         label={copied ? 'Copied' : 'Copy output'}
-        appearance={{ label: styles.copyLabel }}
-        style={styles.copyRow}
+        alignSelf="flex-start"
+        marginHorizontal="6"
         onPress={copy}
         testID="tool-output-copy"
       /> : null}
     </HullActionSheetModal>
   );
 }
-
-const styles = StyleSheet.create((theme) => {
-  const groknight = theme.buzz;
-  return {
-    copyLabel: { ...groknight.type.machine, color: groknight.accent },
-    copyRow: { alignSelf: 'flex-start', marginHorizontal: HULL_SHEET_INSET },
-    sheetModal: { maxWidth: TOOL_OUTPUT_SHEET_MAX_WIDTH },
-    sheetScroll: { flexGrow: 0, flexShrink: 1 },
-    sheetContent: { paddingHorizontal: HULL_SHEET_INSET },
-    sheetOutput: {
-      ...groknight.type.machine,
-      width: '100%',
-      minWidth: 0,
-      flexShrink: 1,
-      color: groknight.ledgerBody,
-    },
-  };
-});

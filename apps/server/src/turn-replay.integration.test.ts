@@ -26,7 +26,7 @@ const AGENT = identity.publicKey, HUMAN = '22'.repeat(32), WS = randomUUID(), RO
 let db: PgliteDatabase, daemon: InstanceType<typeof DaemonService>, phone: InstanceType<typeof PhoneService>;
 let source:{connectionId:string;epoch:number};
 async function executeOwned<N extends keyof DaemonOperationMap>(name:N,input:DaemonOperationMap[N]['input'],agentId=AGENT):Promise<DaemonOperationMap[N]['output']>{
-  const {capability}=await daemon.negotiateOwnedModel(agentId,source,true);
+  const {capability}=await daemon.negotiateOwnedModel(agentId,true);
   const owned=['claimAgentCommand','claimAgentTurn','acknowledgeAgentCommand','postAgentTurnReceipt','releaseAgentTurn'].includes(name);
   return daemon.execute(name,input,agentId,owned?source:undefined,owned?capability:undefined);
 }
@@ -136,7 +136,7 @@ it.each([
       expect(settled).toBe(false);
       expect((await db.query('SELECT state FROM agent_commands WHERE turn_request_id=$1',[trigger])).rows).toEqual([{state:'complete'}]);
       expect((await db.query('SELECT status FROM agent_turns WHERE request_id=$1',[trigger])).rows).toEqual([{status:'failed'}]);
-      expect((await db.query("SELECT 1 FROM messages WHERE room_id=$1 AND card_type='turn-failed' AND card->>'requestId'=$2",[roomId,trigger])).rowCount).toBe(1);
+      expect((await db.query("SELECT 1 FROM messages WHERE room_id=$1 AND card_type='turn-failed' AND card->>'requestId'=$2",[roomId,trigger])).rowCount).toBe(0);
       const nudge = randomUUID();answeredTrigger=nudge;
       await db.query(`INSERT INTO messages(id,room_id,author_id,text) VALUES($1,$2,$3,'Continue with the interrupted work')`, [nudge,roomId,HUMAN]);
       await createAgentCommand(db, { roomId, agentId: AGENT, sourceMessageId: nudge, reason: 'human_tag' });
