@@ -49,8 +49,10 @@ describe('agent presentation names', () => {
     expect(isReasonableAgentName("O'Brien")).toBe(true);
     expect(isReasonableAgentName('')).toBe(false);
     expect(isReasonableAgentName('x'.repeat(33))).toBe(false);
-    expect(isReasonableAgentName('h4x0r')).toBe(false);
+    expect(isReasonableAgentName('h4x0r')).toBe(true);
     expect(isReasonableAgentName('Firstmate 2')).toBe(true);
+    expect(resolveAgentName('Bot2', 'agent')).toBe('Bot2');
+    expect(resolveAgentName('R2 D2', 'agent')).toBe('R2 D2');
   });
 
   it('uses a neutral fallback for every system marker', () => {

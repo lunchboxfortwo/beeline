@@ -146,8 +146,7 @@ export function isReasonableAgentName(value: string): boolean {
   return (
     normalized.length > 0 &&
     normalized.length <= AGENT_NAME_MAX_LENGTH &&
-    // A number word may follow, as in a name that follows `firstmate_2`.
-    /^\p{L}[\p{L}\p{M}'’ -]*$/u.test(normalized.replace(/ \p{N}+(?= |$)/gu, ''))
+    /^\p{L}[\p{L}\p{M}\p{N}'’ -]*$/u.test(normalized)
   );
 }
 
