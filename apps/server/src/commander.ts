@@ -331,7 +331,7 @@ export async function reportToCommander(
   text: string,
   command?: CommandRow,
   reportId = randomBytes(32).toString('hex'),
-  options: { orderIssuer?: boolean; automatic?: boolean; agentOnly?: boolean; ask?: string; attachments?: PrivateCommandPayload['attachments']; idleSince?: string } = {},
+  options: { orderIssuer?: boolean; automatic?: boolean; agentOnly?: boolean; wakeInCorner?: boolean; ask?: string; attachments?: PrivateCommandPayload['attachments']; idleSince?: string } = {},
 ): Promise<{ id: string; createdAt: number; delivered?: boolean; receipt?: string; skipped?: boolean }> {
   // Server-generated failure diagnostics may include long child argv/stderr.
   // The manual report limit must not roll back their terminal receipt.
@@ -354,20 +354,23 @@ export async function reportToCommander(
     console.error(`[commander] ${roomId}: cannot route report without recorded opening provenance`);
     return { id: reportId, createdAt: Math.floor(Date.now() / 1000), delivered: false };
   }
+  const orderedHere = incoming?.room_id === origin && incoming?.agent_id !== recipient &&
+    incoming?.private_payload?.kind !== 'report';
   const recipientKind=(await db.query<{kind:string}>('SELECT kind FROM identities WHERE id=$1',[recipient])).rows[0]?.kind;
   // A report from a thread wakes its agent commander inside that thread, so
   // the reaction stays with the thread instead of the chat it was opened from.
   // Effective access counts inherited parent-roster membership; callers on the
   // raw database need the named view rather than query rewriting. A connected
   // app has no helper turn in the thread; it keeps the session it joined. A
-  // relay from a thread the commander itself implements keeps the return route.
+  // relay from a thread the commander implements keeps the return route unless
+  // it is an ordered report or an explicit review-gate handback.
   const wakeRoom = recipientKind === 'agent' && origin &&
     (await db.query(`SELECT 1 FROM room_access access JOIN rooms corner ON corner.id=access.room_id
       LEFT JOIN corner_facts fact ON fact.corner_id=corner.id
       WHERE access.room_id=$1 AND access.identity_id=$2 AND access.removed_at IS NULL
       AND NOT EXISTS(SELECT 1 FROM rooms_mcp_members app WHERE app.member_id=$2)
-      AND ${cornerImplementerSql('fact', 'corner')} IS DISTINCT FROM $2`,
-      [origin,recipient])).rowCount ? origin : returnRoom;
+      AND (${cornerImplementerSql('fact', 'corner')} IS DISTINCT FROM $2 OR $3::boolean)`,
+      [origin,recipient,orderedHere || Boolean(options.wakeInCorner)])).rowCount ? origin : returnRoom;
   if(recipientKind==='agent')
     await lockAgentCommandQueue(db,[{roomId:returnRoom,agentId:recipient},{roomId:wakeRoom,agentId:recipient}]);
   const member = (

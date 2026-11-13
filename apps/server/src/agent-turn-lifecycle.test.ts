@@ -166,7 +166,7 @@ it('a claimed restart kept across close completes on its new lifecycle instead o
   expect((await notices()).rowCount).toBe(0);
 });
 
-it('a delivered terminal report ends its order before connection loss can hand it back',async()=>{
+it('a delivered terminal report keeps its order resumable in the same generation until the turn ends',async()=>{
   const command=(await createAgentCommand(db,{roomId:R,agentId:A,sourceMessageId:null,reason:'order',
     privatePayload:{kind:'order',authorId:H,fromRoomId:R,text:'Finish this assignment'}}))!;
   await startQueuedTurn(db, R, A, command.id);

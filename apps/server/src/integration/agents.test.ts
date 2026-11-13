@@ -668,7 +668,7 @@ const fixture = monolithFixture();
     const soul = await fixture.request('/v1/phone/operations/updateAgentSoul', 'POST', {
       workspaceId: WORKSPACE,
       agentId: AGENT,
-      name: 'Honeybee',
+      handle: 'honeybee',
       instructions: 'Be precise and practical.',
       avatarSeed: 'honeybee-seed',
     });

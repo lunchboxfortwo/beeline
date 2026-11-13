@@ -3,7 +3,7 @@ import { readMemberDelivery, setupMemberDelivery, confirmMemberDelivery, prepare
 import { memberStreamEnabled, serveMcpMemberStream, type McpStreamCursor } from './rooms-mcp-stream.js';
 import type { SqlDatabase } from './database.js';
 import { waitForConnection } from './connection-wait.js';
-import { mentionRouting, mentionReplyKey, mentionReplyId, mentionAnswerKey, owedMentions, fullRoomId, OWED_MENTION_OPEN_SQL } from './owed-mentions.js';
+import { mentionRouting, mentionReplyKey, mentionReplyId, mentionAnswerKey, OWED_MENTION_OPEN_SQL } from './owed-mentions.js';
 import { RoomsMcpEvents, McpEventError } from './rooms-mcp-events.js';
 import type { IncomingMessage, ServerResponse } from 'node:http';
 import { createHash } from 'node:crypto';
@@ -82,26 +82,6 @@ const READABLE = `SELECT r.id,r.name,r.parent_id,r.workspace_id FROM rooms r
   JOIN room_access rm ON rm.room_id=r.id AND rm.identity_id=$1 AND rm.removed_at IS NULL
   JOIN memberships wm ON wm.workspace_id=r.workspace_id AND wm.room_id IS NULL AND wm.identity_id=$1 AND wm.removed_at IS NULL`;
 const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
-/** The call item already listed for one member in one place. Another place keeps its own. */
-const listedOwedTurn = new Map<string, string>();
-/** The first result of a connected-app call item lists that place. Anything else lists none. */
-async function connectorOwedMentions(db: SqlDatabase, member: string | null, args: Record<string, unknown>) {
-  if (!member) return undefined;
-  const named = ['roomId', 'room', 'address', 'cornerId'].map(key => fullRoomId(args[key])).find(room => room !== undefined);
-  const calls = (await db.query<{ room_id: string; id: string }>(
-    `SELECT room_id,id FROM agent_commands
-     WHERE agent_id=$1 AND state='pending' AND reason='mcp_call'
-       AND ($2::uuid IS NULL OR room_id=$2::uuid)
-     ORDER BY created_at DESC, id DESC`, [member, named ?? null])).rows;
-  if (!calls.length) return undefined;
-  const place = named ?? (new Set(calls.map(row => row.room_id)).size === 1 ? calls[0]!.room_id : undefined);
-  const item = calls[0]!.id;
-  const listed = place ? `${member}:${place}` : '';
-  if (!place || listedOwedTurn.get(listed) === item) return undefined;
-  listedOwedTurn.set(listed, item);
-  const mentions = await owedMentions(db, member, place);
-  return mentions.length ? mentions : undefined;
-}
 function textArg(value: unknown, max: number): string {
   if (typeof value !== 'string' || !value.trim() || value.length > max) throw new Error('Invalid arguments');
   return value;
@@ -244,21 +224,17 @@ export class RoomsMcp {
     return true;
   }
   private async toolResult(principal: McpPrincipal, name: string, args: Record<string, unknown>) {
-    const mentions = () => connectorOwedMentions(this.oauth.database, principal.member_id, args);
     try {
       const result = await this.call(principal, name, args);
       await this.oauth.audit(principal, name, 'succeeded');
-      const owedMentions = await mentions();
-      return { content: [{ type: 'text' as const, text: JSON.stringify(owedMentions ? { data: result, owedMentions } : { data: result }) }] };
+      return { content: [{ type: 'text' as const, text: JSON.stringify({ data: result }) }] };
     } catch (error) {
       await this.oauth.audit(principal, name, 'refused');
       const reason = mcpRefusal(error);
       if (!reason) console.error('[rooms-mcp] tool call failed', name, error);
       const text = reason ? `Request refused: ${reason}.`
         : 'Request refused. Check the tool arguments, consent scopes, and current Room membership.';
-      const owedMentions = await mentions();
-      return { isError: true, content: [{ type: 'text' as const, text },
-        ...(owedMentions ? [{ type: 'text' as const, text: JSON.stringify({ owedMentions }) }] : [])] };
+      return { isError: true, content: [{ type: 'text' as const, text }] };
     }
   }
   private async setupNote(member: string) {

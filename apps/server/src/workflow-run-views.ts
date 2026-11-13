@@ -551,7 +551,7 @@ SELECT message.id,(message.card->>'seq')::int seq,output.output_turns,output.liv
           choice.prompt,choice.options,choice.status,${MICROS('choice.created_at')} created_us,
           vote.option_id,vote.created_at answered_at,
           voter.id voter_id,voter.name voter_name,voter.kind voter_kind,
-          voter.handle voter_handle,voter.avatar voter_avatar,voter.face_id voter_face_id
+          beeline_room_handle(voter.id,choice.room_id) voter_handle,voter.avatar voter_avatar,voter.face_id voter_face_id
         FROM run_head JOIN room_choices choice ON choice.room_id=run_head.room_id
         JOIN messages message ON message.id=choice.message_id AND message.room_id=choice.room_id
         LEFT JOIN LATERAL (

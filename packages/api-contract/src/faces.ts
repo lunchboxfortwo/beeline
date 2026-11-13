@@ -178,7 +178,7 @@ export interface SeededAgentIdentity {
   readonly soul: string;
 }
 
-const AGENT_HANDLE_MAX_LENGTH = 30;
+export const AGENT_HANDLE_MAX_LENGTH = 30;
 
 /** The canonical address stem for an agent name. */
 export function agentHandleFromName(name: string): string {
@@ -193,6 +193,37 @@ export function agentHandleFromName(name: string): string {
     .slice(0, AGENT_HANDLE_MAX_LENGTH)
     .replace(/_+$/g, '');
   return handle || 'agent';
+}
+
+/** Addresses Beeline itself answers to; nobody may choose them. */
+const RESERVED_HANDLES: ReadonlySet<string> = new Set(['channel', 'system', 'review', 'play-review', 'scheduler']);
+
+/** What an owner typed into the agent handle field, as the address it names. */
+export function normalizeAgentHandleInput(value: string): string {
+  return value.trim().replace(/^@+/, '').toLowerCase();
+}
+
+/**
+ * Why an owner-chosen agent handle cannot be saved, or null when its shape is
+ * acceptable. Workspace uniqueness is the server's check.
+ */
+export function agentHandleRefusal(handle: string): string | null {
+  if (!handle) return 'Enter a handle.';
+  if (handle.length > AGENT_HANDLE_MAX_LENGTH)
+    return `A handle is at most ${AGENT_HANDLE_MAX_LENGTH} characters.`;
+  if (!/^[a-z][a-z0-9]*(?:_[a-z0-9]+)*$/.test(handle))
+    return 'A handle starts with a letter and uses lowercase letters, numbers and single underscores between words.';
+  if (RESERVED_HANDLES.has(handle)) return `@${handle} is reserved by Beeline.`;
+  return null;
+}
+
+/** An agent's display name follows its handle: `code_bot` is "Code Bot". */
+export function agentNameFromHandle(handle: string): string {
+  return handle
+    .split('_')
+    .filter(Boolean)
+    .map((word) => word.charAt(0).toUpperCase() + word.slice(1))
+    .join(' ');
 }
 
 /** A name-derived handle that does not collide with any supplied address. */

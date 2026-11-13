@@ -87,6 +87,27 @@ const scope1 = fixtureScope1();
 
 
 
+  it('saves an edited handle and shows a Workspace refusal under the handle field', async () => {
+    const renderer = await render();
+    await openAgentProfile(renderer);
+    const first = (testID: string) => renderer.root.findAll((node: any) => node.props.testID === testID)[0];
+    await act(async () => { first('edit-agent-soul').props.onPress(); });
+    expect(first('agent-handle').props.value).toBe('clara');
+
+    client.setAgentSoul.mockRejectedValueOnce(Object.assign(new Error('@goosy is already taken in this Workspace.'), { status: 409 }));
+    await act(async () => { first('agent-handle').props.onChangeText('goosy'); });
+    await act(async () => { await first('save-agent-soul').props.onPress(); });
+    expect(first('agent-handle-error').props.children).toBe('@goosy is already taken in this Workspace.');
+    expect(first('agent-handle').props.value).toBe('goosy');
+
+    await act(async () => { first('agent-handle').props.onChangeText('code_bot'); });
+    await act(async () => { await first('save-agent-soul').props.onPress(); });
+    expect(client.setAgentSoul).toHaveBeenLastCalledWith(WORKSPACE, AGENT, expect.objectContaining({ handle: 'code_bot' }));
+    expect(first('agent-handle-error')).toBeUndefined();
+    expect(first('agent-handle')).toBeUndefined();
+    expect(first('agent-profile-head').props.title).toBe('@code_bot');
+  });
+
   it("hides another owner's agent configuration from a plain member", async () => {
     state.workspace = {
       ...baseWorkspace(),

@@ -64,8 +64,8 @@ export function cornerIdleSql(cornerId: string, includeCommander = false): strin
       ) snapshot`;
 }
 
-/** Delivery and claim require the same idle start and absence of every idle disqualifier. */
-export function currentIdleReportSql(command: string): string {
+/** Same idle episode command pickup used to inline. Planned once per session, and only for an idle alert. */
+function currentIdleReportPredicateSql(command: string): string {
   return `EXISTS(SELECT 1 FROM (${cornerIdleSql(`(
     SELECT origin.id FROM rooms origin WHERE origin.archived_at IS NULL AND origin.id=CASE
       WHEN COALESCE(${command}.private_payload->>'originCornerId',${command}.private_payload->>'fromRoomId')
@@ -73,4 +73,22 @@ export function currentIdleReportSql(command: string): string {
       THEN COALESCE(${command}.private_payload->>'originCornerId',${command}.private_payload->>'fromRoomId')::uuid END)`)}) idle
     WHERE idle.idle_since=${command}.private_payload->>'idleSince'
       AND idle.idle_eligible)`;
+}
+
+/** Delivery and claim require the same idle start and absence of every idle disqualifier.
+ * The predicate stays in a function so command pickup does not plan it on every read. */
+export function currentIdleReportSql(command: string): string {
+  return `beeline_current_idle_report(${command}.private_payload)`;
+}
+
+export function currentIdleReportFunctionSql(): string {
+  return `CREATE OR REPLACE FUNCTION beeline_current_idle_report(payload jsonb) RETURNS boolean
+LANGUAGE plpgsql STABLE AS $idle_report$
+BEGIN
+  RETURN COALESCE((
+    SELECT ${currentIdleReportPredicateSql('command')}
+    FROM (SELECT payload AS private_payload) command
+  ), false);
+END
+$idle_report$;`;
 }

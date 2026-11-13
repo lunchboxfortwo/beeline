@@ -158,117 +158,39 @@ describe('owed Room tags', () => {
     expect((await call('list_mentions')).mentions.map((m: any) => m.id)).not.toContain(a);
     expect(BigInt(page.nextCursor)).toBeGreaterThan(BigInt(seq));
   });
-  it('C7 owed mentions are listed once per claimed turn and only for that place', async () => {
-    const elsewhereRoom = '44444444-4444-4444-8444-444444444444';
-    await db.query(`INSERT INTO rooms(id,workspace_id,name) VALUES($1,$2,'Elsewhere')`, [elsewhereRoom, workspace]);
-    for (const who of [owner, helper]) await db.query(
-      `INSERT INTO memberships(workspace_id,room_id,identity_id,role) VALUES($1,$2,$3,'member')`, [workspace, elsewhereRoom, who]);
-    const elsewhere = id();
-    await db.query('INSERT INTO messages(id,room_id,author_id,text) VALUES($1,$2,$3,$4)', [elsewhere, elsewhereRoom, owner, 'elsewhere']);
-    await recordMcpMention(db, helper, elsewhereRoom, elsewhere);
-    const here = await tag(helper);
-    const caller = principal(helper);
-    const tool = (mcp as unknown as { toolResult(p: McpPrincipal, n: string, a: Record<string, unknown>): Promise<{ content: { text: string }[] }> }).toolResult.bind(mcp);
-    const mentions = (result: { content: { text: string }[] }) => {
-      const block = [...result.content].reverse().find(item => item.text.includes('"owedMentions"'));
-      return block ? JSON.parse(block.text).owedMentions as { messageId: string; roomId: string }[] : undefined;
-    };
-    const claim = async (generation: string, place = room) => {
-      await db.query("UPDATE agent_commands SET state='complete' WHERE agent_id=$1 AND state='pending'", [helper]);
-      const source = id();
-      await db.query('INSERT INTO messages(id,room_id,author_id,text) VALUES($1,$2,$3,$4)', [source, place, owner, `@helper ${generation}`]);
-      await routeHumanMessage(db, source);
-      const command = (await daemon.execute('getAgentCommands', { roomId: place }, helper)).commands.find(item => item.sourceMessageId === source);
-      expect(command?.id).toBeTruthy();
-      await startQueuedCommand(daemon, { roomId: place, commandId: command!.id }, helper);
-      return command!.id;
-    };
-    const claimed: string[] = [];
+  it('Reproduction wake-15: tool results carry only their own result, never owed mentions', async () => {
+    // 12 Nov 19:16 rc.2: one procedure read returned (11) owed entries, several
+    // for other agents' tags. Owed mentions are listed once, at turn start.
+    for (let index = 0; index < 8; index += 1) await tag(helper);
+    for (let index = 0; index < 3; index += 1) await tag(other, `@pidoong tag ${index}`);
+    const { createBeelineServer } = await import('./server.js');
+    const token = 'local-owed-' + id();
+    await db.query('INSERT INTO daemon_tokens(token_hash,agent_id) VALUES($1,$2)', [createHash('sha256').update(token).digest('hex'), helper]);
+    const server = createBeelineServer({ database: db, auth: new TokenAuth(db, async () => { throw new Error('unused'); }), phone, daemon, live, mediaMaximumBytes: 1024 });
+    await new Promise<void>(resolve => server.listen(0, '127.0.0.1', resolve));
+    const base = `http://127.0.0.1:${(server.address() as { port: number }).port}`;
     try {
-      expect(mentions(await tool(caller, 'list_rooms', {}))).toBeUndefined();
-      expect(mentions(await tool(caller, 'read_messages', { room }))).toBeUndefined();
-      expect(mentions(await tool(caller, 'send_message', { room, text: '' }))).toBeUndefined();
-      claimed.push(await claim('owed-turn-1'));
-      expect(mentions(await tool(caller, 'read_messages', { room: elsewhereRoom }))).toBeUndefined();
-      const first = mentions(await tool(caller, 'read_messages', { room }));
-      expect(first?.some(item => item.messageId === here)).toBe(true);
-      expect(first?.some(item => item.roomId === elsewhereRoom)).toBe(false);
-      expect(mentions(await tool(caller, 'read_messages', { room }))).toBeUndefined();
-      expect(mentions(await tool(caller, 'list_rooms', {}))).toBeUndefined();
-      claimed.push(await claim('owed-turn-b', elsewhereRoom));
-      const otherPlace = mentions(await tool(caller, 'read_messages', { room: elsewhereRoom }));
-      expect(otherPlace?.some(item => item.messageId === elsewhere)).toBe(true);
-      expect(otherPlace?.some(item => item.roomId === room)).toBe(false);
-      expect(mentions(await tool(caller, 'read_messages', { room }))).toBeUndefined();
-      await db.query(`UPDATE agent_commands SET state='complete' WHERE id=ANY($1::text[])`, [claimed]);
-      claimed.push(await claim('owed-turn-2'));
-      const reset = mentions(await tool(caller, 'list_rooms', {}));
-      expect(reset?.some(item => item.messageId === here)).toBe(true);
-      expect(reset?.some(item => item.roomId === elsewhereRoom)).toBe(false);
+      const response = await fetch(`${base}/v1/daemon/operations/getAgentCommands`, {
+        method: 'POST', body: JSON.stringify({ roomId: room }),
+        headers: { authorization: `Bearer ${token}`, 'content-type': 'application/json', 'x-beeline-tool-result': '1', 'x-beeline-place': room },
+      });
+      const result = await response.json();
+      expect(result).toMatchObject({ commandProtocol: 2, commands: expect.any(Array) });
+      expect(JSON.stringify(result)).not.toContain('owedMentions');
+      expect((await fetch(`${base}/v1/daemon/owed-mentions`, { headers: { authorization: `Bearer ${token}` } })).status).toBe(404);
     } finally {
-      if (claimed.length) await db.query(`UPDATE agent_commands SET state='complete' WHERE id=ANY($1::text[])`, [claimed]);
-      await db.query('DELETE FROM memberships WHERE room_id=$1', [elsewhereRoom]);
-      await db.query('DELETE FROM rooms WHERE id=$1', [elsewhereRoom]);
+      server.closeAllConnections();
+      await new Promise<void>(resolve => server.close(() => resolve()));
     }
-  });
-  it('C7 owed mentions for one place leave the other place out', async () => {
-    const other = '33333333-3333-4333-8333-333333333333';
-    await db.query(`INSERT INTO rooms(id,workspace_id,name) VALUES($1,$2,'Other')`, [other, workspace]);
-    for (const who of [owner, member]) await db.query(`INSERT INTO memberships(workspace_id,room_id,identity_id,role) VALUES($1,$2,$3,'member')`, [workspace, other, who]);
-    const elsewhere = id();
-    await db.query('INSERT INTO messages(id,room_id,author_id,text) VALUES($1,$2,$3,$4)', [elsewhere, other, owner, 'elsewhere']);
-    await recordMcpMention(db, member, other, elsewhere);
-    const here = await tag();
-    expect((await owedMentions(db, member, room)).some(m => m.messageId === here)).toBe(true);
-    expect((await owedMentions(db, member, room)).some(m => m.roomId === other)).toBe(false);
-    expect((await owedMentions(db, member, 'short')).some(m => m.messageId === elsewhere)).toBe(true);
+    const tool = (mcp as unknown as { toolResult(p: McpPrincipal, n: string, a: Record<string, unknown>): Promise<{ content: { text: string }[] }> }).toolResult.bind(mcp);
+    for (const result of [await tool(principal(helper), 'list_rooms', {}), await tool(principal(helper), 'send_message', { room, text: '' })])
+      expect(result.content.map(item => item.text).join('')).not.toContain('owedMentions');
   });
   it('C7 helper tool context returns only its authenticated member’s owed tags', async () => {
     const message = await tag(helper);
     const result = await daemon.execute('getOwedMentions', {}, helper);
     expect(result.owedMentions.some(m => m.messageId === message)).toBe(true);
     expect((await daemon.execute('getOwedMentions', {}, member)).owedMentions.some(m => m.messageId === message)).toBe(false);
-  });
-  it('C7 helper operation piggybacks owed context and keeps its result if the lookup fails', async () => {
-    const { createBeelineServer } = await import('./server.js');
-    const token = 'local-owed-' + id();
-    await db.query('INSERT INTO daemon_tokens(token_hash,agent_id) VALUES($1,$2)', [createHash('sha256').update(token).digest('hex'), helper]);
-    const server = createBeelineServer({ database: db, auth: new TokenAuth(db, async () => { throw new Error('unused'); }), phone, daemon, live, mediaMaximumBytes: 1024 });
-    await new Promise<void>(resolve => server.listen(0, '127.0.0.1', resolve));
-    const message = await tag(helper);
-    const execute = vi.spyOn(daemon, 'execute');
-    const call = (context: boolean) => fetch(`http://127.0.0.1:${(server.address() as { port: number }).port}/v1/daemon/operations/getAgentCommands`, {
-      method: 'POST', headers: { authorization: `Bearer ${token}`, 'content-type': 'application/json', ...(context ? { 'x-beeline-tool-result': '1' } : {}) },
-      body: JSON.stringify({ roomId: room }),
-    });
-    let fault: ReturnType<typeof vi.spyOn> | undefined;
-    try {
-      const owedResponse = await fetch(`http://127.0.0.1:${(server.address() as { port: number }).port}/v1/daemon/owed-mentions`, {
-        headers: { authorization: `Bearer ${token}` },
-      });
-      expect(owedResponse.status).toBe(200);
-      expect((await owedResponse.json()).owedMentions.some((m: any) => m.messageId === message)).toBe(true);
-      expect(execute).not.toHaveBeenCalled();
-      const anonymous = await fetch(`http://127.0.0.1:${(server.address() as { port: number }).port}/v1/daemon/owed-mentions`);
-      expect(anonymous.ok).toBe(false);
-      const response = await call(true);
-      expect(response.status).toBe(200);
-      const result = await response.json();
-      expect(result._beelineOwedMentions.some((m: any) => m.messageId === message)).toBe(true);
-      expect((await (await call(false)).json())._beelineOwedMentions).toBeUndefined();
-      const query = db.query.bind(db);
-      fault = vi.spyOn(db, 'query').mockImplementation(((sql: string, values?: unknown[]) => {
-        if (sql.includes('SELECT mention.room_id,mention.message_id')) throw new Error('fixture: owed lookup unavailable');
-        return query(sql, values);
-      }) as typeof db.query);
-      const fallback = await call(true);
-      expect(fallback.status).toBe(200);
-      expect(await fallback.json()).toMatchObject({ commandProtocol: 1, commands: expect.any(Array) });
-      expect(execute.mock.calls.map(([operation]) => operation)).toEqual(['getAgentCommands', 'getAgentCommands', 'getAgentCommands']);
-    } finally {
-      fault?.mockRestore(); execute.mockRestore(); server.closeAllConnections();
-      await new Promise<void>(resolve => server.close(() => resolve()));
-    }
   });
   it('C8 server key deduplicates initial sends and retries independently for each tagged member', async () => {
     const message = await tag(); await recordMcpMention(db, other, room, message);
@@ -293,7 +215,7 @@ describe('owed Room tags', () => {
     expect(reached).toContain('pidoong');
     expect(first.notWoken.map((w: any) => w.handle)).not.toContain('pidoong');
   });
-  it('C5 helper silence requires an explicit tag message ID and clears only that tag', async () => {
+  it('an unanswered tag remains owed until its own reply is posted', async () => {
     await db.query("UPDATE agent_commands SET state='complete' WHERE agent_id=$1 AND state='pending'", [helper]);
     const source = id(), keep = await tag(helper);
     await db.query(`INSERT INTO messages(id,room_id,author_id,text) VALUES($1,$2,$3,'@helper decline this')`, [source, room, owner]);
@@ -301,15 +223,31 @@ describe('owed Room tags', () => {
     const command = (await daemon.execute('getAgentCommands', { roomId: room }, helper)).commands.find(c => c.sourceMessageId === source)!;
     await startQueuedCommand(daemon, { roomId: room, commandId: command.id }, helper);
     const context = { roomId: room, requestId: command.turnRequestId };
-    await expect(daemon.execute('markAgentTurnSilent', context, helper)).rejects.toThrow('nonhuman wake');
     expect((await owedMentions(db, helper)).some(m => m.messageId === source)).toBe(true);
-    await daemon.execute('markAgentTurnSilent', { ...context, messageId: source }, helper);
+    expect(await daemon.execute('markAgentTurnSilent',{...context,messageId:source},helper)).toMatchObject({answered:false});
+    expect((await owedMentions(db,helper)).some(mention=>mention.messageId===source)).toBe(true);
+    await daemon.execute('postRoomMessage',{...context,text:'I cannot do that request.',replyToMessageId:source},helper);
     const remaining = (await owedMentions(db, helper)).map(m => m.messageId);
     expect(remaining).not.toContain(source);
     expect(remaining).toContain(keep);
     await db.query("UPDATE agent_commands SET state='complete' WHERE id=$1", [command.id]);
   });
-  it('C8 helper post and automatic final reply share the server mention key across turns', async () => {
+  it('a silence acknowledgement keeps a human request queued', async () => {
+    // 12 Nov 00:41: a delivery-check wake rode a human_tag turn; the silent
+    // reply was refused as a human wake, so the agent posted filler.
+    await db.query("UPDATE agent_commands SET state='complete' WHERE agent_id=$1 AND state='pending'", [helper]);
+    const source = id();
+    await db.query(`INSERT INTO messages(id,room_id,author_id,text) VALUES($1,$2,$3,'@helper try this out')`, [source, room, owner]);
+    await routeHumanMessage(db, source);
+    const command = (await daemon.execute('getAgentCommands', { roomId: room }, helper)).commands.find(c => c.sourceMessageId === source)!;
+    expect(command.reason).toBe('human_tag');
+    await startQueuedCommand(daemon, { roomId: room, commandId: command.id }, helper);
+    await daemon.execute('markAgentTurnSilent', { roomId: room, requestId: command.turnRequestId }, helper);
+    expect((await db.query(`SELECT completion_kind FROM agent_turns WHERE room_id=$1 AND agent_id=$2 AND request_id=$3`,
+      [room, helper, command.turnRequestId])).rows[0]).toEqual({completion_kind:null});
+    expect((await db.query('SELECT state FROM agent_commands WHERE id=$1',[command.id])).rows).toEqual([{state:'pending'}]);
+  });
+  it('each queued request can answer an earlier tag without spending another request’s answer', async () => {
     await db.query("UPDATE agent_commands SET state='complete' WHERE agent_id=$1 AND state='pending'", [helper]);
     const source = id();
     await db.query(`INSERT INTO messages(id,room_id,author_id,text) VALUES($1,$2,$3,'@helper answer once')`, [source, room, owner]);
@@ -320,8 +258,9 @@ describe('owed Room tags', () => {
     await db.query(`UPDATE agent_commands SET state='pending',turn_request_id=$2 WHERE id=$1`, [command.id, id()]);
     const retry = (await daemon.execute('getAgentCommands', { roomId: room }, helper)).commands.find(c => c.id === command.id)!;
     await startQueuedCommand(daemon, { roomId: room, commandId: command.id }, helper);
-    await expect(daemon.execute('postRoomMessage', { roomId: room, requestId: retry.turnRequestId, text: 'retry answer', replyToMessageId: source }, helper)).rejects.toThrow('not delivered');
-    expect((await db.query('SELECT id FROM messages WHERE author_id=$1 AND reply_to_message_id=$2', [helper, source])).rows).toEqual([{ id: first.id }]);
+    const second=await daemon.execute('postRoomMessage',{roomId:room,requestId:retry.turnRequestId,text:'retry answer',replyToMessageId:source},helper);
+    expect(second.id).not.toBe(first.id);
+    expect((await db.query('SELECT id FROM messages WHERE author_id=$1 AND reply_to_message_id=$2', [helper, source])).rows).toEqual(expect.arrayContaining([{id:first.id},{id:second.id}]));
     expect((await owedMentions(db, helper)).some(m => m.messageId === source)).toBe(false);
   });
 

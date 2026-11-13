@@ -146,7 +146,7 @@ export function isReasonableAgentName(value: string): boolean {
   return (
     normalized.length > 0 &&
     normalized.length <= AGENT_NAME_MAX_LENGTH &&
-    /^\p{L}[\p{L}\p{M}'’ -]*$/u.test(normalized)
+    /^\p{L}[\p{L}\p{M}\p{N}'’ -]*$/u.test(normalized)
   );
 }
 

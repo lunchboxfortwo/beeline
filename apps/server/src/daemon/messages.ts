@@ -85,7 +85,7 @@ import { daemonWriteResult } from './corner-messages.js';
       : [];
     const repeated = Boolean(ctx.commandTransaction && earlier.length);
     const mentionKey = await mentionReplyKey(ctx.database, agentId, input.roomId, input.replyToMessageId);
-    const messageId = mentionKey ? mentionReplyId(mentionKey) : id();
+    const messageId = mentionKey ? mentionReplyId(`${mentionKey}:${input.requestId}`) : id();
     const parent = input.replyToMessageId
       ? (
           await ctx.database.query<{

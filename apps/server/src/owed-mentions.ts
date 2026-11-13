@@ -36,7 +36,7 @@ export function isMentionReplyInput(input: object): boolean {
   return serverMentionInputs.has(input);
 }
 
-/** Both catch-up pages and tool reminders read the same outstanding obligation.
+/** Catch-up pages read the outstanding obligation.
  * Helper final answers carry request_id even when they have no replyTo. A
  * cancelled source command closes that conversation; completion alone does not
  * prove an answer (historical failed activations also completed commands).
@@ -58,26 +58,17 @@ export const OWED_MENTION_OPEN_SQL = `
     OR EXISTS(SELECT 1 FROM agent_commands source WHERE source.source_message_id=mention.message_id
       AND source.room_id=mention.room_id AND source.agent_id=mention.member_id AND source.state='pending'))`;
 
-const FULL_ROOM_ID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
-
-/** A shortened id is not a place filter. Casting it to uuid would fail the read. */
-export function fullRoomId(value: unknown): string | undefined {
-  return typeof value === 'string' && FULL_ROOM_ID.test(value) ? value : undefined;
-}
-
-/** Private, current membership-scoped reminder accompanying tool results. */
-export async function owedMentions(db: SqlDatabase, member: string, roomId?: string) {
-  const room = fullRoomId(roomId) ?? null;
+/** Private, current membership-scoped catch-up read. Tool results never carry it. */
+export async function owedMentions(db: SqlDatabase, member: string) {
   const rows = (await db.query<{room_id: string; message_id: string; author_handle: string | null}>(`SELECT mention.room_id,mention.message_id,beeline_room_handle(author.id,mention.room_id) author_handle
     FROM rooms_mcp_mentions mention JOIN messages m ON m.id=mention.message_id AND m.deleted_at IS NULL
     JOIN identities author ON author.id=m.author_id
     JOIN rooms r ON r.id=mention.room_id AND r.archived_at IS NULL
     WHERE mention.member_id=$1 AND mention.cleared_at IS NULL
-      AND ($2::uuid IS NULL OR mention.room_id=$2::uuid)
       AND EXISTS(SELECT 1 FROM room_access rm WHERE rm.room_id=r.id AND rm.identity_id=$1 AND rm.removed_at IS NULL)
       AND EXISTS(SELECT 1 FROM memberships wm WHERE wm.workspace_id=r.workspace_id AND wm.room_id IS NULL AND wm.identity_id=$1 AND wm.removed_at IS NULL)
       AND ${OWED_MENTION_OPEN_SQL}
-    ORDER BY mention.seq LIMIT 100`, [member, room])).rows;
+    ORDER BY mention.seq LIMIT 100`, [member])).rows;
   return rows.map(row => mentionRouting(member, row.room_id, row.message_id, row.author_handle));
 }
 export async function clearOwedMention(db: SqlDatabase, member: string, room: string, message: string): Promise<number> {

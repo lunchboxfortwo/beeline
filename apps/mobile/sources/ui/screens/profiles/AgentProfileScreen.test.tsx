@@ -46,7 +46,7 @@ function agent(overrides: Record<string, unknown> = {}) {
   return {
     detail: detail(), workspaceId: 'w', loading: false, error: null, busy: false, working: null,
     canEdit: true, canRemove: true, ownerByline: 'by @lunchboxfortwo', soul: 'Alan builds Beeline’s mobile app.',
-    editing: false, nameDraft: 'Alan', soulDraft: 'Alan builds', setNameDraft: vi.fn(), setSoulDraft: vi.fn(),
+    editing: false, handleDraft: 'alan', handleError: null, soulDraft: 'Alan builds', setHandleDraft: vi.fn(), setSoulDraft: vi.fn(),
     beginEdit: vi.fn(), cancelEdit: vi.fn(), saveEdit: vi.fn(), close: vi.fn(), message: vi.fn(),
     modelAxes: { model: undefined, effort: undefined, fast: undefined }, openModelAxis: null, closeModelAxis: vi.fn(),
     modelSearchQuery: '', setModelSearchQuery: vi.fn(), modelAppliesNote: null, modelAxisError: null,
@@ -95,6 +95,19 @@ describe('agent profile', () => {
     await act(async () => { byId(tree, 'remove-agent').props.onPress(); });
     expect(profile.value.removeAgent).toHaveBeenCalled();
     expect(byId(tree, 'edit-agent-soul')).toBeUndefined();
+  });
+
+  it('edits the handle, never a separate name, and shows a refusal under it', async () => {
+    profile.value = agent({ editing: true, handleError: '@goosy is already taken in this Workspace.' });
+    const tree = await render();
+    expect(text(tree)).not.toContain('Agent name');
+    expect(tree.root.findAll((node: any) => node.props['aria-label'] === 'Agent name')).toHaveLength(0);
+    const field = byId(tree, 'agent-handle');
+    expect(field.props).toMatchObject({ value: 'alan', 'aria-label': 'Handle', autoCapitalize: 'none' });
+    expect(text(tree)).toContain('Handle | @');
+    act(() => field.props.onChangeText('Code_Bot'));
+    expect(profile.value.setHandleDraft).toHaveBeenCalledWith('code_bot');
+    expect(byId(tree, 'agent-handle-error').props.children).toBe('@goosy is already taken in this Workspace.');
   });
 
   it('shows the running model and thinking level ahead of a saved next-session selection', async () => {

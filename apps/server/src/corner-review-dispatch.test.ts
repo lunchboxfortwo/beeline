@@ -254,7 +254,7 @@ describe('corner message attribution', () => {
     await claim(review!);
     await rootFixture.daemon.execute('report', { roomId: C, requestId: review!.turnRequestId, status: 'done', text: 'done: FAIL on the reviewed head.' }, B);
     await greenHead(84, '2'.repeat(40));
-    expect((await commands(A, R)).filter(c => c.reason === 'report' && c.source.body.includes('FAIL on the reviewed head'))).toEqual([]);
+    expect((await commands(A, C)).filter(c => c.reason === 'report' && c.source.body.includes('FAIL on the reviewed head'))).toEqual([]);
   });
 
 
@@ -287,7 +287,6 @@ describe('corner message attribution', () => {
     expect(refreshed).toHaveBeenCalledTimes(1);
     expect(refreshed).toHaveBeenCalledWith(C);
     const next = (await commands(B, C)).find(c => c.reason === 'agent_tag');
-    expect(next?.source.body).toContain(`Current handoff target: PR #83 at ${'2'.repeat(40)}`);
     const target = (await rootFixture.db.query<{ context: { headSha: string } }>('SELECT review_context context FROM agent_commands WHERE id=$1', [next!.id])).rows[0]?.context;
     expect(target?.headSha).toBe('2'.repeat(40));
   });
@@ -486,7 +485,7 @@ describe('corner message attribution', () => {
     for (let cycle = 0; cycle < 3; cycle++) await reconcileConfiguredCornerReviewers(rootFixture.db, R);
     expect(await commands(B, C)).toHaveLength(0);
     expect(await commands(A, C)).toHaveLength(0);
-    expect((await commands(A, R)).filter(c => c.reason === 'report')).toHaveLength(0);
+    expect((await commands(A, C)).filter(c => c.reason === 'report')).toHaveLength(0);
     await rootFixture.phone.execute('sendRoomMessage', {
       roomId: C, messageId: 'e'.repeat(64), text: 'Proceed with the demonstration.',
     }, H);
@@ -537,7 +536,7 @@ describe('corner message attribution', () => {
     if (state === 'claimed') await claim((await commands(A, C))[0]!);
     await reconcileConfiguredCornerReviewers(rootFixture.db);
     expect(await commands(B, C)).toHaveLength(0);
-    expect((await commands(A, R)).filter(c => c.reason === 'report')).toHaveLength(0);
+    expect((await commands(A, C)).filter(c => c.reason === 'report')).toHaveLength(0);
     expect((await commands(A, C)).filter(c => c.reason === 'corner_review_needed')).toHaveLength(0);
   });
 
@@ -576,7 +575,7 @@ describe('corner message attribution', () => {
     const [repair] = await commands(A, C);
     expect(repair?.reason).toBe('agent_tag');
     expect(repair?.source.body).toContain(findings);
-    expect(repair?.source.body).toContain(`Current handoff target: PR #27 at ${head}`);
+    expect((await rootFixture.db.query('SELECT review_context->>\'headSha\' head FROM agent_commands WHERE id=$1', [repair!.id])).rows[0]).toEqual({ head });
     await claim(repair!);
     const reply = '@goosy Added both demonstrations to the PR description; the code and head are unchanged.';
     await result(repair!, reply);
@@ -603,7 +602,7 @@ describe('corner message attribution', () => {
     const handback = await commands(A, C);
     expect(handback.map(command => command.reason)).toEqual(['corner_review_needed']);
     expect(handback[0]?.source.body).toContain('FAIL: demonstration is missing.');
-    expect(handback[0]?.source.body).toContain('c'.repeat(40));
+    expect((await rootFixture.db.query(`SELECT review_context->>'headSha' head FROM agent_commands WHERE id=$1`, [handback[0]!.id])).rows[0]).toEqual({ head: 'c'.repeat(40) });
     for (let sweep = 2; sweep <= 3; sweep += 1)
       expect((await reconcileConfiguredCornerReviewers(rootFixture.db, R)).commands).toBe(0);
     expect((await commands(A, C)).map(command => command.id)).toEqual(handback.map(command => command.id));
@@ -622,15 +621,17 @@ describe('corner message attribution', () => {
   });
 
 
-  it('names the brief revision current at dispatch in the review wake', async () => {
+  it('Reproduction wake-16: a review wake names no brief revision that a later revision can make stale', async () => {
+    // 10 Nov 15:51: a review wake said brief revision 1 while the corner was on
+    // human-approved revision 2. The helper builds the newest revision and head
+    // at delivery, so the stored wake carries neither.
     await rootFixture.phone.execute('updateRoom', { roomId: R, reviewerAgentId: B }, H);
-    for (const revision of [1, 2])
-      await rootFixture.db.query(`INSERT INTO corner_brief_revisions(corner_id,revision,content,spec,author_id,source_room_id)
-        VALUES($1,$2,'Brief','Brief',$3,$4)`, [C, revision, A, R]);
+    await rootFixture.db.query(`INSERT INTO corner_brief_revisions(corner_id,revision,content,spec,author_id,source_room_id)
+      VALUES($1,1,'Brief','Brief',$2,$3)`, [C, A, R]);
     await greenHead(29, 'e'.repeat(40));
     const [review] = await commands(B, C);
-    expect(review?.source.body).toContain('Review against brief revision 2');
-    expect(review?.source.body).not.toContain('revision 1');
+    expect(review?.reason).toBe('corner_review_dispatch');
+    expect(review?.source.body).not.toMatch(/brief revision|handoff target/i);
   });
 
 

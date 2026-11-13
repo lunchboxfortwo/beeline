@@ -403,7 +403,9 @@ export async function insertAgentCommand(db: SqlDatabase, input: AgentCommandInp
        )) self_authored,
        COALESCE((SELECT author.kind='human' AND source.presentation='message' AND source.system_event IS NULL
          FROM messages source JOIN identities author ON author.id=source.author_id WHERE source.id=$3),false)
-         AND $4::boolean OR COALESCE((SELECT kind='human' FROM identities WHERE id=$5),false) AND $6::boolean human_input,
+         AND $4::boolean OR COALESCE((SELECT kind='human' FROM identities WHERE id=$5),false) AND $6::boolean
+         -- A Squire decision is a person's answer to the asker's wait.
+         OR COALESCE((SELECT system_event->>'kind'='squire-approval-decided' FROM messages WHERE id=$3),false) human_input,
        COALESCE((SELECT true FROM corner_facts fact
          JOIN rooms corner ON corner.id=fact.corner_id
          WHERE fact.corner_id=r.id

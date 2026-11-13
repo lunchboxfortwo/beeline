@@ -59,9 +59,9 @@ export function useMembersRouteState([
   ownsSelectedAgent: boolean,
   editingAgentSoul: boolean,
   allowProfileNavigationRef: React.RefObject<boolean>,
-  nameDraft: import("@/buzz/text-draft-store").TextDraft<string>,
+  handleDraft: import("@/buzz/text-draft-store").TextDraft<string>,
   soulDraft: import("@/buzz/text-draft-store").TextDraft<string>,
-  agentNameDraft: string,
+  agentHandleDraft: string,
   agentSoulDraft: string,
   navigation: Omit<import("@react-navigation/core").NavigationProp<ReactNavigation.RootParamList>, "getState"> & { getState(): import("@react-navigation/routers").NavigationState | undefined; },
   pendingConfigWriteRef: React.RefObject<boolean>,
@@ -76,7 +76,7 @@ export function useMembersRouteState([
   working: MembersAction | null,
   setRetryGeneration: React.Dispatch<React.SetStateAction<number>>,
   setProfileRetryGeneration: React.Dispatch<React.SetStateAction<number>>,
-  setAgentNameDraft: (update: string | ((previous: string) => string)) => void,
+  setAgentHandleDraft: (update: string | ((previous: string) => string)) => void,
   setAgentSoulDraft: (update: string | ((previous: string) => string)) => void,
   params: { communityId?: string | string[]; roomId?: string | string[]; action?: string | string[]; },
   openModelAxis: ModelAxisKind | null,
@@ -162,8 +162,8 @@ export function useMembersRouteState([
     true,
   );
   const [editingAgentSoul, setEditingAgentSoul] = useState(false);
-  const [agentNameDraft, setAgentNameDraft, nameDraft] = useTextDraft(
-    selectedAgent ? `agent-name:${workspaceId}:${selectedAgent.agent.identity.pubkey}` : null,
+  const [agentHandleDraft, setAgentHandleDraft, handleDraft] = useTextDraft(
+    selectedAgent ? `agent-handle:${workspaceId}:${selectedAgent.agent.identity.pubkey}` : null,
     '',
   );
   const [agentSoulDraft, setAgentSoulDraft, soulDraft] = useTextDraft(
@@ -305,10 +305,10 @@ return [
     setAccessError, setLocalAgentId, setError, profileRetryGeneration, surface, setWorking,
     setPickerOpen, setPairCommand, requestedActionHandledRef, requestedAction, memberQuery,
     setRosterLoading, rosterLoading, selectedAgent, ownsSelectedAgent, editingAgentSoul,
-    allowProfileNavigationRef, nameDraft, soulDraft, agentNameDraft, agentSoulDraft, navigation,
+    allowProfileNavigationRef, handleDraft, soulDraft, agentHandleDraft, agentSoulDraft, navigation,
     pendingConfigWriteRef, applyAgentReceipt, finishConfigWrite, modelAppliesTimerRef,
     setModelAxisError, waitingForEffortCatalogRef, canRemoveSelectedAgent, error, workspaceError,
-    working, setRetryGeneration, setProfileRetryGeneration, setAgentNameDraft, setAgentSoulDraft,
+    working, setRetryGeneration, setProfileRetryGeneration, setAgentHandleDraft, setAgentSoulDraft,
     params, openModelAxis, modelSearchQuery, setModelSearchQuery, modelAppliesNote, modelAxisError,
     selectedAgentOwnerByline, theme, accessError, yoloError, insets, rosterQuery, desktop,
     setMemberQuery, pickerOpen, pairCommand,

@@ -156,8 +156,7 @@ export function agentToolsFor(
     institutionalMemoryEnabled || !['search', 'remember'].includes(tool.name));
   if (commandRunnerAvailable) tools.push(invocationTool(RUNNER_TOOL), invocationTool(WORKSPACE_TOOL));
   // no_reply_needed mounts on every harness: it is the only silence path, so a
-  // nonhuman wake must always be able to end without posting prose. The tool
-  // itself refuses human wakes.
+  // wake must always be able to end without posting prose.
   tools.push(invocationTool(SILENT_TOOL));
   if (!nativeIoProven) tools.push(...scratchTools(cornerTurn && !repositoryCorner));
   return freeAgent ? tools.map(tool => {

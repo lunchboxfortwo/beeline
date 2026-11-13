@@ -95,8 +95,9 @@ it('Reproduction REVIEW-TARGET: a new head wake uses the newest brief and report
     VALUES($1,2,'New brief','New brief',$2,$3)`,[C,A,R]);
   await greenHead(104,'2'.repeat(40));
   const [next]=await commands(B,C);
-  expect(next?.source.body).toContain('Review against brief revision 2');
-  expect(next?.source.body).toContain('2'.repeat(40));
+  // The helper renders the newest brief and head at delivery; the body names neither.
+  expect(next?.source.body).not.toMatch(/brief revision|handoff target/i);
+  expect((await rootFixture.db.query(`SELECT review_context->>'headSha' head FROM agent_commands WHERE id=$1`,[next!.id])).rows[0]).toEqual({head:'2'.repeat(40)});
   expect(next?.source.body).toContain('FAIL: newest reported evidence');
 });
 

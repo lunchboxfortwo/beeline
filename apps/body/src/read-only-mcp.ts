@@ -18,7 +18,6 @@ import { ConnectorOfferDeps, squireShareFailure } from './read-only-mcp-agent-gr
 import { agentScheduleRoomId, DaemonArtifactUploadResult } from './read-only-mcp-download-attachment.js';
 import { GrantRunDeps, executeAgentTool, turnArtifacts } from './read-only-mcp-open-poll.js';
 import { handleLine } from './read-only-mcp-tool-call-id.js';
-import { claimToolOwedListing, filterOwedMentions } from './tool-owed-once.js';
 
 
 
@@ -470,7 +469,6 @@ export function isDaemonNetworkFailure(error: unknown): boolean {
 
 
 
-export const toolOwedStorage = new AsyncLocalStorage<{ owedMentions?: unknown[]; includeOwed?: boolean; roomId?: string }>();
 
 
 
@@ -494,7 +492,6 @@ export async function daemonExecute(name: string, input: JsonObject): Promise<Js
           authorization: `Bearer ${requiredEnv('BEELINE_DAEMON_TOKEN')}`,
           'content-type': 'application/json',
           'x-beeline-helper-version': process.env.BEELINE_HELPER_VERSION || 'v0.0.0',
-          ...(toolOwedStorage.getStore()?.includeOwed ? { 'x-beeline-tool-result': '1', ...(toolOwedStorage.getStore()?.roomId ? { 'x-beeline-place': toolOwedStorage.getStore()!.roomId } : {}) } : {}),
         },
         body,
       });
@@ -508,13 +505,7 @@ export async function daemonExecute(name: string, input: JsonObject): Promise<Js
         }
         throw new Error(`daemon operation ${name} failed (${response.status}: ${code})`);
       }
-      const result = await response.json() as JsonObject | null;
-      const toolContext = toolOwedStorage.getStore();
-      if (toolContext) {
-        if (toolContext.includeOwed) toolContext.owedMentions = Array.isArray(result?._beelineOwedMentions) ? result._beelineOwedMentions : undefined;
-        if (result && typeof result === 'object' && '_beelineToolResult' in result) return result._beelineToolResult as JsonObject;
-      }
-      return result as JsonObject;
+      return await response.json() as JsonObject;
   } catch(error){
     if(!isDaemonNetworkFailure(error))throw error;
     throw new Error(`daemon operation ${name} failed before the server answered; await a new action or recovery boundary${daemonOperationIsSafeToRepeat(name,input)?'':'; the write outcome is unknown'}`);
@@ -866,34 +857,12 @@ export async function callCommandTool(name: string, args: JsonObject, toolCallId
 
 
 /** Keep concurrent calls isolated; footer metadata rides on their existing operation responses. */
-export async function withToolOwedContext(work: () => Promise<string>) {
-  const listing = claimToolOwedListing();
-  return toolOwedStorage.run({ includeOwed: listing.include, roomId: listing.roomId }, async () => {
-    let output: string;
-    let isError = false;
-    try { output = await work(); }
-    catch (error) {
-      isError = true;
-      output = error instanceof Error ? error.message : String(error);
-      // Validation may refuse before dispatch. Read fresh authenticated context
-      // without adding an operation to the command/operation log.
-      if (listing.include && !toolOwedStorage.getStore()?.owedMentions) {
-        try {
-          const response = await fetch(new URL('/v1/daemon/owed-mentions', requiredEnv('BEELINE_DAEMON_BASE_URL')), {
-            signal: undefined,
-            headers: { authorization: `Bearer ${requiredEnv('BEELINE_DAEMON_TOKEN')}`, ...(listing.roomId ? { 'x-beeline-place': listing.roomId } : {}) },
-          });
-          if (response.ok) {
-            const context = await response.json() as { owedMentions?: unknown[] };
-            if (Array.isArray(context.owedMentions)) toolOwedStorage.getStore()!.owedMentions = context.owedMentions;
-          }
-        } catch { /* Optional context must never mask the original refusal. */ }
-      }
-    }
-    const owedMentions = filterOwedMentions(toolOwedStorage.getStore()?.owedMentions, listing.roomId);
-    return { ...(isError ? { isError: true } : {}), content: [{ type: 'text' as const, text: output },
-      ...(owedMentions ? [{ type: 'text' as const, text: JSON.stringify({ owedMentions }) }] : [])] };
-  });
+/** Every tool returns only its own result. Owed mentions are listed once, at turn start. */
+export async function withToolResult(work: () => Promise<string>) {
+  try { return { content: [{ type: 'text' as const, text: await work() }] }; }
+  catch (error) {
+    return { isError: true, content: [{ type: 'text' as const, text: error instanceof Error ? error.message : String(error) }] };
+  }
 }
 
 

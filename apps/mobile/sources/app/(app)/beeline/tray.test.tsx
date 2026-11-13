@@ -1,4 +1,6 @@
 import { describe, expect, it } from 'vitest';
+// @ts-expect-error react-test-renderer has no declarations in this workspace.
+import { act } from 'react-test-renderer';
 import {
   byTestId,
   calls,
@@ -188,12 +190,25 @@ describe('Tags screen', () => {
     expect(navigation.replace).toHaveBeenCalledWith('/beeline/channels');
   });
 
-  it('on a phone, carries the list header (the shared layout draws the tab bar)', async () => {
+  it('on a phone, carries the shared tab header: the name opens the Workspace rail, with no Search or New chat', async () => {
     serve({ needs: [need(), merge()] });
     const tree = await renderTags();
     expect(hasTestId(tree, 'chat-list-header')).toBe(true);
     expect(textOf(tree)).toContain('Beeline Work');
     expect(hasTestId(tree, 'tab-bar')).toBe(false);
+    expect(hasTestId(tree, 'room-search-open')).toBe(false);
+    expect(hasTestId(tree, 'new-chat')).toBe(false);
+    expect(hasTestId(tree, 'community-drawer-overlay')).toBe(false);
+    await press(tree, 'workspace-switcher');
+    expect(hasTestId(tree, 'community-drawer-overlay')).toBe(true);
+  });
+
+  it('on a phone, draws a hairline under the header only once the cards scroll under it', async () => {
+    serve({ needs: [need(), merge()] });
+    const tree = await renderTags();
+    expect(byTestId(tree, 'tab-header-edge').props.borderColor).toBe('transparent');
+    await act(async () => byTestId(tree, 'tray-list').props.onScroll({ nativeEvent: { contentOffset: { y: 40 } } }));
+    expect(byTestId(tree, 'tab-header-edge').props.borderColor).toBe('stroke');
   });
 
   it('on desktop, is the middle column alone: no list header, no tab bar', async () => {
