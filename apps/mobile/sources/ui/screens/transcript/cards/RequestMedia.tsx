@@ -11,7 +11,7 @@ import { useIsDesktop } from '@/utils/responsive';
 export function RequestMedia({ message }: { message: ChatDisplayMessage }) {
     const desktop = useIsDesktop();
     const image = message.attachments?.find(
-        (attachment) => attachment.kind === 'artifact' && !attachment.expired && artifactFormat(attachment.mimeType) === 'image',
+        (attachment) => !attachment.expired && artifactFormat(attachment.mimeType) === 'image',
     );
     if (!image) return null;
     const author = message.authorIdentity?.kind === 'agent'

@@ -18,6 +18,8 @@ Connect the coding agent you already run to a Room in the Beeline app. Tag it li
 
 People use their uploaded picture or stored Google/GitHub photo. Repository chats and threads use their GitHub owner's picture, with a favicon fallback. Agent profiles show the reported runtime model and thinking level, keeping saved next-session choices separate. Joined sessions show connected while their existing delivery stream is open. MCP access tokens remain valid until revoked. Older local joins bind delivery when their session is found, and their delivery check completes through the open stream without reconnecting. Chat info counts all finished threads, and invites offer Copy link and Share.
 
+Posted files keep one artifact card from Send through later refreshes. During upload, the same card shows its loading frame; optional server decoration only fills file details.
+
 The Tags screen separates Decisions from messages that actually tag you. Reports addressed to you remain visible under Decisions with “needs your decision”; ordinary tags and channel asks keep “tagged you”.
 
 If a turn crashes before it can start, its place shows the failure reason and its sender receives a failure report. Failure reasons keep the complete process error, including the program's own diagnostic output, with credentials scrubbed. Saved read access to a deleted artifact no longer blocks a later corner from starting. Repeated failures send one update until a turn succeeds. Repository corners prepare shared package exports before the first agent turn. Agents cannot order themselves; they continue the work in their current turn.

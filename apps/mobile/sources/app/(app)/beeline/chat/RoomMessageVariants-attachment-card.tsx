@@ -12,21 +12,15 @@ import type { ChannelReferenceIndex, ChannelReferenceTarget } from '@/buzz/chann
 import { type MessageReplyDisplayTarget } from '@/buzz/message-reply';
 import { currentViewerConversation, subscribeViewerConversation, viewerContextLabel } from '@/buzz/viewer-conversation';
 import { type ConnectorReceipt } from '@/buzz/connector-receipt';
-import { attachmentOpenUrl, formatAttachmentSize } from '@/buzz/chat-attachment';
-import { mediaIdFromUrl } from '@/buzz/artifact';
-import { ArtifactImage } from '@/components/buzz/ArtifactMedia';
+import { formatAttachmentSize } from '@/buzz/chat-attachment';
 import { TranscriptReference } from '@/components/buzz/TranscriptReference';
 import { openComputerSessionViewer } from '@/components/buzz/ComputerSession';
 import { openArtifactViewer } from '@/components/buzz/ArtifactCard';
-import { ArtifactViewerScreen } from '@/components/buzz/ArtifactViewer';
-import { showPictureActions } from '@/buzz/picture-actions';
 import { ContentTarget } from '@/components/buzz/IndexRow';
-import { Modal } from '@/modal';
-import { openExternalUrl } from '@/utils/open-external-url';
 import { IdentityMark } from '@/components/buzz/IdentityMark';
 import { FileRow } from '@/ui/screens/transcript/FileRow';
 import { CornerDownRight, CornerUpLeft } from 'lucide-react-native';
-import { EmojiGlyph, Filled, Glyph, RingOutset, T } from '@/ui/grammar';
+import { EmojiGlyph, Glyph, RingOutset, T } from '@/ui/grammar';
 
 
 
@@ -37,91 +31,20 @@ import { EmojiGlyph, Filled, Glyph, RingOutset, T } from '@/ui/grammar';
  * one — the name, type and size the message still holds, inscribed rather than
  * framed. Nothing is fetched and nothing opens: there is no longer a file
  * behind the link, and a broken thumbnail or a spinner would say otherwise.
+ * Every live file renders the artifact card instead, so a posted file has one
+ * shape from send through every later refresh.
  */
-export function AttachmentCard({
-  attachment,
-  isDesktop,
-  visible,
-}: {
-  attachment: AttachmentReference;
-  isDesktop: boolean;
-  visible: boolean;
-}) {
-  const image =
-    visible && !attachment.expired && attachment.mimeType.startsWith('image/') && mediaIdFromUrl(attachment.url);
-  const open = () => {
-    // A picture opens the same centered full-screen viewer on every surface,
-    // desktop included; the work pane keeps only its documents.
-    if (attachment.mimeType.startsWith('image/')) {
-      const objectId = mediaIdFromUrl(attachment.url);
-      Modal.show({
-        component: ArtifactViewerScreen,
-        props: { attachment },
-        placement: 'fill',
-      });
-      return;
-    }
-    void openExternalUrl(attachmentOpenUrl(attachment)).catch(() => {
-      Modal.alert('Could not open attachment', 'The file link could not be opened on this device.');
-    });
-  };
+export function ExpiredAttachmentRow({ attachment }: { attachment: AttachmentReference }) {
   const metadata = `${attachment.mimeType.toUpperCase()} · ${formatAttachmentSize(attachment.size)}`;
-  if (attachment.expired) {
-    return (
-      <YStack
-        accessibilityLabel={`Expired attachment ${attachment.name}`}
-        minWidth={0}
-        width="100%"
-        marginTop="2"
-        testID={`chat-attachment-expired-${attachment.name}`}
-      >
-        <FileRow name={attachment.name} meta={`EXPIRED · ${metadata}`} opens={false} quiet />
-      </YStack>
-    );
-  }
-  // A file with no preview is one raised row (`ui/screens/transcript/FileRow`).
   return (
-    <YStack minWidth={0} width="100%" marginTop="2">
-    <ContentTarget
-      accessibilityLabel={`Open attachment ${attachment.name}`}
-      accessibilityRole={attachment.mimeType.startsWith('image/') ? 'button' : 'link'}
-      delayLongPress={450}
-      onLongPress={
-        attachment.mimeType.startsWith('image/')
-          ? (event) => {
-              event.stopPropagation();
-              showPictureActions(attachment);
-            }
-          : undefined
-      }
-      onPress={open}
-      testID={`chat-attachment-${attachment.name}`}
-      {...(isDesktop && attachment.mimeType.startsWith('image/')
-        ? ({
-            onContextMenu: (event: { preventDefault(): void; stopPropagation(): void }) => {
-              event.preventDefault();
-              event.stopPropagation();
-              showPictureActions(attachment);
-            },
-          } as any)
-        : {})}
+    <YStack
+      accessibilityLabel={`Expired attachment ${attachment.name}`}
+      minWidth={0}
+      width="100%"
+      marginTop="2"
+      testID={`chat-attachment-expired-${attachment.name}`}
     >
-      <FileRow
-        name={attachment.name}
-        meta={metadata}
-        opens
-        leading={image ? (
-          <YStack width={44} height={44} borderRadius="sm" overflow="hidden" backgroundColor="highlight">
-            <Filled
-              view={ArtifactImage}
-              attachment={attachment}
-              fit="cover"
-              testID={`chat-attachment-thumbnail-${attachment.name}`}
-            />
-          </YStack>
-        ) : undefined}
-      />
-    </ContentTarget>
+      <FileRow name={attachment.name} meta={`EXPIRED · ${metadata}`} opens={false} quiet />
     </YStack>
   );
 }

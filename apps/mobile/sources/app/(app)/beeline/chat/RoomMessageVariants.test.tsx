@@ -3,6 +3,7 @@ import React from 'react';
 import { act, create, type ReactTestRenderer } from 'react-test-renderer';
 import { afterEach, beforeEach, expect, it, vi } from 'vitest';
 import type { ChoiceCardView } from '@beeline/api-contract/phone';
+import type { AttachmentReference } from '@beeline/buzz-client';
 import type { ChatDisplayMessage } from '@/buzz/room-view-presentation';
 import { TranscriptCardChoicePlate } from '@/components/buzz/ChoicePlate';
 
@@ -35,7 +36,7 @@ vi.mock('@/components/buzz/Button', () => ({ Button: vi.fn(() => null) }));
 vi.mock('@/components/buzz/MonoHull', () => ({ NewMessageMaterialize: vi.fn(() => null), PixelLoader: vi.fn(() => null) }));
 vi.mock('@/modal', () => ({ Modal: vi.fn(() => null) }));
 vi.mock('@/buzz/picture-actions', () => ({ showPictureActions: vi.fn(() => null) }));
-vi.mock('@/buzz/chat-attachment', () => ({ attachmentOpenUrl: vi.fn(() => null), formatAttachmentSize: vi.fn(() => null) }));
+vi.mock('@/buzz/chat-attachment', () => ({ formatAttachmentSize: vi.fn(() => null) }));
 vi.mock('@/utils/open-external-url', () => ({ openExternalUrl: vi.fn(() => null) }));
 vi.mock('@/auth/signin-funnel', () => ({ funnelOnboarding: vi.fn(() => null) }));
 vi.mock('@/buzz/artifact-viewport', () => ({ useArtifactRowVisible: vi.fn(() => null) }));
@@ -55,6 +56,7 @@ vi.mock('@/components/buzz/TranscriptCard', () => ({
 
 import { ChoiceCard } from './RoomMessageVariants';
 import { OrdinaryLedgerMessage } from './RoomMessageVariants-ordinary-ledger-message';
+import { ArtifactCard } from '@/components/buzz/ArtifactCard';
 import { LedgerEntry, LedgerSteer } from '@/components/buzz/Ledger';
 import { NewMessageMaterialize } from '@/components/buzz/MonoHull';
 import { TurnSettledLine } from '@/components/buzz/TurnProgressLine';
@@ -202,4 +204,33 @@ it('SEND-ACTIONS keeps tap and long press on the existing message-actions path',
   expect(actions).toHaveBeenCalledTimes(2); expect(actions).toHaveBeenCalledWith(props.message);
 });
 
+// Reproduction the owner reported: the same posted file grew and shrank between
+// the artifact card and the file pill because the shape read an optional server
+// decoration. The file's own data decides the shape, so both reads agree.
+const postedFile: AttachmentReference = {
+  url: '/v1/media/aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa',
+  name: 'shot.png',
+  mimeType: 'image/png',
+  size: 1024,
+};
 
+// The row builds the attachment elements once and hands the same array to
+// whichever frame paints the message, so the element type is the shape.
+function postedAttachmentElement(): any {
+  const steer = vi.mocked(LedgerSteer).mock.calls.at(-1)?.[0] as any;
+  const entry = vi.mocked(LedgerEntry).mock.calls.at(-1)?.[0] as any;
+  const attachments = (steer ?? entry)?.attachments;
+  return Array.isArray(attachments) ? attachments[0] : undefined;
+}
+
+it('ONE-SHAPE renders the artifact card for a posted file with or without server decoration', () => {
+  const props = ordinaryProps();
+  const decorated: AttachmentReference = { ...postedFile, kind: 'artifact', title: 'Mock', author: 'ruby' };
+  act(() => { renderer = create(<OrdinaryLedgerMessage {...props} message={{ ...props.message, attachments: [decorated] }} />); });
+  expect(postedAttachmentElement()?.type).toBe(ArtifactCard);
+  act(() => renderer.update(<OrdinaryLedgerMessage {...props} message={{ ...props.message, attachments: [postedFile] }} />));
+  expect(postedAttachmentElement()?.type).toBe(ArtifactCard);
+  act(() => renderer.update(<OrdinaryLedgerMessage {...props} message={{ ...props.message, attachmentUploadPending: true, attachments: [postedFile] }} />));
+  expect(postedAttachmentElement()?.type).toBe(ArtifactCard);
+  expect(postedAttachmentElement()?.props.visible).toBe(false);
+});
