@@ -150,6 +150,9 @@ export type PrivateCommandPayload = {
   reportedOutcome?: string;
   /** Origin of a forwarded report, for the existing human attention index. */
   originCornerId?: string;
+  /** The explicit public post this command's current generation made. */
+  publicPostId?: string;
+  publicPostGenerationId?: string;
 };
 
 export type CommandRow = {

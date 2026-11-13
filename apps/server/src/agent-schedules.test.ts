@@ -543,6 +543,10 @@ describe('agent schedule background posting', () => {
         },
       });
       for (const message of messages.rows) expect(message).toEqual(messages.rows[0]);
+      // Reproduction quiet-chat-schedule: the run stays in the routine's
+      // history; the chat shows no `@scheduler ran a schedule` line.
+      const view = await new PhoneService(database, 'http://local.test').readRoom(ROOM, OWNER);
+      expect(view?.messages.some((row) => row.text.includes('ran a schedule'))).toBe(false);
       // The scheduler identity is hidden from rosters.
       expect(
         (

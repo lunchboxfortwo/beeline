@@ -31,7 +31,7 @@ it('keeps the originating corner waiting for a decision returned to its parent R
     { status: 'needs_decision', ...authority(turn), ask: 'Which endpoint should we use?', text: 'needs-decision: choose endpoint' },
     WORKER,
   );
-  const returned = (await commands(ROOM, RUBY)).find((c) => c.reason === 'report')!;
+  const returned = (await commands(opened.cornerId, RUBY)).find((c) => c.reason === 'report')!;
   await claim(returned);
   await rootFixture.daemon.execute(
     'report',
@@ -97,7 +97,7 @@ it('keeps DM-returned decisions indexed until answered or source membership ends
     { ...authority(turn), text: 'Reported the decision' },
     WORKER,
   );
-  const returned = (await commands(DM, RUBY)).find((c) => c.reason === 'report')!;
+  const returned = (await commands(opened.cornerId, RUBY)).find((c) => c.reason === 'report')!;
   await claim(returned);
   await rootFixture.daemon.execute(
     'report',
@@ -357,7 +357,7 @@ for (const delivery of ['report', 'postRoomMessage'] as const) {
     await rootFixture.daemon.execute('report', {
       ...authority(turn), status: 'done', text: 'done: design ready',
     }, WORKER);
-    const report = (await commands(DM, RUBY)).find(c => c.reason === 'report')!;
+    const report = (await commands(opened.cornerId, RUBY)).find(c => c.reason === 'report')!;
     await claim(report);
     await rootFixture.daemon.execute('postAgentAttachment', {
       ...authority(report), attachment: attachment(copy, 'design for approval'),
@@ -372,10 +372,18 @@ for (const delivery of ['report', 'postRoomMessage'] as const) {
       }, RUBY);
     }
     const visible = (await rootFixture.phone.readRoom(DM, HUMAN))!.messages.filter(m => m.attachments?.length);
-    expect(visible).toHaveLength(1);
-    expect(visible[0]!.attachments).toEqual([expect.objectContaining({
-      url: 'http://test/v1/media/' + original, name: 'owner approval',
-    })]);
+    if (delivery === 'postRoomMessage') {
+      // Closing prose of a corner report wake is the commander's reply in the corner.
+      expect(visible).toEqual([]);
+      const reply = (await rootFixture.phone.readRoom(opened.cornerId, HUMAN))!.messages
+        .filter(m => m.text === 'Here is the design');
+      expect(reply).toEqual([expect.objectContaining({ attachments: [expect.objectContaining({ url: 'http://test/v1/media/' + copy })] })]);
+    } else {
+      expect(visible).toHaveLength(1);
+      expect(visible[0]!.attachments).toEqual([expect.objectContaining({
+        url: 'http://test/v1/media/' + original, name: 'owner approval',
+      })]);
+    }
     expect((await rootFixture.db.query(`SELECT 1 FROM agent_pending_attachments WHERE request_id=$1`,
       [report.turnRequestId])).rowCount).toBe(0);
   });
@@ -394,11 +402,11 @@ it('Reproduction R-ID: supplied private report and order ids reopen their payloa
   const attachment = { url: uploaded.url, name: 'handoff.txt', mimeType: 'text/plain', size: Buffer.byteLength('Synthetic handoff') };
   await rootFixture.daemon.execute('postAgentAttachment', { ...authority(turn), attachment }, WORKER);
   const report = await rootFixture.daemon.execute('report', { ...authority(turn), status: 'done', text: 'done: evidence ready' }, WORKER);
-  expect(await read(report.id, RUBY, DM)).toMatchObject({ body: 'done: evidence ready', attachments: [expect.objectContaining({ name: 'handoff.txt' })] });
+  expect(await read(report.id, RUBY)).toMatchObject({ body: 'done: evidence ready', attachments: [expect.objectContaining({ name: 'handoff.txt' })] });
   expect(await read(report.id)).toMatchObject({ body: 'done: evidence ready' });
   // Continuations retain private payloads and expose their own command ids.
   await rootFixture.db.query(`UPDATE agent_commands SET private_payload=jsonb_set(private_payload,'{kind}','\"lifecycle\"'::jsonb) WHERE id=$1`, [report.id]);
-  expect(await read(report.id, RUBY, DM)).toMatchObject({ body: 'done: evidence ready' });
+  expect(await read(report.id, RUBY)).toMatchObject({ body: 'done: evidence ready' });
   // A current Room member who is neither sender nor recipient cannot see it.
   const outsider = 'e'.repeat(64);
   await rootFixture.db.query(`INSERT INTO identities(id,kind,name) VALUES($1,'agent','Observer') ON CONFLICT DO NOTHING`, [outsider]);
@@ -406,8 +414,8 @@ it('Reproduction R-ID: supplied private report and order ids reopen their payloa
     VALUES($1,NULL,$3,'member'),($1,$2,$3,'member')`, [WS, ROOM, outsider]);
   await expect(read(report.id, outsider, ROOM)).rejects.toThrow('message access denied');
   await expect(read(turn.id, outsider, ROOM)).rejects.toThrow('message access denied');
-  await rootFixture.db.query(`UPDATE memberships SET removed_at=now() WHERE room_id=$1 AND identity_id=$2`, [DM, RUBY]);
-  await expect(read(report.id, RUBY, ROOM)).rejects.toThrow('message access denied');
+  await rootFixture.db.query(`UPDATE memberships SET removed_at=now() WHERE room_id=$1 AND identity_id=$2`, [ROOM, RUBY]);
+  await expect(read(report.id, RUBY)).rejects.toThrow('access denied');
 });
 
 

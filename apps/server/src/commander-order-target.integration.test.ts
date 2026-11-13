@@ -107,7 +107,8 @@ it.each(['corner', 'parent Room'])('Reproduction corner-peer-orders: %s order pr
   await daemon.execute('report', { roomId: address, requestId: assigned.turnRequestId, generationId: 'reply',
     status: 'done', text: 'done: replay passed' }, BABY);
   const recipient = target === 'corner' ? JELLYBEAN : CANDY;
-  const destination = target === 'corner' ? DM : opened.cornerId;
+  // Either way the commander's report wake lands in the corner the work concerns.
+  const destination = opened.cornerId;
   const replies = (await daemon.execute('getAgentCommands', { roomId: destination }, recipient)).commands;
   expect(replies.find(c => c.reason === 'report')).toMatchObject({ private: true,
     source: { authorId: BABY, body: 'done: replay passed' } });
@@ -169,7 +170,7 @@ it.each(['done', 'blocked', 'failed', 'needs_decision'])('Reproduction report-co
   const text = `${status.replace('_', '-')}: repair result`;
   await daemon.execute('report', { roomId: assigned.roomId, requestId: assigned.turnRequestId,
     generationId: 'repair', status, text }, BABY);
-  const reply = (await daemon.execute('getAgentCommands', { roomId: DM }, JELLYBEAN)).commands.find(c => c.reason === 'report')!;
+  const reply = (await daemon.execute('getAgentCommands', { roomId: incoming.roomId }, JELLYBEAN)).commands.find(c => c.reason === 'report')!;
   expect(reply).toMatchObject({ private: true, source: { authorId: BABY, body: text } });
   await daemon.execute('claimAgentCommand', { roomId: reply.roomId, commandId: reply.id, generationId: 'received' }, JELLYBEAN);
   expect((await db.query(`SELECT state,parent_command_id,review_context FROM agent_commands WHERE id=$1`, [reply.id])).rows[0])
@@ -201,7 +202,7 @@ it('Reproduction report-commander-refused: a current reviewer report keeps its o
   await daemon.execute('claimAgentCommand', { roomId: assigned.roomId, commandId: assigned.id, generationId: 'review' }, BABY);
   await daemon.execute('report', { roomId: assigned.roomId, requestId: assigned.turnRequestId,
     generationId: 'review', status: 'done', text: 'done: current review complete' }, BABY);
-  const reply = (await daemon.execute('getAgentCommands', { roomId: DM }, JELLYBEAN)).commands.find(c => c.reason === 'report')!;
+  const reply = (await daemon.execute('getAgentCommands', { roomId: incoming.roomId }, JELLYBEAN)).commands.find(c => c.reason === 'report')!;
   expect(reply).toMatchObject({ source: { authorId: BABY, body: expect.stringContaining('done: current review complete') } });
   expect((await db.query(`SELECT review_context FROM agent_commands WHERE id=$1`, [reply.id])).rows[0]?.review_context)
     .toMatchObject({ ...context, purpose: 'verdict' });
@@ -266,7 +267,7 @@ it.each(['done', 'blocked', 'failed', 'needs_decision'].flatMap(status => [JELLY
   await daemon.execute('report', { roomId: repair.roomId, requestId: repair.turnRequestId, generationId: 'repair',
     status, text: `${status.replace('_', '-')}: repair result` }, CANDY);
   const recipient = JELLYBEAN;
-  const destination = DM;
+  const destination = incoming.roomId;
   expect((await db.query(`SELECT agent_id,room_id FROM agent_commands WHERE reason='report'`)).rows)
     .toEqual([{ agent_id: recipient, room_id: destination }]);
 });

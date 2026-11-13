@@ -56,13 +56,14 @@ it.each(['approved', 'legacy', 'agent-order', 'different-dispatch', 'same-issuer
     SET approval_basis=approval_basis-'commanderCommandId'-'commanderReturnRoomId' WHERE corner_id=$1 AND revision=2`, [opened.cornerId]);
   if (historicalOrder) {
     await daemon.execute('report', { ...authority(historicalOrder), status: 'blocked', text: 'Earlier same-issuer order result' }, WORKER);
-    expect((await commands(ROOM, BOSS)).filter(c => c.reason === 'report')).toEqual([
+    // Report wakes reach the commander inside the corner they concern.
+    expect((await commands(opened.cornerId, BOSS)).filter(c => c.reason === 'report')).toEqual([
       expect.objectContaining({ source: expect.objectContaining({ body: 'blocked: Earlier same-issuer order result' }) })]);
     expect((await commands(returnRoom, BOSS)).filter(c => c.reason === 'report')).toEqual([]);
   }
   if (mode === 'in-flight') {
     await daemon.execute('report', { ...authority(initial), status: 'blocked', text: 'Original order result' }, WORKER);
-    expect((await commands(DM, RUBY)).filter(c => c.reason === 'report')).toEqual([
+    expect((await commands(opened.cornerId, RUBY)).filter(c => c.reason === 'report')).toEqual([
       expect.objectContaining({ source: expect.objectContaining({ body: 'blocked: Original order result' }) })]);
     expect((await commands(returnRoom, BOSS)).filter(c => c.reason === 'report')).toEqual([]);
   }
@@ -78,8 +79,11 @@ it.each(['approved', 'legacy', 'agent-order', 'different-dispatch', 'same-issuer
     SELECT 1 FROM (${commanderChainSql('corner', '$2', 'now()')}) commanders WHERE commanders.id=$3)`, [opened.cornerId, WORKER, BOSS])).rows;
   expect(chain.length).toBe(approved ? 1 : 0);
   await daemon.execute('report', { ...authority(turn), status: 'blocked', text: 'Endpoint decision required' }, WORKER);
-  const reports = (await commands(approved ? returnRoom : DM, approved ? BOSS : RUBY)).filter(c => c.reason === 'report');
-  expect(reports).toEqual([expect.objectContaining({ source: expect.objectContaining({ body: 'blocked: Endpoint decision required' }) })]);
+  const endpoint = async (agent: string) => (await commands(opened.cornerId, agent))
+    .filter(c => c.reason === 'report' && c.source.body === 'blocked: Endpoint decision required');
+  expect(await endpoint(approved ? BOSS : RUBY)).toHaveLength(1);
+  expect(await endpoint(approved ? RUBY : BOSS)).toEqual([]);
+  expect((await commands(approved ? returnRoom : DM, approved ? BOSS : RUBY)).filter(c => c.reason === 'report')).toEqual([]);
   const saved = (await db.query<CommandRow>('SELECT * FROM agent_commands WHERE id=$1', [initial.id])).rows[0]!;
   // The original opening assignment remains an in-flight order of the original commander.
   expect(await commanderReportAddress(db, opened.cornerId, saved)).toMatchObject({ recipient: RUBY, returnRoom: DM });
