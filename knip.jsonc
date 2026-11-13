@@ -11,6 +11,8 @@
   "ignoreIssues": {
     // GitHub github-script invokes these CommonJS exports; Knip cannot see inline workflow consumers.
     "scripts/{acp-adapter-issue,release-preflight}.cjs": ["exports"],
+    // The release composites load these run exports through github-script's Workspace path.
+    "scripts/release-steps/{daemon-leg-step1,pages-leg-step3}.mjs": ["exports"],
     // esbuild exposes start/submit through demo.js, which the static homepage lazy-loads.
     "web/marketing/demo-source.mjs": ["exports"],
     // CONNECT-RING-1 selects router/transport aliases and the temporary Metro adapter.
@@ -38,6 +40,10 @@
         // Runtime consumers in Expo and inline workflow scripts load these by convention/path.
         "scripts/acp-adapter-issue.cjs",
         "scripts/pages-channel.mjs",
+        // Shared release shell/composite steps invoke these outside the JavaScript graph.
+        "scripts/release-steps/{daemon-leg-step1,pages-leg-step3}.mjs",
+        "scripts/server-previous-sources.mjs",
+        "scripts/verify-pages-update.mjs",
         "scripts/release-preflight.cjs",
         "scripts/prompt-pr-replay.mjs",
         "scripts/sync-play-metadata.mjs",
@@ -202,6 +208,8 @@
         "metro.config.js",
         "fingerprint.config.js",
         "index.ts",
+        // The shared web-app release shell invokes this source-map CLI from the mobile directory.
+        "scripts/prepare-web-sourcemaps.mjs",
         // WEB-OUTBOX-3446 invokes the exported-bundle startup proof by path.
         "scripts/outbox-startup-bundle-proof.mjs",
         // CONNECT-RING-1 selects the native entry and Metro adapter by path.
