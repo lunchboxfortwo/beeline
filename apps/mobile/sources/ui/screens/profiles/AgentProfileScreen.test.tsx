@@ -131,6 +131,17 @@ describe('agent profile', () => {
     expect(byId(tree, 'model-axis-effort').props.value).toBe('Not available');
   });
 
+  it('does not open thinking choices for a model with only off', async () => {
+    profile.value = agent({ editing: true, detail: detail({
+      catalog: [
+        { id: 'model', category: 'model', currentValue: 'grunt/grunt', options: [{ id: 'grunt/grunt' }] },
+        { id: 'thought_level', category: 'thought_level', currentValue: 'off', options: [{ id: 'off' }] },
+      ],
+    }) });
+    const tree = await render();
+    expect(byId(tree, 'model-axis-effort').props.onPress).toBeUndefined();
+  });
+
   it('opens the model picker only while editing, and picks a model', async () => {
     const axis = { id: 'model', category: 'model', currentValue: 'claude-opus-5-5', options: [{ id: 'claude-opus-5-5', name: 'Claude Opus 5.5' }, { id: 'gpt-5-5', name: 'GPT-5.5' }] };
     profile.value = agent({ modelAxes: { model: axis, effort: undefined, fast: undefined } });

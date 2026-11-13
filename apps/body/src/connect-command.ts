@@ -305,8 +305,9 @@ export function connectEffortPickerFromAxes(
 ): ConnectAxisPicker | undefined {
   const isEffort = (axis: { category: string; options: Array<{ id: string }> }): boolean =>
     CONNECT_EFFORT_CATEGORIES.includes(axis.category) && axis.options.length > 0;
-  const axis = axes.find(isEffort) ?? rawAxes.find(isEffort);
-  return axis ? { currentValue: axis.currentValue, options: axis.options } : undefined;
+  const axis = axes.find((axis) => CONNECT_EFFORT_CATEGORIES.includes(axis.category)) ?? rawAxes.find(isEffort);
+  return axis?.options.some((choice) => choice.id !== 'off')
+    ? { currentValue: axis.currentValue, options: axis.options } : undefined;
 }
 
 
@@ -578,7 +579,7 @@ export async function collectConnectWizard(
       }).catch(() => undefined);
       axis = reread?.effort;
     }
-    if (!axis?.options.length) return undefined;
+    if (!axis?.options.some((choice) => choice.id !== 'off')) return undefined;
     const picked = await prompts.select<string>({
       message: brass('Choose reasoning effort'),
       options: axis.options.map((choice) => ({

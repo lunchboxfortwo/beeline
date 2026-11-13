@@ -40,14 +40,15 @@ export function fastModeConfigAxis<
  * that is neither the model nor Fast mode, so a harness naming its effort
  * category differently keeps its effort picker.
  */
-export function effortConfigAxis<T extends Pick<AgentModelConfigOption, 'id' | 'category'>>(
+export function effortConfigAxis<T extends Pick<AgentModelConfigOption, 'id' | 'category' | 'options'>>(
   catalog: readonly T[],
 ): T | undefined {
-  return (
+  const axis = (
     catalog.find((axis) => EFFORT_CATEGORIES.includes(axis.category)) ??
     catalog.find(
       (axis) =>
         axis.category !== 'model' && !(axis.id === 'fast-mode' && axis.category === 'model_config'),
     )
   );
+  return axis?.options.some((choice) => choice.id !== 'off') ? axis : undefined;
 }
