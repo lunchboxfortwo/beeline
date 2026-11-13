@@ -454,7 +454,7 @@ describe('PR-scoped check gate', () => {
   });
 
 
-  it('names a configured reviewer who is not a parent member and does not drop the gate', async () => {
+  it('counts a reviewer removed from the parent Room as no reviewer, as tags do', async () => {
     await ownPr();
     await rootFixture.db.query(`UPDATE rooms SET reviewer_agent_id=$2 WHERE id=$1`, [R, REVIEWER]);
     await rootFixture.db.query(`UPDATE memberships SET removed_at=now() WHERE room_id=$1 AND identity_id=$2`, [
@@ -464,13 +464,9 @@ describe('PR-scoped check gate', () => {
     expect(await gate(AUTHOR)).toMatchObject({
       checks: 'passed',
       approved: false,
-      reviewer: '@reviewer',
-      reviewerExists: true,
-      reviewerWake: {
-        status: 'unreachable',
-        detail:
-          '@reviewer is configured as reviewer but is not a current member of the parent Room, so the checks-passed transition cannot wake them.',
-      },
+      reviewer: null,
+      reviewerExists: false,
+      reviewerWake: { status: 'unconfigured' },
     });
   });
 

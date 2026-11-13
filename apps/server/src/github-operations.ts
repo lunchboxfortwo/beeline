@@ -649,7 +649,7 @@ export function challenge(value: string): string {
 }
 
 
-export type ReviewerWakeStatus = 'unconfigured' | 'unreachable' | 'waiting' | 'dispatched';
+export type ReviewerWakeStatus = 'unconfigured' | 'waiting' | 'dispatched';
 
 
 /** Whether the configured reviewer can be / was woken for this corner's current check state. */
