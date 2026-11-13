@@ -57,7 +57,15 @@ beforeEach(async () => {
   await reportPresence(REVIEWER_A, 'online');
   await reportPresence(REVIEWER_B, 'online');
   authors = [OWNER_AGENT]; incomplete = false; moved = false;
-  const app = { issuesRequest: vi.fn(async (_token: string, _repo: string, _method: string, path: string) => {
+  const app = {
+    readPullRequest: vi.fn(async (_token: string, _repo: string, number: number) => ({
+      number, url: `https://github.com/test/repo/pull/${number}`, headSha: moved ? '2'.repeat(40) : HEAD,
+      state: 'open', merged: false, mergeability: 'clean',
+    })),
+    readCommitCheckRollup: vi.fn(async () => ({
+      state: 'passed', total: 1, failing: [], checks: [{ name: 'typecheck', status: 'passed' }],
+    })),
+    issuesRequest: vi.fn(async (_token: string, _repo: string, _method: string, path: string) => {
     if (!path.includes('/commits?')) return { head: { sha: moved ? '2'.repeat(40) : HEAD }, commits: authors.length };
     const page = Number(new URL(`https://test/${path}`).searchParams.get('page') ?? 1);
     return incomplete ? [] : authors.slice((page - 1) * 100, page * 100).map(id => ({ commit: { author: { email: `${id.slice(0,16)}@users.noreply.github.com` },
@@ -65,6 +73,8 @@ beforeEach(async () => {
   }) };
   github = new GitHubOperations(db, {} as GitHubOAuthClient, app as unknown as GitHubAppClient, 'test');
   vi.spyOn(github, 'roomAnchorTarget').mockResolvedValue({ token: 'test', repository: 'test/repo', defaultBranch: 'main' });
+  vi.spyOn(github, 'roomWorkflowTarget').mockResolvedValue({ token: 'test', repository: 'test/repo', defaultBranch: 'main',
+    repository_id: '1', installation_id: '1' });
   // Head refresh has separate provider coverage; this fixture isolates reviewer selection.
   vi.spyOn(github, 'refreshCornerReviewHead').mockResolvedValue(undefined);
   phone = new PhoneService(db, 'http://test');
@@ -132,7 +142,9 @@ it('dispatches green review to the corner reviewer and projects its reviewer sur
   await set('reviewerb');
   const note = await systemLine(db, { roomId: C, authorId: H, subject: { kind: 'github', name: 'GitHub' }, verb: 'passed checks',
     kind: 'check-passed', object: { text: 'checks', headSha: HEAD } });
+  const liveChecks = vi.spyOn(github, 'prChecksStatus');
   await advanceCorner(db, C, { kind: 'checks', result: 'passing', sourceMessageId: note.id });
+  expect(liveChecks).toHaveBeenCalledWith({ cornerId: C });
   const commands = await daemon.execute('getAgentCommands', { roomId: C }, REVIEWER_B);
   expect(commands.commands.some(command => ['corner_review_dispatch','subscribed_event'].includes(command.reason))).toBe(true);
   expect((await daemon.execute('getAgentCommands', {roomId:C}, REVIEWER_A)).commands).toEqual([]);
