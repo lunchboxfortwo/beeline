@@ -164,6 +164,7 @@ export async function migrate(
       await retireOrphanRoomMemberships(tx);
     }));
   });
+  await ddlScript('retired membership alias', 'DROP VIEW IF EXISTS effective_memberships;');
   await ddlScript('machine Squire source', SQUIRE_MACHINE_SCHEMA);
   await ddlScript('workspace handles', WORKSPACE_HANDLE_SCHEMA);
   await ddlScript('chat message numbers', CHAT_SEQ_SCHEMA);

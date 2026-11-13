@@ -8,5 +8,10 @@ The server leg applies these files only after both Machines serve the new
 image. Each statement must be a single `ALTER TABLE` column drop with `IF EXISTS`.
 Other migrations remain on the existing predeployment path.
 
-The retired owner and star milestone columns remain compatibility storage;
-this release deliberately has no column contracts.
+`workspace-members.sql` belongs to the release after the membership no-reader
+cleanup. It removes only the retired free/MCP Workspace fields; ordinary
+`memberships` rows and agent lifecycle/connection metadata stay intact. The
+same release's normal migration removes the unused `effective_memberships`
+view alias. The canonical `room_access` projection remains.
+
+The retired owner and star milestone columns remain compatibility storage.
