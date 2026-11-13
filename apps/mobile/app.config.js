@@ -72,7 +72,7 @@ export default {
         scheme,
         userInterfaceStyle: "automatic",
         ios: {
-            runtimeVersion: runtimeVersionOverride || "40",
+            runtimeVersion: runtimeVersionOverride || "41",
             // Keep the launcher identity stable across system appearance modes.
             // iOS masks this full-size source; only Android adaptive layers need
             // the separately inset safe-zone treatment.
@@ -107,14 +107,14 @@ export default {
             }
         },
         android: {
-            runtimeVersion: runtimeVersionOverride || "52",
+            runtimeVersion: runtimeVersionOverride || "53",
             versionCode: 27,
             adaptiveIcon: {
                 foregroundImage: "./sources/assets/images/icon-adaptive.png",
-                // Owner-final treatment: brass loop on a flat aubergine field. Keep the
+                // Stone ink loop on a full-bleed Stone paper field. Keep the
                 // fallback in sync if a toolchain drops the generated background image.
                 backgroundImage: "./sources/assets/images/icon-adaptive-background.png",
-                backgroundColor: "#14091A",
+                backgroundColor: "#f5f5f4",
                 monochromeImage: "./sources/assets/images/icon-adaptive-monochrome.png"
             },
             permissions: [
