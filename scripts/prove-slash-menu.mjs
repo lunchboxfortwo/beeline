@@ -7,7 +7,7 @@ import { createRequire } from 'node:module';
 import { resolve } from 'node:path';
 import { build } from 'esbuild';
 import { chromium } from 'playwright';
-import { beelineThemes } from '../apps/mobile/sources/buzz/groknight.ts';
+import { beelineThemes, stonePalette } from '../apps/mobile/sources/buzz/groknight.ts';
 import { agentCommandCatalogPublisher } from '../apps/body/src/agent-command-catalog.ts';
 const root = resolve(import.meta.dirname, '..');
 // Keep the original reproduction usable after the fix is committed.
@@ -58,9 +58,9 @@ createRoot(document.getElementById('root')).render(<main><h2>Commands · Grunt</
    b.onLoad({filter:/.*/,namespace:'adapter'},()=>({contents:adapters,loader:'tsx',resolveDir:root}));
    if(phase==='before')b.onLoad({filter:/(SlashVerbPicker|MonoMarkdown|Suggestions)\.tsx$/},a=>({contents:execFileSync('git',['show',`${baseline}:${a.path.slice(root.length+1)}`],{encoding:'utf8'}),loader:'tsx',resolveDir:resolve(a.path,'..')}));
   }}]});
-  for(const [device,width] of [['phone',390],['web',1280]])for(const theme of ['bone','obsidian']){
+  for(const [device,width] of [['phone',390],['web',1280]])for(const theme of ['light','dark']){
    const page=await browser.newPage({viewport:{width,height:820}});
-   const palette=beelineThemes[theme];
+   const palette={...beelineThemes[theme === 'light' ? 'bone' : 'obsidian'], ...stonePalette[theme]};
    await page.setContent(`<style>@font-face{font-family:Space;src:url(data:font/ttf;base64,${font})}@font-face{font-family:Space;src:url(data:font/ttf;base64,${semibold});font-weight:600}body{--canvas:${palette.bgBase};--highlight:${palette.bgHighlight};--stroke:${palette.border};--secondary:${palette.textSecondary};background:var(--canvas);color:${palette.textPrimary};font:16px/23px Space;margin:0}main{max-width:620px;margin:32px auto;padding:16px}button{font-family:inherit;color:inherit;text-align:left}p{font-size:13px;color:var(--secondary)}#message{margin:32px 0;overflow-wrap:normal}#long{overflow-wrap:anywhere;max-width:200px;margin:16px 0;font-size:13px;line-height:19px}footer{border:1px solid var(--stroke);padding:16px;border-radius:8px}h2{font-size:24px}</style><div id="root"></div>`);
    await page.addScriptTag({content:bundle.outputFiles[0].text});
    await page.getByTestId('slash-verb-picker').waitFor();
