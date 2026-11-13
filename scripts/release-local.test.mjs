@@ -7,7 +7,7 @@ import { join, resolve } from 'node:path';
 import test from 'node:test';
 import { parse } from 'yaml';
 import { LocalActions, matrixRows } from './release-local-actions.mjs';
-import { attribution, loadEnvironment, localHooks, parseArguments } from './release-local.mjs';
+import { attribution, loadEnvironment, localHooks, missingReleaseCredentials, parseArguments } from './release-local.mjs';
 import { condition, evaluate, readCommandFile, render } from './release-local-expressions.mjs';
 import { Processes } from './release-local-process.mjs';
 import { mergeBeelineBundles } from './merge-beeline-bundles.mjs';
@@ -27,6 +27,54 @@ test('execution is explicit and requires immutable identity and complete attribu
   assert.throws(() => attribution('{}'), /agentId/);
   const provenance = Object.fromEntries(['agentId', 'handle', 'place', 'humanCommandMessageId', 'auditMessageId'].map(k => [k, k]));
   assert.deepEqual(attribution(JSON.stringify(provenance)), provenance);
+});
+test('Play credentials are optional for OTA and required only for selected native Android delivery', async () => {
+  const args = { channel: 'next' };
+  assert.equal(missingReleaseCredentials(args, {}).includes('GOOGLE_PLAY_SERVICE_ACCOUNT_JSON'), false);
+  assert.equal(missingReleaseCredentials(args, {}, { run_mobile_native: 'true', native_android: 'false' }).includes('GOOGLE_PLAY_SERVICE_ACCOUNT_JSON'), false);
+  assert.equal(missingReleaseCredentials(args, {}, { run_mobile_native: 'true', native_android: 'true' }).includes('GOOGLE_PLAY_SERVICE_ACCOUNT_JSON'), true);
+  const policy = localHooks(tmpdir(), new Processes({}, () => {}));
+  const context = { secrets: {} }, step = { name: 'Produce the inspectable release plan' };
+  await policy.afterStep({ step, context, result: { outputs: { run_mobile_native: 'false', native_android: 'true' } } });
+  await assert.rejects(policy.afterStep({ step, context, result: { outputs: { run_mobile_native: 'true', native_android: 'true' } } }), /GOOGLE_PLAY_SERVICE_ACCOUNT_JSON/);
+  context.secrets.GOOGLE_PLAY_SERVICE_ACCOUNT_JSON = 'test-only-key';
+  await policy.afterStep({ step, context, result: { outputs: { run_mobile_native: 'true', native_android: 'true' } } });
+});
+test('Node selection honors an installed compatible repository pin through fnm', async () => {
+  const directory = temporary(), calls = [];
+  try {
+    writeFileSync(join(directory, '.nvmrc'), '22\n');
+    const processes = new Processes({}, () => {});
+    processes.run = async (command, args) => { calls.push([command, args]); return JSON.stringify({ version: '22.23.2', path: '/installed/node22/bin/node' }); };
+    const engine = new LocalActions({ root: directory, directory, secrets: {}, processes });
+    const selected = await engine.nodeEnvironment({ PATH: '/operator/bin' });
+    assert.equal(calls[0][0], 'fnm');
+    assert.deepEqual(calls[0][1].slice(0, 4), ['exec', '--using', '22', 'node']);
+    assert.equal(selected.PATH, '/installed/node22/bin:/operator/bin');
+    writeFileSync(join(directory, '.nvmrc'), '20.11.0\n');
+    writeFileSync(join(directory, 'package.json'), JSON.stringify({ engines: { node: '24.16.0' } }));
+    await engine.nodeEnvironment({ PATH: '/operator/bin' });
+    assert.deepEqual(calls[1][1].slice(0, 4), ['exec', '--using', '24.16.0', 'node']);
+  } finally { rmSync(directory, { recursive: true, force: true }); }
+});
+test('local setup-node accepts Node 24 without fnm and rejects Node below 22', async () => {
+  const directory = temporary();
+  try {
+    writeFileSync(join(directory, '.nvmrc'), '20.11.0\n');
+    writeFileSync(join(directory, 'package.json'), JSON.stringify({ engines: { node: '>=20.11.0' } }));
+    let version = '24.16.0';
+    const processes = new Processes({}, () => {});
+    processes.run = async command => {
+      if (command === 'fnm') throw new Error('not installed');
+      return JSON.stringify({ version, path: '/installed/node/bin/node' });
+    };
+    const engine = new LocalActions({ root: directory, directory, secrets: {}, processes });
+    const context = { env: { PATH: '/operator/bin' }, job: { status: 'success' } };
+    await engine.action({ uses: 'actions/setup-node@v4', with: { 'node-version': '22' } }, context, context.env, { outputs: {} }, 1000);
+    assert.equal(context.env.PATH, '/installed/node/bin:/operator/bin');
+    version = '20.19.6';
+    await assert.rejects(engine.nodeEnvironment({ PATH: '/operator/bin' }), /requires Node >=22/);
+  } finally { rmSync(directory, { recursive: true, force: true }); }
 });
 test('secret input is private data outside the checkout, never shell execution', () => {
   const directory = temporary(), env = join(directory, 'release.env');

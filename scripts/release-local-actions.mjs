@@ -9,6 +9,18 @@ import { appendSummary, privateWrite, readOptional } from './release-local-proce
 
 const SUPPORTED = /^(actions\/(checkout|setup-node|setup-java|github-script|upload-artifact|download-artifact|cache)(\/restore|\/save)?@v\d+|docker\/login-action@v3|dtolnay\/rust-toolchain@[^\s]+)$/;
 
+function preferredNode(root, requested) {
+  const pin = readOptional(join(root, '.nvmrc')).trim();
+  // fs.globSync requires Node 22. An older project minimum cannot downgrade
+  // this release runner below its own floor.
+  if (/^v?\d+(?:\.\d+){0,2}$/.test(pin) && Number(pin.replace(/^v/, '').split('.')[0]) >= 22) return pin;
+  const manifest = readOptional(join(root, 'package.json'));
+  const engine = manifest ? JSON.parse(manifest).engines?.node : '';
+  const major = /^(?:>=|\^|~|v)?\s*(\d+)/.exec(engine ?? '')?.[1];
+  if (/^v?\d+(?:\.\d+){0,2}$/.test(engine ?? '') && Number(major) >= 22) return engine;
+  return Number(major) >= 22 ? major : requested;
+}
+
 export function matrixRows(matrix = {}) {
   let rows = [{}];
   for (const [key, values] of Object.entries(matrix).filter(([k]) => !['include', 'exclude'].includes(k))) {
@@ -28,11 +40,25 @@ export class LocalActions {
     this.cancelled = false;
     this.abortController = new AbortController();
     // Do not leak the operator's production environment into test jobs.
-    this.baseEnv = Object.fromEntries(Object.entries(baseEnv).filter(([key]) => /^(PATH|LANG|LC_.*|ANDROID_HOME|ANDROID_SDK_ROOT|JAVA_HOME|SHELL|TMPDIR|RUSTUP_HOME|CARGO_HOME)$/.test(key)));
+    this.baseEnv = Object.fromEntries(Object.entries(baseEnv).filter(([key]) => /^(PATH|LANG|LC_.*|ANDROID_HOME|ANDROID_SDK_ROOT|JAVA_HOME|SHELL|TMPDIR|RUSTUP_HOME|CARGO_HOME|FNM_DIR)$/.test(key)));
     if (baseEnv.HOME) {
       this.baseEnv.RUSTUP_HOME ||= join(baseEnv.HOME, '.rustup');
       this.baseEnv.CARGO_HOME ||= join(baseEnv.HOME, '.cargo');
+      this.baseEnv.FNM_DIR ||= baseEnv.FNM_DIR || join(baseEnv.HOME, '.local/share/fnm');
     }
+  }
+  async nodeEnvironment(env, requested = '22') {
+    const version = preferredNode(this.root, requested);
+    let selected;
+    const query = ['-p', 'JSON.stringify({version:process.versions.node,path:process.execPath})'];
+    const options = { env: { ...env, ...(this.baseEnv.FNM_DIR ? { FNM_DIR: this.baseEnv.FNM_DIR } : {}) }, quiet: true };
+    try {
+      selected = JSON.parse(await this.processes.run('fnm', ['exec', '--using', version, 'node', ...query], options));
+      if (Number(selected.version.split('.')[0]) < 22) selected = undefined;
+    } catch { /* fnm or the preferred installed version is unavailable. */ }
+    if (!selected) selected = JSON.parse(await this.processes.run('node', query, options));
+    if (Number(selected.version.split('.')[0]) < 22) throw new Error(`Release runner requires Node >=22; found ${selected.version}`);
+    return { ...env, ...options.env, PATH: `${dirname(selected.path)}:${env.PATH}` };
   }
   read(file) { return parse(readFileSync(resolve(this.root, file), 'utf8')); }
   inspect(file, visited = new Set()) {
@@ -226,7 +252,9 @@ export class LocalActions {
       result.outputs['cache-hit'] = 'false';
       result.outputs['cache-primary-key'] = inputs.key ?? '';
     } else if (name.startsWith('actions/setup-node@')) {
-      await this.processes.run('node', ['-e', `if(process.versions.node.split('.')[0]!==${JSON.stringify(inputs['node-version'] || '22')})process.exit(1)`], { env, quiet: true });
+      const selected = await this.nodeEnvironment(env, inputs['node-version'] || '22');
+      context.env.PATH = selected.PATH;
+      if (selected.FNM_DIR) context.env.FNM_DIR = selected.FNM_DIR;
     } else if (name.startsWith('actions/setup-java@')) {
       await this.processes.run('bash', ['-c', 'java -version 2>&1 | head -1 | grep -F "\\\"$1"', 'java-version', inputs['java-version']], { env, quiet: true });
     } else if (name.startsWith('dtolnay/rust-toolchain@')) {

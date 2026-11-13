@@ -43,7 +43,8 @@ squire secret file. Provision the remaining workflow authorities separately:
 | `BEELINE_GITHUB_APP_ID`, `BEELINE_GITHUB_APP_PRIVATE_KEY` | Repository-scoped identity reservation token |
 | `FLY_FREE_AGENT_IMAGE_TOKEN`, `MIGRATION_DATABASE_URL` | Next server image publication and migration |
 | `SERVER_CANARY_REVIEW_SECRET` or legacy `SERVER_CANARY_PHONE_TOKEN`, `SERVER_CANARY_ROOM_ID` | Next authenticated server canary |
-| `GOOGLE_PLAY_SERVICE_ACCOUNT_JSON`, `EXPO_ASC_KEY_ID`, `EXPO_ASC_ISSUER_ID`, `EXPO_ASC_API_KEY_P8` | Live store-runtime reads for OTA |
+| `GOOGLE_PLAY_SERVICE_ACCOUNT_JSON` | Required only when the release plan selects a native Android store build; optional for OTA store-runtime reads |
+| `EXPO_ASC_KEY_ID`, `EXPO_ASC_ISSUER_ID`, `EXPO_ASC_API_KEY_P8` | Live App Store runtime reads for OTA |
 | `SENTRY_AUTH_TOKEN` | OTA source maps; required for latest web app delivery |
 | `BEELINE_REVIEW_SECRET` | Explicit `--run-release-proof` device proof |
 | `BEELINE_RELEASE_NOTIFY_SECRET` | Existing best-effort release notification |
@@ -55,7 +56,7 @@ Keep vaulted keys vaulted; suitable provider API calls can use Squire's
 `use_credential`. A CLI requiring a raw credential needs a provider-issued
 local credential or approved secure injection, not plaintext vault retrieval.
 
-Run from a clean checkout of the exact commit on `origin/main`, using Node 22,
+Run from a clean checkout of the exact commit on `origin/main`, using Node 22 or newer,
 the pinned Rust toolchain, Docker, Fly, gh, gh-axi and SSH tools. The Mac needs
 Git, curl, tar, shasum, rustup and its normal compiler/SDK. The controller downloads
 checksum-verified Node 22.23.2 and installs Rust 1.95.0 into the task's remote
@@ -64,6 +65,12 @@ temporary directory, without changing shared host tools or toolchain defaults.
 shallow-fetches shared history. It checks for active
 hosted releases and holds a local per-user release lock. A stale lock is an
 operator recovery decision; it is never automatically removed.
+
+When available, fnm selects an installed Node version using a compatible
+`.nvmrc` or `engines.node` preference. Older repository pins cannot lower the
+runner below Node 22; otherwise an installed Node 22 or newer is accepted.
+The same policy applies to local `setup-node` steps, so squire's Node 24
+does not fail later after passing preflight.
 
 ```sh
 node scripts/release-local.mjs --dry-run --leg require-tools
