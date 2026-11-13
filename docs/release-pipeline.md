@@ -86,6 +86,16 @@ runner below Node 22; otherwise an installed Node 22 or newer is accepted.
 The same policy applies to local `setup-node` steps, so squire's Node 24
 does not fail later after passing preflight.
 
+Local `setup-java` selects an installed JDK matching the requested distribution
+and version, or runs the workflow's official `actions/setup-java` version with
+its inputs and a private tool cache. It exports `JAVA_HOME` and prepends the
+selected JDK's `bin` to subsequent steps. The hosted nightly Checks dispatch is
+reported as unavailable locally; the full local release Checks gate still runs.
+To execute that complete gate without reserving a release identity or delivering
+anything, use `--execute --leg release_checks --release-sha <full-main-commit>`
+with `--env-file` and a fresh `--state-dir`. This checks-only mode needs no
+dispatch receipt or delivery credentials.
+
 ```sh
 node scripts/release-local.mjs --dry-run --leg require-tools
 node scripts/release-local.mjs --dry-run --leg pages

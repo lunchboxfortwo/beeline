@@ -35,6 +35,7 @@ export function parseArguments(argv) {
   if (!['next', 'latest'].includes(args.channel)) throw new Error('channel must be next or latest');
   if (args['release-sha'] && !/^[0-9a-f]{40}$/.test(args['release-sha'])) throw new Error('release-sha must be a full commit SHA');
   if (args['mac-host'] !== MAC) throw new Error(`Only the authorized Mac build host ${MAC} is supported`);
+  if (args.leg && args.mode !== 'dry-run' && !(args.mode === 'execute' && args.leg === 'release_checks')) throw new Error('--leg requires --dry-run or --execute --leg release_checks');
   return args;
 }
 
@@ -186,6 +187,12 @@ export function localHooks(directory, processes) {
       }
     },
     step: async ({ step, context, env, result }) => {
+      if (context?.github?.job === 'nightly_checks' && step.name === 'Dispatch nightly checks for the released commit') {
+        const message = 'Nightly checks dispatch is not available during local recovery (GitHub Actions unavailable); release Checks run locally.';
+        processes.log(message);
+        appendSummary(env.GITHUB_STEP_SUMMARY, message);
+        return true;
+      }
       if (step.id === 'app_token' && context?.github?.job === 'initialize') {
         const token = context.github.token;
         if (!token) throw new Error('Local GitHub initialization requires GITHUB_TOKEN or GH_TOKEN');
@@ -318,9 +325,19 @@ export async function dryRun(args, engine, context) {
   engine.processes.log('Build proofs complete. Canary, migrations, live update proof and rollback were not exercised against production.');
 }
 
+export async function releaseChecks(engine, context) {
+  const call = engine.read(WORKFLOW).jobs.release_checks;
+  const inputs = engine.value(call.with, { ...context, needs: { initialize: { outputs: { release_sha: context.github.sha } } } });
+  const results = await engine.workflow(call.uses, inputs, context, 'release_checks/');
+  privateWrite(join(engine.directory, 'release-checks.json'), JSON.stringify(results, null, 2));
+  if (Object.values(results).some(result => result.result === 'failure')) throw new Error(`Release checks failed; inspect private results under ${engine.directory}`);
+  engine.processes.log('Release checks complete; no release identity reserved or delivery attempted.');
+  return results;
+}
+
 async function main(argv) {
   const args = parseArguments(argv);
-  if (args.help) { console.log('node scripts/release-local.mjs [--plan | --dry-run [--leg initialize|server|helper|mobile-ota|pages|web-app|eas-cli|require-tools|mac-tools] | --execute] --channel next|latest --release-sha <40-char SHA> --dispatched-by <audited JSON> [--env-file ~/.config/beeline-release.env] [--run-release-proof] [--state-dir /outside/repo]'); return; }
+  if (args.help) { console.log('node scripts/release-local.mjs [--plan | --dry-run [--leg initialize|server|helper|mobile-ota|pages|web-app|eas-cli|require-tools|mac-tools] | --execute [--leg release_checks]] --channel next|latest --release-sha <40-char SHA> --dispatched-by <audited JSON> [--env-file ~/.config/beeline-release.env] [--run-release-proof] [--state-dir /outside/repo]'); return; }
   if (args['remote-job']) { await remoteJob(args['remote-job']); return; }
   if (process.platform !== 'linux') throw new Error('Run the release controller on Linux squire');
   const sha = args['release-sha'] || execFileSync('git', ['rev-parse', 'HEAD'], { cwd: root, encoding: 'utf8' }).trim();
@@ -345,6 +362,12 @@ async function main(argv) {
     return;
   }
   if (args.mode === 'dry-run') { await dryRun(args, engine, context); return; }
+  if (args.leg === 'release_checks') {
+    if (!args['release-sha']) throw new Error('Release checks require an explicit immutable --release-sha');
+    if (execFileSync('git', ['rev-parse', 'HEAD'], { cwd: root, encoding: 'utf8' }).trim() !== sha) throw new Error('Checkout HEAD must equal release-sha');
+    await releaseChecks(engine, context);
+    return;
+  }
   console.log('website not released: static Pages suspended; the selected EAS web app still runs.');
   console.log('Local policy: Apple-silicon helper and published desktop updater set are carried unchanged.');
   attribution(args['dispatched-by']);
