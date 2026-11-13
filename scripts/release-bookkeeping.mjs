@@ -176,7 +176,7 @@ export async function run(env = process.env, { fetchImpl = fetch, git = execFile
   }
   let jobs = [];
   try {
-    jobs = await readJobs(fetchImpl, {
+    jobs = env.BEELINE_LOCAL_RELEASE_RECORDS ? readJsonFile(env.BEELINE_LOCAL_RELEASE_RECORDS, []) : await readJobs(fetchImpl, {
       api, repository: env.GITHUB_REPOSITORY, runId: env.GITHUB_RUN_ID,
       attempt: env.GITHUB_RUN_ATTEMPT || '1', token: env.GH_TOKEN,
     });
@@ -197,6 +197,10 @@ export async function run(env = process.env, { fetchImpl = fetch, git = execFile
     version, sha, previous, needs, runId: env.GITHUB_RUN_ID, attempt: env.GITHUB_RUN_ATTEMPT || '1',
     merges, jobs, receipt, triggerEpoch: env.TRIGGER_EPOCH,
   });
+  if (env.BEELINE_LOCAL_RELEASE_ID) {
+    delete record.runId;
+    record.execution = { kind: 'local', id: env.BEELINE_LOCAL_RELEASE_ID };
+  }
   log(`release bookkeeping: ${record.merges.length} merge(s), ${record.stages.length} stage(s), owner receipt ${record.ownerReceipt.state}`);
 
   if (!env.INSIGHTS_TOKEN) {

@@ -44,9 +44,8 @@ runs:
     - name: Install mobile dependencies and build SDKs
       shell: bash
       working-directory: apps/mobile
-      run: |
-        bash ../../scripts/npm-ci-timed.sh
-        npm run eas-build-post-install
+      run: |-
+        bash "$GITHUB_WORKSPACE/scripts/release-steps/mobile-ota-leg.sh" step0
     - name: Read the live store runtimes
       shell: bash
       working-directory: apps/mobile
@@ -54,15 +53,8 @@ runs:
         EXPO_TOKEN_SECRET: ${{ inputs.expo_token }}
         OTA_MEMORY: ${{ inputs.ota_memory }}
         BEELINE_RELEASE_CHANNEL: ${{ inputs.channel }}
-      run: |
-        set -euo pipefail
-        if [ -n "$EXPO_TOKEN_SECRET" ]; then export EXPO_TOKEN="$EXPO_TOKEN_SECRET"; fi
-        mkdir -p "$RUNNER_TEMP/ota"
-        memory="${OTA_MEMORY:-}"
-        [ -n "$memory" ] || memory='{}'
-        export OTA_MEMORY="$memory"
-        node ../../scripts/release-job-output.mjs OTA_MEMORY "$RUNNER_TEMP/ota/memory.json"
-        node scripts/ota-release.mjs targets --memory "$RUNNER_TEMP/ota/memory.json" --output "$RUNNER_TEMP/ota/targets.json"
+      run: |-
+        bash "$GITHUB_WORKSPACE/scripts/release-steps/mobile-ota-leg.sh" step1
     - name: Publish every live runtime and move the requested channel
       id: publish
       shell: bash
@@ -74,28 +66,11 @@ runs:
         RELEASE_VERSION: ${{ inputs.release_version }}
         BRANCH: ${{ format('release-{0}', inputs.release_version) }}
         CHANNEL: ${{ inputs.channel }}
-      run: |
-        set -euo pipefail
-        if [ -n "$EXPO_TOKEN_SECRET" ]; then export EXPO_TOKEN="$EXPO_TOKEN_SECRET"; fi
-        test -n "${EXPO_TOKEN:-}" || { echo "EXPO_TOKEN is unavailable" >&2; exit 2; }
-        started="$(date +%s)"
-        OTA_TMPDIR="$(mktemp -d)"
-        TMPDIR="$OTA_TMPDIR" node scripts/ota-release.mjs publish \
-          --sha "$RELEASE_SHA" --release-version "$RELEASE_VERSION" --branch "$BRANCH" \
-          --channel "$CHANNEL" --targets "$RUNNER_TEMP/ota/targets.json" \
-          --output "$RUNNER_TEMP/ota/published.json"
-        echo "OTA branch publish: $(( $(date +%s) - started ))s" >> "$GITHUB_STEP_SUMMARY"
+      run: |-
+        bash "$GITHUB_WORKSPACE/scripts/release-steps/mobile-ota-leg.sh" publish
     - name: Report the delivered branch identity
       id: facts
       shell: bash
       working-directory: apps/mobile
-      run: |
-        node --input-type=module - "$RUNNER_TEMP/ota" >> "$GITHUB_OUTPUT" <<'NODE'
-        import { readFileSync } from 'node:fs';
-        import { encodeReleaseOutput } from '../../scripts/release-job-output.mjs';
-        const facts = JSON.parse(readFileSync(`${process.argv[2]}/published.json`, 'utf8'));
-        console.log(`branch=${facts.branch}`);
-        console.log(`targets=${facts.targets.map(t => `${t.platform}@${t.runtimeVersion}`).join(',')}`);
-        if (facts.storeRuntime) console.log(`store_runtime=${encodeReleaseOutput({ previouslyLive: facts.storeRuntime.previouslyLive ?? [] })}`);
-        console.log(`completed_at=${Math.floor(Date.now() / 1000)}`);
-        NODE
+      run: |-
+        bash "$GITHUB_WORKSPACE/scripts/release-steps/mobile-ota-leg.sh" facts

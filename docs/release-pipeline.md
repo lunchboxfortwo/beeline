@@ -3,6 +3,94 @@
 `Unified production release` is the only workflow that releases current
 `main` to `next`, or promotes its last successful `next` release to `latest`. It is manually dispatched; merging to main starts no workflow.
 
+## Local recovery during an Actions outage
+
+`node scripts/release-local.mjs --plan` shows the local recovery path without
+running release commands. The runner reads the committed unified workflow,
+including its complete Checks dependency, release validation, composite steps,
+canary, helper download proof, optional device proof, rollback and finalization.
+The composite shell and github-script bodies live in `scripts/release-steps/`;
+Actions and the local runner call the same files. Jobs run sequentially through
+the existing dependency graph. Cache misses rebuild; unknown action types fail.
+
+The temporary outage policy is explicit: **website not released** means static
+GitHub Pages is left serving its published site. The selected EAS web app leg
+still exports, uploads private source maps, deploys and verifies its canonical
+origin. The published Apple-silicon helper archive is carried byte for byte,
+with its original per-platform commit/version/checksum and a `carriedFrom`
+record; Linux and Intel Mac helpers build and prove their new bytes. The Intel
+job runs over SSH on `dani@100.104.88.126` in a private `/tmp/beeline-release-*`
+build directory. It never uses the host's checkout, Pictures or existing keys.
+
+The desktop updater manifest has one version for all platforms. Local recovery
+carries the complete published signed desktop installer set, including Windows,
+and its existing desktop version. This prevents unchanged Windows bytes from
+being offered as a newer desktop version. The normal hosted pipeline retains
+its native builds and Pages deployment. Remove the local exceptions when
+Actions recovers; do not run hosted and local releases together.
+
+Local credentials come only from `~/.config/beeline-release.env` (or an explicit
+`--env-file` outside the checkout), owned by the operator with mode `600`.
+Use `KEY=value` records; JSON double-quoted values support embedded newlines.
+The file is parsed as data, never sourced. Do not commit or print it. Local
+publication uses `NPM_AUTOMATION_TOKEN` in a private job npmrc; hosted
+publication retains OIDC. Populate `GITHUB_TOKEN` from the existing gh login,
+`FLY_API_TOKEN` from the authorized Fly login, and `EXPO_TOKEN` from the existing
+squire secret file. Provision the remaining workflow authorities separately:
+
+| Authority | Used by |
+| --- | --- |
+| `BEELINE_GITHUB_APP_ID`, `BEELINE_GITHUB_APP_PRIVATE_KEY` | Repository-scoped identity reservation token |
+| `FLY_FREE_AGENT_IMAGE_TOKEN`, `MIGRATION_DATABASE_URL` | Next server image publication and migration |
+| `SERVER_CANARY_REVIEW_SECRET` or legacy `SERVER_CANARY_PHONE_TOKEN`, `SERVER_CANARY_ROOM_ID` | Next authenticated server canary |
+| `GOOGLE_PLAY_SERVICE_ACCOUNT_JSON`, `EXPO_ASC_KEY_ID`, `EXPO_ASC_ISSUER_ID`, `EXPO_ASC_API_KEY_P8` | Live store-runtime reads for OTA |
+| `SENTRY_AUTH_TOKEN` | OTA source maps; required for latest web app delivery |
+| `BEELINE_REVIEW_SECRET` | Explicit `--run-release-proof` device proof |
+| `BEELINE_RELEASE_NOTIFY_SECRET` | Existing best-effort release notification |
+| `BEELINE_INSIGHTS_TOKEN`, `MOBILE_OTA_OWNER_PUBKEY`, `MOBILE_OTA_RECEIPT_TOKEN` | Existing best-effort release bookkeeping |
+| `BEELINE_HELPER_SENTRY_DSN`, `BEELINE_MOBILE_SENTRY_DSN` | Public build configuration, corresponding to repository variables |
+
+The carried desktop set requires no new Apple signing or Tauri private keys.
+Keep vaulted keys vaulted; suitable provider API calls can use Squire's
+`use_credential`. A CLI requiring a raw credential needs a provider-issued
+local credential or approved secure injection, not plaintext vault retrieval.
+
+Run from a clean checkout of the exact commit on `origin/main`, using Node 22,
+the pinned Rust toolchain, Docker, Fly, gh, gh-axi and SSH tools. The Mac needs
+Git, curl, tar, shasum, rustup and its normal compiler/SDK. The controller downloads
+checksum-verified Node 22.23.2 and installs Rust 1.95.0 into the task's remote
+temporary directory, without changing shared host tools or toolchain defaults.
+`--dry-run --leg mac-tools` proves that setup alone. The runner never
+shallow-fetches shared history. It checks for active
+hosted releases and holds a local per-user release lock. A stale lock is an
+operator recovery decision; it is never automatically removed.
+
+```sh
+node scripts/release-local.mjs --dry-run --leg require-tools
+node scripts/release-local.mjs --dry-run --leg pages
+node scripts/release-local.mjs --execute --channel next \
+  --release-sha <full-main-commit> --dispatched-by '<server-recorded attribution JSON>' \
+  --state-dir /private/path/outside-the-checkout
+```
+
+The unchanged attribution fields are `agentId`, `handle`, `place`,
+`humanCommandMessageId` and `auditMessageId`. Preserve the server's audit receipt;
+the local runner does not mint a replacement human command or dispatch receipt.
+Only firstmate runs the first production recovery. `--channel latest` retains
+the successful-next promotion rules. `--run-release-proof` retains the original
+proof-before-promotion gate. Store submission remains `store_track=none`.
+
+`--dry-run` executes build-only commands; `--leg` limits their cost. Server builds
+an image without pushing, migrating or updating Machines. Helper builds the
+Linux archive and runs the existing installer proof. OTA exports locally;
+the web app exports and checks its worker/identity without uploading maps or
+deploying. The Pages leg only builds static files. These are build proofs,
+not evidence of a live canary, native Mac acceptance, channel publication or
+successful production rollback. Those steps remain in real execution. Private
+artifacts, summaries and job results stay outside Git, under `--state-dir`.
+Local release records identify their execution as local and record all carries;
+they do not claim a GitHub Actions run ID.
+
 ## Release tests and PR selection
 
 A PR runs the tests selected for its affected modules and every correctness
