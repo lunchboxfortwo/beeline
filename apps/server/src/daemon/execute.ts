@@ -16,6 +16,7 @@ import { daemonAccess,daemonReviewSourceAccess } from './access.js';
 import type { DaemonContext } from './context.js';
 import { daemonPostCornerMessage,daemonReach,daemonWriteResult } from './corner-messages.js';
 import { daemonAuthorizeScopedGrant } from './grants.js';
+import { recordReportedReviewApproval } from './corner-reads.js';
 import { daemonPostRoomMessage } from './messages.js';
 import { daemonExecuteOperation } from './operations.js';
 import { daemonTurnReceipt } from './turn-receipts.js';
@@ -309,8 +310,15 @@ export async function daemonExecute<Name extends keyof DaemonOperationMap>(ctx: 
       ask: typeof value.ask === 'string' ? value.ask : undefined,
     });
     if (!('answered' in saved) || saved.answered!==false) {
-      const refresh=()=>ctx.reconcileZeroCheckWorkerCompletion(String(value.roomId),agentId)
-        .catch(error=>console.warn('[answer] optional lifecycle refresh omitted:',error));
+      const refresh=async()=>{
+        await Promise.all([
+          ctx.reconcileZeroCheckWorkerCompletion(String(value.roomId),agentId)
+            .catch(error=>console.warn('[answer] optional lifecycle refresh omitted:',error)),
+          name==='report' && value.status==='done' && /^\s*PASS\b/.test(String(value.text ?? '')) && typeof value.requestId==='string'
+            ? recordReportedReviewApproval(ctx,agentId,value.requestId)
+              .catch(error=>console.warn('[answer] optional reviewer approval omitted:',error)) : Promise.resolve(),
+        ]);
+      };
       const background=CornerAccessDatabase.physical(ctx.database).backgroundWork;
       if (background) background.run(refresh); else void refresh();
     }

@@ -6,7 +6,7 @@ import { CornerAccessDatabase } from '../corner-access-database.js';
 import { recordAgentConnectedAfterNudge } from '../free-agent-warning.js';
 import { machineSquireReport } from '../squire-machine.js';
 import type { AgentPairingClaimView, InviteView } from '@beeline/api-contract/phone';
-import { assignSeededAgentIdentity, uniqueAgentHandle, isCommunityInviteToken, resolveFace } from '@beeline/api-contract/phone';
+import { assignSeededAgentIdentity, isCommunityInviteToken, resolveFace } from '@beeline/api-contract/phone';
 import { type SqlDatabase } from '../database.js';
 import { ensureInvitedWorkspaceMembership, restoreInvitedWorkspaceMembership, joinRooms } from '../membership-join.js';
 import { grantSquireToOwnerMachineAgents } from '../workbench.js';
@@ -336,6 +336,10 @@ import { hash, unix, normalizeAgentName, CONNECT_RENAME_WINDOW_MS } from './valu
   }): Promise<{ status: 'renamed'; agentName: string } | { status: 'not_found' | 'expired' }> {
     const name = normalizeAgentName(input.name);
     return ctx.database.transaction(async (database) => {
+      const place = (await database.query<{ workspace_id: string }>(
+        `SELECT workspace_id FROM agent_pairing_codes WHERE code_hash=$1`, [hash(input.code)])).rows[0];
+      if (!place) return { status: 'not_found' };
+      await database.query(`SELECT id FROM workspaces WHERE id=$1 FOR UPDATE`, [place.workspace_id]);
       const pairing = (
         await database.query<{
           claimed_by: string | null;
@@ -347,8 +351,19 @@ import { hash, unix, normalizeAgentName, CONNECT_RENAME_WINDOW_MS } from './valu
         )
       ).rows[0];
       if (!pairing?.claimed_by || !pairing.claimed_at) return { status: 'not_found' };
+      if (!(await database.query(`SELECT 1 FROM memberships WHERE workspace_id=$1 AND identity_id=$2
+        AND room_id IS NULL AND removed_at IS NULL`, [pairing.workspace_id,pairing.claimed_by])).rowCount)
+        return { status: 'not_found' };
       if (Date.now() - pairing.claimed_at.getTime() > CONNECT_RENAME_WINDOW_MS)
         return { status: 'expired' };
+      // The wizard's final name owns the first address. Later app renames keep
+      // their established address; only this fresh pairing can replace its seed.
+      await database.query(`DELETE FROM workspace_handles WHERE workspace_id=$1 AND identity_id=$2`,
+        [pairing.workspace_id, pairing.claimed_by]);
+      await database.query(`UPDATE identities SET workspace_handle_base=$2 WHERE id=$1`,
+        [pairing.claimed_by, agentHandleFromName(name)]);
+      await database.query(`SELECT beeline_assign_workspace_handle($1,$2)`,
+        [pairing.claimed_by, pairing.workspace_id]);
       await database.query(`UPDATE identities SET name=$2,updated_at=now() WHERE id=$1`, [
         pairing.claimed_by,
         name,
@@ -375,8 +390,12 @@ import { hash, unix, normalizeAgentName, CONNECT_RENAME_WINDOW_MS } from './valu
     code: string;
     workspaceJoined: boolean;
     eventSubscriptions?: readonly string[];
-  }): Promise<{ status: 'finished' } | { status: 'not_found' | 'expired' }> {
+  }): Promise<{ status: 'finished'; agentHandle: string } | { status: 'not_found' | 'expired' }> {
     return ctx.database.transaction(async (database) => {
+      const place = (await database.query<{ workspace_id: string }>(
+        `SELECT workspace_id FROM agent_pairing_codes WHERE code_hash=$1`, [hash(input.code)])).rows[0];
+      if (!place) return { status: 'not_found' };
+      await database.query(`SELECT id FROM workspaces WHERE id=$1 FOR UPDATE`, [place.workspace_id]);
       const pairing = (
         await database.query<{
           claimed_by: string | null;
@@ -390,6 +409,9 @@ import { hash, unix, normalizeAgentName, CONNECT_RENAME_WINDOW_MS } from './valu
         )
       ).rows[0];
       if (!pairing?.claimed_by || !pairing.claimed_at) return { status: 'not_found' };
+      if (!(await database.query(`SELECT 1 FROM memberships WHERE workspace_id=$1 AND identity_id=$2
+        AND room_id IS NULL AND removed_at IS NULL`, [pairing.workspace_id,pairing.claimed_by])).rowCount)
+        return { status: 'not_found' };
       if (Date.now() - pairing.claimed_at.getTime() > CONNECT_RENAME_WINDOW_MS)
         return { status: 'expired' };
       const joined = await joinRooms(database, {
@@ -407,6 +429,8 @@ import { hash, unix, normalizeAgentName, CONNECT_RENAME_WINDOW_MS } from './valu
       if (subscriptions.length && joined.roomIds.length) {
         for (const roomId of joined.roomIds) await setRoomEventSubscriptions(database, roomId, pairing.claimed_by, subscriptions);
       }
-      return { status: 'finished' };
+      const address = await database.query<{ handle: string }>(
+        `SELECT beeline_workspace_handle($1,$2) handle`, [pairing.claimed_by, pairing.workspace_id]);
+      return { status: 'finished', agentHandle: address.rows[0]!.handle };
     });
   }

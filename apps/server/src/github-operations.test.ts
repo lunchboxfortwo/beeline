@@ -1,5 +1,6 @@
 import { createHash, describe, expect, it, vi, cornerRunStateSql, generateKeyPair, exportPKCS8, GitHubAppClient, GitHubHttpError, GitHubOAuthClient, seedCornerOpening, setCornerOwner, GitHubOperations, readAgentCommands, DaemonService, LiveHub, PhoneService, readRoomView, HUMAN, REVIEWER, fixtureScope1, type SqlDatabase } from './test-support-github-operations.test-support.js';
 import { readFileSync } from 'node:fs';
+import { reconcileConfiguredCornerReviewers } from './agent-command-reconcile-configured-corner-reviewers.js';
 import { runInNewContext } from 'node:vm';
 import { transformSync } from 'esbuild';
 
@@ -402,6 +403,77 @@ const scope1 = fixtureScope1();
     });
 
 
+  it('Reproduction CHECKS-LIVE-1: after a missed push webhook, a live read shows GitHub\'s finished checks and opens the gate', async () => {
+      const cause = 'missed push webhook';
+      const { corners, app, payload, headSha } = await scope1.checksFixture();
+      const corner = corners[0]!;
+      await scope1.database.query(`UPDATE corner_github_cache SET lifecycle=jsonb_set(jsonb_set(lifecycle,
+        '{pr,title}','"Fix checks"'),'{pr,targetBranch}','"main"') WHERE corner_id=$1`, [corner]);
+      await scope1.database.query(`INSERT INTO memberships(workspace_id,room_id,identity_id,role)
+        SELECT workspace_id,id,$2,'member' FROM rooms WHERE id=$1`, ['22222222-2222-4222-8222-222222222222', HUMAN]);
+      await scope1.database.query(`INSERT INTO memberships(workspace_id,identity_id,role)
+        VALUES('11111111-1111-4111-8111-111111111111',$1,'owner')`, [HUMAN]);
+      const operations = new GitHubOperations(scope1.database, {} as GitHubOAuthClient,
+        app as unknown as GitHubAppClient, 'secret');
+      const phone = new PhoneService(scope1.database, 'http://local.test');
+      const line = async () => checkStatusLine(readRoomView(await phone.readRoom(corner, HUMAN))!.cornerLifecycle);
+      const green = { state: 'passed', total: 2, failing: [], checks: [{ name: 'lint', status: 'passed' }, { name: 'tests', status: 'passed' }] };
+      app.readCommitCheckRollup.mockResolvedValue(green);
+      await operations.processWebhook('check_run', payload);
+      expect(await line()).toBe('PR #1 · all 2 tests passed');
+      const liveHead = '2'.repeat(40);
+      const previous = await app.readPullRequest('room-token', 'owner/widgets', 1);
+      app.readPullRequest.mockResolvedValue({ ...previous, headSha: liveHead });
+      const status = await operations.prChecksStatus({ cornerId: corner });
+      console.info(`Reproduction CHECKS-LIVE-1 (${cause}): phone → ${await line()}; gate → ${status.blockedReason}`);
+      expect(status).toMatchObject({ checks: 'passed', headSha: liveHead });
+      expect(status.blockedReason).not.toMatch(/PR head changed|checks are/);
+      expect(await line()).toBe('PR #1 · all 2 tests passed');
+      expect((await scope1.database.query<{ head: string }>(
+        `SELECT lifecycle->'pr'->>'headSha' head FROM corner_github_cache WHERE corner_id=$1`, [corner])).rows[0]?.head).toBe(liveHead);
+    });
+
+
+  it.each([
+    ['configured reviewers', 'pending', 1, 'clean', false],
+    ['configured reviewers', 'pending', 0, 'clean', false],
+    ['configured reviewers', 'passed', 1, 'dirty', false],
+    ['attention', 'pending', 0, 'clean', false],
+    ['attention', 'passed', 1, 'dirty', false],
+    ['blockers', 'pending', 1, 'clean', false],
+    ['attention', 'passed', 1, 'clean', false],
+    ['attention', 'pending', 0, 'dirty', true],
+    ['attention', 'pending', 0, 'clean', true],
+  ] as const)('LIVE-WAKE: %s reconciliation reads live %s checks (%i contexts) and %s mergeability, confirmed zero=%s', async (trigger, state, total, mergeability, confirmedZero) => {
+    const { room, corners, app, headSha } = await scope1.checksFixture();
+    const corner = corners[0]!;
+    const worker = 'c'.repeat(64);
+    await scope1.database.query(`INSERT INTO identities(id,kind,name) VALUES($1,'agent','Worker')`, [worker]);
+    await scope1.database.query(`INSERT INTO agents(agent_id,owner_id) VALUES($1,$2)`, [worker, HUMAN]);
+    await scope1.database.query(`INSERT INTO memberships(workspace_id,room_id,identity_id,role)
+      SELECT workspace_id,id,$2,'member' FROM rooms WHERE id=$1`, [room, worker]);
+    await seedCornerOpening(scope1.database, { cornerId: corner, agentId: worker });
+    if (confirmedZero) await scope1.database.query(`UPDATE corner_github_cache SET lifecycle=jsonb_set(lifecycle,
+      '{checksSummary}','{"status":"passing","total":0,"checks":[],"failing":[]}'::jsonb) WHERE corner_id=$1`, [corner]);
+    app.readCommitCheckRollup.mockResolvedValue({ state, total, failing: [], checks: [] });
+    const pr = await app.readPullRequest('room-token', 'owner/widgets', 1);
+    app.readPullRequest.mockResolvedValue({ ...pr, mergeability });
+    new GitHubOperations(scope1.database, {} as GitHubOAuthClient, app as unknown as GitHubAppClient, 'secret');
+    if (trigger === 'configured reviewers') await reconcileConfiguredCornerReviewers(scope1.database, room);
+    else if (trigger === 'attention') {
+      const { refreshCornerAttention } = await import('./corner-attention.js');
+      await refreshCornerAttention(scope1.database, corner);
+    } else {
+      const { reconcileCornerMergeBlockers } = await import('./agent-command.js');
+      await reconcileCornerMergeBlockers(scope1.database, corner);
+    }
+    const reviews = await scope1.database.query(`SELECT review_context FROM agent_commands WHERE room_id=$1
+      AND reason='corner_review_dispatch' AND review_context->>'headSha'=$2`, [corner, headSha]);
+    expect(app.readCommitCheckRollup).toHaveBeenCalled();
+    expect(reviews.rowCount).toBe((state === 'passed' || confirmedZero) && mergeability === 'clean' ? 1 : 0);
+  });
+
+
   it('IDLE-DERIVED: identical GitHub reads retain the check status timestamp', async () => {
     const { corners, app, payload } = await scope1.checksFixture();
     const corner = corners[0]!;
@@ -481,6 +553,9 @@ const scope1 = fixtureScope1();
     app.readPullRequest.mockResolvedValue({ ...clean, mergeability: 'dirty' });
     await operations.processWebhook('check_run', payload);
     expect(await readLine()).toBe('PR #1 · merge conflict');
+    // The gate reads the same live verdict: GitHub would refuse this merge.
+    expect(await operations.prChecksStatus({ cornerId: corner })).toMatchObject({
+      mergeAllowed: false, blockedReason: expect.stringContaining('merge conflicts') });
     app.readPullRequest.mockResolvedValue(clean);
     await operations.refreshStaleMergeability(corner);
     expect(await readLine()).toBe('PR #1 · all 1 test passed');

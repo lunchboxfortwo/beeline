@@ -15,6 +15,30 @@ import { id, Input, Output, seconds } from './values.js';
 import { daemonIdentity, daemonAccess } from './access.js';
 import { daemonOfferContext } from './workbench.js';
 import { daemonWriteResult } from './corner-messages.js';
+import type { SqlDatabase } from '../database.js';
+
+
+  /**
+   * An approval card belongs where its turn ran, as a grant card does. When
+   * the person who decides it cannot read that place, it goes to their
+   * @System DM instead, so Room membership stays the read boundary.
+   */
+  async function approvalCardPlacement(database: SqlDatabase, workspaceId: string, deciderId: string, originRoomId: string) {
+    const decider = (await database.query<{ name: string; reads_origin: boolean }>(
+      `SELECT identity.name,EXISTS (SELECT 1 FROM room_access access JOIN rooms origin ON origin.id=access.room_id
+         WHERE access.room_id=$2 AND access.identity_id=identity.id AND access.removed_at IS NULL
+           AND origin.workspace_id=$3) reads_origin
+       FROM identities identity WHERE identity.id=$1`,
+      [deciderId, originRoomId, workspaceId],
+    )).rows[0];
+    if (!decider) throw new Error('resource owner access denied');
+    // System authors the card wherever it lands.
+    await ensureSystemIdentity(database);
+    const roomId = decider.reads_origin ? originRoomId
+      : await ensureSystemDirectMessageRoom(database, workspaceId, deciderId);
+    // Read projection gives Squire's page only to this person.
+    return { roomId, owner: { pubkey: deciderId, kind: 'human' as const, name: decider.name } };
+  }
 
 
   // Root provenance can cross Rooms or name a private command instead of a message.
@@ -32,8 +56,8 @@ import { daemonWriteResult } from './corner-messages.js';
 
   /**
    * Squire owns the decision and its passkey page. Beeline only places that
-   * page in the resource owner's @System DM so Telegram is not a
-   * prerequisite for seeing it.
+   * page where the request was made (or the resource owner's @System DM) so
+   * Telegram is not a prerequisite for seeing it.
    */
   export async function daemonLinkSpendApproval(ctx: DaemonContext, input: Input<'createLinkSpendRequest'>,
     agentId: string, ownerId: string, requestId: string, approvalUrl: string): Promise<void> {
@@ -50,13 +74,14 @@ import { daemonWriteResult } from './corner-messages.js';
       AND room_id IS NULL AND identity_id=$2 AND removed_at IS NULL`,
       [context.workspace_id, ownerId]);
     if (!member.rowCount) throw new Error('resource owner access denied');
-    const roomId = await ensureSystemDirectMessageRoom(ctx.database, context.workspace_id, ownerId);
+    const { roomId, owner } = await approvalCardPlacement(ctx.database, context.workspace_id, ownerId, input.roomId);
     const title = systemMessage("daemon-service.link-purchase-at", input.merchant);
     const detail = systemMessage("daemon-service.usd", (input.amount / 100).toFixed(2), input.description).slice(0, 500);
     const source = await daemonApprovalSource(ctx, 'squire-approval');
     const line = await systemLine(ctx.database, {
       id: createHash('sha256').update(`link-approval:${requestId}`).digest('hex'),
       roomId, authorId: SYSTEM_IDENTITY_ID,
+      requestId: ctx.authorizedCommand?.turn_request_id ?? undefined,
       subject: { kind: 'system', name: systemMessage("daemon-service.link") },
       verb: systemMessage("daemon-service.needs-your-approval-for"), object: title, consequence: detail,
       presentation: 'card', cardType: 'squire-approval',
@@ -64,7 +89,9 @@ import { daemonWriteResult } from './corner-messages.js';
         agent: { pubkey: agentId, kind: 'agent', name: context.agent_name,
           ...(context.agent_handle ? { handle: context.agent_handle } : {}),
           ...(context.agent_avatar ? { avatar: context.agent_avatar } : {}) },
+        owner,
         tool: 'Link', title, detail, approvalUrl, approvalId: requestId,
+        ...(ctx.authorizedCommand ? { commandId: ctx.authorizedCommand.id } : {}),
         linkKind: 'approval',
         expiresAt: Date.now() + 24 * 60 * 60_000,
         ...source,
@@ -134,7 +161,7 @@ import { daemonWriteResult } from './corner-messages.js';
       [context.workspace_id, context.owner_id],
     );
     if (!member.rowCount) throw new Error('resource owner access denied');
-    const roomId = await ensureSystemDirectMessageRoom(database, context.workspace_id, context.owner_id);
+    const { roomId, owner } = await approvalCardPlacement(database, context.workspace_id, context.owner_id, input.roomId);
     const dedupeKey = input.approvalId?.trim() || approvalUrl.toString();
     const messageId = createHash('sha256')
       .update(`squire-approval:v1:${context.workspace_id}:${agentId}:${dedupeKey}`)
@@ -162,6 +189,7 @@ import { daemonWriteResult } from './corner-messages.js';
       cardType: 'squire-approval',
       card: {
         agent,
+        owner,
         tool: input.tool.trim(),
         title: input.title.trim(),
         detail: input.detail.trim(),
@@ -200,8 +228,7 @@ import { daemonWriteResult } from './corner-messages.js';
   /**
    * Squire's own decision on a pending approval, relayed by the helper over
    * the task connection it kept alive for exactly this wait. Posted to the
-   * Room the turn actually ran in (never the @System DM `postSquireApproval`
-   * used, since a task-relay approval posts no DM card) with `kind:
+   * Room the turn actually ran in (never an @System DM fallback card) with `kind:
    * 'squire-approval-decided'` and `wakes: [agentId]`, so the agent's paused
    * turn resumes. Approved and denied pushes start one follow-up if that turn ended.
    */

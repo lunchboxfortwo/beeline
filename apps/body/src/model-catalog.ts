@@ -106,12 +106,29 @@ async function withAgentModelCatalog<T>(
     const { sessionId, raw: sessionRaw } = await client.sessionNew({
       cwd: scratchCwd,
     });
-    const raw = parseAdvertisedConfigOptions(
+    let raw = parseAdvertisedConfigOptions(
       sessionRaw,
       selection?.model,
       isGrokAgentCommand(agent),
     );
+    // Session defaults need not match the requested model. Select it before
+    // filtering: custom Pi providers can authenticate outside the env filter.
+    // A successful live setter is authoritative for this selected candidate.
+    if (selection?.model) {
+      raw = (await applyAgentModelSelectionWithUpdatedCatalog(
+        client, sessionId, raw, { model: selection.model },
+      )).options;
+    }
     const catalog = filterAgentModelCatalog(agent, raw, probeEnv);
+    if (selection?.model) {
+      const selected = raw.find((axis) => axis.category === 'model')?.options.find(
+        (choice) => choice.id === selection.model,
+      );
+      const model = catalog.find((axis) => axis.category === 'model');
+      if (selected && model && !model.options.some((choice) => choice.id === selected.id)) {
+        model.options = [...model.options, selected];
+      }
+    }
     const inspected = inspect({ client, sessionId, raw, catalog });
     return await inspected;
   } finally {

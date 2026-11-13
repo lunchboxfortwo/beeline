@@ -356,7 +356,7 @@ describe('app-authorized agent connect', () => {
     let finished: Parameters<typeof state.agentConnectFinish>[0] | undefined;
     state.agentConnectFinish = async (input) => {
       finished = input;
-      return { status: 'finished' };
+      return { status: 'finished', agentHandle: 'milo_2' };
     };
     const response = await app.inject({
       method: 'POST',
@@ -369,6 +369,7 @@ describe('app-authorized agent connect', () => {
       },
     });
     expect(response.statusCode).toBe(200);
+    expect(response.json()).toEqual({ ok: true, agent_handle: 'milo_2' });
     // Trimmed and lowercased here; the monolith drops anything not a real kind.
     expect(finished?.eventSubscriptions).toEqual(['joined', 'check-failed']);
     expect(finished?.workspaceJoined).toBe(true);

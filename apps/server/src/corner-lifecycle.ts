@@ -1,3 +1,4 @@
+import { readLiveCornerChecks } from './corner-live-checks.js';
 import { CornerLifecycleView } from '@beeline/api-contract/phone';
 import { SYSTEM_IDENTITY_ID } from '@beeline/api-contract/system-identity';
 import { systemMessage } from '@beeline/api-contract/system-message-catalog';
@@ -189,6 +190,13 @@ export async function advanceCorner(
   // another event's slow reads. A commit to the row in between changes its
   // version; the write then reads the newer facts and compares again.
   if (commit) return advanceCornerCommitted(database, cornerId, event, commit);
+  // Events can release an owed review long after its green webhook. Refresh
+  // before planning the wake; provider-backed commits already carry their read.
+  if (event.kind === 'reconcile' || event.kind === 'checks' || event.kind === 'approval' || event.kind === 'brief-revised') {
+    const cached = await loadCorner(database, cornerId, false);
+    if (!cached?.archived && cached?.lifecycle.pr && cached.lifecycle.checks === 'passing')
+      await readLiveCornerChecks(database, cornerId);
+  }
   for (;;) {
     const read = await readCornerAdvance(database, cornerId, event);
     if (!read) return { accepted: false, state: undefined };
@@ -406,23 +414,9 @@ async function writeCornerAdvance(
       const sourceId = event.kind === 'checks' ? event.sourceMessageId : checkSource?.id;
       switch (effect.kind) {
         case 'merge-conflict': {
-          const source =
-            event.kind === 'merge-conflict'
-              ? event.sourceMessageId
-              : (
-                  await systemLine(db, {
-                    id: createHash('sha256')
-                      .update(
-                        `beeline:${cornerId}:github:merge-conflict:${corner.lifecycle.pr?.number}:${head}`,
-                      )
-                      .digest('hex'),
-                    roomId: cornerId,
-                    authorId: corner.worker_agent_id ?? SYSTEM_IDENTITY_ID,
-                    subject: GITHUB_SUBJECT,
-                    verb: systemMessage('agent-command.found-merge-conflicts-in'),
-                    object: { text: corner.lifecycle.pr?.title ?? 'Pull request', headSha: head },
-                  })
-                ).id;
+          // The machine wakes this effect only for a live-read conflict event.
+          if (event.kind !== 'merge-conflict') break;
+          const source = event.sourceMessageId;
           const command = corner.worker_agent_id
             ? await createAgentCommand(db, {
                 roomId: cornerId,
@@ -493,7 +487,7 @@ async function writeCornerAdvance(
           }
           break;
         case 'review': {
-          const reviewer = await reachableReviewer(db, cornerId, corner, sourceId ?? cornerId);
+          const reviewer = reachableReviewer(corner);
           if (!reviewer) {
             result = await noteReviewBlocked(
               db,

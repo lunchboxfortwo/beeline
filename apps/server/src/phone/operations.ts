@@ -133,6 +133,7 @@ import { phoneReadConnectionDetail, phoneRevokeConnectionGrants } from './connec
           viewerId,
           input as Input<'answerStarPrompt'>,
           ctx.github,
+          [ctx.publicOrigin, ...(process.env.BEELINE_WEB_APP_ORIGINS ?? '').split(',').map(origin => origin.trim()).filter(Boolean)],
         )) as Output<Name>;
       case 'sendRoomMessage': {
         const sent = await phoneSendMessage(ctx, input as Input<'sendRoomMessage'>, viewerId, sourceClient, familyId);

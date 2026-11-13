@@ -25,7 +25,7 @@ import { daemonOwnedModelReady, daemonModelClaimCredentials } from './owned-mode
 import { daemonWriteResult } from './corner-messages.js';
 import { daemonPostRoomMessage } from './messages.js';
 import { daemonAccess } from './access.js';
-import { daemonLinkSpendApproval } from './approvals.js';
+import { daemonLinkSpendApproval, daemonSquireApprovalDecision } from './approvals.js';
 import { daemonGrantRequester } from './grants.js';
 import { daemonAgentWorkbench, daemonOfferContext } from './workbench.js';
 
@@ -298,6 +298,25 @@ export async function retrieveLinkSpendRequestOperation<Name extends keyof Daemo
           `SELECT owner_id FROM agents WHERE agent_id=$1`, [authenticatedAgentId])).rows[0];
         if (!owner) throw new Error('agent owner not found');
         const result = await ctx.linkWallet.retrieve(owner.owner_id, authenticatedAgentId, request.id);
+        // Provider reads settle the original approval, even when a later turn
+        // retrieves it from another Room. Provenance is not the asking turn.
+        if (result.status === 'approved' || result.status === 'denied' || result.status === 'expired') {
+          const approvals = await ctx.database.query<{ room_id: string; request_id: string; title: string; detail: string }>(
+            `SELECT spend.room_id,COALESCE(command.turn_request_id,message.request_id,
+               message.card->>'sourceMessageId',message.id) request_id,
+               message.card->>'title' title,message.card->>'detail' detail
+             FROM link_spend_requests spend JOIN messages message
+               ON message.card_type='squire-approval' AND message.card->>'approvalId'=spend.id
+               AND message.card->>'tool'='Link' AND message.card->'agent'->>'pubkey'=spend.agent_id
+               AND message.card->'owner'->>'pubkey'=spend.owner_identity_id
+             LEFT JOIN agent_commands command ON command.id=message.card->>'commandId'
+             WHERE spend.id=$1 AND spend.owner_identity_id=$2 AND spend.agent_id=$3`,
+            [request.id, owner.owner_id, authenticatedAgentId]);
+          for (const approval of approvals.rows) await daemonSquireApprovalDecision(ctx, {
+            roomId: approval.room_id, requestId: approval.request_id, approvalId: request.id,
+            status: result.status, tool: 'Link', title: approval.title, detail: approval.detail,
+          }, authenticatedAgentId);
+        }
         return { id: result.id, status: result.status,
           ...(result.approval_url ? { approvalUrl: result.approval_url } : {}),
           ...(result.status_details?.requires_action?.next_action ? { nextAction: {

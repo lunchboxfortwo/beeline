@@ -1,8 +1,7 @@
 import { systemMessage } from '@beeline/api-contract/system-message-catalog';
 import { MAX_ACCESS_ALLOWLIST_ENTRIES, agentAccessPolicyRecord, isAgentAccessPolicy } from '@beeline/api-contract/agent-access';
 import { retireAgentFromWorkspace } from '../agent-retirement.js';
-import { revokeDaemonCredentials } from '../daemon-credential-lifetime.js';
-import { removeIdentityMemberships } from '../membership-join.js';
+import { deleteUnrealizedAgent } from '../unrealized-agent.js';
 import { systemLine } from '../system-line.js';
 import type { PhoneContext } from './context.js';
 import { Input } from './types.js';
@@ -126,7 +125,7 @@ import { AGENT_OWNER_AUTHORITY_MESSAGE, ACCESS_POLICY_AUTHORITY_MESSAGE } from '
 
   /**
    * Roll back an agent registration whose connect helper never came up. Only
-   * an agent that has NEVER reported presence is unrealizable: anything else
+   * an agent that has NEVER reported presence or received work is unrealizable: anything else
    * is a real daemon and must be removed by a human through removeAgent.
    */
   export async function phoneRollbackUnrealizedAgent(ctx: PhoneContext, agentId: string) {
@@ -136,13 +135,7 @@ import { AGENT_OWNER_AUTHORITY_MESSAGE, ACCESS_POLICY_AUTHORITY_MESSAGE } from '
         [agentId],
       );
       if (!claimed.rowCount) throw new Error('pairing not found');
-      const ran = await database.query(
-        `SELECT 1 FROM live_outputs WHERE agent_id=$1 AND kind='presence' LIMIT 1`,
-        [agentId],
-      );
-      if (ran.rowCount) throw new Error('agent already ran; use removeAgent instead');
-      await revokeDaemonCredentials(database, agentId);
-      await removeIdentityMemberships(database, [agentId]);
+      await deleteUnrealizedAgent(database, agentId);
     });
   }
 

@@ -319,21 +319,6 @@ export function nextAgentDepth(parentDepth: number): number {
   return parentDepth + 1;
 }
 
-/** A reviewer reaches a corner through current parent Room membership. */
-export async function repairReviewerCornerMembership(
-  db: SqlDatabase, cornerId: string, reviewerAgentId: string,
-): Promise<boolean> {
-    db = new CornerAccessDatabase(db);
-  const member = await db.query(
-    `SELECT 1 FROM rooms corner JOIN memberships member ON member.room_id=corner.parent_id
-     JOIN identities identity ON identity.id=member.identity_id AND identity.kind='agent'
-     WHERE corner.id=$1 AND member.identity_id=$2 AND member.removed_at IS NULL`,
-    [cornerId, reviewerAgentId],
-  );
-  return member.rowCount > 0;
-}
-
-
 /** Exact-target eligibility shared by dispatch, the machine snapshot and delivery, including reports. */
 export function currentCornerCommandTargetSql(command: string): string {
   const corner = `COALESCE((${command}.review_context->>'cornerId')::uuid,${command}.room_id)`;

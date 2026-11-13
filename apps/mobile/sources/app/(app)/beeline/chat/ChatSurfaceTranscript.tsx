@@ -44,7 +44,7 @@ type Props = {
   holdPhoneLanding: (height: number) => void;
   phoneScrollList: import("@/buzz/transcript-scroll-controller").TranscriptScrollList & { scrollToIndexFailed(info: { averageItemLength: number; }): void; };
   loadOlderTranscriptIfReaderAsked: () => void;
-  starPrompt: { prompt: import("@beeline/api-contract/phone").StarPrompt | null; busy: import("@beeline/api-contract/phone").StarPromptAction | null; answer: (action: import("@beeline/api-contract/phone").StarPromptAction) => Promise<void>; accept: (view: { prompt: import("@beeline/api-contract/phone").StarPrompt | null; }) => void; };
+  starPrompt: ReturnType<typeof import('@/components/buzz/StarPromptCard').useStarPrompt>;
   loadOlderTranscriptMessages: () => void;
   desktopExperience: boolean;
   turnChromeTopInset: number;
@@ -266,14 +266,15 @@ export const ChatSurfaceTranscript = React.memo(function ChatSurfaceTranscript({
                   ListEmptyComponent={leadBlock ? <>{leadBlock}{emptyLedger}</> : emptyLedger}
                   // Inverted native list: the header is the newest end of the transcript.
                   ListHeaderComponent={
-                    starPrompt.prompt || transcriptForwardLine ? (
+                    starPrompt.prompt || starPrompt.starred || transcriptForwardLine ? (
                       <YStack>
                         {transcriptForwardLine}
-                        {starPrompt.prompt ? (
+                        {starPrompt.prompt || starPrompt.starred ? (
                           <YStack paddingTop="4">
                             <StarPromptCard
                               prompt={starPrompt.prompt}
                               busy={starPrompt.busy}
+                              starred={starPrompt.starred}
                               onAnswer={(action) => void starPrompt.answer(action)}
                             />
                           </YStack>

@@ -69,6 +69,7 @@ export class DaemonService {
   async negotiateOwnedModel(...args: CommandArguments<typeof daemonNegotiateOwnedModel>): ReturnType<typeof daemonNegotiateOwnedModel> { return daemonNegotiateOwnedModel(this, ...args); }
   modelClaimCredentials(...args: CommandArguments<typeof daemonModelClaimCredentials>): ReturnType<typeof daemonModelClaimCredentials> { return daemonModelClaimCredentials(this, ...args); }
 
+   cornerPrRegistrationUnavailable?: boolean;
    starterOnboarding?: StarterOnboardingService;
   setStarterOnboarding(...args: CommandArguments<typeof daemonSetStarterOnboarding>): ReturnType<typeof daemonSetStarterOnboarding> { return daemonSetStarterOnboarding(this, ...args); }
 

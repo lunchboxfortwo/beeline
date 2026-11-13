@@ -448,6 +448,8 @@ const fixture = monolithFixture();
       exchangeToken: grant.exchangeToken,
     });
     expect(rolledBack.status).toBe(204);
+    expect((await fixture.database.query(`SELECT id FROM identities WHERE id=$1`,[grant.agentPubkey])).rows).toEqual([]);
+    expect((await fixture.database.query(`SELECT handle FROM workspace_handles WHERE identity_id=$1`,[grant.agentPubkey])).rows).toEqual([]);
     const afterReadiness = await phoneFetch(`${fixture.origin}/v1/releases/daemon-readiness`);
     const afterBody = (await afterReadiness.json()) as typeof body;
     expect(

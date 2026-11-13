@@ -1,5 +1,7 @@
 import { githubProviderKey } from './providers/index.js';
+import { beginGitHubStarAuthorization, completeGitHubStarAuthorization } from './github-star-authorization.js';
 import { NotificationWork } from './notification-work.js';
+import { setLiveCornerChecksReader } from './corner-live-checks.js';
 import { CommandRefusalError } from './command-refusal.js';
 import type { RepositorySignals } from './repository-onboarding.js';
 import { createCipheriv, createDecipheriv, createHash, randomBytes } from 'node:crypto';
@@ -56,6 +58,7 @@ export class GitHubOperations {
   ) {
     this.#key = createHash('sha256').update(clientSecret).digest();
     this.armRoomTokenCache();
+    setLiveCornerChecksReader(this.database, cornerId => this.prChecksStatus({ cornerId }));
     this.app.setRateLimitStore?.({
       get: async installationId => {
         const row = (await this.database.query<{ retry_at: string | null }>(
@@ -71,7 +74,11 @@ export class GitHubOperations {
 async beginIdentity(viewerId: string, input: Input<'beginGitHubIdentityBind'>) { return gitHubOperationsBeginIdentity(this, viewerId, input); }
 async completeIdentity(viewerId: string, input: Input<'completeGitHubIdentityBind'>, recover: boolean) { return gitHubOperationsCompleteIdentity(this, viewerId, input, recover); }
 async beginInstallation(viewerId: string, input: Input<'beginGitHubInstallation'>) { return gitHubOperationsBeginInstallation(this, viewerId, input); }
-async completeInstallation(state: string, installationId?: number, code?: string, callbackUri?: string) { return gitHubOperationsCompleteInstallation(this, state, installationId, code, callbackUri); }
+async beginStarAuthorization(viewerId: string, redirectUri: string) { return beginGitHubStarAuthorization(this, viewerId, redirectUri); }
+async completeInstallation(state: string, installationId?: number, code?: string, callbackUri?: string) {
+  if (state.startsWith('github_star_')) return completeGitHubStarAuthorization(this, state, code, callbackUri);
+  return gitHubOperationsCompleteInstallation(this, state, installationId, code, callbackUri);
+}
 async refresh(viewerId: string): Promise<{
     githubReconnectNeeded?: boolean;
 }> { return gitHubOperationsRefresh(this, viewerId); }
@@ -649,15 +656,13 @@ export function challenge(value: string): string {
 }
 
 
-export type ReviewerWakeStatus = 'unconfigured' | 'unreachable' | 'waiting' | 'dispatched';
+export type ReviewerWakeStatus = 'unconfigured' | 'waiting' | 'dispatched';
 
 
 /** Whether the configured reviewer can be / was woken for this corner's current check state. */
 export function reviewerWakeFromFacts(input: {
   configuredReviewerId: string | null;
   reviewerHandle: string | null;
-  parentMember: boolean;
-  cornerMember: boolean;
   /** The live GitHub verdict reported beside this status, never the stored lifecycle. */
   checks: string | undefined;
   /** The run sits in `review` after a green head woke the reviewer. */
@@ -668,18 +673,6 @@ export function reviewerWakeFromFacts(input: {
     return {
       status: 'unconfigured',
       detail: 'No reviewer is configured for this corner, so no agent is woken for review.',
-    };
-  }
-  if (!input.parentMember) {
-    return {
-      status: 'unreachable',
-      detail: `${label} is configured as reviewer but is not a current member of the parent Room, so the checks-passed transition cannot wake them.`,
-    };
-  }
-  if (!input.cornerMember) {
-    return {
-      status: 'unreachable',
-      detail: `${label} is configured as reviewer but is not a current member of this corner, so the checks-passed transition cannot wake them.`,
     };
   }
   if (input.reviewWoken) {

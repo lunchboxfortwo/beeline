@@ -1,12 +1,13 @@
 import { startQueuedCommand } from './test-fixtures/queued-turn.test-support.js';
 import * as phoneLiveReads from './phone/live-reads.js';
 import { createCipheriv, createHash, randomBytes } from 'node:crypto';
-import { createServer, type Server } from 'node:http';
+import { createServer, request, type Server } from 'node:http';
 import type { AddressInfo } from 'node:net';
 import { once } from 'node:events';
 import WebSocket from 'ws';
 import { afterAll, beforeAll, beforeEach, expect, it, vi } from 'vitest';
-import { GitHubAppClient, type GitHubOAuthClient } from '@beeline/auth/github';
+import { GitHubAppClient, GitHubOAuthClient } from '@beeline/auth/github';
+import { AuthStore, type TransactionalDatabase } from '@beeline/auth/store';
 import type { AgentCommand } from '@beeline/api-contract/daemon';
 import { PgliteDatabase, migratedDatabase } from './test-support.js';
 import { PhoneService } from './phone-service.js';
@@ -15,6 +16,7 @@ import { LiveHub } from './live.js';
 import { createBeelineServer } from './server.js';
 import type { TokenAuth } from './auth.js';
 import { GitHubOperations } from './github-operations.js';
+import { createMonolithAuth, type MonolithAuthMount } from './monolith-auth.js';
 
 const H = 'a'.repeat(64),
   A = 'b'.repeat(64);
@@ -24,10 +26,14 @@ const CLIENT_SECRET = 'client-secret';
 const USER_TOKEN = 'person-user-token';
 
 let db: PgliteDatabase, phone: PhoneService, daemon: DaemonService;
+let operations: GitHubOperations, authMount: MonolithAuthMount;
+let authServer: Server, authOrigin: string;
 const live = new LiveHub();
 let github: Server;
 let starResponse = 204;
 let starred = false;
+let githubSubject = 42;
+let exchanges = 0;
 const githubCalls: string[] = [];
 
 /** The same sealing GitHubOperations uses for stored user tokens. */
@@ -73,6 +79,17 @@ async function turn(text = 'hello', artifact = false): Promise<string> {
 
 beforeAll(async () => {
   github = createServer((request, response) => {
+    if (request.url === '/login/oauth/access_token') {
+      exchanges += 1;
+      response.writeHead(200, { 'content-type': 'application/json' }).end(JSON.stringify({
+        access_token: USER_TOKEN, refresh_token: 'refresh-token', expires_in: 28800,
+      }));
+      return;
+    }
+    if (request.url === '/user') {
+      response.writeHead(200, { 'content-type': 'application/json' }).end(JSON.stringify({ id: githubSubject, login: 'person' }));
+      return;
+    }
     githubCalls.push(`${request.method} ${request.url} ${request.headers.authorization}`);
     if (request.url !== '/user/starred/Beeline-Work/beeline') {
       response.writeHead(404).end();
@@ -113,17 +130,36 @@ beforeAll(async () => {
   await db.query(`INSERT INTO github_user_tokens(subject,encrypted_token) VALUES('42',$1)`, [
     seal(USER_TOKEN),
   ]);
-  const operations = new GitHubOperations(
+  const oauth = new GitHubOAuthClient({ clientId: 'beeline-app', clientSecret: CLIENT_SECRET,
+    authorizationEndpoint: `${apiBaseUrl}/authorize`, tokenEndpoint: `${apiBaseUrl}/login/oauth/access_token`, apiBaseUrl });
+  const app = new GitHubAppClient({ appId: '1', privateKey: 'unused', slug: 'beeline', apiBaseUrl });
+  operations = new GitHubOperations(
     db,
-    {} as GitHubOAuthClient,
-    new GitHubAppClient({ appId: '1', privateKey: 'unused', slug: 'beeline', apiBaseUrl }),
+    oauth,
+    app,
     CLIENT_SECRET,
   );
   phone = new PhoneService(db, 'http://test', operations);
   daemon = new DaemonService(db, live);
+  await new AuthStore(db as unknown as TransactionalDatabase).migrate();
+  authMount = await createMonolithAuth(db, 'http://test', { oauth, app }, {
+    createDaemonExchange: async () => { throw new Error('not used'); },
+    completeRepositoryInstallation: (...args) => operations.completeInstallation(...args),
+    env: { NODE_ENV: 'test', BEELINE_AUTH_TENANTS_JSON: JSON.stringify([
+      { host: 'test', community: 'stars', roomCommunityIds: ['stars'], origin: 'http://test' },
+    ]), BEELINE_AUTH_OIDC_ISSUER: 'https://accounts.example',
+    BEELINE_AUTH_OIDC_AUTHORIZATION_ENDPOINT: 'https://accounts.example/authorize',
+    BEELINE_AUTH_OIDC_TOKEN_ENDPOINT: 'https://accounts.example/token',
+    BEELINE_AUTH_OIDC_JWKS_URI: 'https://accounts.example/jwks', BEELINE_AUTH_OIDC_CLIENT_ID: 'test-client' },
+  });
+  authServer = createServer(authMount.handle);
+  await new Promise<void>(resolve => authServer.listen(0, '127.0.0.1', resolve));
+  authOrigin = `http://127.0.0.1:${(authServer.address() as AddressInfo).port}`;
 }, 30_000);
 
 afterAll(async () => {
+  if (authServer) await new Promise<void>(resolve => authServer.close(() => resolve()));
+  await authMount?.close();
   await db?.close();
   await new Promise((resolve) => github?.close(resolve));
 });
@@ -135,9 +171,19 @@ beforeEach(async () => {
   await db.query(`DELETE FROM agent_turns`);
   await db.query(`DELETE FROM github_star_prompts`);
   await db.query(`DELETE FROM free_agents`);
+  await db.query(`DELETE FROM github_auth_flows`);
+  await db.query(`DELETE FROM identity_external_links WHERE provider='github'`);
+  await db.query(`UPDATE identities SET github_subject=NULL WHERE id=$1`, [H]);
+  await db.query(`INSERT INTO identity_external_links(provider,subject,identity_id,issuer,audience)
+    VALUES('github','42',$1,'https://github.com','github')`, [H]);
+  await db.query(`INSERT INTO github_user_tokens(subject,encrypted_token,encrypted_refresh_token,expires_at,stale_at)
+    VALUES('42',$1,NULL,NULL,NULL) ON CONFLICT(subject) DO UPDATE SET encrypted_token=$1,
+    encrypted_refresh_token=NULL,expires_at=NULL,stale_at=NULL`, [seal(USER_TOKEN)]);
   starResponse = 204;
   starred = false;
   githubCalls.length = 0;
+  githubSubject = 42;
+  exchanges = 0;
 });
 
 it.each(['helper', 'free/hosted'])('shows the card on a fresh account’s 3rd completed reply (%s) and stars with the person token', async (runtime) => {
@@ -181,7 +227,7 @@ it('shows immediately when the milestone reply itself carries an artifact', asyn
   expect(await read()).toEqual({ prompt: null });
 });
 
-it('opens the repository instead when GitHub refuses the star', async () => {
+it('authorizes without falsely closing the card when GitHub refuses the star', async () => {
   starResponse = 403;
   await db.query(
     `INSERT INTO github_star_prompts(identity_id,replies)
@@ -189,11 +235,97 @@ it('opens the repository instead when GitHub refuses the star', async () => {
     [H],
   );
   expect((await read()).prompt?.milestone).toBe(3);
-  expect(await answer('star', 3)).toEqual({
-    outcome: 'open',
-    url: 'https://github.com/Beeline-Work/beeline',
+  const result = await phone.execute('answerStarPrompt', { action: 'star', milestone: 3,
+    redirectUri: `beeline://beeline/chat/${R}` }, H);
+  expect(result.outcome).toBe('open');
+  expect(new URL(result.url!).pathname).toBe('/authorize');
+  expect((await read()).prompt?.milestone).toBe(3);
+});
+
+async function authorizeStar(redirectUri = `beeline://beeline/chat/${R}`) {
+  await db.query(`INSERT INTO github_star_prompts(identity_id,replies) VALUES($1,3)`, [H]);
+  const result = await phone.execute('answerStarPrompt', { action: 'star', milestone: 3, redirectUri }, H);
+  expect(result.outcome).toBe('open');
+  const authorization = new URL(result.url!);
+  expect(authorization.pathname).toBe('/authorize');
+  expect(authorization.searchParams.has('scope')).toBe(false);
+  const state = authorization.searchParams.get('state')!;
+  expect(state).toMatch(/^github_star_/);
+  expect(authorization.searchParams.get('code_challenge')).toBe(createHash('sha256').update(state).digest('base64url'));
+  expect((await read()).prompt?.milestone).toBe(3);
+  return state;
+}
+
+async function callback(state: string, query = 'code=star-code') {
+  // Node fetch does not preserve a custom Host; the mounted auth boundary uses it.
+  return new Promise<Response>((resolve, reject) => {
+    const outgoing = request(`${authOrigin}/auth/github/callback?state=${state}&${query}`, { headers: { host: 'test' } }, incoming => {
+      const chunks: Buffer[] = [];
+      incoming.on('data', chunk => chunks.push(Buffer.from(chunk)));
+      incoming.on('end', () => resolve(new Response(Buffer.concat(chunks), {
+        status: incoming.statusCode,
+        headers: incoming.headers as Record<string, string>,
+      })));
+    });
+    outgoing.on('error', reject);
+    outgoing.end();
   });
+}
+
+it.each(['unlinked', 'missing token', 'stale token'])('authorizes a %s account, stars on callback, and returns to the same chat', async kind => {
+  await db.query(`DELETE FROM github_user_tokens WHERE subject='42'`);
+  if (kind === 'unlinked') await db.query(`DELETE FROM identity_external_links WHERE identity_id=$1 AND provider='github'`, [H]);
+  if (kind === 'stale token') await db.query(`INSERT INTO github_user_tokens(subject,encrypted_token,stale_at) VALUES('42',$1,now())`, [seal('stale')]);
+  const state = await authorizeStar();
+  const response = await callback(state);
+  expect(response.status, await response.clone().text()).toBe(302);
+  expect(response.headers.get('location')).toBe(`beeline://beeline/chat/${R}?githubStar=starred`);
+  expect(starred).toBe(true);
+  expect(githubCalls).toContain(`PUT /user/starred/Beeline-Work/beeline Bearer ${USER_TOKEN}`);
+  expect(await operations.userCredential(H, db)).toMatchObject({ subject: '42', token: USER_TOKEN, refreshToken: 'refresh-token' });
+  expect((await db.query(`SELECT encrypted_token FROM github_user_tokens WHERE subject='42'`)).rows[0]!.encrypted_token).not.toBe(USER_TOKEN);
+  await db.query(`UPDATE github_star_prompts SET replies=300 WHERE identity_id=$1`, [H]);
   expect(await read()).toEqual({ prompt: null });
+  expect((await callback(state)).status).not.toBe(302);
+  expect(exchanges).toBe(1);
+});
+
+it('returns to the web chat after authorizing and starring', async () => {
+  await db.query(`DELETE FROM github_user_tokens WHERE subject='42'`);
+  const state = await authorizeStar(`http://test/beeline/chat/${R}`);
+  expect((await callback(state)).headers.get('location')).toBe(`http://test/beeline/chat/${R}?githubStar=starred`);
+});
+
+it.each(['denied', 'restricted', 'mismatched account', 'already linked'])('returns to chat without thanks or a false star when authorization is %s', async kind => {
+  await db.query(`DELETE FROM github_user_tokens WHERE subject='42'`);
+  if (kind === 'restricted') starResponse = 403;
+  if (kind === 'mismatched account' || kind === 'already linked') githubSubject = 43;
+  if (kind === 'already linked') await db.query(`INSERT INTO identity_external_links(provider,subject,identity_id,issuer,audience)
+    VALUES('github','43',$1,'https://github.com','github')`, [A]);
+  if (kind === 'already linked') await db.query(`DELETE FROM identity_external_links WHERE identity_id=$1 AND provider='github'`, [H]);
+  const state = await authorizeStar();
+  const response = await callback(state, kind === 'denied' ? 'error=access_denied&code=ignored' : undefined);
+  expect(response.headers.get('location')).toBe(`beeline://beeline/chat/${R}?githubStar=failed`);
+  expect(starred).toBe(false);
+  expect((await read()).prompt?.milestone).toBe(3);
+  if (kind === 'denied') expect(exchanges).toBe(0);
+  if (kind.includes('account') || kind === 'already linked') expect(githubCalls.some(call => call.startsWith('PUT'))).toBe(false);
+});
+
+it('does not authorize or star an expired flow', async () => {
+  await db.query(`DELETE FROM github_user_tokens WHERE subject='42'`);
+  const state = await authorizeStar();
+  await db.query(`UPDATE github_auth_flows SET expires_at=now()-interval '1 minute'`);
+  expect((await callback(state)).status).not.toBe(302);
+  expect(exchanges).toBe(0);
+  expect(starred).toBe(false);
+});
+
+it.each(['https://evil.test/beeline/chat/', 'beeline://evil/chat/', 'beeline://beeline/chat/'])('rejects unsafe or inaccessible return destinations (%s)', async prefix => {
+  await db.query(`DELETE FROM github_user_tokens WHERE subject='42'`);
+  const room = prefix === 'beeline://beeline/chat/' ? '99999999-9999-4999-8999-999999999999' : R;
+  await expect(phone.execute('answerStarPrompt', { action: 'star', milestone: 3, redirectUri: `${prefix}${room}` }, H)).rejects.toThrow();
+  expect((await db.query(`SELECT * FROM github_auth_flows`)).rows).toEqual([]);
 });
 
 it('waits for the next milestone after Not now and stops for good after close', async () => {

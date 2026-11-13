@@ -238,6 +238,10 @@ m45_describe('phone surface readers', () => {
         squireApproval: { ...squireApproval, approvalUrl: 'javascript:alert(1)' },
       })?.squireApproval,
     ).toBeUndefined();
+    // A Room member who is not the owner reads the card without Squire's page.
+    const { approvalUrl: _ownerOnly, ...shared } = squireApproval;
+    m45_expect(m45_readRoomViewMessage({ ...scope1.message, squireApproval: shared })?.squireApproval)
+      .toEqual(shared);
   });
 
 

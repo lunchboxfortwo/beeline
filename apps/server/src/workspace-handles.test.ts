@@ -1,6 +1,7 @@
 import { randomUUID } from 'node:crypto';
 import { afterEach, beforeEach, expect, it } from 'vitest';
 import { migratedDatabase, type PgliteDatabase } from './test-support.js';
+import { removeWorkspaceMemberships } from './membership-join.js';
 import { WORKSPACE_HANDLE_SCHEMA } from './workspace-handles.js';
 import { resolveCurrentMemberMentions, taggedIdentityIdsSql, tagsKnownIdentitySql } from './message-mentions.js';
 import { PhoneService } from './phone-service.js';
@@ -38,7 +39,7 @@ async function tags(room: string, text: string, expected: string[]) {
   for (const id of expected) expect((await db.query<{tagged:boolean}>(`SELECT ${tagsKnownIdentitySql('m','$2','NULL',"'agent'")} tagged FROM messages m WHERE id=$1`, [message,id])).rows[0]!.tagged).toBe(true);
 }
 
-it('numbers same-workspace clashes, keeps other workspaces plain and retains reservations after rename and departure', async () => {
+it('numbers same-workspace clashes, keeps other workspaces plain and retains reservations after rename and releases them after departure', async () => {
   const one = await workspace(), two = await workspace();
   const x = 'b'.repeat(64), y = 'c'.repeat(64), z = 'd'.repeat(64);
   await agent(x,'x'); await agent(y,'x_2'); await agent(z,'x_3');
@@ -48,6 +49,9 @@ it('numbers same-workspace clashes, keeps other workspaces plain and retains res
   await db.query(`UPDATE identities SET name='Renamed' WHERE id=$1`, [y]);
   await db.query(`UPDATE memberships SET removed_at=now() WHERE identity_id=$1`, [x]);
   expect(await handle(one,y)).toBe('x_2');
+  expect((await db.query(`SELECT 1 FROM workspace_handles WHERE workspace_id=$1 AND identity_id=$2`,[one.id,x])).rows).toEqual([]);
+  await agent('e'.repeat(64),'x_4'); await join(one,'e'.repeat(64));
+  expect(await handle(one,'e'.repeat(64))).toBe('x');
   await db.query(WORKSPACE_HANDLE_SCHEMA);
   expect(await handle(one,y)).toBe('x_2');
 });
@@ -84,6 +88,20 @@ it('reserves DM arrivals in the destination workspace and prevents later global 
   expect(await handle(one,x)).toBe('x');
   await tags(dm,'@x_2',[x]);
   expect((await db.query<{handle:string|null}>(`SELECT beeline_identity_handle($1,'x',true) handle`,[owner])).rows[0]!.handle).toBeNull();
+});
+
+it('releases a removed member address atomically and lets the next same-name agent take it', async () => {
+  const w = await workspace(), departed = 'b'.repeat(64), next = 'c'.repeat(64);
+  await agent(departed,'x'); await join(w,departed);
+  await expect(db.transaction(async tx => {
+    await removeWorkspaceMemberships(tx,[w.id,departed]);
+    expect((await tx.query(`SELECT 1 FROM workspace_handles WHERE identity_id=$1`,[departed])).rows).toEqual([]);
+    throw new Error('abort departure');
+  })).rejects.toThrow('abort departure');
+  expect(await handle(w,departed)).toBe('x');
+  await db.transaction(tx => removeWorkspaceMemberships(tx,[w.id,departed]));
+  await agent(next,'x_2'); await join(w,next);
+  expect(await handle(w,next)).toBe('x');
 });
 
 it('keeps chat-list author, peer and reaction handles scoped while human handles stay live', async () => {

@@ -357,10 +357,15 @@ export type StarPrompt = {
 };
 export type StarPromptView = { readonly prompt: StarPrompt | null };
 export type StarPromptAction = 'star' | 'later' | 'dismiss';
-export type AnswerStarPromptInput = { action: StarPromptAction; milestone: number };
+export type AnswerStarPromptInput = {
+  action: StarPromptAction;
+  milestone: number;
+  /** Originating chat, used only if GitHub user authorization is needed. */
+  redirectUri?: string;
+};
 /**
  * `starred`: GitHub starred the repository with the viewer's token.
- * `open`: the token cannot star (no Starring permission yet), so the app opens `url`.
+ * `open`: authorize the GitHub App at `url`; the server stars on return.
  */
 export type AnswerStarPromptResult = {
   readonly outcome: 'starred' | 'open' | 'later' | 'dismissed';

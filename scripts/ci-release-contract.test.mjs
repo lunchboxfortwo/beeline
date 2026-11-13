@@ -12,12 +12,17 @@ const workflow = name => parse(readFileSync(`.github/workflows/${name}.yml`, 'ut
 const checks = workflow('checks');
 const release = workflow('unified-release');
 
-test('merging to main triggers no workflow; PRs and manual suites keep their Checks contexts', () => {
+test('merging to main triggers no push workflow; PRs, merge-queue groups and manual suites keep their Checks contexts', () => {
   for (const file of readdirSync('.github/workflows').filter(file => file.endsWith('.yml'))) {
     const triggers = parse(readFileSync(`.github/workflows/${file}`, 'utf8')).on;
     assert.equal(triggers?.push, undefined, `${file} still runs on push`);
   }
   assert.ok(checks.on.pull_request); assert.ok(checks.on.workflow_dispatch); assert.ok(checks.on.workflow_call);
+  // The main merge queue waits for every required context on its merge-group commit (item 19, 12 Nov).
+  assert.deepEqual(checks.on.merge_group, { types: ['checks_requested'] });
+  for (const job of ['typecheck', 'body-suite', 'server-suite-shard', 'server-claim-latency', 'mobile-suite', 'mobile-export-reachability', 'native-fingerprint', 'actionlint']) {
+    assert.doesNotMatch(checks.jobs[job].if, /github.event_name == 'pull_request'\)?"?$/, `${job} skips merge groups`);
+  }
   assert.equal(checks.jobs['coverage-map-check'].name, 'SERVER COVERAGE MAP');
   assert.equal(checks.jobs['coverage-map-check'].if, "github.event_name == 'pull_request'");
   const mapCheck = checks.jobs['coverage-map-check'].steps.find(step => step.run?.includes('check-map'));

@@ -143,8 +143,10 @@ export const SquireApprovalCard = React.memo(function SquireApprovalCard({
     onPress: () => onOpenSource(approval.sourceRoomId!, approval.sourceMessageId!), testID: 'squire-approval-source',
   });
   // Approve opens the exact page Squire returned; Squire's own passkey decides there.
-  if (!settled) actions.push({ label: 'Approve', primary: true,
-    accessibilityRole: 'link', destination: 'external', onPress: () => void openExternalUrl(approval.approvalUrl), testID: 'squire-approval-open' });
+  // Only the owner receives the page; other Room members read the ask.
+  const approvalUrl = approval.approvalUrl;
+  if (!settled && approvalUrl) actions.push({ label: 'Approve', primary: true,
+    accessibilityRole: 'link', destination: 'external', onPress: () => void openExternalUrl(approvalUrl), testID: 'squire-approval-open' });
   return <AgentApprovalCard tier={settled ? 'record' : 'ask'} testID="squire-approval-card" wrapTitle
     askingAgent={approval.agent} agent={agent}
     title={`@${name.replace(/^@/, '')} wants to ${approval.action ?? squireApprovalAction(approval.tool, approval.detail, approval.linkKind)}`}

@@ -1,5 +1,5 @@
 import { commanderReportAddress } from './commander.js';
-import { cornerReviewWokenSql,noteReviewDispatchFailure,noteUnreachableReviewer } from './corner-lifecycle-review-state.js';
+import { cornerReviewWokenSql,noteReviewDispatchFailure } from './corner-lifecycle-review-state.js';
 import { queueReviewerCommand } from './corner-lifecycle.js';
 import { A,advanceCorner,assignCornerWorker,B,C,claim,commands,createAgentCommand,DaemonService,describe,expect,greenHead,H,it,LiveHub,PushDeliveryLoop,R,reconcileConfiguredCornerReviewers,result,REVIEWER_DISPATCH_REASONS,reviewerDispatchCarriesHead,rootFixture,routeSystemCommand,systemLine,vi } from './test-support-corner-review-dispatch.test-support.js';
 
@@ -9,13 +9,6 @@ describe('corner message attribution', () => {
     expect(await commanderReportAddress(rootFixture.db, opened.id)).toMatchObject({ recipient: H, returnRoom: R });
     const before = (await rootFixture.db.query('SELECT id FROM messages')).rowCount;
     await noteReviewDispatchFailure(rootFixture.db, opened.id, 'a'.repeat(40), 'review queue unavailable');
-    const opening = (await rootFixture.db.query<{id:string}>(
-      "SELECT id FROM messages WHERE room_id=$1 AND card->>'cornerId'=$2", [R, opened.id],
-    )).rows[0]!;
-    await noteUnreachableReviewer(rootFixture.db, {
-      cornerId: opened.id, sourceMessageId: opening.id, reviewerId: B, reviewerKind: 'agent',
-      reviewerName: 'Reviewer', reason: 'offline',
-    });
     expect((await rootFixture.db.query('SELECT id FROM messages')).rowCount).toBe(before);
   });
 
@@ -253,7 +246,7 @@ describe('corner message attribution', () => {
   });
 
 
-  it('wakes the implementer without consuming green when the reviewer is not a parent member', async () => {
+  it('treats a reviewer removed from the parent Room as no reviewer and wakes the implementer', async () => {
     await rootFixture.phone.execute('updateRoom', { roomId: R, reviewerAgentId: B }, H);
     await rootFixture.db.query(`UPDATE memberships SET removed_at=now() WHERE room_id=$1 AND identity_id=$2`, [
       R,
@@ -285,7 +278,7 @@ describe('corner message attribution', () => {
     ).rows;
     // The commander's report about its own corner wakes it in that corner too.
     expect(routed.map(row => `${row.agent_id === A}:${row.reason}`).sort()).toEqual(['true:corner_review_needed']);
-    expect((await commands(A, C)).find(command => command.reason === 'corner_review_needed')?.source.body).toContain('the configured reviewer is unreachable');
+    expect((await commands(A, C)).find(command => command.reason === 'corner_review_needed')?.source.body).toContain('no reviewer is configured');
     expect(
       (
         await rootFixture.db.query<{ text: string }>(
@@ -295,7 +288,7 @@ describe('corner message attribution', () => {
       ).rows.map((row) => row.text),
     ).toEqual([]);
     expect((await commands(A,R)).filter(command=>command.reason==='report')
-      .some(command=>command.private && command.source.body.includes('not a current member of the parent Room'))).toBe(true);
+      .some(command=>command.private && command.source.body.includes('no reviewer is configured'))).toBe(true);
   });
 
 

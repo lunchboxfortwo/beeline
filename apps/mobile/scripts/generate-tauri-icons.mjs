@@ -1,16 +1,7 @@
 #!/usr/bin/env node
-// Regenerates apps/mobile/src-tauri/icons from the one source of app identity,
-// sources/assets/images/icon.png. The committed brass loop is lifted off its
-// aubergine ground by a channel projection (no redrawing — the exact vector
-// shape and antialiasing survive), then composited at its natural unmasked
-// proportion onto a full-bleed rounded gradient plate. Desktop launchers do
-// not use Android's adaptive safe zone, so the old 100px transparent inset and
-// fixed 528px loop treatment do not belong on this surface.
-//
-//   node scripts/generate-tauri-icons.mjs [--check]
-//
-// --check regenerates into memory and fails if any committed file differs, so
-// a changed source icon cannot silently leave the desktop bundles stale.
+// Regenerate desktop bundles from the Stone app icon without changing the mark.
+// Desktop launchers need a rounded outer silhouette; the paper fills that shape.
+// node scripts/generate-tauri-icons.mjs [--check]
 import { deflateSync, inflateSync } from 'node:zlib';
 import { readFileSync, writeFileSync } from 'node:fs';
 import { dirname, join } from 'node:path';
@@ -19,23 +10,11 @@ import { fileURLToPath } from 'node:url';
 const here = dirname(fileURLToPath(import.meta.url));
 const SOURCE = join(here, '..', 'sources', 'assets', 'images', 'icon.png');
 const ICONS = join(here, '..', 'src-tauri', 'icons');
-const EVIDENCE = join(here, '..', 'evidence', 'macos-app-icon');
 
 const CANVAS_SIZE = 1024;
 const PLATE_INSET = 0;
 const PLATE_SIZE = 1024;
 const CORNER_RADIUS = 230;
-const MARK_THRESHOLD = 8;
-
-// The committed vector's two inks (icon.svg: aubergine ground rect + brass loop).
-const GROUND = [0x14, 0x09, 0x1a];
-const BRASS = [0xe5, 0xa6, 0x45];
-
-// Picked variant B gradient, the subtle (faint) pass: diagonal top-left to
-// bottom-right over the plate. The strong pass is a one-value swap here.
-const GRADIENT_TOP = [0x1e, 0x0d, 0x26];
-const GRADIENT_BOTTOM = [0x10, 0x07, 0x15];
-
 const crcTable = Array.from({ length: 256 }, (_, n) => {
     let c = n;
     for (let k = 0; k < 8; k += 1) c = c & 1 ? 0xedb88320 ^ (c >>> 1) : c >>> 1;
@@ -153,66 +132,6 @@ function resize(image, size) {
     return { width: size, height: size, pixels: out };
 }
 
-function markBounds(image) {
-    const ground = image.pixels.subarray(0, 3);
-    let left = image.width;
-    let top = image.height;
-    let right = -1;
-    let bottom = -1;
-    for (let y = 0; y < image.height; y += 1) {
-        for (let x = 0; x < image.width; x += 1) {
-            const at = (y * image.width + x) * 4;
-            const differs = [0, 1, 2].some(
-                (channel) =>
-                    Math.abs(image.pixels[at + channel] - ground[channel]) >= MARK_THRESHOLD,
-            );
-            if (!differs) continue;
-            left = Math.min(left, x);
-            top = Math.min(top, y);
-            right = Math.max(right, x);
-            bottom = Math.max(bottom, y);
-        }
-    }
-    if (right < left || bottom < top) throw new Error('source icon has no visible mark');
-    return { left, top, right, bottom, width: right - left + 1, height: bottom - top + 1 };
-}
-
-// Lift the committed loop off its aubergine ground without re-tracing it: every
-// source pixel is brass*a + ground*(1-a), so a comes back from the channels
-// weighted by each channel's brass-ground span. The loop stays the exact
-// committed shape, its antialiasing intact.
-function markMask(source) {
-    const spans = BRASS.map((b, c) => b - GROUND[c]);
-    const spanSq = spans.reduce((sum, span) => sum + span * span, 0);
-    const out = new Float32Array(source.width * source.height * 4);
-    for (let i = 0; i < source.width * source.height; i += 1) {
-        const at = i * 4;
-        let dot = 0;
-        for (let c = 0; c < 3; c += 1) {
-            dot += spans[c] * (source.pixels[at + c] - GROUND[c]);
-        }
-        const alpha = Math.max(0, Math.min(1, dot / spanSq));
-        out[at] = (BRASS[0] / 255) * alpha;
-        out[at + 1] = (BRASS[1] / 255) * alpha;
-        out[at + 2] = (BRASS[2] / 255) * alpha;
-        out[at + 3] = alpha;
-    }
-    return { width: source.width, height: source.height, pixels: out };
-}
-
-function sampleBilinear(image, x, y, channel) {
-    const x0 = Math.max(0, Math.min(image.width - 1, Math.floor(x)));
-    const y0 = Math.max(0, Math.min(image.height - 1, Math.floor(y)));
-    const x1 = Math.min(image.width - 1, x0 + 1);
-    const y1 = Math.min(image.height - 1, y0 + 1);
-    const tx = x - x0;
-    const ty = y - y0;
-    const pixel = (px, py) => image.pixels[(py * image.width + px) * 4 + channel];
-    const top = pixel(x0, y0) * (1 - tx) + pixel(x1, y0) * tx;
-    const bottom = pixel(x0, y1) * (1 - tx) + pixel(x1, y1) * tx;
-    return top * (1 - ty) + bottom * ty;
-}
-
 function insideRoundedPlate(x, y) {
     const nearX = Math.max(
         PLATE_INSET + CORNER_RADIUS,
@@ -225,36 +144,22 @@ function insideRoundedPlate(x, y) {
     return (x - nearX) ** 2 + (y - nearY) ** 2 <= CORNER_RADIUS ** 2;
 }
 
-// The picked variant B master: the lifted loop composited over a rounded
-// aubergine plate with a diagonal top-left to bottom-right gradient. Apple's
-// icon grid leaves 100px around the 824px plate; four-by-four coverage
-// sampling keeps the 185px rounded edge clean in the 1024px master, and the
-// box filter carries that antialiasing into every smaller payload.
-function tileSource(source, mask) {
-    const pixels = Buffer.alloc(CANVAS_SIZE * CANVAS_SIZE * 4);
-    const gradientSpan = PLATE_SIZE + PLATE_SIZE;
-
-    for (let y = PLATE_INSET; y < PLATE_INSET + PLATE_SIZE; y += 1) {
-        for (let x = PLATE_INSET; x < PLATE_INSET + PLATE_SIZE; x += 1) {
+// Only the outside corners become transparent. All interior pixels come
+// straight from the opaque launcher master, including its exact Stone colors.
+function tileSource(source) {
+    if (source.width !== CANVAS_SIZE || source.height !== CANVAS_SIZE) {
+        throw new Error('desktop source must be 1024x1024');
+    }
+    const pixels = Buffer.from(source.pixels);
+    for (let y = 0; y < CANVAS_SIZE; y += 1) {
+        for (let x = 0; x < CANVAS_SIZE; x += 1) {
             let covered = 0;
             for (let sy = 0; sy < 4; sy += 1) {
                 for (let sx = 0; sx < 4; sx += 1) {
                     if (insideRoundedPlate(x + (sx + 0.5) / 4, y + (sy + 0.5) / 4)) covered += 1;
                 }
             }
-            if (covered === 0) continue;
-
-            const t = Math.max(0, Math.min(1, (x + y - PLATE_INSET * 2) / gradientSpan));
-            const sourceX = x;
-            const sourceY = y;
-            const markA = sampleBilinear(mask, sourceX, sourceY, 3);
-            const to = (y * CANVAS_SIZE + x) * 4;
-            for (let c = 0; c < 3; c += 1) {
-                const plate = GRADIENT_TOP[c] + (GRADIENT_BOTTOM[c] - GRADIENT_TOP[c]) * t;
-                const mark = sampleBilinear(mask, sourceX, sourceY, c);
-                pixels[to + c] = Math.round(mark * 255 + plate * (1 - markA));
-            }
-            pixels[to + 3] = Math.round((covered / 16) * 255);
+            pixels[(y * CANVAS_SIZE + x) * 4 + 3] = Math.round((covered / 16) * 255);
         }
     }
     return { width: CANVAS_SIZE, height: CANVAS_SIZE, pixels };
@@ -368,9 +273,7 @@ function encodeIcns(pngFor) {
 }
 
 const source = decodePng(readFileSync(SOURCE));
-const bounds = markBounds(source);
-const mask = markMask(source);
-const tile = tileSource(source, mask);
+const tile = tileSource(source);
 const scaled = new Map();
 const at = (size) => {
     if (!scaled.has(size)) scaled.set(size, size === tile.width ? tile : resize(tile, size));
@@ -401,13 +304,6 @@ const outputs = new Map([
     ['icon.icns', encodeIcns(pngAt)],
 ]);
 
-const evidence = new Map([
-    // The shared flat source remains useful beside the desktop gradient tile.
-    ['reproduced-square-128.png', encodePng(resize(source, 128))],
-    ['demonstrated-rounded-1024.png', pngAt(1024)],
-    ['demonstrated-rounded-128.png', pngAt(128)],
-]);
-
 const check = process.argv.includes('--check');
 const stale = [];
 for (const [name, data] of outputs) {
@@ -425,21 +321,6 @@ for (const [name, data] of outputs) {
         writeFileSync(path, data);
     }
 }
-for (const [name, data] of evidence) {
-    const path = join(EVIDENCE, name);
-    if (check) {
-        let existing;
-        try {
-            existing = readFileSync(path);
-        } catch {
-            stale.push(`evidence/${name} (missing)`);
-            continue;
-        }
-        if (!existing.equals(data)) stale.push(`evidence/${name}`);
-    } else {
-        writeFileSync(path, data);
-    }
-}
 
 if (check) {
     if (stale.length > 0) {
@@ -450,7 +331,7 @@ if (check) {
         process.exit(1);
     }
     console.log(
-        `Desktop icons: ${outputs.size} bundle file(s) and ${evidence.size} evidence file(s) match the source icon.`,
+        `Desktop icons: ${outputs.size} bundle file(s) match the source icon.`,
     );
 } else {
     console.log(`Desktop icons written to src-tauri/icons: ${[...outputs.keys()].join(', ')}`);

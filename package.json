@@ -70,6 +70,7 @@
     "test:router-boundaries": "node --test scripts/router-boundaries.test.mjs"
   },
   "devDependencies": {
+    "@actions/expressions": "0.3.61",
     "@colbymchenry/codegraph": "^1.6.0",
     "@types/node": "^22.9.0",
     "esbuild": "^0.28.1",

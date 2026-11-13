@@ -73,11 +73,7 @@ export async function isCornerReviewer(
 ): Promise<boolean> {
     db = new CornerAccessDatabase(db);
   const member = await db.query(
-    `SELECT 1 FROM rooms corner
-     JOIN rooms parent ON parent.id=corner.parent_id
-     JOIN room_access reviewer ON reviewer.room_id=parent.id AND reviewer.identity_id=$2
-       AND reviewer.removed_at IS NULL
-     JOIN identities identity ON identity.id=reviewer.identity_id AND identity.kind='agent'
+    `SELECT 1 FROM rooms corner JOIN rooms parent ON parent.id=corner.parent_id
      WHERE corner.id=$1 AND ${cornerReviewerSql()}=$2`,
     [cornerId, agentId],
   );

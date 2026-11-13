@@ -1,7 +1,4 @@
-<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1024 1024" width="1024" height="1024">
-  <title>Beeline adaptive launcher background — flat aubergine tile</title>
-  <!-- Owner final choice: the brass loop sits on a flat aubergine field
-       (#14091A), not on brass. app.config.js adaptiveIcon.backgroundColor must
-       match so a dropped background image still reads correctly. -->
-  <rect width="1024" height="1024" fill="#14091A"/>
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 240 240" width="1024" height="1024">
+  <title>Beeline adaptive background — Stone paper</title>
+  <rect width="240" height="240" fill="#f5f5f4"/>
 </svg>

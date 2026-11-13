@@ -7,7 +7,7 @@ import { createHash } from 'node:crypto';
 import { mkdtemp, readFile, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { describe, expect, it } from 'vitest';
+import { describe, expect, it, vi } from 'vitest';
 import { cornerImplementerSql } from '.././corner-worker.js';
 import { HelperDaemonService as DaemonService } from '.././test-fixtures/helper-daemon.js';
 import { LiveHub } from '.././live.js';
@@ -634,6 +634,17 @@ const fixture = monolithFixture();
         await fixture.database.query(`UPDATE rooms SET reviewer_agent_id=$2 WHERE id=$1`, [ROOM, AGENT]);
         await fixture.database.query(`UPDATE corner_github_cache SET lifecycle=$2::jsonb WHERE corner_id=$1`, [cornerId,
           JSON.stringify({ checks: state === 'review-checks' ? 'pending' : 'passing', pr: { number: 42, headSha: 'brief-head' } })]);
+      }
+      if (state === 'review-reviewer') {
+        // Reconcile validates a green head with GitHub before dispatching review.
+        vi.spyOn(fixture.githubOperations, 'roomWorkflowTarget').mockResolvedValue({
+          token: 'test', repository: 'example/repo', defaultBranch: 'main', repository_id: '1', installation_id: '1',
+        });
+        Object.assign(fixture.githubApp, { readPullRequest: vi.fn(async () => ({
+          number: 42, url: 'https://github.com/example/repo/pull/42', headSha: 'brief-head',
+          state: 'open', merged: false, mergeability: 'clean',
+        })) });
+        fixture.githubRollupState = 'passed';
       }
       if (state === 'waiting') await fixture.database.query(
         `INSERT INTO messages(id,room_id,author_id,text,presentation,card_type,card)

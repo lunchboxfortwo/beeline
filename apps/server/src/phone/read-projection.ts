@@ -293,11 +293,14 @@ export function projectedMessage(
       return { ...base, permission: row.card as NonNullable<RoomViewMessage['permission']> };
     case 'grant-request':
       return { ...base, grantRequest: row.card as NonNullable<RoomViewMessage['grantRequest']> };
-    case 'squire-approval':
-      return {
-        ...base,
-        squireApproval: row.card as NonNullable<RoomViewMessage['squireApproval']>,
-      };
+    case 'squire-approval': {
+      // A card at the call site is read by the whole Room. Squire's page is
+      // its owner's alone; cards without an owner only ever sat in their DM.
+      const card = row.card as NonNullable<RoomViewMessage['squireApproval']>;
+      if (!card.owner || card.owner.pubkey === viewerId) return { ...base, squireApproval: card };
+      const { approvalUrl: _ownerOnly, ...shared } = card;
+      return { ...base, squireApproval: shared };
+    }
     case 'computer-session':
       return {
         ...base,

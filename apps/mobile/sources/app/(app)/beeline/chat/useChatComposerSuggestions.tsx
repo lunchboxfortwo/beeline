@@ -65,7 +65,7 @@ export function useChatComposerSuggestions([
   mentionAgentCommands: import("@/buzz/slash-verbs").AgentPaletteCommand[],
   agentTurnMarkers: readonly import("@beeline/api-contract/phone").RoomViewAgentTurn[],
   activeAgentTurn: import("@beeline/api-contract/phone").RoomViewAgentTurn,
-  starPrompt: { prompt: import("@beeline/api-contract/phone").StarPrompt | null; busy: import("@beeline/api-contract/phone").StarPromptAction | null; answer: (action: import("@beeline/api-contract/phone").StarPromptAction) => Promise<void>; accept: (view: { prompt: import("@beeline/api-contract/phone").StarPrompt | null; }) => void; },
+  starPrompt: ReturnType<typeof useStarPrompt>,
   activeMention: import("@/buzz/room-participants").ActiveMention | null,
   activeChannel: import("@/buzz/channel-suggestions").ActiveChannel | null,
   mentionAgentCommandScope: string | null,

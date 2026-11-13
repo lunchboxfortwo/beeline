@@ -44,6 +44,17 @@ describe('request cards in the transcript', () => {
         expect(tree.root.findAll((node: any) => node.type === 'Icon.ExternalLink')).toHaveLength(1);
     });
 
+    it('another Room member reads a Squire approval without its page', () => {
+        // The server withholds the page from everyone but the owner.
+        const message = { id: 'sq', text: '', isUser: false, timestamp: 1793700000, squireApproval: {
+            agent: AGENT, owner: { pubkey: 'c'.repeat(64), kind: 'human', name: 'Dan', handle: 'dan' }, tool: 'fetch_credential',
+            detail: 'Reveal pages', linkKind: 'passkey',
+        } } as never;
+        const tree = render(<SquireApprovalCard message={message} viewerPubkey={VIEWER} />);
+        expect(buttons(tree).some((node: any) => node.props.testID === 'squire-approval-open')).toBe(false);
+        expect(JSON.stringify(tree.toJSON())).toContain('for @dan');
+    });
+
     it('write requests are Approve / Deny on today’s permission decision', () => {
         const onDecision = vi.fn();
         const message = { id: 'wp', text: '', isUser: false, timestamp: 1793700000, writePermission: {

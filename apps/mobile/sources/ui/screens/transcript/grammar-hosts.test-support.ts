@@ -37,6 +37,7 @@ export function tamaguiHosts() {
     module.Avatar = withStatics('Avatar', ['Image', 'Fallback']);
     module.useTheme = () => new Proxy({}, { get: (_target, key) => ({ val: String(key), get: () => String(key) }) });
     module.useThemeName = () => 'dark_brass';
+    module.getTokens = () => ({ space: { '1': { val: 4 } } });
     module.useMedia = () => ({});
     module.styled = (base: unknown) => base;
     return module;

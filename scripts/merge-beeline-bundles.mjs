@@ -5,7 +5,7 @@ import { join, resolve } from 'node:path';
 import { pathToFileURL } from 'node:url';
 import { validateBundleDirectory } from './pages-site.mjs';
 
-export async function mergeBeelineBundles({ outputDir, inputDirs }) {
+export async function mergeBeelineBundles({ outputDir, inputDirs, carriedArm64Dir }) {
   outputDir = resolve(outputDir);
   inputDirs = inputDirs.map((directory) => resolve(directory));
   if (inputDirs.length === 0) throw new Error('at least one helper bundle directory is required');
@@ -37,6 +37,17 @@ export async function mergeBeelineBundles({ outputDir, inputDirs }) {
     }
   }
   const manifest = { ...identity, bundles };
+  // Outage recovery only: retain the verified Apple-silicon archive verbatim.
+  // The old identity remains on the entry; it must never be restamped as new.
+  if (carriedArm64Dir) {
+    const { manifest: previous } = await validateBundleDirectory(resolve(carriedArm64Dir));
+    const carried = previous.bundles['darwin-arm64'];
+    if (!carried || bundles['darwin-arm64']) throw new Error('expected one carried darwin-arm64 helper');
+    bundles['darwin-arm64'] = { ...carried, carriedFrom: { commit: carried.commit, version: carried.version, sha256: carried.sha256 } };
+    for (const name of [carried.file, `${carried.file}.sha256`])
+      await copyFile(join(carriedArm64Dir, name), join(outputDir, name));
+    console.log(`Helper darwin-arm64 carried unchanged: ${carried.version} ${carried.commit} sha256=${carried.sha256}`);
+  }
   if (identity.recovery)
     for (const name of [identity.recovery.file, `${identity.recovery.file}.sha256`]) {
       const source = join(inputs[0].directory, name);
@@ -62,7 +73,10 @@ async function main() {
       'usage: merge-beeline-bundles.mjs --output-dir DIR --input-dir DIR [--input-dir DIR ...]',
     );
   }
-  const manifest = await mergeBeelineBundles({ outputDir, inputDirs });
+  const carryIndex = process.argv.indexOf('--carry-arm64-dir');
+  const carriedArm64Dir = carryIndex >= 0 ? process.argv[carryIndex + 1] : undefined;
+  if (carryIndex >= 0 && !carriedArm64Dir) throw new Error('--carry-arm64-dir needs a directory');
+  const manifest = await mergeBeelineBundles({ outputDir, inputDirs, carriedArm64Dir });
   console.log(
     `merge-beeline-bundles: ${Object.keys(manifest.bundles).sort().join(', ')} for ${manifest.version}`,
   );
