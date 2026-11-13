@@ -81,18 +81,15 @@ async function executable(path) {
   }
 }
 
-async function resolveAgentBinaries(platform) {
+export async function resolveAgentBinaries(platform, { toolsDirectory = toolsRoot } = {}) {
   let agent = process.env.BUZZ_AGENT_BIN ?? '';
   let mcp = process.env.BUZZ_DEV_MCP_BIN ?? '';
   if (Boolean(agent) !== Boolean(mcp)) {
     fail('set both BUZZ_AGENT_BIN and BUZZ_DEV_MCP_BIN, or neither');
   }
 
-  if (!agent && platform === hostPlatform()) {
-    agent = capture('sh', ['-c', 'command -v buzz-agent || true']);
-    mcp = capture('sh', ['-c', 'command -v buzz-dev-mcp || true']);
-  }
-
+  // PATH may contain installed helper launchers, not native build outputs.
+  // Only explicit cache/build overrides can bypass the pinned Cargo recipe.
   if (!agent || !mcp) {
     if (platform !== hostPlatform()) {
       fail(
@@ -102,9 +99,9 @@ async function resolveAgentBinaries(platform) {
     if (!capture('sh', ['-c', 'command -v cargo || true'])) {
       fail('cargo is required to build buzz-agent and buzz-dev-mcp');
     }
-    const upstreamRoot = resolve(toolsRoot, 'block-buzz');
-    const targetRoot = resolve(toolsRoot, 'target', platform);
-    await mkdir(toolsRoot, { recursive: true });
+    const upstreamRoot = resolve(toolsDirectory, 'block-buzz');
+    const targetRoot = resolve(toolsDirectory, 'target', platform);
+    await mkdir(toolsDirectory, { recursive: true });
     try {
       await access(resolve(upstreamRoot, '.git'));
     } catch {
@@ -116,7 +113,7 @@ async function resolveAgentBinaries(platform) {
         upstreamRoot,
       ]);
     }
-    run('git', ['-C', upstreamRoot, 'fetch', '--depth', '1', 'origin', UPSTREAM_REF]);
+    run('git', ['-C', upstreamRoot, 'fetch', 'origin', UPSTREAM_REF]);
     run('git', ['-C', upstreamRoot, 'checkout', '--detach', '--force', 'FETCH_HEAD']);
     const cargoStarted = process.hrtime.bigint();
     run('cargo', [
@@ -456,4 +453,6 @@ async function main() {
   console.log(`build-beeline-bundle: sha256 ${digest}`);
 }
 
-main().catch((error) => fail(error instanceof Error ? error.message : String(error)));
+if (process.argv[1] && resolve(process.argv[1]) === fileURLToPath(import.meta.url)) {
+  main().catch((error) => fail(error instanceof Error ? error.message : String(error)));
+}
