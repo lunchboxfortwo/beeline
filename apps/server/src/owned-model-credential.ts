@@ -24,16 +24,19 @@ ALTER TABLE owned_model_credentials ALTER COLUMN expires_ms DROP NOT NULL;
 -- connection only as signed history; new rows record none.
 ALTER TABLE owned_model_credentials ALTER COLUMN connection_id DROP NOT NULL,
  ALTER COLUMN connection_epoch DROP NOT NULL, ALTER COLUMN instance_id DROP NOT NULL;
+-- Legacy revocation remains writable by preceding images, but current
+-- credentials end with their queue item and never read this column.
+ALTER TABLE owned_model_credentials ADD COLUMN IF NOT EXISTS revoked_at timestamptz;
 CREATE OR REPLACE FUNCTION beeline_owned_model_credential_immutable() RETURNS trigger AS $$
 BEGIN
  IF TG_OP='DELETE' THEN RAISE EXCEPTION 'owned model credential identity is retained' USING ERRCODE='23514'; END IF;
- IF to_jsonb(NEW) IS DISTINCT FROM to_jsonb(OLD) THEN
+ IF to_jsonb(NEW)-'revoked_at' IS DISTINCT FROM to_jsonb(OLD)-'revoked_at'
+   OR OLD.revoked_at IS NOT NULL AND NEW.revoked_at IS DISTINCT FROM OLD.revoked_at THEN
    RAISE EXCEPTION 'owned model credential binding is immutable' USING ERRCODE='23514';
  END IF;
  RETURN NEW;
 END; $$ LANGUAGE plpgsql;
--- A credential ends with its queue item; nothing revokes it separately.
-ALTER TABLE owned_model_credentials DROP COLUMN IF EXISTS revoked_at;
+
 DROP TRIGGER IF EXISTS beeline_owned_model_credential_immutable ON owned_model_credentials;
 CREATE TRIGGER beeline_owned_model_credential_immutable BEFORE UPDATE OR DELETE ON owned_model_credentials
  FOR EACH ROW EXECUTE FUNCTION beeline_owned_model_credential_immutable();

@@ -7,7 +7,6 @@ import type { SqlDatabase } from './database.js';
  * Nothing else ends an item; a dropped helper leaves it pending.
  */
 export const AGENT_TURN_END_SCHEMA = `
-DROP FUNCTION IF EXISTS beeline_end_agent_turn(text,text,text,text,text);
 CREATE OR REPLACE FUNCTION beeline_finish_agent_command(
   command_id text, outcome text, terminal_reason text, result_id text
 ) RETURNS SETOF agent_commands LANGUAGE plpgsql AS $$

@@ -737,7 +737,35 @@
           "answer_attachments": "Uploaded answer media must survive helper/server replacement without an optional table read before publication.",
           "report_address": "The original commander escalation address is frozen at append so later orders or transcript changes cannot redirect a report.",
           "message": "The delivered source text, author and attachments must survive transcript edits and be readable without optional context joins.",
-          "posted_reply_id": "A committed mid-turn reply suppresses closing-message publication and survives helper/server replacement."
+          "posted_reply_id": "A committed mid-turn reply suppresses closing-message publication and survives helper/server replacement.",
+          "generation_id": {
+            "reason": "Retired queue ownership storage; current requests do not read or write it, retained for preceding serving and rollback images.",
+            "drop": "docs/release-pipeline.md#release-memory - beeline-drop-retired-turn-schema contract release"
+          },
+          "lease_expires_at": {
+            "reason": "Retired queue ownership storage; current requests do not read or write it, retained for preceding serving and rollback images.",
+            "drop": "docs/release-pipeline.md#release-memory - beeline-drop-retired-turn-schema contract release"
+          },
+          "claimed_at": {
+            "reason": "Retired queue ownership storage; current requests do not read or write it, retained for preceding serving and rollback images.",
+            "drop": "docs/release-pipeline.md#release-memory - beeline-drop-retired-turn-schema contract release"
+          },
+          "execution_kind": {
+            "reason": "Retired queue ownership storage; current requests do not read or write it, retained for preceding serving and rollback images.",
+            "drop": "docs/release-pipeline.md#release-memory - beeline-drop-retired-turn-schema contract release"
+          },
+          "turn_owner_connection_id": {
+            "reason": "Retired queue ownership storage; current requests do not read or write it, retained for preceding serving and rollback images.",
+            "drop": "docs/release-pipeline.md#release-memory - beeline-drop-retired-turn-schema contract release"
+          },
+          "turn_owner_epoch": {
+            "reason": "Retired queue ownership storage; current requests do not read or write it, retained for preceding serving and rollback images.",
+            "drop": "docs/release-pipeline.md#release-memory - beeline-drop-retired-turn-schema contract release"
+          },
+          "restart_confirmed_at": {
+            "reason": "Retired queue ownership storage; current requests do not read or write it, retained for preceding serving and rollback images.",
+            "drop": "docs/release-pipeline.md#release-memory - beeline-drop-retired-turn-schema contract release"
+          }
         }
       },
       "agent_connections": {
@@ -848,7 +876,11 @@
           "mime_type": "existing before the registry; weekly audit reviews",
           "size": "existing before the registry; weekly audit reviews",
           "created_at": "existing before the registry; weekly audit reviews",
-          "request_id": "existing before the registry; weekly audit reviews"
+          "request_id": "existing before the registry; weekly audit reviews",
+          "generation_id": {
+            "reason": "Retired queue ownership storage; current requests do not read or write it, retained for preceding serving and rollback images.",
+            "drop": "docs/release-pipeline.md#release-memory - beeline-drop-retired-turn-schema contract release"
+          }
         }
       },
       "agent_schedule_occurrences": {
@@ -958,6 +990,10 @@
           "startup_outcome": {
             "reason": "Retained without runtime use until the previous server drains during this rolling release.",
             "drop": "Next release after turn-lifecycle cleanup: docs/agent-server-surfaces.md#turn-recovery-storage-retirement"
+          },
+          "generation_id": {
+            "reason": "Retired queue ownership storage; current requests do not read or write it, retained for preceding serving and rollback images.",
+            "drop": "docs/release-pipeline.md#release-memory - beeline-drop-retired-turn-schema contract release"
           }
         }
       },
@@ -3309,7 +3345,7 @@
           "workspace_id": "Preserves the admitted Workspace boundary across later membership changes.",
           "room_id": "Pins model authority to the Room that admitted the original command.",
           "command_id": "Identifies the durable command whose claim issued this credential.",
-          "generation_id": "Distinguishes successive command claims and prevents a credential crossing generations.",
+          "generation_id": "Retained column name stores the queue item id for current credentials; it creates no execution generation.",
           "request_id": "Binds model authority to the admitted helper turn request.",
           "connection_id": {
             "reason": "Signed history of older credentials only; NULL for new credentials and never compared to a live connection.",
@@ -3327,7 +3363,11 @@
           "agent_model": "Retains the explicit agent model selection used when the credential was issued.",
           "model_token_hash": "Detects model-token rotation after issuance without retaining its secret.",
           "expires_ms": "Records the deadline signed into older credentials; new credentials store NULL, live invocation membership bounds their authority, and no time expiry is enforced.",
-          "created_at": "Records the issuance boundary independently of later command claim changes."
+          "created_at": "Records the issuance boundary independently of later command claim changes.",
+          "revoked_at": {
+            "reason": "Retired queue ownership storage; current requests do not read or write it, retained for preceding serving and rollback images.",
+            "drop": "docs/release-pipeline.md#release-memory - beeline-drop-retired-turn-schema contract release"
+          }
         }
       },
       "owned_model_attempts": {

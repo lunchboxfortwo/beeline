@@ -141,24 +141,9 @@ ALTER TABLE agent_commands ADD CONSTRAINT agent_commands_agent_depth_check CHECK
 -- The queue has no claim, lease or generation. Unfinished work goes back to
 -- pending; resume and stop controls are no longer queued.
 DROP TRIGGER IF EXISTS beeline_classify_claim_kind ON agent_commands;
-DROP FUNCTION IF EXISTS beeline_classify_claim_kind();
 DROP TRIGGER IF EXISTS beeline_bind_command_generation ON agent_commands;
-DROP FUNCTION IF EXISTS beeline_bind_command_generation();
 DROP TRIGGER IF EXISTS beeline_fence_ended_command_claim ON agent_commands;
-DROP FUNCTION IF EXISTS beeline_fence_ended_command_claim();
 DROP TRIGGER IF EXISTS beeline_fence_unknown_model_generation ON agent_commands;
-DROP FUNCTION IF EXISTS beeline_fence_unknown_model_generation();
-DROP FUNCTION IF EXISTS beeline_command_generation_open(text,text);
-DROP FUNCTION IF EXISTS beeline_command_claim_open(text);
-DROP FUNCTION IF EXISTS beeline_register_owned_effect(text,text,text,text,bigint);
-DROP FUNCTION IF EXISTS beeline_retain_owned_access(uuid,text,text);
-DROP TABLE IF EXISTS turn_owned_access_checks;
-DROP FUNCTION IF EXISTS beeline_commit_owned_access();
-DROP TABLE IF EXISTS turn_owned_effect_fences;
-DROP TABLE IF EXISTS agent_command_owner_ends;
-DROP FUNCTION IF EXISTS beeline_preserve_owner_end();
-DROP TABLE IF EXISTS agent_command_generation_owners;
-DROP FUNCTION IF EXISTS beeline_preserve_generation_binding();
 -- Helper activation snapshots were read only by claims.
 DO $$ DECLARE source text; BEGIN
  FOREACH source IN ARRAY ARRAY['workspaces','agents','identities','memberships','rooms','agent_grants','workspace_apps',
@@ -166,16 +151,17 @@ DO $$ DECLARE source text; BEGIN
    EXECUTE format('DROP TRIGGER IF EXISTS beeline_activation_source ON %I',source);
  END LOOP;
 END $$;
-DROP FUNCTION IF EXISTS beeline_activation_source();
-DROP FUNCTION IF EXISTS beeline_activation_touch(uuid);
-DROP TABLE IF EXISTS helper_activation_authority;
 ALTER TABLE agent_commands DROP CONSTRAINT IF EXISTS agent_commands_turn_owner_pair;
 ALTER TABLE agent_commands DROP CONSTRAINT IF EXISTS agent_commands_execution_kind;
-ALTER TABLE agent_commands DROP COLUMN IF EXISTS generation_id, DROP COLUMN IF EXISTS lease_expires_at,
-  DROP COLUMN IF EXISTS claimed_at, DROP COLUMN IF EXISTS execution_kind,
-  DROP COLUMN IF EXISTS turn_owner_connection_id, DROP COLUMN IF EXISTS turn_owner_epoch,
-  DROP COLUMN IF EXISTS restart_confirmed_at;
-ALTER TABLE IF EXISTS agent_pending_attachments DROP COLUMN IF EXISTS generation_id;
+-- Retained storage is inert in this queue implementation. Removal belongs to
+-- a later contract release after the preceding serving/rollback images drain.
+ALTER TABLE agent_commands ADD COLUMN IF NOT EXISTS generation_id text,
+  ADD COLUMN IF NOT EXISTS lease_expires_at timestamptz,
+  ADD COLUMN IF NOT EXISTS claimed_at timestamptz,
+  ADD COLUMN IF NOT EXISTS execution_kind text,
+  ADD COLUMN IF NOT EXISTS turn_owner_connection_id text,
+  ADD COLUMN IF NOT EXISTS turn_owner_epoch bigint;
+ALTER TABLE agent_pending_attachments ADD COLUMN IF NOT EXISTS generation_id text;
 ${AGENT_COMMAND_DELEGATION_SCHEMA}
 UPDATE agent_commands SET state='pending' WHERE state='claimed';
 -- A legacy resume can share its source and request with its parent. Preserve

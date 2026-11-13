@@ -82,6 +82,8 @@ these unused upgrade columns for that same cleanup: `agent_commands.renudged_at`
 `rooms_mcp_members.last_bridge_poll_at`, `rooms_mcp_mentions.rewakes`, `rooms_mcp_webhook_outbox.attempts`,
 `sentry_wake_issues.last_digested_at`, `sentry_wake_issues.last_digested_level`, `sentry_wake_issues.urgent`,
 `sentry_wake_state.last_daily_wake_at`, `sentry_wake_state.last_wake_at`, `x_ad_signups.next_attempt_at`.
+Retired queue ownership columns and their retained functions/tables also remain for preceding serving and rollback images under the [release memory contract](release-pipeline.md#release-memory).
+Current queue requests do not use them.
 Runtime readers, writers and triggers are removed with their features; these columns authorize no timer,
 recovery scan, retry or resend path. Remove their storage-registry entries only when the corresponding schema
 columns are dropped after serving and rollback images have drained.

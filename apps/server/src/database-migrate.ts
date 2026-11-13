@@ -151,7 +151,6 @@ export async function migrate(
   await ddlScript('retired turn recovery schema', `
     ALTER TABLE agent_turns ADD COLUMN IF NOT EXISTS startup_outcome text;
     DROP TRIGGER IF EXISTS defer_startup_wake ON agent_commands;
-    DROP FUNCTION IF EXISTS defer_startup_wake();
   `);
   await ddlScript('free agents schema', FREE_AGENTS_SCHEMA);
   await runMigrationStep('Workspace member cleanup', async () => {

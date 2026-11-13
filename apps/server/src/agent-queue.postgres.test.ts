@@ -64,6 +64,25 @@ describe.skipIf(!url)('durable agent queue on PostgreSQL', () => {
     expect((await fixture.database.query(`SELECT 1 FROM messages WHERE author_id=$1 AND request_id=$2`,[agent,item.turn_request_id])).rowCount).toBe(0);
   });
 
+  it('retains preceding-image storage without letting it own the new answer', async () => {
+    const item=await ask('rolling release overlap');
+    await fixture.database.query(`UPDATE agent_commands SET generation_id='legacy-generation',
+      claimed_at='2026-01-01T00:00:00Z',lease_expires_at='2026-01-02T00:00:00Z',
+      execution_kind='helper',turn_owner_connection_id='legacy-connection',turn_owner_epoch=7 WHERE id=$1`,[item.id]);
+    await fixture.database.query(`CREATE TABLE IF NOT EXISTS turn_owned_access_checks(id text);
+      INSERT INTO turn_owned_access_checks VALUES('retained');
+      CREATE OR REPLACE FUNCTION beeline_command_claim_open(text) RETURNS boolean LANGUAGE sql AS $$ SELECT true $$`);
+    await fixture.database.query(AGENT_COMMAND_SCHEMA);
+    expect((await fixture.database.query(`SELECT generation_id,turn_owner_connection_id,turn_owner_epoch::int epoch
+      FROM agent_commands WHERE id=$1`,[item.id])).rows).toEqual([
+        {generation_id:'legacy-generation',turn_owner_connection_id:'legacy-connection',epoch:7}]);
+    expect((await fixture.database.query(`SELECT id,beeline_command_claim_open(id) readable
+      FROM turn_owned_access_checks`)).rows).toEqual([{id:'retained',readable:true}]);
+    await answer(item.turn_request_id);
+    expect((await fixture.database.query('SELECT state FROM agent_commands WHERE id=$1',[item.id])).rows)
+      .toEqual([{state:'complete'}]);
+  });
+
   it('upgrades a shared legacy resume source without spending its parent answer', async () => {
     const item=await ask('legacy resume'), resumed=randomBytes(32).toString('hex');
     await fixture.database.query(`INSERT INTO agent_commands(id,room_id,agent_id,source_message_id,

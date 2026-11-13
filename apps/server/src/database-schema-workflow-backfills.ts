@@ -503,8 +503,8 @@ CREATE TABLE IF NOT EXISTS agent_turns (
 );
 ALTER TABLE agent_turns ADD COLUMN IF NOT EXISTS failure_reason text;
 ALTER TABLE agent_turns ADD COLUMN IF NOT EXISTS completion_kind text;
--- A turn is one queue item; it has no execution generation.
-ALTER TABLE agent_turns DROP COLUMN IF EXISTS generation_id;
+-- Retained for preceding serving/rollback images; queue turns do not use it.
+ALTER TABLE agent_turns ADD COLUMN IF NOT EXISTS generation_id text;
 -- How much work the turn did, as the harness's own stream counted it. A turn is
 -- the unit mid-close cohorts compare, so the count has to live where both the
 -- served and the unserved cohort can be read from — a serve ledger only ever
