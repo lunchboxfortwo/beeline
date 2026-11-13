@@ -117,7 +117,7 @@ export async function queueStopOrders() {
 
 export async function claim(c: AgentCommand, generationId = 'g1') {
   const source=await helperOwner(c.agentId);
-  const {capability}=await daemon.negotiateOwnedModel(c.agentId,source,true);
+  const {capability}=await daemon.negotiateOwnedModel(c.agentId,true);
   await daemon.execute(
     'claimAgentCommand',
     { roomId: c.roomId, commandId: c.id, generationId },

@@ -193,14 +193,14 @@ import { daemonExecuteOperation } from './operations.js';
           throw error;
         },
       ));
-    let ownedIntent = Boolean(turnOwner || ctx.authorizedCommand?.turn_owner_connection_id);
-    if (!ctx.commandTransaction && scopedRoom && typeof candidate.generationId === 'string' &&
+    // Owned dispatch follows the claim's recorded execution kind, never a socket.
+    let ownedIntent = Boolean(turnOwner || ctx.authorizedCommand?.execution_kind === 'helper');
+    if (!ownedIntent && !ctx.commandTransaction && scopedRoom && typeof candidate.generationId === 'string' &&
         typeof (candidate.requestId ?? candidate.turnId) === 'string') {
-      ownedIntent ||= Boolean((await ctx.database.query(`SELECT 1 FROM agent_commands command
-        JOIN agent_command_generation_owners binding ON binding.command_id=command.id
-          AND binding.generation_id=$4 AND binding.connection_id IS NOT NULL
-        WHERE command.room_id=$1 AND command.agent_id=$2 AND command.turn_request_id=$3 LIMIT 1`,
-        [scopedRoom, authenticatedAgentId, candidate.requestId ?? candidate.turnId, candidate.generationId])).rowCount);
+      ownedIntent = Boolean((await ctx.database.query(`SELECT 1 FROM agent_commands command
+        WHERE command.room_id=$1 AND command.agent_id=$2 AND command.turn_request_id=$3
+          AND command.execution_kind='helper' LIMIT 1`,
+        [scopedRoom, authenticatedAgentId, candidate.requestId ?? candidate.turnId])).rowCount);
     }
     // An owned claim must not remove existing tools. Operations without a
     // dedicated adapter keep their established provider/permission path while
@@ -306,12 +306,16 @@ import { daemonExecuteOperation } from './operations.js';
             (candidate.status !== 'failed' || candidate.heartbeat !== undefined)) throw new OwnedModelOwnerEndRefusal();
         if (name === 'postAgentTurnReceipt' && !candidate.diagnosticsOnly && ['failed', 'complete'].includes(String(candidate.status))) {
           // Preserve causal provider evidence before the single terminal write.
-          if (await parkOwnedModelTerminal(db, input as Input<'postAgentTurnReceipt'>, authenticatedAgentId, turnOwner)) {
-            const ended = (await db.query<CommandRow>(`SELECT * FROM agent_commands
-              WHERE room_id=$1 AND agent_id=$2 AND turn_request_id=$3 AND generation_id=$4 FOR UPDATE`,
-              [scopedRoom,authenticatedAgentId,requestId,candidate.generationId])).rows[0];
-            if (ended && await endAgentTurn(db,ended,'failed','The model result could not be confirmed.'))
-              await recordAgentTurnFailure(db,ended,'The model result could not be confirmed.');
+          if (await parkOwnedModelTerminal(db, input as Input<'postAgentTurnReceipt'>, authenticatedAgentId)) {
+            // The model owner ended for the whole invocation. Its unfinished
+            // members end with it; completed members keep their results.
+            const unfinished = (await db.query<CommandRow>(`SELECT * FROM agent_commands
+              WHERE room_id=$1 AND agent_id=$2 AND generation_id=$3 AND state='claimed'
+                AND action IN ('input','resume') ORDER BY created_at,id FOR UPDATE`,
+              [scopedRoom,authenticatedAgentId,candidate.generationId])).rows;
+            for (const ended of unfinished)
+              if (await endAgentTurn(db,ended,'failed','The model result could not be confirmed.'))
+                await recordAgentTurnFailure(db,ended,'The model result could not be confirmed.');
             return daemonWriteResult(ctx) as Output<Name>;
           }
 
@@ -336,7 +340,7 @@ import { daemonExecuteOperation } from './operations.js';
           : await authorizeCommandOutput(
           db, scopedRoom, authenticatedAgentId, requestId, candidate.generationId, allowCompleted,
         );
-        if (name === 'postAgentTurnReceipt' && command.turn_owner_connection_id && candidate.heartbeat)
+        if (name === 'postAgentTurnReceipt' && command.execution_kind === 'helper' && candidate.heartbeat)
           throw new Error('Owned turns do not accept freshness receipts');
         // Helpers cannot impose an order outcome on an informational wake.
         // The stored command and its delivered receipt own that obligation.

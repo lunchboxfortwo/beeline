@@ -20,7 +20,7 @@ import { isCornerReviewer } from './agent-health.js';
 import { cornerImplementerSql } from './corner-worker.js';
 import { CORNER_LIFECYCLE_CARD_TYPE } from './room-choice.js';
 import { SYSTEM_IDENTITY_ID } from '@beeline/api-contract/system-identity';
-import { claimAgentCommand, routeAgentResult, CORNER_REVIEW_DEADLOCK_CARD_TYPE, CORNER_CHECKS_BLOCKED_CARD_TYPE, CORNER_AGENT_UNREACHABLE_CARD_TYPE, CORNER_MERGE_YES_CARD_TYPE, StaleWakeClaimRefused, claimMcpOrder, dismissAgentCommandWakes, releaseUnreportedMcpOrder, authorizeCommandOutput } from './agent-command-route-agent-result.js';
+import { claimAgentCommand, routeAgentResult, CORNER_REVIEW_DEADLOCK_CARD_TYPE, CORNER_CHECKS_BLOCKED_CARD_TYPE, CORNER_AGENT_UNREACHABLE_CARD_TYPE, CORNER_MERGE_YES_CARD_TYPE, StaleWakeClaimRefused, claimMcpOrder, dismissAgentCommandWakes, releaseUnreportedMcpOrder, authorizeCommandOutput, MCP_CLAIM } from './agent-command-route-agent-result.js';
 import { TAGGED_AGENT_LIFECYCLE_COMMANDS, TaggedAgentLifecycleCommand, parseTaggedAgentLifecycleCommand, agentSignInCardId, isTaggedLoginText, soloRoomAgentSql, routeHumanMessage } from './agent-command-create-agent-command.js';
 import { readAgentCommands, commandInbox, routeSystemCommand, queueCornerMergeConflict, reconcileCornerMergeBlockers } from './agent-command-read-agent-commands.js';
 import { reconcileConfiguredCornerReviewers } from './agent-command-reconcile-configured-corner-reviewers.js';
@@ -168,6 +168,8 @@ export type CommandRow = {
   state: 'pending' | 'claimed' | 'complete' | 'cancelled';
   generation_id: string | null;
   lease_expires_at: Date | null;
+  /** NULL only for claims written by images below PR 4294. */
+  execution_kind?: 'helper' | 'mcp' | 'legacy' | null;
   turn_owner_connection_id?: string | null;
   turn_owner_epoch?: string | number | null;
   result_message_id: string | null;
@@ -489,7 +491,7 @@ export async function createClaimedMcpAgentCommand(db: SqlDatabase, input: {
       [id, input.roomId, input.agentId, chain?.root_command_id ?? id,
         chain?.root_source_message_id ?? input.requesterMessageId ?? id,
         chain ? Math.min(chain.agent_depth + 1, COMMAND_MAX_DEPTH) : 0, input.generationId]);
-    await claimAgentCommand(db, input.roomId, input.agentId, id, input.generationId);
+    await claimAgentCommand(db, input.roomId, input.agentId, id, input.generationId, MCP_CLAIM);
     return id;
   });
 }

@@ -7,7 +7,7 @@ import { COMMITTED_JOURNAL_SCHEMA } from './committed-journal-schema.js';
 import { MEMBERSHIP_AUTHORITY_SCHEMA } from './membership-authority-schema.js';
 import { OwnedModelAttempts } from './owned-model-attempt.js';
 import { parkOwnedModelTerminal } from './owned-model-parking.js';
-import { MODEL, MODEL_AGENT, MODEL_CLAIM, MODEL_ROOM, MODEL_SOURCE, seedOwnedModelFixture } from './test-fixtures/owned-model.js';
+import { MODEL, MODEL_AGENT, MODEL_CLAIM, MODEL_ROOM, seedOwnedModelFixture } from './test-fixtures/owned-model.js';
 
 const url = process.env.BEELINE_COMMAND_TEST_POSTGRES_URL;
 if (url && !['127.0.0.1', 'localhost', '[::1]'].includes(new URL(url).hostname)) throw new Error('Model parking proof requires isolated loopback PostgreSQL');
@@ -50,7 +50,7 @@ describe.skipIf(!url)('real PostgreSQL causal model owner end', () => {
       await f.left.query(`INSERT INTO agent_turns(room_id,request_id,agent_id,status,generation_id) VALUES($1,'synthetic-request',$2,'working',$3)`, [MODEL_ROOM, MODEL_AGENT, MODEL_CLAIM.generationId]);
       park = f.left.transaction(async tx => {
         await parkOwnedModelTerminal(tx, { roomId: MODEL_ROOM, agentId: MODEL_AGENT, requestId: 'synthetic-request', generationId: MODEL_CLAIM.generationId,
-          status: 'failed', modelOwnerEnd: { requestId: ONE } }, MODEL_AGENT, MODEL_SOURCE);
+          status: 'failed', modelOwnerEnd: { requestId: ONE } }, MODEL_AGENT);
         admitted.resolve(); await release.promise;
       });
       await admitted.promise;

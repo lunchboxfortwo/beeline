@@ -42,7 +42,7 @@ describe.skipIf(!url)('native current authority on real PostgreSQL',()=>{
     await first.query(`INSERT INTO memberships(workspace_id,room_id,identity_id,role) VALUES($1,$2,$3,'owner'),($1,$2,$4,'member')`,[workspace,room,person,agent]);
     await first.query(`INSERT INTO messages(id,room_id,author_id,text) VALUES($1,$2,$3,'Please work')`,[request,room,person]);
     const queued=(await createAgentCommand(first,{roomId:room,agentId:agent,sourceMessageId:request,reason:'human_tag'}))!;
-    await claimAgentCommand(first,room,agent,queued.id,'generation',owner);
+    await claimAgentCommand(first,room,agent,queued.id,'generation',{kind:'helper',owner});
     return {room,request,queued};
   }
   it.each(['membership','workspace','archive'] as const)('rolls back an admitted database effect when %s changes before commit',async kind=>{
@@ -191,10 +191,10 @@ describe.skipIf(!url)('native current authority on real PostgreSQL',()=>{
     const childStop=(await createAgentCommand(first,{...input,roomId:corner}))!;
     const rootStop=(await createAgentCommand(first,{...input,roomId:room}))!;
     await first.query('UPDATE rooms SET archived_at=clock_timestamp() WHERE id=ANY($1::uuid[])',[[room,corner]]);
-    await claimAgentCommand(first,corner,agent,childStop.id,'cleanup',owner);
+    await claimAgentCommand(first,corner,agent,childStop.id,'cleanup',{kind:'helper',owner});
     const frames:string[]=[],daemon=new DaemonService(first,new LiveHub());
     await daemon.fenceOwnedTurnReply(agent,{roomId:corner,commandId:childStop.id,generationId:'cleanup'},()=>frames.push('cleanup'));
-    await expect(claimAgentCommand(first,room,agent,rootStop.id,'cleanup',owner)).rejects.toThrow('authority expired before commit');
+    await expect(claimAgentCommand(first,room,agent,rootStop.id,'cleanup',{kind:'helper',owner})).rejects.toThrow('authority expired before commit');
     await second.query('UPDATE memberships SET removed_at=clock_timestamp() WHERE room_id=$1 AND identity_id=$2',[room,agent]);
     await expect(daemon.fenceOwnedTurnReply(agent,{roomId:corner,commandId:childStop.id,generationId:'cleanup'},()=>frames.push('must not send')))
       .rejects.toThrow('access changed');

@@ -1,6 +1,5 @@
 import { githubProviderKey } from './providers/index.js';
 import type { CommandArguments, DaemonDependencies, DaemonContext } from './daemon/context.js';
-import type { HelperTurnOwnershipSource } from '@beeline/api-contract/helper-turn-ownership';
 import type { StarterOnboardingService } from './starter-onboarding-run.js';
 import { CornerAccessDatabase } from './corner-access-database.js';
 import { type CommandRow } from './agent-command.js';
@@ -65,7 +64,7 @@ export class DaemonService {
 
    ownedModel?: OwnedModelConfiguration;
 
-   readonly modelClaims = new WeakMap<object, { agentId: string; source: HelperTurnOwnershipSource; configuration: OwnedModelConfiguration }>();
+   readonly modelClaims = new WeakMap<object, { agentId: string; configuration: OwnedModelConfiguration }>();
   setOwnedModel(...args: CommandArguments<typeof daemonSetOwnedModel>): ReturnType<typeof daemonSetOwnedModel> { return daemonSetOwnedModel(this, ...args); }
   ownedModelReady(...args: CommandArguments<typeof daemonOwnedModelReady>): ReturnType<typeof daemonOwnedModelReady> { return daemonOwnedModelReady(this, ...args); }
   async negotiateOwnedModel(...args: CommandArguments<typeof daemonNegotiateOwnedModel>): ReturnType<typeof daemonNegotiateOwnedModel> { return daemonNegotiateOwnedModel(this, ...args); }

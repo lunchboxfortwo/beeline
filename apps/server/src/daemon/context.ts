@@ -1,4 +1,3 @@
-import type { HelperTurnOwnershipSource } from '@beeline/api-contract/helper-turn-ownership';
 import type { StarterOnboardingService } from '../starter-onboarding-run.js';
 import type { CommandRow } from '../agent-command.js';
 import type { SqlDatabase } from '../database.js';
@@ -78,7 +77,7 @@ export type CommandArguments<Handler> = Handler extends (ctx: infer _Context, ..
 export interface DaemonContext extends DaemonDependencies {
   readonly dependencies: DaemonDependencies;
   ownedModel?: OwnedModelConfiguration;
-  readonly modelClaims: WeakMap<object, { agentId: string; source: HelperTurnOwnershipSource; configuration: OwnedModelConfiguration }>;
+  readonly modelClaims: WeakMap<object, { agentId: string; configuration: OwnedModelConfiguration }>;
   starterOnboarding?: StarterOnboardingService;
   memoryEmbed: EmbedFn | undefined;
   afterCommit: AfterCommit | undefined;

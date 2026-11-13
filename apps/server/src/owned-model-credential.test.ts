@@ -2,9 +2,10 @@ import { OWNED_MODEL_UNKNOWN_GENERATION_MESSAGE } from './owned-model-errors.js'
 import { createHash, createHmac } from 'node:crypto';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import type { SqlDatabase } from './database.js';
-import { OwnedModelCredentials } from './owned-model-credential.js';
+import { LEGACY_CREDENTIAL_BINDINGS_LIVE_SQL, OwnedModelCredentials } from './owned-model-credential.js';
 import { OwnedModelAttempts } from './owned-model-attempt.js';
-import { MODEL_AGENT, MODEL_CLAIM, MODEL_KEY, MODEL_ROOM, MODEL_SOURCE, ownedModelFixture } from './test-fixtures/owned-model.js';
+import { MODEL_AGENT, MODEL_CLAIM, MODEL_KEY, MODEL_ROOM, MODEL_SOURCE, MODEL_WORKSPACE, ownedModelFixture } from './test-fixtures/owned-model.js';
+import { parkOwnedModelTerminal } from './owned-model-parking.js';
 
 describe('opaque immutable owned-model credential primitive', () => {
   let fixture: Awaited<ReturnType<typeof ownedModelFixture>>;
@@ -37,6 +38,19 @@ describe('opaque immutable owned-model credential primitive', () => {
     expect(await db.transaction(tx=>credentials.issueInTransaction(tx,MODEL_CLAIM))).toEqual(issued);
     await db.transaction(tx=>credentials.assertCurrent(tx,actor));
     expect((await db.query('SELECT count(*)::int n FROM owned_model_credentials')).rows[0]).toEqual({n:1});
+  });
+
+  it('names the retirement prerequisite for the signed connection columns: no live invocation still holds a legacy-bound credential', async () => {
+    const { db } = fixture;
+    const live = async () => (await db.query<{ live: number }>(LEGACY_CREDENTIAL_BINDINGS_LIVE_SQL)).rows[0]?.live;
+    expect(await live()).toBe(0);
+    await db.query(`INSERT INTO owned_model_credentials(id,key_version,token_hash,agent_id,owner_id,workspace_id,room_id,command_id,
+      generation_id,request_id,connection_id,connection_epoch,instance_id,model,agent_model,model_token_hash,expires_ms)
+      SELECT $1,key_version,token_hash,agent_id,owner_id,workspace_id,room_id,'legacy-command',generation_id,request_id,
+        'legacy-socket',1,'legacy-server',model,agent_model,model_token_hash,expires_ms FROM owned_model_credentials LIMIT 1`, ['f'.repeat(32)]);
+    expect(await live()).toBe(1);
+    await db.query(`SELECT beeline_end_agent_turn($1,$2,'complete',NULL,NULL)`, [MODEL_CLAIM.commandId, MODEL_CLAIM.generationId]);
+    expect(await live()).toBe(0);
   });
 
   it('separates the key-derivation and credential-message MAC domains from direct sealing-key MACs', async () => {
@@ -135,5 +149,27 @@ describe('opaque immutable owned-model credential primitive', () => {
     expect((await db.query('SELECT command_id,state FROM owned_model_attempts ORDER BY command_id')).rows).toEqual([
       { command_id: 'different-command', state: 'unknown' }, { command_id: MODEL_CLAIM.commandId, state: 'unknown' },
     ]);
+  });
+
+  it('keeps one generation in two Rooms as two invocations with their own credential and owner end', async () => {
+    const { db, credentials, issued } = fixture;
+    const otherRoom = '33333333-3333-4333-8333-333333333333';
+    await db.query(`INSERT INTO rooms(id,workspace_id,name) VALUES($1,$2,'Other Room')`, [otherRoom, MODEL_WORKSPACE]);
+    await db.query(`INSERT INTO memberships(workspace_id,room_id,identity_id,role) VALUES($1,$2,$3,'member')`,
+      [MODEL_WORKSPACE, otherRoom, MODEL_AGENT]);
+    await db.query(`INSERT INTO agent_commands(id,room_id,agent_id,turn_request_id,action,reason,root_command_id,
+      root_source_message_id,agent_depth,state,generation_id,claimed_at,execution_kind)
+      VALUES('other-command',$1,$2,'other-request','input','human_tag','other-command','other-source',0,'claimed',$3,clock_timestamp(),'helper')`,
+      [otherRoom, MODEL_AGENT, MODEL_CLAIM.generationId]);
+    const other = await db.transaction(tx => credentials.issueInTransaction(tx,
+      { agentId: MODEL_AGENT, commandId: 'other-command', generationId: MODEL_CLAIM.generationId }));
+    expect(other.token).not.toBe(issued.token);
+    expect((await credentials.authenticate(db, other.token)).binding.roomId).toBe(otherRoom);
+    expect((await credentials.authenticate(db, issued.token)).binding.roomId).toBe(MODEL_ROOM);
+    await db.transaction(tx => parkOwnedModelTerminal(tx, { agentId: MODEL_AGENT, roomId: otherRoom, requestId: 'other-request',
+      generationId: MODEL_CLAIM.generationId, status: 'failed', modelOwnerEnd: { journalUnavailable: true } }, MODEL_AGENT));
+    expect((await db.query(`SELECT command_id FROM agent_command_owner_ends ORDER BY command_id`)).rows)
+      .toEqual([{ command_id: 'other-command' }]);
+    expect((await credentials.authenticate(db, issued.token)).binding.commandId).toBe(MODEL_CLAIM.commandId);
   });
 });

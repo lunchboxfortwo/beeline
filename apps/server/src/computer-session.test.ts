@@ -536,7 +536,7 @@ const scope1 = fixtureScope1();
     const anotherHumanId = '8'.repeat(64);
     await scope1.database.query(`INSERT INTO messages(id,room_id,author_id,text) VALUES($1,$2,$3,'Another request')`, [anotherHumanId, ROOM, HUMAN]);
     const anotherHuman = await createAgentCommand(scope1.database, { roomId: ROOM, agentId: AGENT, sourceMessageId: anotherHumanId, reason: 'human_tag' });
-    await expect(claimAgentCommand(scope1.database, ROOM, AGENT, snapshot.id, 'activity-generation',scope1.helperSource)).resolves.toMatchObject({ id: snapshot.id });
+    await expect(claimAgentCommand(scope1.database, ROOM, AGENT, snapshot.id, 'activity-generation',{kind:'helper',owner:scope1.helperSource})).resolves.toMatchObject({ id: snapshot.id });
     await scope1.database.query(`UPDATE agent_commands SET state='complete' WHERE id=$1`, [anotherHuman!.id]);
     // One pending observation per share; the running one is listed with its generation to resume.
     expect((await readAgentCommands(scope1.database, ROOM, AGENT)).commands.filter((c) =>

@@ -86,3 +86,13 @@ these unused upgrade columns for that same cleanup: `agent_commands.renudged_at`
 Runtime readers, writers and triggers are removed with their features; these columns authorize no timer,
 recovery scan, retry or resend path. Remove their storage-registry entries only when the corresponding schema
 columns are dropped after serving and rollback images have drained.
+
+## Turn transport storage retirement
+
+A running turn has no owning socket, epoch or server instance. The columns that once recorded one stay stored only for the overlaps below; nothing reads them for dispatch or authority, except the older-claim-writer classifier below, which reads only `turn_owner_connection_id` of an older image's write. Drop each group in one release when its condition holds, then remove its storage-registry entries.
+
+- `agent_connections.turn_connection_id`, `turn_connection_epoch`, `turn_transport_id`: drop when `SELECT 1 FROM agent_connections WHERE released_at IS NULL AND (turn_connection_id IS NOT NULL OR turn_connection_epoch IS NOT NULL OR turn_transport_id IS NOT NULL)` returns no row and the rollback floor is above PR 4267.
+- `agent_commands.turn_owner_connection_id`, `turn_owner_epoch` (and their pair constraint and index): claims still write them so the previous release reads owned turns after a rollback. Stop the write and drop them once the rollback floor is above this release. `agent_commands.execution_kind` replaces them.
+- Older claim writers: images below PR 4294 claim without `agent_commands.execution_kind`. The `beeline_classify_claim_kind` trigger (`apps/server/src/turn-ownership.ts`) derives it for their writes, so a connected-app claim from an older image is never offered to a helper. Current claims always store `helper`, `mcp` or `legacy`; the trigger leaves a declared kind unchanged, and NULL means an older image's legacy-adapter claim. Drop the trigger and its function when no image below PR 4294 serves and the rollback floor is above PR 4294. It reads `turn_owner_connection_id`, so drop it no later than those columns.
+- `agent_command_generation_owners.connection_id`, `connection_epoch`: no longer written. Drop when the rollback floor is above PR 4267.
+- `owned_model_credentials.connection_id`, `connection_epoch`, `instance_id`: the credential MAC covers them for credentials issued before PR 4267. Drop when `LEGACY_CREDENTIAL_BINDINGS_LIVE_SQL` (`apps/server/src/owned-model-credential.ts`) returns 0: then no credential that signs a connection belongs to a live invocation, so none can authenticate again and no credential-format migration is needed. `expires_ms` is not a retirement mechanism; no time expiry is enforced.

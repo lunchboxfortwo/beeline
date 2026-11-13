@@ -508,10 +508,11 @@ describe('corner_owed', () => {
     const isTargetSource = (alias: string) => /^target_source(?:_\d+)?$/.test(alias);
     expect(messageScans.filter((scan) => isTargetSource(scan.alias))).toHaveLength(2);
     expect(messageScans.filter((scan) => scan.alias === 'visible')).toHaveLength(1);
-    // The common clearing rule adds the report publication boundary and
-    // commander probes in the corner and threaded to the report.
+    // The common clearing rule adds commander probes in the corner and
+    // threaded to the report. The report projection reads its publication
+    // boundary from the visible card it already joins.
     expect(messageScans.filter((scan) => scan.alias !== 'item' && scan.alias !== 'visible' &&
       !isDispatchSource(scan.alias) && !isTargetSource(scan.alias) && !scan.alias.startsWith('callsite') &&
-      !scan.alias.startsWith('run_card'))).toHaveLength(9);
+      !scan.alias.startsWith('run_card'))).toHaveLength(8);
   });
 });
