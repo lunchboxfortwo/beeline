@@ -6,9 +6,17 @@ import { CommandRefusalError } from './command-refusal.js';
 import { cornerImplementerSql } from './corner-worker.js';
 import { systemLine } from './system-line.js';
 
-/** A corner's reviewer: its override, else the parent Room's reviewer. */
+/**
+ * A corner's reviewer: its override, else the parent Room's reviewer, while it
+ * is a current agent member of the parent Room. Tags, review wakes, PASS, the
+ * checks read and the merge gate all read this one list.
+ */
 export function cornerReviewerSql(corner = 'corner', parent = 'parent'): string {
-  return `COALESCE((SELECT reviewer_agent_id FROM corner_facts WHERE corner_id=${corner}.id),${parent}.reviewer_agent_id)`;
+  return `(SELECT reviewer.identity_id FROM memberships reviewer
+    JOIN identities reviewer_agent ON reviewer_agent.id=reviewer.identity_id AND reviewer_agent.kind='agent'
+    WHERE reviewer.room_id=${parent}.id AND reviewer.removed_at IS NULL
+      AND reviewer.identity_id=COALESCE((SELECT reviewer_agent_id FROM corner_facts WHERE corner_id=${corner}.id),
+        ${parent}.reviewer_agent_id) LIMIT 1)`;
 }
 
 export async function assertIndependentCornerReviewer(

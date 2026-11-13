@@ -1,4 +1,5 @@
 import { expect, it, createAgentCommand, nextAgentDepth, reconcileCornerMergeBlockers, reconcileConfiguredCornerReviewers, routeSystemCommand, readAgentCommands, systemLine, advanceCorner, H, A, B, R, C, id, db, phone, daemon, commands, send, helperOwner, claim, result, landCorner, rootFixture } from './test-support-agent-command.integration.test-support.js';
+import { queueCornerMergeConflict } from './agent-command.js';
 
 
 it('gives old helpers only projected commands and refuses unsolicited old output', async () => {
@@ -71,38 +72,29 @@ it('wakes the opener for failed checks even after a reviewer turn and retries a 
 });
 
 
-it('recovers a dirty PR lifecycle once per head and retries an undelivered conflict', async () => {
+it('Reproduction CONFLICT-LIVE-1: a stored conflict never wakes; only a live-read conflict event does, once per head', async () => {
   const headSha = 'f'.repeat(40);
   await rootFixture.db.query(`UPDATE corner_github_cache SET lifecycle=$2::jsonb WHERE corner_id=$1`, [
     C,
     JSON.stringify({
       checks: 'passing',
-      pr: {
-        number: 32,
-        headSha,
-        title: 'Resolve conflict',
-        url: 'https://github.com/acme/repo/pull/32',
-        mergeability: 'dirty',
-      },
+      pr: { number: 32, headSha, title: 'Resolve conflict', url: 'https://github.com/acme/repo/pull/32', mergeability: 'dirty' },
     }),
   ]);
-  await expect(reconcileCornerMergeBlockers(rootFixture.db)).resolves.toBe(1);
-  expect(await commands(B, C)).toEqual([
-    expect.objectContaining({ reason: 'corner_merge_conflict' }),
-  ]);
+  // Reconciliation and other events read only the stored copy, which GitHub may have cleared.
   await expect(reconcileCornerMergeBlockers(rootFixture.db)).resolves.toBe(0);
-  await rootFixture.db.query(`DELETE FROM agent_commands WHERE room_id=$1`, [C]);
-  await expect(reconcileCornerMergeBlockers(rootFixture.db)).resolves.toBe(1);
+  await advanceCorner(rootFixture.db, C, { kind: 'push', headSha, contents: { headSha } });
+  console.info(`Reproduction CONFLICT-LIVE-1: wrong=1 wake from the stored verdict; right=0; observed=${(await commands(B, C)).length}`);
+  expect(await commands(B, C)).toHaveLength(0);
+  const conflict = async () => {
+    const note = await systemLine(rootFixture.db, { roomId: C, authorId: H, subject: { kind: 'github', name: 'GitHub' },
+      verb: 'found merge conflicts in', object: { text: 'Resolve conflict', headSha } });
+    return queueCornerMergeConflict(rootFixture.db, C, note.id);
+  };
+  await expect(conflict()).resolves.toBe(true);
+  expect(await commands(B, C)).toEqual([expect.objectContaining({ reason: 'corner_merge_conflict' })]);
+  await expect(conflict()).resolves.toBe(false);
   expect(await commands(B, C)).toHaveLength(1);
-  await rootFixture.db.query(
-    `UPDATE corner_github_cache SET lifecycle=jsonb_set(lifecycle,'{pr,baseSha}',to_jsonb($2::text))
-     WHERE corner_id=$1`,
-    [C, 'a'.repeat(40)],
-  );
-  // A moved base is not a new head: the conflict wake stays one per head.
-  await expect(reconcileCornerMergeBlockers(rootFixture.db)).resolves.toBe(0);
-  expect(await commands(B, C)).toHaveLength(1);
-  await expect(reconcileCornerMergeBlockers(rootFixture.db)).resolves.toBe(0);
 });
 
 
@@ -119,8 +111,13 @@ it('Reproduction STALE-1: drops a merge-conflict wake whose head moved before th
         mergeability: 'dirty',
       },
     });
+  const conflict = async (headSha: string) => {
+    const note = await systemLine(rootFixture.db, { roomId: C, authorId: H, subject: { kind: 'github', name: 'GitHub' },
+      verb: 'found merge conflicts in', object: { text: 'Resolve conflict', headSha } });
+    return queueCornerMergeConflict(rootFixture.db, C, note.id);
+  };
   await rootFixture.db.query(`UPDATE corner_github_cache SET lifecycle=$2::jsonb WHERE corner_id=$1`, [C, dirty(headA)]);
-  await expect(reconcileCornerMergeBlockers(rootFixture.db)).resolves.toBe(1);
+  await expect(conflict(headA)).resolves.toBe(true);
   const [staleWake] = await commands(B, C);
   expect(staleWake?.reason).toBe('corner_merge_conflict');
   expect(staleWake?.source.body).toContain(headA);
@@ -137,12 +134,12 @@ it('Reproduction STALE-1: drops a merge-conflict wake whose head moved before th
   expect(staleState).toBe('cancelled');
   await expect(claim(staleWake!)).rejects.toThrow();
   // The current dirty head still gets exactly one wake, naming that head.
-  await expect(reconcileCornerMergeBlockers(rootFixture.db)).resolves.toBe(1);
+  await expect(conflict(headB)).resolves.toBe(true);
   const current = (await commands(B, C)).filter((command) => command.reason === 'corner_merge_conflict');
   expect(current).toHaveLength(1);
   expect(current[0]?.source.body).toContain(headB);
   expect(current[0]?.source.body).not.toContain(headA);
-  await expect(reconcileCornerMergeBlockers(rootFixture.db)).resolves.toBe(0);
+  await expect(conflict(headB)).resolves.toBe(false);
   console.log('Demonstrated Reproduction STALE-1: stale head A wake cancelled and refused; current dirty head B wake delivered exactly once');
 });
 
@@ -336,7 +333,7 @@ it('holds the green review wake while the corner worker still holds a live turn'
   await rootFixture.phone.execute('updateRoom', { roomId: R, reviewerAgentId: null }, H);
 });
 
-it('wakes the implementer without consuming a green transition when the configured reviewer is not a parent member', async () => {
+it('treats a configured reviewer removed from the parent Room as no reviewer and wakes the implementer', async () => {
   await rootFixture.phone.execute('updateRoom', { roomId: R, reviewerAgentId: A }, H);
   await rootFixture.db.query(`UPDATE memberships SET removed_at=now() WHERE room_id=$1 AND identity_id=$2`, [
     R,
@@ -356,12 +353,12 @@ it('wakes the implementer without consuming a green transition when the configur
   const handback = await commands(B, C);
   expect(handback.map(command => command.reason).sort()).toEqual(['corner_review_needed', 'report']);
   const needed = handback.find(command => command.reason === 'corner_review_needed');
-  expect(needed?.source.body).toContain('the configured reviewer is unreachable');
+  expect(needed?.source.body).toContain('no reviewer is configured');
   expect(needed?.source.body).toContain('report the blocker to its commander');
   expect((await rootFixture.db.query(`SELECT 1 FROM messages WHERE room_id=$1 AND text LIKE '%could not be reached%'`, [C])).rowCount).toBe(0);
   await expect(
     rootFixture.daemon.execute('getAgentConfiguration', { agentId: B, roomId: C }, B),
-  ).resolves.toEqual(expect.objectContaining({ reviewerHandle: 'hoots' }));
+  ).resolves.not.toEqual(expect.objectContaining({ reviewerHandle: 'hoots' }));
 });
 
 it('keeps reviewer subscriptions mandatory and reconciles an unreviewed green head', async () => {

@@ -1,6 +1,7 @@
 import { afterEach, beforeEach, expect, it } from 'vitest';
 import { migratedDatabase, type PgliteDatabase } from './test-support.js';
 import { migrate } from './database.js';
+import { readFileSync } from 'node:fs';
 import { PhoneService } from './phone-service.js';
 import { ensureSystemDirectMessageRoomResult } from './system-line.js';
 import { SYSTEM_IDENTITY_ID } from '@beeline/api-contract/system-identity';
@@ -119,7 +120,7 @@ it('cleans overlap-created orphan joins without rereading or dropping retired ag
   expect((await db.query(`SELECT 1 FROM rooms_mcp_members WHERE member_id=$1`,[MCP])).rowCount).toBe(1);
   expect((await db.query(`SELECT 1 FROM information_schema.columns WHERE table_schema=current_schema()
     AND ((table_name='free_agents' AND column_name='workspace_id') OR (table_name='rooms_mcp_members' AND column_name='workspace_ids'))`)).rowCount).toBe(2);
-  expect((await db.query(`SELECT 1 FROM pg_views WHERE schemaname=current_schema() AND viewname='effective_memberships'`)).rowCount).toBe(1);
+  expect((await db.query(`SELECT 1 FROM pg_views WHERE schemaname=current_schema() AND viewname='effective_memberships'`)).rowCount).toBe(0);
   expect(await phone.readRoom(PRIVATE,HUMAN)).not.toBeNull();
   expect(await phone.readRoom(PUBLIC,MCP)).not.toBeNull();
   await migrate(db);
@@ -137,4 +138,39 @@ it('migrates and serves canonical members when retired storage is absent', async
     AND ((table_name='free_agents' AND column_name='workspace_id') OR (table_name='rooms_mcp_members' AND column_name='workspace_ids'))`)).rowCount).toBe(0);
   expect(await phone.readRoom(PUBLIC,FREE)).not.toBeNull();
   expect(await phone.readRoom(PRIVATE,MCP)).not.toBeNull();
+});
+
+it('drops only retired membership storage, preserving canonical rows and agent metadata', async () => {
+  await db.query(`ALTER TABLE free_agents ADD COLUMN workspace_id uuid REFERENCES workspaces(id);
+    CREATE INDEX free_agents_workspace ON free_agents(workspace_id);
+    ALTER TABLE rooms_mcp_members ADD COLUMN workspace_ids uuid[];
+    CREATE VIEW effective_memberships AS SELECT * FROM room_access;`);
+  await db.query(`INSERT INTO free_agents(agent_id,owner_id,workspace_id,sealed_keys,fly_machine_id)
+    VALUES($1,$2,$3,'fixture','machine')`,[FREE,OWNER,W]);
+  await db.query(`INSERT INTO rooms_mcp_clients(id,name,redirects) VALUES('client','App','[]')`);
+  await db.query(`INSERT INTO rooms_mcp_members(client_id,owner_id,member_id,model_label,workspace_ids)
+    VALUES('client',$1,$2,'App',ARRAY[$3::uuid])`,[OWNER,MCP,W]);
+  await db.query(`INSERT INTO memberships(workspace_id,identity_id,role) VALUES($1,$2,'member'),($1,$3,'member')`,[W,FREE,MCP]);
+  await phone.execute('addRoomMember',{roomId:PUBLIC,memberId:FREE},OWNER);
+  await phone.execute('addRoomMember',{roomId:PRIVATE,memberId:MCP},OWNER);
+  await db.query(`INSERT INTO memberships(workspace_id,room_id,identity_id,role,push_muted,removed_at)
+    VALUES($1,$2,$3,'member',true,now())`,[W,PRIVATE,FREE]);
+  const records = async () => (await db.query(`SELECT * FROM memberships ORDER BY id`)).rows;
+  const metadata = async () => (await db.query(`SELECT to_jsonb(free)-'workspace_id' data FROM free_agents free
+    UNION ALL SELECT to_jsonb(member)-'workspace_ids' FROM rooms_mcp_members member`)).rows;
+  const before = await records(), agents = await metadata();
+  const sql = readFileSync(new URL('../contracts/workspace-members.sql',import.meta.url),'utf8');
+  await db.query(sql);
+  await migrate(db);
+  expect(await records()).toEqual(before);
+  expect(await metadata()).toEqual(agents);
+  expect((await db.query(`SELECT 1 FROM information_schema.columns WHERE table_schema=current_schema()
+    AND ((table_name='free_agents' AND column_name='workspace_id') OR (table_name='rooms_mcp_members' AND column_name='workspace_ids'))`)).rowCount).toBe(0);
+  expect((await db.query(`SELECT 1 FROM pg_views WHERE schemaname=current_schema() AND viewname='effective_memberships'`)).rowCount).toBe(0);
+  expect(await phone.readRoom(PUBLIC,FREE)).not.toBeNull();
+  expect(await phone.readRoom(PRIVATE,MCP)).not.toBeNull();
+  await db.query(sql);
+  await migrate(db);
+  expect(await records()).toEqual(before);
+  expect(await metadata()).toEqual(agents);
 });

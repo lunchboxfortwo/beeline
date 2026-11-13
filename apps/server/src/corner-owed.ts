@@ -205,10 +205,13 @@ function cornerOwedRowsSql(where: string, bulk: boolean, corner?: string, parent
         WHEN item.card_type='connector-offer' THEN
           item.card->>'status'='pending' AND item.card->'addressee'->>'pubkey'=person.id
         WHEN item.card_type='squire-approval' THEN
-          item.card->>'status' IS DISTINCT FROM 'expired'
-          AND NOT EXISTS (SELECT 1 FROM messages decision WHERE decision.room_id=owed_corner.id
+          COALESCE(item.card->'owner'->>'pubkey',person.id)=person.id
+          AND COALESCE(item.card->>'status','pending') NOT IN ('approved','denied','expired')
+          AND NOT EXISTS (SELECT 1 FROM messages decision JOIN rooms decision_room ON decision_room.id=decision.room_id
+            WHERE decision_room.workspace_id=owed_corner.workspace_id
             AND decision.card_type='squire-approval-decision'
-            AND decision.card->>'approvalId'=item.card->>'approvalId')
+            AND decision.card->>'approvalId'=item.card->>'approvalId'
+            AND decision.card->>'agentId'=item.card->'agent'->>'pubkey')
         WHEN item.card_type='grant-request' THEN EXISTS (
           SELECT 1 FROM jsonb_array_elements(
             CASE WHEN jsonb_typeof(item.card->'grants')='array' THEN item.card->'grants' ELSE '[]'::jsonb END
@@ -449,8 +452,11 @@ BEGIN
   IF NEW.card_type='squire-approval-decision' THEN
     PERFORM corner_owed_recompute_message(owed.message_id)
       FROM corner_owed owed JOIN messages approval ON approval.id=owed.message_id
-      WHERE owed.corner_id=NEW.room_id AND approval.card_type='squire-approval'
-        AND approval.card->>'approvalId'=NEW.card->>'approvalId';
+      JOIN rooms owed_scope ON owed_scope.id=owed.corner_id
+      JOIN rooms decision_scope ON decision_scope.id=NEW.room_id AND decision_scope.workspace_id=owed_scope.workspace_id
+      WHERE approval.card_type='squire-approval'
+        AND approval.card->>'approvalId'=NEW.card->>'approvalId'
+        AND approval.card->'agent'->>'pubkey'=NEW.card->>'agentId';
   END IF;
   -- A reply in the return Room also answers reports owed by their originating corner.
   IF TG_OP='INSERT' AND NEW.presentation='message' AND NEW.deleted_at IS NULL THEN

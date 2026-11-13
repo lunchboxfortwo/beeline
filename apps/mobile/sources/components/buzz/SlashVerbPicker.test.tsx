@@ -235,6 +235,12 @@ describe('SlashVerbPicker agent command palette', () => {
     );
     find_by_test_id(renderer, 'slash-verb-open-corner')[0].props.onPress();
     expect(onVerb).toHaveBeenCalledWith('open-corner');
+    for (const id of ['slash-agent-command-loop', 'slash-verb-open-corner']) {
+      const row = find_by_test_id(renderer, id)[0];
+      expect(row.findAll((node: any) => node.type === 'YStack' && node.props.width === 28)).toHaveLength(0);
+      expect(row.findAll((node: any) => node.type === 'Icon.Slash')).toHaveLength(0);
+      expect(row.props.paddingHorizontal).toBe('0');
+    }
   });
 
   it('states honestly when the agent does not advertise commands', () => {

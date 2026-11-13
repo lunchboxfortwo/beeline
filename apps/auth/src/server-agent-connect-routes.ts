@@ -285,7 +285,8 @@ export function registerServerAgentConnectRoutes(context: AuthRouteContext): voi
       throw new ProtocolError(410, 'rename_window_closed', 'reconnect this agent from the app');
     }
     noStore(reply);
-    return reply.send({ ok: true });
+    if (finished.status !== 'finished') throw new ProtocolError(500, 'connect_failed', 'finishing the agent connection failed');
+    return reply.send({ ok: true, ...(finished.agentHandle ? { agent_handle: finished.agentHandle } : {}) });
   });
 
   app.post('/auth/device/connect', async (request, reply) => {

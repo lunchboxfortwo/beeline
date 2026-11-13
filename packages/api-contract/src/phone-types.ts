@@ -612,7 +612,8 @@ export type SquireApprovalCardView = SquireApprovalDetails & {
   readonly tool: string;
   readonly title: string;
   readonly detail: string;
-  readonly approvalUrl: string;
+  /** Present only for `owner`, or on a legacy card in its owner's @System DM. */
+  readonly approvalUrl?: string;
   readonly approvalId?: string;
   readonly linkKind: 'approval' | 'passkey' | 'vouch';
   readonly sourceRoomId?: string;

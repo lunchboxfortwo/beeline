@@ -97,6 +97,13 @@ test('free-agent image publication stages its digest before the sole server roll
   assert.equal(existsSync('.github/workflows/free-agent-image.yml'), false);
   const workflow = parse(readFileSync('.github/workflows/unified-release.yml', 'utf8'));
   const steps = parse(readFileSync('.github/actions/server-leg/action.yml', 'utf8')).runs.steps;
+  const shared = readFileSync('scripts/release-steps/server-leg.sh', 'utf8');
+  for (const step of steps) if (step.run) {
+    const key = step.run.split(' ').at(-1);
+    const body = shared.match(new RegExp(`^${key}\\)\\n([\\s\\S]*?)^;;$`, 'm'));
+    assert.ok(body, `shared server step ${key} exists`);
+    step.run = body[1];
+  }
   const publish = steps.findIndex(step => step.id === 'free_agent_image');
   const stage = steps.findIndex(step => step.name?.startsWith('Stage the free starter'));
   const rollout = steps.findIndex(step => step.name?.startsWith('Canary one Machine'));

@@ -11,6 +11,9 @@ const REPOSITORY_ROOT = resolve(dirname(fileURLToPath(import.meta.url)), '..');
 const DEFAULT_SOURCE_ROOT = join(REPOSITORY_ROOT, 'web');
 const REQUIRED_STATIC_PATHS = [
   'index.html',
+  'favicon.ico',
+  'apple-touch-icon.png',
+  'icon-512.png',
   'privacy/index.html',
   'terms/index.html',
   'delete-account/index.html',
@@ -101,7 +104,12 @@ export async function validateBundleDirectory(bundleRoot, { expectedSha, expecte
       fail(`helper manifest names an unsafe ${platform} bundle file`);
     }
     if (bundle.verified !== true) fail(`helper manifest marks ${platform} as unverified`);
-    if (bundle.commit !== manifest.sourceCommit || bundle.version !== manifest.version) {
+    const carried = platform === 'darwin-arm64' &&
+      bundle.carriedFrom?.commit === bundle.commit && /^[0-9a-f]{40}$/.test(bundle.commit ?? '') &&
+      bundle.carriedFrom?.version === bundle.version && /^v\d+\.\d+\.\d+(?:-rc\.\d+)?$/.test(bundle.version ?? '') &&
+      bundle.carriedFrom?.sha256 === bundle.sha256;
+    if (bundle.carriedFrom && !carried) fail(`helper manifest has invalid ${platform} carry provenance`);
+    if ((bundle.commit !== manifest.sourceCommit || bundle.version !== manifest.version) && !carried) {
       fail(`helper manifest ${platform} identity differs from its top-level identity`);
     }
     if (!/^[0-9a-f]{64}$/.test(bundle.sha256 ?? '')) {

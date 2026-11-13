@@ -1,3 +1,4 @@
+import { cleanupConnectHandles } from './migrations/connect-handle-cleanup.js';
 import { backfillProviderPhotos } from './migrations/provider-photos.js';
 import { DIAGNOSTIC_COMMAND_SCHEMA } from './diagnostics-schema.js';
 import { SQUIRE_MACHINE_SCHEMA } from './squire-machine.js';
@@ -163,6 +164,7 @@ export async function migrate(
       await retireOrphanRoomMemberships(tx);
     }));
   });
+  await ddlScript('retired membership alias', 'DROP VIEW IF EXISTS effective_memberships;');
   await ddlScript('machine Squire source', SQUIRE_MACHINE_SCHEMA);
   await ddlScript('workspace handles', WORKSPACE_HANDLE_SCHEMA);
   await ddlScript('chat message numbers', CHAT_SEQ_SCHEMA);
@@ -590,6 +592,8 @@ export async function migrateData(database: SqlDatabase): Promise<void> {
     });
     return result;
   };
+  await dataStep('connect handle cleanup', () => workflowBackfillOnce(
+    database, 'connect-handle-cleanup-v1', cleanupConnectHandles));
   await dataStep('chat message numbers', () => workflowBackfillOnce(
     database, 'chat-seq-v1', async db => { await backfillChatSeq(db); }));
   await dataStep('provider photos', () => workflowBackfillOnce(

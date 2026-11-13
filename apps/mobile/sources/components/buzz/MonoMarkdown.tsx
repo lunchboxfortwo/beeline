@@ -319,7 +319,12 @@ function InlineMarkdown({
             />
           );
         }
-        if (!span.styles.length && !span.url && !span.mention && !span.channelRef && !span.tail) return span.text;
+        // Join only standalone command tokens; paths, URLs and code stay literal.
+        const text = span.url || span.styles.includes('code')
+          ? span.text
+          : span.text.replace(/(^|[\s(])\/([a-zA-Z][\w-]*)(?=$|[\s).,!?;:])/g,
+              (_, before: string, name: string) => `${before}/\u2060${name.replace(/-/g, '\u2060-\u2060')}`);
+        if (!span.styles.length && !span.url && !span.mention && !span.channelRef && !span.tail) return text;
         return (
           <ProseRun
             accessibilityRole={
@@ -343,7 +348,7 @@ function InlineMarkdown({
             // Last, so the arriving tail's tone wins over the settled body's.
             fade={span.tail ? tail?.style : undefined}
           >
-            {span.text}
+            {text}
           </ProseRun>
         );
       })}

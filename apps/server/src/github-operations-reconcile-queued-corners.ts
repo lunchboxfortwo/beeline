@@ -473,7 +473,7 @@ import { GitHubOperations, CornerWebhookTarget, GitHubRecord, repositoryName, br
                 checks: [],
                 updatedAt: Math.floor((await database.query<{ now: number }>(`SELECT extract(epoch FROM clock_timestamp())::double precision now`)).rows[0]!.now),
               },
-              ...(lifecycle.pr ? { pr: { ...lifecycle.pr, headSha: head } } : {}),
+              ...(lifecycle.pr ? { pr: { ...lifecycle.pr, headSha: head, mergeability: 'unknown' } } : {}),
             },
             database,
           );

@@ -45,7 +45,7 @@ export function SuggestionGlyph({ icon }: { icon: IconComponent }) {
 }
 
 export function SuggestionRow({ mark, name, nameAccent = false, detail, trailing, selected, first, label, role = 'button', state, onPress, testID }: {
-    mark: React.ReactNode; name: string; nameAccent?: boolean; detail?: string; trailing?: React.ReactNode;
+    mark?: React.ReactNode; name: string; nameAccent?: boolean; detail?: string; trailing?: React.ReactNode;
     selected: boolean; first: boolean; label: string; role?: 'button' | 'checkbox' | 'switch';
     state: { selected?: boolean; checked?: boolean }; onPress: () => void; testID: string;
 }) {
@@ -54,7 +54,7 @@ export function SuggestionRow({ mark, name, nameAccent = false, detail, trailing
             minHeight={HEIGHT.sheetRow}
             height={SUGGESTION_ROW_HEIGHT}
             padding="0"
-            paddingHorizontal="1"
+            paddingHorizontal={mark ? "1" : "0"}
             gap="3"
             alignItems="center"
             justifyContent="flex-start"
@@ -68,7 +68,7 @@ export function SuggestionRow({ mark, name, nameAccent = false, detail, trailing
             accessibilityState={state}
             testID={testID}
         >
-            <YStack width={28} alignItems="center">{mark}</YStack>
+            {mark ? <YStack width={28} alignItems="center">{mark}</YStack> : null}
             <YStack flex={1} minWidth={0}>
                 <T v="metaStrong" color={nameAccent ? 'needsYou' : 'ink'} numberOfLines={1}>{name}</T>
                 {detail ? <T v="meta" color="secondary" numberOfLines={1}>{detail}</T> : null}

@@ -385,6 +385,7 @@ export function waitingReportSql(command: string): string {
     WHEN ${command}.action NOT IN ('input','resume') THEN true
     WHEN ${command}.private_payload->>'kind' IN ('order','report') THEN true
     WHEN ${command}.reason='corner_review_dispatch' THEN true
+    WHEN ${command}.reason='agent_tag' AND ${command}.review_context IS NOT NULL THEN true
     WHEN ${command}.reason='corner_check' AND EXISTS (
       SELECT 1 FROM corner_facts fact JOIN rooms corner ON corner.id=fact.corner_id
       WHERE fact.corner_id=${command}.room_id
@@ -431,21 +432,6 @@ export function turnRootMessageSql(turn: 'turn' | 'written'): string {
 export function nextAgentDepth(parentDepth: number): number | undefined {
   return parentDepth < COMMAND_MAX_DEPTH ? parentDepth + 1 : undefined;
 }
-
-/** A reviewer reaches a corner through current parent Room membership. */
-export async function repairReviewerCornerMembership(
-  db: SqlDatabase, cornerId: string, reviewerAgentId: string,
-): Promise<boolean> {
-    db = new CornerAccessDatabase(db);
-  const member = await db.query(
-    `SELECT 1 FROM rooms corner JOIN memberships member ON member.room_id=corner.parent_id
-     JOIN identities identity ON identity.id=member.identity_id AND identity.kind='agent'
-     WHERE corner.id=$1 AND member.identity_id=$2 AND member.removed_at IS NULL`,
-    [cornerId, reviewerAgentId],
-  );
-  return member.rowCount > 0;
-}
-
 
 /** Exact-target eligibility shared by dispatch, the machine snapshot and delivery, including reports. */
 export function currentCornerCommandTargetSql(command: string): string {
@@ -651,7 +637,7 @@ export async function insertAgentCommand(db: SqlDatabase, input: AgentCommandInp
       : undefined);
   if (!selfAuthored && (input.action === undefined || input.action === 'input' || input.action === 'resume') &&
       privatePayload?.kind !== 'order' && !member.rows[0]!.human_input && !greenReviewWake &&
-      !failingCheckWake &&
+      !failingCheckWake && !(reviewContext && input.reason === 'agent_tag') &&
       await cornerReportWaiting(db, input.roomId, privatePayload?.kind))
     return undefined;
   // A current reviewer handoff continues the corner assignment, including an

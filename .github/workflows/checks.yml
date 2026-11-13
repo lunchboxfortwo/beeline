@@ -2,6 +2,8 @@ name: Checks
 run-name: ${{ inputs.nightly_id && (inputs.pinned_sha && format('Nightly Checks {0} {1}', inputs.nightly_id, inputs.pinned_sha) || format('Nightly Checks {0}', inputs.nightly_id)) || github.event.pull_request.title || github.workflow }}
 on:
   pull_request: {}
+  merge_group:
+    types: [checks_requested]
   workflow_call:
     inputs:
       suite:

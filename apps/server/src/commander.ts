@@ -9,7 +9,7 @@ import { SYSTEM_IDENTITY_ID } from '@beeline/api-contract/system-identity';
 import { normalizeAgentAsk } from './tray-approval-ask.js';
 import { createHash, randomBytes } from 'node:crypto';
 import type { SqlDatabase } from './database.js';
-import { createAgentCommand, hasPendingCornerReview, repairReviewerCornerMembership, nextAgentDepth, type CommandRow, type PrivateCommandPayload } from './agent-command.js';
+import { createAgentCommand, hasPendingCornerReview, nextAgentDepth, type CommandRow, type PrivateCommandPayload } from './agent-command.js';
 import { isChannelMentionToken, resolveCurrentMemberMentions, typedMentionHandles } from './message-mentions.js';
 import { cornerImplementerSql } from './corner-worker.js';
 import { CommandRefusalError } from './command-refusal.js';
@@ -129,7 +129,7 @@ export async function sendOrder(
          WHERE member.room_id=$1 AND member.removed_at IS NULL
            AND (identity.id=$2 OR lower(beeline_workspace_handle(identity.id,member.workspace_id))=$3)`, [address, named, named.toLowerCase()],
       )).rows[0];
-      if (!member || !await repairReviewerCornerMembership(db, address, member.id))
+      if (!member)
         throw new CommandRefusalError('order agent must be an agent member of this corner or its parent Room', 403);
       worker = member.id;
     }

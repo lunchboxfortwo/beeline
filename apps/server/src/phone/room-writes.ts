@@ -235,8 +235,6 @@ import { normalizeHumanCornerTitle, UUID_PATTERN } from './values.js';
           await subscribeRoomReviewer(database, [input.roomId, reviewerAgentId]);
 
       }
-      if (reviewerAgentId !== undefined)
-        await reconcileConfiguredCornerReviewers(database, input.roomId);
       if (input.visibility && input.visibility !== current?.visibility) {
         if (input.visibility === 'public')
           await joinWorkspaceMembersToPublicRoom(database, room.workspace_id, input.roomId);
@@ -251,6 +249,9 @@ import { normalizeHumanCornerTitle, UUID_PATTERN } from './values.js';
         });
       }
     });
+    // After commit: the reconcile reads GitHub live, never inside this transaction.
+    if (reviewerAgentId !== undefined)
+      await reconcileConfiguredCornerReviewers(ctx.database, input.roomId);
   }
 
   export async function phoneDeleteRoom(ctx: PhoneContext, roomId: string, viewerId: string) {

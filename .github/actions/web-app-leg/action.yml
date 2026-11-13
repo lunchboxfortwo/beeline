@@ -21,7 +21,7 @@ runs:
     - name: Install mobile dependencies
       shell: bash
       working-directory: apps/mobile
-      run: bash ../../scripts/npm-ci-timed.sh
+      run: bash "$GITHUB_WORKSPACE/scripts/release-steps/web-app-leg.sh" step0
     - name: Export the production web bundle
       shell: bash
       working-directory: apps/mobile
@@ -29,29 +29,29 @@ runs:
         EXPO_PUBLIC_BEELINE_RELEASE_SHA: ${{ inputs.release_sha }}
         EXPO_PUBLIC_BEELINE_RELEASE_VERSION: ${{ inputs.release_version }}
         NODE_ENV: production
-      run: npx expo export --platform web --source-maps --output-dir dist
+      run: bash "$GITHUB_WORKSPACE/scripts/release-steps/web-app-leg.sh" step1
     - name: Upload private source maps and remove them from the hosting export
       shell: bash
       working-directory: apps/mobile
       env:
         SENTRY_AUTH_TOKEN: ${{ inputs.sentry_auth_token }}
         RELEASE_SHA: ${{ inputs.release_sha }}
-      run: node scripts/prepare-web-sourcemaps.mjs dist "$RELEASE_SHA"
+      run: bash "$GITHUB_WORKSPACE/scripts/release-steps/web-app-leg.sh" step2
     - name: Verify the push worker is in the export
       shell: bash
-      run: cmp apps/mobile/public/push-sw.js apps/mobile/dist/push-sw.js
+      run: bash "$GITHUB_WORKSPACE/scripts/release-steps/web-app-leg.sh" step3
     - name: Stamp the immutable release identity
       shell: bash
       env:
         RELEASE_SHA: ${{ inputs.release_sha }}
         RELEASE_VERSION: ${{ inputs.release_version }}
-      run: node -e 'require("node:fs").writeFileSync("apps/mobile/dist/beeline-web-release.json", JSON.stringify({version:process.env.RELEASE_VERSION,sourceSha:process.env.RELEASE_SHA})+"\n")'
+      run: bash "$GITHUB_WORKSPACE/scripts/release-steps/web-app-leg.sh" step4
     - name: Deploy and promote the export to EAS Hosting production
       shell: bash
       working-directory: apps/mobile
       env:
         EXPO_TOKEN: ${{ inputs.expo_token }}
-      run: '"$EAS_CLI_PATH" deploy --prod --export-dir dist --non-interactive'
+      run: 'bash "$GITHUB_WORKSPACE/scripts/release-steps/web-app-leg.sh" step5'
     - name: Verify the canonical web origin serves this release
       shell: bash
-      run: node scripts/verify-web-deployment.mjs --expected-release apps/mobile/dist/beeline-web-release.json --attempts 20
+      run: bash "$GITHUB_WORKSPACE/scripts/release-steps/web-app-leg.sh" step6

@@ -75,10 +75,12 @@ test('route rejects unrecognized files, nested paths and writes before fetching'
 test('helper promote dry run publishes and reads both exact channels through the Worker, without Pages', async () => {
   const directory = await mkdtemp(join(tmpdir(), 'helper-downloads-'));
   const originalFetch = globalThis.fetch;
+  const environmentKeys = ['GITHUB_WORKSPACE', 'BUNDLE_DIR', 'CHANNEL', 'RELEASE_SHA', 'RELEASE_VERSION'];
+  const originalEnvironment = Object.fromEntries(environmentKeys.map(key => [key, process.env[key]]));
   try {
     const action = await yaml('.github/actions/daemon-leg/action.yml');
     assert.equal(action.runs.steps.some(step => /pages-leg|deploy-pages|upload-pages/.test(step.uses ?? step.run ?? '')), false);
-    const publish = action.runs.steps.find(step => step.with?.script?.includes('publishPagesChannel'));
+    const publish = action.runs.steps.find(step => step.env?.BUNDLE_DIR);
     const releases = new Map(), assets = new Map(); let id = 1;
     const github = { rest: { repos: {
       async getReleaseByTag({ tag }) { if (!releases.has(tag)) throw Object.assign(Error('missing'), { status: 404 }); return { data: releases.get(tag) }; },
@@ -87,7 +89,7 @@ test('helper promote dry run publishes and reads both exact channels through the
       async uploadReleaseAsset({ release_id, name, data }) { const asset = { id: id++, name }; assets.set(asset.id, data); [...releases.values()].find(release => release.id === release_id).assets.push(asset); },
     } } };
     // Execute the actual github-script publication step with local fixture bytes.
-    const run = new (Object.getPrototypeOf(async function () {}).constructor)('github', 'context', 'process', publish.with.script);
+    const run = new (Object.getPrototypeOf(async function () {}).constructor)('github', 'core', 'context', publish.with.script);
     const channelManifests = [];
     for (const channel of ['latest', 'next']) {
       const bytes = Buffer.from(`verified ${channel} archive`), sha = 'a'.repeat(40);
@@ -97,9 +99,10 @@ test('helper promote dry run publishes and reads both exact channels through the
       await writeFile(join(directory, file), bytes);
       await writeFile(join(directory, `${file}.sha256`), `${digest}  ${file}\n`);
       await writeFile(join(directory, 'manifest.json'), JSON.stringify(manifest));
-      await run(github, { repo: { owner: 'Beeline-Work', repo: 'beeline' } }, { env: {
+      Object.assign(process.env, {
         GITHUB_WORKSPACE: process.cwd(), BUNDLE_DIR: directory, CHANNEL: channel, RELEASE_SHA: sha, RELEASE_VERSION: version,
-      } });
+      });
+      await run(github, {}, { repo: { owner: 'Beeline-Work', repo: 'beeline' } });
       channelManifests.push([channel, manifest, bytes]);
     }
     globalThis.fetch = async url => {
@@ -119,6 +122,9 @@ test('helper promote dry run publishes and reads both exact channels through the
     assert.equal(workflow.jobs.website.steps.find(step => step.uses?.includes('pages-leg')).if, undefined);
   } finally {
     globalThis.fetch = originalFetch;
+    for (const [key, value] of Object.entries(originalEnvironment)) {
+      if (value === undefined) delete process.env[key]; else process.env[key] = value;
+    }
     await rm(directory, { recursive: true, force: true });
   }
 });
@@ -127,7 +133,8 @@ test('website publication excludes every download while preserving installers an
   const directory = await mkdtemp(join(tmpdir(), 'static-pages-'));
   try {
     const action = await yaml('.github/actions/pages-leg/action.yml');
-    assert.match(action.runs.steps[0].run, /--static-only/);
+    assert.match(action.runs.steps[0].run, /release-steps\/pages-leg\.sh/);
+    assert.match(await readFile('scripts/release-steps/pages-leg.sh', 'utf8'), /--static-only/);
     assert.equal(action.runs.steps.some(step => step.with?.script?.includes('downloadPagesChannel')), false);
     await buildPagesSite({ outputRoot: directory, includeDownloads: false });
     await assert.rejects(access(join(directory, 'dl')), { code: 'ENOENT' });

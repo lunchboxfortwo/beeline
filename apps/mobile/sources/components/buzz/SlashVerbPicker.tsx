@@ -1,10 +1,9 @@
 import React from 'react';
 import { ScrollView, YStack } from 'tamagui';
-import { Slash } from 'lucide-react-native';
 import { T } from '@/ui/grammar';
 import type { BuiltInSlashVerb, BuiltInSlashVerbId } from '@/buzz/slash-verbs';
 import type { AgentPaletteCommand } from '@/buzz/slash-verbs';
-import { SuggestionCard, SuggestionGlyph, SuggestionRow } from '@/ui/screens/composer/Suggestions';
+import { SuggestionCard, SuggestionRow } from '@/ui/screens/composer/Suggestions';
 
 /** At most six rows show before the list scrolls inside the card. */
 const VISIBLE_ROWS = 6;
@@ -69,7 +68,6 @@ export function SlashVerbPicker({
               }
               onPress={() => onSelectCommand(command.name)}
               testID={`slash-agent-command-${command.name}`}
-              mark={<SuggestionGlyph icon={Slash} />}
               name={`/${command.name}`}
               detail={[command.description, command.inputHint].filter(Boolean).join(' · ') || undefined}
               trailing={command.toggle === undefined ? undefined : (
@@ -90,7 +88,6 @@ export function SlashVerbPicker({
                 state={{ selected: index === highlightedIndex }}
                 onPress={() => onSelect(verb.id)}
                 testID={`slash-verb-${verb.id}`}
-                mark={<SuggestionGlyph icon={Slash} />}
                 name={`/${verb.command} · ${verb.label}`}
                 detail={verb.description}
               />

@@ -844,7 +844,7 @@ describe('PhoneService Needs-you tray', () => {
       .toEqual([['Approve'], ['Use passkey'], ['Vouch']]);
   });
 
-  it('holds a Trusty Squire approval until its decision lands in the source Room', async () => {
+  it('matches a Trusty Squire decision by agent and approval identity across Rooms', async () => {
     await card(ROOM, 'squire-approval', {
       agent: hoots,
       tool: 'fetch_credential',
@@ -866,10 +866,20 @@ describe('PhoneService Needs-you tray', () => {
         actions: [{ kind: 'external', label: 'Use passkey', url: 'https://squire.example/approve/1' }],
       },
     ]);
-    await card(CORNER, 'squire-approval-decision', {
-      approvalId: 'approval-1',
-      status: 'approved',
+    await card(ROOM, 'squire-approval-decision', {
+      approvalId: 'approval-1', agentId: 'unrelated-agent', status: 'approved',
     });
+    expect(await approvals()).toHaveLength(1);
+    await card(ROOM, 'squire-approval-decision', {
+      approvalId: 'approval-1', agentId: AGENT, status: 'approved',
+    });
+    expect(await approvals()).toEqual([]);
+  });
+
+  it.each(['approved', 'denied', 'expired'])('omits a %s Squire card even without a decision message', async status => {
+    await card(ROOM, 'squire-approval', { agent: hoots, tool: 'fetch_credential',
+      title: 'Reveal key', approvalUrl: 'https://squire.example/settled', approvalId: 'settled',
+      sourceRoomId: CORNER, expiresAt: Date.now() + 600000, linkKind: 'passkey', status });
     expect(await approvals()).toEqual([]);
   });
 
