@@ -1,5 +1,6 @@
 import { githubProviderKey } from './providers/index.js';
 import { NotificationWork } from './notification-work.js';
+import { setLiveCornerChecksReader } from './corner-live-checks.js';
 import { CommandRefusalError } from './command-refusal.js';
 import type { RepositorySignals } from './repository-onboarding.js';
 import { createCipheriv, createDecipheriv, createHash, randomBytes } from 'node:crypto';
@@ -56,6 +57,7 @@ export class GitHubOperations {
   ) {
     this.#key = createHash('sha256').update(clientSecret).digest();
     this.armRoomTokenCache();
+    setLiveCornerChecksReader(cornerId => this.readPrChecksStatus({ cornerId }, false));
     this.app.setRateLimitStore?.({
       get: async installationId => {
         const row = (await this.database.query<{ retry_at: string | null }>(

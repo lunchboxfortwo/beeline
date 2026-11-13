@@ -1,5 +1,6 @@
 import { createHash, describe, expect, it, vi, cornerRunStateSql, generateKeyPair, exportPKCS8, GitHubAppClient, GitHubHttpError, GitHubOAuthClient, seedCornerOpening, setCornerOwner, GitHubOperations, readAgentCommands, DaemonService, LiveHub, PhoneService, readRoomView, HUMAN, REVIEWER, fixtureScope1, type SqlDatabase } from './test-support-github-operations.test-support.js';
 import { readFileSync } from 'node:fs';
+import { reconcileConfiguredCornerReviewers } from './agent-command-reconcile-configured-corner-reviewers.js';
 import { runInNewContext } from 'node:vm';
 import { transformSync } from 'esbuild';
 
@@ -431,6 +432,24 @@ const scope1 = fixtureScope1();
       expect((await scope1.database.query<{ head: string }>(
         `SELECT lifecycle->'pr'->>'headSha' head FROM corner_github_cache WHERE corner_id=$1`, [corner])).rows[0]?.head).toBe(liveHead);
     });
+
+
+  it('LIVE-WAKE: a reconcile reads GitHub before a stored green wakes the reviewer (item 12)', async () => {
+    const { room, corners, app, headSha } = await scope1.checksFixture();
+    const corner = corners[0]!;
+    const worker = 'c'.repeat(64);
+    await scope1.database.query(`INSERT INTO identities(id,kind,name) VALUES($1,'agent','Worker')`, [worker]);
+    await scope1.database.query(`INSERT INTO agents(agent_id,owner_id) VALUES($1,$2)`, [worker, HUMAN]);
+    await scope1.database.query(`INSERT INTO memberships(workspace_id,room_id,identity_id,role)
+      SELECT workspace_id,id,$2,'member' FROM rooms WHERE id=$1`, [room, worker]);
+    await seedCornerOpening(scope1.database, { cornerId: corner, agentId: worker });
+    app.readCommitCheckRollup.mockResolvedValue({ state: 'pending', total: 1, failing: [], checks: [] });
+    new GitHubOperations(scope1.database, {} as GitHubOAuthClient, app as unknown as GitHubAppClient, 'secret');
+    await reconcileConfiguredCornerReviewers(scope1.database, room);
+    expect(app.readCommitCheckRollup).toHaveBeenCalled();
+    expect((await scope1.database.query(`SELECT 1 FROM agent_commands WHERE room_id=$1
+      AND reason='corner_review_dispatch' AND review_context->>'headSha'=$2`, [corner, headSha])).rowCount).toBe(0);
+  });
 
 
   it('IDLE-DERIVED: identical GitHub reads retain the check status timestamp', async () => {
