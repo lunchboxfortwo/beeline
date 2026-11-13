@@ -109,10 +109,10 @@ export function useChatRoute([
 
   const insets = useSafeAreaInsets();
 
-  const readOnlyFooterInset =
+  const readOnlyFooterInset = useMemo(() =>
     Platform.OS === 'android'
       ? { marginBottom: insets.bottom }
-      : { paddingBottom: Math.max(insets.bottom, 8) };
+      : { paddingBottom: Math.max(insets.bottom, 8) }, [insets.bottom]);
 
   const navigation = useNavigation();
   return [

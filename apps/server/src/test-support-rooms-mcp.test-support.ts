@@ -180,7 +180,7 @@ export function fixtureScope1() {
     const response = await exchange(grant);
     expect(response.status).toBe(200);
     const tokens = await response.json() as { access_token: string };
-    expect(tokens).not.toHaveProperty('expires_in');
+    expect(tokens).toHaveProperty('expires_in', 10 * 365 * 24 * 60 * 60);
     expect(tokens).not.toHaveProperty('refresh_token');
     expect((await db.query('SELECT expires_at FROM rooms_mcp_tokens WHERE hash=$1', [tokenHash(tokens.access_token)])).rows[0]?.expires_at).toBeNull();
     // The connection acts through a member owned by the approving person; a

@@ -248,6 +248,7 @@ export const conversationColumns = `SELECT id,author_id,created_at,presentation,
         root_message_id,request_id,
         (SELECT request.author_id FROM messages request WHERE request.id=messages.request_id) request_author_id,
         agent_hop_count,attachments,system_event,
+        CASE WHEN chat_seq IS NOT NULL THEN '¶'||beeline_room_handle(author_id,room_id)||'-'||chat_seq END message_link,
         ${MESSAGE_CURSOR_MS_SQL} cursor_ms,
         floor(extract(epoch FROM now())*1000)::bigint now_ms`;
 

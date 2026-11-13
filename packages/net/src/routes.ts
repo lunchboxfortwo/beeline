@@ -134,6 +134,7 @@ const phoneOperations = {
   requestCornerClose: true,
   resolveDirectMessage: true,
   resolveInvite: true,
+  resolveChatLinks: true,
   resolveMessageLink: true,
   revealWebhookToken: true,
   revokeAgentGrant: true,

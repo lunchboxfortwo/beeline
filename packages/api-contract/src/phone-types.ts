@@ -257,6 +257,8 @@ export type RoomViewMessage = {
   readonly requestId?: string;
   readonly attachments?: readonly AttachmentReference[];
   readonly mentionPubkeys?: readonly string[];
+  /** This message's place in its chat (a Room with its threads); `¶author-N` names it. */
+  readonly chatSeq?: number;
   /** The model that produced this agent reply, stamped at generation time on
    *  the server. Absent on rows before the stamp existed and on non-agent
    *  rows; the byline falls back to no model, never a roster lookup. */

@@ -78,6 +78,8 @@ export interface SystemLineInput {
   /** Agent-only browser observations use activity and never paint in the transcript. */
   readonly presentation?: 'system' | 'card' | 'activity';
   readonly cardType?: string;
+  /** False stores the line and does not route it. The caller advances the corner. */
+  readonly routeCommands?: boolean;
   readonly card?: Record<string, unknown>;
   readonly requestId?: string;
   readonly commandId?: string;
@@ -462,7 +464,7 @@ export async function systemLine(
           parent: watch.incoming_command ?? undefined, retainDepth: true,
           action: 'input',
         });
-      await routeSystemCommand(db, {
+      if (input.routeCommands !== false) await routeSystemCommand(db, {
         roomId: input.roomId,
         sourceMessageId: id,
         kind: input.kind,

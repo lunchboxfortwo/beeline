@@ -368,16 +368,16 @@ describe('checks dispatch (rows 6-8)', () => {
   });
 });
 describe('the run lock (a push transition can race a close or another push)', () => {
-  it('retains the state row in the first read before applying a transition', async () => {
+  it('reads facts before locking the state row to apply a transition', async () => {
     const cornerId = await open('owner/widgets');
     const recording = new RecordingDatabase(rootFixture.db);
     await advanceCorner(recording, cornerId, { kind: 'push', headSha: '1'.repeat(40), contents: {} });
-    expect(recording.calls[0]).toEqual({
-      sql: expect.stringContaining('FOR UPDATE OF fact'),
-      values: [cornerId],
-    });
+    expect(recording.calls[0].sql).not.toContain('FOR UPDATE');
+    expect(recording.calls[0].values).toEqual([cornerId]);
     const readIndex = recording.calls.findIndex((call) => call.sql.includes('FROM messages'));
     expect(readIndex).toBeGreaterThan(0);
+    const lockIndex = recording.calls.findIndex((call) => call.sql.includes('FOR UPDATE OF fact'));
+    expect(lockIndex).toBeGreaterThan(readIndex);
     // The transition still actually happened — this proves the lock, not a no-op.
     expect(await currentState(cornerId)).toBe('working');
   });

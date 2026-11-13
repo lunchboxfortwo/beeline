@@ -9,6 +9,7 @@ import {
   readInviteView,
   readMessageSearchView,
   readMessageLinkView,
+  readChatLinksView,
   readRoomHistoryOutline,
   readRoomHistoryView,
   readRoomView,
@@ -55,6 +56,9 @@ type Guard<T> = SurfaceReader<T>;
 class MonolithRoomViewClient {
   resolveMessageLink(messageId: string) {
     return this.get('resolveMessageLink', { messageId }, readMessageLinkView);
+  }
+  resolveChatLinks(roomId: string, tokens: readonly string[]) {
+    return this.get('resolveChatLinks', { roomId, tokens: [...tokens] }, readChatLinksView);
   }
   workspaces(): Promise<WorkspaceListView> { return this.get('readWorkspaces', {}, readWorkspaceListView); }
   workspace(workspaceId: string): Promise<WorkspaceView> {
@@ -154,6 +158,9 @@ export class RoomViewClient {
   constructor(_options: RoomViewClientOptions) {}
   resolveMessageLink(messageId: string) {
     return this.implementation.resolveMessageLink(messageId);
+  }
+  resolveChatLinks(roomId: string, tokens: readonly string[]) {
+    return this.implementation.resolveChatLinks(roomId, tokens);
   }
   workspaces() {
     return this.implementation.workspaces();

@@ -16,17 +16,21 @@ import { useChatComposerSend } from './useChatComposerSend';
 import { useSendConfirmationState } from './send-confirmation';
 import { selectComposerAckPresentation } from '@/buzz/room-indicators';
 
-it('SEND-CONFIRM-1 paints the optimistic row before acceptance and keeps failure feedback', async () => {
+it.each([false, true])('SEND-CONFIRM-1 paints the optimistic row before acceptance and keeps failure feedback (reply=%s)', async (reply) => {
   Object.assign(globalThis, { IS_REACT_ACT_ENVIRONMENT: true });
   let accept!: (result: object) => void;
   const receipt = new Promise<object>(resolve => { accept = resolve; });
   const event = { id: 'signed-message', created_at: 100 };
-  const transport = { composeMessage: vi.fn(async () => event) };
-  const outbox = { enqueue: vi.fn(async () => undefined), send: vi.fn(() => receipt), get: () => true };
+  const compose = vi.fn(async () => event);
+  const transport = { composeMessage: compose, composeReplyMessage: compose };
+  const outbox = { enqueue: vi.fn(async (_event: unknown, _row: unknown) => undefined), send: vi.fn(() => receipt), get: () => true };
   let inputRef!: React.RefObject<string>;
   let send!: ReturnType<typeof useChatComposerSend>[0];
   const draft = { value: 'Hello agent', captureMessage: () => () => { draft.value = ''; return true; } };
   const no = () => undefined;
+  const reference = { channelId: 'room', eventId: 'parent', rootId: 'parent' };
+  const replyTarget = reply ? { messageId: 'parent', authorName: 'Captain', isAgent: false,
+    preview: 'Original message', reference } : null;
   function Harness() {
     const confirmation = useSendConfirmationState();
     const [sending, setSending] = useState(false);
@@ -35,7 +39,7 @@ it('SEND-CONFIRM-1 paints the optimistic row before acceptance and keeps failure
     const inFlight = useRef(false);
     const input = useRef(draft.value);
     inputRef = input;
-    const args = [draft, input, null, { current: [] }, inFlight, false,
+    const args = [draft, input, replyTarget, { current: [] }, inFlight, false,
       [], { current: new Map() }, () => no, { current: new Map() }, [], true,
       { current: () => outbox }, true, confirmation.setReceivedSteer, confirmation.setPendingAck,
       setSending, true, setDelivery, null, 'viewer', { remove: no }, { request: no }, no,
@@ -62,6 +66,7 @@ it('SEND-CONFIRM-1 paints the optimistic row before acceptance and keeps failure
     expect(tree.root.findByType('p').props.children).toBe('Hello agent');
     expect(tree.root.findByType('span').props.children).toBe('sending…');
     expect(outbox.enqueue).toHaveBeenCalledOnce();
+    expect(outbox.enqueue.mock.calls[0]?.[1]).toMatchObject(reply ? { reply: reference } : {});
     await act(async () => { accept({ externalAgentHandles: ['atlas'] }); await pending; });
     expect(tree.root.findByType('span').props.children).toBe('Sent to @atlas');
     expect(tree.root.findByType('output').props['data-sending']).toBe(false);

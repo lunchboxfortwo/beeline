@@ -8,7 +8,10 @@ import { HelperDaemonService as DaemonService } from './test-fixtures/helper-dae
 import { PhoneService } from './phone-service.js';
 import { LiveHub } from './live.js';
 import { captureServerError } from './sentry.js';
-vi.mock('./sentry.js', () => ({ captureServerError: vi.fn() }));
+vi.mock('./sentry.js', async (importOriginal) => ({
+  ...await importOriginal<typeof import('./sentry.js')>(),
+  captureServerError: vi.fn(),
+}));
 import { GitHubOperations } from './github-operations.js';
 import { readAgentCommands, createAgentCommand, type CommandRow } from './agent-command.js';
 import { GITHUB_SUBJECT, systemLine } from './system-line.js';

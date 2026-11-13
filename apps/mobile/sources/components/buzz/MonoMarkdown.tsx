@@ -1,5 +1,5 @@
 import React, { createContext, useCallback, useContext, useMemo } from 'react';
-import type { StyleProp, TextStyle } from 'react-native';
+import { Platform, type StyleProp, type TextStyle } from 'react-native';
 import { XStack, YStack } from 'tamagui';
 import { Indent, ProseRun, T, type ProseMark } from '@/ui/grammar';
 import { parseMarkdown, type MarkdownSpan } from '@/components/markdown/parseMarkdown';
@@ -10,6 +10,8 @@ import {
   type ChannelReferenceTarget,
 } from '@/buzz/channel-reference';
 import { messageLinkId, openMessageLink } from '@/buzz/message-link';
+import { findChatLinkTokens, type ChatLinkToken } from '@beeline/api-contract/phone';
+import { ChatLinkRun } from '@/components/buzz/ChatLinks';
 import { openExternalUrl } from '@/utils/open-external-url';
 
 /** The viewer's own normalized handle; a mention of it is highlighted. */
@@ -24,6 +26,8 @@ const ViewerMention = createContext<string | undefined>(undefined);
 type MentionSpan = MarkdownSpan & {
   mention?: boolean;
   channelRef?: ChannelReferenceTarget;
+  /** A `↳thread` or `¶author-N` token; the server decides what it opens. */
+  chatLink?: ChatLinkToken;
   /** The just-arrived region of a streaming draft (`tail`, C98). */
   tail?: boolean;
 };
@@ -108,6 +112,34 @@ export function glossChannelReferences(
   return out;
 }
 
+/**
+ * `↳thread` and `¶author-N` tokens in plain prose. Same discipline as the
+ * other two families: never inside code, a URL, a mention or a channel
+ * reference. Whether a token links is the server's answer (`ChatLinkRun`).
+ */
+export function glossChatLinks(spans: MentionSpan[]): MentionSpan[] {
+  const out: MentionSpan[] = [];
+  for (const span of spans) {
+    if (span.url || span.styles.includes('code') || span.mention || span.channelRef) {
+      out.push(span);
+      continue;
+    }
+    const tokens = findChatLinkTokens(span.text);
+    if (!tokens.length) {
+      out.push(span);
+      continue;
+    }
+    let last = 0;
+    for (const token of tokens) {
+      if (token.start > last) out.push({ ...span, text: span.text.slice(last, token.start) });
+      out.push({ ...span, text: token.text, chatLink: token });
+      last = token.end;
+    }
+    if (last < span.text.length) out.push({ ...span, text: span.text.slice(last) });
+  }
+  return out;
+}
+
 type MonoMarkdownProps = {
   markdown: string;
   /**
@@ -186,8 +218,10 @@ export function markTailSpans(spans: MentionSpan[], length: number): MentionSpan
       continue;
     }
     const cut = span.text.length - remaining;
-    out.unshift({ ...span, text: span.text.slice(cut), tail: true });
-    out.unshift({ ...span, text: span.text.slice(0, cut) });
+    // A link token split by the arriving tail is not whole; draw its words.
+    const { chatLink: _split, ...whole } = span;
+    out.unshift({ ...whole, text: span.text.slice(cut), tail: true });
+    out.unshift({ ...whole, text: span.text.slice(0, cut) });
     remaining = 0;
   }
   return out;
@@ -266,7 +300,7 @@ function InlineMarkdown({
   // is spoken.
   const viewerHandle = useContext(ViewerMention);
   const glossed = markTailSpans(
-    glossChannelReferences(glossMentions(spans, liveMentionHandles), channelIndex),
+    glossChatLinks(glossChannelReferences(glossMentions(spans, liveMentionHandles), channelIndex)),
     tail?.length ?? 0,
   );
   return (
@@ -274,6 +308,17 @@ function InlineMarkdown({
       {glossed.map((span, index) => {
         // Unmarked words inherit their paragraph's type. A second styled Text
         // adds a Fabric node and repeats token resolution for the same body.
+        if (span.chatLink && !span.tail) {
+          return (
+            <ChatLinkRun
+              key={`${span.text}-${index}`}
+              token={span.chatLink}
+              body={base}
+              marks={[...baseMarks, ...spanMarks(span, viewerHandle)]}
+              level={level}
+            />
+          );
+        }
         if (!span.styles.length && !span.url && !span.mention && !span.channelRef && !span.tail) return span.text;
         return (
           <ProseRun
@@ -422,6 +467,11 @@ export const MonoMarkdown = React.memo(function MonoMarkdown({
   testID,
 }: MonoMarkdownProps) {
   const blocks = useMemo(() => parseMarkdown(markdown, document), [markdown, document]);
+  // Android starts native text selection under a long-pressed link as well as
+  // the link's preview. The row's long press already owns selection there
+  // (the message menu's Select), so prose holding a link is not selectable.
+  // Tamagui reads an absent userSelect as selectable, so say 'none'.
+  const proseSelect = Platform.OS === 'android' && findChatLinkTokens(markdown).length ? 'none' : 'text';
   const liveMentionHandles = useMemo(
     () =>
       new Set((mentionHandles ?? []).map((handle) => handle.normalize('NFKC').toLocaleLowerCase())),
@@ -450,7 +500,7 @@ export const MonoMarkdown = React.memo(function MonoMarkdown({
     <ViewerMention.Provider value={viewerMention}>
     <YStack width="100%" minWidth={0} testID={testID}>
       {leadingInline && !inlineHosted ? (
-        <ProseRun userSelect="text" marginBottom="2" body={base}>
+        <ProseRun userSelect={proseSelect} marginBottom="2" body={base}>
           {leadingInline}
         </ProseRun>
       ) : null}
@@ -463,7 +513,7 @@ export const MonoMarkdown = React.memo(function MonoMarkdown({
 
         if (block.type === 'text') {
           return (
-            <ProseRun key={index} userSelect="text" marginBottom={last ? 0 : document ? '4' : '2'} body={base}>
+            <ProseRun key={index} userSelect={proseSelect} marginBottom={last ? 0 : document ? '4' : '2'} body={base}>
               {lead}
               <InlineMarkdown
                 spans={block.content}
@@ -484,7 +534,7 @@ export const MonoMarkdown = React.memo(function MonoMarkdown({
           return (
             <ProseRun
               key={index}
-              userSelect="text"
+              userSelect={proseSelect}
               marginTop={document ? (index === 0 ? 0 : '4') : '1'}
               marginBottom={document || !last ? '2' : 0}
               body={base}
@@ -510,7 +560,7 @@ export const MonoMarkdown = React.memo(function MonoMarkdown({
         if (block.type === 'quote') {
           return (
             <YStack key={index} borderLeftWidth={2} borderLeftColor="stroke" paddingLeft="4" paddingVertical={document ? '2' : 0} marginBottom={last ? 0 : document ? '4' : '2'}>
-              <ProseRun userSelect="text" body={base} marks={['quiet']}>
+              <ProseRun userSelect={proseSelect} body={base} marks={['quiet']}>
                 <InlineMarkdown spans={block.content} base={base} baseMarks={['quiet']} onLink={onLink} liveMentionHandles={liveMentionHandles} onMention={onMention} channelIndex={channelIndex} onChannelReference={onChannelReference} tail={trail} />
               </ProseRun>
             </YStack>
@@ -522,7 +572,7 @@ export const MonoMarkdown = React.memo(function MonoMarkdown({
               {block.items.map((item, itemIndex) => (
                 <Indent key={itemIndex} depth={item.depth}>
                   <ProseRun
-                    userSelect="text"
+                    userSelect={proseSelect}
                     width="100%"
                     body={base}
                   >
@@ -580,7 +630,7 @@ export const MonoMarkdown = React.memo(function MonoMarkdown({
         }
         if (block.type === 'options') {
           return (
-            <ProseRun key={index} userSelect="text" marginBottom={last ? 0 : document ? '4' : '2'} body={base}>
+            <ProseRun key={index} userSelect={proseSelect} marginBottom={last ? 0 : document ? '4' : '2'} body={base}>
               {block.items.map((item) => `· ${item}`).join('\n')}
             </ProseRun>
           );

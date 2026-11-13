@@ -1927,10 +1927,19 @@
           "created_at": "existing before the registry; weekly audit reviews"
         }
       },
+      "chat_message_counters": {
+        "module": "Rooms and messages",
+        "reason": "Hands out the next chat_seq per chat under concurrent sends; a row count would reuse numbers after deletes.",
+        "columns": {
+          "root_room_id": "The chat (root Room) whose messages share one number sequence.",
+          "last_seq": "The last chat_seq handed out in that chat."
+        }
+      },
       "messages": {
         "module": "Rooms and messages",
         "reason": "existing before the registry; weekly audit reviews",
         "columns": {
+          "chat_seq": "Stable per-chat number behind ¶author-N links; it must not shift when older messages are deleted, so row order cannot derive it.",
           "id": "existing before the registry; weekly audit reviews",
           "room_id": "existing before the registry; weekly audit reviews",
           "author_id": "existing before the registry; weekly audit reviews",

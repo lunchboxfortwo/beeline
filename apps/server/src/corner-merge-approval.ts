@@ -4,7 +4,7 @@ import { cornerReviewerSql } from './corner-reviewer.js';
 import { commanderReportAddress } from './commander.js';
 import { CommandRefusalError } from './command-refusal.js';
 import type { SqlDatabase } from './database.js';
-import { advanceCorner, lockCornerLifecycle } from './corner-lifecycle.js';
+import { advanceCorner } from './corner-lifecycle.js';
 
 /**
  * The one head-bound yes shared by a reviewer's PASS and a person's order.
@@ -36,6 +36,22 @@ export async function recordCornerMergeApproval(
   return Boolean(approval.rowCount);
 }
 
+async function personMayApproveMerge(database: SqlDatabase, cornerId: string, actorId: string) {
+  const authorized = await database.query<{ ok: boolean }>(
+    `SELECT true ok FROM rooms corner
+     JOIN room_access room_member ON room_member.room_id=corner.id AND room_member.identity_id=$2
+       AND room_member.removed_at IS NULL
+     JOIN memberships workspace_member ON workspace_member.workspace_id=corner.workspace_id
+       AND workspace_member.room_id IS NULL AND workspace_member.identity_id=$2
+       AND workspace_member.removed_at IS NULL AND workspace_member.role IN ('owner','admin')
+     JOIN identities person ON person.id=$2 AND person.kind='human'
+     WHERE corner.id=$1 AND corner.archived_at IS NULL`,
+    [cornerId, actorId],
+  );
+  return Boolean(authorized.rowCount);
+}
+
+
 /**
  * A person's yes on the corner's current head: a current human member of the
  * corner whose Workspace role is `owner` or `admin`. It is the same yes as a
@@ -47,37 +63,38 @@ export async function recordPersonMergeYes(
   cornerId: string,
   actorId: string,
 ): Promise<{ roomId: string; headSha: string; pullRequestNumber: number; recorded: boolean }> {
-  return database.transaction(async (db) => {
-    await lockCornerLifecycle(db, cornerId);
-    const authorized = await db.query<{ ok: boolean }>(
-      `SELECT true ok FROM rooms corner
-       JOIN room_access room_member ON room_member.room_id=corner.id AND room_member.identity_id=$2
-         AND room_member.removed_at IS NULL
-       JOIN memberships workspace_member ON workspace_member.workspace_id=corner.workspace_id
-         AND workspace_member.room_id IS NULL AND workspace_member.identity_id=$2
-         AND workspace_member.removed_at IS NULL AND workspace_member.role IN ('owner','admin')
-       JOIN identities person ON person.id=$2 AND person.kind='human'
-       WHERE corner.id=$1 AND corner.archived_at IS NULL`,
-      [cornerId, actorId],
-    );
-    if (!authorized.rowCount)
-      throw new Error('merge approval denied: current Workspace owner or admin required');
-    const target = (await db.query<{ number: number | null; head_sha: string | null }>(
-      `SELECT (fact.lifecycle->'pr'->>'number')::int number,
-              fact.lifecycle->'pr'->>'headSha' head_sha
-       FROM corner_github_cache fact WHERE fact.corner_id=$1`,
-      [cornerId],
-    )).rows[0];
-    if (!target?.number || !target.head_sha) throw new Error('corner has no pull request to merge');
-    const recorded = await recordCornerMergeApproval(db, {
-      cornerId,
-      approvedBy: actorId,
-      pullRequestNumber: target.number,
-      headSha: target.head_sha,
-    });
-    if (recorded) await advanceCorner(db, cornerId, { kind: 'approval', headSha: target.head_sha, by: 'person' });
-    return { roomId: cornerId, headSha: target.head_sha, pullRequestNumber: target.number, recorded };
+  // Refuse before the unlocked lifecycle read. The locked write checks again.
+  if (!(await personMayApproveMerge(database, cornerId, actorId)))
+    throw new Error('merge approval denied: current Workspace owner or admin required');
+  let result: { roomId: string; headSha: string; pullRequestNumber: number; recorded: boolean } | undefined;
+  await advanceCorner(database, cornerId, { kind: 'approval', headSha: '', by: 'person' }, {
+    project(corner) {
+      const headSha = corner.lifecycle.pr?.headSha;
+      if (!headSha) return { corner, event: { kind: 'approval', headSha: '', by: 'person' } };
+      return { corner, facts: { approved: true }, event: { kind: 'approval', headSha, by: 'person' } };
+    },
+    async write(db) {
+      if (!(await personMayApproveMerge(db, cornerId, actorId)))
+        throw new Error('merge approval denied: current Workspace owner or admin required');
+      const target = (await db.query<{ number: number | null; head_sha: string | null }>(
+        `SELECT (fact.lifecycle->'pr'->>'number')::int number,
+                fact.lifecycle->'pr'->>'headSha' head_sha
+         FROM corner_github_cache fact WHERE fact.corner_id=$1`,
+        [cornerId],
+      )).rows[0];
+      if (!target?.number || !target.head_sha) throw new Error('corner has no pull request to merge');
+      const recorded = await recordCornerMergeApproval(db, {
+        cornerId,
+        approvedBy: actorId,
+        pullRequestNumber: target.number,
+        headSha: target.head_sha,
+      });
+      result = { roomId: cornerId, headSha: target.head_sha, pullRequestNumber: target.number, recorded };
+      return recorded;
+    },
   });
+  if (!result) throw new Error('merge approval denied: current Workspace owner or admin required');
+  return result;
 }
 
 /**

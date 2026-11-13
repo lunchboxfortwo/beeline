@@ -16,7 +16,7 @@ it('keeps actionable exception frames and removes user/request/content/credentia
     exception: { values: [{ type: 'Error', value: 'Failed https://provider.test/?secret=abc Bearer opaque user@example.com sk-secret',
       stacktrace: { frames: [{ filename: '/home/alice/repo/app.ts', function: 'serve', lineno: 42, colno: 8, in_app: true,
         vars: { password: 'private' }, context_line: 'sensitive source', pre_context: ['private'] }] } }] },
-    user: { email: 'private@example.com', ip_address: '127.0.0.1' },
+    user: { id: 'f'.repeat(64), email: 'private@example.com', ip_address: '127.0.0.1', username: 'Alice' },
     request: { headers: { authorization: 'secret' }, data: 'chat text' },
     breadcrumbs: [{ message: 'conversation text' }], contexts: { device: { name: 'Alice phone' } },
     extra: { args: ['private'] }, tags: { surface: 'server', room_id: 'private', error_scope: 'voice-join' },
@@ -25,6 +25,7 @@ it('keeps actionable exception frames and removes user/request/content/credentia
     value: 'Failed [url] Bearer [redacted] [email] [token]',
     stacktrace: { frames: [{ filename: '[home]/repo/app.ts', function: 'serve', lineno: 42, colno: 8, in_app: true }] },
   }] }, tags: { surface: 'server', error_scope: 'voice-join' } });
+  expect(event.user).toEqual({ id: 'f'.repeat(64) });
   const encoded = JSON.stringify(event);
   for (const forbidden of ['private', 'opaque', 'chat text', 'sensitive source', 'Alice', '127.0.0.1', 'sk-secret', 'user@example.com']) {
     expect(encoded).not.toContain(forbidden);
