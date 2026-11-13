@@ -57,14 +57,17 @@ const scope12 = fixtureScope12(scope8);
   });
 
 
-  m9_it('refuses a script too long to read honestly instead of truncating it', async () => {
-    const root = scope12.checkout(`${Array.from({ length: 400 }, (_, i) => `line ${i}`).join('\n')}\n`);
-    await m9_expect(
-      m9_requestGrant(
-        { kind: 'command', target: 'python3 fix.py', purpose: 'x', reason: 'x' },
-        { ...scope8.deps({ grantId: 'g' }), scriptRoots: [root] },
-      ),
-    ).rejects.toThrow('will not be truncated');
+  m9_it('sends a long script in full, bound to its hash, without a size refusal', async () => {
+    const body = `${Array.from({ length: 2_000 }, (_, i) => `print(${i})`).join('\n')}\n`;
+    const root = scope12.checkout(body);
+    const ops: Array<{ name: string; input: Record<string, unknown> }> = [];
+    await m9_requestGrant(
+      { kind: 'command', target: 'python3 fix.py', purpose: 'x', reason: 'x' },
+      { ...scope8.deps({ grantId: 'g', status: 'pending', auto: false }, ops), scriptRoots: [root] },
+    );
+    m9_expect(ops.map(op => op.name)).toEqual(['requestAgentGrant']);
+    m9_expect(ops[0]!.input.script).toEqual({ path: 'fix.py', contents: body, bytes: Buffer.byteLength(body),
+      sha256: m9_createHash('sha256').update(body).digest('hex') });
   });
 
 

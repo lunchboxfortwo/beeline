@@ -168,7 +168,7 @@ deterministic work on their own schedule, so the run only reads.
 | --- | --- | --- | --- |
 | Feedback | `report_feedback`, `@system`, Report issue | `feedback_items` (pull query above) | always current |
 | Release failures | `release-failure.yml` | open `release-failure` issues | closed on proven recovery |
-| Nightly Checks | `nightly-checks.yml`, 03:00 | open `nightly-checks` issues (failed twice, flaky, unfinished) | closed when the job next passes first time |
+| Nightly Checks | `nightly-checks.yml`, started by the 2 AM next release | open `nightly-checks` issues (failed twice, flaky, unfinished) | closed when the job next passes first time |
 | ACP adapters, latest/latest | `acp-adapters.yml` | open `adapter-compat` issues | until a passing run |
 | ACP adapters, installed programs | this run's `adapters` step | its own results | this run |
 | Production logs | log walk on squire, 06:40 (`scripts/log-walk/README.md`) | `report.md`/`report.json` in the triager's home | `window.to` is this morning |

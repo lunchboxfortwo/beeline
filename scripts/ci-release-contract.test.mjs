@@ -1,5 +1,8 @@
 import assert from 'node:assert/strict';
-import { readFileSync, readdirSync } from 'node:fs';
+import { spawnSync } from 'node:child_process';
+import { mkdtempSync, readFileSync, readdirSync, rmSync, writeFileSync } from 'node:fs';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
 import test from 'node:test';
 import { parse } from 'yaml';
 import { coverageMapReads } from '../apps/server/scripts/coverage-map-artifact.mjs';
@@ -35,7 +38,7 @@ test('full Checks checks out the exact release SHA and never applies PR selectio
   for (const [name, job] of Object.entries(checks.jobs)) {
     if (name === 'coverage-map-check') continue; // PR-only validation of the existing map.
     for (const step of job.steps ?? []) {
-      if (step.uses === 'actions/checkout@v4') assert.equal(step.with.ref, '${{ inputs.release_sha || github.sha }}');
+      if (step.uses === 'actions/checkout@v4') assert.equal(step.with.ref, '${{ inputs.release_sha || inputs.pinned_sha || github.sha }}');
       if (step.run?.includes('test-selection.mjs select')) assert.match(step.if, /github.event_name == 'pull_request'/);
     }
   }
@@ -130,6 +133,69 @@ test('workspace archives and provenance use the checkout SHA when a release prom
     if (step.env?.CI_BUILD_SHA) assert.equal(step.env.CI_BUILD_SHA, '${{ steps.checkout.outputs.sha }}');
     if (step.with?.key?.startsWith('ci-build-')) assert.match(step.with.key, /steps.checkout.outputs.sha/);
   }
+});
+
+test('Reproduction 20: the next release starts nightly checks and the nightly cron is gone', () => {
+  const nightly = workflow('nightly-checks');
+  assert.equal(nightly.on.schedule, undefined);
+  assert.equal(nightly.on.workflow_dispatch.inputs.release_run_id.required, false);
+  assert.equal(nightly.on.workflow_dispatch.inputs.release_sha.required, false);
+  const checkout = nightly.jobs.nightly.steps.find(step => step.uses === 'actions/checkout@v4');
+  assert.equal(checkout.with.ref, '${{ inputs.release_sha || github.sha }}');
+  const nightlyRun = nightly.jobs.nightly.steps.find(step => step.run?.includes('nightly-checks.mjs'));
+  assert.equal(nightlyRun.env.RELEASE_SHA, '${{ inputs.release_sha }}');
+  const job = release.jobs.nightly_checks;
+  assert.equal(job.name, 'Start nightly checks');
+  assert.deepEqual(job.needs, ['initialize', 'release_result']);
+  assert.equal(job.if, "!cancelled() && needs.initialize.result == 'success' && inputs.channel == 'next'");
+  assert.equal(job.permissions.actions, 'write');
+  const step = job.steps.find(item => item.name === 'Dispatch nightly checks for the released commit');
+  assert.equal(step.env.GH_TOKEN, '${{ github.token }}');
+  assert.equal(step.env.RELEASE_VERSION, undefined);
+  assert.equal(step.env.RELEASE_SHA, '${{ needs.initialize.outputs.release_sha }}');
+  assert.equal(step.env.RELEASE_RUN_ID, '${{ github.run_id }}');
+  assert.match(step.run, /actions\/workflows\/nightly-checks\.yml\/dispatches/);
+  assert.match(step.run, /-f ref=main/);
+  assert.doesNotMatch(step.run, /RELEASE_VERSION/);
+  assert.match(step.run, /inputs\[release_run_id\]=\$\{RELEASE_RUN_ID\}/);
+  assert.match(step.run, /inputs\[release_sha\]=\$\{RELEASE_SHA\}/);
+  assert.equal(checks.on.workflow_dispatch.inputs.pinned_sha.default, '');
+  assert.match(checks['run-name'], /inputs\.pinned_sha/);
+  assert.match(checks.jobs.typecheck.env.CI_BASE_SHA, /inputs\.pinned_sha/);
+});
+
+test('Reproduction 20: the release step sends the initialized commit, not the moving tip of main', () => {
+  const step = release.jobs.nightly_checks.steps.find(item => item.name === 'Dispatch nightly checks for the released commit');
+  const released = 'released-commit';
+  const dir = mkdtempSync(join(tmpdir(), 'nightly-release-step-'));
+  try {
+    const calls = join(dir, 'calls');
+    writeFileSync(join(dir, 'gh'), `#!/usr/bin/env node
+const fs = require('node:fs');
+fs.appendFileSync(process.env.CALLS, JSON.stringify(process.argv.slice(2)) + '\\n');
+`, { mode: 0o755 });
+    const summary = join(dir, 'summary.txt');
+    const run = sha => spawnSync('bash', ['-c', step.run], {
+      encoding: 'utf8',
+      env: {
+        ...process.env, PATH: `${dir}:${process.env.PATH}`, CALLS: calls,
+        GITHUB_REPOSITORY: 'fixture/repo', GITHUB_STEP_SUMMARY: summary,
+        RELEASE_RUN_ID: '99', RELEASE_SHA: sha, GH_TOKEN: 'test',
+      },
+    });
+    writeFileSync(calls, '');
+    const sent = run(released);
+    assert.equal(sent.status, 0, sent.stderr);
+    const args = JSON.parse(readFileSync(calls, 'utf8').trim());
+    assert.ok(args.includes('ref=main'));
+    assert.ok(args.includes(`inputs[release_sha]=${released}`));
+    assert.ok(args.includes('inputs[release_run_id]=99'));
+    assert.match(readFileSync(summary, 'utf8'), new RegExp(released));
+    writeFileSync(calls, '');
+    const rejected = run('main');
+    assert.equal(rejected.status, 1);
+    assert.equal(readFileSync(calls, 'utf8'), '');
+  } finally { rmSync(dir, { recursive: true, force: true }); }
 });
 
 test('ACTIONLINT uses the runner ShellCheck without refreshing apt mirrors', () => {

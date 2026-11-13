@@ -20,7 +20,7 @@ vi.mock('react-native', async () => {
   return { AppState: { get currentState() { return foreground.state; }, addEventListener: (_: string, listener: () => void) => { foreground.listeners.add(listener); return { remove: () => foreground.listeners.delete(listener) }; } }, BackHandler: { addEventListener: vi.fn(() => ({ remove: vi.fn() })) }, Platform: { OS: 'android' }, Image: host('Image'), Pressable: host('Pressable'), Text: host('Text'), View: host('View') };
 });
 vi.mock('expo-clipboard', () => clipboard);
-vi.mock('tamagui', async () => (await import('@/ui/screens/transcript/grammar-hosts.test-support')).tamaguiHosts());
+vi.mock('tamagui', async () => ({ ...(await import('@/ui/screens/transcript/grammar-hosts.test-support')).tamaguiHosts(), useTheme: () => new Proxy({}, { get: (_, key) => ({ val: ({ canvas: '#fafaf9', ink: '#1c1917', strongStroke: '#d6d3d1' } as Record<string, string>)[String(key)] ?? String(key) }) }) }));
 vi.mock('lucide-react-native', async () => (await import('@/ui/screens/transcript/grammar-hosts.test-support')).lucideHosts());
 vi.mock('react-native-safe-area-context', () => ({ useSafeAreaInsets: () => ({ top: 0, bottom: 24 }) }));
 vi.mock('expo-image', async () => {
@@ -76,7 +76,7 @@ for (const isDesktop of [false, true]) {
     await act(async () => { tree = create(<ComputerSessionCard messageId="message-1" roomId="computer-test" session={{ ...session, access: undefined }} isDesktop={isDesktop} />); });
     expect(tree!.root.findAllByProps({ testID: 'computer-session-card-live' }).length).toBeGreaterThan(0);
     expect(tree!.root.findAllByProps({ testID: 'computer-session-open' })).toHaveLength(0);
-    expect(tree!.root.findAllByProps({ testID: 'computer-session-card-open-browser' })).toHaveLength(0);
+  expect(tree!.root.findAllByProps({ testID: 'computer-session-card-open-browser' })).toHaveLength(0);
     await act(async () => tree!.unmount());
   });
 }
@@ -86,7 +86,7 @@ it('shows an ended card without an open button', async () => {
   await act(async () => { tree = create(<ComputerSessionCard messageId="message-1" roomId="computer-test" session={{ ...session, status: 'ended' }} />); });
   expect(tree!.root.findAllByProps({ testID: 'computer-session-card-ended' }).length).toBeGreaterThan(0);
   expect(tree!.root.findAllByProps({ testID: 'computer-session-open' })).toHaveLength(0);
-    expect(tree!.root.findAllByProps({ testID: 'computer-session-card-open-browser' })).toHaveLength(0);
+  expect(tree!.root.findAllByProps({ testID: 'computer-session-card-open-browser' })).toHaveLength(0);
   await act(async () => tree!.unmount());
 });
 
@@ -103,7 +103,7 @@ it('mints a fresh steering token before opening the system browser', async () =>
   await act(async () => tree!.unmount());
 });
 
-it('keeps the keyboard, Open in browser and Close above the page; closing never controls or ends the share', async () => {
+it('keeps only Open in browser and Close in the header; closing never ends the share', async () => {
   const onClose = vi.fn();
   let tree: ReturnType<typeof create>;
   await act(async () => { tree = create(<ComputerSessionViewer session={session} onClose={onClose} />); });
@@ -112,43 +112,18 @@ it('keeps the keyboard, Open in browser and Close above the page; closing never 
   expect(viewer.findAllByType(SafeBottom)).toHaveLength(1);
   const controls = tree!.root.findByProps({ testID: 'computer-session-controls' });
   expect(controls.findAllByType(Btn).map((button: any) => button.props.label))
-    .toEqual(['Keyboard controls', 'Open in browser', 'Close browser']);
+    .toEqual(['Open in browser', 'Close browser']);
+  expect(controls.findAllByType(Btn).map((button: any) => button.props.kind)).toEqual(['quiet', 'icon']);
+  expect(controls.findAllByType('Text').flatMap((node: any) => [node.props.children].flat().filter((value: unknown) => typeof value === 'string'))).toEqual(['Open in browser']);
+  expect(tree!.root.findAllByProps({ testID: 'computer-session-keyboard-toggle' })).toHaveLength(0);
+  expect(tree!.root.findAllByProps({ testID: 'computer-session-key-bar' })).toHaveLength(0);
+  const page = new URL(tree!.root.findByType('WebView').props.source.uri);
+  expect(page.searchParams.get('canvas')).toBe('#fafaf9');
+  expect(page.searchParams.get('ink')).toBe('#1c1917');
+  expect(page.searchParams.get('strongStroke')).toBe('#d6d3d1');
   await act(async () => tree!.root.findByProps({ testID: 'computer-session-close' }).props.onPress());
   expect(onClose).toHaveBeenCalledOnce();
   expect(phoneOperation).toHaveBeenCalledExactlyOnceWith('openComputerSession', { id: 'session-1' });
-  await act(async () => tree!.unmount());
-});
-
-it('key bar: the field types into the page, keys and Paste ride the paste bridge', async () => {
-  let tree: ReturnType<typeof create>;
-  await act(async () => { tree = create(<ComputerSessionViewer session={session} onClose={() => {}} />); });
-  expect(tree!.root.findAllByProps({ testID: 'computer-session-key-bar' })).toHaveLength(0);
-  await act(async () => tree!.root.findByProps({ testID: 'computer-session-keyboard-toggle' }).props.onPress());
-  const sent = () => injectJavaScript.mock.calls.map(([script]: any[]) =>
-    JSON.parse(/window\.postMessage\((.*), '\*'\)/.exec(script)![1]!)).filter((message: any) => message.type !== 'viewer-mode');
-  injectJavaScript.mockClear();
-  const field = () => tree!.root.findByProps({ testID: 'computer-session-key-field' });
-  await act(async () => field().props.onChangeText('LG'));
-  await act(async () => field().props.onChangeText('LGTM'));
-  await act(async () => field().props.onChangeText('LGT'));
-  expect(sent()).toEqual([
-    { type: 'viewer-paste', text: 'LG', id: 'session-1' },
-    { type: 'viewer-paste', text: 'TM', id: 'session-1' },
-    { type: 'viewer-key', key: 'Backspace', id: 'session-1' },
-  ]);
-  injectJavaScript.mockClear();
-  for (const key of ['Escape', 'Tab', 'Backspace', 'Enter', 'ArrowLeft', 'ArrowUp', 'ArrowDown', 'ArrowRight'])
-    await act(async () => tree!.root.findByProps({ testID: `computer-session-key-${key}` }).props.onPress());
-  expect(sent().map((message: any) => message.key)).toEqual(
-    ['Escape', 'Tab', 'Backspace', 'Enter', 'ArrowLeft', 'ArrowUp', 'ArrowDown', 'ArrowRight']);
-  injectJavaScript.mockClear();
-  await act(async () => {
-    tree!.root.findByProps({ testID: 'computer-session-key-paste' }).props.onPress();
-    await vi.waitFor(() => expect(sent()).toEqual([{ type: 'viewer-paste', text: 'from my phone', id: 'session-1' }]));
-  });
-  expect(tree!.root.findByProps({ testID: 'computer-session-key-sent' }).props.children).toBe('Sent Paste to the page');
-  await act(async () => tree!.root.findByProps({ testID: 'computer-session-key-bar-close' }).props.onPress());
-  expect(tree!.root.findAllByProps({ testID: 'computer-session-key-bar' })).toHaveLength(0);
   await act(async () => tree!.unmount());
 });
 
@@ -445,12 +420,14 @@ it.each([false, true])('assigns keyboard avoidance to the correct computer viewe
   await act(async () => tree!.unmount());
 });
 
-it('the card offers one Open, which opens the shared browser viewer', async () => {
+it('restores the card browser handoff and Open actions', async () => {
   let tree: ReturnType<typeof create>;
   await act(async () => { tree = create(<ComputerSessionCard messageId="message-1" roomId="computer-test" session={session} />); });
-  expect(tree!.root.findAllByProps({ testID: 'computer-session-card-open-browser' })).toHaveLength(0);
+  await act(async () => { await tree!.root.findByProps({ testID: 'computer-session-card-open-browser' }).props.onPress(); });
+  expect(openExternalUrl).toHaveBeenCalledWith('https://server.usebeeline.app/s/session-1/?access=fresh-token');
+  openExternalUrl.mockClear();
   const open = tree!.root.findByProps({ testID: 'computer-session-open' });
-  expect(open.props.label).toBe('Open shared browser');
+  expect(open.props.label).toBe('Open live browser');
   await act(async () => { await open.props.onPress(); });
   expect(Modal.show).toHaveBeenCalledOnce();
   expect(openExternalUrl).not.toHaveBeenCalled();

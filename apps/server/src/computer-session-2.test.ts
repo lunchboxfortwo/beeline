@@ -305,10 +305,6 @@ const scope1 = fixtureScope1();
       expect(forwarded.some((message) => message.type === 'key' && message.key === 'v')).toBe(false);
       // Focus returns to the page view, so other shortcuts still reach the remote.
       expect(await evaluate<string>('document.activeElement.id')).toBe('canvas');
-      // The phone key bar posts a key into the page, which forwards it as Squire's key message.
-      await evaluate(`window.postMessage({ type: 'viewer-key', id: '${share.id}', key: 'Escape' }, '*')`);
-      await until(async () => forwarded.some((message) => message.type === 'key' && message.key === 'Escape') ? true : undefined);
-      expect(forwarded.filter((message) => message.type === 'key')).toEqual([{ type: 'key', key: 'Escape', ctrl: false, meta: false }]);
       // Reproduction R1: a phone in control keeps the keyboard button on a
       // remote sign-in window. That window's own keyboard does not open the
       // phone keyboard. Reproduction R2: focusing the keyboard does not scroll

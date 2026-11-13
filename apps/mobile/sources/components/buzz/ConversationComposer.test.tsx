@@ -5,7 +5,7 @@ import { expect, it, vi } from 'vitest';
 
 vi.mock('react-native', () => ({ Platform: { OS: 'android' }, Keyboard: { dismiss: () => {} }, Linking: {} }));
 vi.mock('tamagui', () => ({ YStack: 'YStack', useTheme: () => ({}) }));
-vi.mock('@/ui/grammar', () => ({ useTextScale: () => 1.2 }));
+vi.mock('@/ui/grammar', () => ({ useTextSize: () => 'large' }));
 vi.mock('@/ui/grammar-root', () => ({ NativeTypeInput: 'NativeTypeInput', NativeTypeMeasure: 'NativeTypeMeasure' }));
 vi.mock('@/buzz/groknight', () => ({ groknight: { type: { body: { lineHeight: 22 } } } }));
 vi.mock('@/components/buzz/ErrorBanner', () => ({ ErrorBanner: () => null }));

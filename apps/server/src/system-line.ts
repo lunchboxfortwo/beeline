@@ -58,6 +58,7 @@ export interface SystemLineInput {
   /** The schedule a `schedule-ran` line fired, so its run may inherit its sessions. */
   readonly scheduleId?: string;
   readonly payload?: unknown;
+  readonly subscriptionId?: string;
   readonly subscriptionPrompt?: string;
   readonly subscriptionWorkflowSlug?: string;
   readonly object?: string | SystemObject;
@@ -189,7 +190,7 @@ export interface SystemLineResult {
 
 export type SystemPhrase = Pick<
   SystemLineInput,
-  'subject' | 'verb' | 'object' | 'consequence' | 'attribution' | 'kind' | 'scheduleId' | 'payload' | 'subscriptionPrompt' | 'subscriptionWorkflowSlug'
+  'subject' | 'verb' | 'object' | 'consequence' | 'attribution' | 'kind' | 'scheduleId' | 'payload' | 'subscriptionId' | 'subscriptionPrompt' | 'subscriptionWorkflowSlug'
 >;
 
 const CLEAN = /[\s ]+/g;
@@ -222,6 +223,7 @@ export function composeSystemLine(phrase: SystemPhrase): { text: string; event: 
     ...(phrase.kind === 'subscription-fired' || phrase.kind === 'check-failed' ||
       phrase.kind === 'computer-session-activity' ? {
       payload: phrase.payload,
+      ...(phrase.subscriptionId ? { subscriptionId: phrase.subscriptionId } : {}),
       ...(phrase.subscriptionPrompt ? { subscriptionPrompt: phrase.subscriptionPrompt } : {}),
       ...(phrase.subscriptionWorkflowSlug ? { subscriptionWorkflowSlug: phrase.subscriptionWorkflowSlug } : {}),
     } : {}),
@@ -480,6 +482,7 @@ export async function systemLine(
             verb: systemMessage("system-line.received"), object: systemMessage("system-line.a-room-event"), consequence: input.kind,
             kind: 'subscription-fired', causeId: id, wakes: [subscription.agent_id],
             payload: { source: 'room', event: input.kind, text },
+            subscriptionId: subscription.id,
             subscriptionPrompt: subscription.prompt!,
             subscriptionWorkflowSlug: subscription.workflow_slug ?? undefined,
           });

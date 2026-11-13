@@ -121,7 +121,7 @@ export default function RootLayout() {
             headerShown: false,
           }}
         />
-        {/* Schedules and subscriptions draws the shared PageHeader. */}
+        {/* Routines draws the shared PageHeader. */}
         <Stack.Screen
           name="beeline/settings/schedules"
           options={{

@@ -455,9 +455,9 @@ export function ChatSurfaceOverlays({
             />
             {canManageWorkspace && (
               <HullActionSheetRow
-                accessibilityLabel={`View ${ROOM_LABEL} schedules and subscriptions`}
+                accessibilityLabel={`View ${ROOM_LABEL} routines`}
                 chevron="right"
-                label="Schedules and subscriptions"
+                label="Routines"
                 onPress={() => {
                   setRoomActionsVisible(false);
                   router.push({
@@ -515,9 +515,9 @@ export function ChatSurfaceOverlays({
         />
         {!viewerIsAgent && roomSurface?.viewer.permissions.send && (
           <HullActionSheetRow
-            accessibilityLabel="View conversation schedules and subscriptions"
+            accessibilityLabel="View conversation routines"
             chevron="right"
-            label="Schedules and subscriptions"
+            label="Routines"
             onPress={() => {
               setDmActionsVisible(false);
               router.push({

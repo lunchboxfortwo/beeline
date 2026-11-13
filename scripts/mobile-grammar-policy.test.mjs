@@ -11,6 +11,7 @@ const tamagui = body => `import { YStack, Text } from 'tamagui';\nexport const X
 const rules = (text, file = 'screens/x.tsx') => scanGrammarSource(file, text).map(e => e.rule);
 
 test('grammar values pass', () => {
+  for (const radius of ['transcript', 'viewer']) assert.deepEqual(rules(tamagui(`<YStack borderRadius="${radius}" />`)), []);
   assert.deepEqual(rules(tamagui(`<YStack padding="4" gap={on ? '2' : '3'} borderRadius="md" backgroundColor="raised" minHeight={44} />`)), []);
   assert.deepEqual(rules(tamagui(`<YStack paddingTop="0.5" margin={0} borderColor={on ? 'needsYou' : 'transparent'} minHeight={HEIGHT.primary} />`)), []);
 });

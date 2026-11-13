@@ -53,7 +53,7 @@ const BUILT_IN_SLASH_VERBS: readonly (BuiltInSlashVerb & {
   {
     id: 'schedule',
     command: 'schedule',
-    label: 'Schedules and subscriptions',
+    label: 'Routines',
     description: 'View or stop what wakes Agents',
     available: 'canManageSchedules',
   },

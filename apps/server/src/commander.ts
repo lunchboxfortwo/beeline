@@ -345,7 +345,9 @@ export async function reportToCommander(
   reportId = randomBytes(32).toString('hex'),
   options: { orderIssuer?: boolean; automatic?: boolean; agentOnly?: boolean; ask?: string; attachments?: PrivateCommandPayload['attachments']; wakeInCorner?: boolean; idleSince?: string } = {},
 ): Promise<{ id: string; createdAt: number; delivered?: boolean; receipt?: string; skipped?: boolean }> {
-  if ((!options.automatic && !/^(done|blocked|needs-decision|failed):\s*\S/.test(text)) || !text.trim() || text.length > 16_000)
+  // Server-generated failure diagnostics may include long child argv/stderr.
+  // The manual report limit must not roll back their terminal receipt.
+  if ((!options.automatic && (!/^(done|blocked|needs-decision|failed):\s*\S/.test(text) || text.length > 16_000)) || !text.trim())
     throw new CommandRefusalError(
       'report must begin done:, blocked:, needs-decision: or failed:',
       400,

@@ -6,9 +6,10 @@ import { expect, it, vi } from 'vitest';
 vi.mock('@/components/buzz/RepositoryMark', () => ({ RepositoryMark: (props: any) => React.createElement('RepositoryMark', props) }));
 vi.mock('tamagui', async () => (await import('./tamagui-hosts.test-support')).tamaguiHosts());
 vi.mock('lucide-react-native', async () => (await import('./tamagui-hosts.test-support')).lucideHosts());
-vi.mock('react-native-svg', async () => (await import('./tamagui-hosts.test-support')).svgHosts());
+vi.mock('react-native-svg', async () => ({ ...(await import('./tamagui-hosts.test-support')).svgHosts(), Line: (props: any) => React.createElement('Line', props) }));
 vi.mock('react-native-safe-area-context', () => ({ useSafeAreaInsets: () => ({ top: 0, bottom: 0 }) }));
 vi.mock('react-native', () => ({
+  Platform: { OS: 'web' },
   FlatList: ({ data, renderItem, ListFooterComponent, ListEmptyComponent, ...props }: any) => React.createElement('FlatList', props,
     data.length ? data.slice(0, 10).map((item: any, index: number) => React.createElement(React.Fragment, { key: item.key }, renderItem({ item, index }))) : ListEmptyComponent,
     ListFooterComponent),
@@ -129,4 +130,18 @@ it('shows repository candidate owner photos and favicon fallbacks in New chat', 
     expect(mark.props).toMatchObject({ avatarUrl: candidate.avatarUrl, faviconUrl: candidate.faviconUrl });
   }
   expect(tree.root.findAll((node: any) => node.type === 'Icon.GitBranch')).toHaveLength(0);
+});
+
+it('shows the full selected name in a removable pill while keeping immediate selection', () => {
+  const name = 'Beeline-Work/repository-selection-with-a-long-name-that-wraps';
+  const { tree, props } = sheet('github', { candidates: [{ key: 'long', name }] });
+  expect(tree.root.findAllByProps({ testID: 'new-chat-repository-pill' })).toHaveLength(0);
+  act(() => byTestID(tree, 'repo-row-long').props.onPress());
+  expect(props.onPickRepository).toHaveBeenCalledOnce();
+  const pill = byTestID(tree, 'new-chat-repository-pill');
+  const text = pill.find((node: any) => node.type === 'Text' && node.props.children === name);
+  expect(text.props.numberOfLines).toBeUndefined();
+  act(() => byTestID(tree, 'new-chat-repository-clear').props.onPress());
+  expect(tree.root.findAllByProps({ testID: 'new-chat-repository-pill' })).toHaveLength(0);
+  expect(props.onPickRepository).toHaveBeenCalledOnce();
 });

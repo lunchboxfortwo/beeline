@@ -17,7 +17,8 @@ vi.mock('react-native', () => ({
 vi.mock('tamagui', async () => (await import('@/ui/screens/transcript/grammar-hosts.test-support')).tamaguiHosts());
 vi.mock('lucide-react-native', async () => (await import('@/ui/screens/transcript/grammar-hosts.test-support')).lucideHosts());
 vi.mock('react-native-safe-area-context', () => ({ useSafeAreaInsets: () => ({ top: 0, bottom: 0, left: 0, right: 0 }) }));
-vi.mock('@/sync/storage', () => ({ useLocalSetting: () => 'medium' }));
+const settings = vi.hoisted(() => ({ appearance: 'dark', palette: 'stone' }));
+vi.mock('@/sync/storage', () => ({ useLocalSetting: () => 'medium', storage: { getState: () => ({ localSettings: settings }) } }));
 vi.mock('@/ui/tamagui.config', () => ({ tamaguiConfig: {}, themeName: (mode: string, palette: string) => `${mode}_${palette}` }));
 
 import { RuntimeErrorView } from './RuntimeErrorBoundary';
@@ -85,4 +86,10 @@ it('does not check for a native update on web', async () => {
   await render();
   expect(updates.check).not.toHaveBeenCalled();
   expect(updates.reload).not.toHaveBeenCalled();
+});
+
+it.each(['stone', 'brass'])('Reproduction STONE-LAUNCH: recovery respects saved %s and dark appearance', async (palette) => {
+  settings.palette = palette;
+  await render();
+  expect(tree.root.findByType('TamaguiProvider').props.defaultTheme).toBe(`dark_${palette}`);
 });

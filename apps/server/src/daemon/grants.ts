@@ -1,4 +1,4 @@
-import { agentGrantAutoApproves, HOST_EMULATOR_TARGET, commandGrantMatches, commandGrantEscalationsBeyondRule } from '@beeline/api-contract/agent-grants';
+import { agentGrantAutoApproves, HOST_EMULATOR_TARGET, commandGrantMatches, grantScriptKey } from '@beeline/api-contract/agent-grants';
 import { resourceRequester } from '../resource-requester.js';
 import { cornerReviewerSql } from '../corner-reviewer.js';
 import { normalizeAgentAsk } from '../tray-approval-ask.js';
@@ -63,16 +63,7 @@ import { daemonWriteResult } from './corner-messages.js';
     }
     // C94: yolo is the scope gate and it is enough — except for the two hard
     // stops, which stand in a Room and in a corner whether yolo is on or not.
-    const committed = isCommandGrantScript(input.script) && input.script.committed;
-    const pr = committed ? await ctx.readPullRequest?.(input.roomId) : undefined;
-    const parent = committed ? (await ctx.database.query<{ parent_id: string | null }>(
-      'SELECT parent_id FROM rooms WHERE id=$1', [input.roomId],
-    )).rows[0]?.parent_id : undefined;
-    const repository = parent ? await ctx.github?.roomWorkflowTarget(parent) : undefined;
-    const blobSha = committed && repository ? await ctx.github!.app.fileBlobSha({
-      accessToken: repository.token, fullName: repository.repository, path: committed.path, ref: committed.commit,
-    }) : undefined;
-    const script = rule ? validateGrantScript(rule, input.script, pr, blobSha) : undefined;
+    const script = rule ? validateGrantScript(rule, input.script) : undefined;
     const escalations: AgentGrantEscalation[] = rule ? commandRuleEscalations(rule, script) : [];
     const reason = input.reason.trim();
     if (kind === 'shared_asset') {
@@ -123,11 +114,10 @@ import { daemonWriteResult } from './corner-messages.js';
         if (grant.kind !== 'command' || grant.status !== 'approved') continue;
         let approved: CommandGrantRule;
         try { approved = parseCommandGrantTarget(grant.target); } catch { continue; }
-        if (!commandGrantMatches(approved, rule.argv) ||
-            commandGrantEscalationsBeyondRule(approved, rule.argv).length ||
+        if (!commandGrantMatches(approved, rule.argv) || approved.stdin !== rule.stdin ||
             approved.secrets.length !== rule.secrets.length ||
             approved.secrets.some(name => !rule!.secrets.includes(name))) continue;
-        if (script ? grant.script?.path !== script.path || grant.script.sha256 !== script.sha256 : Boolean(grant.script)) continue;
+        if (grantScriptKey(script) !== grantScriptKey(grant.script)) continue;
         return { grantId: grant.grantId, status: 'approved' as const, auto: true, messageId: undefined };
       }
     }

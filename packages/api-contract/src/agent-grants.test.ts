@@ -1,16 +1,13 @@
 import { describe, expect, it } from 'vitest';
 import {
   grantPresentation,
-  GRANT_SCRIPT_MAX_BYTES,
-  GRANT_SCRIPT_MAX_LINES,
   agentGrantAutoApproves,
   commandGrantEscalations,
-  commandGrantEscalationsBeyondRule,
   commandGrantMatches,
   commandRuleEscalations,
   formatGrantDecisionLine,
   formatGrantEscalationReason,
-  grantScriptTooLongMessage,
+  grantScriptKey,
   interpreterScriptArgument,
   isCommandGrantScript,
   isAgentGrantKind,
@@ -18,7 +15,6 @@ import {
   gitShowStatNamesFile,
   isPreapprovedReadOnlyCommand,
   namesCredentialFile,
-  repositoryContentBeyondRule,
   parseCommandGrantTarget,
   PREAPPROVED_READ_ONLY_COMMANDS,
   parseGrantDecisionLine,
@@ -66,7 +62,7 @@ describe('command grant targets', () => {
     expect(() => parseCommandGrantTarget('--with TOKEN')).toThrow('must name a command');
   });
 
-  it('matches only when the approved argv is a word-for-word prefix', () => {
+  it('matches only the exact approved argv, word for word', () => {
     const rule = parseCommandGrantTarget('fly deploy -a beeline-preview --with FLY_TOKEN');
     expect(commandGrantMatches(rule, ['fly', 'deploy', '-a', 'beeline-preview'])).toBe(true);
     expect(
@@ -78,7 +74,7 @@ describe('command grant targets', () => {
         '--strategy',
         'rolling',
       ]),
-    ).toBe(true);
+    ).toBe(false);
     expect(commandGrantMatches(rule, ['fly', 'deploy', '-a', 'beeline-prod'])).toBe(false);
     expect(commandGrantMatches(rule, ['fly', 'deploy'])).toBe(false);
     expect(commandGrantMatches(rule, ['flyctl', 'deploy', '-a', 'beeline-preview'])).toBe(false);
@@ -228,16 +224,6 @@ describe('the two hard stops', () => {
     ).toEqual(['credential']);
   });
 
-  it('lets an approved shape run and stops what the prefix never showed', () => {
-    const rule = parseCommandGrantTarget('cut -d=');
-    expect(commandGrantEscalationsBeyondRule(rule, ['cut', '-d=', '-f1', 'names.csv'])).toEqual([]);
-    expect(commandGrantEscalationsBeyondRule(rule, ['cut', '-d=', '-f1', '.env'])).toEqual([
-      'credential',
-    ]);
-    const approved = parseCommandGrantTarget('cut -d= -f1 .env');
-    expect(commandGrantEscalationsBeyondRule(approved, ['cut', '-d=', '-f1', '.env'])).toEqual([]);
-  });
-
   it('names why a human has to answer', () => {
     expect(formatGrantEscalationReason([])).toBeUndefined();
     expect(formatGrantEscalationReason(['unseen-script', 'credential'])).toBe(
@@ -265,19 +251,20 @@ describe('an interpreter grant is bound to its script', () => {
     // No file to bind: `python3 -V` is not a hard stop.
     for (const option of [['-u', 'PATH'], ['--unset=PATH'], ['-C', '/tmp'], ['--chdir=/tmp']]) {
       const argv = ['env', ...option, '/bin/echo', 'approved'];
-      expect(interpreterScriptArgument(argv, true)).toEqual({ index: option.length + 1, path: '/bin/echo', direct: true });
+      expect(interpreterScriptArgument(argv)).toEqual({ index: option.length + 1, path: '/bin/echo', direct: true });
       expect(interpreterScriptArgument(['env', ...option, 'python3', 'fix.py'])).toEqual({
         index: option.length + 2, path: 'fix.py',
       });
     }
     expect(interpreterScriptArgument(['python3', '-V'])).toBeUndefined();
     expect(interpreterScriptArgument(['npm', 'test'])).toBeUndefined();
-    expect(interpreterScriptArgument(['custom-script'], true)).toEqual({ index: 0, path: 'custom-script', direct: true });
-    expect(interpreterScriptArgument(['env', 'FOO=1', 'custom-script'], true)).toEqual({ index: 2, path: 'custom-script', direct: true });
+    // A bare program name is the program, never a script to review.
+    expect(interpreterScriptArgument(['custom-script'])).toBeUndefined();
+    expect(interpreterScriptArgument(['env', 'FOO=1', './custom-script'])).toEqual({ index: 2, path: './custom-script', direct: true });
     expect(interpreterScriptArgument(['env', 'FOO=1', 'npm', 'test'])).toBeUndefined();
   });
 
-  it('accepts only a whole binding, and refuses rather than truncating an unreadable one', () => {
+  it('accepts only a whole binding, keyed on path and content', () => {
     expect(
       isCommandGrantScript({ path: 'x.py', sha256: 'a'.repeat(64), bytes: 3, contents: 'a' }),
     ).toBe(true);
@@ -285,11 +272,10 @@ describe('an interpreter grant is bound to its script', () => {
       false,
     );
     expect(isCommandGrantScript(undefined)).toBe(false);
-    expect(GRANT_SCRIPT_MAX_BYTES).toBe(4_096);
-    expect(GRANT_SCRIPT_MAX_LINES).toBe(120);
-    const refusal = grantScriptTooLongMessage('big.py', 9_000, 400);
-    expect(refusal).toContain('will not be truncated');
-    expect(refusal).toContain('open_corner');
+    const key = grantScriptKey({ path: 'x.py', sha256: 'a'.repeat(64) });
+    expect(grantScriptKey({ path: 'x.py', sha256: 'b'.repeat(64) })).not.toBe(key);
+    expect(grantScriptKey({ path: 'y.py', sha256: 'a'.repeat(64) })).not.toBe(key);
+    expect(grantScriptKey(undefined)).not.toBe(key);
   });
 });
 
@@ -324,7 +310,7 @@ it('R-SCRIPT-1 preserves literal inline and stdin bytes and identifies interpret
   expect(interpreterScriptArgument(['bash', '-s'])).toMatchObject({ path: '<stdin>', stdin: true });
   expect(interpreterScriptArgument(['bash', '-s', '-c', code])).toMatchObject({ path: '<inline>', inline: code });
   expect(interpreterScriptArgument(['python3'])).toMatchObject({ path: '<stdin>', stdin: true });
-  expect(interpreterScriptArgument(['env', '-S', 'bash task.sh'], true)).toMatchObject({ path: 'task.sh' });
+  expect(interpreterScriptArgument(['env', '-S', 'bash task.sh'])).toMatchObject({ path: 'task.sh' });
   expect(() => interpreterScriptArgument(['node', '-e', code, '-e', 'unapproved'])).toThrow('Multiple interpreter eval');
   expect(() => parseCommandGrantTarget('bash -c echo; touch other')).toThrow('shell metacharacters');
 });
@@ -362,12 +348,6 @@ it('preapproves a short list of read-only gh and git commands and still asks nea
   expect(isPreapprovedReadOnlyCommand(['git', 'show', '--stat', 'HEAD:secret.txt'])).toBe(false);
   expect(gitShowStatNamesFile(['git', 'show', '--stat', blob])).toBe(true);
   expect(gitShowStatNamesFile(['git', 'show', '--stat', 'HEAD'])).toBe(false);
-  expect(repositoryContentBeyondRule(['git', 'show', '--stat'], ['git', 'show', 'HEAD'])).toBe(true);
-  expect(repositoryContentBeyondRule(['git', 'show', '--stat'], ['git', 'show', '--stat', '-p', 'HEAD'])).toBe(true);
-  expect(repositoryContentBeyondRule(['git', 'log'], ['git', 'log', '-1', '-p'])).toBe(true);
-  expect(repositoryContentBeyondRule(['git', 'log', '-1', '-p'], ['git', 'log', '-1', '-p'])).toBe(false);
-  expect(repositoryContentBeyondRule(['gh', 'pr', 'view'], ['gh', 'pr', 'diff', '12'])).toBe(true);
-  expect(repositoryContentBeyondRule(['gh', 'pr', 'diff', '12'], ['gh', 'pr', 'diff', '12'])).toBe(false);
   const secret = parseCommandGrantTarget('git status GITHUB_TOKEN=secret');
   expect(commandRuleEscalations(secret)).toContain('credential');
   expect(agentGrantAutoApproves({
@@ -377,7 +357,6 @@ it('preapproves a short list of read-only gh and git commands and still asks nea
   const injected = parseCommandGrantTarget('gh pr view --with FLY_TOKEN');
   expect(commandRuleEscalations(injected, script)).toContain('unseen-script');
   expect(commandRuleEscalations(parseCommandGrantTarget('fly deploy --with FLY_TOKEN'))).toEqual([]);
-  expect(commandGrantEscalationsBeyondRule(parseCommandGrantTarget('git status'), ['git', 'status', 'GITHUB_TOKEN=secret'])).toEqual(['credential']);
   expect(commandRuleEscalations(parseCommandGrantTarget(JSON.stringify(['python3', '-c', 'print(1)'])), script)).toContain('unseen-script');
   expect(commandGrantEscalations(['env', 'FOO=1', 'npm', 'test'])).toEqual([]);
 });

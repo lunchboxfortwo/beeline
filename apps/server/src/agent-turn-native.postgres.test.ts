@@ -32,7 +32,7 @@ describe.skipIf(!url)('native terminal receipt serialization',()=>{
       {connectionId:'turn-connection',instanceId:'turn-proof'})};
     await first.query(`INSERT INTO messages(id,room_id,author_id,text) VALUES($1,$2,$3,'@helper Please work')`,[request,room,person]);
     commandId=(await createAgentCommand(first,{roomId:room,agentId:agent,sourceMessageId:request,reason:'human_tag'}))!.id;
-    await claimAgentCommand(first,room,agent,commandId,'generation',owner);
+    await claimAgentCommand(first,room,agent,commandId,'generation',{kind:'helper',owner});
   },60_000);
   afterAll(async()=>{await first.close();await second.close();await admin.query(`DROP DATABASE IF EXISTS ${name} WITH(FORCE)`);await admin.end();});
   it('concurrent failed receipts retain one terminal result without a notice or replay work',async()=>{
@@ -74,7 +74,7 @@ describe.skipIf(!url)('native terminal receipt serialization',()=>{
       VALUES($1,$3,$4,'First task'),($2,$3,$4,'Second task')`,[aSource,bSource,queueRoom,person]);
     const payload={kind:'order' as const,text:'Do the work',authorId:commander,fromRoomId:queueRoom};
     const running=(await createAgentCommand(first,{roomId:queueRoom,agentId:agent,sourceMessageId:aSource,privatePayload:payload,reason:'order'}))!;
-    await claimAgentCommand(first,queueRoom,agent,running.id,'queue-generation',owner);
+    await claimAgentCommand(first,queueRoom,agent,running.id,'queue-generation',{kind:'helper',owner});
     const deferred=()=>{let resolve!:()=>void;const promise=new Promise<void>(done=>resolve=done);return {promise,resolve};};
     const inserting=deferred(),release=deferred(),stopping=deferred();
     const observe=(db:SqlDatabase,side:'dispatch'|'stop'):SqlDatabase=>({

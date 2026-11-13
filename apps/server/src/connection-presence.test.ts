@@ -24,7 +24,7 @@ const body=async()=>(await database.query<{body:Record<string,unknown>}>(`SELECT
 async function claimed(connectionId='connection'){
   const source={connectionId,epoch:await presence.claimConnection(AGENT,{connectionId})};
   const command=(await createAgentCommand(database,{roomId:ROOM,agentId:AGENT,sourceMessageId:null,reason:'system'}))!;
-  await database.transaction(db=>claimAgentCommand(db,ROOM,AGENT,command.id,'generation',source));
+  await database.transaction(db=>claimAgentCommand(db,ROOM,AGENT,command.id,'generation',{kind:'helper',owner:source}));
   return {source,command};
 }
 it('keeps a closed connection’s running turn claimed for the same helper to continue',async()=>{

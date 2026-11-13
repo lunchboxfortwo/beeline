@@ -20,9 +20,8 @@ import {
   chatTitle,
   joinableTitle,
   threadTitle,
-  threadWaitsOnViewer,
-  threadWord,
 } from './chat-tree-model';
+import { threadListLabel } from '@/ui/screens/thread/thread-status';
 
 const MARK = 36;
 /** Holding a chat's mark this long opens a new thread in it (today's corner-glyph threshold). */
@@ -69,11 +68,10 @@ function ChatMark({ item }: { item: Partial<Pick<ChatListItem, 'directMessage' |
   return <RepositoryMark avatarUrl={item.room?.avatar} faviconUrl={item.room?.favicon} size={MARK} />;
 }
 
-/** One active thread under its chat: ↳, the short title, and its state (brass when it waits on you). */
-function ThreadLine({ item, corner, onOpen }: { item: ChatListItem; corner: ChatListCorner; onOpen: (roomId: string, cornerId: string, name: string) => void }) {
-  const waiting = threadWaitsOnViewer(corner);
+/** One active thread under its chat: ↳, the short title, and its state ("waiting on you" semibold for the viewer it waits on). */
+function ThreadLine({ item, corner, viewer, onOpen }: { item: ChatListItem; corner: ChatListCorner; viewer: string | undefined; onOpen: (roomId: string, cornerId: string, name: string) => void }) {
+  const { word, you: waiting } = threadListLabel(corner, viewer);
   const title = threadTitle(item, corner);
-  const word = threadWord(corner);
   const step = useStep();
   return (
     <ListItem
@@ -92,20 +90,20 @@ function ThreadLine({ item, corner, onOpen }: { item: ChatListItem; corner: Chat
       <YStack paddingTop="0.5"><Glyph icon={CornerDownRight} size={16} accent={waiting} /></YStack>
       <YStack flex={1} minWidth={0} gap={step('1')}>
         <Copy>{title}</Copy>
-        <Copy small accent={waiting} quiet={!waiting}>{word}</Copy>
+        <Copy small strong={waiting} accent={waiting} quiet={!waiting}>{word}</Copy>
       </YStack>
     </ListItem>
   );
 }
 
 /** "N more" expands the rest of a chat's active threads in place. */
-function MoreThreads({ item, rest, onOpen }: { item: ChatListItem; rest: readonly ChatListCorner[]; onOpen: (roomId: string, cornerId: string, name: string) => void }) {
+function MoreThreads({ item, rest, viewer, onOpen }: { item: ChatListItem; rest: readonly ChatListCorner[]; viewer: string | undefined; onOpen: (roomId: string, cornerId: string, name: string) => void }) {
   const [shown, setShown] = useState(false);
   const title = chatTitle(item);
   return (
     <Collapsible open={shown} onOpenChange={setShown}>
       <Collapsible.Content>
-        {rest.map((corner) => <ThreadLine key={corner.id} item={item} corner={corner} onOpen={onOpen} />)}
+        {rest.map((corner) => <ThreadLine key={corner.id} item={item} corner={corner} viewer={viewer} onOpen={onOpen} />)}
       </Collapsible.Content>
       <Collapsible.Trigger asChild>
         <ListItem
@@ -209,11 +207,11 @@ export const ChatRow = React.memo(function ChatRow({ item, viewer, now, first, d
         <YStack flex={1} minWidth={0} gap={step('1')}>
           <ChatName v="listTitle" name={title} testID={`room-${item.room.id}-title`} />
           {refused ? (
-            <Copy small numberOfLines={2} color="removed" testID={`room-${item.room.id}-preview`}>Not sent: {refused.row.text}</Copy>
+            <Copy small color="removed" testID={`room-${item.room.id}-preview`}>Not sent: {refused.row.text}</Copy>
           ) : call ? (
-            <Copy small accent numberOfLines={2} testID={`room-${item.room.id}-preview`}>Ongoing call: {voiceCallHumanNames(call, viewer)}</Copy>
+            <Copy small accent testID={`room-${item.room.id}-preview`}>Ongoing call: {voiceCallHumanNames(call, viewer)}</Copy>
           ) : (
-            <Copy small quiet={!unread} numberOfLines={2} testID={`room-${item.room.id}-preview`}>
+            <Copy small quiet={!unread} testID={`room-${item.room.id}-preview`}>
               {preview.who ? <T v="metaStrong" color="secondary">{preview.who}: </T> : null}
               {preview.text}
             </Copy>
@@ -227,9 +225,9 @@ export const ChatRow = React.memo(function ChatRow({ item, viewer, now, first, d
       </ListItem>
       {threads.length ? (
         <YStack marginLeft="4" marginTop={step('2')} paddingLeft="4" borderLeftWidth={1} borderColor="strongStroke" testID={`nest-${item.room.id}`}>
-          {threads.slice(0, VISIBLE_THREADS).map((corner) => <ThreadLine key={corner.id} item={item} corner={corner} onOpen={onOpenThread} />)}
+          {threads.slice(0, VISIBLE_THREADS).map((corner) => <ThreadLine key={corner.id} item={item} corner={corner} viewer={viewer} onOpen={onOpenThread} />)}
           {threads.length > VISIBLE_THREADS
-            ? <MoreThreads item={item} rest={threads.slice(VISIBLE_THREADS)} onOpen={onOpenThread} />
+            ? <MoreThreads item={item} rest={threads.slice(VISIBLE_THREADS)} viewer={viewer} onOpen={onOpenThread} />
             : null}
         </YStack>
       ) : null}

@@ -15,6 +15,7 @@ vi.mock('@/components/buzz/IdentityMark', () => ({ IdentityMark: () => null }));
 import type { ChatListItem } from '@beeline/buzz-client';
 import { ChatRow, ChatRowDivider, NEW_THREAD_HOLD_MS } from './ChatTree';
 import { CornerDownRight } from 'lucide-react-native';
+import { TextSizeContext, type TextSize } from '@/ui/grammar';
 
 (globalThis as typeof globalThis & { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
 
@@ -127,4 +128,48 @@ it('with the divider outside, the row spans divider to divider and keeps its spa
   expect(after.bottom).toBe(before.bottom + before.top);
   expect(vertical(last).bottom).toBe(before.bottom);
   for (const tree of [inside, outside, last, divider]) act(() => tree.unmount());
+});
+
+it('labels the same waiting thread "waiting on you" in semibold for its commander and "waiting on <name>" for another member', () => {
+  const commander = 'c'.repeat(64);
+  const member = 'm'.repeat(64);
+  const waiting = {
+    ...item,
+    openCorners: [{
+      id: 'corner-w', name: 'One durable turn owner', state: 'waiting' as const, reason: 'question' as const, mine: true as const,
+      blocker: { kind: 'report' as const, personId: commander, personName: 'Claude' }, lastActivityAt: 1_700_000_000,
+    }],
+  } as unknown as ChatListItem;
+  const label = (viewer: string) => {
+    let tree!: ReactTestRenderer;
+    act(() => {
+      tree = create(<ChatRow item={waiting} viewer={viewer} now={1_700_000_000_000} first onOpen={vi.fn()} onPin={vi.fn()} onOpenThread={vi.fn()} />);
+    });
+    const line = byTestID(tree, 'thread-row-corner-w');
+    const text = line.findAll((node: any) => node.type === 'Text').at(-1)!;
+    const result = { aria: line.props['aria-label'], word: text.props.children, face: text.props.fontFamily };
+    act(() => tree.unmount());
+    return result;
+  };
+  expect(label(commander)).toEqual({
+    aria: 'Thread One durable turn owner, waiting on you', word: 'waiting on you', face: 'SpaceGrotesk-SemiBold',
+  });
+  // The other member follows the thread too (`mine`), yet it waits on Claude, not on them.
+  expect(label(member)).toEqual({
+    aria: 'Thread One durable turn owner, waiting on Claude', word: 'waiting on Claude', face: 'SpaceGrotesk-Regular',
+  });
+});
+
+// Text wraps, never truncates: a long preview keeps every line at every Text size.
+it.each(['small', 'medium', 'large'] as const)('a long chat preview at Text size %s wraps instead of cutting off', (size: TextSize) => {
+  const text = 'A long preview that runs well past two lines on a phone, so a line cap would cut it off. '.repeat(4);
+  const long = { ...item, latestMessage: { id: 'm', text, author: { name: 'Ada' }, createdAt: 1_700_000_000 } } as unknown as ChatListItem;
+  let tree!: ReactTestRenderer;
+  act(() => {
+    tree = create(<TextSizeContext.Provider value={size}><ChatRow item={long} now={1_700_000_000_000} first onOpen={vi.fn()} onPin={vi.fn()} onOpenThread={vi.fn()} /></TextSizeContext.Provider>);
+  });
+  const preview = byTestID(tree, `room-${ROOM}-preview`);
+  expect(preview.props.numberOfLines).toBeUndefined();
+  expect(preview.props.ellipsizeMode).toBeUndefined();
+  act(() => tree.unmount());
 });

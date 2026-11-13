@@ -5,12 +5,12 @@ import { applySystemBackground } from './buzz/system-background';
 import { captureMobileError } from './buzz/sentry-entry';
 import { setAndroidNavigationBarStyle } from './buzz/android-navigation-bar';
 import type { LocalSettings } from './sync/localSettings';
-import { loadLocalSettings } from './sync/persistence';
+import { loadInitialLocalSettings } from './sync/persistence';
 import {
     applyEffectiveAndroidLaunchAppearance,
     pinAndroidLaunchAppearance,
 } from './buzz/android-launch-appearance';
-import { resolveAppAppearance, seedAppAppearanceFromSystem } from './buzz/app-appearance-seed';
+import { resolveAppAppearance } from './buzz/app-appearance-seed';
 import { canvasColor } from './buzz/groknight';
 
 /**
@@ -21,8 +21,7 @@ import { canvasColor } from './buzz/groknight';
 export type AppMode = 'light' | 'dark';
 
 // Complete the one-time migration before any settings consumers mount.
-seedAppAppearanceFromSystem();
-const initialSettings = loadLocalSettings();
+const initialSettings = loadInitialLocalSettings();
 let appearance: LocalSettings['appearance'] = initialSettings.appearance;
 let mode: AppMode = resolveAppAppearance(appearance);
 let palette: LocalSettings['palette'] = initialSettings.palette;
@@ -86,4 +85,4 @@ Appearance.addChangeListener(() => {
 });
 
 // Subscribe before clearing a native override: that reset can emit a change.
-applyEffectiveAndroidLaunchAppearance();
+applyEffectiveAndroidLaunchAppearance(appearance);

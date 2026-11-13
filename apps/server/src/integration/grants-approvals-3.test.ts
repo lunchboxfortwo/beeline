@@ -584,6 +584,9 @@ const fixture = monolithFixture();
     const repeated = await ask('python3 fix.py', { script: binding });
     expect(repeated).toMatchObject({ grantId: interpreter.grantId, status: 'approved', auto: true });
     expect(repeated.messageId).toBeUndefined();
+    // Added arguments are a different command and need their own approval.
+    expect(await ask('python3 fix.py --extra', { script: binding }))
+      .toMatchObject({ status: 'pending', auto: false });
     const changed = script + '# changed\n';
     expect(await ask('python3 fix.py', { script: { ...binding, contents: changed,
       bytes: Buffer.byteLength(changed), sha256: createHash('sha256').update(changed).digest('hex') } }))
@@ -607,9 +610,9 @@ const fixture = monolithFixture();
       'hash does not match its contents',
     );
 
-    // A script too long to read honestly is refused, never truncated.
+    // A long script is shown in full; no length limit refuses it.
     const long = Array.from({ length: 400 }, (_, index) => `line ${index}`).join('\n');
-    const refused = await fixture.daemonOperation('requestAgentGrant', {
+    const accepted = await fixture.daemonOperation('requestAgentGrant', {
       roomId: ROOM,
       kind: 'command',
       target: 'python3 huge.py',
@@ -621,8 +624,7 @@ const fixture = monolithFixture();
         contents: long,
       },
     });
-    expect(refused.status).toBe(400);
-    expect(((await refused.json()) as { error: string }).error).toContain('will not be truncated');
+    expect(accepted.status).toBe(200);
 
     // Corner automatic grants also remain silent.
     const cornerId = '44444444-4444-4444-8444-444444444444';

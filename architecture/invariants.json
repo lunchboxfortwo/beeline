@@ -743,8 +743,9 @@
             "reason": "Retained without runtime use until the previous server drains during this rolling release.",
             "drop": "Next release after turn-lifecycle cleanup: docs/agent-server-surfaces.md#turn-recovery-storage-retirement"
           },
-          "turn_owner_connection_id": "Pins an owned command generation to its actual helper registration; NULL retains the installed-helper adapter.",
-          "turn_owner_epoch": "Fences an owned command against takeover of that helper registration even if other identifiers remain the same.",
+          "execution_kind": "Records how the claimed generation executes (helper protocol, connected app, or legacy installed-helper adapter) so dispatch never reads a socket. NULL only for claims written by images below PR 4294.",
+          "turn_owner_connection_id": { "reason": "retired: claims still write it only so the previous release reads owned turns after a rollback; only the beeline_classify_claim_kind older-writer trigger reads it", "drop": "docs/agent-server-surfaces.md#turn-transport-storage-retirement (rollback floor passes this release; drop the trigger first)" },
+          "turn_owner_epoch": { "reason": "retired: claims still write it only so the previous release reads owned turns after a rollback; nothing reads it", "drop": "docs/agent-server-surfaces.md#turn-transport-storage-retirement (rollback floor passes this release)" },
           "startup_wake_after": {
             "reason": "Retained without runtime use until the previous server drains during this rolling release.",
             "drop": "Next release after turn-lifecycle cleanup: docs/agent-server-surfaces.md#turn-recovery-storage-retirement"
@@ -761,9 +762,9 @@
           "instance_id": "existing before the registry; weekly audit reviews",
           "connected_at": "existing before the registry; weekly audit reviews",
           "released_at": "existing before the registry; weekly audit reviews",
-          "turn_connection_id": { "reason": "retired: a running turn has no owning connection; kept for serving and rollback overlap", "drop": "https://github.com/Beeline-Work/beeline/pull/4267 follow-up, after the rollback window for 4267 closes" },
-          "turn_connection_epoch": { "reason": "retired: a running turn has no owning connection epoch; kept for serving and rollback overlap", "drop": "https://github.com/Beeline-Work/beeline/pull/4267 follow-up, after the rollback window for 4267 closes" },
-          "turn_transport_id": { "reason": "retired: a running turn has no owning transport; kept for serving and rollback overlap", "drop": "https://github.com/Beeline-Work/beeline/pull/4267 follow-up, after the rollback window for 4267 closes" }
+          "turn_connection_id": { "reason": "retired: a running turn has no owning connection; kept for serving and rollback overlap", "drop": "docs/agent-server-surfaces.md#turn-transport-storage-retirement (no unreleased registration holds a value, and rollback floor passes 4267)" },
+          "turn_connection_epoch": { "reason": "retired: a running turn has no owning connection epoch; kept for serving and rollback overlap", "drop": "docs/agent-server-surfaces.md#turn-transport-storage-retirement (no unreleased registration holds a value, and rollback floor passes 4267)" },
+          "turn_transport_id": { "reason": "retired: a running turn has no owning transport; kept for serving and rollback overlap", "drop": "docs/agent-server-surfaces.md#turn-transport-storage-retirement (no unreleased registration holds a value, and rollback floor passes 4267)" }
         }
       },
       "agent_grant_policy_revocations": {
@@ -3303,8 +3304,8 @@
         "columns": {
           "command_id": "Identifies the command whose execution generation has an immutable owner binding.",
           "generation_id": "Preserves each admitted execution generation after the current command advances or is requeued.",
-          "connection_id": "History only: the registration that first claimed the generation; NULL for ingress without a helper registration. Never an owner check.",
-          "connection_epoch": "History only: the epoch of that first claiming registration. Never an owner check."
+          "connection_id": { "reason": "retired history: older rows name the registration that first claimed the generation; no longer written and never an owner check", "drop": "docs/agent-server-surfaces.md#turn-transport-storage-retirement (rollback floor passes 4267)" },
+          "connection_epoch": { "reason": "retired history: older rows name the epoch of that first claim; no longer written and never an owner check", "drop": "docs/agent-server-surfaces.md#turn-transport-storage-retirement (rollback floor passes 4267)" }
         }
       },
       "turn_owned_access_checks": {
@@ -3342,13 +3343,13 @@
           "command_id": "Identifies the durable command whose claim issued this credential.",
           "generation_id": "Distinguishes successive command claims and prevents a credential crossing generations.",
           "request_id": "Binds model authority to the admitted helper turn request.",
-          "connection_id": { "reason": "Signed history of older credentials only; NULL for new credentials and never compared to a live connection.", "drop": "https://github.com/Beeline-Work/beeline/pull/4267 follow-up, after credentials issued before 4267 expire" },
-          "connection_epoch": { "reason": "Signed history of older credentials only; NULL for new credentials and never compared to a live connection.", "drop": "https://github.com/Beeline-Work/beeline/pull/4267 follow-up, after credentials issued before 4267 expire" },
-          "instance_id": { "reason": "Signed history of older credentials only; NULL for new credentials and never compared to a server lease.", "drop": "https://github.com/Beeline-Work/beeline/pull/4267 follow-up, after credentials issued before 4267 expire" },
+          "connection_id": { "reason": "Signed history of older credentials only; NULL for new credentials and never compared to a live connection.", "drop": "docs/agent-server-surfaces.md#turn-transport-storage-retirement (LEGACY_CREDENTIAL_BINDINGS_LIVE_SQL in owned-model-credential.ts returns 0)" },
+          "connection_epoch": { "reason": "Signed history of older credentials only; NULL for new credentials and never compared to a live connection.", "drop": "docs/agent-server-surfaces.md#turn-transport-storage-retirement (LEGACY_CREDENTIAL_BINDINGS_LIVE_SQL in owned-model-credential.ts returns 0)" },
+          "instance_id": { "reason": "Signed history of older credentials only; NULL for new credentials and never compared to a server lease.", "drop": "docs/agent-server-surfaces.md#turn-transport-storage-retirement (LEGACY_CREDENTIAL_BINDINGS_LIVE_SQL in owned-model-credential.ts returns 0)" },
           "model": "Pins the selected provider model so configuration changes cannot retarget an issued credential.",
           "agent_model": "Retains the explicit agent model selection used when the credential was issued.",
           "model_token_hash": "Detects model-token rotation after issuance without retaining its secret.",
-          "expires_ms": "Preserves the original admitted deadline so replay cannot extend model authority.",
+          "expires_ms": "Records the deadline signed into older credentials; new credentials store NULL, live invocation membership bounds their authority, and no time expiry is enforced.",
           "created_at": "Records the issuance boundary independently of later command claim changes.",
           "revoked_at": "Preserves the credential schema revocation marker checked by authentication; the existing primitive has no current revocation writer."
         }

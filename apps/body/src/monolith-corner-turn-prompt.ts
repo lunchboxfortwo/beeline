@@ -14,7 +14,7 @@ import { TurnStoppedError } from './turn-stop.js';
 import { AgentTurnStream, durableReplyText } from './turn-stream.js';
 import { isCompletedToolCall, isPrChecksRead, toolCallFailureLine } from './tool-call-failure.js';
 import { captureConnectionUsage } from './connector-runner.js';
-import { distillTurnFailureReason, turnErrorDetail } from './turn-failure-reason.js';
+import { distillTurnFailureReason, redactToolDetail, turnErrorDetail } from './turn-failure-reason.js';
 import { allocatedDirectoryBytes, scratchBudgetMessage, scratchGrowthExceedsBudget } from './scratch-lifecycle.js';
 import { awaitInstitutionalContext, startInstitutionalContextFetch } from './institutional-context.js';
 import { approvedDeviceGrant, dependencyMountResumePrompt, deviceGrantResumePrompt } from './monolith-room-turn.js';
@@ -907,7 +907,7 @@ import { MonolithCornerTurnLoop, isCornerReviewTurn, DaemonActivity, toolCallKey
         requestId,
         status: 'failed',
         generationId: ctx.commandContext.generationId,
-        reason: reason.text,
+        reason: redactToolDetail(reason.text),
         ...(reason.kind ? { reasonKind: reason.kind } : {}),
         toolCalls: trace.toolCallsTotal,
         trace: trace.replay(),

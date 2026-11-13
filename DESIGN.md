@@ -217,6 +217,7 @@ Flat by default. Depth is tonal: the elevation ladder in Colors, one hairline, a
 
 ### Shape
 - **House radius** `radius = 3`: inputs, buttons, poll plates, reference chips, identity plates.
+- **Historical browser surfaces:** grammar radii `transcript` (10) and `viewer` (14) preserve the pre-redesign card and floating pill. `Btn viewerInset` keeps its 42 px inner face inside the existing 44 px border; use `Motion` and `TypedView` for animation and markdown.
 - **Transcript card family:** radius 10 on a 1 px border, matching the composer. Code blocks inside a card use 8.
 - **Phone Room-list cards:** radius 14 (`roomCard.cornerRadius`).
 - Circles for state (`StateCircle`), dots and counts.

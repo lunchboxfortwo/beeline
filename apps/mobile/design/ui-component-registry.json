@@ -419,6 +419,7 @@
     "components/buzz/PushLevelSetting.tsx": [
       "PushLevelSetting"
     ],
+    "components/buzz/SelectedRepositoryPill.tsx": ["SelectedRepositoryPill"],
     "components/buzz/RepoList.tsx": [
       "RepoList"
     ],
@@ -491,9 +492,6 @@
       "ScheduledWorkDoes",
       "ScheduledWorkFacts",
       "StopScheduledWork"
-    ],
-    "components/buzz/ScheduledWorkWhere.tsx": [
-      "ScheduledWorkWhere"
     ],
     "components/buzz/ServiceMark.tsx": [
       "ServiceMark"
@@ -800,9 +798,6 @@
     "components/buzz/ScheduledWorkDetail.tsx": {
       "07de2e5c25d42e98decd": 1,
       "b19562113bc51653909c": 1
-    },
-    "components/buzz/ScheduledWorkWhere.tsx": {
-      "78cfd6ebfcfb461ad2c2": 1
     },
     "components/buzz/SettingsScopeTabs.tsx": {
       "1fec11345992a82086ee": 1,

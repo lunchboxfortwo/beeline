@@ -3,6 +3,7 @@ import React from 'react';
 import { act, create } from 'react-test-renderer';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 
+vi.mock('react-native', () => ({ Platform: { OS: 'web' } }));
 vi.mock('@/components/buzz/RepositoryMark', () => ({ RepositoryMark: (props: any) => React.createElement('RepositoryMark', props) }));
 vi.mock('tamagui', async () => {
     const hosts = (await import('@/ui/screens/transcript/grammar-hosts.test-support')).tamaguiHosts();
@@ -101,7 +102,10 @@ describe('Chat info', () => {
         await act(async () => pressable(tree, 'chat-repository').props.onPress());
         expect(operation).toHaveBeenCalledWith('listGitHubRepositories', {});
         const list = tree.root.findByType('RepoList');
-        act(() => list.props.onSelect(list.props.candidates[0]));
+        expect(tree.root.findAllByProps({ testID: 'chat-repository-pill' })).toHaveLength(0);
+        expect(tree.root.findAllByProps({ testID: 'chat-repository-none' })).toHaveLength(0);
+        act(() => list.props.onSelect(list.props.getCandidate(list.props.candidates[0])));
+        expect(control(tree, 'chat-repository-pill')).toBeDefined();
         await act(async () => control(tree, 'chat-repository-save').props.onPress());
         expect(operation).toHaveBeenCalledWith('setRoomRepository', {
             roomId: ROOM, key: 'github:9', name: 'owner/repo', remote: 'git://github.com/owner/repo', targetBranch: 'develop', githubInstallationId: 77,
@@ -110,7 +114,7 @@ describe('Chat info', () => {
         expect(flat(tree)).toContain('owner/repo');
     });
 
-    it('CHAT-REPO-1: opens and selects without rerendering Chat info while the read is pending', async () => {
+    it.each([1, 1000])('CHAT-REPO-1: opens and selects without rerendering Chat info or mapping %i repositories', async (count) => {
         let resolve!: (result: unknown) => void;
         operation.mockImplementationOnce(() => new Promise(done => { resolve = done; }));
         const tree = render();
@@ -119,9 +123,16 @@ describe('Chat info', () => {
         expect(tree.root.findAllByType('Sheet')[0].props.open).toBe(true);
         expect(infoReads).not.toHaveBeenCalled();
         expect(tree.root.findByType('RepoList').props.loading).toBe(true);
-        await act(async () => resolve({ repositories: [{ id: 9, fullName: 'owner/repo', installationId: 77, defaultBranch: 'main' }] }));
+        const nameRead = vi.fn(() => 'owner/repo');
+        const repositories = Array.from({ length: count }, (_, index) => ({
+            id: index + 9, get fullName() { return nameRead(); }, installationId: 77, defaultBranch: 'main',
+        }));
+        await act(async () => resolve({ repositories }));
+        // The list owns individual row conversion; loading a response must not
+        // visit every repository before the picker can draw its first window.
+        expect(nameRead).not.toHaveBeenCalled();
         const list = tree.root.findByType('RepoList');
-        act(() => list.props.onSelect(list.props.candidates[0]));
+        act(() => list.props.onSelect(list.props.getCandidate(list.props.candidates[0])));
         expect(infoReads).not.toHaveBeenCalled();
         act(() => tree.root.findAllByType('Button').find((node: any) => node.props['aria-label'] === 'Cancel').props.onPress());
         expect(tree.root.findAllByType('Sheet')[0].props.open).toBe(false);
@@ -162,7 +173,7 @@ describe('Chat info', () => {
         const tree = render();
         await act(async () => pressable(tree, 'chat-repository').props.onPress());
         const list = tree.root.findByType('RepoList');
-        act(() => list.props.onSelect(list.props.candidates[0]));
+        act(() => list.props.onSelect(list.props.getCandidate(list.props.candidates[0])));
         await act(async () => control(tree, 'chat-repository-save').props.onPress());
         expect(modal.confirm).toHaveBeenCalledWith('Change chat repo?', expect.stringContaining('owner/old'), expect.objectContaining({ confirmText: 'Change anyway' }));
         expect(operation.mock.calls.map(call => call[0])).toEqual(['listGitHubRepositories']);
@@ -174,7 +185,12 @@ describe('Chat info', () => {
         operation.mockResolvedValueOnce({ installations: [], repositories: [] });
         const tree = render();
         await act(async () => pressable(tree, 'chat-repository').props.onPress());
-        act(() => pressable(tree, 'chat-repository-none').props.onPress());
+        expect(control(tree, 'chat-repository-save').props.disabled).toBe(true);
+        expect(flat(tree)).toContain('owner/old');
+        act(() => control(tree, 'chat-repository-clear').props.onPress());
+        expect(tree.root.findAllByProps({ testID: 'chat-repository-pill' })).toHaveLength(0);
+        expect(control(tree, 'chat-repository-save').props.disabled).toBe(false);
+        expect(operation.mock.calls.map(call => call[0])).toEqual(['listGitHubRepositories']);
         await act(async () => control(tree, 'chat-repository-save').props.onPress());
         expect(modal.confirm).toHaveBeenCalledWith('Unlink owner/old?', expect.stringContaining('chat-only'), expect.objectContaining({ destructive: true }));
         expect(operation).toHaveBeenCalledWith('removeRoomRepository', { roomId: ROOM });
@@ -186,7 +202,7 @@ describe('Chat info', () => {
         const tree = render();
         await act(async () => pressable(tree, 'chat-repository').props.onPress());
         const list = tree.root.findByType('RepoList');
-        act(() => list.props.onSelect(list.props.candidates[0]));
+        act(() => list.props.onSelect(list.props.getCandidate(list.props.candidates[0])));
         data.room.viewer.permissions.manage = false;
         act(() => tree.update(<ChatInfoScreen roomId={ROOM} close={vi.fn()} />));
         await act(async () => control(tree, 'chat-repository-save').props.onPress());

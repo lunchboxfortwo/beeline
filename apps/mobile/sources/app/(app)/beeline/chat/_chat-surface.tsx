@@ -465,7 +465,7 @@ export function BuzzChatSurface({
 />
 
           {!isCorner && !isDirectMessage && (
-            <ThreadsDropdown roomId={decodedId} chatName={resolvedChannelName} openThread={openCorner}
+            <ThreadsDropdown roomId={decodedId} chatName={resolvedChannelName} viewer={viewerPubkey ?? undefined} openThread={openCorner}
               onNewThread={() => void handleOpenRandomCorner()}
               newThreadDisabled={viewerIsAgent || isArchived} />
           )}

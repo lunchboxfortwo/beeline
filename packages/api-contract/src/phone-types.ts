@@ -1,4 +1,3 @@
-import type { MemberDelivery } from './mcp-delivery.js';
 import type { SquireApprovalDetails } from './approval-copy.js';
 import type { RepositoryOnboardingCard } from './repository-onboarding.js';
 import type { AgentUsage } from './agent-usage.js';
@@ -6,6 +5,7 @@ import type { SystemEvent } from './system-events.js';
 import type { AgentGrantKind, AgentGrantStatus, CommandGrantScript } from './agent-grants.js';
 import type { ChoiceMode, ChoiceOptionView, ChoiceStatus } from './room-choices.js';
 import type { ConnectorOfferCardView } from './connector-offers.js';
+import type { readHeader, readMember } from './phone-guards.js';
 import type { AgentSignInCardView } from './agent-sign-in.js';
 export { type RoomLiveDelta, type RoomView, type RoomHistoryView, MESSAGE_SEARCH_QUERY_MAX_BYTES, type MessageSearchView, type MessageSearchResult, type MessageSearchSnippetPart, type RoomHistoryOutline, type RoomHistoryOutlineDay, type ChatListCorner, type RoomCornerSummary, type ChatListItem, type ChatListWorkspace, type ChatListView, type ChatListUnavailable, type WorkspaceListView, type WorkspaceManagedRoomView, type WorkspaceView, type WorkspaceMemberListView, type WorkspaceMemberListQuery, type AgentComposerCommand, type AgentDetailView, type AgentAccessView, type AgentYoloView, type InviteView, type InviteInviterView, type AgentPairingClaimView, type AgentPairingClaimWireView, type AgentPairingAbandonView, type CornerListItem, type CornerListView, type RoomRepositoryView, type RoomRepositoryResolution } from './phone-types-room-live-delta.js';
 
@@ -157,20 +157,8 @@ export type RoomViewIdentity = {
 };
 
 
-export type RoomViewMember = {
-  readonly delivery?: MemberDelivery;
-  readonly identity: RoomViewIdentity;
-  readonly role: 'owner' | 'admin' | 'member' | 'spectator';
-  /** Selected model label for agent bylines, available on the Room read itself. */
-  readonly model?: string;
-  readonly presence?: {
-    readonly status: 'online' | 'offline';
-    readonly observedAt: number;
-    /** A live helper connection holds this presence; it does not age out. */
-    readonly held?: true;
-    readonly roomId?: string;
-  };
-};
+/** `model` is the selected label for agent bylines. `presence.held` is a live helper that does not age out. */
+export type RoomViewMember = NonNullable<ReturnType<typeof readMember>>;
 
 
 /** Paint-ready agent metadata for the Workspace Members row. */
@@ -182,26 +170,10 @@ export type WorkspaceAgentView = RoomViewMember & {
 };
 
 
-export type RoomViewHeader = {
-  readonly id: string;
-  /** Absent when this bundle could not read it; callers fall back to their own workspace context. */
-  readonly workspaceId?: string;
-  readonly parentId?: string;
-  readonly name: string;
-  readonly about?: string;
-  readonly avatar?: string;
-  readonly favicon?: string;
-  readonly visibility?: 'public' | 'invite-only';
-  /** Agent configured to review repository corners opened from this Room. */
-  readonly reviewerAgentId?: string;
-  /** Absent when this bundle could not read it. Only `true` paints a Room as
-   *  archived. */
-  readonly archived?: boolean;
-  readonly createdAt?: number;
-  /** Absent when this bundle could not read it; a surface omits the age rather
-   *  than dating the Room from the epoch. */
-  readonly updatedAt?: number;
-};
+/** Absent fields were unreadable. Only `archived: true` paints a Room as archived.
+ *  `reviewerAgentId` reviews repository corners opened here. Callers fall back when
+ *  `workspaceId` is absent, and omit `updatedAt` rather than dating the Room from the epoch. */
+export type RoomViewHeader = NonNullable<ReturnType<typeof readHeader>>;
 
 
 export type RoomToolReference = { readonly roomId: string; readonly anchor: string };

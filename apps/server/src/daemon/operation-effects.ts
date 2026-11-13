@@ -142,7 +142,9 @@ export async function claimAgentCommandOperation<Name extends keyof DaemonOperat
         const claimed = await queueDatabaseWork(ctx.database, `turn:${scopedRoom}:${authenticatedAgentId}`, () => ctx.database.transaction(async (db) => {
           if (ownedIntent) await daemonLockOwnedTurnAccess(ctx, db, scopedRoom!, authenticatedAgentId, String(candidate.commandId));
           const row = await claimAgentCommand(db, scopedRoom!, authenticatedAgentId,
-            String(candidate.commandId), typeof candidate.generationId === 'string' ? candidate.generationId : '', turnOwner, name === 'claimAgentTurn')
+            String(candidate.commandId), typeof candidate.generationId === 'string' ? candidate.generationId : '',
+            turnOwner ? { kind: 'helper', owner: turnOwner, allPending: name === 'claimAgentTurn' }
+              : { kind: 'legacy', allPending: name === 'claimAgentTurn' })
             .catch((error: unknown) => {
               if (isOwnedModelUnknownGenerationError(error)) throw new OwnedModelUnknownGeneration();
               // Commit stale cancellations before refusing a cached helper claim.
@@ -153,7 +155,7 @@ export async function claimAgentCommandOperation<Name extends keyof DaemonOperat
           let modelCredential: Awaited<ReturnType<OwnedModelCredentials['issueInTransaction']>> | undefined;
           if (turnOwner && daemonOwnedModelReady(ctx) && (row.action === 'input' || row.action === 'resume') &&
               (await db.query('SELECT 1 FROM free_agents WHERE agent_id=$1', [authenticatedAgentId])).rowCount) {
-            const credentials = daemonModelClaimCredentials(ctx, modelClaim, authenticatedAgentId, turnOwner);
+            const credentials = daemonModelClaimCredentials(ctx, modelClaim, authenticatedAgentId);
             modelCredential = await credentials.issueInTransaction(db, { agentId: authenticatedAgentId, commandId: row.id,
               generationId: row.generation_id! });
           }

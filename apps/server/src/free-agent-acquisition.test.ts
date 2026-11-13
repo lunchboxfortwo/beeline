@@ -59,7 +59,7 @@ it.each(['before', 'after'] as const)('connected helper retains owned-model auth
     id: 'm1', state: 'started', instance_id: 'current', config: { image },
   }));
   const service = new FreeAgentService(fixture.db, config(), provider, async () => ({ exchangeToken: 'synthetic' }));
-  const negotiate = () => daemon.negotiateOwnedModel(MODEL_AGENT, source, true);
+  const negotiate = () => daemon.negotiateOwnedModel(MODEL_AGENT, true);
   const selectedBefore = timing === 'before' ? await negotiate() : undefined;
   // Registration and listener catch-up both admit this acquisition while the
   // original messages are still pending. A serving helper must remain ready.

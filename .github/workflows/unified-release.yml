@@ -1587,3 +1587,27 @@ jobs:
           node scripts/release-job-output.mjs PREVIOUS_RECORD "$RUNNER_TEMP/previous-release.json"
           NEEDS_FILE="$RUNNER_TEMP/needs.json" PREVIOUS_RECORD_FILE="$RUNNER_TEMP/previous-release.json" \
             node scripts/release-bookkeeping.mjs
+  nightly_checks:
+    name: Start nightly checks
+    needs: [initialize, release_result]
+    if: "!cancelled() && needs.initialize.result == 'success' && inputs.channel == 'next'"
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    permissions:
+      actions: write
+    steps:
+      - name: Dispatch nightly checks for the released commit
+        env:
+          GH_TOKEN: ${{ github.token }}
+          RELEASE_SHA: ${{ needs.initialize.outputs.release_sha }}
+          RELEASE_RUN_ID: ${{ github.run_id }}
+        run: |
+          set -euo pipefail
+          case "$RELEASE_SHA" in
+            ''|main|*[[:space:]]*|*/*)
+              echo "release SHA is not a commit: ${RELEASE_SHA}" >&2
+              exit 1
+              ;;
+          esac
+          gh api --method POST "repos/${GITHUB_REPOSITORY}/actions/workflows/nightly-checks.yml/dispatches" -f ref=main -f "inputs[release_run_id]=${RELEASE_RUN_ID}" -f "inputs[release_sha]=${RELEASE_SHA}"
+          echo "Nightly checks dispatched for ${RELEASE_SHA}." >> "${GITHUB_STEP_SUMMARY}"
