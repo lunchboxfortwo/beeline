@@ -121,7 +121,7 @@ export function Copy({ children, quiet = false, small = false, strong = false, a
 
 type IconComponent = React.ComponentType<{ size?: number; color?: string; strokeWidth?: number }>;
 /** Icons: lucide outline at 16 or 20, 1.7 stroke, secondary; brass when it means you. */
-export function Glyph({ icon: Icon, size = 20, accent = false, color }: { icon: IconComponent; size?: 14 | 16 | 18 | 20; accent?: boolean; color?: 'ink' | 'primaryInk' | 'removed' }) {
+export function Glyph({ icon: Icon, size = 20, accent = false, color }: { icon: IconComponent; size?: 14 | 16 | 18 | 20; accent?: boolean; color?: 'ink' | 'primaryInk' | 'removed' | 'tabOn' | 'tabOff' }) {
     const t = useTheme() as Record<string, { val: string } | undefined>;
     const ink = color ? t[color]?.val : accent ? t.needsYou?.val : t.secondary?.val;
     return <Icon size={size} color={ink} strokeWidth={1.7} />;

@@ -13,12 +13,13 @@ import { watchActiveCommunityId } from '@/buzz/community-storage';
 import { messageSearchHref } from '@/buzz/use-message-search';
 import { roomRowName } from '@/buzz/room-list-row';
 import { roomHref } from '@/buzz/corner-navigation';
-import { BuzzCommunityShell, useCommunityDrawer } from '@/components/buzz/CommunityRail';
+import { BuzzCommunityShell } from '@/components/buzz/CommunityRail';
 import { WorkspaceAddAgentSheet } from '@/ui/screens/members/ChatAddSheets';
 import { RoomDeckLoadingView } from '@/components/buzz/RoomDeckLoadingView';
 import { WORKSPACE_LABEL } from '@/buzz/vocabulary';
 import { Btn, Copy, Glyph, SafeTop, T } from '@/ui/grammar';
 import { ChatListHeader } from '@/ui/screens/chats/ChatListHeader';
+import { TabHeader, useScrolledUnder } from '@/ui/shell/TabHeader';
 import { ChatRow, ChatRowDivider, JoinableChats } from '@/ui/screens/chats/ChatTree';
 import { MessageMatches } from '@/ui/screens/chats/MessageMatches';
 import { NewChatSheet } from '@/ui/screens/chats/NewChatSheet';
@@ -27,7 +28,7 @@ import { router, useLocalSearchParams, usePathname, type Href } from 'expo-route
 import { memo, useContext, useEffect, useRef, useState } from 'react';
 import { FlatList } from 'react-native';
 import { Swipeable } from 'react-native-gesture-handler';
-import { Separator, XStack, YStack } from 'tamagui';
+import { XStack, YStack } from 'tamagui';
 import { LogOut } from 'lucide-react-native';
 import { FirstContentDrawContext, isInitialLandingNavigationSuppressed, isInitialLandingResolved, markInitialLandingResolved } from '@/navigation/initial-landing';
 import { isPersonNameOnboardingPending } from '@/buzz/person-name';
@@ -152,12 +153,6 @@ export default function SavedRoomDeck() {
   ) : <RoomDeckLoadingView />;
 }
 
-/** The list header on a phone: the Workspace name opens today's Workspace drawer. */
-function DeckHeader(props: Omit<React.ComponentProps<typeof ChatListHeader>, 'onWorkspace'>) {
-  const drawer = useCommunityDrawer();
-  return <ChatListHeader {...props} onWorkspace={drawer?.openDrawer} />;
-}
-
 const EMPTY_CHATS: readonly ChatListItem[] = [];
 
 const BuzzChannels = memo(function BuzzChannels({ session }: { session: DeckSession }) {
@@ -173,6 +168,7 @@ const BuzzChannels = memo(function BuzzChannels({ session }: { session: DeckSess
   const { activeCommunity, activeCommunityId, viewerIsAgent, canManageWorkspace, search, setSearch, pinned } = view;
   const { roomListGestures, swipeableRefs, handleLeaveRoom, handleCloseChat, visibleRows: rows } = actions;
   const canCreate = !viewerIsAgent && canManageWorkspace;
+  const { scrolled, scrollProps } = useScrolledUnder();
   const workspaceName = chatList?.workspace.name ?? activeCommunity?.name ?? WORKSPACE_LABEL;
   // Desktop has no bare list in the middle: the top chat of the already loaded
   // list opens there (build spec, desktop walk "open: sidebar, #beeline in the middle").
@@ -283,11 +279,7 @@ const BuzzChannels = memo(function BuzzChannels({ session }: { session: DeckSess
     >
       <YStack flex={1} minHeight={0} backgroundColor="canvas" onLayout={onLayout} testID={refreshing ? 'room-list-refreshing' : 'room-list-idle'}>
         {isDesktop ? null : (
-          <>
-            <SafeTop />
-            <DeckHeader workspaceName={workspaceName} onNew={canCreate ? () => state.setNewChatStep('menu') : undefined} search={search} onSearch={setSearch} />
-            <Separator borderColor="stroke" />
-          </>
+          <TabHeader workspaceName={workspaceName} onNew={canCreate ? () => state.setNewChatStep('menu') : undefined} search={search} onSearch={setSearch} scrolled={scrolled} />
         )}
         {view.pinError ? <YStack paddingHorizontal="4" paddingVertical="2"><Copy small color="removed">{view.pinError}</Copy></YStack> : null}
         {state.deletedWorkspaceNotice ? (
@@ -309,6 +301,7 @@ const BuzzChannels = memo(function BuzzChannels({ session }: { session: DeckSess
             <FlatList
               testID="room-list"
               {...roomListGestures.listHandlers}
+              {...scrollProps}
               data={rows}
               keyExtractor={(item) => item.room.id}
               extraData={[roomListGestures.swipesEnabled, pinned, ageNow]}
