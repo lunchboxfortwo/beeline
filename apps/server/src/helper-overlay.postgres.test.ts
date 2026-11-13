@@ -53,7 +53,7 @@ describe.skipIf(!url)('overlay real PostgreSQL remote listener and viewer fences
       if(mode==='wire')await writer.query(`INSERT INTO room_push_views VALUES($1,'reader','phone-on-reader-instance',NULL,NULL)`,[room]);
       await writer.query(`INSERT INTO live_server_instances VALUES('owner-server',clock_timestamp());
       INSERT INTO agent_connections VALUES('agent','connection',1,NULL,'owner-server');
-        INSERT INTO agent_turns VALUES('${room}','agent','turn','generation','working');
+        INSERT INTO agent_turns VALUES('${room}','agent','turn','working');
         INSERT INTO agent_commands(id,room_id,agent_id,turn_request_id,action,state) VALUES('command','${room}','agent','turn','input','pending');`);
       listening=listener.run();await ready.promise;
       stopLive=live.subscribe(room,event=>{if(viewer.accept(event))void forward(event);});

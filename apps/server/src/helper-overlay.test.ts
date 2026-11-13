@@ -29,7 +29,7 @@ describe('helper overlay source ownership and final enqueue',()=>{
     await db.query(`INSERT INTO room_push_views VALUES($1,'reader','session',NULL,NULL)`,[room]);
     await db.query(`INSERT INTO live_server_instances VALUES('owner-server',clock_timestamp());
       INSERT INTO agent_connections VALUES('agent','connection',1,NULL,'owner-server');
-      INSERT INTO agent_turns VALUES('${room}','agent','turn','generation','working');
+      INSERT INTO agent_turns VALUES('${room}','agent','turn','working');
       INSERT INTO agent_commands(id,room_id,agent_id,turn_request_id,action,state) VALUES('command','${room}','agent','turn','input','pending');`);
   },30000);
   afterAll(async()=>{await db.close();});
