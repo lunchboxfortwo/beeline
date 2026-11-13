@@ -7,7 +7,7 @@ import { createErrorEventFilter } from '@beeline/api-contract/error-reporting';
 import { createBeelineServer } from '../../server/src/server.js';
 import { migratedDatabase } from '../../server/src/test-support.js';
 import type { DaemonService } from '../../server/src/daemon-service.js';
-import type { TokenAuth } from '../../server/src/auth.js';
+import { TokenAuth,tokenHash } from '../../server/src/auth.js';
 import type { PhoneService } from '../../server/src/phone-service.js';
 import { LiveHub } from '../../server/src/live.js';
 import { MachineLink } from './machine-link.js';
@@ -32,9 +32,11 @@ it('helper error reports name the owning account once its agent registers', asyn
   const owner = 'a'.repeat(64), agentId = 'ab'.repeat(32);
   await database.query(`INSERT INTO identities(id,kind,name) VALUES($1,'human','Owner'),($2,'agent','Helper')`, [owner, agentId]);
   await database.query(`INSERT INTO agents(agent_id,owner_id) VALUES($1,$2)`, [agentId, owner]);
+  await database.query('INSERT INTO daemon_tokens(token_hash,agent_id) VALUES($1,$2)',[tokenHash('bdt_helper_owner_fixture'),agentId]);
+  const auth=new TokenAuth(database,async()=>{throw new Error('unused');});
   const server = createBeelineServer({ database,
     daemon: { execute: vi.fn(async () => ({})) } as unknown as DaemonService,
-    auth: { authenticateDaemon: async () => agentId, retiredDaemonAgent: async () => null } as unknown as TokenAuth,
+    auth,
     phone: {} as unknown as PhoneService, live: new LiveHub(), mediaMaximumBytes: 1 });
   await new Promise<void>(resolve => server.listen(0, '127.0.0.1', resolve));
   const sockets: WebSocket[] = [];

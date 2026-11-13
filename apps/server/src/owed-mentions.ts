@@ -32,10 +32,6 @@ export async function prepareMentionReplyInput(db: SqlDatabase, member: string,
   serverMentionInputs.add(input);
 }
 
-export function isMentionReplyInput(input: object): boolean {
-  return serverMentionInputs.has(input);
-}
-
 /** Catch-up pages read the outstanding obligation.
  * Helper final answers carry request_id even when they have no replyTo. A
  * cancelled source command closes that conversation; completion alone does not

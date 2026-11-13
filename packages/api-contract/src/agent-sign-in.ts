@@ -153,8 +153,3 @@ export const AGENT_SIGN_IN_KINDS: Readonly<Record<AgentSignInHarness, AgentSignI
   claude: 'paste-code', codex: 'device-code', grok: 'device-code', cursor: 'approve-wait',
   opencode: 'api-key', pi: 'api-key', goose: 'api-key',
 };
-
-/** Harnesses that sign in with a provider API key rather than a login page. */
-export function agentSignInUsesKey(harness: AgentSignInHarness): boolean {
-  return AGENT_SIGN_IN_KINDS[harness] === 'api-key';
-}

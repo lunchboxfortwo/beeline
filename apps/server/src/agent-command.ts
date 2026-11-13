@@ -17,6 +17,7 @@ import { cornerOpeningSql } from './corner-opening.js';
 import { cornerReviewerSql } from './corner-reviewer.js';
 import { cornerImplementerSql } from './corner-worker.js';
 import type { SqlDatabase } from './database.js';
+import { recordStarPromptReply } from './github-star-prompt.js';
 import { hasSystemReportMention,isChannelMentionToken,typedMentionHandles } from './message-mentions.js';
 import { mcpCommandWakeSql } from './rooms-mcp-events.js';
 import { recordMcpMemberWebhook,recordMcpMention } from './rooms-mcp-members.js';
@@ -384,7 +385,7 @@ export type AgentCommandInput = {
   };
 
 
-export { agentSignInCardId,isTaggedLoginText,parseTaggedAgentLifecycleCommand,soloRoomAgentSql,TAGGED_AGENT_LIFECYCLE_COMMANDS } from './agent-command-create-agent-command.js';
+export { agentSignInCardId,isTaggedLoginText,parseTaggedAgentLifecycleCommand,TAGGED_AGENT_LIFECYCLE_COMMANDS } from './agent-command-create-agent-command.js';
 export type { TaggedAgentLifecycleCommand } from './agent-command-create-agent-command.js';
 export { dropQueuedOrdersForStop,lockAgentCommandQueue } from './agent-command-queue.js';
 export { commandInbox,queueCornerMergeConflict,readAgentCommands,reconcileCornerMergeBlockers,routeSystemCommand } from './agent-command-read-agent-commands.js';
@@ -774,6 +775,8 @@ export async function answerQueuedMessage(database: SqlDatabase, agentId: string
           [published.id,replySteps(input.steps),agentId]);
       };
       await Promise.all([
+        recordStarPromptReply(database,{roomId:input.roomId,agentId,requestId:input.requestId ?? '',messageId:published.id})
+          .catch(error=>console.warn('[answer] optional star reply counter omitted:',error)),
         database.query(`SELECT beeline_record_agent_answer(id,false,NULL) FROM agent_commands
           WHERE room_id=$1 AND agent_id=$2 AND turn_request_id=$3`,[input.roomId,agentId,input.requestId ?? null])
           .catch(error=>console.warn('[answer] optional turn status omitted:',error)),

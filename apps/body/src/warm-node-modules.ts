@@ -78,24 +78,24 @@
  * and a crashed harvest all degrade to the install the corner would have run
  * anyway.
  */
-import { createHash, randomUUID } from 'node:crypto';
+import { createHash,randomUUID } from 'node:crypto';
 import { constants as fsConstants } from 'node:fs';
 import {
-  chmod,
-  copyFile,
-  link,
-  lstat,
-  mkdir,
-  readdir,
-  readFile,
-  readlink,
-  rename,
-  rm,
-  stat,
-  symlink,
-  utimes,
+chmod,
+copyFile,
+link,
+lstat,
+mkdir,
+readdir,
+readFile,
+readlink,
+rename,
+rm,
+stat,
+symlink,
+utimes,
 } from 'node:fs/promises';
-import { dirname, join, resolve } from 'node:path';
+import { dirname,join,resolve } from 'node:path';
 
 /**
  * Bumped when the on-disk shape of a store entry changes. It is part of the
@@ -108,43 +108,6 @@ const STAGING_PREFIX = '.beeline-warm-';
 
 /** A staging directory older than this was left by a process that died. */
 export const STAGING_SWEEP_MS = 24 * 60 * 60 * 1000;
-
-/** The one npm cache every corner session on this host shares. */
-export function sharedNpmCacheDir(supervisorRoot: string): string {
-  return resolve(supervisorRoot, 'beeline', 'npm-cache');
-}
-
-/** The pnpm content-addressable store shared by every corner on this host. */
-export function sharedPnpmStoreDir(supervisorRoot: string): string {
-  return resolve(supervisorRoot, 'beeline', 'pnpm-store');
-}
-
-/**
- * Turbo's build cache, shared by every corner on this host.
- *
- * Turbo derives its default cache directory from the GIT COMMON directory, so
- * a linked worktree under `corners/` resolves it to the read-only
- * `repositories/.turbo/cache` beside the bare canonical clone and every
- * `turbo run` fails before it starts. Pointing `TURBO_CACHE_DIR` here makes the
- * cache writable and shared, the same trade the npm cache already makes: later
- * corners reuse cache hits instead of rebuilding.
- */
-export function sharedTurboCacheDir(supervisorRoot: string): string {
-  return resolve(supervisorRoot, 'beeline', 'turbo-cache');
-}
-
-/** The host-wide warm `node_modules` store, one entry per lockfile key. */
-export function warmNodeModulesStoreDir(supervisorRoot: string): string {
-  return resolve(supervisorRoot, 'beeline', 'node-modules');
-}
-
-/**
- * Mobile has its own lockfile but uses the same machine-wide generation store.
- * Matching hashes share bytes regardless of the checkout-relative location.
- */
-export function mobileNodeModulesStoreDir(supervisorRoot: string): string {
-  return warmNodeModulesStoreDir(supervisorRoot);
-}
 
 /**
  * What a warm start for one checkout is keyed to and made of, or the reason

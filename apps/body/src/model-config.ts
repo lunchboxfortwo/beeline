@@ -14,11 +14,11 @@
  * RAW advertised catalog every time something is about to be set — so even a
  * caller that forgot to filter first still cannot reach `mode`.
  */
-import { agentBehavior } from './agent-command.js';
-import { isAllowedAgentModelConfigCategory, type AgentModelConfigOption } from './model-types.js';
-import { lstatSync, readFileSync } from 'node:fs';
-import { basename, resolve } from 'node:path';
 import { isAuthShapedFault } from '@beeline/api-contract/daemon';
+import { lstatSync,readFileSync } from 'node:fs';
+import { basename,resolve } from 'node:path';
+import { agentBehavior } from './agent-command.js';
+import { isAllowedAgentModelConfigCategory,type AgentModelConfigOption } from './model-types.js';
 import { isTransientProviderText } from './transient-provider-error.js';
 
 /** Synthetic safe axes derived from Grok's standard ACP session model metadata. */
@@ -609,13 +609,4 @@ export async function applyAgentModelSelectionWithUpdatedCatalog(
     await client.setConfigOption(sessionId, 'fast-mode', selection.fastMode ? 'on' : 'off');
   }
   return { options: currentOptions, appliedSelection };
-}
-
-export async function applyAgentModelSelection(
-  client: ModelConfigSettable,
-  sessionId: string,
-  advertisedOptions: AgentModelConfigOption[],
-  selection: { model?: string; effort?: string; fastMode?: boolean },
-): Promise<AppliedModelSelectionResult> {
-  return applyAgentModelSelectionWithUpdatedCatalog(client, sessionId, advertisedOptions, selection);
 }

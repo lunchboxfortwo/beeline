@@ -1,6 +1,5 @@
-import { HelperOverlayOwner } from './helper-overlay.js';
-import type { DaemonOperationMap } from '@beeline/api-contract/daemon';
 import type { DaemonApiClient } from './daemon-api-client.js';
+import { HelperOverlayOwner } from './helper-overlay.js';
 import { sanitizeAgentReply } from './reply-sanitizer.js';
 
 /**
@@ -41,13 +40,6 @@ export interface AgentTurnStreamOptions {
   commandId: string;
   /** Log prefix naming the surface, e.g. `monolith Room <id>` or `corner <id>`. */
   label: string;
-}
-
-/** Extra fields the durable reply carries on one surface but not the other. */
-export interface DurableReplyFields {
-  triggerMessageId?: string;
-  /** A Room reply's tool calls and earlier text runs, in turn order. */
-  steps?: DaemonOperationMap['postRoomMessage']['input']['steps'];
 }
 
 /**

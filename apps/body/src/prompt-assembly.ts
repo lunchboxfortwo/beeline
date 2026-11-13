@@ -1,43 +1,18 @@
+import type { CornerBrief } from '@beeline/api-contract/daemon';
+import { boundReplyExcerpt,subscriptionActionPrompt,WORKSPACE_CORE_SKILL_SLUG,type RoomInboxResult,type SystemEvent } from '@beeline/api-contract/daemon';
 import { mentionReplyRule } from '@beeline/api-contract/phone';
-import type { CodexPromptDelivery } from './codex-prompt-delivery.js';
-import { renderFreeAgentCheckpoint, type FreeAgentCheckpoint } from './free-agent-continuation.js';
-import { boundReplyExcerpt, subscriptionActionPrompt, WORKSPACE_CORE_SKILL_SLUG, type RoomInboxResult, type SystemEvent } from '@beeline/api-contract/daemon';
-import type { CornerBrief, DaemonOperationMap } from '@beeline/api-contract/daemon';
 import { createHash } from 'node:crypto';
-import { nonhumanSilentWake } from './silent-wake.js';
-import type { CornerGitHubCli } from './corner-github-auth.js';
 import { ACP_SESSION_MEMORY_MAX_BYTES } from './acp-resource-scope.js';
-import { harnessHonorsSessionSystemPrompt } from './harness-capabilities.js';
-import { boundRoomTaskBody, budgetTranscript } from './transcript-budget.js';
-import type { MachineHost } from './machine-host.js';
-import { HOST_EMULATOR_RULE } from './host-emulator.js';
 import { SITUATIONAL_SKILL_NAMES } from './beeline-skill.js';
-import { agentToolsFor, placeBeelineApps } from './minimal-tool-surface.js';
-
-/**
- * The ONE place Beeline prompt text is written and assembled.
- *
- * Every rule an agent is given lives in a section below: an id, the single
- * topic it owns, why it exists, a byte budget, the surfaces it applies to, and
- * a render function. `assembleSessionPrompt` and `assembleTurnPrompt` are the
- * only builders; the turn loops pass facts in and send what comes out.
- *
- * Guards (`prompt-assembly.test.ts`): no two sections share a topic, no
- * sentence repeats inside an assembled prompt, every section stays inside its
- * budget, harnesses that drop the session prompt still receive every session
- * rule, and the assembled prompt for every surface is snapshotted in
- * `docs/prompts/` so a wording change shows up as a readable diff.
- * `prompt-layers.test.ts` fails when a sentence is written in more than one of
- * the prompt, the skills and the tool text.
- *
- * Where new text goes: a rule goes in the session section for its subject,
- * with its Room, DM or corner wording beside the others; what a tool's inputs
- * mean is that tool's description; rare mechanics are a skill; one person's
- * preference is a memory item. Adding a rule means cutting or shortening
- * another to stay inside `SESSION_BUDGET_BYTES`.
- */
-
-type WorkspaceRoster = DaemonOperationMap['getWorkspaceRoster']['output'];
+import type { CodexPromptDelivery } from './codex-prompt-delivery.js';
+import type { CornerGitHubCli } from './corner-github-auth.js';
+import { renderFreeAgentCheckpoint,type FreeAgentCheckpoint } from './free-agent-continuation.js';
+import { harnessHonorsSessionSystemPrompt } from './harness-capabilities.js';
+import { HOST_EMULATOR_RULE } from './host-emulator.js';
+import type { MachineHost } from './machine-host.js';
+import { agentToolsFor,placeBeelineApps } from './minimal-tool-surface.js';
+import { nonhumanSilentWake } from './silent-wake.js';
+import { boundRoomTaskBody,budgetTranscript } from './transcript-budget.js';
 
 type ReplyContext = Pick<RoomInboxResult['items'][number],
   'replyToMessageId' | 'replyToAuthorId' | 'replyToAuthorName' | 'replyToExcerpt'>;
@@ -197,9 +172,6 @@ Non-repo work: post_artifact and report. End awaiting orders/checks/review; comm
 
 export const CORNER_REVIEWER_SESSION_INSTRUCTION =
   "As configured reviewer, review the assigned green head with approve_merge. Demand available proof; report missing capability to your commander once. PASS lands the PR once checks are green and no hold stands; use merge_corner yourself only on an explicit commander order.";
-
-export const CORNER_REVIEWER_UNSTABLE_HEAD_INSTRUCTION =
-  'A current green review target matching this checkout could not be verified. Read checks before reviewing; confirm the checkout matches the live PR head. The server still requires green checks and approval on that exact head.';
 
 export const CORNER_DELIVERY_NUDGE =
   'Only when you write code in this corner and the brief calls for repository changes, inspect the repository state and finish delivering the work unless a human hold stands: commit and push the intended changes and open the pull request if one does not exist. Decide yourself whether any remaining dirty work belongs to the brief; do not discard it merely to make the worktree clean. The pull request body must carry ## Reproduced and ## Demonstrated; if they are missing, add them before ending the turn. If you wrote no code, deliver with post_artifact.';
@@ -574,34 +546,6 @@ export function renderAssignedCornerBrief(brief: CornerBrief): string {
     ? `Approved by ${brief.approval.approverName}, message ${brief.approval.sourceMessageId}: ${brief.approval.text}`
     : 'This revision predates recorded approvals.';
   return `Brief revision ${brief.revision}:\n${brief.spec}\n\n${approval}`;
-}
-
-/**
- * The member list: the only place handle spellings come from. The rule for
- * using them is in the `talking` section; this renders the facts only.
- */
-export function roomMentionDirectory(roster: WorkspaceRoster, selfId: string): string {
-  const rows: string[] = [];
-  let selfHandle: string | undefined;
-  for (const member of roster.members) {
-    if (member.identityId === selfId) {
-      selfHandle = member.handle?.trim().replace(/^@/, '');
-      continue;
-    }
-    const memberHandle = member.handle?.trim().replace(/^@/, '');
-    if (!memberHandle) continue;
-    const name = member.name?.trim() ?? '';
-    const kind = member.kind === 'agent' ? 'agent' : 'person';
-    const metadata = member.kind === 'agent'
-      ? [member.owner ? `owner ${member.owner.handle ? `@${member.owner.handle}` : member.owner.name}` : '',
-          member.machine ?? ''].filter(Boolean).join(' · ')
-      : '';
-    rows.push(`- @${memberHandle}${name && name !== memberHandle ? ` — ${name}` : ''} (${kind})${metadata ? ` · ${metadata}` : ''}`);
-  }
-  // Without this line an agent reading the list concludes it is not a member.
-  if (selfHandle) rows.push(`You are @${selfHandle}, a member of this Room; you are not listed above.`);
-  if (!rows.length) return '';
-  return ['Members (exact tag spellings):', ...rows].join('\n');
 }
 
 export interface TurnPromptContext {

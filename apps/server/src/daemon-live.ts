@@ -257,8 +257,7 @@ export class DaemonAgentSession {
       const model = await this.deps.daemon.negotiateOwnedModel(this.agentId, this.presence.queueV1 === true);
       this.#ownedModelCapability = model?.capability;
       this.deps.registry.settled(this);
-      if (this.presence.usageAccountV1 && helperUsageEnabled()) void this.deps.database.query<{owner_id:string|null}>(
-        'SELECT owner_id FROM agents WHERE agent_id=$1', [this.agentId]).then(result => { this.usageOwnerId = result.rows[0]?.owner_id ?? undefined; }, () => undefined);
+
     } catch (error) {
       console.error('[presence] connection claim failed', error instanceof Error ? error.message : String(error));
     }

@@ -5,7 +5,9 @@ answer at its recorded return address. Checks stay where their data is;
 refusals use `wall(kind, reason)` from `@beeline/api-contract/daemon`.
 `packages/api-contract/src/walls.ts` owns the kinds and error shape.
 `scripts/check-walls.mjs` rejects other refusals, gates, skips, waits and caps
-on that path and caps production `wall(...)` calls at ten. lunchboxfortwo reviews changes to these walls and their builder.
+on that path.
+Production wall constructions: 4.
+Any additional construction requires lunchboxfortwo's review of a change here.
 
 ## `signed-in` The person must be signed in
 

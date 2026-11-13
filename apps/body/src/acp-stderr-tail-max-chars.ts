@@ -1,6 +1,6 @@
 import type { ChildProcessWithoutNullStreams } from 'node:child_process';
-import { type TurnTokenFigure } from './harness-turn-tokens.js';
 import { toolCallEntries } from './acp.js';
+import { type TurnTokenFigure } from './harness-turn-tokens.js';
 
 
 
@@ -575,31 +575,6 @@ export function toolCallOpenings(updates: readonly SessionUpdate[]): number[] {
     if (!id && sessionUpdate === 'tool_result') activeAnonymous = undefined;
   }
   return [...opened.values()];
-}
-
-
-/**
- * The stream-level fact about a turn that ended with no answer text, for a
- * failure reason: what the harness said the stop was, what the stream carried
- * instead (reasoning only, tool calls only, nothing at all), and whether the
- * last message run was retry narration. Never the bare "no reply".
- */
-export function describeEmptyTurn(result: PromptResult, agentLabel?: string): string {
-  const counts = new Map<string, number>();
-  for (const { update } of result.updates) {
-    const kind = typeof update.sessionUpdate === 'string' ? update.sessionUpdate : 'unknown';
-    if (kind === 'session_info_update' || kind === 'available_commands_update') continue;
-    counts.set(kind, (counts.get(kind) ?? 0) + 1);
-  }
-  const stream = counts.size
-    ? `the stream carried only ${[...counts].map(([kind, count]) => `${kind}×${count}`).join(', ')}`
-    : 'the stream carried no content updates';
-  const lastRun = agentMessageRuns(result.updates, agentLabel).at(-1);
-  const narration =
-    lastRun && isPureRetryNarration(lastRun)
-      ? `; the last message was retry narration "${lastRun.trim().slice(0, 80)}"`
-      : '';
-  return `harness ended the turn (${result.stopReason}) with no answer text; ${stream}${narration}`;
 }
 
 

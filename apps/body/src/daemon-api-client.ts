@@ -1,34 +1,33 @@
-import { renewSquireShareOnViewerActivity } from './squire-share-renewals.js';
-import { invalidateUsageAccountAttachment } from './helper-usage-publisher.js';
-import { postChangedAgentUsage } from './helper-usage-binding.js';
 import {
-  isAgentCommand,
-  type AgentCommand,
-  type AgentSignInFrame,
-  type DaemonOperationMap,
+isAgentCommand,
+type AgentCommand,
+type AgentSignInFrame,
+type DaemonOperationMap,
 } from '@beeline/api-contract/daemon';
-import { resolve } from 'node:path';
 import { randomUUID } from 'node:crypto';
-import { helperVersion, helperVersionHeader } from './helper-version.js';
-import {
-  retryAfterMs,
-  type LiveLink,
-  type LiveLinkTiming,
-  type LiveSocketFactory,
-} from './live-link.js';
-import { MachineLink, type AgentChannel } from './machine-link.js';
+import { resolve } from 'node:path';
 import { agentSignInFrame } from './agent-sign-in.js';
-import { unknownServerEventLogger } from './unknown-server-event.js';
+import { postChangedAgentUsage } from './helper-usage-binding.js';
+import { invalidateUsageAccountAttachment } from './helper-usage-publisher.js';
+import { helperVersion,helperVersionHeader } from './helper-version.js';
 import {
-  readRuntimeRecord,
-  runtimeDirectory,
-  writeRuntimeRecord,
-  type AgentRuntimeRecord,
+retryAfterMs,
+type LiveLink,
+type LiveLinkTiming,
+type LiveSocketFactory,
+} from './live-link.js';
+import { MachineLink,type AgentChannel } from './machine-link.js';
+import {
+readRuntimeRecord,
+runtimeDirectory,
+writeRuntimeRecord,
+type AgentRuntimeRecord,
 } from './runtime.js';
+import { renewSquireShareOnViewerActivity } from './squire-share-renewals.js';
+import { unknownServerEventLogger } from './unknown-server-event.js';
 
 type Input<Name extends keyof DaemonOperationMap> = DaemonOperationMap[Name]['input'];
 type Output<Name extends keyof DaemonOperationMap> = DaemonOperationMap[Name]['output'];
-export type InboxItem = Output<'getRoomInbox'>['items'][number];
 
 /** Membership / corner set change pushed on the daemon live socket. */
 export type RoomMembershipChange = {

@@ -172,8 +172,6 @@ export async function stopCommandedTurn(
     receipt: 'Running turn stopped. Send a new order; it runs next.' };
 }
 
-export const AGENT_COMMAND_CARD_TYPE = 'agent-command';
-
 /** Commanders come from the assignment at the question boundary and its recorded
  * parents. Humans with current access outrank agents; peer activity never does.
  * Expressions refer to the caller's question row, not to later replacement orders.

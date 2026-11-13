@@ -86,7 +86,4 @@ export async function authorizeCommandOutput(
   if (row.state === 'cancelled') throw new ExpectedRefusalError('command turn cancelled');
   return row;
 }
-
-
-export { mergeCardDetail,squireDecisionDetail,workflowWakeDetail } from './agent-input-context.js';
-export type { MergeCard,WorkflowWakeCard } from './agent-input-context.js';
+export { squireDecisionDetail,type WorkflowWakeCard,workflowWakeDetail } from './agent-input-context.js';

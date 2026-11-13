@@ -171,8 +171,9 @@ export function productionWallSites(root) {
 export function judgeWalls(root) {
   const errors = [], kinds = wallKinds(root);
   const constructions = productionWallSites(root);
-  if (constructions.length > 10) errors.push(`Production wall sites: ${constructions.length}; maximum 10. Delete parallel admission paths.\n${constructions.join('\n')}`);
   const docs = readFileSync(resolve(root, WALLS_FILE), 'utf8');
+  const maximum = Number(docs.match(/^Production wall constructions: (\d+)\.$/m)?.[1]);
+  if (!Number.isInteger(maximum) || constructions.length > maximum) errors.push(`Production wall sites: ${constructions.length}; maximum ${maximum} from ${WALLS_FILE}. Additions require captain review there.\n${constructions.join('\n')}`);
   const documented = [...docs.matchAll(/^## `([a-z-]+)`/gm)].map(match => match[1]);
   if (!kinds.length || new Set(kinds).size !== kinds.length || kinds.join() !== documented.join())
     errors.push(`${WALLS_FILE} must list exactly the kinds in ${WALL_BUILDER_FILE}: ${kinds.join(', ')}`);

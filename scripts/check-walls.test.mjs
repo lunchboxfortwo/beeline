@@ -53,18 +53,29 @@ mutation('a per-line exception cannot bless a refusal', WALLS_FILE, '## `stop` S
   '## `stop` Stop\n\n- `apps/body/src/agent-runner.ts deliver: refuse new Error()`');
 mutation('a new builder kind requires matching documentation', WALL_BUILDER_FILE, "'sandbox', 'stop'", "'sandbox', 'stop', 'quota'");
 mutation('a documented kind cannot be added without the builder', WALLS_FILE, '## `stop` Stop', '## `quota` Quota\n\nWhy: no.\n\n## `stop` Stop');
-test('only the shared builder and its known kinds may construct a refusal', () => {
-  const target = copy();
+test('only the shared builder and its known kinds may construct an existing wall', () => {
+  const target=copy();
   try {
-    const path = resolve(target, 'apps/body/src/agent-runner.ts');
-    const text = readFileSync(path, 'utf8');
-    writeFileSync(path, "import { wall } from '@beeline/api-contract/daemon';\n" + text.replace('place.running = item;', "place.running = item;\nthrow wall('membership', 'only chat members');"));
-    assert.deepEqual(judgeWalls(target), []);
-    plant(target, 'apps/body/src/agent-runner.ts', "wall('membership',", "wall('quota',");
-    assert.ok(judgeWalls(target).some(error => error.includes('unknown wall kind')));
-    writeFileSync(path, 'const wall = () => new Error();\n' + text.replace('place.running = item;', "place.running = item;\nthrow wall('membership', 'pretend');"));
-    assert.ok(judgeWalls(target).some(error => error.includes('shared builder')));
-  } finally { rmSync(target, { recursive: true, force: true }); }
+    plant(target,'apps/server/src/agent-command.ts',"wall('membership',","wall('stop',");
+    assert.deepEqual(judgeWalls(target),[]);
+    plant(target,'apps/server/src/agent-command.ts',"wall('stop',","wall('quota',");
+    assert.ok(judgeWalls(target).some(error=>error.includes('unknown wall kind')));
+    const file=resolve(target,'apps/server/src/phone-socket.ts');
+    writeFileSync(file,readFileSync(file,'utf8').replace(/import \{[^}]*\bwall\b[^}]*\} from '@beeline\/api-contract\/daemon';/, 'const wall = () => new Error();'));
+    assert.ok(judgeWalls(target).some(error=>error.includes('shared builder')));
+  } finally {rmSync(target,{recursive:true,force:true});}
+});
+
+test('a fifth canonical construction requires changing the captain-owned wall document', () => {
+  const target=copy();
+  try {
+    const file=resolve(target,'apps/body/src/place-session.ts');
+    writeFileSync(file,"import {wall} from '@beeline/api-contract/daemon';\n"+readFileSync(file,'utf8').replace('  async start(): Promise<void> {',"  async start(): Promise<void> { if(this.stale) throw wall('stop','added refusal');"));
+    assert.equal(productionWallSites(target).length,5);
+    assert.ok(judgeWalls(target).some(error=>error.includes('maximum 4')));
+    plant(target,WALLS_FILE,'Production wall constructions: 4.','Production wall constructions: 5.');
+    assert.deepEqual(judgeWalls(target),[]);
+  } finally {rmSync(target,{recursive:true,force:true});}
 });
 
 mutation('a new machine registration cap fails', 'apps/server/src/machine-connection.ts',
@@ -76,14 +87,14 @@ mutation('a daemon frame admission gate fails', 'apps/server/src/daemon-live.ts'
 
 mutation('a syntax error cannot hide a path guard', 'apps/body/src/agent-runner.ts', 'place.running = item;', 'place.running = item; if (');
 
-test('eleven production wall constructions fail even outside the request path', () => {
+test('a fifth production wall construction fails even outside the named request path', () => {
   const target = copy();
   try {
     const file = resolve(target, 'apps/server/src/wall-sprawl.ts');
     writeFileSync(file, "import {wall} from '@beeline/api-contract/daemon';\n" +
-      Array.from({length: 11}, (_, i) => `export const refusal${i} = () => wall('membership', 'duplicate');`).join('\n'));
-    assert.ok(productionWallSites(target).length > 10);
-    assert.ok(judgeWalls(target).some(error => error.includes('maximum 10')));
+      Array.from({length: 1}, (_, i) => `export const refusal${i} = () => wall('membership', 'duplicate');`).join('\n'));
+    assert.ok(productionWallSites(target).length > 4);
+    assert.ok(judgeWalls(target).some(error => error.includes('maximum 4')));
   } finally { rmSync(target, {recursive:true, force:true}); }
 });
 

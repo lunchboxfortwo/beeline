@@ -284,9 +284,3 @@ export function roomShellCapability(
   return options.osSandbox ? 'runs' : 'refused';
 }
 
-/** Native IO includes network access: an unwrapped Codex Room has a shell but is offline. */
-export function roomNativeIoProven(command: string | undefined, options: { osSandbox?: boolean } = {}): boolean {
-  return roomShellCapability(command, options) === 'runs' &&
-    (harnessEnforcement(command).enforcement !== 'sandboxed' || options.osSandbox === true);
-}
-

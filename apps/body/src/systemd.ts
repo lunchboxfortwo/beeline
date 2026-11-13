@@ -1,16 +1,16 @@
+import { execFile } from 'node:child_process';
+import { mkdir,readFile,writeFile } from 'node:fs/promises';
+import { homedir } from 'node:os';
+import { dirname,resolve } from 'node:path';
+import { promisify } from 'node:util';
 import { assertLifecycleTestIsolation } from './lifecycle-test-guard.js';
 import { convergeNativeHelper } from './native-helper.js';
-import { execFile } from 'node:child_process';
-import { mkdir, readFile, writeFile } from 'node:fs/promises';
-import { homedir } from 'node:os';
-import { dirname, resolve } from 'node:path';
-import { promisify } from 'node:util';
 import {
-  updateSquireBrokerInstall,
-  TRUSTY_SQUIRE_BROKER_UNIT_NAME,
-  trustySquireBrokerUnit,
-  writeSquireBrokerUnitMarker,
-  type SquireInstallRunner,
+TRUSTY_SQUIRE_BROKER_UNIT_NAME,
+trustySquireBrokerUnit,
+updateSquireBrokerInstall,
+writeSquireBrokerUnitMarker,
+type SquireInstallRunner,
 } from './squire-host.js';
 
 const execFileAsync = promisify(execFile);
@@ -222,13 +222,6 @@ export interface DaemonNotifier {
 async function notify(fields: string[]): Promise<void> {
   if (process.env.BEELINE_MANAGED_BY_SYSTEMD !== '1') return;
   await execFileAsync('systemd-notify', fields, { timeout: SYSTEMD_COMMAND_TIMEOUT_MS });
-}
-
-/** Extend startup while interrupted-turn replay waits for a network reconnect. */
-export async function extendSystemdStartTimeout(ms: number): Promise<void> {
-  await notify([`EXTEND_TIMEOUT_USEC=${Math.max(0, Math.round(ms)) * 1000}`]).catch(
-    () => undefined,
-  );
 }
 
 /** Native service readiness and status; process exit remains manager-owned. */

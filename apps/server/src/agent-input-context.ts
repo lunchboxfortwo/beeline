@@ -1,30 +1,4 @@
 import { CORNER_LIFECYCLE_CARD_TYPE } from './room-choice.js';
-export type MergeCard = {
-  cornerId?: string;
-  name?: string;
-  pullRequest?: { number?: number; url?: string; mergeCommitSha?: string };
-};
-
-
-/**
- * A parent-Room merge card's sentence names only the pull request title, so an
- * agent woken by a `merged` subscription reads which corner and pull request
- * landed from the card itself.
- */
-export function mergeCardDetail(card: MergeCard | null): string {
-  if (!card) return '';
-  const corner = card.cornerId
-    ? `corner ${card.name ? `${card.name} (${card.cornerId})` : card.cornerId}`
-    : '';
-  const pr = card.pullRequest;
-  const pullRequest =
-    pr?.number || pr?.url
-      ? ['pull request', pr.number ? `#${pr.number}` : '', pr.url ?? ''].filter(Boolean).join(' ')
-      : '';
-  const commit = pr?.mergeCommitSha ? `merge commit ${pr.mergeCommitSha}` : '';
-  const detail = [corner, pullRequest, commit].filter(Boolean).join(' · ');
-  return detail ? `\n${detail}` : '';
-}
 
 
 export type WorkflowWakeCard = {

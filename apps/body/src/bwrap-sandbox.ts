@@ -12,14 +12,12 @@
  *
  * Missing or unusable bubblewrap remains a loudly reported fail-open path.
  */
-import { spawnSync } from 'node:child_process';
-import { lstatSync, mkdirSync, readdirSync, realpathSync } from 'node:fs';
+import { agentGrantAutoApproves,namesCredentialFile,pathGrantAllowsWrite,type SharedAssetCategory } from '@beeline/api-contract/agent-grants';
+import { lstatSync,mkdirSync,readdirSync,realpathSync } from 'node:fs';
 import { homedir } from 'node:os';
-import { basename, dirname, isAbsolute, relative, resolve, sep } from 'node:path';
-import { executableOnPath } from './agent-command.js';
+import { basename,dirname,isAbsolute,relative,resolve,sep } from 'node:path';
 import type { SessionMode } from './config.js';
 import { CURSOR_HARNESS_COMMAND } from './cursor-acp-bridge.js';
-import { agentGrantAutoApproves, namesCredentialFile, pathGrantAllowsWrite, type SharedAssetCategory } from '@beeline/api-contract/agent-grants';
 import { PACKAGE_CACHE_DIRS } from './workspace-assets.js';
 
 
@@ -27,9 +25,6 @@ import { PACKAGE_CACHE_DIRS } from './workspace-assets.js';
 
 /** Operator switch, persisted on the runtime record and mirrored onto BodyConfig. */
 export type SandboxPolicy = 'bwrap' | 'off';
-
-
-export const DEFAULT_SANDBOX_POLICY: SandboxPolicy = 'bwrap';
 
 
 /**
@@ -213,25 +208,6 @@ export function siblingAgentMaskPaths(
     .filter((name) => name.toLowerCase() !== ownName)
     .map((name) => ({ path: resolve(agentsRoot, name), kind: 'dir' as const }))
     .sort((a, b) => a.path.localeCompare(b.path));
-}
-
-
-/** Result of the one-shot start-up feature detection. */
-export interface BwrapAvailability {
-  /** Absolute path to a `bwrap` that passed the self-test, when usable. */
-  path?: string;
-  /** One operator-facing line explaining the state. Always present. */
-  advisory: string;
-  /**
-   * The ONE sentence a Room/DM session prompt may state about a missing
-   * sandbox: a fixed reason plus the operator's one-line fix where one applies.
-   * Set only by `ensureBwrapSandbox`, which knows which branch it took.
-   *
-   * Deliberately not `advisory`: a model is told to say this in a reply every
-   * Workspace member can read, so it must carry no host posture, no resolved
-   * path, no AppArmor remediation, and no installer output.
-   */
-  shellDetail?: string;
 }
 
 
@@ -656,101 +632,3 @@ export function wrapAgentCommand(input: {
     args: input.args,
   });
 }
-
-
-/**
- * The git common directory backing a corner worktree, or undefined when it
- * cannot be resolved — which the caller treats as a reason to skip wrapping that
- * session entirely, since a corner that can edit but never commit is worse than
- * an unwrapped one.
- */
-/**
- * One-shot start-up detection: is there a `bwrap` on this host that can actually
- * build the namespace we intend to spawn into?
- *
- * The self-test is the real mount table (minus the session-specific mounts), not
- * `bwrap --version`: a `bwrap` that exists but cannot unshare is the exact
- * failure this is meant to catch, and it only shows up when it tries.
- */
-export function detectBwrapSandbox(
-  options: {
-    policy?: SandboxPolicy;
-    env?: NodeJS.ProcessEnv;
-    /** Test seam: run the self-test command. */
-    run?: (command: string, args: string[]) => { status: number | null; stderr?: string };
-  } = {},
-): BwrapAvailability {
-  const env = options.env ?? process.env;
-  const policy = options.policy ?? DEFAULT_SANDBOX_POLICY;
-  if (policy === 'off') {
-    return {
-      advisory:
-        'harness OS sandbox DISABLED by configuration (sandbox=off); ACP children run unconfined and the Room read-only rule rests on the permission handler alone',
-    };
-  }
-  const bwrapPath = executableOnPath('bwrap', env);
-  if (!bwrapPath) {
-    return {
-      advisory:
-        'harness OS sandbox UNAVAILABLE: bwrap (bubblewrap) is not on PATH; ACP children run unconfined and the Room read-only rule rests on the permission handler alone. Install bubblewrap to enforce it at the OS level.',
-    };
-  }
-  const run =
-    options.run ??
-    ((command: string, args: string[]) => {
-      const result = spawnSync(command, args, { encoding: 'utf8', timeout: 10_000 });
-      return { status: result.status, stderr: result.stderr ?? '' };
-    });
-  const probe = buildBwrapArgv({
-    bwrapPath,
-    plan: { readOnly: [], writable: [], masks: [] },
-    cwd: '/',
-    command: '/bin/true',
-  });
-  const result = run(probe.command, probe.args);
-  if (result.status !== 0) {
-    const detail =
-      (result.stderr ?? '').trim().split('\n').filter(Boolean).pop() ?? `exit ${result.status}`;
-    const appArmorRemediation =
-      /No permissions to create (?:a )?new namespace|setting up uid map: Permission denied|userns_create/i.test(
-        result.stderr ?? '',
-      )
-        ? " Ubuntu AppArmor may be blocking unprivileged user namespaces. If the agent's user service inherited an AppArmor profile, reinstall the Beeline user unit and restart the agent; the unit explicitly transitions to unconfined before /usr/bin/bwrap enters Ubuntu's bwrap profile."
-        : '';
-    return {
-      advisory: `harness OS sandbox UNAVAILABLE: ${bwrapPath} self-test failed (${detail}); ACP children run unconfined and the Room read-only rule rests on the permission handler alone.${appArmorRemediation}`,
-    };
-  }
-  return {
-    path: bwrapPath,
-    advisory: `harness OS sandbox ENABLED via ${bwrapPath}: every ACP child gets a read-only filesystem plus a private /tmp and PID namespace, writable only in its own harness state; ambient credential stores (~/.config/gh, ~/.ssh, ~/.netrc, ~/.git-credentials) are masked absent; a repository corner adds its worktree and git dir, then receives its linked repository's GitHub App credential. Hygiene boundary, not confinement — it shapes where sessions write files and does not restrict other access this account has (e.g. sockets, container runtimes, secrets not on the mask list)`,
-  };
-}
-
-
-/** The one command an operator runs when Beeline could not install bubblewrap itself. */
-export const BUBBLEWRAP_INSTALL_FIX = 'sudo apt-get install -y bubblewrap';
-
-
-/**
- * …and the same instruction for a host with no apt-get, where naming a command
- * would be guessing at a package manager nobody confirmed is here.
- */
-export const BUBBLEWRAP_INSTALL_FIX_UNKNOWN_MANAGER = "install this host's bubblewrap package";
-
-
-export type SandboxInstallResult = {
-  readonly code: number | null;
-  readonly output: string;
-};
-
-
-export type SandboxInstallRunner = (
-  command: string,
-  args: readonly string[],
-) => Promise<SandboxInstallResult>;
-
-export const INSTALL_OUTPUT_LIMIT = 32 * 1024;
-export { BUBBLEWRAP_INSTALL_BUDGET_MS } from './bwrap-sandbox-bubblewrap-install-budget-ms.js';
-export { runSandboxInstallCommand } from './bwrap-sandbox-bubblewrap-install-budget-ms.js';
-export { ensureBwrapSandbox } from './bwrap-sandbox-bubblewrap-install-budget-ms.js';

@@ -62,7 +62,7 @@ import { DRAW_AVATAR_SKILL_NAME } from './draw-avatar-skill.js';
 import { type OpenRouterRoutingHomeInput } from './openrouter-routing.js';
 export { SHARED_CREDENTIALS } from './agent-command.js';
 export { HARNESS_STATE_ENV_VARS,harnessStateDirsFromEnv,roomAgentHomeEnv,roomSessionTmpDir,writeIsolatedHarnessFile } from './agent-home-plan-managed-skills.js';
-export { expectedMountedImportedMcpServerNames,grantedSquireHostBindPaths,hostImportedMcpDeclarations,hostImportedMcpServerNames,mountedImportedMcpServerNames } from './agent-home-provision-agent-skills-and-mcp.js';
+export { hostImportedMcpDeclarations } from './agent-home-provision-agent-skills-and-mcp.js';
 export { AGENT_PRIVATE_STATE_ENV } from './agent-private-state-env.js';
 
 
@@ -151,57 +151,6 @@ export function isSharedSkillName(value: unknown): value is string {
 export class AgentHomeSecurityError extends Error {}
 
 export const agentHomeProvisionQueues = new Map<string, Promise<void>>();
-
-
-export const EXPIRED_LOGIN_PATTERNS = [
-  /\boauth session expired\b/i,
-  /\b(?:oauth|login|session|token)\b.{0,80}\bcould not be refreshed\b/i,
-  /\b(?:failed|unable) to refresh\b.{0,80}\b(?:oauth|login|session|token)\b/i,
-  /\brefresh token\b.{0,80}\b(?:expired|invalid|revoked)\b/i,
-] as const;
-
-
-/** A harness login failed in the one shape a credential re-link can repair. */
-export function isExpiredHarnessLoginError(error: unknown): boolean {
-  const seen = new Set<unknown>();
-  let current = error;
-  for (let depth = 0; depth < 4 && current != null && !seen.has(current); depth += 1) {
-    seen.add(current);
-    const text =
-      current instanceof Error
-        ? current.message
-        : typeof current === 'string'
-          ? current
-          : typeof current === 'object' && 'message' in current
-            ? String((current as { message: unknown }).message)
-            : String(current);
-    if (EXPIRED_LOGIN_PATTERNS.some((pattern) => pattern.test(text))) return true;
-    current =
-      current instanceof Error
-        ? current.cause
-        : typeof current === 'object' && current && 'cause' in current
-          ? (current as { cause: unknown }).cause
-          : undefined;
-  }
-  return false;
-}
-
-
-export const HARNESS_LOGIN_NAMES: Partial<Record<AgentKind, string>> = {
-  claude: 'Claude',
-  codex: 'Codex',
-  grok: 'Grok',
-  pi: 'Pi',
-  cursor: 'Cursor',
-  opencode: 'OpenCode',
-};
-
-
-/** The only user-visible answer after a repaired link proves the source login is stale too. */
-export function freshHarnessLoginLine(kind: AgentKind | undefined, machine: string): string {
-  const harness = (kind && HARNESS_LOGIN_NAMES[kind]) || 'The agent provider';
-  return `${harness} on ${machine.trim() || 'this machine'} needs a fresh login.`;
-}
 
 
 /**

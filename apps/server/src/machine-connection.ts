@@ -126,12 +126,13 @@ export function serveMachineSocket(
     let registrationStage = 'authentication';
     try {
       const authenticated = typeof token === 'string' && token.startsWith('bdt_')
-        ? await deps.auth.authenticateDaemon(token) : undefined;
+        ? await deps.auth.authenticateDaemon(token,true) : undefined;
+      const authenticatedAgent=typeof authenticated==='string' ? authenticated : authenticated?.agentId;
       if (!isOpen()) return;
-      if (authenticated !== agentId) {
+      if (authenticatedAgent !== agentId) {
         // The same two answers HTTP gives: a settled removal, or a token to retry.
         registrationStage = 'retirement-check';
-        const retired = authenticated ? null : typeof token === 'string' ? await deps.auth.retiredDaemonAgent(token) : null;
+        const retired = authenticatedAgent ? null : typeof token === 'string' ? await deps.auth.retiredDaemonAgent(token) : null;
         reply({
           type: 'register-refused',
           agentId,
@@ -166,6 +167,7 @@ export function serveMachineSocket(
           ...(item.daemonOperationsV1===true?{daemonOperationsV1:true}:{}),
         },
       );
+      if (authenticated && typeof authenticated!=='string') session.usageOwnerId=authenticated.ownerId ?? undefined;
       sessions.set(agentId, session);
       registrationStage = 'presence-claim';
       await session.claim();

@@ -1,6 +1,6 @@
 import { execFile } from 'node:child_process';
-import { access, appendFile, mkdir, readFile } from 'node:fs/promises';
-import { dirname, isAbsolute, resolve } from 'node:path';
+import { access,appendFile,mkdir,readFile } from 'node:fs/promises';
+import { dirname,isAbsolute,resolve } from 'node:path';
 import { promisify } from 'node:util';
 import type { BodyConfig } from './config.js';
 
@@ -8,11 +8,6 @@ const execFileAsync = promisify(execFile);
 
 const CODEGRAPH_INDEX_PATH = '.codegraph/codegraph.db';
 const CODEGRAPH_PREPARE_TIMEOUT_MS = 120_000;
-
-/** The one repository path CodeGraph must update even in a read-only Room. */
-export function codegraphIndexDirectory(cwd: string): string {
-  return resolve(cwd, dirname(CODEGRAPH_INDEX_PATH));
-}
 
 async function isGitWorktree(cwd: string): Promise<boolean> {
   try {
