@@ -163,6 +163,7 @@ export function localHooks(directory, processes) {
   return {
     job: async args => {
       const { context, engine } = args;
+      context.env.BEELINE_LOCAL_RELEASE = 'true';
       if (['helper_linux', 'helper_macos', 'server'].includes(context.github.job)) context.env.CARGO_BUILD_JOBS = '2';
       if (context.github.job === 'helper_macos') {
         if (context.matrix.platform === 'darwin-arm64') return carryArm64(engine, context);
@@ -270,17 +271,40 @@ async function remoteJob(path) {
   if (job.result !== 'success') process.exitCode = 1;
 }
 
-async function dryRun(args, engine, context) {
-  const legs = args.leg ? [args.leg] : ['require-tools', 'eas-cli', 'server', 'helper', 'mobile-ota', 'pages', 'web-app'];
+export function dryInitializeJob(workflow) {
+  const job = structuredClone(workflow.jobs.initialize);
+  const identity = job.steps.find(step => step.id === 'identity');
+  const reserve = /^\s*gh release create[^\n]+$/m;
+  if (!reserve.test(identity.run)) throw new Error('Cannot identify the release reservation command for dry-run');
+  identity.run = identity.run.replace(reserve, "            echo 'Dry run: identity is not reserved; no draft release created.'");
+  // Attribution is mandatory for a real dispatch. A read-only build proof
+  // without a receipt must not invent one or describe itself as a dispatch.
+  job.steps = job.steps.filter(step => step.name !== 'Verify release dispatch attribution');
+  return job;
+}
+
+export async function dryRun(args, engine, context) {
+  context = { ...context, vars: engine.variables || {}, secrets: engine.secrets || {}, env: {} };
+  const legs = args.leg ? [args.leg] : ['initialize', 'require-tools', 'eas-cli', 'server', 'helper', 'mobile-ota', 'pages', 'web-app'];
   const sha = context.github.sha;
+  let version = 'v0.0.0-rc.1';
   for (const leg of legs) {
     engine.processes.log(`Dry-run build: ${leg}; no publication, migration, channel move or rollout`);
+    if (leg === 'initialize') {
+      if (!context.github.token) throw new Error('Dry-run initialize requires --env-file with GITHUB_TOKEN or GH_TOKEN');
+      const inputs = { channel: args.channel, release_sha: sha, release_version: args['release-version'] || '', selection: 'auto', store_track: 'none', run_release_proof: false };
+      const job = await engine.job(dryInitializeJob(engine.read(WORKFLOW)), { ...context, inputs, matrix: {}, needs: {}, steps: {}, github: { ...context.github, job: 'initialize' } }, 'dry-initialize', engine.read(WORKFLOW).env);
+      privateWrite(join(engine.directory, 'dry-initialize.json'), JSON.stringify(job, null, 2));
+      if (job.result !== 'success') throw new Error('Dry-run initialize failed; no release was attempted');
+      version = job.outputs.release_version;
+      continue;
+    }
     let steps;
-    if (leg === 'server') steps = [{ run: `docker build --file apps/server/Dockerfile --tag beeline-release-dry-${createHash('sha256').update(engine.directory).digest('hex').slice(0, 12)} --build-arg "BEELINE_RELEASE_SHA=$GITHUB_SHA" --build-arg BEELINE_RELEASE_VERSION=v0.0.0-rc.1 .` }];
+    if (leg === 'server') steps = [{ run: `docker build --file apps/server/Dockerfile --tag beeline-release-dry-${createHash('sha256').update(engine.directory).digest('hex').slice(0, 12)} --build-arg "BEELINE_RELEASE_SHA=$GITHUB_SHA" --build-arg "BEELINE_RELEASE_VERSION=$DRY_RELEASE_VERSION" .`, env: { DRY_RELEASE_VERSION: version } }];
     else if (leg === 'helper') steps = [
       { uses: 'dtolnay/rust-toolchain@1.95.0' },
       { uses: './.github/actions/buzz-agent-cache', with: { platform: 'linux-x64' } },
-      { run: 'npm run bundle:beeline -- --platform linux-x64', env: { BEELINE_BUNDLE_COMMIT: sha, BEELINE_BUNDLE_VERSION: 'v0.0.0-rc.1', CARGO_BUILD_JOBS: '2' } },
+      { run: 'npm run bundle:beeline -- --platform linux-x64', env: { BEELINE_BUNDLE_COMMIT: sha, BEELINE_BUNDLE_VERSION: version, CARGO_BUILD_JOBS: '2' } },
     ];
     else if (leg === 'mobile-ota') steps = [...engine.read('.github/actions/mobile-ota-leg/action.yml').runs.steps.slice(0, 1), { run: 'npx --no-install expo export --platform all --output-dir "$RUNNER_TEMP/ota-export"', 'working-directory': 'apps/mobile', env: { EXPO_PUBLIC_BUZZY_MONOLITH_URL: 'https://server.usebeeline.app' } }];
     else if (leg === 'pages') steps = engine.read('.github/actions/pages-leg/action.yml').runs.steps.slice(0, 1);
@@ -288,7 +312,7 @@ async function dryRun(args, engine, context) {
     else if (leg === 'mac-tools') { await prepareMacTools(engine); continue; }
     else if (['eas-cli', 'require-tools'].includes(leg)) steps = [{ uses: `./.github/actions/${leg}`, with: leg === 'require-tools' ? { tools: 'node git docker ssh tar curl' } : {} }];
     else throw new Error(`Unknown dry-run leg: ${leg}`);
-    const job = await engine.job({ steps, 'timeout-minutes': 45 }, { ...context, inputs: { release_sha: sha, release_version: 'v0.0.0-rc.1' }, matrix: {}, needs: {}, steps: {}, job: { status: 'success', services: {} } }, `dry-${leg}`);
+    const job = await engine.job({ steps, 'timeout-minutes': 45 }, { ...context, inputs: { release_sha: sha, release_version: version }, matrix: {}, needs: {}, steps: {}, job: { status: 'success', services: {} } }, `dry-${leg}`);
     if (job.result !== 'success') throw new Error(`Dry-run ${leg} failed; no release was attempted`);
   }
   engine.processes.log('Build proofs complete. Canary, migrations, live update proof and rollback were not exercised against production.');
@@ -296,7 +320,7 @@ async function dryRun(args, engine, context) {
 
 async function main(argv) {
   const args = parseArguments(argv);
-  if (args.help) { console.log('node scripts/release-local.mjs [--plan | --dry-run [--leg server|helper|mobile-ota|pages|web-app|eas-cli|require-tools|mac-tools] | --execute] --channel next|latest --release-sha <40-char SHA> --dispatched-by <audited JSON> [--env-file ~/.config/beeline-release.env] [--run-release-proof] [--state-dir /outside/repo]'); return; }
+  if (args.help) { console.log('node scripts/release-local.mjs [--plan | --dry-run [--leg initialize|server|helper|mobile-ota|pages|web-app|eas-cli|require-tools|mac-tools] | --execute] --channel next|latest --release-sha <40-char SHA> --dispatched-by <audited JSON> [--env-file ~/.config/beeline-release.env] [--run-release-proof] [--state-dir /outside/repo]'); return; }
   if (args['remote-job']) { await remoteJob(args['remote-job']); return; }
   if (process.platform !== 'linux') throw new Error('Run the release controller on Linux squire');
   const sha = args['release-sha'] || execFileSync('git', ['rev-parse', 'HEAD'], { cwd: root, encoding: 'utf8' }).trim();
