@@ -616,7 +616,7 @@ async function postMessage(db: SqlDatabase, input: QueuedPost, chat: Chat): Prom
   const targets = input.presentation === 'card' || stops.length ? [] : input.agentIds ? chat.members.filter(member => input.agentIds!.includes(member.id)) : [...new Map([
     ...explicit,
     ...(human && !hasSystemReportMention(input.text) && chat.direct ? agents : []),
-    ...(human && !handles.length && solo ? [solo] : []),
+    ...(human && !explicit.length && solo ? [solo] : []),
   ].filter(member => member.kind === 'agent' && member.id !== input.authorId && member.id !== SYSTEM_IDENTITY_ID).map(member => [member.id, member])).values()];
   const commands: CommandRow[] = [], woken: string[] = [];
   for (const member of targets) {

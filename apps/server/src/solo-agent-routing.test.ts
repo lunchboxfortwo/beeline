@@ -41,7 +41,7 @@ describe('solo-agent-untagged-silence', () => {
       `SELECT agent_id,source_message_id,id FROM agent_commands WHERE source_message_id=$1`, [MESSAGE])).rows;
   }
 
-  it('dispatches and claims the untagged phone message once', async () => {
+  it.each(['Hello lol', '@beebeego Hello lol'] as const)('dispatches and claims the phone message once: %s', async text => {
     const statements: string[] = [];
     const measured = (database: SqlDatabase, inTransaction = false): SqlDatabase => ({
       query(sql, values, preparedName) {
@@ -51,7 +51,7 @@ describe('solo-agent-untagged-silence', () => {
       transaction: work => database.transaction(tx => work(measured(tx, true))),
     });
     phone = new PhoneService(measured(db), 'http://local.test');
-    const commands = await send();
+    const commands = await send(text);
     // Each statement is another database round trip before the send receipt.
     // The corner front door classifies the address with one indexed Room lookup.
     // The receipt reads which external MCP agents were notified.
@@ -62,7 +62,7 @@ describe('solo-agent-untagged-silence', () => {
     expect((await db.query(`SELECT 1 FROM agent_commands WHERE source_message_id=$1`, [MESSAGE])).rowCount).toBe(1);
     await startQueuedTurn(db, ROOM, AGENT, commands[0]!.id);
     expect((await db.query(`SELECT state FROM agent_commands WHERE id=$1`, [commands[0]!.id])).rows[0]?.state).toBe('pending');
-    await new DaemonService(db, new LiveHub()).execute('postRoomMessage', { roomId: ROOM, requestId: MESSAGE, text: 'Hello back!' }, AGENT);
+    await new DaemonService(db, new LiveHub()).execute('postRoomMessage', { roomId: ROOM, requestId: commands[0]!.id, text: 'Hello back!' }, AGENT);
     const view = await phone.readRoom(ROOM, HUMAN);
     expect(JSON.stringify(view)).toContain('Hello back!');
   });
@@ -112,8 +112,8 @@ describe('solo-agent-untagged-silence', () => {
     expect(await send()).toEqual([]);
   });
 
-  it.each(['@other hi', '@unknown hi', '@system hi'])('does not infer a target for %s', async text => {
-    expect(await send(text)).toEqual([]);
+  it.each(['@channel hi', '@other hi', '@unknown hi', '@system hi', '@agent @beebeego hi'])('dispatches once when sending %s', async text => {
+    expect(await send(text)).toEqual([expect.objectContaining({ agent_id: AGENT })]);
   });
 
   it('channel asks reach all current agent members',async()=>{expect(await send('@channel hi')).toHaveLength(1);});

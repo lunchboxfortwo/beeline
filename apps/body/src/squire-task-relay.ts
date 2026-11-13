@@ -90,6 +90,7 @@ type TaskConnection = {
   connectionId: string;
   client: StdioSquireMcpClient;
   sessions: Set<string>;
+  sharedSessionId?: string;
   pendingApprovals: Map<string, PendingApproval>;
   decidedApprovals: Set<string>;
   dead: boolean;
@@ -176,7 +177,10 @@ export class SquireTaskRelay {
   private readonly sessionSites = new Map<string, string>();
 
   private ended(ids: Iterable<string>): void {
-    for (const id of ids) { this.shareRenewals.stop(id); this.sessionSites.delete(id); this.onSessionEnded(id); }
+    for (const id of ids) {
+      if (this.task?.sharedSessionId === id) this.task.sharedSessionId = undefined;
+      this.shareRenewals.stop(id); this.sessionSites.delete(id); this.onSessionEnded(id);
+    }
   }
 
   async listen(contextFile = this.contextFile): Promise<{ url: string; token: string; contextFile: string }> {
@@ -432,11 +436,26 @@ export class SquireTaskRelay {
     if (input.method !== 'tools/list' && input.method !== 'tools/call')
       throw new Error('Unsupported Squire MCP method');
     let task = this.connection(active?.taskId ?? 'inventory');
-    const toolName = input.method === 'tools/call' ? input.params?.name : undefined;
+    let params = input.params ?? {};
+    const toolName = input.method === 'tools/call' ? params.name : undefined;
+    const driveArgs = params.arguments as Record<string, unknown> | undefined;
+    const sharedId = task.sharedSessionId;
+    // A URL-only continuation of the shared app must observe the page the
+    // person just used, rather than opening a fresh Squire session.
+    if (toolName === 'operate_drive' && driveArgs?.session_id === undefined &&
+        typeof driveArgs?.url === 'string' && sharedId) {
+      const site = this.sessionSites.get(sharedId);
+      try {
+        if (site && new URL(site).origin === new URL(driveArgs.url).origin) {
+          const { url: _url, ...rest } = driveArgs;
+          params = { ...params, arguments: { ...rest, session_id: sharedId } };
+        }
+      } catch { /* Squire owns URL validation. */ }
+    }
     const safeToolName = typeof toolName === 'string' && /^[a-z][a-z0-9_]{0,80}$/i.test(toolName)
       ? toolName : undefined;
     if(safeToolName==='operate_start' && task.uncertainStart)throw task.uncertainStart;
-    const requestedIds = sessionIds(input.params?.arguments);
+    const requestedIds = sessionIds(params.arguments);
     this.log('call-start', task, { method: input.method, tool: safeToolName ?? null,
       sessionId: redactedSessionId(requestedIds[0] ?? task.sessions.values().next().value) });
     if (input.method === 'tools/list' && task.dead) {
@@ -471,9 +490,9 @@ export class SquireTaskRelay {
     }
     if (input.method === 'tools/call' && !(await this.authorize({
       ...active!, tool: safeToolName!,
-      args: input.params?.arguments && typeof input.params.arguments === 'object' &&
-        !Array.isArray(input.params.arguments)
-        ? input.params.arguments as Record<string, unknown> : {},
+      args: params.arguments && typeof params.arguments === 'object' &&
+        !Array.isArray(params.arguments)
+        ? params.arguments as Record<string, unknown> : {},
     }))) {
       this.log('call-refused', task, { reason: 'resource-denied' });
       throw new Error('Squire call is not authorized for this task');
@@ -482,7 +501,6 @@ export class SquireTaskRelay {
       throw new SquireOperationError('Browser connection was lost; the previous result must be read before another browser action.',
         {cause:'process-exit',accepted:null,completed:false});
     try {
-      let params = input.params ?? {};
       const args = params.arguments as Record<string, unknown> | undefined;
       if (safeToolName === 'use_credential' && this.connectedCredential &&
           typeof args?.service === 'string' && !args.reference && !args.name) {
@@ -540,7 +558,7 @@ export class SquireTaskRelay {
       if (this.activeScheduleId)
         for (const id of requestedIds) tagSquireSessionSchedule(id, this.activeScheduleId);
       if (input.method === 'tools/call') {
-        const args = input.params?.arguments as Record<string, unknown> | undefined;
+        const args = params.arguments as Record<string, unknown> | undefined;
         const ids = requestedIds.length ? requestedIds : sessionIds(result);
         const target = typeof args?.service_url === 'string' ? args.service_url
           : typeof args?.url === 'string' ? args.url : undefined;
@@ -549,8 +567,11 @@ export class SquireTaskRelay {
         if (signedOutUrl)
           this.onSignedOut(signedOutUrl, ids.map((id) => this.sessionSites.get(id)).find(Boolean));
       }
-      if (safeToolName === 'operate_share' && requestedIds.length === 1)
+      if (safeToolName === 'operate_share' && requestedIds.length === 1 &&
+          !(result && typeof result === 'object' && (result as { isError?: unknown }).isError === true)) {
+        task.sharedSessionId = requestedIds[0];
         this.shareRenewals.track(requestedIds[0]!, callClient, result);
+      }
       // A successful vault consume has no approval URL. Correlate it by ID,
       // before parsing pending links, so its old expiry cannot revoke this turn.
       const resultApprovalId = resultString(result, 'approval_id');
@@ -563,7 +584,7 @@ export class SquireTaskRelay {
         this.rememberDecision(task, key);
       }
       const approval = input.method === 'tools/call' && squireApprovalFromMcp(
-        { id: 1, method: input.method, params: input.params }, { id: 1, result },
+        { id: 1, method: input.method, params }, { id: 1, result },
       );
       if (approval) {
         const ids = requestedIds.length ? requestedIds : [...task.sessions];
