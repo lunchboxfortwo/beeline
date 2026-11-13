@@ -96,4 +96,9 @@ it.each([false, true])('COMPOSER-KEYBOARD-1: desktop=%s, only the phone chrome l
   // The field (with its attachment strip) and the keyboard foot keep their height.
   expect(composer.props.flexShrink).toBeUndefined();
   expect(row.findByType('Motion').props.flexShrink).toBeUndefined();
+  // Once Send owns the files, the transcript holds their loading card.
+  act(() => renderer!.update(<ChatSurfaceComposer {...props} sending />));
+  expect(renderer!.root.findByType('Composer').props.attachments).toHaveLength(0);
+  act(() => renderer!.update(<ChatSurfaceComposer {...props} sending={false} />));
+  expect(renderer!.root.findByType('Composer').props.attachments).toHaveLength(1);
 });

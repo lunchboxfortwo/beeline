@@ -262,7 +262,7 @@ it('the same corner can order and report privately to its parent Room commander'
   const child = await worker(opened.cornerId);
   await rootFixture.daemon.execute('order', { ...authority(child), address: ROOM, agent: RUBY, text: 'Recruit parent' }, WORKER);
   await rootFixture.daemon.execute('report', { ...authority(child), status: 'blocked', text: 'blocked: need the commander decision' }, WORKER);
-  expect((await commands(ROOM, RUBY)).find(command => command.reason === 'report'))
+  expect((await commands(opened.cornerId, RUBY)).find(command => command.reason === 'report'))
     .toMatchObject({ private: true, source: { authorId: WORKER, body: 'blocked: need the commander decision' } });
   expect((await rootFixture.db.query(`SELECT 1 FROM messages WHERE text=$1`, ['blocked: need the commander decision'])).rowCount).toBe(0);
 });
@@ -316,7 +316,7 @@ it('vocabulary: commander orders the child reviewer and its report returns priva
   expect(review).toMatchObject({private:true,source:{body:'Review the exact head'}});
   await claim(review);
   await rootFixture.daemon.execute('report', { ...authority(review), status:'blocked', text:'blocked: waiting for green checks' }, reviewer);
-  expect((await commands(DM,RUBY)).find(command => command.reason === 'report')?.source.body).toBe('blocked: waiting for green checks');
+  expect((await commands(opened.cornerId, RUBY)).find(command => command.reason === 'report')?.source.body).toBe('blocked: waiting for green checks');
   expect((await rootFixture.db.query(`SELECT ${cornerImplementerSql('f', 'c')} worker_agent_id FROM corner_facts f JOIN rooms c ON c.id=f.corner_id WHERE f.corner_id=$1`,[opened.cornerId])).rows[0]?.worker_agent_id).not.toBe(reviewer);
 });
 
@@ -340,7 +340,7 @@ it('vocabulary: forbidden corner orders give a usable report step', async () => 
   const opened = await open(), turn = await worker(opened.cornerId);
   await expect(rootFixture.daemon.execute('order', {...authority(turn),address:DM,agent:'ruby',text:'Do parent work'},WORKER)).rejects.toThrow('Report to your commander');
   await rootFixture.daemon.execute('report', {...authority(turn),status:'blocked',text:'blocked: parent work needs the commander'},WORKER);
-  expect((await commands(DM,RUBY)).find(command => command.reason === 'report')?.source.body).toContain('parent work');
+  expect((await commands(opened.cornerId, RUBY)).find(command => command.reason === 'report')?.source.body).toContain('parent work');
 });
 
 
@@ -537,7 +537,7 @@ it.each([true, false])('Reproduction R1/R2: lifecycle receipt preserves delivere
   }
   await rootFixture.daemon.execute('postAgentTurnReceipt', { ...authority(wake), agentId: WORKER,
     status: 'failed', reason: 'unreported_order: requested work is unconfirmed' }, WORKER);
-  const reports = (await commands(DM, RUBY)).filter(c => c.reason === 'report');
+  const reports = (await commands(opened.cornerId, RUBY)).filter(c => c.reason === 'report');
   expect(reports).toHaveLength(delivered ? 1 : 0);
   expect((await rootFixture.db.query('SELECT status FROM agent_turns WHERE request_id=$1', [wake.turnRequestId])).rows[0]?.status).toBe('complete');
 });
@@ -588,7 +588,7 @@ it('Reproduction unreported-order-false: a later report(done) closes the open or
   await claim(wake);
   await expect(rootFixture.daemon.execute('report', { ...authority(wake), status: 'done', text: 'done: checks passed' }, WORKER))
     .resolves.toMatchObject({ delivered: true });
-  expect((await commands(DM, RUBY)).filter(c => c.reason === 'report').map(c => c.source.body)).toEqual(['done: checks passed']);
+  expect((await commands(opened.cornerId, RUBY)).filter(c => c.reason === 'report').map(c => c.source.body)).toEqual(['done: checks passed']);
   console.info('Demonstrated Reproduction unreported-order-false: later report(done) delivered once to the commander');
 });
 
@@ -805,7 +805,7 @@ it.each(['agent_tag','corner_review_dispatch'])('Reproduction F1: a failed %s wa
   const turn=(await commands(opened.cornerId,WORKER)).find(command=>command.id===queued.id)!;
   await claim(turn);
   await rootFixture.daemon.execute('postAgentTurnReceipt',{...authority(turn),status:'failed',reason:'checkout preparation failed'},WORKER);
-  const reports=(await commands(DM,RUBY)).filter(command=>command.reason==='report');
+  const reports=(await commands(opened.cornerId, RUBY)).filter(command=>command.reason==='report');
   expect(reports).toHaveLength(1);
   expect(reports[0]!.source.body).toContain('checkout preparation failed');
   expect(reports[0]!.source.body).toContain('@worker');

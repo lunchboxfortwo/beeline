@@ -627,7 +627,7 @@ async function writeCornerAdvance(
           `blocked: Corner ${row.name} is idle. Resume it, set a hold, or close it.`,
           undefined,
           createHash('sha256').update(`idle:${cornerId}:${row.idle_since}`).digest('hex'),
-          { automatic: true, agentOnly: true, wakeInCorner: true, idleSince: row.idle_since },
+          { automatic: true, agentOnly: true, idleSince: row.idle_since },
         );
       }
       // Explicit reports, owed asks and action cards already deliver to their

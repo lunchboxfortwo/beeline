@@ -60,19 +60,21 @@ describe.skipIf(!url)('running turns survive answered and superseded sources (Po
     await claimAgentCommand(db,opened.cornerId,worker,assignment.id,'worker');
     await daemon.execute('report',{ roomId:opened.cornerId,requestId:assignment.turnRequestId,generationId:'worker',
       status:'blocked',text:'blocked: publish is pending' },worker);
-    const report = (await readAgentCommands(db,room,agent)).commands.find(command => command.reason === 'report')!;
-    await claimAgentCommand(db,room,agent,report.id,'running',{kind:'helper',owner});
-    await phone.execute('sendRoomMessage', { roomId:opened.cornerId,text:'Publish is unblocked now' },human);
-    await phone.execute('sendRoomMessage', { roomId:room,text:'@ruby The blocker is resolved; check the next step' },human);
+    // The blocked report wakes its commander inside the corner it concerns.
+    const thread = opened.cornerId;
+    const report = (await readAgentCommands(db,thread,agent)).commands.find(command => command.reason === 'report')!;
+    await claimAgentCommand(db,thread,agent,report.id,'running',{kind:'helper',owner});
+    await phone.execute('sendRoomMessage', { roomId:thread,text:'Publish is unblocked now' },human);
+    await phone.execute('sendRoomMessage', { roomId:thread,text:'@ruby The blocker is resolved; check the next step' },human);
     expect((await db.query("SELECT private_payload->>'waitingAnswered' answered,state FROM agent_commands WHERE id=$1",
       [report.id])).rows).toEqual([{ answered:'true',state:'claimed' }]);
-    const queued = (await readAgentCommands(db,room,agent)).commands;
+    const queued = (await readAgentCommands(db,thread,agent)).commands;
     const next = queued.find(command => command.source.body.includes('The blocker is resolved'))!;
     expect(next).toBeDefined();
-    await claimAgentCommand(db,room,agent,report.id,'running',{kind:'helper',owner});
-    await finish(room,report.turnRequestId,'The blocker handling is complete.');
+    await claimAgentCommand(db,thread,agent,report.id,'running',{kind:'helper',owner});
+    await finish(thread,report.turnRequestId,'The blocker handling is complete.');
     expect((await db.query('SELECT state FROM agent_commands WHERE id=$1',[next.id])).rows).toEqual([{ state:'pending' }]);
-    await claimAgentCommand(db,room,agent,next.id,'next',{kind:'helper',owner});
+    await claimAgentCommand(db,thread,agent,next.id,'next',{kind:'helper',owner});
     expect((await db.query('SELECT state,generation_id FROM agent_commands WHERE id=$1',[next.id])).rows)
       .toEqual([{ state:'claimed',generation_id:'next' }]);
   });

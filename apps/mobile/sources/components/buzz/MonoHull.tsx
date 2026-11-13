@@ -249,6 +249,6 @@ export function NewMessageMaterialize({
   useEffect(() => {
     if (animate && messageId !== undefined) markMessageRevealed(messageId);
   }, [animate, messageId]);
-  if (!animate) return <YStack>{children}</YStack>;
+  if (!animate) return <>{children}</>;
   return <Motion entering={getNewMessageEntering()}>{children}</Motion>;
 }

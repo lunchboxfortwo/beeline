@@ -194,6 +194,8 @@ export type ChatDisplayMessage = {
   isUser: boolean;
   /** Local outbox/optimistic row, not yet a committed read boundary. */
   isPendingSend?: boolean;
+  /** Local picked files waiting for upload; render the existing loading frame. */
+  attachmentUploadPending?: boolean;
   timestamp: number;
   /** High-resolution causal ordering; `timestamp` remains the display clock. */
   orderAtMs?: number;

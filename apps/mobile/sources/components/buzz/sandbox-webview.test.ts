@@ -32,14 +32,6 @@ function Probe({ onStatus }: { onStatus: (status: string) => void }) {
   return React.createElement('View', { webview: WebView ? 'yes' : 'no' });
 }
 
-async function flush(): Promise<void> {
-  for (let round = 0; round < 20; round += 1) {
-    await act(async () => {
-      await new Promise((resolve) => setTimeout(resolve, 0));
-    });
-  }
-}
-
 describe('useSandboxWebViewStatus', () => {
   it('starts loading, then settles to ready when the sandboxed WebView loads', async () => {
     const statuses: string[] = [];
@@ -47,9 +39,12 @@ describe('useSandboxWebViewStatus', () => {
     await act(async () => {
       renderer = create(React.createElement(Probe, { onStatus: (s: string) => statuses.push(s) }));
     });
-    await flush();
+    await act(async () => {
+      await vi.dynamicImportSettled();
+    });
     expect(statuses[0]).toBe('loading');
     expect(statuses.at(-1)).toBe('ready');
     expect(renderer.root.findByProps({ webview: 'yes' })).toBeDefined();
+    act(() => renderer.unmount());
   });
 });

@@ -5,7 +5,10 @@ import { authenticSentryAlert, sendSentryTelegram, sentryTelegramMessage } from 
 import { createBeelineServer, type ServerOptions } from './server.js';
 import { LiveHub } from './live.js';
 const capture = vi.hoisted(() => vi.fn());
-vi.mock('./sentry.js', () => ({ captureServerError: capture }));
+vi.mock('./sentry.js', async (importOriginal) => ({
+  ...await importOriginal<typeof import('./sentry.js')>(),
+  captureServerError: capture,
+}));
 const config = { token: 'webhook-secret', botToken: 'bot-secret', chatId: 'chat-fixture' };
 const servers: ReturnType<typeof createBeelineServer>[] = [];
 afterEach(async () => { vi.restoreAllMocks(); vi.unstubAllGlobals(); await Promise.all(servers.splice(0).map(s => new Promise<void>(r => s.close(() => r())))); });

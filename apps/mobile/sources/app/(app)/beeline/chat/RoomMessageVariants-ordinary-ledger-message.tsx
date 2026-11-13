@@ -37,7 +37,7 @@ import { RequestFrame } from '@/ui/screens/transcript/cards/RequestCard';
 import { forwardedMessageParts } from '@/buzz/message-forward';
 import { agentMessageJsonMarkdown } from '@/buzz/agent-message-json';
 import { T } from '@/ui/grammar';
-import { OrdinaryLedgerMessageProps, SwipeToReply, ConnectorReceiptCard, AttachmentCard, ViewerContextReference } from './RoomMessageVariants-attachment-card';
+import { OrdinaryLedgerMessageProps, SwipeToReply, ConnectorReceiptCard, ExpiredAttachmentRow, ViewerContextReference } from './RoomMessageVariants-attachment-card';
 
 
 
@@ -359,6 +359,8 @@ export const OrdinaryLedgerMessage = React.memo(function OrdinaryLedgerMessage({
     (viewerContext!.startsWith('Viewing artifact:') || attachment.name === 'browser-screen.jpg'), [viewerContext]);
   // Two or more live files share one stacked card at the first file's place.
   // Memoized so the memoized card is not redrawn by an unrelated row update.
+  // Every live file is one artifact card; the file's own url/mime/name/size
+  // decides, never the optional server decoration that used to flip the shape.
   const artifactGroup = useMemo(() => messageArtifactGroup(message.attachments, viewedAttachment),
     [message.attachments, viewedAttachment]);
   const firstGroupArtifact = artifactGroup?.[0];
@@ -367,11 +369,11 @@ export const OrdinaryLedgerMessage = React.memo(function OrdinaryLedgerMessage({
     Boolean(viewerPubkey) && command.recipient.id === viewerPubkey ? command : null;
   const attachments = message.attachments?.map((attachment, index) => {
     if (viewedAttachment(attachment, index)) return null;
-    if (attachment.kind === 'artifact' && !attachment.expired) {
+    if (!attachment.expired) {
       if (artifactGroup && attachment !== firstGroupArtifact) return null;
       return (
         <ArtifactCard
-          visible={artifactVisible}
+          visible={!message.attachmentUploadPending && artifactVisible}
           attachment={attachment}
           authorHandle={
             attachment.author ??
@@ -386,10 +388,8 @@ export const OrdinaryLedgerMessage = React.memo(function OrdinaryLedgerMessage({
       );
     }
     return (
-      <AttachmentCard
-        visible={artifactVisible}
+      <ExpiredAttachmentRow
         attachment={attachment}
-        isDesktop={desktopLayout}
         key={`${message.id}-${attachment.url}`}
       />
     );
@@ -409,7 +409,7 @@ export const OrdinaryLedgerMessage = React.memo(function OrdinaryLedgerMessage({
   // A local send is tap feedback; never hide it behind the arrival fade.
   const content = (
     <NewMessageMaterialize enabled={Boolean(message.isNew) && !message.isUser} messageId={message.id}>
-      <YStack>
+      <>
         {isSelfSteer ? (
           <LedgerSteer
             itemId={message.id}
@@ -577,7 +577,7 @@ export const OrdinaryLedgerMessage = React.memo(function OrdinaryLedgerMessage({
           ) : null}
           </TranscriptLine>
         ) : null}
-      </YStack>
+      </>
     </NewMessageMaterialize>
   );
   if (announcementFeed) return content;

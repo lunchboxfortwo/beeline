@@ -72,3 +72,11 @@ it('drops a public chat from joinable once the viewer joins it', async () => {
   expect(view?.joinable?.map((chat) => chat.id)).toEqual([LEFT]);
   expect(view?.chats.map((chat) => chat.room.id).sort()).toEqual([JOINED, LAUNCH].sort());
 });
+
+it('Reproduction quiet-chat-badge: a thread message never marks its chat unread; the chat dot reflects chat messages only', async () => {
+  const row = async () => (await phone.readChats(WORKSPACE, PERSON))?.chats.find((chat) => chat.room.id === JOINED);
+  await phone.execute('sendRoomMessage', { roomId: CORNER, text: 'Thread news' }, TEAMMATE);
+  expect((await row())?.unread).toBe(false);
+  await phone.execute('sendRoomMessage', { roomId: JOINED, text: 'Chat news' }, TEAMMATE);
+  expect((await row())?.unread).toBe(true);
+});

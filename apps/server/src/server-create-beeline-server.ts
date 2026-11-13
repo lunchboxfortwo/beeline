@@ -2,6 +2,7 @@ import type { IncomingMessage, ServerResponse } from "node:http";
 import { bearer, type TokenAuth } from "./auth.js";
 import { PHONE_READ_OPERATIONS } from "@beeline/api-contract/phone";
 import { ServerOptions, json } from './server.js';
+import { noteSentryAgent, noteSentryUser } from './sentry.js';
 
 
 
@@ -36,7 +37,9 @@ export async function phoneIdentity(
   // Family is recorded beside the identity lookup. The identity return stays the
   // access-token query System messages already follow.
   if (value) await rememberPhoneFamily(request, options.auth, value);
-  return value ? options.auth.authenticatePhone(value) : null;
+  const identityId = value ? await options.auth.authenticatePhone(value) : null;
+  noteSentryUser(identityId);
+  return identityId;
 }
 
 
@@ -58,7 +61,10 @@ export async function daemonIdentity(
   options: ServerOptions,
 ): Promise<string | null> {
   const value = bearer(request.headers.authorization);
-  return value ? options.auth.authenticateDaemon(value) : null;
+  const agentId = value ? await options.auth.authenticateDaemon(value) : null;
+  // Sentry counts the person who owns the agent, not each of their agents.
+  noteSentryAgent(options.database, agentId);
+  return agentId;
 }
 
 

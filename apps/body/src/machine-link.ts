@@ -3,6 +3,7 @@ import { randomUUID } from 'node:crypto';
 import type { DaemonOperationMap, PostConnectorVaultInput } from '@beeline/api-contract/daemon';
 import { helperVersion } from './helper-version.js';
 import { unknownServerEventLogger } from './unknown-server-event.js';
+import { setHelperErrorUser } from './sentry.js';
 import { LiveLink, type LiveLinkTiming, type LiveSocketFactory } from './live-link.js';
 
 /** Subprotocol of the one socket a helper machine holds for all of its agents. */
@@ -107,7 +108,9 @@ export class AgentChannel {
       if (!this.#wanted || this.#registered) return;
       this.#registered = true;
       this.#capabilities = event.capabilities as Record<string,unknown> ?? {};
-      this.overlay.negotiate(this.#capabilities.overlayV1 === true);
+      const c = this.#capabilities;
+      if (typeof c.ownerId === 'string') setHelperErrorUser(c.ownerId);
+      this.overlay.negotiate(c.overlayV1 === true);
       for (const pending of this.#requests.values()) this.#dispatch(pending);
       for (const waiter of this.#waiters) waiter.resolve();
       this.#waiters.clear();

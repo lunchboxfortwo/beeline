@@ -6,7 +6,7 @@ it.each(['final', 'post-final', 'silent', 'post-silent'] as const)('Reproduction
   const opened = await open(), turn = await worker(opened.cornerId);
   await rootFixture.daemon.execute('postRoomMessage', { ...authority(rootFixture.order), text: 'Work started.' }, RUBY);
   await rootFixture.daemon.execute('report', { ...authority(turn), status: 'done', text: 'done: files ready' }, WORKER);
-  const wake = (await commands(DM, RUBY)).find(c => c.reason === 'report')!;
+  const wake = (await commands(opened.cornerId, RUBY)).find(c => c.reason === 'report')!;
   await claim(wake);
   const objectId = randomUUID();
   await rootFixture.db.query(`INSERT INTO objects(id,owner_id,kind,key,mime,title,size,sha256,state,expires_at)
@@ -25,7 +25,9 @@ it.each(['final', 'post-final', 'silent', 'post-silent'] as const)('Reproduction
   } else {
     await rootFixture.daemon.execute('postRoomMessage', { ...authority(wake), text: 'Here is the image.' }, RUBY);
   }
-  const visible = (await rootFixture.phone.readRoom(DM, HUMAN))!.messages.filter(m => m.author.pubkey === RUBY && m.presentation === 'message' && m.text !== 'Work started.');
+  // The wake runs in the corner: its closing reply lands there, an explicit post in the DM.
+  const visible = [...(await rootFixture.phone.readRoom(DM, HUMAN))!.messages, ...(await rootFixture.phone.readRoom(opened.cornerId, HUMAN))!.messages]
+    .filter(m => m.author.pubkey === RUBY && m.presentation === 'message' && m.text !== 'Work started.');
   expect(visible).toHaveLength(mode === 'post-final' ? 2 : 1);
   expect(visible.flatMap(message => (message.attachments ?? []).map(attachment => attachment.name))).toEqual(['proof.png']);
   expect(visible[0]!.text).not.toContain('must remain silent');
@@ -242,7 +244,8 @@ it.each(['done','no-reply'])('WAKE-STORM: auth-failed reviewer reports once with
   expect(corner?.latestAgentTurns).toContainEqual(expect.objectContaining({
     agentPubkey:SOL,requestId:review.turnRequestId,status:'failed',
   }));
-  const failures = (await commands(DM,RUBY)).filter(c=>c.reason==='report');
+  // The corner's idle alert shares this queue; the failure arrives once beside it.
+  const failures = (await commands(opened.cornerId,RUBY)).filter(c=>c.reason==='report'&&c.source.body.startsWith('failed:'));
   expect(failures).toHaveLength(1);
   expect(failures[0]!.source.body).toContain('Authentication required');
   if (outcome === 'done') await rootFixture.daemon.execute('report', {...authority(rootFixture.order),status:'done',text:'done: the assigned coordination is complete'}, RUBY);
@@ -250,9 +253,12 @@ it.each(['done','no-reply'])('WAKE-STORM: auth-failed reviewer reports once with
   const upstreamResults = outcome === 'done' ? 1 : 0;
   expect((await commands(DM,NIGLET)).filter(c=>c.reason==='report')).toHaveLength(upstreamResults);
   await claim(failures[0]!);
-  // This later report is a separate command with its own result.
+  // This later report is a separate command with its own result: the commander's
+  // closing prose answers in the corner it concerns and is not relayed upstream.
   await rootFixture.daemon.execute('postRoomMessage', {...authority(failures[0]!),text:'The reviewer still requires authentication.'}, RUBY);
-  expect((await commands(DM,NIGLET)).filter(c=>c.reason==='report')).toHaveLength(upstreamResults + 1);
+  expect((await rootFixture.db.query(`SELECT room_id FROM messages WHERE author_id=$1 AND text=$2`,
+    [RUBY,'The reviewer still requires authentication.'])).rows).toEqual([{room_id:opened.cornerId}]);
+  expect((await commands(DM,NIGLET)).filter(c=>c.reason==='report')).toHaveLength(upstreamResults);
   const {reportToCommander} = await import('./commander.js');
   const row = (await rootFixture.db.query<CommandRow>('SELECT * FROM agent_commands WHERE id=$1',[review.id])).rows[0]!;
   for(let attempt=0;attempt<5;attempt++) await rootFixture.daemon.execute('postAgentTurnReceipt',
@@ -305,11 +311,14 @@ it('WAKE-STORM: a later delegate report publishes its reply without re-answering
   const turn = await worker(opened.cornerId);
   await rootFixture.daemon.execute('report', {...authority(rootFixture.order),status:'done',text:'done: coordination finished'}, RUBY);
   await rootFixture.daemon.execute('report', {...authority(turn),status:'blocked',text:'blocked: reviewer requires authentication'}, WORKER);
-  const returned = (await commands(DM,RUBY)).find(c=>c.reason==='report')!;
+  const returned = (await commands(opened.cornerId,RUBY)).find(c=>c.reason==='report')!;
   await claim(returned);
   await rootFixture.daemon.execute('postRoomMessage', {...authority(returned),text:'The reviewer still needs to sign in.'}, RUBY);
+  // The reply to a corner report publishes in that corner; the chat keeps only the earlier result.
   expect((await rootFixture.phone.readRoom(DM,HUMAN))!.messages.filter(m=>m.author.pubkey===RUBY && m.presentation==='message').map(m=>m.text))
-    .toEqual(['done: coordination finished', 'The reviewer still needs to sign in.']);
+    .toEqual(['done: coordination finished']);
+  expect((await rootFixture.phone.readRoom(opened.cornerId,HUMAN))!.messages.filter(m=>m.author.pubkey===RUBY && m.presentation==='message').map(m=>m.text))
+    .toEqual(['The reviewer still needs to sign in.']);
 });
 
 
@@ -561,7 +570,7 @@ it('Reproduction RETURN-ADDRESS: an agent order without an explicit return addre
   const opened = await open(), turn = await worker(opened.cornerId);
   await rootFixture.db.query(`UPDATE agent_commands SET private_payload=private_payload-'fromRoomId' WHERE id=$1`, [turn.id]);
   await rootFixture.daemon.execute('report', { ...authority(turn), status: 'blocked', text: 'blocked: need a decision' }, WORKER);
-  const returned = (await commands(DM, RUBY)).filter(c => c.reason === 'report');
+  const returned = (await commands(opened.cornerId, RUBY)).filter(c => c.reason === 'report');
   expect(returned).toHaveLength(1);
   expect(returned[0]!.source.body).toBe('blocked: need a decision');
   await claim(returned[0]!);
@@ -571,7 +580,7 @@ it('Reproduction RETURN-ADDRESS: an agent order without an explicit return addre
 it('Reproduction RETURN-ADDRESS: a report whose parent expired retains the recorded human source route', async () => {
   const opened = await open(), turn = await worker(opened.cornerId);
   await rootFixture.daemon.execute('report', { ...authority(turn), status: 'blocked', text: 'blocked: decision needed' }, WORKER);
-  const returned = (await commands(DM, RUBY)).find(c => c.reason === 'report')!;
+  const returned = (await commands(opened.cornerId, RUBY)).find(c => c.reason === 'report')!;
   await claim(returned);
   // Production feedback fb_135f018e: the report parent was gone, but its
   // root_source_message_id still named the human's original Room order.

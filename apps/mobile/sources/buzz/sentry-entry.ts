@@ -1,1 +1,1 @@
-export { setMobileErrorRoute, captureMobileError } from './sentry';
+export { setMobileErrorRoute, setMobileErrorUser, captureMobileError } from './sentry';

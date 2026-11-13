@@ -323,20 +323,31 @@ export class PostgresDatabase implements ClosableDatabase {
     }
   }
 
-  async #timed<T>(sql: string, work: () => Promise<T>): Promise<T> {
+  async #timed<T>(
+    sql: string,
+    work: (acquired: () => void) => Promise<T>,
+    waitsForConnection = false,
+  ): Promise<T> {
     const ticket = this.#nextTicket++;
-    const startedAt = Date.now();
-    this.#inFlight.set(ticket, startedAt);
+    const startedAt = performance.now();
+    // Transaction statements already own a client; ordinary queries include checkout.
+    // After acquisition, execution includes diagnostics and client release overhead.
+    let acquiredAt = waitsForConnection ? undefined : startedAt;
+    this.#inFlight.set(ticket, Date.now());
     let error: unknown;
     try {
-      return await work();
+      return await work(() => { acquiredAt = performance.now(); });
     } catch (caught) {
       recordPostgresStatementError(caught,sql);
       error = caught;
       throw caught;
     } finally {
       this.#inFlight.delete(ticket);
-      this.#profiler.record(sql, Date.now() - startedAt, error);
+      const finishedAt = performance.now();
+      this.#profiler.record(sql, finishedAt - startedAt, error, {
+        poolWaitMs: (acquiredAt ?? finishedAt) - startedAt,
+        executionMs: acquiredAt === undefined ? 0 : finishedAt - acquiredAt,
+      });
     }
   }
 
@@ -417,8 +428,9 @@ export class PostgresDatabase implements ClosableDatabase {
     preparedName?: string,
   ): Promise<QueryResult<Row>> {
     try {
-      const raw = await this.#timed(sql, async () => {
+      const raw = await this.#timed(sql, async acquired => {
         const { client, release } = await this.#connectCheckedOut();
+        acquired();
         try {
           const result = await this.#statement(client, sql, () => preparedName
             ? client.query<Row>(preparedQuery(preparedName, sql, values))
@@ -429,7 +441,7 @@ export class PostgresDatabase implements ClosableDatabase {
           release(error instanceof Error ? error : new Error('query failed'));
           throw error;
         }
-      });
+      }, true);
       this.#noteSuccess();
       const result = Array.isArray(raw) ? raw.at(-1) : raw;
       return { rows: result?.rows ?? [], rowCount: result?.rowCount ?? result?.rows.length ?? 0 };

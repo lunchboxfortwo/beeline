@@ -338,7 +338,7 @@ describe('checks dispatch (rows 6-8)', () => {
     await claim(work!);
     await rootFixture.daemon.execute('report', { status: 'needs_decision', roomId: cornerId, requestId: work!.turnRequestId,
       generationId: 'g1', text: 'needs-decision: decide whether to continue' }, A);
-    expect((await commands(B, R)).some(c => c.reason === 'report' && c.source.body.includes('needs-decision:'))).toBe(true);
+    expect((await commands(B, cornerId)).some(c => c.reason === 'report' && c.source.body.includes('needs-decision:'))).toBe(true);
     expect((await rootFixture.db.query(`SELECT 1 FROM messages WHERE text='needs-decision: decide whether to continue'`)).rowCount).toBe(0);
   });
 

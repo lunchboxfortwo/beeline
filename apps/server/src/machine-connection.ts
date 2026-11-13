@@ -1,3 +1,4 @@
+import { cachedSentryAccount, noteSentryUser, rememberSentryAccount, withSentryAgent } from './sentry.js';
 import type { Socket } from 'node:net';
 import type { WebSocket } from 'ws';
 import { HELPER_UPDATE_CLOSE_CODE, HELPER_UPDATE_CLOSE_REASON } from '@beeline/api-contract/daemon';
@@ -126,7 +127,7 @@ export function serveAgentSocket(
       deps.errors.invalid++;
       return;
     }
-    session.frame(item, bytes);
+    withSentryAgent(deps.database, principal.identityId, () => session.frame(item, bytes));
   });
   client.on('close', (code, reason) => {
     guard.dispose();
@@ -174,7 +175,9 @@ export function serveMachineSocket(
   const unregistered = (agentId: string, reason: string, code?: number) =>
     send({ type: 'unregistered', agentId, reason, ...(code ? { code } : {}) });
 
-  const register = async (item: Record<string, unknown>, reply = send) => {
+  const register = (item: Record<string, unknown>, reply = send) =>
+    typeof item.agentId === 'string' ? withSentryAgent(deps.database, item.agentId, () => registerAgent(item, reply)) : registerAgent(item, reply);
+  const registerAgent = async (item: Record<string, unknown>, reply = send) => {
     const agentId = item.agentId;
     const token = item.token;
     if (typeof agentId !== 'string' || !/^[0-9a-f]{64}$/i.test(agentId)) {
@@ -245,12 +248,19 @@ export function serveMachineSocket(
       registrationStage = 'presence-claim';
       await session.claim();
       if (session.closed || sessions.get(agentId) !== session) return;
+      // The helper names this account on its own error reports. Telemetry never refuses registration.
+      const ownerId = session.usageOwnerId ?? (cachedSentryAccount(agentId) !== agentId ? cachedSentryAccount(agentId) : undefined) ?? await deps.database.query<{ owner_id: string | null }>(
+        'SELECT owner_id FROM agents WHERE agent_id=$1', [agentId],
+      ).then(result => result.rows[0]?.owner_id ?? undefined, () => undefined);
+      if (ownerId) { rememberSentryAccount(agentId, ownerId); noteSentryUser(ownerId); }
+      if (session.closed || sessions.get(agentId) !== session) return;
       reply({
         type: 'registered',
         agentId,
         capabilities: { initialSnapshotsV1: true, discoveryWake: true, pushIntake: true,
           ...(item.daemonOperationsV1 === true ? {daemonOperationsV1:true} : {}),
           ...(item.queueV1 === true ? {queueV1:true} : {}),
+          ...(ownerId ? {ownerId} : {}),
           ...(session.overlayV1?{overlayV1:true}:{}),
           ...(session.usageAccountV1?{usageAccountV1:true,usageOwnerId:session.usageOwnerId,usageConnectionId:session.connectionId,usageConnectionEpoch:session.epoch}:{}) },
       });
@@ -295,7 +305,7 @@ export function serveMachineSocket(
       session.close();
       return;
     }
-    session.frame(item, bytes);
+    withSentryAgent(deps.database, session.agentId, () => session.frame(item, bytes));
   });
   client.on('close', (code, reason) => {
     guard.dispose();

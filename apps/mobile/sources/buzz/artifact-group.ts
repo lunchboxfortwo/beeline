@@ -6,17 +6,18 @@ import { artifactFormat, formatAttachmentSize } from '@/buzz/artifact';
 export const ARTIFACT_GROUP_VISIBLE_ROWS = 3;
 
 /**
- * The files of one message that share one stacked card: every live artifact,
- * in message order. Expired files keep their own expired line, and a message
- * with one live file keeps the single card, so both return undefined.
- * `skip` drops attachments the message already shows another way.
+ * The files of one message that share one stacked card: every live file, in
+ * message order — the file itself decides, not an optional server decoration.
+ * Expired files keep their own expired line, and a message with one live file
+ * keeps the single card, so both return undefined. `skip` drops attachments
+ * the message already shows another way.
  */
 export function messageArtifactGroup(
   attachments: readonly AttachmentReference[] | undefined,
   skip?: (attachment: AttachmentReference, index: number) => boolean,
 ): readonly AttachmentReference[] | undefined {
   const live = (attachments ?? []).filter((attachment, index) =>
-    attachment.kind === 'artifact' && !attachment.expired && !skip?.(attachment, index));
+    !attachment.expired && !skip?.(attachment, index));
   return live.length > 1 ? live : undefined;
 }
 

@@ -236,7 +236,18 @@ export class MonolithSession {
     return () => { this.sessionRequiredListeners.delete(listener); };
   }
 
+  private errorUserSequence = 0;
+  /** Error reports name only the signed-in identity id; the newest answer wins. */
+  private reportErrorUser(identity: string | null | Promise<string | null>): void {
+    const sequence = ++this.errorUserSequence;
+    void Promise.resolve(identity).then(async (id) => {
+      const sdk = await import('@/buzz/sentry-entry');
+      if (sequence === this.errorUserSequence) sdk.setMobileErrorUser(id);
+    }).catch(() => undefined);
+  }
+
   private identityChanged(): void {
+    this.reportErrorUser(this.identityId());
     for (const listener of this.identityListeners) {
       try {
         listener();
@@ -270,6 +281,7 @@ export class MonolithSession {
 
   async clear(): Promise<void> {
     void import('@/track/diagnostics').then(t=>t.diagnosticIdentity(null)).catch(()=>undefined);
+    this.reportErrorUser(null);
     this.credentialRevision += 1;
     this.sessionRevision += 1;
     this.access = undefined;
@@ -394,7 +406,10 @@ export class MonolithSession {
         typeof (value as { identityId?: unknown }).identityId === 'string' &&
         (value as { identityId: string }).identityId === identityId
       )
+      {
         this.access = value as { token: string; expiresAt: number; identityId: string };
+        this.reportErrorUser(this.access.identityId);
+      }
     } catch {
       // An old or partial secure-store value simply takes the refresh path.
     }
@@ -584,6 +599,7 @@ export class MonolithSession {
       // Token refresh alone must not start another registration/refresh loop.
       if (signedIn || previousId !== tokens.identityId) this.identityChanged();
       void import('@/track/diagnostics').then(t=>t.diagnosticIdentity(tokens.identityId)).catch(()=>undefined);
+      this.reportErrorUser(tokens.identityId);
       if (signedIn)
         void import('./signin-funnel')
           .then((module) => module.funnelSignedIn(tokens.accessToken))

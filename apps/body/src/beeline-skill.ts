@@ -122,6 +122,7 @@ export function beelineCornersSkillMarkdown(releaseId: string): string {
 
 - A finished non-corner order may report done without a pull request.
 - Agent-to-agent orders and reports stay private.
+- A report, idle or failure notice about a corner wakes you in that corner; answer there. A scheduled run posts in each corner it acts on. Post in a chat only when a person tagged you there or a person must decide, and then in one short message.
 - For friction in Beeline itself, call report_feedback with tool_name and error_excerpt filled in when a tool failed, so triage can group it.
 - After a fix pull request merges, notify_feedback_fixed(item_ids, title, pr_url) resolves the feedback items it lists. The feedback-triage-steps procedure says when to send Fixed notices.
 - For an operator notice explicitly commanded by lunchboxfortwo, use send_operator_system_dm({recipients,text}) through their own agent. recipients is one exact human id/handle, a list, or all. The server enforces owner-command provenance and audits each send. Keep the returned sendId; pending delivery is not a reason to resend. Read completion counts with read_operator_system_dm({sendId}). Delivered means committed to the System thread, not read by the person. Never substitute an ad-hoc production database write.
