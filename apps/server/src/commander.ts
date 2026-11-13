@@ -343,7 +343,7 @@ export async function reportToCommander(
   text: string,
   command?: CommandRow,
   reportId = randomBytes(32).toString('hex'),
-  options: { orderIssuer?: boolean; automatic?: boolean; agentOnly?: boolean; ask?: string; attachments?: PrivateCommandPayload['attachments']; idleSince?: string } = {},
+  options: { orderIssuer?: boolean; automatic?: boolean; agentOnly?: boolean; wakeInCorner?: boolean; ask?: string; attachments?: PrivateCommandPayload['attachments']; idleSince?: string } = {},
 ): Promise<{ id: string; createdAt: number; delivered?: boolean; receipt?: string; skipped?: boolean }> {
   // Server-generated failure diagnostics may include long child argv/stderr.
   // The manual report limit must not roll back their terminal receipt.
