@@ -3,15 +3,17 @@ import * as React from 'react';
 import { act, create } from 'react-test-renderer';
 import { beforeEach, expect, it, vi } from 'vitest';
 
+const currentTheme = vi.hoisted(() => ({ name: 'dark_brass' }));
+
 vi.mock('expo-router', () => ({ router: { canDismiss: () => false, dismissAll: vi.fn(), replace: vi.fn() } }));
 // createTamagui hands back its config, so the real theme values can be read.
-vi.mock('tamagui', async () => ({ ...(await import('@/ui/screens/transcript/grammar-hosts.test-support')).tamaguiHosts(), createTamagui: (config: unknown) => config }));
+vi.mock('tamagui', async () => ({ ...(await import('@/ui/screens/transcript/grammar-hosts.test-support')).tamaguiHosts(), createTamagui: (config: unknown) => config, useThemeName: () => currentTheme.name }));
 vi.mock('lucide-react-native', async () => (await import('@/ui/screens/transcript/grammar-hosts.test-support')).lucideHosts());
 const platform = vi.hoisted(() => ({ OS: 'android' }));
 vi.mock('react-native', () => ({ Platform: platform }));
 vi.mock('react-native-safe-area-context', () => ({ useSafeAreaInsets: () => ({ top: 0, bottom: 0, left: 0, right: 0 }) }));
 
-beforeEach(() => { (globalThis as any).IS_REACT_ACT_ENVIRONMENT = true; });
+beforeEach(() => { (globalThis as any).IS_REACT_ACT_ENVIRONMENT = true; currentTheme.name = 'dark_brass'; });
 
 async function labelProps(os: string, label: string) {
     platform.OS = os;
@@ -34,6 +36,7 @@ it('leaves web tab labels as they were, with no ellipsis', async () => {
 
 it.each(['dark', 'light'])('shows the selected tab apart from the others under %s Stone colors', async (mode) => {
     platform.OS = 'ios';
+    currentTheme.name = `${mode}_stone`;
     vi.resetModules();
     const { TabBar } = await import('./TabBar');
     const { tamaguiConfig, themeName } = await import('@/ui/tamagui.config');
