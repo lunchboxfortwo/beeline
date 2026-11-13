@@ -727,7 +727,7 @@ it('human Room reports with an agent-written mention enter the needs-you tray an
 });
 
 
-it('refuses newly queued files after a terminal report and ignores closing prose', async () => {
+it('accepts a file after a terminal report, posts it with the next message, and sends no second report', async () => {
   const opened = await open(),
     turn = await worker(opened.cornerId),
     media = randomUUID();
@@ -753,7 +753,7 @@ it('refuses newly queued files after a terminal report and ignores closing prose
       },
     },
     WORKER,
-  )).rejects.toThrow('authority rejected');
+  )).resolves.toBeDefined();
   await rootFixture.daemon.execute(
     'postRoomMessage',
     { ...authority(turn), text: 'The artifact is ready' },
@@ -762,7 +762,7 @@ it('refuses newly queued files after a terminal report and ignores closing prose
   const reports = (await commands(DM, RUBY)).filter((c) => c.reason === 'report');
   expect(reports).toHaveLength(1);
   expect((await rootFixture.phone.readRoom(opened.cornerId, HUMAN))?.messages.some(message =>
-    message.attachments?.some(attachment => attachment.name === 'late.txt'))).toBe(false);
+    message.attachments?.some(attachment => attachment.name === 'late.txt'))).toBe(true);
   expect(
     (
       await rootFixture.db.query(`SELECT 1 FROM agent_pending_attachments WHERE request_id=$1`, [

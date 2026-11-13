@@ -195,7 +195,9 @@ it.each([true, false])('DONE-PR-1: report resolves an unregistered PR (exists: %
       expect((await commands(DM, RUBY)).find(c => c.reason === 'report')?.source.body).toBe('done: widget delivered');
       expect((await db.query(`SELECT lifecycle->'pr'->>'number' number FROM corner_facts WHERE corner_id=$1`, [opened.cornerId])).rows[0]?.number).toBe('42');
       expect(app.readPullRequest).toHaveBeenCalledTimes(1);
-      await expect(send()).rejects.toThrow('authority rejected');
+      // A retried report in the same turn is the same report, not a second one.
+      await send();
+      expect((await commands(DM, RUBY)).filter(c => c.reason === 'report')).toHaveLength(1);
       expect(app.openPullRequestsForBranch).toHaveBeenCalledTimes(1);
       expect(app.readPullRequest).toHaveBeenCalledTimes(1);
     } else {
@@ -209,7 +211,7 @@ it.each([true, false])('DONE-PR-1: report resolves an unregistered PR (exists: %
 it.each(['Delivered', 'blocked: Delivered'])('uses the validated report status for %s', async text => {
   const input={...authority(order),status:'done' as const,text};
   const first=await daemon.execute('report',input,RUBY);
-  await expect(daemon.execute('report',input,RUBY)).rejects.toThrow('authority rejected');
+  expect((await daemon.execute('report',input,RUBY)).id).toBe(first.id);
   expect((await db.query(`SELECT text FROM messages WHERE id=$1`,[first.id])).rows).toEqual([{text:'done: Delivered'}]);
 });
 it.each([undefined,'working'])('rejects a nonterminal report status %s', async status => {
