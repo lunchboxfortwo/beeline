@@ -386,12 +386,17 @@ describe('Settings → You → Profile picture', () => {
 });
 
 describe('Settings tab', () => {
-  it('titles the tab Settings and captions @handle (the shared layout draws the tab bar)', async () => {
+  it('carries the shared tab header instead of a Settings title, and captions @handle (the shared layout draws the tab bar)', async () => {
     operations({});
     const renderer = await renderScreen();
-    expect(renderedText(renderer)).toContain('Settings');
+    expect(renderer.root.findAll((node: any) => node.type === 'Text' && node.props.children === 'Settings')).toHaveLength(0);
     await vi.waitFor(() => expect(byId(renderer, 'settings-caption')?.props.children).toBe('@lunchboxfortwo'));
     expect(renderer.root.findAll((node: any) => node.type === 'TabBar')).toHaveLength(0);
+    expect(byId(renderer, 'room-search-open')).toBeUndefined();
+    expect(byId(renderer, 'new-chat')).toBeUndefined();
+    expect(byId(renderer, 'community-drawer-overlay')).toBeUndefined();
+    await act(async () => byId(renderer, 'workspace-switcher').props.onPress());
+    expect(byId(renderer, 'community-drawer-overlay')).toBeDefined();
   });
 
   it('lists Device, Account and the version check, without Getting started', async () => {

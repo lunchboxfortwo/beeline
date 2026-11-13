@@ -28,9 +28,10 @@ import { openArtifactViewer } from '@/components/buzz/ArtifactCard';
 import { prefetchPushRoom } from '@/push/push-room-prefetch';
 import { monolithPhoneOperation } from '@/sync/transport/monolith-operation';
 import { openExternalUrl } from '@/utils/open-external-url';
-import { Btn, Copy, SafeTop, T } from '@/ui/grammar';
+import { Btn, Copy, T } from '@/ui/grammar';
 import { TAB_ROUTES } from '@/ui/shell/tab-routes';
-import { CLOSED_SEARCH, ChatListHeader } from '@/ui/screens/chats/ChatListHeader';
+import { TabHeader, TabRail, useScrolledUnder } from '@/ui/shell/TabHeader';
+import { WORKSPACE_LABEL } from '@/buzz/vocabulary';
 import { TagCard, type TagCardActions } from '@/ui/screens/tags/TagCard';
 import type { TagDecision } from '@/ui/screens/tags/tag-card-model';
 
@@ -283,6 +284,7 @@ export default function TrayScreen() {
   // Ages are read when the projection changes, so unchanged cards do not re-render.
   const now = useMemo(() => Date.now(), [items]);
   const goToChats = useCallback(() => router.replace(TAB_ROUTES.chats as never), [router]);
+  const { scrolled, scrollProps } = useScrolledUnder();
 
   const list = (
     <FlatList
@@ -321,28 +323,19 @@ export default function TrayScreen() {
         )
       }
       testID="tray-list"
+      {...scrollProps}
     />
   );
 
-  return (
+  const screen = (
     <YStack flex={1} minHeight={0} backgroundColor="canvas" testID="tags-screen">
-      {desktop ? null : (
-        <>
-          <SafeTop />
-          {/* The list header shared with Chats. Search and + take the Chats list,
-              where they act; the Workspace switcher stays on Chats. */}
-          <ChatListHeader
-            workspaceName={workspaceName ?? 'Workspace'}
-            search={CLOSED_SEARCH}
-            onSearch={(next) => { if (next.open) goToChats(); }}
-            onNew={() => router.replace({ pathname: TAB_ROUTES.chats, params: { ...(workspaceId ? { communityId: workspaceId } : {}), newRoom: String(Date.now()) } } as never)}
-          />
-        </>
-      )}
+      {/* The header every tab shares; Tags has no buttons of its own. */}
+      {desktop ? null : <TabHeader workspaceName={workspaceName ?? WORKSPACE_LABEL} scrolled={scrolled} />}
       {error ? <YStack paddingHorizontal="4" paddingTop="2"><Copy small quiet testID="tray-error">{error}</Copy></YStack> : null}
       <YStack flex={1} minHeight={0} width="100%" maxWidth={desktop ? 760 : undefined} alignSelf="center">
         {list}
       </YStack>
     </YStack>
   );
+  return desktop ? screen : <TabRail tab="tags" workspaceId={workspaceId || null}>{screen}</TabRail>;
 }

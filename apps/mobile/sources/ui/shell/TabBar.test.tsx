@@ -4,7 +4,8 @@ import { act, create } from 'react-test-renderer';
 import { beforeEach, expect, it, vi } from 'vitest';
 
 vi.mock('expo-router', () => ({ router: { canDismiss: () => false, dismissAll: vi.fn(), replace: vi.fn() } }));
-vi.mock('tamagui', async () => (await import('@/ui/screens/transcript/grammar-hosts.test-support')).tamaguiHosts());
+// createTamagui hands back its config, so the real theme values can be read.
+vi.mock('tamagui', async () => ({ ...(await import('@/ui/screens/transcript/grammar-hosts.test-support')).tamaguiHosts(), createTamagui: (config: unknown) => config }));
 vi.mock('lucide-react-native', async () => (await import('@/ui/screens/transcript/grammar-hosts.test-support')).lucideHosts());
 const platform = vi.hoisted(() => ({ OS: 'android' }));
 vi.mock('react-native', () => ({ Platform: platform }));
@@ -29,4 +30,20 @@ it('leaves web tab labels as they were, with no ellipsis', async () => {
     const props = await labelProps('web', 'People');
     expect(props.numberOfLines).toBeUndefined();
     expect(props.adjustsFontSizeToFit).toBeUndefined();
+});
+
+it.each(['dark', 'light'])('shows the selected tab apart from the others under %s Stone colors', async (mode) => {
+    platform.OS = 'ios';
+    vi.resetModules();
+    const { TabBar } = await import('./TabBar');
+    const { tamaguiConfig, themeName } = await import('@/ui/tamagui.config');
+    const theme = (tamaguiConfig as unknown as { themes: Record<string, Record<string, string>> }).themes[themeName(mode as 'dark' | 'light', 'stone')];
+    let tree: any;
+    act(() => { tree = create(<TabBar active="people" />); });
+    const color = (label: string) => theme[tree.root.find((node: any) => node.type === 'Text' && node.props.children === label).props.color];
+    expect(color('People')).toBe(theme.ink);
+    for (const other of ['Chats', 'Tags', 'Settings']) expect(color(other)).not.toBe(color('People'));
+    const line = (node: any) => node.type === 'YStack' && node.props.testID === 'tab-selected-line';
+    expect(tree.root.findAll(line)).toHaveLength(1);
+    expect(tree.root.find((node: any) => typeof node.type === 'string' && node.props.testID === 'tab-people').findAll(line)).toHaveLength(1);
 });

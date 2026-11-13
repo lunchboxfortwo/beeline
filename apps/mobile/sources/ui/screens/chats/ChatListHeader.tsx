@@ -13,19 +13,23 @@ const CHIPS: { value: SearchChip; label: string }[] = [
 ];
 
 /**
- * The list header (Chats and the desktop sidebar): the Workspace name opens
- * today's Workspace switcher, then Search and New chat. Search replaces it
+ * The list header (every phone tab and the desktop sidebar): the Workspace
+ * name opens today's Workspace switcher, then that place's buttons. On Chats
+ * and the sidebar those are Search and New chat; Search replaces the header
  * with a field and the Unread / Pinned chips.
  */
-export function ChatListHeader({ workspaceName, onWorkspace, onNew, search, onSearch }: {
+export function ChatListHeader({ workspaceName, onWorkspace, onNew, search, onSearch, actions }: {
   workspaceName: string;
   onWorkspace?: () => void;
   /** Absent when the viewer may not create a chat. */
   onNew?: () => void;
-  search: ChatSearch;
-  onSearch: (next: ChatSearch) => void;
+  /** Absent on tabs that do not search chats. */
+  search?: ChatSearch;
+  onSearch?: (next: ChatSearch) => void;
+  /** A tab's own buttons, after Search and New chat. */
+  actions?: React.ReactNode;
 }) {
-  if (search.open) {
+  if (search?.open && onSearch) {
     return (
       <YStack paddingHorizontal="3" paddingTop="2" paddingBottom="2" gap="2" testID="header-search">
         <XStack gap="2" alignItems="center">
@@ -92,8 +96,9 @@ export function ChatListHeader({ workspaceName, onWorkspace, onNew, search, onSe
       )}
       <YStack flex={1} />
       <XStack gap="1">
-        <Btn kind="icon" label="Search" onPress={() => onSearch({ ...search, open: true })} testID="room-search-open"><Glyph icon={Search} /></Btn>
+        {search && onSearch ? <Btn kind="icon" label="Search" onPress={() => onSearch({ ...search, open: true })} testID="room-search-open"><Glyph icon={Search} /></Btn> : null}
         {onNew ? <Btn kind="icon" label="New chat" onPress={onNew} testID="new-chat"><Glyph icon={Plus} /></Btn> : null}
+        {actions}
       </XStack>
     </XStack>
   );
