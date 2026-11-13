@@ -580,7 +580,8 @@ export function readSquireApproval(value: unknown): NonNullable<RoomViewMessage[
     !nonempty(item.tool) ||
     !nonempty(item.title) ||
     !nonempty(item.detail) ||
-    !httpUrl(item.approvalUrl) ||
+    // Only the card's owner receives Squire's page; other Room members read the ask.
+    (item.approvalUrl !== undefined && !httpUrl(item.approvalUrl)) ||
     !linkKind
   ) {
     return null;
@@ -590,7 +591,7 @@ export function readSquireApproval(value: unknown): NonNullable<RoomViewMessage[
     tool: item.tool,
     title: item.title,
     detail: item.detail,
-    approvalUrl: item.approvalUrl,
+    ...field('approvalUrl', httpUrl(item.approvalUrl) ? item.approvalUrl : undefined),
     linkKind,
     ...field('owner', readHumanApprovalIdentity(item.owner)),
     ...field('status', oneOf(item.status, ['approved', 'denied', 'expired'])),

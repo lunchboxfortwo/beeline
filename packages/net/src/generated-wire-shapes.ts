@@ -344,7 +344,7 @@ export const wireShapes: readonly WireShape[] = [
   shape({"kind":"union","choices":[6,340]}),
   shape({"kind":"array","item":341}),
   shape({"kind":"object","properties":{"label":{"node":1,"optional":false},"value":{"node":1,"optional":false}}}),
-  shape({"kind":"object","properties":{"owner":{"node":313,"optional":true},"status":{"node":343,"optional":true},"decidedBy":{"node":313,"optional":true},"decidedAt":{"node":17,"optional":true},"agent":{"node":210,"optional":false},"tool":{"node":1,"optional":false},"title":{"node":1,"optional":false},"detail":{"node":1,"optional":false},"approvalUrl":{"node":1,"optional":false},"approvalId":{"node":5,"optional":true},"linkKind":{"node":344,"optional":false},"sourceRoomId":{"node":5,"optional":true},"sourceMessageId":{"node":5,"optional":true}}}),
+  shape({"kind":"object","properties":{"owner":{"node":313,"optional":true},"status":{"node":343,"optional":true},"decidedBy":{"node":313,"optional":true},"decidedAt":{"node":17,"optional":true},"agent":{"node":210,"optional":false},"tool":{"node":1,"optional":false},"title":{"node":1,"optional":false},"detail":{"node":1,"optional":false},"approvalUrl":{"node":5,"optional":true},"approvalId":{"node":5,"optional":true},"linkKind":{"node":344,"optional":false},"sourceRoomId":{"node":5,"optional":true},"sourceMessageId":{"node":5,"optional":true}}}),
   shape({"kind":"union","choices":[6,188,318,189]}),
   shape({"kind":"union","choices":[345,346,347]}),
   shape({"kind":"literal","value":"vouch"}),
