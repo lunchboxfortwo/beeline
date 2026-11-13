@@ -526,7 +526,7 @@ export interface WrappedCommand {
 }
 
 
-/** Mounts each `tree upper work` triple, then drops every capability before the command. */
+/** Mounts each `tree upper work` triple before the unprivileged inner sandbox. */
 const OVERLAY_BOOTSTRAP = [
   'set -eu',
   'while [ "$1" != -- ]; do',
@@ -534,7 +534,7 @@ const OVERLAY_BOOTSTRAP = [
   '  shift 3',
   'done',
   'shift',
-  'exec setpriv --bounding-set=-all --inh-caps=-all --ambient-caps=-all --no-new-privs "$@"',
+  'exec "$@"',
 ].join('\n');
 
 
@@ -572,12 +572,11 @@ export function buildBwrapArgv(input: {
   const args = [
     // sd_bus rejects peers whose PID cannot be resolved in its namespace.
     ...(input.plan.userBus ? [] : ['--unshare-pid']),
-    // An unprivileged overlay mount needs namespace root; the bootstrap drops
-    // every capability before the command. IS_SANDBOX tells harnesses that
-    // refuse to run as root that this root is a namespace one.
+    // Overlay setup needs namespace root. SETFCAP permits remapping that UID
+    // in the inner namespace, which drops all capabilities before the command.
     ...(overlays.length
-      ? ['--unshare-user', '--uid', '0', '--gid', '0', '--setenv', 'IS_SANDBOX', '1',
-          ...['CAP_SYS_ADMIN', 'CAP_DAC_OVERRIDE', 'CAP_SETPCAP'].flatMap(cap => ['--cap-add', cap])]
+      ? ['--unshare-user', '--uid', '0', '--gid', '0',
+          ...['CAP_SYS_ADMIN', 'CAP_DAC_OVERRIDE', 'CAP_SETFCAP'].flatMap(cap => ['--cap-add', cap])]
       : []),
     input.plan.rootWritable ? '--bind' : '--ro-bind',
     '/',
@@ -624,8 +623,12 @@ export function buildBwrapArgv(input: {
   args.push('--die-with-parent');
   if (overlays.length) {
     for (const layer of overlays) for (const dir of [layer.upper, layer.work]) mkdirSync(dir, { recursive: true, mode: 0o700 });
+    // Rebind the already-private /dev with device access in the inner mount
+    // namespace; an ordinary bind makes child-process stdio fail with EACCES.
     args.push('--', 'sh', '-c', OVERLAY_BOOTSTRAP, 'beeline-dependency-layers',
-      ...overlays.flatMap(layer => [layer.tree, layer.upper, layer.work]), '--', input.command, ...(input.args ?? []));
+      ...overlays.flatMap(layer => [layer.tree, layer.upper, layer.work]), '--',
+      input.bwrapPath, '--unshare-user', '--uid', String(process.getuid!()), '--gid', String(process.getgid!()),
+      '--cap-drop', 'ALL', '--bind', '/', '/', '--dev-bind', '/dev', '/dev', '--', input.command, ...(input.args ?? []));
   } else {
     args.push('--', input.command, ...(input.args ?? []));
   }
