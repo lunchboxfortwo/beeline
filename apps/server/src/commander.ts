@@ -365,16 +365,16 @@ export async function reportToCommander(
     console.error(`[commander] ${roomId}: cannot route report without recorded opening provenance`);
     return { id: reportId, createdAt: Math.floor(Date.now() / 1000), delivered: false };
   }
-  // A report on an order the corner's implementer gave inside that corner wakes
-  // it there; the parent Room has no worktree or PR route for that work.
+  // A report on work another agent did inside the corner (an order, a review),
+  // or a server report on the corner's review gate, wakes the implementer
+  // there; the parent Room has no worktree or PR route for that work.
   // Escalations up the opening chain keep their return place.
-  const orderedHere = incoming?.room_id === origin && incoming?.private_payload?.kind === 'order'
-    && incoming.private_payload.authorId === recipient && incoming.agent_id !== recipient;
+  const orderedHere = incoming?.room_id === origin && incoming?.agent_id !== recipient;
   const wakeRoom = origin && (await db.query(`SELECT 1 FROM room_access member
       JOIN corner_facts fact ON fact.corner_id=member.room_id JOIN rooms corner ON corner.id=fact.corner_id
       WHERE member.room_id=$1 AND member.identity_id=$2 AND member.removed_at IS NULL
         AND ($3::boolean OR ($4::boolean AND ${cornerImplementerSql('fact', 'corner')}=$2))`,
-    [origin, recipient, Boolean(options.automatic && options.agentOnly && options.wakeInCorner), orderedHere])).rowCount ? origin : returnRoom;
+    [origin, recipient, Boolean(options.automatic && options.agentOnly && options.wakeInCorner), orderedHere || Boolean(options.wakeInCorner)])).rowCount ? origin : returnRoom;
   const recipientKind=(await db.query<{kind:string}>('SELECT kind FROM identities WHERE id=$1',[recipient])).rows[0]?.kind;
   if(recipientKind==='agent')
     await lockAgentCommandQueue(db,[{roomId:returnRoom,agentId:recipient},{roomId:wakeRoom,agentId:recipient}]);

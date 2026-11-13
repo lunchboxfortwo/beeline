@@ -748,7 +748,8 @@ export async function noteReviewBlocked(
       systemMessage('corner-lifecycle.blocked', reason),
       undefined,
       createHash('sha256').update(`review-gap:${episode}`).digest('hex'),
-      { agentOnly: true },
+      // The review gate is corner work: wake the implementer where its PR lives.
+      { agentOnly: true, wakeInCorner: true },
     );
   const command = corner.worker_agent_id
     ? await createAgentCommand(db, {
