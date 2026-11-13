@@ -345,6 +345,7 @@ export async function pushToCorner(cornerId: string, headSha: string) {
 
 
 export async function greenHead(cornerId: string, number: number, headSha: string) {
+  githubRollupState = 'passed';
   await pushToCorner(cornerId, headSha);
   await db.query(`UPDATE corner_github_cache SET lifecycle=$2::jsonb WHERE corner_id=$1`, [
     cornerId,

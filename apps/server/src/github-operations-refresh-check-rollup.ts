@@ -110,9 +110,11 @@ import { GitHubOperations, CornerWebhookTarget, checkFact, jobErrorLines, text, 
           return fetchStartedAt >= latestFetch;
         };
         const planCheckRefresh = (current: CornerLifecycleView) => {
+          const completedWithoutChecks = rollup.total === 0 && !rollup.pendingRegistrations &&
+            current.checks === 'passing' && current.checksSummary?.total === 0;
           const summary = {
             status:
-              failedChecks.length ? ('failing' as const) : rollup.total === 0 && rollup.state !== 'pending' ? ('unknown' as const) : rollup.state === 'passed'
+              failedChecks.length ? ('failing' as const) : completedWithoutChecks ? ('passing' as const) : rollup.total === 0 && rollup.state !== 'pending' ? ('unknown' as const) : rollup.state === 'passed'
                 ? ('passing' as const)
                 : rollup.state === 'failed' && interruptedOnly && checksSettled(rollup.checks)
                   ? ('unknown' as const)
@@ -201,6 +203,7 @@ import { GitHubOperations, CornerWebhookTarget, checkFact, jobErrorLines, text, 
             const plan = planCheckRefresh(corner.lifecycle);
             const { branch: _branch, ...lifecycle } = {
               ...corner.lifecycle, checks: plan.summary.status, checksSummary: plan.storedSummary,
+              ...(livePr && corner.lifecycle.pr ? { pr: { ...corner.lifecycle.pr, mergeability: livePr.mergeability } } : {}),
             };
             return { corner: { ...corner, lifecycle }, event: plan.event };
           },
@@ -216,7 +219,9 @@ import { GitHubOperations, CornerWebhookTarget, checkFact, jobErrorLines, text, 
             ).rows[0];
             if (!currentRow || !admits(currentRow.lifecycle)) return false;
             const plan = planCheckRefresh(currentRow.lifecycle);
-            await ctx.updateLifecycle(target.corner_id, { checks: plan.summary.status, checksSummary: plan.storedSummary }, db);
+            await ctx.updateLifecycle(target.corner_id, { checks: plan.summary.status, checksSummary: plan.storedSummary,
+              ...(livePr && currentRow.lifecycle.pr ? { pr: { ...currentRow.lifecycle.pr, mergeability: livePr.mergeability } } : {}),
+            }, db);
             if (plan.wantsNote) {
               noteInserted = (await systemLine(db, {
                 id: hash(`beeline:${target.corner_id}:${plan.dedupe}`),

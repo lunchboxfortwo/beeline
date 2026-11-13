@@ -57,7 +57,7 @@ export class GitHubOperations {
   ) {
     this.#key = createHash('sha256').update(clientSecret).digest();
     this.armRoomTokenCache();
-    setLiveCornerChecksReader(cornerId => this.readPrChecksStatus({ cornerId }, false));
+    setLiveCornerChecksReader(this.database, cornerId => this.prChecksStatus({ cornerId }));
     this.app.setRateLimitStore?.({
       get: async installationId => {
         const row = (await this.database.query<{ retry_at: string | null }>(

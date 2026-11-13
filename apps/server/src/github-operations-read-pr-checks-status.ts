@@ -116,13 +116,16 @@ import { GitHubOperations, reviewerWakeFromFacts, Input, LandCornerOutcome, Corn
       corner.lifecycle.pr?.headSha === pr.headSha;
     const checks = completedWithoutChecks ? ('passed' as const) : rollup.state;
     const summaryStatus = checks === 'passed' ? 'passing' : checks === 'failed' ? 'failing' : 'pending';
+    const mergeabilityChanged = corner.lifecycle.pr?.mergeability !== pr.mergeability;
+    const refreshEmptyGreen = corner.lifecycle.checks === 'passing' &&
+      (mergeabilityChanged || (rollup.state === 'pending' && !completedWithoutChecks));
     // The live read and phone header must retain the same provider snapshot.
     // Reuse the event path, including its head/age guards and review transition,
     // without fetching GitHub again. Explicit reads of another PR cannot change
     // this corner, and zero-check completion retains its worker-only authority.
-    if (!corner.archived && !pr.merged && rollup.total > 0 && corner.author_id &&
+    if (!corner.archived && !pr.merged && (rollup.total > 0 || refreshEmptyGreen) && corner.author_id &&
       corner.lifecycle.pr?.number === number && corner.lifecycle.pr.headSha === pr.headSha &&
-      (corner.lifecycle.checksSummary?.total !== rollup.total ||
+      (mergeabilityChanged || corner.lifecycle.checksSummary?.total !== rollup.total ||
         JSON.stringify(corner.lifecycle.checksSummary?.checks) !== JSON.stringify(rollup.checks) ||
         corner.lifecycle.checksSummary?.status !== summaryStatus || corner.lifecycle.checks !== summaryStatus)) {
       await ctx.refreshCheckRollup({ ...target, corner_id: input.cornerId,

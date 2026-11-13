@@ -434,7 +434,17 @@ const scope1 = fixtureScope1();
     });
 
 
-  it('LIVE-WAKE: a reconcile reads GitHub before a stored green wakes the reviewer (item 12)', async () => {
+  it.each([
+    ['configured reviewers', 'pending', 1, 'clean', false],
+    ['configured reviewers', 'pending', 0, 'clean', false],
+    ['configured reviewers', 'passed', 1, 'dirty', false],
+    ['attention', 'pending', 0, 'clean', false],
+    ['attention', 'passed', 1, 'dirty', false],
+    ['blockers', 'pending', 1, 'clean', false],
+    ['attention', 'passed', 1, 'clean', false],
+    ['attention', 'pending', 0, 'dirty', true],
+    ['attention', 'pending', 0, 'clean', true],
+  ] as const)('LIVE-WAKE: %s reconciliation reads live %s checks (%i contexts) and %s mergeability, confirmed zero=%s', async (trigger, state, total, mergeability, confirmedZero) => {
     const { room, corners, app, headSha } = await scope1.checksFixture();
     const corner = corners[0]!;
     const worker = 'c'.repeat(64);
@@ -443,12 +453,24 @@ const scope1 = fixtureScope1();
     await scope1.database.query(`INSERT INTO memberships(workspace_id,room_id,identity_id,role)
       SELECT workspace_id,id,$2,'member' FROM rooms WHERE id=$1`, [room, worker]);
     await seedCornerOpening(scope1.database, { cornerId: corner, agentId: worker });
-    app.readCommitCheckRollup.mockResolvedValue({ state: 'pending', total: 1, failing: [], checks: [] });
+    if (confirmedZero) await scope1.database.query(`UPDATE corner_github_cache SET lifecycle=jsonb_set(lifecycle,
+      '{checksSummary}','{"status":"passing","total":0,"checks":[],"failing":[]}'::jsonb) WHERE corner_id=$1`, [corner]);
+    app.readCommitCheckRollup.mockResolvedValue({ state, total, failing: [], checks: [] });
+    const pr = await app.readPullRequest('room-token', 'owner/widgets', 1);
+    app.readPullRequest.mockResolvedValue({ ...pr, mergeability });
     new GitHubOperations(scope1.database, {} as GitHubOAuthClient, app as unknown as GitHubAppClient, 'secret');
-    await reconcileConfiguredCornerReviewers(scope1.database, room);
+    if (trigger === 'configured reviewers') await reconcileConfiguredCornerReviewers(scope1.database, room);
+    else if (trigger === 'attention') {
+      const { refreshCornerAttention } = await import('./corner-attention.js');
+      await refreshCornerAttention(scope1.database, corner);
+    } else {
+      const { reconcileCornerMergeBlockers } = await import('./agent-command.js');
+      await reconcileCornerMergeBlockers(scope1.database, corner);
+    }
+    const reviews = await scope1.database.query(`SELECT review_context FROM agent_commands WHERE room_id=$1
+      AND reason='corner_review_dispatch' AND review_context->>'headSha'=$2`, [corner, headSha]);
     expect(app.readCommitCheckRollup).toHaveBeenCalled();
-    expect((await scope1.database.query(`SELECT 1 FROM agent_commands WHERE room_id=$1
-      AND reason='corner_review_dispatch' AND review_context->>'headSha'=$2`, [corner, headSha])).rowCount).toBe(0);
+    expect(reviews.rowCount).toBe((state === 'passed' || confirmedZero) && mergeability === 'clean' ? 1 : 0);
   });
 
 
