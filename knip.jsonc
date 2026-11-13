@@ -27,6 +27,8 @@
     // The Trusty Squire native proof resolves these through its temporary Metro adapter.
     "apps/mobile/scripts/proof-shims/*.{ts,tsx,cjs}": ["exports", "types"],
     "apps/mobile/scripts/ui-alignment-proof/{proof-env,proof-workbench,svg,unistyles}.{ts,tsx}": ["exports"],
+    // tsc compiles these phone view field checks; nothing imports the file.
+    "packages/api-contract/src/phone-view.typecheck.ts": ["files"],
   },
   "workspaces": {
     ".": {
