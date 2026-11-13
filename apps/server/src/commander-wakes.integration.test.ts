@@ -202,7 +202,7 @@ it.each([true, false])('DONE-PR-1: report resolves an unregistered PR (exists: %
       expect(app.readPullRequest).toHaveBeenCalledTimes(1);
       // A retried report in the same turn is the same report, not a second one.
       await send();
-      expect((await commands(DM, RUBY)).filter(c => c.reason === 'report')).toHaveLength(1);
+      expect((await commands(opened.cornerId, RUBY)).filter(c => c.reason === 'report')).toHaveLength(1);
       expect(app.openPullRequestsForBranch).toHaveBeenCalledTimes(1);
       expect(app.readPullRequest).toHaveBeenCalledTimes(1);
     } else {
