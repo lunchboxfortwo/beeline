@@ -127,6 +127,39 @@ describe('PhoneService agent connect pairing claim', () => {
     expect(memberships.rows).toEqual([{ room_id: null }, { room_id: ROOM }]);
   });
 
+  it.each([1,2])('replays a taken connect name with %i occupied name-based handles', async taken => {
+    await database.query(`INSERT INTO identities(id,kind,name,handle) VALUES($1,'agent','Milo','milo')`, ['c'.repeat(64)]);
+    await database.query(`INSERT INTO memberships(workspace_id,identity_id,role) VALUES($1,$2,'member')`, [WORKSPACE,'c'.repeat(64)]);
+    if (taken === 2) {
+      await database.query(`INSERT INTO identities(id,kind,name,handle) VALUES($1,'agent','Milo','milo_2')`, ['d'.repeat(64)]);
+      await database.query(`INSERT INTO memberships(workspace_id,identity_id,role) VALUES($1,$2,'member')`, [WORKSPACE,'d'.repeat(64)]);
+    }
+    await insertCode(new Date(Date.now() + 60_000));
+    await phone.claimAgentConnectPairing({ code: CODE, agentPubkey: AGENT, model: 'gpt-5.4', deferJoin: true });
+    await phone.renameConnectedAgent({ code: CODE, name: 'Milo' });
+    const finished = await phone.finishAgentConnectPairing({ code: CODE, workspaceJoined: true });
+    expect(finished).toMatchObject({ status: 'finished', agentHandle: `milo_${taken+1}` });
+    expect((await database.query(`SELECT beeline_room_handle($1,$2) handle`, [AGENT,ROOM])).rows).toEqual([{handle:`milo_${taken+1}`}]);
+  });
+
+  it('replays an unrealized connect failure without leaving an identity or handle', async () => {
+    await insertCode(new Date(Date.now() + 60_000));
+    await phone.claimAgentConnectPairing({ code: CODE, agentPubkey: AGENT, model: 'gpt-5.4', deferJoin: true });
+    await phone.rollbackUnrealizedAgent(AGENT);
+    for (const [table,column] of [['identities','id'],['agents','agent_id'],['memberships','identity_id'],['workspace_handles','identity_id'],['agent_pairing_codes','claimed_by']]) {
+      expect((await database.query(`SELECT 1 FROM ${table} WHERE ${column}=$1`,[AGENT])).rows,table).toEqual([]);
+    }
+  });
+
+  it('does not erase an agent that has pending work but has not reported presence', async () => {
+    await insertCode(new Date(Date.now() + 60_000));
+    await phone.claimAgentConnectPairing({ code: CODE, agentPubkey: AGENT, model: 'gpt-5.4', deferJoin: true });
+    await database.query(`INSERT INTO agent_commands(id,room_id,agent_id,turn_request_id,action,reason,root_command_id,root_source_message_id,agent_depth)
+      VALUES('pending',$1,$2,'pending','input','test','pending','pending',0)`, [ROOM,AGENT]);
+    await expect(phone.rollbackUnrealizedAgent(AGENT)).rejects.toThrow('already ran');
+    expect((await database.query(`SELECT id FROM identities WHERE id=$1`,[AGENT])).rows).toEqual([{id:AGENT}]);
+  });
+
   it('stores the reasoning effort the wizard chose, and none when it asked nothing', async () => {
     const selectedEffort = async (): Promise<string | null> =>
       (
@@ -393,7 +426,7 @@ describe('PhoneService agent connect pairing claim', () => {
 
       await expect(
         phone.finishAgentConnectPairing({ code: CODE, workspaceJoined: true }),
-      ).resolves.toEqual({ status: 'finished' });
+      ).resolves.toMatchObject({ status: 'finished' });
 
       const memberships = await database.query<{ room_id: string | null }>(
         `SELECT room_id FROM memberships WHERE identity_id=$1 ORDER BY room_id NULLS FIRST`,
@@ -487,7 +520,7 @@ describe('PhoneService agent connect pairing claim', () => {
       // Finishing an already joined claim remains silent and idempotent.
       await expect(
         phone.finishAgentConnectPairing({ code: CODE, workspaceJoined: false }),
-      ).resolves.toEqual({ status: 'finished' });
+      ).resolves.toMatchObject({ status: 'finished' });
       const afterFinish = await database.query<{ count: string }>(
         `SELECT count(*)::text FROM messages message JOIN rooms room ON room.id=message.room_id
          WHERE room.workspace_id=$1 AND room.direct_participants @> jsonb_build_array($2::text,$3::text)

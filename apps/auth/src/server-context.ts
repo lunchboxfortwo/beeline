@@ -190,7 +190,7 @@ export interface AuthServerOptions {
     workspaceJoined: boolean;
     /** Server event kinds this agent reacts to, in the Rooms it is joined to. */
     eventSubscriptions?: readonly string[];
-  }) => Promise<{ status: 'finished' } | { status: 'not_found' | 'expired' }>;
+  }) => Promise<{ status: 'finished'; agentHandle?: string } | { status: 'not_found' | 'expired' }>;
 }
 
 
