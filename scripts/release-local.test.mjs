@@ -28,6 +28,48 @@ test('execution is explicit and requires immutable identity and complete attribu
   const provenance = Object.fromEntries(['agentId', 'handle', 'place', 'humanCommandMessageId', 'auditMessageId'].map(k => [k, k]));
   assert.deepEqual(attribution(JSON.stringify(provenance)), provenance);
 });
+test('local preflight requires user GitHub authority instead of App credentials', async () => {
+  const missing = missingReleaseCredentials({ channel: 'next' }, {});
+  assert.equal(missing.includes('BEELINE_GITHUB_APP_ID'), false);
+  assert.equal(missing.includes('BEELINE_GITHUB_APP_PRIVATE_KEY'), false);
+  assert.equal(missing.includes('GITHUB_TOKEN or GH_TOKEN'), true);
+  const policy = localHooks(tmpdir(), new Processes({}, () => {}));
+  await assert.rejects(policy.step({ step: { id: 'app_token' }, context: { github: { job: 'initialize' } }, result: { outputs: {} } }), /requires GITHUB_TOKEN or GH_TOKEN/);
+});
+test('local initialization routes App-token consumers through the user token without minting an installation token', async () => {
+  const directory = temporary(), token = 'fixture-local-user-token', messages = [], authenticated = [];
+  try {
+    const workflow = parse(readFileSync(join(repository, '.github/workflows/unified-release.yml'), 'utf8'));
+    const original = workflow.jobs.initialize.steps;
+    const identity = original.find(step => step.id === 'identity');
+    writeFileSync(join(directory, 'workflow.yml'), JSON.stringify({ jobs: { initialize: {
+      steps: [
+        original.find(step => step.id === 'app_token'),
+        original.find(step => step.id === 'clock'),
+        { id: 'read', uses: 'actions/github-script@v7', with: {
+          'github-token': '${{ steps.app_token.outputs.token }}',
+          script: "const r=await github.rest.repos.getReleaseByTag({tag:'vfixture'});core.setOutput('verified',r.data.tag_name==='vfixture');",
+        } },
+        { ...identity, env: { ...identity.env, EXPECTED_TOKEN: '${{ github.token }}' }, run: 'test "$GH_TOKEN" = "$EXPECTED_TOKEN"\necho verified=true >> "$GITHUB_OUTPUT"' },
+      ],
+      outputs: { shell: '${{ steps.identity.outputs.verified }}', api: '${{ steps.read.outputs.verified }}', clock: '${{ steps.clock.outputs.trigger_epoch }}' },
+    } } }));
+    const processes = new Processes({ GITHUB_TOKEN: token }, line => messages.push(line));
+    const engine = new LocalActions({ root: directory, directory: join(directory, 'state'), secrets: { GITHUB_TOKEN: token }, processes, hooks: localHooks(directory, processes),
+      github: provided => {
+        authenticated.push(provided);
+        return { rest: { repos: { getReleaseByTag: async ({ tag }) => ({ data: { tag_name: tag } }) } } };
+      },
+    });
+    const results = await engine.workflow('workflow.yml', { channel: 'next' }, { github: { token, sha, repository: 'Beeline-Work/beeline', event_name: 'workflow_dispatch', run_id: '123' } });
+    assert.equal(results.initialize.result, 'success');
+    assert.equal(results.initialize.outputs.shell, 'true');
+    assert.equal(results.initialize.outputs.api, 'true');
+    assert.match(results.initialize.outputs.clock, /^\d+$/);
+    assert.deepEqual(authenticated, [token]);
+    assert.equal(messages.some(line => line.includes(token)), false);
+  } finally { rmSync(directory, { recursive: true, force: true }); }
+});
 test('Play credentials are optional for OTA and required only for selected native Android delivery', async () => {
   const args = { channel: 'next' };
   assert.equal(missingReleaseCredentials(args, {}).includes('GOOGLE_PLAY_SERVICE_ACCOUNT_JSON'), false);
