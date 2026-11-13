@@ -97,4 +97,3 @@ it('keeps multi-line git diagnostics without carrying a JavaScript stack', () =>
     "fatal: Authentication failed for 'https://github.com/Beeline-Work/beeline.git/'";
   expect(distillTurnFailureReason(new Error(message)).text).toBe(message);
 });
-
