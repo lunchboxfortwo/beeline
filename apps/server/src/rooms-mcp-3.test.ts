@@ -1,3 +1,4 @@
+import { startQueuedCommand } from './test-fixtures/queued-turn.test-support.js';
 import { migrate } from './database.js';
 import { phoneFetch, describe, expect, it, vi, MCP_ORDER_WAKE_HINT, MCP_REVIEW_WAKE_HINT, backfillMcpMemberAvatars, ensureMcpMember, randomBytes, createHash, randomUUID, Client, StreamableHTTPClientTransport, tokenHash, MCP_AGENT_EXCLUSIONS, MCP_APP_ROUTE_OPERATIONS, createAgentCommand, routeHumanMessage, routeAgentResult, openSecrets, deliverMcpMemberWebhooks, PREREGISTERED_MCP_CLIENTS, readFileSync, sharp, FACE_SOULS, USER, OTHER, AGENT, WORKSPACE, ROOM, PRIVATE, CORNER, opaque, fixtureScope1, fixtureScope2, fixtureScope3 } from './test-support-rooms-mcp.test-support.js';
 import { bundledMcpLogo } from './rooms-mcp-logos.js';
@@ -689,8 +690,8 @@ const scope3 = fixtureScope3(scope1);
       // The app's own call left no open turn behind.
       expect((await scope1.db.query(`SELECT 1 FROM agent_commands WHERE agent_id=$1 AND state<>'complete'`, [member])).rowCount).toBe(0);
       const generationId = 'gen-report';
-      await scope1.daemon.execute('claimAgentCommand', { roomId: ROOM, commandId: order.id, generationId } as never, AGENT);
-      await scope1.daemon.execute('report', { roomId: ROOM, requestId: order.turn_request_id, generationId, status: 'done', text: 'done: the numbers match' } as never, AGENT);
+      await startQueuedCommand(scope1.daemon, { roomId: ROOM, commandId: order.id } as never, AGENT);
+      await scope1.daemon.execute('report', { roomId: ROOM, requestId: order.turn_request_id, status: 'done', text: 'done: the numbers match' } as never, AGENT);
       const wakes = (await scope3.ok(client, 'list_mentions', {})).wakes as { address: string; reason: string; text: string }[];
       expect(wakes).toContainEqual(expect.objectContaining({ address: ROOM, reason: 'report', text: expect.stringContaining('the numbers match') }));
       expect((await scope3.ok(client, 'no_reply_needed', { address: ROOM })).cleared).toBe(1);

@@ -6,8 +6,8 @@ const scope34 = fixtureScope34();
   it.each(['daemon', 'phone', 'merge'] as const)('CLEANUP-ATTACH-1: %s archival removes pending attachments', async (path) => {
     const cornerId = path === 'merge' ? await inReview() : await open('owner/widgets');
     await rootFixture.db.query(`INSERT INTO agent_pending_attachments
-      (room_id,agent_id,url,name,mime_type,size,request_id,generation_id)
-      VALUES($1,$2,'/v1/media/example','proof.txt','text/plain',5,'request','generation')`, [cornerId, A]);
+      (room_id,agent_id,url,name,mime_type,size,request_id)
+      VALUES($1,$2,'/v1/media/example','proof.txt','text/plain',5,'request')`, [cornerId, A]);
     expect((await rootFixture.db.query(`SELECT id FROM agent_pending_attachments WHERE room_id=$1`, [cornerId])).rowCount).toBe(1);
     if (path === 'merge') await mergedWebhook(cornerId, 7, SHA);
     else if (path === 'phone') await rootFixture.phone.execute('requestCornerClose', { roomId: cornerId }, H);

@@ -1,10 +1,10 @@
-import { TURN_OWNERSHIP_SCHEMA } from './turn-ownership.js';
+import { COMMITTED_JOURNAL_SCHEMA } from './committed-journal-schema.js';
 import { afterAll, beforeAll, describe, expect, it, vi } from 'vitest';
 import { PgliteDatabase } from './test-support.js';
 import { appendHelperOverlay, type HelperOverlayFrame } from '@beeline/api-contract/helper-overlay';
 import { HELPER_OVERLAY_SCHEMA, HelperOverlayViewer, applyHelperOverlay, fenceHelperOverlayEnqueue, helperOverlayDemand, type HelperOverlayLiveEvent } from './helper-overlay.js';
 const room='11111111-1111-4111-8111-111111111111',workspace='22222222-2222-4222-8222-222222222222';
-const identity={agentId:'agent',roomId:room,commandId:'command',turnId:'turn',turnGeneration:'generation',runGeneration:0,kind:'draft' as const};
+const identity={agentId:'agent',roomId:room,commandId:'command',turnId:'turn',turnGeneration:'command',runGeneration:0,kind:'draft' as const};
 const frame=(input:Partial<HelperOverlayFrame>={}):HelperOverlayFrame=>({...identity,v:1,type:'baseline',revision:1,offset:0,text:'🌍',viewingRevision:1,...input});
 const owner={connectionId:'connection',epoch:1};
 
@@ -18,10 +18,10 @@ describe('helper overlay source ownership and final enqueue',()=>{
       CREATE TABLE room_push_views(room_id uuid,identity_id text,session_id text,instance_id text,expires_at timestamptz);
       CREATE TABLE live_server_instances(instance_id text,renewed_at timestamptz);
       CREATE TABLE agent_connections(agent_id text,connection_id text,epoch bigint,released_at timestamptz,instance_id text);
-      CREATE TABLE agent_commands(id text PRIMARY KEY,room_id uuid,agent_id text,turn_request_id text,action text,generation_id text,state text,created_at timestamptz DEFAULT now(),lease_expires_at timestamptz);
-      CREATE TABLE agent_turns(room_id uuid,agent_id text,request_id text,generation_id text,status text);
+      CREATE TABLE agent_commands(id text PRIMARY KEY,room_id uuid,agent_id text,turn_request_id text,action text,state text,created_at timestamptz DEFAULT now());
+      CREATE TABLE agent_turns(room_id uuid,agent_id text,request_id text,status text);
       CREATE TABLE live_outputs(room_id uuid,agent_id text,turn_id text,kind text,body jsonb,updated_at timestamptz DEFAULT now(),PRIMARY KEY(room_id,agent_id,turn_id,kind));`);
-    await db.query(TURN_OWNERSHIP_SCHEMA);
+    await db.query(COMMITTED_JOURNAL_SCHEMA);
     await db.query(HELPER_OVERLAY_SCHEMA);
     await db.query(`INSERT INTO rooms(id,workspace_id,archived_at) VALUES($1,$2,NULL)`,[room,workspace]);
     await db.query(`INSERT INTO room_access VALUES($1,'agent',NULL),($1,'reader',NULL)`,[room]);
@@ -30,7 +30,7 @@ describe('helper overlay source ownership and final enqueue',()=>{
     await db.query(`INSERT INTO live_server_instances VALUES('owner-server',clock_timestamp());
       INSERT INTO agent_connections VALUES('agent','connection',1,NULL,'owner-server');
       INSERT INTO agent_turns VALUES('${room}','agent','turn','generation','working');
-      INSERT INTO agent_commands(id,room_id,agent_id,turn_request_id,action,generation_id,state) VALUES('command','${room}','agent','turn','input','generation','claimed');`);
+      INSERT INTO agent_commands(id,room_id,agent_id,turn_request_id,action,state) VALUES('command','${room}','agent','turn','input','pending');`);
   },30000);
   afterAll(async()=>{await db.close();});
   it('validates UTF-8 offsets, monotone revision/run generation, and stale baseline rejection',async()=>{
@@ -70,7 +70,11 @@ describe('helper overlay source ownership and final enqueue',()=>{
     expect((await applyHelperOverlay(db,'agent',owner,frame({revision:8,runGeneration:1,viewingRevision}))).ack).toEqual({accepted:false,reason:'stale'});
     await db.query(`UPDATE agent_commands SET state='complete';UPDATE agent_turns SET status='complete'`);
     const enqueue=vi.fn(),body=(await db.query<{body:Record<string,unknown>}>('SELECT body FROM live_outputs')).rows[0]!.body;
-    const {helperOverlayEvent}=await import('./helper-overlay.js');await fenceHelperOverlayEnqueue(db,helperOverlayEvent(body)!,enqueue,'reader');expect(enqueue).not.toHaveBeenCalled();
+    const {helperOverlayEvent}=await import('./helper-overlay.js');
+    // A terminal tombstone can still clear the phone after completion.
+    await fenceHelperOverlayEnqueue(db,helperOverlayEvent(body)!,enqueue,'reader');expect(enqueue).toHaveBeenCalledOnce();
+    const late = helperOverlayEvent({...body, overlayV1: {...(body.overlayV1 as Record<string,unknown>), type:'baseline', revision:8}})!;
+    await fenceHelperOverlayEnqueue(db,late,enqueue,'reader');expect(enqueue).toHaveBeenCalledOnce();
   });
 });
 

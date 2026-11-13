@@ -1,8 +1,4 @@
-import { AcpRuntimeExitedError, AcpResourceLimitError, type AcpClient } from './acp.js';
-
-export function isAgentProcessExit(error: unknown): boolean {
-  return error instanceof AcpRuntimeExitedError || error instanceof AcpResourceLimitError;
-}
+import { type AcpClient } from './acp.js';
 
 /** All production ACP process starts and stops pass through this module. */
 export async function startAgentProcess(client: AcpClient): Promise<void> {

@@ -34,21 +34,6 @@ import { daemonCheckReviewerAuthors } from './corner-reads.js';
     const prefix = text.match(/^(done|blocked|failed|needs[-_]decision):\s*\S/)?.[1]?.replace('_', '-');
     // Keep automatic reports' established prefix without inventing a status.
     text = text.replace(/^needs_decision:/, 'needs-decision:');
-    if (prefix === 'done') {
-      const corner = (await database.query<{ worker: string; merged: boolean; has_pr: boolean }>(
-        `SELECT ${cornerImplementerSql('fact', 'room')} worker,
-          ${cornerLifecycleSql('fact.corner_id')}->'pr'->>'number' IS NOT NULL has_pr,
-          ${cornerLifecycleSql('fact.corner_id')}->'pr'->>'mergeCommitSha' IS NOT NULL merged
-         FROM rooms room JOIN corner_facts fact ON fact.corner_id=room.id WHERE room.id=$1`,
-        [command.room_id])).rows[0];
-      if (corner?.worker === agentId && !corner.merged) {
-        const brief = await currentCornerBrief(database, command.room_id);
-        if (brief?.repositoryWork !== false) {
-          if (!corner.has_pr) throw new CommandRefusalError(
-            'done requires an opened or merged PR; post progress in the corner instead (non-PR deliverables require repositoryWork false)', 409);
-        }
-      }
-    }
 
     const pending = (await database.query<{ id: string; url: string; name: string; mime_type: string; size: number }>(
       `WITH RECURSIVE chain AS (
@@ -77,7 +62,10 @@ import { daemonCheckReviewerAuthors } from './corner-reads.js';
       return true;
     });
     const result = await reportToCommander(database, command.room_id, agentId, text, command,
-      createHash('sha256').update(`report:${command.id}:${text}:${ask ?? ""}:${JSON.stringify(uniqueAttachments)}`).digest('hex'), { attachments: uniqueAttachments, automatic, ask });
+      createHash('sha256').update(`report:${command.id}:${text}:${ask ?? ""}:${JSON.stringify(uniqueAttachments)}`).digest('hex'), {
+        attachments: uniqueAttachments, automatic, ask,
+        orderIssuer: automatic && command.private_payload?.kind === 'order',
+      });
     if (result.skipped || ('delivered' in result && !result.delivered)) return result;
     for (const attachment of pending) await database.query(
       `DELETE FROM agent_pending_attachments WHERE room_id=$1 AND agent_id=$2 AND id=$3`,
@@ -87,7 +75,7 @@ import { daemonCheckReviewerAuthors } from './corner-reads.js';
         jsonb_build_object('reported',true,'reportedOutcome',$2::text) WHERE id=$1`,
       [command.id, prefix ?? null]);
     if (prefix && ['done','failed','blocked','needs-decision'].includes(prefix))
-      await endAgentTurn(database,command,prefix==='failed'?'failed':'complete');
+      await endAgentTurn(database,command,prefix==='failed'?'failed':'complete',null,result.id);
     return result;
   }
 

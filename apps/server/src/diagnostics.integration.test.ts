@@ -101,7 +101,7 @@ it('command origin crosses the durable queue and terminal observations never inv
   expect(command).toBeDefined();
   expect((await db.query(`SELECT session_id,action_id FROM diagnostic_command_origins WHERE command_id=$1`,[command!.id])).rows[0])
     .toEqual({session_id:b.sessionId,action_id:actionId});
-  await db.query(`INSERT INTO agent_turns(room_id,request_id,agent_id,status) VALUES($1,$2,$3,'working') ON CONFLICT(room_id,request_id,agent_id) DO UPDATE SET status='working',generation_id=NULL`,[ws.roomId,command!.turn_request_id,agent]);
+  await db.query(`INSERT INTO agent_turns(room_id,request_id,agent_id,status) VALUES($1,$2,$3,'working') ON CONFLICT(room_id,request_id,agent_id) DO UPDATE SET status='working'`,[ws.roomId,command!.turn_request_id,agent]);
   expect(await db.transaction(tx=>endAgentTurn(tx,command!,'failed','activation-failed'))).toBe(true);
   expect((await db.query(`SELECT status FROM agent_turns WHERE room_id=$1 AND request_id=$2 AND agent_id=$3`,[ws.roomId,command!.turn_request_id,agent])).rows[0]).toEqual({status:'failed'});
   const steps=(await readPersonDiagnostics(db,user))!.devices[0]!.sessions[0]!.actions.filter(a=>a.command_id===command!.id);

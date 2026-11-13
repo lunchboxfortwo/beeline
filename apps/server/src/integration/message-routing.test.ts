@@ -1,4 +1,5 @@
-import { createAgentCommand, claimAgentCommand } from '.././agent-command.js';
+import { startQueuedTurn } from '../test-fixtures/queued-turn.test-support.js';
+import { createAgentCommand } from '.././agent-command.js';
 import { createHash } from 'node:crypto';
 import { describe, expect, it, vi } from 'vitest';
 import { insertCornerFacts } from '.././test-support.js';
@@ -34,7 +35,7 @@ const fixture = monolithFixture();
       reason: 'human_tag',
       turnRequestId: requestId,
     });
-    await claimAgentCommand(fixture.database, ROOM, AGENT, command!.id, `${requestId}-g`);
+    await startQueuedTurn(fixture.database, ROOM, AGENT, command!.id);
     // The membership check is a database read; its failure is an outage, not a
     // refusal, so it must reach the route's 503 default intact.
     const query = fixture.database.query.bind(fixture.database);
@@ -46,13 +47,7 @@ const fixture = monolithFixture();
       const outage = await fixture.request(
         '/v1/daemon/operations/order',
         'POST',
-        {
-          roomId: ROOM,
-          requestId,
-          generationId: `${requestId}-g`,
-          text: 'Steer into the corner',
-          address: steerCorner,
-        },
+        { roomId: ROOM, requestId, text: 'Steer into the corner', address: steerCorner },
         fixture.daemonToken,
       );
       expect(outage.status).toBe(503);
@@ -778,11 +773,8 @@ const fixture = monolithFixture();
     const opening = (await fixture.database.query<{ id: string; turn_request_id: string }>(
       `SELECT id,turn_request_id FROM agent_commands WHERE room_id=$1 AND reason='corner_objective'`, [cornerId],
     )).rows[0]!;
-    await claimAgentCommand(fixture.database, cornerId, AGENT, opening.id, 'question-generation');
-    const reply = await fixture.daemonOperation('report', {
-      roomId: cornerId, requestId: opening.turn_request_id, generationId: 'question-generation',
-      status: 'needs_decision', text: '@owner which release should I target?',
-    });
+    await startQueuedTurn(fixture.database, cornerId, AGENT, opening.id);
+    const reply = await fixture.daemonOperation('report', { roomId: cornerId, requestId: opening.turn_request_id, status: 'needs_decision', text: '@owner which release should I target?' });
     expect(reply.status).toBe(200);
     const stored = await fixture.database.query<{ tagged_ids: string[] }>(
       `SELECT ${taggedIdentityIdsSql('m')} tagged_ids FROM messages m

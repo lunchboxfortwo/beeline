@@ -634,19 +634,11 @@ async function writeCornerAdvance(
       // commander. The machine records the wait; it never broadcasts to Room people.
       effects.push(notice.key);
     }
-    // Committed command activity invalidates idle delivery immediately through its fact guard.
-    const stale = await db.query(
-      `SELECT (terminal.ended).* FROM (SELECT beeline_finish_agent_command(agent_commands.id,'cancelled','stale_idle_alert',NULL) ended
-      FROM agent_commands WHERE state='pending' AND reason='report' AND private_payload->>'authorId'=$3
-        AND private_payload->>'idleSince' IS NOT NULL AND COALESCE(private_payload->>'originCornerId',private_payload->>'fromRoomId')=$1::text
-        AND private_payload->>'idleSince' IS DISTINCT FROM $2::text) terminal`,
-      [cornerId, plan.state.state === 'idle' ? facts.idleSince : null, SYSTEM_IDENTITY_ID],
-    );
     const state = { ...plan.state, effects };
     // Any write here changes the row version, so an event that read before this
     // commit reads again. Only a write-free event leaves the version alone.
     const wrote = archived || event.kind === 'closed' || plan.wakes.length > 0 ||
-      plan.notifications.length > 0 || (stale.rowCount ?? 0) > 0;
+      plan.notifications.length > 0;
     await db.query(
       `UPDATE corner_facts SET machine=$2::jsonb WHERE corner_id=$1 AND ($3 OR machine IS DISTINCT FROM $2::jsonb)`,
       [cornerId, JSON.stringify(state), wrote],

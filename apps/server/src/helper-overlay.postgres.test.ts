@@ -1,4 +1,3 @@
-import { TURN_OWNERSHIP_SCHEMA } from './turn-ownership.js';
 import { randomUUID } from 'node:crypto';
 import { Pool } from 'pg';
 import { describe, expect, it } from 'vitest';
@@ -11,7 +10,7 @@ import { HelperOverlayOwner } from '../../body/src/helper-overlay.js';
 const url=process.env.BEELINE_COMMAND_TEST_POSTGRES_URL;
 if(url&&!['127.0.0.1','localhost','[::1]'].includes(new URL(url).hostname))throw new Error('Overlay proofs require isolated loopback PostgreSQL');
 const room='11111111-1111-4111-8111-111111111111',workspace='22222222-2222-4222-8222-222222222222';
-const frame=(value:Partial<HelperOverlayFrame>={}):HelperOverlayFrame=>({v:1,agentId:'agent',roomId:room,commandId:'command',turnId:'turn',turnGeneration:'generation',runGeneration:0,
+const frame=(value:Partial<HelperOverlayFrame>={}):HelperOverlayFrame=>({v:1,agentId:'agent',roomId:room,commandId:'command',turnId:'turn',turnGeneration:'command',runGeneration:0,
   kind:'draft',type:'baseline',revision:1,offset:0,text:'🌍',viewingRevision:1,...value});
 const deferred=()=>{let resolve!:()=>void;const promise=new Promise<void>(done=>{resolve=done;});return {resolve,promise};};
 describe.skipIf(!url)('overlay real PostgreSQL remote listener and viewer fences',()=>{
@@ -38,8 +37,8 @@ describe.skipIf(!url)('overlay real PostgreSQL remote listener and viewer fences
         CREATE TABLE room_push_views(room_id uuid,identity_id text,session_id text,instance_id text,expires_at timestamptz);
         CREATE TABLE live_server_instances(instance_id text,renewed_at timestamptz);
         CREATE TABLE agent_connections(agent_id text,connection_id text,epoch bigint,released_at timestamptz,instance_id text);
-        CREATE TABLE agent_commands(id text PRIMARY KEY,room_id uuid,agent_id text,turn_request_id text,action text,generation_id text,state text,created_at timestamptz DEFAULT now(),lease_expires_at timestamptz);
-        CREATE TABLE agent_turns(room_id uuid,agent_id text,request_id text,generation_id text,status text);
+        CREATE TABLE agent_commands(id text PRIMARY KEY,room_id uuid,agent_id text,turn_request_id text,action text,state text,created_at timestamptz DEFAULT now());
+        CREATE TABLE agent_turns(room_id uuid,agent_id text,request_id text,status text);
         CREATE TABLE live_outputs(room_id uuid,agent_id text,turn_id text,kind text,body jsonb,updated_at timestamptz DEFAULT now(),PRIMARY KEY(room_id,agent_id,turn_id,kind));
         CREATE TABLE corner_github_cache(corner_id uuid PRIMARY KEY);
         CREATE TABLE registry_mcp_oauth_attempts(state text,connector_id text,expires_at timestamptz,code text);`);
@@ -47,7 +46,6 @@ describe.skipIf(!url)('overlay real PostgreSQL remote listener and viewer fences
       // trigger on the one table this isolated fixture exercises.
       await writer.query((await postgresLiveSchema()).split('-- Memory jobs')[0]!);
       await writer.query(`CREATE TRIGGER beeline_notify_live_live_outputs AFTER INSERT OR UPDATE OR DELETE ON live_outputs FOR EACH ROW EXECUTE FUNCTION beeline_notify_live()`);
-      await writer.query(TURN_OWNERSHIP_SCHEMA);
     await writer.query(HELPER_OVERLAY_SCHEMA);
       await writer.query(`INSERT INTO rooms(id,workspace_id,archived_at) VALUES($1,$2,NULL)`,[room,workspace]);
       await writer.query(`INSERT INTO room_access VALUES($1,'agent',NULL),($1,'reader',NULL)`,[room]);
@@ -56,13 +54,13 @@ describe.skipIf(!url)('overlay real PostgreSQL remote listener and viewer fences
       await writer.query(`INSERT INTO live_server_instances VALUES('owner-server',clock_timestamp());
       INSERT INTO agent_connections VALUES('agent','connection',1,NULL,'owner-server');
         INSERT INTO agent_turns VALUES('${room}','agent','turn','generation','working');
-        INSERT INTO agent_commands(id,room_id,agent_id,turn_request_id,action,generation_id,state) VALUES('command','${room}','agent','turn','input','generation','claimed');`);
+        INSERT INTO agent_commands(id,room_id,agent_id,turn_request_id,action,state) VALUES('command','${room}','agent','turn','input','pending');`);
       listening=listener.run();await ready.promise;
       stopLive=live.subscribe(room,event=>{if(viewer.accept(event))void forward(event);});
       if(mode==='helper'){
         const uploaded:HelperOverlayFrame[]=[];
         const initial=deferred();
-        helper=new HelperOverlayOwner({agentId:'agent',roomId:room,commandId:'command',turnId:'turn',turnGeneration:'generation',kind:'draft'}, {
+        helper=new HelperOverlayOwner({agentId:'agent',roomId:room,commandId:'command',turnId:'turn',turnGeneration:'command',kind:'draft'}, {
           enabled:()=>true,
           subscribe:(_room,receive)=>subscribeHelperOverlayDemand(reader,room,demand=>{receive(demand);initial.resolve();}),
           send:async value=>{uploaded.push(value);const result=await applyHelperOverlay(writer,'agent',{connectionId:'connection',epoch:1},value);expect(result.ack.accepted).toBe(true);return result.ack;},

@@ -1,8 +1,9 @@
+import { startQueuedTurn } from './test-fixtures/queued-turn.test-support.js';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 
 import { SYSTEM_IDENTITY_ID } from '@beeline/api-contract/system-identity';
 
-import { claimAgentCommand, createAgentCommand } from './agent-command.js';
+import { createAgentCommand } from './agent-command.js';
 
 import { DAEMON_OPERATION_NAMES, DaemonService } from './daemon-service.js';
 
@@ -136,8 +137,8 @@ export async function openTurn(sourceMessageId: string, roomId = ROOM, agentId =
     reason: 'human_tag',
     turnRequestId: requestId,
   });
-  await claimAgentCommand(database, roomId, agentId, command!.id, generationId);
-  return { roomId, requestId, generationId };
+  await startQueuedTurn(database, roomId, agentId, command!.id);
+  return { roomId, requestId };
 }
 
 
@@ -311,7 +312,7 @@ fixedDms,
 }
 export { afterEach, beforeEach, describe, expect, it } from 'vitest';
 export { SYSTEM_IDENTITY_ID } from '@beeline/api-contract/system-identity';
-export { claimAgentCommand, createAgentCommand } from './agent-command.js';
+export { startQueuedTurn, createAgentCommand } from './agent-command.js';
 export { DAEMON_OPERATION_NAMES, DaemonService } from './daemon-service.js';
 export { feedbackConfigFromEnv } from './feedback.js';
 export { FEEDBACK_TRIAGE_PULL_SQL } from './feedback-triage-workflow.js';

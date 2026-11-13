@@ -1,3 +1,4 @@
+import { createHash } from 'node:crypto';
 import { endAgentTurn } from '../agent-turn-end.js';
 import { systemMessage } from '@beeline/api-contract/system-message-catalog';
 import { clearOwedMention, mentionReplyKey } from '../owed-mentions.js';
@@ -147,6 +148,18 @@ export async function getModelCredentialOperation<Name extends keyof DaemonOpera
 /** Status only: the helper handed this item to the agent session. */
 export async function startAgentTurnOperation<Name extends keyof DaemonOperationMap>(ctx: DaemonContext, name: Name, input: Input<Name>, authenticatedAgentId: string, modelClaim: OwnedModelClaimCapability | undefined, candidate: Record<string, unknown>, scopedRoom: string | undefined): Promise<Output<Name>> {
         const request = input as Input<'startAgentTurn'>;
+        if (request.available === false) {
+          const command = await authorizeCommandOutput(ctx.database, request.roomId, authenticatedAgentId, request.requestId);
+          const agent = (await ctx.database.query<{ name: string }>('SELECT name FROM identities WHERE id=$1', [authenticatedAgentId])).rows[0]!;
+          await systemLine(ctx.database, {
+            id: createHash('sha256').update(`offline:${command.id}`).digest('hex'),
+            roomId: command.room_id,
+            subject: { kind: 'agent', id: authenticatedAgentId, name: agent.name },
+            verb: systemMessage('phone-service.is-offline'),
+            consequence: systemMessage('phone-service.connect-again'),
+          });
+          ctx.live.publish({ type: 'invalidate', roomId: request.roomId, reason: 'message', agentId: authenticatedAgentId });
+        } else {
         await ctx.database.query(`INSERT INTO agent_turns(room_id,request_id,agent_id,status)
           SELECT command.room_id,command.turn_request_id,command.agent_id,'working' FROM agent_commands command
           WHERE command.room_id=$1 AND command.agent_id=$2 AND command.turn_request_id=$3 AND command.state='pending'
@@ -155,6 +168,7 @@ export async function startAgentTurnOperation<Name extends keyof DaemonOperation
             completion_kind=NULL,created_at=now(),started_at=now()
           WHERE agent_turns.status<>'cancelled'`, [request.roomId, authenticatedAgentId, request.requestId]);
         ctx.live.publish({ type: 'invalidate', roomId: request.roomId, reason: 'turn', agentId: authenticatedAgentId });
+        }
         return daemonWriteResult(ctx) as Output<Name>;
 }
 
@@ -189,12 +203,15 @@ export async function markAgentTurnSilentOperation<Name extends keyof DaemonOper
           if (!(await ctx.database.query(`SELECT 1 FROM agent_pending_attachments
             WHERE room_id=$1 AND agent_id=$2 AND request_id=$3 LIMIT 1`,
             [command.room_id, authenticatedAgentId, command.turn_request_id])).rowCount) {
-            await ctx.database.query(`UPDATE agent_turns SET completion_kind='no-reply'
-              WHERE room_id=$1 AND agent_id=$2 AND request_id=$3`,
-              [command.room_id, authenticatedAgentId, command.turn_request_id]);
-            await endAgentTurn(ctx.database, command, 'complete');
-            if (declinedMessage) await clearOwedMention(ctx.database, authenticatedAgentId, command.room_id, declinedMessage);
-            return daemonWriteResult(ctx) as Output<Name>;
+            const answered = command.state === 'complete' || command.action === 'restart' || Boolean((await ctx.database.query(
+              `SELECT 1 FROM messages WHERE room_id=$1 AND author_id=$2 AND request_id=$3
+                AND deleted_at IS NULL LIMIT 1`,
+              [command.return_room_id, authenticatedAgentId, command.turn_request_id])).rowCount);
+            if (answered) {
+              await endAgentTurn(ctx.database, command, 'complete');
+              if (declinedMessage) await clearOwedMention(ctx.database, authenticatedAgentId, command.room_id, declinedMessage);
+            }
+            return { ...daemonWriteResult(ctx), answered } as Output<Name>;
           }
           // Drain promised files through the same ordinary reply path before
           // recording silence; the reply writer never receives System prose.
@@ -206,11 +223,8 @@ export async function markAgentTurnSilentOperation<Name extends keyof DaemonOper
         );
         if (name === 'markAgentTurnSilent') {
           const command = ctx.authorizedCommand!;
-          await ctx.database.query(`UPDATE agent_turns SET completion_kind='no-reply'
-            WHERE room_id=$1 AND agent_id=$2 AND request_id=$3`,
-            [command.room_id, authenticatedAgentId, command.turn_request_id]);
           if (declinedMessage) await clearOwedMention(ctx.database, authenticatedAgentId, command.room_id, declinedMessage);
-          return daemonWriteResult(ctx) as Output<Name>;
+          return { ...daemonWriteResult(ctx), answered: true } as Output<Name>;
         }
         return output as Output<Name>;
 

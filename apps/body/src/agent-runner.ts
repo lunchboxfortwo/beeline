@@ -4,7 +4,7 @@ import { resolveSessionIdleMs } from './agent-process.js';
 import { AnswerStore, type StoredAnswer } from './answer-store.js';
 import type { BodyConfig } from './config.js';
 import { captureConnectionUsage, ConnectorUsageRecorder } from './connector-runner.js';
-import { DaemonApiError, isAgentRemovedError, type DaemonApiClient } from './daemon-api-client.js';
+import { isAgentRemovedError, type DaemonApiClient } from './daemon-api-client.js';
 import { GrantCommandRunner, GrantRunnerServer, type GrantRunnerEndpoint } from './grant-runner.js';
 import { openRouterRoutingCacheDir } from './openrouter-routing.js';
 import { PlaceSession, type Answer } from './place-session.js';
@@ -36,6 +36,9 @@ export class AgentRunner {
   /** Items with an answer on disk or on the wire; never handed to the agent again. */
   private readonly answered = new Set<string>();
   private readonly answers: AnswerStore;
+  private readonly stored = new Map<string, StoredAnswer>();
+  private readonly posting = new Set<string>();
+  private readonly restored: Promise<void>;
   private readonly connectionUsage = new ConnectorUsageRecorder();
   private readonly storage: PlaceStorage;
   private readonly agent: ReturnType<typeof runtimeIdentity>;
@@ -58,6 +61,12 @@ export class AgentRunner {
     const runtimeDir = dirname(configPath);
     this.agent = runtimeIdentity(runtime.agent);
     this.answers = new AnswerStore(resolve(runtimeDir, 'answers'));
+    this.restored = this.answers.all().then(answers => {
+      for (const answer of answers) {
+        this.stored.set(answer.itemId, answer);
+        this.answered.add(answer.itemId);
+      }
+    });
     this.grantRunner = new GrantCommandRunner({ api: options.daemonApi, agentId: this.agent.publicKey });
     this.grantRunnerServer = new GrantRunnerServer(this.grantRunner, (placeId, parentRoomId) => prepareWorkspace({
       api: options.daemonApi, config: this.baseConfig, supervisorRoot: runtime.supervisorRoot,
@@ -110,7 +119,13 @@ export class AgentRunner {
   /** The server's whole list of this agent's undone items, oldest first. */
   private queueChanged(commands: readonly AgentCommand[]): void {
     this.latest = commands;
+    void this.restored.then(() => this.reconcileQueue()).catch(error => console.error('[body] queue delivery failed:', error));
+  }
+
+  private reconcileQueue(): void {
+    const commands = this.latest;
     const listed = new Set(commands.map(item => item.id));
+    for (const id of this.answered) if (!listed.has(id) && !this.stored.has(id)) this.answered.delete(id);
     void this.resendStoredAnswers(listed);
     for (const place of this.places.values()) {
       // Stop wall: the running item left the queue without an answer from us.
@@ -119,18 +134,19 @@ export class AgentRunner {
     }
     const known = (item: AgentCommand) => this.answered.has(item.id) || [...this.places.values()]
       .some(place => place.running?.id === item.id || place.waiting.some(waiting => waiting.id === item.id));
-    for (const item of commands.filter(item => !known(item))) this.place(item).waiting.push(item);
+    for (const item of commands.filter(item => !known(item))) {
+      const place = this.place(item);
+      place.waiting.push(item);
+      if (place.running) place.session.followUp(item);
+    }
     for (const placeId of this.places.keys()) void this.pump(placeId);
   }
 
-  /** An answer on disk goes out again; one whose item left the queue is forgotten. */
+  /** A visible queued item gets its stored answer again. Absence alone is not
+   * acknowledgement: a membership change can hide an item that is still owed. */
   private async resendStoredAnswers(listed: ReadonlySet<string>): Promise<void> {
-    for (const answer of await this.answers.all()) {
-      if (!listed.has(answer.itemId)) {
-        await this.answers.remove(answer.itemId);
-        this.answered.delete(answer.itemId);
-      } else if (!this.answered.has(answer.itemId)) {
-        this.answered.add(answer.itemId);
+    for (const answer of this.stored.values()) {
+      if (listed.has(answer.itemId) && !this.posting.has(answer.itemId)) {
         void this.post(answer);
       }
     }
@@ -146,44 +162,61 @@ export class AgentRunner {
 
   private async deliver(placeId: string, place: Place, item: AgentCommand): Promise<void> {
     place.running = item;
-    let again = true;
+    let started = false;
     try {
       if (item.action === 'restart') {
         await Promise.all([...this.places.values()].map(other => other.session.stop()));
         await this.store({ itemId: item.id, roomId: item.roomId, requestId: item.turnRequestId, text: '' });
       } else {
         // A harness that cannot start leaves the item waiting for the next queue update.
-        again = false;
         await place.session.start();
-        again = true;
+        started = true;
+        void this.options.daemonApi.execute('startAgentTurn', { roomId: item.roomId, requestId: item.turnRequestId })
+          .catch(error => console.warn('[body] delivery status not written:', error));
         const answer = await place.session.deliver(item, place.waiting);
         // Stop wall: a stopped item gets no answer.
-        if (this.latest.some(listed => listed.id === item.id)) await this.store({
-          itemId: item.id, roomId: item.roomId, requestId: item.turnRequestId,
-          text: answer.text, ...(answer.text && answer.steps.length ? { steps: answer.steps } : {}),
-        });
-        this.afterAnswer(item, answer);
+        for (const answered of [item, ...(answer.followUps ?? [])]) {
+          if (this.latest.some(listed => listed.id === answered.id)) await this.store({
+            itemId: answered.id, roomId: answered.roomId, requestId: answered.turnRequestId,
+            text: answer.text, ...(answer.text && answer.steps.length ? { steps: answer.steps } : {}),
+          });
+        }
+        const consumed = new Set(answer.followUps?.map(next => next.id));
+        place.waiting = place.waiting.filter(next => !consumed.has(next.id));
+        void Promise.resolve().then(() => this.afterAnswer(item, answer))
+          .catch(error => console.warn('[body] answer diagnostics failed:', error));
       }
     } catch (error) {
-      // The session died before answering: the item is delivered again once it is back.
       console.error(`[body] place ${placeId} could not answer ${item.id}:`, error);
-      if (this.latest.some(listed => listed.id === item.id) && !this.answered.has(item.id)) place.waiting.unshift(item);
+      if (this.latest.some(listed => listed.id === item.id) && !this.answered.has(item.id)) {
+        if (started && !this.stopped) await this.store({
+          itemId: item.id, roomId: item.roomId, requestId: item.turnRequestId,
+          text: `${this.agent.name} stopped while answering this: ${error instanceof Error ? error.message : String(error)}`,
+        });
+        else {
+          place.waiting.unshift(item);
+          if (!this.stopped) void this.options.daemonApi.execute('startAgentTurn', {
+            roomId: item.roomId, requestId: item.turnRequestId, available: false,
+          }).catch(error => console.warn('[body] offline status not written:', error));
+        }
+      }
       await place.session.stop().catch(stopError => console.warn('[body] session stop failed:', stopError));
     } finally {
       place.running = undefined;
       await place.session.writeContext(undefined, []).catch(contextError => console.warn('[body] turn context not cleared:', contextError));
     }
-    if (again) void this.pump(placeId);
+    if (started) void this.pump(placeId);
   }
 
   /** Usage and diagnostics follow the answer and never hold it. */
   private afterAnswer(item: AgentCommand, answer: Answer): void {
-    void answer.clearDraft();
+    void answer.clearDraft().catch(error => console.warn('[body] draft cleanup failed:', error));
     captureConnectionUsage(this.connectionUsage, {
       requestId: item.turnRequestId, agentId: this.agent.publicKey,
       ...(item.parentRoomId ? { cornerId: item.roomId } : { roomId: item.roomId }),
     }, answer.toolCalls);
-    void this.connectionUsage.flush(this.options.daemonApi, item.turnRequestId);
+    void this.connectionUsage.flush(this.options.daemonApi, item.turnRequestId)
+      .catch(error => console.warn('[body] usage diagnostics failed:', error));
     const trace = new TurnTrace({ surface: item.parentRoomId ? 'corner' : 'room', agentId: this.agent.publicKey,
       roomId: item.roomId, requestId: item.turnRequestId });
     trace.toolCalls([...answer.toolCalls]);
@@ -202,37 +235,43 @@ export class AgentRunner {
 
   private async store(answer: StoredAnswer): Promise<void> {
     this.answered.add(answer.itemId);
-    await this.answers.save(answer);
-    await this.post(answer);
+    this.stored.set(answer.itemId, answer);
+    this.posting.add(answer.itemId);
+    try {
+      await this.answers.save(answer);
+      void this.post(answer);
+    } catch (error) {
+      this.posting.delete(answer.itemId);
+      console.error('[body] answer could not be saved:', error);
+    }
   }
 
   /** Post a stored answer; the item is done on the server only once this lands. */
   private async post(answer: StoredAnswer): Promise<void> {
     const api = this.options.daemonApi;
+    this.posting.add(answer.itemId);
     try {
+      await this.answers.save(answer);
       if (answer.text) await api.execute('postRoomMessage', {
         roomId: answer.roomId, requestId: answer.requestId, text: answer.text, presentation: 'message',
         ...(answer.steps ? { steps: answer.steps } : {}),
       });
       else await api.execute('markAgentTurnSilent', { roomId: answer.roomId, requestId: answer.requestId });
-      await this.answers.remove(answer.itemId);
+      this.stored.delete(answer.itemId);
+      void this.answers.remove(answer.itemId).catch(error => console.warn('[body] answer cleanup failed:', error));
     } catch (error) {
-      if (error instanceof DaemonApiError && !error.retryable) {
-        // Stop and membership walls: the server refused this answer for good.
-        console.warn(`[body] answer for ${answer.itemId} refused:`, error.message);
-        await this.answers.remove(answer.itemId);
-        return;
-      }
-      // Kept on disk; the next queue update or reconnect sends it again.
-      this.answered.delete(answer.itemId);
+      // A queued item still owns its stored answer, including after a refusal.
+      // Only a queue snapshot confirming completion or Stop can discard it.
       console.warn(`[body] answer for ${answer.itemId} not delivered yet:`, error);
+    } finally {
+      this.posting.delete(answer.itemId);
     }
   }
 
   private sessionExited(placeId: string): void {
     const place = this.places.get(placeId);
     if (!place || this.stopped) return;
-    // A running item fails out of deliver() and is queued again there.
+    // deliver() posts the stopped-answer notice for a running item.
     if (!place.running) void place.session.stop().then(() => this.pump(placeId));
   }
 
@@ -289,7 +328,7 @@ export class AgentRunner {
     onEstablished?: () => void | Promise<void>;
     onProgress?: (status: string, fault?: unknown) => void | Promise<void>;
   } = {}): Promise<'aborted' | 'agent-removed'> {
-    this.endpoint = await this.grantRunnerEndpoint();
+    void this.grantRunnerEndpoint().then(endpoint => { this.endpoint = endpoint; });
     this.options.daemonApi.subscribeQueue();
     let established = false;
     try {
@@ -320,7 +359,6 @@ export class AgentRunner {
       this.stopped = true;
       for (const place of this.places.values()) clearTimeout(place.idleTimer);
       await Promise.all([...this.places.values()].map(place => place.session.dispose().catch(() => undefined)));
-      await this.storage.idle().catch(() => undefined);
       await this.grantRunnerServer.close();
     }
   }

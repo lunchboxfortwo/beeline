@@ -89,8 +89,8 @@ describe('Reproduction S-07 end to end: a held review wake reaches the reviewer 
     // The worker is mid-turn: its command holds a live lease.
     const work = await createAgentCommand(db, { roomId: CORNER, agentId: WORKER, sourceMessageId: await source('@worker fix it'), reason: 'human_tag' });
     const generationId = randomUUID();
-    await call(WORKER, 'claimAgentCommand', { roomId: CORNER, commandId: work!.id, generationId });
-    const turn = { roomId: CORNER, requestId: work!.turn_request_id, generationId, agentId: WORKER };
+    await call(WORKER, 'startQueuedTurn', { roomId: CORNER, commandId: work!.id });
+    const turn = { roomId: CORNER, requestId: work!.turn_request_id, agentId: WORKER };
     await call(WORKER, 'postAgentTurnReceipt', { ...turn, status: 'working' });
 
     // The reviewer's helper watches the corner on one socket for the whole test.

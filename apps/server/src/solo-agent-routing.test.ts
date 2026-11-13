@@ -1,5 +1,6 @@
+import { startQueuedTurn } from './test-fixtures/queued-turn.test-support.js';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
-import { claimAgentCommand, routeHumanMessage } from './agent-command.js';
+import { routeHumanMessage } from './agent-command.js';
 import { DaemonService } from './daemon-service.js';
 import { LiveHub } from './live.js';
 import { PhoneService } from './phone-service.js';
@@ -59,11 +60,9 @@ describe('solo-agent-untagged-silence', () => {
     expect(commands[0]).toMatchObject({ agent_id: AGENT, source_message_id: MESSAGE });
     await routeHumanMessage(db, MESSAGE);
     expect((await db.query(`SELECT 1 FROM agent_commands WHERE source_message_id=$1`, [MESSAGE])).rowCount).toBe(1);
-    await claimAgentCommand(db, ROOM, AGENT, commands[0]!.id, 'solo-proof');
+    await startQueuedTurn(db, ROOM, AGENT, commands[0]!.id);
     expect((await db.query(`SELECT state FROM agent_commands WHERE id=$1`, [commands[0]!.id])).rows[0]?.state).toBe('claimed');
-    await new DaemonService(db, new LiveHub()).execute('postRoomMessage', {
-      roomId: ROOM, requestId: MESSAGE, generationId: 'solo-proof', text: 'Hello back!',
-    }, AGENT);
+    await new DaemonService(db, new LiveHub()).execute('postRoomMessage', { roomId: ROOM, requestId: MESSAGE, text: 'Hello back!' }, AGENT);
     const view = await phone.readRoom(ROOM, HUMAN);
     expect(JSON.stringify(view)).toContain('Hello back!');
   });

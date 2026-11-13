@@ -10,7 +10,13 @@ import ts from 'typescript';
  * must be one of the walls in docs/walls.md, listed there by its text.
  */
 export const PATH = [
-  { file: 'apps/body/src/agent-runner.ts', functions: ['queueChanged', 'resendStoredAnswers', 'pump', 'deliver', 'store', 'post'] },
+  { file: 'apps/body/src/agent-runner.ts', functions: ['queueChanged', 'reconcileQueue', 'resendStoredAnswers', 'pump', 'deliver', 'store', 'post'] },
+  { file: 'apps/server/src/agent-command-create-agent-command.ts', functions: ['routeHumanMessage'] },
+  { file: 'apps/server/src/agent-command.ts', functions: ['insertAgentCommand'] },
+  { file: 'apps/server/src/agent-command-read-agent-commands.ts', functions: ['readAgentCommands'] },
+  { file: 'apps/server/src/agent-command-route-agent-result.ts', functions: ['authorizeCommandOutput'] },
+  { file: 'apps/server/src/daemon/execute.ts', functions: ['daemonExecute'] },
+  { file: 'apps/server/src/daemon/messages.ts', functions: ['daemonPostRoomMessage'] },
 ];
 
 export const WALLS_FILE = 'docs/walls.md';
@@ -49,7 +55,8 @@ export function stopSites(file, text, functions) {
   const scan = (name, node) => {
     const add = (kind, at) => sites.push(`${file} ${name}: ${kind} ${collapse(`${guard(at)}${at.getText(tree)}`)}`);
     if (ts.isThrowStatement(node)) add('refuse', node);
-    else if (ts.isReturnStatement(node) && !isFinal(node)) add('early return', node);
+    else if (ts.isReturnStatement(node) && !isFinal(node) &&
+        (!node.expression || ['undefined', 'null', 'false'].includes(node.expression.getText(tree)))) add('early return', node);
     else if (ts.isContinueStatement(node) || ts.isBreakStatement(node)) add('skip', node);
     else if (ts.isCallExpression(node) && WAITS.has(node.expression.getText(tree).split('.').at(-1))) add('wait', node);
     else if (ts.isNewExpression(node) && node.expression.getText(tree) === 'Promise') add('wait', node);

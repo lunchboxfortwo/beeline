@@ -61,12 +61,12 @@ it.each([['machine', 'working'], ['machine', 'complete'], ['http', 'working'], [
     const cornerId = await corner(), requestId = randomUUID(), generationId = randomUUID();
     await db.query(`INSERT INTO messages(id,room_id,author_id,text) VALUES($1,$2,$3,'Finish this work')`, [requestId, cornerId, person]);
     const command = (await createAgentCommand(db, { roomId: cornerId, agentId: agent, sourceMessageId: requestId, reason: 'human_mention' }))!;
-    await api.execute('claimAgentCommand', { roomId: cornerId, commandId: command.id, generationId });
+    await api.execute('startQueuedTurn', { roomId: cornerId, commandId: command.id });
     if (state === 'complete') {
       await db.query(`UPDATE agent_commands SET state='complete' WHERE id=$1`, [command.id]);
       await db.query(`UPDATE agent_turns SET status='complete' WHERE room_id=$1 AND agent_id=$2`, [cornerId, agent]);
     }
-    const input = { cornerId, roomId: cornerId, requestId, generationId };
+    const input = { cornerId, roomId: cornerId, requestId };
     if (transport === 'machine') await api.execute('archiveCorner', input);
     else {
       const response = await fetch(`${origin}/v1/daemon/operations/archiveCorner`, {
@@ -84,7 +84,7 @@ it.each([['machine', 'working'], ['machine', 'complete'], ['http', 'working'], [
 it('uses target parent membership when the helper context names an archived source corner, and confirms a repeated close', async () => {
   const cornerId = await corner(), source = await corner();
   await phone.execute('requestCornerClose', { roomId: source }, person);
-  const input = { cornerId, roomId: source, requestId: 'finished-source', generationId: 'finished-generation' };
+  const input = { cornerId, roomId: source, requestId: 'finished-source' };
   await api.execute('archiveCorner', input);
   expect(await archived(cornerId)).toBe(true);
   await api.execute('archiveCorner', input);

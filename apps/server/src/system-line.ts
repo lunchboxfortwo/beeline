@@ -713,12 +713,7 @@ export async function backfillComputerObservations(database: SqlDatabase): Promi
       system_event=jsonb_set(system_event,'{subject,name}',
         to_jsonb(replace(system_event->'subject'->>'name','A person','Shared browser')))
     WHERE system_event->>'kind'='computer-session-activity'`);
-  // Browser activity accepted by an older release must not start a turn.
-  // Claimed turns and commands sourced from a person's message stay intact.
-  await database.query(`SELECT (terminal.ended).* FROM (SELECT beeline_finish_agent_command(command.id,'cancelled',NULL,NULL) ended FROM agent_commands command ,messages source WHERE source.id=command.source_message_id
-      AND command.state='pending'
-      AND command.reason IN ('subscribed_event','computer_activity')
-      AND source.system_event->>'kind'='computer-session-activity') terminal`);
+
 }
 
 /** A plain operator notice in the recipient's existing System thread. */

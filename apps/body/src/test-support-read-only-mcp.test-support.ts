@@ -50,7 +50,7 @@ import { agentToolsFor as m9_agentToolsFor, listGrants as m9_listGrants, request
 import { resolveGrantCommand as m9_resolveGrantCommand } from "./grant-script.js";
 
 
-import { approvedDeviceGrant as m9_approvedDeviceGrant } from "./monolith-room-turn.js";
+import { approvedDeviceGrant as m9_approvedDeviceGrant } from "./place-prompt.js";
 
 import { describe as mergedDescribe9 } from 'vitest';
 
@@ -80,7 +80,7 @@ import { describe as m14_describe, expect as m14_expect, it as m14_it, vi as m14
 import { agentToolsFor as m14_agentToolsFor, connectorOfferDepsFromEnv as m14_connectorOfferDepsFromEnv, offerConnector as m14_offerConnector, workbenchStatus as m14_workbenchStatus, type ConnectorOfferDeps as m14_ConnectorOfferDeps, } from "./read-only-mcp.js";
 
 
-import { pendingGrantToolCall as m14_pendingGrantToolCall, resumePrompt as m14_resumePrompt } from "./monolith-room-turn.js";
+import { resumePrompt as m14_resumePrompt } from "./place-prompt.js";
 
 import { describe as mergedDescribe14 } from 'vitest';
 

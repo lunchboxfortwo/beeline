@@ -1,8 +1,9 @@
+import { startQueuedTurn } from '../test-fixtures/queued-turn.test-support.js';
 import { expect, it } from 'vitest';
 import { migrate, migrateData } from '../database.js';
 import { PgliteDatabase } from '../test-support.js';
-import { createAgentCommand, claimAgentCommand } from '../agent-command.js';
-import { workingTurnFreshSql } from '../turn-ownership.js';
+import { createAgentCommand } from '../agent-command.js';
+import { workingTurnFreshSql } from '../agent-turn-end.js';
 
 it('release migration invents no terminal results and exposes only a live claimed successor', async () => {
   const database = new PgliteDatabase();
@@ -40,7 +41,7 @@ it('release migration invents no terminal results and exposes only a live claime
         sourceMessageId: request,
         reason: 'human_tag',
       });
-      await claimAgentCommand(database, room, agent, command!.id, `old-${index}`);
+      await startQueuedTurn(database, room, agent, command!.id);
       await database.query(
         `UPDATE agent_commands SET state='complete',completed_at=now()-interval '2 days' WHERE id=$1`,
         [command!.id],
@@ -64,7 +65,7 @@ it('release migration invents no terminal results and exposes only a live claime
           action: 'resume',
           turnRequestId: request,
         });
-        await claimAgentCommand(database, room, agent, successor!.id, 'live-successor');
+        await startQueuedTurn(database, room, agent, successor!.id);
       }
     }
     await migrateData(database);

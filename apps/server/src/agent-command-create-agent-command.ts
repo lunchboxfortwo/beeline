@@ -359,30 +359,12 @@ export async function routeHumanMessage(db: SqlDatabase, sourceId: string): Prom
         [target, source.author_id, source.room_id],
       )
     ).rows[0];
-    if (
-      !agent ||
-      !senderMayAddressAgent(
-        parseAgentAccessPolicy(agent.access_policy),
-        source.author_id,
-        agent.owner_id,
-      )
-    )
-      continue;
+    if (!agent) continue;
     if (agent.mcp_member) {
       await recordMcpMention(db, target, source.room_id, sourceId);
       if (agent.mcp_callback_url)
         await recordMcpMemberWebhook(db, target, agent.mcp_callback_url, source.room_id, sourceId, source.text);
-      continue;
-    }
-    if (avatarJob) {
-      if (agent.owner_id !== source.author_id)
-        throw new Error('only the agent owner may generate its avatar (access denied)');
-      const active = await db.query(
-        `SELECT 1 FROM agent_commands WHERE agent_id=$1 AND avatar_job AND state='pending'`,
-        [target],
-      );
-      if (active.rowCount) throw new Error('avatar generation already active (conflict)');
-    }
+    } else {
     await createAgentCommand(db, {
       roomId: source.room_id,
       agentId: target,
@@ -390,6 +372,7 @@ export async function routeHumanMessage(db: SqlDatabase, sourceId: string): Prom
       sourceMessageId: sourceId,
       reason: source.direct_participants ? 'direct_message' : 'human_tag',
     });
+    }
   }
   return false;
 }

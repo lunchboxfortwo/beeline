@@ -1,3 +1,4 @@
+import { startQueuedCommand } from './test-fixtures/queued-turn.test-support.js';
 import { cornerKindSql, createHash, randomBytes, describe, expect, it, migrate, SYSTEM_IDENTITY_ID, describedWorkflow, PhoneService, DaemonService, LiveHub, systemLine, advanceCorner, CORNER_LIFECYCLE_SLUG, cornerMergeGate, deleteStoredCornerWorkflows, createAgentCommand, CORNER_LIFECYCLE_CARD_TYPE, cornerOwnerSql, getWorkflowRun, liveWorkflowRun, saveWorkflow, startWorkflow, RecordingDatabase, H, A, B, W, R, db, phone, daemon, github, githubRollupState, githubHead, githubApp, implementersMerge, derivedWorker, cards, currentState, commissioned, brief, open, claim, pushToCorner, greenHead, redHead, commands, result, SHA, OPEN_CLOSE_BADGES, branchOf, reasons, projected, inReview, approve, approved, mergedWebhook, say, revise, F, fallback, rootFixture, fixtureScope2, fixtureScope9, fixtureScope10, fixtureScope11, type CommandRow } from './test-support-corner-lifecycle.test-support.js';
 
 describe('the corner lifecycle contract itself', () => {
@@ -238,9 +239,8 @@ describe('a person-opened corner in a repository Room', () => {
     const { id: cornerId } = await rootFixture.phone.execute('createHumanCorner', { roomId: R, title: 'Swap-widget' }, H);
     await say(cornerId, '@hoots fix the widget');
     const [working] = await commands(A, cornerId);
-    await rootFixture.daemon.execute('claimAgentCommand', { roomId: cornerId, commandId: working!.id, generationId: 'g1' }, A);
-    await rootFixture.daemon.execute('postAgentTurnReceipt', { roomId: cornerId, requestId: working!.turnRequestId,
-      generationId: 'g1', agentId: A, status: 'working' }, A);
+    await startQueuedCommand(rootFixture.daemon, { roomId: cornerId, commandId: working!.id }, A);
+    await rootFixture.daemon.execute('postAgentTurnReceipt', { roomId: cornerId, requestId: working!.turnRequestId, agentId: A, status: 'working' }, A);
 
     await say(cornerId, '@goosy take this over');
     expect(await derivedWorker(cornerId)).toBe(B);
@@ -336,8 +336,7 @@ describe('checks dispatch (rows 6-8)', () => {
     const cornerId = await open('owner/widgets', false, B);
     const [work] = await commands(A, cornerId);
     await claim(work!);
-    await rootFixture.daemon.execute('report', { status: 'needs_decision', roomId: cornerId, requestId: work!.turnRequestId,
-      generationId: 'g1', text: 'needs-decision: decide whether to continue' }, A);
+    await rootFixture.daemon.execute('report', { status: 'needs_decision', roomId: cornerId, requestId: work!.turnRequestId, text: 'needs-decision: decide whether to continue' }, A);
     expect((await commands(B, cornerId)).some(c => c.reason === 'report' && c.source.body.includes('needs-decision:'))).toBe(true);
     expect((await rootFixture.db.query(`SELECT 1 FROM messages WHERE text='needs-decision: decide whether to continue'`)).rowCount).toBe(0);
   });
@@ -435,8 +434,7 @@ const scope9 = fixtureScope9();
     const cornerId = await scope9.toReview();
     const [review] = await commands(B, cornerId);
     await claim(review!, 'review-generation');
-    await rootFixture.daemon.execute('order', { roomId: cornerId, requestId: review!.turnRequestId,
-      generationId: 'review-generation', address: cornerId, text: 'Fix the race condition' }, B);
+    await rootFixture.daemon.execute('order', { roomId: cornerId, requestId: review!.turnRequestId, address: cornerId, text: 'Fix the race condition' }, B);
     expect((await commands(A, cornerId)).some(c => c.reason === 'order')).toBe(true);
     expect(await currentState(cornerId)).toBe('working');
     await rootFixture.daemon.execute('approveCornerMerge', { cornerId, headSha: '7'.repeat(40) }, B);
@@ -652,20 +650,20 @@ it('review dispatch is immediate and leaves unrelated reviewer work independent'
 it('Reproduction F1-7: opener revises a delegated sibling from its own command', async () => {
   const source = await open('owner/widgets');
   const command = await commissioned(source);
-  const input = { roomId: source, requestId: command.turnRequestId, generationId: 'g1', name: 'Delegate-widget', objective: 'Ship the widget', repository: 'owner/widgets', implementer: 'goosy', brief: brief(command.sourceMessageId) };
+  const input = { roomId: source, requestId: command.turnRequestId, name: 'Delegate-widget', objective: 'Ship the widget', repository: 'owner/widgets', implementer: 'goosy', brief: brief(command.sourceMessageId) };
   const { cornerId } = await rootFixture.daemon.execute('createCorner', input, A);
   await rootFixture.db.query(`INSERT INTO live_outputs(room_id,agent_id,turn_id,kind,body) VALUES($1,$2,'presence','presence','{"status":"online"}')`, [R, B]);
-  const result = await rootFixture.daemon.execute('reviseCornerBrief', { roomId: source, cornerId, requestId: command.turnRequestId, generationId: 'g1', expectedRevision: 1, brief: { ...input.brief, spec: 'Corrected widget', change: 'Correct scope' } }, A);
+  const result = await rootFixture.daemon.execute('reviseCornerBrief', { roomId: source, cornerId, requestId: command.turnRequestId, expectedRevision: 1, brief: { ...input.brief, spec: 'Corrected widget', change: 'Correct scope' } }, A);
   console.info(`Reproduction F1-7: wrong=revision denied; right=revision 2; observed=${result.revision}`);
   expect(result).toMatchObject({ revision: 2, wake: { queued: true, agentId: B } });
   await fallback(cornerId);
   const outsider = await createAgentCommand(rootFixture.db, { roomId: cornerId, agentId: F, sourceMessageId: command.sourceMessageId, reason: 'audit' });
-  await rootFixture.daemon.execute('claimAgentCommand', { roomId: cornerId, commandId: outsider!.id, generationId: 'g1' }, F);
+  await startQueuedCommand(rootFixture.daemon, { roomId: cornerId, commandId: outsider!.id }, F);
   // Reach, not role, decides: an agent outside both the corner and its parent Room is refused.
   await rootFixture.db.query(`UPDATE memberships SET removed_at=now() WHERE room_id IN ($1,$2) AND identity_id=$3`, [cornerId, R, F]);
-  await expect(rootFixture.daemon.execute('reviseCornerBrief', { roomId: cornerId, cornerId, requestId: outsider!.turn_request_id, generationId: 'g1', expectedRevision: 2, brief: { ...input.brief, change: 'Unauthorized' } }, F)).rejects.toThrow(/denied/);
+  await expect(rootFixture.daemon.execute('reviseCornerBrief', { roomId: cornerId, cornerId, requestId: outsider!.turn_request_id, expectedRevision: 2, brief: { ...input.brief, change: 'Unauthorized' } }, F)).rejects.toThrow(/denied/);
   await rootFixture.db.query(`UPDATE memberships SET removed_at=now() WHERE room_id=$1 AND identity_id=$2`, [R, B]);
-  const unwoken = await rootFixture.daemon.execute('reviseCornerBrief', { roomId: source, cornerId, requestId: command.turnRequestId, generationId: 'g1', expectedRevision: 2, brief: { ...input.brief, spec: 'Saved without a worker', change: 'Keep the revision' } }, A);
+  const unwoken = await rootFixture.daemon.execute('reviseCornerBrief', { roomId: source, cornerId, requestId: command.turnRequestId, expectedRevision: 2, brief: { ...input.brief, spec: 'Saved without a worker', change: 'Keep the revision' } }, A);
   expect(unwoken).toMatchObject({ revision: 3, wake: { queued: false, reason: expect.any(String) } });
   expect((await rootFixture.daemon.execute('listCornerBriefRevisions', { cornerId }, A)).revisions[0]!.revision).toBe(3);
 });
@@ -680,8 +678,8 @@ it('a corner member revises from its own corner and the Room', async () => {
   for (const roomId of [null, R])
     await rootFixture.db.query(`INSERT INTO memberships(workspace_id,room_id,identity_id,role) VALUES($1,$2,$3,'member') ON CONFLICT DO NOTHING`, [W, roomId, G]);
   const turn = await createAgentCommand(rootFixture.db, { roomId: cornerId, agentId: G, sourceMessageId: command.sourceMessageId, reason: 'human_tag' });
-  await rootFixture.daemon.execute('claimAgentCommand', { roomId: cornerId, commandId: turn!.id, generationId: 'g1' }, G);
-  const input = { cornerId, requestId: turn!.turn_request_id, generationId: 'g1', expectedRevision: 1, brief: { ...brief(command.sourceMessageId), spec: 'Heir scope', change: 'Take over' } };
+  await startQueuedCommand(rootFixture.daemon, { roomId: cornerId, commandId: turn!.id }, G);
+  const input = { cornerId, requestId: turn!.turn_request_id, expectedRevision: 1, brief: { ...brief(command.sourceMessageId), spec: 'Heir scope', change: 'Take over' } };
   expect(await rootFixture.daemon.execute('reviseCornerBrief', input, G)).toMatchObject({ revision: 2 });
   await rootFixture.phone.execute('sendRoomMessage', { roomId: R, messageId: randomBytes(32).toString('hex'), text: '@heir revise the brief' }, H);
   const roomTurn = (await rootFixture.daemon.execute('getAgentCommands', { roomId: R }, G)).commands.at(-1)!;
@@ -706,7 +704,7 @@ it('Reproduction F1-9: brief history defaults to one revision with a cursor', as
 
 it('Reproduction F1-11: exact replay survives implementer departure', async () => {
   const command = await commissioned(R);
-  const input = { roomId: R, requestId: command.turnRequestId, generationId: 'g1', idempotencyKey: 'f1-replay', name: 'Delegate-widget', objective: 'Ship widget', repository: 'owner/widgets', implementer: 'goosy', brief: brief(command.sourceMessageId) };
+  const input = { roomId: R, requestId: command.turnRequestId, idempotencyKey: 'f1-replay', name: 'Delegate-widget', objective: 'Ship widget', repository: 'owner/widgets', implementer: 'goosy', brief: brief(command.sourceMessageId) };
   const first = await rootFixture.daemon.execute('createCorner', input, A);
   await rootFixture.db.query(`UPDATE memberships SET removed_at=now() WHERE room_id=$1 AND identity_id=$2`, [R, B]);
   const replay = await rootFixture.daemon.execute('createCorner', input, A);

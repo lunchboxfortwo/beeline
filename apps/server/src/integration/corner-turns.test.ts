@@ -1,6 +1,7 @@
+import { startQueuedTurn } from '../test-fixtures/queued-turn.test-support.js';
 import { phoneFetch } from '../../../../tests/helpers/phone-operation.js';
 import { migrateMembershipSubscriptions } from '.././agent-subscriptions.js';
-import { createAgentCommand, claimAgentCommand } from '.././agent-command.js';
+import { createAgentCommand } from '.././agent-command.js';
 import { createHash } from 'node:crypto';
 import { describe, expect, it } from 'vitest';
 import { PhoneService } from '.././phone-service.js';
@@ -16,8 +17,8 @@ const fixture = monolithFixture();
     const command = (await createAgentCommand(fixture.database, {
       roomId: ROOM, agentId: AGENT, sourceMessageId: messageId, reason: 'human_tag', turnRequestId: 'retired-tool',
     }))!;
-    await claimAgentCommand(fixture.database, ROOM, AGENT, command.id, 'retired-g');
-    const turn = { roomId: ROOM, requestId: 'retired-tool', generationId: 'retired-g' };
+    await startQueuedTurn(fixture.database, ROOM, AGENT, command.id);
+    const turn = { roomId: ROOM, requestId: 'retired-tool' };
     const relay = await fixture.request('/v1/daemon/operations/postRoomMessage', 'POST', {
       ...turn, text: 'Old steer', relay: { fromRoomId: ROOM, toRoomId: ROOM, direction: 'down' },
     }, fixture.daemonToken);
@@ -36,11 +37,8 @@ const fixture = monolithFixture();
       roomId: ROOM, agentId: AGENT, sourceMessageId: null, reason: 'order', turnRequestId: 'retired-private',
       privatePayload: { kind: 'order', authorId: HUMAN, fromRoomId: ROOM, text: 'Do the private work' },
     }))!;
-    await claimAgentCommand(fixture.database, ROOM, AGENT, privateOrder.id, 'private-g');
-    const privateRelay = await fixture.request('/v1/daemon/operations/postRoomMessage', 'POST', {
-      roomId: ROOM, requestId: 'retired-private', generationId: 'private-g', text: 'Old private steer',
-      relay: { fromRoomId: ROOM, toRoomId: ROOM, direction: 'down' },
-    }, fixture.daemonToken);
+    await startQueuedTurn(fixture.database, ROOM, AGENT, privateOrder.id);
+    const privateRelay = await fixture.request('/v1/daemon/operations/postRoomMessage', 'POST', { roomId: ROOM, requestId: 'retired-private', text: 'Old private steer', relay: { fromRoomId: ROOM, toRoomId: ROOM, direction: 'down' } }, fixture.daemonToken);
     expect(privateRelay.status).toBe(410);
     expect((await fixture.database.query(`SELECT state FROM agent_commands WHERE id=$1`, [privateOrder.id])).rows[0]?.state).toBe('claimed');
     expect((await fixture.database.query(`SELECT 1 FROM messages WHERE text LIKE 'done: Old private steer%'`)).rowCount).toBe(0);
@@ -72,8 +70,8 @@ const fixture = monolithFixture();
         reason: 'human_tag',
         turnRequestId: requestId,
       });
-      await claimAgentCommand(fixture.database, roomId, AGENT, command!.id, `${requestId}-g`);
-      return { roomId, requestId, generationId: `${requestId}-g`, messageId };
+      await startQueuedTurn(fixture.database, roomId, AGENT, command!.id);
+      return { roomId, requestId, messageId };
     };
     const daemonCall = (name: string, body: unknown) =>
       fixture.request(`/v1/daemon/operations/${name}`, 'POST', body, fixture.daemonToken);
@@ -439,14 +437,9 @@ const fixture = monolithFixture();
         reason: 'fixture',
       });
       expect(command).toBeTruthy();
-      await claimAgentCommand(tx, corner, AGENT, command!.id, 'triage-generation');
+      await startQueuedTurn(tx, corner, AGENT, command!.id);
     });
-    const call = (messageId: string) => fixture.daemonOperation('getRoomMessage', {
-      roomId: corner,
-      messageId,
-      requestId: 'triage-request',
-      generationId: 'triage-generation',
-    });
+    const call = (messageId: string) => fixture.daemonOperation('getRoomMessage', { roomId: corner, messageId, requestId: 'triage-request' });
     const sharedResult = await call('triage-shared');
     expect(sharedResult.status).toBe(200);
     expect(await sharedResult.json()).toMatchObject({ body: 'Authorized result text' });
@@ -693,8 +686,8 @@ const fixture = monolithFixture();
       }),
     ]);
     const stop = helperCommands.commands.find(command => command.action === 'stop')!;
-    const stopInput = { roomId: cornerId, commandId: stop.id, generationId: 'closed-corner-stop' };
-    expect((await fixture.daemonOperation('claimAgentCommand', stopInput)).status).toBe(200);
+    const stopInput = { roomId: cornerId, commandId: stop.id };
+    expect((await fixture.daemonOperation('startQueuedTurn', stopInput)).status).toBe(200);
     expect((await fixture.daemonOperation('acknowledgeAgentCommand', stopInput)).status).toBe(200);
     expect((await fixture.database.query(`SELECT 1 FROM memberships WHERE room_id=$1`, [cornerId])).rowCount).toBe(0);
     await fixture.database.query(`UPDATE memberships SET removed_at=now() WHERE room_id=$1 AND identity_id=$2`, [ROOM, AGENT]);

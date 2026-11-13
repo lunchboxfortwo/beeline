@@ -67,9 +67,7 @@ it.each(['before', 'after'] as const)('connected helper retains owned-model auth
   const selected = selectedBefore ?? await negotiate();
   const pending = await daemon.execute('getAgentCommands', { roomId: MODEL_ROOM }, MODEL_AGENT);
   const generationId = 'original-messages';
-  const claimed = await daemon.execute('claimAgentTurn', {
-    roomId: MODEL_ROOM, commandId: pending.commands[0]!.id, generationId,
-  }, MODEL_AGENT, source, selected.capability);
+  const claimed = await daemon.execute('claimAgentTurn', { roomId: MODEL_ROOM, commandId: pending.commands[0]!.id }, MODEL_AGENT, source, selected.capability);
   const workingRoom = (await phone.readRoom(MODEL_ROOM, MODEL_OWNER))!;
   const working = workingRoom.latestAgentTurns.find(turn => turn.status === 'working')!;
   expect(workingRoom.pendingAgentCommands).toEqual([]);
@@ -82,12 +80,9 @@ it.each(['before', 'after'] as const)('connected helper retains owned-model auth
   expect(claimed.commands.map(command => command.source.id)).toEqual([first.messageId, second.messageId]);
   expect(claimed.modelCredential).toMatchObject({ v: 1 });
   const actor = await fixture.credentials.authenticate(fixture.db, claimed.modelCredential!.token);
-  expect(actor.binding).toMatchObject({ connectionId: null, connectionEpoch: null, generationId });
-  await daemon.execute('postRoomMessage', {
-    roomId: MODEL_ROOM, requestId: claimed.commands[0]!.turnRequestId!, generationId,
-    text: 'Both original messages answered.',
-  }, MODEL_AGENT);
-  await daemon.execute('releaseAgentTurn', { roomId: MODEL_ROOM, generationId }, MODEL_AGENT, source);
+  expect(actor.binding).toMatchObject({ connectionId: null, connectionEpoch: null });
+  await daemon.execute('postRoomMessage', { roomId: MODEL_ROOM, requestId: claimed.commands[0]!.turnRequestId!, text: 'Both original messages answered.' }, MODEL_AGENT);
+  await daemon.execute('releaseAgentTurn', { roomId: MODEL_ROOM }, MODEL_AGENT, source);
   expect((await fixture.db.query('SELECT state FROM free_agents WHERE agent_id=$1', [MODEL_AGENT])).rows)
     .toEqual([{ state: 'sleeping' }]);
   expect((await fixture.db.query('SELECT state FROM agent_commands WHERE source_message_id=ANY($1::text[])',
@@ -173,7 +168,7 @@ it('provider failure preserves pending work and never replays the unknown mutati
 it('full read and send receipt show the accepted pending command without a synthetic working turn',async()=>{
   const receipt=await send('before boot');const room=(await phone.readRoom(MODEL_ROOM,MODEL_OWNER))!;
   expect(room.pendingAgentCommands).toEqual(receipt.pendingAgentCommands);
-  expect((await fixture.db.query(`SELECT 1 FROM agent_turns WHERE generation_id LIKE 'pending:%'`)).rowCount).toBe(0);
+  expect((await fixture.db.query(`SELECT 1 FROM agent_turns WHERE status='working'`)).rowCount).toBe(0);
   const pending=room.pendingAgentCommands![0]!;
   const ack=selectComposerAckPresentation({isCorner:false,now:Date.now(),viewerPubkey:MODEL_OWNER,viewerCanSend:true,
     pendingAgentCommands:room.pendingAgentCommands,conversationIdentities:new Map([[MODEL_AGENT,{pubkey:MODEL_AGENT,kind:'agent',name:'Beebee'}]])});

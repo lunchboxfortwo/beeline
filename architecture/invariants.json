@@ -60,7 +60,7 @@
       "strict": true,
       "ownerFunctions": {
         "apps/server/src/agent-command.ts": [
-          "createMcpAgentCommand",
+          "createClaimedMcpAgentCommand",
           "insertAgentCommand"
         ]
       },
@@ -78,7 +78,9 @@
       "owners": [],
       "strict": true,
       "total": 0,
-      "fix": "Items stay pending until their answer is posted; deliver them from getAgentCommands without claiming."
+      "fix": "Items stay pending until their answer is posted; deliver them from getAgentCommands without claiming.",
+      "ownerFunctions": {},
+      "ownerSites": 0
     },
     {
       "id": "work.command-owner-fields",
@@ -92,7 +94,9 @@
       "owners": [],
       "strict": true,
       "total": 0,
-      "fix": "Identify a queue item by its id and requestId; it carries no generation, lease or owner."
+      "fix": "Identify a queue item by its id and requestId; it carries no generation, lease or owner.",
+      "ownerFunctions": {},
+      "ownerSites": 0
     },
     {
       "id": "work.mcp-turn-state",
@@ -456,7 +460,7 @@
       "id": "phone.connection-error-surface",
       "module": "Phone connection failures",
       "invariant": "Connection failure copy and the connection failure hook belong only to the app-wide banner.",
-      "pattern": "Beeline (?:isn[\\x27’]t|is not) connected|Could(?:n[\\x27’]t| not) reach Beeline|[Cc]heck your connection|Showing saved messages|connectionError(?:Title|Description)|\\buseConnectionFailure\\s*\\(|No connection to the server|Not connected yet|No connection(?!s)|You[’']re offline",
+      "pattern": "Beeline (?:isn[\\x27\u2019]t|is not) connected|Could(?:n[\\x27\u2019]t| not) reach Beeline|[Cc]heck your connection|Showing saved messages|connectionError(?:Title|Description)|\\buseConnectionFailure\\s*\\(|No connection to the server|Not connected yet|No connection(?!s)|You[\u2019']re offline",
       "scope": [
         "apps/mobile/sources"
       ],
@@ -976,7 +980,7 @@
           "machine_name": "existing before the registry; weekly audit reviews",
           "squire_report": {
             "reason": "Retired broker-copy storage retained for preceding serving and rollback images; canonical reports live in squire_machines.",
-            "drop": "docs/release-pipeline.md#release-memory — beeline-drop-retired-turn-schema contract release"
+            "drop": "docs/release-pipeline.md#release-memory \u2014 beeline-drop-retired-turn-schema contract release"
           },
           "squire_work": "existing before the registry; weekly audit reviews",
           "harness": "existing before the registry; weekly audit reviews",
@@ -1924,7 +1928,7 @@
         "module": "Rooms and messages",
         "reason": "existing before the registry; weekly audit reviews",
         "columns": {
-          "chat_seq": "Stable per-chat number behind ¶author-N links; it must not shift when older messages are deleted, so row order cannot derive it.",
+          "chat_seq": "Stable per-chat number behind \u00b6author-N links; it must not shift when older messages are deleted, so row order cannot derive it.",
           "id": "existing before the registry; weekly audit reviews",
           "room_id": "existing before the registry; weekly audit reviews",
           "author_id": "existing before the registry; weekly audit reviews",
@@ -1957,7 +1961,7 @@
           "event_depth": "existing before the registry; weekly audit reviews",
           "event_woken": {
             "reason": "Retired cascade counter retained for preceding serving and rollback images; current event traces have no budget counter.",
-            "drop": "docs/release-pipeline.md#release-memory — beeline-drop-retired-turn-schema contract release"
+            "drop": "docs/release-pipeline.md#release-memory \u2014 beeline-drop-retired-turn-schema contract release"
           },
           "agent_model": "existing before the registry; weekly audit reviews",
           "source_client": "existing before the registry; weekly audit reviews"

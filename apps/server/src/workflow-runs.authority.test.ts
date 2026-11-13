@@ -1,3 +1,4 @@
+import { startQueuedTurn } from './test-fixtures/queued-turn.test-support.js';
 import { ExpectedRefusalError } from './command-refusal.js';
 import { activeWorkflowRunIds } from './workflow-admin.js';
 import { DaemonService } from './daemon-service.js';
@@ -6,7 +7,7 @@ import { describedWorkflow, insertCornerFacts } from './test-support.js';
 import { SYSTEM_IDENTITY_ID } from '@beeline/api-contract/system-identity';
 import { randomBytes } from 'node:crypto';
 import { describe, expect, it, vi } from 'vitest';
-import { claimAgentCommand, createAgentCommand, readAgentCommands, type CommandRow } from './agent-command.js';
+import { createAgentCommand, readAgentCommands, type CommandRow } from './agent-command.js';
 import { answerRoomChoice } from './room-choice.js';
 import { AgentScheduleLoop } from './agent-schedules.js';
 import { PhoneService } from './phone-service.js';
@@ -238,7 +239,7 @@ describe('agent workflow run reads and cancellation', () => {
   it('cancels the wake for an earlier attempt and states the new attempt on the next wake', async () => {
     const { runId } = await startedRun();
     await handoff(database, await commandFor(IMPLEMENTER), { runId, outcome: 'pushed', contents: { summary: 'ready', prUrl: 'test' } });
-    const commands = (await readAgentCommands(database, ROOM, IMPLEMENTER)).commands;
+    const commands = (await readAgentCommands(database, IMPLEMENTER, ROOM)).commands;
     expect(commands.find(c => c.sourceMessageId === runId)).toBeUndefined();
     const wake = commands.find(c => c.source.body.includes(`You are in run ${runId}`));
     expect(wake?.source.body).toContain('Current state: checks');

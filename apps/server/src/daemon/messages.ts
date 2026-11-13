@@ -68,8 +68,9 @@ import { daemonWriteResult } from './corner-messages.js';
 
   export async function daemonPostRoomMessage(ctx: DaemonContext, input: Input<'postRoomMessage'>, agentId: string, atomicCommandWrite = false) {
     if (!ctx.commandTransaction && !atomicCommandWrite) await ctx.access(input.roomId, agentId);
-    if ('relay' in input) throw new CommandRefusalError('relay cards are retired; use order and report', 410);
-    let steps = replySteps(input.steps);
+    let steps: ReturnType<typeof replySteps> = null;
+    try { steps = replySteps(input.steps); }
+    catch (error) { console.warn('[answer] invalid optional tool history omitted:', error); }
     // Explicit same-address posts can already have
     // committed a message. Keep the closing text in turn activity regardless
     // of wording, rather than publishing a second conversation message.
@@ -108,15 +109,13 @@ import { daemonWriteResult } from './corner-messages.js';
     const published = await roomPostBody(ctx.database, input.roomId, agentId, input, command);
     const text = published.text;
     const removed = published.removed;
-    // An answer with nothing left to show (and no queued files) is silence:
-    // the item is done without an empty message.
+    // Empty output spends no answer obligation. The helper can recover its
+    // streamed answer or report a harness failure; a reconnect still owes it.
     if (!text && input.presentation !== 'card' && input.requestId && !(await ctx.database.query(
       `SELECT 1 FROM agent_pending_attachments WHERE room_id=$1 AND agent_id=$2 AND request_id=$3 LIMIT 1`,
       [input.roomId, agentId, input.requestId])).rowCount) {
       const item = command ?? await authorizeCommandOutput(ctx.database, input.roomId, agentId, input.requestId);
-      await ctx.database.query(`UPDATE agent_turns SET completion_kind='no-reply'
-        WHERE room_id=$1 AND agent_id=$2 AND request_id=$3`, [input.roomId, agentId, input.requestId]);
-      await endAgentTurn(ctx.database, item, 'complete');
+      if (earlier.length) await endAgentTurn(ctx.database, item, 'complete', null, earlier[0]!.id);
       return { ...daemonWriteResult(ctx), ...(removed.length ? { receipt: `Removed: ${removed.join(', ')}.` } : {}) };
     }
     if (repeated) {
@@ -125,7 +124,8 @@ import { daemonWriteResult } from './corner-messages.js';
         text: text.slice(index * MAX_REPLY_NOTE_LENGTH, (index + 1) * MAX_REPLY_NOTE_LENGTH),
         ...(index ? { continues: true as const } : {}),
       }));
-      steps = replySteps([...(input.steps ?? []), ...notes], notes.length);
+      try { steps = replySteps([...(input.steps ?? []), ...notes], notes.length); }
+      catch (error) { console.warn('[answer] optional turn summary omitted:', error); }
     }
     // A tag an agent writes reaches the person it names, exactly as a
     // human-authored one does: the same reading of the text, the same push

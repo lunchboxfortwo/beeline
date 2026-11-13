@@ -1,6 +1,7 @@
+import { startQueuedTurn } from './test-fixtures/queued-turn.test-support.js';
 import { phoneFetch } from '../../../tests/helpers/phone-operation.js';
 
-import { createAgentCommand, claimAgentCommand } from './agent-command.js';
+import { createAgentCommand } from './agent-command.js';
 
 import { createHash, createHmac, type generateKeyPairSync } from 'node:crypto';
 
@@ -108,7 +109,7 @@ export function fixtureScope1() {
       sourceMessageId: WALLET_REQUEST,
       reason: 'human_mention',
     });
-    await claimAgentCommand(database, ROOM, HELPER, command!.id, 'wallet-generation');
+    await startQueuedTurn(database, ROOM, HELPER, command!.id);
     auth = new TokenAuth(database, async (proof) => {
       const login = proof === 'proof' ? 'owner' : proof;
       return { subject: login, login, name: login };
@@ -159,16 +160,11 @@ export function fixtureScope1() {
         [ROOM, HELPER, WALLET_REQUEST],
       )
     ).rows[0];
-    if (pending) await claimAgentCommand(database, ROOM, HELPER, pending.id, 'wallet-generation');
+    if (pending) await startQueuedTurn(database, ROOM, HELPER, pending.id);
     const response = await phoneFetch(`${origin}/v1/daemon/operations/${name}`, {
       method: 'POST',
       headers: { authorization: `Bearer ${helperToken}`, 'content-type': 'application/json' },
-      body: JSON.stringify({
-        ...(payload as object),
-        roomId: ROOM,
-        requestId: WALLET_REQUEST,
-        generationId: 'wallet-generation',
-      }),
+      body: JSON.stringify({ ...(payload as object), roomId: ROOM, requestId: WALLET_REQUEST }),
     });
     return { status: response.status, body: (await response.json()) as Record<string, unknown> };
   };
@@ -247,7 +243,7 @@ fundChain,
 };
 }
 export { phoneFetch } from '../../../tests/helpers/phone-operation.js';
-export { createAgentCommand, claimAgentCommand } from './agent-command.js';
+export { createAgentCommand, startQueuedTurn } from './agent-command.js';
 export { createHash, createHmac, generateKeyPairSync } from 'node:crypto';
 export { CdpWalletClient, WalletTransactionPending } from './cdp-client.js';
 export { AddressInfo } from 'node:net';

@@ -1,3 +1,4 @@
+import { startQueuedCommand } from './test-fixtures/queued-turn.test-support.js';
 import * as daemonWorkbench from './daemon/workbench.js';
 import { afterAll, beforeAll, expect, it, vi } from 'vitest';
 import type { AddressInfo } from 'node:net';
@@ -80,10 +81,8 @@ it('Reproduction OPEN-1 / SENTRY-D: agent-message opening succeeds without Sentr
   const source = '1'.repeat(64), invalidApproval = '2'.repeat(64);
   await db.query(`INSERT INTO messages(id,room_id,author_id,text) VALUES($1,$3,$4,'Open work'),($2,$3,$5,'Agent suggestion')`, [source, invalidApproval, parent, owner, agent]);
   const command = await createAgentCommand(db, { roomId: parent, agentId: agent, sourceMessageId: source, reason: 'human_tag' });
-  await daemon.execute('claimAgentCommand', { roomId: parent, commandId: command!.id, generationId: 'proof' }, agent);
-  const input = { roomId: parent, requestId: command!.turn_request_id, generationId: 'proof',
-    name: 'Agent-initiated', objective: 'Open agent-initiated work',
-    brief: { spec: 'Do the assigned work', approval: { sourceMessageId: invalidApproval } } };
+  await startQueuedCommand(daemon, { roomId: parent, commandId: command!.id }, agent);
+  const input = { roomId: parent, requestId: command!.turn_request_id, name: 'Agent-initiated', objective: 'Open agent-initiated work', brief: { spec: 'Do the assigned work', approval: { sourceMessageId: invalidApproval } } };
   vi.mocked(captureException).mockClear();
   const response = await fetch(`${origin}/v1/daemon/operations/createCorner`, {
     method: 'POST', headers: { authorization: 'Bearer bdt_refusal_fixture_123456789', 'content-type': 'application/json' }, body: JSON.stringify(input),
@@ -103,8 +102,8 @@ it.each([
   const source = operation === 'listAppTools' ? '3'.repeat(64) : '4'.repeat(64);
   await db.query(`INSERT INTO messages(id,room_id,author_id,text) VALUES($1,$2,$3,'Prove refusal')`, [source, parent, owner]);
   const command = await createAgentCommand(db, { roomId: parent, agentId: agent, sourceMessageId: source, reason: 'human_tag' });
-  await daemon.execute('claimAgentCommand', { roomId: parent, commandId: command!.id, generationId: 'remaining' }, agent);
-  const authorizedInput = { ...input, requestId: command!.turn_request_id, generationId: 'remaining' };
+  await startQueuedCommand(daemon, { roomId: parent, commandId: command!.id }, agent);
+  const authorizedInput = { ...input, requestId: command!.turn_request_id };
   vi.mocked(captureException).mockClear();
   const response = await fetch(`${origin}/v1/daemon/operations/${operation}`, {
     method: 'POST', headers: { authorization: 'Bearer bdt_refusal_fixture_123456789', 'content-type': 'application/json' }, body: JSON.stringify(authorizedInput),
@@ -118,8 +117,8 @@ it('Reproduction SENTRY-R: start workflow with missing starter returns aggregate
   const source = '5'.repeat(64);
   await db.query(`INSERT INTO messages(id,room_id,author_id,text) VALUES($1,$2,$3,'Prove workflow refusal')`, [source, parent, owner]);
   const command = await createAgentCommand(db, { roomId: parent, agentId: agent, sourceMessageId: source, reason: 'human_tag' });
-  await daemon.execute('claimAgentCommand', { roomId: parent, commandId: command!.id, generationId: 'role' }, agent);
-  const turn = { roomId: parent, requestId: command!.turn_request_id, generationId: 'role' };
+  await startQueuedCommand(daemon, { roomId: parent, commandId: command!.id }, agent);
+  const turn = { roomId: parent, requestId: command!.turn_request_id };
   await daemon.execute('saveWorkflow', { ...turn, contract: describedWorkflow({
     version: 1, name: 'refusal-proof', description: 'Prove missing starter refusal', roles: ['starter'], start: 'work',
     handoffs: { work: { role: 'starter', requires: ['summary'], on: { done: 'done' } }, done: { kind: 'terminal', status: 'done' } },

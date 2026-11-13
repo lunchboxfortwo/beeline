@@ -1,8 +1,9 @@
+import { startQueuedTurn } from './test-fixtures/queued-turn.test-support.js';
 import { readdirSync, readFileSync } from 'node:fs';
 import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
-import { claimAgentCommand, createAgentCommand, routeHumanMessage } from './agent-command.js';
+import { createAgentCommand, routeHumanMessage } from './agent-command.js';
 import { computerViewToken, createComputerSession } from './computer-session.js';
 import { announceAgentLifecycle } from './connection-presence.js';
 import { setCornerHold } from './corner-holds.js';
@@ -117,7 +118,7 @@ describe('permissions: agent owner, Workspace admin, or anyone in the Room', () 
       sourceMessageId: ask,
       reason: 'human_tag',
     });
-    await claimAgentCommand(database, roomId, AGENT, command!.id, `generation-${ask.slice(-4)}`);
+    await startQueuedTurn(database, roomId, AGENT, command!.id);
     return ask;
   }
 

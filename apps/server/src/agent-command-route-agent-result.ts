@@ -120,14 +120,6 @@ export const CORNER_AGENT_UNREACHABLE_CARD_TYPE = 'corner-agent-unreachable';
 export const CORNER_MERGE_YES_CARD_TYPE = 'corner-merge-yes';
 
 
-export type WakeDropLog = { drops: Record<string, unknown>[] };
-
-
-export function logStaleWakeDrops(drops: WakeDropLog['drops'] | undefined): void {
-  for (const drop of drops ?? []) console.info(JSON.stringify(drop));
-}
-
-
 /** A connected app answers its orders through the queue: the order it names,
  * or its oldest pending order (this Room first). */
 export async function selectMcpOrder(db: SqlDatabase, agentId: string, target: string,
@@ -147,7 +139,7 @@ export async function selectMcpOrder(db: SqlDatabase, agentId: string, target: s
 }
 
 
-/** Inbox dismissal answers queued non-orders silently; orders still require a report. */
+/** Acknowledging notifications never spends an unanswered queue item. */
 export async function dismissAgentCommandWakes(db: SqlDatabase, roomId: string, agentId: string,
   commandId?: string): Promise<number> {
   return db.transaction(async db => {
@@ -157,11 +149,10 @@ export async function dismissAgentCommandWakes(db: SqlDatabase, roomId: string, 
       JOIN room_access member ON member.room_id=room.id AND member.identity_id=command.agent_id AND member.removed_at IS NULL
       WHERE command.room_id=$1 AND command.agent_id=$2 AND command.action='input' AND command.reason<>'mcp_call'
         AND ($3::text IS NULL OR command.id=$3)
-        AND ($3::text IS NOT NULL OR COALESCE(command.private_payload->>'kind','')<>'order')
-        AND command.state='pending'
+        AND command.state='pending' AND EXISTS(SELECT 1 FROM messages answer
+          WHERE answer.room_id=command.return_room_id AND answer.author_id=command.agent_id
+            AND answer.request_id IN (command.id,command.turn_request_id) AND answer.deleted_at IS NULL)
       ORDER BY command.created_at,command.id FOR UPDATE OF command`, [roomId,agentId,commandId ?? null])).rows;
-    if (waiting.some(command => command.private_payload?.kind === 'order'))
-      throw new ExpectedRefusalError('that wake is an order; answer it with report');
     await db.query(`SELECT ended.id FROM agent_commands command CROSS JOIN LATERAL
       beeline_finish_agent_command(command.id,'complete',NULL,NULL) ended
       WHERE command.id=ANY($1::text[])`,[waiting.map(command=>command.id)]);

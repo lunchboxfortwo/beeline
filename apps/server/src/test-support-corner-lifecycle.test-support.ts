@@ -1,3 +1,4 @@
+import { startQueuedCommand } from './test-fixtures/queued-turn.test-support.js';
 import { phoneFetch } from '../../../tests/helpers/phone-operation.js';
 
 import { cornerKindSql } from './corner-opening.js';
@@ -281,7 +282,7 @@ export async function commissioned(roomId: string, agentId = A): Promise<AgentCo
     H,
   );
   const command = (await daemon.execute('getAgentCommands', { roomId }, agentId)).commands.at(-1);
-  await daemon.execute('claimAgentCommand', { roomId, commandId: command!.id, generationId: 'g1' }, agentId);
+  await startQueuedCommand(daemon, { roomId, commandId: command!.id }, agentId);
   return command!;
 }
 
@@ -298,17 +299,7 @@ export async function open(repository?: string, hold?: boolean, commander = A): 
   const command = await commissioned(R, commander);
   const { cornerId } = await daemon.execute(
     'createCorner',
-    {
-      roomId: R,
-      requestId: command.turnRequestId,
-      generationId: 'g1',
-      name: 'Ship-widget',
-      objective: 'Ship the widget end to end',
-      ...(commander !== A ? { implementer: 'hoots' } : {}),
-
-      ...(repository ? { repository, targetBranch: 'main' } : {}),
-      brief: brief(command.sourceMessageId),
-    },
+    { roomId: R, requestId: command.turnRequestId, name: 'Ship-widget', objective: 'Ship the widget end to end', ...(commander !== A ? { implementer: 'hoots' } : {}), ...(repository ? { repository, targetBranch: 'main' } : {}), brief: brief(command.sourceMessageId) },
     commander,
   );
   // Legacy agent-set holds remain releasable after the citation requirement.
@@ -319,7 +310,7 @@ export async function open(repository?: string, hold?: boolean, commander = A): 
 
 
 export async function claim(c: AgentCommand, generationId = 'g1') {
-  await daemon.execute('claimAgentCommand', { roomId: c.roomId, commandId: c.id, generationId }, c.agentId);
+  await startQueuedCommand(daemon, { roomId: c.roomId, commandId: c.id }, c.agentId);
 }
 
 
@@ -402,14 +393,13 @@ export const commands = (agentId: string, roomId: string) =>
 
 
 export const result = (c: AgentCommand, text: string, generationId = 'g1') =>
-  daemon.execute('postRoomMessage', { roomId: c.roomId, requestId: c.turnRequestId, generationId, text }, c.agentId);
+  daemon.execute('postRoomMessage', { roomId: c.roomId, requestId: c.turnRequestId, text }, c.agentId);
 
 
 /** A fixture that finishes execution, including the real helper's final receipt. */
 export async function terminalResult(c: AgentCommand, text: string, generationId = 'g1') {
   const published = await result(c, text, generationId);
-  await daemon.execute('postAgentTurnReceipt', { roomId: c.roomId, requestId: c.turnRequestId,
-    generationId, agentId: c.agentId, status: 'complete' }, c.agentId);
+  await daemon.execute('postAgentTurnReceipt', { roomId: c.roomId, requestId: c.turnRequestId, agentId: c.agentId, status: 'complete' }, c.agentId);
   return published;
 }
 
@@ -421,7 +411,7 @@ export async function orderRepairsFromRoom(review: AgentCommand, cornerId: strin
     reason: 'order', parent: (await db.query<import('./agent-command.js').CommandRow>(`SELECT * FROM agent_commands WHERE id=$1`, [review.id])).rows[0] });
   const turn = (await commands(B, R)).find(command => command.id === coordination!.id)!;
   await claim(turn);
-  await daemon.execute('order', { roomId: R, requestId: turn.turnRequestId, generationId: 'g1', address: cornerId, text }, B);
+  await daemon.execute('order', { roomId: R, requestId: turn.turnRequestId, address: cornerId, text }, B);
 }
 
 
@@ -513,10 +503,7 @@ export async function say(roomId: string, text: string, parentMessageId?: string
 export async function revise(cornerId: string, service = daemon) {
   await fallback(cornerId, false);
   const command = await commissioned(R, F);
-  return service.execute('reviseCornerBrief', {
-    roomId: R, cornerId, requestId: command.turnRequestId, generationId: 'g1', expectedRevision: 1,
-    brief: { ...brief(command.sourceMessageId), spec: 'Revised widget\n\n## Checklist\n- Ship it', change: 'Changed scope' },
-  }, F);
+  return service.execute('reviseCornerBrief', { roomId: R, cornerId, requestId: command.turnRequestId, expectedRevision: 1, brief: { ...brief(command.sourceMessageId), spec: 'Revised widget\n\n## Checklist\n- Ship it', change: 'Changed scope' } }, F);
 }
 
 
@@ -835,7 +822,7 @@ export function fixtureScope30() {
     const direct = (await commands(A, cornerId)).at(-1)!;
     await claim(direct);
     return service.execute('orderCornerMerge',
-      { cornerId, roomId: cornerId, requestId: direct.turnRequestId, generationId: 'g1' }, A);
+      { cornerId, roomId: cornerId, requestId: direct.turnRequestId }, A);
   }
 return {
 order,
@@ -853,10 +840,7 @@ export function fixtureScope31() {
       return;
     }
     const command = await commissioned(R);
-    await rootFixture.daemon.execute('reviseCornerBrief', {
-      roomId: R, cornerId, requestId: command.turnRequestId, generationId: 'g1', expectedRevision: 1,
-      brief: { ...brief(command.sourceMessageId), repositoryWork, change: 'Say whether files change' },
-    }, A);
+    await rootFixture.daemon.execute('reviseCornerBrief', { roomId: R, cornerId, requestId: command.turnRequestId, expectedRevision: 1, brief: { ...brief(command.sourceMessageId), repositoryWork, change: 'Say whether files change' } }, A);
   }
 
 

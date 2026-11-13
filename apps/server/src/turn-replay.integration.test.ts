@@ -27,7 +27,7 @@ let db: PgliteDatabase, daemon: InstanceType<typeof DaemonService>, phone: Insta
 let source:{connectionId:string;epoch:number};
 async function executeOwned<N extends keyof DaemonOperationMap>(name:N,input:DaemonOperationMap[N]['input'],agentId=AGENT):Promise<DaemonOperationMap[N]['output']>{
   const {capability}=await daemon.negotiateOwnedModel(agentId,true);
-  const owned=['claimAgentCommand','claimAgentTurn','acknowledgeAgentCommand','postAgentTurnReceipt','releaseAgentTurn'].includes(name);
+  const owned=['startQueuedTurn','claimAgentTurn','acknowledgeAgentCommand','postAgentTurnReceipt','releaseAgentTurn'].includes(name);
   return daemon.execute(name,input,agentId,owned?source:undefined,owned?capability:undefined);
 }
 beforeAll(async () => {
@@ -75,7 +75,7 @@ it.each([
       if (name === 'getRoomGitHubToken') return {token:'fixture',expiresAt:Date.now()+60000};
       if (name === 'claimAgentTurn') {
         const command = (await executeOwned('getAgentCommands',{roomId},AGENT)).commands.find(c=>c.id===input.commandId)!;
-        activeAuthority = {roomId,requestId:command.turnRequestId,generationId:input.generationId};
+        activeAuthority = { roomId, requestId:command.turnRequestId };
       }
 
       const result = await executeOwned(name as never,input as never,AGENT);
@@ -110,7 +110,7 @@ it.each([
     onTools?.(calls);
     const refused = {id:'post',title:'post',status:'in_progress',content:''};
     calls.push(refused);onTools?.(calls);
-    await expect(executeOwned('postRoomMessage',{...activeAuthority,roomId,generationId:'wrong-generation',text:'Refused write'} as never,AGENT)).rejects.toThrow();
+    await expect(executeOwned('postRoomMessage',{ ...activeAuthority, roomId, text:'Refused write' } as never,AGENT)).rejects.toThrow();
     refused.status='rejected';refused.content='permission denied';onTools?.(calls);
     onChunk?.('Proof completed.','Proof completed.');
     return {stopReason:'end_turn',agentText:'Proof completed.',updates:[],toolCalls:calls};
@@ -173,8 +173,8 @@ async function claimedTurn() {
   await db.query(`INSERT INTO messages(id,room_id,author_id,text) VALUES($1,$2,$3,'Proof')`,[messageId,ROOM,HUMAN]);
   const command=(await createAgentCommand(db,{roomId:ROOM,agentId:AGENT,sourceMessageId:messageId,reason:'human_tag'}))!;
   const generationId=randomUUID();
-  await executeOwned('claimAgentCommand',{roomId:ROOM,commandId:command.id,generationId},AGENT);
-  return {roomId:ROOM,requestId:command.turn_request_id,generationId};
+  await executeOwned('startQueuedTurn',{ roomId:ROOM, commandId:command.id },AGENT);
+  return { roomId:ROOM, requestId:command.turn_request_id };
 }
 const emptyTrace={totalMs:12,attempts:[{attempt:1,phases:{publish:1},tools:[]}]};
 it('stores no replies and multiple replies, and never trusts supplied message ids',async()=>{
@@ -211,7 +211,7 @@ it('accepts only the stopped generation diagnostics and never restores output au
   await db.query(`UPDATE agent_commands SET state='cancelled' WHERE turn_request_id=$1`,[turn.requestId]);
   await executeOwned('postAgentTurnReceipt',{...turn,status:'cancelled',trace:emptyTrace},AGENT);
   expect((await db.query(`SELECT outcome FROM agent_turn_traces WHERE request_id=$1`,[turn.requestId])).rows[0]!.outcome).toBe('cancelled');
-  await expect(executeOwned('postAgentTurnReceipt',{...turn,generationId:'stale',status:'cancelled',trace:emptyTrace},AGENT)).rejects.toThrow();
+  await expect(executeOwned('postAgentTurnReceipt',{ ...turn, status:'cancelled', trace:emptyTrace },AGENT)).rejects.toThrow();
   await expect(executeOwned('postRoomMessage',{...turn,text:'Must stay stopped'},AGENT)).rejects.toThrow();
   expect((await db.query(`SELECT status FROM agent_turns WHERE request_id=$1`,[turn.requestId])).rows[0]!.status).toBe('cancelled');
 });

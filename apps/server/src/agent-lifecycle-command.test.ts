@@ -1,10 +1,6 @@
+import { startQueuedTurn } from './test-fixtures/queued-turn.test-support.js';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
-import {
-  claimAgentCommand,
-  createAgentCommand,
-  parseTaggedAgentLifecycleCommand,
-  routeHumanMessage,
-} from './agent-command.js';
+import { createAgentCommand, parseTaggedAgentLifecycleCommand, routeHumanMessage } from './agent-command.js';
 import { announceAgentLifecycle } from './connection-presence.js';
 import { LiveHub } from './live.js';
 import { PhoneService } from './phone-service.js';
@@ -132,22 +128,20 @@ describe('tagged agent lifecycle commands', () => {
     ).toEqual([{ lifecycle_before: 'boot-1', state: 'pending' }]);
   });
 
-  it.each(['pending', 'past-lease', 'mismatched', 'complete', 'live'])(
+  it.each(['pending', 'old', 'complete', 'live'])(
     'uses live execution evidence for lifecycle status and restart (%s)', async state => {
       const ask = 'e'.repeat(64);
       await send(ask, OWNER, '@bee work');
       const command = (await database.query<{ id: string }>(
         `SELECT id FROM agent_commands WHERE source_message_id=$1`, [ask])).rows[0]!;
       if (state !== 'pending') {
-        await claimAgentCommand(database, ROOM, AGENT, command.id, 'old-process');
-        if (state === 'past-lease') await database.query(
-          `UPDATE agent_commands SET lease_expires_at=now()-interval '1 second' WHERE id=$1`, [command.id]);
-        if (state === 'mismatched') await database.query(
-          `UPDATE agent_turns SET generation_id='another-process' WHERE request_id=$1`, [ask]);
+        await startQueuedTurn(database, ROOM, AGENT, command.id);
+        if (state === 'old') await database.query(
+          `UPDATE agent_commands SET created_at=now()-interval '1 day' WHERE id=$1`, [command.id]);
         if (state === 'complete') await database.query(
           `UPDATE agent_commands SET state='complete',completed_at=now() WHERE id=$1`, [command.id]);
       }
-      const running = state === 'live' || state === 'past-lease';
+      const running = state === 'live' || state === 'old';
       const texts = async () => (await database.query<{ text: string }>(
         `SELECT text FROM messages WHERE presentation='system' ORDER BY created_at,id`)).rows.map(row => row.text);
       await send('f'.repeat(64), OWNER, '@bee status');
@@ -159,7 +153,7 @@ describe('tagged agent lifecycle commands', () => {
       expect(await texts()).toContain(`@bee queued a restart · ${running ? 'running turn will drain first' : 'helper will reconnect to confirm'}`);
       const restart = (await database.query<{ id: string }>(
         `SELECT id FROM agent_commands WHERE action='restart'`)).rows[0]!;
-      await claimAgentCommand(database, ROOM, AGENT, restart.id, 'restart-process');
+      await startQueuedTurn(database, ROOM, AGENT, restart.id);
       await announceAgentLifecycle(database, live, ROOM, AGENT, { lifecycleId: 'boot-2' });
       expect((await database.query(`SELECT state FROM agent_commands WHERE id=$1`, [restart.id])).rows)
         .toEqual([{ state: 'complete' }]);
@@ -172,7 +166,7 @@ describe('tagged agent lifecycle commands', () => {
     const command = (
       await database.query<{ id: string }>(`SELECT id FROM agent_commands WHERE action='restart'`)
     ).rows[0]!;
-    await claimAgentCommand(database, ROOM, AGENT, command.id, 'generation-1');
+    await startQueuedTurn(database, ROOM, AGENT, command.id);
 
     await announceAgentLifecycle(database, live, ROOM, AGENT, { lifecycleId: 'boot-1' });
     expect(
@@ -229,7 +223,7 @@ describe('tagged agent lifecycle commands', () => {
       sourceMessageId: ask,
       reason: 'human_tag',
     });
-    await claimAgentCommand(database, ROOM, AGENT, original!.id, 'generation-work');
+    await startQueuedTurn(database, ROOM, AGENT, original!.id);
     await send('7'.repeat(64), MEMBER, '@bee stop');
     expect(
       (
@@ -254,7 +248,7 @@ describe('tagged agent lifecycle commands', () => {
       sourceMessageId: failedAsk,
       reason: 'human_tag',
     });
-    await claimAgentCommand(database, ROOM, AGENT, failed!.id, 'generation-failed');
+    await startQueuedTurn(database, ROOM, AGENT, failed!.id);
     await database.query(
       `UPDATE agent_turns SET status='failed',failure_reason='provider failed' WHERE request_id=$1`,
       [failedAsk],

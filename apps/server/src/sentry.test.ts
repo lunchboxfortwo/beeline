@@ -280,7 +280,7 @@ it('unexpected database errors still alert with retired validation wording', asy
       import { migrate } from './src/database.ts';
       import { HelperDaemonService as DaemonService } from './src/test-fixtures/helper-daemon.ts';
       import { LiveHub } from './src/live.ts';
-      import { createAgentCommand, claimAgentCommand } from './src/agent-command.ts';
+      import { createAgentCommand, startQueuedTurn } from './src/agent-command.ts';
       import { createBeelineServer } from './src/server.ts';
       import { flushServerErrors } from './src/sentry.ts';
       const db = new PgliteDatabase(); await migrate(db);
@@ -292,7 +292,7 @@ it('unexpected database errors still alert with retired validation wording', asy
       await db.query("INSERT INTO rooms(id,workspace_id,name) VALUES($1,$2,'Test')",[room,workspace]);
       await db.query("INSERT INTO memberships(workspace_id,room_id,identity_id,role) VALUES($1,NULL,$3,'member'),($1,$2,$3,'member')",[workspace,room,agent]);
       const command=await createAgentCommand(db,{roomId:room,agentId:agent,sourceMessageId:null,reason:'human_tag'});
-      await claimAgentCommand(db,room,agent,command.id,'proof');
+      await startQueuedTurn(db,room,agent,command.id,'proof');
       const live=new LiveHub(), daemon=new DaemonService(db,live);
       const server=createBeelineServer({database:db,live,daemon,phone:{},
         auth:{authenticateDaemon:async()=>agent,authenticatePhone:async()=>null},mediaMaximumBytes:1});
@@ -401,7 +401,7 @@ it('ATTACH-CAP-1: attachment cap is a client error and unexpected failures still
       const command = await createAgentCommand(db, {roomId:room,agentId:agent,sourceMessageId:null,reason:'system'});
       const [pending] = (await daemon.execute('getAgentCommands',{roomId:room},agent)).commands;
       assert.equal(pending.id,command.id);
-      await daemon.execute('claimAgentCommand',{roomId:room,commandId:pending.id,generationId:'proof'},agent);
+      await daemon.execute('startQueuedTurn',{roomId:room,commandId:pending.id,generationId:'proof'},agent);
       const server = createBeelineServer({ database: db, live, daemon, phone: {},
         auth: { authenticateDaemon: async () => agent, authenticatePhone: async () => null }, mediaMaximumBytes: 10 });
       await new Promise(r => server.listen(0,'127.0.0.1',r));
@@ -527,7 +527,7 @@ it('WORKFLOW-ROLE-REFUSAL / BEELINE-SENTRY-REFUSALS / APP-REFUSAL-5: real agent 
       const command = await createAgentCommand(db, {roomId:room,agentId:agent,sourceMessageId:'human-root',reason:'test'});
       const [pending] = (await daemon.execute('getAgentCommands',{roomId:room},agent)).commands;
       assert.equal(pending.id,command.id);
-      await daemon.execute('claimAgentCommand',{roomId:room,commandId:pending.id,generationId:'proof'},agent);
+      await daemon.execute('startQueuedTurn',{roomId:room,commandId:pending.id,generationId:'proof'},agent);
       const server = createBeelineServer({ database: db, live, daemon, phone: {},
         auth: { authenticateDaemon: async () => agent, authenticatePhone: async () => null }, mediaMaximumBytes: 10 });
       await new Promise(r => server.listen(0,'127.0.0.1',r));

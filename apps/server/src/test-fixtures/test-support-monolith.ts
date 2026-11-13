@@ -1,5 +1,6 @@
+import { startQueuedTurn } from './queued-turn.test-support.js';
 import { phoneFetch } from '../../../../tests/helpers/phone-operation.js';
-import { createAgentCommand, claimAgentCommand } from '.././agent-command.js';
+import { createAgentCommand } from '.././agent-command.js';
 import { createHash, createHmac } from 'node:crypto';
 import type { AddressInfo } from 'node:net';
 import { afterEach, beforeAll, beforeEach, vi } from 'vitest';
@@ -377,13 +378,7 @@ export function monolithFixture() {
           )
         ).rows[0];
         if (existing) {
-          await claimAgentCommand(
-            tx,
-            String(input.roomId),
-            who,
-            existing.id,
-            String(input.generationId),
-          ).catch(() => undefined);
+          await startQueuedTurn(tx, String(input.roomId), who, existing.id).catch(() => undefined);
           return;
         }
         await tx.query(
@@ -398,13 +393,7 @@ export function monolithFixture() {
           reason: 'fixture',
         });
         if (command)
-          await claimAgentCommand(
-            tx,
-            String(input.roomId),
-            who,
-            command.id,
-            String(input.generationId),
-          );
+          await startQueuedTurn(tx, String(input.roomId), who, command.id);
       });
       const suppliedBrief = input.brief as
         | { content?: unknown; attachments?: unknown; change?: unknown; spec?: unknown }

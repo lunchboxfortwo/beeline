@@ -1,3 +1,4 @@
+import { startQueuedCommand } from './test-fixtures/queued-turn.test-support.js';
 import { phoneFetch, describe, expect, it, vi, createServer, Webhook, MCP_ORDER_WAKE_HINT, MCP_REVIEW_WAKE_HINT, MCP_WAKE_HINT, backfillMcpMemberAvatars, ensureMcpMember, postMcpWebhook, randomBytes, createHash, randomUUID, Client, StreamableHTTPClientTransport, tokenHash, recordSigninAttempt, pendingMcpWakes, createAgentCommand, routeHumanMessage, openSecrets, deliverMcpMemberWebhooks, runMcpWebhookDelivery, USER, OTHER, AGENT, WORKSPACE, ROOM, opaque, fixtureScope1, type AddressInfo } from './test-support-rooms-mcp.test-support.js';
 import { MCP_WEBHOOK_TABLE, POSTGRES_LIVE_CHANNEL } from './postgres-live-notifications.js';
 
@@ -337,15 +338,14 @@ const scope1 = fixtureScope1();
     const commander = (await createAgentCommand(scope1.db, {
       roomId: ROOM, agentId: AGENT, sourceMessageId: source.messageId, reason: 'human_message',
     }))!;
-    await scope1.daemon.execute('claimAgentCommand', { roomId: ROOM, commandId: commander.id, generationId: 'notify-proof' }, AGENT);
+    await startQueuedCommand(scope1.daemon, { roomId: ROOM, commandId: commander.id }, AGENT);
     const notices: object[] = [];
     const unlisten = await scope1.db.client.listen(POSTGRES_LIVE_CHANNEL, payload => {
       const notice = JSON.parse(payload);
       if (notice.table === MCP_WEBHOOK_TABLE) notices.push(notice);
     });
     try {
-      const args = { roomId: ROOM, requestId: commander.turn_request_id, generationId: 'notify-proof',
-        address: ROOM, agent: handle, text: 'Check delivery without a later tag.' };
+      const args = { roomId: ROOM, requestId: commander.turn_request_id, address: ROOM, agent: handle, text: 'Check delivery without a later tag.' };
       const sent = await scope1.daemon.execute('order', args, AGENT) as { id: string };
       // A queued row alone is insufficient: the event-driven worker needs this committed notification.
       expect(notices).toEqual([{ table: MCP_WEBHOOK_TABLE, operation: 'INSERT', roomId: ROOM }]);
@@ -399,8 +399,8 @@ const scope1 = fixtureScope1();
     const commander = (await createAgentCommand(scope1.db, {
       roomId: ROOM, agentId: AGENT, sourceMessageId: source.messageId, reason: 'human_message',
     }))!;
-    await scope1.daemon.execute('claimAgentCommand', { roomId: ROOM, commandId: commander.id, generationId: 'wake-proof' }, AGENT);
-    const authority = { roomId: ROOM, requestId: commander.turn_request_id, generationId: 'wake-proof' };
+    await startQueuedCommand(scope1.daemon, { roomId: ROOM, commandId: commander.id }, AGENT);
+    const authority = { roomId: ROOM, requestId: commander.turn_request_id };
     const place = async (text: string, agent: string) => await scope1.daemon.execute('order',
       { ...authority, address: ROOM, agent, text }, AGENT) as { id: string };
     const queued = async (commandId: string) => (await scope1.db.query<{ subscription_id: string; body: string }>(

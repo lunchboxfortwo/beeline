@@ -39,8 +39,6 @@ export class PlaceStorage {
     })().finally(() => { this.flight = undefined; });
   }
 
-  async idle(): Promise<void> { await this.flight; }
-
   private refusalPath(cornerId: string): string {
     return resolve(this.options.runtimeDir, 'corner-cleanup-refusals', `${createHash('sha256').update(cornerId).digest('hex')}.json`);
   }

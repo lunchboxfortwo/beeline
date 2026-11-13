@@ -1,6 +1,7 @@
+import { startQueuedTurn } from './test-fixtures/queued-turn.test-support.js';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { PgliteDatabase, migratedDatabase } from './test-support.js';
-import { claimAgentCommand, createAgentCommand } from './agent-command.js';
+import { createAgentCommand } from './agent-command.js';
 import { DaemonService } from './daemon-service.js';
 import { LiveHub } from './live.js';
 import { SYSTEM_IDENTITY_ID } from '@beeline/api-contract/system-identity';
@@ -105,7 +106,7 @@ async function claim(roomId: string, requestId: string, generationId: string) {
     reason: 'corner_objective',
     turnRequestId: requestId,
   });
-  await claimAgentCommand(database, roomId, NIGLET, command!.id, generationId);
+  await startQueuedTurn(database, roomId, NIGLET, command!.id);
   return command!;
 }
 
@@ -128,29 +129,16 @@ describe('corner turn institutional authority', () => {
       retainDepth: true,
       turnRequestId: 'corner-turn',
     });
-    await claimAgentCommand(database, CORNER, NIGLET, corner!.id, 'corner-generation');
+    await startQueuedTurn(database, CORNER, NIGLET, corner!.id);
     const memory = await daemon.execute(
       'searchInstitutionalMemory',
-      {
-        agentId: NIGLET,
-        roomId: CORNER,
-        requestId: 'corner-turn',
-        generationId: 'corner-generation',
-        query: 'anything',
-      },
+      { agentId: NIGLET, roomId: CORNER, requestId: 'corner-turn', query: 'anything' },
       NIGLET,
     );
     expect(memory.results).toEqual([]);
     const history = await daemon.execute(
       'searchInstitutionalHistory',
-      {
-        agentId: NIGLET,
-        roomId: CORNER,
-        requestId: 'corner-turn',
-        generationId: 'corner-generation',
-        query: 'login',
-        limit: 5,
-      },
+      { agentId: NIGLET, roomId: CORNER, requestId: 'corner-turn', query: 'login', limit: 5 },
       NIGLET,
     );
     expect(history.results).toBeDefined();
@@ -177,16 +165,10 @@ describe('corner turn institutional authority', () => {
       retainDepth: true,
       turnRequestId: 'corner-from-corner-turn',
     });
-    await claimAgentCommand(database, CORNER, NIGLET, corner!.id, 'corner-from-corner-generation');
+    await startQueuedTurn(database, CORNER, NIGLET, corner!.id);
     const memory = await daemon.execute(
       'searchInstitutionalMemory',
-      {
-        agentId: NIGLET,
-        roomId: CORNER,
-        requestId: 'corner-from-corner-turn',
-        generationId: 'corner-from-corner-generation',
-        query: 'anything',
-      },
+      { agentId: NIGLET, roomId: CORNER, requestId: 'corner-from-corner-turn', query: 'anything' },
       NIGLET,
     );
     expect(memory.results).toEqual([]);
@@ -200,26 +182,13 @@ describe('corner turn institutional authority', () => {
     await claim(CORNER, NOTE, 'checks-generation');
     const memory = await daemon.execute(
       'searchInstitutionalMemory',
-      {
-        agentId: NIGLET,
-        roomId: CORNER,
-        requestId: NOTE,
-        generationId: 'checks-generation',
-        query: 'anything',
-      },
+      { agentId: NIGLET, roomId: CORNER, requestId: NOTE, query: 'anything' },
       NIGLET,
     );
     expect(memory.results).toEqual([]);
     const history = await daemon.execute(
       'searchInstitutionalHistory',
-      {
-        agentId: NIGLET,
-        roomId: CORNER,
-        requestId: NOTE,
-        generationId: 'checks-generation',
-        query: 'login',
-        limit: 5,
-      },
+      { agentId: NIGLET, roomId: CORNER, requestId: NOTE, query: 'login', limit: 5 },
       NIGLET,
     );
     expect(history.results).toBeDefined();
@@ -227,7 +196,7 @@ describe('corner turn institutional authority', () => {
     // fallback too, not just the search tools.
     const snapshot = await daemon.execute(
       'getInstitutionalContext',
-      { roomId: CORNER, requestId: NOTE, generationId: 'checks-generation' },
+      { roomId: CORNER, requestId: NOTE },
       NIGLET,
     );
     expect(snapshot.snapshotRevision).toBe(0);

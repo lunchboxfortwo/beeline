@@ -1,4 +1,5 @@
-import { createAgentCommand, claimAgentCommand } from '.././agent-command.js';
+import { startQueuedTurn } from '../test-fixtures/queued-turn.test-support.js';
+import { createAgentCommand } from '.././agent-command.js';
 import { createHash } from 'node:crypto';
 import { describe, expect, it } from 'vitest';
 import WebSocket from 'ws';
@@ -388,17 +389,12 @@ const fixture = monolithFixture();
         reason: 'fixture',
       });
       expect(command).toBeTruthy();
-      await claimAgentCommand(tx, cornerId, AGENT, command!.id, 'corner-generation');
+      await startQueuedTurn(tx, cornerId, AGENT, command!.id);
     });
     // The helper sends its turn context with the read, so the server binds it
     // to the active corner command; the primary lookup scopes to the corner.
     const read = (await (
-      await fixture.daemonOperation('getRoomMessage', {
-        roomId: cornerId,
-        messageId: transcriptId,
-        requestId: 'corner-request',
-        generationId: 'corner-generation',
-      })
+      await fixture.daemonOperation('getRoomMessage', { roomId: cornerId, messageId: transcriptId, requestId: 'corner-request' })
     ).json()) as { body: string };
     expect(read.body).toBe('Corner transcript row the turn must read');
     // The parent Room holds no transcript rows of this corner, so a message

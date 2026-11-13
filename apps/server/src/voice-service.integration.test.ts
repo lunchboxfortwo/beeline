@@ -1,3 +1,4 @@
+import { startQueuedCommand } from './test-fixtures/queued-turn.test-support.js';
 import { phoneFetch } from '../../../tests/helpers/phone-operation.js';
 import type { AddressInfo } from 'node:net';
 import WebSocket from 'ws';
@@ -575,7 +576,7 @@ it('call history search excludes Rooms another caller cannot read and privately 
       { name: 'read_posted_item', query: 'voice-private-search' }, new AbortController().signal)).rejects.toThrow('not available');
     await service.dispatch(call.call.id, source, A);
     const { readAgentCommands } = await import('./agent-command.js');
-    const commands = await readAgentCommands(db, room, A);
+    const commands = await readAgentCommands(db, A, room);
     expect(commands.commands[0]?.source.body).toContain('This input came from a live voice call.');
     expect(commands.commands[0]?.source.body).toContain('Results dated today are current');
     expect(commands.commands[0]?.source.body).toContain('Never start your reply with your name');
@@ -604,7 +605,7 @@ it('VOICE-ROUTER-1: hand-offs arriving mid-turn remain pending for the next curr
     const daemon = new DaemonService(db,live);
     const commands = () => daemon.execute('getAgentCommands',{roomId:room},A).then(page=>page.commands);
     const active = (await commands())[0]!;
-    await daemon.execute('claimAgentCommand',{roomId:room,commandId:active.id,generationId:'voice-busy'},A);
+    await startQueuedCommand(daemon, { roomId:room, commandId:active.id }, A);
     const second = await handoff('merge the PR');
     const third = await handoff('open a corner to fix X');
     await db.query(`UPDATE agent_commands SET created_at=created_at-interval '2 minutes' WHERE room_id=$1`,[room]);
@@ -628,14 +629,14 @@ it('Reproduction R1/R2: a handed-off voice request carries today and posts its h
     const source = await service.recordHuman(joined.call.id,room,H,agent,"what triggered today's chip selloff",owner);
     await service.dispatch(joined.call.id,source,A);
     const {readAgentCommands}=await import('./agent-command.js');
-    const command=(await readAgentCommands(db,room,A)).commands.find(command=>command.source.id===source)!;
+    const command=(await readAgentCommands(db, A, room)).commands.find(command=>command.source.id===source)!;
     expect(command.source.body).toContain('Results dated today are current');
     expect(command.source.body).toContain('Never start your reply with your name');
     const day=new Intl.DateTimeFormat('en-GB',{timeZone:'UTC',day:'numeric',month:'long',year:'numeric'}).format(Date.now());
     expect(command.source.body).toContain(day);
     const daemon=new DaemonService(db,live);
-    await daemon.execute('claimAgentCommand',{roomId:room,commandId:command.id,generationId:'voice-name-proof'},A);
-    await daemon.execute('postRoomMessage',{roomId:room,requestId:command.turnRequestId,generationId:'voice-name-proof',text:'**Ruby:** Today’s search shows the answer.'},A);
+    await startQueuedCommand(daemon, { roomId:room, commandId:command.id }, A);
+    await daemon.execute('postRoomMessage',{ roomId:room, requestId:command.turnRequestId, text:'**Ruby:** Today’s search shows the answer.' },A);
     const messages=(await new PhoneService(db,'http://proof').readRoom(room,H))!.messages;
     expect(messages.some(message=>message.author.pubkey===A && message.text==='Today’s search shows the answer.')).toBe(true);
   } finally {await service.leave(joined.call.id,H);await db.query('DELETE FROM rooms WHERE id=$1',[room]);}

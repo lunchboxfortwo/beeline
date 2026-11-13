@@ -1,5 +1,6 @@
+import { startQueuedTurn } from './test-fixtures/queued-turn.test-support.js';
 import { describe, expect, it } from 'vitest';
-import { claimAgentCommand, readAgentCommands } from './agent-command.js';
+import { readAgentCommands } from './agent-command.js';
 import { monolithFixture, AGENT, ROOM } from './test-fixtures/test-support-monolith.js';
 
 describe('Squire decision after the asking turn ended', () => {
@@ -10,15 +11,15 @@ describe('Squire decision after the asking turn ended', () => {
       const asked = await (await fixture.operation('sendRoomMessage', {
         roomId: ROOM, text: '@bee buy the flowers', mentions: [AGENT],
       })).json() as { messageId: string };
-      const [asking] = (await readAgentCommands(fixture.database, ROOM, AGENT)).commands;
+      const [asking] = (await readAgentCommands(fixture.database, AGENT, ROOM)).commands;
       expect(asking).toBeDefined();
       await fixture.database.transaction(tx =>
-        claimAgentCommand(tx, ROOM, AGENT, asking!.id, 'asking-generation'));
+        startQueuedTurn(tx, ROOM, AGENT, asking!.id));
       if (ended) await fixture.database.query(
         `SELECT beeline_finish_agent_command(id,'complete',NULL,NULL)
          FROM agent_commands WHERE id=$1`, [asking!.id],
       );
-      if (ended) expect((await readAgentCommands(fixture.database, ROOM, AGENT)).commands).toEqual([]);
+      if (ended) expect((await readAgentCommands(fixture.database, AGENT, ROOM)).commands).toEqual([]);
       const decision = { roomId: ROOM, requestId: asked.messageId, approvalId: 'flowers',
         status, tool: 'inject_card', title: 'Purchase approval', detail: 'Flowers' };
       const first = await fixture.daemonOperation('postSquireApprovalDecision', decision);
@@ -28,7 +29,7 @@ describe('Squire decision after the asking turn ended', () => {
       expect(duplicate.status).toBe(200);
       expect(await duplicate.json()).toMatchObject({ id: posted.id });
       // A still-running asking turn is listed only with its generation, for its helper to resume.
-      const waiting = async () => (await readAgentCommands(fixture.database, ROOM, AGENT)).commands.filter(command => !command.generationId);
+      const waiting = async () => (await readAgentCommands(fixture.database, AGENT, ROOM)).commands.filter(command => !command.generationId);
       const commands = await waiting();
       expect(commands).toHaveLength(1);
       expect(commands[0]).toMatchObject({ roomId: ROOM, agentId: AGENT,
@@ -43,14 +44,12 @@ describe('Squire decision after the asking turn ended', () => {
       );
       expect(lines.rows).toEqual([{ id: posted.id }]);
       await fixture.database.transaction(tx =>
-        claimAgentCommand(tx, ROOM, AGENT, commands[0]!.id, 'decision-generation'));
+        startQueuedTurn(tx, ROOM, AGENT, commands[0]!.id));
       expect((await fixture.database.query(
-        `SELECT request_id,generation_id,status FROM agent_turns WHERE room_id=$1
+        `SELECT request_id,status FROM agent_turns WHERE room_id=$1
          AND agent_id=$2 AND request_id=$3`, [ROOM, AGENT, commands[0]!.turnRequestId],
-      )).rows).toEqual([{ request_id: commands[0]!.turnRequestId, generation_id: 'decision-generation', status: 'working' }]);
-      const silent = await fixture.daemonOperation('markAgentTurnSilent', {
-        roomId: ROOM, requestId: commands[0]!.turnRequestId, generationId: 'decision-generation',
-      });
+      )).rows).toEqual([{ request_id: commands[0]!.turnRequestId, status: 'working' }]);
+      const silent = await fixture.daemonOperation('markAgentTurnSilent', { roomId: ROOM, requestId: commands[0]!.turnRequestId });
       expect(silent.status).toBe(200);
       await fixture.daemonOperation('postSquireApprovalDecision', decision);
       expect(await waiting()).toEqual([]);

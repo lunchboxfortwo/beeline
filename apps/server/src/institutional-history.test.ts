@@ -1,3 +1,4 @@
+import { startQueuedTurn } from './test-fixtures/queued-turn.test-support.js';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { Check } from 'typebox/value';
 import { mkdtemp, writeFile, rm } from 'node:fs/promises';
@@ -6,7 +7,7 @@ import { join } from 'node:path';
 import { createServer } from 'node:http';
 import { agentToolsFor, callAgentTool } from '../../body/src/read-only-mcp.js';
 import type { CommandRow } from './agent-command.js';
-import { claimAgentCommand, createAgentCommand } from './agent-command.js';
+import { createAgentCommand } from './agent-command.js';
 import { DaemonService } from './daemon-service.js';
 import { LiveHub } from './live.js';
 import {
@@ -111,14 +112,12 @@ describe('authorized institutional history search', () => {
       roomId: OUTPUT, agentId: AGENT, sourceMessageId: ROOT,
       reason: 'human_tag', turnRequestId: 'hsa-1',
     });
-    await claimAgentCommand(database, OUTPUT, AGENT, active!.id, 'hsa-generation');
+    await startQueuedTurn(database, OUTPUT, AGENT, active!.id);
     const daemon = new DaemonService(database, new LiveHub(), undefined, undefined, false,
       undefined, false, undefined, undefined, undefined, { enabled: true, live: true });
     const contextDirectory = await mkdtemp(join(tmpdir(), 'history-search-'));
     const contextPath = join(contextDirectory, 'context.json');
-    await writeFile(contextPath, JSON.stringify({
-      roomId: OUTPUT, requestId: 'hsa-1', generationId: 'hsa-generation',
-    }));
+    await writeFile(contextPath, JSON.stringify({ roomId: OUTPUT, requestId: 'hsa-1' }));
     const server = createServer(async (request, response) => {
       try {
         expect(request.url).toBe('/v1/daemon/operations/searchInstitutionalHistory');
@@ -198,7 +197,7 @@ describe('authorized institutional history search', () => {
       reason: 'human_tag',
       turnRequestId: 'rhs-1',
     });
-    await claimAgentCommand(database, OUTPUT, AGENT, active!.id, 'rhs-generation');
+    await startQueuedTurn(database, OUTPUT, AGENT, active!.id);
     const daemon = new DaemonService(
       database,
       new LiveHub(),
@@ -214,14 +213,7 @@ describe('authorized institutional history search', () => {
     );
     const result = await daemon.execute(
       'searchInstitutionalHistory',
-      {
-        agentId: AGENT,
-        roomId: OUTPUT,
-        requestId: 'rhs-1',
-        generationId: 'rhs-generation',
-        query: 'workflow run screen UI design steps timeline',
-        limit: 10,
-      },
+      { agentId: AGENT, roomId: OUTPUT, requestId: 'rhs-1', query: 'workflow run screen UI design steps timeline', limit: 10 },
       AGENT,
     );
     console.log('Reproduction RHS-1:', JSON.stringify(result));

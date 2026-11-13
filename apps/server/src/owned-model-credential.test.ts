@@ -1,11 +1,10 @@
-import { OWNED_MODEL_UNKNOWN_GENERATION_MESSAGE } from './owned-model-errors.js';
 import { createHash, createHmac } from 'node:crypto';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import type { SqlDatabase } from './database.js';
-import { LEGACY_CREDENTIAL_BINDINGS_LIVE_SQL, OwnedModelCredentials } from './owned-model-credential.js';
+import { OwnedModelCredentials } from './owned-model-credential.js';
 import { OwnedModelAttempts } from './owned-model-attempt.js';
 import { MODEL_AGENT, MODEL_CLAIM, MODEL_KEY, MODEL_ROOM, MODEL_SOURCE, MODEL_WORKSPACE, ownedModelFixture } from './test-fixtures/owned-model.js';
-import { parkOwnedModelTerminal } from './owned-model-parking.js';
+import { endAgentTurn } from './agent-turn-end.js';
 
 describe('opaque immutable owned-model credential primitive', () => {
   let fixture: Awaited<ReturnType<typeof ownedModelFixture>>;
@@ -33,31 +32,18 @@ describe('opaque immutable owned-model credential primitive', () => {
     await db.transaction(tx=>credentials.assertCurrent(tx,actor));
     await credentials.authenticate(db,issued.token);
     await db.query(`INSERT INTO live_server_instances VALUES('reconnected-server',clock_timestamp());
-      UPDATE agent_connections SET connection_id='reconnected-socket',turn_transport_id='reconnected-socket',
+      UPDATE agent_connections SET connection_id='reconnected-socket',
         epoch=epoch+1,instance_id='reconnected-server',released_at=NULL`);
     expect(await db.transaction(tx=>credentials.issueInTransaction(tx,MODEL_CLAIM))).toEqual(issued);
     await db.transaction(tx=>credentials.assertCurrent(tx,actor));
     expect((await db.query('SELECT count(*)::int n FROM owned_model_credentials')).rows[0]).toEqual({n:1});
   });
 
-  it('names the retirement prerequisite for the signed connection columns: no live invocation still holds a legacy-bound credential', async () => {
-    const { db } = fixture;
-    const live = async () => (await db.query<{ live: number }>(LEGACY_CREDENTIAL_BINDINGS_LIVE_SQL)).rows[0]?.live;
-    expect(await live()).toBe(0);
-    await db.query(`INSERT INTO owned_model_credentials(id,key_version,token_hash,agent_id,owner_id,workspace_id,room_id,command_id,
-      generation_id,request_id,connection_id,connection_epoch,instance_id,model,agent_model,model_token_hash,expires_ms)
-      SELECT $1,key_version,token_hash,agent_id,owner_id,workspace_id,room_id,'legacy-command',generation_id,request_id,
-        'legacy-socket',1,'legacy-server',model,agent_model,model_token_hash,expires_ms FROM owned_model_credentials LIMIT 1`, ['f'.repeat(32)]);
-    expect(await live()).toBe(1);
-    await db.query(`SELECT beeline_finish_agent_command($1,'complete',NULL,NULL)`, [MODEL_CLAIM.commandId, MODEL_CLAIM.generationId]);
-    expect(await live()).toBe(0);
-  });
-
   it('separates the key-derivation and credential-message MAC domains from direct sealing-key MACs', async () => {
     const { db, issued, credentials } = fixture;
     const row = (await db.query('SELECT * FROM owned_model_credentials')).rows[0]!;
     const data = JSON.stringify([row.id, row.key_version, row.agent_id, row.owner_id, row.workspace_id, row.room_id, row.command_id,
-      row.generation_id, row.request_id, row.connection_id, row.connection_epoch === null ? null : Number(row.connection_epoch), row.instance_id, row.model,
+      row.request_id, row.connection_id, row.connection_epoch === null ? null : Number(row.connection_epoch), row.instance_id, row.model,
       row.agent_model, row.model_token_hash, row.expires_ms === null ? null : Number(row.expires_ms)]);
     const key = createHmac('sha256', MODEL_KEY).update('beeline:owned-model:credential-key:v1\0').digest();
     const mac = createHmac('sha256', key).update('beeline:owned-model:credential:v1\0').update(data).digest('hex');
@@ -83,7 +69,7 @@ describe('opaque immutable owned-model credential primitive', () => {
     // Synthetic DB-owner corruption bypasses the ordinary immutable trigger;
     // the original bearer still cannot authenticate the changed signed row.
     await db.query('ALTER TABLE owned_model_credentials DISABLE TRIGGER beeline_owned_model_credential_immutable');
-    await db.query(`UPDATE owned_model_credentials SET generation_id='another-generation'`);
+    await db.query(`UPDATE owned_model_credentials SET command_id='another-command'`);
     await expect(credentials.authenticate(db, issued.token)).rejects.toThrow('authority');
   });
 
@@ -96,41 +82,28 @@ describe('opaque immutable owned-model credential primitive', () => {
       if (change === 'rotation') await db.query(`UPDATE free_agents SET model_token_hash=$2 WHERE agent_id=$1`, [MODEL_AGENT, 'd'.repeat(64)]);
       if (change === 'retired') await db.query('UPDATE free_agents SET removed_at=clock_timestamp() WHERE agent_id=$1', [MODEL_AGENT]);
       if (change === 'model') await db.query(`UPDATE free_agents SET model='synthetic/other' WHERE agent_id=$1`, [MODEL_AGENT]);
-      if (change === 'command') await db.query(`UPDATE agent_commands SET state='pending',generation_id=NULL,turn_owner_connection_id=NULL,turn_owner_epoch=NULL WHERE id=$1`, [MODEL_CLAIM.commandId]);
+      if (change === 'command') await db.query(`UPDATE agent_commands SET state='cancelled' WHERE id=$1`, [MODEL_CLAIM.commandId]);
       if (change === 'stop') await db.query(`UPDATE agent_commands SET action='stop' WHERE id=$1`, [MODEL_CLAIM.commandId]);
       await expect(credentials.assertCurrent(db, actor)).rejects.toThrow('authority');
       await expect(credentials.authenticate(db, issued.token)).rejects.toThrow('authority');
     },
   );
 
-  it('does not issue a new credential for a generation the command no longer holds or manufacture a trusted actor from JSON', async () => {
+  it('does not issue another item’s credential or manufacture a trusted actor from JSON', async () => {
     const { db, credentials, actor } = fixture;
-    await expect(db.transaction(tx => credentials.issueInTransaction(tx, { ...MODEL_CLAIM,
-      generationId: 'old-generation' }))).rejects.toThrow('authority');
+    await expect(db.transaction(tx => credentials.issueInTransaction(tx, { ...MODEL_CLAIM, commandId: 'unknown-item' }))).rejects.toThrow('authority');
     expect(() => credentials.actor({ binding: actor.binding } as typeof actor)).toThrow('authority');
     expect((await db.query('SELECT count(*)::int count FROM owned_model_credentials')).rows[0]?.count).toBe(1);
   });
-
-  it.each(['private_payload', 'review_context'] as const)('rolls a new %s command generation claim back while its prior model outcome remains UNKNOWN', async kind => {
+  it.each(['private_payload', 'review_context'] as const)('keeps the same item credential after optional %s changes with an UNKNOWN model result', async kind => {
     const { db, credentials, actor, issued } = fixture;
-    await new OwnedModelAttempts(db, credentials).reserve(actor, '11111111-1111-4111-8111-111111111111', { step: 'synthetic request' }, async () => ({
-      reservation: { day: '2026-11-02', reserved: 16, maxOutput: 8, reservedUsd: 0.01, credit: 0 },
-      payload: { model: actor.binding.model, max_tokens: 8, messages: [] },
-    }));
-    // Exact current claim recovery remains reconstructive, with no new bearer,
-    // generation, reservation or provider admission despite its UNKNOWN.
+    const attempts = new OwnedModelAttempts(db, credentials);
+    const prepared = async () => ({ reservation: { day: '2026-11-02', reserved: 16, maxOutput: 8, reservedUsd: 0.01, credit: 0 },
+      payload: { model: actor.binding.model, max_tokens: 8, messages: [] } });
+    await attempts.reserve(actor, '11111111-1111-4111-8111-111111111111', { step: 'request' }, prepared);
+    await db.query(`UPDATE agent_commands SET ${kind}='{"synthetic":true}'::jsonb WHERE id=$1`, [MODEL_CLAIM.commandId]);
     expect(await db.transaction(tx => credentials.issueInTransaction(tx, MODEL_CLAIM))).toEqual(issued);
-    await db.query(`UPDATE agent_commands SET ${kind}='{"synthetic":true}'::jsonb,state='pending',generation_id=NULL,
-      turn_owner_connection_id=NULL,turn_owner_epoch=NULL WHERE id=$1`, [MODEL_CLAIM.commandId]);
-    await expect(db.transaction(async tx => {
-      await tx.query(`UPDATE agent_commands SET state='claimed',generation_id='next-generation',claimed_at=clock_timestamp(),
-        turn_owner_connection_id=$2,turn_owner_epoch=$3 WHERE id=$1`, [MODEL_CLAIM.commandId, MODEL_SOURCE.connectionId, MODEL_SOURCE.epoch]);
-      return credentials.issueInTransaction(tx, { ...MODEL_CLAIM, generationId: 'next-generation' });
-    })).rejects.toMatchObject({ code: '23514', message: OWNED_MODEL_UNKNOWN_GENERATION_MESSAGE });
-    expect((await db.query(`SELECT state,generation_id FROM agent_commands WHERE id=$1`, [MODEL_CLAIM.commandId])).rows)
-      .toEqual([{ state: 'pending', generation_id: null }]);
-    expect((await db.query(`SELECT 1 FROM agent_command_generation_owners WHERE generation_id='next-generation'`)).rowCount).toBe(0);
-    expect((await db.query('SELECT * FROM owned_model_credentials')).rowCount).toBe(1);
+    expect((await attempts.reserve(actor, '11111111-1111-4111-8111-111111111111', { step: 'request' }, prepared)).permit).toBeUndefined();
     expect((await db.query('SELECT state FROM owned_model_attempts')).rows).toEqual([{ state: 'unknown' }]);
   });
 
@@ -140,10 +113,10 @@ describe('opaque immutable owned-model credential primitive', () => {
       payload: { model: actor.binding.model, max_tokens: 8, messages: [] } });
     await attempts.reserve(actor, '11111111-1111-4111-8111-111111111111', { step: 'same synthetic semantic payload' }, prepared);
     await db.query(`INSERT INTO agent_commands(id,room_id,agent_id,turn_request_id,action,reason,root_command_id,root_source_message_id,
-      agent_depth,state,generation_id,claimed_at,turn_owner_connection_id,turn_owner_epoch)
+      agent_depth,state)
       SELECT 'different-command',room_id,agent_id,'different-request','input','human_tag','different-command','different-human-source',
-        0,'claimed','different-generation',clock_timestamp(),turn_owner_connection_id,turn_owner_epoch FROM agent_commands WHERE id=$1`, [MODEL_CLAIM.commandId]);
-    const granted = await db.transaction(tx => credentials.issueInTransaction(tx, { ...MODEL_CLAIM, commandId: 'different-command', generationId: 'different-generation' }));
+        0,'pending' FROM agent_commands WHERE id=$1`, [MODEL_CLAIM.commandId]);
+    const granted = await db.transaction(tx => credentials.issueInTransaction(tx, { ...MODEL_CLAIM, commandId: 'different-command' }));
     const different = await credentials.authenticate(db, granted.token);
     expect((await attempts.reserve(different, '22222222-2222-4222-8222-222222222222', { step: 'same synthetic semantic payload' }, prepared)).permit).toBeDefined();
     expect((await db.query('SELECT command_id,state FROM owned_model_attempts ORDER BY command_id')).rows).toEqual([
@@ -151,25 +124,23 @@ describe('opaque immutable owned-model credential primitive', () => {
     ]);
   });
 
-  it('keeps one generation in two Rooms as two invocations with their own credential and owner end', async () => {
+  it('keeps separate queue-item credentials across Rooms when one item is stopped', async () => {
     const { db, credentials, issued } = fixture;
     const otherRoom = '33333333-3333-4333-8333-333333333333';
     await db.query(`INSERT INTO rooms(id,workspace_id,name) VALUES($1,$2,'Other Room')`, [otherRoom, MODEL_WORKSPACE]);
     await db.query(`INSERT INTO memberships(workspace_id,room_id,identity_id,role) VALUES($1,$2,$3,'member')`,
       [MODEL_WORKSPACE, otherRoom, MODEL_AGENT]);
     await db.query(`INSERT INTO agent_commands(id,room_id,agent_id,turn_request_id,action,reason,root_command_id,
-      root_source_message_id,agent_depth,state,generation_id,claimed_at,execution_kind)
-      VALUES('other-command',$1,$2,'other-request','input','human_tag','other-command','other-source',0,'claimed',$3,clock_timestamp(),'helper')`,
-      [otherRoom, MODEL_AGENT, MODEL_CLAIM.generationId]);
+      root_source_message_id,agent_depth,state)
+      VALUES('other-command',$1,$2,'other-request','input','human_tag','other-command','other-source',0,'pending')`,
+      [otherRoom, MODEL_AGENT]);
     const other = await db.transaction(tx => credentials.issueInTransaction(tx,
-      { agentId: MODEL_AGENT, commandId: 'other-command', generationId: MODEL_CLAIM.generationId }));
+      { agentId: MODEL_AGENT, commandId: 'other-command' }));
     expect(other.token).not.toBe(issued.token);
     expect((await credentials.authenticate(db, other.token)).binding.roomId).toBe(otherRoom);
     expect((await credentials.authenticate(db, issued.token)).binding.roomId).toBe(MODEL_ROOM);
-    await db.transaction(tx => parkOwnedModelTerminal(tx, { agentId: MODEL_AGENT, roomId: otherRoom, requestId: 'other-request',
-      generationId: MODEL_CLAIM.generationId, status: 'failed', modelOwnerEnd: { journalUnavailable: true } }, MODEL_AGENT));
-    expect((await db.query(`SELECT command_id FROM agent_command_owner_ends ORDER BY command_id`)).rows)
-      .toEqual([{ command_id: 'other-command' }]);
+    await db.transaction(tx => endAgentTurn(tx, { id: 'other-command' }, 'cancelled', 'stop'));
+    await expect(credentials.authenticate(db, other.token)).rejects.toThrow('authority');
     expect((await credentials.authenticate(db, issued.token)).binding.commandId).toBe(MODEL_CLAIM.commandId);
   });
 });

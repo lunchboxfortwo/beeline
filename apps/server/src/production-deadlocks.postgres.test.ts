@@ -1,3 +1,4 @@
+import { startQueuedCommand } from './test-fixtures/queued-turn.test-support.js';
 import { DatabaseLockDiagnostics } from './database-lock-diagnostics.js';
 import { loadCorner } from './corner-lifecycle-read-state.js';
 import { seedCornerOpening } from './test-fixtures/corner-commands.js';
@@ -306,7 +307,7 @@ describe.skipIf(!url)('production transaction lock ordering', () => {
     const command = path === 'open'
       ? (await daemon.execute('getAgentCommands', { roomId: room }, agent)).commands.find(command => command.sourceMessageId === messageId)
       : undefined;
-    if (command) await daemon.execute('claimAgentCommand', { roomId: room, commandId: command.id, generationId: 'lock-proof' }, agent);
+    if (command) await startQueuedCommand(daemon, { roomId: room, commandId: command.id }, agent);
     await ensureSystemIdentity(first);
     await observer.query('BEGIN');
     await observer.query('SELECT id FROM identities WHERE id=$1 FOR NO KEY UPDATE', [SYSTEM_IDENTITY_ID]);
@@ -315,9 +316,7 @@ describe.skipIf(!url)('production transaction lock ordering', () => {
       if (path === 'refresh') expect(await refreshCornerAttention(first, id)).toEqual({ parentId: room });
       else {
         expect(command).toBeDefined();
-        id = (await daemon.execute('createCorner', { roomId: room, requestId: command!.turnRequestId,
-          generationId: 'lock-proof', name: 'Independent-corner', objective: 'Prove independent corner opening',
-          brief: { spec: 'Prove independent corner opening', approval: { sourceMessageId: messageId } } }, agent)).cornerId;
+        id = (await daemon.execute('createCorner', { roomId: room, requestId: command!.turnRequestId, name: 'Independent-corner', objective: 'Prove independent corner opening', brief: { spec: 'Prove independent corner opening', approval: { sourceMessageId: messageId } } }, agent)).cornerId;
       }
       const visible = (await phone.readCorners(room, owner))?.corners.find(item => item.corner.id === id);
       expect(visible?.state).toBe(path === 'open' ? 'working' : 'idle');

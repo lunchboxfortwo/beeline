@@ -363,13 +363,7 @@ const fixture = monolithFixture();
     const outsideTurn = await fixture.request(
       '/v1/daemon/operations/postRoomEvent',
       'POST',
-      {
-        roomId: ROOM,
-        requestId: 'event-without-turn',
-        generationId: 'fixture-generation',
-        kind: 'agent:handoff',
-        consequence: 'the branch is ready',
-      },
+      { roomId: ROOM, requestId: 'event-without-turn', kind: 'agent:handoff', consequence: 'the branch is ready' },
       fixture.daemonToken,
     );
     expect(outsideTurn.status).toBe(400);

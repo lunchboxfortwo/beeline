@@ -1,3 +1,4 @@
+import { startQueuedTurn } from './test-fixtures/queued-turn.test-support.js';
 import * as daemonWorkbench from './daemon/workbench.js';
 import type { AddressInfo } from 'node:net';
 import { captureException } from '@sentry/node';
@@ -9,7 +10,7 @@ import { LiveHub } from './live.js';
 import { TokenAuth, tokenHash } from './auth.js';
 import { PhoneService } from './phone-service.js';
 import { createBeelineServer } from './server.js';
-import { createAgentCommand, claimAgentCommand } from './agent-command.js';
+import { createAgentCommand } from './agent-command.js';
 
 vi.mock('@sentry/node', () => ({ captureException: vi.fn() }));
 vi.spyOn(daemonWorkbench, 'daemonWarmConnectorIndex').mockResolvedValue();
@@ -40,8 +41,8 @@ it('Reproduction SERVER-4K: workflow unavailable and already-ended refusals stay
     await db.query(`INSERT INTO daemon_tokens(token_hash,agent_id) VALUES($1,$2)`, [tokenHash(TOKEN), agent]);
     await db.query(`INSERT INTO messages(id,room_id,author_id,text) VALUES($1,$2,$3,'Start the feedback sweep')`, [source, room, owner]);
     const command = await createAgentCommand(db, { roomId: room, agentId: agent, sourceMessageId: source, reason: 'human_tag' });
-    await claimAgentCommand(db, room, agent, command!.id, 'proof');
-    const turn = { roomId: room, requestId: command!.turn_request_id, generationId: 'proof' };
+    await startQueuedTurn(db, room, agent, command!.id);
+    const turn = { roomId: room, requestId: command!.turn_request_id };
     await new Promise<void>(resolve => server.listen(0, '127.0.0.1', resolve));
     const origin = `http://127.0.0.1:${(server.address() as AddressInfo).port}`;
     const post = async (operation: string, input: unknown) => {

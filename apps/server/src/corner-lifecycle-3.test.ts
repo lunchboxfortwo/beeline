@@ -402,7 +402,7 @@ describe('the implementer merges when the gate opens (AC-5)', () => {
     await say(R, '@goosy look after the widget corner');
     const turn = (await commands(B, R)).at(-1)!;
     await claim(turn);
-    const authority = { roomId: R, requestId: turn.turnRequestId, generationId: 'g1' };
+    const authority = { roomId: R, requestId: turn.turnRequestId };
     await wiredDaemon.execute('postCornerMessage', { ...authority, cornerId, text: 'A note from the Room' }, B);
     expect((await rootFixture.db.query(`SELECT author_id FROM messages WHERE room_id=$1 AND text='A note from the Room'`, [cornerId])).rows)
       .toEqual([{ author_id: B }]);
@@ -506,23 +506,17 @@ describe('the implementer merges when the gate opens (AC-5)', () => {
       await say(cornerId, '@hoots what colour is the widget?');
       const inCorner = (await commands(A, cornerId)).at(-1)!;
       await claim(inCorner);
-      await expect(rootFixture.daemon.execute('getRoomMessage', {
-        roomId: cornerId, requestId: inCorner.turnRequestId, generationId: 'g1', messageId: roomMessage,
-      }, A)).resolves.toMatchObject({ body: expect.stringContaining('ships blue') });
+      await expect(rootFixture.daemon.execute('getRoomMessage', { roomId: cornerId, requestId: inCorner.turnRequestId, messageId: roomMessage }, A)).resolves.toMatchObject({ body: expect.stringContaining('ships blue') });
       // Sibling corners share the same current Room audience.
       const sibling = await open();
       await say(sibling, 'Sibling fact: the widget is heavy');
       const siblingMessage = (await rootFixture.db.query<{ id: string }>(`SELECT id FROM messages WHERE room_id=$1 AND text LIKE 'Sibling fact%'`, [sibling])).rows[0]!.id;
-      await expect(rootFixture.daemon.execute('getRoomMessage', {
-        roomId: cornerId, requestId: inCorner.turnRequestId, generationId: 'g1', messageId: siblingMessage,
-      }, A)).resolves.toMatchObject({ body: expect.stringContaining('heavy') });
+      await expect(rootFixture.daemon.execute('getRoomMessage', { roomId: cornerId, requestId: inCorner.turnRequestId, messageId: siblingMessage }, A)).resolves.toMatchObject({ body: expect.stringContaining('heavy') });
 
       await say(R, '@hoots when does the widget ship?');
       const inRoom = (await commands(A, R)).at(-1)!;
       await claim(inRoom);
-      await expect(rootFixture.daemon.execute('getRoomMessage', {
-        roomId: R, requestId: inRoom.turnRequestId, generationId: 'g1', messageId: cornerMessage,
-      }, A)).resolves.toMatchObject({ body: expect.stringContaining('on Friday') });
+      await expect(rootFixture.daemon.execute('getRoomMessage', { roomId: R, requestId: inRoom.turnRequestId, messageId: cornerMessage }, A)).resolves.toMatchObject({ body: expect.stringContaining('on Friday') });
     } finally {
       await rootFixture.db.query(`DELETE FROM memberships WHERE identity_id IN ($1,$2)`, [cornerOnly, roomOnly]);
     }

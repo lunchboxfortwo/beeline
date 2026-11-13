@@ -1,3 +1,4 @@
+import { startQueuedCommand } from './test-fixtures/queued-turn.test-support.js';
 import { advanceCorner } from './corner-lifecycle.js';
 import { SYSTEM_IDENTITY_ID } from '@beeline/api-contract/system-identity';
 import { cornerReportWaiting } from './corner-state.js';
@@ -113,11 +114,11 @@ const post = async (id: string, text: string, author = WORKER, age = '0 hours') 
   );
 // The idle alert now wakes its opening commander inside the corner whenever
 // the commander has effective access (inherited parent-roster access counts).
-const commanderFlags = async () => (await readAgentCommands(db, C, COMMANDER)).commands;
+const commanderFlags = async () => (await readAgentCommands(db, COMMANDER, C)).commands;
 
 it('MODEL-UNKNOWN: a model owner end remains terminal while a new explicit command can run', async () => {
   const command=(await wake())!;
-  await daemon.execute('claimAgentCommand',{roomId:C,commandId:command.id,generationId:'unknown-model'},WORKER);
+  await startQueuedCommand(daemon, { roomId:C, commandId:command.id }, WORKER);
   expect((await db.query<{worker_active:boolean}>(cornerIdleSql('$1'),[C])).rows[0]?.worker_active).toBe(true);
   await db.query(`INSERT INTO agent_command_owner_ends(command_id,generation_id,model_request_id)
     VALUES($1,'unknown-model',NULL)`,[command.id]);
@@ -128,8 +129,8 @@ it('MODEL-UNKNOWN: a model owner end remains terminal while a new explicit comma
   await post('explicit-after-unknown','Do this new task',HUMAN);
   const next=(await createAgentCommand(db,{id:'explicit-after-unknown-command',roomId:C,agentId:WORKER,
     sourceMessageId:'explicit-after-unknown',reason:'human_tag'}))!;
-  expect((await readAgentCommands(db,C,WORKER)).commands.map(item=>item.id)).toContain(next.id);
-  await daemon.execute('claimAgentCommand',{roomId:C,commandId:next.id,generationId:'new-explicit-generation'},WORKER);
+  expect((await readAgentCommands(db, WORKER, C)).commands.map(item=>item.id)).toContain(next.id);
+  await startQueuedCommand(daemon, { roomId:C, commandId:next.id }, WORKER);
   expect((await db.query('SELECT state,generation_id FROM agent_commands WHERE id=$1',[command.id])).rows)
     .toEqual([{state:'complete',generation_id:'unknown-model'}]);
 });
@@ -139,22 +140,21 @@ it('a pre-claim failure cannot end queued work; its owner can report a plain fai
   await expect(daemon.execute('postAgentTurnReceipt', {roomId:C,requestId:command.turn_request_id,
     status:'failed',reason:'git fetch failed: cannot lock ref'},WORKER)).rejects.toThrow('authority rejected');
   expect(await state()).toBe('working');
-  await daemon.execute('claimAgentCommand',{roomId:C,commandId:command.id,generationId:'workspace-failure'},WORKER);
-  await daemon.execute('postAgentTurnReceipt',{roomId:C,requestId:command.turn_request_id,generationId:'workspace-failure',
-    status:'failed',reason:'git fetch failed: cannot lock ref'},WORKER);
+  await startQueuedCommand(daemon, { roomId:C, commandId:command.id }, WORKER);
+  await daemon.execute('postAgentTurnReceipt',{ roomId:C, requestId:command.turn_request_id, status:'failed', reason:'git fetch failed: cannot lock ref' },WORKER);
   expect(await state()).toBe('idle');
-  const failures=(await readAgentCommands(db,C,COMMANDER)).commands.filter(item=>item.reason==='report'&&item.source.body.startsWith('failed:'));
+  const failures=(await readAgentCommands(db, COMMANDER, C)).commands.filter(item=>item.reason==='report'&&item.source.body.startsWith('failed:'));
   expect(failures).toHaveLength(1);
   expect(failures[0]!.source.body).toContain('cannot lock ref');
 });
 
 async function turn(agent = WORKER) {
-  let command=agent===COMMANDER?undefined:(await readAgentCommands(db,C,agent)).commands[0];
+  let command=agent===COMMANDER?undefined:(await readAgentCommands(db, agent, C)).commands[0];
   if(!command) {
     const queued=(await wake(agent,randomUUID()))!;
-    command=(await readAgentCommands(db,C,agent)).commands.find(item=>item.id===queued.id)!;
+    command=(await readAgentCommands(db, agent, C)).commands.find(item=>item.id===queued.id)!;
   }
-  await daemon.execute('claimAgentCommand',{roomId:C,commandId:command.id,generationId:'actual'},agent);
+  await startQueuedCommand(daemon, { roomId:C, commandId:command.id }, agent);
 }
 async function end(agent = WORKER, age = 0) {
   await db.query(`SELECT beeline_finish_agent_command(id,'complete',NULL,NULL) FROM agent_commands
@@ -385,7 +385,7 @@ it('Reproduction CORNER-REVIEW-ROLE: a dispatched reviewer stays Review after Ro
   const serviceStates=async()=>[await state(),(await phone.readCorners(ROOM,HUMAN))!.corners[0]!.state];
   // A queued reviewer keeps the corner in review during its pickup window.
   expect(await serviceStates()).toEqual(['review','review']);
-  await daemon.execute('claimAgentCommand',{roomId:C,commandId:dispatch!.id,generationId:'review-proof'},REVIEWER);
+  await startQueuedCommand(daemon, { roomId:C, commandId:dispatch!.id }, REVIEWER);
   expect(await serviceStates()).toEqual(['review','review']);
   await db.query(`UPDATE rooms SET reviewer_agent_id=NULL WHERE id=$1`,[ROOM]);
   expect(await serviceStates()).toEqual(['review','review']);
@@ -409,8 +409,8 @@ it('Reproduction IDLE-1: incidental orders cannot redirect an idle alert from it
   await db.query('DELETE FROM agent_turns WHERE room_id=$1', [C]);
   await runCornerAttention(db);
   expect(await commanderFlags()).toHaveLength(1);
-  expect((await readAgentCommands(db, ROOM, REVIEWER)).commands).toHaveLength(0);
-  expect((await readAgentCommands(db, C, WORKER)).commands).toHaveLength(0);
+  expect((await readAgentCommands(db, REVIEWER, ROOM)).commands).toHaveLength(0);
+  expect((await readAgentCommands(db, WORKER, C)).commands).toHaveLength(0);
 });
 
 it.each(['failed', 'complete'])('Reproduction IDLE-STORM: commander %s does not reopen its own idle episode', async (status) => {
@@ -493,8 +493,8 @@ it('Reproduction R1: a worker order waiting on an offline helper stays working',
     [behind, WS, HUMAN],
   );
   await db.query(
-    `INSERT INTO agent_turns(room_id,request_id,agent_id,status,generation_id)
-     VALUES($1,$2,$3,'working','g-live')`,
+    `INSERT INTO agent_turns(room_id,request_id,agent_id,status)
+     VALUES($1,$2,$3,'working')`,
     [behind, 'f'.repeat(64), WORKER],
   );
   expect(await daemon.execute('getCornerRestoreState', { cornerId: C }, WORKER)).toMatchObject({

@@ -55,7 +55,7 @@ describe('actual owned model endpoint and actual quota adapter', () => {
   });
 
   it('keeps the original claimed invocation usable after the former execution window', async () => {
-    await f.db.query("UPDATE agent_commands SET claimed_at=clock_timestamp()-interval '2 hours'");
+    await f.db.query("UPDATE agent_commands SET created_at=clock_timestamp()-interval '2 hours'");
     const response = await call();
     expect(response.status).toBe(200);
     expect(await response.text()).toContain('SYNTHETIC_PRIVATE_ANSWER');

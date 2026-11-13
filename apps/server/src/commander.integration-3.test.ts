@@ -116,8 +116,8 @@ it.each(['human', 'order'])('Reproduction R1: silent completion preserves fresh 
   await rootFixture.daemon.execute('postAgentDraft', { ...authority(next), agentId: WORKER, turnId: next.turnRequestId, text: 'Checking the widget' }, WORKER);
   await rootFixture.daemon.execute('retractAgentLiveOutput', { ...authority(next), agentId: WORKER, turnId: next.turnRequestId, kind: 'draft' }, WORKER);
   await rootFixture.daemon.execute('postAgentTurnReceipt', { ...authority(next), status: 'complete', completionKind: 'no-reply' }, WORKER);
-  expect((await rootFixture.db.query(`SELECT state,generation_id FROM agent_commands WHERE id=$1`, [next.id])).rows[0])
-    .toMatchObject({ state: 'complete', generation_id: authority(next).generationId });
+  expect((await rootFixture.db.query(`SELECT state FROM agent_commands WHERE id=$1`, [next.id])).rows[0])
+    .toMatchObject({ state: 'complete' });
   expect(await commands(opened.cornerId, WORKER)).toEqual([]);
   expect((await commands(DM, RUBY)).filter(command => command.reason === 'report')).toEqual([]);
 });

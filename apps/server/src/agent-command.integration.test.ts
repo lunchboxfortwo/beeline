@@ -1,46 +1,27 @@
+import { startQueuedCommand } from './test-fixtures/queued-turn.test-support.js';
 import { describe, expect, it, taggedIdentityIdsSql, seedCornerOpening, PhoneService, DaemonService, createAgentCommand, H, A, B, P, R, C, id, stopProofPostgresUrl, db, phone, daemon, live, commands, send, disconnectHelper, helperOwner, queuedHumanTags, queueStopOrders, claim, result, rootFixture, fixtureScope1, type SqlDatabase } from './test-support-agent-command.integration.test-support.js';
 
 
 
 
 it.each(['ordinary', 'tagged', 'threaded', 'private', 'private-agent', 'corner', 'dm'])(
-  'Reproduction R1: refuses final text after no-reply on the %s output path', async path => {
+  'a silence acknowledgement preserves the answer obligation on the %s path', async path => {
     const roomId = path === 'corner' ? C : R;
-    if (path === 'dm')
-      await rootFixture.db.query(`UPDATE rooms SET direct_participants=$2::jsonb WHERE id=$1`, [R, JSON.stringify([H, A])]);
-    const queued = await createAgentCommand(rootFixture.db, {
-      roomId, agentId: A, sourceMessageId: null, reason: 'system',
-      ...(path.startsWith('private') ? {
-        privatePayload: { kind: 'order' as const, authorId: path === 'private-agent' ? B : H, fromRoomId: R, text: 'Observe silently' },
-        reason: 'order' as const,
-      } : {}),
-    });
-    const command = (await commands(A, roomId)).find(c => c.id === queued!.id)!;
+    if (path === 'dm') await rootFixture.db.query('UPDATE rooms SET direct_participants=$2::jsonb WHERE id=$1', [R, JSON.stringify([H,A])]);
+    const queued = await createAgentCommand(rootFixture.db, { roomId, agentId:A, sourceMessageId:null,
+      reason:path.startsWith('private')?'order':'system', ...(path.startsWith('private')?{
+        privatePayload:{kind:'order',authorId:path==='private-agent'?B:H,fromRoomId:R,text:'Please answer'}}:{}) });
+    const command=(await commands(A,roomId)).find(c=>c.id===queued!.id)!;
     await claim(command);
-    await rootFixture.daemon.execute('postAgentTurnReceipt', {
-      roomId, requestId: command.turnRequestId, generationId: 'g1',
-      status: 'complete', completionKind: 'no-reply',
-    }, A, await helperOwner(A));
-    const text = `R1 unwanted closing sentence${path === 'tagged' ? ' @goosy' : ''}`;
-    const parent = path === 'threaded' ? await send('Thread parent') : undefined;
-    const before = (await rootFixture.phone.readRoom(roomId, H))!.messages.map(m => m.id);
-    // Deliberate silence remains terminal; attempted text receives an explicit refusal.
-    await expect(result(command, text, 'g1', parent ? { replyToMessageId: parent.messageId } : {})).rejects.toThrow('not delivered');
-    await expect(result(command, text, 'g1', parent ? { replyToMessageId: parent.messageId } : {})).rejects.toThrow('not delivered');
-    await expect(result(command, text, 'other-generation')).rejects.toThrow('authority rejected');
-    expect((await rootFixture.phone.readRoom(roomId, H))!.messages.map(m => m.id)).toEqual(before);
-    expect((await rootFixture.db.query(`SELECT 1 FROM messages WHERE author_id=$1 AND text=$2`, [A, text])).rowCount).toBe(0);
-    expect((await commands(B)).filter(c => c.source.body.includes(text))).toEqual([]);
-    expect((await rootFixture.db.query(`SELECT completion_kind FROM agent_turns
-      WHERE room_id=$1 AND agent_id=$2 AND request_id=$3`, [roomId, A, command.turnRequestId])).rows)
-      .toEqual([{ completion_kind: 'no-reply' }]);
-    const next = await createAgentCommand(rootFixture.db, { roomId, agentId: A, sourceMessageId: null, reason: 'system' });
-    const nextCommand = (await commands(A, roomId)).find(c => c.id === next!.id)!;
-    await claim(nextCommand, 'next-generation');
-    await result(nextCommand, 'R1 next turn remains visible', 'next-generation');
-    expect((await rootFixture.phone.readRoom(roomId, H))!.messages.some(m => m.text === 'R1 next turn remains visible')).toBe(true);
-  },
-);
+    expect(await rootFixture.daemon.execute('markAgentTurnSilent',{roomId,requestId:command.turnRequestId},A)).toMatchObject({answered:false});
+    expect((await commands(A,roomId)).map(c=>c.id)).toContain(command.id);
+    const text='Here is the requested answer for '+path+(path==='tagged'?' @goosy':'');
+    const posted=await result(command,text);
+    expect((await result(command,text)).id).toBe(posted.id);
+    expect((await commands(A,roomId)).map(c=>c.id)).not.toContain(command.id);
+    if(path==='private-agent') expect((await commands(B)).some(c=>c.source.body.includes(text))).toBe(true);
+    else expect((await rootFixture.db.query('SELECT count(*)::int n FROM messages WHERE author_id=$1 AND text=$2',[A,text])).rows).toEqual([{n:1}]);
+  });
 
 
 
@@ -64,23 +45,7 @@ it.each(['I posted nothing.', 'Nothing to post.', "I won't post to the Room.", '
   });
 
 
-it('WAKE-STORM: a no_reply_needed receipt posts nothing on a system wake', async () => {
-  for (const roomId of [R, C]) {
-    const queued = await createAgentCommand(rootFixture.db, { roomId, agentId: A, sourceMessageId: null, reason: 'system' });
-    const command = (await commands(A, roomId)).find(c => c.id === queued!.id)!;
-    await claim(command);
-    await rootFixture.daemon.execute('postAgentTurnReceipt', {
-      roomId, requestId: command.turnRequestId, generationId: 'g1',
-      status: 'complete', completionKind: 'no-reply',
-    }, A, await helperOwner(A));
-    const text = 'Nonhuman wake only … Ending silently';
-    await expect(result(command, text)).rejects.toThrow('not delivered');
-    await expect(result(command, text)).rejects.toThrow('not delivered');
-    expect((await rootFixture.db.query('SELECT 1 FROM messages WHERE request_id=$1 AND author_id=$2', [command.turnRequestId, A])).rowCount).toBe(0);
-    expect((await rootFixture.db.query('SELECT completion_kind FROM agent_turns WHERE request_id=$1 AND agent_id=$2', [command.turnRequestId, A])).rows[0]?.completion_kind).toBe('no-reply');
-    await expect(result(command, text, 'wrong-generation')).rejects.toThrow('authority rejected');
-  }
-});
+
 
 
 it('WAKE-STORM: a human wake publishes its report-status reply as written', async () => {
@@ -129,7 +94,7 @@ it.each(['deleted', 'stopped'])('QUEUED-TAGS-REPEAT: reconnect preserves unrelat
   // The reconnected helper resumes the running turn in its own generation.
   await claim(snapshot[0]!);
   await result(snapshot[0]!, 'First answer');
-  expect((await commands()).filter(command => command.action === 'input').map(command => command.sourceMessageId)).toEqual([messages[2]!.messageId]);
+  expect((await commands()).filter(command => command.action === 'input').map(command => command.sourceMessageId)).toEqual((kind === 'deleted' ? messages.slice(1) : messages.slice(2)).map(message => message.messageId));
 });
 
 it('QUEUED-TAGS-REPEAT: each source retains only its own attachments', async () => {
@@ -164,9 +129,9 @@ it('Reproduction cold-beebee-first-reply: shows every queued agent, then only it
     FROM agent_turns WHERE agent_id=$1`, [A])).rows[0]?.fresh).toBe(true);
   const after = await rootFixture.phone.readRoom(R, H);
   expect(after?.latestAgentTurns?.filter(turn => turn.agentPubkey === A)).toEqual([
-    expect.objectContaining({ status: 'working', generationId: 'real-helper' }),
+    expect.objectContaining({ status: 'working' }),
   ]);
-  expect(after?.pendingAgentCommands).toEqual([expect.objectContaining({ agentPubkey: B })]);
+  expect(after?.pendingAgentCommands).toEqual(expect.arrayContaining([expect.objectContaining({ agentPubkey: A }), expect.objectContaining({ agentPubkey: B })]));
 });
 
 
@@ -206,8 +171,7 @@ it('Stop preserves other senders, source Rooms, targets, human mentions and newe
   expect(remaining.some(command => command.source.body.includes('Human follow-up'))).toBe(true);
   expect(remaining.some(command => command.id === newer!.id)).toBe(true);
   expect((await rootFixture.db.query(`SELECT 1 FROM agent_commands WHERE agent_id=$1 AND state='pending' AND private_payload->>'text'='survivor'`, [B])).rowCount).toBe(1);
-  await rootFixture.daemon.execute('order', { roomId: R, address: R, agent: 'hoots', text: 'after Stop',
-    requestId: root.turnRequestId, generationId: 'g1' }, B);
+  await rootFixture.daemon.execute('order', { roomId: R, address: R, agent: 'hoots', text: 'after Stop', requestId: root.turnRequestId }, B);
   const after = (await commands()).find(command => command.source.body.includes('after Stop'))!;
   await expect(claim(after)).resolves.toBeUndefined();
 });
@@ -254,16 +218,14 @@ it.runIf(Boolean(stopProofPostgresUrl))('Stop holds the claim fence through the 
   let claimAttempt: Promise<unknown> | undefined, arriving: Promise<unknown> | undefined;
   try {
     await stopped;
-    claimAttempt = new DaemonService(wrapClaim(db), live).execute('claimAgentCommand',
-      { roomId: R, commandId: queued[1]!.id, generationId: 'racing-helper' }, A, await helperOwner(A));
+    claimAttempt = startQueuedCommand(new DaemonService(wrapClaim(db), live), { roomId: R, commandId: queued[1]!.id }, A);
     // Attach the rejection handler before releasing Stop.
     const rejected = expect(claimAttempt).rejects.toThrow('command claim conflict');
     await started;
     await expect(db.transaction(transaction => transaction.query(
       'SELECT identity_id FROM memberships WHERE room_id=$1 AND identity_id=$2 FOR UPDATE NOWAIT',[R,A])))
       .rejects.toMatchObject({code:'55P03'});
-    arriving = new DaemonService(wrapClaim(db,orderStarted),live).execute('order', { roomId: R, address: R, agent: 'hoots', text: 'arrived during Stop',
-      requestId: root.turnRequestId, generationId: 'g1' }, B);
+    arriving = new DaemonService(wrapClaim(db,orderStarted),live).execute('order', { roomId: R, address: R, agent: 'hoots', text: 'arrived during Stop', requestId: root.turnRequestId }, B);
     await Promise.race([queuedOrder,arriving.then(()=>{throw new Error('Order did not reach the recipient fence');})]); release();
     await stop;
     await rejected; await arriving;
@@ -284,7 +246,7 @@ it('preserves each fresh follow-up while another request is being answered', asy
   const pending = await commands();
   expect(pending).toHaveLength(3);
   await claim(pending[0]!);
-  expect((await commands()).map(command => command.id)).toEqual(pending.slice(1).map(command => command.id));
+  expect((await commands()).map(command => command.id)).toEqual(pending.map(command => command.id));
   await result(pending[0]!, 'First answer');
   expect((await commands()).map(command => command.source.body)).toEqual(['@hoots Second request', '@hoots Third request']);
 });
@@ -437,7 +399,7 @@ it('lets the corner agent retitle its corner during its turn', async () => {
   const rename = (name: string) =>
     rootFixture.daemon.execute(
       'renameCorner',
-      { cornerId: C, requestId: command!.turnRequestId, generationId: 'g1', name },
+      { cornerId: C, requestId: command!.turnRequestId, name },
       A,
     );
 
@@ -446,7 +408,7 @@ it('lets the corner agent retitle its corner during its turn', async () => {
   await expect(rename('Launch-plan')).resolves.toEqual({ cornerId: C, name: 'Launch-plan' });
   expect((await rootFixture.phone.readRoom(C, H))?.room.name).toBe('Launch-plan');
   await result(command!, 'Renamed.');
-  await expect(rename('Too late')).rejects.toThrow();
+  await expect(rename('Follow-up title')).resolves.toMatchObject({name:'Follow-up-title'});
   await rootFixture.db.query(`UPDATE rooms SET name='Corner' WHERE id=$1`, [C]);
 });
 
@@ -466,9 +428,9 @@ it.each(['room', 'corner', 'dm'])(
       expect(shown?.latestAgentTurns?.filter((turn) => turn.agentPubkey === A)).toEqual([
         expect.objectContaining({ requestId: running!.turnRequestId, status: 'working' }),
       ]);
-      const [queued] = shown?.pendingAgentCommands ?? [];
-      expect(queued).toMatchObject({ agentPubkey: A });
-      expect(queued!.requestId).not.toBe(running!.turnRequestId);
+      const queued = (await commands(A,room)).find(item => item.sourceMessageId === followUp.messageId);
+      expect(queued).toMatchObject({agentId:A});
+      expect(queued!.turnRequestId).not.toBe(running!.turnRequestId);
       expect((await rootFixture.db.query(`SELECT status FROM agent_turns WHERE room_id=$1 AND agent_id=$2
         AND request_id=$3`, [room, A, running!.turnRequestId])).rows).toEqual([{ status: 'working' }]);
 
@@ -575,7 +537,7 @@ const scope1 = fixtureScope1(room);
     expect(await commands(B, scope1.room)).toEqual([]);
   });
 
-  it('allows depths zero through three and refuses a fourth dispatch', async () => {
+  it('preserves provenance through the former depth boundary', async () => {
     await send('@hoots start', scope1.room);
     let [c] = await commands(A, scope1.room);
     const root = c!.id;
@@ -586,8 +548,9 @@ const scope1 = fixtureScope1(room);
       const target = c!.agentId === A ? B : A;
       await result(c!, `@${target === A ? 'hoots' : 'goosy'} depth ${depth}`);
       const next = await commands(target, scope1.room);
-      if (depth === 3) expect(next).toEqual([]);
-      else c = next[0];
+      expect(next).toHaveLength(1);
+      expect(next[0]?.agentDepth).toBe(depth + 1);
+      c = next[0];
     }
   });
 
@@ -676,7 +639,7 @@ it('routes a direct message without redundant tags or a presence row', async () 
   }
 });
 
-it('does not route a removed target or refused human', async () => {
+it('routes member requests regardless of creator policy while removed targets remain inaccessible', async () => {
   await rootFixture.db.query(`UPDATE memberships SET removed_at=now() WHERE room_id=$1 AND identity_id=$2`, [
     R,
     B,
@@ -689,10 +652,10 @@ it('does not route a removed target or refused human', async () => {
     A,
   ]);
   await rootFixture.phone.execute('sendRoomMessage', { roomId: R, text: '@hoots' }, P);
-  expect(await commands(A)).toEqual([]);
+  expect(await commands(A)).toHaveLength(1);
 });
 
-it('deduplicates human writes, claims and final results', async () => {
+it('deduplicates human writes, deliveries and final results', async () => {
   const messageId = id();
   for (let n = 0; n < 2; n++)
     await rootFixture.phone.execute('sendRoomMessage', { roomId: R, text: '@hoots', messageId }, H);
@@ -708,10 +671,10 @@ it('deduplicates human writes, claims and final results', async () => {
   await claim(c!);
   const attempts = await Promise.allSettled(
     ['g2', 'g3'].map(async (generationId) =>
-      rootFixture.daemon.execute('claimAgentCommand', { roomId: R, commandId: c!.id, generationId }, A, await helperOwner(A)),
+      startQueuedCommand(rootFixture.daemon, { roomId: R, commandId: c!.id }, A),
     ),
   );
-  expect(attempts.every((a) => a.status === 'rejected')).toBe(true);
+  expect(attempts.every((a) => a.status === 'fulfilled')).toBe(true);
   const one = await result(c!, '@goosy Done');
   const two = await result(c!, '@goosy Done');
   expect(two.id).toBe(one.id);
@@ -722,13 +685,7 @@ it('rejects unknown, wrong agent, cross-Room, completed and cancelled turn outpu
   await send('@hoots');
   const [c] = await commands();
   await claim(c!);
-  const draft = {
-    roomId: R,
-    agentId: A,
-    turnId: c!.turnRequestId,
-    generationId: 'g1',
-    text: 'draft',
-  };
+  const draft = { roomId: R, agentId: A, turnId: c!.turnRequestId, text: 'draft' };
   await expect(rootFixture.daemon.execute('postAgentDraft', { ...draft, turnId: id() }, A)).rejects.toThrow();
   await expect(rootFixture.daemon.execute('postAgentDraft', { ...draft, roomId: C }, A)).rejects.toThrow();
   await expect(rootFixture.daemon.execute('postAgentDraft', { ...draft, agentId: B }, B)).rejects.toThrow();
@@ -736,14 +693,13 @@ it('rejects unknown, wrong agent, cross-Room, completed and cancelled turn outpu
   await rootFixture.phone.execute('cancelAgentTurn', { roomId: R, agentId: A, requestId: c!.turnRequestId }, H);
   await expect(result(c!, 'Stopped')).rejects.toThrow();
   await expect(rootFixture.daemon.execute('postAgentDraft', draft, A)).rejects.toThrow();
-  expect((await commands())[0]?.action).toBe('stop');
+  expect(await commands()).toEqual([]);
   await send('@hoots next');
   const [next] = (await commands()).filter((c) => c.action === 'input');
   await claim(next!);
   await result(next!, 'Done');
-  await expect(
-    rootFixture.daemon.execute('postAgentDraft', { ...draft, turnId: next!.turnRequestId }, A),
-  ).rejects.toThrow();
+  await rootFixture.daemon.execute('postAgentDraft', { ...draft, turnId: next!.turnRequestId }, A);
+  expect(await commands()).toEqual([]);
 });
 
 it('routes a validated agent tag when the final message is committed', async () => {

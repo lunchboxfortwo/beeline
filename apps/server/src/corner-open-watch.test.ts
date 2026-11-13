@@ -1,3 +1,4 @@
+import { startQueuedCommand } from './test-fixtures/queued-turn.test-support.js';
 import { randomBytes } from 'node:crypto';
 import { afterAll, beforeAll, expect, it, vi } from 'vitest';
 import { PgliteDatabase, migratedDatabase } from './test-support.js';
@@ -67,24 +68,11 @@ async function open(roomId = R) {
     H,
   );
   const command = (await daemon.execute('getAgentCommands', { roomId }, A)).commands.at(-1)!;
-  await daemon.execute(
-    'claimAgentCommand',
-    { roomId, commandId: command.id, generationId: 'g1' },
-    A,
-  );
+  await startQueuedCommand(daemon, { roomId, commandId: command.id }, A);
   pr += 1;
   return daemon.execute(
     'createCorner',
-    {
-      roomId,
-      requestId: command.turnRequestId,
-      generationId: 'g1',
-      name: `Step-${pr}`,
-      objective: 'Ship the widget end to end',
-      repository: 'owner/widgets',
-      targetBranch: 'main',
-      brief: { spec: 'Ship the widget', approval: { sourceMessageId: command.sourceMessageId } },
-    },
+    { roomId, requestId: command.turnRequestId, name: `Step-${pr}`, objective: 'Ship the widget end to end', repository: 'owner/widgets', targetBranch: 'main', brief: { spec: 'Ship the widget', approval: { sourceMessageId: command.sourceMessageId } } },
     A,
   );
 }
@@ -129,7 +117,7 @@ async function merge(cornerId: string) {
 async function mergeWakes() {
 
 
-  return (await readAgentCommands(db, R, A)).commands.filter(
+  return (await readAgentCommands(db, A, R)).commands.filter(
     (c) => c.source.systemEvent?.kind === 'merged',
   );
 }
@@ -146,7 +134,7 @@ it('open_corner watches for merged by default and the merge wakes the opener onc
   await clearWakes();
   const created = await open();
   expect(created.watch).toEqual({ roomId: R, kinds: ['opened', 'merged'] });
-  expect((await readAgentCommands(db, R, A)).commands.filter(c => c.reason === 'watched_corner')).toEqual([]);
+  expect((await readAgentCommands(db, A, R)).commands.filter(c => c.reason === 'watched_corner')).toEqual([]);
   console.info('Demonstrated ST-opened: createCorner auto-watch produced no opener wake');
   await merge(created.cornerId);
   const wakes = await mergeWakes();

@@ -1,3 +1,4 @@
+import { startQueuedCommand } from './test-fixtures/queued-turn.test-support.js';
 import { expect, it, createAgentCommand, nextAgentDepth, reconcileCornerMergeBlockers, reconcileConfiguredCornerReviewers, routeSystemCommand, readAgentCommands, systemLine, advanceCorner, H, A, B, R, C, id, db, phone, daemon, commands, send, helperOwner, claim, result, landCorner, rootFixture } from './test-support-agent-command.integration.test-support.js';
 
 
@@ -62,7 +63,7 @@ it('wakes the opener for failed checks even after a reviewer turn and retries a 
   expect(await commands(B, C)).toEqual([
     expect.objectContaining({ reason: 'corner_check', sourceMessageId: note.id }),
   ]);
-  expect((await readAgentCommands(rootFixture.db,C,A)).commands).toHaveLength(0);
+  expect((await readAgentCommands(rootFixture.db, A, C)).commands).toHaveLength(0);
   // A deleted wake is recovered from the recorded checks despite its effect receipt.
   await rootFixture.db.query(`DELETE FROM agent_commands WHERE room_id=$1`, [C]);
   await expect(reconcileCornerMergeBlockers(rootFixture.db)).resolves.toBe(1);
@@ -106,7 +107,7 @@ it('recovers a dirty PR lifecycle once per head and retries an undelivered confl
 });
 
 
-it('Reproduction STALE-1: drops a merge-conflict wake whose head moved before the implementer claims it', async () => {
+it('keeps every accepted merge-conflict wake after its head moves', async () => {
   const headA = '1'.repeat(40), headB = '2'.repeat(40);
   const dirty = (headSha: string) =>
     JSON.stringify({
@@ -130,24 +131,18 @@ it('Reproduction STALE-1: drops a merge-conflict wake whose head moved before th
   const staleState = (
     await rootFixture.db.query<{ state: string }>(`SELECT state FROM agent_commands WHERE id=$1`, [staleWake!.id])
   ).rows[0]?.state;
-  console.info(
-    `Reproduction STALE-1: wrong=1 delivered wake naming ${headA.slice(0, 8)}; right=0; observed=${delivered.filter((command) => command.source.body.includes(headA)).length}`,
-  );
-  expect(delivered).toHaveLength(0);
-  expect(staleState).toBe('cancelled');
-  await expect(claim(staleWake!)).rejects.toThrow();
-  // The current dirty head still gets exactly one wake, naming that head.
+  expect(delivered.map(command=>command.id)).toContain(staleWake!.id);
+  expect(staleState).toBe('pending');
+  await claim(staleWake!);
   await expect(reconcileCornerMergeBlockers(rootFixture.db)).resolves.toBe(1);
-  const current = (await commands(B, C)).filter((command) => command.reason === 'corner_merge_conflict');
-  expect(current).toHaveLength(1);
-  expect(current[0]?.source.body).toContain(headB);
-  expect(current[0]?.source.body).not.toContain(headA);
+  const current=(await commands(B,C)).filter(command=>command.reason==='corner_merge_conflict');
+  expect(current).toHaveLength(2);
+  expect(current.some(command=>command.source.body.includes(headB))).toBe(true);
   await expect(reconcileCornerMergeBlockers(rootFixture.db)).resolves.toBe(0);
-  console.log('Demonstrated Reproduction STALE-1: stale head A wake cancelled and refused; current dirty head B wake delivered exactly once');
 });
 
 
-it.each(['delivery', 'claim'])('Reproduction CHECK-HEAD-1: cancels a failed-check wake for the previous head at %s', async boundary => {
+it.each(['delivery', 'claim'])('keeps an accepted failed-check wake after the head changes at %s', async boundary => {
   const oldHead = '1'.repeat(40), newHead = '2'.repeat(40);
   await rootFixture.db.query(`UPDATE corner_github_cache SET lifecycle=$2::jsonb WHERE corner_id=$1`, [C,
     JSON.stringify({ checks: 'failing', pr: { number: 41, headSha: oldHead } })]);
@@ -160,11 +155,10 @@ it.each(['delivery', 'claim'])('Reproduction CHECK-HEAD-1: cancels a failed-chec
   expect(stale?.reason).toBe('corner_check');
   await rootFixture.db.query(`UPDATE corner_github_cache SET lifecycle=$2::jsonb WHERE corner_id=$1`, [C,
     JSON.stringify({ checks: 'passing', pr: { number: 41, headSha: newHead } })]);
-  if (boundary === 'delivery') expect(await commands(B, C)).toHaveLength(0);
-  await expect(claim(stale!)).rejects.toThrow();
-  // A rejected claim rolls back its transaction; delivery persists the cancellation.
-  expect(await commands(B, C)).toHaveLength(0);
-  expect((await rootFixture.db.query(`SELECT state FROM agent_commands WHERE id=$1`, [queued!.id])).rows[0]?.state).toBe('cancelled');
+  if (boundary === 'delivery') expect(await commands(B,C)).toHaveLength(1);
+  await claim(stale!);
+  expect(await commands(B,C)).toHaveLength(1);
+  expect((await rootFixture.db.query('SELECT state FROM agent_commands WHERE id=$1',[queued!.id])).rows[0]?.state).toBe('pending');
 });
 
 
@@ -227,9 +221,10 @@ it('routes subscribed events, grants and changed corner checks through actions',
       commandId: c!.id,
     }),
   );
-  const [resume] = await commands();
-  expect(resume?.action).toBe('resume');
-  expect(resume?.turnRequestId).toBe(c!.turnRequestId);
+  const resume=(await commands()).find(command=>command.reason==='resume');
+  expect(resume?.action).toBe('input');
+  expect(resume?.parentCommandId).toBe(c!.id);
+  expect(resume?.turnRequestId).not.toBe(c!.turnRequestId);
   await rootFixture.db.query(
     `UPDATE corner_github_cache SET lifecycle='{"checks":"passing","pr":{"number":1,"headSha":"action-head"}}' WHERE corner_id=$1`,
     [C],
@@ -267,7 +262,7 @@ it('routes subscribed events, grants and changed corner checks through actions',
     verb: 'failed a check',
     kind: 'check-failed',
   });
-  expect((await readAgentCommands(rootFixture.db,C,A)).commands).toHaveLength(0);
+  expect((await readAgentCommands(rootFixture.db, A, C)).commands).toHaveLength(0);
   expect(await commands(B, C)).toHaveLength(1);
 
   await rootFixture.db.query(`DELETE FROM agent_commands`);
@@ -320,10 +315,10 @@ it('holds the green review wake while the corner worker still holds a live turn'
       .query(`SELECT 1 FROM agent_commands WHERE room_id=$1 AND agent_id=$2`, [C, A])
       .then((r) => r.rowCount),
   ).resolves.toBe(0);
-  expect((await readAgentCommands(rootFixture.db,C,A)).commands).toHaveLength(0);
+  expect((await readAgentCommands(rootFixture.db, A, C)).commands).toHaveLength(0);
 
   // Only the worker result releases the review wake.
-  await rootFixture.daemon.execute('postAgentTurnReceipt',{roomId:C,requestId:workerCommand!.turnRequestId,generationId:'gw',status:'complete'},B,await helperOwner(B));
+  await result(workerCommand!,'The work is ready.');
   await advanceCorner(rootFixture.db, C, { kind: 'reconcile' });
   expect(await commands(A, C)).toHaveLength(1);
 
@@ -352,9 +347,9 @@ it('wakes the implementer without consuming a green transition when the configur
     verb: 'passed a check',
     kind: 'check-passed',
   });
-  expect((await readAgentCommands(rootFixture.db,C,A)).commands).toHaveLength(0);
+  expect((await readAgentCommands(rootFixture.db, A, C)).commands).toHaveLength(0);
   const handback = await commands(B, C);
-  expect(handback.map(command => command.reason)).toEqual(['corner_review_needed']);
+  expect(handback.map(command => command.reason)).toContain('corner_review_needed');
   expect(handback[0]?.source.body).toContain('the configured reviewer is unreachable');
   expect(handback[0]?.source.body).toContain('report the blocker to its commander');
   expect((await rootFixture.db.query(`SELECT 1 FROM messages WHERE room_id=$1 AND text LIKE '%could not be reached%'`, [C])).rowCount).toBe(0);
@@ -523,7 +518,7 @@ it('runs revised-brief refusal, repair, rereview, exact-head approval, and imple
     '@goosy PROD-AC-2-1 [AC-2] confirmed: the partial PR omits the corrected Responsible owner label; repair and preserve this finding ID.',
   );
 
-  const [fix] = await commands(B, C);
+  const fix = (await commands(B,C)).find(command=>command.reason==='agent_tag');
   expect(fix?.reason).toBe('agent_tag');
   await claim(fix!);
   await result(fix!, 'Pushed the fix');
@@ -545,7 +540,7 @@ it('runs revised-brief refusal, repair, rereview, exact-head approval, and imple
     verb: 'passed a check',
     kind: 'check-passed',
   });
-  const [secondReview] = await commands(A, C);
+  const secondReview=(await commands(A,C)).find(command=>command.reason==='corner_review_dispatch');
   await claim(secondReview!, 'g2');
   await expect(
     rootFixture.daemon.execute(
@@ -595,13 +590,7 @@ it('records its own corner objective without a second wake or resetting the auth
   await claim(c!);
   const opened = await rootFixture.daemon.execute(
     'createCorner',
-    {
-      roomId: R,
-      requestId: c!.turnRequestId,
-      generationId: 'g1',
-      name: 'Task',
-      objective: 'Do this task',
-    },
+    { roomId: R, requestId: c!.turnRequestId, name: 'Task', objective: 'Do this task' },
     A,
   );
   expect((await commands(A, opened.cornerId)).map(c => c.reason)).toEqual(['corner_objective']);
@@ -623,7 +612,7 @@ it('records its own corner objective without a second wake or resetting the auth
 });
 
 it('makes the depth boundary explicit', () => {
-  expect([0, 1, 2, 3].map(nextAgentDepth)).toEqual([1, 2, 3, undefined]);
+  expect([0, 1, 2, 3, 50].map(nextAgentDepth)).toEqual([1, 2, 3, 4, 51]);
 });
 
 
@@ -665,18 +654,14 @@ it.each(['absent', 'stale', 'offline'] as const)(
     );
     const [command] = await commands();
     expect(command?.sourceMessageId).toBe(messageId);
-    await rootFixture.daemon.execute(
-      'claimAgentCommand',
-      { roomId: R, commandId: command!.id, generationId: `return-${presence}` },
-      A, await helperOwner(A),
-    );
+    await startQueuedCommand(rootFixture.daemon, { roomId: R, commandId: command!.id }, A);
     expect(
       (
         await rootFixture.db.query<{ state: string }>(`SELECT state FROM agent_commands WHERE id=$1`, [
           command!.id,
         ])
       ).rows[0]?.state,
-    ).toBe('claimed');
+    ).toBe('pending');
   },
 );
 
@@ -705,35 +690,21 @@ it('keeps a mention queued without a premature offline notice during restart', a
   );
 });
 
-it('selects exactly one winner when two generations claim a pending command together', async () => {
-  await send('@hoots');
-  const [c] = await commands();
-  const attempts = await Promise.allSettled(
-    ['race-a', 'race-b'].map(async (generationId) =>
-      rootFixture.daemon.execute('claimAgentCommand', { roomId: R, commandId: c!.id, generationId }, A, await helperOwner(A)),
-    ),
-  );
-  expect(attempts.filter((a) => a.status === 'fulfilled')).toHaveLength(1);
-  expect(attempts.filter((a) => a.status === 'rejected')).toHaveLength(1);
-});
+
 
 it('atomically establishes the working receipt when an input command is claimed', async () => {
   await send('@hoots');
   const [c] = await commands();
-  await rootFixture.daemon.execute(
-    'claimAgentCommand',
-    { roomId: R, commandId: c!.id, generationId: 'working-at-claim' },
-    A, await helperOwner(A),
-  );
+  await startQueuedCommand(rootFixture.daemon, { roomId: R, commandId: c!.id }, A);
   expect(
     (
       await rootFixture.db.query(
-        `SELECT status,generation_id FROM agent_turns
+        `SELECT status FROM agent_turns
          WHERE room_id=$1 AND request_id=$2 AND agent_id=$3`,
         [R, c!.turnRequestId, A],
       )
     ).rows,
-  ).toEqual([{ status: 'working', generation_id: 'working-at-claim' }]);
+  ).toEqual([{ status: 'working' }]);
   expect((await rootFixture.phone.readRoom(R, H))?.latestAgentTurns).toContainEqual(
     expect.objectContaining({
       requestId: c!.turnRequestId,
@@ -780,11 +751,7 @@ it('restarts the turn clock when a parked turn resumes after a long approval wai
     reason: 'resume',
     turnRequestId: c!.turnRequestId,
   }))!;
-  await rootFixture.daemon.execute(
-    'claimAgentCommand',
-    { roomId: R, commandId: resume.id, generationId: 'after-approval' },
-    A, await helperOwner(A),
-  );
+  await startQueuedCommand(rootFixture.daemon, { roomId: R, commandId: resume.id }, A);
   expect(await turn()).toMatchObject({ status: 'working' });
   expect((await turn()).age_hours).toBeLessThan(1);
 
@@ -792,7 +759,7 @@ it('restarts the turn clock when a parked turn resumes after a long approval wai
   await parkFor57Hours();
   await rootFixture.daemon.execute(
     'postAgentTurnReceipt',
-    { roomId: R, agentId: A, requestId: c!.turnRequestId, generationId: 'after-approval', status: 'working' },
+    { roomId: R, agentId: A, requestId: c!.turnRequestId, status: 'working' },
     A, await helperOwner(A),
   );
   expect((await turn()).age_hours).toBeGreaterThan(56);

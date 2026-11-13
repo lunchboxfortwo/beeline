@@ -37,9 +37,9 @@ export async function seedOwnedModelFixture<T extends SqlDatabase>(db: T,
   await db.query(`INSERT INTO agent_connections(agent_id,connection_id,epoch,instance_id)
     VALUES($1,$2,$3,'synthetic-server')`, [MODEL_AGENT, MODEL_SOURCE.connectionId, MODEL_SOURCE.epoch]);
   await db.query(`INSERT INTO agent_commands(id,room_id,agent_id,turn_request_id,action,reason,root_command_id,root_source_message_id,
-    agent_depth,state,generation_id,claimed_at,turn_owner_connection_id,turn_owner_epoch)
-    VALUES($1,$2,$3,'synthetic-request','input','human_tag',$1,'synthetic-source',0,'claimed',$4,clock_timestamp(),$5,$6)`,
-  [MODEL_CLAIM.commandId, MODEL_ROOM, MODEL_AGENT, MODEL_CLAIM.generationId, MODEL_SOURCE.connectionId, MODEL_SOURCE.epoch]);
+    agent_depth,state)
+    VALUES($1,$2,$3,'synthetic-request','input','human_tag',$1,'synthetic-source',0,'pending')`,
+  [MODEL_CLAIM.commandId, MODEL_ROOM, MODEL_AGENT]);
   await db.query(`CREATE TABLE owned_model_test_accounting(id text PRIMARY KEY,amount integer NOT NULL)`);
   const credentials = new OwnedModelCredentials({ currentVersion: 'test-v1', key: version => version === 'test-v1' ? MODEL_KEY : undefined },
     () => MODEL);

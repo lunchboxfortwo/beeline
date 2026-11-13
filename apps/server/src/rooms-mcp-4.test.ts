@@ -1,3 +1,4 @@
+import { startQueuedCommand } from './test-fixtures/queued-turn.test-support.js';
 import { cornerOwnerSql, describe, expect, it, randomUUID, createAgentCommand, USER, AGENT, WORKSPACE, ROOM, CORNER, PUBLIC_CORNER, fixtureScope1, fixtureScope3 } from './test-support-rooms-mcp.test-support.js';
 
 describe('Rooms connector HTTP OAuth and MCP', () => {
@@ -92,9 +93,8 @@ const scope3 = fixtureScope3(scope1);
       const corner = opened.address as string;
       const assignment = (await scope1.db.query<{ id: string; turn_request_id: string }>(
         `SELECT id,turn_request_id FROM agent_commands WHERE room_id=$1 AND agent_id=$2 AND reason='corner_objective'`, [corner, AGENT])).rows[0]!;
-      await scope1.daemon.execute('claimAgentCommand', { roomId: corner, commandId: assignment.id, generationId: 'blocked-worker' }, AGENT);
-      await scope1.daemon.execute('report', { roomId: corner, requestId: assignment.turn_request_id,
-        generationId: 'blocked-worker', status: 'blocked', text: 'Choose the nebula source' }, AGENT);
+      await startQueuedCommand(scope1.daemon, { roomId: corner, commandId: assignment.id }, AGENT);
+      await scope1.daemon.execute('report', { roomId: corner, requestId: assignment.turn_request_id, status: 'blocked', text: 'Choose the nebula source' }, AGENT);
       const handback = (await scope1.db.query<{ id: string; room_id: string }>(
         `SELECT id,room_id FROM agent_commands WHERE agent_id=$1 AND reason='report'`, [member])).rows[0]!;
       expect(handback.room_id).toBe(ROOM);

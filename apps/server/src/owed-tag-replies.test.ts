@@ -1,3 +1,4 @@
+import { startQueuedCommand } from './test-fixtures/queued-turn.test-support.js';
 import { afterAll, beforeAll, describe, expect, it, vi } from 'vitest';
 import { createHash, randomBytes } from 'node:crypto';
 import { BACKGROUND_DUE_SOURCE_SCHEMA } from './background-due-source.js';
@@ -179,7 +180,7 @@ describe('owed Room tags', () => {
       await routeHumanMessage(db, source);
       const command = (await daemon.execute('getAgentCommands', { roomId: place }, helper)).commands.find(item => item.sourceMessageId === source);
       expect(command?.id).toBeTruthy();
-      await daemon.execute('claimAgentCommand', { roomId: place, commandId: command!.id, generationId: generation }, helper);
+      await startQueuedCommand(daemon, { roomId: place, commandId: command!.id }, helper);
       return command!.id;
     };
     const claimed: string[] = [];
@@ -298,8 +299,8 @@ describe('owed Room tags', () => {
     await db.query(`INSERT INTO messages(id,room_id,author_id,text) VALUES($1,$2,$3,'@helper decline this')`, [source, room, owner]);
     await routeHumanMessage(db, source);
     const command = (await daemon.execute('getAgentCommands', { roomId: room }, helper)).commands.find(c => c.sourceMessageId === source)!;
-    await daemon.execute('claimAgentCommand', { roomId: room, commandId: command.id, generationId: 'decline' }, helper);
-    const context = { roomId: room, requestId: command.turnRequestId, generationId: 'decline' };
+    await startQueuedCommand(daemon, { roomId: room, commandId: command.id }, helper);
+    const context = { roomId: room, requestId: command.turnRequestId };
     await expect(daemon.execute('markAgentTurnSilent', context, helper)).rejects.toThrow('nonhuman wake');
     expect((await owedMentions(db, helper)).some(m => m.messageId === source)).toBe(true);
     await daemon.execute('markAgentTurnSilent', { ...context, messageId: source }, helper);
@@ -314,12 +315,12 @@ describe('owed Room tags', () => {
     await db.query(`INSERT INTO messages(id,room_id,author_id,text) VALUES($1,$2,$3,'@helper answer once')`, [source, room, owner]);
     await routeHumanMessage(db, source);
     const command = (await daemon.execute('getAgentCommands', { roomId: room }, helper)).commands.find(c => c.sourceMessageId === source)!;
-    await daemon.execute('claimAgentCommand', { roomId: room, commandId: command.id, generationId: 'first' }, helper);
-    const first = await daemon.execute('postCornerMessage', { roomId: room, cornerId: room, requestId: command.turnRequestId, generationId: 'first', text: 'first answer', replyTo: source }, helper);
-    await db.query(`UPDATE agent_commands SET state='pending',generation_id=NULL,lease_expires_at=NULL,turn_request_id=$2 WHERE id=$1`, [command.id, id()]);
+    await startQueuedCommand(daemon, { roomId: room, commandId: command.id }, helper);
+    const first = await daemon.execute('postCornerMessage', { roomId: room, cornerId: room, requestId: command.turnRequestId, text: 'first answer', replyTo: source }, helper);
+    await db.query(`UPDATE agent_commands SET state='pending',turn_request_id=$2 WHERE id=$1`, [command.id, id()]);
     const retry = (await daemon.execute('getAgentCommands', { roomId: room }, helper)).commands.find(c => c.id === command.id)!;
-    await daemon.execute('claimAgentCommand', { roomId: room, commandId: command.id, generationId: 'retry' }, helper);
-    await expect(daemon.execute('postRoomMessage', { roomId: room, requestId: retry.turnRequestId, generationId: 'retry', text: 'retry answer', replyToMessageId: source }, helper)).rejects.toThrow('not delivered');
+    await startQueuedCommand(daemon, { roomId: room, commandId: command.id }, helper);
+    await expect(daemon.execute('postRoomMessage', { roomId: room, requestId: retry.turnRequestId, text: 'retry answer', replyToMessageId: source }, helper)).rejects.toThrow('not delivered');
     expect((await db.query('SELECT id FROM messages WHERE author_id=$1 AND reply_to_message_id=$2', [helper, source])).rows).toEqual([{ id: first.id }]);
     expect((await owedMentions(db, helper)).some(m => m.messageId === source)).toBe(false);
   });

@@ -214,12 +214,7 @@ const fixture = monolithFixture();
   it('keeps working receipts fresh without letting heartbeats resurrect terminal turns', async () => {
     const requestId = '6'.repeat(64);
     const generationId = `${AGENT}:${ROOM}`;
-    await fixture.daemonOperation('postAgentTurnReceipt', {
-      roomId: ROOM,
-      requestId,
-      status: 'working',
-      generationId,
-    });
+    await fixture.daemonOperation('postAgentTurnReceipt', { roomId: ROOM, requestId, status: 'working' });
     await fixture.database.query(
       `UPDATE agent_turns SET started_at=now()-interval '2 minutes',
          created_at=now()-interval '2 minutes'
@@ -227,13 +222,7 @@ const fixture = monolithFixture();
       [ROOM, requestId, AGENT],
     );
 
-    await fixture.daemonOperation('postAgentTurnReceipt', {
-      roomId: ROOM,
-      requestId,
-      status: 'working',
-      generationId,
-      heartbeat: true,
-    });
+    await fixture.daemonOperation('postAgentTurnReceipt', { roomId: ROOM, requestId, status: 'working', heartbeat: true });
     const fresh = await fixture.database.query<{ status: string; age_seconds: number }>(
       `SELECT status,extract(epoch FROM now()-created_at)::float age_seconds
        FROM agent_turns WHERE room_id=$1 AND request_id=$2 AND agent_id=$3`,
@@ -248,24 +237,13 @@ const fixture = monolithFixture();
     expect(projected!.createdAt).toBeGreaterThan(projected!.startedAt!);
     expect(projected!.createdAt - projected!.startedAt!).toBeGreaterThanOrEqual(119);
 
-    await fixture.daemonOperation('postAgentTurnReceipt', {
-      roomId: ROOM,
-      requestId,
-      status: 'complete',
-      generationId,
-    });
+    await fixture.daemonOperation('postAgentTurnReceipt', { roomId: ROOM, requestId, status: 'complete' });
     await fixture.database.query(
       `UPDATE agent_turns SET created_at=now()-interval '1 minute'
        WHERE room_id=$1 AND request_id=$2 AND agent_id=$3`,
       [ROOM, requestId, AGENT],
     );
-    await fixture.daemonOperation('postAgentTurnReceipt', {
-      roomId: ROOM,
-      requestId,
-      status: 'working',
-      generationId,
-      heartbeat: true,
-    });
+    await fixture.daemonOperation('postAgentTurnReceipt', { roomId: ROOM, requestId, status: 'working', heartbeat: true });
     const terminal = await fixture.database.query<{ status: string; old: boolean }>(
       `SELECT status,created_at<now()-interval '30 seconds' old
        FROM agent_turns WHERE room_id=$1 AND request_id=$2 AND agent_id=$3`,
@@ -273,23 +251,12 @@ const fixture = monolithFixture();
     );
     expect(terminal.rows[0]).toEqual({ status: 'complete', old: true });
 
-    await fixture.daemonOperation('postAgentTurnReceipt', {
-      roomId: ROOM,
-      requestId: 'heartbeat-without-turn',
-      status: 'working',
-      generationId,
-    });
+    await fixture.daemonOperation('postAgentTurnReceipt', { roomId: ROOM, requestId: 'heartbeat-without-turn', status: 'working' });
     await fixture.database.query(`DELETE FROM agent_turns WHERE request_id='heartbeat-without-turn'`);
     const missingHeartbeat = await fixture.request(
       '/v1/daemon/operations/postAgentTurnReceipt',
       'POST',
-      {
-        roomId: ROOM,
-        requestId: 'heartbeat-without-turn',
-        status: 'working',
-        generationId,
-        heartbeat: true,
-      },
+      { roomId: ROOM, requestId: 'heartbeat-without-turn', status: 'working', heartbeat: true },
       fixture.daemonToken,
     );
     expect(missingHeartbeat.status).toBe(200);

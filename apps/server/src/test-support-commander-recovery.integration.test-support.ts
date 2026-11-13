@@ -1,3 +1,4 @@
+import { startQueuedCommand } from './test-fixtures/queued-turn.test-support.js';
 import { releaseAgentConnection } from './connection-presence.js';
 
 import { advanceCorner } from './corner-lifecycle.js';
@@ -37,8 +38,6 @@ import { createAgentCommand, readAgentCommands, type CommandRow } from './agent-
 import { GITHUB_SUBJECT, systemLine } from './system-line.js';
 
 import type { AgentCommand } from '@beeline/api-contract/daemon';
-
-import { CommandExecutionContext, runServerCommandIntake } from '../../body/src/server-command-intake.js';
 
 import type { DaemonApiClient } from '../../body/src/daemon-api-client.js';
 
@@ -112,25 +111,13 @@ beforeEach(async () => {
 });
 
 export const claim = (command: AgentCommand) =>
-  daemon.execute(
-    'claimAgentCommand',
-    {
-      roomId: command.roomId,
-      commandId: command.id,
-      generationId: 'proof-generation',
-    },
-    command.agentId,
-  );
+  startQueuedCommand(daemon, { roomId: command.roomId, commandId: command.id }, command.agentId);
 
-export const authority = (command: AgentCommand) => ({
-  roomId: command.roomId,
-  requestId: command.turnRequestId,
-  generationId: 'proof-generation',
-});
+export const authority = (command: AgentCommand) => ({ roomId: command.roomId, requestId: command.turnRequestId });
 
 export const commands = async (roomId: string, agentId: string) => {
 
-  return (await readAgentCommands(db, roomId, agentId)).commands.filter(command => !command.generationId);
+  return (await readAgentCommands(db, agentId, roomId)).commands.filter(command => !command.generationId);
 };
 
 export async function open(name = 'Widget') {
@@ -181,7 +168,6 @@ export { LiveHub } from './live.js';
 export { PushDeliveryLoop } from './background.js';
 export { createAgentCommand, readAgentCommands } from './agent-command.js';
 export { GITHUB_SUBJECT, systemLine } from './system-line.js';
-export { CommandExecutionContext, runServerCommandIntake } from '../../body/src/server-command-intake.js';
 export type { CommandRow } from './agent-command.js';
 export type { AgentCommand } from '@beeline/api-contract/daemon';
 export type { DaemonApiClient } from '../../body/src/daemon-api-client.js';

@@ -1,3 +1,4 @@
+import { startQueuedCommand } from './test-fixtures/queued-turn.test-support.js';
 import { releaseAgentConnection } from './connection-presence.js';
 import { AgentScheduleLoop } from './agent-schedules.js';
 import { advanceCorner } from './corner-lifecycle.js';
@@ -59,13 +60,10 @@ beforeEach(async () => {
   order = (await daemon.execute('getAgentCommands', { roomId: DM }, RUBY)).commands[0]!;
   await claim(order);
 });
-const claim = (command: AgentCommand) => daemon.execute('claimAgentCommand', {
-  roomId: command.roomId, commandId: command.id, generationId: 'proof-generation',
-}, command.agentId);
-const authority = (command: AgentCommand) => ({ roomId: command.roomId,
-  requestId: command.turnRequestId, generationId: 'proof-generation' });
+const claim = (command: AgentCommand) => startQueuedCommand(daemon, { roomId: command.roomId, commandId: command.id }, command.agentId);
+const authority = (command: AgentCommand) => ({ roomId: command.roomId, requestId: command.turnRequestId });
 const answer = (cornerId: string) => daemon.execute('order', { ...authority(order), address: cornerId, agent: 'worker', text: 'Publish is verified; continue' }, RUBY);
-const commands = (roomId: string, agentId: string) => readAgentCommands(db, roomId, agentId).then(r => r.commands);
+const commands = (roomId: string, agentId: string) => readAgentCommands(db, agentId, roomId).then(r => r.commands);
 async function open(repositoryWork = true) {
   return daemon.execute('createCorner', { ...authority(order), requestId: order.turnRequestId,
     targetRoomId: ROOM, name: 'Widget', objective: 'Build the widget', implementer: 'worker',
@@ -132,7 +130,7 @@ it('STALE-ANSWERED-REPORT: preserves a report already being handled', async () =
   await claim(report);
   expect((await db.query('SELECT state FROM agent_commands WHERE id=$1', [report.id])).rows)
     .toEqual([{ state: 'claimed' }]);
-  await db.query(`UPDATE agent_commands SET lease_expires_at=now()-interval '1 second' WHERE id=$1`, [report.id]);
+  await db.query(`UPDATE agent_commands SET created_at=now()-interval '1 day' WHERE id=$1`, [report.id]);
   await claim(report);
   // A closed connection keeps the work claimed; its helper resumes it in the same generation.
   const connection = (await db.query<{ connection_id: string }>(
@@ -300,7 +298,7 @@ it('keeps lifecycle events independent across a server restart', async () => {
   const second = await event('merge-2', 'Watched corner two: merged');
   const restarted = PgliteDatabase.fromSnapshot(await db.snapshot());
   try {
-    const wakes = (await readAgentCommands(restarted, DM, RUBY)).commands.filter(c => c.reason === 'watched_corner');
+    const wakes = (await readAgentCommands(restarted, RUBY, DM)).commands.filter(c => c.reason === 'watched_corner');
     expect(wakes.map(command => command.id)).toEqual([first!.id, second!.id]);
     expect(wakes.map(command => command.source.body)).toEqual(['Watched corner one: merged', 'Watched corner two: merged']);
   } finally { await restarted.close(); }

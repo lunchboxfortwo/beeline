@@ -1,4 +1,3 @@
-import { OWNED_MODEL_UNKNOWN_GENERATION_MESSAGE } from './owned-model-errors.js';
 import { randomUUID } from 'node:crypto';
 import { Pool, type QueryResultRow } from 'pg';
 import { describe, expect, it, vi } from 'vitest';
@@ -8,7 +7,6 @@ import { OwnedModelAttempts } from './owned-model-attempt.js';
 import { OwnedModelCredentials } from './owned-model-credential.js';
 import { MODEL, MODEL_AGENT, MODEL_KEY, MODEL_ROOM, seedOwnedModelFixture } from './test-fixtures/owned-model.js';
 import { MEMBERSHIP_AUTHORITY_SCHEMA } from './membership-authority-schema.js';
-import { TURN_OWNERSHIP_SCHEMA } from './turn-ownership.js';
 import { FreeAgentService, freeAgentConfigFromEnv, sealSecrets, tokenHash } from './free-agents.js';
 import { retireAgentFromWorkspace } from './agent-retirement.js';
 import { MODEL_OWNER, MODEL_WORKSPACE } from './test-fixtures/owned-model.js';
@@ -57,12 +55,12 @@ async function fixture() {
       CREATE TABLE live_server_instances(instance_id text PRIMARY KEY,renewed_at timestamptz);
       CREATE TABLE agent_connections(agent_id text PRIMARY KEY,connection_id text,epoch bigint,instance_id text,released_at timestamptz);
       CREATE TABLE agent_commands(id text PRIMARY KEY,room_id uuid,agent_id text,turn_request_id text,action text,reason text,
-        root_command_id text,root_source_message_id text,agent_depth integer,state text,generation_id text,claimed_at timestamptz,
+        root_command_id text,root_source_message_id text,agent_depth integer,state text,
         lease_expires_at timestamptz,created_at timestamptz DEFAULT now());
-      CREATE TABLE agent_turns(room_id uuid,request_id text,agent_id text,status text,generation_id text,started_at timestamptz);`);
+      CREATE TABLE agent_turns(room_id uuid,request_id text,agent_id text,status text,started_at timestamptz);`);
     // Install actual authority writer triggers and actual owned source/commit
     // predicates, rather than a fake lock in the proof's membership adapter.
-    await left.query(COMMITTED_JOURNAL_SCHEMA); await left.query(MEMBERSHIP_AUTHORITY_SCHEMA); await left.query(TURN_OWNERSHIP_SCHEMA);
+    await left.query(COMMITTED_JOURNAL_SCHEMA); await left.query(MEMBERSHIP_AUTHORITY_SCHEMA);
     const seeded = await seedOwnedModelFixture(left);
     return { ...seeded, left, right, admin, close: async () => {
       await left.close(); await right.close(); await admin.query(`DROP SCHEMA ${schema} CASCADE`); await admin.end();
@@ -178,7 +176,7 @@ describe.skipIf(!url)('real PostgreSQL owned model primitive contention', () => 
     }
   },20_000);
 
-  it.each(['membership', 'source', 'rotation'] as const)('serializes actual %s change through final synchronous handoff, without awaiting provider completion', async change => {
+  it.each(['membership', 'rotation'] as const)('serializes actual %s change through final synchronous handoff, without awaiting provider completion', async change => {
     const f = await fixture(), entered = deferred<void>(), release = deferred<void>(), pid = deferred<number>(), provider = deferred<string>();
     let pause = false, early: unknown, handoff: ReturnType<OwnedModelAttempts['handoff']> | undefined, writer: Promise<unknown> | undefined;
     try {
@@ -194,7 +192,6 @@ describe.skipIf(!url)('real PostgreSQL owned model primitive contention', () => 
       writer = f.right.transaction(async tx => {
         pid.resolve(Number((await tx.query<{ pid: number }>('SELECT pg_backend_pid() pid')).rows[0]!.pid));
         if (change === 'membership') await tx.query('UPDATE memberships SET removed_at=clock_timestamp() WHERE room_id=$1', [MODEL_ROOM]);
-        if (change === 'source') await tx.query(`UPDATE agent_connections SET connection_id='replacement',epoch=2 WHERE agent_id=$1`, [MODEL_AGENT]);
         if (change === 'rotation') await tx.query('UPDATE free_agents SET model_token_hash=$2 WHERE agent_id=$1', [MODEL_AGENT, 'e'.repeat(64)]);
         written = true;
       });
@@ -209,7 +206,7 @@ describe.skipIf(!url)('real PostgreSQL owned model primitive contention', () => 
     }
   }, 20_000);
 
-  it('rechecks actual lease expiry after queue/source admission and refuses entry while retaining the committed UNKNOWN reservation', async () => {
+  it("a stale server presence lease cannot prevent a queued item’s own model request", async () => {
     const f = await fixture(), entered = deferred<void>(), release = deferred<void>(); let pause = false, early: unknown;
     let handoff: ReturnType<OwnedModelAttempts['handoff']> | undefined;
     try {
@@ -220,7 +217,7 @@ describe.skipIf(!url)('real PostgreSQL owned model primitive contention', () => 
       handoff = owner.handoff(admitted.permit!, start); void handoff.catch(error => { early = error; entered.resolve(); });
       await entered.promise; if (early) throw early;
       await f.right.query(`UPDATE live_server_instances SET renewed_at=clock_timestamp()-interval '91 seconds'`);
-      release.resolve(); await expect(handoff).rejects.toThrow('authority'); expect(start).not.toHaveBeenCalled();
+      release.resolve(); expect((await handoff).state).toBe('started'); expect(start).toHaveBeenCalledOnce();
       expect((await f.right.query('SELECT state,evidence FROM owned_model_attempts')).rows).toEqual([{ state: 'unknown', evidence: null }]);
       expect((await f.right.query('SELECT * FROM owned_model_test_accounting')).rowCount).toBe(1);
       await expect(owner.handoff(admitted.permit!, start)).rejects.toThrow('UNKNOWN');
@@ -255,7 +252,7 @@ describe.skipIf(!url)('real PostgreSQL owned model primitive contention', () => 
     }
   }, 20_000);
 
-  it('accounts for the complete final DB response delay instead of handing off with an expired observed lifetime', async () => {
+  it("DB response delay cannot expire a queue item’s credential", async () => {
     const f = await fixture(); let delay = false, delayed = false;
     try {
       const owner = new OwnedModelAttempts(observe(f.left, async (sql, tx) => {
@@ -265,7 +262,7 @@ describe.skipIf(!url)('real PostgreSQL owned model primitive contention', () => 
       }), f.credentials);
       const admitted = await owner.reserve(f.actor, ONE, payload(), reserve), start = vi.fn(async () => 'must not enter');
       await f.right.query(`UPDATE live_server_instances SET renewed_at=clock_timestamp()-interval '89 seconds'`); delay = true;
-      await expect(owner.handoff(admitted.permit!, start)).rejects.toThrow(); expect(delayed).toBe(true); expect(start).not.toHaveBeenCalled();
+      expect((await owner.handoff(admitted.permit!,start)).state).toBe('started'); expect(delayed).toBe(true); expect(start).toHaveBeenCalledOnce();
       expect((await f.right.query('SELECT state FROM owned_model_attempts')).rows).toEqual([{ state: 'unknown' }]);
     } finally { await f.close(); }
   }, 20_000);
@@ -334,46 +331,5 @@ describe.skipIf(!url)('real PostgreSQL owned model primitive contention', () => 
       releaseRetire.resolve(); releaseHandoff.resolve();
       await Promise.allSettled([retirement, handoff].filter((work): work is NonNullable<typeof work> => work !== undefined)); await f.close();
     }
-  }, 20_000);
-
-  it('serializes a generation writer behind old reservation COMMIT, then rolls its new credential composition back on UNKNOWN', async () => {
-    const f = await fixture(), reserved = deferred<void>(), release = deferred<void>(), pid = deferred<number>(); let early: unknown;
-    let first: ReturnType<OwnedModelAttempts['reserve']> | undefined, next: Promise<unknown> | undefined;
-    try {
-      const owner = new OwnedModelAttempts(f.left, f.credentials);
-      first = owner.reserve(f.actor, ONE, payload(), async tx => { const value = await reserve(tx); reserved.resolve(); await release.promise; return value; });
-      void first.catch(error => { early = error; reserved.resolve(); }); await reserved.promise; if (early) throw early;
-      const issue = vi.spyOn(f.credentials, 'issueInTransaction');
-      next = f.right.transaction(async tx => {
-        pid.resolve(Number((await tx.query<{ pid: number }>('SELECT pg_backend_pid() pid')).rows[0]!.pid));
-        await tx.query(`UPDATE agent_commands SET state='pending',generation_id=NULL,turn_owner_connection_id=NULL,turn_owner_epoch=NULL WHERE id='synthetic-command'`);
-        await tx.query(`UPDATE agent_commands SET state='claimed',generation_id='next-generation',claimed_at=clock_timestamp(),
-          turn_owner_connection_id='synthetic-connection',turn_owner_epoch=1 WHERE id='synthetic-command'`);
-        return f.credentials.issueInTransaction(tx, { agentId: MODEL_AGENT, commandId: 'synthetic-command', generationId: 'next-generation',
-          source: { connectionId: 'synthetic-connection', epoch: 1 } });
-      });
-      const rejected = expect(next).rejects.toMatchObject({ code: '23514', message: OWNED_MODEL_UNKNOWN_GENERATION_MESSAGE });
-      await blocked(f.admin, await pid.promise); release.resolve(); expect((await first).permit).toBeDefined(); await rejected;
-      expect(issue).not.toHaveBeenCalled(); // persisted SQL floor protects old callers without this hook
-      expect((await f.left.query('SELECT generation_id,state FROM agent_commands')).rows).toEqual([{ generation_id: 'synthetic-generation', state: 'claimed' }]);
-      expect((await f.left.query(`SELECT 1 FROM agent_command_generation_owners WHERE generation_id='next-generation'`)).rowCount).toBe(0);
-      expect((await f.left.query('SELECT * FROM owned_model_credentials')).rowCount).toBe(1);
-      expect((await f.left.query('SELECT state FROM owned_model_attempts')).rows).toEqual([{ state: 'unknown' }]);
-    } finally { release.resolve(); await Promise.allSettled([first, next].filter((work): work is NonNullable<typeof work> => work !== undefined)); await f.close(); }
-  }, 20_000);
-
-  it('refuses an old actor reservation promptly behind an uncommitted generation writer, before its quota hook can run', async () => {
-    const f = await fixture(), held = deferred<void>(), release = deferred<void>(); let early: unknown, writer: Promise<unknown> | undefined;
-    try {
-      writer = f.right.transaction(async tx => {
-        await tx.query(`UPDATE agent_commands SET state='pending',generation_id=NULL,turn_owner_connection_id=NULL,turn_owner_epoch=NULL WHERE id='synthetic-command'`);
-        held.resolve(); await release.promise;
-      });
-      void writer.catch(error => { early = error; held.resolve(); }); await held.promise; if (early) throw early;
-      const quota = vi.fn(reserve);
-      await expect(new OwnedModelAttempts(f.left, f.credentials).reserve(f.actor, ONE, payload(), quota)).rejects.toMatchObject({ code: '55P03' });
-      expect(quota).not.toHaveBeenCalled(); expect((await f.left.query('SELECT * FROM owned_model_attempts')).rowCount).toBe(0);
-      release.resolve(); await writer;
-    } finally { release.resolve(); await Promise.allSettled(writer ? [writer] : []); await f.close(); }
   }, 20_000);
 });

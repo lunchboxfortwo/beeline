@@ -1,3 +1,4 @@
+import { startQueuedCommand, startQueuedTurn } from './test-fixtures/queued-turn.test-support.js';
 import { phoneFetch } from '../../../tests/helpers/phone-operation.js';
 
 import { COMMAND_COMPLETION_CHANNEL, notifyCommandCompletion } from './command-completion.js';
@@ -46,7 +47,7 @@ import { RoomsMcp } from './rooms-mcp.js';
 
 import { MCP_AGENT_EXCLUSIONS, MCP_AGENT_TOOLS, MCP_APP_ROUTE_OPERATIONS, pendingMcpWakes } from './rooms-mcp-agent.js';
 
-import { claimAgentCommand, createAgentCommand, routeHumanMessage, routeAgentResult } from './agent-command.js';
+import { createAgentCommand, routeHumanMessage, routeAgentResult } from './agent-command.js';
 
 import { cornerWorkSql } from './chat-corner-counts.js';
 
@@ -306,8 +307,8 @@ export function fixtureScope3(scope1: ReturnType<typeof fixtureScope1>) {
       const command = (await scope1.db.query<{ id: string; turn_request_id: string }>(
         'SELECT id,turn_request_id FROM agent_commands WHERE source_message_id=$1 AND agent_id=$2', [sent.messageId, AGENT])).rows[0]!;
       const generationId = `gen-${randomBytes(4).toString('hex')}`;
-      await scope1.daemon.execute('claimAgentCommand', { roomId: ROOM, commandId: command.id, generationId } as never, AGENT);
-      return { roomId: ROOM, requestId: command.turn_request_id, generationId };
+      await startQueuedCommand(scope1.daemon, { roomId: ROOM, commandId: command.id } as never, AGENT);
+      return { roomId: ROOM, requestId: command.turn_request_id };
     }
 
     async function reportCorner(member: string) {
@@ -356,7 +357,7 @@ export { createBeelineServer } from './server.js';
 export { BROWSER_REFUSALS, RoomsMcpOAuth } from './rooms-mcp-oauth.js';
 export { RoomsMcp } from './rooms-mcp.js';
 export { MCP_AGENT_EXCLUSIONS, MCP_AGENT_TOOLS, MCP_APP_ROUTE_OPERATIONS, pendingMcpWakes } from './rooms-mcp-agent.js';
-export { claimAgentCommand, createAgentCommand, routeHumanMessage, routeAgentResult } from './agent-command.js';
+export { startQueuedTurn, createAgentCommand, routeHumanMessage, routeAgentResult } from './agent-command.js';
 export { cornerWorkSql } from './chat-corner-counts.js';
 export { openSecrets } from './free-agents.js';
 export { PREREGISTERED_MCP_CLIENTS } from './rooms-mcp-preregistered.js';

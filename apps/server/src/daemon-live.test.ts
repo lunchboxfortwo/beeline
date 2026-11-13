@@ -1,3 +1,4 @@
+import { startQueuedCommand } from './test-fixtures/queued-turn.test-support.js';
 import { ROUTER_COMMAND_SCHEMA } from './router-command-ledger.js';
 import { createAgentCommand } from './agent-command.js';
 import type { AddressInfo } from 'node:net';
@@ -358,7 +359,7 @@ describe('held presence for a live connection', () => {
       const owner = (await database.query<{ connectionId: string; epoch: number }>(
         `SELECT connection_id "connectionId",epoch::integer epoch FROM agent_connections WHERE agent_id=$1`, [AGENT_A],
       )).rows[0]!;
-      await daemon.execute('claimAgentCommand', { roomId: ROOM, commandId: claimed.id, generationId: 'first' }, AGENT_A, owner);
+      await startQueuedCommand(daemon, { roomId: ROOM, commandId: claimed.id }, AGENT_A);
       const missed = (await command(AGENT_A))!, sibling = (await command(AGENT_B))!;
       // Both inserts have committed. No more commands are inserted to recover delivery.
       const change = (agentId: string) => live.publish({
@@ -379,7 +380,7 @@ describe('held presence for a live connection', () => {
       if (recovery === 'resync') live.resync();
       else live.publish({ type: 'invalidate', roomId: ROOM, reason: 'postgres:messages', messageId: 'source' });
       const recovered = await client.next(frame => delivered(frame, missed.id));
-      expect(recovered.commands).toEqual([expect.objectContaining({ id: claimed.id, generationId: 'first' }),
+      expect(recovered.commands).toEqual([expect.objectContaining({ id: claimed.id }),
         expect.objectContaining({ id: missed.id })]);
       // The running turn is listed only with its generation, for its helper to resume.
       expect(client.frames.flatMap(frame => frame.type === 'commands' && Array.isArray(frame.commands) ? frame.commands as { id: string; generationId?: string }[] : [])
@@ -626,134 +627,6 @@ it('publishes a final reply over 64 KB without dropping its tool steps', async (
   expect(daemon.execute).toHaveBeenCalledTimes(1);
 });
 
-it('completes a large Claude final reply before claiming the wake queued during that turn', async () => {
-  const {mkdtemp,rm} = await import('node:fs/promises');
-  const {tmpdir} = await import('node:os');
-  const {join} = await import('node:path');
-  const {DaemonApiClient} = await import('../../body/src/daemon-api-client.js');
-  const {CommandExecutionContext,runServerCommandIntake} = await import('../../body/src/server-command-intake.js');
-  const {AcpClient,agentTurnSteps} = await import('../../body/src/acp.js');
-  const {AgentTurnStream} = await import('../../body/src/turn-stream.js');
-  const {roomReplySteps} = await import('../../body/src/room-turn-steps.js');
-  const command = (id:string) => ({id,roomId:'room',agentId:AGENT_A,turnRequestId:id,
-    sourceMessageId:id,action:'input' as const,reason:'agent_tag' as const,rootCommandId:id,
-    rootSourceMessageId:id,agentDepth:0,source:{id,authorId:AGENT_B,body:id,createdAt:1,attachments:[]}});
-  const queue = [command('original')];
-  const transitions: string[] = [];
-  let notify!: (commands:ReturnType<typeof command>[]) => void;
-  const daemon = daemonStub();
-  vi.mocked(daemon.execute).mockImplementation(async (name:string,input:Record<string,unknown>) => {
-    if(name === 'getAgentCommands') return {commandProtocol:1,commands:[...queue]};
-    if(name === 'claimAgentTurn') { transitions.push(`claim:${input.commandId}`); return {commands:[queue.shift()!]}; }
-    if(name === 'releaseAgentTurn') return {commands:[...queue]};
-    if(name === 'postRoomMessage') transitions.push(`reply:${input.requestId}`);
-    if(name === 'postAgentTurnReceipt') transitions.push(`complete:${input.requestId}`);
-    return {id:'written',createdAt:1};
-  });
-  const {port} = await start({daemon});
-  const api = new DaemonApiClient(`http://127.0.0.1:${port}`,'bdt_a',AGENT_A);
-  const root = await mkdtemp(join(tmpdir(),'beeline-large-completion-'));
-  const context = new CommandExecutionContext(root), abort = new AbortController();
-  const client = new AcpClient({agentCommand:'claude-agent-acp',agentEnv:{}});
-  const errors: unknown[] = [];
-  let completed = 0;
-  vi.spyOn(client,'request').mockImplementation(async (_method,params) => {
-    const {sessionId} = params as {sessionId:string};
-    if(!completed) { queue.push(command('new-wake')); notify([...queue]); }
-    for(let index=0;index<70;index++) client.emit('session/update',{sessionId,update:{
-      sessionUpdate:'tool_call',toolCallId:String(index),title:'read',kind:'read',
-      rawInput:{path:`file-${index}`},
-      status:'completed',content:[{type:'content',content:{type:'text',text:'a'.repeat(3000)}}],
-    }});
-    client.emit('session/update',{sessionId,update:{sessionUpdate:'agent_message_chunk',
-      content:{type:'text',text:'Finished.'}}});
-    return {stopReason:'end_turn'};
-  });
-  // The intake uses the real machine request owner; only the harness/provider
-  // and daemon's durable effects are fixtures. No helper process is launched.
-  const running = runServerCommandIntake({api:{execute:api.execute.bind(api)} as never,
-    roomId:'room',agentId:AGENT_A,context,signal:abort.signal,stop:()=>{},
-    onWake:wake => {if(wake) notify=wake;},onError:error => {errors.push(error);abort.abort();},
-    run:async item => {
-      const result = await client.sessionPrompt('claude',item.source.body);
-      expect(result.agentText).toBe('Finished.');
-      expect(result.toolCalls).toHaveLength(70);
-      const stream = new AgentTurnStream({api,roomId:'room',agentId:AGENT_A,requestId:item.id,label:'large reply proof'});
-      await stream.settle(result.agentText,{steps:roomReplySteps(agentTurnSteps(result.updates))});
-      await api.execute('postAgentTurnReceipt',{agentId:AGENT_A,roomId:'room',requestId:item.id,status:'complete'});
-      if(++completed === 2) abort.abort();
-    }});
-  try {
-    await vi.waitFor(() => {expect(errors).toEqual([]);expect(completed).toBe(2);},{timeout:5000});
-    await running;
-    expect(errors).toEqual([]);
-    expect(transitions).toEqual(['claim:original','reply:original','complete:original',
-      'claim:new-wake','reply:new-wake','complete:new-wake']);
-    const replies = vi.mocked(daemon.execute).mock.calls.filter(([name]) => name === 'postRoomMessage');
-    expect(replies).toHaveLength(2);
-    expect(Buffer.byteLength(JSON.stringify(replies[0]![1]))).toBeGreaterThan(64 * 1024);
-    expect((replies[0]![1] as {steps:unknown[]}).steps).toHaveLength(70);
-  } finally {
-    abort.abort();api.closeLive();await running;await rm(root,{recursive:true,force:true});
-  }
-});
-
-it.each(['after turn completion', 'on reconnect'])(
-  'recovers an idle pending tag when the command snapshot fails %s without another Room event', async boundary => {
-    const {mkdtemp,rm} = await import('node:fs/promises');
-    const {tmpdir} = await import('node:os');
-    const {join} = await import('node:path');
-    const {DaemonApiClient} = await import('../../body/src/daemon-api-client.js');
-    const {CommandExecutionContext,runServerCommandIntake} = await import('../../body/src/server-command-intake.js');
-    const command = (id:string) => ({id,roomId:'room',agentId:AGENT_A,turnRequestId:id,
-      sourceMessageId:id,action:'input' as const,reason:'human_tag' as const,rootCommandId:id,
-      rootSourceMessageId:id,agentDepth:0,source:{id,authorId:'human',body:id,createdAt:1,attachments:[]}});
-    const queue = [command('original')], completed:string[] = [];
-    const live = new LiveHub(), daemon = daemonStub();
-    let failNextPush = false, releases = 0, subscribed = false;
-    vi.mocked(daemon.execute).mockImplementation(async (name:string) => {
-      if (name === 'getAgentCommands') {
-        if (failNextPush) { failNextPush = false; throw new Error('canceling statement due to lock timeout'); }
-        return {commandProtocol:1,commands:[...queue]};
-      }
-      if (name === 'claimAgentTurn') return {commands:[queue.shift()!]};
-      if (name === 'releaseAgentTurn') { releases++; return {commands:[...queue]}; }
-      throw new Error(`Unexpected operation ${name}`);
-    });
-    const error = vi.spyOn(console,'error').mockImplementation(() => undefined);
-    const {port} = await start({daemon,live});
-    const http = vi.fn<typeof fetch>();
-    const api = new DaemonApiClient(`http://127.0.0.1:${port}`,'bdt_a',AGENT_A,http);
-    const root = await mkdtemp(join(tmpdir(),'beeline-idle-push-'));
-    const context = new CommandExecutionContext(root), abort = new AbortController();
-    const running = runServerCommandIntake({api,roomId:'room',agentId:AGENT_A,context,
-      signal:abort.signal,stop:()=>{},onSubscriptionState:connected=>{subscribed=connected;},
-      run:async item=>{completed.push(item.id);}});
-    try {
-      await vi.waitFor(() => {
-        expect(completed).toEqual(['original']);
-        expect(releases).toBe(1);
-        expect(context.current).toBeUndefined();
-        expect(subscribed).toBe(true);
-      });
-      queue.push(command('idle-tag'));
-      failNextPush = true;
-      if (boundary === 'on reconnect') api.reconnectLive();
-      else live.publish({type:'invalidate',roomId:'room',reason:'postgres:agent_commands',targetAgentId:AGENT_A});
-      await vi.waitFor(() => expect(error).toHaveBeenCalledWith(
-        '[live] daemon command push failed','canceling statement due to lock timeout'));
-      // The tag has committed. No second tag, Room invalidation or timer recovers it.
-      await vi.waitFor(() => expect(completed).toEqual(['original','idle-tag']),{timeout:3000});
-      expect(api.metrics().reconnects).toBe(boundary === 'on reconnect' ? 2 : 1);
-      expect(vi.mocked(daemon.execute).mock.calls.filter(([name]) => name === 'claimAgentTurn')).toHaveLength(2);
-      expect(http).not.toHaveBeenCalled();
-    } finally {
-      abort.abort();api.closeLive();await running;
-      await rm(root,{recursive:true,force:true});error.mockRestore();
-    }
-  },
-);
-
 it('answers a request admission failure instead of leaving the helper waiting', async () => {
   const database = new PgliteDatabase();
   requestDatabases.push(database);
@@ -801,10 +674,10 @@ it('dispatches turn controls with the registered machine owner through the ordin
     const {port}=await start({daemon,database,connectionPresence:presence});const client=await machine(port);
     client.send({type:'register',agentId:AGENT_A,token:'bdt_a',daemonOperationsV1:true,turnOwnershipV1:true});
     const registered=await client.next(frame=>frame.type==='registered');
-    client.send({type:'daemon-operation',agentId:AGENT_A,requestId:'claim',operation:'claimAgentCommand',input:{commandId:'command'}});
+    client.send({type:'daemon-operation',agentId:AGENT_A,requestId:'claim',operation:'startQueuedTurn',input:{commandId:'command'}});
     await client.next(frame=>frame.requestId==='claim');
     const capabilities=registered.capabilities as {turnConnectionId:string;turnConnectionEpoch:number};
-    expect(daemon.execute).toHaveBeenCalledWith('claimAgentCommand',{commandId:'command'},AGENT_A,
+    expect(daemon.execute).toHaveBeenCalledWith('startQueuedTurn',{commandId:'command'},AGENT_A,
       {connectionId:capabilities.turnConnectionId,epoch:capabilities.turnConnectionEpoch},undefined);
   }finally{await database.close();}
 });

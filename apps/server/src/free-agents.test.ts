@@ -1,3 +1,4 @@
+import { startQueuedTurn } from './test-fixtures/queued-turn.test-support.js';
 import { migrateMembershipSubscriptions } from './agent-subscriptions.js';
 import { STARTER_BANTER_TYPING_MS, StarterOnboardingService } from './starter-onboarding-run.js';
 import { starterHello, postStarterGame } from './starter-onboarding.js';
@@ -8,7 +9,7 @@ import { createECDH } from 'node:crypto';
 import { getPublicKey } from '@beeline/nostr';
 
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import { claimAgentCommand, createAgentCommand, type CommandRow } from './agent-command.js';
+import { createAgentCommand, type CommandRow } from './agent-command.js';
 import { claimAgentConnection, releaseAgentConnection } from './connection-presence.js';
 import { migrate } from './database.js';
 import type { FreeAgentMachines, FreeAgentMachineSpec } from './fly-machines.js';
@@ -223,12 +224,12 @@ describe('free starter agents', () => {
     const source = 'e'.repeat(64);
     await db.query(`INSERT INTO messages(id,room_id,author_id,text) VALUES($1,$2,$3,'run onboarding')`, [source, other.id, FRIEND]);
     const command = (await createAgentCommand(db, { roomId: other.id, agentId: beebee, sourceMessageId: source, reason: 'human_tag' }))!;
-    await claimAgentCommand(db, other.id, beebee, command.id, 'welcome-generation');
+    await startQueuedTurn(db, other.id, beebee, command.id);
     const daemon = new DaemonService(db, live);
     daemon.setStarterOnboarding(new StarterOnboardingService(db));
     const replay = async () => {
       const before = (await db.query(`SELECT id FROM messages WHERE room_id=$1 AND card->>'starterOnboarding'='welcome'`, [other.id])).rowCount;
-      expect(await daemon.execute('postStarterWelcome', { roomId: other.id, requestId: command.turn_request_id, generationId: 'welcome-generation' } as never, beebee)).toEqual({ status: 'started' });
+      expect(await daemon.execute('postStarterWelcome', { roomId: other.id, requestId: command.turn_request_id } as never, beebee)).toEqual({ status: 'started' });
       let choice: { messageId: string } | undefined;
       await vi.waitFor(async () => {
         const rows = (await db.query<{ id: string }>(`SELECT id FROM messages WHERE room_id=$1 AND card->>'starterOnboarding'='welcome' ORDER BY created_at DESC,id DESC`, [other.id])).rows;
@@ -254,7 +255,7 @@ describe('free starter agents', () => {
     const periods = await dashboardPeriods(db, new Date().toISOString());
     const funnel = periods['24h'].onboardingFunnel!;
     expect('steps' in funnel && funnel.steps[0]!.count).toBe(0);
-    await expect(daemon.execute('postStarterWelcome', { roomId: other.id, requestId: command.turn_request_id, generationId: 'wrong' } as never, beebee)).rejects.toThrow();
+    await expect(daemon.execute('postStarterWelcome', { roomId: other.id, requestId: command.turn_request_id } as never, beebee)).rejects.toThrow();
   });
 
   it('starts playback on the first Room read only for the onboarding person', async () => {
@@ -493,9 +494,9 @@ describe('free starter agents', () => {
       `SELECT c.id,c.turn_request_id FROM agent_commands c JOIN messages m ON m.id=c.root_source_message_id
        WHERE c.agent_id=$1 AND c.room_id=$2 AND m.author_id=$3 AND m.text LIKE '%Make the README useful%'`, [agent.agent_id, roomId, FRIEND])).rows[0]!;
     expect(command).toBeDefined();
-    await claimAgentCommand(db, roomId, agent.agent_id, command.id, 'invite-generation');
+    await startQueuedTurn(db, roomId, agent.agent_id, command.id);
     const daemon = new DaemonService(db, live);
-    const context = { roomId, requestId: command.turn_request_id, generationId: 'invite-generation' };
+    const context = { roomId, requestId: command.turn_request_id };
     const configuration = await daemon.execute('getAgentConfiguration', context as never, agent.agent_id);
     expect(configuration.soul?.instructions).toContain('beeline:onboarding');
     expect(configuration.soul?.instructions).toContain(FREE_AGENT_TURN_GUIDE);
@@ -506,8 +507,8 @@ describe('free starter agents', () => {
     await db.query(`INSERT INTO messages(id,room_id,author_id,text) VALUES($1,$2,$3,'Help with this project')`, [ownerMessageId, roomId, OWNER]);
     const ownerCommand = (await createAgentCommand(db, { roomId, agentId: agent.agent_id,
       sourceMessageId: ownerMessageId, reason: 'human_tag', turnRequestId: 'owner-request' }))!;
-    await claimAgentCommand(db, roomId, agent.agent_id, ownerCommand.id, 'owner-generation');
-    const ownerContext = { roomId, requestId: ownerCommand.turn_request_id, generationId: 'owner-generation' };
+    await startQueuedTurn(db, roomId, agent.agent_id, ownerCommand.id);
+    const ownerContext = { roomId, requestId: ownerCommand.turn_request_id };
     expect((await daemon.execute('getAgentConfiguration', ownerContext as never, agent.agent_id)).soul?.instructions).toContain('beeline:onboarding');
     expect(await daemon.execute('getRoomRepositoryState', ownerContext as never, agent.agent_id)).toHaveProperty('repositoryOnboarding', true);
     expect(await daemon.execute('postRepositoryOnboarding', { ...ownerContext, kind: 'repository' } as never, agent.agent_id)).toMatchObject({ requesterId: OWNER, canLink: true });

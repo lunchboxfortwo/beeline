@@ -1,3 +1,4 @@
+import { startQueuedCommand } from './test-fixtures/queued-turn.test-support.js';
 import { releaseAgentConnection, advanceCorner, randomUUID, randomBytes, expect, it, vi, MemoryObjectStorage, ObjectService, DaemonService, LiveHub, PushDeliveryLoop, createAgentCommand, GITHUB_SUBJECT, systemLine, HUMAN, RUBY, WORKER, WS, ROOM, DM, db, daemon, phone, order, claim, authority, commands, open, worker, rootFixture, type AgentCommand } from './test-support-commander-recovery.integration.test-support.js';
 import { claimAgentConnection } from './connection-presence.js';
 
@@ -163,13 +164,7 @@ it('reports a later corner order to the opening commander', async () => {
   } as unknown as AgentCommand);
   await rootFixture.daemon.execute(
     'order',
-    {
-      roomId: ROOM,
-      requestId: incoming.turn_request_id,
-      generationId: 'proof-generation',
-      address: opened.cornerId,
-      text: 'Other requests a follow-up',
-    },
+    { roomId: ROOM, requestId: incoming.turn_request_id, address: opened.cornerId, text: 'Other requests a follow-up' },
     OTHER,
   );
   const turn = (await commands(opened.cornerId, WORKER)).find((c) => c.reason === 'order')!;
@@ -217,16 +212,16 @@ it('keeps private work across connection close and a new helper process resumes 
   const opened=await open(),turn=await worker(opened.cornerId);
   const connection=(await rootFixture.db.query<{connection_id:string}>('SELECT connection_id FROM agent_connections WHERE agent_id=$1',[WORKER])).rows[0]!;
   await releaseAgentConnection(rootFixture.db,new LiveHub(),WORKER,connection.connection_id);
-  const claimed=(await rootFixture.db.query<{state:string;generation_id:string}>('SELECT state,generation_id FROM agent_commands WHERE id=$1',[turn.id])).rows[0]!;
-  expect(claimed.state).toBe('claimed');
+  const claimed=(await rootFixture.db.query<{state:string;generation_id:string}>('SELECT state FROM agent_commands WHERE id=$1',[turn.id])).rows[0]!;
+  expect(claimed.state).toBe('pending');
   await claimAgentConnection(rootFixture.db,new LiveHub(),WORKER,{lifecycleId:'restarted-helper'},
     {connectionId:'restarted-helper',instanceId:'helper-fixture'});
-  expect((await rootFixture.db.query('SELECT state,generation_id FROM agent_commands WHERE id=$1',[turn.id])).rows[0]).toEqual(claimed);
+  expect((await rootFixture.db.query('SELECT state FROM agent_commands WHERE id=$1',[turn.id])).rows[0]).toEqual(claimed);
   expect((await commands(DM,RUBY)).some(command=>command.reason==='report'&&command.source.body.startsWith('failed:'))).toBe(false);
   const resumable=(await rootFixture.daemon.execute('getAgentCommands',{roomId:opened.cornerId},WORKER)).commands.find(command=>command.id===turn.id);
-  expect(resumable?.generationId).toBe(claimed.generation_id);
-  await rootFixture.daemon.execute('claimAgentCommand',{roomId:opened.cornerId,commandId:turn.id,generationId:resumable!.generationId!},WORKER);
-  expect((await rootFixture.db.query('SELECT state,generation_id FROM agent_commands WHERE id=$1',[turn.id])).rows[0]).toEqual(claimed);
+  expect(resumable?.id).toBe(turn.id);
+  await startQueuedCommand(rootFixture.daemon, { roomId:opened.cornerId, commandId:turn.id }, WORKER);
+  expect((await rootFixture.db.query('SELECT state FROM agent_commands WHERE id=$1',[turn.id])).rows[0]).toEqual(claimed);
 });
 
 
@@ -449,13 +444,7 @@ it('maintains human follows through private orders', async () => {
   } as unknown as AgentCommand);
   await rootFixture.daemon.execute(
     'order',
-    {
-      roomId: ROOM,
-      requestId: incoming.turn_request_id,
-      generationId: 'proof-generation',
-      address: opened.cornerId,
-      text: 'Update as the second person asked',
-    },
+    { roomId: ROOM, requestId: incoming.turn_request_id, address: opened.cornerId, text: 'Update as the second person asked' },
     RUBY,
   );
   expect(

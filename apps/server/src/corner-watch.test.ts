@@ -68,7 +68,7 @@ const emit = (kind: CornerWatchKind = 'merged') =>
     object: { text: 'Ship widget', url: 'https://github.com/owner/widgets/pull/42' },
     durableFact: 'merge',
   });
-const wakes = async () => (await readAgentCommands(db, A, W)).commands;
+const wakes = async () => (await readAgentCommands(db, W, A)).commands;
 
 it('Reproduction O-2: a watcher receives a named sibling merge in A', async () => {
 
@@ -158,7 +158,7 @@ it('lets a parent Room watch its child', async () => {
   );
   expect((await watch(['merged'], P)).snapshot.id).toBe(B);
   await emit();
-  expect((await readAgentCommands(db, P, W)).commands).toHaveLength(1);
+  expect((await readAgentCommands(db, W, P)).commands).toHaveLength(1);
 });
 
 it('filters kinds and replaces the earlier watch', async () => {
@@ -185,10 +185,10 @@ it('WAKE-STORM: passive opened watches and subscriptions wake nobody', async () 
   await db.query(`UPDATE memberships SET event_subscriptions='["corner-opened"]' WHERE room_id=$1 AND identity_id=$2`, [P,W]);
   await systemLine(db, { roomId: P, authorId: W, subject: { kind: 'agent', id: W, name: 'Watcher' }, verb: 'opened', kind: 'corner-opened', card: { cornerId: B } });
   expect(await wakes()).toEqual([]);
-  expect((await readAgentCommands(db, P, W)).commands).toEqual([]);
+  expect((await readAgentCommands(db, W, P)).commands).toEqual([]);
   await systemLine(db, { roomId: P, authorId: H, subject: { kind: 'agent', id: H, name: 'Other opener' }, verb: 'opened', kind: 'corner-opened', card: { cornerId: B } });
   expect(await wakes()).toHaveLength(0);
-  expect((await readAgentCommands(db, P, W)).commands).toEqual([]);
+  expect((await readAgentCommands(db, W, P)).commands).toEqual([]);
 });
 
 it('an empty list removes the watch', async () => {

@@ -1,3 +1,4 @@
+import { startQueuedTurn } from './test-fixtures/queued-turn.test-support.js';
 import { claimAgentConnection } from './connection-presence.js';
 
 import { createServer } from 'node:http';
@@ -30,7 +31,7 @@ import { LiveHub } from './live.js';
 
 import { systemLine } from './system-line.js';
 
-import { createAgentCommand, claimAgentCommand, readAgentCommands } from './agent-command.js';
+import { createAgentCommand, readAgentCommands } from './agent-command.js';
 
 import { DaemonService } from './daemon-service.js';
 
@@ -44,8 +45,6 @@ import type { TokenAuth } from './auth.js';
 import { createBeelineServer } from './server.js';
 
 import { readRoomViewMessage } from '@beeline/api-contract/phone';
-
-import { CommandExecutionContext, runServerCommandIntake } from '../../body/src/server-command-intake.js';
 
 import { assembleTurnPrompt } from '../../body/src/prompt-assembly.js';
 
@@ -415,12 +414,11 @@ export { migrate } from './database.js';
 export { PgliteDatabase } from './test-support.js';
 export { LiveHub } from './live.js';
 export { systemLine, backfillComputerObservations } from './system-line.js';
-export { createAgentCommand, claimAgentCommand, readAgentCommands } from './agent-command.js';
+export { createAgentCommand, startQueuedTurn, readAgentCommands } from './agent-command.js';
 export { DaemonService } from './daemon-service.js';
 export { PhoneService } from './phone-service.js';
 export { createBeelineServer } from './server.js';
 export { readRoomViewMessage } from '@beeline/api-contract/phone';
-export { CommandExecutionContext, runServerCommandIntake } from '../../body/src/server-command-intake.js';
 export { assembleTurnPrompt } from '../../body/src/prompt-assembly.js';
 export { VIEWER_LAYOUT_SCRIPT, computerViewToken, computerViewerHtml, createComputerSession, endComputerSession, getComputerSession, refreshComputerSession, serveComputerSession, serveComputerStatus, trustedComputerShareUpstream, upgradeBodyComputerSource, upgradeComputerSession, upgradeComputerWaiter } from './computer-session.js';
 export type { TokenAuth } from './auth.js';

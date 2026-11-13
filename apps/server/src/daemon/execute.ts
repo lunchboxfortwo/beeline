@@ -1,3 +1,4 @@
+import { SYSTEM_IDENTITY_ID } from '@beeline/api-contract/system-identity';
 import { typedMentionHandles } from '../message-mentions.js';
 import { endAgentTurn } from '../agent-turn-end.js';
 import { cleanVoiceReply } from '../voice-reply.js';
@@ -175,20 +176,13 @@ import { daemonTurnReceipt } from './turn-receipts.js';
           throw error;
         },
       ));
-    // Provider reads happen before the command transaction. Reports may be
-    // delivered in the commander's Room, so refresh their origin corners too.
-    if (!ctx.commandTransaction && scopedRoom && ctx.github) {
-      if (isCorner && !cornerReviewer && name === 'report' && candidate.status === 'done') {
-        await ctx.github.resolveUnregisteredCornerPullRequest(scopedRoom, authenticatedAgentId);
-      } else if (isCorner && (['order', 'report', 'postCornerMessage'].includes(name) ||
-        name === 'postRoomMessage' && candidate.relay === undefined)) {
-        await ctx.github.refreshCornerReviewHead?.(scopedRoom);
-      }
-    }
+    // Repository tools resolve provider facts themselves; an answer never
+    // depends on a GitHub read or a successful token refresh.
+    if (!ctx.commandTransaction && scopedRoom && ctx.github && isCorner &&
+        ['order', 'postCornerMessage'].includes(name))
+      await ctx.github.refreshCornerReviewHead?.(scopedRoom);
     if (voiceAgentName && typeof candidate.text === 'string')
       candidate.text = cleanVoiceReply(candidate.text, voiceAgentName);
-    if (name === 'postRoomMessage' && candidate.relay !== undefined)
-      throw new CommandRefusalError('relay cards are retired; use order and report', 410);
 
     if (
       !ctx.commandTransaction &&
@@ -261,32 +255,26 @@ import { daemonTurnReceipt } from './turn-receipts.js';
           return daemonWriteResult(ctx) as Output<Name>;
         if (command.state === 'complete' && name === 'postRoomMessage' && candidate.presentation !== 'card') {
           const saved = command.result_message_id ? (await db.query<{ id: string; created_at: Date }>(
-            `SELECT id,created_at FROM messages WHERE id=$1`, [command.result_message_id])).rows[0] : undefined;
+            `SELECT id,created_at FROM messages WHERE id=$1
+             UNION ALL SELECT id,created_at FROM agent_commands WHERE id=$1 LIMIT 1`, [command.result_message_id])).rows[0] : undefined;
           return (saved ? { id: saved.id, createdAt: seconds(saved.created_at) } : daemonWriteResult(ctx)) as Output<Name>;
         }
-        // A corner is the ordered work's own address: its viewers watch the
-        // turn's live work there. Elsewhere the final prose of a private item
-        // (an order or report) goes privately to its return route.
-        if (command.private_payload && ((name === 'postRoomMessage' && (/^(blocked|failed|needs-decision):\s*\S/.test(String(candidate.text ?? '')) || !(await db.query(
-          `SELECT 1 FROM corner_facts WHERE corner_id=$1`, [scopedRoom])).rowCount)) || ([
+        // Private inputs keep the return address recorded with the item.
+        // A refused delivery keeps both the queue item and the helper's answer.
+        const privateAnswer = command.private_payload && (command.private_payload.kind !== 'lifecycle' ||
+          command.private_payload.authorId !== SYSTEM_IDENTITY_ID);
+        if (privateAnswer && (name === 'postRoomMessage' || ([
           'postAgentDraft', 'postAgentThought', 'postAgentActivity',
         ].includes(name) && !(await db.query(
           `SELECT 1 FROM corner_facts WHERE corner_id=$1`, [scopedRoom])).rowCount))) {
           if (name !== 'postRoomMessage') return daemonWriteResult(ctx) as Output<Name>;
           const text = String(candidate.text ?? '').trim();
-          // A report the return route refuses (no commander left) is posted
-          // here in the item's place instead of being dropped.
-          const reported = !text || await db.query('SAVEPOINT private_answer')
-            .then(() => daemonReport(ctx, text, authenticatedAgentId, command, db, true))
-            .then(async result => { await db.query('RELEASE SAVEPOINT private_answer'); return !('delivered' in result && result.delivered === false); })
-            .catch(async (error: unknown) => {
-              if (!(error instanceof CommandRefusalError)) throw error;
-              await db.query('ROLLBACK TO SAVEPOINT private_answer');
-              return false;
-            });
-          if (reported) {
-            await endAgentTurn(db, command, 'complete');
-            return daemonWriteResult(ctx) as Output<Name>;
+          if (text) {
+            const reported = await daemonReport(ctx, text, authenticatedAgentId, command, db, true);
+            if ('delivered' in reported && reported.delivered === false)
+              throw new CommandRefusalError('commander is no longer a member of the return address', 403);
+            await endAgentTurn(db, command, 'complete', null, reported.id);
+            return reported as Output<Name>;
           }
         }
         const scoped = createDaemonCommandService(ctx.dependencies, {
@@ -357,8 +345,7 @@ import { daemonTurnReceipt } from './turn-receipts.js';
       for (const event of events) {
         if (event.type !== 'invalidate' || !event.committedRow) {
           ctx.live.publish(event);
-          continue;
-        }
+        } else {
         const emittedAt = Date.now();
         ctx.live.publish({
           ...event,
@@ -369,6 +356,7 @@ import { daemonTurnReceipt } from './turn-receipts.js';
             startedAt: event.committedRow.startedAt ?? writeStartedAt,
           },
         });
+        }
       }
       if (name === 'postRoomMessage' && candidate.relay === undefined && isCorner) {
         await daemonReconcileZeroCheckWorkerCompletion(ctx,

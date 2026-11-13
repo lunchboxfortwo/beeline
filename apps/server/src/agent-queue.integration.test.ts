@@ -81,11 +81,71 @@ it('Stop cancels the item: it leaves the queue and its answer is refused', async
   await expect(answer(R1, item.turn_request_id, 'too late')).rejects.toThrow('command turn cancelled');
 });
 
-it('an answer that is empty after repair is silence, not a refusal', async () => {
+it('empty output and silence acknowledgements leave an unanswered request queued', async () => {
   const item = await ask(R1, 'anything?');
   await answer(R1, item.turn_request_id, '<thinking>nothing to say</thinking>');
-  expect(await queue()).toEqual([]);
+  expect((await queue()).map(entry => entry.id)).toEqual([item.id]);
   expect((await db.query(`SELECT count(*)::int n FROM messages WHERE author_id=$1 AND request_id=$2`,
     [A, item.turn_request_id])).rows[0]).toEqual({ n: 0 });
-  await daemon.execute('markAgentTurnSilent', { roomId: R1, requestId: item.turn_request_id }, A);
+  expect(await daemon.execute('markAgentTurnSilent', { roomId: R1, requestId: item.turn_request_id }, A)).toMatchObject({ answered: false });
+  expect((await queue()).map(entry => entry.id)).toEqual([item.id]);
+  await answer(R1, item.turn_request_id, 'Here is my answer.');
+  expect(await queue()).toEqual([]);
+});
+
+it('posts a private answer to the return address fixed at insertion, then completes the item', async () => {
+  const item = await createAgentCommand(db, { roomId: R1, agentId: A, sourceMessageId: null, reason: 'order',
+    privatePayload: { kind: 'order', text: 'answer in Two', authorId: H, fromRoomId: R2 } });
+  expect((await queue()).find(entry => entry.id === item!.id)?.returnRoomId).toBe(R2);
+  // A later mutable context must not move the committed return address.
+  await db.query(`UPDATE agent_commands SET private_payload=jsonb_set(private_payload,'{fromRoomId}',to_jsonb($2::text))
+    WHERE id=$1`, [item!.id, R1]);
+  await answer(R1, item!.turn_request_id, 'recorded-route answer');
+  expect((await db.query('SELECT room_id,text FROM messages WHERE author_id=$1 AND text=$2', [A, 'recorded-route answer'])).rows)
+    .toEqual([{ room_id: R2, text: 'recorded-route answer' }]);
+  expect(await queue()).toEqual([]);
+  await answer(R1, item!.turn_request_id, 'recorded-route answer');
+  expect((await db.query('SELECT count(*)::int n FROM messages WHERE author_id=$1 AND text=$2', [A, 'recorded-route answer'])).rows[0])
+    .toEqual({ n: 1 });
+});
+
+it('retains the answer obligation when return membership is gone, with no public fallback', async () => {
+  const item = await createAgentCommand(db, { roomId: R1, agentId: A, sourceMessageId: null, reason: 'order',
+    privatePayload: { kind: 'order', text: 'private question', authorId: H, fromRoomId: R2 } });
+  await db.query('UPDATE memberships SET removed_at=now() WHERE room_id=$1 AND identity_id=$2', [R2, H]);
+  try {
+    await expect(answer(R1, item!.turn_request_id, 'private answer')).rejects.toThrow('return address');
+    expect((await queue()).map(entry => entry.id)).toContain(item!.id);
+    expect((await db.query('SELECT 1 FROM messages WHERE author_id=$1 AND text=$2', [A, 'private answer'])).rows).toEqual([]);
+  } finally {
+    await db.query('UPDATE memberships SET removed_at=NULL WHERE room_id=$1 AND identity_id=$2', [R2, H]);
+  }
+});
+
+it('queues messages beyond the retired chain-depth cap', async () => {
+  const parent = await ask(R1, 'root');
+  await db.query('UPDATE agent_commands SET agent_depth=50 WHERE id=$1', [parent.id]);
+  const next = await createAgentCommand(db, { roomId: R1, agentId: A, sourceMessageId: null, reason: 'order',
+    parent: { ...parent, agent_depth: 50 }, privatePayload: { kind: 'order', text: 'next request', authorId: H, fromRoomId: R1 } });
+  expect(next!.agent_depth).toBe(51);
+  expect((await queue()).map(entry => entry.id)).toEqual([parent.id, next!.id]);
+});
+
+it('drops malformed optional tool history without losing the answer', async () => {
+  const item = await ask(R1, 'answer despite broken history');
+  await daemon.execute('postRoomMessage', { roomId: R1, requestId: item.turn_request_id,
+    text: 'answer without history', steps: [{ kind: 'unsupported' }] as never }, A);
+  expect(await queue()).toEqual([]);
+  expect((await db.query('SELECT text FROM messages WHERE author_id=$1 AND request_id=$2', [A, item.turn_request_id])).rows)
+    .toEqual([{ text: 'answer without history' }]);
+});
+
+it('shows only the offline connection notice when the harness cannot start, keeping its item queued', async () => {
+  const item = await ask(R1, 'waiting for a harness');
+  await daemon.execute('startAgentTurn', { roomId: R1, requestId: item.turn_request_id, available: false }, A);
+  expect((await queue()).map(entry => entry.id)).toEqual([item.id]);
+  const notices = await db.query<{text:string}>(`SELECT text FROM messages WHERE room_id=$1 AND presentation='system'`, [R1]);
+  expect(notices.rows.at(-1)?.text).toMatch(/is offline.*connect again/);
+  expect((await db.query('SELECT state,completed_at FROM agent_commands WHERE id=$1', [item.id])).rows[0])
+    .toEqual({ state: 'pending', completed_at: null });
 });

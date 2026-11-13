@@ -814,19 +814,13 @@ const fixture = monolithFixture();
       fixture.request(
         '/v1/daemon/operations/createCorner',
         'POST',
-        {
-          ...input,
-          generationId: 'fixture-generation',
-        },
+        { ...input },
         fixture.daemonToken,
       ),
       fixture.request(
         '/v1/daemon/operations/createCorner',
         'POST',
-        {
-          ...input,
-          generationId: 'fixture-generation',
-        },
+        { ...input },
         fixture.daemonToken,
       ),
     ]);

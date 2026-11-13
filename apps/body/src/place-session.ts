@@ -62,6 +62,7 @@ export interface PlaceSessionOptions {
 
 export interface Answer {
   readonly text: string;
+  readonly followUps?: readonly AgentCommand[];
   readonly steps: NonNullable<DaemonOperationMap['postRoomMessage']['input']['steps']>;
   readonly stopReason: string;
   readonly toolCalls: readonly ToolCallEntry[];
@@ -90,6 +91,8 @@ export class PlaceSession {
   private scratch?: string;
   private claudeLoginWatch?: { close(): void };
   private stopping = false;
+  private followUps: AgentCommand[] = [];
+  private steering: Promise<void>[] = [];
   readonly contextPath: string;
 
   constructor(readonly options: PlaceSessionOptions) {
@@ -189,6 +192,7 @@ export class PlaceSession {
     this.stale = false;
     this.notes = [];
     const sandbox = Boolean(this.options.config.bwrapPath);
+    if (!sandbox) this.notes.push(`The OS sandbox is unavailable. You can read files, edit files only inside ${this.folder()}, and shell commands are refused.`);
     const failure = await this.activate(sandbox).then(() => undefined, (error: unknown) => error ?? new Error('activation failed'));
     // Sandbox wall: when it cannot start, the session still runs with writes
     // refused outside this place's folder, and the agent is told so.
@@ -306,9 +310,10 @@ export class PlaceSession {
     });
     const nativeIoProven = harnessEnforcement(harnessLabel).enforcement !== 'unknown';
     const shellCapability = roomShellCapability(harnessLabel, { osSandbox: sandboxed });
-    const servers: McpServerWire[] = [
-      ...(nativeIoProven && corner || shellCapability === 'runs' ? [] : [readOnlyMcpServer(config, folder, undefined, undefined, agentEnv.PATH)]),
-      beelineAgentMcpServer(config, api, {
+    const inspection = nativeIoProven && corner || shellCapability === 'runs' ? undefined
+      : await this.optional('File inspection tools', async () => readOnlyMcpServer(config, folder, undefined, undefined, agentEnv.PATH), undefined);
+    const servers: McpServerWire[] = inspection ? [inspection] : [];
+    const agentTools = await this.optional('Beeline tools', async () => beelineAgentMcpServer(config, api, {
         roomId: parentRoomId ?? placeId, workspaceId,
         ...(corner ? { cornerId: placeId, repositoryBacked } : {}),
         reviewer: configuration?.isReviewer === true,
@@ -319,8 +324,8 @@ export class PlaceSession {
         turnContextPath: this.contextPath,
         ...(squireScope.relay ? { squireRelay: squireScope.relay } : {}),
         ...(this.options.grantRunner ? { grantRunner: this.options.grantRunner } : {}),
-      }),
-    ];
+      }), undefined);
+    if (agentTools) servers.push(agentTools);
     const codegraph = codegraphMcpServer(config, folder, { readonly: !corner });
     if (codegraph) servers.push(codegraph);
     const hostDeclarations = hostImportedMcpDeclarations({ operatorHome, agentKind: config.agentKind });
@@ -408,6 +413,18 @@ export class PlaceSession {
       console.log(`[body] place ${placeId} uses an OpenRouter key`);
   }
 
+  /** New input joins the active prompt; unsupported steering leaves it queued. */
+  followUp(item: AgentCommand): void {
+    if (this.current && this.client && this.sessionId) {
+      const prompt = itemPrompt(item, { names: this.names, notes: [], turnPrefix: this.turnPrefix });
+      this.steering.push(this.client.sessionSteer(this.sessionId, prompt).then(() => {
+        this.followUps.push(item);
+      }).catch(error => {
+        console.warn('[body] follow-up remains queued:', error);
+      }));
+    }
+  }
+
   /**
    * Hand one item to the session and wait for its answer. Throws only when
    * the harness itself fails; the item then stays in the queue.
@@ -418,8 +435,10 @@ export class PlaceSession {
     const sessionId = this.sessionId!;
     this.current = item;
     if (item.roomId === this.options.placeId) this.squireRelay.activate(item, item.id);
-    const model = await this.hostedModel(item);
-    await this.writeContext(item, queued, model?.paths().directory);
+    this.followUps = [];
+    this.steering = [];
+    const model = await this.optional('Hosted model credential', () => this.hostedModel(item), undefined);
+    await this.optional('Tool context', () => this.writeContext(item, queued, model?.paths().directory), undefined);
     const prompt = itemPrompt(item, { names: this.names, notes: this.notes, turnPrefix: this.turnPrefix });
     this.notes = [];
     const stream = new AgentTurnStream({
@@ -428,7 +447,10 @@ export class PlaceSession {
     });
     let result: PromptResult;
     try {
-      result = await client.sessionPrompt(sessionId, prompt, stream.onChunk);
+      const answering = client.sessionPrompt(sessionId, prompt, stream.onChunk);
+      for (const next of queued) this.followUp(next);
+      result = await answering;
+      await Promise.all(this.steering);
     } catch (error) {
       void stream.retract();
       throw error;
@@ -441,9 +463,15 @@ export class PlaceSession {
     if (this.options.config.agentHomeRoot && agentBehavior(this.options.config.agentKind).sharedLoginWriteBack)
       void writeBackRoomClaudeLogin({ root: this.options.config.agentHomeRoot, operatorHome: this.options.config.operatorHome })
         .catch(error => console.warn('[body] refreshed Claude login not shared:', error));
+    const text = durableReplyText(result.agentText) || durableReplyText(stream.lastRunText);
+    if (!text) throw new Error(`harness ended without a public answer (${result.stopReason})`);
+    let steps: Answer['steps'] = [];
+    try { steps = roomReplySteps(agentTurnSteps(result.updates ?? [])); }
+    catch (error) { console.warn('[body] optional answer history omitted:', error); }
     return {
-      text: durableReplyText(result.agentText),
-      steps: roomReplySteps(agentTurnSteps(result.updates ?? [])),
+      text,
+      followUps: this.followUps,
+      steps,
       stopReason: result.stopReason,
       toolCalls: result.toolCalls,
       clearDraft: () => stream.retract(),

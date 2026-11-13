@@ -150,7 +150,7 @@ export type DaemonOperationMap = {
     { readonly commandProtocol: 2; readonly commands: readonly AgentCommand[] }
   >;
   /** Marks the item's turn as working once its helper hands it to the agent session. Status only. */
-  startAgentTurn: Operation<RoomInput & { readonly requestId: string }, WriteResult>;
+  startAgentTurn: Operation<RoomInput & { readonly requestId: string; readonly available?: boolean }, WriteResult>;
   /** A hosted-model credential bound to one undone queue item (`requestId`). */
   getModelCredential: Operation<RoomInput & { readonly requestId: string }, { readonly modelCredential?: OwnedModelCredential }>;
   getDaemonBootstrap: Operation<DaemonBootstrapInput, DaemonBootstrapResult>;
@@ -337,7 +337,7 @@ export type DaemonOperationMap = {
   postAgentDraft: Operation<PostLiveOutputInput, WriteResult>;
   postAgentThought: Operation<PostLiveOutputInput, WriteResult>;
   retractAgentLiveOutput: Operation<RetractLiveOutputInput, WriteResult>;
-  markAgentTurnSilent: Operation<RoomInput & TurnOutputAuthority & { readonly messageId?: string }, WriteResult>;
+  markAgentTurnSilent: Operation<RoomInput & TurnOutputAuthority & { readonly messageId?: string }, WriteResult & { readonly answered?: boolean }>;
   postAgentTurnReceipt: Operation<PostTurnReceiptInput, WriteResult>;
   postAgentActivity: Operation<PostAgentActivityInput, WriteResult>;
   /** Push a continuation when a tool from this command finishes after its prompt ended. */

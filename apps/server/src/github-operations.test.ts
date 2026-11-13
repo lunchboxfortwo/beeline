@@ -756,7 +756,7 @@ const scope1 = fixtureScope1();
       'SELECT lifecycle FROM corner_facts WHERE corner_id=$1', [corner])).rows[0]!.lifecycle;
     expect(lifecycle.pr?.number).toBe(2);
     expect(lifecycle.checks).toBe('passing');
-    const commands = (await readAgentCommands(scope1.database, corner, REVIEWER)).commands;
+    const commands = (await readAgentCommands(scope1.database, REVIEWER, corner)).commands;
     expect(commands).toHaveLength(1);
     const target = (await scope1.database.query<{ pr: number }>(
       "SELECT (review_context->>'pullRequest')::int pr FROM agent_commands WHERE id=$1", [commands[0]!.id])).rows[0];

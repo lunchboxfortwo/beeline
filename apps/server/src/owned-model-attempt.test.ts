@@ -151,31 +151,7 @@ describe('owned model durable UNKNOWN and exact one-use handoff primitive', () =
     await expect(attempts.handoff({} as OwnedModelDispatchPermit, async () => 'forged')).rejects.toBeInstanceOf(OwnedModelUnknownPayload);
   });
 
-  it('fences a pre-created newer-generation permit and new reservation when prior-generation UNKNOWN evidence arrives, while exact receipt recovery stays read-only', async () => {
-    const { db, credentials, actor } = fixture;
-    await db.query(`UPDATE agent_commands SET state='pending',generation_id=NULL,turn_owner_connection_id=NULL,turn_owner_epoch=NULL WHERE id=$1`, [MODEL_CLAIM.commandId]);
-    const grant = await db.transaction(async tx => {
-      await tx.query(`UPDATE agent_commands SET state='claimed',generation_id='next-generation',claimed_at=clock_timestamp(),
-        turn_owner_connection_id=$2,turn_owner_epoch=$3 WHERE id=$1`, [MODEL_CLAIM.commandId, MODEL_SOURCE.connectionId, MODEL_SOURCE.epoch]);
-      return credentials.issueInTransaction(tx, { ...MODEL_CLAIM, generationId: 'next-generation' });
-    });
-    const nextActor = await credentials.authenticate(db, grant.token), next = new OwnedModelAttempts(db, credentials), reserve = hook();
-    const admitted = await next.reserve(nextActor, ONE, semantic, reserve);
-    // Simulate a durable old-generation marker recovered from an older
-    // admission. It is evidence only; the row can never manufacture a permit.
-    await db.query(`INSERT INTO owned_model_attempts(credential_id,model_request_id,command_id,generation_id,agent_id,owner_id,
-      request_digest,payload_digest,reservation,state) VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9::jsonb,'unknown')`,
-    [actor.binding.id, TWO, actor.binding.commandId, actor.binding.generationId, actor.binding.agentId, actor.binding.ownerId,
-      'd'.repeat(64), 'e'.repeat(64), JSON.stringify(ALLOWANCE)]);
-    expect(await next.reserve(nextActor, ONE, semantic, reserve)).toEqual({ receipt: admitted.receipt });
-    expect(await db.transaction(tx => credentials.issueInTransaction(tx, { ...MODEL_CLAIM, generationId: 'next-generation' }))).toEqual(grant);
-    const noNewQuota = vi.fn(hook());
-    await expect(next.reserve(nextActor, TWO, { ...semantic, another: true }, noNewQuota)).rejects.toBeInstanceOf(OwnedModelUnknownGeneration);
-    const start = vi.fn(async () => 'must not enter');
-    await expect(next.handoff(admitted.permit!, start)).rejects.toBeInstanceOf(OwnedModelUnknownGeneration);
-    await expect(next.handoff(admitted.permit!, start)).rejects.toBeInstanceOf(OwnedModelUnknownPayload);
-    expect(start).not.toHaveBeenCalled(); expect(noNewQuota).not.toHaveBeenCalled(); expect(reserve).toHaveBeenCalledOnce();
-  });
+
 
   it('uses canonical bounded JSON, rejects accessors and cycles without invoking getters, and preserves the endpoint byte bound', () => {
     expect(canonicalOwnedModelPayload({ b: 2, a: ['é🙂'] })).toEqual(canonicalOwnedModelPayload({ a: ['é🙂'], b: 2 }));

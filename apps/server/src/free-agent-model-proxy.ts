@@ -1,4 +1,3 @@
-import { endFreeAgentModelTurn } from './free-agent-turn-budget.js';
 import { encodeOwnedModelReceipt } from '@beeline/api-contract/helper-model-receipt';
 import { OwnedModelStream } from './owned-model-stream.js';
 import { imageInput, withoutImageData } from './free-agent-image-input.js';
@@ -307,8 +306,6 @@ async function handleOwnedFreeAgentModel(request: IncomingMessage, response: Ser
       return { reservation: { ...reserved, day }, payload: modelPayload(body, binding.model, reserved.maxOutput, openRouter) };
     });
   } catch (error) {
-    if (error instanceof OwnedModelAllowanceRefusal)
-      await endFreeAgentModelTurn(options.database,binding.commandId,error.message);
     if (error instanceof CommandRefusalError) sendJson(response, error.status, { error: {
       code: error instanceof OwnedModelAllowanceRefusal ? 'owned_model_allowance' :
         error instanceof OwnedModelUnknownPayload ? 'owned_model_unknown' : 'owned_model_refused', message: error.message,
@@ -457,7 +454,6 @@ export async function executeFreeAgentModel(response: ServerResponse, body: Reco
   if ('limit' in reservation) {
     if (reservation.limit === 'budget') {
       await recordFreeAgentEvent(options.database, agent.agent_id, 'budget_reached');
-      await endFreeAgentModelTurn(options.database,turn.id,FREE_AGENT_BUDGET_MESSAGE);
       sendJson(response,403,{error:{message:FREE_AGENT_BUDGET_MESSAGE}});
       return true;
     }
@@ -465,8 +461,6 @@ export async function executeFreeAgentModel(response: ServerResponse, body: Reco
       limit: reservation.limit, roomId: turn.room_id, requestId: turn.turn_request_id,
     });
     const used = await freeAgentAllowance(options.database, agent.owner_id, now);
-    await endFreeAgentModelTurn(options.database,turn.id,
-      allowanceMessage(reservation.limit,config,reservation.limit === 'daily' ? used.today : used.lifetime));
     sendJson(response,403,{error:{message:allowanceMessage(reservation.limit,config,reservation.limit === 'daily' ? used.today : used.lifetime)}});
     return true;
   }

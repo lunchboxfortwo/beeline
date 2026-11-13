@@ -1,3 +1,4 @@
+import { startQueuedCommand } from './test-fixtures/queued-turn.test-support.js';
 import { randomBytes, randomUUID } from 'node:crypto';
 import { createAgentCommand } from './agent-command.js';
 import type { SqlDatabase } from './database.js';
@@ -41,8 +42,8 @@ async function turnFrom(
   ]);
   const command = await createAgentCommand(database, { roomId, agentId, sourceMessageId: id, reason: 'human_message' });
   const generationId = randomUUID();
-  await daemon.execute('claimAgentCommand', { roomId, commandId: command!.id, generationId }, agentId);
-  return { requestId: command!.turn_request_id, generationId };
+  await startQueuedCommand(daemon, { roomId, commandId: command!.id }, agentId);
+  return { requestId: command!.turn_request_id };
 }
 
 async function fixture() {
@@ -77,8 +78,8 @@ it.each([OWNER, OTHER_AGENT, null, AGENT])('Reproduction schedule-report-owner: 
       [scheduleId, WORKSPACE, ROOM, AGENT, owner]);
     expect(await new AgentScheduleLoop(database).runOnce()).toBe(1);
     const [command] = (await daemon.execute('getAgentCommands', { roomId: ROOM }, AGENT)).commands;
-    await daemon.execute('claimAgentCommand', { roomId: ROOM, commandId: command!.id, generationId: 'schedule-proof' }, AGENT);
-    const authority = { roomId: ROOM, requestId: command!.turnRequestId, generationId: 'schedule-proof' };
+    await startQueuedCommand(daemon, { roomId: ROOM, commandId: command!.id }, AGENT);
+    const authority = { roomId: ROOM, requestId: command!.turnRequestId };
     await daemon.execute('postCornerMessage', { ...authority, cornerId: ROOM, text: 'Work posted' }, AGENT);
     await expect(daemon.execute('report', { ...authority, status: 'done', text: 'Work complete' }, AGENT))
       .resolves.toMatchObject({ delivered: true });
@@ -567,20 +568,10 @@ describe('agent schedule background posting', () => {
       expect(scheduledItems).toHaveLength(maxRuns);
       const [command] = (await daemon.execute('getAgentCommands', { roomId: ROOM }, AGENT))
         .commands;
-      await daemon.execute(
-        'claimAgentCommand',
-        { roomId: ROOM, commandId: command!.id, generationId: 'g1' },
-        AGENT,
-      );
+      await startQueuedCommand(daemon, { roomId: ROOM, commandId: command!.id }, AGENT);
       await daemon.execute(
         'postRoomMessage',
-        {
-          roomId: ROOM,
-          text: 'hello @methoxine-debug',
-          requestId: command!.turnRequestId,
-          generationId: 'g1',
-          replyToMessageId: scheduledItems[0]!.id,
-        },
+        { roomId: ROOM, text: 'hello @methoxine-debug', requestId: command!.turnRequestId, replyToMessageId: scheduledItems[0]!.id },
         AGENT,
       );
       const replies = await database.query<{ text: string }>(

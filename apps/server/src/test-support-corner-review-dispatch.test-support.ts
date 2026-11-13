@@ -1,3 +1,4 @@
+import { startQueuedCommand } from './test-fixtures/queued-turn.test-support.js';
 import { cornerImplementerSql } from './corner-worker.js';
 
 import { INSTITUTIONAL_MEMORY_ON } from './institutional-memory-shadow.js';
@@ -55,20 +56,10 @@ export const commands = (agentId = A, roomId = R) =>
   daemon.execute('getAgentCommands', { roomId }, agentId).then((r) => r.commands.filter(command => !command.generationId));
 
 export async function claim(c: AgentCommand, generationId = 'g1') {
-  await daemon.execute(
-    'claimAgentCommand',
-    { roomId: c.roomId, commandId: c.id, generationId },
-    c.agentId,
-  );
+  await startQueuedCommand(daemon, { roomId: c.roomId, commandId: c.id }, c.agentId);
   await daemon.execute(
     'postAgentTurnReceipt',
-    {
-      roomId: c.roomId,
-      agentId: c.agentId,
-      requestId: c.turnRequestId,
-      generationId,
-      status: 'working',
-    },
+    { roomId: c.roomId, agentId: c.agentId, requestId: c.turnRequestId, status: 'working' },
     c.agentId,
   );
 }
@@ -76,13 +67,7 @@ export async function claim(c: AgentCommand, generationId = 'g1') {
 export const result = (c: AgentCommand, text: string, generationId = 'g1', extra = {}) =>
   daemon.execute(
     'postRoomMessage',
-    {
-      roomId: c.roomId,
-      requestId: c.turnRequestId,
-      generationId,
-      text,
-      ...extra,
-    },
+    { roomId: c.roomId, requestId: c.turnRequestId, text, ...extra },
     c.agentId,
   );
 

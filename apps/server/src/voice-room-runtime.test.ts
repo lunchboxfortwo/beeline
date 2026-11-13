@@ -1,4 +1,4 @@
-import { VOICE_DATA_TOPIC, expect, it, vi, VoiceService, VoiceRoomRuntime, spokenReport, confirmedVoiceSpeech, voicePlaybackEcho, OpenRouterVoiceBrain, VoiceQuotaError, RealVoiceService, migrate, PgliteDatabase, LiveHub, claimAgentCommand, DaemonService, PhoneService, state, roster, conversationService, phantomHarness, deferred } from './test-support-voice-room-runtime.test-support.js';
+import { VOICE_DATA_TOPIC, expect, it, vi, VoiceService, VoiceRoomRuntime, spokenReport, confirmedVoiceSpeech, voicePlaybackEcho, OpenRouterVoiceBrain, VoiceQuotaError, RealVoiceService, migrate, PgliteDatabase, LiveHub, startQueuedTurn, DaemonService, PhoneService, state, roster, conversationService, phantomHarness, deferred } from './test-support-voice-room-runtime.test-support.js';
 
 
 
@@ -499,10 +499,8 @@ it('Reproduction voice-lost-1 stand-in: mixed request dispatch and failure follo
     const command = (await db.query<{ id: string; source_message_id: string }>(`SELECT id,source_message_id FROM agent_commands WHERE room_id=$1`, [room])).rows;
     expect(command).toHaveLength(1);
     expect((await db.query<{text:string}>(`SELECT text FROM messages WHERE id=$1`, [command[0]!.source_message_id])).rows[0]!.text).toBe('@ruby ' + request);
-    await claimAgentCommand(db, room, agent, command[0]!.id, 'proof-generation');
-    await new DaemonService(db, live).execute('postRoomMessage', {
-      roomId: room, requestId: command[0]!.source_message_id, generationId: 'proof-generation', text: failure,
-    }, agent);
+    await startQueuedTurn(db, room, agent, command[0]!.id);
+    await new DaemonService(db, live).execute('postRoomMessage', { roomId: room, requestId: command[0]!.source_message_id, text: failure }, agent);
     const phone = new PhoneService(db, 'http://proof');
     const replies = (await phone.readRoom(room, human))!.messages.filter(message => message.author.pubkey === agent && message.presentation === 'message');
     expect(replies.map(reply => reply.text)).toEqual(['Checking. I’ll tell you when I have it.', failure]);

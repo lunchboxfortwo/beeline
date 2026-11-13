@@ -1,3 +1,4 @@
+import { startQueuedTurn } from './test-fixtures/queued-turn.test-support.js';
 import { phoneFetch } from '../../../tests/helpers/phone-operation.js';
 
 import type { AddressInfo } from 'node:net';
@@ -28,7 +29,7 @@ import type { TokenAuth } from './auth.js';
 
 import type { PhoneService } from './phone-service.js';
 
-import { claimAgentCommand, createAgentCommand } from './agent-command.js';
+import { createAgentCommand } from './agent-command.js';
 
 import { DaemonService } from './daemon-service.js';
 
@@ -306,7 +307,7 @@ export { dashboardHealth, dashboardOps } from './operator-dashboard.js';
 export { dashboardOverview } from './operator-dashboard-overview.js';
 export { REVIEW_IDENTITY_ID } from './review-access.js';
 export { QueryWindow } from './query-profile.js';
-export { claimAgentCommand, createAgentCommand } from './agent-command.js';
+export { startQueuedTurn, createAgentCommand } from './agent-command.js';
 export { DaemonService } from './daemon-service.js';
 export { LiveHub } from './live.js';
 export { dashboardCoreMetrics } from './operator-dashboard-core-metrics.js';

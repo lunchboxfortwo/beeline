@@ -1,5 +1,6 @@
+import { startQueuedTurn } from './test-fixtures/queued-turn.test-support.js';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
-import { createAgentCommand, claimAgentCommand } from './agent-command.js';
+import { createAgentCommand } from './agent-command.js';
 import { DaemonService } from './daemon-service.js';
 import { LiveHub } from './live.js';
 import { PgliteDatabase, migratedDatabase } from './test-support.js';
@@ -50,7 +51,7 @@ describe('a Room reply’s steps', () => {
       sourceMessageId: REQUEST,
       reason: 'human_tag',
     });
-    await claimAgentCommand(database, ROOM, AGENT, command!.id, GENERATION);
+    await startQueuedTurn(database, ROOM, AGENT, command!.id);
     daemon = new DaemonService(
       database,
       new LiveHub(),
@@ -68,13 +69,7 @@ describe('a Room reply’s steps', () => {
   const reply = (input: Record<string, unknown>) =>
     daemon.execute(
       'postRoomMessage',
-      {
-        roomId: ROOM,
-        requestId: REQUEST,
-        generationId: GENERATION,
-        text: 'I closed the Play declaration corner.',
-        ...input,
-      } as never,
+      { roomId: ROOM, requestId: REQUEST, text: 'I closed the Play declaration corner.', ...input } as never,
       AGENT,
     );
 

@@ -1,8 +1,9 @@
+import { startQueuedTurn } from './test-fixtures/queued-turn.test-support.js';
 import { randomUUID } from 'node:crypto';
 import { performance } from 'node:perf_hooks';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import type { QueryResultRow } from 'pg';
-import { createAgentCommand, claimAgentCommand } from './agent-command.js';
+import { createAgentCommand } from './agent-command.js';
 import { DaemonService } from './daemon-service.js';
 import { migrate, type QueryResult, type SqlDatabase } from './database.js';
 import { LiveHub } from './live.js';
@@ -111,7 +112,7 @@ describe('agent reply completion latency', () => {
       sourceMessageId: REQUEST,
       reason: 'human_tag',
     });
-    await claimAgentCommand(database, ROOM, AGENT, command!.id, GENERATION);
+    await startQueuedTurn(database, ROOM, AGENT, command!.id);
   });
 
   afterEach(async () => { vi.restoreAllMocks(); await database.close(); });
@@ -141,12 +142,7 @@ describe('agent reply completion latency', () => {
 
     const first = await daemon.execute(
       'postRoomMessage',
-      {
-        roomId: ROOM,
-        requestId: REQUEST,
-        generationId: GENERATION,
-        text: 'Answer',
-      },
+      { roomId: ROOM, requestId: REQUEST, text: 'Answer' },
       AGENT,
     );
 
@@ -219,24 +215,14 @@ describe('agent reply completion latency', () => {
     ).toEqual({ state: 'complete', result_message_id: expect.any(String) });
     const retry = await daemon.execute(
       'postRoomMessage',
-      {
-        roomId: ROOM,
-        requestId: REQUEST,
-        generationId: GENERATION,
-        text: 'Answer',
-      },
+      { roomId: ROOM, requestId: REQUEST, text: 'Answer' },
       AGENT,
     );
     expect(retry.id).toBe(first.id);
     await expect(
       daemon.execute(
         'postRoomMessage',
-        {
-          roomId: ROOM,
-          requestId: REQUEST,
-          generationId: GENERATION,
-          text: 'Different answer',
-        },
+        { roomId: ROOM, requestId: REQUEST, text: 'Different answer' },
         AGENT,
       ),
     ).rejects.toThrow('command result conflict');
@@ -263,13 +249,13 @@ describe('agent reply completion latency', () => {
       sourceMessageId: request,
       reason: 'human_tag',
     });
-    await claimAgentCommand(database, ROOM, AGENT, command!.id, generation);
+    await startQueuedTurn(database, ROOM, AGENT, command!.id);
     const live = new LiveHub();
     const publish = vi.spyOn(live, 'publish');
 
     await new DaemonService(database, live).execute(
       'postRoomMessage',
-      { roomId: ROOM, requestId: request, generationId: generation, text: 'Ordinary reply' },
+      { roomId: ROOM, requestId: request, text: 'Ordinary reply' },
       AGENT,
     );
 
@@ -295,19 +281,13 @@ describe('agent reply completion latency', () => {
       sourceMessageId: request,
       reason: 'human_tag',
     });
-    await claimAgentCommand(database, ROOM, AGENT, command!.id, generation);
+    await startQueuedTurn(database, ROOM, AGENT, command!.id);
     const live = new LiveHub();
     const publish = vi.spyOn(live, 'publish');
     const daemon = new DaemonService(database, live);
     await daemon.execute(
       'postAgentTurnReceipt',
-      {
-        roomId: ROOM,
-        requestId: request,
-        generationId: generation,
-        status: 'failed',
-        reason: 'temporary failure',
-      },
+      { roomId: ROOM, requestId: request, status: 'failed', reason: 'temporary failure' },
       AGENT,
     );
     expect(
@@ -320,7 +300,7 @@ describe('agent reply completion latency', () => {
     await expect(
       daemon.execute(
         'postRoomMessage',
-        { roomId: ROOM, requestId: request, generationId: generation, text: 'Late reply' },
+        { roomId: ROOM, requestId: request, text: 'Late reply' },
         AGENT,
       ),
     ).rejects.toThrow('command already completed');
@@ -352,7 +332,7 @@ describe('agent reply completion latency', () => {
     const delayed = new DelayedDatabase(database, timing);
     const startedAt = performance.now();
 
-    await claimAgentCommand(delayed, ROOM, AGENT, command!.id, `${GENERATION}-claim`);
+    await startQueuedTurn(delayed, ROOM, AGENT, command!.id);
 
     expect(performance.now() - startedAt).toBeLessThan(QUERY_DURATION_MS * 2);
     expect(timing.transactionWrappers ?? 0).toBe(0);
@@ -384,7 +364,7 @@ describe('agent reply completion latency', () => {
       sourceMessageId: request,
       reason: 'human_tag',
     });
-    await claimAgentCommand(database, ROOM, AGENT, command!.id, generation);
+    await startQueuedTurn(database, ROOM, AGENT, command!.id);
     const live = new LiveHub();
     const publish = vi.spyOn(live, 'publish');
     const daemon = new DaemonService(database, live);
@@ -392,12 +372,7 @@ describe('agent reply completion latency', () => {
 
     await daemon.execute(
       'postAgentTurnReceipt',
-      {
-        roomId: ROOM,
-        requestId: request,
-        status: 'working',
-        generationId: generation,
-      },
+      { roomId: ROOM, requestId: request, status: 'working' },
       AGENT,
     );
 
@@ -436,7 +411,7 @@ describe('agent reply completion latency', () => {
       sourceMessageId: request,
       reason: 'human_tag',
     });
-    await claimAgentCommand(database, ROOM, AGENT, command!.id, GENERATION);
+    await startQueuedTurn(database, ROOM, AGENT, command!.id);
     await database.query(
       `INSERT INTO institutional_context_serves
        (id,workspace_id,room_id,agent_id,request_id,requester_identity_id,mode,served,total_bytes,
@@ -447,18 +422,7 @@ describe('agent reply completion latency', () => {
     const daemon = new DaemonService(database, new LiveHub());
     await daemon.execute(
       'postAgentTurnReceipt',
-      {
-        agentId: AGENT,
-        roomId: ROOM,
-        requestId: request,
-        status: 'complete',
-        generationId: GENERATION,
-        inputTokens: 30_000,
-        totalInputTokens: 45_000,
-        outputTokens: 800,
-        promptBytes: 60_000,
-        toolCalls: 7,
-      },
+      { agentId: AGENT, roomId: ROOM, requestId: request, status: 'complete', inputTokens: 30_000, totalInputTokens: 45_000, outputTokens: 800, promptBytes: 60_000, toolCalls: 7 },
       AGENT,
     );
     // The receipt's real cost and work live on the turn itself.

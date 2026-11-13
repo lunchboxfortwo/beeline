@@ -7,21 +7,21 @@ import { isResumeKind } from '@beeline/api-contract/phone';
 import type { SqlDatabase } from './database.js';
 import { advanceCorner } from './corner-lifecycle.js';
 import { SYSTEM_IDENTITY_ID } from '@beeline/api-contract/system-identity';
-import { CommandRow, commandValidityCtes, ordinaryWakeSql, waitingReportSql, checkFailureLogBody, reportedHeadBody } from './agent-command.js';
-import { WakeDropLog, MergeCard, WorkflowWakeCard, logStaleWakeDrops, mergeCardDetail, workflowWakeDetail, squireDecisionDetail } from './agent-command-route-agent-result.js';
+import { CommandRow, checkFailureLogBody, reportedHeadBody } from './agent-command.js';
+import { MergeCard, WorkflowWakeCard, mergeCardDetail, workflowWakeDetail, squireDecisionDetail } from './agent-command-route-agent-result.js';
 import { createAgentCommand } from './agent-command.js';
 
 
 
 /** Every pending item in one agent's queue, across the places where it is a
- * current member, oldest first. Superseded wakes are cancelled here. */
+ * current member, oldest first. Reading never spends an item. */
 export async function readAgentCommands(
   db: SqlDatabase,
   agentId: string,
   roomId?: string,
 ): Promise<{ commandProtocol: 2; commands: AgentCommand[] }> {
   const rows = await db.query<
-    CommandRow & WakeDropLog & {
+    CommandRow & {
       text: string;
       delivered_context: string | null;
       voice_origin: boolean;
@@ -47,7 +47,7 @@ export async function readAgentCommands(
       created_at: Date;
     }
   >(
-    `WITH ${commandValidityCtes('$2')}, delivery AS (
+    `WITH delivery AS (
      SELECT c.*,command_corner.parent_id parent_room_id,EXISTS(SELECT 1 FROM voice_orders voice WHERE voice.source_message_id=c.source_message_id AND voice.agent_id=c.agent_id) voice_origin,c.recovery_context delivered_context,CASE WHEN c.reason='corner_objective' THEN ${cornerObjectiveSql('command_corner')} WHEN c.reason='free_agent_checkin' THEN c.wake_context->>'checkinPrompt' ELSE m.text END text,CASE WHEN m.card_type='daemon-fact' AND m.card->>'type'='corner-complete' THEN m.card END merge_card,CASE WHEN workflow_latest.card IS NOT NULL THEN workflow_version.markdown::jsonb->'handoffs'->(workflow_latest.card->>'toState')->>'hint' WHEN m.room_id=c.room_id THEN COALESCE(m.card->>'receiptHint',choice_message.card->>'receiptHint') END receipt_hint,m.author_id,m.attachments,m.system_event,m.presentation,m.reply_to_message_id,reply_parent.author_id reply_to_author_id,reply_author.name reply_to_author_name,left(reply_parent.text,${REPLY_EXCERPT_MAX_LENGTH + 1}) reply_to_excerpt,CASE WHEN m.room_id=c.room_id AND m.card->>'runId' IS NOT NULL THEN m.card_type WHEN resume_source.room_id=c.room_id AND resume_source.card->>'runId' IS NOT NULL THEN resume_source.card_type WHEN m.room_id=c.room_id THEN m.card_type END wake_card_type,CASE WHEN m.room_id=c.room_id AND m.card->>'runId' IS NOT NULL THEN m.card WHEN resume_source.room_id=c.room_id AND resume_source.card->>'runId' IS NOT NULL THEN resume_source.card WHEN m.room_id=c.room_id THEN m.card END wake_card,workflow_latest.card->>'toState' workflow_state,NULLIF(workflow_start.card->>'runStatus','live') workflow_status,workflow_version.markdown::jsonb->'handoffs'->(workflow_latest.card->>'toState')->'on' workflow_outcomes,watched_corner.id watched_corner_id,watched_corner.name watched_corner_name,watched_fact.lifecycle->'pr'->>'mergeCommitSha' watched_merge_commit FROM agent_commands c LEFT JOIN messages m ON m.id=c.source_message_id LEFT JOIN rooms command_corner ON command_corner.id=c.room_id
  LEFT JOIN messages reply_parent ON reply_parent.id=m.reply_to_message_id
  LEFT JOIN identities reply_author ON reply_author.id=reply_parent.author_id
@@ -73,19 +73,10 @@ export async function readAgentCommands(
    AND command_corner.archived_at IS NULL
    AND EXISTS(SELECT 1 FROM memberships member WHERE member.room_id=COALESCE(command_corner.parent_id,command_corner.id)
      AND member.identity_id=c.agent_id AND member.removed_at IS NULL)
-   AND NOT EXISTS(SELECT 1 FROM cancelled_wakes cancelled WHERE cancelled.id=c.id)
-   AND (${ordinaryWakeSql('c')} OR NOT EXISTS (
-     SELECT 1 FROM agent_commands requested WHERE requested.room_id=c.room_id
-       AND requested.agent_id=c.agent_id AND requested.reason<>'computer_activity'
-       AND requested.action='input' AND requested.state='pending'
-   ))
-   AND workflow_latest.card->'cancellation' IS NULL
-   AND ${waitingReportSql('c')}
-     ) SELECT delivery.*,wake_drop_log.drops FROM wake_drop_log LEFT JOIN delivery ON true
+     ) SELECT delivery.* FROM delivery
      ORDER BY delivery.created_at,delivery.id`,
     [roomId ?? null, agentId],
   );
-  logStaleWakeDrops(rows.rows[0]?.drops);
   return {
     commandProtocol: 2,
     commands: rows.rows.filter(r => r.id).map((r) => ({

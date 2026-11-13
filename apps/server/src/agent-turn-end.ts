@@ -2,9 +2,8 @@ import type { SqlDatabase } from './database.js';
 import type { CommandRow } from './agent-command.js';
 
 /** Every terminal write to a queue item goes through this database function:
- * the answer was posted (complete), the agent chose silence (complete), its
- * hosted-model allowance refused it (failed), or Stop/a superseded wake
- * cancelled it. A terminal replay changes nothing.
+ * the answer was posted (complete), or Stop cancelled it. A terminal replay
+ * changes nothing. Legacy failed outcomes remain readable during upgrades.
  * Nothing else ends an item; a dropped helper leaves it pending.
  */
 export const AGENT_TURN_END_SCHEMA = `

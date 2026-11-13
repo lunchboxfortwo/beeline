@@ -1,3 +1,4 @@
+import { startQueuedCommand } from './test-fixtures/queued-turn.test-support.js';
 import { randomBytes } from 'node:crypto';
 import { afterAll, beforeAll, expect, it } from 'vitest';
 import { PgliteDatabase, migratedDatabase } from './test-support.js';
@@ -54,11 +55,7 @@ async function commissioned(roomId: string, text: string): Promise<AgentCommand>
     HUMAN,
   );
   const command = (await daemon.execute('getAgentCommands', { roomId }, AGENT)).commands.at(-1);
-  await daemon.execute(
-    'claimAgentCommand',
-    { roomId, commandId: command!.id, generationId: 'g1' },
-    AGENT,
-  );
+  await startQueuedCommand(daemon, { roomId, commandId: command!.id }, AGENT);
   return command!;
 }
 
@@ -73,17 +70,7 @@ async function openCorner(
   attachments: { objectId: string; purpose: string; required: boolean }[] = [],
 ) {
   const command = await commissioned(roomId, text);
-  const input = {
-    roomId,
-    requestId: command.turnRequestId,
-    generationId: 'g1',
-    idempotencyKey: `open-${name}`,
-    name,
-    objective: text,
-    repository: 'owner/widgets',
-    targetBranch: 'main',
-    brief: { ...brief(command.sourceMessageId, text), attachments },
-  };
+  const input = { roomId, requestId: command.turnRequestId, idempotencyKey: `open-${name}`, name, objective: text, repository: 'owner/widgets', targetBranch: 'main', brief: { ...brief(command.sourceMessageId, text), attachments } };
   return { input, created: await daemon.execute('createCorner', input, AGENT) };
 }
 

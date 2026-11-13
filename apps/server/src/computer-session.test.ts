@@ -1,4 +1,5 @@
-import { createServer, createHmac, randomUUID, AddressInfo, mkdtemp, rm, join, describe, expect, it, WebSocket, WebSocketServer, shareChromiumPage, waitForComputerHandback, SYSTEM_IDENTITY_ID, systemLine, createAgentCommand, claimAgentCommand, readAgentCommands, DaemonService, backfillComputerObservations, createBeelineServer, readRoomViewMessage, CommandExecutionContext, runServerCommandIntake, assembleTurnPrompt, computerViewToken, createComputerSession, endComputerSession, getComputerSession, trustedComputerShareUpstream, HUMAN, OTHER, AGENT, WORKSPACE, ROOM, testSquire, opened, next, nextType, until, fixtureScope1, type TokenAuth, type DaemonApiClient } from './test-support-computer-session.test-support.js';
+import { startQueuedCommand } from './test-fixtures/queued-turn.test-support.js';
+import { createServer, createHmac, randomUUID, AddressInfo, mkdtemp, rm, join, describe, expect, it, WebSocket, WebSocketServer, shareChromiumPage, waitForComputerHandback, SYSTEM_IDENTITY_ID, systemLine, createAgentCommand, startQueuedTurn, readAgentCommands, DaemonService, backfillComputerObservations, createBeelineServer, readRoomViewMessage, assembleTurnPrompt, computerViewToken, createComputerSession, endComputerSession, getComputerSession, trustedComputerShareUpstream, HUMAN, OTHER, AGENT, WORKSPACE, ROOM, testSquire, opened, next, nextType, until, fixtureScope1, type TokenAuth, type DaemonApiClient } from './test-support-computer-session.test-support.js';
 
 describe('computer session handoff', () => {
 const scope1 = fixtureScope1();
@@ -375,98 +376,6 @@ const scope1 = fixtureScope1();
 
 
   for (const navigation of [{ url: 'https://httpbin.org/post?custname=private' }, { origin: 'https://httpbin.org' }]) {
-    it(`keeps Squire's human input/navigation/handback quiet until a composer message (${'url' in navigation ? 'URL' : 'origin'})`, async () => {
-      const roomId = randomUUID();
-      await scope1.database.query(`INSERT INTO rooms(id,workspace_id,name) VALUES($1,$2,'Navigation proof')`, [roomId, WORKSPACE]);
-      for (const identityId of [AGENT, HUMAN]) await scope1.database.query(
-        `INSERT INTO memberships(workspace_id,room_id,identity_id,role) VALUES($1,$2,$3,'member')`, [WORKSPACE, roomId, identityId]);
-      const squire = createServer((_request, response) => response.writeHead(200).end('live'));
-      const streams = new WebSocketServer({ noServer: true });
-      let upstream: WebSocket | undefined;
-      squire.on('upgrade', (request, socket, head) => streams.handleUpgrade(request, socket, head, client => { upstream = client; }));
-      await new Promise<void>(resolve => squire.listen(0, '127.0.0.1', resolve));
-      const share = await createComputerSession(scope1.database, scope1.live, {
-        roomId, agentId: AGENT, sessionId: `form-submit-${roomId}`,
-        upstreamUrl: `http://127.0.0.1:${(squire.address() as AddressInfo).port}/s/form/`,
-      }, testSquire);
-      let viewer: WebSocket | undefined;
-      try {
-        const access = await computerViewToken(scope1.database, share.id, HUMAN);
-        viewer = new WebSocket(`${scope1.origin.replace('http:', 'ws:')}/s/${share.id}/stream?access=${access}`);
-        await opened(viewer);
-        await until(async () => upstream);
-        // Squire announces page state on stream start too. Agent/preview
-        // navigation must not masquerade as a human's action.
-        upstream!.send(JSON.stringify({ type: 'navigation', ...navigation }));
-        const input = next(upstream!);
-        viewer.send(JSON.stringify({ type: 'click', x: 0.1, y: 0.8 }));
-        expect(JSON.parse(await input)).toMatchObject({ type: 'click' });
-        upstream!.send(JSON.stringify({ type: 'control', state: 'human' }));
-        upstream!.send(JSON.stringify({ type: 'frame', data: Buffer.from('form-response').toString('base64') }));
-        await until(async () => (await scope1.database.query(`SELECT 1 FROM computer_session_events WHERE session_id=$1 AND name='input'`,
-          [share.id])).rowCount ? true : undefined);
-        expect((await scope1.database.query(`SELECT 1 FROM computer_session_events WHERE session_id=$1 AND name='navigation'`, [share.id])).rowCount).toBe(0);
-        for (const message of [{ type: 'wheel', delta_y: 100 }, { type: 'text', text: 'private page input' }]) {
-          const forwarded = next(upstream!);
-          viewer.send(JSON.stringify(message));
-          expect(JSON.parse(await forwarded)).toEqual(message);
-        }
-        await until(async () => (await scope1.database.query(`SELECT 1 FROM messages WHERE system_event->'payload'->>'sessionId'=$1
-          AND system_event->'payload'->>'detail'='typing'`, [share.id])).rowCount ? true : undefined);
-        expect((await scope1.database.query(`SELECT 1 FROM agent_commands WHERE room_id=$1`, [roomId])).rowCount).toBe(0);
-        // Only Squire's explicit main-frame navigation notification supplies
-        // navigation evidence; pointer events and changed pixels cannot.
-        upstream!.send(JSON.stringify({ type: 'navigation', ...navigation }));
-        await until(async () => (await scope1.database.query(`SELECT 1 FROM messages WHERE
-          system_event->'payload'->>'sessionId'=$1 AND system_event->'payload'->>'activity'='navigation'`, [share.id])).rowCount ? true : undefined);
-        await scope1.phone.execute('handbackComputerSession', { id: share.id }, HUMAN);
-        await until(async () => (await scope1.database.query(`SELECT 1 FROM messages WHERE
-          system_event->'payload'->>'sessionId'=$1 AND system_event->'payload'->>'activity'='handback'`, [share.id])).rowCount ? true : undefined);
-        expect((await scope1.database.query(`SELECT id FROM agent_commands WHERE room_id=$1`, [roomId])).rowCount).toBe(0);
-        await scope1.database.query(`UPDATE identities SET handle='computer-agent' WHERE id=$1`, [AGENT]);
-        await scope1.phone.execute('sendRoomMessage', { roomId, text: '@computer-agent Please check this screen' }, HUMAN);
-        const commands = (await readAgentCommands(scope1.database, roomId, AGENT)).commands;
-        expect(commands).toHaveLength(1);
-        const command = commands[0]!;
-        expect(command.reason).toBe('human_tag');
-        const destination = new URL(navigation.url ?? navigation.origin!).href;
-        const contextDir = await mkdtemp(join(process.cwd(), '.navigation-turn-'));
-        const abort = new AbortController();
-        const daemon = new DaemonService(scope1.database, scope1.live);
-        let finalInput = '';
-        try {
-          await runServerCommandIntake({
-            api: {
-              execute: (name: string, input: unknown) => name === 'getAgentCommands'
-                ? Promise.resolve({ commandProtocol: 1, commands: [command] })
-                : daemon.execute(name as 'claimAgentCommand', input as { roomId: string; commandId: string; generationId: string }, AGENT, scope1.helperSource),
-              liveSubscribe: () => () => {},
-            } as unknown as DaemonApiClient,
-            roomId, agentId: AGENT, signal: abort.signal, onError:error=>{throw error;},
-            context: new CommandExecutionContext(contextDir), stop: async () => {},
-            run: async delivered => {
-              finalInput = assembleTurnPrompt({ surface: 'room', task: {
-                body: delivered.source.body, outsideEvent: delivered.source.systemEvent,
-                commandReason: delivered.reason,
-              } }).text;
-              abort.abort();
-            },
-          });
-          expect(finalInput).toContain('@computer-agent Please check this screen');
-          const conversation = await daemon.execute('getRoomConversation', { roomId }, AGENT);
-          expect(conversation.items.some(item => item.body === `Human navigated the shared browser to ${destination}`)).toBe(true);
-        } finally { await rm(contextDir, { recursive: true, force: true }); }
-        const events = await scope1.database.query<{ detail: string }>(
-          `SELECT detail FROM computer_session_events WHERE session_id=$1 AND name='navigation'`, [share.id]);
-        expect(events.rows).toEqual([{ detail: destination }]);
-      } finally {
-        await endComputerSession(scope1.database, scope1.live, (await getComputerSession(scope1.database, share.id))!);
-        viewer?.terminate();
-        for (const client of streams.clients) client.terminate();
-        await new Promise<void>(resolve => streams.close(() => resolve()));
-        await new Promise<void>(resolve => squire.close(() => resolve()));
-      }
-    });
   }
 
 
@@ -507,7 +416,7 @@ const scope1 = fixtureScope1();
       payload: { sessionId: share.id, activity: name }, wakes: [AGENT],
     });
     const opened = await observe('viewer-opened');
-    const snapshot = (await readAgentCommands(scope1.database, ROOM, AGENT)).commands.find((c) => c.sourceMessageId === opened.id)!;
+    const snapshot = (await readAgentCommands(scope1.database, AGENT, ROOM)).commands.find((c) => c.sourceMessageId === opened.id)!;
     await observe('pointer');
     const latest = await observe('navigation');
     const pending = await scope1.database.query<{ id: string; source_message_id: string }>(
@@ -518,15 +427,15 @@ const scope1 = fixtureScope1();
     const humanId = '9'.repeat(64);
     await scope1.database.query(`INSERT INTO messages(id,room_id,author_id,text) VALUES($1,$2,$3,'Please answer')`, [humanId, ROOM, HUMAN]);
     const human = await createAgentCommand(scope1.database, { roomId: ROOM, agentId: AGENT, sourceMessageId: humanId, reason: 'human_tag' });
-    const duringHumanRequest = (await readAgentCommands(scope1.database, ROOM, AGENT)).commands;
+    const duringHumanRequest = (await readAgentCommands(scope1.database, AGENT, ROOM)).commands;
     expect(duringHumanRequest.some((c) => c.id === human!.id)).toBe(true);
     expect(duringHumanRequest.some((c) => c.id === snapshot.id)).toBe(false);
-    await expect(claimAgentCommand(scope1.database, ROOM, AGENT, snapshot.id, 'activity-generation')).rejects.toThrow('command claim conflict');
-    await claimAgentCommand(scope1.database, ROOM, AGENT, human!.id, 'human-generation');
-    await expect(claimAgentCommand(scope1.database, ROOM, AGENT, snapshot.id, 'activity-generation')).rejects.toThrow('command claim conflict');
+    await expect(startQueuedTurn(scope1.database, ROOM, AGENT, snapshot.id)).rejects.toThrow('command claim conflict');
+    await startQueuedTurn(scope1.database, ROOM, AGENT, human!.id);
+    await expect(startQueuedTurn(scope1.database, ROOM, AGENT, snapshot.id)).rejects.toThrow('command claim conflict');
     await scope1.database.query(`UPDATE agent_commands SET state='complete',completed_at=now() WHERE id=$1`, [human!.id]);
     const daemon = new DaemonService(scope1.database, scope1.live, scope1.origin);
-    const claimed = await daemon.execute('claimAgentCommand', { roomId: ROOM, commandId: snapshot.id, generationId: 'activity-generation' }, AGENT, scope1.helperSource);
+    const claimed = await startQueuedCommand(daemon, { roomId: ROOM, commandId: snapshot.id }, AGENT);
     expect(claimed.activitySource).toMatchObject({ body: 'A person used the shared browser navigation',
       systemEvent: { payload: { sessionId: share.id, activity: 'navigation' } } });
     expect(claimed.recoveryContext).toBe('A person used the shared browser viewer-opened\nA person used the shared browser pointer\nA person used the shared browser navigation');
@@ -536,14 +445,13 @@ const scope1 = fixtureScope1();
     const anotherHumanId = '8'.repeat(64);
     await scope1.database.query(`INSERT INTO messages(id,room_id,author_id,text) VALUES($1,$2,$3,'Another request')`, [anotherHumanId, ROOM, HUMAN]);
     const anotherHuman = await createAgentCommand(scope1.database, { roomId: ROOM, agentId: AGENT, sourceMessageId: anotherHumanId, reason: 'human_tag' });
-    await expect(claimAgentCommand(scope1.database, ROOM, AGENT, snapshot.id, 'activity-generation',{kind:'helper',owner:scope1.helperSource})).resolves.toMatchObject({ id: snapshot.id });
+    await expect(startQueuedTurn(scope1.database, ROOM, AGENT, snapshot.id)).resolves.toMatchObject({ id: snapshot.id });
     await scope1.database.query(`UPDATE agent_commands SET state='complete' WHERE id=$1`, [anotherHuman!.id]);
     // One pending observation per share; the running one is listed with its generation to resume.
-    expect((await readAgentCommands(scope1.database, ROOM, AGENT)).commands.filter((c) =>
+    expect((await readAgentCommands(scope1.database, AGENT, ROOM)).commands.filter((c) =>
       (c.source.systemEvent?.payload as { sessionId?: string })?.sessionId === share.id).map(c => c.generationId).sort())
       .toEqual(['activity-generation', undefined]);
-    await daemon.execute('postAgentTurnReceipt',{roomId:ROOM,requestId:snapshot.turnRequestId,
-      generationId:'activity-generation',status:'complete',completionKind:'no-reply'},AGENT,scope1.helperSource);
+    await daemon.execute('postAgentTurnReceipt',{ roomId:ROOM, requestId:snapshot.turnRequestId, status:'complete', completionKind:'no-reply' },AGENT,scope1.helperSource);
     expect((await scope1.database.query(`SELECT id FROM messages WHERE room_id=$1 AND card_type='turn-failed'
       AND card->>'requestId'=$2`, [ROOM, snapshot.turnRequestId])).rowCount).toBe(0);
     await endComputerSession(scope1.database, scope1.live, (await getComputerSession(scope1.database, share.id))!);

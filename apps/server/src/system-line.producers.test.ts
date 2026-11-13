@@ -1,4 +1,5 @@
-import { createAgentCommand, claimAgentCommand } from './agent-command.js';
+import { startQueuedTurn } from './test-fixtures/queued-turn.test-support.js';
+import { createAgentCommand } from './agent-command.js';
 import { describe, expect, it, vi } from 'vitest';
 import { PushDeliveryLoop } from './background.js';
 import { PgliteDatabase, migratedDatabase } from './test-support.js';
@@ -408,32 +409,17 @@ describe('system-line producers', () => {
           reason: 'fixture',
         }),
       );
-      await claimAgentCommand(database, ROOM, AGENT, command!.id, 'g1');
+      await startQueuedTurn(database, ROOM, AGENT, command!.id);
       const daemon = new DaemonService(database, new LiveHub());
       await daemon.execute(
         'postAgentTurnReceipt',
-        {
-          agentId: AGENT,
-          roomId: ROOM,
-          requestId,
-          generationId: 'g1',
-          status: 'failed',
-          reason: 'model selection unavailable',
-          reasonKind: 'model-selection-unavailable',
-        },
+        { agentId: AGENT, roomId: ROOM, requestId, status: 'failed', reason: 'model selection unavailable', reasonKind: 'model-selection-unavailable' },
         AGENT,
       );
       await expect(
         daemon.execute(
           'postAgentTurnReceipt',
-          {
-            agentId: AGENT,
-            roomId: ROOM,
-            requestId,
-            generationId: 'g1',
-            status: 'failed',
-            reason: 'timed out: after 120s',
-          },
+          { agentId: AGENT, roomId: ROOM, requestId, status: 'failed', reason: 'timed out: after 120s' },
           AGENT,
         ),
       ).resolves.toBeDefined();
@@ -442,7 +428,7 @@ describe('system-line producers', () => {
       await expect(
         daemon.execute(
           'postAgentTurnReceipt',
-          { agentId: AGENT, roomId: ROOM, requestId, generationId: 'g1', status: 'complete' },
+          { agentId: AGENT, roomId: ROOM, requestId, status: 'complete' },
           AGENT,
         ),
       ).resolves.toBeDefined();

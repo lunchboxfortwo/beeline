@@ -1,4 +1,5 @@
-import { phoneFetch, describe, expect, it, vi, ensureMcpMember, MCP_TAG_INSTRUCTION, randomBytes, createHash, Client, StreamableHTTPClientTransport, tokenHash, BROWSER_REFUSALS, MCP_AGENT_TOOLS, claimAgentCommand, routeHumanMessage, deliverMcpMemberWebhooks, readFileSync, MCP_STARTER_ROUTINE, USER, AGENT, WORKSPACE, ROOM, PRIVATE, CORNER, PUBLIC_CORNER, opaque, fixtureScope1 } from './test-support-rooms-mcp.test-support.js';
+import { startQueuedCommand } from './test-fixtures/queued-turn.test-support.js';
+import { phoneFetch, describe, expect, it, vi, ensureMcpMember, MCP_TAG_INSTRUCTION, randomBytes, createHash, Client, StreamableHTTPClientTransport, tokenHash, BROWSER_REFUSALS, MCP_AGENT_TOOLS, startQueuedTurn, routeHumanMessage, deliverMcpMemberWebhooks, readFileSync, MCP_STARTER_ROUTINE, USER, AGENT, WORKSPACE, ROOM, PRIVATE, CORNER, PUBLIC_CORNER, opaque, fixtureScope1 } from './test-support-rooms-mcp.test-support.js';
 
 describe('Rooms connector HTTP OAuth and MCP', () => {
 const scope1 = fixtureScope1();
@@ -441,7 +442,7 @@ const scope1 = fixtureScope1();
     expect(message.author_id).toBe(member);
     expect(message.author_id).not.toBe(USER);
     const command = (await scope1.db.query<{ id: string }>('SELECT id FROM agent_commands WHERE source_message_id=$1 AND agent_id=$2', [message.id, AGENT])).rows[0]!;
-    expect(command).toBeDefined(); await claimAgentCommand(scope1.db, ROOM, AGENT, command.id, 'mcp-proof');
+    expect(command).toBeDefined(); await startQueuedTurn(scope1.db, ROOM, AGENT, command.id);
     expect((await scope1.db.query('SELECT state FROM agent_commands WHERE id=$1', [command.id])).rows[0]!.state).toBe('claimed');
     expect(JSON.stringify(await client.callTool({ name: 'read_messages', arguments: { room: ROOM, limit: 1 } }))).toContain('nebula test');
     const searched = JSON.stringify(await client.callTool({ name: 'search_messages', arguments: { query: 'nebula' } }));
@@ -475,9 +476,9 @@ const scope1 = fixtureScope1();
     const firstCommand = await agentCommand(firstId);
     expect(firstCommand.agent_depth).toBe(1);
     // The demo agent answers, tagging the external member at depth two.
-    await scope1.daemon.execute('claimAgentCommand', { roomId: ROOM, commandId: firstCommand.id, generationId: 'loop-1' }, AGENT);
-    await scope1.daemon.execute('postAgentTurnReceipt', { roomId: ROOM, agentId: AGENT, requestId: firstCommand.turn_request_id, generationId: 'loop-1', status: 'working' }, AGENT);
-    await scope1.daemon.execute('postRoomMessage', { roomId: ROOM, requestId: firstCommand.turn_request_id, generationId: 'loop-1', text: `@${handle} step one done` }, AGENT);
+    await startQueuedCommand(scope1.daemon, { roomId: ROOM, commandId: firstCommand.id }, AGENT);
+    await scope1.daemon.execute('postAgentTurnReceipt', { roomId: ROOM, agentId: AGENT, requestId: firstCommand.turn_request_id, status: 'working' }, AGENT);
+    await scope1.daemon.execute('postRoomMessage', { roomId: ROOM, requestId: firstCommand.turn_request_id, text: `@${handle} step one done` }, AGENT);
     expect(await latestMemberCommand()).toBeUndefined();
     expect((await scope1.db.query('SELECT 1 FROM rooms_mcp_webhook_outbox WHERE member_id=$1', [member])).rowCount).toBe(2);
     // The member replies again: depth three, the last depth the limit allows.
@@ -491,9 +492,9 @@ const scope1 = fixtureScope1();
     expect(secondCommand.agent_depth).toBe(3);
     // The final tag still reaches the external member, without a helper turn.
     const stopped = await latestMemberCommand();
-    await scope1.daemon.execute('claimAgentCommand', { roomId: ROOM, commandId: secondCommand.id, generationId: 'loop-2' }, AGENT);
-    await scope1.daemon.execute('postAgentTurnReceipt', { roomId: ROOM, agentId: AGENT, requestId: secondCommand.turn_request_id, generationId: 'loop-2', status: 'working' }, AGENT);
-    await scope1.daemon.execute('postRoomMessage', { roomId: ROOM, requestId: secondCommand.turn_request_id, generationId: 'loop-2', text: `@${handle} step two done` }, AGENT);
+    await startQueuedCommand(scope1.daemon, { roomId: ROOM, commandId: secondCommand.id }, AGENT);
+    await scope1.daemon.execute('postAgentTurnReceipt', { roomId: ROOM, agentId: AGENT, requestId: secondCommand.turn_request_id, status: 'working' }, AGENT);
+    await scope1.daemon.execute('postRoomMessage', { roomId: ROOM, requestId: secondCommand.turn_request_id, text: `@${handle} step two done` }, AGENT);
     expect(await latestMemberCommand()).toEqual(stopped);
     expect((await scope1.db.query('SELECT 1 FROM rooms_mcp_webhook_outbox WHERE member_id=$1', [member])).rowCount).toBe(3);
     const tagging = (await scope1.db.query<{ id: string }>(
@@ -579,9 +580,9 @@ const scope1 = fixtureScope1();
       "UPDATE agent_commands SET agent_depth=3,reason='report' WHERE source_message_id=$1 AND agent_id=$2 RETURNING id,turn_request_id",
       [source.messageId, AGENT])).rows[0]!;
     const generationId = `depth-three-${callback}`;
-    await scope1.daemon.execute('claimAgentCommand', { roomId: ROOM, commandId: command.id, generationId }, AGENT);
-    await scope1.daemon.execute('postAgentTurnReceipt', { roomId: ROOM, agentId: AGENT, requestId: command.turn_request_id, generationId, status: 'working' }, AGENT);
-    const result = await scope1.daemon.execute('postRoomMessage', { roomId: ROOM, requestId: command.turn_request_id, generationId, text: `@${handle} the work is finished` }, AGENT);
+    await startQueuedCommand(scope1.daemon, { roomId: ROOM, commandId: command.id }, AGENT);
+    await scope1.daemon.execute('postAgentTurnReceipt', { roomId: ROOM, agentId: AGENT, requestId: command.turn_request_id, status: 'working' }, AGENT);
+    const result = await scope1.daemon.execute('postRoomMessage', { roomId: ROOM, requestId: command.turn_request_id, text: `@${handle} the work is finished` }, AGENT);
     expect((await scope1.db.query('SELECT 1 FROM rooms_mcp_mentions WHERE member_id=$1 AND message_id=$2', [member, result.id])).rowCount).toBe(1);
     expect((await scope1.db.query('SELECT 1 FROM agent_commands WHERE agent_id=$1', [member])).rowCount).toBe(0);
     const posts: { url: string; body: { messageId: string; memberId: string } }[] = [];

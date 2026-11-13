@@ -13,7 +13,7 @@ import type { SqlDatabase } from './database.js';
 import { closeRunChoices, postRoomChoice } from './room-choice.js';
 import { ensureSystemIdentity, identitySubject, systemLine } from './system-line.js';
 import { SYSTEM_IDENTITY_ID } from '@beeline/api-contract/system-identity';
-import { loadRunStart, noteWorkflowRoleExhausted, RunScope, WORKFLOW_HANDOFF_CARD_TYPE, cancelRunWakes, loadRunRoleAgents, resolveRoleBinding, saveRunStatus, TriedAgent, mentionsFor, roleReasons, workflowRequester, WorkflowRunCard, openRun, loadIdentityRow } from './workflow-runs.js';
+import { loadRunStart, noteWorkflowRoleExhausted, RunScope, WORKFLOW_HANDOFF_CARD_TYPE, loadRunRoleAgents, resolveRoleBinding, saveRunStatus, TriedAgent, mentionsFor, roleReasons, workflowRequester, WorkflowRunCard, openRun, loadIdentityRow } from './workflow-runs.js';
 
 
 
@@ -168,7 +168,6 @@ export async function enterState(
   const isTerminal = nextState.kind === 'terminal';
   const isGate = nextState.kind === 'gate';
   if (!await claimRun(db, scope)) return { state: scope.stateName, attempt: scope.run.seq };
-  await cancelRunWakes(db, roomId, runId);
 
   // Leaving a gate or ending the run must not strand an open gate choice: it
   // would refuse every later gate this agent asks in this Room.
@@ -252,7 +251,6 @@ export async function moveRole(
   const from = run.roleBindings[input.role];
   const names = await mentionsFor(db, [input.picked, ...(from ? [from] : [])],roomId);
   if (!await claimRun(db, scope)) return { state: scope.stateName, attempt: scope.run.seq };
-  await cancelRunWakes(db, roomId, runId);
   if (state.kind === 'gate') await closeRunChoices(db, roomId, runId);
   const attempt = run.seq + 1;
   const cardId = randomBytes(32).toString('hex');
@@ -314,7 +312,6 @@ export async function closeRun(
 ): Promise<boolean> {
   const { run, roomId, runId, stateName } = scope;
   if (!await claimRun(db, scope)) return false;
-  await cancelRunWakes(db, roomId, runId);
   await closeRunChoices(db, roomId, runId);
   await ensureSystemIdentity(db);
   await systemLine(db, {

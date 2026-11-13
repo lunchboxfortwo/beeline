@@ -1,4 +1,4 @@
-import { describe, expect, it, vi, REVIEW_IDENTITY_ID, claimAgentCommand, createAgentCommand, DaemonService, LiveHub, dashboardCoreMetrics, workspace, room, secret, db, get, coreWorkspace, coreRoom, secondWorkspace, coreMeasuredAt, coreId, coreAt, easternDay, shiftEasternDay, corePoint, rootFixture, fixtureScope3 } from './test-support-operator-dashboard.test-support.js';
+import { describe, expect, it, vi, REVIEW_IDENTITY_ID, startQueuedTurn, createAgentCommand, DaemonService, LiveHub, dashboardCoreMetrics, workspace, room, secret, db, get, coreWorkspace, coreRoom, secondWorkspace, coreMeasuredAt, coreId, coreAt, easternDay, shiftEasternDay, corePoint, rootFixture, fixtureScope3 } from './test-support-operator-dashboard.test-support.js';
 
 
 
@@ -345,15 +345,8 @@ const scope3 = fixtureScope3();
         sourceMessageId: requestId,
         reason: 'human_tag',
       });
-      await claimAgentCommand(rootFixture.db, room, coreId(scope3.K_AGENT), command!.id, 'core-generation');
-      await daemon.execute('postAgentTurnReceipt', {
-        roomId: room,
-        requestId,
-        status: 'complete',
-        generationId: 'core-generation',
-        agentId: coreId(scope3.K_AGENT),
-        ...tokens,
-      }, coreId(scope3.K_AGENT));
+      await startQueuedTurn(rootFixture.db, room, coreId(scope3.K_AGENT), command!.id);
+      await daemon.execute('postAgentTurnReceipt', { roomId: room, requestId, status: 'complete', agentId: coreId(scope3.K_AGENT), ...tokens }, coreId(scope3.K_AGENT));
     };
     await receipt('core-measured', { inputTokens: 10, totalInputTokens: 1000, outputTokens: 200 });
     await receipt('core-bare', {});

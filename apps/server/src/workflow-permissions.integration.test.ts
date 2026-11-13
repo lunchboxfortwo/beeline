@@ -67,8 +67,8 @@ async function turn(actor: string, agent = SAVER, roomId = ROOM) {
   await db.query(`INSERT INTO messages(id,room_id,author_id,text) VALUES($1,$2,$3,'Manage this workflow')`, [source, roomId, actor]);
   const command = await createAgentCommand(db, { roomId, agentId: agent, sourceMessageId: source, reason: 'human_message' });
   const generationId = randomUUID();
-  expect((await call(agent, 'claimAgentCommand', { roomId, commandId: command!.id, generationId })).status).toBe(200);
-  const context = { roomId, requestId: command!.turn_request_id, generationId };
+  expect((await call(agent, 'startQueuedTurn', { roomId, commandId: command!.id })).status).toBe(200);
+  const context = { roomId, requestId: command!.turn_request_id };
   expect((await call(agent, 'postAgentTurnReceipt', { ...context, agentId: agent, status: 'working' })).status).toBe(200);
   return context;
 }

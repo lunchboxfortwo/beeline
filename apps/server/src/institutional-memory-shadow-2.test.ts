@@ -1,4 +1,4 @@
-import { describe, expect, it, migrateData, claimAgentCommand, createAgentCommand, WORKSPACE, ROOM, OTHER_ROOM, HUMAN, AGENT, OTHER_AGENT, OTHER_HUMAN, MESSAGE, database, liveDaemon, enrollLive, openTurn, closeTurn, rootFixture } from './test-support-institutional-memory-shadow.test-support.js';
+import { describe, expect, it, migrateData, startQueuedTurn, createAgentCommand, WORKSPACE, ROOM, OTHER_ROOM, HUMAN, AGENT, OTHER_AGENT, OTHER_HUMAN, MESSAGE, database, liveDaemon, enrollLive, openTurn, closeTurn, rootFixture } from './test-support-institutional-memory-shadow.test-support.js';
 
 describe('institutional memory phase-0 shadow capture', () => {
 
@@ -313,11 +313,11 @@ describe('institutional memory authority for agent-started turns', () => {
       reason: 'test',
       turnRequestId: 'cross-workspace-turn',
     });
-    await claimAgentCommand(rootFixture.database, ROOM, AGENT, command!.id, 'cross-workspace-generation');
+    await startQueuedTurn(rootFixture.database, ROOM, AGENT, command!.id);
     await expect(
       liveDaemon().execute(
         'getInstitutionalContext',
-        { roomId: ROOM, requestId: 'cross-workspace-turn', generationId: 'cross-workspace-generation' },
+        { roomId: ROOM, requestId: 'cross-workspace-turn' },
         AGENT,
       ),
     ).rejects.toThrow(/requester authority is unavailable/);

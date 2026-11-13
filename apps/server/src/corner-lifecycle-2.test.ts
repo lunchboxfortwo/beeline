@@ -55,9 +55,7 @@ describe('Reproduction R5a: entry paths lock the run before corner rows', () => 
       await revise(cornerId, recordedDaemon);
     } else if (path === 'create') {
       const command = await commissioned(R);
-      const created = await recordedDaemon.execute('createCorner', { roomId: R, requestId: command.turnRequestId,
-        generationId: 'g1', name: 'Another-widget', objective: 'Ship another widget', repository: 'owner/widgets',
-        brief: brief(command.sourceMessageId) }, A);
+      const created = await recordedDaemon.execute('createCorner', { roomId: R, requestId: command.turnRequestId, name: 'Another-widget', objective: 'Ship another widget', repository: 'owner/widgets', brief: brief(command.sourceMessageId) }, A);
       lockId = created.cornerId;
     } else if (path === 'zero-check') {
       await rootFixture.db.query(`UPDATE corner_github_cache SET lifecycle=jsonb_set(jsonb_set(lifecycle,'{checks}','"unknown"'),'{pr,mergeability}','"clean"') WHERE corner_id=$1`, [cornerId]);
@@ -68,8 +66,7 @@ describe('Reproduction R5a: entry paths lock the run before corner rows', () => 
         recording.calls.length = 0;
         return status;
       });
-      await completion.execute('postRoomMessage', { roomId: cornerId, requestId: command.turnRequestId,
-        generationId: 'g1', text: 'https://github.com/owner/widgets/pull/7' }, A);
+      await completion.execute('postRoomMessage', { roomId: cornerId, requestId: command.turnRequestId, text: 'https://github.com/owner/widgets/pull/7' }, A);
     } else {
       await rootFixture.db.query(`UPDATE corner_github_cache SET lifecycle=jsonb_set(lifecycle,'{checks}','"failing"') WHERE corner_id=$1`, [cornerId]);
       await reconcileCornerMergeBlockers(recording, cornerId);
@@ -225,8 +222,7 @@ describe('each transition wakes the next role exactly once (AC-2)', () => {
     await result(reply!, 'blocked: the proof is attached; a required entry point is still unavailable.');
     for (const tagged of (await commands(A, cornerId)).filter(command => command.reason === 'agent_tag')) {
       await claim(tagged);
-      await rootFixture.daemon.execute('postAgentTurnReceipt', { roomId: cornerId, requestId: tagged.turnRequestId,
-        generationId: 'g1', agentId: A, status: 'complete', completionKind: 'no-reply' }, A);
+      await rootFixture.daemon.execute('postAgentTurnReceipt', { roomId: cornerId, requestId: tagged.turnRequestId, agentId: A, status: 'complete', completionKind: 'no-reply' }, A);
     }
     // The implementer opened this corner itself, so its escalation returns
     // directly to its original human requester rather than its later reviewer.

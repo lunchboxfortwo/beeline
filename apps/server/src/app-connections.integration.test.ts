@@ -1,3 +1,4 @@
+import { startQueuedCommand } from './test-fixtures/queued-turn.test-support.js';
 import { seedSquireMachine } from './test-fixtures/squire-machines.js';
 import { agentInvitationGuide, BEELINE_ROOMS_MCP_URL } from '@beeline/api-contract/agent-invitation-guide';
 import { phoneFetch, describe, expect, it, vi, randomBytes, LinkAgentWallet, migrate, DaemonService, PhoneService, LiveHub, ConnectionPresence, applyVaultList, recordSquireSignIn, readOwnerApps, resolveAppRoute, createBeelineServer, captureServerError, WORKSPACE, ROOM, OWNER, HELPER, COMMAND, GENERATION, turn, linearServer, fakeRegistry, fixtureScope1, fixtureScope2, type AddressInfo, type TokenAuth } from './test-support-app-connections.integration.test-support.js';
@@ -835,11 +836,10 @@ const scope2 = fixtureScope2();
     if (presence) {
       const epoch = await presence.claimConnection(HELPER, {connectionId:'owned-provider-parity'});
       // The fixture's turn was claimed outside a helper; this helper claims it afresh.
-      await scope2.database.query(`UPDATE agent_commands SET state='pending',generation_id=NULL,claimed_at=NULL WHERE id=$1`, [COMMAND]);
-      await daemon.execute('claimAgentCommand', { roomId: ROOM, commandId: COMMAND, generationId },
-        HELPER, { connectionId: 'owned-provider-parity', epoch });
+      await scope2.database.query(`UPDATE agent_commands SET state='pending' WHERE id=$1`, [COMMAND]);
+      await startQueuedCommand(daemon, { roomId: ROOM, commandId: COMMAND }, HELPER);
     }
-    const callTurn = {...turn,generationId};
+    const callTurn = { ...turn };
     try {
 
     const continuation = 'I will post the launch notes after sign-in.';

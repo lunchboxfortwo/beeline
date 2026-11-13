@@ -1,4 +1,5 @@
-import { claimAgentCommand } from '.././agent-command.js';
+import { startQueuedTurn } from '../test-fixtures/queued-turn.test-support.js';
+
 import { createHash } from 'node:crypto';
 import { describe, expect, it } from 'vitest';
 import { migrate } from '.././database.js';
@@ -366,7 +367,7 @@ const fixture = monolithFixture();
       `SELECT id FROM agent_commands WHERE room_id=$1 AND agent_id=$2 AND turn_request_id=$3`,
       [ROOM, AGENT, asked.messageId],
     )).rows[0]!;
-    await fixture.database.transaction((tx) => claimAgentCommand(tx, ROOM, AGENT, parent.id, 'live-generation'));
+    await fixture.database.transaction((tx) => startQueuedTurn(tx, ROOM, AGENT, parent.id));
     const decision = {
       roomId: ROOM,
       requestId: asked.messageId,
@@ -387,13 +388,9 @@ const fixture = monolithFixture();
       { action: 'input', state: 'claimed' },
       { action: 'resume', state: 'pending' },
     ]);
-    const heartbeat = await fixture.request('/v1/daemon/operations/postAgentTurnReceipt', 'POST', {
-      roomId: ROOM, requestId: asked.messageId, status: 'working', generationId: 'live-generation', heartbeat: true,
-    }, fixture.daemonToken);
+    const heartbeat = await fixture.request('/v1/daemon/operations/postAgentTurnReceipt', 'POST', { roomId: ROOM, requestId: asked.messageId, status: 'working', heartbeat: true }, fixture.daemonToken);
     expect(heartbeat.status).toBe(200);
-    const finished = await fixture.request('/v1/daemon/operations/postAgentTurnReceipt', 'POST', {
-      roomId: ROOM, requestId: asked.messageId, status: 'complete', generationId: 'live-generation',
-    }, fixture.daemonToken);
+    const finished = await fixture.request('/v1/daemon/operations/postAgentTurnReceipt', 'POST', { roomId: ROOM, requestId: asked.messageId, status: 'complete' }, fixture.daemonToken);
     expect(finished.status).toBe(200);
     const page = (await (await fixture.daemonOperation('getAgentCommands', { roomId: ROOM })).json()) as {
       commands: { action: string; turnRequestId: string; source: { body: string } }[];

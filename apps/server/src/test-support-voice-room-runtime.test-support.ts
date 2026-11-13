@@ -1,3 +1,4 @@
+import { startQueuedTurn } from './test-fixtures/queued-turn.test-support.js';
 import { VOICE_DATA_TOPIC } from '@beeline/api-contract/phone';
 
 import * as backgroundWork from './background-work.js';
@@ -28,7 +29,7 @@ import { PgliteDatabase } from './test-support.js';
 
 import { LiveHub } from './live.js';
 
-import { routeHumanMessage, claimAgentCommand } from './agent-command.js';
+import { routeHumanMessage } from './agent-command.js';
 
 import { HelperDaemonService as DaemonService } from './test-fixtures/helper-daemon.js';
 
@@ -189,7 +190,7 @@ export { SYSTEM_IDENTITY_ID } from '@beeline/api-contract/system-identity';
 export { migrate } from './database.js';
 export { PgliteDatabase } from './test-support.js';
 export { LiveHub } from './live.js';
-export { routeHumanMessage, claimAgentCommand } from './agent-command.js';
+export { routeHumanMessage, startQueuedTurn } from './agent-command.js';
 export { HelperDaemonService as DaemonService } from './test-fixtures/helper-daemon.js';
 export { PhoneService } from './phone-service.js';
 export { ConnectionPresence } from './connection-presence.js';

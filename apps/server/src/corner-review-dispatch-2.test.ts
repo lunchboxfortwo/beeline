@@ -194,8 +194,8 @@ describe('corner message attribution', () => {
       await claim(worker!);
       // What post_artifact queues for the turn's final reply.
       await rootFixture.db.query(
-        `INSERT INTO agent_pending_attachments(room_id,agent_id,url,name,mime_type,size,request_id,generation_id)
-         VALUES($1,$2,'https://example.test/media/report','report.pdf','application/pdf',10,$3,'g1')`,
+        `INSERT INTO agent_pending_attachments(room_id,agent_id,url,name,mime_type,size,request_id)
+         VALUES($1,$2,'https://example.test/media/report','report.pdf','application/pdf',10,$3)`,
         [C, A, worker!.turnRequestId],
       );
       const text = tagged ? '@human The report is attached.' : 'The report is attached.';
@@ -316,10 +316,8 @@ describe('corner message attribution', () => {
       await greenHead(95, head);
       const [review] = await commands(B, C);
       await claim(review!);
-      await rootFixture.daemon.execute('report', { roomId: C, requestId: review!.turnRequestId, generationId: 'g1',
-        status: verdict.startsWith('blocked:') ? 'blocked' : 'failed',
-        text: verdict.startsWith('blocked:') ? verdict : `failed: ${verdict}` }, B);
-      await rootFixture.daemon.execute('postAgentTurnReceipt', { roomId: C, requestId: review!.turnRequestId, generationId: 'g1', status: 'failed', reasonKind: 'hiccup', reason: 'unreported_order: runtime failed after delivery' }, B);
+      await rootFixture.daemon.execute('report', { roomId: C, requestId: review!.turnRequestId, status: verdict.startsWith('blocked:') ? 'blocked' : 'failed', text: verdict.startsWith('blocked:') ? verdict : `failed: ${verdict}` }, B);
+      await rootFixture.daemon.execute('postAgentTurnReceipt', { roomId: C, requestId: review!.turnRequestId, status: 'failed', reasonKind: 'hiccup', reason: 'unreported_order: runtime failed after delivery' }, B);
       const sourceId = (await rootFixture.db.query<{ id: string }>(
         `SELECT id FROM messages WHERE room_id=$1 AND system_event->>'kind'='check-passed' ORDER BY created_at DESC LIMIT 1`, [C])).rows[0]!.id;
       for (const reason of REVIEWER_DISPATCH_REASONS.filter(reason => !['agent_tag','order'].includes(reason))) {
@@ -353,10 +351,7 @@ describe('corner message attribution', () => {
     const beforeEcho = (await rootFixture.db.query<{ id: string }>(
       `SELECT id FROM agent_commands WHERE room_id=$1 AND agent_id=$2`, [C, B],
     )).rows.map(row => row.id);
-    const echoed = await rootFixture.daemon.execute('report', {
-      roomId: C, requestId: review!.turnRequestId, generationId: 'g1', status: 'failed',
-      text: 'failed: FAIL: the pull request is unchanged.',
-    }, B);
+    const echoed = await rootFixture.daemon.execute('report', { roomId: C, requestId: review!.turnRequestId, status: 'failed', text: 'failed: FAIL: the pull request is unchanged.' }, B);
     const afterEcho = (await rootFixture.db.query<{ id: string }>(
       `SELECT id FROM agent_commands WHERE room_id=$1 AND agent_id=$2`, [C, B],
     )).rows.map(row => row.id);
@@ -547,8 +542,7 @@ it.each(['empty','status','failed'])('a %s review result ends silently without r
   await greenHead(91,'d'.repeat(40));
   const [review]=await commands(B,C);await claim(review!);
   if(ending==='status')await result(review!,'Review ended without a verdict.');
-  else await rootFixture.daemon.execute('postAgentTurnReceipt',{roomId:C,requestId:review!.turnRequestId,
-    generationId:'g1',status:ending==='failed'?'failed':'complete',...(ending==='failed'?{reason:'provider unavailable'}:{})},B);
+  else await rootFixture.daemon.execute('postAgentTurnReceipt',{ roomId:C, requestId:review!.turnRequestId, status:ending==='failed'?'failed':'complete', ...(ending==='failed'?{reason:'provider unavailable'}:{}) },B);
   for(let event=0;event<3;event++)await reconcileConfiguredCornerReviewers(rootFixture.db,R);
   expect(await commands(B,C)).toEqual([]);
   expect((await rootFixture.db.query<{text:string}>(`SELECT text FROM messages WHERE room_id=$1`,[C])).rows
@@ -563,8 +557,7 @@ it('Reproduction REVIEW-LOOP: a current member tag reaches a reviewer after an e
   await greenHead(92,'e'.repeat(40));
   const [review]=await commands(B,C);
   await claim(review!);
-  await rootFixture.daemon.execute('postAgentTurnReceipt',{roomId:C,requestId:review!.turnRequestId,
-    generationId:'g1',status:'complete'},B);
+  await rootFixture.daemon.execute('postAgentTurnReceipt',{ roomId:C, requestId:review!.turnRequestId, status:'complete' },B);
   await rootFixture.db.query(`INSERT INTO messages(id,room_id,author_id,text) VALUES('retry-tag',$1,$2,'@goosy please review this head')`,[C,A]);
   const {routeAgentResult}=await import('./agent-command.js');
   const parent=(await rootFixture.db.query(`SELECT * FROM agent_commands WHERE id=$1`,[review!.id])).rows[0];
@@ -618,8 +611,7 @@ it.each(['final','report'])(
     const [review]=await commands(B,C);
     await claim(review!);
     if(delivery==='report') {
-      await rootFixture.daemon.execute('report',{roomId:C,requestId:review!.turnRequestId,generationId:'g1',
-        status:'done',text:'done: PASS. Screenshots are attached here.'},B);
+      await rootFixture.daemon.execute('report',{ roomId:C, requestId:review!.turnRequestId, status:'done', text:'done: PASS. Screenshots are attached here.' },B);
     } else await result(review!,'PASS: screenshots attached.');
     await expect(rootFixture.daemon.execute('approveCornerMerge',{cornerId:C,headSha:head},B)).rejects.toThrow(/missing.*attachment/i);
     // A file on an unrelated older message must not satisfy this verdict.
@@ -646,9 +638,8 @@ it.each(['complete','failed'] as const)('Reproduction review-1: a delivered repa
   await greenHead(3060,head);
   const [review]=await commands(B,C);
   await claim(review!);
-  await rootFixture.daemon.execute('order',{roomId:C,requestId:review!.turnRequestId,generationId:'g1',
-    address:C,agent:'@hoots',text:'FAIL: the sample endpoint accepts an invalid request. Add the required validation.'},B);
-  await rootFixture.daemon.execute('postAgentTurnReceipt',{roomId:C,requestId:review!.turnRequestId,generationId:'g1',status,...(status==='complete'?{completionKind:'no-reply' as const}:{reason:'unreported_order: runtime failed after delivery',reasonKind:'hiccup' as const})},B);
+  await rootFixture.daemon.execute('order',{ roomId:C, requestId:review!.turnRequestId, address:C, agent:'@hoots', text:'FAIL: the sample endpoint accepts an invalid request. Add the required validation.' },B);
+  await rootFixture.daemon.execute('postAgentTurnReceipt',{ roomId:C, requestId:review!.turnRequestId, status, ...(status==='complete'?{completionKind:'no-reply' as const}:{reason:'unreported_order: runtime failed after delivery',reasonKind:'hiccup' as const}) },B);
   const repairs=(await commands(A,C)).filter(c=>c.reason==='order');
   expect(repairs.length).toBeGreaterThan(0);
   await rootFixture.db.query("UPDATE agent_commands SET state='complete',completed_at=now() WHERE room_id=$1 AND agent_id=$2",[C,A]);
@@ -718,12 +709,7 @@ it.each(['pending', 'claimed'] as const)(
       expect((await commands(B, C)).some((command) => command.id === reviews[0]!.id)).toBe(false);
       await rootFixture.daemon.execute(
         'postAgentTurnReceipt',
-        {
-          roomId: C,
-          requestId: worker!.turn_request_id,
-          generationId: 'g1',
-          status: 'complete',
-        },
+        { roomId: C, requestId: worker!.turn_request_id, status: 'complete' },
         A,
       );
       expect((await commands(B, C)).some((command) => command.id === reviews[0]!.id)).toBe(true);
@@ -793,12 +779,7 @@ it.each(
       if (state === 'complete')
         await rootFixture.daemon.execute(
           'postAgentTurnReceipt',
-          {
-            roomId: C,
-            requestId: earlier.command!.turn_request_id,
-            generationId: 'g1',
-            status: 'complete',
-          },
+          { roomId: C, requestId: earlier.command!.turn_request_id, status: 'complete' },
           B,
         );
     }
@@ -898,8 +879,7 @@ it('committed-event recovery: startup green, lost command and reviewer completio
     await vi.waitFor(async () => expect(await commands(B, C)).toHaveLength(1));
     const [review] = await commands(B, C);
     await claim(review!);
-    await rootFixture.daemon.execute('postAgentTurnReceipt', { roomId: C, requestId: review!.turnRequestId,
-      generationId: 'g1', status: 'complete' }, B);
+    await rootFixture.daemon.execute('postAgentTurnReceipt', { roomId: C, requestId: review!.turnRequestId, status: 'complete' }, B);
     for (let replay = 0; replay < 3; replay++) live.publish({ type: 'invalidate', roomId: C, reason: 'postgres:corner_state' });
     await machine.refresh(C);
     const lines=(await rootFixture.db.query<{text:string}>(`SELECT text FROM messages WHERE room_id=$1`,[C])).rows;

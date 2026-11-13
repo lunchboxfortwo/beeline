@@ -1,3 +1,4 @@
+import { startQueuedCommand } from './test-fixtures/queued-turn.test-support.js';
 import { randomBytes, randomUUID } from 'node:crypto';
 import { writeFileSync } from 'node:fs';
 import { afterAll, beforeAll, beforeEach, expect, it, vi } from 'vitest';
@@ -69,24 +70,13 @@ async function request(roomId: string) {
     (c) => c.sourceMessageId === sourceMessageId,
   )!;
   expect(command).toBeDefined();
-  await daemon.execute(
-    'claimAgentCommand',
-    { roomId, commandId: command.id, generationId: 'proof' },
-    A,
-  );
+  await startQueuedCommand(daemon, { roomId, commandId: command.id }, A);
   return command;
 }
 async function open(roomId: string, command: { turnRequestId: string }, name = 'requested-work') {
   return daemon.execute(
     'createCorner',
-    {
-      roomId,
-      targetRoomId: R,
-      requestId: command.turnRequestId,
-      generationId: 'proof',
-      name,
-      objective: 'Build the requested work',
-    },
+    { roomId, targetRoomId: R, requestId: command.turnRequestId, name, objective: 'Build the requested work' },
     A,
   );
 }
@@ -178,11 +168,7 @@ it.each(['schedule', 'workflow', 'order', 'report', 'judgment'] as const)(
         : {}),
     });
     expect(command).toBeDefined();
-    await daemon.execute(
-      'claimAgentCommand',
-      { roomId: DM, commandId: command!.id, generationId: 'proof' },
-      A,
-    );
+    await startQueuedCommand(daemon, { roomId: DM, commandId: command!.id }, A);
     const opened = await open(DM, { turnRequestId: command!.turn_request_id });
     expect(await facts(opened.cornerId)).toEqual([]);
     expect((await phone.readRoom(DM, H))!.messages.some(
@@ -215,11 +201,7 @@ it.each(['dm', 'room', 'corner'] as const)(
       retainDepth: true,
     });
     expect(command).toBeDefined();
-    await daemon.execute(
-      'claimAgentCommand',
-      { roomId: commandRoom, commandId: command!.id, generationId: 'proof' },
-      A,
-    );
+    await startQueuedCommand(daemon, { roomId: commandRoom, commandId: command!.id }, A);
     const opened = await open(commandRoom, { turnRequestId: command!.turn_request_id }, 'fleet-parity-deps');
     const written = await facts(opened.cornerId);
     expect(written).toEqual([]);
@@ -272,11 +254,7 @@ it('does not treat an automatic workflow card as a dispatching message', async (
     retainDepth: true,
   });
   expect(command).toBeDefined();
-  await daemon.execute(
-    'claimAgentCommand',
-    { roomId: DM, commandId: command!.id, generationId: 'proof' },
-    A,
-  );
+  await startQueuedCommand(daemon, { roomId: DM, commandId: command!.id }, A);
   const opened = await open(DM, { turnRequestId: command!.turn_request_id });
   const written = await facts(opened.cornerId);
   expect(written).toEqual([]);

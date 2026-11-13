@@ -1,3 +1,4 @@
+import { startQueuedCommand } from './test-fixtures/queued-turn.test-support.js';
 import { randomBytes } from 'node:crypto';
 import { afterAll, beforeAll, expect, it } from 'vitest';
 import { migratedDatabase, type PgliteDatabase } from './test-support.js';
@@ -54,18 +55,8 @@ it('SELF-OUTPUT: its own corner assignment queues once; posts and reports queue 
   const incoming = (
     await daemon.execute('getAgentCommands', { roomId: ROOM }, AGENT)
   ).commands.find((c) => c.sourceMessageId === source)!;
-  await daemon.execute(
-    'claimAgentCommand',
-    { roomId: ROOM, commandId: incoming.id, generationId: 'self-proof' },
-    AGENT,
-  );
-  const input = {
-      roomId: ROOM,
-      requestId: incoming.turnRequestId,
-      generationId: 'self-proof',
-      name: 'Glyph-alignment',
-      objective: 'Align the glyphs',
-    };
+  await startQueuedCommand(daemon, { roomId: ROOM, commandId: incoming.id }, AGENT);
+  const input = { roomId: ROOM, requestId: incoming.turnRequestId, name: 'Glyph-alignment', objective: 'Align the glyphs' };
   const { cornerId } = await daemon.execute('createCorner', input, AGENT);
   expect((await daemon.execute('createCorner', input, AGENT)).cornerId).toBe(cornerId);
   const opening = (
@@ -77,12 +68,9 @@ it('SELF-OUTPUT: its own corner assignment queues once; posts and reports queue 
   expect(opening).toBeDefined(); // The order still owns corner provenance and idempotency.
   expect((await daemon.execute('getAgentCommands', { roomId: cornerId }, AGENT)).commands.map(c => c.id))
     .toEqual([opening.id]);
-  await daemon.execute('claimAgentCommand', { roomId: cornerId, commandId: opening.id,
-    generationId: 'own-corner-work' }, AGENT);
-  await daemon.execute('postCornerMessage', { roomId: cornerId, cornerId,
-    requestId: opening.turn_request_id, generationId: 'own-corner-work', text: '@worker mock ready' }, AGENT);
-  await daemon.execute('postAgentTurnReceipt', { roomId: cornerId,
-    requestId: opening.turn_request_id, generationId: 'own-corner-work', status: 'complete' }, AGENT);
+  await startQueuedCommand(daemon, { roomId: cornerId, commandId: opening.id }, AGENT);
+  await daemon.execute('postCornerMessage', { roomId: cornerId, cornerId, requestId: opening.turn_request_id, text: '@worker mock ready' }, AGENT);
+  await daemon.execute('postAgentTurnReceipt', { roomId: cornerId, requestId: opening.turn_request_id, status: 'complete' }, AGENT);
   expect(
     await reportToCommander(db, cornerId, AGENT, 'done: mock ready', opening, 'self-report-proof'),
   ).toMatchObject({ delivered: true });
@@ -128,21 +116,10 @@ it('SELF-OUTPUT: a different commander still receives explicit and System report
   const incoming = (
     await daemon.execute('getAgentCommands', { roomId: ROOM }, OTHER)
   ).commands.find((c) => c.sourceMessageId === source)!;
-  await daemon.execute(
-    'claimAgentCommand',
-    { roomId: ROOM, commandId: incoming.id, generationId: 'other-proof' },
-    OTHER,
-  );
+  await startQueuedCommand(daemon, { roomId: ROOM, commandId: incoming.id }, OTHER);
   const { cornerId } = await daemon.execute(
     'createCorner',
-    {
-      roomId: ROOM,
-      requestId: incoming.turnRequestId,
-      generationId: 'other-proof',
-      name: 'Delegated-work',
-      objective: 'Make the mock',
-      implementer: 'worker',
-    },
+    { roomId: ROOM, requestId: incoming.turnRequestId, name: 'Delegated-work', objective: 'Make the mock', implementer: 'worker' },
     OTHER,
   );
   const opening = (

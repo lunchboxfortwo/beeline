@@ -1,4 +1,5 @@
-import { claimAgentCommand } from '.././agent-command.js';
+import { startQueuedTurn } from '../test-fixtures/queued-turn.test-support.js';
+
 import { describe, expect, it } from 'vitest';
 import WebSocket from 'ws';
 import { PhoneService } from '.././phone-service.js';
@@ -128,7 +129,7 @@ const fixture = monolithFixture();
       `SELECT id FROM agent_commands WHERE room_id=$1 AND agent_id=$2 AND source_message_id=$3`,
       [ROOM, AGENT, messageId],
     )).rows[0];
-    const claimed = await claimAgentCommand(fixture.database, ROOM, AGENT, queued.id, 'fixture-generation');
+    const claimed = await startQueuedTurn(fixture.database, ROOM, AGENT, queued.id);
     expect(claimed.source_message_id).toBe(messageId);
     expect((await fixture.database.query('SELECT state FROM agent_commands WHERE source_message_id=$1 AND agent_id=$2', [threadedMessageId, AGENT])).rows).toEqual([{state:'pending'}]);
     const delivered = next(socket, 'message-delta');

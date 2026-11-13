@@ -8,7 +8,7 @@ export interface StoredAnswer {
   readonly itemId: string;
   readonly roomId: string;
   readonly requestId: string;
-  /** Empty when the agent chose not to post a reply. */
+  /** Empty only for a restart control acknowledgement. */
   readonly text: string;
   readonly steps?: DaemonOperationMap['postRoomMessage']['input']['steps'];
 }

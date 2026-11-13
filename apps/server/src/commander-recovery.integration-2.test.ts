@@ -1,4 +1,4 @@
-import { advanceCorner, createHash, randomUUID, randomBytes, expect, it, vi, MemoryObjectStorage, ObjectService, callAgentTool, postArtifact, createServer, spawn, createInterface, mkdtemp, readFile, writeFile, rm, tmpdir, join, CommandExecutionContext, runServerCommandIntake, HUMAN, RUBY, WORKER, WS, ROOM, DM, db, daemon, phone, order, claim, authority, commands, open, worker, rootFixture, type AgentCommand, type DaemonApiClient } from './test-support-commander-recovery.integration.test-support.js';
+import { advanceCorner, createHash, randomUUID, randomBytes, expect, it, vi, MemoryObjectStorage, ObjectService, callAgentTool, postArtifact, createServer, spawn, createInterface, mkdtemp, readFile, writeFile, rm, tmpdir, join, HUMAN, RUBY, WORKER, WS, ROOM, DM, db, daemon, phone, order, claim, authority, commands, open, worker, rootFixture, type AgentCommand, type DaemonApiClient } from './test-support-commander-recovery.integration.test-support.js';
 
 
 it('keeps the originating corner waiting for a decision returned to its parent Room', async () => {
@@ -641,55 +641,6 @@ it('QUEUE-1: direct messages sent during a running turn each require a result', 
   await claim(next[0]!);
   await rootFixture.daemon.execute('postAgentTurnReceipt', { ...authority(next[0]!), status: 'complete' }, RUBY);
   expect((await commands(DM, RUBY)).map(command => command.id)).toEqual([next[1]!.id]);
-});
-
-
-it('AGENT-STOP-1: a commander stops its worker\'s running turn, then its new order runs next', async () => {
-  const opened = await open();
-  await rootFixture.db.query(`INSERT INTO live_outputs(room_id,agent_id,turn_id,kind,body) VALUES($1,$2,'presence','presence','{"status":"online"}')`, [opened.cornerId, WORKER]);
-  const root = await mkdtemp(join(tmpdir(), 'agent-stop-proof-'));
-  const abort = new AbortController();
-  const ctx = new CommandExecutionContext(root);
-  const prompts: AgentCommand[] = [];
-  const stops: string[] = [];
-  const errors: unknown[] = [];
-  let pushed: ((rows: readonly AgentCommand[]) => void) | undefined;
-  let finishOld!: () => void;
-  const oldRun = new Promise<void>((resolve) => { finishOld = resolve; });
-  const api = {
-    execute: (name: string, input: object) => rootFixture.daemon.execute(name as never, input as never, WORKER),
-    liveSubscribe: (_room: unknown, _cursor: unknown, _items: unknown, _state: unknown,
-      _presence: unknown, onCommands: typeof pushed) => { pushed = onCommands; return () => {}; },
-  } as unknown as DaemonApiClient;
-  const running = runServerCommandIntake({ api, roomId: opened.cornerId, agentId: WORKER,
-    context: ctx, signal: abort.signal, onError: (error) => errors.push(error),
-    stop: (id) => { stops.push(id); finishOld(); },
-    run: async (command) => {
-      prompts.push(command);
-      if (prompts.length === 1) await oldRun;
-      else abort.abort();
-    },
-  });
-  try {
-    await vi.waitFor(() => expect(prompts).toHaveLength(1));
-    const old = prompts[0]!;
-    const result = await rootFixture.daemon.execute('stopAgentTurn', { ...authority(rootFixture.order), address: opened.cornerId }, RUBY);
-    expect(result).toMatchObject({ stopped: true, agent: WORKER });
-    expect((await rootFixture.db.query(`SELECT status FROM agent_turns WHERE room_id=$1 AND request_id=$2`,
-      [opened.cornerId, old.turnRequestId])).rows[0]?.status).toBe('cancelled');
-    expect((await rootFixture.db.query(`SELECT text FROM messages WHERE room_id=$1 AND text LIKE '%stopped @%''s running turn%'`,
-      [opened.cornerId])).rows.map((row) => row.text)).toEqual([expect.stringMatching(/^@\S+ stopped @\S+'s running turn$/)]);
-    await rootFixture.daemon.execute('order', { ...authority(rootFixture.order), address: opened.cornerId, text: 'New plan: paint it green' }, RUBY);
-    pushed?.((await rootFixture.daemon.execute('getAgentCommands', { roomId: opened.cornerId }, WORKER)).commands);
-    await vi.waitFor(() => expect(prompts).toHaveLength(2));
-    await running;
-    expect(stops).toContain(old.turnRequestId);
-    expect(prompts[1]!.source.body).toContain('New plan: paint it green');
-    expect(errors).toEqual([]);
-    console.log('AGENT-STOP-1: commander stop cancelled the running turn; the follow-up order ran next');
-  } finally {
-    abort.abort(); finishOld(); await running; await rm(root, { recursive: true, force: true });
-  }
 });
 
 

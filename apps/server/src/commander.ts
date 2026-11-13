@@ -177,8 +177,6 @@ export async function sendOrder(
     retainDepth: !peerOrder,
   });
   if (!queued) {
-    if (peerOrder && nextAgentDepth(command.agent_depth) === undefined)
-      throw new CommandRefusalError('agent order chain depth limit reached', 400);
     throw new CommandRefusalError('order recipient is no longer a member', 403);
   }
   if (target.parent_id)
@@ -344,7 +342,8 @@ export async function reportToCommander(
     );
   const ask = options.ask === undefined ? undefined : normalizeAgentAsk(options.ask);
   const strict = Boolean(command) && !options.automatic;
-  const { recipient, returnRoom, parent, origin, incoming } = await commanderReportAddress(db, roomId, command, options.orderIssuer);
+  const { recipient, returnRoom: resolvedReturnRoom, parent, origin, incoming } = await commanderReportAddress(db, roomId, command, options.orderIssuer);
+  const returnRoom = command?.private_payload ? command.return_room_id ?? resolvedReturnRoom : resolvedReturnRoom;
   // Closed work has no outstanding request. Do not move its stale reports to
   // an ancestor Room merely because that Room still exists.
   if (origin && (await db.query(`SELECT 1 FROM rooms corner
@@ -463,8 +462,7 @@ export async function reportToCommander(
   } else {
     // Closing prose after an explicit post to this same chat is turn activity.
     // Delivering it as a report would post the same answer to the person twice.
-    const posted = options.automatic && command?.private_payload?.publicPostId &&
-      command.private_payload.publicPostGenerationId === command.generation_id
+    const posted = options.automatic && command?.private_payload?.publicPostId
       ? (await db.query<{ id: string }>(`SELECT id FROM messages WHERE id=$1 AND room_id=$2 AND deleted_at IS NULL`,
         [command.private_payload.publicPostId, returnRoom])).rows[0]
       : undefined;
@@ -695,6 +693,9 @@ export async function commanderReportAddress(db: SqlDatabase, roomId: string, co
     )).rows[0];
     returnRoom = live?.id;
   }
-  return { recipient, returnRoom, parent, origin, incoming };
+  // Approved briefs can supply routing provenance without representing a
+  // queue item. Only an actual item can parent the next queued report.
+  const queueParent = parent?.id ? parent : incoming?.id ? incoming : undefined;
+  return { recipient, returnRoom, parent: queueParent, origin, incoming };
 }
 

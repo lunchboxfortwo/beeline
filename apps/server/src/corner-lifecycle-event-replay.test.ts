@@ -51,16 +51,11 @@ describe('corner lifecycle recorded event sequences', () => {
       const [review] = await commands(B, cornerId);
       expect(await machine(cornerId)).toMatchObject({ state: 'review', phase: 'reviewer' });
       await claim(review!);
-      await rootFixture.daemon.execute('report', {
-        roomId: cornerId, requestId: review!.turnRequestId, generationId: 'g1', status,
-        text: 'FAIL: required native phone screenshots are missing. Capture the approved screens.',
-      }, B);
+      await rootFixture.daemon.execute('report', { roomId: cornerId, requestId: review!.turnRequestId, status, text: 'FAIL: required native phone screenshots are missing. Capture the approved screens.' }, B);
       // PGlite has no production LISTEN bridge; deliver the committed report event.
       await advanceCorner(rootFixture.db, cornerId, { kind: 'reconcile' });
       expect(await machine(cornerId)).toMatchObject({ state: 'working' });
-      await rootFixture.daemon.execute('postAgentTurnReceipt', {
-        roomId: cornerId, requestId: review!.turnRequestId, generationId: 'g1', status: 'complete',
-      }, B);
+      await rootFixture.daemon.execute('postAgentTurnReceipt', { roomId: cornerId, requestId: review!.turnRequestId, status: 'complete' }, B);
       await advanceCorner(rootFixture.db, cornerId, { kind: 'reconcile' });
       expect(await machine(cornerId)).toMatchObject({ state: 'working' });
       const repair = (await commands(A, cornerId)).find(command => command.reason === 'corner_review_needed');
@@ -76,13 +71,8 @@ describe('corner lifecycle recorded event sequences', () => {
     const cornerId = await inReview();
     const [review] = await commands(B, cornerId);
     await claim(review!);
-    await rootFixture.daemon.execute('report', {
-      roomId: cornerId, requestId: review!.turnRequestId, generationId: 'g1', status: 'blocked',
-      text: 'FAIL: required native phone screenshots are missing.',
-    }, B);
-    await rootFixture.daemon.execute('postAgentTurnReceipt', {
-      roomId: cornerId, requestId: review!.turnRequestId, generationId: 'g1', status: 'complete',
-    }, B);
+    await rootFixture.daemon.execute('report', { roomId: cornerId, requestId: review!.turnRequestId, status: 'blocked', text: 'FAIL: required native phone screenshots are missing.' }, B);
+    await rootFixture.daemon.execute('postAgentTurnReceipt', { roomId: cornerId, requestId: review!.turnRequestId, status: 'complete' }, B);
     await advanceCorner(rootFixture.db, cornerId, { kind: 'reconcile' });
     const repair = (await commands(A, cornerId)).find(command => command.reason === 'corner_review_needed');
     await claim(repair!);
@@ -92,11 +82,7 @@ describe('corner lifecycle recorded event sequences', () => {
       if (event.table === 'corner_state') changes.push(event.roomId);
     });
     try {
-      const ask = await rootFixture.daemon.execute('requestAgentGrant', {
-        roomId: cornerId, requestId: repair!.turnRequestId, generationId: 'g1',
-        kind: 'host', target: '127.0.0.1:5037', purpose: 'Capture required phone screenshots',
-        reason: 'Use the owner emulator for the approved visual proof.',
-      }, A);
+      const ask = await rootFixture.daemon.execute('requestAgentGrant', { roomId: cornerId, requestId: repair!.turnRequestId, kind: 'host', target: '127.0.0.1:5037', purpose: 'Capture required phone screenshots', reason: 'Use the owner emulator for the approved visual proof.' }, A);
       expect(ask).toMatchObject({ status: 'pending', auto: false });
       // The card sits in the corner where the agent asked.
       expect((await rootFixture.db.query('SELECT room_id FROM messages WHERE id=$1', [ask.messageId])).rows[0]!.room_id)

@@ -1,6 +1,7 @@
+import { startQueuedTurn } from '../test-fixtures/queued-turn.test-support.js';
 import { phoneFetch } from '../../../../tests/helpers/phone-operation.js';
 import * as serverSentry from '.././sentry.js';
-import { claimAgentCommand } from '.././agent-command.js';
+
 import { request as httpRequest } from 'node:http';
 import { describe, expect, it, vi } from 'vitest';
 import { FACE_NAMES, FACE_SOULS, isFaceId, type FaceId } from '@beeline/api-contract/phone';
@@ -38,16 +39,11 @@ const fixture = monolithFixture();
       )
     ).rows[0]!;
     expect(command).toBeDefined();
-    const input = {
-      roomId: ROOM,
-      drawing,
-      requestId: command.turn_request_id,
-      generationId: 'avatar-turn',
-    };
+    const input = { roomId: ROOM, drawing, requestId: command.turn_request_id };
     const call = (body: unknown) =>
       fixture.request('/v1/daemon/operations/postAgentAvatar', 'POST', body, fixture.daemonToken);
     expect((await call(input)).status).not.toBe(200);
-    await claimAgentCommand(fixture.database, ROOM, AGENT, command.id, 'avatar-turn');
+    await startQueuedTurn(fixture.database, ROOM, AGENT, command.id);
     expect((await call({ ...input, agentId: 'c'.repeat(64) })).status).not.toBe(200);
     expect((await call({ ...input, drawing: [] })).status).not.toBe(200);
     expect((await fixture.phone.readAgent(WORKSPACE, AGENT, HUMAN))?.avatarGenerationId).toBeUndefined();

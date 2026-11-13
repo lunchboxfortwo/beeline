@@ -28,8 +28,7 @@ describe('corner message attribution', () => {
     await expect(rootFixture.daemon.execute('getRoomMessage', {roomId:source,messageId:'review-approval'},B))
       .resolves.toMatchObject({body:'Approved scope'});
     expect((await rootFixture.db.query(`SELECT 1 FROM memberships WHERE room_id=$1 AND identity_id=$2`, [source,B])).rowCount).toBe(0);
-    await rootFixture.daemon.execute('postAgentTurnReceipt', {roomId:C,requestId:review!.turnRequestId,
-      generationId:'g1',status:'complete'}, B);
+    await rootFixture.daemon.execute('postAgentTurnReceipt', { roomId:C, requestId:review!.turnRequestId, status:'complete' }, B);
     await expect(read('review-approval')).rejects.toThrow('message access denied');
     await rootFixture.db.query(`UPDATE agent_commands SET state='claimed',completed_at=NULL WHERE id=$1`, [review!.id]);
     await expect(read('review-approval')).resolves.toMatchObject({body:'Approved scope'});
@@ -84,9 +83,7 @@ describe('corner message attribution', () => {
       .resolves.toMatchObject({body:'Prior human decision'});
     await expect(transcript(A)).rejects.toThrow();
     await expect(rootFixture.daemon.execute('getRoomInbox',{roomId:source},B)).rejects.toThrow();
-    await expect(rootFixture.daemon.execute('postRoomMessage',{
-      roomId:source,requestId:review!.turnRequestId,generationId:'g1',text:'Outside assignment',
-    },B)).rejects.toThrow();
+    await expect(rootFixture.daemon.execute('postRoomMessage',{ roomId:source, requestId:review!.turnRequestId, text:'Outside assignment' },B)).rejects.toThrow();
     await expect(rootFixture.daemon.execute('listRoomMembers',{roomId:source},B)).rejects.toThrow();
     await expect(rootFixture.daemon.execute('getRoomConversation',{roomId:sibling},B)).rejects.toThrow();
     await expect(rootFixture.daemon.execute('getRoomMessage',{roomId:source,messageId:childMessage},B)).rejects.toThrow();
@@ -209,7 +206,7 @@ describe('corner message attribution', () => {
     const noReviewerWorker = (await commands(A, C)).find(command => command.id === opening!.id);
     await claim(noReviewerWorker!, 'g2');
     await result(noReviewerWorker!, 'https://github.com/acme/repo/pull/7', 'g2');
-    await rootFixture.daemon.execute('postAgentTurnReceipt', { roomId: C, requestId: noReviewerWorker!.turnRequestId, generationId: 'g2', status: 'complete' }, A);
+    await rootFixture.daemon.execute('postAgentTurnReceipt', { roomId: C, requestId: noReviewerWorker!.turnRequestId, status: 'complete' }, A);
     await advanceCorner(rootFixture.db, C, { kind: 'reconcile' });
     expect(checkGate).toHaveBeenCalledTimes(2);
     const notices = (await commands(A, C)).filter(command => command.reason === 'corner_review_needed');
@@ -231,8 +228,7 @@ describe('corner message attribution', () => {
     await claim(review!);
     await greenHead(81, '2'.repeat(40));
     if (surface === 'final') await result(review!, '@hoots FAIL: repair the old head.');
-    else await rootFixture.daemon.execute('postCornerMessage', { roomId: C, cornerId: C, requestId: review!.turnRequestId,
-      generationId: 'g1', text: '@hoots FAIL: repair the old head.' }, B);
+    else await rootFixture.daemon.execute('postCornerMessage', { roomId: C, cornerId: C, requestId: review!.turnRequestId, text: '@hoots FAIL: repair the old head.' }, B);
     expect(await commands(A, C)).toEqual([]);
     expect((await rootFixture.db.query(`SELECT 1 FROM messages WHERE room_id=$1 AND text LIKE '%repair the old head%'`, [C])).rowCount).toBe(1);
     expect((await rootFixture.db.query(`SELECT state FROM agent_commands WHERE id=$1`, [review!.id])).rows)
@@ -256,8 +252,7 @@ describe('corner message attribution', () => {
     await greenHead(84, '1'.repeat(40));
     const [review] = await commands(B, C);
     await claim(review!);
-    await rootFixture.daemon.execute('report', { roomId: C, requestId: review!.turnRequestId,
-      generationId: 'g1', status: 'done', text: 'done: FAIL on the reviewed head.' }, B);
+    await rootFixture.daemon.execute('report', { roomId: C, requestId: review!.turnRequestId, status: 'done', text: 'done: FAIL on the reviewed head.' }, B);
     await greenHead(84, '2'.repeat(40));
     expect((await commands(A, R)).filter(c => c.reason === 'report' && c.source.body.includes('FAIL on the reviewed head'))).toEqual([]);
   });
