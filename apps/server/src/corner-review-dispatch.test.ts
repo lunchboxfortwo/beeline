@@ -597,6 +597,36 @@ describe('corner message attribution', () => {
   });
 
 
+  it('Reproduction REVIEWER-TAG-1: a blocked worker can tag the reviewer, and the reviewer PASS report records the yes', async () => {
+    // Production PR #4253, 12 Nov: the worker reported blocked: after a FAIL, then
+    // two tags to the reviewer got "agent or place is no longer available".
+    const head = '9'.repeat(40);
+    await rootFixture.phone.execute('updateRoom', { roomId: R, reviewerAgentId: B }, H);
+    await greenHead(29, head);
+    const [review] = await commands(B, C);
+    await claim(review!);
+    await result(review!, 'FAIL: the R1 proof is missing.');
+    await reconcileConfiguredCornerReviewers(rootFixture.db, R);
+    const [handback] = await commands(A, C);
+    expect(handback?.reason).toBe('corner_review_needed');
+    await claim(handback!);
+    // The corner now waits on a person, as after the worker's blocked: report.
+    await rootFixture.db.query(`INSERT INTO messages(id,room_id,author_id,text) VALUES('worker-blocked',$1,$2,'blocked: stuck in review')`, [C, A]);
+    await rootFixture.db.query(`INSERT INTO corner_owed(corner_id,person_id,message_id,created_at,answerable,blocking)
+      VALUES($1,$2,'worker-blocked',now(),true,true)`, [C, H]);
+    await result(handback!, '@goosy The R1 proof is now in the PR at the same head. Please review again.');
+    const rereviews = await commands(B, C);
+    console.info(`Reproduction REVIEWER-TAG-1: wrong=0 reviewer commands ("no longer available"); right=1; observed=${rereviews.length}`);
+    expect(rereviews).toHaveLength(1);
+    expect(rereviews[0]?.source.body).toContain('Please review again');
+    await claim(rereviews[0]!, 'g2');
+    await rootFixture.daemon.execute('report', { roomId: C, requestId: rereviews[0]!.turnRequestId, generationId: 'g2',
+      status: 'done', text: 'PASS. The R1 proof is attached to the PR description.' }, B);
+    const { cornerMergeGate } = await import('./corner-lifecycle.js');
+    expect(await cornerMergeGate(rootFixture.db, C, { number: 29, headSha: head })).toMatchObject({ approved: true });
+  });
+
+
   it('returns explicit review findings once and does not replay the repair on reconciliation', async () => {
     await rootFixture.phone.execute('updateRoom', { roomId: R, reviewerAgentId: B }, H);
     await greenHead(28, 'c'.repeat(40));
