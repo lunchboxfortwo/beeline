@@ -665,7 +665,7 @@ describe('desktop Workspace navigation', () => {
 
   it('nests the chat threads and opens one in the main pane', () => {
     expect(control('thread-row-corner-a').props['aria-label']).toBe('Thread Fix fixture, working');
-    expect(control('thread-row-corner-theirs').props['aria-label']).toBe('Thread Their fix, waiting');
+    expect(control('thread-row-corner-theirs').props['aria-label']).toBe('Thread Their fix, waiting on a reply');
     act(() => control('thread-row-corner-a').props.onPress());
     expect(routerPush).toHaveBeenCalledWith({
       pathname: '/beeline/chat/[channelId]',

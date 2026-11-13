@@ -4,7 +4,7 @@ import { router, useLocalSearchParams } from 'expo-router';
 import { YStack } from 'tamagui';
 import { CornerDownRight, Plus } from 'lucide-react-native';
 import { cornerShortTitle, roomTitle } from '@beeline/api-contract/phone';
-import { loadBuzzIdentity } from '@/auth/buzz-identity-storage';
+import { loadBuzzIdentity, peekBuzzViewerContext } from '@/auth/buzz-identity-storage';
 import { CORNER_LABEL } from '@/buzz/vocabulary';
 import { CornerOpenRow } from '@/components/buzz/CornerOpenToast';
 import { SurfaceGlyphLoader } from '@/components/buzz/SurfaceGlyphLoader';
@@ -72,6 +72,7 @@ export default function BuzzCorners() {
   };
 
   const rows = corners.openRows;
+  const viewer = peekBuzzViewerContext()?.viewerPubkey;
   const more = corners.record?.nextOpen ? Math.max(0, (corners.record.summary?.cornerCount ?? 0) - rows.length) : 0;
   return (
     <Screen
@@ -91,6 +92,7 @@ export default function BuzzCorners() {
         <YStack testID="room-corners-list">
           {rows.map((row) => (
             <ThreadLine avatarUrl={row.corner.avatar} faviconUrl={row.corner.favicon} key={row.corner.id} title={cornerShortTitle(name, row.corner.name, row.corner.id)} state={row.state}
+              blocker={row.blocker} reason={row.reason} viewer={viewer}
               onPress={() => router.push(cornerHref(row.corner.id, decodedId, row.corner.name, 'corners'))}
               testID={`thread-row-${row.corner.id}`} />
           ))}

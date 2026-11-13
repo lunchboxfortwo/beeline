@@ -1,4 +1,4 @@
-import type { CornerLifecycleView, CornerState } from '@beeline/api-contract/phone';
+import type { CornerBlocker, CornerLifecycleView, CornerState, CornerStateReason } from '@beeline/api-contract/phone';
 
 /**
  * The words a thread's server state reads as (header B). The server owns the
@@ -25,10 +25,26 @@ export function threadStatusText(state: CornerState, running: number): string {
   return `${STATE_WORD[state]}${running > 0 ? ` · ${running} running` : ''}`;
 }
 
-/** A thread line's second line in lists: "waiting on you", "review", "done". */
-export function threadListWord(state: CornerState): string {
-  if (state === 'waiting') return 'waiting on you';
-  return state === 'archived' ? 'done' : state;
+/** The facts a list line reads: the server's state and, while waiting, its blocker. */
+export type ThreadWaitFacts = { readonly state: CornerState; readonly blocker?: CornerBlocker; readonly reason?: CornerStateReason };
+
+/** The thread waits on this viewer: the server's waiting blocker names them. */
+export function threadWaitsOnViewer(thread: ThreadWaitFacts, viewer: string | undefined): boolean {
+  return thread.state === 'waiting' && viewer !== undefined && thread.blocker?.personId === viewer;
+}
+
+/**
+ * A thread line's second line in lists, per viewer: "waiting on you" (`you`,
+ * drawn semibold) for the person the thread waits on, "waiting on Claude"
+ * for everyone else, then "review", "working", "done".
+ */
+export function threadListLabel(thread: ThreadWaitFacts, viewer: string | undefined): { word: string; you: boolean } {
+  if (thread.state !== 'waiting') return { word: thread.state === 'archived' ? 'done' : thread.state, you: false };
+  if (threadWaitsOnViewer(thread, viewer)) return { word: 'waiting on you', you: true };
+  const name = thread.blocker?.personName?.trim();
+  if (name) return { word: `waiting on ${name}`, you: false };
+  if (thread.blocker?.kind === 'ci') return { word: 'waiting on checks', you: false };
+  return { word: thread.reason === 'approve' ? 'waiting on approval' : 'waiting on a reply', you: false };
 }
 
 /**

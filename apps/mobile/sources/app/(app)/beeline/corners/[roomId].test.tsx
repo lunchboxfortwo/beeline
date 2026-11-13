@@ -20,7 +20,9 @@ vi.mock('@/ui/grammar', () => ({
 }));
 vi.mock('@/ui/screens/thread/ThreadLine', () => ({ ThreadLine: 'ThreadLine' }));
 vi.mock('@/buzz/latency-route-hook', () => ({ useLatencyRouteFrame: () => undefined }));
-vi.mock('@/auth/buzz-identity-storage', () => ({ loadBuzzIdentity: async () => ({ publicKey: 'me' }) }));
+vi.mock('@/auth/buzz-identity-storage', () => ({ loadBuzzIdentity: async () => ({ publicKey: 'me' }),
+  peekBuzzViewerContext: () => ({ relayUrl: 'wss://relay.test', viewerPubkey: 'me' }),
+}));
 vi.mock('@/components/buzz/CornerOpenToast', () => ({ CornerOpenRow: () => null }));
 vi.mock('@/sync/transport', () => ({ BuzzRigTransport: class {} }));
 vi.mock('@/buzz/room-list-new-corner', () => ({ openRoomListCorner: fixture.create }));

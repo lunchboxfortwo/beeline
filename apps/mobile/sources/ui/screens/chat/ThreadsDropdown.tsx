@@ -4,7 +4,7 @@ import { usePanel } from '@/ui/shell/panel';
 import { Platform, useWindowDimensions } from 'react-native';
 import { Collapsible, ScrollView, Separator, XStack, YStack } from 'tamagui';
 import { ChevronDown, ChevronUp, CornerDownRight } from 'lucide-react-native';
-import { cornerShortTitle, type CornerState } from '@beeline/api-contract/phone';
+import { cornerShortTitle, type ChatListCorner, type CornerState } from '@beeline/api-contract/phone';
 import { useRoomCornerSummary } from '@/buzz/room-corner-store';
 import { useRoomCorners } from '@/buzz/use-room-corners';
 import { Btn, Copy, Glyph, HEIGHT } from '@/ui/grammar';
@@ -14,7 +14,7 @@ import { ThreadLine } from '@/ui/screens/thread/ThreadLine';
 /** The list is at most this share of the window and scrolls inside itself. */
 export const THREADS_DROPDOWN_SHARE = 0.45;
 
-type Line = { id: string; title: string; state: CornerState };
+type Line = Pick<ChatListCorner, 'id' | 'blocker' | 'reason'> & { title: string; state: CornerState };
 
 const DropdownContext = React.createContext<{
     open: boolean; setOpen: (open: boolean) => void;
@@ -36,9 +36,11 @@ export function ThreadsDropdownScope({ children }: { children: React.ReactNode }
  * "Threads · N active" under the chat header. The count is the Room's
  * server corner summary; opening it reads the Room's open corner pages.
  */
-export function ThreadsDropdown({ roomId, chatName, openThread, onNewThread, newThreadDisabled = false }: {
+export function ThreadsDropdown({ roomId, chatName, viewer, openThread, onNewThread, newThreadDisabled = false }: {
     roomId: string; chatName: string | null; openThread: (cornerId: string) => void;
     onNewThread: () => void; newThreadDisabled?: boolean;
+    /** The viewer's identity id; a thread waiting on them reads "waiting on you". */
+    viewer?: string;
 }) {
     const [newThreadPrompt, setNewThreadPrompt] = useState(false);
     const summary = useRoomCornerSummary(roomId);
@@ -73,7 +75,7 @@ export function ThreadsDropdown({ roomId, chatName, openThread, onNewThread, new
                 </XStack>
                 <Collapsible.Content>
                     {open ? <ThreadsDropdownList roomId={roomId} chatName={chatName} count={count}
-                        fallback={summary?.openCorners ?? []} openThread={openThread} /> : null}
+                        fallback={summary?.openCorners ?? []} viewer={viewer} openThread={openThread} /> : null}
                 </Collapsible.Content>
             </Collapsible>
             {newThreadPrompt ? <ForwardCornerSheet visible fromMessage={false}
@@ -84,22 +86,24 @@ export function ThreadsDropdown({ roomId, chatName, openThread, onNewThread, new
     );
 }
 
-function ThreadsDropdownList({ roomId, chatName, count, fallback, openThread }: {
-    roomId: string; chatName: string | null; count: number;
-    fallback: readonly { id: string; name: string; state: CornerState }[];
+function ThreadsDropdownList({ roomId, chatName, count, fallback, viewer, openThread }: {
+    roomId: string; chatName: string | null; count: number; viewer?: string;
+    fallback: readonly ChatListCorner[];
     openThread: (cornerId: string) => void;
 }) {
     const { height } = useWindowDimensions();
     const corners = useRoomCorners(roomId, null, false);
     const lines: Line[] = corners.openRows.length
-        ? corners.openRows.map((row) => ({ id: row.corner.id, title: cornerShortTitle(chatName, row.corner.name, row.corner.id), state: row.state }))
-        : fallback.map((corner) => ({ id: corner.id, title: cornerShortTitle(chatName, corner.name, corner.id), state: corner.state }));
+        ? corners.openRows.map((row) => ({ id: row.corner.id, title: cornerShortTitle(chatName, row.corner.name, row.corner.id),
+            state: row.state, blocker: row.blocker, reason: row.reason }))
+        : fallback.map((corner) => ({ id: corner.id, title: cornerShortTitle(chatName, corner.name, corner.id),
+            state: corner.state, blocker: corner.blocker, reason: corner.reason }));
     const more = corners.record?.nextOpen ? Math.max(0, count - lines.length) : 0;
     return (
         <ScrollView maxHeight={Math.round(height * THREADS_DROPDOWN_SHARE)} keyboardShouldPersistTaps="handled" testID="threads-dropdown-list">
             <YStack marginLeft="6" marginRight="4" marginTop="1" paddingLeft="3" borderLeftWidth={1} borderColor="strongStroke">
                 {lines.map((line) => (
-                    <ThreadLine key={line.id} title={line.title} state={line.state}
+                    <ThreadLine key={line.id} title={line.title} state={line.state} blocker={line.blocker} reason={line.reason} viewer={viewer}
                         onPress={() => openThread(line.id)} testID={`thread-row-${line.id}`} />
                 ))}
                 {more ? (
