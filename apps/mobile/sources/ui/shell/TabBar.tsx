@@ -32,7 +32,7 @@ export const TabBar = React.memo(function TabBar({ active, tagsCount = 0 }: { ac
                 <Tabs.List justifyContent="space-around" paddingVertical="2" backgroundColor="canvas">
                     {TABS.map((tab) => (
                         <Tabs.Tab key={tab.value} value={tab.value} flex={1} minHeight={HEIGHT.tabBar} flexDirection="column" gap="1" backgroundColor="canvas" aria-label={tab.label} testID={`tab-${tab.value}`}>
-                            <XStack gap="1" alignItems="center">
+                            <XStack gap="1" alignItems="center" position="relative">
                                 {/* A short line over the selected tab's icon. */}
                                 {active === tab.value ? (
                                     <YStack position="absolute" top={-10} left="50%" marginLeft={-10} width={20} height={2} borderRadius={1} backgroundColor="tabOn" testID="tab-selected-line" />
