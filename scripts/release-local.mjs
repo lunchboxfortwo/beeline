@@ -71,7 +71,7 @@ export function attribution(text) {
 }
 
 export function missingReleaseCredentials(args, secrets, plan = {}) {
-  const required = ['BEELINE_GITHUB_APP_ID', 'BEELINE_GITHUB_APP_PRIVATE_KEY', 'EXPO_TOKEN', 'EXPO_ASC_KEY_ID', 'EXPO_ASC_ISSUER_ID', 'EXPO_ASC_API_KEY_P8', 'NPM_AUTOMATION_TOKEN'];
+  const required = ['EXPO_TOKEN', 'EXPO_ASC_KEY_ID', 'EXPO_ASC_ISSUER_ID', 'EXPO_ASC_API_KEY_P8', 'NPM_AUTOMATION_TOKEN'];
   if (args.channel === 'next') required.push('FLY_API_TOKEN', 'FLY_FREE_AGENT_IMAGE_TOKEN', 'MIGRATION_DATABASE_URL', 'SERVER_CANARY_ROOM_ID');
   if (args.channel === 'latest') required.push('SENTRY_AUTH_TOKEN');
   if (plan.run_mobile_native === 'true' && plan.native_android === 'true') required.push('GOOGLE_PLAY_SERVICE_ACCOUNT_JSON');
@@ -185,6 +185,16 @@ export function localHooks(directory, processes) {
       }
     },
     step: async ({ step, context, env, result }) => {
+      if (step.id === 'app_token' && context?.github?.job === 'initialize') {
+        const token = context.github.token;
+        if (!token) throw new Error('Local GitHub initialization requires GITHUB_TOKEN or GH_TOKEN');
+        processes.mask(token);
+        // Preserve the workflow's token output wiring while bypassing the
+        // App-only installation lookup/mint, which is unavailable locally.
+        result.outputs.token = token;
+        processes.log('Local GitHub initialization uses the configured user token; no App installation token is minted.');
+        return true;
+      }
       if (step.name === 'Record dispatch clock') {
         result.outputs.trigger_epoch = String(Math.floor(Date.now() / 1000));
         return true;
@@ -296,6 +306,7 @@ async function main(argv) {
   if (!outside(root, realpathSync(directory))) throw new Error('Release state symlink points inside the repository');
   const envFile = resolve(args['env-file'] || join(homedir(), '.config/beeline-release.env'));
   const secrets = args.mode === 'execute' || (args.mode === 'dry-run' && args['env-file']) ? loadEnvironment(envFile) : {};
+  if (!secrets.GITHUB_TOKEN && secrets.GH_TOKEN) secrets.GITHUB_TOKEN = secrets.GH_TOKEN;
   const processes = new Processes(secrets);
   const variables = { BEELINE_HELPER_SENTRY_DSN: secrets.BEELINE_HELPER_SENTRY_DSN || '', BEELINE_MOBILE_SENTRY_DSN: secrets.BEELINE_MOBILE_SENTRY_DSN || '' };
   const engine = new LocalActions({ root, directory, secrets, variables, processes, github: localGithub, hooks: localHooks(directory, processes) });

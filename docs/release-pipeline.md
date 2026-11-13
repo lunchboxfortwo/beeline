@@ -38,9 +38,15 @@ publication retains OIDC. Populate `GITHUB_TOKEN` from the existing gh login,
 `FLY_API_TOKEN` from the authorized Fly login, and `EXPO_TOKEN` from the existing
 squire secret file. Provision the remaining workflow authorities separately:
 
+All local GitHub calls, including identity reservation and release-record reads,
+use the configured `GITHUB_TOKEN` (or `GH_TOKEN`). Local initialization skips the
+App installation lookup and installation-token mint. The hosted workflow keeps
+its existing App-token path and its `BEELINE_GITHUB_APP_ID` and
+`BEELINE_GITHUB_APP_PRIVATE_KEY` requirements; those credentials are not required
+by the local runner.
+
 | Authority | Used by |
 | --- | --- |
-| `BEELINE_GITHUB_APP_ID`, `BEELINE_GITHUB_APP_PRIVATE_KEY` | Repository-scoped identity reservation token |
 | `FLY_FREE_AGENT_IMAGE_TOKEN`, `MIGRATION_DATABASE_URL` | Next server image publication and migration |
 | `SERVER_CANARY_REVIEW_SECRET` or legacy `SERVER_CANARY_PHONE_TOKEN`, `SERVER_CANARY_ROOM_ID` | Next authenticated server canary |
 | `GOOGLE_PLAY_SERVICE_ACCOUNT_JSON` | Required only when the release plan selects a native Android store build; optional for OTA store-runtime reads |
