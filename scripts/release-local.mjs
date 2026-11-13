@@ -70,6 +70,18 @@ export function attribution(text) {
   return value;
 }
 
+export function missingReleaseCredentials(args, secrets, plan = {}) {
+  const required = ['BEELINE_GITHUB_APP_ID', 'BEELINE_GITHUB_APP_PRIVATE_KEY', 'EXPO_TOKEN', 'EXPO_ASC_KEY_ID', 'EXPO_ASC_ISSUER_ID', 'EXPO_ASC_API_KEY_P8', 'NPM_AUTOMATION_TOKEN'];
+  if (args.channel === 'next') required.push('FLY_API_TOKEN', 'FLY_FREE_AGENT_IMAGE_TOKEN', 'MIGRATION_DATABASE_URL', 'SERVER_CANARY_ROOM_ID');
+  if (args.channel === 'latest') required.push('SENTRY_AUTH_TOKEN');
+  if (plan.run_mobile_native === 'true' && plan.native_android === 'true') required.push('GOOGLE_PLAY_SERVICE_ACCOUNT_JSON');
+  const missing = required.filter(name => !secrets[name]);
+  if (!secrets.GITHUB_TOKEN && !secrets.GH_TOKEN) missing.push('GITHUB_TOKEN or GH_TOKEN');
+  if (args.channel === 'next' && !secrets.SERVER_CANARY_REVIEW_SECRET && !secrets.SERVER_CANARY_PHONE_TOKEN) missing.push('SERVER_CANARY_REVIEW_SECRET or SERVER_CANARY_PHONE_TOKEN');
+  if (args.proof && !secrets.BEELINE_REVIEW_SECRET) missing.push('BEELINE_REVIEW_SECRET');
+  return missing;
+}
+
 async function carryArm64(engine, context) {
   const directory = join(engine.directory, 'carried-arm64');
   if (!existsSync(join(directory, 'manifest.json'))) {
@@ -203,6 +215,11 @@ export function localHooks(directory, processes) {
       }
     },
     afterStep: async ({ step, context, env, result }) => {
+      if (step.name === 'Produce the inspectable release plan' &&
+          result.outputs.run_mobile_native === 'true' && result.outputs.native_android === 'true' &&
+          !context.secrets?.GOOGLE_PLAY_SERVICE_ACCOUNT_JSON) {
+        throw new Error('Native Android store delivery requires GOOGLE_PLAY_SERVICE_ACCOUNT_JSON');
+      }
       if (step.name === 'Produce the inspectable release plan' && result.outputs.run_desktop === 'true') {
         const previous = JSON.parse(readFileSync(join(context.runner.temp, 'previous/release.json'), 'utf8'));
         const desktop = previous.components.desktop;
@@ -306,15 +323,12 @@ async function main(argv) {
   if (execFileSync('git', ['status', '--porcelain'], { cwd: root, encoding: 'utf8' }).trim()) throw new Error('Release checkout must be clean');
   if (execFileSync('git', ['rev-parse', 'HEAD'], { cwd: root, encoding: 'utf8' }).trim() !== sha) throw new Error('Checkout HEAD must equal release-sha');
   execFileSync('git', ['merge-base', '--is-ancestor', sha, 'origin/main'], { cwd: root });
-  const required = ['BEELINE_GITHUB_APP_ID', 'BEELINE_GITHUB_APP_PRIVATE_KEY', 'EXPO_TOKEN', 'GOOGLE_PLAY_SERVICE_ACCOUNT_JSON', 'EXPO_ASC_KEY_ID', 'EXPO_ASC_ISSUER_ID', 'EXPO_ASC_API_KEY_P8', 'NPM_AUTOMATION_TOKEN'];
-  if (args.channel === 'next') required.push('FLY_API_TOKEN', 'FLY_FREE_AGENT_IMAGE_TOKEN', 'MIGRATION_DATABASE_URL', 'SERVER_CANARY_ROOM_ID');
-  if (args.channel === 'latest') required.push('SENTRY_AUTH_TOKEN');
-  const missing = required.filter(name => !secrets[name]);
-  if (!context.github.token) missing.push('GITHUB_TOKEN or GH_TOKEN');
-  if (args.channel === 'next' && !secrets.SERVER_CANARY_REVIEW_SECRET && !secrets.SERVER_CANARY_PHONE_TOKEN) missing.push('SERVER_CANARY_REVIEW_SECRET or SERVER_CANARY_PHONE_TOKEN');
-  if (args.proof && !secrets.BEELINE_REVIEW_SECRET) missing.push('BEELINE_REVIEW_SECRET');
+  const missing = missingReleaseCredentials(args, secrets);
   if (missing.length) throw new Error(`Missing local release credentials: ${missing.join(', ')}`);
-  await processes.run('bash', ['-c', 'test "$(node -p "process.versions.node.split(\".\")[0]")" = 22; for tool in docker git ssh scp gh gh-axi flyctl rustup; do command -v "$tool" >/dev/null || exit 1; done'], { env: process.env, quiet: true });
+  const toolEnv = await engine.nodeEnvironment(process.env);
+  engine.baseEnv.PATH = toolEnv.PATH;
+  if (toolEnv.FNM_DIR) engine.baseEnv.FNM_DIR = toolEnv.FNM_DIR;
+  await processes.run('bash', ['-c', 'for tool in docker git ssh scp gh gh-axi flyctl rustup; do command -v "$tool" >/dev/null || exit 1; done'], { env: toolEnv, quiet: true });
   await prepareMacTools(engine);
   // A local lock plus the existing advisory Actions check. The operator must
   // keep hosted release dispatch disabled until this recovery run completes.
