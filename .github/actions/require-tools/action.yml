@@ -13,16 +13,5 @@ runs:
     - shell: bash
       env:
         TOOLS: ${{ inputs.tools }}
-      run: |
-        missing=()
-        for tool in $TOOLS; do
-          if command -v "$tool" >/dev/null 2>&1; then
-            echo "$tool: $(command -v "$tool")"
-          else
-            missing+=("$tool")
-          fi
-        done
-        if [ "${#missing[@]}" -gt 0 ]; then
-          echo "::error title=Runner is missing release tools::$(hostname) (${RUNNER_NAME:-unknown runner}) has no ${missing[*]} on PATH. Install them on this runner or take it out of the pool; nothing was released." >&2
-          exit 1
-        fi
+      run: |-
+        bash "$GITHUB_WORKSPACE/scripts/release-steps/require-tools.sh" step0

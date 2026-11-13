@@ -37,25 +37,12 @@ runs:
     - name: Collect daemon artifact
       if: inputs.phase == 'collect'
       shell: bash
-      run: |
-        linux_dir="${{ inputs.linux_bundle_dir }}"
-        arm64_dir="${{ inputs.darwin_arm64_bundle_dir }}"
-        x64_dir="${{ inputs.darwin_x64_bundle_dir }}"
-        if [ -z "$linux_dir" ] || [ -z "$arm64_dir" ] || [ -z "$x64_dir" ]; then
-          echo "A three-platform merge needs linux_bundle_dir, darwin_arm64_bundle_dir and darwin_x64_bundle_dir; the Mac bundles were never built this run." >&2
-          exit 1
-        fi
-        node scripts/merge-beeline-bundles.mjs \
-          --output-dir "$RUNNER_TEMP/daemon-release" \
-          --input-dir "$linux_dir" \
-          --input-dir "$arm64_dir" \
-          --input-dir "$x64_dir"
-        if [ -f "$arm64_dir/mac-helper-inputs.json" ]; then
-          cp "$arm64_dir/mac-helper-inputs.json" "$RUNNER_TEMP/daemon-release/mac-helper-inputs-darwin-arm64.json"
-        fi
-        if [ -f "$x64_dir/mac-helper-inputs.json" ]; then
-          cp "$x64_dir/mac-helper-inputs.json" "$RUNNER_TEMP/daemon-release/mac-helper-inputs-darwin-x64.json"
-        fi
+      run: |-
+        bash "$GITHUB_WORKSPACE/scripts/release-steps/daemon-leg.sh" step0
+      env:
+        BEELINE_ACTION_VALUE_0: ${{ inputs.linux_bundle_dir }}
+        BEELINE_ACTION_VALUE_1: ${{ inputs.darwin_arm64_bundle_dir }}
+        BEELINE_ACTION_VALUE_2: ${{ inputs.darwin_x64_bundle_dir }}
     # ---- promote -----------------------------------------------------------
     - name: Publish the selected public helper channel
       if: inputs.phase == 'promote'
@@ -67,19 +54,16 @@ runs:
         CHANNEL: ${{ inputs.channel }}
       with:
         script: |
-          const { publishPagesChannel } = await import(`${process.env.GITHUB_WORKSPACE}/scripts/pages-channel.mjs`);
-          await publishPagesChannel({ github, repo: context.repo, directory: process.env.BUNDLE_DIR,
-            channel: process.env.CHANNEL, expectedSha: process.env.RELEASE_SHA, expectedVersion: process.env.RELEASE_VERSION });
+          const { run } = await import(`${process.env.GITHUB_WORKSPACE}/scripts/release-steps/daemon-leg-step1.mjs`);
+          await run({ github, core, context });
     - name: Prove a real helper update through the download route
       if: inputs.phase == 'promote'
       shell: bash
       env:
         MANIFEST_URL: ${{ inputs.manifest_url }}
+        BEELINE_ACTION_VALUE_0: ${{ runner.temp }}
       run: >-
-        node scripts/verify-pages-update.mjs
-        --manifest-url "$MANIFEST_URL"
-        --expected-manifest "${{ runner.temp }}/daemon-release/manifest.json"
-        --work-dir "$RUNNER_TEMP/helper-update-proof"
+        bash "$GITHUB_WORKSPACE/scripts/release-steps/daemon-leg.sh" step2
     - name: Record asynchronous fleet uptake without blocking the release
       if: inputs.phase == 'promote'
       shell: bash
@@ -87,19 +71,5 @@ runs:
       env:
         RELEASE_SHA: ${{ inputs.release_sha }}
         RELEASE_VERSION: ${{ inputs.release_version }}
-      run: |
-        set -u
-        {
-          echo '## Helper fleet uptake (asynchronous)'
-          echo
-          if curl -fsS --max-time 10 \
-            https://server.usebeeline.app/v1/releases/daemon-readiness \
-            -o "$RUNNER_TEMP/release-readiness.json"; then
-            echo '```json'
-            cat "$RUNNER_TEMP/release-readiness.json"
-            echo
-            echo '```'
-          else
-            echo 'Readiness snapshot unavailable. Fleet convergence remains post-release observability.'
-          fi
-        } >> "$GITHUB_STEP_SUMMARY"
+      run: |-
+        bash "$GITHUB_WORKSPACE/scripts/release-steps/daemon-leg.sh" step3

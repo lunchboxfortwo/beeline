@@ -61,17 +61,20 @@ async function main() {
   const repository = process.env.GITHUB_REPOSITORY;
   const run = process.env.GITHUB_RUN_ID;
   const gh = args => execFileSync('gh', args, { encoding: 'utf8', maxBuffer: 64 * 1024 * 1024 });
-  const jobs = [];
-  for (let page = 1; ; page++) {
-    const result = JSON.parse(gh(['api', `repos/${repository}/actions/runs/${run}/attempts/${process.env.GITHUB_RUN_ATTEMPT}/jobs?per_page=100&page=${page}`]));
-    jobs.push(...result.jobs);
-    if (result.jobs.length < 100) break;
+  const local = process.env.BEELINE_LOCAL_RELEASE_RECORDS;
+  const jobs = local ? JSON.parse(readFileSync(local, 'utf8')) : [];
+  if (!local) {
+    for (let page = 1; ; page++) {
+      const result = JSON.parse(gh(['api', `repos/${repository}/actions/runs/${run}/attempts/${process.env.GITHUB_RUN_ATTEMPT}/jobs?per_page=100&page=${page}`]));
+      jobs.push(...result.jobs);
+      if (result.jobs.length < 100) break;
+    }
   }
   const directory = join(process.env.RUNNER_TEMP, 'coverage-records');
   const records = existsSync(directory) ? readdirSync(directory).filter(file => file.endsWith('.json'))
     .map(file => JSON.parse(readFileSync(join(directory, file), 'utf8'))) : [];
-  const report = await releaseTestReport({ jobs: jobs.filter(job => job.name.startsWith('release_checks / ')),
-    log: id => gh(['api', `repos/${repository}/actions/jobs/${id}/logs`]), map: buildMap(records),
+  const report = await releaseTestReport({ jobs: jobs.filter(job => /^release_checks(?: \/ |\/)/.test(job.name)),
+    log: id => local ? readFileSync(jobs.find(job => job.id === id).logFile, 'utf8') : gh(['api', `repos/${repository}/actions/jobs/${id}/logs`]), map: buildMap(records),
     previous: process.env.PREVIOUS_SHA, sha: process.env.RELEASE_SHA,
     testFiles: execFileSync('git', ['ls-files'], { encoding: 'utf8' }).trim().split('\n').filter(file => /\.(?:test|spec)\.[cm]?[jt]sx?$/.test(file)),
     commits: (previous, sha, files) => execFileSync('git', ['log', '--format=%h %s', `${previous}..${sha}`, '--', ...files],
