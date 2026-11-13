@@ -381,20 +381,25 @@ export async function hasPendingCornerReview(db: SqlDatabase, roomId: string, ag
 /** Automatic work cannot answer a worker's explicit waiting report.
  * A green review wake still goes out: that report is often the pending gate. */
 export function waitingReportSql(command: string): string {
-  return `(${command}.action NOT IN ('input','resume') OR NOT corner_has_explicit_wait(${command}.room_id)
-    OR ${command}.private_payload->>'kind' IN ('order','report')
-    OR ${command}.reason='corner_review_dispatch'
-    OR (${command}.reason='corner_check' AND EXISTS (
+  // CASE stops at the first match. A human message, order, or review exemption
+  // does not plan or run the corner wait probe.
+  return `CASE
+    WHEN ${command}.action NOT IN ('input','resume') THEN true
+    WHEN ${command}.private_payload->>'kind' IN ('order','report') THEN true
+    WHEN ${command}.reason='corner_review_dispatch' THEN true
+    WHEN ${command}.reason='corner_check' AND EXISTS (
       SELECT 1 FROM corner_facts fact JOIN rooms corner ON corner.id=fact.corner_id
       WHERE fact.corner_id=${command}.room_id
-        AND ${command}.agent_id=${cornerImplementerSql('fact', 'corner')}))
-    OR (${command}.reason='subscribed_event' AND EXISTS (
+        AND ${command}.agent_id=${cornerImplementerSql('fact', 'corner')}) THEN true
+    WHEN ${command}.reason='subscribed_event' AND EXISTS (
       SELECT 1 FROM messages review_source WHERE review_source.id=${command}.source_message_id
-        AND review_source.system_event->>'kind'='check-passed'))
-    OR EXISTS (
-    SELECT 1 FROM messages source JOIN identities author ON author.id=source.author_id
-    WHERE source.id=${command}.source_message_id AND author.kind='human' AND source.system_event IS NULL
-  ))`;
+        AND review_source.system_event->>'kind'='check-passed') THEN true
+    WHEN EXISTS (
+      SELECT 1 FROM messages source JOIN identities author ON author.id=source.author_id
+      WHERE source.id=${command}.source_message_id AND author.kind='human' AND source.system_event IS NULL
+    ) THEN true
+    ELSE NOT corner_has_explicit_wait(${command}.room_id)
+  END`;
 }
 
 

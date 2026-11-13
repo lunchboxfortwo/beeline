@@ -514,6 +514,10 @@ export async function migrate(
   ));
   await ddlScript('corner owed schema', cornerOwedSchemaSql());
   await ddlScript('corner explicit wait function', cornerWaitingFunctionSql());
+  // The idle function is built from the corner idle query. Import it after this
+  // module has finished loading the command schema.
+  const { currentIdleReportFunctionSql } = await import('./corner-idle.js');
+  await ddlScript('current idle report function', currentIdleReportFunctionSql());
   await ddlScript('corner attention schema', CORNER_ATTENTION_SCHEMA);
   // Idle reads use bounded ordered probes, including a corner with a long
   // execution/transcript history. Build outside busy writer transactions.
