@@ -40,7 +40,7 @@ describe('solo-agent-untagged-silence', () => {
       `SELECT agent_id,source_message_id,id FROM agent_commands WHERE source_message_id=$1`, [MESSAGE])).rows;
   }
 
-  it('dispatches and claims the untagged phone message once', async () => {
+  it.each([['Hello lol', 10], ['@beebeego Hello lol', 11]] as const)('dispatches and claims the phone message once: %s', async (text, roundTrips) => {
     const statements: string[] = [];
     const measured = (database: SqlDatabase, inTransaction = false): SqlDatabase => ({
       query(sql, values, preparedName) {
@@ -50,12 +50,13 @@ describe('solo-agent-untagged-silence', () => {
       transaction: work => database.transaction(tx => work(measured(tx, true))),
     });
     phone = new PhoneService(measured(db), 'http://local.test');
-    const commands = await send();
+    const commands = await send(text);
     // Each statement is another database round trip before the send receipt.
     // The corner front door classifies the address with one indexed Room lookup.
     // The receipt reads which external MCP agents were notified.
-    expect(statements).toHaveLength(10);
+    // Typed tags also read the current membership for mention resolution.
     expect(commands).toHaveLength(1);
+    expect(statements).toHaveLength(roundTrips);
     expect(commands[0]).toMatchObject({ agent_id: AGENT, source_message_id: MESSAGE });
     await routeHumanMessage(db, MESSAGE);
     expect((await db.query(`SELECT 1 FROM agent_commands WHERE source_message_id=$1`, [MESSAGE])).rowCount).toBe(1);
@@ -111,8 +112,8 @@ describe('solo-agent-untagged-silence', () => {
     expect(await send()).toEqual([]);
   });
 
-  it.each(['@channel hi', '@other hi', '@unknown hi', '@system hi'])('does not infer a target for %s', async text => {
-    expect(await send(text)).toEqual([]);
+  it.each(['@channel hi', '@other hi', '@unknown hi', '@system hi', '@agent @beebeego hi'])('dispatches once when sending %s', async text => {
+    expect(await send(text)).toEqual([expect.objectContaining({ agent_id: AGENT })]);
   });
 
   it('ignores removed memberships when counting', async () => {
