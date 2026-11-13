@@ -33,7 +33,7 @@ type Props = [
   optimisticReactionsRef: React.RefObject<Record<string, readonly import("@beeline/api-contract/phone").MessageReactionView[] | undefined>>,
   setOptimisticReactions: React.Dispatch<React.SetStateAction<Record<string, readonly import("@beeline/api-contract/phone").MessageReactionView[] | undefined>>>,
   applyRoomMessageResult: (message: import("@beeline/api-contract/phone").RoomViewMessage) => void,
-  starPrompt: { prompt: import("@beeline/api-contract/phone").StarPrompt | null; busy: import("@beeline/api-contract/phone").StarPromptAction | null; answer: (action: import("@beeline/api-contract/phone").StarPromptAction) => Promise<void>; accept: (view: { prompt: import("@beeline/api-contract/phone").StarPrompt | null; }) => void; },
+  starPrompt: ReturnType<typeof import('@/components/buzz/StarPromptCard').useStarPrompt>,
   messageRecordScope: string | null,
   showReportToast: (message: string) => void,
   canManageWorkspace: boolean,
