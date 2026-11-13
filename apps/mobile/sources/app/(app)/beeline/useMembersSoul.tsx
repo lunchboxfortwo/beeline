@@ -2,7 +2,8 @@ import { appErrorCopy } from '@/buzz/app-error-copy';
 import React, { useEffect } from 'react';
 import { Platform } from 'react-native';
 import { router } from 'expo-router';
-import { AGENT_NAME_MAX_LENGTH, isReasonableAgentName, type AgentDetailView, type Identity } from '@beeline/buzz-client';
+import { type AgentDetailView, type Identity } from '@beeline/buzz-client';
+import { agentHandleRefusal, normalizeAgentHandleInput } from '@beeline/api-contract/phone';
 import { BuzzRigTransport } from '@/sync/transport';
 import { Modal } from '@/modal/ModalManager';
 import { MembersAction, agentSoulCopy } from './members';
@@ -14,10 +15,10 @@ type Props = [
   ownsSelectedAgent: boolean,
   editingAgentSoul: boolean,
   allowProfileNavigationRef: React.RefObject<boolean>,
-  nameDraft: import("@/buzz/text-draft-store").TextDraft<string>,
+  handleDraft: import("@/buzz/text-draft-store").TextDraft<string>,
   soulDraft: import("@/buzz/text-draft-store").TextDraft<string>,
   setEditingAgentSoul: React.Dispatch<React.SetStateAction<boolean>>,
-  agentNameDraft: string,
+  agentHandleDraft: string,
   agentSoulDraft: string,
   onClose: (() => void) | undefined,
   messagePerson: (pubkey: string) => Promise<void>,
@@ -29,12 +30,13 @@ type Props = [
   writeClient: () => Promise<import("@beeline/buzz-client").BuzzClient & { refreshAgentModelCatalog(workspaceId: string, agentId: string): Promise<unknown>; }>,
   applyAgentReceipt: (value: AgentDetailView) => void,
   finishConfigWrite: (agentId: string) => void,
+  setHandleError: React.Dispatch<React.SetStateAction<string | null>>,
 ];
 export function useMembersSoul([
   identity, workspaceId, selectedAgent, ownsSelectedAgent, editingAgentSoul,
-  allowProfileNavigationRef, nameDraft, soulDraft, setEditingAgentSoul, agentNameDraft,
+  allowProfileNavigationRef, handleDraft, soulDraft, setEditingAgentSoul, agentHandleDraft,
   agentSoulDraft, onClose, messagePerson, profileAgentId, navigation, setError, setWorking,
-  pendingConfigWriteRef, writeClient, applyAgentReceipt, finishConfigWrite,
+  pendingConfigWriteRef, writeClient, applyAgentReceipt, finishConfigWrite, setHandleError,
 ]: Props): [
   closeAgentProfile: () => Promise<void>,
   messageSelectedAgent: () => Promise<void>,
@@ -69,24 +71,25 @@ export function useMembersSoul([
   const beginAgentSoulEdit = () => {
     if (!selectedAgent || !ownsSelectedAgent) return;
     allowProfileNavigationRef.current = false;
-    nameDraft.initialize(selectedAgent.soul?.name ?? selectedAgent.agent.identity.name);
+    handleDraft.initialize(currentHandle(selectedAgent));
     soulDraft.initialize(agentSoulCopy(selectedAgent));
+    setHandleError(null);
     setEditingAgentSoul(true);
   };
 
   const agentEditDirty = Boolean(
     editingAgentSoul &&
     selectedAgent &&
-    (agentNameDraft !== (selectedAgent.soul?.name ?? selectedAgent.agent.identity.name) ||
+    (agentHandleDraft !== currentHandle(selectedAgent) ||
       agentSoulDraft !== agentSoulCopy(selectedAgent)),
   );
   const confirmDiscardAgentEdit = async (): Promise<boolean> => {
     if (!agentEditDirty) return true;
-    const clearName = nameDraft.capture();
+    const clearHandle = handleDraft.capture();
     const clearSoul = soulDraft.capture();
     const confirmed = await Modal.confirm(
       'Discard agent changes?',
-      'Your name and soul edits have not been saved.',
+      'Your handle and soul edits have not been saved.',
       {
         cancelText: 'Keep editing',
         confirmText: 'Discard',
@@ -94,7 +97,7 @@ export function useMembersSoul([
       },
     );
     if (confirmed) {
-      clearName();
+      clearHandle();
       clearSoul();
     }
     return confirmed;
@@ -141,17 +144,17 @@ export function useMembersSoul([
 
   const saveAgentSoul = async (): Promise<boolean> => {
     if (!selectedAgent || !ownsSelectedAgent || !workspaceId) return false;
-    const name = agentNameDraft.trim().slice(0, AGENT_NAME_MAX_LENGTH);
+    const handle = normalizeAgentHandleInput(agentHandleDraft);
     const soul = agentSoulDraft.trim();
-    if (!isReasonableAgentName(name)) {
-      setError('Agent name must be a short spoken name.');
-      return false;
-    }
+    const handleChanged = handle !== currentHandle(selectedAgent);
+    const refusal = handleChanged ? agentHandleRefusal(handle) : null;
+    setHandleError(refusal);
+    if (refusal) return false;
     if (!soul) {
       setError('Agent soul instructions cannot be empty.');
       return false;
     }
-    const clearName = nameDraft.capture(false);
+    const clearHandle = handleDraft.capture(false);
     const clearSoul = soulDraft.capture(false);
     setWorking('save-agent-soul');
     pendingConfigWriteRef.current = true;
@@ -160,18 +163,21 @@ export function useMembersSoul([
       const pubkey = selectedAgent.agent.identity.pubkey;
       const client = await writeClient();
       const receipt = await client.setAgentSoul(workspaceId, pubkey, {
-        name,
+        ...(handleChanged ? { handle } : {}),
         soul,
         avatarSeed: selectedAgent.soul?.avatarSeed ?? pubkey,
         ...(selectedAgent.soul?.avatar ? { avatar: selectedAgent.soul.avatar } : {}),
       });
       applyAgentReceipt(receipt as unknown as AgentDetailView);
-      clearName();
+      clearHandle();
       clearSoul();
       setEditingAgentSoul(false);
       return true;
     } catch (reason) {
-      setError(appErrorCopy(reason, `Could not save agent settings.`));
+      // A refused handle is shown under the handle field; nothing was saved.
+      const copy = appErrorCopy(reason, `Could not save agent settings.`);
+      if (handleChanged && isHandleRefusal(reason)) setHandleError(copy);
+      else setError(copy);
       return false;
     } finally {
       finishConfigWrite(selectedAgent.agent.identity.pubkey);
@@ -181,4 +187,15 @@ export function useMembersSoul([
 return [
     closeAgentProfile, messageSelectedAgent, requestSoulAvatar, beginAgentSoulEdit, saveAgentSoul,
   ];
+}
+
+/** The handle the profile shows, which an owner edits. */
+function currentHandle(agent: AgentDetailView): string {
+  return agent.agent.identity.handle ?? '';
+}
+
+/** The server refuses a handle with 400 (shape) or 409 (taken in this workspace). */
+function isHandleRefusal(reason: unknown): boolean {
+  const status = reason && typeof reason === 'object' ? (reason as { status?: unknown }).status : undefined;
+  return status === 400 || status === 409;
 }

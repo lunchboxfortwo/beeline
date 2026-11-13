@@ -111,6 +111,15 @@ export interface AgentSoulInput {
   avatar?: string;
 }
 
+/** An owner's profile save: the server derives the agent's name from a new handle. */
+export interface AgentSoulSave {
+  /** Present only when the owner changed the handle. */
+  handle?: string;
+  soul: string;
+  avatarSeed: string;
+  avatar?: string;
+}
+
 export interface AgentSoulProfile extends AgentSoulInput {
   communityId: string;
   agentPubkey: string;

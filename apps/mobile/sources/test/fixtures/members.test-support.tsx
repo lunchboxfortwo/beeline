@@ -4,6 +4,7 @@ import { HumanProfile } from "../../app/(app)/beeline/human-profile";
 import AgentProfileRoute from "../../app/(app)/beeline/agent-profile";
 
 import * as React from 'react';
+import { agentNameFromHandle } from '@beeline/api-contract/phone';
 
 import { StyleSheet } from 'react-native';
 
@@ -24,7 +25,11 @@ export { profileLane };
 
 
 
-vi.mock('tamagui', async () => (await import('@/ui/screens/transcript/grammar-hosts.test-support')).tamaguiHosts());
+vi.mock('tamagui', async () => {
+  const hosts = (await import('@/ui/screens/transcript/grammar-hosts.test-support')).tamaguiHosts() as Record<string, any>;
+  hosts.Switch.Thumb = () => null;
+  return hosts;
+});
 vi.mock('lucide-react-native', async () => (await import('@/ui/screens/transcript/grammar-hosts.test-support')).lucideHosts());
 
 vi.mock('@/utils/responsive', async (importOriginal) => ({ ...(await importOriginal<typeof import('@/utils/responsive')>()), useIsDesktop: () => false }));
@@ -147,19 +152,22 @@ const client = vi.hoisted(() => ({
     };
   }),
   setAgentSoul: vi.fn(async (_workspaceId: string, pubkey: string, soul: any) => {
+    // As the server does: the name follows a new handle; otherwise both stay.
+    const handle = soul.handle ?? state.agent.agent.identity.handle;
+    const name = soul.handle ? agentNameFromHandle(soul.handle) : state.agent.agent.identity.name;
     state.agent = {
       ...state.agent,
       agent: {
         ...state.agent.agent,
-        identity: { ...state.agent.agent.identity, name: soul.name },
+        identity: { ...state.agent.agent.identity, name, handle },
       },
-      soul: { name: soul.name, instructions: soul.soul, avatarSeed: soul.avatarSeed },
+      soul: { name, instructions: soul.soul, avatarSeed: soul.avatarSeed },
     };
     state.workspace = {
       ...state.workspace,
       agents: state.workspace.agents.map((member: any) =>
         member.identity.pubkey === pubkey
-          ? { ...member, identity: { ...member.identity, name: soul.name } }
+          ? { ...member, identity: { ...member.identity, name, handle } }
           : member,
       ),
     };

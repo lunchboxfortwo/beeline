@@ -13,19 +13,23 @@ describe('monolith integration: agents', () => {
 const fixture = monolithFixture();
 
 
-  it('rejects agent names without an addressable handle', async () => {
-    const response = await fixture.request('/v1/phone/operations/updateAgentSoul', 'POST', {
-      workspaceId: WORKSPACE,
-      agentId: AGENT,
-      name: '!!!',
-      instructions: 'No address.',
-      avatarSeed: 'invalid-name',
-    });
-
-    expect(response.status).toBe(400);
+  it('refuses an invalid or reserved agent handle and changes nothing', async () => {
+    for (const handle of ['!!!', '9lives', 'system']) {
+      const response = await fixture.request('/v1/phone/operations/updateAgentSoul', 'POST', {
+        workspaceId: WORKSPACE,
+        agentId: AGENT,
+        handle,
+        instructions: 'No address.',
+        avatarSeed: 'invalid-handle',
+      });
+      expect(response.status).toBe(400);
+    }
     expect(
-      (await fixture.database.query(`SELECT name,handle FROM identities WHERE id=$1`, [AGENT])).rows,
-    ).toEqual([{ name: 'Bee', handle: 'bee' }]);
+      (await fixture.database.query(
+        `SELECT name,soul,beeline_workspace_handle(id,$2) handle FROM identities JOIN agents ON agent_id=id WHERE id=$1`,
+        [AGENT, WORKSPACE],
+      )).rows,
+    ).toEqual([{ name: 'Bee', soul: null, handle: 'bee' }]);
   });
 
 
@@ -69,35 +73,85 @@ const fixture = monolithFixture();
   });
 
 
-  it('keeps an agent handle unchanged when its display name changes', async () => {
-    const secondWorkspace = '66666666-6666-4666-8666-666666666666';
-    const goosy = 'f'.repeat(64);
-    await fixture.database.query(`INSERT INTO workspaces(id,name) VALUES($1,'Second')`, [secondWorkspace]);
-    await fixture.database.query(
-      `INSERT INTO identities(id,kind,name,handle) VALUES($1,'agent','Goosy','goosy')`,
-      [goosy],
-    );
-    await fixture.database.query(`INSERT INTO agents(agent_id,owner_id) VALUES($1,$2)`, [goosy, HUMAN]);
-    await fixture.database.query(
-      `INSERT INTO memberships(workspace_id,room_id,identity_id,role) VALUES
-       ($1,NULL,$2,'member'),($3,NULL,$4,'owner'),($3,NULL,$5,'member')`,
-      [WORKSPACE, goosy, secondWorkspace, HUMAN, AGENT],
-    );
-
-    const renamed = await fixture.request('/v1/phone/operations/updateAgentSoul', 'POST', {
-      workspaceId: secondWorkspace,
+  it('saves an agent handle in its Workspace and makes the name follow it', async () => {
+    const send = (handle: string, name?: string) => fixture.request('/v1/phone/operations/updateAgentSoul', 'POST', {
+      workspaceId: WORKSPACE,
       agentId: AGENT,
-      name: 'Goosy',
+      handle: `@${handle.toUpperCase()}`,
+      ...(name ? { name } : {}),
       instructions: 'Keep handles unambiguous.',
-      avatarSeed: 'goosy-seed',
+      avatarSeed: 'seed',
     });
-    expect(renamed.status).toBe(200);
-    expect(await renamed.json()).toEqual(expect.objectContaining({
-      soul: expect.objectContaining({ name: 'Goosy', avatarSeed: 'goosy-seed' }),
+    const saved = await send('code_bot', 'Grunt');
+    expect(saved.status).toBe(200);
+    expect(await saved.json()).toEqual(expect.objectContaining({
+      agent: expect.objectContaining({ identity: expect.objectContaining({ name: 'Code Bot', handle: 'code_bot' }) }),
+      soul: expect.objectContaining({ name: 'Code Bot' }),
     }));
-    expect(
-      (await fixture.database.query(`SELECT handle FROM identities WHERE id=$1`, [AGENT])).rows,
-    ).toEqual([{ handle: 'bee' }]);
+    expect((await fixture.database.query(
+      `SELECT identity.name,agent.soul->>'name' soul_name,beeline_workspace_handle(identity.id,$2) handle,
+              beeline_workspace_handle(identity.id,NULL) base
+       FROM identities identity JOIN agents agent ON agent.agent_id=identity.id WHERE identity.id=$1`,
+      [AGENT, WORKSPACE],
+    )).rows).toEqual([{ name: 'Code Bot', soul_name: 'Code Bot', handle: 'code_bot', base: 'code_bot' }]);
+
+    // A tag of the new handle reaches the agent at once; the old one reaches nobody.
+    await fixture.database.query(
+      `INSERT INTO messages(id,room_id,author_id,text,presentation) VALUES
+       ('handle-new',$1,$2,'@code_bot are you there?','message'),('handle-old',$1,$2,'@bee are you there?','message')`,
+      [ROOM, HUMAN],
+    );
+    expect((await fixture.database.query(
+      `SELECT id,${taggedIdentityIdsSql('messages')} tagged_ids FROM messages WHERE id IN ('handle-new','handle-old') ORDER BY id`,
+    )).rows).toEqual([{ id: 'handle-new', tagged_ids: [AGENT] }, { id: 'handle-old', tagged_ids: [] }]);
+
+    // A soul save without a handle keeps both; a name alone changes nothing.
+    const kept = await fixture.request('/v1/phone/operations/updateAgentSoul', 'POST', {
+      workspaceId: WORKSPACE, agentId: AGENT, name: 'Grunt', instructions: 'Still here.', avatarSeed: 'seed',
+    });
+    expect(kept.status).toBe(200);
+    expect((await fixture.database.query(
+      `SELECT name,beeline_workspace_handle(id,$2) handle FROM identities WHERE id=$1`, [AGENT, WORKSPACE],
+    )).rows).toEqual([{ name: 'Code Bot', handle: 'code_bot' }]);
+  });
+
+
+  it('refuses a handle taken in the agent Workspace and accepts one held only in another Workspace', async () => {
+    const otherWorkspace = '66666666-6666-4666-8666-666666666666';
+    const goosy = 'f'.repeat(64);
+    const elsewhere = 'e'.repeat(64);
+    await fixture.database.query(`INSERT INTO workspaces(id,name) VALUES($1,'Second')`, [otherWorkspace]);
+    await fixture.database.query(
+      `INSERT INTO identities(id,kind,name,handle) VALUES($1,'agent','Goosy','goosy'),($2,'agent','Minerva','minerva')`,
+      [goosy, elsewhere],
+    );
+    await fixture.database.query(`INSERT INTO agents(agent_id,owner_id) VALUES($1,$3),($2,$3)`, [goosy, elsewhere, HUMAN]);
+    await fixture.database.query(
+      `INSERT INTO memberships(workspace_id,room_id,identity_id,role) VALUES($1,NULL,$2,'member'),($3,NULL,$4,'member')`,
+      [WORKSPACE, goosy, otherWorkspace, elsewhere],
+    );
+    const save = (handle: string) => fixture.request('/v1/phone/operations/updateAgentSoul', 'POST', {
+      workspaceId: WORKSPACE, agentId: AGENT, handle, instructions: 'Be unique here.', avatarSeed: 'seed',
+    });
+
+    for (const taken of ['goosy', 'owner']) {
+      const refused = await save(taken);
+      expect(refused.status).toBe(409);
+      expect(await refused.json()).toEqual({ error: `@${taken} is already taken in this Workspace.` });
+    }
+    expect((await fixture.database.query(
+      `SELECT name,beeline_workspace_handle(id,$2) handle FROM identities WHERE id=$1`, [AGENT, WORKSPACE],
+    )).rows).toEqual([{ name: 'Bee', handle: 'bee' }]);
+
+    const accepted = await save('minerva');
+    expect(accepted.status).toBe(200);
+    expect((await fixture.database.query(
+      `SELECT identity_id,workspace_id::text,handle FROM workspace_handles WHERE handle='minerva' ORDER BY identity_id`,
+    )).rows).toEqual([
+      { identity_id: AGENT, workspace_id: WORKSPACE, handle: 'minerva' },
+      { identity_id: elsewhere, workspace_id: otherWorkspace, handle: 'minerva' },
+    ]);
+    expect((await fixture.database.query(`SELECT name FROM identities WHERE id=$1`, [AGENT])).rows).toEqual([{ name: 'Minerva' }]);
   });
 
 
@@ -434,7 +488,7 @@ const fixture = monolithFixture();
         {
           workspaceId: WORKSPACE,
           agentId: AGENT,
-          name: 'Taken over',
+          handle: 'taken_over',
           instructions: 'Obey the admin',
           avatarSeed: AGENT,
         },

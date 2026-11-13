@@ -1,3 +1,4 @@
+import { useState } from 'react';
 import { monolithPhoneOperation } from '@/sync/transport/monolith-operation';
 import { RoomViewClient } from '@/sync/transport/room-view-client';
 import { USAGE_REFRESH_CLIENT_TIMEOUT_MS } from './usage-cell';
@@ -23,13 +24,14 @@ export function useAgentProfile(agentId: string, workspaceId: string | undefined
         setAccessError, setLocalAgentId, setError, profileRetryGeneration, surface, setWorking,
         setPickerOpen, setPairCommand, requestedActionHandledRef, requestedAction, memberQuery,
         setRosterLoading, rosterLoading, selectedAgent, ownsSelectedAgent, editingAgentSoul,
-        allowProfileNavigationRef, nameDraft, soulDraft, agentNameDraft, agentSoulDraft, navigation,
+        allowProfileNavigationRef, handleDraft, soulDraft, agentHandleDraft, agentSoulDraft, navigation,
         pendingConfigWriteRef, applyAgentReceipt, finishConfigWrite, modelAppliesTimerRef,
         setModelAxisError, waitingForEffortCatalogRef, canRemoveSelectedAgent, error, workspaceError,
-        working, , , setAgentNameDraft, setAgentSoulDraft,
+        working, , , setAgentHandleDraft, setAgentSoulDraft,
         params, openModelAxis, modelSearchQuery, setModelSearchQuery, modelAppliesNote, modelAxisError,
         selectedAgentOwnerByline, , accessError, yoloError,
     ] = useMembersRouteState([workspaceId, agentId]);
+    const [handleError, setHandleError] = useState<string | null>(null);
     const [writeClient, readMemberPage, applyMemberPage, closeAgentSettings] = useMembersReads([
         identity, relayUrl, recordScope, setRosterQuery, resolvedWorkspaceId, focused, agentId,
         setIdentity, setRelayUrl, focusedRef, setWorkspaceError, readWorkspaceRef,
@@ -45,9 +47,9 @@ export function useAgentProfile(agentId: string, workspaceId: string | undefined
     ]);
     const [closeAgentProfile, messageSelectedAgent, , beginAgentSoulEdit, saveAgentSoul] = useMembersSoul([
         identity, resolvedWorkspaceId, selectedAgent, ownsSelectedAgent, editingAgentSoul,
-        allowProfileNavigationRef, nameDraft, soulDraft, setEditingAgentSoul, agentNameDraft,
+        allowProfileNavigationRef, handleDraft, soulDraft, setEditingAgentSoul, agentHandleDraft,
         agentSoulDraft, close, messagePerson, agentId, navigation, setError, setWorking,
-        pendingConfigWriteRef, writeClient, applyAgentReceipt, finishConfigWrite,
+        pendingConfigWriteRef, writeClient, applyAgentReceipt, finishConfigWrite, setHandleError,
     ]);
     const [toggleModelAxis, setModelOption, setFastMode, toggleAnswersEveryone, toggleYolo, removeSelectedAgent] = useMembersConfiguration([
         modelAppliesTimerRef, setModelAppliesNote, selectedAgent, ownsSelectedAgent, () => modelAxes,
@@ -72,9 +74,9 @@ export function useAgentProfile(agentId: string, workspaceId: string | undefined
         loading: !selectedAgent && !displayedError, error: displayedError, busy, working,
         canEdit: ownsSelectedAgent, canRemove: Boolean(selectedAgent && canRemoveSelectedAgent),
         ownerByline: selectedAgentOwnerByline, soul: selectedAgent ? agentSoulCopy(selectedAgent) : '',
-        editing: editingAgentSoul, nameDraft: agentNameDraft, soulDraft: agentSoulDraft,
-        setNameDraft: setAgentNameDraft, setSoulDraft: setAgentSoulDraft,
-        beginEdit: beginAgentSoulEdit, cancelEdit: () => setEditingAgentSoul(false), saveEdit: () => void saveAgentSoul(),
+        editing: editingAgentSoul, handleDraft: agentHandleDraft, handleError, soulDraft: agentSoulDraft,
+        setHandleDraft: setAgentHandleDraft, setSoulDraft: setAgentSoulDraft,
+        beginEdit: beginAgentSoulEdit, cancelEdit: () => { setHandleError(null); setEditingAgentSoul(false); }, saveEdit: () => void saveAgentSoul(),
         close: () => void closeAgentProfile(), message: () => void messageSelectedAgent(),
         modelAxes, openModelAxis, closeModelAxis: () => setOpenModelAxis(null), modelSearchQuery, setModelSearchQuery,
         modelAppliesNote, modelAxisError, toggleModelAxis, setModelOption, setFastMode,

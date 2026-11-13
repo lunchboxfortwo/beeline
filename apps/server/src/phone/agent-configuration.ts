@@ -6,6 +6,9 @@ import { isTaggedLoginText } from '../agent-command.js';
 import { randomBytes } from 'node:crypto';
 import { createAgentPairingCode } from '@beeline/api-contract/phone';
 import type { AgentDetailView } from '@beeline/api-contract/phone';
+import { agentHandleRefusal, agentNameFromHandle, normalizeAgentHandleInput } from '@beeline/api-contract/phone';
+import { CommandRefusalError } from '../command-refusal.js';
+import { type SqlDatabase } from '../database.js';
 import { type AgentGrantDecision, type AgentGrantStatus } from '@beeline/api-contract/agent-grants';
 import { notifyAgentConfigRoom } from '../postgres-live.js';
 import { settleGrantCard } from '../agent-retirement.js';
@@ -13,7 +16,7 @@ import { identitySubject, systemLine } from '../system-line.js';
 import type { PhoneContext } from './context.js';
 import { Input } from './types.js';
 import { phoneRequireWorkspaceMember, phoneRequireWorkspaceAgent, phoneRequireGrantAuthority, phoneRequireIdentity } from './access.js';
-import { hash, normalizeAgentName, messageId } from './values.js';
+import { hash, messageId } from './values.js';
 
 import { effortCatalogAxis } from './read-projection.js';
 
@@ -32,8 +35,15 @@ import { effortCatalogAxis } from './read-projection.js';
 
   export async function phoneUpdateAgentSoul(ctx: PhoneContext, input: Input<'updateAgentSoul'>, viewerId: string) {
     await ctx.requireWorkspaceAgent(input.workspaceId, input.agentId, viewerId);
-    const name = normalizeAgentName(input.name);
+    // An agent's name follows its handle; a name sent by an older phone is ignored.
+    const handle = input.handle === undefined ? undefined : normalizeAgentHandleInput(String(input.handle));
+    const refusal = handle === undefined ? null : agentHandleRefusal(handle);
+    if (refusal) throw new CommandRefusalError(refusal, 400);
     await ctx.database.transaction(async (database) => {
+      const name = handle === undefined
+        ? (await database.query<{ name: string }>(`SELECT name FROM identities WHERE id=$1 FOR UPDATE`, [input.agentId])).rows[0]?.name
+        : await claimAgentHandle(database, input.workspaceId, input.agentId, handle);
+      if (name === undefined) throw new Error('agent not found');
       await database.query(`UPDATE agents SET soul=$2::jsonb,updated_at=now() WHERE agent_id=$1`, [
         input.agentId,
         JSON.stringify({
@@ -48,6 +58,41 @@ import { effortCatalogAxis } from './read-projection.js';
         [input.agentId, name, input.avatar ?? null],
       );
     });
+  }
+
+  /**
+   * Give an agent a new handle in its Workspace and return the name that
+   * follows from it. A handle is unique within the Workspace only: another
+   * identity's reservation there, or a human member's handle, refuses it.
+   */
+  async function claimAgentHandle(database: SqlDatabase, workspaceId: string, agentId: string, handle: string): Promise<string> {
+    // The same lock the arrival reservation trigger takes, so two saves (or a
+    // save and a join) in one Workspace cannot both claim a handle.
+    await database.query(`SELECT id FROM workspaces WHERE id=$1 FOR UPDATE`, [workspaceId]);
+    const taken = await database.query(
+      `SELECT 1 FROM workspace_handles WHERE workspace_id=$1 AND handle=$3 AND identity_id<>$2
+       UNION ALL
+       SELECT 1 FROM memberships member JOIN identities person ON person.id=member.identity_id
+       WHERE member.workspace_id=$1 AND person.kind='human' AND person.id<>$2 AND lower(person.handle)=$3
+       LIMIT 1`,
+      [workspaceId, agentId, handle],
+    );
+    if (taken.rows[0]) throw new CommandRefusalError(`@${handle} is already taken in this Workspace.`, 409);
+    // Share the global counter lock with explicit person claims, as the
+    // reservation trigger does, so a racing claim cannot reuse this address.
+    await database.query(
+      `INSERT INTO identity_handle_counters(name,n)
+       VALUES(regexp_replace($1,'_[0-9]+$',''),CASE WHEN $1 ~ '_[0-9]+$' THEN substring($1 from '([0-9]+)$')::numeric ELSE 1 END)
+       ON CONFLICT(name) DO UPDATE SET n=greatest(identity_handle_counters.n,excluded.n)`,
+      [handle],
+    );
+    await database.query(
+      `INSERT INTO workspace_handles(workspace_id,identity_id,handle) VALUES($1,$2,$3)
+       ON CONFLICT(workspace_id,identity_id) DO UPDATE SET handle=excluded.handle`,
+      [workspaceId, agentId, handle],
+    );
+    await database.query(`UPDATE identities SET workspace_handle_base=$2 WHERE id=$1`, [agentId, handle]);
+    return agentNameFromHandle(handle);
   }
 
   export async function phoneUpdateAgentModel(ctx: PhoneContext, input: Input<'updateAgentModelSelection'>, viewerId: string) {

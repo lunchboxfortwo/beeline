@@ -4,7 +4,7 @@ import type { SurfaceWatchFilter } from './room-view.js';
 import type { ChannelRole } from './channel.js';
 import type {
   AgentPairingCode,
-  AgentSoulInput,
+  AgentSoulSave,
   AgentSoulProfile,
   AgentModelConfig,
   AgentModelConfigInput,
@@ -121,7 +121,7 @@ export interface BuzzClient {
   setAgentSoul(
     communityId: string,
     agentPubkey: string,
-    soul: AgentSoulInput,
+    soul: AgentSoulSave,
   ): Promise<AgentSoulProfile>;
   /** Choose a model/effort for an agent. Applied on that agent's next session (re)activation. */
   setAgentModelConfig(

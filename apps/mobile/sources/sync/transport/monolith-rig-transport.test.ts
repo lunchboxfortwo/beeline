@@ -576,7 +576,7 @@ describe('monolith Room send path', () => {
 
     await expect(
       client.setAgentSoul('workspace-id', 'agent-id', {
-        name: 'Honeybee',
+        handle: 'honeybee',
         soul: 'Be precise and practical.',
         avatarSeed: 'honeybee-seed',
       }),
@@ -587,7 +587,7 @@ describe('monolith Room send path', () => {
       {
           workspaceId: 'workspace-id',
           agentId: 'agent-id',
-          name: 'Honeybee',
+          handle: 'honeybee',
           instructions: 'Be precise and practical.',
           avatarSeed: 'honeybee-seed',
         },
