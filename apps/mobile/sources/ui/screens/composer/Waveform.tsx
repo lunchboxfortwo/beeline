@@ -1,6 +1,7 @@
 import React from 'react';
 import { getTokens, XStack, YStack } from 'tamagui';
-import Animated, { useAnimatedStyle, useFrameCallback, useSharedValue, type SharedValue } from 'react-native-reanimated';
+import { useAnimatedStyle, useFrameCallback, useSharedValue, type SharedValue } from 'react-native-reanimated';
+import { Motion } from '@/ui/grammar';
 import { advanceWaveform, initialWaveformMotion, waveformOffset, WAVEFORM_BARS, type WaveformMotion } from './waveform-motion';
 
 /** More bars than the widest field holds; the oldest clip off the left edge. */
@@ -9,12 +10,13 @@ const BAR_MIN = 2;
 const BAR_RANGE = 16;
 const FIELD_HEIGHT = 26;
 
-const AnimatedBar = Animated.createAnimatedComponent(YStack);
-
 function WaveformBar({ index, motion, live, pitch }: { index: number; motion: SharedValue<WaveformMotion>; live: boolean; pitch: number }) {
     const style = useAnimatedStyle(() => {
         const height = motion.value.heights[index] ?? BAR_MIN;
         return {
+            position: 'absolute',
+            right: 0,
+            width: 2,
             height,
             top: '50%',
             opacity: index < motion.value.heights.length ? 1 : 0,
@@ -24,8 +26,9 @@ function WaveformBar({ index, motion, live, pitch }: { index: number; motion: Sh
             ],
         };
     });
-    return <AnimatedBar position="absolute" right={0} width={2} flexShrink={0} borderRadius="full"
-        backgroundColor={live ? 'needsYou' : 'secondary'} style={style} />;
+    return <Motion motion={style} testID="waveform-bar">
+        <YStack flex={1} borderRadius="full" backgroundColor={live ? 'needsYou' : 'secondary'} />
+    </Motion>;
 }
 
 /** One bar's height for a level from 0 (silence) to 1 (loudest). */

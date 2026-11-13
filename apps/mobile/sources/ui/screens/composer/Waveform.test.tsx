@@ -17,20 +17,23 @@ vi.mock('react-native-reanimated', async () => {
         },
     };
 });
+vi.mock('@/ui/grammar', () => ({
+    Motion: (props: Record<string, unknown>) => React.createElement('Motion', props),
+}));
 import { WAVEFORM_BARS, Waveform, barHeight } from './Waveform';
 import { advanceWaveform, initialWaveformMotion, waveformOffset } from './waveform-motion';
 
 let tree: any;
 beforeEach(() => { (globalThis as any).IS_REACT_ACT_ENVIRONMENT = true; animation.active = false; });
 afterEach(() => { act(() => tree?.unmount()); tree = undefined; });
-const bars = () => tree.root.findAll((node: any) => node.type === 'YStack' && node.props.width === 2);
-const visible = () => bars().filter((bar: any) => bar.props.style.opacity === 1);
+const bars = () => tree.root.findAll((node: any) => node.type === 'Motion' && node.props.testID === 'waveform-bar');
+const visible = () => bars().filter((bar: any) => bar.props.motion.opacity === 1);
 const tick = (elapsed: number | null) => act(() => { if (animation.active) animation.callback!({ timeSincePreviousFrame: elapsed }); });
 
 it('scrolls between irregular readings and readings never move the history', () => {
     act(() => { tree = create(<Waveform level={0.2} live />); });
     tick(null);
-    const x = () => visible()[0].props.style.transform[0].translateX;
+    const x = () => visible()[0].props.motion.transform[0].translateX;
     tick(16);
     expect(x()).toBeCloseTo(-1.2);
     const callback = animation.callback;
@@ -51,32 +54,32 @@ it('eases heights toward the newest target without snapping on a reading', () =>
     act(() => { tree = create(<Waveform level={0} live />); });
     tick(null);
     act(() => tree.update(<Waveform level={1} live />));
-    expect(visible()[0].props.style.height).toBe(barHeight(0));
+    expect(visible()[0].props.motion.height).toBe(barHeight(0));
     tick(16);
-    const height = visible()[0].props.style.height;
+    const height = visible()[0].props.motion.height;
     expect(height).toBeGreaterThan(barHeight(0));
     expect(height).toBeLessThan(barHeight(1));
     tick(16);
-    expect(visible()[0].props.style.height).toBeGreaterThan(height);
+    expect(visible()[0].props.motion.height).toBeGreaterThan(height);
 });
 
 it('freezes motion and heights in secondary ink while stopped, resumes without catch-up, and cleans up', () => {
     act(() => { tree = create(<Waveform level={0.8} live testID="take" />); });
     tick(41);
-    const before = visible().map((bar: any) => [bar.props.style.height, bar.props.style.transform]);
+    const before = visible().map((bar: any) => [bar.props.motion.height, bar.props.motion.transform]);
     act(() => tree.update(<Waveform level={0} live={false} testID="take" />));
     expect(animation.active).toBe(false);
     tick(1000);
     // Also cover an already queued UI callback after deactivation.
     act(() => animation.callback!({ timeSincePreviousFrame: 1000 }));
-    expect(visible().map((bar: any) => [bar.props.style.height, bar.props.style.transform])).toEqual(before);
-    expect(bars().every((bar: any) => bar.props.backgroundColor === 'secondary')).toBe(true);
+    expect(visible().map((bar: any) => [bar.props.motion.height, bar.props.motion.transform])).toEqual(before);
+    expect(bars().every((bar: any) => bar.findByType('YStack' as any).props.backgroundColor === 'secondary')).toBe(true);
     expect(tree.root.findByProps({ testID: 'take' })).toBeDefined();
     act(() => tree.update(<Waveform level={0.4} live testID="take" />));
     tick(null);
-    expect(visible().map((bar: any) => [bar.props.style.height, bar.props.style.transform])).toEqual(before);
+    expect(visible().map((bar: any) => [bar.props.motion.height, bar.props.motion.transform])).toEqual(before);
     tick(16);
-    expect(visible()[0].props.style.transform).not.toEqual(before[0][1]);
+    expect(visible()[0].props.motion.transform).not.toEqual(before[0][1]);
     act(() => tree.unmount());
     expect(animation.active).toBe(false);
 });
