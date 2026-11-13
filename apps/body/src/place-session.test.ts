@@ -95,7 +95,7 @@ it('discloses an unavailable cached paid model and uses the advertised agent def
     soul: { name: 'Reviewer', instructions: 'Review carefully.' } };
   await f.session.start();
   await f.session.deliver(f.item, []);
-  expect(f.prompt.mock.calls[0]?.[1]).toContain('Selected model unavailable-paid-model is unavailable; this session runs with default-model');
+  expect(f.prompt.mock.calls[0]?.[1]).toContain('Selected model unavailable-paid-model is unavailable at startup; this session runs with default-model');
   expect(f.session.client?.sessionNew).toHaveBeenCalledWith(expect.objectContaining({ systemPrompt: expect.stringContaining('Review carefully.') }));
   await f.session.dispose();
 });
@@ -109,5 +109,34 @@ it('does not pass an unverified retired model to a native launch before it can f
   expect(f.spawn.mock.calls[0]?.[0].agentArgs).toEqual(['agent', 'stdio']);
   await f.session.deliver(f.item, []);
   expect(f.prompt.mock.calls[0]?.[1]).toContain('Selected model retired-paid-model is unavailable');
+  await f.session.dispose();
+});
+
+it('returns the successful public answer before a model cleanup error', async () => {
+  const f=await fixture();
+  await f.session.start();
+  const revoke=vi.fn(()=>{throw new Error('cleanup EACCES');});
+  (f.session as unknown as {hostedModel:()=>Promise<unknown>}).hostedModel=async()=>({
+    paths:()=>({directory:'/fixture'}),revoke,
+  });
+  const answer=await f.session.deliver(f.item,[]);
+  expect(answer.text).toBe('The answer');
+  expect(f.prompt).toHaveBeenCalledTimes(1);
+  expect(revoke).not.toHaveBeenCalled();
+  await expect(answer.cleanup()).rejects.toThrow('cleanup EACCES');
+  expect(answer.text).toBe('The answer');
+  await f.session.dispose();
+});
+
+it('starts and answers without awaiting an optional model setter', async () => {
+  const f=await fixture();
+  f.config.modelSelection={model:'default-model'};
+  const setter=vi.fn(()=>new Promise(()=>{}));
+  const original=f.spawn.getMockImplementation()!;
+  f.spawn.mockImplementation((options)=>Object.assign(original(options),{setConfigOption:setter}));
+  await f.session.start();
+  expect((await f.session.deliver(f.item,[])).text).toBe('The answer');
+  expect(setter).not.toHaveBeenCalled();
+  expect(f.prompt).toHaveBeenCalledTimes(1);
   await f.session.dispose();
 });

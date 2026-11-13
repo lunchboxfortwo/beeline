@@ -38,7 +38,7 @@ export async function readAgentCommands(
         id: item.id, roomId: item.room_id, returnRoomId: item.return_room_id ?? item.room_id,
         ...(item.parent_room_id ? {parentRoomId:item.parent_room_id} : {}),
         agentId: item.agent_id, createdAt, sourceMessageId: item.private_payload ? item.id : item.source_message_id ?? item.id,
-        turnRequestId: item.turn_request_id, action: item.action, reason: item.reason,
+        turnRequestId: item.id, action: item.action, reason: item.reason,
         rootCommandId: item.root_command_id, rootSourceMessageId: item.root_source_message_id,
         ...(item.parent_command_id ? {parentCommandId:item.parent_command_id} : {}),
         agentDepth: item.agent_depth, ...(item.private_payload ? {private:true} : {}),
@@ -91,41 +91,6 @@ export async function routeSystemCommand(
       return;
     }
   }
-  if (input.kind === 'computer-session-activity') {
-    // Serialize producers per share. A claimed update stays immutable; all
-    // further actions accumulate in a single pending update for that share.
-    const activity = (await db.query<{ session_id: string; text: string }>(
-      `SELECT session.id session_id,message.text FROM messages message
-       JOIN computer_sessions session ON session.id=message.system_event->'payload'->>'sessionId'
-       WHERE message.id=$1 AND session.room_id=$2 AND session.status='live'
-       FOR UPDATE OF session`, [input.sourceMessageId, input.roomId],
-    )).rows[0];
-    if (!activity) return;
-    for (const agentId of new Set(input.targets)) {
-      const pending = (await db.query<CommandRow>(
-        `SELECT command.* FROM agent_commands command
-         JOIN messages source ON source.id=command.source_message_id
-         WHERE command.room_id=$1 AND command.agent_id=$2 AND command.state='pending'
-           AND command.reason='computer_activity'
-           AND source.system_event->'payload'->>'sessionId'=$3
-         FOR UPDATE OF command`, [input.roomId, agentId, activity.session_id],
-      )).rows[0];
-      if (pending) {
-        await db.query(
-          `UPDATE agent_commands SET source_message_id=$2,
-             recovery_context=right(COALESCE(recovery_context || E'\\n','') || $3,16000)
-           WHERE id=$1 AND state='pending'`, [pending.id, input.sourceMessageId, activity.text],
-        );
-      } else {
-        const command = await createAgentCommand(db, {
-          roomId: input.roomId, agentId, sourceMessageId: input.sourceMessageId, reason: 'computer_activity',
-        });
-        if (command) await db.query(`UPDATE agent_commands SET recovery_context=$2 WHERE id=$1`,
-          [command.id, activity.text]);
-      }
-    }
-    return;
-  }
   // A Stop cancels the stopped turn's pending items. A decision (approval,
   // connector, Squire) is a new item that continues its parent's turn; the
   // parent stays queued until it is answered.
@@ -157,7 +122,7 @@ export async function routeSystemCommand(
       agentId,
       sourceMessageId: input.sourceMessageId,
       workflowAssignment: input.assignmentTargets?.includes(agentId),
-      reason: resume ? 'resume' : input.kind === 'schedule-ran' ? 'schedule' : 'subscribed_event',
+      reason: resume ? 'resume' : input.kind === 'schedule-ran' ? 'schedule' : input.kind === 'computer-session-activity' ? 'computer_activity' : 'subscribed_event',
       ...(parent ? { parent, retainDepth: resume, resume } : {}),
     });
   }

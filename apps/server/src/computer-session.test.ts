@@ -1,4 +1,3 @@
-import { startQueuedCommand } from './test-fixtures/queued-turn.test-support.js';
 import { createServer, createHmac, randomUUID, AddressInfo, mkdtemp, rm, join, describe, expect, it, WebSocket, WebSocketServer, shareChromiumPage, waitForComputerHandback, SYSTEM_IDENTITY_ID, systemLine, createAgentCommand, startQueuedTurn, readAgentCommands, DaemonService, backfillComputerObservations, createBeelineServer, readRoomViewMessage, assembleTurnPrompt, computerViewToken, createComputerSession, endComputerSession, getComputerSession, trustedComputerShareUpstream, HUMAN, OTHER, AGENT, WORKSPACE, ROOM, testSquire, opened, next, nextType, until, fixtureScope1, type TokenAuth, type DaemonApiClient } from './test-support-computer-session.test-support.js';
 
 describe('computer session handoff', () => {
@@ -118,7 +117,7 @@ const scope1 = fixtureScope1();
   });
 
 
-  it('retires all unclaimed browser wakes while preserving sent messages', async () => {
+  it('normalizes historical browser observations without spending their queued answers', async () => {
     const share = await createComputerSession(scope1.database, scope1.live, {
       roomId: ROOM, agentId: AGENT, sessionId: 'old-view', upstreamUrl: 'body:',
     });
@@ -143,7 +142,7 @@ const scope1 = fixtureScope1();
     const commands = await scope1.database.query<{source_message_id: string;state: string}>(
       `SELECT source_message_id,state FROM agent_commands WHERE source_message_id=ANY($1::text[])`, [[passive.id,meaningful.id]]);
     expect(commands.rows).toEqual(expect.arrayContaining([
-      {source_message_id: passive.id,state:'cancelled'}, {source_message_id: meaningful.id,state:'cancelled'},
+      {source_message_id: passive.id,state:'pending'}, {source_message_id: meaningful.id,state:'pending'},
     ]));
     const rows = await scope1.database.query<{text: string;presentation: string}>(
       `SELECT text,presentation FROM messages WHERE id=ANY($1::text[])`, [[passive.id,meaningful.id]]);
@@ -406,56 +405,33 @@ const scope1 = fixtureScope1();
   });
 
 
-  it('coalesces each share into one latest observation, behind human requests, with silent completion', async () => {
-    const share = await createComputerSession(scope1.database, scope1.live, {
-      roomId: ROOM, agentId: AGENT, sessionId: 'activity-burst', upstreamUrl: 'body:',
+  it('appends every shared-computer observation even while an earlier item is being answered', async () => {
+    const share=await createComputerSession(scope1.database,scope1.live,{
+      roomId:ROOM,agentId:AGENT,sessionId:'activity-burst',upstreamUrl:'body:',
     });
-    const observe = (name: string) => systemLine(scope1.database, {
-      roomId: ROOM, authorId: SYSTEM_IDENTITY_ID, subject: { kind: 'system', name: 'A person' },
-      verb: 'used', object: `the shared browser ${name}`, kind: 'computer-session-activity',
-      payload: { sessionId: share.id, activity: name }, wakes: [AGENT],
+    const observe=(name:string)=>systemLine(scope1.database,{
+      roomId:ROOM,authorId:SYSTEM_IDENTITY_ID,subject:{kind:'system',name:'A person'},
+      verb:'used',object:`the shared browser ${name}`,kind:'computer-session-activity',
+      payload:{sessionId:share.id,activity:name},wakes:[AGENT],
     });
-    const opened = await observe('viewer-opened');
-    const snapshot = (await readAgentCommands(scope1.database, AGENT, ROOM)).commands.find((c) => c.sourceMessageId === opened.id)!;
-    await observe('pointer');
-    const latest = await observe('navigation');
-    const pending = await scope1.database.query<{ id: string; source_message_id: string }>(
-      `SELECT id,source_message_id FROM agent_commands WHERE reason='computer_activity'
-       AND source_message_id IN (SELECT id FROM messages WHERE system_event->'payload'->>'sessionId'=$1)
-       AND state='pending'`, [share.id]);
-    expect(pending.rows).toEqual([{ id: snapshot.id, source_message_id: latest.id }]);
-    const humanId = '9'.repeat(64);
-    await scope1.database.query(`INSERT INTO messages(id,room_id,author_id,text) VALUES($1,$2,$3,'Please answer')`, [humanId, ROOM, HUMAN]);
-    const human = await createAgentCommand(scope1.database, { roomId: ROOM, agentId: AGENT, sourceMessageId: humanId, reason: 'human_tag' });
-    const duringHumanRequest = (await readAgentCommands(scope1.database, AGENT, ROOM)).commands;
-    expect(duringHumanRequest.some((c) => c.id === human!.id)).toBe(true);
-    expect(duringHumanRequest.some((c) => c.id === snapshot.id)).toBe(false);
-    await expect(startQueuedTurn(scope1.database, ROOM, AGENT, snapshot.id)).rejects.toThrow('command claim conflict');
-    await startQueuedTurn(scope1.database, ROOM, AGENT, human!.id);
-    await expect(startQueuedTurn(scope1.database, ROOM, AGENT, snapshot.id)).rejects.toThrow('command claim conflict');
-    await scope1.database.query(`UPDATE agent_commands SET state='complete',completed_at=now() WHERE id=$1`, [human!.id]);
-    const daemon = new DaemonService(scope1.database, scope1.live, scope1.origin);
-    const claimed = await startQueuedCommand(daemon, { roomId: ROOM, commandId: snapshot.id }, AGENT);
-    expect(claimed.activitySource).toMatchObject({ body: 'A person used the shared browser navigation',
-      systemEvent: { payload: { sessionId: share.id, activity: 'navigation' } } });
-    expect(claimed.recoveryContext).toBe('A person used the shared browser viewer-opened\nA person used the shared browser pointer\nA person used the shared browser navigation');
-    await observe('typing');
-    await observe('handback');
-    // Lost claim responses remain replayable even when a person arrives next.
-    const anotherHumanId = '8'.repeat(64);
-    await scope1.database.query(`INSERT INTO messages(id,room_id,author_id,text) VALUES($1,$2,$3,'Another request')`, [anotherHumanId, ROOM, HUMAN]);
-    const anotherHuman = await createAgentCommand(scope1.database, { roomId: ROOM, agentId: AGENT, sourceMessageId: anotherHumanId, reason: 'human_tag' });
-    await expect(startQueuedTurn(scope1.database, ROOM, AGENT, snapshot.id)).resolves.toMatchObject({ id: snapshot.id });
-    await scope1.database.query(`UPDATE agent_commands SET state='complete' WHERE id=$1`, [anotherHuman!.id]);
-    // One pending observation per share; the running one is listed with its generation to resume.
-    expect((await readAgentCommands(scope1.database, AGENT, ROOM)).commands.filter((c) =>
-      (c.source.systemEvent?.payload as { sessionId?: string })?.sessionId === share.id).map(c => c.generationId).sort())
-      .toEqual(['activity-generation', undefined]);
-    await daemon.execute('postAgentTurnReceipt',{ roomId:ROOM, requestId:snapshot.turnRequestId, status:'complete', completionKind:'no-reply' },AGENT,scope1.helperSource);
-    expect((await scope1.database.query(`SELECT id FROM messages WHERE room_id=$1 AND card_type='turn-failed'
-      AND card->>'requestId'=$2`, [ROOM, snapshot.turnRequestId])).rowCount).toBe(0);
-    await endComputerSession(scope1.database, scope1.live, (await getComputerSession(scope1.database, share.id))!);
-    await scope1.database.query(`UPDATE agent_commands SET state='complete' WHERE room_id=$1 AND reason='computer_activity'`, [ROOM]);
+    const opened=await observe('viewer-opened');
+    const initial=(await readAgentCommands(scope1.database,AGENT,ROOM)).commands;
+    const first=initial.find(item=>item.sourceMessageId===opened.id)!;
+    await startQueuedTurn(scope1.database,ROOM,AGENT,first.id);
+    const pointer=await observe('pointer');
+    const navigation=await observe('navigation '+ 'x'.repeat(17000));
+    const rows=(await readAgentCommands(scope1.database,AGENT,ROOM)).commands
+      .filter(item=>(item.source.systemEvent?.payload as {sessionId?:string})?.sessionId===share.id);
+    expect(rows.map(item=>item.sourceMessageId)).toEqual([opened.id,pointer.id,navigation.id]);
+    expect(rows[0]!.source.body).toBe(first.source.body);
+    expect(rows[2]!.source.body).toContain('x'.repeat(17000));
+    const daemon=new DaemonService(scope1.database,scope1.live,scope1.origin);
+    for(const item of rows)await daemon.execute('postRoomMessage',{
+      roomId:ROOM,requestId:item.id,text:`Observation answered: ${item.sourceMessageId}`,
+    },AGENT);
+    expect((await readAgentCommands(scope1.database,AGENT,ROOM)).commands
+      .filter(item=>rows.some(row=>row.id===item.id))).toEqual([]);
+    await endComputerSession(scope1.database,scope1.live,(await getComputerSession(scope1.database,share.id))!);
   });
 
 

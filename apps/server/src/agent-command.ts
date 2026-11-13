@@ -164,6 +164,8 @@ ALTER TABLE agent_commands ADD COLUMN IF NOT EXISTS generation_id text,
 ALTER TABLE agent_pending_attachments ADD COLUMN IF NOT EXISTS generation_id text;
 ${AGENT_COMMAND_DELEGATION_SCHEMA}
 UPDATE agent_commands SET state='pending' WHERE state='claimed';
+-- The item owns its answer. Source ids are provenance, including older queues.
+UPDATE agent_commands SET turn_request_id=id WHERE state='pending' AND turn_request_id<>id;
 -- A legacy resume can share its source and request with its parent. Preserve
 -- its message before removing that uniqueness collision; each item then owns
 -- a separate request id and can receive its own answer after the upgrade.
@@ -675,7 +677,7 @@ async function insertAgentCommand(db: SqlDatabase, input: AgentCommandInput, cha
      VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13::jsonb,'pending',$14,$15::jsonb,$16::jsonb,$17::jsonb,$18::jsonb)
      ON CONFLICT DO NOTHING RETURNING *),${wake.cte}
      SELECT inserted.* FROM inserted ${wake.join}`,
-    [id, chat.id, input.agentId, input.sourceMessageId, input.id ?? input.sourceMessageId ?? id,
+    [id, chat.id, input.agentId, input.sourceMessageId, id,
       input.action ?? 'input', input.reason, parent?.root_command_id ?? id, parent?.id ?? null,
       parent?.root_source_message_id ?? input.scheduledHumanCommandMessageId ?? input.sourceMessageId ?? id,
       parent ? input.retainDepth || lifecycle || input.resume ? parent.agent_depth : parent.agent_depth + 1 : 0,
@@ -722,8 +724,7 @@ export async function answerQueuedMessage(database: SqlDatabase, agentId: string
        LEFT JOIN messages source ON source.id=item.source_message_id
        LEFT JOIN messages posted ON posted.id=item.posted_reply_id AND posted.deleted_at IS NULL
          AND posted.request_id=item.turn_request_id AND posted.room_id=item.return_room_id
-       WHERE item.agent_id=$1 AND item.room_id::text=$2 AND item.turn_request_id=$3
-       ORDER BY item.created_at DESC,item.id DESC LIMIT 1 FOR UPDATE OF item`,
+       WHERE item.agent_id=$1 AND item.room_id::text=$2 AND item.id=$3 FOR UPDATE OF item`,
       [agentId, input.roomId, input.requestId ?? null],
     )).rows[0];
     if (item?.state === 'complete' && item.result_message_id)

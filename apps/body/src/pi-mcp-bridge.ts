@@ -1,59 +1,12 @@
-import { execFile } from 'node:child_process';
-import { mkdtemp, mkdir, readFile, rm, unlink } from 'node:fs/promises';
-import { tmpdir } from 'node:os';
+import { mkdir,readFile } from 'node:fs/promises';
 import { resolve } from 'node:path';
-import { promisify } from 'node:util';
 import { grantedSquireHostRoute } from './host-mcp-route.js';
 import type { McpServerWire } from './acp.js';
 import { writeIsolatedHarnessFile } from './agent-home.js';
 
-/**
- * Pi ACP still ignores session/new mcpServers. An isolated executable probe
- * chooses one owner for each session's MCP mounts: Pi's native mcp.json loader
- * when it works, or the generated extension for older/bundled Pi executables.
- * The bridge also republishes the already filtered local stdio imports from
- * the isolated home. Both paths keep the server's own MCP authorization and
- * session boundary; neither reads a repository or operator MCP config.
- */
+/** Pi ACP loads this private bridge without contacting optional servers.
+ * Their discovery and execution belong to explicit agent tool calls. */
 export const PI_MCP_BRIDGE_FILENAME = 'beeline-mcp-bridge.js';
-const execFileAsync = promisify(execFile);
-const nativeMcpProbes = new Map<string, Promise<boolean>>();
-
-/**
- * Probe with the SAME `PATH` the real session's pi-acp child will resolve
- * `pi` against (`agentEnv`, not this daemon's own `process.env`). A bare
- * `command` like `'pi'` resolves through whatever `PATH` the probe is given;
- * the daemon's ambient `PATH` and a session's `agentEnv.PATH` can name two
- * different installed Pi versions (one pinned/older, one newer on the
- * operator's PATH), so probing the wrong one answers a question about a Pi
- * that will never actually run this session — the native/bridge choice must
- * be measured against the exact executable pi-acp spawns.
- */
-async function piHasNativeMcp(command: string, env?: NodeJS.ProcessEnv): Promise<boolean> {
-  const path = env?.PATH ?? process.env.PATH ?? '';
-  const cacheKey = `${command}\0${path}`;
-  let probe = nativeMcpProbes.get(cacheKey);
-  if (!probe) {
-    probe = (async () => {
-      const home = await mkdtemp(resolve(tmpdir(), 'beeline-pi-mcp-probe-'));
-      try {
-        const { stdout } = await execFileAsync(command, ['mcp', 'list', '--json'], {
-          cwd: home,
-          timeout: 1_200,
-          env: { PATH: path, HOME: home, PI_CODING_AGENT_DIR: home, PI_OFFLINE: '1' },
-        });
-        const result = JSON.parse(stdout) as { servers?: unknown; errors?: unknown };
-        return Array.isArray(result.servers) && Array.isArray(result.errors);
-      } catch {
-        return false;
-      } finally {
-        await rm(home, { recursive: true, force: true });
-      }
-    })();
-    nativeMcpProbes.set(cacheKey, probe);
-  }
-  return probe;
-}
 
 type PiMcpConfig = { mcpServers?: Record<string, Record<string, unknown>>; [key: string]: unknown };
 type PiMountedServer = McpServerWire & { cwd?: string };
@@ -116,7 +69,7 @@ function isPiAcpCommand(agentCommand: string | undefined): boolean {
  *
  * Pure and exported so tests can run the bridge against real stdio processes.
  */
-export function piMcpBridgeSource(servers: readonly PiMountedServer[], tracePath?: string): string {
+export function piMcpBridgeSource(servers: readonly PiMountedServer[]): string {
   const manifest = servers.map((server) => ({
     name: server.name,
     // Rewritten aliases carry the broker socket even after their original launch is replaced.
@@ -133,7 +86,7 @@ export function piMcpBridgeSource(servers: readonly PiMountedServer[], tracePath
     ...(server.cwd ? { cwd: server.cwd } : {}),
     env: Object.fromEntries((server.env ?? []).map((entry) => [entry.name, entry.value])),
   }));
-  return `${BRIDGE_PREAMBLE}const TRACE_PATH = ${JSON.stringify(tracePath ?? '')};\nconst SERVERS = ${JSON.stringify(manifest, null, 2)};\n${BRIDGE_BODY}`;
+  return `${BRIDGE_PREAMBLE}const SERVERS = ${JSON.stringify(manifest, null, 2)};\n${BRIDGE_BODY}`;
 }
 
 /**
@@ -146,13 +99,6 @@ export async function installPiMcpBridge(input: {
   agentCommand?: string;
   /** `PI_CODING_AGENT_DIR` for this session, from the prepared home overlay. */
   piHome?: string;
-  piCommand?: string;
-  /** The session's own env (`PATH` above all): pi-acp resolves its `pi` child
-   *  against this, not the daemon's `process.env`, so the native-MCP probe
-   *  must match it or it answers for a Pi that will never run this session. */
-  agentEnv?: NodeJS.ProcessEnv;
-  /** Tests pin the two installed Pi paths without changing the operator's executable. */
-  nativeMcp?: boolean;
   servers: readonly McpServerWire[];
 }): Promise<string | undefined> {
   if (!isPiAcpCommand(input.agentCommand)) return undefined;
@@ -161,30 +107,9 @@ export async function installPiMcpBridge(input: {
   const path = resolve(directory, PI_MCP_BRIDGE_FILENAME);
   try {
     const config = await isolatedPiConfig(input.piHome);
-    const nativeMcp =
-      input.nativeMcp ?? (await piHasNativeMcp(input.piCommand ?? 'pi', input.agentEnv));
-    if (nativeMcp) {
-      const mcpServers = { ...config.mcpServers };
-      for (const server of input.servers)
-        mcpServers[server.name] = {
-          command: server.command,
-          args: server.args ?? [],
-          env: Object.fromEntries((server.env ?? []).map((entry) => [entry.name, entry.value])),
-          exposure: 'direct',
-        };
-      await writeIsolatedHarnessFile(
-        resolve(input.piHome, 'mcp.json'),
-        `${JSON.stringify({ ...config, mcpServers }, null, 2)}\n`,
-      );
-      await unlink(path).catch((error: NodeJS.ErrnoException) => {
-        if (error.code !== 'ENOENT') throw error;
-      });
-      return resolve(input.piHome, 'mcp.json');
-    }
     const servers = [...input.servers, ...importedStdioServers(config, input.servers)];
     if (!servers.length) return undefined;
-    // A Pi executable may load native MCP even when its CLI probe is absent or
-    // broken. Keep every stdio server owned by the bridge in that case too.
+    // Keep native Pi auto-discovery disabled for these bridge-owned routes.
     const mcpServers = { ...config.mcpServers };
     for (const server of servers)
       mcpServers[server.name] = {
@@ -198,7 +123,7 @@ export async function installPiMcpBridge(input: {
       `${JSON.stringify({ ...config, mcpServers }, null, 2)}\n`,
     );
     await mkdir(directory, { recursive: true, mode: 0o700 });
-    await writeIsolatedHarnessFile(path, piMcpBridgeSource(servers, resolve(input.piHome, 'beeline-mcp-startup.json')));
+    await writeIsolatedHarnessFile(path, piMcpBridgeSource(servers));
     return path;
   } catch (error) {
     console.error('[body] pi MCP bridge could not be written', path, error);
@@ -207,20 +132,18 @@ export async function installPiMcpBridge(input: {
 }
 
 const BRIDGE_PREAMBLE = `// Generated by Beeline for one Room session. Do not edit: it is rewritten on
-// every activation for Pi executables without a working native MCP loader.
+// every activation. Discovery happens only inside an explicit tool call.
 import { spawn } from 'node:child_process';
-import { readFile, writeFile } from 'node:fs/promises';
+import { readFile } from 'node:fs/promises';
 
 `;
 
-const BRIDGE_BODY = `const LIST_TIMEOUT_MS = 20000;
-
-/**
+const BRIDGE_BODY = `/**
  * One request/response against a short-lived stdio route. Squire's route is
  * only a proxy: its real MCP connection is held by SquireTaskRelay in the
  * helper across these processes and across Pi ACP replacements.
  */
-function callServer(server, request, signal, timeoutMs) {
+function callServer(server, request, signal) {
   return new Promise((resolvePromise, rejectPromise) => {
     const child = spawn(server.command, server.args, {
       env: { ...process.env, ...server.env },
@@ -324,87 +247,21 @@ function labelOf(name) {
   return name.replace(/_/g, ' ').replace(/^./, (first) => first.toUpperCase());
 }
 
-export default async function (pi) {
-  const mounted = new Map();
-  const discovery = new Map();
-  async function refreshServer(server) {
-    let tools = [];
-    const startedAt = performance.now();
-    try {
-      const listed = await callServer(
-        server,
-        { jsonrpc: '2.0', id: 1, method: 'tools/list', params: {} },
-        undefined,
-        LIST_TIMEOUT_MS,
-      );
-      tools = Array.isArray(listed?.tools) ? listed.tools : [];
-      discovery.set(server.name, { server: server.name, at: new Date().toISOString(), elapsedMs: Math.round(performance.now() - startedAt) });
-    } catch (error) {
-      // A server that will not list is a server whose tools this session does
-      // not have. Say so once; never fail the session over it.
-      console.error('[beeline] MCP server ' + server.name + ' did not list its tools:', error);
-      return;
-    }
-    const previous = mounted.get(server.name) ?? new Map();
-    const current = new Map();
-    for (const tool of tools) {
-      if (!tool || typeof tool.name !== 'string') continue;
-      const name = server.name + '__' + tool.name;
-      const descriptor = JSON.stringify(tool);
-      current.set(name, descriptor);
-      if (previous.get(name) === descriptor) continue;
-      const schema =
-        tool.inputSchema && typeof tool.inputSchema === 'object'
-          ? tool.inputSchema
-          : { type: 'object', properties: {} };
-      pi.registerTool({
-        name,
-        label: labelOf(tool.name),
-        description: typeof tool.description === 'string' ? tool.description : tool.name,
-        parameters: schema,
-        async execute(toolCallId, params, signal) {
-          if (server.requiresSquireAuthorization) await authorizeSquire(signal);
-          const result = await callServer(
-            server,
-            {
-              jsonrpc: '2.0',
-              id: 1,
-              method: 'tools/call',
-              params: {
-                name: tool.name,
-                arguments: params ?? {},
-                _meta: { beelineToolCallId: toolCallId },
-              },
-            },
-            signal,
-          );
-          // An MCP refusal is a RESULT carrying isError. Throwing is how a pi
-          // tool reports failure, so the sentence explaining the refusal is
-          // what the model reads.
-          if (result?.isError) throw new Error(textOf(result));
-          return { content: [{ type: 'text', text: textOf(result) }], details: {} };
-        },
-      });
-    }
-    // Pi has no unregisterTool API. Removed tools stay registered but cannot
-    // be selected by the model; a later reappearance activates them again.
-    if (mounted.has(server.name) && pi.getActiveTools && pi.setActiveTools) {
-      const active = pi.getActiveTools().filter((name) => !previous.has(name) || current.has(name));
-      for (const name of current.keys())
-        if (!previous.has(name) && !active.includes(name)) active.push(name);
-      pi.setActiveTools(active);
-    }
-    mounted.set(server.name, current);
-  }
-  async function refreshTools() {
-    await Promise.all(SERVERS.map(refreshServer));
-    // pi-acp discards Pi stderr. Keep one bounded discovery snapshot in this
-    // session home so the helper can include it in startup diagnostics.
-    if (TRACE_PATH) await writeFile(TRACE_PATH, JSON.stringify([...discovery.values()])).catch(() => {});
-  }
-  await refreshTools();
-  // Registering descriptors during a prompt can break an in-flight call.
-  // Each prompt reopens discovery, also covering a server replaced silently.
-  pi.on?.('before_agent_start', refreshTools);
+export default function (pi) {
+  for (const server of SERVERS) pi.registerTool({
+    name: server.name + '__mcp',
+    label: labelOf(server.name),
+    description: 'Use with no name to list this MCP server tools, then supply a listed name and arguments to call one. Discovery runs only when you request it.',
+    parameters: { type: 'object', properties: { name: { type: 'string' }, arguments: { type: 'object', additionalProperties: true } } },
+    async execute(toolCallId, params, signal) {
+      if (params?.name && server.requiresSquireAuthorization) await authorizeSquire(signal);
+      const result = await callServer(server, params?.name ? {
+        jsonrpc: '2.0', id: 1, method: 'tools/call',
+        params: { name: params.name, arguments: params.arguments ?? {}, _meta: { beelineToolCallId: toolCallId } },
+      } : { jsonrpc: '2.0', id: 1, method: 'tools/list', params: {} }, signal);
+      if (result?.isError) throw new Error(textOf(result));
+      return { content: [{ type: 'text', text: Array.isArray(result?.tools) ? JSON.stringify(result) : textOf(result) }], details: {} };
+    },
+  });
 }
 `;

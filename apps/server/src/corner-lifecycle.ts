@@ -1,4 +1,3 @@
-import { readLiveCornerChecks } from './corner-live-checks.js';
 import { CornerLifecycleView } from '@beeline/api-contract/phone';
 import { SYSTEM_IDENTITY_ID } from '@beeline/api-contract/system-identity';
 import { systemMessage } from '@beeline/api-contract/system-message-catalog';
@@ -190,13 +189,6 @@ export async function advanceCorner(
   // another event's slow reads. A commit to the row in between changes its
   // version; the write then reads the newer facts and compares again.
   if (commit) return advanceCornerCommitted(database, cornerId, event, commit);
-  // Events can release an owed review long after its green webhook. Refresh
-  // before planning the wake; provider-backed commits already carry their read.
-  if (event.kind === 'reconcile' || event.kind === 'checks' || event.kind === 'approval' || event.kind === 'brief-revised') {
-    const cached = await loadCorner(database, cornerId, false);
-    if (!cached?.archived && cached?.lifecycle.pr && cached.lifecycle.checks === 'passing')
-      await readLiveCornerChecks(database, cornerId);
-  }
   for (;;) {
     const read = await readCornerAdvance(database, cornerId, event);
     if (!read) return { accepted: false, state: undefined };

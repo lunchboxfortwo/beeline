@@ -17,7 +17,7 @@ import type { GrantRunnerEndpoint,GrantRunnerRoom } from './grant-runner.js';
 import { harnessEnforcement,roomShellCapability } from './harness-capabilities.js';
 import { postChangedAgentUsage } from './helper-usage-binding.js';
 import { CODE_OWNED_HOST_MCP_NAMES } from './mcp-route-class.js';
-import { agentArgsWithModelSelection,applyAgentModelSelection,filterAllowedModelConfigOptions,parseAdvertisedConfigOptions } from './model-config.js';
+import { agentArgsWithModelSelection,filterAllowedModelConfigOptions,parseAdvertisedConfigOptions } from './model-config.js';
 import { agentOpenRouterKey } from './openrouter-key-usage.js';
 import { openRouterRoutingInput } from './openrouter-routing.js';
 import { OwnedModelFiles } from './owned-model-files.js';
@@ -62,7 +62,7 @@ export interface Answer {
   readonly stopReason: string;
   readonly toolCalls: readonly ToolCallEntry[];
   /** Remove the live draft; called once the answer is posted. */
-  readonly clearDraft: () => Promise<void>;
+  readonly cleanup: () => Promise<void>;
 }
 
 /**
@@ -287,10 +287,8 @@ export class PlaceSession {
     if (agentEnv.BEELINE_FREE_AGENT_ID || agentEnv.BEELINE_FREE_AGENT_MODEL_TOKEN)
       await this.optional('Hosted model binding', () => installOwnedModelProvider(agentEnv.PI_CODING_AGENT_DIR), undefined);
     await installPiMcpBridge({
-      nativeMcp: false,
       agentCommand: harnessLabel, piHome: agentEnv.PI_CODING_AGENT_DIR,
-      piCommand: agentEnv.PI_ACP_PI_COMMAND ?? process.env.PI_ACP_PI_COMMAND,
-      agentEnv, servers,
+      servers,
     });
     const mountedServers = servers.map(server => server.name);
     const hostServers = [...CODE_OWNED_HOST_MCP_NAMES];
@@ -354,15 +352,9 @@ export class PlaceSession {
     const catalog = filterAllowedModelConfigOptions(parseAdvertisedConfigOptions(opened.raw));
     this.resources.rememberModelCatalog(catalog);
     const advertisedDefault = catalog.find(option => option.category === 'model')?.currentValue;
-    let runningModel = advertisedDefault ?? 'the agent default';
-    if (selection.model || selection.effort) {
-      const available = !selection.model || catalog.some(option => option.category === 'model' && option.options.some(value => value.id === selection.model));
-      if (available) {
-        const applied = await this.optional('Model selection', () => applyAgentModelSelection(client, opened.sessionId, catalog, selection), undefined);
-        runningModel = applied?.appliedSelection.model ?? runningModel;
-        if (!applied && selection.model) this.notes.push(`Selected model ${selection.model} could not be applied; this session runs with ${runningModel}.`);
-      } else this.notes.push(`Selected model ${selection.model} is unavailable; this session runs with ${runningModel}.`);
-    }
+    const runningModel = advertisedDefault ?? 'the agent default';
+    if (selection.model && selection.model !== runningModel)
+      this.notes.push(`Selected model ${selection.model} is unavailable at startup; this session runs with ${runningModel}.`);
     this.notes.push(`This session uses ${runningModel}; persona and reviewer skills use ${configuration ? 'cached configuration' : 'the agent default'}. Optional context and capability status: read(facet:session).`);
     if (agentOpenRouterKey(config.agentKind, selection.model, config.agentEnv))
       console.log(`[body] place ${placeId} uses an OpenRouter key`);
@@ -435,7 +427,6 @@ export class PlaceSession {
       throw error;
     } finally {
       stream.close();
-      model?.revoke();
       this.squireRelay.deactivate(item.turnRequestId);
       this.current = undefined;
     }
@@ -453,7 +444,10 @@ export class PlaceSession {
       steps,
       stopReason: result.stopReason,
       toolCalls: result.toolCalls,
-      clearDraft: () => stream.retract(),
+      cleanup: async () => {
+        model?.revoke();
+        return stream.retract();
+      },
     };
   }
 

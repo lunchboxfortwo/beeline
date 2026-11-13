@@ -654,7 +654,7 @@
       "apps/server/src",
       "apps/auth/src"
     ],
-    "bootstrapTotal": 1648,
+    "bootstrapTotal": 1647,
     "unusedTotal": 172,
     "tables": {
       "agent_avatars": {
@@ -711,7 +711,10 @@
           "wake_context": "existing before the registry; weekly audit reviews",
           "report_outcome": "The published answer outcome distinguishes failed work from a successful answer while both complete their queue obligation.",
           "cancellation_reason": "existing before the registry; weekly audit reviews",
-          "recovery_context": "existing before the registry; weekly audit reviews",
+          "recovery_context": {
+            "reason": "Retired browser-activity accumulator; each observation now owns an immutable queued input. Retained for preceding serving and rollback images.",
+            "drop": "docs/agent-server-surfaces.md#turn-recovery-storage-retirement after serving and rollback images drain"
+          },
           "wake_after": {
             "reason": "Retained without runtime use until the previous server drains during this rolling release.",
             "drop": "Next release after turn-lifecycle cleanup: docs/agent-server-surfaces.md#turn-recovery-storage-retirement"

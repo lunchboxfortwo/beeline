@@ -114,7 +114,7 @@ export type AgentCommand = {
   readonly parentRoomId?: string;
   readonly agentId: string;
   readonly sourceMessageId: string;
-  /** The `requestId` every tool call made for this item carries. */
+  /** The queue item id, carried as `requestId` by every tool call for it. */
   readonly turnRequestId: string;
   readonly action: AgentCommandAction;
   readonly reason: string;

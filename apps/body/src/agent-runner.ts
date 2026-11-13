@@ -218,7 +218,7 @@ export class AgentRunner {
 
   /** Usage and diagnostics follow the answer and never hold it. */
   private afterAnswer(item: AgentCommand, answer: Answer): void {
-    void answer.clearDraft().catch(error => console.warn('[body] draft cleanup failed:', error));
+    void answer.cleanup().catch(error => console.warn('[body] answer cleanup failed:', error));
     captureConnectionUsage(this.connectionUsage, {
       requestId: item.turnRequestId, agentId: this.agent.publicKey,
       ...(item.parentRoomId ? { cornerId: item.roomId } : { roomId: item.roomId }),
@@ -261,7 +261,7 @@ export class AgentRunner {
         this.durable.add(answer.itemId);
       }
       const receipt=await api.execute('postRoomMessage', {
-        roomId: answer.roomId, requestId: answer.requestId, text: answer.text, presentation: 'message',
+        roomId: answer.roomId, requestId: answer.itemId, text: answer.text, presentation: 'message',
         ...(answer.steps ? { steps: answer.steps } : {}),
       });
       if (receipt.answered!==false) {

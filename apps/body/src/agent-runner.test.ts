@@ -24,7 +24,7 @@ const roots: string[] = [];
 beforeEach(() => {
   vi.restoreAllMocks();
   harness.start.mockReset().mockResolvedValue(undefined);
-  harness.deliver.mockReset().mockResolvedValue({ text: 'answer', steps: [], toolCalls: [], clearDraft: async () => {} });
+  harness.deliver.mockReset().mockResolvedValue({ text: 'answer', steps: [], toolCalls: [], cleanup: async () => {} });
   harness.stop.mockReset().mockResolvedValue(undefined);
   harness.steer.mockReset().mockResolvedValue(undefined);
 });
@@ -65,8 +65,8 @@ it('loads stored answers before delivering a reconnect snapshot to the harness',
   f.changed([item]);
   await Promise.resolve();
   expect(harness.start).not.toHaveBeenCalled();
-  loaded.resolve([{ itemId: item.id, roomId: item.roomId, requestId: item.turnRequestId, text: 'stored answer' }]);
-  await vi.waitFor(() => expect(f.execute).toHaveBeenCalledWith('postRoomMessage', expect.objectContaining({ text: 'stored answer' })));
+  loaded.resolve([{ itemId: item.id, roomId: item.roomId, requestId: 'legacy-source-id', text: 'stored answer' }]);
+  await vi.waitFor(() => expect(f.execute).toHaveBeenCalledWith('postRoomMessage', expect.objectContaining({ text: 'stored answer', requestId:item.id })));
   expect(harness.deliver).not.toHaveBeenCalled();
 });
 
@@ -136,7 +136,7 @@ it('hands a new busy-place item to the active session as follow-up input and ans
   await vi.waitFor(() => expect(harness.deliver).toHaveBeenCalledTimes(1));
   f.changed([first, next]);
   await vi.waitFor(() => expect(harness.steer).toHaveBeenCalledWith(next));
-  answering.resolve({ text: 'combined answer', followUps: [next], steps: [], toolCalls: [], clearDraft: async () => {} });
+  answering.resolve({ text: 'combined answer', followUps: [next], steps: [], toolCalls: [], cleanup: async () => {} });
   await vi.waitFor(() => expect(f.execute.mock.calls.filter(call => call[0] === 'postRoomMessage')).toHaveLength(2));
   expect(harness.deliver).toHaveBeenCalledTimes(1);
 });
@@ -157,7 +157,7 @@ it('posts an already stored answer when the outbox becomes unwritable afterwards
 
 it('sends empty closing text through the answer exit and retains it while no answer exists',async()=>{
   const f=await fixture(),item=f.item('empty-closing');
-  harness.deliver.mockResolvedValueOnce({text:'',steps:[],toolCalls:[],clearDraft:async()=>{}});
+  harness.deliver.mockResolvedValueOnce({text:'',steps:[],toolCalls:[],cleanup:async()=>{}});
   f.execute.mockImplementation(async name=>name==='postRoomMessage'?{id:'owed',createdAt:1,answered:false}:{id:'status',createdAt:1});
   f.changed([item]);
   await vi.waitFor(()=>expect(f.execute).toHaveBeenCalledWith('postRoomMessage',expect.objectContaining({text:'',requestId:item.turnRequestId})));
@@ -166,5 +166,23 @@ it('sends empty closing text through the answer exit and retains it while no ans
   f.execute.mockResolvedValue({id:'posted',createdAt:1});
   f.changed([item]);
   await vi.waitFor(async()=>expect(await new AnswerStore(join(f.root,'answers')).all()).toEqual([]));
+  expect(harness.deliver).toHaveBeenCalledTimes(1);
+});
+
+it('keeps the genuine answer durable when optional cleanup fails', async () => {
+  const saved=vi.spyOn(AnswerStore.prototype,'save');
+  const cleanup=vi.fn(async()=>{
+    expect(saved).toHaveBeenCalledWith(expect.objectContaining({text:'The genuine answer'}));
+    throw new Error('cleanup EACCES');
+  });
+  harness.deliver.mockResolvedValueOnce({text:'The genuine answer',steps:[],toolCalls:[],cleanup});
+  const f=await fixture(),item=f.item('cleanup');
+  f.execute.mockImplementation(async name=>{
+    if(name==='postRoomMessage')throw new Error('disconnected');
+    return {id:'posted',createdAt:1};
+  });
+  f.changed([item]);
+  await vi.waitFor(()=>expect(cleanup).toHaveBeenCalledTimes(1));
+  expect(JSON.parse(await readFile(join(f.root,'answers',`${item.id}.json`),'utf8')).text).toBe('The genuine answer');
   expect(harness.deliver).toHaveBeenCalledTimes(1);
 });

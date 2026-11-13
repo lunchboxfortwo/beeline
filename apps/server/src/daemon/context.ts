@@ -75,8 +75,6 @@ export type CommandArguments<Handler> = Handler extends (ctx: infer _Context, ..
 
 /** Handler capabilities are derived from their owners, never from the service facade. */
 export interface DaemonContext extends DaemonDependencies {
-  /** This command could not verify a missing PR during registration repair. */
-  cornerPrRegistrationUnavailable?: boolean;
   readonly dependencies: DaemonDependencies;
   ownedModel?: OwnedModelConfiguration;
   readonly modelClaims: WeakMap<object, { agentId: string; configuration: OwnedModelConfiguration }>;

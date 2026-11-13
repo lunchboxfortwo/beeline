@@ -296,3 +296,18 @@ it('optional question formatting cannot make PostgreSQL reject the answer',async
   expect(await queue()).toEqual([]);
   expect((await db.query('SELECT card FROM messages WHERE id=$1',[posted.id])).rows[0]).toMatchObject({card:{ask:'Which scope?\uFFFD\uFFFD'}});
 });
+
+it('gives same-source obligations distinct item-owned answer identities by default', async () => {
+  const first=await ask(R1,'one source with two obligations');
+  const second=(await createAgentCommand(db,{roomId:R1,agentId:A,
+    sourceMessageId:first.source_message_id,reason:'subscribed_event'}))!;
+  expect(first.turn_request_id).toBe(first.id);
+  expect(second.turn_request_id).toBe(second.id);
+  expect(second.id).not.toBe(first.id);
+  const posted=await answer(R1,second.id,'Answer to the second item');
+  expect((await queue()).map(item=>item.id)).toEqual([first.id]);
+  expect((await answer(R1,second.id,'Replay')).id).toBe(posted.id);
+  expect((await queue()).map(item=>item.id)).toEqual([first.id]);
+  await answer(R1,first.id,'Answer to the first item');
+  expect(await queue()).toEqual([]);
+});
