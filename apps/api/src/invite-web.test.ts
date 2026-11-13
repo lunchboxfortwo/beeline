@@ -62,12 +62,14 @@ describe('public invite website', () => {
     expect(replace).toHaveBeenCalledWith(`https://backend.composio.dev/api/v1/auth-apps/add${carried}`);
   });
 
-  it('renders one monochrome join action without exposing the invite token', () => {
+  it('renders one Stone join action without exposing the invite token', () => {
     const landing = repoFile('web/join/index.html');
     const colors = [...landing.matchAll(/#[0-9a-f]{6}/gi)].map(([color]) => color);
 
     expect(landing.match(/<(?:a|button)\b/gi)).toHaveLength(1);
     expect(landing).toContain('id="join-workspace"');
+    expect(landing).toContain('background: #171717');
+    expect(landing).toContain('background: #222222');
     expect(landing).toContain('Resolving invite…');
     expect(landing).toContain('If Beeline is not installed');
     expect(landing).not.toContain('Copy invite code');
@@ -76,7 +78,7 @@ describe('public invite website', () => {
     expect(
       colors.every((color) => {
         const [, red, green, blue] = color.match(/^#(..)(..)(..)$/i) ?? [];
-        return red === green && green === blue;
+        return (red === green && green === blue) || color.toLowerCase() === '#fafaf9';
       }),
     ).toBe(true);
   });

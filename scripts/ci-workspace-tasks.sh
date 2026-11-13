@@ -11,6 +11,8 @@ typecheck() {
   node scripts/check-mobile-ui-components.mjs --base "$UI_POLICY_BASE"
   # Hold every Tamagui surface to the one design grammar
   node scripts/check-mobile-grammar.mjs
+  node scripts/check-stone-surfaces.mjs
+  node --test scripts/check-stone-surfaces.test.mjs
   # Allow no phone network channel besides the main live socket
   export CHANNEL_BASE="$CI_BASE_SHA"
   git fetch --no-tags --depth=1 origin "$CHANNEL_BASE"
