@@ -31,6 +31,7 @@
     "tauri:build:dev": "tauri build --config src-tauri/tauri.dev.conf.json",
     "tauri:build:preview": "tauri build --config src-tauri/tauri.preview.conf.json",
     "tauri:build:production": "tauri build",
+    "app:icons": "node scripts/generate-app-icons.mjs",
     "tauri:icons": "node scripts/generate-tauri-icons.mjs",
     "tauri:icons:check": "node scripts/generate-tauri-icons.mjs --check",
     "pdfjs:vendor": "node scripts/vendor-pdfjs.mjs",
