@@ -1,16 +1,17 @@
 import type { AgentInvitationPickerGuide } from '@beeline/api-contract/phone';
-import React, { useEffect, useState } from 'react';
+import { useEffect, useState } from 'react';
 import { Image, Separator, Spinner, XStack, YStack } from 'tamagui';
 import { Globe, Terminal } from 'lucide-react-native';
-import { Btn, Copy, CopyLine, Glyph, SheetFrame, SheetRow } from '@/ui/grammar';
+import { Btn, Copy, CopyLine, Glyph, SheetFrame, SheetRow, T } from '@/ui/grammar';
 import { appErrorCopy } from '@/buzz/app-error-copy';
 import { agentPairingCommand } from '@/buzz/agent-pairing-command';
 import { monolithPhoneOperation } from '@/sync/transport/monolith-operation';
+import { openExternalUrl } from '@/utils/open-external-url';
 import { HARNESSES } from './harnesses';
 import { Face, copyText } from './PeopleParts';
 import { newcomer, type PeopleRow } from './people-rows';
 
-type Step = 'root' | 'external' | 'create' | { harness: string };
+type Step = 'root' | 'external' | 'create';
 
 function Waiting({ joined, where }: { joined: PeopleRow | undefined; where: string }) {
     return joined ? (
@@ -30,8 +31,8 @@ function Waiting({ joined, where }: { joined: PeopleRow | undefined; where: stri
 }
 
 /**
- * People tab Agents +: Invite an external agent (today's harness list, each
- * with its join line) or Create a new agent (`npx usebeeline connect …` from
+ * People tab Agents +: Invite an external agent (the server's one copyable
+ * prompt, four marks and its full-list link) or Create a new agent (`npx usebeeline connect …` from
  * `createAgentPairingCode`). The joined line comes from the live roster.
  */
 export function AddAgentSheet({ open, close, workspaceId, workspaceName, agents }: {
@@ -42,8 +43,7 @@ export function AddAgentSheet({ open, close, workspaceId, workspaceName, agents 
     const [invitationGuide, setInvitationGuide] = useState<AgentInvitationPickerGuide | null>(null);
     const [command, setCommand] = useState<string | null>(null);
     const [error, setError] = useState<string | null>(null);
-    const harness = typeof step === 'object' ? HARNESSES.find((h) => h.id === step.harness) : undefined;
-    const waiting = step === 'create' || Boolean(harness);
+    const waiting = step === 'create';
 
     useEffect(() => {
         if (!waiting) { setKnown(null); return; }
@@ -66,39 +66,34 @@ export function AddAgentSheet({ open, close, workspaceId, workspaceName, agents 
     const joined = newcomer(agents, known);
     const title = step === 'root' ? 'Add an agent'
         : step === 'external' ? 'Invite an external agent'
-            : step === 'create' ? 'Create a new agent'
-                : `Invite ${harness?.name ?? ''}`;
-    const back = step === 'root' ? undefined : harness ? () => setStep('external') : () => setStep('root');
+            : 'Create a new agent';
+    const back = step === 'root' ? undefined : () => setStep('root');
+    const listUrl = invitationGuide?.listUrl;
 
     return (
-        <SheetFrame open={open} close={shut} title={title} back={back} testID={`sheet-add-agent-${harness ? 'harness' : step}`}>
+        <SheetFrame open={open} close={shut} title={title} back={back} testID={`sheet-add-agent-${step}`}>
             {step === 'root' ? (
                 <>
-                    <SheetRow testID="agent-external" icon={<Glyph icon={Globe} />} label="Invite an external agent" detail="Claude, Codex, Gemini and others you already use" onPress={() => setStep('external')} chevron />
+                    <SheetRow testID="agent-external" icon={<Glyph icon={Globe} />} label="Invite an external agent" detail="Claude Code, Codex, Gemini CLI and others you already use" onPress={() => setStep('external')} chevron />
                     <Separator borderColor="stroke" />
                     <SheetRow testID="agent-create" icon={<Glyph icon={Terminal} />} label="Create a new agent" detail="Run one command where the agent will work" onPress={() => setStep('create')} chevron />
                 </>
             ) : step === 'external' ? (
-                <YStack>
-                    {HARNESSES.map((h, index) => (
-                        <React.Fragment key={h.id}>
-                            <SheetRow
-                                testID={`harness-${h.id}`}
-                                icon={<Image source={h.logo} width={24} height={24} borderRadius="sm" aria-label={`${h.name} logo`} />}
-                                label={h.name}
-                                onPress={() => setStep({ harness: h.id })}
-                                chevron
-                            />
-                            {index < HARNESSES.length - 1 ? <Separator borderColor="stroke" /> : null}
-                        </React.Fragment>
-                    ))}
-                </YStack>
-            ) : harness ? (
                 <YStack gap="3">
-                    <Copy>{`Follow these steps for ${harness.name}.`}</Copy>
-                    {invitationGuide?.lines[harness.id] ? <CopyLine line={invitationGuide.lines[harness.id]} label={`Copy ${harness.name} join line`} onCopy={copyText} /> : <Copy>Ask a Beeline agent for current setup steps.</Copy>}
-                    <Waiting joined={joined} where={workspaceName} />
-                    <Btn kind="primary" label="Done" onPress={shut}>Done</Btn>
+                    {invitationGuide?.prompt ? <CopyLine line={invitationGuide.prompt} label="Copy invite prompt" onCopy={copyText} />
+                        : error ? <Copy small quiet role="alert">{error}</Copy> : null}
+                    <XStack alignItems="center" justifyContent="space-between" gap="3">
+                        <XStack gap="2" alignItems="center">
+                            {/* `src`, not the deprecated `source` the web Image drops; it takes a bundled asset though typed as a URL. */}
+                            {HARNESSES.map((h) => <Image key={h.id} src={h.logo as unknown as string} width={24} height={24} borderRadius="sm" aria-label={`${h.name} logo`} />)}
+                        </XStack>
+                        {listUrl ? (
+                            <Btn kind="quiet" label="Full list of agents" accessibilityRole="link" testID="agent-full-list" onPress={() => void openExternalUrl(listUrl).catch(() => undefined)}>
+                                <T v="metaStrong" color="secondary">Full list of agents</T>
+                            </Btn>
+                        ) : null}
+                    </XStack>
+                    <Copy small quiet>Not the regular ChatGPT or Claude chat apps</Copy>
                 </YStack>
             ) : (
                 <YStack gap="3">

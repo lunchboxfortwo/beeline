@@ -27,8 +27,53 @@ ALTER TABLE agent_connections ADD COLUMN IF NOT EXISTS turn_connection_epoch big
 ALTER TABLE agent_connections ADD COLUMN IF NOT EXISTS turn_transport_id text;
 DROP TRIGGER IF EXISTS beeline_replace_turn_transport ON agent_connections;
 DROP FUNCTION IF EXISTS beeline_replace_turn_transport();
+-- The claim records how its generation executes: 'helper' for the helper
+-- turn-ownership protocol, 'mcp' for connected-app calls, 'legacy' for the
+-- installed-helper legacy adapter. NULL is reserved for claims written by
+-- images below this release. Dispatch reads this, never a socket.
+ALTER TABLE agent_commands ADD COLUMN IF NOT EXISTS execution_kind text;
+DO $$ BEGIN
+  -- Replace an earlier check that did not admit 'legacy'.
+  IF EXISTS(SELECT 1 FROM pg_constraint WHERE conname='agent_commands_execution_kind'
+    AND conrelid='agent_commands'::regclass AND pg_get_constraintdef(oid) NOT LIKE '%legacy%') THEN
+    ALTER TABLE agent_commands DROP CONSTRAINT agent_commands_execution_kind;
+  END IF;
+  IF NOT EXISTS(SELECT 1 FROM pg_constraint WHERE conname='agent_commands_execution_kind'
+    AND conrelid='agent_commands'::regclass) THEN
+    ALTER TABLE agent_commands ADD CONSTRAINT agent_commands_execution_kind CHECK
+      (execution_kind IN ('helper','mcp','legacy'));
+  END IF;
+END $$;
+-- Retired transport columns: claims still fill them for rollback overlap
+-- below this release. Only the older-claim-writer classifier below reads them.
 ALTER TABLE agent_commands ADD COLUMN IF NOT EXISTS turn_owner_connection_id text;
 ALTER TABLE agent_commands ADD COLUMN IF NOT EXISTS turn_owner_epoch bigint;
+-- Older-image compatibility writer. Images below this release claim without
+-- execution_kind during serving and rollback overlap, and never clear it on
+-- requeue. When a write sets a generation without declaring a new kind, the
+-- database derives it the way those images named their work: an 'mcp:'
+-- generation is a connected-app call, a recorded connection is a helper turn,
+-- anything else stays NULL (the legacy adapter). Current claims always
+-- declare their kind, so derivation never changes their answer. Retirement condition:
+-- docs/agent-server-surfaces.md, "Older claim writers".
+CREATE OR REPLACE FUNCTION beeline_classify_claim_kind() RETURNS trigger AS $$
+BEGIN
+  IF NEW.generation_id IS NULL THEN NEW.execution_kind:=NULL; RETURN NEW; END IF;
+  IF (TG_OP='INSERT' AND NEW.execution_kind IS NULL) OR (TG_OP='UPDATE'
+      AND NEW.generation_id IS DISTINCT FROM OLD.generation_id
+      AND NEW.execution_kind IS NOT DISTINCT FROM OLD.execution_kind) THEN
+    NEW.execution_kind:=CASE WHEN NEW.generation_id LIKE 'mcp:%' THEN 'mcp'
+      WHEN NEW.turn_owner_connection_id IS NOT NULL THEN 'helper' END;
+  END IF;
+  RETURN NEW;
+END; $$ LANGUAGE plpgsql;
+DROP TRIGGER IF EXISTS beeline_classify_claim_kind ON agent_commands;
+CREATE TRIGGER beeline_classify_claim_kind BEFORE INSERT OR UPDATE OF generation_id ON agent_commands
+  FOR EACH ROW EXECUTE FUNCTION beeline_classify_claim_kind();
+-- One migration cut for claims admitted before their kind was recorded.
+UPDATE agent_commands SET execution_kind=CASE WHEN generation_id LIKE 'mcp:%' THEN 'mcp' ELSE 'helper' END
+  WHERE state='claimed' AND execution_kind IS NULL
+    AND (generation_id LIKE 'mcp:%' OR turn_owner_connection_id IS NOT NULL);
 DO $$ BEGIN
   IF NOT EXISTS(SELECT 1 FROM pg_constraint WHERE conname='agent_commands_turn_owner_pair'
     AND conrelid='agent_commands'::regclass) THEN
@@ -48,9 +93,9 @@ CREATE TABLE IF NOT EXISTS agent_command_generation_owners(
   PRIMARY KEY(command_id,generation_id),
   CHECK((connection_id IS NULL)=(connection_epoch IS NULL))
 );
--- One migration cut preserves known legacy generations as NULL-owner markers.
-INSERT INTO agent_command_generation_owners(command_id,generation_id,connection_id,connection_epoch)
- SELECT id,generation_id,turn_owner_connection_id,turn_owner_epoch FROM agent_commands
+-- One migration cut records known legacy generations.
+INSERT INTO agent_command_generation_owners(command_id,generation_id)
+ SELECT id,generation_id FROM agent_commands
  WHERE generation_id IS NOT NULL ON CONFLICT DO NOTHING;
 CREATE OR REPLACE FUNCTION beeline_preserve_generation_binding() RETURNS trigger AS $$
 BEGIN
@@ -62,13 +107,13 @@ END; $$ LANGUAGE plpgsql;
 DROP TRIGGER IF EXISTS beeline_preserve_generation_binding ON agent_command_generation_owners;
 CREATE TRIGGER beeline_preserve_generation_binding BEFORE UPDATE OR DELETE ON agent_command_generation_owners
   FOR EACH ROW EXECUTE FUNCTION beeline_preserve_generation_binding();
--- Each generation is recorded once. Its claiming socket is history, not an owner.
+-- Each generation is recorded once, as the durable key for owner-end evidence.
+-- No socket is copied into it; its connection columns are retired history.
 CREATE OR REPLACE FUNCTION beeline_bind_command_generation() RETURNS trigger AS $$
 BEGIN
   IF NEW.generation_id IS NULL THEN RETURN NULL; END IF;
-  INSERT INTO agent_command_generation_owners(command_id,generation_id,connection_id,connection_epoch)
-    VALUES(NEW.id,NEW.generation_id,NEW.turn_owner_connection_id,NEW.turn_owner_epoch)
-    ON CONFLICT DO NOTHING;
+  INSERT INTO agent_command_generation_owners(command_id,generation_id)
+    VALUES(NEW.id,NEW.generation_id) ON CONFLICT DO NOTHING;
   RETURN NULL;
 END; $$ LANGUAGE plpgsql;
 DROP TRIGGER IF EXISTS beeline_bind_command_generation ON agent_commands;
@@ -105,6 +150,8 @@ BEGIN
 END; $$ LANGUAGE plpgsql;
 DROP TRIGGER IF EXISTS beeline_commit_owned_effect ON turn_owned_effect_fences;
 DROP FUNCTION IF EXISTS beeline_commit_owned_effect();
+-- The retired lease predicate. Its exact signature is dropped on upgrade.
+DROP FUNCTION IF EXISTS beeline_command_owner_live(text,text,bigint,timestamptz,timestamptz);
 -- Queue writers take membership before command rows, while final effects can
 -- already hold command/source rows. Bound the reverse-order wait below the
 -- deadlock detector instead of NOWAIT, allowing brief queue contention to clear.
@@ -146,11 +193,11 @@ export function commandOwnerLiveSql(alias?: string): string {
   return `(${p}state='claimed' AND beeline_command_generation_open(${p}id,${p}generation_id))`;
 }
 /** A claimed helper turn that its helper resumes in the same generation after
- * a restart or a local interruption. MCP calls run in their own client under
- * 'mcp:' generations. */
+ * a restart or a local interruption. Connected-app calls run in their own
+ * client, recorded by their claim as execution kind 'mcp'. */
 export function helperTurnResumableSql(alias: string): string {
   const p = prefix(alias);
-  return `(${p}action IN ('input','resume') AND ${p}generation_id NOT LIKE 'mcp:%' AND ${commandOwnerLiveSql(alias)})`;
+  return `(${p}action IN ('input','resume') AND ${p}execution_kind IS DISTINCT FROM 'mcp' AND ${commandOwnerLiveSql(alias)})`;
 }
 /** Model work belongs to the invocation, while results remain command-specific. */
 export function invocationCommandSql(anchor: string, member: string): string {

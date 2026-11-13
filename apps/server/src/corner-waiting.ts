@@ -39,8 +39,7 @@ export function cornerWaitingSql(corner: string): string {
       SELECT COALESCE(report.message_id,report.report_id) item_id,report.person_id,report.created_at,
         report.return_room_id,report.asked_at,'question'::text reason,
         CASE WHEN report.return_room_id=${corner}.id AND report.message_id IS NOT NULL THEN 'message' ELSE 'report' END kind,
-        COALESCE(command.private_payload->>'text',message.text) text,false private,
-        ARRAY[report.message_id,report.card_id] asked_items
+        COALESCE(command.private_payload->>'text',message.text) text,false private,report.asked_items
       FROM (${cornerWaitingReportSql(corner)}) report
       LEFT JOIN agent_commands command ON command.id=report.report_id LEFT JOIN messages message ON message.id=report.message_id
       JOIN identities recipient ON recipient.id=report.person_id

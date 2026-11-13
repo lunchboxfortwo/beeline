@@ -52,7 +52,7 @@ describe.skipIf(!url)('running turns survive answered and superseded sources (Po
     const db = fixture.database, { room } = await place(), source = randomUUID();
     await db.query("INSERT INTO messages(id,room_id,author_id,text) VALUES($1,$2,$3,'Handle the blocker')", [source,room,human]);
     const parent = (await createAgentCommand(db,{ roomId:room,agentId:agent,sourceMessageId:source,reason:'human_tag' }))!;
-    await claimAgentCommand(db,room,agent,parent.id,'opening',owner);
+    await claimAgentCommand(db,room,agent,parent.id,'opening',{kind:'helper',owner});
     const opened = await daemon.execute('createCorner',{ roomId:room,requestId:parent.turn_request_id,generationId:'opening',
       targetRoomId:room,name:'Blocker',objective:'Publish the work',implementer:'worker',
       brief:{ spec:'Publish the work',repositoryWork:false,approval:{ sourceMessageId:source } } },agent);
@@ -61,7 +61,7 @@ describe.skipIf(!url)('running turns survive answered and superseded sources (Po
     await daemon.execute('report',{ roomId:opened.cornerId,requestId:assignment.turnRequestId,generationId:'worker',
       status:'blocked',text:'blocked: publish is pending' },worker);
     const report = (await readAgentCommands(db,room,agent)).commands.find(command => command.reason === 'report')!;
-    await claimAgentCommand(db,room,agent,report.id,'running',owner);
+    await claimAgentCommand(db,room,agent,report.id,'running',{kind:'helper',owner});
     await phone.execute('sendRoomMessage', { roomId:opened.cornerId,text:'Publish is unblocked now' },human);
     await phone.execute('sendRoomMessage', { roomId:room,text:'@ruby The blocker is resolved; check the next step' },human);
     expect((await db.query("SELECT private_payload->>'waitingAnswered' answered,state FROM agent_commands WHERE id=$1",
@@ -69,10 +69,10 @@ describe.skipIf(!url)('running turns survive answered and superseded sources (Po
     const queued = (await readAgentCommands(db,room,agent)).commands;
     const next = queued.find(command => command.source.body.includes('The blocker is resolved'))!;
     expect(next).toBeDefined();
-    await claimAgentCommand(db,room,agent,report.id,'running',owner);
+    await claimAgentCommand(db,room,agent,report.id,'running',{kind:'helper',owner});
     await finish(room,report.turnRequestId,'The blocker handling is complete.');
     expect((await db.query('SELECT state FROM agent_commands WHERE id=$1',[next.id])).rows).toEqual([{ state:'pending' }]);
-    await claimAgentCommand(db,room,agent,next.id,'next',owner);
+    await claimAgentCommand(db,room,agent,next.id,'next',{kind:'helper',owner});
     expect((await db.query('SELECT state,generation_id FROM agent_commands WHERE id=$1',[next.id])).rows)
       .toEqual([{ state:'claimed',generation_id:'next' }]);
   });
@@ -83,7 +83,7 @@ describe.skipIf(!url)('running turns survive answered and superseded sources (Po
     await db.query('UPDATE agent_commands SET review_context=$2::jsonb WHERE id=$1',
       [running.id,JSON.stringify({ cornerId:corner,headSha:'old-head',pullRequest:42,briefRevision:0 })]);
     const claimOwner = mode === 'owned' ? owner : undefined;
-    await claimAgentCommand(db,corner,agent,running.id,'running',claimOwner);
+    await claimAgentCommand(db,corner,agent,running.id,'running',{kind:'helper',owner:claimOwner});
     await db.query(`UPDATE corner_github_cache SET lifecycle=jsonb_set(lifecycle,'{pr,headSha}','"new-head"') WHERE corner_id=$1`, [corner]);
     const event = randomUUID();
     await db.query(`INSERT INTO messages(id,room_id,author_id,text,system_event)
@@ -94,10 +94,10 @@ describe.skipIf(!url)('running turns survive answered and superseded sources (Po
     expect(next).toBeDefined();
     expect(next.source.body).toContain('Checks passed on the newer head');
     // Legacy same-generation claim replays also pass through stale-wake admission.
-    await claimAgentCommand(db,corner,agent,running.id,'running',claimOwner);
+    await claimAgentCommand(db,corner,agent,running.id,'running',{kind:'helper',owner:claimOwner});
     await finish(corner,running.turn_request_id,'Review of the previous head is complete.');
     expect((await db.query('SELECT state FROM agent_commands WHERE id=$1',[newer.id])).rows).toEqual([{ state:'pending' }]);
-    await claimAgentCommand(db,corner,agent,next.id,'next',owner);
+    await claimAgentCommand(db,corner,agent,next.id,'next',{kind:'helper',owner});
     expect((await db.query('SELECT state,generation_id FROM agent_commands WHERE id=$1',[newer.id])).rows)
       .toEqual([{ state:'claimed',generation_id:'next' }]);
   });
@@ -106,12 +106,12 @@ describe.skipIf(!url)('running turns survive answered and superseded sources (Po
     const stale = (await createAgentCommand(db,{ roomId:corner,agentId:agent,sourceMessageId:null,reason:'system' }))!;
     await db.query('UPDATE agent_commands SET review_context=$2::jsonb WHERE id=$1',
       [stale.id,JSON.stringify({ cornerId:corner,headSha:'obsolete',pullRequest:42,briefRevision:0 })]);
-    await expect(claimAgentCommand(db,corner,agent,stale.id,'stale',owner)).rejects.toThrow();
+    await expect(claimAgentCommand(db,corner,agent,stale.id,'stale',{kind:'helper',owner})).rejects.toThrow();
     expect((await db.query('SELECT state,cancellation_reason FROM agent_commands WHERE id=$1',[stale.id])).rows)
       .toEqual([{ state:'cancelled',cancellation_reason:'superseded_wake' }]);
     const message = await phone.execute('sendRoomMessage',{ roomId:room,text:'@ruby Do some work' },human);
     const running = (await readAgentCommands(db,room,agent)).commands.find(command => command.sourceMessageId === message.messageId)!;
-    await claimAgentCommand(db,room,agent,running.id,'running',owner);
+    await claimAgentCommand(db,room,agent,running.id,'running',{kind:'helper',owner});
     await phone.execute('cancelAgentTurn',{ roomId:room,agentId:agent,requestId:running.turnRequestId },human);
     expect((await db.query('SELECT status FROM agent_turns WHERE room_id=$1 AND request_id=$2',
       [room,running.turnRequestId])).rows).toEqual([{ status:'cancelled' }]);

@@ -28,16 +28,20 @@ describe('chat rows', () => {
   const now = 1_800_000_000_000;
   const ago = (hours: number) => now / 1000 - hours * 60 * 60;
 
+  const viewer = 'v'.repeat(64);
+  const onViewer = { kind: 'report' as const, personId: viewer, personName: 'Vera' };
+  const onAlan = { kind: 'report' as const, personId: alan.pubkey, personName: 'Alan' };
+
   it('orders threads waiting on the viewer first, then their own, then the rest', () => {
     const corners = [
       { id: '1', name: 'one', state: 'working' as const, lastActivityAt: ago(1) },
-      { id: '2', name: 'two', state: 'waiting' as const, lastActivityAt: ago(1) },
+      { id: '2', name: 'two', state: 'waiting' as const, blocker: onAlan, lastActivityAt: ago(1) },
       { id: '3', name: 'three', state: 'idle' as const, mine: true as const, lastActivityAt: ago(1) },
-      { id: '4', name: 'four', state: 'waiting' as const, mine: true as const, lastActivityAt: ago(1) },
+      { id: '4', name: 'four', state: 'waiting' as const, mine: true as const, blocker: onViewer, lastActivityAt: ago(1) },
     ];
     expect(chatThreads(chat('a'), corners, now).map((corner) => corner.id)).toEqual(['4', '3', '1', '2']);
-    expect(threadWord(corners[3]!)).toBe('waiting on you');
-    expect(threadWord(corners[1]!)).toBe('waiting');
+    expect(threadWord(corners[3]!, viewer)).toBe('waiting on you');
+    expect(threadWord(corners[1]!, viewer)).toBe('waiting on Alan');
     // A direct message has no threads.
     expect(chatThreads(chat('dm', { directMessage: { peer: alan } }), corners, now)).toEqual([]);
   });
@@ -49,9 +53,11 @@ describe('chat rows', () => {
       { id: 'others-wait', name: 'others-wait', state: 'waiting' as const, lastActivityAt: ago(25) },
       { id: 'owed-week', name: 'owed-week', state: 'waiting' as const, mine: true as const, lastActivityAt: ago(6 * 24) },
       { id: 'owed-old', name: 'owed-old', state: 'waiting' as const, mine: true as const, lastActivityAt: ago(8 * 24) },
+      // The viewer's own waiting thread keeps its week however its label reads.
+      { id: 'mine-on-alan', name: 'mine-on-alan', state: 'waiting' as const, mine: true as const, blocker: onAlan, lastActivityAt: ago(25) },
       { id: 'silent', name: 'silent', state: 'working' as const },
     ];
-    expect(chatThreads(chat('a'), corners, now).map((corner) => corner.id)).toEqual(['owed-week', 'fresh']);
+    expect(chatThreads(chat('a'), corners, now).map((corner) => corner.id)).toEqual(['owed-week', 'mine-on-alan', 'fresh']);
     // No thread qualifies: the chat shows no thread lines.
     expect(chatThreads(chat('a'), corners.slice(1, 3), now)).toEqual([]);
   });

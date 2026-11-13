@@ -66,12 +66,13 @@ export default {
         // (apps/mobile/patches) moves the other platform's stamp too; both pins
         // move together. OTA automatically targets each pin plus the two highest
         // shipped runtimes below it, excluding explicit retirements.
+        backgroundColor: "#FAFAF9",
         orientation: "default",
         icon: "./sources/assets/images/icon.png",
         scheme,
         userInterfaceStyle: "automatic",
         ios: {
-            runtimeVersion: runtimeVersionOverride || "39",
+            runtimeVersion: runtimeVersionOverride || "40",
             // Keep the launcher identity stable across system appearance modes.
             // iOS masks this full-size source; only Android adaptive layers need
             // the separately inset safe-zone treatment.
@@ -106,7 +107,7 @@ export default {
             }
         },
         android: {
-            runtimeVersion: runtimeVersionOverride || "50",
+            runtimeVersion: runtimeVersionOverride || "52",
             versionCode: 27,
             adaptiveIcon: {
                 foregroundImage: "./sources/assets/images/icon-adaptive.png",

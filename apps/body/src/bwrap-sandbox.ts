@@ -13,7 +13,7 @@
  * Missing or unusable bubblewrap remains a loudly reported fail-open path.
  */
 import { spawnSync } from 'node:child_process';
-import { lstatSync, readdirSync, realpathSync } from 'node:fs';
+import { lstatSync, mkdirSync, readdirSync, realpathSync } from 'node:fs';
 import { homedir } from 'node:os';
 import { basename, dirname, isAbsolute, relative, resolve, sep } from 'node:path';
 import { executableOnPath } from './agent-command.js';
@@ -256,11 +256,8 @@ export interface SandboxMountPlan {
   readOnly: string[];
   /** Paths bind-mounted read-write, deduplicated and sorted. */
   writable: string[];
-  /**
-   * Hard-limited scratch filesystems whose mount lives only for this physical
-   * sandbox session.
-   */
-  quotaTmpfs: Array<{ target: string; maxBytes: number; maxInodes: number; blockGit?: boolean }>;
+  /** Copy-on-write layers mounted over shared dependency trees; see {@link DependencyLayer}. */
+  overlays?: DependencyLayer[];
   /**
    * Credential stores replaced by emptiness (empty tmpfs for directories,
    * `/dev/null` for files). Emitted AFTER the whole-home ro-bind — which
@@ -273,6 +270,14 @@ export interface SandboxMountPlan {
   /** Approved host device nodes bound into the private `/dev`. */
   devices?: string[];
 }
+
+
+/**
+ * A shared dependency tree seen through an overlay: reads come from `tree`
+ * (hard links into the Workspace store), writes land in `upper`. `upper` and
+ * `work` belong to one checkout, so a write never reaches another corner.
+ */
+export interface DependencyLayer { tree: string; upper: string; work: string }
 
 
 export interface SandboxSessionSpec {
@@ -304,12 +309,10 @@ export interface SandboxSessionSpec {
   roomGitDirectory?: string;
   /** Hygiene denylist overlaid read-only in an edit session. */
   protectedPaths?: string[];
-  /** Dependency trees are sealed after every writable parent mount. */
-  dependencyPaths?: string[];
+  /** Shared dependency trees, each writable through this checkout's own layer. */
+  dependencyLayers?: DependencyLayer[];
   /** Explicit capabilities restored writable after protected parent mounts. */
   additionalWritablePaths?: string[];
-  /** Per-session quota workbench mounted at this stable path. */
-  workbench?: { dir: string; maxBytes: number; maxInodes: number };
   /** Credential stores hidden from this session ({@link credentialMaskPaths}).
    * Both modes get them: a Room reading the operator's gh token is the same
    * out-of-band-push hole a corner would be. */
@@ -380,11 +383,21 @@ function normalize(paths: Array<string | undefined>): string[] {
 
 
 /**
- * The exact mount table for one session. Pure — no filesystem access — so the
- * room-vs-corner difference is a unit-testable value, not spawn-time behaviour.
+ * The exact mount table for one session. Resolve optional capabilities here;
+ * required private boundaries retain their fail-closed validation below.
  */
 export function sandboxMountPlan(spec: SandboxSessionSpec): SandboxMountPlan {
-  const ownerPaths = [...(spec.grantedPaths ?? [])];
+  const ownerPaths: NonNullable<SandboxMountPlan['ownerPaths']> = [];
+  for (const grant of spec.grantedPaths ?? []) {
+    try {
+      // Bind the actual destination, never a symlink mountpoint. A saved grant
+      // may outlive its source, or point through a broken/unreachable link.
+      const path = realpathSync(grant.path);
+      // Read access already comes from the root mount. Only /tmp needs
+      // restoring through its private tmpfs; old grants must not pin artifacts.
+      if (grant.writable || isUnderTmp(path)) ownerPaths.push({ path, writable: grant.writable });
+    } catch { /* An unavailable optional capability mounts nothing. */ }
+  }
   if (spec.operatorHome && agentGrantAutoApproves({ kind: 'path', target: spec.operatorHome }))
     ownerPaths.unshift({ path: resolve(spec.operatorHome), writable: true });
   const userBus = spec.operatorHome && spec.userRuntimeDir &&
@@ -488,15 +501,6 @@ export function sandboxMountPlan(spec: SandboxSessionSpec): SandboxMountPlan {
       target: resolve(spec.roomGitDirectory, 'beeline-seed-objects'), mode: 'ro-bind' });
     requiredMounts.push({ source: resolve(spec.roomGitDirectory), target: resolve(spec.cwd, '.git'), mode: 'bind' });
   }
-  for (const tree of spec.dependencyPaths ?? []) {
-    // npm --package-lock-only unlinks its private hidden lockfile. Keep that
-    // metadata and tool caches writable, sealing the shared package bytes.
-    for (const entry of readdirSync(tree, { withFileTypes: true })) {
-      if (!entry.isDirectory() || entry.name === '.cache') continue;
-      const path = resolve(tree, entry.name);
-      requiredMounts.push({ source: path, target: path, mode: 'ro-bind' });
-    }
-  }
   return {
     ownerPaths,
     protectedReadOnly: normalize(spec.protectedPaths ?? []),
@@ -504,16 +508,7 @@ export function sandboxMountPlan(spec: SandboxSessionSpec): SandboxMountPlan {
     ...(spec.mode === 'edit' ? { rootWritable: true } : {}),
     readOnly,
     writable,
-    quotaTmpfs: spec.workbench
-      ? [
-          {
-            target: resolve(spec.workbench.dir),
-            maxBytes: spec.workbench.maxBytes,
-            maxInodes: spec.workbench.maxInodes,
-            blockGit: true,
-          },
-        ]
-      : [],
+    ...(spec.dependencyLayers?.length ? { overlays: spec.dependencyLayers } : {}),
     masks: [...(spec.maskPaths ?? []), ...boundaryMasks,
       ...[...new Set(['/run/docker.sock', '/var/run/docker.sock', ...(spec.userRuntimeDir ? [resolve(spec.userRuntimeDir, 'docker.sock')] : [])]
         .filter(path => lstatSync(path, { throwIfNoEntry: false }) &&
@@ -531,10 +526,14 @@ export interface WrappedCommand {
 }
 
 
-const QUOTA_TMPFS_BOOTSTRAP = [
+/** Mounts each `tree upper work` triple, then drops every capability before the command. */
+const OVERLAY_BOOTSTRAP = [
   'set -eu',
-  'mount -t tmpfs -o "remount,size=$2,nr_inodes=$3" tmpfs "$1"',
-  'shift 3',
+  'while [ "$1" != -- ]; do',
+  '  mount -t overlay overlay -o "lowerdir=$1,upperdir=$2,workdir=$3,userxattr" "$1"',
+  '  shift 3',
+  'done',
+  'shift',
   'exec setpriv --bounding-set=-all --inh-caps=-all --ambient-caps=-all --no-new-privs "$@"',
 ].join('\n');
 
@@ -550,7 +549,7 @@ export function sandboxAllowsWrite(plan: SandboxMountPlan, path: string): boolea
   for (const mask of plan.masks) if (covers(mask.path)) allowed = false;
   for (const root of plan.writable) if (covers(root)) allowed = true;
   for (const mount of plan.requiredMounts ?? []) if (covers(mount.target)) allowed = mount.mode === 'bind';
-  for (const mount of plan.quotaTmpfs) if (covers(mount.target)) allowed = true;
+  for (const layer of plan.overlays ?? []) if (covers(layer.tree)) allowed = true;
   return allowed;
 }
 
@@ -569,22 +568,16 @@ export function buildBwrapArgv(input: {
   command: string;
   args?: string[];
 }): WrappedCommand {
-  const quotaTmpfs = input.plan.quotaTmpfs ?? [];
+  const overlays = input.plan.overlays ?? [];
   const args = [
     // sd_bus rejects peers whose PID cannot be resolved in its namespace.
     ...(input.plan.userBus ? [] : ['--unshare-pid']),
-    ...(quotaTmpfs.length
-      ? [
-          '--unshare-user',
-          '--uid',
-          '0',
-          '--gid',
-          '0',
-          '--cap-add',
-          'CAP_SYS_ADMIN',
-          '--cap-add',
-          'CAP_SETPCAP',
-        ]
+    // An unprivileged overlay mount needs namespace root; the bootstrap drops
+    // every capability before the command. IS_SANDBOX tells harnesses that
+    // refuse to run as root that this root is a namespace one.
+    ...(overlays.length
+      ? ['--unshare-user', '--uid', '0', '--gid', '0', '--setenv', 'IS_SANDBOX', '1',
+          ...['CAP_SYS_ADMIN', 'CAP_DAC_OVERRIDE', 'CAP_SETPCAP'].flatMap(cap => ['--cap-add', cap])]
       : []),
     input.plan.rootWritable ? '--bind' : '--ro-bind',
     '/',
@@ -599,7 +592,7 @@ export function buildBwrapArgv(input: {
   args.push('--proc', '/proc', '--tmpfs', '/tmp');
   for (const path of input.plan.readOnly) args.push('--ro-bind', path, path);
   for (const binding of input.plan.ownerPaths ?? [])
-    args.push(binding.writable ? '--bind' : '--ro-bind', binding.path, binding.path);
+    args.push(binding.writable ? '--bind-try' : '--ro-bind-try', binding.path, binding.path);
   if (input.plan.userBus) {
     args.push('--bind', input.plan.userBus, input.plan.userBus,
       '--setenv', 'XDG_RUNTIME_DIR', input.plan.userBus,
@@ -626,38 +619,13 @@ export function buildBwrapArgv(input: {
       throw new Error(`required sandbox mount is missing or a symlink: ${mount.source} -> ${mount.target}`);
     args.push(`--${mount.mode}`, mount.source, mount.target);
   }
-  for (const binding of quotaTmpfs) {
-    args.push(
-      '--dir',
-      binding.target,
-      '--size',
-      String(binding.maxBytes),
-      '--tmpfs',
-      binding.target,
-    );
-    // The sandbox reserves this leaf. Mounting /dev/null over it makes `.git`
-    // neither a directory nor removable, so `git init`, worktree `.git` files,
-    // and `cp -r repo/. …` all fail inside the kernel mount table.
-    if (binding.blockGit) args.push('--ro-bind', '/dev/null', resolve(binding.target, '.git'));
-  }
   args.push('--chdir', input.cwd);
   // The sandbox must not outlive the daemon that owns the session.
   args.push('--die-with-parent');
-  if (quotaTmpfs.length) {
-    if (quotaTmpfs.length !== 1) throw new Error('only one quota tmpfs is supported per session');
-    const quota = quotaTmpfs[0]!;
-    args.push(
-      '--',
-      'sh',
-      '-c',
-      QUOTA_TMPFS_BOOTSTRAP,
-      'beeline-quota-tmpfs',
-      quota.target,
-      String(quota.maxBytes),
-      String(quota.maxInodes),
-      input.command,
-      ...(input.args ?? []),
-    );
+  if (overlays.length) {
+    for (const layer of overlays) for (const dir of [layer.upper, layer.work]) mkdirSync(dir, { recursive: true, mode: 0o700 });
+    args.push('--', 'sh', '-c', OVERLAY_BOOTSTRAP, 'beeline-dependency-layers',
+      ...overlays.flatMap(layer => [layer.tree, layer.upper, layer.work]), '--', input.command, ...(input.args ?? []));
   } else {
     args.push('--', input.command, ...(input.args ?? []));
   }
@@ -728,7 +696,7 @@ export function detectBwrapSandbox(
     });
   const probe = buildBwrapArgv({
     bwrapPath,
-    plan: { readOnly: [], writable: [], quotaTmpfs: [], masks: [] },
+    plan: { readOnly: [], writable: [], masks: [] },
     cwd: '/',
     command: '/bin/true',
   });

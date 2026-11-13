@@ -1,20 +1,17 @@
+import { RoutineBody } from '@/ui/screens/profiles/RoutineBody';
 import { SettingsRow } from '@/components/buzz/SettingsRow';
 import { desktopColumnWidths } from '@/buzz/desktop-layout-tokens';
 import { useIsDesktop as useDesktopPageLayout } from '@/utils/responsive';
-import { Button } from '@/components/buzz/Button';
 import { useLatencyRouteFrame } from '@/buzz/latency-route-hook';
 import React, { useState } from 'react';
 import { ScrollView, YStack } from 'tamagui';
 import { router, useLocalSearchParams } from 'expo-router';
-import { scheduleTitle, scheduleRuns, scheduleWhere, stopSchedule, useScheduledWork } from '@/buzz/scheduled-work';
-import { PageHeader } from '@/components/buzz/PageHeader';
+import { stopSchedule, useScheduledWork } from '@/buzz/scheduled-work';
 import {
-  ScheduledWorkDoes,
-  ScheduledWorkFacts,
   StopScheduledWork,
 } from '@/components/buzz/ScheduledWorkDetail';
 import { SurfaceGlyphLoader } from '@/components/buzz/SurfaceGlyphLoader';
-import { Copy, SafeBottom, SafeTop } from '@/ui/grammar';
+import { Copy, SafeBottom, SafeTop, ScreenHeader } from '@/ui/grammar';
 
 function first(value: string | string[] | undefined): string | undefined {
   return Array.isArray(value) ? value[0] : value;
@@ -58,13 +55,7 @@ export default function PromptSchedule() {
       width={desktopPageLayout ? '100%' : undefined} maxWidth={desktopPageLayout ? desktopColumnWidths.detail : undefined}
       alignSelf={desktopPageLayout ? 'center' : undefined}>
       <SafeTop />
-      <PageHeader
-        backAccessibilityLabel="Back to Schedules and subscriptions"
-        eyebrow="Schedules and subscriptions"
-        onBack={() => router.back()}
-        testID="schedule-header"
-        title={schedule ? scheduleTitle(schedule) : 'Schedule'}
-      />
+      <ScreenHeader title="Routine" back={() => router.back()} backLabel="Back to Routines" />
       {stopFailed ? (
         <SettingsRow
           title="Could not stop this schedule."
@@ -82,20 +73,8 @@ export default function PromptSchedule() {
         </YStack>
       ) : schedule ? (
         <ScrollView testID="schedule-page">
-          <ScheduledWorkFacts
-            agents={[work?.agentNames.get(schedule.agentId) ?? 'Agent']}
-            runs={scheduleRuns(schedule)}
-            where={scheduleWhere(schedule, work?.roomName, work?.isDirectMessage)}
-            whereCorner={schedule.corner}
-          />
-          <ScheduledWorkDoes roomId={schedule.roomId}
-            prompt={schedule.message} workflowSlug={schedule.workflowSlug} />
-          <StopScheduledWork
-            label="Stop schedule"
-            onStop={() => void stop()}
-            testID="stop-schedule"
-            working={working}
-          />
+          <RoutineBody kind="schedule" routine={schedule} work={work!} stop={<StopScheduledWork
+            label="Stop schedule" onStop={() => void stop()} testID="stop-schedule" working={working} />} />
           <YStack paddingBottom="6" />
           <SafeBottom />
         </ScrollView>

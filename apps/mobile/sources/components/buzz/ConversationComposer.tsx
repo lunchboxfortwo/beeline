@@ -13,7 +13,7 @@ import {
   type TextLayoutEvent,
 } from 'react-native';
 import { YStack, useTheme } from 'tamagui';
-import { useTextScale } from '@/ui/grammar';
+import { useTextSize } from '@/ui/grammar';
 import { NativeTypeInput, NativeTypeMeasure } from '@/ui/grammar-root';
 import { groknight } from '@/buzz/groknight';
 import { HullDialog } from './HullDialog';
@@ -176,7 +176,7 @@ function ConversationComposerContent({
   placeholder,
 }: Props) {
   const brass = useTheme().needsYou?.val as string;
-  const textScale = useTextScale();
+  const textSize = useTextSize();
   const containerRef = React.useRef<HTMLElement | null>(null);
   const ownInputRef = React.useRef<TextInput | null>(null);
   const [textOffset, setTextOffset] = React.useState(0);
@@ -334,7 +334,7 @@ function ConversationComposerContent({
       window.removeEventListener('resize', measure);
       observer?.disconnect();
     };
-  }, [height, inputRevision, textScale]);
+  }, [height, inputRevision, textSize]);
 
   // Speech recognition — internal hook, scoped to the composer.
   // What the current take added to the text, so Stop can take exactly that out.

@@ -1,14 +1,23 @@
 import React, { useEffect, useState } from 'react';
 import { XStack } from 'tamagui';
-import { Check } from 'lucide-react-native';
-import { Btn, Copy, Glyph, Row, SheetFrame, SheetRow } from '@/ui/grammar';
+import { Btn, Copy, Row, SheetFrame } from '@/ui/grammar';
 import { RepoList } from '@/components/buzz/RepoList';
+import { SelectedRepositoryPill } from '@/components/buzz/SelectedRepositoryPill';
+import type { GitHubRepositoryListResult } from '@beeline/api-contract/phone';
 import type { RepoCandidate } from '@/buzz/room-repo-picker';
 import { appErrorCopy } from '@/buzz/app-error-copy';
 import { confirmRoomRepoReplacement } from '@/buzz/room-repo-replacement';
 import { CORNER_LABEL, ROOM_LABEL } from '@/buzz/vocabulary';
 import { Modal } from '@/modal';
 import { monolithPhoneOperation } from '@/sync/transport/monolith-operation';
+
+type ListedRepository = GitHubRepositoryListResult['repositories'][number];
+const repositoryCandidate = (repository: ListedRepository): RepoCandidate => ({
+    key: `github:${repository.id}`, name: repository.fullName,
+    remote: `git://github.com/${repository.fullName}`,
+    githubInstallationId: repository.installationId, defaultBranch: repository.defaultBranch,
+    private: repository.private,
+});
 
 type Props = {
     roomId: string;
@@ -27,7 +36,7 @@ export function ChatRepositoryEditor({ roomId, current, canEditRepository, disab
     const [saving, setSaving] = useState(false);
     const busy = disabled || saving;
     const [repositoryDraft, setRepositoryDraft] = useState<RepoCandidate | null>(null);
-    const [repositories, setRepositories] = useState<RepoCandidate[]>([]);
+    const [repositories, setRepositories] = useState<readonly ListedRepository[]>([]);
     const [repositoriesLoading, setRepositoriesLoading] = useState(false);
     const [editError, setEditError] = useState<string | null>(null);
     useEffect(() => { setOpen(false); }, [roomId]);
@@ -35,12 +44,7 @@ export function ChatRepositoryEditor({ roomId, current, canEditRepository, disab
         if (!open) return;
         let cancelled = false;
         void monolithPhoneOperation('listGitHubRepositories', {}).then(result => {
-            if (!cancelled) setRepositories(result.repositories.map(repository => ({
-                key: `github:${repository.id}`, name: repository.fullName,
-                remote: `git://github.com/${repository.fullName}`,
-                githubInstallationId: repository.installationId, defaultBranch: repository.defaultBranch,
-                private: repository.private,
-            })));
+            if (!cancelled) setRepositories(result.repositories);
         }).catch(reason => {
             if (!cancelled) setEditError(appErrorCopy(reason, 'Could not load repos.'));
         }).finally(() => { if (!cancelled) setRepositoriesLoading(false); });
@@ -84,9 +88,8 @@ export function ChatRepositoryEditor({ roomId, current, canEditRepository, disab
     return <>
         <Row label="Repository" value={current?.name ?? 'None'} onPress={canEditRepository ? openRepository : undefined} testID="chat-repository" />
         <SheetFrame open={open && canEditRepository} close={() => { if (!busy) setOpen(false); }} title="Repository" testID="chat-repository-sheet">
-            <SheetRow label="None" icon={!repositoryDraft ? <Glyph icon={Check} accent /> : null}
-                onPress={() => { if (!busy) setRepositoryDraft(null); }} testID="chat-repository-none" />
-            <RepoList candidates={repositories} currentKey={repositoryDraft?.key ?? null} loading={repositoriesLoading}
+            <SelectedRepositoryPill repository={repositoryDraft} disabled={busy} onClear={() => setRepositoryDraft(null)} testIDPrefix="chat-repository" />
+            <RepoList candidates={repositories} getCandidate={repositoryCandidate} currentKey={repositoryDraft?.key ?? null} loading={repositoriesLoading}
                 onSelect={candidate => { if (!busy) setRepositoryDraft(candidate); }} draftContext={roomId} testIDPrefix="chat-repository-list" />
             {editError ? <Copy small quiet role="alert">{editError}</Copy> : null}
             <XStack gap="2" justifyContent="flex-end">

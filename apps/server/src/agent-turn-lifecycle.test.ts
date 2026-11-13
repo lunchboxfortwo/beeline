@@ -26,7 +26,7 @@ afterEach(()=>db.close());
 async function ask(){
   const sent=await phone.execute('sendRoomMessage',{roomId:R,text:'@candy Please answer'},H);
   const command=(await readAgentCommands(db,R,A)).commands.find(c=>c.sourceMessageId===sent.messageId)!;
-  await claimAgentCommand(db,R,A,command.id,'generation',owner);return command;
+  await claimAgentCommand(db,R,A,command.id,'generation',{kind:'helper',owner});return command;
 }
 const receipt=(requestId:string,status:'complete'|'failed')=>daemon.execute('postAgentTurnReceipt',
   {roomId:R,requestId,generationId:'generation',status,...(status==='failed'?{reason:'provider unavailable',reasonKind:'hiccup'}:{})},A,owner);
@@ -64,7 +64,7 @@ it('one failed result ends the turn silently and creates no retry',async()=>{
   expect((await readAgentCommands(db,R,A)).commands).toEqual([]);
   expect((await db.query('SELECT status FROM agent_turns WHERE request_id=$1',[c.turnRequestId])).rows).toEqual([{status:'failed'}]);
 });
-it('a failed result ends even when its commander has left the return Room',async()=>{
+it('stores and delivers a complete child-process failure beyond the manual report limit, including stderr',async()=>{
   const commander='c'.repeat(64);
   await db.query("INSERT INTO identities(id,kind,name) VALUES($1,'agent','Commander')",[commander]);
   await db.query('INSERT INTO agents(agent_id,owner_id) VALUES($1,$2)',[commander,H]);
@@ -73,6 +73,27 @@ it('a failed result ends even when its commander has left the return Room',async
   const c=(await createAgentCommand(db,{roomId:R,agentId:A,sourceMessageId:null,reason:'order',
     privatePayload:{kind:'order',text:'Do this task',authorId:commander,fromRoomId:R}}))!;
   await claimAgentCommand(db,R,A,c.id,'generation',owner);
+  const reason='Command failed: /usr/bin/bwrap '+ '--bind /long/corner/path /long/corner/path '.repeat(500)+
+    "\nbwrap: Can't find source path /deleted/.corner-artifacts/threads-refresh: No such file or directory";
+  await daemon.execute('postAgentTurnReceipt',{
+    roomId:R,requestId:c.turn_request_id,generationId:'generation',status:'failed',reason,
+  },A,owner);
+  expect((await db.query('SELECT failure_reason FROM agent_turns WHERE request_id=$1',[c.turn_request_id])).rows)
+    .toEqual([{failure_reason:reason}]);
+  const reports=(await db.query<{text:string}>(`SELECT private_payload->>'text' text FROM agent_commands
+    WHERE agent_id=$1 AND reason='report'`,[commander])).rows;
+  expect(reports).toHaveLength(1);
+  expect(reports[0]!.text).toContain(reason);
+});
+it('a failed result ends even when its commander has left the return Room',async()=>{
+  const commander='c'.repeat(64);
+  await db.query("INSERT INTO identities(id,kind,name) VALUES($1,'agent','Commander')",[commander]);
+  await db.query('INSERT INTO agents(agent_id,owner_id) VALUES($1,$2)',[commander,H]);
+  await db.query(`INSERT INTO memberships(workspace_id,room_id,identity_id,role)
+    VALUES($1,NULL,$3,'member'),($1,$2,$3,'member')`,[W,R,commander]);
+  const c=(await createAgentCommand(db,{roomId:R,agentId:A,sourceMessageId:null,reason:'order',
+    privatePayload:{kind:'order',text:'Do this task',authorId:commander,fromRoomId:R}}))!;
+  await claimAgentCommand(db,R,A,c.id,'generation',{kind:'helper',owner});
   await db.query('UPDATE memberships SET removed_at=now() WHERE room_id=$1 AND identity_id=$2',[R,commander]);
   await receipt(c.turn_request_id,'failed');
   expect((await db.query('SELECT state FROM agent_commands WHERE id=$1',[c.id])).rows).toEqual([{state:'complete'}]);
@@ -114,7 +135,7 @@ it('disconnect keeps the running turn; the same helper continues it, and a new h
   expect((await db.query('SELECT state,generation_id FROM agent_commands WHERE id=$1',[c.id])).rows)
     .toEqual([{state:'claimed',generation_id:'generation'}]);
   expect((await readAgentCommands(db,R,A)).commands.map(item=>[item.id,item.generationId])).toEqual([[c.id,'generation']]);
-  await claimAgentCommand(db,R,A,c.id,'generation',next);
+  await claimAgentCommand(db,R,A,c.id,'generation',{kind:'helper',owner:next});
   await daemon.execute('postRoomMessage',{roomId:R,requestId:c.turnRequestId,generationId:'generation',text:'Recovered answer.'},A);
   expect((await readAgentCommands(db,R,A)).commands).toEqual([]);
   expect((await notices()).rowCount).toBe(0);
@@ -128,7 +149,7 @@ it('an initially offline mention waits for connection and never posts an offline
   expect((await db.query("SELECT id FROM messages WHERE room_id=$1 AND presentation='system'",[R])).rows).toEqual([]);
   const next={connectionId:'returning',epoch:await claimAgentConnection(db,live,A,{},
     {connectionId:'returning',instanceId:'test-server'})};
-  await claimAgentCommand(db,R,A,queued.id,'returned',next);
+  await claimAgentCommand(db,R,A,queued.id,'returned',{kind:'helper',owner:next});
   await daemon.execute('postRoomMessage',{roomId:R,requestId:queued.turnRequestId,generationId:'returned',text:'I can answer now.'},A);
   expect((await notices()).rowCount).toBe(0);
 });
@@ -136,7 +157,7 @@ it('an initially offline mention waits for connection and never posts an offline
 it('a claimed restart kept across close completes on its new lifecycle instead of restarting again',async()=>{
   await phone.execute('sendRoomMessage',{roomId:R,text:'@candy restart'},H);
   const restart=(await readAgentCommands(db,R,A)).commands.find(c=>c.action==='restart')!;
-  await claimAgentCommand(db,R,A,restart.id,'restart-generation',owner);
+  await claimAgentCommand(db,R,A,restart.id,'restart-generation',{kind:'helper',owner});
   await releaseAgentConnection(db,live,A,owner.connectionId);
   expect((await db.query('SELECT state FROM agent_commands WHERE id=$1',[restart.id])).rows).toEqual([{state:'claimed'}]);
   await claimAgentConnection(db,live,A,{lifecycleId:'second-boot'},
@@ -149,7 +170,7 @@ it('a claimed restart kept across close completes on its new lifecycle instead o
 it('a delivered terminal report ends its order before connection loss can hand it back',async()=>{
   const command=(await createAgentCommand(db,{roomId:R,agentId:A,sourceMessageId:null,reason:'order',
     privatePayload:{kind:'order',authorId:H,fromRoomId:R,text:'Finish this assignment'}}))!;
-  await claimAgentCommand(db,R,A,command.id,'report-generation',owner);
+  await claimAgentCommand(db,R,A,command.id,'report-generation',{kind:'helper',owner});
   await daemon.execute('report',{roomId:R,requestId:command.turn_request_id,generationId:'report-generation',
     status:'done',text:'The assignment is finished.'},A);
   expect((await db.query('SELECT state FROM agent_commands WHERE id=$1',[command.id])).rows).toEqual([{state:'complete'}]);

@@ -8,10 +8,12 @@ vi.mock('react-native', () => ({
   Text: 'Text',
   TouchableOpacity: 'TouchableOpacity',
   View: 'View',
-  SectionList: ({ sections, renderItem, initialNumToRender = 10, ...props }: any) =>
-    React.createElement('SectionList', props, sections.flatMap((section: any) =>
-      section.data.map((item: any) => ({ item, section }))).slice(0, initialNumToRender)
-      .map(({ item, section }: any) => React.createElement(React.Fragment, { key: item.key }, renderItem({ item, section })))),
+  VirtualizedList: ({ data, getItem, getItemCount, renderItem, initialNumToRender = 10, ...props }: any) =>
+    React.createElement('VirtualizedList', props,
+      Array.from({ length: Math.min(getItemCount(data), initialNumToRender) }, (_, index) => {
+        const item = getItem(data, index);
+        return React.createElement(React.Fragment, { key: item.key }, renderItem({ item, index }));
+      })),
 }));
 vi.mock('@/buzz/use-text-draft', () => ({ useTextDraft: (_: string, initial: string) => React.useState(initial) }));
 vi.mock('tamagui', async () => (await import('@/ui/screens/transcript/grammar-hosts.test-support')).tamaguiHosts());
@@ -114,14 +116,14 @@ it('owns open/close renders and resets the repository draft on reopening', () =>
   expect(repository.setListOpen).not.toHaveBeenCalled();
   expect(renderer.root.findByType('Sheet').props.title).toBe('Choose a repo');
   expect(renderer.root.findByType('Sheet').props.scrollBody).toBe(false);
-  expect(renderer.root.findAllByType('SectionList')).toHaveLength(1);
+  expect(renderer.root.findAllByType('VirtualizedList')).toHaveLength(1);
   const rows = () => renderer.root.findAll((node: any) => node.type === 'Row' && node.props.testID?.startsWith('room-repo-list-candidate-'));
   expect(rows()).toHaveLength(6);
   act(() => renderer.root.findByType('Input').props.onChangeText('repository-999'));
   expect(rows()).toHaveLength(1);
   expect(rows()[0].props.accessibilityLabel).toBe('owner/repository-999');
   act(() => rows()[0].props.onPress());
-  expect(renderer.root.findAllByType('SectionList')).toHaveLength(0);
+  expect(renderer.root.findAllByType('VirtualizedList')).toHaveLength(0);
   act(() => renderer.root.findByType('RepositoryChoice').props.onOpenList());
   expect(renders).toHaveBeenCalledOnce();
   act(() => renderer.root.findByType('Sheet').props.onClose());

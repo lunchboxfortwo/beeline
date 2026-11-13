@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import type { CornerLifecycleView } from '@beeline/api-contract/phone';
-import { threadDotTone, threadListWord, threadPrLine, threadStatusText } from './thread-status';
+import { threadDotTone, threadListLabel, threadPrLine, threadStatusText } from './thread-status';
 
 const pr = { number: 4181, url: 'https://github.com/o/r/pull/4181', title: 'Keep place', targetBranch: 'main', headSha: 'abc' };
 const lifecycle = (extra: Partial<CornerLifecycleView>): CornerLifecycleView => ({ lifecycle: 'in-review', checks: 'unknown', pr, ...extra });
@@ -21,9 +21,16 @@ describe('thread status (header B)', () => {
   });
 
   it('reads list words as the Chats list does', () => {
-    expect(threadListWord('waiting')).toBe('waiting on you');
-    expect(threadListWord('review')).toBe('review');
-    expect(threadListWord('archived')).toBe('done');
+    const viewer = 'v'.repeat(64);
+    const blocker = { kind: 'report' as const, personId: viewer, personName: 'Vera' };
+    expect(threadListLabel({ state: 'waiting', blocker }, viewer)).toEqual({ word: 'waiting on you', you: true });
+    expect(threadListLabel({ state: 'waiting', blocker }, 'o'.repeat(64))).toEqual({ word: 'waiting on Vera', you: false });
+    // Never a bare "waiting", even before the server names the person.
+    expect(threadListLabel({ state: 'waiting', reason: 'approve' }, viewer).word).toBe('waiting on approval');
+    expect(threadListLabel({ state: 'waiting', blocker: { kind: 'ci' } }, viewer).word).toBe('waiting on checks');
+    expect(threadListLabel({ state: 'waiting' }, viewer).word).toBe('waiting on a reply');
+    expect(threadListLabel({ state: 'review' }, viewer).word).toBe('review');
+    expect(threadListLabel({ state: 'archived' }, viewer).word).toBe('done');
   });
 
   it('writes the PR row from the lifecycle', () => {

@@ -4,6 +4,7 @@ import { FlatList } from 'react-native';
 import { Lock, Pencil, Search } from 'lucide-react-native';
 import Svg, { Path } from 'react-native-svg';
 import type { GitHubInstallationAccess } from '@beeline/buzz-client';
+import { SelectedRepositoryPill } from '@/components/buzz/SelectedRepositoryPill';
 import { RepositoryMark } from '@/components/buzz/RepositoryMark';
 import { ROOM_SLUG_HINT, roomNameEntry, validRoomSlug } from '@/buzz/room-name';
 import { filterRepoCandidates, type RepoCandidate } from '@/buzz/room-repo-picker';
@@ -100,10 +101,12 @@ function StartEmpty({ name, onName, busy, onCreateEmpty }: NewChatSheetProps) {
 
 function RepositoryStep({ candidates, installations, loading, error, notice, busy, onConnectGitHub, onPickRepository }: NewChatSheetProps) {
   const [query, setQuery] = useState('');
+  const [selected, setSelected] = useState<RepoCandidate | null>(null);
   const found = filterRepoCandidates(candidates, query, installations);
   const connected = installations.length > 0 || candidates.length > 0;
   return (
     <YStack gap="3">
+      <SelectedRepositoryPill repository={selected} onClear={() => setSelected(null)} testIDPrefix="new-chat-repository" />
       <XStack alignItems="center" gap="2">
         <Glyph icon={Search} />
         <Input flex={1} minWidth={0} size="md" placeholder="Find a repository" aria-label="Find a repository" value={query} onChangeText={setQuery} testID="repo-search" />
@@ -127,7 +130,7 @@ function RepositoryStep({ candidates, installations, loading, error, notice, bus
               justifyContent="flex-start"
               backgroundColor="raised"
               disabled={busy}
-              onPress={() => onPickRepository(candidate)}
+              onPress={() => { setSelected(candidate); onPickRepository(candidate); }}
               aria-label={`${candidate.name}${candidate.private ? ', private' : ''}`}
               accessibilityRole="button"
               testID={`repo-row-${candidate.key}`}

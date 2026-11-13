@@ -54,7 +54,7 @@ The revised matrix accompanies this artifact. It deliberately distinguishes docu
 
 Reproduction `onboarding-picker-1`: in Beeline Review on Android app (0.2.24), Members → Add agents → choose any existing-agent tile → Copy returned the same bare-host sentence for different paths; the guide omitted OpenCode, Pi, Hermes and ZCode starts. Ruby recorded the live observation in message efc611227242b66269ee2df25e43c975fd3762c38cae10cc5b50a0d527d7b6c7.
 
-The built production AddAgentSheet browser stand-in follows People → Agents + → Invite an external agent, selects every harness and exercises Copy, checking canonical text and other-agent starts at phone/desktop widths. It replaces native primitives and shared controls with DOM adapters; it does not claim native sheet geometry or native Clipboard access. Ruby retains native validation; iPhone stays docs-only. Run `npm run prove:agent-invitation-picker`. The earlier baseline failure remains recorded at the pre-integration head; main has since replaced the old component.
+The built production AddAgentSheet browser stand-in follows People → Agents + → Invite an external agent, copies the one join prompt and opens the full list of agents, then copies the Create a new agent command, at phone/desktop widths. It replaces native primitives and shared controls with DOM adapters; it does not claim native sheet geometry or native Clipboard access. Ruby retains native validation; iPhone stays docs-only. Run `npm run prove:agent-invitation-picker`. The earlier baseline failure remains recorded at the pre-integration head; main has since replaced the old component.
 
 ## Harness review corrections
 

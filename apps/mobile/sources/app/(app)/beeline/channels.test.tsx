@@ -727,7 +727,8 @@ describe('Room deck live path', () => {
           { id: 'corner-1', name: 'one', state: 'working', lastActivityAt: Math.floor(Date.now() / 1000) },
           { id: 'corner-2', name: 'two', state: 'idle', lastActivityAt: Math.floor(Date.now() / 1000) },
           { id: 'corner-3', name: 'three', state: 'review', mine: true, lastActivityAt: Math.floor(Date.now() / 1000) },
-          { id: 'corner-4', name: 'four', state: 'waiting', mine: true, lastActivityAt: Math.floor(Date.now() / 1000) },
+          { id: 'corner-4', name: 'four', state: 'waiting', mine: true, lastActivityAt: Math.floor(Date.now() / 1000),
+            blocker: { kind: 'report', personId: 'viewer', personName: 'Captain' } },
         ],
       }),
     ]);

@@ -13,7 +13,7 @@ import { TurnStoppedError } from './turn-stop.js';
 import { AgentTurnStream, durableReplyText } from './turn-stream.js';
 import { roomReplySteps } from './room-turn-steps.js';
 import { toolCallFailureLine } from './tool-call-failure.js';
-import { distillTurnFailureReason } from './turn-failure-reason.js';
+import { distillTurnFailureReason, redactToolDetail } from './turn-failure-reason.js';
 import { isAgentProcessExit } from './agent-process.js';
 import { MonolithRoomTurnLoop, ActiveTurn, inboxItemPromptBody, transcriptMessagePrompt, resumePrompt, inboxItemAuthorName, roomMessagePrompt, approvedDeviceGrant, deviceGrantResumePrompt, openCornerToolCall, openedACorner, pendingCardKind } from './monolith-room-turn.js';
 
@@ -575,7 +575,7 @@ import { MonolithRoomTurnLoop, ActiveTurn, inboxItemPromptBody, transcriptMessag
         requestId: item.id,
         status: 'failed',
         generationId: ctx.commandContext.generationId,
-        reason: reason.text,
+        reason: redactToolDetail(reason.text),
         ...(reason.kind ? { reasonKind: reason.kind } : {}),
         toolCalls: trace.toolCallsTotal,
         trace: trace.replay(),

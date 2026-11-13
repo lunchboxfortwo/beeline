@@ -4,6 +4,8 @@ import { ScrollView, TamaguiProvider, YStack } from 'tamagui';
 import { Btn, T } from '@/ui/grammar';
 import { tamaguiConfig, themeName } from '@/ui/tamagui.config';
 import { reportClientError, type ClientErrorScope } from '@/buzz/client-error-report';
+import { storage } from '@/sync/storage';
+import { resolveAppAppearance } from '@/buzz/app-appearance-seed';
 import { checkNativeUpdate, reloadNativeUpdate } from '@/hooks/useUpdates';
 
 /**
@@ -38,9 +40,10 @@ export function RuntimeErrorView({ error, retry, scope }: {
     </YStack>
   );
   if (scope !== 'app') return body;
-  const mode = Appearance.getColorScheme() === 'dark' ? 'dark' : 'light';
+  const settings = storage.getState().localSettings;
+  const mode = resolveAppAppearance(settings.appearance, Appearance.getColorScheme());
   return (
-    <TamaguiProvider config={tamaguiConfig} defaultTheme={themeName(mode, 'brass')}>
+    <TamaguiProvider config={tamaguiConfig} defaultTheme={themeName(mode, settings.palette)}>
       <YStack flex={1} backgroundColor="canvas" paddingTop="8">{body}</YStack>
     </TamaguiProvider>
   );

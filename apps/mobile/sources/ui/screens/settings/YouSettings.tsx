@@ -106,7 +106,11 @@ export function YouSettings({ you }: { you: You }) {
                     <RadioGroup aria-label="Color set" value={palette} onValueChange={(next: string) => setPalette(next as typeof palette)} gap="2">
                         {PALETTES.map(([value, label, detail]) => (
                             <XStack key={value} gap="3" alignItems="center" minHeight={HEIGHT.control}>
-                                <RadioGroup.Item value={value} id={`palette-${value}`} aria-label={label} testID={`palette-${value}`}>
+                                {/* activeTheme is applied under the item, after its fill is resolved, so the
+                                    dot takes brand ink on the canvas and vanishes. The brand theme has to
+                                    sit on the item that paints the circle. */}
+                                <RadioGroup.Item value={value} id={`palette-${value}`} aria-label={label} testID={`palette-${value}`}
+                                    theme={palette === value ? 'brand' : undefined}>
                                     <RadioGroup.Indicator />
                                 </RadioGroup.Item>
                                 <YStack flex={1}>

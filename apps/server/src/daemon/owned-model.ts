@@ -1,7 +1,6 @@
 import { OwnedModelRefusal } from '../owned-model-errors.js';
 import { lockOwnedTurnRoomAccess } from '../turn-ownership.js';
 import { fenceOwnedTurnReply as enqueueOwnedTurnReply } from '../owned-turn-reply.js';
-import type { HelperTurnOwnershipSource } from '@beeline/api-contract/helper-turn-ownership';
 import { OwnedModelCredentials } from '../owned-model-credential.js';
 import type { CommandActivationInput } from '@beeline/api-contract/helper-activation';
 import { captureCommandActivation, helperActivationEnabled } from '../helper-activation.js';
@@ -19,23 +18,24 @@ import { DaemonService } from '../daemon-service.js';
   export function daemonOwnedModelReady(ctx: DaemonContext): boolean { return ctx.ownedModel?.ready() === true; }
 
 
-  export async function daemonNegotiateOwnedModel(ctx: DaemonContext, agentId: string, source: HelperTurnOwnershipSource, installed: boolean): Promise<OwnedModelNegotiation> {
+  export async function daemonNegotiateOwnedModel(ctx: DaemonContext, agentId: string, installed: boolean): Promise<OwnedModelNegotiation> {
     const free = (await ctx.database.query<{ eligible: boolean }>(`SELECT removed_at IS NULL
       AND model_token_hash IS NOT NULL eligible FROM free_agents WHERE agent_id=$1`, [agentId])).rows[0];
     if (!free) return { freeAgent: false };
     const configuration = ctx.ownedModel;
     if (!installed || !free.eligible || !configuration?.ready()) return { freeAgent: true };
     const capability = Object.freeze({}) as OwnedModelClaimCapability;
-    ctx.modelClaims.set(capability, { agentId, source: Object.freeze({ ...source }), configuration });
+    // The capability object is the negotiated grant; no socket is recorded.
+    ctx.modelClaims.set(capability, { agentId, configuration });
     return { freeAgent: true, capability };
   }
 
 
-  export function daemonModelClaimCredentials(ctx: DaemonContext, capability: OwnedModelClaimCapability | undefined, agentId: string,
-    source: HelperTurnOwnershipSource): OwnedModelCredentials {
+  export function daemonModelClaimCredentials(ctx: DaemonContext, capability: OwnedModelClaimCapability | undefined,
+    agentId: string): OwnedModelCredentials {
     const claim = capability && ctx.modelClaims.get(capability), configuration = ctx.ownedModel;
-    if (!claim || !configuration || claim.configuration !== configuration || !configuration.ready() || claim.agentId !== agentId ||
-        claim.source.connectionId !== source.connectionId || claim.source.epoch !== source.epoch) throw new OwnedModelRefusal();
+    if (!claim || !configuration || claim.configuration !== configuration || !configuration.ready() || claim.agentId !== agentId)
+      throw new OwnedModelRefusal();
     return configuration.credentials;
   }
 

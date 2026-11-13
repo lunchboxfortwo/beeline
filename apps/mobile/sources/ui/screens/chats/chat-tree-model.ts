@@ -3,6 +3,7 @@ import type { ChatListCorner } from '@beeline/api-contract/phone';
 import type { ChatListItem } from '@beeline/buzz-client';
 import { roomRowAttentionReason, roomRowName, roomRowPreview } from '@/buzz/room-list-row';
 import type { RepoCandidate } from '@/buzz/room-repo-picker';
+import { threadListLabel } from '@/ui/screens/thread/thread-status';
 
 /** Chats show up to three active threads; the rest wait behind "N more". */
 export const VISIBLE_THREADS = 3;
@@ -35,13 +36,9 @@ export function joinableTitle(name: string): string {
   return roomTitle(name) ?? `#${name}`;
 }
 
-/** Waiting on the viewer: the corner is waiting and is theirs (the server's Mine rule). */
-export function threadWaitsOnViewer(corner: ChatListCorner): boolean {
-  return corner.state === 'waiting' && corner.mine === true;
-}
-
-export function threadWord(corner: ChatListCorner): string {
-  return threadWaitsOnViewer(corner) ? 'waiting on you' : corner.state;
+/** "waiting on you" for the person the server's waiting blocker names, "waiting on <name>" for everyone else. */
+export function threadWord(corner: ChatListCorner, viewer: string | undefined): string {
+  return threadListLabel(corner, viewer).word;
 }
 
 export function threadTitle(item: ChatListItem, corner: ChatListCorner): string {
@@ -50,18 +47,23 @@ export function threadTitle(item: ChatListItem, corner: ChatListCorner): string 
 
 const DAY_SECONDS = 24 * 60 * 60;
 
-/** A thread line stays under its chat for a day after it last spoke, or a week while it waits on the viewer. */
+/** Waiting and the viewer's own (the server's Mine rule): keeps a thread listed for a week and ranks it first. */
+function waitingAndMine(corner: ChatListCorner): boolean {
+  return corner.state === 'waiting' && corner.mine === true;
+}
+
+/** A thread line stays under its chat for a day after it last spoke, or a week while it is waiting and the viewer's own. */
 function threadIsRecent(corner: ChatListCorner, nowSeconds: number): boolean {
   const at = corner.lastActivityAt ?? corner.waitingSince;
   if (at === undefined) return false;
-  return nowSeconds - at <= (threadWaitsOnViewer(corner) ? 7 * DAY_SECONDS : DAY_SECONDS);
+  return nowSeconds - at <= (waitingAndMine(corner) ? 7 * DAY_SECONDS : DAY_SECONDS);
 }
 
-/** Recent threads, the ones waiting on the viewer first, then the viewer's own, then the rest in server order. */
+/** Recent threads, waiting ones of the viewer's own first, then the viewer's own, then the rest in server order. */
 export function chatThreads(item: ChatListItem, corners: readonly ChatListCorner[] | undefined, now: number): ChatListCorner[] {
   if (item.directMessage || !corners?.length) return [];
   const nowSeconds = now / 1000;
-  const rank = (corner: ChatListCorner) => (threadWaitsOnViewer(corner) ? 0 : corner.mine ? 1 : 2);
+  const rank = (corner: ChatListCorner) => (waitingAndMine(corner) ? 0 : corner.mine ? 1 : 2);
   return corners
     .filter((corner) => threadIsRecent(corner, nowSeconds))
     .map((corner, index) => ({ corner, index }))

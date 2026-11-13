@@ -27,7 +27,7 @@
     "dead-code": "node scripts/check-dead-code.mjs",
     "predead-code:baseline": "npm run dead-code:prepare",
     "dead-code:baseline": "node scripts/check-dead-code.mjs --write-baseline",
-    "typecheck": "turbo run typecheck && npm run typecheck --prefix apps/mobile && tsc -p tsconfig.scripts.json",
+    "typecheck": "node scripts/check-stone-surfaces.mjs && node --test scripts/check-stone-surfaces.test.mjs && turbo run typecheck && npm run typecheck --prefix apps/mobile && tsc -p tsconfig.scripts.json",
     "test": "turbo run test",
     "feedback:group": "node scripts/feedback-signals.mjs",
     "test:feedback-signals": "node --test scripts/feedback-signals.test.mjs",

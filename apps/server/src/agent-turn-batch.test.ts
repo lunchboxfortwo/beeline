@@ -115,7 +115,7 @@ it('releasing an invocation consumes it once; repeated release never requeues it
     .rejects.toThrow('command claim conflict');
 });
 
-it.each([0,2,4])('R1 Stop on batch member %s clears all five requests before helper cleanup and preserves other invocations', async target => {
+it.each([0,2,4])('R1 Stop on batch member %s clears the whole invocation despite differing transport history and preserves other invocations', async target => {
   const send = async (text: string) => {
     await phone.execute('sendRoomMessage', {roomId:R,text:`@worker ${text}`}, H);
     return (await db.query<{id:string}>(`SELECT id FROM agent_commands WHERE room_id=$1 AND state='pending'
@@ -126,29 +126,27 @@ it.each([0,2,4])('R1 Stop on batch member %s clears all five requests before hel
   const batch = await daemon.execute('claimAgentTurn',
     {roomId:R,commandId:ids[0]!,generationId:'r1-stop'},A,owner);
   expect(batch.commands).toHaveLength(5);
-  const preserved = [];
-  for (const [generation,connection,epoch] of [
-    ['successor',owner.connectionId,owner.epoch],
-    ['r1-stop','different-connection',owner.epoch],
-    ['r1-stop',owner.connectionId,owner.epoch+1],
-  ] as const) {
-    const id = await send('different invocation');
+  const claim = async (generation: string, connection: string, epoch: number) => {
+    const id = await send('another delivery');
     await db.query(`UPDATE agent_commands SET state='claimed',generation_id=$2,
       turn_owner_connection_id=$3,turn_owner_epoch=$4 WHERE id=$1`,[id,generation,connection,epoch]);
-    preserved.push(id);
-  }
-  preserved.push(await send('unclaimed follow-up'));
+    return id;
+  };
+  // Same generation through another recorded socket is still this invocation.
+  const members = [...ids, await claim('r1-stop','different-connection',owner.epoch),
+    await claim('r1-stop',owner.connectionId,owner.epoch+1)];
+  const preserved = [await claim('successor',owner.connectionId,owner.epoch), await send('unclaimed follow-up')];
   await phone.execute('cancelAgentTurn',
     {roomId:R,agentId:A,requestId:batch.commands[target]!.turnRequestId},H);
-  expect((await db.query(`SELECT state FROM agent_commands WHERE id=ANY($1::text[])`,[ids])).rows)
-    .toEqual(Array.from({length:5},()=>({state:'cancelled'})));
+  expect((await db.query(`SELECT state FROM agent_commands WHERE id=ANY($1::text[])`,[members])).rows)
+    .toEqual(members.map(()=>({state:'cancelled'})));
   expect((await db.query(`SELECT status FROM agent_turns WHERE room_id=$1 AND request_id=ANY($2::text[])`,
     [R,batch.commands.map(c=>c.turnRequestId)])).rows)
     .toEqual(Array.from({length:5},()=>({status:'cancelled'})));
   expect((await phone.readRoom(R,H))!.latestAgentTurns
     .some(turn=>turn.status==='working' && batch.commands.some(c=>c.turnRequestId===turn.requestId))).toBe(false);
   expect((await db.query(`SELECT id,state FROM agent_commands WHERE id=ANY($1::text[]) ORDER BY id`,[preserved])).rows)
-    .toEqual(preserved.map((id,index)=>({id,state:index===3?'pending':'claimed'})).sort((a,b)=>a.id.localeCompare(b.id)));
+    .toEqual(preserved.map((id,index)=>({id,state:index===1?'pending':'claimed'})).sort((a,b)=>a.id.localeCompare(b.id)));
   // Test cleanup uses the normal terminal path.
   await db.query(`SELECT beeline_end_agent_turn(id,generation_id,'cancelled','test cleanup')
     FROM agent_commands WHERE id=ANY($1::text[])`,[preserved]);

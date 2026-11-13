@@ -1,4 +1,4 @@
-import { interpreterScriptArgument, COMMAND_WRAPPERS } from '@beeline/api-contract/agent-grants';
+import { COMMAND_WRAPPERS } from '@beeline/api-contract/agent-grants';
 import { accessSync, constants, statSync, realpathSync } from 'node:fs';
 import { resolve, dirname } from 'node:path';
 
@@ -14,8 +14,6 @@ export function resolveGrantCommand(input: readonly string[], cwd: string, env: 
   const optional = ['block-signal', 'default-signal', 'ignore-signal'];
   const names = [...noValue, ...required, ...optional];
   while (COMMAND_WRAPPERS.has(argv[head]?.split('/').pop() ?? '')) {
-    const executable = argv[head]!;
-    if (resolveGrantExecutable(executable, cwd, result) && !trustedGrantExecutable(executable, cwd, result)) break;
     const wrapper = argv[head++]!.split('/').pop();
     if (wrapper !== 'env') {
       // Preserve the contract's existing traversal of other command wrappers.
@@ -102,13 +100,9 @@ function resolveGrantExecutable(path: string, cwd: string, env: NodeJS.ProcessEn
   return undefined;
 }
 
-/** Only a root-owned executable in an unmodifiable root-owned tree is installed. */
-export function installedGrantExecutable(argument: { path: string; direct?: true }, cwd: string, env: NodeJS.ProcessEnv): string | undefined {
-  if (!argument.direct || argument.path.includes('/')) return undefined;
-  return trustedGrantExecutable(argument.path, cwd, env);
-}
-
-function trustedGrantExecutable(path: string, cwd: string, env: NodeJS.ProcessEnv): string | undefined {
+/** A bare program name on PATH that is root-owned in an unmodifiable root-owned tree. */
+export function installedGrantExecutable(path: string | undefined, cwd: string, env: NodeJS.ProcessEnv): string | undefined {
+  if (!path || path.includes('/')) return undefined;
   const candidate = resolveGrantExecutable(path, cwd, env);
   if (!candidate) return undefined;
   const trustedTree = (path: string): boolean => {
@@ -137,23 +131,4 @@ export function isNativeGrantExecutable(bytes: Buffer): boolean {
     magic === 0xcafebabe || magic === 0xbebafeca || // Universal Mach-O
     magic === 0xcafebabf || magic === 0xbfbafeca ||
     (bytes[0] === 0x4d && bytes[1] === 0x5a); // Windows PE
-}
-
-/** Resolve the file using the parsed execution environment and directory. */
-export function resolveGrantScriptExecutable(
-  argument: { path: string; direct?: true },
-  cwd: string,
-  env: NodeJS.ProcessEnv,
-): string | undefined {
-  return argument.direct ? resolveGrantExecutable(argument.path, cwd, env) : resolve(cwd, argument.path);
-}
-
-/** Classify the resolved executable before trusting interpreter or wrapper names. */
-export function grantScriptArgument(context: ReturnType<typeof resolveGrantCommand>): ReturnType<typeof interpreterScriptArgument> {
-  const path = context.argv[0];
-  if (path && resolveGrantExecutable(path, context.cwd, context.env) &&
-      !trustedGrantExecutable(path, context.cwd, context.env)) {
-    return { index: 0, path, direct: true };
-  }
-  return interpreterScriptArgument(context.argv, true);
 }

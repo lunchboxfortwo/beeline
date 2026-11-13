@@ -1,10 +1,15 @@
 name: Nightly Checks
 on:
   workflow_dispatch:
-  schedule:
-    # Separate triggers identify the harmless DST twin even when it is delayed.
-    - cron: '7 7 * * *'
-    - cron: '7 8 * * *'
+    inputs:
+      release_run_id:
+        description: Unified production release run that is starting this nightly check
+        required: false
+        type: string
+      release_sha:
+        description: Released commit to check out and hand to Checks
+        required: false
+        type: string
 permissions:
   contents: read
   actions: write
@@ -22,15 +27,16 @@ jobs:
       - uses: actions/checkout@v4
         with:
           persist-credentials: false
-          ref: ${{ github.ref }}
+          ref: ${{ inputs.release_sha || github.sha }}
       - uses: actions/setup-node@v4
         with:
           node-version: 22
-      - name: Dispatch every Checks suite on main
+      - name: Dispatch every Checks suite
         env:
           GH_TOKEN: ${{ github.token }}
           EVENT_NAME: ${{ github.event_name }}
-          SCHEDULE: ${{ github.event.schedule }}
+          RELEASE_RUN_ID: ${{ inputs.release_run_id }}
+          RELEASE_SHA: ${{ inputs.release_sha }}
         run: node scripts/nightly-checks.mjs
       - name: Publish nightly result
         if: always()

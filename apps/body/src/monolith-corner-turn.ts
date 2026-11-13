@@ -706,8 +706,8 @@ export interface MonolithCornerTurnOptions {
     githubToken: string;
     readOnly?: boolean;
   };
-  /** Gives a writer its private copy; every other turn gets the Room's read-only checkout. */
-  prepareCheckout?: (repositoryWork: boolean, implementerAgentId?: string, assigned?: boolean) =>
+  /** This agent's private copy of the corner; read-only when the brief has no repository work. */
+  prepareCheckout?: (repositoryWork: boolean, implementerAgentId?: string) =>
     Promise<{ path: string; gitCommonDir: string; writable: boolean }>;
   runtime: AgentRuntimeRecord;
   config: BodyConfig;

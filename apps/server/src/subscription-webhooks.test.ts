@@ -38,6 +38,36 @@ async function fixture() {
 }
 
 describe('agent-created webhook subscription', () => {
+  it('lists only posted replies caused by the selected routine, with message destinations', async () => {
+    const { db, create, phone, root } = await fixture();
+    try {
+      const subscription = await create();
+      const wake = 'e'.repeat(64), posted = 'f'.repeat(64);
+      await db.query(`INSERT INTO messages(id,room_id,author_id,text,system_event)
+        VALUES($1,$2,$3,'Webhook wake',$4::jsonb)`, [wake, ROOM, OWNER,
+        JSON.stringify({ kind: 'subscription-fired', subscriptionId: subscription.id })]);
+      await db.query(`INSERT INTO agent_commands(id,room_id,agent_id,source_message_id,turn_request_id,
+        action,reason,root_command_id,root_source_message_id,agent_depth)
+        VALUES('routine-run',$1,$2,$3,'routine-run','input','system_event','routine-run',$3,0)`, [ROOM, AGENT, wake]);
+      await db.query(`INSERT INTO messages(id,room_id,author_id,text,request_id)
+        VALUES($1,$2,$3,'Posted the triage','routine-run'),('unrelated',$2,$3,'Other work','other-run')`, [posted, ROOM, AGENT]);
+      const schedule = '33333333-3333-4333-8333-333333333333';
+      await db.query(`INSERT INTO agent_schedules(id,workspace_id,room_id,agent_id,creator_id,cadence,message,next_run_at)
+        VALUES($1,$2,$3,$4,$5,'{"kind":"interval","everyMinutes":60}','Read the chat',now())`, [schedule, WORKSPACE, ROOM, AGENT, OWNER]);
+      await db.query(`INSERT INTO agent_schedule_occurrences(schedule_id,scheduled_for,message_id)
+        VALUES($1,now(),$2)`, [schedule, root]);
+      await db.query(`INSERT INTO messages(id,room_id,author_id,text,request_id)
+        VALUES('schedule-post',$1,$2,'Posted morning summary','create-hook')`, [ROOM, AGENT]);
+      const result = await phone.execute('readScheduledWork', { roomId: ROOM }, OWNER);
+      expect(result.recentRuns).toEqual(expect.arrayContaining([expect.objectContaining({ routineId: subscription.id,
+        roomId: ROOM, messageId: posted, text: 'Posted the triage', at: expect.any(Number) }),
+        expect.objectContaining({ routineId: schedule, messageId: 'schedule-post' })]));
+      expect(result.recentRuns).toHaveLength(2);
+      await db.query('UPDATE messages SET deleted_at=now() WHERE id=$1', [posted]);
+      expect((await phone.execute('readScheduledWork', { roomId: ROOM }, OWNER)).recentRuns?.map(run => run.messageId)).toEqual(['schedule-post']);
+    } finally { await db.close(); }
+  });
+
   it('creates distinct encrypted links only for a commanding Workspace admin, with phone-only token controls', async () => {
     const { db, create, phone, root } = await fixture();
     try {

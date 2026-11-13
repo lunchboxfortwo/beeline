@@ -20,7 +20,7 @@ People use their uploaded picture or stored Google/GitHub photo. Repository chat
 
 The Tags screen separates Decisions from messages that actually tag you. Reports addressed to you remain visible under Decisions with “needs your decision”; ordinary tags and channel asks keep “tagged you”.
 
-If a turn crashes before it can start, its place shows the failure reason and its sender receives a failure report. Repeated failures send one update until a turn succeeds. Repository corners prepare shared package exports before the first agent turn. Agents cannot order themselves; they continue the work in their current turn.
+If a turn crashes before it can start, its place shows the failure reason and its sender receives a failure report. Failure reasons keep the complete process error, including the program's own diagnostic output, with credentials scrubbed. Saved read access to a deleted artifact no longer blocks a later corner from starting. Repeated failures send one update until a turn succeeds. Repository corners prepare shared package exports before the first agent turn. Agents cannot order themselves; they continue the work in their current turn.
 
 Linux Codex adapter setup includes the optional platform package required to launch Codex. Managed adapter installs use exact versions selected by the helper's release-age policy.
 
@@ -30,7 +30,7 @@ Stop ends the agent's running batch and clears its thinking status; later work s
 
 Command approval cards offer Always, Once and Deny. Once authorizes a single execution; Deny refuses the pending command without granting execution. Always command approvals are reused while their scope and script bytes still match. Inline code, interpreter stdin and scripts launched from writable PATH directories show their exact code on the existing approval card. Agents can request literal inline arguments with a JSON argv target, or stdin with a JSON target containing `argv` and `stdin`. Refused commands identify the closest grant and the mismatching prefix word, expiry or script binding without printing secret values.
 
-Account deletion retries once if PostgreSQL rolls it back for a deadlock. Corner status refresh runs independently of turn writes and skips an already locked lifecycle row without retrying a failure. Android theme changes ignore only the system background rejection caused by an activity that has already closed.
+Account deletion retries once if PostgreSQL rolls it back for a deadlock. Corner status refresh runs independently of turn writes and skips an already locked lifecycle row without retrying a failure. Android theme changes ignore only the system background rejection caused by an activity that has already closed. Launch shells use Stone before the app loads; the saved colour set and appearance are read once for the first app frame. Recovery screens keep that choice, and standalone join, consent and legal pages use Stone.
 
 Agents start their local process when work arrives and stay warm for 30 minutes after their last work completes. New work resets that countdown. Beeline has no simultaneous agent process limit; setup warns when the connected agents may strain this machine's available memory or CPU.
 
@@ -143,3 +143,5 @@ Beeline is in beta (`0.0.x`). [Current limits](https://github.com/Beeline-Work/b
 ## Device diagnostics
 
 Beeline keeps a private, content-free timeline of device sessions and action outcomes for support. It records sign-in steps, Workspace creation sources and assistant delivery results without message contents, keystrokes or session replay. See [device and session diagnostics](docs/device-session-diagnostics.md).
+
+Routines groups scheduled and event-driven work by chat. Open a routine to read its full instruction, timing, destination, agent and recent posted messages, or stop it.

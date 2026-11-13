@@ -43,7 +43,7 @@ export function ViewerConversationDock({
   const [focused, setFocused] = React.useState(false);
   const [open, setOpen] = React.useState(false);
   // The closed pill is one control tall; the transcript rises above it.
-  const pillHeight = 44;
+  const [pillHeight, setPillHeight] = React.useState(44);
   const [tickerVisible, setTickerVisible] = React.useState(false);
   const [sending, setSending] = React.useState(false);
   const [error, setError] = React.useState<string | null>(null);
@@ -126,10 +126,12 @@ export function ViewerConversationDock({
   const recent = open ? entries.slice(-3) : agentReplies.slice(-2);
   return (
     <TalkDock
+      compact={kind === 'computer'}
+      onPillHeightChange={setPillHeight}
       open={open}
       onToggle={() => {
         if (open) setTickerVisible(false);
-        setOpen((value) => !value);
+        setOpen(!open);
       }}
       bottom={bottom}
       maxTranscriptHeight={transcriptMaxHeight}

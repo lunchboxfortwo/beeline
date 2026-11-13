@@ -26,7 +26,7 @@ const AGENT = identity.publicKey, HUMAN = '22'.repeat(32), WS = randomUUID(), RO
 let db: PgliteDatabase, daemon: InstanceType<typeof DaemonService>, phone: InstanceType<typeof PhoneService>;
 let source:{connectionId:string;epoch:number};
 async function executeOwned<N extends keyof DaemonOperationMap>(name:N,input:DaemonOperationMap[N]['input'],agentId=AGENT):Promise<DaemonOperationMap[N]['output']>{
-  const {capability}=await daemon.negotiateOwnedModel(agentId,source,true);
+  const {capability}=await daemon.negotiateOwnedModel(agentId,true);
   const owned=['claimAgentCommand','claimAgentTurn','acknowledgeAgentCommand','postAgentTurnReceipt','releaseAgentTurn'].includes(name);
   return daemon.execute(name,input,agentId,owned?source:undefined,owned?capability:undefined);
 }

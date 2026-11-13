@@ -6,7 +6,7 @@ import type { SqlDatabase } from './database.js';
 import { cornerImplementerSql } from './corner-worker.js';
 import type { CornerMachine } from './corner-machine.js';
 import { cornerCommanderInputSql } from './corner-waiting.js';
-import { cornerWaitingReportSql } from './corner-waiting-report.js';
+import { cornerWaitingReportSql, reportCardIdSql } from './corner-waiting-report.js';
 
 /** Read the question boundary and the newest accepted input, without changing cards.
  * Message probes use the Room/author index once per current chain member.
@@ -24,12 +24,12 @@ export async function loadCornerQuestion(db: SqlDatabase, cornerId: string, item
     UNION ALL
     SELECT command.id,command.private_payload->>'authorId',visible.created_at,
       command.private_payload->>'text','report',ARRAY[visible.id] FROM agent_commands command
-      JOIN messages visible ON visible.id=encode(sha256(convert_to('agent-command-card:'||command.id,'UTF8')),'hex')
+      JOIN messages visible ON visible.id=${reportCardIdSql('command.id')}
       WHERE command.id=$2 AND command.private_payload->>'kind'='report'
     UNION ALL
     SELECT COALESCE(report.report_id,report.message_id),${cornerImplementerSql('question_fact', 'question_corner')},
       report.asked_at,COALESCE(command.private_payload->>'text',message.text),
-      CASE WHEN report.report_id IS NULL THEN 'message' ELSE 'report' END,ARRAY[report.message_id,report.card_id]
+      CASE WHEN report.report_id IS NULL THEN 'message' ELSE 'report' END,report.asked_items
       FROM rooms question_corner JOIN corner_facts question_fact ON question_fact.corner_id=question_corner.id
       CROSS JOIN LATERAL (${cornerWaitingReportSql('question_corner', true)}) report
       LEFT JOIN agent_commands command ON command.id=report.report_id

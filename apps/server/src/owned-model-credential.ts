@@ -2,7 +2,7 @@ import { OwnedModelRefusal, OwnedModelUnknownGeneration } from './owned-model-er
 import type { OwnedModelCredential } from '@beeline/api-contract/helper-model';
 import { createHash, createHmac, randomBytes, timingSafeEqual } from 'node:crypto';
 import type { SqlDatabase } from './database.js';
-import { invocationCommandSql, registerOwnedAccessCheck } from './turn-ownership.js';
+import { commandOwnerLiveSql, invocationCommandSql, registerOwnedAccessCheck } from './turn-ownership.js';
 
 /** Release-installed additive primitive for the claim/router/provider adapters;
  * this module creates no transport or rollout switch. */
@@ -123,6 +123,17 @@ const CURRENT = `SELECT command.agent_id,starter.owner_id,room.workspace_id,room
    AND EXISTS(SELECT 1 FROM agent_commands invocation_command
      WHERE ${invocationCommandSql('command','invocation_command')})`;
 
+/** Retirement prerequisite for the three signed connection columns. It counts
+ * credentials whose signature still covers a connection and whose invocation
+ * can still authenticate. At zero no such credential can be accepted again, so
+ * the columns can be dropped without a credential-format migration. */
+export const LEGACY_CREDENTIAL_BINDINGS_LIVE_SQL = `SELECT count(*)::int live FROM owned_model_credentials credential
+  WHERE credential.revoked_at IS NULL
+    AND (credential.connection_id IS NOT NULL OR credential.connection_epoch IS NOT NULL OR credential.instance_id IS NOT NULL)
+    AND EXISTS(SELECT 1 FROM agent_commands member WHERE member.agent_id=credential.agent_id
+      AND member.room_id=credential.room_id AND member.generation_id=credential.generation_id
+      AND member.action IN ('input','resume') AND ${commandOwnerLiveSql('member')})`;
+
 export class OwnedModelCredentials {
   private readonly actors = new WeakMap<object, Actor>();
   constructor(private readonly keys: OwnedModelKeyring, private readonly currentDefaultModel: () => string) {}
@@ -148,10 +159,15 @@ export class OwnedModelCredentials {
     // The actual claim already owns this row. The explicit read fence also
     // makes direct composition safe against an old in-flight reservation.
     // NOWAIT refuses existing inverse lock owners without a retry timer.
-    await database.query('SELECT id FROM agent_commands WHERE id=$1 AND agent_id=$2 FOR SHARE NOWAIT', [input.commandId, input.agentId]);
+    // One invocation is (agent, Room, generation): the addressed command's Room
+    // selects its credential, so equal generations in two Rooms never alias.
+    const addressed = (await database.query<{ room_id: string }>('SELECT room_id FROM agent_commands WHERE id=$1 AND agent_id=$2 FOR SHARE NOWAIT',
+      [input.commandId, input.agentId])).rows[0];
+    if (!addressed) throw new OwnedModelRefusal();
     const model = this.currentDefaultModel();
     const invocation = () => database.query<CredentialRow>(`SELECT * FROM owned_model_credentials
-      WHERE agent_id=$1 AND generation_id=$2 ORDER BY created_at,id LIMIT 1`, [input.agentId, input.generationId]);
+      WHERE agent_id=$1 AND room_id=$2 AND generation_id=$3 ORDER BY created_at,id LIMIT 1`,
+      [input.agentId, addressed.room_id, input.generationId]);
     let row = (await invocation()).rows[0];
     // The credential's own command stays its anchor after that member ends.
     const current = (await database.query<CurrentRow>(CURRENT,

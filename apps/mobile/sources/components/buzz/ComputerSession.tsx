@@ -1,6 +1,7 @@
 import React from 'react';
+import { IndexRow } from '@/components/buzz/IndexRow';
 import { AppState, BackHandler, Platform } from 'react-native';
-import { YStack } from 'tamagui';
+import { YStack, useTheme } from 'tamagui';
 import { Image } from 'expo-image';
 import * as Clipboard from 'expo-clipboard';
 import { FillView } from '@/ui/grammar';
@@ -11,7 +12,6 @@ import { openComputerInDesktopWorkPane } from '@/buzz/desktop-computer-pane';
 import { openExternalUrl } from '@/utils/open-external-url';
 import { ViewerConversationDock } from '@/components/buzz/ViewerConversationDock';
 import { BrowserCard, BrowserStreamNote, BrowserViewerFrame } from '@/ui/screens/viewers/BrowserChrome';
-import { KeyBar } from '@/ui/screens/viewers/KeyBar';
 import { currentViewerConversation, subscribeViewerConversation } from '@/buzz/viewer-conversation';
 import { useArtifactRowVisible } from '@/buzz/artifact-viewport';
 import {
@@ -50,14 +50,10 @@ function useViewerRoomFocused(roomId: string | undefined): boolean {
 import type { ComputerSessionView } from '@/buzz/computer-session';
 export type { ComputerSessionView } from '@/buzz/computer-session';
 
-/** Posts one bridge message into the stream page, the way paste reaches it. */
-type StreamPost = (message: Record<string, unknown>) => void;
-
-function ComputerStream({ session, preview = false, onEnded, onFirstFrame, onAccessRejected, captureRef, postRef, warm = false, interactive = true }: {
+function ComputerStream({ session, preview = false, onEnded, onFirstFrame, onAccessRejected, captureRef, warm = false, interactive = true }: {
   session: ComputerSessionView; preview?: boolean; onEnded?: () => void; onFirstFrame?: () => void;
   onAccessRejected?: () => void; warm?: boolean; interactive?: boolean;
   captureRef?: React.MutableRefObject<(() => Promise<string | null>) | null>;
-  postRef?: React.MutableRefObject<StreamPost | null>;
 }) {
   const WebView = useSandboxWebView();
   const iframeRef = React.useRef<HTMLIFrameElement | null>(null);
@@ -68,7 +64,12 @@ function ComputerStream({ session, preview = false, onEnded, onFirstFrame, onAcc
     for (const resolve of pendingCaptures.current.values()) resolve(null);
     pendingCaptures.current.clear();
   }, []);
+  const theme = useTheme();
   const streamUrl = new URL(session.url);
+  for (const name of ['canvas', 'ink', 'strongStroke'] as const) {
+    const color = theme[name]?.val;
+    if (typeof color === 'string' && /^#[a-f0-9]{6}$/i.test(color)) streamUrl.searchParams.set(name, color);
+  }
   if (session.access) streamUrl.searchParams.set('access', session.access);
   streamUrl.searchParams.set('embedded', '1');
   if (preview) streamUrl.searchParams.set('preview', '1');
@@ -102,15 +103,6 @@ function ComputerStream({ session, preview = false, onEnded, onFirstFrame, onAcc
     });
     return () => { captureRef.current = null; releaseCaptures(); };
   }, [captureRef, preview, releaseCaptures, session.id, session.status, url]);
-  React.useEffect(() => {
-    if (!postRef) return;
-    // The key bar rides the same bridge as viewer paste: a message posted
-    // into the page's own window, which forwards it on its stream socket.
-    postRef.current = (message) => {
-      webViewRef.current?.injectJavaScript(`window.postMessage(${JSON.stringify({ ...message, id: session.id })}, '*'); true;`);
-    };
-    return () => { postRef.current = null; };
-  }, [postRef, session.id]);
   const setViewerMode = React.useCallback(() => {
     if (!warm) return;
     const mode = { type: 'viewer-mode', id: session.id, interactive };
@@ -199,6 +191,14 @@ export function ComputerSessionCard({ session, messageId, roomId, isDesktop, age
     await openComputerSessionViewer({ ...session, access,
       previewFrame: captureRef.current?.() }, isDesktop, roomId, agentHandle);
   };
+  const openInBrowser = async () => {
+    if (!visible || !access || session.status !== 'live') return;
+    try {
+      const { access: freshAccess } = await monolithPhoneOperation('openComputerSession', { id: session.id });
+      const url = new URL(session.url); url.searchParams.set('access', freshAccess);
+      await openExternalUrl(url.toString());
+    } catch { Modal.alert('Could not open browser', 'The live browser is unavailable. Try again.'); }
+  };
   const live = session.status === 'live' && Boolean(access);
   return (
     <BrowserCard
@@ -206,6 +206,7 @@ export function ComputerSessionCard({ session, messageId, roomId, isDesktop, age
       title={session.title}
       live={live}
       frame={live && visible && !fullViewer ? <ComputerStream session={{ ...session, access: access! }} preview captureRef={captureRef} /> : null}
+      onOpenInBrowser={() => void openInBrowser()}
       onOpen={() => void open()}
       testID={`computer-session-card-${session.status}`}
     />
@@ -271,8 +272,6 @@ export function ComputerSessionViewer({ session, onClose, roomId, agentHandle, a
   const displayed = active && focused && foreground;
   React.useLayoutEffect(() => displayed ? retainFullViewer(session.id) : undefined, [displayed, session.id]);
   const captureRef = React.useRef<(() => Promise<string | null>) | null>(null);
-  const postRef = React.useRef<StreamPost | null>(null);
-  const [keysOpen, setKeysOpen] = React.useState(false);
   const [ended, setEnded] = React.useState(session.status === 'ended');
   const [unavailable, setUnavailable] = React.useState(false);
   const [refreshedAccess, setRefreshedAccess] = React.useState<string>();
@@ -322,27 +321,23 @@ export function ComputerSessionViewer({ session, onClose, roomId, agentHandle, a
       Modal.alert('Could not open browser', 'The live browser is unavailable. Try again.');
     }
   };
-  const post = (message: Record<string, unknown>) => postRef.current?.(message);
   const live = !ended && !unavailable && Boolean(session.access);
   return (
     <BrowserViewerFrame
       safeArea
-      keysOpen={keysOpen}
-      // Native viewers bridge keys into the page; a desktop browser types into the frame itself.
-      onToggleKeys={Platform.OS !== 'web' && live ? () => setKeysOpen((value) => !value) : undefined}
       onOpenInBrowser={live ? () => void openInBrowser() : undefined}
       onClose={onClose}
       stream={
         <>
           {unavailable ? (
-            <BrowserStreamNote text="Browser is unavailable" />
+            <YStack paddingHorizontal="5"><IndexRow inset="flush" title="Browser unavailable" description="Browser is unavailable" /></YStack>
           ) : displayed ? (
             <ComputerStream session={shownSession} warm={warm} interactive={active} onEnded={() => setEnded(true)}
               onFirstFrame={() => { firstFrame.current = true; setPreviewFrame(null); }}
               onAccessRejected={() => {
                 if (accessRejected && refreshedAccess) setUnavailable(true);
                 else setAccessRejected(true);
-              }} captureRef={captureRef} postRef={postRef} />
+              }} captureRef={captureRef} />
           ) : null}
           {!ended && !unavailable && previewFrame ? (
             <YStack pointerEvents="none" position="absolute" top={0} left={0} right={0} bottom={0} width="100%" height="100%">
@@ -352,14 +347,6 @@ export function ComputerSessionViewer({ session, onClose, roomId, agentHandle, a
           ) : null}
         </>
       }
-      keyBar={keysOpen && live ? (
-        <KeyBar
-          onText={(text) => post({ type: 'viewer-paste', text })}
-          onKey={(key) => post({ type: 'viewer-key', key })}
-          onPaste={() => void Clipboard.getStringAsync().then((text) => { if (text) post({ type: 'viewer-paste', text }); }).catch(() => {})}
-          onClose={() => setKeysOpen(false)}
-        />
-      ) : null}
       dock={displayed ? (
         <ViewerConversationDock keyboardAvoidedByParent={!warm} kind="computer" title={session.title} roomId={roomId}
           agentHandle={agentHandle} captureScreen={() => captureRef.current?.() ?? Promise.resolve(null)} />

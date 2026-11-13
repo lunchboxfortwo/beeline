@@ -144,15 +144,27 @@ export class StaleWakeClaimRefused extends Error {
 }
 
 
+/** How a claimed generation executes. 'helper' runs the helper turn-ownership
+ * protocol, 'mcp' a connected-app call, 'legacy' the installed-helper adapter.
+ * One claim kind owns its admission and same-generation replay. */
+export type CommandClaim =
+  | { kind: 'helper'; owner: HelperTurnOwnershipSource; allPending?: boolean }
+  | { kind: 'mcp' }
+  | { kind: 'legacy'; allPending?: boolean };
+export const LEGACY_CLAIM: CommandClaim = Object.freeze({ kind: 'legacy' });
+export const MCP_CLAIM: CommandClaim = Object.freeze({ kind: 'mcp' });
+
 export async function claimAgentCommand(
   db: SqlDatabase,
   roomId: string,
   agentId: string,
   commandId: string,
   generation: string,
-  owner?: HelperTurnOwnershipSource,
-  allPending = false,
+  claim: CommandClaim = LEGACY_CLAIM,
 ): Promise<CommandRow> {
+  // The claim records its execution kind; dispatch never infers it from a socket.
+  const owner = claim.kind === 'helper' ? claim.owner : undefined;
+  const allPending = claim.kind !== 'mcp' && claim.allPending === true;
   if (!generation || generation.length > 200) throw new Error('command generation is required');
   // Helper claims re-check Room access at commit and replay as a read. Other
   // claims commit the turn in their one statement.
@@ -168,6 +180,7 @@ export async function claimAgentCommand(
            AND turn.request_id=command.turn_request_id AND turn.status='cancelled') turn_cancelled
        FROM agent_commands command WHERE command.id=$1 AND command.room_id=$2 AND command.agent_id=$3
          AND command.state='claimed' AND command.generation_id=$4
+         AND command.execution_kind IS DISTINCT FROM 'mcp'
          AND beeline_command_claim_open(command.id)
        FOR UPDATE OF command`,
       [commandId, roomId, agentId, generation],
@@ -189,8 +202,9 @@ export async function claimAgentCommand(
                AND room_id=$2 AND agent_id=$3 AND
                claim_fence.removed_at IS NULL AND
                beeline_command_claim_open(id) AND
-               (state='pending' OR (state='claimed' AND generation_id=$4)
-                )
+               (state='pending' OR (state='claimed' AND generation_id=$4
+                 -- A running generation is replayed only by its own execution kind.
+                 AND (execution_kind IS NOT DISTINCT FROM 'mcp')=($8::text IS NOT DISTINCT FROM 'mcp')))
                AND NOT EXISTS(SELECT 1 FROM cancelled_wakes cancelled WHERE cancelled.id=agent_commands.id)
                AND ${reviewerQuietSql('agent_commands')} AND ${waitingReportSql('agent_commands')}
 
@@ -214,7 +228,7 @@ export async function claimAgentCommand(
            ), claimed AS (
              UPDATE agent_commands command SET state='claimed',generation_id=$4,
                lease_expires_at=NULL,claimed_at=now(),
-               turn_owner_connection_id=$5::text,turn_owner_epoch=$6::bigint
+               turn_owner_connection_id=$5::text,turn_owner_epoch=$6::bigint,execution_kind=$8::text
              FROM eligible
              WHERE command.id=eligible.id AND
                (eligible.action='stop' OR eligible.action='restart' OR EXISTS(SELECT 1 FROM working
@@ -238,7 +252,7 @@ export async function claimAgentCommand(
                AND working.agent_id=eligible.agent_id AND working.request_id=eligible.turn_request_id)
            ) SELECT claim_result.*,wake_drop_log.drops FROM wake_drop_log LEFT JOIN claim_result ON true
              ORDER BY claim_result.created_at,claim_result.id`,
-        [commandId, roomId, agentId, generation, owner?.connectionId ?? null, owner?.epoch ?? null, allPending],
+        [commandId, roomId, agentId, generation, owner?.connectionId ?? null, owner?.epoch ?? null, allPending, claim.kind],
       )
     ).rows[0];
     if (!row?.id) {
@@ -267,7 +281,7 @@ export async function claimMcpOrder(db: SqlDatabase, agentId: string, target: st
        AND command.private_payload->>'kind'='order'
        AND ($3::text IS NULL OR (command.id=$3 AND command.room_id=$2))
        AND (command.state='pending' OR (command.state='claimed' AND
-         ($3::text IS NOT NULL AND command.generation_id LIKE 'mcp:%')))
+         ($3::text IS NOT NULL AND command.execution_kind='mcp')))
      ORDER BY (command.room_id=$2) DESC,command.created_at,command.id`,
     [agentId, target, commandId ?? null])).rows;
   if (!commandId && !waiting.some(row => row.room_id === target) && waiting.length > 1)
@@ -277,8 +291,8 @@ export async function claimMcpOrder(db: SqlDatabase, agentId: string, target: st
   // Stop and claims take this same queue lock before inspecting or writing ownership.
   await lockAgentCommandQueue(db, selected.room_id, agentId);
   const current = (await db.query<CommandRow>(`SELECT * FROM agent_commands WHERE id=$1 FOR UPDATE`, [selected.id])).rows[0];
-  const reuse = commandId && current?.state === 'claimed' && current.generation_id?.startsWith('mcp:');
-  return claimAgentCommand(db, selected.room_id, agentId, selected.id, reuse ? current.generation_id! : generation);
+  const reuse = commandId && current?.state === 'claimed' && current.execution_kind === 'mcp';
+  return claimAgentCommand(db, selected.room_id, agentId, selected.id, reuse ? current.generation_id! : generation, MCP_CLAIM);
 }
 
 

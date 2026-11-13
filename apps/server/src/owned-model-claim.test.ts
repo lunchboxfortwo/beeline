@@ -21,7 +21,7 @@ describe('actual owned-model claim transaction and secret boundary', () => {
   });
   afterEach(async () => { vi.unstubAllEnvs(); await f.db.close(); });
   const input = () => ({ roomId: MODEL_ROOM, commandId, generationId });
-  const capability = async () => (await daemon.negotiateOwnedModel(MODEL_AGENT, MODEL_SOURCE, true)).capability!;
+  const capability = async () => (await daemon.negotiateOwnedModel(MODEL_AGENT, true)).capability!;
 
   it('atomically issues the current claimed generation credential and keeps it out of activation, journal and live events', async () => {
     vi.stubEnv('BEELINE_NETWORK_ROUTER_V1', '1');

@@ -17,8 +17,8 @@ const ANDROID_12_SPLASH_ITEMS = {
   'android:windowSplashScreenIconBackgroundColor': '@color/splashscreen_background',
 };
 
-const LIGHT_SPLASH_BACKGROUND = '#F3EEE4';
-const DARK_SPLASH_BACKGROUND = '#14091A';
+const LIGHT_SPLASH_BACKGROUND = '#FAFAF9';
+const DARK_SPLASH_BACKGROUND = '#171717';
 
 function styleItems(stylesXml) {
   const styles = stylesXml?.resources?.style ?? [];
@@ -50,6 +50,12 @@ function applyAndroid12SplashTheme(stylesXml) {
       value,
     });
   }
+  next = AndroidConfig.Styles.assignStylesValue(next, {
+    add: true,
+    parent: { name: 'AppTheme', parent: 'Theme.AppCompat.DayNight.NoActionBar' },
+    name: 'android:windowBackground',
+    value: '@color/splashscreen_background',
+  });
   return next;
 }
 

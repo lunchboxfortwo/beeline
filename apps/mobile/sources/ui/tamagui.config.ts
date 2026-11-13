@@ -1,5 +1,6 @@
 import { createTamagui } from 'tamagui';
 import { defaultConfig } from '@tamagui/config/v6';
+import { installWebControlProps } from './web-control-props';
 // `animations` is the driver both platforms export: CSS on web, React Native
 // animations on phones. `animationsCSS` exists only on web, so on phones every
 // Sheet threw Tamagui error 008 (no animation driver).
@@ -75,6 +76,8 @@ const body = {
 
 export const tamaguiConfig = createTamagui({
     ...defaultConfig,
+    // Historical browser surfaces retain their pre-redesign geometry.
+    tokens: { ...defaultConfig.tokens, radius: { ...defaultConfig.tokens.radius, transcript: 10, viewer: 14 } },
     animations,
     // Longhand style props (paddingHorizontal, backgroundColor) are the grammar's spelling.
     settings: { ...defaultConfig.settings, onlyAllowShorthands: false },
@@ -83,6 +86,9 @@ export const tamaguiConfig = createTamagui({
 });
 
 export type AppTamaguiConfig = typeof tamaguiConfig;
+
+// Web host: accessibilityRole and accessibilityLabel become role and aria-label.
+installWebControlProps();
 
 declare module 'tamagui' {
     interface TamaguiCustomConfig extends AppTamaguiConfig {}

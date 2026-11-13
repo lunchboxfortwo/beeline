@@ -448,7 +448,15 @@ export type RoomScheduleView = {
   readonly runCount: number;
 };
 export type RoomScheduleListResult = { readonly schedules: readonly RoomScheduleView[] };
+type RoutineRunView = {
+  readonly routineId: string;
+  readonly roomId: string;
+  readonly messageId: string;
+  readonly text: string;
+  readonly at: number;
+};
 export type ScheduledWorkResult = RoomScheduleListResult & RoomSubscriptionListResult & {
+  readonly recentRuns?: readonly RoutineRunView[];
   /** Absent on older servers; named Rooms and unnamed Rooms remain Rooms. */
   readonly isDirectMessage?: boolean;
   readonly roomName: string | null;
@@ -704,6 +712,10 @@ export type PairingCodeInput = { readonly code: string };
 export interface AgentInvitationPickerGuide {
   readonly lines: Readonly<Record<string, string>>;
   readonly other: string;
+  /** The one copyable prompt on Invite an external agent. */
+  readonly prompt?: string;
+  /** The full list of agents that accept the prompt. */
+  readonly listUrl?: string;
 }
 export type PairingCodeResult = PairingCodeInput & {
   readonly expiresAt: number;
