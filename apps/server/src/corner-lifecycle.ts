@@ -187,10 +187,26 @@ export async function archiveCorner(database: SqlDatabase, cornerId: string): Pr
 }
 
 
+/** A caller's fact write (head, checks, approval, merge) runs under the corner
+ * row lock, after the unlocked read. `project` is what that write will make
+ * visible. `write` rechecks the head or authority and commits the fact.
+ * False skips the machine write. A returned event replaces the projected one. */
+export type CornerAdvanceCommit = {
+  project(corner: CornerRow): {
+    corner: CornerRow;
+    facts?: Partial<CornerMachineFacts>;
+    /** Null commits the fact and does not run the machine. */
+    event?: CornerEvent | null;
+  } | undefined;
+  write(db: SqlDatabase): Promise<boolean | CornerEvent>;
+};
+
+
 export async function advanceCorner(
   database: SqlDatabase,
   cornerId: string,
   event: CornerEvent,
+  commit?: CornerAdvanceCommit,
 ): Promise<CornerAdvance> {
   // Admission is not a committed activity fact. Preserve the queue's lock
   // order (queue -> command -> Room); its committed event updates the machine.
@@ -200,9 +216,87 @@ export async function advanceCorner(
     const command = plan.wakes.length ? await createAgentCommand(db, event.command) : undefined;
     return { state: current.state, accepted: Boolean(command), ...(command ? { command } : {}) };
   });
-  return database.transaction(async (db) => {
-    const corner = await loadCorner(db, cornerId, event.kind === 'reconcile' ? 'skip-locked' : true);
+  // The corner row lock covers only the compare-and-write below. Every fact is
+  // read first without it, so events on one busy corner never queue behind
+  // another event's slow reads. A commit to the row in between changes its
+  // version; the write then reads the newer facts and compares again.
+  if (commit) return advanceCornerCommitted(database, cornerId, event, commit);
+  for (;;) {
+    const read = await readCornerAdvance(database, cornerId, event);
+    if (!read) return { accepted: false, state: undefined };
+    const written = await database.transaction(async db => {
+      const locked = await loadCorner(db, cornerId, event.kind === 'reconcile' ? 'skip-locked' : true);
+      if (!locked) return { accepted: false, state: undefined };
+      if (JSON.stringify(locked) !== JSON.stringify(read.corner)) return undefined;
+      return writeCornerAdvance(db, cornerId, event, read);
+    });
+    if (written) return written;
+  }
+}
+
+
+async function advanceCornerCommitted(
+  database: SqlDatabase,
+  cornerId: string,
+  event: CornerEvent,
+  commit: CornerAdvanceCommit,
+): Promise<CornerAdvance> {
+  for (;;) {
+    const corner = await loadCorner(database, cornerId, false);
     if (!corner) return { accepted: false, state: undefined };
+    const projected = commit.project(corner);
+    if (!projected) return { accepted: false, state: corner.machine?.state };
+    const chosen = projected.event === undefined ? event : projected.event;
+    if (chosen === null) {
+      const wrote = await database.transaction(async db => {
+        const locked = await loadCorner(db, cornerId, true);
+        if (!locked) return { accepted: false, state: undefined };
+        if (JSON.stringify(locked) !== JSON.stringify(corner)) return undefined;
+        await commit.write(db);
+        return { accepted: false, state: locked.machine?.state };
+      });
+      if (wrote) return wrote;
+      continue;
+    }
+    const read = await readCornerAdvance(database, cornerId, chosen, {
+      corner: projected.corner, facts: projected.facts, before: corner.lifecycle,
+    });
+    if (!read) return { accepted: false, state: undefined };
+    const written = await database.transaction(async db => {
+      // The caller's fact write has to land. A reconcile event still waits:
+      // the lock now covers only this compare-and-write, so a skip would drop
+      // the check or head update while another event holds the row.
+      const locked = await loadCorner(db, cornerId, true);
+      if (!locked) return { accepted: false, state: undefined };
+      if (JSON.stringify(locked) !== JSON.stringify(corner)) return undefined;
+      const result = await commit.write(db);
+      if (result === false) return { accepted: false, state: locked.machine?.state };
+      return writeCornerAdvance(db, cornerId, result === true ? chosen : result, read);
+    });
+    if (written) return written;
+  }
+}
+
+
+type CornerAdvanceRead = {
+  corner: CornerRow;
+  head: string | undefined;
+  row: CornerIdleRow | undefined;
+  checkSource: { id: string } | undefined;
+  facts: CornerMachineFacts;
+};
+
+
+/** Every fact for one event, read without the corner row lock. */
+async function readCornerAdvance(
+  db: SqlDatabase,
+  cornerId: string,
+  event: CornerEvent,
+  projected?: { corner: CornerRow; facts?: Partial<CornerMachineFacts>; before?: CornerLifecycleView },
+): Promise<CornerAdvanceRead | undefined> {
+    // The row is read first: a later commit to it makes the version differ at the write.
+    const corner = projected?.corner ?? await loadCorner(db, cornerId, false);
+    if (!corner) return undefined;
     const head = corner.lifecycle.pr?.headSha ?? (event.kind === 'push' ? event.headSha : undefined);
     await ensureSystemIdentity(db);
     const row = (await db.query<CornerIdleRow>(cornerIdleSql('$1', true), [cornerId])).rows[0];
@@ -289,6 +383,46 @@ export async function advanceCorner(
         ? !row.suppressed && !row.worker_active && !row.reviewer_active && !row.blocking
         : false,
     };
+    if (projected?.before) alignProjectedIdle(row, facts, corner.lifecycle, projected.before);
+    if (projected?.facts) Object.assign(facts, projected.facts);
+    return { corner, head, row, checkSource, facts };
+}
+
+
+/** The idle snapshot still sees the committed lifecycle. A projected check or
+ * head change suppresses idle the same way the snapshot would after the write. */
+function alignProjectedIdle(
+  row: CornerIdleRow | undefined,
+  facts: CornerMachineFacts,
+  projected: CornerLifecycleView,
+  before: CornerLifecycleView,
+): void {
+  const suppresses = (lifecycle: CornerLifecycleView) => {
+    const summary = lifecycle.checksSummary as { status?: string; fetchStartedAt?: number } | undefined;
+    return lifecycle.checks === 'pending' || Boolean(
+      lifecycle.pr && summary?.status === 'unknown' && summary.fetchStartedAt === undefined,
+    );
+  };
+  if (suppresses(projected) && !suppresses(before)) {
+    facts.idleEligible = false;
+    if (row) row.suppressed = true;
+  }
+  const summary = projected.checksSummary as { statusChangedAt?: number; updatedAt?: number } | undefined;
+  const stamp = summary?.statusChangedAt ?? summary?.updatedAt;
+  if (row && typeof stamp === 'number' && Number(row.idle_since) < stamp) {
+    row.idle_since = String(stamp);
+    facts.idleSince = row.idle_since;
+  }
+}
+
+
+/** Holds the corner row lock: the machine transition and its effects only. */
+async function writeCornerAdvance(
+  db: SqlDatabase,
+  cornerId: string,
+  event: CornerEvent,
+  { corner, head, row, checkSource, facts }: CornerAdvanceRead,
+): Promise<CornerAdvance> {
     const prior = corner.machine ?? { state: 'idle' };
     const plan = transitionCorner(prior, { facts, event });
     if (plan.suppression) return { state: prior.state, accepted: false };
@@ -524,7 +658,7 @@ export async function advanceCorner(
       effects.push(notice.key);
     }
     // Committed command activity invalidates idle delivery immediately through its fact guard.
-    await db.query(
+    const stale = await db.query(
       `SELECT (terminal.ended).* FROM (SELECT beeline_end_agent_turn(agent_commands.id,agent_commands.generation_id,'cancelled','stale_idle_alert',NULL) ended
       FROM agent_commands WHERE state='pending' AND reason='report' AND private_payload->>'authorId'=$3
         AND private_payload->>'idleSince' IS NOT NULL AND COALESCE(private_payload->>'originCornerId',private_payload->>'fromRoomId')=$1::text
@@ -532,9 +666,13 @@ export async function advanceCorner(
       [cornerId, plan.state.state === 'idle' ? facts.idleSince : null, SYSTEM_IDENTITY_ID],
     );
     const state = { ...plan.state, effects };
+    // Any write here changes the row version, so an event that read before this
+    // commit reads again. Only a write-free event leaves the version alone.
+    const wrote = archived || event.kind === 'closed' || plan.wakes.length > 0 ||
+      plan.notifications.length > 0 || (stale.rowCount ?? 0) > 0;
     await db.query(
-      'UPDATE corner_facts SET machine=$2::jsonb WHERE corner_id=$1 AND machine IS DISTINCT FROM $2::jsonb',
-      [cornerId, JSON.stringify(state)],
+      `UPDATE corner_facts SET machine=$2::jsonb WHERE corner_id=$1 AND ($3 OR machine IS DISTINCT FROM $2::jsonb)`,
+      [cornerId, JSON.stringify(state), wrote],
     );
     return {
       state: state.state,
@@ -542,7 +680,6 @@ export async function advanceCorner(
       ...(archived ? { archived: true } : {}),
       ...(wakeResult ? { wake: wakeResult } : {}),
     };
-  });
 }
 
 
