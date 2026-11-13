@@ -1,6 +1,19 @@
-import { randomBytes, expect, it, HUMAN, RUBY, WORKER, ROOM, DM, rootFixture,
-  authority, claim, commands, open, worker, createAgentCommand, type CommandRow } from './test-support-commander.integration.test-support.js';
-import { commanderReportAddress, reportToCommander } from './commander.js';
+import { commanderReportAddress,reportToCommander } from './commander.js';
+import {
+authority,claim,commands,
+createAgentCommand,
+DM,
+expect,
+HUMAN,
+it,
+open,
+randomBytes,
+ROOM,
+rootFixture,
+RUBY,WORKER,
+worker,
+type CommandRow
+} from './test-support-commander.integration.test-support.js';
 
 it.each((['Room', 'DM'] as const).flatMap(surface => (['blocked', 'needs_decision', 'failed', 'done'] as const).map(status => ({ surface, status }))))('opening commander $status escalation returns to the original $surface even from inside the corner', async ({ surface, status }) => {
   if (surface === 'Room') {
@@ -53,7 +66,7 @@ it('later human orders get ordinary replies here while escalations still go to t
     .toMatchObject({ recipient: RUBY, returnRoom: DM });
 });
 
-it('drops an escalation tag to the human opener when their surface is elsewhere and posts the rest', async () => {
+it('preserves public post text while the report keeps its recorded escalation address', async () => {
   const opened = await open();
   const command = await createAgentCommand(rootFixture.db, { roomId: opened.cornerId, agentId: RUBY,
     sourceMessageId: null, reason: 'corner_check' });
@@ -61,9 +74,9 @@ it('drops an escalation tag to the human opener when their surface is elsewhere 
   await claim(turn);
   const posted = await rootFixture.daemon.execute('postCornerMessage', { ...authority(turn), cornerId: opened.cornerId,
     text: '@captain Choose the endpoint' }, RUBY);
-  expect(posted.receipt).toContain('tag @captain');
+  expect(posted.receipt).toContain('Message stored and visible.');
   expect((await rootFixture.db.query<{ text: string }>(`SELECT text FROM messages WHERE id=$1`, [posted.id])).rows[0]?.text)
-    .toBe('Choose the endpoint');
+    .toBe('@captain Choose the endpoint');
   expect((await commands(DM, RUBY)).filter(command => command.reason === 'report')).toEqual([]);
 });
 
@@ -86,9 +99,7 @@ it.each([false, true])('nested corners report one step up even with opening pare
   await rootFixture.daemon.execute('postAgentTurnReceipt', { ...authority(parentTurn), agentId: WORKER, status: 'complete' }, WORKER);
   await claim(report);
   await rootFixture.daemon.execute('report', { ...authority(report), status: 'needs_decision', text: 'Nested decision needed' }, WORKER);
-  if (removed) expect((await rootFixture.db.query(`SELECT room_id,text FROM messages WHERE author_id=$1 AND text=$2`, [WORKER, 'needs-decision: Nested decision needed'])).rows)
-    .toEqual([{ room_id: DM, text: 'needs-decision: Nested decision needed' }]);
-  else expect((await commands(DM, RUBY)).find(command => command.reason === 'report'))
+  expect((await commands(DM, RUBY)).find(command => command.reason === 'report'))
     .toMatchObject({ private: true, source: { authorId: WORKER, body: 'needs-decision: Nested decision needed' } });
 });
 

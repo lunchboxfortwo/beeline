@@ -1,10 +1,11 @@
-import { startQueuedTurn } from './test-fixtures/queued-turn.test-support.js';
-import { afterEach, beforeEach, describe, expect, it } from 'vitest';
-import { createAgentCommand, parseTaggedAgentLifecycleCommand, routeHumanMessage } from './agent-command.js';
+import { afterEach,beforeEach,describe,expect,it } from 'vitest';
+import { parseTaggedAgentLifecycleCommand } from './agent-command.js';
 import { announceAgentLifecycle } from './connection-presence.js';
 import { LiveHub } from './live.js';
 import { PhoneService } from './phone-service.js';
-import { PgliteDatabase, migratedDatabase } from './test-support.js';
+import { routeHumanMessage } from './test-fixtures/queue-routing.test-support.js';
+import { startQueuedTurn } from './test-fixtures/queued-turn.test-support.js';
+import { PgliteDatabase,migratedDatabase } from './test-support.js';
 
 const WORKSPACE = '11111111-1111-4111-8111-111111111111';
 const ROOM = '22222222-2222-4222-8222-222222222222';
@@ -66,202 +67,41 @@ describe('tagged agent lifecycle commands', () => {
     expect(parseTaggedAgentLifecycleCommand('@bee login now', 'bee')).toBeUndefined();
   });
 
-  it('answers status and help on the server without starting a model turn', async () => {
-    await send('1'.repeat(64), MEMBER, '@bee status');
-    await send('2'.repeat(64), MEMBER, '@bee help');
-    expect((await database.query(`SELECT 1 FROM agent_commands`)).rowCount).toBe(0);
-    expect(
-      (
-        await database.query<{ text: string }>(
-          `SELECT text FROM messages WHERE presentation='system' ORDER BY created_at,id`,
-        )
-      ).rows.map((row) => row.text),
-    ).toEqual([
-      '@bee is online · no turn is running',
-      '@bee supports lifecycle commands · restart · status · stop · retry · debug · help · /login',
-    ]);
-  });
 
-  it('does not add an unanswered-mention warning when an offline helper gets a server answer', async () => {
-    await database.query(`DELETE FROM live_outputs WHERE agent_id=$1 AND kind='presence'`, [AGENT]);
-    const phone = new PhoneService(database, 'http://local.test', undefined, undefined, live);
-    await phone.execute(
-      'sendRoomMessage',
-      { roomId: ROOM, messageId: 'd'.repeat(64), text: '@bee status', mentions: [AGENT] },
-      MEMBER,
-    );
-    expect(
-      (
-        await database.query<{ text: string }>(
-          `SELECT text FROM messages WHERE presentation='system' ORDER BY created_at,id`,
-        )
-      ).rows.map((row) => row.text),
-    ).toEqual(['@bee is offline · no turn is running']);
-  });
-
-  it('lets any Room member restart and deduplicates the accepted request', async () => {
-    // Restart only interrupts the agent, so a member who does not own it may ask.
-    await send('3'.repeat(64), MEMBER, '@bee /restart');
-    expect(
-      (
-        await database.query<{ text: string }>(
-          `SELECT text FROM messages WHERE presentation='system' ORDER BY created_at DESC LIMIT 1`,
-        )
-      ).rows[0]?.text,
-    ).toContain('@bee queued a restart');
-
-    const id = '4'.repeat(64);
-    const phone = new PhoneService(database, 'http://local.test', undefined, undefined, live);
-    await phone.execute(
-      'sendRoomMessage',
-      { roomId: ROOM, messageId: id, text: '@bee /restart', mentions: [AGENT] },
-      OWNER,
-    );
-    await routeHumanMessage(database, id);
-    await send('a'.repeat(64), OWNER, '@bee restart');
-    expect(
-      (
-        await database.query<{ lifecycle_before: string; state: string }>(
-          `SELECT lifecycle_before,state FROM agent_commands WHERE action='restart'`,
-        )
-      ).rows,
-    ).toEqual([{ lifecycle_before: 'boot-1', state: 'pending' }]);
-  });
-
-  it.each(['pending', 'old', 'complete', 'live'])(
-    'uses live execution evidence for lifecycle status and restart (%s)', async state => {
-      const ask = 'e'.repeat(64);
-      await send(ask, OWNER, '@bee work');
-      const command = (await database.query<{ id: string }>(
-        `SELECT id FROM agent_commands WHERE source_message_id=$1`, [ask])).rows[0]!;
-      if (state !== 'pending') {
-        await startQueuedTurn(database, ROOM, AGENT, command.id);
-        if (state === 'old') await database.query(
-          `UPDATE agent_commands SET created_at=now()-interval '1 day' WHERE id=$1`, [command.id]);
-        if (state === 'complete') await database.query(
-          `UPDATE agent_commands SET state='complete',completed_at=now() WHERE id=$1`, [command.id]);
-      }
-      const running = state === 'live' || state === 'old';
-      const texts = async () => (await database.query<{ text: string }>(
-        `SELECT text FROM messages WHERE presentation='system' ORDER BY created_at,id`)).rows.map(row => row.text);
-      await send('f'.repeat(64), OWNER, '@bee status');
-      expect(await texts()).toContain(`@bee is online · ${running ? 'one turn is running' : 'no turn is running'}`);
-      await send('1'.repeat(64), OWNER, '@bee debug');
-      expect((await texts()).find(text => text.includes('reported diagnostics')))
-        .toContain(running ? `turn ${ask}` : 'no active turn');
-      await send('2'.repeat(64), OWNER, '@bee restart');
-      expect(await texts()).toContain(`@bee queued a restart · ${running ? 'running turn will drain first' : 'helper will reconnect to confirm'}`);
-      const restart = (await database.query<{ id: string }>(
-        `SELECT id FROM agent_commands WHERE action='restart'`)).rows[0]!;
-      await startQueuedTurn(database, ROOM, AGENT, restart.id);
-      await announceAgentLifecycle(database, live, ROOM, AGENT, { lifecycleId: 'boot-2' });
-      expect((await database.query(`SELECT state FROM agent_commands WHERE id=$1`, [restart.id])).rows)
-        .toEqual([{ state: 'complete' }]);
-    },
-  );
-
-  it('confirms restart only after a claimed request reconnects with a new lifecycle', async () => {
-    const id = '5'.repeat(64);
-    await send(id, OWNER, '@bee restart');
-    const command = (
-      await database.query<{ id: string }>(`SELECT id FROM agent_commands WHERE action='restart'`)
-    ).rows[0]!;
-    await startQueuedTurn(database, ROOM, AGENT, command.id);
-
-    await announceAgentLifecycle(database, live, ROOM, AGENT, { lifecycleId: 'boot-1' });
-    expect(
-      (
-        await database.query<{ state: string }>(`SELECT state FROM agent_commands WHERE id=$1`, [
-          command.id,
-        ])
-      ).rows[0]?.state,
-    ).toBe('pending');
-
-    await announceAgentLifecycle(database, live, ROOM, AGENT, { lifecycleId: 'boot-2' });
-    expect(
-      (
-        await database.query<{ state: string; confirmed: boolean }>(
-          `SELECT state,restart_confirmed_at IS NOT NULL confirmed FROM agent_commands WHERE id=$1`,
-          [command.id],
-        )
-      ).rows[0],
-    ).toEqual({ state: 'complete', confirmed: true });
-    expect(
-      (
-        await database.query<{ text: string }>(
-          `SELECT text FROM messages
-           WHERE presentation='system' AND system_event->>'verb'='reconnected after restart'`,
-        )
-      ).rows[0]?.text,
-    ).toBeUndefined();
-  });
-
-  it('keeps empty stop/retry requests silent', async () => {
-    await send('e'.repeat(64), OWNER, '@bee stop');
-    await send('f'.repeat(64), OWNER, '@bee retry');
+  it.each(['restart','/restart','status','retry','debug','help','login','/login'])('delivers @bee %s as ordinary agent input',async command=>{
+    const id='1'.repeat(64);
+    await send(id,MEMBER,`@bee ${command}`);
+    expect((await database.query('SELECT action,state,message FROM agent_commands')).rows).toEqual([
+      {action:'input',state:'pending',message:expect.objectContaining({body:`@bee ${command}`,authorId:MEMBER})}]);
     expect((await database.query("SELECT 1 FROM messages WHERE presentation='system'")).rowCount).toBe(0);
-    expect((await database.query('SELECT 1 FROM agent_commands')).rowCount).toBe(0);
+    await announceAgentLifecycle(database,live,ROOM,AGENT,{lifecycleId:'boot-2'});
+    expect((await database.query('SELECT state FROM agent_commands')).rows).toEqual([{state:'pending'}]);
   });
 
-  it('keeps a duplicate restart request silent while retaining the accepted restart history', async () => {
-    await send('d'.repeat(64), OWNER, '@bee restart');
-    await send('e'.repeat(64), OWNER, '@bee restart');
-    expect((await database.query("SELECT text FROM messages WHERE presentation='system'")).rows)
-      .toEqual([expect.objectContaining({ text: expect.stringContaining('queued a restart') })]);
-    expect((await database.query("SELECT 1 FROM agent_commands WHERE action='restart'")).rowCount).toBe(1);
+  it('a reconnect resend deduplicates its source, while a separate restart request stays distinct',async()=>{
+    const phone=new PhoneService(database,'http://test');
+    for(const id of ['1'.repeat(64),'1'.repeat(64),'2'.repeat(64)])
+      await phone.execute('sendRoomMessage',{roomId:ROOM,messageId:id,text:'@bee restart'},MEMBER);
+    expect((await database.query("SELECT 1 FROM agent_commands WHERE state='pending' AND action='input'")).rowCount).toBe(2);
   });
 
-  it('maps stop and retry onto authoritative turn state', async () => {
-    const ask = '6'.repeat(64);
-    await database.query(
-      `INSERT INTO messages(id,room_id,author_id,text) VALUES($1,$2,$3,'@bee work')`,
-      [ask, ROOM, MEMBER],
-    );
-    const original = await createAgentCommand(database, {
-      roomId: ROOM,
-      agentId: AGENT,
-      sourceMessageId: ask,
-      reason: 'human_tag',
-    });
-    await startQueuedTurn(database, ROOM, AGENT, original!.id);
-    await send('7'.repeat(64), MEMBER, '@bee stop');
-    expect(
-      (
-        await database.query<{ status: string }>(
-          `SELECT status FROM agent_turns WHERE room_id=$1 AND request_id=$2 AND agent_id=$3`,
-          [ROOM, ask, AGENT],
-        )
-      ).rows[0]?.status,
-    ).toBe('cancelled');
-    expect(
-      (await database.query(`SELECT 1 FROM agent_commands WHERE action='stop'`)).rowCount,
-    ).toBe(1);
+  it('offline control prose stays queued without a server-generated answer',async()=>{
+    await database.query("DELETE FROM live_outputs WHERE agent_id=$1 AND kind='presence'",[AGENT]);
+    await send('1'.repeat(64),MEMBER,'@bee status');
+    expect((await database.query("SELECT 1 FROM agent_commands WHERE state='pending'")).rowCount).toBe(1);
+    expect((await database.query("SELECT 1 FROM messages WHERE presentation='system'")).rowCount).toBe(0);
+  });
 
-    const failedAsk = '8'.repeat(64);
-    await database.query(
-      `INSERT INTO messages(id,room_id,author_id,text) VALUES($1,$2,$3,'@bee fail')`,
-      [failedAsk, ROOM, OWNER],
-    );
-    const failed = await createAgentCommand(database, {
-      roomId: ROOM,
-      agentId: AGENT,
-      sourceMessageId: failedAsk,
-      reason: 'human_tag',
-    });
-    await startQueuedTurn(database, ROOM, AGENT, failed!.id);
-    await database.query(
-      `UPDATE agent_turns SET status='failed',failure_reason='provider failed' WHERE request_id=$1`,
-      [failedAsk],
-    );
-    await database.query(`UPDATE agent_commands SET state='complete' WHERE id=$1`, [failed!.id]);
-    await send('9'.repeat(64), OWNER, '@bee retry');
-    expect(
-      (
-        await database.query<{ action: string; reason: string; turn_request_id: string }>(
-          `SELECT action,reason,turn_request_id FROM agent_commands WHERE source_message_id=$1`,
-          ['9'.repeat(64)],
-        )
-      ).rows[0],
-    ).toEqual({ action: 'resume', reason: 'tagged_lifecycle_retry', turn_request_id: failedAsk });
+  it('exact tagged Stop cancels pending work; a later retry is another ordinary request',async()=>{
+    await send('1'.repeat(64),MEMBER,'@bee work');
+    const item=(await database.query<{id:string}>('SELECT id FROM agent_commands')).rows[0]!;
+    await startQueuedTurn(database,ROOM,AGENT,item.id);
+    await send('2'.repeat(64),MEMBER,'@bee stop');
+    expect((await database.query('SELECT state FROM agent_commands WHERE id=$1',[item.id])).rows).toEqual([{state:'cancelled'}]);
+    expect((await database.query("SELECT status FROM agent_turns")).rows).toEqual([{status:'cancelled'}]);
+    await send('3'.repeat(64),MEMBER,'@bee retry');
+    expect((await database.query("SELECT action,state FROM agent_commands WHERE source_message_id=$1",['3'.repeat(64)])).rows)
+      .toEqual([{action:'input',state:'pending'}]);
+    expect((await database.query("SELECT 1 FROM agent_commands WHERE action='stop'")).rowCount).toBe(0);
   });
 });

@@ -1,115 +1,51 @@
-import { cornerObjectiveSql } from './corner-objective.js';
-import { voiceDateContext } from './voice-reply.js';
-import { subscriptionPromptBody } from './agent-subscriptions.js';
-import { boundReplyExcerpt, REPLY_EXCERPT_MAX_LENGTH } from '@beeline/api-contract/daemon';
-import type { AgentCommand, RoomInboxResult } from '@beeline/api-contract/daemon';
+import type { AgentCommand,RoomInboxResult } from '@beeline/api-contract/daemon';
 import { isResumeKind } from '@beeline/api-contract/phone';
-import type { SqlDatabase } from './database.js';
-import { advanceCorner } from './corner-lifecycle.js';
 import { SYSTEM_IDENTITY_ID } from '@beeline/api-contract/system-identity';
-import { CommandRow, checkFailureLogBody, reportedHeadBody } from './agent-command.js';
-import { MergeCard, WorkflowWakeCard, mergeCardDetail, workflowWakeDetail, squireDecisionDetail } from './agent-command-route-agent-result.js';
-import { createAgentCommand } from './agent-command.js';
+import { CommandRow,checkFailureLogBody,createAgentCommand,reportedHeadBody } from './agent-command.js';
+import { advanceCorner } from './corner-lifecycle.js';
+import type { SqlDatabase } from './database.js';
 
 
 
-/** Every pending item in one agent's queue, across the places where it is a
- * current member, oldest first. Reading never spends an item. */
+/** One durable queue read, shared by helper push and connected-app delivery. */
+export async function readAgentQueueRows(db:SqlDatabase,agentId:string,roomId?:string) {
+  return db.query<CommandRow & { parent_room_id: string | null }>(
+    `SELECT item.*,room.parent_id parent_room_id FROM agent_commands item
+     LEFT JOIN rooms room ON room.id=item.room_id
+     WHERE item.agent_id=$1 AND ($2::text IS NULL OR item.room_id::text=$2) AND item.state='pending'
+     ORDER BY item.inbox_sequence,item.created_at,item.id`, [agentId, roomId ?? null]);
+ }
+
+/** Every pending item in one agent's queue, in append order.
+ * Membership belongs to insertion and publication; reading never spends an item. */
 export async function readAgentCommands(
   db: SqlDatabase,
   agentId: string,
   roomId?: string,
 ): Promise<{ commandProtocol: 2; commands: AgentCommand[] }> {
-  const rows = await db.query<
-    CommandRow & {
-      text: string;
-      delivered_context: string | null;
-      voice_origin: boolean;
-      receipt_hint: string | null;
-      author_id: string;
-      attachments: RoomInboxResult['items'][number]['attachments'];
-      system_event: RoomInboxResult['items'][number]['systemEvent'];
-      presentation: string;
-      reply_to_message_id: string | null;
-      reply_to_author_id: string | null;
-      reply_to_author_name: string | null;
-      reply_to_excerpt: string | null;
-      merge_card: MergeCard | null;
-      wake_card_type: string | null;
-      wake_card: WorkflowWakeCard | null;
-      workflow_state: string | null;
-      workflow_outcomes: Record<string, string> | null;
-      workflow_status: string | null;
-      watched_corner_id: string;
-      watched_corner_name: string;
-      watched_merge_commit: string | null;
-      parent_room_id: string | null;
-      created_at: Date;
-    }
-  >(
-    `WITH delivery AS (
-     SELECT c.*,command_corner.parent_id parent_room_id,EXISTS(SELECT 1 FROM voice_orders voice WHERE voice.source_message_id=c.source_message_id AND voice.agent_id=c.agent_id) voice_origin,c.recovery_context delivered_context,CASE WHEN c.reason='corner_objective' THEN ${cornerObjectiveSql('command_corner')} WHEN c.reason='free_agent_checkin' THEN c.wake_context->>'checkinPrompt' ELSE m.text END text,CASE WHEN m.card_type='daemon-fact' AND m.card->>'type'='corner-complete' THEN m.card END merge_card,CASE WHEN workflow_latest.card IS NOT NULL THEN workflow_version.markdown::jsonb->'handoffs'->(workflow_latest.card->>'toState')->>'hint' WHEN m.room_id=c.room_id THEN COALESCE(m.card->>'receiptHint',choice_message.card->>'receiptHint') END receipt_hint,m.author_id,m.attachments,m.system_event,m.presentation,m.reply_to_message_id,reply_parent.author_id reply_to_author_id,reply_author.name reply_to_author_name,left(reply_parent.text,${REPLY_EXCERPT_MAX_LENGTH + 1}) reply_to_excerpt,CASE WHEN m.room_id=c.room_id AND m.card->>'runId' IS NOT NULL THEN m.card_type WHEN resume_source.room_id=c.room_id AND resume_source.card->>'runId' IS NOT NULL THEN resume_source.card_type WHEN m.room_id=c.room_id THEN m.card_type END wake_card_type,CASE WHEN m.room_id=c.room_id AND m.card->>'runId' IS NOT NULL THEN m.card WHEN resume_source.room_id=c.room_id AND resume_source.card->>'runId' IS NOT NULL THEN resume_source.card WHEN m.room_id=c.room_id THEN m.card END wake_card,workflow_latest.card->>'toState' workflow_state,NULLIF(workflow_start.card->>'runStatus','live') workflow_status,workflow_version.markdown::jsonb->'handoffs'->(workflow_latest.card->>'toState')->'on' workflow_outcomes,watched_corner.id watched_corner_id,watched_corner.name watched_corner_name,watched_fact.lifecycle->'pr'->>'mergeCommitSha' watched_merge_commit FROM agent_commands c LEFT JOIN messages m ON m.id=c.source_message_id LEFT JOIN rooms command_corner ON command_corner.id=c.room_id
- LEFT JOIN messages reply_parent ON reply_parent.id=m.reply_to_message_id
- LEFT JOIN identities reply_author ON reply_author.id=reply_parent.author_id
- LEFT JOIN rooms watched_corner ON watched_corner.id=m.room_id AND c.reason='watched_corner'
- LEFT JOIN corner_github_cache watched_fact ON watched_fact.corner_id=watched_corner.id
- LEFT JOIN agent_commands resume_parent ON resume_parent.id=c.parent_command_id
- LEFT JOIN messages resume_source ON resume_source.id=resume_parent.source_message_id
- LEFT JOIN room_choices choice ON choice.id::text=m.card->>'choiceId' AND choice.room_id=c.room_id
- LEFT JOIN messages choice_message ON choice_message.id=choice.message_id
- LEFT JOIN LATERAL (
-   SELECT latest.card FROM messages latest
-   WHERE latest.room_id=c.room_id AND latest.card_type='workflow-handoff'
-     AND latest.card->>'runId'=COALESCE(m.card->>'runId',choice_message.card->>'runId',resume_source.card->>'runId')
-   ORDER BY (latest.card->>'seq')::int DESC NULLS LAST,latest.created_at DESC,latest.id DESC LIMIT 1
- ) workflow_latest ON true
- LEFT JOIN messages workflow_start ON workflow_start.id=workflow_latest.card->>'runId' AND workflow_start.room_id=c.room_id
- LEFT JOIN rooms workflow_room ON workflow_room.id=c.room_id
- LEFT JOIN workspace_skills workflow_skill ON workflow_skill.workspace_id=workflow_room.workspace_id
-   AND workflow_skill.slug=workflow_latest.card->>'workflowSlug' AND workflow_skill.kind='workflow'
- LEFT JOIN workspace_skill_versions workflow_version ON workflow_version.skill_id=workflow_skill.id
-   AND workflow_version.version=(workflow_latest.card->>'workflowVersion')::int
- WHERE c.agent_id=$2 AND ($1::uuid IS NULL OR c.room_id=$1) AND c.state='pending'
-   AND command_corner.archived_at IS NULL
-   AND EXISTS(SELECT 1 FROM memberships member WHERE member.room_id=COALESCE(command_corner.parent_id,command_corner.id)
-     AND member.identity_id=c.agent_id AND member.removed_at IS NULL)
-     ) SELECT delivery.* FROM delivery
-     ORDER BY delivery.created_at,delivery.id`,
-    [roomId ?? null, agentId],
-  );
+  const rows = await readAgentQueueRows(db,agentId,roomId);
   return {
     commandProtocol: 2,
-    commands: rows.rows.filter(r => r.id).map((r) => ({
-      id: r.id,
-      roomId: r.room_id,
-      returnRoomId: r.return_room_id ?? r.room_id,
-      ...(r.parent_room_id ? { parentRoomId: r.parent_room_id } : {}),
-      createdAt: Math.floor(r.created_at.getTime() / 1000),
-      agentId: r.agent_id,
-      sourceMessageId: r.private_payload ? r.id : r.source_message_id ?? r.id,
-      turnRequestId: r.turn_request_id,
-      action: r.action,
-      reason: r.reason,
-      ...(r.private_payload ? { private: true } : {}),
-      ...(r.system_event?.scheduleId ? { scheduleId: r.system_event.scheduleId } : {}),
-      rootCommandId: r.root_command_id,
-      ...(r.parent_command_id ? { parentCommandId: r.parent_command_id } : {}),
-      rootSourceMessageId: r.root_source_message_id,
-      agentDepth: r.agent_depth,
-      source: {
-        id: r.private_payload ? r.id : r.source_message_id ?? r.id,
-        authorId: r.private_payload?.authorId ?? (r.reason === 'free_agent_checkin' ? SYSTEM_IDENTITY_ID : r.author_id),
-        body: (r.delivered_context ? `${r.delivered_context}\n` : '') + (r.private_payload?.text ?? (r.reason === 'watched_corner' ? `Watched corner ${r.watched_corner_name} (${r.watched_corner_id}): ${r.system_event?.kind}${r.system_event?.kind === 'merged' && r.watched_merge_commit ? ` · merge commit ${r.watched_merge_commit}` : ''}\n` : '') + subscriptionPromptBody(r.text, r.system_event ?? null)) + (r.voice_origin ? '\n' + voiceDateContext(Date.now()) + ' Never start your reply with your name.\nThis input came from a live voice call. Answer the latest message and fold in earlier relevant speech from the current conversation in one response; do not answer each chunk separately. Start your report with a spoken answer sized to the question: one line for a status, a few sentences for a real answer, at most about 150 words. Then a blank line, then the full report.' : '') + checkFailureLogBody(r.system_event ?? null) + reportedHeadBody(r.system_event ?? null) + mergeCardDetail(r.merge_card) + workflowWakeDetail(r.wake_card_type, r.wake_card, r.workflow_state, r.workflow_outcomes, r.workflow_status) + squireDecisionDetail(r.wake_card_type, r.wake_card) + (r.receipt_hint ? `\nReceipt hint for this state: ${r.receipt_hint}. Attach an optional receipt when you call handoff.` : ''),
-        attachments: r.private_payload?.attachments ?? r.attachments ?? [],
-        createdAt: Math.floor(r.created_at.getTime() / 1000),
-        type: r.private_payload ? 'private' : r.reason === 'free_agent_checkin' ? 'system' : r.presentation,
-        systemEvent: r.system_event,
-        ...(r.reply_to_message_id ? { replyToMessageId: r.reply_to_message_id } : {}),
-        ...(r.reply_to_author_id ? { replyToAuthorId: r.reply_to_author_id } : {}),
-        ...(r.reply_to_author_name ? { replyToAuthorName: r.reply_to_author_name } : {}),
-        ...(r.reply_to_excerpt !== null ? { replyToExcerpt: boundReplyExcerpt(r.reply_to_excerpt) } : {}),
-      },
-    })),
+    commands: rows.rows.map(item => {
+      const createdAt = Math.floor(new Date(item.created_at).getTime() / 1000);
+      const source: AgentCommand['source'] = item.message ?? {
+        createdAt,
+        id: item.source_message_id ?? item.id, authorId: item.private_payload?.authorId ?? SYSTEM_IDENTITY_ID,
+        body: item.private_payload?.text ?? item.reason,
+        attachments: item.private_payload?.attachments ?? [], type: item.private_payload ? 'private' : 'system',
+      };
+      return {
+        id: item.id, roomId: item.room_id, returnRoomId: item.return_room_id ?? item.room_id,
+        ...(item.parent_room_id ? {parentRoomId:item.parent_room_id} : {}),
+        agentId: item.agent_id, createdAt, sourceMessageId: item.private_payload ? item.id : item.source_message_id ?? item.id,
+        turnRequestId: item.turn_request_id, action: item.action, reason: item.reason,
+        rootCommandId: item.root_command_id, rootSourceMessageId: item.root_source_message_id,
+        ...(item.parent_command_id ? {parentCommandId:item.parent_command_id} : {}),
+        agentDepth: item.agent_depth, ...(item.private_payload ? {private:true} : {}),
+        ...(source.systemEvent?.scheduleId ? {scheduleId:source.systemEvent.scheduleId} : {}),
+        source: { ...source, createdAt, body: source.body + checkFailureLogBody(source.systemEvent ?? null) + reportedHeadBody(source.systemEvent ?? null) },
+      };
+    }),
   };
 }
 

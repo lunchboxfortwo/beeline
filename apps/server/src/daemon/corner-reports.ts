@@ -1,80 +1,29 @@
-import { wall } from '@beeline/api-contract/daemon';
-import { endAgentTurn } from '../agent-turn-end.js';
-import { systemMessage } from '@beeline/api-contract/system-message-catalog';
-import { cornerObjectiveSql, writeCornerObjective } from '../corner-objective.js';
-import { cornerKindSql } from '../corner-opening.js';
-import { cornerRunStateSql } from '../corner-run.js';
-import { setCornerReviewer } from '../corner-reviewer.js';
-import { reportToCommander, CommandRefusalError } from '../commander.js';
-import { authorizeCommandOutput, type CommandRow } from '../agent-command.js';
-import { createHash } from 'node:crypto';
-import { cornerImplementerSql } from '../corner-worker.js';
-import { currentCornerBrief, resolveCornerBriefApproval, resolveCornerBriefAttachments, resolvePendingCornerBriefAttachments, validateCornerBrief } from '../corner-brief.js';
 import { fixCornerText } from '@beeline/api-contract/daemon';
-import { type SqlDatabase } from '../database.js';
-import { writeCornerTitle } from '../corner-title.js';
+import { systemMessage } from '@beeline/api-contract/system-message-catalog';
+import { answerQueuedMessage,authorizeCommandOutput,type CommandRow } from '../agent-command.js';
+import { CommandRefusalError } from '../commander.js';
+import { currentCornerBrief,resolveCornerBriefApproval,resolveCornerBriefAttachments,resolvePendingCornerBriefAttachments,validateCornerBrief } from '../corner-brief.js';
+import { cornerLifecycleSql,recordHelperRemoteState } from '../corner-github-cache.js';
 import { lockCornerLifecycle } from '../corner-lifecycle.js';
-import { systemLine, wakeLateCornerWatcher } from '../system-line.js';
-import { mediaIdFromUrl } from '../media-ttl.js';
+import { cornerObjectiveSql,writeCornerObjective } from '../corner-objective.js';
+import { cornerKindSql } from '../corner-opening.js';
+import { setCornerReviewer } from '../corner-reviewer.js';
+import { cornerRunStateSql } from '../corner-run.js';
+import { writeCornerTitle } from '../corner-title.js';
+import { type SqlDatabase } from '../database.js';
 import { AUTHORIZED_ROOMS_CTE } from '../institutional-history.js';
-import { cornerLifecycleSql, recordHelperRemoteState } from '../corner-github-cache.js';
+import { systemLine,wakeLateCornerWatcher } from '../system-line.js';
+import { daemonAccess,daemonIdentity } from './access.js';
 import type { DaemonContext } from './context.js';
-import { id, Input, Output } from './values.js';
-import { daemonWriteResult, daemonReach } from './corner-messages.js';
-import { daemonAccess, daemonIdentity } from './access.js';
+import { daemonReach,daemonWriteResult } from './corner-messages.js';
 import { daemonCheckReviewerAuthors } from './corner-reads.js';
+import { id,Input,Output } from './values.js';
 
 
   export async function daemonReport(ctx: DaemonContext, text: string, agentId: string, command = ctx.authorizedCommand!, database = ctx.database, automatic = false, status?: unknown, ask?: string) {
-    if (!automatic) {
-      text = text.replace(/^(?:done|blocked|failed|needs[-_]decision):\s*/, '');
-      if (!text.trim()) throw wall('credentials', { message: 'report requires status done, blocked, failed, or needs_decision and nonempty text', status: 400 });
-      status = ['done', 'blocked', 'failed', 'needs_decision'].includes(String(status)) ? status : 'done';
-      text = `${String(status).replace('_', '-')}: ${text}`;
-    }
-    const prefix = text.match(/^(done|blocked|failed|needs[-_]decision):\s*\S/)?.[1]?.replace('_', '-');
-    // Keep automatic reports' established prefix without inventing a status.
-    text = text.replace(/^needs_decision:/, 'needs-decision:');
-
-    const pending = (await database.query<{ id: string; url: string; name: string; mime_type: string; size: number }>(
-      `WITH RECURSIVE chain AS (
-         SELECT * FROM agent_commands WHERE id=$1
-         UNION ALL SELECT parent.* FROM agent_commands parent JOIN chain child ON parent.id=child.parent_command_id
-       ) SELECT attachment.id,attachment.url,attachment.name,attachment.mime_type,attachment.size::integer size
-       FROM agent_pending_attachments attachment WHERE attachment.room_id=$2 AND attachment.agent_id=$3
-         AND attachment.request_id IN (SELECT turn_request_id FROM chain WHERE room_id=$2 AND agent_id=$3)
-       ORDER BY attachment.created_at,attachment.id`, [command.id, command.room_id, agentId],
-    )).rows;
-    // An explicit report already answered this item; final prose adds nothing
-    // unless tools queued more files after that report.
-    if (automatic && command.private_payload?.reported === true && !pending.length)
-      return daemonWriteResult(ctx);
-    const attachments = [...(command.private_payload?.attachments ?? []),
-      ...pending.map(row => ({ url: row.url, name: row.name, mimeType: row.mime_type, size: row.size }))]
-      .filter((row, index, all) => all.findIndex(other => other.url === row.url) === index);
-    // Collapse alternate URLs for the same object; content deduplication waits
-    // until reportToCommander has selected the recipient.
-    const byObject = new Map<string, typeof attachments[number]>();
-    for (const attachment of attachments) {
-      const key = mediaIdFromUrl(attachment.url) ?? attachment.url;
-      if (!byObject.has(key)) byObject.set(key, attachment);
-    }
-    const uniqueAttachments = [...byObject.values()];
-    const result = await reportToCommander(database, command.room_id, agentId, text, command,
-      createHash('sha256').update(`report:${command.id}:${text}:${ask ?? ""}:${JSON.stringify(uniqueAttachments)}`).digest('hex'), {
-        attachments: uniqueAttachments, automatic, ask, afterCommit: ctx.afterCommit,
-        orderIssuer: automatic && command.private_payload?.kind === 'order',
-      });
-    for (const attachment of pending) await database.query(
-      `DELETE FROM agent_pending_attachments WHERE room_id=$1 AND agent_id=$2 AND id=$3`,
-      [command.room_id, agentId, attachment.id]);
-    if (command.private_payload) await database.query(
-      `UPDATE agent_commands SET private_payload=private_payload ||
-        jsonb_build_object('reported',true,'reportedOutcome',$2::text) WHERE id=$1`,
-      [command.id, prefix ?? null]);
-    if (prefix && ['done','failed','blocked','needs-decision'].includes(prefix))
-      await endAgentTurn(database,command,prefix==='failed'?'failed':'complete',null,result.id);
-    return result;
+    return answerQueuedMessage(database, agentId, { roomId: command.room_id, requestId: command.turn_request_id,
+      text, report: !automatic, status, ask,
+    });
   }
 
   export async function daemonWatchCorner(ctx: DaemonContext,

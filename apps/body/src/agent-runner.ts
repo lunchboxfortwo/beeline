@@ -1,18 +1,18 @@
-import { dirname, resolve } from 'node:path';
 import type { AgentCommand } from '@beeline/api-contract/daemon';
+import { dirname,resolve } from 'node:path';
 import { resolveSessionIdleMs } from './agent-process.js';
+import { AnswerStore,type StoredAnswer } from './answer-store.js';
 import { writePrivateFileAtomically } from './atomic-private-file.js';
-import { AnswerStore, type StoredAnswer } from './answer-store.js';
 import type { BodyConfig } from './config.js';
-import { captureConnectionUsage, ConnectorUsageRecorder } from './connector-runner.js';
-import { isAgentRemovedError, type DaemonApiClient } from './daemon-api-client.js';
-import { GrantCommandRunner, GrantRunnerServer, type GrantRunnerEndpoint } from './grant-runner.js';
+import { captureConnectionUsage,ConnectorUsageRecorder } from './connector-runner.js';
+import { isAgentRemovedError,type DaemonApiClient } from './daemon-api-client.js';
+import { GrantCommandRunner,GrantRunnerServer,type GrantRunnerEndpoint } from './grant-runner.js';
 import { openRouterRoutingCacheDir } from './openrouter-routing.js';
-import { PlaceSession, type Answer } from './place-session.js';
+import { PlaceSession,type Answer } from './place-session.js';
 import { PlaceStorage } from './place-storage.js';
-import { runtimeIdentity, type AgentRuntimeRecord } from './runtime.js';
+import { runtimeIdentity,type AgentRuntimeRecord } from './runtime.js';
 import { publishStorageFacts } from './storage-owners.js';
-import { TurnTrace, turnTraceDirectory } from './turn-trace.js';
+import { TurnTrace,turnTraceDirectory } from './turn-trace.js';
 import { workspaceAssetRoot } from './workspace-assets.js';
 import { prepareWorkspace } from './workspace-checkout.js';
 
@@ -74,6 +74,8 @@ export class AgentRunner {
       api: options.daemonApi, config: this.baseConfig, supervisorRoot: runtime.supervisorRoot,
       workspaceId: runtime.communityId, agent: this.agent, placeId, ...(parentRoomId ? { parentRoomId } : {}),
     }), async (placeId, input) => {
+      if (input.action === 'operation') return options.daemonApi.execute(
+        input.operation as keyof import('@beeline/api-contract/daemon').DaemonOperationMap,input.input as never);
       const session = this.places.get(placeId)?.session;
       if (!session) throw new Error('This place has no live session');
       if (input.action === 'context') {
@@ -176,10 +178,6 @@ export class AgentRunner {
     place.running = item;
     let started = false;
     try {
-      if (item.action === 'restart') {
-        await Promise.all([...this.places.values()].map(other => other.session.stop()));
-        await this.store({ itemId: item.id, roomId: item.roomId, requestId: item.turnRequestId, text: '' });
-      } else {
         // A harness that cannot start leaves the item waiting for the next queue update.
         await place.session.start();
         started = true;
@@ -197,7 +195,6 @@ export class AgentRunner {
         place.waiting = place.waiting.filter(next => !consumed.has(next.id));
         void Promise.resolve().then(() => this.afterAnswer(item, answer))
           .catch(error => console.warn('[body] answer diagnostics failed:', error));
-      }
     } catch (error) {
       console.error(`[body] place ${placeId} could not answer ${item.id}:`, error);
       if (this.latest.some(listed => listed.id === item.id) && !this.answered.has(item.id)) {
@@ -263,14 +260,15 @@ export class AgentRunner {
         await this.answers.save(answer);
         this.durable.add(answer.itemId);
       }
-      if (answer.text) await api.execute('postRoomMessage', {
+      const receipt=await api.execute('postRoomMessage', {
         roomId: answer.roomId, requestId: answer.requestId, text: answer.text, presentation: 'message',
         ...(answer.steps ? { steps: answer.steps } : {}),
       });
-      else await api.execute('markAgentTurnSilent', { roomId: answer.roomId, requestId: answer.requestId });
-      this.stored.delete(answer.itemId);
-      this.durable.delete(answer.itemId);
-      void this.answers.remove(answer.itemId).catch(error => console.warn('[body] answer cleanup failed:', error));
+      if (receipt.answered!==false) {
+        this.stored.delete(answer.itemId);
+        this.durable.delete(answer.itemId);
+        void this.answers.remove(answer.itemId).catch(error => console.warn('[body] answer cleanup failed:', error));
+      }
     } catch (error) {
       // A queued item still owns its stored answer, including after a refusal.
       // Only a queue snapshot confirming completion or Stop can discard it.

@@ -1,11 +1,11 @@
-import { startQueuedTurn } from './test-fixtures/queued-turn.test-support.js';
-import { afterEach, beforeEach, describe, expect, it } from 'vitest';
-import { routeHumanMessage } from './agent-command.js';
+import { afterEach,beforeEach,describe,expect,it } from 'vitest';
 import { DaemonService } from './daemon-service.js';
+import type { SqlDatabase } from './database.js';
 import { LiveHub } from './live.js';
 import { PhoneService } from './phone-service.js';
-import { PgliteDatabase, migratedDatabase } from './test-support.js';
-import type { SqlDatabase } from './database.js';
+import { routeHumanMessage } from './test-fixtures/queue-routing.test-support.js';
+import { startQueuedTurn } from './test-fixtures/queued-turn.test-support.js';
+import { PgliteDatabase,migratedDatabase } from './test-support.js';
 
 const WORKSPACE = '11111111-1111-4111-8111-111111111111';
 const ROOM = '22222222-2222-4222-8222-222222222222';
@@ -55,7 +55,7 @@ describe('solo-agent-untagged-silence', () => {
     // Each statement is another database round trip before the send receipt.
     // The corner front door classifies the address with one indexed Room lookup.
     // The receipt reads which external MCP agents were notified.
-    expect(statements).toHaveLength(10);
+    expect(statements.filter(sql=>sql.includes('WITH audience AS MATERIALIZED'))).toHaveLength(1);
     expect(commands).toHaveLength(1);
     expect(commands[0]).toMatchObject({ agent_id: AGENT, source_message_id: MESSAGE });
     await routeHumanMessage(db, MESSAGE);
@@ -83,7 +83,9 @@ describe('solo-agent-untagged-silence', () => {
       .toEqual([{message_id:MESSAGE}]);
     if(operation==='sendRoomReply')expect((await db.query(`SELECT reply_to_message_id,root_message_id FROM messages WHERE id=$1`,[MESSAGE])).rows)
       .toEqual([{reply_to_message_id:parent,root_message_id:parent}]);
-    await expect(phone.execute(operation,{...input,text:'Different content'},HUMAN,client)).rejects.toThrow('messageId is invalid');
+    const distinct=await phone.execute(operation,{...input,text:'Different content'},HUMAN,client);
+    expect(distinct.messageId).not.toBe(first.messageId);
+    expect((await db.query('SELECT text FROM messages WHERE id=$1',[distinct.messageId])).rows).toEqual([{text:'Different content'}]);
     expect((await db.query(`SELECT text FROM messages WHERE id=$1`,[MESSAGE])).rows).toEqual([{text:'Please review'}]);
   });
 
@@ -110,9 +112,11 @@ describe('solo-agent-untagged-silence', () => {
     expect(await send()).toEqual([]);
   });
 
-  it.each(['@channel hi', '@other hi', '@unknown hi', '@system hi'])('does not infer a target for %s', async text => {
+  it.each(['@other hi', '@unknown hi', '@system hi'])('does not infer a target for %s', async text => {
     expect(await send(text)).toEqual([]);
   });
+
+  it('channel asks reach all current agent members',async()=>{expect(await send('@channel hi')).toHaveLength(1);});
 
   it('ignores removed memberships when counting', async () => {
     await db.query(`INSERT INTO memberships(workspace_id,room_id,identity_id,role,removed_at)

@@ -1,12 +1,12 @@
-import { mkdtemp, readFile, rm } from 'node:fs/promises';
+import type { AgentCommand } from '@beeline/api-contract/daemon';
+import { mkdtemp,readFile,rm } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { afterEach, beforeEach, expect, it, vi } from 'vitest';
-import type { AgentCommand } from '@beeline/api-contract/daemon';
+import { afterEach,beforeEach,expect,it,vi } from 'vitest';
 import { AgentRunner } from './agent-runner.js';
 import { AnswerStore } from './answer-store.js';
 import type { DaemonApiClient } from './daemon-api-client.js';
-import { identityFromKey, type AgentRuntimeRecord } from './runtime.js';
+import { identityFromKey,type AgentRuntimeRecord } from './runtime.js';
 
 const harness = vi.hoisted(() => ({ start: vi.fn(), deliver: vi.fn(), stop: vi.fn(), steer: vi.fn() }));
 vi.mock('./place-session.js', () => ({ PlaceSession: class {
@@ -152,4 +152,19 @@ it('posts an already stored answer when the outbox becomes unwritable afterwards
   const f = await fixture();
   f.changed([f.item('stored-before-readonly')]);
   await vi.waitFor(() => expect(f.execute).toHaveBeenCalledWith('postRoomMessage', expect.objectContaining({ text: 'answer' })));
+});
+
+
+it('sends empty closing text through the answer exit and retains it while no answer exists',async()=>{
+  const f=await fixture(),item=f.item('empty-closing');
+  harness.deliver.mockResolvedValueOnce({text:'',steps:[],toolCalls:[],clearDraft:async()=>{}});
+  f.execute.mockImplementation(async name=>name==='postRoomMessage'?{id:'owed',createdAt:1,answered:false}:{id:'status',createdAt:1});
+  f.changed([item]);
+  await vi.waitFor(()=>expect(f.execute).toHaveBeenCalledWith('postRoomMessage',expect.objectContaining({text:'',requestId:item.turnRequestId})));
+  expect((await new AnswerStore(join(f.root,'answers')).all()).map(answer=>answer.itemId)).toEqual([item.id]);
+  expect(f.execute.mock.calls.some(call=>call[0]==='markAgentTurnSilent')).toBe(false);
+  f.execute.mockResolvedValue({id:'posted',createdAt:1});
+  f.changed([item]);
+  await vi.waitFor(async()=>expect(await new AnswerStore(join(f.root,'answers')).all()).toEqual([]));
+  expect(harness.deliver).toHaveBeenCalledTimes(1);
 });

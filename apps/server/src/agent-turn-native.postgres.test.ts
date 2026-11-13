@@ -1,15 +1,16 @@
+import { randomUUID } from 'node:crypto';
+import { Pool,type QueryResultRow } from 'pg';
+import { afterAll,beforeAll,describe,expect,it } from 'vitest';
+import { createAgentCommand } from './agent-command.js';
+import { sendOrder } from './commander.js';
+import { claimAgentConnection } from './connection-presence.js';
+import { DaemonService } from './daemon-service.js';
+import { migrate,PostgresDatabase,type SqlDatabase } from './database.js';
+import { LiveHub } from './live.js';
+import { PhoneService } from './phone-service.js';
+import { concurrentWriters } from './test-fixtures/concurrent-writers.js';
+import { routeHumanMessage } from './test-fixtures/queue-routing.test-support.js';
 import { startQueuedTurn } from './test-fixtures/queued-turn.test-support.js';
-import {randomUUID} from 'node:crypto';
-import {Pool,type QueryResultRow} from 'pg';
-import {afterAll,beforeAll,describe,expect,it} from 'vitest';
-import {migrate,PostgresDatabase,type SqlDatabase} from './database.js';
-import { createAgentCommand, routeHumanMessage } from './agent-command.js';
-import {claimAgentConnection} from './connection-presence.js';
-import {DaemonService} from './daemon-service.js';
-import {LiveHub} from './live.js';
-import {PhoneService} from './phone-service.js';
-import {sendOrder} from './commander.js';
-import {concurrentWriters} from './test-fixtures/concurrent-writers.js';
 
 const url=process.env.BEELINE_COMMAND_TEST_POSTGRES_URL;
 if(url&&!['localhost','127.0.0.1','[::1]'].includes(new URL(url).hostname))throw new Error('Isolated loopback PostgreSQL required');

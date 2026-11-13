@@ -38,7 +38,7 @@
           "httpPhoneOperation"
         ]
       },
-      "ownerSites": 16,
+      "ownerSites": 14,
       "strict": true,
       "total": 0,
       "fix": "Send phone operations through LiveConnection.request. Keep HTTP limited to its documented non-phone tool commands; do not add another sender. Rooms MCP retains its separate authenticated tool boundary."
@@ -46,7 +46,7 @@
     {
       "id": "work.command-creation",
       "module": "Work authority",
-      "invariant": "Agent commands are created only by agent-command.ts creation functions; only a command authorizes a turn.",
+      "invariant": "Agent queue items are appended only by the conversational queue owner; only an item authorizes a turn.",
       "pattern": "INSERT\\s+INTO\\s+(?:\"?\\w+\"?\\s*\\.\\s*)?\"?agent_commands\"?\\b",
       "flags": "i",
       "scope": [
@@ -56,15 +56,14 @@
         "apps/server/src/agent-command.ts"
       ],
       "total": 0,
-      "fix": "Call createAgentCommand(db, {...}) or createMcpAgentCommand for an explicit connected-app call in apps/server/src/agent-command.ts instead of inserting the row; it owns depth, dedupe and wake routing.",
+      "fix": "Call queueMessage in apps/server/src/agent-command.ts; it owns membership, source/return addresses and durable append.",
       "strict": true,
       "ownerFunctions": {
         "apps/server/src/agent-command.ts": [
-          "createClaimedMcpAgentCommand",
           "insertAgentCommand"
         ]
       },
-      "ownerSites": 2
+      "ownerSites": 1
     },
     {
       "id": "work.command-claim",
@@ -655,7 +654,7 @@
       "apps/server/src",
       "apps/auth/src"
     ],
-    "bootstrapTotal": 1651,
+    "bootstrapTotal": 1648,
     "unusedTotal": 172,
     "tables": {
       "agent_avatars": {
@@ -704,10 +703,13 @@
             "reason": "Retained without runtime use until the previous server drains during this rolling release.",
             "drop": "Next release after turn-lifecycle cleanup: docs/agent-server-surfaces.md#turn-recovery-storage-retirement"
           },
-          "lifecycle_before": "existing before the registry; weekly audit reviews",
+          "lifecycle_before": {
+            "reason": "Historical orchestration field retained for the previous server during this rolling release.",
+            "drop": "Next release after https://github.com/Beeline-Work/beeline/pull/4310 drains old servers."
+          },
           "review_context": "existing before the registry; weekly audit reviews",
           "wake_context": "existing before the registry; weekly audit reviews",
-          "report_outcome": "existing before the registry; weekly audit reviews",
+          "report_outcome": "The published answer outcome distinguishes failed work from a successful answer while both complete their queue obligation.",
           "cancellation_reason": "existing before the registry; weekly audit reviews",
           "recovery_context": "existing before the registry; weekly audit reviews",
           "wake_after": {
@@ -731,7 +733,11 @@
             "reason": "Retained without runtime use until the previous server drains during this rolling release.",
             "drop": "Next release after turn-lifecycle cleanup: docs/agent-server-surfaces.md#turn-recovery-storage-retirement"
           },
-          "return_room_id": "Where the item's answer goes, fixed when the item is queued (an order's issuer place)."
+          "return_room_id": "Where the item's answer goes, fixed when the item is queued (an order's issuer place).",
+          "answer_attachments": "Uploaded answer media must survive helper/server replacement without an optional table read before publication.",
+          "report_address": "The original commander escalation address is frozen at append so later orders or transcript changes cannot redirect a report.",
+          "message": "The delivered source text, author and attachments must survive transcript edits and be readable without optional context joins.",
+          "posted_reply_id": "A committed mid-turn reply suppresses closing-message publication and survives helper/server replacement."
         }
       },
       "agent_connections": {
@@ -2475,14 +2481,15 @@
       },
       "rooms_mcp_idempotency": {
         "module": "Tools and connectors",
-        "reason": "existing before the registry; weekly audit reviews",
+        "reason": "Retired send-claim/result cache retained only while the previous server drains; queue/message IDs own native replay.",
         "columns": {
           "member_id": "existing before the registry; weekly audit reviews",
           "idempotency_key": "existing before the registry; weekly audit reviews",
           "message_id": "existing before the registry; weekly audit reviews",
           "result": "existing before the registry; weekly audit reviews",
           "claimed_at": "existing before the registry; weekly audit reviews"
-        }
+        },
+        "drop": "Next release after https://github.com/Beeline-Work/beeline/pull/4310 drains old servers."
       },
       "rooms_mcp_members": {
         "module": "Tools and connectors",
@@ -3445,13 +3452,14 @@
       },
       "diagnostic_command_origins": {
         "module": "Device session diagnostics",
-        "reason": "Durable content-free diagnosis cannot be recovered from volatile application logs.",
+        "reason": "Historical source attribution remains readable while old servers drain; queue admission no longer writes diagnostic records.",
         "columns": {
           "command_id": "Durable command identifier preserves origin across asynchronous execution.",
           "session_id": "Origin activity session, distinct from the helper host.",
           "user_id": "Authenticated initiating person independent of agent ownership.",
           "action_id": "Origin action propagates across child commands."
-        }
+        },
+        "drop": "Next release after https://github.com/Beeline-Work/beeline/pull/4310 drains old servers."
       },
       "diagnostic_actions_default": {
         "module": "Device session diagnostics",

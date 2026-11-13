@@ -1,4 +1,4 @@
-import type { CornerLifecycleView, CornerStateFacts, DerivedCornerState } from '@beeline/api-contract/phone';
+import type { CornerLifecycleView,CornerStateFacts,DerivedCornerState } from '@beeline/api-contract/phone';
 import type { CornerEvent } from './corner-lifecycle-values.js';
 
 export type CornerCheckSummary = NonNullable<CornerLifecycleView['checksSummary']> & {
@@ -49,8 +49,7 @@ export type MachineWake = {
     | 'review-gap'
     | 'land'
     | 'merge-refused'
-    | 'merge-conflict'
-    | 'command';
+    | 'merge-conflict';
   key: string;
 };
 
@@ -130,14 +129,6 @@ export function transitionCorner(
       f.lifecycle.checksSummary.fetchStartedAt === undefined);
   const providerEnded = f.lifecycle?.outcome === 'abandoned' || f.lifecycle?.lifecycle === 'done';
   const merged = f.lifecycle?.outcome === 'landed' || Boolean(f.lifecycle?.pr?.mergedAt);
-  if (
-    event.kind === 'command' &&
-    (current.state === 'archived' || f.archived) &&
-    !['stop', 'restart'].includes(event.command.action ?? 'input')
-  )
-    return { state: current, wakes, notifications, suppression: 'archived' };
-  if (event.kind === 'command')
-    return { state: current, wakes: [{ kind: 'command', key: '' }], notifications };
   if (current.state === 'archived')
     return !f.archived && (event.kind === 'closed' || event.kind === 'merged')
       ? { state: event.kind === 'merged' ? { ...current, outcome: 'landed' } : current, wakes, notifications }

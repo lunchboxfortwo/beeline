@@ -1,8 +1,8 @@
-import { startQueuedCommand } from './test-fixtures/queued-turn.test-support.js';
-import { releaseAgentConnection, advanceCorner, randomUUID, randomBytes, expect, it, vi, MemoryObjectStorage, ObjectService, DaemonService, LiveHub, PushDeliveryLoop, createAgentCommand, GITHUB_SUBJECT, systemLine, HUMAN, RUBY, WORKER, WS, ROOM, DM, db, daemon, phone, order, claim, authority, commands, open, worker, rootFixture, type AgentCommand } from './test-support-commander-recovery.integration.test-support.js';
 import { claimAgentConnection } from './connection-presence.js';
+import { startQueuedCommand } from './test-fixtures/queued-turn.test-support.js';
+import { DM,DaemonService,GITHUB_SUBJECT,HUMAN,LiveHub,MemoryObjectStorage,ObjectService,PushDeliveryLoop,ROOM,RUBY,WORKER,WS,advanceCorner,authority,claim,commands,createAgentCommand,expect,it,open,randomBytes,randomUUID,releaseAgentConnection,rootFixture,systemLine,vi,worker,type AgentCommand } from './test-support-commander-recovery.integration.test-support.js';
 
-it('RUBY-16: a reviewer reads reported files from the existing corner report card', async () => {
+it('RUBY-16: report files stay in the immutable private queue snapshot', async () => {
   const opened = await open();
   const turn = await worker(opened.cornerId);
   const objects = new ObjectService(rootFixture.db, new MemoryObjectStorage(), 'http://test');
@@ -16,15 +16,8 @@ it('RUBY-16: a reviewer reads reported files from the existing corner report car
   await rootFixture.db.query(`INSERT INTO agents(agent_id,owner_id) VALUES($1,$2)`, [reviewer, HUMAN]);
   await rootFixture.db.query(`INSERT INTO memberships(workspace_id,room_id,identity_id,role)
     VALUES($1,NULL,$3,'member'),($1,$2,$3,'member')`, [WS, ROOM, reviewer]);
-  const card = (await rootFixture.db.query<{ id: string }>(`SELECT id FROM messages
-    WHERE room_id=$1 AND card_type='agent-command' AND card->>'kind'='report'`, [opened.cornerId])).rows[0]!;
-  const read = await rootFixture.daemon.execute('getRoomMessage', { roomId: opened.cornerId, messageId: card.id }, reviewer);
-  expect(read.attachments).toEqual([expect.objectContaining(attachment)]);
-  const byObject = await rootFixture.daemon.execute('getRoomMessage', {
-    roomId: opened.cornerId, attachmentId: uploaded.url.split('/').at(-1)!,
-  }, reviewer);
-  expect(byObject.attachments).toEqual(read.attachments);
-  const privateReport = (await commands(opened.cornerId, RUBY)).find(command => command.reason === 'report')!;
+  const privateReport=(await commands(opened.cornerId,RUBY)).find(command=>command.reason==='report')!;
+  expect(privateReport.source.attachments).toEqual([expect.objectContaining(attachment)]);
   await expect(rootFixture.daemon.execute('getRoomMessage', {
     roomId: opened.cornerId, messageId: privateReport.id,
   }, reviewer)).rejects.toThrow('message access denied');
@@ -72,13 +65,6 @@ it.each(['report', 'postRoomMessage'] as const)('Reproduction FILE-HANDOFF: inde
     else await rootFixture.daemon.execute('postRoomMessage', { ...authority(report), text: `Attached ${attachments[index]!.name}` }, RUBY);
   }
   const visible = (await rootFixture.phone.readRoom(DM, HUMAN))!.messages.filter(message => message.attachments?.length);
-  if (delivery === 'postRoomMessage') {
-    // Closing prose answers in each corner; nothing is relayed to the chat.
-    expect(visible).toEqual([]);
-    for (const [index, corner] of corners.entries())
-      expect((await rootFixture.phone.readRoom(corner, HUMAN))!.messages.some(m => m.text === `Attached ${attachments[index]!.name}`)).toBe(true);
-    return;
-  }
   expect(visible).toHaveLength(2);
   for (const [index, message] of visible.entries()) {
     expect(message.attachments).toEqual([expect.objectContaining(attachments[index])]);
@@ -188,10 +174,10 @@ it('keeps approval resume provenance and posts progress only in the corner', asy
     wakes: [WORKER],
     requestId: turn.turnRequestId,
   });
-  const resumed = (await commands(opened.cornerId, WORKER)).find((c) => c.action === 'resume')!;
+  const resumed = (await commands(opened.cornerId, WORKER)).find((c) => c.reason === 'resume')!;
   expect(resumed.private).toBe(true);
   expect(resumed.source.body).toContain('received approval');
-  expect(resumed.source.body).toContain('Build the widget');
+  expect(resumed.parentCommandId).toBe(turn.id);
   await claim(resumed);
   await rootFixture.daemon.execute(
     'postRoomMessage',
@@ -200,16 +186,18 @@ it('keeps approval resume provenance and posts progress only in the corner', asy
   );
   expect(
     (await rootFixture.db.query(`SELECT text FROM messages WHERE text='PRIVATE COORDINATION LEAK'`)).rowCount,
-  ).toBe(1);
+  ).toBe(0);
   expect(
     (await commands(DM, RUBY)).some(
       (c) => c.reason === 'report' && c.source.body === 'done: PRIVATE COORDINATION LEAK',
     ),
   ).toBe(false);
+  expect((await commands(opened.cornerId,RUBY)).some(item=>item.source.body==='PRIVATE COORDINATION LEAK')).toBe(true);
 });
 
 it('keeps private work across connection close and a new helper process resumes it without a failure report', async () => {
   const opened=await open(),turn=await worker(opened.cornerId);
+  await claimAgentConnection(rootFixture.db,new LiveHub(),WORKER,{}, {connectionId:'before-disconnect',instanceId:'helper-fixture'});
   const connection=(await rootFixture.db.query<{connection_id:string}>('SELECT connection_id FROM agent_connections WHERE agent_id=$1',[WORKER])).rows[0]!;
   await releaseAgentConnection(rootFixture.db,new LiveHub(),WORKER,connection.connection_id);
   const claimed=(await rootFixture.db.query<{state:string}>('SELECT state FROM agent_commands WHERE id=$1',[turn.id])).rows[0]!;
@@ -261,9 +249,9 @@ it('retains workflow run and attempt guidance in private commands', async () => 
     requestId: fired.turnRequestId,
     wakes: [WORKER],
   });
-  const resumed = (await commands(opened.cornerId, WORKER)).find((c) => c.action === 'resume')!;
-  expect(resumed.source.body).toContain('specific-run-id');
-  expect(resumed.source.body).toContain('attempt 1');
+  const resumed = (await commands(opened.cornerId, WORKER)).find((c) => c.reason === 'resume')!;
+  expect(resumed.parentCommandId).toBe(fired.id);
+  expect(fired.source.body).toContain('specific-run-id');
 });
 
 it('opens a sibling when given a corner target', async () => {
@@ -286,7 +274,7 @@ it('opens a sibling when given a corner target', async () => {
 });
 
 
-it('keeps artifacts on corner report cards and forwards them in human reports', async () => {
+it('keeps private report artifacts in the queue and forwards them with human answers', async () => {
   const opened = await open(),
     turn = await worker(opened.cornerId),
     media = randomUUID();
@@ -322,7 +310,7 @@ it('keeps artifacts on corner report cards and forwards them in human reports', 
   ).toBe(0);
   expect(
     (await rootFixture.db.query(`SELECT room_id,card_type FROM messages WHERE attachments::text LIKE $1`, ['%' + media + '%'])).rows,
-  ).toEqual([{ room_id: opened.cornerId, card_type: 'agent-command' }]);
+  ).toEqual([]);
   const report = (await commands(opened.cornerId, RUBY)).find((c) => c.reason === 'report')!;
   expect(report.source.attachments).toEqual([expect.objectContaining({ name: 'report.txt' })]);
   await claim(report);
@@ -391,27 +379,14 @@ it('routes zero-check completion through a durable lifecycle fact', async () => 
   ).toBe(1);
 });
 
-it('ends a private provider failure once without a retry', async () => {
-  const opened = await open(),
-    turn = await worker(opened.cornerId);
-  const result = await rootFixture.daemon.execute(
-    'postAgentTurnReceipt',
-    {
-      ...authority(turn),
-      agentId: WORKER,
-      status: 'failed',
-      reason: 'provider error 429 concurrency_limit',
-      reasonKind: 'hiccup',
-    },
-    WORKER,
-  );
-  expect(result).not.toHaveProperty('hiccupRestart');
-  expect(
-    (await rootFixture.db.query(`SELECT state FROM agent_commands WHERE id=$1`, [turn.id]))
-      .rows[0],
-  ).toMatchObject({ state: 'complete' });
-  expect((await commands(opened.cornerId, RUBY)).filter(command=>command.reason==='report'&&command.source.body.startsWith('failed:'))).toHaveLength(1);
-  expect(await commands(opened.cornerId,WORKER)).toEqual([]);
+it('a provider diagnostic leaves work pending until its failure answer is posted',async()=>{
+  const opened=await open(),turn=await worker(opened.cornerId);
+  await rootFixture.daemon.execute('postAgentTurnReceipt',{...authority(turn),status:'failed',reason:'provider outage'},WORKER);
+  expect((await commands(opened.cornerId,WORKER)).some(item=>item.id===turn.id)).toBe(true);
+  expect((await commands(opened.cornerId,RUBY)).filter(item=>item.reason==='report')).toHaveLength(0);
+  await rootFixture.daemon.execute('report',{...authority(turn),status:'failed',text:'The provider stopped before the work finished.'},WORKER);
+  expect((await commands(opened.cornerId,WORKER)).some(item=>item.id===turn.id)).toBe(false);
+  expect((await commands(opened.cornerId,RUBY)).filter(item=>item.reason==='report')).toHaveLength(1);
 });
 
 
@@ -491,7 +466,7 @@ it('resumes the incoming human order for a non-opener watch', async () => {
 });
 
 
-it('rejects stale private workflow wakes after their run ends', async () => {
+it('answers a queued workflow wake even after its run ends', async () => {
   const opened = await open(),
     run = randomBytes(32).toString('hex');
   await systemLine(rootFixture.db, {
@@ -517,47 +492,21 @@ it('rejects stale private workflow wakes after their run ends', async () => {
     (c) => c.reason === 'subscribed_event',
   )!;
   await rootFixture.db.query(`UPDATE messages SET card=card||'{"runStatus":"done"}'::jsonb WHERE id=$1`, [run]);
-  const connection = (await rootFixture.db.query<{ connection_id: string }>(
-    'SELECT connection_id FROM agent_connections WHERE agent_id=$1', [WORKER])).rows[0]!;
-  await releaseAgentConnection(rootFixture.db, new LiveHub(), WORKER, connection.connection_id);
-  expect((await commands(opened.cornerId, WORKER)).some((c) => c.id === stale.id)).toBe(false);
-  await expect(claim(stale)).rejects.toThrow('command claim conflict');
-  expect(
-    (await rootFixture.db.query(`SELECT state FROM agent_commands WHERE id=$1`, [stale.id])).rows[0],
-  ).toMatchObject({ state: 'cancelled' });
+  expect((await commands(opened.cornerId,WORKER)).some(item=>item.id===stale.id)).toBe(true);
+  await claim(stale);
+  await rootFixture.daemon.execute('postRoomMessage',{...authority(stale),text:'The workflow has already finished.'},WORKER);
+  expect((await rootFixture.db.query('SELECT state FROM agent_commands WHERE id=$1',[stale.id])).rows[0]).toMatchObject({state:'complete'});
 });
 
-it('commits terminal failure when the commander has left', async () => {
-  const opened = await open(),
-    turn = await worker(opened.cornerId);
-  await rootFixture.db.query(`UPDATE memberships SET removed_at=now() WHERE room_id=$1 AND identity_id=$2`, [
-    DM,
-    RUBY,
-  ]);
-  await expect(
-    rootFixture.daemon.execute(
-      'postAgentTurnReceipt',
-      {
-        ...authority(turn),
-        agentId: WORKER,
-        status: 'failed',
-        reason: 'provider outage',
-        reasonKind: 'hiccup',
-      },
-      WORKER,
-    ),
-  ).resolves.toHaveProperty('id');
-  expect(
-    (await rootFixture.db.query(`SELECT state FROM agent_commands WHERE id=$1`, [turn.id])).rows[0],
-  ).toMatchObject({ state: 'complete' });
-  expect(
-    (
-      await rootFixture.db.query(
-        `SELECT status FROM agent_turns WHERE room_id=$1 AND request_id=$2 AND agent_id=$3`,
-        [opened.cornerId, turn.turnRequestId, WORKER],
-      )
-    ).rows[0],
-  ).toMatchObject({ status: 'failed' });
+it('retains the failure answer obligation while its return membership is gone',async()=>{
+  const opened=await open(),turn=await worker(opened.cornerId);
+  await rootFixture.db.query('UPDATE memberships SET removed_at=now() WHERE room_id=$1 AND identity_id=$2',[DM,RUBY]);
+  await rootFixture.daemon.execute('postAgentTurnReceipt',{...authority(turn),status:'failed',reason:'provider outage'},WORKER);
+  await expect(rootFixture.daemon.execute('report',{...authority(turn),status:'failed',text:'The provider stopped.'},WORKER)).rejects.toThrow('return address');
+  expect((await rootFixture.db.query('SELECT state FROM agent_commands WHERE id=$1',[turn.id])).rows[0]).toEqual({state:'pending'});
+  await rootFixture.db.query('UPDATE memberships SET removed_at=NULL WHERE room_id=$1 AND identity_id=$2',[DM,RUBY]);
+  await rootFixture.daemon.execute('report',{...authority(turn),status:'failed',text:'The provider stopped.'},WORKER);
+  expect((await rootFixture.db.query('SELECT state FROM agent_commands WHERE id=$1',[turn.id])).rows[0]).toEqual({state:'complete'});
 });
 
 it.each([false, true])('the commander revises from its DM after a check wake (cited approval: %s)', async citedApproval => {
@@ -638,7 +587,7 @@ it('discovers only reachable member addresses and corners from a DM', async () =
 });
 
 
-it('keeps file-only corner final replies in the corner without reporting progress', async () => {
+it('keeps a file and its unanswered item pending when closing text is empty', async () => {
   const opened = await open(),
     turn = await worker(opened.cornerId);
   const media = randomUUID();
@@ -669,14 +618,14 @@ it('keeps file-only corner final replies in the corner without reporting progres
         turn.turnRequestId,
       ])
     ).rowCount,
-  ).toBe(0);
+  ).toBe(1);
   expect(
     (
       await rootFixture.db.query(`SELECT 1 FROM messages WHERE room_id=$1 AND presentation='message'`, [
         opened.cornerId,
       ])
     ).rowCount,
-  ).toBe(1);
+  ).toBe(0);
 });
 
 
@@ -755,8 +704,8 @@ it('accepts a file after a terminal report, posts it with the next message, and 
     WORKER,
   )).resolves.toBeDefined();
   await rootFixture.daemon.execute(
-    'postRoomMessage',
-    { ...authority(turn), text: 'The artifact is ready' },
+    'postCornerMessage',
+    { ...authority(turn),cornerId:opened.cornerId, text: 'The artifact is ready' },
     WORKER,
   );
   const reports = (await commands(opened.cornerId, RUBY)).filter((c) => c.reason === 'report');
@@ -821,26 +770,11 @@ it('keeps unrelated Room subscriptions independent of completed orders', async (
   ).toBe(false);
 });
 
-it('refuses retired relay writes on private turns without reporting success', async () => {
-  const opened = await open(),
-    turn = await worker(opened.cornerId);
-  const r = await rootFixture.daemon
-    .execute(
-      'postRoomMessage',
-      {
-        ...authority(turn),
-        text: 'Old steer',
-        relay: { fromRoomId: opened.cornerId, toRoomId: ROOM, direction: 'down' },
-      } as any,
-      WORKER,
-    )
-    .then(
-      (v) => ({ ok: true, value: v }),
-      (e) => ({ ok: false, status: e.status, message: e.message }),
-    );
-  expect(r).toMatchObject({ ok: false, status: 410 });
-  expect(
-    (await rootFixture.db.query(`SELECT state FROM agent_commands WHERE id=$1`, [turn.id])).rows[0]?.state,
-  ).toBe('pending');
-  expect((await commands(DM, RUBY)).some((c) => c.reason === 'report')).toBe(false);
+it('ignores retired relay metadata and answers at the recorded return address',async()=>{
+  const opened=await open(),turn=await worker(opened.cornerId);
+  await rootFixture.daemon.execute('postRoomMessage',{...authority(turn),text:'Old steer',
+    relay:{fromRoomId:opened.cornerId,toRoomId:ROOM,direction:'down'}} as any,WORKER);
+  expect((await rootFixture.db.query('SELECT state FROM agent_commands WHERE id=$1',[turn.id])).rows[0]).toEqual({state:'complete'});
+  expect((await commands(opened.cornerId,RUBY)).find(item=>item.reason==='report')?.source.body).toBe('Old steer');
+  expect((await rootFixture.db.query('SELECT 1 FROM messages WHERE room_id=$1 AND text=$2',[ROOM,'Old steer'])).rowCount).toBe(0);
 });

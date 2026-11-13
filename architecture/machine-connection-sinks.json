@@ -56,7 +56,7 @@
     "reason": "Authenticated machine output and actual login/session replacement; release readiness never refuses frames."
   },
   "apps/server/src/machine-connection.ts::serveMachineSocket::close": {
-    "count": 4,
+    "count": 3,
     "reason": "Authenticated machine output and actual login/session replacement; release readiness never refuses frames."
   },
   "apps/server/src/machine-connection.ts::serveMachineSocket::send": {

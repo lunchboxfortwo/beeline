@@ -33,5 +33,5 @@ export function cornerOpenedFromSql(cornerId: string): string {
 }
 
 export function cornerRequestSql(cornerId: string): string {
-  return `(SELECT opening.turn_request_id FROM (${cornerOpeningSql(cornerId)}) opening)`;
+  return `(SELECT COALESCE((SELECT parent.turn_request_id FROM agent_commands parent WHERE parent.id=opening.parent_command_id),opening.turn_request_id) FROM (${cornerOpeningSql(cornerId)}) opening)`;
 }

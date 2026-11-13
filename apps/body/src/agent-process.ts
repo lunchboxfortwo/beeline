@@ -1,4 +1,3 @@
-import { wall } from '@beeline/api-contract/daemon';
 import { type AcpClient } from './acp.js';
 
 /** All production ACP process starts and stops pass through this module. */
@@ -7,7 +6,7 @@ export async function startAgentProcess(client: AcpClient): Promise<void> {
     await client.startProcess();
   } catch (error) {
     await client.stopProcess().catch(() => undefined);
-    throw wall('sandbox', error instanceof Error ? error : { message: String(error), status: 503 });
+    throw error;
   }
 }
 export async function stopAgentProcess(client: AcpClient): Promise<void> {

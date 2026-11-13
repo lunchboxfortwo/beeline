@@ -1,12 +1,12 @@
 import { mentionReplyRule } from '@beeline/api-contract/phone';
-import { recoverMemberDelivery } from './rooms-mcp-delivery.js';
-import { recordDiagnostic } from './diagnostics.js';
-import { createHash, createHmac, randomBytes, randomUUID, timingSafeEqual } from 'node:crypto';
+import { createHash,createHmac,randomBytes,randomUUID,timingSafeEqual } from 'node:crypto';
 import type { SqlDatabase } from './database.js';
-import type { McpPrincipal } from './rooms-mcp-oauth.js';
-import { openSecrets, sealSecrets } from './free-agents.js';
+import { recordDiagnostic } from './diagnostics.js';
+import { openSecrets,sealSecrets } from './free-agents.js';
+import { notifyMcpDeliveryChange,notifyMcpWakesSql,notifyMcpWebhook,POSTGRES_LIVE_CHANNEL } from './postgres-live.js';
+import { recoverMemberDelivery } from './rooms-mcp-delivery.js';
 import { postMcpWebhook } from './rooms-mcp-members.js';
-import { notifyMcpWakesSql, notifyMcpWebhook, notifyMcpDeliveryChange, POSTGRES_LIVE_CHANNEL } from './postgres-live.js';
+import type { McpPrincipal } from './rooms-mcp-oauth.js';
 
 // Replay stays in list_mentions; event cursors are null so queued events cannot be skipped.
 const MENTION_EVENT = {
@@ -211,6 +211,8 @@ export function mcpCommandWakeSql(first: number): { cte: string; join: string; p
             AND beeline_mcp_delivery_owner(wake.member_id,'events',wake.id))))
       JOIN rooms_mcp_connections c ON c.client_id=s.client_id AND c.identity_id=s.owner_id AND c.revoked_at IS NULL
       WHERE beeline_mcp_delivery_owner(s.member_id,'events',s.id) AND command.state='pending' AND command.action='input' AND command.reason<>'mcp_call'
+        AND (command.source_message_id IS NULL OR command.private_payload IS NOT NULL
+          OR command.reason NOT IN ('human_tag','direct_message','agent_tag','human_message'))
       ON CONFLICT(subscription_id,command_id) WHERE command_id IS NOT NULL DO NOTHING
       RETURNING room_id
     )`,

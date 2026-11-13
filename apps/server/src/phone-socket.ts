@@ -1,12 +1,12 @@
-import { WallRefusal } from '@beeline/api-contract/daemon';
-import { parseDiagnosticOrigin, withDiagnosticContext } from './diagnostics.js';
+import { wall,WallRefusal } from '@beeline/api-contract/daemon';
+import {
+type PhoneRequestFrame,type PhoneResponseFrame,
+} from '@beeline/api-contract/phone';
 import { parseRouterCommandIdentity } from '@beeline/api-contract/router-command';
 import type { WebSocket } from 'ws';
-import {
-  type PhoneRequestFrame, type PhoneResponseFrame,
-} from '@beeline/api-contract/phone';
+import { parseDiagnosticOrigin,withDiagnosticContext } from './diagnostics.js';
+import { PhoneOperationError,type PhoneOperationDispatcher } from './phone-operations.js';
 import { captureServerError } from './sentry.js';
-import { PhoneOperationError, type PhoneOperationDispatcher } from './phone-operations.js';
 
 /** Requests do not join the ordered subscription queue; each owns one bounded slot. */
 export function phoneSocketRequests(
@@ -22,9 +22,10 @@ export function phoneSocketRequests(
   fenceReply?: (operation: string, args: Record<string, unknown>, result: unknown,
     enqueue: (safeResult?: unknown) => undefined) => Promise<void>,
 ): (message: unknown) => boolean {
-  const active = new Map<string, AbortController>();
+  if (!viewerId) throw wall('signed-in', { message: 'phone_token_required', status: 401 });
+  const active = new Set<AbortController>();
   const abandon = () => {
-    for (const controller of active.values()) controller.abort();
+    for (const controller of active) controller.abort();
     active.clear();
   };
   client.once('close', abandon);
@@ -35,7 +36,8 @@ export function phoneSocketRequests(
   const fail = (id: string, code: string, message: string, retryable = false) =>
     reply({ t: 'res', id, ok: false, error: { code, message, retryable } });
   return (message) => {
-    if (!message || typeof message !== 'object' || (message as { t?: unknown }).t !== 'req') return false;
+    const ownsFrame = Boolean(message && typeof message === 'object' && (message as { t?: unknown }).t === 'req');
+    if (!ownsFrame) return ownsFrame;
     const request = message as Partial<PhoneRequestFrame>;
     const id = typeof request.id === 'string' ? request.id : '';
     if (!id || typeof request.op !== 'string' ||
@@ -43,22 +45,23 @@ export function phoneSocketRequests(
       fail(id, 'invalid_request', 'Invalid phone request');
       return true;
     }
-    if (active.has(id)) {
-      fail(id, 'duplicate_id', 'Request id is already in flight');
-      return true;
+    const conversational = request.op === 'sendRoomMessage' || request.op === 'sendRoomReply';
+    let command: PhoneRequestFrame['command'];
+    if (conversational) {
+      const identity = request.command;
+      if (identity && typeof identity === 'object' && typeof identity.id === 'string') command = identity;
+    } else {
+      try { command = request.command === undefined ? undefined : parseRouterCommandIdentity(request.command); }
+      catch { fail(id, 'invalid_command_identity', 'Invalid durable command identity'); return true; }
     }
-    let command;
-    try { command = request.command === undefined ? undefined : parseRouterCommandIdentity(request.command); }
-    catch { fail(id, 'invalid_command_identity', 'Invalid durable command identity'); return true; }
     const controller = new AbortController();
-    active.set(id, controller);
+    active.add(controller);
     void withDiagnosticContext(viewerId,parseDiagnosticOrigin(request.diagnostic), () => dispatch(request.op!, request.args as Record<string, unknown>, viewerId, controller.signal, familyId, command))
       .then(async result => {
-        const enqueue = (safeResult: unknown = result) => {
+        const enqueue = (safeResult: unknown = result): undefined => {
           if (!controller.signal.aborted) reply({ t: 'res', id, ok: true, result: safeResult ?? null });
-          return undefined;
         };
-        if (fenceReply) await fenceReply(request.op!, request.args as Record<string, unknown>, result, enqueue);
+        if (fenceReply && !conversational) await fenceReply(request.op!, request.args as Record<string, unknown>, result, enqueue);
         else enqueue();
       }).catch(error => {
         if (controller.signal.aborted) return;
@@ -71,7 +74,7 @@ export function phoneSocketRequests(
           : status === 403 ? 'access_denied' : status === 404 ? 'not_found'
           : status === 409 ? 'conflict' : status === 429 ? 'too_many_requests' : 'unavailable';
         fail(id, code, message, status === 429 || status >= 500);
-      }).finally(() => active.delete(id));
+      }).finally(() => active.delete(controller));
     return true;
   };
 }

@@ -1,21 +1,20 @@
-import { loadCornerWaiting } from './corner-waiting.js';
-import { deleteCornerWakeSources } from './corner-wake-cleanup.js';
-import { releaseArchivedCornerHolds } from './corner-holds.js';
-import { systemMessage } from '@beeline/api-contract/system-message-catalog';
-import { reportAgentAttention } from './commander.js';
-import { createHash } from 'node:crypto';
 import { CornerLifecycleView } from '@beeline/api-contract/phone';
 import { SYSTEM_IDENTITY_ID } from '@beeline/api-contract/system-identity';
+import { systemMessage } from '@beeline/api-contract/system-message-catalog';
+import { createHash,randomBytes } from 'node:crypto';
+import { createAgentCommand,currentCornerCommandTargetSql,hasPendingCornerReview,type CommandRow } from './agent-command.js';
+import { reportAgentAttention } from './commander.js';
+import { releaseArchivedCornerHolds } from './corner-holds.js';
+import { cornerIdleSql,type CornerIdleRow } from './corner-idle.js';
+import { loadCorner,type CornerRow } from './corner-lifecycle-read-state.js';
+import { cornerMergeGate,independentReviewerConfigured,loadCornerReviewState,lockCornerArchivalAuthority,lockCornerLifecycle,noteReviewDispatchFailure,reachableReviewer } from './corner-lifecycle-review-state.js';
+import { OK,reviewChecksSql,type Applied,type CornerAdvance,type CornerEvent,type RevisionWake } from './corner-lifecycle-values.js';
+import { transitionCorner,type CornerMachineFacts } from './corner-machine.js';
+import { loadCornerWaiting } from './corner-waiting.js';
+import { deleteCornerWakeSources } from './corner-wake-cleanup.js';
 import type { SqlDatabase } from './database.js';
-import { insertAgentCommand as createAgentCommand, hasPendingCornerReview, currentCornerCommandTargetSql, type CommandRow } from './agent-command.js';
-import { firstHealthyAgent } from './agent-health.js';
-import { ensureSystemIdentity, GITHUB_SUBJECT, systemLine } from './system-line.js';
+import { GITHUB_SUBJECT,ensureSystemIdentity,systemLine } from './system-line.js';
 import { abandonCornerWorkflowRuns } from './workflow-runs.js';
-import { cornerIdleSql, type CornerIdleRow } from './corner-idle.js';
-import { loadCorner, type CornerRow } from './corner-lifecycle-read-state.js';
-import { transitionCorner, type CornerMachine, type CornerMachineFacts } from './corner-machine.js';
-import { lockCornerArchivalAuthority, lockCornerLifecycle, loadCornerReviewState, cornerMergeGate, independentReviewerConfigured,  noteReviewDispatchFailure, reachableReviewer,  cornerReviewWokenSql, CornerMergeGate, CornerMergeabilityInput, cornerMergeability, confirmCornerMergeAuthority, deleteStoredCornerWorkflows } from './corner-lifecycle-review-state.js';
-import { OK, reviewChecksSql, CORNER_LIFECYCLE_SLUG, CORNER_MACHINE_SCHEMA, type CornerEvent, type CornerAdvance, type RevisionWake, type Applied } from './corner-lifecycle-values.js';
 
 
 
@@ -185,14 +184,6 @@ export async function advanceCorner(
   event: CornerEvent,
   commit?: CornerAdvanceCommit,
 ): Promise<CornerAdvance> {
-  // Admission is not a committed activity fact. Preserve the queue's lock
-  // order (queue -> command -> Room); its committed event updates the machine.
-  if (event.kind === 'command') return database.transaction(async db => {
-    const current = (await db.query<{ machine: CornerMachine | null }>('SELECT machine FROM corner_facts WHERE corner_id=$1', [cornerId])).rows[0]?.machine ?? { state: 'idle' as const };
-    const plan = transitionCorner(current, { facts: { archived: false, turnRunning: false }, event });
-    const command = plan.wakes.length ? await createAgentCommand(db, event.command) : undefined;
-    return { state: current.state, accepted: Boolean(command), ...(command ? { command } : {}) };
-  });
   // The corner row lock covers only the compare-and-write below. Every fact is
   // read first without it, so events on one busy corner never queue behind
   // another event's slow reads. A commit to the row in between changes its
@@ -459,9 +450,7 @@ async function writeCornerAdvance(
         }
         case 'revision': {
           if (event.kind !== 'brief-revised') break;
-          const agentId = corner.worker_agent_id
-            ? await firstHealthyAgent(db, cornerId, [corner.worker_agent_id])
-            : null;
+          const agentId = corner.worker_agent_id !== event.command.agent_id ? corner.worker_agent_id : null;
           const command = agentId
             ? await createAgentCommand(db, {
                 roomId: cornerId,
@@ -789,7 +778,7 @@ export async function queueReviewerCommand(
              SELECT jsonb_array_elements_text(COALESCE(command.review_context->'reportIds','[]'::jsonb))))
          UNION ALL
          SELECT report.private_payload->>'text',report.created_at FROM agent_commands report
-         WHERE report.id IN (SELECT jsonb_array_elements_text(COALESCE(command.review_context->'reportIds','[]'::jsonb)))
+         WHERE (report.id=command.result_message_id OR report.id IN (SELECT jsonb_array_elements_text(COALESCE(command.review_context->'reportIds','[]'::jsonb))))
            AND report.private_payload->>'authorId'=command.agent_id
        ) evidence
        WHERE command.room_id=$1 AND command.agent_id=$2 AND command.review_context IS NOT NULL
@@ -804,7 +793,7 @@ export async function queueReviewerCommand(
   await db.query('SAVEPOINT corner_reviewer_dispatch');
   try {
     const command = await createAgentCommand(db, {
-      ...input,
+      ...input,id:input.id ?? randomBytes(32).toString('hex'),
       // The helper builds the head and newest brief revision at delivery.
       ...(prior ? { wakeNote: `Prior reviewer verdict and evidence (historical context):\n${prior}` } : {}),
     });
@@ -849,7 +838,7 @@ export { checksRestarted } from './corner-machine.js';
 
 export { actionsJobId } from './corner-machine.js';
 
-export type { CornerAdvance, CornerEvent } from './corner-lifecycle-values.js';
+export type { CornerAdvance,CornerEvent } from './corner-lifecycle-values.js';
 
 export { CORNER_MACHINE_SCHEMA } from './corner-lifecycle-values.js';
 

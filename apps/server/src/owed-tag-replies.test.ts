@@ -1,19 +1,19 @@
-import { startQueuedCommand } from './test-fixtures/queued-turn.test-support.js';
-import { afterAll, beforeAll, describe, expect, it, vi } from 'vitest';
-import { createHash, randomBytes } from 'node:crypto';
-import { BACKGROUND_DUE_SOURCE_SCHEMA } from './background-due-source.js';
-import { ROOMS_MCP_SCHEMA } from './rooms-mcp-schema.js';
-import { migrate } from './database.js';
-import { PgliteDatabase } from './test-support.js';
-import { PhoneService } from './phone-service.js';
-import { HelperDaemonService as DaemonService } from './test-fixtures/helper-daemon.js';
-import { LiveHub } from './live.js';
+import { createHash,randomBytes } from 'node:crypto';
+import { afterAll,beforeAll,describe,expect,it,vi } from 'vitest';
 import { TokenAuth } from './auth.js';
+import { BACKGROUND_DUE_SOURCE_SCHEMA } from './background-due-source.js';
+import { migrate } from './database.js';
+import { LiveHub } from './live.js';
+import { clearOwedMention,owedMentions } from './owed-mentions.js';
+import { PhoneService } from './phone-service.js';
+import { deliverMcpMemberWebhooks,recordMcpMemberWebhook,recordMcpMention } from './rooms-mcp-members.js';
+import { RoomsMcpOAuth,type McpPrincipal } from './rooms-mcp-oauth.js';
+import { ROOMS_MCP_SCHEMA } from './rooms-mcp-schema.js';
 import { RoomsMcp } from './rooms-mcp.js';
-import { RoomsMcpOAuth, type McpPrincipal } from './rooms-mcp-oauth.js';
-import { recordMcpMention, recordMcpMemberWebhook, deliverMcpMemberWebhooks } from './rooms-mcp-members.js';
-import { routeHumanMessage } from './agent-command.js';
-import { owedMentions, clearOwedMention } from './owed-mentions.js';
+import { HelperDaemonService as DaemonService } from './test-fixtures/helper-daemon.js';
+import { routeHumanMessage } from './test-fixtures/queue-routing.test-support.js';
+import { startQueuedCommand } from './test-fixtures/queued-turn.test-support.js';
+import { PgliteDatabase } from './test-support.js';
 
 
 import { MCP_STARTER_ROUTINE } from '@beeline/api-contract/phone';
@@ -81,9 +81,11 @@ describe('owed Room tags', () => {
   });
   it('C5 failed send leaves tag owed; successful reply or explicit message silence clears only that tag', async () => {
     const message = await tag(), keep = await tag();
-    const send = vi.spyOn(phone, 'execute').mockRejectedValueOnce(new Error('send failed'));
-    await expect(call('send_message', { room, text: 'answer', replyTo: message })).rejects.toThrow('send failed');
-    send.mockRestore();
+    await db.query(`CREATE FUNCTION refuse_owed_reply() RETURNS trigger LANGUAGE plpgsql AS $$ BEGIN
+      IF NEW.author_id='${member}' THEN RAISE EXCEPTION 'send failed'; END IF; RETURN NEW; END $$;
+      CREATE TRIGGER refuse_owed_reply BEFORE INSERT ON messages FOR EACH ROW EXECUTE FUNCTION refuse_owed_reply()`);
+    try { await expect(call('send_message',{room,text:'answer',replyTo:message})).rejects.toThrow('send failed'); }
+    finally { await db.query('DROP TRIGGER refuse_owed_reply ON messages;DROP FUNCTION refuse_owed_reply()'); }
     expect((await owedMentions(db, member)).some(m => m.messageId === message)).toBe(true);
     // Failed claims must be immediately retryable, without a minute of lost work.
     await call('send_message', { room, text: 'answer', replyTo: message });
@@ -196,9 +198,9 @@ describe('owed Room tags', () => {
     const message = await tag(); await recordMcpMention(db, other, room, message);
     for (const who of [member, other]) {
       const first = await call('send_message', { room, text: 'first', replyTo: message, idempotencyKey: 'custom-key' }, who);
-      const retry = await call('send_message', { room, text: 'first', replyTo: message, idempotencyKey: 'different-key' }, who);
+      const retry = await call('send_message', { room, text: 'first', replyTo: message, idempotencyKey: 'custom-key' }, who);
       expect(retry).toEqual(first);
-      expect((await db.query(`SELECT 1 FROM rooms_mcp_idempotency WHERE member_id=$1 AND idempotency_key LIKE $2`, [who, `mention:${who}:${message}:%`])).rowCount).toBe(1);
+      expect((await db.query('SELECT 1 FROM messages WHERE author_id=$1 AND reply_to_message_id=$2',[who,message])).rowCount).toBe(1);
     }
     expect((await db.query('SELECT 1 FROM messages WHERE reply_to_message_id=$1', [message])).rowCount).toBe(2);
   });
@@ -312,6 +314,17 @@ describe('owed Room tags', () => {
     await clearOwedMention(db, member, room, unanswered);
     await db.query(ROOMS_MCP_SCHEMA);
     expect((await owedMentions(db, member)).map(m => m.messageId)).not.toContain(unanswered);
+  });
+
+  it('distinct explicit replies to a real queued tag are delivered, and a replay keeps its receipt',async()=>{
+    const handle=(await db.query<{handle:string}>('SELECT beeline_room_handle(id,$2) handle FROM identities WHERE id=$1',[member,room])).rows[0]!.handle;
+    const source=await phone.execute('sendRoomMessage',{roomId:room,text:`@${handle} review this`},owner);
+    const first=await call('send_message',{room,text:'First answer',replyTo:source.messageId});
+    const second=await call('send_message',{room,text:'Additional explicit message',replyTo:source.messageId});
+    expect(second.messageId).not.toBe(first.messageId);
+    expect(await call('send_message',{room,text:'Additional explicit message',replyTo:source.messageId})).toEqual(second);
+    expect((await db.query('SELECT count(*)::int n FROM messages WHERE author_id=$1 AND reply_to_message_id=$2',[member,source.messageId])).rows[0]).toEqual({n:2});
+    expect((await db.query('SELECT state FROM agent_commands WHERE agent_id=$1 AND source_message_id=$2',[member,source.messageId])).rows[0]).toEqual({state:'complete'});
   });
 
 });

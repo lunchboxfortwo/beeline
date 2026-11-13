@@ -1,22 +1,19 @@
-import { startQueuedCommand } from './test-fixtures/queued-turn.test-support.js';
-import { AgentScheduleLoop } from './agent-schedules.js';
-import { advanceCorner } from './corner-lifecycle.js';
-import { randomUUID, randomBytes } from 'node:crypto';
-import { beforeAll, beforeEach, afterAll, afterEach, expect, it, vi } from 'vitest';
-import { PgliteDatabase, migratedDatabase } from './test-support.js';
-import { HelperDaemonService as DaemonService } from './test-fixtures/helper-daemon.js';
-import { PhoneService } from './phone-service.js';
+import type { AgentCommand } from '@beeline/api-contract/daemon';
+import type { GitHubOAuthClient } from '@beeline/auth/github';
+import { randomBytes,randomUUID } from 'node:crypto';
+import { afterAll,afterEach,beforeAll,beforeEach,expect,it,vi } from 'vitest';
+import { createAgentCommand,readAgentCommands,type CommandRow } from './agent-command.js';
+import { GitHubOperations } from './github-operations.js';
 import { LiveHub } from './live.js';
+import { PhoneService } from './phone-service.js';
 import { captureServerError } from './sentry.js';
+import { HelperDaemonService as DaemonService } from './test-fixtures/helper-daemon.js';
+import { startQueuedCommand } from './test-fixtures/queued-turn.test-support.js';
+import { PgliteDatabase,migratedDatabase } from './test-support.js';
 vi.mock('./sentry.js', async (importOriginal) => ({
   ...await importOriginal<typeof import('./sentry.js')>(),
   captureServerError: vi.fn(),
 }));
-import { GitHubOperations } from './github-operations.js';
-import { readAgentCommands, createAgentCommand, type CommandRow } from './agent-command.js';
-import { GITHUB_SUBJECT, systemLine } from './system-line.js';
-import type { AgentCommand } from '@beeline/api-contract/daemon';
-import type { GitHubOAuthClient } from '@beeline/auth/github';
 
 const HUMAN = 'a'.repeat(64), RUBY = 'b'.repeat(64), WORKER = 'c'.repeat(64);
 const WS = '11111111-1111-4111-8111-111111111111';
@@ -205,19 +202,19 @@ it.each([undefined,'working'])('delivers prose with a missing or old diagnostic 
   expect((await db.query('SELECT text FROM messages WHERE id=$1',[result.id])).rows).toEqual([{text:'done: Delivered'}]);
 });
 
-it.each(['','done:   '])('rejects an empty report body %s', async text => {
-  await expect(daemon.execute('report',{...authority(order),status:'done',text},RUBY))
-    .rejects.toThrow('nonempty text');
+it.each(['','done:   '])('an empty report does not refuse or spend the answer obligation: %s', async text => {
+  expect(await daemon.execute('report',{...authority(order),status:'done',text},RUBY)).toMatchObject({answered:false});
+  expect((await commands(DM,RUBY)).map(item=>item.id)).toContain(order.id);
 });
 it('Reproduction report-schema: stores and delivers a complete multi-paragraph report', async () => {
   const opened = await open(), turn = await worker(opened.cornerId);
   const text = 'blocked: ' + 'Synthetic paragraph for report delivery.\n\n'.repeat(150) + 'End of report.\n\n';
   await daemon.execute('report', { ...authority(turn), status: 'blocked', text }, WORKER);
   const report = (await commands(opened.cornerId, RUBY)).find(command => command.reason === 'report')!;
-  expect(report.source.body).toBe(text);
+  expect(report.source.body).toBe(text.trim());
   expect((await db.query<{ text: string }>(
     `SELECT private_payload->>'text' text FROM agent_commands WHERE id=$1`, [report.id],
-  )).rows[0]?.text).toBe(text);
+  )).rows[0]?.text).toBe(text.trim());
   console.info(`Demonstrated report-schema: server stored and commander received all ${text.length} characters including the final paragraph`);
 });
 it.each([false, true])('Reproduction report-step: delivers a finished PR step while merging is blocked (held: %s)', async hold => {
@@ -316,7 +313,7 @@ it('Reproduction QUIET-CHAT-THREAD: a thread report wakes its commander in the t
   expect((await db.query(`SELECT room_id FROM messages WHERE author_id=$1 AND text='Reviewed the widget; it passes.'`, [RUBY])).rows)
     .toEqual([{ room_id: DM }]);
 });
-it('explicit additional prose is preserved at the recorded return address', async () => {
+it('an explicit reply leaves closing prose in turn activity', async () => {
   // Replay of the Nov 12 21:39/21:40 pair: one report wake, an explicit post to
   // the chat, then closing prose re-delivered to the person as a second post.
   const workerDM = randomUUID();
@@ -332,7 +329,8 @@ it('explicit additional prose is preserved at the recorded return address', asyn
   await daemon.execute('postCornerMessage', { ...authority(wakes[0]!), cornerId: DM, text: 'The endpoint research is in.' }, RUBY);
   await daemon.execute('postRoomMessage', { ...authority(wakes[0]!), text: 'The endpoint research is in; nothing else is needed.' }, RUBY);
   expect((await db.query(`SELECT text FROM messages WHERE room_id=$1 AND author_id=$2 AND presentation='message'`, [DM, RUBY])).rows)
-    .toEqual([{ text: 'The endpoint research is in.' }, { text: 'The endpoint research is in; nothing else is needed.' }]);
+    .toEqual([{ text: 'The endpoint research is in.' }]);
+  await vi.waitFor(async()=>expect((await db.query(`SELECT text FROM messages WHERE presentation='activity' AND author_id=$1`,[RUBY])).rows).toContainEqual({text:'The endpoint research is in; nothing else is needed.'}));
 });
 it('Reproduction QUIET-CHAT-ESCALATE: a thread-woken commander escalates a decision to the DM where the person gave the order', async () => {
   // Captain -> Ruby in the DM -> Ruby opens a thread in the target Room for Worker.

@@ -1,10 +1,9 @@
-import { wall } from '@beeline/api-contract/daemon';
 import { systemMessage } from '@beeline/api-contract/system-message-catalog';
-import { cornerReviewerSql } from '../corner-reviewer.js';
 import { agentMemberMetadata } from '../agent-member-metadata.js';
 import { CornerAccessDatabase } from '../corner-access-database.js';
+import { cornerReviewerSql } from '../corner-reviewer.js';
 import type { DaemonContext } from './context.js';
-import { id } from './values.js';
+import { AccessDeniedError } from './values.js';
 
 
   export async function daemonIdentity(ctx: DaemonContext, agentId: string) {
@@ -44,7 +43,7 @@ import { id } from './values.js';
        LIMIT 1`,
       [roomId, agentId],
     );
-    if (!result.rowCount) throw wall('membership', 'daemon room access denied');
+    if (!result.rowCount) throw new AccessDeniedError();
   }
 
 
@@ -57,7 +56,7 @@ import { id } from './values.js';
    */
   export async function daemonAccess(ctx: DaemonContext, roomId: string, agentId: string, requestId?: unknown): Promise<{ cornerReviewer: boolean; isCorner: boolean; privateCommand: boolean; voiceAgentName?: string | null }> {
     if (!/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(roomId))
-      throw wall('membership', 'daemon room access denied');
+      throw new AccessDeniedError();
     // Both joins target physical rows; reading the view here inverts locks with view replacement.
     const result = await CornerAccessDatabase.physical(ctx.database).query<{ corner_reviewer: boolean; is_corner: boolean; private_command: boolean; voice_agent_name: string | null }>(
       `SELECT EXISTS(
@@ -81,7 +80,7 @@ import { id } from './values.js';
        WHERE addressed.id=$1`,
       [roomId, agentId, typeof requestId === 'string' ? requestId : null],
     );
-    if (!result.rowCount) throw wall('membership', 'daemon room access denied');
+    if (!result.rowCount) throw new AccessDeniedError();
     const row = result.rows[0]!;
     return { cornerReviewer: row.corner_reviewer, isCorner: row.is_corner, privateCommand: row.private_command, voiceAgentName: row.voice_agent_name };
   }

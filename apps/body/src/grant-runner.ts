@@ -1,5 +1,5 @@
 import { waitForPathRemoval } from './filesystem-change.js';
-import { resolveGrantCommand, isNativeGrantExecutable, installedGrantExecutable } from './grant-script.js';
+import { installedGrantExecutable,isNativeGrantExecutable,resolveGrantCommand } from './grant-script.js';
 /**
  * The command-kind grant runner (Agent Grants, slice 2).
  *
@@ -48,28 +48,28 @@ import { resolveGrantCommand, isNativeGrantExecutable, installedGrantExecutable 
  * last-resort fallback. Values are injected into the child's env and scrubbed
  * from its output; they never reach the transcript, the ledger, or the model.
  */
-import { execFile, spawnSync } from 'node:child_process';
-import { createHash, randomBytes, randomUUID } from 'node:crypto';
-import { chmod, mkdir, readFile, readdir, rename, rm, rmdir, stat, writeFile } from 'node:fs/promises';
-import { createServer, type Server } from 'node:http';
-import type { AddressInfo } from 'node:net';
-import { dirname, isAbsolute, resolve } from 'node:path';
 import {
-  commandGrantMatches,
-  grantScriptKey,
-  interpreterScriptArgument,
-  parseCommandGrantTarget,
-  type CommandGrantRule,
+commandGrantMatches,
+grantScriptKey,
+interpreterScriptArgument,
+parseCommandGrantTarget,
+type CommandGrantRule,
 } from '@beeline/api-contract/agent-grants';
 import type { DaemonOperationMap } from '@beeline/api-contract/daemon';
-import { surfaceAllows, type AgentSurface } from '@beeline/api-contract/surface-capabilities';
-import { grantedSandboxDevices, grantedSandboxPaths, wrapAgentCommand, type MaskedPath, type SandboxSessionSpec } from './bwrap-sandbox.js';
+import { surfaceAllows,type AgentSurface } from '@beeline/api-contract/surface-capabilities';
+import { execFile,spawnSync } from 'node:child_process';
+import { createHash,randomBytes,randomUUID } from 'node:crypto';
+import { chmod,mkdir,readFile,readdir,rename,rm,rmdir,stat,writeFile } from 'node:fs/promises';
+import { createServer,type Server } from 'node:http';
+import type { AddressInfo } from 'node:net';
+import { dirname,isAbsolute,resolve } from 'node:path';
+import { grantedSandboxDevices,grantedSandboxPaths,wrapAgentCommand,type MaskedPath,type SandboxSessionSpec } from './bwrap-sandbox.js';
 import type { DaemonApiClient } from './daemon-api-client.js';
 import {
-  PROVIDER_KEY_ENV_VARS,
-  providerKeyStorePath,
-  readProviderKeyStore,
-  type ProviderKeyProvider,
+PROVIDER_KEY_ENV_VARS,
+providerKeyStorePath,
+readProviderKeyStore,
+type ProviderKeyProvider,
 } from './provider-key-store.js';
 
 export const GRANT_COMMAND_TIMEOUT_MS = 10 * 60_000;
@@ -752,7 +752,7 @@ export class GrantRunnerServer {
     private readonly runner: GrantCommandRunner,
     /** The `workspace` tool: the agent's own checkout, made only when it asks. */
     private readonly workspace?: (placeId: string, parentRoomId?: string) => Promise<string>,
-    private readonly session?: (placeId: string, input: { action?: unknown; prepare?: unknown; app?: unknown; tool?: unknown; args?: unknown }) => Promise<unknown>,
+    private readonly session?: (placeId: string, input: { action?: unknown; prepare?: unknown; app?: unknown; tool?: unknown; args?: unknown; operation?: unknown; input?: unknown }) => Promise<unknown>,
   ) {}
 
   async start(): Promise<GrantRunnerEndpoint> {

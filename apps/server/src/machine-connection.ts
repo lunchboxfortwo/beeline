@@ -1,9 +1,8 @@
-import { wall } from '@beeline/api-contract/daemon';
-import { cachedSentryAccount, noteSentryUser, rememberSentryAccount, withSentryAgent } from './sentry.js';
+import { HELPER_UPDATE_CLOSE_CODE,HELPER_UPDATE_CLOSE_REASON,wall } from '@beeline/api-contract/daemon';
 import type { Socket } from 'node:net';
 import type { WebSocket } from 'ws';
-import { HELPER_UPDATE_CLOSE_CODE, HELPER_UPDATE_CLOSE_REASON } from '@beeline/api-contract/daemon';
-import { DaemonAgentSession, type DaemonLiveDependencies } from './daemon-live.js';
+import { DaemonAgentSession,type DaemonLiveDependencies } from './daemon-live.js';
+import { cachedSentryAccount,noteSentryUser,rememberSentryAccount,withSentryAgent } from './sentry.js';
 export const MACHINE_SOCKET_PROTOCOL = 'beeline.machine.1';
 type SendLive = (payload: string) => void;
 
@@ -123,19 +122,16 @@ export function serveMachineSocket(
       deps.errors.invalid++;
       return;
     }
-    if (typeof token !== 'string' || !token.startsWith('bdt_')) {
-      reply({ type: 'register-refused', agentId, code: wall('credentials', 'daemon_token_required').message });
-      return;
-    }
     const registrationStartedAt = Date.now();
     let registrationStage = 'authentication';
     try {
-      const authenticated = await deps.auth.authenticateDaemon(token);
+      const authenticated = typeof token === 'string' && token.startsWith('bdt_')
+        ? await deps.auth.authenticateDaemon(token) : undefined;
       if (!isOpen()) return;
       if (authenticated !== agentId) {
         // The same two answers HTTP gives: a settled removal, or a token to retry.
         registrationStage = 'retirement-check';
-        const retired = authenticated ? null : await deps.auth.retiredDaemonAgent(token);
+        const retired = authenticated ? null : typeof token === 'string' ? await deps.auth.retiredDaemonAgent(token) : null;
         reply({
           type: 'register-refused',
           agentId,
@@ -156,13 +152,7 @@ export function serveMachineSocket(
             sessions.delete(agentId);
             unregistered(agentId, reason, code);
           },
-          authenticateOperation: async () => {
-            if (await deps.auth.authenticateDaemon(token) !== agentId) {
-              client.close(4003, 'machine login changed');
-              return await deps.auth.retiredDaemonAgent(token)
-                ? {error: wall('credentials', 'agent_removed').message, status: 403} : {error: wall('credentials', 'daemon_token_required').message, status: 401};
-            }
-          },
+
         },
         {
           ...(typeof item.lifecycleId === 'string'
@@ -200,7 +190,7 @@ export function serveMachineSocket(
         agentId, stage: registrationStage, elapsedMs: Date.now() - registrationStartedAt,
         helperSourceSha: principal.helperSourceSha,
       }), error instanceof Error ? error.message : String(error));
-      if (isOpen()) reply({ type: 'register-refused', agentId, code: wall('credentials', { message: 'registration_failed', status: 503, cause: error instanceof Error ? error : undefined }).message });
+      if (isOpen()) reply({ type: 'register-refused', agentId, code: 'registration_failed' });
     }
   };
 

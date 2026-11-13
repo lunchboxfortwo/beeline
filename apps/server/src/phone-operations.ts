@@ -1,25 +1,26 @@
-import { wall, WallRefusal } from '@beeline/api-contract/daemon';
+import { WallRefusal } from '@beeline/api-contract/daemon';
 import { parseSigninFunnelEvent } from '@beeline/api-contract/signin-funnel';
-import { recordSigninFunnelEvent } from './signin-funnel.js';
-import { ingestDiagnostics, recordDiagnostic } from './diagnostics.js';
+import { createHash } from 'node:crypto';
+import { ingestDiagnostics,recordDiagnostic } from './diagnostics.js';
 import { readRoomTools } from './room-tool-projection.js';
-import { dispatchTrayDecisionCommand, isTrayDecisionCommand } from './tray-decision-command.js';
+import { recordSigninFunnelEvent } from './signin-funnel.js';
+import { dispatchTrayDecisionCommand,isTrayDecisionCommand } from './tray-decision-command.js';
 
-import { readMediaMetadata } from './phone-media.js';
-import { CHAT_LINK_TOKEN_LIMIT, CHAT_LINK_TOKEN_MAX_LENGTH } from '@beeline/api-contract/chat-links';
-import { runnableOrigin } from './runnable-artifact.js';
-import { parseRouterCommandIdentity, type RouterCommandIdentity } from '@beeline/api-contract/router-command';
-import { RouterCommandLedger, CommandDigestConflict, InvalidCommandArguments } from './router-command-ledger.js';
-import { randomUUID } from 'node:crypto';
+import { CHAT_LINK_TOKEN_LIMIT,CHAT_LINK_TOKEN_MAX_LENGTH } from '@beeline/api-contract/chat-links';
 import {
-  MESSAGE_SEARCH_QUERY_MAX_BYTES, PHONE_READ_OPERATIONS, messageSearchTerms,
+MESSAGE_SEARCH_QUERY_MAX_BYTES,PHONE_READ_OPERATIONS,messageSearchTerms,
 } from '@beeline/api-contract/phone';
-import { PHONE_OPERATION_NAMES, MessageSearchTooBroadError, parseArchivedCornerCursor } from './phone-service.js';
-import { recordOperatorFunctionEvent } from './operator-dashboard.js';
-import { IdentityRateLimit } from './phone-read-limit.js';
-import { VoiceBudgetExceeded } from './voice-budget.js';
-import type { ServerOptions } from './server.js';
+import { parseRouterCommandIdentity,type RouterCommandIdentity } from '@beeline/api-contract/router-command';
+import { randomUUID } from 'node:crypto';
 import { ExpectedRefusalError } from './command-refusal.js';
+import { recordOperatorFunctionEvent } from './operator-dashboard.js';
+import { readMediaMetadata } from './phone-media.js';
+import { IdentityRateLimit } from './phone-read-limit.js';
+import { MessageSearchTooBroadError,PHONE_OPERATION_NAMES,parseArchivedCornerCursor } from './phone-service.js';
+import { CommandDigestConflict,InvalidCommandArguments,RouterCommandLedger } from './router-command-ledger.js';
+import { runnableOrigin } from './runnable-artifact.js';
+import type { ServerOptions } from './server.js';
+import { VoiceBudgetExceeded } from './voice-budget.js';
 
 export class PhoneOperationError extends ExpectedRefusalError {
   constructor(readonly status: number, readonly payload: Record<string, unknown>) {
@@ -42,7 +43,6 @@ export const ATOMIC_ROUTER_COMMANDS = new Set([
   'clearNeedsYou', 'clearNeedsYouSection',
   'deleteRoomSchedule',
 ]);
-const preparedMessageCommands = new Set(['sendRoomMessage', 'sendRoomReply']);
 const scheduledStopCommands=new Set(['deleteRoomSchedule','deleteRoomSubscription']);
 const clientErrorLimit = new IdentityRateLimit('client-error', 12);
 function refuse(status: number, error: string): never {
@@ -53,7 +53,7 @@ function found<T>(result: T | null): T {
   return result;
 }
 function required(input: Record<string, unknown>, key: string): string {
-  if (typeof input[key] !== 'string') throw wall('credentials', { message: `${key} is required`, status: 400 });
+  if (typeof input[key] !== 'string') throw new PhoneOperationError(400, { error: `${key} is required` });
   return input[key];
 }
 function optional(input: Record<string, unknown>, key: string): string | undefined {
@@ -63,7 +63,7 @@ function optional(input: Record<string, unknown>, key: string): string | undefin
 function uuid(input: Record<string, unknown>, key: string): string {
   const value = required(input, key);
   if (!/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(value))
-    throw wall('credentials', { message: `${key} is invalid`, status: 400 });
+    throw new PhoneOperationError(400, { error: `${key} is invalid` });
   return value;
 }
 function messageId(input: Record<string, unknown>): string {
@@ -254,22 +254,19 @@ export function createPhoneOperationDispatcher(
     }
   };
 
-  const dispatch = async (name: string, input: Record<string, unknown>, viewerId: string, _signal?: AbortSignal,
+  const dispatchOptional = async (name: string, input: Record<string, unknown>, viewerId: string, _signal?: AbortSignal,
     familyId?: string, command?: RouterCommandIdentity): Promise<unknown> => {
-    if (!viewerId) throw wall('signed-in', { message: 'phone_token_required', status: 401 });
-    if (!PHONE_OPERATION_NAMES.has(name as never)) throw wall('credentials', { message: 'unknown_phone_operation', status: 404 });
-    if (!input || typeof input !== 'object' || Array.isArray(input)) throw wall('credentials', { message: 'invalid_args', status: 400 });
+    if (!PHONE_OPERATION_NAMES.has(name as never)) throw new PhoneOperationError(404, { error: 'unknown_phone_operation' });
+    if (!input || typeof input !== 'object' || Array.isArray(input)) throw new PhoneOperationError(400, { error: 'invalid_args' });
     const startedAt = Date.now();
     // Let admitted writes settle atomically. Never race a transaction against socket closure.
     let identity: RouterCommandIdentity | undefined;
     if (command !== undefined) {
       try { identity = parseRouterCommandIdentity(command); }
-      catch { throw wall('credentials', { message: 'invalid_command_identity', status: 400 }); }
-      if (!ATOMIC_ROUTER_COMMANDS.has(name) && !preparedMessageCommands.has(name)&&!scheduledStopCommands.has(name)&&!isTrayDecisionCommand(name))
-        throw wall('credentials', { message: 'command_operation_not_supported', status: 400 });
+      catch { throw new PhoneOperationError(400, { error: 'invalid_command_identity' }); }
+      if (!ATOMIC_ROUTER_COMMANDS.has(name)&&!scheduledStopCommands.has(name)&&!isTrayDecisionCommand(name))
+        throw new PhoneOperationError(400, { error: 'command_operation_not_supported' });
     }
-    if (identity && preparedMessageCommands.has(name) && input.messageId !== identity.id)
-      throw wall('credentials', { message: 'command_message_identity_mismatch', status: 400 });
     if(identity&&scheduledStopCommands.has(name)){
       uuid(input,'roomId');
       if(name==='deleteRoomSchedule')uuid(input,'scheduleId');else required(input,'subscriptionId');
@@ -297,16 +294,13 @@ export function createPhoneOperationDispatcher(
         result = receipt.result;
         if (receipt.state !== 'committed') {
           if (command) return receipt;
-          throw wall('credentials', { message: receipt.state === 'result-expired' ? 'command_result_expired' : 'command_outcome_unknown', status: 409 });
+          throw new PhoneOperationError(409, { error: receipt.state === 'result-expired' ? 'command_result_expired' : 'command_outcome_unknown' });
         }
       } else result = await execute(name, input, viewerId, familyId);
     } catch (error) {
-      if (error instanceof CommandDigestConflict) throw wall('credentials', { message: 'command_identity_conflict', status: 409 });
-      if (error instanceof InvalidCommandArguments) throw wall('credentials', { message: 'invalid_command_arguments', status: 400 });
-      throw wall('credentials', error instanceof WallRefusal ? error : {
-        message: error instanceof Error ? error.message : String(error), status: errorStatus(error),
-        cause: error instanceof Error ? error : undefined,
-      });
+      if (error instanceof CommandDigestConflict) throw new PhoneOperationError(409, { error: 'command_identity_conflict' });
+      if (error instanceof InvalidCommandArguments) throw new PhoneOperationError(400, { error: 'invalid_command_arguments' });
+      throw error;
     }
     // Replaying a receipt must not replay post-commit hooks or notifications.
     if (command && !performed) return receipt;
@@ -327,6 +321,19 @@ export function createPhoneOperationDispatcher(
       });
     }
     return command ? receipt : result;
+  };
+  const dispatch = async (name: string, input: Record<string, unknown>, viewerId: string, _signal?: AbortSignal,
+    familyId?: string, command?: RouterCommandIdentity): Promise<unknown> => {
+    if (name === 'sendRoomMessage' || name === 'sendRoomReply') {
+      const intent = command && typeof command.id === 'string' ? command.id : undefined;
+      const result = await execute(name, { ...input,
+        roomId: String(input.roomId ?? ''), text: String(input.text ?? ''),
+        ...(intent ? { messageId: /^[0-9a-f]{64}$/.test(intent) ? intent :
+          createHash('sha256').update(`message:${viewerId}:${name}:${intent}`).digest('hex') } : {}),
+      } as never, viewerId);
+      return command ? { v: 1, operation: name, commandId: intent, state: 'committed', result } : result;
+    }
+    return dispatchOptional(name, input, viewerId, _signal, familyId, command);
   };
   return async (...args: Parameters<typeof dispatch>): Promise<unknown> => {
     const started = Date.now();

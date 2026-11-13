@@ -1,4 +1,4 @@
-import { describe, it, expect, cornerCallText, Check, callAgentTool, CAPABILITY_TOOLS, toolValidationSchema, m7_describe, m7_expect, m7_it, m7_agentToolsFor, m7_askChoice, m7_openPoll, mergedDescribe7, m8_describe, m8_expect, m8_it, m8_agentToolsFor, m8_emitEvent, m8_listEventSubscriptions, m8_subscribeEvents, mergedDescribe8, m9_createHash, m9_tmpdir, m9_describe, m9_expect, m9_it, m9_REQUESTABLE_AGENT_GRANT_KINDS, m9_agentToolsFor, m9_listGrants, m9_requestGrant, m9_requestSharedAssetIsolation, m9_runGrantedCommand, m9_storeSecret, m9_resolveGrantCommand, mergedDescribe9, schema, fixtureScope3, fixtureScope6, fixtureScope8, fixtureScope12, type m9_GrantRunDeps, type Call } from './test-support-read-only-mcp.test-support.js';
+import { callAgentTool,CAPABILITY_TOOLS,Check,cornerCallText,describe,expect,fixtureScope12,fixtureScope3,fixtureScope6,fixtureScope8,it,m7_agentToolsFor,m7_askChoice,m7_describe,m7_expect,m7_it,m7_openPoll,m8_agentToolsFor,m8_describe,m8_emitEvent,m8_expect,m8_it,m8_listEventSubscriptions,m8_subscribeEvents,m9_agentToolsFor,m9_createHash,m9_describe,m9_expect,m9_it,m9_listGrants,m9_REQUESTABLE_AGENT_GRANT_KINDS,m9_requestGrant,m9_requestSharedAssetIsolation,m9_resolveGrantCommand,m9_runGrantedCommand,m9_storeSecret,m9_tmpdir,mergedDescribe7,mergedDescribe8,mergedDescribe9,schema,toolValidationSchema,type Call,type m9_GrantRunDeps } from './test-support-read-only-mcp.test-support.js';
 
 describe('corner text', () => {
   it('flattens an untidy call instead of refusing it', () => {
@@ -122,7 +122,8 @@ m7_describe('beeline-agent ask_choice and open_poll', () => {
       m7_expect(names).not.toContain('open_poll');
       const schema = tools.find(tool => tool.name === 'report')!.inputSchema;
       m7_expect(schema.required ?? []).not.toContain('ask');
-      m7_expect(schema.properties?.ask).toMatchObject({ maxLength: 140, description: m7_expect.stringContaining('one sentence on one line') });
+      m7_expect(schema.properties?.ask).toMatchObject({type:'string'});
+      m7_expect(schema.properties?.ask).not.toHaveProperty('maxLength');
     }
   });
 

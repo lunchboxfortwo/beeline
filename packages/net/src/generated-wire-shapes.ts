@@ -2036,7 +2036,7 @@ export const wireShapes: readonly WireShape[] = [
   shape({"kind":"union","choices":[6,216,217]}),
   shape({"kind":"union","choices":[6,1902]}),
   shape({"kind":"intersection","choices":[1411,2034]}),
-  shape({"kind":"object","properties":{"receipt":{"node":5,"optional":true}}}),
+  shape({"kind":"object","properties":{"answered":{"node":20,"optional":true},"receipt":{"node":5,"optional":true}}}),
   shape({"kind":"intersection","choices":[338,1414,1413,2036]}),
   shape({"kind":"object","properties":{"tool":{"node":1,"optional":false},"title":{"node":1,"optional":false},"detail":{"node":1,"optional":false},"approvalUrl":{"node":1,"optional":false},"approvalId":{"node":5,"optional":true},"linkKind":{"node":344,"optional":false},"expiresAt":{"node":17,"optional":true},"signInUrl":{"node":5,"optional":true}}}),
   shape({"kind":"intersection","choices":[1413,2038]}),

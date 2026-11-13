@@ -1,43 +1,26 @@
-import { startQueuedTurn } from './test-fixtures/queued-turn.test-support.js';
-import { VOICE_DATA_TOPIC } from '@beeline/api-contract/phone';
 
-import * as backgroundWork from './background-work.js';
 
 import { EventEmitter } from 'node:events';
 
-import { afterEach, expect, it, vi } from 'vitest';
+import { afterEach,vi } from 'vitest';
 
-import { voiceTempo } from './voice-tempo.js';
 
-import { markdownToSpeech } from './markdown-to-speech.js';
 
 import { VoiceService } from './voice-service.js';
 
-import * as telemetry from './sentry.js';
 
-import { VoiceRoomRuntime, spokenReport, confirmedVoiceSpeech, voiceInterrupt, voicePlaybackEcho } from './voice-room-runtime.js';
 
-import { AuraSpeech, OpenRouterVoiceBrain, VoiceQuotaError } from './voice-providers.js';
 
-import { VoiceService as RealVoiceService } from './voice-service.js';
 
-import { SYSTEM_IDENTITY_ID } from '@beeline/api-contract/system-identity';
 
-import { migrate } from './database.js';
 
-import { PgliteDatabase } from './test-support.js';
 
 import { LiveHub } from './live.js';
 
-import { routeHumanMessage } from './agent-command.js';
 
-import { HelperDaemonService as DaemonService } from './test-fixtures/helper-daemon.js';
 
-import { PhoneService } from './phone-service.js';
 
-import { ConnectionPresence } from './connection-presence.js';
 
-import { groupBPostgresDatabase } from './test-fixtures/test-support-router-group-b-postgres.js';
 
 
 afterEach(() => { vi.useRealTimers(); });
@@ -179,19 +162,20 @@ export const inputOwnerPostgresUrl = process.env.BEELINE_COMMAND_TEST_POSTGRES_U
 
 
 export { VOICE_DATA_TOPIC } from '@beeline/api-contract/phone';
-export { EventEmitter } from 'node:events';
-export { afterEach, expect, it, vi } from 'vitest';
-export { voiceTempo } from './voice-tempo.js';
-export { markdownToSpeech } from './markdown-to-speech.js';
-export { VoiceService, VoiceService as RealVoiceService } from './voice-service.js';
-export { VoiceRoomRuntime, spokenReport, confirmedVoiceSpeech, voiceInterrupt, voicePlaybackEcho } from './voice-room-runtime.js';
-export { AuraSpeech, OpenRouterVoiceBrain, VoiceQuotaError } from './voice-providers.js';
 export { SYSTEM_IDENTITY_ID } from '@beeline/api-contract/system-identity';
-export { migrate } from './database.js';
-export { PgliteDatabase } from './test-support.js';
-export { LiveHub } from './live.js';
-export { routeHumanMessage, startQueuedTurn } from './agent-command.js';
-export { HelperDaemonService as DaemonService } from './test-fixtures/helper-daemon.js';
-export { PhoneService } from './phone-service.js';
+export { EventEmitter } from 'node:events';
+export { afterEach,expect,it,vi } from 'vitest';
 export { ConnectionPresence } from './connection-presence.js';
+export { migrate } from './database.js';
+export { LiveHub } from './live.js';
+export { markdownToSpeech } from './markdown-to-speech.js';
+export { PhoneService } from './phone-service.js';
+export { HelperDaemonService as DaemonService } from './test-fixtures/helper-daemon.js';
+export { routeHumanMessage } from './test-fixtures/queue-routing.test-support.js';
+export { startQueuedTurn } from './test-fixtures/queued-turn.test-support.js';
 export { groupBPostgresDatabase } from './test-fixtures/test-support-router-group-b-postgres.js';
+export { PgliteDatabase } from './test-support.js';
+export { AuraSpeech,OpenRouterVoiceBrain,VoiceQuotaError } from './voice-providers.js';
+export { confirmedVoiceSpeech,spokenReport,voiceInterrupt,voicePlaybackEcho,VoiceRoomRuntime } from './voice-room-runtime.js';
+export { VoiceService as RealVoiceService,VoiceService } from './voice-service.js';
+export { voiceTempo } from './voice-tempo.js';

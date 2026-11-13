@@ -1,18 +1,18 @@
-import { WallRefusal } from '@beeline/api-contract/daemon';
-import { AsyncLocalStorage } from 'node:async_hooks';
-import { clearOwedMention } from './owed-mentions.js';
-import { createHash, randomUUID } from 'node:crypto';
+import { INSTITUTIONAL_HISTORY_RESULT_MAX,INSTITUTIONAL_MEMORY_SEARCH_RESULT_MAX,REPOSITORY_SUBSCRIPTION_EVENTS,WallRefusal } from '@beeline/api-contract/daemon';
+import { MESSAGE_REACTION_EMOJIS,SUBSCRIBABLE_EVENT_KINDS } from '@beeline/api-contract/phone';
 import type { Tool } from '@modelcontextprotocol/sdk/types.js';
-import { INSTITUTIONAL_HISTORY_RESULT_MAX, INSTITUTIONAL_MEMORY_SEARCH_RESULT_MAX, REPOSITORY_SUBSCRIPTION_EVENTS } from '@beeline/api-contract/daemon';
-import { MESSAGE_REACTION_EMOJIS, SUBSCRIBABLE_EVENT_KINDS } from '@beeline/api-contract/phone';
-import type { SqlDatabase } from './database.js';
-import type { DaemonService } from './daemon-service.js';
-import type { ObjectService } from './object-service.js';
-import { ExpectedRefusalError } from './command-refusal.js';
-import { McpToolError, mcpProvenance } from './rooms-mcp-members.js';
-import { selectMcpOrder, dismissAgentCommandWakes, createMcpAgentCommand } from './agent-command.js';
+import { AsyncLocalStorage } from 'node:async_hooks';
+import { createHash } from 'node:crypto';
+import { readAgentQueueRows } from './agent-command-read-agent-commands.js';
+import { createMcpAgentCommand,dismissAgentCommandWakes,selectMcpOrder } from './agent-command.js';
 import { endAgentTurn } from './agent-turn-end.js';
+import { ExpectedRefusalError } from './command-refusal.js';
+import type { DaemonService } from './daemon-service.js';
+import type { SqlDatabase } from './database.js';
+import type { ObjectService } from './object-service.js';
+import { clearOwedMention } from './owed-mentions.js';
 import { mcpWakeNext } from './rooms-mcp-events.js';
+import { McpToolError,mcpProvenance } from './rooms-mcp-members.js';
 
 /**
  * Agent tools a connected AI app does not get, with the plain reason it is
@@ -342,6 +342,24 @@ export class RoomsMcpAgentTools {
   }
 
   async call(member: string, name: string, args: Args): Promise<unknown> {
+    if (name === 'order' || name === 'report' || name === 'post' && args.progress !== true) {
+      const target = String(args.address ?? args.room ?? '');
+      const item = (await this.db.query<import('./agent-command.js').CommandRow>(
+        `SELECT * FROM agent_commands WHERE agent_id=$1 AND (state='pending' OR id=$2) AND reason<>'mcp_call'
+         AND ($2::text IS NULL OR id=$2) ORDER BY (room_id::text=$3) DESC,inbox_sequence,id LIMIT 1`,
+        [member,typeof args.commandId === 'string' ? args.commandId : null,target])).rows[0];
+      const context = {roomId:item?.room_id ?? target,requestId:item?.turn_request_id};
+      if (name === 'post' && item?.state==='pending' && (item.return_room_id ?? item.room_id) === target)
+        return this.exec(member,'postRoomMessage',{...context,text:args.text,replyToMessageId:args.replyTo});
+      return this.exec(member,name === 'post' ? 'postCornerMessage' : name,
+        name === 'order' ? {...context,address:target,text:args.text,agent:args.agent}
+        : name === 'report' ? {...context,status:args.status,text:args.text,ask:args.ask}
+        : {...context,cornerId:target,text:args.text,replyTo:args.replyTo});
+    }
+    return this.callTool(member,name,args);
+  }
+
+  private async callTool(member: string, name: string, args: Args): Promise<unknown> {
     if (MCP_AGENT_EXCLUSIONS[name]) throw new McpToolError(`${name}: ${MCP_AGENT_EXCLUSIONS[name]}`);
     const definition = MCP_AGENT_TOOLS.find(candidate => candidate.name === name);
     if (!definition) throw new McpToolError(`unknown tool: ${name}`);
@@ -387,11 +405,7 @@ export class RoomsMcpAgentTools {
         return exec('reviseCornerBrief', { ...context, cornerId, expectedRevision: args.expectedRevision, reviewer: args.reviewer,
           brief: { ...briefDraft(args.brief), change: args.change } });
       });
-      case 'order': return turn((_, context) => exec('order', { ...context, address: addressArg(args.address), text: args.text, agent: args.agent }));
       case 'stop': return turn((_, context) => exec('stopAgentTurn', { ...context, address: addressArg(args.address), agent: args.agent }));
-      case 'report':
-        return this.inTurn(member, addressArg(args.address), (_, context) =>
-          exec('report', { ...context, status: args.status, text: args.text, ask: args.ask }), true);
       case 'report_feedback': return turn((_, context) => exec('reportFeedback', { ...context, category: args.category, summary: args.summary,
         detail: args.detail, toolName: args.tool_name, errorExcerpt: args.error_excerpt, promptSectionIds: [] }));
       case 'notify_feedback_fixed': return turn((_, context) => exec('notifyFeedbackFixed', { ...context,
@@ -679,16 +693,11 @@ function briefDraft(value: unknown): Args | undefined {
  * scheduled wakes addressed to this member that it has not handled yet.
  */
 export async function pendingMcpWakes(db: SqlDatabase, member: string) {
-  return (await db.query<{ id: string; room_id: string; reason: string; kind: string | null; text: string | null; created_at: Date }>(
-    `SELECT command.id,command.room_id,command.reason,command.private_payload->>'kind' kind,
-       left(COALESCE(command.private_payload->>'text',source.text),16000) text,command.created_at
-     FROM agent_commands command LEFT JOIN messages source ON source.id=command.source_message_id
-     WHERE command.agent_id=$1 AND command.action='input' AND command.reason<>'mcp_call'
-       AND EXISTS(SELECT 1 FROM rooms active WHERE active.id=command.room_id AND active.archived_at IS NULL)
-       AND command.state='pending'
-       AND EXISTS(SELECT 1 FROM room_access member WHERE member.room_id=command.room_id
-         AND member.identity_id=$1 AND member.removed_at IS NULL)
-     ORDER BY command.created_at,command.id`, [member])).rows
-    .map(row => ({ id: row.id, address: row.room_id, reason: row.reason, ...(row.kind ? { kind: row.kind } : {}),
-      ...(row.text ? { text: row.text } : {}), createdAt: row.created_at, next: mcpWakeNext(row.kind, row.reason) }));
+  const {rows} = await readAgentQueueRows(db,member);
+  return rows.filter(item=>item.reason!=='mcp_call').map(item=>({
+    id:item.id,address:item.room_id,reason:item.reason,
+    ...(item.private_payload ? {kind:item.private_payload.kind} : {}),
+    text:item.message?.body ?? item.private_payload?.text ?? item.reason,createdAt:item.created_at,
+    next:mcpWakeNext(item.private_payload?.kind ?? null,item.reason),
+  }));
 }

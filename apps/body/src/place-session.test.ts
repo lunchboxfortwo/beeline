@@ -1,14 +1,14 @@
-import { EventEmitter } from 'node:events';
-import { mkdtemp, rm } from 'node:fs/promises';
-import { tmpdir } from 'node:os';
-import { join } from 'node:path';
-import { afterEach, expect, it, vi } from 'vitest';
 import type { AgentCommand } from '@beeline/api-contract/daemon';
+import { EventEmitter } from 'node:events';
+import { mkdtemp,rm,writeFile } from 'node:fs/promises';
+import { tmpdir } from 'node:os';
+import { dirname,join } from 'node:path';
+import { afterEach,expect,it,vi } from 'vitest';
 import type { AcpClient } from './acp.js';
 import type { BodyConfig } from './config.js';
 import type { DaemonApiClient } from './daemon-api-client.js';
-import type { AgentRuntimeRecord } from './runtime.js';
 import { PlaceSession } from './place-session.js';
+import type { AgentRuntimeRecord } from './runtime.js';
 
 // Cache persistence is tested with real files by SessionResources. These
 // prompt tests intentionally finish while optional background work is pending.
@@ -72,6 +72,20 @@ it('an optional home/skills setup that never resolves cannot hold the answer', a
   expect(prepareRoomAgentHome).not.toHaveBeenCalled();
   void f.session.resources.prepare();
   await vi.waitFor(() => expect(prepareRoomAgentHome).toHaveBeenCalled());
+  await f.session.dispose();
+});
+
+it('answers from a fresh private home when the configured home is a file', async () => {
+  const f = await fixture();
+  await writeFile(f.config.agentHomeRoot!, 'not a directory');
+  await f.session.start();
+  const home = f.spawn.mock.calls[0]![0].agentEnv!.HOME!;
+  roots.push(dirname(home));
+  expect(home).not.toBe(f.config.operatorHome);
+  expect(home).not.toContain(f.config.agentHomeRoot!);
+  expect(await f.session.deliver(f.item, [])).toMatchObject({ text: 'The answer' });
+  expect(f.prompt.mock.calls[0]?.[1]).toContain('Private home setup failed');
+  expect(f.prompt.mock.calls[0]?.[1]).toContain('fresh private home');
   await f.session.dispose();
 });
 

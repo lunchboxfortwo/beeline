@@ -1,11 +1,10 @@
-import { wall } from '@beeline/api-contract/daemon';
-import { phoneIdentity as identity, type PhoneIdentityRow as IdentityRow } from '../phone-identity.js';
-import type { AgentGrantView } from '@beeline/api-contract/phone';
 import { type AgentGrantStatus } from '@beeline/api-contract/agent-grants';
-import { type SqlDatabase } from '../database.js';
+import type { AgentGrantView } from '@beeline/api-contract/phone';
 import { SYSTEM_IDENTITY_ID } from '@beeline/api-contract/system-identity';
+import { type SqlDatabase } from '../database.js';
+import { phoneIdentity as identity,type PhoneIdentityRow as IdentityRow } from '../phone-identity.js';
 import type { PhoneContext } from './context.js';
-import { AGENT_OWNER_AUTHORITY_MESSAGE, WORKSPACE_ADMIN_AUTHORITY_MESSAGE } from './values.js';
+import { AGENT_OWNER_AUTHORITY_MESSAGE,WORKSPACE_ADMIN_AUTHORITY_MESSAGE } from './values.js';
 
 
 
@@ -193,7 +192,7 @@ import { AGENT_OWNER_AUTHORITY_MESSAGE, WORKSPACE_ADMIN_AUTHORITY_MESSAGE } from
       );
       const participants = room.rows[0]?.direct_participants ?? null;
       if (participants?.includes(SYSTEM_IDENTITY_ID))
-        throw wall('credentials', 'this is a read-only system thread; only @system may post here (access denied)');
+        throw new Error('this is a read-only system thread; only @system may post here (access denied)');
     }
   }
 

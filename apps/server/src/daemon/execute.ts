@@ -1,34 +1,31 @@
-import { wall, WallRefusal } from '@beeline/api-contract/daemon';
-import { SYSTEM_IDENTITY_ID } from '@beeline/api-contract/system-identity';
-import { typedMentionHandles } from '../message-mentions.js';
-import { endAgentTurn } from '../agent-turn-end.js';
-import { cleanVoiceReply } from '../voice-reply.js';
-import { queueDatabaseWork } from '../database-work-queue.js';
-import { routeAgentResult } from '../agent-command.js';
-import { authorizeCommandOutput } from '../agent-command-route-agent-result.js';
-import { randomBytes } from 'node:crypto';
 import type { DaemonOperationMap } from '@beeline/api-contract/daemon';
+import { WallRefusal } from '@beeline/api-contract/daemon';
+import { createHash,randomBytes } from 'node:crypto';
+import { authorizeCommandOutput } from '../agent-command-route-agent-result.js';
+import { answerQueuedMessage } from '../agent-command.js';
+import { sendOrder } from '../commander.js';
+import { CornerAccessDatabase } from '../corner-access-database.js';
 import { lockCornerLifecycle } from '../corner-lifecycle.js';
-import { LiveHub, type LiveEvent } from '../live.js';
-import { precomputeInstitutionalQueryEmbedding } from '../institutional-memory-shadow.js';
-import type { AfterCommit } from '../institutional-memory-embeddings.js';
-import type { DaemonContext } from './context.js';
-import { Input, OwnedModelClaimCapability, Output, CORNER_REACH_OPERATIONS, AccessDeniedError, CORNER_CLEANUP_OPERATIONS, seconds } from './values.js';
-import { daemonAccess, daemonReviewSourceAccess } from './access.js';
-import { daemonReach, daemonWriteResult } from './corner-messages.js';
-import { daemonPostRoomMessage } from './messages.js';
-import { daemonReconcileZeroCheckWorkerCompletion } from './corner-completion.js';
 import { createDaemonCommandService } from '../daemon-service.js';
-import { daemonReport } from './corner-reports.js';
+import { queueDatabaseWork } from '../database-work-queue.js';
+import type { AfterCommit } from '../institutional-memory-embeddings.js';
+import { precomputeInstitutionalQueryEmbedding } from '../institutional-memory-shadow.js';
+import { LiveHub,type LiveEvent } from '../live.js';
+import { cleanVoiceReply } from '../voice-reply.js';
+import { daemonAccess,daemonReviewSourceAccess } from './access.js';
+import type { DaemonContext } from './context.js';
+import { daemonPostCornerMessage,daemonReach,daemonWriteResult } from './corner-messages.js';
 import { daemonAuthorizeScopedGrant } from './grants.js';
+import { daemonPostRoomMessage } from './messages.js';
 import { daemonExecuteOperation } from './operations.js';
 import { daemonTurnReceipt } from './turn-receipts.js';
+import { AccessDeniedError,CORNER_CLEANUP_OPERATIONS,CORNER_REACH_OPERATIONS,Input,Output,OwnedModelClaimCapability } from './values.js';
 
 
   /** One request from an agent: the membership wall, then the queue item the
    * call serves (its `requestId`), then the operation. An answer for an item
    * that is already done returns the stored result. */
-  export async function daemonExecute<Name extends keyof DaemonOperationMap>(ctx: DaemonContext,
+  async function daemonExecuteTool<Name extends keyof DaemonOperationMap>(ctx: DaemonContext,
     name: Name,
     input: Input<Name>,
     authenticatedAgentId: string,
@@ -44,8 +41,6 @@ import { daemonTurnReceipt } from './turn-receipts.js';
     const turnWrites = new Set([
       'postVaultSaveCard',
       'postAgentAvatar',
-      'postRoomMessage',
-      'postCornerMessage',
       'postAgentAttachment',
       'postAgentDraft',
       'postAgentThought',
@@ -57,9 +52,7 @@ import { daemonTurnReceipt } from './turn-receipts.js';
       'postSquireLoginWall',
       'createLinkSpendRequest',
       'retrieveLinkSpendRequest',
-      'order',
       'stopAgentTurn',
-      'report',
       'createCorner',
       'reviseCornerBrief',
       'postRoomEvent',
@@ -120,7 +113,7 @@ import { daemonTurnReceipt } from './turn-receipts.js';
     input = { ...input };
     const candidate = input as Record<string, unknown>;
     if (typeof candidate.agentId === 'string' && candidate.agentId !== authenticatedAgentId)
-      throw wall('credentials', 'daemon token does not own requested agent');
+      throw new AccessDeniedError();
     // Command writes authorize their source before the operation checks its
     // target. Lifecycle and read operations authorize the addressed corner,
     // independently of any source context the helper also supplies.
@@ -145,7 +138,7 @@ import { daemonTurnReceipt } from './turn-receipts.js';
       'walletContractCall',
       'walletSignTypedData',
     ].includes(name);
-    if (walletCall && !scopedRoom) throw wall('credentials', 'wallet access requires an active Room command');
+    if (walletCall && !scopedRoom) throw new AccessDeniedError();
     let cornerReviewer = false;
     let isCorner = false;
     let privateCommand = false;
@@ -162,7 +155,7 @@ import { daemonTurnReceipt } from './turn-receipts.js';
                 return daemonReach(ctx, addressedRoom, authenticatedAgentId).then(() => ({
                   cornerReviewer: false, isCorner: true, privateCommand: false, voiceAgentName: null,
                 }));
-              throw wall('membership', sourceError instanceof Error ? sourceError : { message: String(sourceError), status: 503 });
+              throw sourceError;
             });
           // Reachable corner operations also admit a parent Room member.
           if ((error instanceof AccessDeniedError || error instanceof WallRefusal && error.kind === 'membership' && error.status < 500) &&
@@ -173,7 +166,7 @@ import { daemonTurnReceipt } from './turn-receipts.js';
               privateCommand: false,
               voiceAgentName: null,
             }));
-          throw wall('membership', error instanceof Error ? error : { message: String(error), status: 503 });
+          throw error;
         },
       ));
     // Repository tools resolve provider facts themselves; an answer never
@@ -181,41 +174,6 @@ import { daemonTurnReceipt } from './turn-receipts.js';
     if (voiceAgentName && typeof candidate.text === 'string')
       candidate.text = cleanVoiceReply(candidate.text, voiceAgentName);
 
-    if (
-      !ctx.commandTransaction &&
-      scopedRoom &&
-      name === 'postRoomMessage' &&
-      candidate.relay === undefined &&
-      typedMentionHandles(String(candidate.text ?? '')).size === 0 &&
-      typeof candidate.replyToMessageId !== 'string' &&
-      // A reply naming nobody normally has nothing to route, which is the whole
-      // reason for this shorter write: one autocommit statement that commits
-      // and publishes on its own. A corner reviewer's reply is the exception —
-      // it hands the branch back — and that handoff must not be a second write
-      // AFTER the commit. Losing it there is permanent: the verdict is durable,
-      // its command output authority is spent, and no retry can re-create the
-      // turn, which is exactly the stall this handback exists to remove. So the
-      // reviewer takes the transactional path below, where the verdict and the
-      // handoff commit together or not at all.
-      !cornerReviewer &&
-      !privateCommand &&
-      // A same-turn post needs the transactional path: insert the ordinary
-      // reply, then demote repeated prose before any reader can observe it.
-      !(await ctx.database.query(
-        `SELECT 1 FROM messages WHERE room_id=$1 AND author_id=$2 AND request_id=$3
-           AND presentation='message' AND deleted_at IS NULL LIMIT 1`,
-        [scopedRoom, authenticatedAgentId, candidate.requestId],
-      )).rowCount
-    ) {
-      const output = await queueDatabaseWork(ctx.database, `turn:${scopedRoom}:${authenticatedAgentId}`, () => daemonPostRoomMessage(ctx,
-        input as Input<'postRoomMessage'>,
-        authenticatedAgentId,
-        true,
-      ));
-      if (isCorner) void daemonReconcileZeroCheckWorkerCompletion(ctx, scopedRoom!, authenticatedAgentId)
-        .catch(error => console.error('[daemon] post-answer reconciliation failed', error));
-      return output as Output<Name>;
-    }
     if (
       !ctx.commandTransaction && scopedRoom && turnWrites.has(name) &&
       (name !== 'getRoomMessage' || candidate.requestId !== undefined)
@@ -246,34 +204,12 @@ import { daemonTurnReceipt } from './turn-receipts.js';
         if (name === 'createCorner' || name === 'reviseCornerBrief') await lockCornerLifecycle(db, scopedRoom);
         const requestId = candidate.requestId ?? candidate.turnId;
         const command = await authorizeCommandOutput(db, scopedRoom, authenticatedAgentId, requestId);
-        // An answer or silence for an item that is already done is a resend:
-        // return the stored result instead of writing again.
         if (command.state === 'complete' && name === 'markAgentTurnSilent')
           return daemonWriteResult(ctx) as Output<Name>;
-        if (command.state === 'complete' && name === 'postRoomMessage' && candidate.presentation !== 'card') {
-          const saved = command.result_message_id ? (await db.query<{ id: string; created_at: Date }>(
-            `SELECT id,created_at FROM messages WHERE id=$1
-             UNION ALL SELECT id,created_at FROM agent_commands WHERE id=$1 LIMIT 1`, [command.result_message_id])).rows[0] : undefined;
-          return (saved ? { id: saved.id, createdAt: seconds(saved.created_at) } : daemonWriteResult(ctx)) as Output<Name>;
-        }
-        // Private inputs keep the return address recorded with the item.
-        // A refused delivery keeps both the queue item and the helper's answer.
-        const privateAnswer = command.private_payload && (command.private_payload.kind !== 'lifecycle' ||
-          command.private_payload.authorId !== SYSTEM_IDENTITY_ID);
-        if (privateAnswer && (name === 'postRoomMessage' || ([
-          'postAgentDraft', 'postAgentThought', 'postAgentActivity',
-        ].includes(name) && !(await db.query(
-          `SELECT 1 FROM corner_facts WHERE corner_id=$1`, [scopedRoom])).rowCount))) {
-          if (name !== 'postRoomMessage') return daemonWriteResult(ctx) as Output<Name>;
-          const text = String(candidate.text ?? '').trim();
-          if (text) {
-            const reported = await daemonReport({ ...ctx, afterCommit: task => { committedTasks.push(task); } }, text, authenticatedAgentId, command, db, true);
-            if ('delivered' in reported && reported.delivered === false)
-              throw wall('membership', 'commander is no longer a member of the return address');
-            await endAgentTurn(db, command, 'complete', null, reported.id);
-            return reported as Output<Name>;
-          }
-        }
+        // Drafts for private commands remain private; answers use the queue exit.
+        if (command.private_payload && ['postAgentDraft', 'postAgentThought', 'postAgentActivity'].includes(name) &&
+            !(await db.query('SELECT 1 FROM corner_facts WHERE corner_id=$1', [scopedRoom])).rowCount)
+          return daemonWriteResult(ctx) as Output<Name>;
         const scoped = createDaemonCommandService(ctx.dependencies, {
           database: db, live: buffered, authorizedCommand: command,
           starterOnboarding: ctx.starterOnboarding, memoryEmbed,
@@ -324,12 +260,6 @@ import { daemonTurnReceipt } from './turn-receipts.js';
               [offerId, command.id],
             );
         }
-        if (name === 'postRoomMessage' && candidate.relay === undefined) {
-          // routeAgentResult reads the reply's own text for the agents it hands
-          // work to, so there is nothing to pre-check here.
-          const message = result as unknown as { id: string };
-          await routeAgentResult(db, command, message.id);
-        }
         return result;
       }));
       for (const event of events) {
@@ -350,9 +280,6 @@ import { daemonTurnReceipt } from './turn-receipts.js';
       }
       for (const task of committedTasks) void Promise.resolve().then(() => task(ctx.database))
         .catch(error => console.error('[daemon] post-commit task failed', error));
-      if (name === 'postRoomMessage' && candidate.relay === undefined && isCorner)
-        void daemonReconcileZeroCheckWorkerCompletion(ctx, scopedRoom!, authenticatedAgentId)
-          .catch(error => console.error('[daemon] post-answer reconciliation failed', error));
       return output;
     }
     if (walletCall && ctx.commandTransaction) {
@@ -368,3 +295,36 @@ import { daemonTurnReceipt } from './turn-receipts.js';
     return daemonExecuteOperation(ctx, name, input, authenticatedAgentId, modelClaim, candidate, scopedRoom);
 
   }
+
+
+/** Conversational operations have one queue entry and one answer exit. */
+export async function daemonExecute<Name extends keyof DaemonOperationMap>(ctx: DaemonContext,
+  name: Name, input: Input<Name>, agentId: string, modelClaim?: OwnedModelClaimCapability,
+): Promise<Output<Name>> {
+  const value = input as Record<string, unknown>;
+  if (name === 'postRoomMessage' || name === 'report') {
+    const saved=name==='postRoomMessage' ? await daemonPostRoomMessage(ctx,input as Input<'postRoomMessage'>,agentId) : await answerQueuedMessage(ctx.database, agentId, { roomId: String(value.roomId),
+      requestId: typeof value.requestId === 'string' ? value.requestId : undefined,
+      text: String(value.text ?? ''), report: true, status: value.status,
+      ask: typeof value.ask === 'string' ? value.ask : undefined,
+    });
+    if (!('answered' in saved) || saved.answered!==false) {
+      const refresh=()=>ctx.reconcileZeroCheckWorkerCompletion(String(value.roomId),agentId)
+        .catch(error=>console.warn('[answer] optional lifecycle refresh omitted:',error));
+      const background=CornerAccessDatabase.physical(ctx.database).backgroundWork;
+      if (background) background.run(refresh); else void refresh();
+    }
+    return saved as Output<Name>;
+  }
+  if (name === 'postCornerMessage' || name === 'order') {
+    const parent = typeof value.requestId === 'string' ? (await ctx.database.query<import('../agent-command.js').CommandRow>(
+      `SELECT * FROM agent_commands WHERE room_id::text=$1 AND agent_id=$2 AND turn_request_id=$3
+       ORDER BY created_at DESC,id DESC LIMIT 1`, [String(value.roomId), agentId, value.requestId])).rows[0] : undefined;
+    if (name === 'postCornerMessage')
+      return daemonPostCornerMessage({ ...ctx, authorizedCommand: parent }, input as Input<'postCornerMessage'>, agentId) as Promise<Output<Name>>;
+    return sendOrder(ctx.database, parent!, agentId, String(value.address), String(value.text ?? ''),
+      typeof value.agent === 'string' ? value.agent : undefined, undefined,
+      typeof value.transportRequestId === 'string' ? createHash('sha256').update(`order:${agentId}:${value.transportRequestId}`).digest('hex') : undefined) as Promise<Output<Name>>;
+  }
+  return daemonExecuteTool(ctx, name, input, agentId, modelClaim);
+}

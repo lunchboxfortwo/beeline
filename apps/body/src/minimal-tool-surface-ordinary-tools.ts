@@ -1,6 +1,6 @@
 import { COMMAND_SECRET_NAME } from '@beeline/api-contract/agent-grants';
+import { ARTIFACT_MIME_TYPES,INSTITUTIONAL_HISTORY_QUERY_SCHEMA,INSTITUTIONAL_HISTORY_RESULT_MAX,INSTITUTIONAL_HISTORY_RESULT_MIN,INSTITUTIONAL_SEARCH_QUERY_MAX_CHARACTERS } from '@beeline/api-contract/daemon';
 import { HOST_EMULATOR_RULE } from './host-emulator.js';
-import { ARTIFACT_MIME_TYPES, INSTITUTIONAL_HISTORY_QUERY_SCHEMA, INSTITUTIONAL_SEARCH_QUERY_MAX_CHARACTERS, INSTITUTIONAL_HISTORY_RESULT_MIN, INSTITUTIONAL_HISTORY_RESULT_MAX } from '@beeline/api-contract/daemon';
 import { ToolDefinition } from './minimal-tool-surface.js';
 
 
@@ -368,14 +368,14 @@ export const ORDINARY_TOOLS: ToolDefinition[] = [
   },
   {
     "name": "report",
-    "description": "Report the assigned outcome one step up. In a corner, a human-approved revised brief transfers command to its author at its dispatch place; otherwise the opening route applies. Earlier explicit orders retain their issuer. Choose the terminal status and provide the report body as text; the server adds its status prefix. No address. Feedback is separate from assignment completion. Local proof paths are refused. First upload each proof with post_artifact, then cite its attachment filename instead of a local path.",
+    "description": "Report the assigned outcome one step up. In a corner, a human-approved revised brief transfers command to its author at its dispatch place; otherwise the opening route applies. Earlier explicit orders retain their issuer. Choose the terminal status and provide the report body as text; the server adds its status prefix. No address. Feedback is separate from assignment completion. Upload proof files with post_artifact and cite their attachment filenames when the recipient needs to open them.",
     "inputSchema": {
       "type": "object",
       "required": ["status", "text"],
       "properties": {
-        "ask": {"type": "string", "minLength": 1, "maxLength": 140, "description": "Optional plain text ask: one sentence on one line, at most 140 characters."},
+        "ask": {"type": "string", "description": "Optional plain text question for the recipient."},
         "status": {"type": "string", "enum": ["done", "blocked", "failed", "needs_decision"]},
-        "text": {"type": "string", "minLength": 1, "maxLength": 16000, "description": "Report text, at most 16000 UTF-16 code units."}
+        "text": {"type": "string", "description": "Complete report text."}
       },
       "additionalProperties": false
     }
@@ -529,9 +529,9 @@ export const ORDINARY_TOOLS: ToolDefinition[] = [
     "inputSchema": {
       "type": "object",
       "properties": {
-        "text": {"type": "string", "minLength": 1, "maxLength": 16000},
+        "text": {"type": "string"},
         "address": {"type": "string", "description": "Target Room or corner id; omitted address uses the active corner."},
-        "replyTo": {"type": "string", "pattern": "^[0-9a-f]{64}$", "description": "Message id to answer in this Room."}
+        "replyTo": {"type": "string", "description": "Message id to answer in this Room."}
       },
       "required": ["text"],
       "additionalProperties": false

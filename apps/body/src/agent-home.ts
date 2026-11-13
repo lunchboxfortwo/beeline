@@ -1,4 +1,3 @@
-import { wall } from '@beeline/api-contract/daemon';
 import { waitForPathRemoval } from './filesystem-change.js';
 /**
  * Per-room-instance harness state directories.
@@ -49,18 +48,21 @@ import { waitForPathRemoval } from './filesystem-change.js';
  * Pi uses `PI_CODING_AGENT_DIR` and the isolated `$HOME`, preventing its
  * otherwise-implicit reads from the operator's `~/.pi` and `~/.agents` trees.
  */
-import { existsSync, watch, type FSWatcher } from 'node:fs';
 import { randomUUID } from 'node:crypto';
-import { chmod, lstat, mkdir, readFile, readlink, realpath, rename, rm, symlink, writeFile } from 'node:fs/promises';
-import { homedir } from 'node:os';
-import { parse as parseYaml, stringify as stringifyYaml } from 'yaml';
-import { dirname, resolve } from 'node:path';
+import { existsSync,watch,type FSWatcher } from 'node:fs';
+import { chmod,lstat,mkdir,mkdtemp,readFile,readlink,realpath,rename,rm,symlink,writeFile } from 'node:fs/promises';
+import { homedir,tmpdir } from 'node:os';
+import { dirname,resolve } from 'node:path';
+import { parse as parseYaml,stringify as stringifyYaml } from 'yaml';
+import { AGENT_BEHAVIORS,agentBehavior,SHARED_CREDENTIALS,type AgentKind } from './agent-command.js';
+import { assertRealContainedDirectory,isMissingPathError,roomAgentHomeEnv,roomSessionTmpDir,writeIsolatedHarnessFile } from './agent-home-plan-managed-skills.js';
+import { provisionAgentSkillsAndMcp,provisionPiCustomModelConfig } from './agent-home-provision-agent-skills-and-mcp.js';
+import { BEELINE_ONBOARDING_SKILL_NAME,BEELINE_REVIEW_SKILL_NAME,BEELINE_SPEC_SKILL_NAME,BEELINE_TRIAGE_SKILL_NAME,runningBeelineReleaseId,SITUATIONAL_SKILL_NAMES } from './beeline-skill.js';
 import { DRAW_AVATAR_SKILL_NAME } from './draw-avatar-skill.js';
-import { AGENT_BEHAVIORS, SHARED_CREDENTIALS, agentBehavior, type AgentKind } from './agent-command.js';
-import { BEELINE_REVIEW_SKILL_NAME, BEELINE_SPEC_SKILL_NAME, BEELINE_ONBOARDING_SKILL_NAME, BEELINE_TRIAGE_SKILL_NAME, runningBeelineReleaseId, SITUATIONAL_SKILL_NAMES } from './beeline-skill.js';
 import { type OpenRouterRoutingHomeInput } from './openrouter-routing.js';
-import { isMissingPathError, assertRealContainedDirectory, roomSessionTmpDir, roomAgentHomeEnv, writeIsolatedHarnessFile } from './agent-home-plan-managed-skills.js';
-import { provisionAgentSkillsAndMcp, provisionPiCustomModelConfig } from './agent-home-provision-agent-skills-and-mcp.js';
+export { SHARED_CREDENTIALS } from './agent-command.js';
+export { HARNESS_STATE_ENV_VARS,harnessStateDirsFromEnv,roomAgentHomeEnv,roomSessionTmpDir,writeIsolatedHarnessFile } from './agent-home-plan-managed-skills.js';
+export { expectedMountedImportedMcpServerNames,grantedSquireHostBindPaths,hostImportedMcpDeclarations,hostImportedMcpServerNames,mountedImportedMcpServerNames } from './agent-home-provision-agent-skills-and-mcp.js';
 export { AGENT_PRIVATE_STATE_ENV } from './agent-private-state-env.js';
 
 
@@ -291,6 +293,7 @@ export const HOME_SUBDIRS = [
 export interface RoomAgentHomeInput {
   /** Per-room agent home root, e.g. `<roomRoot>/agent-home`. */
   root: string;
+  onDiagnostic?: (message: string) => void;
   /** Server-provided identity of the agent and this Room. */
   squireScope?: { readonly agentId: string; readonly roomId: string; readonly relay?: { readonly url: string; readonly token: string; readonly contextFile: string } };
   /** Operator's real home directory; defaults to the daemon's. */
@@ -462,7 +465,7 @@ export async function repairRoomAgentCredentialLinks(input: {
       const target = resolve(root, credential.dir, credential.target);
       await mkdir(dirname(target), { recursive: true, mode: 0o700 });
       const stats = await lstat(target).catch((error: unknown) => {
-        if (!isMissingPathError(error)) throw wall('credentials', error instanceof Error ? error : { message: String(error), status: 503 });
+        if (!isMissingPathError(error)) throw error;
       });
       const alreadyLinked = stats?.isSymbolicLink() && resolve(dirname(target), await readlink(target)) === source;
       if (!alreadyLinked) {
@@ -568,7 +571,20 @@ export function sharedClaudeLoginEnv(operatorHome: string): Record<string, strin
  * them. An unsafe or unavailable private home never falls back to another
  * credential or ambient harness state.
  */
-export async function prepareRoomAgentCredentials(
+export async function prepareRoomAgentCredentials(input: RoomAgentHomeInput): Promise<Record<string, string>> {
+  try { return await provisionRoomAgentCredentials(input); }
+  catch (error) {
+    // A broken configured folder never admits ambient credentials or prevents
+    // delivery. A fresh private home starts empty and the session hears why.
+    const root = await mkdtemp(resolve(tmpdir(), 'beeline-agent-private-'));
+    await Promise.all(HOME_SUBDIRS.map(dir => mkdir(resolve(root, dir), { recursive: true, mode: 0o700 })));
+    input.onDiagnostic?.(`Private home setup failed (${error instanceof Error ? error.message : String(error)}). ` +
+      `This session uses a fresh private home at ${root}; saved login and optional tools may be unavailable.`);
+    return { ...roomAgentHomeEnv(root), TMPDIR: resolve(root, 'tmp') };
+  }
+}
+
+async function provisionRoomAgentCredentials(
   input: RoomAgentHomeInput,
 ): Promise<Record<string, string>> {
   const root = resolve(input.root);
@@ -578,7 +594,7 @@ export async function prepareRoomAgentCredentials(
     await mkdir(root, { recursive: true, mode: 0o700 });
     const rootStats = await lstat(root);
     if (!rootStats.isDirectory() || rootStats.isSymbolicLink()) {
-      throw wall('credentials', `agent home root is not an ordinary directory: ${root}`);
+      throw new Error(`agent home root is not an ordinary directory: ${root}`);
     }
     for (const subdir of HOME_SUBDIRS) {
       const path = resolve(root, subdir);
@@ -604,7 +620,7 @@ export async function prepareRoomAgentCredentials(
       console.error(`[body] short TMPDIR link unavailable under ${root}:`, error);
     }
   } catch (error) {
-    throw wall('credentials', error instanceof Error ? error : { message: String(error), status: 503 });
+    throw error;
   }
 
   try {
@@ -614,26 +630,7 @@ export async function prepareRoomAgentCredentials(
       writeBackNewerClaudeLogin: agentBehavior(input.agentKind).sharedLoginWriteBack === true,
     });
   } catch (error) {
-    throw wall('credentials', error instanceof Error ? error : { message: String(error), status: 503 });
-  }
-
-  // A cold process must not start optional MCP providers from a previous
-  // activation. They remain reachable through session tools once loaded.
-  for (const config of HARNESS_MCP_CONFIGS) await writeIsolatedHarnessFile(
-    resolve(root, config.dir, 'config.toml'),
-    config.roomDefaults ? `${CODEX_ROOM_AGENT_LOCKDOWN_TOML}\n${CODEX_ROOM_WEB_SEARCH_TOML}` : '',
-  );
-  await writeIsolatedHarnessFile(resolve(root, 'claude', '.claude.json'), '{"mcpServers":{}}');
-  await writeIsolatedHarnessFile(resolve(root, 'pi', 'mcp.json'), '{"mcpServers":{}}');
-  await provisionPiCustomModelConfig(root, operatorHome, true, undefined);
-  for (const name of GOOSE_SHARED_CONFIG_FILES) {
-    const source = await readFile(resolve(operatorHome, '.config', 'goose', name), 'utf8').catch(error => {
-      if (!isMissingPathError(error)) throw wall('credentials', error instanceof Error ? error : { message: String(error), status: 503 });
-    });
-    if (source !== undefined) {
-      const body = name === 'config.yaml' ? stringifyYaml({ ...parseYaml(source), extensions: {} }) : source;
-      await writeIsolatedHarnessFile(resolve(root, 'goose', 'config', name), body);
-    }
+    throw error;
   }
 
   const env = tmpLinkReady
@@ -648,8 +645,27 @@ export async function prepareRoomAgentCredentials(
 export async function prepareRoomAgentHome(input: RoomAgentHomeInput): Promise<Record<string, string>> {
   const env = await prepareRoomAgentCredentials(input);
   if (!env.HOME) return env;
-  const root = resolve(input.root);
+  const root = dirname(env.HOME);
   const operatorHome = input.operatorHome ?? homedir();
+  // A cold process must not start optional MCP providers from a previous
+  // activation. They remain reachable through session tools once loaded.
+  for (const config of HARNESS_MCP_CONFIGS) await writeIsolatedHarnessFile(
+    resolve(root, config.dir, 'config.toml'),
+    config.roomDefaults ? `${CODEX_ROOM_AGENT_LOCKDOWN_TOML}\n${CODEX_ROOM_WEB_SEARCH_TOML}` : '',
+  );
+  await writeIsolatedHarnessFile(resolve(root, 'claude', '.claude.json'), '{"mcpServers":{}}');
+  await writeIsolatedHarnessFile(resolve(root, 'pi', 'mcp.json'), '{"mcpServers":{}}');
+  await provisionPiCustomModelConfig(root, operatorHome, true, undefined);
+  for (const name of GOOSE_SHARED_CONFIG_FILES) {
+    const source = await readFile(resolve(operatorHome, '.config', 'goose', name), 'utf8').catch(error => {
+      if (!isMissingPathError(error)) throw error;
+    });
+    if (source !== undefined) {
+      const body = name === 'config.yaml' ? stringifyYaml({ ...parseYaml(source), extensions: {} }) : source;
+      await writeIsolatedHarnessFile(resolve(root, 'goose', 'config', name), body);
+    }
+  }
+
   const prior = agentHomeProvisionQueues.get(root) ?? Promise.resolve();
   const provision = prior
     .catch(() => undefined)
@@ -679,14 +695,3 @@ export async function prepareRoomAgentHome(input: RoomAgentHomeInput): Promise<R
 
   return env;
 }
-export { SHARED_CREDENTIALS } from './agent-command.js';
-export { mountedImportedMcpServerNames } from './agent-home-provision-agent-skills-and-mcp.js';
-export { hostImportedMcpDeclarations } from './agent-home-provision-agent-skills-and-mcp.js';
-export { hostImportedMcpServerNames } from './agent-home-provision-agent-skills-and-mcp.js';
-export { grantedSquireHostBindPaths } from './agent-home-provision-agent-skills-and-mcp.js';
-export { expectedMountedImportedMcpServerNames } from './agent-home-provision-agent-skills-and-mcp.js';
-export { writeIsolatedHarnessFile } from './agent-home-plan-managed-skills.js';
-export { roomSessionTmpDir } from './agent-home-plan-managed-skills.js';
-export { roomAgentHomeEnv } from './agent-home-plan-managed-skills.js';
-export { HARNESS_STATE_ENV_VARS } from './agent-home-plan-managed-skills.js';
-export { harnessStateDirsFromEnv } from './agent-home-plan-managed-skills.js';

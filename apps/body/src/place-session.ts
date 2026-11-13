@@ -1,44 +1,41 @@
-import { wall } from '@beeline/api-contract/daemon';
-import { mkdir, writeFile } from 'node:fs/promises';
-import { homedir } from 'node:os';
-import { delimiter, dirname, join, resolve } from 'node:path';
-import type { AgentCommand, DaemonOperationMap } from '@beeline/api-contract/daemon';
-import { AcpClient, openAcpConversation, type McpServerWire, type PromptResult, type ToolCallEntry } from './acp.js';
-import { agentTurnSteps } from './acp.js';
-import { agentBehavior } from './agent-command.js';
+import type { AgentCommand,DaemonOperationMap } from '@beeline/api-contract/daemon';
+import { mkdir,rm,writeFile } from 'node:fs/promises';
+import { homedir,hostname } from 'node:os';
+import { delimiter,dirname,join,resolve } from 'node:path';
+import { AcpClient,agentTurnSteps,openAcpConversation,type McpServerWire,type PromptResult,type ToolCallEntry } from './acp.js';
 import { agentCommandCatalogPublisher } from './agent-command-catalog.js';
+import { agentBehavior } from './agent-command.js';
 import { agentGitIdentityEnv } from './agent-git-identity.js';
-import { harnessStateDirsFromEnv, prepareRoomAgentCredentials, prepareRoomAgentHome, repairRoomAgentCredentialLinks, watchRoomClaudeLogin, writeBackRoomClaudeLogin } from './agent-home.js';
-import { HostPlaces, startAgentProcess, stopAgentProcess } from './agent-process.js';
-import { credentialMaskPaths, harnessHomeStateDirs, sandboxMountPlan, siblingAgentMaskPaths, wrapAgentCommand, type SandboxSessionSpec } from './bwrap-sandbox.js';
-import { bodyAgentCommand, type BodyConfig } from './config.js';
+import { harnessStateDirsFromEnv,prepareRoomAgentCredentials,prepareRoomAgentHome,watchRoomClaudeLogin,writeBackRoomClaudeLogin } from './agent-home.js';
+import { HostPlaces,startAgentProcess,stopAgentProcess } from './agent-process.js';
+import { credentialMaskPaths,harnessHomeStateDirs,sandboxMountPlan,siblingAgentMaskPaths,wrapAgentCommand,type SandboxSessionSpec } from './bwrap-sandbox.js';
+import { bodyAgentCommand,type BodyConfig } from './config.js';
 import { installCornerGitHubWrappers } from './corner-github-auth.js';
-import { harnessIdentityLabel, sessionNewMcpServers } from './cursor-acp-bridge.js';
+import { harnessIdentityLabel,sessionNewMcpServers } from './cursor-acp-bridge.js';
 import type { DaemonApiClient } from './daemon-api-client.js';
-import type { GrantRunnerEndpoint, GrantRunnerRoom } from './grant-runner.js';
-import { resourceCallFacts } from './resource-mcp-facade.js';
-import { harnessEnforcement, roomShellCapability } from './harness-capabilities.js';
+import type { GrantRunnerEndpoint,GrantRunnerRoom } from './grant-runner.js';
+import { harnessEnforcement,roomShellCapability } from './harness-capabilities.js';
 import { postChangedAgentUsage } from './helper-usage-binding.js';
-import { hostname } from 'node:os';
-import { SessionResources } from './session-resources.js';
 import { CODE_OWNED_HOST_MCP_NAMES } from './mcp-route-class.js';
-import { agentArgsWithModelSelection, applyAgentModelSelection, filterAllowedModelConfigOptions, parseAdvertisedConfigOptions } from './model-config.js';
+import { agentArgsWithModelSelection,applyAgentModelSelection,filterAllowedModelConfigOptions,parseAdvertisedConfigOptions } from './model-config.js';
 import { agentOpenRouterKey } from './openrouter-key-usage.js';
 import { openRouterRoutingInput } from './openrouter-routing.js';
-import { installOwnedModelProvider } from './owned-model-install.js';
 import { OwnedModelFiles } from './owned-model-files.js';
+import { installOwnedModelProvider } from './owned-model-install.js';
 import { installPiMcpBridge } from './pi-mcp-bridge.js';
 import { itemPrompt } from './place-prompt.js';
-import { assembleSessionPrompt, cornerHasRepositoryWork } from './prompt-assembly.js';
-import { roomPermissionDecision, unsandboxedPermissionDecision } from './room-permissions.js';
-import { beelineAgentMcpServer, readOnlyMcpServer } from './room-session.js';
+import { assembleSessionPrompt,cornerHasRepositoryWork } from './prompt-assembly.js';
+import { resourceCallFacts } from './resource-mcp-facade.js';
+import { roomPermissionDecision,unsandboxedPermissionDecision } from './room-permissions.js';
+import { beelineAgentMcpServer,readOnlyMcpServer } from './room-session.js';
 import { roomReplySteps } from './room-turn-steps.js';
 import type { AgentRuntimeRecord } from './runtime.js';
 import { runtimeDirectory } from './runtime.js';
-import { durableReplyText, AgentTurnStream } from './turn-stream.js';
+import { SessionResources } from './session-resources.js';
+import { SquireTaskRelay } from './squire-task-relay.js';
+import { AgentTurnStream,durableReplyText } from './turn-stream.js';
 import { WarmTranscript } from './warm-transcript.js';
 import { cornerCheckoutFolders } from './workspace-checkout.js';
-import { SquireTaskRelay } from './squire-task-relay.js';
 
 
 export interface PlaceSessionOptions {
@@ -87,6 +84,7 @@ export class PlaceSession {
   /** The item being answered, for run_granted_command. */
   current?: AgentCommand;
   private scratch?: string;
+  private privateHomeRoot?: string;
   private claudeLoginWatch?: { close(): void };
   private stopping = false;
   readonly resources: SessionResources;
@@ -180,16 +178,7 @@ export class PlaceSession {
 
   /** Make sure a live session serves this place; reuse the running one. */
   async start(): Promise<void> {
-    if (this.alive && !this.stale) await this.repairCredentialLinks();
-    else await this.startFresh();
-  }
-
-  private async repairCredentialLinks(): Promise<void> {
-    const { config } = this.options;
-    if (config.agentHomeRoot) await repairRoomAgentCredentialLinks({
-      root: config.agentHomeRoot, operatorHome: config.operatorHome,
-      writeBackNewerClaudeLogin: agentBehavior(config.agentKind).sharedLoginWriteBack === true,
-    }).catch(error => console.warn('[body] credential link repair skipped:', error));
+    if (!this.alive || this.stale) await this.startFresh();
   }
 
   private async startFresh(): Promise<void> {
@@ -198,15 +187,14 @@ export class PlaceSession {
     this.notes = [];
     const sandbox = Boolean(this.options.config.bwrapPath);
     if (!sandbox) this.notes.push(`The OS sandbox is unavailable. You can read files, edit files only inside ${this.folder()}, and shell commands are refused.`);
-    const failure = await this.activate(sandbox).then(() => undefined, (error: unknown) => error ?? new Error('activation failed'));
-    // Sandbox wall: when it cannot start, the session still runs with writes
-    // refused outside this place's folder, and the agent is told so.
-    if (failure && sandbox) {
+    try { await this.activate(sandbox); }
+    catch (error) {
+      if (!sandbox) throw error;
       await this.stop();
-      this.notes.push(`The OS sandbox could not start (${failure instanceof Error ? failure.message : String(failure)}). ` +
+      this.notes.push(`The OS sandbox could not start (${error instanceof Error ? error.message : String(error)}). ` +
         `This session runs without it: you can read files, edit files only inside ${this.folder()}, and shell commands are refused.`);
       await this.activate(false);
-    } else if (failure) throw wall('sandbox', failure instanceof Error ? failure : { message: String(failure), status: 503 });
+    }
   }
 
   private async activate(sandboxed: boolean): Promise<void> {
@@ -227,8 +215,11 @@ export class PlaceSession {
     const operatorHome = config.operatorHome ?? homedir();
     const homeOverlay = config.agentHomeRoot ? await prepareRoomAgentCredentials({
       root: config.agentHomeRoot, failClosed: true, agentKind: config.agentKind,
+      onDiagnostic: message => this.notes.push(message),
       operatorHome: config.operatorHome,
     }) : {};
+    this.privateHomeRoot = homeOverlay.HOME ? dirname(homeOverlay.HOME) : undefined;
+    const privateHomeRoot = this.privateHomeRoot;
     const command = bodyAgentCommand(config);
     const harnessLabel = harnessIdentityLabel({ kind: config.agentKind, command });
     const agentEnv: Record<string, string> = {
@@ -241,7 +232,7 @@ export class PlaceSession {
     const repositoryBacked = repository?.resolution === 'repository';
     // The wrapper directory is stable; setup may populate it while the
     // session is already answering. Until then a tool receives its own error.
-    if (corner && config.agentHomeRoot) agentEnv.PATH = [resolve(config.agentHomeRoot, 'beeline-github-bin'),
+    if (corner && privateHomeRoot) agentEnv.PATH = [resolve(privateHomeRoot, 'beeline-github-bin'),
       agentEnv.PATH ?? process.env.PATH].filter(Boolean).join(delimiter);
     const knownModels = this.resources.context.modelCatalog?.find(option => option.category === 'model');
     const launchSelection = selection.model && knownModels?.options.some(option => option.id === selection.model) ? selection : selection.model ? {} : undefined;
@@ -250,7 +241,7 @@ export class PlaceSession {
     this.scratch = tmpDir;
     const homeStateDirs = harnessHomeStateDirs(harnessLabel, agentEnv.HOME ?? operatorHome);
     await Promise.all(homeStateDirs.map(dir => mkdir(dir, { recursive: true })));
-    const attachScratchRoot = config.agentHomeRoot ?? tmpDir;
+    const attachScratchRoot = homeOverlay.HOME ? dirname(homeOverlay.HOME) : tmpDir;
     if (attachScratchRoot) await mkdir(attachScratchRoot, { recursive: true });
     const sandboxSpec: SandboxSessionSpec = {
       operatorHome,
@@ -325,8 +316,8 @@ export class PlaceSession {
     HostPlaces.enter(placeId);
     client.on('exit', () => { if (this.client === client && !this.stopping) this.options.onExit(); });
     await startAgentProcess(client);
-    if (agentBehavior(config.agentKind).sharedLoginWriteBack && config.agentHomeRoot)
-      this.claudeLoginWatch = watchRoomClaudeLogin({ root: config.agentHomeRoot, operatorHome: config.operatorHome });
+    if (agentBehavior(config.agentKind).sharedLoginWriteBack && privateHomeRoot)
+      this.claudeLoginWatch = watchRoomClaudeLogin({ root: privateHomeRoot, operatorHome: config.operatorHome });
     const brief = restore?.brief;
     const session = assembleSessionPrompt({
       squireAvailable: false,
@@ -379,19 +370,20 @@ export class PlaceSession {
 
   private async prepareOptionalHome(): Promise<void> {
     const { config, parentRoomId, placeId } = this.options;
+    const homeRoot = this.privateHomeRoot ?? config.agentHomeRoot;
     const configuration = this.resources.context.configuration;
-    if (config.agentHomeRoot) await prepareRoomAgentHome({
-      root: config.agentHomeRoot, failClosed: true, operatorHome: config.operatorHome,
+    if (homeRoot) await prepareRoomAgentHome({
+      root: homeRoot, failClosed: true, operatorHome: config.operatorHome,
       agentKind: config.agentKind, sharedSkills: config.sharedSkills,
       isReviewer: configuration?.isReviewer === true,
       ...openRouterRoutingInput(config, { model: configuration?.model ?? config.modelSelection?.model }, undefined, {}),
     });
-    if (parentRoomId && config.runtimeConfigPath && config.agentHomeRoot) {
+    if (parentRoomId && config.runtimeConfigPath && homeRoot) {
       const { execFileAsync } = await import('./workspace-checkout.js');
       const which = (name: string) => execFileAsync('which', [name]).then(result => String(result.stdout).trim()).catch(() => undefined);
       const gitBinary = await which('git');
       if (!gitBinary) throw new Error('git is not installed');
-      await installCornerGitHubWrappers({ root: config.agentHomeRoot, runtimeConfigPath: config.runtimeConfigPath,
+      await installCornerGitHubWrappers({ root: homeRoot, runtimeConfigPath: config.runtimeConfigPath,
         roomId: parentRoomId, cliEntrypoint: process.argv[1]!, gitBinary, ghBinary: await which('gh'),
         featureBranch: this.resources.context.restore?.featureBranch ?? `feature/corner-${placeId.replaceAll('-', '').slice(0, 12)}`,
         targetBranch: this.resources.context.repository?.targetBranch || 'main',
@@ -440,18 +432,18 @@ export class PlaceSession {
       result = await answering;
     } catch (error) {
       void stream.retract();
-      throw wall('stop', error instanceof Error ? error : { message: String(error), status: 503 });
+      throw error;
     } finally {
       stream.close();
       model?.revoke();
       this.squireRelay.deactivate(item.turnRequestId);
       this.current = undefined;
     }
-    if (this.options.config.agentHomeRoot && agentBehavior(this.options.config.agentKind).sharedLoginWriteBack)
-      void writeBackRoomClaudeLogin({ root: this.options.config.agentHomeRoot, operatorHome: this.options.config.operatorHome })
+    if (this.privateHomeRoot && agentBehavior(this.options.config.agentKind).sharedLoginWriteBack)
+      void writeBackRoomClaudeLogin({ root: this.privateHomeRoot, operatorHome: this.options.config.operatorHome })
         .catch(error => console.warn('[body] refreshed Claude login not shared:', error));
-    const text = durableReplyText(result.agentText) || durableReplyText(stream.lastRunText);
-    if (!text) throw wall('stop', `harness ended without a public answer (${result.stopReason})`);
+    const text = durableReplyText(result.agentText) || durableReplyText(stream.lastRunText) ||
+      `${this.options.agent.name} stopped while answering this: harness ended without a public answer (${result.stopReason})`;
     let steps: Answer['steps'] = [];
     try { steps = roomReplySteps(agentTurnSteps(result.updates ?? [])); }
     catch (error) { console.warn('[body] optional answer history omitted:', error); }
@@ -478,6 +470,8 @@ export class PlaceSession {
 
   async stop(): Promise<void> {
     const client = this.client;
+    const homeRoot = this.privateHomeRoot;
+    this.privateHomeRoot = undefined;
     this.client = undefined;
     this.sessionId = undefined;
     this.claudeLoginWatch?.close();
@@ -487,6 +481,8 @@ export class PlaceSession {
       try { await stopAgentProcess(client); }
       finally { this.stopping = false; HostPlaces.leave(this.options.placeId); }
     }
+    if (homeRoot && this.options.config.agentHomeRoot && homeRoot !== resolve(this.options.config.agentHomeRoot))
+      void rm(homeRoot,{recursive:true,force:true}).catch(error=>console.warn('[body] private home cleanup skipped:',error));
   }
 }
 

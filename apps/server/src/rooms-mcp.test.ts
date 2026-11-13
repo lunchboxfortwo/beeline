@@ -1,6 +1,6 @@
+import { MCP_WEBHOOK_TABLE,POSTGRES_LIVE_CHANNEL } from './postgres-live-notifications.js';
 import { startQueuedCommand } from './test-fixtures/queued-turn.test-support.js';
-import { phoneFetch, describe, expect, it, vi, createServer, Webhook, MCP_ORDER_WAKE_HINT, MCP_REVIEW_WAKE_HINT, MCP_WAKE_HINT, backfillMcpMemberAvatars, ensureMcpMember, postMcpWebhook, randomBytes, createHash, randomUUID, Client, StreamableHTTPClientTransport, tokenHash, recordSigninAttempt, pendingMcpWakes, createAgentCommand, routeHumanMessage, openSecrets, deliverMcpMemberWebhooks, runMcpWebhookDelivery, USER, OTHER, AGENT, WORKSPACE, ROOM, opaque, fixtureScope1, type AddressInfo } from './test-support-rooms-mcp.test-support.js';
-import { MCP_WEBHOOK_TABLE, POSTGRES_LIVE_CHANNEL } from './postgres-live-notifications.js';
+import { AGENT,backfillMcpMemberAvatars,Client,createAgentCommand,createHash,createServer,deliverMcpMemberWebhooks,describe,ensureMcpMember,expect,fixtureScope1,it,MCP_ORDER_WAKE_HINT,MCP_REVIEW_WAKE_HINT,MCP_WAKE_HINT,opaque,openSecrets,OTHER,pendingMcpWakes,phoneFetch,postMcpWebhook,randomBytes,randomUUID,recordSigninAttempt,ROOM,routeHumanMessage,runMcpWebhookDelivery,StreamableHTTPClientTransport,tokenHash,USER,vi,Webhook,WORKSPACE,type AddressInfo } from './test-support-rooms-mcp.test-support.js';
 
 describe('Rooms connector HTTP OAuth and MCP', () => {
 const scope1 = fixtureScope1();
@@ -113,9 +113,8 @@ const scope1 = fixtureScope1();
         WHERE client_id=$1 AND identity_id=$2`, [grant.clientId, USER, route === 'never polled', age]);
       const response = await sender.client.callTool({ name: 'send_message', arguments: { room: ROOM, text: `@${handle} check this tag` } }) as { content: { text: string }[] };
       const receipt = JSON.parse(response.content[0]!.text).data;
-      const live = ['webhook', 'events'].includes(route);
-      expect(receipt.woken).toEqual(live ? [handle] : []);
-      expect(receipt.notWoken).toEqual(live ? [] : [{ handle, reason: route === 'recent poll' ? 'delivered; its poller picks it up' : 'no live wake route; sees it on next list_mentions' }]);
+      expect(receipt.woken).toEqual([handle]);
+      expect(receipt.notWoken).toEqual([]);
       expect((await scope1.db.query('SELECT 1 FROM rooms_mcp_mentions WHERE member_id=$1 AND message_id=$2', [member, receipt.messageId])).rowCount).toBe(1);
     }, 60_000);
 
@@ -326,7 +325,7 @@ const scope1 = fixtureScope1();
     expect((await scope1.db.query('SELECT 1 FROM rooms_mcp_event_deliveries WHERE delivered_at IS NULL')).rowCount).toBe(0);
   });
 
-  it.each(['mention', 'wake', 'webhook'])('MCP-ORDER-NOTIFY: %s orders notify the delivery loop and can be claimed', async route => {
+  it.each(['mention', 'wake', 'webhook'])('MCP-ORDER-NOTIFY: %s orders notify the delivery loop and remain queued until answered', async route => {
     const { client, member, token, params, grant } = await scope1.eventFixture();
     if (route === 'webhook') {
       await scope1.db.query('UPDATE rooms_mcp_clients SET callback_url=$2 WHERE id=$1', [grant.clientId, params.delivery.url]);
@@ -345,7 +344,7 @@ const scope1 = fixtureScope1();
       if (notice.table === MCP_WEBHOOK_TABLE) notices.push(notice);
     });
     try {
-      const args = { roomId: ROOM, requestId: commander.turn_request_id, address: ROOM, agent: handle, text: 'Check delivery without a later tag.' };
+      const args = { roomId: ROOM, requestId: commander.turn_request_id, address: ROOM, agent: handle, text: 'Check delivery without a later tag.', transportRequestId:`stable-order-rpc:${route}` };
       const sent = await scope1.daemon.execute('order', args, AGENT) as { id: string };
       // A queued row alone is insufficient: the event-driven worker needs this committed notification.
       expect(notices).toEqual([{ table: MCP_WEBHOOK_TABLE, operation: 'INSERT', roomId: ROOM }]);
@@ -402,7 +401,7 @@ const scope1 = fixtureScope1();
     await startQueuedCommand(scope1.daemon, { roomId: ROOM, commandId: commander.id }, AGENT);
     const authority = { roomId: ROOM, requestId: commander.turn_request_id };
     const place = async (text: string, agent: string) => await scope1.daemon.execute('order',
-      { ...authority, address: ROOM, agent, text }, AGENT) as { id: string };
+      { ...authority, address: ROOM, agent, text,transportRequestId:`order-rpc:${agent}:${text}` } as never, AGENT) as { id: string };
     const queued = async (commandId: string) => (await scope1.db.query<{ subscription_id: string; body: string }>(
       `SELECT subscription_id, body FROM rooms_mcp_event_deliveries WHERE command_id=$1 ORDER BY subscription_id`,
       [commandId])).rows;

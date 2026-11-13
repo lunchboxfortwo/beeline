@@ -1,20 +1,19 @@
-import { wall } from '@beeline/api-contract/daemon';
-import { MachineRequestResults } from './machine-request-results.js';
-import { helperUsageCodecs } from '@beeline/net/helper-codecs';
 import type { DaemonOperationMap } from '@beeline/api-contract/daemon';
-import { helperUsageEnabled } from './helper-usage.js';
-import { applyHelperOverlay, helperOverlayEnabled, subscribeHelperOverlayDemand } from './helper-overlay.js';
+import { helperUsageCodecs } from '@beeline/net/helper-codecs';
 import { randomUUID } from 'node:crypto';
-import type { VaultSaveRelay } from './vault-save-relay.js';
-import { isTransientDatabaseConnectionError } from './database.js';
 import type { TokenAuth } from './auth.js';
 import type { ConnectionPresence } from './connection-presence.js';
-import { DAEMON_OPERATION_NAMES, type DaemonService, type OwnedModelClaimCapability } from './daemon-service.js';
+import { DAEMON_OPERATION_NAMES,type DaemonService,type OwnedModelClaimCapability } from './daemon-service.js';
+import type { SqlDatabase } from './database.js';
+import { isTransientDatabaseConnectionError } from './database.js';
+import { applyHelperOverlay,helperOverlayEnabled,subscribeHelperOverlayDemand } from './helper-overlay.js';
+import { helperUsageEnabled } from './helper-usage.js';
 import type { HelperVersionGate } from './helper-version-gate.js';
 import type { LiveHub } from './live.js';
+import { MachineRequestResults } from './machine-request-results.js';
 import type { PhoneService } from './phone-service.js';
 import type { ReleaseNotifier } from './release-notify.js';
-import type { SqlDatabase } from './database.js';
+import type { VaultSaveRelay } from './vault-save-relay.js';
 
 
 export interface DaemonLiveDependencies {
@@ -86,8 +85,6 @@ export interface DaemonSessionTransport {
   isOpen(): boolean;
   /** Ends this agent's session: an old socket closes; a registration is dropped. */
   drop(code: number, reason: string): void;
-  /** Ordinary operations preserve HTTP's per-request token revocation check. */
-  authenticateOperation?: () => Promise<{error: string; status: number} | undefined>;
 }
 
 /**
@@ -325,33 +322,33 @@ export class DaemonAgentSession {
         ? {type:'daemon-operation-result',requestId,...result} : {type:'request-missing',requestId});
     };
     try {
-      // Re-check credentials on result reads as well as original dispatch.
-      const refusal = this.transport.authenticateOperation ? await this.transport.authenticateOperation()
-        : {error:wall('credentials', 'daemon_token_required').message,status:401};
-      if(refusal){reply(refusal);return;}
       if(item.type === 'request-result') { reply(await results.read(this.agentId,requestId,this.#closedSignal.signal));return; }
       if(item.type === 'request-ack') { await results.acknowledge(this.agentId,requestId);return; }
-      reply(await results.execute(this.agentId,requestId,{operation:item.operation,input:item.input},async()=>{
+      const execute = async () => {
         try {
-          if(Object.keys(item).some(key=>!['type','agentId','requestId','operation','input'].includes(key)) ||
-            typeof item.operation!=='string' || !DAEMON_OPERATION_NAMES.has(item.operation as keyof DaemonOperationMap) ||
-            !item.input || typeof item.input!=='object' || Array.isArray(item.input))
-            return {error:wall('credentials', 'invalid_daemon_operation').message,status:400};
-          const operation=item.operation as keyof DaemonOperationMap;
-          const input=item.input as never;
-          return {result:await this.deps.daemon.execute(operation,input,this.agentId,
-            operation==='getModelCredential' ? this.#ownedModelCapability : undefined)};
-        } catch(error) {
-          const failure = wall('credentials', error instanceof Error ? error : {message:'daemon_operation_refused',status:503});
-          return {error:failure.message,status:this.deps.operationErrorStatus?.(failure)??failure.status};
+          const operation = item.operation as keyof DaemonOperationMap;
+          if (!DAEMON_OPERATION_NAMES.has(operation)) return { error: 'invalid_daemon_operation', status: 400 };
+          const input = operation === 'order' || operation === 'postCornerMessage'
+            ? { ...(item.input as object), transportRequestId: requestId } : item.input;
+          const result = await this.deps.daemon.execute(operation, input as never, this.agentId,
+            operation === 'getModelCredential' ? this.#ownedModelCapability : undefined);
+          return { result };
+        } catch (error) {
+          return { error: error instanceof Error ? error.message : String(error),
+            status: this.deps.operationErrorStatus?.(error) ?? 503 };
         }
-      }));
+      };
+      // Queue/message IDs own conversational replay. The optional-tool RPC ledger
+      // cannot claim, expire, or refuse an answer before its native write.
+      if (['postRoomMessage', 'postCornerMessage', 'order', 'report'].includes(String(item.operation)))
+        reply(await execute());
+      else reply(await results.execute(this.agentId, requestId, {operation:item.operation,input:item.input}, execute));
     } catch(error) {
       // A refused admission or result write must answer the correlated request.
       // Otherwise a finished harness stays working while publication waits forever.
       // Keep the durable request identity: no failed operation is resubmitted here.
       console.error('[live] machine request failed',error);
-      reply({error:wall('credentials', {message:'machine_request_failed',status:503,cause:error instanceof Error?error:undefined}).message,status:503});
+      reply({error:error instanceof Error ? error.message : 'machine_request_failed',status:503});
     }
   }
 

@@ -1,27 +1,26 @@
-import { LOCAL_RECEIVER_RECOVERY } from '@beeline/api-contract/phone';
-import { readMemberDelivery, setupMemberDelivery, confirmMemberDelivery, prepareLocalDelivery, localDeliveryProbe, failMemberDelivery, recoverMemberDelivery } from './rooms-mcp-delivery.js';
-import { memberStreamEnabled, serveMcpMemberStream, type McpStreamCursor } from './rooms-mcp-stream.js';
-import type { SqlDatabase } from './database.js';
-import { waitForConnection } from './connection-wait.js';
-import { mentionRouting, mentionReplyKey, mentionReplyId, mentionAnswerKey, OWED_MENTION_OPEN_SQL } from './owed-mentions.js';
-import { RoomsMcpEvents, McpEventError } from './rooms-mcp-events.js';
-import type { IncomingMessage, ServerResponse } from 'node:http';
-import { createHash } from 'node:crypto';
-import { readFileSync } from 'node:fs';
-import { mcpEndpoint, resourceMetadataUrl } from './rooms-mcp-endpoints.js';
+import { LOCAL_RECEIVER_RECOVERY,MCP_STARTER_ROUTINE,MUSE_SETUP_RECIPE,externalAgentRules,messageSearchTerms } from '@beeline/api-contract/phone';
 import { Server } from '@modelcontextprotocol/sdk/server/index.js';
 import { StreamableHTTPServerTransport } from '@modelcontextprotocol/sdk/server/streamableHttp.js';
-import { CallToolRequestSchema, ListToolsRequestSchema, type Tool } from '@modelcontextprotocol/sdk/types.js';
-import { MCP_STARTER_ROUTINE, MUSE_SETUP_RECIPE, externalAgentRules, messageSearchTerms } from '@beeline/api-contract/phone';
-import type { PhoneService } from './phone-service.js';
-import type { LiveHub } from './live.js';
-import { visibleChatMessageSql } from './read-cursor.js';
-import { MCP_AVATAR_MAX_CHARS, McpToolError, mcpProvenance, routeMcpMemberPost, setMcpMemberProfile, setMcpMemberWebhook } from './rooms-mcp-members.js';
-import { RoomsMcpOAuth, mcpBody, mcpJson, type McpPrincipal } from './rooms-mcp-oauth.js';
-import { MCP_FULL_SCOPE } from './rooms-mcp-connections.js';
+import { CallToolRequestSchema,ListToolsRequestSchema,type Tool } from '@modelcontextprotocol/sdk/types.js';
+import { createHash } from 'node:crypto';
+import { readFileSync } from 'node:fs';
+import type { IncomingMessage,ServerResponse } from 'node:http';
+import { answerQueuedMessage,queueMessage,type CommandRow } from './agent-command.js';
 import type { DaemonService } from './daemon-service.js';
+import type { SqlDatabase } from './database.js';
+import type { LiveHub } from './live.js';
 import type { ObjectService } from './object-service.js';
-import { MCP_AGENT_EXCLUSIONS, MCP_AGENT_TOOLS, RoomsMcpAgentTools, mcpRefusal, pendingMcpWakes } from './rooms-mcp-agent.js';
+import { OWED_MENTION_OPEN_SQL,mentionRouting } from './owed-mentions.js';
+import type { PhoneService } from './phone-service.js';
+import { visibleChatMessageSql } from './read-cursor.js';
+import { MCP_AGENT_EXCLUSIONS,MCP_AGENT_TOOLS,RoomsMcpAgentTools,mcpRefusal,pendingMcpWakes } from './rooms-mcp-agent.js';
+import { MCP_FULL_SCOPE } from './rooms-mcp-connections.js';
+import { confirmMemberDelivery,failMemberDelivery,localDeliveryProbe,prepareLocalDelivery,readMemberDelivery,recoverMemberDelivery,setupMemberDelivery } from './rooms-mcp-delivery.js';
+import { mcpEndpoint,resourceMetadataUrl } from './rooms-mcp-endpoints.js';
+import { McpEventError,RoomsMcpEvents } from './rooms-mcp-events.js';
+import { MCP_AVATAR_MAX_CHARS,McpToolError,setMcpMemberProfile,setMcpMemberWebhook } from './rooms-mcp-members.js';
+import { RoomsMcpOAuth,mcpBody,mcpJson,type McpPrincipal } from './rooms-mcp-oauth.js';
+import { memberStreamEnabled,serveMcpMemberStream,type McpStreamCursor } from './rooms-mcp-stream.js';
 
 const JOIN_PAGE = readFileSync(new URL('../assets/mcp/join.html', import.meta.url), 'utf8');
 
@@ -245,30 +244,6 @@ export class RoomsMcp {
     return row ? { owner: { name: row.name, handle: row.handle }, delivery,
       ...(!['proved_ready','host_without_live_delivery'].includes(delivery.state) ? { setup: SETUP_NOTE+(/muse/i.test(row.model_label)?'\n'+MUSE_SETUP_RECIPE:'')+(delivery.mechanism==='local'&&delivery.failure==='local_receiver_setup_failed'?'\n'+LOCAL_RECEIVER_RECOVERY:'') } : {}) } : {delivery};
   }
-  /** Complete a saved post, including a retry after the HTTP request was interrupted. */
-  private async finishPost(member: string, roomId: string, messageId: string, key: string | null) {
-    const db = this.oauth.database;
-    if (key) await db.query(`UPDATE rooms_mcp_idempotency SET message_id=$3
-      WHERE member_id=$1 AND idempotency_key=$2`, [member, key, messageId]);
-    // A failed provenance read must not poison the routing transaction.
-    let provenance: typeof mcpProvenance;
-    try { const incoming = await mcpProvenance(db, member, roomId, messageId); provenance = async () => incoming; }
-    catch (error) { provenance = async () => { throw error; }; }
-    const result = await db.transaction(async tx => {
-      if (key) {
-        const saved = (await tx.query<{ result: unknown }>(`SELECT result FROM rooms_mcp_idempotency
-          WHERE member_id=$1 AND idempotency_key=$2 FOR UPDATE`, [member, key])).rows[0];
-        if (saved?.result) return saved.result;
-      }
-      const routed = await routeMcpMemberPost(tx, member, roomId, messageId, provenance);
-      const result = { messageId, ...routed };
-      if (key) await tx.query(`UPDATE rooms_mcp_idempotency SET result=$3::jsonb
-        WHERE member_id=$1 AND idempotency_key=$2`, [member, key, JSON.stringify(result)]);
-      return result;
-    });
-    this.live.publish({ type: 'invalidate', roomId, reason: 'phone-write', messageId });
-    return result;
-  }
   private async mentionsPage(member: string, cursor: string, limit: number, db: SqlDatabase = this.oauth.database, stream = false) {
     const rows = (await db.query<{ seq: string; id: string; room_id: string; room_name: string; author_id: string; author_handle: string | null; author_name: string | null; created_at: Date; text: string; truncated: boolean }>(
       `WITH readable AS (${READABLE})
@@ -291,6 +266,30 @@ export class RoomsMcp {
     };
   }
   private async call(principal: McpPrincipal, name: string, args: Record<string, unknown>): Promise<unknown> {
+    if (name === 'send_message') return this.sendMessage(principal,args);
+    return this.callTool(principal,name,args);
+  }
+
+  private async sendMessage(principal: McpPrincipal, args: Record<string,unknown>): Promise<unknown> {
+      const key = typeof args.idempotencyKey === 'string' ? args.idempotencyKey : undefined;
+      const replyTo = typeof args.replyTo === 'string' ? args.replyTo : undefined;
+      const id = key ? createHash('sha256').update(`rooms-mcp-message:${principal.member_id}:${key}`).digest('hex')
+        : replyTo ? createHash('sha256').update(`rooms-mcp-reply:${principal.member_id}:${replyTo}:${String(args.text ?? '')}`).digest('hex') : undefined;
+      const item = (await this.oauth.database.query<CommandRow>(
+        `SELECT * FROM agent_commands WHERE agent_id=$1 AND room_id::text=$2 AND reason<>'mcp_call'
+         AND ($3::text IS NULL OR source_message_id=$3 OR id=$3)
+         AND (state='pending' OR result_message_id=$4)
+         ORDER BY (state='pending') DESC,inbox_sequence,id LIMIT 1`,
+        [principal.member_id,String(args.room ?? ''),replyTo ?? null,id ?? null])).rows[0];
+      const saved = item ? await answerQueuedMessage(this.oauth.database,principal.member_id!,{
+        roomId:item.room_id,requestId:item.turn_request_id,text:String(args.text ?? ''),messageId:id,replyToMessageId:replyTo,
+      }) : await queueMessage(this.oauth.database, {kind:'post',authorId:principal.member_id!,
+        roomId:String(args.room ?? ''),text:String(args.text ?? ''),replyTo,id});
+      this.live.publish({type:'invalidate',roomId:String(args.room),reason:'phone-write',messageId:saved.id});
+      return {messageId:saved.id,woken:'woken' in saved ? saved.woken : [],notWoken:'notWoken' in saved ? saved.notWoken : []};
+  }
+
+  private async callTool(principal: McpPrincipal, name: string, args: Record<string, unknown>): Promise<unknown> {
     if (MCP_AGENT_EXCLUSIONS[name]) throw new McpToolError(`${name}: ${MCP_AGENT_EXCLUSIONS[name]}`);
     const definition = ROOM_TOOLS.find(t => t.name === name);
     const db = this.oauth.database;
@@ -350,52 +349,7 @@ export class RoomsMcp {
       const messages = rows.slice(0, limit);
       return { messages, ...(rows.length > limit ? { nextCursor: messages.at(-1)!.id } : {}), ...(search ? {} : await this.setupNote(member)) };
     }
-    if (name === 'send_message') {
-      if (!roomId) throw new Error('Room required');
-      const text = textArg(args.text, 16000);
-      const replyTo = args.replyTo === undefined ? undefined : textArg(args.replyTo, 64);
-      if (replyTo !== undefined && !/^[0-9a-f]{64}$/.test(replyTo)) throw new Error('Invalid replyTo');
-      const mentionTag = await mentionReplyKey(db, member, roomId, replyTo);
-      const mentionKey = mentionTag && mentionAnswerKey(mentionTag, text);
-      const key = mentionKey ?? (args.idempotencyKey === undefined ? null : textArg(args.idempotencyKey, 100));
-      const messageId = key ? (mentionKey ? mentionReplyId(mentionKey) : createHash('sha256').update(`rooms-mcp-message:${member}:${key}`).digest('hex')) : undefined;
-      if (key) {
-        // Claim the key first, so a repeated call returns the first message and posts nothing.
-        const claim = await db.query(`INSERT INTO rooms_mcp_idempotency(member_id,idempotency_key,message_id) VALUES($1,$2,'')
-          ON CONFLICT(member_id,idempotency_key) DO NOTHING RETURNING member_id`, [member, key]);
-        if (!claim.rowCount) {
-          // Install interest first; the durable completion fact closes the
-          // claim/read race without repeated status queries.
-          const existing = await waitForConnection(async () => {
-            const row = (await db.query<{ message_id: string; result: unknown; stale: boolean }>(
-              `SELECT message_id,result,claimed_at<now()-interval '60 seconds' stale FROM rooms_mcp_idempotency
-               WHERE member_id=$1 AND idempotency_key=$2`, [member, key])).rows[0];
-            return !row || row.stale || row.message_id ? { row } : undefined;
-          }, { principal: member, operation: 'rooms-mcp-send', commandId: key });
-          if (existing?.row?.message_id && existing.row.result) return existing.row.result;
-          const posted = (await db.query<{ room_id: string }>(
-            'SELECT room_id FROM messages WHERE id=$1 AND author_id=$2', [messageId, member])).rows[0];
-          if (posted) return this.finishPost(member, posted.room_id, messageId!, key);
-          const reclaimed = await db.query(`DELETE FROM rooms_mcp_idempotency
-            WHERE member_id=$1 AND idempotency_key=$2 AND claimed_at<now()-interval '60 seconds'`, [member, key]);
-          if (!reclaimed.rowCount) throw new Error('This message is still being sent; retry shortly');
-          await db.query(`INSERT INTO rooms_mcp_idempotency(member_id,idempotency_key,message_id) VALUES($1,$2,'')`, [member, key]);
-        }
-      }
-      const source = (await db.query<{ name: string }>('SELECT name FROM rooms_mcp_clients WHERE id=$1', [principal.client_id])).rows[0]!;
-      const client = { id: principal.client_id, name: source.name };
-      let stored;
-      try {
-        stored = replyTo
-        ? await this.phone.execute('sendRoomReply', { roomId, text, parentMessageId: replyTo, ...(messageId ? { messageId } : {}) }, member, client)
-        : await this.phone.execute('sendRoomMessage', { roomId, text, ...(messageId ? { messageId } : {}) }, member, client);
-      } catch (error) {
-        // Release an uncommitted claim. Never clear owed state for a failed send.
-        if (key) await db.query(`DELETE FROM rooms_mcp_idempotency WHERE member_id=$1 AND idempotency_key=$2 AND message_id=''`, [member, key]);
-        throw error;
-      }
-      return this.finishPost(member, roomId, stored.messageId, key);
-    }
+
     if (name === 'set_profile') {
       const stored = await setMcpMemberProfile(db, member, { name: args.name, handle: args.handle, avatar: args.avatar });
       return { updated: true, ...(stored.avatar ? { avatar: `${this.oauth.origin}${stored.avatar}` } : {}) };

@@ -1,9 +1,9 @@
 import { createHash } from 'node:crypto';
 import { type CommittedTurnLiveRow } from '../live.js';
-import type { DaemonContext } from './context.js';
-import { Input, id, seconds } from './values.js';
 import { daemonAccess } from './access.js';
+import type { DaemonContext } from './context.js';
 import { daemonPersistTurnTrace } from './messages.js';
+import { Input,id,seconds } from './values.js';
 
 
 
@@ -26,6 +26,9 @@ import { daemonPersistTurnTrace } from './messages.js';
     const outputTokens = recordedTokens(input.outputTokens);
     let committedTurn: CommittedTurnLiveRow | undefined;
     await ctx.database.transaction(async db => {
+      await db.query(`SELECT beeline_record_agent_answer(id,$4,$5) FROM agent_commands
+        WHERE room_id=$1 AND turn_request_id=$2 AND agent_id=$3`,
+        [input.roomId,input.requestId,agentId,input.outcome === 'failed' || input.outcome === 'stopped',input.reason ?? null]);
       await db.query(`UPDATE agent_turns SET tool_calls=COALESCE($4,tool_calls),
         input_tokens=COALESCE($5,input_tokens),output_tokens=COALESCE($6,output_tokens)
         WHERE room_id=$1 AND request_id=$2 AND agent_id=$3`,

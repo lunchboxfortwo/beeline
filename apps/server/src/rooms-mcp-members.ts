@@ -1,24 +1,23 @@
-import { mentionReplyRule } from '@beeline/api-contract/phone';
-import { recordDiagnostic } from './diagnostics.js';
-import {
-  joinRooms,
-  restoreInvitedWorkspaceMembership,
-  removeIdentityMemberships,
-} from './membership-join.js';
-import { notifyMcpWebhook, notifyMcpDeliveryChange } from './postgres-live.js';
-import { mentionRouting } from './owed-mentions.js';
-import { queueMcpMentionEvents, deliverMcpEvents, mcpWakeNext } from './rooms-mcp-events.js';
-import { createHash, randomUUID } from 'node:crypto';
+import { MCP_STARTER_ROUTINE,agentHandleFromName,mentionReplyRule } from '@beeline/api-contract/phone';
+import { createHash,randomUUID } from 'node:crypto';
 import { lookup } from 'node:dns/promises';
+import { Agent,request as httpsRequest } from 'node:https';
 import { isIP } from 'node:net';
-import { Agent, request as httpsRequest } from 'node:https';
-import { MCP_STARTER_ROUTINE, agentHandleFromName } from '@beeline/api-contract/phone';
-import type { SqlDatabase } from './database.js';
-import { fetchMcpLogo, mcpMemberAvatar, mcpClientName } from './rooms-mcp-logos.js';
-import { normalizeAvatar } from './durable-avatar.js';
-import { openSecrets, sealSecrets } from './free-agents.js';
+import { type CommandRow } from './agent-command.js';
 import { publicMcpAddress } from './company-mcp-discovery.js';
-import { routeAgentResult, type CommandRow } from './agent-command.js';
+import type { SqlDatabase } from './database.js';
+import { recordDiagnostic } from './diagnostics.js';
+import { normalizeAvatar } from './durable-avatar.js';
+import { openSecrets,sealSecrets } from './free-agents.js';
+import {
+joinRooms,
+removeIdentityMemberships,
+restoreInvitedWorkspaceMembership,
+} from './membership-join.js';
+import { mentionRouting } from './owed-mentions.js';
+import { notifyMcpDeliveryChange,notifyMcpWebhook } from './postgres-live.js';
+import { deliverMcpEvents,mcpWakeNext,queueMcpMentionEvents } from './rooms-mcp-events.js';
+import { fetchMcpLogo,mcpClientName,mcpMemberAvatar } from './rooms-mcp-logos.js';
 
 /** The identity id a connection's member always has, derived from its grant. */
 function mcpMemberIdentityId(clientId: string, ownerId: string): string {
@@ -592,17 +591,4 @@ export async function mcpProvenance(db: SqlDatabase, memberId: string, roomId: s
       [memberId, roomId, messageId ?? null, replyTo ?? null],
     )).rows[0];
   });
-}
-
-/** Route this post once; an explicit repeat request can use its saved message ID. */
-export async function routeMcpMemberPost(
-  db: SqlDatabase, memberId: string, roomId: string, messageId: string,
-  provenance: typeof mcpProvenance = mcpProvenance,
-): Promise<{ woken: string[]; notWoken: { handle: string; reason: string }[] }> {
-  let incoming: Awaited<ReturnType<typeof mcpProvenance>> | null = null;
-  try { incoming = await provenance(db, memberId, roomId, messageId); }
-  catch (error) { console.error('[rooms-mcp] provenance lookup failed; routing without a parent', error); }
-  const parent = incoming?.command ? { ...incoming.command, agent_depth: incoming.command.agent_depth + 1 } : undefined;
-  return routeAgentResult(db, parent, messageId,
-    { roomId, agentId: memberId, initialAgentDepth: 1 });
 }

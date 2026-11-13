@@ -1,20 +1,20 @@
-import { startQueuedCommand } from './test-fixtures/queued-turn.test-support.js';
-import { ROUTER_COMMAND_SCHEMA } from './router-command-ledger.js';
-import { createAgentCommand } from './agent-command.js';
-import type { AddressInfo } from 'node:net';
-import { afterEach, describe, expect, it, vi } from 'vitest';
-import WebSocket from 'ws';
 import { isAgentReachable } from '@beeline/api-contract/agent-access';
+import type { AddressInfo } from 'node:net';
+import { afterEach,describe,expect,it,vi } from 'vitest';
+import WebSocket from 'ws';
+import { createAgentCommand } from './agent-command.js';
 import type { TokenAuth } from './auth.js';
 import { ConnectionPresence } from './connection-presence.js';
 import { MACHINE_SOCKET_PROTOCOL } from './daemon-live.js';
 import { DaemonService } from './daemon-service.js';
 import { type SqlDatabase } from './database.js';
 import { LiveHub } from './live.js';
-import { ReleaseNotifier } from './release-notify.js';
 import type { PhoneService } from './phone-service.js';
-import { createBeelineServer, type ServerOptions } from './server.js';
-import { migratedDatabase, PgliteDatabase } from './test-support.js';
+import { ReleaseNotifier } from './release-notify.js';
+import { ROUTER_COMMAND_SCHEMA } from './router-command-ledger.js';
+import { createBeelineServer,type ServerOptions } from './server.js';
+import { startQueuedCommand } from './test-fixtures/queued-turn.test-support.js';
+import { migratedDatabase,PgliteDatabase } from './test-support.js';
 
 const AGENT_A = 'a'.repeat(64);
 const AGENT_B = 'b'.repeat(64);
@@ -608,14 +608,19 @@ it('publishes a final reply over 64 KB without dropping its tool steps', async (
     type:'daemon-operation-result',result:{id:'final-reply'},
   });
   expect(daemon.execute).toHaveBeenCalledWith('postRoomMessage',input,AGENT_A,undefined);
-  client.send({type:'daemon-operation',agentId:AGENT_A,requestId:'publish',operation:'postRoomMessage',
-    input:{...input,text:'changed intent'}});
-  expect(await client.next(frame => frame.requestId === 'publish' && frame.status === 409))
-    .toMatchObject({error:'request_identity_conflict'});
-  expect(daemon.execute).toHaveBeenCalledTimes(1);
+
+  client.frames.splice(0);
+  client.send({type:'request-result',agentId:AGENT_A,requestId:'publish'});
+  expect(await client.next(frame => frame.requestId === 'publish')).toMatchObject({type:'request-missing'});
+  client.frames.splice(0);
+
+  client.send({type:'daemon-operation',agentId:AGENT_A,requestId:'publish',operation:'postRoomMessage',input});
+  expect(await client.next(frame => frame.requestId === 'publish')).toMatchObject({result:{id:'final-reply'}});
+  // The native answer owner handles this replay; the transport cannot cap or claim it.
+  expect(daemon.execute).toHaveBeenCalledTimes(2);
 });
 
-it('answers a request admission failure instead of leaving the helper waiting', async () => {
+it('publishes an answer without consulting the generic RPC admission ledger', async () => {
   const database = new PgliteDatabase();
   requestDatabases.push(database);
   const query = database.query.bind(database);
@@ -633,25 +638,24 @@ it('answers a request admission failure instead of leaving the helper waiting', 
     client.send({type:'daemon-operation',agentId:AGENT_A,requestId:'publish',operation:'postRoomMessage',
       input:{roomId:'room',requestId:'turn',text:'Finished.'}});
     expect(await client.next(frame => frame.requestId === 'publish')).toMatchObject({
-      type:'daemon-operation-result',error:'machine_request_failed',status:503,
+      type:'daemon-operation-result',result:expect.anything(),
     });
-    expect(daemon.execute).not.toHaveBeenCalled();
-    expect(error).toHaveBeenCalledWith('[live] machine request failed',expect.any(Error));
+    expect(daemon.execute).toHaveBeenCalledTimes(1);
+    expect(error).not.toHaveBeenCalled();
   } finally { error.mockRestore(); }
 });
 
-it('rechecks token revocation before an ordinary operation on an already registered socket', async () => {
+it('binds helper credentials once at registration and keeps the established session delivering', async () => {
   const tokenAuth = auth(), daemon = daemonStub();
   const {port} = await start({auth: tokenAuth, daemon});
   const client = await machine(port);
   client.send({type: 'register', agentId: AGENT_A, token: 'bdt_a', daemonOperationsV1: true});
   await client.next(frame => frame.type === 'registered');
   vi.mocked(tokenAuth.authenticateDaemon).mockResolvedValue(null);
-  vi.mocked(tokenAuth.retiredDaemonAgent).mockResolvedValue(AGENT_A);
-  const ended=new Promise<number>(resolve=>client.socket.once('close',resolve));
-  client.send({type: 'daemon-operation', agentId: AGENT_A, requestId: 'revoked', operation: 'listRooms', input: {agentId: AGENT_A}});
-  expect(await ended).toBe(4003);
-  expect(daemon.execute).not.toHaveBeenCalled();
+  client.send({type: 'daemon-operation', agentId: AGENT_A, requestId: 'established', operation: 'listRooms', input: {agentId: AGENT_A}});
+  expect(await client.next(frame => frame.requestId === 'established')).toMatchObject({result:expect.anything()});
+  expect(tokenAuth.authenticateDaemon).toHaveBeenCalledTimes(1);
+  expect(daemon.execute).toHaveBeenCalledTimes(1);
 });
 
 it('dispatches turn controls with the registered machine owner through the ordinary request path',async()=>{

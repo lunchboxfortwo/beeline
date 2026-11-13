@@ -1,56 +1,12 @@
-import { wall } from '@beeline/api-contract/daemon';
-import { messageColumns } from '../message-columns.js';
-import { cornerRequestSql } from '../corner-opening.js';
-import { mentionReplyKey, mentionReplyId } from '../owed-mentions.js';
-import { visibleMessageSql } from '../read-cursor.js';
 import { sanitizeTurnReplay } from '@beeline/api-contract/daemon';
-import { observeOnboardingMessage } from '../signin-funnel.js';
-import { CornerAccessDatabase } from '../corner-access-database.js';
-import { mentionHandlesToDrop, CommandRefusalError } from '../commander.js';
-import { repairAgentPost } from '../agent-post-text.js';
-import { stripMentionHandles } from '../message-mentions.js';
-import { turnRootMessageSql, type CommandRow } from '../agent-command.js';
-import { authorizeCommandOutput } from '../agent-command-route-agent-result.js';
-import { randomBytes } from 'node:crypto';
-import { endAgentTurn } from '../agent-turn-end.js';
+import { answerQueuedMessage,queueMessage,turnRootMessageSql } from '../agent-command.js';
+import { cornerRequestSql } from '../corner-opening.js';
 import { type SqlDatabase } from '../database.js';
-import { type CommittedMessageLiveRow } from '../live.js';
-import { taggedIdentityIdsSql } from '../message-mentions.js';
-import { recordStarPromptReply, starPromptReplySql } from '../github-star-prompt.js';
-import type { DaemonContext } from './context.js';
-import { Input, replySteps, id, MAX_REPLY_NOTE_LENGTH, seconds, MEDIA_URL_PATTERN } from './values.js';
+import { visibleMessageSql } from '../read-cursor.js';
 import { daemonAccess } from './access.js';
+import type { DaemonContext } from './context.js';
 import { daemonWriteResult } from './corner-messages.js';
-
-
-  /** The text a room post stores. Thinking is removed. A tag this turn may not
-   *  send is removed. Nothing is refused: text that is empty after repair is
-   *  the agent choosing silence. */
-  export async function roomPostBody(
-    database: SqlDatabase,
-    roomId: string,
-    agentId: string,
-    input: { readonly text: string; readonly presentation?: string },
-    command?: CommandRow,
-  ): Promise<{ text: string; removed: string[] }> {
-    let text = input.text;
-    const removed: string[] = [];
-    if (input.presentation !== 'card') {
-      const repaired = repairAgentPost(text);
-      if (repaired.removed.length) {
-        text = repaired.text.trim();
-        removed.push(...repaired.removed);
-      }
-    }
-    if (command && input.presentation !== 'card') {
-      const dropped = await mentionHandlesToDrop(database, roomId, agentId, text, command);
-      if (dropped.length) {
-        text = stripMentionHandles(text, dropped).trim();
-        removed.push(...dropped.map((handle) => `tag @${handle}`));
-      }
-    }
-    return { text, removed };
-  }
+import { Input,MEDIA_URL_PATTERN } from './values.js';
 
   export async function daemonCompletion(ctx: DaemonContext, input: Input<'getRequestCompletion'>, agentId: string) {
     await daemonAccess(ctx, input.roomId, agentId);
@@ -58,382 +14,26 @@ import { daemonWriteResult } from './corner-messages.js';
       await ctx.database.query<{ corner_id: string | null; status: 'complete' | 'failed' | null; failure_reason: string | null }>(
         `SELECT (SELECT id::text FROM rooms WHERE parent_id=$1 AND ${cornerRequestSql('rooms.id')}=$2 LIMIT 1) corner_id,
           ended.status,ended.failure_reason FROM (SELECT 1) anchor LEFT JOIN LATERAL (
-            SELECT status,failure_reason FROM agent_turns WHERE room_id=$1 AND request_id=$2 AND status IN ('complete','failed')
+            SELECT CASE WHEN report_outcome='failed' THEN 'failed' ELSE state END status,cancellation_reason failure_reason FROM agent_commands
+            WHERE room_id=$1 AND turn_request_id=$2 AND agent_id=$3 AND state='complete'
             ORDER BY created_at DESC LIMIT 1) ended ON true`,
-        [input.roomId, input.requestId],
+        [input.roomId, input.requestId, agentId],
       )
     ).rows[0]!;
     return { ...(row.corner_id ? { openedCornerId: row.corner_id } : {}), completed: Boolean(row.status),
       ...(row.status ? { outcome: row.status, ...(row.failure_reason ? { failureReason: row.failure_reason } : {}) } : {}) };
   }
 
-  export async function daemonPostRoomMessage(ctx: DaemonContext, input: Input<'postRoomMessage'>, agentId: string, atomicCommandWrite = false) {
-    if (!ctx.commandTransaction && !atomicCommandWrite) await ctx.access(input.roomId, agentId);
-    let steps: ReturnType<typeof replySteps> = null;
-    try { steps = replySteps(input.steps); }
-    catch (error) { console.warn('[answer] invalid optional tool history omitted:', error); }
-    // Explicit same-address posts can already have
-    // committed a message. Keep the closing text in turn activity regardless
-    // of wording, rather than publishing a second conversation message.
-    const earlier = input.requestId && input.presentation !== 'card'
-      ? (await ctx.database.query<{ id: string; text: string }>(
-          `SELECT id,text FROM messages
-           WHERE room_id=$1 AND author_id=$2 AND request_id=$3
-             AND presentation='message' AND deleted_at IS NULL
-           ORDER BY created_at DESC,id DESC LIMIT 64`,
-          [input.roomId, agentId, input.requestId],
-        )).rows
-      : [];
-    const repeated = Boolean(ctx.commandTransaction && earlier.length);
-    const mentionKey = await mentionReplyKey(ctx.database, agentId, input.roomId, input.replyToMessageId);
-    const messageId = mentionKey ? mentionReplyId(`${mentionKey}:${input.requestId}`) : id();
-    const parent = input.replyToMessageId
-      ? (
-          await ctx.database.query<{
-            root_message_id: string | null;
-            agent_hop_count: number;
-            author_kind: 'human' | 'agent';
-          }>(
-            `SELECT message.root_message_id,message.agent_hop_count,identity.kind author_kind
-             FROM messages message JOIN identities identity ON identity.id=message.author_id
-             WHERE message.id=$1 AND message.room_id=$2`,
-            [input.replyToMessageId, input.roomId],
-          )
-        ).rows[0]
-      : undefined;
-    // A reply link to a message outside this Room is dropped, never the answer.
-    if (input.replyToMessageId && !parent) input = { ...input, replyToMessageId: undefined };
-    const command = atomicCommandWrite
-      ? undefined
-      : (ctx.authorizedCommand ??
-        (await authorizeCommandOutput(ctx.database, input.roomId, agentId, input.requestId)));
-    const published = await roomPostBody(ctx.database, input.roomId, agentId, input, command);
-    const text = published.text;
-    const removed = published.removed;
-    // Empty output spends no answer obligation. The helper can recover its
-    // streamed answer or report a harness failure; a reconnect still owes it.
-    if (!text && input.presentation !== 'card' && input.requestId && !(await ctx.database.query(
-      `SELECT 1 FROM agent_pending_attachments WHERE room_id=$1 AND agent_id=$2 AND request_id=$3 LIMIT 1`,
-      [input.roomId, agentId, input.requestId])).rowCount) {
-      const item = command ?? await authorizeCommandOutput(ctx.database, input.roomId, agentId, input.requestId);
-      if (earlier.length) await endAgentTurn(ctx.database, item, 'complete', null, earlier[0]!.id);
-      return { ...daemonWriteResult(ctx), ...(removed.length ? { receipt: `Removed: ${removed.join(', ')}.` } : {}) };
+  export async function daemonPostRoomMessage(ctx: DaemonContext, input: Input<'postRoomMessage'>, agentId: string, _atomicCommandWrite = false) {
+    if (input.presentation === 'card') {
+      const saved = await queueMessage(ctx.database, { kind: 'post', roomId: input.roomId,
+        authorId: agentId, text: input.text, requestId: input.requestId, presentation: 'card', tags: input.tags,
+      });
+      return { id: saved.id, createdAt: saved.createdAt };
     }
-    if (repeated) {
-      const notes = Array.from({ length: Math.ceil(text.length / MAX_REPLY_NOTE_LENGTH) }, (_, index) => ({
-        kind: 'note' as const, title: 'Turn summary',
-        text: text.slice(index * MAX_REPLY_NOTE_LENGTH, (index + 1) * MAX_REPLY_NOTE_LENGTH),
-        ...(index ? { continues: true as const } : {}),
-      }));
-      try { steps = replySteps([...(input.steps ?? []), ...notes], notes.length); }
-      catch (error) { console.warn('[answer] optional turn summary omitted:', error); }
-    }
-    // A tag an agent writes reaches the person it names, exactly as a
-    // human-authored one does: the same reading of the text, the same push
-    // fan-out, the same highlight. There is no per-turn numeric cap, and no
-    // list is frozen here — `message-mentions.ts` reads the tags back out of
-    // this text whenever someone asks who it addresses.
-    const rootMessageId = input.replyToMessageId
-      ? (parent!.root_message_id ?? input.replyToMessageId)
-      : null;
-    // Turns are unthreaded by design. Count from the inbox item that woke this
-    // agent, not the optional presentation reply parent; a human item starts a
-    // fresh chain at zero.
-    const hopCount = command?.agent_depth ?? 0;
-    let messageWriteStartedAt: number | undefined;
-    const saveCompatibilityReply = async (database: SqlDatabase) => {
-      // Attachments queued this turn by beeline-agent post_artifact ride on this
-      // final reply; they are drained exactly once, here.
-      const pending = (
-        await database.query<{
-          url: string;
-          name: string;
-          mime_type: string;
-          size: number;
-        }>(
-          `SELECT url,name,mime_type,size::integer AS size FROM agent_pending_attachments
-           WHERE room_id=$1 AND agent_id=$2 AND request_id=$3 ORDER BY created_at,id`,
-          [input.roomId, agentId, input.requestId],
-        )
-      ).rows;
-      if (pending.length)
-        await database.query(
-          `DELETE FROM agent_pending_attachments WHERE room_id=$1 AND agent_id=$2 AND request_id=$3`,
-          [input.roomId, agentId, input.requestId],
-        );
-      const values = [
-        messageId,
-        input.roomId,
-        agentId,
-        text,
-        // The daemon posts conversation (or a card); a system line is only
-        // ever phrased by the server (`system-line.ts`).
-        input.presentation === 'card' ? 'card' : 'message',
-        input.requestId ?? null,
-        JSON.stringify(input.tags ?? {}),
-        input.replyToMessageId ?? null,
-        rootMessageId,
-        hopCount,
-        JSON.stringify(
-          pending.map((row) => ({
-            url: row.url,
-            name: row.name,
-            mimeType: row.mime_type,
-            size: row.size,
-          })),
-        ),
-        steps,
-      ];
-      if (ctx.commandTransaction) {
-        return (
-          await database.query<CommittedMessageLiveRow>(
-            `WITH new_messages AS (
-               INSERT INTO messages(
-                 id,room_id,author_id,text,presentation,request_id,legacy_event,
-                 reply_to_message_id,root_message_id,agent_hop_count,attachments,activity,agent_model
-               ) VALUES($1,$2,$3,$4,$5,$6,$7::jsonb,$8,$9,$10,$11::jsonb,$12::jsonb,
-                 (SELECT selected_model FROM agents WHERE agent_id=$3))
-               ON CONFLICT(id) DO NOTHING
-               RETURNING ${messageColumns('messages')}
-             ), inserted AS (
-               SELECT new_messages.* FROM new_messages UNION ALL
-               SELECT ${messageColumns('stored')} FROM messages stored WHERE stored.id=$1 AND stored.room_id=$2 AND stored.author_id=$3
-                 AND NOT EXISTS(SELECT 1 FROM new_messages)
-             ), completed AS (
-               SELECT beeline_finish_agent_command($13,'complete',NULL,inserted.id) ended
-               FROM inserted
-             )
-             SELECT inserted.*,author.kind author_kind,author.name author_name,
-               beeline_room_handle(author.id,inserted.room_id) author_handle,author.avatar author_avatar,author.face_id author_face,
-               ${taggedIdentityIdsSql('inserted')} tagged_ids
-             FROM inserted JOIN identities author ON author.id=inserted.author_id
-             CROSS JOIN (SELECT count(*) FROM completed) completion`,
-            [...values, command!.id],
-          )
-        ).rows[0]!;
-      }
-      return (
-        await database.query<CommittedMessageLiveRow>(
-          `WITH new_messages AS (
-             INSERT INTO messages(
-               id,room_id,author_id,text,presentation,request_id,legacy_event,
-               reply_to_message_id,root_message_id,agent_hop_count,attachments,activity,agent_model
-             ) VALUES($1,$2,$3,$4,$5,$6,$7::jsonb,$8,$9,$10,$11::jsonb,$12::jsonb,
-               (SELECT selected_model FROM agents WHERE agent_id=$3))
-             ON CONFLICT(id) DO NOTHING
-             RETURNING ${messageColumns('messages')}
-           ), inserted AS (
-             SELECT new_messages.* FROM new_messages UNION ALL
-             SELECT ${messageColumns('stored')} FROM messages stored WHERE stored.id=$1 AND stored.room_id=$2 AND stored.author_id=$3
-               AND NOT EXISTS(SELECT 1 FROM new_messages)
-           )
-           SELECT inserted.*,author.kind author_kind,author.name author_name,
-             beeline_room_handle(author.id,inserted.room_id) author_handle,author.avatar author_avatar,author.face_id author_face,
-             ${taggedIdentityIdsSql('inserted')} tagged_ids
-           FROM inserted JOIN identities author ON author.id=inserted.author_id`,
-          values,
-        )
-      ).rows[0]!;
-    };
-    let saved: CommittedMessageLiveRow;
-    let databaseAwaitResolvedAt: number | undefined;
-    let projectionCompletedAt: number | undefined;
-    if (atomicCommandWrite) {
-      type AtomicReplyResult = {
-        outcome:
-          | 'committed'
-          | 'authority_rejected'
-          | 'turn_cancelled'
-          | 'already_completed'
-          | 'write_failed';
-        row: (Omit<CommittedMessageLiveRow, 'created_at'> & { created_at: string }) | null;
-      };
-      // One autocommit statement owns the item lock, the Stop decision,
-      // attachment drain, reply insert, item completion and live-output cleanup. PostgreSQL commits the
-      // statement before query() resolves, so the live row remains authoritative.
-      messageWriteStartedAt = Date.now();
-      const query = await ctx.database.query<AtomicReplyResult>(
-        `WITH reply_access AS MATERIALIZED (
-             SELECT 1 FROM rooms room JOIN memberships member ON member.room_id=COALESCE(room.parent_id,room.id)
-               AND member.identity_id=$3 AND member.removed_at IS NULL
-             WHERE room.id=$2 AND room.archived_at IS NULL
-           ), candidate AS MATERIALIZED (
-             SELECT command.* FROM agent_commands command
-             WHERE command.room_id=$2 AND command.agent_id=$3 AND command.turn_request_id=$6
-               AND command.action='input' AND EXISTS(SELECT 1 FROM reply_access)
-             ORDER BY command.created_at DESC,command.id DESC LIMIT 1 FOR UPDATE OF command
-           ), writable AS (
-             SELECT candidate.* FROM candidate WHERE state='pending'
-           ), pending AS (
-             DELETE FROM agent_pending_attachments attachment USING writable
-             WHERE attachment.room_id=$2 AND attachment.agent_id=$3
-               AND attachment.request_id=$6
-             RETURNING attachment.url,attachment.name,attachment.mime_type,attachment.size,
-               attachment.created_at,attachment.id
-           ), attachment_payload AS (
-             SELECT COALESCE(jsonb_agg(jsonb_build_object(
-               'url',url,'name',name,'mimeType',mime_type,'size',size::integer
-             ) ORDER BY created_at,id),'[]'::jsonb) attachments FROM pending
-           ), settled AS (
-             SELECT 1 FROM writable
-           ), new_messages AS (
-             INSERT INTO messages(
-               id,room_id,author_id,text,presentation,request_id,legacy_event,
-               reply_to_message_id,root_message_id,agent_hop_count,attachments,activity,agent_model
-             ) SELECT $1,$2,$3,$4,$5,$6,$7::jsonb,$8,$9,
-                 writable.agent_depth,attachment_payload.attachments,$10::jsonb,
-                 (SELECT selected_model FROM agents WHERE agent_id=$3)
-               FROM writable,settled,attachment_payload
-             ON CONFLICT(id) DO NOTHING
-             RETURNING ${messageColumns('messages')}
-           ), inserted AS (
-             SELECT new_messages.* FROM new_messages UNION ALL
-             SELECT ${messageColumns('stored')} FROM messages stored WHERE stored.id=$1 AND stored.room_id=$2 AND stored.author_id=$3
-               AND NOT EXISTS(SELECT 1 FROM new_messages)
-           ), completed AS (
-             SELECT (ended).* FROM (SELECT beeline_finish_agent_command(writable.id,'complete',NULL,inserted.id) ended FROM writable,inserted) ended_commands
-           ), star_count AS (
-             ${starPromptReplySql(
-               `(SELECT writable.root_source_message_id FROM writable,completed WHERE $5='message')`,
-             )}
-           ), inserted_public AS (
-             SELECT inserted.*,author.kind author_kind,author.name author_name,
-               beeline_room_handle(author.id,inserted.room_id) author_handle,author.avatar author_avatar,author.face_id author_face,
-               ${taggedIdentityIdsSql('inserted')} tagged_ids
-             FROM inserted JOIN identities author ON author.id=inserted.author_id
-             CROSS JOIN completed
-           ), existing_public AS (
-             SELECT ${messageColumns('message')},author.kind author_kind,author.name author_name,
-               beeline_room_handle(author.id,message.room_id) author_handle,author.avatar author_avatar,author.face_id author_face,
-               ${taggedIdentityIdsSql('message')} tagged_ids
-             FROM candidate JOIN messages message ON message.id=candidate.result_message_id
-             JOIN identities author ON author.id=message.author_id
-             WHERE candidate.state='complete'
-           ), committed AS (
-             SELECT inserted_public.* FROM inserted_public UNION ALL SELECT existing_public.* FROM existing_public
-           )
-           SELECT 'committed'::text outcome,to_jsonb(committed) row
-           FROM committed
-           UNION ALL
-           SELECT CASE
-             WHEN NOT EXISTS(SELECT 1 FROM candidate) THEN 'authority_rejected'
-             WHEN (SELECT state FROM candidate)='cancelled' THEN 'turn_cancelled'
-             WHEN (SELECT state FROM candidate)='complete' THEN 'already_completed'
-             ELSE 'write_failed'
-           END outcome,NULL::jsonb row
-           WHERE NOT EXISTS(SELECT 1 FROM committed)
-           LIMIT 1`,
-        [
-          messageId,
-          input.roomId,
-          agentId,
-          text,
-          input.presentation === 'card' ? 'card' : 'message',
-          input.requestId ?? null,
-          JSON.stringify(input.tags ?? {}),
-          input.replyToMessageId ?? null,
-          rootMessageId,
-          steps,
-        ],
-      );
-      if (ctx.livePaintDiagnostics) databaseAwaitResolvedAt = Date.now();
-      const result = query.rows[0];
-      if (result?.outcome === 'turn_cancelled') throw wall('stop', 'command turn cancelled');
-      // An already completed item returns its durable receipt.
-      if (result?.outcome === 'already_completed') return daemonWriteResult(ctx);
-      if (!result?.row) throw wall('credentials', 'command output authority rejected');
-      saved = { ...result.row, created_at: new Date(result.row.created_at) };
-      if (ctx.livePaintDiagnostics) projectionCompletedAt = Date.now();
-    } else {
-      saved = await ctx.database.transaction(saveCompatibilityReply);
-    }
-    if (repeated && ctx.commandTransaction && saved.presentation === 'message') {
-      // Deliver queued artifacts on the existing public post, so suppressing
-      // closing prose never hides the turn's deliverable.
-      if (saved.attachments.length) {
-        await ctx.database.query(`UPDATE messages SET attachments=attachments || $2::jsonb WHERE id=$1`,
-          [earlier[0]!.id, JSON.stringify(saved.attachments)]);
-        await ctx.database.query(`UPDATE messages SET attachments='[]'::jsonb WHERE id=$1`, [saved.id]);
-        saved = { ...saved, attachments: [] };
-        ctx.live.publish({ type: 'invalidate', roomId: input.roomId, reason: 'message', agentId, messageId: earlier[0]!.id });
-      }
-      // This is still inside the authorized command transaction. System/card
-      // producers keep their existing insert path and are never demoted here.
-      const demoted = (await ctx.database.query<{ presentation: 'activity'; version: number }>(
-        `UPDATE messages SET presentation='activity'
-         WHERE id=$1 AND room_id=$2 AND author_id=$3 AND presentation='message'
-         RETURNING presentation,version`,
-        [saved.id, input.roomId, agentId],
-      )).rows[0];
-      if (demoted) saved = { ...saved, ...demoted };
-    }
-    const emittedAt = Date.now();
-    ctx.live.publish({
-      type: 'invalidate',
-      roomId: input.roomId,
-      reason: 'message',
-      agentId,
-      messageId,
-      committedRow: {
-        type: 'message',
-        row: saved,
-        ...(messageWriteStartedAt ? { startedAt: messageWriteStartedAt } : {}),
-      },
-      ...(messageWriteStartedAt
-        ? {
-            trace: {
-              id: randomBytes(16).toString('hex'),
-              databaseAt: saved.created_at.getTime(),
-              emittedAt,
-              startedAt: messageWriteStartedAt,
-              ...(databaseAwaitResolvedAt ? { databaseAwaitResolvedAt } : {}),
-              ...(projectionCompletedAt ? { projectionCompletedAt } : {}),
-              ...(ctx.livePaintDiagnostics && ctx.liveDiagnosticServerInstance
-                ? { serverInstance: ctx.liveDiagnosticServerInstance }
-                : {}),
-            },
-          }
-        : {}),
-    });
-    if (saved.presentation === 'message') {
-      const depth = (saved as CommittedMessageLiveRow & { agent_hop_count?: number }).agent_hop_count
-        ?? ctx.authorizedCommand?.agent_depth;
-      // Observe committed replies without delaying their publication or acknowledgement.
-      const observe = async (database: SqlDatabase) => {
-        const work = () => observeOnboardingMessage(database, input.roomId, agentId, depth, text)
-          .catch(error => console.error('[onboarding]', error));
-        const backgroundWork = CornerAccessDatabase.physical(database).backgroundWork;
-        if (backgroundWork) backgroundWork.run(work);
-        else await work();
-      };
-      if (ctx.afterCommit) ctx.afterCommit(observe);
-      else await observe(ctx.database);
-    }
-    // The atomic reply statement counted it in its own star_count CTE.
-    if (!atomicCommandWrite && input.requestId && input.presentation !== 'card') {
-      const reply = {
-        roomId: input.roomId,
-        agentId,
-        requestId: input.requestId,
-        messageId: saved.id,
-      };
-      const count = (database: SqlDatabase) => recordStarPromptReply(database, reply);
-      if (ctx.afterCommit) ctx.afterCommit(count);
-      else
-        await count(ctx.database).catch((error) =>
-          console.error('[daemon] star prompt reply count failed', error),
-        );
-    }
-    return {
-      id: saved.id,
-      createdAt: seconds(saved.created_at),
-      ...(removed.length ? { receipt: `Removed: ${removed.join(', ')}.` } : {}),
-    };
+    return answerQueuedMessage(ctx.database, agentId, input);
   }
 
-  /** An agent-claimed attachment queued by post_artifact; stamped onto the agent's
-   *  next final Room reply. Only media this agent uploaded through the daemon
-   *  media endpoint may be queued. */
   export async function daemonPostAgentAttachment(ctx: DaemonContext, input: Input<'postAgentAttachment'>, agentId: string) {
     const attachment = input.attachment;
     if (!attachment || typeof attachment !== 'object' || Array.isArray(attachment))
@@ -457,32 +57,16 @@ import { daemonWriteResult } from './corner-messages.js';
       [mediaId, agentId],
     );
     if (!owned.rowCount) throw new Error('attachment media is not owned by this agent');
-    const queued = await ctx.database.query<{ total: string }>(
-      `SELECT COALESCE(SUM(size),0)::text total FROM agent_pending_attachments
-       WHERE room_id=$1 AND agent_id=$2`,
-      [input.roomId, agentId],
-    );
-    const usedBytes = Number(queued.rows[0]!.total);
-    if (usedBytes + attachment.size > ctx.mediaMaximumBytes)
-      throw new CommandRefusalError(
-        `Queued attachments exceed the ${ctx.mediaMaximumBytes}-byte total limit per reply: ` +
-          `${usedBytes} bytes already queued; artifact size: ${attachment.size} bytes. ` +
-          'Use smaller files, or deliver the queued attachments with your next reply or report before posting more.',
-        400,
-      );
+    // Older servers and brief tools still read the pending-media table during
+    // this rolling release. The queue owns the answer's copy before upload returns.
     await ctx.database.query(
       `INSERT INTO agent_pending_attachments(room_id,agent_id,url,name,mime_type,size,request_id)
        VALUES($1,$2,$3,$4,$5,$6,$7)`,
-      [
-        input.roomId,
-        agentId,
-        attachment.url,
-        attachment.name,
-        attachment.mimeType,
-        attachment.size,
-        input.requestId,
-      ],
-    );
+      [input.roomId,agentId,attachment.url,attachment.name,attachment.mimeType,attachment.size,input.requestId]);
+    await ctx.database.query(
+      `UPDATE agent_commands SET answer_attachments=answer_attachments || $4::jsonb
+       WHERE room_id=$1 AND agent_id=$2 AND turn_request_id=$3`,
+      [input.roomId, agentId, input.requestId, JSON.stringify([attachment])]);
     return daemonWriteResult(ctx);
   }
 

@@ -1,13 +1,12 @@
-import { agentToolsFor, toolValidationSchema, CAPABILITY_ROUTES, CAPABILITY_TOOLS, SCRATCH_ROUTES, placeBeelineApps } from "./minimal-tool-surface.js";
-import { fixCornerText, INSTITUTIONAL_SEARCH_QUERY_MAX_CHARACTERS, REPOSITORY_SUBSCRIPTION_EVENTS } from "@beeline/api-contract/daemon";
-import { Check, Errors } from "typebox/value";
-import { basename } from "node:path";
-import { builtinBeelineApp } from "@beeline/api-contract/workbench";
+import { INSTITUTIONAL_SEARCH_QUERY_MAX_CHARACTERS,REPOSITORY_SUBSCRIPTION_EVENTS,fixCornerText } from "@beeline/api-contract/daemon";
 import { SUBSCRIBABLE_EVENT_KINDS } from "@beeline/api-contract/phone";
-import { JsonObject, grantRunDepsFromEnv, ToolDefinition, asObject, commandRequest, callCommandTool, readTurnContextFile, daemonExecute, requiredEnv } from './read-only-mcp.js';
-import { AgentGrantDeps, agentGrantDepsFromEnv, choiceOptionArgs } from './read-only-mcp-agent-grant-deps.js';
-import { namedPrivateFiles, attachRootsFromEnv, agentScheduleRoomId, agentScheduleDepsFromEnv, subscribeEvents, createSchedule, updateSchedule, deleteSchedule } from './read-only-mcp-download-attachment.js';
-import { executeAgentOperation } from './read-only-mcp-execute-agent-operation.js';
+import { builtinBeelineApp } from "@beeline/api-contract/workbench";
+import { Check,Errors } from "typebox/value";
+import { CAPABILITY_ROUTES,CAPABILITY_TOOLS,SCRATCH_ROUTES,agentToolsFor,placeBeelineApps,toolValidationSchema } from "./minimal-tool-surface.js";
+import { AgentGrantDeps,agentGrantDepsFromEnv,choiceOptionArgs } from './read-only-mcp-agent-grant-deps.js';
+import { agentScheduleDepsFromEnv,agentScheduleRoomId,createSchedule,deleteSchedule,subscribeEvents,updateSchedule } from './read-only-mcp-download-attachment.js';
+import { executeAgentOperation,executeConversationOperation } from './read-only-mcp-execute-agent-operation.js';
+import { JsonObject,ToolDefinition,asObject,callCommandTool,commandRequest,daemonExecute,grantRunDepsFromEnv,requiredEnv } from './read-only-mcp.js';
 
 
 
@@ -101,6 +100,7 @@ export function advertisedAgentTool(name: string): ToolDefinition {
 
 
 export function validateAdvertisedToolInput(tool: ToolDefinition, args: JsonObject): void {
+  if (tool.name==='post'||tool.name==='order'||tool.name==='report') return;
   // Restore root combinations while retaining surface-specific restrictions
   // such as scratch_io without quota. App operations have their own contracts
   // and may share a name (e.g. workflow read) with an ordinary tool.
@@ -258,8 +258,7 @@ export const turnArtifacts = new Map<string, { uploads: { name: string; result: 
 
 export async function callAgentTool(name: string, args: JsonObject, toolCallId: string): Promise<string> {
   const {requestId,...input}=args;
-  if(requestId!==undefined && (typeof requestId!=='string'||!requestId.length)) throw new Error('invalid claimed requestId');
-  return commandRequest.run(requestId as string|undefined,
+  return commandRequest.run(typeof requestId==='string'?requestId:undefined,
     () => callCommandTool(name, input, toolCallId));
 }
 
@@ -267,26 +266,21 @@ export async function callAgentTool(name: string, args: JsonObject, toolCallId: 
 
 
 /** Execute only the advertised vocabulary; internal operations retain server authority. */
-export async function executeAgentTool(name: string, args: JsonObject, toolCallId: string, attachmentNames: string[] = []): Promise<string> {
-  if (process.env.BEELINE_TURN_CONTEXT_FILE && (await readTurnContextFile()).terminalReason)
-    throw new Error('turn has ended; further tool calls are refused');
+export async function executeAgentTool(name:string,args:JsonObject,toolCallId:string,_attachmentNames:string[]=[]):Promise<string> {
+  if (name==='post'||name==='order'||name==='report') return executeConversationOperation(name,args);
+  return executeResourceTool(name,args,toolCallId);
+}
+
+async function executeResourceTool(name: string, args: JsonObject, toolCallId: string): Promise<string> {
   if (name === 'read' && args.cursor !== undefined &&
       (!args.cursor || typeof args.cursor !== 'object' || Array.isArray(args.cursor)))
     throw new Error('read: pass the returned next object unchanged as cursor');
   const removed = normalizeAgentToolArgs(name, args);
   validateAdvertisedToolInput(advertisedAgentTool(name), args);
-  let deliveryWarning = '';
-  if (name === 'order' || name === 'report' || name === 'post') {
-    const named = namedPrivateFiles(attachRootsFromEnv(), String(args.text ?? ''), true)
-      .filter(file => basename(file.named) !== file.named || !attachmentNames.includes(file.named));
-    if (named.length) deliveryWarning =
-      `Warning: the ${name} names ${named.map(file => file.named).join(', ')}, which recipients may not be able to open; ` +
-      'upload the file with post_artifact and name its attachment instead, or attach it to the target corner brief with revise_corner.';
-  }
   const addressed = { ...args, ...(typeof args.address === 'string' ? { cornerId: args.address } : {}) };
   const execute = async (operation: string, input = args) => {
     const result = await executeAgentOperation(operation, input, toolCallId);
-    return withAdjustments(deliveryWarning ? `${result}\n\n${deliveryWarning}` : result, removed);
+    return withAdjustments(result,removed);
   };
   switch (name) {
     case 'read': {
@@ -351,7 +345,6 @@ export async function executeAgentTool(name: string, args: JsonObject, toolCallI
       }
       return execute('revise_corner_brief', input);
     }
-    case 'report':
     case 'report_feedback':
     case 'notify_feedback_fixed':
     case 'send_operator_system_dm':
@@ -360,7 +353,6 @@ export async function executeAgentTool(name: string, args: JsonObject, toolCallI
     case 'approve_merge':
     case 'merge_corner':
     case 'set_corner_hold':
-    case 'post':
     case 'close_corner': return execute(name, addressed);
     case 'record_merge_yes': return execute('order_corner_merge', addressed);
     case 'close_corner_pr': return execute('close_pull_request', addressed);
@@ -468,7 +460,6 @@ export async function executeAgentTool(name: string, args: JsonObject, toolCallI
         throw new Error(`${message}\nRemoved: ${removed.join(', ')}.`);
       }
     }
-    case 'order':
     case 'stop':
     case 'post_artifact':
     case 'react_to_message':

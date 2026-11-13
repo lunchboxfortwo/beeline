@@ -1,6 +1,21 @@
-import { randomBytes, randomUUID, expect, it, HUMAN, RUBY, WORKER, WS, ROOM, DM, rootFixture,
-  authority, claim, commands, open, worker, privateAssignment, createAgentCommand, type CommandRow } from './test-support-commander.integration.test-support.js';
-import { commanderReportAddress, commanderChainSql } from './commander.js';
+import { commanderChainSql,commanderReportAddress } from './commander.js';
+import {
+authority,claim,commands,
+createAgentCommand,
+DM,
+expect,
+HUMAN,
+it,
+open,
+privateAssignment,
+randomBytes,randomUUID,
+ROOM,
+rootFixture,
+RUBY,WORKER,
+worker,
+WS,
+type CommandRow
+} from './test-support-commander.integration.test-support.js';
 
 const BOSS = 'f'.repeat(64);
 
@@ -72,9 +87,9 @@ it.each(['approved', 'legacy', 'agent-order', 'different-dispatch', 'same-issuer
   await claim(turn);
   const posted = await daemon.execute('postCornerMessage', { ...authority(turn), cornerId: opened.cornerId,
     text: '@captain Choose the endpoint' }, WORKER);
-  expect(posted.receipt).toContain('tag @captain');
+  expect(posted.receipt).toContain('Message stored and visible.');
   expect((await db.query<{ text: string }>(`SELECT text FROM messages WHERE id=$1`, [posted.id])).rows[0]?.text)
-    .toBe('Choose the endpoint');
+    .toBe('@captain Choose the endpoint');
   const chain = (await db.query<{ id: string }>(`SELECT id FROM rooms corner WHERE corner.id=$1 AND EXISTS (
     SELECT 1 FROM (${commanderChainSql('corner', '$2', 'now()')}) commanders WHERE commanders.id=$3)`, [opened.cornerId, WORKER, BOSS])).rows;
   expect(chain.length).toBe(approved ? 1 : 0);

@@ -1,11 +1,9 @@
+import { afterEach,beforeEach } from 'vitest';
 import { startQueuedTurn } from './test-fixtures/queued-turn.test-support.js';
-import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 
-import { migrateData } from './database.js';
 
-import { INSTITUTIONAL_CONTEXT_HEADER, tombstoneInstitutionalMemoryForMessage, } from './institutional-memory-shadow.js';
 
-import { PgliteDatabase, migratedDatabase } from './test-support.js';
+import { PgliteDatabase,migratedDatabase } from './test-support.js';
 
 import { createAgentCommand } from './agent-command.js';
 
@@ -172,10 +170,11 @@ export const rootFixture = {
 get database(){return database;}, set database(value: typeof database){database=value;},
 };
 
-export { afterEach, beforeEach, describe, expect, it } from 'vitest';
-export { migrateData } from './database.js';
-export { INSTITUTIONAL_CONTEXT_HEADER, tombstoneInstitutionalMemoryForMessage } from './institutional-memory-shadow.js';
-export { PgliteDatabase, migratedDatabase } from './test-support.js';
-export { startQueuedTurn, createAgentCommand } from './agent-command.js';
+export { afterEach,beforeEach,describe,expect,it } from 'vitest';
+export { createAgentCommand } from './agent-command.js';
 export { DaemonService } from './daemon-service.js';
+export { migrateData } from './database.js';
+export { INSTITUTIONAL_CONTEXT_HEADER,tombstoneInstitutionalMemoryForMessage } from './institutional-memory-shadow.js';
 export { LiveHub } from './live.js';
+export { startQueuedTurn } from './test-fixtures/queued-turn.test-support.js';
+export { PgliteDatabase,migratedDatabase } from './test-support.js';

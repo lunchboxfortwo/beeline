@@ -1,4 +1,4 @@
-import { readCornerObjective, activeCornerHolds, SYSTEM_IDENTITY_ID, cornerMergeGate, randomUUID, randomBytes, expect, it, DaemonService, LiveHub, createAgentCommand, systemLine, HUMAN, RUBY, WORKER, WS, ROOM, DM, db, daemon, phone, order, claim, authority, commands, open, worker, currentPlaceReminder, rootFixture, type CommandRow, type AgentCommand } from './test-support-commander.integration.test-support.js';
+import { DM,DaemonService,HUMAN,LiveHub,ROOM,RUBY,SYSTEM_IDENTITY_ID,WORKER,WS,activeCornerHolds,authority,claim,commands,cornerMergeGate,createAgentCommand,currentPlaceReminder,daemon,db,expect,it,open,order,randomBytes,randomUUID,readCornerObjective,rootFixture,vi,worker,type AgentCommand,type CommandRow } from './test-support-commander.integration.test-support.js';
 
 
 
@@ -25,10 +25,10 @@ it.each(['final', 'post-final', 'silent', 'post-silent'] as const)('Reproduction
   } else {
     await rootFixture.daemon.execute('postRoomMessage', { ...authority(wake), text: 'Here is the image.' }, RUBY);
   }
-  // The wake runs in the corner: its closing reply lands there, an explicit post in the DM.
+  // The frozen return address is the DM. An explicit reply spends the public answer; closing is activity.
   const visible = [...(await rootFixture.phone.readRoom(DM, HUMAN))!.messages, ...(await rootFixture.phone.readRoom(opened.cornerId, HUMAN))!.messages]
     .filter(m => m.author.pubkey === RUBY && m.presentation === 'message' && m.text !== 'Work started.');
-  expect(visible).toHaveLength(mode.startsWith('post-') ? 2 : 1);
+  expect(visible).toHaveLength(1);
   expect(visible.flatMap(message => (message.attachments ?? []).map(attachment => attachment.name))).toEqual(['proof.png']);
   expect(visible[0]!.text).not.toContain('must remain silent');
   expect((await rootFixture.db.query('SELECT 1 FROM agent_pending_attachments WHERE request_id=$1', [wake.turnRequestId])).rowCount).toBe(0);
@@ -51,7 +51,7 @@ it.each([false, true])('same-place closing keeps a new attachment on the visible
   const message = messages[0]!;
   expect((await rootFixture.db.query(`SELECT presentation FROM messages WHERE id=$1`, [final.id])).rows[0]?.presentation).toBe('activity');
   expect(message.presentation).toBe('message');
-  expect(message.attachments).toHaveLength(1);
+  await vi.waitFor(async()=>expect((await rootFixture.phone.readRoom(DM,HUMAN))!.messages.find(item=>item.id===message.id)?.attachments).toHaveLength(1));
 });
 
 
@@ -262,7 +262,7 @@ it('Reproduction SELF-2: own brief revisions and external shell completion bookk
     brief: { spec: 'Build the clarified widget', change: 'Clarify work' } }, RUBY);
   expect((await commands(own.cornerId,RUBY)).filter(c=>c.reason==='corner_brief_revision')).toEqual([]);
   expect((await db.query(`SELECT state FROM agent_commands WHERE room_id=$1 AND reason='corner_brief_revision'`,[own.cornerId])).rows)
-    .toEqual([{state:'complete'}]);
+    .toEqual([]);
 
 });
 
@@ -324,7 +324,7 @@ it.each([
     const after = await snapshot();
     expect(after.briefs).toHaveLength(2);
     expect(after.notes.length).toBe(before.notes.length + 1);
-    expect(after.commands.filter(row => row.state === 'pending' && row.room_id === opened.cornerId)).toHaveLength(1);
+    expect(after.commands.filter(row => row.state === 'pending' && row.room_id === opened.cornerId && row.reason==='corner_brief_revision')).toHaveLength(1);
   } else if (scenario === 'authority revoked' || scenario === 'revision changed') {
     await expect(watched.execute('reviseCornerBrief', input, RUBY)).rejects.toThrow(
       scenario === 'authority revoked' ? /access|member|authority/i : /revision changed/);
@@ -499,17 +499,15 @@ it('Reproduction RETURN-ADDRESS: a report whose parent expired retains the recor
 
 
 it('Reproduction POST-ID: different explicit replies receive their own stored ids and identical retries reuse them', async () => {
-  const { mentionReplyKey, mentionReplyId } = await import('./owed-mentions.js');
-  const key = await mentionReplyKey(rootFixture.db, RUBY, DM, rootFixture.order.sourceMessageId);
-  expect(key).toBeDefined();
-  const legacyId = mentionReplyId(key!);
+  const legacyId = randomBytes(32).toString('hex');
   await rootFixture.db.query(`INSERT INTO messages(id,room_id,author_id,text,reply_to_message_id,root_message_id)
     VALUES($1,$2,$3,'Opened the fix.',$4,$4)`, [legacyId, DM, RUBY, rootFixture.order.sourceMessageId]);
   const post = (text: string) => rootFixture.daemon.execute('postCornerMessage', {
     ...authority(rootFixture.order), cornerId: DM, replyTo: rootFixture.order.sourceMessageId, text,
+    transportRequestId: text,
   }, RUBY);
   const first = await post('Opened the fix.');
-  expect(first.id).toBe(legacyId);
+  expect(first.id).not.toBe(legacyId);
   const second = await post('The fix is complete.');
   expect(second.id).not.toBe(first.id);
   expect((await post('The fix is complete.')).id).toBe(second.id);

@@ -1,12 +1,12 @@
-import { startQueuedCommand } from './test-fixtures/queued-turn.test-support.js';
-import { cornerImplementerSql } from './corner-worker.js';
-import { randomBytes, randomUUID } from 'node:crypto';
-import { afterAll, beforeAll, beforeEach, expect, it } from 'vitest';
-import { PgliteDatabase, migratedDatabase } from './test-support.js';
-import { HelperDaemonService as DaemonService } from './test-fixtures/helper-daemon.js';
-import { PhoneService } from './phone-service.js';
-import { LiveHub } from './live.js';
 import type { AgentCommand } from '@beeline/api-contract/daemon';
+import { randomBytes,randomUUID } from 'node:crypto';
+import { afterAll,beforeAll,beforeEach,expect,it } from 'vitest';
+import { cornerImplementerSql } from './corner-worker.js';
+import { LiveHub } from './live.js';
+import { PhoneService } from './phone-service.js';
+import { HelperDaemonService as DaemonService } from './test-fixtures/helper-daemon.js';
+import { startQueuedCommand } from './test-fixtures/queued-turn.test-support.js';
+import { PgliteDatabase,migratedDatabase } from './test-support.js';
 
 const OWNER = 'a'.repeat(64), JELLYBEAN = 'b'.repeat(64), BABY = 'c'.repeat(64), CANDY = 'd'.repeat(64), EARTH = 'e'.repeat(64);
 const AGENTS = [JELLYBEAN, BABY, CANDY, EARTH];
@@ -46,12 +46,14 @@ const authority = () => ({ roomId: order.roomId, requestId: order.turnRequestId 
 const orderWakes = async () => (await db.query<{ agent_id: string; room_id: string }>(
   `SELECT agent_id,room_id FROM agent_commands WHERE reason='order' ORDER BY agent_id`)).rows;
 
-it('Reproduction room-broadcast: replays the four incident Room orders and wakes nobody', async () => {
-  for (const text of ['Candy only: check the build', 'Baby only: rerun the proof', 'Candy only: post the URL', 'Baby only: stop'])
-    await expect(daemon.execute('order', { ...authority(), address: ROOM, text }, JELLYBEAN))
-      .rejects.toThrow('order must name exactly one agent');
+it('an unnamed Room order gives target-selection feedback and leaves the issuer request queued', async () => {
+  for (const text of ['Candy only: check the build','Baby only: rerun the proof','Candy only: post the URL','Baby only: stop']) {
+    const result=await daemon.execute('order',{...authority(),address:ROOM,text},JELLYBEAN) as {feedback?:string};
+    expect(result.feedback).toMatch(/^name which agent this order is for: /);
+    for (const handle of ['baby','candy','earth']) expect(result.feedback).toContain(`@${handle}`);
+  }
   expect(await orderWakes()).toEqual([]);
-  console.info('Demonstrated room-broadcast: 4 Room-address orders without agent were refused; 0 agents woken (was Baby, Candy, Earth)');
+  expect((await daemon.execute('getAgentCommands',{},JELLYBEAN)).commands).toHaveLength(1);
 });
 
 it('wakes only the named agent at a Room address, by handle, @handle or id', async () => {
@@ -63,8 +65,8 @@ it('wakes only the named agent at a Room address, by handle, @handle or id', asy
 });
 
 it('refuses a Room order naming a non-member or a human', async () => {
-  for (const agent of ['nobody', 'owner', ' '])
-    await expect(daemon.execute('order', { ...authority(), address: ROOM, agent, text: 'Do it' }, JELLYBEAN)).rejects.toThrow('agent');
+  for (const agent of ['nobody', 'owner'])
+    await expect(daemon.execute('order', { ...authority(), address: ROOM, agent, text: 'Do it' }, JELLYBEAN)).rejects.toMatchObject({kind:'membership'});
   expect(await orderWakes()).toEqual([]);
 });
 
@@ -138,7 +140,7 @@ it('RUBY-18: an explicit re-review reaches the configured reviewer at the chain 
   const result = await daemon.execute('order', { roomId: incoming.roomId, requestId: incoming.turnRequestId, address: incoming.roomId, agent: 'baby', text: 'Re-review the restored PR body on the same head' }, CANDY);
   const review = (await daemon.execute('getAgentCommands', { roomId: incoming.roomId }, BABY)).commands.find(command => command.id === result.id)!;
   expect(review.source.body).toContain('Re-review the restored PR body');
-  expect((await db.query<{ agent_depth: number }>(`SELECT agent_depth FROM agent_commands WHERE id=$1`, [review.id])).rows[0]!.agent_depth).toBe(3);
+  expect((await db.query<{ agent_depth: number }>(`SELECT agent_depth FROM agent_commands WHERE id=$1`, [review.id])).rows[0]!.agent_depth).toBe(4);
   await db.query(`UPDATE agent_commands SET state='complete',completed_at=now() WHERE id=$1`, [review.id]);
   const tagged = await daemon.execute('postCornerMessage', { roomId: incoming.roomId, requestId: incoming.turnRequestId, cornerId: incoming.roomId, text: '@baby Re-review the restored evidence' }, CANDY);
   expect(tagged.woken).toContain('baby');
@@ -201,7 +203,7 @@ it('keeps membership walls while allowing explicit corner self-orders', async ()
   await db.query(`UPDATE memberships SET removed_at=now() WHERE room_id=$1 AND identity_id=$2`, [ROOM, EARTH]);
   const before = await orderWakes();
   for (const agent of ['owner', 'nobody', 'earth'])
-    await expect(daemon.execute('order', { roomId: incoming.roomId, requestId: incoming.turnRequestId, address: incoming.roomId, agent, text: 'Do it' }, CANDY)).rejects.toThrow('agent member');
+    await expect(daemon.execute('order', { roomId: incoming.roomId, requestId: incoming.turnRequestId, address: incoming.roomId, agent, text: 'Do it' }, CANDY)).rejects.toMatchObject({kind:'membership'});
   expect(await orderWakes()).toEqual(before);
   for (const agent of ['candy', CANDY, undefined]) {
     const result = await daemon.execute('order', { roomId: incoming.roomId, requestId: incoming.turnRequestId, address: incoming.roomId, agent, text: `Continue ${agent}` }, CANDY);

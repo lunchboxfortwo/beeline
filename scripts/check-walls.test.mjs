@@ -4,7 +4,7 @@ import { tmpdir } from 'node:os';
 import { dirname, resolve } from 'node:path';
 import { test } from 'node:test';
 import { fileURLToPath } from 'node:url';
-import { PATH, WALLS_FILE, WALL_BUILDER_FILE, judgeWalls } from './check-walls.mjs';
+import { PATH, WALLS_FILE, WALL_BUILDER_FILE, judgeWalls, productionWallSites } from './check-walls.mjs';
 const root = resolve(dirname(fileURLToPath(import.meta.url)), '..');
 function copy() {
   const target = mkdtempSync(resolve(tmpdir(), 'walls-'));
@@ -29,6 +29,7 @@ function mutation(name, file, find, code) {
 test('the tree passes without a per-line exception list', () => assert.deepEqual(judgeWalls(root), []));
 for (const [name, code] of [
   ['refusal', "if (item.reason === 'schedule') throw new Error('paused');"],
+  ['aliased refusal', "const denied = new Error('paused'); throw denied;"],
   ['rejected answer', "return Promise.reject(new Error('not now'));"],
   ['negative return', 'if (item.agentDepth > 2) return { delivered: false };'],
   ['skip receipt', 'if (item.agentDepth > 2) return { skipped: true };'],
@@ -74,3 +75,14 @@ mutation('a daemon frame admission gate fails', 'apps/server/src/daemon-live.ts'
   '    if (this.#closed) return;\n    if ([', '    if (raw.admissionDenied) return;\n    if (this.#closed) return;\n    if ([');
 
 mutation('a syntax error cannot hide a path guard', 'apps/body/src/agent-runner.ts', 'place.running = item;', 'place.running = item; if (');
+
+test('eleven production wall constructions fail even outside the request path', () => {
+  const target = copy();
+  try {
+    const file = resolve(target, 'apps/server/src/wall-sprawl.ts');
+    writeFileSync(file, "import {wall} from '@beeline/api-contract/daemon';\n" +
+      Array.from({length: 11}, (_, i) => `export const refusal${i} = () => wall('membership', 'duplicate');`).join('\n'));
+    assert.ok(productionWallSites(target).length > 10);
+    assert.ok(judgeWalls(target).some(error => error.includes('maximum 10')));
+  } finally { rmSync(target, {recursive:true, force:true}); }
+});

@@ -1,24 +1,24 @@
-import { sessionToolRequest } from './session-tool-connection.js';
-import { agentToolsFor, REPOSITORY_ROUTES, repositoryTools } from "./minimal-tool-surface.js";
-import { realpathSync, lstatSync, existsSync, statSync, readFileSync, writeFileSync } from "node:fs";
-import { resolve, isAbsolute, relative, sep, join, basename } from "node:path";
+import { encodeArtifactTitleHeader,fixCornerText } from "@beeline/api-contract/daemon";
 import { AsyncLocalStorage } from "node:async_hooks";
-import { isNetworkFailure } from "./network-failure.js";
-import { fixCornerText, encodeArtifactTitleHeader } from "@beeline/api-contract/daemon";
-import { fetchBoundedBytes, BoundedSizeError, MAX_ATTACHMENT_BYTES, FETCH_TIMEOUT_MS, EXPIRED_REASON } from "./attachment-delivery.js";
-import { assertScratchWriteBudget } from "./scratch-lifecycle.js";
 import { createHash } from "node:crypto";
-import { describeTailscaleReach } from "./connector-tailscale.js";
-import { readVault } from "./connector-squire.js";
-import { squireReachCause } from "./squire-status.js";
+import { existsSync,lstatSync,readFileSync,realpathSync,statSync,writeFileSync } from "node:fs";
+import { basename,isAbsolute,join,relative,resolve,sep } from "node:path";
 import { createInterface } from "node:readline";
-import { READ_ONLY_TOOL_NAMES } from "./read-only-policy.js";
-import { listFiles, readAgentFile, searchText, gitLog, gitShow, gitDiff, gitStatus } from './read-only-mcp-read-tools.js';
-import { FetchImageDeps, fetchImageDepsFromEnv, parseImageUrl, resolveFetchedImageMime, resolveWriteScratchPath, fetchedImageFileName, DownloadAttachmentDeps, downloadAttachmentDepsFromEnv, resolveDownloadAttachment, AttachmentDownloadError } from './read-only-mcp-open-corner.js';
-import { ConnectorOfferDeps, squireShareFailure } from './read-only-mcp-agent-grant-deps.js';
-import { agentScheduleRoomId, DaemonArtifactUploadResult } from './read-only-mcp-download-attachment.js';
-import { GrantRunDeps, executeAgentTool, turnArtifacts } from './read-only-mcp-open-poll.js';
+import { BoundedSizeError,EXPIRED_REASON,FETCH_TIMEOUT_MS,fetchBoundedBytes,MAX_ATTACHMENT_BYTES } from "./attachment-delivery.js";
+import { readVault } from "./connector-squire.js";
+import { describeTailscaleReach } from "./connector-tailscale.js";
+import { agentToolsFor,REPOSITORY_ROUTES,repositoryTools } from "./minimal-tool-surface.js";
+import { isNetworkFailure } from "./network-failure.js";
+import { ConnectorOfferDeps,squireShareFailure } from './read-only-mcp-agent-grant-deps.js';
+import { agentScheduleRoomId,DaemonArtifactUploadResult } from './read-only-mcp-download-attachment.js';
+import { AttachmentDownloadError,DownloadAttachmentDeps,downloadAttachmentDepsFromEnv,fetchedImageFileName,FetchImageDeps,fetchImageDepsFromEnv,parseImageUrl,resolveDownloadAttachment,resolveFetchedImageMime,resolveWriteScratchPath } from './read-only-mcp-open-corner.js';
+import { executeAgentTool,GrantRunDeps,turnArtifacts } from './read-only-mcp-open-poll.js';
+import { gitDiff,gitLog,gitShow,gitStatus,listFiles,readAgentFile,searchText } from './read-only-mcp-read-tools.js';
 import { handleLine } from './read-only-mcp-tool-call-id.js';
+import { READ_ONLY_TOOL_NAMES } from "./read-only-policy.js";
+import { assertScratchWriteBudget } from "./scratch-lifecycle.js";
+import { sessionToolRequest } from './session-tool-connection.js';
+import { squireReachCause } from "./squire-status.js";
 
 
 
@@ -474,10 +474,9 @@ export function isDaemonNetworkFailure(error: unknown): boolean {
 
 
 
-// This sandboxed stdio process has no machine registration. Its HTTP ingress
-// keeps command authorization in DaemonService without replacing the parent socket.
+// Conversational tools share the parent helper's bound native connection.
+// Optional resource tools and installed older helpers retain the HTTP adapter.
 export async function daemonExecute(name: string, input: JsonObject): Promise<JsonObject> {
-  const baseUrl = requiredEnv('BEELINE_DAEMON_BASE_URL');
   const body = JSON.stringify({
     ...input,
     ...(process.env.BEELINE_TURN_CONTEXT_FILE &&
@@ -487,7 +486,13 @@ export async function daemonExecute(name: string, input: JsonObject): Promise<Js
       : {}),
   });
   try {
-      const response = await fetch(new URL(`/v1/daemon/operations/${name}`, `${baseUrl}/`), {
+      if (['postRoomMessage','postCornerMessage','order','report'].includes(name) &&
+          (process.env.BEELINE_GRANT_RUNNER_FILE || process.env.BEELINE_GRANT_RUNNER_URL)) {
+        const input = JSON.parse(body) as JsonObject;
+        return await sessionToolRequest('session',{placeId:input.roomId ?? process.env.BEELINE_DAEMON_ROOM_ID,
+          action:'operation',operation:name,input}) as JsonObject;
+      }
+      const response = await fetch(new URL(`/v1/daemon/operations/${name}`, `${requiredEnv('BEELINE_DAEMON_BASE_URL')}/`), {
         method: 'POST',
         headers: {
           authorization: `Bearer ${requiredEnv('BEELINE_DAEMON_TOKEN')}`,
@@ -771,8 +776,7 @@ export async function daemonUploadArtifact(
   mime: string,
   title: string,
 ): Promise<DaemonArtifactUploadResult> {
-  const baseUrl = requiredEnv('BEELINE_DAEMON_BASE_URL');
-  const response = await fetch(new URL('/v1/daemon/artifacts', `${baseUrl}/`), {
+  const response = await fetch(new URL('/v1/daemon/artifacts', `${requiredEnv('BEELINE_DAEMON_BASE_URL')}/`), {
     method: 'POST',
     headers: {
       authorization: `Bearer ${requiredEnv('BEELINE_DAEMON_TOKEN')}`,
@@ -879,44 +883,11 @@ export const lines = createInterface({ input: process.stdin, crlfDelay: Infinity
 
 lines.on('line', (line) => void handleLine(line));
 export { agentToolsFor } from './minimal-tool-surface.js';
-export { reportFeedback } from './read-only-mcp-open-corner.js';
-export { prChecksStatus } from './read-only-mcp-open-corner.js';
-export { approveMerge } from './read-only-mcp-open-corner.js';
-export type { WriteScratchFileDeps } from './read-only-mcp-open-corner.js';
-export { writeScratchFileDepsFromEnv } from './read-only-mcp-open-corner.js';
-export { resolveWriteScratchPath } from './read-only-mcp-open-corner.js';
-export { writeScratchFile } from './read-only-mcp-open-corner.js';
-export type { FetchImageDeps } from './read-only-mcp-open-corner.js';
-export { fetchImageDepsFromEnv } from './read-only-mcp-open-corner.js';
-export { resolveAttachPath } from './read-only-mcp-download-attachment.js';
-export type { DaemonArtifactUploadResult } from './read-only-mcp-download-attachment.js';
-export type { PostArtifactDeps } from './read-only-mcp-download-attachment.js';
-export { postArtifactDepsFromEnv } from './read-only-mcp-download-attachment.js';
-export { postArtifact } from './read-only-mcp-download-attachment.js';
-export { namedPrivateFiles } from './read-only-mcp-download-attachment.js';
-export { bindBriefFiles } from './read-only-mcp-download-attachment.js';
-export type { AgentScheduleDeps } from './read-only-mcp-download-attachment.js';
-export { agentScheduleDepsFromEnv } from './read-only-mcp-download-attachment.js';
-export { reactToMessage } from './read-only-mcp-download-attachment.js';
-export { createSchedule } from './read-only-mcp-download-attachment.js';
-export { listSchedules } from './read-only-mcp-download-attachment.js';
-export { subscribeEvents } from './read-only-mcp-download-attachment.js';
-export { listEventSubscriptions } from './read-only-mcp-download-attachment.js';
-export { emitEvent } from './read-only-mcp-download-attachment.js';
-export { updateSchedule } from './read-only-mcp-download-attachment.js';
-export { deleteSchedule } from './read-only-mcp-download-attachment.js';
-export type { AgentGrantDeps } from './read-only-mcp-agent-grant-deps.js';
-export { agentGrantDepsFromEnv } from './read-only-mcp-agent-grant-deps.js';
-export { readGrantScript } from './read-only-mcp-agent-grant-deps.js';
-export { requestGrant } from './read-only-mcp-agent-grant-deps.js';
-export { requestSharedAssetIsolation } from './read-only-mcp-agent-grant-deps.js';
-export { listGrants } from './read-only-mcp-agent-grant-deps.js';
-export { storeSecret } from './read-only-mcp-agent-grant-deps.js';
-export type { ConnectorOfferDeps } from './read-only-mcp-agent-grant-deps.js';
-export { workbenchStatus } from './read-only-mcp-agent-grant-deps.js';
-export { offerConnector } from './read-only-mcp-agent-grant-deps.js';
-export { askChoice } from './read-only-mcp-agent-grant-deps.js';
-export { openPoll } from './read-only-mcp-open-poll.js';
+export { agentGrantDepsFromEnv,askChoice,listGrants,offerConnector,readGrantScript,requestGrant,requestSharedAssetIsolation,storeSecret,workbenchStatus } from './read-only-mcp-agent-grant-deps.js';
+export type { AgentGrantDeps,ConnectorOfferDeps } from './read-only-mcp-agent-grant-deps.js';
+export { agentScheduleDepsFromEnv,bindBriefFiles,createSchedule,deleteSchedule,emitEvent,listEventSubscriptions,listSchedules,namedPrivateFiles,postArtifact,postArtifactDepsFromEnv,reactToMessage,resolveAttachPath,subscribeEvents,updateSchedule } from './read-only-mcp-download-attachment.js';
+export type { AgentScheduleDeps,DaemonArtifactUploadResult,PostArtifactDeps } from './read-only-mcp-download-attachment.js';
+export { approveMerge,fetchImageDepsFromEnv,prChecksStatus,reportFeedback,resolveWriteScratchPath,writeScratchFile,writeScratchFileDepsFromEnv } from './read-only-mcp-open-corner.js';
+export type { FetchImageDeps,WriteScratchFileDeps } from './read-only-mcp-open-corner.js';
+export { callAgentTool,openPoll,runGrantedCommand } from './read-only-mcp-open-poll.js';
 export type { GrantRunDeps } from './read-only-mcp-open-poll.js';
-export { runGrantedCommand } from './read-only-mcp-open-poll.js';
-export { callAgentTool } from './read-only-mcp-open-poll.js';

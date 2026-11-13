@@ -178,14 +178,6 @@
       "phase": "M5"
     },
     {
-      "id": "apps/body/src/institutional-context.ts::fetch",
-      "file": "apps/body/src/institutional-context.ts",
-      "kind": "fetch",
-      "count": 1,
-      "compatibility": "legacy-only",
-      "phase": "M5"
-    },
-    {
       "id": "apps/body/src/kernel-lock.ts::import:node:net",
       "file": "apps/body/src/kernel-lock.ts",
       "kind": "import:node:net",
@@ -285,7 +277,7 @@
       "id": "apps/body/src/read-only-mcp.ts::fetch",
       "file": "apps/body/src/read-only-mcp.ts",
       "kind": "fetch",
-      "count": 7,
+      "count": 6,
       "compatibility": "legacy-only",
       "phase": "M5"
     },
@@ -334,22 +326,6 @@
       "file": "apps/body/src/resource-mcp-facade.ts",
       "kind": "fetch-impl",
       "count": 3,
-      "compatibility": "legacy-only",
-      "phase": "M5"
-    },
-    {
-      "id": "apps/body/src/room-github-auth.ts::import:node:http",
-      "file": "apps/body/src/room-github-auth.ts",
-      "kind": "import:node:http",
-      "count": 1,
-      "compatibility": "legacy-only",
-      "phase": "M5"
-    },
-    {
-      "id": "apps/body/src/room-github-auth.ts::import:node:net",
-      "file": "apps/body/src/room-github-auth.ts",
-      "kind": "import:node:net",
-      "count": 1,
       "compatibility": "legacy-only",
       "phase": "M5"
     },
@@ -1177,6 +1153,15 @@
       "count": 1,
       "compatibility": "legacy-only",
       "phase": "M4"
+    },
+    {
+      "id": "apps/body/src/session-tool-connection.ts::fetch",
+      "file": "apps/body/src/session-tool-connection.ts",
+      "kind": "fetch",
+      "count": 1,
+      "compatibility": "legacy-only",
+      "phase": "M5",
+      "reason": "Consolidates existing sandbox loopback session/workspace calls; conversational tools forward through the parent helper native connection instead of another server HTTP credential check."
     }
   ]
 }

@@ -1,9 +1,10 @@
-import { afterAll, beforeAll, beforeEach, expect, it } from 'vitest';
-import { migratedDatabase, type PgliteDatabase } from './test-support.js';
-import { AGENT_COMMAND_SCHEMA, createAgentCommand } from './agent-command.js';
-import { HelperDaemonService as DaemonService } from './test-fixtures/helper-daemon.js';
-import { claimAgentConnection, releaseAgentConnection } from './connection-presence.js';
+import { afterAll,beforeAll,beforeEach,expect,it } from 'vitest';
+import { AGENT_COMMAND_SCHEMA,answerQueuedMessage,createAgentCommand,queueMessage,readAgentCommands } from './agent-command.js';
+import { claimAgentConnection,releaseAgentConnection } from './connection-presence.js';
+import type { SqlDatabase } from './database.js';
 import { LiveHub } from './live.js';
+import { HelperDaemonService as DaemonService } from './test-fixtures/helper-daemon.js';
+import { migratedDatabase,type PgliteDatabase } from './test-support.js';
 
 const H = 'a'.repeat(64), A = 'b'.repeat(64);
 const W = '11111111-1111-4111-8111-111111111111';
@@ -100,6 +101,8 @@ it('Stop cancels the item: it leaves the queue and its answer is refused', async
 
 it('empty output and silence acknowledgements leave an unanswered request queued', async () => {
   const item = await ask(R1, 'anything?');
+  expect(await daemon.execute('postCornerMessage', {roomId:R1,cornerId:R1,requestId:item.turn_request_id,
+    text:'<thinking>private reasoning</thinking>'},A)).toMatchObject({stored:false,visible:false});
   await answer(R1, item.turn_request_id, '<thinking>nothing to say</thinking>');
   expect((await queue()).map(entry => entry.id)).toEqual([item.id]);
   expect((await db.query(`SELECT count(*)::int n FROM messages WHERE author_id=$1 AND request_id=$2`,
@@ -177,4 +180,119 @@ it('a missing optional human reply link still appends and answers the request', 
   await answer(R1, items[0]!.turnRequestId, 'Here is the answer.');
   expect(await queue()).toEqual([]);
   expect((await db.query('SELECT reply_to_message_id FROM messages WHERE id=$1', [id])).rows[0]).toEqual({ reply_to_message_id: null });
+});
+
+it('uses one membership snapshot at the shared entry and one at the answer exit', async () => {
+  const reads: string[] = [];
+  const observe = (database: SqlDatabase): SqlDatabase => new Proxy(database, {
+    get(target, key) {
+      if (key === 'transaction') return (work: (tx: SqlDatabase) => Promise<unknown>) => target.transaction(tx => work(observe(tx)));
+      if (key === 'query') return (sql: string, values?: unknown[]) => {
+        if (sql.includes('memberships')) reads.push(sql);
+        return target.query(sql, values);
+      };
+      const value = Reflect.get(target, key, target);
+      return typeof value === 'function' ? value.bind(target) : value;
+    },
+  });
+  const observed = observe(db);
+  const sent = await queueMessage(observed, { kind: 'post', roomId: R1, authorId: H, text: '@agent one entry' });
+  expect(sent.commands).toHaveLength(1);
+  expect(reads).toHaveLength(1);
+  const item = sent.commands[0]!;
+  reads.length = 0;
+  await readAgentCommands(observed, A);
+  expect(reads).toHaveLength(0);
+  await answerQueuedMessage(observed, A, { roomId: R1, requestId: item.turn_request_id, text: 'one exit' });
+  expect(reads).toHaveLength(1);
+  expect(await queue()).toEqual([]);
+});
+
+it('delivers the queued source despite transcript edits and an optional workflow read failure', async () => {
+  const item = await ask(R1, 'Keep the original request');
+  await db.query('UPDATE messages SET text=$2 WHERE id=$1', [item.source_message_id, 'Later edited context']);
+  const query = db.query.bind(db);
+  const unavailable = new Proxy(db, {
+    get(target, key) {
+      if (key === 'query') return (sql: string, values?: unknown[]) => {
+        if (/workspace_skills|workspace_skill_versions|room_choices|voice_orders/.test(sql))
+          throw new Error('optional context is unavailable');
+        return query(sql, values);
+      };
+      const value = Reflect.get(target, key, target);
+      return typeof value === 'function' ? value.bind(target) : value;
+    },
+  });
+  expect((await readAgentCommands(unavailable, A)).commands[0]?.source.body).toContain('Keep the original request');
+  await answer(R1, item.turn_request_id, 'The original request was answered.');
+  expect(await queue()).toEqual([]);
+});
+
+it('normalizes unrepresentable text without refusing the message or truncating its answer', async () => {
+  const sent = await queueMessage(db, { kind: 'post', roomId: R1, authorId: H, text: '@agent NUL\0 and surrogate \uD800' });
+  expect((await queue())[0]?.source.body).toBe('@agent NUL\uFFFD and surrogate \uFFFD');
+  const text = 'A complete answer. '.repeat(8_000);
+  const saved = await answer(R1, sent.commands[0]!.turn_request_id, text);
+  expect((await db.query('SELECT text FROM messages WHERE id=$1', [saved.id])).rows[0]?.text).toBe(text.trim());
+});
+
+it('keeps closing text in activity when a reply tool already answered this request', async () => {
+  const item = await ask(R1, 'Publish one reply');
+  const posted = await daemon.execute('postCornerMessage', { roomId: R1, cornerId: R1,
+    requestId: item.turn_request_id, text: 'The reply from the tool.' }, A);
+  const settled = await answer(R1, item.turn_request_id, 'Closing details belong in activity.');
+  expect((await db.query("SELECT id,text FROM messages WHERE request_id=$1 AND author_id=$2 AND presentation='message'",
+    [item.turn_request_id,A])).rows).toEqual([{id:posted.id,text:'The reply from the tool.'}]);
+  expect((await db.query('SELECT activity FROM messages WHERE id=$1', [settled.id])).rows[0]?.activity)
+    .toContainEqual({kind:'note',title:'Turn summary',text:'Closing details belong in activity.'});
+  expect((await answer(R1,item.turn_request_id,'Closing details belong in activity.')).id).toBe(settled.id);
+  expect(await queue()).toEqual([]);
+});
+
+it('publishes the closing text as the answer when no reply tool posted', async () => {
+  const item = await ask(R1, 'Use the closing answer');
+  const settled = await answer(R1,item.turn_request_id,'This closing text is the answer.');
+  expect((await db.query("SELECT id,text,presentation FROM messages WHERE request_id=$1 AND author_id=$2",
+    [item.turn_request_id,A])).rows).toEqual([{id:settled.id,text:'This closing text is the answer.',presentation:'message'}]);
+  expect(await queue()).toEqual([]);
+});
+
+
+it('distinct requests using the same source retain separate item and answer identities',async()=>{
+  const first=await ask(R1,'answer all three causes');
+  const second=(await createAgentCommand(db,{id:'separate-cause-one',roomId:R1,agentId:A,
+    sourceMessageId:first.source_message_id,reason:'subscribed_event'}))!;
+  const third=(await createAgentCommand(db,{id:'separate-cause-two',roomId:R1,agentId:A,
+    sourceMessageId:first.source_message_id,reason:'subscribed_event'}))!;
+  expect(new Set((await queue()).map(item=>item.turnRequestId)).size).toBe(3);
+  for(const item of [first,second,third]) await answer(R1,item.turn_request_id,`Answered ${item.id}`);
+  expect(await queue()).toEqual([]);
+  expect((await db.query('SELECT count(*)::int n FROM messages WHERE author_id=$1 AND request_id=ANY($2::text[])',
+    [A,[first.turn_request_id,second.turn_request_id,third.turn_request_id]])).rows[0]).toEqual({n:3});
+});
+
+it('a late attachment must reach the existing reply before its item can finish',async()=>{
+  const item=await ask(R1,'send the proof');
+  const posted=await daemon.execute('postCornerMessage',{roomId:R1,cornerId:R1,requestId:item.turn_request_id,text:'The proof is ready.'},A);
+  const file={url:'https://example.test/late-proof',name:'proof.txt',mimeType:'text/plain',size:10};
+  await db.query('UPDATE agent_commands SET answer_attachments=$2::jsonb WHERE id=$1',[item.id,JSON.stringify([file])]);
+  await db.query(`CREATE FUNCTION refuse_late_proof() RETURNS trigger LANGUAGE plpgsql AS $$ BEGIN
+    IF NEW.id='${posted.id}' THEN RAISE EXCEPTION 'late proof write failed'; END IF; RETURN NEW; END $$;
+    CREATE TRIGGER refuse_late_proof BEFORE UPDATE OF attachments ON messages FOR EACH ROW EXECUTE FUNCTION refuse_late_proof()`);
+  try { await expect(answer(R1,item.turn_request_id,'Closing summary')).rejects.toThrow('late proof write failed'); }
+  finally { await db.query('DROP TRIGGER refuse_late_proof ON messages;DROP FUNCTION refuse_late_proof()'); }
+  expect((await queue()).map(item=>item.id)).toContain(item.id);
+  await answer(R1,item.turn_request_id,'Closing summary');
+  expect(await queue()).toEqual([]);
+  expect((await db.query('SELECT attachments FROM messages WHERE id=$1',[posted.id])).rows[0]).toEqual({attachments:[file]});
+  expect((await db.query("SELECT count(*)::int n FROM messages WHERE request_id=$1 AND author_id=$2 AND presentation='message'",[item.turn_request_id,A])).rows[0]).toEqual({n:1});
+});
+
+
+it('optional question formatting cannot make PostgreSQL reject the answer',async()=>{
+  const item=await ask(R1,'choose a scope');
+  const posted=await answerQueuedMessage(db,A,{roomId:R1,requestId:item.turn_request_id,
+    report:true,status:'needs_decision',text:'Choose the scope?',ask:'Which scope?\u0000\ud800'});
+  expect(await queue()).toEqual([]);
+  expect((await db.query('SELECT card FROM messages WHERE id=$1',[posted.id])).rows[0]).toMatchObject({card:{ask:'Which scope?\uFFFD\uFFFD'}});
 });

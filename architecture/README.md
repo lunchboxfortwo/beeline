@@ -17,9 +17,9 @@ rule edit; negative fixtures live in `scripts/check-architecture.test.mjs`.
 
 The command-creation, live-notify, membership-write and server-interval rules
 have zero exceptions. Command creation lives in `agent-command.ts`, including
-explicit connected-app commands minted as pending queue items. The internal
-`createClaimedMcpAgentCommand` sink keeps its historical name for that strict
-owner boundary; its exported API is `createMcpAgentCommand` and it claims nothing.
+explicit connected-app commands minted as pending queue items. The private
+`insertAgentCommand` sink serves the single `queueMessage` entry; its connected-app
+resource adapter is `createMcpAgentCommand` and it claims nothing.
 The claim and owner-field rules allow zero writers and zero owned sites.
 `corner-lifecycle.ts` alone decides and runs corner archival cleanup. Subscriptions
 live in `agent_subscriptions`; legacy JSON may be read only by named upgrade

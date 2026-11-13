@@ -1,4 +1,4 @@
-import { readFileSync } from 'node:fs';
+import { readFileSync, readdirSync, existsSync } from 'node:fs';
 import { resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import ts from 'typescript';
@@ -6,23 +6,24 @@ import ts from 'typescript';
 /** Checks stay beside their data. This checks refusal construction, not authority. */
 export const PATH = [
   { file: 'apps/body/src/agent-runner.ts', functions: ['queueChanged', 'reconcileQueue', 'resendStoredAnswers', 'pump', 'deliver', 'store', 'post'] },
-  { file: 'apps/body/src/place-session.ts', functions: ['start', 'startFresh', 'activate', 'deliver', 'followUp', 'repairCredentialLinks', 'hostedModel', 'optional', 'stop', 'dispose'], startup: true },
+  { file: 'apps/body/src/place-session.ts', functions: ['start', 'startFresh', 'activate', 'deliver', 'followUp', 'hostedModel', 'optional', 'stop', 'dispose'], startup: true },
+  { file: 'apps/body/src/read-only-mcp-execute-agent-operation.ts', functions:['executeAgentOperation','executeConversationOperation'] },
+  { file: 'apps/body/src/read-only-mcp-open-poll.ts', functions:['executeAgentTool','callAgentTool'] },
   { file: 'apps/body/src/agent-process.ts', functions: ['startAgentProcess', 'stopAgentProcess'], startup: true },
   { file: 'apps/body/src/session-resources.ts', functions: ['refresh', 'load', 'rememberModelCatalog', 'persist'] },
   { file: 'apps/body/src/agent-home.ts', functions: ['prepareRoomAgentCredentials', 'repairRoomAgentCredentialLinks'], startup: true },
   { file: 'apps/server/src/machine-connection.ts', functions: ['machineConnectionOutput', 'serveMachineSocket', 'serveAgentSocket'], transport: true, startup: true },
   { file: 'apps/server/src/daemon-live.ts', functions: ['frame', '#operation', '#readQueue'], transport: true },
-  { file: 'apps/server/src/phone/messages.ts', functions: ['phoneSendMessage', 'phoneSendReply'] },
-  { file: 'apps/server/src/phone/access.ts', functions: ['phoneAssertRoomIsWritable'] },
-  { file: 'apps/server/src/phone-operations.ts', functions: ['dispatch', 'required', 'uuid'] },
-  { file: 'apps/server/src/agent-command-create-agent-command.ts', functions: ['routeHumanMessage'] },
-  { file: 'apps/server/src/agent-command.ts', functions: ['insertAgentCommand'] },
-  { file: 'apps/server/src/agent-command-read-agent-commands.ts', functions: ['readAgentCommands'] },
-  { file: 'apps/server/src/agent-command-route-agent-result.ts', functions: ['authorizeCommandOutput'] },
-  { file: 'apps/server/src/commander.ts', functions: ['commandAddress', 'sendOrder', 'reportToCommander', 'prepareCommanderReport', 'deliverCommanderReport'] },
+  { file: 'apps/server/src/rooms-mcp.ts', functions: ['call','sendMessage'] },
+  { file: 'apps/server/src/rooms-mcp-agent.ts', functions: ['call'] },
+  { file: 'apps/server/src/phone-socket.ts', functions: ['phoneSocketRequests'], transport: true },
+  { file: 'apps/server/src/phone/messages.ts', functions: ['phoneSendMessage'] },
+  { file: 'apps/server/src/phone-operations.ts', functions: ['dispatch'] },
+  { file: 'apps/server/src/agent-command.ts', functions: ['queueMessage', 'postMessage', 'insertAgentCommand', 'answerQueuedMessage'] },
+  { file: 'apps/server/src/agent-command-read-agent-commands.ts', functions: ['readAgentCommands','readAgentQueueRows'] },
+  { file: 'apps/server/src/commander.ts', functions: ['sendOrder', 'reportToCommander'] },
   { file: 'apps/server/src/daemon/corner-reports.ts', functions: ['daemonReport'] },
-  { file: 'apps/server/src/daemon/access.ts', functions: ['daemonAccess', 'daemonReviewSourceAccess'] },
-  { file: 'apps/server/src/daemon/corner-messages.ts', functions: ['daemonReach', 'daemonPostAddressAccess'] },
+  { file: 'apps/server/src/daemon/corner-messages.ts', functions: ['daemonPostCornerMessage'] },
   { file: 'apps/server/src/daemon/execute.ts', functions: ['daemonExecute'] },
   { file: 'apps/server/src/daemon/messages.ts', functions: ['daemonPostRoomMessage'] },
 ];
@@ -33,7 +34,7 @@ const WAITS = new Set(['setTimeout', 'setInterval', 'setImmediate', 'sleep', 'de
 // These are the protocol handoff and private credential/sandbox bootstrap,
 // not additional admission waits. New optional dependencies are rejected.
 const SESSION_OPERATIONS = new Set(['this.repairCredentialLinks', 'this.startFresh', 'this.stop', 'this.activate',
-  'mkdir', 'prepareRoomAgentCredentials', 'installPiMcpBridge', 'startAgentProcess', 'stopAgentProcess',
+  'mkdir', 'mkdtemp', 'provisionRoomAgentCredentials', 'prepareRoomAgentCredentials', 'installPiMcpBridge', 'startAgentProcess', 'stopAgentProcess',
   'openAcpConversation', 'applyAgentModelSelection', 'answering', 'client.startProcess', 'client.stopProcess',
   'repairRoomAgentCredentialLinks', 'lstat', 'assertRealContainedDirectory', 'writeIsolatedHarnessFile',
   'readlink', 'rm', 'symlink', 'rename', 'writeBackDetachedClaudeLogin', 'readFile', 'provisionPiCustomModelConfig',
@@ -94,6 +95,18 @@ export function stopSites(file, text, functions, startup = false, kinds = [], tr
     if (callee.endsWith('.execute') && expression.arguments[0]?.text === 'getModelCredential') return true;
     return SESSION_OPERATIONS.has(callee);
   };
+  const propagated = expression => {
+    if (!ts.isIdentifier(expression)) return false;
+    for (let at = expression.parent; at; at = at.parent) {
+      if (ts.isCatchClause(at) && at.variableDeclaration?.name.getText(tree) === expression.text) return true;
+      if (ts.isFunctionLike(at)) {
+        const call = at.parent;
+        return ts.isCallExpression(call) && ts.isPropertyAccessExpression(call.expression) &&
+          call.expression.name.text === 'catch' && at.parameters.some(parameter => parameter.name.getText(tree) === expression.text);
+      }
+    }
+    return false;
+  };
   const scan = (name, node) => {
     const add = kind => sites.push(`${file} ${name}: ${kind} ${`${guard(node)}${node.getText(tree)}`.replace(/\s+/g, ' ').trim()}`);
     if (isWall(node)) {
@@ -102,7 +115,7 @@ export function stopSites(file, text, functions, startup = false, kinds = [], tr
       if (!kind || !ts.isStringLiteral(kind) || !kinds.includes(kind.text)) add('unknown wall kind');
       else walls.push({ file, line: tree.getLineAndCharacterOfPosition(node.getStart(tree)).line + 1, kind: kind.text, reason: node.arguments[1]?.getText(tree) });
     }
-    if (ts.isThrowStatement(node) && !isWall(node.expression)) add('refuse without wall');
+    if (ts.isThrowStatement(node) && !isWall(node.expression) && !propagated(node.expression)) add('refuse without wall');
     else if (ts.isCallExpression(node) && node.expression.getText(tree) === 'refuse') add('refuse without wall');
     else if (ts.isCallExpression(node) && node.expression.getText(tree) === 'Promise.reject' && !isWall(node.arguments[0])) add('reject without wall');
     else if (ts.isReturnStatement(node) && node.expression && ts.isObjectLiteralExpression(node.expression) && node.expression.properties.some(property => ts.isPropertyAssignment(property) && ((['delivered', 'accepted', 'allowed'].includes(property.name.getText(tree)) && property.initializer.kind === ts.SyntaxKind.FalseKeyword) || (property.name.getText(tree) === 'skipped' && property.initializer.kind === ts.SyntaxKind.TrueKeyword)))) add('negative return');
@@ -129,8 +142,33 @@ export function stopSites(file, text, functions, startup = false, kinds = [], tr
   return { sites, walls, missing: functions.filter(name => !found.has(name)).map(name => `${file}: path function ${name} is missing; update scripts/check-walls.mjs`) };
 }
 
+/** Count every production construction, including files outside the route inventory. */
+export function productionWallSites(root) {
+  const sites = [];
+  const walk = folder => {
+    if (!existsSync(folder)) return;
+    for (const entry of readdirSync(folder, { withFileTypes: true })) {
+      const file = resolve(folder, entry.name);
+      if (entry.isDirectory() && !['node_modules', 'dist', 'build', '__tests__', 'fixtures'].includes(entry.name)) walk(file);
+      else if (entry.isFile() && /\.[cm]?[jt]sx?$/.test(entry.name) && !/\.(?:test|spec)\./.test(entry.name)) {
+        const tree = ts.createSourceFile(file, readFileSync(file, 'utf8'), ts.ScriptTarget.Latest, true);
+        const visit = node => {
+          if (ts.isCallExpression(node) && node.expression.getText(tree) === 'wall')
+            sites.push(`${file}:${tree.getLineAndCharacterOfPosition(node.getStart(tree)).line + 1}`);
+          ts.forEachChild(node, visit);
+        };
+        visit(tree);
+      }
+    }
+  };
+  walk(resolve(root, 'apps')); walk(resolve(root, 'packages'));
+  return sites;
+}
+
 export function judgeWalls(root) {
   const errors = [], kinds = wallKinds(root);
+  const constructions = productionWallSites(root);
+  if (constructions.length > 10) errors.push(`Production wall sites: ${constructions.length}; maximum 10. Delete parallel admission paths.\n${constructions.join('\n')}`);
   const docs = readFileSync(resolve(root, WALLS_FILE), 'utf8');
   const documented = [...docs.matchAll(/^## `([a-z-]+)`/gm)].map(match => match[1]);
   if (!kinds.length || new Set(kinds).size !== kinds.length || kinds.join() !== documented.join())

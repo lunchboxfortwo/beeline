@@ -1,11 +1,11 @@
-import type { TurnReplay } from './turn-replay.js';
-import type { AppRoute, AppTransport, ConnectAppStatus } from './app-connections.js';
-import type { CornerMergeHold } from './phone-operations.js';
-import type { SystemEvent } from './system-events.js';
-import type { CornerLifecycleView, MessageReactionEmoji } from './phone-types.js';
-import { RoomCursorInput, RoomInput, CornerInput, AgentRoomInput, AgentInput, AgentMemberMetadata } from './daemon-operations-daemon-operation-map.js';
+import type { AppRoute,AppTransport,ConnectAppStatus } from './app-connections.js';
+import { AgentInput,AgentMemberMetadata,AgentRoomInput,CornerInput,RoomCursorInput,RoomInput } from './daemon-operations-daemon-operation-map.js';
+import { DaemonActivityItem,DaemonAgentToolMandate,DaemonModelConfigOption,DaemonPermissionScope,DaemonPullRequestFact } from './daemon-operations-revise-corner-brief-input.js';
 import { TurnOutputAuthority } from './daemon-operations.js';
-import { DaemonActivityItem, DaemonPermissionScope, DaemonAgentToolMandate, DaemonModelConfigOption, DaemonPullRequestFact } from './daemon-operations-revise-corner-brief-input.js';
+import type { CornerMergeHold } from './phone-operations.js';
+import type { CornerLifecycleView,MessageReactionEmoji } from './phone-types.js';
+import type { SystemEvent } from './system-events.js';
+import type { TurnReplay } from './turn-replay.js';
 
 
 /**
@@ -416,6 +416,8 @@ export type WriteResult = {
 };
 
 export type PostRoomMessageResult = WriteResult & {
+  /** False when no public reply exists and closing text is empty; the queue item stays owed. */
+  readonly answered?: boolean;
   /** Non-fatal delivery warnings after a public reply has already posted. */
   readonly receipt?: string;
 };
