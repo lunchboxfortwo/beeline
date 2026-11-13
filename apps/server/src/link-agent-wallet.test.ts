@@ -24,7 +24,9 @@ beforeEach(async () => {
     VALUES ($1,$2,$3,'Purchase','invite-only')`, [ROOM, WORKSPACE, OWNER]);
 });
 
-it('posts the Link approval URL only to the owner’s private Link card', async () => {
+it.each([false, true])('posts the Link approval at its call site only when the owner reads it (owner in Room: %s)', async ownerInRoom => {
+  if (ownerInRoom) await database.query(`INSERT INTO memberships(workspace_id,room_id,identity_id,role)
+    VALUES ($1,$2,$3,'owner')`, [WORKSPACE, ROOM, OWNER]);
   const transport = vi.fn(async (url: string | URL | Request) => {
     if (String(url).endsWith('/auth/token')) return Response.json({ access_token: 'access',
       refresh_token: 'refresh', expires_in: 3600, scope: 'payment_methods.agentic userinfo:read' });
@@ -46,6 +48,8 @@ it('posts the Link approval URL only to the owner’s private Link card', async 
     `SELECT room_id,card FROM messages WHERE card_type='squire-approval'`)).rows[0]!;
   expect(card.card).toMatchObject({ tool: 'Link',
     approvalUrl: 'https://app.link.com/activity/approve/lsrq_private1' });
+  expect(card.card).toMatchObject({ owner: { pubkey: OWNER } });
+  if (ownerInRoom) return expect(card.room_id).toBe(ROOM);
   expect(card.room_id).not.toBe(ROOM);
   const members = (await database.query<{ identity_id: string }>(
     `SELECT identity_id FROM memberships WHERE room_id=$1 ORDER BY identity_id`,

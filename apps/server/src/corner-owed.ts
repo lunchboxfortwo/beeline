@@ -205,7 +205,8 @@ function cornerOwedRowsSql(where: string, bulk: boolean, corner?: string, parent
         WHEN item.card_type='connector-offer' THEN
           item.card->>'status'='pending' AND item.card->'addressee'->>'pubkey'=person.id
         WHEN item.card_type='squire-approval' THEN
-          item.card->>'status' IS DISTINCT FROM 'expired'
+          COALESCE(item.card->'owner'->>'pubkey',person.id)=person.id
+          AND item.card->>'status' IS DISTINCT FROM 'expired'
           AND NOT EXISTS (SELECT 1 FROM messages decision WHERE decision.room_id=owed_corner.id
             AND decision.card_type='squire-approval-decision'
             AND decision.card->>'approvalId'=item.card->>'approvalId')

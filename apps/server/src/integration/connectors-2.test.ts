@@ -10,7 +10,13 @@ describe('monolith integration: connectors', () => {
 const fixture = monolithFixture();
 
 
-  it('relays Squire-owned approval pages into the owner connector DM exactly once', async () => {
+  it('R1: places a Squire approval in the Room its turn ran in, once, with its page for the owner only', async () => {
+    const MEMBER = 'd'.repeat(64);
+    await fixture.database.query(`INSERT INTO identities(id,kind,name,handle) VALUES($1,'human','Member','member')`, [MEMBER]);
+    await fixture.database.query(
+      `INSERT INTO memberships(workspace_id,room_id,identity_id,role) VALUES($1,NULL,$2,'member'),($1,$3,$2,'member')`,
+      [WORKSPACE, MEMBER, ROOM],
+    );
     const requestId = createHash('sha256').update('squire-purchase-approval').digest('hex');
     const payload = {
       roomId: ROOM,
@@ -30,33 +36,88 @@ const fixture = monolithFixture();
     expect((await duplicate.json()).id).toBe((await first.json()).id);
 
     const rows = await fixture.database.query<{
+      id: string;
       room_id: string;
       author_id: string;
-      card: {
-        approvalUrl: string;
-        title: string;
-        detail: string;
-        sourceRoomId: string;
-        sourceMessageId: string;
-        expiresAt: number;
-      };
-    }>(`SELECT room_id,author_id,card FROM messages WHERE card_type='squire-approval'`);
+      card: Record<string, unknown>;
+    }>(`SELECT id,room_id,author_id,card FROM messages WHERE card_type='squire-approval'`);
     expect(rows.rows).toHaveLength(1);
     const row = rows.rows[0]!;
     expect(row.author_id).toBe(SYSTEM_IDENTITY_ID);
-    expect(row.room_id).not.toBe(ROOM);
+    expect(row.room_id).toBe(ROOM);
     expect(row.card).toMatchObject({
       approvalUrl: payload.approvalUrl,
       title: payload.title,
       detail: payload.detail,
+      owner: { pubkey: HUMAN, kind: 'human', name: 'Owner' },
       sourceRoomId: ROOM,
       sourceMessageId: requestId,
       expiresAt: payload.expiresAt,
     });
-    const view = await fixture.phone.readRoom(row.room_id, HUMAN);
-    expect(view?.messages.find((message) => message.squireApproval)?.squireApproval).toEqual(
+    const ownerView = await fixture.phone.readRoom(ROOM, HUMAN);
+    expect(ownerView?.messages.find((message) => message.id === row.id)?.squireApproval).toEqual(
       expect.objectContaining({ approvalUrl: payload.approvalUrl, detail: payload.detail }),
     );
+    // Other Room members read the ask, never Squire's page, and cannot decide it here.
+    const memberCard = (await fixture.phone.readRoom(ROOM, MEMBER))?.messages.find((message) => message.id === row.id)?.squireApproval;
+    expect(memberCard).toMatchObject({ title: payload.title, owner: { pubkey: HUMAN } });
+    expect(memberCard).not.toHaveProperty('approvalUrl');
+    await expect(fixture.phone.execute('decideApprovalCard', { roomId: ROOM, messageId: row.id, decision: 'allow' }, MEMBER))
+      .rejects.toThrow('approval kind cannot be decided here');
+    const needsYou = (viewer: string) => fixture.phone.execute('readNeedsYou', { workspaceId: WORKSPACE }, viewer)
+      .then(view => JSON.stringify(view).includes(row.id));
+    expect(await needsYou(HUMAN)).toBe(true);
+    expect(await needsYou(MEMBER)).toBe(false);
+
+    // Squire's decision settles the same card where it was asked and resumes the turn once.
+    const decision = { roomId: ROOM, requestId, approvalId: 'purchase-1', status: 'approved', tool: 'inject_card', title: payload.title, detail: payload.detail };
+    const decided = await fixture.daemonOperation('postSquireApprovalDecision', decision);
+    expect(decided.status).toBe(200);
+    const again = await fixture.daemonOperation('postSquireApprovalDecision', { ...decision, status: 'denied' });
+    expect((await again.json()).id).toBe((await decided.json()).id);
+    expect((await fixture.phone.readRoom(ROOM, HUMAN))?.messages.find((message) => message.id === row.id)?.squireApproval)
+      .toMatchObject({ status: 'approved' });
+    expect((await fixture.database.query(`SELECT room_id FROM messages WHERE card_type='squire-approval-decision'`)).rows)
+      .toEqual([{ room_id: ROOM }]);
+    expect((await fixture.database.query(
+      `SELECT 1 FROM agent_commands WHERE room_id=$1 AND agent_id=$2 AND turn_request_id=$3 AND action='resume'`,
+      [ROOM, AGENT, requestId],
+    )).rowCount).toBe(1);
+  });
+
+
+  it('R1: places a Squire approval in its corner or DM, and in the owner System DM when the owner cannot read the origin', async () => {
+    const MEMBER = 'd'.repeat(64);
+    await fixture.database.query(`INSERT INTO identities(id,kind,name,handle) VALUES($1,'human','Member','member')`, [MEMBER]);
+    await fixture.database.query(
+      `INSERT INTO memberships(workspace_id,room_id,identity_id,role) VALUES($1,NULL,$2,'member'),($1,$3,$2,'member')`,
+      [WORKSPACE, MEMBER, ROOM],
+    );
+    const { id: corner } = await (await fixture.operation('createHumanCorner', { roomId: ROOM, title: 'Deploy' })).json() as { id: string };
+    const dm = (await fixture.phone.execute('resolveDirectMessage', { workspaceId: WORKSPACE, participantId: AGENT }, HUMAN)).id;
+    const agentsOnly = '33333333-3333-4333-8333-333333333333';
+    await fixture.database.query(`INSERT INTO rooms(id,workspace_id,name) VALUES($1,$2,'Agents')`, [agentsOnly, WORKSPACE]);
+    await fixture.database.query(`INSERT INTO memberships(workspace_id,room_id,identity_id,role) VALUES($1,$2,$3,'member')`, [WORKSPACE, agentsOnly, AGENT]);
+    const ask = async (roomId: string, approvalId: string) => {
+      const response = await fixture.daemonOperation('postSquireApproval', {
+        roomId, requestId: createHash('sha256').update(approvalId).digest('hex'), tool: 'fetch_credential',
+        title: 'Credential access approval', detail: 'Reveal test', approvalUrl: `https://approve.trustysquire.test/${approvalId}`,
+        approvalId, linkKind: 'passkey',
+      });
+      expect(response.status).toBe(200);
+      const { id } = await response.json() as { id: string };
+      return (await fixture.database.query<{ room_id: string; direct: string[] | null }>(
+        `SELECT message.room_id,room.direct_participants direct FROM messages message JOIN rooms room ON room.id=message.room_id WHERE message.id=$1`, [id],
+      )).rows[0]!;
+    };
+    expect((await ask(corner, 'corner-1')).room_id).toBe(corner);
+    // Only the owner owes the corner its approval.
+    expect((await fixture.database.query(`SELECT person_id FROM corner_owed WHERE corner_id=$1`, [corner])).rows)
+      .toEqual([{ person_id: HUMAN }]);
+    expect((await ask(dm, 'dm-1')).room_id).toBe(dm);
+    const fallback = await ask(agentsOnly, 'absent-1');
+    expect(fallback.room_id).not.toBe(agentsOnly);
+    expect(fallback.direct).toEqual(expect.arrayContaining([HUMAN, SYSTEM_IDENTITY_ID]));
   });
 
 

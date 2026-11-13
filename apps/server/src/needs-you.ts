@@ -46,10 +46,11 @@ export function cardExpiresAtSql(card = 'card'): string {
 }
 /** The approval cards whose only exit is their `expiresAt`. */
 export const EXPIRING_CARD_TYPES = `card_type IN ('squire-approval','agent-sign-in')`;
-/** Squire approvals reach Room members; sign-in cards reach their owner. */
+/** Squire approvals reach their owner (legacy DM cards name none); sign-in cards reach their owner. */
 export function expiringCardForSql(m: string, identity: string): string {
   return `(${m}.${EXPIRING_CARD_TYPES} AND ${m}.deleted_at IS NULL
-    AND (${m}.card_type='squire-approval' OR ${m}.card->>'ownerId'=${identity}))`;
+    AND ((${m}.card_type='squire-approval' AND (${m}.card->'owner'->>'pubkey' IS NULL
+      OR ${m}.card->'owner'->>'pubkey'=${identity})) OR ${m}.card->>'ownerId'=${identity}))`;
 }
 /** Now, in the epoch milliseconds `cardExpiresAtSql` returns. */
 const NOW_MS = `(extract(epoch FROM now())*1000)::bigint`;
@@ -378,7 +379,7 @@ return [
          (${cardExpiresAtSql('m.card')} IS NULL OR ${cardExpiresAtSql('m.card')}>${NOW_MS}) ELSE false END
        ELSE m.card->>'status'='pending'
      END`,
-  // A Trusty Squire approval in the owner's @System DM. Squire decides it;
+  // A Trusty Squire approval at its call site or in the owner's @System DM. Squire decides it;
   // the decision (or Squire's expiry) lands in the Room the paused turn ran in.
   `${APPROVAL_FROM('squire', `to_timestamp(${cardExpiresAtSql('m.card')}/1000.0)`)}
    JOIN messages m ON m.room_id=room.id AND m.card_type='squire-approval'
