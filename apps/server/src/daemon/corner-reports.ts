@@ -43,7 +43,9 @@ import { daemonCheckReviewerAuthors } from './corner-reads.js';
       if (corner?.worker === agentId && !corner.merged) {
         const brief = await currentCornerBrief(database, command.room_id);
         if (brief?.repositoryWork !== false) {
-          if (!corner.has_pr) throw new CommandRefusalError(
+          // An unavailable registration read must not silence the worker.
+          // This command-local exception grants no merge authority.
+          if (!corner.has_pr && !ctx.cornerPrRegistrationUnavailable) throw new CommandRefusalError(
             'done requires an opened or merged PR; post progress in the corner instead (non-PR deliverables require repositoryWork false)', 409);
         }
       }
