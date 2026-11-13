@@ -226,7 +226,7 @@ describe('the implementer merges when the gate opens (AC-5)', () => {
     const cornerId = await inReview();
     const pr = (await rootFixture.db.query(`SELECT lifecycle->'pr' pr FROM corner_facts WHERE corner_id=$1`, [cornerId])).rows[0]!.pr;
     // Recreate a corner archived by the old close path, with its PR still recorded.
-    await rootFixture.db.query(`UPDATE corner_github_cache SET lifecycle=lifecycle-'pr' WHERE corner_id=$1`, [cornerId]);
+    await rootFixture.db.query(`UPDATE corner_github_cache SET lifecycle=lifecycle-'pr'-'checksSummary' WHERE corner_id=$1`, [cornerId]);
     await rootFixture.daemon.execute('archiveCorner', { cornerId }, A);
     await rootFixture.db.query(`UPDATE corner_github_cache SET lifecycle=jsonb_set(lifecycle,'{pr}',$2::jsonb) WHERE corner_id=$1`, [cornerId, JSON.stringify(pr)]);
     await rootFixture.db.query(`INSERT INTO corner_merge_approvals(corner_id,approved_by,pull_request_number,head_sha) VALUES($1,$2,7,$3)`, [cornerId, B, SHA]);
@@ -695,11 +695,13 @@ const scope26 = fixtureScope26();
 
   it('an unreadable outcome is settled later by the merge webhook, with no stored claim', async () => {
     const cornerId = await approved();
+    expect(await currentState(cornerId)).toBe('idle');
     rootFixture.githubApp.mergePullRequest.mockImplementationOnce(async () => {
       rootFixture.githubApp.readPullRequest.mockRejectedValue(new Error('temporary GitHub outage'));
     });
     expect(await implementersMerge()).toBe(1);
-    expect(await currentState(cornerId)).toBe('idle');
+    await expect(advanceCorner(rootFixture.db, cornerId, { kind: 'reconcile' })).rejects.toThrow('temporary GitHub outage');
+    expect(await projected(cornerId)).toBe('idle');
     await mergedWebhook(cornerId, 7, SHA);
     expect(await currentState(cornerId)).toBe('archived');
     expect(rootFixture.githubApp.mergePullRequest).toHaveBeenCalledTimes(1);

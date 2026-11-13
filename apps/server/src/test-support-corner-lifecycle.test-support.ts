@@ -352,7 +352,9 @@ export async function greenHead(cornerId: string, number: number, headSha: strin
     JSON.stringify({
       checks: 'passing',
       lifecycle: 'in-review',
-      pr: { number, url: `https://github.com/owner/widgets/pull/${number}`, headSha },
+      checksSummary: { status: 'passing', total: 1, failing: [],
+        checks: [{ name: 'typecheck', status: 'passed' }], updatedAt: Math.floor(Date.now() / 1000) },
+      pr: { number, url: `https://github.com/owner/widgets/pull/${number}`, headSha, mergeability: 'clean' },
     }),
   ]);
   await systemLine(db, {

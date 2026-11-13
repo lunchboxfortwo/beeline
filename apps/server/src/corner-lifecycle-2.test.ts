@@ -286,6 +286,7 @@ describe('each transition wakes the next role exactly once (AC-2)', () => {
     await rootFixture.db.query(`UPDATE rooms SET reviewer_agent_id=$2 WHERE id=$1`, [R, B]);
     if (state === 'review') await rootFixture.db.query(`DELETE FROM agent_commands WHERE room_id=$1 AND agent_id=$2`, [cornerId, B]);
     else {
+      rootFixture.githubRollupState = 'passed';
       await pushToCorner(cornerId, SHA);
       await rootFixture.db.query(`UPDATE corner_github_cache SET lifecycle=$2::jsonb WHERE corner_id=$1`, [cornerId,
         JSON.stringify({ checks: 'passing', lifecycle: 'in-review', pr: { number: 7, headSha: SHA } })]);
