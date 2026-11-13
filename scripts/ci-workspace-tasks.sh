@@ -7,7 +7,7 @@ set -euo pipefail
 typecheck() {
   # Enforce the shared UI component registry
   export UI_POLICY_BASE="$CI_BASE_SHA"
-  git fetch --no-tags --depth=1 origin "$UI_POLICY_BASE"
+  git fetch --no-tags origin "$UI_POLICY_BASE"
   node scripts/check-mobile-ui-components.mjs --base "$UI_POLICY_BASE"
   # Hold every Tamagui surface to the one design grammar
   node scripts/check-mobile-grammar.mjs
@@ -15,14 +15,14 @@ typecheck() {
   node --test scripts/check-stone-surfaces.test.mjs
   # Allow no phone network channel besides the main live socket
   export CHANNEL_BASE="$CI_BASE_SHA"
-  git fetch --no-tags --depth=1 origin "$CHANNEL_BASE"
+  git fetch --no-tags origin "$CHANNEL_BASE"
   node scripts/check-phone-network-channels.mjs --base "$CHANNEL_BASE"
   node scripts/check-router-boundaries.mjs --base "$CHANNEL_BASE"
   node scripts/check-no-emulator-start.mjs
   node --test scripts/no-emulator-start.test.mjs
   # Keep each module's sinks in their owner files
   export ARCHITECTURE_BASE="$CI_BASE_SHA"
-  git fetch --no-tags --depth=1 origin "$ARCHITECTURE_BASE"
+  git fetch --no-tags origin "$ARCHITECTURE_BASE"
   # G1: candidate invariants govern CI; changes are reviewed weekly after merging.
   node scripts/check-architecture.mjs --root . --base "$ARCHITECTURE_BASE"
   # The root command also generates mobile routes and typechecks mobile.

@@ -185,6 +185,27 @@ test('local transport upgrades shallow fetches without changing the hosted workf
   await policy.step({ step });
   assert.equal(step.run, 'git fetch --no-tags origin "$CI_BASE_SHA"');
 });
+test('workspace checks never shallow-fetch the repository shared by local release worktrees', () => {
+  const directory = temporary();
+  try {
+    const bin = join(directory, 'bin'), calls = join(directory, 'git-calls');
+    mkdirSync(bin);
+    for (const command of ['git', 'node', 'npx', 'npm']) {
+      const path = join(bin, command);
+      writeFileSync(path, command === 'git'
+        ? '#!/bin/sh\nprintf "%s\\n" "$*" >> "$FETCH_CALLS"\n'
+        : '#!/bin/sh\nexit 0\n');
+      chmodSync(path, 0o700);
+    }
+    execFileSync('bash', ['scripts/ci-workspace-tasks.sh', 'typecheck'], {
+      cwd: repository, env: { ...process.env, PATH: `${bin}:${process.env.PATH}`,
+        FETCH_CALLS: calls, CI_BASE_SHA: sha, GITHUB_EVENT_NAME: 'pull_request' },
+    });
+    const requests = readFileSync(calls, 'utf8').trim().split('\n');
+    assert.equal(requests.length, 3);
+    for (const request of requests) assert.equal(request, `fetch --no-tags origin ${sha}`);
+  } finally { rmSync(directory, { recursive: true, force: true }); }
+});
 test('secret masks work across chunks and dynamically registered token lines', async () => {
   const lines = [], processes = new Processes({ TOKEN: 'secret-value' }, line => lines.push(line));
   await processes.run(process.execPath, ['-e', 'process.stdout.write("::add-mask::minted-token\\n"); process.stdout.write("secret-"); setTimeout(()=>process.stdout.write("value minted-token\\n"),5)'], { env: process.env });
