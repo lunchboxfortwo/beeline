@@ -169,7 +169,7 @@ export const steps = {
     await messageMenu(p, f);
     return {
       act: () => click(id(p, 'message-reaction-👍')),
-      done: () => visible(p.getByRole('button', { name: /👍.*1 reaction/ }).first()),
+      done: () => visible(id(p, `reaction-chip-${f.messageId}-👍`)),
     };
   },
   'bookmark-message': async (p, f) => {
@@ -183,7 +183,7 @@ export const steps = {
     await messageMenu(p, f);
     await click(id(p, 'message-report-action'));
     return {
-      act: () => click(button(p, 'Report')),
+      act: () => click(p.getByText('Report', { exact: true }).filter({ visible: true })),
       done: () => visible(id(p, 'chat-reported-marker')),
     };
   },
@@ -191,27 +191,31 @@ export const steps = {
     await messageMenu(p, f);
     await click(id(p, 'message-delete-action'));
     return {
-      act: () => click(button(p, 'Delete')),
+      act: () => click(p.getByText('Delete', { exact: true }).filter({ visible: true })),
       done: () => hidden(p.getByText(f.text, { exact: true }).first()),
     };
   },
   'rename-room': async (p, f, token) => {
-    await room(p, f);
-    // `/rename` is the chat's rename control; it opens the rename editor.
-    await id(p, 'chat-input').fill('/rename');
-    await click(id(p, 'slash-verb-rename'));
-    await visible(id(p, 'rename-room-input'));
-    await id(p, 'rename-room-input').fill(token);
+    await p.goto(`/beeline/chat-info?communityId=${workspace}&roomId=${f.roomId}`);
+    await visible(id(p, 'chat-kind'));
+    await click(id(p, 'chat-name'));
+    await id(p, 'chat-name-input').fill(token);
     return {
-      act: () => click(id(p, 'apply-room-rename')),
-      done: () => visible(id(p, 'chat-title').filter({ hasText: token })),
+      act: () => click(id(p, 'chat-name-save')),
+      done: async () => {
+        await visible(id(p, 'chat-name').filter({ hasText: token }));
+        await hidden(id(p, 'chat-name-editor'));
+      },
     };
   },
   'leave-room': async (p, f) => {
     await p.goto(`/beeline/chat-info?communityId=${workspace}&roomId=${f.roomId}`);
     await visible(id(p, 'chat-kind'));
     await click(id(p, 'leave-chat'));
-    return { act: () => click(button(p, 'Leave')), done: () => hidden(id(p, 'leave-chat')) };
+    return {
+      act: () => click(p.getByText('Leave', { exact: true }).filter({ visible: true })),
+      done: () => hidden(id(p, 'leave-chat')),
+    };
   },
   'close-corner': async (p, f) => {
     await room(p, f, true);
@@ -238,7 +242,7 @@ export const steps = {
     await visible(target);
     return {
       act: () => click(target),
-      done: () => visible(p.getByText('Rig B', { exact: true }).first()),
+      done: () => visible(id(p, 'model-applies-model')),
     };
   },
   'change-yolo': async (p) => {
@@ -253,9 +257,12 @@ export const steps = {
   },
   'stop-turn': async (p, f) => {
     await room(p, f);
-    const target = button(p, 'Stop this turn').first();
+    const target = p.locator('[aria-label="Stop this turn"]').filter({ visible: true }).first();
     await visible(target);
-    return { act: () => click(target), done: () => hidden(button(p, 'Stop this turn')) };
+    return {
+      act: () => click(target),
+      done: () => hidden(p.locator('[aria-label="Stop this turn"]').filter({ visible: true })),
+    };
   },
 };
 // Excluded cases still have an explicit driver decision, independently checked

@@ -128,11 +128,13 @@ export async function captureRoutes({
                     !name.startsWith('beeline.surface.') && !name.startsWith('beeline.outbox.'),
                 );
             }
-            if (variant === 'warm') {
-              await page.goto(config.url);
-              await waitForRouteContent(page, config);
-            }
             try {
+              // A warm page that never shows its fixture used to throw here and
+              // stop the whole sweep. Record that sample and keep going.
+              if (variant === 'warm') {
+                await page.goto(config.url);
+                await waitForRouteContent(page, config);
+              }
               // Warm document loads retain browser and surface caches. Cold loads
               // clear app caches and the HTTP cache, preserving authentication only.
               await page.goto('/__latency_blank.html');
