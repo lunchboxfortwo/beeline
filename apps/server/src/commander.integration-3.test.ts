@@ -644,3 +644,16 @@ it('Reproduction wake-8: a report leaves the command open for the same turn’s 
   await daemon.execute('postAgentTurnReceipt', { ...authority(turn), agentId: WORKER, status: 'complete' }, WORKER);
   expect((await db.query(`SELECT state FROM agent_commands WHERE id=$1`, [turn.id])).rows[0]).toEqual({ state: 'complete' });
 });
+
+
+it('Reproduction wake-14: a released Squire card wakes the asking corner worker while its corner waits', async () => {
+  // 12 Nov 01:23: the worker asked for a card release and reported that it was
+  // waiting. The person released the card; checkout resumed only on a direct tag.
+  const opened = await open(), turn = await worker(opened.cornerId);
+  await daemon.execute('report', { ...authority(turn), status: 'blocked', text: 'Waiting for the card release.' }, WORKER);
+  await daemon.execute('postAgentTurnReceipt', { ...authority(turn), agentId: WORKER, status: 'complete' }, WORKER);
+  await daemon.execute('postSquireApprovalDecision', { roomId: opened.cornerId, requestId: turn.turnRequestId,
+    approvalId: 'card-release', status: 'approved', tool: 'inject_card', title: 'Card release', detail: 'Checkout' }, WORKER);
+  expect((await commands(opened.cornerId, WORKER)).map(c => c.source.body))
+    .toEqual([expect.stringContaining('Squire approval card-release for inject_card: approved')]);
+});

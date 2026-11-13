@@ -259,7 +259,7 @@ describe('corner message attribution', () => {
     await rootFixture.daemon.execute('report', { roomId: C, requestId: review!.turnRequestId,
       generationId: 'g1', status: 'done', text: 'done: FAIL on the reviewed head.' }, B);
     await greenHead(84, '2'.repeat(40));
-    expect((await commands(A, R)).filter(c => c.reason === 'report' && c.source.body.includes('FAIL on the reviewed head'))).toEqual([]);
+    expect((await commands(A, C)).filter(c => c.reason === 'report' && c.source.body.includes('FAIL on the reviewed head'))).toEqual([]);
   });
 
 
@@ -490,7 +490,7 @@ describe('corner message attribution', () => {
     for (let cycle = 0; cycle < 3; cycle++) await reconcileConfiguredCornerReviewers(rootFixture.db, R);
     expect(await commands(B, C)).toHaveLength(0);
     expect(await commands(A, C)).toHaveLength(0);
-    expect((await commands(A, R)).filter(c => c.reason === 'report')).toHaveLength(0);
+    expect((await commands(A, C)).filter(c => c.reason === 'report')).toHaveLength(0);
     await rootFixture.phone.execute('sendRoomMessage', {
       roomId: C, messageId: 'e'.repeat(64), text: 'Proceed with the demonstration.',
     }, H);
@@ -541,7 +541,7 @@ describe('corner message attribution', () => {
     if (state === 'claimed') await claim((await commands(A, C))[0]!);
     await reconcileConfiguredCornerReviewers(rootFixture.db);
     expect(await commands(B, C)).toHaveLength(0);
-    expect((await commands(A, R)).filter(c => c.reason === 'report')).toHaveLength(0);
+    expect((await commands(A, C)).filter(c => c.reason === 'report')).toHaveLength(0);
     expect((await commands(A, C)).filter(c => c.reason === 'corner_review_needed')).toHaveLength(0);
   });
 
@@ -607,7 +607,7 @@ describe('corner message attribution', () => {
     const handback = await commands(A, C);
     expect(handback.map(command => command.reason)).toEqual(['corner_review_needed']);
     expect(handback[0]?.source.body).toContain('FAIL: demonstration is missing.');
-    expect(handback[0]?.source.body).toContain('c'.repeat(40));
+    expect((await rootFixture.db.query(`SELECT review_context->>'headSha' head FROM agent_commands WHERE id=$1`, [handback[0]!.id])).rows[0]).toEqual({ head: 'c'.repeat(40) });
     for (let sweep = 2; sweep <= 3; sweep += 1)
       expect((await reconcileConfiguredCornerReviewers(rootFixture.db, R)).commands).toBe(0);
     expect((await commands(A, C)).map(command => command.id)).toEqual(handback.map(command => command.id));

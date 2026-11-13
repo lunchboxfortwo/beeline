@@ -107,11 +107,11 @@ describe('corner message attribution', () => {
     try {
       await reconcileConfiguredCornerReviewers(rootFixture.db, R);
       expect(await commands(B, C)).toHaveLength(0);
-      expect((await commands(A, R)).filter(command => command.reason === 'report')
+      expect((await commands(A, C)).filter(command => command.reason === 'report')
         .some(command => command.private && command.source.body.includes('reviewer command could not be queued'))).toBe(true);
       expect((await rootFixture.db.query(`SELECT 1 FROM messages WHERE room_id=$1 AND text LIKE '%review queue denied by trigger%'`, [C])).rowCount).toBe(0);
-      const handback = await commands(A, C);
-      expect(handback.map(command => command.reason)).toEqual(['corner_review_needed']);
+      const handback = (await commands(A, C)).filter(command => command.reason === 'corner_review_needed');
+      expect(handback).toHaveLength(1);
       expect(handback[0]?.source.body).toContain('review queue denied by trigger');
     } finally {
       await rootFixture.db.query(`DROP TRIGGER IF EXISTS refuse_review_command ON agent_commands; DROP FUNCTION IF EXISTS refuse_review_command();`);
@@ -285,8 +285,9 @@ describe('corner message attribution', () => {
         [C],
       )
     ).rows;
-    expect(routed).toEqual([{ agent_id: A, reason: 'corner_review_needed' }]);
-    expect((await commands(A, C))[0]?.source.body).toContain('the configured reviewer is unreachable');
+    // The commander's report about its own corner wakes it in that corner too.
+    expect(routed.map(row => `${row.agent_id === A}:${row.reason}`).sort()).toEqual(['true:corner_review_needed', 'true:report']);
+    expect((await commands(A, C)).find(command => command.reason === 'corner_review_needed')?.source.body).toContain('the configured reviewer is unreachable');
     expect(
       (
         await rootFixture.db.query<{ text: string }>(
@@ -295,7 +296,7 @@ describe('corner message attribution', () => {
         )
       ).rows.map((row) => row.text),
     ).toEqual([]);
-    expect((await commands(A, R)).filter(command => command.reason === 'report')
+    expect((await commands(A, C)).filter(command => command.reason === 'report')
       .some(command => command.private && command.source.body.includes('not a current member of the parent Room'))).toBe(true);
   });
 
@@ -361,7 +362,7 @@ describe('corner message attribution', () => {
       `SELECT id FROM agent_commands WHERE room_id=$1 AND agent_id=$2`, [C, B],
     )).rows.map(row => row.id);
     expect(echoed).toMatchObject({ delivered: true });
-    expect((await commands(A, R)).find(command => command.id === echoed.id))
+    expect((await commands(A, C)).find(command => command.id === echoed.id))
       .toMatchObject({ private: true, source: { authorId: B, body: expect.stringContaining('failed: FAIL: the pull request is unchanged.') } });
     expect(afterEcho).toEqual(beforeEcho);
     await result(review!, 'FAIL: the pull request is unchanged.');
@@ -458,7 +459,7 @@ describe('corner message attribution', () => {
     await greenHead(92, '1'.repeat(40));
     const [nextHead] = await commands(B, C);
     expect(nextHead?.reason).toBe('corner_review_dispatch');
-    expect(nextHead?.source.body).toContain('1'.repeat(40));
+    expect((await rootFixture.db.query(`SELECT review_context->>'headSha' head FROM agent_commands WHERE id=$1`, [nextHead!.id])).rows[0]).toEqual({ head: '1'.repeat(40) });
     // A repair handback is an order whose purpose is repair. It is not a repeat review.
     expect(reviewerDispatchCarriesHead('order', undefined, { purpose: 'repair', headSha: '1'.repeat(40) })).toBe(false);
     await rootFixture.db.query(`UPDATE messages SET card=jsonb_set(card,'{waitingAnswered}','true') WHERE room_id=$1 AND card->>'reportToId' IS NOT NULL`, [C]);
@@ -553,7 +554,7 @@ it.each(['empty','status','failed'])('a %s review result ends silently without r
   expect(await commands(B,C)).toEqual([]);
   expect((await rootFixture.db.query<{text:string}>(`SELECT text FROM messages WHERE room_id=$1`,[C])).rows
     .some(line=>line.text.includes('reviewer gave no verdict'))).toBe(false);
-  if(ending==='failed')expect((await commands(A,R)).filter(c=>c.reason==='report'&&c.source.body.includes('failed:'))).toHaveLength(1);
+  if(ending==='failed')expect((await commands(A,C)).filter(c=>c.reason==='report'&&c.source.body.includes('failed:'))).toHaveLength(1);
 
 });
 
