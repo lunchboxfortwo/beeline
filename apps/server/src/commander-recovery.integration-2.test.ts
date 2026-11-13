@@ -38,6 +38,7 @@ it('keeps the originating corner waiting for a decision returned to its parent R
     { status: 'needs_decision', ...authority(returned), ask: 'Which endpoint should we use?', text: 'needs-decision: choose endpoint @captain' },
     RUBY,
   );
+  await rootFixture.daemon.execute('postAgentTurnReceipt', { ...authority(returned), agentId: RUBY, status: 'complete' }, RUBY);
   expect((await rootFixture.db.query(`SELECT private_payload->>'waitingAnswered' answered
     FROM agent_commands WHERE id=$1`, [workerReport.id])).rows).toEqual([{ answered: null }]);
   expect(
