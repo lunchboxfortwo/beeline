@@ -2,7 +2,7 @@ import { githubProviderKey } from './providers/index.js';
 import { storeGitHubInstallations } from './github-installation-store.js';
 import { systemMessage } from '@beeline/api-contract/system-message-catalog';
 import { deleteArchivedCornerBranch } from './corner-branch-cleanup.js';
-import { GitHubAppClient, GitHubHttpError } from '@beeline/auth/github';
+import { GitHubAppClient, GitHubHttpError, transientGitHubError } from '@beeline/auth/github';
 import type { CornerLifecycleView } from '@beeline/api-contract/phone';
 import type { SqlDatabase } from './database.js';
 import { GITHUB_SUBJECT, systemLine, type SystemPhrase } from './system-line.js';
@@ -30,8 +30,7 @@ import { GitHubOperations, CornerWebhookTarget, checkFact, jobErrorLines, text, 
     if (admitted.pr?.headSha && admitted.pr.headSha !== checkHeadSha) return;
     let fetchStartedAt = 0;
     let confirmedPr: Awaited<ReturnType<GitHubAppClient['readPullRequest']>> | undefined;
-    // A failed read throws to its caller and leaves the stored result as GitHub last reported it.
-    {
+    try {
         // Use the database clock across server instances, with subsecond precision
         // to order overlapping fetches while keeping updatedAt in epoch seconds.
         fetchStartedAt = options?.snapshot?.fetchStartedAt ?? (await database.query<{ started_at: number }>(
@@ -238,6 +237,18 @@ import { GitHubOperations, CornerWebhookTarget, checkFact, jobErrorLines, text, 
         // returns to that owner; it does not replay reads or writes here.
         await refresh();
         if (noteInserted) ctx.onRoomChanged?.(target.corner_id);
+    } catch (error) {
+      if (transientGitHubError(error)) {
+        await database.query(`UPDATE corner_github_cache SET lifecycle=jsonb_set(
+            jsonb_set(lifecycle,'{checks}','"pending"'::jsonb),
+              '{checksSummary}',jsonb_build_object('total',0,'failing','[]'::jsonb,
+                'checks','[]'::jsonb,'updatedAt',floor(extract(epoch FROM clock_timestamp()))) ||
+                COALESCE(lifecycle->'checksSummary','{}'::jsonb) || '{"status":"pending"}'::jsonb)
+          WHERE corner_id=$1 AND lifecycle->'pr'->>'headSha'=$2
+            AND COALESCE((lifecycle->'checksSummary'->>'fetchStartedAt')::double precision,0)<=$3`,
+          [target.corner_id, checkHeadSha, fetchStartedAt]);
+      }
+      throw error;
     }
     // A checks read repairs only its check snapshot; mergeability refreshes
     // retain their event path and must not reset a pending merge claim's age.

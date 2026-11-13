@@ -248,7 +248,7 @@ describe('corner message attribution', () => {
   });
 
 
-  it('wakes the implementer without consuming green when the reviewer is not a parent member', async () => {
+  it('treats a reviewer removed from the parent Room as no reviewer and wakes the implementer', async () => {
     await rootFixture.phone.execute('updateRoom', { roomId: R, reviewerAgentId: B }, H);
     await rootFixture.db.query(`UPDATE memberships SET removed_at=now() WHERE room_id=$1 AND identity_id=$2`, [
       R,
@@ -279,7 +279,7 @@ describe('corner message attribution', () => {
       )
     ).rows;
     expect(routed).toEqual([{ agent_id: A, reason: 'corner_review_needed' }]);
-    expect((await commands(A, C))[0]?.source.body).toContain('the configured reviewer is unreachable');
+    expect((await commands(A, C))[0]?.source.body).toContain('no reviewer is configured');
     expect(
       (
         await rootFixture.db.query<{ text: string }>(
@@ -288,8 +288,6 @@ describe('corner message attribution', () => {
         )
       ).rows.map((row) => row.text),
     ).toEqual([]);
-    expect((await commands(A, R)).filter(command => command.reason === 'report')
-      .some(command => command.private && command.source.body.includes('not a current member of the parent Room'))).toBe(true);
   });
 
 

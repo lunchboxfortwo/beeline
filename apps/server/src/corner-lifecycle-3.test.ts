@@ -130,15 +130,13 @@ describe('the implementer merges when the gate opens (AC-5)', () => {
     await greenHead(cornerId, 7, SHA);
     rootFixture.githubHead = SHA;
     rootFixture.githubRollupState = 'passed';
-    // A reviewer is configured, so reviewerExists is true even though it has
-    // left the parent Room; its departure is reported through reviewerWake,
-    // not by hiding the configuration.
+    // One reviewer list: a reviewer who left the parent Room is no reviewer.
     expect(await cornerMergeGate(rootFixture.db, cornerId, { number: 7, headSha: SHA }))
-      .toMatchObject({ reviewerExists: true, approved: false, open: false });
+      .toMatchObject({ reviewerExists: false, approved: false, open: false });
     expect(await currentState(cornerId)).toBe('review');
     expect((await rootFixture.db.query(`SELECT text FROM messages WHERE room_id=$1 AND text LIKE '%could not be reached%'`, [cornerId])).rows)
       .toHaveLength(0);
-    expect(await rootFixture.github.prChecksStatus({ cornerId })).toMatchObject({ reviewerExists: true, mergeAllowed: false });
+    expect(await rootFixture.github.prChecksStatus({ cornerId })).toMatchObject({ reviewerExists: false, mergeAllowed: false });
     expect(await implementersMerge()).toBe(0);
     expect(rootFixture.githubApp.mergePullRequest).not.toHaveBeenCalled();
   });

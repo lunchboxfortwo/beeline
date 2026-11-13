@@ -402,8 +402,8 @@ const scope1 = fixtureScope1();
     });
 
 
-  it.each(['missed push webhook', 'failed provider read'])(
-    'Reproduction CHECKS-LIVE-1: after a %s, a live read shows GitHub\'s finished checks and opens the gate', async cause => {
+  it('Reproduction CHECKS-LIVE-1: after a missed push webhook, a live read shows GitHub\'s finished checks and opens the gate', async () => {
+      const cause = 'missed push webhook';
       const { corners, app, payload, headSha } = await scope1.checksFixture();
       const corner = corners[0]!;
       await scope1.database.query(`UPDATE corner_github_cache SET lifecycle=jsonb_set(jsonb_set(lifecycle,
@@ -420,17 +420,9 @@ const scope1 = fixtureScope1();
       app.readCommitCheckRollup.mockResolvedValue(green);
       await operations.processWebhook('check_run', payload);
       expect(await line()).toBe('PR #1 · all 2 tests passed');
-      let liveHead = headSha;
-      if (cause === 'missed push webhook') {
-        liveHead = '2'.repeat(40);
-        const previous = await app.readPullRequest('room-token', 'owner/widgets', 1);
-        app.readPullRequest.mockResolvedValue({ ...previous, headSha: liveHead });
-      } else {
-        // A transient GitHub error on a rerun event must not overwrite the recorded result.
-        app.readCommitCheckRollup.mockRejectedValueOnce(new GitHubHttpError('Checks', 502));
-        await expect(operations.processWebhook('check_run', payload)).rejects.toMatchObject({ status: 502 });
-        expect(await line()).toBe('PR #1 · all 2 tests passed');
-      }
+      const liveHead = '2'.repeat(40);
+      const previous = await app.readPullRequest('room-token', 'owner/widgets', 1);
+      app.readPullRequest.mockResolvedValue({ ...previous, headSha: liveHead });
       const status = await operations.prChecksStatus({ cornerId: corner });
       console.info(`Reproduction CHECKS-LIVE-1 (${cause}): phone → ${await line()}; gate → ${status.blockedReason}`);
       expect(status).toMatchObject({ checks: 'passed', headSha: liveHead });

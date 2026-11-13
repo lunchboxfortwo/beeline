@@ -333,7 +333,7 @@ it('holds the green review wake while the corner worker still holds a live turn'
   await rootFixture.phone.execute('updateRoom', { roomId: R, reviewerAgentId: null }, H);
 });
 
-it('wakes the implementer without consuming a green transition when the configured reviewer is not a parent member', async () => {
+it('treats a configured reviewer removed from the parent Room as no reviewer and wakes the implementer', async () => {
   await rootFixture.phone.execute('updateRoom', { roomId: R, reviewerAgentId: A }, H);
   await rootFixture.db.query(`UPDATE memberships SET removed_at=now() WHERE room_id=$1 AND identity_id=$2`, [
     R,
@@ -352,12 +352,12 @@ it('wakes the implementer without consuming a green transition when the configur
   expect((await readAgentCommands(rootFixture.db,C,A)).commands).toHaveLength(0);
   const handback = await commands(B, C);
   expect(handback.map(command => command.reason)).toEqual(['corner_review_needed']);
-  expect(handback[0]?.source.body).toContain('the configured reviewer is unreachable');
+  expect(handback[0]?.source.body).toContain('no reviewer is configured');
   expect(handback[0]?.source.body).toContain('report the blocker to its commander');
   expect((await rootFixture.db.query(`SELECT 1 FROM messages WHERE room_id=$1 AND text LIKE '%could not be reached%'`, [C])).rowCount).toBe(0);
   await expect(
     rootFixture.daemon.execute('getAgentConfiguration', { agentId: B, roomId: C }, B),
-  ).resolves.toEqual(expect.objectContaining({ reviewerHandle: 'hoots' }));
+  ).resolves.not.toEqual(expect.objectContaining({ reviewerHandle: 'hoots' }));
 });
 
 it('keeps reviewer subscriptions mandatory and reconciles an unreviewed green head', async () => {
