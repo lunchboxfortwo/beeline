@@ -70,7 +70,7 @@ export const wireShapes: readonly WireShape[] = [
   shape({"kind":"literal","value":"closed"}),
   shape({"kind":"literal","value":"answered"}),
   shape({"kind":"literal","value":"retracted"}),
-  shape({"kind":"object","properties":{"action":{"node":69,"optional":false},"milestone":{"node":18,"optional":false}}}),
+  shape({"kind":"object","properties":{"action":{"node":69,"optional":false},"milestone":{"node":18,"optional":false},"redirectUri":{"node":5,"optional":true}}}),
   shape({"kind":"union","choices":[70,71,72]}),
   shape({"kind":"literal","value":"star"}),
   shape({"kind":"literal","value":"later"}),
