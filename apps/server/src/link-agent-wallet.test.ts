@@ -4,6 +4,9 @@ import { PgliteDatabase, migratedDatabase } from './test-support.js';
 import { LinkAgentWallet } from './link-agent-wallet.js';
 import { DaemonService } from './daemon-service.js';
 import { LiveHub } from './live.js';
+import { createAgentCommand } from './agent-command.js';
+import { ensureSystemIdentity } from './system-line.js';
+import { SYSTEM_IDENTITY_ID } from '@beeline/api-contract/system-identity';
 
 const OWNER = 'a'.repeat(64);
 const AGENT = 'b'.repeat(64);
@@ -57,6 +60,59 @@ it.each([false, true])('posts the Link approval at its call site only when the o
   expect(members).toContain(OWNER);
   expect(members).not.toContain(AGENT);
 });
+it.each(['approved', 'denied', 'expired'] as const)('settles a Link %s at the original call site and wakes its asking turn once', async status => {
+  await database.query(`INSERT INTO memberships(workspace_id,room_id,identity_id,role)
+    VALUES ($1,$2,$3,'owner'),($1,$2,$4,'member')`, [WORKSPACE, ROOM, OWNER, AGENT]);
+  await ensureSystemIdentity(database);
+  const requestId = createHash('sha256').update('link-asking-turn').digest('hex');
+  await database.query(`INSERT INTO messages(id,room_id,author_id,text) VALUES($1,$2,$3,'Buy a book')`, [requestId, ROOM, SYSTEM_IDENTITY_ID]);
+  const command = await createAgentCommand(database, { roomId: ROOM, agentId: AGENT, sourceMessageId: requestId, turnRequestId: requestId, reason: 'fixture' });
+  let providerStatus = 'pending_approval';
+  const transport = vi.fn(async (url: string | URL | Request) => {
+    if (String(url).endsWith('/auth/token')) return Response.json({ access_token: 'access',
+      refresh_token: 'refresh', expires_in: 3600, scope: 'payment_methods.agentic userinfo:read' });
+    if (String(url).endsWith('/userinfo')) return Response.json({ address: { country: 'US' } });
+    return Response.json({ id: 'lsrq_settlement', status: providerStatus,
+      ...(providerStatus === 'pending_approval' ? { approval_url: 'https://app.link.com/activity/approve/lsrq_settlement' } : {}),
+      ...(providerStatus === 'approved' ? { card: { number: '4000009990001984', exp_month: 6, exp_year: 2029 } } : {}) });
+  }) as unknown as typeof fetch;
+  const client = wallet(transport);
+  await client.complete(new URL(await client.begin(OWNER)).searchParams.get('state')!, 'code');
+  const live = new LiveHub();
+  const publish = vi.spyOn(live, 'publish');
+  const daemon = new DaemonService(database, live, undefined, undefined,
+    true, command!, false, undefined, undefined, undefined, undefined, undefined,
+    undefined, undefined, undefined, undefined, client);
+  await daemon.execute('createLinkSpendRequest', { agentId: AGENT, roomId: ROOM,
+    merchant: 'Bookshop', merchantUrl: 'https://bookshop.example.test', amount: 100,
+    description: 'Harmless test purchase', idempotencyKey: 'settlement' }, AGENT);
+  expect((await daemon.execute('retrieveLinkSpendRequest', { agentId: AGENT, roomId: ROOM, id: 'lsrq_settlement' }, AGENT)).status).toBe('pending_approval');
+  expect((await database.query(`SELECT 1 FROM agent_commands WHERE action='resume'`)).rowCount).toBe(0);
+  providerStatus = status;
+  // Retrieval may run elsewhere; only the creating Room and turn receive the decision.
+  const otherRoom = '33333333-3333-4333-8333-333333333333';
+  await database.query(`INSERT INTO rooms(id,workspace_id,name) VALUES($1,$2,'Elsewhere')`, [otherRoom, WORKSPACE]);
+  const laterRequestId = createHash('sha256').update('link-retrieving-turn').digest('hex');
+  await database.query(`INSERT INTO messages(id,room_id,author_id,text) VALUES($1,$2,$3,'Retrieve the purchase')`, [laterRequestId, otherRoom, SYSTEM_IDENTITY_ID]);
+  const laterCommand = await createAgentCommand(database, { roomId: otherRoom, agentId: AGENT,
+    sourceMessageId: laterRequestId, turnRequestId: laterRequestId, reason: 'fixture' });
+  const retrieving = new DaemonService(database, live, undefined, undefined,
+    true, laterCommand!, false, undefined, undefined, undefined, undefined, undefined,
+    undefined, undefined, undefined, undefined, client);
+  const input = { agentId: AGENT, roomId: otherRoom, id: 'lsrq_settlement' };
+  expect((await retrieving.execute('retrieveLinkSpendRequest', input, AGENT)).status).toBe(status);
+  await retrieving.execute('retrieveLinkSpendRequest', input, AGENT);
+  expect((await database.query(`SELECT room_id,card->>'status' status FROM messages WHERE card_type='squire-approval'`)).rows)
+    .toEqual([{ room_id: ROOM, status }]);
+  expect((await database.query(`SELECT room_id,turn_request_id FROM agent_commands WHERE action='resume'`)).rows)
+    .toEqual([{ room_id: ROOM, turn_request_id: requestId }]);
+  expect((await database.query(`SELECT room_id FROM messages WHERE card_type='squire-approval-decision'`)).rows)
+    .toEqual([{ room_id: ROOM }]);
+  expect(publish).toHaveBeenCalledWith(expect.objectContaining({ type: 'invalidate', roomId: ROOM }));
+  expect(JSON.stringify((await database.query(`SELECT card FROM messages WHERE card_type IN ('squire-approval','squire-approval-decision')`)).rows))
+    .not.toContain('4000009990001984');
+});
+
 afterEach(async () => database.close());
 
 function wallet(transport: typeof fetch) {

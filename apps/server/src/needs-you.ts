@@ -385,14 +385,14 @@ return [
    JOIN messages m ON m.room_id=room.id AND m.card_type='squire-approval'
    ${APPROVAL_JOINS}
    WHERE ${expiringCardForSql('m', '$2')} AND m.card->>'approvalId' IS NOT NULL
-     AND m.card->>'status' IS DISTINCT FROM 'expired'
+     AND COALESCE(m.card->>'status','pending') NOT IN ('approved','denied','expired')
      AND ${cardExpiresAtSql('m.card')}>${NOW_MS}
-     AND m.card->>'sourceRoomId' ~ '^[0-9a-f-]{36}$'
      AND NOT EXISTS (
-       SELECT 1 FROM messages decision
-       WHERE decision.room_id=(m.card->>'sourceRoomId')::uuid
+       SELECT 1 FROM messages decision JOIN rooms decision_room ON decision_room.id=decision.room_id
+       WHERE decision_room.workspace_id=$1
          AND decision.card_type='squire-approval-decision'
          AND decision.card->>'approvalId'=m.card->>'approvalId'
+         AND decision.card->>'agentId'=m.card->'agent'->>'pubkey'
      )`,
 ];
 }

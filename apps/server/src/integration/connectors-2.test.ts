@@ -1,6 +1,7 @@
-import { claimAgentCommand } from '.././agent-command.js';
+import { createAgentCommand, claimAgentCommand } from '.././agent-command.js';
 import { createHash } from 'node:crypto';
 import { describe, expect, it } from 'vitest';
+import { ensureSystemIdentity } from '../system-line.js';
 import { migrate } from '.././database.js';
 import { isRoomView } from '@beeline/api-contract/phone';
 import { SYSTEM_IDENTITY_ID } from '@beeline/api-contract/system-identity';
@@ -83,6 +84,34 @@ const fixture = monolithFixture();
       `SELECT 1 FROM agent_commands WHERE room_id=$1 AND agent_id=$2 AND turn_request_id=$3 AND action='resume'`,
       [ROOM, AGENT, requestId],
     )).rowCount).toBe(1);
+  });
+
+
+  it.each(['approved', 'denied', 'expired'] as const)('settles %s when the root message and executing turn are in different Rooms', async status => {
+    const sourceRoom = '33333333-3333-4333-8333-333333333333';
+    await fixture.database.query(`INSERT INTO rooms(id,workspace_id,name) VALUES($1,$2,'Root source')`, [sourceRoom, WORKSPACE]);
+    await fixture.database.query(`INSERT INTO memberships(workspace_id,room_id,identity_id,role) VALUES($1,$2,$3,'owner')`, [WORKSPACE, sourceRoom, HUMAN]);
+    const root = createHash('sha256').update('cross-room-root').digest('hex');
+    await fixture.database.query(`INSERT INTO messages(id,room_id,author_id,text) VALUES($1,$2,$3,'Please run the check')`, [root, sourceRoom, HUMAN]);
+    const requestId = createHash('sha256').update('cross-room-request').digest('hex');
+    await ensureSystemIdentity(fixture.database);
+    await fixture.database.query(`INSERT INTO messages(id,room_id,author_id,text) VALUES($1,$2,$3,'Agent request')`, [requestId, ROOM, SYSTEM_IDENTITY_ID]);
+    const command = await createAgentCommand(fixture.database, { roomId: ROOM, agentId: AGENT, sourceMessageId: requestId, turnRequestId: requestId, reason: 'fixture' });
+    await fixture.database.query(`UPDATE agent_commands SET root_source_message_id=$2 WHERE id=$1`, [command!.id, root]);
+    const payload = { roomId: ROOM, requestId, approvalId: 'cross-room', tool: 'fetch_credential',
+      title: 'Credential access approval', detail: 'Reveal harmless test credential',
+      approvalUrl: 'https://approve.example.test/cross-room', linkKind: 'passkey' };
+    const ask = await fixture.daemonOperation('postSquireApproval', payload);
+    expect(ask.status).toBe(200);
+    const { id } = await ask.json() as { id: string };
+    const needs = async () => JSON.stringify(await fixture.phone.execute('readNeedsYou', { workspaceId: WORKSPACE }, HUMAN)).includes(id);
+    expect(await needs()).toBe(true);
+    expect((await fixture.database.query(`SELECT card->>'sourceRoomId' source FROM messages WHERE id=$1`, [id])).rows)
+      .toEqual([{ source: sourceRoom }]);
+    expect((await fixture.daemonOperation('postSquireApprovalDecision', { ...payload, status })).status).toBe(200);
+    expect((await fixture.phone.readRoom(ROOM, HUMAN))?.messages.find(message => message.id === id)?.squireApproval?.status).toBe(status);
+    expect(await needs()).toBe(false);
+    expect((await fixture.database.query(`SELECT 1 FROM agent_commands WHERE room_id=$1 AND agent_id=$2 AND turn_request_id=$3 AND action='resume'`, [ROOM, AGENT, requestId])).rowCount).toBe(1);
   });
 
 

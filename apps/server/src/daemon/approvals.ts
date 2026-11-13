@@ -81,6 +81,7 @@ import type { SqlDatabase } from '../database.js';
     const line = await systemLine(ctx.database, {
       id: createHash('sha256').update(`link-approval:${requestId}`).digest('hex'),
       roomId, authorId: SYSTEM_IDENTITY_ID,
+      requestId: ctx.authorizedCommand?.turn_request_id ?? undefined,
       subject: { kind: 'system', name: systemMessage("daemon-service.link") },
       verb: systemMessage("daemon-service.needs-your-approval-for"), object: title, consequence: detail,
       presentation: 'card', cardType: 'squire-approval',
@@ -90,6 +91,7 @@ import type { SqlDatabase } from '../database.js';
           ...(context.agent_avatar ? { avatar: context.agent_avatar } : {}) },
         owner,
         tool: 'Link', title, detail, approvalUrl, approvalId: requestId,
+        ...(ctx.authorizedCommand ? { commandId: ctx.authorizedCommand.id, generationId: ctx.authorizedCommand.generation_id } : {}),
         linkKind: 'approval',
         expiresAt: Date.now() + 24 * 60 * 60_000,
         ...source,
